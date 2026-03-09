@@ -1,31 +1,24 @@
-description = "执行集成测试 (需先构建)"
+description = "执行集成测试"
 prompt = """
 请执行集成测试。
 
 **前置检查**:
-!{if [ -d "build" ]; then echo "✅ Build dir found"; else echo "❌ Build dir missing"; fi}
+!{node --version}
 
 执行以下步骤:
 
 1. **环境检查**:
-   - 如果 `build/` 目录不存在，提示用户先运行 `/ai-collaboration-installer:test` 或构建命令。
+   - 确认 Node.js >= 18 已安装（用于内置测试运行器）。
 
 2. **执行测试**:
-   - 使用 `run_shell_command` 执行以下逻辑 (参考 `.agents/scripts/fit-service.sh`):
+   - 本项目的集成测试包含在统一测试套件中（如在临时目录中运行 `aci init` 并验证结果）。
+   - 使用 `run_shell_command` 执行:
      ```bash
-     source .agents/scripts/fit-service.sh
-     init_log_dir
-     init_plugin_dir
-     start_fit_service
-     verify_all
-     TEST_RESULT=$?
-     cleanup false
-     exit $TEST_RESULT
+     node --test tests/*.test.js
      ```
 
 3. **报告**:
-   - 输出集成测试结果。
-   - 日志位于 `.ai-workspace/logs/fit-server-*.log`。
+   - 输出测试结果摘要。
 
 **下一步**:
 测试通过后，使用以下命令提交代码:

@@ -9,7 +9,7 @@ description: >
 
 将依赖包升级到指定版本，并进行构建和测试验证。
 
-<!-- TODO: 根据你的项目包管理器调整以下命令 -->
+本项目仅使用 Node.js 内置模块，通常无外部依赖需要升级。
 
 ## 执行流程
 
@@ -32,21 +32,16 @@ description: >
 
 ### 4. 安装依赖
 
-<!-- TODO: 替换为你的项目安装命令 -->
+如有新增外部依赖：
 ```bash
-# npm install          (Node.js)
-# mvn clean install    (Maven)
-# pip install -r requirements.txt  (Python)
-# go mod tidy          (Go)
+npm install
 ```
 
 ### 5. 验证构建
 
-<!-- TODO: 替换为你的项目构建命令 -->
+本项目无构建步骤。运行测试验证：
 ```bash
-# npm run build        (Node.js)
-# mvn compile          (Maven)
-# make build           (通用)
+node --test tests/*.test.js
 ```
 
 ### 6. 运行测试

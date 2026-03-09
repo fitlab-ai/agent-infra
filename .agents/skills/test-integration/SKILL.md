@@ -9,29 +9,22 @@ description: >
 
 执行项目的集成测试流程，进行端到端验证。
 
-<!-- TODO: 将以下命令替换为你的项目实际命令 -->
+## 1. 验证前置条件
 
-## 1. 验证构建产物
-
-在运行集成测试前确保项目已构建。
+确认 Node.js >= 18 已安装（用于内置测试运行器）。
 
 ```bash
-# TODO: 替换为你的项目构建验证命令
-# ls build/              (检查构建输出是否存在)
-# npm run build          (Node.js)
-# mvn package -DskipTests  (Maven)
+node --version
 ```
 
-如果构建产物不存在，提示用户先执行 test 技能。
+本项目无构建步骤，无需验证构建产物。
 
 ## 2. 运行集成测试
 
+本项目的集成测试包含在统一测试套件中（如在临时目录中运行 `aci init` 并验证结果）。
+
 ```bash
-# TODO: 替换为你的项目集成测试命令
-# npm run test:integration    (Node.js)
-# mvn verify                  (Maven)
-# pytest tests/integration/   (Python)
-# go test -tags=integration ./...  (Go)
+node --test tests/*.test.js
 ```
 
 ## 3. 输出结果

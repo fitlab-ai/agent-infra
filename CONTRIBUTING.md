@@ -18,25 +18,24 @@
 
 ### 前置条件
 
-<!-- TODO: 在此添加你的项目前置条件 -->
+- Git
+- Node.js >= 18（用于内置测试运行器 `node:test`）
+- Shell（sh/bash/zsh）
 
 ### 快速开始
 
 ```bash
 # 克隆项目
-git clone <repository-url>
+git clone git@github.com:fitlab-ai/ai-collaboration-installer.git
 
-# 安装依赖
-# TODO: 添加你的项目安装命令
+# 安装依赖：无需安装，仅使用 Node.js 内置模块
 
-# 构建
-# TODO: 添加你的项目构建命令
+# 构建：无需构建，项目由 Shell 脚本和模板文件组成
 
 # 运行测试
-# TODO: 添加你的项目测试命令
+node --test tests/*.test.js
 
-# 代码检查
-# TODO: 添加你的项目检查命令
+# 代码检查：暂未配置 lint 工具
 ```
 
 请参考项目的 `README.md` 文件以获取更多关于如何配置开发环境的指导。
@@ -68,7 +67,9 @@ git clone <repository-url>
 
 ### 代码风格
 
-<!-- TODO: 在此添加你的项目代码风格要求 -->
+- Shell 脚本保持 POSIX sh 兼容，使用 `set -e` 进行错误处理
+- 模板文件使用 `{project}` 和 `{org}` 作为渲染占位符
+- Markdown 文件提供双语版本（英文为主 + 中文翻译）
 
 ### 注释信息
 
@@ -98,7 +99,10 @@ git clone <repository-url>
 
 ## 测试
 
-<!-- TODO: 在此添加你的项目测试要求 -->
+- 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 18）
+- 运行命令：`node --test tests/*.test.js`
+- 测试覆盖：模板文件完整性、CLI 初始化流程、占位符渲染验证
+- 提交前务必确保所有测试通过
 
 ## 发布流程
 

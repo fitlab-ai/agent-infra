@@ -109,29 +109,36 @@ test("update-ai-collaboration instructions point to templates rendering", () => 
 test("update-ai-collaboration template copies stay in sync with working files", () => {
   const collaborator = JSON.parse(read("collaborator.json"));
   const project = collaborator.project;
+  const org = collaborator.org;
+  const lang = collaborator.language;
 
-  const identicalFiles = [
+  // Select the correct language variant for template files
+  function langTemplate(basePath) {
+    if (lang === "zh-CN") {
+      const ext = path.extname(basePath);
+      const variant = basePath.replace(ext, `.zh-CN${ext}`);
+      if (exists(variant)) return variant;
+    }
+    return basePath;
+  }
+
+  // Render {project} and {org} placeholders in template content
+  function renderPlaceholders(content) {
+    return content.replace(/\{project\}/g, project).replace(/\{org\}/g, org);
+  }
+
+  const syncFiles = [
     [".agents/skills/update-ai-collaboration/SKILL.md", "templates/.agents/skills/update-ai-collaboration/SKILL.md"],
     [".claude/commands/update-ai-collaboration.md", "templates/.claude/commands/update-ai-collaboration.md"],
     [".gemini/commands/ai-collaboration-installer/update-ai-collaboration.toml", "templates/.gemini/commands/_project_/update-ai-collaboration.toml"],
-    [".opencode/commands/update-ai-collaboration.md", "templates/.opencode/commands/update-ai-collaboration.md"]
-  ];
-
-  identicalFiles.forEach(([source, target]) => {
-    assert.equal(read(target), read(source), `${target} is out of sync with ${source}`);
-  });
-
-  // Codex templates use {project} placeholder in frontmatter that gets rendered
-  const codexFiles = [
+    [".opencode/commands/update-ai-collaboration.md", "templates/.opencode/commands/update-ai-collaboration.md"],
     [".codex/commands/ai-collaboration-installer-update-ai-collaboration.md", "templates/.codex/commands/_project_-update-ai-collaboration.md"]
   ];
 
-  codexFiles.forEach(([source, target]) => {
-    const rendered = read(target).replace(
-      /^(usage:.*)\{project\}/m,
-      `$1${project}`
-    );
-    assert.equal(rendered, read(source), `${target} is out of sync with ${source}`);
+  syncFiles.forEach(([source, target]) => {
+    const templatePath = langTemplate(target);
+    const rendered = renderPlaceholders(read(templatePath));
+    assert.equal(rendered, read(source), `${templatePath} is out of sync with ${source}`);
   });
 });
 

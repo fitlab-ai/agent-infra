@@ -4,28 +4,42 @@
 
 ## 快速命令
 
-<!-- TODO: 在此添加你的项目构建命令 -->
 ```bash
-# 安装依赖
-# TODO: 你的安装命令
+# 安装依赖：无需安装，仅使用 Node.js 内置模块
 
-# 构建项目
-# TODO: 你的构建命令
+# 构建项目：无需构建，项目由 Shell 脚本和模板文件组成
 
 # 运行测试
-# TODO: 你的测试命令
+node --test tests/*.test.js
 
-# 代码检查
-# TODO: 你的 lint 命令
+# 代码检查：暂未配置 lint 工具
 ```
 
 ## 项目结构
 
-<!-- TODO: 在此添加你的项目目录结构 -->
+```
+├── bin/                           # CLI 可执行文件
+│   ├── ai-collaboration-installer # 主 CLI（Shell 脚本）
+│   └── aci                        # 快捷命令包装
+├── templates/                     # 模板源文件（镜像项目目录结构）
+│   ├── .agents/                   # AI 代理配置模板
+│   ├── .claude/                   # Claude Code 配置模板
+│   ├── .codex/                    # Codex 配置模板
+│   ├── .gemini/                   # Gemini CLI 配置模板
+│   ├── .opencode/                 # OpenCode 配置模板
+│   ├── .github/                   # GitHub 配置模板
+│   └── *.md                       # 根级模板文件
+├── tests/                         # 测试（Node.js 内置测试运行器）
+├── install.sh                     # 引导安装脚本
+├── collaborator.json              # 项目配置
+└── package.json                   # npm 测试脚本定义
+```
 
 ## 编码规范
 
-<!-- TODO: 在此添加你的项目编码规范 -->
+- Shell 脚本保持 POSIX sh 兼容，使用 `set -e` 进行错误处理
+- 模板文件使用 `{project}` 和 `{org}` 作为渲染占位符
+- Markdown 文件提供双语版本（英文为主 + 中文翻译）
 
 ### 版权头更新
 修改任意带版权头的文件时，必须更新版权年份：
@@ -37,7 +51,9 @@
 
 ## 测试要求
 
-<!-- TODO: 在此添加你的项目测试框架和命令 -->
+- 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 18）
+- 运行命令：`node --test tests/*.test.js`
+- 测试覆盖：模板文件完整性、CLI 初始化流程、占位符渲染验证
 
 ## 提交与 PR 规范
 

@@ -10,29 +10,22 @@ usage: "/test-integration"
 
 执行项目的集成测试。
 
-<!-- TODO: 替换为你的项目实际命令 -->
+## 步骤 1：验证前置条件
 
-## 步骤 1：验证构建产物
-
-确保项目已完成构建，再运行集成测试。
+确认 Node.js >= 18 已安装（用于内置测试运行器）。
 
 ```bash
-# TODO: 替换为你的项目构建验证
-# ls build/              (检查构建输出是否存在)
-# npm run build          (Node.js)
-# mvn package -DskipTests  (Maven)
+node --version
 ```
 
-如果构建产物不存在，提示用户先运行 `/test` 命令。
+本项目无构建步骤，无需验证构建产物。
 
 ## 步骤 2：运行集成测试
 
+本项目的集成测试包含在统一测试套件中（如在临时目录中运行 `aci init` 并验证结果）。
+
 ```bash
-# TODO: 替换为你的项目集成测试命令
-# npm run test:integration    (Node.js)
-# mvn verify                  (Maven)
-# pytest tests/integration/   (Python)
-# go test -tags=integration ./...  (Go)
+node --test tests/*.test.js
 ```
 
 ## 步骤 3：输出结果

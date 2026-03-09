@@ -6,26 +6,25 @@ prompt = """
 
 执行步骤:
 
-<!-- TODO: 适配你的项目的包管理器 -->
+本项目仅使用 Node.js 内置模块，无外部依赖。如需操作 `package.json`：
 
 1. **查找目标包**:
    ```bash
-   # TODO: 替换为你的依赖文件
-   # 示例: package.json / pom.xml / requirements.txt / go.mod / Cargo.toml
+   # 搜索 package.json 中的依赖声明
    ```
 
 2. **更新版本号**。
 
 3. **安装新版本**:
+   本项目无外部依赖，通常无需安装。如有新增依赖：
    ```bash
-   # TODO: 替换为你的项目的安装命令
-   # 示例: npm install / mvn clean install / pip install -r requirements.txt / go mod tidy
+   npm install
    ```
 
 4. **验证构建**:
+   本项目无构建步骤。运行测试验证：
    ```bash
-   # TODO: 替换为你的项目的构建命令
-   # 示例: npm run build / mvn compile / make build / go build ./...
+   node --test tests/*.test.js
    ```
 
 5. **运行测试**，确保没有破坏。

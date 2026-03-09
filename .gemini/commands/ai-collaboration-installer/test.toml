@@ -5,16 +5,11 @@ prompt = """
 执行步骤:
 
 1. **编译 / 类型检查**:
-   <!-- TODO: 替换为你的项目的编译命令 -->
-   ```bash
-   # 示例: npx tsc --noEmit / mvn compile / go build ./...
-   ```
-   确认无编译错误。
+   本项目由 Shell 脚本和模板文件组成，无需编译。跳过此步骤。
 
 2. **运行所有单元测试**:
-   <!-- TODO: 替换为你的项目的测试命令 -->
    ```bash
-   # 示例: npm test / mvn test / pytest / go test ./...
+   node --test tests/*.test.js
    ```
 
 3. **输出结果**:

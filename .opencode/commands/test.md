@@ -10,26 +10,14 @@ usage: "/test"
 
 执行项目的完整测试流程。
 
-<!-- TODO: 替换为你的项目实际命令 -->
-
 ## 步骤 1：编译 / 类型检查
 
-```bash
-# TODO: 替换为你的项目编译命令
-# npx tsc --noEmit       (TypeScript)
-# mvn compile             (Maven)
-# go build ./...          (Go)
-# make build              (generic)
-```
+本项目由 Shell 脚本和模板文件组成，无需编译。跳过此步骤。
 
 ## 步骤 2：运行全部单元测试
 
 ```bash
-# TODO: 替换为你的项目测试命令
-# npm test                (Node.js)
-# mvn test                (Maven)
-# pytest                  (Python)
-# go test ./...           (Go)
+node --test tests/*.test.js
 ```
 
 ## 步骤 3：输出结果

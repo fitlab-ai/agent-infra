@@ -8,7 +8,6 @@ description: >
 
 执行指定版本的版本发布流程。
 
-<!-- TODO: 根据你的项目发布流程调整以下步骤 -->
 
 ## 执行流程
 
@@ -32,22 +31,12 @@ git status --short
 
 ### 步骤 3：更新版本引用
 
-<!-- TODO: 替换为你的项目版本更新步骤 -->
+更新以下文件中的版本号：
 
-搜索项目文件中的版本引用并更新：
+1. `bin/ai-collaboration-installer` 中的 `VERSION="X.Y.Z"`
+2. `collaborator.json` 中的 `"version": "X.Y.Z"`
 
-```bash
-# 查找包含版本引用的文件
-# 搜索当前版本模式
-# 更新版本字符串
-```
-
-**常见需要更新的文件**：
-- `package.json`（Node.js）
-- `pom.xml`（Maven）
-- `setup.py` / `pyproject.toml`（Python）
-- `version.go`（Go）
-- `README.md`（文档）
+使用搜索确认旧版本号无遗漏，使用编辑工具更新。
 
 **排除以下目录的版本替换**：
 - `.agents/`、`.ai-workspace/`、`.claude/`、`.codex/`、`.gemini/`、`.opencode/`（AI 工具配置）
