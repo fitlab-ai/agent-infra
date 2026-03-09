@@ -1,0 +1,291 @@
+#!/bin/sh
+# ai-collaboration-installer CLI - bootstrap tool for AI collaboration infrastructure
+set -e
+
+VERSION="1.0.0"
+INSTALL_DIR="$HOME/.ai-collaboration-installer"
+TEMPLATE_DIR="$INSTALL_DIR/templates"
+
+# ---------- helpers ----------
+info()  { printf '  \033[1;34m>\033[0m %s\n' "$*"; }
+ok()    { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
+err()   { printf '  \033[1;31m✗\033[0m %s\n' "$*" >&2; }
+ask()   { printf '  \033[1;33m?\033[0m %s' "$1"; }
+
+prompt() {
+  # prompt VAR_NAME "prompt text" "default value"
+  _default="$3"
+  if [ -n "$_default" ]; then
+    ask "$2 [$_default]: "
+  else
+    ask "$2: "
+  fi
+  read -r _answer
+  if [ -z "$_answer" ]; then
+    _answer="$_default"
+  fi
+  eval "$1=\"\$_answer\""
+}
+
+# ---------- usage ----------
+usage() {
+  cat <<'EOF'
+ai-collaboration-installer - bootstrap AI collaboration infrastructure
+
+Usage:
+  ai-collaboration-installer init        Initialize a new project with update-ai-collaboration seed command
+  ai-collaboration-installer version     Show version
+  ai-collaboration-installer help        Show this help message
+
+Shorthand: aci (e.g. aci init)
+
+Examples:
+  cd my-project && ai-collaboration-installer init
+EOF
+}
+
+# ---------- init ----------
+cmd_init() {
+  echo ""
+  echo "  ai-collaboration-installer init"
+  echo "  ================================"
+  echo ""
+
+  # pre-checks
+  if [ ! -d "$INSTALL_DIR" ]; then
+    err "ai-collaboration-installer not found at $INSTALL_DIR"
+    err "Run the install script first:"
+    echo "  curl -fsSL https://raw.githubusercontent.com/fitlab-ai/ai-collaboration-installer/main/install.sh | sh"
+    exit 1
+  fi
+
+  if [ ! -d "$TEMPLATE_DIR" ]; then
+    err "Template directory not found at $TEMPLATE_DIR"
+    exit 1
+  fi
+
+  if [ -f "collaborator.json" ]; then
+    err "This project already has a collaborator.json."
+    err "Use /update-ai-collaboration in your AI TUI to update."
+    exit 1
+  fi
+
+  # collect project info
+  _default_project="$(basename "$(git remote get-url origin 2>/dev/null | sed 's/\.git$//')" 2>/dev/null)" || true
+  [ -z "$_default_project" ] && _default_project="$(basename "$(pwd)")"
+  prompt PROJECT_NAME "Project name" "$_default_project"
+  if [ -z "$PROJECT_NAME" ]; then
+    err "Project name is required."
+    exit 1
+  fi
+  # validate: only alphanumeric, hyphens, underscores, dots
+  case "$PROJECT_NAME" in
+    *[!a-zA-Z0-9_.@-]*)
+      err "Project name may only contain letters, digits, hyphens, underscores, dots, and @."
+      err "Got: $PROJECT_NAME"
+      exit 1
+      ;;
+  esac
+
+  _default_org="$(git remote get-url origin 2>/dev/null | sed 's/\.git$//' | sed 's|.*://[^/]*/||;s|.*:||' | cut -d/ -f1)" || true
+  prompt ORG_NAME "Organization / owner" "$_default_org"
+  if [ -z "$ORG_NAME" ]; then
+    err "Organization name is required."
+    exit 1
+  fi
+  case "$ORG_NAME" in
+    *[!a-zA-Z0-9_.@-]*)
+      err "Organization name may only contain letters, digits, hyphens, underscores, dots, and @."
+      err "Got: $ORG_NAME"
+      exit 1
+      ;;
+  esac
+
+  prompt LANGUAGE "Language (en / zh)" "zh"
+  # normalize shorthand: zh -> zh-CN
+  case "$LANGUAGE" in
+    zh) LANGUAGE="zh-CN" ;;
+  esac
+  # validate language allowlist
+  case "$LANGUAGE" in
+    en|zh-CN) ;;
+    *)
+      err "Language must be 'en' or 'zh'. Got: $LANGUAGE"
+      exit 1
+      ;;
+  esac
+
+  prompt LICENSE "License (MIT / Apache-2.0)" "MIT"
+  case "$LICENSE" in
+    MIT|Apache-2.0) ;;
+    *)
+      err "License must be 'MIT' or 'Apache-2.0'. Got: $LICENSE"
+      exit 1
+      ;;
+  esac
+
+  MODULES="ai,github"
+
+  # derive the short project name used in paths and placeholders
+  PROJECT="$PROJECT_NAME"
+
+  echo ""
+  info "Installing update-ai-collaboration seed command for: $PROJECT_NAME ($ORG_NAME)"
+  echo ""
+
+  # select language suffix for template files
+  if [ "$LANGUAGE" = "zh-CN" ]; then
+    SKILL_FILE="SKILL.zh-CN.md"
+    CLAUDE_SRC="update-ai-collaboration.zh-CN.md"
+    CODEX_SRC="_project_-update-ai-collaboration.zh-CN.md"
+    GEMINI_SRC="update-ai-collaboration.zh-CN.toml"
+    OPENCODE_SRC="update-ai-collaboration.zh-CN.md"
+  else
+    SKILL_FILE="SKILL.md"
+    CLAUDE_SRC="update-ai-collaboration.md"
+    CODEX_SRC="_project_-update-ai-collaboration.md"
+    GEMINI_SRC="update-ai-collaboration.toml"
+    OPENCODE_SRC="update-ai-collaboration.md"
+  fi
+
+  # create directories
+  mkdir -p ".agents/skills/update-ai-collaboration"
+  mkdir -p ".claude/commands"
+  mkdir -p ".codex/commands"
+  mkdir -p ".gemini/commands/$PROJECT"
+  mkdir -p ".opencode/commands"
+
+  # escape strings for safe use in sed replacement
+  SED_PROJECT=$(printf '%s' "$PROJECT" | sed 's/[&/\]/\\&/g')
+  SED_ORG=$(printf '%s' "$ORG_NAME" | sed 's/[&/\]/\\&/g')
+
+  # helper: copy template file with placeholder rendering
+  render_file() {
+    _src="$1"
+    _dst="$2"
+    if [ ! -f "$_src" ]; then
+      err "Template file not found: $_src"
+      return 1
+    fi
+    sed -e "s/{project}/$SED_PROJECT/g" \
+        -e "s/{org}/$SED_ORG/g" \
+        "$_src" > "$_dst"
+  }
+
+  # install skill
+  render_file \
+    "$TEMPLATE_DIR/.agents/skills/update-ai-collaboration/$SKILL_FILE" \
+    ".agents/skills/update-ai-collaboration/SKILL.md"
+  ok "Installed .agents/skills/update-ai-collaboration/SKILL.md"
+
+  # install Claude command
+  render_file \
+    "$TEMPLATE_DIR/.claude/commands/$CLAUDE_SRC" \
+    ".claude/commands/update-ai-collaboration.md"
+  ok "Installed .claude/commands/update-ai-collaboration.md"
+
+  # install Codex command (replace _project_ in filename)
+  render_file \
+    "$TEMPLATE_DIR/.codex/commands/$CODEX_SRC" \
+    ".codex/commands/${PROJECT}-update-ai-collaboration.md"
+  ok "Installed .codex/commands/${PROJECT}-update-ai-collaboration.md"
+
+  # install Codex install-prompts.sh script
+  mkdir -p ".codex/scripts"
+  cp "$INSTALL_DIR/.codex/scripts/install-prompts.sh" ".codex/scripts/install-prompts.sh" 2>/dev/null \
+    || cp "$TEMPLATE_DIR/.codex/scripts/install-prompts.sh" ".codex/scripts/install-prompts.sh"
+  chmod +x ".codex/scripts/install-prompts.sh"
+  ok "Installed .codex/scripts/install-prompts.sh"
+
+  # sync Codex commands to global ~/.codex/prompts/
+  bash ".codex/scripts/install-prompts.sh" > /dev/null
+  ok "Synced Codex prompts to ~/.codex/prompts/"
+
+  # install Gemini command (replace _project_ in directory name)
+  render_file \
+    "$TEMPLATE_DIR/.gemini/commands/_project_/$GEMINI_SRC" \
+    ".gemini/commands/$PROJECT/update-ai-collaboration.toml"
+  ok "Installed .gemini/commands/$PROJECT/update-ai-collaboration.toml"
+
+  # install OpenCode command
+  render_file \
+    "$TEMPLATE_DIR/.opencode/commands/$OPENCODE_SRC" \
+    ".opencode/commands/update-ai-collaboration.md"
+  ok "Installed .opencode/commands/update-ai-collaboration.md"
+
+  # generate collaborator.json
+  # parse modules into JSON array
+  MODULES_JSON=$(echo "$MODULES" | sed 's/,/", "/g')
+  cat > "collaborator.json" <<ENDJSON
+{
+  "version": "$VERSION",
+  "project": "$PROJECT_NAME",
+  "org": "$ORG_NAME",
+  "language": "$LANGUAGE",
+  "license": "$LICENSE",
+  "templateSource": "templates/",
+  "templateVersion": "$VERSION",
+  "modules": ["$MODULES_JSON"],
+  "files": {
+    "managed": [
+      ".mailmap",
+      ".editorconfig",
+      ".agents/workflows/",
+      ".agents/skills/",
+      ".agents/templates/",
+      ".claude/commands/",
+      ".codex/commands/",
+      ".codex/scripts/",
+      ".gemini/commands/",
+      ".opencode/commands/",
+      ".github/ISSUE_TEMPLATE/",
+      ".github/workflows/pr-title-check.yml",
+      ".github/PULL_REQUEST_TEMPLATE.md",
+      ".ai-workspace/README.md"
+    ],
+    "merged": [
+      "AGENTS.md",
+      "CONTRIBUTING.md",
+      "SECURITY.md",
+      ".claude/CLAUDE.md",
+      ".claude/project-rules.md",
+      ".agents/README.md",
+      ".agents/QUICKSTART.md",
+      ".gitignore",
+      "*/test.*",
+      "*/test-integration.*",
+      "*/release.*",
+      "*/upgrade-dependency.*"
+    ],
+    "ejected": [
+      "README.md",
+      "README.zh-CN.md",
+      "License.txt"
+    ]
+  }
+}
+ENDJSON
+  ok "Generated collaborator.json"
+
+  # done
+  echo ""
+  ok "Project initialized successfully!"
+  echo ""
+  echo "  Next step: open this project in any AI TUI and run:"
+  echo ""
+  echo "    Claude Code / OpenCode:  /update-ai-collaboration"
+  echo "    Gemini CLI:              /$PROJECT:update-ai-collaboration"
+  echo "    Codex CLI:               /prompts:${PROJECT}-update-ai-collaboration"
+  echo ""
+  echo "  This will render all templates and set up the full"
+  echo "  AI collaboration infrastructure."
+  echo ""
+}
+
+# ---------- main ----------
+case "${1:-}" in
+  init)    cmd_init ;;
+  version) echo "ai-collaboration-installer $VERSION" ;;
+  help|"") usage ;;
+  *)       err "Unknown command: $1"; usage; exit 1 ;;
+esac

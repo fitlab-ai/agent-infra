@@ -1,0 +1,60 @@
+description = "Review task implementation and output code review report"
+prompt = """
+Please review the code implementation of task {{args}}.
+
+**Check prerequisites**:
+!{if [ -f .ai-workspace/active/{{args}}/task.md ]; then echo "✅ Task file exists"; else echo "❌ Task file not found"; fi}
+!{if [ -f .ai-workspace/active/{{args}}/implementation.md ]; then echo "✅ Implementation report exists"; else echo "❌ Implementation report not found"; fi}
+
+Execute the following steps:
+
+1. **Prepare for review**:
+   - Read `implementation.md` to understand the changes.
+   - Use `git diff` or read relevant source files for inspection.
+
+2. **Execute code review**:
+   Check points:
+   - Code quality and standards.
+   - Bugs and potential issues.
+   - Test coverage and quality.
+   - Error handling and edge cases.
+   - Security and performance.
+   - Consistency with `plan.md`.
+
+3. **Output review report**:
+   Create `review.md` in the task directory, containing:
+   - Review summary
+   - Review findings:
+     - 🔴 Must fix (Blocker)
+     - 🟡 Suggested changes (Major)
+     - 🟢 Optimization suggestions (Minor)
+   - Strengths and highlights
+   - Standards/test/security/performance review details
+   - Summary and recommendations
+
+4. **Update task status**:
+   - Modify `task.md`:
+     - current_step: code-review
+     - updated_at: current time
+     - Mark code review as complete
+
+5. **Inform user**:
+   - Output review result summary.
+   - Suggest based on results:
+     - No issues:
+       - Claude Code / OpenCode: `/commit`
+       - Gemini CLI: `/{project}:commit`
+       - Codex CLI: `/prompts:{project}-commit`
+     - Has issues:
+       - Claude Code / OpenCode: `/refine-task {{args}}`
+       - Gemini CLI: `/{project}:refine-task {{args}}`
+       - Codex CLI: `/prompts:{project}-refine-task {{args}}`
+     - Major issues:
+       - Claude Code / OpenCode: `/implement-task {{args}}`
+       - Gemini CLI: `/{project}:implement-task {{args}}`
+       - Codex CLI: `/prompts:{project}-implement-task {{args}}`
+
+**Principles**:
+- Strict but fair.
+- Provide specific files and line numbers.
+"""

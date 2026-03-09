@@ -1,0 +1,32 @@
+description = "Run integration tests (requires build first)"
+prompt = """
+Please run integration tests.
+
+<!-- TODO: Replace with your project's actual integration test commands -->
+
+**Pre-check**:
+!{if [ -d "build" ]; then echo "✅ Build dir found"; else echo "❌ Build dir missing"; fi}
+
+Execute the following steps:
+
+1. **Environment check**:
+   - If `build/` directory does not exist, prompt user to run `/{project}:test` or build command first.
+
+2. **Run integration tests**:
+   ```bash
+   # TODO: Replace with your project's integration test command
+   # npm run test:integration    (Node.js)
+   # mvn verify                  (Maven)
+   # pytest tests/integration/   (Python)
+   # go test -tags=integration ./...  (Go)
+   ```
+
+3. **Report**:
+   - Output integration test results.
+
+**Next steps**:
+After tests pass, commit code:
+- Claude Code / OpenCode: `/commit`
+- Gemini CLI: `/{project}:commit`
+- Codex CLI: `/prompts:{project}-commit`
+"""

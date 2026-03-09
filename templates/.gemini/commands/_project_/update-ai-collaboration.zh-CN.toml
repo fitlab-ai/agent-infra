@@ -1,0 +1,42 @@
+description = "通过重新渲染最新 templates/ 来更新项目 AI 协作基础设施"
+prompt = """
+更新当前项目的 AI 协作基础设施，使其与最新的 ai-collaboration-installer 模板保持一致。
+
+执行步骤：
+
+1. **读取项目配置**：
+   - 读取项目根目录的 `collaborator.json`。
+   - 提取：source、project、org、language、modules、templateSource、files。
+
+2. **定位并刷新模板源**：
+   - source 为 "self" 时使用当前仓库。
+   - 否则执行 `git -C ~/.ai-collaboration-installer pull` 拉取最新模板，再从 `~/.ai-collaboration-installer/` 读取。
+   - 根据 `templateSource`（默认 `templates/`）定位模板根目录。
+   - 如果 `~/.ai-collaboration-installer/` 不存在，报错并停止。
+
+3. **确定更新范围**：
+   - 只处理 modules 中列出的模块。
+
+4. **处理 managed 文件**：
+   - 从 `{templateSource}` 渲染，选择语言版本，并替换 `{project}` / `{org}` / `_project_`。
+   - 新模板文件则创建，已移除的文件则标记提示用户。
+
+5. **处理 merged 文件**（AI 智能合并）：
+   - 先渲染最新模板。如果本地文件不存在，直接写入渲染后的模板（首次安装）。
+   - 否则与本地当前文件比较。
+   - 识别模板标准部分和用户定制内容。
+   - 更新模板部分，保留用户定制。
+   - 有疑问时保留用户内容，不静默删除用户添加的内容。
+
+6. **处理 ejected 文件**：本地已有则跳过；本地不存在则首次从模板渲染一份。
+
+7. **更新 collaborator.json**：
+   - 刷新 `templateVersion`。
+   - 除非用户明确要求迁移模板目录，否则保持 `templateSource` 不变。
+
+8. **同步 Codex prompts**：如果 `.codex/scripts/install-prompts.sh` 存在，执行它将命令同步到 `~/.codex/prompts/`。
+
+9. **输出报告**：managed/merged/ejected 文件状态。
+
+**停止**：不要对项目做其他更改。
+"""

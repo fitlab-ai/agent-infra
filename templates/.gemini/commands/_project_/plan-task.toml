@@ -1,0 +1,58 @@
+description = "Design technical solution and output implementation plan"
+prompt = """
+Please design a technical solution for task {{args}}.
+
+**Check task file**:
+!{if [ -f .ai-workspace/active/{{args}}/task.md ]; then echo "✅ Task exists in active"; else echo "⚠️ Task not in active directory"; fi}
+
+**Find task location**:
+!{find .ai-workspace -type f -path "*/{{args}}/task.md" 2>/dev/null || echo "❌ Task file not found"}
+
+Execute the following steps:
+
+1. **Verify prerequisites**:
+   - If task file not found, report error and exit.
+   - Read `task.md` and `analysis.md` (using `read_file`).
+   - If `analysis.md` does not exist, prompt user to run `/{project}:analyze-issue` first.
+
+2. **Understand problem and constraints**:
+   - Based on `analysis.md`, understand root cause, impact scope, and technical constraints.
+   - Identify special requirements (security, regression, scalability).
+
+3. **Design solution**:
+   - Propose multiple feasible solutions and compare trade-offs.
+   - Select the most suitable solution.
+   - Define detailed implementation steps.
+   - List files to create/modify.
+   - Design verification strategy (tests, regression).
+   - Assess impact (performance, security, compatibility).
+   - Define risk control and rollback plan.
+
+4. **Output plan document**:
+   Create `plan.md` in the task directory, containing:
+   - Decision rationale (problem understanding, constraints, solution comparison, final selection)
+   - Technical approach (core strategy, key technical points, implementation details)
+   - Implementation steps (detailed step list)
+   - File manifest (files to create/modify)
+   - Verification strategy (functional/problem/regression verification)
+   - Impact assessment
+   - Risk control
+
+5. **Update task status**:
+   - Modify `task.md`:
+     - current_step: technical-design
+     - updated_at: current time
+     - Mark technical design as complete
+
+6. **Inform user**:
+   - Output plan summary
+   - Show output file paths
+   - **Indicate this is a human review checkpoint**: After review approval, start implementation:
+     - Claude Code / OpenCode: `/implement-task {{args}}`
+     - Gemini CLI: `/{project}:implement-task {{args}}`
+     - Codex CLI: `/prompts:{project}-implement-task {{args}}`
+
+**Notes**:
+- Must complete requirement analysis first.
+- Plan design **must** wait for human review after completion.
+"""

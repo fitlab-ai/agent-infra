@@ -1,0 +1,37 @@
+description = "Handle code review feedback and fix issues"
+prompt = """
+Please handle the code review feedback for task {{args}} and fix the issues.
+
+**Check prerequisites**:
+!{if [ -f .ai-workspace/active/{{args}}/review.md ]; then echo "Review report exists"; else echo "Review report not found"; fi}
+
+Execute the following steps:
+
+1. **Read review report**:
+   - Read `review.md`.
+   - Extract all Blocker and Major issues.
+
+2. **Execute fixes**:
+   - Fix by priority: Blocker -> Major -> Minor.
+   - Ensure no new issues are introduced.
+   - Run tests to ensure they pass.
+
+3. **Create fix report**:
+   - Create `refinement-report.md`, including: fix summary, fix details, unfixed issues and reasons, test results.
+
+4. **Update task status**:
+   - current_step: refinement, updated_at: current time.
+
+5. **Inform user**:
+   - Suggest next steps:
+     - Re-review:
+       - Claude Code / OpenCode: `/review-task {{args}}`
+       - Gemini CLI: `/{project}:review-task {{args}}`
+       - Codex CLI: `/prompts:{project}-review-task {{args}}`
+     - Or commit directly:
+       - Claude Code / OpenCode: `/commit`
+       - Gemini CLI: `/{project}:commit`
+       - Codex CLI: `/prompts:{project}-commit`
+
+**Note**: Do not add extra changes. Do not auto-commit code.
+"""

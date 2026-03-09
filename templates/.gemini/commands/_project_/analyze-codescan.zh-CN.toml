@@ -1,0 +1,41 @@
+description = "分析 Code Scanning 告警并创建任务"
+prompt = """
+请分析 Code Scanning (CodeQL) 告警 #{{args}}。
+
+**前置检查**:
+- 检查是否已有任务处理此告警（grep "codescan_alert_number: {{args}}"）。
+
+执行以下步骤:
+
+1. **获取信息**:
+   - 获取 Repo 信息: `gh repo view --json owner,name`。
+   - 获取告警详情: `gh api repos/:owner/:repo/code-scanning/alerts/{{args}}`。
+
+2. **创建任务**:
+   - 如果无现有任务，创建 `.ai-workspace/active/TASK-{timestamp}/`。
+   - 创建 `task.md`（记录 severity、rule_id、tool）。
+
+3. **分析**:
+   - 根据 location 定位源码文件和行号。
+   - 读取告警所在的源码上下文。
+   - 分析代码为什么触发了该规则。
+   - 评估风险（可利用性、攻击向量）。
+
+4. **输出文档**:
+   - 创建 `analysis.md`（告警详情、源码分析、风险评估、修复建议）。
+
+5. **更新状态**: current_step: security-analysis。
+
+6. **告知用户**:
+   - 输出分析摘要。
+   - 下一步设计修复方案:
+     - Claude Code / OpenCode: `/plan-task {task-id}`
+     - Gemini CLI: `/{project}:plan-task {task-id}`
+     - Codex CLI: `/prompts:{project}-plan-task {task-id}`
+   - 如果是误报，关闭告警:
+     - Claude Code / OpenCode: `/close-codescan {{args}}`
+     - Gemini CLI: `/{project}:close-codescan {{args}}`
+     - Codex CLI: `/prompts:{project}-close-codescan {{args}}`
+
+**注意**: Critical/High -> 立即处理。Medium -> 计划处理。Low -> 可延期。
+"""

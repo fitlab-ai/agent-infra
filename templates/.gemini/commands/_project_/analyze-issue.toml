@@ -1,0 +1,57 @@
+description = "Analyze GitHub Issue and create requirement analysis document"
+prompt = """
+Please analyze GitHub Issue #{{args}} and create a task file.
+
+Current time: !{date '+%Y-%m-%d %H:%M:%S'}
+
+Issue information:
+!{gh issue view {{args}} --json number,title,body,labels 2>/dev/null || echo "Issue not found"}
+
+Execute the following steps:
+
+1. **Check Issue information**:
+   If the Issue information above shows not found, prompt user to check the Issue number.
+
+2. **Generate task ID**:
+   Use format `TASK-YYYYMMDD-HHMMSS` (using the current time above).
+
+3. **Create task directory**:
+   Use `run_shell_command` to create directory: `.ai-workspace/active/TASK-{timestamp}/`
+
+   Use `write_file` based on `.agents/templates/task.md` (if exists) or create a new `task.md` file:
+   - Fill in task metadata: issue_number, title, created_at, workflow, etc.
+   - created_at and updated_at use current time.
+
+4. **Perform requirement analysis**:
+   - Read and understand the Issue description above.
+   - Use `search_file_content` or `glob` to search for related code files.
+   - Analyze code structure and impact scope.
+   - Identify potential technical risks and dependencies.
+   - Assess effort and complexity.
+
+5. **Output analysis document**:
+   Create `analysis.md` in the task directory, containing:
+   - Requirement understanding (restate the requirement)
+   - Related files list (with file paths and line numbers)
+   - Impact scope assessment (direct and indirect impact)
+   - Technical risks
+   - Dependencies
+   - Effort and complexity assessment
+
+6. **Update task status**:
+   - current_step: requirement-analysis
+   - updated_at: current time
+   - Mark analysis.md as completed
+
+7. **Inform user**:
+   - Output task ID, title, workflow
+   - Show output file paths
+   - Suggest next step - design technical plan:
+     - Claude Code / OpenCode: `/plan-task {{args}}`
+     - Gemini CLI: `/{project}:plan-task {{args}}`
+     - Codex CLI: `/prompts:{project}-plan-task {{args}}`
+
+**Notes**:
+- Strictly follow `.agents/workflows/feature-development.yaml` workflow definition
+- Suggest human review after analysis is complete
+"""

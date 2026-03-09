@@ -1,0 +1,40 @@
+description = "Commit current changes to Git (auto copyright check)"
+prompt = """
+Please commit current changes to Git.
+
+**Current status**:
+!{git status --short}
+!{git log -1 --oneline}
+Current year: !{date +%Y}
+
+Execute the following steps:
+
+1. **Check local modifications**:
+   - If there are no staged changes, prompt user to first use `git add`, or use `git diff` to view.
+   - Make sure to understand user's changes, do not overwrite user's implementation.
+
+2. **Copyright header check (CRITICAL)**:
+   - For each modified file, check if it contains a copyright header.
+   - Use `read_file` to check.
+   - If it contains a copyright header but the year is outdated, use `replace` to update to current year.
+   - Format example: "Copyright (C) 2024" -> "Copyright (C) 2024-2026" (assuming current is 2026).
+   - Do **NOT** hardcode the year.
+
+3. **Generate commit message**:
+   - Format: `<type>(<scope>): <subject>`
+   - Body: Describe changes in detail (2-4 bullet points).
+   - Signature: `Co-Authored-By: Gemini <noreply@google.com>` (or similar).
+
+4. **Execute commit**:
+   - Use `run_shell_command` to execute `git commit`.
+   - Ensure using HEREDOC or `-m` to correctly pass multi-line messages.
+
+5. **Verify**:
+   - Run `git status` to confirm successful commit.
+
+**Post-execution**:
+- If this is a task-related commit, prompt user to update task status:
+  - Claude Code / OpenCode: `/check-task` or `/complete-task`
+  - Gemini CLI: `/{project}:check-task` or `/{project}:complete-task`
+  - Codex CLI: `/prompts:{project}-check-task` or `/prompts:{project}-complete-task`
+"""

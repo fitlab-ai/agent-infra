@@ -1,0 +1,91 @@
+#!/bin/sh
+# ai-collaboration-installer bootstrap installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/fitlab-ai/ai-collaboration-installer/main/install.sh | sh
+set -e
+
+REPO_OWNER="fitlab-ai"
+REPO_NAME="ai-collaboration-installer"
+REPO_SSH="git@github.com:${REPO_OWNER}/${REPO_NAME}.git"
+REPO_HTTPS="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
+INSTALL_DIR="$HOME/.ai-collaboration-installer"
+BIN_NAME="ai-collaboration-installer"
+
+# ---------- helpers ----------
+info()  { printf '  \033[1;34m>\033[0m %s\n' "$*"; }
+ok()    { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
+err()   { printf '  \033[1;31m✗\033[0m %s\n' "$*" >&2; }
+
+# ---------- pre-checks ----------
+if ! command -v git >/dev/null 2>&1; then
+  err "git is required but not found. Please install git first."
+  exit 1
+fi
+
+# ---------- select clone method ----------
+# Priority: gh CLI > SSH > HTTPS
+select_repo_url() {
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    # gh is authenticated — let it handle the clone directly
+    echo "gh"
+    return
+  fi
+  if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+    echo "$REPO_SSH"
+    return
+  fi
+  echo "$REPO_HTTPS"
+}
+
+# ---------- clone or update ----------
+if [ -d "$INSTALL_DIR" ]; then
+  info "Updating existing installation at $INSTALL_DIR ..."
+  git -C "$INSTALL_DIR" pull --quiet
+  ok "Updated to latest version."
+else
+  CLONE_METHOD=$(select_repo_url)
+  if [ "$CLONE_METHOD" = "gh" ]; then
+    info "Cloning ai-collaboration-installer via gh CLI to $INSTALL_DIR ..."
+    gh repo clone "${REPO_OWNER}/${REPO_NAME}" "$INSTALL_DIR" -- --quiet
+  else
+    info "Cloning ai-collaboration-installer to $INSTALL_DIR ..."
+    git clone --quiet "$CLONE_METHOD" "$INSTALL_DIR"
+  fi
+  ok "Cloned successfully."
+fi
+
+# ---------- install CLI command ----------
+# Try ~/.local/bin first (no sudo needed), fall back to /usr/local/bin
+BIN_SOURCE="$INSTALL_DIR/bin/$BIN_NAME"
+chmod +x "$BIN_SOURCE"
+
+BIN_DIR=""
+if [ -d "$HOME/.local/bin" ] && echo "$PATH" | grep -q "$HOME/.local/bin"; then
+  BIN_DIR="$HOME/.local/bin"
+elif [ -d "$HOME/.local/bin" ]; then
+  BIN_DIR="$HOME/.local/bin"
+elif [ -w "/usr/local/bin" ]; then
+  BIN_DIR="/usr/local/bin"
+else
+  mkdir -p "$HOME/.local/bin"
+  BIN_DIR="$HOME/.local/bin"
+fi
+
+ln -sf "$BIN_SOURCE" "$BIN_DIR/$BIN_NAME"
+ln -sf "$BIN_SOURCE" "$BIN_DIR/aci"
+ok "Installed $BIN_NAME to $BIN_DIR/ (shorthand: aci)"
+
+# ---------- PATH hint ----------
+if ! command -v "$BIN_NAME" >/dev/null 2>&1; then
+  echo ""
+  info "Add $BIN_DIR to your PATH:"
+  echo "  export PATH=\"$BIN_DIR:\$PATH\""
+  echo ""
+fi
+
+# ---------- done ----------
+echo ""
+ok "ai-collaboration-installer installed successfully!"
+echo ""
+echo "  Next step: cd into your project and run:"
+echo "    ai-collaboration-installer init  (or: aci init)"
+echo ""

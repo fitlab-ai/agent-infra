@@ -1,0 +1,52 @@
+description = "Implement task based on technical plan and output implementation report"
+prompt = """
+Please implement task {{args}} based on the technical plan.
+
+**Check prerequisites**:
+!{if [ -f .ai-workspace/active/{{args}}/task.md ]; then echo "✅ Task file exists"; else echo "❌ Task file not found"; fi}
+!{if [ -f .ai-workspace/active/{{args}}/plan.md ]; then echo "✅ Technical plan exists"; else echo "❌ Technical plan not found"; fi}
+
+Execute the following steps:
+
+1. **Preparation**:
+   - If prerequisites are not met, prompt the user.
+   - Read `plan.md` to understand implementation steps and file manifest.
+
+2. **Execute code implementation**:
+   - **Strictly follow the steps in `plan.md` in order**.
+   - Use `write_file` or `replace` to modify code.
+   - Implement feature code.
+   - **Write comprehensive unit tests**.
+   - Run tests to verify functionality (using `run_shell_command`).
+   - Follow project coding standards.
+
+3. **Run verification**:
+   - Run Maven/Node/Python tests to ensure they pass.
+
+4. **Output implementation report**:
+   Create `implementation.md` in the task directory, containing:
+   - Modified file list
+   - Key code explanation
+   - Test results
+   - Deviations from plan (if any)
+   - Items for review
+   - Next step suggestions
+
+5. **Update task status**:
+   - Modify `task.md`:
+     - current_step: implementation
+     - updated_at: current time
+     - Mark code implementation as complete
+
+6. **Inform user**:
+   - Output implementation summary
+   - Suggest next step - code review:
+     - Claude Code / OpenCode: `/review-task {{args}}`
+     - Gemini CLI: `/{project}:review-task {{args}}`
+     - Codex CLI: `/prompts:{project}-review-task {{args}}`
+
+**Principles**:
+- Strictly follow the plan.
+- Run tests after each step.
+- Do **NOT** auto-commit code (git commit), wait for review.
+"""

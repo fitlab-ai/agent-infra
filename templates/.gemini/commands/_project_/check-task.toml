@@ -1,0 +1,23 @@
+description = "View task status"
+prompt = """
+Please check the status of task {{args}}.
+
+**Find task**:
+!{if [ -d .ai-workspace/active/{{args}} ]; then echo "active"; elif [ -d .ai-workspace/completed/{{args}} ]; then echo "completed"; elif [ -d .ai-workspace/blocked/{{args}} ]; then echo "blocked"; else echo "not_found"; fi}
+
+Execute the following steps:
+
+1. **Read task file**:
+   - Based on the status directory found above, read `task.md`.
+   - If not found, prompt the user.
+
+2. **Check context files**:
+   - List all `.md` files in the task directory.
+
+3. **Output status report**:
+   - Task ID, title, Issue number.
+   - Current status (active/completed/blocked).
+   - Current step (current_step).
+   - Workflow progress (which files already exist).
+   - Next step suggestions.
+"""

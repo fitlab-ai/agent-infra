@@ -1,0 +1,32 @@
+description = "Run full test workflow (compilation check + unit tests)"
+prompt = """
+Execute the full test workflow.
+
+Execute the following steps:
+
+1. **Compilation / Type check**:
+   <!-- TODO: Replace with your project's compilation command -->
+   ```bash
+   # Example: npx tsc --noEmit / mvn compile / go build ./...
+   ```
+   Confirm no compilation errors.
+
+2. **Run all unit tests**:
+   <!-- TODO: Replace with your project's test command -->
+   ```bash
+   # Example: npm test / mvn test / pytest / go test ./...
+   ```
+
+3. **Output results**:
+   - Number of passing/failing tests.
+   - Failure details (if any).
+   - Suggested fix direction (if there are failures).
+
+If tests fail, do not auto-fix code; wait for user decision.
+
+**Next steps**:
+After tests pass, commit code:
+- Claude Code / OpenCode: `/commit`
+- Gemini CLI: `/{project}:commit`
+- Codex CLI: `/prompts:{project}-commit`
+"""

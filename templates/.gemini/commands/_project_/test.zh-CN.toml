@@ -1,0 +1,32 @@
+description = "运行完整的测试流程（编译检查 + 单元测试）"
+prompt = """
+执行完整的测试流程。
+
+执行步骤:
+
+1. **编译 / 类型检查**:
+   <!-- TODO: 替换为你的项目的编译命令 -->
+   ```bash
+   # 示例: npx tsc --noEmit / mvn compile / go build ./...
+   ```
+   确认无编译错误。
+
+2. **运行所有单元测试**:
+   <!-- TODO: 替换为你的项目的测试命令 -->
+   ```bash
+   # 示例: npm test / mvn test / pytest / go test ./...
+   ```
+
+3. **输出结果**:
+   - 通过/失败的测试数量。
+   - 失败详情（如果有）。
+   - 建议修复方向（如果有失败）。
+
+如果测试失败，不要自动修复代码，等待用户决定。
+
+**下一步**:
+测试通过后，提交代码:
+- Claude Code / OpenCode: `/commit`
+- Gemini CLI: `/{project}:commit`
+- Codex CLI: `/prompts:{project}-commit`
+"""

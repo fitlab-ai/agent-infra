@@ -1,0 +1,29 @@
+# AI workspace (temporary task data)
+.ai-workspace/active/
+.ai-workspace/blocked/
+.ai-workspace/completed/
+.ai-workspace/logs/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# OpenCode runtime
+.opencode/node_modules/
+.opencode/bun.lock
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*

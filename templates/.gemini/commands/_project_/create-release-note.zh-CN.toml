@@ -1,0 +1,130 @@
+description = "从 PR/commit 中自动生成结构化的 Release Notes，并可选创建 GitHub Draft Release"
+prompt = """
+请为版本 {{args}} 生成 Release Notes。
+
+自动从 PR、commit 和 Issue 中收集变更信息，按模块和类型分类，生成符合项目格式的 Release Notes。支持创建 GitHub Draft Release。对于 x.y.0 版本，支持合并前一 minor 系列的已发布 release notes。
+
+**当前状态**:
+!{git tag --sort=-v:refname | head -10}
+!{git branch --show-current}
+
+步骤 1-3 为公共步骤，步骤 3 根据版本类型分流:
+- **合并路径**（PATCH == 0）: 步骤 4-7 → 跳到步骤 14
+- **常规路径**（PATCH > 0）: 步骤 8-13 → 继续步骤 14
+步骤 14-15 为公共步骤。
+
+执行以下步骤:
+
+1. **解析参数**:
+   - 从 {{args}} 中提取参数，支持两种形式:
+     - 单参数: `<version>` — 当前版本号
+     - 双参数: `<version> <prev-version>` — 当前版本号和上一版本号
+   - 版本号必须匹配 `X.Y.Z` 格式（X、Y、Z 均为非负整数）
+   - 如果格式不正确，报错退出：`错误：版本号格式不正确，期望格式为 X.Y.Z（例如 3.6.3）`
+
+2. **确定版本范围**:
+   - 当前版本 tag: `v<version>`
+   - 上一版本 tag 推断逻辑（仅当未指定 `<prev-version>` 时）:
+     - 使用 `run_shell_command` 执行: `git tag --sort=-v:refname`
+     - 如果 PATCH > 0: 查找同一 minor 系列中的前一个 tag
+     - 如果 PATCH == 0: 查找前一个 minor 系列的最后一个 tag
+   - 验证 tag 存在: `git rev-parse v<version>` 和 `git rev-parse v<prev-version>`
+
+3. **判断版本类型并选择路径**:
+   - 如果 PATCH == 0 → 走**合并路径**，从步骤 4 开始
+   - 如果 PATCH > 0 → 走**常规路径**，从步骤 8 开始
+
+--- 合并路径（PATCH == 0，x.y.0 版本）---
+
+4. **查找前一 minor 系列的所有已发布 release**:
+   - 使用 `run_shell_command` 执行: `gh release list --limit 50 --json tagName,isDraft,isPrerelease`
+   - 筛选 tagName 以 `vX.(Y-1).` 开头、isDraft==false、isPrerelease==false 的条目
+   - 如果未找到任何已发布的 release，提示用户并回退到常规路径（步骤 8）
+
+5. **按版本号升序获取各 release body**:
+   - 对每个 release tag 执行: `gh release view v<tag> --json body --jq .body`
+
+6. **合并所有 release body**:
+   - 按版本顺序拼接各版本的完整 release notes
+   - 同平台同类型条目合并（如 FIT Function Platform 的 Enhancement 条目合并到一起）
+   - 去重 Contributors（合并所有 ❤️ Contributors 段落，去重后按贡献量降序排列）
+
+7. **生成 Overview**:
+   - x.y.0 始终视为 Major release
+   - 在顶部添加 🌟 Overview 总结段落（2-3 句话概括整个 minor 系列的核心主题和亮点）
+   - 每个平台添加 🚀 Features Overview 要点列表（3-5 个关键特性要点）
+   - **完成后跳到步骤 14**
+
+--- 常规路径（PATCH > 0）---
+
+8. **收集合并的 PR**:
+   - 获取两个 tag 之间的日期范围:
+     - `git log v<prev-version> --format=%aI -1`
+     - `git log v<version> --format=%aI -1`
+   - 获取目标分支（分支名格式: X.Y.x）
+   - 使用 `run_shell_command` 执行: `gh pr list --state merged --base <branch> --json number,title,body,author,labels,mergedAt,url --limit 200 --search "merged:YYYY-MM-DD..YYYY-MM-DD"`
+   - 补充: `git log v<prev-version>..v<version> --format="%H %s" --no-merges`
+   - 找出没有关联 PR 的 commit
+
+9. **收集关联的 Issue**:
+   - 从 PR body 中提取: `Closes #N`、`Fixes #N`、`Resolves #N`（不区分大小写）
+   - 使用 `run_shell_command` 执行: `gh issue view <N> --json number,title,labels,url`
+
+10. **分类 — 按模块分组**:
+    按优先级判断模块:
+    - PR title 中的模块标签 `[fit]`, `[FEL]`, `[waterflow]`
+    - Conventional commit scope `feat(fit):`, `fix(waterflow):`
+    - PR 变更文件路径（`gh pr view <N> --json files`）
+    - 默认归入 FIT Function Platform
+
+    模块到平台的映射:
+    - fit/python/docker/fit-launcher/framework/fit/** → FIT Function Platform
+    - fel/FEL/framework/fel/** → FIT Expression for LLM
+    - waterflow/framework/waterflow/** → Waterflow Flow Scheduling Platform
+    - claude/.claude/.agents/AI 相关 → 🤖 AI Development Configuration
+
+11. **分类 — 按类型分组**:
+    - feat/perf/refactor/chore(deps)/依赖升级 → ✨ Enhancement
+    - fix → ✅ Bugfix
+    - docs → 📚 Documentation（条目少于 3 个则并入 Enhancement）
+
+12. **判断发布级别**:
+    - Major release（合并 PR > 15 个）: 生成 🌟 Overview + 每个平台 🚀 Features Overview
+    - Regular release: 直接列出条目，不加 Overview
+
+13. **生成 Release Notes**:
+    按项目格式输出 markdown:
+    ```
+    ## FIT Function Platform
+    ### ✨ Enhancement
+    - [fit] 描述 by @author in [#N](url)
+    ### ✅ Bugfix
+    - [fit] 描述 by @author in [#N](url)
+    ## ❤️ Contributors
+    @contributor1, @contributor2
+    ```
+    格式规则:
+    - 条目格式: `- [module] 描述 by @author1 and @author2 in [#N](url)`
+    - 关联 Issue 和 PR: `in [#Issue](issue-url) and [#PR](pr-url)`
+    - 描述优先使用 PR title，去掉 type(scope): 前缀，首字母大写
+    - 贡献者去重，按贡献量降序排列
+    - 空平台不输出
+
+--- 公共步骤 ---
+
+14. **展示并确认**:
+    将 release notes 完整输出给用户查看，询问:
+    - 是否需要调整内容
+    - 是否创建 GitHub Draft Release
+
+15. **创建 Draft Release**:
+    用户确认后执行:
+    `gh release create v<version> --title "v<version>" --notes-file /tmp/release-notes-v<version>.md --target <release-branch-or-tag> --draft`
+
+**错误处理**:
+- 版本号格式错误 → 提示正确格式并退出
+- Tag 不存在 → 提示确认 tag 已创建
+- gh CLI 未安装或未认证 → 提示安装/认证方法
+- 无合并 PR → 提示检查 tag 和分支
+- x.y.0 无已发布 release → 回退到常规路径
+"""

@@ -1,0 +1,27 @@
+description = "Sync task progress to Pull Request comment"
+prompt = """
+Please sync the progress of task {{args}} to the Pull Request.
+
+**Current time**: !{date '+%Y-%m-%d %H:%M:%S'}
+
+**Task status**:
+!{if [ -d .ai-workspace/active/{{args}} ]; then echo "active"; else echo "check other dirs"; fi}
+
+Execute the following steps:
+
+1. **Read task**:
+   - Read `task.md` to get `pr_number`.
+   - Read context files.
+
+2. **Generate summary**:
+   - Focus on technical decisions and implementation highlights (for reviewers).
+   - Include: completed steps, current progress, next steps, related files.
+
+3. **Sync**:
+   - `gh pr comment <pr_number> --body "<summary>"`
+
+4. **Update status**:
+   - Update `last_synced_to_pr_at` in `task.md`.
+
+5. **Inform user**: Sync complete.
+"""

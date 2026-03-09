@@ -1,0 +1,7 @@
+{
+  "name": "ai-collaboration-installer",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}

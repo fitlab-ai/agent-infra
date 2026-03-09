@@ -1,0 +1,28 @@
+description = "Sync task progress to GitHub Issue comment"
+prompt = """
+Please sync the progress of task {{args}} to the GitHub Issue.
+
+**Current time**: !{date '+%Y-%m-%d %H:%M:%S'}
+
+**Task status**:
+!{if [ -d .ai-workspace/active/{{args}} ]; then echo "active"; else echo "check other dirs"; fi}
+
+Execute the following steps:
+
+1. **Read task**:
+   - Read `task.md` to get `issue_number`.
+   - Read `analysis.md`, `plan.md`, `implementation.md`, etc. for progress.
+
+2. **Generate summary**:
+   - Format: `## 🤖 Task Progress Update` ... (reference OpenCode format).
+   - Include completed steps, current progress, next steps, related files.
+
+3. **Sync**:
+   - Use `run_shell_command`: `gh issue comment <issue_number> --body "..."`
+
+4. **Update status**:
+   - Update `last_synced_at` in `task.md`.
+
+5. **Inform user**:
+   - Sync complete.
+"""

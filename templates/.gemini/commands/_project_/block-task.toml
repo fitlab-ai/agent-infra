@@ -1,0 +1,33 @@
+description = "Mark task as blocked and record reason"
+prompt = """
+Please mark task {{args}} as blocked.
+
+**Task check**:
+!{if [ -d .ai-workspace/active/{{args}} ]; then echo "Found"; else echo "Not Found"; fi}
+
+Execute the following steps:
+
+1. **Verify task**: If not found, report error.
+
+2. **Record blocking reason**:
+   - Ask user for the specific blocking reason (if not provided in arguments).
+   - Block type: Technical / Requirement / Resource / Decision.
+
+3. **Update task status**:
+   - Modify `task.md`: status: blocked, blocked_at: current time, blocked_reason.
+   - Append "Blocking Information" section to `task.md`.
+
+4. **Move task**:
+   - Create `.ai-workspace/blocked/` (if needed).
+   - Move task directory to `blocked/`.
+
+5. **Inform user**:
+   - Task has been marked as blocked. Archive location: `.ai-workspace/blocked/{{args}}/`.
+   - How to unblock:
+     1. After resolving the blocking issue, manually move back to active directory:
+        `mv .ai-workspace/blocked/{{args}} .ai-workspace/active/`
+     2. After recovery, check task status:
+        - Claude Code / OpenCode: `/check-task {{args}}`
+        - Gemini CLI: `/{project}:check-task {{args}}`
+        - Codex CLI: `/prompts:{project}-check-task {{args}}`
+"""

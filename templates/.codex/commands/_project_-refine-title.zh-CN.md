@@ -1,0 +1,47 @@
+---
+description: 深度分析 Issue 或 PR 内容并重构标题为 Conventional Commits 格式
+argument-hint: <id>
+---
+
+针对 GitHub Issue 或 PR #$1,读取其详细描述、标签和代码变更,深度理解其意图,然后生成符合 type(scope): subject 规范的新标题并执行修改。
+
+执行以下步骤:
+
+1. 识别对象与获取信息:
+   先尝试获取 Issue:
+   ```bash
+   gh issue view $1 --json number,title,body,labels,state
+   ```
+   如果失败,尝试获取 PR:
+   ```bash
+   gh pr view $1 --json number,title,body,labels,state,files
+   ```
+
+2. 智能分析:
+   2.1 确定 Type: 阅读 body、检查 labels(bug→fix, feature→feat)、分析 files
+   2.2 确定 Scope: 分析涉及的模块(fit/waterflow/fel)
+   2.3 生成 Subject: 从 body 中提炼核心意图(忽略原标题),20字以内中文
+
+3. 生成建议与交互:
+   ```
+   🔍 分析对象: Issue/PR #$1
+   当前标题: <原标题>
+   🧠 分析依据: <推断类型和范围的依据>
+   ✨ 建议标题: <type>(<scope>): <subject>
+   ```
+   询问用户: "是否确认修改?(y/n)"
+
+4. 执行修改:
+   Issue: `gh issue edit $1 --title "<new-title>"`
+   PR: `gh pr edit $1 --title "<new-title>"`
+
+5. 告知用户:
+   ```
+   ✅ 标题已更新
+   原标题: <old>
+   新标题: <new>
+   ```
+
+**注意事项**:
+- 必须先分析内容,不要直接使用原标题
+- 确保用户确认后再执行修改

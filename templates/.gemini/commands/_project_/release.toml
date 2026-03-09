@@ -1,0 +1,61 @@
+description = "Execute version release workflow"
+prompt = """
+Please execute the release workflow for version {{args}}.
+
+<!-- TODO: Adapt to your project's release process -->
+
+**No build verification**: Only version updates and Git operations.
+**No auto-push**: All operations are local; user pushes manually.
+
+**Current status**:
+!{git status --short}
+!{git log -1 --oneline}
+!{git branch --show-current}
+
+Execute the following steps:
+
+1. **Parse and validate arguments**:
+   - Version = {{args}}, must match `X.Y.Z` format (X, Y, Z are non-negative integers)
+   - If format is invalid, error and exit: "Version format incorrect, expected X.Y.Z (e.g., 1.2.3)"
+
+2. **Verify clean workspace**:
+   - If `git status --short` has output (uncommitted changes), error and exit
+   - Workspace must be clean to continue
+
+3. **Update version references**:
+   <!-- TODO: Replace with your project's version update steps -->
+   - Search for version references in project files and update them
+   - Common files: pom.xml, package.json, README.md, setup.py, version.go
+   - **Exclude directories**: `.agents/`, `.ai-workspace/`, `.claude/`, `.codex/`, `.gemini/`, `.opencode/`
+   - Verify no references were missed after replacement
+
+4. **Create Release commit**:
+   - Use `run_shell_command`: `git add -A && git commit -m "chore: release v{version}"`
+
+5. **Create tag**:
+   - Use `run_shell_command`: `git tag v{version}`
+
+6. **Output summary**:
+   Output complete release summary including:
+   - Release version, commit hash, tag
+   - Number of files updated
+   - Manual post-steps:
+     * `git push origin v{version}`
+     * `git push origin <current-branch>`
+     * (Optional) Generate Release Notes:
+       - Claude Code / OpenCode: `/create-release-note {version}`
+       - Gemini CLI: `/{project}:create-release-note {version}`
+       - Codex CLI: `/prompts:{project}-create-release-note {version}`
+
+**Error handling**:
+- Invalid version format → prompt correct format and exit
+- Dirty workspace → prompt to commit or stash first
+- Git operation failure → show error, suggest manual handling
+
+**Rollback** (if something went wrong):
+```
+git tag -d v{version}
+git reset --soft HEAD~1
+git checkout -- .
+```
+"""

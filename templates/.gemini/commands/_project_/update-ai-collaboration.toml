@@ -1,0 +1,41 @@
+description = "Update project AI collaboration infrastructure by re-rendering latest templates/"
+prompt = """
+Update the current project's AI collaboration infrastructure to match the latest ai-collaboration-installer templates.
+
+Steps:
+
+1. **Read project config**:
+   - Read `collaborator.json` from project root.
+   - Extract: source, project, org, language, modules, templateSource, files.
+
+2. **Locate and refresh template source**:
+   - If `source` is "self", use current repository.
+   - Otherwise, run `git -C ~/.ai-collaboration-installer pull` to fetch latest templates, then read from `~/.ai-collaboration-installer/`.
+   - Resolve the template root from `templateSource` (default: `templates/`).
+   - If `~/.ai-collaboration-installer/` does not exist, report error and stop.
+
+3. **Determine update scope**:
+   - Only process files belonging to modules listed in `collaborator.json.modules`.
+
+4. **Process managed files**:
+   - Render from `{templateSource}`, select language version, and replace `{project}` / `{org}` / `_project_`.
+   - Overwrite existing files. Create new template files. Flag removed files.
+
+5. **Process merged files** (AI intelligent merge):
+   - Render the latest template version. If the local file does not exist, write the rendered template directly (first-time setup).
+   - Otherwise, compare with the current local file. Identify template standard sections vs user customizations.
+   - Update template sections, preserve user customizations.
+   - When in doubt, preserve user content. Never silently delete user-added content.
+
+6. **Process ejected files**: skip if local file exists; render from template once if local file does not exist (first-time setup).
+
+7. **Update collaborator.json**:
+   - Refresh `templateVersion`.
+   - Keep `templateSource` unchanged unless the user explicitly wants a different template tree.
+
+8. **Sync Codex prompts**: if `.codex/scripts/install-prompts.sh` exists, run it to sync commands to `~/.codex/prompts/`.
+
+9. **Output report**: managed/merged/ejected file status.
+
+**STOP**: Do not make other changes to the project.
+"""

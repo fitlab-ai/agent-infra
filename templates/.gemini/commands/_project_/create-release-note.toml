@@ -1,0 +1,124 @@
+description = "Auto-generate structured Release Notes from PRs/commits, optionally create GitHub Draft Release"
+prompt = """
+Please generate Release Notes for version {{args}}.
+
+Automatically collect change information from PRs, commits, and Issues, classify by module and type, and generate Release Notes conforming to the project format. Supports creating GitHub Draft Release. For x.y.0 versions, supports merging previously published release notes from the prior minor series.
+
+**Current status**:
+!{git tag --sort=-v:refname | head -10}
+!{git branch --show-current}
+
+Steps 1-3 are common steps. Step 3 branches based on version type:
+- **Merge path** (PATCH == 0): Steps 4-7 → skip to Step 14
+- **Regular path** (PATCH > 0): Steps 8-13 → continue to Step 14
+Steps 14-15 are common steps.
+
+Execute the following steps:
+
+1. **Parse arguments**:
+   - Extract from {{args}}, two forms supported:
+     - Single: `<version>` — current version
+     - Double: `<version> <prev-version>` — current and previous version
+   - Must match `X.Y.Z` format (X, Y, Z are non-negative integers)
+   - If invalid, error: "Version format incorrect, expected X.Y.Z (e.g., 3.6.3)"
+
+2. **Determine version range**:
+   - Current tag: `v<version>`
+   - Previous tag detection (only when `<prev-version>` not specified):
+     - Use `run_shell_command`: `git tag --sort=-v:refname`
+     - If PATCH > 0: find previous tag in same minor series
+     - If PATCH == 0: find last tag of previous minor series
+   - Verify tags exist: `git rev-parse v<version>` and `git rev-parse v<prev-version>`
+
+3. **Determine version type and choose path**:
+   - If PATCH == 0 → take **Merge path**, start from Step 4
+   - If PATCH > 0 → take **Regular path**, start from Step 8
+
+--- Merge Path (PATCH == 0, x.y.0 versions) ---
+
+4. **Find all published releases from previous minor series**:
+   - Use `run_shell_command`: `gh release list --limit 50 --json tagName,isDraft,isPrerelease`
+   - Filter entries with tagName starting with `vX.(Y-1).`, isDraft==false, isPrerelease==false
+   - If no published releases found, prompt user and fall back to Regular path (Step 8)
+
+5. **Get release body for each version in ascending order**:
+   - For each release tag: `gh release view v<tag> --json body --jq .body`
+
+6. **Merge all release bodies**:
+   - Concatenate in version order
+   - Merge same-platform same-type entries
+   - Deduplicate Contributors (merge all ❤️ Contributors, sort by contribution count descending)
+
+7. **Generate Overview**:
+   - x.y.0 always treated as Major release
+   - Add 🌟 Overview summary at top (2-3 sentences on core themes and highlights)
+   - Add 🚀 Features Overview per platform (3-5 key feature highlights)
+   - **After completion, skip to Step 14**
+
+--- Regular Path (PATCH > 0) ---
+
+8. **Collect merged PRs**:
+   - Get date range between tags:
+     - `git log v<prev-version> --format=%aI -1`
+     - `git log v<version> --format=%aI -1`
+   - Get target branch (format: X.Y.x)
+   - Use `run_shell_command`: `gh pr list --state merged --base <branch> --json number,title,body,author,labels,mergedAt,url --limit 200 --search "merged:YYYY-MM-DD..YYYY-MM-DD"`
+   - Supplement: `git log v<prev-version>..v<version> --format="%H %s" --no-merges`
+   - Find commits not associated with any PR
+
+9. **Collect related Issues**:
+   - Extract from PR body: `Closes #N`, `Fixes #N`, `Resolves #N` (case-insensitive)
+   - Use `run_shell_command`: `gh issue view <N> --json number,title,labels,url`
+
+10. **Classify — Group by module**:
+    Determine module by priority:
+    - Module tag in PR title `[module]`
+    - Conventional commit scope `feat(module):`
+    - PR changed file paths (`gh pr view <N> --json files`)
+    - Default to main module
+
+11. **Classify — Group by type**:
+    - feat/perf/refactor/chore(deps)/dependency upgrades → ✨ Enhancement
+    - fix → ✅ Bugfix
+    - docs → 📚 Documentation (merge into Enhancement if fewer than 3 items)
+
+12. **Determine release level**:
+    - Major release (merged PRs > 15): Generate 🌟 Overview + 🚀 Features Overview per platform
+    - Regular release: List items directly without Overview
+
+13. **Generate Release Notes**:
+    Output markdown following project format:
+    ```
+    ## {Platform/Module Name}
+    ### ✨ Enhancement
+    - [{scope}] Description by @author in [#N](url)
+    ### ✅ Bugfix
+    - [{scope}] Description by @author in [#N](url)
+    ## ❤️ Contributors
+    @contributor1, @contributor2
+    ```
+    Format rules:
+    - Item format: `- [module] Description by @author1 and @author2 in [#N](url)`
+    - Issue + PR: `in [#Issue](issue-url) and [#PR](pr-url)`
+    - Description: prefer PR title, remove type(scope): prefix, capitalize first letter
+    - Contributors: deduplicated, sorted by contribution count descending
+    - Empty platforms: omit
+
+--- Common Steps ---
+
+14. **Present and confirm**:
+    Display complete release notes for user review. Ask:
+    - Whether adjustments are needed
+    - Whether to create GitHub Draft Release
+
+15. **Create Draft Release**:
+    After user confirmation:
+    `gh release create v<version> --title "v<version>" --notes-file /tmp/release-notes-v<version>.md --target <release-branch-or-tag> --draft`
+
+**Error handling**:
+- Invalid version format → prompt correct format and exit
+- Tag not found → prompt to confirm tag exists
+- gh CLI not installed or authenticated → prompt installation/authentication
+- No merged PRs → prompt to check tags and branches
+- x.y.0 no published releases → fall back to Regular path
+"""

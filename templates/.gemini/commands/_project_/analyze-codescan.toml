@@ -1,0 +1,41 @@
+description = "Analyze Code Scanning alert and create task"
+prompt = """
+Please analyze Code Scanning (CodeQL) alert #{{args}}.
+
+**Pre-check**:
+- Check if a task already exists for this alert (grep "codescan_alert_number: {{args}}").
+
+Execute the following steps:
+
+1. **Fetch information**:
+   - Get repo info: `gh repo view --json owner,name`.
+   - Get alert details: `gh api repos/:owner/:repo/code-scanning/alerts/{{args}}`.
+
+2. **Create task**:
+   - If no existing task, create `.ai-workspace/active/TASK-{timestamp}/`.
+   - Create `task.md` (record severity, rule_id, tool).
+
+3. **Analyze**:
+   - Locate the source file and line number from location.
+   - Read the source code context around the alert.
+   - Analyze why the code triggered the rule.
+   - Assess risk (exploitability, attack vectors).
+
+4. **Output document**:
+   - Create `analysis.md` (alert details, source analysis, risk assessment, fix recommendations).
+
+5. **Update status**: current_step: security-analysis.
+
+6. **Inform user**:
+   - Output analysis summary.
+   - Next step - design remediation plan:
+     - Claude Code / OpenCode: `/plan-task {task-id}`
+     - Gemini CLI: `/{project}:plan-task {task-id}`
+     - Codex CLI: `/prompts:{project}-plan-task {task-id}`
+   - If false positive, close the alert:
+     - Claude Code / OpenCode: `/close-codescan {{args}}`
+     - Gemini CLI: `/{project}:close-codescan {{args}}`
+     - Codex CLI: `/prompts:{project}-close-codescan {{args}}`
+
+**Note**: Critical/High -> handle immediately. Medium -> plan to fix. Low -> may defer.
+"""

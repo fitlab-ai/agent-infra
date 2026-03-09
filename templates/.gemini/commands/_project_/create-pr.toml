@@ -1,0 +1,46 @@
+description = "Create Pull Request"
+prompt = """
+Please create a Pull Request.
+
+**User-specified target branch**: {{args}}
+
+**Current status**:
+!{git status --short}
+!{git branch --show-current}
+!{git log --oneline --decorate --first-parent -20}
+
+**Recent PRs**:
+!{gh pr list --limit 3 --state merged --json number,title,body 2>/dev/null || echo "No recent PRs"}
+
+Execute the following steps:
+
+1. **Preparation**:
+   - Read `.github/PULL_REQUEST_TEMPLATE.md` (if exists).
+   - Confirm current branch is pushed to remote. If not, run `git push -u origin HEAD`.
+
+2. **Generate PR content**:
+   - Title: `[module] short description`
+   - Body: Fill in based on template and recent commits.
+   - Append: `🤖 Generated with Gemini CLI`
+
+3. **Create PR**:
+   - Use `run_shell_command` to execute `gh pr create`.
+   - Specify `--base`:
+     - If user specified a target branch ({{args}} is not empty), use that value
+     - If not specified, infer from current branch and git log:
+       - Currently on a core branch (main or major.minor.x format like 3.6.x) → target is current branch
+       - Currently on a feature branch → find nearest parent core branch from log markers
+       - Cannot determine → ask user
+
+4. **Inform user**:
+   - Output PR link.
+   - Suggest next steps:
+     - If in a task workflow, sync progress:
+       - Claude Code / OpenCode: `/sync-pr {task-id}`
+       - Gemini CLI: `/{project}:sync-pr {task-id}`
+       - Codex CLI: `/prompts:{project}-sync-pr {task-id}`
+     - Or mark task complete:
+       - Claude Code / OpenCode: `/complete-task {task-id}`
+       - Gemini CLI: `/{project}:complete-task {task-id}`
+       - Codex CLI: `/prompts:{project}-complete-task {task-id}`
+"""

@@ -1,0 +1,44 @@
+description = "Mark task completed and archive"
+prompt = """
+Please mark task {{args}} as completed and archive it.
+
+**Pre-checks**:
+- Confirm code has been reviewed and approved.
+- Confirm code has been committed (Git).
+- Confirm tests pass.
+
+**Task status**:
+!{if [ -d .ai-workspace/active/{{args}} ]; then echo "Active"; else echo "Not Active"; fi}
+
+Execute the following steps:
+
+1. **Verify task**:
+   - Check file completeness under `.ai-workspace/active/{{args}}/` (analysis, plan, implementation, review).
+   - If task is not in active directory, stop execution.
+
+2. **Update task metadata**:
+   - Modify `task.md`:
+     - status: completed
+     - current_step: finalize
+     - completed_at: current time
+   - Append "Task Completion Summary" to `task.md` (including completion time, deliverables list).
+
+3. **Archive task**:
+   - Use `run_shell_command` to create `.ai-workspace/completed` directory (if not exists).
+   - Use `run_shell_command` to move task directory from `active` to `completed`.
+     - `mv .ai-workspace/active/{{args}} .ai-workspace/completed/`
+
+4. **Sync (optional)**:
+   - If linked to Issue/PR, prompt user to sync.
+
+5. **Inform user**:
+   - Task archived to `.ai-workspace/completed/{{args}}/`.
+   - List deliverables.
+   - Suggest next steps:
+     - If there are other pending tasks:
+       - Claude Code / OpenCode: `/check-task {task-id}`
+       - Gemini CLI: `/{project}:check-task {task-id}`
+       - Codex CLI: `/prompts:{project}-check-task {task-id}`
+
+**Note**: Only execute this after truly completing all work.
+"""
