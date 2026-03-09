@@ -1,0 +1,47 @@
+{
+  "version": "1.0.0",
+  "project": "ai-collaboration-installer",
+  "org": "fitlab-ai",
+  "language": "zh-CN",
+  "license": "MIT",
+  "templateSource": "templates/",
+  "templateVersion": "1.0.0",
+  "modules": ["ai", "github"],
+  "files": {
+    "managed": [
+      ".mailmap",
+      ".editorconfig",
+      ".agents/workflows/",
+      ".agents/skills/",
+      ".agents/templates/",
+      ".claude/commands/",
+      ".codex/commands/",
+      ".codex/scripts/",
+      ".gemini/commands/",
+      ".opencode/commands/",
+      ".github/ISSUE_TEMPLATE/",
+      ".github/workflows/pr-title-check.yml",
+      ".github/PULL_REQUEST_TEMPLATE.md",
+      ".ai-workspace/README.md"
+    ],
+    "merged": [
+      "AGENTS.md",
+      "CONTRIBUTING.md",
+      "SECURITY.md",
+      ".claude/CLAUDE.md",
+      ".claude/project-rules.md",
+      ".agents/README.md",
+      ".agents/QUICKSTART.md",
+      ".gitignore",
+      "*/test.*",
+      "*/test-integration.*",
+      "*/release.*",
+      "*/upgrade-dependency.*"
+    ],
+    "ejected": [
+      "README.md",
+      "README.zh-CN.md",
+      "License.txt"
+    ]
+  }
+}
