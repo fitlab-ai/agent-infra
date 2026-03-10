@@ -1,5 +1,5 @@
 ---
-description: Update project AI collaboration config by re-rendering latest templates/
+description: "Update project AI collaboration config by re-rendering latest templates/"
 ---
 
 Read and execute the update-ai-collaboration skill from `.agents/skills/update-ai-collaboration/SKILL.md`.

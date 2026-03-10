@@ -1,5 +1,6 @@
 ---
 description: "Review task implementation and output code review report"
+usage: "/review-task <task-id>"
 ---
 
 Read and execute the review-task skill from `.agents/skills/review-task/SKILL.md`.

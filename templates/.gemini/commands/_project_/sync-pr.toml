@@ -1,5 +1,7 @@
 description = "Sync task progress to Pull Request comment"
 prompt = """
+Sync task {{args}} to PR.
+
 Read and execute the sync-pr skill from `.agents/skills/sync-pr/SKILL.md`.
 
 Follow all steps defined in the skill exactly.

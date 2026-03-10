@@ -1,5 +1,6 @@
 ---
 description: "查看任务的当前状态、工作流进度和上下文文件。这是只读操作，报告任务状态并建议 适当的下一步操作。当用户要求查看任务状态时触发。参数：task-id。"
+usage: "/check-task <task-id>"
 ---
 
 读取并执行 `.agents/skills/check-task/SKILL.md` 中的 check-task 技能。

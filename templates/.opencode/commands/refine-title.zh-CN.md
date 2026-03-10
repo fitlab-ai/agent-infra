@@ -1,6 +1,10 @@
 ---
 description: "深度分析 Issue 或 PR 内容，并将其标题重构为 Conventional Commits 格式。 当用户要求优化标题时触发。参数：issue 或 PR 编号。"
+agent: general
+subtask: false
 ---
+
+优化 #$1 的标题。
 
 读取并执行 `.agents/skills/refine-title/SKILL.md` 中的 refine-title 技能。
 

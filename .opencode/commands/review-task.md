@@ -1,6 +1,10 @@
 ---
 description: "审查任务实现代码并输出代码审查报告，按严重程度分类（Blocker / Major / Minor）。 当用户在实现完成后要求代码审查时触发。参数：task-id。"
+agent: general
+subtask: false
 ---
+
+审查任务 $1。
 
 读取并执行 `.agents/skills/review-task/SKILL.md` 中的 review-task 技能。
 

@@ -1,5 +1,7 @@
 description = "查看任务的当前状态、工作流进度和上下文文件。这是只读操作，报告任务状态并建议 适当的下一步操作。当用户要求查看任务状态时触发。参数：task-id。"
 prompt = """
+查看任务 {{args}} 的状态。
+
 读取并执行 `.agents/skills/check-task/SKILL.md` 中的 check-task 技能。
 
 严格按照技能中定义的所有步骤执行。

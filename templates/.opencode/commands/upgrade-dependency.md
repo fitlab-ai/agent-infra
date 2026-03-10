@@ -1,6 +1,10 @@
 ---
 description: "Upgrade dependency package to new version"
+agent: general
+subtask: false
 ---
+
+Upgrade dependency: $ARGUMENTS
 
 Read and execute the upgrade-dependency skill from `.agents/skills/upgrade-dependency/SKILL.md`.
 

@@ -1,5 +1,7 @@
 description = "Design technical solution and output implementation plan"
 prompt = """
+Design plan for task {{args}}.
+
 Read and execute the plan-task skill from `.agents/skills/plan-task/SKILL.md`.
 
 Follow all steps defined in the skill exactly.

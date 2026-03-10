@@ -1,6 +1,10 @@
 ---
 description: "Review task implementation and output code review report"
+agent: general
+subtask: false
 ---
+
+Review task $1.
 
 Read and execute the review-task skill from `.agents/skills/review-task/SKILL.md`.
 

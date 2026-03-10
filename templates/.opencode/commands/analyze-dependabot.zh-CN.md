@@ -1,6 +1,10 @@
 ---
 description: "分析 Dependabot 安全告警，评估安全风险，并创建修复任务。 当用户要求分析 Dependabot 告警时触发。参数：告警编号。"
+agent: general
+subtask: false
 ---
+
+分析 Dependabot 告警 #$1。
 
 读取并执行 `.agents/skills/analyze-dependabot/SKILL.md` 中的 analyze-dependabot 技能。
 

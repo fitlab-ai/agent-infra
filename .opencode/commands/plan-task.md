@@ -1,6 +1,10 @@
 ---
 description: "为任务设计技术方案并输出详细的实施计划。当用户要求为已完成需求分析的任务设计方案或技术计划时触发。 这是一个强制性的人工审查检查点。参数：task-id。"
+agent: general
+subtask: false
 ---
+
+为任务 $1 设计方案。
 
 读取并执行 `.agents/skills/plan-task/SKILL.md` 中的 plan-task 技能。
 

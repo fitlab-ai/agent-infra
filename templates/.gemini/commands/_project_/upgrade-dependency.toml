@@ -1,5 +1,7 @@
 description = "Upgrade dependency package to new version"
 prompt = """
+Upgrade dependency: {{args}}
+
 Read and execute the upgrade-dependency skill from `.agents/skills/upgrade-dependency/SKILL.md`.
 
 Follow all steps defined in the skill exactly.

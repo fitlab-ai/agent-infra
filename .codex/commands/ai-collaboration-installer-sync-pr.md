@@ -1,7 +1,10 @@
 ---
 description: "将任务处理进度同步到对应的 Pull Request 评论。 当用户要求同步进度到 PR 时触发。参数：task-id。"
+argument-hint: <task-id>
 usage: /prompts:ai-collaboration-installer-sync-pr
 ---
+
+同步任务 $1 到 PR。
 
 读取并执行 `.agents/skills/sync-pr/SKILL.md` 中的 sync-pr 技能。
 

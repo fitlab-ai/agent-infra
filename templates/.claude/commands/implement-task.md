@@ -1,5 +1,6 @@
 ---
 description: "Implement task based on technical plan and output implementation report"
+usage: "/implement-task <task-id>"
 ---
 
 Read and execute the implement-task skill from `.agents/skills/implement-task/SKILL.md`.

@@ -1,7 +1,10 @@
 ---
 description: "关闭 Dependabot 安全告警并提供有据可查的理由。 当用户要求关闭 Dependabot 告警时触发。参数：告警编号。"
+argument-hint: <alert-number>
 usage: /prompts:ai-collaboration-installer-close-dependabot
 ---
+
+关闭 Dependabot 告警 #$1。
 
 读取并执行 `.agents/skills/close-dependabot/SKILL.md` 中的 close-dependabot 技能。
 

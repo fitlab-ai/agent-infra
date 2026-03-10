@@ -1,5 +1,6 @@
 ---
 description: "Mark task as blocked and record blocking reason"
+usage: "/block-task <task-id> [reason]"
 ---
 
 Read and execute the block-task skill from `.agents/skills/block-task/SKILL.md`.

@@ -52,6 +52,133 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const commandSpecs = {
+  "analyze-codescan": {
+    usage: "<alert-number>",
+    hint: "<alert-number>",
+    en: "Analyze CodeQL alert #$1.",
+    zh: "分析 CodeQL 告警 #$1。"
+  },
+  "analyze-dependabot": {
+    usage: "<alert-number>",
+    hint: "<alert-number>",
+    en: "Analyze Dependabot alert #$1.",
+    zh: "分析 Dependabot 告警 #$1。"
+  },
+  "analyze-issue": {
+    usage: "<issue-number>",
+    hint: "<issue-number>",
+    en: "Analyze Issue #$1.",
+    zh: "分析 Issue #$1。"
+  },
+  "block-task": {
+    usage: "<task-id> [reason]",
+    hint: "<task-id> [reason]",
+    en: "Block task: $ARGUMENTS",
+    zh: "阻塞任务：$ARGUMENTS"
+  },
+  "check-task": {
+    usage: "<task-id>",
+    hint: "<task-id>",
+    en: "Check status of task $1.",
+    zh: "查看任务 $1 的状态。"
+  },
+  commit: {},
+  "close-codescan": {
+    usage: "<alert-number>",
+    hint: "<alert-number>",
+    en: "Close CodeQL alert #$1.",
+    zh: "关闭 CodeQL 告警 #$1。"
+  },
+  "close-dependabot": {
+    usage: "<alert-number>",
+    hint: "<alert-number>",
+    en: "Close Dependabot alert #$1.",
+    zh: "关闭 Dependabot 告警 #$1。"
+  },
+  "complete-task": {
+    usage: "<task-id>",
+    hint: "<task-id>",
+    en: "Complete task $1.",
+    zh: "完成任务 $1。"
+  },
+  "create-pr": {
+    usage: "[target-branch]",
+    hint: "[target-branch]",
+    en: "Create PR: $ARGUMENTS",
+    zh: "创建 PR：$ARGUMENTS"
+  },
+  "create-release-note": {
+    usage: "<ver> [prev]",
+    hint: "<ver> [prev]",
+    en: "Generate release note: $ARGUMENTS",
+    zh: "生成发布说明：$ARGUMENTS"
+  },
+  "create-task": {
+    usage: "<description>",
+    hint: "<description>",
+    en: "Task description: $ARGUMENTS",
+    zh: "任务描述：$ARGUMENTS"
+  },
+  "implement-task": {
+    usage: "<task-id>",
+    hint: "<task-id>",
+    en: "Implement task $1.",
+    zh: "实施任务 $1。"
+  },
+  "plan-task": {
+    usage: "<task-id>",
+    hint: "<task-id>",
+    en: "Design plan for task $1.",
+    zh: "为任务 $1 设计方案。"
+  },
+  "refine-task": {
+    usage: "<task-id>",
+    hint: "<task-id>",
+    en: "Refine task $1.",
+    zh: "修复任务 $1 的审查问题。"
+  },
+  "refine-title": {
+    usage: "<number>",
+    hint: "<number>",
+    en: "Refine title of #$1.",
+    zh: "优化 #$1 的标题。"
+  },
+  release: {
+    usage: "<version>",
+    hint: "<version>",
+    en: "Release version $1.",
+    zh: "发布版本 $1。"
+  },
+  "review-task": {
+    usage: "<task-id>",
+    hint: "<task-id>",
+    en: "Review task $1.",
+    zh: "审查任务 $1。"
+  },
+  "sync-issue": {
+    usage: "<task-id>",
+    hint: "<task-id>",
+    en: "Sync task $1 to Issue.",
+    zh: "同步任务 $1 到 Issue。"
+  },
+  "sync-pr": {
+    usage: "<task-id>",
+    hint: "<task-id>",
+    en: "Sync task $1 to PR.",
+    zh: "同步任务 $1 到 PR。"
+  },
+  test: {},
+  "test-integration": {},
+  "update-ai-collaboration": {},
+  "upgrade-dependency": {
+    usage: "<pkg> <from> <to>",
+    hint: "<pkg> <from> <to>",
+    en: "Upgrade dependency: $ARGUMENTS",
+    zh: "升级依赖：$ARGUMENTS"
+  }
+};
+
 test("collaborator.json declares templates as the template source", () => {
   const collaborator = JSON.parse(read("collaborator.json"));
 
@@ -145,6 +272,7 @@ test("skill command templates use thin adapter bodies", () => {
   const skills = listSkillNames();
 
   skills.forEach((skill) => {
+    const spec = commandSpecs[skill] || {};
     const markdownTargets = [
       `templates/.claude/commands/${skill}.md`,
       `templates/.claude/commands/${skill}.zh-CN.md`,
@@ -161,17 +289,57 @@ test("skill command templates use thin adapter bodies", () => {
 
     markdownTargets.forEach((target) => {
       const content = read(target);
+      const isChinese = target.endsWith(".zh-CN.md");
+      const contextLine = isChinese ? spec.zh : spec.en;
 
       assert.match(content, skillPathPattern, `${target} should reference the skill file`);
       assert.doesNotMatch(content, /^name:/m, `${target} should not declare a name field`);
 
       if (target.includes("/.codex/")) {
         assert.match(content, /^usage: \/prompts:/m, `${target} should declare Codex usage`);
+        if (spec.hint) {
+          assert.match(
+            content,
+            new RegExp(`^argument-hint: ${escapeRegExp(spec.hint)}$`, "m"),
+            `${target} should declare the correct argument hint`
+          );
+        } else {
+          assert.doesNotMatch(content, /^argument-hint:/m, `${target} should not declare an argument hint`);
+        }
       } else {
+        assert.doesNotMatch(content, /^argument-hint:/m, `${target} should not declare an argument hint`);
+      }
+
+      if (target.includes("/.claude/")) {
+        if (spec.usage) {
+          assert.match(
+            content,
+            new RegExp(`^usage: "${escapeRegExp(`/${skill} ${spec.usage}`)}"$`, "m"),
+            `${target} should declare the Claude usage`
+          );
+        } else {
+          assert.doesNotMatch(content, /^usage:/m, `${target} should not declare usage`);
+        }
+      } else if (!target.includes("/.codex/")) {
         assert.doesNotMatch(content, /^usage:/m, `${target} should not declare usage`);
       }
 
-      if (target.endsWith(".zh-CN.md")) {
+      if (target.includes("/.opencode/")) {
+        assert.match(content, /^agent: general$/m, `${target} should declare the OpenCode agent`);
+        assert.match(content, /^subtask: false$/m, `${target} should declare the OpenCode subtask flag`);
+      }
+
+      if (contextLine && !target.includes("/.claude/")) {
+        assert.match(
+          content,
+          new RegExp(escapeRegExp(contextLine)),
+          `${target} should include the command argument context`
+        );
+      } else if (!contextLine) {
+        assert.doesNotMatch(content, /\$1|\$ARGUMENTS/, `${target} should not include argument placeholders`);
+      }
+
+      if (isChinese) {
         assert.match(content, /读取并执行/, `${target} should use the Chinese thin adapter body`);
         assert.match(content, /严格按照技能中定义的所有步骤执行/, `${target} should include the Chinese execution instruction`);
       } else {
@@ -182,12 +350,26 @@ test("skill command templates use thin adapter bodies", () => {
 
     tomlTargets.forEach((target) => {
       const content = read(target);
+      const isChinese = target.endsWith(".zh-CN.toml");
+      const contextLine = (isChinese ? spec.zh : spec.en)
+        ?.replace(/\$1/g, "{{args}}")
+        .replace(/\$ARGUMENTS/g, "{{args}}");
 
       assert.match(content, /^description = "/, `${target} should declare a TOML description`);
       assert.match(content, /^prompt = """$/m, `${target} should use a multiline TOML prompt`);
       assert.match(content, skillPathPattern, `${target} should reference the skill file`);
 
-      if (target.endsWith(".zh-CN.toml")) {
+      if (contextLine) {
+        assert.match(
+          content,
+          new RegExp(escapeRegExp(contextLine)),
+          `${target} should include the Gemini argument context`
+        );
+      } else {
+        assert.doesNotMatch(content, /\{\{args\}\}/, `${target} should not include Gemini arguments`);
+      }
+
+      if (isChinese) {
         assert.match(content, /读取并执行/, `${target} should use the Chinese thin adapter body`);
         assert.match(content, /严格按照技能中定义的所有步骤执行/, `${target} should include the Chinese execution instruction`);
       } else {

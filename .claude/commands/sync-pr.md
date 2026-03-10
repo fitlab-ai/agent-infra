@@ -1,5 +1,6 @@
 ---
 description: "将任务处理进度同步到对应的 Pull Request 评论。 当用户要求同步进度到 PR 时触发。参数：task-id。"
+usage: "/sync-pr <task-id>"
 ---
 
 读取并执行 `.agents/skills/sync-pr/SKILL.md` 中的 sync-pr 技能。

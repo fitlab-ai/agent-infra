@@ -1,5 +1,7 @@
 ---
 description: "Commit current changes to Git"
+agent: general
+subtask: false
 ---
 
 Read and execute the commit skill from `.agents/skills/commit/SKILL.md`.

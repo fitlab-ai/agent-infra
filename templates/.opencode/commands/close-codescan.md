@@ -1,6 +1,10 @@
 ---
 description: "Close Code Scanning alert with documented reason"
+agent: general
+subtask: false
 ---
+
+Close CodeQL alert #$1.
 
 Read and execute the close-codescan skill from `.agents/skills/close-codescan/SKILL.md`.
 

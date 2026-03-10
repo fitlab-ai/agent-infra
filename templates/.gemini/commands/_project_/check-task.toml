@@ -1,5 +1,7 @@
 description = "View task current status and progress"
 prompt = """
+Check status of task {{args}}.
+
 Read and execute the check-task skill from `.agents/skills/check-task/SKILL.md`.
 
 Follow all steps defined in the skill exactly.
