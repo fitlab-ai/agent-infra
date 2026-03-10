@@ -110,17 +110,7 @@ Set `templateVersion` to the template source's current commit SHA
 Keep `templateSource` unchanged unless the user explicitly wants to move
 to a different template tree.
 
-## Step 8: Sync Codex prompts to global directory
-
-If `.codex/scripts/install-prompts.sh` exists, run it to sync all Codex
-commands from `.codex/commands/` to `~/.codex/prompts/`. This ensures
-newly rendered commands are immediately available in Codex CLI.
-
-```bash
-bash .codex/scripts/install-prompts.sh
-```
-
-## Step 9: Verify and output report
+## Step 8: Verify and output report
 
 **Idempotency check**: Running this command on an already up-to-date project
 should produce zero or very few file changes. If managed file changes are

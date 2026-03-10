@@ -48,7 +48,7 @@ CLI 会交互式收集项目信息（名称、组织、语言等），安装 `up
 | TUI | 命令 |
 |-----|------|
 | Claude Code | `/update-ai-collaboration` |
-| Codex | `/prompts:{project}-update-ai-collaboration` |
+| Codex | `$update-ai-collaboration` |
 | Gemini CLI | `/{project}:update-ai-collaboration` |
 | OpenCode | `/update-ai-collaboration` |
 

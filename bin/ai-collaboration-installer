@@ -137,13 +137,11 @@ cmd_init() {
   if [ "$LANGUAGE" = "zh-CN" ]; then
     SKILL_FILE="SKILL.zh-CN.md"
     CLAUDE_SRC="update-ai-collaboration.zh-CN.md"
-    CODEX_SRC="_project_-update-ai-collaboration.zh-CN.md"
     GEMINI_SRC="update-ai-collaboration.zh-CN.toml"
     OPENCODE_SRC="update-ai-collaboration.zh-CN.md"
   else
     SKILL_FILE="SKILL.md"
     CLAUDE_SRC="update-ai-collaboration.md"
-    CODEX_SRC="_project_-update-ai-collaboration.md"
     GEMINI_SRC="update-ai-collaboration.toml"
     OPENCODE_SRC="update-ai-collaboration.md"
   fi
@@ -151,7 +149,6 @@ cmd_init() {
   # create directories
   mkdir -p ".agents/skills/update-ai-collaboration"
   mkdir -p ".claude/commands"
-  mkdir -p ".codex/commands"
   mkdir -p ".gemini/commands/$PROJECT"
   mkdir -p ".opencode/commands"
 
@@ -183,23 +180,6 @@ cmd_init() {
     "$TEMPLATE_DIR/.claude/commands/$CLAUDE_SRC" \
     ".claude/commands/update-ai-collaboration.md"
   ok "Installed .claude/commands/update-ai-collaboration.md"
-
-  # install Codex command (replace _project_ in filename)
-  render_file \
-    "$TEMPLATE_DIR/.codex/commands/$CODEX_SRC" \
-    ".codex/commands/${PROJECT}-update-ai-collaboration.md"
-  ok "Installed .codex/commands/${PROJECT}-update-ai-collaboration.md"
-
-  # install Codex install-prompts.sh script
-  mkdir -p ".codex/scripts"
-  cp "$INSTALL_DIR/.codex/scripts/install-prompts.sh" ".codex/scripts/install-prompts.sh" 2>/dev/null \
-    || cp "$TEMPLATE_DIR/.codex/scripts/install-prompts.sh" ".codex/scripts/install-prompts.sh"
-  chmod +x ".codex/scripts/install-prompts.sh"
-  ok "Installed .codex/scripts/install-prompts.sh"
-
-  # sync Codex commands to global ~/.codex/prompts/
-  bash ".codex/scripts/install-prompts.sh" > /dev/null
-  ok "Synced Codex prompts to ~/.codex/prompts/"
 
   # install Gemini command (replace _project_ in directory name)
   render_file \
@@ -234,8 +214,6 @@ cmd_init() {
       ".agents/skills/",
       ".agents/templates/",
       ".claude/commands/",
-      ".codex/commands/",
-      ".codex/scripts/",
       ".gemini/commands/",
       ".opencode/commands/",
       ".github/ISSUE_TEMPLATE/",
@@ -275,7 +253,7 @@ ENDJSON
   echo ""
   echo "    Claude Code / OpenCode:  /update-ai-collaboration"
   echo "    Gemini CLI:              /$PROJECT:update-ai-collaboration"
-  echo "    Codex CLI:               /prompts:${PROJECT}-update-ai-collaboration"
+  echo "    Codex CLI:               \$update-ai-collaboration"
   echo ""
   echo "  This will render all templates and set up the full"
   echo "  AI collaboration infrastructure."

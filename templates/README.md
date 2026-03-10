@@ -48,7 +48,7 @@ Open the project in any AI TUI and run `update-ai-collaboration`:
 | TUI | Command |
 |-----|---------|
 | Claude Code | `/update-ai-collaboration` |
-| Codex | `/prompts:{project}-update-ai-collaboration` |
+| Codex | `$update-ai-collaboration` |
 | Gemini CLI | `/{project}:update-ai-collaboration` |
 | OpenCode | `/update-ai-collaboration` |
 

@@ -96,16 +96,7 @@ description: >
 更新 `templateVersion` 为模板源当前版本（步骤 2 记录的 commit SHA）。
 除非用户明确要求迁移模板目录，否则保持 `templateSource` 不变。
 
-## 步骤 8：同步 Codex prompts 到全局目录
-
-如果 `.codex/scripts/install-prompts.sh` 存在，执行它将 `.codex/commands/`
-下的所有命令同步到 `~/.codex/prompts/`，确保新渲染的命令在 Codex CLI 中立即可用。
-
-```bash
-bash .codex/scripts/install-prompts.sh
-```
-
-## 步骤 9：验证与输出报告
+## 步骤 8：验证与输出报告
 
 **幂等性检查**：对已经是最新状态的项目执行此命令，预期产生极少或零文件变更。
 如果 managed 文件变更数量超出预期，在提交前暂停，用 `git diff` 抽查变更方向是否正确

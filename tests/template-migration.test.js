@@ -43,7 +43,6 @@ function buildCommandSyncFiles(project) {
   return listSkillNames().flatMap((skill) => [
     [`.claude/commands/${skill}.md`, `templates/.claude/commands/${skill}.md`],
     [`.opencode/commands/${skill}.md`, `templates/.opencode/commands/${skill}.md`],
-    [`.codex/commands/${project}-${skill}.md`, `templates/.codex/commands/_project_-${skill}.md`],
     [`.gemini/commands/${project}/${skill}.toml`, `templates/.gemini/commands/_project_/${skill}.toml`]
   ]);
 }
@@ -55,116 +54,97 @@ function escapeRegExp(value) {
 const commandSpecs = {
   "analyze-codescan": {
     usage: "<alert-number>",
-    hint: "<alert-number>",
     en: "Analyze CodeQL alert #$1.",
     zh: "分析 CodeQL 告警 #$1。"
   },
   "analyze-dependabot": {
     usage: "<alert-number>",
-    hint: "<alert-number>",
     en: "Analyze Dependabot alert #$1.",
     zh: "分析 Dependabot 告警 #$1。"
   },
   "analyze-issue": {
     usage: "<issue-number>",
-    hint: "<issue-number>",
     en: "Analyze Issue #$1.",
     zh: "分析 Issue #$1。"
   },
   "block-task": {
     usage: "<task-id> [reason]",
-    hint: "<task-id> [reason]",
     en: "Block task: $ARGUMENTS",
     zh: "阻塞任务：$ARGUMENTS"
   },
   "check-task": {
     usage: "<task-id>",
-    hint: "<task-id>",
     en: "Check status of task $1.",
     zh: "查看任务 $1 的状态。"
   },
   commit: {},
   "close-codescan": {
     usage: "<alert-number>",
-    hint: "<alert-number>",
     en: "Close CodeQL alert #$1.",
     zh: "关闭 CodeQL 告警 #$1。"
   },
   "close-dependabot": {
     usage: "<alert-number>",
-    hint: "<alert-number>",
     en: "Close Dependabot alert #$1.",
     zh: "关闭 Dependabot 告警 #$1。"
   },
   "complete-task": {
     usage: "<task-id>",
-    hint: "<task-id>",
     en: "Complete task $1.",
     zh: "完成任务 $1。"
   },
   "create-pr": {
     usage: "[target-branch]",
-    hint: "[target-branch]",
     en: "Create PR: $ARGUMENTS",
     zh: "创建 PR：$ARGUMENTS"
   },
   "create-release-note": {
     usage: "<ver> [prev]",
-    hint: "<ver> [prev]",
     en: "Generate release note: $ARGUMENTS",
     zh: "生成发布说明：$ARGUMENTS"
   },
   "create-task": {
     usage: "<description>",
-    hint: "<description>",
     en: "Task description: $ARGUMENTS",
     zh: "任务描述：$ARGUMENTS"
   },
   "implement-task": {
     usage: "<task-id>",
-    hint: "<task-id>",
     en: "Implement task $1.",
     zh: "实施任务 $1。"
   },
   "plan-task": {
     usage: "<task-id>",
-    hint: "<task-id>",
     en: "Design plan for task $1.",
     zh: "为任务 $1 设计方案。"
   },
   "refine-task": {
     usage: "<task-id>",
-    hint: "<task-id>",
     en: "Refine task $1.",
     zh: "修复任务 $1 的审查问题。"
   },
   "refine-title": {
     usage: "<number>",
-    hint: "<number>",
     en: "Refine title of #$1.",
     zh: "优化 #$1 的标题。"
   },
   release: {
     usage: "<version>",
-    hint: "<version>",
     en: "Release version $1.",
     zh: "发布版本 $1。"
   },
   "review-task": {
     usage: "<task-id>",
-    hint: "<task-id>",
     en: "Review task $1.",
     zh: "审查任务 $1。"
   },
   "sync-issue": {
     usage: "<task-id>",
-    hint: "<task-id>",
     en: "Sync task $1 to Issue.",
     zh: "同步任务 $1 到 Issue。"
   },
   "sync-pr": {
     usage: "<task-id>",
-    hint: "<task-id>",
     en: "Sync task $1 to PR.",
     zh: "同步任务 $1 到 PR。"
   },
@@ -173,7 +153,6 @@ const commandSpecs = {
   "update-ai-collaboration": {},
   "upgrade-dependency": {
     usage: "<pkg> <from> <to>",
-    hint: "<pkg> <from> <to>",
     en: "Upgrade dependency: $ARGUMENTS",
     zh: "升级依赖：$ARGUMENTS"
   }
@@ -201,7 +180,6 @@ test("required template files were migrated into templates/", () => {
     "templates/.claude/settings.json",
     "templates/.claude/commands/update-ai-collaboration.md",
     "templates/.codex/README.md",
-    "templates/.codex/commands/_project_-update-ai-collaboration.md",
     "templates/.gemini/settings.json",
     "templates/.gemini/commands/_project_/update-ai-collaboration.toml",
     "templates/.opencode/README.md",
@@ -228,12 +206,10 @@ test("init-project files have been removed", () => {
   const removedFiles = [
     ".agents/skills/init-project/SKILL.md",
     ".claude/commands/init-project.md",
-    ".codex/commands/collaborator-init-project.md",
     ".gemini/commands/collaborator/init-project.toml",
     ".opencode/commands/init-project.md",
     "templates/.agents/skills/init-project/SKILL.md",
     "templates/.claude/commands/init-project.md",
-    "templates/.codex/commands/_project_-init-project.md",
     "templates/.gemini/commands/_project_/init-project.toml",
     "templates/.opencode/commands/init-project.md"
   ];
@@ -277,9 +253,7 @@ test("skill command templates use thin adapter bodies", () => {
       `templates/.claude/commands/${skill}.md`,
       `templates/.claude/commands/${skill}.zh-CN.md`,
       `templates/.opencode/commands/${skill}.md`,
-      `templates/.opencode/commands/${skill}.zh-CN.md`,
-      `templates/.codex/commands/_project_-${skill}.md`,
-      `templates/.codex/commands/_project_-${skill}.zh-CN.md`
+      `templates/.opencode/commands/${skill}.zh-CN.md`
     ];
     const tomlTargets = [
       `templates/.gemini/commands/_project_/${skill}.toml`,
@@ -294,21 +268,7 @@ test("skill command templates use thin adapter bodies", () => {
 
       assert.match(content, skillPathPattern, `${target} should reference the skill file`);
       assert.doesNotMatch(content, /^name:/m, `${target} should not declare a name field`);
-
-      if (target.includes("/.codex/")) {
-        assert.match(content, /^usage: \/prompts:/m, `${target} should declare Codex usage`);
-        if (spec.hint) {
-          assert.match(
-            content,
-            new RegExp(`^argument-hint: ${escapeRegExp(spec.hint)}$`, "m"),
-            `${target} should declare the correct argument hint`
-          );
-        } else {
-          assert.doesNotMatch(content, /^argument-hint:/m, `${target} should not declare an argument hint`);
-        }
-      } else {
-        assert.doesNotMatch(content, /^argument-hint:/m, `${target} should not declare an argument hint`);
-      }
+      assert.doesNotMatch(content, /^argument-hint:/m, `${target} should not declare an argument hint`);
 
       if (target.includes("/.claude/")) {
         if (spec.usage) {
@@ -320,7 +280,7 @@ test("skill command templates use thin adapter bodies", () => {
         } else {
           assert.doesNotMatch(content, /^usage:/m, `${target} should not declare usage`);
         }
-      } else if (!target.includes("/.codex/")) {
+      } else {
         assert.doesNotMatch(content, /^usage:/m, `${target} should not declare usage`);
       }
 
@@ -434,16 +394,16 @@ test("ai-collaboration-installer init generates seed files in a temp directory",
       "claude command should be installed"
     );
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".codex/commands/testproj-update-ai-collaboration.md")),
-      "codex command should be installed in project dir"
+      !fs.existsSync(path.join(tmpDir, ".codex/commands/testproj-update-ai-collaboration.md")),
+      "codex prompt adapter should not be installed"
     );
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".codex/scripts/install-prompts.sh")),
-      "codex install-prompts.sh should be installed"
+      !fs.existsSync(path.join(tmpDir, ".codex/scripts/install-prompts.sh")),
+      "codex prompt sync script should not be installed"
     );
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".codex/prompts/testproj-update-ai-collaboration.md")),
-      "codex prompt should be synced to global dir"
+      !fs.existsSync(path.join(tmpDir, ".codex/prompts/testproj-update-ai-collaboration.md")),
+      "codex prompt should not be synced to the global dir"
     );
     assert.ok(
       fs.existsSync(path.join(tmpDir, ".gemini/commands/testproj/update-ai-collaboration.toml")),
@@ -491,11 +451,15 @@ test("ai-collaboration-installer init rejects invalid input", () => {
   });
 });
 
-test("collaborator.json includes .codex/scripts/ in managed files", () => {
+test("collaborator.json excludes deprecated codex prompt paths", () => {
   const collaborator = JSON.parse(read("collaborator.json"));
   assert.ok(
-    collaborator.files.managed.includes(".codex/scripts/"),
-    ".codex/scripts/ should be in managed list"
+    !collaborator.files.managed.includes(".codex/commands/"),
+    ".codex/commands/ should not be in managed list"
+  );
+  assert.ok(
+    !collaborator.files.managed.includes(".codex/scripts/"),
+    ".codex/scripts/ should not be in managed list"
   );
 });
 

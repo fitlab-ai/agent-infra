@@ -15,8 +15,6 @@
       ".agents/skills/",
       ".agents/templates/",
       ".claude/commands/",
-      ".codex/commands/",
-      ".codex/scripts/",
       ".gemini/commands/",
       ".opencode/commands/",
       ".github/ISSUE_TEMPLATE/",
