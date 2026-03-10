@@ -41,7 +41,21 @@ description: >
 
 ## 步骤 4：处理 managed 文件
 
-对分类为 managed 的每个文件：
+对 managed 目录/路径下的每个模板文件，按以下顺序处理：
+
+### 4.0 排除 merged / ejected 文件（必须首先执行）
+
+遍历 managed 目录中的文件时，**逐个检查**该文件的目标相对路径是否匹配
+`files.merged` 或 `files.ejected` 中的任何条目（精确路径或 glob 模式）。
+**如果匹配，跳过该文件**，留给步骤 5 或步骤 6 处理。
+
+> **示例**：`.agents/skills/` 是 managed 目录，但 `files.merged` 包含
+> `.agents/skills/test/SKILL.*`。处理该目录时：
+> - `.agents/skills/commit/SKILL.md` → 不匹配任何 merged 模式 → **按 managed 处理**
+> - `.agents/skills/test/SKILL.md` → 匹配 `.agents/skills/test/SKILL.*` → **跳过，留给步骤 5**
+>
+> **常见错误**：先批量处理整个 managed 目录，再单独处理 merged 文件。
+> 这会导致 merged 文件被 managed 逻辑覆盖，用户定制内容（如已填充的 TODO）丢失。
 
 ### 4.1 语言选择
 

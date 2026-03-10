@@ -45,7 +45,23 @@ Match glob patterns against the file's relative path in the project.
 
 ## Step 4: Process managed files
 
-For each file classified as managed:
+For each template file under a managed directory/path, follow these sub-steps in order:
+
+### 4.0 Exclude merged / ejected files (MUST run first)
+
+When iterating files inside a managed directory, **check each file's target
+relative path** against every entry (exact path or glob pattern) in
+`files.merged` and `files.ejected`.
+**If it matches, skip the file** — it will be handled in Step 5 or Step 6.
+
+> **Example**: `.agents/skills/` is a managed directory, but `files.merged`
+> contains `.agents/skills/test/SKILL.*`. When processing that directory:
+> - `.agents/skills/commit/SKILL.md` → no merged match → **process as managed**
+> - `.agents/skills/test/SKILL.md` → matches `.agents/skills/test/SKILL.*` → **skip, leave for Step 5**
+>
+> **Common mistake**: batch-processing the entire managed directory first, then
+> handling merged files separately. This overwrites merged files with template
+> content, destroying user customizations (e.g., filled-in TODOs).
 
 ### 4.1 Language selection
 
