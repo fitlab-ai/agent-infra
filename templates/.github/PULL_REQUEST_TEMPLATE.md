@@ -101,6 +101,8 @@ Do not create a Pull Request without creating an issue first.
 
 - [ ] 我已经编写了必要的单元测试来验证逻辑正确性 / I have written necessary unit-tests to verify the logic correction
 - [ ] 当存在跨模块依赖时，我尽量使用了 mock / I have used mocks when cross-module dependencies exist
+- [ ] 代码检查通过 / Lint checks pass
+- [ ] 单元测试通过 / Unit tests pass
 
 **文档和兼容性 / Documentation and Compatibility:**
 
