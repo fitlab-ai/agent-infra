@@ -10,7 +10,7 @@ description: >
 ## 执行约束
 
 1. **确定性步骤脚本化**：managed / ejected 文件处理、注册表同步、配置更新
-   全部由 `sync-templates.js` 脚本执行，不得逐文件手工处理。
+   全部由 `sync-templates.cjs` 脚本执行，不得逐文件手工处理。
    脚本保证原子性和幂等性。
 
 2. **禁止委托子代理**：阶段 B（merged 文件智能合并）必须在主会话中直接执行，
@@ -21,7 +21,7 @@ description: >
 执行以下命令，一次性处理所有确定性步骤：
 
 ```bash
-node .agents/skills/update-ai-collaboration/scripts/sync-templates.js
+node .agents/skills/update-ai-collaboration/scripts/sync-templates.cjs
 ```
 
 脚本读取 `collaborator.json`（含 `templateSource`，默认 `templates/`），自动完成：

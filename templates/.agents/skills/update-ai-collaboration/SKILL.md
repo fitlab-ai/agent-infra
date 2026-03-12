@@ -12,7 +12,7 @@ description: >
 ## Execution constraints
 
 1. **Script-driven deterministic steps**: managed / ejected file processing,
-   registry sync, and config updates are ALL handled by `sync-templates.js`.
+   registry sync, and config updates are ALL handled by `sync-templates.cjs`.
    Never process these files manually one by one.
    The script guarantees atomicity and idempotency.
 
@@ -25,7 +25,7 @@ description: >
 Execute the following command to handle all deterministic steps at once:
 
 ```bash
-node .agents/skills/update-ai-collaboration/scripts/sync-templates.js
+node .agents/skills/update-ai-collaboration/scripts/sync-templates.cjs
 ```
 
 The script reads `collaborator.json` (including `templateSource`, default `templates/`) and automatically performs:

@@ -71,7 +71,7 @@ test("ai-collaboration-installer init generates seed files in a temp directory",
       "skill should be installed"
     );
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".agents/skills/update-ai-collaboration/scripts/sync-templates.js")),
+      fs.existsSync(path.join(tmpDir, ".agents/skills/update-ai-collaboration/scripts/sync-templates.cjs")),
       "skill sync script should be installed"
     );
     assert.ok(
@@ -104,6 +104,49 @@ test("ai-collaboration-installer init generates seed files in a temp directory",
     );
     assert.doesNotMatch(skill, /\{\{project\}\}/, "skill should not contain unrendered {{project}}");
     assert.doesNotMatch(skill, /\{\{org\}\}/, "skill should not contain unrendered {{org}}");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("installed sync-templates.cjs executes inside a type=module project", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-esm-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    fs.writeFileSync(
+      path.join(tmpDir, "package.json"),
+      JSON.stringify({ name: "esm-project", type: "module" }, null, 2) + "\n",
+      "utf8"
+    );
+
+    execSync(
+      `printf 'esmproj\\nesmorg\\n\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe" }
+    );
+    assert.equal(
+      JSON.parse(fs.readFileSync(path.join(tmpDir, "package.json"), "utf8")).type,
+      "module",
+      "package.json should remain an ESM package after init"
+    );
+
+    const output = execFileSync(
+      process.execPath,
+      [path.join(".agents", "skills", "update-ai-collaboration", "scripts", "sync-templates.cjs")],
+      {
+        cwd: tmpDir,
+        encoding: "utf8"
+      }
+    );
+    const report = JSON.parse(output);
+
+    assert.ok(!report.error, "sync-templates.cjs should run without ESM loader errors");
+    assert.ok(
+      fs.existsSync(
+        path.join(tmpDir, ".agents", "skills", "update-ai-collaboration", "scripts", "sync-templates.cjs")
+      ),
+      "sync-templates.cjs should be installed into the ESM project"
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -164,6 +207,14 @@ test("ai-collaboration-installer update refreshes seed files and syncs file regi
       "stale skill\n",
       "utf8"
     );
+    fs.mkdirSync(path.join(tmpDir, ".agents", "skills", "update-ai-collaboration", "scripts"), {
+      recursive: true
+    });
+    fs.writeFileSync(
+      path.join(tmpDir, ".agents", "skills", "update-ai-collaboration", "scripts", "sync-templates.js"),
+      "legacy script\n",
+      "utf8"
+    );
 
     const output = execSync(`node "${cli}" update`, {
       cwd: tmpDir,
@@ -193,7 +244,10 @@ test("ai-collaboration-installer update refreshes seed files and syncs file regi
     assert.doesNotMatch(skill, /\{\{project\}\}/);
     assert.doesNotMatch(skill, /\{\{org\}\}/);
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".agents", "skills", "update-ai-collaboration", "scripts", "sync-templates.js"))
+      fs.existsSync(path.join(tmpDir, ".agents", "skills", "update-ai-collaboration", "scripts", "sync-templates.cjs"))
+    );
+    assert.ok(
+      !fs.existsSync(path.join(tmpDir, ".agents", "skills", "update-ai-collaboration", "scripts", "sync-templates.js"))
     );
 
     assert.ok(

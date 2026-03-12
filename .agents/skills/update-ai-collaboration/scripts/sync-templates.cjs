@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * sync-templates.js — Deterministic template sync for managed & ejected files.
+ * sync-templates.cjs — Deterministic template sync for managed & ejected files.
  *
  * Handles SKILL steps: 2 (git pull), 3.0 (registry sync), 4 (managed),
  * 6 (ejected), 7 (collaborator.json update).
@@ -9,7 +9,7 @@
  * The report includes `merged.pending` so the AI knows what to process.
  *
  * Usage:
- *   node .agents/skills/update-ai-collaboration/scripts/sync-templates.js [project-root]
+ *   node .agents/skills/update-ai-collaboration/scripts/sync-templates.cjs [project-root]
  *
  * Output: JSON report to stdout.
  */

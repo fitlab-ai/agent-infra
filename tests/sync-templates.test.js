@@ -66,7 +66,7 @@ test("syncTemplates respects templateSource and stays idempotent", () => {
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = loadFresh(".agents/skills/update-ai-collaboration/scripts/sync-templates.js");
+    const { syncTemplates } = loadFresh(".agents/skills/update-ai-collaboration/scripts/sync-templates.cjs");
 
     const firstReport = syncTemplates(projectRoot);
     const afterFirstRun = fs.readFileSync(path.join(projectRoot, "collaborator.json"), "utf8");
@@ -157,7 +157,7 @@ test("syncTemplates runs git pull and reports the install SHA when clone metadat
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = loadFresh(".agents/skills/update-ai-collaboration/scripts/sync-templates.js");
+    const { syncTemplates } = loadFresh(".agents/skills/update-ai-collaboration/scripts/sync-templates.cjs");
     const report = syncTemplates(projectRoot);
 
     assert.equal(report.templateSha, "abc123");
