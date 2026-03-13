@@ -92,7 +92,7 @@ my-project/
 
 | 分类 | 技能 | 说明 |
 |------|------|------|
-| **任务管理** | `create-task`、`plan-task`、`implement-task`、`review-task`、`complete-task` | 完整开发生命周期 |
+| **任务管理** | `analyze-issue`、`create-task`、`plan-task`、`implement-task`、`review-task`、`refine-task`、`complete-task` | 完整开发生命周期 |
 | **代码质量** | `commit`、`test`、`test-integration` | 带联合署名的提交、运行测试 |
 | **PR 与 Issue** | `create-pr`、`sync-issue`、`sync-pr` | 创建 PR、同步进度 |
 | **发布** | `release`、`create-release-note` | 版本发布工作流 |
@@ -100,6 +100,42 @@ my-project/
 | **维护** | `upgrade-dependency`、`refine-title` | 依赖升级、标题优化 |
 
 > 所有技能在所有支持的 AI TUI 中通用——同一工作流，任选工具。
+
+### 基本工作流示例
+
+最简单的端到端开发工作流：
+
+```
+analyze-issue #42                   从 GitHub Issue 创建任务
+(或: create-task "添加暗色模式")      或直接描述需求创建任务
+         |
+         |  --> 得到任务 ID, 如 T1
+         v
+    plan-task T1                    设计技术方案  <-- 人工审查检查点
+         |
+         v
+  implement-task T1                 编写代码与测试
+         |
+         v
+  +-> review-task T1                自动代码审查
+  |      |
+  |   有问题?
+  |      +--NO-------+
+  |     YES          |
+  |      |           |
+  |      v           |
+  |  refine-task T1  |
+  |      |           |
+  +------+           |
+                     |
+         +-----------+
+         |
+         v
+      commit                        提交最终代码
+         |
+         v
+  complete-task T1                  归档完成
+```
 
 ## 文件管理策略
 

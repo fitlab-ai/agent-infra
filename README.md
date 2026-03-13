@@ -92,7 +92,7 @@ my-project/
 
 | Category | Skills | Description |
 |----------|--------|-------------|
-| **Task Management** | `create-task`, `plan-task`, `implement-task`, `review-task`, `complete-task` | Full development lifecycle |
+| **Task Management** | `analyze-issue`, `create-task`, `plan-task`, `implement-task`, `review-task`, `refine-task`, `complete-task` | Full development lifecycle |
 | **Code Quality** | `commit`, `test`, `test-integration` | Commit with co-authorship, run tests |
 | **PR & Issues** | `create-pr`, `sync-issue`, `sync-pr` | Create PRs, sync progress |
 | **Release** | `release`, `create-release-note` | Version release workflow |
@@ -100,6 +100,42 @@ my-project/
 | **Maintenance** | `upgrade-dependency`, `refine-title` | Dependency updates, title formatting |
 
 > Every skill works across all supported AI TUIs — same workflow, any tool.
+
+### Basic Workflow Example
+
+The simplest end-to-end development workflow:
+
+```
+analyze-issue #42                   Create task from GitHub Issue
+(or: create-task "add dark mode")   Or create task from description
+         |
+         |  --> get task ID, e.g. T1
+         v
+    plan-task T1                    Design solution  <-- human review
+         |
+         v
+  implement-task T1                 Write code & tests
+         |
+         v
+  +-> review-task T1                Automated code review
+  |      |
+  |   Issues?
+  |      +--NO-------+
+  |     YES          |
+  |      |           |
+  |      v           |
+  |  refine-task T1  |
+  |      |           |
+  +------+           |
+                     |
+         +-----------+
+         |
+         v
+      commit                        Commit final code
+         |
+         v
+  complete-task T1                  Archive & done
+```
 
 ## File Management Strategies
 
