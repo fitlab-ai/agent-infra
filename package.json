@@ -1,6 +1,6 @@
 {
   "name": "ai-collaboration-installer",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0",
   "description": "Bootstrap tool for AI multi-tool collaboration infrastructure — works with Claude Code, Codex, Gemini CLI, and OpenCode",
   "license": "MIT",
   "type": "module",
