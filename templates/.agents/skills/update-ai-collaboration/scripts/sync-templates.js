@@ -92,6 +92,16 @@ function walkDir(dir) {
   return out;
 }
 
+function removeEmptyDirs(dir) {
+  if (!fs.existsSync(dir)) return;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) removeEmptyDirs(path.join(dir, e.name));
+  }
+  if (fs.readdirSync(dir).length === 0) {
+    fs.rmdirSync(dir);
+  }
+}
+
 function matchesAny(rel, patterns) {
   const n = norm(rel);
   return patterns.some(p => norm(p) === n || globMatch(p, n));
@@ -248,7 +258,7 @@ function syncTemplates(projectRoot) {
     templateSha: sha,
     templateRoot: norm(templateRoot),
     registryAdded: [],
-    managed: { written: [], created: [], unchanged: [], skippedMerged: [], skippedModule: [] },
+    managed: { written: [], created: [], unchanged: [], skippedMerged: [], skippedModule: [], removed: [] },
     ejected: { created: [], skipped: [] },
     merged:  { pending: [] },
     configUpdated: false,
@@ -273,6 +283,7 @@ function syncTemplates(projectRoot) {
   for (const entry of managed) {
     const isDir = entry.endsWith('/');
     let entryRels;
+    const expectedTargets = isDir ? new Set() : null;
 
     if (isDir) {
       const dir = path.join(templateRoot, entry);
@@ -289,6 +300,8 @@ function syncTemplates(projectRoot) {
     }
 
     for (const [tgt, src] of langSelect(entryRels, lang, allSet, project)) {
+      if (expectedTargets) expectedTargets.add(tgt);
+
       const mod = fileModule(tgt);
       if (mod !== null && !modSet.has(mod)) {
         report.managed.skippedModule.push(tgt);
@@ -324,6 +337,27 @@ function syncTemplates(projectRoot) {
       }
 
       (exists ? report.managed.written : report.managed.created).push(tgt);
+    }
+
+    if (isDir) {
+      const projDir = path.join(projectRoot, entry);
+      if (fs.existsSync(projDir)) {
+        const removedBefore = report.managed.removed.length;
+        const projFiles = walkDir(projDir).map(f => norm(path.relative(projectRoot, f)));
+        for (const projFile of projFiles) {
+          if (expectedTargets.has(projFile)) continue;
+          if (matchesAny(projFile, merged) || matchesAny(projFile, ejected)) continue;
+
+          const mod = fileModule(projFile);
+          if (mod !== null && !modSet.has(mod)) continue;
+
+          fs.unlinkSync(path.join(projectRoot, projFile));
+          report.managed.removed.push(projFile);
+        }
+        if (report.managed.removed.length > removedBefore) {
+          removeEmptyDirs(projDir);
+        }
+      }
     }
   }
 
@@ -384,6 +418,7 @@ function syncTemplates(projectRoot) {
   const hasChanges = (
     report.managed.written.length +
     report.managed.created.length +
+    report.managed.removed.length +
     report.ejected.created.length +
     report.registryAdded.length
   ) > 0;
