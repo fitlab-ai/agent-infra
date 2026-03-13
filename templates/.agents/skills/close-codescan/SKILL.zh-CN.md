@@ -22,13 +22,13 @@ gh api repos/{owner}/{repo}/code-scanning/alerts/<alert-number>
 ### 2. 展示告警详情
 
 ```
-Code Scanning Alert #{alert-number}
+Code Scanning 告警 #{alert-number}
 
-Severity: {security_severity_level}
-Rule: {rule.id} - {rule.description}
-Scanner: {tool.name}
-Location: {location.path}:{location.start_line}
-Message: {message}
+严重程度：{security_severity_level}
+规则：{rule.id} - {rule.description}
+扫描工具：{tool.name}
+位置：{location.path}:{location.start_line}
+消息：{message}
 ```
 
 ### 3. 询问关闭理由
@@ -51,14 +51,14 @@ Message: {message}
 ### 5. 最终确认
 
 ```
-About to close Code Scanning alert #{alert-number}:
+即将关闭 Code Scanning 告警 #{alert-number}：
 
-Rule: {rule.id}
-Location: {location.path}:{location.start_line}
-Reason: {选择的理由}
-Explanation: {用户的说明}
+规则：{rule.id}
+位置：{location.path}:{location.start_line}
+原因：{选择的理由}
+说明：{用户的说明}
 
-Confirm? (y/N)
+确认？(y/N)
 ```
 
 ### 6. 执行关闭

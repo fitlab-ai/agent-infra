@@ -23,17 +23,17 @@ gh api repos/{owner}/{repo}/dependabot/alerts/<alert-number>
 
 向用户展示关键信息：
 ```
-Security Alert #{alert-number}
+安全告警 #{alert-number}
 
-Severity: {severity}
-Vulnerability: {summary}
-Package: {package-name} ({ecosystem})
-Current version: {current-version}
-Vulnerable range: {vulnerable-version-range}
-Patched version: {first-patched-version}
+严重程度：{severity}
+漏洞：{summary}
+包名：{package-name}（{ecosystem}）
+当前版本：{current-version}
+受影响版本范围：{vulnerable-version-range}
+修复版本：{first-patched-version}
 
-GHSA: {ghsa-id}
-CVE: {cve-id}
+GHSA：{ghsa-id}
+CVE：{cve-id}
 ```
 
 ### 3. 询问关闭理由
@@ -57,14 +57,14 @@ CVE: {cve-id}
 ### 5. 最终确认
 
 ```
-About to close security alert #{alert-number}:
+即将关闭安全告警 #{alert-number}：
 
-Alert: {summary}
-Severity: {severity}
-Reason: {选择的理由}
-Explanation: {用户的说明}
+告警：{summary}
+严重程度：{severity}
+原因：{选择的理由}
+说明：{用户的说明}
 
-Confirm? (y/N)
+确认？(y/N)
 ```
 
 ### 6. 执行关闭

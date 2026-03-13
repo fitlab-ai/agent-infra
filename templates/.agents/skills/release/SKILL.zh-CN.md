@@ -48,6 +48,7 @@ git status --short
 - `setup.py` / `pyproject.toml`（Python）
 - `version.go`（Go）
 - `README.md`（文档）
+- `SECURITY.md` / `SECURITY.zh-CN.md`（支持版本表格）
 
 **排除以下目录的版本替换**：
 - `.agents/`、`.ai-workspace/`、`.claude/`、`.codex/`、`.gemini/`、`.opencode/`（AI 工具配置）
@@ -70,21 +71,21 @@ git tag v{version}
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
 ```
-Release v{version} prepared.
+版本 v{version} 已准备好发布。
 
-Release info:
-- Version: {version}
-- Release commit: {commit-hash}
-- Tag: v{version}
+发布信息：
+- 版本：{version}
+- 发布提交：{commit-hash}
+- 标签：v{version}
 
-Files updated: {数量}
+已更新文件数：{数量}
 
-Next steps (manual):
+下一步（手动执行）：
 
-1. Push tag:
+1. 推送标签：
    git push origin v{version}
 
-2. Push branch:
+2. 推送分支：
    git push origin {current-branch}
 
 3.（可选）生成发布说明：

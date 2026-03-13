@@ -49,6 +49,8 @@ node --test tests/*.test.js
 
 1. `package.json` 中的 `"version": "X.Y.Z"`
 2. `collaborator.json` 中的 `"version": "X.Y.Z"`
+3. `SECURITY.md` 中的支持版本表格（`v{MAJOR}.{MINOR}.x | Supported`，`< v{MAJOR}.{MINOR}.0 | Not Supported`）
+4. `SECURITY.zh-CN.md` 中的支持版本表格（`v{MAJOR}.{MINOR}.x | 支持中`，`< v{MAJOR}.{MINOR}.0 | 不再支持`）
 
 如果当前工作区处于开发期 prerelease 版本（例如 `0.1.0-alpha.1`），也需要将其替换为目标正式版本 `X.Y.Z`。
 

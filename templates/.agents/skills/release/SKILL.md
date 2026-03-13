@@ -49,6 +49,7 @@ Search for version references in project files and update them:
 - `setup.py` / `pyproject.toml` (Python)
 - `version.go` (Go)
 - `README.md` (documentation)
+- `SECURITY.md` / `SECURITY.zh-CN.md` (supported version table)
 
 **Exclude from version replacement**:
 - `.agents/`, `.ai-workspace/`, `.claude/`, `.codex/`, `.gemini/`, `.opencode/` (AI tool configs)

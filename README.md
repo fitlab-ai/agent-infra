@@ -1,4 +1,4 @@
-# ai-collaboration-installer
+# AI Collaboration Installer
 
 A template and skill repository for initializing and maintaining AI multi-tool collaboration infrastructure and project governance across software projects.
 
@@ -16,13 +16,6 @@ ai-collaboration-installer provides standardized configuration for AI TUI tools 
 - **Modular Design**: Two independent modules (`ai` and `github`) that can be installed separately
 - **Template Source Architecture**: `templates/` mirrors the working tree and is rendered into project files
 - **AI Intelligent Merge**: LLMs handle template merging during updates, preserving user customizations
-
-### Modules
-
-| Module | Responsibility | Contents |
-|--------|---------------|----------|
-| **ai** | AI multi-tool collaboration infrastructure | `.agents/`, `.ai-workspace/`, `.claude/`, `.codex/`, `.gemini/`, `.opencode/`, `AGENTS.md`, `.mailmap` |
-| **github** | Project governance + base config | `.github/`, `.editorconfig`, `.gitignore`, `License.txt`, `CONTRIBUTING.md`, `SECURITY.md`, `SECURITY.zh-CN.md` |
 
 ## Quick Start
 
@@ -72,6 +65,41 @@ Open the project in any AI TUI and run `update-ai-collaboration`:
 | OpenCode | `/update-ai-collaboration` |
 
 This pulls the latest templates and renders all files. Use the same command for future updates — it automatically handles both first-time setup and incremental updates.
+
+## What You Get
+
+After setup, your project gains a complete AI collaboration infrastructure:
+
+```
+my-project/
+├── .agents/               # Shared AI collaboration config
+│   ├── skills/            # 30+ built-in AI skills
+│   ├── workflows/         # Structured development workflows
+│   └── templates/         # Task & artifact templates
+├── .ai-workspace/         # Task workspace (git-ignored)
+├── .claude/               # Claude Code config & commands
+├── .gemini/               # Gemini CLI config & commands
+├── .opencode/             # OpenCode config & commands
+├── .github/               # PR templates, issue forms, workflows
+├── AGENTS.md              # Universal AI agent instructions
+├── CONTRIBUTING.md        # Development guide
+├── SECURITY.md            # Security policy (English)
+├── SECURITY.zh-CN.md      # Security policy (Chinese)
+└── collaborator.json      # Central configuration
+```
+
+### Built-in AI Skills
+
+| Category | Skills | Description |
+|----------|--------|-------------|
+| **Task Management** | `create-task`, `plan-task`, `implement-task`, `review-task`, `complete-task` | Full development lifecycle |
+| **Code Quality** | `commit`, `test`, `test-integration` | Commit with co-authorship, run tests |
+| **PR & Issues** | `create-pr`, `sync-issue`, `sync-pr` | Create PRs, sync progress |
+| **Release** | `release`, `create-release-note` | Version release workflow |
+| **Security** | `analyze-dependabot`, `analyze-codescan` | Security alert triage |
+| **Maintenance** | `upgrade-dependency`, `refine-title` | Dependency updates, title formatting |
+
+> Every skill works across all supported AI TUIs — same workflow, any tool.
 
 ## File Management Strategies
 

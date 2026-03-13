@@ -44,19 +44,19 @@ gh pr view <id> --json number,title,body,labels,state,files
 ### 3. 展示建议
 
 ```
-Analysis for Issue/PR #{id}:
+Issue/PR #{id} 分析结果：
 
-Current title: {原始标题}
+当前标题：{原始标题}
 --------------------------------------------------
-Analysis:
-- Intent: {从 body 提取的一行摘要}
-- Type: {type} (basis: {依据})
-- Scope: {scope} (basis: {依据})
+分析：
+- 意图：{从 body 提取的一行摘要}
+- 类型：{type}（依据：{依据}）
+- 范围：{scope}（依据：{依据}）
 --------------------------------------------------
-Suggested title: {type}({scope}): {subject}
+建议标题：{type}({scope}): {subject}
 ```
 
-询问用户："Apply this title? (y/n)"
+询问用户："是否应用此标题？(y/n)"
 
 ### 4. 应用修改
 

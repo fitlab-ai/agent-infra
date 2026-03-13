@@ -84,7 +84,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 在工作流进度中标记 code-review 为已完成，并注明实际轮次（如果任务模板支持）
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, Blockers: {n}, Major: {n}, Minor: {n} → {artifact-filename}
+  - {yyyy-MM-dd HH:mm:ss} — **Code Review (Round {N})** by {agent} — 结论：{已批准/需要修改/拒绝}，阻塞项：{n}，主要问题：{n}，次要问题：{n} → {artifact-filename}
   ```
 
 ### 6. 告知用户
@@ -141,7 +141,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - **审查者**：{审查者名称}
 - **审查时间**：{时间戳}
 - **审查范围**：{文件数量和主要模块}
-- **总体结论**：{Approved / Changes Requested / Rejected}
+- **总体结论**：{已批准 / 需要修改 / 拒绝}
 
 ## 发现的问题
 
