@@ -87,21 +87,21 @@ git tag v{version}
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
 ```
-Release v{version} prepared.
+版本 v{version} 已准备好发布。
 
-Release info:
-- Version: {version}
-- Release commit: {commit-hash}
-- Tag: v{version}
+发布信息：
+- 版本：{version}
+- 发布提交：{commit-hash}
+- 标签：v{version}
 
-Files updated: {数量}
+已更新文件数：{数量}
 
-Next steps (manual):
+下一步（手动执行）：
 
-1. Push branch:
+1. 推送分支：
    git push origin {current-branch}
 
-2. Push tag:
+2. 推送标签：
    git push origin v{version}
 
 3.（可选）生成发布说明：
