@@ -146,7 +146,7 @@ test("syncTemplates runs git pull and reports the install SHA when clone metadat
     childProcess.execSync = (command, options = {}) => {
       commands.push({ command, cwd: options.cwd });
 
-      if (command === "git pull --quiet") {
+      if (command === "git pull --rebase --quiet") {
         return "";
       }
       if (command === "git rev-parse --short HEAD") {
@@ -163,7 +163,7 @@ test("syncTemplates runs git pull and reports the install SHA when clone metadat
 
     assert.equal(report.templateSha, "abc123");
     assert.deepEqual(report.managed.removed, []);
-    assert.ok(commands.some((entry) => entry.command === "git pull --quiet" && entry.cwd === installDir));
+    assert.ok(commands.some((entry) => entry.command === "git pull --rebase --quiet" && entry.cwd === installDir));
     assert.ok(commands.some((entry) => entry.command === "git rev-parse --short HEAD" && entry.cwd === installDir));
   } finally {
     os.homedir = originalHomedir;

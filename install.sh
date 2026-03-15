@@ -40,7 +40,7 @@ select_repo_url() {
 # ---------- clone or update ----------
 if [ -d "$INSTALL_DIR" ]; then
   info "Updating existing installation at $INSTALL_DIR ..."
-  git -C "$INSTALL_DIR" pull --quiet
+  git -C "$INSTALL_DIR" pull --rebase --quiet
   ok "Updated to latest version."
 else
   CLONE_METHOD=$(select_repo_url)

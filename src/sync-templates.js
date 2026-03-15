@@ -201,7 +201,7 @@ function syncTemplates(projectRoot) {
 
   const hasGit = fs.existsSync(path.join(installDir, '.git'));
   if (hasGit) {
-    try { childProcess.execSync('git pull --quiet', { cwd: installDir, stdio: 'pipe' }); } catch { /* network */ }
+    try { childProcess.execSync('git pull --rebase --quiet', { cwd: installDir, stdio: 'pipe' }); } catch { /* network */ }
   }
 
   let sha = 'unknown';
