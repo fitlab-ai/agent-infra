@@ -39,7 +39,7 @@ The script outputs JSON to stdout. Parse and record the report.
 
 **Key fields**:
 - `error`: error message (if non-empty, stop and report)
-- `templateSha`: current template source version
+- `templateVersion`: current template source version
 - `templateRoot`: absolute path to the template file root directory
 - `managed.written` / `managed.created`: updated / newly created managed files
 - `merged.pending`: list of merged files for AI to process

@@ -236,18 +236,27 @@ function syncTemplates(projectRoot) {
 
   const hasGit = fs.existsSync(path.join(installDir, '.git'));
   if (hasGit) {
-    try { childProcess.execSync('git pull --rebase --quiet', { cwd: installDir, stdio: 'pipe' }); } catch { /* network */ }
+    try { childProcess.execSync('git fetch --tags --quiet', { cwd: installDir, stdio: 'pipe' }); } catch { /* network */ }
   }
 
-  let sha = 'unknown';
+  let version = 'unknown';
   if (hasGit) {
+    let tagOutput;
     try {
-      sha = childProcess.execSync('git rev-parse --short HEAD', {
+      tagOutput = childProcess.execSync('git tag --sort=-v:refname', {
         cwd: installDir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
       }).trim();
-    } catch { /* ignore */ }
+    } catch {
+      return { error: 'Failed to list tags in agent-orchestrator repository. Please check git installation.' };
+    }
+    const latestTag = tagOutput.split('\n')[0];
+    if (!latestTag) {
+      return { error: 'No tags found in agent-orchestrator repository. This is unexpected — please reinstall.' };
+    }
+    try { childProcess.execFileSync('git', ['checkout', latestTag, '--quiet'], { cwd: installDir, stdio: 'pipe' }); } catch { /* ignore */ }
+    version = latestTag;
   } else {
-    sha = INSTALLER_VERSION || sha;
+    version = INSTALLER_VERSION || version;
   }
 
   const { project, org, language: lang = 'en', modules = [] } = cfg;
@@ -258,7 +267,7 @@ function syncTemplates(projectRoot) {
   const ejected = [...(cfg.files.ejected || [])];
 
   const report = {
-    templateSha: sha,
+    templateVersion: version,
     templateRoot: norm(templateRoot),
     registryAdded: [],
     managed: { written: [], created: [], unchanged: [], skippedMerged: [], skippedModule: [], removed: [] },
@@ -435,7 +444,7 @@ function syncTemplates(projectRoot) {
   cfg.files.ejected = ejected;
 
   if (!report.selfUpdate || hasChanges) {
-    cfg.templateVersion = sha;
+    cfg.templateVersion = version;
     report.configUpdated = true;
   }
 

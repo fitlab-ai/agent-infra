@@ -112,9 +112,10 @@ test("syncTemplates respects templateSource and stays idempotent", async () => {
   }
 });
 
-test("syncTemplates runs git pull and reports the install SHA when clone metadata exists", async () => {
+test("syncTemplates prefers the latest tag and reports the template version when clone metadata exists", async () => {
   const originalHomedir = os.homedir;
   const originalExecSync = childProcess.execSync;
+  const originalExecFileSync = childProcess.execFileSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-home-"));
 
   try {
@@ -146,14 +147,26 @@ test("syncTemplates runs git pull and reports the install SHA when clone metadat
     childProcess.execSync = (command, options = {}) => {
       commands.push({ command, cwd: options.cwd });
 
-      if (command === "git pull --rebase --quiet") {
+      if (command === "git fetch --tags --quiet") {
         return "";
       }
-      if (command === "git rev-parse --short HEAD") {
-        return "abc123\n";
+      if (command === "git tag --sort=-v:refname") {
+        return "v1.0.0\nv0.9.0\n";
+      }
+      if (command === "git checkout v1.0.0 --quiet") {
+        return "";
       }
       if (command === "git remote get-url origin") {
         throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+    childProcess.execFileSync = (file, args, options = {}) => {
+      const command = [file, ...args].join(" ");
+      commands.push({ command, cwd: options.cwd });
+
+      if (file === "git" && args.join(" ") === "checkout v1.0.0 --quiet") {
+        return "";
       }
       throw new Error(`Unexpected command: ${command}`);
     };
@@ -161,13 +174,155 @@ test("syncTemplates runs git pull and reports the install SHA when clone metadat
     const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-orchestrator/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot);
 
-    assert.equal(report.templateSha, "abc123");
+    assert.equal(report.templateVersion, "v1.0.0");
     assert.deepEqual(report.managed.removed, []);
-    assert.ok(commands.some((entry) => entry.command === "git pull --rebase --quiet" && entry.cwd === installDir));
-    assert.ok(commands.some((entry) => entry.command === "git rev-parse --short HEAD" && entry.cwd === installDir));
+    assert.deepEqual(commands.slice(0, 3), [
+      { command: "git fetch --tags --quiet", cwd: installDir },
+      { command: "git tag --sort=-v:refname", cwd: installDir },
+      { command: "git checkout v1.0.0 --quiet", cwd: installDir }
+    ]);
+    assert.ok(!commands.some((entry) => entry.command === "git rev-parse --short HEAD"));
   } finally {
     os.homedir = originalHomedir;
     childProcess.execSync = originalExecSync;
+    childProcess.execFileSync = originalExecFileSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates returns an error when no tags exist", async () => {
+  const originalHomedir = os.homedir;
+  const originalExecSync = childProcess.execSync;
+  const originalExecFileSync = childProcess.execFileSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-no-tags-"));
+
+  try {
+    const homeDir = path.join(tmpDir, "home");
+    const installDir = path.join(homeDir, ".agent-orchestrator");
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = path.join(tmpDir, "template-root");
+    const commands = [];
+
+    fs.mkdirSync(path.join(installDir, ".git"), { recursive: true });
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.mkdirSync(templateRoot, { recursive: true });
+
+    writeFile(templateRoot, "README.md", "Hello {{project}}\n");
+    writeJson(projectRoot, ".aorc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      templateSource: templateRoot,
+      modules: [],
+      files: {
+        managed: ["README.md"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    os.homedir = () => homeDir;
+    childProcess.execSync = (command, options = {}) => {
+      commands.push({ command, cwd: options.cwd });
+
+      if (command === "git fetch --tags --quiet") {
+        return "";
+      }
+      if (command === "git tag --sort=-v:refname") {
+        return "\n";
+      }
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+    childProcess.execFileSync = () => {
+      throw new Error("checkout should not run when no tags exist");
+    };
+
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-orchestrator/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot);
+
+    assert.deepEqual(report, {
+      error: "No tags found in agent-orchestrator repository. This is unexpected — please reinstall."
+    });
+    assert.deepEqual(commands.slice(0, 2), [
+      { command: "git fetch --tags --quiet", cwd: installDir },
+      { command: "git tag --sort=-v:refname", cwd: installDir }
+    ]);
+    assert.ok(!commands.some((entry) => entry.command.startsWith("git checkout v")));
+  } finally {
+    os.homedir = originalHomedir;
+    childProcess.execSync = originalExecSync;
+    childProcess.execFileSync = originalExecFileSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates returns an error when tag listing fails", async () => {
+  const originalHomedir = os.homedir;
+  const originalExecSync = childProcess.execSync;
+  const originalExecFileSync = childProcess.execFileSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-tag-failure-"));
+
+  try {
+    const homeDir = path.join(tmpDir, "home");
+    const installDir = path.join(homeDir, ".agent-orchestrator");
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = path.join(tmpDir, "template-root");
+    const commands = [];
+
+    fs.mkdirSync(path.join(installDir, ".git"), { recursive: true });
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.mkdirSync(templateRoot, { recursive: true });
+
+    writeFile(templateRoot, "README.md", "Hello {{project}}\n");
+    writeJson(projectRoot, ".aorc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      templateSource: templateRoot,
+      modules: [],
+      files: {
+        managed: ["README.md"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    os.homedir = () => homeDir;
+    childProcess.execSync = (command, options = {}) => {
+      commands.push({ command, cwd: options.cwd });
+
+      if (command === "git fetch --tags --quiet") {
+        return "";
+      }
+      if (command === "git tag --sort=-v:refname") {
+        throw new Error("git tag failed");
+      }
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+    childProcess.execFileSync = () => {
+      throw new Error("checkout should not run when tag listing fails");
+    };
+
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-orchestrator/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot);
+
+    assert.deepEqual(report, {
+      error: "Failed to list tags in agent-orchestrator repository. Please check git installation."
+    });
+    assert.deepEqual(commands.slice(0, 2), [
+      { command: "git fetch --tags --quiet", cwd: installDir },
+      { command: "git tag --sort=-v:refname", cwd: installDir }
+    ]);
+  } finally {
+    os.homedir = originalHomedir;
+    childProcess.execSync = originalExecSync;
+    childProcess.execFileSync = originalExecFileSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

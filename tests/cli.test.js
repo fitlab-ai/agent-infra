@@ -18,13 +18,22 @@ function pathExists(targetPath) {
 
 function ensureCloneInstallFixture() {
   const installDir = path.join(os.homedir(), ".agent-orchestrator");
-  if (pathExists(installDir)) {
-    return () => {};
+  const templateSource = filePath("templates");
+  const backupDir = pathExists(installDir)
+    ? `${installDir}.test-backup-${process.pid}-${Date.now()}`
+    : null;
+
+  if (backupDir) {
+    fs.renameSync(installDir, backupDir);
   }
 
-  fs.symlinkSync(filePath(""), installDir, "dir");
+  fs.mkdirSync(installDir, { recursive: true });
+  fs.cpSync(templateSource, path.join(installDir, "templates"), { recursive: true });
   return () => {
     fs.rmSync(installDir, { recursive: true, force: true });
+    if (backupDir) {
+      fs.renameSync(backupDir, installDir);
+    }
   };
 }
 

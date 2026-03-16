@@ -35,7 +35,7 @@ node .agents/skills/update-agent-orchestrator/scripts/sync-templates.js
 
 **关键字段**：
 - `error`：错误信息（如非空则停止并报告）
-- `templateSha`：模板源当前版本
+- `templateVersion`：模板源当前版本
 - `templateRoot`：模板文件根目录绝对路径
 - `managed.written` / `managed.created`：已更新/新建的 managed 文件
 - `merged.pending`：需要 AI 处理的 merged 文件列表

@@ -40,8 +40,8 @@ select_repo_url() {
 # ---------- clone or update ----------
 if [ -d "$INSTALL_DIR" ]; then
   info "Updating existing installation at $INSTALL_DIR ..."
-  git -C "$INSTALL_DIR" pull --rebase --quiet
-  ok "Updated to latest version."
+  git -C "$INSTALL_DIR" fetch --tags --quiet
+  ok "Fetched latest tags."
 else
   CLONE_METHOD=$(select_repo_url)
   if [ "$CLONE_METHOD" = "gh" ]; then
@@ -53,6 +53,14 @@ else
   fi
   ok "Cloned successfully."
 fi
+
+LATEST_TAG=$(git -C "$INSTALL_DIR" tag --sort=-v:refname | head -n 1)
+if [ -z "$LATEST_TAG" ]; then
+  err "No tags found in agent-orchestrator repository. This is unexpected."
+  exit 1
+fi
+git -C "$INSTALL_DIR" checkout --quiet "$LATEST_TAG"
+ok "Using stable release: $LATEST_TAG"
 
 # ---------- install CLI command ----------
 # Try ~/.local/bin first (no sudo needed), fall back to /usr/local/bin.
