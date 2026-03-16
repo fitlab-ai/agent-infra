@@ -156,7 +156,7 @@ Users can adjust strategies per file in `.aorc.json`.
 
 ## Version Management
 
-Uses semantic versioning via git tags. Version tracked in `.aorc.json`.
+Uses semantic versioning via git tags. Template version is tracked in `.aorc.json` as `templateVersion`.
 
 ## Contributing
 

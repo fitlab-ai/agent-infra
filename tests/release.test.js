@@ -53,4 +53,5 @@ test("release documentation reflects CI-driven npm publishing", () => {
   assert.match(releasing, /推送标签后由 CI 自动执行/);
   assert.match(releaseSkill, /推送后将自动触发 GitHub Release 创建和 npm 发布/);
   assert.match(releaseSkill, /npm 自动发布/);
+  assert.match(releaseSkill, /\.aorc\.json.*templateVersion/);
 });

@@ -156,7 +156,7 @@ analyze-issue #42                   从 GitHub Issue 创建任务
 
 ## 版本管理
 
-通过 git tag 使用语义版本号。版本记录在 `.aorc.json` 中。
+通过 git tag 使用语义版本号。模板版本记录在 `.aorc.json` 的 `templateVersion` 字段中。
 
 ## 参与贡献
 
