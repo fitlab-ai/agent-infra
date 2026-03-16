@@ -444,14 +444,14 @@ function syncTemplates(projectRoot) {
     report.registryAdded.length
   ) > 0;
 
+  const prevVersion = cfg.templateVersion;
+
   cfg.files.managed = managed;
   cfg.files.merged  = merged;
   cfg.files.ejected = ejected;
+  cfg.templateVersion = version;
 
-  if (!report.selfUpdate || hasChanges) {
-    cfg.templateVersion = version;
-    report.configUpdated = true;
-  }
+  report.configUpdated = hasChanges || prevVersion !== version;
 
   fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
 
