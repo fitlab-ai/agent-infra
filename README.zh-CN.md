@@ -35,10 +35,11 @@ cd agent-orchestrator
 sh install.sh
 ```
 
-**方式 C — npm** *（尚未发布）*
+**方式 C — npm**
 
 ```bash
-npm install -g agent-orchestrator
+npm install -g @fitlab-ai/agent-orchestrator
+npx @fitlab-ai/agent-orchestrator init
 ```
 
 ### 2. 初始化新项目

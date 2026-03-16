@@ -35,10 +35,11 @@ cd agent-orchestrator
 sh install.sh
 ```
 
-**Option C — npm** *(not yet published)*
+**Option C — npm**
 
 ```bash
-npm install -g agent-orchestrator
+npm install -g @fitlab-ai/agent-orchestrator
+npx @fitlab-ai/agent-orchestrator init
 ```
 
 ### 2. Initialize a new project

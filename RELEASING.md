@@ -36,10 +36,10 @@
 
 - 工作区干净，没有未提交变更
 - `package.json` 与 `.aorc.json` 的版本号一致
-- `node --test tests/*.test.js` 全部通过
+- `npm test` 全部通过
 - 待发布内容已经过代码审查
 - 本次变更的 PR 标签和标题足以生成准确的 GitHub Release Notes
-- 如需发布 npm 包，确认当前操作者具备 npm 发布权限
+- 仓库中的 `NPM_TOKEN` GitHub Actions secret 有效，并具备 `@fitlab-ai/agent-orchestrator` 发布权限
 
 ## 标准发布流程
 
@@ -73,6 +73,8 @@ git push origin vX.Y.Z
 - 设置 Node.js 环境
 - 再次执行测试
 - 使用 `gh release create --generate-notes` 创建 GitHub Release
+- 校验 `package.json` 版本与 tag 一致
+- 使用 `npm publish --provenance` 发布 `@fitlab-ai/agent-orchestrator`
 
 `.github/release.yml` 负责定义自动生成发布说明时的分类规则。
 
@@ -86,19 +88,19 @@ git push origin vX.Y.Z
 
 如果 GitHub 自动生成的说明已经足够，可以直接使用 Release 页面内容；否则手动补充亮点、迁移提示和已知限制。
 
-### 4. 手动发布 npm 包
+### 4. npm 发布（自动）
 
-本仓库当前不在 CI 中自动执行 `npm publish`。如果需要把该版本发布到 npm registry，使用具备权限的账号在本地执行：
+推送 `vX.Y.Z` 标签后，`npm-publish` job 会在 CI 中自动执行：
 
-```bash
-npm publish
-```
+- 校验 `package.json` 中的版本号与 Git tag 一致
+- 运行 `npm test`
+- 使用 `NODE_AUTH_TOKEN=${{ secrets.NPM_TOKEN }}` 执行 `npm publish --provenance`
 
-建议在执行前再次确认：
+发布前建议再次确认：
 
-- 当前提交已经打上对应标签
-- GitHub Release 已创建
-- 目标版本尚未在 npm 上存在
+- 仓库已配置有效的 `NPM_TOKEN` secret
+- `fitlab-ai` scope 或对应组织权限已经在 npm 准备完成
+- 目标版本尚未在 npm registry 中存在
 
 ## 回滚流程
 
@@ -122,10 +124,9 @@ gh release delete vX.Y.Z --yes
 当前流程采用渐进式自动化：
 
 - GitHub Release 自动化：已纳入流程
-- npm publish 自动化：暂不启用，避免引入额外 token 管理复杂度
+- npm publish 自动化：已纳入流程，推送标签后由 CI 自动执行
 
 如后续需要全自动 npm 发布，应单独评估：
 
-- `NPM_TOKEN` 的权限和轮换策略
 - 发布失败时的回滚方案
 - 预发布版本和稳定版本的区分机制

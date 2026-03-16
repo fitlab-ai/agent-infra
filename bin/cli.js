@@ -21,13 +21,13 @@ Usage:
 Shorthand: ao (e.g. ao init)
 
 Install methods:
-  npm:   npm install -g agent-orchestrator
-  npx:   npx agent-orchestrator init
+  npm:   npm install -g @fitlab-ai/agent-orchestrator
+  npx:   npx @fitlab-ai/agent-orchestrator init
   curl:  curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-orchestrator/main/install.sh | sh
 
 Examples:
   cd my-project && agent-orchestrator init
-  npx agent-orchestrator init
+  npx @fitlab-ai/agent-orchestrator init
 `;
 
 const command = process.argv[2] || '';

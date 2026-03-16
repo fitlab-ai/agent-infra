@@ -112,11 +112,13 @@ test("README documents the bootstrap installation flow", () => {
   assert.match(readme, /install\.sh/);
   assert.match(readme, /ao init/);
   assert.match(readme, /update-agent-orchestrator/);
-  assert.match(readme, /npm install -g/);
+  assert.match(readme, /npm install -g @fitlab-ai\/agent-orchestrator/);
+  assert.match(readme, /npx @fitlab-ai\/agent-orchestrator init/);
   assert.match(readme, /Install from source/);
   assert.match(readmeZh, /install\.sh/);
   assert.match(readmeZh, /ao init/);
   assert.match(readmeZh, /update-agent-orchestrator/);
-  assert.match(readmeZh, /npm install -g/);
+  assert.match(readmeZh, /npm install -g @fitlab-ai\/agent-orchestrator/);
+  assert.match(readmeZh, /npx @fitlab-ai\/agent-orchestrator init/);
   assert.match(readmeZh, /源码安装/);
 });

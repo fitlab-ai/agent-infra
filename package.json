@@ -1,12 +1,21 @@
 {
-  "name": "agent-orchestrator",
+  "name": "@fitlab-ai/agent-orchestrator",
   "version": "0.1.1",
   "description": "Bootstrap tool for AI multi-tool collaboration infrastructure — works with Claude Code, Codex, Gemini CLI, and OpenCode",
   "license": "MIT",
   "type": "module",
+  "author": "CodeCaster <codecaster365@outlook.com>",
+  "homepage": "https://github.com/fitlab-ai/agent-orchestrator#readme",
+  "bugs": {
+    "url": "https://github.com/fitlab-ai/agent-orchestrator/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/fitlab-ai/agent-orchestrator.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "bin": {
     "agent-orchestrator": "./bin/cli.js",
@@ -33,6 +42,7 @@
   ],
   "scripts": {
     "build": "node scripts/build-inline.js",
-    "test": "node scripts/build-inline.js --check && node --test tests/*.test.js"
+    "test": "node scripts/build-inline.js --check && node --test tests/*.test.js",
+    "prepublishOnly": "node scripts/build-inline.js --check && node --test tests/*.test.js"
   }
 }

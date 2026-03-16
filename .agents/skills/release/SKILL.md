@@ -32,7 +32,7 @@ git status --short
 
 ```bash
 git branch --show-current
-node --test tests/*.test.js
+npm test
 ```
 
 验证要求：
@@ -108,6 +108,7 @@ git tag v{version}
 
 2. 推送标签：
    git push origin v{version}
+   推送后将自动触发 GitHub Release 创建和 npm 发布
 
 3.（可选）生成发布说明：
    - Claude Code / OpenCode：/create-release-note {version}
@@ -133,10 +134,11 @@ git checkout -- .
 
 1. **需要干净的工作区**：必须没有未提交的变更
 2. **不自动推送**：所有操作仅在本地执行；用户手动推送
-3. **发布前验证**：检查当前分支，并在本技能内运行 `node --test tests/*.test.js`
+3. **发布前验证**：检查当前分支，并在本技能内运行 `npm test`
 4. **内联产物**：版本更新后必须运行 `node scripts/build-inline.js`，否则嵌入的版本号和默认配置会过期
-5. **版本替换范围**：通过搜索确定需要更新哪些文件；排除 AI 工具目录
-6. **适配你的项目**：以上版本更新步骤是通用的；请根据你的项目版本方案进行定制
+5. **npm 自动发布**：推送标签会触发 CI 中的 npm publish；需提前配置 `NPM_TOKEN` 并确保包版本与标签一致
+6. **版本替换范围**：通过搜索确定需要更新哪些文件；排除 AI 工具目录
+7. **适配你的项目**：以上版本更新步骤是通用的；请根据你的项目版本方案进行定制
 
 ## 错误处理
 
