@@ -48,6 +48,8 @@ test("release documentation reflects CI-driven npm publishing", () => {
   const releaseSkill = read(".agents/skills/release/SKILL.md");
   const releaseTemplate = read("templates/.agents/skills/release/SKILL.md");
   const releaseTemplateZh = read("templates/.agents/skills/release/SKILL.zh-CN.md");
+  const releaseScript = read(".agents/skills/release/scripts/manage-milestones.sh");
+  const releaseTemplateScript = read("templates/.agents/skills/release/scripts/manage-milestones.sh");
 
   assert.match(releasing, /NPM_TOKEN/);
   assert.match(releasing, /npm publish --provenance/);
@@ -57,9 +59,12 @@ test("release documentation reflects CI-driven npm publishing", () => {
   assert.match(releaseSkill, /npm 自动发布/);
   assert.match(releaseSkill, /\.aorc\.json.*templateVersion/);
   [releaseSkill, releaseTemplate, releaseTemplateZh].forEach((content) => {
+    assert.match(content, /manage-milestones\.sh/);
+    assert.match(content, /init-milestones/);
+  });
+  [releaseScript, releaseTemplateScript].forEach((content) => {
     assert.match(content, /milestones\?state=all/);
     assert.match(content, /Issues that we want to resolve in/);
     assert.match(content, /Issues that we want to release in v/);
-    assert.match(content, /init-milestones/);
   });
 });

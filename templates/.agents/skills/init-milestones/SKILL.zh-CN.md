@@ -13,201 +13,55 @@ description: >
 
 ### 1. 验证前置条件
 
-执行：
+确认以下条件成立：
+- 已安装 `gh`
+- `gh auth status` 执行成功
+- `gh repo view --json nameWithOwner` 可以访问当前仓库
+
+如果任一条件失败，停止并输出对应错误。
+
+### 2. 运行初始化脚本
+
+执行以下命令，完成整套里程碑初始化流程：
 
 ```bash
-command -v gh
-gh auth status
-gh repo view --json nameWithOwner
+bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 ```
 
-如果任一命令失败，提示用户先安装或登录 `gh`，然后停止。
+脚本负责：
+- 创建并清理临时工作目录
+- 检测是否传入 `--history`
+- 按“最新 `v*` Git tag → `package.json` → 默认 `0.1.0`”解析版本基线
+- 使用 `gh api "repos/$repo/milestones"` 读取当前里程碑
+- 构建目标里程碑集合，并且只创建缺失标题
+- 输出最终执行摘要
 
-为后续步骤创建临时工作目录：
-
-```bash
-tmpdir="$(mktemp -d)"
-trap 'rm -rf "$tmpdir"' EXIT
-```
-
-### 2. 解析参数
-
-检查参数中是否包含 `--history` 标志。
-
-```bash
-history_mode="false"
-
-case " $ARGUMENTS " in
-  *" --history "*) history_mode="true" ;;
-esac
-
-echo "History mode: $history_mode"
-```
-
-### 3. 检测当前版本基线
-
-优先使用最新 Git tag；如果没有 tag，则回退到 `package.json`；如果仍无法确定，则使用默认值 `0.1.0`。
-
-```bash
-current_version=""
-latest_tag="$(git tag --list 'v*' --sort=-v:refname | head -1)"
-
-if [ -n "$latest_tag" ]; then
-  current_version="${latest_tag#v}"
-elif [ -f package.json ]; then
-  current_version="$(node -p "const version = require('./package.json').version || ''; version.replace(/^v/, '').replace(/-.*/, '')")"
-fi
-
-if [ -z "$current_version" ]; then
-  current_version="0.1.0"
-fi
-
-major="${current_version%%.*}"
-rest="${current_version#*.}"
-minor="${rest%%.*}"
-patch="${rest#*.}"
-patch="${patch%%[^0-9]*}"
-
-printf '%s %s %s\n' "$major" "$minor" "$patch" | grep -Eq '^[0-9]+ [0-9]+ [0-9]+$'
-
-line_milestone="$major.$minor.x"
-next_version="$major.$minor.$((patch + 1))"
-
-echo "Detected version baseline: $current_version"
-echo "Line milestone: $line_milestone"
-echo "Next version milestone: $next_version"
-```
-
-### 4. 获取现有里程碑列表
-
-```bash
-repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
-
-gh api "repos/$repo/milestones?state=all" --paginate \
-  --jq '.[] | [.title, .state] | @tsv' > "$tmpdir/existing.tsv"
-
-cut -f1 "$tmpdir/existing.tsv" > "$tmpdir/existing-titles.txt"
-cat "$tmpdir/existing.tsv"
-```
-
-### 5. 准备标准里程碑定义
+### 3. 标准里程碑定义
 
 按固定描述创建以下里程碑：
 - `General Backlog`：`All unsorted backlogged tasks may be completed in a future version.`（state=`open`）
 - `{major}.{minor}.x`：`Issues that we want to resolve in {major}.{minor} line.`（state=`open`）
 - `{major}.{minor}.{patch+1}`：`Issues that we want to release in v{major}.{minor}.{patch+1}.`（state=`open`）
-- `--history` 模式下，每个历史版本 `{major}.{minor}.{patch}` 额外生成：
-  - `{major}.{minor}.x` 线里程碑（state=`open`）
-  - `{major}.{minor}.{patch}` 版本里程碑（state=`closed`）
 
-```bash
-cat <<EOF > "$tmpdir/desired.tsv"
-General Backlog	All unsorted backlogged tasks may be completed in a future version.	open
-$line_milestone	Issues that we want to resolve in $major.$minor line.	open
-$next_version	Issues that we want to release in v$next_version.	open
-EOF
+当传入 `--history` 时，每个历史 `vX.Y.Z` tag 还会额外贡献：
+- `X.Y.x` 作为开启状态的线里程碑
+- `X.Y.Z` 作为关闭状态的版本里程碑（`state=closed`）
 
-if [ "$history_mode" = "true" ]; then
-  git tag --list 'v*' --sort=v:refname > "$tmpdir/history-tags.txt"
+### 4. 输出与行为保证
 
-  if [ ! -s "$tmpdir/history-tags.txt" ]; then
-    echo "No history tags found matching v*; only standard milestones will be created."
-  else
-    while IFS= read -r tag; do
-      [ -n "$tag" ] || continue
+摘要必须包含：
+- 版本基线
+- 是否启用 `--history`
+- 创建与跳过的里程碑数量
+- 新创建的里程碑标题
+- 已存在的里程碑标题
 
-      ver="${tag#v}"
-      h_major="${ver%%.*}"
-      h_rest="${ver#*.}"
-      h_minor="${h_rest%%.*}"
-      h_patch="${h_rest#*.}"
-      h_patch="${h_patch%%[^0-9]*}"
-
-      if ! printf '%s %s %s\n' "$h_major" "$h_minor" "$h_patch" | grep -Eq '^[0-9]+ [0-9]+ [0-9]+$'; then
-        echo "Skip non-semver tag: $tag"
-        continue
-      fi
-
-      printf '%s\t%s\t%s\n' \
-        "$h_major.$h_minor.x" \
-        "Issues that we want to resolve in $h_major.$h_minor line." \
-        "open" >> "$tmpdir/desired.tsv"
-
-      printf '%s\t%s\t%s\n' \
-        "$h_major.$h_minor.$h_patch" \
-        "Issues that we want to release in v$h_major.$h_minor.$h_patch." \
-        "closed" >> "$tmpdir/desired.tsv"
-    done < "$tmpdir/history-tags.txt"
-  fi
-fi
-```
-
-### 6. 创建缺失的里程碑
-
-逐个检查标题是否已存在；已存在则跳过，不重复创建。
-
-```bash
-: > "$tmpdir/created.txt"
-: > "$tmpdir/skipped.txt"
-
-while IFS="$(printf '\t')" read -r title description state; do
-  [ -n "$title" ] || continue
-  state="${state:-open}"
-
-  if grep -Fqx "$title" "$tmpdir/existing-titles.txt"; then
-    printf '%s\n' "$title" >> "$tmpdir/skipped.txt"
-    echo "Skip existing milestone: $title"
-    continue
-  fi
-
-  gh api "repos/$repo/milestones" \
-    -f title="$title" \
-    -f description="$description" \
-    -f state="$state" >/dev/null
-
-  printf '%s\n' "$title" >> "$tmpdir/created.txt"
-  printf '%s\n' "$title" >> "$tmpdir/existing-titles.txt"
-  echo "Created milestone: $title ($state)"
-done < "$tmpdir/desired.tsv"
-```
-
-### 7. 汇总结果
-
-向用户报告执行结果：
-
-```bash
-created_count="$(wc -l < "$tmpdir/created.txt" | tr -d ' ')"
-skipped_count="$(wc -l < "$tmpdir/skipped.txt" | tr -d ' ')"
-
-echo "GitHub Milestones initialized."
-echo
-echo "Summary:"
-echo "- Version baseline: $current_version"
-echo "- History mode: $history_mode"
-echo "- Created milestones: $created_count"
-echo "- Skipped existing milestones: $skipped_count"
-
-if [ -s "$tmpdir/created.txt" ]; then
-  echo "- Newly created:"
-  sed 's/^/  - /' "$tmpdir/created.txt"
-fi
-
-if [ -s "$tmpdir/skipped.txt" ]; then
-  echo "- Already present:"
-  sed 's/^/  - /' "$tmpdir/skipped.txt"
-fi
-
-echo
-echo "Notes:"
-echo "- Milestone titles are treated as the idempotency key."
-echo "- General Backlog is the fallback milestone for unsorted work."
-echo "- Without --history, version milestones are created only for the next patch release."
-
-if [ "$history_mode" = "true" ]; then
-  echo "- Historical X.Y.Z tags create X.Y.x milestones as open and X.Y.Z milestones as closed."
-  echo "- Repositories with many tags may hit the GitHub API rate limit."
-fi
-```
+执行说明：
+- Milestone titles are treated as the idempotency key.
+- General Backlog 是未分类工作的兜底里程碑。
+- 不带 `--history` 时，只为下一次 patch 发布创建版本里程碑。
+- 历史 `X.Y.Z` tag 会生成开启状态的 `X.Y.x` 和关闭状态的 `X.Y.Z`。
+- 标签较多的仓库可能触发 GitHub API rate limit。
 
 ## 错误处理
 

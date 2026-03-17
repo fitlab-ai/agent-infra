@@ -22,11 +22,32 @@ test("update-agent-orchestrator instructions point to templates rendering", () =
 });
 
 test("init-labels skill documents label bootstrap flow and command discovery", () => {
-  [
+  const skillDocs = [
     ".agents/skills/init-labels/SKILL.md",
     "templates/.agents/skills/init-labels/SKILL.md",
     "templates/.agents/skills/init-labels/SKILL.zh-CN.md"
-  ].forEach((relativePath) => {
+  ];
+  const scriptPaths = [
+    ".agents/skills/init-labels/scripts/init-labels.sh",
+    "templates/.agents/skills/init-labels/scripts/init-labels.sh"
+  ];
+
+  skillDocs.forEach((relativePath) => {
+    assertContainsPatterns(relativePath, [
+      /bash \.agents\/skills\/init-labels\/scripts\/init-labels\.sh/,
+      /type:/,
+      /status:/,
+      /good first issue/,
+      /dependencies/,
+      /in: core/,
+      /theme:/,
+      /question/,
+      /wontfix/,
+      /gh auth status/
+    ]);
+  });
+
+  scriptPaths.forEach((relativePath) => {
     assertContainsPatterns(relativePath, [
       /gh label create .*--force/,
       /type: bug/,
@@ -34,11 +55,7 @@ test("init-labels skill documents label bootstrap flow and command discovery", (
       /status: in-progress/,
       /status: waiting-for-internal-feedback/,
       /good first issue/,
-      /dependencies/,
-      /in: core/,
-      /theme:/,
-      /question/,
-      /wontfix/
+      /dependencies/
     ]);
   });
 
@@ -52,23 +69,38 @@ test("init-labels skill documents label bootstrap flow and command discovery", (
 });
 
 test("init-milestones skill documents milestone bootstrap flow and command discovery", () => {
-  [
+  const skillDocs = [
     ".agents/skills/init-milestones/SKILL.md",
     "templates/.agents/skills/init-milestones/SKILL.md",
     "templates/.agents/skills/init-milestones/SKILL.zh-CN.md"
-  ].forEach((relativePath) => {
+  ];
+  const scriptPaths = [
+    ".agents/skills/init-milestones/scripts/init-milestones.sh",
+    "templates/.agents/skills/init-milestones/scripts/init-milestones.sh"
+  ];
+
+  skillDocs.forEach((relativePath) => {
     assertContainsPatterns(relativePath, [
       /General Backlog/,
       /--history/,
-      /git tag --list 'v\*' --sort=-v:refname \| head -1/,
-      /git tag --list 'v\*' --sort=v:refname/,
       /package\.json/,
       /0\.1\.0/,
       /Issues that we want to resolve in .* line/,
       /Issues that we want to release in v/,
       /state.*closed/,
+      /bash \.agents\/skills\/init-milestones\/scripts\/init-milestones\.sh/,
       /gh api "repos\/\$repo\/milestones"/,
       /Milestone titles are treated as the idempotency key/
+    ]);
+  });
+
+  scriptPaths.forEach((relativePath) => {
+    assertContainsPatterns(relativePath, [
+      /git tag --list 'v\*' --sort=-v:refname \| head -1/,
+      /git tag --list 'v\*' --sort=v:refname/,
+      /package\.json/,
+      /0\.1\.0/,
+      /gh api "repos\/\$repo\/milestones"/
     ]);
   });
 

@@ -71,65 +71,18 @@ git tag v{version}
 
 Close the milestone for the released version when it exists, and create the missing planning milestones for the next cycle.
 
+Run:
+
 ```bash
-tmpdir="$(mktemp -d)"
-trap 'rm -rf "$tmpdir"' EXIT
-
-repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
-released_version="${MAJOR}.${MINOR}.${PATCH}"
-line_milestone="${MAJOR}.${MINOR}.x"
-next_patch_version="${MAJOR}.${MINOR}.$((PATCH + 1))"
-next_minor_version="${MAJOR}.$((MINOR + 1)).0"
-next_minor_line="${MAJOR}.$((MINOR + 1)).x"
-
-gh api "repos/$repo/milestones?state=all" --paginate \
-  --jq '.[] | [.number, .title, .state] | @tsv' > "$tmpdir/milestones.tsv"
-
-created_count=0
-
-ensure_milestone() {
-  title="$1"
-  description="$2"
-
-  if awk -F '\t' -v target="$title" '$2 == target { found = 1 } END { exit found ? 0 : 1 }' "$tmpdir/milestones.tsv"; then
-    echo "Milestone already exists: $title"
-    return 0
-  fi
-
-  gh api "repos/$repo/milestones" \
-    -f title="$title" \
-    -f description="$description" \
-    -f state="open" >/dev/null
-
-  printf '0\t%s\topen\n' "$title" >> "$tmpdir/milestones.tsv"
-  created_count=$((created_count + 1))
-  echo "Created milestone: $title"
-}
-
-released_number="$(awk -F '\t' -v target="$released_version" '$2 == target { print $1; exit }' "$tmpdir/milestones.tsv")"
-released_state="$(awk -F '\t' -v target="$released_version" '$2 == target { print $3; exit }' "$tmpdir/milestones.tsv")"
-
-if [ -n "$released_number" ] && [ "$released_state" = "open" ]; then
-  gh api "repos/$repo/milestones/$released_number" -X PATCH -f state="closed" >/dev/null
-  released_action="closed"
-elif [ -n "$released_number" ]; then
-  released_action="already-closed"
-else
-  released_action="missing"
-fi
-
-ensure_milestone "$next_patch_version" "Issues that we want to release in v$next_patch_version."
-ensure_milestone "$line_milestone" "Issues that we want to resolve in $MAJOR.$MINOR line."
-
-if [ "$PATCH" -eq 0 ]; then
-  ensure_milestone "$next_minor_version" "Issues that we want to release in v$next_minor_version."
-  ensure_milestone "$next_minor_line" "Issues that we want to resolve in $MAJOR.$((MINOR + 1)) line."
-fi
-
-echo "Milestone summary:"
-echo "- Released milestone: $released_version ($released_action)"
-echo "- New milestones created: $created_count"
+bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PATCH"
 ```
+
+The script is responsible for:
+- Loading the current milestone list with `gh api "repos/$repo/milestones"`
+- Closing `{MAJOR}.{MINOR}.{PATCH}` when it exists and is still open
+- Ensuring `{MAJOR}.{MINOR}.{PATCH+1}` and `{MAJOR}.{MINOR}.x` exist
+- When `PATCH=0`, also ensuring `{MAJOR}.{MINOR+1}.0` and `{MAJOR}.{MINOR+1}.x`
+- Printing a milestone summary with the released milestone action and new milestone count
 
 ### Step 7: Output Summary
 

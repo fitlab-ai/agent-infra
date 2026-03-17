@@ -70,65 +70,18 @@ git tag v{version}
 
 为已发布版本关闭对应版本里程碑，并为下一轮创建缺失的规划里程碑。
 
+执行：
+
 ```bash
-tmpdir="$(mktemp -d)"
-trap 'rm -rf "$tmpdir"' EXIT
-
-repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
-released_version="${MAJOR}.${MINOR}.${PATCH}"
-line_milestone="${MAJOR}.${MINOR}.x"
-next_patch_version="${MAJOR}.${MINOR}.$((PATCH + 1))"
-next_minor_version="${MAJOR}.$((MINOR + 1)).0"
-next_minor_line="${MAJOR}.$((MINOR + 1)).x"
-
-gh api "repos/$repo/milestones?state=all" --paginate \
-  --jq '.[] | [.number, .title, .state] | @tsv' > "$tmpdir/milestones.tsv"
-
-created_count=0
-
-ensure_milestone() {
-  title="$1"
-  description="$2"
-
-  if awk -F '\t' -v target="$title" '$2 == target { found = 1 } END { exit found ? 0 : 1 }' "$tmpdir/milestones.tsv"; then
-    echo "Milestone already exists: $title"
-    return 0
-  fi
-
-  gh api "repos/$repo/milestones" \
-    -f title="$title" \
-    -f description="$description" \
-    -f state="open" >/dev/null
-
-  printf '0\t%s\topen\n' "$title" >> "$tmpdir/milestones.tsv"
-  created_count=$((created_count + 1))
-  echo "Created milestone: $title"
-}
-
-released_number="$(awk -F '\t' -v target="$released_version" '$2 == target { print $1; exit }' "$tmpdir/milestones.tsv")"
-released_state="$(awk -F '\t' -v target="$released_version" '$2 == target { print $3; exit }' "$tmpdir/milestones.tsv")"
-
-if [ -n "$released_number" ] && [ "$released_state" = "open" ]; then
-  gh api "repos/$repo/milestones/$released_number" -X PATCH -f state="closed" >/dev/null
-  released_action="closed"
-elif [ -n "$released_number" ]; then
-  released_action="already-closed"
-else
-  released_action="missing"
-fi
-
-ensure_milestone "$next_patch_version" "Issues that we want to release in v$next_patch_version."
-ensure_milestone "$line_milestone" "Issues that we want to resolve in $MAJOR.$MINOR line."
-
-if [ "$PATCH" -eq 0 ]; then
-  ensure_milestone "$next_minor_version" "Issues that we want to release in v$next_minor_version."
-  ensure_milestone "$next_minor_line" "Issues that we want to resolve in $MAJOR.$((MINOR + 1)) line."
-fi
-
-echo "Milestone summary:"
-echo "- Released milestone: $released_version ($released_action)"
-echo "- New milestones created: $created_count"
+bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PATCH"
 ```
+
+脚本负责：
+- 使用 `gh api "repos/$repo/milestones"` 读取当前里程碑
+- 在 `{MAJOR}.{MINOR}.{PATCH}` 存在且仍为开启状态时将其关闭
+- 确保 `{MAJOR}.{MINOR}.{PATCH+1}` 与 `{MAJOR}.{MINOR}.x` 存在
+- 当 `PATCH=0` 时，同时确保 `{MAJOR}.{MINOR+1}.0` 与 `{MAJOR}.{MINOR+1}.x`
+- 输出包含已发布里程碑动作和新建数量的汇总
 
 ### 步骤 7：输出摘要
 
