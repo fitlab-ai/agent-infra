@@ -17,11 +17,18 @@ description: >
 - 纯数字（如 `123`）或 `#` + 数字（如 `#123`）-> 视为 issue number
 - `TASK-` 开头 -> 视为 task-id（现有格式）
 
-如果参数是 issue number：
-- 遍历 `.agent-workspace/active/`、`.agent-workspace/blocked/`、`.agent-workspace/completed/` 下所有任务目录
-- 读取每个 `task.md` 的 `issue_number` 字段并匹配目标编号
-- 找到匹配任务后，记录对应 `{task-id}` 和任务目录，然后继续执行步骤 2
-- 如果没有找到，提示 `No task found associated with Issue #{issue-number}`
+如果参数是 issue number，使用 Bash 搜索关联任务（注意：`.agent-workspace` 是隐藏目录，Grep/Glob 工具会跳过，必须使用 Bash）：
+
+```bash
+grep -rl "^issue_number: {issue-number}$" \
+  .agent-workspace/active/ \
+  .agent-workspace/blocked/ \
+  .agent-workspace/completed/ \
+  2>/dev/null | head -1
+```
+
+- 如果返回文件路径（如 `.agent-workspace/completed/TASK-xxx/task.md`），从路径中提取 `{task-id}` 和任务目录，继续执行步骤 2
+- 如果无返回，提示 `No task found associated with Issue #{issue-number}`
 
 如果参数是 task-id，继续执行步骤 2 的现有逻辑。
 

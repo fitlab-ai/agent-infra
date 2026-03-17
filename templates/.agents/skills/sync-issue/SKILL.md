@@ -18,11 +18,18 @@ Determine the provided argument:
 - A plain number (`123`) or `#` + number (`#123`) -> treat it as an issue number
 - Starts with `TASK-` -> treat it as a task-id (existing format)
 
-If the argument is an issue number:
-- Traverse task directories under `.agent-workspace/active/`, `.agent-workspace/blocked/`, and `.agent-workspace/completed/`
-- Read the `issue_number` field from each `task.md` and match it against the target number
-- When a matching task is found, record the corresponding `{task-id}` and task directory, then continue to step 2
-- If no match is found, prompt `No task found associated with Issue #{issue-number}`
+If the argument is an issue number, use Bash to search for the associated task (note: `.agent-workspace` is a hidden directory — Grep/Glob tools skip hidden directories by default, so Bash must be used):
+
+```bash
+grep -rl "^issue_number: {issue-number}$" \
+  .agent-workspace/active/ \
+  .agent-workspace/blocked/ \
+  .agent-workspace/completed/ \
+  2>/dev/null | head -1
+```
+
+- If a file path is returned (e.g., `.agent-workspace/completed/TASK-xxx/task.md`), extract the `{task-id}` and task directory from the path, then continue to step 2
+- If no result is returned, prompt `No task found associated with Issue #{issue-number}`
 
 If the argument is a task-id, continue with the existing step 2 logic.
 
