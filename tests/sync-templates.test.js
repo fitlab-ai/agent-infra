@@ -45,7 +45,7 @@ test("syncTemplates respects templateSource and stays idempotent", async () => {
     writeFile(templateRoot, "child.md", "Top\n");
     writeFile(templateRoot, "nested/child.md", "Nested\n");
 
-    writeJson(projectRoot, ".aorc.json", {
+    writeJson(projectRoot, ".airc.json", {
       project: "demo",
       org: "acme",
       language: "zh-CN",
@@ -66,12 +66,12 @@ test("syncTemplates respects templateSource and stays idempotent", async () => {
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-orchestrator/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
 
     const firstReport = syncTemplates(projectRoot);
-    const afterFirstRun = fs.readFileSync(path.join(projectRoot, ".aorc.json"), "utf8");
+    const afterFirstRun = fs.readFileSync(path.join(projectRoot, ".airc.json"), "utf8");
     const secondReport = syncTemplates(projectRoot);
-    const afterSecondRun = fs.readFileSync(path.join(projectRoot, ".aorc.json"), "utf8");
+    const afterSecondRun = fs.readFileSync(path.join(projectRoot, ".airc.json"), "utf8");
 
     assert.equal(normalize(firstReport.templateRoot), normalize(templateRoot));
     assert.ok(
@@ -120,7 +120,7 @@ test("syncTemplates prefers the latest tag and reports the template version when
 
   try {
     const homeDir = path.join(tmpDir, "home");
-    const installDir = path.join(homeDir, ".agent-orchestrator");
+    const installDir = path.join(homeDir, ".agent-infra");
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = path.join(tmpDir, "template-root");
     const commands = [];
@@ -130,7 +130,7 @@ test("syncTemplates prefers the latest tag and reports the template version when
     fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, "README.md", "Hello {{project}}\n");
-    writeJson(projectRoot, ".aorc.json", {
+    writeJson(projectRoot, ".airc.json", {
       project: "demo",
       org: "acme",
       language: "en",
@@ -171,7 +171,7 @@ test("syncTemplates prefers the latest tag and reports the template version when
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-orchestrator/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot);
 
     assert.equal(report.templateVersion, "v1.0.0");
@@ -198,7 +198,7 @@ test("syncTemplates returns an error when no tags exist", async () => {
 
   try {
     const homeDir = path.join(tmpDir, "home");
-    const installDir = path.join(homeDir, ".agent-orchestrator");
+    const installDir = path.join(homeDir, ".agent-infra");
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = path.join(tmpDir, "template-root");
     const commands = [];
@@ -208,7 +208,7 @@ test("syncTemplates returns an error when no tags exist", async () => {
     fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, "README.md", "Hello {{project}}\n");
-    writeJson(projectRoot, ".aorc.json", {
+    writeJson(projectRoot, ".airc.json", {
       project: "demo",
       org: "acme",
       language: "en",
@@ -240,11 +240,11 @@ test("syncTemplates returns an error when no tags exist", async () => {
       throw new Error("checkout should not run when no tags exist");
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-orchestrator/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot);
 
     assert.deepEqual(report, {
-      error: "No tags found in agent-orchestrator repository. This is unexpected — please reinstall."
+      error: "No tags found in agent-infra repository. This is unexpected — please reinstall."
     });
     assert.deepEqual(commands.slice(0, 2), [
       { command: "git fetch --tags --quiet", cwd: installDir },
@@ -267,7 +267,7 @@ test("syncTemplates returns an error when tag listing fails", async () => {
 
   try {
     const homeDir = path.join(tmpDir, "home");
-    const installDir = path.join(homeDir, ".agent-orchestrator");
+    const installDir = path.join(homeDir, ".agent-infra");
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = path.join(tmpDir, "template-root");
     const commands = [];
@@ -277,7 +277,7 @@ test("syncTemplates returns an error when tag listing fails", async () => {
     fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, "README.md", "Hello {{project}}\n");
-    writeJson(projectRoot, ".aorc.json", {
+    writeJson(projectRoot, ".airc.json", {
       project: "demo",
       org: "acme",
       language: "en",
@@ -309,11 +309,11 @@ test("syncTemplates returns an error when tag listing fails", async () => {
       throw new Error("checkout should not run when tag listing fails");
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-orchestrator/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot);
 
     assert.deepEqual(report, {
-      error: "Failed to list tags in agent-orchestrator repository. Please check git installation."
+      error: "Failed to list tags in agent-infra repository. Please check git installation."
     });
     assert.deepEqual(commands.slice(0, 2), [
       { command: "git fetch --tags --quiet", cwd: installDir },
@@ -343,7 +343,7 @@ test("syncTemplates outputs both SECURITY language variants for zh-CN merged fil
 
     writeFile(templateRoot, "SECURITY.md", "Security EN\n");
     writeFile(templateRoot, "SECURITY.zh-CN.md", "Security ZH\n");
-    writeJson(projectRoot, ".aorc.json", {
+    writeJson(projectRoot, ".airc.json", {
       project: "demo",
       org: "acme",
       language: "zh-CN",
@@ -364,7 +364,7 @@ test("syncTemplates outputs both SECURITY language variants for zh-CN merged fil
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-orchestrator/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot);
 
     assert.deepEqual(report.merged.pending, [
@@ -394,7 +394,7 @@ test("syncTemplates outputs both SECURITY language variants for en merged files"
 
     writeFile(templateRoot, "SECURITY.md", "Security EN\n");
     writeFile(templateRoot, "SECURITY.zh-CN.md", "Security ZH\n");
-    writeJson(projectRoot, ".aorc.json", {
+    writeJson(projectRoot, ".airc.json", {
       project: "demo",
       org: "acme",
       language: "en",
@@ -415,7 +415,7 @@ test("syncTemplates outputs both SECURITY language variants for en merged files"
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-orchestrator/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot);
 
     assert.deepEqual(report.merged.pending, [
@@ -448,7 +448,7 @@ test("syncTemplates removes stale managed files but preserves merged, ejected, a
     writeFile(templateRoot, ".github/workflows/release.yml", "name: release\n");
     writeFile(templateRoot, "preserved.md", "Existing\n");
 
-    writeJson(projectRoot, ".aorc.json", {
+    writeJson(projectRoot, ".airc.json", {
       project: "demo",
       org: "acme",
       language: "en",
@@ -477,7 +477,7 @@ test("syncTemplates removes stale managed files but preserves merged, ejected, a
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-orchestrator/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
 
     const firstReport = syncTemplates(projectRoot);
     const secondReport = syncTemplates(projectRoot);
@@ -515,7 +515,7 @@ test("syncTemplates preserves stale files that match merged glob patterns", asyn
     fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, "docs/guide.md", "Guide\n");
-    writeJson(projectRoot, ".aorc.json", {
+    writeJson(projectRoot, ".airc.json", {
       project: "demo",
       org: "acme",
       language: "en",
@@ -540,7 +540,7 @@ test("syncTemplates preserves stale files that match merged glob patterns", asyn
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-orchestrator/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot);
 
     assert.equal(fs.readFileSync(path.join(projectRoot, "docs/stale/note.md"), "utf8"), "keep merged glob\n");

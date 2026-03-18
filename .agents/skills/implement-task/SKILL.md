@@ -130,7 +130,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 下一步 - 代码审查：
   - Claude Code / OpenCode：/review-task {task-id}
-  - Gemini CLI：/agent-orchestrator:review-task {task-id}
+  - Gemini CLI：/agent-infra:review-task {task-id}
   - Codex CLI：$review-task {task-id}
 ```
 

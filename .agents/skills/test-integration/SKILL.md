@@ -21,7 +21,7 @@ node --version
 
 ## 2. 运行集成测试
 
-本项目的集成测试包含在统一测试套件中（如在临时目录中运行 `ao init` 并验证结果）。
+本项目的集成测试包含在统一测试套件中（如在临时目录中运行 `ai init` 并验证结果）。
 
 ```bash
 node --test tests/*.test.js
@@ -50,7 +50,7 @@ node --test tests/*.test.js
 ```
 下一步 - 提交代码：
   - Claude Code / OpenCode：/commit
-  - Gemini CLI：/agent-orchestrator:commit
+  - Gemini CLI：/agent-infra:commit
   - Codex CLI：$commit
 ```
 

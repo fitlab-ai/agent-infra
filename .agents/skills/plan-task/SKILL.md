@@ -120,7 +120,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 下一步 - 实施任务：
   - Claude Code / OpenCode：/implement-task {task-id}
-  - Gemini CLI：/agent-orchestrator:implement-task {task-id}
+  - Gemini CLI：/agent-infra:implement-task {task-id}
   - Codex CLI：$implement-task {task-id}
 ```
 

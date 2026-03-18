@@ -33,7 +33,7 @@ AI 代理的分步指令。
 ## 可用命令
 
 ### 项目设置
-- `update-agent-orchestrator` - 更新项目配置
+- `update-agent-infra` - 更新项目配置
 
 ### 开发
 - `commit` - 提交当前变更到 Git

@@ -17,7 +17,7 @@ function pathExists(targetPath) {
 }
 
 function ensureCloneInstallFixture() {
-  const installDir = path.join(os.homedir(), ".agent-orchestrator");
+  const installDir = path.join(os.homedir(), ".agent-infra");
   const templateSource = filePath("templates");
   const backupDir = pathExists(installDir)
     ? `${installDir}.test-backup-${process.pid}-${Date.now()}`
@@ -43,10 +43,10 @@ test("bootstrap CLI files exist", () => {
 
   const installSh = read("install.sh");
   assert.match(installSh, /git clone/);
-  assert.match(installSh, /\.agent-orchestrator/);
+  assert.match(installSh, /\.agent-infra/);
 
   const nodeCli = read("bin/cli.js");
-  assert.match(nodeCli, /agent-orchestrator/);
+  assert.match(nodeCli, /agent-infra/);
 
   const nodeStats = fs.statSync(filePath("bin/cli.js"));
   assert.ok(nodeStats.mode & 0o111, "bin/cli.js should be executable");
@@ -58,10 +58,10 @@ test("cli version output stays in sync with package.json", () => {
     encoding: "utf8"
   });
 
-  assert.equal(output.trim(), `agent-orchestrator ${pkg.version}`);
+  assert.equal(output.trim(), `agent-infra ${pkg.version}`);
 });
 
-test("agent-orchestrator init generates seed files in a temp directory", () => {
+test("agent-infra init generates seed files in a temp directory", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
   const cli = filePath("bin/cli.js");
 
@@ -72,7 +72,7 @@ test("agent-orchestrator init generates seed files in a temp directory", () => {
     );
 
     const config = JSON.parse(
-      fs.readFileSync(path.join(tmpDir, ".aorc.json"), "utf8")
+      fs.readFileSync(path.join(tmpDir, ".airc.json"), "utf8")
     );
     assert.equal(config.project, "testproj");
     assert.equal(config.org, "testorg");
@@ -97,23 +97,23 @@ test("agent-orchestrator init generates seed files in a temp directory", () => {
     });
 
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".agents/skills/update-agent-orchestrator/SKILL.md")),
+      fs.existsSync(path.join(tmpDir, ".agents/skills/update-agent-infra/SKILL.md")),
       "skill should be installed"
     );
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".agents/skills/update-agent-orchestrator/scripts/package.json")),
+      fs.existsSync(path.join(tmpDir, ".agents/skills/update-agent-infra/scripts/package.json")),
       "skill scripts package.json should be installed"
     );
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".agents/skills/update-agent-orchestrator/scripts/sync-templates.js")),
+      fs.existsSync(path.join(tmpDir, ".agents/skills/update-agent-infra/scripts/sync-templates.js")),
       "skill sync script should be installed"
     );
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-orchestrator.md")),
+      fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-infra.md")),
       "claude command should be installed"
     );
     assert.ok(
-      !fs.existsSync(path.join(tmpDir, ".codex/commands/testproj-update-agent-orchestrator.md")),
+      !fs.existsSync(path.join(tmpDir, ".codex/commands/testproj-update-agent-infra.md")),
       "codex prompt adapter should not be installed"
     );
     assert.ok(
@@ -121,20 +121,20 @@ test("agent-orchestrator init generates seed files in a temp directory", () => {
       "codex prompt sync script should not be installed"
     );
     assert.ok(
-      !fs.existsSync(path.join(tmpDir, ".codex/prompts/testproj-update-agent-orchestrator.md")),
+      !fs.existsSync(path.join(tmpDir, ".codex/prompts/testproj-update-agent-infra.md")),
       "codex prompt should not be synced to the global dir"
     );
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".gemini/commands/testproj/update-agent-orchestrator.toml")),
+      fs.existsSync(path.join(tmpDir, ".gemini/commands/testproj/update-agent-infra.toml")),
       "gemini command should be installed"
     );
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-orchestrator.md")),
+      fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")),
       "opencode command should be installed"
     );
 
     const skill = fs.readFileSync(
-      path.join(tmpDir, ".agents/skills/update-agent-orchestrator/SKILL.md"), "utf8"
+      path.join(tmpDir, ".agents/skills/update-agent-infra/SKILL.md"), "utf8"
     );
     assert.doesNotMatch(skill, /\{\{project\}\}/, "skill should not contain unrendered {{project}}");
     assert.doesNotMatch(skill, /\{\{org\}\}/, "skill should not contain unrendered {{org}}");
@@ -167,7 +167,7 @@ test("installed sync-templates.js executes inside a type=module project", () => 
 
     const output = execFileSync(
       process.execPath,
-      [path.join(".agents", "skills", "update-agent-orchestrator", "scripts", "sync-templates.js")],
+      [path.join(".agents", "skills", "update-agent-infra", "scripts", "sync-templates.js")],
       {
         cwd: tmpDir,
         encoding: "utf8"
@@ -178,7 +178,7 @@ test("installed sync-templates.js executes inside a type=module project", () => 
     assert.ok(!report.error, "sync-templates.js should run without ESM loader errors");
     assert.ok(
       fs.existsSync(
-        path.join(tmpDir, ".agents", "skills", "update-agent-orchestrator", "scripts", "sync-templates.js")
+        path.join(tmpDir, ".agents", "skills", "update-agent-infra", "scripts", "sync-templates.js")
       ),
       "sync-templates.js should be installed into the ESM project"
     );
@@ -194,7 +194,7 @@ test("build output is up-to-date", () => {
   });
 });
 
-test("agent-orchestrator init rejects invalid input", () => {
+test("agent-infra init rejects invalid input", () => {
   const cli = filePath("bin/cli.js");
   const cases = [
     { input: 'demo"x\\ntestorg\\n\\n', desc: "project name with quote" },
@@ -217,7 +217,7 @@ test("agent-orchestrator init rejects invalid input", () => {
   });
 });
 
-test("agent-orchestrator update refreshes seed files and syncs file registry", () => {
+test("agent-infra update refreshes seed files and syncs file registry", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-"));
   const cli = filePath("bin/cli.js");
   const config = {
@@ -237,23 +237,23 @@ test("agent-orchestrator update refreshes seed files and syncs file registry", (
 
   try {
     fs.writeFileSync(
-      path.join(tmpDir, ".aorc.json"),
+      path.join(tmpDir, ".airc.json"),
       JSON.stringify(config, null, 2) + "\n",
       "utf8"
     );
-    fs.mkdirSync(path.join(tmpDir, ".agents", "skills", "update-agent-orchestrator"), {
+    fs.mkdirSync(path.join(tmpDir, ".agents", "skills", "update-agent-infra"), {
       recursive: true
     });
     fs.writeFileSync(
-      path.join(tmpDir, ".agents", "skills", "update-agent-orchestrator", "SKILL.md"),
+      path.join(tmpDir, ".agents", "skills", "update-agent-infra", "SKILL.md"),
       "stale skill\n",
       "utf8"
     );
-    fs.mkdirSync(path.join(tmpDir, ".agents", "skills", "update-agent-orchestrator", "scripts"), {
+    fs.mkdirSync(path.join(tmpDir, ".agents", "skills", "update-agent-infra", "scripts"), {
       recursive: true
     });
     fs.writeFileSync(
-      path.join(tmpDir, ".agents", "skills", "update-agent-orchestrator", "scripts", "sync-templates.cjs"),
+      path.join(tmpDir, ".agents", "skills", "update-agent-infra", "scripts", "sync-templates.cjs"),
       "legacy script\n",
       "utf8"
     );
@@ -267,7 +267,7 @@ test("agent-orchestrator update refreshes seed files and syncs file registry", (
     assert.match(output, /Seed files updated successfully!/);
 
     const updated = JSON.parse(
-      fs.readFileSync(path.join(tmpDir, ".aorc.json"), "utf8")
+      fs.readFileSync(path.join(tmpDir, ".airc.json"), "utf8")
     );
     assert.ok(updated.files.managed.includes(".agents/skills/"));
     assert.ok(updated.files.merged.includes("**/test.*"));
@@ -278,37 +278,37 @@ test("agent-orchestrator update refreshes seed files and syncs file registry", (
     );
 
     const skill = fs.readFileSync(
-      path.join(tmpDir, ".agents", "skills", "update-agent-orchestrator", "SKILL.md"),
+      path.join(tmpDir, ".agents", "skills", "update-agent-infra", "SKILL.md"),
       "utf8"
     );
     assert.notEqual(skill, "stale skill\n");
-    assert.match(skill, /ao update/);
+    assert.match(skill, /ai update/);
     assert.doesNotMatch(skill, /\{\{project\}\}/);
     assert.doesNotMatch(skill, /\{\{org\}\}/);
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".agents", "skills", "update-agent-orchestrator", "scripts", "sync-templates.js"))
+      fs.existsSync(path.join(tmpDir, ".agents", "skills", "update-agent-infra", "scripts", "sync-templates.js"))
     );
     assert.ok(
-      !fs.existsSync(path.join(tmpDir, ".agents", "skills", "update-agent-orchestrator", "scripts", "sync-templates.cjs"))
+      !fs.existsSync(path.join(tmpDir, ".agents", "skills", "update-agent-infra", "scripts", "sync-templates.cjs"))
     );
 
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".claude", "commands", "update-agent-orchestrator.md"))
+      fs.existsSync(path.join(tmpDir, ".claude", "commands", "update-agent-infra.md"))
     );
     assert.ok(
       fs.existsSync(
-        path.join(tmpDir, ".gemini", "commands", "seedproj", "update-agent-orchestrator.toml")
+        path.join(tmpDir, ".gemini", "commands", "seedproj", "update-agent-infra.toml")
       )
     );
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".opencode", "commands", "update-agent-orchestrator.md"))
+      fs.existsSync(path.join(tmpDir, ".opencode", "commands", "update-agent-infra.md"))
     );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("agent-orchestrator update requires .aorc.json", () => {
+test("agent-infra update requires .airc.json", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-"));
   const cli = filePath("bin/cli.js");
 

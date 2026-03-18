@@ -1,18 +1,18 @@
-# Agent Orchestrator
+# Agent Infra
 
-[![npm version](https://img.shields.io/npm/v/@fitlab-ai/agent-orchestrator)](https://www.npmjs.com/package/@fitlab-ai/agent-orchestrator)
-[![npm downloads](https://img.shields.io/npm/dm/@fitlab-ai/agent-orchestrator)](https://www.npmjs.com/package/@fitlab-ai/agent-orchestrator)
+[![npm version](https://img.shields.io/npm/v/@fitlab-ai/agent-infra)](https://www.npmjs.com/package/@fitlab-ai/agent-infra)
+[![npm downloads](https://img.shields.io/npm/dm/@fitlab-ai/agent-infra)](https://www.npmjs.com/package/@fitlab-ai/agent-infra)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](License.txt)
 [![Node.js >= 18](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen?logo=node.js)](https://nodejs.org/)
-[![GitHub release](https://img.shields.io/github/v/release/fitlab-ai/agent-orchestrator)](https://github.com/fitlab-ai/agent-orchestrator/releases)
+[![GitHub release](https://img.shields.io/github/v/release/fitlab-ai/agent-infra)](https://github.com/fitlab-ai/agent-infra/releases)
 
 A template and skill repository for initializing and maintaining AI multi-tool collaboration infrastructure and project governance across software projects.
 
 [中文版](README.zh-CN.md)
 
-## What is agent-orchestrator?
+## What is agent-infra?
 
-agent-orchestrator provides standardized configuration for AI TUI tools (Claude Code, Codex, Gemini CLI, OpenCode) to collaborate effectively on the same project. A lightweight bootstrap CLI seeds the first command; all subsequent operations are AI skill-driven.
+agent-infra provides standardized configuration for AI TUI tools (Claude Code, Codex, Gemini CLI, OpenCode) to collaborate effectively on the same project. A lightweight bootstrap CLI seeds the first command; all subsequent operations are AI skill-driven.
 
 ### Key Features
 
@@ -25,26 +25,26 @@ agent-orchestrator provides standardized configuration for AI TUI tools (Claude 
 
 ## Quick Start
 
-### 1. Install agent-orchestrator
+### 1. Install agent-infra
 
 **Option A — npm (recommended)**
 
 ```bash
-npm install -g @fitlab-ai/agent-orchestrator
-npx @fitlab-ai/agent-orchestrator init
+npm install -g @fitlab-ai/agent-infra
+npx @fitlab-ai/agent-infra init
 ```
 
 **Option B — Shell script**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-orchestrator/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh
 ```
 
 **Option C — Install from source**
 
 ```bash
-git clone https://github.com/fitlab-ai/agent-orchestrator.git
-cd agent-orchestrator
+git clone https://github.com/fitlab-ai/agent-infra.git
+cd agent-infra
 sh install.sh
 ```
 
@@ -52,24 +52,24 @@ sh install.sh
 
 ```bash
 cd my-project
-ao init
-# or: agent-orchestrator init
+ai init
+# or: agent-infra init
 ```
 
-The CLI will interactively collect project info (name, org, language, etc.), install the `update-agent-orchestrator` seed command for all AI TUIs, and generate `.aorc.json`.
+The CLI will interactively collect project info (name, org, language, etc.), install the `update-agent-infra` seed command for all AI TUIs, and generate `.airc.json`.
 
-> **Tip:** `ao` is a shorthand for `agent-orchestrator`. Both commands are equivalent.
+> **Tip:** `ai` is a shorthand for `agent-infra`. Both commands are equivalent.
 
 ### 3. Render the full infrastructure
 
-Open the project in any AI TUI and run `update-agent-orchestrator`:
+Open the project in any AI TUI and run `update-agent-infra`:
 
 | TUI | Command |
 |-----|---------|
-| Claude Code | `/update-agent-orchestrator` |
-| Codex | `$update-agent-orchestrator` |
-| Gemini CLI | `/{{project}}:update-agent-orchestrator` |
-| OpenCode | `/update-agent-orchestrator` |
+| Claude Code | `/update-agent-infra` |
+| Codex | `$update-agent-infra` |
+| Gemini CLI | `/{{project}}:update-agent-infra` |
+| OpenCode | `/update-agent-infra` |
 
 This pulls the latest templates and renders all files. Use the same command for future updates — it automatically handles both first-time setup and incremental updates.
 
@@ -92,7 +92,7 @@ my-project/
 ├── CONTRIBUTING.md        # Development guide
 ├── SECURITY.md            # Security policy (English)
 ├── SECURITY.zh-CN.md      # Security policy (Chinese)
-└── .aorc.json             # Central configuration
+└── .airc.json             # Central configuration
 ```
 
 ### Built-in AI Skills
@@ -151,15 +151,15 @@ import-issue #42                    Import task from GitHub Issue
 
 | Strategy | Meaning | Update Behavior |
 |----------|---------|----------------|
-| **managed** | agent-orchestrator fully controls | Overwrite on update; users should not modify |
+| **managed** | agent-infra fully controls | Overwrite on update; users should not modify |
 | **merged** | Template + user customizations coexist | AI intelligent merge preserving user additions |
 | **ejected** | Generated only on first run | Never updated |
 
-Users can adjust strategies per file in `.aorc.json`.
+Users can adjust strategies per file in `.airc.json`.
 
 ## Version Management
 
-Uses semantic versioning via git tags. Template version is tracked in `.aorc.json` as `templateVersion`.
+Uses semantic versioning via git tags. Template version is tracked in `.airc.json` as `templateVersion`.
 
 ## Contributing
 

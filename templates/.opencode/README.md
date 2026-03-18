@@ -32,7 +32,7 @@ Use markdown code blocks for illustrative examples that should NOT be auto-execu
 ## Available Commands
 
 ### Project Setup
-- `update-agent-orchestrator` - Update project configuration
+- `update-agent-infra` - Update project configuration
 
 ### Development
 - `commit` - Commit current changes to Git

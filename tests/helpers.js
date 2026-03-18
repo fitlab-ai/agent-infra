@@ -198,7 +198,7 @@ const commandSpecs = {
   },
   test: {},
   "test-integration": {},
-  "update-agent-orchestrator": {},
+  "update-agent-infra": {},
   "upgrade-dependency": {
     usage: "<pkg> <from> <to>",
     en: "Upgrade dependency: $ARGUMENTS",

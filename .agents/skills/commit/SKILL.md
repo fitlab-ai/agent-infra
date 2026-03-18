@@ -164,7 +164,7 @@ date "+%Y-%m-%d %H:%M:%S"
 ```
 下一步 - 完成并归档任务：
   - Claude Code / OpenCode：/complete-task {task-id}
-  - Gemini CLI：/agent-orchestrator:complete-task {task-id}
+  - Gemini CLI：/agent-infra:complete-task {task-id}
   - Codex CLI：$complete-task {task-id}
 ```
 
@@ -188,7 +188,7 @@ date "+%Y-%m-%d %H:%M:%S"
 ```
 下一步 - 代码审查：
   - Claude Code / OpenCode：/review-task {task-id}
-  - Gemini CLI：/agent-orchestrator:review-task {task-id}
+  - Gemini CLI：/agent-infra:review-task {task-id}
   - Codex CLI：$review-task {task-id}
 ```
 
@@ -205,7 +205,7 @@ date "+%Y-%m-%d %H:%M:%S"
 ```
 下一步 - 创建 Pull Request：
   - Claude Code / OpenCode：/create-pr
-  - Gemini CLI：/agent-orchestrator:create-pr
+  - Gemini CLI：/agent-infra:create-pr
   - Codex CLI：$create-pr
 ```
 

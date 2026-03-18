@@ -77,7 +77,7 @@ Code Scanning 告警 #{alert-number} 已导入。
 
 下一步：
   - Claude Code / OpenCode：/analyze-task {task-id}
-  - Gemini CLI：/agent-orchestrator:analyze-task {task-id}
+  - Gemini CLI：/agent-infra:analyze-task {task-id}
   - Codex CLI：$analyze-task {task-id}
 ```
 

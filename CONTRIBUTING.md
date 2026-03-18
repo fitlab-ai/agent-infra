@@ -9,9 +9,9 @@
 我们使用 [Git](https://git-scm.com/) 作为版本控制工具，项目开发模式遵从多版本的 `Git-Flow` 模式：
 
 - `main` 分支为主干开发分支，所有特性都从该分支检出并合入
-- `agent-orchestrator-feature-*` 分支为特性开发分支
-- `agent-orchestrator-{$majorVersion}.{$minorVersion}.x` 为指定版本分支
-- `agent-orchestrator-bugfix-*` 分支为问题修复分支
+- `agent-infra-feature-*` 分支为特性开发分支
+- `agent-infra-{$majorVersion}.{$minorVersion}.x` 为指定版本分支
+- `agent-infra-bugfix-*` 分支为问题修复分支
 - 所有问题修复或者功能增强，均需要找到合适的最低版本分支进行处理，然后逐级分支往上合入，最终合入 `main` 分支
 
 ## 环境配置
@@ -26,7 +26,7 @@
 
 ```bash
 # 克隆项目
-git clone git@github.com:fitlab-ai/agent-orchestrator.git
+git clone git@github.com:fitlab-ai/agent-infra.git
 
 # 安装依赖：无需安装，仅使用 Node.js 内置模块
 
@@ -45,11 +45,11 @@ npm test
 
 - 为每个功能或问题修复创建一个新的分支，避免在主分支（如 `main`）上直接开发。
 - 分支命名应简洁明了，描述分支的主要目的。
-  - 分支以 `agent-orchestrator-` 开头。
-  - 特性分支以 `agent-orchestrator-feature-` 开头，功能增强分支以 `agent-orchestrator-enhancement-` 开头，任务型分支以 `agent-orchestrator-task-` 开头，问题修复分支以 `agent-orchestrator-bugfix-` 开头。
+  - 分支以 `agent-infra-` 开头。
+  - 特性分支以 `agent-infra-feature-` 开头，功能增强分支以 `agent-infra-enhancement-` 开头，任务型分支以 `agent-infra-task-` 开头，问题修复分支以 `agent-infra-bugfix-` 开头。
   - 使用短划线 `-` 来分隔单词。
-  - 版本分支最后跟两个版本号和一个 `x` 字母，例如：`agent-orchestrator-1.0.x`。
-  - 发布分支后面跟三个版本号，例如：`agent-orchestrator-1.0.0`。
+  - 版本分支最后跟两个版本号和一个 `x` 字母，例如：`agent-infra-1.0.x`。
+  - 发布分支后面跟三个版本号，例如：`agent-infra-1.0.0`。
 
 ### 版本分支合并规则
 
@@ -58,9 +58,9 @@ npm test
 
 ## 标签管理
 
-- 每个标签的名字和发布分支的名字需要保持一致，例如：`agent-orchestrator-1.0.0`。
+- 每个标签的名字和发布分支的名字需要保持一致，例如：`agent-infra-1.0.0`。
 - 纯数字版本的分支需要以 `v` 开头，例如：`v0.1.0`。
-- 候选版本以特殊词组结尾，例如：`agent-orchestrator-1.0.0-alpha1`。
+- 候选版本以特殊词组结尾，例如：`agent-infra-1.0.0-alpha1`。
 - 当标签被打出后，对应的发布分支应当删除。
 - 所有的 Issue 和 PR 都需要至少包含两种标签：`in: {$module}` 和 `type: {$type}`。
 
@@ -75,7 +75,7 @@ npm test
 ### 构建架构
 
 - `src/sync-templates.js` 是开发源码，保留可读的源码结构和对 `lib/` 数据文件的标准读取方式。
-- `templates/.agents/skills/update-agent-orchestrator/scripts/sync-templates.js` 是构建产物，发布时会把默认配置和版本号内联为常量。
+- `templates/.agents/skills/update-agent-infra/scripts/sync-templates.js` 是构建产物，发布时会把默认配置和版本号内联为常量。
 - 之所以需要这层构建，是因为 `sync-templates.js` 会被复制到用户项目中运行，届时不能再依赖 installer 仓库里的 `lib/` 目录。
 - 修改 `src/`、`lib/defaults.json` 或相关版本信息后，应执行 `npm run build` 重新生成产物，不要直接手工编辑 `templates/` 下的生成文件。
 

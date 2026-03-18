@@ -10,7 +10,7 @@ This project uses native Codex skills.
 Examples:
 
 ```text
-$update-agent-orchestrator
+$update-agent-infra
 $create-task add graceful shutdown support
 $plan-task TASK-20260310-105622
 ```
@@ -20,7 +20,7 @@ $plan-task TASK-20260310-105622
 Codex reads the actual workflow instructions from the project-local skill
 files, for example:
 
-- `.agents/skills/update-agent-orchestrator/SKILL.md`
+- `.agents/skills/update-agent-infra/SKILL.md`
 - `.agents/skills/create-task/SKILL.md`
 - `.agents/skills/implement-task/SKILL.md`
 

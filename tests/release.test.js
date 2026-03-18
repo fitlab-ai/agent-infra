@@ -7,11 +7,11 @@ import { filePath, read } from "./helpers.js";
 test("package metadata supports scoped npm publishing", () => {
   const pkg = JSON.parse(read("package.json"));
 
-  assert.equal(pkg.name, "@fitlab-ai/agent-orchestrator");
+  assert.equal(pkg.name, "@fitlab-ai/agent-infra");
   assert.equal(pkg.author, "CodeCaster <codecaster365@outlook.com>");
-  assert.equal(pkg.homepage, "https://github.com/fitlab-ai/agent-orchestrator#readme");
+  assert.equal(pkg.homepage, "https://github.com/fitlab-ai/agent-infra#readme");
   assert.deepEqual(pkg.bugs, {
-    url: "https://github.com/fitlab-ai/agent-orchestrator/issues"
+    url: "https://github.com/fitlab-ai/agent-infra/issues"
   });
   assert.deepEqual(pkg.publishConfig, {
     access: "public",
@@ -39,8 +39,8 @@ test("CLI help advertises scoped npm install commands", () => {
     encoding: "utf8"
   });
 
-  assert.match(output, /npm install -g @fitlab-ai\/agent-orchestrator/);
-  assert.match(output, /npx @fitlab-ai\/agent-orchestrator init/);
+  assert.match(output, /npm install -g @fitlab-ai\/agent-infra/);
+  assert.match(output, /npx @fitlab-ai\/agent-infra init/);
 });
 
 test("release documentation reflects CI-driven npm publishing", () => {
@@ -53,11 +53,11 @@ test("release documentation reflects CI-driven npm publishing", () => {
 
   assert.match(releasing, /NPM_TOKEN/);
   assert.match(releasing, /npm publish --provenance/);
-  assert.match(releasing, /@fitlab-ai\/agent-orchestrator/);
+  assert.match(releasing, /@fitlab-ai\/agent-infra/);
   assert.match(releasing, /推送标签后由 CI 自动执行/);
   assert.match(releaseSkill, /推送后将自动触发 GitHub Release 创建和 npm 发布/);
   assert.match(releaseSkill, /npm 自动发布/);
-  assert.match(releaseSkill, /\.aorc\.json.*templateVersion/);
+  assert.match(releaseSkill, /\.airc\.json.*templateVersion/);
   [releaseSkill, releaseTemplate, releaseTemplateZh].forEach((content) => {
     assert.match(content, /manage-milestones\.sh/);
     assert.match(content, /init-milestones/);

@@ -10,14 +10,14 @@ import {
   skillDocPaths
 } from "./helpers.js";
 
-test("update-agent-orchestrator instructions point to templates rendering", () => {
-  const updateSkill = read(".agents/skills/update-agent-orchestrator/SKILL.md");
-  const geminiUpdate = read(".gemini/commands/agent-orchestrator/update-agent-orchestrator.toml");
+test("update-agent-infra instructions point to templates rendering", () => {
+  const updateSkill = read(".agents/skills/update-agent-infra/SKILL.md");
+  const geminiUpdate = read(".gemini/commands/agent-infra/update-agent-infra.toml");
 
   assert.match(updateSkill, /templateSource/);
   assert.match(updateSkill, /templates\//);
   assert.match(updateSkill, /git.*pull/);
-  assert.match(updateSkill, /ao update/);
+  assert.match(updateSkill, /ai update/);
   assert.match(geminiUpdate, /SKILL\.md/);
 });
 
@@ -64,8 +64,8 @@ test("init-labels skill documents label bootstrap flow and command discovery", (
   assert.match(read(".claude/CLAUDE.md"), /\/init-labels\s+# 初始化 GitHub Labels/);
   assert.match(read("templates/.gemini/commands/_project_/init-labels.toml"), /\{\{project\}\}/);
   assert.match(read("templates/.gemini/commands/_project_/init-labels.zh-CN.toml"), /\{\{project\}\}/);
-  assert.doesNotMatch(read(".gemini/commands/agent-orchestrator/init-labels.toml"), /\{\{project\}\}/);
-  assert.match(read(".gemini/commands/agent-orchestrator/init-labels.toml"), /agent-orchestrator/);
+  assert.doesNotMatch(read(".gemini/commands/agent-infra/init-labels.toml"), /\{\{project\}\}/);
+  assert.match(read(".gemini/commands/agent-infra/init-labels.toml"), /agent-infra/);
 });
 
 test("init-milestones skill documents milestone bootstrap flow and command discovery", () => {
@@ -109,8 +109,8 @@ test("init-milestones skill documents milestone bootstrap flow and command disco
   assert.match(read(".claude/CLAUDE.md"), /\/init-milestones\s+# 初始化 GitHub Milestones/);
   assert.match(read("templates/.gemini/commands/_project_/init-milestones.toml"), /\{\{project\}\}/);
   assert.match(read("templates/.gemini/commands/_project_/init-milestones.zh-CN.toml"), /\{\{project\}\}/);
-  assert.doesNotMatch(read(".gemini/commands/agent-orchestrator/init-milestones.toml"), /\{\{project\}\}/);
-  assert.match(read(".gemini/commands/agent-orchestrator/init-milestones.toml"), /agent-orchestrator/);
+  assert.doesNotMatch(read(".gemini/commands/agent-infra/init-milestones.toml"), /\{\{project\}\}/);
+  assert.match(read(".gemini/commands/agent-infra/init-milestones.toml"), /agent-infra/);
 });
 
 test("sync-issue skill documents label sync and development linking", () => {

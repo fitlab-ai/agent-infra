@@ -3,13 +3,13 @@
  * sync-templates.js — Deterministic template sync for managed & ejected files.
  *
  * Handles SKILL steps: 2 (git pull), 3.0 (registry sync), 4 (managed),
- * 6 (ejected), 7 (.aorc.json update).
+ * 6 (ejected), 7 (.airc.json update).
  *
  * Merged files (step 5) are NOT handled — they require AI semantic merge.
  * The report includes `merged.pending` so the AI knows what to process.
  *
  * Usage:
- *   node .agents/skills/update-agent-orchestrator/scripts/sync-templates.js [project-root]
+ *   node .agents/skills/update-agent-infra/scripts/sync-templates.js [project-root]
  *
  * Output: JSON report to stdout.
  */
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 // Keep these helpers aligned with lib/paths.js for clone installs.
 function resolveInstallDir() {
-  return path.join(os.homedir(), '.agent-orchestrator');
+  return path.join(os.homedir(), '.agent-infra');
 }
 
 function resolveTemplateDir() {
@@ -227,15 +227,15 @@ function langSelect(rels, lang, allSet, project) {
 }
 
 function syncTemplates(projectRoot) {
-  const cfgPath = path.join(projectRoot, '.aorc.json');
+  const cfgPath = path.join(projectRoot, '.airc.json');
   if (!fs.existsSync(cfgPath)) {
-    return { error: 'No .aorc.json in project root.' };
+    return { error: 'No .airc.json in project root.' };
   }
 
   const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
   const templateRoot = resolveProjectTemplateDir(projectRoot, cfg.templateSource);
   if (!templateRoot) {
-    return { error: 'Template source not found. Install: curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-orchestrator/main/install.sh | sh' };
+    return { error: 'Template source not found. Install: curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh' };
   }
   const installDir = resolveInstallDir();
 
@@ -252,11 +252,11 @@ function syncTemplates(projectRoot) {
         cwd: installDir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
       }).trim();
     } catch {
-      return { error: 'Failed to list tags in agent-orchestrator repository. Please check git installation.' };
+      return { error: 'Failed to list tags in agent-infra repository. Please check git installation.' };
     }
     const latestTag = tagOutput.split('\n')[0];
     if (!latestTag) {
-      return { error: 'No tags found in agent-orchestrator repository. This is unexpected — please reinstall.' };
+      return { error: 'No tags found in agent-infra repository. This is unexpected — please reinstall.' };
     }
     try { childProcess.execFileSync('git', ['checkout', latestTag, '--quiet'], { cwd: installDir, stdio: 'pipe' }); } catch { /* ignore */ }
     version = latestTag;

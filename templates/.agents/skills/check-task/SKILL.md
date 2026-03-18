@@ -106,11 +106,11 @@ description: >
 
 | 当前状态 | Claude Code / OpenCode | Gemini CLI | Codex CLI |
 |---------|----------------------|------------|-----------|
-| 分析完成 | `/plan-task {task-id}` | `/agent-orchestrator:plan-task {task-id}` | `$plan-task {task-id}` |
-| 计划完成 | `/implement-task {task-id}` | `/agent-orchestrator:implement-task {task-id}` | `$implement-task {task-id}` |
-| 实现完成 | `/review-task {task-id}` | `/agent-orchestrator:review-task {task-id}` | `$review-task {task-id}` |
-| 审查通过 | `/commit` | `/agent-orchestrator:commit` | `$commit` |
-| 审查有问题 | `/refine-task {task-id}` | `/agent-orchestrator:refine-task {task-id}` | `$refine-task {task-id}` |
+| 分析完成 | `/plan-task {task-id}` | `/agent-infra:plan-task {task-id}` | `$plan-task {task-id}` |
+| 计划完成 | `/implement-task {task-id}` | `/agent-infra:implement-task {task-id}` | `$implement-task {task-id}` |
+| 实现完成 | `/review-task {task-id}` | `/agent-infra:review-task {task-id}` | `$review-task {task-id}` |
+| 审查通过 | `/commit` | `/agent-infra:commit` | `$commit` |
+| 审查有问题 | `/refine-task {task-id}` | `/agent-infra:refine-task {task-id}` | `$refine-task {task-id}` |
 | 任务被阻塞 | 解除阻塞或提供所需信息 | — | 解除阻塞或提供所需信息 |
 | 任务已完成 | 无需操作 | — | 无需操作 |
 

@@ -5,29 +5,29 @@ import { VERSION } from '../lib/version.js';
 const major = parseInt(process.versions.node.split('.')[0], 10);
 if (major < 18) {
   process.stderr.write(
-    `agent-orchestrator requires Node.js >= 18 (current: ${process.version})\n`
+    `agent-infra requires Node.js >= 18 (current: ${process.version})\n`
   );
   process.exit(1);
 }
 
-const USAGE = `agent-orchestrator - bootstrap AI collaboration infrastructure
+const USAGE = `agent-infra - bootstrap AI collaboration infrastructure
 
 Usage:
-  agent-orchestrator init        Initialize a new project with update-agent-orchestrator seed command
-  agent-orchestrator update      Update seed files and sync file registry for an existing project
-  agent-orchestrator version     Show version
-  agent-orchestrator help        Show this help message
+  agent-infra init        Initialize a new project with update-agent-infra seed command
+  agent-infra update      Update seed files and sync file registry for an existing project
+  agent-infra version     Show version
+  agent-infra help        Show this help message
 
-Shorthand: ao (e.g. ao init)
+Shorthand: ai (e.g. ai init)
 
 Install methods:
-  npm:   npm install -g @fitlab-ai/agent-orchestrator
-  npx:   npx @fitlab-ai/agent-orchestrator init
-  curl:  curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-orchestrator/main/install.sh | sh
+  npm:   npm install -g @fitlab-ai/agent-infra
+  npx:   npx @fitlab-ai/agent-infra init
+  curl:  curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh
 
 Examples:
-  cd my-project && agent-orchestrator init
-  npx @fitlab-ai/agent-orchestrator init
+  cd my-project && agent-infra init
+  npx @fitlab-ai/agent-infra init
 `;
 
 const command = process.argv[2] || '';
@@ -50,7 +50,7 @@ switch (command) {
     break;
   }
   case 'version': {
-    console.log(`agent-orchestrator ${VERSION}`);
+    console.log(`agent-infra ${VERSION}`);
     break;
   }
   case 'help':

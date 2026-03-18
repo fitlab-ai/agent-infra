@@ -22,9 +22,9 @@ test("required template files were migrated into templates/", () => {
     "templates/.agents/skills/init-labels/SKILL.zh-CN.md",
     "templates/.agents/skills/init-milestones/SKILL.md",
     "templates/.agents/skills/init-milestones/SKILL.zh-CN.md",
-    "templates/.agents/skills/update-agent-orchestrator/SKILL.md",
-    "templates/.agents/skills/update-agent-orchestrator/scripts/package.json",
-    "templates/.agents/skills/update-agent-orchestrator/scripts/sync-templates.js",
+    "templates/.agents/skills/update-agent-infra/SKILL.md",
+    "templates/.agents/skills/update-agent-infra/scripts/package.json",
+    "templates/.agents/skills/update-agent-infra/scripts/sync-templates.js",
     "templates/.agent-workspace/README.md",
     "templates/.agent-workspace/README.zh-CN.md",
     "templates/.claude/CLAUDE.md",
@@ -34,21 +34,21 @@ test("required template files were migrated into templates/", () => {
     "templates/.claude/commands/init-milestones.zh-CN.md",
     "templates/.claude/commands/init-labels.md",
     "templates/.claude/commands/init-labels.zh-CN.md",
-    "templates/.claude/commands/update-agent-orchestrator.md",
+    "templates/.claude/commands/update-agent-infra.md",
     "templates/.codex/README.md",
     "templates/.gemini/settings.json",
     "templates/.gemini/commands/_project_/init-milestones.toml",
     "templates/.gemini/commands/_project_/init-milestones.zh-CN.toml",
     "templates/.gemini/commands/_project_/init-labels.toml",
     "templates/.gemini/commands/_project_/init-labels.zh-CN.toml",
-    "templates/.gemini/commands/_project_/update-agent-orchestrator.toml",
+    "templates/.gemini/commands/_project_/update-agent-infra.toml",
     "templates/.opencode/README.md",
     "templates/.opencode/COMMAND_STYLE_GUIDE.md",
     "templates/.opencode/commands/init-milestones.md",
     "templates/.opencode/commands/init-milestones.zh-CN.md",
     "templates/.opencode/commands/init-labels.md",
     "templates/.opencode/commands/init-labels.zh-CN.md",
-    "templates/.opencode/commands/update-agent-orchestrator.md",
+    "templates/.opencode/commands/update-agent-infra.md",
     "templates/.github/ISSUE_TEMPLATE/01_bug_report.yml",
     "templates/.github/workflows/pr-title-check.yml",
     "templates/.github/PULL_REQUEST_TEMPLATE.md",
@@ -100,17 +100,17 @@ test("init-project files have been removed", () => {
   });
 });
 
-test("update-agent-orchestrator template copies stay in sync with working files", () => {
-  const collaborator = JSON.parse(read(".aorc.json"));
+test("update-agent-infra template copies stay in sync with working files", () => {
+  const collaborator = JSON.parse(read(".airc.json"));
   const project = collaborator.project;
   const org = collaborator.org;
   const lang = collaborator.language;
 
   const syncFiles = [
     [".agents/skills/init-labels/SKILL.md", "templates/.agents/skills/init-labels/SKILL.md"],
-    [".agents/skills/update-agent-orchestrator/SKILL.md", "templates/.agents/skills/update-agent-orchestrator/SKILL.md"],
-    [".agents/skills/update-agent-orchestrator/scripts/package.json", "templates/.agents/skills/update-agent-orchestrator/scripts/package.json"],
-    [".agents/skills/update-agent-orchestrator/scripts/sync-templates.js", "templates/.agents/skills/update-agent-orchestrator/scripts/sync-templates.js"],
+    [".agents/skills/update-agent-infra/SKILL.md", "templates/.agents/skills/update-agent-infra/SKILL.md"],
+    [".agents/skills/update-agent-infra/scripts/package.json", "templates/.agents/skills/update-agent-infra/scripts/package.json"],
+    [".agents/skills/update-agent-infra/scripts/sync-templates.js", "templates/.agents/skills/update-agent-infra/scripts/sync-templates.js"],
     ...buildCommandSyncFiles(project)
   ];
 
@@ -158,15 +158,15 @@ test("README documents the bootstrap installation flow", () => {
   const readmeZh = read("README.zh-CN.md");
 
   assert.match(readme, /install\.sh/);
-  assert.match(readme, /ao init/);
-  assert.match(readme, /update-agent-orchestrator/);
-  assert.match(readme, /npm install -g @fitlab-ai\/agent-orchestrator/);
-  assert.match(readme, /npx @fitlab-ai\/agent-orchestrator init/);
+  assert.match(readme, /ai init/);
+  assert.match(readme, /update-agent-infra/);
+  assert.match(readme, /npm install -g @fitlab-ai\/agent-infra/);
+  assert.match(readme, /npx @fitlab-ai\/agent-infra init/);
   assert.match(readme, /Install from source/);
   assert.match(readmeZh, /install\.sh/);
-  assert.match(readmeZh, /ao init/);
-  assert.match(readmeZh, /update-agent-orchestrator/);
-  assert.match(readmeZh, /npm install -g @fitlab-ai\/agent-orchestrator/);
-  assert.match(readmeZh, /npx @fitlab-ai\/agent-orchestrator init/);
+  assert.match(readmeZh, /ai init/);
+  assert.match(readmeZh, /update-agent-infra/);
+  assert.match(readmeZh, /npm install -g @fitlab-ai\/agent-infra/);
+  assert.match(readmeZh, /npx @fitlab-ai\/agent-infra init/);
   assert.match(readmeZh, /源码安装/);
 });

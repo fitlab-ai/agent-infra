@@ -1,15 +1,15 @@
 #!/bin/sh
-# agent-orchestrator bootstrap installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-orchestrator/main/install.sh | sh
+# agent-infra bootstrap installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh
 set -e
 
 REPO_OWNER="fitlab-ai"
-REPO_NAME="agent-orchestrator"
+REPO_NAME="agent-infra"
 REPO_SSH="git@github.com:${REPO_OWNER}/${REPO_NAME}.git"
 REPO_HTTPS="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
-INSTALL_DIR="$HOME/.agent-orchestrator"
+INSTALL_DIR="$HOME/.agent-infra"
 # Symlink name for the installed command in PATH.
-BIN_NAME="agent-orchestrator"
+BIN_NAME="agent-infra"
 
 # ---------- helpers ----------
 info()  { printf '  \033[1;34m>\033[0m %s\n' "$*"; }
@@ -45,10 +45,10 @@ if [ -d "$INSTALL_DIR" ]; then
 else
   CLONE_METHOD=$(select_repo_url)
   if [ "$CLONE_METHOD" = "gh" ]; then
-    info "Cloning agent-orchestrator via gh CLI to $INSTALL_DIR ..."
+    info "Cloning agent-infra via gh CLI to $INSTALL_DIR ..."
     gh repo clone "${REPO_OWNER}/${REPO_NAME}" "$INSTALL_DIR" -- --quiet
   else
-    info "Cloning agent-orchestrator to $INSTALL_DIR ..."
+    info "Cloning agent-infra to $INSTALL_DIR ..."
     git clone --quiet "$CLONE_METHOD" "$INSTALL_DIR"
   fi
   ok "Cloned successfully."
@@ -56,7 +56,7 @@ fi
 
 LATEST_TAG=$(git -C "$INSTALL_DIR" tag --sort=-v:refname | head -n 1)
 if [ -z "$LATEST_TAG" ]; then
-  err "No tags found in agent-orchestrator repository. This is unexpected."
+  err "No tags found in agent-infra repository. This is unexpected."
   exit 1
 fi
 git -C "$INSTALL_DIR" checkout --quiet "$LATEST_TAG"
@@ -94,8 +94,8 @@ else
 fi
 
 ln -sf "$BIN_SOURCE" "$BIN_DIR/$BIN_NAME"
-ln -sf "$BIN_SOURCE" "$BIN_DIR/ao"
-ok "Installed $BIN_NAME to $BIN_DIR/ (shorthand: ao)"
+ln -sf "$BIN_SOURCE" "$BIN_DIR/ai"
+ok "Installed $BIN_NAME to $BIN_DIR/ (shorthand: ai)"
 
 # ---------- PATH hint ----------
 if ! command -v "$BIN_NAME" >/dev/null 2>&1; then
@@ -107,8 +107,8 @@ fi
 
 # ---------- done ----------
 echo ""
-ok "agent-orchestrator installed successfully!"
+ok "agent-infra installed successfully!"
 echo ""
 echo "  Next step: cd into your project and run:"
-echo "    agent-orchestrator init  (or: ao init)"
+echo "    agent-infra init  (or: ai init)"
 echo ""

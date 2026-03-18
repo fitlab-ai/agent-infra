@@ -1,9 +1,7 @@
 ---
 description: "Update project AI collaboration config by re-rendering latest templates/"
-agent: general
-subtask: false
 ---
 
-Read and execute the update-agent-orchestrator skill from `.agents/skills/update-agent-orchestrator/SKILL.md`.
+Read and execute the update-agent-infra skill from `.agents/skills/update-agent-infra/SKILL.md`.
 
 Follow all steps defined in the skill exactly, including rendering from `templates/` before applying managed or merged updates.

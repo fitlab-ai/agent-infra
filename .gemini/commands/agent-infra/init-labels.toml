@@ -1,6 +1,6 @@
 description = "一次性初始化仓库的标准 GitHub Labels 体系。创建通用 labels、自动探测 in: labels、不生成 theme: labels，并提示未覆盖的默认 labels。"
 prompt = """
-为 agent-orchestrator 初始化 GitHub Labels。
+为 agent-infra 初始化 GitHub Labels。
 
 读取并执行 `.agents/skills/init-labels/SKILL.md` 中的 init-labels 技能。
 

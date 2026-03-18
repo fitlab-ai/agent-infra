@@ -1,6 +1,6 @@
-# agent-orchestrator - AI Development Guide
+# agent-infra - AI Development Guide
 
-This repository contains the agent-orchestrator template and skill repository for multi-AI collaboration infrastructure.
+This repository contains the agent-infra template and skill repository for multi-AI collaboration infrastructure.
 
 ## Quick Start Commands
 

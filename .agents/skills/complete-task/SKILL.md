@@ -86,7 +86,7 @@ ls .agent-workspace/completed/{task-id}/task.md
 ```
 （可选）同步完成状态到 GitHub Issue：
   - Claude Code / OpenCode：/sync-issue {issue_number}
-  - Gemini CLI：/agent-orchestrator:sync-issue {issue_number}
+  - Gemini CLI：/agent-infra:sync-issue {issue_number}
   - Codex CLI：$sync-issue {issue_number}
 ```
 

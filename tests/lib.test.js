@@ -13,7 +13,7 @@ test("paths detect clone installs when bundled templates live under HOME", () =>
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-home-"));
 
   try {
-    const installDir = path.join(tmpDir, ".agent-orchestrator");
+    const installDir = path.join(tmpDir, ".agent-infra");
     fs.mkdirSync(path.join(installDir, "templates"), { recursive: true });
 
     os.homedir = () => tmpDir;

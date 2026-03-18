@@ -1,4 +1,4 @@
-# Codex Skills（agent-orchestrator）
+# Codex Skills（agent-infra）
 
 本项目使用 Codex 原生 skills。
 
@@ -10,7 +10,7 @@
 示例：
 
 ```text
-$update-agent-orchestrator
+$update-agent-infra
 $create-task 给 postman 添加优雅停机功能
 $analyze-task TASK-20260310-105622
 $import-issue 207
@@ -21,7 +21,7 @@ $plan-task TASK-20260310-105622
 
 Codex 会直接读取项目内的技能文件，例如：
 
-- `.agents/skills/update-agent-orchestrator/SKILL.md`
+- `.agents/skills/update-agent-infra/SKILL.md`
 - `.agents/skills/create-task/SKILL.md`
 - `.agents/skills/analyze-task/SKILL.md`
 - `.agents/skills/implement-task/SKILL.md`

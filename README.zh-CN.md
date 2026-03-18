@@ -1,18 +1,18 @@
-# Agent Orchestrator
+# Agent Infra
 
-[![npm version](https://img.shields.io/npm/v/@fitlab-ai/agent-orchestrator)](https://www.npmjs.com/package/@fitlab-ai/agent-orchestrator)
-[![npm downloads](https://img.shields.io/npm/dm/@fitlab-ai/agent-orchestrator)](https://www.npmjs.com/package/@fitlab-ai/agent-orchestrator)
+[![npm version](https://img.shields.io/npm/v/@fitlab-ai/agent-infra)](https://www.npmjs.com/package/@fitlab-ai/agent-infra)
+[![npm downloads](https://img.shields.io/npm/dm/@fitlab-ai/agent-infra)](https://www.npmjs.com/package/@fitlab-ai/agent-infra)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](License.txt)
 [![Node.js >= 18](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen?logo=node.js)](https://nodejs.org/)
-[![GitHub release](https://img.shields.io/github/v/release/fitlab-ai/agent-orchestrator)](https://github.com/fitlab-ai/agent-orchestrator/releases)
+[![GitHub release](https://img.shields.io/github/v/release/fitlab-ai/agent-infra)](https://github.com/fitlab-ai/agent-infra/releases)
 
 用于初始化和维护 AI 多工具协作基础设施及项目治理配置的模板仓库和技能仓库。
 
 [English](README.md)
 
-## 什么是 agent-orchestrator？
+## 什么是 agent-infra？
 
-agent-orchestrator 为 AI TUI 工具（Claude Code、Codex、Gemini CLI、OpenCode）提供标准化配置，使它们能在同一项目中高效协作。轻量级引导 CLI 安装种子命令，后续所有操作由 AI 技能驱动。
+agent-infra 为 AI TUI 工具（Claude Code、Codex、Gemini CLI、OpenCode）提供标准化配置，使它们能在同一项目中高效协作。轻量级引导 CLI 安装种子命令，后续所有操作由 AI 技能驱动。
 
 ### 核心特性
 
@@ -25,26 +25,26 @@ agent-orchestrator 为 AI TUI 工具（Claude Code、Codex、Gemini CLI、OpenCo
 
 ## 快速开始
 
-### 1. 安装 agent-orchestrator
+### 1. 安装 agent-infra
 
 **方式 A — npm（推荐）**
 
 ```bash
-npm install -g @fitlab-ai/agent-orchestrator
-npx @fitlab-ai/agent-orchestrator init
+npm install -g @fitlab-ai/agent-infra
+npx @fitlab-ai/agent-infra init
 ```
 
 **方式 B — Shell 脚本**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-orchestrator/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh
 ```
 
 **方式 C — 源码安装**
 
 ```bash
-git clone https://github.com/fitlab-ai/agent-orchestrator.git
-cd agent-orchestrator
+git clone https://github.com/fitlab-ai/agent-infra.git
+cd agent-infra
 sh install.sh
 ```
 
@@ -52,24 +52,24 @@ sh install.sh
 
 ```bash
 cd my-project
-ao init
-# 或: agent-orchestrator init
+ai init
+# 或: agent-infra init
 ```
 
-CLI 会交互式收集项目信息（名称、组织、语言等），安装 `update-agent-orchestrator` 种子命令到所有 AI TUI，并生成 `.aorc.json`。
+CLI 会交互式收集项目信息（名称、组织、语言等），安装 `update-agent-infra` 种子命令到所有 AI TUI，并生成 `.airc.json`。
 
-> **提示：** `ao` 是 `agent-orchestrator` 的简写命令，两者完全等价。
+> **提示：** `ai` 是 `agent-infra` 的简写命令，两者完全等价。
 
 ### 3. 渲染完整基础设施
 
-在任意 AI TUI 中执行 `update-agent-orchestrator`：
+在任意 AI TUI 中执行 `update-agent-infra`：
 
 | TUI | 命令 |
 |-----|------|
-| Claude Code | `/update-agent-orchestrator` |
-| Codex | `$update-agent-orchestrator` |
-| Gemini CLI | `/{{project}}:update-agent-orchestrator` |
-| OpenCode | `/update-agent-orchestrator` |
+| Claude Code | `/update-agent-infra` |
+| Codex | `$update-agent-infra` |
+| Gemini CLI | `/{{project}}:update-agent-infra` |
+| OpenCode | `/update-agent-infra` |
 
 该命令会拉取最新模板并渲染所有文件。后续更新使用同一命令——自动处理首次安装和增量更新。
 
@@ -92,7 +92,7 @@ my-project/
 ├── CONTRIBUTING.md        # 开发指南
 ├── SECURITY.md            # 安全政策（英文）
 ├── SECURITY.zh-CN.md      # 安全政策（中文）
-└── .aorc.json             # 中央配置文件
+└── .airc.json             # 中央配置文件
 ```
 
 ### 内置 AI 技能
@@ -151,15 +151,15 @@ import-issue #42                    从 GitHub Issue 导入任务
 
 | 策略 | 含义 | 更新行为 |
 |------|------|---------|
-| **managed** | agent-orchestrator 完全控制 | 更新时覆盖，用户不应修改 |
+| **managed** | agent-infra 完全控制 | 更新时覆盖，用户不应修改 |
 | **merged** | 模板 + 用户定制共存 | AI 智能合并，保留用户添加的内容 |
 | **ejected** | 仅首次运行时生成 | 永不更新 |
 
-用户可在 `.aorc.json` 中按文件调整策略。
+用户可在 `.airc.json` 中按文件调整策略。
 
 ## 版本管理
 
-通过 git tag 使用语义版本号。模板版本记录在 `.aorc.json` 的 `templateVersion` 字段中。
+通过 git tag 使用语义版本号。模板版本记录在 `.airc.json` 的 `templateVersion` 字段中。
 
 ## 参与贡献
 

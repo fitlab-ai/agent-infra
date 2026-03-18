@@ -1,6 +1,6 @@
-# agent-orchestrator - AI 开发指南
+# agent-infra - AI 开发指南
 
-本仓库包含 agent-orchestrator 模板和技能仓库，用于多 AI 协作基础设施。
+本仓库包含 agent-infra 模板和技能仓库，用于多 AI 协作基础设施。
 
 ## 快速开始命令
 

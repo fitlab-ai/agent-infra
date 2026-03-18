@@ -48,7 +48,7 @@ npm test
 更新以下文件中的版本号：
 
 1. `package.json` 中的 `"version": "X.Y.Z"`
-2. `.aorc.json` 中的 `"templateVersion": "vX.Y.Z"`
+2. `.airc.json` 中的 `"templateVersion": "vX.Y.Z"`
 3. `SECURITY.md` 中的支持版本表格（`v{MAJOR}.{MINOR}.x | Supported`，`< v{MAJOR}.{MINOR}.0 | Not Supported`）
 4. `SECURITY.zh-CN.md` 中的支持版本表格（`v{MAJOR}.{MINOR}.x | 支持中`，`< v{MAJOR}.{MINOR}.0 | 不再支持`）
 
@@ -70,8 +70,8 @@ node scripts/build-inline.js
 - 如果命令失败，停止发布流程并先修复构建问题
 - 构建完成后，将产物同步到工作副本，保持两处一致：
   ```bash
-  cp templates/.agents/skills/update-agent-orchestrator/scripts/sync-templates.js \
-     .agents/skills/update-agent-orchestrator/scripts/sync-templates.js
+  cp templates/.agents/skills/update-agent-infra/scripts/sync-templates.js \
+     .agents/skills/update-agent-infra/scripts/sync-templates.js
   ```
 
 ### 步骤 6：创建发布提交
@@ -127,7 +127,7 @@ bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PAT
 
 3.（可选）生成发布说明：
    - Claude Code / OpenCode：/create-release-note {version}
-   - Gemini CLI：/agent-orchestrator:create-release-note {version}
+   - Gemini CLI：/agent-infra:create-release-note {version}
    - Codex CLI：$create-release-note {version}
 ```
 

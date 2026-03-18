@@ -103,11 +103,11 @@ PR 已创建：{pr-url}
 下一步（如在任务工作流中）：
 - 同步进度：
   - Claude Code / OpenCode：/sync-pr {task-id}
-  - Gemini CLI：/agent-orchestrator:sync-pr {task-id}
+  - Gemini CLI：/agent-infra:sync-pr {task-id}
   - Codex CLI：$sync-pr {task-id}
 - 完成任务：
   - Claude Code / OpenCode：/complete-task {task-id}
-  - Gemini CLI：/agent-orchestrator:complete-task {task-id}
+  - Gemini CLI：/agent-infra:complete-task {task-id}
   - Codex CLI：$complete-task {task-id}
 ```
 

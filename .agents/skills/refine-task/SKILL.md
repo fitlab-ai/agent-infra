@@ -123,11 +123,11 @@ date "+%Y-%m-%d %H:%M:%S"
 下一步 - 重新审查或提交：
 - 重新审查：
   - Claude Code / OpenCode：/review-task {task-id}
-  - Gemini CLI：/agent-orchestrator:review-task {task-id}
+  - Gemini CLI：/agent-infra:review-task {task-id}
   - Codex CLI：$review-task {task-id}
 - 直接提交：
   - Claude Code / OpenCode：/commit
-  - Gemini CLI：/agent-orchestrator:commit
+  - Gemini CLI：/agent-infra:commit
   - Codex CLI：$commit
 ```
 

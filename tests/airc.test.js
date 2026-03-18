@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 
 import { read } from "./helpers.js";
 
-test(".aorc.json declares templates as the template source", () => {
-  const collaborator = JSON.parse(read(".aorc.json"));
+test(".airc.json declares templates as the template source", () => {
+  const collaborator = JSON.parse(read(".airc.json"));
 
   assert.equal(collaborator.templateSource, "templates/");
 });
 
-test(".aorc.json merged patterns use recursive command globs and explicit skill paths", () => {
-  const collaborator = JSON.parse(read(".aorc.json"));
+test(".airc.json merged patterns use recursive command globs and explicit skill paths", () => {
+  const collaborator = JSON.parse(read(".airc.json"));
   const merged = collaborator.files.merged;
 
   [
@@ -36,14 +36,14 @@ test(".aorc.json merged patterns use recursive command globs and explicit skill 
   });
 });
 
-test(".aorc.json does not contain license field", () => {
-  const collaborator = JSON.parse(read(".aorc.json"));
+test(".airc.json does not contain license field", () => {
+  const collaborator = JSON.parse(read(".airc.json"));
 
-  assert.ok(!("license" in collaborator), "license field should not exist in .aorc.json");
+  assert.ok(!("license" in collaborator), "license field should not exist in .airc.json");
 });
 
-test(".aorc.json excludes deprecated codex prompt paths", () => {
-  const collaborator = JSON.parse(read(".aorc.json"));
+test(".airc.json excludes deprecated codex prompt paths", () => {
+  const collaborator = JSON.parse(read(".airc.json"));
 
   assert.ok(
     !collaborator.files.managed.includes(".codex/commands/"),

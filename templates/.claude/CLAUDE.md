@@ -1,6 +1,6 @@
 # Project - Claude Code Instructions
 
-This repository uses agent-orchestrator for multi-AI collaboration infrastructure.
+This repository uses agent-infra for multi-AI collaboration infrastructure.
 
 ## Quick Commands
 
@@ -136,7 +136,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 /init-labels                # Initialize GitHub Labels
 /refine-title               # Reformat Issue/PR title
 /upgrade-dependency         # Upgrade dependency
-/update-agent-orchestrator  # Update AI collaboration config
+/update-agent-infra  # Update AI collaboration config
 ```
 
 ## Language Conventions

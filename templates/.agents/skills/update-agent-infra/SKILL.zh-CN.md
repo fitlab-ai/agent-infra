@@ -1,7 +1,7 @@
 ---
-name: update-agent-orchestrator
+name: update-agent-infra
 description: >
-  更新当前项目的 AI 协作基础设施和项目治理配置，使其与最新的 agent-orchestrator 模板保持一致。
+  更新当前项目的 AI 协作基础设施和项目治理配置，使其与最新的 agent-infra 模板保持一致。
   智能合并模板变更，同时保留项目特定的定制内容。
 ---
 
@@ -21,15 +21,15 @@ description: >
 执行以下命令，一次性处理所有确定性步骤：
 
 ```bash
-node .agents/skills/update-agent-orchestrator/scripts/sync-templates.js
+node .agents/skills/update-agent-infra/scripts/sync-templates.js
 ```
 
-脚本读取 `.aorc.json`（含 `templateSource`，默认 `templates/`），自动完成：
+脚本读取 `.airc.json`（含 `templateSource`，默认 `templates/`），自动完成：
 - git pull 拉取最新模板
-- 同步文件注册表（`defaults.json` → `.aorc.json`）
+- 同步文件注册表（`defaults.json` → `.airc.json`）
 - 处理所有 managed 文件（语言选择 → 排除 merged/ejected → 占位符渲染 → 覆盖写入）
 - 处理 ejected 文件（仅首次安装时创建）
-- 更新 `.aorc.json`（`templateVersion`、文件列表）
+- 更新 `.airc.json`（`templateVersion`、文件列表）
 
 脚本输出 JSON 到 stdout，解析并记录报告内容。
 
@@ -42,14 +42,14 @@ node .agents/skills/update-agent-orchestrator/scripts/sync-templates.js
   - 每项包含 `target`（项目中的目标路径）和 `template`（模板根目录下的相对路径）
 - `registryAdded`：新增的文件注册条目
 - `selfUpdate`：是否为自更新模式
-- `configUpdated`：`.aorc.json` 是否已更新
+- `configUpdated`：`.airc.json` 是否已更新
 
 ## 阶段 B：处理 merged 文件（AI 智能合并）
 
 根据报告中 `merged.pending` 列表，逐个文件处理。对于每个条目：
 
 1. 从 `<templateRoot>/<template>` 读取模板文件
-2. 渲染占位符：将双花括号包裹的 `project` 和 `org` 占位符替换为 .aorc.json 中的实际值
+2. 渲染占位符：将双花括号包裹的 `project` 和 `org` 占位符替换为 .airc.json 中的实际值
 3. 读取本地当前文件（`<项目根>/<target>`）
 
 **如果本地文件不存在**（首次安装），直接写入渲染后的模板，跳过合并。
@@ -99,17 +99,17 @@ node .agents/skills/update-agent-orchestrator/scripts/sync-templates.js
 
 ### 自身更新检测
 
-检查 `git diff` 中是否包含 `.agents/skills/update-agent-orchestrator/SKILL.md` 的变更。
+检查 `git diff` 中是否包含 `.agents/skills/update-agent-infra/SKILL.md` 的变更。
 如果该文件在本次更新中被修改，在报告末尾输出以下警告：
 
 ```
-⚠ update-agent-orchestrator 技能自身已更新。
-  建议再次执行 /update-agent-orchestrator 以确保所有新逻辑生效。
+⚠ update-agent-infra 技能自身已更新。
+  建议再次执行 /update-agent-infra 以确保所有新逻辑生效。
 ```
 
 > **原因**：本次执行使用的是旧版技能逻辑，新版技能可能包含额外的处理步骤。
 > 再次执行可确保新逻辑完整应用。
-> 用户也可以在执行前先运行 `ao update` 来预先更新技能文件，避免需要两次执行。
+> 用户也可以在执行前先运行 `ai update` 来预先更新技能文件，避免需要两次执行。
 
 ### 输出报告
 

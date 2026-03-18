@@ -10,7 +10,7 @@
 示例：
 
 ```text
-$update-agent-orchestrator
+$update-agent-infra
 $create-task 给 postman 添加优雅停机功能
 $plan-task TASK-20260310-105622
 ```
@@ -19,7 +19,7 @@ $plan-task TASK-20260310-105622
 
 Codex 会直接读取项目内的技能文件，例如：
 
-- `.agents/skills/update-agent-orchestrator/SKILL.md`
+- `.agents/skills/update-agent-infra/SKILL.md`
 - `.agents/skills/create-task/SKILL.md`
 - `.agents/skills/implement-task/SKILL.md`
 

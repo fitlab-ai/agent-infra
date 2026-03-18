@@ -1,6 +1,6 @@
 # 项目 - Claude Code 指令
 
-本仓库使用 agent-orchestrator 进行多 AI 协作基础设施管理。
+本仓库使用 agent-infra 进行多 AI 协作基础设施管理。
 
 ## 快速命令
 
@@ -136,7 +136,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 /init-labels                # 初始化 GitHub Labels
 /refine-title               # 重构 Issue/PR 标题
 /upgrade-dependency         # 升级依赖
-/update-agent-orchestrator  # 更新 AI 协作配置
+/update-agent-infra  # 更新 AI 协作配置
 ```
 
 ## 语言规范

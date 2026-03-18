@@ -10,7 +10,7 @@ const targetPath = path.join(
   'templates',
   '.agents',
   'skills',
-  'update-agent-orchestrator',
+  'update-agent-infra',
   'scripts',
   'sync-templates.js'
 );

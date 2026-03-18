@@ -138,7 +138,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 下一步 - 设计技术方案：
   - Claude Code / OpenCode：/plan-task {task-id}
-  - Gemini CLI：/agent-orchestrator:plan-task {task-id}
+  - Gemini CLI：/agent-infra:plan-task {task-id}
   - Codex CLI：$plan-task {task-id}
 ```
 
