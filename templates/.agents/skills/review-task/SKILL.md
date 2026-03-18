@@ -1,271 +1,276 @@
 ---
 name: review-task
 description: >
-  Review task implementation code and output a code review report with
-  findings categorized by severity (Blocker / Major / Minor). Triggered
-  when the user requests code review after implementation is complete.
-  Argument: task-id.
+  审查任务实现代码并输出代码审查报告，按严重程度分类（Blocker / Major / Minor）。
+  当用户在实现完成后要求代码审查时触发。参数：task-id。
 ---
 
-# Code Review
+# 代码审查
 
-## Boundary / Critical Rules
+## 行为边界 / 关键规则
 
-- This skill only reads code and produces a review artifact (`review.md` or `review-r{N}.md`) -- it does not modify business code
-- After executing this skill, you **must** immediately update task status in task.md
+- 本技能仅读取代码并产出审查报告（`review.md` 或 `review-r{N}.md`）—— 不修改业务代码
+- 执行本技能后，你**必须**立即更新 task.md 中的任务状态
 
-## Steps
+## 执行步骤
 
-### 1. Verify Prerequisites
+### 1. 验证前置条件
 
-Check required files:
-- `.agent-workspace/active/{task-id}/task.md` - Task file
-- At least one implementation report: `implementation.md` or `implementation-r{N}.md`
+检查必要文件：
+- `.agent-workspace/active/{task-id}/task.md` - 任务文件
+- 至少一个实现报告：`implementation.md` 或 `implementation-r{N}.md`
 
-Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, e.g. `TASK-20260306-143022`
+注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 
-If either requirement is missing, prompt the user to complete the prerequisite step first.
+如果任一文件缺失，提示用户先完成前置步骤。
 
-### 2. Determine the Review Round
+### 2. 确定审查轮次
 
-Scan `.agent-workspace/active/{task-id}/` for review artifacts:
-- If neither `review.md` nor `review-r*.md` exists -> this is Round 1 and must create `review.md`
-- If `review.md` exists and no `review-r*.md` exists -> this is Round 2 and must create `review-r2.md`
-- If `review-r{N}.md` exists -> this is Round N+1 and must create `review-r{N+1}.md`
+扫描 `.agent-workspace/active/{task-id}/` 目录中的审查产物文件：
+- 如果不存在 `review.md` 且不存在 `review-r*.md` → 本轮为第 1 轮，产出 `review.md`
+- 如果存在 `review.md` 且不存在 `review-r*.md` → 本轮为第 2 轮，产出 `review-r2.md`
+- 如果存在 `review-r{N}.md` → 本轮为第 N+1 轮，产出 `review-r{N+1}.md`
 
-Record:
-- `{review-round}`: the current review round
-- `{review-artifact}`: the review report filename for this round
+记录：
+- `{review-round}`：本轮审查轮次
+- `{review-artifact}`：本轮审查报告文件名
 
-### 3. Read Implementation Report
+### 3. 阅读实现与修复报告
 
-Scan the task directory for implementation reports (`implementation.md`, `implementation-r{N}.md`) and read the highest-round artifact to understand:
-- List of modified files
-- Key functionality implemented
-- Test situation
-- Items the implementer flagged for attention
+扫描任务目录中的实现报告文件（`implementation.md`、`implementation-r{N}.md`），读取最高轮次的文件以理解：
+- 修改的文件列表
+- 实现的关键功能
+- 测试情况
+- 实现者标记的需关注事项
 
-### 4. Execute Code Review
+如果存在修复产物（`refinement.md`、`refinement-r{N}.md`），读取最高轮次的文件以理解：
+- 已修复了哪些审查问题
+- 修复对代码和测试的影响
+- 当前代码状态相对上轮审查的变化
 
-Follow the `code-review` step in `.agents/workflows/feature-development.yaml`:
+### 4. 执行代码审查
 
-**Required review areas**:
-- [ ] Code quality and coding standards (per project instructions)
-- [ ] Bug and potential issue detection
-- [ ] Test coverage and test quality
-- [ ] Error handling and edge cases
-- [ ] Performance and security issues
-- [ ] Code comments and documentation
-- [ ] Consistency with technical plan
+遵循 `.agents/workflows/feature-development.yaml` 中的 `code-review` 步骤：
 
-**Review principles**:
-1. **Strict but fair**: Point out issues, but also acknowledge strengths
-2. **Be specific**: Provide exact file paths and line numbers
-3. **Provide suggestions**: Don't just flag problems -- offer solutions
-4. **Categorize by severity**: Distinguish must-fix from nice-to-have
+**必要审查领域**：
+- [ ] 代码质量和编码规范（按项目指南）
+- [ ] Bug 和潜在问题检测
+- [ ] 测试覆盖率和测试质量
+- [ ] 错误处理和边界情况
+- [ ] 性能和安全问题
+- [ ] 代码注释和文档
+- [ ] 与技术方案的一致性
 
-Also review the `git diff` to see all changes in context.
+**审查原则**：
+1. **严格但公正**：指出问题的同时也肯定做得好的地方
+2. **具体**：提供准确的文件路径和行号
+3. **提供建议**：不仅指出问题，还要提供解决方案
+4. **按严重程度分类**：区分必须修复和可优化项
 
-### 5. Output Review Report
+同时审查 `git diff` 以查看所有变更的上下文。
 
-Create `.agent-workspace/active/{task-id}/{review-artifact}`.
+### 5. 输出审查报告
 
-### 6. Update Task Status
+创建 `.agent-workspace/active/{task-id}/{review-artifact}`。
 
-Get the current time:
+### 6. 更新任务状态
+
+获取当前时间：
 
 ```bash
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-Update `.agent-workspace/active/{task-id}/task.md`:
-- `current_step`: code-review
-- `assigned_to`: {reviewer}
-- `updated_at`: {current time}
-- Record the review artifact for this round: `{review-artifact}` (Round `{review-round}`)
-- Mark code-review as complete in workflow progress and include the actual round when the task template supports it
-- **Append** to `## Activity Log` (do NOT overwrite previous entries):
+更新 `.agent-workspace/active/{task-id}/task.md`：
+- `current_step`：code-review
+- `assigned_to`：{审查者}
+- `updated_at`：{当前时间}
+- 记录本轮审查产物：`{review-artifact}`（Round `{review-round}`）
+- 在工作流进度中标记 code-review 为已完成，并注明实际轮次（如果任务模板支持）
+- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, Blockers: {n}, Major: {n}, Minor: {n} → {artifact-filename}
+  - {yyyy-MM-dd HH:mm:ss} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n} → {artifact-filename}
   ```
 
-### 7. Inform User
+### 7. 告知用户
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
-Output based on review result:
+根据审查结果输出：
 
-**If approved with no issues** (Major = 0 and Minor = 0):
+**如果通过且无问题**（Major = 0 且 Minor = 0）：
 ```
-Code review complete for task {task-id}. Verdict: Approved.
-- Blockers: 0 | Major: 0 | Minor: 0
+任务 {task-id} 代码审查完成。结论：通过。
+- 阻塞项：0 | 主要问题：0 | 次要问题：0
 
-Next step - commit changes:
-  - Claude Code / OpenCode: /commit
-  - Gemini CLI: /{{project}}:commit
-  - Codex CLI: $commit
-```
-
-**If approved with issues** (Major > 0 or Minor > 0):
-```
-Code review complete for task {task-id}. Verdict: Approved.
-- Blockers: 0 | Major: {n} | Minor: {n}
-- Report: .agent-workspace/active/{task-id}/{review-artifact}
-
-Next step - fix issues then commit (recommended):
-  - Claude Code / OpenCode: /refine-task {task-id}
-  - Gemini CLI: /{{project}}:refine-task {task-id}
-  - Codex CLI: $refine-task {task-id}
-
-Or commit directly (skip fixes):
-  - Claude Code / OpenCode: /commit
-  - Gemini CLI: /{{project}}:commit
-  - Codex CLI: $commit
+下一步 - 提交代码：
+  - Claude Code / OpenCode：/commit
+  - Gemini CLI：/agent-orchestrator:commit
+  - Codex CLI：$commit
 ```
 
-**If changes requested**:
+**如果通过但有问题**（Major > 0 或 Minor > 0）：
 ```
-Code review complete for task {task-id}. Verdict: Changes Requested.
-- Blockers: {n} | Major: {n} | Minor: {n}
-- Report: .agent-workspace/active/{task-id}/{review-artifact}
+任务 {task-id} 代码审查完成。结论：通过。
+- 阻塞项：0 | 主要问题：{n} | 次要问题：{n}
+- 审查报告：.agent-workspace/active/{task-id}/{review-artifact}
 
-Next step - fix issues:
-  - Claude Code / OpenCode: /refine-task {task-id}
-  - Gemini CLI: /{{project}}:refine-task {task-id}
-  - Codex CLI: $refine-task {task-id}
-```
+下一步 - 修复问题后提交（推荐）：
+  - Claude Code / OpenCode：/refine-task {task-id}
+  - Gemini CLI：/agent-orchestrator:refine-task {task-id}
+  - Codex CLI：$refine-task {task-id}
 
-**If rejected**:
-```
-Code review complete for task {task-id}. Verdict: Rejected - needs major rework.
-- Report: .agent-workspace/active/{task-id}/{review-artifact}
-
-Next step - re-implement:
-  - Claude Code / OpenCode: /implement-task {task-id}
-  - Gemini CLI: /{{project}}:implement-task {task-id}
-  - Codex CLI: $implement-task {task-id}
+或直接提交（跳过修复）：
+  - Claude Code / OpenCode：/commit
+  - Gemini CLI：/agent-orchestrator:commit
+  - Codex CLI：$commit
 ```
 
-## Output Template
+**如果需要修改**：
+```
+任务 {task-id} 代码审查完成。结论：需要修改。
+- 阻塞项：{n} | 主要问题：{n} | 次要问题：{n}
+- 审查报告：.agent-workspace/active/{task-id}/{review-artifact}
+
+下一步 - 修复问题：
+  - Claude Code / OpenCode：/refine-task {task-id}
+  - Gemini CLI：/agent-orchestrator:refine-task {task-id}
+  - Codex CLI：$refine-task {task-id}
+```
+
+**如果拒绝**：
+```
+任务 {task-id} 代码审查完成。结论：拒绝，需要重大返工。
+- 审查报告：.agent-workspace/active/{task-id}/{review-artifact}
+
+下一步 - 重新实现：
+  - Claude Code / OpenCode：/implement-task {task-id}
+  - Gemini CLI：/agent-orchestrator:implement-task {task-id}
+  - Codex CLI：$implement-task {task-id}
+```
+
+## 输出模板
 
 ```markdown
-# Code Review Report
+# 代码审查报告
 
-- **Review round**: Round {review-round}
-- **Artifact file**: `{review-artifact}`
-- **Implementation input**: `{implementation-artifact}`
+- **审查轮次**：Round {review-round}
+- **产物文件**：`{review-artifact}`
+- **实现输入**：
+  - `{implementation-artifact}`
+  - `{refinement-artifact}`（如存在）
 
-## Review Summary
+## 审查摘要
 
-- **Reviewer**: {reviewer name}
-- **Review time**: {timestamp}
-- **Review scope**: {file count and main modules}
-- **Overall verdict**: {Approved / Changes Requested / Rejected}
+- **审查者**：{审查者名称}
+- **审查时间**：{时间戳}
+- **审查范围**：{文件数量和主要模块}
+- **总体结论**：{已批准 / 需要修改 / 拒绝}
 
-## Findings
+## 发现的问题
 
-### Blockers (Must Fix)
+### 阻塞项（必须修复）
 
-#### 1. {Issue title}
-**File**: `{file-path}:{line-number}`
-**Description**: {Detailed description}
-**Suggested fix**: {Specific suggestion}
-**Severity**: High
+#### 1. {问题标题}
+**文件**：`{file-path}:{line-number}`
+**描述**：{详细描述}
+**建议修复**：{具体建议}
+**严重程度**：高
 
-### Major Issues (Should Fix)
+### 主要问题（应该修复）
 
-#### 1. {Issue title}
-**File**: `{file-path}:{line-number}`
-**Description**: {Detailed description}
-**Suggested fix**: {Specific suggestion}
-**Severity**: Medium
+#### 1. {问题标题}
+**文件**：`{file-path}:{line-number}`
+**描述**：{详细描述}
+**建议修复**：{具体建议}
+**严重程度**：中
 
-### Minor Issues (Nice to Have)
+### 次要问题（可选优化）
 
-#### 1. {Optimization point}
-**File**: `{file-path}:{line-number}`
-**Suggestion**: {Optimization suggestion}
+#### 1. {优化点}
+**文件**：`{file-path}:{line-number}`
+**建议**：{优化建议}
 
-## Strengths
+## 亮点
 
-- {Well-done aspect 1}
-- {Well-done aspect 2}
+- {做得好的方面 1}
+- {做得好的方面 2}
 
-## Standards Compliance
+## 规范符合度
 
-### Coding Standards
-- [ ] Naming conventions
-- [ ] Code style
-- [ ] Comment standards
-- [ ] Test standards
+### 编码规范
+- [ ] 命名规范
+- [ ] 代码风格
+- [ ] 注释规范
+- [ ] 测试规范
 
-### Code Quality Metrics
-- Cyclomatic complexity: {Assessment}
-- Code duplication: {Assessment}
-- Test coverage: {Percentage or assessment}
+### 代码质量指标
+- 圈复杂度：{评估}
+- 代码重复：{评估}
+- 测试覆盖率：{百分比或评估}
 
-## Test Review
+## 测试审查
 
-### Test Coverage
-- Unit tests: {Assessment}
-- Edge cases: {Covered?}
-- Error scenarios: {Covered?}
+### 测试覆盖率
+- 单元测试：{评估}
+- 边界情况：{是否覆盖？}
+- 错误场景：{是否覆盖？}
 
-### Test Quality
-- Test naming: {Assessment}
-- Assertion adequacy: {Assessment}
-- Test independence: {Assessment}
+### 测试质量
+- 测试命名：{评估}
+- 断言充分性：{评估}
+- 测试独立性：{评估}
 
-## Security Review
+## 安全审查
 
-- SQL injection risk: {Check result}
-- XSS risk: {Check result}
-- Access control: {Check result}
-- Sensitive data exposure: {Check result}
+- SQL 注入风险：{检查结果}
+- XSS 风险：{检查结果}
+- 访问控制：{检查结果}
+- 敏感数据暴露：{检查结果}
 
-## Performance Review
+## 性能审查
 
-- Algorithm complexity: {Assessment}
-- Resource management: {Check result}
-- Potential bottlenecks: {Assessment}
+- 算法复杂度：{评估}
+- 资源管理：{检查结果}
+- 潜在瓶颈：{评估}
 
-## Consistency with Plan
+## 与方案的一致性
 
-- [ ] Implementation matches technical plan
-- [ ] No deviation from design intent
-- [ ] No unplanned features added
+- [ ] 实现与技术方案一致
+- [ ] 没有偏离设计意图
+- [ ] 没有添加计划外的功能
 
-## Verdict and Recommendations
+## 结论和建议
 
-### Approval Decision
-- [ ] Approved - no blocking issues
-- [ ] Changes requested - has issues to address
-- [ ] Rejected - needs major rework
+### 审批决定
+- [ ] 通过 - 无阻塞问题
+- [ ] 需要修改 - 有需要解决的问题
+- [ ] 拒绝 - 需要重大返工
 
-### Next Steps
-{Recommendations based on review result}
+### 后续步骤
+{基于审查结果的建议}
 ```
 
-## Completion Checklist
+## 完成检查清单
 
-- [ ] Completed code review of all modified files
-- [ ] Created review report `.agent-workspace/active/{task-id}/{review-artifact}`
-- [ ] Updated `current_step` to code-review in task.md
-- [ ] Updated `updated_at` to current time in task.md
-- [ ] Updated `assigned_to` to reviewer name in task.md
-- [ ] Appended entry to Activity Log in task.md
-- [ ] Marked code-review as complete in workflow progress
-- [ ] Informed user of next step based on review result (must include all TUI command formats — do not filter)
+- [ ] 完成了所有修改文件的代码审查
+- [ ] 创建了审查报告 `.agent-workspace/active/{task-id}/{review-artifact}`
+- [ ] 更新了 task.md 中的 `current_step` 为 code-review
+- [ ] 更新了 task.md 中的 `updated_at` 为当前时间
+- [ ] 更新了 task.md 中的 `assigned_to` 为审查者名称
+- [ ] 追加了 Activity Log 条目到 task.md
+- [ ] 在工作流进度中标记了 code-review 为已完成
+- [ ] 根据审查结果告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
 
-## Notes
+## 注意事项
 
-1. **Prerequisites**: At least one implementation artifact must exist (`implementation.md` or `implementation-r{N}.md`)
-2. **Objectivity**: Be strict but fair; acknowledge good work alongside issues
-3. **Specificity**: Always reference exact file paths and line numbers
-4. **Severity classification**: Blockers must be fixed; major issues should be fixed; minor issues are optional
-5. **Versioning rule**: First-round review uses `review.md`; later rounds use `review-r{N}.md`
+1. **前置条件**：必须已完成至少一轮实现（`implementation.md` 或 `implementation-r{N}.md` 存在）
+2. **客观性**：严格但公正；在指出问题的同时肯定优秀的工作
+3. **具体性**：始终引用准确的文件路径和行号
+4. **严重程度分类**：阻塞项必须修复；主要问题应该修复；次要问题为可选
+5. **版本化规则**：首轮审查使用 `review.md`；后续轮次使用 `review-r{N}.md`
 
-## Error Handling
+## 错误处理
 
-- Task not found: Prompt "Task {task-id} not found"
-- Missing implementation report: Prompt "Implementation report not found, please run the implement-task skill first"
+- 任务未找到：提示 "Task {task-id} not found"
+- 缺少实现报告：提示 "Implementation report not found, please run the implement-task skill first"

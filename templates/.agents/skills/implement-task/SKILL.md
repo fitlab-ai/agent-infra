@@ -11,7 +11,7 @@ description: >
 
 ## Boundary / Critical Rules
 
-- Strictly follow `plan.md` -- do not deviate without documenting the reason
+- Strictly follow the latest technical plan artifact (`plan.md` or `plan-r{N}.md`) -- do not deviate without documenting the reason
 - Do NOT auto-commit. Never execute `git commit` or `git add` automatically
 - This skill outputs an implementation report (`implementation.md` or `implementation-r{N}.md`) and must never overwrite an existing round artifact
 - After executing this skill, you **must** immediately update task status in task.md
@@ -22,13 +22,16 @@ description: >
 
 Check required files:
 - `.agent-workspace/active/{task-id}/task.md` - Task file
-- `.agent-workspace/active/{task-id}/plan.md` - Technical plan
+- At least one technical plan artifact: `plan.md` or `plan-r{N}.md`
 
 Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, e.g. `TASK-20260306-143022`
 
 If either file is missing, prompt the user to complete the prerequisite step first.
 
-### 2. Determine the Implementation Round
+### 2. Determine the Input Plan and Implementation Round
+
+Scan `.agent-workspace/active/{task-id}/` for technical plan files (`plan.md`, `plan-r{N}.md`):
+- Read the highest-round plan file and record it as `{plan-artifact}`
 
 Scan `.agent-workspace/active/{task-id}/` for implementation report files:
 - If neither `implementation.md` nor `implementation-r*.md` exists -> this is Round 1 and must create `implementation.md`
@@ -36,6 +39,7 @@ Scan `.agent-workspace/active/{task-id}/` for implementation report files:
 - If `implementation-r{N}.md` exists -> this is Round N+1 and must create `implementation-r{N+1}.md`
 
 Record:
+- `{plan-artifact}`: the technical plan file used for this implementation
 - `{implementation-round}`: the current implementation round
 - `{implementation-artifact}`: the implementation report filename for this round
 
@@ -43,7 +47,7 @@ Note: multi-round implementation should only happen after a review verdict of Re
 
 ### 3. Read Technical Plan
 
-Carefully read `plan.md` to understand:
+Carefully read `{plan-artifact}` to understand:
 - Technical approach and solution strategy
 - Detailed implementation steps
 - Files to create/modify
@@ -210,7 +214,7 @@ After completing the checklist, **stop**. Do not auto-commit. Wait for code revi
 
 ## Notes
 
-1. **Prerequisites**: Must have a reviewed technical plan (plan.md exists and approved)
+1. **Prerequisites**: Must have a reviewed technical plan (`plan.md` or `plan-r{N}.md` exists and is approved)
 2. **No auto-commit**: Do NOT execute `git commit` or `git add` automatically. Remind the user to commit manually
 3. **Test requirement**: All new code must have unit tests; test coverage must not decrease
 4. **Code quality**: Follow project coding standards

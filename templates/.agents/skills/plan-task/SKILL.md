@@ -1,207 +1,225 @@
 ---
 name: plan-task
 description: >
-  Design a technical solution for a task and output a detailed implementation
-  plan. Triggered when the user requests a design or technical plan for a task
-  that has completed requirement analysis. This is a mandatory human review
-  checkpoint. Argument: task-id.
+  为任务设计技术方案并输出详细的实施计划。当用户要求为已完成需求分析的任务设计方案或技术计划时触发。
+  这是一个强制性的人工审查检查点。参数：task-id。
 ---
 
-# Design Technical Solution
+# 设计技术方案
 
-## Boundary / Critical Rules
+## 行为边界 / 关键规则
 
-- This skill produces `plan.md` only -- no business code changes
-- This is a **mandatory human review checkpoint** -- do not auto-proceed to implementation
-- After executing this skill, you **must** immediately update task status in task.md
+- 本技能仅产出技术方案文档（`plan.md` 或 `plan-r{N}.md`）—— 不修改任何业务代码
+- 这是一个**强制性的人工审查检查点** —— 不要自动进入实现阶段
+- 执行本技能后，你**必须**立即更新 task.md 中的任务状态
 
-## Steps
+## 执行步骤
 
-### 1. Verify Prerequisites
+### 1. 验证前置条件
 
-Check required files:
-- `.agent-workspace/active/{task-id}/task.md` - Task file
-- `.agent-workspace/active/{task-id}/analysis.md` - Requirement analysis
+检查必要文件：
+- `.agent-workspace/active/{task-id}/task.md` - 任务文件
+- 至少一个分析产物：`analysis.md` 或 `analysis-r{N}.md`
 
-Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, e.g. `TASK-20260306-143022`
+注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 
-If either file is missing, prompt the user to complete the prerequisite step first.
+如果任一文件缺失，提示用户先完成前置步骤。
 
-### 2. Read Requirement Analysis
+### 2. 确定方案轮次
 
-Carefully read `analysis.md` to understand:
-- The requirement and its context
-- Related files and code structure
-- Impact scope and dependencies
-- Technical risks identified
-- Effort and complexity assessment
+扫描 `.agent-workspace/active/{task-id}/` 目录中的方案产物文件：
+- 如果不存在 `plan.md` 且不存在 `plan-r*.md` → 本轮为第 1 轮，产出 `plan.md`
+- 如果存在 `plan.md` 且不存在 `plan-r*.md` → 本轮为第 2 轮，产出 `plan-r2.md`
+- 如果存在 `plan-r{N}.md` → 本轮为第 N+1 轮，产出 `plan-r{N+1}.md`
 
-### 3. Understand the Problem
+记录：
+- `{plan-round}`：本轮方案轮次
+- `{plan-artifact}`：本轮方案产物文件名
 
-- Read relevant source code files identified in the analysis
-- Understand the current architecture and patterns
-- Identify constraints (backward compatibility, performance, etc.)
-- Consider edge cases and error scenarios
+### 3. 阅读需求分析
 
-### 4. Design Technical Solution
+扫描任务目录中的分析产物文件（`analysis.md`、`analysis-r{N}.md`）：
+- 如果存在 `analysis-r{N}.md`，读取最高 N 的文件
+- 否则读取 `analysis.md`
+以理解：
+- 需求及其背景
+- 相关文件和代码结构
+- 影响范围和依赖关系
+- 已识别的技术风险
+- 工作量和复杂度评估
 
-Follow the `technical-design` step in `.agents/workflows/feature-development.yaml`:
+### 4. 理解问题
 
-**Required tasks**:
-- [ ] Define the technical approach and rationale
-- [ ] Consider alternative solutions and explain trade-offs
-- [ ] Detail implementation steps in order
-- [ ] List all files to create/modify
-- [ ] Define verification strategy (tests, manual checks)
-- [ ] Assess impact and risks of the solution
+- 阅读分析中识别的相关源码文件
+- 理解当前架构和模式
+- 识别约束条件（向后兼容性、性能等）
+- 考虑边界情况和错误场景
 
-**Design principles**:
-1. **Simplicity**: Prefer the simplest solution that meets requirements
-2. **Consistency**: Follow existing code patterns and conventions
-3. **Testability**: Design for easy testing
-4. **Reversibility**: Prefer changes that are easy to revert
+### 5. 设计技术方案
 
-### 5. Output Plan Document
+遵循 `.agents/workflows/feature-development.yaml` 中的 `technical-design` 步骤：
 
-Create `.agent-workspace/active/{task-id}/plan.md`.
+**必要任务**：
+- [ ] 定义技术方法和理由
+- [ ] 考虑备选方案并说明权衡
+- [ ] 按顺序详细列出实施步骤
+- [ ] 列出所有需要创建/修改的文件
+- [ ] 定义验证策略（测试、手动检查）
+- [ ] 评估方案的影响和风险
 
-### 6. Update Task Status
+**设计原则**：
+1. **简洁性**：优先选择满足需求的最简方案
+2. **一致性**：遵循现有代码模式和规范
+3. **可测试性**：设计易于测试的方案
+4. **可逆性**：优先选择易于回退的变更
 
-Get the current time:
+### 6. 输出计划文档
+
+创建 `.agent-workspace/active/{task-id}/{plan-artifact}`。
+
+### 7. 更新任务状态
+
+获取当前时间：
 
 ```bash
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-Update `.agent-workspace/active/{task-id}/task.md`:
-- `current_step`: technical-design
-- `assigned_to`: {current AI agent}
-- `updated_at`: {current time}
-- Mark plan.md as completed
-- Mark technical-design as complete in workflow progress
-- **Append** to `## Activity Log` (do NOT overwrite previous entries):
+更新 `.agent-workspace/active/{task-id}/task.md`：
+- `current_step`：technical-design
+- `assigned_to`：{当前 AI 代理}
+- `updated_at`：{当前时间}
+- 记录本轮方案产物：`{plan-artifact}`（Round `{plan-round}`）
+- 如任务模板包含 `## 设计` 段落，更新为指向 `{plan-artifact}` 的链接
+- 在工作流进度中标记 technical-design 为已完成，并注明实际轮次（如果任务模板支持）
+- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Technical Design** by {agent} — Plan completed, awaiting human review
+  - {yyyy-MM-dd HH:mm:ss} — **Technical Design (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
   ```
 
-### 7. Inform User
+### 8. 告知用户
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
-Output format:
+输出格式：
 ```
-Technical plan complete for task {task-id}.
+任务 {task-id} 技术方案完成。
 
-Plan summary:
-- Approach: {brief description}
-- Files to modify: {count}
-- Files to create: {count}
-- Estimated complexity: {assessment}
+方案概要：
+- 轮次：Round {plan-round}
+- 方法：{简要描述}
+- 需修改文件：{数量}
+- 需新建文件：{数量}
+- 预估复杂度：{评估}
 
-Output file:
-- Technical plan: .agent-workspace/active/{task-id}/plan.md
+产出文件：
+- 技术方案：.agent-workspace/active/{task-id}/{plan-artifact}
 
-IMPORTANT: Human review checkpoint.
-Please review the technical plan before proceeding to implementation.
+重要：人工审查检查点。
+请在继续实现之前审查技术方案。
 
-Next step - implement the task:
-  - Claude Code / OpenCode: /implement-task {task-id}
-  - Gemini CLI: /{{project}}:implement-task {task-id}
-  - Codex CLI: $implement-task {task-id}
+下一步 - 实施任务：
+  - Claude Code / OpenCode：/implement-task {task-id}
+  - Gemini CLI：/agent-orchestrator:implement-task {task-id}
+  - Codex CLI：$implement-task {task-id}
 ```
 
-## Output Template
+## 输出模板
 
 ```markdown
-# Technical Plan
+# 技术方案
 
-## Problem Understanding
-{Summarize the problem to solve and key constraints}
+- **方案轮次**：Round {plan-round}
+- **产物文件**：`{plan-artifact}`
 
-## Constraints
-- {Constraint 1}
-- {Constraint 2}
+## 问题理解
+{总结需要解决的问题和关键约束}
 
-## Solution Alternatives
+## 约束条件
+- {约束 1}
+- {约束 2}
 
-### Option A: {Name}
-- **Approach**: {Description}
-- **Pros**: {Advantages}
-- **Cons**: {Disadvantages}
+## 方案对比
 
-### Option B: {Name}
-- **Approach**: {Description}
-- **Pros**: {Advantages}
-- **Cons**: {Disadvantages}
+### 方案 A：{名称}
+- **方法**：{描述}
+- **优点**：{优势}
+- **缺点**：{劣势}
 
-### Decision
-{Which option and why}
+### 方案 B：{名称}
+- **方法**：{描述}
+- **优点**：{优势}
+- **缺点**：{劣势}
 
-## Technical Approach
-{Detailed description of the chosen solution}
+### 决策
+{选择哪个方案以及原因}
 
-## Implementation Steps
+## 技术方法
+{所选方案的详细描述}
 
-### Step 1: {Title}
-- **File**: `{file-path}`
-- **Action**: {What to do}
-- **Details**: {Specifics}
+## 实施步骤
 
-### Step 2: {Title}
+### 步骤 1：{标题}
+- **文件**：`{file-path}`
+- **操作**：{要做什么}
+- **详情**：{具体细节}
+
+### 步骤 2：{标题}
 ...
 
-## File Manifest
+## 文件清单
 
-### New Files
-- `{file-path}` - {Purpose}
+### 新建文件
+- `{file-path}` - {用途}
 
-### Modified Files
-- `{file-path}` - {What changes}
+### 修改文件
+- `{file-path}` - {修改内容}
 
-## Verification Strategy
+## 验证策略
 
-### Unit Tests
-- {Test case 1}
-- {Test case 2}
+### 单元测试
+- {测试用例 1}
+- {测试用例 2}
 
-### Manual Verification
-- {Verification step}
+### 手动验证
+- {验证步骤}
 
-## Impact Assessment
-- Breaking changes: {Yes/No - details}
-- Performance impact: {Assessment}
-- Security considerations: {Assessment}
+## 影响评估
+- 破坏性变更：{是/否 - 详情}
+- 性能影响：{评估}
+- 安全考量：{评估}
 
-## Risk Control
-- {Risk 1}: {Mitigation}
-- {Risk 2}: {Mitigation}
+## 风险控制
+- {风险 1}：{缓解措施}
+- {风险 2}：{缓解措施}
 ```
 
-## Completion Checklist
+## 完成检查清单
 
-- [ ] Read and understood requirement analysis
-- [ ] Considered alternative solutions
-- [ ] Created plan document `.agent-workspace/active/{task-id}/plan.md`
-- [ ] Updated `current_step` to technical-design in task.md
-- [ ] Updated `updated_at` to current time in task.md
-- [ ] Marked plan.md as completed in task.md
-- [ ] Marked technical-design as complete in workflow progress
-- [ ] Appended entry to Activity Log in task.md
-- [ ] Informed user this is a human review checkpoint
-- [ ] Informed user of next step (must include all TUI command formats — do not filter)
+- [ ] 阅读并理解了需求分析
+- [ ] 考虑了备选方案
+- [ ] 创建了计划文档 `.agent-workspace/active/{task-id}/{plan-artifact}`
+- [ ] 更新了 task.md 中的 `current_step` 为 technical-design
+- [ ] 更新了 task.md 中的 `updated_at` 为当前时间
+- [ ] 在 task.md 中记录了 `{plan-artifact}` 为已完成产物
+- [ ] 在工作流进度中标记了 technical-design 为已完成
+- [ ] 追加了 Activity Log 条目到 task.md
+- [ ] 告知了用户这是人工审查检查点
+- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
 
-## STOP
+## 停止
 
-After completing the checklist, **stop immediately**.
-This is a **mandatory human review checkpoint** -- the user must review and approve the plan before implementation can proceed.
+完成检查清单后，**立即停止**。
+这是一个**强制性的人工审查检查点** —— 用户必须审查并批准计划后才能继续实现。
 
-## Notes
+## 注意事项
 
-1. **Prerequisites**: Must have completed requirement analysis (analysis.md exists)
-2. **Human review**: This is a mandatory checkpoint -- do not auto-proceed to implementation
-3. **Plan quality**: The plan should be specific enough that another AI agent could implement it without additional context
+1. **前置条件**：必须已完成至少一轮需求分析（`analysis.md` 或 `analysis-r{N}.md` 存在）
+2. **人工审查**：这是强制性检查点 —— 不要自动进入实现阶段
+3. **计划质量**：计划应足够具体，使另一个 AI 代理无需额外上下文即可实现
+4. **版本化规则**：首轮方案使用 `plan.md`；后续修订使用 `plan-r{N}.md`
 
-## Error Handling
+## 错误处理
 
-- Task not found: Prompt "Task {task-id} not found, please check the task ID"
-- Missing analysis: Prompt "Analysis not found, please run the create-task or analyze-issue skill first"
+- 任务未找到：提示 "Task {task-id} not found, please check the task ID"
+- 缺少分析：提示 "Analysis not found, please run the analyze-task skill first"

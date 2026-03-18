@@ -28,19 +28,26 @@ description: >
 随后执行以下发现与校验：
 1. 扫描任务目录中的审查产物文件（`review.md`、`review-r{N}.md`）
 2. 取最高轮次的审查产物作为本次修复输入，记为 `{review-artifact}`
-3. 扫描实现报告文件（`implementation.md`、`implementation-r{N}.md`），取最高轮次作为修复要追加到的 `{implementation-artifact}`
-4. **一致性校验**：检查 `task.md` 的 `## 活动日志` 中最近一条 Code Review 记录的轮次号和文件名，是否与步骤 2 扫描到的最新审查产物匹配
+3. 扫描修复产物文件（`refinement.md`、`refinement-r{N}.md`）并确定本轮修复产物：
+   - 如果不存在 `refinement.md` 且不存在 `refinement-r*.md` → 本轮为第 1 轮，产出 `refinement.md`
+   - 如果存在 `refinement.md` 且不存在 `refinement-r*.md` → 本轮为第 2 轮，产出 `refinement-r2.md`
+   - 如果存在 `refinement-r{N}.md` → 本轮为第 N+1 轮，产出 `refinement-r{N+1}.md`
+   - 记录 `{refinement-round}` 和 `{refinement-artifact}`
+4. 扫描实现报告文件（`implementation.md`、`implementation-r{N}.md`），取最高轮次作为修复上下文的 `{implementation-artifact}`
+   - 记录 `{implementation-artifact}`
+5. **一致性校验**：检查 `task.md` 的 `## 活动日志` 中最近一条 Code Review 记录的轮次号和文件名，是否与步骤 2 扫描到的最新审查产物匹配
 
 若 Activity Log 记录与实际文件不匹配，立即停止并提示：
 `Review artifact mismatch: Activity Log references {expected} but file not found. Please verify the review artifact exists.`
 
-### 2. 阅读审查报告
+### 2. 阅读审查与实现上下文
 
-仔细阅读步骤 1 中确定的最新审查产物 `{review-artifact}` 以理解：
+仔细阅读步骤 1 中确定的最新审查产物 `{review-artifact}` 和实现产物 `{implementation-artifact}` 以理解：
 - 所有阻塞项（必须修复）
 - 所有主要问题（应该修复）
 - 次要问题（可选优化）
 - 审查者的建议和推荐
+- 当前实现和之前修复的上下文
 
 ### 3. 规划修复
 
@@ -77,10 +84,7 @@ description: >
 
 ### 6. 创建修复报告
 
-更新 `.agent-workspace/active/{task-id}/{implementation-artifact}`，追加修复部分。
-
-追加部分的标题使用：
-`## 修复记录（针对 {review-artifact}）`
+创建 `.agent-workspace/active/{task-id}/{refinement-artifact}`。
 
 ### 7. 更新任务状态
 
@@ -94,9 +98,10 @@ date "+%Y-%m-%d %H:%M:%S"
 - `current_step`：refinement
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
+- 记录本轮修复产物：`{refinement-artifact}`（Round `{refinement-round}`）
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Refinement (for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues
+  - {yyyy-MM-dd HH:mm:ss} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues → {refinement-artifact}
   ```
 
 ### 8. 告知用户
@@ -113,7 +118,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 次要问题修复：{数量}/{总数}
 - 所有测试通过：{是/否}
 - 审查输入：{review-artifact}
-- 更新产物：{implementation-artifact}
+- 修复产物：{refinement-artifact}
 
 下一步 - 重新审查或提交：
 - 重新审查：
@@ -128,10 +133,13 @@ date "+%Y-%m-%d %H:%M:%S"
 
 ## 输出模板
 
-追加到 `{implementation-artifact}`：
-
 ```markdown
-## 修复记录（针对 {review-artifact}）
+# 修复报告
+
+- **修复轮次**：Round {refinement-round}
+- **产物文件**：`{refinement-artifact}`
+- **审查输入**：`{review-artifact}`
+- **实现上下文**：`{implementation-artifact}`
 
 ### 审查反馈处理
 
@@ -165,7 +173,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - [ ] 修复了所有主要问题
 - [ ] 在适当情况下处理了次要问题
 - [ ] 修复后所有测试通过
-- [ ] 更新了 `{implementation-artifact}` 的修复记录
+- [ ] 创建了 `{refinement-artifact}` 修复报告
 - [ ] 更新了 task.md 中的任务状态
 - [ ] 追加了 Activity Log 条目到 task.md
 - [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
@@ -177,7 +185,12 @@ date "+%Y-%m-%d %H:%M:%S"
 3. **范围纪律**：仅修复审查中标记的问题 —— 不添加额外变更
 4. **不同意见**：如果不同意某个审查意见，在"未处理的问题"部分记录你的理由
 5. **重新审查**：修复阻塞项后，建议重新运行 review-task 技能进行验证
-6. **一致性要求**：最新审查产物、Activity Log 记录和修复记录标题必须引用同一轮次文件
+6. **一致性要求**：最新审查产物、Activity Log 记录和修复报告标题必须引用同一轮次文件
+7. **版本化规则**：首轮修复使用 `refinement.md`；后续轮次使用 `refinement-r{N}.md`
+
+## 停止
+
+完成检查清单后，**立即停止**。等待用户审查修复结果并决定重新审查还是提交。
 
 ## 错误处理
 

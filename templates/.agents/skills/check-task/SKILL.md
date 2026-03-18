@@ -1,117 +1,122 @@
 ---
 name: check-task
 description: >
-  View a task's current status, workflow progress, and context files.
-  This is a read-only operation that reports the task state and suggests
-  the appropriate next action. Triggered when the user requests a task
-  status check. Argument: task-id.
+  查看任务的当前状态、工作流进度和上下文文件。这是只读操作，报告任务状态并建议
+  适当的下一步操作。当用户要求查看任务状态时触发。参数：task-id。
 ---
 
-# Check Task Status
+# 查看任务状态
 
-## Boundary / Critical Rules
+## 行为边界 / 关键规则
 
-- This skill is **read-only** -- it does not modify any files
-- Always check active, blocked, and completed directories
+- 本技能是**只读**操作 —— 不修改任何文件
+- 始终检查 active、blocked 和 completed 目录
 
-## Steps
+## 执行步骤
 
-### 1. Find Task
+### 1. 查找任务
 
-Search for the task in this priority order:
+按以下优先顺序搜索任务：
 1. `.agent-workspace/active/{task-id}/task.md`
 2. `.agent-workspace/blocked/{task-id}/task.md`
 3. `.agent-workspace/completed/{task-id}/task.md`
 
-Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, e.g. `TASK-20260306-143022`
+注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 
-If not found in any directory, prompt "Task {task-id} not found".
+如果在任何目录中都未找到，提示 "Task {task-id} not found"。
 
-### 2. Read Task Metadata
+### 2. 读取任务元数据
 
-From `task.md`, extract:
-- `id`, `title`, `type`, `status`, `workflow`
-- `current_step`, `assigned_to`
-- `created_at`, `updated_at`
-- `issue_number`, `pr_number` (if applicable)
+从 `task.md` 中提取：
+- `id`、`title`、`type`、`status`、`workflow`
+- `current_step`、`assigned_to`
+- `created_at`、`updated_at`
+- `issue_number`、`pr_number`（如适用）
 
-### 3. Check Context Files
+### 3. 检查上下文文件
 
-Scan and report the existence, round, and status of these artifact types:
-- `analysis.md` - Requirement analysis
-- `plan.md` - Technical plan
-- `implementation.md`, `implementation-r2.md`, ... - Implementation reports
-- `review.md`, `review-r2.md`, ... - Review reports
+按产物类型扫描并记录以下文件的存在、轮次和状态：
+- `analysis.md`、`analysis-r{N}.md` - 需求分析
+- `plan.md`、`plan-r{N}.md` - 技术方案
+- `implementation.md`、`implementation-r2.md`、... - 实现报告
+- `refinement.md`、`refinement-r2.md`、... - 修复报告
+- `review.md`、`review-r2.md`、... - 审查报告
 
-For `implementation` and `review`:
-- Scan the task directory for every versioned artifact
-- Record the latest round, latest filename, and total rounds for each artifact type
-- When `task.md` Activity Log records the latest round, verify it matches the actual latest artifact
+对于版本化产物（`analysis`、`plan`、`implementation`、`refinement`、`review`）：
+- 扫描任务目录中的所有同类版本化文件
+- 记录每类产物的最新轮次、最新文件路径和总轮次数
+- 如果 `task.md` 的 Activity Log 记录了最新轮次，优先核对其与实际文件是否一致
 
-### 4. Output Status Report
+### 4. 输出状态报告
 
-Format the output with clear structure and status indicators:
+以清晰的结构和状态指示器格式化输出：
 
 ```
-Task Status: {task-id}
+任务状态：{task-id}
 =======================
 
-Basic Info:
-- Title: {title}
-- Type: {type}
-- Status: {status}
-- Workflow: {workflow}
-- Assigned to: {assigned_to}
-- Created: {created_at}
-- Updated: {updated_at}
+基本信息：
+- 标题：{title}
+- 类型：{type}
+- 状态：{status}
+- 工作流：{workflow}
+- 分配给：{assigned_to}
+- 创建时间：{created_at}
+- 更新时间：{updated_at}
 
-Workflow Progress:
-  [done]       Requirement Analysis    analysis.md
-  [done]       Technical Design        plan.md
-  [current]    Implementation          implementation.md (Round 1)
-  [pending]    Code Review             review.md (Round 1 will be created next)
-  [pending]    Final Commit
+工作流进度：
+  [已完成]    需求分析        analysis-r2.md (Round 2, latest)
+  [已完成]    技术设计        plan.md (Round 1)
+  [进行中]    实现            implementation.md (Round 1)
+  [待处理]    修复            refinement.md (Round 1 will be created next)
+  [待处理]    代码审查        review.md (Round 1 will be created next)
+  [待处理]    最终提交
 
-Context Files:
-- analysis.md:       exists
-- plan.md:           exists
-- implementation.md: exists (Round 1, latest)
-- review.md:         not started
+上下文文件：
+- analysis.md：           已存在 (Round 1)
+- analysis-r2.md：        已存在 (Round 2, latest)
+- plan.md：               已存在 (Round 1, latest)
+- implementation.md：     已存在 (Round 1, latest)
+- refinement.md：         未开始
+- review.md：             未开始
 
-If multiple rounds exist, list every artifact and mark the latest one, for example:
-- implementation.md: exists (Round 1)
-- implementation-r2.md: exists (Round 2, latest)
-- review.md: exists (Round 1)
-- review-r2.md: exists (Round 2, latest)
+如果存在多轮产物，显示所有轮次，并标记最新版本，例如：
+- plan.md：已存在 (Round 1)
+- plan-r2.md：已存在 (Round 2, latest)
+- implementation.md：已存在 (Round 1)
+- implementation-r2.md：已存在 (Round 2, latest)
+- refinement.md：已存在 (Round 1)
+- review.md：已存在 (Round 1)
+- review-r2.md：已存在 (Round 2, latest)
 
-Next Step:
-  Complete implementation, then run the review-task skill with {task-id}
+下一步：
+  完成实现，然后执行代码审查
 ```
 
-**Status indicators**:
-- `[done]` - Step completed
-- `[current]` - Currently in progress
-- `[pending]` - Not started yet
-- `[blocked]` - Blocked
-- `[skipped]` - Skipped
+**状态指示器**：
+- `[done]` - 步骤已完成
+- `[current]` - 当前进行中
+- `[pending]` - 尚未开始
+- `[blocked]` - 被阻塞
+- `[skipped]` - 已跳过
 
-### 5. Suggest Next Action
+### 5. 建议下一步操作
 
-Based on the current workflow state, suggest the appropriate next skill. You must show all TUI command formats from every column in the table below, not just the column for the current AI agent:
+根据当前工作流状态，建议合适的下一个技能。必须展示下表中所有 TUI 列的命令格式，不要只展示当前 AI 代理对应的列：
 
-| Current State | Claude Code / OpenCode | Gemini CLI | Codex CLI |
-|--------------|------------------------|------------|-----------|
-| analysis complete | `/plan-task {task-id}` | `/{{project}}:plan-task {task-id}` | `$plan-task {task-id}` |
-| plan complete | `/implement-task {task-id}` | `/{{project}}:implement-task {task-id}` | `$implement-task {task-id}` |
-| implementation complete | `/review-task {task-id}` | `/{{project}}:review-task {task-id}` | `$review-task {task-id}` |
-| review passed | `/commit` | `/{{project}}:commit` | `$commit` |
-| review has issues | `/refine-task {task-id}` | `/{{project}}:refine-task {task-id}` | `$refine-task {task-id}` |
-| task blocked | Unblock or provide required info | — | Unblock or provide required info |
-| task completed | No action needed | — | No action needed |
+| 当前状态 | Claude Code / OpenCode | Gemini CLI | Codex CLI |
+|---------|----------------------|------------|-----------|
+| 分析完成 | `/plan-task {task-id}` | `/agent-orchestrator:plan-task {task-id}` | `$plan-task {task-id}` |
+| 计划完成 | `/implement-task {task-id}` | `/agent-orchestrator:implement-task {task-id}` | `$implement-task {task-id}` |
+| 实现完成 | `/review-task {task-id}` | `/agent-orchestrator:review-task {task-id}` | `$review-task {task-id}` |
+| 审查通过 | `/commit` | `/agent-orchestrator:commit` | `$commit` |
+| 审查有问题 | `/refine-task {task-id}` | `/agent-orchestrator:refine-task {task-id}` | `$refine-task {task-id}` |
+| 任务被阻塞 | 解除阻塞或提供所需信息 | — | 解除阻塞或提供所需信息 |
+| 任务已完成 | 无需操作 | — | 无需操作 |
 
-## Notes
+## 注意事项
 
-1. **Read-only**: This skill only reads and reports -- it does not modify any files
-2. **Multi-directory search**: Always check active, blocked, and completed directories
-3. **Quick reference**: Use this skill anytime to check where a task stands in the workflow
-4. **Versioned artifacts**: `implementation` and `review` must report real rounds instead of only fixed filenames
+1. **只读**：本技能仅读取和报告 —— 不修改任何文件
+2. **多目录搜索**：始终检查 active、blocked 和 completed 目录
+3. **快速参考**：随时可以使用本技能检查任务在工作流中的位置
+4. **版本化产物**：`analysis`、`plan`、`implementation`、`refinement`、`review` 都需要报告实际轮次，而不是只报告固定文件名

@@ -45,7 +45,8 @@ Before creating PR:
 ## Rule 5: Task Semantic Recognition
 
 Auto-detect user intent:
-- "analyze issue XXX" -> `/analyze-issue`
+- "analyze issue XXX" -> `/import-issue`
+- "analyze task TASK-..." -> `/analyze-task`
 - "plan/design solution" -> `/plan-task`
 - "implement/code" -> `/implement-task`
 - "review" -> `/review-task`
@@ -55,7 +56,8 @@ Auto-detect user intent:
 CRITICAL: Update task status immediately after command execution.
 
 Commands that require updates:
-- `/analyze-issue`: update current_step, updated_at, assigned_to
+- `/import-issue`: update current_step, updated_at, assigned_to
+- `/analyze-task`: update current_step, updated_at, assigned_to
 - `/plan-task`: update current_step, updated_at
 - `/implement-task`: update current_step, updated_at
 - `/review-task`: update current_step, updated_at

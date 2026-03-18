@@ -89,20 +89,25 @@ function skillDocPaths(skill) {
 }
 
 const commandSpecs = {
-  "analyze-codescan": {
-    usage: "<alert-number>",
-    en: "Analyze CodeQL alert #$1.",
-    zh: "分析 CodeQL 告警 #$1。"
+  "analyze-task": {
+    usage: "<task-id>",
+    en: "Analyze task $1.",
+    zh: "分析任务 $1。"
   },
-  "analyze-dependabot": {
+  "import-codescan": {
     usage: "<alert-number>",
-    en: "Analyze Dependabot alert #$1.",
-    zh: "分析 Dependabot 告警 #$1。"
+    en: "Import CodeQL alert #$1.",
+    zh: "导入 CodeQL 告警 #$1。"
   },
-  "analyze-issue": {
+  "import-dependabot": {
+    usage: "<alert-number>",
+    en: "Import Dependabot alert #$1.",
+    zh: "导入 Dependabot 告警 #$1。"
+  },
+  "import-issue": {
     usage: "<issue-number>",
-    en: "Analyze Issue #$1.",
-    zh: "分析 Issue #$1。"
+    en: "Import Issue #$1.",
+    zh: "导入 Issue #$1。"
   },
   "block-task": {
     usage: "<task-id> [reason]",

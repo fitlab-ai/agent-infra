@@ -1,24 +1,23 @@
 ---
 name: sync-issue
 description: >
-  Sync task progress to the corresponding GitHub Issue as a comment.
-  Triggered when the user requests syncing progress to an Issue.
-  Argument: task-id or issue-number.
+  将任务处理进度同步到对应的 GitHub Issue 评论。
+  当用户要求同步进度到 Issue 时触发。参数：task-id 或 issue-number。
 ---
 
-# Sync Progress to Issue
+# 同步进度到 Issue
 
-Sync task progress to its associated GitHub Issue. Argument: task-id or issue-number.
+将任务处理进度同步到关联的 GitHub Issue。参数：task-id 或 issue-number。
 
-## Execution Flow
+## 执行流程
 
-### 1. Parse Argument
+### 1. 解析参数
 
-Determine the provided argument:
-- A plain number (`123`) or `#` + number (`#123`) -> treat it as an issue number
-- Starts with `TASK-` -> treat it as a task-id (existing format)
+识别用户提供的参数：
+- 纯数字（如 `123`）或 `#` + 数字（如 `#123`）-> 视为 issue number
+- `TASK-` 开头 -> 视为 task-id（现有格式）
 
-If the argument is an issue number, use Bash to search for the associated task (note: `.agent-workspace` is a hidden directory — Grep/Glob tools skip hidden directories by default, so Bash must be used):
+如果参数是 issue number，使用 Bash 搜索关联任务（注意：`.agent-workspace` 是隐藏目录，Grep/Glob 工具会跳过，必须使用 Bash）：
 
 ```bash
 grep -rl "^issue_number: {issue-number}$" \
@@ -28,43 +27,44 @@ grep -rl "^issue_number: {issue-number}$" \
   2>/dev/null | head -1
 ```
 
-- If a file path is returned (e.g., `.agent-workspace/completed/TASK-xxx/task.md`), extract the `{task-id}` and task directory from the path, then continue to step 2
-- If no result is returned, prompt `No task found associated with Issue #{issue-number}`
+- 如果返回文件路径（如 `.agent-workspace/completed/TASK-xxx/task.md`），从路径中提取 `{task-id}` 和任务目录，继续执行步骤 2
+- 如果无返回，提示 `No task found associated with Issue #{issue-number}`
 
-If the argument is a task-id, continue with the existing step 2 logic.
+如果参数是 task-id，继续执行步骤 2 的现有逻辑。
 
-### 2. Verify Task Exists
+### 2. 验证任务存在
 
-For the `task-id` path, search for the task in priority order:
+对于 `task-id` 路径，按优先顺序搜索任务：
 - `.agent-workspace/active/{task-id}/task.md`
 - `.agent-workspace/blocked/{task-id}/task.md`
 - `.agent-workspace/completed/{task-id}/task.md`
 
-Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, e.g. `TASK-20260306-143022`
+注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 
-If step 1 already resolved an issue number to a matching task, use that task directory directly and continue without rescanning.
+如果步骤 1 已通过 issue number 找到匹配任务，则直接使用该任务目录继续后续步骤，无需再次扫描。
 
-### 3. Read Task Information
+### 3. 读取任务信息
 
-From task.md, extract:
-- `issue_number` (required - if missing, prompt user)
+从 task.md 中提取：
+- `issue_number`（必需 —— 如果缺失，提示用户）
 - `type`
-- Task title, description, status
-- `current_step`, `created_at`, `updated_at`, `last_synced_at` (if present)
+- 任务标题、描述、状态
+- `current_step`、`created_at`、`updated_at`、`last_synced_at`（如存在）
 
-### 4. Read Context Files
+### 4. 读取上下文文件
 
-Check and read (if they exist):
-- `analysis.md` - Requirement analysis
-- `plan.md` - Technical plan
-- `implementation.md`, `implementation-r*.md` - Implementation reports
-- `review.md`, `review-r*.md` - Review reports
+检查并读取（如存在）：
+- 最高轮次的 `analysis.md` / `analysis-r{N}.md` - 需求分析
+- 最高轮次的 `plan.md` / `plan-r{N}.md` - 技术方案
+- `implementation.md`、`implementation-r*.md` - 实现报告
+- `refinement.md`、`refinement-r*.md` - 修复报告
+- `review.md`、`review-r*.md` - 审查报告
 
-### 5. Detect Delivery Status
+### 5. 探测交付状态
 
-Run the following checks in order; if any step fails, fall back to "Mode C: In Development" and do not invent unverified information.
+依次执行以下探测；任一步失败时，降级到“模式 C：开发中”，不要编造无法确认的信息。
 
-Before running the checks, resolve the repository coordinates and absolute GitHub URL prefix:
+在开始探测前，先获取仓库坐标和绝对 URL 前缀：
 
 ```bash
 repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
@@ -72,203 +72,203 @@ owner="${repo%%/*}"
 repo_url="https://github.com/$repo"
 ```
 
-**a) Extract the commit hash**
+**a) 提取 commit hash**
 
-From `## Activity Log` in task.md, find the last `**Commit** by` entry. The activity log format is fixed as:
+从 task.md 的 `## Activity Log` 中匹配最后一条 `**Commit** by` 记录，活动日志格式固定为：
 
 ```text
 **Commit** by {agent} — {hash} {subject}
 ```
 
-Extract the first token as the commit hash. If none is found, mark it as "no commit".
+提取第一个词作为 commit hash；如果找不到，标记为“无 commit”。
 
-**b) Check whether the commit is on a protected branch**
+**b) 检测 commit 是否在受保护分支上**
 
-If a commit hash exists, run:
+如果存在 commit hash，执行：
 
 ```bash
 git branch -a --contains {commit-hash} 2>/dev/null
 ```
 
-Decision rules:
-- Output contains `main` or `master` -> merged into the primary branch; record the branch name
-- Output matches a `{major}.{minor}.x` branch name -> merged into a release branch; record the branch name
-- Otherwise -> not on a protected branch
+判断规则：
+- 输出包含 `main` 或 `master` -> 已合入主分支，记录分支名
+- 输出匹配 `{major}.{minor}.x` 模式的分支名 -> 已合入版本分支，记录分支名
+- 都不匹配 -> 未合入受保护分支
 
-**c) Check the linked PR**
+**c) 检测关联 PR**
 
-Inspect the `pr_number` field in task.md. If it exists, run:
+检查 task.md 的 `pr_number` 字段；如果存在，执行：
 
 ```bash
 gh pr view {pr-number} --json state,mergedAt
 ```
 
-Use the result to classify the PR as `OPEN`, `MERGED`, or another state.
+根据返回结果识别 PR 是 `OPEN`、`MERGED` 还是其他状态。
 
-**d) Check the Issue state**
+**d) 检测 Issue 状态**
 
-Run:
+执行：
 
 ```bash
 gh issue view {issue-number} --json state
 ```
 
-Record whether the Issue is currently `OPEN` or `CLOSED`.
+记录 Issue 当前是 `OPEN` 还是 `CLOSED`。
 
-**e) Determine the delivery mode**
+**e) 综合判定交付模式**
 
-Choose the summary mode using the following priority:
+按以下优先级确定摘要模式：
 
-| Condition | Mode |
+| 条件 | 模式 |
 |------|------|
-| commit is on a protected branch | Mode A: Completed |
-| a PR exists and its state is `OPEN` or `MERGED` | Mode B: PR Stage |
-| otherwise | Mode C: In Development |
+| commit 已在受保护分支上 | 模式 A：已完成 |
+| 有 PR，且状态为 `OPEN` 或 `MERGED` | 模式 B：PR 阶段 |
+| 其他情况 | 模式 C：开发中 |
 
-Priority must be `Mode A > Mode B > Mode C`. Even if a PR exists, if the commit is already on a protected branch, treat it as completed.
+优先级必须为 `模式 A > 模式 B > 模式 C`。即使存在 PR，只要 commit 已在受保护分支上，也按“已完成”处理。
 
-All commit / PR links used later must be absolute URLs:
+后续所有 commit / PR 链接必须使用绝对 URL：
 - `https://github.com/{owner}/{repo}/commit/{commit-hash}`
 - `https://github.com/{owner}/{repo}/pull/{pr-number}`
 
-Do not use relative paths such as `../../commit/...` or `../../pull/...` anymore.
+不要再使用 `../../commit/...` 或 `../../pull/...` 这类相对路径。
 
-### 6. Sync Labels and Issue Type
+### 6. 同步 Labels 和 Issue Type
 
-Sync Issue labels based on the delivery status detected in step 5.
+基于步骤 5 的探测结果同步 Issue labels。
 
-**a) Check whether the label system is initialized**
+**a) 检查 label 体系是否已初始化**
 
-Run:
+执行：
 
 ```bash
 gh label list --search "type:" --limit 1 --json name --jq 'length'
 ```
 
-Decision rules:
-- Returns `0` -> the standard label set is missing. Run the `init-labels` skill first (idempotent), then rerun this step
-- Returns non-`0` -> continue with label synchronization
+判断规则：
+- 返回 `0` -> 说明标准 label 体系缺失。先执行 `init-labels` 技能（幂等），然后重新执行本步骤
+- 返回非 `0` -> 继续后续 label 同步
 
-**b) Sync the type label**
+**b) 同步 type label**
 
-Map the `type` field from task.md using the following table:
+根据 task.md 的 `type` 字段按下表映射：
 
 | task.md type | GitHub label |
 |---|---|
-| bug, bugfix | `type: bug` |
+| bug、bugfix | `type: bug` |
 | feature | `type: feature` |
 | enhancement | `type: enhancement` |
 | documentation | `type: documentation` |
 | dependency-upgrade | `type: dependency-upgrade` |
 | task | `type: task` |
-| anything else (including refactoring) | skip |
+| 其他（含 refactoring 等） | 跳过 |
 
-When the type maps to a standard label, run:
+如果映射到具体 label，执行：
 
 ```bash
 gh issue edit {issue-number} --add-label "{type-label}"
 ```
 
-If the type is unmapped, skip it and do not create a new label.
+未映射到标准 type label 时跳过，不创建新 label。
 
-**c) Sync the status label**
+**c) 同步 status label**
 
-First read the existing `status:` labels on the Issue:
+先读取 Issue 上已有的 `status:` labels：
 
 ```bash
 gh issue view {issue-number} --json labels --jq '.labels[].name | select(startswith("status:"))'
 ```
 
-Remove each existing `status:` label:
+对每个已有的 `status:` label 执行移除：
 
 ```bash
 gh issue edit {issue-number} --remove-label "{status-label}"
 ```
 
-Then decide whether to add a new `status:` label using the following priority:
+然后按以下优先级决定是否添加新的 `status:` label：
 
-| Condition | Action |
+| 条件 | 动作 |
 |---|---|
-| Task is under `blocked/` | add `status: blocked` |
-| Mode A: Completed | add no new status label |
-| Mode B: PR is `MERGED` | add no new status label |
-| Mode B: PR is `OPEN` | add `status: in-progress` |
-| Mode C + `current_step` ∈ {`requirement-analysis`, `technical-design`} | add `status: pending-design-work` |
-| Mode C + `current_step` ∈ {`implementation`, `code-review`, `refinement`} | add `status: in-progress` |
+| 任务位于 `blocked/` 目录 | 添加 `status: blocked` |
+| 模式 A：已完成 | 不添加新的 status label |
+| 模式 B：PR 已 MERGED | 不添加新的 status label |
+| 模式 B：PR OPEN | 添加 `status: in-progress` |
+| 模式 C + `current_step` ∈ {`requirement-analysis`, `technical-design`} | 添加 `status: pending-design-work` |
+| 模式 C + `current_step` ∈ {`implementation`, `code-review`, `refinement`} | 添加 `status: in-progress` |
 
-If a new status label is needed, run:
+如果需要添加新 label，执行：
 
 ```bash
 gh issue edit {issue-number} --add-label "{status-label}"
 ```
 
-**d) Sync the in: labels**
+**d) 同步 in: label**
 
-Extract affected file paths from implementation reports first, or fall back to `analysis.md`:
-- Prefer the file lists under `## Modified Files` / `## New Files` in `implementation.md` and `implementation-r*.md`
-- If the implementation report does not exist, use the affected file list from the analysis report
+从实现报告（优先）或 `analysis.md` 中提取受影响文件路径：
+- 优先读取 `implementation.md` 与 `implementation-r*.md` 中 `## 修改文件` / `## 新建文件` 的文件列表
+- 如果实现报告不存在，则回退到分析报告中的受影响文件列表
 
-For each file path:
-1. Take the first directory segment as the module name
-2. Deduplicate modules
-3. Check whether the corresponding label exists in the repository:
+对每个文件路径：
+1. 取第一级目录作为模块名
+2. 去重
+3. 检查仓库中是否存在对应 label：
 
 ```bash
 gh label list --search "in: {module}" --limit 10 --json name --jq '.[].name'
 ```
 
-4. Only when an exact `in: {module}` label exists, run:
+4. 只有存在精确匹配的 `in: {module}` label 时才执行：
 
 ```bash
 gh issue edit {issue-number} --add-label "in: {module}"
 ```
 
-5. **Only add labels; never remove** existing `in:` labels
+5. **只添加，不移除**现有的 `in:` labels
 
-**e) Sync the Issue Type field**
+**e) 同步 Issue Type 字段**
 
-Map the `type` field from task.md to the native GitHub Issue Type:
+根据 task.md 的 `type` 字段映射 GitHub 原生 Issue Type：
 
 | task.md type | GitHub Issue Type |
 |---|---|
-| `bug`, `bugfix` | `Bug` |
-| `feature`, `enhancement` | `Feature` |
-| `task`, `documentation`, `dependency-upgrade`, `chore`, `docs`, `refactor`, `refactoring`, and everything else | `Task` |
+| `bug`、`bugfix` | `Bug` |
+| `feature`、`enhancement` | `Feature` |
+| `task`、`documentation`、`dependency-upgrade`、`chore`、`docs`、`refactor`、`refactoring` 及其他值 | `Task` |
 
-First query the available Issue Types on the organization:
+先查询组织可用的 Issue Types：
 
 ```bash
 gh api "orgs/$owner/issue-types" --jq '.[].name'
 ```
 
-Then only when the target type exists, run:
+然后仅在目标类型存在时执行：
 
 ```bash
 gh api "repos/$repo/issues/{issue-number}" -X PATCH -f type="{name}"
 ```
 
-Fault-tolerance requirements:
-- If the API returns `404`, the owner is not an organization, or the repository has not enabled Issue Types, record `Issue Type: skipped (not enabled)` and continue without failing the sync
-- If the target type is not available, record `Issue Type: skipped (type not available)`
-- Never try to create new Issue Types; only use types that already exist in the organization
+容错要求：
+- 如果 API 返回 `404`、仓库 owner 不是组织，或仓库未启用 Issue Types，记录 `Issue Type: skipped (not enabled)` 并继续，不要让整个同步失败
+- 如果目标类型不存在，记录 `Issue Type: skipped (type not available)`
+- 不要尝试创建新的 Issue Type；只使用组织中已存在的类型名称
 
-### 7. Sync Development
+### 7. 同步 Development
 
-If task.md contains `pr_number`, ensure the PR body links the current Issue.
+如果 task.md 包含 `pr_number`，确保 PR body 关联当前 Issue。
 
-1. Read the PR body:
+1. 读取 PR body：
 
 ```bash
 gh pr view {pr-number} --json body --jq '.body // ""'
 ```
 
-2. Check whether the body already contains any of:
+2. 检查 body 是否已经包含以下任一关键词：
 - `Closes #{issue-number}`
 - `Fixes #{issue-number}`
 - `Resolves #{issue-number}`
 
-3. If any keyword already exists, skip the update
-4. Otherwise append this text to the end of the body:
+3. 如果已存在任一关键词，跳过更新
+4. 如果不存在，在 body 末尾追加：
 
 ```bash
 gh pr edit {pr-number} --body "$(cat <<'EOF'
@@ -279,85 +279,85 @@ EOF
 )"
 ```
 
-5. If task.md does not contain `pr_number`, record `Development: N/A`
+5. 如果 task.md 不包含 `pr_number`，记录为 `Development: N/A`
 
-### 8. Sync Milestone
+### 8. 同步 Milestone
 
-Assign a line milestone to the Issue based on the existing Issue state, explicit task configuration, and branch policy.
+根据 Issue 当前状态、任务显式配置和分支策略，为 Issue 关联线里程碑。
 
-**a) Check whether the Issue already has a milestone**
+**a) 检查 Issue 是否已有 Milestone**
 
-Run:
+执行：
 
 ```bash
 gh issue view {issue-number} --json milestone --jq '.milestone.title // empty'
 ```
 
-If the result is non-empty, preserve the existing milestone, record `Milestone: {existing} (preserved)`, and skip the remaining milestone sync steps.
+如果返回非空，保留现有里程碑并记录 `Milestone: {existing} (preserved)`，跳过后续里程碑同步步骤。
 
-**b) Check whether task.md explicitly sets a milestone**
+**b) 检查 task.md 是否显式指定 milestone**
 
-If task.md frontmatter contains a non-empty `milestone` field, use that value as the target milestone.
-This field should point to a line milestone title or `General Backlog`; do not auto-assign a concrete release milestone.
+如果 task.md frontmatter 中存在非空 `milestone` 字段，优先使用该值作为目标里程碑。
+此字段应填写线里程碑标题或 `General Backlog`，不要自动指定具体版本里程碑。
 
-**c) Infer the target line milestone**
+**c) 推断目标线里程碑**
 
-When task.md does not explicitly set `milestone`, infer the target in this order:
+当 task.md 未显式指定 `milestone` 时，按以下顺序推断：
 
-1. Detect the current branch:
+1. 检测当前分支：
 
 ```bash
 git branch --show-current
 ```
 
-- If the branch matches `{major}.{minor}.x`, target the same line milestone `{major}.{minor}.x`
+- 如果分支名匹配 `{major}.{minor}.x`，目标里程碑为同名线里程碑 `{major}.{minor}.x`
 
-2. If the current branch is `main` or `master`, detect existing release branches:
+2. 如果当前分支是 `main` 或 `master`，检测现有版本分支：
 
 ```bash
 git branch -a | grep -oE '[0-9]+\.[0-9]+\.x' | sort -V | tail -1
 ```
 
-- If the highest release branch is `X.Y.x`, target `(X+1).0.x`
-- If no release branch exists, inspect the latest tag:
+- 如果存在最高版本分支 `X.Y.x`，则目标里程碑为 `(X+1).0.x`
+- 如果不存在版本分支，则读取最新 tag：
 
 ```bash
 git tag --list 'v*' --sort=-v:refname | head -1
 ```
 
-- When the latest tag parses as `X.Y.Z`, target `X.Y.x`
+- 当最新 tag 存在且可解析为 `X.Y.Z` 时，目标里程碑为 `X.Y.x`
 
-3. If no rule yields a result, fall back to `General Backlog`
+3. 如果以上规则都无法得出结果，回退到 `General Backlog`
 
-**d) Resolve the target milestone number**
+**d) 查找目标里程碑编号**
 
-Run:
+执行：
 
 ```bash
 gh api "repos/$repo/milestones" --paginate \
   --jq '.[] | select(.title=="{target}") | .number'
 ```
 
-- If the target milestone does not exist, retry with `General Backlog`
-- If `General Backlog` also does not exist, record `Milestone: skipped (not found)` and skip assignment
+- 如果目标里程碑不存在，则降级到查找 `General Backlog`
+- 如果 `General Backlog` 也不存在，则记录 `Milestone: skipped (not found)` 并跳过关联
 
-**e) Assign the Issue milestone**
+**e) 关联 Issue 到里程碑**
 
-Once the target milestone number is known, run:
+一旦找到目标里程碑编号，执行：
 
 ```bash
 gh api "repos/$repo/issues/{issue-number}" -X PATCH -F milestone={milestone-number}
 ```
 
-Record one of:
-- `Milestone: {target} (assigned)` or
+记录：
+- `Milestone: {target} (assigned)` 或
 - `Milestone: General Backlog (fallback)`
 
-### 9. Fetch Existing Comments and Build the Published Artifact Set
+### 9. 拉取已有评论并构建已发布文件集合
 
-Fetch all Issue comments once, then build a local "published file-stem set" using hidden markers while preparing the artifact timeline that should be posted.
+一次性拉取 Issue 的全部评论，并基于隐藏标识构建“已发布文件 stem 集合”，同时在本地构建待发布的产物时间线。
 
-First fetch the comments while keeping both the comment id and body:
+先拉取评论（保留 comment id 与 body）：
 
 ```bash
 comments_jsonl="$(mktemp)"
@@ -367,41 +367,38 @@ gh api "repos/$repo/issues/{issue-number}/comments" \
   --jq '.[] | {id, body}' > "$comments_jsonl"
 ```
 
-Scan the task directory for these artifact files and include only the ones that exist:
-- `analysis.md`
-- `plan.md`
-- `implementation.md`
-- `implementation-r*.md`
-- `review.md`
-- `review-r*.md`
+从 `task.md` 的 Activity Log 中提取所有以 `→ {filename}` 结尾的记录。
 
-The first line of every synced comment must contain a hidden marker:
+解析规则：
+- 使用正则 `/→\s+(\S+\.md)\s*$/` 提取文件名
+- 去掉 `.md` 后缀得到 `{file-stem}`
+- 按 Activity Log 中的出现顺序构建产物时间线
+- `summary` 仍作为最后一个固定产物追加到时间线末尾
+- `summary` 始终排在最末
+
+仅当 Activity Log 引用的文件当前存在于任务目录中时，才纳入待发布集合；缺失文件跳过，不报错。
+
+每条同步评论的第一行必须插入隐藏标识：
 
 ```html
 <!-- sync-issue:{task-id}:{file-stem} -->
 ```
 
-Where `{file-stem}` is the filename without the `.md` suffix, such as `analysis`, `plan`, `implementation`, `implementation-r2`, or `review-r3`; `summary` still uses the literal `summary`.
+其中 `{file-stem}` 为去掉 `.md` 后缀后的文件名，例如 `analysis`、`plan`、`implementation`、`implementation-r2`、`review-r3`；`summary` 仍使用字面量 `summary`。
 
-The publication order must be derived from these sorting rules:
-1. `analysis` and `plan` have no round number and must always appear first, with `analysis` before `plan`
-2. Sort the remaining artifacts by round: Round 1 (no suffix) → Round 2 (`-r2`) → Round 3 (`-r3`) → ...
-3. Within the same round, `implementation` must appear before `review`
-4. `summary` is always last
+时间线示例：
+`analysis → plan → implementation → review → refinement → analysis-r2 → plan-r2 → implementation-r2 → review-r2 → summary`
 
-For example, the ordered result should look like:
-`analysis → plan → implementation → review → implementation-r2 → review-r2 → review-r3 → summary`
-
-For each `{file-stem}`, detect whether it is already published by searching the local comment dump:
+对每个 `{file-stem}`，用本地检索判断是否已发布：
 
 ```bash
 grep -qF "<!-- sync-issue:{task-id}:{file-stem} -->" "$comments_jsonl"
 ```
 
-- Match found: the artifact is already published and should be skipped by default
-- No match: the artifact has not been published yet and may create a new comment
+- 匹配到：该产物已发布，后续默认跳过
+- 未匹配：该产物尚未发布，可以创建新评论
 
-For the `summary` artifact, also resolve the existing comment id for later updates:
+对 `summary` 产物，额外提取评论 id 以便后续更新：
 
 ```bash
 summary_comment_id="$(
@@ -410,83 +407,92 @@ summary_comment_id="$(
 )"
 ```
 
-Idempotency requirements:
-- The first execution should publish only the artifact comments whose source files already exist
-- The next execution must skip already published files and publish only newly available artifacts such as `implementation-r2` or `review-r2`
-- If all artifact comments are already published and the `summary` body has not changed, the run must perform zero comment writes
-- If `summary` already exists but the delivery state changed, edit the existing summary comment instead of creating a second summary comment
+幂等要求：
+- 第一次执行时，只发布当前已存在产物对应的文件评论
+- 第二次执行时，必须跳过已发布文件，只补发新增产物（例如 `implementation-r2`、`review-r2`）
+- 如果所有产物文件评论都已发布，且 `summary` 内容没有变化，则本次不发布任何新评论
+- 如果 `summary` 已发布但交付状态发生变化，只更新原评论，不新增第二条 summary 评论
 
-### 10. Publish Context Files Step by Step
+### 10. 按时间线逐条发布上下文文件
 
-Process the sorted artifact list produced in step 9. Do not fall back to a fixed 5-step order, and do not merge multiple rounds of the same artifact type into a single comment.
+按步骤 9 生成的已排序产物列表逐条处理，不要再使用固定 5 步骤，也不要把同类型多轮次产物合并到一条评论。
 
-**a) Prepare the body for each artifact**
+**a) 为每个产物准备评论内容**
 
-- `analysis`: publish the raw contents of `analysis.md`
-- `plan`: publish the raw contents of `plan.md`
-- `implementation` and `implementation-r{N}`: publish one comment per file using the raw implementation report content
-- `review` and `review-r{N}`: publish one comment per file using the raw review report content
-- `summary`: generate a compact delivery summary that contains only the current delivery state and GitHub-accessible absolute links
+- `analysis`：发布 `analysis.md` 原文
+- `plan`：发布 `plan.md` 原文
+- `analysis-r{N}`、`plan-r{N}`：每个文件各自发布一条评论，正文直接使用对应产物原文
+- `implementation`、`implementation-r{N}`：每个文件各自发布一条评论，正文直接使用对应实现报告原文
+- `refinement`、`refinement-r{N}`：每个文件各自发布一条评论，正文直接使用对应修复报告原文
+- `review`、`review-r{N}`：每个文件各自发布一条评论，正文直接使用对应审查报告原文
+- `summary`：生成精简交付摘要，只包含当前交付状态与 GitHub 上可访问的绝对链接
 
-Except for `summary`, publish the original artifact text rather than generating another stakeholder summary.
+除 `summary` 外，其余产物都应发布原文，不要再次压缩成摘要。
 
-Use this common comment structure:
+每条评论统一格式：
 
 ```markdown
 <!-- sync-issue:{task-id}:{file-stem} -->
-## {artifact title}
+## {产物标题}
 
-{raw artifact content or summary content}
+{原文内容或 summary 内容}
 
 ---
-*Auto-generated by AI · Internal tracking: {task-id}*
+*由 AI 自动生成 · 内部追踪：{task-id}*
 ```
 
-Recommended title mapping:
-- `analysis` -> `Requirement Analysis`
-- `plan` -> `Technical Plan`
-- `implementation` -> `Implementation Report (Round 1)`
-- `implementation-r2` -> `Implementation Report (Round 2)`
-- `implementation-r{N}` -> `Implementation Report (Round {N})`
-- `review` -> `Review Report (Round 1)`
-- `review-r2` -> `Review Report (Round 2)`
-- `review-r{N}` -> `Review Report (Round {N})`
-- `summary` -> `Delivery Summary`
+推荐标题映射：
+- `analysis` -> `需求分析`
+- `analysis-r2` -> `需求分析（Round 2）`
+- `analysis-r{N}` -> `需求分析（Round {N}）`
+- `plan` -> `技术方案`
+- `plan-r2` -> `技术方案（Round 2）`
+- `plan-r{N}` -> `技术方案（Round {N}）`
+- `implementation` -> `实现报告（Round 1）`
+- `implementation-r2` -> `实现报告（Round 2）`
+- `implementation-r{N}` -> `实现报告（Round {N}）`
+- `refinement` -> `修复报告（Round 1）`
+- `refinement-r2` -> `修复报告（Round 2）`
+- `refinement-r{N}` -> `修复报告（Round {N}）`
+- `review` -> `审查报告（Round 1）`
+- `review-r2` -> `审查报告（Round 2）`
+- `review-r{N}` -> `审查报告（Round {N}）`
+- `summary` -> `交付摘要`
 
-Recommended `summary` comment format:
+`summary` 评论建议格式：
 
 ```markdown
 <!-- sync-issue:{task-id}:summary -->
-## Delivery Summary
+## 交付摘要
 
-**Updated**: {current time}
-**Status**: {mode-specific status text}
+**更新时间**：{当前时间}
+**状态**：{模式化状态描述}
 
-| Type | Content |
+| 类型 | 内容 |
 |---|---|
-| Branch | `{branch or N/A}` |
-| Commit | [`{commit-short}`](https://github.com/{owner}/{repo}/commit/{commit-hash}) or `N/A` |
-| PR | [#{pr-number}](https://github.com/{owner}/{repo}/pull/{pr-number}) or `N/A` |
+| 分支 | `{branch 或 N/A}` |
+| Commit | [`{commit-short}`](https://github.com/{owner}/{repo}/commit/{commit-hash}) 或 `N/A` |
+| PR | [#{pr-number}](https://github.com/{owner}/{repo}/pull/{pr-number}) 或 `N/A` |
 | Issue | `{issue-state}` |
 
 ---
-*Auto-generated by AI · Internal tracking: {task-id}*
+*由 AI 自动生成 · 内部追踪：{task-id}*
 ```
 
-Mode-specific status text:
-- Mode A: `✅ Completed, code is already in {branch}`
-- Mode B: `PR stage, currently #{pr-number} (OPEN or MERGED)`
-- Mode C: `In development, current step is {current_step}`
+模式化状态描述要求：
+- 模式 A：`✅ 已完成，代码已合入 {branch}`
+- 模式 B：`PR 阶段，当前为 #{pr-number}（OPEN 或 MERGED）`
+- 模式 C：`开发中，当前步骤为 {current_step}`
 
-**b) Skip missing or already published artifacts**
+**b) 跳过已发布或缺失的产物**
 
-- For `analysis.md`, `plan.md`, `implementation*.md`, and `review*.md`: if the source file does not exist, skip without error
-- For any artifact: if the marker already exists, skip by default
-- For `summary`: always regenerate the candidate body so you can decide whether an update is required
+- 对于 `analysis.md`、`plan.md`、`implementation*.md`、`review*.md`：如果对应文件不存在，直接跳过，不报错
+- 对于任意产物：如果标识已存在，默认跳过
+- 对于 `summary`：即使标识已存在，也要重新生成候选内容，用于比较是否需要更新
 
-**c) Create new comments**
+**c) 发布新评论**
 
-When an artifact has not been published yet, run:
+当产物尚未发布时，执行：
 
 ```bash
 gh issue comment {issue-number} --body "$(cat <<'EOF'
@@ -495,9 +501,9 @@ EOF
 )"
 ```
 
-**d) Update only the existing summary comment**
+**d) 仅更新已有 summary 评论**
 
-If the `summary` marker already exists and the regenerated body differs from the current body, edit the original comment:
+如果 `summary` 标识已存在，且新生成内容与已有内容不同，则编辑原评论：
 
 ```bash
 gh api "repos/$repo/issues/comments/{comment-id}" -X PATCH -f body="$(cat <<'EOF'
@@ -506,58 +512,58 @@ EOF
 )"
 ```
 
-If the body is unchanged, do nothing.
+如果内容相同，则不做任何操作。
 
-**e) Zero-write scenario**
+**e) 零操作场景**
 
-If every artifact is already synced and `summary` does not need an update:
-- Do not create any new comments
-- Explicitly tell the user: `All artifacts are already synced; no new content was posted`
+如果所有产物都已同步，且 `summary` 无需更新：
+- 不发布任何新评论
+- 在最终告知用户时明确说明：`所有产物已同步，无新内容`
 
-### 11. Update Task Status
+### 11. 更新任务状态
 
-Get the current time:
+获取当前时间：
 
 ```bash
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-Add or update `last_synced_at` field in task.md to `{current time}`.
-- **Append** to `## Activity Log` (do NOT overwrite previous entries):
+在 task.md 中添加或更新 `last_synced_at` 字段为 `{当前时间}`。
+- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
   - {yyyy-MM-dd HH:mm:ss} — **Sync to Issue** by {agent} — Progress synced to Issue #{issue-number}
   ```
 
-### 12. Inform User
+### 12. 告知用户
 
 ```
-Progress synced to Issue #{issue-number}.
+进度已同步到 Issue #{issue-number}。
 
-Sync result:
-- New comments posted: {count}
-- Existing comments updated: {count}
-- Steps skipped: {step-list or `none`}
-- Current status: {status}
-- Labels: type={type-label or skipped}, status={status-label or cleared}, in:={count added}
-- Issue Type: {Bug / Feature / Task / skipped}
-- Milestone: {preserved / assigned / fallback / skipped}
-- Development: {Closes keyword appended / already linked / skipped because no PR}
+同步结果：
+- 新发布评论：{数量}
+- 更新评论：{数量}
+- 已跳过步骤：{步骤列表或 `无`}
+- 当前状态：{状态}
+- Labels：type={type-label 或 skipped}，status={status-label 或 cleared}，in:={新增数量}
+- Issue Type：{Bug / Feature / Task / skipped}
+- Milestone：{preserved / assigned / fallback / skipped}
+- Development：{已追加 Closes 关联 / 已存在关联 / 无 PR，跳过}
 
-View: https://github.com/{owner}/{repo}/issues/{issue-number}
+查看：https://github.com/{owner}/{repo}/issues/{issue-number}
 
-If this run posted or updated nothing, explicitly say: All steps are already synced; no new content was posted.
+如果本次没有发布或更新任何评论，请明确说明：所有步骤已同步，无新内容。
 ```
 
-## Notes
+## 注意事项
 
-1. **Issue number required**: Task must have `issue_number` in task.md. If missing, prompt user.
-2. **Audience**: The `sync-issue` skill is for stakeholders; the `sync-pr` skill is for code reviewers. Different focus.
-3. **Timing**: Sync after completing important phases (analysis, design, implementation, review) or when blocked.
-4. **Avoid spam**: Don't sync too frequently. Hidden markers make the workflow idempotent, but unnecessary reruns should still be avoided.
+1. **需要 Issue 编号**：任务的 task.md 中必须有 `issue_number`。如果缺失，提示用户。
+2. **受众**：`sync-issue` 技能面向利益相关者；`sync-pr` 技能面向代码审查者。关注点不同。
+3. **同步时机**：在完成重要阶段（分析、设计、实现、审查）或被阻塞时同步。
+4. **避免刷屏**：不要同步过于频繁。虽然本技能使用隐藏标识保证幂等，但仍应避免无意义重复同步。
 
-## Error Handling
+## 错误处理
 
-- Task not found: Prompt "Task {task-id} not found"
-- Missing issue number: Prompt "Task has no issue_number field"
-- Issue not found: Prompt "Issue #{number} not found"
-- gh auth failure: Prompt "Please check GitHub CLI authentication"
+- 任务未找到：提示 "Task {task-id} not found"
+- 缺少 Issue 编号：提示 "Task has no issue_number field"
+- Issue 未找到：提示 "Issue #{number} not found"
+- gh 认证失败：提示 "Please check GitHub CLI authentication"

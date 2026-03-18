@@ -1,20 +1,21 @@
 ---
 name: create-task
 description: >
-  根据用户的自然语言描述创建任务并执行需求分析。当用户描述一个新功能、Bug 或改进需求时触发。
-  唯一的产出是 task.md 和 analysis.md —— 不编写任何业务代码。参数：任务描述文本。
+  根据用户的自然语言描述创建任务骨架。当用户描述一个新功能、Bug 或改进需求时触发。
+  唯一的产出是 task.md —— 不编写任何业务代码。参数：任务描述文本。
 ---
 
 # 创建任务
 
 ## 行为边界 / 关键规则
 
-**本技能的唯一产出是 `task.md` 和 `analysis.md`。**
+**本技能的唯一产出是 `task.md`。**
 
 - 不要编写、修改或创建任何业务代码或配置文件
+- 不要执行需求分析；分析由 `analyze-task` 独立完成
 - 不要直接实现所描述的功能
 - 不要跳过工作流直接进入计划/实现阶段
-- 仅执行：解析描述 -> 创建任务文件 -> 需求分析 -> 输出分析文档 -> 告知用户下一步
+- 仅执行：解析描述 -> 创建任务文件 -> 更新任务状态 -> 告知用户下一步
 
 用户的描述是一个**待办事项**，而不是**立即执行的指令**。
 
@@ -75,57 +76,7 @@ assigned_to: {当前 AI 代理}
 
 注意：`created_by` 为 `human`，因为任务来源于用户的描述。
 
-### 3. 执行需求分析
-
-遵循 `.agents/workflows/feature-development.yaml` 中的 `requirement-analysis` 步骤：
-
-**必要任务**（仅分析，不编写任何业务代码）：
-- [ ] 理解用户描述的需求
-- [ ] 搜索相关代码文件（**只读**）
-- [ ] 分析代码结构和影响范围
-- [ ] 识别潜在技术风险和依赖
-- [ ] 评估工作量和复杂度
-
-### 4. 输出分析文档
-
-创建 `.agent-workspace/active/{task-id}/analysis.md`，包含以下部分：
-
-## 输出模板
-
-```markdown
-# 需求分析报告
-
-## 需求来源
-
-**来源类型**：用户自然语言描述
-**原始描述**：
-> {用户的原始描述}
-
-## 需求理解
-{用自己的话重述需求以确认理解}
-
-## 相关文件
-- `{file-path}:{line-number}` - {描述}
-
-## 影响评估
-**直接影响**：
-- {受影响的模块和文件}
-
-**间接影响**：
-- {可能受影响的其他部分}
-
-## 技术风险
-- {风险描述和缓解思路}
-
-## 依赖关系
-- {需要的依赖和与其他模块的协调}
-
-## 工作量和复杂度评估
-- 复杂度：{高/中/低}
-- 风险等级：{高/中/低}
-```
-
-### 5. 更新任务状态
+### 3. 更新任务状态
 
 获取当前时间：
 
@@ -137,20 +88,18 @@ date "+%Y-%m-%d %H:%M:%S"
 - `current_step`：requirement-analysis
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
-- 标记 analysis.md 为已完成
-- 在工作流进度中标记 requirement-analysis 为已完成
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Requirement Analysis** by {agent} — Task created and analysis completed
+  - {yyyy-MM-dd HH:mm:ss} — **Task Created** by {agent} — Task created from description
   ```
 
-### 6. 告知用户
+### 4. 告知用户
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
 输出格式：
 ```
-任务已创建，分析完成。
+任务已创建。
 
 任务信息：
 - 任务 ID：{task-id}
@@ -160,36 +109,33 @@ date "+%Y-%m-%d %H:%M:%S"
 
 产出文件：
 - 任务文件：.agent-workspace/active/{task-id}/task.md
-- 分析报告：.agent-workspace/active/{task-id}/analysis.md
 
-下一步 - 审查分析报告，然后设计技术方案：
-  - Claude Code / OpenCode：/plan-task {task-id}
-  - Gemini CLI：/agent-orchestrator:plan-task {task-id}
-  - Codex CLI：$plan-task {task-id}
+下一步 - 执行需求分析：
+  - Claude Code / OpenCode：/analyze-task {task-id}
+  - Gemini CLI：/agent-orchestrator:analyze-task {task-id}
+  - Codex CLI：$analyze-task {task-id}
 ```
 
 ## 完成检查清单
 
 - [ ] 创建了任务文件 `.agent-workspace/active/{task-id}/task.md`
-- [ ] 创建了分析文档 `.agent-workspace/active/{task-id}/analysis.md`
 - [ ] 更新了 task.md 中的 `current_step` 为 requirement-analysis
 - [ ] 更新了 task.md 中的 `updated_at` 为当前时间
 - [ ] 更新了 task.md 中的 `assigned_to`
 - [ ] 追加了 Activity Log 条目到 task.md
-- [ ] 在工作流进度中标记了 requirement-analysis 为已完成
 - [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
-- [ ] **没有修改任何业务代码或配置文件**（仅 task.md 和 analysis.md）
+- [ ] **没有修改任何业务代码或配置文件**（仅 task.md）
 
 ## 停止
 
 完成检查清单后，**立即停止**。不要继续执行计划、实现或任何后续步骤。
-等待用户审查分析结果并手动调用 `plan-task` 技能。
+等待用户执行 `analyze-task` 技能。
 
 ## 注意事项
 
 1. **清晰度**：如果用户描述模糊或缺少关键信息，先要求澄清
-2. **与 analyze-issue 的区别**：`analyze-issue` 从 GitHub Issue 创建任务；`create-task` 从自由描述创建
-3. **人工检查点**：分析完成是建议的审查点，建议在继续之前进行审查
+2. **与 import-issue 的区别**：`import-issue` 从 GitHub Issue 导入任务；`create-task` 从自由描述创建
+3. **工作流顺序**：创建任务后，必须先执行 `analyze-task`，再进入 `plan-task`
 
 ## 错误处理
 

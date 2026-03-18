@@ -99,11 +99,11 @@ my-project/
 
 | 分类 | 技能 | 说明 |
 |------|------|------|
-| **任务管理** | `analyze-issue`、`create-task`、`plan-task`、`implement-task`、`review-task`、`refine-task`、`complete-task` | 完整开发生命周期 |
+| **任务管理** | `create-task`、`analyze-task`、`import-issue`、`plan-task`、`implement-task`、`review-task`、`refine-task`、`complete-task` | 完整开发生命周期 |
 | **代码质量** | `commit`、`test`、`test-integration` | 带联合署名的提交、运行测试 |
 | **PR 与 Issue** | `create-pr`、`sync-issue`、`sync-pr` | 创建 PR、同步进度 |
 | **发布** | `release`、`create-release-note` | 版本发布工作流 |
-| **安全** | `analyze-dependabot`、`analyze-codescan` | 安全告警分析 |
+| **安全** | `import-dependabot`、`import-codescan` | 安全告警分析 |
 | **维护** | `upgrade-dependency`、`refine-title` | 依赖升级、标题优化 |
 
 > 所有技能在所有支持的 AI TUI 中通用——同一工作流，任选工具。
@@ -113,10 +113,13 @@ my-project/
 最简单的端到端开发工作流：
 
 ```
-analyze-issue #42                   从 GitHub Issue 创建任务
+import-issue #42                    从 GitHub Issue 导入任务
 (或: create-task "添加暗色模式")      或直接描述需求创建任务
          |
          |  --> 得到任务 ID, 如 T1
+         v
+  analyze-task T1                   需求分析
+         |
          v
     plan-task T1                    设计技术方案  <-- 人工审查检查点
          |

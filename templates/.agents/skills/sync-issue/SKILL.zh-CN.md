@@ -54,9 +54,10 @@ grep -rl "^issue_number: {issue-number}$" \
 ### 4. 读取上下文文件
 
 检查并读取（如存在）：
-- `analysis.md` - 需求分析
-- `plan.md` - 技术方案
+- 最高轮次的 `analysis.md` / `analysis-r{N}.md` - 需求分析
+- 最高轮次的 `plan.md` / `plan-r{N}.md` - 技术方案
 - `implementation.md`、`implementation-r*.md` - 实现报告
+- `refinement.md`、`refinement-r*.md` - 修复报告
 - `review.md`、`review-r*.md` - 审查报告
 
 ### 5. 探测交付状态
@@ -366,13 +367,16 @@ gh api "repos/$repo/issues/{issue-number}/comments" \
   --jq '.[] | {id, body}' > "$comments_jsonl"
 ```
 
-扫描任务目录中以下产物文件（存在才纳入待发布集合）：
-- `analysis.md`
-- `plan.md`
-- `implementation.md`
-- `implementation-r*.md`
-- `review.md`
-- `review-r*.md`
+从 `task.md` 的 Activity Log 中提取所有以 `→ {filename}` 结尾的记录。
+
+解析规则：
+- 使用正则 `/→\s+(\S+\.md)\s*$/` 提取文件名
+- 去掉 `.md` 后缀得到 `{file-stem}`
+- 按 Activity Log 中的出现顺序构建产物时间线
+- `summary` 仍作为最后一个固定产物追加到时间线末尾
+- `summary` 始终排在最末
+
+仅当 Activity Log 引用的文件当前存在于任务目录中时，才纳入待发布集合；缺失文件跳过，不报错。
 
 每条同步评论的第一行必须插入隐藏标识：
 
@@ -382,14 +386,8 @@ gh api "repos/$repo/issues/{issue-number}/comments" \
 
 其中 `{file-stem}` 为去掉 `.md` 后缀后的文件名，例如 `analysis`、`plan`、`implementation`、`implementation-r2`、`review-r3`；`summary` 仍使用字面量 `summary`。
 
-待发布时间线的排序规则必须是：
-1. `analysis` 和 `plan` 无轮次概念，固定排在最前，且 `analysis` 必须先于 `plan`
-2. 其余产物按轮次排序：Round 1（无后缀）→ Round 2（`-r2`）→ Round 3（`-r3`）→ …
-3. 同轮次内 `implementation` 必须排在 `review` 之前
-4. `summary` 始终排在最末
-
-例如，排序结果应类似：
-`analysis → plan → implementation → review → implementation-r2 → review-r2 → review-r3 → summary`
+时间线示例：
+`analysis → plan → implementation → review → refinement → analysis-r2 → plan-r2 → implementation-r2 → review-r2 → summary`
 
 对每个 `{file-stem}`，用本地检索判断是否已发布：
 
@@ -423,7 +421,9 @@ summary_comment_id="$(
 
 - `analysis`：发布 `analysis.md` 原文
 - `plan`：发布 `plan.md` 原文
+- `analysis-r{N}`、`plan-r{N}`：每个文件各自发布一条评论，正文直接使用对应产物原文
 - `implementation`、`implementation-r{N}`：每个文件各自发布一条评论，正文直接使用对应实现报告原文
+- `refinement`、`refinement-r{N}`：每个文件各自发布一条评论，正文直接使用对应修复报告原文
 - `review`、`review-r{N}`：每个文件各自发布一条评论，正文直接使用对应审查报告原文
 - `summary`：生成精简交付摘要，只包含当前交付状态与 GitHub 上可访问的绝对链接
 
@@ -443,10 +443,17 @@ summary_comment_id="$(
 
 推荐标题映射：
 - `analysis` -> `需求分析`
+- `analysis-r2` -> `需求分析（Round 2）`
+- `analysis-r{N}` -> `需求分析（Round {N}）`
 - `plan` -> `技术方案`
+- `plan-r2` -> `技术方案（Round 2）`
+- `plan-r{N}` -> `技术方案（Round {N}）`
 - `implementation` -> `实现报告（Round 1）`
 - `implementation-r2` -> `实现报告（Round 2）`
 - `implementation-r{N}` -> `实现报告（Round {N}）`
+- `refinement` -> `修复报告（Round 1）`
+- `refinement-r2` -> `修复报告（Round 2）`
+- `refinement-r{N}` -> `修复报告（Round {N}）`
 - `review` -> `审查报告（Round 1）`
 - `review-r2` -> `审查报告（Round 2）`
 - `review-r{N}` -> `审查报告（Round {N}）`

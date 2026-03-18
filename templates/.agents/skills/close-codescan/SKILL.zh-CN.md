@@ -109,7 +109,7 @@ Code Scanning 告警 #{alert-number} 已关闭。
 
 ## 注意事项
 
-1. **谨慎处理高严重程度告警**：Critical/High 告警需要充分分析。建议先执行 analyze-codescan 技能。
+1. **谨慎处理高严重程度告警**：Critical/High 告警需要充分分析。建议先执行 import-codescan + analyze-task。
 2. **真实的理由**：关闭记录保存在 GitHub 中，可能会被审计。
 3. **定期复查**：已关闭的告警应定期复查。
 4. **优先修复**：关闭应作为最后手段。

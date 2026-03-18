@@ -35,13 +35,18 @@ description: >
 - `{review-round}`：本轮审查轮次
 - `{review-artifact}`：本轮审查报告文件名
 
-### 3. 阅读实现报告
+### 3. 阅读实现与修复报告
 
 扫描任务目录中的实现报告文件（`implementation.md`、`implementation-r{N}.md`），读取最高轮次的文件以理解：
 - 修改的文件列表
 - 实现的关键功能
 - 测试情况
 - 实现者标记的需关注事项
+
+如果存在修复产物（`refinement.md`、`refinement-r{N}.md`），读取最高轮次的文件以理解：
+- 已修复了哪些审查问题
+- 修复对代码和测试的影响
+- 当前代码状态相对上轮审查的变化
 
 ### 4. 执行代码审查
 
@@ -84,7 +89,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 在工作流进度中标记 code-review 为已完成，并注明实际轮次（如果任务模板支持）
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Code Review (Round {N})** by {agent} — 结论：{已批准/需要修改/拒绝}，阻塞项：{n}，主要问题：{n}，次要问题：{n} → {artifact-filename}
+  - {yyyy-MM-dd HH:mm:ss} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n} → {artifact-filename}
   ```
 
 ### 7. 告知用户
@@ -100,7 +105,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 下一步 - 提交代码：
   - Claude Code / OpenCode：/commit
-  - Gemini CLI：/{{project}}:commit
+  - Gemini CLI：/agent-orchestrator:commit
   - Codex CLI：$commit
 ```
 
@@ -112,12 +117,12 @@ date "+%Y-%m-%d %H:%M:%S"
 
 下一步 - 修复问题后提交（推荐）：
   - Claude Code / OpenCode：/refine-task {task-id}
-  - Gemini CLI：/{{project}}:refine-task {task-id}
+  - Gemini CLI：/agent-orchestrator:refine-task {task-id}
   - Codex CLI：$refine-task {task-id}
 
 或直接提交（跳过修复）：
   - Claude Code / OpenCode：/commit
-  - Gemini CLI：/{{project}}:commit
+  - Gemini CLI：/agent-orchestrator:commit
   - Codex CLI：$commit
 ```
 
@@ -129,7 +134,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 下一步 - 修复问题：
   - Claude Code / OpenCode：/refine-task {task-id}
-  - Gemini CLI：/{{project}}:refine-task {task-id}
+  - Gemini CLI：/agent-orchestrator:refine-task {task-id}
   - Codex CLI：$refine-task {task-id}
 ```
 
@@ -140,7 +145,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 下一步 - 重新实现：
   - Claude Code / OpenCode：/implement-task {task-id}
-  - Gemini CLI：/{{project}}:implement-task {task-id}
+  - Gemini CLI：/agent-orchestrator:implement-task {task-id}
   - Codex CLI：$implement-task {task-id}
 ```
 
@@ -151,7 +156,9 @@ date "+%Y-%m-%d %H:%M:%S"
 
 - **审查轮次**：Round {review-round}
 - **产物文件**：`{review-artifact}`
-- **实现输入**：`{implementation-artifact}`
+- **实现输入**：
+  - `{implementation-artifact}`
+  - `{refinement-artifact}`（如存在）
 
 ## 审查摘要
 

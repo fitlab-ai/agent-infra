@@ -1,0 +1,8 @@
+description = "Analyze an existing task and output a requirement analysis document"
+prompt = """
+Analyze task {{args}}.
+
+Read and execute the analyze-task skill from `.agents/skills/analyze-task/SKILL.md`.
+
+Follow all steps defined in the skill exactly.
+"""

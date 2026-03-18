@@ -99,11 +99,11 @@ my-project/
 
 | Category | Skills | Description |
 |----------|--------|-------------|
-| **Task Management** | `analyze-issue`, `create-task`, `plan-task`, `implement-task`, `review-task`, `refine-task`, `complete-task` | Full development lifecycle |
+| **Task Management** | `create-task`, `analyze-task`, `import-issue`, `plan-task`, `implement-task`, `review-task`, `refine-task`, `complete-task` | Full development lifecycle |
 | **Code Quality** | `commit`, `test`, `test-integration` | Commit with co-authorship, run tests |
 | **PR & Issues** | `create-pr`, `sync-issue`, `sync-pr` | Create PRs, sync progress |
 | **Release** | `release`, `create-release-note` | Version release workflow |
-| **Security** | `analyze-dependabot`, `analyze-codescan` | Security alert triage |
+| **Security** | `import-dependabot`, `import-codescan` | Security alert triage |
 | **Maintenance** | `upgrade-dependency`, `refine-title` | Dependency updates, title formatting |
 
 > Every skill works across all supported AI TUIs — same workflow, any tool.
@@ -113,10 +113,13 @@ my-project/
 The simplest end-to-end development workflow:
 
 ```
-analyze-issue #42                   Create task from GitHub Issue
+import-issue #42                    Import task from GitHub Issue
 (or: create-task "add dark mode")   Or create task from description
          |
          |  --> get task ID, e.g. T1
+         v
+  analyze-task T1                   Requirement analysis
+         |
          v
     plan-task T1                    Design solution  <-- human review
          |

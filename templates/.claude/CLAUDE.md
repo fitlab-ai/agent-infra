@@ -69,7 +69,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 3. **Task status management**: Update `task.md` fields after each command
 
 ### Important Rules
-4. **Task semantic recognition**: Auto-detect user intent (e.g., "analyze issue 207" -> `/analyze-issue 207`)
+4. **Task semantic recognition**: Auto-detect user intent (e.g., "analyze issue 207" -> `/import-issue 207`; "analyze task TASK-20260306-143022" -> `/analyze-task TASK-20260306-143022`)
 5. **PR conventions**: Add generation marker when creating PRs
 
 **Detailed rules**: `.claude/project-rules.md`
@@ -97,7 +97,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ### Task Management
 ```bash
 /create-task <description>  # Create task from description
-/analyze-issue <number>     # Analyze GitHub Issue
+/import-issue <number>      # Import GitHub Issue as task
+/analyze-task <task-id>     # Analyze task requirements
 /plan-task <task-id>        # Design technical plan
 /implement-task <task-id>   # Implement task
 /review-task <task-id>      # Code review
@@ -123,9 +124,9 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ### Security
 ```bash
-/analyze-dependabot         # Analyze Dependabot alert
+/import-dependabot <number> # Import Dependabot alert
 /close-dependabot           # Close Dependabot alert
-/analyze-codescan           # Analyze Code Scanning alert
+/import-codescan <number>   # Import Code Scanning alert
 /close-codescan             # Close Code Scanning alert
 ```
 

@@ -1,189 +1,200 @@
 ---
 name: refine-task
 description: >
-  Handle code review feedback and fix issues found during review. Fixes are
-  applied in priority order (Blocker -> Major -> Minor). Only addresses
-  issues flagged in the review -- no extra changes. Triggered when the user
-  requests fixing review issues. Argument: task-id.
+  处理代码审查反馈并修复审查中发现的问题。按优先级（Blocker -> Major -> Minor）修复。
+  仅处理审查中标记的问题，不添加额外变更。当用户要求修复审查问题时触发。参数：task-id。
 ---
 
-# Fix Review Issues
+# 修复审查问题
 
-## Boundary / Critical Rules
+## 行为边界 / 关键规则
 
-- Fix only what was flagged in the review -- do NOT add unrelated changes or extra "improvements"
-- Do NOT auto-commit. Never execute `git commit` or `git add` automatically
-- After executing this skill, you **must** immediately update task status in task.md
+- 仅修复审查中标记的问题 —— 不要添加无关变更或额外的"改进"
+- 不要自动提交。绝不自动执行 `git commit` 或 `git add`
+- 执行本技能后，你**必须**立即更新 task.md 中的任务状态
 
-## Steps
+## 执行步骤
 
-### 1. Verify Prerequisites
+### 1. 验证前置条件
 
-Check required files:
-- `.agent-workspace/active/{task-id}/task.md` - Task file
-- At least one review artifact: `review.md` or `review-r{N}.md`
+检查必要文件：
+- `.agent-workspace/active/{task-id}/task.md` - 任务文件
+- 至少一个审查产物：`review.md` 或 `review-r{N}.md`
 
-Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, e.g. `TASK-20260306-143022`
+注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 
-If `task.md` is missing or no review artifact exists, prompt the user to complete the prerequisite step first.
+如果缺少 `task.md` 或没有任何审查产物，提示用户先完成前置步骤。
 
-Then perform discovery and consistency checks:
-1. Scan the task directory for review artifacts (`review.md`, `review-r{N}.md`)
-2. Select the highest-round review artifact as `{review-artifact}`
-3. Scan implementation reports (`implementation.md`, `implementation-r{N}.md`) and select the highest-round artifact as `{implementation-artifact}`
-4. **Consistency check**: compare the most recent Code Review entry in `## Activity Log` against the actual latest review artifact from step 2
+随后执行以下发现与校验：
+1. 扫描任务目录中的审查产物文件（`review.md`、`review-r{N}.md`）
+2. 取最高轮次的审查产物作为本次修复输入，记为 `{review-artifact}`
+3. 扫描修复产物文件（`refinement.md`、`refinement-r{N}.md`）并确定本轮修复产物：
+   - 如果不存在 `refinement.md` 且不存在 `refinement-r*.md` → 本轮为第 1 轮，产出 `refinement.md`
+   - 如果存在 `refinement.md` 且不存在 `refinement-r*.md` → 本轮为第 2 轮，产出 `refinement-r2.md`
+   - 如果存在 `refinement-r{N}.md` → 本轮为第 N+1 轮，产出 `refinement-r{N+1}.md`
+   - 记录 `{refinement-round}` 和 `{refinement-artifact}`
+4. 扫描实现报告文件（`implementation.md`、`implementation-r{N}.md`），取最高轮次作为修复上下文的 `{implementation-artifact}`
+   - 记录 `{implementation-artifact}`
+5. **一致性校验**：检查 `task.md` 的 `## 活动日志` 中最近一条 Code Review 记录的轮次号和文件名，是否与步骤 2 扫描到的最新审查产物匹配
 
-If Activity Log and files do not match, stop immediately with:
+若 Activity Log 记录与实际文件不匹配，立即停止并提示：
 `Review artifact mismatch: Activity Log references {expected} but file not found. Please verify the review artifact exists.`
 
-### 2. Read Review Report
+### 2. 阅读审查与实现上下文
 
-Carefully read the latest review artifact `{review-artifact}` identified in Step 1 to understand:
-- All blocker issues (must fix)
-- All major issues (should fix)
-- Minor issues (optional optimizations)
-- Reviewer's suggestions and recommendations
+仔细阅读步骤 1 中确定的最新审查产物 `{review-artifact}` 和实现产物 `{implementation-artifact}` 以理解：
+- 所有阻塞项（必须修复）
+- 所有主要问题（应该修复）
+- 次要问题（可选优化）
+- 审查者的建议和推荐
+- 当前实现和之前修复的上下文
 
-### 3. Plan Fixes
+### 3. 规划修复
 
-Categorize and prioritize issues:
-1. **Blockers first**: All blocker issues must be resolved
-2. **Then major issues**: Address all major issues
-3. **Then minor issues**: Address if time permits (optional)
+分类并确定优先级：
+1. **阻塞项优先**：必须解决所有阻塞项
+2. **然后是主要问题**：处理所有主要问题
+3. **最后是次要问题**：如有时间则处理（可选）
 
-For each issue, determine:
-- Which file(s) need changes
-- What specific changes to make
-- How to verify the fix
+对于每个问题，确定：
+- 需要修改哪些文件
+- 具体要做哪些修改
+- 如何验证修复
 
-### 4. Execute Code Fixes
+### 4. 执行代码修复
 
-Fix issues in priority order:
+按优先级顺序修复问题：
 
-**For each fix**:
-1. Read the affected file
-2. Apply the fix
-3. Verify the fix addresses the review comment
-4. Run relevant tests
+**对于每个修复**：
+1. 读取受影响的文件
+2. 应用修复
+3. 验证修复是否解决了审查意见
+4. 运行相关测试
 
-**Fix principles**:
-- Fix only what was flagged -- do NOT add unrelated changes
-- Do NOT add extra "improvements" beyond what was requested
-- Keep changes minimal and focused
+**修复原则**：
+- 仅修复标记的问题 —— 不要添加无关变更
+- 不要添加超出要求的额外"改进"
+- 保持变更最小化和聚焦
 
-### 5. Run Test Verification
+### 5. 运行测试验证
 
-Execute the project's test command. Reference the `test` skill for the project-specific test command.
+执行项目的测试命令。参考 `test` 技能获取项目特定的测试命令。
 
-Ensure all tests still pass after fixes.
+确保修复后所有测试仍然通过。
 
-### 6. Create Refinement Report
+### 6. 创建修复报告
 
-Update `.agent-workspace/active/{task-id}/{implementation-artifact}` and append the fix section.
+创建 `.agent-workspace/active/{task-id}/{refinement-artifact}`。
 
-Use this heading for the appended section:
-`## Fix Log (for {review-artifact})`
+### 7. 更新任务状态
 
-### 7. Update Task Status
-
-Get the current time:
+获取当前时间：
 
 ```bash
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-Update `.agent-workspace/active/{task-id}/task.md`:
-- `current_step`: refinement
-- `assigned_to`: {current AI agent}
-- `updated_at`: {current time}
-- **Append** to `## Activity Log` (do NOT overwrite previous entries):
+更新 `.agent-workspace/active/{task-id}/task.md`：
+- `current_step`：refinement
+- `assigned_to`：{当前 AI 代理}
+- `updated_at`：{当前时间}
+- 记录本轮修复产物：`{refinement-artifact}`（Round `{refinement-round}`）
+- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Refinement (for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues
+  - {yyyy-MM-dd HH:mm:ss} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues → {refinement-artifact}
   ```
 
-### 8. Inform User
+### 8. 告知用户
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
-Output format:
+输出格式：
 ```
-Refinement complete for task {task-id}.
+任务 {task-id} 修复完成。
 
-Fixes applied:
-- Blockers fixed: {count}/{total}
-- Major issues fixed: {count}/{total}
-- Minor issues fixed: {count}/{total}
-- All tests pass: {Yes/No}
-- Review input: {review-artifact}
-- Updated artifact: {implementation-artifact}
+修复情况：
+- 阻塞项修复：{数量}/{总数}
+- 主要问题修复：{数量}/{总数}
+- 次要问题修复：{数量}/{总数}
+- 所有测试通过：{是/否}
+- 审查输入：{review-artifact}
+- 修复产物：{refinement-artifact}
 
-Next step - re-review or commit:
-- Re-review:
-  - Claude Code / OpenCode: /review-task {task-id}
-  - Gemini CLI: /{{project}}:review-task {task-id}
-  - Codex CLI: $review-task {task-id}
-- Commit directly:
-  - Claude Code / OpenCode: /commit
-  - Gemini CLI: /{{project}}:commit
-  - Codex CLI: $commit
+下一步 - 重新审查或提交：
+- 重新审查：
+  - Claude Code / OpenCode：/review-task {task-id}
+  - Gemini CLI：/agent-orchestrator:review-task {task-id}
+  - Codex CLI：$review-task {task-id}
+- 直接提交：
+  - Claude Code / OpenCode：/commit
+  - Gemini CLI：/agent-orchestrator:commit
+  - Codex CLI：$commit
 ```
 
-## Output Template
-
-Append to `{implementation-artifact}`:
+## 输出模板
 
 ```markdown
-## Fix Log (for {review-artifact})
+# 修复报告
 
-### Review Feedback Addressed
+- **修复轮次**：Round {refinement-round}
+- **产物文件**：`{refinement-artifact}`
+- **审查输入**：`{review-artifact}`
+- **实现上下文**：`{implementation-artifact}`
 
-#### Blockers Fixed
-1. **{Issue title}** (from {review-artifact})
-   - **Fix**: {What was changed}
-   - **File**: `{file-path}:{line-number}`
-   - **Verification**: {How verified}
+### 审查反馈处理
 
-#### Major Issues Fixed
-1. **{Issue title}** (from {review-artifact})
-   - **Fix**: {What was changed}
-   - **File**: `{file-path}:{line-number}`
+#### 阻塞项修复
+1. **{问题标题}**（来自 {review-artifact}）
+   - **修复**：{做了什么修改}
+   - **文件**：`{file-path}:{line-number}`
+   - **验证**：{如何验证}
 
-#### Minor Issues Addressed
-1. **{Issue title}** (from {review-artifact})
-   - **Fix**: {What was changed}
+#### 主要问题修复
+1. **{问题标题}**（来自 {review-artifact}）
+   - **修复**：{做了什么修改}
+   - **文件**：`{file-path}:{line-number}`
 
-#### Issues Not Addressed
-- {Issue}: {Reason for not addressing, e.g. disagreed with suggestion}
+#### 次要问题处理
+1. **{问题标题}**（来自 {review-artifact}）
+   - **修复**：{做了什么修改}
 
-### Test Results After Refinement
-- All tests pass: {Yes/No}
-- Test output: {Summary}
+#### 未处理的问题
+- {问题}：{未处理的原因，例如不同意审查建议}
+
+### 修复后的测试结果
+- 所有测试通过：{是/否}
+- 测试输出：{摘要}
 ```
 
-## Completion Checklist
+## 完成检查清单
 
-- [ ] Read and understood all review findings
-- [ ] Fixed all blocker issues
-- [ ] Fixed all major issues
-- [ ] Addressed minor issues where appropriate
-- [ ] All tests pass after fixes
-- [ ] Updated fix log in `{implementation-artifact}`
-- [ ] Updated task status in task.md
-- [ ] Appended entry to Activity Log in task.md
-- [ ] Informed user of next step (must include all TUI command formats — do not filter)
+- [ ] 阅读并理解了所有审查发现
+- [ ] 修复了所有阻塞项
+- [ ] 修复了所有主要问题
+- [ ] 在适当情况下处理了次要问题
+- [ ] 修复后所有测试通过
+- [ ] 创建了 `{refinement-artifact}` 修复报告
+- [ ] 更新了 task.md 中的任务状态
+- [ ] 追加了 Activity Log 条目到 task.md
+- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
 
-## Notes
+## 注意事项
 
-1. **Prerequisites**: A review artifact must exist (`review.md` or `review-r{N}.md`)
-2. **No auto-commit**: Do NOT execute `git commit` automatically. Remind the user to commit manually
-3. **Scope discipline**: Only fix what was flagged in the review -- no additional changes
-4. **Disagreements**: If you disagree with a review comment, document your reasoning in the "Issues Not Addressed" section
-5. **Re-review**: After fixing blockers, it is recommended to re-run the review-task skill to verify
-6. **Consistency requirement**: The latest review artifact, Activity Log entry, and appended fix log heading must all reference the same review file
+1. **前置条件**：必须有审查报告（`review.md` 或 `review-r{N}.md` 存在）
+2. **禁止自动提交**：不要自动执行 `git commit`。提醒用户手动提交
+3. **范围纪律**：仅修复审查中标记的问题 —— 不添加额外变更
+4. **不同意见**：如果不同意某个审查意见，在"未处理的问题"部分记录你的理由
+5. **重新审查**：修复阻塞项后，建议重新运行 review-task 技能进行验证
+6. **一致性要求**：最新审查产物、Activity Log 记录和修复报告标题必须引用同一轮次文件
+7. **版本化规则**：首轮修复使用 `refinement.md`；后续轮次使用 `refinement-r{N}.md`
 
-## Error Handling
+## 停止
 
-- Task not found: Prompt "Task {task-id} not found"
-- Missing review report: Prompt "Review report not found, please run the review-task skill first"
-- Review artifact mismatch: Prompt "Review artifact mismatch: Activity Log references {expected} but file not found. Please verify the review artifact exists."
-- Test failure after fix: Output test errors, ask user how to proceed
+完成检查清单后，**立即停止**。等待用户审查修复结果并决定重新审查还是提交。
+
+## 错误处理
+
+- 任务未找到：提示 "Task {task-id} not found"
+- 缺少审查报告：提示 "Review report not found, please run the review-task skill first"
+- 审查产物不一致：提示 "Review artifact mismatch: Activity Log references {expected} but file not found. Please verify the review artifact exists."
+- 修复后测试失败：输出测试错误，询问用户如何处理

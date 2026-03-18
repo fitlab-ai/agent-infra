@@ -42,6 +42,8 @@ AI 代理的分步指令。
 
 ### 任务管理
 - `create-task` - 从自然语言描述创建任务
+- `analyze-task` - 分析已有任务并生成需求分析
+- `import-issue` - 从 GitHub Issue 导入任务
 - `plan-task` - 为任务设计技术方案
 - `implement-task` - 根据方案实施任务
 - `review-task` - 审查任务实现
@@ -54,12 +56,11 @@ AI 代理的分步指令。
 - `create-pr` - 创建 Pull Request
 - `sync-pr` - 同步任务进度到 PR 评论
 - `sync-issue` - 同步任务进度到 Issue 评论
-- `analyze-issue` - 分析 GitHub Issue
 
 ### 安全
-- `analyze-dependabot` - 分析 Dependabot 告警
+- `import-dependabot` - 导入 Dependabot 告警
 - `close-dependabot` - 关闭 Dependabot 告警
-- `analyze-codescan` - 分析 Code Scanning 告警
+- `import-codescan` - 导入 Code Scanning 告警
 - `close-codescan` - 关闭 Code Scanning 告警
 
 ### 发布和维护

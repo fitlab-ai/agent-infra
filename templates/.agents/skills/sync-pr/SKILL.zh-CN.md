@@ -31,10 +31,11 @@ description: >
 ### 3. 读取上下文文件
 
 检查并读取（如存在）：
-- `analysis.md` - 需求分析
-- `plan.md` - 技术方案
-- `implementation.md` - 实现报告
-- `review.md` - 审查报告
+- 最高轮次的 `analysis.md` / `analysis-r{N}.md` - 需求分析
+- 最高轮次的 `plan.md` / `plan-r{N}.md` - 技术方案
+- `implementation.md`、`implementation-r{N}.md` - 实现报告
+- `refinement.md`、`refinement-r{N}.md` - 修复报告
+- `review.md`、`review-r{N}.md` - 审查报告
 
 ### 4. 生成进度摘要
 
@@ -74,9 +75,10 @@ description: >
 ### 相关文档
 
 - 任务：`.agent-workspace/{status}/{task-id}/task.md`
-- 分析：`.agent-workspace/{status}/{task-id}/analysis.md`
-- 方案：`.agent-workspace/{status}/{task-id}/plan.md`
-- 实现：`.agent-workspace/{status}/{task-id}/implementation.md`
+- 分析：`.agent-workspace/{status}/{task-id}/{analysis-artifact}`
+- 方案：`.agent-workspace/{status}/{task-id}/{plan-artifact}`
+- 实现：`.agent-workspace/{status}/{task-id}/{implementation-artifact}`
+- 修复：`.agent-workspace/{status}/{task-id}/{refinement-artifact}`（如存在）
 
 ---
 *由 AI 自动生成 - [任务管理](.agents/README.md)*

@@ -160,7 +160,7 @@ test("sync-issue skill accepts issue numbers and keeps task-id compatibility", (
       /参数：task-id 或 issue-number|Argument: task-id or issue-number/,
       /纯数字（如 `123`）或 `#` \+ 数字（如 `#123`）|plain number \(`123`\) or `#` \+ number \(`#123`\)/,
       /`TASK-` 开头|Starts with `TASK-`/,
-      /读取每个 `task\.md` 的 `issue_number` 字段|Read the `issue_number` field from each `task\.md`/,
+      /grep -rl "\^issue_number: \{issue-number\}\$"/,
       /No task found associated with Issue #\{issue-number\}/
     ]);
   });
@@ -177,8 +177,9 @@ test("sync-issue skill documents issue type sync, timeline comments, and absolut
       /其中 `\{file-stem\}` 为去掉 `\.md` 后缀后的文件名|Where `\{file-stem\}` is the filename without the `\.md` suffix/,
       /implementation-r2/,
       /review-r2/,
-      /analysis` 和 `plan` 无轮次概念，固定排在最前，且 `analysis` 必须先于 `plan`|`analysis` and `plan` have no round number and must always appear first, with `analysis` before `plan`/,
-      /其余产物按轮次排序：Round 1（无后缀）→ Round 2（`-r2`）→ Round 3（`-r3`）→ …|Sort the remaining artifacts by round: Round 1 \(no suffix\) → Round 2 \(`-r2`\) → Round 3 \(`-r3`\) → \.\.\./,
+      /按 Activity Log 中的出现顺序构建产物时间线|build the artifact timeline in Activity Log order/,
+      /使用正则 `\/→\\s\+\(\\S\+\\\.md\)\\s\*\$\/` 提取文件名|Use the regex `\/→\\s\+\(\\S\+\\\.md\)\\s\*\$\/` to extract filenames/,
+      /仅当 Activity Log 引用的文件当前存在于任务目录中时，才纳入待发布集合|Only include files that still exist in the task directory/,
       /summary` 始终排在最末|`summary` is always last/,
       /不要再使用固定 5 步骤，也不要把同类型多轮次产物合并到一条评论|Do not fall back to a fixed 5-step order, and do not merge multiple rounds of the same artifact type into a single comment/,
       /gh api "repos\/\$repo\/issues\/comments\/\{comment-id\}" -X PATCH/,
@@ -405,9 +406,7 @@ test("workflows document artifact versioning for implementation, review, and fix
 
 test("skills that write timestamps require date command guidance", () => {
   const timestampSkills = [
-    "analyze-codescan",
-    "analyze-dependabot",
-    "analyze-issue",
+    "analyze-task",
     "block-task",
     "close-codescan",
     "close-dependabot",
@@ -415,6 +414,9 @@ test("skills that write timestamps require date command guidance", () => {
     "complete-task",
     "create-pr",
     "create-task",
+    "import-codescan",
+    "import-dependabot",
+    "import-issue",
     "implement-task",
     "plan-task",
     "refine-task",
@@ -433,5 +435,92 @@ test("skills that write timestamps require date command guidance", () => {
         `${relativePath} should require the date command for timestamp writes`
       );
     });
+  });
+});
+
+test("implement-task skill resolves the latest versioned plan artifact", () => {
+  skillDocPaths("implement-task").forEach((relativePath) => {
+    assertContainsPatterns(relativePath, [
+      /plan\.md` or `plan-r\{N\}\.md|`plan\.md` 或 `plan-r\{N\}\.md`/,
+      /highest-round plan file|最高轮次的方案文件/,
+      /\{plan-artifact\}/
+    ]);
+  });
+});
+
+test("import alert skills define boundaries and completion checklists", () => {
+  ["import-codescan", "import-dependabot"].forEach((skill) => {
+    skillDocPaths(skill).forEach((relativePath) => {
+      assertContainsPatterns(relativePath, [
+        /行为边界 \/ 关键规则|Boundary \/ Critical Rules/,
+        /完成检查清单|Completion Checklist/
+      ]);
+    });
+  });
+});
+
+test("review-task activity log guidance uses English summary fields", () => {
+  skillDocPaths("review-task").forEach((relativePath) => {
+    const content = read(relativePath);
+
+    assert.match(
+      content,
+      /Verdict: \{Approved\/Changes Requested\/Rejected\}, blockers: \{n\}, major: \{n\}, minor: \{n\}/,
+      `${relativePath} should use English Activity Log summary fields`
+    );
+    assert.doesNotMatch(
+      content,
+      /结论：\{已批准\/需要修改\/拒绝\}，阻塞项：\{n\}，主要问题：\{n\}，次要问题：\{n\}/,
+      `${relativePath} should not use mixed-language Activity Log summary fields`
+    );
+  });
+});
+
+test("import-issue skill uses the shared boundary section format", () => {
+  skillDocPaths("import-issue").forEach((relativePath) => {
+    const content = read(relativePath);
+
+    assertContainsPatterns(relativePath, [
+      /行为边界 \/ 关键规则|Boundary \/ Critical Rules/,
+      /唯一产出是 `task\.md`|only output is `task\.md`/,
+      /执行本技能后，你\*\*必须\*\*立即更新任务状态|After executing this skill, you \*\*must\*\* immediately update task status/
+    ]);
+
+    assert.doesNotMatch(content, /## 关键：行为边界/);
+    assert.doesNotMatch(content, /## 关键：状态更新要求/);
+  });
+});
+
+test("refine-task records the implementation artifact during prerequisite discovery", () => {
+  skillDocPaths("refine-task").forEach((relativePath) => {
+    assertContainsPatterns(relativePath, [
+      /记录 `\{implementation-artifact\}`|Record `\{implementation-artifact\}`/
+    ]);
+  });
+});
+
+test("plan-task clarifies how to choose the latest analysis artifact", () => {
+  skillDocPaths("plan-task").forEach((relativePath) => {
+    assertContainsPatterns(relativePath, [
+      /如果存在 `analysis-r\{N\}\.md`，读取最高 N 的文件|If any `analysis-r\{N\}\.md` exists, read the highest N file/,
+      /否则读取 `analysis\.md`|otherwise read `analysis\.md`/
+    ]);
+  });
+});
+
+test("analyze-task activity log uses the analysis artifact placeholder", () => {
+  skillDocPaths("analyze-task").forEach((relativePath) => {
+    const content = read(relativePath);
+
+    assert.match(
+      content,
+      /Analysis completed → \{analysis-artifact\}/,
+      `${relativePath} should use the analysis-artifact placeholder`
+    );
+    assert.doesNotMatch(
+      content,
+      /\{artifact-filename\}/,
+      `${relativePath} should not use the generic artifact-filename placeholder`
+    );
   });
 });

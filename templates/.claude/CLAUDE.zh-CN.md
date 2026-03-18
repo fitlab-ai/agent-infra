@@ -69,7 +69,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 3. **任务状态管理**：执行命令后更新 `task.md` 字段
 
 ### 重要规则
-4. **任务语义识别**：自动识别用户意图（如"分析 issue 207" -> `/analyze-issue 207`）
+4. **任务语义识别**：自动识别用户意图（如"分析 issue 207" -> `/import-issue 207`；"分析任务 TASK-20260306-143022" -> `/analyze-task TASK-20260306-143022`）
 5. **PR 规范**：创建 PR 时添加生成标记
 
 **详细规则**：`.claude/project-rules.md`
@@ -97,7 +97,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ### 任务管理
 ```bash
 /create-task <description>  # 创建任务
-/analyze-issue <number>     # 分析 Issue
+/import-issue <number>      # 导入 GitHub Issue 为任务
+/analyze-task <task-id>     # 分析任务需求
 /plan-task <task-id>        # 设计方案
 /implement-task <task-id>   # 实施任务
 /review-task <task-id>      # 代码审查
@@ -123,9 +124,9 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ### 安全
 ```bash
-/analyze-dependabot         # 分析 Dependabot 告警
+/import-dependabot <number> # 导入 Dependabot 告警
 /close-dependabot           # 关闭 Dependabot 告警
-/analyze-codescan           # 分析 Code Scanning 告警
+/import-codescan <number>   # 导入 Code Scanning 告警
 /close-codescan             # 关闭 Code Scanning 告警
 ```
 

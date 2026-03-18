@@ -45,7 +45,8 @@
 ## 规则 5: 任务语义识别
 
 自动识别用户意图：
-- "分析 issue XXX" -> `/analyze-issue`
+- "分析 issue XXX" -> `/import-issue`
+- "分析任务 TASK-..." -> `/analyze-task`
 - "设计方案" -> `/plan-task`
 - "实施/实现" -> `/implement-task`
 - "审查" -> `/review-task`
@@ -55,7 +56,8 @@
 关键: 每个命令执行后必须立即更新任务状态。
 
 需要更新的命令：
-- `/analyze-issue`: 更新 current_step, updated_at, assigned_to
+- `/import-issue`: 更新 current_step, updated_at, assigned_to
+- `/analyze-task`: 更新 current_step, updated_at, assigned_to
 - `/plan-task`: 更新 current_step, updated_at
 - `/implement-task`: 更新 current_step, updated_at
 - `/review-task`: 更新 current_step, updated_at

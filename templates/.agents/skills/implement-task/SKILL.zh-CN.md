@@ -9,7 +9,7 @@ description: >
 
 ## 行为边界 / 关键规则
 
-- 严格遵循 `plan.md` —— 不要偏离，除非记录了偏离原因
+- 严格遵循最新技术方案产物（`plan.md` 或 `plan-r{N}.md`）—— 不要偏离，除非记录了偏离原因
 - 不要自动提交。绝不自动执行 `git commit` 或 `git add`
 - 本技能产出实现报告（`implementation.md` 或 `implementation-r{N}.md`）—— 不覆盖已有轮次产物
 - 执行本技能后，你**必须**立即更新 task.md 中的任务状态
@@ -20,13 +20,16 @@ description: >
 
 检查必要文件：
 - `.agent-workspace/active/{task-id}/task.md` - 任务文件
-- `.agent-workspace/active/{task-id}/plan.md` - 技术方案
+- 至少一个技术方案产物：`plan.md` 或 `plan-r{N}.md`
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 
 如果任一文件缺失，提示用户先完成前置步骤。
 
-### 2. 确定实现轮次
+### 2. 确定输入方案与实现轮次
+
+扫描 `.agent-workspace/active/{task-id}/` 目录中的技术方案文件（`plan.md`、`plan-r{N}.md`）：
+- 读取最高轮次的方案文件，记为 `{plan-artifact}`
 
 扫描 `.agent-workspace/active/{task-id}/` 目录中的实现报告文件：
 - 如果不存在 `implementation.md` 且不存在 `implementation-r*.md` → 本轮为第 1 轮，产出 `implementation.md`
@@ -34,6 +37,7 @@ description: >
 - 如果存在 `implementation-r{N}.md` → 本轮为第 N+1 轮，产出 `implementation-r{N+1}.md`
 
 记录：
+- `{plan-artifact}`：本次实现遵循的技术方案文件
 - `{implementation-round}`：本轮实现轮次
 - `{implementation-artifact}`：本轮实现报告文件名
 
@@ -41,7 +45,7 @@ description: >
 
 ### 3. 阅读技术方案
 
-仔细阅读 `plan.md` 以理解：
+仔细阅读 `{plan-artifact}` 以理解：
 - 技术方法和解决策略
 - 详细实施步骤
 - 需要创建/修改的文件
@@ -208,7 +212,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 ## 注意事项
 
-1. **前置条件**：必须有已审查的技术方案（plan.md 存在且已获批准）
+1. **前置条件**：必须有已审查的技术方案（`plan.md` 或 `plan-r{N}.md` 存在且已获批准）
 2. **禁止自动提交**：不要自动执行 `git commit` 或 `git add`。提醒用户手动提交
 3. **测试要求**：所有新代码必须有单元测试；测试覆盖率不得下降
 4. **代码质量**：遵循项目编码规范

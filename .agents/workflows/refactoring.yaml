@@ -19,6 +19,11 @@ steps:
     inputs:
       - 重构请求或 Issue 描述
       - 项目代码库
+    artifact_versioning:
+      outputs:
+        - name: analysis
+          pattern: "analysis.md | analysis-r{N}.md"
+          rule: "扫描现有分析产物；首轮创建 analysis.md，后续修订创建 analysis-r{N}.md（N = 当前最高轮次 + 1）"
     outputs:
       - 包含依赖关系图的范围分析
       - 风险评估
@@ -37,6 +42,15 @@ steps:
     inputs:
       - 上一步的范围分析
       - 项目架构
+    artifact_versioning:
+      inputs:
+        - name: analysis
+          pattern: "analysis.md | analysis-r{N}.md"
+          rule: "读取最高轮次的分析产物作为设计输入"
+      outputs:
+        - name: plan
+          pattern: "plan.md | plan-r{N}.md"
+          rule: "扫描现有方案产物；首轮创建 plan.md，后续修订创建 plan-r{N}.md（N = 当前最高轮次 + 1）"
     outputs:
       - 包含增量步骤的重构计划
       - 前置测试列表
@@ -114,9 +128,9 @@ steps:
           pattern: "review.md | review-r{N}.md"
           rule: "读取最高轮次的审查产物，并校验其与 task.md Activity Log 中最近一条 Code Review 记录一致"
       outputs:
-        - name: implementation
-          pattern: "implementation.md | implementation-r{N}.md"
-          rule: "将修复记录追加到最高轮次的实现产物，并在标题中标注对应审查产物文件名"
+        - name: refinement
+          pattern: "refinement.md | refinement-r{N}.md"
+          rule: "扫描现有修复产物；首轮创建 refinement.md，后续轮次创建 refinement-r{N}.md（N = 当前最高轮次 + 1）"
     outputs:
       - 包含修复的更新分支
       - 更新后的任务文件

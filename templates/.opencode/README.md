@@ -41,6 +41,8 @@ Use markdown code blocks for illustrative examples that should NOT be auto-execu
 
 ### Task Management
 - `create-task` - Create a task from natural language description
+- `import-issue` - Import a GitHub Issue as a task
+- `analyze-task` - Analyze task requirements
 - `plan-task` - Design a technical plan for a task
 - `implement-task` - Implement a task based on the plan
 - `review-task` - Review task implementation
@@ -53,12 +55,11 @@ Use markdown code blocks for illustrative examples that should NOT be auto-execu
 - `create-pr` - Create a Pull Request
 - `sync-pr` - Sync task progress to PR comments
 - `sync-issue` - Sync task progress to Issue comments
-- `analyze-issue` - Analyze a GitHub Issue
 
 ### Security
-- `analyze-dependabot` - Analyze Dependabot alerts
+- `import-dependabot` - Import Dependabot alerts
 - `close-dependabot` - Close Dependabot alerts
-- `analyze-codescan` - Analyze Code Scanning alerts
+- `import-codescan` - Import Code Scanning alerts
 - `close-codescan` - Close Code Scanning alerts
 
 ### Release and Maintenance

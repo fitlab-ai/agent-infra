@@ -36,12 +36,13 @@ description: >
 ### 3. 检查上下文文件
 
 按产物类型扫描并记录以下文件的存在、轮次和状态：
-- `analysis.md` - 需求分析
-- `plan.md` - 技术方案
+- `analysis.md`、`analysis-r{N}.md` - 需求分析
+- `plan.md`、`plan-r{N}.md` - 技术方案
 - `implementation.md`、`implementation-r2.md`、... - 实现报告
+- `refinement.md`、`refinement-r2.md`、... - 修复报告
 - `review.md`、`review-r2.md`、... - 审查报告
 
-对于 `implementation` 和 `review`：
+对于版本化产物（`analysis`、`plan`、`implementation`、`refinement`、`review`）：
 - 扫描任务目录中的所有同类版本化文件
 - 记录每类产物的最新轮次、最新文件路径和总轮次数
 - 如果 `task.md` 的 Activity Log 记录了最新轮次，优先核对其与实际文件是否一致
@@ -64,21 +65,27 @@ description: >
 - 更新时间：{updated_at}
 
 工作流进度：
-  [已完成]    需求分析        analysis.md
-  [已完成]    技术设计        plan.md
+  [已完成]    需求分析        analysis-r2.md (Round 2, latest)
+  [已完成]    技术设计        plan.md (Round 1)
   [进行中]    实现            implementation.md (Round 1)
+  [待处理]    修复            refinement.md (Round 1 will be created next)
   [待处理]    代码审查        review.md (Round 1 will be created next)
   [待处理]    最终提交
 
 上下文文件：
-- analysis.md：       已存在
-- plan.md：           已存在
-- implementation.md：已存在 (Round 1, latest)
-- review.md：         未开始
+- analysis.md：           已存在 (Round 1)
+- analysis-r2.md：        已存在 (Round 2, latest)
+- plan.md：               已存在 (Round 1, latest)
+- implementation.md：     已存在 (Round 1, latest)
+- refinement.md：         未开始
+- review.md：             未开始
 
 如果存在多轮产物，显示所有轮次，并标记最新版本，例如：
+- plan.md：已存在 (Round 1)
+- plan-r2.md：已存在 (Round 2, latest)
 - implementation.md：已存在 (Round 1)
 - implementation-r2.md：已存在 (Round 2, latest)
+- refinement.md：已存在 (Round 1)
 - review.md：已存在 (Round 1)
 - review-r2.md：已存在 (Round 2, latest)
 
@@ -99,11 +106,11 @@ description: >
 
 | 当前状态 | Claude Code / OpenCode | Gemini CLI | Codex CLI |
 |---------|----------------------|------------|-----------|
-| 分析完成 | `/plan-task {task-id}` | `/{{project}}:plan-task {task-id}` | `$plan-task {task-id}` |
-| 计划完成 | `/implement-task {task-id}` | `/{{project}}:implement-task {task-id}` | `$implement-task {task-id}` |
-| 实现完成 | `/review-task {task-id}` | `/{{project}}:review-task {task-id}` | `$review-task {task-id}` |
-| 审查通过 | `/commit` | `/{{project}}:commit` | `$commit` |
-| 审查有问题 | `/refine-task {task-id}` | `/{{project}}:refine-task {task-id}` | `$refine-task {task-id}` |
+| 分析完成 | `/plan-task {task-id}` | `/agent-orchestrator:plan-task {task-id}` | `$plan-task {task-id}` |
+| 计划完成 | `/implement-task {task-id}` | `/agent-orchestrator:implement-task {task-id}` | `$implement-task {task-id}` |
+| 实现完成 | `/review-task {task-id}` | `/agent-orchestrator:review-task {task-id}` | `$review-task {task-id}` |
+| 审查通过 | `/commit` | `/agent-orchestrator:commit` | `$commit` |
+| 审查有问题 | `/refine-task {task-id}` | `/agent-orchestrator:refine-task {task-id}` | `$refine-task {task-id}` |
 | 任务被阻塞 | 解除阻塞或提供所需信息 | — | 解除阻塞或提供所需信息 |
 | 任务已完成 | 无需操作 | — | 无需操作 |
 
@@ -112,4 +119,4 @@ description: >
 1. **只读**：本技能仅读取和报告 —— 不修改任何文件
 2. **多目录搜索**：始终检查 active、blocked 和 completed 目录
 3. **快速参考**：随时可以使用本技能检查任务在工作流中的位置
-4. **版本化产物**：`implementation` 与 `review` 需要报告实际轮次，而不是只报告固定文件名
+4. **版本化产物**：`analysis`、`plan`、`implementation`、`refinement`、`review` 都需要报告实际轮次，而不是只报告固定文件名

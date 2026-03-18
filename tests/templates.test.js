@@ -122,6 +122,37 @@ test("update-agent-orchestrator template copies stay in sync with working files"
   });
 });
 
+test("assistant template docs use import commands and analyze-task naming", () => {
+  [
+    "templates/.claude/CLAUDE.md",
+    "templates/.claude/CLAUDE.zh-CN.md",
+    "templates/.claude/project-rules.md",
+    "templates/.claude/project-rules.zh-CN.md",
+    "templates/.opencode/README.md",
+    "templates/.opencode/README.zh-CN.md"
+  ].forEach((relativePath) => {
+    const content = read(relativePath);
+
+    assert.match(content, /import-issue/, `${relativePath} should reference import-issue`);
+    assert.match(content, /analyze-task/, `${relativePath} should reference analyze-task`);
+    assert.doesNotMatch(content, /analyze-issue/, `${relativePath} should not reference analyze-issue`);
+  });
+
+  [
+    "templates/.claude/CLAUDE.md",
+    "templates/.claude/CLAUDE.zh-CN.md",
+    "templates/.opencode/README.md",
+    "templates/.opencode/README.zh-CN.md"
+  ].forEach((relativePath) => {
+    const content = read(relativePath);
+
+    assert.match(content, /import-dependabot/, `${relativePath} should reference import-dependabot`);
+    assert.match(content, /import-codescan/, `${relativePath} should reference import-codescan`);
+    assert.doesNotMatch(content, /analyze-dependabot/, `${relativePath} should not reference analyze-dependabot`);
+    assert.doesNotMatch(content, /analyze-codescan/, `${relativePath} should not reference analyze-codescan`);
+  });
+});
+
 test("README documents the bootstrap installation flow", () => {
   const readme = read("README.md");
   const readmeZh = read("README.zh-CN.md");
