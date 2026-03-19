@@ -104,7 +104,7 @@ description: >
 
 根据当前工作流状态，建议合适的下一个技能。必须展示下表中所有 TUI 列的命令格式，不要只展示当前 AI 代理对应的列：
 
-> **⚠️ CONDITION CHECK — 你必须先根据 `status`、`current_step`、最新产物和最新审查结果，选择下表中唯一匹配的一行：**
+> **⚠️ 条件判断 — 你必须先根据 `status`、`current_step`、最新产物和最新审查结果，选择下表中唯一匹配的一行：**
 >
 > - `status = blocked` → 选择「任务被阻塞」
 > - `status = completed` → 选择「任务已完成」
