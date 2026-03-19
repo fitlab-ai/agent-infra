@@ -104,6 +104,18 @@ description: >
 
 根据当前工作流状态，建议合适的下一个技能。必须展示下表中所有 TUI 列的命令格式，不要只展示当前 AI 代理对应的列：
 
+> **⚠️ CONDITION CHECK — 你必须先根据 `status`、`current_step`、最新产物和最新审查结果，选择下表中唯一匹配的一行：**
+>
+> - `status = blocked` → 选择「任务被阻塞」
+> - `status = completed` → 选择「任务已完成」
+> - `current_step = requirement-analysis` 且最新分析产物已完成 → 选择「分析完成」
+> - `current_step = technical-design` 且最新计划产物已完成 → 选择「计划完成」
+> - 最新实现产物已存在，且尚无最新审查产物 → 选择「实现完成」
+> - 最新审查产物存在，且结论为 `Approved`，同时 `Blocker = 0`、`Major = 0`、`Minor = 0` → 选择「审查通过」
+> - 最新审查产物存在，但仍有任何 `Blocker`、`Major` 或 `Minor` 问题，或结论不是无问题通过 → 选择「审查有问题」
+>
+> **特别注意：只要最新审查报告中存在任何问题，就不能使用「审查通过」行。必须改用「审查有问题」行。**
+
 | 当前状态 | Claude Code / OpenCode | Gemini CLI | Codex CLI |
 |---------|----------------------|------------|-----------|
 | 分析完成 | `/plan-task {task-id}` | `/agent-infra:plan-task {task-id}` | `$plan-task {task-id}` |

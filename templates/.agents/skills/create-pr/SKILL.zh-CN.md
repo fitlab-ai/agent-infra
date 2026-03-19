@@ -181,6 +181,14 @@ date "+%Y-%m-%d %H:%M:%S"
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
+> **⚠️ NEXT STEP CHECK — 你必须先判断创建 PR 后的真实下一步，再展示下面的命令：**
+>
+> - 如果 `task.md` 有有效 `issue_number`，且需要把 PR 状态或审查摘要同步回任务上下文，优先提示「发布审查摘要（可选）」
+> - 如果所有工作流步骤已经完成，或创建 PR 后下一步就是归档任务，提示「完成任务」
+> - 如果以上两者都适用，必须明确顺序：**先同步 PR 进度，再完成任务**
+>
+> **禁止把「完成任务」写成唯一下一步，如果仍需要同步进度或补充 PR 上下文。**
+
 ```
 PR 已创建：{pr-url}
 
@@ -190,11 +198,11 @@ PR 已创建：{pr-url}
 - Development：{development-result}
 
 下一步（如在任务工作流中）：
-- 发布审查摘要（可选）：
+- 发布审查摘要（可选；有关联任务或需要同步 PR 状态时建议先执行）：
   - Claude Code / OpenCode：/sync-pr {task-id}
   - Gemini CLI：/{{project}}:sync-pr {task-id}
   - Codex CLI：$sync-pr {task-id}
-- 完成任务：
+- 完成任务（所有工作流步骤完成后执行）：
   - Claude Code / OpenCode：/complete-task {task-id}
   - Gemini CLI：/{{project}}:complete-task {task-id}
   - Codex CLI：$complete-task {task-id}

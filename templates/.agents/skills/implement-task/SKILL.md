@@ -71,7 +71,7 @@ Follow the `implementation` step in `.agents/workflows/feature-development.yaml`
 3. **Test continuously**: Run tests after completing each step
 4. **Keep it simple**: Do not over-engineer or add unplanned features
 
-### 5. Run Test Verification
+### 5. Run Test Verification (Failure Must Stop the Flow)
 
 Execute the project's test command. Reference the `test` skill for the project-specific test command:
 
@@ -84,7 +84,15 @@ Execute the project's test command. Reference the `test` skill for the project-s
 # go test ./...     (Go)
 ```
 
-Ensure all tests pass. If tests fail, fix the issues before proceeding.
+> **⚠️ Failure Branch — if tests fail, you must immediately take the failure path:**
+>
+> - Output a summary of the test errors
+> - Ask the user whether to continue
+> - Stop immediately: do not create the implementation report, do not mark task.md as implementation-complete, and do not output the Step 8 "Implementation complete for task {task-id}." template
+>
+> **You may continue to Steps 6, 7, and 8 only when all tests pass.**
+
+Ensure all tests pass. Proceed to Steps 6, 7, and 8 only when the entire test suite passes.
 
 ### 6. Output Implementation Report
 
@@ -225,5 +233,5 @@ After completing the checklist, **stop**. Do not auto-commit. Wait for code revi
 
 - Task not found: Prompt "Task {task-id} not found"
 - Missing plan: Prompt "Technical plan not found, please run the plan-task skill first"
-- Test failure: Output test errors, ask user whether to continue
+- Test failure: Output test errors, ask user whether to continue, and stop immediately without creating the implementation report or outputting "Implementation complete for task {task-id}."
 - Build failure: Output build errors, stop implementation

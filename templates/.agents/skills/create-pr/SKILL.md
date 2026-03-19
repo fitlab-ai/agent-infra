@@ -182,6 +182,14 @@ If there is an active task for this work, update `.agent-workspace/active/{task-
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
 
+> **⚠️ Next-Step Check — you must determine the real next action after PR creation before showing the commands below:**
+>
+> - If `task.md` has a valid `issue_number` and the PR status or review summary should be synced back into task context, prioritize "Publish review summary (optional)"
+> - If all workflow steps are complete, or the next action after PR creation is task archival, include "Complete task"
+> - If both apply, make the order explicit: **sync PR progress first, then complete the task**
+>
+> **Do not present "Complete task" as the only next step when PR progress or context still needs to be synced.**
+
 ```
 PR created: {pr-url}
 
@@ -191,11 +199,11 @@ Metadata sync:
 - Development: {development-result}
 
 Next steps (if in task workflow):
-- Publish review summary (optional):
+- Publish review summary (optional; recommended first when task/PR status still needs syncing):
   - Claude Code / OpenCode: /sync-pr {task-id}
   - Gemini CLI: /{{project}}:sync-pr {task-id}
   - Codex CLI: $sync-pr {task-id}
-- Complete task:
+- Complete task (after all workflow steps are complete):
   - Claude Code / OpenCode: /complete-task {task-id}
   - Gemini CLI: /{{project}}:complete-task {task-id}
   - Codex CLI: $complete-task {task-id}

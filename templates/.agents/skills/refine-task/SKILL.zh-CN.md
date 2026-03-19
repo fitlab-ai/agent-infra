@@ -108,6 +108,14 @@ date "+%Y-%m-%d %H:%M:%S"
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
+> **⚠️ CONDITION CHECK — 在展示下面两个下一步之前，你必须先判断修复结果：**
+>
+> - 如果本轮修复了任何 `Blocker` 或 `Major` 问题，或改动影响核心逻辑/测试范围较广，**默认推荐**先执行「重新审查」
+> - 如果仅修复 `Minor` 问题，且变更范围很小、风险可控，才可以把「直接提交」作为可选项
+> - 如果仍有未修复的 `Blocker` 或 `Major`，**不要**暗示可以直接提交；应明确提示继续修复或重新审查
+>
+> **禁止把「直接提交」写成默认路径，除非你确认没有剩余高风险问题。**
+
 输出格式：
 ```
 任务 {task-id} 修复完成。
@@ -121,11 +129,11 @@ date "+%Y-%m-%d %H:%M:%S"
 - 修复产物：{refinement-artifact}
 
 下一步 - 重新审查或提交：
-- 重新审查：
+- 重新审查（默认推荐；修复了 Blocker/Major 时优先）：
   - Claude Code / OpenCode：/review-task {task-id}
   - Gemini CLI：/agent-infra:review-task {task-id}
   - Codex CLI：$review-task {task-id}
-- 直接提交：
+- 直接提交（仅限只修复 Minor 且风险可控）：
   - Claude Code / OpenCode：/commit
   - Gemini CLI：/agent-infra:commit
   - Codex CLI：$commit

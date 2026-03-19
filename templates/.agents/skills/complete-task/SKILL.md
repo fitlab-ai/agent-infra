@@ -27,13 +27,21 @@ If not found in `active/`, check `blocked/` and `completed/`:
 - If in `completed/`: Inform user the task is already completed
 - If in `blocked/`: Inform user the task is blocked; suggest unblocking first
 
-### 2. Verify Completion Prerequisites
+### 2. Verify Completion Prerequisites (Failure Must Stop)
 
 Before marking complete, verify ALL of these:
 - [ ] All workflow steps are complete (check workflow progress in task.md)
 - [ ] Code has been reviewed (`review.md` or `review-r{N}.md` exists, and the latest review verdict is Approved; or review was done externally)
 - [ ] Code has been committed (no uncommitted changes related to this task)
 - [ ] Tests are passing
+
+> **⚠️ Prerequisite Branch Check — you must decide whether to continue or stop before proceeding:**
+>
+> - If all conditions above are satisfied -> continue to Step 3
+> - If any condition is missing -> **stop by default** and output the prerequisite warning
+> - Only continue with unmet prerequisites when the user explicitly requested `--force`
+>
+> **Do not continue to Steps 3-7 when prerequisites are not met, and do not output "Task {task-id} completed and archived."**
 
 If any prerequisite is not met, warn the user:
 ```
@@ -42,6 +50,8 @@ Cannot complete task {task-id} - prerequisites not met:
 
 Please complete the missing steps first, or use --force to override.
 ```
+
+If prerequisites are not met and the user did not explicitly provide `--force`, stop immediately and do not execute Steps 3-7.
 
 ### 3. Update Task Metadata
 

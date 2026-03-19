@@ -148,7 +148,22 @@ For all cases below, **append** to `## Activity Log` in task.md (do NOT overwrit
 - {yyyy-MM-dd HH:mm:ss} — **Commit** by {agent} — {commit hash short} {commit subject}
 ```
 
-### Case 1: Final Commit (Task Complete)
+> **⚠️ Situation Check — you must inspect task state first, then choose exactly one matching case below:**
+>
+> - Check `task.md` for `current_step`, workflow progress, and the latest `## Activity Log` entry
+> - Check whether the latest `review.md` / `review-r{N}.md` exists and whether the latest review passed with no issues
+> - Check whether any follow-up repair, review, or PR creation step is still pending
+>
+> | Decision basis | Required case |
+> |---------------|---------------|
+> | All workflow steps complete + latest review passed with no issues + all tests pass | Case 1: Final Commit |
+> | There are still incomplete steps, unresolved fixes, or waiting actions | Case 2: More Work Needed |
+> | The purpose of this commit is to send the implementation/refinement into code review | Case 3: Ready for Review |
+> | Code is committed, review is done, and the next action should be PR creation | Case 4: Ready for PR |
+>
+> **Do not mix multiple cases. You must decide first, then output the single matching next step.**
+
+### Case 1: Final Commit (Trigger: all work is done and the next step is task archival)
 
 If this is the last commit and all work is done:
 
@@ -169,13 +184,13 @@ Next step - complete and archive the task:
   - Codex CLI: $complete-task {task-id}
 ```
 
-### Case 2: More Work Needed
+### Case 2: More Work Needed (Trigger: incomplete steps, unresolved issues, or pending collaboration remain)
 
 If there's follow-up work (awaiting review, more fixes needed):
 - Update `task.md`: set `updated_at` to current time
 - Record this commit's content and next steps in task.md
 
-### Case 3: Ready for Review
+### Case 3: Ready for Review (Trigger: the next action should be `review-task`)
 
 If the commit is ready for code review:
 - Update `task.md`: set `current_step` to `code-review`
@@ -193,7 +208,7 @@ Next step - code review:
   - Codex CLI: $review-task {task-id}
 ```
 
-### Case 4: Ready for PR
+### Case 4: Ready for PR (Trigger: the next action should be `create-pr`)
 
 If the commit should become a Pull Request:
 - Update `task.md`: set `updated_at` to current time
