@@ -122,6 +122,7 @@ test("sync-issue skill documents label sync and development linking", () => {
       /--remove-label/,
       /type: bug/,
       /\| bug(?:、|, )bugfix \| `type: bug` \|/,
+      /\| refactor(?:、|, )refactoring \| `type: enhancement` \|/,
       /type: feature/,
       /status: blocked/,
       /status: in-progress/,
@@ -202,16 +203,20 @@ test("sync-pr skill documents metadata sync and idempotent summary", () => {
     const content = read(relativePath);
 
     assertContainsPatterns(relativePath, [
+      /repo="\$\(gh repo view --json nameWithOwner --jq '\.nameWithOwner'\)"/,
       /<!-- sync-pr:\{task-id\}:summary -->/,
       /gh pr edit \{pr-number\} --add-label/,
       /gh label list --search "type:"/,
       /init-labels/,
       /type: bug/,
+      /\| refactor(?:、|, )refactoring \| `type: enhancement` \|/,
+      /方案 A\/B|Option A\/B/,
       /in: \{module\}/,
       /--milestone/,
       /Closes #\{issue-number\}/,
       /gh issue view \{issue-number\} --json state/,
       /gh api "repos\/\$repo\/issues\/comments\/\{comment-id\}" -X PATCH/,
+      /PR #\{number\} is closed\/merged, metadata sync skipped/,
       /date "\+%Y-%m-%d %H:%M:%S"/
     ]);
 
@@ -232,12 +237,22 @@ test("sync-pr skill documents metadata sync and idempotent summary", () => {
 
 test("create-pr skill documents metadata sync step", () => {
   skillDocPaths("create-pr").forEach((relativePath) => {
+    const content = read(relativePath);
+
     assertContainsPatterns(relativePath, [
       /--add-label/,
       /--milestone/,
+      /\| bug(?:、|, )bugfix \| `type: bug` \|/,
+      /\| refactor(?:、|, )refactoring \| `type: enhancement` \|/,
       /Closes #\{issue-number\}/,
       /sync-pr/
     ]);
+
+    assert.doesNotMatch(
+      content,
+      /复用 `sync-pr` 的 type label 映射|Reuse the same type-label mapping as `sync-pr`/,
+      `${relativePath} should inline the type-label mapping instead of delegating to sync-pr`
+    );
   });
 });
 

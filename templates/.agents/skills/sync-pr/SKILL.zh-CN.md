@@ -39,7 +39,14 @@ description: >
 - `refinement.md`、`refinement-r{N}.md` - 修复报告
 - 最高轮次的 `analysis.md` / `analysis-r{N}.md` - 需求分析（仅作为 `in:` label 的回退输入）
 
-### 4. 检查 label 体系是否已初始化
+### 4. 获取仓库坐标并检查 label 体系是否已初始化
+
+先获取仓库坐标，供后续 milestone 查询和评论同步复用：
+
+```bash
+repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+owner="${repo%%/*}"
+```
 
 执行：
 
@@ -60,10 +67,11 @@ gh label list --search "type:" --limit 1 --json name --jq 'length'
 | bug、bugfix | `type: bug` |
 | feature | `type: feature` |
 | enhancement | `type: enhancement` |
+| refactor、refactoring | `type: enhancement` |
 | documentation | `type: documentation` |
 | dependency-upgrade | `type: dependency-upgrade` |
 | task | `type: task` |
-| 其他（含 refactor、refactoring） | 跳过 |
+| 其他 | 跳过 |
 
 如果映射到具体 label，执行：
 
@@ -203,11 +211,9 @@ gh issue view {issue-number} --json state
 
 ### 10. 生成或更新单条幂等审查摘要
 
-先获取仓库坐标，并拉取 PR 已有评论：
+复用步骤 4 已获取的仓库坐标，并拉取 PR 已有评论：
 
 ```bash
-repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
-owner="${repo%%/*}"
 pr_comments_jsonl="$(mktemp)"
 
 gh api "repos/$repo/issues/{pr-number}/comments" \
@@ -233,6 +239,7 @@ summary_comment_id="$(
 摘要内容要求：
 - 面向代码审查者，不重复罗列 PR diff 已经展示的文件变更
 - 从 `plan.md` 的 `## 决策`、`## 技术方法`、`## 实施步骤` 中提取 2-4 条关键技术决策
+- 关键技术决策的描述必须自包含，不要引用内部文档的编号或术语（如 `方案 A/B`）；审查者应能独立理解每条决策的含义
 - 从 `review.md`、`review-r{N}.md`、`refinement.md`、`refinement-r{N}.md` 构建审查历程表格
 - 从 `implementation.md` 或 `refinement.md` 的测试章节提取测试结果
 - 在关联表格中记录 Issue 状态
@@ -343,4 +350,5 @@ date "+%Y-%m-%d %H:%M:%S"
 - 任务未找到：提示 `Task {task-id} not found`
 - 缺少 PR 编号：提示 `Task has no pr_number field`
 - PR 未找到：提示 `PR #{number} not found`
+- PR 已关闭/已合并：提示 `PR #{number} is closed/merged, metadata sync skipped`
 - gh 认证失败：提示 `Please check GitHub CLI authentication`

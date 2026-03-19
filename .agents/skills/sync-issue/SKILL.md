@@ -158,10 +158,11 @@ gh label list --search "type:" --limit 1 --json name --jq 'length'
 | bug、bugfix | `type: bug` |
 | feature | `type: feature` |
 | enhancement | `type: enhancement` |
+| refactor、refactoring | `type: enhancement` |
 | documentation | `type: documentation` |
 | dependency-upgrade | `type: dependency-upgrade` |
 | task | `type: task` |
-| 其他（含 refactoring 等） | 跳过 |
+| 其他 | 跳过 |
 
 如果映射到具体 label，执行：
 

@@ -95,7 +95,18 @@ gh label list --search "type:" --limit 1 --json name --jq 'length'
 
 **b) Sync the type label**
 
-Reuse the same type-label mapping as `sync-pr`.
+Map task.md `type` using this table:
+
+| task.md type | GitHub label |
+|---|---|
+| bug, bugfix | `type: bug` |
+| feature | `type: feature` |
+| enhancement | `type: enhancement` |
+| refactor, refactoring | `type: enhancement` |
+| documentation | `type: documentation` |
+| dependency-upgrade | `type: dependency-upgrade` |
+| task | `type: task` |
+| anything else | skip |
 
 If task.md `type` maps to a standard type label, run:
 

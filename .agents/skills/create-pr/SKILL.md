@@ -94,7 +94,18 @@ gh label list --search "type:" --limit 1 --json name --jq 'length'
 
 **b) 同步 type label**
 
-复用 `sync-pr` 的 type label 映射。
+根据 task.md 的 `type` 字段按下表映射：
+
+| task.md type | GitHub label |
+|---|---|
+| bug、bugfix | `type: bug` |
+| feature | `type: feature` |
+| enhancement | `type: enhancement` |
+| refactor、refactoring | `type: enhancement` |
+| documentation | `type: documentation` |
+| dependency-upgrade | `type: dependency-upgrade` |
+| task | `type: task` |
+| 其他 | 跳过 |
 
 如果 task.md 的 `type` 可以映射到标准 type label，执行：
 

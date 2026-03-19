@@ -39,7 +39,14 @@ Check and read these files if they exist:
 - `refinement.md`, `refinement-r{N}.md` - refinement reports
 - highest-round `analysis.md` / `analysis-r{N}.md` - analysis input only as fallback for `in:` labels
 
-### 4. Check Whether the Label System Has Been Initialized
+### 4. Resolve Repository Coordinates and Check Whether the Label System Has Been Initialized
+
+Resolve repository coordinates first so later milestone queries and comment sync steps can reuse them:
+
+```bash
+repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+owner="${repo%%/*}"
+```
 
 Run:
 
@@ -60,10 +67,11 @@ Map task.md `type` using this table:
 | bug, bugfix | `type: bug` |
 | feature | `type: feature` |
 | enhancement | `type: enhancement` |
+| refactor, refactoring | `type: enhancement` |
 | documentation | `type: documentation` |
 | dependency-upgrade | `type: dependency-upgrade` |
 | task | `type: task` |
-| anything else, including refactor or refactoring | skip |
+| anything else | skip |
 
 If the value maps to a label, run:
 
@@ -203,11 +211,9 @@ If task.md does not contain `issue_number`, record `Issue: N/A`.
 
 ### 10. Create or Update the Single Idempotent Review Summary
 
-First resolve repository coordinates and fetch existing PR comments:
+Reuse the repository coordinates resolved in step 4, then fetch existing PR comments:
 
 ```bash
-repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
-owner="${repo%%/*}"
 pr_comments_jsonl="$(mktemp)"
 
 gh api "repos/$repo/issues/{pr-number}/comments" \
@@ -233,6 +239,7 @@ summary_comment_id="$(
 Summary requirements:
 - target reviewers instead of restating the full PR diff
 - extract 2-4 key technical decisions from `## Decision`, `## Technical Approach`, and `## Implementation Steps` in `plan.md`
+- each key technical decision must be self-contained; do not reference internal document labels or jargon such as `Option A/B`
 - build a review-history table from `review.md`, `review-r{N}.md`, `refinement.md`, and `refinement-r{N}.md`
 - extract test results from `implementation.md` or `refinement.md`
 - include Issue state in the relationship table
@@ -343,4 +350,5 @@ View: https://github.com/{owner}/{repo}/pull/{pr-number}
 - Task not found: `Task {task-id} not found`
 - Missing PR number: `Task has no pr_number field`
 - PR not found: `PR #{number} not found`
+- PR is closed or merged: `PR #{number} is closed/merged, metadata sync skipped`
 - GitHub CLI auth failed: `Please check GitHub CLI authentication`
