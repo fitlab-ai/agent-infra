@@ -498,6 +498,12 @@ test("create-issue skill limits issue content to task.md and writes back issue_n
       /仅从 task\.md 读取|from `task\.md` only/,
       /不要读取 `analysis\.md`、`plan\.md`、`implementation\.md`|Do not read `analysis\.md`, `plan\.md`, `implementation\.md`/,
       /gh auth status/,
+      /ISSUE_TEMPLATE/,
+      /fallback|兜底/,
+      /`labels:`/,
+      /textarea/,
+      /dropdown/,
+      /checkboxes/,
       /gh issue create --title/,
       /`issue_number`/,
       /sync-issue/
