@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { loadFreshEsm } from "./helpers.js";
+import { loadFreshEsm, read } from "./helpers.js";
 
 function writeFile(root, relativePath, content) {
   const fullPath = path.join(root, relativePath);
@@ -105,6 +105,56 @@ test("syncTemplates respects templateSource and stays idempotent", async () => {
     assert.deepEqual(secondReport.ejected.created, []);
     assert.deepEqual(secondReport.ejected.skipped, ["local-only.md"]);
     assert.equal(afterSecondRun, afterFirstRun);
+  } finally {
+    os.homedir = originalHomedir;
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates falls back to the installer version with a v prefix when clone metadata is unavailable", async () => {
+  const originalHomedir = os.homedir;
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-installer-version-"));
+
+  try {
+    const homeDir = path.join(tmpDir, "home");
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = path.join(tmpDir, "template-root");
+
+    fs.mkdirSync(homeDir, { recursive: true });
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.mkdirSync(templateRoot, { recursive: true });
+
+    writeFile(templateRoot, "README.md", "Hello {{project}}\n");
+    writeJson(projectRoot, ".airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      templateSource: templateRoot,
+      modules: [],
+      files: {
+        managed: ["README.md"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    os.homedir = () => homeDir;
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot);
+
+    assert.equal(
+      report.templateVersion,
+      `v${JSON.parse(read("package.json")).version}`
+    );
   } finally {
     os.homedir = originalHomedir;
     childProcess.execSync = originalExecSync;

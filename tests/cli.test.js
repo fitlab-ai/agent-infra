@@ -58,7 +58,7 @@ test("cli version output stays in sync with package.json", () => {
     encoding: "utf8"
   });
 
-  assert.equal(output.trim(), `agent-infra ${pkg.version}`);
+  assert.equal(output.trim(), `agent-infra v${pkg.version}`);
 });
 
 test("agent-infra init generates seed files in a temp directory", () => {
@@ -76,6 +76,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
     );
     assert.equal(config.project, "testproj");
     assert.equal(config.org, "testorg");
+    assert.equal(config.templateVersion, `v${JSON.parse(read("package.json")).version}`);
     assert.ok(!config.branchPrefix, "branchPrefix should not exist");
     assert.ok(!config.source, "consumer projects should not have source: self");
     assert.ok(!config.files.managed.includes(".mailmap"), ".mailmap should not be managed");

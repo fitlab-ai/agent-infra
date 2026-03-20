@@ -22,7 +22,7 @@ const DEFAULTS_EXPR = [
 ].join('\n');
 
 const VERSION_EXPR = [
-  'const INSTALLER_VERSION = JSON.parse(',
+  "const INSTALLER_VERSION = 'v' + JSON.parse(",
   "  fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')",
   ').version;'
 ].join('\n');
@@ -41,7 +41,7 @@ function buildInlineContent() {
 
   return source
     .replace(DEFAULTS_EXPR, `const DEFAULTS = ${JSON.stringify(defaults, null, 2)};`)
-    .replace(VERSION_EXPR, `const INSTALLER_VERSION = ${JSON.stringify(version)};`);
+    .replace(VERSION_EXPR, `const INSTALLER_VERSION = ${JSON.stringify(`v${version}`)};`);
 }
 
 function main() {

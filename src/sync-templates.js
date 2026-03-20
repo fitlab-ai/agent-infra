@@ -38,7 +38,7 @@ const DEFAULTS = JSON.parse(
   fs.readFileSync(new URL('../lib/defaults.json', import.meta.url), 'utf8')
 );
 
-const INSTALLER_VERSION = JSON.parse(
+const INSTALLER_VERSION = 'v' + JSON.parse(
   fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
 ).version;
 
