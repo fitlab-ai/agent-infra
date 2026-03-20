@@ -100,6 +100,18 @@ Each AI tool has different strengths. Use them accordingly:
 4. **Run the workflow**: Follow the appropriate workflow in `.agents/workflows/`.
 5. **Hand off**: When switching AIs, create a handoff document from the template.
 
+## Label Conventions
+
+GitHub Labels in this project use the following prefixes, each with a defined scope:
+
+| Label prefix | Issue | PR | Notes |
+|---|---|---|---|
+| `type:` | — | Yes | Issues use the native GitHub Type field; PRs use `type:` labels for changelog generation and categorization |
+| `status:` | Yes | — | PRs already have their own state flow (Open / Draft / Merged / Closed); Issues use `status:` labels for project tracking states |
+| `in:` | Yes | Yes | Both Issues and PRs can be filtered by module |
+
+Initialize the label set with the `/init-labels` command.
+
 ## Skill Authoring Conventions
 
 When writing or updating `.agents/skills/*/SKILL.md` files and their templates, keep step numbering consistent:

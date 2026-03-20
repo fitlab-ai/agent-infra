@@ -115,15 +115,13 @@ test("init-milestones skill documents milestone bootstrap flow and command disco
 
 test("sync-issue skill documents label sync and development linking", () => {
   skillDocPaths("sync-issue").forEach((relativePath) => {
+    const content = read(relativePath);
+
     assertContainsPatterns(relativePath, [
       /gh label list --search "type:"/,
       /init-labels/,
       /--add-label/,
       /--remove-label/,
-      /type: bug/,
-      /\| bug(?:、|, )bugfix \| `type: bug` \|/,
-      /\| refactor(?:、|, )refactoring \| `type: enhancement` \|/,
-      /type: feature/,
       /status: blocked/,
       /status: in-progress/,
       /status: pending-design-work/,
@@ -142,7 +140,18 @@ test("sync-issue skill documents label sync and development linking", () => {
       /Resolves #\{issue-number\}/
     ]);
 
-    const stepNumbers = [...read(relativePath).matchAll(/^### (\d+)\. /gm)]
+    assert.doesNotMatch(
+      content,
+      /gh issue edit \{issue-number\} --add-label "\{type-label\}"/,
+      `${relativePath} should not sync a type label onto Issues`
+    );
+    assert.doesNotMatch(
+      content,
+      /\| bug(?:、|, )bugfix \| `type: bug` \|/,
+      `${relativePath} should not document a type label mapping for Issues`
+    );
+
+    const stepNumbers = [...content.matchAll(/^### (\d+)\. /gm)]
       .map((match) => Number(match[1]));
 
     const expected = stepNumbers.map((_, index) => index + 1);
@@ -502,7 +511,9 @@ test("implement-task skill resolves the latest versioned plan artifact", () => {
     assertContainsPatterns(relativePath, [
       /plan\.md` or `plan-r\{N\}\.md|`plan\.md` 或 `plan-r\{N\}\.md`/,
       /highest-round plan file|最高轮次的方案文件/,
-      /\{plan-artifact\}/
+      /\{plan-artifact\}/,
+      /Attempt to fix the issue and re-run tests first|先尝试修复并重新运行测试/,
+      /external blocker, missing environment, or unclear requirement|外部阻塞、环境缺失或需求不明确/
     ]);
   });
 });

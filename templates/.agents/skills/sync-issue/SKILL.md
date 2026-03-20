@@ -150,30 +150,7 @@ Decision rules:
 - returns `0` -> the standard label system is missing; run the `init-labels` skill first (idempotent), then retry this step
 - returns non-zero -> continue with label sync
 
-**b) Sync the `type:` label**
-
-Map the `type` field in task.md with this table:
-
-| task.md type | GitHub label |
-|---|---|
-| bug, bugfix | `type: bug` |
-| feature | `type: feature` |
-| enhancement | `type: enhancement` |
-| refactor, refactoring | `type: enhancement` |
-| documentation | `type: documentation` |
-| dependency-upgrade | `type: dependency-upgrade` |
-| task | `type: task` |
-| anything else | skip |
-
-If it maps to a concrete label, run:
-
-```bash
-gh issue edit {issue-number} --add-label "{type-label}"
-```
-
-If it does not map to a standard `type:` label, skip it and do not create a new label.
-
-**c) Sync the `status:` label**
+**b) Sync the `status:` label**
 
 First read existing `status:` labels on the Issue:
 
@@ -204,7 +181,7 @@ If a new label needs to be added, run:
 gh issue edit {issue-number} --add-label "{status-label}"
 ```
 
-**d) Sync the `in:` label**
+**c) Sync the `in:` label**
 
 Extract affected file paths from implementation reports first, or from `analysis.md` as a fallback:
 - prefer file paths listed under `## Modified Files`, especially `### New Files` / `### Modified Files`, in `implementation.md` and `implementation-r{N}.md`
@@ -227,7 +204,7 @@ gh issue edit {issue-number} --add-label "in: {module}"
 
 5. **Only add; do not remove** existing `in:` labels
 
-**e) Sync the Issue Type field**
+**d) Sync the Issue Type field**
 
 Map the `type` field in task.md to the native GitHub Issue Type:
 
@@ -559,7 +536,7 @@ Sync result:
 - Comments updated: {count}
 - Steps skipped: {step list or `none`}
 - Current status: {status}
-- Labels: type={type-label or skipped}, status={status-label or cleared}, in:={added count}
+- Labels: status={status-label or cleared}, in:={added count}
 - Issue Type: {Bug / Feature / Task / skipped}
 - Milestone: {preserved / assigned / fallback / skipped}
 - Development: {Closes link appended / link already existed / no PR, skipped}

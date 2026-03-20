@@ -45,6 +45,14 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 - 明确覆盖的 GitHub 默认同名 labels：`good first issue` 和 `help wanted`
 - 额外通用 labels，例如 `dependencies`
 
+#### 适用范围
+
+| Label 前缀 | Issue | PR | 说明 |
+|---|---|---|---|
+| `type:` | — | Yes | Issue 使用 GitHub 原生 Type 字段；PR 无原生类型字段，需 `type:` label 驱动 changelog |
+| `status:` | Yes | — | PR 有自身状态流转（Open/Draft/Merged/Closed）；Issue 使用 `status:` label 标记项目管理状态 |
+| `in:` | Yes | Yes | Issue 和 PR 均需按模块筛选 |
+
 ### 4. 范围探测规则
 
 目录派生 label 遵循以下规则：

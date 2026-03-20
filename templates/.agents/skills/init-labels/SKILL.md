@@ -45,6 +45,14 @@ The script manages these common label families:
 - GitHub-default-name labels intentionally overwritten in place: `good first issue` and `help wanted`
 - Additional shared labels such as `dependencies`
 
+#### Scope
+
+| Label prefix | Issue | PR | Notes |
+|---|---|---|---|
+| `type:` | — | Yes | Issues use the native GitHub Type field; PRs need `type:` labels to drive changelog grouping |
+| `status:` | Yes | — | PRs already have their own state flow (Open/Draft/Merged/Closed); Issues use `status:` labels for project tracking |
+| `in:` | Yes | Yes | Both Issues and PRs need module-based filtering |
+
 ### 4. Scope discovery rules
 
 Directory-derived labels follow these rules:

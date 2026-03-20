@@ -149,30 +149,7 @@ gh label list --search "type:" --limit 1 --json name --jq 'length'
 - 返回 `0` -> 说明标准 label 体系缺失。先执行 `init-labels` 技能（幂等），然后重新执行本步骤
 - 返回非 `0` -> 继续后续 label 同步
 
-**b) 同步 type label**
-
-根据 task.md 的 `type` 字段按下表映射：
-
-| task.md type | GitHub label |
-|---|---|
-| bug、bugfix | `type: bug` |
-| feature | `type: feature` |
-| enhancement | `type: enhancement` |
-| refactor、refactoring | `type: enhancement` |
-| documentation | `type: documentation` |
-| dependency-upgrade | `type: dependency-upgrade` |
-| task | `type: task` |
-| 其他 | 跳过 |
-
-如果映射到具体 label，执行：
-
-```bash
-gh issue edit {issue-number} --add-label "{type-label}"
-```
-
-未映射到标准 type label 时跳过，不创建新 label。
-
-**c) 同步 status label**
+**b) 同步 status label**
 
 先读取 Issue 上已有的 `status:` labels：
 
@@ -203,7 +180,7 @@ gh issue edit {issue-number} --remove-label "{status-label}"
 gh issue edit {issue-number} --add-label "{status-label}"
 ```
 
-**d) 同步 in: label**
+**c) 同步 in: label**
 
 从实现报告（优先）或 `analysis.md` 中提取受影响文件路径：
 - 优先读取 `implementation.md` 与 `implementation-r*.md` 中 `## 修改文件` / `## 新建文件` 的文件列表
@@ -226,7 +203,7 @@ gh issue edit {issue-number} --add-label "in: {module}"
 
 5. **只添加，不移除**现有的 `in:` labels
 
-**e) 同步 Issue Type 字段**
+**d) 同步 Issue Type 字段**
 
 根据 task.md 的 `type` 字段映射 GitHub 原生 Issue Type：
 
@@ -558,7 +535,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 更新评论：{数量}
 - 已跳过步骤：{步骤列表或 `无`}
 - 当前状态：{状态}
-- Labels：type={type-label 或 skipped}，status={status-label 或 cleared}，in:={新增数量}
+- Labels：status={status-label 或 cleared}，in:={新增数量}
 - Issue Type：{Bug / Feature / Task / skipped}
 - Milestone：{preserved / assigned / fallback / skipped}
 - Development：{已追加 Closes 关联 / 已存在关联 / 无 PR，跳过}

@@ -71,7 +71,7 @@ Follow the `implementation` step in `.agents/workflows/feature-development.yaml`
 3. **Test continuously**: Run tests after completing each step
 4. **Keep it simple**: Do not over-engineer or add unplanned features
 
-### 5. Run Test Verification (Failure Must Stop the Flow)
+### 5. Run Test Verification
 
 Execute the project's test command. Reference the `test` skill for the project-specific test command:
 
@@ -84,15 +84,12 @@ Execute the project's test command. Reference the `test` skill for the project-s
 # go test ./...     (Go)
 ```
 
-> **⚠️ Failure Branch — if tests fail, you must immediately take the failure path:**
->
-> - Output a summary of the test errors
-> - Ask the user whether to continue
-> - Stop immediately: do not create the implementation report, do not mark task.md as implementation-complete, and do not output the Step 8 "Implementation complete for task {task-id}." template
->
-> **You may continue to Steps 6, 7, and 8 only when all tests pass.**
+If tests fail:
+- Analyze the failure first, and prioritize fixing problems introduced by the current implementation, plus any test or documentation updates required to match the approved plan
+- Re-run the tests after each fix until they pass, or until you confirm the remaining issue is an external blocker outside the current task scope
+- Only stop when the failure is blocked by external dependencies, missing environment, or unclear requirements that cannot be resolved within the task; in that case, report the blocker and do not create the implementation report, update task.md as implementation-complete, or output the Step 8 completion template
 
-Ensure all tests pass. Proceed to Steps 6, 7, and 8 only when the entire test suite passes.
+Proceed to Steps 6, 7, and 8 only after the full test suite passes.
 
 ### 6. Output Implementation Report
 
@@ -233,5 +230,5 @@ After completing the checklist, **stop**. Do not auto-commit. Wait for code revi
 
 - Task not found: Prompt "Task {task-id} not found"
 - Missing plan: Prompt "Technical plan not found, please run the plan-task skill first"
-- Test failure: Output test errors, ask user whether to continue, and stop immediately without creating the implementation report or outputting "Implementation complete for task {task-id}."
+- Test failure: Attempt to fix the issue and re-run tests first; stop only when an external blocker, missing environment, or unclear requirement prevents completion, and report that blocker
 - Build failure: Output build errors, stop implementation

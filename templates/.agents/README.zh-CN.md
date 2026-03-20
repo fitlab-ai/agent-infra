@@ -100,6 +100,18 @@
 4. **执行工作流**：按照 `.agents/workflows/` 中相应的工作流执行。
 5. **交接**：切换 AI 时，从模板创建交接文档。
 
+## Label 规范
+
+本项目的 GitHub Labels 按以下前缀分类，各前缀有明确的适用范围：
+
+| Label 前缀 | Issue | PR | 说明 |
+|---|---|---|---|
+| `type:` | — | Yes | Issue 使用 GitHub 原生 Type 字段；PR 无原生类型字段，通过 `type:` label 驱动 changelog 和分类 |
+| `status:` | Yes | — | PR 有自身状态流转（Open / Draft / Merged / Closed）；Issue 使用 `status:` label 标记等待反馈、已确认等项目管理状态 |
+| `in:` | Yes | Yes | Issue 和 PR 均可按模块筛选 |
+
+初始化 Label 体系：使用 `/init-labels` 命令一次性创建标准 labels。
+
 ## Skill 编写规范
 
 编写或维护 `.agents/skills/*/SKILL.md` 及其模板时，步骤编号遵循以下规则：
