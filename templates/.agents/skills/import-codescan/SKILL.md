@@ -1,43 +1,44 @@
 ---
 name: import-codescan
 description: >
-  导入 Code Scanning（CodeQL）告警并创建修复任务。
-  当用户要求导入 Code Scanning 告警时触发。参数：告警编号。
+  Import a Code Scanning (CodeQL) alert and create a remediation task.
+  Triggered when the user asks to import a Code Scanning alert.
+  Argument: alert number.
 ---
 
-# 导入 Code Scanning 告警
+# Import Code Scanning Alert
 
-导入指定的 Code Scanning（CodeQL）告警并创建修复任务。
+Import the specified Code Scanning (CodeQL) alert and create a remediation task.
 
-## 行为边界 / 关键规则
+## Boundary / Critical Rules
 
-- 本技能仅负责导入告警并创建任务骨架 —— 不直接修改业务代码或关闭告警
-- 不要自动提交。绝不自动执行 `git commit` 或 `git add`
-- 执行本技能后，你**必须**立即更新 task.md 中的任务状态
+- This skill only imports the alert and creates a task skeleton; it does not directly modify business code or dismiss the alert
+- Do NOT auto-commit. Never execute `git commit` or `git add` automatically
+- After executing this skill, you **must** immediately update task status in task.md
 
-## 执行流程
+## Execution Flow
 
-### 1. 获取告警信息
+### 1. Retrieve Alert Information
 
 ```bash
 gh api repos/{owner}/{repo}/code-scanning/alerts/<alert-number>
 ```
 
-提取关键信息：
-- `number`：告警编号
-- `state`：状态（open/dismissed/fixed）
-- `rule`：规则信息（id、severity、description、security_severity_level）
-- `tool`：扫描工具信息（name、version）
-- `most_recent_instance`：位置（path、start_line、end_line）、消息
-- `html_url`：GitHub 告警链接
+Extract key information:
+- `number`: alert number
+- `state`: state (`open` / `dismissed` / `fixed`)
+- `rule`: rule information (`id`, `severity`, `description`, `security_severity_level`)
+- `tool`: scanning tool information (`name`, `version`)
+- `most_recent_instance`: location (`path`, `start_line`, `end_line`) and message
+- `html_url`: GitHub alert link
 
-### 2. 创建任务目录和文件
+### 2. Create the Task Directory and File
 
-检查是否已存在该告警的任务。如果不存在，创建：
+Check whether a task for this alert already exists. If not, create one:
 
-目录：`.agent-workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+Directory: `.agent-workspace/active/TASK-{yyyyMMdd-HHmmss}/`
 
-任务元数据：
+Task metadata:
 ```yaml
 id: TASK-{yyyyMMdd-HHmmss}
 codescan_alert_number: <alert-number>
@@ -46,58 +47,58 @@ rule_id: <rule-id>
 tool: <tool-name>
 ```
 
-### 3. 更新任务状态
+### 3. Update Task Status
 
-获取当前时间：
+Get the current time:
 
 ```bash
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 task.md：`current_step` -> `requirement-analysis`。
-- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
+Update task.md: `current_step` -> `requirement-analysis`.
+- **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
   - {yyyy-MM-dd HH:mm:ss} — **Import Code Scanning Alert** by {agent} — Code Scanning alert #{alert-number} imported
   ```
 
-### 4. 告知用户
+### 4. Inform User
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
 
 ```
-Code Scanning 告警 #{alert-number} 已导入。
+Code Scanning alert #{alert-number} imported.
 
-告警信息：
-- 严重程度：{severity}
-- 规则：{rule-id}
-- 位置：{file-path}:{line-number}
+Alert information:
+- Severity: {severity}
+- Rule: {rule-id}
+- Location: {file-path}:{line-number}
 
-任务信息：
-- 任务 ID：{task-id}
+Task information:
+- Task ID: {task-id}
 
-下一步：
-  - Claude Code / OpenCode：/analyze-task {task-id}
-  - Gemini CLI：/agent-infra:analyze-task {task-id}
-  - Codex CLI：$analyze-task {task-id}
+Next step:
+  - Claude Code / OpenCode: /analyze-task {task-id}
+  - Gemini CLI: /{{project}}:analyze-task {task-id}
+  - Codex CLI: $analyze-task {task-id}
 ```
 
-## 注意事项
+## Notes
 
-1. **严重程度优先级**：Critical/High -> 立即处理。Medium -> 计划处理。Low -> 可延后。
-2. **范围**：本技能仅负责导入告警并创建任务；风险评估由 `analyze-task` 负责。
-3. **后续动作**：导入后先执行 `analyze-task`，分析完成后再决定修复或关闭。
+1. **Severity priority**: Critical/High -> handle immediately. Medium -> schedule handling. Low -> can be deferred.
+2. **Scope**: this skill only imports the alert and creates the task; risk assessment is handled by `analyze-task`.
+3. **Follow-up**: after import, run `analyze-task` first, then decide whether to fix or dismiss.
 
-## 完成检查清单
+## Completion Checklist
 
-- [ ] 获取并记录了告警关键信息
-- [ ] 创建或确认了对应的任务目录与任务文件
-- [ ] 更新了 task.md 中的 `current_step` 为 requirement-analysis
-- [ ] 更新了 task.md 中的 `updated_at` 为当前时间
-- [ ] 追加了 Activity Log 条目到 task.md
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
+- [ ] Retrieved and recorded the key alert information
+- [ ] Created or confirmed the corresponding task directory and task file
+- [ ] Updated `current_step` to requirement-analysis in task.md
+- [ ] Updated `updated_at` to the current time in task.md
+- [ ] Appended an Activity Log entry to task.md
+- [ ] Informed the user of the next step (must include all TUI command formats; do not filter)
 
-## 错误处理
+## Error Handling
 
-- 告警未找到：提示 "Code Scanning alert #{number} not found"
-- 告警已关闭：询问用户是否继续分析
-- 网络/权限错误：提示相应信息
+- Alert not found: output "Code Scanning alert #{number} not found"
+- Alert already closed: ask the user whether to continue with analysis
+- Network/permission error: output the corresponding error information

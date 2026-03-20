@@ -84,7 +84,7 @@ Do not create new type labels.
 ### 6. Sync `in:` Labels
 
 Extract affected modules from implementation reports first, or analysis as fallback:
-- prefer file paths listed under `## 修改文件` / `## 新建文件` in `implementation.md` and `implementation-r{N}.md`
+- prefer file paths listed under `## Modified Files`, especially `### New Files` / `### Modified Files`, in `implementation.md` and `implementation-r{N}.md`
 - if implementation reports do not exist yet, fall back to affected files from analysis
 
 For each file path:

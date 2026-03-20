@@ -1,67 +1,68 @@
 ---
 name: create-task
 description: >
-  根据用户的自然语言描述创建任务骨架。当用户描述一个新功能、Bug 或改进需求时触发。
-  唯一的产出是 task.md —— 不编写任何业务代码。参数：任务描述文本。
+  Create a task skeleton from the user's natural-language description.
+  Triggered when the user describes a new feature, bug, or improvement request.
+  The only output is task.md; do not write any business code. Argument: task description text.
 ---
 
-# 创建任务
+# Create Task
 
-## 行为边界 / 关键规则
+## Boundary / Critical Rules
 
-**本技能的唯一产出是 `task.md`。**
+**The only output of this skill is `task.md`.**
 
-- 不要编写、修改或创建任何业务代码或配置文件
-- 不要执行需求分析；分析由 `analyze-task` 独立完成
-- 不要直接实现所描述的功能
-- 不要跳过工作流直接进入计划/实现阶段
-- 仅执行：解析描述 -> 创建任务文件 -> 更新任务状态 -> 告知用户下一步
+- Do not write, modify, or create any business code or configuration files
+- Do not perform requirements analysis; analysis is handled separately by `analyze-task`
+- Do not directly implement the requested functionality
+- Do not skip the workflow and jump directly to planning or implementation
+- Only do this: parse the description -> create the task file -> update task status -> inform the user of the next step
 
-用户的描述是一个**待办事项**，而不是**立即执行的指令**。
+The user's description is a **work item**, not an **instruction to execute immediately**.
 
-执行本技能后，你**必须**立即更新 task.md 中的任务状态。
+After executing this skill, you **must** immediately update task status in task.md.
 
-## 执行步骤
+## Steps
 
-### 1. 解析用户描述
+### 1. Parse the User Description
 
-从自然语言描述中提取：
-- **任务标题**：简洁标题（最多 50 个字符）
-- **任务类型**：`feature` | `bugfix` | `refactor` | `docs` | `chore`（从描述推断）
-- **工作流**：`feature-development` | `bug-fix` | `refactoring`（从类型推断）
-- **详细描述**：整理后的用户原始描述
+Extract from the natural-language description:
+- **Task title**: a concise title (maximum 50 characters)
+- **Task type**: `feature` | `bugfix` | `refactor` | `docs` | `chore` (infer from the description)
+- **Workflow**: `feature-development` | `bug-fix` | `refactoring` (infer from the type)
+- **Detailed description**: the cleaned-up original user request
 
-如果描述不清晰，**先向用户确认**再继续。
+If the description is unclear, **ask the user to clarify first**.
 
-**类型推断规则**：
-- 包含 "add"、"new"、"support"、"implement" -> `feature`
-- 包含 "fix"、"resolve"、"bug"、"error" -> `bugfix`
-- 包含 "refactor"、"optimize"、"improve"、"clean up" -> `refactor`
-- 包含 "document"、"javadoc"、"comment"、"readme" -> `docs`
-- 其他 -> `chore`
+**Type inference rules**:
+- Contains "add", "new", "support", "implement" -> `feature`
+- Contains "fix", "resolve", "bug", "error" -> `bugfix`
+- Contains "refactor", "optimize", "improve", "clean up" -> `refactor`
+- Contains "document", "javadoc", "comment", "readme" -> `docs`
+- Anything else -> `chore`
 
-**工作流映射**：
+**Workflow mapping**:
 - `feature` / `docs` / `chore` -> `feature-development`
 - `bugfix` -> `bug-fix`
 - `refactor` -> `refactoring`
 
-### 2. 创建任务目录和文件
+### 2. Create the Task Directory and File
 
-获取当前时间戳：
+Get the current timestamp:
 
 ```bash
 date +%Y%m%d-%H%M%S
 ```
 
-- 创建任务目录：`.agent-workspace/active/TASK-{yyyyMMdd-HHmmss}/`
-- 使用 `.agents/templates/task.md` 模板创建任务文件：`task.md`
+- Create the task directory: `.agent-workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+- Use the `.agents/templates/task.md` template to create the task file: `task.md`
 
-**重要**：
-- 目录命名：`TASK-{yyyyMMdd-HHmmss}`（**必须**包含 `TASK-` 前缀）
-- 示例：`TASK-20260306-143022`
-- 任务 ID = 目录名
+**Important**:
+- Directory naming: `TASK-{yyyyMMdd-HHmmss}` (**must** include the `TASK-` prefix)
+- Example: `TASK-20260306-143022`
+- Task ID = directory name
 
-任务元数据（task.md YAML front matter）：
+Task metadata (`task.md` YAML front matter):
 ```yaml
 id: TASK-{yyyyMMdd-HHmmss}
 type: feature|bugfix|refactor|docs|chore
@@ -71,73 +72,73 @@ created_at: {yyyy-MM-dd HH:mm:ss}
 updated_at: {yyyy-MM-dd HH:mm:ss}
 created_by: human
 current_step: requirement-analysis
-assigned_to: {当前 AI 代理}
+assigned_to: {current AI agent}
 ```
 
-注意：`created_by` 为 `human`，因为任务来源于用户的描述。
+Note: `created_by` is `human` because the task comes from the user's description.
 
-### 3. 更新任务状态
+### 3. Update Task Status
 
-获取当前时间：
+Get the current time:
 
 ```bash
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 `.agent-workspace/active/{task-id}/task.md`：
-- `current_step`：requirement-analysis
-- `assigned_to`：{当前 AI 代理}
-- `updated_at`：{当前时间}
-- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
+Update `.agent-workspace/active/{task-id}/task.md`:
+- `current_step`: requirement-analysis
+- `assigned_to`: {current AI agent}
+- `updated_at`: {current time}
+- **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
   - {yyyy-MM-dd HH:mm:ss} — **Task Created** by {agent} — Task created from description
   ```
 
-### 4. 告知用户
+### 4. Inform User
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
 
-输出格式：
+Output format:
 ```
-任务已创建。
+Task created.
 
-任务信息：
-- 任务 ID：{task-id}
-- 标题：{title}
-- 类型：{type}
-- 工作流：{workflow}
+Task information:
+- Task ID: {task-id}
+- Title: {title}
+- Type: {type}
+- Workflow: {workflow}
 
-产出文件：
-- 任务文件：.agent-workspace/active/{task-id}/task.md
+Output file:
+- Task file: .agent-workspace/active/{task-id}/task.md
 
-下一步 - 执行需求分析：
-  - Claude Code / OpenCode：/analyze-task {task-id}
-  - Gemini CLI：/agent-infra:analyze-task {task-id}
-  - Codex CLI：$analyze-task {task-id}
+Next step - run requirements analysis:
+  - Claude Code / OpenCode: /analyze-task {task-id}
+  - Gemini CLI: /{{project}}:analyze-task {task-id}
+  - Codex CLI: $analyze-task {task-id}
 ```
 
-## 完成检查清单
+## Completion Checklist
 
-- [ ] 创建了任务文件 `.agent-workspace/active/{task-id}/task.md`
-- [ ] 更新了 task.md 中的 `current_step` 为 requirement-analysis
-- [ ] 更新了 task.md 中的 `updated_at` 为当前时间
-- [ ] 更新了 task.md 中的 `assigned_to`
-- [ ] 追加了 Activity Log 条目到 task.md
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
-- [ ] **没有修改任何业务代码或配置文件**（仅 task.md）
+- [ ] Created the task file `.agent-workspace/active/{task-id}/task.md`
+- [ ] Updated `current_step` to requirement-analysis in task.md
+- [ ] Updated `updated_at` to the current time in task.md
+- [ ] Updated `assigned_to` in task.md
+- [ ] Appended an Activity Log entry to task.md
+- [ ] Informed the user of the next step (must include all TUI command formats; do not filter)
+- [ ] **Did not modify any business code or configuration files** (only task.md)
 
-## 停止
+## STOP
 
-完成检查清单后，**立即停止**。不要继续执行计划、实现或任何后续步骤。
-等待用户执行 `analyze-task` 技能。
+After completing the checklist, **stop immediately**. Do not continue to planning, implementation, or any follow-up step.
+Wait for the user to run the `analyze-task` skill.
 
-## 注意事项
+## Notes
 
-1. **清晰度**：如果用户描述模糊或缺少关键信息，先要求澄清
-2. **与 import-issue 的区别**：`import-issue` 从 GitHub Issue 导入任务；`create-task` 从自由描述创建
-3. **工作流顺序**：创建任务后，必须先执行 `analyze-task`，再进入 `plan-task`
+1. **Clarity**: if the user description is vague or missing key information, ask for clarification first
+2. **Difference from `import-issue`**: `import-issue` imports from a GitHub Issue; `create-task` creates from a free-form description
+3. **Workflow order**: after creating a task, `analyze-task` must run before `plan-task`
 
-## 错误处理
+## Error Handling
 
-- 空描述：提示 "Please provide a task description"
-- 描述过于模糊：在创建任务之前提出澄清问题
+- Empty description: output "Please provide a task description"
+- Description too vague: ask clarification questions before creating the task

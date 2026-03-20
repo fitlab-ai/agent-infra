@@ -1,169 +1,170 @@
 ---
 name: analyze-task
 description: >
-  分析已有任务并输出需求分析文档，支持多轮分析产物（analysis.md / analysis-r{N}.md）。
-  当用户要求分析某个任务时触发。参数：task-id。
+  Analyze an existing task and output a requirements analysis document,
+  supporting multi-round artifacts (`analysis.md` / `analysis-r{N}.md`).
+  Triggered when the user asks to analyze a task. Argument: task-id.
 ---
 
-# 分析任务
+# Analyze Task
 
-## 行为边界 / 关键规则
+## Boundary / Critical Rules
 
-- 本技能仅产出需求分析文档（`analysis.md` 或 `analysis-r{N}.md`）—— 不修改任何业务代码
-- 严格基于 `task.md` 中已有的需求、上下文和来源信息展开分析
-- 执行本技能后，你**必须**立即更新 task.md 中的任务状态
+- This skill only outputs a requirements analysis document (`analysis.md` or `analysis-r{N}.md`) and does not modify any business code
+- Base the analysis strictly on the existing requirements, context, and source information in `task.md`
+- After executing this skill, you **must** immediately update task status in task.md
 
-## 执行步骤
+## Steps
 
-### 1. 验证前置条件
+### 1. Verify Prerequisites
 
-检查必要文件：
-- `.agent-workspace/active/{task-id}/task.md` - 任务文件
+Check required files:
+- `.agent-workspace/active/{task-id}/task.md` - Task file
 
-注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
+Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, for example `TASK-20260306-143022`
 
-如果缺少 `task.md`，提示用户先创建或导入任务。
+If `task.md` is missing, tell the user to create or import the task first.
 
-### 2. 确定分析轮次
+### 2. Determine the Analysis Round
 
-扫描 `.agent-workspace/active/{task-id}/` 目录中的分析产物文件：
-- 如果不存在 `analysis.md` 且不存在 `analysis-r*.md` → 本轮为第 1 轮，产出 `analysis.md`
-- 如果存在 `analysis.md` 且不存在 `analysis-r*.md` → 本轮为第 2 轮，产出 `analysis-r2.md`
-- 如果存在 `analysis-r{N}.md` → 本轮为第 N+1 轮，产出 `analysis-r{N+1}.md`
+Scan `.agent-workspace/active/{task-id}/` for analysis artifact files:
+- If neither `analysis.md` nor `analysis-r*.md` exists -> this is Round 1 and must create `analysis.md`
+- If `analysis.md` exists and no `analysis-r*.md` exists -> this is Round 2 and must create `analysis-r2.md`
+- If `analysis-r{N}.md` exists -> this is Round N+1 and must create `analysis-r{N+1}.md`
 
-记录：
-- `{analysis-round}`：本轮分析轮次
-- `{analysis-artifact}`：本轮分析产物文件名
+Record:
+- `{analysis-round}`: the current analysis round
+- `{analysis-artifact}`: the artifact filename for this round
 
-### 3. 阅读任务上下文
+### 3. Read Task Context
 
-仔细阅读 `task.md` 以理解：
-- 任务标题、描述和需求列表
-- 上下文信息（Issue、PR、分支、告警编号等）
-- 当前已知的受影响文件和约束
+Read `task.md` carefully to understand:
+- task title, description, and requirement list
+- context information (Issue, PR, branch, alert numbers, etc.)
+- currently known affected files and constraints
 
-如 `task.md` 包含以下来源字段，补充读取对应来源信息：
+If `task.md` contains these source fields, also read the corresponding source information:
 - `issue_number` - GitHub Issue
-- `codescan_alert_number` - Code Scanning 告警
-- `security_alert_number` - Dependabot 告警
+- `codescan_alert_number` - Code Scanning alert
+- `security_alert_number` - Dependabot alert
 
-### 4. 执行需求分析
+### 4. Perform Requirements Analysis
 
-遵循 `.agents/workflows/feature-development.yaml` 中的 `analysis` 步骤：
+Follow the `analysis` step in `.agents/workflows/feature-development.yaml`:
 
-**必要任务**（仅分析，不编写业务代码）：
-- [ ] 理解任务需求和目标
-- [ ] 搜索相关代码文件（**只读**）
-- [ ] 分析代码结构和影响范围
-- [ ] 识别潜在技术风险和依赖
-- [ ] 评估工作量和复杂度
+**Required tasks** (analysis only, no business code changes):
+- [ ] Understand the task requirements and goals
+- [ ] Search related code files (**read-only**)
+- [ ] Analyze code structure and impact scope
+- [ ] Identify potential technical risks and dependencies
+- [ ] Assess effort and complexity
 
-### 5. 输出分析文档
+### 5. Output Analysis Document
 
-创建 `.agent-workspace/active/{task-id}/{analysis-artifact}`。
+Create `.agent-workspace/active/{task-id}/{analysis-artifact}`.
 
-## 输出模板
+## Output Template
 
 ```markdown
-# 需求分析报告
+# Requirements Analysis Report
 
-- **分析轮次**：Round {analysis-round}
-- **产物文件**：`{analysis-artifact}`
+- **Analysis round**: Round {analysis-round}
+- **Artifact file**: `{analysis-artifact}`
 
-## 需求来源
+## Requirement Source
 
-**来源类型**：{用户描述 / GitHub Issue / Code Scanning / Dependabot / 其他}
-**来源摘要**：
-> {任务来源或关键上下文}
+**Source type**: {User description / GitHub Issue / Code Scanning / Dependabot / Other}
+**Source summary**:
+> {Task source or key context}
 
-## 需求理解
-{用自己的话重述需求以确认理解}
+## Requirement Understanding
+{Restate the requirement in your own words to confirm understanding}
 
-## 相关文件
-- `{file-path}:{line-number}` - {描述}
+## Related Files
+- `{file-path}:{line-number}` - {Description}
 
-## 影响评估
-**直接影响**：
-- {受影响的模块和文件}
+## Impact Assessment
+**Direct impact**:
+- {Affected modules and files}
 
-**间接影响**：
-- {可能受影响的其他部分}
+**Indirect impact**:
+- {Other parts that may be affected}
 
-## 技术风险
-- {风险描述和缓解思路}
+## Technical Risks
+- {Risk description and mitigation idea}
 
-## 依赖关系
-- {需要的依赖和与其他模块的协调}
+## Dependencies
+- {Required dependencies and coordination with other modules}
 
-## 工作量和复杂度评估
-- 复杂度：{高/中/低}
-- 风险等级：{高/中/低}
+## Effort and Complexity Assessment
+- Complexity: {High/Medium/Low}
+- Risk level: {High/Medium/Low}
 ```
 
-### 6. 更新任务状态
+### 6. Update Task Status
 
-获取当前时间：
+Get the current time:
 
 ```bash
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 `.agent-workspace/active/{task-id}/task.md`：
-- `current_step`：requirement-analysis
-- `assigned_to`：{当前 AI 代理}
-- `updated_at`：{当前时间}
-- 记录本轮分析产物：`{analysis-artifact}`（Round `{analysis-round}`）
-- 如任务模板包含 `## 分析` 段落，更新为指向 `{analysis-artifact}` 的链接
-- 在工作流进度中标记 requirement-analysis 为已完成，并注明实际轮次（如果任务模板支持）
-- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
+Update `.agent-workspace/active/{task-id}/task.md`:
+- `current_step`: requirement-analysis
+- `assigned_to`: {current AI agent}
+- `updated_at`: {current time}
+- Record the analysis artifact for this round: `{analysis-artifact}` (Round `{analysis-round}`)
+- If the task template contains a `## Analysis` section, update it to link to `{analysis-artifact}`
+- Mark requirement-analysis as complete in workflow progress and include the actual round when the task template supports it
+- **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
   - {yyyy-MM-dd HH:mm:ss} — **Requirement Analysis (Round {N})** by {agent} — Analysis completed → {analysis-artifact}
   ```
 
-### 7. 告知用户
+### 7. Inform User
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
 
-输出格式：
+Output format:
 ```
-任务 {task-id} 分析完成。
+Analysis complete for task {task-id}.
 
-摘要：
-- 分析轮次：Round {analysis-round}
-- 相关文件：{数量}
-- 风险等级：{评估}
+Summary:
+- Analysis round: Round {analysis-round}
+- Related files: {count}
+- Risk level: {assessment}
 
-产出文件：
-- 分析报告：.agent-workspace/active/{task-id}/{analysis-artifact}
+Output file:
+- Analysis report: .agent-workspace/active/{task-id}/{analysis-artifact}
 
-下一步 - 设计技术方案：
-  - Claude Code / OpenCode：/plan-task {task-id}
-  - Gemini CLI：/agent-infra:plan-task {task-id}
-  - Codex CLI：$plan-task {task-id}
+Next step - create technical plan:
+  - Claude Code / OpenCode: /plan-task {task-id}
+  - Gemini CLI: /{{project}}:plan-task {task-id}
+  - Codex CLI: $plan-task {task-id}
 ```
 
-## 完成检查清单
+## Completion Checklist
 
-- [ ] 阅读并理解了任务文件和来源信息
-- [ ] 创建了分析文档 `.agent-workspace/active/{task-id}/{analysis-artifact}`
-- [ ] 更新了 task.md 中的 `current_step` 为 requirement-analysis
-- [ ] 更新了 task.md 中的 `updated_at` 为当前时间
-- [ ] 更新了 task.md 中的 `assigned_to`
-- [ ] 追加了 Activity Log 条目到 task.md
-- [ ] 在工作流进度中标记了 requirement-analysis 为已完成
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
-- [ ] **没有修改任何业务代码**
+- [ ] Read and understood the task file and source information
+- [ ] Created analysis document `.agent-workspace/active/{task-id}/{analysis-artifact}`
+- [ ] Updated `current_step` to requirement-analysis in task.md
+- [ ] Updated `updated_at` to the current time in task.md
+- [ ] Updated `assigned_to` in task.md
+- [ ] Appended an Activity Log entry to task.md
+- [ ] Marked requirement-analysis as complete in workflow progress
+- [ ] Informed the user of the next step (must include all TUI command formats; do not filter)
+- [ ] **Did not modify any business code**
 
-## 停止
+## STOP
 
-完成检查清单后，**立即停止**。等待用户审查分析结果并手动调用 `plan-task` 技能。
+After completing the checklist, **stop immediately**. Wait for the user to review the analysis result and manually invoke the `plan-task` skill.
 
-## 注意事项
+## Notes
 
-1. **前置条件**：必须已存在任务文件 `task.md`
-2. **多轮分析**：需求变化或已有分析需要修订时，使用 `analysis-r{N}.md`
-3. **职责单一**：本技能只负责分析，不设计方案、不实现代码
+1. **Prerequisite**: the task file `task.md` must already exist
+2. **Multi-round analysis**: use `analysis-r{N}.md` when requirements change or an existing analysis needs revision
+3. **Single responsibility**: this skill only handles analysis, not planning or implementation
 
-## 错误处理
+## Error Handling
 
-- 任务未找到：提示 "Task {task-id} not found, please check the task ID"
+- Task not found: output "Task {task-id} not found, please check the task ID"
