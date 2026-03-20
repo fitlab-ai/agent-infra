@@ -33,22 +33,29 @@ git rev-parse v<version>
 git rev-parse v<prev-version>
 ```
 
-### 步骤 3：参考历史发布说明格式
+### 步骤 3：参考历史发布说明格式与分类
 
-获取最近一次已发布的 Release Note 作为格式参考：
+获取最近多条已发布的 Release Note 作为格式参考，并参考预定义的完整分类清单：
 
 ```bash
-# 获取最近的非草稿 Release 标签
-gh release list --limit 5 --json tagName,isDraft,isPrerelease \
-  --jq '[.[] | select(.isDraft == false and .isPrerelease == false)][0].tagName'
-
-# 获取该 Release 的 body
-gh release view <latest-tag> --json body -q '.body'
+# Part A: 逐条获取这 3 条 Release 的 body
+for tag in $(gh release list --limit 10 --json tagName,isDraft,isPrerelease \
+  --jq '[.[] | select(.isDraft == false and .isPrerelease == false)] | .[0:3] | .[].tagName'); do
+  gh release view "$tag" --json body -q '.body'
+done
 ```
 
+**Part B：完整分类清单**
+- `🆕 Feature`
+- `✨ Enhancement`
+- `✅ Bugfix`
+- `📚 Documentation`
+
 **用途**：
-- 分析历史发布说明的章节结构、标题风格、emoji 使用、条目格式
-- 后续步骤 7 生成发布说明时，**必须**优先遵循历史格式，保持版本间的一致性
+- Part A：分析最近 3 条历史发布说明的章节结构、标题风格、emoji 使用、条目格式
+- Part B：提供静态完整分类清单，确保后续生成时不遗漏已有分类
+- 该静态清单用于确保变更分类时不遗漏已有类别名称；若当前版本无该类变更，仍按步骤 7 的格式规则省略空分类
+- 后续步骤 7 生成发布说明时，**必须**同时参考步骤 3 的历史格式风格和完整分类清单，保持版本间的一致性
 - 如果没有历史发布说明，则使用步骤 7 中定义的默认格式
 
 ### 步骤 4：收集已合并的 PR
@@ -93,7 +100,7 @@ gh issue view <N> --json number,title,labels,url
 
 ### 步骤 7：生成发布说明
 
-**优先使用步骤 3 中获取的历史格式**。如果存在历史发布说明，严格沿用其章节结构、标题风格（含 emoji）、条目格式和双语布局。
+**优先使用步骤 3 中获取的历史格式风格，并确保覆盖步骤 3 列出的所有分类。** 如果存在历史发布说明，严格沿用其章节结构、标题风格（含 emoji）、条目格式和双语布局。
 
 如果没有历史发布说明，使用以下默认格式化为 Markdown：
 

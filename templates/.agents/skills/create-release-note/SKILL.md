@@ -34,22 +34,29 @@ git rev-parse v<version>
 git rev-parse v<prev-version>
 ```
 
-### Step 3: Reference Historical Release Notes Format
+### Step 3: Reference Historical Release Notes Format and Categories
 
-Fetch the most recent published release notes as a format reference:
+Fetch multiple published release notes as format references, then use a predefined complete category list:
 
 ```bash
-# Get the latest non-draft release tag
-gh release list --limit 5 --json tagName,isDraft,isPrerelease \
-  --jq '[.[] | select(.isDraft == false and .isPrerelease == false)][0].tagName'
-
-# Get the release body
-gh release view <latest-tag> --json body -q '.body'
+# Part A: Fetch the body for each of the 3 releases
+for tag in $(gh release list --limit 10 --json tagName,isDraft,isPrerelease \
+  --jq '[.[] | select(.isDraft == false and .isPrerelease == false)] | .[0:3] | .[].tagName'); do
+  gh release view "$tag" --json body -q '.body'
+done
 ```
 
+**Part B: Complete Category List**
+- `🆕 Feature`
+- `✨ Enhancement`
+- `✅ Bugfix`
+- `📚 Documentation`
+
 **Purpose**:
-- Analyze the section structure, heading style, emoji usage, and item format of historical release notes
-- When generating release notes in Step 7, **must** follow the historical format to maintain consistency across versions
+- Part A: Analyze the section structure, heading style, emoji usage, and item format from the latest 3 historical release notes
+- Part B: Provide a static complete category list so no existing category is omitted
+- This static list ensures existing category names are not missed during classification; if the current release has no entries for a category, Step 7 still omits the empty section
+- When generating release notes in Step 7, **must** follow both the historical format style and the full category list gathered in Step 3
 - If no historical release notes exist, use the default format defined in Step 7
 
 ### Step 4: Collect Merged PRs
@@ -94,7 +101,7 @@ gh issue view <N> --json number,title,labels,url
 
 ### Step 7: Generate Release Notes
 
-**Prioritize the historical format obtained in Step 3.** If historical release notes exist, strictly follow their section structure, heading style (including emojis), item format, and bilingual layout.
+**Prioritize the historical format style obtained in Step 3 and ensure all categories listed in Step 3 are covered.** If historical release notes exist, strictly follow their section structure, heading style (including emojis), item format, and bilingual layout.
 
 If no historical release notes exist, use the following default Markdown format:
 
