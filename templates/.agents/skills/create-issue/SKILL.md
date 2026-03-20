@@ -62,15 +62,18 @@ Check the project templates and ignore `config.yml`:
 rg --files .github/ISSUE_TEMPLATE -g '*.yml' -g '!config.yml'
 ```
 
-If template files exist, search the filename or top-level `name:` field using these keywords:
+If template files exist, read the top-level `name:` field from each template and build a candidate list. Use the task title and description to choose the most semantically appropriate template from that list.
 
-| task.md type | Match keywords |
-|---|---|
-| `bug`, `bugfix` | `bug` |
-| `feature` | `feature` |
-| `enhancement` | `feature`, `enhancement` |
-| `docs`, `documentation` | `documentation`, `doc` |
-| anything else | `other` |
+Example candidate list:
+- `bug_report.yml` - a bug-focused template
+- `question.yml` - a question or support template
+- `feature_request.yml` - a feature-focused template
+- `documentation.yml` - a documentation-focused template
+- `other.yml` - a general fallback template
+
+If there is no clearly matching template, choose the closest one.
+
+These filenames are illustrative only; use the actual templates present in the target project.
 
 If there is no template, no suitable match, or YAML parsing fails, go directly to the **3c fallback path**.
 
@@ -172,16 +175,55 @@ issue_number="${issue_url##*/}"
 
 If `{issue-type}` has been determined, set the Issue Type after creation on a best-effort basis:
 
+Get repository information first because the later `in:` label step can reuse it:
+
 ```bash
 repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 owner="${repo%%/*}"
-gh api "orgs/$owner/issue-types" --jq '.[].name'
-gh api "repos/$repo/issues/{issue-number}" -X PATCH -f type="{issue-type}"
 ```
+
+Query the organization's available Issue Types:
+
+```bash
+gh api "orgs/$owner/issue-types" --jq '.[].name'
+```
+
+If the query succeeds and `{issue-type}` appears in the returned list, set it:
+
+```bash
+gh api "repos/$repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent
+```
+
+Verify the result:
+
+```bash
+gh api "repos/$repo/issues/{issue-number}" --jq '.type.name // empty'
+```
+
+If the verification result matches `{issue-type}`, record `Issue Type: {issue-type}`; otherwise record `Issue Type: failed to set`.
+
+#### Add `in:` labels
+
+Get all repository labels with the `in:` prefix:
+
+```bash
+gh label list --search "in:" --limit 50 --json name --jq '.[].name'
+```
+
+If no `in:` labels exist, skip this step.
+
+If `in:` labels exist, use the task context (title, description, and affected file list) to judge which labels are relevant. For each relevant label, run:
+
+```bash
+gh issue edit {issue-number} --add-label "in: {module}"
+```
+
+Record all successfully added `in:` labels. If none are relevant, record `in: labels: skipped (no relevant labels)`.
 
 Tolerance requirements:
 - if `orgs/$owner/issue-types` returns `404`, the repo owner is not an organization, or Issue Types are not enabled, skip this without failing the create flow
 - if `{issue-type}` is not in the available list, skip it
+- if adding an `in:` label fails, skip it and record the failure without blocking Issue creation
 - if the milestone name is invalid or unavailable, warn and skip it instead of aborting the whole Issue creation flow
 
 ### 5. Update Task Status
@@ -212,7 +254,8 @@ Issue details:
 - Number: #{issue-number}
 - URL: {issue-url}
 - Labels: {applied-labels or skipped}
-- Issue Type: {issue-type or skipped}
+- in: Labels: {applied-in-labels or skipped}
+- Issue Type: {issue-type | failed to set | skipped}
 - Milestone: {milestone or skipped}
 
 Output:
@@ -231,6 +274,7 @@ Next step - sync task progress to the Issue:
 - [ ] Used template structure when available, otherwise used the fallback format
 - [ ] Built the Issue title and body from `task.md` only
 - [ ] Handled `type:` / Issue Type and `milestone` when available
+- [ ] Processed `in:` labels using LLM relevance judgment
 - [ ] Recorded `issue_number` in task.md
 - [ ] Updated `updated_at` in task.md
 - [ ] Appended an Activity Log entry to task.md
@@ -248,6 +292,7 @@ After completing the checklist, **stop immediately**. Do not sync detailed Issue
 3. **Label tolerance**: if standard labels are not initialized, skipping the label is acceptable and should not block Issue creation
 4. **Template tolerance**: if a template is missing, unmatched, or its YAML is invalid, fall back to the simple body format instead of failing the whole create flow
 5. **Issue Type / Milestone tolerance**: if Issue Types are unavailable, the target type is missing, or the milestone is unavailable, skip that part and continue creating the Issue
+6. **`in:` label tolerance**: if adding an `in:` label fails, skip it without blocking Issue creation
 
 ## Error Handling
 

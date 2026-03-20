@@ -34,12 +34,13 @@ Extract from the natural-language description:
 
 If the description is unclear, **ask the user to clarify first**.
 
-**Type inference rules**:
-- Contains "add", "new", "support", "implement" -> `feature`
-- Contains "fix", "resolve", "bug", "error" -> `bugfix`
-- Contains "refactor", "optimize", "improve", "clean up" -> `refactor`
-- Contains "document", "javadoc", "comment", "readme" -> `docs`
-- Anything else -> `chore`
+**Type inference**: choose the best matching type from the following candidates based on the semantics of the task description:
+
+- `feature` - new functionality or capability
+- `bugfix` - defect or error fix
+- `refactor` - refactoring, optimization, or code improvement
+- `docs` - documentation-related work
+- `chore` - other miscellaneous work
 
 **Workflow mapping**:
 - `feature` / `docs` / `chore` -> `feature-development`

@@ -33,12 +33,13 @@ description: >
 
 如果描述不清晰，**先向用户确认**再继续。
 
-**类型推断规则**：
-- 包含 "add"、"new"、"support"、"implement" -> `feature`
-- 包含 "fix"、"resolve"、"bug"、"error" -> `bugfix`
-- 包含 "refactor"、"optimize"、"improve"、"clean up" -> `refactor`
-- 包含 "document"、"javadoc"、"comment"、"readme" -> `docs`
-- 其他 -> `chore`
+**类型推断**：根据任务描述的语义，从以下候选值中选择最匹配的类型：
+
+- `feature` — 新增功能、新特性
+- `bugfix` — 修复缺陷、错误
+- `refactor` — 重构、优化、改进
+- `docs` — 文档相关
+- `chore` — 其他杂项任务
 
 **工作流映射**：
 - `feature` / `docs` / `chore` -> `feature-development`

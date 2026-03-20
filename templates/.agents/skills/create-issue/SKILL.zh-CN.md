@@ -62,15 +62,18 @@ Issue 内容规则：
 rg --files .github/ISSUE_TEMPLATE -g '*.yml' -g '!config.yml'
 ```
 
-如果存在模板文件，按任务类型优先在模板文件名或顶层 `name:` 字段中搜索以下关键词：
+如果存在模板文件，读取每个模板的顶层 `name:` 字段，构建候选列表。结合任务标题和描述，从候选列表中选择最匹配的模板。
 
-| task.md type | 匹配关键词 |
-|---|---|
-| `bug`、`bugfix` | `bug` |
-| `feature` | `feature` |
-| `enhancement` | `feature`、`enhancement` |
-| `docs`、`documentation` | `documentation`、`doc` |
-| 其他 | `other` |
+示例候选列表：
+- `bug_report.yml` — Bug 类模板
+- `question.yml` — 问题咨询类模板
+- `feature_request.yml` — 功能请求类模板
+- `documentation.yml` — 文档问题类模板
+- `other.yml` — 通用兜底模板
+
+如果没有明确匹配的模板，选择最接近的一个。
+
+以上文件名仅为示例，应以目标项目实际存在的模板为准。
 
 如果没有模板、没有匹配到合适模板，或模板 YAML 解析失败，则直接进入 **3c fallback / 兜底路径**。
 
@@ -172,16 +175,55 @@ issue_number="${issue_url##*/}"
 
 如果已经确定了 `{issue-type}`，在创建后以 best-effort 方式设置 Issue Type：
 
+先获取仓库信息，后续 `in:` label 步骤也会复用：
+
 ```bash
 repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 owner="${repo%%/*}"
-gh api "orgs/$owner/issue-types" --jq '.[].name'
-gh api "repos/$repo/issues/{issue-number}" -X PATCH -f type="{issue-type}"
 ```
+
+查询组织可用的 Issue Types：
+
+```bash
+gh api "orgs/$owner/issue-types" --jq '.[].name'
+```
+
+如果查询成功且 `{issue-type}` 在返回列表中，执行设置：
+
+```bash
+gh api "repos/$repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent
+```
+
+验证设置结果：
+
+```bash
+gh api "repos/$repo/issues/{issue-number}" --jq '.type.name // empty'
+```
+
+如果验证返回的名称与 `{issue-type}` 一致，记录 `Issue Type: {issue-type}`；否则记录 `Issue Type: failed to set`。
+
+#### 添加 `in:` labels
+
+获取仓库中所有 `in:` 前缀的 labels：
+
+```bash
+gh label list --search "in:" --limit 50 --json name --jq '.[].name'
+```
+
+如果没有 `in:` labels，跳过此步骤。
+
+如果存在 `in:` labels，结合任务上下文（标题、描述、受影响文件列表）判断每个 `in:` label 是否与当前任务相关。对判断为相关的 label，执行：
+
+```bash
+gh issue edit {issue-number} --add-label "in: {module}"
+```
+
+记录所有成功添加的 `in:` labels。如果没有判断为相关的 label，记录 `in: labels: skipped (no relevant labels)`。
 
 容错要求：
 - 如果 `orgs/$owner/issue-types` 返回 `404`、仓库 owner 不是组织，或仓库未启用 Issue Types，则跳过，不要让创建失败
 - 如果目标 `{issue-type}` 不在可用列表中，则跳过
+- `in:` label 添加失败时，跳过并记录，不阻止 Issue 创建流程
 - Milestone 不存在或名称无效时，也应提示并跳过，而不是中断整个 Issue 创建流程
 
 ### 5. 更新任务状态
@@ -212,7 +254,8 @@ Issue 信息：
 - 编号：#{issue-number}
 - URL：{issue-url}
 - Labels：{applied-labels 或 skipped}
-- Issue Type：{issue-type 或 skipped}
+- in: Labels：{applied-in-labels 或 skipped}
+- Issue Type：{issue-type | failed to set | skipped}
 - Milestone：{milestone 或 skipped}
 
 产出：
@@ -231,6 +274,7 @@ Issue 信息：
 - [ ] 有模板时按模板结构生成正文；无模板时走 fallback / 兜底格式
 - [ ] Issue 标题和正文仅来自 task.md
 - [ ] 如可用，处理了 `type:` / Issue Type 和 `milestone`
+- [ ] 处理了 `in:` labels（LLM 判断关联性）
 - [ ] 在 task.md 中记录了 `issue_number`
 - [ ] 更新了 task.md 中的 `updated_at`
 - [ ] 追加了 Activity Log 条目到 task.md
@@ -248,6 +292,7 @@ Issue 信息：
 3. **Label 容错**：标准 label 未初始化时，可以跳过 label，但不要阻止 Issue 创建
 4. **模板容错**：模板缺失、匹配失败或 YAML 异常时，退回 fallback / 兜底正文，不要让整个创建失败
 5. **Issue Type / Milestone 容错**：Issue Type 未启用、类型不存在或 milestone 不可用时，跳过该项并继续创建
+6. **in: Label 容错**：`in:` label 添加失败时跳过，不阻止 Issue 创建
 
 ## 错误处理
 
