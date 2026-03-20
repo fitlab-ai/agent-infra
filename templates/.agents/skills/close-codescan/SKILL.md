@@ -1,122 +1,123 @@
 ---
 name: close-codescan
 description: >
-  关闭 Code Scanning（CodeQL）告警并提供有据可查的理由。
-  当用户要求关闭 Code Scanning 告警时触发。参数：告警编号。
+  Dismiss a Code Scanning (CodeQL) alert with a documented justification.
+  Triggered when the user asks to dismiss a Code Scanning alert.
+  Argument: alert number.
 ---
 
-# 关闭 Code Scanning 告警
+# Dismiss Code Scanning Alert
 
-关闭指定的 Code Scanning（CodeQL）告警并记录合理的关闭理由。
+Dismiss the specified Code Scanning (CodeQL) alert and record a justified reason.
 
-## 执行流程
+## Execution Flow
 
-### 1. 获取告警信息
+### 1. Retrieve Alert Information
 
 ```bash
 gh api repos/{owner}/{repo}/code-scanning/alerts/<alert-number>
 ```
 
-验证告警处于 `open` 状态。如果已被关闭/修复，告知用户并退出。
+Verify that the alert is in the `open` state. If it is already dismissed or fixed, inform the user and exit.
 
-### 2. 展示告警详情
-
-```
-Code Scanning 告警 #{alert-number}
-
-严重程度：{security_severity_level}
-规则：{rule.id} - {rule.description}
-扫描工具：{tool.name}
-位置：{location.path}:{location.start_line}
-消息：{message}
-```
-
-### 3. 询问关闭理由
-
-提示用户选择理由：
-
-1. **误报 (False Positive)** - CodeQL 规则误判；代码不存在此安全问题
-2. **不会修复 (Won't Fix)** - 已知问题但基于架构或业务原因不予修复
-3. **测试代码 (Used in Tests)** - 仅在测试代码中出现，不影响生产环境安全
-4. **取消** - 不关闭告警
-
-### 4. 要求详细说明
-
-如果用户选择关闭（非取消），要求提供详细说明：
-- 最少 20 个字符
-- 必须清楚说明为什么可以安全关闭该告警
-- 如果是误报，说明为什么代码不存在该安全问题
-- 如果是不修复，说明技术或业务原因
-
-### 5. 最终确认
+### 2. Show Alert Details
 
 ```
-即将关闭 Code Scanning 告警 #{alert-number}：
+Code Scanning alert #{alert-number}
 
-规则：{rule.id}
-位置：{location.path}:{location.start_line}
-原因：{选择的理由}
-说明：{用户的说明}
-
-确认？(y/N)
+Severity: {security_severity_level}
+Rule: {rule.id} - {rule.description}
+Scanner: {tool.name}
+Location: {location.path}:{location.start_line}
+Message: {message}
 ```
 
-### 6. 执行关闭
+### 3. Ask for the Dismissal Reason
+
+Ask the user to choose a reason:
+
+1. **False Positive** - the CodeQL rule misfired and the code does not contain the security issue
+2. **Won't Fix** - the issue is known but will not be fixed due to architectural or business reasons
+3. **Used in Tests** - the issue appears only in test code and does not affect production security
+4. **Cancel** - do not dismiss the alert
+
+### 4. Require a Detailed Explanation
+
+If the user chooses to dismiss the alert (not cancel), require a detailed explanation:
+- at least 20 characters
+- must clearly explain why the alert can be safely dismissed
+- if it is a false positive, explain why the code does not contain the issue
+- if it is won't fix, explain the technical or business reason
+
+### 5. Final Confirmation
+
+```
+About to dismiss Code Scanning alert #{alert-number}:
+
+Rule: {rule.id}
+Location: {location.path}:{location.start_line}
+Reason: {selected reason}
+Explanation: {user explanation}
+
+Confirm? (y/N)
+```
+
+### 6. Execute the Dismissal
 
 ```bash
 gh api --method PATCH \
   repos/{owner}/{repo}/code-scanning/alerts/<alert-number> \
   -f state=dismissed \
   -f dismissed_reason="{api-reason}" \
-  -f dismissed_comment="{用户的说明}"
+  -f dismissed_comment="{user explanation}"
 ```
 
-**API reason 映射**（按 GitHub Code Scanning API）：
-- 误报 -> `false positive`
-- 不会修复 -> `won't fix`
-- 测试代码 -> `used in tests`
+**API reason mapping** (per the GitHub Code Scanning API):
+- False Positive -> `false positive`
+- Won't Fix -> `won't fix`
+- Used in Tests -> `used in tests`
 
-### 7. 记录到任务（如存在）
+### 7. Record in the Task (If Any)
 
-如果有关联任务（搜索 `codescan_alert_number: <alert-number>`）：
-获取当前时间：
+If a related task exists (search for `codescan_alert_number: <alert-number>`):
+Get the current time:
 
 ```bash
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-- 添加关闭记录到 task.md
-- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
+- Add the dismissal record to task.md
+- **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
   - {yyyy-MM-dd HH:mm:ss} — **Alert Closed** by {agent} — Code Scanning alert #{alert-number} dismissed: {reason}
   ```
-- 归档任务
+- Archive the task
 
-### 8. 告知用户
+### 8. Inform User
 
 ```
-Code Scanning 告警 #{alert-number} 已关闭。
+Code Scanning alert #{alert-number} dismissed.
 
-规则：{rule.id}
-位置：{location.path}:{location.start_line}
-原因：{reason}
-说明：{explanation}
+Rule: {rule.id}
+Location: {location.path}:{location.start_line}
+Reason: {reason}
+Explanation: {explanation}
 
-查看：{html_url}
+View: {html_url}
 
-注意：如有需要，可在 GitHub 上重新打开。
+Note: it can be reopened on GitHub if necessary.
 ```
 
-## 注意事项
+## Notes
 
-1. **谨慎处理高严重程度告警**：Critical/High 告警需要充分分析。建议先执行 import-codescan + analyze-task。
-2. **真实的理由**：关闭记录保存在 GitHub 中，可能会被审计。
-3. **定期复查**：已关闭的告警应定期复查。
-4. **优先修复**：关闭应作为最后手段。
+1. **Handle high-severity alerts carefully**: Critical/High alerts require thorough analysis. Prefer `import-codescan` + `analyze-task` first.
+2. **Use truthful reasons**: dismissal records are stored in GitHub and may be audited.
+3. **Review periodically**: dismissed alerts should be re-evaluated over time.
+4. **Fix first**: dismissal should be the last resort.
 
-## 错误处理
+## Error Handling
 
-- 告警未找到：提示 "Code Scanning alert #{number} not found"
-- 已关闭：提示 "Alert #{number} is already {state}"
-- 权限错误：提示 "No permission to modify alerts"
-- 用户取消：提示 "Cancellation acknowledged"
+- Alert not found: output "Code Scanning alert #{number} not found"
+- Already closed: output "Alert #{number} is already {state}"
+- Permission error: output "No permission to modify alerts"
+- User canceled: output "Cancellation acknowledged"

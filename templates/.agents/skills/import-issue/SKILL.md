@@ -1,46 +1,46 @@
 ---
 name: import-issue
 description: >
-  从 GitHub Issue 导入并创建任务文件。
-  当用户要求导入某个 Issue 时触发。参数：issue 编号。
+  Import from a GitHub Issue and create a task file.
+  Triggered when the user asks to import an Issue. Argument: issue number.
 ---
 
-# 导入 Issue
+# Import Issue
 
-导入指定的 GitHub Issue 并创建任务。参数：issue 编号。
+Import the specified GitHub Issue and create a task. Argument: issue number.
 
-## 行为边界 / 关键规则
+## Boundary / Critical Rules
 
-- 本技能的唯一产出是 `task.md`
-- 不要编写或修改业务代码。仅做导入
-- 执行本技能后，你**必须**立即更新任务状态
+- The only output is `task.md`
+- Do not write or modify business code; import only
+- After executing this skill, you **must** immediately update task status
 
-## 执行流程
+## Execution Flow
 
-### 1. 获取 Issue 信息
+### 1. Retrieve Issue Information
 
 ```bash
 gh issue view <issue-number> --json number,title,body,labels
 ```
 
-提取：issue 编号、标题、描述、标签。
+Extract: issue number, title, description, and labels.
 
-### 2. 检查已有任务
+### 2. Check for an Existing Task
 
-搜索 `.agent-workspace/active/` 中是否已有链接到此 Issue 的任务。
-- 如果找到，询问用户是重新导入还是继续使用现有任务
-- 如果未找到，创建新任务
+Search `.agent-workspace/active/` for an existing task linked to this Issue.
+- If found, ask the user whether to re-import or continue with the existing task
+- If not found, create a new task
 
-### 3. 创建任务目录和文件
+### 3. Create the Task Directory and File
 
 ```bash
 date +%Y%m%d-%H%M%S
 ```
 
-- 创建目录：`.agent-workspace/active/TASK-{yyyyMMdd-HHmmss}/`
-- 使用 `.agents/templates/task.md` 模板创建 `task.md`
+- Create the directory: `.agent-workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+- Use the `.agents/templates/task.md` template to create `task.md`
 
-任务元数据：
+Task metadata:
 ```yaml
 id: TASK-{yyyyMMdd-HHmmss}
 issue_number: <issue-number>
@@ -51,69 +51,69 @@ created_at: {yyyy-MM-dd HH:mm:ss}
 updated_at: {yyyy-MM-dd HH:mm:ss}
 created_by: human
 current_step: requirement-analysis
-assigned_to: {当前 AI 代理}
+assigned_to: {current AI agent}
 ```
 
-### 4. 更新任务状态
+### 4. Update Task Status
 
-获取当前时间：
+Get the current time:
 
 ```bash
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 `.agent-workspace/active/{task-id}/task.md`：
-- `current_step`：requirement-analysis
-- `assigned_to`：{当前 AI 代理}
-- `updated_at`：{当前时间}
-- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
+Update `.agent-workspace/active/{task-id}/task.md`:
+- `current_step`: requirement-analysis
+- `assigned_to`: {current AI agent}
+- `updated_at`: {current time}
+- **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
   - {yyyy-MM-dd HH:mm:ss} — **Import Issue** by {agent} — Issue #{number} imported
   ```
 
-### 5. 告知用户
+### 5. Inform User
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
 
 ```
-Issue #{number} 已导入。
+Issue #{number} imported.
 
-任务信息：
-- 任务 ID：{task-id}
-- 标题：{title}
-- 工作流：{workflow}
+Task information:
+- Task ID: {task-id}
+- Title: {title}
+- Workflow: {workflow}
 
-产出文件：
-- 任务文件：.agent-workspace/active/{task-id}/task.md
+Output file:
+- Task file: .agent-workspace/active/{task-id}/task.md
 
-下一步 - 执行需求分析：
-  - Claude Code / OpenCode：/analyze-task {task-id}
-  - Gemini CLI：/agent-infra:analyze-task {task-id}
-  - Codex CLI：$analyze-task {task-id}
+Next step - run requirements analysis:
+  - Claude Code / OpenCode: /analyze-task {task-id}
+  - Gemini CLI: /{{project}}:analyze-task {task-id}
+  - Codex CLI: $analyze-task {task-id}
 ```
 
-## 完成检查清单
+## Completion Checklist
 
-- [ ] 创建了任务文件 `.agent-workspace/active/{task-id}/task.md`
-- [ ] 在 task.md 中记录了 issue_number
-- [ ] 更新了 `current_step` 为 requirement-analysis
-- [ ] 更新了 `updated_at` 为当前时间
-- [ ] 追加了 Activity Log 条目到 task.md
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
-- [ ] **没有修改任何业务代码**
+- [ ] Created the task file `.agent-workspace/active/{task-id}/task.md`
+- [ ] Recorded `issue_number` in task.md
+- [ ] Updated `current_step` to requirement-analysis
+- [ ] Updated `updated_at` to the current time
+- [ ] Appended an Activity Log entry to task.md
+- [ ] Informed the user of the next step (must include all TUI command formats; do not filter)
+- [ ] **Did not modify any business code**
 
-## 停止
+## STOP
 
-完成检查清单后，**立即停止**。不要继续执行后续步骤。
+After completing the checklist, **stop immediately**. Do not continue to later steps.
 
-## 注意事项
+## Notes
 
-1. **Issue 验证**：在继续之前检查 Issue 是否存在
-2. **重复任务**：如果此 Issue 已有关联任务，在创建新任务前询问用户
-3. **下一步**：导入完成后，先执行 `analyze-task`，再进入 `plan-task`
+1. **Issue validation**: verify that the Issue exists before continuing
+2. **Duplicate task**: if this Issue already has a linked task, ask the user before creating a new one
+3. **Next step**: after import, run `analyze-task` before `plan-task`
 
-## 错误处理
+## Error Handling
 
-- Issue 未找到：提示 "Issue #{number} not found, please check the issue number"
-- 网络错误：提示 "Cannot connect to GitHub, please check network"
-- 权限错误：提示 "No access to this repository"
+- Issue not found: output "Issue #{number} not found, please check the issue number"
+- Network error: output "Cannot connect to GitHub, please check network"
+- Permission error: output "No access to this repository"

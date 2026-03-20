@@ -1,130 +1,131 @@
 ---
 name: close-dependabot
 description: >
-  关闭 Dependabot 安全告警并提供有据可查的理由。
-  当用户要求关闭 Dependabot 告警时触发。参数：告警编号。
+  Dismiss a Dependabot security alert with a documented justification.
+  Triggered when the user asks to dismiss a Dependabot alert.
+  Argument: alert number.
 ---
 
-# 关闭 Dependabot 告警
+# Dismiss Dependabot Alert
 
-关闭指定的 Dependabot 安全告警并记录合理的关闭理由。
+Dismiss the specified Dependabot security alert and record a justified reason.
 
-## 执行流程
+## Execution Flow
 
-### 1. 获取告警信息
+### 1. Retrieve Alert Information
 
 ```bash
 gh api repos/{owner}/{repo}/dependabot/alerts/<alert-number>
 ```
 
-验证告警处于 `open` 状态。如果已被关闭/修复，告知用户并退出。
+Verify that the alert is in the `open` state. If it is already dismissed or fixed, inform the user and exit.
 
-### 2. 展示告警详情
+### 2. Show Alert Details
 
-向用户展示关键信息：
+Show the user the key information:
 ```
-安全告警 #{alert-number}
+Security alert #{alert-number}
 
-严重程度：{severity}
-漏洞：{summary}
-包名：{package-name}（{ecosystem}）
-当前版本：{current-version}
-受影响版本范围：{vulnerable-version-range}
-修复版本：{first-patched-version}
+Severity: {severity}
+Advisory: {summary}
+Package: {package-name} ({ecosystem})
+Current version: {current-version}
+Vulnerable version range: {vulnerable-version-range}
+Patched version: {first-patched-version}
 
-GHSA：{ghsa-id}
-CVE：{cve-id}
-```
-
-### 3. 询问关闭理由
-
-提示用户选择理由：
-
-1. **误报 (False Positive)** - 漏洞代码路径在本项目中未被使用
-2. **无法利用 (Not Exploitable)** - 漏洞存在但在当前上下文中无法被利用
-3. **已有缓解措施 (Mitigated)** - 通过其他方式缓解了风险（配置、网络隔离等）
-4. **无修复版本 (No Fix Available)** - 无修复版本且风险可接受
-5. **仅开发/测试依赖 (Dev/Test Dependency Only)** - 仅在开发/测试中使用，不在生产环境中
-6. **取消** - 不关闭告警
-
-### 4. 要求详细说明
-
-如果用户选择关闭（非取消），要求提供详细说明：
-- 最少 20 个字符
-- 必须清楚说明为什么可以安全关闭该告警
-- 应引用具体证据（代码搜索结果、配置等）
-
-### 5. 最终确认
-
-```
-即将关闭安全告警 #{alert-number}：
-
-告警：{summary}
-严重程度：{severity}
-原因：{选择的理由}
-说明：{用户的说明}
-
-确认？(y/N)
+GHSA: {ghsa-id}
+CVE: {cve-id}
 ```
 
-### 6. 执行关闭
+### 3. Ask for the Dismissal Reason
+
+Ask the user to choose a reason:
+
+1. **False Positive** - the vulnerable code path is not used in this project
+2. **Not Exploitable** - the vulnerability exists but cannot be exploited in the current context
+3. **Mitigated** - the risk is mitigated by other means (configuration, network isolation, etc.)
+4. **No Fix Available** - no patched version exists and the remaining risk is acceptable
+5. **Dev/Test Dependency Only** - used only in development or tests, not in production
+6. **Cancel** - do not dismiss the alert
+
+### 4. Require a Detailed Explanation
+
+If the user chooses to dismiss the alert (not cancel), require a detailed explanation:
+- at least 20 characters
+- must clearly explain why the alert can be safely dismissed
+- should cite concrete evidence (code search results, configuration, etc.)
+
+### 5. Final Confirmation
+
+```
+About to dismiss security alert #{alert-number}:
+
+Alert: {summary}
+Severity: {severity}
+Reason: {selected reason}
+Explanation: {user explanation}
+
+Confirm? (y/N)
+```
+
+### 6. Execute the Dismissal
 
 ```bash
 gh api --method PATCH \
   repos/{owner}/{repo}/dependabot/alerts/<alert-number> \
   -f state=dismissed \
   -f dismissed_reason="{api-reason}" \
-  -f dismissed_comment="{用户的说明}"
+  -f dismissed_comment="{user explanation}"
 ```
 
-**API reason 映射**：
-- 误报 -> `not_used` 或 `inaccurate`
-- 无法利用 -> `tolerable_risk`
-- 已有缓解措施 -> `tolerable_risk`
-- 无修复版本 -> `tolerable_risk`
-- 开发/测试依赖 -> `not_used`
+**API reason mapping**:
+- False Positive -> `not_used` or `inaccurate`
+- Not Exploitable -> `tolerable_risk`
+- Mitigated -> `tolerable_risk`
+- No Fix Available -> `tolerable_risk`
+- Dev/Test Dependency Only -> `not_used`
 
-### 7. 记录到任务（如存在）
+### 7. Record in the Task (If Any)
 
-如果有关联任务（搜索 `security_alert_number: <alert-number>`）：
-获取当前时间：
+If a related task exists (search for `security_alert_number: <alert-number>`):
+Get the current time:
 
 ```bash
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-- 添加关闭记录到 task.md
-- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
+- Add the dismissal record to task.md
+- **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
   - {yyyy-MM-dd HH:mm:ss} — **Alert Closed** by {agent} — Dependabot alert #{alert-number} dismissed: {reason}
   ```
-- 归档任务
+- Archive the task
 
-### 8. 告知用户
+### 8. Inform User
 
 ```
-安全告警 #{alert-number} 已关闭。
+Security alert #{alert-number} dismissed.
 
-告警：{summary}
-严重程度：{severity}
-原因：{reason}
-说明：{explanation}
+Alert: {summary}
+Severity: {severity}
+Reason: {reason}
+Explanation: {explanation}
 
-查看：https://github.com/{owner}/{repo}/security/dependabot/{alert-number}
+View: https://github.com/{owner}/{repo}/security/dependabot/{alert-number}
 
-注意：如有需要，可在 GitHub 上重新打开。
+Note: it can be reopened on GitHub if necessary.
 ```
 
-## 注意事项
+## Notes
 
-1. **谨慎处理高严重程度告警**：Critical/High 告警需要在关闭前进行充分分析。建议先执行 import-dependabot + analyze-task。
-2. **真实的理由**：关闭记录保存在 GitHub 中，可能会被审计。
-3. **定期复查**：已关闭的告警应定期复查，因为代码变更可能使关闭理由失效。
-4. **优先修复**：关闭应作为最后手段。优先考虑升级、替换或缓解。
+1. **Handle high-severity alerts carefully**: Critical/High alerts require thorough analysis before dismissal. Prefer `import-dependabot` + `analyze-task` first.
+2. **Use truthful reasons**: dismissal records are stored in GitHub and may be audited.
+3. **Review periodically**: dismissed alerts should be re-evaluated because code changes may invalidate the dismissal rationale.
+4. **Fix first**: dismissal should be the last resort. Prefer upgrading, replacing, or mitigating.
 
-## 错误处理
+## Error Handling
 
-- 告警未找到：提示 "Security alert #{number} not found"
-- 已关闭：提示 "Alert #{number} is already {state}"
-- 权限错误：提示 "No permission to modify alerts"
-- 用户取消：提示 "Cancellation acknowledged"
+- Alert not found: output "Security alert #{number} not found"
+- Already closed: output "Alert #{number} is already {state}"
+- Permission error: output "No permission to modify alerts"
+- User canceled: output "Cancellation acknowledged"

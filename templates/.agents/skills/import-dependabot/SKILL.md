@@ -1,44 +1,45 @@
 ---
 name: import-dependabot
 description: >
-  导入 Dependabot 安全告警并创建修复任务。
-  当用户要求导入 Dependabot 告警时触发。参数：告警编号。
+  Import a Dependabot security alert and create a remediation task.
+  Triggered when the user asks to import a Dependabot alert.
+  Argument: alert number.
 ---
 
-# 导入 Dependabot 安全告警
+# Import Dependabot Security Alert
 
-导入指定的 Dependabot 安全告警并创建修复任务。
+Import the specified Dependabot security alert and create a remediation task.
 
-## 行为边界 / 关键规则
+## Boundary / Critical Rules
 
-- 本技能仅负责导入告警并创建任务骨架 —— 不直接修改业务代码或关闭告警
-- 不要自动提交。绝不自动执行 `git commit` 或 `git add`
-- 执行本技能后，你**必须**立即更新 task.md 中的任务状态
+- This skill only imports the alert and creates a task skeleton; it does not directly modify business code or dismiss the alert
+- Do NOT auto-commit. Never execute `git commit` or `git add` automatically
+- After executing this skill, you **must** immediately update task status in task.md
 
-## 执行流程
+## Execution Flow
 
-### 1. 获取告警信息
+### 1. Retrieve Alert Information
 
 ```bash
 gh api repos/{owner}/{repo}/dependabot/alerts/<alert-number>
 ```
 
-提取关键信息：
-- `number`：告警编号
-- `state`：状态（open/dismissed/fixed）
-- `security_advisory`：安全公告详情（ghsa_id、cve_id、severity、summary、description）
-- `dependency`：受影响的依赖（包名、生态系统、清单路径）
-- `security_vulnerability`：受影响版本范围、首个修复版本
+Extract key information:
+- `number`: alert number
+- `state`: state (`open` / `dismissed` / `fixed`)
+- `security_advisory`: advisory details (`ghsa_id`, `cve_id`, `severity`, `summary`, `description`)
+- `dependency`: affected dependency (package name, ecosystem, manifest path)
+- `security_vulnerability`: affected version range and first patched version
 
-### 2. 创建任务目录和文件
+### 2. Create the Task Directory and File
 
-检查 `.agent-workspace/active/` 中是否已存在该告警的任务。
-- 如果找到，询问用户是否重新导入
-- 如果未找到，创建新任务
+Check whether `.agent-workspace/active/` already has a task for this alert.
+- If found, ask the user whether to re-import
+- If not found, create a new task
 
-创建目录：`.agent-workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+Create directory: `.agent-workspace/active/TASK-{yyyyMMdd-HHmmss}/`
 
-任务元数据需包含：
+Task metadata must include:
 ```yaml
 id: TASK-{yyyyMMdd-HHmmss}
 security_alert_number: <alert-number>
@@ -47,61 +48,61 @@ cve_id: <CVE-ID>
 ghsa_id: <GHSA-ID>
 ```
 
-### 3. 更新任务状态
+### 3. Update Task Status
 
-获取当前时间：
+Get the current time:
 
 ```bash
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 task.md：`current_step` -> `requirement-analysis`。
-- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
+Update task.md: `current_step` -> `requirement-analysis`.
+- **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
   - {yyyy-MM-dd HH:mm:ss} — **Import Dependabot Alert** by {agent} — Dependabot alert #{alert-number} imported
   ```
 
-### 4. 告知用户
+### 4. Inform User
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
 
 ```
-安全告警 #{alert-number} 已导入。
+Security alert #{alert-number} imported.
 
-漏洞信息：
-- 严重程度：{severity}
-- CVE/GHSA：{cve-id} / {ghsa-id}
-- 受影响包：{package-name}
+Vulnerability information:
+- Severity: {severity}
+- CVE/GHSA: {cve-id} / {ghsa-id}
+- Affected package: {package-name}
 
-任务信息：
-- 任务 ID：{task-id}
+Task information:
+- Task ID: {task-id}
 
-产出文件：
-- 任务文件：.agent-workspace/active/{task-id}/task.md
+Output file:
+- Task file: .agent-workspace/active/{task-id}/task.md
 
-下一步：
-  - Claude Code / OpenCode：/analyze-task {task-id}
-  - Gemini CLI：/agent-infra:analyze-task {task-id}
-  - Codex CLI：$analyze-task {task-id}
+Next step:
+  - Claude Code / OpenCode: /analyze-task {task-id}
+  - Gemini CLI: /{{project}}:analyze-task {task-id}
+  - Codex CLI: $analyze-task {task-id}
 ```
 
-## 注意事项
+## Notes
 
-1. **严重程度优先级**：Critical/High -> 立即处理。Medium -> 计划处理。Low -> 可延后。
-2. **范围**：本技能仅负责导入告警并创建任务；风险评估由 `analyze-task` 负责。
-3. **后续动作**：导入后先执行 `analyze-task`，分析完成后再决定修复或关闭。
+1. **Severity priority**: Critical/High -> handle immediately. Medium -> schedule handling. Low -> can be deferred.
+2. **Scope**: this skill only imports the alert and creates the task; risk assessment is handled by `analyze-task`.
+3. **Follow-up**: after import, run `analyze-task` first, then decide whether to fix or dismiss.
 
-## 完成检查清单
+## Completion Checklist
 
-- [ ] 获取并记录了告警关键信息
-- [ ] 创建或确认了对应的任务目录与任务文件
-- [ ] 更新了 task.md 中的 `current_step` 为 requirement-analysis
-- [ ] 更新了 task.md 中的 `updated_at` 为当前时间
-- [ ] 追加了 Activity Log 条目到 task.md
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
+- [ ] Retrieved and recorded the key alert information
+- [ ] Created or confirmed the corresponding task directory and task file
+- [ ] Updated `current_step` to requirement-analysis in task.md
+- [ ] Updated `updated_at` to the current time in task.md
+- [ ] Appended an Activity Log entry to task.md
+- [ ] Informed the user of the next step (must include all TUI command formats; do not filter)
 
-## 错误处理
+## Error Handling
 
-- 告警未找到：提示 "Security alert #{number} not found"
-- 告警已关闭：询问用户是否继续分析
-- 网络/权限错误：提示相应信息
+- Alert not found: output "Security alert #{number} not found"
+- Alert already closed: ask the user whether to continue with analysis
+- Network/permission error: output the corresponding error information
