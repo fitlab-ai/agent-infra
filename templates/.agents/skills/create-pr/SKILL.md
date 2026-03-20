@@ -64,13 +64,22 @@ git push -u origin <current-branch>
 
 ### 7. Create PR
 
+- If this work is associated with an active task, extract `issue_number` from task.md
+- If `issue_number` exists, query Issue information on a best-effort basis and skip on failure:
+  ```bash
+  gh issue view {issue-number} --json number,title --jq '.number' 2>/dev/null
+  ```
 - Follow `.github/PULL_REQUEST_TEMPLATE.md` format for all sections
 - Reference recent merged PRs for style
 - Use HEREDOC format to pass the body
+- If `issue_number` exists:
+  - replace `{$IssueNumber}` in the template with the actual Issue number
+  - use `Closes #{issue_number}` in the `Related Issue` section
+- If `issue_number` does not exist, keep the current behavior
 - PR must end with: `Generated with AI assistance`
 
 ```bash
-gh pr create --base <target-branch> --title "<title>" --body "$(cat <<'EOF'
+gh pr create --base <target-branch> --title "<title>" --assignee @me --body "$(cat <<'EOF'
 <Complete PR description following template>
 
 Generated with AI assistance
@@ -93,7 +102,21 @@ gh label list --search "type:" --limit 1 --json name --jq 'length'
 - returns `0` -> run the `init-labels` skill first, then retry this step
 - returns non-zero -> continue
 
-**b) Sync the type label**
+**b) Query Issue metadata**
+
+If task.md contains `issue_number`, query the Issue labels and milestone on a best-effort basis:
+
+```bash
+gh issue view {issue-number} --json labels,milestone 2>/dev/null
+```
+
+If the query fails (Issue not found, permission denied, etc.), skip Issue metadata inheritance and continue with only the static mappings from task.md.
+
+Record the results for later substeps:
+- `{issue-labels}`: list of labels currently on the Issue
+- `{issue-milestone}`: title of the Issue milestone, if present
+
+**c) Sync the type label**
 
 Map task.md `type` using this table:
 
@@ -114,7 +137,17 @@ If task.md `type` maps to a standard type label, run:
 gh pr edit {pr-number} --add-label "{type-label}"
 ```
 
-**c) Sync `in:` labels**
+**d) Inherit Issue labels**
+
+If `{issue-labels}` is not empty, filter labels that do not start with `type:` or `status:` and run the following for each label on a best-effort basis:
+
+```bash
+gh pr edit {pr-number} --add-label "{label-name}"
+```
+
+Only add labels; do not remove any existing PR labels.
+
+**e) Sync `in:` labels**
 
 Extract affected modules from implementation reports or analysis, verify that the label exists, then run:
 
@@ -124,11 +157,12 @@ gh pr edit {pr-number} --add-label "in: {module}"
 
 Only add labels; do not remove existing `in:` labels.
 
-**d) Sync the milestone**
+**f) Sync the milestone**
 
-Reuse the same milestone inference strategy as `sync-pr`:
+Extend the `sync-pr` milestone inference strategy with Issue milestone priority:
 - preserve an existing PR milestone
 - otherwise respect explicit `milestone` from task.md
+- otherwise use the Issue milestone when available (`{issue-milestone}`)
 - otherwise infer from the current branch, release branches, or the latest tag
 - finally fall back to `General Backlog`
 
@@ -138,7 +172,7 @@ Once the target is resolved, run:
 gh pr edit {pr-number} --milestone "{milestone-title}"
 ```
 
-**e) Sync development linking**
+**g) Sync development linking**
 
 If task.md contains `issue_number`, read the PR body:
 
@@ -222,3 +256,6 @@ Next steps (if in task workflow):
 - No commits to push: Prompt "No commits found between {target} and HEAD"
 - Push rejected: Suggest `git pull --rebase` first
 - PR already exists: Show existing PR URL
+- Issue not accessible or missing: Skip Issue metadata inheritance and record "Issue #{number} not accessible, skipping metadata inheritance"
+- Issue label unavailable: Skip that label and record "Label '{name}' not found, skipping"
+- Issue milestone unavailable: Fall back to branch-based milestone inference

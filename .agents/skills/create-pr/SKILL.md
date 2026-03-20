@@ -63,13 +63,22 @@ git push -u origin <current-branch>
 
 ### 7. 创建 PR
 
+- 如果存在关联的活跃任务，从 task.md 提取 `issue_number`
+- 如果 `issue_number` 存在，查询 Issue 信息（容错，失败时跳过）：
+  ```bash
+  gh issue view {issue-number} --json number,title --jq '.number' 2>/dev/null
+  ```
 - 遵循 `.github/PULL_REQUEST_TEMPLATE.md` 格式填写所有部分
 - 参考最近合并的 PR 的风格
 - 使用 HEREDOC 格式传递 body
+- 如果 `issue_number` 存在：
+  - 将模板中的 `{$IssueNumber}` 替换为实际 Issue 编号
+  - 在 `Related Issue` 部分使用 `Closes #{issue_number}`
+- 如果 `issue_number` 不存在，保持原有行为
 - PR 必须以 `Generated with AI assistance` 结尾
 
 ```bash
-gh pr create --base <target-branch> --title "<title>" --body "$(cat <<'EOF'
+gh pr create --base <target-branch> --title "<title>" --assignee @me --body "$(cat <<'EOF'
 <按模板填写的完整 PR 描述>
 
 Generated with AI assistance
@@ -92,7 +101,21 @@ gh label list --search "type:" --limit 1 --json name --jq 'length'
 - 返回 `0` -> 先执行 `init-labels` 技能，然后重新执行本步骤
 - 返回非 `0` -> 继续
 
-**b) 同步 type label**
+**b) 查询 Issue 元数据**
+
+如果 task.md 包含 `issue_number`，查询 Issue 的 Labels 和 Milestone（容错）：
+
+```bash
+gh issue view {issue-number} --json labels,milestone 2>/dev/null
+```
+
+如果查询失败（Issue 不存在、权限不足等），跳过 Issue 元数据继承，后续步骤仅使用 task.md 静态映射。
+
+记录查询结果供后续子步骤使用：
+- `{issue-labels}` — Issue 上的 Labels 列表
+- `{issue-milestone}` — Issue 上的 Milestone 标题（如有）
+
+**c) 同步 type label**
 
 根据 task.md 的 `type` 字段按下表映射：
 
@@ -113,7 +136,17 @@ gh label list --search "type:" --limit 1 --json name --jq 'length'
 gh pr edit {pr-number} --add-label "{type-label}"
 ```
 
-**c) 同步 in: label**
+**d) 继承 Issue Labels**
+
+如果 `{issue-labels}` 非空，筛选出不以 `type:` 或 `status:` 开头的 labels，对每个 label 执行（容错，label 不存在时跳过）：
+
+```bash
+gh pr edit {pr-number} --add-label "{label-name}"
+```
+
+只添加，不移除 PR 上现有的 labels。
+
+**e) 同步 in: label**
 
 从实现报告或分析报告提取受影响模块，确认对应 label 存在后执行：
 
@@ -123,11 +156,12 @@ gh pr edit {pr-number} --add-label "in: {module}"
 
 只添加，不移除现有的 `in:` labels。
 
-**d) 同步 Milestone**
+**f) 同步 Milestone**
 
-复用 `sync-pr` 的里程碑推断策略：
+基于 `sync-pr` 的里程碑推断策略，并扩展 Issue Milestone 优先级：
 - 先检查 PR 是否已有 milestone
 - 再检查 task.md 是否显式指定 `milestone`
+- 再检查 Issue 是否已有 milestone（使用 `{issue-milestone}`）
 - 否则基于当前分支、版本分支或最新 tag 推断
 - 最终回退到 `General Backlog`
 
@@ -137,7 +171,7 @@ gh pr edit {pr-number} --add-label "in: {module}"
 gh pr edit {pr-number} --milestone "{milestone-title}"
 ```
 
-**e) 同步 Development 关联**
+**g) 同步 Development 关联**
 
 如果 task.md 包含 `issue_number`，读取 PR body：
 
@@ -221,3 +255,6 @@ PR 已创建：{pr-url}
 - 无提交可推送：提示 "No commits found between {target} and HEAD"
 - 推送被拒绝：建议先执行 `git pull --rebase`
 - PR 已存在：显示已有的 PR URL
+- Issue 不存在或无权限：跳过 Issue 元数据继承，记录 "Issue #{number} not accessible, skipping metadata inheritance"
+- Issue Label 不可用：跳过对应 label，记录 "Label '{name}' not found, skipping"
+- Issue Milestone 不可用：回退到分支推断策略
