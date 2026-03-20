@@ -408,11 +408,13 @@ summary_comment_id="$(
 )"
 ```
 
+在步骤 9 结束前，基于上述已发布/未发布结果，预先判断 `has_unpublished_artifacts`：是否存在任何尚未发布的非 `summary` 产物。该判断在步骤 10 执行期间保持不变，仅用于决定 `summary` 是原地更新还是删除后在尾部重建。
+
 幂等要求：
 - 第一次执行时，只发布当前已存在产物对应的文件评论
 - 第二次执行时，必须跳过已发布文件，只补发新增产物（例如 `implementation-r2`、`review-r2`）
 - 如果所有产物文件评论都已发布，且 `summary` 内容没有变化，则本次不发布任何新评论
-- 如果 `summary` 已发布但交付状态发生变化，只更新原评论，不新增第二条 summary 评论
+- 如果 `summary` 已发布但交付状态发生变化：当本次有新产物发布时，删除旧 `summary` 并在尾部重建；当本次无新产物发布时，原地更新原评论
 
 ### 10. 按时间线逐条发布上下文文件
 
@@ -502,18 +504,29 @@ EOF
 )"
 ```
 
-**d) 仅更新已有 summary 评论**
+**d) 发布或重建 summary 评论**
 
-如果 `summary` 标识已存在，且新生成内容与已有内容不同，则编辑原评论：
+`summary` 必须始终保持为最后一条评论。根据以下条件决定处理方式：
+
+- `summary` 不存在：按步骤 10c 发布新的 `summary` 评论
+- `summary` 已存在且 `has_unpublished_artifacts=true`：先删除旧 `summary` 评论，再按步骤 10c 发布新的 `summary` 评论
+- `summary` 已存在且 `has_unpublished_artifacts=false` 且新生成内容与已有内容不同：原地更新原评论
+- `summary` 已存在且 `has_unpublished_artifacts=false` 且内容相同：不做任何操作
+
+删除旧 `summary` 评论时，执行：
 
 ```bash
-gh api "repos/$repo/issues/comments/{comment-id}" -X PATCH -f body="$(cat <<'EOF'
+gh api "repos/$repo/issues/comments/{summary_comment_id}" -X DELETE
+```
+
+原地更新已有 `summary` 评论时，执行：
+
+```bash
+gh api "repos/$repo/issues/comments/{summary_comment_id}" -X PATCH -f body="$(cat <<'EOF'
 {comment-body}
 EOF
 )"
 ```
-
-如果内容相同，则不做任何操作。
 
 **e) 零操作场景**
 

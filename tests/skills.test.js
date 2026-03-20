@@ -183,7 +183,7 @@ test("sync-issue skill documents issue type sync, timeline comments, and absolut
       /仅当 Activity Log 引用的文件当前存在于任务目录中时，才纳入待发布集合|Only include files that still exist in the task directory/,
       /summary` 始终排在最末|`summary` is always last/,
       /不要再使用固定 5 步骤，也不要把同类型多轮次产物合并到一条评论|Do not fall back to a fixed 5-step order, and do not merge multiple rounds of the same artifact type into a single comment/,
-      /gh api "repos\/\$repo\/issues\/comments\/\{comment-id\}" -X PATCH/,
+      /gh api "repos\/\$repo\/issues\/comments\/\{summary_comment_id\}" -X PATCH/,
       /https:\/\/github\.com\/\{owner\}\/\{repo\}\/commit\/\{commit-hash\}/,
       /https:\/\/github\.com\/\{owner\}\/\{repo\}\/pull\/\{pr-number\}/,
       /implementation-r\*\.md/,
