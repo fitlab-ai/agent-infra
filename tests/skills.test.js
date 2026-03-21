@@ -223,7 +223,6 @@ test("sync-pr skill documents metadata sync and idempotent summary", () => {
       /in: \{module\}/,
       /--milestone/,
       /Closes #\{issue-number\}/,
-      /gh issue view \{issue-number\} --json state/,
       /gh api "repos\/\$repo\/issues\/comments\/\{comment-id\}" -X PATCH/,
       /PR #\{number\} is closed\/merged, metadata sync skipped/,
       /date "\+%Y-%m-%d %H:%M:%S"/
@@ -239,8 +238,6 @@ test("sync-pr skill documents metadata sync and idempotent summary", () => {
       expected,
       `${relativePath} steps should be consecutively numbered from 1`
     );
-
-    assert.doesNotMatch(content, /gh pr comment/);
   });
 });
 

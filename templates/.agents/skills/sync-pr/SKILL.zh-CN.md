@@ -197,19 +197,7 @@ EOF
 
 5. 如果 task.md 不包含 `issue_number`，记录 `Development: N/A`
 
-### 9. 探测关联 Issue 状态
-
-如果 task.md 包含 `issue_number`，执行：
-
-```bash
-gh issue view {issue-number} --json state
-```
-
-记录 Issue 当前是 `OPEN` 还是 `CLOSED`。
-
-如果 task.md 不包含 `issue_number`，记录 `Issue: N/A`。
-
-### 10. 生成或更新单条幂等审查摘要
+### 9. 生成或更新单条幂等审查摘要
 
 复用步骤 4 已获取的仓库坐标，并拉取 PR 已有评论：
 
@@ -242,7 +230,6 @@ summary_comment_id="$(
 - 关键技术决策的描述必须自包含，不要引用内部文档的编号或术语（如 `方案 A/B`）；审查者应能独立理解每条决策的含义
 - 从 `review.md`、`review-r{N}.md`、`refinement.md`、`refinement-r{N}.md` 构建审查历程表格
 - 从 `implementation.md` 或 `refinement.md` 的测试章节提取测试结果
-- 在关联表格中记录 Issue 状态
 
 审查历程表格建议字段：
 - `轮次`
@@ -276,12 +263,6 @@ summary_comment_id="$(
 
 - {test-summary}
 
-### 关联
-
-| 类型 | 内容 |
-|------|------|
-| Issue | #{issue-number}（{state}）或 `N/A` |
-
 ---
 *由 AI 自动生成 · 内部追踪：{task-id}*
 ```
@@ -309,7 +290,7 @@ EOF
 )"
 ```
 
-### 11. 更新任务状态
+### 10. 更新任务状态
 
 获取当前时间：
 
@@ -323,7 +304,7 @@ date "+%Y-%m-%d %H:%M:%S"
   - {yyyy-MM-dd HH:mm:ss} — **Sync to PR** by {agent} — PR metadata synced, summary {created|updated|skipped} on PR #{pr-number}
   ```
 
-### 12. 告知用户
+### 11. 告知用户
 
 ```
 进度已同步到 PR #{pr-number}。
@@ -333,7 +314,6 @@ date "+%Y-%m-%d %H:%M:%S"
 - Milestone：{milestone-result}
 - Development：{development-result}
 - Summary：{created|updated|skipped}
-- Issue：{OPEN|CLOSED|N/A}
 
 查看：https://github.com/{owner}/{repo}/pull/{pr-number}
 ```
@@ -343,7 +323,7 @@ date "+%Y-%m-%d %H:%M:%S"
 1. `sync-pr` 面向代码审查者，只维护一条 reviewer-facing summary 评论，不逐轮发布完整产物。
 2. PR 元数据同步必须可重复执行；重复执行时仅补齐缺失信息，不制造额外噪音。
 3. 由于 Pull Request 共享 Issue 评论接口，summary 评论应使用 `issues/{pr-number}/comments` API 创建。
-4. 如果 `issue_number` 缺失，Development 和 Issue 状态探测都应记录为 `N/A`，不要让整个流程失败。
+4. 如果 `issue_number` 缺失，Development 应记录为 `N/A`，不要让整个流程失败。
 
 ## 错误处理
 
