@@ -131,6 +131,37 @@ cd agent-infra
 sh install.sh
 ```
 
+### Updating agent-infra
+
+Already installed? Update to the latest version using the same method you used to install:
+
+**Option A - npm**
+
+```bash
+npm update -g @fitlab-ai/agent-infra
+```
+
+**Option B - Shell script**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh
+```
+
+**Option C - Install from source**
+
+```bash
+cd agent-infra
+git pull
+sh install.sh
+```
+
+Check your current version:
+
+```bash
+ai version
+# or: agent-infra version
+```
+
 ### 2. Initialize a new project
 
 ```bash

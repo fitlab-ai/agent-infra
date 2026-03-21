@@ -131,6 +131,37 @@ cd agent-infra
 sh install.sh
 ```
 
+### 更新 agent-infra
+
+如果已经安装过，可以按你最初安装时使用的方式升级到最新版本：
+
+**方式 A - npm**
+
+```bash
+npm update -g @fitlab-ai/agent-infra
+```
+
+**方式 B - Shell 脚本**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh
+```
+
+**方式 C - 从源码安装**
+
+```bash
+cd agent-infra
+git pull
+sh install.sh
+```
+
+查看当前版本：
+
+```bash
+ai version
+# 或：agent-infra version
+```
+
 ### 2. 初始化新项目
 
 ```bash
