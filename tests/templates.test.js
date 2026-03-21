@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildCommandSyncFiles,
+  escapeRegExp,
   exists,
   langTemplate,
   listFilesRecursive,
@@ -150,6 +151,63 @@ test("assistant template docs use import commands and analyze-task naming", () =
     assert.match(content, /import-codescan/, `${relativePath} should reference import-codescan`);
     assert.doesNotMatch(content, /analyze-dependabot/, `${relativePath} should not reference analyze-dependabot`);
     assert.doesNotMatch(content, /analyze-codescan/, `${relativePath} should not reference analyze-codescan`);
+  });
+});
+
+test("system prompt templates embed skill authoring conventions from the collaboration guide", () => {
+  [
+    {
+      sourcePath: "templates/.agents/README.md",
+      heading: "## Skill Authoring Conventions",
+      nextHeading: "## ",
+      comment: "<!-- Canonical source: .agents/README.md - keep in sync -->",
+      replacements: [
+        ["files and their templates, keep", "files, keep"]
+      ],
+      targets: [
+        "templates/.claude/CLAUDE.md",
+        "templates/AGENTS.md"
+      ]
+    },
+    {
+      sourcePath: "templates/.agents/README.zh-CN.md",
+      heading: "## Skill 编写规范",
+      nextHeading: "## ",
+      comment: "<!-- Canonical source: .agents/README.zh-CN.md - keep in sync -->",
+      replacements: [
+        ["及其模板时", "时"]
+      ],
+      targets: [
+        "templates/.claude/CLAUDE.zh-CN.md",
+        "templates/AGENTS.zh-CN.md"
+      ]
+    }
+  ].forEach(({ sourcePath, heading, nextHeading, comment, replacements, targets }) => {
+    const source = read(sourcePath);
+    const [, sourceSection] = source.match(
+      new RegExp(`${escapeRegExp(heading)}\\n\\n([\\s\\S]*?)(?=\\n${escapeRegExp(nextHeading)}|\\s*$)`)
+    ) ?? [];
+
+    assert.ok(sourceSection, `${sourcePath} should define the canonical conventions`);
+
+    const sectionForTemplates = (replacements ?? []).reduce(
+      (section, [from, to]) => section.replace(from, to),
+      sourceSection.trim()
+    );
+
+    const expected = [
+      heading,
+      sectionForTemplates,
+      comment
+    ].join("\n\n");
+
+    targets.forEach((relativePath) => {
+      assert.match(
+        read(relativePath),
+        new RegExp(escapeRegExp(expected)),
+        `${relativePath} should embed the canonical skill authoring conventions`
+      );
+    });
   });
 });
 

@@ -86,6 +86,19 @@ All code-level content uses **English**. Documentation provides **multilingual v
 
 <!-- TODO: Add your project's tech stack here -->
 
+## Skill Authoring Conventions
+
+When writing or updating `.agents/skills/*/SKILL.md` files, keep step numbering consistent:
+
+1. Use consecutive integers for top-level steps: `1.`, `2.`, `3.`.
+2. Use nested numbering only for child actions that belong to a parent step: `1.1`, `1.2`, `2.1`.
+3. Use `a`, `b`, and `c` markers for branches, conditions, or alternative paths within the same step.
+4. Do not use intermediate numbers such as `1.5` or `2.5`; if a new standalone step is needed, renumber the following top-level steps.
+5. When renumbering, update every in-document step reference so the instructions remain accurate.
+6. Extract long bash scripts into a sibling `scripts/` directory; the SKILL.md should contain only a single-line invocation (e.g., `bash .agents/skills/<skill>/scripts/<script>.sh`) and a brief summary of the script's responsibilities.
+
+<!-- Canonical source: .agents/README.md - keep in sync -->
+
 ---
 
 **Based on standard**: [AGENTS.md](https://agents.md) (Linux Foundation AAIF)

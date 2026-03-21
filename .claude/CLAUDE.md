@@ -172,6 +172,19 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 **协作指南**：`.agents/README.md`
 
+## Skill 编写规范
+
+编写或维护 `.agents/skills/*/SKILL.md` 及其模板时，步骤编号遵循以下规则：
+
+1. 顶级步骤使用连续整数：`1.`、`2.`、`3.`。
+2. 只有父步骤下的从属动作才使用子步骤：`1.1`、`1.2`、`2.1`。
+3. 同一步中的分支、条件或多种可能性使用 `a`、`b`、`c` 标记。
+4. 不要使用 `1.5`、`2.5` 这类中间编号；如新增独立步骤，应整体顺延后续编号。
+5. 调整编号时，必须同步更新文中的步骤引用，确保说明、命令和检查点一致。
+6. 长 bash 脚本应从 SKILL.md 提取到同级 `scripts/` 目录中，SKILL.md 只保留单行调用（如 `bash .agents/skills/<skill>/scripts/<script>.sh`）和对脚本职责的概要说明。
+
+<!-- Canonical source: .agents/README.zh-CN.md - keep in sync -->
+
 ## 安全注意事项
 
 - 不要提交：`.env`、credentials、密钥
