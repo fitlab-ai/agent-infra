@@ -51,10 +51,13 @@ npm test
 2. `.agent-infra/config.json` 中的 `"templateVersion": "vX.Y.Z"`
 3. `SECURITY.md` 中的支持版本表格（`v{MAJOR}.{MINOR}.x | Supported`，`< v{MAJOR}.{MINOR}.0 | Not Supported`）
 4. `SECURITY.zh-CN.md` 中的支持版本表格（`v{MAJOR}.{MINOR}.x | 支持中`，`< v{MAJOR}.{MINOR}.0 | 不再支持`）
+5. 运行 `npm install --package-lock-only`，同步 `package-lock.json` 中的版本号
 
 如果当前工作区处于开发期 prerelease 版本（例如 `0.1.0-alpha.1`），也需要将其替换为目标正式版本 `X.Y.Z`。
 
 使用搜索确认旧版本号（包含可能的 prerelease 后缀）无遗漏，使用编辑工具更新。
+
+更新 `package.json` 后执行 `npm install --package-lock-only`，确保锁文件版本与 `package.json` 保持同步。
 
 **排除以下目录的版本替换**：
 - `.agents/`、`.agent-infra/workspace/`、`.claude/`、`.codex/`、`.gemini/`、`.opencode/`（AI 工具配置）
@@ -90,6 +93,8 @@ git tag v{version}
 ### 步骤 8：管理里程碑
 
 为已发布版本关闭对应版本里程碑，并为下一轮创建缺失的规划里程碑。
+
+执行：
 
 ```bash
 bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PATCH"
@@ -160,5 +165,6 @@ git checkout -- .
 
 - 版本格式无效：提示正确格式并退出
 - 工作区不干净：提示提交或暂存
-- 测试失败：显示测试错误并退出
+- 验证失败：显示失败的检查并停止发布流程
+- 产物重建失败：显示构建错误并停止发布流程
 - Git 操作失败：显示错误并提供回滚说明

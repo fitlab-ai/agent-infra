@@ -30,7 +30,26 @@ git status --short
 
 如果有未提交的变更，报错："Workspace has uncommitted changes. Please commit or stash first."
 
-### 步骤 3：更新版本引用
+### 步骤 3：发布前验证
+
+<!-- TODO: 替换为你的项目发布前验证步骤 -->
+
+运行所有在准备发布前必须通过的检查：
+
+```bash
+git branch --show-current
+# TODO: 替换为你的项目测试/构建验证命令
+```
+
+验证要求：
+- 确认发布使用的是项目规定的分支
+- 运行你的发布流程要求的完整校验命令
+
+处理规则：
+- 如果当前分支不符合预期，按项目策略输出警告或直接退出
+- 如果任何验证命令失败，停止发布流程并先修复问题
+
+### 步骤 4：更新版本引用
 
 <!-- TODO: 替换为你的项目版本更新步骤 -->
 
@@ -44,6 +63,7 @@ git status --short
 
 **常见需要更新的文件**：
 - `package.json`（Node.js）
+- `package-lock.json`（Node.js；更新 `package.json` 后运行 `npm install --package-lock-only` 同步锁文件）
 - `pom.xml`（Maven）
 - `setup.py` / `pyproject.toml`（Python）
 - `version.go`（Go）
@@ -53,20 +73,37 @@ git status --short
 **排除以下目录的版本替换**：
 - `.agents/`、`.agent-infra/workspace/`、`.claude/`、`.codex/`、`.gemini/`、`.opencode/`（AI 工具配置）
 
-### 步骤 4：创建发布提交
+如果项目使用 `package-lock.json`，在更新 `package.json` 后运行 `npm install --package-lock-only`，确保锁文件中的版本号保持同步。
+
+### 步骤 5：重新生成构建产物
+
+<!-- TODO: 替换为你的项目产物重建步骤 -->
+
+如果版本更新会影响生成文件、内嵌元数据或打包产物，现在重新生成它们：
+
+```bash
+# TODO: 替换为你的项目构建/重建命令
+```
+
+执行要求：
+- 在更新版本引用后运行，确保生成产物使用最新版本号
+- 如果项目没有生成产物，请在项目特化版本中明确说明
+- 如果重建失败，停止发布流程并先修复构建问题
+
+### 步骤 6：创建发布提交
 
 ```bash
 git add -A
 git commit -m "chore: release v{version}"
 ```
 
-### 步骤 5：创建 Git 标签
+### 步骤 7：创建 Git 标签
 
 ```bash
 git tag v{version}
 ```
 
-### 步骤 6：管理里程碑
+### 步骤 8：管理里程碑
 
 为已发布版本关闭对应版本里程碑，并为下一轮创建缺失的规划里程碑。
 
@@ -83,7 +120,7 @@ bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PAT
 - 当 `PATCH=0` 时，同时确保 `{MAJOR}.{MINOR+1}.0` 与 `{MAJOR}.{MINOR+1}.x`
 - 输出包含已发布里程碑动作和新建数量的汇总
 
-### 步骤 7：输出摘要
+### 步骤 9：输出摘要
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
@@ -99,11 +136,11 @@ bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PAT
 
 下一步（手动执行）：
 
-1. 推送标签：
-   git push origin v{version}
-
-2. 推送分支：
+1. 推送分支：
    git push origin {current-branch}
+
+2. 推送标签：
+   git push origin v{version}
 
 3.（可选）生成发布说明：
    - Claude Code / OpenCode：/create-release-note {version}
@@ -129,13 +166,17 @@ git checkout -- .
 
 1. **需要干净的工作区**：必须没有未提交的变更
 2. **不自动推送**：所有操作仅在本地执行；用户手动推送
-3. **不验证构建**：发布前执行 test 技能进行验证
-4. **版本替换范围**：通过搜索确定需要更新哪些文件；排除 AI 工具目录
-5. **适配你的项目**：以上版本更新步骤是通用的；请根据你的项目版本方案进行定制
-6. **里程碑联动**：发布时自动创建下一轮里程碑；如果里程碑体系未初始化，建议先运行 `init-milestones`
+3. **发布前验证**：将步骤 3 的 TODO 替换为你的项目所需的分支、测试和验证命令
+4. **生成产物**：如果版本变化会影响生成文件、打包产物或内嵌元数据，需要将步骤 5 的 TODO 替换为实际命令
+5. **发布自动化**：如果推送标签会触发 CI/CD 或包发布，请先确认所需凭据和流水线配置
+6. **版本替换范围**：通过搜索确定需要更新哪些文件；排除 AI 工具目录
+7. **适配你的项目**：以上版本更新和产物重建步骤是通用的；请根据你的项目版本方案进行定制
+8. **里程碑联动**：发布时自动创建下一轮里程碑；如果里程碑体系未初始化，建议先运行 `init-milestones`
 
 ## 错误处理
 
 - 版本格式无效：提示正确格式并退出
 - 工作区不干净：提示提交或暂存
+- 验证失败：显示失败的检查并停止发布流程
+- 产物重建失败：显示构建错误并停止发布流程
 - Git 操作失败：显示错误并提供回滚说明
