@@ -42,7 +42,7 @@ test("bootstrap CLI files exist", () => {
   assert.ok(exists("bin/cli.js"), "bin/cli.js (node) should exist");
 
   const installSh = read("install.sh");
-  assert.match(installSh, /git clone/);
+  assert.match(installSh, /npm install/);
   assert.match(installSh, /\.agent-infra/);
 
   const nodeCli = read("bin/cli.js");

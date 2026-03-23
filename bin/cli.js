@@ -23,7 +23,7 @@ Shorthand: ai (e.g. ai init)
 Install methods:
   npm:   npm install -g @fitlab-ai/agent-infra
   npx:   npx @fitlab-ai/agent-infra init
-  curl:  curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh
+  curl:  curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh  (runs npm install -g internally)
 
 Examples:
   cd my-project && agent-infra init

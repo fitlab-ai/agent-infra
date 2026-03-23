@@ -114,45 +114,19 @@ These are not thin command aliases. Each skill encapsulates standardized process
 
 ```bash
 npm install -g @fitlab-ai/agent-infra
-npx @fitlab-ai/agent-infra init
 ```
 
 **Option B - Shell script**
 
 ```bash
+# Convenience wrapper — detects Node.js and runs npm install -g internally
 curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh
-```
-
-**Option C - Install from source**
-
-```bash
-git clone https://github.com/fitlab-ai/agent-infra.git
-cd agent-infra
-sh install.sh
 ```
 
 ### Updating agent-infra
 
-Already installed? Update to the latest version using the same method you used to install:
-
-**Option A - npm**
-
 ```bash
 npm update -g @fitlab-ai/agent-infra
-```
-
-**Option B - Shell script**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh
-```
-
-**Option C - Install from source**
-
-```bash
-cd agent-infra
-git pull
-sh install.sh
 ```
 
 Check your current version:
@@ -195,7 +169,7 @@ agent-infra is intentionally simple: a bootstrap CLI creates the seed configurat
 
 ### End-to-End Flow
 
-1. **Install** — `npm install -g @fitlab-ai/agent-infra` (or use the shell script)
+1. **Install** — `npm install -g @fitlab-ai/agent-infra` (or use the shell script wrapper)
 2. **Initialize** — `ai init` in the project root to generate `.airc.json` and install the seed command
 3. **Render** — run `update-agent-infra` in any AI TUI to pull templates and generate all managed files
 4. **Develop** — use 28 built-in skills to drive the full lifecycle: `analysis → design → implementation → review → fix → commit`

@@ -3,68 +3,25 @@
 # Usage: curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh
 set -e
 
-REPO_OWNER="fitlab-ai"
-REPO_NAME="agent-infra"
-REPO_SSH="git@github.com:${REPO_OWNER}/${REPO_NAME}.git"
-REPO_HTTPS="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
-INSTALL_DIR="$HOME/.agent-infra"
-# Symlink name for the installed command in PATH.
-BIN_NAME="agent-infra"
+NPM_PACKAGE="@fitlab-ai/agent-infra"
+LEGACY_DIR="$HOME/.agent-infra"
+LEGACY_BIN_DIR="$HOME/.local/bin"
 
 # ---------- helpers ----------
 info()  { printf '  \033[1;34m>\033[0m %s\n' "$*"; }
 ok()    { printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
+warn()  { printf '  \033[1;33m!\033[0m %s\n' "$*"; }
 err()   { printf '  \033[1;31m✗\033[0m %s\n' "$*" >&2; }
 
-# ---------- pre-checks ----------
-if ! command -v git >/dev/null 2>&1; then
-  err "git is required but not found. Please install git first."
-  exit 1
-fi
-
-# ---------- select clone method ----------
-# Priority: gh CLI > SSH > HTTPS
-select_repo_url() {
-  if command -v gh >/dev/null 2>&1 && gh auth token >/dev/null 2>&1; then
-    # gh is authenticated — let it handle the clone directly
-    echo "gh"
-    return
+legacy_link_target() {
+  target_path=$1
+  if [ ! -L "$target_path" ]; then
+    return 1
   fi
-  if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
-    echo "$REPO_SSH"
-    return
-  fi
-  echo "$REPO_HTTPS"
+  readlink "$target_path" 2>/dev/null || return 1
 }
 
-# ---------- clone or update ----------
-if [ -d "$INSTALL_DIR" ]; then
-  info "Updating existing installation at $INSTALL_DIR ..."
-  git -C "$INSTALL_DIR" fetch --tags --quiet
-  ok "Fetched latest tags."
-else
-  CLONE_METHOD=$(select_repo_url)
-  if [ "$CLONE_METHOD" = "gh" ]; then
-    info "Cloning agent-infra via gh CLI to $INSTALL_DIR ..."
-    gh repo clone "${REPO_OWNER}/${REPO_NAME}" "$INSTALL_DIR" -- --quiet
-  else
-    info "Cloning agent-infra to $INSTALL_DIR ..."
-    git clone --quiet "$CLONE_METHOD" "$INSTALL_DIR"
-  fi
-  ok "Cloned successfully."
-fi
-
-LATEST_TAG=$(git -C "$INSTALL_DIR" tag --sort=-v:refname | head -n 1)
-if [ -z "$LATEST_TAG" ]; then
-  err "No tags found in agent-infra repository. This is unexpected."
-  exit 1
-fi
-git -C "$INSTALL_DIR" checkout --quiet "$LATEST_TAG"
-ok "Using stable release: $LATEST_TAG"
-
-# ---------- install CLI command ----------
-# Try ~/.local/bin first (no sudo needed), fall back to /usr/local/bin.
-# The installer requires the Node.js CLI entrypoint and Node.js >= 18.
+# ---------- pre-checks ----------
 if ! command -v node >/dev/null 2>&1; then
   err "Node.js >= 18 is required but not found."
   err "Install Node.js: https://nodejs.org/"
@@ -78,37 +35,50 @@ if [ "$NODE_MAJOR" -lt 18 ] 2>/dev/null; then
   exit 1
 fi
 
-BIN_SOURCE="$INSTALL_DIR/bin/cli.js"
-chmod +x "$BIN_SOURCE"
-
-BIN_DIR=""
-if [ -d "$HOME/.local/bin" ] && echo "$PATH" | grep -q "$HOME/.local/bin"; then
-  BIN_DIR="$HOME/.local/bin"
-elif [ -d "$HOME/.local/bin" ]; then
-  BIN_DIR="$HOME/.local/bin"
-elif [ -w "/usr/local/bin" ]; then
-  BIN_DIR="/usr/local/bin"
-else
-  mkdir -p "$HOME/.local/bin"
-  BIN_DIR="$HOME/.local/bin"
+if ! command -v npm >/dev/null 2>&1; then
+  err "npm is required but not found."
+  err "npm is bundled with Node.js >= 18. Please reinstall Node.js: https://nodejs.org/"
+  exit 1
 fi
 
-ln -sf "$BIN_SOURCE" "$BIN_DIR/$BIN_NAME"
-ln -sf "$BIN_SOURCE" "$BIN_DIR/ai"
-ok "Installed $BIN_NAME to $BIN_DIR/ (shorthand: ai)"
-
-# ---------- PATH hint ----------
-if ! command -v "$BIN_NAME" >/dev/null 2>&1; then
+# ---------- detect legacy clone install ----------
+if [ -d "$LEGACY_DIR" ]; then
   echo ""
-  info "Add $BIN_DIR to your PATH:"
-  echo "  export PATH=\"$BIN_DIR:\$PATH\""
+  warn "Detected legacy clone install at $LEGACY_DIR"
+  warn "This script now installs via npm. The old clone directory is no longer needed."
+  warn "After verifying the npm install works, you can remove it:"
+  echo "    rm -rf $LEGACY_DIR"
   echo ""
 fi
+
+LEGACY_LINK_DETECTED=0
+
+for legacy_link in "$LEGACY_BIN_DIR/ai" "$LEGACY_BIN_DIR/agent-infra"; do
+  link_target=$(legacy_link_target "$legacy_link" || true)
+  case "$link_target" in
+    *".agent-infra"*)
+      LEGACY_LINK_DETECTED=1
+      ;;
+  esac
+done
+
+if [ "$LEGACY_LINK_DETECTED" -eq 1 ]; then
+  warn "Detected legacy symlink under $LEGACY_BIN_DIR"
+  warn "After verifying the npm install works, you can remove it:"
+  echo "    rm -f $LEGACY_BIN_DIR/ai $LEGACY_BIN_DIR/agent-infra"
+  echo ""
+fi
+
+# ---------- install via npm ----------
+info "Installing $NPM_PACKAGE via npm ..."
+npm install -g "$NPM_PACKAGE"
+ok "agent-infra installed successfully!"
 
 # ---------- done ----------
 echo ""
-ok "agent-infra installed successfully!"
-echo ""
 echo "  Next step: cd into your project and run:"
 echo "    agent-infra init  (or: ai init)"
+echo ""
+echo "  To update later:"
+echo "    npm update -g $NPM_PACKAGE"
 echo ""

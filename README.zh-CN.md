@@ -114,45 +114,19 @@ agent-infra 的目标就是把这层协作面标准化。它为所有支持的 A
 
 ```bash
 npm install -g @fitlab-ai/agent-infra
-npx @fitlab-ai/agent-infra init
 ```
 
 **方式 B - Shell 脚本**
 
 ```bash
+# 便捷封装：检测 Node.js 后，内部执行 npm install -g
 curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh
-```
-
-**方式 C - 从源码安装**
-
-```bash
-git clone https://github.com/fitlab-ai/agent-infra.git
-cd agent-infra
-sh install.sh
 ```
 
 ### 更新 agent-infra
 
-如果已经安装过，可以按你最初安装时使用的方式升级到最新版本：
-
-**方式 A - npm**
-
 ```bash
 npm update -g @fitlab-ai/agent-infra
-```
-
-**方式 B - Shell 脚本**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh
-```
-
-**方式 C - 从源码安装**
-
-```bash
-cd agent-infra
-git pull
-sh install.sh
 ```
 
 查看当前版本：
@@ -195,7 +169,7 @@ agent-infra 的结构刻意保持简单：引导 CLI 负责生成种子配置，
 
 ### 端到端流程
 
-1. **安装** — `npm install -g @fitlab-ai/agent-infra`（或使用 shell 脚本）
+1. **安装** — `npm install -g @fitlab-ai/agent-infra`（或使用 shell 脚本便捷封装）
 2. **初始化** — 在项目根目录运行 `ai init`，生成 `.airc.json` 并安装种子命令
 3. **渲染** — 在任意 AI TUI 中执行 `update-agent-infra`，拉取模板并生成所有受管理文件
 4. **开发** — 使用 28 个内置 skill 驱动完整生命周期：`analysis → design → implementation → review → fix → commit`
