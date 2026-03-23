@@ -65,13 +65,15 @@ rg --files .github/ISSUE_TEMPLATE -g '*.yml' -g '!config.yml'
 如果存在模板文件，读取每个模板的顶层 `name:` 字段，构建候选列表。结合任务标题和描述，从候选列表中选择最匹配的模板。
 
 示例候选列表：
-- `01_bug_report.yml` — 🐛 问题报告 / Bug Report
-- `02_question.yml` — ❓ 问题咨询 / Question
-- `03_feature_request.yml` — ✨ 功能请求 / Feature Request
-- `04_documentation.yml` — 📚 文档问题 / Documentation Issue
-- `05_other.yml` — 🔧 其他问题 / Other Issues
+- `bug_report.yml` — Bug 类模板
+- `question.yml` — 问题咨询类模板
+- `feature_request.yml` — 功能请求类模板
+- `documentation.yml` — 文档问题类模板
+- `other.yml` — 通用兜底模板
 
 如果没有明确匹配的模板，选择最接近的一个。
+
+以上文件名仅为示例，应以目标项目实际存在的模板为准。
 
 如果没有模板、没有匹配到合适模板，或模板 YAML 解析失败，则直接进入 **3c fallback / 兜底路径**。
 
@@ -173,7 +175,7 @@ issue_number="${issue_url##*/}"
 
 如果已经确定了 `{issue-type}`，在创建后以 best-effort 方式设置 Issue Type：
 
-获取仓库信息（后续 `in:` label 步骤也会复用）：
+先获取仓库信息，后续 `in:` label 步骤也会复用：
 
 ```bash
 repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"

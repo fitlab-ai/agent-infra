@@ -139,9 +139,9 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ### 安全
 ```bash
-/import-dependabot          # 导入 Dependabot 告警
+/import-dependabot <number> # 导入 Dependabot 告警
 /close-dependabot           # 关闭 Dependabot 告警
-/import-codescan            # 导入 Code Scanning 告警
+/import-codescan <number>   # 导入 Code Scanning 告警
 /close-codescan             # 关闭 Code Scanning 告警
 ```
 
