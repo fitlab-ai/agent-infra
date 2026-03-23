@@ -30,6 +30,9 @@ git clone git@github.com:fitlab-ai/agent-infra.git
 
 # 安装依赖：无需安装，仅使用 Node.js 内置模块
 
+# 启用 Git hooks（仅首次 clone 后执行一次）
+git config core.hooksPath .github/hooks
+
 # 构建（修改 src/ 或 lib/ 后需要运行）
 npm run build
 

@@ -29,6 +29,9 @@ git clone <repository-url>
 # Install dependencies
 # TODO: Add your project's install command
 
+# Enable Git hooks (run once after first clone)
+git config core.hooksPath .github/hooks
+
 # Build
 # TODO: Add your project's build command
 

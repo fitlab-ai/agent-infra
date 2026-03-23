@@ -29,6 +29,9 @@ git clone <repository-url>
 # 安装依赖
 # TODO: 添加你的项目安装命令
 
+# 启用 Git hooks（仅首次 clone 后执行一次）
+git config core.hooksPath .github/hooks
+
 # 构建
 # TODO: 添加你的项目构建命令
 
