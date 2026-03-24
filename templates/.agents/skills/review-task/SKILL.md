@@ -61,6 +61,8 @@ Choose exactly one branch based on the findings:
 - blockers that can be fixed in a focused pass -> changes requested
 - major redesign or re-implementation needed -> rejected
 
+> The full four-branch output templates, selection rules, and prohibition clauses live in `reference/output-templates.md`. Read `reference/output-templates.md` before reporting the review result.
+
 Include all TUI command formats in the next-step output.
 
 ## Completion Checklist

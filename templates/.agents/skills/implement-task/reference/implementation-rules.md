@@ -37,6 +37,17 @@ If tests fail:
 - re-run tests after each fix until they pass, or confirm that the problem is an external blocker
 - only stop without producing the implementation artifact when the failure is caused by an external blocker, missing environment, or unclear requirement that cannot be resolved inside the task
 
+Two-way failure handling:
+1. implementation-caused failures:
+   - fix the code, tests, docs, or fixtures introduced by this implementation
+   - re-run the test command after each fix
+   - continue until all required tests pass
+2. external blockers:
+   - confirm the failure comes from missing environment, unrelated upstream breakage, or unclear requirements outside this task
+   - stop without creating `implementation.md` / `implementation-r{N}.md`
+   - do not mark implementation complete in `task.md`
+   - do not output the normal success/next-step template
+
 ## Notes
 
 1. **Prerequisite**: the approved technical plan must exist (`plan.md` or `plan-r{N}.md`)

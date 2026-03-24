@@ -23,6 +23,37 @@ git diff <target-branch>...HEAD --stat
 git diff <target-branch>...HEAD
 ```
 
+### 8. Sync PR Metadata
+
+Before syncing labels, verify the standard label system:
+
+```bash
+gh label list --search "type:" --limit 1 --json name --jq 'length'
+```
+
+If the result is `0`, run `init-labels` before retrying metadata sync.
+
+Type label mapping:
+
+| task.md type | GitHub label |
+|---|---|
+| `bug`, `bugfix` | `type: bug` |
+| `feature` | `type: feature` |
+| `enhancement` | `type: enhancement` |
+| `refactor`, `refactoring` | `type: enhancement` |
+| `documentation` | `type: documentation` |
+| `dependency-upgrade` | `type: dependency-upgrade` |
+| `task` | `type: task` |
+| other values | skip |
+
+Metadata sync order:
+1. query Issue labels and milestone best-effort with `gh issue view {issue-number} --json labels,milestone`
+2. add the mapped type label with `gh pr edit {pr-number} --add-label "{type-label}"`
+3. inherit non-`type:` and non-`status:` Issue labels with repeated `gh pr edit ... --add-label`
+4. add relevant `in: {module}` labels without removing existing ones
+5. resolve milestone in order: PR -> task.md -> Issue -> branch/tag inference -> `General Backlog`
+6. ensure the PR body contains `Closes #{issue-number}` or an equivalent closing keyword
+
 ### 7. Create PR
 
 - Extract `issue_number` from task.md when this work belongs to an active task
@@ -38,4 +69,18 @@ gh pr create --base <target-branch> --title "<title>" --assignee @me --body "$(c
 Generated with AI assistance
 EOF
 )"
+```
+
+Final user output should include both follow-up paths in order:
+
+```text
+Next steps:
+  - optional reviewer summary sync:
+    - Claude Code / OpenCode: /sync-pr {task-id}
+    - Gemini CLI: /agent-infra:sync-pr {task-id}
+    - Codex CLI: $sync-pr {task-id}
+  - complete the task after the workflow truly finishes:
+    - Claude Code / OpenCode: /complete-task {task-id}
+    - Gemini CLI: /agent-infra:complete-task {task-id}
+    - Codex CLI: $complete-task {task-id}
 ```

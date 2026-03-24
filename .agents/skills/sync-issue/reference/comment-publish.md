@@ -19,6 +19,18 @@ Artifact extraction rules:
 Build the artifact timeline in Activity Log order. Only include artifacts whose files still exist.
 Typical artifact filenames include `implementation-r*.md` and `review-r*.md`.
 
+Published-set detection:
+
+```bash
+grep -qF "<!-- sync-issue:{task-id}:{file-stem} -->" "$comments_jsonl"
+```
+
+Interpretation:
+- match found -> the artifact is already published
+- no match -> the artifact can be created now
+
+Define `has_unpublished_artifacts` before publishing comments: whether any non-`summary` artifact in the timeline is still unpublished. Keep that flag fixed while processing this sync pass.
+
 Recommended title mapping:
 
 | file-stem | title |
@@ -39,11 +51,26 @@ Recommended title mapping:
 
 Keep `summary` last. Do not collapse multiple rounds into one comment.
 
+Unified comment format:
+
+```markdown
+<!-- sync-issue:{task-id}:{file-stem} -->
+## {artifact-title}
+
+{artifact original body or summary body}
+
+---
+*由 AI 自动生成 · 内部追踪：{task-id}*
+```
+
 Summary handling rules:
 - if `summary` does not exist, create it
 - if `summary` exists and `has_unpublished_artifacts=true`, delete the old `summary` and recreate it at the end
 - if `summary` exists, `has_unpublished_artifacts=false`, and the content changed, patch the existing comment in place
 - if `summary` exists, `has_unpublished_artifacts=false`, and the content is unchanged, do nothing
+
+Zero-operation rule:
+- if all artifacts are already synced and `summary` content is unchanged, publish nothing and report `所有产物已同步，无新内容`
 
 When updating an existing summary comment, use:
 

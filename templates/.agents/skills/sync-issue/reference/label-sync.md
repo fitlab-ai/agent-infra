@@ -38,6 +38,13 @@ gh label list --search "in: {module}" --limit 10 --json name --jq '.[].name'
 gh issue edit {issue-number} --add-label "in: {module}"
 ```
 
+`in:` label flow:
+1. extract changed file paths from implementation artifacts first; fall back to analysis artifacts only when implementation artifacts do not exist
+2. take the first path segment as `{module}`
+3. de-duplicate all inferred modules
+4. check whether each exact `in: {module}` label exists before adding it
+5. add matching labels only; never remove existing `in:` labels
+
 Issue Type workflow:
 
 ```bash

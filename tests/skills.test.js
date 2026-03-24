@@ -184,7 +184,10 @@ test("sync-issue skill documents issue type sync, timeline comments, and absolut
     /\| commit is already on a protected branch \| Mode A: Completed \|/,
     /\| PR exists and its state is `OPEN` or `MERGED` \| Mode B: PR stage \|/,
     /main` or `master`|protected release line/,
-    /Inference algorithm when `task\.md` does not set `milestone` explicitly/,
+    /Inference branches when `task\.md` does not set `milestone` explicitly/,
+    /Branch A: if the current branch matches `\{major\}\.\{minor\}\.x`/,
+    /Branch B: if the current branch is `main` or `master`/,
+    /Branch C fallback: if no branch or tag rule yields a version line, fall back to `General Backlog`/,
     /\(X\+1\)\.0\.x/,
     /latest `vX\.Y\.Z` tag and fall back to `X\.Y\.x`/,
     /\| `summary` \| `交付摘要` \|/,
@@ -603,11 +606,100 @@ test("create-issue skill limits issue content to task.md and writes back issue_n
   });
 });
 
+test("create-issue skill keeps template candidates, fallback mappings, and sync-issue next steps", () => {
+  const corpus = skillContentPaths("create-issue").map(read).join("\n");
+
+  [
+    /bug_report\.yml/,
+    /feature_request\.yml/,
+    /\| `bug`, `bugfix` \| `type: bug` \|/,
+    /\| `feature` \| `type: feature` \|/,
+    /\| `bug`, `bugfix` \| `Bug` \|/,
+    /General Backlog/,
+    /Do not remove existing `in:` labels|Do not fail Issue creation/,
+    /\/agent-infra:sync-issue \{task-id\}/,
+    /\$sync-issue \{task-id\}/
+  ].forEach((pattern) => {
+    assert.match(corpus, pattern);
+  });
+});
+
 test("refine-task records the implementation artifact during prerequisite discovery", () => {
   skillDocPaths("refine-task").forEach((relativePath) => {
     assertContainsPatterns(relativePath, [
       /记录 `\{implementation-artifact\}`|Record `\{implementation-artifact\}`/
     ]);
+  });
+});
+
+test("refine-task skill keeps re-review decision rules and output template", () => {
+  const corpus = skillContentPaths("refine-task").map(read).join("\n");
+
+  [
+    /if this round fixed any `Blocker` or `Major`, recommend re-review by default/,
+    /never present direct commit as the only next step/,
+    /\/agent-infra:review-task \{task-id\}/,
+    /\$commit/
+  ].forEach((pattern) => {
+    assert.match(corpus, pattern);
+  });
+});
+
+test("review-task skill keeps verdict branch templates and prohibitions", () => {
+  const corpus = skillContentPaths("review-task").map(read).join("\n");
+
+  [
+    /reference\/output-templates\.md/,
+    /if `Blocker > 0`, never output an approval template/,
+    /\/agent-infra:refine-task \{task-id\}/,
+    /\/agent-infra:implement-task \{task-id\}/,
+    /\$commit/
+  ].forEach((pattern) => {
+    assert.match(corpus, pattern);
+  });
+});
+
+test("create-pr skill keeps metadata sync order and ordered next steps", () => {
+  const corpus = skillContentPaths("create-pr").map(read).join("\n");
+
+  [
+    /gh issue view \{issue-number\} --json labels,milestone/,
+    /\| `refactor`, `refactoring` \| `type: enhancement` \|/,
+    /resolve milestone in order: PR -> task\.md -> Issue -> branch\/tag inference -> `General Backlog`/,
+    /never present `complete-task` as the only next step/,
+    /\/agent-infra:sync-pr \{task-id\}/,
+    /\$complete-task \{task-id\}/
+  ].forEach((pattern) => {
+    assert.match(corpus, pattern);
+  });
+});
+
+test("sync-pr skill keeps milestone inference and reviewer-summary content rules", () => {
+  const corpus = skillContentPaths("sync-pr").map(read).join("\n");
+
+  [
+    /\(X\+1\)\.0\.x/,
+    /inherit the Issue milestone/,
+    /self-contained technical decisions/,
+    /avoid internal shorthand such as `方案 A\/B`/,
+    /review-history table/,
+    /\| 轮次 \| 结论 \| 问题统计 \| 修复状态 \|/
+  ].forEach((pattern) => {
+    assert.match(corpus, pattern);
+  });
+});
+
+test("implement-task reference keeps the two-way test-failure handling", () => {
+  const corpus = skillContentPaths("implement-task").map(read).join("\n");
+
+  [
+    /Two-way failure handling/,
+    /implementation-caused failures/,
+    /external blockers/,
+    /do not mark implementation complete in `task\.md`/,
+    /do not output the normal success\/next-step template/
+  ].forEach((pattern) => {
+    assert.match(corpus, pattern);
   });
 });
 

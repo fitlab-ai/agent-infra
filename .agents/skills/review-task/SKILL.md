@@ -61,6 +61,8 @@ date "+%Y-%m-%d %H:%M:%S"
 - 有 blocker，且可集中修复 -> 需要修改
 - 需要重大返工或重新实现 -> 拒绝
 
+> 完整的 4 分支输出模板、判断规则和禁止条款见 `reference/output-templates.md`。向用户汇报审查结论前先读取 `reference/output-templates.md`。
+
 向用户展示下一步时，必须包含所有 TUI 命令格式。
 
 ## 完成检查清单

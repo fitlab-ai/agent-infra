@@ -10,13 +10,21 @@ Milestone priority:
 3. inferred version line from the current branch
 4. `General Backlog`
 
-Inference algorithm when `task.md` does not set `milestone` explicitly:
+Inference branches when `task.md` does not set `milestone` explicitly:
 1. detect the current branch with `git branch --show-current`
-2. if the current branch matches `{major}.{minor}.x`, use that exact line milestone
-3. if the current branch is `main` or `master`, inspect existing `{major}.{minor}.x` branches
-4. when a highest existing line `X.Y.x` exists, target `(X+1).0.x`
-5. if no version line exists, inspect the latest `vX.Y.Z` tag and fall back to `X.Y.x`
-6. if no branch or tag rule yields a version line, fall back to `General Backlog`
+2. Branch A: if the current branch matches `{major}.{minor}.x`, use that exact line milestone
+3. Branch B: if the current branch is `main` or `master`, inspect existing `{major}.{minor}.x` branches
+4. Branch B result: when a highest existing line `X.Y.x` exists, target `(X+1).0.x`
+5. Branch C: if no branch rule yields a version line, inspect the latest `vX.Y.Z` tag and fall back to `X.Y.x`
+6. Branch C fallback: if no branch or tag rule yields a version line, fall back to `General Backlog`
+
+Fallback and assignment logic:
+1. preserve an existing Issue milestone when one is already set
+2. otherwise prefer an explicit `milestone` field from `task.md`
+3. otherwise apply the branch/tag inference above
+4. if the inferred target milestone does not exist, downgrade to `General Backlog`
+5. if `General Backlog` also does not exist, record `Milestone: skipped (not found)` and stop milestone sync
+6. once a milestone title is resolved, assign it and record either `{target} (assigned)` or `General Backlog (fallback)`
 
 Useful commands:
 

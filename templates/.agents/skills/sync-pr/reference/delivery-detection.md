@@ -23,6 +23,20 @@ Milestone priority:
 4. inferred release line
 5. `General Backlog`
 
+Milestone inference algorithm:
+1. if the current branch matches `{major}.{minor}.x`, use that exact release line
+2. if the current branch is `main` or `master`, inspect existing `{major}.{minor}.x` branches and target `(X+1).0.x`
+3. if no release line branch exists, inspect the latest `vX.Y.Z` tag and fall back to `X.Y.x`
+4. if none of the above resolve, fall back to `General Backlog`
+
+Execution order:
+1. preserve an existing PR milestone when present
+2. otherwise prefer explicit `milestone` in task.md
+3. otherwise inherit the Issue milestone if it exists
+4. otherwise apply the branch/tag inference above
+5. if the target milestone is unavailable, fall back to `General Backlog`
+6. if even `General Backlog` is unavailable, record `Milestone: skipped (not found)`
+
 Useful commands:
 
 ```bash
