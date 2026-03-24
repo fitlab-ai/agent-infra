@@ -19,22 +19,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const RETIRED_FILE_ENTRIES = new Set([
-  '.agent-workspace/README.md',
-  '.agent-infra/config.json',
-  '.agent-infra/workspace/README.md',
-  '.github/hooks/',
-  '.github/ISSUE_TEMPLATE/',
-  '.github/PULL_REQUEST_TEMPLATE.md',
-  '.github/release.yml',
-  '.github/workflows/pr-title-check.yml',
-  '.github/dependabot.yml',
-  'CONTRIBUTING.md',
-  'SECURITY.md',
-  '.editorconfig',
-  '.mailmap'
-]);
-
 const DEFAULTS = {
   "files": {
     "managed": [
@@ -189,16 +173,6 @@ function langSelect(rels, lang, allSet, project) {
   return sel;
 }
 
-function pruneRetiredConfig(config) {
-  const prune = (entries = []) => entries.filter((entry) => !RETIRED_FILE_ENTRIES.has(entry));
-
-  delete config.modules;
-  config.files = config.files || {};
-  config.files.managed = prune(config.files.managed);
-  config.files.merged = prune(config.files.merged);
-  config.files.ejected = prune(config.files.ejected);
-}
-
 function syncTemplates(projectRoot) {
   const configDir = path.join(projectRoot, '.agents');
   const cfgPath = path.join(configDir, '.airc.json');
@@ -244,7 +218,6 @@ function syncTemplates(projectRoot) {
 
   const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
   const configPathRel = norm(path.relative(projectRoot, cfgPath));
-  pruneRetiredConfig(cfg);
   const templateRoot = resolveProjectTemplateDir(projectRoot, cfg.templateSource);
   if (!templateRoot) {
     return { error: 'Template source not found. Install via npm: npm install -g @fitlab-ai/agent-infra' };

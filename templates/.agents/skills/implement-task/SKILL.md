@@ -221,7 +221,7 @@ After completing the checklist, **stop**. Do not auto-commit. Wait for code revi
 
 1. **Prerequisites**: Must have a reviewed technical plan (`plan.md` or `plan-r{N}.md` exists and is approved)
 2. **No auto-commit**: Do NOT execute `git commit` or `git add` automatically. Remind the user to commit manually
-3. **Test requirement**: All new code must have unit tests; test coverage must not decrease
+3. **Test requirement**: All new code must have unit tests; test coverage must not decrease. When removing a feature, delete the test fixtures and assertions that existed solely for that feature — do not mechanically flip assertions; every assertion must verify meaningful business logic, not merely confirm that data passes through unchanged
 4. **Code quality**: Follow project coding standards
 5. **Plan deviation**: If you need to deviate from the plan, document the reason in the implementation report
 6. **Versioning rule**: First-round implementation uses `implementation.md`; later re-implementations use `implementation-r{N}.md`

@@ -212,10 +212,9 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
       language: "zh-CN",
       templateSource: "templates/",
       templateVersion: "stale",
-      modules: ["ai", "github"],
       files: {
-        managed: [".editorconfig"],
-        merged: [".mailmap"],
+        managed: [],
+        merged: [],
         ejected: []
       }
     };
@@ -255,9 +254,6 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     const updated = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
     );
-    assert.ok(!("modules" in updated), "legacy modules field should be removed");
-    assert.ok(!updated.files.managed.includes(".editorconfig"));
-    assert.ok(!updated.files.merged.includes(".mailmap"));
     assert.ok(updated.files.managed.includes(".agents/skills/"));
     assert.ok(updated.files.merged.includes("**/test.*"));
 
@@ -305,10 +301,9 @@ test("agent-infra update migrates v0.2 legacy config and workspace paths", () =>
         language: "en",
         templateSource: "templates/",
         templateVersion: "stale",
-        modules: ["ai", "github"],
         files: {
-          managed: [".editorconfig"],
-          merged: [".mailmap"],
+          managed: [],
+          merged: [],
           ejected: []
         }
       }, null, 2) + "\n",
@@ -326,10 +321,6 @@ test("agent-infra update migrates v0.2 legacy config and workspace paths", () =>
     assert.match(output, /Migrated \.airc\.json -> \.agents\/\.airc\.json/);
     assert.match(output, /Migrated \.agent-workspace -> \.agents\/workspace/);
     assert.ok(fs.existsSync(path.join(tmpDir, ".agents", ".airc.json")));
-    const migrated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8"));
-    assert.ok(!("modules" in migrated), "legacy modules field should be removed during migration");
-    assert.ok(!migrated.files.managed.includes(".editorconfig"));
-    assert.ok(!migrated.files.merged.includes(".mailmap"));
     assert.ok(fs.existsSync(path.join(tmpDir, ".agents", "workspace", "README.md")));
     assert.ok(!fs.existsSync(path.join(tmpDir, ".airc.json")));
     assert.ok(!fs.existsSync(path.join(tmpDir, ".agent-workspace")));
@@ -352,10 +343,9 @@ test("agent-infra update migrates v0.3 legacy config and workspace paths", () =>
         language: "en",
         templateSource: "templates/",
         templateVersion: "stale",
-        modules: ["ai", "github"],
         files: {
-          managed: [".editorconfig"],
-          merged: [".mailmap"],
+          managed: [],
+          merged: [],
           ejected: []
         }
       }, null, 2) + "\n",
@@ -374,11 +364,6 @@ test("agent-infra update migrates v0.3 legacy config and workspace paths", () =>
     assert.ok(fs.existsSync(path.join(tmpDir, ".agents", ".airc.json")));
     assert.ok(fs.existsSync(path.join(tmpDir, ".agents", "workspace", "README.md")));
     assert.ok(!fs.existsSync(path.join(tmpDir, ".agent-infra")));
-
-    const migrated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8"));
-    assert.ok(!("modules" in migrated), "legacy modules field should be removed during migration");
-    assert.ok(!migrated.files.managed.includes(".editorconfig"));
-    assert.ok(!migrated.files.merged.includes(".mailmap"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

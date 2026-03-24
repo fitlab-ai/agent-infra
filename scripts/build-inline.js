@@ -5,15 +5,25 @@ import { fileURLToPath } from 'node:url';
 
 const rootDir = path.dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const sourcePath = path.join(rootDir, 'src', 'sync-templates.js');
-const targetPath = path.join(
-  rootDir,
-  'templates',
-  '.agents',
-  'skills',
-  'update-agent-infra',
-  'scripts',
-  'sync-templates.js'
-);
+const targetPaths = [
+  path.join(
+    rootDir,
+    'templates',
+    '.agents',
+    'skills',
+    'update-agent-infra',
+    'scripts',
+    'sync-templates.js'
+  ),
+  path.join(
+    rootDir,
+    '.agents',
+    'skills',
+    'update-agent-infra',
+    'scripts',
+    'sync-templates.js'
+  )
+];
 
 const DEFAULTS_EXPR = [
   'const DEFAULTS = JSON.parse(',
@@ -46,25 +56,29 @@ function buildInlineContent() {
 
 function main() {
   const nextContent = buildInlineContent();
-  const currentContent = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, 'utf8') : null;
   const checkOnly = process.argv.includes('--check');
 
   if (checkOnly) {
-    if (currentContent !== nextContent) {
-      process.stderr.write(
-        'Inline build output is out of date. Run: node scripts/build-inline.js\n'
-      );
-      process.exitCode = 1;
-      return;
+    for (const targetPath of targetPaths) {
+      const currentContent = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, 'utf8') : null;
+      if (currentContent !== nextContent) {
+        process.stderr.write(
+          `Inline build output is out of date for ${path.relative(rootDir, targetPath)}. Run: node scripts/build-inline.js\n`
+        );
+        process.exitCode = 1;
+        return;
+      }
     }
 
     process.stdout.write('Inline build output is up to date.\n');
     return;
   }
 
-  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.writeFileSync(targetPath, nextContent, 'utf8');
-  process.stdout.write(`Updated ${path.relative(rootDir, targetPath)}\n`);
+  for (const targetPath of targetPaths) {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, nextContent, 'utf8');
+    process.stdout.write(`Updated ${path.relative(rootDir, targetPath)}\n`);
+  }
 }
 
 main();

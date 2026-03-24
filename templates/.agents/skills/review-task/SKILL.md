@@ -56,7 +56,7 @@ Follow the `code-review` step in `.agents/workflows/feature-development.yaml`:
 **Required review areas**:
 - [ ] Code quality and coding standards (per project instructions)
 - [ ] Bug and risk detection
-- [ ] Test coverage and test quality
+- [ ] Test coverage and test quality (when a feature is removed, verify that test fixtures and assertions for that feature are also removed — not mechanically flipped; assertions that only confirm data passes through unchanged are not valid tests)
 - [ ] Error handling and edge cases
 - [ ] Performance and security concerns
 - [ ] Code comments and documentation
