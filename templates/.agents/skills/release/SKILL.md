@@ -1,8 +1,6 @@
 ---
 name: release
-description: >
-  Execute the version release workflow. Triggered when the user
-  requests a version release. Argument: version number (X.Y.Z).
+description: "Run the version release workflow"
 ---
 
 # Version Release
@@ -13,7 +11,7 @@ Execute the version release workflow for the specified version.
 
 ## Execution Flow
 
-### Step 1: Parse and Validate Version
+### 1. Parse and Validate Version
 
 Extract version from arguments. Must match `X.Y.Z` format.
 
@@ -23,7 +21,7 @@ Parse components:
 
 If format is invalid, error: "Version format incorrect, expected X.Y.Z (e.g. 1.2.3)"
 
-### Step 2: Verify Clean Workspace
+### 2. Verify Clean Workspace
 
 ```bash
 git status --short
@@ -31,7 +29,7 @@ git status --short
 
 If there are uncommitted changes, error: "Workspace has uncommitted changes. Please commit or stash first."
 
-### Step 3: Pre-release Verification
+### 3. Pre-release Verification
 
 <!-- TODO: Replace with your project's pre-release verification steps -->
 
@@ -50,7 +48,7 @@ Handling rules:
 - If the current branch is unexpected, print a warning or exit based on your policy
 - If any verification command fails, stop the release process and fix the issue first
 
-### Step 4: Update Version References
+### 4. Update Version References
 
 <!-- TODO: Replace with your project's version update steps -->
 
@@ -76,7 +74,7 @@ Search for version references in project files and update them:
 
 If the project uses `package-lock.json`, run `npm install --package-lock-only` after updating `package.json` so the lockfile version stays in sync.
 
-### Step 5: Rebuild Artifacts
+### 5. Rebuild Artifacts
 
 <!-- TODO: Replace with your project's artifact rebuild steps -->
 
@@ -91,20 +89,20 @@ Execution guidance:
 - If your project has no generated artifacts, document that explicitly in the project-specific skill
 - If the rebuild fails, stop the release process and fix the build first
 
-### Step 6: Create Release Commit
+### 6. Create Release Commit
 
 ```bash
 git add -A
 git commit -m "chore: release v{version}"
 ```
 
-### Step 7: Create Git Tag
+### 7. Create Git Tag
 
 ```bash
 git tag v{version}
 ```
 
-### Step 8: Manage Milestones
+### 8. Manage Milestones
 
 Close the milestone for the released version when it exists, and create the missing planning milestones for the next cycle.
 
@@ -121,7 +119,7 @@ The script is responsible for:
 - When `PATCH=0`, also ensuring `{MAJOR}.{MINOR+1}.0` and `{MAJOR}.{MINOR+1}.x`
 - Printing a milestone summary with the released milestone action and new milestone count
 
-### Step 9: Output Summary
+### 9. Output Summary
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
 

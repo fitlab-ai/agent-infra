@@ -1,5 +1,5 @@
 ---
-description: "Run integration test workflow"
+description: "Run the integration test workflow"
 agent: general
 subtask: false
 ---

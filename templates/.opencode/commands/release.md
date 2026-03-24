@@ -1,5 +1,5 @@
 ---
-description: "Execute version release workflow"
+description: "Run the version release workflow"
 agent: general
 subtask: false
 ---

@@ -1,9 +1,6 @@
 ---
 name: close-dependabot
-description: >
-  Dismiss a Dependabot security alert with a documented justification.
-  Triggered when the user asks to dismiss a Dependabot alert.
-  Argument: alert number.
+description: "Close a Dependabot alert with a documented reason"
 ---
 
 # Dismiss Dependabot Alert

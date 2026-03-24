@@ -1,10 +1,6 @@
 ---
 name: check-task
-description: >
-  Check a task's current status, workflow progress, and context files. This is a
-  read-only operation that reports the task status and recommends appropriate
-  next steps. Triggered when the user asks to inspect task status. Argument:
-  task-id.
+description: "Check a task's current status and progress"
 ---
 
 # Check Task Status

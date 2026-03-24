@@ -1,8 +1,6 @@
 ---
 name: test-integration
-description: >
-  执行项目集成测试流程。
-  当用户要求运行集成测试或端到端验证时触发。
+description: "执行项目集成测试流程"
 ---
 
 # 运行集成测试

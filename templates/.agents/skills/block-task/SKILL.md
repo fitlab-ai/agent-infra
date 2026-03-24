@@ -1,10 +1,6 @@
 ---
 name: block-task
-description: >
-  Mark a task as blocked and record the blocking reason, moving it from
-  the active directory to the blocked directory. Use when a task cannot
-  proceed due to technical problems, unclear requirements, missing resources,
-  or pending decisions. Arguments: task-id, optional blocking reason.
+description: "Mark a task as blocked and record the reason"
 ---
 
 # Block Task

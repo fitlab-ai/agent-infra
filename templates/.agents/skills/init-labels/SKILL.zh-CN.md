@@ -1,9 +1,6 @@
 ---
 name: init-labels
-description: >
-  一次性初始化仓库的标准 GitHub Labels 体系。
-  创建通用 labels、基于项目目录结构自动探测 `in:` labels、
-  不创建 `theme:` labels、覆盖名称完全匹配的 GitHub 默认 labels，并提示未覆盖的默认 labels。
+description: "初始化仓库的 GitHub Labels 体系"
 ---
 
 # 初始化 GitHub Labels

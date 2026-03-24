@@ -1,8 +1,6 @@
 ---
 name: update-agent-infra
-description: >
-  更新当前项目的 AI 协作基础设施和项目治理配置，使其与最新的 agent-infra 模板保持一致。
-  智能合并模板变更，同时保留项目特定的定制内容。
+description: "更新项目 AI 协作配置"
 ---
 
 # 更新项目

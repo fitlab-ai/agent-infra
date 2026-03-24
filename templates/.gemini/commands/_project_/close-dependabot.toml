@@ -1,4 +1,4 @@
-description = "Close Dependabot security alert with documented reason"
+description = "Close a Dependabot alert with a documented reason"
 prompt = """
 Close Dependabot alert #{{args}}.
 

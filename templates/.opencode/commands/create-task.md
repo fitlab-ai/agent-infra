@@ -1,5 +1,5 @@
 ---
-description: "Create task from natural language description and generate requirement analysis document"
+description: "Create a task from a natural-language description"
 agent: general
 subtask: false
 ---

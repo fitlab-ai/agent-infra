@@ -1,6 +1,7 @@
 ---
-description: "Create a GitHub Issue from a task file. Triggered when the user asks to create an Issue for a task. Argument: task-id."
+description: "Create a GitHub Issue from a task file"
 usage: "/create-issue <task-id>"
+disable-model-invocation: true
 ---
 
 Read and execute the create-issue skill from `.agents/skills/create-issue/SKILL.md`.

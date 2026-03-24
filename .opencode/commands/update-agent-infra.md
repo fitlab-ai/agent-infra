@@ -1,5 +1,5 @@
 ---
-description: "通过重新渲染最新 templates/ 来更新项目 AI 协作配置"
+description: "更新项目 AI 协作配置"
 agent: general
 subtask: false
 ---

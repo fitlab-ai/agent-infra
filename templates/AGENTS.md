@@ -88,14 +88,22 @@ All code-level content uses **English**. Documentation provides **multilingual v
 
 ## Skill Authoring Conventions
 
-When writing or updating `.agents/skills/*/SKILL.md` files, keep step numbering consistent:
+When writing or updating `.agents/skills/*/SKILL.md` files and their templates, keep step numbering consistent:
 
 1. Use consecutive integers for top-level steps: `1.`, `2.`, `3.`.
 2. Use nested numbering only for child actions that belong to a parent step: `1.1`, `1.2`, `2.1`.
-3. Use `a`, `b`, and `c` markers for branches, conditions, or alternative paths within the same step.
+3. Use `a`, `b`, and `c` markers for subordinate options, conditional branches, or parallel possibilities within the same step; use them only for in-step expansion, not for naming standalone decision paths or output templates.
 4. Do not use intermediate numbers such as `1.5` or `2.5`; if a new standalone step is needed, renumber the following top-level steps.
 5. When renumbering, update every in-document step reference so the instructions remain accurate.
 6. Extract long bash scripts into a sibling `scripts/` directory; the SKILL.md should contain only a single-line invocation (e.g., `bash .agents/skills/<skill>/scripts/<script>.sh`) and a brief summary of the script's responsibilities.
+7. In SKILL.md files and their `reference/` templates, when a standalone conditional flow, decision path, or output template needs a label, use "Scenario" naming (for example, use "Scenario A").
+
+### SKILL.md Size Control
+
+- Keep the SKILL.md body within about 500 tokens (roughly 80 lines / 2KB).
+- Move content beyond that threshold into a sibling `reference/` directory.
+- Use explicit navigation in the skeleton, such as: `Read reference/xxx.md before executing this step.`
+- Keep scripts in `scripts/` and execute them instead of inlining long bash blocks.
 
 <!-- Canonical source: .agents/README.md - keep in sync -->
 

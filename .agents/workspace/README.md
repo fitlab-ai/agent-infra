@@ -1,26 +1,26 @@
-# AI 工作区
+# AI Workspace
 
-本目录是多 AI 协作的运行时工作区。除本 README 和 `.gitkeep` 文件外，所有内容均被 **git ignore**。
+This directory is the runtime workspace for multi-AI collaboration. All contents are **git-ignored** except for this README and `.gitkeep` files.
 
-## 目录结构
+## Directory Structure
 
 ```
 .agents/workspace/
-  active/           # 当前活跃的任务和交接文档
-  blocked/          # 被阻塞的任务，等待解决
-  completed/        # 已完成的任务（保留供参考）
-  logs/             # 协作日志和会话记录
+  active/           # Currently active tasks and handoff documents
+  blocked/          # Tasks that are blocked and waiting for resolution
+  completed/        # Completed tasks (kept for reference)
+  logs/             # Collaboration logs and session records
 ```
 
-## 使用方法
+## Usage
 
-- **active/**：工作开始时将任务文件放在这里。根据情况将其移至 `completed/` 或 `blocked/`。
-- **blocked/**：当任务无法继续时将其移至此处。在任务文件中记录阻塞原因。
-- **completed/**：任务完成后将其移至此处。这些作为历史记录保留。
-- **logs/**：存储会话日志、AI 对话导出或协作笔记。
+- **active/**: Place task files here when work begins. Move them to `completed/` or `blocked/` as appropriate.
+- **blocked/**: Move tasks here when they cannot proceed. Document the blocker in the task file.
+- **completed/**: Move tasks here when they are done. These serve as a historical record.
+- **logs/**: Store session logs, AI conversation exports, or collaboration notes.
 
-## 重要事项
+## Important
 
-- 本目录的内容**不受版本控制**（已被 git ignore）。
-- 不要在这里存储需要通过 git 共享的内容。
-- 模板和工作流定义属于 `.agents/` 目录，而非此处。
+- Contents of this directory are **not version-controlled** (git-ignored).
+- Do not store anything here that needs to be shared via git.
+- Templates and workflow definitions belong in `.agents/`, not here.

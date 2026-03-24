@@ -1,5 +1,5 @@
 ---
-description: "View task current status and progress"
+description: "Check a task's current status and progress"
 agent: general
 subtask: false
 ---

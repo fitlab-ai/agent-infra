@@ -1,5 +1,5 @@
 ---
-description: "从任务文件创建 GitHub Issue。 当用户要求为任务创建 Issue 时触发。参数：task-id。"
+description: "从任务文件创建 GitHub Issue"
 agent: general
 subtask: false
 ---

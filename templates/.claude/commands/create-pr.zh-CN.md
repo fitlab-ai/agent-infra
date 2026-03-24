@@ -1,5 +1,5 @@
 ---
-description: "创建 Pull Request 到指定或自动推断的目标分支。 当用户要求创建 PR 时触发。可选参数：目标分支。"
+description: "创建 Pull Request 到目标分支"
 usage: "/create-pr [target-branch]"
 ---
 

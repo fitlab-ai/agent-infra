@@ -1,9 +1,6 @@
 ---
 name: analyze-task
-description: >
-  Analyze an existing task and output a requirements analysis document,
-  supporting multi-round artifacts (`analysis.md` / `analysis-r{N}.md`).
-  Triggered when the user asks to analyze a task. Argument: task-id.
+description: "Analyze a task and produce a requirements document"
 ---
 
 # Analyze Task

@@ -1,5 +1,5 @@
 ---
-description: "Analyze an existing task and output a requirement analysis document"
+description: "Analyze a task and produce a requirements document"
 usage: "/analyze-task <task-id>"
 ---
 

@@ -1,5 +1,5 @@
 ---
-description: "一次性初始化仓库的标准 GitHub Milestones 体系。创建 General Backlog、基于当前版本的初始里程碑，并可选通过 --history 补齐历史版本里程碑。"
+description: "初始化仓库的 GitHub Milestones 体系"
 agent: general
 subtask: false
 ---

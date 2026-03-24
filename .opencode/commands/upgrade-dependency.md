@@ -1,5 +1,5 @@
 ---
-description: "升级项目中的指定依赖包到新版本并验证变更。 当用户要求升级依赖时触发。参数：包名、原版本和新版本。"
+description: "升级项目依赖到新版本并验证"
 agent: general
 subtask: false
 ---

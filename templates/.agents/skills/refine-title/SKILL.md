@@ -1,9 +1,6 @@
 ---
 name: refine-title
-description: >
-  Deeply analyze Issue or PR content and reformat the title to
-  Conventional Commits format. Triggered when the user requests
-  title optimization. Argument: issue or PR number.
+description: "Rewrite an Issue or PR title in Conventional Commits format"
 ---
 
 # Refine Title

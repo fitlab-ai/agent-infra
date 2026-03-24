@@ -1,5 +1,5 @@
 ---
-description: "一次性初始化仓库的标准 GitHub Labels 体系。创建通用 labels、自动探测 in: labels、不生成 theme: labels，并提示未覆盖的默认 labels。"
+description: "初始化仓库的 GitHub Labels 体系"
 agent: general
 subtask: false
 ---

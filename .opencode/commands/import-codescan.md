@@ -1,5 +1,5 @@
 ---
-description: "导入 Code Scanning（CodeQL）告警并创建修复任务。 当用户要求导入 Code Scanning 告警时触发。参数：告警编号。"
+description: "导入 Code Scanning 告警并创建修复任务"
 agent: general
 subtask: false
 ---

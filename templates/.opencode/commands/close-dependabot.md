@@ -1,5 +1,5 @@
 ---
-description: "Close Dependabot security alert with documented reason"
+description: "Close a Dependabot alert with a documented reason"
 agent: general
 subtask: false
 ---

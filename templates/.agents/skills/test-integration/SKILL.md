@@ -1,9 +1,6 @@
 ---
 name: test-integration
-description: >
-  Execute the project's integration test workflow.
-  Triggered when the user requests running integration tests
-  or end-to-end verification.
+description: "Run the integration test workflow"
 ---
 
 # Run Integration Tests

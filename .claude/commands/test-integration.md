@@ -1,5 +1,6 @@
 ---
-description: "执行项目集成测试流程。 当用户要求运行集成测试或端到端验证时触发。"
+description: "执行项目集成测试流程"
+disable-model-invocation: true
 ---
 
 读取并执行 `.agents/skills/test-integration/SKILL.md` 中的 test-integration 技能。

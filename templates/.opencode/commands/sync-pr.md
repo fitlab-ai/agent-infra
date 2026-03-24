@@ -1,5 +1,5 @@
 ---
-description: "Sync task progress to Pull Request comment"
+description: "Sync task progress to a Pull Request"
 agent: general
 subtask: false
 ---

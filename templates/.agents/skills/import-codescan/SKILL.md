@@ -1,9 +1,6 @@
 ---
 name: import-codescan
-description: >
-  Import a Code Scanning (CodeQL) alert and create a remediation task.
-  Triggered when the user asks to import a Code Scanning alert.
-  Argument: alert number.
+description: "Import a Code Scanning alert and create a remediation task"
 ---
 
 # Import Code Scanning Alert

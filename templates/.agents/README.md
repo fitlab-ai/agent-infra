@@ -36,12 +36,11 @@ This dual-config approach ensures every AI tool receives appropriate project con
     bug-fix.yaml                # Bug fix workflow
     code-review.yaml            # Code review workflow
     refactoring.yaml            # Refactoring workflow
-
-.agents/workspace/         # Runtime workspace (git-ignored)
-  active/                       # Currently active tasks
-  blocked/                      # Blocked tasks
-  completed/                    # Completed tasks
-  logs/                         # Collaboration logs
+  workspace/                    # Runtime workspace (git-ignored)
+    active/                     # Currently active tasks
+    blocked/                    # Blocked tasks
+    completed/                  # Completed tasks
+    logs/                       # Collaboration logs
 
 .claude/                        # Claude Code specific config
   CLAUDE.md                     # Project instructions for Claude
@@ -53,11 +52,12 @@ This dual-config approach ensures every AI tool receives appropriate project con
 
 The multi-AI collaboration follows a structured workflow:
 
-```
-1. Analysis    -->  2. Design    -->  3. Implementation
-                                            |
-6. Commit  <--  5. Fix Issues  <--  4. Review
-```
+1. Analysis
+2. Design
+3. Implementation
+4. Review
+5. Fix Issues
+6. Commit
 
 ### Phase Details
 
@@ -122,6 +122,13 @@ When writing or updating `.agents/skills/*/SKILL.md` files and their templates, 
 4. Do not use intermediate numbers such as `1.5` or `2.5`; if a new standalone step is needed, renumber the following top-level steps.
 5. When renumbering, update every in-document step reference so the instructions remain accurate.
 6. Extract long bash scripts into a sibling `scripts/` directory; the SKILL.md should contain only a single-line invocation (e.g., `bash .agents/skills/<skill>/scripts/<script>.sh`) and a brief summary of the script's responsibilities.
+
+### SKILL.md Size Control
+
+- Keep the SKILL.md body within about 500 tokens (roughly 80 lines / 2KB).
+- Move content beyond that threshold into a sibling `reference/` directory.
+- Use explicit navigation in the skeleton, such as: `Read reference/xxx.md before executing this step.`
+- Keep scripts in `scripts/` and execute them instead of inlining long bash blocks.
 
 ## FAQ
 

@@ -1,5 +1,5 @@
 ---
-description: "Deep-analyze Issue or PR content and reformat its title to Conventional Commits format"
+description: "Rewrite an Issue or PR title in Conventional Commits format"
 agent: general
 subtask: false
 ---

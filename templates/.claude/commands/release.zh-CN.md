@@ -1,6 +1,7 @@
 ---
-description: "执行版本发布流程。当用户要求发布版本时触发。参数：版本号（X.Y.Z）。"
+description: "执行版本发布流程"
 usage: "/release <version>"
+disable-model-invocation: true
 ---
 
 读取并执行 `.agents/skills/release/SKILL.md` 中的 release 技能。

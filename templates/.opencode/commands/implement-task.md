@@ -1,5 +1,5 @@
 ---
-description: "Implement task based on technical plan and output implementation report"
+description: "Implement a task from its technical plan and output a report"
 agent: general
 subtask: false
 ---

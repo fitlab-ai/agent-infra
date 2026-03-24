@@ -1,6 +1,7 @@
 ---
-description: "Auto-generate structured Release Notes from PR/commit and optionally create GitHub Draft Release"
+description: "Generate release notes from PRs and commits"
 usage: "/create-release-note <ver> [prev]"
+disable-model-invocation: true
 ---
 
 Read and execute the create-release-note skill from `.agents/skills/create-release-note/SKILL.md`.

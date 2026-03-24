@@ -1,5 +1,5 @@
 ---
-description: "Update project AI collaboration config by re-rendering latest templates/"
+description: "Update the project AI collaboration configuration"
 agent: general
 subtask: false
 ---

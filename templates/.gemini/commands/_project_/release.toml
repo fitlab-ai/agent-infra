@@ -1,4 +1,4 @@
-description = "Execute version release workflow"
+description = "Run the version release workflow"
 prompt = """
 Release version {{args}}.
 

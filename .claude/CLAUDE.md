@@ -106,56 +106,10 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ## Slash Commands
 
-### 开发相关
-```bash
-/commit [message]           # 提交代码
-/create-pr [branch]         # 创建 PR
-```
+可用命令从 `.claude/commands/` 自动发现。在提示符中输入 `/` 查看完整列表和描述。
 
-### 任务管理
-```bash
-/create-task <description>  # 创建任务
-/import-issue <number>      # 导入 GitHub Issue 为任务
-/analyze-task <task-id>     # 分析任务需求
-/plan-task <task-id>        # 设计方案
-/implement-task <task-id>   # 实施任务
-/review-task <task-id>      # 代码审查
-/complete-task <task-id>    # 完成任务
-/check-task <task-id>       # 查看状态
-/block-task <task-id>       # 阻塞任务
-/refine-task <task-id>      # 处理审查反馈
-```
-
-### PR 与同步
-```bash
-/sync-issue <number>        # 同步进度到 Issue
-/sync-pr <number>           # 同步进度到 PR
-```
-
-### 测试与发布
-```bash
-/test                       # 运行测试
-/test-integration           # 运行集成测试
-/release <version>          # 版本发布
-/create-release-note        # 生成发布说明
-```
-
-### 安全
-```bash
-/import-dependabot <number> # 导入 Dependabot 告警
-/close-dependabot           # 关闭 Dependabot 告警
-/import-codescan <number>   # 导入 Code Scanning 告警
-/close-codescan             # 关闭 Code Scanning 告警
-```
-
-### 工具
-```bash
-/init-milestones            # 初始化 GitHub Milestones
-/init-labels                # 初始化 GitHub Labels
-/refine-title               # 重构 Issue/PR 标题
-/upgrade-dependency         # 升级依赖
-/update-agent-infra  # 更新 AI 协作配置
-```
+任务工作流的典型顺序：
+`/create-task` -> `/analyze-task` -> `/plan-task` -> `/implement-task` -> `/review-task` -> `/complete-task`
 
 ## 语言规范
 
@@ -181,10 +135,19 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 1. 顶级步骤使用连续整数：`1.`、`2.`、`3.`。
 2. 只有父步骤下的从属动作才使用子步骤：`1.1`、`1.2`、`2.1`。
-3. 同一步中的分支、条件或多种可能性使用 `a`、`b`、`c` 标记。
+3. 同一步中的从属选项、条件分支或并列可能性使用 `a`、`b`、`c` 标记；仅用于步骤内部的子项展开，不用于命名独立的决策路径或输出模板。
 4. 不要使用 `1.5`、`2.5` 这类中间编号；如新增独立步骤，应整体顺延后续编号。
 5. 调整编号时，必须同步更新文中的步骤引用，确保说明、命令和检查点一致。
 6. 长 bash 脚本应从 SKILL.md 提取到同级 `scripts/` 目录中，SKILL.md 只保留单行调用（如 `bash .agents/skills/<skill>/scripts/<script>.sh`）和对脚本职责的概要说明。
+7. 在 SKILL.md 及其 `reference/` 模板中，如需为独立的条件分流、决策路径或输出模板命名，统一使用“场景”命名（例如使用“场景 A”）。
+
+### SKILL.md 体积控制
+
+- SKILL.md 正文控制在约 500 tokens（约 80 行 / 2KB）以内。
+- 超过阈值的内容拆分到同级 `reference/` 目录。
+- 骨架中使用明确导航，例如：`执行此步骤前，先读取 reference/xxx.md。`
+- 长脚本继续放在 `scripts/` 目录，优先执行脚本而不是内联大段 bash。
+- 当 skill 提供双语 `SKILL.md` / `SKILL.zh-CN.md` 时，面向用户的 `reference/` 文件也必须提供对应的双语版本。
 
 <!-- Canonical source: .agents/README.zh-CN.md - keep in sync -->
 

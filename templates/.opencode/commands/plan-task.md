@@ -1,5 +1,5 @@
 ---
-description: "Design technical solution and output implementation plan"
+description: "Design a technical plan for a task"
 agent: general
 subtask: false
 ---

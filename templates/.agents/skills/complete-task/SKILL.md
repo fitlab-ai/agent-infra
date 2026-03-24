@@ -1,11 +1,6 @@
 ---
 name: complete-task
-description: >
-  Mark a task as completed and archive it by moving the task directory from
-  active/ to completed/. Verifies that all workflow steps are done, code is
-  reviewed and committed, and tests pass before allowing completion.
-  Triggered when the user requests task completion or archiving.
-  Argument: task-id.
+description: "Mark a task as completed and archive it"
 ---
 
 # Complete Task

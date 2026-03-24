@@ -46,7 +46,7 @@
 
 自动识别用户意图：
 - "分析 issue XXX" -> `/import-issue`
-- "分析任务 TASK-..." -> `/analyze-task`
+- "分析任务 TASK-XXX" -> `/analyze-task`
 - "设计方案" -> `/plan-task`
 - "实施/实现" -> `/implement-task`
 - "审查" -> `/review-task`

@@ -1,9 +1,6 @@
 ---
 name: upgrade-dependency
-description: >
-  Upgrade a specified dependency package to a new version and verify
-  the change. Triggered when the user requests dependency upgrade.
-  Arguments: package name, old version, new version.
+description: "Upgrade a dependency and validate the change"
 ---
 
 # Upgrade Dependency

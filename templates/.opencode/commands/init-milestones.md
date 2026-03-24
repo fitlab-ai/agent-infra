@@ -1,5 +1,5 @@
 ---
-description: "Initialize the repository's standard GitHub Milestones taxonomy and optionally backfill historical milestones with --history"
+description: "Initialize the repository's standard GitHub Milestones taxonomy"
 agent: general
 subtask: false
 ---

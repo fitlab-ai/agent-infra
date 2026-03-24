@@ -1,4 +1,4 @@
-description = "Mark task completed and archive to completed directory"
+description = "Mark a task as completed and archive it"
 prompt = """
 Complete task {{args}}.
 

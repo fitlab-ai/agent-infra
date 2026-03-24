@@ -1,5 +1,5 @@
 ---
-description: "Mark task as blocked and record blocking reason"
+description: "Mark a task as blocked and record the reason"
 usage: "/block-task <task-id> [reason]"
 ---
 

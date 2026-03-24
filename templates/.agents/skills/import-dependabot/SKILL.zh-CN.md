@@ -1,8 +1,6 @@
 ---
 name: import-dependabot
-description: >
-  导入 Dependabot 安全告警并创建修复任务。
-  当用户要求导入 Dependabot 告警时触发。参数：告警编号。
+description: "导入 Dependabot 安全告警并创建修复任务"
 ---
 
 # 导入 Dependabot 安全告警

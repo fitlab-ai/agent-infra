@@ -1,10 +1,6 @@
 ---
 name: update-agent-infra
-description: >
-  Update the current project's AI collaboration infrastructure
-  and project governance to match the latest agent-infra
-  templates. Intelligently merges template changes while
-  preserving project-specific customizations.
+description: "Update the project AI collaboration configuration"
 ---
 
 # Update Project

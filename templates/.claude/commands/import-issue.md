@@ -1,5 +1,5 @@
 ---
-description: "Import a GitHub Issue and create a task file"
+description: "Import a GitHub Issue and create a task"
 usage: "/import-issue <issue-number>"
 ---
 

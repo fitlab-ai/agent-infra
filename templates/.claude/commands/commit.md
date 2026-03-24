@@ -1,5 +1,5 @@
 ---
-description: "Commit current changes to Git"
+description: "Commit the current changes to Git"
 ---
 
 Read and execute the commit skill from `.agents/skills/commit/SKILL.md`.

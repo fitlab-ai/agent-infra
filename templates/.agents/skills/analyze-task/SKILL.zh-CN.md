@@ -1,8 +1,6 @@
 ---
 name: analyze-task
-description: >
-  分析已有任务并输出需求分析文档，支持多轮分析产物（analysis.md / analysis-r{N}.md）。
-  当用户要求分析某个任务时触发。参数：task-id。
+description: "分析任务并输出需求分析文档"
 ---
 
 # 分析任务

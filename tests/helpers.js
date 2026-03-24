@@ -88,6 +88,20 @@ function skillDocPaths(skill) {
   ].filter(exists);
 }
 
+function skillContentPaths(skill) {
+  const paths = [...skillDocPaths(skill)];
+  const referenceRoots = [
+    `.agents/skills/${skill}/reference`,
+    `templates/.agents/skills/${skill}/reference`
+  ].filter(exists);
+
+  referenceRoots.forEach((relativeDir) => {
+    paths.push(...listFilesRecursive(relativeDir));
+  });
+
+  return paths;
+}
+
 const commandSpecs = {
   "analyze-task": {
     usage: "<task-id>",
@@ -224,5 +238,6 @@ export {
   loadFreshEsm,
   read,
   renderPlaceholders,
+  skillContentPaths,
   skillDocPaths
 };

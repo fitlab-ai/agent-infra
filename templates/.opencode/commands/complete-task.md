@@ -1,5 +1,5 @@
 ---
-description: "Mark task completed and archive to completed directory"
+description: "Mark a task as completed and archive it"
 agent: general
 subtask: false
 ---

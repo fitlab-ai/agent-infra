@@ -1,9 +1,6 @@
 ---
 name: create-release-note
-description: >
-  Generate release notes from PRs and commits between two versions.
-  Triggered when the user requests release note generation.
-  Arguments: version number, optional previous version.
+description: "Generate release notes from PRs and commits"
 ---
 
 # Create Release Notes
@@ -12,13 +9,13 @@ Generate comprehensive release notes for a version based on merged PRs and commi
 
 ## Execution Flow
 
-### Step 1: Parse Arguments
+### 1. Parse Arguments
 
 From arguments:
 - `<version>`: Current release version (required), format `X.Y.Z`
 - `<prev-version>`: Previous version (optional), auto-detected if not provided
 
-### Step 2: Determine Version Range
+### 2. Determine Version Range
 
 **Current tag**: `v<version>`
 
@@ -34,7 +31,7 @@ git rev-parse v<version>
 git rev-parse v<prev-version>
 ```
 
-### Step 3: Reference Historical Release Notes Format and Categories
+### 3. Reference Historical Release Notes Format and Categories
 
 Fetch multiple published release notes as format references, then use a predefined complete category list:
 
@@ -59,7 +56,7 @@ done
 - When generating release notes in Step 7, **must** follow both the historical format style and the full category list gathered in Step 3
 - If no historical release notes exist, use the default format defined in Step 7
 
-### Step 4: Collect Merged PRs
+### 4. Collect Merged PRs
 
 Get the date range between tags, then query merged PRs:
 
@@ -79,7 +76,7 @@ Also collect direct commits without PRs:
 git log v<prev-version>..v<version> --format="%H %s" --no-merges
 ```
 
-### Step 5: Collect Related Issues
+### 5. Collect Related Issues
 
 From each PR body, extract linked Issues:
 - Match patterns: `Closes #N`, `Fixes #N`, `Resolves #N` (case-insensitive)
@@ -88,7 +85,7 @@ From each PR body, extract linked Issues:
 gh issue view <N> --json number,title,labels,url
 ```
 
-### Step 6: Classify Changes
+### 6. Classify Changes
 
 **By type** (from PR title conventional commit prefix):
 - `feat`, `perf`, `refactor`, dependency upgrades -> Enhancement
@@ -99,7 +96,7 @@ gh issue view <N> --json number,title,labels,url
 - Infer module from PR title brackets like `[module]` or conventional scope `feat(module):`
 - Fallback: analyze changed files
 
-### Step 7: Generate Release Notes
+### 7. Generate Release Notes
 
 **Prioritize the historical format style obtained in Step 3 and ensure all categories listed in Step 3 are covered.** If historical release notes exist, strictly follow their section structure, heading style (including emojis), item format, and bilingual layout.
 
@@ -128,7 +125,7 @@ If no historical release notes exist, use the following default Markdown format:
 4. Contributors: Deduplicated, sorted by contribution count (descending)
 5. Empty sections: Omit sections with no entries
 
-### Step 8: Present and Confirm
+### 8. Present and Confirm
 
 Show the generated release notes to the user.
 
@@ -136,7 +133,7 @@ Ask:
 1. Need any adjustments?
 2. Create a GitHub Draft Release?
 
-### Step 9: Create Draft Release (If Confirmed)
+### 9. Create Draft Release (If Confirmed)
 
 ```bash
 gh release create v<version> \

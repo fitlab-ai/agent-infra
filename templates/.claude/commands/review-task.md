@@ -1,5 +1,5 @@
 ---
-description: "Review task implementation and output code review report"
+description: "Review a task implementation and output a code review report"
 usage: "/review-task <task-id>"
 ---
 

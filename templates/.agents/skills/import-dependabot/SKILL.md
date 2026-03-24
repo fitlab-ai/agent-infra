@@ -1,9 +1,6 @@
 ---
 name: import-dependabot
-description: >
-  Import a Dependabot security alert and create a remediation task.
-  Triggered when the user asks to import a Dependabot alert.
-  Argument: alert number.
+description: "Import a Dependabot alert and create a remediation task"
 ---
 
 # Import Dependabot Security Alert

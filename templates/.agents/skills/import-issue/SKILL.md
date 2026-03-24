@@ -1,8 +1,6 @@
 ---
 name: import-issue
-description: >
-  Import from a GitHub Issue and create a task file.
-  Triggered when the user asks to import an Issue. Argument: issue number.
+description: "Import a GitHub Issue and create a task"
 ---
 
 # Import Issue

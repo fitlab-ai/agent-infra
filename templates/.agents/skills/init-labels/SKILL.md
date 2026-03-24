@@ -1,9 +1,6 @@
 ---
 name: init-labels
-description: >
-  Initialize the repository's standard GitHub Labels taxonomy in one pass.
-  Create the common labels, auto-detect `in:` labels from the project structure,
-  do not create `theme:` labels, overwrite exact-match GitHub defaults, and report unmatched defaults.
+description: "Initialize the repository's standard GitHub Labels taxonomy"
 ---
 
 # Initialize GitHub Labels

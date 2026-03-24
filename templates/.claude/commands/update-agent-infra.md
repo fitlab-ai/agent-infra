@@ -1,5 +1,6 @@
 ---
-description: "Update project AI collaboration config by re-rendering latest templates/"
+description: "Update the project AI collaboration configuration"
+disable-model-invocation: true
 ---
 
 Read and execute the update-agent-infra skill from `.agents/skills/update-agent-infra/SKILL.md`.

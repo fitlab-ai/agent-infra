@@ -1,8 +1,6 @@
 ---
 name: test
-description: >
-  Execute the project's full test workflow (compilation check + unit tests).
-  Triggered when the user requests running tests or verifying code quality.
+description: "Run the full project test workflow"
 ---
 
 # Run Tests

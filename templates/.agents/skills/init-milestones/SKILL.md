@@ -1,8 +1,6 @@
 ---
 name: init-milestones
-description: >
-  Initialize the repository's standard GitHub Milestones taxonomy in one pass.
-  Create General Backlog, the initial milestones derived from the current version baseline, and optionally backfill historical milestones.
+description: "Initialize the repository's standard GitHub Milestones taxonomy"
 ---
 
 # Initialize GitHub Milestones

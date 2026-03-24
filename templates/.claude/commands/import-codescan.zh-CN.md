@@ -1,6 +1,7 @@
 ---
-description: "导入 Code Scanning（CodeQL）告警并创建修复任务。 当用户要求导入 Code Scanning 告警时触发。参数：告警编号。"
+description: "导入 Code Scanning 告警并创建修复任务"
 usage: "/import-codescan <alert-number>"
+disable-model-invocation: true
 ---
 
 读取并执行 `.agents/skills/import-codescan/SKILL.md` 中的 import-codescan 技能。

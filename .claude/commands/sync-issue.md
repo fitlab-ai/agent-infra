@@ -1,5 +1,5 @@
 ---
-description: "将任务处理进度同步到对应的 GitHub Issue 评论。 当用户要求同步进度到 Issue 时触发。参数：task-id。"
+description: "将任务进度同步到 GitHub Issue"
 usage: "/sync-issue <task-id>"
 ---
 

@@ -1,5 +1,5 @@
 ---
-description: "Upgrade dependency package to new version"
+description: "Upgrade a dependency and validate the change"
 agent: general
 subtask: false
 ---

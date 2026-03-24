@@ -1,5 +1,6 @@
 ---
 description: "Initialize the repository's standard GitHub Labels taxonomy"
+disable-model-invocation: true
 ---
 
 Read and execute the init-labels skill from `.agents/skills/init-labels/SKILL.md`.

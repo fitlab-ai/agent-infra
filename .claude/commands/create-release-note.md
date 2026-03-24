@@ -1,6 +1,7 @@
 ---
-description: "从 PR 和 commit 生成版本发布说明。 当用户要求生成发布说明时触发。参数：版本号，可选的上一版本号。"
+description: "从 PR 和 commit 生成版本发布说明"
 usage: "/create-release-note <ver> [prev]"
+disable-model-invocation: true
 ---
 
 读取并执行 `.agents/skills/create-release-note/SKILL.md` 中的 create-release-note 技能。

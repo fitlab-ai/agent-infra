@@ -1,5 +1,5 @@
 ---
-description: "根据技术方案实施任务，编写代码和测试，输出实现报告。当用户在技术方案审查通过后要求实施任务或编码时触发。 参数：task-id。"
+description: "根据技术方案实施任务并输出报告"
 agent: general
 subtask: false
 ---

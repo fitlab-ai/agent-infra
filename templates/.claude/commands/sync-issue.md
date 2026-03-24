@@ -1,5 +1,5 @@
 ---
-description: "Sync task progress to GitHub Issue comment"
+description: "Sync task progress to a GitHub Issue"
 usage: "/sync-issue <task-id>"
 ---
 

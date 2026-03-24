@@ -1,5 +1,5 @@
 ---
-description: "Create Pull Request to specified or auto-detected target branch"
+description: "Create a Pull Request to a target branch"
 agent: general
 subtask: false
 ---

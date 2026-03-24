@@ -1,8 +1,6 @@
 ---
 name: close-codescan
-description: >
-  关闭 Code Scanning（CodeQL）告警并提供有据可查的理由。
-  当用户要求关闭 Code Scanning 告警时触发。参数：告警编号。
+description: "关闭 Code Scanning 告警并记录理由"
 ---
 
 # 关闭 Code Scanning 告警

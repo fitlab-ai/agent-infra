@@ -1,8 +1,6 @@
 ---
 name: refine-title
-description: >
-  深度分析 Issue 或 PR 内容，并将其标题重构为 Conventional Commits 格式。
-  当用户要求优化标题时触发。参数：issue 或 PR 编号。
+description: "重构 Issue/PR 标题为 Conventional Commits 格式"
 ---
 
 # 重构标题

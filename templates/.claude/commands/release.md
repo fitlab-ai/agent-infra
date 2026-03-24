@@ -1,6 +1,7 @@
 ---
-description: "Execute version release workflow"
+description: "Run the version release workflow"
 usage: "/release <version>"
+disable-model-invocation: true
 ---
 
 Read and execute the release skill from `.agents/skills/release/SKILL.md`.

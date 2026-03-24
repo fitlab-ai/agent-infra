@@ -1,5 +1,5 @@
 ---
-description: "Run full test workflow (compilation + unit tests)"
+description: "Run the full project test workflow"
 agent: general
 subtask: false
 ---

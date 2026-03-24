@@ -1,5 +1,5 @@
 ---
-description: "Auto-generate structured Release Notes from PR/commit and optionally create GitHub Draft Release"
+description: "Generate release notes from PRs and commits"
 agent: general
 subtask: false
 ---

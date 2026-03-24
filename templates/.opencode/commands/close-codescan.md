@@ -1,5 +1,5 @@
 ---
-description: "Close Code Scanning alert with documented reason"
+description: "Close a Code Scanning alert with a documented reason"
 agent: general
 subtask: false
 ---

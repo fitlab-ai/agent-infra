@@ -1,5 +1,5 @@
 ---
-description: "根据用户的自然语言描述创建任务并执行需求分析。当用户描述一个新功能、Bug 或改进需求时触发。 唯一的产出是 task.md 和 analysis.md —— 不编写任何业务代码。参数：任务描述文本。"
+description: "根据自然语言描述创建任务"
 usage: "/create-task <description>"
 ---
 

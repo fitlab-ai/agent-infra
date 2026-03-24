@@ -1,5 +1,5 @@
 ---
-description: "从 GitHub Issue 导入并创建任务文件。 当用户要求导入某个 Issue 时触发。参数：issue 编号。"
+description: "从 GitHub Issue 导入并创建任务"
 usage: "/import-issue <issue-number>"
 ---
 

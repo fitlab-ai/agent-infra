@@ -1,10 +1,6 @@
 ---
 name: plan-task
-description: >
-  Design a technical plan for a task and output a detailed implementation
-  plan. Triggered when the user asks for a design or technical plan after
-  requirements analysis is complete. This is a mandatory human review
-  checkpoint. Argument: task-id.
+description: "Design a technical plan for a task"
 ---
 
 # Design Technical Plan

@@ -1,4 +1,4 @@
-description = "Sync task progress to Pull Request comment"
+description = "Sync task progress to a Pull Request"
 prompt = """
 Sync task {{args}} to PR.
 

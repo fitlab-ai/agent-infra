@@ -36,12 +36,11 @@
     bug-fix.yaml                # 缺陷修复工作流
     code-review.yaml            # 代码审查工作流
     refactoring.yaml            # 重构工作流
-
-.agents/workspace/         # 运行时工作区（已被 git ignore）
-  active/                       # 当前活跃任务
-  blocked/                      # 被阻塞的任务
-  completed/                    # 已完成的任务
-  logs/                         # 协作日志
+  workspace/                    # 运行时工作区（已被 git ignore）
+    active/                     # 当前活跃任务
+    blocked/                    # 被阻塞的任务
+    completed/                  # 已完成的任务
+    logs/                       # 协作日志
 
 .claude/                        # Claude Code 专属配置
   CLAUDE.md                     # Claude 项目指令
@@ -53,11 +52,12 @@
 
 多 AI 协作遵循结构化工作流：
 
-```
-1. 分析    -->  2. 设计    -->  3. 实现
-                                    |
-6. 提交  <--  5. 修复问题  <--  4. 审查
-```
+1. 分析
+2. 设计
+3. 实现
+4. 审查
+5. 修复问题
+6. 提交
 
 ### 阶段详情
 
@@ -122,6 +122,13 @@
 4. 不要使用 `1.5`、`2.5` 这类中间编号；如新增独立步骤，应整体顺延后续编号。
 5. 调整编号时，必须同步更新文中的步骤引用，确保说明、命令和检查点一致。
 6. 长 bash 脚本应从 SKILL.md 提取到同级 `scripts/` 目录中，SKILL.md 只保留单行调用（如 `bash .agents/skills/<skill>/scripts/<script>.sh`）和对脚本职责的概要说明。
+
+### SKILL.md 体积控制
+
+- SKILL.md 正文控制在约 500 tokens（约 80 行 / 2KB）以内。
+- 超过阈值的内容拆分到同级 `reference/` 目录。
+- 骨架中使用明确导航，例如：`执行此步骤前，先读取 reference/xxx.md。`
+- 长脚本继续放在 `scripts/` 目录，优先执行脚本而不是内联大段 bash。
 
 ## 常见问题
 

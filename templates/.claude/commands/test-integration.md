@@ -1,5 +1,6 @@
 ---
-description: "Run integration test workflow"
+description: "Run the integration test workflow"
+disable-model-invocation: true
 ---
 
 Read and execute the test-integration skill from `.agents/skills/test-integration/SKILL.md`.

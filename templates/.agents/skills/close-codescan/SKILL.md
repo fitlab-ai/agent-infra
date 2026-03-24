@@ -1,9 +1,6 @@
 ---
 name: close-codescan
-description: >
-  Dismiss a Code Scanning (CodeQL) alert with a documented justification.
-  Triggered when the user asks to dismiss a Code Scanning alert.
-  Argument: alert number.
+description: "Close a Code Scanning alert with a documented reason"
 ---
 
 # Dismiss Code Scanning Alert

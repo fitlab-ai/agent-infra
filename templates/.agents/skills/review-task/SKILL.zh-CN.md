@@ -1,77 +1,46 @@
 ---
 name: review-task
-description: >
-  审查任务实现代码并输出代码审查报告，按严重程度分类（Blocker / Major / Minor）。
-  当用户在实现完成后要求代码审查时触发。参数：task-id。
+description: "审查任务实现并输出代码审查报告"
 ---
 
 # 代码审查
 
+审查最新实现轮次，并产出 `review.md` 或 `review-r{N}.md`。
+
 ## 行为边界 / 关键规则
 
-- 本技能仅读取代码并产出审查报告（`review.md` 或 `review-r{N}.md`）—— 不修改业务代码
-- 执行本技能后，你**必须**立即更新 task.md 中的任务状态
+- 本技能只审查代码并写报告，不修改业务代码
+- 执行本技能后，你**必须**立即更新 task.md
 
 ## 执行步骤
 
 ### 1. 验证前置条件
 
-检查必要文件：
-- `.agents/workspace/active/{task-id}/task.md` - 任务文件
-- 至少一个实现报告：`implementation.md` 或 `implementation-r{N}.md`
-
-注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
-
-如果任一文件缺失，提示用户先完成前置步骤。
+要求存在：
+- `.agents/workspace/active/{task-id}/task.md`
+- 至少一个实现产物：`implementation.md` 或 `implementation-r{N}.md`
 
 ### 2. 确定审查轮次
 
-扫描 `.agents/workspace/active/{task-id}/` 目录中的审查产物文件：
-- 如果不存在 `review.md` 且不存在 `review-r*.md` → 本轮为第 1 轮，产出 `review.md`
-- 如果存在 `review.md` 且不存在 `review-r*.md` → 本轮为第 2 轮，产出 `review-r2.md`
-- 如果存在 `review-r{N}.md` → 本轮为第 N+1 轮，产出 `review-r{N+1}.md`
+扫描任务目录并记录：
+- `{review-round}`
+- 作为本轮产物的 `{review-artifact}`，格式为 `review.md` 或 `review-r{N}.md`
 
-记录：
-- `{review-round}`：本轮审查轮次
-- `{review-artifact}`：本轮审查报告文件名
+### 3. 阅读实现与修复上下文
 
-### 3. 阅读实现与修复报告
+读取最高轮次的实现产物；如存在修复产物，也读取最高轮次的修复产物。
 
-扫描任务目录中的实现报告文件（`implementation.md`、`implementation-r{N}.md`），读取最高轮次的文件以理解：
-- 修改的文件列表
-- 实现的关键功能
-- 测试情况
-- 实现者标记的需关注事项
+### 4. 执行审查
 
-如果存在修复产物（`refinement.md`、`refinement-r{N}.md`），读取最高轮次的文件以理解：
-- 已修复了哪些审查问题
-- 修复对代码和测试的影响
-- 当前代码状态相对上轮审查的变化
+遵循 `.agents/workflows/feature-development.yaml`，并同时检查 `git diff` 获取完整变更上下文。
 
-### 4. 执行代码审查
+> 详细审查标准、严重程度划分和 reviewer 关注点见 `reference/review-criteria.md`。执行此步骤前先读取 `reference/review-criteria.md`。
 
-遵循 `.agents/workflows/feature-development.yaml` 中的 `code-review` 步骤：
-
-**必要审查领域**：
-- [ ] 代码质量和编码规范（按项目指南）
-- [ ] Bug 和潜在问题检测
-- [ ] 测试覆盖率和测试质量（删除功能时，确认为该功能而存在的测试 fixture 和断言已一并删除，而非机械翻转断言方向；仅确认数据原样通过的断言不构成有效测试）
-- [ ] 错误处理和边界情况
-- [ ] 性能和安全问题
-- [ ] 代码注释和文档
-- [ ] 与技术方案的一致性
-
-**审查原则**：
-1. **严格但公正**：指出问题的同时也肯定做得好的地方
-2. **具体**：提供准确的文件路径和行号
-3. **提供建议**：不仅指出问题，还要提供解决方案
-4. **按严重程度分类**：区分必须修复和可优化项
-
-同时审查 `git diff` 以查看所有变更的上下文。
-
-### 5. 输出审查报告
+### 5. 编写审查报告
 
 创建 `.agents/workspace/active/{task-id}/{review-artifact}`。
+
+> 报告格式和严重程度布局见 `reference/report-template.md`。写报告前先读取 `reference/report-template.md`。
 
 ### 6. 更新任务状态
 
@@ -81,205 +50,35 @@ description: >
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 `.agents/workspace/active/{task-id}/task.md`：
-- `current_step`：code-review
-- `assigned_to`：{审查者}
-- `updated_at`：{当前时间}
-- 记录本轮审查产物：`{review-artifact}`（Round `{review-round}`）
-- 在工作流进度中标记 code-review 为已完成，并注明实际轮次（如果任务模板支持）
-- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
-  ```
-  - {yyyy-MM-dd HH:mm:ss} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n} → {artifact-filename}
-  ```
+更新 task.md，并追加：
+`- {yyyy-MM-dd HH:mm:ss} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n} → {artifact-filename}`
 
 ### 7. 告知用户
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+必须先判断结果，再只选择一个输出分支：
+- 无 blocker、major、minor -> 通过且无问题
+- 无 blocker，但有 major 或 minor -> 通过但有问题
+- 有 blocker，且可集中修复 -> 需要修改
+- 需要重大返工或重新实现 -> 拒绝
 
-根据审查结果输出：
+> 完整的 4 分支输出模板、判断规则和禁止条款见 `reference/output-templates.md`。向用户汇报审查结论前先读取 `reference/output-templates.md`。
 
-> **⚠️ 条件判断 — 你必须先判断以下条件，再选择唯一匹配的输出分支：**
->
-> 1. 如果 `Blocker = 0` 且 `Major = 0` 且 `Minor = 0` → 使用「输出分支 A — 通过且无问题」
-> 2. 如果 `Blocker = 0` 且 (`Major > 0` 或 `Minor > 0`) → 使用「输出分支 B — 通过但有问题」
-> 3. 如果 `Blocker > 0` 且问题可通过一次修复解决，**且未达到需要整体重做的程度** → 使用「输出分支 C — 需要修改」
-> 4. 如果问题需要重大返工、重新设计或重新实现 → 使用「输出分支 D — 拒绝」
->
-> **禁止跳过判断、禁止混用不同分支的模板。每次只能输出一个分支。只要 `Blocker > 0`，就绝不能输出任何“通过”模板。**
-
-**📋 输出分支 A — 通过且无问题**（条件：Blocker = 0 且 Major = 0 且 Minor = 0）：
-```
-任务 {task-id} 代码审查完成。结论：通过。
-- 阻塞项：0 | 主要问题：0 | 次要问题：0
-
-下一步 - 提交代码：
-  - Claude Code / OpenCode：/commit
-  - Gemini CLI：/agent-infra:commit
-  - Codex CLI：$commit
-```
-
-**📋 输出分支 B — 通过但有问题**（条件：Blocker = 0 且 (`Major > 0` 或 `Minor > 0`)）：
-```
-任务 {task-id} 代码审查完成。结论：通过。
-- 阻塞项：0 | 主要问题：{n} | 次要问题：{n}
-- 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
-
-下一步 - 修复问题后提交（推荐）：
-  - Claude Code / OpenCode：/refine-task {task-id}
-  - Gemini CLI：/agent-infra:refine-task {task-id}
-  - Codex CLI：$refine-task {task-id}
-
-或直接提交（跳过修复）：
-  - Claude Code / OpenCode：/commit
-  - Gemini CLI：/agent-infra:commit
-  - Codex CLI：$commit
-```
-
-**📋 输出分支 C — 需要修改**（条件：Blocker > 0，且问题可修复但无需重大返工）：
-```
-任务 {task-id} 代码审查完成。结论：需要修改。
-- 阻塞项：{n} | 主要问题：{n} | 次要问题：{n}
-- 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
-
-下一步 - 修复问题：
-  - Claude Code / OpenCode：/refine-task {task-id}
-  - Gemini CLI：/agent-infra:refine-task {task-id}
-  - Codex CLI：$refine-task {task-id}
-```
-
-**📋 输出分支 D — 拒绝**（条件：需要重大返工、重新设计或重新实现）：
-```
-任务 {task-id} 代码审查完成。结论：拒绝，需要重大返工。
-- 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
-
-下一步 - 重新实现：
-  - Claude Code / OpenCode：/implement-task {task-id}
-  - Gemini CLI：/agent-infra:implement-task {task-id}
-  - Codex CLI：$implement-task {task-id}
-```
-
-## 输出模板
-
-```markdown
-# 代码审查报告
-
-- **审查轮次**：Round {review-round}
-- **产物文件**：`{review-artifact}`
-- **实现输入**：
-  - `{implementation-artifact}`
-  - `{refinement-artifact}`（如存在）
-
-## 审查摘要
-
-- **审查者**：{审查者名称}
-- **审查时间**：{时间戳}
-- **审查范围**：{文件数量和主要模块}
-- **总体结论**：{已批准 / 需要修改 / 拒绝}
-
-## 发现的问题
-
-### 阻塞项（必须修复）
-
-#### 1. {问题标题}
-**文件**：`{file-path}:{line-number}`
-**描述**：{详细描述}
-**建议修复**：{具体建议}
-**严重程度**：高
-
-### 主要问题（应该修复）
-
-#### 1. {问题标题}
-**文件**：`{file-path}:{line-number}`
-**描述**：{详细描述}
-**建议修复**：{具体建议}
-**严重程度**：中
-
-### 次要问题（可选优化）
-
-#### 1. {优化点}
-**文件**：`{file-path}:{line-number}`
-**建议**：{优化建议}
-
-## 亮点
-
-- {做得好的方面 1}
-- {做得好的方面 2}
-
-## 规范符合度
-
-### 编码规范
-- [ ] 命名规范
-- [ ] 代码风格
-- [ ] 注释规范
-- [ ] 测试规范
-
-### 代码质量指标
-- 圈复杂度：{评估}
-- 代码重复：{评估}
-- 测试覆盖率：{百分比或评估}
-
-## 测试审查
-
-### 测试覆盖率
-- 单元测试：{评估}
-- 边界情况：{是否覆盖？}
-- 错误场景：{是否覆盖？}
-
-### 测试质量
-- 测试命名：{评估}
-- 断言充分性：{评估}
-- 测试独立性：{评估}
-
-## 安全审查
-
-- SQL 注入风险：{检查结果}
-- XSS 风险：{检查结果}
-- 访问控制：{检查结果}
-- 敏感数据暴露：{检查结果}
-
-## 性能审查
-
-- 算法复杂度：{评估}
-- 资源管理：{检查结果}
-- 潜在瓶颈：{评估}
-
-## 与方案的一致性
-
-- [ ] 实现与技术方案一致
-- [ ] 没有偏离设计意图
-- [ ] 没有添加计划外的功能
-
-## 结论和建议
-
-### 审批决定
-- [ ] 通过 - 无阻塞问题
-- [ ] 需要修改 - 有需要解决的问题
-- [ ] 拒绝 - 需要重大返工
-
-### 后续步骤
-{基于审查结果的建议}
-```
+向用户展示下一步时，必须包含所有 TUI 命令格式。
 
 ## 完成检查清单
 
-- [ ] 完成了所有修改文件的代码审查
-- [ ] 创建了审查报告 `.agents/workspace/active/{task-id}/{review-artifact}`
-- [ ] 更新了 task.md 中的 `current_step` 为 code-review
-- [ ] 更新了 task.md 中的 `updated_at` 为当前时间
-- [ ] 更新了 task.md 中的 `assigned_to` 为审查者名称
-- [ ] 追加了 Activity Log 条目到 task.md
-- [ ] 在工作流进度中标记了 code-review 为已完成
-- [ ] 根据审查结果告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
+- [ ] 已审查最新实现上下文
+- [ ] 已创建 `{review-artifact}`
+- [ ] 已更新 task.md 并追加 Activity Log
+- [ ] 用户输出中只选择了一个审查结论分支
 
 ## 注意事项
 
-1. **前置条件**：必须已完成至少一轮实现（`implementation.md` 或 `implementation-r{N}.md` 存在）
-2. **客观性**：严格但公正；在指出问题的同时肯定优秀的工作
-3. **具体性**：始终引用准确的文件路径和行号
-4. **严重程度分类**：阻塞项必须修复；主要问题应该修复；次要问题为可选
-5. **版本化规则**：首轮审查使用 `review.md`；后续轮次使用 `review-r{N}.md`
+- 首轮审查使用 `review.md`，后续轮次使用 `review-r{N}.md`
+- 所有问题都要引用具体文件路径和行号
+- 严重程度必须区分 blocker、major、minor
 
 ## 错误处理
 
-- 任务未找到：提示 "Task {task-id} not found"
-- 缺少实现报告：提示 "Implementation report not found, please run the implement-task skill first"
+- 任务未找到：`Task {task-id} not found`
+- 缺少实现报告：`Implementation report not found, please run the implement-task skill first`

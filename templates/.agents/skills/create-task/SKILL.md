@@ -1,9 +1,6 @@
 ---
 name: create-task
-description: >
-  Create a task skeleton from the user's natural-language description.
-  Triggered when the user describes a new feature, bug, or improvement request.
-  The only output is task.md; do not write any business code. Argument: task description text.
+description: "Create a task from a natural-language description"
 ---
 
 # Create Task
