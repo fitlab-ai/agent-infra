@@ -20,7 +20,7 @@ description: >
 ### 1. Verify Prerequisites
 
 Check required files:
-- `.agent-infra/workspace/active/{task-id}/task.md` - Task file
+- `.agents/workspace/active/{task-id}/task.md` - Task file
 - At least one analysis artifact: `analysis.md` or `analysis-r{N}.md`
 
 Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, for example `TASK-20260306-143022`
@@ -29,7 +29,7 @@ If any required file is missing, prompt the user to complete the prerequisite st
 
 ### 2. Determine the Plan Round
 
-Scan `.agent-infra/workspace/active/{task-id}/` for plan artifact files:
+Scan `.agents/workspace/active/{task-id}/` for plan artifact files:
 - If neither `plan.md` nor `plan-r*.md` exists -> this is Round 1 and must create `plan.md`
 - If `plan.md` exists and no `plan-r*.md` exists -> this is Round 2 and must create `plan-r2.md`
 - If `plan-r{N}.md` exists -> this is Round N+1 and must create `plan-r{N+1}.md`
@@ -77,7 +77,7 @@ Follow the `technical-design` step in `.agents/workflows/feature-development.yam
 
 ### 6. Output Plan Document
 
-Create `.agent-infra/workspace/active/{task-id}/{plan-artifact}`.
+Create `.agents/workspace/active/{task-id}/{plan-artifact}`.
 
 ### 7. Update Task Status
 
@@ -87,7 +87,7 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-Update `.agent-infra/workspace/active/{task-id}/task.md`:
+Update `.agents/workspace/active/{task-id}/task.md`:
 - `current_step`: technical-design
 - `assigned_to`: {current AI agent}
 - `updated_at`: {current time}
@@ -115,7 +115,7 @@ Plan summary:
 - Estimated complexity: {assessment}
 
 Output file:
-- Technical plan: .agent-infra/workspace/active/{task-id}/{plan-artifact}
+- Technical plan: .agents/workspace/active/{task-id}/{plan-artifact}
 
 Important: human review checkpoint.
 Please review the technical plan before continuing to implementation.
@@ -200,7 +200,7 @@ Next step - implement the task:
 
 - [ ] Read and understood the requirements analysis
 - [ ] Considered alternative options
-- [ ] Created the plan document `.agent-infra/workspace/active/{task-id}/{plan-artifact}`
+- [ ] Created the plan document `.agents/workspace/active/{task-id}/{plan-artifact}`
 - [ ] Updated `current_step` to technical-design in task.md
 - [ ] Updated `updated_at` to the current time in task.md
 - [ ] Recorded `{plan-artifact}` as a completed artifact in task.md

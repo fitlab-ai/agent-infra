@@ -17,7 +17,7 @@ description: >
 ### 1. 验证前置条件
 
 检查必要文件：
-- `.agent-infra/workspace/active/{task-id}/task.md` - 任务文件
+- `.agents/workspace/active/{task-id}/task.md` - 任务文件
 - 至少一个实现报告：`implementation.md` 或 `implementation-r{N}.md`
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
@@ -26,7 +26,7 @@ description: >
 
 ### 2. 确定审查轮次
 
-扫描 `.agent-infra/workspace/active/{task-id}/` 目录中的审查产物文件：
+扫描 `.agents/workspace/active/{task-id}/` 目录中的审查产物文件：
 - 如果不存在 `review.md` 且不存在 `review-r*.md` → 本轮为第 1 轮，产出 `review.md`
 - 如果存在 `review.md` 且不存在 `review-r*.md` → 本轮为第 2 轮，产出 `review-r2.md`
 - 如果存在 `review-r{N}.md` → 本轮为第 N+1 轮，产出 `review-r{N+1}.md`
@@ -71,7 +71,7 @@ description: >
 
 ### 5. 输出审查报告
 
-创建 `.agent-infra/workspace/active/{task-id}/{review-artifact}`。
+创建 `.agents/workspace/active/{task-id}/{review-artifact}`。
 
 ### 6. 更新任务状态
 
@@ -81,7 +81,7 @@ description: >
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 `.agent-infra/workspace/active/{task-id}/task.md`：
+更新 `.agents/workspace/active/{task-id}/task.md`：
 - `current_step`：code-review
 - `assigned_to`：{审查者}
 - `updated_at`：{当前时间}
@@ -122,7 +122,7 @@ date "+%Y-%m-%d %H:%M:%S"
 ```
 任务 {task-id} 代码审查完成。结论：通过。
 - 阻塞项：0 | 主要问题：{n} | 次要问题：{n}
-- 审查报告：.agent-infra/workspace/active/{task-id}/{review-artifact}
+- 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
 
 下一步 - 修复问题后提交（推荐）：
   - Claude Code / OpenCode：/refine-task {task-id}
@@ -139,7 +139,7 @@ date "+%Y-%m-%d %H:%M:%S"
 ```
 任务 {task-id} 代码审查完成。结论：需要修改。
 - 阻塞项：{n} | 主要问题：{n} | 次要问题：{n}
-- 审查报告：.agent-infra/workspace/active/{task-id}/{review-artifact}
+- 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
 
 下一步 - 修复问题：
   - Claude Code / OpenCode：/refine-task {task-id}
@@ -150,7 +150,7 @@ date "+%Y-%m-%d %H:%M:%S"
 **📋 输出分支 D — 拒绝**（条件：需要重大返工、重新设计或重新实现）：
 ```
 任务 {task-id} 代码审查完成。结论：拒绝，需要重大返工。
-- 审查报告：.agent-infra/workspace/active/{task-id}/{review-artifact}
+- 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
 
 下一步 - 重新实现：
   - Claude Code / OpenCode：/implement-task {task-id}
@@ -263,7 +263,7 @@ date "+%Y-%m-%d %H:%M:%S"
 ## 完成检查清单
 
 - [ ] 完成了所有修改文件的代码审查
-- [ ] 创建了审查报告 `.agent-infra/workspace/active/{task-id}/{review-artifact}`
+- [ ] 创建了审查报告 `.agents/workspace/active/{task-id}/{review-artifact}`
 - [ ] 更新了 task.md 中的 `current_step` 为 code-review
 - [ ] 更新了 task.md 中的 `updated_at` 为当前时间
 - [ ] 更新了 task.md 中的 `assigned_to` 为审查者名称

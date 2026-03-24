@@ -24,12 +24,12 @@ description: >
 node .agents/skills/update-agent-infra/scripts/sync-templates.js
 ```
 
-脚本读取 `.agent-infra/config.json`（含 `templateSource`，默认 `templates/`），自动完成：
+脚本读取 `.agents/.airc.json`（含 `templateSource`，默认 `templates/`），自动完成：
 - 检测模板源版本
-- 同步文件注册表（`defaults.json` → `.agent-infra/config.json`）
+- 同步文件注册表（`defaults.json` → `.agents/.airc.json`）
 - 处理所有 managed 文件（语言选择 → 排除 merged/ejected → 占位符渲染 → 覆盖写入）
 - 处理 ejected 文件（仅首次安装时创建）
-- 更新 `.agent-infra/config.json`（`templateVersion`、文件列表）
+- 更新 `.agents/.airc.json`（`templateVersion`、文件列表）
 
 脚本输出 JSON 到 stdout，解析并记录报告内容。
 
@@ -42,14 +42,14 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
   - 每项包含 `target`（项目中的目标路径）和 `template`（模板根目录下的相对路径）
 - `registryAdded`：新增的文件注册条目
 - `selfUpdate`：是否为自更新模式
-- `configUpdated`：`.agent-infra/config.json` 是否已更新
+- `configUpdated`：`.agents/.airc.json` 是否已更新
 
 ## 阶段 B：处理 merged 文件（AI 智能合并）
 
 根据报告中 `merged.pending` 列表，逐个文件处理。对于每个条目：
 
 1. 从 `<templateRoot>/<template>` 读取模板文件
-2. 渲染占位符：将双花括号包裹的 `project` 和 `org` 占位符替换为 .agent-infra/config.json 中的实际值
+2. 渲染占位符：将双花括号包裹的 `project` 和 `org` 占位符替换为 .agents/.airc.json 中的实际值
 3. 读取本地当前文件（`<项目根>/<target>`）
 
 **如果本地文件不存在**（首次安装），直接写入渲染后的模板，跳过合并。

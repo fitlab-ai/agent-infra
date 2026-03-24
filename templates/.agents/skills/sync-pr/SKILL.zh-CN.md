@@ -14,9 +14,9 @@ description: >
 ### 1. 验证任务存在
 
 按优先顺序搜索任务：
-- `.agent-infra/workspace/active/{task-id}/task.md`
-- `.agent-infra/workspace/completed/{task-id}/task.md`
-- `.agent-infra/workspace/blocked/{task-id}/task.md`
+- `.agents/workspace/active/{task-id}/task.md`
+- `.agents/workspace/completed/{task-id}/task.md`
+- `.agents/workspace/blocked/{task-id}/task.md`
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 

@@ -18,7 +18,7 @@ description: >
 ### 1. 验证前置条件
 
 检查必要文件：
-- `.agent-infra/workspace/active/{task-id}/task.md` - 任务文件
+- `.agents/workspace/active/{task-id}/task.md` - 任务文件
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 
@@ -26,7 +26,7 @@ description: >
 
 ### 2. 确定分析轮次
 
-扫描 `.agent-infra/workspace/active/{task-id}/` 目录中的分析产物文件：
+扫描 `.agents/workspace/active/{task-id}/` 目录中的分析产物文件：
 - 如果不存在 `analysis.md` 且不存在 `analysis-r*.md` → 本轮为第 1 轮，产出 `analysis.md`
 - 如果存在 `analysis.md` 且不存在 `analysis-r*.md` → 本轮为第 2 轮，产出 `analysis-r2.md`
 - 如果存在 `analysis-r{N}.md` → 本轮为第 N+1 轮，产出 `analysis-r{N+1}.md`
@@ -60,7 +60,7 @@ description: >
 
 ### 5. 输出分析文档
 
-创建 `.agent-infra/workspace/active/{task-id}/{analysis-artifact}`。
+创建 `.agents/workspace/active/{task-id}/{analysis-artifact}`。
 
 ## 输出模板
 
@@ -108,7 +108,7 @@ description: >
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 `.agent-infra/workspace/active/{task-id}/task.md`：
+更新 `.agents/workspace/active/{task-id}/task.md`：
 - `current_step`：requirement-analysis
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
@@ -134,7 +134,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 风险等级：{评估}
 
 产出文件：
-- 分析报告：.agent-infra/workspace/active/{task-id}/{analysis-artifact}
+- 分析报告：.agents/workspace/active/{task-id}/{analysis-artifact}
 
 下一步 - 设计技术方案：
   - Claude Code / OpenCode：/plan-task {task-id}
@@ -145,7 +145,7 @@ date "+%Y-%m-%d %H:%M:%S"
 ## 完成检查清单
 
 - [ ] 阅读并理解了任务文件和来源信息
-- [ ] 创建了分析文档 `.agent-infra/workspace/active/{task-id}/{analysis-artifact}`
+- [ ] 创建了分析文档 `.agents/workspace/active/{task-id}/{analysis-artifact}`
 - [ ] 更新了 task.md 中的 `current_step` 为 requirement-analysis
 - [ ] 更新了 task.md 中的 `updated_at` 为当前时间
 - [ ] 更新了 task.md 中的 `assigned_to`

@@ -131,9 +131,9 @@ Status: active
 1. **验证任务存在**
 
 按以下顺序搜索任务文件：
-- `.agent-infra/workspace/active/{task-id}/task.md`
-- `.agent-infra/workspace/blocked/{task-id}/task.md`
-- `.agent-infra/workspace/completed/{task-id}/task.md`
+- `.agents/workspace/active/{task-id}/task.md`
+- `.agents/workspace/blocked/{task-id}/task.md`
+- `.agents/workspace/completed/{task-id}/task.md`
 
 如果未找到，回复：
 "任务 {task-id} 不存在，请检查任务 ID。"
@@ -157,9 +157,9 @@ Status: active
 
 ```markdown
 按以下顺序搜索任务：
-1. `.agent-infra/workspace/active/{task-id}/task.md`
-2. `.agent-infra/workspace/blocked/{task-id}/task.md`
-3. `.agent-infra/workspace/completed/{task-id}/task.md`
+1. `.agents/workspace/active/{task-id}/task.md`
+2. `.agents/workspace/blocked/{task-id}/task.md`
+3. `.agents/workspace/completed/{task-id}/task.md`
 ```
 
 ### 状态更新模式

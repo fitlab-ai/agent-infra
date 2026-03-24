@@ -55,6 +55,6 @@
 
 ## 参考资料
 
-- 任务文件：`.agent-infra/workspace/active/task-XXX.md`
+- 任务文件：`.agents/workspace/active/task-XXX.md`
 - 相关文档：[链接或文件路径]
 - 相关 Issue：#XXX

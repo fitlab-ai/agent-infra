@@ -18,17 +18,17 @@ Identify the argument provided by the user:
 - plain number (`123`) or `#` + number (`#123`) -> treat as an issue number
 - Starts with `TASK-` -> treat as a task-id (current format)
 
-If the argument is an issue number, use Bash to search for the related task (note: `.agent-infra/workspace` is a hidden directory, so Grep/Glob tools may skip it; you must use Bash):
+If the argument is an issue number, use Bash to search for the related task (note: `.agents/workspace` is a hidden directory, so Grep/Glob tools may skip it; you must use Bash):
 
 ```bash
 grep -rl "^issue_number: {issue-number}$" \
-  .agent-infra/workspace/active/ \
-  .agent-infra/workspace/blocked/ \
-  .agent-infra/workspace/completed/ \
+  .agents/workspace/active/ \
+  .agents/workspace/blocked/ \
+  .agents/workspace/completed/ \
   2>/dev/null | head -1
 ```
 
-- If a file path is returned (for example `.agent-infra/workspace/completed/TASK-xxx/task.md`), extract `{task-id}` and the task directory from the path, then continue to Step 2
+- If a file path is returned (for example `.agents/workspace/completed/TASK-xxx/task.md`), extract `{task-id}` and the task directory from the path, then continue to Step 2
 - If nothing is returned, output `No task found associated with Issue #{issue-number}`
 
 If the argument is a task-id, continue with the normal Step 2 flow.
@@ -36,9 +36,9 @@ If the argument is a task-id, continue with the normal Step 2 flow.
 ### 2. Verify the Task Exists
 
 For a `task-id`, search for the task in this order:
-- `.agent-infra/workspace/active/{task-id}/task.md`
-- `.agent-infra/workspace/blocked/{task-id}/task.md`
-- `.agent-infra/workspace/completed/{task-id}/task.md`
+- `.agents/workspace/active/{task-id}/task.md`
+- `.agents/workspace/blocked/{task-id}/task.md`
+- `.agents/workspace/completed/{task-id}/task.md`
 
 Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, for example `TASK-20260306-143022`
 

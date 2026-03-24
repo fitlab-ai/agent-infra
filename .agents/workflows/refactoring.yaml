@@ -151,4 +151,4 @@ steps:
       - 任务文件
     outputs:
       - 拉取请求
-      - 已完成的任务文件（位于 .agent-infra/workspace/completed/）
+      - 已完成的任务文件（位于 .agents/workspace/completed/）

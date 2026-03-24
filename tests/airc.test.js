@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 
 import { read } from "./helpers.js";
 
-test(".agent-infra/config.json declares templates as the template source", () => {
-  const collaborator = JSON.parse(read(".agent-infra/config.json"));
+test(".agents/.airc.json declares templates as the template source", () => {
+  const collaborator = JSON.parse(read(".agents/.airc.json"));
 
   assert.equal(collaborator.templateSource, "templates/");
 });
 
-test(".agent-infra/config.json merged patterns use recursive command globs and explicit skill paths", () => {
-  const collaborator = JSON.parse(read(".agent-infra/config.json"));
+test(".agents/.airc.json merged patterns use recursive command globs and explicit skill paths", () => {
+  const collaborator = JSON.parse(read(".agents/.airc.json"));
   const merged = collaborator.files.merged;
 
   [
@@ -36,14 +36,14 @@ test(".agent-infra/config.json merged patterns use recursive command globs and e
   });
 });
 
-test(".agent-infra/config.json does not contain license field", () => {
-  const collaborator = JSON.parse(read(".agent-infra/config.json"));
+test(".agents/.airc.json does not contain license field", () => {
+  const collaborator = JSON.parse(read(".agents/.airc.json"));
 
-  assert.ok(!("license" in collaborator), "license field should not exist in .agent-infra/config.json");
+  assert.ok(!("license" in collaborator), "license field should not exist in .agents/.airc.json");
 });
 
-test(".agent-infra/config.json excludes deprecated codex prompt paths", () => {
-  const collaborator = JSON.parse(read(".agent-infra/config.json"));
+test(".agents/.airc.json excludes deprecated codex prompt paths", () => {
+  const collaborator = JSON.parse(read(".agents/.airc.json"));
 
   assert.ok(
     collaborator.files.managed.includes(".claude/hooks/"),

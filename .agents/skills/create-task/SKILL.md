@@ -54,7 +54,7 @@ description: >
 date +%Y%m%d-%H%M%S
 ```
 
-- 创建任务目录：`.agent-infra/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+- 创建任务目录：`.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
 - 使用 `.agents/templates/task.md` 模板创建任务文件：`task.md`
 
 **重要**：
@@ -85,7 +85,7 @@ assigned_to: {当前 AI 代理}
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 `.agent-infra/workspace/active/{task-id}/task.md`：
+更新 `.agents/workspace/active/{task-id}/task.md`：
 - `current_step`：requirement-analysis
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
@@ -109,7 +109,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 工作流：{workflow}
 
 产出文件：
-- 任务文件：.agent-infra/workspace/active/{task-id}/task.md
+- 任务文件：.agents/workspace/active/{task-id}/task.md
 
 下一步 - 执行需求分析：
   - Claude Code / OpenCode：/analyze-task {task-id}
@@ -119,7 +119,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 ## 完成检查清单
 
-- [ ] 创建了任务文件 `.agent-infra/workspace/active/{task-id}/task.md`
+- [ ] 创建了任务文件 `.agents/workspace/active/{task-id}/task.md`
 - [ ] 更新了 task.md 中的 `current_step` 为 requirement-analysis
 - [ ] 更新了 task.md 中的 `updated_at` 为当前时间
 - [ ] 更新了 task.md 中的 `assigned_to`

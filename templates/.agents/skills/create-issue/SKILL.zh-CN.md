@@ -20,7 +20,7 @@ description: >
 ### 1. 验证前置条件
 
 检查必要文件：
-- `.agent-infra/workspace/active/{task-id}/task.md` - 任务文件
+- `.agents/workspace/active/{task-id}/task.md` - 任务文件
 
 检查 GitHub CLI 可用且已认证：
 
@@ -234,7 +234,7 @@ gh issue edit {issue-number} --add-label "in: {module}"
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 `.agent-infra/workspace/active/{task-id}/task.md`：
+更新 `.agents/workspace/active/{task-id}/task.md`：
 - 添加或更新 `issue_number`：`{issue-number}`
 - `updated_at`：{当前时间}
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：

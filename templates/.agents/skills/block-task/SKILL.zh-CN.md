@@ -24,7 +24,7 @@ description: >
 
 ### 1. 验证任务存在
 
-检查任务是否存在于 `.agent-infra/workspace/active/{task-id}/`。
+检查任务是否存在于 `.agents/workspace/active/{task-id}/`。
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 
@@ -46,7 +46,7 @@ description: >
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 `.agent-infra/workspace/active/{task-id}/task.md`：
+更新 `.agents/workspace/active/{task-id}/task.md`：
 - `status`：blocked
 - `blocked_at`：{当前时间戳}
 - `updated_at`：{当前时间戳}
@@ -60,13 +60,13 @@ date "+%Y-%m-%d %H:%M:%S"
 ### 4. 移动任务到 blocked 目录
 
 ```bash
-mv .agent-infra/workspace/active/{task-id} .agent-infra/workspace/blocked/{task-id}
+mv .agents/workspace/active/{task-id} .agents/workspace/blocked/{task-id}
 ```
 
 ### 5. 验证移动
 
 ```bash
-ls .agent-infra/workspace/blocked/{task-id}/task.md
+ls .agents/workspace/blocked/{task-id}/task.md
 ```
 
 ### 6. 同步到 Issue（可选）
@@ -92,10 +92,10 @@ ls .agent-infra/workspace/blocked/{task-id}/task.md
 
 阻塞原因：{摘要}
 解除阻塞所需：{需要什么}
-归档路径：.agent-infra/workspace/blocked/{task-id}/
+归档路径：.agents/workspace/blocked/{task-id}/
 
 解除阻塞时执行：
-  mv .agent-infra/workspace/blocked/{task-id} .agent-infra/workspace/active/{task-id}
+  mv .agents/workspace/blocked/{task-id} .agents/workspace/active/{task-id}
   # 然后更新 task.md：status -> active，移除 blocked_at
 ```
 
@@ -132,7 +132,7 @@ ls .agent-infra/workspace/blocked/{task-id}/task.md
 
 - [ ] 分析并记录了阻塞原因
 - [ ] 更新了 task.md 的阻塞状态和阻塞信息
-- [ ] 将任务目录移动到 `.agent-infra/workspace/blocked/`
+- [ ] 将任务目录移动到 `.agents/workspace/blocked/`
 - [ ] 验证了移动成功
 - [ ] 告知了用户如何解除阻塞
 
@@ -142,7 +142,7 @@ ls .agent-infra/workspace/blocked/{task-id}/task.md
 
 ```bash
 # 1. 移回 active
-mv .agent-infra/workspace/blocked/{task-id} .agent-infra/workspace/active/{task-id}
+mv .agents/workspace/blocked/{task-id} .agents/workspace/active/{task-id}
 
 # 2. 更新 task.md：设置 status 为 active，更新时间戳
 # 3. 从中断处继续（检查 current_step）

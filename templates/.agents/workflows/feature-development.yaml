@@ -1,150 +1,150 @@
-# 功能开发工作流
-# 实现新功能时使用此工作流。
+# Feature Development Workflow
+# Use this workflow when implementing a new feature.
 
 name: feature-development
-description: 开发新功能的端到端工作流。
+description: End-to-end workflow for developing a new feature.
 
 steps:
   - name: analysis
-    description: 分析功能需求，探索代码库，识别受影响的区域。
+    description: Analyze feature requirements, explore the codebase, and identify impacted areas.
     recommended_agents:
       - claude
       - gemini
     tasks:
-      - 阅读并理解功能需求
-      - 探索代码库以识别相关文件和模块
-      - 识别依赖项和潜在影响区域
-      - 将发现记录在任务文件中
+      - Read and understand the feature requirements
+      - Explore the codebase to identify relevant files and modules
+      - Identify dependencies and potentially impacted areas
+      - Record findings in the task file
     inputs:
-      - 功能需求或 Issue 描述
-      - 项目代码库
+      - Feature requirements or issue description
+      - Project codebase
     artifact_versioning:
       outputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
-          rule: "扫描现有分析产物；首轮创建 analysis.md，后续修订创建 analysis-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "Scan existing analysis artifacts; create analysis.md for the first round, then analysis-r{N}.md for later revisions (N = current highest round + 1)"
     outputs:
-      - 更新后的任务文件（分析部分）
-      - 受影响文件列表
-      - 识别的风险或约束
+      - Updated task file (analysis section)
+      - List of impacted files
+      - Identified risks or constraints
 
   - name: design
-    description: 为功能实现创建技术设计方案。
+    description: Create the technical design for the feature implementation.
     recommended_agents:
       - claude
       - gemini
     tasks:
-      - 定义接口和数据结构
-      - 概述实现方案
-      - 识别边界情况和错误处理策略
-      - 在任务文件中记录设计方案
+      - Define interfaces and data structures
+      - Outline the implementation approach
+      - Identify edge cases and error-handling strategies
+      - Record the design in the task file
     inputs:
-      - 上一步的分析结果
-      - 项目架构和规范
+      - Analysis results from the previous step
+      - Project architecture and conventions
     artifact_versioning:
       inputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
-          rule: "读取最高轮次的分析产物作为设计输入"
+          rule: "Read the highest-round analysis artifact as design input"
       outputs:
         - name: plan
           pattern: "plan.md | plan-r{N}.md"
-          rule: "扫描现有方案产物；首轮创建 plan.md，后续修订创建 plan-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "Scan existing plan artifacts; create plan.md for the first round, then plan-r{N}.md for later revisions (N = current highest round + 1)"
     outputs:
-      - 更新后的任务文件（设计部分）
-      - 接口定义
-      - 实现计划
+      - Updated task file (design section)
+      - Interface definitions
+      - Implementation plan
 
   - name: implementation
-    description: 按照设计方案实现功能。
+    description: Implement the feature according to the design plan.
     recommended_agents:
       - codex
       - cursor
     tasks:
-      - 创建功能分支
-      - 实现功能代码
-      - 编写单元测试
-      - 编写集成测试（如适用）
-      - 确保代码遵循项目规范
+      - Create a feature branch
+      - Implement the feature code
+      - Write unit tests
+      - Write integration tests when applicable
+      - Ensure the code follows project conventions
     inputs:
-      - 上一步的技术设计
-      - 项目编码标准
+      - Technical design from the previous step
+      - Project coding standards
     artifact_versioning:
       outputs:
         - name: implementation
           pattern: "implementation.md | implementation-r{N}.md"
-          rule: "扫描现有实现产物；首轮创建 implementation.md，后续重实现创建 implementation-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "Scan existing implementation artifacts; create implementation.md for the first round, then implementation-r{N}.md for later re-implementations (N = current highest round + 1)"
     outputs:
-      - 包含实现的功能分支
-      - 测试文件
-      - 更新后的任务文件（实现备注）
+      - Feature branch with the implementation
+      - Test files
+      - Updated task file (implementation notes)
 
   - name: review
-    description: 审查实现的正确性、代码风格和最佳实践。
+    description: Review correctness, code style, and best practices in the implementation.
     recommended_agents:
       - claude
     tasks:
-      - 审查代码变更的正确性
-      - 检查是否遵循项目规范
-      - 验证测试覆盖率和质量
-      - 检查安全和性能问题
-      - 创建审查报告
+      - Review the correctness of the code changes
+      - Check adherence to project conventions
+      - Verify test coverage and quality
+      - Check for security and performance issues
+      - Create a review report
     inputs:
-      - 实现分支
-      - 项目规范
+      - Implementation branch
+      - Project conventions
     artifact_versioning:
       inputs:
         - name: implementation
           pattern: "implementation.md | implementation-r{N}.md"
-          rule: "读取最高轮次的实现产物作为审查输入"
+          rule: "Read the highest-round implementation artifact as review input"
       outputs:
         - name: review
           pattern: "review.md | review-r{N}.md"
-          rule: "扫描现有审查产物；首轮创建 review.md，后续轮次创建 review-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "Scan existing review artifacts; create review.md for the first round, then review-r{N}.md for later rounds (N = current highest round + 1)"
     outputs:
-      - 审查报告
-      - 待修复问题列表
+      - Review report
+      - List of issues to fix
 
   - name: fix
-    description: 处理审查阶段发现的问题。
+    description: Address issues found during the review step.
     recommended_agents:
       - codex
       - cursor
     tasks:
-      - 修复审查中的所有严重和重要问题
-      - 酌情处理次要问题和建议
-      - 根据需要更新测试
-      - 验证所有测试通过
+      - Fix all critical and major review findings
+      - Address minor issues and suggestions when appropriate
+      - Update tests as needed
+      - Verify that all tests pass
     inputs:
-      - 审查报告
-      - 实现分支
+      - Review report
+      - Implementation branch
     artifact_versioning:
       inputs:
         - name: review
           pattern: "review.md | review-r{N}.md"
-          rule: "读取最高轮次的审查产物，并校验其与 task.md Activity Log 中最近一条 Code Review 记录一致"
+          rule: "Read the highest-round review artifact and verify that it matches the latest Code Review entry in the task.md Activity Log"
       outputs:
         - name: refinement
           pattern: "refinement.md | refinement-r{N}.md"
-          rule: "扫描现有修复产物；首轮创建 refinement.md，后续轮次创建 refinement-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "Scan existing refinement artifacts; create refinement.md for the first round, then refinement-r{N}.md for later rounds (N = current highest round + 1)"
     outputs:
-      - 包含修复的更新分支
-      - 更新后的任务文件
+      - Updated branch with fixes
+      - Updated task file
 
   - name: commit
-    description: 最终确认变更并创建拉取请求。
+    description: Finalize the changes and create a pull request.
     recommended_agents:
       - claude
       - human
     tasks:
-      - 确保所有测试通过
-      - 按规范编写清晰的提交信息
-      - 创建包含适当描述的拉取请求
-      - 将 PR 关联到相关 Issue
-      - 将任务移至已完成
+      - Ensure all tests pass
+      - Write a clear commit message that follows project conventions
+      - Create a pull request with an appropriate description
+      - Link the PR to the relevant issue
+      - Move the task to completed
     inputs:
-      - 最终实现分支
-      - 任务文件
+      - Final implementation branch
+      - Task file
     outputs:
-      - 拉取请求
-      - 已完成的任务文件（位于 .agent-infra/workspace/completed/）
+      - Pull request
+      - Completed task file (stored in .agents/workspace/completed/)

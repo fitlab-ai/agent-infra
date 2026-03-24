@@ -32,11 +32,11 @@ gh api repos/{owner}/{repo}/dependabot/alerts/<alert-number>
 
 ### 2. 创建任务目录和文件
 
-检查 `.agent-infra/workspace/active/` 中是否已存在该告警的任务。
+检查 `.agents/workspace/active/` 中是否已存在该告警的任务。
 - 如果找到，询问用户是否重新导入
 - 如果未找到，创建新任务
 
-创建目录：`.agent-infra/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+创建目录：`.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
 
 任务元数据需包含：
 ```yaml
@@ -77,7 +77,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 任务 ID：{task-id}
 
 产出文件：
-- 任务文件：.agent-infra/workspace/active/{task-id}/task.md
+- 任务文件：.agents/workspace/active/{task-id}/task.md
 
 下一步：
   - Claude Code / OpenCode：/analyze-task {task-id}

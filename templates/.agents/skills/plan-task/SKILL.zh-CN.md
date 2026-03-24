@@ -18,7 +18,7 @@ description: >
 ### 1. 验证前置条件
 
 检查必要文件：
-- `.agent-infra/workspace/active/{task-id}/task.md` - 任务文件
+- `.agents/workspace/active/{task-id}/task.md` - 任务文件
 - 至少一个分析产物：`analysis.md` 或 `analysis-r{N}.md`
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
@@ -27,7 +27,7 @@ description: >
 
 ### 2. 确定方案轮次
 
-扫描 `.agent-infra/workspace/active/{task-id}/` 目录中的方案产物文件：
+扫描 `.agents/workspace/active/{task-id}/` 目录中的方案产物文件：
 - 如果不存在 `plan.md` 且不存在 `plan-r*.md` → 本轮为第 1 轮，产出 `plan.md`
 - 如果存在 `plan.md` 且不存在 `plan-r*.md` → 本轮为第 2 轮，产出 `plan-r2.md`
 - 如果存在 `plan-r{N}.md` → 本轮为第 N+1 轮，产出 `plan-r{N+1}.md`
@@ -75,7 +75,7 @@ description: >
 
 ### 6. 输出计划文档
 
-创建 `.agent-infra/workspace/active/{task-id}/{plan-artifact}`。
+创建 `.agents/workspace/active/{task-id}/{plan-artifact}`。
 
 ### 7. 更新任务状态
 
@@ -85,7 +85,7 @@ description: >
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 `.agent-infra/workspace/active/{task-id}/task.md`：
+更新 `.agents/workspace/active/{task-id}/task.md`：
 - `current_step`：technical-design
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
@@ -113,7 +113,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 预估复杂度：{评估}
 
 产出文件：
-- 技术方案：.agent-infra/workspace/active/{task-id}/{plan-artifact}
+- 技术方案：.agents/workspace/active/{task-id}/{plan-artifact}
 
 重要：人工审查检查点。
 请在继续实现之前审查技术方案。
@@ -198,7 +198,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 - [ ] 阅读并理解了需求分析
 - [ ] 考虑了备选方案
-- [ ] 创建了计划文档 `.agent-infra/workspace/active/{task-id}/{plan-artifact}`
+- [ ] 创建了计划文档 `.agents/workspace/active/{task-id}/{plan-artifact}`
 - [ ] 更新了 task.md 中的 `current_step` 为 technical-design
 - [ ] 更新了 task.md 中的 `updated_at` 为当前时间
 - [ ] 在 task.md 中记录了 `{plan-artifact}` 为已完成产物

@@ -203,7 +203,7 @@ EOF
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-如果有关联的活跃任务，更新 `.agent-infra/workspace/active/{task-id}/task.md`：
+如果有关联的活跃任务，更新 `.agents/workspace/active/{task-id}/task.md`：
 - `pr_number`：{pr-number}
 - `updated_at`：{当前时间}
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：

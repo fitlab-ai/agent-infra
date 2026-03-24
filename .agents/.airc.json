@@ -9,7 +9,7 @@
       ".agents/skills/",
       ".agents/templates/",
       ".agents/workflows/",
-      ".agent-infra/workspace/README.md",
+      ".agents/workspace/README.md",
       ".claude/commands/",
       ".claude/hooks/",
       ".gemini/commands/",

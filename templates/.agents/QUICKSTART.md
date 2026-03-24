@@ -13,7 +13,7 @@ This guide walks you through using multiple AI coding assistants together on a p
 1. Copy the task template to the active workspace:
 
 ```bash
-cp .agents/templates/task.md .agent-infra/workspace/active/task-001.md
+cp .agents/templates/task.md .agents/workspace/active/task-001.md
 ```
 
 2. Fill in the task metadata:
@@ -49,7 +49,7 @@ Claude Code excels at codebase exploration and understanding complex relationshi
 gemini
 
 # Example prompt:
-# "Based on the analysis in .agent-infra/workspace/active/task-001.md,
+# "Based on the analysis in .agents/workspace/active/task-001.md,
 #  create a technical design. Define interfaces and outline the approach."
 ```
 
@@ -60,7 +60,7 @@ gemini
 codex
 
 # Example prompt:
-# "Implement the changes described in .agent-infra/workspace/active/task-001.md.
+# "Implement the changes described in .agents/workspace/active/task-001.md.
 #  Follow the design section. Create a new branch for this work."
 ```
 
@@ -87,7 +87,7 @@ claude
 
 ```bash
 # Quick bug fix workflow
-cp .agents/templates/task.md .agent-infra/workspace/active/bugfix-001.md
+cp .agents/templates/task.md .agents/workspace/active/bugfix-001.md
 # Edit the task, then:
 # 1. Use Claude Code to analyze
 # 2. Use Codex/Cursor to fix
@@ -101,7 +101,7 @@ cp .agents/templates/task.md .agent-infra/workspace/active/bugfix-001.md
 3. **Report**: Generate review report from template.
 
 ```bash
-cp .agents/templates/review-report.md .agent-infra/workspace/active/review-pr-42.md
+cp .agents/templates/review-report.md .agents/workspace/active/review-pr-42.md
 # Use Claude Code to fill in the review
 ```
 
@@ -113,7 +113,7 @@ cp .agents/templates/review-report.md .agent-infra/workspace/active/review-pr-42
 4. **Verify** (Claude Code): Ensure no regressions, run tests.
 
 ```bash
-cp .agents/templates/task.md .agent-infra/workspace/active/refactor-001.md
+cp .agents/templates/task.md .agents/workspace/active/refactor-001.md
 # Follow the refactoring workflow in .agents/workflows/refactoring.yaml
 ```
 
@@ -122,7 +122,7 @@ cp .agents/templates/task.md .agent-infra/workspace/active/refactor-001.md
 When switching between AI tools, create a handoff document:
 
 ```bash
-cp .agents/templates/handoff.md .agent-infra/workspace/active/handoff-task-001-phase2.md
+cp .agents/templates/handoff.md .agents/workspace/active/handoff-task-001-phase2.md
 ```
 
 Fill in:

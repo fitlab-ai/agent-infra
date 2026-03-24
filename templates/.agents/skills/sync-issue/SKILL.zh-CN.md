@@ -17,17 +17,17 @@ description: >
 - 纯数字（如 `123`）或 `#` + 数字（如 `#123`）-> 视为 issue number
 - `TASK-` 开头 -> 视为 task-id（现有格式）
 
-如果参数是 issue number，使用 Bash 搜索关联任务（注意：`.agent-infra/workspace` 是隐藏目录，Grep/Glob 工具会跳过，必须使用 Bash）：
+如果参数是 issue number，使用 Bash 搜索关联任务（注意：`.agents/workspace` 是隐藏目录，Grep/Glob 工具会跳过，必须使用 Bash）：
 
 ```bash
 grep -rl "^issue_number: {issue-number}$" \
-  .agent-infra/workspace/active/ \
-  .agent-infra/workspace/blocked/ \
-  .agent-infra/workspace/completed/ \
+  .agents/workspace/active/ \
+  .agents/workspace/blocked/ \
+  .agents/workspace/completed/ \
   2>/dev/null | head -1
 ```
 
-- 如果返回文件路径（如 `.agent-infra/workspace/completed/TASK-xxx/task.md`），从路径中提取 `{task-id}` 和任务目录，继续执行步骤 2
+- 如果返回文件路径（如 `.agents/workspace/completed/TASK-xxx/task.md`），从路径中提取 `{task-id}` 和任务目录，继续执行步骤 2
 - 如果无返回，提示 `No task found associated with Issue #{issue-number}`
 
 如果参数是 task-id，继续执行步骤 2 的现有逻辑。
@@ -35,9 +35,9 @@ grep -rl "^issue_number: {issue-number}$" \
 ### 2. 验证任务存在
 
 对于 `task-id` 路径，按优先顺序搜索任务：
-- `.agent-infra/workspace/active/{task-id}/task.md`
-- `.agent-infra/workspace/blocked/{task-id}/task.md`
-- `.agent-infra/workspace/completed/{task-id}/task.md`
+- `.agents/workspace/active/{task-id}/task.md`
+- `.agents/workspace/blocked/{task-id}/task.md`
+- `.agents/workspace/completed/{task-id}/task.md`
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 

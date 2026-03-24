@@ -20,7 +20,7 @@ description: >
 ### 1. Verify Prerequisites
 
 Check required file:
-- `.agent-infra/workspace/active/{task-id}/task.md` - Task file
+- `.agents/workspace/active/{task-id}/task.md` - Task file
 
 Check that GitHub CLI is available and authenticated:
 
@@ -234,7 +234,7 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-Update `.agent-infra/workspace/active/{task-id}/task.md`:
+Update `.agents/workspace/active/{task-id}/task.md`:
 - Add or update `issue_number`: `{issue-number}`
 - `updated_at`: {current time}
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):

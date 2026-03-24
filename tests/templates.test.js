@@ -28,8 +28,8 @@ test("required template files were migrated into templates/", () => {
     "templates/.agents/skills/update-agent-infra/SKILL.md",
     "templates/.agents/skills/update-agent-infra/scripts/package.json",
     "templates/.agents/skills/update-agent-infra/scripts/sync-templates.js",
-    "templates/.agent-infra/workspace/README.md",
-    "templates/.agent-infra/workspace/README.zh-CN.md",
+    "templates/.agents/workspace/README.md",
+    "templates/.agents/workspace/README.zh-CN.md",
     "templates/.claude/CLAUDE.md",
     "templates/.claude/project-rules.md",
     "templates/.claude/hooks/check-version-format.sh",
@@ -82,7 +82,7 @@ test("templates do not contain legacy single-brace project or org placeholders",
 });
 
 test("update-agent-infra template copies stay in sync with working files", () => {
-  const collaborator = JSON.parse(read(".agent-infra/config.json"));
+  const collaborator = JSON.parse(read(".agents/.airc.json"));
   const project = collaborator.project;
   const org = collaborator.org;
   const lang = collaborator.language;
@@ -216,7 +216,7 @@ test("README documents the bootstrap installation flow", () => {
 
 test("version format validation hooks are wired into templates and local config", () => {
   const packageJson = JSON.parse(read("package.json"));
-  const collaborator = JSON.parse(read(".agent-infra/config.json"));
+  const collaborator = JSON.parse(read(".agents/.airc.json"));
   const rootClaudeSettings = JSON.parse(read(".claude/settings.json"));
   const templateClaudeSettings = JSON.parse(read("templates/.claude/settings.json"));
   const localCheckScript = read(".github/hooks/check-version-format.sh");
@@ -233,7 +233,7 @@ test("version format validation hooks are wired into templates and local config"
   assert.equal(
     collaborator.templateVersion,
     `v${packageJson.version}`,
-    ".agent-infra/config.json templateVersion should match package.json version with a v prefix"
+    ".agents/.airc.json templateVersion should match package.json version with a v prefix"
   );
 
   [
@@ -294,14 +294,14 @@ test("version format validation hook only blocks git commit in PreToolUse mode",
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-version-hook-"));
   const hooksDir = path.join(tempRoot, ".github", "hooks");
   const claudeHooksDir = path.join(tempRoot, ".claude", "hooks");
-  const configDir = path.join(tempRoot, ".agent-infra");
+  const configDir = path.join(tempRoot, ".agents");
 
   fs.mkdirSync(hooksDir, { recursive: true });
   fs.mkdirSync(claudeHooksDir, { recursive: true });
   fs.mkdirSync(configDir, { recursive: true });
   fs.copyFileSync(".github/hooks/check-version-format.sh", path.join(hooksDir, "check-version-format.sh"));
   fs.copyFileSync(".claude/hooks/check-version-format.sh", path.join(claudeHooksDir, "check-version-format.sh"));
-  fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ templateVersion: "v1.2.3" }));
+  fs.writeFileSync(path.join(configDir, ".airc.json"), JSON.stringify({ templateVersion: "v1.2.3" }));
   fs.writeFileSync(path.join(tempRoot, "package.json"), JSON.stringify({ version: "1.2.3" }));
 
   const runClaudeHook = (input) => spawnSync(
@@ -324,7 +324,7 @@ test("version format validation hook only blocks git commit in PreToolUse mode",
     assert.match(commit.stdout, /Version format check passed\./, "PreToolUse should log successful validation");
     assert.match(commit.stdout, /Claude hook: version check passed\./, "PreToolUse should log successful Claude-hook delegation");
 
-    fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ templateVersion: "1.2.3" }));
+    fs.writeFileSync(path.join(configDir, ".airc.json"), JSON.stringify({ templateVersion: "1.2.3" }));
 
     const blockedCommit = runClaudeHook(JSON.stringify({ tool_input: { command: "git commit -m broken" } }));
     assert.equal(blockedCommit.status, 2, "PreToolUse should block invalid git commit commands with exit 2");

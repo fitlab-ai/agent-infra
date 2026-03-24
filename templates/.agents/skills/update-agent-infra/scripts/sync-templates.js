@@ -3,7 +3,7 @@
  * sync-templates.js — Deterministic template sync for managed & ejected files.
  *
  * Handles SKILL steps: 2 (detect template source version), 3.0 (registry sync), 4 (managed),
- * 6 (ejected), 7 (.agent-infra/config.json update).
+ * 6 (ejected), 7 (.agents/.airc.json update).
  *
  * Merged files (step 5) are NOT handled — they require AI semantic merge.
  * The report includes `merged.pending` so the AI knows what to process.
@@ -21,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 
 const RETIRED_FILE_ENTRIES = new Set([
   '.agent-workspace/README.md',
+  '.agent-infra/config.json',
+  '.agent-infra/workspace/README.md',
   '.github/hooks/',
   '.github/ISSUE_TEMPLATE/',
   '.github/PULL_REQUEST_TEMPLATE.md',
@@ -39,7 +41,7 @@ const DEFAULTS = {
       ".agents/skills/",
       ".agents/templates/",
       ".agents/workflows/",
-      ".agent-infra/workspace/README.md",
+      ".agents/workspace/README.md",
       ".claude/commands/",
       ".claude/hooks/",
       ".gemini/commands/",
@@ -198,26 +200,50 @@ function pruneRetiredConfig(config) {
 }
 
 function syncTemplates(projectRoot) {
-  const configDir = path.join(projectRoot, '.agent-infra');
-  const cfgPath = path.join(configDir, 'config.json');
-  const legacyCfgPath = path.join(projectRoot, '.airc.json');
+  const configDir = path.join(projectRoot, '.agents');
+  const cfgPath = path.join(configDir, '.airc.json');
+  const legacyCfgPaths = [
+    path.join(projectRoot, '.airc.json'),
+    path.join(projectRoot, '.agent-infra', 'config.json')
+  ];
   const workspacePath = path.join(configDir, 'workspace');
-  const legacyWorkspacePath = path.join(projectRoot, '.agent-workspace');
+  const legacyWorkspacePaths = [
+    path.join(projectRoot, '.agent-workspace'),
+    path.join(projectRoot, '.agent-infra', 'workspace')
+  ];
 
-  if (!fs.existsSync(cfgPath) && fs.existsSync(legacyCfgPath)) {
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.renameSync(legacyCfgPath, cfgPath);
+  if (!fs.existsSync(cfgPath)) {
+    for (const legacyCfgPath of legacyCfgPaths) {
+      if (!fs.existsSync(legacyCfgPath)) continue;
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.renameSync(legacyCfgPath, cfgPath);
+      break;
+    }
   }
-  if (!fs.existsSync(workspacePath) && fs.existsSync(legacyWorkspacePath)) {
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.renameSync(legacyWorkspacePath, workspacePath);
+  if (!fs.existsSync(workspacePath)) {
+    for (const legacyWorkspacePath of legacyWorkspacePaths) {
+      if (!fs.existsSync(legacyWorkspacePath)) continue;
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.renameSync(legacyWorkspacePath, workspacePath);
+      break;
+    }
+  }
+
+  try {
+    const legacyConfigDir = path.join(projectRoot, '.agent-infra');
+    if (fs.existsSync(legacyConfigDir) && fs.readdirSync(legacyConfigDir).length === 0) {
+      fs.rmdirSync(legacyConfigDir);
+    }
+  } catch {
+    // Ignore cleanup failures for partially migrated directories.
   }
 
   if (!fs.existsSync(cfgPath)) {
-    return { error: 'No .agent-infra/config.json in project root.' };
+    return { error: 'No .agents/.airc.json in project root.' };
   }
 
   const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  const configPathRel = norm(path.relative(projectRoot, cfgPath));
   pruneRetiredConfig(cfg);
   const templateRoot = resolveProjectTemplateDir(projectRoot, cfg.templateSource);
   if (!templateRoot) {
@@ -315,6 +341,7 @@ function syncTemplates(projectRoot) {
         const projFiles = walkDir(projDir).map(f => norm(path.relative(projectRoot, f)));
         for (const projFile of projFiles) {
           if (expectedTargets.has(projFile)) continue;
+          if (projFile === configPathRel) continue;
           if (matchesAny(projFile, merged) || matchesAny(projFile, ejected)) continue;
 
           fs.unlinkSync(path.join(projectRoot, projFile));

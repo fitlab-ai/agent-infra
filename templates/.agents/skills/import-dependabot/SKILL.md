@@ -33,11 +33,11 @@ Extract key information:
 
 ### 2. Create the Task Directory and File
 
-Check whether `.agent-infra/workspace/active/` already has a task for this alert.
+Check whether `.agents/workspace/active/` already has a task for this alert.
 - If found, ask the user whether to re-import
 - If not found, create a new task
 
-Create directory: `.agent-infra/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+Create directory: `.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
 
 Task metadata must include:
 ```yaml
@@ -78,7 +78,7 @@ Task information:
 - Task ID: {task-id}
 
 Output file:
-- Task file: .agent-infra/workspace/active/{task-id}/task.md
+- Task file: .agents/workspace/active/{task-id}/task.md
 
 Next step:
   - Claude Code / OpenCode: /analyze-task {task-id}

@@ -27,11 +27,13 @@ node --test tests/*.test.js
 │   ├── .gemini/                   # Gemini CLI 配置模板
 │   ├── .opencode/                 # OpenCode 配置模板
 │   └── *.md                       # 根级模板文件
+├── .agents/                       # agent-infra 配置与工作区
+│   ├── .airc.json                 # 项目配置
+│   ├── workspace/                 # 任务工作区（已被 git ignore）
+│   ├── skills/                    # 技能仓库
+│   └── workflows/                 # 工作流定义
 ├── tests/                         # 测试（Node.js 内置测试运行器）
 ├── install.sh                     # 引导安装脚本
-├── .agent-infra/                  # agent-infra 配置与工作区
-│   ├── config.json                # 项目配置
-│   └── workspace/                 # 任务工作区（已被 git ignore）
 └── package.json                   # npm 测试脚本定义
 ```
 
@@ -169,7 +171,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 本项目支持 Claude Code、Codex、Gemini CLI、OpenCode。
 
 - `.agents/` - 共享协作配置
-- `.agent-infra/workspace/` - 任务工作区（已被 git ignore）
+- `.agents/workspace/` - 任务工作区（已被 git ignore）
 
 **协作指南**：`.agents/README.md`
 

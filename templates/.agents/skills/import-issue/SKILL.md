@@ -27,7 +27,7 @@ Extract: issue number, title, description, and labels.
 
 ### 2. Check for an Existing Task
 
-Search `.agent-infra/workspace/active/` for an existing task linked to this Issue.
+Search `.agents/workspace/active/` for an existing task linked to this Issue.
 - If found, ask the user whether to re-import or continue with the existing task
 - If not found, create a new task
 
@@ -37,7 +37,7 @@ Search `.agent-infra/workspace/active/` for an existing task linked to this Issu
 date +%Y%m%d-%H%M%S
 ```
 
-- Create the directory: `.agent-infra/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+- Create the directory: `.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
 - Use the `.agents/templates/task.md` template to create `task.md`
 
 Task metadata:
@@ -62,7 +62,7 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-Update `.agent-infra/workspace/active/{task-id}/task.md`:
+Update `.agents/workspace/active/{task-id}/task.md`:
 - `current_step`: requirement-analysis
 - `assigned_to`: {current AI agent}
 - `updated_at`: {current time}
@@ -84,7 +84,7 @@ Task information:
 - Workflow: {workflow}
 
 Output file:
-- Task file: .agent-infra/workspace/active/{task-id}/task.md
+- Task file: .agents/workspace/active/{task-id}/task.md
 
 Next step - run requirements analysis:
   - Claude Code / OpenCode: /analyze-task {task-id}
@@ -94,7 +94,7 @@ Next step - run requirements analysis:
 
 ## Completion Checklist
 
-- [ ] Created the task file `.agent-infra/workspace/active/{task-id}/task.md`
+- [ ] Created the task file `.agents/workspace/active/{task-id}/task.md`
 - [ ] Recorded `issue_number` in task.md
 - [ ] Updated `current_step` to requirement-analysis
 - [ ] Updated `updated_at` to the current time

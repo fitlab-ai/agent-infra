@@ -17,9 +17,9 @@ description: >
 ### 1. 查找任务
 
 按以下优先顺序搜索任务：
-1. `.agent-infra/workspace/active/{task-id}/task.md`
-2. `.agent-infra/workspace/blocked/{task-id}/task.md`
-3. `.agent-infra/workspace/completed/{task-id}/task.md`
+1. `.agents/workspace/active/{task-id}/task.md`
+2. `.agents/workspace/blocked/{task-id}/task.md`
+3. `.agents/workspace/completed/{task-id}/task.md`
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 

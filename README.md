@@ -144,7 +144,7 @@ ai init
 # or: agent-infra init
 ```
 
-The CLI collects project metadata, installs the `update-agent-infra` seed command for all supported AI TUIs, and generates `.agent-infra/config.json`.
+The CLI collects project metadata, installs the `update-agent-infra` seed command for all supported AI TUIs, and generates `.agents/.airc.json`.
 
 > `ai` is a shorthand for `agent-infra`. Both commands are equivalent.
 
@@ -170,7 +170,7 @@ agent-infra is intentionally simple: a bootstrap CLI creates the seed configurat
 ### End-to-End Flow
 
 1. **Install** — `npm install -g @fitlab-ai/agent-infra` (or use the shell script wrapper)
-2. **Initialize** — `ai init` in the project root to generate `.agent-infra/config.json` and install the seed command
+2. **Initialize** — `ai init` in the project root to generate `.agents/.airc.json` and install the seed command
 3. **Render** — run `update-agent-infra` in any AI TUI to detect the bundled template version and generate all managed files
 4. **Develop** — use 28 built-in skills to drive the full lifecycle: `analysis → design → implementation → review → fix → commit`
 5. **Update** — run `update-agent-infra` again whenever a new template version is available
@@ -197,7 +197,7 @@ block-beta
 
     block:project:4
         columns 4
-        agents[".agents/"] config[".agent-infra/config.json"] workspace[".agent-infra/workspace/"] governance["AGENTS.md"]
+        agents[".agents/"] config[".agents/.airc.json"] workspace[".agents/workspace/"] governance["AGENTS.md"]
     end
 
     tui -- "slash commands" --> shared
@@ -214,10 +214,9 @@ After setup, your project gains a complete AI collaboration infrastructure:
 
 ```text
 my-project/
-├── .agent-infra/          # agent-infra-owned state
-│   ├── config.json        # Central configuration
-│   └── workspace/         # Task workspace (git-ignored)
 ├── .agents/               # Shared AI collaboration config
+│   ├── .airc.json         # Central configuration
+│   ├── workspace/         # Task workspace (git-ignored)
 │   ├── skills/            # 28 built-in AI skills
 │   ├── workflows/         # 4 prebuilt workflows
 │   └── templates/         # Task and artifact templates
@@ -372,9 +371,9 @@ import-issue #42                    Import task from GitHub Issue
 
 ## Configuration Reference
 
-The generated `.agent-infra/config.json` file is the central contract between the bootstrap CLI, templates, and future updates.
+The generated `.agents/.airc.json` file is the central contract between the bootstrap CLI, templates, and future updates.
 
-### Example `.agent-infra/config.json`
+### Example `.agents/.airc.json`
 
 ```json
 {
@@ -385,7 +384,7 @@ The generated `.agent-infra/config.json` file is the central contract between th
   "templateVersion": "v0.3.2",
   "files": {
     "managed": [
-      ".agent-infra/workspace/README.md",
+      ".agents/workspace/README.md",
       ".agents/skills/",
       ".agents/templates/",
       ".agents/workflows/",
@@ -433,7 +432,7 @@ Each generated path is assigned an update strategy. That strategy determines how
   "files": {
     "managed": [
       ".agents/skills/",
-      ".agent-infra/workspace/README.md"
+      ".agents/workspace/README.md"
     ],
     "merged": [
       ".gitignore",
@@ -448,7 +447,7 @@ Each generated path is assigned an update strategy. That strategy determines how
 
 ### Moving a file from `managed` to `ejected`
 
-1. Remove the path from the `managed` array in `.agent-infra/config.json`.
+1. Remove the path from the `managed` array in `.agents/.airc.json`.
 2. Add the same path to the `ejected` array.
 3. Run `update-agent-infra` again so future updates stop managing that file.
 
@@ -458,7 +457,7 @@ Use this when a file starts as template-owned but later becomes project-specific
 
 ## Version Management
 
-agent-infra uses semantic versioning through Git tags and GitHub releases. The installed template version is recorded in `.agent-infra/config.json` as `templateVersion`, which gives both humans and AI tools a stable reference point for upgrades.
+agent-infra uses semantic versioning through Git tags and GitHub releases. The installed template version is recorded in `.agents/.airc.json` as `templateVersion`, which gives both humans and AI tools a stable reference point for upgrades.
 
 <a id="contributing"></a>
 

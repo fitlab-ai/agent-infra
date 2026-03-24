@@ -19,7 +19,7 @@ description: >
 ### 1. Verify Prerequisites
 
 Check required files:
-- `.agent-infra/workspace/active/{task-id}/task.md` - Task file
+- `.agents/workspace/active/{task-id}/task.md` - Task file
 
 Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, for example `TASK-20260306-143022`
 
@@ -27,7 +27,7 @@ If `task.md` is missing, tell the user to create or import the task first.
 
 ### 2. Determine the Analysis Round
 
-Scan `.agent-infra/workspace/active/{task-id}/` for analysis artifact files:
+Scan `.agents/workspace/active/{task-id}/` for analysis artifact files:
 - If neither `analysis.md` nor `analysis-r*.md` exists -> this is Round 1 and must create `analysis.md`
 - If `analysis.md` exists and no `analysis-r*.md` exists -> this is Round 2 and must create `analysis-r2.md`
 - If `analysis-r{N}.md` exists -> this is Round N+1 and must create `analysis-r{N+1}.md`
@@ -61,7 +61,7 @@ Follow the `analysis` step in `.agents/workflows/feature-development.yaml`:
 
 ### 5. Output Analysis Document
 
-Create `.agent-infra/workspace/active/{task-id}/{analysis-artifact}`.
+Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 
 ## Output Template
 
@@ -109,7 +109,7 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-Update `.agent-infra/workspace/active/{task-id}/task.md`:
+Update `.agents/workspace/active/{task-id}/task.md`:
 - `current_step`: requirement-analysis
 - `assigned_to`: {current AI agent}
 - `updated_at`: {current time}
@@ -135,7 +135,7 @@ Summary:
 - Risk level: {assessment}
 
 Output file:
-- Analysis report: .agent-infra/workspace/active/{task-id}/{analysis-artifact}
+- Analysis report: .agents/workspace/active/{task-id}/{analysis-artifact}
 
 Next step - create technical plan:
   - Claude Code / OpenCode: /plan-task {task-id}
@@ -146,7 +146,7 @@ Next step - create technical plan:
 ## Completion Checklist
 
 - [ ] Read and understood the task file and source information
-- [ ] Created analysis document `.agent-infra/workspace/active/{task-id}/{analysis-artifact}`
+- [ ] Created analysis document `.agents/workspace/active/{task-id}/{analysis-artifact}`
 - [ ] Updated `current_step` to requirement-analysis in task.md
 - [ ] Updated `updated_at` to the current time in task.md
 - [ ] Updated `assigned_to` in task.md

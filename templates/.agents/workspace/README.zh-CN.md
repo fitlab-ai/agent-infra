@@ -5,7 +5,7 @@
 ## 目录结构
 
 ```
-.agent-infra/workspace/
+.agents/workspace/
   active/           # 当前活跃的任务和交接文档
   blocked/          # 被阻塞的任务，等待解决
   completed/        # 已完成的任务（保留供参考）

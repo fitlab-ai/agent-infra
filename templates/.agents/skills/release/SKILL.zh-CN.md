@@ -71,7 +71,7 @@ git branch --show-current
 - `SECURITY.md` / `SECURITY.zh-CN.md`（支持版本表格）
 
 **排除以下目录的版本替换**：
-- `.agents/`、`.agent-infra/workspace/`、`.claude/`、`.codex/`、`.gemini/`、`.opencode/`（AI 工具配置）
+- `.agents/`、`.agents/workspace/`、`.claude/`、`.codex/`、`.gemini/`、`.opencode/`（AI 工具配置）
 
 如果项目使用 `package-lock.json`，在更新 `package.json` 后运行 `npm install --package-lock-only`，确保锁文件中的版本号保持同步。
 

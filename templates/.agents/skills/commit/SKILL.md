@@ -90,7 +90,7 @@ Generate commit message in Conventional Commits format:
 
 ### Multi-Agent Co-Authorship (If Task-Related)
 
-If the commit belongs to an active task and `.agent-infra/workspace/active/{task-id}/task.md` exists:
+If the commit belongs to an active task and `.agents/workspace/active/{task-id}/task.md` exists:
 
 1. Read the `## Activity Log` section from `task.md`.
 2. Extract all unique agent names from entries matching `by {agent}`. A loose pattern such as `by (\S+)` is acceptable.

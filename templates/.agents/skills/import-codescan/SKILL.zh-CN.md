@@ -35,7 +35,7 @@ gh api repos/{owner}/{repo}/code-scanning/alerts/<alert-number>
 
 检查是否已存在该告警的任务。如果不存在，创建：
 
-目录：`.agent-infra/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+目录：`.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
 
 任务元数据：
 ```yaml

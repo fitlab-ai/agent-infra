@@ -37,7 +37,7 @@
     code-review.yaml            # 代码审查工作流
     refactoring.yaml            # 重构工作流
 
-.agent-infra/workspace/         # 运行时工作区（已被 git ignore）
+.agents/workspace/         # 运行时工作区（已被 git ignore）
   active/                       # 当前活跃任务
   blocked/                      # 被阻塞的任务
   completed/                    # 已完成的任务
@@ -95,7 +95,7 @@
 ## 快速入门
 
 1. **阅读快速入门指南**：参见 `QUICKSTART.zh-CN.md` 获取分步说明。
-2. **创建任务**：将 `.agents/templates/task.zh-CN.md` 复制到 `.agent-infra/workspace/active/`。
+2. **创建任务**：将 `.agents/templates/task.zh-CN.md` 复制到 `.agents/workspace/active/`。
 3. **分配给 AI**：更新任务元数据中的 `assigned_to` 字段。
 4. **执行工作流**：按照 `.agents/workflows/` 中相应的工作流执行。
 5. **交接**：切换 AI 时，从模板创建交接文档。
@@ -131,7 +131,7 @@
 
 ### Q：任务如何在 AI 工具之间传递？
 
-通过存储在 `.agent-infra/workspace/` 中的交接文档。每份交接文档包含上下文、进度和后续步骤，让接收方 AI 能无缝接续。
+通过存储在 `.agents/workspace/` 中的交接文档。每份交接文档包含上下文、进度和后续步骤，让接收方 AI 能无缝接续。
 
 ### Q：如果某个 AI 工具不支持 AGENTS.md 怎么办？
 
@@ -143,4 +143,4 @@
 
 ### Q：运行时文件存储在哪里？
 
-在 `.agent-infra/workspace/` 中，该目录已被 git ignore。只有 `.agents/` 中的模板和工作流定义受版本控制。
+在 `.agents/workspace/` 中，该目录已被 git ignore。只有 `.agents/` 中的模板和工作流定义受版本控制。

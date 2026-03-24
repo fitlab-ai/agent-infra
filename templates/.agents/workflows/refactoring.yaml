@@ -1,154 +1,154 @@
-# 重构工作流
-# 代码重构任务时使用此工作流。
+# Refactoring Workflow
+# Use this workflow for code refactoring tasks.
 
 name: refactoring
-description: 安全且结构化的代码重构工作流。
+description: Safe and structured workflow for code refactoring.
 
 steps:
   - name: analysis
-    description: 分析当前代码并确定重构范围。
+    description: Analyze the current code and determine the refactoring scope.
     recommended_agents:
       - claude
       - gemini
     tasks:
-      - 识别待重构的代码及重构原因
-      - 映射受影响代码的所有依赖项和使用者
-      - 评估重构的风险和复杂度
-      - 识别受影响区域的现有测试覆盖
-      - 将发现记录在任务文件中
+      - Identify the code to refactor and why it needs refactoring
+      - Map all dependencies and consumers of the impacted code
+      - Assess refactoring risk and complexity
+      - Identify existing test coverage for impacted areas
+      - Record findings in the task file
     inputs:
-      - 重构请求或 Issue 描述
-      - 项目代码库
+      - Refactoring request or issue description
+      - Project codebase
     artifact_versioning:
       outputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
-          rule: "扫描现有分析产物；首轮创建 analysis.md，后续修订创建 analysis-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "Scan existing analysis artifacts; create analysis.md for the first round, then analysis-r{N}.md for later revisions (N = current highest round + 1)"
     outputs:
-      - 包含依赖关系图的范围分析
-      - 风险评估
-      - 更新后的任务文件（分析部分）
+      - Scope analysis with dependency mapping
+      - Risk assessment
+      - Updated task file (analysis section)
 
   - name: design
-    description: 规划重构方案以最小化风险。
+    description: Plan the refactoring approach to minimize risk.
     recommended_agents:
       - claude
     tasks:
-      - 定义目标架构或代码结构
-      - 规划增量重构步骤（避免一次性大改动）
-      - 识别应保持功能正常的中间状态
-      - 规划重构前需要的额外测试
-      - 在任务文件中记录重构计划
+      - Define the target architecture or code structure
+      - Plan incremental refactoring steps to avoid a single large change
+      - Identify intermediate states that must remain functional
+      - Plan any additional tests needed before refactoring
+      - Record the refactoring plan in the task file
     inputs:
-      - 上一步的范围分析
-      - 项目架构
+      - Scope analysis from the previous step
+      - Project architecture
     artifact_versioning:
       inputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
-          rule: "读取最高轮次的分析产物作为设计输入"
+          rule: "Read the highest-round analysis artifact as design input"
       outputs:
         - name: plan
           pattern: "plan.md | plan-r{N}.md"
-          rule: "扫描现有方案产物；首轮创建 plan.md，后续修订创建 plan-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "Scan existing plan artifacts; create plan.md for the first round, then plan-r{N}.md for later revisions (N = current highest round + 1)"
     outputs:
-      - 包含增量步骤的重构计划
-      - 前置测试列表
-      - 更新后的任务文件（设计部分）
+      - Refactoring plan with incremental steps
+      - List of prerequisite tests
+      - Updated task file (design section)
 
   - name: implementation
-    description: 按计划执行重构。
+    description: Execute the refactoring according to the plan.
     recommended_agents:
       - codex
       - cursor
     tasks:
-      - 创建重构分支
-      - 添加前置测试（如尚未存在）
-      - 增量执行重构步骤
-      - 每步后验证测试通过
-      - 更新受影响的文档或注释
-      - 确保代码遵循项目规范
+      - Create a refactoring branch
+      - Add prerequisite tests if they do not already exist
+      - Execute the refactoring incrementally
+      - Verify tests pass after each step
+      - Update impacted documentation or comments
+      - Ensure the code follows project conventions
     inputs:
-      - 上一步的重构计划
-      - 项目编码标准
+      - Refactoring plan from the previous step
+      - Project coding standards
     artifact_versioning:
       outputs:
         - name: implementation
           pattern: "implementation.md | implementation-r{N}.md"
-          rule: "扫描现有实现产物；首轮创建 implementation.md，后续重实现创建 implementation-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "Scan existing implementation artifacts; create implementation.md for the first round, then implementation-r{N}.md for later re-implementations (N = current highest round + 1)"
     outputs:
-      - 包含变更的重构分支
-      - 更新或新增的测试文件
-      - 更新后的任务文件（实现备注）
+      - Refactoring branch with the changes
+      - Updated or new test files
+      - Updated task file (implementation notes)
 
   - name: review
-    description: 验证重构是否保持了行为并提升了代码质量。
+    description: Verify that the refactoring preserves behavior and improves code quality.
     recommended_agents:
       - claude
     tasks:
-      - 验证功能等价性（除非有意改变，否则行为不变）
-      - 检查所有测试通过
-      - 验证代码质量提升
-      - 检查是否有遗漏的依赖项或使用者
-      - 评估性能影响（如适用）
-      - 创建审查报告
+      - Verify functional equivalence unless behavior changes are intentional
+      - Check that all tests pass
+      - Confirm that code quality has improved
+      - Check for missed dependencies or consumers
+      - Assess performance impact when applicable
+      - Create a review report
     inputs:
-      - 重构分支
-      - 原始代码用于对比
-      - 测试结果
+      - Refactoring branch
+      - Original code for comparison
+      - Test results
     artifact_versioning:
       inputs:
         - name: implementation
           pattern: "implementation.md | implementation-r{N}.md"
-          rule: "读取最高轮次的实现产物作为审查输入"
+          rule: "Read the highest-round implementation artifact as review input"
       outputs:
         - name: review
           pattern: "review.md | review-r{N}.md"
-          rule: "扫描现有审查产物；首轮创建 review.md，后续轮次创建 review-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "Scan existing review artifacts; create review.md for the first round, then review-r{N}.md for later rounds (N = current highest round + 1)"
     outputs:
-      - 审查报告
-      - 问题列表（如有）
+      - Review report
+      - List of issues if any
 
   - name: fix
-    description: 处理审查中发现的问题。
+    description: Address issues found during review.
     recommended_agents:
       - codex
       - cursor
     tasks:
-      - 修复审查中识别的问题
-      - 根据需要更新测试
-      - 验证所有测试通过
-      - 确保无回归问题
+      - Fix issues identified in the review
+      - Update tests as needed
+      - Verify that all tests pass
+      - Ensure there are no regressions
     inputs:
-      - 审查报告
-      - 重构分支
+      - Review report
+      - Refactoring branch
     artifact_versioning:
       inputs:
         - name: review
           pattern: "review.md | review-r{N}.md"
-          rule: "读取最高轮次的审查产物，并校验其与 task.md Activity Log 中最近一条 Code Review 记录一致"
+          rule: "Read the highest-round review artifact and verify that it matches the latest Code Review entry in the task.md Activity Log"
       outputs:
         - name: refinement
           pattern: "refinement.md | refinement-r{N}.md"
-          rule: "扫描现有修复产物；首轮创建 refinement.md，后续轮次创建 refinement-r{N}.md（N = 当前最高轮次 + 1）"
+          rule: "Scan existing refinement artifacts; create refinement.md for the first round, then refinement-r{N}.md for later rounds (N = current highest round + 1)"
     outputs:
-      - 包含修复的更新分支
-      - 更新后的任务文件
+      - Updated branch with fixes
+      - Updated task file
 
   - name: commit
-    description: 最终确认重构并创建拉取请求。
+    description: Finalize the refactoring and create a pull request.
     recommended_agents:
       - claude
       - human
     tasks:
-      - 确保所有测试通过
-      - 编写清晰的提交信息说明重构内容
-      - 创建包含详细变更描述的拉取请求
-      - 将 PR 关联到相关 Issue
-      - 将任务移至已完成
+      - Ensure all tests pass
+      - Write a clear commit message that explains the refactoring
+      - Create a pull request with a detailed change summary
+      - Link the PR to the relevant issue
+      - Move the task to completed
     inputs:
-      - 最终重构分支
-      - 任务文件
+      - Final refactoring branch
+      - Task file
     outputs:
-      - 拉取请求
-      - 已完成的任务文件（位于 .agent-infra/workspace/completed/）
+      - Pull request
+      - Completed task file (stored in .agents/workspace/completed/)

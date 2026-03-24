@@ -8,7 +8,7 @@ repo_root=$(
   CDPATH= cd -- "$script_dir/../.." && pwd
 )
 
-airc_file="$repo_root/.agent-infra/config.json"
+airc_file="$repo_root/.agents/.airc.json"
 package_file="$repo_root/package.json"
 
 if [ ! -f "$airc_file" ] || [ ! -f "$package_file" ]; then
@@ -18,7 +18,7 @@ fi
 template_version=$(
   node -e "const fs = require('node:fs'); const data = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); if (typeof data.templateVersion !== 'string') process.exit(1); process.stdout.write(data.templateVersion);" "$airc_file"
 ) || {
-  echo "Error: Failed to read templateVersion from .agent-infra/config.json."
+  echo "Error: Failed to read templateVersion from .agents/.airc.json."
   exit 1
 }
 
@@ -30,8 +30,8 @@ package_version=$(
 }
 
 if ! printf '%s\n' "$template_version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-  echo "Error: .agent-infra/config.json templateVersion must use v-prefixed semver (found: $template_version)."
-  echo "Fix: set .agent-infra/config.json.templateVersion to v$package_version"
+  echo "Error: .agents/.airc.json templateVersion must use v-prefixed semver (found: $template_version)."
+  echo "Fix: set .agents/.airc.json.templateVersion to v$package_version"
   exit 1
 fi
 
@@ -42,7 +42,7 @@ if ! printf '%s\n' "$package_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; the
 fi
 
 if [ "${template_version#v}" != "$package_version" ]; then
-  echo "Error: .agent-infra/config.json templateVersion and package.json version do not match."
+  echo "Error: .agents/.airc.json templateVersion and package.json version do not match."
   echo "Expected: templateVersion=v$package_version"
   echo "Actual: templateVersion=$template_version, version=$package_version"
   exit 1

@@ -42,7 +42,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
     );
 
     const config = JSON.parse(
-      fs.readFileSync(path.join(tmpDir, ".agent-infra/config.json"), "utf8")
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
     );
     assert.equal(config.project, "testproj");
     assert.equal(config.org, "testorg");
@@ -138,9 +138,9 @@ test("installed sync-templates.js executes inside a type=module project", () => 
     fs.mkdirSync(path.join(tmpDir, "templates"), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, "templates", "README.md"), "Hello {{project}}\n", "utf8");
     fs.writeFileSync(
-      path.join(tmpDir, ".agent-infra", "config.json"),
+      path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
-        ...JSON.parse(fs.readFileSync(path.join(tmpDir, ".agent-infra", "config.json"), "utf8")),
+        ...JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")),
         templateSource: path.join(tmpDir, "templates"),
         files: {
           managed: ["README.md"],
@@ -221,9 +221,9 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     };
 
   try {
-    fs.mkdirSync(path.join(tmpDir, ".agent-infra"), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
     fs.writeFileSync(
-      path.join(tmpDir, ".agent-infra/config.json"),
+      path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify(config, null, 2) + "\n",
       "utf8"
     );
@@ -253,7 +253,7 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     assert.match(output, /Seed files updated successfully!/);
 
     const updated = JSON.parse(
-      fs.readFileSync(path.join(tmpDir, ".agent-infra/config.json"), "utf8")
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
     );
     assert.ok(!("modules" in updated), "legacy modules field should be removed");
     assert.ok(!updated.files.managed.includes(".editorconfig"));
@@ -292,7 +292,7 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
   }
 });
 
-test("agent-infra update migrates legacy config and workspace paths", () => {
+test("agent-infra update migrates v0.2 legacy config and workspace paths", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-legacy-"));
   const cli = filePath("bin/cli.js");
 
@@ -323,14 +323,14 @@ test("agent-infra update migrates legacy config and workspace paths", () => {
       encoding: "utf8"
     });
 
-    assert.match(output, /Migrated \.airc\.json -> \.agent-infra\/config\.json/);
-    assert.match(output, /Migrated \.agent-workspace -> \.agent-infra\/workspace/);
-    assert.ok(fs.existsSync(path.join(tmpDir, ".agent-infra", "config.json")));
-    const migrated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agent-infra", "config.json"), "utf8"));
+    assert.match(output, /Migrated \.airc\.json -> \.agents\/\.airc\.json/);
+    assert.match(output, /Migrated \.agent-workspace -> \.agents\/workspace/);
+    assert.ok(fs.existsSync(path.join(tmpDir, ".agents", ".airc.json")));
+    const migrated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8"));
     assert.ok(!("modules" in migrated), "legacy modules field should be removed during migration");
     assert.ok(!migrated.files.managed.includes(".editorconfig"));
     assert.ok(!migrated.files.merged.includes(".mailmap"));
-    assert.ok(fs.existsSync(path.join(tmpDir, ".agent-infra", "workspace", "README.md")));
+    assert.ok(fs.existsSync(path.join(tmpDir, ".agents", "workspace", "README.md")));
     assert.ok(!fs.existsSync(path.join(tmpDir, ".airc.json")));
     assert.ok(!fs.existsSync(path.join(tmpDir, ".agent-workspace")));
   } finally {
@@ -338,7 +338,53 @@ test("agent-infra update migrates legacy config and workspace paths", () => {
   }
 });
 
-test("agent-infra update requires .agent-infra/config.json", () => {
+test("agent-infra update migrates v0.3 legacy config and workspace paths", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-legacy-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    fs.mkdirSync(path.join(tmpDir, ".agent-infra", "workspace"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, ".agent-infra", "config.json"),
+      JSON.stringify({
+        project: "legacyproj",
+        org: "legacyorg",
+        language: "en",
+        templateSource: "templates/",
+        templateVersion: "stale",
+        modules: ["ai", "github"],
+        files: {
+          managed: [".editorconfig"],
+          merged: [".mailmap"],
+          ejected: []
+        }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+    fs.writeFileSync(path.join(tmpDir, ".agent-infra", "workspace", "README.md"), "legacy\n", "utf8");
+
+    const output = execSync(`node "${cli}" update`, {
+      cwd: tmpDir,
+      stdio: "pipe",
+      encoding: "utf8"
+    });
+
+    assert.match(output, /Migrated \.agent-infra\/config\.json -> \.agents\/\.airc\.json/);
+    assert.match(output, /Migrated \.agent-infra\/workspace -> \.agents\/workspace/);
+    assert.ok(fs.existsSync(path.join(tmpDir, ".agents", ".airc.json")));
+    assert.ok(fs.existsSync(path.join(tmpDir, ".agents", "workspace", "README.md")));
+    assert.ok(!fs.existsSync(path.join(tmpDir, ".agent-infra")));
+
+    const migrated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8"));
+    assert.ok(!("modules" in migrated), "legacy modules field should be removed during migration");
+    assert.ok(!migrated.files.managed.includes(".editorconfig"));
+    assert.ok(!migrated.files.merged.includes(".mailmap"));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra update requires .agents/.airc.json", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-"));
   const cli = filePath("bin/cli.js");
 

@@ -19,7 +19,7 @@ description: >
 ### 1. 验证前置条件
 
 检查必要文件：
-- `.agent-infra/workspace/active/{task-id}/task.md` - 任务文件
+- `.agents/workspace/active/{task-id}/task.md` - 任务文件
 - 至少一个技术方案产物：`plan.md` 或 `plan-r{N}.md`
 
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
@@ -28,10 +28,10 @@ description: >
 
 ### 2. 确定输入方案与实现轮次
 
-扫描 `.agent-infra/workspace/active/{task-id}/` 目录中的技术方案文件（`plan.md`、`plan-r{N}.md`）：
+扫描 `.agents/workspace/active/{task-id}/` 目录中的技术方案文件（`plan.md`、`plan-r{N}.md`）：
 - 读取最高轮次的方案文件，记为 `{plan-artifact}`
 
-扫描 `.agent-infra/workspace/active/{task-id}/` 目录中的实现报告文件：
+扫描 `.agents/workspace/active/{task-id}/` 目录中的实现报告文件：
 - 如果不存在 `implementation.md` 且不存在 `implementation-r*.md` → 本轮为第 1 轮，产出 `implementation.md`
 - 如果存在 `implementation.md` 且不存在 `implementation-r*.md` → 本轮为第 2 轮，产出 `implementation-r2.md`
 - 如果存在 `implementation-r{N}.md` → 本轮为第 N+1 轮，产出 `implementation-r{N+1}.md`
@@ -91,7 +91,7 @@ description: >
 
 ### 6. 输出实现报告
 
-创建 `.agent-infra/workspace/active/{task-id}/{implementation-artifact}`。
+创建 `.agents/workspace/active/{task-id}/{implementation-artifact}`。
 
 要求：
 - 不要覆盖已有的实现报告
@@ -106,7 +106,7 @@ description: >
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 `.agent-infra/workspace/active/{task-id}/task.md`：
+更新 `.agents/workspace/active/{task-id}/task.md`：
 - `current_step`：implementation
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
@@ -131,7 +131,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 测试通过：{数量}/{总数}
 
 产出文件：
-- 实现报告：.agent-infra/workspace/active/{task-id}/{implementation-artifact}（Round {implementation-round}）
+- 实现报告：.agents/workspace/active/{task-id}/{implementation-artifact}（Round {implementation-round}）
 
 下一步 - 代码审查：
   - Claude Code / OpenCode：/review-task {task-id}
@@ -202,7 +202,7 @@ date "+%Y-%m-%d %H:%M:%S"
 ## 完成检查清单
 
 - [ ] 完成了所有代码实现
-- [ ] 创建了实现报告 `.agent-infra/workspace/active/{task-id}/{implementation-artifact}`
+- [ ] 创建了实现报告 `.agents/workspace/active/{task-id}/{implementation-artifact}`
 - [ ] 所有测试通过
 - [ ] 更新了 task.md 中的 `current_step` 为 implementation
 - [ ] 更新了 task.md 中的 `updated_at` 为当前时间

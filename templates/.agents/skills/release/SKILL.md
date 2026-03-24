@@ -72,7 +72,7 @@ Search for version references in project files and update them:
 - `SECURITY.md` / `SECURITY.zh-CN.md` (supported version table)
 
 **Exclude from version replacement**:
-- `.agents/`, `.agent-infra/workspace/`, `.claude/`, `.codex/`, `.gemini/`, `.opencode/` (AI tool configs)
+- `.agents/`, `.agents/workspace/`, `.claude/`, `.codex/`, `.gemini/`, `.opencode/` (AI tool configs)
 
 If the project uses `package-lock.json`, run `npm install --package-lock-only` after updating `package.json` so the lockfile version stays in sync.
 

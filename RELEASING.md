@@ -8,7 +8,7 @@
 
 项目使用语义化版本（SemVer）：`MAJOR.MINOR.PATCH`。
 
-- `MAJOR`：CLI 命令发生不兼容变更、模板目录结构出现破坏性调整、移除或重定义 `.agent-infra/config.json` 公共配置项
+- `MAJOR`：CLI 命令发生不兼容变更、模板目录结构出现破坏性调整、移除或重定义 `.agents/.airc.json` 公共配置项
 - `MINOR`：新增 AI 工具支持、新增技能或工作流模板、新增 CLI 功能且保持向后兼容
 - `PATCH`：Bug 修复、模板内容修正、文档更新、非破坏性流程优化
 
@@ -19,12 +19,12 @@
 发布版本必须同时更新以下两个文件，并保持完全一致：
 
 - `package.json`
-- `.agent-infra/config.json`
+- `.agents/.airc.json`
 
 其中：
 
 - `package.json` 表示 CLI 包版本
-- `.agent-infra/config.json` 表示模板和协作基线版本
+- `.agents/.airc.json` 表示模板和协作基线版本
 
 开发期版本使用 `-alpha.N` 后缀，例如 `0.1.0-alpha.1`，用于明确标识当前版本尚未正式发布。
 
@@ -35,7 +35,7 @@
 发版前必须确认以下事项：
 
 - 工作区干净，没有未提交变更
-- `package.json` 与 `.agent-infra/config.json` 的版本号一致
+- `package.json` 与 `.agents/.airc.json` 的版本号一致
 - `npm test` 全部通过
 - 待发布内容已经过代码审查
 - 本次变更的 PR 标签和标题足以生成准确的 GitHub Release Notes
@@ -57,7 +57,7 @@
 - 检查工作区是否干净
 - 警告当前分支是否不是 `main`
 - 运行测试
-- 同步更新 `package.json` 和 `.agent-infra/config.json`
+- 同步更新 `package.json` 和 `.agents/.airc.json`
 - 创建发布提交和本地标签
 
 ### 2. 推送分支和标签

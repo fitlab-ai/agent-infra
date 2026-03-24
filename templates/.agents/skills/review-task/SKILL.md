@@ -18,7 +18,7 @@ description: >
 ### 1. Verify Prerequisites
 
 Check required files:
-- `.agent-infra/workspace/active/{task-id}/task.md` - Task file
+- `.agents/workspace/active/{task-id}/task.md` - Task file
 - At least one implementation report: `implementation.md` or `implementation-r{N}.md`
 
 Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, for example `TASK-20260306-143022`
@@ -27,7 +27,7 @@ If either file is missing, prompt the user to complete the prerequisite step fir
 
 ### 2. Determine Review Round
 
-Scan review artifacts in `.agent-infra/workspace/active/{task-id}/`:
+Scan review artifacts in `.agents/workspace/active/{task-id}/`:
 - If neither `review.md` nor `review-r*.md` exists -> this is Round 1 and must create `review.md`
 - If `review.md` exists and no `review-r*.md` exists -> this is Round 2 and must create `review-r2.md`
 - If `review-r{N}.md` exists -> this is Round N+1 and must create `review-r{N+1}.md`
@@ -72,7 +72,7 @@ Also review `git diff` to inspect the full context of all changes.
 
 ### 5. Output Review Report
 
-Create `.agent-infra/workspace/active/{task-id}/{review-artifact}`.
+Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
 ### 6. Update Task Status
 
@@ -82,7 +82,7 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-Update `.agent-infra/workspace/active/{task-id}/task.md`:
+Update `.agents/workspace/active/{task-id}/task.md`:
 - `current_step`: code-review
 - `assigned_to`: {reviewer}
 - `updated_at`: {current time}
@@ -123,7 +123,7 @@ Next step - commit changes:
 ```
 Code review complete for task {task-id}. Verdict: Approved.
 - Blockers: 0 | Major issues: {n} | Minor issues: {n}
-- Review report: .agent-infra/workspace/active/{task-id}/{review-artifact}
+- Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - fix issues before commit (recommended):
   - Claude Code / OpenCode: /refine-task {task-id}
@@ -140,7 +140,7 @@ Or commit directly (skip fixes):
 ```
 Code review complete for task {task-id}. Verdict: Changes Requested.
 - Blockers: {n} | Major issues: {n} | Minor issues: {n}
-- Review report: .agent-infra/workspace/active/{task-id}/{review-artifact}
+- Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - refine the issues:
   - Claude Code / OpenCode: /refine-task {task-id}
@@ -151,7 +151,7 @@ Next step - refine the issues:
 **📋 Output Branch D - Rejected** (Condition: major rework, redesign, or re-implementation is required):
 ```
 Code review complete for task {task-id}. Verdict: Rejected, major rework required.
-- Review report: .agent-infra/workspace/active/{task-id}/{review-artifact}
+- Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - re-implement:
   - Claude Code / OpenCode: /implement-task {task-id}
@@ -264,7 +264,7 @@ Next step - re-implement:
 ## Completion Checklist
 
 - [ ] Completed code review for all modified files
-- [ ] Created review report `.agent-infra/workspace/active/{task-id}/{review-artifact}`
+- [ ] Created review report `.agents/workspace/active/{task-id}/{review-artifact}`
 - [ ] Updated `current_step` to code-review in task.md
 - [ ] Updated `updated_at` to the current time in task.md
 - [ ] Updated `assigned_to` to the reviewer name in task.md

@@ -1,8 +1,8 @@
 # Agent workspace (temporary task data)
-.agent-infra/workspace/active/
-.agent-infra/workspace/blocked/
-.agent-infra/workspace/completed/
-.agent-infra/workspace/logs/
+.agents/workspace/active/
+.agents/workspace/blocked/
+.agents/workspace/completed/
+.agents/workspace/logs/
 
 # Claude Code local settings
 .claude/settings.local.json

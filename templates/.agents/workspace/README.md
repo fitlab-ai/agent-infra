@@ -5,7 +5,7 @@ This directory is the runtime workspace for multi-AI collaboration. All contents
 ## Directory Structure
 
 ```
-.agent-infra/workspace/
+.agents/workspace/
   active/           # Currently active tasks and handoff documents
   blocked/          # Tasks that are blocked and waiting for resolution
   completed/        # Completed tasks (kept for reference)

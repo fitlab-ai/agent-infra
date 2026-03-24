@@ -36,10 +36,14 @@ node --test tests/*.test.js
 ```
 ├── bin/                           # CLI 可执行文件
 │   └── cli.js                     # 主 CLI（Node.js）
+├── .agents/                       # AI 协作配置与工作区
+│   ├── .airc.json                 # 项目配置
+│   ├── workspace/                 # 任务工作区
+│   ├── skills/                    # 技能仓库
+│   └── workflows/                 # 工作流定义
 ├── templates/                     # 模板源文件（镜像项目目录结构）
 ├── tests/                         # 测试（Node.js 内置测试运行器）
 ├── install.sh                     # 引导安装脚本
-├── .agent-infra/config.json       # 项目配置
 └── package.json                   # npm 测试脚本定义
 ```
 

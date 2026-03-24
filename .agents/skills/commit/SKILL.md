@@ -89,7 +89,7 @@ git log --oneline -5
 
 ### 多 Agent 协作署名（仅任务相关提交）
 
-如果本次提交属于某个活动任务，且存在 `.agent-infra/workspace/active/{task-id}/task.md`：
+如果本次提交属于某个活动任务，且存在 `.agents/workspace/active/{task-id}/task.md`：
 
 1. 读取 `task.md` 中的 `## Activity Log` 部分。
 2. 从符合 `by {agent}` 的条目中提取所有唯一 Agent 名称；可使用较宽松的匹配模式，例如 `by (\S+)`。

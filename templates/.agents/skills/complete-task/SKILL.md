@@ -19,7 +19,7 @@ description: >
 
 ### 1. Verify Task Exists
 
-Check that the task exists in `.agent-infra/workspace/active/{task-id}/`.
+Check that the task exists in `.agents/workspace/active/{task-id}/`.
 
 Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, e.g. `TASK-20260306-143022`
 
@@ -61,7 +61,7 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-Update `.agent-infra/workspace/active/{task-id}/task.md`:
+Update `.agents/workspace/active/{task-id}/task.md`:
 - `status`: completed
 - `completed_at`: {current timestamp}
 - `updated_at`: {current timestamp}
@@ -76,13 +76,13 @@ Update `.agent-infra/workspace/active/{task-id}/task.md`:
 Move the task directory from active to completed:
 
 ```bash
-mv .agent-infra/workspace/active/{task-id} .agent-infra/workspace/completed/{task-id}
+mv .agents/workspace/active/{task-id} .agents/workspace/completed/{task-id}
 ```
 
 ### 5. Verify Archive
 
 ```bash
-ls .agent-infra/workspace/completed/{task-id}/task.md
+ls .agents/workspace/completed/{task-id}/task.md
 ```
 
 Confirm the task directory was successfully moved.
@@ -111,7 +111,7 @@ Task {task-id} completed and archived.
 Task info:
 - Title: {title}
 - Completed at: {timestamp}
-- Archived to: .agent-infra/workspace/completed/{task-id}/
+- Archived to: .agents/workspace/completed/{task-id}/
 
 Deliverables:
 - {List of key outputs: files modified, tests added, etc.}
@@ -121,7 +121,7 @@ Deliverables:
 
 - [ ] Verified all workflow steps are complete
 - [ ] Updated task.md with completed status and timestamp
-- [ ] Moved task directory to `.agent-infra/workspace/completed/`
+- [ ] Moved task directory to `.agents/workspace/completed/`
 - [ ] Verified archive succeeded
 - [ ] Informed user of completion
 
@@ -135,7 +135,7 @@ Deliverables:
 
 2. **Rollback**: If a task was archived incorrectly:
    ```bash
-   mv .agent-infra/workspace/completed/{task-id} .agent-infra/workspace/active/{task-id}
+   mv .agents/workspace/completed/{task-id} .agents/workspace/active/{task-id}
    ```
    Then update task.md status back to `active`.
 

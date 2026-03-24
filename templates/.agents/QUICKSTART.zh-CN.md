@@ -13,7 +13,7 @@
 1. 将任务模板复制到活跃工作区：
 
 ```bash
-cp .agents/templates/task.zh-CN.md .agent-infra/workspace/active/task-001.md
+cp .agents/templates/task.zh-CN.md .agents/workspace/active/task-001.md
 ```
 
 2. 填写任务元数据：
@@ -49,7 +49,7 @@ Claude Code 擅长代码库探索和理解文件间的复杂关系。
 gemini
 
 # 示例提示：
-# "基于 .agent-infra/workspace/active/task-001.md 中的分析结果，
+# "基于 .agents/workspace/active/task-001.md 中的分析结果，
 #  创建技术设计方案。定义接口并概述实现思路。"
 ```
 
@@ -60,7 +60,7 @@ gemini
 codex
 
 # 示例提示：
-# "实现 .agent-infra/workspace/active/task-001.md 中描述的变更。
+# "实现 .agents/workspace/active/task-001.md 中描述的变更。
 #  遵循设计部分。为此工作创建新分支。"
 ```
 
@@ -87,7 +87,7 @@ claude
 
 ```bash
 # 快速缺陷修复工作流
-cp .agents/templates/task.zh-CN.md .agent-infra/workspace/active/bugfix-001.md
+cp .agents/templates/task.zh-CN.md .agents/workspace/active/bugfix-001.md
 # 编辑任务，然后：
 # 1. 使用 Claude Code 分析
 # 2. 使用 Codex/Cursor 修复
@@ -101,7 +101,7 @@ cp .agents/templates/task.zh-CN.md .agent-infra/workspace/active/bugfix-001.md
 3. **报告**：从模板生成审查报告。
 
 ```bash
-cp .agents/templates/review-report.zh-CN.md .agent-infra/workspace/active/review-pr-42.md
+cp .agents/templates/review-report.zh-CN.md .agents/workspace/active/review-pr-42.md
 # 使用 Claude Code 填写审查内容
 ```
 
@@ -113,7 +113,7 @@ cp .agents/templates/review-report.zh-CN.md .agent-infra/workspace/active/review
 4. **验证**（Claude Code）：确保没有回归问题，运行测试。
 
 ```bash
-cp .agents/templates/task.zh-CN.md .agent-infra/workspace/active/refactor-001.md
+cp .agents/templates/task.zh-CN.md .agents/workspace/active/refactor-001.md
 # 按照 .agents/workflows/refactoring.zh-CN.yaml 中的重构工作流执行
 ```
 
@@ -122,7 +122,7 @@ cp .agents/templates/task.zh-CN.md .agent-infra/workspace/active/refactor-001.md
 在 AI 工具之间切换时，创建交接文档：
 
 ```bash
-cp .agents/templates/handoff.zh-CN.md .agent-infra/workspace/active/handoff-task-001-phase2.md
+cp .agents/templates/handoff.zh-CN.md .agents/workspace/active/handoff-task-001-phase2.md
 ```
 
 填写：

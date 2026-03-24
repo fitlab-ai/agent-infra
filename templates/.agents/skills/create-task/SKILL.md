@@ -55,7 +55,7 @@ Get the current timestamp:
 date +%Y%m%d-%H%M%S
 ```
 
-- Create the task directory: `.agent-infra/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+- Create the task directory: `.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
 - Use the `.agents/templates/task.md` template to create the task file: `task.md`
 
 **Important**:
@@ -86,7 +86,7 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-Update `.agent-infra/workspace/active/{task-id}/task.md`:
+Update `.agents/workspace/active/{task-id}/task.md`:
 - `current_step`: requirement-analysis
 - `assigned_to`: {current AI agent}
 - `updated_at`: {current time}
@@ -110,7 +110,7 @@ Task information:
 - Workflow: {workflow}
 
 Output file:
-- Task file: .agent-infra/workspace/active/{task-id}/task.md
+- Task file: .agents/workspace/active/{task-id}/task.md
 
 Next step - run requirements analysis:
   - Claude Code / OpenCode: /analyze-task {task-id}
@@ -120,7 +120,7 @@ Next step - run requirements analysis:
 
 ## Completion Checklist
 
-- [ ] Created the task file `.agent-infra/workspace/active/{task-id}/task.md`
+- [ ] Created the task file `.agents/workspace/active/{task-id}/task.md`
 - [ ] Updated `current_step` to requirement-analysis in task.md
 - [ ] Updated `updated_at` to the current time in task.md
 - [ ] Updated `assigned_to` in task.md

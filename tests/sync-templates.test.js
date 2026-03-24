@@ -42,7 +42,7 @@ test("syncTemplates respects templateSource and stays idempotent", async () => {
     writeFile(templateRoot, "child.md", "Top\n");
     writeFile(templateRoot, "nested/child.md", "Nested\n");
 
-    writeJson(projectRoot, ".agent-infra/config.json", {
+    writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo",
       org: "acme",
       language: "zh-CN",
@@ -64,9 +64,9 @@ test("syncTemplates respects templateSource and stays idempotent", async () => {
     const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
 
     const firstReport = syncTemplates(projectRoot);
-    const afterFirstRun = fs.readFileSync(path.join(projectRoot, ".agent-infra/config.json"), "utf8");
+    const afterFirstRun = fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8");
     const secondReport = syncTemplates(projectRoot);
-    const afterSecondRun = fs.readFileSync(path.join(projectRoot, ".agent-infra/config.json"), "utf8");
+    const afterSecondRun = fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8");
 
     assert.equal(normalize(firstReport.templateRoot), normalize(templateRoot));
     assert.ok(firstReport.registryAdded.some((entry) => entry.entry === ".agents/skills/" && entry.list === "managed"));
@@ -115,7 +115,7 @@ test("syncTemplates prunes retired config entries during sync", async () => {
     fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, "README.md", "Hello {{project}}\n");
-    writeJson(projectRoot, ".agent-infra/config.json", {
+    writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo",
       org: "acme",
       language: "en",
@@ -138,7 +138,7 @@ test("syncTemplates prunes retired config entries during sync", async () => {
     const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     syncTemplates(projectRoot);
 
-    const updated = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agent-infra/config.json"), "utf8"));
+    const updated = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
     assert.ok(!("modules" in updated));
     assert.ok(!updated.files.managed.includes(".editorconfig"));
     assert.ok(!updated.files.merged.includes(".mailmap"));
@@ -160,7 +160,7 @@ test("syncTemplates reports the bundled installer version with a v prefix", asyn
     fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, "README.md", "Hello {{project}}\n");
-    writeJson(projectRoot, ".agent-infra/config.json", {
+    writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo",
       org: "acme",
       language: "en",
@@ -208,7 +208,7 @@ test("syncTemplates removes stale managed files but preserves merged and ejected
     writeFile(templateRoot, ".github/workflows/release.yml", "name: release\n");
     writeFile(templateRoot, "preserved.md", "Existing\n");
 
-    writeJson(projectRoot, ".agent-infra/config.json", {
+    writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo",
       org: "acme",
       language: "en",
@@ -269,7 +269,7 @@ test("syncTemplates preserves stale files that match merged glob patterns", asyn
     fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, "docs/guide.md", "Guide\n");
-    writeJson(projectRoot, ".agent-infra/config.json", {
+    writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo",
       org: "acme",
       language: "en",

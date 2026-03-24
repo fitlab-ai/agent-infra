@@ -27,7 +27,7 @@ gh issue view <issue-number> --json number,title,body,labels
 
 ### 2. 检查已有任务
 
-搜索 `.agent-infra/workspace/active/` 中是否已有链接到此 Issue 的任务。
+搜索 `.agents/workspace/active/` 中是否已有链接到此 Issue 的任务。
 - 如果找到，询问用户是重新导入还是继续使用现有任务
 - 如果未找到，创建新任务
 
@@ -37,7 +37,7 @@ gh issue view <issue-number> --json number,title,body,labels
 date +%Y%m%d-%H%M%S
 ```
 
-- 创建目录：`.agent-infra/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+- 创建目录：`.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
 - 使用 `.agents/templates/task.md` 模板创建 `task.md`
 
 任务元数据：
@@ -62,7 +62,7 @@ assigned_to: {当前 AI 代理}
 date "+%Y-%m-%d %H:%M:%S"
 ```
 
-更新 `.agent-infra/workspace/active/{task-id}/task.md`：
+更新 `.agents/workspace/active/{task-id}/task.md`：
 - `current_step`：requirement-analysis
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
@@ -84,7 +84,7 @@ Issue #{number} 已导入。
 - 工作流：{workflow}
 
 产出文件：
-- 任务文件：.agent-infra/workspace/active/{task-id}/task.md
+- 任务文件：.agents/workspace/active/{task-id}/task.md
 
 下一步 - 执行需求分析：
   - Claude Code / OpenCode：/analyze-task {task-id}
@@ -94,7 +94,7 @@ Issue #{number} 已导入。
 
 ## 完成检查清单
 
-- [ ] 创建了任务文件 `.agent-infra/workspace/active/{task-id}/task.md`
+- [ ] 创建了任务文件 `.agents/workspace/active/{task-id}/task.md`
 - [ ] 在 task.md 中记录了 issue_number
 - [ ] 更新了 `current_step` 为 requirement-analysis
 - [ ] 更新了 `updated_at` 为当前时间
