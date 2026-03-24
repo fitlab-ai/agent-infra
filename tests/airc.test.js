@@ -46,6 +46,10 @@ test(".agent-infra/config.json excludes deprecated codex prompt paths", () => {
   const collaborator = JSON.parse(read(".agent-infra/config.json"));
 
   assert.ok(
+    collaborator.files.managed.includes(".claude/hooks/"),
+    ".claude/hooks/ should be in managed list"
+  );
+  assert.ok(
     !collaborator.files.managed.includes(".codex/commands/"),
     ".codex/commands/ should not be in managed list"
   );

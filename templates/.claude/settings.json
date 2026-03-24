@@ -18,13 +18,13 @@
     ]
   },
   "hooks": {
-    "PostToolUse": [
+    "PreToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "sh .github/hooks/check-version-format.sh",
+            "command": "sh .claude/hooks/check-version-format.sh",
             "timeout": 5
           }
         ]

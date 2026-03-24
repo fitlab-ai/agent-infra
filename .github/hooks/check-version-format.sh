@@ -47,3 +47,5 @@ if [ "${template_version#v}" != "$package_version" ]; then
   echo "Actual: templateVersion=$template_version, version=$package_version"
   exit 1
 fi
+
+echo "Version format check passed."

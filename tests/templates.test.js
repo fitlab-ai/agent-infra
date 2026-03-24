@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   buildCommandSyncFiles,
@@ -28,6 +32,7 @@ test("required template files were migrated into templates/", () => {
     "templates/.agent-infra/workspace/README.zh-CN.md",
     "templates/.claude/CLAUDE.md",
     "templates/.claude/project-rules.md",
+    "templates/.claude/hooks/check-version-format.sh",
     "templates/.claude/settings.json",
     "templates/.claude/commands/init-milestones.md",
     "templates/.claude/commands/init-milestones.zh-CN.md",
@@ -87,6 +92,7 @@ test("update-agent-infra template copies stay in sync with working files", () =>
     [".agents/skills/update-agent-infra/SKILL.md", "templates/.agents/skills/update-agent-infra/SKILL.md"],
     [".agents/skills/update-agent-infra/scripts/package.json", "templates/.agents/skills/update-agent-infra/scripts/package.json"],
     [".agents/skills/update-agent-infra/scripts/sync-templates.js", "templates/.agents/skills/update-agent-infra/scripts/sync-templates.js"],
+    [".claude/hooks/check-version-format.sh", "templates/.claude/hooks/check-version-format.sh"],
     ...buildCommandSyncFiles(project)
   ];
 
@@ -214,6 +220,8 @@ test("version format validation hooks are wired into templates and local config"
   const rootClaudeSettings = JSON.parse(read(".claude/settings.json"));
   const templateClaudeSettings = JSON.parse(read("templates/.claude/settings.json"));
   const localCheckScript = read(".github/hooks/check-version-format.sh");
+  const localClaudeHook = read(".claude/hooks/check-version-format.sh");
+  const templateClaudeHook = read("templates/.claude/hooks/check-version-format.sh");
   const localPreCommit = read(".github/hooks/pre-commit");
 
   assert.equal(
@@ -234,6 +242,22 @@ test("version format validation hooks are wired into templates and local config"
     assert.match(content, /templateVersion must use v-prefixed semver/, `${relativePath} should validate the templateVersion format`);
     assert.match(content, /package\.json version must use plain semver/, `${relativePath} should validate the package version format`);
     assert.match(content, /templateVersion and package\.json version do not match/, `${relativePath} should validate version parity`);
+    assert.match(content, /Version format check passed\./, `${relativePath} should log successful validation`);
+    assert.doesNotMatch(content, /--pre-tool-use/, `${relativePath} should remain a pure git hook`);
+    assert.doesNotMatch(content, /tool_input/, `${relativePath} should not parse Claude hook payloads`);
+  });
+
+  [
+    [".claude/hooks/check-version-format.sh", localClaudeHook],
+    ["templates/.claude/hooks/check-version-format.sh", templateClaudeHook]
+  ].forEach(([relativePath, content]) => {
+    assert.match(content, /tool_input/, `${relativePath} should parse the Claude hook payload`);
+    assert.match(content, /hook_command/, `${relativePath} should use a descriptive command variable name`);
+    assert.match(content, /git\\ commit \| git\\ commit\\ \*/, `${relativePath} should precisely match git commit commands in PreToolUse mode`);
+    assert.match(content, /\.github\/hooks\/check-version-format\.sh/, `${relativePath} should delegate to the git hook`);
+    assert.match(content, /exit 2/, `${relativePath} should map git-hook failures to Claude exit code 2`);
+    assert.match(content, /Claude hook: version check passed\./, `${relativePath} should log successful Claude-hook delegation`);
+    assert.match(content, /Claude hook: blocking git commit \(version format error\)\./, `${relativePath} should log blocked Claude-hook delegation`);
   });
 
   [
@@ -248,20 +272,75 @@ test("version format validation hooks are wired into templates and local config"
     ["templates/.claude/settings.json", templateClaudeSettings]
   ].forEach(([relativePath, settings]) => {
     assert.deepEqual(
-      settings.hooks?.PostToolUse,
+      settings.hooks?.PreToolUse,
       [
         {
           matcher: "Bash",
           hooks: [
             {
               type: "command",
-              command: "sh .github/hooks/check-version-format.sh",
+              command: "sh .claude/hooks/check-version-format.sh",
               timeout: 5
             }
           ]
         }
       ],
-      `${relativePath} should configure the PostToolUse version format validation hook`
+      `${relativePath} should configure the PreToolUse version format validation hook`
     );
   });
+});
+
+test("version format validation hook only blocks git commit in PreToolUse mode", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-version-hook-"));
+  const hooksDir = path.join(tempRoot, ".github", "hooks");
+  const claudeHooksDir = path.join(tempRoot, ".claude", "hooks");
+  const configDir = path.join(tempRoot, ".agent-infra");
+
+  fs.mkdirSync(hooksDir, { recursive: true });
+  fs.mkdirSync(claudeHooksDir, { recursive: true });
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.copyFileSync(".github/hooks/check-version-format.sh", path.join(hooksDir, "check-version-format.sh"));
+  fs.copyFileSync(".claude/hooks/check-version-format.sh", path.join(claudeHooksDir, "check-version-format.sh"));
+  fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ templateVersion: "v1.2.3" }));
+  fs.writeFileSync(path.join(tempRoot, "package.json"), JSON.stringify({ version: "1.2.3" }));
+
+  const runClaudeHook = (input) => spawnSync(
+    "sh",
+    [path.join(claudeHooksDir, "check-version-format.sh")],
+    {
+      cwd: tempRoot,
+      encoding: "utf8",
+      input
+    }
+  );
+
+  try {
+    const nonCommit = runClaudeHook(JSON.stringify({ tool_input: { command: "git status" } }));
+    assert.equal(nonCommit.status, 0, "PreToolUse should skip non-git-commit commands");
+    assert.equal(nonCommit.stdout, "", "PreToolUse should stay silent when skipping non-git-commit commands");
+
+    const commit = runClaudeHook(JSON.stringify({ tool_input: { command: "git commit -m test" } }));
+    assert.equal(commit.status, 0, "PreToolUse should validate git commit commands");
+    assert.match(commit.stdout, /Version format check passed\./, "PreToolUse should log successful validation");
+    assert.match(commit.stdout, /Claude hook: version check passed\./, "PreToolUse should log successful Claude-hook delegation");
+
+    fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ templateVersion: "1.2.3" }));
+
+    const blockedCommit = runClaudeHook(JSON.stringify({ tool_input: { command: "git commit -m broken" } }));
+    assert.equal(blockedCommit.status, 2, "PreToolUse should block invalid git commit commands with exit 2");
+    assert.match(blockedCommit.stdout, /Claude hook: blocking git commit \(version format error\)\./, "PreToolUse should log blocked Claude-hook delegation");
+
+    const preCommit = spawnSync(
+      "sh",
+      [path.join(hooksDir, "check-version-format.sh")],
+      {
+        cwd: tempRoot,
+        encoding: "utf8",
+        input: ""
+      }
+    );
+    assert.equal(preCommit.status, 1, "git pre-commit should fail with exit 1 on invalid versions");
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 });

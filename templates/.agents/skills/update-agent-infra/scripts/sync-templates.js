@@ -41,6 +41,7 @@ const DEFAULTS = {
       ".agents/workflows/",
       ".agent-infra/workspace/README.md",
       ".claude/commands/",
+      ".claude/hooks/",
       ".gemini/commands/",
       ".opencode/commands/"
     ],
