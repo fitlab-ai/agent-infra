@@ -9,13 +9,13 @@ description: "从 PR 和 commit 生成版本发布说明"
 
 ## 执行流程
 
-### 步骤 1：解析参数
+### 1. 解析参数
 
 从参数中提取：
 - `<version>`：当前发布版本（必需），格式 `X.Y.Z`
 - `<prev-version>`：上一版本（可选），如未提供则自动检测
 
-### 步骤 2：确定版本范围
+### 2. 确定版本范围
 
 **当前标签**：`v<version>`
 
@@ -31,7 +31,7 @@ git rev-parse v<version>
 git rev-parse v<prev-version>
 ```
 
-### 步骤 3：参考历史发布说明格式与分类
+### 3. 参考历史发布说明格式与分类
 
 获取最近多条已发布的 Release Note 作为格式参考，并参考预定义的完整分类清单：
 
@@ -56,7 +56,7 @@ done
 - 后续步骤 7 生成发布说明时，**必须**同时参考步骤 3 的历史格式风格和完整分类清单，保持版本间的一致性
 - 如果没有历史发布说明，则使用步骤 7 中定义的默认格式
 
-### 步骤 4：收集已合并的 PR
+### 4. 收集已合并的 PR
 
 获取标签之间的日期范围，然后查询已合并的 PR：
 
@@ -76,7 +76,7 @@ gh pr list --state merged --base <branch> \
 git log v<prev-version>..v<version> --format="%H %s" --no-merges
 ```
 
-### 步骤 5：收集关联 Issue
+### 5. 收集关联 Issue
 
 从每个 PR body 中提取关联的 Issue：
 - 匹配模式：`Closes #N`、`Fixes #N`、`Resolves #N`（不区分大小写）
@@ -85,7 +85,7 @@ git log v<prev-version>..v<version> --format="%H %s" --no-merges
 gh issue view <N> --json number,title,labels,url
 ```
 
-### 步骤 6：分类变更
+### 6. 分类变更
 
 **按类型**（从 PR 标题的 Conventional Commit 前缀）：
 - `feat`、`perf`、`refactor`、依赖升级 -> Enhancement
@@ -96,7 +96,7 @@ gh issue view <N> --json number,title,labels,url
 - 从 PR 标题中的方括号 `[module]` 或 Conventional scope `feat(module):` 推断模块
 - 兜底：分析变更的文件
 
-### 步骤 7：生成发布说明
+### 7. 生成发布说明
 
 **优先使用步骤 3 中获取的历史格式风格，并确保覆盖步骤 3 列出的所有分类。** 如果存在历史发布说明，严格沿用其章节结构、标题风格（含 emoji）、条目格式和双语布局。
 
@@ -125,7 +125,7 @@ gh issue view <N> --json number,title,labels,url
 4. 贡献者：去重，按贡献数量降序排列
 5. 空部分：省略没有条目的部分
 
-### 步骤 8：展示并确认
+### 8. 展示并确认
 
 向用户展示生成的发布说明。
 
@@ -133,7 +133,7 @@ gh issue view <N> --json number,title,labels,url
 1. 需要调整吗？
 2. 是否创建 GitHub Draft Release？
 
-### 步骤 9：创建 Draft Release（如确认）
+### 9. 创建 Draft Release（如确认）
 
 ```bash
 gh release create v<version> \

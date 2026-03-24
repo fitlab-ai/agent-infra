@@ -11,7 +11,7 @@ description: "执行版本发布流程"
 
 ## 执行流程
 
-### 步骤 1：解析并验证版本号
+### 1. 解析并验证版本号
 
 从参数中提取版本。必须匹配 `X.Y.Z` 格式。
 
@@ -21,7 +21,7 @@ description: "执行版本发布流程"
 
 如果格式无效，报错："Version format incorrect, expected X.Y.Z (e.g. 1.2.3)"
 
-### 步骤 2：验证工作区干净
+### 2. 验证工作区干净
 
 ```bash
 git status --short
@@ -29,7 +29,7 @@ git status --short
 
 如果有未提交的变更，报错："Workspace has uncommitted changes. Please commit or stash first."
 
-### 步骤 3：发布前验证
+### 3. 发布前验证
 
 <!-- TODO: 替换为你的项目发布前验证步骤 -->
 
@@ -48,7 +48,7 @@ git branch --show-current
 - 如果当前分支不符合预期，按项目策略输出警告或直接退出
 - 如果任何验证命令失败，停止发布流程并先修复问题
 
-### 步骤 4：更新版本引用
+### 4. 更新版本引用
 
 <!-- TODO: 替换为你的项目版本更新步骤 -->
 
@@ -74,7 +74,7 @@ git branch --show-current
 
 如果项目使用 `package-lock.json`，在更新 `package.json` 后运行 `npm install --package-lock-only`，确保锁文件中的版本号保持同步。
 
-### 步骤 5：重新生成构建产物
+### 5. 重新生成构建产物
 
 <!-- TODO: 替换为你的项目产物重建步骤 -->
 
@@ -89,20 +89,20 @@ git branch --show-current
 - 如果项目没有生成产物，请在项目特化版本中明确说明
 - 如果重建失败，停止发布流程并先修复构建问题
 
-### 步骤 6：创建发布提交
+### 6. 创建发布提交
 
 ```bash
 git add -A
 git commit -m "chore: release v{version}"
 ```
 
-### 步骤 7：创建 Git 标签
+### 7. 创建 Git 标签
 
 ```bash
 git tag v{version}
 ```
 
-### 步骤 8：管理里程碑
+### 8. 管理里程碑
 
 为已发布版本关闭对应版本里程碑，并为下一轮创建缺失的规划里程碑。
 
@@ -119,7 +119,7 @@ bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PAT
 - 当 `PATCH=0` 时，同时确保 `{MAJOR}.{MINOR+1}.0` 与 `{MAJOR}.{MINOR+1}.x`
 - 输出包含已发布里程碑动作和新建数量的汇总
 
-### 步骤 9：输出摘要
+### 9. 输出摘要
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 

@@ -7,7 +7,7 @@ description: "提交当前变更到 Git"
 
 在不覆盖用户本地工作的前提下创建 Git commit，并在需要时更新关联任务状态。
 
-## 步骤 1：检查本地修改（关键）
+## 1. 检查本地修改（关键）
 
 在任何编辑前先检查：
 
@@ -18,23 +18,23 @@ git diff
 
 必须尊重现有用户改动；如果你的计划与之冲突，先停止并征求确认。
 
-## 步骤 2：更新版权头年份
+## 2. 更新版权头年份
 
 动态获取当前年份，只更新已经改动过的文件。
 
 > 完整版权检查流程见 `reference/copyright-check.md`。修改任何版权头前，先读取 `reference/copyright-check.md`。
 
-## 步骤 3：生成提交信息
+## 3. 生成提交信息
 
 检查状态、diff 和最近历史，然后按 Conventional Commits 生成 message，并补齐正确的协作署名。
 
 > 提交信息规则、示例和多代理署名细节见 `reference/commit-message.md`。写 commit message 前先读取 `reference/commit-message.md`。
 
-## 步骤 4：创建提交
+## 4. 创建提交
 
 只暂存明确列出的文件，然后执行 `git commit`。
 
-## 步骤 5：按需更新任务状态
+## 5. 按需更新任务状态
 
 获取当前时间：
 
