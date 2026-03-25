@@ -1,7 +1,6 @@
 ---
 description: "从任务文件创建 GitHub Issue"
 usage: "/create-issue <task-id>"
-disable-model-invocation: true
 ---
 
 读取并执行 `.agents/skills/create-issue/SKILL.md` 中的 create-issue 技能。

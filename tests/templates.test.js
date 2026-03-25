@@ -14,6 +14,48 @@ import {
   renderPlaceholders
 } from "./helpers.js";
 
+const highFrequencyCommands = [
+  "analyze-task",
+  "commit",
+  "complete-task",
+  "create-issue",
+  "create-pr",
+  "create-task",
+  "implement-task",
+  "import-issue",
+  "plan-task",
+  "refine-task",
+  "review-task",
+  "sync-issue",
+  "sync-pr",
+  "test"
+];
+
+const lowFrequencyCommands = [
+  "block-task",
+  "check-task",
+  "close-codescan",
+  "close-dependabot",
+  "create-release-note",
+  "import-codescan",
+  "import-dependabot",
+  "init-labels",
+  "init-milestones",
+  "refine-title",
+  "release",
+  "test-integration",
+  "update-agent-infra",
+  "upgrade-dependency"
+];
+
+function claudeCommandTargets(command) {
+  return [
+    `.claude/commands/${command}.md`,
+    `templates/.claude/commands/${command}.md`,
+    `templates/.claude/commands/${command}.zh-CN.md`
+  ];
+}
+
 test("required template files were migrated into templates/", () => {
   const requiredFiles = [
     "templates/.agents/workflows/feature-development.yaml",
@@ -107,6 +149,36 @@ test("update-agent-infra template copies stay in sync with working files", () =>
     const rendered = renderPlaceholders(read(templatePath), { project, org });
 
     assert.equal(rendered, read(source), `${templatePath} is out of sync with ${source}`);
+  });
+});
+
+test("Claude command disable-model-invocation settings match command frequency", () => {
+  const expectedCommands = [...highFrequencyCommands, ...lowFrequencyCommands].sort();
+  const localCommands = listFilesRecursive(".claude/commands")
+    .filter((relativePath) => relativePath.endsWith(".md"))
+    .map((relativePath) => path.basename(relativePath, ".md"))
+    .sort();
+
+  assert.deepEqual(localCommands, expectedCommands, "command coverage should stay in sync with the frequency allowlists");
+
+  highFrequencyCommands.forEach((command) => {
+    claudeCommandTargets(command).forEach((relativePath) => {
+      assert.doesNotMatch(
+        read(relativePath),
+        /^disable-model-invocation: true$/m,
+        `${relativePath} should remain available for semantic matching`
+      );
+    });
+  });
+
+  lowFrequencyCommands.forEach((command) => {
+    claudeCommandTargets(command).forEach((relativePath) => {
+      assert.match(
+        read(relativePath),
+        /^disable-model-invocation: true$/m,
+        `${relativePath} should disable semantic preloading for low-frequency commands`
+      );
+    });
   });
 });
 

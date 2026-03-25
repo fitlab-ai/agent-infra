@@ -1,6 +1,7 @@
 ---
 description: "标记任务为阻塞状态并记录原因"
 usage: "/block-task <task-id> [reason]"
+disable-model-invocation: true
 ---
 
 读取并执行 `.agents/skills/block-task/SKILL.md` 中的 block-task 技能。
