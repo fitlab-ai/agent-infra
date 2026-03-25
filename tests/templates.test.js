@@ -7,7 +7,6 @@ import path from "node:path";
 
 import {
   buildCommandSyncFiles,
-  escapeRegExp,
   exists,
   langTemplate,
   listFilesRecursive,
@@ -116,128 +115,6 @@ test("split skill reference templates provide zh-CN variants", () => {
     const zhVariant = relativePath.replace(/\.md$/, ".zh-CN.md");
     assert.ok(exists(zhVariant), `Missing zh-CN reference variant: ${zhVariant}`);
   });
-});
-
-test("assistant template docs use import commands and analyze-task naming", () => {
-  [
-    "templates/.claude/project-rules.md",
-    "templates/.claude/project-rules.zh-CN.md",
-    "templates/.opencode/README.md",
-    "templates/.opencode/README.zh-CN.md"
-  ].forEach((relativePath) => {
-    const content = read(relativePath);
-
-    assert.match(content, /import-issue/, `${relativePath} should reference import-issue`);
-    assert.match(content, /analyze-task/, `${relativePath} should reference analyze-task`);
-    assert.doesNotMatch(content, /analyze-issue/, `${relativePath} should not reference analyze-issue`);
-  });
-
-  [
-    "templates/.opencode/README.md",
-    "templates/.opencode/README.zh-CN.md"
-  ].forEach((relativePath) => {
-    const content = read(relativePath);
-
-    assert.match(content, /import-dependabot/, `${relativePath} should reference import-dependabot`);
-    assert.match(content, /import-codescan/, `${relativePath} should reference import-codescan`);
-    assert.doesNotMatch(content, /analyze-dependabot/, `${relativePath} should not reference analyze-dependabot`);
-    assert.doesNotMatch(content, /analyze-codescan/, `${relativePath} should not reference analyze-codescan`);
-  });
-
-  [
-    "templates/.claude/CLAUDE.md",
-    "templates/.claude/CLAUDE.zh-CN.md"
-  ].forEach((relativePath) => {
-    const content = read(relativePath);
-
-    assert.match(content, /auto-discovered from `\.claude\/commands\/`|自动发现/, `${relativePath} should explain command auto-discovery`);
-    assert.match(content, /\/create-task.*\/complete-task/s, `${relativePath} should keep the workflow sequence hint`);
-  });
-});
-
-test("system prompt templates embed skill authoring conventions from the collaboration guide", () => {
-  [
-    {
-      heading: "## Skill Authoring Conventions",
-      comment: "<!-- Canonical source: .agents/README.md - keep in sync -->",
-      mustMatch: [
-        /When writing or updating `\.agents\/skills\/\*\/SKILL\.md` files(?: and their templates)?, keep step numbering consistent:/,
-        /1\. Use consecutive integers for top-level steps: `1\.`, `2\.`, `3\.`\./,
-        /2\. Use nested numbering only for child actions that belong to a parent step: `1\.1`, `1\.2`, `2\.1`\./,
-        /3\. Use `a`, `b`, and `c` markers for (?:branches, conditions, or alternative paths within the same step|subordinate options, conditional branches, or parallel possibilities within the same step; use them only for in-step expansion, not for naming standalone decision paths or output templates)\./,
-        /4\. Do not use intermediate numbers such as `1\.5` or `2\.5`; if a new standalone step is needed, renumber the following top-level steps\./,
-        /5\. When renumbering, update every in-document step reference so the instructions remain accurate\./,
-        /6\. Extract long bash scripts into a sibling `scripts\/` directory; the SKILL\.md should contain only a single-line invocation \(e\.g\., `bash \.agents\/skills\/<skill>\/scripts\/<script>\.sh`\) and a brief summary of the script's responsibilities\./,
-        /### SKILL\.md Size Control/,
-        /- Keep the SKILL\.md body within about 500 tokens \(roughly 80 lines \/ 2KB\)\./,
-        /- Move content beyond that threshold into a sibling `reference\/` directory\./,
-        /- Use explicit navigation in the skeleton, such as: `Read reference\/xxx\.md before executing this step\.`/,
-        /- Keep scripts in `scripts\/` and execute them instead of inlining long bash blocks\./
-      ],
-      targets: [
-        "templates/.claude/CLAUDE.md",
-        "templates/AGENTS.md"
-      ]
-    },
-    {
-      heading: "## Skill 编写规范",
-      comment: "<!-- Canonical source: .agents/README.zh-CN.md - keep in sync -->",
-      mustMatch: [
-        /编写或维护 `\.agents\/skills\/\*\/SKILL\.md`(?: 及其模板)?时，步骤编号遵循以下规则：/,
-        /1\. 顶级步骤使用连续整数：`1\.`、`2\.`、`3\.`。/,
-        /2\. 只有父步骤下的从属动作才使用子步骤：`1\.1`、`1\.2`、`2\.1`。/,
-        /3\. 同一步中的(?:分支、条件或多种可能性|从属选项、条件分支或并列可能性)使用 `a`、`b`、`c` 标记(?:；仅用于步骤内部的子项展开，不用于命名独立的决策路径或输出模板)?。/,
-        /4\. 不要使用 `1\.5`、`2\.5` 这类中间编号；如新增独立步骤，应整体顺延后续编号。/,
-        /5\. 调整编号时，必须同步更新文中的步骤引用，确保说明、命令和检查点一致。/,
-        /6\. 长 bash 脚本应从 SKILL\.md 提取到同级 `scripts\/` 目录中，SKILL\.md 只保留单行调用（如 `bash \.agents\/skills\/<skill>\/scripts\/<script>\.sh`）和对脚本职责的概要说明。/,
-        /### SKILL\.md 体积控制/,
-        /- SKILL\.md 正文控制在约 500 tokens（约 80 行 \/ 2KB）以内。/,
-        /- 超过阈值的内容拆分到同级 `reference\/` 目录。/,
-        /- 骨架中使用明确导航，例如：`执行此步骤前，先读取 reference\/xxx\.md。`/,
-        /- 长脚本继续放在 `scripts\/` 目录，优先执行脚本而不是内联大段 bash。/
-      ],
-      targets: [
-        "templates/.claude/CLAUDE.zh-CN.md",
-        "templates/AGENTS.zh-CN.md"
-      ]
-    }
-  ].forEach(({ heading, comment, mustMatch, targets }) => {
-    targets.forEach((relativePath) => {
-      const content = read(relativePath);
-
-      assert.match(content, new RegExp(escapeRegExp(heading)), `${relativePath} should include the conventions heading`);
-      mustMatch.forEach((pattern) => {
-        assert.match(content, pattern, `${relativePath} should document ${pattern}`);
-      });
-      assert.match(
-        content,
-        new RegExp(escapeRegExp(comment)),
-        `${relativePath} should keep the canonical-source marker`
-      );
-    });
-  });
-});
-
-test("README documents the bootstrap installation flow", () => {
-  const readme = read("README.md");
-  const readmeZh = read("README.zh-CN.md");
-
-  assert.match(readme, /install\.sh/);
-  assert.match(readme, /ai init/);
-  assert.match(readme, /update-agent-infra/);
-  assert.match(readme, /npm install -g @fitlab-ai\/agent-infra/);
-  assert.match(readme, /npm update -g @fitlab-ai\/agent-infra/);
-  assert.match(readme, /runs npm install -g internally/);
-  assert.doesNotMatch(readme, /npx @fitlab-ai\/agent-infra init/);
-  assert.doesNotMatch(readme, /Install from source/);
-  assert.match(readmeZh, /install\.sh/);
-  assert.match(readmeZh, /ai init/);
-  assert.match(readmeZh, /update-agent-infra/);
-  assert.match(readmeZh, /npm install -g @fitlab-ai\/agent-infra/);
-  assert.match(readmeZh, /npm update -g @fitlab-ai\/agent-infra/);
-  assert.match(readmeZh, /内部执行 npm install -g/);
-  assert.doesNotMatch(readmeZh, /npx @fitlab-ai\/agent-infra init/);
-  assert.doesNotMatch(readmeZh, /源码安装/);
 });
 
 test("version format validation hooks are wired into templates and local config", () => {

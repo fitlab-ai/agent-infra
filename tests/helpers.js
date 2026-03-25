@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -72,12 +71,54 @@ async function loadFreshEsm(relativePath) {
   return import(moduleUrl.href);
 }
 
-function assertContainsPatterns(relativePath, patterns) {
+function parseFrontmatter(relativePath) {
   const content = read(relativePath);
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
 
-  patterns.forEach((pattern) => {
-    assert.match(content, pattern, `${relativePath} should match ${pattern}`);
-  });
+  if (!match) {
+    return null;
+  }
+
+  const lines = match[1].split(/\r?\n/);
+  let name = "";
+  let description = "";
+
+  const normalizeValue = (value) => value.replace(/^["']|["']$/g, "").trim();
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+
+    if (line.startsWith("name:")) {
+      name = normalizeValue(line.slice("name:".length).trim());
+      continue;
+    }
+
+    if (!line.startsWith("description:")) {
+      continue;
+    }
+
+    const value = line.slice("description:".length).trim();
+    if (value === ">") {
+      const descriptionLines = [];
+
+      for (let offset = index + 1; offset < lines.length; offset += 1) {
+        const descriptionLine = lines[offset];
+        if (!/^\s+/.test(descriptionLine)) {
+          break;
+        }
+
+        descriptionLines.push(descriptionLine.trim());
+        index = offset;
+      }
+
+      description = descriptionLines.join(" ").trim();
+      continue;
+    }
+
+    description = normalizeValue(value);
+  }
+
+  return { name, description };
 }
 
 function skillDocPaths(skill) {
@@ -86,20 +127,6 @@ function skillDocPaths(skill) {
     `templates/.agents/skills/${skill}/SKILL.md`,
     `templates/.agents/skills/${skill}/SKILL.zh-CN.md`
   ].filter(exists);
-}
-
-function skillContentPaths(skill) {
-  const paths = [...skillDocPaths(skill)];
-  const referenceRoots = [
-    `.agents/skills/${skill}/reference`,
-    `templates/.agents/skills/${skill}/reference`
-  ].filter(exists);
-
-  referenceRoots.forEach((relativeDir) => {
-    paths.push(...listFilesRecursive(relativeDir));
-  });
-
-  return paths;
 }
 
 const commandSpecs = {
@@ -226,7 +253,6 @@ const commandSpecs = {
 };
 
 export {
-  assertContainsPatterns,
   buildCommandSyncFiles,
   commandSpecs,
   escapeRegExp,
@@ -236,8 +262,8 @@ export {
   listFilesRecursive,
   listSkillNames,
   loadFreshEsm,
+  parseFrontmatter,
   read,
   renderPlaceholders,
-  skillContentPaths,
   skillDocPaths
 };
