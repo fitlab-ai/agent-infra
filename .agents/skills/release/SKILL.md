@@ -102,9 +102,9 @@ bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PAT
 
 脚本负责：
 - 使用 `gh api "repos/$repo/milestones"` 读取当前里程碑
-- 在 `${MAJOR}.${MINOR}.${PATCH}` 存在且仍为开启状态时将其关闭
-- 确保 `${MAJOR}.${MINOR}.${PATCH+1}` 与 `${MAJOR}.${MINOR}.x` 存在
-- 当 `PATCH=0` 时，同时确保 `${MAJOR}.${MINOR+1}.0` 与 `${MAJOR}.${MINOR+1}.x`
+- 在 `{MAJOR}.{MINOR}.{PATCH}` 存在且仍为开启状态时将其关闭
+- 确保 `{MAJOR}.{MINOR}.{PATCH+1}` 与 `{MAJOR}.{MINOR}.x` 存在
+- 当 `PATCH=0` 时，同时确保 `{MAJOR}.{MINOR+1}.0` 与 `{MAJOR}.{MINOR+1}.x`
 - 输出包含已发布里程碑动作和新建数量的汇总
 
 ### 9. 输出摘要

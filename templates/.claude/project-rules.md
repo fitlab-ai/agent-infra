@@ -46,7 +46,7 @@ Before creating PR:
 
 Auto-detect user intent:
 - "analyze issue XXX" -> `/import-issue`
-- "analyze task TASK-..." -> `/analyze-task`
+- "analyze task TASK-XXX" -> `/analyze-task`
 - "plan/design solution" -> `/plan-task`
 - "implement/code" -> `/implement-task`
 - "review" -> `/review-task`

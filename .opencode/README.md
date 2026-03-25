@@ -42,8 +42,8 @@ AI 代理的分步指令。
 
 ### 任务管理
 - `create-task` - 从自然语言描述创建任务
-- `analyze-task` - 分析已有任务并生成需求分析
-- `import-issue` - 从 GitHub Issue 导入任务
+- `import-issue` - 导入 GitHub Issue 为任务
+- `analyze-task` - 分析任务需求
 - `plan-task` - 为任务设计技术方案
 - `implement-task` - 根据方案实施任务
 - `review-task` - 审查任务实现
