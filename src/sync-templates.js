@@ -145,41 +145,6 @@ function langSelect(rels, lang, allSet, project) {
 function syncTemplates(projectRoot) {
   const configDir = path.join(projectRoot, '.agents');
   const cfgPath = path.join(configDir, '.airc.json');
-  const legacyCfgPaths = [
-    path.join(projectRoot, '.airc.json'),
-    path.join(projectRoot, '.agent-infra', 'config.json')
-  ];
-  const workspacePath = path.join(configDir, 'workspace');
-  const legacyWorkspacePaths = [
-    path.join(projectRoot, '.agent-workspace'),
-    path.join(projectRoot, '.agent-infra', 'workspace')
-  ];
-
-  if (!fs.existsSync(cfgPath)) {
-    for (const legacyCfgPath of legacyCfgPaths) {
-      if (!fs.existsSync(legacyCfgPath)) continue;
-      fs.mkdirSync(configDir, { recursive: true });
-      fs.renameSync(legacyCfgPath, cfgPath);
-      break;
-    }
-  }
-  if (!fs.existsSync(workspacePath)) {
-    for (const legacyWorkspacePath of legacyWorkspacePaths) {
-      if (!fs.existsSync(legacyWorkspacePath)) continue;
-      fs.mkdirSync(configDir, { recursive: true });
-      fs.renameSync(legacyWorkspacePath, workspacePath);
-      break;
-    }
-  }
-
-  try {
-    const legacyConfigDir = path.join(projectRoot, '.agent-infra');
-    if (fs.existsSync(legacyConfigDir) && fs.readdirSync(legacyConfigDir).length === 0) {
-      fs.rmdirSync(legacyConfigDir);
-    }
-  } catch {
-    // Ignore cleanup failures for partially migrated directories.
-  }
 
   if (!fs.existsSync(cfgPath)) {
     return { error: 'No .agents/.airc.json in project root.' };

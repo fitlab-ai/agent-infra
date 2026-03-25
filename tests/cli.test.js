@@ -209,19 +209,19 @@ test("agent-infra init rejects invalid input", () => {
 test("agent-infra update refreshes seed files and syncs file registry", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-"));
   const cli = filePath("bin/cli.js");
-    const config = {
-      version: "0.1.0",
-      project: "seedproj",
-      org: "seedorg",
-      language: "zh-CN",
-      templateSource: "templates/",
-      templateVersion: "stale",
-      files: {
-        managed: [],
-        merged: [],
-        ejected: []
-      }
-    };
+  const config = {
+    version: "0.1.0",
+    project: "seedproj",
+    org: "seedorg",
+    language: "zh-CN",
+    templateSource: "templates/",
+    templateVersion: "stale",
+    files: {
+      managed: [],
+      merged: [],
+      ejected: []
+    }
+  };
 
   try {
     fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
@@ -288,87 +288,6 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     assert.ok(
       fs.existsSync(path.join(tmpDir, ".opencode", "commands", "update-agent-infra.md"))
     );
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("agent-infra update migrates v0.2 legacy config and workspace paths", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-legacy-"));
-  const cli = filePath("bin/cli.js");
-
-  try {
-    fs.writeFileSync(
-      path.join(tmpDir, ".airc.json"),
-      JSON.stringify({
-        project: "legacyproj",
-        org: "legacyorg",
-        language: "en",
-        templateSource: "templates/",
-        templateVersion: "stale",
-        files: {
-          managed: [],
-          merged: [],
-          ejected: []
-        }
-      }, null, 2) + "\n",
-      "utf8"
-    );
-    fs.mkdirSync(path.join(tmpDir, ".agent-workspace"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, ".agent-workspace", "README.md"), "legacy\n", "utf8");
-
-    const output = execSync(`node "${cli}" update`, {
-      cwd: tmpDir,
-      stdio: "pipe",
-      encoding: "utf8"
-    });
-
-    assert.match(output, /Migrated \.airc\.json -> \.agents\/\.airc\.json/);
-    assert.match(output, /Migrated \.agent-workspace -> \.agents\/workspace/);
-    assert.ok(fs.existsSync(path.join(tmpDir, ".agents", ".airc.json")));
-    assert.ok(fs.existsSync(path.join(tmpDir, ".agents", "workspace", "README.md")));
-    assert.ok(!fs.existsSync(path.join(tmpDir, ".airc.json")));
-    assert.ok(!fs.existsSync(path.join(tmpDir, ".agent-workspace")));
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("agent-infra update migrates v0.3 legacy config and workspace paths", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-legacy-"));
-  const cli = filePath("bin/cli.js");
-
-  try {
-    fs.mkdirSync(path.join(tmpDir, ".agent-infra", "workspace"), { recursive: true });
-    fs.writeFileSync(
-      path.join(tmpDir, ".agent-infra", "config.json"),
-      JSON.stringify({
-        project: "legacyproj",
-        org: "legacyorg",
-        language: "en",
-        templateSource: "templates/",
-        templateVersion: "stale",
-        files: {
-          managed: [],
-          merged: [],
-          ejected: []
-        }
-      }, null, 2) + "\n",
-      "utf8"
-    );
-    fs.writeFileSync(path.join(tmpDir, ".agent-infra", "workspace", "README.md"), "legacy\n", "utf8");
-
-    const output = execSync(`node "${cli}" update`, {
-      cwd: tmpDir,
-      stdio: "pipe",
-      encoding: "utf8"
-    });
-
-    assert.match(output, /Migrated \.agent-infra\/config\.json -> \.agents\/\.airc\.json/);
-    assert.match(output, /Migrated \.agent-infra\/workspace -> \.agents\/workspace/);
-    assert.ok(fs.existsSync(path.join(tmpDir, ".agents", ".airc.json")));
-    assert.ok(fs.existsSync(path.join(tmpDir, ".agents", "workspace", "README.md")));
-    assert.ok(!fs.existsSync(path.join(tmpDir, ".agent-infra")));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
