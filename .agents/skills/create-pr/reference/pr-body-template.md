@@ -76,9 +76,9 @@ EOF
 ```text
 下一步：
   - 可选：同步 reviewer 摘要：
-    - Claude Code / OpenCode: /sync-pr {task-id}
-    - Gemini CLI: /agent-infra:sync-pr {task-id}
-    - Codex CLI: $sync-pr {task-id}
+    - Claude Code / OpenCode: /sync-pr #{pr_number}
+    - Gemini CLI: /agent-infra:sync-pr #{pr_number}
+    - Codex CLI: $sync-pr #{pr_number}
   - 工作流真正结束后完成任务：
     - Claude Code / OpenCode: /complete-task {task-id}
     - Gemini CLI: /agent-infra:complete-task {task-id}

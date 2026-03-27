@@ -85,9 +85,9 @@ gh pr edit <id> --title "<new-title>"
 
 ```
 下一步 - 同步任务进度到 PR：
-  - Claude Code / OpenCode：/sync-pr {task-id}
-  - Gemini CLI：/agent-infra:sync-pr {task-id}
-  - Codex CLI：$sync-pr {task-id}
+  - Claude Code / OpenCode：/sync-pr #{pr_number}
+  - Gemini CLI：/agent-infra:sync-pr #{pr_number}
+  - Codex CLI：$sync-pr #{pr_number}
 ```
 
 ## 优势

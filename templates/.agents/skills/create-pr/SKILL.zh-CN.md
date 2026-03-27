@@ -62,7 +62,7 @@ date "+%Y-%m-%d %H:%M:%S"
 ### 8. 告知用户
 
 说明 PR URL、元数据同步结果，并按顺序给出两个后续动作：
-- 可选执行 `sync-pr {task-id}`，发布面向 reviewer 的上下文摘要
+- 可选执行 `sync-pr #{pr_number}`，发布面向 reviewer 的上下文摘要
 - 当整个工作流真正完成后执行 `complete-task {task-id}`
 
 ## 注意事项

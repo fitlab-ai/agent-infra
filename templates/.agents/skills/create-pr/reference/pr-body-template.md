@@ -76,9 +76,9 @@ Final user output should include both follow-up paths in order:
 ```text
 Next steps:
   - optional reviewer summary sync:
-    - Claude Code / OpenCode: /sync-pr {task-id}
-    - Gemini CLI: /agent-infra:sync-pr {task-id}
-    - Codex CLI: $sync-pr {task-id}
+    - Claude Code / OpenCode: /sync-pr #{pr_number}
+    - Gemini CLI: /agent-infra:sync-pr #{pr_number}
+    - Codex CLI: $sync-pr #{pr_number}
   - complete the task after the workflow truly finishes:
     - Claude Code / OpenCode: /complete-task {task-id}
     - Gemini CLI: /agent-infra:complete-task {task-id}

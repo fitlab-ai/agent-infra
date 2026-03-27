@@ -62,7 +62,7 @@ If `{task-id}` is available, update task.md with `pr_number`, `updated_at`, and 
 ### 8. Inform the User
 
 Explain the created PR URL, summarize metadata sync results, and present both follow-up commands in order:
-- optional `sync-pr {task-id}` to publish reviewer-facing context
+- optional `sync-pr #{pr_number}` to publish reviewer-facing context
 - `complete-task {task-id}` once the workflow is truly done
 
 ## Notes

@@ -85,9 +85,9 @@ date "+%Y-%m-%d %H:%M:%S"
 
 ```
 下一步 - 同步任务进度到 PR（可选）：
-  - Claude Code / OpenCode：/sync-pr {task-id}
-  - Gemini CLI：/agent-infra:sync-pr {task-id}
-  - Codex CLI：$sync-pr {task-id}
+  - Claude Code / OpenCode：/sync-pr #{pr_number}
+  - Gemini CLI：/agent-infra:sync-pr #{pr_number}
+  - Codex CLI：$sync-pr #{pr_number}
 ```
 
 如果任务已进入最终阶段，追加：

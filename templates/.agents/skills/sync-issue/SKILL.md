@@ -85,9 +85,9 @@ If the task has a related PR, add:
 
 ```
 Next step - sync task progress to the PR (optional):
-  - Claude Code / OpenCode: /sync-pr {task-id}
-  - Gemini CLI: /{{project}}:sync-pr {task-id}
-  - Codex CLI: $sync-pr {task-id}
+  - Claude Code / OpenCode: /sync-pr #{pr_number}
+  - Gemini CLI: /{{project}}:sync-pr #{pr_number}
+  - Codex CLI: $sync-pr #{pr_number}
 ```
 
 If the task is in its final stage, add:

@@ -24,6 +24,6 @@ Feature-branch parent inference details:
 - if no reliable parent can be inferred, stop and ask the user instead of guessing
 
 Next-step rule after PR creation:
-- if `issue_number` exists and reviewer-facing context still needs publishing, recommend `sync-pr {task-id}` first
+- if `issue_number` exists and reviewer-facing context still needs publishing, recommend `sync-pr #{pr_number}` first
 - if all workflow work is complete after PR creation, recommend `complete-task {task-id}` second
 - never present `complete-task` as the only next step when PR context still needs syncing
