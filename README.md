@@ -1,7 +1,15 @@
-# Agent Infra
-
 <p align="center">
   <img src="./assets/logo.svg" alt="Agent Infra Logo" width="200">
+</p>
+
+<h1 align="center">Agent Infra</h1>
+
+<p align="center">
+  The missing collaboration layer for AI coding agents — unified skills and workflows for Claude Code, Codex, Gemini CLI, and OpenCode.
+</p>
+
+<p align="center">
+  <strong>Semi-automated programming, powered by AI agents.</strong> Define a requirement, let AI handle analysis, planning, coding, review, and delivery — you only step in when it matters.
 </p>
 
 <p align="center">
@@ -12,10 +20,6 @@
   <a href="https://github.com/fitlab-ai/agent-infra/releases"><img src="https://img.shields.io/github/v/release/fitlab-ai/agent-infra" alt="GitHub release"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
 </p>
-
-The missing collaboration layer for AI coding agents — unified skills and workflows for Claude Code, Codex, Gemini CLI, and OpenCode.
-
-**Semi-automated programming, powered by AI agents.** Define a requirement, let AI handle analysis, planning, coding, review, and delivery — you only step in when it matters.
 
 [中文版](README.zh-CN.md)
 
