@@ -4,12 +4,14 @@
   <img src="./assets/logo.svg" alt="Agent Infra Logo" width="200">
 </p>
 
-[![npm version](https://img.shields.io/npm/v/@fitlab-ai/agent-infra)](https://www.npmjs.com/package/@fitlab-ai/agent-infra)
-[![npm downloads](https://img.shields.io/npm/dm/@fitlab-ai/agent-infra)](https://www.npmjs.com/package/@fitlab-ai/agent-infra)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](License.txt)
-[![Node.js >= 18](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen?logo=node.js)](https://nodejs.org/)
-[![GitHub release](https://img.shields.io/github/v/release/fitlab-ai/agent-infra)](https://github.com/fitlab-ai/agent-infra/releases)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+<p align="center">
+  <a href="https://www.npmjs.com/package/@fitlab-ai/agent-infra"><img src="https://img.shields.io/npm/v/@fitlab-ai/agent-infra" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@fitlab-ai/agent-infra"><img src="https://img.shields.io/npm/dm/@fitlab-ai/agent-infra" alt="npm downloads"></a>
+  <a href="License.txt"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen?logo=node.js" alt="Node.js >= 18"></a>
+  <a href="https://github.com/fitlab-ai/agent-infra/releases"><img src="https://img.shields.io/github/v/release/fitlab-ai/agent-infra" alt="GitHub release"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
+</p>
 
 The missing collaboration layer for AI coding agents — unified skills and workflows for Claude Code, Codex, Gemini CLI, and OpenCode.
 
