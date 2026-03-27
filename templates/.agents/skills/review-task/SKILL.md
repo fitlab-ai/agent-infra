@@ -71,6 +71,7 @@ Include all TUI command formats in the next-step output.
 - [ ] Created `{review-artifact}`
 - [ ] Updated task.md and appended the Activity Log entry
 - [ ] Chose exactly one verdict branch in the user output
+- [ ] Informed the user of the next step (must include all TUI command formats; do not filter)
 
 ## Notes
 

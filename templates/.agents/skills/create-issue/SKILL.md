@@ -55,7 +55,21 @@ Write back `issue_number`, update `updated_at`, and append the Create Issue Acti
 
 ### 6. Inform User
 
-Show the Issue number, URL, labels, Issue Type, milestone result, confirm that `issue_number` was written back, and include the next `sync-issue` command in every TUI format.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+
+Show the Issue number, URL, labels, Issue Type, milestone result, confirm that `issue_number` was written back, and include the next-step commands in every TUI format:
+
+```
+Next step - run requirements analysis:
+  - Claude Code / OpenCode: /analyze-task {task-id}
+  - Gemini CLI: /{{project}}:analyze-task {task-id}
+  - Codex CLI: $analyze-task {task-id}
+
+Next step - sync task progress to the Issue later (optional):
+  - Claude Code / OpenCode: /sync-issue {issue_number}
+  - Gemini CLI: /{{project}}:sync-issue {issue_number}
+  - Codex CLI: $sync-issue {issue_number}
+```
 
 ## Completion Checklist
 
@@ -63,7 +77,7 @@ Show the Issue number, URL, labels, Issue Type, milestone result, confirm that `
 - [ ] Used `task.md` as the only content source
 - [ ] Recorded `issue_number` in task.md
 - [ ] Updated `updated_at` and appended the Activity Log entry
-- [ ] Included all TUI formats for the next `sync-issue` step
+- [ ] Included all TUI formats for the next-step commands
 
 ## STOP
 

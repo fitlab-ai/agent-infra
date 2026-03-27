@@ -61,7 +61,27 @@ date "+%Y-%m-%d %H:%M:%S"
 
 ### 7. 告知用户
 
-如果本轮修复了 Blocker 或 Major，默认推荐重新审查。只有在风险确实很低且只修复 Minor 时，才可把直接提交作为备选项。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+
+输出修复摘要后，根据修复的问题严重程度选择下一步：
+
+如果修复了 Blocker 或 Major（推荐重新审查）：
+
+```
+下一步 - 代码审查：
+  - Claude Code / OpenCode：/review-task {task-id}
+  - Gemini CLI：/agent-infra:review-task {task-id}
+  - Codex CLI：$review-task {task-id}
+```
+
+如果仅修复 Minor（可直接提交）：
+
+```
+下一步 - 提交代码：
+  - Claude Code / OpenCode：/commit
+  - Gemini CLI：/agent-infra:commit
+  - Codex CLI：$commit
+```
 
 ## 完成检查清单
 

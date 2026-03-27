@@ -44,6 +44,8 @@ date "+%Y-%m-%d %H:%M:%S"
 
 > The full four-case status matrix, prerequisite checks, and multi-TUI next-step commands live in `reference/task-status-update.md`. Read `reference/task-status-update.md` before updating task state.
 
+> **IMPORTANT**: When showing the next step, output every TUI command format in full and directly use the standard template from `reference/task-status-update.md`.
+
 Append the Commit Activity Log entry and choose exactly one next-step case:
 - final commit -> `complete-task {task-id}`
 - more work remains -> update task.md and stop

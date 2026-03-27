@@ -83,6 +83,8 @@ ls .agents/workspace/blocked/{task-id}/task.md
 
 ### 7. 告知用户
 
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+
 输出格式：
 ```
 任务 {task-id} 已标记为阻塞。
@@ -94,6 +96,11 @@ ls .agents/workspace/blocked/{task-id}/task.md
 解除阻塞时执行：
   mv .agents/workspace/blocked/{task-id} .agents/workspace/active/{task-id}
   # 然后更新 task.md：status -> active，移除 blocked_at
+
+下一步 - 检查任务状态（解除阻塞后）：
+  - Claude Code / OpenCode：/check-task {task-id}
+  - Gemini CLI：/agent-infra:check-task {task-id}
+  - Codex CLI：$check-task {task-id}
 ```
 
 ## 输出模板

@@ -119,4 +119,15 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 - ejected 文件处理
 - 自身更新检测结果
 
+如有变更需要提交，追加：
+
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+
+```
+下一步 - 提交代码：
+  - Claude Code / OpenCode：/commit
+  - Gemini CLI：/agent-infra:commit
+  - Codex CLI：$commit
+```
+
 输出报告后**停止**，不要对项目做其他更改。

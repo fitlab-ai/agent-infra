@@ -69,7 +69,27 @@ date "+%Y-%m-%d %H:%M:%S"
 
 ### 10. 告知用户
 
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+
 汇总已同步的 labels、milestone、development 状态、summary 结果以及 PR URL。
+
+如果有关联 Issue，追加：
+
+```
+下一步 - 同步任务进度到 Issue（可选）：
+  - Claude Code / OpenCode：/sync-issue {issue_number}
+  - Gemini CLI：/agent-infra:sync-issue {issue_number}
+  - Codex CLI：$sync-issue {issue_number}
+```
+
+追加可选归档提示：
+
+```
+下一步 - 完成并归档任务（可选）：
+  - Claude Code / OpenCode：/complete-task {task-id}
+  - Gemini CLI：/agent-infra:complete-task {task-id}
+  - Codex CLI：$complete-task {task-id}
+```
 
 ## 注意事项
 

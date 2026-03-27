@@ -113,6 +113,11 @@ Next step - run requirements analysis:
   - Claude Code / OpenCode: /analyze-task {task-id}
   - Gemini CLI: /{{project}}:analyze-task {task-id}
   - Codex CLI: $analyze-task {task-id}
+
+Or create a GitHub Issue first:
+  - Claude Code / OpenCode: /create-issue {task-id}
+  - Gemini CLI: /{{project}}:create-issue {task-id}
+  - Codex CLI: $create-issue {task-id}
 ```
 
 ## Completion Checklist
@@ -134,7 +139,7 @@ Wait for the user to run the `analyze-task` skill.
 
 1. **Clarity**: if the user description is vague or missing key information, ask for clarification first
 2. **Difference from `import-issue`**: `import-issue` imports from a GitHub Issue; `create-task` creates from a free-form description
-3. **Workflow order**: after creating a task, `analyze-task` must run before `plan-task`
+3. **Workflow order**: after creating a task, typically run `analyze-task` before `plan-task`; if you need GitHub tracking first, you may run `create-issue` first
 
 ## Error Handling
 

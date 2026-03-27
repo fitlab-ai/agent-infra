@@ -70,6 +70,19 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 - 整个操作具备幂等性，因为每个 label 都使用 `gh label create --force`。
 - 如果自动探测出的 `in:` labels 需要细化，请在初始化后手动调整。
 
+### 6. 告知用户
+
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+
+输出 labels 初始化摘要后，提示：
+
+```
+下一步 - 初始化 Milestones（可选）：
+  - Claude Code / OpenCode：/init-milestones
+  - Gemini CLI：/agent-infra:init-milestones
+  - Codex CLI：$init-milestones
+```
+
 ## 错误处理
 
 - 未找到 `gh`：提示 "GitHub CLI (`gh`) is not installed"

@@ -69,7 +69,27 @@ Update `last_synced_to_pr_at` and append the Sync to PR Activity Log entry.
 
 ### 10. Inform the User
 
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+
 Report the synchronized labels, milestone, development status, summary result, and PR URL.
+
+If there is a related Issue, add:
+
+```
+Next step - sync task progress to the Issue (optional):
+  - Claude Code / OpenCode: /sync-issue {issue_number}
+  - Gemini CLI: /{{project}}:sync-issue {issue_number}
+  - Codex CLI: $sync-issue {issue_number}
+```
+
+Add the optional archive path:
+
+```
+Next step - complete and archive the task (optional):
+  - Claude Code / OpenCode: /complete-task {task-id}
+  - Gemini CLI: /{{project}}:complete-task {task-id}
+  - Codex CLI: $complete-task {task-id}
+```
 
 ## Notes
 

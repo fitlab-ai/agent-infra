@@ -92,6 +92,8 @@ date "+%Y-%m-%d %H:%M:%S"
 
 ### 8. Inform User
 
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+
 ```
 Code Scanning alert #{alert-number} dismissed.
 
@@ -103,6 +105,11 @@ Explanation: {explanation}
 View: {html_url}
 
 Note: it can be reopened on GitHub if necessary.
+
+Next step - complete and archive the task if a related task exists:
+  - Claude Code / OpenCode: /complete-task {task-id}
+  - Gemini CLI: /{{project}}:complete-task {task-id}
+  - Codex CLI: $complete-task {task-id}
 ```
 
 ## Notes

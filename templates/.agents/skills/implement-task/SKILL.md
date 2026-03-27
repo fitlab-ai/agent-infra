@@ -91,7 +91,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 
 ### 9. Inform the User
 
-Output the implementation summary and include all TUI command variants for the next review step.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. Use the output template in `reference/output-template.md`.
 
 ## Completion Checklist
 

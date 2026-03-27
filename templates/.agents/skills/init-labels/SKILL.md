@@ -70,6 +70,19 @@ Operational notes:
 - The operation is idempotent because every label uses `gh label create --force`.
 - If the detected `in:` labels need refinement, adjust them manually after initialization.
 
+### 6. Inform User
+
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+
+After summarizing the label initialization, show:
+
+```
+Next step - initialize milestones (optional):
+  - Claude Code / OpenCode: /init-milestones
+  - Gemini CLI: /{{project}}:init-milestones
+  - Codex CLI: $init-milestones
+```
+
 ## Error Handling
 
 - `gh` not found: prompt "GitHub CLI (`gh`) is not installed"

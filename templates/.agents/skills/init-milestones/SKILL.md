@@ -61,6 +61,19 @@ Operational notes:
 - Historical `X.Y.Z` tags create `X.Y.x` milestones as open and `X.Y.Z` milestones as closed.
 - Repositories with many tags may hit the GitHub API rate limit.
 
+### 5. Inform User
+
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+
+After summarizing the milestone initialization, show:
+
+```
+Next step - initialize labels (optional):
+  - Claude Code / OpenCode: /init-labels
+  - Gemini CLI: /{{project}}:init-labels
+  - Codex CLI: $init-labels
+```
+
 ## Error Handling
 
 - `gh` not found: prompt "GitHub CLI (`gh`) is not installed"

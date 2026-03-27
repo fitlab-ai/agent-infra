@@ -61,7 +61,27 @@ Update task.md:
 
 ### 7. Inform User
 
-Recommend re-review by default when Blocker or Major issues were fixed. Only present direct commit as a low-risk option when the changes are truly minor.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+
+After summarizing the fixes, choose the next step based on severity:
+
+If the round fixed any Blocker or Major issues (recommended):
+
+```
+Next step - code review:
+  - Claude Code / OpenCode: /review-task {task-id}
+  - Gemini CLI: /{{project}}:review-task {task-id}
+  - Codex CLI: $review-task {task-id}
+```
+
+If the round fixed Minor issues only (low risk):
+
+```
+Next step - commit changes:
+  - Claude Code / OpenCode: /commit
+  - Gemini CLI: /{{project}}:commit
+  - Codex CLI: $commit
+```
 
 ## Completion Checklist
 

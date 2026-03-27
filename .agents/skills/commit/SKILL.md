@@ -44,6 +44,8 @@ date "+%Y-%m-%d %H:%M:%S"
 
 > 完整的 4 种状态分支、前置条件检查和多 TUI 下一步命令见 `reference/task-status-update.md`。更新任务状态前，先读取 `reference/task-status-update.md`。
 
+> **重要**：向用户展示下一步时，必须完整输出所有 TUI 命令格式，并直接使用 `reference/task-status-update.md` 中对应场景的标准模板。
+
 追加 Commit 的 Activity Log，并且只能选择一个下一步分支：
 - 最终提交 -> `complete-task {task-id}`
 - 还有后续工作 -> 更新 task.md 后停止

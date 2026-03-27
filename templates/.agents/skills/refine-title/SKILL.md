@@ -68,6 +68,28 @@ gh issue edit <id> --title "<new-title>"
 gh pr edit <id> --title "<new-title>"
 ```
 
+### 5. Inform User
+
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+
+If the skill updated an Issue title, show:
+
+```
+Next step - sync task progress to the Issue:
+  - Claude Code / OpenCode: /sync-issue {issue_number}
+  - Gemini CLI: /{{project}}:sync-issue {issue_number}
+  - Codex CLI: $sync-issue {issue_number}
+```
+
+If the skill updated a PR title, show:
+
+```
+Next step - sync task progress to the PR:
+  - Claude Code / OpenCode: /sync-pr {task-id}
+  - Gemini CLI: /{{project}}:sync-pr {task-id}
+  - Codex CLI: $sync-pr {task-id}
+```
+
 ## Advantages
 
 This skill:

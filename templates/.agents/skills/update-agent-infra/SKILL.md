@@ -129,4 +129,15 @@ Based on the script report and merged results, output a complete update report i
 - Ejected file processing
 - Self-update detection result
 
+If there are changes to submit, add:
+
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+
+```
+Next step - commit changes:
+  - Claude Code / OpenCode: /commit
+  - Gemini CLI: /{{project}}:commit
+  - Codex CLI: $commit
+```
+
 Output the report, then **STOP** — do not make other changes to the project.

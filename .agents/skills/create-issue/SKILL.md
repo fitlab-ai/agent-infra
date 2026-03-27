@@ -55,7 +55,21 @@ date "+%Y-%m-%d %H:%M:%S"
 
 ### 6. 告知用户
 
-展示 Issue 编号、URL、labels、Issue Type、milestone 结果，确认 `issue_number` 已回写，并完整输出所有 TUI 里的下一步 `sync-issue` 命令。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+
+展示 Issue 编号、URL、labels、Issue Type、milestone 结果，确认 `issue_number` 已回写，并完整输出所有 TUI 里的下一步命令：
+
+```
+下一步 - 执行需求分析：
+  - Claude Code / OpenCode：/analyze-task {task-id}
+  - Gemini CLI：/agent-infra:analyze-task {task-id}
+  - Codex CLI：$analyze-task {task-id}
+
+下一步 - 同步任务进度到 Issue（可选，适用于后续阶段）：
+  - Claude Code / OpenCode：/sync-issue {issue_number}
+  - Gemini CLI：/agent-infra:sync-issue {issue_number}
+  - Codex CLI：$sync-issue {issue_number}
+```
 
 ## 完成检查清单
 
@@ -63,7 +77,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - [ ] 已仅使用 `task.md` 作为内容来源
 - [ ] 已在 task.md 中记录 `issue_number`
 - [ ] 已更新 `updated_at` 并追加 Activity Log
-- [ ] 已输出所有 TUI 格式的 `sync-issue` 下一步命令
+- [ ] 已输出所有 TUI 格式的下一步命令
 
 ## 停止
 

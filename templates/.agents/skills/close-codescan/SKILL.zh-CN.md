@@ -92,6 +92,8 @@ date "+%Y-%m-%d %H:%M:%S"
 
 ### 8. 告知用户
 
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+
 ```
 Code Scanning 告警 #{alert-number} 已关闭。
 
@@ -103,6 +105,11 @@ Code Scanning 告警 #{alert-number} 已关闭。
 查看：{html_url}
 
 注意：如有需要，可在 GitHub 上重新打开。
+
+下一步 - 完成并归档任务（如有关联任务）：
+  - Claude Code / OpenCode：/complete-task {task-id}
+  - Gemini CLI：/agent-infra:complete-task {task-id}
+  - Codex CLI：$complete-task {task-id}
 ```
 
 ## 注意事项

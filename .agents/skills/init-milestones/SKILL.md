@@ -61,6 +61,19 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 - 历史 `X.Y.Z` tag 会生成开启状态的 `X.Y.x` 和关闭状态的 `X.Y.Z`。
 - 标签较多的仓库可能触发 GitHub API rate limit。
 
+### 5. 告知用户
+
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+
+输出 milestones 初始化摘要后，提示：
+
+```
+下一步 - 初始化 Labels（可选）：
+  - Claude Code / OpenCode：/init-labels
+  - Gemini CLI：/agent-infra:init-labels
+  - Codex CLI：$init-labels
+```
+
 ## 错误处理
 
 - 未找到 `gh`：提示 "GitHub CLI (`gh`) is not installed"

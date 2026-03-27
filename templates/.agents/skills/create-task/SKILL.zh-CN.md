@@ -113,6 +113,11 @@ date "+%Y-%m-%d %H:%M:%S"
   - Claude Code / OpenCode：/analyze-task {task-id}
   - Gemini CLI：/agent-infra:analyze-task {task-id}
   - Codex CLI：$analyze-task {task-id}
+
+或先创建 GitHub Issue：
+  - Claude Code / OpenCode：/create-issue {task-id}
+  - Gemini CLI：/agent-infra:create-issue {task-id}
+  - Codex CLI：$create-issue {task-id}
 ```
 
 ## 完成检查清单
@@ -134,7 +139,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 1. **清晰度**：如果用户描述模糊或缺少关键信息，先要求澄清
 2. **与 import-issue 的区别**：`import-issue` 从 GitHub Issue 导入任务；`create-task` 从自由描述创建
-3. **工作流顺序**：创建任务后，必须先执行 `analyze-task`，再进入 `plan-task`
+3. **工作流顺序**：创建任务后，通常先执行 `analyze-task` 再进入 `plan-task`；如需先建立 GitHub 跟踪，也可先执行 `create-issue`
 
 ## 错误处理
 
