@@ -76,9 +76,9 @@ gh pr edit <id> --title "<new-title>"
 
 ```
 下一步 - 同步任务进度到 Issue：
-  - Claude Code / OpenCode：/sync-issue {issue_number}
-  - Gemini CLI：/agent-infra:sync-issue {issue_number}
-  - Codex CLI：$sync-issue {issue_number}
+  - Claude Code / OpenCode：/sync-issue #{issue_number}
+  - Gemini CLI：/agent-infra:sync-issue #{issue_number}
+  - Codex CLI：$sync-issue #{issue_number}
 ```
 
 如果修改了 PR 标题，提示：

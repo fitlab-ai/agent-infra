@@ -77,9 +77,9 @@ If there is a related Issue, add:
 
 ```
 Next step - sync task progress to the Issue (optional):
-  - Claude Code / OpenCode: /sync-issue {issue_number}
-  - Gemini CLI: /{{project}}:sync-issue {issue_number}
-  - Codex CLI: $sync-issue {issue_number}
+  - Claude Code / OpenCode: /sync-issue #{issue_number}
+  - Gemini CLI: /{{project}}:sync-issue #{issue_number}
+  - Codex CLI: $sync-issue #{issue_number}
 ```
 
 Add the optional archive path:

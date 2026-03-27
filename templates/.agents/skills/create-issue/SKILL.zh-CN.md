@@ -66,9 +66,9 @@ date "+%Y-%m-%d %H:%M:%S"
   - Codex CLI：$analyze-task {task-id}
 
 下一步 - 同步任务进度到 Issue（可选，适用于后续阶段）：
-  - Claude Code / OpenCode：/sync-issue {issue_number}
-  - Gemini CLI：/agent-infra:sync-issue {issue_number}
-  - Codex CLI：$sync-issue {issue_number}
+  - Claude Code / OpenCode：/sync-issue #{issue_number}
+  - Gemini CLI：/agent-infra:sync-issue #{issue_number}
+  - Codex CLI：$sync-issue #{issue_number}
 ```
 
 ## 完成检查清单

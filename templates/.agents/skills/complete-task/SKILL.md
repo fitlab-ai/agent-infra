@@ -92,9 +92,9 @@ If a valid `issue_number` exists, optionally sync the completion status:
 
 ```
 (Optional) Sync completion status to the GitHub Issue:
-  - Claude Code / OpenCode: /sync-issue {issue_number}
-  - Gemini CLI: /{{project}}:sync-issue {issue_number}
-  - Codex CLI: $sync-issue {issue_number}
+  - Claude Code / OpenCode: /sync-issue #{issue_number}
+  - Gemini CLI: /{{project}}:sync-issue #{issue_number}
+  - Codex CLI: $sync-issue #{issue_number}
 ```
 
 ### 7. Inform User

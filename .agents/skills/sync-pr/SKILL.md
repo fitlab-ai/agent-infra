@@ -77,9 +77,9 @@ date "+%Y-%m-%d %H:%M:%S"
 
 ```
 下一步 - 同步任务进度到 Issue（可选）：
-  - Claude Code / OpenCode：/sync-issue {issue_number}
-  - Gemini CLI：/agent-infra:sync-issue {issue_number}
-  - Codex CLI：$sync-issue {issue_number}
+  - Claude Code / OpenCode：/sync-issue #{issue_number}
+  - Gemini CLI：/agent-infra:sync-issue #{issue_number}
+  - Codex CLI：$sync-issue #{issue_number}
 ```
 
 追加可选归档提示：

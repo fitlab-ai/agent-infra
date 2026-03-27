@@ -76,9 +76,9 @@ If the skill updated an Issue title, show:
 
 ```
 Next step - sync task progress to the Issue:
-  - Claude Code / OpenCode: /sync-issue {issue_number}
-  - Gemini CLI: /{{project}}:sync-issue {issue_number}
-  - Codex CLI: $sync-issue {issue_number}
+  - Claude Code / OpenCode: /sync-issue #{issue_number}
+  - Gemini CLI: /{{project}}:sync-issue #{issue_number}
+  - Codex CLI: $sync-issue #{issue_number}
 ```
 
 If the skill updated a PR title, show:

@@ -76,9 +76,9 @@ If a valid `issue_number` exists, suggest syncing:
 
 ```
 (Optional) Sync the blocking status to the Issue:
-  - Claude Code / OpenCode: /sync-issue {issue_number}
-  - Gemini CLI: /{{project}}:sync-issue {issue_number}
-  - Codex CLI: $sync-issue {issue_number}
+  - Claude Code / OpenCode: /sync-issue #{issue_number}
+  - Gemini CLI: /{{project}}:sync-issue #{issue_number}
+  - Codex CLI: $sync-issue #{issue_number}
 ```
 
 ### 7. Inform User

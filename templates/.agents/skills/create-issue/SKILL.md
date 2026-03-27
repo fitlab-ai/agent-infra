@@ -66,9 +66,9 @@ Next step - run requirements analysis:
   - Codex CLI: $analyze-task {task-id}
 
 Next step - sync task progress to the Issue later (optional):
-  - Claude Code / OpenCode: /sync-issue {issue_number}
-  - Gemini CLI: /{{project}}:sync-issue {issue_number}
-  - Codex CLI: $sync-issue {issue_number}
+  - Claude Code / OpenCode: /sync-issue #{issue_number}
+  - Gemini CLI: /{{project}}:sync-issue #{issue_number}
+  - Codex CLI: $sync-issue #{issue_number}
 ```
 
 ## Completion Checklist
