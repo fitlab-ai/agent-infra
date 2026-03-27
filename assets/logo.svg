@@ -1,0 +1,35 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="mainGradient" x1="20" y1="20" x2="180" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366F1" /> <!-- Indigo 500 -->
+      <stop offset="100%" stop-color="#06B6D4" /> <!-- Cyan 500 -->
+    </linearGradient>
+  </defs>
+
+  <!-- Background Hexagon Frame -->
+  <path d="M100 20L169.282 60V140L100 180L30.718 140V60L100 20Z" fill="#0F172A" stroke="url(#mainGradient)" stroke-width="4" stroke-linejoin="round" />
+
+  <!-- Inner Connections (Subtle Grid/Network) -->
+  <path d="M100 60L134.641 80V120L100 140L65.359 120V80L100 60Z" stroke="url(#mainGradient)" stroke-width="2" stroke-dasharray="4 4" stroke-opacity="0.4" />
+
+  <!-- Main Agent Nodes -->
+  <circle cx="100" cy="60" r="10" fill="url(#mainGradient)" />
+  <circle cx="134.641" cy="120" r="10" fill="url(#mainGradient)" />
+  <circle cx="65.359" cy="120" r="10" fill="url(#mainGradient)" />
+
+  <!-- Center Infrastructure Hub -->
+  <circle cx="100" cy="100" r="18" fill="#1E293B" stroke="url(#mainGradient)" stroke-width="3" />
+  <circle cx="100" cy="100" r="10" fill="#22D3EE" opacity="0.18" />
+  <circle cx="100" cy="100" r="7" fill="#22D3EE" />
+  <circle cx="100" cy="100" r="4" fill="#FFFFFF" />
+
+  <!-- Connection Lines (Active Pathways) -->
+  <line x1="100" y1="60" x2="100" y2="82" stroke="url(#mainGradient)" stroke-width="3" stroke-linecap="round" />
+  <line x1="134.641" y1="120" x2="115.588" y2="109" stroke="url(#mainGradient)" stroke-width="3" stroke-linecap="round" />
+  <line x1="65.359" y1="120" x2="84.412" y2="109" stroke="url(#mainGradient)" stroke-width="3" stroke-linecap="round" />
+
+  <!-- Decorative Accents -->
+  <circle cx="65.359" cy="80" r="3" fill="#6366F1" opacity="0.6" />
+  <circle cx="134.641" cy="80" r="3" fill="#6366F1" opacity="0.6" />
+  <circle cx="100" cy="140" r="3" fill="#06B6D4" opacity="0.6" />
+</svg>

@@ -1,5 +1,9 @@
 # Agent Infra
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/assets/logo.svg" alt="Agent Infra Logo" width="200">
+</p>
+
 [![npm version](https://img.shields.io/npm/v/@fitlab-ai/agent-infra)](https://www.npmjs.com/package/@fitlab-ai/agent-infra)
 [![npm downloads](https://img.shields.io/npm/dm/@fitlab-ai/agent-infra)](https://www.npmjs.com/package/@fitlab-ai/agent-infra)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](License.txt)
