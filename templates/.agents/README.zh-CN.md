@@ -124,8 +124,7 @@
 
 ### SKILL.md 体积控制
 
-- SKILL.md 正文控制在约 500 tokens（约 80 行 / 2KB）以内。
-- 超过阈值的内容拆分到同级 `reference/` 目录。
+- SKILL.md 正文尽可能精简，把详细规则、长模板和大段脚本拆分到同级 `reference/` 或 `scripts/` 目录。
 - 骨架中使用明确导航，例如：`执行此步骤前，先读取 reference/xxx.md。`
 - 长脚本继续放在 `scripts/` 目录，优先执行脚本而不是内联大段 bash。
 

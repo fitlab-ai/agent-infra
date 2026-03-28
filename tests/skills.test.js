@@ -45,22 +45,6 @@ test("all skill doc files have consecutive step numbering", () => {
   });
 });
 
-test("skills with reference/ directory keep SKILL.md within size threshold", () => {
-  listSkillNames().forEach((skill) => {
-    const referenceDir = `.agents/skills/${skill}/reference`;
-    if (!exists(referenceDir)) {
-      return;
-    }
-
-    skillDocPaths(skill).forEach((relativePath) => {
-      const lineCount = read(relativePath).split(/\r?\n/).length;
-      if (lineCount > 120) {
-        console.log(`  ⚠ ${relativePath}: ${lineCount} lines (soft limit 120)`);
-      }
-    });
-  });
-});
-
 test("SKILL.md reference paths point to existing files", () => {
   skillDocFiles.forEach((relativePath) => {
     const content = read(relativePath);

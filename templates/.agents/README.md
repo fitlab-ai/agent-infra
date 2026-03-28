@@ -124,8 +124,7 @@ When writing or updating `.agents/skills/*/SKILL.md` files and their templates, 
 
 ### SKILL.md Size Control
 
-- Keep the SKILL.md body within about 500 tokens (roughly 80 lines / 2KB).
-- Move content beyond that threshold into a sibling `reference/` directory.
+- Keep SKILL.md as concise as possible; move detailed rules, long templates, and large script blocks into a sibling `reference/` or `scripts/` directory.
 - Use explicit navigation in the skeleton, such as: `Read reference/xxx.md before executing this step.`
 - Keep scripts in `scripts/` and execute them instead of inlining long bash blocks.
 
