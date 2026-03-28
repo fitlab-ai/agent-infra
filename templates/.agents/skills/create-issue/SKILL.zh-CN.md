@@ -10,6 +10,7 @@ description: "从任务文件创建 GitHub Issue"
 ## 行为边界 / 关键规则
 
 - Issue 标题和正文只能来自 `task.md`
+- Issue 标题格式为 `type(scope): 描述`——type 从 task.md 的 `type` 字段映射（feature→feat, bugfix→fix, refactor→refactor, docs→docs, chore→chore），scope 从受影响模块推断（无法确定时省略），描述使用 task.md 中的任务标题原文（不要翻译或改写）
 - 不要读取 `analysis.md`、`plan.md`、`implementation.md` 或审查产物
 - 持久产物只有 GitHub Issue 本身，以及 task.md 中的 `issue_number` 更新
 - 执行本技能后，你**必须**立即更新 task.md
@@ -26,7 +27,7 @@ description: "从任务文件创建 GitHub Issue"
 
 ### 2. 提取任务信息
 
-从 task.md 提取标题、`## Description`、`## Requirements`、`type` 和 `milestone`。
+从 task.md 提取标题、`## Description`、`## Requirements`、`type` 和 `milestone`。构造 Issue 标题：将 task.md 的 `type` 映射为 Conventional Commits type，推断 scope，拼接为 `cc_type(scope): task_title` 或 `cc_type: task_title`（scope 不确定时省略）。
 
 ### 3. 构建 Issue 内容
 

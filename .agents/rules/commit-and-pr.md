@@ -4,6 +4,7 @@
 
 - 使用 Conventional Commits：`<type>(<scope>): <subject>`
 - `type` 仅限：`feat`、`fix`、`docs`、`refactor`、`test`、`chore`
+- `scope`：模块名（可省略）
 - `subject` 使用英文祈使语气，保持简洁
 
 ## 禁止自动提交

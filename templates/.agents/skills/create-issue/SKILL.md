@@ -10,6 +10,7 @@ Create the base GitHub Issue from `task.md` and write `issue_number` back to the
 ## Boundary / Critical Rules
 
 - Build the Issue title and body from `task.md` only
+- Issue title format: `type(scope): description` - map `type` from task.md (`feature` -> `feat`, `bugfix` -> `fix`, `refactor` -> `refactor`, `docs` -> `docs`, `chore` -> `chore`), infer scope from the affected module (omit it if unclear), and use the task title from task.md verbatim for the description (do not translate or rewrite)
 - Do not read `analysis.md`, `plan.md`, `implementation.md`, or review artifacts
 - The only durable outputs are the GitHub Issue and the `issue_number` update in task.md
 - After executing this skill, you **must** immediately update task.md
@@ -26,7 +27,7 @@ If `issue_number` already exists and is not empty or `N/A`, confirm with the use
 
 ### 2. Extract Task Information
 
-Extract the title, `## Description`, `## Requirements`, `type`, and `milestone` from task.md.
+Extract the title, `## Description`, `## Requirements`, `type`, and `milestone` from task.md. Build the Issue title by mapping task.md `type` to a Conventional Commits type, inferring scope, and formatting it as `cc_type(scope): task_title` or `cc_type: task_title` when scope is unclear.
 
 ### 3. Build Issue Content
 

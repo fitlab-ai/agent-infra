@@ -24,7 +24,7 @@ After executing this skill, you **must** immediately update task status in task.
 ### 1. Parse the User Description
 
 Extract from the natural-language description:
-- **Task title**: a concise title (maximum 50 characters), in the same language as the user's description
+- **Task title**: a concise title (maximum 50 characters), in the same language as the user's description - do not translate it to English or apply Conventional Commits formatting
 - **Task type**: `feature` | `bugfix` | `refactor` | `docs` | `chore` (infer from the description)
 - **Workflow**: `feature-development` | `bug-fix` | `refactoring` (infer from the type)
 - **Detailed description**: the cleaned-up original user request

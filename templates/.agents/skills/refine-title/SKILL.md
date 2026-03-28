@@ -37,7 +37,7 @@ Based on the fetched data:
 
 **Generate Subject**:
 - **Ignore the original title** (avoid bias) - extract core intent from body
-- Keep concise (under 50 characters), English imperative mood, no trailing period
+- Keep concise (under 50 characters), use the content's original language (Chinese content stays Chinese, English content stays English), no trailing period
 
 ### 3. Present Suggestion
 
@@ -86,7 +86,7 @@ Next step - sync task progress to the PR:
 ## Advantages
 
 This skill:
-1. **Fixes misleading titles**: Even if the original title is "Help me", it reads the body and generates a proper title like `fix(core): resolve startup error`
+1. **Fixes misleading titles**: Even if the original title is "Help me", it reads the body and generates a proper title like `fix(core): resolve startup error` while keeping the subject in the content's original language
 2. **Accurate scope**: By analyzing PR file changes, it can automatically infer the correct scope without manual specification
 
 ## Notes

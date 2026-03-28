@@ -24,7 +24,7 @@ description: "根据自然语言描述创建任务"
 ### 1. 解析用户描述
 
 从自然语言描述中提取：
-- **任务标题**：简洁标题（最多 50 个字符），使用与用户描述相同的语言
+- **任务标题**：简洁标题（最多 50 个字符），使用中文——不要翻译为英文，不要套用 Conventional Commits 格式
 - **任务类型**：`feature` | `bugfix` | `refactor` | `docs` | `chore`（从描述推断）
 - **工作流**：`feature-development` | `bug-fix` | `refactoring`（从类型推断）
 - **详细描述**：整理后的用户原始描述

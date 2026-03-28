@@ -37,7 +37,7 @@ gh pr view <id> --json number,title,body,labels,state,files
 
 **生成 Subject**：
 - **忽略原始标题**（避免偏见）- 从 body 中提取核心意图
-- 保持简洁（不超过 50 字符），英文祈使语气，末尾无句号
+- 保持简洁（不超过 50 字符），使用内容原始语言（中文内容用中文，英文内容用英文），末尾无句号
 
 ### 3. 展示建议
 
@@ -86,7 +86,7 @@ gh pr edit <id> --title "<new-title>"
 ## 优势
 
 本技能的优势：
-1. **修复误导性标题**：即使原始标题是"Help me"，也能读取 body 并生成合适的标题，如 `fix(core): resolve startup error`
+1. **修复误导性标题**：即使原始标题是"Help me"，也能读取 body 并生成合适的标题，如 `fix(core): 修复启动错误` 或 `fix(core): resolve startup error`
 2. **精确 scope**：通过分析 PR 文件变更，可以自动推断正确的 scope，无需手动指定
 
 ## 注意事项

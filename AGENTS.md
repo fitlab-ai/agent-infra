@@ -60,28 +60,7 @@ node --test tests/*.test.js
 
 ## 提交与 PR 规范
 
-### 提交信息格式（Conventional Commits）
-```
-<type>(<scope>): <subject>
-
-示例：
-feat(module): add new feature
-fix(module): fix critical bug
-docs(module): update documentation
-refactor(module): refactor internal logic
-```
-
-- **type**: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
-- **scope**: 模块名（可省略）
-- **subject**: 英文，简洁祈使语气，不超过 50 字符
-
-### PR 检查清单
-提交 PR 前必须确保：
-- [ ] 所有测试通过
-- [ ] 代码检查通过
-- [ ] 构建成功
-- [ ] 公共 API 有文档
-- [ ] 版权头年份已更新（如适用）
+详见 `.agents/rules/commit-and-pr.md`（提交代码或创建 PR 时按需加载）。
 
 ## 安全注意事项
 
@@ -110,7 +89,8 @@ refactor(module): refactor internal logic
 | 代码标识符、JSDoc/TSDoc | 英文 | 代码即文档 |
 | CLI 帮助文本、错误信息 | 英文 | 面向所有用户 |
 | Git commit message | 英文 | Conventional Commits 祈使语气 |
-| 任务标题与 GitHub Issue 标题 | 跟随用户输入语言 | 通过 `/create-task` 或 `/import-issue` 创建 |
+| 任务标题 | 跟随用户输入语言 | task.md 标题保持用户原文，不套用 Conventional Commits 格式 |
+| GitHub Issue/PR 标题 | 英文前缀 + 跟随用户输入语言 | 格式：`type(scope): 中文描述`；type/scope 英文，描述保持原文 |
 | 任务工作区产物 | 跟随已部署的技能语言 | `.agents/workspace/` 文件使用 `.airc.json` 选定的 SKILL.md 语言 |
 | Activity Log 步骤名 | 英文 | 工具链使用的结构化标识符（如 `**Commit** by`） |
 | 项目文档 | 英文（主） + 中文翻译 | 如 `README.md` + `README.zh-CN.md` |
