@@ -64,11 +64,6 @@ Next step - run requirements analysis:
   - Claude Code / OpenCode: /analyze-task {task-id}
   - Gemini CLI: /{{project}}:analyze-task {task-id}
   - Codex CLI: $analyze-task {task-id}
-
-Next step - sync task progress to the Issue later (optional):
-  - Claude Code / OpenCode: /sync-issue #{issue_number}
-  - Gemini CLI: /{{project}}:sync-issue #{issue_number}
-  - Codex CLI: $sync-issue #{issue_number}
 ```
 
 ## Completion Checklist
@@ -85,7 +80,7 @@ Stop after the checklist. Do not start detailed progress sync here.
 
 ## Notes
 
-- `create-issue` creates the base Issue; `sync-issue` publishes detailed progress later
+- `create-issue` creates the base Issue; later status, comments, and checkboxes are maintained by workflow skills and GitHub Actions
 - If no valid labels survive filtering, create the Issue without labels instead of failing
 - If Issue Type or milestone setup fails, continue and record the fallback outcome
 

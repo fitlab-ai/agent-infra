@@ -53,6 +53,11 @@ date "+%Y-%m-%d %H:%M:%S"
 Update task.md and append:
 `- {yyyy-MM-dd HH:mm:ss} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n} → {artifact-filename}`
 
+If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
+- Read `.agents/rules/issue-sync.md` before syncing
+- Set `status: in-progress`
+- Publish the `{review-artifact}` comment
+
 ### 7. Inform User
 
 Choose exactly one branch based on the findings:

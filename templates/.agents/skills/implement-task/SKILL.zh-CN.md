@@ -89,6 +89,10 @@ date "+%Y-%m-%d %H:%M:%S"
 - 追加：
   `- {yyyy-MM-dd HH:mm:ss} — **Implementation (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {implementation-artifact}`
 
+如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续；执行前先读取 `.agents/rules/issue-sync.md`）：
+- 设置 `status: in-progress`，并为本轮改动涉及模块补充 `in:` label
+- 同步 `## 需求` 中已勾选项到 Issue body，并发布 `{implementation-artifact}` 评论
+
 ### 9. 告知用户
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。输出格式见 `reference/output-template.md`。

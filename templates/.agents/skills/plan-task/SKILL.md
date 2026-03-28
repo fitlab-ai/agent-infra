@@ -95,6 +95,11 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   - {yyyy-MM-dd HH:mm:ss} — **Technical Design (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
   ```
 
+If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
+- Read `.agents/rules/issue-sync.md` before syncing
+- Set `status: pending-design-work`
+- Publish the `{plan-artifact}` comment
+
 ### 8. Inform User
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.

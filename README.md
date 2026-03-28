@@ -182,7 +182,7 @@ agent-infra is intentionally simple: a bootstrap CLI creates the seed configurat
 1. **Install** — `npm install -g @fitlab-ai/agent-infra` (or use the shell script wrapper)
 2. **Initialize** — `ai init` in the project root to generate `.agents/.airc.json` and install the seed command
 3. **Render** — run `update-agent-infra` in any AI TUI to detect the bundled template version and generate all managed files
-4. **Develop** — use 28 built-in skills to drive the full lifecycle: `analysis → design → implementation → review → fix → commit`
+4. **Develop** — use 27 built-in skills to drive the full lifecycle: `analysis → design → implementation → review → fix → commit`
 5. **Update** — run `update-agent-infra` again whenever a new template version is available
 
 ### Layered Architecture
@@ -200,7 +200,7 @@ block-beta
 
     block:shared:4
         columns 3
-        skills["28 Skills"] workflows["4 Workflows"] templates["Templates"]
+        skills["27 Skills"] workflows["4 Workflows"] templates["Templates"]
     end
 
     space:4
@@ -227,7 +227,7 @@ my-project/
 ├── .agents/               # Shared AI collaboration config
 │   ├── .airc.json         # Central configuration
 │   ├── workspace/         # Task workspace (git-ignored)
-│   ├── skills/            # 28 built-in AI skills
+│   ├── skills/            # 27 built-in AI skills
 │   ├── workflows/         # 4 prebuilt workflows
 │   └── templates/         # Task and artifact templates
 ├── .claude/               # Claude Code config and commands
@@ -240,7 +240,7 @@ my-project/
 
 ## Built-in AI Skills
 
-agent-infra ships with **28 built-in AI skills**. They are organized by use case, but they all share the same design goal: every AI TUI should be able to execute the same workflow vocabulary in the same repository.
+agent-infra ships with **27 built-in AI skills**. They are organized by use case, but they all share the same design goal: every AI TUI should be able to execute the same workflow vocabulary in the same repository.
 
 <a id="task-lifecycle"></a>
 
@@ -273,7 +273,6 @@ agent-infra ships with **28 built-in AI skills**. They are organized by use case
 | Skill | Description | Parameters | Recommended use case |
 |-------|-------------|------------|----------------------|
 | `create-issue` | Create a GitHub Issue from a task file. | `task-id` | Push a local task into GitHub tracking. |
-| `sync-issue` | Post task progress updates back to the linked GitHub Issue. | `task-id` or `issue-number` | Keep stakeholders updated as the task evolves. |
 | `create-pr` | Open a Pull Request to an inferred or explicit target branch. | `task-id` (optional), `target-branch` (optional) | Publish reviewed changes for merge, with optional explicit task linkage after a fresh session. |
 | `sync-pr` | Sync task progress and review metadata into the Pull Request. | `task-id` or `pr-number` | Keep PR metadata aligned with the local task record from either task or PR entrypoints. |
 

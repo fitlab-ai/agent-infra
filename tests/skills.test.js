@@ -194,7 +194,6 @@ test("skills that write timestamps require date command guidance", () => {
     "plan-task",
     "refine-task",
     "review-task",
-    "sync-issue",
     "sync-pr"
   ];
 

@@ -66,12 +66,3 @@ gh issue edit {issue-number} --add-label "in: {module}"
 只添加相关的 `in:` label。不要移除已有的 `in:` label，并且当 `in:` label 不可用或不相关时，不要让创建 Issue 流程失败。
 
 当 label、Issue Type 或 milestone 不可用时，应跳过并继续，不要让 Issue 创建失败。
-
-最终给用户的输出必须包含所有 TUI 的 `sync-issue` 命令格式：
-
-```text
-下一步 - 同步进度到 Issue：
-  - Claude Code / OpenCode: /sync-issue {task-id}
-  - Gemini CLI: /agent-infra:sync-issue {task-id}
-  - Codex CLI: $sync-issue {task-id}
-```

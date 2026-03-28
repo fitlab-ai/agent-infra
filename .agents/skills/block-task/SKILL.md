@@ -68,18 +68,11 @@ ls .agents/workspace/blocked/{task-id}/task.md
 
 ### 6. 同步到 Issue（可选）
 
-检查 `task.md` 中是否存在 `issue_number` 字段，且其值不为空也不为 `N/A`。如果没有，**跳过此步骤，不输出任何内容**。
+检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过。
 
-如果存在有效的 `issue_number`，建议同步：
+> Issue 同步的 status label 规则见 `.agents/rules/issue-sync.md`。执行同步前先读取该文件。
 
-> **重要**：以下列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
-
-```
-（可选）同步阻塞状态到 Issue：
-  - Claude Code / OpenCode：/sync-issue #{issue_number}
-  - Gemini CLI：/agent-infra:sync-issue #{issue_number}
-  - Codex CLI：$sync-issue #{issue_number}
-```
+如果存在有效的 `issue_number`，直接设置 `status: blocked`。
 
 ### 7. 告知用户
 

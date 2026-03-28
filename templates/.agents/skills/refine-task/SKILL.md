@@ -59,6 +59,13 @@ Update task.md:
 - append:
   `- {yyyy-MM-dd HH:mm:ss} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues → {refinement-artifact}`
 
+If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
+- Read `.agents/rules/issue-sync.md` before syncing
+- Set `status: in-progress`
+- Add `in:` labels for modules touched in this round
+- Sync checked `## Requirements` items to the Issue body
+- Publish the `{refinement-artifact}` comment
+
 ### 7. Inform User
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.

@@ -73,14 +73,7 @@ Update `last_synced_to_pr_at` and append the Sync to PR Activity Log entry.
 
 Report the synchronized labels, milestone, development status, summary result, and PR URL.
 
-If there is a related Issue, add:
-
-```
-Next step - sync task progress to the Issue (optional):
-  - Claude Code / OpenCode: /sync-issue #{issue_number}
-  - Gemini CLI: /{{project}}:sync-issue #{issue_number}
-  - Codex CLI: $sync-issue #{issue_number}
-```
+If there is a related Issue, explain that Issue status, checkboxes, and artifact comments are already maintained by workflow skills and GitHub Actions, so no extra Issue-sync command is needed.
 
 Add the optional archive path:
 

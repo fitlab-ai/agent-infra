@@ -64,11 +64,6 @@ date "+%Y-%m-%d %H:%M:%S"
   - Claude Code / OpenCode：/analyze-task {task-id}
   - Gemini CLI：/agent-infra:analyze-task {task-id}
   - Codex CLI：$analyze-task {task-id}
-
-下一步 - 同步任务进度到 Issue（可选，适用于后续阶段）：
-  - Claude Code / OpenCode：/sync-issue #{issue_number}
-  - Gemini CLI：/agent-infra:sync-issue #{issue_number}
-  - Codex CLI：$sync-issue #{issue_number}
 ```
 
 ## 完成检查清单
@@ -85,7 +80,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 ## 注意事项
 
-- `create-issue` 只负责创建基础 Issue；详细进度由 `sync-issue` 发布
+- `create-issue` 只负责创建基础 Issue；后续状态、评论和复选框由工作流技能与 GitHub Actions 维护
 - 如果过滤后没有有效 label，允许不带 label 创建 Issue
 - 如果 Issue Type 或 milestone 设置失败，继续执行并记录结果
 

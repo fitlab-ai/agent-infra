@@ -73,14 +73,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 汇总已同步的 labels、milestone、development 状态、summary 结果以及 PR URL。
 
-如果有关联 Issue，追加：
-
-```
-下一步 - 同步任务进度到 Issue（可选）：
-  - Claude Code / OpenCode：/sync-issue #{issue_number}
-  - Gemini CLI：/agent-infra:sync-issue #{issue_number}
-  - Codex CLI：$sync-issue #{issue_number}
-```
+如果有关联 Issue，说明 Issue 状态、复选框和产物评论已由各任务技能与 GitHub Actions 自动维护，无需额外执行 Issue 同步命令。
 
 追加可选归档提示：
 

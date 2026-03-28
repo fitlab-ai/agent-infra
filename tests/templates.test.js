@@ -26,7 +26,6 @@ const highFrequencyCommands = [
   "plan-task",
   "refine-task",
   "review-task",
-  "sync-issue",
   "sync-pr",
   "test"
 ];

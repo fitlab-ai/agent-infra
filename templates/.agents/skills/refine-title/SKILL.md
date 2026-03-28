@@ -72,14 +72,7 @@ gh pr edit <id> --title "<new-title>"
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
 
-If the skill updated an Issue title, show:
-
-```
-Next step - sync task progress to the Issue:
-  - Claude Code / OpenCode: /sync-issue #{issue_number}
-  - Gemini CLI: /{{project}}:sync-issue #{issue_number}
-  - Codex CLI: $sync-issue #{issue_number}
-```
+If the skill updated an Issue title, explain that no extra sync command is required; continue with the workflow skill that matches the task's current stage.
 
 If the skill updated a PR title, show:
 

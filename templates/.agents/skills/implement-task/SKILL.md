@@ -89,6 +89,10 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - append:
   `- {yyyy-MM-dd HH:mm:ss} — **Implementation (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {implementation-artifact}`
 
+If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure; read `.agents/rules/issue-sync.md` first):
+- Set `status: in-progress` and add `in:` labels for modules touched in this round
+- Sync checked `## Requirements` items to the Issue body and publish the `{implementation-artifact}` comment
+
 ### 9. Inform the User
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. Use the output template in `reference/output-template.md`.

@@ -53,6 +53,11 @@ date "+%Y-%m-%d %H:%M:%S"
 更新 task.md，并追加：
 `- {yyyy-MM-dd HH:mm:ss} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n} → {artifact-filename}`
 
+如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
+- 执行前先读取 `.agents/rules/issue-sync.md`
+- 设置 `status: in-progress`
+- 发布 `{review-artifact}` 评论
+
 ### 7. 告知用户
 
 必须先判断结果，再只选择一个输出分支：

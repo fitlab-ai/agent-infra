@@ -66,12 +66,3 @@ gh issue edit {issue-number} --add-label "in: {module}"
 Only add relevant `in:` labels. Do not remove existing `in:` labels, and do not fail Issue creation when `in:` labels are unavailable or irrelevant.
 
 Skip unavailable labels, Issue Types, or milestones without failing the Issue creation flow.
-
-Final user output must include every TUI `sync-issue` command format:
-
-```text
-Next step - sync progress to the Issue:
-  - Claude Code / OpenCode: /sync-issue {task-id}
-  - Gemini CLI: /agent-infra:sync-issue {task-id}
-  - Codex CLI: $sync-issue {task-id}
-```

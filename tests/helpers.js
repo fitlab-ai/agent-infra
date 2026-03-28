@@ -232,11 +232,6 @@ const commandSpecs = {
     en: "Review task $1.",
     zh: "审查任务 $1。"
   },
-  "sync-issue": {
-    usage: "<task-id>",
-    en: "Sync task $1 to Issue.",
-    zh: "同步任务 $1 到 Issue。"
-  },
   "sync-pr": {
     usage: "<task-id | pr-number>",
     en: "Sync PR context: $ARGUMENTS",

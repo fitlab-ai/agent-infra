@@ -68,18 +68,11 @@ ls .agents/workspace/blocked/{task-id}/task.md
 
 ### 6. Sync to Issue (Optional)
 
-Check whether `task.md` includes an `issue_number` field whose value is neither empty nor `N/A`. If not, **skip this step and output nothing**.
+Check whether `task.md` includes a valid `issue_number`. If not, skip this step.
 
-If a valid `issue_number` exists, suggest syncing:
+> Status-label sync rules live in `.agents/rules/issue-sync.md`. Read that file before syncing.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
-
-```
-(Optional) Sync the blocking status to the Issue:
-  - Claude Code / OpenCode: /sync-issue #{issue_number}
-  - Gemini CLI: /{{project}}:sync-issue #{issue_number}
-  - Codex CLI: $sync-issue #{issue_number}
-```
+If a valid `issue_number` exists, set `status: blocked` directly.
 
 ### 7. Inform User
 

@@ -72,14 +72,7 @@ gh pr edit <id> --title "<new-title>"
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
-如果修改了 Issue 标题，提示：
-
-```
-下一步 - 同步任务进度到 Issue：
-  - Claude Code / OpenCode：/sync-issue #{issue_number}
-  - Gemini CLI：/agent-infra:sync-issue #{issue_number}
-  - Codex CLI：$sync-issue #{issue_number}
-```
+如果修改了 Issue 标题，提示无需额外同步命令；后续按任务当前阶段继续执行对应工作流技能。
 
 如果修改了 PR 标题，提示：
 

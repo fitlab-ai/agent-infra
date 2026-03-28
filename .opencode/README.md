@@ -55,7 +55,6 @@ AI 代理的分步指令。
 ### PR 和同步
 - `create-pr` - 创建 Pull Request
 - `sync-pr` - 同步任务进度到 PR 评论
-- `sync-issue` - 同步任务进度到 Issue 评论
 
 ### 安全
 - `import-dependabot` - 导入 Dependabot 告警

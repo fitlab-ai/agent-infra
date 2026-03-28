@@ -82,20 +82,16 @@ ls .agents/workspace/completed/{task-id}/task.md
 
 确认任务目录已成功移动。
 
-### 6. 同步到 Issue（可选）
+### 6. 同步到 Issue
 
-检查 `task.md` 中是否存在 `issue_number` 字段，且其值不为空也不为 `N/A`。如果没有，**跳过此步骤，不输出任何内容**。
+检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过此步骤且不输出任何内容。
 
-如果存在有效的 `issue_number`，可选择同步完成状态：
+> Issue 同步规则见 `.agents/rules/issue-sync.md`。执行同步前先读取该文件。
 
-> **重要**：以下列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
-
-```
-（可选）同步完成状态到 GitHub Issue：
-  - Claude Code / OpenCode：/sync-issue #{issue_number}
-  - Gemini CLI：/{{project}}:sync-issue #{issue_number}
-  - Codex CLI：$sync-issue #{issue_number}
-```
+如果存在有效的 `issue_number`：
+- 先按 `.agents/rules/issue-sync.md` 的补发规则扫描并补发未发布的 `analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md` 评论
+- 兜底同步 `## 需求` 中已勾选的条目到 Issue body
+- 最后创建或更新 `<!-- sync-issue:{task-id}:summary -->` 标记的 summary 评论
 
 ### 7. 告知用户
 
