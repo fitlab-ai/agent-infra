@@ -315,6 +315,7 @@ agent-infra ships with **a rich set of built-in AI skills**. They are organized 
 | `refine-title` | Rewrite an Issue or PR title into Conventional Commits format. | `number` | Normalize inconsistent GitHub titles. |
 | `init-labels` | Initialize the repository's standard GitHub label set. | None | Bootstrap labels in a new repository. |
 | `init-milestones` | Initialize the repository's milestone structure. | None | Bootstrap milestone tracking in a new repository. |
+| `archive-tasks` | Archive completed tasks into a date-organized directory with a manifest index. | `[--days N \| --before DATE \| TASK-ID...]` | Periodically clean up the `completed/` directory. |
 | `update-agent-infra` | Update the project's collaboration infrastructure to the latest template version. | None | Refresh shared AI tooling without rebuilding local conventions. |
 
 > Every skill works across supported AI TUIs. The command prefix changes, but the workflow semantics stay the same.

@@ -135,6 +135,11 @@ const commandSpecs = {
     en: "Analyze task $1.",
     zh: "分析任务 $1。"
   },
+  "archive-tasks": {
+    usage: "[--days N | --before YYYY-MM-DD | TASK-ID...]",
+    en: "Archive completed tasks: $ARGUMENTS",
+    zh: "归档已完成任务：$ARGUMENTS"
+  },
   "import-codescan": {
     usage: "<alert-number>",
     en: "Import CodeQL alert #$1.",

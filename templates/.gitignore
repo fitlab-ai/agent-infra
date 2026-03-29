@@ -2,6 +2,7 @@
 .agents/workspace/active/
 .agents/workspace/blocked/
 .agents/workspace/completed/
+.agents/workspace/archive/
 .agents/workspace/logs/
 
 # Claude Code local settings
