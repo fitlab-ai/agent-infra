@@ -1,4 +1,7 @@
 {
+  "labels": {
+    "in": {}
+  },
   "files": {
     "managed": [
       ".agents/QUICKSTART.md",

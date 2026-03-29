@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { loadFreshEsm, read } from "./helpers.js";
+import { loadFreshEsm, read } from "../helpers.js";
 
 function writeFile(root, relativePath, content) {
   const fullPath = path.join(root, relativePath);

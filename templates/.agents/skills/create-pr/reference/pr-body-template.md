@@ -50,7 +50,7 @@ Metadata sync order:
 1. query Issue labels and milestone best-effort with `gh issue view {issue-number} --json labels,milestone`
 2. add the mapped type label with `gh pr edit {pr-number} --add-label "{type-label}"`
 3. inherit non-`type:` and non-`status:` Issue labels with repeated `gh pr edit ... --add-label`
-4. add relevant `in: {module}` labels without removing existing ones
+4. refine the PR `in:` labels by following `.agents/rules/issue-sync.md`, and keep the linked Issue `in:` labels in sync with the same result
 5. resolve milestone in order: PR -> task.md -> Issue -> branch/tag inference -> `General Backlog`
 6. ensure the PR body contains `Closes #{issue-number}` or an equivalent closing keyword
 

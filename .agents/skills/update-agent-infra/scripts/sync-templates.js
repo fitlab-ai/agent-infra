@@ -20,6 +20,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULTS = {
+  "labels": {
+    "in": {}
+  },
   "files": {
     "managed": [
       ".agents/QUICKSTART.md",

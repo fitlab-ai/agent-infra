@@ -11,7 +11,7 @@ import {
   parseFrontmatter,
   read,
   skillDocPaths
-} from "./helpers.js";
+} from "../helpers.js";
 
 const skillDocFiles = [
   ...listFilesRecursive(".agents/skills"),

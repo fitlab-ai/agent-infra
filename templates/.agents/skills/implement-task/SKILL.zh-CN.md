@@ -90,7 +90,7 @@ date "+%Y-%m-%d %H:%M:%S"
   `- {yyyy-MM-dd HH:mm:ss} — **Implementation (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {implementation-artifact}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续；执行前先读取 `.agents/rules/issue-sync.md`）：
-- 设置 `status: in-progress`，并为本轮改动涉及模块补充 `in:` label
+- 设置 `status: in-progress`，并按 `.agents/rules/issue-sync.md` 的 `in:` label 同步规则，基于分支改动精修 `in:` label（有映射时可增可删，无映射时仅补充）
 - 同步 `## 需求` 中已勾选项到 Issue body，并发布 `{implementation-artifact}` 评论
 
 ### 9. 完成校验

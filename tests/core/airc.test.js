@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { read } from "./helpers.js";
+import { read } from "../helpers.js";
 
 test(".agents/.airc.json does not declare templateSource", () => {
   const collaborator = JSON.parse(read(".agents/.airc.json"));
@@ -41,6 +41,16 @@ test(".agents/.airc.json does not contain license field", () => {
   const collaborator = JSON.parse(read(".agents/.airc.json"));
 
   assert.ok(!("license" in collaborator), "license field should not exist in .agents/.airc.json");
+});
+
+test(".agents/.airc.json declares labels.in mapping for module labels", () => {
+  const collaborator = JSON.parse(read(".agents/.airc.json"));
+
+  assert.deepEqual(collaborator.labels.in, {
+    cli: ["bin/", "lib/", "src/", "tests/cli/"],
+    templates: ["templates/", "tests/templates/"],
+    core: ["scripts/", "assets/", "tests/core/"]
+  });
 });
 
 test(".agents/.airc.json excludes deprecated codex prompt paths", () => {

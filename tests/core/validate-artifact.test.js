@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { filePath, exists, read } from "./helpers.js";
+import { filePath, exists, read } from "../helpers.js";
 
 const scriptPath = filePath(".agents/scripts/validate-artifact.js");
 

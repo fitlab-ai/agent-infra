@@ -58,25 +58,6 @@ while IFS="$(printf '\t')" read -r name color description; do
   gh label create "$name" --color "$color" --description "$description" --force
 done < "$tmpdir/common.tsv"
 
-project_dirs=$(
-  find . -mindepth 1 -maxdepth 1 -type d ! -name '.*' |
-  sed 's#^\./##' |
-  grep -Ev '^(node_modules|vendor|dist|build|out|target|tmp|temp|log|logs|coverage|__pycache__)$' |
-  sort -u
-)
-
-if [ -z "$project_dirs" ]; then
-  project_dirs="core"
-fi
-
-printf '%s\n' "$project_dirs" | while IFS= read -r dir; do
-  [ -n "$dir" ] || continue
-  gh label create "in: $dir" \
-    --color EBF8DF \
-    --description "Issues in $dir" \
-    --force
-done
-
 gh label list --limit 200 --json name --jq '.[].name' > "$tmpdir/final-names.txt"
 cp "$tmpdir/final-names.txt" "$tmpdir/final.txt"
 
@@ -88,13 +69,11 @@ for label in bug documentation duplicate enhancement invalid question wontfix; d
 done
 
 common_count="$(wc -l < "$tmpdir/common.tsv" | tr -d ' ')"
-in_count="$(printf '%s\n' "$project_dirs" | sed '/^$/d' | wc -l | tr -d ' ')"
 
 echo "GitHub Labels initialized."
 echo
 echo "Summary:"
 echo "- Common labels created or updated: $common_count"
-echo "- in: labels created or updated: $in_count"
 echo "- Exact-match GitHub defaults overwritten: good first issue, help wanted"
 
 if [ -s "$tmpdir/unmatched-defaults.txt" ]; then
@@ -108,4 +87,4 @@ echo
 echo "Notes:"
 echo "- theme: labels were intentionally not created."
 echo "- The operation is idempotent because every label uses gh label create --force."
-echo "- If the detected in: labels need refinement, adjust them manually after initialization."
+echo "- in: labels are managed by the AI-guided step in the SKILL."

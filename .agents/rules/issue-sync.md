@@ -25,14 +25,29 @@ fi
 
 ## `in:` label 同步
 
-如果技能需要补充 `in:` label，先基于本轮改动文件提取第一级目录，再仅添加仓库中已存在的精确 label：
+读取 `.agents/.airc.json` 的 `labels.in` 映射。
 
 ```bash
-gh label list --search "in: {module}" --limit 10 --json name --jq '.[].name'
-gh issue edit {issue-number} --add-label "in: {module}" 2>/dev/null || true
+git diff {base-branch}...HEAD --name-only
 ```
 
-只添加相关 label，不移除已有 `in:` label。
+`{base-branch}` 通常为 `main`；如果在 PR 上下文中，则使用 PR 的 base branch。
+
+### 有映射时（精确增删）
+
+1. 获取分支全部改动文件
+2. 对每个文件按目录前缀匹配 `labels.in` 中的值，得到"应有的 `in:` labels"集合
+3. 查询 Issue/PR 当前的 `in:` labels
+4. 差集比较：
+   - 应有但没有 → `gh issue edit {issue-number} --add-label "in: {module}" 2>/dev/null || true`
+   - 有但不应有 → `gh issue edit {issue-number} --remove-label "in: {module}" 2>/dev/null || true`
+
+### 无映射时（只增不删回退）
+
+如果 `.airc.json` 中不存在 `labels.in` 或为空对象：
+1. 查询仓库已有 `in:` labels
+2. 从改动文件提取第一级目录
+3. 仅添加匹配的 label，不移除已有 `in:` label
 
 ## 产物评论发布
 

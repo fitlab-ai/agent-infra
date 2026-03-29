@@ -28,7 +28,8 @@ Fallback label 映射：
 | `enhancement` | `type: enhancement` |
 | `docs`, `documentation` | `type: documentation` |
 | `dependency-upgrade` | `type: dependency-upgrade` |
-| `task`, `chore`, `refactor`, `refactoring` | `type: task` |
+| `task`, `chore` | `type: task` |
+| `refactor`, `refactoring` | `type: enhancement` |
 | 其他值 | 跳过 |
 
 Issue Type fallback 映射：
@@ -56,13 +57,20 @@ gh api "orgs/$owner/issue-types" --jq '.[].name'
 gh api "repos/$repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent
 ```
 
-`in:` label：
+`in:` label（粗选）：
 
 ```bash
 gh label list --search "in:" --limit 50 --json name --jq '.[].name'
 gh issue edit {issue-number} --add-label "in: {module}"
 ```
 
-只添加相关的 `in:` label。不要移除已有的 `in:` label，并且当 `in:` label 不可用或不相关时，不要让创建 Issue 流程失败。
+从查询结果中，根据 task.md 的标题和描述进行语义匹配：
+- 任务描述**明确提及**某个模块（如"修复 CLI 参数解析"→ `in: cli`）→ 添加
+- 任务描述**强烈暗示**某个模块 → 添加
+- 无法确定或模糊 → **不添加**
+
+原则：宁缺毋滥。粗选阶段不求精确，后续 implement-task / create-pr 阶段会基于实际改动文件精修。
+
+只添加相关的 `in:` label。当 `in:` label 不可用或不相关时，不要让创建 Issue 流程失败。
 
 当 label、Issue Type 或 milestone 不可用时，应跳过并继续，不要让 Issue 创建失败。

@@ -12,7 +12,7 @@ import {
   listFilesRecursive,
   read,
   renderPlaceholders
-} from "./helpers.js";
+} from "../helpers.js";
 
 const highFrequencyCommands = [
   "analyze-task",

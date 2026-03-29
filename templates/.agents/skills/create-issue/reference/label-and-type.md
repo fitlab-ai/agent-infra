@@ -28,7 +28,8 @@ Fallback label mapping:
 | `enhancement` | `type: enhancement` |
 | `docs`, `documentation` | `type: documentation` |
 | `dependency-upgrade` | `type: dependency-upgrade` |
-| `task`, `chore`, `refactor`, `refactoring` | `type: task` |
+| `task`, `chore` | `type: task` |
+| `refactor`, `refactoring` | `type: enhancement` |
 | other values | skip |
 
 Issue Type fallback mapping:
@@ -56,13 +57,20 @@ gh api "orgs/$owner/issue-types" --jq '.[].name'
 gh api "repos/$repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent
 ```
 
-`in:` labels:
+`in:` labels (coarse selection):
 
 ```bash
 gh label list --search "in:" --limit 50 --json name --jq '.[].name'
 gh issue edit {issue-number} --add-label "in: {module}"
 ```
 
-Only add relevant `in:` labels. Do not remove existing `in:` labels, and do not fail Issue creation when `in:` labels are unavailable or irrelevant.
+Use the returned labels to do semantic matching against the task.md title and description:
+- add a label when the task **explicitly mentions** a module (for example, "fix CLI argument parsing" -> `in: cli`)
+- add a label when the task **strongly implies** a module
+- skip the label when the mapping is ambiguous or uncertain
+
+Principle: prefer missing labels over wrong labels. Coarse selection does not need to be perfect because implement-task / create-pr will refine `in:` labels from actual changed files later.
+
+Only add relevant `in:` labels. Do not fail Issue creation when `in:` labels are unavailable or irrelevant.
 
 Skip unavailable labels, Issue Types, or milestones without failing the Issue creation flow.

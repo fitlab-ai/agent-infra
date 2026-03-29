@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { exists, filePath, read } from "./helpers.js";
+import { exists, filePath, read } from "../helpers.js";
 
 test("bootstrap CLI files exist", () => {
   assert.ok(exists("install.sh"), "install.sh should exist");
@@ -50,6 +50,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.ok(!("templateSource" in config), "init should not generate templateSource");
     assert.ok(!config.branchPrefix, "branchPrefix should not exist");
     assert.ok(!config.source, "consumer projects should not have source: self");
+    assert.deepEqual(config.labels, { in: {} }, "init should generate empty labels.in defaults");
     assert.ok(
       config.files.managed.includes(".github/hooks/check-version-format.sh"),
       ".github/hooks/check-version-format.sh should be managed"
@@ -282,6 +283,7 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     const updated = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
     );
+    assert.deepEqual(updated.labels, { in: {} }, "update should backfill empty labels.in defaults");
     assert.ok(updated.files.managed.includes(".github/hooks/check-version-format.sh"));
     assert.ok(updated.files.managed.includes(".agents/skills/"));
     assert.ok(updated.files.merged.includes("**/test.*"));

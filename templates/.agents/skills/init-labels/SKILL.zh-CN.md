@@ -29,8 +29,6 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 脚本负责：
 - 在修改前保存当前 label 快照
 - 使用 `gh label create --force` 创建或更新标准 label 集合
-- 自动探测顶层目录，并为有效目录创建对应的 `in:` label
-- 在没有可用目录时回退到 `in: core`
 - 提示仍然存在的 GitHub 默认 labels，例如 `question` 和 `wontfix`
 - 输出最终执行摘要
 
@@ -50,25 +48,44 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 | `status:` | Yes | — | PR 有自身状态流转（Open/Draft/Merged/Closed）；Issue 使用 `status:` label 标记项目管理状态 |
 | `in:` | Yes | Yes | Issue 和 PR 均需按模块筛选 |
 
-### 4. 范围探测规则
+### 4. 配置 `in:` label 映射
 
-目录派生 label 遵循以下规则：
-- 只探测项目顶层目录
-- 排除隐藏目录和常见构建/缓存目录
-- 仅当没有有效目录时才创建 `in: core`
-- 本技能不创建任何 `theme:` labels
+检查 `.agents/.airc.json` 中是否已有 `labels.in` 字段。
+
+#### 4.1 已有映射
+
+展示当前映射，询问用户是否需要更新。
+- 不需要：跳到步骤 4.3
+- 需要：按步骤 4.2 处理
+
+#### 4.2 无映射或用户要求更新
+
+1. 扫描项目顶层目录，排除隐藏目录和常见构建目录。
+2. 分析目录内容，给出有意义的模块分组建议。
+3. 向用户展示建议的 `in:` label 映射，并根据自然语言反馈迭代调整。
+4. 如果用户拒绝配置，则为每个顶层目录生成 1:1 默认映射（`{dir}/`）。
+
+#### 4.3 写入配置并创建 label
+
+1. 将最终映射写入 `.agents/.airc.json` 的 `labels.in` 字段。
+2. 为每个映射 key 创建 `in: {key}` label：
+   ```bash
+   gh label create "in: {key}" --color EBF8DF --description "Module: {key}" --force
+   ```
+3. 询问用户确认后，清理不在最终映射中的旧 `in:` label。
 
 ### 5. 输出与行为保证
 
 摘要必须包含：
 - 创建或更新的通用 labels 数量
-- 创建或更新的 `in:` labels 数量
+- 写入的 `labels.in` 映射结果
+- 按映射 key 计算的 `in:` labels 数量
 - 名称完全匹配的 GitHub 默认 labels 已被覆盖的说明
 - 仍然存在的未匹配 GitHub 默认 labels
 
 执行说明：
 - 整个操作具备幂等性，因为每个 label 都使用 `gh label create --force`。
-- 如果自动探测出的 `in:` labels 需要细化，请在初始化后手动调整。
+- `in:` labels 由 AI 引导步骤和 `.airc.json` 映射统一管理。
 
 ### 6. 告知用户
 

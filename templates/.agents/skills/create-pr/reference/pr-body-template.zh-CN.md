@@ -50,7 +50,7 @@ Type label 映射：
 1. 用 `gh issue view {issue-number} --json labels,milestone` 尽力查询 Issue 的 labels 和 milestone
 2. 用 `gh pr edit {pr-number} --add-label "{type-label}"` 添加映射后的 type label
 3. 用重复的 `gh pr edit ... --add-label` 继承非 `type:`、非 `status:` 的 Issue labels
-4. 添加相关的 `in: {module}` label，但不要移除已有 label
+4. 按 `.agents/rules/issue-sync.md` 的 `in:` label 同步规则精修 PR 的 `in:` label，同时同步更新关联 Issue 的 `in:` label 保持一致
 5. 按 `PR -> task.md -> Issue -> branch/tag inference -> General Backlog` 的顺序解析 milestone
 6. 确保 PR 正文包含 `Closes #{issue-number}` 或等价的 closing keyword
 

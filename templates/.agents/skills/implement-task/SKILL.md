@@ -90,7 +90,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   `- {yyyy-MM-dd HH:mm:ss} — **Implementation (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {implementation-artifact}`
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure; read `.agents/rules/issue-sync.md` first):
-- Set `status: in-progress` and add `in:` labels for modules touched in this round
+- Set `status: in-progress` and refine `in:` labels from the branch diff by following `.agents/rules/issue-sync.md` (add/remove when a mapping exists, add-only when it does not)
 - Sync checked `## Requirements` items to the Issue body and publish the `{implementation-artifact}` comment
 
 ### 9. Verification Gate

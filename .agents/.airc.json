@@ -3,6 +3,25 @@
   "org": "fitlab-ai",
   "language": "zh-CN",
   "templateVersion": "v0.4.2",
+  "labels": {
+    "in": {
+      "cli": [
+        "bin/",
+        "lib/",
+        "src/",
+        "tests/cli/"
+      ],
+      "templates": [
+        "templates/",
+        "tests/templates/"
+      ],
+      "core": [
+        "scripts/",
+        "assets/",
+        "tests/core/"
+      ]
+    }
+  },
   "files": {
     "managed": [
       ".agents/skills/",

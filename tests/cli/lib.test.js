@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import readline from "node:readline";
 
-import { filePath, loadFreshEsm, renderPlaceholders } from "./helpers.js";
-import * as paths from "../lib/paths.js";
+import { filePath, loadFreshEsm, renderPlaceholders } from "../helpers.js";
+import * as paths from "../../lib/paths.js";
 
 test("resolveTemplateDir returns the bundled templates directory", () => {
   assert.equal(paths.resolveTemplateDir(), filePath("templates"));

@@ -29,8 +29,6 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 The script is responsible for:
 - Capturing the current label snapshot before making changes
 - Creating or updating the standard label set with `gh label create --force`
-- Auto-detecting top-level directories and creating one `in:` label per valid directory
-- Falling back to `in: core` when no eligible directory is detected
 - Reporting unmatched GitHub default labels such as `question` and `wontfix`
 - Printing the final execution summary
 
@@ -50,25 +48,44 @@ The script manages these common label families:
 | `status:` | Yes | — | PRs already have their own state flow (Open/Draft/Merged/Closed); Issues use `status:` labels for project tracking |
 | `in:` | Yes | Yes | Both Issues and PRs need module-based filtering |
 
-### 4. Scope discovery rules
+### 4. Configure the `in:` Label Mapping
 
-Directory-derived labels follow these rules:
-- Detect top-level project directories only
-- Skip hidden directories and common generated folders
-- Create `in: core` only when no valid directory remains
-- Do not create any `theme:` labels in this skill
+Check whether `.agents/.airc.json` already contains a `labels.in` field.
+
+#### 4.1 Existing mapping
+
+Show the current mapping and ask whether it should be updated.
+- if no: continue to step 4.3
+- if yes: continue to step 4.2
+
+#### 4.2 Missing mapping or user-requested update
+
+1. Scan top-level project directories while excluding hidden and generated folders.
+2. Analyze the directory contents and suggest meaningful module groupings.
+3. Show the proposed `in:` label mapping and refine it through the user's natural-language feedback.
+4. If the user declines configuration, generate a 1:1 fallback mapping for each top-level directory (`{dir}/`).
+
+#### 4.3 Write the mapping and create labels
+
+1. Write the final mapping to `.agents/.airc.json` under `labels.in`.
+2. Create one `in: {key}` label for each mapping key:
+   ```bash
+   gh label create "in: {key}" --color EBF8DF --description "Module: {key}" --force
+   ```
+3. After user confirmation, delete stale `in:` labels that are no longer present in the final mapping.
 
 ### 5. Output and behavior guarantees
 
 The summary must include:
 - Number of common labels created or updated
-- Number of `in:` labels created or updated
+- The written `labels.in` mapping
+- The number of `in:` labels derived from the mapping keys
 - Confirmation that exact-match GitHub defaults were overwritten
 - Any unmatched GitHub default labels still present
 
 Operational notes:
 - The operation is idempotent because every label uses `gh label create --force`.
-- If the detected `in:` labels need refinement, adjust them manually after initialization.
+- `in:` labels are managed by the AI-guided step together with the `.airc.json` mapping.
 
 ### 6. Inform User
 

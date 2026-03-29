@@ -62,7 +62,7 @@ Update task.md:
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
 - Read `.agents/rules/issue-sync.md` before syncing
 - Set `status: in-progress`
-- Add `in:` labels for modules touched in this round
+- Refine `in:` labels from the branch diff by following `.agents/rules/issue-sync.md` (add/remove when a mapping exists, add-only when it does not)
 - Sync checked `## Requirements` items to the Issue body
 - Publish the `{refinement-artifact}` comment
 

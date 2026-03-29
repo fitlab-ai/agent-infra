@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
-import { filePath, read } from "./helpers.js";
+import { filePath, read } from "../helpers.js";
 
 test("package metadata supports scoped npm publishing", () => {
   const pkg = JSON.parse(read("package.json"));
@@ -19,7 +19,7 @@ test("package metadata supports scoped npm publishing", () => {
   });
   assert.equal(
     pkg.scripts.prepublishOnly,
-    "node scripts/build-inline.js --check && node --test tests/*.test.js"
+    "node scripts/build-inline.js --check && node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js"
   );
 });
 

@@ -25,14 +25,29 @@ If `gh` fails, skip and continue. Do not fail the skill.
 
 ## `in:` Label Sync
 
-If a skill needs to add `in:` labels, derive the top-level module from the files changed in the current round, then add only labels that already exist in the repository:
+Read the `labels.in` mapping from `.agents/.airc.json`.
 
 ```bash
-gh label list --search "in: {module}" --limit 10 --json name --jq '.[].name'
-gh issue edit {issue-number} --add-label "in: {module}" 2>/dev/null || true
+git diff {base-branch}...HEAD --name-only
 ```
 
-Add only relevant labels and never remove existing `in:` labels.
+`{base-branch}` is usually `main`; in PR context, use the PR's base branch.
+
+### When a mapping exists (precise add/remove)
+
+1. Collect the full set of changed files in the branch
+2. Match each file against the directory prefixes in `labels.in` to compute the expected `in:` label set
+3. Query the current `in:` labels on the Issue or PR
+4. Apply the diff:
+   - expected but missing -> `gh issue edit {issue-number} --add-label "in: {module}" 2>/dev/null || true`
+   - present but no longer expected -> `gh issue edit {issue-number} --remove-label "in: {module}" 2>/dev/null || true`
+
+### When no mapping exists (add-only fallback)
+
+If `.airc.json` has no `labels.in` field or it is empty:
+1. query existing repository `in:` labels
+2. derive the top-level directory from each changed file
+3. add matching labels only and never remove existing `in:` labels
 
 ## Artifact Comment Publishing
 
