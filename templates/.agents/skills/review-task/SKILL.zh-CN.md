@@ -58,7 +58,24 @@ date "+%Y-%m-%d %H:%M:%S"
 - 设置 `status: in-progress`
 - 发布 `{review-artifact}` 评论
 
-### 7. 告知用户
+### 7. 完成校验
+
+运行完成校验，确认任务产物和同步状态符合规范：
+
+```bash
+node .agents/scripts/validate-artifact.js gate review-task .agents/workspace/active/{task-id} {review-artifact} --format text
+```
+
+处理结果：
+- 退出码 0（全部通过）-> 继续到「告知用户」步骤
+- 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
+- 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
+
+将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
+
+### 8. 告知用户
+
+> 仅在校验通过后执行本步骤。
 
 必须先判断结果，再只选择一个输出分支：
 - 无 blocker、major、minor -> 通过且无问题
@@ -69,21 +86,6 @@ date "+%Y-%m-%d %H:%M:%S"
 > 完整的 4 分支输出模板、判断规则和禁止条款见 `reference/output-templates.md`。向用户汇报审查结论前先读取 `reference/output-templates.md`。
 
 向用户展示下一步时，必须包含所有 TUI 命令格式。
-
-### 8. 完成校验
-
-运行完成校验，确认任务产物和同步状态符合规范：
-
-```bash
-node .agents/scripts/validate-artifact.js gate review-task .agents/workspace/active/{task-id} {review-artifact}
-```
-
-处理结果：
-- 退出码 0（全部通过）-> 继续完成检查清单
-- 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
-- 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
-
-将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 
 ## 完成检查清单
 

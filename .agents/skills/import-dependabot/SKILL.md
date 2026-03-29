@@ -59,7 +59,24 @@ date "+%Y-%m-%d %H:%M:%S"
   - {yyyy-MM-dd HH:mm:ss} — **Import Dependabot Alert** by {agent} — Dependabot alert #{alert-number} imported
   ```
 
-### 4. 告知用户
+### 4. 完成校验
+
+运行完成校验，确认任务产物和同步状态符合规范：
+
+```bash
+node .agents/scripts/validate-artifact.js gate import-dependabot .agents/workspace/active/{task-id} --format text
+```
+
+处理结果：
+- 退出码 0（全部通过）-> 继续到「告知用户」步骤
+- 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
+- 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
+
+将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
+
+### 5. 告知用户
+
+> 仅在校验通过后执行本步骤。
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
@@ -82,27 +99,6 @@ date "+%Y-%m-%d %H:%M:%S"
   - Gemini CLI：/agent-infra:analyze-task {task-id}
   - Codex CLI：$analyze-task {task-id}
 ```
-
-## 注意事项
-
-1. **严重程度优先级**：Critical/High -> 立即处理。Medium -> 计划处理。Low -> 可延后。
-2. **范围**：本技能仅负责导入告警并创建任务；风险评估由 `analyze-task` 负责。
-3. **后续动作**：导入后先执行 `analyze-task`，分析完成后再决定修复或关闭。
-
-### 5. 完成校验
-
-运行完成校验，确认任务产物和同步状态符合规范：
-
-```bash
-node .agents/scripts/validate-artifact.js gate import-dependabot .agents/workspace/active/{task-id}
-```
-
-处理结果：
-- 退出码 0（全部通过）-> 继续完成检查清单
-- 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
-- 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
-
-将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 
 ## 完成检查清单
 

@@ -56,7 +56,9 @@ function main(argv) {
 }
 
 function runGate(args) {
-  const [skillName, taskDirArg, artifactFile] = args;
+  const { value: formatValue, rest: positional } = extractOption(args, "--format");
+  const format = normalizeFormat(formatValue);
+  const [skillName, taskDirArg, artifactFile] = positional;
 
   if (!skillName || !taskDirArg) {
     printUsageAndExit();
@@ -94,18 +96,19 @@ function runGate(args) {
     action: buildAction(gate, checks)
   };
 
-  writeJson(output);
+  writeOutput(output, format);
   process.exit(EXIT_CODE[gate]);
 }
 
 function runSingleCheck(args) {
-  const skillIndex = args.indexOf("--skill");
-  if (skillIndex === -1 || !args[skillIndex + 1]) {
+  const { value: formatValue, rest: formatArgs } = extractOption(args, "--format");
+  const format = normalizeFormat(formatValue);
+  const { value: skillName, rest: positional } = extractOption(formatArgs, "--skill");
+
+  if (!skillName) {
     printUsageAndExit();
   }
 
-  const skillName = args[skillIndex + 1];
-  const positional = args.filter((_, index) => index !== skillIndex && index !== skillIndex + 1);
   const [type, taskDirArg, artifactFile] = positional;
 
   if (!type || !taskDirArg) {
@@ -120,11 +123,12 @@ function runSingleCheck(args) {
   }
 
   if (config === null) {
-    writeJson({
+    writeOutput({
       type,
+      skill: skillName,
       status: "pass",
       message: `Check '${type}' is disabled for skill '${skillName}'.`
-    });
+    }, format);
     process.exit(0);
   }
 
@@ -135,7 +139,10 @@ function runSingleCheck(args) {
     config
   });
 
-  writeJson(result);
+  writeOutput({
+    skill: skillName,
+    ...result
+  }, format);
   process.exit(EXIT_CODE[result.status] ?? 1);
 }
 
@@ -713,6 +720,30 @@ function buildAction(gate, checks) {
   return `Fix ${firstFailure.type} issues and re-run gate`;
 }
 
+function buildCheckAction(result) {
+  if (result.status === "pass") {
+    return "Requested check passed";
+  }
+
+  if (result.status === "blocked") {
+    return `Resolve blocked ${result.type} check and re-run check`;
+  }
+
+  return `Fix ${result.type} issues and re-run check`;
+}
+
+function buildSingleCheckSummary(status) {
+  if (status === "pass") {
+    return "1 passed, 0 failed";
+  }
+
+  if (status === "blocked") {
+    return "0 passed, 0 failed, 1 blocked";
+  }
+
+  return "0 passed, 1 failed";
+}
+
 function passResult(type, message) {
   return { type, status: "pass", message };
 }
@@ -746,6 +777,77 @@ function isBlank(value) {
   return value === undefined || value === null || String(value).trim() === "";
 }
 
+function extractOption(args, name) {
+  const rest = [];
+  let value;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === name) {
+      value = args[index + 1];
+      index += 1;
+      continue;
+    }
+
+    const inlinePrefix = `${name}=`;
+    if (arg.startsWith(inlinePrefix)) {
+      value = arg.slice(inlinePrefix.length);
+      continue;
+    }
+
+    rest.push(arg);
+  }
+
+  return { value, rest };
+}
+
+function normalizeFormat(value) {
+  return value === "text" ? "text" : "json";
+}
+
+function formatStatusLabel(status) {
+  if (status === "fail") {
+    return "FAIL";
+  }
+
+  if (status === "blocked") {
+    return "BLOCKED";
+  }
+
+  return "pass";
+}
+
+function writeOutput(value, format) {
+  if (format === "text") {
+    writeText(value);
+    return;
+  }
+
+  writeJson(value);
+}
+
+function writeText(value) {
+  const lines = [];
+
+  if (Array.isArray(value.checks)) {
+    lines.push(`Verification: ${value.gate} | Skill: ${value.skill}`);
+    lines.push("");
+    for (const check of value.checks) {
+      lines.push(`  [${formatStatusLabel(check.status)}] ${check.type} - ${check.message}`);
+    }
+    lines.push("");
+    lines.push(`Result: ${value.summary} - ${value.action}`);
+  } else {
+    lines.push(`Check: ${value.status} | Skill: ${value.skill} | Type: ${value.type}`);
+    lines.push("");
+    lines.push(`  [${formatStatusLabel(value.status)}] ${value.type} - ${value.message}`);
+    lines.push("");
+    lines.push(`Result: ${buildSingleCheckSummary(value.status)} - ${buildCheckAction(value)}`);
+  }
+
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
 function writeJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -753,8 +855,8 @@ function writeJson(value) {
 function printUsageAndExit() {
   failUsage(
     "Usage:\n" +
-      "  node .agents/scripts/validate-artifact.js gate <skill-name> <task-dir> [artifact-file]\n" +
-      "  node .agents/scripts/validate-artifact.js check <type> <task-dir> [artifact-file] --skill <skill-name>"
+      "  node .agents/scripts/validate-artifact.js gate <skill-name> <task-dir> [artifact-file] [--format json|text]\n" +
+      "  node .agents/scripts/validate-artifact.js check <type> <task-dir> [artifact-file] --skill <skill-name> [--format json|text]"
   );
 }
 

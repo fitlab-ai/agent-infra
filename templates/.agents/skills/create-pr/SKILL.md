@@ -73,26 +73,28 @@ date "+%Y-%m-%d %H:%M:%S"
 
 If `{task-id}` is available, update task.md with `pr_number`, `updated_at`, and append the PR Created Activity Log entry including metadata-sync and summary results.
 
-### 9. Inform the User
-
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
-
-Explain the created PR URL, summarize metadata sync and summary-comment results, and recommend `complete-task {task-id}` once the workflow is truly done.
-
-### 10. Verification Gate
+### 9. Verification Gate
 
 If this operation is associated with `{task-id}`, run the verification gate to confirm task metadata and sync state. If there is no task context, skip this step.
 
 ```bash
-node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/active/{task-id}
+node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/active/{task-id} --format text
 ```
 
 Handle the result as follows:
-- exit code 0 (all checks passed) -> continue to the completion checklist
+- exit code 0 (all checks passed) -> continue to the "Inform User" step
 - exit code 1 (validation failed) -> fix the reported issues and run the gate again
 - exit code 2 (network blocked) -> stop and tell the user that human intervention is required
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
+
+### 10. Inform User
+
+> Execute this step only after the verification gate passes.
+
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+
+Explain the created PR URL, summarize metadata sync and summary-comment results, and recommend `complete-task {task-id}` once the workflow is truly done.
 
 ## Notes
 

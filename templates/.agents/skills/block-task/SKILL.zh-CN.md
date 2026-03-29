@@ -74,7 +74,24 @@ ls .agents/workspace/blocked/{task-id}/task.md
 
 如果存在有效的 `issue_number`，直接设置 `status: blocked`。
 
-### 7. 告知用户
+### 7. 完成校验
+
+运行完成校验，确认任务产物和同步状态符合规范：
+
+```bash
+node .agents/scripts/validate-artifact.js gate block-task .agents/workspace/blocked/{task-id} --format text
+```
+
+处理结果：
+- 退出码 0（全部通过）-> 继续到「告知用户」步骤
+- 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
+- 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
+
+将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
+
+### 8. 告知用户
+
+> 仅在校验通过后执行本步骤。
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
@@ -95,50 +112,6 @@ ls .agents/workspace/blocked/{task-id}/task.md
   - Gemini CLI：/agent-infra:check-task {task-id}
   - Codex CLI：$check-task {task-id}
 ```
-
-## 输出模板
-
-添加到 task.md 的阻塞信息部分：
-
-```markdown
-## 阻塞信息
-
-### 摘要
-{阻塞原因的一行描述}
-
-### 问题描述
-{阻塞问题的详细描述}
-
-### 根本原因
-{分析为什么会被阻塞}
-
-### 已尝试的解决方案
-- {尝试了什么以及为什么没有成功}
-
-### 解除阻塞所需
-- {需要什么：信息、决策、资源等}
-
-### 解除阻塞条件
-{允许恢复工作的具体条件}
-
-### 备选方案
-{考虑过的任何变通方法或替代方案}
-```
-
-### 8. 完成校验
-
-运行完成校验，确认任务产物和同步状态符合规范：
-
-```bash
-node .agents/scripts/validate-artifact.js gate block-task .agents/workspace/blocked/{task-id}
-```
-
-处理结果：
-- 退出码 0（全部通过）-> 继续完成检查清单
-- 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
-- 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
-
-将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 
 ## 完成检查清单
 

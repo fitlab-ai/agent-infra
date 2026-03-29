@@ -100,7 +100,24 @@ If task.md contains a valid `issue_number`, perform these sync actions (skip and
 - Set `status: pending-design-work`
 - Publish the `{plan-artifact}` comment
 
-### 8. Inform User
+### 8. Verification Gate
+
+Run the verification gate to confirm the task artifact and sync state are valid:
+
+```bash
+node .agents/scripts/validate-artifact.js gate plan-task .agents/workspace/active/{task-id} {plan-artifact} --format text
+```
+
+Handle the result as follows:
+- exit code 0 (all checks passed) -> continue to the "Inform User" step
+- exit code 1 (validation failed) -> fix the reported issues and run the gate again
+- exit code 2 (network blocked) -> stop and tell the user that human intervention is required
+
+Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
+
+### 9. Inform User
+
+> Execute this step only after the verification gate passes.
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
 
@@ -126,91 +143,6 @@ Next step - implement the task:
   - Gemini CLI: /{{project}}:implement-task {task-id}
   - Codex CLI: $implement-task {task-id}
 ```
-
-## Output Template
-
-```markdown
-# Technical Plan
-
-- **Plan round**: Round {plan-round}
-- **Artifact file**: `{plan-artifact}`
-
-## Problem Understanding
-{Summarize the problem to solve and the key constraints}
-
-## Constraints
-- {Constraint 1}
-- {Constraint 2}
-
-## Option Comparison
-
-### Option A: {Name}
-- **Approach**: {Description}
-- **Pros**: {Advantages}
-- **Cons**: {Drawbacks}
-
-### Option B: {Name}
-- **Approach**: {Description}
-- **Pros**: {Advantages}
-- **Cons**: {Drawbacks}
-
-### Decision
-{Which option was chosen and why}
-
-## Technical Approach
-{Detailed description of the selected approach}
-
-## Implementation Steps
-
-### Step 1: {Title}
-- **File**: `{file-path}`
-- **Action**: {What to do}
-- **Details**: {Specific details}
-
-### Step 2: {Title}
-...
-
-## File List
-
-### New Files
-- `{file-path}` - {Purpose}
-
-### Modified Files
-- `{file-path}` - {Planned changes}
-
-## Verification Strategy
-
-### Unit Tests
-- {Test case 1}
-- {Test case 2}
-
-### Manual Validation
-- {Validation step}
-
-## Impact Assessment
-- Breaking change: {Yes/No - details}
-- Performance impact: {Assessment}
-- Security considerations: {Assessment}
-
-## Risk Control
-- {Risk 1}: {Mitigation}
-- {Risk 2}: {Mitigation}
-```
-
-### 9. Verification Gate
-
-Run the verification gate to confirm the task artifact and sync state are valid:
-
-```bash
-node .agents/scripts/validate-artifact.js gate plan-task .agents/workspace/active/{task-id} {plan-artifact}
-```
-
-Handle the result as follows:
-- exit code 0 (all checks passed) -> continue to the completion checklist
-- exit code 1 (validation failed) -> fix the reported issues and run the gate again
-- exit code 2 (network blocked) -> stop and tell the user that human intervention is required
-
-Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 
 ## Completion Checklist
 

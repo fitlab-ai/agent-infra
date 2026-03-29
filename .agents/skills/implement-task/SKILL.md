@@ -93,24 +93,26 @@ date "+%Y-%m-%d %H:%M:%S"
 - 设置 `status: in-progress`，并为本轮改动涉及模块补充 `in:` label
 - 同步 `## 需求` 中已勾选项到 Issue body，并发布 `{implementation-artifact}` 评论
 
-### 9. 告知用户
-
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。输出格式见 `reference/output-template.md`。
-
-### 10. 完成校验
+### 9. 完成校验
 
 运行完成校验，确认任务产物和同步状态符合规范：
 
 ```bash
-node .agents/scripts/validate-artifact.js gate implement-task .agents/workspace/active/{task-id} {implementation-artifact}
+node .agents/scripts/validate-artifact.js gate implement-task .agents/workspace/active/{task-id} {implementation-artifact} --format text
 ```
 
 处理结果：
-- 退出码 0（全部通过）-> 继续完成检查清单
+- 退出码 0（全部通过）-> 继续到「告知用户」步骤
 - 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
 - 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
 
 将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
+
+### 10. 告知用户
+
+> 仅在校验通过后执行本步骤。
+
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。输出格式见 `reference/output-template.md`。
 
 ## 完成检查清单
 

@@ -134,10 +134,12 @@ When writing or updating `.agents/skills/*/SKILL.md` files and their templates, 
 For skills that produce structured artifacts or mutate task state, run the verification gate before claiming completion:
 
 ```bash
-node .agents/scripts/validate-artifact.js gate <skill-name> <task-dir> [artifact-file]
+node .agents/scripts/validate-artifact.js gate <skill-name> <task-dir> [artifact-file] [--format json|text]
 ```
 
 - Each skill declares its own checks in `config/verify.json`; keep the file focused on what that skill must validate
+- If a skill also prints next-step guidance, run the gate first and only show those instructions after the gate passes
+- For user-facing final validation, prefer `--format text` so the reply contains a readable summary instead of raw JSON
 - Shared validation logic belongs in `.agents/scripts/validate-artifact.js`; do not move detailed rules back into SKILL.md
 - Keep the gate output in the reply as fresh evidence; without output from the current run, do not claim completion
 

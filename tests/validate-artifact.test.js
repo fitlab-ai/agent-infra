@@ -102,6 +102,33 @@ test("validate-artifact gate passes for implement-task with fresh task and artif
   }
 });
 
+test("validate-artifact gate supports human-readable text output", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gate-text-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+
+  try {
+    write(path.join(taskDir, "task.md"), buildTaskContent());
+    write(path.join(taskDir, "implementation.md"), loadFixture("valid-implementation.md"));
+
+    const result = runValidator([
+      "gate",
+      "implement-task",
+      taskDir,
+      "implementation.md",
+      "--format",
+      "text"
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^Verification: pass \| Skill: implement-task$/m);
+    assert.match(result.stdout, /^\s+\[pass\] task-meta - /m);
+    assert.match(result.stdout, /^\s+\[pass\] artifact - /m);
+    assert.match(result.stdout, /^Result: 4 passed, 0 failed - All declared checks passed$/m);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("validate-artifact artifact check fails when a required section is missing", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gate-fail-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");

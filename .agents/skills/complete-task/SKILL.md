@@ -93,7 +93,24 @@ ls .agents/workspace/completed/{task-id}/task.md
 - 兜底同步 `## 需求` 中已勾选的条目到 Issue body
 - 最后创建或更新 `<!-- sync-issue:{task-id}:summary -->` 标记的 summary 评论
 
-### 7. 告知用户
+### 7. 完成校验
+
+运行完成校验，确认任务产物和同步状态符合规范：
+
+```bash
+node .agents/scripts/validate-artifact.js gate complete-task .agents/workspace/completed/{task-id} --format text
+```
+
+处理结果：
+- 退出码 0（全部通过）-> 继续到「告知用户」步骤
+- 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
+- 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
+
+将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
+
+### 8. 告知用户
+
+> 仅在校验通过后执行本步骤。
 
 输出格式：
 ```
@@ -107,21 +124,6 @@ ls .agents/workspace/completed/{task-id}/task.md
 交付物：
 - {关键产出列表：修改的文件、添加的测试等}
 ```
-
-### 8. 完成校验
-
-运行完成校验，确认任务产物和同步状态符合规范：
-
-```bash
-node .agents/scripts/validate-artifact.js gate complete-task .agents/workspace/completed/{task-id}
-```
-
-处理结果：
-- 退出码 0（全部通过）-> 继续完成检查清单
-- 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
-- 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
-
-将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 
 ## 完成检查清单
 

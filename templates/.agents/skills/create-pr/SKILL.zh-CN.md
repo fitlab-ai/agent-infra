@@ -73,26 +73,28 @@ date "+%Y-%m-%d %H:%M:%S"
 
 如果获取到了 `{task-id}`，更新 task.md 的 `pr_number`、`updated_at`，并追加 PR Created 的 Activity Log，记录元数据同步和摘要发布结果。
 
-### 9. 告知用户
-
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
-
-说明 PR URL、元数据同步结果、摘要评论结果，并在工作流真正完成后推荐执行 `complete-task {task-id}`。
-
-### 10. 完成校验
+### 9. 完成校验
 
 如果本次操作关联了 `{task-id}`，运行完成校验，确认任务元数据和同步状态符合规范；如果没有任务上下文，跳过本步骤。
 
 ```bash
-node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/active/{task-id}
+node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/active/{task-id} --format text
 ```
 
 处理结果：
-- 退出码 0（全部通过）-> 继续完成检查清单
+- 退出码 0（全部通过）-> 继续到「告知用户」步骤
 - 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
 - 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
 
 将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
+
+### 10. 告知用户
+
+> 仅在校验通过后执行本步骤。
+
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+
+说明 PR URL、元数据同步结果、摘要评论结果，并在工作流真正完成后推荐执行 `complete-task {task-id}`。
 
 ## 注意事项
 

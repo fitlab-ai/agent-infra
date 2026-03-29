@@ -134,10 +134,12 @@
 对会产生结构化产物或任务状态变更的 skill，统一在结束前运行完成校验：
 
 ```bash
-node .agents/scripts/validate-artifact.js gate <skill-name> <task-dir> [artifact-file]
+node .agents/scripts/validate-artifact.js gate <skill-name> <task-dir> [artifact-file] [--format json|text]
 ```
 
 - 每个 skill 在自己的 `config/verify.json` 中声明需要检查的事项
+- 如果 skill 还会展示“下一步”提示，必须先通过完成校验，再输出这些指引
+- 面向用户展示最终校验结果时，优先使用 `--format text` 输出可读摘要，而不是原始 JSON
 - 共享逻辑集中在 `.agents/scripts/validate-artifact.js`，不要把详细校验规则重新塞回 SKILL.md
 - 在回复中保留当次校验输出作为当次验证输出；没有当次校验输出，不得声明完成
 

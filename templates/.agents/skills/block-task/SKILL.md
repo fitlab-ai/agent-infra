@@ -74,7 +74,24 @@ Check whether `task.md` includes a valid `issue_number`. If not, skip this step.
 
 If a valid `issue_number` exists, set `status: blocked` directly.
 
-### 7. Inform User
+### 7. Verification Gate
+
+Run the verification gate to confirm the task artifact and sync state are valid:
+
+```bash
+node .agents/scripts/validate-artifact.js gate block-task .agents/workspace/blocked/{task-id} --format text
+```
+
+Handle the result as follows:
+- exit code 0 (all checks passed) -> continue to the "Inform User" step
+- exit code 1 (validation failed) -> fix the reported issues and run the gate again
+- exit code 2 (network blocked) -> stop and tell the user that human intervention is required
+
+Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
+
+### 8. Inform User
+
+> Execute this step only after the verification gate passes.
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
 
@@ -95,50 +112,6 @@ Next step - check task status after unblocking:
   - Gemini CLI: /{{project}}:check-task {task-id}
   - Codex CLI: $check-task {task-id}
 ```
-
-## Output Template
-
-Blocking information section to add to task.md:
-
-```markdown
-## Blocking Information
-
-### Summary
-{One-line description of why the task is blocked}
-
-### Problem Description
-{Detailed description of the blocking issue}
-
-### Root Cause
-{Analysis of why this is blocking}
-
-### Attempted Solutions
-- {What was tried and why it didn't work}
-
-### Required to Unblock
-- {What's needed: information, decision, resource, etc.}
-
-### Unblocking Conditions
-{Specific conditions that would allow work to resume}
-
-### Alternative Plans
-{Any workarounds or alternative approaches considered}
-```
-
-### 8. Verification Gate
-
-Run the verification gate to confirm the task artifact and sync state are valid:
-
-```bash
-node .agents/scripts/validate-artifact.js gate block-task .agents/workspace/blocked/{task-id}
-```
-
-Handle the result as follows:
-- exit code 0 (all checks passed) -> continue to the completion checklist
-- exit code 1 (validation failed) -> fix the reported issues and run the gate again
-- exit code 2 (network blocked) -> stop and tell the user that human intervention is required
-
-Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 
 ## Completion Checklist
 

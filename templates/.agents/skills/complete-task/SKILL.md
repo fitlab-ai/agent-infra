@@ -93,7 +93,24 @@ If a valid `issue_number` exists:
 - Backfill checked `## Requirements` items to the Issue body
 - Finally create or update the summary comment marked with `<!-- sync-issue:{task-id}:summary -->`
 
-### 7. Inform User
+### 7. Verification Gate
+
+Run the verification gate to confirm the task artifact and sync state are valid:
+
+```bash
+node .agents/scripts/validate-artifact.js gate complete-task .agents/workspace/completed/{task-id} --format text
+```
+
+Handle the result as follows:
+- exit code 0 (all checks passed) -> continue to the "Inform User" step
+- exit code 1 (validation failed) -> fix the reported issues and run the gate again
+- exit code 2 (network blocked) -> stop and tell the user that human intervention is required
+
+Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
+
+### 8. Inform User
+
+> Execute this step only after the verification gate passes.
 
 Output format:
 ```
@@ -107,21 +124,6 @@ Task info:
 Deliverables:
 - {List of key outputs: files modified, tests added, etc.}
 ```
-
-### 8. Verification Gate
-
-Run the verification gate to confirm the task artifact and sync state are valid:
-
-```bash
-node .agents/scripts/validate-artifact.js gate complete-task .agents/workspace/completed/{task-id}
-```
-
-Handle the result as follows:
-- exit code 0 (all checks passed) -> continue to the completion checklist
-- exit code 1 (validation failed) -> fix the reported issues and run the gate again
-- exit code 2 (network blocked) -> stop and tell the user that human intervention is required
-
-Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 
 ## Completion Checklist
 
