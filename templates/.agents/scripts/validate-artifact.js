@@ -830,6 +830,14 @@ function extractCommentBody(commentBody) {
     start += 1;
   }
 
+  if (start < lines.length && /^> \*\*.+\*\* · .+$/.test(lines[start].trim())) {
+    start += 1;
+  }
+
+  while (start < lines.length && lines[start].trim() === "") {
+    start += 1;
+  }
+
   let end = lines.length;
   for (let index = lines.length - 1; index >= start; index -= 1) {
     const trimmed = lines[index].trim();

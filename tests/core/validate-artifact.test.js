@@ -111,7 +111,8 @@ function buildArtifactComment(taskId, artifactFile, title, body) {
     MARKER: buildArtifactMarker(taskId, artifactFile),
     TITLE: title,
     BODY: body.trim(),
-    TASK_ID: taskId
+    TASK_ID: taskId,
+    AGENT: "codex"
   });
 }
 
@@ -136,6 +137,7 @@ function buildTaskComment(taskId, taskContent, options = {}) {
 
   return loadFixture("task-comment.md", {
     TASK_ID: taskId,
+    AGENT: "codex",
     BODY: renderedBody
   });
 }

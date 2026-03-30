@@ -79,11 +79,15 @@ gh api "repos/{owner}/{repo}/issues/{issue-number}/comments" \
 <!-- sync-issue:{task-id}:{file-stem} -->
 ## {artifact-title}
 
+> **{agent}** · {task-id}
+
 {artifact body}
 
 ---
-*由 AI 自动生成 · 内部追踪：{task-id}*
+*由 {agent} 自动生成 · 内部追踪：{task-id}*
 ```
+
+其中 `{agent}` 使用当前执行该技能的 AI 代理名称（如 `claude`、`codex`、`gemini`）。
 
 `summary` 评论需要额外处理：
 - 先查找已有 `<!-- sync-issue:{task-id}:summary -->` 评论的 ID
@@ -124,6 +128,8 @@ task.md 评论格式：
 <!-- sync-issue:{task-id}:task -->
 ## 任务文件
 
+> **{agent}** · {task-id}
+
 <details><summary>元数据 (frontmatter)</summary>
 
 ​```yaml
@@ -137,7 +143,7 @@ task.md 评论格式：
 {task.md body after frontmatter}
 
 ---
-*由 AI 自动生成 · 内部追踪：{task-id}*
+*由 {agent} 自动生成 · 内部追踪：{task-id}*
 ```
 
 还原时，从 `<details>` 块中提取 frontmatter，与正文拼合恢复为原始 `task.md`。
@@ -150,6 +156,10 @@ task.md 评论格式：
 - 扫描任务目录中的 `task.md`、`analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md`
 - 对每个 `{file-stem}` 用隐藏标记检查是否已发布；未发布则补发，已发布则跳过
 - 补发只追加缺失评论，不删除或重排已有评论
+- 补发评论的 `{agent}` 按以下顺序确定：
+  1. 从 Activity Log 中匹配对应产物文件名（如 `→ analysis.md`），提取 `by {agent}` 中的执行者
+  2. 若未匹配到，则回退到 task.md frontmatter 的 `assigned_to`
+  3. 若 `assigned_to` 也不可用，则使用当前执行补发的 agent
 - 位置说明从 Activity Log 推导时间线中的前后邻居，并加在评论标题下方：
 
 ```markdown

@@ -54,7 +54,8 @@ EOF
 <!-- sync-pr:{task-id}:summary -->
 ## 审查摘要
 
-**任务**：{task-id}
+> **{agent}** · {task-id}
+
 **更新时间**：{当前时间}
 
 ### 关键技术决策
@@ -73,7 +74,7 @@ EOF
 - {test-summary}
 
 ---
-*由 AI 自动生成 · 内部追踪：{task-id}*
+*由 {agent} 自动生成 · 内部追踪：{task-id}*
 ```
 
 ## 结果回传
