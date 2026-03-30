@@ -1,0 +1,24 @@
+{
+  "skill": "restore-task",
+  "checks": {
+    "task-meta": {
+      "required_fields": [
+        "id",
+        "type",
+        "workflow",
+        "status",
+        "created_at",
+        "updated_at",
+        "current_step",
+        "assigned_to"
+      ],
+      "expected_status": "active",
+      "require_issue_number": true
+    },
+    "activity-log": {
+      "expected_action_pattern": "Restore Task",
+      "freshness_minutes": 30
+    },
+    "github-sync": null
+  }
+}

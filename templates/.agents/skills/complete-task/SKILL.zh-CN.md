@@ -89,7 +89,7 @@ ls .agents/workspace/completed/{task-id}/task.md
 > Issue 同步规则见 `.agents/rules/issue-sync.md`。执行同步前先读取该文件。
 
 如果存在有效的 `issue_number`：
-- 先按 `.agents/rules/issue-sync.md` 的补发规则扫描并补发未发布的 `analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md` 评论
+- 先按 `.agents/rules/issue-sync.md` 的补发规则扫描并补发未发布的 `task.md`、`analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md` 评论（`task.md` 走幂等更新路径）
 - 兜底同步 `## 需求` 中已勾选的条目到 Issue body
 - 最后创建或更新 `<!-- sync-issue:{task-id}:summary -->` 标记的 summary 评论
 

@@ -42,6 +42,7 @@ const lowFrequencyCommands = [
   "init-milestones",
   "refine-title",
   "release",
+  "restore-task",
   "test-integration",
   "update-agent-infra",
   "upgrade-dependency"

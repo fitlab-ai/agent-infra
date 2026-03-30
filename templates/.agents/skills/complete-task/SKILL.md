@@ -89,7 +89,7 @@ Check whether `task.md` includes a valid `issue_number`. If not, skip this step 
 > Issue sync rules live in `.agents/rules/issue-sync.md`. Read that file before syncing.
 
 If a valid `issue_number` exists:
-- First scan and backfill unpublished `analysis*.md`, `plan*.md`, `implementation*.md`, `review*.md`, and `refinement*.md` comments using the backfill rules in `.agents/rules/issue-sync.md`
+- First scan and backfill unpublished `task.md`, `analysis*.md`, `plan*.md`, `implementation*.md`, `review*.md`, and `refinement*.md` comments using the backfill rules in `.agents/rules/issue-sync.md` (`task.md` uses the idempotent update path)
 - Backfill checked `## Requirements` items to the Issue body
 - Finally create or update the summary comment marked with `<!-- sync-issue:{task-id}:summary -->`
 

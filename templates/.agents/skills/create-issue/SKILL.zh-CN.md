@@ -54,6 +54,15 @@ date "+%Y-%m-%d %H:%M:%S"
 
 回写 `issue_number`，更新 `updated_at`，并追加 Create Issue 的 Activity Log。
 
+### 5.1 补发已有产物
+
+如果任务目录中已存在产物文件，按以下顺序补发：
+
+1. `task.md` → `<!-- sync-issue:{task-id}:task -->` 评论（幂等创建或更新）
+2. 按文件名排序补发已存在的 `analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md`
+
+所有补发动作都必须遵循 `.agents/rules/issue-sync.md` 的原文发布、task.md 同步和分片规则。
+
 ### 6. 完成校验
 
 运行完成校验，确认任务产物和同步状态符合规范：

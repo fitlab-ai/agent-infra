@@ -65,6 +65,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 按 `.agents/rules/issue-sync.md` 的 `in:` label 同步规则，基于分支改动精修 `in:` label（有映射时可增可删，无映射时仅补充）
 - 同步 `## 需求` 中已勾选项到 Issue body
 - 发布 `{refinement-artifact}` 评论
+- 创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论（按 issue-sync.md 的 task.md 评论同步规则）
 
 ### 7. 完成校验
 

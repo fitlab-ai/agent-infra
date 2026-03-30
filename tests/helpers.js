@@ -237,6 +237,11 @@ const commandSpecs = {
     en: "Review task $1.",
     zh: "审查任务 $1。"
   },
+  "restore-task": {
+    usage: "<issue-number> [task-id]",
+    en: "Restore task from Issue: $ARGUMENTS",
+    zh: "从 Issue 还原任务：$ARGUMENTS"
+  },
   test: {},
   "test-integration": {},
   "update-agent-infra": {},

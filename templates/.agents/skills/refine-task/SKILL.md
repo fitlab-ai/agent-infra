@@ -65,6 +65,7 @@ If task.md contains a valid `issue_number`, perform these sync actions (skip and
 - Refine `in:` labels from the branch diff by following `.agents/rules/issue-sync.md` (add/remove when a mapping exists, add-only when it does not)
 - Sync checked `## Requirements` items to the Issue body
 - Publish the `{refinement-artifact}` comment
+- Create or update the `<!-- sync-issue:{task-id}:task -->` comment (follow the task.md comment sync rule in issue-sync.md)
 
 ### 7. Verification Gate
 

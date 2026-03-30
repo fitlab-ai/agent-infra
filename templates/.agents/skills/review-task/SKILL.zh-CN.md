@@ -57,6 +57,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 执行前先读取 `.agents/rules/issue-sync.md`
 - 设置 `status: in-progress`
 - 发布 `{review-artifact}` 评论
+- 创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论（按 issue-sync.md 的 task.md 评论同步规则）
 
 ### 7. 完成校验
 

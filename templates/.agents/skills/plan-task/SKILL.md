@@ -99,6 +99,7 @@ If task.md contains a valid `issue_number`, perform these sync actions (skip and
 - Read `.agents/rules/issue-sync.md` before syncing
 - Set `status: pending-design-work`
 - Publish the `{plan-artifact}` comment
+- Create or update the `<!-- sync-issue:{task-id}:task -->` comment (follow the task.md comment sync rule in issue-sync.md)
 
 ### 8. Verification Gate
 

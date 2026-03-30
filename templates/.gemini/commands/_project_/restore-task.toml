@@ -1,0 +1,8 @@
+description = "Restore local task files from GitHub Issue comments"
+prompt = """
+Restore task from Issue: {{args}}
+
+Read and execute the restore-task skill from `.agents/skills/restore-task/SKILL.md`.
+
+Follow all steps defined in the skill exactly.
+"""

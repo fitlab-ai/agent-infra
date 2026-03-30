@@ -92,6 +92,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure; read `.agents/rules/issue-sync.md` first):
 - Set `status: in-progress` and refine `in:` labels from the branch diff by following `.agents/rules/issue-sync.md` (add/remove when a mapping exists, add-only when it does not)
 - Sync checked `## Requirements` items to the Issue body and publish the `{implementation-artifact}` comment
+- Create or update the `<!-- sync-issue:{task-id}:task -->` comment (follow the task.md comment sync rule in issue-sync.md)
 
 ### 9. Verification Gate
 

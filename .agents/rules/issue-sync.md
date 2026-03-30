@@ -65,7 +65,16 @@ gh api "repos/{owner}/{repo}/issues/{issue-number}/comments" \
   | grep -qF "<!-- sync-issue:{task-id}:{file-stem} -->"
 ```
 
-如果已存在则跳过。评论格式统一为：
+如果已存在则跳过。
+
+发布流程：
+
+1. 先读取本地产物文件全文
+2. 将文件全文作为 `{artifact body}` 原文内联到评论中
+3. 禁止自行组织摘要、改写或截断正文
+4. 如果内容超过分片阈值，按下方“分片发布”规则处理
+
+评论格式统一为：
 
 ```markdown
 <!-- sync-issue:{task-id}:{file-stem} -->
@@ -92,9 +101,74 @@ EOF
 )"
 ```
 
+## task.md 评论同步
+
+隐藏标记：
+
+```html
+<!-- sync-issue:{task-id}:task -->
+```
+
+`task.md` 使用幂等更新路径：
+
+1. 读取 `task.md` 全文
+2. 将 YAML frontmatter（`---` 到 `---` 之间的内容）包裹在 `<details><summary>元数据 (frontmatter)</summary>` 和 `` ```yaml `` 代码块中，其余正文保持原样作为 Markdown 渲染
+3. 如内容超过分片阈值，按”分片发布”规则以 `task` 为 `{file-stem}` 处理
+4. 查找已有标记评论 ID
+5. 不存在则创建
+6. 已存在且正文有变化则 PATCH 原地更新
+7. 已存在且正文相同则跳过
+
+task.md 评论格式：
+
+```markdown
+<!-- sync-issue:{task-id}:task -->
+## 任务文件
+
+<details><summary>元数据 (frontmatter)</summary>
+
+​```yaml
+---
+{frontmatter fields}
+---
+​```
+
+</details>
+
+{task.md body after frontmatter}
+
+---
+*由 AI 自动生成 · 内部追踪：{task-id}*
+```
+
+还原时，从 `<details>` 块中提取 frontmatter，与正文拼合恢复为原始 `task.md`。
+
+评论标题映射：
+- `task` -> `任务文件`
+
+## 分片发布
+
+当文件正文超过 60000 字符时（为标题、标记和页脚预留空间），必须分片发布。
+
+分片隐藏标记：
+
+```html
+<!-- sync-issue:{task-id}:{file-stem}:{part}/{total} -->
+```
+
+分片规则：
+
+1. 计算文件总字符数
+2. 小于等于 60000 字符时，按常规单条评论发布
+3. 大于 60000 字符时，以 60000 字符为上限并尽量在最近的换行符处分片；如果该范围内没有换行符，则在 60000 字符处强制切割
+4. 每个分片独立发布，标题追加 `（{part}/{total}）`
+5. 还原时按 `{part}` 升序拼接分片正文
+
+`task.md` 与所有产物文件都适用这套规则。
+
 ## 补发规则（`/complete-task` 归档前执行）
 
-- 扫描任务目录中的 `analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md`
+- 扫描任务目录中的 `task.md`、`analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md`
 - 对每个 `{file-stem}` 用隐藏标记检查是否已发布；未发布则补发，已发布则跳过
 - 补发只追加缺失评论，不删除或重排已有评论
 - 位置说明从 Activity Log 推导时间线中的前后邻居，并加在评论标题下方：
@@ -106,6 +180,7 @@ EOF
 - 如果只有前邻居或后邻居，仅保留存在的一侧说明；如果两侧都不存在，则不添加位置说明
 
 标题映射：
+- `task` -> `任务文件`
 - `analysis` / `analysis-r{N}` -> `需求分析` / `需求分析（Round {N}）`
 - `plan` / `plan-r{N}` -> `技术方案` / `技术方案（Round {N}）`
 - `implementation` / `implementation-r{N}` -> `实现报告（Round 1）` / `实现报告（Round {N}）`

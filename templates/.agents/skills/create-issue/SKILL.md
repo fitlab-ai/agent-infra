@@ -54,6 +54,15 @@ date "+%Y-%m-%d %H:%M:%S"
 
 Write back `issue_number`, update `updated_at`, and append the Create Issue Activity Log entry.
 
+### 5.1 Backfill Existing Artifacts
+
+If artifact files already exist in the task directory, backfill them in this order:
+
+1. `task.md` -> `<!-- sync-issue:{task-id}:task -->` comment (idempotent create or update)
+2. Backfill existing `analysis*.md`, `plan*.md`, `implementation*.md`, `review*.md`, and `refinement*.md` files in filename order
+
+Every backfill action must follow the raw publishing, task.md sync, and chunking rules in `.agents/rules/issue-sync.md`.
+
 ### 6. Verification Gate
 
 Run the verification gate to confirm the task artifact and sync state are valid:
