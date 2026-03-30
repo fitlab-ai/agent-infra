@@ -187,33 +187,24 @@ agent-infra 的结构刻意保持简单：引导 CLI 负责生成种子配置，
 
 ### 分层架构
 
-```mermaid
-graph TD
-    subgraph TUI["AI TUI 层"]
-        claude["Claude Code"]
-        codex["Codex"]
-        gemini["Gemini CLI"]
-        opencode["OpenCode"]
-    end
-
-    subgraph Shared["共享层"]
-        skills["Skills"]
-        workflows["Workflows"]
-        templates["Templates"]
-    end
-
-    subgraph Project["项目层"]
-        agents[".agents/"]
-        config[".airc.json"]
-        workspace["workspace/"]
-        governance["AGENTS.md"]
-    end
-
-    TUI -- "slash 命令" --> Shared
-    Shared -- "渲染为" --> Project
+```text
+┌───────────────────────────────────────────────────────┐
+│                     AI TUI Layer                      │
+│  Claude Code  ·  Codex  ·  Gemini CLI  ·  OpenCode    │
+└──────────────────────────┬────────────────────────────┘
+                           │ slash 命令
+                           ▼
+┌───────────────────────────────────────────────────────┐
+│                     Shared Layer                      │
+│         Skills  ·  Workflows  ·  Templates            │
+└──────────────────────────┬────────────────────────────┘
+                           │ 渲染为
+                           ▼
+┌───────────────────────────────────────────────────────┐
+│                    Project Layer                      │
+│               .agents/  ·  AGENTS.md                  │
+└───────────────────────────────────────────────────────┘
 ```
-
-GitHub 原生支持 Mermaid 渲染。即使某些下游渲染器不支持，上方文字也足以传达系统结构。
 
 <a id="what-you-get"></a>
 

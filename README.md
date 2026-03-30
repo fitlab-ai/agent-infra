@@ -187,33 +187,24 @@ agent-infra is intentionally simple: a bootstrap CLI creates the seed configurat
 
 ### Layered Architecture
 
-```mermaid
-graph TD
-    subgraph TUI["AI TUI Layer"]
-        claude["Claude Code"]
-        codex["Codex"]
-        gemini["Gemini CLI"]
-        opencode["OpenCode"]
-    end
-
-    subgraph Shared["Shared Layer"]
-        skills["Skills"]
-        workflows["Workflows"]
-        templates["Templates"]
-    end
-
-    subgraph Project["Project Layer"]
-        agents[".agents/"]
-        config[".airc.json"]
-        workspace["workspace/"]
-        governance["AGENTS.md"]
-    end
-
-    TUI -- "slash commands" --> Shared
-    Shared -- "renders into" --> Project
+```text
+┌───────────────────────────────────────────────────────┐
+│                     AI TUI Layer                      │
+│  Claude Code  ·  Codex  ·  Gemini CLI  ·  OpenCode    │
+└──────────────────────────┬────────────────────────────┘
+                           │ slash commands
+                           ▼
+┌───────────────────────────────────────────────────────┐
+│                     Shared Layer                      │
+│         Skills  ·  Workflows  ·  Templates            │
+└──────────────────────────┬────────────────────────────┘
+                           │ renders into
+                           ▼
+┌───────────────────────────────────────────────────────┐
+│                    Project Layer                      │
+│               .agents/  ·  AGENTS.md                  │
+└───────────────────────────────────────────────────────┘
 ```
-
-GitHub renders Mermaid diagrams natively. If a downstream renderer does not, the text above still explains the system structure.
 
 <a id="what-you-get"></a>
 
