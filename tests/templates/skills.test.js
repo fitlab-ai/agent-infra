@@ -167,6 +167,7 @@ test("skills that write timestamps require date command guidance", () => {
   const timestampSkills = [
     "analyze-task",
     "block-task",
+    "cancel-task",
     "close-codescan",
     "close-dependabot",
     "commit",

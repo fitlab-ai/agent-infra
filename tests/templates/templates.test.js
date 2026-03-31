@@ -32,6 +32,7 @@ const highFrequencyCommands = [
 const lowFrequencyCommands = [
   "archive-tasks",
   "block-task",
+  "cancel-task",
   "check-task",
   "close-codescan",
   "close-dependabot",

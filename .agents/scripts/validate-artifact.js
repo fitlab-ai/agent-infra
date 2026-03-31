@@ -176,7 +176,7 @@ function checkTaskMeta({ taskDir, config }) {
     return failResult("task-meta", `Missing required fields: ${missingFields.join(", ")}`);
   }
 
-  const invalidDates = ["created_at", "updated_at", "completed_at", "blocked_at"]
+  const invalidDates = ["created_at", "updated_at", "completed_at", "blocked_at", "cancelled_at"]
     .filter((field) => !isBlank(metadata[field]) && !DATE_TIME_PATTERN.test(metadata[field]));
   if (invalidDates.length > 0) {
     return failResult("task-meta", `Invalid date format in: ${invalidDates.join(", ")}`);
@@ -214,6 +214,10 @@ function checkTaskMeta({ taskDir, config }) {
 
   if (config.require_blocked_at && isBlank(metadata.blocked_at)) {
     return failResult("task-meta", "Expected blocked_at to be present");
+  }
+
+  if (config.require_cancelled_at && isBlank(metadata.cancelled_at)) {
+    return failResult("task-meta", "Expected cancelled_at to be present");
   }
 
   if (config.match_task_dir !== false) {

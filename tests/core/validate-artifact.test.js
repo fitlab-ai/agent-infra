@@ -269,6 +269,31 @@ test("validate-artifact activity-log freshness uses local timestamps", () => {
   }
 });
 
+test("validate-artifact task-meta supports cancel-task cancelled_at requirements", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-cancel-task-meta-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const cancelledAt = formatTimestamp(new Date());
+
+  try {
+    write(path.join(taskDir, "task.md"), buildTaskContent({
+      status: "completed",
+      cancelled_at: cancelledAt,
+      cancel_reason: "No longer needed after investigation"
+    }, {
+      NOW: cancelledAt
+    }));
+
+    const result = runValidator(["check", "task-meta", taskDir, "--skill", "cancel-task"]);
+    assert.equal(result.status, 0, result.stderr);
+
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.type, "task-meta");
+    assert.equal(payload.status, "pass");
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("validate-artifact github-sync blocks after retry exhaustion on gh network errors", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gate-blocked-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");

@@ -160,6 +160,11 @@ const commandSpecs = {
     en: "Block task: $ARGUMENTS",
     zh: "阻塞任务：$ARGUMENTS"
   },
+  "cancel-task": {
+    usage: "<task-id> <reason>",
+    en: "Cancel task: $ARGUMENTS",
+    zh: "取消任务：$ARGUMENTS"
+  },
   "check-task": {
     usage: "<task-id>",
     en: "Check status of task $1.",
