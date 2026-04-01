@@ -35,12 +35,12 @@
 ## 选择下一步分支
 
 判断规则：
-1. 如果本轮修复了任何 `Blocker` 或 `Major`，默认推荐重新审查
-2. 只有当本轮只修复了 Minor，且改动明显低风险时，才可以把直接提交作为一个可选项
-3. 如果仍有任何 `Blocker` 或 `Major` 未解决，就不要建议直接提交
+1. 始终将重新审查作为默认推荐的下一步，无论本轮修复了哪个级别的问题
+2. 直接提交仅可作为附加选项，且仅在所有问题均已解决且改动明显低风险时
+3. 如果仍有任何 `Blocker` 或 `Major` 未解决，不要提供直接提交选项
 
 禁止规则：
-- 只要还存在高风险问题，绝对不要把直接提交写成唯一下一步
+- 绝对不要把直接提交写成唯一下一步——重新审查必须始终作为首要推荐
 
 必用输出模板：
 
@@ -56,11 +56,11 @@
 - 修复产物：{refinement-artifact}
 
 下一步 - 重新审查或提交：
-- 重新审查（默认推荐；修复了 Blocker/Major 时优先）：
+- 重新审查（始终推荐）：
   - Claude Code / OpenCode：/review-task {task-id}
   - Gemini CLI：/agent-infra:review-task {task-id}
   - Codex CLI：$review-task {task-id}
-- 直接提交（仅限只修复 Minor 且风险可控）：
+- 直接提交（可选；仅在所有问题已解决且风险可控时）：
   - Claude Code / OpenCode：/commit
   - Gemini CLI：/agent-infra:commit
   - Codex CLI：$commit
@@ -72,5 +72,5 @@
 2. **禁止自动提交**：不要执行 `git commit`
 3. **范围约束**：只修复审查中列出的问题
 4. **分歧处理**：如果不同意审查意见，要在报告里明确记录
-5. **重新审查**：修复了 Blocker 或 Major 后，推荐执行 `review-task`
+5. **重新审查**：修复后始终推荐执行 `review-task`
 6. **一致性**：最新审查产物、Activity Log 记录和修复报告必须引用同一轮次

@@ -88,21 +88,15 @@ node .agents/scripts/validate-artifact.js gate refine-task .agents/workspace/act
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
 
-输出修复摘要后，根据修复的问题严重程度选择下一步：
-
-如果修复了 Blocker 或 Major（推荐重新审查）：
+输出修复摘要后，展示下一步：
 
 ```
-下一步 - 代码审查：
+下一步 - 重新审查或提交：
+- 重新审查（始终推荐）：
   - Claude Code / OpenCode：/review-task {task-id}
   - Gemini CLI：/agent-infra:review-task {task-id}
   - Codex CLI：$review-task {task-id}
-```
-
-如果仅修复 Minor（可直接提交）：
-
-```
-下一步 - 提交代码：
+- 直接提交（可选；仅在所有问题已解决且风险可控时）：
   - Claude Code / OpenCode：/commit
   - Gemini CLI：/agent-infra:commit
   - Codex CLI：$commit
