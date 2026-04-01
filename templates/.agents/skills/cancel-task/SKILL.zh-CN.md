@@ -75,6 +75,7 @@ ls .agents/workspace/completed/{task-id}/task.md
 
 如果存在有效的 `issue_number`：
 - 替换所有 `status:` labels，并设置步骤 2 推断出的标签
+- 移除所有 `in:` labels
 - 移除 milestone
 - 移除全部 assignees
 - 发布取消评论，隐藏标记使用 `<!-- sync-issue:{task-id}:cancel -->`
@@ -84,7 +85,6 @@ ls .agents/workspace/completed/{task-id}/task.md
 取消评论至少包含：
 - 取消原因
 - 选定的 `status:` label
-- 归档路径 `.agents/workspace/completed/{task-id}/`
 
 ### 7. 完成校验
 

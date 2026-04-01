@@ -75,6 +75,7 @@ Check whether `task.md` contains a valid `issue_number`. If not, skip this step.
 
 If a valid `issue_number` exists:
 - Replace all `status:` labels with the label inferred in Step 2
+- Remove all `in:` labels
 - Remove the milestone
 - Remove all assignees
 - Publish a cancellation comment using the marker `<!-- sync-issue:{task-id}:cancel -->`
@@ -84,7 +85,6 @@ If a valid `issue_number` exists:
 The cancellation comment must include at least:
 - the cancellation reason
 - the selected `status:` label
-- the archive path `.agents/workspace/completed/{task-id}/`
 
 ### 7. Verification Gate
 
