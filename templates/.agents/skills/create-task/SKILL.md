@@ -27,6 +27,10 @@ Extract from the natural-language description:
 - **Task title**: a concise title (maximum 50 characters), in the same language as the user's description - do not translate it to English or apply Conventional Commits formatting
 - **Task type**: `feature` | `bugfix` | `refactor` | `docs` | `chore` (infer from the description)
 - **Workflow**: `feature-development` | `bug-fix` | `refactoring` (infer from the type)
+- **Branch name**: format `<project>-<type>-<slug>`
+  - `<project>` comes from the `project` field in `.agents/.airc.json`
+  - `<type>` is the inferred task type
+  - `<slug>` is a kebab-case slug built from 3-6 English keywords extracted from the task title
 - **Detailed description**: the cleaned-up original user request
 
 If the description is unclear, **ask the user to clarify first**.
@@ -64,6 +68,7 @@ Task metadata (`task.md` YAML front matter):
 ```yaml
 id: TASK-{yyyyMMdd-HHmmss}
 type: feature|bugfix|refactor|docs|chore
+branch: <project>-<type>-<slug>
 workflow: feature-development|bug-fix|refactoring
 status: active
 created_at: {yyyy-MM-dd HH:mm:ss}
@@ -87,6 +92,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `current_step`: requirement-analysis
 - `assigned_to`: {current AI agent}
 - `updated_at`: {current time}
+- `## Context` -> `- **Branch**:`: update it to the generated branch name
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
   - {yyyy-MM-dd HH:mm:ss} — **Task Created** by {agent} — Task created from description

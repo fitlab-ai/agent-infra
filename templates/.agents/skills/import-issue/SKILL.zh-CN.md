@@ -44,6 +44,7 @@ date +%Y%m%d-%H%M%S
 id: TASK-{yyyyMMdd-HHmmss}
 issue_number: <issue-number>
 type: feature|bugfix|refactor|docs|chore
+branch: <project>-<type>-<slug>
 workflow: feature-development|bug-fix|refactoring
 status: active
 created_at: {yyyy-MM-dd HH:mm:ss}
@@ -65,6 +66,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - `current_step`：requirement-analysis
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
+- `## 上下文` 中的 `- **分支**：`：更新为生成的分支名
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
   - {yyyy-MM-dd HH:mm:ss} — **Import Issue** by {agent} — Issue #{number} imported

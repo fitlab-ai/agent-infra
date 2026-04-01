@@ -149,8 +149,13 @@ test("update-agent-infra template copies stay in sync with working files", () =>
   const syncFiles = [
     [".agents/QUICKSTART.md", "templates/.agents/QUICKSTART.md"],
     [".agents/README.md", "templates/.agents/README.md"],
+    [".agents/templates/task.md", "templates/.agents/templates/task.md"],
     [".agents/skills/archive-tasks/SKILL.md", "templates/.agents/skills/archive-tasks/SKILL.md"],
     [".agents/skills/archive-tasks/scripts/archive-tasks.sh", "templates/.agents/skills/archive-tasks/scripts/archive-tasks.sh"],
+    [".agents/skills/create-task/SKILL.md", "templates/.agents/skills/create-task/SKILL.md"],
+    [".agents/skills/create-task/config/verify.json", "templates/.agents/skills/create-task/config/verify.json"],
+    [".agents/skills/import-issue/SKILL.md", "templates/.agents/skills/import-issue/SKILL.md"],
+    [".agents/skills/import-issue/config/verify.json", "templates/.agents/skills/import-issue/config/verify.json"],
     [".agents/skills/init-labels/SKILL.md", "templates/.agents/skills/init-labels/SKILL.md"],
     [".agents/skills/update-agent-infra/SKILL.md", "templates/.agents/skills/update-agent-infra/SKILL.md"],
     [".agents/skills/update-agent-infra/scripts/package.json", "templates/.agents/skills/update-agent-infra/scripts/package.json"],

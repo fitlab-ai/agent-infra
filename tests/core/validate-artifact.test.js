@@ -246,6 +246,55 @@ test("validate-artifact gate supports human-readable text output", () => {
   }
 });
 
+test("validate-artifact create-task task-meta accepts a generated branch", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-create-task-branch-pass-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+
+  try {
+    write(path.join(taskDir, "task.md"), [
+      buildTaskFrontmatter({
+        type: "feature",
+        workflow: "feature-development",
+        branch: "agent-infra-feature-cli-generic-sandbox",
+        current_step: "requirement-analysis"
+      }),
+      "",
+      "# 任务：创建任务",
+      "",
+      "## 活动日志",
+      "",
+      `- ${formatTimestamp(new Date())} — **Task Created** by codex — Task created from description`
+    ].join("\n"));
+
+    const result = runValidator(["check", "task-meta", taskDir, "--skill", "create-task"]);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact create-task task-meta rejects invalid branch naming", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-create-task-branch-fail-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+
+  try {
+    write(path.join(taskDir, "task.md"), [
+      buildTaskFrontmatter({
+        branch: "wrong-prefix-feature-cli-generic-sandbox",
+        current_step: "requirement-analysis"
+      }),
+      "",
+      "# 任务：创建任务"
+    ].join("\n"));
+
+    const result = runValidator(["check", "task-meta", taskDir, "--skill", "create-task"]);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /Invalid branch/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("validate-artifact artifact check fails when a required section is missing", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gate-fail-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");

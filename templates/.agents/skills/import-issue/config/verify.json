@@ -5,6 +5,7 @@
       "required_fields": [
         "id",
         "type",
+        "branch",
         "workflow",
         "status",
         "created_at",

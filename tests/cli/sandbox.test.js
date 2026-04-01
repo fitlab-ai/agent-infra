@@ -101,3 +101,88 @@ test("assertValidBranchName rejects invalid branch names", async () => {
 
   assert.throws(() => sandboxConstants.assertValidBranchName("bad branch name"), /Invalid branch name/);
 });
+
+test("resolveTaskBranch returns plain branch names unchanged", async () => {
+  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+
+  assert.equal(
+    taskResolver.resolveTaskBranch("agent-infra-feature-cli-generic-sandbox", process.cwd()),
+    "agent-infra-feature-cli-generic-sandbox"
+  );
+});
+
+test("resolveTaskBranch reads branch from task frontmatter", async () => {
+  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-frontmatter-"));
+  const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180000");
+
+  try {
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, "task.md"), [
+      "---",
+      "id: TASK-20260401-180000",
+      "type: feature",
+      "branch: agent-infra-feature-cli-generic-sandbox",
+      "---",
+      "",
+      "# task"
+    ].join("\n"));
+
+    assert.equal(
+      taskResolver.resolveTaskBranch("TASK-20260401-180000", tmpDir),
+      "agent-infra-feature-cli-generic-sandbox"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveTaskBranch falls back to the context branch for legacy tasks", async () => {
+  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-context-"));
+  const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180001");
+
+  try {
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, "task.md"), [
+      "---",
+      "id: TASK-20260401-180001",
+      "type: feature",
+      "---",
+      "",
+      "## 上下文",
+      "",
+      "- **分支**：agent-infra-feature-cli-generic-sandbox"
+    ].join("\n"));
+
+    assert.equal(
+      taskResolver.resolveTaskBranch("TASK-20260401-180001", tmpDir),
+      "agent-infra-feature-cli-generic-sandbox"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveTaskBranch rejects missing task files and missing branch metadata", async () => {
+  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-errors-"));
+  const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180002");
+
+  try {
+    assert.throws(
+      () => taskResolver.resolveTaskBranch("TASK-20260401-180002", tmpDir),
+      /Task not found/
+    );
+
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, "task.md"), "---\nid: TASK-20260401-180002\n---\n\n# task\n");
+
+    assert.throws(
+      () => taskResolver.resolveTaskBranch("TASK-20260401-180002", tmpDir),
+      /has no branch field/
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

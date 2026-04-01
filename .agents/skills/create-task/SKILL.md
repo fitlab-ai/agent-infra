@@ -27,6 +27,10 @@ description: "根据自然语言描述创建任务"
 - **任务标题**：简洁标题（最多 50 个字符），使用中文——不要翻译为英文，不要套用 Conventional Commits 格式
 - **任务类型**：`feature` | `bugfix` | `refactor` | `docs` | `chore`（从描述推断）
 - **工作流**：`feature-development` | `bug-fix` | `refactoring`（从类型推断）
+- **分支名**：格式 `<project>-<type>-<slug>`
+  - `<project>` 从 `.agents/.airc.json` 的 `project` 字段读取
+  - `<type>` 为推断出的任务类型
+  - `<slug>` 从任务标题提取 3-6 个英文关键词并转为 kebab-case
 - **详细描述**：整理后的用户原始描述
 
 如果描述不清晰，**先向用户确认**再继续。
@@ -64,6 +68,7 @@ date +%Y%m%d-%H%M%S
 ```yaml
 id: TASK-{yyyyMMdd-HHmmss}
 type: feature|bugfix|refactor|docs|chore
+branch: <project>-<type>-<slug>
 workflow: feature-development|bug-fix|refactoring
 status: active
 created_at: {yyyy-MM-dd HH:mm:ss}
@@ -87,6 +92,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - `current_step`：requirement-analysis
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
+- `## 上下文` 中的 `- **分支**：`：更新为生成的分支名
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
   - {yyyy-MM-dd HH:mm:ss} — **Task Created** by {agent} — Task created from description

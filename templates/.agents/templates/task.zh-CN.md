@@ -1,12 +1,13 @@
 ---
 id: task-XXX
-type: feature          # feature | bugfix | refactor | docs | review
+type: feature                  # feature | bugfix | refactor | docs | review
+branch: ""                     # <project>-<type>-<slug>
 workflow: feature-development  # feature-development | bug-fix | code-review | refactoring
-status: open           # open | in-progress | review | blocked | completed
+status: open                   # open | in-progress | review | blocked | completed
 created_at: YYYY-MM-DD
 updated_at: YYYY-MM-DD
-current_step: analysis # analysis | design | implementation | review | fix | commit
-assigned_to: ""        # claude | codex | gemini | opencode | human
+current_step: analysis         # analysis | design | implementation | review | fix | commit
+assigned_to: ""                # claude | codex | gemini | opencode | human
 ---
 
 # 任务：[标题]

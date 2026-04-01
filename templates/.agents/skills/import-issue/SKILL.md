@@ -44,6 +44,7 @@ Task metadata:
 id: TASK-{yyyyMMdd-HHmmss}
 issue_number: <issue-number>
 type: feature|bugfix|refactor|docs|chore
+branch: <project>-<type>-<slug>
 workflow: feature-development|bug-fix|refactoring
 status: active
 created_at: {yyyy-MM-dd HH:mm:ss}
@@ -65,6 +66,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `current_step`: requirement-analysis
 - `assigned_to`: {current AI agent}
 - `updated_at`: {current time}
+- `## Context` -> `- **Branch**:`: update it to the generated branch name
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
   - {yyyy-MM-dd HH:mm:ss} — **Import Issue** by {agent} — Issue #{number} imported

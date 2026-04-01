@@ -33,6 +33,7 @@ const DEFAULT_RETRY_DELAYS_MS = [3000, 10000];
 const DEFAULT_FRESHNESS_MINUTES = 30;
 const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const ACTIVITY_LOG_PATTERN = /^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) — \*\*(.+?)\*\* by (.+?) — (.+)$/;
+const BRANCH_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..", "..");
@@ -190,6 +191,11 @@ function checkTaskMeta({ taskDir, config }) {
     }
   }
 
+  const branchValidationError = validateTaskBranch(metadata);
+  if (branchValidationError) {
+    return failResult("task-meta", branchValidationError);
+  }
+
   const expectedStep = config.expected_step;
   if (expectedStep && metadata.current_step !== expectedStep) {
     return failResult(
@@ -230,6 +236,40 @@ function checkTaskMeta({ taskDir, config }) {
   }
 
   return passResult("task-meta", `Task metadata valid (${requiredFields.length} required fields checked)`);
+}
+
+function validateTaskBranch(metadata) {
+  if (isBlank(metadata.branch)) {
+    return null;
+  }
+
+  const projectName = loadProjectName();
+  const expectedPrefix = projectName ? `${projectName}-${metadata.type}-` : "";
+
+  if (expectedPrefix && !String(metadata.branch).startsWith(expectedPrefix)) {
+    return `Invalid branch: expected prefix '${expectedPrefix}', got '${metadata.branch}'`;
+  }
+
+  const slug = expectedPrefix ? String(metadata.branch).slice(expectedPrefix.length) : String(metadata.branch);
+  if (!BRANCH_SLUG_PATTERN.test(slug)) {
+    return `Invalid branch: '${metadata.branch}' must use kebab-case suffixes`;
+  }
+
+  return null;
+}
+
+function loadProjectName() {
+  const configPath = path.join(repoRoot, ".agents", ".airc.json");
+  if (!fs.existsSync(configPath)) {
+    return "";
+  }
+
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    return String(config.project || "").trim();
+  } catch {
+    return "";
+  }
 }
 
 function checkArtifact({ taskDir, config, artifactFile }) {
