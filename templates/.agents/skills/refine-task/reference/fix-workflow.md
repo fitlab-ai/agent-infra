@@ -35,12 +35,12 @@ Run the project test command from the `test` skill and confirm that all required
 ## Choose the Next-Step Branch
 
 Decision rules:
-1. if this round fixed any `Blocker` or `Major`, recommend re-review by default
-2. only when this round fixed Minor issues only and the change is clearly low risk may direct commit be offered as an option
-3. if any `Blocker` or `Major` remains unresolved, do not suggest direct commit
+1. always recommend re-review as the default next step, regardless of the severity of fixed issues
+2. direct commit may be offered as an additional option only when all issues are resolved and changes are clearly low risk
+3. if any `Blocker` or `Major` remains unresolved, do not offer direct commit as an option
 
 Prohibition:
-- never present direct commit as the only next step unless no high-risk issue remains
+- never present direct commit as the only next step — re-review must always be the primary recommendation
 
 Required output template:
 
@@ -56,11 +56,11 @@ Refinement status:
 - Refinement artifact: {refinement-artifact}
 
 Next step - re-review or commit:
-- Re-review (recommended by default when Blocker/Major issues were fixed):
+- Re-review (always recommended):
   - Claude Code / OpenCode: /review-task {task-id}
   - Gemini CLI: /agent-infra:review-task {task-id}
   - Codex CLI: $review-task {task-id}
-- Commit directly (Minor-only, low-risk changes only):
+- Commit directly (optional; only when all issues are resolved and changes are low risk):
   - Claude Code / OpenCode: /commit
   - Gemini CLI: /agent-infra:commit
   - Codex CLI: $commit
@@ -72,5 +72,5 @@ Next step - re-review or commit:
 2. **No auto-commit**: do not run `git commit`
 3. **Scope discipline**: only fix reviewed issues
 4. **Disagreement handling**: record any disagreement in the report
-5. **Re-review**: after fixing Blockers or Major issues, recommend `review-task`
+5. **Re-review**: always recommend `review-task` as the default next step after refinement
 6. **Consistency**: the latest review artifact, Activity Log entry, and refinement report must reference the same round

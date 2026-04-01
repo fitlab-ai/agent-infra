@@ -88,21 +88,15 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
 
-After summarizing the fixes, choose the next step based on severity:
-
-If the round fixed any Blocker or Major issues (recommended):
+After summarizing the fixes, present the next step:
 
 ```
-Next step - code review:
+Next step - re-review or commit:
+- Re-review (always recommended):
   - Claude Code / OpenCode: /review-task {task-id}
   - Gemini CLI: /{{project}}:review-task {task-id}
   - Codex CLI: $review-task {task-id}
-```
-
-If the round fixed Minor issues only (low risk):
-
-```
-Next step - commit changes:
+- Commit directly (optional; only when all issues are resolved and changes are low risk):
   - Claude Code / OpenCode: /commit
   - Gemini CLI: /{{project}}:commit
   - Codex CLI: $commit
