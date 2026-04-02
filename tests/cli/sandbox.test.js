@@ -17,6 +17,16 @@ test("agent-infra sandbox help is wired into the main CLI", () => {
   assert.match(output, /rebuild \[--quiet\]/);
 });
 
+test("sandbox create help documents the host aliases file", () => {
+  const output = execFileSync(process.execPath, [filePath("bin/cli.js"), "sandbox", "create", "--help"], {
+    encoding: "utf8"
+  });
+
+  assert.match(output, /Usage: ai sandbox create <branch> \[base\] \[--cpu <n>\] \[--memory <n>\]/);
+  assert.match(output, /~\/\.ai-sandbox-aliases/);
+  assert.match(output, /\/home\/devuser\/\.bash_aliases/);
+});
+
 test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => {
   const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-config-"));
@@ -80,6 +90,111 @@ test("composeDockerfile joins runtime fragments in order", async () => {
     assert.match(content, /setup_20\.x/);
     assert.match(content, /python3 python3-pip python3-venv/);
     assert.match(content, /AI_TOOL_PACKAGES build arg is required/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("composeDockerfile includes gh CLI and bash_aliases sourcing", async () => {
+  const sandboxDockerfile = await loadFreshEsm("lib/sandbox/dockerfile.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-gh-"));
+
+  try {
+    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+      repoRoot: tmpDir,
+      project: "demo",
+      runtimes: ["node20"],
+      dockerfile: null
+    });
+    const content = fs.readFileSync(dockerfilePath, "utf8");
+
+    assert.match(content, /cli\.github\.com\/packages/);
+    assert.match(content, /apt-get install -y gh/);
+    assert.match(content, /\[ -f ~\/\.bash_aliases \] && \. ~\/\.bash_aliases/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("buildContainerEnvArgs injects GH_TOKEN when available", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+
+  const envArgs = sandboxCreate.buildContainerEnvArgs([
+    { tool: { envVars: { FOO: "bar" } } },
+    { tool: { envVars: { BAZ: "qux" } } }
+  ], (cmd, args) => {
+    assert.equal(cmd, "gh");
+    assert.deepEqual(args, ["auth", "token"]);
+    return "token-123";
+  });
+
+  assert.deepEqual(envArgs, [
+    "-e", "FOO=bar",
+    "-e", "BAZ=qux",
+    "-e", "GH_TOKEN=token-123"
+  ]);
+});
+
+test("buildContainerEnvArgs skips GH_TOKEN when auth token is unavailable", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+
+  const envArgs = sandboxCreate.buildContainerEnvArgs([
+    { tool: { envVars: { FOO: "bar" } } }
+  ], () => "");
+
+  assert.deepEqual(envArgs, ["-e", "FOO=bar"]);
+});
+
+test("ensureSandboxAliasesFile creates the default aliases once", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-defaults-"));
+
+  try {
+    const created = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
+    assert.equal(created.created, true);
+    assert.equal(created.path, path.join(tmpDir, ".ai-sandbox-aliases"));
+
+    const content = fs.readFileSync(created.path, "utf8");
+    assert.match(content, /alias claude-yolo='claude --dangerously-skip-permissions'/);
+    assert.match(content, /alias gy='gemini --yolo'/);
+
+    const second = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
+    assert.equal(second.created, false);
+    assert.equal(fs.readFileSync(created.path, "utf8"), content);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncShellAliases skips missing alias files and copies existing aliases", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-"));
+
+  try {
+    const calls = [];
+    const missing = sandboxCreate.syncShellAliases("demo-container", tmpDir, (...args) => calls.push(args));
+    assert.equal(missing, false);
+    assert.deepEqual(calls, []);
+
+    const aliasesPath = path.join(tmpDir, ".ai-sandbox-aliases");
+    fs.writeFileSync(aliasesPath, "alias cy='claude --dangerously-skip-permissions'\n", "utf8");
+
+    const copied = sandboxCreate.syncShellAliases("demo-container", tmpDir, (...args) => calls.push(args));
+    assert.equal(copied, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], "docker");
+    assert.deepEqual(calls[0][1], [
+      "exec",
+      "-i",
+      "demo-container",
+      "sh",
+      "-c",
+      "cat > /home/devuser/.bash_aliases"
+    ]);
+    assert.deepEqual(calls[0][2], {
+      input: "alias cy='claude --dangerously-skip-permissions'\n",
+      stdio: ["pipe", "pipe", "pipe"]
+    });
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
