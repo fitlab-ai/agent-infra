@@ -171,6 +171,12 @@ Open the project in any AI TUI and run `update-agent-infra`:
 
 This detects the packaged template version and renders all managed files. The same command is used both for first-time setup and for future template upgrades.
 
+### Sandbox aliases and GitHub CLI
+
+`ai sandbox create` now bootstraps the host-side aliases file at `~/.ai-sandbox-aliases` on first run. The generated file includes ready-to-edit yolo shortcuts for Claude, Codex, Gemini CLI, and OpenCode, and every sandbox syncs that file into `/home/devuser/.bash_aliases`.
+
+The sandbox image also preinstalls `gh`. When `gh auth token` succeeds on the host, `ai sandbox create` injects the token into the container as `GH_TOKEN`, so `gh` commands work inside the sandbox without extra setup.
+
 <a id="architecture-overview"></a>
 
 ## Architecture Overview
