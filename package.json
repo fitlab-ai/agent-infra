@@ -40,6 +40,10 @@
     "bootstrap",
     "installer"
   ],
+  "dependencies": {
+    "@clack/prompts": "0.11.0",
+    "picocolors": "1.1.1"
+  },
   "scripts": {
     "build": "node scripts/build-inline.js",
     "prepare": "git config core.hooksPath .github/hooks || true",

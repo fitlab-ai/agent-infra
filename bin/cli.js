@@ -15,6 +15,7 @@ const USAGE = `agent-infra - bootstrap AI collaboration infrastructure
 Usage:
   agent-infra init        Initialize a new project with update-agent-infra seed command
   agent-infra update      Update seed files and sync file registry for an existing project
+  agent-infra sandbox     Manage Docker-based AI sandboxes
   agent-infra version     Show version
   agent-infra help        Show this help message
 
@@ -44,6 +45,14 @@ switch (command) {
   case 'update': {
     const { cmdUpdate } = await import('../lib/update.js');
     await cmdUpdate().catch((e) => {
+      process.stderr.write(`Error: ${e.message}\n`);
+      process.exitCode = 1;
+    });
+    break;
+  }
+  case 'sandbox': {
+    const { runSandbox } = await import('../lib/sandbox/index.js');
+    await runSandbox(process.argv.slice(3)).catch((e) => {
       process.stderr.write(`Error: ${e.message}\n`);
       process.exitCode = 1;
     });

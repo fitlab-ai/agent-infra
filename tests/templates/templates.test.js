@@ -129,6 +129,14 @@ test("templates do not contain legacy single-brace project or org placeholders",
   });
 });
 
+test("root and template gitignore both ignore node_modules", () => {
+  const rootGitignore = read(".gitignore");
+  const templateGitignore = read("templates/.gitignore");
+
+  assert.match(rootGitignore, /^node_modules\/$/m);
+  assert.match(templateGitignore, /^node_modules\/$/m);
+});
+
 test("update-agent-infra template copies stay in sync with working files", () => {
   const collaborator = JSON.parse(read(".agents/.airc.json"));
   const project = collaborator.project;

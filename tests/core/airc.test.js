@@ -53,6 +53,21 @@ test(".agents/.airc.json declares labels.in mapping for module labels", () => {
   });
 });
 
+test(".agents/.airc.json declares default sandbox configuration", () => {
+  const collaborator = JSON.parse(read(".agents/.airc.json"));
+
+  assert.deepEqual(collaborator.sandbox, {
+    runtimes: ["node20"],
+    tools: ["claude-code", "codex", "opencode", "gemini-cli"],
+    dockerfile: null,
+    vm: {
+      cpu: null,
+      memory: null,
+      disk: null
+    }
+  });
+});
+
 test(".agents/.airc.json excludes deprecated codex prompt paths", () => {
   const collaborator = JSON.parse(read(".agents/.airc.json"));
 

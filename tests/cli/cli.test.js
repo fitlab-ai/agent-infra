@@ -17,6 +17,7 @@ test("bootstrap CLI files exist", () => {
 
   const nodeCli = read("bin/cli.js");
   assert.match(nodeCli, /agent-infra/);
+  assert.match(nodeCli, /sandbox/);
 
   const nodeStats = fs.statSync(filePath("bin/cli.js"));
   assert.ok(nodeStats.mode & 0o111, "bin/cli.js should be executable");
@@ -50,6 +51,12 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.ok(!("templateSource" in config), "init should not generate templateSource");
     assert.ok(!config.branchPrefix, "branchPrefix should not exist");
     assert.ok(!config.source, "consumer projects should not have source: self");
+    assert.deepEqual(config.sandbox, {
+      runtimes: ["node20"],
+      tools: ["claude-code", "codex", "opencode", "gemini-cli"],
+      dockerfile: null,
+      vm: { cpu: null, memory: null, disk: null }
+    }, "init should generate default sandbox config");
     assert.deepEqual(config.labels, { in: {} }, "init should generate empty labels.in defaults");
     assert.ok(
       config.files.managed.includes(".github/hooks/check-version-format.sh"),
@@ -283,6 +290,12 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     const updated = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
     );
+    assert.deepEqual(updated.sandbox, {
+      runtimes: ["node20"],
+      tools: ["claude-code", "codex", "opencode", "gemini-cli"],
+      dockerfile: null,
+      vm: { cpu: null, memory: null, disk: null }
+    }, "update should backfill default sandbox config");
     assert.deepEqual(updated.labels, { in: {} }, "update should backfill empty labels.in defaults");
     assert.ok(updated.files.managed.includes(".github/hooks/check-version-format.sh"));
     assert.ok(updated.files.managed.includes(".agents/skills/"));

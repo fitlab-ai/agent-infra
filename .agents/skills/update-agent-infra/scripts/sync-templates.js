@@ -20,6 +20,23 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULTS = {
+  "sandbox": {
+    "runtimes": [
+      "node20"
+    ],
+    "tools": [
+      "claude-code",
+      "codex",
+      "opencode",
+      "gemini-cli"
+    ],
+    "dockerfile": null,
+    "vm": {
+      "cpu": null,
+      "memory": null,
+      "disk": null
+    }
+  },
   "labels": {
     "in": {}
   },
