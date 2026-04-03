@@ -18,7 +18,7 @@ test("package metadata supports scoped npm publishing", () => {
     registry: "https://registry.npmjs.org/"
   });
   assert.deepEqual(pkg.dependencies, {
-    "@clack/prompts": "0.11.0",
+    "@clack/prompts": "1.2.0",
     "picocolors": "1.1.1"
   });
   assert.equal(

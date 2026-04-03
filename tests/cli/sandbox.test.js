@@ -109,7 +109,9 @@ test("composeDockerfile includes gh CLI and bash_aliases sourcing", async () => 
     const content = fs.readFileSync(dockerfilePath, "utf8");
 
     assert.match(content, /cli\.github\.com\/packages/);
+    assert.match(content, /curl wget git vim file/);
     assert.match(content, /apt-get install -y gh/);
+    assert.match(content, /export GPG_TTY=\$\(tty\)/);
     assert.match(content, /\[ -f ~\/\.bash_aliases \] && \. ~\/\.bash_aliases/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -198,6 +200,158 @@ test("syncShellAliases skips missing alias files and copies existing aliases", a
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test("detectGpgConfig identifies host gitconfig that requires GPG support", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+
+  assert.equal(sandboxCreate.detectGpgConfig("[commit]\n  gpgsign = true\n"), true);
+  assert.equal(sandboxCreate.detectGpgConfig("[gpg]\n  program = /opt/homebrew/bin/gpg\n"), true);
+  assert.equal(sandboxCreate.detectGpgConfig("[gpg \"ssh\"]\n  program = /opt/homebrew/bin/ssh-keygen\n"), true);
+  assert.equal(sandboxCreate.detectGpgConfig("[user]\n  name = Demo User\n"), false);
+});
+
+test("sanitizeGitConfig rewrites paths and keeps container GPG config usable", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const home = "/Users/demo";
+  const gitconfig = [
+    "[user]",
+    "  name = Demo User",
+    "  signingKey = /Users/demo/.gnupg/pubring.kbx",
+    "[gpg]",
+    "  program = /opt/homebrew/bin/gpg",
+    "  format = openpgp",
+    "[difftool \"sourcetree\"]",
+    "  cmd = /Applications/Sourcetree.app",
+    "[core]",
+    "  excludesfile = /Users/demo/.gitignore_global",
+    ""
+  ].join("\n");
+
+  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, home);
+
+  assert.match(sanitized, /\[user\]/);
+  assert.match(sanitized, /signingKey = \/home\/devuser\/\.gnupg\/pubring\.kbx/);
+  assert.match(sanitized, /\[gpg\]/);
+  assert.match(sanitized, /format = openpgp/);
+  assert.doesNotMatch(sanitized, /program = \/opt\/homebrew\/bin\/gpg/);
+  assert.doesNotMatch(sanitized, /\[difftool "sourcetree"\]/);
+  assert.match(sanitized, /excludesfile = \/home\/devuser\/\.gitignore_global/);
+});
+
+test("sanitizeGitConfig strips GPG sections when host keys are unavailable", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const gitconfig = [
+    "[commit]",
+    "  gpgsign = true",
+    "[gpg]",
+    "  program = /opt/homebrew/bin/gpg",
+    "[gpg \"ssh\"]",
+    "  allowedSignersFile = ~/.ssh/allowed_signers",
+    "[user]",
+    "  name = Demo User",
+    ""
+  ].join("\n");
+
+  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, "/Users/demo", { stripGpg: true });
+
+  assert.match(sanitized, /\[commit\]/);
+  assert.match(sanitized, /gpgsign = true/);
+  assert.match(sanitized, /\[user\]/);
+  assert.doesNotMatch(sanitized, /\[gpg\]/);
+  assert.doesNotMatch(sanitized, /\[gpg "ssh"\]/);
+  assert.doesNotMatch(sanitized, /allowedSignersFile/);
+});
+
+test("syncGpgKeys returns false when the host has no public keys to import", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const calls = [];
+
+  const synced = sandboxCreate.syncGpgKeys("demo-container", "/Users/demo", (cmd, args, options) => {
+    calls.push([cmd, args, options]);
+    if (cmd === "gpg" && args[0] === "--export") {
+      return Buffer.alloc(0);
+    }
+    throw new Error("unexpected call");
+  }, () => {
+    throw new Error("runSafe should not be called");
+  });
+
+  assert.equal(synced, false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], "gpg");
+  assert.deepEqual(calls[0][1], ["--export"]);
+  assert.equal(calls[0][2].env.HOME, "/Users/demo");
+});
+
+test("syncGpgKeys returns false when the host has no secret keys to import", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const calls = [];
+
+  const synced = sandboxCreate.syncGpgKeys("demo-container", "/Users/demo", (cmd, args, options) => {
+    calls.push([cmd, args, options]);
+    if (cmd !== "gpg") {
+      throw new Error("unexpected command");
+    }
+    if (args[0] === "--export") {
+      return Buffer.from("pub");
+    }
+    if (args[0] === "--export-secret-keys") {
+      return Buffer.alloc(0);
+    }
+    throw new Error("unexpected gpg args");
+  }, () => {
+    throw new Error("runSafe should not be called");
+  });
+
+  assert.equal(synced, false);
+  assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
+    ["gpg", ["--export"]],
+    ["gpg", ["--export-secret-keys"]]
+  ]);
+});
+
+test("syncGpgKeys imports host public and secret keys into the container", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const calls = [];
+  const runSafeCalls = [];
+
+  const synced = sandboxCreate.syncGpgKeys("demo-container", "/Users/demo", (cmd, args, options) => {
+    calls.push([cmd, args, options]);
+    if (cmd === "gpg" && args[0] === "--export") {
+      return Buffer.from("pub");
+    }
+    if (cmd === "gpg" && args[0] === "--export-secret-keys") {
+      return Buffer.from("sec");
+    }
+    if (cmd === "docker" && args.at(-1) === "--import") {
+      return Buffer.from("");
+    }
+    throw new Error(`unexpected call: ${cmd} ${args.join(" ")}`);
+  }, (cmd, args) => {
+    runSafeCalls.push([cmd, args]);
+    return "";
+  });
+
+  assert.equal(synced, true);
+  assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
+    ["gpg", ["--export"]],
+    ["gpg", ["--export-secret-keys"]],
+    ["docker", ["exec", "-i", "demo-container", "gpg", "--import"]],
+    ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
+  ]);
+  assert.equal(calls[0][2].env.HOME, "/Users/demo");
+  assert.deepEqual(calls[2][2], {
+    input: Buffer.from("pub"),
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  assert.deepEqual(calls[3][2], {
+    input: Buffer.from("sec"),
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  assert.deepEqual(runSafeCalls, [
+    ["docker", ["exec", "demo-container", "gpgconf", "--launch", "gpg-agent"]]
+  ]);
 });
 
 test("composeDockerfile rejects unknown runtimes", async () => {
