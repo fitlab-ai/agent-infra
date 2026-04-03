@@ -109,7 +109,9 @@ test("composeDockerfile includes gh CLI and bash_aliases sourcing", async () => 
     const content = fs.readFileSync(dockerfilePath, "utf8");
 
     assert.match(content, /cli\.github\.com\/packages/);
+    assert.match(content, /curl wget git vim file/);
     assert.match(content, /apt-get install -y gh/);
+    assert.match(content, /export GPG_TTY=\$\(tty\)/);
     assert.match(content, /\[ -f ~\/\.bash_aliases \] && \. ~\/\.bash_aliases/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -198,6 +200,67 @@ test("syncShellAliases skips missing alias files and copies existing aliases", a
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test("detectGpgConfig identifies host gitconfig that requires GPG support", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+
+  assert.equal(sandboxCreate.detectGpgConfig("[commit]\n  gpgsign = true\n"), true);
+  assert.equal(sandboxCreate.detectGpgConfig("[gpg]\n  program = /opt/homebrew/bin/gpg\n"), true);
+  assert.equal(sandboxCreate.detectGpgConfig("[gpg \"ssh\"]\n  program = /opt/homebrew/bin/ssh-keygen\n"), true);
+  assert.equal(sandboxCreate.detectGpgConfig("[user]\n  name = Demo User\n"), false);
+});
+
+test("sanitizeGitConfig rewrites paths and keeps mounted GPG config usable in the sandbox", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const home = "/Users/demo";
+  const gitconfig = [
+    "[user]",
+    "  name = Demo User",
+    "  signingKey = /Users/demo/.gnupg/pubring.kbx",
+    "[gpg]",
+    "  program = /opt/homebrew/bin/gpg",
+    "  format = openpgp",
+    "[difftool \"sourcetree\"]",
+    "  cmd = /Applications/Sourcetree.app",
+    "[core]",
+    "  excludesfile = /Users/demo/.gitignore_global",
+    ""
+  ].join("\n");
+
+  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, home);
+
+  assert.match(sanitized, /\[user\]/);
+  assert.match(sanitized, /signingKey = \/home\/devuser\/\.gnupg\/pubring\.kbx/);
+  assert.match(sanitized, /\[gpg\]/);
+  assert.match(sanitized, /format = openpgp/);
+  assert.doesNotMatch(sanitized, /program = \/opt\/homebrew\/bin\/gpg/);
+  assert.doesNotMatch(sanitized, /\[difftool "sourcetree"\]/);
+  assert.match(sanitized, /excludesfile = \/home\/devuser\/\.gitignore_global/);
+});
+
+test("sanitizeGitConfig strips GPG sections when host keys are unavailable", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const gitconfig = [
+    "[commit]",
+    "  gpgsign = true",
+    "[gpg]",
+    "  program = /opt/homebrew/bin/gpg",
+    "[gpg \"ssh\"]",
+    "  allowedSignersFile = ~/.ssh/allowed_signers",
+    "[user]",
+    "  name = Demo User",
+    ""
+  ].join("\n");
+
+  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, "/Users/demo", { stripGpg: true });
+
+  assert.match(sanitized, /\[commit\]/);
+  assert.match(sanitized, /gpgsign = true/);
+  assert.match(sanitized, /\[user\]/);
+  assert.doesNotMatch(sanitized, /\[gpg\]/);
+  assert.doesNotMatch(sanitized, /\[gpg "ssh"\]/);
+  assert.doesNotMatch(sanitized, /allowedSignersFile/);
 });
 
 test("composeDockerfile rejects unknown runtimes", async () => {

@@ -18,6 +18,7 @@ RUN git config --global --add safe.directory /workspace
 RUN echo 'export NPM_CONFIG_PREFIX=/home/devuser/.npm-global' >> /home/devuser/.bashrc && \
     echo 'export PATH="/home/devuser/.npm-global/bin:${PATH}"' >> /home/devuser/.bashrc && \
     echo 'export GIT_CONFIG_GLOBAL=/home/devuser/.gitconfig' >> /home/devuser/.bashrc && \
+    echo 'export GPG_TTY=$(tty)' >> /home/devuser/.bashrc && \
     echo '[ -f ~/.bash_aliases ] && . ~/.bash_aliases' >> /home/devuser/.bashrc
 
 WORKDIR /workspace
