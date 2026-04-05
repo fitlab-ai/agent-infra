@@ -5,7 +5,10 @@ description: "Archive completed tasks into a date-organized workspace directory"
 
 # Archive Completed Tasks
 
-Move completed tasks from `.agents/workspace/completed/` into `.agents/workspace/archive/YYYY/MM/DD/TASK-xxx/` and rebuild the archive index `manifest.md`.
+Move completed tasks from `.agents/workspace/completed/` into `.agents/workspace/archive/YYYY/MM/DD/TASK-xxx/` and rebuild a three-level archive index:
+- root manifest: `.agents/workspace/archive/manifest.md`
+- yearly manifest: `.agents/workspace/archive/YYYY/manifest.md`
+- monthly manifest: `.agents/workspace/archive/YYYY/MM/manifest.md`
 
 ## Execution Flow
 
@@ -29,7 +32,7 @@ The script is responsible for:
 - reading `completed_at` from `task.md` frontmatter and falling back to `updated_at`
 - moving task directories directly into `YYYY/MM/DD/TASK-xxx/` without compression
 - skipping already archived, missing, or malformed tasks
-- rebuilding `.agents/workspace/archive/manifest.md` from all archived tasks
+- rebuilding root, yearly, and monthly manifests from all archived tasks
 - printing an archive and skip summary
 
 ### 3. Inform the user
@@ -37,4 +40,4 @@ The script is responsible for:
 Report:
 - how many tasks were archived
 - how many tasks were skipped and why
-- the path to `manifest.md`
+- the path to the root manifest

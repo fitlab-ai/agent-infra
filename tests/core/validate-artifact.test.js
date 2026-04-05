@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { filePath, exists, read } from "../helpers.js";
 
 const scriptPath = filePath(".agents/scripts/validate-artifact.js");
+const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 function formatTimestamp(date) {
   const pad = (value) => String(value).padStart(2, "0");
@@ -20,6 +21,27 @@ function formatTimestamp(date) {
     pad(date.getMinutes()),
     pad(date.getSeconds())
   ].join(":");
+}
+
+function formatTimestampInTimeZone(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+
+  const values = Object.fromEntries(
+    parts
+      .filter(({ type }) => type !== "literal")
+      .map(({ type, value }) => [type, value])
+  );
+
+  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
 }
 
 function write(filePathname, content) {
@@ -320,7 +342,7 @@ test("validate-artifact activity-log freshness uses local timestamps", () => {
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
 
   try {
-    const staleTimestamp = formatTimestamp(new Date(Date.now() - 45 * 60_000));
+    const staleTimestamp = formatTimestampInTimeZone(new Date(Date.now() - 45 * 60_000), localTimeZone);
     const staleTask = buildTaskContent(
       { updated_at: staleTimestamp },
       { NOW: staleTimestamp }
@@ -331,7 +353,7 @@ test("validate-artifact activity-log freshness uses local timestamps", () => {
 
     const result = runValidator(["check", "activity-log", taskDir, "--skill", "implement-task"], {
       env: {
-        TZ: "Asia/Shanghai"
+        TZ: localTimeZone
       }
     });
 
