@@ -147,6 +147,128 @@ test("buildContainerEnvArgs skips GH_TOKEN when auth token is unavailable", asyn
   assert.deepEqual(envArgs, ["-e", "FOO=bar"]);
 });
 
+test("extractClaudeOAuthToken returns the environment token before checking the host", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = "env-token-123";
+
+  try {
+    const token = sandboxCreate.extractClaudeOAuthToken("/Users/demo", () => {
+      throw new Error("execFn should not be called");
+    });
+
+    assert.equal(token, "env-token-123");
+  } finally {
+    if (originalToken === undefined) {
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    } else {
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
+    }
+  }
+});
+
+test("extractClaudeOAuthToken reads the Claude Code OAuth token from macOS Keychain", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+  delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });
+
+  try {
+    const token = sandboxCreate.extractClaudeOAuthToken("/Users/demo", (cmd, args, options) => {
+      assert.equal(cmd, "security");
+      assert.deepEqual(args, [
+        "find-generic-password",
+        "-s",
+        "Claude Code-credentials",
+        "-w"
+      ]);
+      assert.deepEqual(options, {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      return JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "mac-keychain-token"
+        }
+      });
+    });
+
+    assert.equal(token, "mac-keychain-token");
+  } finally {
+    if (originalPlatformDescriptor) {
+      Object.defineProperty(process, "platform", originalPlatformDescriptor);
+    }
+    if (originalToken === undefined) {
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    } else {
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
+    }
+  }
+});
+
+test("extractClaudeOAuthToken falls back to an empty string when macOS Keychain lookup fails", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+  delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });
+
+  try {
+    const token = sandboxCreate.extractClaudeOAuthToken("/Users/demo", () => {
+      throw new Error("missing keychain item");
+    });
+
+    assert.equal(token, "");
+  } finally {
+    if (originalPlatformDescriptor) {
+      Object.defineProperty(process, "platform", originalPlatformDescriptor);
+    }
+    if (originalToken === undefined) {
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    } else {
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
+    }
+  }
+});
+
+test("extractClaudeOAuthToken reads Linux credentials from the Claude config directory", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-token-"));
+  const claudeDir = path.join(tmpDir, ".claude");
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+  fs.mkdirSync(claudeDir, { recursive: true });
+  fs.writeFileSync(path.join(claudeDir, ".credentials.json"), JSON.stringify({
+    accessToken: "linux-file-token"
+  }), "utf8");
+
+  delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  Object.defineProperty(process, "platform", { configurable: true, value: "linux" });
+
+  try {
+    const token = sandboxCreate.extractClaudeOAuthToken(tmpDir, () => {
+      throw new Error("execFn should not be called on Linux");
+    });
+
+    assert.equal(token, "linux-file-token");
+  } finally {
+    if (originalPlatformDescriptor) {
+      Object.defineProperty(process, "platform", originalPlatformDescriptor);
+    }
+    if (originalToken === undefined) {
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    } else {
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("buildImage uses verbose docker build output while keeping host UID/GID lookups quiet", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const calls = [];
