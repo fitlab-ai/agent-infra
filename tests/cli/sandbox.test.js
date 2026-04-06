@@ -147,6 +147,39 @@ test("buildContainerEnvArgs skips GH_TOKEN when auth token is unavailable", asyn
   assert.deepEqual(envArgs, ["-e", "FOO=bar"]);
 });
 
+test("assertBranchAvailable allows branches that are not checked out in any worktree", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+
+  assert.doesNotThrow(() => sandboxCreate.assertBranchAvailable("/repo", "feature/demo", (cmd, args) => {
+    assert.equal(cmd, "git");
+    assert.deepEqual(args, ["-C", "/repo", "worktree", "list", "--porcelain"]);
+    return "worktree /repo\nbranch refs/heads/main\n";
+  }));
+});
+
+test("assertBranchAvailable rejects branches that are already checked out", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+
+  assert.throws(() => sandboxCreate.assertBranchAvailable("/repo", "feature/demo", () => [
+    "worktree /repo/worktrees/demo",
+    "branch refs/heads/feature/demo",
+    ""
+  ].join("\n")), /already checked out/);
+});
+
+test("assertBranchAvailable reports the conflicting worktree path", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+
+  assert.throws(() => sandboxCreate.assertBranchAvailable("/repo", "feature/demo", () => [
+    "worktree /repo",
+    "branch refs/heads/main",
+    "",
+    "worktree /tmp/demo-worktree",
+    "branch refs/heads/feature/demo",
+    ""
+  ].join("\n")), /\/tmp\/demo-worktree/);
+});
+
 test("ensureClaudeOnboarding creates .claude.json with onboarding and workspace trust", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-"));
@@ -190,6 +223,37 @@ test("ensureClaudeOnboarding skips write when flag already set", async () => {
     const mtimeBefore = fs.statSync(filePath).mtimeMs;
     sandboxCreate.ensureClaudeOnboarding(tmpDir);
     const mtimeAfter = fs.statSync(filePath).mtimeMs;
+    assert.equal(mtimeBefore, mtimeAfter);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("ensureClaudeSettings creates settings.json with skipDangerousModePermissionPrompt", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-"));
+
+  try {
+    sandboxCreate.ensureClaudeSettings(tmpDir);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
+    assert.equal(data.skipDangerousModePermissionPrompt, true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("ensureClaudeSettings skips write when skipDangerousModePermissionPrompt is already set", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-noop-"));
+  const settingsPath = path.join(tmpDir, "settings.json");
+
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify({
+      skipDangerousModePermissionPrompt: true
+    }), "utf8");
+    const mtimeBefore = fs.statSync(settingsPath).mtimeMs;
+    sandboxCreate.ensureClaudeSettings(tmpDir);
+    const mtimeAfter = fs.statSync(settingsPath).mtimeMs;
     assert.equal(mtimeBefore, mtimeAfter);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -453,6 +517,8 @@ test("ensureSandboxAliasesFile creates the default aliases once", async () => {
 
     const content = fs.readFileSync(created.path, "utf8");
     assert.match(content, /alias claude-yolo='claude --dangerously-skip-permissions'/);
+    assert.match(content, /alias opencode-yolo='OPENCODE_PERMISSION=.*external_directory.*doom_loop.* opencode'/);
+    assert.match(content, /alias oy='OPENCODE_PERMISSION=.*external_directory.*doom_loop.* opencode'/);
     assert.match(content, /alias gy='gemini --yolo'/);
 
     const second = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
