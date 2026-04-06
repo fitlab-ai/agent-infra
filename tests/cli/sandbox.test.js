@@ -147,6 +147,55 @@ test("buildContainerEnvArgs skips GH_TOKEN when auth token is unavailable", asyn
   assert.deepEqual(envArgs, ["-e", "FOO=bar"]);
 });
 
+test("ensureClaudeOnboarding creates .claude.json with onboarding and workspace trust", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-"));
+
+  try {
+    sandboxCreate.ensureClaudeOnboarding(tmpDir);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
+    assert.equal(data.hasCompletedOnboarding, true);
+    assert.equal(data.projects["/workspace"].hasTrustDialogAccepted, true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("ensureClaudeOnboarding preserves existing fields", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-existing-"));
+
+  try {
+    fs.writeFileSync(path.join(tmpDir, ".claude.json"), JSON.stringify({ theme: "dark", userID: "abc" }), "utf8");
+    sandboxCreate.ensureClaudeOnboarding(tmpDir);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
+    assert.equal(data.hasCompletedOnboarding, true);
+    assert.equal(data.theme, "dark");
+    assert.equal(data.userID, "abc");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("ensureClaudeOnboarding skips write when flag already set", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-noop-"));
+  const filePath = path.join(tmpDir, ".claude.json");
+
+  try {
+    fs.writeFileSync(filePath, JSON.stringify({
+      hasCompletedOnboarding: true,
+      projects: { "/workspace": { hasTrustDialogAccepted: true } }
+    }), "utf8");
+    const mtimeBefore = fs.statSync(filePath).mtimeMs;
+    sandboxCreate.ensureClaudeOnboarding(tmpDir);
+    const mtimeAfter = fs.statSync(filePath).mtimeMs;
+    assert.equal(mtimeBefore, mtimeAfter);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("extractClaudeOAuthToken returns the environment token before checking the host", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -265,6 +314,66 @@ test("extractClaudeOAuthToken reads Linux credentials from the Claude config dir
     } else {
       process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
     }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexWorkspaceTrust appends workspace trust to config.toml", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-trust-"));
+
+  try {
+    fs.writeFileSync(path.join(tmpDir, "config.toml"), 'model = "o3"\n', "utf8");
+    sandboxCreate.ensureCodexWorkspaceTrust(tmpDir);
+    const content = fs.readFileSync(path.join(tmpDir, "config.toml"), "utf8");
+    assert.match(content, /model = "o3"/);
+    assert.match(content, /\[projects\."\/workspace"\]/);
+    assert.match(content, /trust_level = "trusted"/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexWorkspaceTrust skips when workspace trust already exists", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-trust-noop-"));
+  const configPath = path.join(tmpDir, "config.toml");
+
+  try {
+    const original = '[projects."/workspace"]\ntrust_level = "trusted"\n';
+    fs.writeFileSync(configPath, original, "utf8");
+    sandboxCreate.ensureCodexWorkspaceTrust(tmpDir);
+    assert.equal(fs.readFileSync(configPath, "utf8"), original);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("ensureGeminiWorkspaceTrust creates trustedFolders.json with workspace trust", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gemini-trust-"));
+
+  try {
+    sandboxCreate.ensureGeminiWorkspaceTrust(tmpDir);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "trustedFolders.json"), "utf8"));
+    assert.deepEqual(data, { "/workspace": "TRUST_FOLDER" });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("ensureGeminiWorkspaceTrust skips write when workspace trust already exists", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gemini-trust-noop-"));
+  const trustPath = path.join(tmpDir, "trustedFolders.json");
+
+  try {
+    fs.writeFileSync(trustPath, JSON.stringify({ "/workspace": "TRUST_FOLDER" }, null, 2), "utf8");
+    const mtimeBefore = fs.statSync(trustPath).mtimeMs;
+    sandboxCreate.ensureGeminiWorkspaceTrust(tmpDir);
+    const mtimeAfter = fs.statSync(trustPath).mtimeMs;
+    assert.equal(mtimeBefore, mtimeAfter);
+  } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
