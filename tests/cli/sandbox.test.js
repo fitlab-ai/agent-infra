@@ -755,6 +755,9 @@ test("syncGpgKeys returns false when the host has no public keys to import", asy
 
   const synced = sandboxCreate.syncGpgKeys("demo-container", "/Users/demo", "demo", (cmd, args, options) => {
     calls.push([cmd, args, options]);
+    if (cmd === "git") {
+      return "";
+    }
     if (cmd === "gpg" && args[0] === "--export") {
       return Buffer.alloc(0);
     }
@@ -764,10 +767,13 @@ test("syncGpgKeys returns false when the host has no public keys to import", asy
   });
 
   assert.equal(synced, false);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0][0], "gpg");
-  assert.deepEqual(calls[0][1], ["--export"]);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0][0], "git");
+  assert.deepEqual(calls[0][1], ["config", "--global", "user.signingKey"]);
   assert.equal(calls[0][2].env.HOME, "/Users/demo");
+  assert.equal(calls[1][0], "gpg");
+  assert.deepEqual(calls[1][1], ["--export"]);
+  assert.equal(calls[1][2].env.HOME, "/Users/demo");
 });
 
 test("currentKeyringFingerprint hashes the current secret keyring", async () => {
@@ -802,6 +808,38 @@ test("currentKeyringFingerprint returns null for an empty keyring listing", asyn
   const fingerprint = sandboxCreate.currentKeyringFingerprint("/Users/demo", () => "   \n");
 
   assert.equal(fingerprint, null);
+});
+
+test("getGitSigningKey returns the configured signing key", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+
+  const signingKey = sandboxCreate.getGitSigningKey("/Users/demo", (cmd, args, options) => {
+    assert.equal(cmd, "git");
+    assert.deepEqual(args, ["config", "--global", "user.signingKey"]);
+    assert.equal(options.encoding, "utf8");
+    assert.equal(options.env.HOME, "/Users/demo");
+    return "8246B1E31A62A1D6\n";
+  });
+
+  assert.equal(signingKey, "8246B1E31A62A1D6");
+});
+
+test("getGitSigningKey returns null when git config lookup fails", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+
+  const signingKey = sandboxCreate.getGitSigningKey("/Users/demo", () => {
+    throw new Error("git config failed");
+  });
+
+  assert.equal(signingKey, null);
+});
+
+test("getGitSigningKey returns null for empty output", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+
+  const signingKey = sandboxCreate.getGitSigningKey("/Users/demo", () => "   \n");
+
+  assert.equal(signingKey, null);
 });
 
 test("readGpgCache returns null when the cache does not exist", async () => {
@@ -977,6 +1015,9 @@ test("syncGpgKeys exports host keys and writes the cache on a cache miss", async
       if (cmd === "gpg" && args[0] === "--export-secret-keys") {
         return Buffer.from("sec");
       }
+      if (cmd === "git") {
+        return "";
+      }
       if (cmd === "gpg" && args[0] === "--list-secret-keys") {
         return "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
       }
@@ -988,6 +1029,7 @@ test("syncGpgKeys exports host keys and writes the cache on a cache miss", async
 
     assert.equal(synced, true);
     assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
+      ["git", ["config", "--global", "user.signingKey"]],
       ["gpg", ["--export"]],
       ["gpg", ["--export-secret-keys"]],
       ["gpg", ["--list-secret-keys", "--with-colons"]],
@@ -1007,17 +1049,66 @@ test("syncGpgKeys exports host keys and writes the cache on a cache miss", async
   }
 });
 
+test("syncGpgKeys exports only the configured signing key on a cache miss", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-signing-key-"));
+  const calls = [];
+
+  try {
+    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd, args, options) => {
+      calls.push([cmd, args, options]);
+      if (cmd === "git") {
+        return "8246B1E31A62A1D6\n";
+      }
+      if (cmd === "gpg" && args[0] === "--export") {
+        return Buffer.from("pub");
+      }
+      if (cmd === "gpg" && args[0] === "--export-secret-keys") {
+        return Buffer.from("sec");
+      }
+      if (cmd === "gpg" && args[0] === "--list-secret-keys") {
+        return "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
+      }
+      if (cmd === "docker" && args.at(-1) === "--import") {
+        return Buffer.from("");
+      }
+      throw new Error(`unexpected call: ${cmd} ${args.join(" ")}`);
+    }, () => "");
+
+    assert.equal(synced, true);
+    assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
+      ["git", ["config", "--global", "user.signingKey"]],
+      ["gpg", ["--export", "8246B1E31A62A1D6"]],
+      ["gpg", ["--export-secret-keys", "8246B1E31A62A1D6"]],
+      ["gpg", ["--list-secret-keys", "--with-colons"]],
+      ["docker", ["exec", "-i", "demo-container", "gpg", "--import"]],
+      ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("syncGpgKeys still succeeds when writing the cache fails", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-cache-write-fails-"));
   const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
   const calls = [];
+  const writes = [];
+  const originalWrite = process.stderr.write;
 
   try {
     fs.writeFileSync(cacheDir, "blocking-file");
+    process.stderr.write = (...args) => {
+      writes.push(args[0]);
+      return true;
+    };
 
     const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd, args, options) => {
       calls.push([cmd, args, options]);
+      if (cmd === "git") {
+        return "";
+      }
       if (cmd === "gpg" && args[0] === "--list-secret-keys") {
         return "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
       }
@@ -1035,13 +1126,18 @@ test("syncGpgKeys still succeeds when writing the cache fails", async () => {
 
     assert.equal(synced, true);
     assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
+      ["git", ["config", "--global", "user.signingKey"]],
       ["gpg", ["--export"]],
       ["gpg", ["--export-secret-keys"]],
       ["gpg", ["--list-secret-keys", "--with-colons"]],
       ["docker", ["exec", "-i", "demo-container", "gpg", "--import"]],
       ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
     ]);
+    assert.deepEqual(writes, [
+      "Warning: failed to cache GPG keys; next sandbox create may prompt again.\n"
+    ]);
   } finally {
+    process.stderr.write = originalWrite;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
@@ -1052,6 +1148,9 @@ test("syncGpgKeys returns false when the host has no secret keys to import", asy
 
   const synced = sandboxCreate.syncGpgKeys("demo-container", "/Users/demo", "demo", (cmd, args, options) => {
     calls.push([cmd, args, options]);
+    if (cmd === "git") {
+      return "";
+    }
     if (cmd !== "gpg") {
       throw new Error("unexpected command");
     }
@@ -1068,6 +1167,7 @@ test("syncGpgKeys returns false when the host has no secret keys to import", asy
 
   assert.equal(synced, false);
   assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
+    ["git", ["config", "--global", "user.signingKey"]],
     ["gpg", ["--export"]],
     ["gpg", ["--export-secret-keys"]]
   ]);
@@ -1080,6 +1180,9 @@ test("syncGpgKeys imports host public and secret keys into the container", async
 
   const synced = sandboxCreate.syncGpgKeys("demo-container", "/Users/demo", "demo", (cmd, args, options) => {
     calls.push([cmd, args, options]);
+    if (cmd === "git") {
+      return "";
+    }
     if (cmd === "gpg" && args[0] === "--export") {
       return Buffer.from("pub");
     }
@@ -1097,6 +1200,7 @@ test("syncGpgKeys imports host public and secret keys into the container", async
 
   assert.equal(synced, true);
   assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
+    ["git", ["config", "--global", "user.signingKey"]],
     ["gpg", ["--export"]],
     ["gpg", ["--export-secret-keys"]],
     ["gpg", ["--list-secret-keys", "--with-colons"]],
@@ -1104,13 +1208,15 @@ test("syncGpgKeys imports host public and secret keys into the container", async
     ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
   ]);
   assert.equal(calls[0][2].env.HOME, "/Users/demo");
-  assert.equal(calls[2][2].env.HOME, "/Users/demo");
-  assert.equal(calls[2][2].encoding, "utf8");
-  assert.deepEqual(calls[3][2], {
+  assert.equal(calls[0][2].encoding, "utf8");
+  assert.equal(calls[1][2].env.HOME, "/Users/demo");
+  assert.equal(calls[3][2].env.HOME, "/Users/demo");
+  assert.equal(calls[3][2].encoding, "utf8");
+  assert.deepEqual(calls[4][2], {
     input: Buffer.from("pub"),
     stdio: ["pipe", "pipe", "pipe"]
   });
-  assert.deepEqual(calls[4][2], {
+  assert.deepEqual(calls[5][2], {
     input: Buffer.from("sec"),
     stdio: ["pipe", "pipe", "pipe"]
   });
