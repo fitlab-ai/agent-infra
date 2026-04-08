@@ -152,6 +152,23 @@ test("buildContainerEnvArgs skips GH_TOKEN when auth token is unavailable", asyn
   assert.deepEqual(envArgs, ["-e", "FOO=bar"]);
 });
 
+test("claude-code tool pins CLAUDE_CONFIG_DIR so $HOME/.claude.json preseed reaches Claude Code", async () => {
+  // Regression guard for the onboarding loop bug: without this env var Claude
+  // Code reads .claude.json from $HOME/.claude.json (outside the bind mount),
+  // so the preseeded onboarding state is silently ignored and every container
+  // start lands on the theme picker.
+  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
+  const tools = sandboxTools.resolveTools({
+    home: "/home/host-user",
+    project: "demo",
+    tools: ["claude-code"]
+  });
+
+  assert.equal(tools.length, 1);
+  assert.equal(tools[0].containerMount, "/home/devuser/.claude");
+  assert.equal(tools[0].envVars?.CLAUDE_CONFIG_DIR, "/home/devuser/.claude");
+});
+
 test("assertBranchAvailable allows branches that are not checked out in any worktree", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
 
