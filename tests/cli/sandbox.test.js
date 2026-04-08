@@ -32,6 +32,60 @@ test("sandbox create help documents the host aliases file", () => {
   assert.match(output, /\/home\/devuser\/\.bash_aliases/);
 });
 
+test("sandbox create fails before preparing a temporary Dockerfile when Claude credentials are missing", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-no-credentials-"));
+  const repoDir = path.join(tmpDir, "repo");
+  const homeDir = path.join(tmpDir, "home");
+  const project = `sandbox-no-leak-${process.pid}-${Date.now()}`;
+  const dockerfilePrefix = `${project}-sandbox-`;
+  const existingEntries = new Set(
+    fs.readdirSync(os.tmpdir()).filter((entry) => entry.startsWith(dockerfilePrefix))
+  );
+
+  try {
+    fs.mkdirSync(repoDir, { recursive: true });
+    fs.mkdirSync(homeDir, { recursive: true });
+    execSync("git init", { cwd: repoDir, stdio: "pipe" });
+    fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repoDir, ".agents", ".airc.json"),
+      JSON.stringify({ project, org: "fitlab-ai" }, null, 2) + "\n",
+      "utf8"
+    );
+
+    let commandError;
+    try {
+      execFileSync(
+        process.execPath,
+        [filePath("bin/cli.js"), "sandbox", "create", "feature/no-credentials"],
+        {
+          cwd: repoDir,
+          env: { ...process.env, HOME: homeDir },
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"]
+        }
+      );
+    } catch (error) {
+      commandError = error;
+    }
+
+    assert.ok(commandError);
+    assert.match(commandError.stderr, /Claude Code credentials not found on host/);
+
+    const leakedEntries = fs.readdirSync(os.tmpdir()).filter((entry) => (
+      entry.startsWith(dockerfilePrefix) && !existingEntries.has(entry)
+    ));
+    assert.deepEqual(leakedEntries, []);
+  } finally {
+    for (const entry of fs.readdirSync(os.tmpdir())) {
+      if (entry.startsWith(dockerfilePrefix) && !existingEntries.has(entry)) {
+        fs.rmSync(path.join(os.tmpdir(), entry), { recursive: true, force: true });
+      }
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => {
   const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-config-"));
@@ -172,34 +226,57 @@ test("claude-code tool pins CLAUDE_CONFIG_DIR so $HOME/.claude.json preseed reac
 test("assertBranchAvailable allows branches that are not checked out in any worktree", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
 
-  assert.doesNotThrow(() => sandboxCreate.assertBranchAvailable("/repo", "feature/demo", (cmd, args) => {
-    assert.equal(cmd, "git");
-    assert.deepEqual(args, ["-C", "/repo", "worktree", "list", "--porcelain"]);
-    return "worktree /repo\nbranch refs/heads/main\n";
+  assert.doesNotThrow(() => sandboxCreate.assertBranchAvailable("/repo", "feature/demo", {
+    runFn(cmd, args) {
+      assert.equal(cmd, "git");
+      assert.deepEqual(args, ["-C", "/repo", "worktree", "list", "--porcelain"]);
+      return "worktree /repo\nbranch refs/heads/main\n";
+    }
   }));
 });
 
 test("assertBranchAvailable rejects branches that are already checked out", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
 
-  assert.throws(() => sandboxCreate.assertBranchAvailable("/repo", "feature/demo", () => [
-    "worktree /repo/worktrees/demo",
-    "branch refs/heads/feature/demo",
-    ""
-  ].join("\n")), /already checked out/);
+  assert.throws(() => sandboxCreate.assertBranchAvailable("/repo", "feature/demo", {
+    runFn: () => [
+      "worktree /repo/worktrees/demo",
+      "branch refs/heads/feature/demo",
+      ""
+    ].join("\n")
+  }), /already checked out/);
 });
 
 test("assertBranchAvailable reports the conflicting worktree path", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
 
-  assert.throws(() => sandboxCreate.assertBranchAvailable("/repo", "feature/demo", () => [
-    "worktree /repo",
-    "branch refs/heads/main",
-    "",
-    "worktree /tmp/demo-worktree",
-    "branch refs/heads/feature/demo",
-    ""
-  ].join("\n")), /\/tmp\/demo-worktree/);
+  assert.throws(() => sandboxCreate.assertBranchAvailable("/repo", "feature/demo", {
+    runFn: () => [
+      "worktree /repo",
+      "branch refs/heads/main",
+      "",
+      "worktree /tmp/demo-worktree",
+      "branch refs/heads/feature/demo",
+      ""
+    ].join("\n")
+  }), /\/tmp\/demo-worktree/);
+});
+
+test("assertBranchAvailable allows the current sandbox worktree to reuse the checked out branch", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+
+  assert.doesNotThrow(() => sandboxCreate.assertBranchAvailable(
+    "/repo",
+    "feature/demo",
+    {
+      allowedWorktrees: ["/repo/.worktrees/feature-demo"],
+      runFn: () => [
+        "worktree /repo/.worktrees/feature-demo",
+        "branch refs/heads/feature/demo",
+        ""
+      ].join("\n")
+    }
+  ));
 });
 
 test("ensureClaudeOnboarding creates .claude.json with onboarding and workspace trust", async () => {
@@ -1076,22 +1153,48 @@ test("currentKeyringFingerprint returns null for an empty keyring listing", asyn
 test("getGitSigningKey returns the configured signing key", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
 
-  const signingKey = sandboxCreate.getGitSigningKey("/Users/demo", (cmd, args, options) => {
-    assert.equal(cmd, "git");
-    assert.deepEqual(args, ["config", "--global", "user.signingKey"]);
-    assert.equal(options.encoding, "utf8");
-    assert.equal(options.env.HOME, "/Users/demo");
-    return "8246B1E31A62A1D6\n";
+  const signingKey = sandboxCreate.getGitSigningKey({
+    home: "/Users/demo",
+    execFn(cmd, args, options) {
+      assert.equal(cmd, "git");
+      assert.deepEqual(args, ["config", "--global", "user.signingKey"]);
+      assert.equal(options.encoding, "utf8");
+      assert.equal(options.env.HOME, "/Users/demo");
+      return "8246B1E31A62A1D6\n";
+    }
   });
 
   assert.equal(signingKey, "8246B1E31A62A1D6");
 });
 
+test("getGitSigningKey reads repo-local signingKey when a worktree path is provided", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-signing-key-local-"));
+  const repoDir = path.join(tmpDir, "repo");
+  const homeDir = path.join(tmpDir, "home");
+
+  try {
+    fs.mkdirSync(repoDir, { recursive: true });
+    fs.mkdirSync(homeDir, { recursive: true });
+    execSync("git init", { cwd: repoDir, stdio: "pipe" });
+    execSync("git config user.signingKey LOCAL-KEY-123", { cwd: repoDir, stdio: "pipe" });
+
+    const signingKey = sandboxCreate.getGitSigningKey({ repoPath: repoDir, home: homeDir });
+
+    assert.equal(signingKey, "LOCAL-KEY-123");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("getGitSigningKey returns null when git config lookup fails", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
 
-  const signingKey = sandboxCreate.getGitSigningKey("/Users/demo", () => {
-    throw new Error("git config failed");
+  const signingKey = sandboxCreate.getGitSigningKey({
+    home: "/Users/demo",
+    execFn() {
+      throw new Error("git config failed");
+    }
   });
 
   assert.equal(signingKey, null);
@@ -1100,7 +1203,10 @@ test("getGitSigningKey returns null when git config lookup fails", async () => {
 test("getGitSigningKey returns null for empty output", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
 
-  const signingKey = sandboxCreate.getGitSigningKey("/Users/demo", () => "   \n");
+  const signingKey = sandboxCreate.getGitSigningKey({
+    home: "/Users/demo",
+    execFn: () => "   \n"
+  });
 
   assert.equal(signingKey, null);
 });
@@ -1187,6 +1293,31 @@ test("readGpgCache returns null when the keyring fingerprint changed", async () 
   }
 });
 
+test("readGpgCache returns null when the cached signingKey no longer matches", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-signing-key-stale-"));
+  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
+  const fingerprint = createHash("sha256").update(listing).digest("hex");
+
+  try {
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, "public.asc"), "pub");
+    fs.writeFileSync(path.join(cacheDir, "secret.asc"), "sec");
+    fs.writeFileSync(
+      path.join(cacheDir, "state.json"),
+      `${JSON.stringify({ fingerprint, signingKey: "OLD-KEY" })}\n`,
+      "utf8"
+    );
+
+    const cache = sandboxCreate.readGpgCache(tmpDir, "demo", () => listing, "NEW-KEY");
+
+    assert.equal(cache, null);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("writeGpgCache creates cache files with secure permissions", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-write-"));
@@ -1212,11 +1343,36 @@ test("writeGpgCache creates cache files with secure permissions", async () => {
   }
 });
 
-test("syncGpgKeys reuses a caller-provided cache without re-reading from disk", async () => {
-  // Regression guard for the duplicate-readGpgCache cleanup: create() reads
-  // the cache once to decide the progress message, then passes the result
-  // into syncGpgKeys so we don't shell out to `gpg --list-secret-keys` twice
-  // per sandbox create.
+test("writeGpgCache stores the signingKey used to build the cache", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-write-signing-key-"));
+  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+
+  try {
+    const written = sandboxCreate.writeGpgCache(
+      tmpDir,
+      "demo",
+      Buffer.from("pub"),
+      Buffer.from("sec"),
+      "fingerprint-1",
+      "KEY-123"
+    );
+
+    assert.equal(written, true);
+    assert.equal(
+      fs.readFileSync(path.join(cacheDir, "state.json"), "utf8"),
+      '{\n  "fingerprint": "fingerprint-1",\n  "signingKey": "KEY-123"\n}\n'
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncGpgKeys reuses a caller-provided cache without re-reading from disk or git config", async () => {
+  // Regression guard for the latest create() path: once the caller has already
+  // resolved the cache hit and signingKey, syncGpgKeys should import the
+  // provided key material directly without spawning another `git config` or
+  // `gpg --list-secret-keys` subprocess.
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const calls = [];
   const providedCache = {
@@ -1236,7 +1392,10 @@ test("syncGpgKeys reuses a caller-provided cache without re-reading from disk", 
       throw new Error(`unexpected execFn call: ${cmd} ${args.join(" ")}`);
     },
     () => "",
-    providedCache
+    {
+      cachedOverride: providedCache,
+      signingKey: "KEY-123"
+    }
   );
 
   assert.equal(synced, true);
@@ -1252,6 +1411,77 @@ test("syncGpgKeys reuses a caller-provided cache without re-reading from disk", 
     input: Buffer.from("sec-from-caller"),
     stdio: ["pipe", "pipe", "pipe"]
   });
+});
+
+test("syncGpgKeys invalidates cache when the effective signing key changed", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-signing-key-changed-"));
+  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
+  const fingerprint = createHash("sha256").update(listing).digest("hex");
+  const calls = [];
+
+  try {
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, "public.asc"), "pub-old");
+    fs.writeFileSync(path.join(cacheDir, "secret.asc"), "sec-old");
+    fs.writeFileSync(
+      path.join(cacheDir, "state.json"),
+      `${JSON.stringify({ fingerprint, signingKey: "OLD-KEY" })}\n`,
+      "utf8"
+    );
+
+    const synced = sandboxCreate.syncGpgKeys(
+      "demo-container",
+      tmpDir,
+      "demo",
+      (cmd, args, options) => {
+        calls.push([cmd, args, options]);
+        if (cmd === "git") {
+          return "NEW-KEY\n";
+        }
+        if (cmd === "gpg" && args[0] === "--list-secret-keys") {
+          return listing;
+        }
+        if (cmd === "gpg" && args[0] === "--export") {
+          assert.deepEqual(args, ["--export", "NEW-KEY"]);
+          return Buffer.from("pub-new");
+        }
+        if (cmd === "gpg" && args[0] === "--export-secret-keys") {
+          assert.deepEqual(args, ["--export-secret-keys", "NEW-KEY"]);
+          return Buffer.from("sec-new");
+        }
+        if (cmd === "docker" && args.at(-1) === "--import") {
+          return Buffer.from("");
+        }
+        throw new Error(`unexpected call: ${cmd} ${args.join(" ")}`);
+      },
+      () => "",
+      {
+        repoPath: "/repo/worktrees/demo"
+      }
+    );
+
+    assert.equal(synced, true);
+    assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
+      ["git", ["-C", "/repo/worktrees/demo", "config", "user.signingKey"]],
+      ["gpg", ["--export", "NEW-KEY"]],
+      ["gpg", ["--export-secret-keys", "NEW-KEY"]],
+      ["gpg", ["--list-secret-keys", "--with-colons"]],
+      ["docker", ["exec", "-i", "demo-container", "gpg", "--import"]],
+      ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
+    ]);
+    assert.equal(fs.readFileSync(path.join(cacheDir, "public.asc"), "utf8"), "pub-new");
+    assert.equal(fs.readFileSync(path.join(cacheDir, "secret.asc"), "utf8"), "sec-new");
+    assert.equal(
+      fs.readFileSync(path.join(cacheDir, "state.json"), "utf8"),
+      '{\n  "fingerprint": "'
+        + fingerprint
+        + '",\n  "signingKey": "NEW-KEY"\n}\n'
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("syncGpgKeys uses the cache when the keyring fingerprint matches", async () => {
@@ -1286,15 +1516,18 @@ test("syncGpgKeys uses the cache when the keyring fingerprint matches", async ()
 
     assert.equal(synced, true);
     assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
+      ["git", ["config", "--global", "user.signingKey"]],
       ["gpg", ["--list-secret-keys", "--with-colons"]],
       ["docker", ["exec", "-i", "demo-container", "gpg", "--import"]],
       ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
     ]);
-    assert.deepEqual(calls[1][2], {
+    assert.equal(calls[0][2].env.HOME, tmpDir);
+    assert.equal(calls[0][2].encoding, "utf8");
+    assert.deepEqual(calls[2][2], {
       input: Buffer.from("pub"),
       stdio: ["pipe", "pipe", "pipe"]
     });
-    assert.deepEqual(calls[2][2], {
+    assert.deepEqual(calls[3][2], {
       input: Buffer.from("sec"),
       stdio: ["pipe", "pipe", "pipe"]
     });
