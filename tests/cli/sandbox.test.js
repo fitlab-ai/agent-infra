@@ -273,6 +273,62 @@ test("claude-code tool pins CLAUDE_CONFIG_DIR so $HOME/.claude.json preseed reac
   assert.equal(tools[0].envVars?.CLAUDE_CONFIG_DIR, "/home/devuser/.claude");
 });
 
+test("resolveTools consolidates sandbox bases under ~/.agent-infra while preserving legacy fallbacks", async () => {
+  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
+  const tools = sandboxTools.resolveTools({
+    home: "/home/host-user",
+    project: "demo",
+    tools: ["claude-code", "codex", "opencode", "gemini-cli"]
+  });
+
+  assert.deepEqual(tools.map((tool) => ({
+    id: tool.id,
+    sandboxBase: tool.sandboxBase,
+    legacySandboxBases: tool.legacySandboxBases
+  })), [
+    {
+      id: "claude-code",
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/claude-code",
+      legacySandboxBases: ["/home/host-user/.claude-sandboxes"]
+    },
+    {
+      id: "codex",
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/codex",
+      legacySandboxBases: ["/home/host-user/.codex-sandboxes"]
+    },
+    {
+      id: "opencode",
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/opencode",
+      legacySandboxBases: ["/home/host-user/.opencode-sandboxes"]
+    },
+    {
+      id: "gemini-cli",
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/gemini-cli",
+      legacySandboxBases: ["/home/host-user/.gemini-sandboxes"]
+    }
+  ]);
+});
+
+test("tool directory candidates prefer consolidated paths before legacy paths", async () => {
+  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
+  const [tool] = sandboxTools.resolveTools({
+    home: "/home/host-user",
+    project: "demo",
+    tools: ["claude-code"]
+  });
+
+  assert.deepEqual(sandboxTools.toolProjectDirCandidates(tool, "demo"), [
+    "/home/host-user/.agent-infra/sandboxes/claude-code/demo",
+    "/home/host-user/.claude-sandboxes/demo"
+  ]);
+  assert.deepEqual(sandboxTools.toolConfigDirCandidates(tool, "demo", "feature/demo"), [
+    "/home/host-user/.agent-infra/sandboxes/claude-code/demo/feature..demo",
+    "/home/host-user/.agent-infra/sandboxes/claude-code/demo/feature-demo",
+    "/home/host-user/.claude-sandboxes/demo/feature..demo",
+    "/home/host-user/.claude-sandboxes/demo/feature-demo"
+  ]);
+});
+
 test("assertBranchAvailable allows branches that are not checked out in any worktree", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
 
@@ -1060,35 +1116,108 @@ test("ensureColima uses verbose commands for install and startup", async () => {
   ]);
 });
 
-test("syncShellAliases skips missing alias files and copies existing aliases", async () => {
+test("hostHasGpgKeys reports whether the host keyring is available", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-"));
+
+  assert.equal(sandboxCreate.hostHasGpgKeys("/Users/demo", () => "sec:u:255:22:ABCDEF:1700000000:0::::::23::0:\n"), true);
+  assert.equal(sandboxCreate.hostHasGpgKeys("/Users/demo", () => {
+    throw new Error("gpg failed");
+  }), false);
+});
+
+test("prepareHostShellConfig writes sanitized config files and returns read-only mount metadata", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-shell-config-"));
 
   try {
-    const calls = [];
-    const missing = sandboxCreate.syncShellAliases("demo-container", tmpDir, (...args) => calls.push(args));
-    assert.equal(missing, false);
-    assert.deepEqual(calls, []);
+    fs.writeFileSync(path.join(tmpDir, ".gitconfig"), [
+      "[commit]",
+      "  gpgsign = true",
+      "[user]",
+      `  signingKey = ${tmpDir}/.gnupg/pubring.kbx`,
+      "[gpg]",
+      "  program = /opt/homebrew/bin/gpg",
+      "[core]",
+      `  excludesfile = ${tmpDir}/.gitignore_global`,
+      ""
+    ].join("\n"), "utf8");
+    fs.writeFileSync(path.join(tmpDir, ".gitignore_global"), "node_modules/\n", "utf8");
+    fs.writeFileSync(path.join(tmpDir, ".stCommitMsg"), "feat: demo\n", "utf8");
+    const aliases = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
 
-    const aliasesPath = path.join(tmpDir, ".ai-sandbox-aliases");
-    fs.writeFileSync(aliasesPath, "alias cy='claude --dangerously-skip-permissions'\n", "utf8");
-
-    const copied = sandboxCreate.syncShellAliases("demo-container", tmpDir, (...args) => calls.push(args));
-    assert.equal(copied, true);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0][0], "docker");
-    assert.deepEqual(calls[0][1], [
-      "exec",
-      "-i",
-      "demo-container",
-      "sh",
-      "-c",
-      "cat > /home/devuser/.bash_aliases"
-    ]);
-    assert.deepEqual(calls[0][2], {
-      input: "alias cy='claude --dangerously-skip-permissions'\n",
-      stdio: ["pipe", "pipe", "pipe"]
+    const prepared = sandboxCreate.prepareHostShellConfig({
+      home: tmpDir,
+      project: "demo",
+      branch: "feature/demo",
+      repoRoot: "/repo"
     });
+
+    assert.equal(
+      prepared.hostDir,
+      path.join(tmpDir, ".agent-infra", "config", "demo", "feature..demo")
+    );
+    assert.deepEqual(prepared.mounts, [
+      {
+        hostPath: path.join(prepared.hostDir, ".gitconfig"),
+        containerPath: "/home/devuser/.gitconfig"
+      },
+      {
+        hostPath: path.join(prepared.hostDir, ".gitignore_global"),
+        containerPath: "/home/devuser/.gitignore_global"
+      },
+      {
+        hostPath: path.join(prepared.hostDir, ".stCommitMsg"),
+        containerPath: "/home/devuser/.stCommitMsg"
+      },
+      {
+        hostPath: path.join(prepared.hostDir, ".bash_aliases"),
+        containerPath: "/home/devuser/.bash_aliases"
+      }
+    ]);
+    assert.deepEqual(
+      fs.readFileSync(path.join(prepared.hostDir, ".gitconfig"), "utf8").split("\n").filter(Boolean),
+      [
+        "[commit]",
+        "[user]",
+        "[core]",
+        "  excludesfile = /home/devuser/.gitignore_global",
+        "[safe]",
+        "\tdirectory = /workspace",
+        "\tdirectory = /repo"
+      ]
+    );
+    assert.equal(
+      fs.readFileSync(path.join(prepared.hostDir, ".bash_aliases"), "utf8"),
+      fs.readFileSync(aliases.path, "utf8")
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("prepareHostShellConfig removes stale files from the previous host config snapshot", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-shell-config-cleanup-"));
+  const hostDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..demo");
+
+  try {
+    fs.mkdirSync(hostDir, { recursive: true });
+    fs.writeFileSync(path.join(hostDir, ".stCommitMsg"), "stale\n", "utf8");
+    fs.writeFileSync(path.join(tmpDir, ".gitconfig"), "[user]\n  name = Demo User\n", "utf8");
+    sandboxCreate.ensureSandboxAliasesFile(tmpDir);
+
+    const prepared = sandboxCreate.prepareHostShellConfig({
+      home: tmpDir,
+      project: "demo",
+      branch: "feature/demo",
+      repoRoot: "/repo"
+    });
+
+    assert.equal(fs.existsSync(path.join(prepared.hostDir, ".stCommitMsg")), false);
+    assert.equal(
+      prepared.mounts.some(({ hostPath }) => hostPath.endsWith(".stCommitMsg")),
+      false
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1103,7 +1232,7 @@ test("detectGpgConfig identifies host gitconfig that requires GPG support", asyn
   assert.equal(sandboxCreate.detectGpgConfig("[user]\n  name = Demo User\n"), false);
 });
 
-test("sanitizeGitConfig rewrites paths and keeps container GPG config usable", async () => {
+test("sanitizeGitConfig rewrites host paths and appends safe.directory entries", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const home = "/Users/demo";
   const gitconfig = [
@@ -1120,39 +1249,122 @@ test("sanitizeGitConfig rewrites paths and keeps container GPG config usable", a
     ""
   ].join("\n");
 
-  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, home);
+  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, home, { repoRoot: "/repo" });
 
-  assert.match(sanitized, /\[user\]/);
-  assert.match(sanitized, /signingKey = \/home\/devuser\/\.gnupg\/pubring\.kbx/);
-  assert.match(sanitized, /\[gpg\]/);
-  assert.match(sanitized, /format = openpgp/);
-  assert.doesNotMatch(sanitized, /program = \/opt\/homebrew\/bin\/gpg/);
-  assert.doesNotMatch(sanitized, /\[difftool "sourcetree"\]/);
-  assert.match(sanitized, /excludesfile = \/home\/devuser\/\.gitignore_global/);
+  assert.deepEqual(sanitized.split("\n").filter(Boolean), [
+    "[user]",
+    "  name = Demo User",
+    "  signingKey = /home/devuser/.gnupg/pubring.kbx",
+    "[gpg]",
+    "  format = openpgp",
+    "[core]",
+    "  excludesfile = /home/devuser/.gitignore_global",
+    "[safe]",
+    "\tdirectory = /workspace",
+    "\tdirectory = /repo"
+  ]);
 });
 
-test("sanitizeGitConfig strips GPG sections when host keys are unavailable", async () => {
+test("sanitizeGitConfig appends missing safe.directory entries to an existing safe section", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const gitconfig = [
+    "[core]",
+    "  editor = vim",
+    "[safe]",
+    "  directory = /workspace",
+    "[user]",
+    "  name = Demo User",
+    ""
+  ].join("\n");
+
+  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, "/Users/demo", { repoRoot: "/repo" });
+  const lines = sanitized.split("\n").filter(Boolean);
+
+  assert.equal(lines.filter((line) => line === "[safe]").length, 1);
+  assert.deepEqual(lines, [
+    "[core]",
+    "  editor = vim",
+    "[safe]",
+    "  directory = /workspace",
+    "\tdirectory = /repo",
+    "[user]",
+    "  name = Demo User"
+  ]);
+});
+
+test("sanitizeGitConfig strips GPG settings from non-gpg sections when host keys are unavailable", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const gitconfig = [
     "[commit]",
+    "  gpgsign = true",
+    "[tag]",
     "  gpgsign = true",
     "[gpg]",
     "  program = /opt/homebrew/bin/gpg",
     "[gpg \"ssh\"]",
     "  allowedSignersFile = ~/.ssh/allowed_signers",
     "[user]",
+    "  signingKey = /Users/demo/.gnupg/pubring.kbx",
     "  name = Demo User",
+    "[core]",
+    "  editor = vim",
     ""
   ].join("\n");
 
-  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, "/Users/demo", { stripGpg: true });
+  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, "/Users/demo", {
+    stripGpg: true,
+    repoRoot: "/repo"
+  });
 
-  assert.match(sanitized, /\[commit\]/);
-  assert.match(sanitized, /gpgsign = true/);
-  assert.match(sanitized, /\[user\]/);
-  assert.doesNotMatch(sanitized, /\[gpg\]/);
-  assert.doesNotMatch(sanitized, /\[gpg "ssh"\]/);
-  assert.doesNotMatch(sanitized, /allowedSignersFile/);
+  assert.deepEqual(sanitized.split("\n").filter(Boolean), [
+    "[commit]",
+    "[tag]",
+    "[user]",
+    "  name = Demo User",
+    "[core]",
+    "  editor = vim",
+    "[safe]",
+    "\tdirectory = /workspace",
+    "\tdirectory = /repo"
+  ]);
+});
+
+test("writeSanitizedGitconfig rewrites the mounted gitconfig without replacing the inode", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-write-sanitized-gitconfig-"));
+  const hostConfigDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..demo");
+
+  try {
+    fs.writeFileSync(path.join(tmpDir, ".gitconfig"), "[user]\n  name = Demo User\n", "utf8");
+    const targetPath = sandboxCreate.writeSanitizedGitconfig({
+      home: tmpDir,
+      hostConfigDir,
+      stripGpg: true,
+      repoRoot: "/repo"
+    });
+    const inodeBefore = fs.statSync(targetPath).ino;
+
+    fs.writeFileSync(path.join(tmpDir, ".gitconfig"), "[user]\n  name = Updated User\n", "utf8");
+    const rewrittenPath = sandboxCreate.writeSanitizedGitconfig({
+      home: tmpDir,
+      hostConfigDir,
+      stripGpg: false,
+      repoRoot: "/repo"
+    });
+    const inodeAfter = fs.statSync(rewrittenPath).ino;
+
+    assert.equal(rewrittenPath, targetPath);
+    assert.equal(inodeAfter, inodeBefore);
+    assert.deepEqual(fs.readFileSync(rewrittenPath, "utf8").split("\n").filter(Boolean), [
+      "[user]",
+      "  name = Updated User",
+      "[safe]",
+      "\tdirectory = /workspace",
+      "\tdirectory = /repo"
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("syncGpgKeys returns false when the host has no public keys to import", async () => {
