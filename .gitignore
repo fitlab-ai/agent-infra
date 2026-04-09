@@ -4,6 +4,7 @@
 .agents/workspace/completed/
 .agents/workspace/archive/
 .agents/workspace/logs/
+.agents/workspace/.merge-backup/
 
 # Claude Code local settings
 .claude/settings.local.json
