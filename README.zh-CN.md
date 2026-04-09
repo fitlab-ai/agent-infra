@@ -181,11 +181,21 @@ CLI 会收集项目元数据，向所有支持的 AI TUI 安装 `update-agent-in
 
 ### 沙箱 aliases 与 GitHub CLI
 
-`ai sandbox create` 在首次运行时会自动生成宿主机侧的 `~/.ai-sandbox-aliases`。该文件内置了 Claude、Codex、Gemini CLI 和 OpenCode 的 yolo 快捷命令模板，你可以直接修改；每次创建沙箱时，这个文件都会同步到容器内的 `/home/devuser/.bash_aliases`。
+`ai sandbox create` 在首次运行时会自动生成宿主机侧的 `~/.agent-infra/aliases/sandbox.sh`。该文件内置了 Claude、Codex、Gemini CLI 和 OpenCode 的 yolo 快捷命令模板，你可以直接修改；每次创建沙箱时，这个文件都会同步到容器内的 `/home/devuser/.bash_aliases`。
 
 沙箱镜像也会预装 `gh`。如果宿主机上的 `gh auth token` 能成功返回 token，`ai sandbox create` 会把它以 `GH_TOKEN` 环境变量注入容器，让你在沙箱里直接使用 `gh`，无需额外登录配置。
 
 `ai sandbox exec` 也会向容器透传一小组终端检测白名单变量（`TERM_PROGRAM`、`TERM_PROGRAM_VERSION`、`LC_TERMINAL`、`LC_TERMINAL_VERSION`）。这样可以让交互式 TUI 保持与宿主终端一致的行为，例如 Claude Code 的 `Shift+Enter` 换行支持，同时避免把整个宿主环境灌入容器。
+
+### 从旧版本升级
+
+如果你此前已经在旧的宿主机路径下保存了 sandbox 状态（例如 `~/.claude-sandboxes`、`~/.demo-worktrees`、`~/.demo-gpg-cache`、`~/.demo-claude-credentials` 或 `~/.ai-sandbox-aliases`），请先运行一次迁移脚本，再使用最新目录布局：
+
+请将 `<next-version>` 替换为你正在升级到的 release tag。
+
+```bash
+curl -fsSL https://github.com/fitlab-ai/agent-infra/releases/download/<next-version>/migrate-to-agent-infra.sh | sh
+```
 
 <a id="architecture-overview"></a>
 

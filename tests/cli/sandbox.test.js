@@ -28,7 +28,7 @@ test("sandbox create help documents the host aliases file", () => {
   });
 
   assert.match(output, /Usage: ai sandbox create <branch> \[base\] \[--cpu <n>\] \[--memory <n>\]/);
-  assert.match(output, /~\/\.ai-sandbox-aliases/);
+  assert.match(output, /~\/\.agent-infra\/aliases\/sandbox\.sh/);
   assert.match(output, /\/home\/devuser\/\.bash_aliases/);
 });
 
@@ -110,7 +110,7 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     assert.deepEqual(config.runtimes, ["node20"]);
     assert.deepEqual(config.tools, ["claude-code", "codex", "opencode", "gemini-cli"]);
     assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
-    assert.equal(config.worktreeBase, path.join(process.env.HOME, ".demo-worktrees"));
+    assert.equal(config.worktreeBase, path.join(process.env.HOME, ".agent-infra", "worktrees", "demo"));
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -273,7 +273,7 @@ test("claude-code tool pins CLAUDE_CONFIG_DIR so $HOME/.claude.json preseed reac
   assert.equal(tools[0].envVars?.CLAUDE_CONFIG_DIR, "/home/devuser/.claude");
 });
 
-test("resolveTools consolidates sandbox bases under ~/.agent-infra while preserving legacy fallbacks", async () => {
+test("resolveTools consolidates sandbox bases under ~/.agent-infra", async () => {
   const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
   const tools = sandboxTools.resolveTools({
     home: "/home/host-user",
@@ -283,33 +283,28 @@ test("resolveTools consolidates sandbox bases under ~/.agent-infra while preserv
 
   assert.deepEqual(tools.map((tool) => ({
     id: tool.id,
-    sandboxBase: tool.sandboxBase,
-    legacySandboxBases: tool.legacySandboxBases
+    sandboxBase: tool.sandboxBase
   })), [
     {
       id: "claude-code",
-      sandboxBase: "/home/host-user/.agent-infra/sandboxes/claude-code",
-      legacySandboxBases: ["/home/host-user/.claude-sandboxes"]
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/claude-code"
     },
     {
       id: "codex",
-      sandboxBase: "/home/host-user/.agent-infra/sandboxes/codex",
-      legacySandboxBases: ["/home/host-user/.codex-sandboxes"]
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/codex"
     },
     {
       id: "opencode",
-      sandboxBase: "/home/host-user/.agent-infra/sandboxes/opencode",
-      legacySandboxBases: ["/home/host-user/.opencode-sandboxes"]
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/opencode"
     },
     {
       id: "gemini-cli",
-      sandboxBase: "/home/host-user/.agent-infra/sandboxes/gemini-cli",
-      legacySandboxBases: ["/home/host-user/.gemini-sandboxes"]
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/gemini-cli"
     }
   ]);
 });
 
-test("tool directory candidates prefer consolidated paths before legacy paths", async () => {
+test("tool directory candidates only return consolidated paths", async () => {
   const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
   const [tool] = sandboxTools.resolveTools({
     home: "/home/host-user",
@@ -318,15 +313,26 @@ test("tool directory candidates prefer consolidated paths before legacy paths", 
   });
 
   assert.deepEqual(sandboxTools.toolProjectDirCandidates(tool, "demo"), [
-    "/home/host-user/.agent-infra/sandboxes/claude-code/demo",
-    "/home/host-user/.claude-sandboxes/demo"
+    "/home/host-user/.agent-infra/sandboxes/claude-code/demo"
   ]);
   assert.deepEqual(sandboxTools.toolConfigDirCandidates(tool, "demo", "feature/demo"), [
     "/home/host-user/.agent-infra/sandboxes/claude-code/demo/feature..demo",
-    "/home/host-user/.agent-infra/sandboxes/claude-code/demo/feature-demo",
-    "/home/host-user/.claude-sandboxes/demo/feature..demo",
-    "/home/host-user/.claude-sandboxes/demo/feature-demo"
+    "/home/host-user/.agent-infra/sandboxes/claude-code/demo/feature-demo"
   ]);
+});
+
+test("claude-code live mount uses the consolidated credentials path", async () => {
+  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
+  const [tool] = sandboxTools.resolveTools({
+    home: "/home/host-user",
+    project: "demo",
+    tools: ["claude-code"]
+  });
+
+  assert.equal(
+    tool.hostLiveMounts?.[0]?.hostPath,
+    "/home/host-user/.agent-infra/credentials/demo/claude-code/.credentials.json"
+  );
 });
 
 test("assertBranchAvailable allows branches that are not checked out in any worktree", async () => {
@@ -741,11 +747,11 @@ test("claudeCredentialsDir and claudeCredentialsPath compute shared credential p
 
   assert.equal(
     sandboxCreate.claudeCredentialsDir("/home/demo", "agent-infra"),
-    "/home/demo/.agent-infra-claude-credentials"
+    "/home/demo/.agent-infra/credentials/agent-infra/claude-code"
   );
   assert.equal(
     sandboxCreate.claudeCredentialsPath("/home/demo", "agent-infra"),
-    "/home/demo/.agent-infra-claude-credentials/.credentials.json"
+    "/home/demo/.agent-infra/credentials/agent-infra/claude-code/.credentials.json"
   );
 });
 
@@ -753,7 +759,7 @@ test("writeClaudeCredentialsFile creates secure shared credentials file", async 
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-credentials-write-"));
   const rawBlob = '{"claudeAiOauth":{"accessToken":"token"}}\n';
-  const credentialsDir = path.join(tmpDir, ".demo-claude-credentials");
+  const credentialsDir = path.join(tmpDir, ".agent-infra", "credentials", "demo", "claude-code");
   const credentialsPath = path.join(credentialsDir, ".credentials.json");
 
   try {
@@ -769,7 +775,7 @@ test("writeClaudeCredentialsFile creates secure shared credentials file", async 
 test("writeClaudeCredentialsFile overwrites existing credentials blob", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-credentials-overwrite-"));
-  const credentialsPath = path.join(tmpDir, ".demo-claude-credentials", ".credentials.json");
+  const credentialsPath = path.join(tmpDir, ".agent-infra", "credentials", "demo", "claude-code", ".credentials.json");
 
   try {
     sandboxCreate.writeClaudeCredentialsFile(tmpDir, "demo", "blob-1");
@@ -980,7 +986,7 @@ test("ensureSandboxAliasesFile creates the default aliases once", async () => {
   try {
     const created = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
     assert.equal(created.created, true);
-    assert.equal(created.path, path.join(tmpDir, ".ai-sandbox-aliases"));
+    assert.equal(created.path, path.join(tmpDir, ".agent-infra", "aliases", "sandbox.sh"));
 
     const content = fs.readFileSync(created.path, "utf8");
     assert.match(content, /# >>> agent-infra managed aliases >>>/);
@@ -999,10 +1005,24 @@ test("ensureSandboxAliasesFile creates the default aliases once", async () => {
   }
 });
 
+test("ensureSandboxAliasesFile creates parent directories for the consolidated alias path", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-nested-"));
+
+  try {
+    const { path: aliasesPath } = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
+
+    assert.equal(fs.existsSync(path.dirname(aliasesPath)), true);
+    assert.equal(fs.existsSync(aliasesPath), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("ensureSandboxAliasesFile upgrades legacy generated alias files", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-upgrade-"));
-  const aliasesPath = path.join(tmpDir, ".ai-sandbox-aliases");
+  const aliasesPath = path.join(tmpDir, ".agent-infra", "aliases", "sandbox.sh");
   const legacyContent = [
     "alias claude-yolo='claude --dangerously-skip-permissions'",
     "alias opencode-yolo='opencode --dangerously-skip-permissions'",
@@ -1017,6 +1037,7 @@ test("ensureSandboxAliasesFile upgrades legacy generated alias files", async () 
   ].join("\n");
 
   try {
+    fs.mkdirSync(path.dirname(aliasesPath), { recursive: true });
     fs.writeFileSync(aliasesPath, legacyContent, "utf8");
     const result = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
     const content = fs.readFileSync(aliasesPath, "utf8");
@@ -1051,9 +1072,10 @@ test("ensureSandboxAliasesFile writes OpenCode full yolo permissions", async () 
 test("ensureSandboxAliasesFile upgrades legacy OpenCode aliases to full yolo permissions", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-opencode-upgrade-full-yolo-"));
-  const aliasesPath = path.join(tmpDir, ".ai-sandbox-aliases");
+  const aliasesPath = path.join(tmpDir, ".agent-infra", "aliases", "sandbox.sh");
 
   try {
+    fs.mkdirSync(path.dirname(aliasesPath), { recursive: true });
     fs.writeFileSync(aliasesPath, "alias oy='opencode --dangerously-skip-permissions'\n", "utf8");
     sandboxCreate.ensureSandboxAliasesFile(tmpDir);
     const content = fs.readFileSync(aliasesPath, "utf8");
@@ -1507,7 +1529,7 @@ test("readGpgCache returns null when the cache does not exist", async () => {
 test("readGpgCache returns null when the cache is missing state metadata", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-missing-state-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
   try {
     fs.mkdirSync(cacheDir, { recursive: true });
@@ -1527,7 +1549,7 @@ test("readGpgCache returns null when the cache is missing state metadata", async
 test("readGpgCache returns cached key material when the keyring fingerprint matches", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-hit-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
 
@@ -1555,7 +1577,7 @@ test("readGpgCache returns cached key material when the keyring fingerprint matc
 test("readGpgCache returns null when the keyring fingerprint changed", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-stale-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
   try {
     fs.mkdirSync(cacheDir, { recursive: true });
@@ -1574,7 +1596,7 @@ test("readGpgCache returns null when the keyring fingerprint changed", async () 
 test("readGpgCache returns null when the cached signingKey no longer matches", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-signing-key-stale-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
 
@@ -1599,7 +1621,7 @@ test("readGpgCache returns null when the cached signingKey no longer matches", a
 test("writeGpgCache creates cache files with secure permissions", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-write-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
   try {
     const written = sandboxCreate.writeGpgCache(
@@ -1624,7 +1646,7 @@ test("writeGpgCache creates cache files with secure permissions", async () => {
 test("writeGpgCache stores the signingKey used to build the cache", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-write-signing-key-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
   try {
     const written = sandboxCreate.writeGpgCache(
@@ -1694,7 +1716,7 @@ test("syncGpgKeys reuses a caller-provided cache without re-reading from disk or
 test("syncGpgKeys invalidates cache when the effective signing key changed", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-signing-key-changed-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
   const calls = [];
@@ -1765,7 +1787,7 @@ test("syncGpgKeys invalidates cache when the effective signing key changed", asy
 test("syncGpgKeys uses the cache when the keyring fingerprint matches", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-cache-hit-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
   const calls = [];
@@ -1853,11 +1875,11 @@ test("syncGpgKeys exports host keys and writes the cache on a cache miss", async
       ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
     ]);
     assert.equal(
-      fs.readFileSync(path.join(tmpDir, ".demo-gpg-cache", "public.asc"), "utf8"),
+      fs.readFileSync(path.join(tmpDir, ".agent-infra", "gpg-cache", "demo", "public.asc"), "utf8"),
       "pub"
     );
     assert.equal(
-      fs.readFileSync(path.join(tmpDir, ".demo-gpg-cache", "secret.asc"), "utf8"),
+      fs.readFileSync(path.join(tmpDir, ".agent-infra", "gpg-cache", "demo", "secret.asc"), "utf8"),
       "sec"
     );
   } finally {
@@ -1908,12 +1930,13 @@ test("syncGpgKeys exports only the configured signing key on a cache miss", asyn
 test("syncGpgKeys still succeeds when writing the cache fails", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-cache-write-fails-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const calls = [];
   const writes = [];
   const originalWrite = process.stderr.write;
 
   try {
+    fs.mkdirSync(path.dirname(cacheDir), { recursive: true });
     fs.writeFileSync(cacheDir, "blocking-file");
     process.stderr.write = (...args) => {
       writes.push(args[0]);
