@@ -2,7 +2,7 @@
   "project": "agent-infra",
   "org": "fitlab-ai",
   "language": "zh-CN",
-  "templateVersion": "v0.5.0",
+  "templateVersion": "v0.5.1",
   "sandbox": {
     "runtimes": [
       "node20"

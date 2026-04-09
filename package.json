@@ -1,6 +1,6 @@
 {
   "name": "@fitlab-ai/agent-infra",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Bootstrap tool for AI multi-tool collaboration infrastructure — works with Claude Code, Codex, Gemini CLI, and OpenCode",
   "license": "MIT",
   "type": "module",
