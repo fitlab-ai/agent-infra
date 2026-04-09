@@ -28,7 +28,7 @@ test("sandbox create help documents the host aliases file", () => {
   });
 
   assert.match(output, /Usage: ai sandbox create <branch> \[base\] \[--cpu <n>\] \[--memory <n>\]/);
-  assert.match(output, /~\/\.ai-sandbox-aliases/);
+  assert.match(output, /~\/\.agent-infra\/aliases\/sandbox\.sh/);
   assert.match(output, /\/home\/devuser\/\.bash_aliases/);
 });
 
@@ -110,7 +110,7 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     assert.deepEqual(config.runtimes, ["node20"]);
     assert.deepEqual(config.tools, ["claude-code", "codex", "opencode", "gemini-cli"]);
     assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
-    assert.equal(config.worktreeBase, path.join(process.env.HOME, ".demo-worktrees"));
+    assert.equal(config.worktreeBase, path.join(process.env.HOME, ".agent-infra", "worktrees", "demo"));
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -271,6 +271,68 @@ test("claude-code tool pins CLAUDE_CONFIG_DIR so $HOME/.claude.json preseed reac
   assert.equal(tools.length, 1);
   assert.equal(tools[0].containerMount, "/home/devuser/.claude");
   assert.equal(tools[0].envVars?.CLAUDE_CONFIG_DIR, "/home/devuser/.claude");
+});
+
+test("resolveTools consolidates sandbox bases under ~/.agent-infra", async () => {
+  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
+  const tools = sandboxTools.resolveTools({
+    home: "/home/host-user",
+    project: "demo",
+    tools: ["claude-code", "codex", "opencode", "gemini-cli"]
+  });
+
+  assert.deepEqual(tools.map((tool) => ({
+    id: tool.id,
+    sandboxBase: tool.sandboxBase
+  })), [
+    {
+      id: "claude-code",
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/claude-code"
+    },
+    {
+      id: "codex",
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/codex"
+    },
+    {
+      id: "opencode",
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/opencode"
+    },
+    {
+      id: "gemini-cli",
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/gemini-cli"
+    }
+  ]);
+});
+
+test("tool directory candidates only return consolidated paths", async () => {
+  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
+  const [tool] = sandboxTools.resolveTools({
+    home: "/home/host-user",
+    project: "demo",
+    tools: ["claude-code"]
+  });
+
+  assert.deepEqual(sandboxTools.toolProjectDirCandidates(tool, "demo"), [
+    "/home/host-user/.agent-infra/sandboxes/claude-code/demo"
+  ]);
+  assert.deepEqual(sandboxTools.toolConfigDirCandidates(tool, "demo", "feature/demo"), [
+    "/home/host-user/.agent-infra/sandboxes/claude-code/demo/feature..demo",
+    "/home/host-user/.agent-infra/sandboxes/claude-code/demo/feature-demo"
+  ]);
+});
+
+test("claude-code live mount uses the consolidated credentials path", async () => {
+  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
+  const [tool] = sandboxTools.resolveTools({
+    home: "/home/host-user",
+    project: "demo",
+    tools: ["claude-code"]
+  });
+
+  assert.equal(
+    tool.hostLiveMounts?.[0]?.hostPath,
+    "/home/host-user/.agent-infra/credentials/demo/claude-code/.credentials.json"
+  );
 });
 
 test("assertBranchAvailable allows branches that are not checked out in any worktree", async () => {
@@ -685,11 +747,11 @@ test("claudeCredentialsDir and claudeCredentialsPath compute shared credential p
 
   assert.equal(
     sandboxCreate.claudeCredentialsDir("/home/demo", "agent-infra"),
-    "/home/demo/.agent-infra-claude-credentials"
+    "/home/demo/.agent-infra/credentials/agent-infra/claude-code"
   );
   assert.equal(
     sandboxCreate.claudeCredentialsPath("/home/demo", "agent-infra"),
-    "/home/demo/.agent-infra-claude-credentials/.credentials.json"
+    "/home/demo/.agent-infra/credentials/agent-infra/claude-code/.credentials.json"
   );
 });
 
@@ -697,7 +759,7 @@ test("writeClaudeCredentialsFile creates secure shared credentials file", async 
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-credentials-write-"));
   const rawBlob = '{"claudeAiOauth":{"accessToken":"token"}}\n';
-  const credentialsDir = path.join(tmpDir, ".demo-claude-credentials");
+  const credentialsDir = path.join(tmpDir, ".agent-infra", "credentials", "demo", "claude-code");
   const credentialsPath = path.join(credentialsDir, ".credentials.json");
 
   try {
@@ -713,7 +775,7 @@ test("writeClaudeCredentialsFile creates secure shared credentials file", async 
 test("writeClaudeCredentialsFile overwrites existing credentials blob", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-credentials-overwrite-"));
-  const credentialsPath = path.join(tmpDir, ".demo-claude-credentials", ".credentials.json");
+  const credentialsPath = path.join(tmpDir, ".agent-infra", "credentials", "demo", "claude-code", ".credentials.json");
 
   try {
     sandboxCreate.writeClaudeCredentialsFile(tmpDir, "demo", "blob-1");
@@ -924,7 +986,7 @@ test("ensureSandboxAliasesFile creates the default aliases once", async () => {
   try {
     const created = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
     assert.equal(created.created, true);
-    assert.equal(created.path, path.join(tmpDir, ".ai-sandbox-aliases"));
+    assert.equal(created.path, path.join(tmpDir, ".agent-infra", "aliases", "sandbox.sh"));
 
     const content = fs.readFileSync(created.path, "utf8");
     assert.match(content, /# >>> agent-infra managed aliases >>>/);
@@ -943,10 +1005,24 @@ test("ensureSandboxAliasesFile creates the default aliases once", async () => {
   }
 });
 
+test("ensureSandboxAliasesFile creates parent directories for the consolidated alias path", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-nested-"));
+
+  try {
+    const { path: aliasesPath } = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
+
+    assert.equal(fs.existsSync(path.dirname(aliasesPath)), true);
+    assert.equal(fs.existsSync(aliasesPath), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("ensureSandboxAliasesFile upgrades legacy generated alias files", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-upgrade-"));
-  const aliasesPath = path.join(tmpDir, ".ai-sandbox-aliases");
+  const aliasesPath = path.join(tmpDir, ".agent-infra", "aliases", "sandbox.sh");
   const legacyContent = [
     "alias claude-yolo='claude --dangerously-skip-permissions'",
     "alias opencode-yolo='opencode --dangerously-skip-permissions'",
@@ -961,6 +1037,7 @@ test("ensureSandboxAliasesFile upgrades legacy generated alias files", async () 
   ].join("\n");
 
   try {
+    fs.mkdirSync(path.dirname(aliasesPath), { recursive: true });
     fs.writeFileSync(aliasesPath, legacyContent, "utf8");
     const result = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
     const content = fs.readFileSync(aliasesPath, "utf8");
@@ -995,9 +1072,10 @@ test("ensureSandboxAliasesFile writes OpenCode full yolo permissions", async () 
 test("ensureSandboxAliasesFile upgrades legacy OpenCode aliases to full yolo permissions", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-opencode-upgrade-full-yolo-"));
-  const aliasesPath = path.join(tmpDir, ".ai-sandbox-aliases");
+  const aliasesPath = path.join(tmpDir, ".agent-infra", "aliases", "sandbox.sh");
 
   try {
+    fs.mkdirSync(path.dirname(aliasesPath), { recursive: true });
     fs.writeFileSync(aliasesPath, "alias oy='opencode --dangerously-skip-permissions'\n", "utf8");
     sandboxCreate.ensureSandboxAliasesFile(tmpDir);
     const content = fs.readFileSync(aliasesPath, "utf8");
@@ -1060,35 +1138,108 @@ test("ensureColima uses verbose commands for install and startup", async () => {
   ]);
 });
 
-test("syncShellAliases skips missing alias files and copies existing aliases", async () => {
+test("hostHasGpgKeys reports whether the host keyring is available", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-"));
+
+  assert.equal(sandboxCreate.hostHasGpgKeys("/Users/demo", () => "sec:u:255:22:ABCDEF:1700000000:0::::::23::0:\n"), true);
+  assert.equal(sandboxCreate.hostHasGpgKeys("/Users/demo", () => {
+    throw new Error("gpg failed");
+  }), false);
+});
+
+test("prepareHostShellConfig writes sanitized config files and returns read-only mount metadata", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-shell-config-"));
 
   try {
-    const calls = [];
-    const missing = sandboxCreate.syncShellAliases("demo-container", tmpDir, (...args) => calls.push(args));
-    assert.equal(missing, false);
-    assert.deepEqual(calls, []);
+    fs.writeFileSync(path.join(tmpDir, ".gitconfig"), [
+      "[commit]",
+      "  gpgsign = true",
+      "[user]",
+      `  signingKey = ${tmpDir}/.gnupg/pubring.kbx`,
+      "[gpg]",
+      "  program = /opt/homebrew/bin/gpg",
+      "[core]",
+      `  excludesfile = ${tmpDir}/.gitignore_global`,
+      ""
+    ].join("\n"), "utf8");
+    fs.writeFileSync(path.join(tmpDir, ".gitignore_global"), "node_modules/\n", "utf8");
+    fs.writeFileSync(path.join(tmpDir, ".stCommitMsg"), "feat: demo\n", "utf8");
+    const aliases = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
 
-    const aliasesPath = path.join(tmpDir, ".ai-sandbox-aliases");
-    fs.writeFileSync(aliasesPath, "alias cy='claude --dangerously-skip-permissions'\n", "utf8");
-
-    const copied = sandboxCreate.syncShellAliases("demo-container", tmpDir, (...args) => calls.push(args));
-    assert.equal(copied, true);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0][0], "docker");
-    assert.deepEqual(calls[0][1], [
-      "exec",
-      "-i",
-      "demo-container",
-      "sh",
-      "-c",
-      "cat > /home/devuser/.bash_aliases"
-    ]);
-    assert.deepEqual(calls[0][2], {
-      input: "alias cy='claude --dangerously-skip-permissions'\n",
-      stdio: ["pipe", "pipe", "pipe"]
+    const prepared = sandboxCreate.prepareHostShellConfig({
+      home: tmpDir,
+      project: "demo",
+      branch: "feature/demo",
+      repoRoot: "/repo"
     });
+
+    assert.equal(
+      prepared.hostDir,
+      path.join(tmpDir, ".agent-infra", "config", "demo", "feature..demo")
+    );
+    assert.deepEqual(prepared.mounts, [
+      {
+        hostPath: path.join(prepared.hostDir, ".gitconfig"),
+        containerPath: "/home/devuser/.gitconfig"
+      },
+      {
+        hostPath: path.join(prepared.hostDir, ".gitignore_global"),
+        containerPath: "/home/devuser/.gitignore_global"
+      },
+      {
+        hostPath: path.join(prepared.hostDir, ".stCommitMsg"),
+        containerPath: "/home/devuser/.stCommitMsg"
+      },
+      {
+        hostPath: path.join(prepared.hostDir, ".bash_aliases"),
+        containerPath: "/home/devuser/.bash_aliases"
+      }
+    ]);
+    assert.deepEqual(
+      fs.readFileSync(path.join(prepared.hostDir, ".gitconfig"), "utf8").split("\n").filter(Boolean),
+      [
+        "[commit]",
+        "[user]",
+        "[core]",
+        "  excludesfile = /home/devuser/.gitignore_global",
+        "[safe]",
+        "\tdirectory = /workspace",
+        "\tdirectory = /repo"
+      ]
+    );
+    assert.equal(
+      fs.readFileSync(path.join(prepared.hostDir, ".bash_aliases"), "utf8"),
+      fs.readFileSync(aliases.path, "utf8")
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("prepareHostShellConfig removes stale files from the previous host config snapshot", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-shell-config-cleanup-"));
+  const hostDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..demo");
+
+  try {
+    fs.mkdirSync(hostDir, { recursive: true });
+    fs.writeFileSync(path.join(hostDir, ".stCommitMsg"), "stale\n", "utf8");
+    fs.writeFileSync(path.join(tmpDir, ".gitconfig"), "[user]\n  name = Demo User\n", "utf8");
+    sandboxCreate.ensureSandboxAliasesFile(tmpDir);
+
+    const prepared = sandboxCreate.prepareHostShellConfig({
+      home: tmpDir,
+      project: "demo",
+      branch: "feature/demo",
+      repoRoot: "/repo"
+    });
+
+    assert.equal(fs.existsSync(path.join(prepared.hostDir, ".stCommitMsg")), false);
+    assert.equal(
+      prepared.mounts.some(({ hostPath }) => hostPath.endsWith(".stCommitMsg")),
+      false
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1103,7 +1254,7 @@ test("detectGpgConfig identifies host gitconfig that requires GPG support", asyn
   assert.equal(sandboxCreate.detectGpgConfig("[user]\n  name = Demo User\n"), false);
 });
 
-test("sanitizeGitConfig rewrites paths and keeps container GPG config usable", async () => {
+test("sanitizeGitConfig rewrites host paths and appends safe.directory entries", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const home = "/Users/demo";
   const gitconfig = [
@@ -1120,39 +1271,122 @@ test("sanitizeGitConfig rewrites paths and keeps container GPG config usable", a
     ""
   ].join("\n");
 
-  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, home);
+  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, home, { repoRoot: "/repo" });
 
-  assert.match(sanitized, /\[user\]/);
-  assert.match(sanitized, /signingKey = \/home\/devuser\/\.gnupg\/pubring\.kbx/);
-  assert.match(sanitized, /\[gpg\]/);
-  assert.match(sanitized, /format = openpgp/);
-  assert.doesNotMatch(sanitized, /program = \/opt\/homebrew\/bin\/gpg/);
-  assert.doesNotMatch(sanitized, /\[difftool "sourcetree"\]/);
-  assert.match(sanitized, /excludesfile = \/home\/devuser\/\.gitignore_global/);
+  assert.deepEqual(sanitized.split("\n").filter(Boolean), [
+    "[user]",
+    "  name = Demo User",
+    "  signingKey = /home/devuser/.gnupg/pubring.kbx",
+    "[gpg]",
+    "  format = openpgp",
+    "[core]",
+    "  excludesfile = /home/devuser/.gitignore_global",
+    "[safe]",
+    "\tdirectory = /workspace",
+    "\tdirectory = /repo"
+  ]);
 });
 
-test("sanitizeGitConfig strips GPG sections when host keys are unavailable", async () => {
+test("sanitizeGitConfig appends missing safe.directory entries to an existing safe section", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const gitconfig = [
+    "[core]",
+    "  editor = vim",
+    "[safe]",
+    "  directory = /workspace",
+    "[user]",
+    "  name = Demo User",
+    ""
+  ].join("\n");
+
+  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, "/Users/demo", { repoRoot: "/repo" });
+  const lines = sanitized.split("\n").filter(Boolean);
+
+  assert.equal(lines.filter((line) => line === "[safe]").length, 1);
+  assert.deepEqual(lines, [
+    "[core]",
+    "  editor = vim",
+    "[safe]",
+    "  directory = /workspace",
+    "\tdirectory = /repo",
+    "[user]",
+    "  name = Demo User"
+  ]);
+});
+
+test("sanitizeGitConfig strips GPG settings from non-gpg sections when host keys are unavailable", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const gitconfig = [
     "[commit]",
+    "  gpgsign = true",
+    "[tag]",
     "  gpgsign = true",
     "[gpg]",
     "  program = /opt/homebrew/bin/gpg",
     "[gpg \"ssh\"]",
     "  allowedSignersFile = ~/.ssh/allowed_signers",
     "[user]",
+    "  signingKey = /Users/demo/.gnupg/pubring.kbx",
     "  name = Demo User",
+    "[core]",
+    "  editor = vim",
     ""
   ].join("\n");
 
-  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, "/Users/demo", { stripGpg: true });
+  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, "/Users/demo", {
+    stripGpg: true,
+    repoRoot: "/repo"
+  });
 
-  assert.match(sanitized, /\[commit\]/);
-  assert.match(sanitized, /gpgsign = true/);
-  assert.match(sanitized, /\[user\]/);
-  assert.doesNotMatch(sanitized, /\[gpg\]/);
-  assert.doesNotMatch(sanitized, /\[gpg "ssh"\]/);
-  assert.doesNotMatch(sanitized, /allowedSignersFile/);
+  assert.deepEqual(sanitized.split("\n").filter(Boolean), [
+    "[commit]",
+    "[tag]",
+    "[user]",
+    "  name = Demo User",
+    "[core]",
+    "  editor = vim",
+    "[safe]",
+    "\tdirectory = /workspace",
+    "\tdirectory = /repo"
+  ]);
+});
+
+test("writeSanitizedGitconfig rewrites the mounted gitconfig without replacing the inode", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-write-sanitized-gitconfig-"));
+  const hostConfigDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..demo");
+
+  try {
+    fs.writeFileSync(path.join(tmpDir, ".gitconfig"), "[user]\n  name = Demo User\n", "utf8");
+    const targetPath = sandboxCreate.writeSanitizedGitconfig({
+      home: tmpDir,
+      hostConfigDir,
+      stripGpg: true,
+      repoRoot: "/repo"
+    });
+    const inodeBefore = fs.statSync(targetPath).ino;
+
+    fs.writeFileSync(path.join(tmpDir, ".gitconfig"), "[user]\n  name = Updated User\n", "utf8");
+    const rewrittenPath = sandboxCreate.writeSanitizedGitconfig({
+      home: tmpDir,
+      hostConfigDir,
+      stripGpg: false,
+      repoRoot: "/repo"
+    });
+    const inodeAfter = fs.statSync(rewrittenPath).ino;
+
+    assert.equal(rewrittenPath, targetPath);
+    assert.equal(inodeAfter, inodeBefore);
+    assert.deepEqual(fs.readFileSync(rewrittenPath, "utf8").split("\n").filter(Boolean), [
+      "[user]",
+      "  name = Updated User",
+      "[safe]",
+      "\tdirectory = /workspace",
+      "\tdirectory = /repo"
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("syncGpgKeys returns false when the host has no public keys to import", async () => {
@@ -1295,7 +1529,7 @@ test("readGpgCache returns null when the cache does not exist", async () => {
 test("readGpgCache returns null when the cache is missing state metadata", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-missing-state-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
   try {
     fs.mkdirSync(cacheDir, { recursive: true });
@@ -1315,7 +1549,7 @@ test("readGpgCache returns null when the cache is missing state metadata", async
 test("readGpgCache returns cached key material when the keyring fingerprint matches", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-hit-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
 
@@ -1343,7 +1577,7 @@ test("readGpgCache returns cached key material when the keyring fingerprint matc
 test("readGpgCache returns null when the keyring fingerprint changed", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-stale-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
   try {
     fs.mkdirSync(cacheDir, { recursive: true });
@@ -1362,7 +1596,7 @@ test("readGpgCache returns null when the keyring fingerprint changed", async () 
 test("readGpgCache returns null when the cached signingKey no longer matches", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-signing-key-stale-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
 
@@ -1387,7 +1621,7 @@ test("readGpgCache returns null when the cached signingKey no longer matches", a
 test("writeGpgCache creates cache files with secure permissions", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-write-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
   try {
     const written = sandboxCreate.writeGpgCache(
@@ -1412,7 +1646,7 @@ test("writeGpgCache creates cache files with secure permissions", async () => {
 test("writeGpgCache stores the signingKey used to build the cache", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-write-signing-key-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
   try {
     const written = sandboxCreate.writeGpgCache(
@@ -1482,7 +1716,7 @@ test("syncGpgKeys reuses a caller-provided cache without re-reading from disk or
 test("syncGpgKeys invalidates cache when the effective signing key changed", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-signing-key-changed-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
   const calls = [];
@@ -1553,7 +1787,7 @@ test("syncGpgKeys invalidates cache when the effective signing key changed", asy
 test("syncGpgKeys uses the cache when the keyring fingerprint matches", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-cache-hit-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
   const calls = [];
@@ -1641,11 +1875,11 @@ test("syncGpgKeys exports host keys and writes the cache on a cache miss", async
       ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
     ]);
     assert.equal(
-      fs.readFileSync(path.join(tmpDir, ".demo-gpg-cache", "public.asc"), "utf8"),
+      fs.readFileSync(path.join(tmpDir, ".agent-infra", "gpg-cache", "demo", "public.asc"), "utf8"),
       "pub"
     );
     assert.equal(
-      fs.readFileSync(path.join(tmpDir, ".demo-gpg-cache", "secret.asc"), "utf8"),
+      fs.readFileSync(path.join(tmpDir, ".agent-infra", "gpg-cache", "demo", "secret.asc"), "utf8"),
       "sec"
     );
   } finally {
@@ -1696,12 +1930,13 @@ test("syncGpgKeys exports only the configured signing key on a cache miss", asyn
 test("syncGpgKeys still succeeds when writing the cache fails", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-cache-write-fails-"));
-  const cacheDir = path.join(tmpDir, ".demo-gpg-cache");
+  const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const calls = [];
   const writes = [];
   const originalWrite = process.stderr.write;
 
   try {
+    fs.mkdirSync(path.dirname(cacheDir), { recursive: true });
     fs.writeFileSync(cacheDir, "blocking-file");
     process.stderr.write = (...args) => {
       writes.push(args[0]);
