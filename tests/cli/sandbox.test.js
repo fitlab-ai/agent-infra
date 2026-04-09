@@ -206,6 +206,37 @@ test("buildContainerEnvArgs skips GH_TOKEN when auth token is unavailable", asyn
   assert.deepEqual(envArgs, ["-e", "FOO=bar"]);
 });
 
+test("terminalEnvFlags forwards iTerm2 detection variables for Shift+Enter support", async () => {
+  const sandboxEnter = await loadFreshEsm("lib/sandbox/commands/enter.js");
+
+  const flags = sandboxEnter.terminalEnvFlags({
+    TERM_PROGRAM: "iTerm.app",
+    TERM_PROGRAM_VERSION: "3.6.9",
+    LC_TERMINAL: "iTerm2",
+    LC_TERMINAL_VERSION: "3.6.9",
+    UNRELATED: "ignored"
+  });
+
+  assert.deepEqual(flags, [
+    "-e", "TERM_PROGRAM=iTerm.app",
+    "-e", "TERM_PROGRAM_VERSION=3.6.9",
+    "-e", "LC_TERMINAL=iTerm2",
+    "-e", "LC_TERMINAL_VERSION=3.6.9"
+  ]);
+});
+
+test("terminalEnvFlags omits unset variables instead of forwarding empty values", async () => {
+  const sandboxEnter = await loadFreshEsm("lib/sandbox/commands/enter.js");
+
+  const flags = sandboxEnter.terminalEnvFlags({
+    TERM_PROGRAM: "iTerm.app",
+    TERM_PROGRAM_VERSION: "",
+    LC_TERMINAL: undefined
+  });
+
+  assert.deepEqual(flags, ["-e", "TERM_PROGRAM=iTerm.app"]);
+});
+
 test("claude-code tool pins CLAUDE_CONFIG_DIR so $HOME/.claude.json preseed reaches Claude Code", async () => {
   // Regression guard for the onboarding loop bug: without this env var Claude
   // Code reads .claude.json from $HOME/.claude.json (outside the bind mount),
