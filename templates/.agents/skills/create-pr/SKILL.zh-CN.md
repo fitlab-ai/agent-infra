@@ -58,11 +58,12 @@ description: "创建 Pull Request 到目标分支"
 
 基于这些产物聚合 reviewer 摘要，并使用隐藏标记维护唯一且幂等的摘要评论。
 
-> 隐藏标记、幂等 summary 评论更新、review history 格式，以及评论创建/更新规则见 `reference/comment-publish.md`。发布摘要前先读取 `reference/comment-publish.md`。
+> 隐藏标记、幂等 summary 评论更新、review history 格式，以及评论创建/更新规则见 `reference/comment-publish.md`（其内联引用 `.agents/rules/pr-sync.md`）。发布摘要前先读取 `reference/comment-publish.md`。
 >
 > **Shell 安全规则**（发布评论前必读）：
 > 1. `{comment-body}` 必须替换为**实际的内联文本**。先读取文件，再将全文粘贴到 heredoc body 中。**禁止**在 `<<'EOF'` 内部使用 `$(cat ...)`、`$(< ...)`、`$(...)`、`${...}`。
 > 2. 构造含 `<!-- -->` 的字符串时，**禁止使用 `echo`**。统一使用 `cat <<'EOF'` heredoc 或 `printf '%s\n'` 构造。
+> 3. 同样的安全约束已在 `.agents/rules/pr-sync.md` 中重述，调用该 rule 后无需重复补充另一份模板规则。
 
 ### 8. 更新任务状态
 

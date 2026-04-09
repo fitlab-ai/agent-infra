@@ -218,16 +218,19 @@ function buildPrPayload(overrides = {}) {
   };
 }
 
-function extractLastMarkdownCodeBlock(fileContent) {
-  const matches = [...fileContent.matchAll(/```markdown\r?\n([\s\S]*?)\r?\n```/g)];
-  assert.ok(matches.length > 0, "Expected at least one markdown code block");
-  return matches.at(-1)[1].trim();
+function assertPointsToPrSyncRule(filePathname) {
+  const content = read(filePathname);
+  assert.match(content, /`\.agents\/rules\/pr-sync\.md`/);
+  assert.doesNotMatch(content, /## 审查摘要/);
+  assert.doesNotMatch(content, /## Review Summary/);
 }
 
-function assertPrSummaryTemplateSync(commitPath, createPrPath) {
-  const commitTemplate = extractLastMarkdownCodeBlock(read(commitPath));
-  const createPrTemplate = extractLastMarkdownCodeBlock(read(createPrPath));
-  assert.equal(commitTemplate, createPrTemplate);
+function assertHasCanonicalPrSyncStructure(filePathname, headings) {
+  const content = read(filePathname);
+  assert.match(content, /<!-- sync-pr:\{task-id\}:summary -->/);
+  for (const heading of headings) {
+    assert.match(content, heading);
+  }
 }
 
 test("validate-artifact gate passes for implement-task with fresh task and artifact", () => {
@@ -949,25 +952,27 @@ test("validate-artifact github-sync passes when create-pr summary comment exists
   }
 });
 
-test("commit PR summary template stays in sync with create-pr reference in local zh-CN docs", () => {
-  assertPrSummaryTemplateSync(
-    ".agents/skills/commit/reference/pr-summary-sync.md",
-    ".agents/skills/create-pr/reference/comment-publish.md"
-  );
+test("commit and create-pr references point to the shared pr-sync rule", () => {
+  assertPointsToPrSyncRule(".agents/skills/commit/reference/pr-summary-sync.md");
+  assertPointsToPrSyncRule(".agents/skills/create-pr/reference/comment-publish.md");
 });
 
-test("commit PR summary template stays in sync with create-pr reference in template en docs", () => {
-  assertPrSummaryTemplateSync(
-    "templates/.agents/skills/commit/reference/pr-summary-sync.md",
-    "templates/.agents/skills/create-pr/reference/comment-publish.md"
-  );
+test("template references point to the shared pr-sync rule", () => {
+  assertPointsToPrSyncRule("templates/.agents/skills/commit/reference/pr-summary-sync.md");
+  assertPointsToPrSyncRule("templates/.agents/skills/commit/reference/pr-summary-sync.zh-CN.md");
+  assertPointsToPrSyncRule("templates/.agents/skills/create-pr/reference/comment-publish.md");
+  assertPointsToPrSyncRule("templates/.agents/skills/create-pr/reference/comment-publish.zh-CN.md");
 });
 
-test("commit PR summary template stays in sync with create-pr reference in template zh-CN docs", () => {
-  assertPrSummaryTemplateSync(
-    "templates/.agents/skills/commit/reference/pr-summary-sync.zh-CN.md",
-    "templates/.agents/skills/create-pr/reference/comment-publish.zh-CN.md"
-  );
+test("local and zh-CN rule files contain the canonical PR summary structure", () => {
+  const zhHeadings = [/## 审查摘要/, /### 关键技术决策/, /### 审查历程/, /### 测试结果/];
+  assertHasCanonicalPrSyncStructure(".agents/rules/pr-sync.md", zhHeadings);
+  assertHasCanonicalPrSyncStructure("templates/.agents/rules/pr-sync.zh-CN.md", zhHeadings);
+});
+
+test("template English rule contains the canonical PR summary structure", () => {
+  const enHeadings = [/## Review Summary/, /### Key Technical Decisions/, /### Review History/, /### Test Results/];
+  assertHasCanonicalPrSyncStructure("templates/.agents/rules/pr-sync.md", enHeadings);
 });
 
 test("validate-artifact github-sync skips for commit when task has no pr_number", () => {

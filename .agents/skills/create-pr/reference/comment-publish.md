@@ -2,81 +2,14 @@
 
 在 `create-pr` 中创建或更新面向 reviewer 的唯一 PR 摘要评论之前先读取本文件。
 
-## 创建或更新唯一且幂等的审查摘要
+> 详细聚合规则、隐藏标记、评论体模板、PATCH/POST 流程、Shell 安全约束和错误处理见 `.agents/rules/pr-sync.md`。执行本步骤前先读取该 rule。
 
-使用如下隐藏标记：
+## 执行要求
 
-```html
-<!-- sync-pr:{task-id}:summary -->
-```
-
-已有评论必须通过 Issues comments API 获取，而不是单独的 PR comments API。
-
-推荐摘要章节：
-- `## 审查摘要`
-- `### 关键技术决策`
-- `### 审查历程`
-- `### 测试结果`
-
-摘要内容规则：
-- 面向 reviewer 编写，而不是面向终端用户
-- 不要简单复述原始文件 diff
-- 从 `plan.md` 中提取 2-4 条自包含的技术决策
-- 避免使用 `方案 A/B` 这类内部简称；每条决策都必须独立可读
-- 用 `review.md`、`review-r{N}.md`、`refinement.md` 和 `refinement-r{N}.md` 构建审查历程表
-- 包含来自 `implementation.md` 或修复产物中的测试结果
-
-推荐审查历程列：
-- `轮次`
-- `结论`
-- `问题统计`
-- `修复状态`
-
-如果摘要评论已经存在：
-- 只有内容发生变化时才更新
-- 否则跳过写入
-
-如果摘要评论不存在：
-- 使用隐藏标记和当前摘要正文创建一条新评论
-
-更新已有评论时，使用：
-
-```bash
-gh api "repos/$repo/issues/comments/{comment-id}" -X PATCH -f body="$(cat <<'EOF'
-{comment-body}
-EOF
-)"
-```
-
-建议摘要正文：
-
-```markdown
-<!-- sync-pr:{task-id}:summary -->
-## 审查摘要
-
-> **{agent}** · {task-id}
-
-**更新时间**：{当前时间}
-
-### 关键技术决策
-
-- {decision-1}
-- {decision-2}
-
-### 审查历程
-
-| 轮次 | 结论 | 问题统计 | 修复状态 |
-|------|------|----------|----------|
-| Round 1 | Pending | N/A | N/A |
-
-### 测试结果
-
-- {test-summary}
-
----
-*由 {agent} 自动生成 · 内部追踪：{task-id}*
-```
+- 按 `.agents/rules/pr-sync.md` 中的唯一权威模板生成或更新 `<!-- sync-pr:{task-id}:summary -->` 评论
+- PR 已存在同标记评论时，只在正文变化时 PATCH；否则跳过写入
+- 本 skill 中，摘要同步失败沿用 `create-pr` 的现有错误处理，不回滚已经创建的 PR
 
 ## 结果回传
 
-将摘要结果整理为 `summary created`、`summary updated` 或 `summary skipped`，供 `create-pr` 在用户输出和 PR Created Activity Log 中复用。
+将 `.agents/rules/pr-sync.md` 中的结果回传字符串用于当前 skill 的用户输出或 `PR Created` Activity Log 复用。

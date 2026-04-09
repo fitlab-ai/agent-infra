@@ -58,11 +58,12 @@ Read the latest context artifacts when they exist: `plan.md` / `plan-r{N}.md`, `
 
 Aggregate a reviewer-facing summary from those artifacts and maintain a single idempotent summary comment via the hidden marker.
 
-> Hidden marker handling, idempotent summary updates, review-history structure, and comment creation/update rules live in `reference/comment-publish.md`. Read `reference/comment-publish.md` before publishing the summary.
+> Hidden marker handling, idempotent summary updates, review-history structure, and comment creation/update rules live in `reference/comment-publish.md` (which in turn points to `.agents/rules/pr-sync.md`). Read `reference/comment-publish.md` before publishing the summary.
 >
 > **Shell safety rules** (required before publishing the comment):
 > 1. Replace `{comment-body}` with the actual inline text. Read files first, then paste the full content into the heredoc body. Do **not** use `$(cat ...)`, `$(< ...)`, `$(...)`, or `${...}` inside `<<'EOF'`.
 > 2. Do **not** use `echo` when constructing strings that contain `<!-- -->`. Use `cat <<'EOF'` heredoc or `printf '%s\n'` instead.
+> 3. The same constraints are restated in `.agents/rules/pr-sync.md`; once that rule is loaded, do not duplicate another copy of the template rules.
 
 ### 8. Update Task Status
 
