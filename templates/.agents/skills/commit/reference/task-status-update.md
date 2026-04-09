@@ -86,3 +86,5 @@ Next step - create Pull Request:
   - Gemini CLI: /agent-infra:create-pr {task-id}
   - Codex CLI: $create-pr {task-id}
 ```
+
+> Note: beyond the four cases, if `task.md` contains a valid `pr_number`, the commit skill must sync the PR summary via `reference/pr-summary-sync.md` before entering the verification gate.

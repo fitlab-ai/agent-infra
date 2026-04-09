@@ -52,7 +52,15 @@ Append the Commit Activity Log entry and choose exactly one next-step case:
 - ready for review -> `review-task {task-id}`
 - ready for PR -> `create-pr`
 
-## 6. Verification Gate
+## 6. Sync PR Summary When Applicable
+
+When `{task-id}` exists and task.md contains a valid `pr_number`, refresh the PR summary comment `<!-- sync-pr:{task-id}:summary -->` on the PR. Otherwise, skip this step.
+
+> The full trigger conditions, aggregation rules, PATCH/POST flow, shell-safety constraints, and error handling live in `reference/pr-summary-sync.md`. Read `reference/pr-summary-sync.md` before executing this step.
+
+Failure handling matches "Update Task Status When Applicable": warn, but do **not** block an already completed `git commit`.
+
+## 7. Verification Gate
 
 If this operation is associated with `{task-id}`, run the verification gate to confirm task metadata and sync state. If there is no task context, skip this step.
 

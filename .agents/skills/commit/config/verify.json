@@ -17,6 +17,9 @@
       "expected_action_pattern": "Commit",
       "freshness_minutes": 30
     },
-    "github-sync": null
+    "github-sync": {
+      "when": "pr_number_exists",
+      "expected_pr_comment_marker": "<!-- sync-pr:{task-id}:summary -->"
+    }
   }
 }

@@ -580,8 +580,12 @@ function buildSyncContext({ taskDir, config, artifactFile }) {
   }
 
   const issueNumber = parseIssueNumber(task.metadata.issue_number);
+  const prNumber = parsePrNumber(task.metadata.pr_number);
   if (config.when === "issue_number_exists" && !issueNumber) {
     return { earlyReturn: passResult("github-sync", "Skipped: task has no issue_number") };
+  }
+  if (config.when === "pr_number_exists" && !prNumber) {
+    return { earlyReturn: passResult("github-sync", "Skipped: task has no pr_number") };
   }
 
   if (!issueNumber) {
@@ -608,7 +612,7 @@ function buildSyncContext({ taskDir, config, artifactFile }) {
     artifactFile,
     artifactPath,
     issueNumber,
-    prNumber: parsePrNumber(task.metadata.pr_number),
+    prNumber,
     ownerRepo: ownerRepo.value,
     marker,
     prMarker

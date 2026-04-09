@@ -86,3 +86,5 @@ date "+%Y-%m-%d %H:%M:%S"
   - Gemini CLI: /agent-infra:create-pr {task-id}
   - Codex CLI: $create-pr {task-id}
 ```
+
+> 注意：四个场景之外，只要 `task.md` 中存在有效 `pr_number`，commit 技能必须先按 `reference/pr-summary-sync.md` 同步 PR 摘要，再进入完成校验。
