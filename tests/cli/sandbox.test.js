@@ -168,10 +168,29 @@ test("composeDockerfile includes gh CLI and bash_aliases sourcing", async () => 
     const content = fs.readFileSync(dockerfilePath, "utf8");
 
     assert.match(content, /cli\.github\.com\/packages/);
-    assert.match(content, /curl wget git vim file/);
+    assert.match(content, /curl wget git vim tmux file/);
     assert.match(content, /apt-get install -y gh/);
     assert.match(content, /export GPG_TTY=\$\(tty\)/);
     assert.match(content, /\[ -f ~\/\.bash_aliases \] && \. ~\/\.bash_aliases/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("composeDockerfile installs tmux for in-container session recovery", async () => {
+  const sandboxDockerfile = await loadFreshEsm("lib/sandbox/dockerfile.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmux-"));
+
+  try {
+    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+      repoRoot: tmpDir,
+      project: "demo",
+      runtimes: ["node20"],
+      dockerfile: null
+    });
+    const content = fs.readFileSync(dockerfilePath, "utf8");
+
+    assert.match(content, /\btmux\b/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -361,6 +380,22 @@ test("ensureClaudeOnboarding populates workspace trust when only hasCompletedOnb
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test("printInteractiveEntryTip writes a tmux-related hint to the given stream", async () => {
+  const sandboxEnter = await loadFreshEsm("lib/sandbox/commands/enter.js");
+
+  let written = "";
+  const fakeStream = {
+    write(chunk) {
+      written += chunk;
+    }
+  };
+
+  sandboxEnter.printInteractiveEntryTip(fakeStream);
+
+  assert.match(written, /tmux/);
+  assert.ok(written.endsWith("\n"), "tip should end with newline");
 });
 
 test("ensureClaudeOnboarding skips write when flag already set", async () => {
