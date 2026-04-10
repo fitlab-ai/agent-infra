@@ -366,3 +366,18 @@ test("version format validation hook only blocks git commit in PreToolUse mode",
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
+
+test("template JavaScript files do not contain shebang lines", () => {
+  const jsFiles = listFilesRecursive("templates")
+    .filter((relativePath) => relativePath.endsWith(".js"));
+
+  jsFiles.forEach((relativePath) => {
+    const firstLine = read(relativePath).split(/\r?\n/, 1)[0];
+    assert.ok(
+      !firstLine.startsWith("#!"),
+      `${relativePath}: template .js files must not contain shebang lines. ` +
+      "Homebrew rewrites shebangs to machine-specific absolute paths during installation, " +
+      "which pollutes project files when synced. Use 'node <path>' to invoke these scripts."
+    );
+  });
+});

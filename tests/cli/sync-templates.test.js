@@ -21,21 +21,17 @@ function normalize(targetPath) {
   return targetPath.replace(/\\/g, "/");
 }
 
-test("syncTemplates resolves template roots via npm and removes legacy templateSource", async () => {
+test("syncTemplates resolves template roots via PATH lookup and removes legacy templateSource", async () => {
   const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-"));
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = path.join(
-      projectRoot,
-      "node_modules",
-      "@fitlab-ai",
-      "agent-infra",
-      "templates"
-    );
+    const installRoot = path.join(tmpDir, "install");
+    const templateRoot = path.join(installRoot, "templates");
 
     fs.mkdirSync(projectRoot, { recursive: true });
+    fs.mkdirSync(path.join(installRoot, "bin"), { recursive: true });
 
     writeFile(templateRoot, "docs/guide.md", "Project {{project}}\n");
     writeFile(templateRoot, "docs/guide.zh-CN.md", "项目 {{project}}\n");
@@ -47,6 +43,11 @@ test("syncTemplates resolves template roots via npm and removes legacy templateS
     writeFile(templateRoot, "local-only.md", "Owner {{org}}\n");
     writeFile(templateRoot, "child.md", "Top\n");
     writeFile(templateRoot, "nested/child.md", "Nested\n");
+    writeJson(installRoot, "package.json", {
+      name: "@fitlab-ai/agent-infra",
+      version: "0.0.0-test"
+    });
+    writeFile(installRoot, "bin/cli.js", "console.log('ai');\n");
 
     writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo",
@@ -61,12 +62,9 @@ test("syncTemplates resolves template roots via npm and removes legacy templateS
     });
 
     childProcess.execSync = (command, options = {}) => {
-      if (command === "npm root -g") {
-        return path.join(tmpDir, "missing-global-node_modules");
-      }
-      if (command === "npm root") {
-        assert.equal(options.cwd, projectRoot);
-        return path.join(projectRoot, "node_modules");
+      if (command === "command -v ai") {
+        assert.equal(options.encoding, "utf8");
+        return path.join(installRoot, "bin", "cli.js");
       }
       if (command === "git remote get-url origin") {
         throw new Error("not a git repo");
@@ -82,7 +80,10 @@ test("syncTemplates resolves template roots via npm and removes legacy templateS
     const afterSecondRun = fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8");
     const parsedConfig = JSON.parse(afterSecondRun);
 
-    assert.equal(normalize(firstReport.templateRoot), normalize(templateRoot));
+    assert.equal(
+      normalize(firstReport.templateRoot),
+      normalize(fs.realpathSync(templateRoot))
+    );
     assert.equal(firstReport.configUpdated, true);
     assert.ok(!("templateSource" in parsedConfig));
     assert.ok(firstReport.registryAdded.some((entry) => entry.entry === ".agents/skills/" && entry.list === "managed"));
@@ -116,6 +117,63 @@ test("syncTemplates resolves template roots via npm and removes legacy templateS
     assert.equal(afterSecondRun, afterFirstRun);
   } finally {
     childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates resolves Windows npm wrappers via .cmd launchers", async () => {
+  const originalExecSync = childProcess.execSync;
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-win32-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const globalRoot = path.join(tmpDir, "npm-global");
+    const packageRoot = path.join(globalRoot, "node_modules", "@fitlab-ai", "agent-infra");
+    const templateRoot = path.join(packageRoot, "templates");
+    const wrapperPath = path.join(globalRoot, "ai.cmd");
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+
+    writeFile(templateRoot, "README.md", "Hello {{project}}\n");
+    writeJson(packageRoot, "package.json", {
+      name: "@fitlab-ai/agent-infra",
+      version: "0.0.0-test"
+    });
+    writeFile(globalRoot, "ai.cmd", "@ECHO OFF\r\n");
+
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      files: {
+        managed: ["README.md"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    Object.defineProperty(process, "platform", { value: "win32" });
+    childProcess.execSync = (command) => {
+      if (command === "where ai") {
+        return wrapperPath;
+      }
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot);
+
+    assert.equal(normalize(report.templateRoot), normalize(templateRoot));
+    assert.equal(fs.readFileSync(path.join(projectRoot, "README.md"), "utf8"), "Hello demo\n");
+  } finally {
+    childProcess.execSync = originalExecSync;
+    if (originalPlatform) {
+      Object.defineProperty(process, "platform", originalPlatform);
+    }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
