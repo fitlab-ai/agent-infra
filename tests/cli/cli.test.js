@@ -149,26 +149,28 @@ test("installed sync-templates.js executes inside a type=module project", () => 
       "module",
       "package.json should remain an ESM package after init"
     );
-    const npmGlobalPrefix = path.join(tmpDir, ".npm-global");
-    const globalTemplateRoot = path.join(
-      npmGlobalPrefix,
-      "lib",
-      "node_modules",
-      "@fitlab-ai",
-      "agent-infra",
-      "templates"
-    );
-    const localTemplateRoot = path.join(
+    const packageRoot = path.join(
       tmpDir,
       "node_modules",
       "@fitlab-ai",
-      "agent-infra",
-      "templates"
+      "agent-infra"
     );
-    fs.mkdirSync(globalTemplateRoot, { recursive: true });
+    const localTemplateRoot = path.join(packageRoot, "templates");
     fs.mkdirSync(localTemplateRoot, { recursive: true });
-    fs.writeFileSync(path.join(globalTemplateRoot, "README.md"), "Hello {{project}} from global\n", "utf8");
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({ name: "@fitlab-ai/agent-infra", version: "0.0.0-test" }, null, 2) + "\n",
+      "utf8"
+    );
+    fs.mkdirSync(path.join(packageRoot, "bin"), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, "bin", "cli.js"), "console.log('ai');\n", {
+      encoding: "utf8",
+      mode: 0o755
+    });
     fs.writeFileSync(path.join(localTemplateRoot, "README.md"), "Hello {{project}}\n", "utf8");
+    const pathBinDir = path.join(tmpDir, ".path-bin");
+    fs.mkdirSync(pathBinDir, { recursive: true });
+    fs.symlinkSync(path.join(packageRoot, "bin", "cli.js"), path.join(pathBinDir, "ai"));
     fs.writeFileSync(
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
@@ -190,21 +192,15 @@ test("installed sync-templates.js executes inside a type=module project", () => 
         encoding: "utf8",
         env: {
           ...process.env,
-          npm_config_prefix: npmGlobalPrefix
+          PATH: `${pathBinDir}:${process.env.PATH || ""}`
         }
       }
     );
     const report = JSON.parse(output);
-    const expectedTemplateRoot = report.templateRoot === globalTemplateRoot
-      ? globalTemplateRoot
-      : localTemplateRoot;
-    const expectedReadme = report.templateRoot === globalTemplateRoot
-      ? "Hello esmproj from global\n"
-      : "Hello esmproj\n";
 
     assert.ok(!report.error, "sync-templates.js should run without ESM loader errors");
-    assert.equal(report.templateRoot, expectedTemplateRoot);
-    assert.equal(fs.readFileSync(path.join(tmpDir, "README.md"), "utf8"), expectedReadme);
+    assert.equal(report.templateRoot, fs.realpathSync(localTemplateRoot));
+    assert.equal(fs.readFileSync(path.join(tmpDir, "README.md"), "utf8"), "Hello esmproj\n");
     assert.ok(
       fs.existsSync(
         path.join(tmpDir, ".agents", "skills", "update-agent-infra", "scripts", "sync-templates.js")

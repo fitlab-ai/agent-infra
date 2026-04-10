@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * sync-templates.js — Deterministic template sync for managed & ejected files.
  *
@@ -75,6 +74,7 @@ const DEFAULTS = {
 };
 
 const INSTALLER_VERSION = "v0.5.1";
+const PACKAGE_NAME = '@fitlab-ai/agent-infra';
 
 function norm(p) { return p.replace(/\\/g, '/'); }
 
@@ -140,37 +140,107 @@ function isTemplateDir(dir) {
   }
 }
 
-function resolveInstalledTemplateDir(nodeModulesRoot) {
-  if (!nodeModulesRoot) return null;
-  const candidate = path.join(nodeModulesRoot, '@fitlab-ai', 'agent-infra', 'templates');
-  return isTemplateDir(candidate) ? candidate : null;
+function verifyPackageDir(dir) {
+  const pkgPath = path.join(dir, 'package.json');
+  if (!fs.existsSync(pkgPath)) {
+    return { templateRoot: null, reason: `package.json not found at ${pkgPath}` };
+  }
+
+  let pkg;
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  } catch {
+    return { templateRoot: null, reason: `invalid package.json at ${pkgPath}` };
+  }
+
+  if (pkg.name !== PACKAGE_NAME) {
+    const packageName = typeof pkg.name === 'string' && pkg.name ? pkg.name : 'an unknown package';
+    return { templateRoot: null, reason: `${pkgPath} belongs to ${packageName}` };
+  }
+
+  const templateRoot = path.join(dir, 'templates');
+  if (!isTemplateDir(templateRoot)) {
+    return { templateRoot: null, reason: `templates/ not found at ${templateRoot}` };
+  }
+
+  return { templateRoot, reason: null };
 }
 
-function resolveTemplateRoot(projectRoot) {
+function resolveUnixTemplateRoot(name) {
+  let linkPath;
   try {
-    const globalRoot = childProcess.execSync('npm root -g', {
+    linkPath = childProcess.execSync(`command -v ${name}`, {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe']
     }).trim();
-    const globalTemplateRoot = resolveInstalledTemplateDir(globalRoot);
-    if (globalTemplateRoot) return globalTemplateRoot;
   } catch {
-    // npm may be unavailable or not configured.
+    return { templateRoot: null, reason: 'not found in PATH' };
   }
 
+  if (!linkPath) {
+    return { templateRoot: null, reason: 'not found in PATH' };
+  }
+
+  let realPath;
   try {
-    const localRoot = childProcess.execSync('npm root', {
-      cwd: projectRoot,
+    realPath = fs.realpathSync(linkPath);
+  } catch {
+    return { templateRoot: null, reason: `cannot resolve symlink target for ${linkPath}` };
+  }
+
+  let dir = path.dirname(realPath);
+  while (true) {
+    const pkgPath = path.join(dir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      return verifyPackageDir(dir);
+    }
+
+    const parentDir = path.dirname(dir);
+    if (parentDir === dir) {
+      break;
+    }
+    dir = parentDir;
+  }
+
+  return { templateRoot: null, reason: `no package.json found above ${realPath}` };
+}
+
+function resolveWindowsTemplateRoot(name) {
+  let output;
+  try {
+    output = childProcess.execSync(`where ${name}`, {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe']
     }).trim();
-    const localTemplateRoot = resolveInstalledTemplateDir(localRoot);
-    if (localTemplateRoot) return localTemplateRoot;
   } catch {
-    // npm may be unavailable or the project may not have a local install.
+    return { templateRoot: null, reason: 'not found in PATH' };
   }
 
-  return null;
+  const wrapperPaths = output.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (wrapperPaths.length === 0) {
+    return { templateRoot: null, reason: 'not found in PATH' };
+  }
+
+  const wrapperPath = wrapperPaths.find(line => /\.cmd$/i.test(line)) || wrapperPaths[0];
+  const packageDir = path.join(path.dirname(wrapperPath), 'node_modules', '@fitlab-ai', 'agent-infra');
+  return verifyPackageDir(packageDir);
+}
+
+function resolveTemplateRoot() {
+  const resolver = process.platform === 'win32'
+    ? resolveWindowsTemplateRoot
+    : resolveUnixTemplateRoot;
+  const errors = [];
+
+  for (const name of ['ai', 'agent-infra']) {
+    const result = resolver(name);
+    if (result.templateRoot) {
+      return result.templateRoot;
+    }
+    errors.push({ name, reason: result.reason });
+  }
+
+  return { templateRoot: null, errors };
 }
 
 function isBinary(fp) {
@@ -228,9 +298,29 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
   const configPathRel = norm(path.relative(projectRoot, cfgPath));
-  const templateRoot = templateRootOverride || resolveTemplateRoot(projectRoot);
+  let templateRoot = templateRootOverride;
   if (!templateRoot) {
-    return { error: 'Template source not found. Install via npm: npm install -g @fitlab-ai/agent-infra' };
+    const resolvedTemplateRoot = resolveTemplateRoot();
+    if (typeof resolvedTemplateRoot === 'string') {
+      templateRoot = resolvedTemplateRoot;
+    } else {
+      const details = resolvedTemplateRoot.errors
+        .map(({ name, reason }) => `  - ${name}: ${reason}`)
+        .join('\n');
+      return {
+        error: [
+          'Template source not found.',
+          '',
+          'Attempted binary lookups:',
+          details,
+          '',
+          'Please ensure agent-infra is installed and available on PATH.',
+          'If already installed, upgrade to the latest version or reinstall:',
+          '  npm install -g @fitlab-ai/agent-infra',
+          '  brew upgrade fitlab-ai/agent-infra/agent-infra || brew install fitlab-ai/agent-infra/agent-infra'
+        ].join('\n')
+      };
+    }
   }
   const version = INSTALLER_VERSION;
   const hadTemplateSource = Object.prototype.hasOwnProperty.call(cfg, 'templateSource');
