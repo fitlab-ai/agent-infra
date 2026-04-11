@@ -41,6 +41,14 @@ agent-infra standardizes that collaboration surface. It gives every supported AI
   <img src="./assets/demo-init.gif" alt="CLI install and initialize demo" width="100%" style="max-width: 720px;">
 </p>
 
+Once initialized, open the project in your AI TUI and install the latest skills:
+
+```bash
+/update-agent-infra
+```
+
+> AI reads `.agents/.airc.json`, auto-locates the installed template root, and syncs the latest skill manifests, managed files, and registry deterministically via `sync-templates.js`.
+
 **Scenario**: Issue #42 reports *"Login API returns 500 when email contains a plus sign"*. Here is the full fix lifecycle — AI does the heavy lifting, you stay in control:
 
 ```bash

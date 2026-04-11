@@ -56,8 +56,3 @@ Sleep 3s
 Type "tree .agents/ .claude/ .gemini/ .opencode/ -L 2 --dirsfirst"
 Enter
 Sleep 4s
-
-# ── Hint next step ──
-Type "# Next: open in Claude Code and run /update-agent-infra"
-Enter
-Sleep 2.5s
