@@ -35,6 +35,20 @@ agent-infra 的目标就是把这层协作面标准化。它为所有支持的 A
 
 ## 实战演示
 
+### 安装与初始化
+
+<p align="center">
+  <img src="./assets/demo-init.gif" alt="CLI 安装初始化演示" width="100%" style="max-width: 720px;">
+</p>
+
+完成初始化后，在你的 AI TUI 中打开项目并安装最新 skills：
+
+```bash
+/update-agent-infra
+```
+
+> AI 读取 `.agents/.airc.json`，自动定位已安装的模板根目录，并通过 `sync-templates.js` 确定性地同步最新的 skill 清单、managed 文件和注册表。
+
 **场景**：Issue #42 报告 *"登录接口在邮箱包含加号时返回 500"*。以下是完整的修复流程 —— AI 执行主要工作，你掌控方向：
 
 ```bash
