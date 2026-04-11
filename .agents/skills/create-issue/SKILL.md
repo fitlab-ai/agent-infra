@@ -21,7 +21,7 @@ description: "从任务文件创建 GitHub Issue"
 
 检查：
 - `.agents/workspace/active/{task-id}/task.md`
-- 使用 `gh auth status` 验证 GitHub CLI 认证状态
+- 执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的认证命令验证当前平台访问能力
 
 如果 `issue_number` 已存在且既不为空也不为 `N/A`，创建前必须先与用户确认。
 
@@ -39,10 +39,7 @@ description: "从任务文件创建 GitHub Issue"
 
 ### 4. 创建 Issue
 
-使用 `gh issue create --title "{title}" --body "{body}" --assignee @me ...` 创建 Issue；如果没有有效 label，就省略 `--label`。
-
-如果已经确定了 Issue Type，则执行：
-`gh api "repos/$repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent`
+按 `.agents/rules/issue-pr-commands.md` 中的 “创建 Issue” 与 “Issue Type 设置” 规则创建并补充 Issue；如果没有有效 label，就省略 label 参数。
 
 ### 5. 更新任务状态
 

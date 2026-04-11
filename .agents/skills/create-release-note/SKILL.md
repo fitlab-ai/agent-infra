@@ -35,12 +35,10 @@ git rev-parse v<prev-version>
 
 获取最近多条已发布的 Release Note 作为格式参考，并参考预定义的完整分类清单：
 
+执行前先读取 `.agents/rules/release-commands.md`。
+
 ```bash
-# Part A: 逐条获取这 3 条 Release 的 body
-for tag in $(gh release list --limit 10 --json tagName,isDraft,isPrerelease \
-  --jq '[.[] | select(.isDraft == false and .isPrerelease == false)] | .[0:3] | .[].tagName'); do
-  gh release view "$tag" --json body -q '.body'
-done
+# Part A：按 `.agents/rules/release-commands.md` 的 release 查询命令逐条获取最近 3 条 Release 的 body
 ```
 
 **Part B：完整分类清单**
@@ -65,10 +63,7 @@ done
 git log v<prev-version> --format=%aI -1
 git log v<version> --format=%aI -1
 
-# 获取范围内已合并的 PR
-gh pr list --state merged --base <branch> \
-  --json number,title,body,author,labels,mergedAt,url \
-  --limit 200 --search "merged:YYYY-MM-DD..YYYY-MM-DD"
+# 获取范围内已合并的 PR（按 `.agents/rules/release-commands.md` 的 merged PR 查询命令执行）
 ```
 
 同时收集没有 PR 的直接提交：
@@ -81,9 +76,7 @@ git log v<prev-version>..v<version> --format="%H %s" --no-merges
 从每个 PR body 中提取关联的 Issue：
 - 匹配模式：`Closes #N`、`Fixes #N`、`Resolves #N`（不区分大小写）
 
-```bash
-gh issue view <N> --json number,title,labels,url
-```
+按 `.agents/rules/release-commands.md` 的关联 Issue 查询命令读取。
 
 ### 6. 分类变更
 
@@ -135,12 +128,7 @@ gh issue view <N> --json number,title,labels,url
 
 ### 9. 创建 Draft Release（如确认）
 
-```bash
-gh release create v<version> \
-  --title "v<version>" \
-  --notes-file /tmp/release-notes-v<version>.md \
-  --draft
-```
+按 `.agents/rules/release-commands.md` 的 Draft Release 创建命令执行。
 
 输出：
 ```

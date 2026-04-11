@@ -38,16 +38,15 @@ Confirm whether the current branch already has an upstream. Push with `git push 
 
 Check whether the current branch already has a PR first; if one exists, show the PR URL and stop without repeating metadata sync or summary publication.
 
-Create the PR with `gh pr create --base <target-branch> --title "<title>" --assignee @me --body ...`.
+Read `.agents/rules/issue-pr-commands.md` before this step, then create the PR with its "Create a PR" command template.
 
 If `{task-id}` is available and the related task provides `issue_number`, keep `Closes #{issue-number}` in the PR body.
 
 ### 6. Sync PR Metadata
 
 For PRs where `{task-id}` is available, sync the core metadata immediately:
-- run `gh label list --search "type:" --limit 1 --json name --jq 'length'`
-- add the mapped type label with `gh pr edit {pr-number} --add-label "{type-label}"`
-- add relevant `in: {module}` labels with `gh pr edit {pr-number} --add-label "in: {module}"`
+- query standard labels, Issue metadata, and PR metadata via `.agents/rules/issue-pr-commands.md`
+- add the mapped type label and relevant `in:` labels with the PR update command from `.agents/rules/issue-pr-commands.md`
 - sync the linked Issue `in:` labels to match by following the `in:` label sync rule in `.agents/rules/issue-sync.md`
 - reuse the Issue milestone by following "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md`
 - keep Development linking in the PR body with `Closes #{issue-number}` when applicable

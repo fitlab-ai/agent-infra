@@ -100,15 +100,25 @@ Each AI tool has different strengths. Use them accordingly:
 
 ## Label Conventions
 
-GitHub Labels in this project use the following prefixes, each with a defined scope:
+This project uses the following collaboration label prefixes, each with a defined scope:
 
 | Label prefix | Issue | PR | Notes |
 |---|---|---|---|
-| `type:` | — | Yes | Issues use the native GitHub Type field; PRs use `type:` labels for changelog generation and categorization |
+| `type:` | — | Yes | Issues use the platform's native type/category field when available; PRs use `type:` labels for changelog generation and categorization |
 | `status:` | Yes | — | PRs already have their own state flow (Open / Draft / Merged / Closed); Issues use `status:` labels for project tracking states |
 | `in:` | Yes | Yes | Both Issues and PRs can be filtered by module |
 
-Initialize the label set with the `/init-labels` command.
+The default GitHub setup initializes these labels with the `/init-labels` command.
+
+## Private Platform Extensions
+
+To adapt agent-infra to a private code-hosting platform:
+
+1. Set `.agents/.airc.json` `platform.type` to a stable identifier such as `my-platform`.
+2. Copy the generated rule files in `.agents/rules/` and adapt them to your platform's CLI or API while keeping the runtime filenames unchanged.
+3. Add the customized rule files to `.agents/.airc.json` `files.ejected` so future `agent-infra update` runs do not overwrite them.
+4. If you maintain a fork of the template source, add matching `.{platform}.` template variants before adding that platform identifier to the sync logic.
+5. Validate the customized workflow on a test task before rolling it out broadly.
 
 ## Skill Authoring Conventions
 

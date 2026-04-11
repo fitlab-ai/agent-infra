@@ -9,7 +9,7 @@ description: "取消不再需要的任务并归档"
 
 - 本命令用于终止一个不再需要继续执行的任务，并归档到 `completed/`
 - 只有在确认该任务无需继续实现、审查或修复时才可取消
-- 有效 `issue_number` 存在时，GitHub Issue 同步属于必做项
+- 有效 `issue_number` 存在时，Issue 同步属于必做项
 
 ## 执行步骤
 
@@ -27,7 +27,7 @@ description: "取消不再需要的任务并归档"
 
 ### 2. 判断取消标签
 
-根据取消原因推断 GitHub Issue 关闭标签：
+根据取消原因推断 Issue 关闭标签：
 - `status: superseded`：原因包含“重复”、“替代”、“合并到”、“已由 #123 / PR 替代”等语义
 - `status: invalid`：原因包含“误报”、“不存在”、“无法复现”、“排查后无问题”等语义
 - `status: declined`：原因包含“不做”、“暂不实现”、“优先级调整”、“方案否决”等语义
@@ -72,6 +72,7 @@ ls .agents/workspace/completed/{task-id}/task.md
 检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过此步骤。
 
 > Issue 同步规则见 `.agents/rules/issue-sync.md`。执行同步前先读取该文件。
+> 关闭 Issue 前先读取 `.agents/rules/issue-pr-commands.md`。
 
 如果存在有效的 `issue_number`：
 - 替换所有 `status:` labels，并设置步骤 2 推断出的标签
@@ -80,7 +81,7 @@ ls .agents/workspace/completed/{task-id}/task.md
 - 移除全部 assignees
 - 发布取消评论，隐藏标记使用 `<!-- sync-issue:{task-id}:cancel -->`
 - 使用 `.agents/rules/issue-sync.md` 的 task.md 评论同步规则创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论
-- 关闭 Issue：`gh issue close {issue-number} --reason "not planned"`
+- 关闭 Issue：按 `.agents/rules/issue-pr-commands.md` 中的“关闭 Issue”命令执行，关闭原因固定为 `not planned`
 
 取消评论至少包含：
 - 取消原因
@@ -112,7 +113,7 @@ node .agents/scripts/validate-artifact.js gate cancel-task .agents/workspace/com
 任务 {task-id} 已取消并归档。
 
 取消原因：{reason}
-GitHub 标签：{status-label 或 skipped}
+状态标签：{status-label 或 skipped}
 归档路径：.agents/workspace/completed/{task-id}/
 
 下一步 - 查看归档任务：
@@ -125,7 +126,7 @@ GitHub 标签：{status-label 或 skipped}
 
 - [ ] 已记录取消原因并更新 task.md
 - [ ] 已将任务目录移动到 `.agents/workspace/completed/`
-- [ ] 已在存在 Issue 时完成 GitHub 同步
+- [ ] 已在存在 Issue 时完成 Issue 同步
 - [ ] 已运行 gate 校验并通过
 - [ ] 已向用户展示完整的下一步命令
 
@@ -139,4 +140,4 @@ GitHub 标签：{status-label 或 skipped}
 
 - 任务未找到：`Task {task-id} not found`
 - 任务已归档：提示任务已在 `completed/` 中
-- Issue 同步失败：保留本地归档结果，并告知用户需要人工补齐 GitHub 操作
+- Issue 同步失败：保留本地归档结果，并告知用户需要人工补齐平台操作

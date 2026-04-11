@@ -17,9 +17,7 @@ Import the specified Dependabot security alert and create a remediation task.
 
 ### 1. Retrieve Alert Information
 
-```bash
-gh api repos/{owner}/{repo}/dependabot/alerts/<alert-number>
-```
+Read `.agents/rules/security-alerts.md` before this step, then use its Dependabot alert read command to fetch the alert details.
 
 Extract key information:
 - `number`: alert number

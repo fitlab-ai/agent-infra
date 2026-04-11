@@ -2,6 +2,9 @@
   "project": "agent-infra",
   "org": "fitlab-ai",
   "language": "zh-CN",
+  "platform": {
+    "type": "github"
+  },
   "templateVersion": "v0.5.1",
   "sandbox": {
     "runtimes": [

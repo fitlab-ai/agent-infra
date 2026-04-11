@@ -38,7 +38,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
 
   try {
     execSync(
-      `printf 'testproj\\ntestorg\\n\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
 
@@ -47,6 +47,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
     );
     assert.equal(config.project, "testproj");
     assert.equal(config.org, "testorg");
+    assert.deepEqual(config.platform, { type: "github" });
     assert.equal(config.templateVersion, `v${JSON.parse(read("package.json")).version}`);
     assert.ok(!("templateSource" in config), "init should not generate templateSource");
     assert.ok(!config.branchPrefix, "branchPrefix should not exist");
@@ -141,7 +142,7 @@ test("installed sync-templates.js executes inside a type=module project", () => 
     );
 
     execSync(
-      `printf 'esmproj\\nesmorg\\n\\n' | node "${cli}" init`,
+      `printf 'esmproj\\nesmorg\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
     assert.equal(
@@ -221,8 +222,9 @@ test("build output is up-to-date", () => {
 test("agent-infra init rejects invalid input", () => {
   const cli = filePath("bin/cli.js");
   const cases = [
-    { input: 'demo"x\\ntestorg\\n\\n', desc: "project name with quote" },
-    { input: 'testproj\\ntestorg\\nbad-lang\\n', desc: "unsupported language" }
+    { input: 'demo"x\\ntestorg\\n\\n\\n', desc: "project name with quote" },
+    { input: 'testproj\\ntestorg\\nbad-lang\\n\\n', desc: "unsupported language" },
+    { input: 'testproj\\ntestorg\\n\\nbad platform\\n', desc: "invalid platform type" }
   ];
 
   cases.forEach(({ input, desc }) => {
@@ -292,6 +294,7 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     const updated = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
     );
+    assert.deepEqual(updated.platform, { type: "github" }, "update should backfill default platform config");
     assert.deepEqual(updated.sandbox, {
       runtimes: ["node20"],
       tools: ["claude-code", "codex", "opencode", "gemini-cli"],

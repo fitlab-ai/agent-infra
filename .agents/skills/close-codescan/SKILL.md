@@ -11,9 +11,7 @@ description: "关闭 Code Scanning 告警并记录理由"
 
 ### 1. 获取告警信息
 
-```bash
-gh api repos/{owner}/{repo}/code-scanning/alerts/<alert-number>
-```
+执行前先读取 `.agents/rules/security-alerts.md`，并按其中的 Code Scanning 告警读取命令获取告警详情。
 
 验证告警处于 `open` 状态。如果已被关闭/修复，告知用户并退出。
 
@@ -61,13 +59,7 @@ Code Scanning 告警 #{alert-number}
 
 ### 6. 执行关闭
 
-```bash
-gh api --method PATCH \
-  repos/{owner}/{repo}/code-scanning/alerts/<alert-number> \
-  -f state=dismissed \
-  -f dismissed_reason="{api-reason}" \
-  -f dismissed_comment="{用户的说明}"
-```
+按 `.agents/rules/security-alerts.md` 中的 Code Scanning 告警关闭命令执行关闭操作，并传入映射后的 `{api-reason}` 与用户说明。
 
 **API reason 映射**（按 GitHub Code Scanning API）：
 - 误报 -> `false positive`
@@ -115,7 +107,7 @@ Code Scanning 告警 #{alert-number} 已关闭。
 ## 注意事项
 
 1. **谨慎处理高严重程度告警**：Critical/High 告警需要充分分析。建议先执行 import-codescan + analyze-task。
-2. **真实的理由**：关闭记录保存在 GitHub 中，可能会被审计。
+2. **真实的理由**：关闭记录保存在平台中，可能会被审计。
 3. **定期复查**：已关闭的告警应定期复查。
 4. **优先修复**：关闭应作为最后手段。
 

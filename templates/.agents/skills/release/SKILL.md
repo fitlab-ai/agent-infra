@@ -113,7 +113,8 @@ bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PAT
 ```
 
 The script is responsible for:
-- Loading the current milestone list with `gh api "repos/$repo/milestones"`
+- Read `.agents/rules/label-milestone-setup.md` before this step
+- Use its milestone list and update commands to load and adjust current milestones
 - Closing `{MAJOR}.{MINOR}.{PATCH}` when it exists and is still open
 - Ensuring `{MAJOR}.{MINOR}.{PATCH+1}` and `{MAJOR}.{MINOR}.x` exist
 - When `PATCH=0`, also ensuring `{MAJOR}.{MINOR+1}.0` and `{MAJOR}.{MINOR+1}.x`

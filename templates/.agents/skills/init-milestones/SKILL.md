@@ -12,9 +12,8 @@ Initialize the repository's standard GitHub Milestones taxonomy.
 ### 1. Verify prerequisites
 
 Confirm that:
-- `gh` is installed
-- `gh auth token` succeeds
-- `gh repo view --json nameWithOwner` can access the current repository
+- read `.agents/rules/label-milestone-setup.md` first
+- use its authentication commands to verify platform access
 
 If any prerequisite fails, stop and report the matching error.
 
@@ -26,11 +25,11 @@ Execute the complete milestone initialization flow with:
 bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 ```
 
-The script is responsible for:
+The script and `.agents/rules/label-milestone-setup.md` are responsible for:
 - Creating and cleaning up a temporary workspace
 - Detecting whether `--history` was requested
 - Resolving the version baseline from the latest `v*` Git tag, then `package.json`, then defaulting to `0.1.0`
-- Listing current milestones with `gh api "repos/$repo/milestones"`
+- Listing current milestones with the platform-specific milestone query command
 - Building the desired milestone set and creating only the missing titles
 - Printing the final execution summary
 
@@ -59,7 +58,7 @@ Operational notes:
 - General Backlog is the fallback milestone for unsorted work.
 - Without `--history`, version milestones are created only for the next patch release.
 - Historical `X.Y.Z` tags create `X.Y.x` milestones as open and `X.Y.Z` milestones as closed.
-- Repositories with many tags may hit the GitHub API rate limit.
+- Repositories with many tags may hit the platform API rate limit.
 
 ### 5. Inform User
 

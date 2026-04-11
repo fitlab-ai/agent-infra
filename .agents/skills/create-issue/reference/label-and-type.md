@@ -42,29 +42,17 @@ Issue Type fallback 映射：
 
 ## 创建 Issue
 
-使用：
+创建 Issue 时，执行前先读取 `.agents/rules/issue-pr-commands.md`，并使用其中的 “创建 Issue” 命令模板。
 
-```bash
-gh issue create --title "{title}" --body "{body}" --label "{label-1}" --label "{label-2}" --milestone "{milestone}"
-```
-
-如果最终没有有效 label，就省略 `--label`。
+如果最终没有有效 label，就省略 label 参数。
 
 Milestone 推断规则见 `.agents/rules/milestone-inference.md` 的「阶段 1：`create-issue`」。推断前先读取该文件。
 
-Issue Type 设置：
-
-```bash
-gh api "orgs/$owner/issue-types" --jq '.[].name'
-gh api "repos/$repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent
-```
+Issue Type 设置同样遵循 `.agents/rules/issue-pr-commands.md` 中的对应命令。
 
 `in:` label（粗选）：
 
-```bash
-gh label list --search "in:" --limit 50 --json name --jq '.[].name'
-gh issue edit {issue-number} --add-label "in: {module}"
-```
+执行前先按 `.agents/rules/issue-pr-commands.md` 的 Issue 更新命令准备 label 编辑参数。
 
 从查询结果中，根据 task.md 的标题和描述进行语义匹配：
 - 任务描述**明确提及**某个模块（如"修复 CLI 参数解析"→ `in: cli`）→ 添加

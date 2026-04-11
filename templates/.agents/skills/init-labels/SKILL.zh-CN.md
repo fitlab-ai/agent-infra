@@ -12,9 +12,8 @@ description: "初始化仓库的 GitHub Labels 体系"
 ### 1. 验证前置条件
 
 确认以下条件成立：
-- 已安装 `gh`
-- `gh auth token` 执行成功
-- `gh repo view --json nameWithOwner` 可以访问当前仓库
+- 执行前先读取 `.agents/rules/label-milestone-setup.md`
+- 按其中的认证命令验证平台访问能力
 
 如果任一条件失败，停止并输出对应错误。
 
@@ -26,10 +25,10 @@ description: "初始化仓库的 GitHub Labels 体系"
 bash .agents/skills/init-labels/scripts/init-labels.sh
 ```
 
-脚本负责：
+脚本与 `.agents/rules/label-milestone-setup.md` 共同负责：
 - 在修改前保存当前 label 快照
-- 使用 `gh label create --force` 创建或更新标准 label 集合
-- 提示仍然存在的 GitHub 默认 labels，例如 `question` 和 `wontfix`
+- 使用平台对应的 label 创建或更新命令维护标准 label 集合
+- 提示仍然存在的平台预置 labels，例如 `question` 和 `wontfix`
 - 输出最终执行摘要
 
 ### 3. 标准分类体系
@@ -68,10 +67,7 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 #### 4.3 写入配置并创建 label
 
 1. 将最终映射写入 `.agents/.airc.json` 的 `labels.in` 字段。
-2. 为每个映射 key 创建 `in: {key}` label：
-   ```bash
-   gh label create "in: {key}" --color EBF8DF --description "Module: {key}" --force
-   ```
+2. 为每个映射 key 按 `.agents/rules/label-milestone-setup.md` 的 label 创建命令创建 `in: {key}` label。
 3. 询问用户确认后，清理不在最终映射中的旧 `in:` label。
 
 ### 5. 输出与行为保证
@@ -80,11 +76,11 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 - 创建或更新的通用 labels 数量
 - 写入的 `labels.in` 映射结果
 - 按映射 key 计算的 `in:` labels 数量
-- 名称完全匹配的 GitHub 默认 labels 已被覆盖的说明
-- 仍然存在的未匹配 GitHub 默认 labels
+- 名称完全匹配的平台预置 labels 已被覆盖的说明
+- 仍然存在的未匹配平台预置 labels
 
 执行说明：
-- 整个操作具备幂等性，因为每个 label 都使用 `gh label create --force`。
+- 整个操作具备幂等性，因为规则文件中的 label 创建命令按覆盖或更新方式执行。
 - `in:` labels 由 AI 引导步骤和 `.airc.json` 映射统一管理。
 
 ### 6. 告知用户

@@ -1,11 +1,11 @@
 ---
 name: restore-task
-description: "从 GitHub Issue 评论还原本地任务文件"
+description: "从平台 Issue 评论还原本地任务文件"
 ---
 
 # 还原任务
 
-从带有 sync 标记的 GitHub Issue 评论中恢复本地任务工作区文件。
+从带有 sync 标记的平台 Issue 评论中恢复本地任务工作区文件。
 
 ## 行为边界 / 关键规则
 
@@ -21,19 +21,13 @@ description: "从 GitHub Issue 评论还原本地任务文件"
 检查：
 - 必填参数 `{issue-number}`
 - 可选参数 `{task-id}`
-- `gh auth status`
+- 执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的认证命令验证当前平台访问能力
 
 如果用户传入了 `{task-id}`，校验其格式为 `TASK-{yyyyMMdd-HHmmss}`。
 
 ### 2. 获取 Issue 评论
 
-读取 Issue 的全部评论，保留原始顺序和评论 ID。
-
-建议命令：
-
-```bash
-gh api "repos/{owner}/{repo}/issues/{issue-number}/comments" --paginate
-```
+按 `.agents/rules/issue-pr-commands.md` 中的 “Issue 评论读取” 命令读取 Issue 的全部评论，保留原始顺序和评论 ID。
 
 ### 3. 确定 task-id 与待恢复文件
 
@@ -152,7 +146,7 @@ node .agents/scripts/validate-artifact.js gate restore-task .agents/workspace/ac
 ## 错误处理
 
 - Issue 不存在或无权访问
-- `gh` 未认证
+- 平台 CLI 未认证
 - 找不到带 sync 标记的评论
 - 无法唯一确定 `task-id`
 - 目标目录已存在

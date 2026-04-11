@@ -1,11 +1,11 @@
 ---
 name: restore-task
-description: "Restore local task files from GitHub Issue comments"
+description: "Restore local task files from platform Issue comments"
 ---
 
 # Restore Task
 
-Restore local task workspace files from GitHub Issue comments that contain sync markers.
+Restore local task workspace files from platform Issue comments that contain sync markers.
 
 ## Boundary / Critical Rules
 
@@ -21,19 +21,13 @@ Restore local task workspace files from GitHub Issue comments that contain sync 
 Check:
 - required `{issue-number}`
 - optional `{task-id}`
-- `gh auth status`
+- read `.agents/rules/issue-pr-commands.md` first and use its authentication commands to verify current platform access
 
 If the user provided `{task-id}`, validate the `TASK-{yyyyMMdd-HHmmss}` format.
 
 ### 2. Fetch Issue Comments
 
-Read all Issue comments while preserving the original order and comment IDs.
-
-Suggested command:
-
-```bash
-gh api "repos/{owner}/{repo}/issues/{issue-number}/comments" --paginate
-```
+Read all Issue comments by following the "Read Issue comments" command in `.agents/rules/issue-pr-commands.md`, preserving the original order and comment IDs.
 
 ### 3. Determine the task-id and Files to Restore
 
@@ -152,7 +146,7 @@ Stop after completing the checklist. Do not continue the workflow automatically.
 ## Error Handling
 
 - Issue missing or inaccessible
-- `gh` unavailable or unauthenticated
+- Platform CLI unavailable or unauthenticated
 - No sync-marked comments found
 - Unable to determine a unique `task-id`
 - Target directory already exists

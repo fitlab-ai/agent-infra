@@ -12,9 +12,8 @@ description: "初始化仓库的 GitHub Milestones 体系"
 ### 1. 验证前置条件
 
 确认以下条件成立：
-- 已安装 `gh`
-- `gh auth token` 执行成功
-- `gh repo view --json nameWithOwner` 可以访问当前仓库
+- 执行前先读取 `.agents/rules/label-milestone-setup.md`
+- 按其中的认证命令验证平台访问能力
 
 如果任一条件失败，停止并输出对应错误。
 
@@ -26,11 +25,11 @@ description: "初始化仓库的 GitHub Milestones 体系"
 bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 ```
 
-脚本负责：
+脚本与 `.agents/rules/label-milestone-setup.md` 共同负责：
 - 创建并清理临时工作目录
 - 检测是否传入 `--history`
 - 按“最新 `v*` Git tag → `package.json` → 默认 `0.1.0`”解析版本基线
-- 使用 `gh api "repos/$repo/milestones"` 读取当前里程碑
+- 使用平台对应的 milestones 查询命令读取当前里程碑
 - 构建目标里程碑集合，并且只创建缺失标题
 - 输出最终执行摘要
 
@@ -59,7 +58,7 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 - General Backlog 是未分类工作的兜底里程碑。
 - 不带 `--history` 时，只为下一次 patch 发布创建版本里程碑。
 - 历史 `X.Y.Z` tag 会生成开启状态的 `X.Y.x` 和关闭状态的 `X.Y.Z`。
-- 标签较多的仓库可能触发 GitHub API rate limit。
+- 标签较多的仓库可能触发平台 API rate limit。
 
 ### 5. 告知用户
 

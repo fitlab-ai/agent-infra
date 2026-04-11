@@ -53,6 +53,7 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
       project: "demo",
       org: "acme",
       language: "zh-CN",
+      platform: { type: "github" },
       templateSource: "custom-source",
       files: {
         managed: ["docs/", "_project_/script.sh", ".github/release.yml"],
@@ -146,6 +147,7 @@ test("syncTemplates resolves Windows npm wrappers via .cmd launchers", async () 
       project: "demo",
       org: "acme",
       language: "en",
+      platform: { type: "github" },
       files: {
         managed: ["README.md"],
         merged: [],
@@ -194,6 +196,7 @@ test("syncTemplates reports the bundled installer version with a v prefix", asyn
       project: "demo",
       org: "acme",
       language: "en",
+      platform: { type: "github" },
       files: {
         managed: ["README.md"],
         merged: [],
@@ -221,6 +224,51 @@ test("syncTemplates reports the bundled installer version with a v prefix", asyn
   }
 });
 
+test("syncTemplates prefers platform-specific variants and composes with zh-CN localization", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-platform-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = path.join(tmpDir, "template-root");
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.mkdirSync(templateRoot, { recursive: true });
+
+    writeFile(templateRoot, "docs/rule.md", "base\n");
+    writeFile(templateRoot, "docs/rule.github.md", "github-en\n");
+    writeFile(templateRoot, "docs/rule.github.zh-CN.md", "github-zh\n");
+
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "zh-CN",
+      platform: { type: "github" },
+      files: {
+        managed: ["docs/"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+
+    assert.deepEqual(report.managed.created.sort(), ["docs/rule.md"]);
+    assert.equal(fs.readFileSync(path.join(projectRoot, "docs/rule.md"), "utf8"), "github-zh\n");
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("syncTemplates removes stale managed files but preserves merged and ejected files", async () => {
   const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-cleanup-"));
@@ -241,6 +289,7 @@ test("syncTemplates removes stale managed files but preserves merged and ejected
       project: "demo",
       org: "acme",
       language: "en",
+      platform: { type: "github" },
       files: {
         managed: ["docs/", ".agents/", ".github/"],
         merged: ["docs/merged.md"],
@@ -301,6 +350,7 @@ test("syncTemplates preserves stale files that match merged glob patterns", asyn
       project: "demo",
       org: "acme",
       language: "en",
+      platform: { type: "github" },
       files: {
         managed: ["docs/"],
         merged: ["docs/**/*.md"],
@@ -352,6 +402,7 @@ test("syncTemplates syncs the managed github hook as a single file", async () =>
       project: "demo",
       org: "acme",
       language: "en",
+      platform: { type: "github" },
       files: {
         managed: [],
         merged: [],
@@ -412,6 +463,7 @@ test("syncTemplates reports github pre-commit as a merged pending file", async (
       project: "demo",
       org: "acme",
       language: "en",
+      platform: { type: "github" },
       files: {
         managed: [],
         merged: [],

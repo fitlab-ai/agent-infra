@@ -11,15 +11,11 @@ description: "重构 Issue/PR 标题为 Conventional Commits 格式"
 
 ### 1. 识别目标并获取信息
 
+执行前先读取 `.agents/rules/issue-pr-commands.md`。
+
 尝试判断 ID 是 Issue 还是 PR：
-
-```bash
-# 先尝试 Issue
-gh issue view <id> --json number,title,body,labels,state
-
-# 如果未找到或是 PR
-gh pr view <id> --json number,title,body,labels,state,files
-```
+- 先按规则文件中的“读取 Issue”命令获取 Issue 信息
+- 如果未找到或目标实际为 PR，再按规则文件中的“读取 PR”命令获取 PR 信息
 
 ### 2. 分析内容
 
@@ -59,14 +55,8 @@ Issue/PR #{id} 分析结果：
 ### 4. 应用修改
 
 如果用户确认：
-
-```bash
-# 对于 Issue
-gh issue edit <id> --title "<new-title>"
-
-# 对于 PR
-gh pr edit <id> --title "<new-title>"
-```
+- 对于 Issue：按 `.agents/rules/issue-pr-commands.md` 中的 “Issue 更新” 命令设置标题
+- 对于 PR：按 `.agents/rules/issue-pr-commands.md` 中的 “PR 更新” 命令设置标题
 
 ### 5. 告知用户
 

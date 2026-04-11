@@ -68,6 +68,12 @@ test(".agents/.airc.json declares default sandbox configuration", () => {
   });
 });
 
+test(".agents/.airc.json declares github as the default platform", () => {
+  const collaborator = JSON.parse(read(".agents/.airc.json"));
+
+  assert.deepEqual(collaborator.platform, { type: "github" });
+});
+
 test(".agents/.airc.json excludes deprecated codex prompt paths", () => {
   const collaborator = JSON.parse(read(".agents/.airc.json"));
 

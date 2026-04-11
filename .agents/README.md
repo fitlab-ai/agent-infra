@@ -100,15 +100,25 @@
 
 ## Label 规范
 
-本项目的 GitHub Labels 按以下前缀分类，各前缀有明确的适用范围：
+本项目的协作 labels 按以下前缀分类，各前缀有明确的适用范围：
 
 | Label 前缀 | Issue | PR | 说明 |
 |---|---|---|---|
-| `type:` | — | Yes | Issue 使用 GitHub 原生 Type 字段；PR 无原生类型字段，通过 `type:` label 驱动 changelog 和分类 |
+| `type:` | — | Yes | Issue 优先使用平台原生的类型/分类字段；PR 无原生类型字段时，通过 `type:` label 驱动 changelog 和分类 |
 | `status:` | Yes | — | PR 有自身状态流转（Open / Draft / Merged / Closed）；Issue 使用 `status:` label 标记等待反馈、已确认等项目管理状态 |
 | `in:` | Yes | Yes | Issue 和 PR 均可按模块筛选 |
 
-初始化 Label 体系：使用 `/init-labels` 命令一次性创建标准 labels。
+默认 GitHub 配置下，可使用 `/init-labels` 命令一次性创建标准 labels。
+
+## 私有平台扩展
+
+如需将 agent-infra 接入私有代码托管平台：
+
+1. 在 `.agents/.airc.json` 中把 `platform.type` 设为稳定标识，例如 `my-platform`。
+2. 以 `.agents/rules/` 下已生成的规则文件为起点，改写为你的平台 CLI 或 API 调用，同时保持运行时文件名不变。
+3. 将这些自定义规则文件加入 `.agents/.airc.json` 的 `files.ejected`，避免后续执行 `agent-infra update` 时被覆盖。
+4. 如果你维护的是模板源码分支或私有 fork，需要先补齐对应的 `.{platform}.` 模板变体，再把该平台标识加入模板同步逻辑。
+5. 在正式推广前，先用一个测试任务完整验证工作流和 gate 校验。
 
 ## Skill 编写规范
 

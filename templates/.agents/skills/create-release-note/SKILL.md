@@ -35,12 +35,10 @@ git rev-parse v<prev-version>
 
 Fetch multiple published release notes as format references, then use a predefined complete category list:
 
+Read `.agents/rules/release-commands.md` before this step.
+
 ```bash
-# Part A: Fetch the body for each of the 3 releases
-for tag in $(gh release list --limit 10 --json tagName,isDraft,isPrerelease \
-  --jq '[.[] | select(.isDraft == false and .isPrerelease == false)] | .[0:3] | .[].tagName'); do
-  gh release view "$tag" --json body -q '.body'
-done
+# Part A: fetch the latest 3 published release bodies by following the release query commands in `.agents/rules/release-commands.md`
 ```
 
 **Part B: Complete Category List**
@@ -65,10 +63,7 @@ Get the date range between tags, then query merged PRs:
 git log v<prev-version> --format=%aI -1
 git log v<version> --format=%aI -1
 
-# Get merged PRs in range
-gh pr list --state merged --base <branch> \
-  --json number,title,body,author,labels,mergedAt,url \
-  --limit 200 --search "merged:YYYY-MM-DD..YYYY-MM-DD"
+# Get merged PRs in range by following the merged-PR query command in `.agents/rules/release-commands.md`
 ```
 
 Also collect direct commits without PRs:
@@ -81,9 +76,7 @@ git log v<prev-version>..v<version> --format="%H %s" --no-merges
 From each PR body, extract linked Issues:
 - Match patterns: `Closes #N`, `Fixes #N`, `Resolves #N` (case-insensitive)
 
-```bash
-gh issue view <N> --json number,title,labels,url
-```
+Read linked Issues by following `.agents/rules/release-commands.md`.
 
 ### 6. Classify Changes
 
@@ -135,12 +128,7 @@ Ask:
 
 ### 9. Create Draft Release (If Confirmed)
 
-```bash
-gh release create v<version> \
-  --title "v<version>" \
-  --notes-file /tmp/release-notes-v<version>.md \
-  --draft
-```
+Create the draft release by following `.agents/rules/release-commands.md`.
 
 Output:
 ```

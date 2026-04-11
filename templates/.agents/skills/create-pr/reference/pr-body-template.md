@@ -25,6 +25,8 @@ git diff <target-branch>...HEAD
 
 ## Sync PR Metadata
 
+Read `.agents/rules/issue-pr-commands.md` before this step.
+
 Before syncing labels, verify the standard label system:
 
 ```bash
@@ -47,9 +49,9 @@ Type label mapping:
 | other values | skip |
 
 Metadata sync order:
-1. query Issue labels and milestone best-effort with `gh issue view {issue-number} --json labels,milestone`
-2. add the mapped type label with `gh pr edit {pr-number} --add-label "{type-label}"`
-3. inherit non-`type:` and non-`status:` Issue labels with repeated `gh pr edit ... --add-label`
+1. query Issue labels and milestone via the Issue read command in `.agents/rules/issue-pr-commands.md`
+2. add the mapped type label via the PR update command in `.agents/rules/issue-pr-commands.md`
+3. inherit non-`type:` and non-`status:` Issue labels via repeated PR update commands from the same rule
 4. refine the PR `in:` labels by following `.agents/rules/issue-sync.md`, and keep the linked Issue `in:` labels in sync with the same result
 5. handle the milestone by following "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md`, reusing the Issue milestone directly
 6. ensure the PR body contains `Closes #{issue-number}` or an equivalent closing keyword
@@ -61,20 +63,13 @@ Milestone rule:
 ## Create the PR
 
 - Extract `issue_number` from task.md when this work belongs to an active task
-- If `issue_number` exists, query the Issue best-effort with `gh issue view {issue-number} --json number,title --jq '.number'`
-- Before calling `gh pr create`, check whether the current branch already has a PR. If it does, report the PR URL and state, then stop without repeating metadata sync or summary publication
+- If `issue_number` exists, query the Issue via `.agents/rules/issue-pr-commands.md`
+- Before calling the PR creation command, check whether the current branch already has a PR. If it does, report the PR URL and state, then stop without repeating metadata sync or summary publication
 - Use HEREDOC to pass the PR body
 - Replace `{$IssueNumber}` in the template when present
 - End the PR body with `Generated with AI assistance`
 
-```bash
-gh pr create --base <target-branch> --title "<title>" --assignee @me --body "$(cat <<'EOF'
-<Complete PR description following template>
-
-Generated with AI assistance
-EOF
-)"
-```
+Create the PR with the "Create a PR" command template in `.agents/rules/issue-pr-commands.md`.
 
 Final user output should include this follow-up path:
 

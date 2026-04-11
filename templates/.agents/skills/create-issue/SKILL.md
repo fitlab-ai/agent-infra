@@ -21,7 +21,7 @@ Create the base GitHub Issue from `task.md` and write `issue_number` back to the
 
 Check:
 - `.agents/workspace/active/{task-id}/task.md`
-- GitHub CLI authentication with `gh auth status`
+- read `.agents/rules/issue-pr-commands.md` first, then use its authentication commands to verify platform access
 
 If `issue_number` already exists and is not empty or `N/A`, confirm with the user before creating a replacement Issue.
 
@@ -39,10 +39,7 @@ Detect `.github/ISSUE_TEMPLATE` files and decide whether to use a matched templa
 
 ### 4. Create the Issue
 
-Create the Issue with `gh issue create --title "{title}" --body "{body}" --assignee @me ...` and omit `--label` when nothing valid remains.
-
-If an Issue Type was selected, set it with:
-`gh api "repos/$repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent`
+Create and enrich the Issue by following the "Create Issue" and "Set the Issue Type" sections in `.agents/rules/issue-pr-commands.md`. Omit label arguments when nothing valid remains.
 
 ### 5. Update Task Status
 

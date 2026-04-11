@@ -17,9 +17,7 @@ description: "导入 Dependabot 安全告警并创建修复任务"
 
 ### 1. 获取告警信息
 
-```bash
-gh api repos/{owner}/{repo}/dependabot/alerts/<alert-number>
-```
+执行前先读取 `.agents/rules/security-alerts.md`，并按其中的 Dependabot 告警读取命令获取告警详情。
 
 提取关键信息：
 - `number`：告警编号

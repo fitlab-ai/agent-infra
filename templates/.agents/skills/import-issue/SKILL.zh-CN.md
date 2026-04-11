@@ -17,9 +17,7 @@ description: "从 GitHub Issue 导入并创建任务"
 
 ### 1. 获取 Issue 信息
 
-```bash
-gh issue view <issue-number> --json number,title,body,labels
-```
+执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的 “读取 Issue” 命令获取 Issue 信息。
 
 提取：issue 编号、标题、描述、标签。
 任务标题直接使用 Issue 的原始标题（保持 Issue 标题的原始语言）。
@@ -74,13 +72,7 @@ date "+%Y-%m-%d %H:%M:%S"
 
 ### 5. 分配 Issue Assignee
 
-如果 task.md 中存在有效的 `issue_number`，将 Issue 分配给当前执行者：
-
-```bash
-gh issue edit {issue-number} --add-assignee @me 2>/dev/null || true
-```
-
-参见 `.agents/rules/issue-sync.md` 的 Assignee 同步规则。
+如果 task.md 中存在有效的 `issue_number`，按 `.agents/rules/issue-pr-commands.md` 的 Issue 更新命令为当前执行者添加 assignee；Assignee 同步的边界仍遵循 `.agents/rules/issue-sync.md`。
 
 ### 6. 完成校验
 

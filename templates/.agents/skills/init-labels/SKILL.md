@@ -12,9 +12,8 @@ Initialize the repository's standard GitHub Labels taxonomy.
 ### 1. Verify prerequisites
 
 Confirm that:
-- `gh` is installed
-- `gh auth token` succeeds
-- `gh repo view --json nameWithOwner` can access the current repository
+- read `.agents/rules/label-milestone-setup.md` first
+- use its authentication commands to verify platform access
 
 If any prerequisite fails, stop and report the matching error.
 
@@ -26,10 +25,10 @@ Execute the complete label initialization flow with:
 bash .agents/skills/init-labels/scripts/init-labels.sh
 ```
 
-The script is responsible for:
+The script and `.agents/rules/label-milestone-setup.md` are responsible for:
 - Capturing the current label snapshot before making changes
-- Creating or updating the standard label set with `gh label create --force`
-- Reporting unmatched GitHub default labels such as `question` and `wontfix`
+- Creating or updating the standard label set with the platform-specific label command
+- Reporting unmatched platform-default labels such as `question` and `wontfix`
 - Printing the final execution summary
 
 ### 3. Standard taxonomy
@@ -68,10 +67,7 @@ Show the current mapping and ask whether it should be updated.
 #### 4.3 Write the mapping and create labels
 
 1. Write the final mapping to `.agents/.airc.json` under `labels.in`.
-2. Create one `in: {key}` label for each mapping key:
-   ```bash
-   gh label create "in: {key}" --color EBF8DF --description "Module: {key}" --force
-   ```
+2. Create one `in: {key}` label for each mapping key by following the label-create command in `.agents/rules/label-milestone-setup.md`.
 3. After user confirmation, delete stale `in:` labels that are no longer present in the final mapping.
 
 ### 5. Output and behavior guarantees
@@ -80,11 +76,11 @@ The summary must include:
 - Number of common labels created or updated
 - The written `labels.in` mapping
 - The number of `in:` labels derived from the mapping keys
-- Confirmation that exact-match GitHub defaults were overwritten
-- Any unmatched GitHub default labels still present
+- Confirmation that exact-match platform defaults were overwritten
+- Any unmatched platform-default labels still present
 
 Operational notes:
-- The operation is idempotent because every label uses `gh label create --force`.
+- The operation is idempotent because the rule-file command updates or overwrites existing labels in place.
 - `in:` labels are managed by the AI-guided step together with the `.airc.json` mapping.
 
 ### 6. Inform User

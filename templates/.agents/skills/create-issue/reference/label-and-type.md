@@ -42,29 +42,17 @@ Issue Type fallback mapping:
 
 ## Create the Issue
 
-Use:
+Before creating the Issue, read `.agents/rules/issue-pr-commands.md` and use its "Create an Issue" command template.
 
-```bash
-gh issue create --title "{title}" --body "{body}" --label "{label-1}" --label "{label-2}" --milestone "{milestone}"
-```
-
-If no valid labels remain, omit `--label`.
+If no valid labels remain, omit label arguments.
 
 For milestone inference, read `.agents/rules/milestone-inference.md` and follow "Phase 1: `create-issue`" before creating the Issue.
 
-Issue Type setup:
-
-```bash
-gh api "orgs/$owner/issue-types" --jq '.[].name'
-gh api "repos/$repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent
-```
+Issue Type setup follows the matching commands in `.agents/rules/issue-pr-commands.md`.
 
 `in:` labels (coarse selection):
 
-```bash
-gh label list --search "in:" --limit 50 --json name --jq '.[].name'
-gh issue edit {issue-number} --add-label "in: {module}"
-```
+Prepare label edit arguments by following the Issue update command in `.agents/rules/issue-pr-commands.md`.
 
 Use the returned labels to do semantic matching against the task.md title and description:
 - add a label when the task **explicitly mentions** a module (for example, "fix CLI argument parsing" -> `in: cli`)

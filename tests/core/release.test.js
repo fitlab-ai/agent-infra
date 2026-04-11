@@ -80,7 +80,7 @@ test("release documentation reflects CI-driven npm publishing", () => {
   const releaseTemplate = read("templates/.agents/skills/release/SKILL.md");
   const releaseTemplateZh = read("templates/.agents/skills/release/SKILL.zh-CN.md");
   const releaseScript = read(".agents/skills/release/scripts/manage-milestones.sh");
-  const releaseTemplateScript = read("templates/.agents/skills/release/scripts/manage-milestones.sh");
+  const releaseTemplateScript = read("templates/.agents/skills/release/scripts/manage-milestones.github.sh");
 
   assert.match(releasing, /NPM_TOKEN/);
   assert.match(releasing, /npm publish --provenance/);

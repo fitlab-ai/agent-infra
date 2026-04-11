@@ -11,15 +11,11 @@ Reformat the title of the specified Issue or PR to Conventional Commits format b
 
 ### 1. Identify Target and Fetch Information
 
+Read `.agents/rules/issue-pr-commands.md` before this step.
+
 Try to determine if the ID is an Issue or PR:
-
-```bash
-# Try Issue first
-gh issue view <id> --json number,title,body,labels,state
-
-# If not found or is a PR
-gh pr view <id> --json number,title,body,labels,state,files
-```
+- first fetch Issue data by following the "Read an Issue" command in the rule file
+- if the target is not an Issue or is actually a PR, fetch PR data by following the "Read a PR" command
 
 ### 2. Analyze Content
 
@@ -58,15 +54,9 @@ Ask user: "Apply this title? (y/n)"
 
 ### 4. Apply Change
 
-If user confirms:
-
-```bash
-# For Issue
-gh issue edit <id> --title "<new-title>"
-
-# For PR
-gh pr edit <id> --title "<new-title>"
-```
+If the user confirms:
+- for an Issue, update the title by following the "Update Issues" command in `.agents/rules/issue-pr-commands.md`
+- for a PR, update the title by following the "Update PRs" command in `.agents/rules/issue-pr-commands.md`
 
 ### 5. Inform User
 

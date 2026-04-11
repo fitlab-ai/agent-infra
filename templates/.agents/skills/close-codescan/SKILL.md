@@ -11,9 +11,7 @@ Dismiss the specified Code Scanning (CodeQL) alert and record a justified reason
 
 ### 1. Retrieve Alert Information
 
-```bash
-gh api repos/{owner}/{repo}/code-scanning/alerts/<alert-number>
-```
+Read `.agents/rules/security-alerts.md` before this step, then use its Code Scanning alert read command to fetch the alert details.
 
 Verify that the alert is in the `open` state. If it is already dismissed or fixed, inform the user and exit.
 
@@ -61,13 +59,7 @@ Confirm? (y/N)
 
 ### 6. Execute the Dismissal
 
-```bash
-gh api --method PATCH \
-  repos/{owner}/{repo}/code-scanning/alerts/<alert-number> \
-  -f state=dismissed \
-  -f dismissed_reason="{api-reason}" \
-  -f dismissed_comment="{user explanation}"
-```
+Dismiss the alert by following the Code Scanning dismiss command in `.agents/rules/security-alerts.md`, passing the mapped `{api-reason}` and the user's explanation.
 
 **API reason mapping** (per the GitHub Code Scanning API):
 - False Positive -> `false positive`
@@ -115,7 +107,7 @@ Next step - complete and archive the task if a related task exists:
 ## Notes
 
 1. **Handle high-severity alerts carefully**: Critical/High alerts require thorough analysis. Prefer `import-codescan` + `analyze-task` first.
-2. **Use truthful reasons**: dismissal records are stored in GitHub and may be audited.
+2. **Use truthful reasons**: dismissal records are stored on the platform and may be audited.
 3. **Review periodically**: dismissed alerts should be re-evaluated over time.
 4. **Fix first**: dismissal should be the last resort.
 

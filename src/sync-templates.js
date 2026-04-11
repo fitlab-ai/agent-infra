@@ -26,6 +26,8 @@ const INSTALLER_VERSION = 'v' + JSON.parse(
   fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
 ).version;
 const PACKAGE_NAME = '@fitlab-ai/agent-infra';
+// Add a new identifier here only after shipping matching .{platform}. template variants.
+const KNOWN_PLATFORMS = new Set(['github']);
 
 function norm(p) { return p.replace(/\\/g, '/'); }
 
@@ -81,6 +83,35 @@ function renderContent(text, vars) {
 
 function renderPathname(p, project) {
   return p.replace(/_project_/g, project);
+}
+
+function variantExt(relativePath) {
+  return path.extname(relativePath);
+}
+
+function variantBase(relativePath) {
+  const ext = variantExt(relativePath);
+  return relativePath.slice(0, -ext.length);
+}
+
+function withVariant(relativePath, variant) {
+  const ext = variantExt(relativePath);
+  const base = variantBase(relativePath);
+  return `${base}.${variant}${ext}`;
+}
+
+function stripVariant(relativePath, variant) {
+  return relativePath.replace(new RegExp(`\\.${variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.`), '.');
+}
+
+function isPlatformVariant(relativePath, platform) {
+  const platforms = new Set([...KNOWN_PLATFORMS, platform]);
+  for (const candidate of platforms) {
+    if (relativePath.includes(`.${candidate}.`)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isTemplateDir(dir) {
@@ -239,6 +270,43 @@ function langSelect(rels, lang, allSet, project) {
   return sel;
 }
 
+function platformSelect(entries, platform, project) {
+  const sel = new Map();
+
+  for (const [target, src] of entries) {
+    if (!target.includes(`.${platform}.`)) continue;
+    sel.set(norm(renderPathname(stripVariant(target, platform), project)), src);
+  }
+
+  for (const [target, src] of entries) {
+    const normalizedTarget = norm(renderPathname(target, project));
+    if (sel.has(normalizedTarget)) continue;
+    if (isPlatformVariant(target, platform)) continue;
+    sel.set(normalizedTarget, src);
+  }
+
+  return sel;
+}
+
+function entryVariantRels(entry, allSet, platform) {
+  const rels = [];
+  const normalized = norm(entry);
+  const candidates = [
+    normalized,
+    withVariant(normalized, 'zh-CN'),
+    withVariant(normalized, platform),
+    withVariant(withVariant(normalized, platform), 'zh-CN')
+  ];
+
+  for (const candidate of candidates) {
+    if (allSet.has(candidate) && !rels.includes(candidate)) {
+      rels.push(candidate);
+    }
+  }
+
+  return rels;
+}
+
 function syncTemplates(projectRoot, templateRootOverride) {
   const configDir = path.join(projectRoot, '.agents');
   const cfgPath = path.join(configDir, '.airc.json');
@@ -277,6 +345,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   const hadTemplateSource = Object.prototype.hasOwnProperty.call(cfg, 'templateSource');
 
   const { project, org, language: lang = 'en' } = cfg;
+  const platformType = cfg.platform?.type || DEFAULTS.platform.type;
   const vars = { project, org };
 
   const managed = [...(cfg.files.managed || [])];
@@ -315,15 +384,11 @@ function syncTemplates(projectRoot, templateRootOverride) {
       entryRels = walkDir(dir).map(f => norm(path.relative(templateRoot, f)));
     } else {
       entryRels = [];
-      const n = norm(entry);
-      if (allSet.has(n)) entryRels.push(n);
-      const ext = path.extname(entry), base = entry.slice(0, -ext.length);
-      const zh = norm(base + '.zh-CN' + ext);
-      if (allSet.has(zh)) entryRels.push(zh);
+      entryRels = entryVariantRels(entry, allSet, platformType);
       if (!entryRels.length) continue;
     }
 
-    const selected = langSelect(entryRels, lang, allSet, project);
+    const selected = platformSelect(langSelect(entryRels, lang, allSet, project), platformType, project);
 
     for (const [tgt, src] of selected) {
       if (expectedTargets) expectedTargets.add(tgt);
@@ -386,13 +451,10 @@ function syncTemplates(projectRoot, templateRootOverride) {
       continue;
     }
 
-    let src = norm(entry);
-    if (lang === 'zh-CN') {
-      const ext = path.extname(entry), base = entry.slice(0, -ext.length);
-      const zh = norm(base + '.zh-CN' + ext);
-      if (allSet.has(zh)) src = zh;
-    }
-    if (!allSet.has(src)) continue;
+    const selected = platformSelect(langSelect(entryVariantRels(entry, allSet, platformType), lang, allSet, project), platformType, project);
+    const target = norm(renderPathname(entry, project));
+    const src = selected.get(target);
+    if (!src) continue;
 
     const content = renderContent(fs.readFileSync(path.join(templateRoot, src), 'utf8'), vars);
     const dir = path.dirname(dstFull);
@@ -410,17 +472,12 @@ function syncTemplates(projectRoot, templateRootOverride) {
         ));
         return globMatch(entry, t);
       });
-      for (const [t, s] of langSelect(hits, lang, allSet, project)) {
+      for (const [t, s] of platformSelect(langSelect(hits, lang, allSet, project), platformType, project)) {
         if (!mergedMap.has(t)) mergedMap.set(t, s);
       }
     } else {
-      const rels = [];
-      const n = norm(entry);
-      if (allSet.has(n)) rels.push(n);
-      const ext = path.extname(entry), base = entry.slice(0, -ext.length);
-      const zh = norm(base + '.zh-CN' + ext);
-      if (allSet.has(zh)) rels.push(zh);
-      const selected = langSelect(rels, lang, allSet, project);
+      const rels = entryVariantRels(entry, allSet, platformType);
+      const selected = platformSelect(langSelect(rels, lang, allSet, project), platformType, project);
       for (const [t, s] of selected) {
         if (!mergedMap.has(t)) mergedMap.set(t, s);
       }

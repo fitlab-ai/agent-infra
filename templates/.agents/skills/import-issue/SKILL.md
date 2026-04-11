@@ -17,9 +17,7 @@ Import the specified GitHub Issue and create a task. Argument: issue number.
 
 ### 1. Retrieve Issue Information
 
-```bash
-gh issue view <issue-number> --json number,title,body,labels
-```
+Read `.agents/rules/issue-pr-commands.md` first, then use its "Read an Issue" command to load the Issue data.
 
 Extract: issue number, title, description, and labels.
 Use the Issue title as-is for the task title (preserve the Issue's original language).
@@ -74,13 +72,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 
 ### 5. Assign the Issue Assignee
 
-If task.md contains a valid `issue_number`, assign the Issue to the current executor:
-
-```bash
-gh issue edit {issue-number} --add-assignee @me 2>/dev/null || true
-```
-
-See the Assignee Sync rules in `.agents/rules/issue-sync.md`.
+If task.md contains a valid `issue_number`, use the Issue update command from `.agents/rules/issue-pr-commands.md` to add the current executor as an assignee. The behavioral boundary still follows `.agents/rules/issue-sync.md`.
 
 ### 6. Verification Gate
 

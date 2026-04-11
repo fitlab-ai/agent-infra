@@ -11,9 +11,7 @@ Dismiss the specified Dependabot security alert and record a justified reason.
 
 ### 1. Retrieve Alert Information
 
-```bash
-gh api repos/{owner}/{repo}/dependabot/alerts/<alert-number>
-```
+Read `.agents/rules/security-alerts.md` before this step, then use its Dependabot alert read command to fetch the alert details.
 
 Verify that the alert is in the `open` state. If it is already dismissed or fixed, inform the user and exit.
 
@@ -67,13 +65,7 @@ Confirm? (y/N)
 
 ### 6. Execute the Dismissal
 
-```bash
-gh api --method PATCH \
-  repos/{owner}/{repo}/dependabot/alerts/<alert-number> \
-  -f state=dismissed \
-  -f dismissed_reason="{api-reason}" \
-  -f dismissed_comment="{user explanation}"
-```
+Dismiss the alert by following the Dependabot dismiss command in `.agents/rules/security-alerts.md`, passing the mapped `{api-reason}` and the user's explanation.
 
 **API reason mapping**:
 - False Positive -> `not_used` or `inaccurate`
@@ -110,9 +102,9 @@ Severity: {severity}
 Reason: {reason}
 Explanation: {explanation}
 
-View: https://github.com/{owner}/{repo}/security/dependabot/{alert-number}
+View: {alert-url}
 
-Note: it can be reopened on GitHub if necessary.
+Note: it can be reopened on the platform if necessary.
 
 Next step - complete and archive the task if a related task exists:
   - Claude Code / OpenCode: /complete-task {task-id}
@@ -123,7 +115,7 @@ Next step - complete and archive the task if a related task exists:
 ## Notes
 
 1. **Handle high-severity alerts carefully**: Critical/High alerts require thorough analysis before dismissal. Prefer `import-dependabot` + `analyze-task` first.
-2. **Use truthful reasons**: dismissal records are stored in GitHub and may be audited.
+2. **Use truthful reasons**: dismissal records are stored on the platform and may be audited.
 3. **Review periodically**: dismissed alerts should be re-evaluated because code changes may invalidate the dismissal rationale.
 4. **Fix first**: dismissal should be the last resort. Prefer upgrading, replacing, or mitigating.
 

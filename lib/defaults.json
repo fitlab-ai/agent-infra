@@ -1,4 +1,7 @@
 {
+  "platform": {
+    "type": "github"
+  },
   "sandbox": {
     "runtimes": [
       "node20"

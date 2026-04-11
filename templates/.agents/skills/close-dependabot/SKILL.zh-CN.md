@@ -11,9 +11,7 @@ description: "关闭 Dependabot 安全告警并记录理由"
 
 ### 1. 获取告警信息
 
-```bash
-gh api repos/{owner}/{repo}/dependabot/alerts/<alert-number>
-```
+执行前先读取 `.agents/rules/security-alerts.md`，并按其中的 Dependabot 告警读取命令获取告警详情。
 
 验证告警处于 `open` 状态。如果已被关闭/修复，告知用户并退出。
 
@@ -67,13 +65,7 @@ CVE：{cve-id}
 
 ### 6. 执行关闭
 
-```bash
-gh api --method PATCH \
-  repos/{owner}/{repo}/dependabot/alerts/<alert-number> \
-  -f state=dismissed \
-  -f dismissed_reason="{api-reason}" \
-  -f dismissed_comment="{用户的说明}"
-```
+按 `.agents/rules/security-alerts.md` 中的 Dependabot 告警关闭命令执行关闭操作，并传入映射后的 `{api-reason}` 与用户说明。
 
 **API reason 映射**：
 - 误报 -> `not_used` 或 `inaccurate`
@@ -110,9 +102,9 @@ date "+%Y-%m-%d %H:%M:%S"
 原因：{reason}
 说明：{explanation}
 
-查看：https://github.com/{owner}/{repo}/security/dependabot/{alert-number}
+查看：{alert-url}
 
-注意：如有需要，可在 GitHub 上重新打开。
+注意：如有需要，可在平台侧重新打开。
 
 下一步 - 完成并归档任务（如有关联任务）：
   - Claude Code / OpenCode：/complete-task {task-id}
@@ -123,7 +115,7 @@ date "+%Y-%m-%d %H:%M:%S"
 ## 注意事项
 
 1. **谨慎处理高严重程度告警**：Critical/High 告警需要在关闭前进行充分分析。建议先执行 import-dependabot + analyze-task。
-2. **真实的理由**：关闭记录保存在 GitHub 中，可能会被审计。
+2. **真实的理由**：关闭记录保存在平台中，可能会被审计。
 3. **定期复查**：已关闭的告警应定期复查，因为代码变更可能使关闭理由失效。
 4. **优先修复**：关闭应作为最后手段。优先考虑升级、替换或缓解。
 

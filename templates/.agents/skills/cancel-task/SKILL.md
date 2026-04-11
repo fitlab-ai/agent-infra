@@ -9,7 +9,7 @@ description: "Cancel an unneeded task and archive it"
 
 - This command terminates a task that no longer needs to continue and archives it into `completed/`
 - Cancel only when the task no longer needs implementation, review, or follow-up work
-- When a valid `issue_number` exists, GitHub Issue sync is required
+- When a valid `issue_number` exists, Issue sync is required
 
 ## Steps
 
@@ -27,7 +27,7 @@ Handling rules:
 
 ### 2. Choose the Cancellation Label
 
-Infer the GitHub Issue closing label from the cancellation reason:
+Infer the Issue closing label from the cancellation reason:
 - `status: superseded`: reason implies duplicate, replaced, merged into, or already covered by another Issue or PR
 - `status: invalid`: reason implies invalid report, no real problem, cannot reproduce, or no issue after investigation
 - `status: declined`: reason implies not planned, deprioritized, or explicitly rejected
@@ -72,6 +72,7 @@ Confirm the task directory was moved successfully.
 Check whether `task.md` contains a valid `issue_number`. If not, skip this step.
 
 > Issue sync rules live in `.agents/rules/issue-sync.md`. Read that file before syncing.
+> Read `.agents/rules/issue-pr-commands.md` before closing the Issue.
 
 If a valid `issue_number` exists:
 - Replace all `status:` labels with the label inferred in Step 2
@@ -80,7 +81,7 @@ If a valid `issue_number` exists:
 - Remove all assignees
 - Publish a cancellation comment using the marker `<!-- sync-issue:{task-id}:cancel -->`
 - Create or update the `<!-- sync-issue:{task-id}:task -->` comment using the task-comment sync rules from `.agents/rules/issue-sync.md`
-- Close the Issue: `gh issue close {issue-number} --reason "not planned"`
+- Close the Issue by following the "Close an Issue" command in `.agents/rules/issue-pr-commands.md`, using the fixed reason `not planned`
 
 The cancellation comment must include at least:
 - the cancellation reason
@@ -112,7 +113,7 @@ Output format:
 Task {task-id} cancelled and archived.
 
 Cancellation reason: {reason}
-GitHub label: {status-label or skipped}
+Status label: {status-label or skipped}
 Archived to: .agents/workspace/completed/{task-id}/
 
 Next step - inspect the archived task:
@@ -125,7 +126,7 @@ Next step - inspect the archived task:
 
 - [ ] Recorded the cancellation reason and updated task.md
 - [ ] Moved the task directory into `.agents/workspace/completed/`
-- [ ] Completed GitHub sync when an Issue exists
+- [ ] Completed Issue sync when an Issue exists
 - [ ] Ran and passed the verification gate
 - [ ] Showed the full next-step command set to the user
 
@@ -139,4 +140,4 @@ Next step - inspect the archived task:
 
 - Task not found: `Task {task-id} not found`
 - Task already archived: inform the user it is already in `completed/`
-- Issue sync failed: keep the local archive result and tell the user manual GitHub follow-up is required
+- Issue sync failed: keep the local archive result and tell the user manual platform follow-up is required
