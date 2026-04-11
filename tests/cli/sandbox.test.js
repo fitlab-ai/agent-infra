@@ -196,6 +196,31 @@ test("composeDockerfile installs tmux for in-container session recovery", async 
   }
 });
 
+test("composeDockerfile configures tmux extended keys and terminal env forwarding", async () => {
+  const sandboxDockerfile = await loadFreshEsm("lib/sandbox/dockerfile.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmux-config-"));
+
+  try {
+    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+      repoRoot: tmpDir,
+      project: "demo",
+      runtimes: ["node20"],
+      dockerfile: null
+    });
+    const content = fs.readFileSync(dockerfilePath, "utf8");
+
+    assert.match(content, /set -g extended-keys always/);
+    assert.match(content, /set -g extended-keys-format csi-u/);
+    assert.match(content, /set -as terminal-features 'xterm\*:extkeys'/);
+    assert.match(
+      content,
+      /set -ga update-environment 'TERM_PROGRAM TERM_PROGRAM_VERSION LC_TERMINAL LC_TERMINAL_VERSION'/
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("buildContainerEnvArgs injects GH_TOKEN when available", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
 

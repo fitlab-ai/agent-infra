@@ -22,6 +22,16 @@ RUN apt-get update && apt-get install -y \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
+# Enable extended keys in CSI u format so Shift+Enter and other modified
+# keys are forwarded through tmux. Preserve terminal-detection variables
+# injected at `docker exec` time when new tmux sessions are created.
+RUN printf '%s\n' \
+      'set -g extended-keys always' \
+      'set -g extended-keys-format csi-u' \
+      "set -as terminal-features 'xterm*:extkeys'" \
+      "set -ga update-environment 'TERM_PROGRAM TERM_PROGRAM_VERSION LC_TERMINAL LC_TERMINAL_VERSION'" \
+    > /etc/tmux.conf
+
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 ENV TERM=xterm-256color
