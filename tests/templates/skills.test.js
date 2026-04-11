@@ -6,6 +6,7 @@ import {
   commandSpecs,
   escapeRegExp,
   exists,
+  langTemplate,
   listFilesRecursive,
   listSkillNames,
   parseFrontmatter,
@@ -17,7 +18,7 @@ const skillDocFiles = [
   ...listFilesRecursive(".agents/skills"),
   ...listFilesRecursive("templates/.agents/skills")
 ]
-  .filter((relativePath) => /\/SKILL(?:\.zh-CN)?\.md$/.test(relativePath))
+  .filter((relativePath) => /\/SKILL(?:\.(?:en|zh-CN))?\.md$/.test(relativePath))
   .sort();
 
 test("all SKILL.md files have valid frontmatter", () => {
@@ -53,16 +54,19 @@ test("SKILL.md reference paths point to existing files", () => {
 
     [...new Set(references)].forEach((referencePath) => {
       const targetPath = path.join(path.dirname(relativePath), referencePath);
-      assert.ok(exists(targetPath), `${relativePath} references missing file: ${targetPath}`);
+      const resolvedTargetPath = relativePath.startsWith("templates/")
+        ? langTemplate(targetPath, relativePath.includes(".zh-CN.") ? "zh-CN" : "en")
+        : targetPath;
+      assert.ok(exists(resolvedTargetPath), `${relativePath} references missing file: ${resolvedTargetPath}`);
     });
   });
 });
 
 test("template SKILL.md files provide zh-CN variants", () => {
   listFilesRecursive("templates/.agents/skills")
-    .filter((relativePath) => /\/SKILL\.md$/.test(relativePath))
+    .filter((relativePath) => /\/SKILL\.en\.md$/.test(relativePath))
     .forEach((relativePath) => {
-      const zhVariant = relativePath.replace(/SKILL\.md$/, "SKILL.zh-CN.md");
+      const zhVariant = relativePath.replace(/SKILL\.en\.md$/, "SKILL.zh-CN.md");
       assert.ok(exists(zhVariant), `Missing zh-CN skill variant: ${zhVariant}`);
     });
 });
@@ -73,13 +77,13 @@ test("skill command templates use thin adapter bodies", () => {
   skills.forEach((skill) => {
     const spec = commandSpecs[skill] || {};
     const markdownTargets = [
-      `templates/.claude/commands/${skill}.md`,
+      `templates/.claude/commands/${skill}.en.md`,
       `templates/.claude/commands/${skill}.zh-CN.md`,
-      `templates/.opencode/commands/${skill}.md`,
+      `templates/.opencode/commands/${skill}.en.md`,
       `templates/.opencode/commands/${skill}.zh-CN.md`
     ];
     const tomlTargets = [
-      `templates/.gemini/commands/_project_/${skill}.toml`,
+      `templates/.gemini/commands/_project_/${skill}.en.toml`,
       `templates/.gemini/commands/_project_/${skill}.zh-CN.toml`
     ];
     const skillPathPattern = new RegExp(escapeRegExp(`.agents/skills/${skill}/SKILL.md`));

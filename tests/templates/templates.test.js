@@ -52,56 +52,56 @@ const lowFrequencyCommands = [
 function claudeCommandTargets(command) {
   return [
     `.claude/commands/${command}.md`,
-    `templates/.claude/commands/${command}.md`,
+    `templates/.claude/commands/${command}.en.md`,
     `templates/.claude/commands/${command}.zh-CN.md`
   ];
 }
 
 test("required template files were migrated into templates/", () => {
   const requiredFiles = [
-    "templates/.agents/workflows/feature-development.yaml",
-    "templates/.agents/templates/task.md",
-    "templates/.agents/README.md",
-    "templates/.agents/QUICKSTART.md",
-    "templates/.agents/skills/archive-tasks/SKILL.md",
+    "templates/.agents/workflows/feature-development.en.yaml",
+    "templates/.agents/templates/task.en.md",
+    "templates/.agents/README.en.md",
+    "templates/.agents/QUICKSTART.en.md",
+    "templates/.agents/skills/archive-tasks/SKILL.en.md",
     "templates/.agents/skills/archive-tasks/SKILL.zh-CN.md",
     "templates/.agents/skills/archive-tasks/scripts/archive-tasks.sh",
-    "templates/.agents/skills/init-labels/SKILL.md",
+    "templates/.agents/skills/init-labels/SKILL.en.md",
     "templates/.agents/skills/init-labels/SKILL.zh-CN.md",
-    "templates/.agents/skills/init-milestones/SKILL.md",
+    "templates/.agents/skills/init-milestones/SKILL.en.md",
     "templates/.agents/skills/init-milestones/SKILL.zh-CN.md",
-    "templates/.agents/skills/update-agent-infra/SKILL.md",
+    "templates/.agents/skills/update-agent-infra/SKILL.en.md",
     "templates/.agents/skills/update-agent-infra/scripts/package.json",
     "templates/.agents/skills/update-agent-infra/scripts/sync-templates.js",
-    "templates/.agents/workspace/README.md",
+    "templates/.agents/workspace/README.en.md",
     "templates/.agents/workspace/README.zh-CN.md",
     "templates/.agents/scripts/validate-artifact.js",
     "templates/.github/hooks/check-version-format.sh",
     "templates/.github/hooks/pre-commit",
     "templates/.claude/hooks/check-version-format.sh",
     "templates/.claude/settings.json",
-    "templates/.claude/commands/archive-tasks.md",
+    "templates/.claude/commands/archive-tasks.en.md",
     "templates/.claude/commands/archive-tasks.zh-CN.md",
-    "templates/.claude/commands/init-milestones.md",
+    "templates/.claude/commands/init-milestones.en.md",
     "templates/.claude/commands/init-milestones.zh-CN.md",
-    "templates/.claude/commands/init-labels.md",
+    "templates/.claude/commands/init-labels.en.md",
     "templates/.claude/commands/init-labels.zh-CN.md",
-    "templates/.claude/commands/update-agent-infra.md",
+    "templates/.claude/commands/update-agent-infra.en.md",
     "templates/.gemini/settings.json",
-    "templates/.gemini/commands/_project_/archive-tasks.toml",
+    "templates/.gemini/commands/_project_/archive-tasks.en.toml",
     "templates/.gemini/commands/_project_/archive-tasks.zh-CN.toml",
-    "templates/.gemini/commands/_project_/init-milestones.toml",
+    "templates/.gemini/commands/_project_/init-milestones.en.toml",
     "templates/.gemini/commands/_project_/init-milestones.zh-CN.toml",
-    "templates/.gemini/commands/_project_/init-labels.toml",
+    "templates/.gemini/commands/_project_/init-labels.en.toml",
     "templates/.gemini/commands/_project_/init-labels.zh-CN.toml",
-    "templates/.gemini/commands/_project_/update-agent-infra.toml",
-    "templates/.opencode/commands/archive-tasks.md",
+    "templates/.gemini/commands/_project_/update-agent-infra.en.toml",
+    "templates/.opencode/commands/archive-tasks.en.md",
     "templates/.opencode/commands/archive-tasks.zh-CN.md",
-    "templates/.opencode/commands/init-milestones.md",
+    "templates/.opencode/commands/init-milestones.en.md",
     "templates/.opencode/commands/init-milestones.zh-CN.md",
-    "templates/.opencode/commands/init-labels.md",
+    "templates/.opencode/commands/init-labels.en.md",
     "templates/.opencode/commands/init-labels.zh-CN.md",
-    "templates/.opencode/commands/update-agent-infra.md",
+    "templates/.opencode/commands/update-agent-infra.en.md",
     "templates/.gitignore"
   ];
 
@@ -143,21 +143,21 @@ test("update-agent-infra template copies stay in sync with working files", () =>
   const org = collaborator.org;
   const lang = collaborator.language;
   const referenceSyncFiles = listFilesRecursive("templates/.agents/skills")
-    .filter((relativePath) => /\/reference\/.*\.md$/.test(relativePath) && !relativePath.includes(".zh-CN."))
-    .map((templatePath) => [templatePath.replace(/^templates\//, ""), templatePath]);
+    .filter((relativePath) => /\/reference\/.*\.md$/.test(relativePath) && relativePath.includes(".en."))
+    .map((templatePath) => [templatePath.replace(/^templates\//, "").replace(/\.en(?=\.[^.]+$)/, ""), templatePath]);
 
   const syncFiles = [
-    [".agents/QUICKSTART.md", "templates/.agents/QUICKSTART.md"],
-    [".agents/README.md", "templates/.agents/README.md"],
-    [".agents/templates/task.md", "templates/.agents/templates/task.md"],
-    [".agents/skills/archive-tasks/SKILL.md", "templates/.agents/skills/archive-tasks/SKILL.md"],
+    [".agents/QUICKSTART.md", "templates/.agents/QUICKSTART.en.md"],
+    [".agents/README.md", "templates/.agents/README.en.md"],
+    [".agents/templates/task.md", "templates/.agents/templates/task.en.md"],
+    [".agents/skills/archive-tasks/SKILL.md", "templates/.agents/skills/archive-tasks/SKILL.en.md"],
     [".agents/skills/archive-tasks/scripts/archive-tasks.sh", "templates/.agents/skills/archive-tasks/scripts/archive-tasks.sh"],
-    [".agents/skills/create-task/SKILL.md", "templates/.agents/skills/create-task/SKILL.md"],
+    [".agents/skills/create-task/SKILL.md", "templates/.agents/skills/create-task/SKILL.en.md"],
     [".agents/skills/create-task/config/verify.json", "templates/.agents/skills/create-task/config/verify.json"],
-    [".agents/skills/import-issue/SKILL.md", "templates/.agents/skills/import-issue/SKILL.md"],
+    [".agents/skills/import-issue/SKILL.md", "templates/.agents/skills/import-issue/SKILL.en.md"],
     [".agents/skills/import-issue/config/verify.json", "templates/.agents/skills/import-issue/config/verify.json"],
-    [".agents/skills/init-labels/SKILL.md", "templates/.agents/skills/init-labels/SKILL.md"],
-    [".agents/skills/update-agent-infra/SKILL.md", "templates/.agents/skills/update-agent-infra/SKILL.md"],
+    [".agents/skills/init-labels/SKILL.md", "templates/.agents/skills/init-labels/SKILL.en.md"],
+    [".agents/skills/update-agent-infra/SKILL.md", "templates/.agents/skills/update-agent-infra/SKILL.en.md"],
     [".agents/skills/update-agent-infra/scripts/package.json", "templates/.agents/skills/update-agent-infra/scripts/package.json"],
     [".agents/skills/update-agent-infra/scripts/sync-templates.js", "templates/.agents/skills/update-agent-infra/scripts/sync-templates.js"],
     [".agents/scripts/validate-artifact.js", "templates/.agents/scripts/validate-artifact.js"],
@@ -207,10 +207,10 @@ test("Claude command disable-model-invocation settings match command frequency",
 
 test("split skill reference templates provide zh-CN variants", () => {
   const referenceTemplates = listFilesRecursive("templates/.agents/skills")
-    .filter((relativePath) => /\/reference\/.*\.md$/.test(relativePath) && !relativePath.includes(".zh-CN."));
+    .filter((relativePath) => /\/reference\/.*\.md$/.test(relativePath) && relativePath.includes(".en."));
 
   referenceTemplates.forEach((relativePath) => {
-    const zhVariant = relativePath.replace(/\.md$/, ".zh-CN.md");
+    const zhVariant = relativePath.replace(/\.en\.md$/, ".zh-CN.md");
     assert.ok(exists(zhVariant), `Missing zh-CN reference variant: ${zhVariant}`);
   });
 });
@@ -226,7 +226,7 @@ test("version format validation hooks are wired into templates and local config"
   const templateClaudeHook = read("templates/.claude/hooks/check-version-format.sh");
   const localPreCommit = read(".github/hooks/pre-commit");
   const templatePreCommit = read("templates/.github/hooks/pre-commit");
-  const templateQuickstart = read("templates/.agents/QUICKSTART.md");
+  const templateQuickstart = read("templates/.agents/QUICKSTART.en.md");
   const templateQuickstartZh = read("templates/.agents/QUICKSTART.zh-CN.md");
   const localQuickstart = read(".agents/QUICKSTART.md");
 
@@ -281,7 +281,7 @@ test("version format validation hooks are wired into templates and local config"
   });
 
   [
-    ["templates/.agents/QUICKSTART.md", templateQuickstart],
+    ["templates/.agents/QUICKSTART.en.md", templateQuickstart],
     ["templates/.agents/QUICKSTART.zh-CN.md", templateQuickstartZh],
     [".agents/QUICKSTART.md", localQuickstart]
   ].forEach(([relativePath, content]) => {

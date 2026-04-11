@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { exists, parseFrontmatter, read } from "../helpers.js";
 
 const localSkillPath = ".agents/skills/restore-task/SKILL.md";
-const templateSkillPath = "templates/.agents/skills/restore-task/SKILL.md";
+const templateSkillPath = "templates/.agents/skills/restore-task/SKILL.en.md";
 const templateSkillZhPath = "templates/.agents/skills/restore-task/SKILL.zh-CN.md";
 const localVerifyPath = ".agents/skills/restore-task/config/verify.json";
 const templateVerifyPath = "templates/.agents/skills/restore-task/config/verify.json";

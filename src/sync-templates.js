@@ -28,6 +28,7 @@ const INSTALLER_VERSION = 'v' + JSON.parse(
 const PACKAGE_NAME = '@fitlab-ai/agent-infra';
 // Add a new identifier here only after shipping matching .{platform}. template variants.
 const KNOWN_PLATFORMS = new Set(['github']);
+const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
 
 function norm(p) { return p.replace(/\\/g, '/'); }
 
@@ -112,6 +113,24 @@ function isPlatformVariant(relativePath, platform) {
     }
   }
   return false;
+}
+
+function isLangVariant(relativePath) {
+  for (const lang of KNOWN_LANGUAGES) {
+    if (relativePath.includes(`.${lang}.`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function stripLangVariant(relativePath) {
+  for (const lang of KNOWN_LANGUAGES) {
+    if (relativePath.includes(`.${lang}.`)) {
+      return stripVariant(relativePath, lang);
+    }
+  }
+  return relativePath;
 }
 
 function isTemplateDir(dir) {
@@ -246,24 +265,15 @@ function gitUrl(dir) {
 function langSelect(rels, lang, allSet, project) {
   const sel = new Map();
 
-  if (lang === 'zh-CN') {
-    for (const r of rels) {
-      if (!r.includes('.zh-CN.')) continue;
-      const target = norm(renderPathname(r.replace(/\.zh-CN\./, '.'), project));
+  for (const r of rels) {
+    if (r.includes(`.${lang}.`)) {
+      const target = norm(renderPathname(stripVariant(r, lang), project));
       sel.set(target, r);
-    }
-    for (const r of rels) {
-      if (r.includes('.zh-CN.')) continue;
+    } else if (!isLangVariant(r)) {
       const target = norm(renderPathname(r, project));
-      if (sel.has(target)) continue;
-      const ext = path.extname(r), base = r.slice(0, -ext.length);
-      if (allSet.has(norm(base + '.zh-CN' + ext))) continue;
-      sel.set(target, r);
-    }
-  } else {
-    for (const r of rels) {
-      if (r.includes('.zh-CN.')) continue;
-      sel.set(norm(renderPathname(r, project)), r);
+      if (!sel.has(target)) {
+        sel.set(target, r);
+      }
     }
   }
 
@@ -293,8 +303,10 @@ function entryVariantRels(entry, allSet, platform) {
   const normalized = norm(entry);
   const candidates = [
     normalized,
+    withVariant(normalized, 'en'),
     withVariant(normalized, 'zh-CN'),
     withVariant(normalized, platform),
+    withVariant(withVariant(normalized, platform), 'en'),
     withVariant(withVariant(normalized, platform), 'zh-CN')
   ];
 
@@ -467,9 +479,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   for (const entry of merged) {
     if (entry.includes('*')) {
       const hits = allRels.filter(r => {
-        const t = norm(renderPathname(
-          r.includes('.zh-CN.') ? r.replace(/\.zh-CN\./, '.') : r, project
-        ));
+        const t = norm(renderPathname(stripLangVariant(r), project));
         return globMatch(entry, t);
       });
       for (const [t, s] of platformSelect(langSelect(hits, lang, allSet, project), platformType, project)) {

@@ -33,16 +33,16 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
     fs.mkdirSync(projectRoot, { recursive: true });
     fs.mkdirSync(path.join(installRoot, "bin"), { recursive: true });
 
-    writeFile(templateRoot, "docs/guide.md", "Project {{project}}\n");
+    writeFile(templateRoot, "docs/guide.en.md", "Project {{project}}\n");
     writeFile(templateRoot, "docs/guide.zh-CN.md", "项目 {{project}}\n");
-    writeFile(templateRoot, "docs/merge.md", "Merge {{org}}\n");
+    writeFile(templateRoot, "docs/merge.en.md", "Merge {{org}}\n");
     writeFile(templateRoot, "docs/merge.zh-CN.md", "合并 {{org}}\n");
     writeFile(templateRoot, "docs/empty.txt", "");
     writeFile(templateRoot, "_project_/script.sh", "#!/bin/sh\necho {{project}}\n");
     writeFile(templateRoot, ".github/release.yml", "name: release\n");
     writeFile(templateRoot, "local-only.md", "Owner {{org}}\n");
-    writeFile(templateRoot, "child.md", "Top\n");
-    writeFile(templateRoot, "nested/child.md", "Nested\n");
+    writeFile(templateRoot, "child.en.md", "Top\n");
+    writeFile(templateRoot, "nested/child.en.md", "Nested\n");
     writeJson(installRoot, "package.json", {
       name: "@fitlab-ai/agent-infra",
       version: "0.0.0-test"
@@ -96,7 +96,6 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
     assert.deepEqual(firstReport.ejected.skipped, []);
     assert.deepEqual(firstReport.merged.pending, [
       { target: "docs/merge.md", template: "docs/merge.zh-CN.md" },
-      { target: "child.md", template: "child.md" },
       { target: ".github/release.yml", template: ".github/release.yml" }
     ]);
 

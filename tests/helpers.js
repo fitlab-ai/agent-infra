@@ -36,12 +36,12 @@ function listSkillNames() {
 }
 
 function langTemplate(basePath, lang) {
-  if (lang === "zh-CN") {
-    const ext = path.extname(basePath);
-    const variant = basePath.replace(ext, `.zh-CN${ext}`);
-    if (exists(variant)) {
-      return variant;
-    }
+  const ext = path.extname(basePath);
+  const variant = /\.(?:en|zh-CN)(?=\.[^.]+$)/.test(basePath)
+    ? basePath.replace(/\.(?:en|zh-CN)(?=\.[^.]+$)/, `.${lang}`)
+    : basePath.replace(ext, `.${lang}${ext}`);
+  if (exists(variant)) {
+    return variant;
   }
 
   return basePath;
@@ -55,9 +55,9 @@ function renderPlaceholders(content, replacements) {
 
 function buildCommandSyncFiles(project) {
   return listSkillNames().flatMap((skill) => [
-    [`.claude/commands/${skill}.md`, `templates/.claude/commands/${skill}.md`],
-    [`.opencode/commands/${skill}.md`, `templates/.opencode/commands/${skill}.md`],
-    [`.gemini/commands/${project}/${skill}.toml`, `templates/.gemini/commands/_project_/${skill}.toml`]
+    [`.claude/commands/${skill}.md`, `templates/.claude/commands/${skill}.en.md`],
+    [`.opencode/commands/${skill}.md`, `templates/.opencode/commands/${skill}.en.md`],
+    [`.gemini/commands/${project}/${skill}.toml`, `templates/.gemini/commands/_project_/${skill}.en.toml`]
   ]);
 }
 
@@ -124,7 +124,7 @@ function parseFrontmatter(relativePath) {
 function skillDocPaths(skill) {
   return [
     `.agents/skills/${skill}/SKILL.md`,
-    `templates/.agents/skills/${skill}/SKILL.md`,
+    `templates/.agents/skills/${skill}/SKILL.en.md`,
     `templates/.agents/skills/${skill}/SKILL.zh-CN.md`
   ].filter(exists);
 }

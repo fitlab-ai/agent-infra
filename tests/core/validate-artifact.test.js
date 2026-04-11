@@ -993,9 +993,9 @@ test("commit and create-pr references point to the shared pr-sync rule", () => {
 });
 
 test("template references point to the shared pr-sync rule", () => {
-  assertPointsToPrSyncRule("templates/.agents/skills/commit/reference/pr-summary-sync.md");
+  assertPointsToPrSyncRule("templates/.agents/skills/commit/reference/pr-summary-sync.en.md");
   assertPointsToPrSyncRule("templates/.agents/skills/commit/reference/pr-summary-sync.zh-CN.md");
-  assertPointsToPrSyncRule("templates/.agents/skills/create-pr/reference/comment-publish.md");
+  assertPointsToPrSyncRule("templates/.agents/skills/create-pr/reference/comment-publish.en.md");
   assertPointsToPrSyncRule("templates/.agents/skills/create-pr/reference/comment-publish.zh-CN.md");
 });
 
@@ -1007,7 +1007,7 @@ test("local and zh-CN rule files contain the canonical PR summary structure", ()
 
 test("template English rule contains the canonical PR summary structure", () => {
   const enHeadings = [/## Review Summary/, /### Key Technical Decisions/, /### Review History/, /### Test Results/];
-  assertHasCanonicalPrSyncStructure("templates/.agents/rules/pr-sync.github.md", enHeadings);
+  assertHasCanonicalPrSyncStructure("templates/.agents/rules/pr-sync.github.en.md", enHeadings);
 });
 
 test("validate-artifact github-sync skips for commit when task has no pr_number", () => {
