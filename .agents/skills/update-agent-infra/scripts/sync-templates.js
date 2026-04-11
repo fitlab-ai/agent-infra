@@ -78,7 +78,8 @@ const DEFAULTS = {
 
 const INSTALLER_VERSION = "v0.5.1";
 const PACKAGE_NAME = '@fitlab-ai/agent-infra';
-const KNOWN_PLATFORMS = new Set(['github', 'gitee', 'gitlab']);
+// Add a new identifier here only after shipping matching .{platform}. template variants.
+const KNOWN_PLATFORMS = new Set(['github']);
 
 function norm(p) { return p.replace(/\\/g, '/'); }
 

@@ -238,7 +238,6 @@ test("syncTemplates prefers platform-specific variants and composes with zh-CN l
     writeFile(templateRoot, "docs/rule.md", "base\n");
     writeFile(templateRoot, "docs/rule.github.md", "github-en\n");
     writeFile(templateRoot, "docs/rule.github.zh-CN.md", "github-zh\n");
-    writeFile(templateRoot, "docs/only-gitee.gitee.md", "gitee-only\n");
 
     writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo",
@@ -264,7 +263,6 @@ test("syncTemplates prefers platform-specific variants and composes with zh-CN l
 
     assert.deepEqual(report.managed.created.sort(), ["docs/rule.md"]);
     assert.equal(fs.readFileSync(path.join(projectRoot, "docs/rule.md"), "utf8"), "github-zh\n");
-    assert.ok(!fs.existsSync(path.join(projectRoot, "docs/only-gitee.md")));
   } finally {
     childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
