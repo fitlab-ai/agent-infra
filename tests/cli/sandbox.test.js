@@ -256,6 +256,86 @@ test("terminalEnvFlags omits unset variables instead of forwarding empty values"
   assert.deepEqual(flags, ["-e", "TERM_PROGRAM=iTerm.app"]);
 });
 
+test("TMUX_ENTRY_SCRIPT includes fallback, primary session bootstrap, linked sessions, and cleanup", async () => {
+  const sandboxEnter = await loadFreshEsm("lib/sandbox/commands/enter.js");
+
+  assert.match(sandboxEnter.TMUX_ENTRY_SCRIPT, /command -v tmux/);
+  assert.match(sandboxEnter.TMUX_ENTRY_SCRIPT, /tmux has-session -t "\$SESSION"/);
+  assert.match(sandboxEnter.TMUX_ENTRY_SCRIPT, /tmux new-session -s "\$SESSION"/);
+  assert.match(sandboxEnter.TMUX_ENTRY_SCRIPT, /tmux list-sessions -F '#\{session_name\} #\{session_attached\}'/);
+  assert.match(sandboxEnter.TMUX_ENTRY_SCRIPT, /case "\$name" in/);
+  assert.match(sandboxEnter.TMUX_ENTRY_SCRIPT, /''\|\*\[!0-9\]\*\) continue ;;/);
+  assert.match(sandboxEnter.TMUX_ENTRY_SCRIPT, /tmux kill-session -t "\$name"/);
+  assert.match(sandboxEnter.TMUX_ENTRY_SCRIPT, /tmux new-session -t "\$SESSION"/);
+});
+
+test("sandbox exec enters tmux automatically for interactive shells", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-enter-"));
+  const repoDir = path.join(tmpDir, "repo");
+  const binDir = path.join(tmpDir, "bin");
+  const logPath = path.join(tmpDir, "docker-log.jsonl");
+  const dockerPath = path.join(binDir, "docker");
+
+  try {
+    fs.mkdirSync(repoDir, { recursive: true });
+    fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
+    fs.mkdirSync(binDir, { recursive: true });
+    execSync("git init", { cwd: repoDir, stdio: "pipe" });
+    fs.writeFileSync(
+      path.join(repoDir, ".agents", ".airc.json"),
+      JSON.stringify({ project: "demo", org: "fitlab-ai" }, null, 2) + "\n",
+      "utf8"
+    );
+    fs.writeFileSync(
+      dockerPath,
+      `#!/bin/sh
+set -eu
+if [ "$1" = "ps" ]; then
+  printf '%s\\n' demo-dev-agent-infra-feature-cli-generic-sandbox
+  exit 0
+fi
+node -e 'require("fs").appendFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)) + "\\n")' "$DOCKER_LOG_PATH" "$@"
+`,
+      "utf8"
+    );
+    fs.chmodSync(dockerPath, 0o755);
+
+    execFileSync(
+      process.execPath,
+      [filePath("bin/cli.js"), "sandbox", "exec", "agent-infra-feature-cli-generic-sandbox"],
+      {
+        cwd: repoDir,
+        env: {
+          ...process.env,
+          HOME: tmpDir,
+          PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+          DOCKER_LOG_PATH: logPath,
+          TERM_PROGRAM: "",
+          TERM_PROGRAM_VERSION: "",
+          LC_TERMINAL: "",
+          LC_TERMINAL_VERSION: ""
+        },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+
+    const dockerCalls = fs.readFileSync(logPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(dockerCalls.length, 1);
+    assert.deepEqual(dockerCalls[0].slice(0, 5), [
+      "exec",
+      "-it",
+      "demo-dev-agent-infra-feature-cli-generic-sandbox",
+      "bash",
+      "-c"
+    ]);
+    assert.match(dockerCalls[0][5], /tmux has-session/);
+    assert.match(dockerCalls[0][5], /tmux new-session -t "\$SESSION"/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("claude-code tool pins CLAUDE_CONFIG_DIR so $HOME/.claude.json preseed reaches Claude Code", async () => {
   // Regression guard for the onboarding loop bug: without this env var Claude
   // Code reads .claude.json from $HOME/.claude.json (outside the bind mount),
@@ -442,22 +522,6 @@ test("ensureClaudeOnboarding populates workspace trust when only hasCompletedOnb
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
-});
-
-test("printInteractiveEntryTip writes a tmux-related hint to the given stream", async () => {
-  const sandboxEnter = await loadFreshEsm("lib/sandbox/commands/enter.js");
-
-  let written = "";
-  const fakeStream = {
-    write(chunk) {
-      written += chunk;
-    }
-  };
-
-  sandboxEnter.printInteractiveEntryTip(fakeStream);
-
-  assert.match(written, /tmux/);
-  assert.ok(written.endsWith("\n"), "tip should end with newline");
 });
 
 test("ensureClaudeOnboarding skips write when flag already set", async () => {
