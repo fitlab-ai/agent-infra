@@ -5,7 +5,7 @@
 <h1 align="center">Agent Infra</h1>
 
 <p align="center">
-  AI 编程代理之间缺失的协作层 —— 为 Claude Code、Codex、Gemini CLI、OpenCode 提供统一的 skills 和工作流。
+  AI 编程代理的协作基础设施 —— 为 Claude Code、Codex、Gemini CLI、OpenCode 提供 skills、工作流和沙箱。
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@
 
 越来越多的团队会在同一个仓库里混用 Claude Code、Codex、Gemini CLI、OpenCode 等 AI TUI，但每个工具往往都会带来自己的命令体系、提示词习惯和本地约定。缺少共享层时，结果通常是工作流割裂、初始化重复、任务历史难以追踪。
 
-agent-infra 的目标就是把这层协作面标准化。它为所有支持的 AI TUI 提供统一的任务生命周期、统一的 skill 词汇、统一的项目治理文件以及统一的升级路径，让团队切换工具时不必重新发明流程。
+agent-infra 的目标就是把这层共享基础设施标准化。它为所有支持的 AI TUI 提供统一的任务生命周期、统一的 skill 词汇、统一的项目治理文件、隔离的开发沙箱以及统一的升级路径，让团队切换工具时不必重新发明流程。
 
 <a id="see-it-in-action"></a>
 

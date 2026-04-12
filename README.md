@@ -5,7 +5,7 @@
 <h1 align="center">Agent Infra</h1>
 
 <p align="center">
-  The missing collaboration layer for AI coding agents — unified skills and workflows for Claude Code, Codex, Gemini CLI, and OpenCode.
+  Collaboration infrastructure for AI coding agents — skills, workflows, and sandboxes for Claude Code, Codex, Gemini CLI, and OpenCode.
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@
 
 Teams increasingly mix Claude Code, Codex, Gemini CLI, OpenCode, and other AI TUIs in the same repository, but each tool tends to introduce its own commands, prompts, and local conventions. Without a shared layer, the result is fragmented workflows, duplicated setup, and task history that is difficult to audit.
 
-agent-infra standardizes that collaboration surface. It gives every supported AI TUI the same task lifecycle, the same skill vocabulary, the same project governance files, and the same upgrade path, so teams can switch tools without rebuilding process from scratch.
+agent-infra standardizes that shared infrastructure. It gives every supported AI TUI the same task lifecycle, the same skill vocabulary, the same project governance files, isolated development sandboxes, and the same upgrade path, so teams can switch tools without rebuilding process from scratch.
 
 <a id="see-it-in-action"></a>
 
