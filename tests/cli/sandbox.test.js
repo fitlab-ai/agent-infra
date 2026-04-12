@@ -32,6 +32,15 @@ test("sandbox create help documents the host aliases file", () => {
   assert.match(output, /\/home\/devuser\/\.bash_aliases/);
 });
 
+test("sandbox rm defaults local branch deletion confirmation to yes", () => {
+  const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/rm.js"), "utf8");
+
+  assert.match(
+    commandSource,
+    /const shouldDeleteBranch = await p\.confirm\(\{[\s\S]*?message: `Also delete local branch '\$\{effectiveBranch\}'\?`,[\s\S]*?initialValue: true[\s\S]*?\}\);/
+  );
+});
+
 test("sandbox create fails before preparing a temporary Dockerfile when Claude credentials are missing", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-no-credentials-"));
   const repoDir = path.join(tmpDir, "repo");
