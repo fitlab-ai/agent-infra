@@ -295,11 +295,16 @@ test("TMUX_ENTRY_SCRIPT includes fallback, primary session bootstrap, linked ses
 });
 
 test("sandbox exec enters tmux automatically for interactive shells", () => {
+  if (process.platform === "win32") {
+    return;
+  }
+
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-enter-"));
   const repoDir = path.join(tmpDir, "repo");
   const binDir = path.join(tmpDir, "bin");
   const logPath = path.join(tmpDir, "docker-log.jsonl");
   const dockerPath = path.join(binDir, "docker");
+  const dockerCmdPath = path.join(binDir, "docker.cmd");
 
   try {
     fs.mkdirSync(repoDir, { recursive: true });
@@ -324,6 +329,17 @@ node -e 'require("fs").appendFileSync(process.argv[1], JSON.stringify(process.ar
       "utf8"
     );
     fs.chmodSync(dockerPath, 0o755);
+    fs.writeFileSync(
+      dockerCmdPath,
+      `@echo off
+if "%1"=="ps" (
+  echo demo-dev-agent-infra-feature-cli-generic-sandbox
+  exit /b 0
+)
+node -e "require('fs').appendFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)) + '\\n')" "%DOCKER_LOG_PATH%" %*
+`,
+      "utf8"
+    );
 
     execFileSync(
       process.execPath,
@@ -334,6 +350,7 @@ node -e 'require("fs").appendFileSync(process.argv[1], JSON.stringify(process.ar
           ...process.env,
           HOME: tmpDir,
           PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+          Path: `${binDir}${path.delimiter}${process.env.Path ?? process.env.PATH}`,
           DOCKER_LOG_PATH: logPath,
           TERM_PROGRAM: "",
           TERM_PROGRAM_VERSION: "",
@@ -853,8 +870,10 @@ test("writeClaudeCredentialsFile creates secure shared credentials file", async 
 
   try {
     sandboxCreate.writeClaudeCredentialsFile(tmpDir, "demo", rawBlob);
-    assert.equal(modeBits(credentialsDir), 0o700);
-    assert.equal(modeBits(credentialsPath), 0o600);
+    if (process.platform !== "win32") {
+      assert.equal(modeBits(credentialsDir), 0o700);
+      assert.equal(modeBits(credentialsPath), 0o600);
+    }
     assert.equal(fs.readFileSync(credentialsPath, "utf8"), rawBlob);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1014,18 +1033,20 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
     "/tmp/Dockerfile",
     "sig-123",
     {
+      engine: "native",
       runFn(cmd, args) {
-        calls.push({ type: "run", cmd, args });
-        if (cmd === "id" && args[0] === "-u") {
+        const [, actualCmd, actualArgs] = arguments;
+        calls.push({ type: "run", cmd: actualCmd, args: actualArgs });
+        if (actualCmd === "id" && actualArgs[0] === "-u") {
           return "501";
         }
-        if (cmd === "id" && args[0] === "-g") {
+        if (actualCmd === "id" && actualArgs[0] === "-g") {
           return "20";
         }
-        throw new Error(`unexpected quiet command: ${cmd} ${args.join(" ")}`);
+        throw new Error(`unexpected quiet command: ${actualCmd} ${actualArgs.join(" ")}`);
       },
-      runVerboseFn(cmd, args, opts) {
-        calls.push({ type: "verbose", cmd, args, opts });
+      runVerboseFn(engine, cmd, args, opts) {
+        calls.push({ type: "verbose", engine, cmd, args, opts });
       }
     }
   );
@@ -1035,6 +1056,7 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
     { type: "run", cmd: "id", args: ["-g"] }
   ]);
   assert.equal(calls[2].type, "verbose");
+  assert.equal(calls[2].engine, "native");
   assert.equal(calls[2].cmd, "docker");
   assert.equal(calls[2].opts.cwd, "/repo");
   assert.deepEqual(calls[2].args, [
@@ -1055,6 +1077,145 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
     "/tmp/Dockerfile",
     "/repo"
   ]);
+});
+
+test("windowsPathToWslPath converts drive paths and rejects UNC mounts", async () => {
+  const windowsPaths = await loadFreshEsm("lib/sandbox/windows-paths.js");
+
+  assert.equal(
+    windowsPaths.windowsPathToWslPath("F:\\ai\\agent-infra"),
+    "/mnt/f/ai/agent-infra"
+  );
+  assert.equal(
+    windowsPaths.windowsPathToWslPath("C:/Users/Demo Repo/project"),
+    "/mnt/c/Users/Demo Repo/project"
+  );
+  assert.equal(windowsPaths.windowsPathToWslPath("/home/demo/project"), "/home/demo/project");
+  assert.throws(
+    () => windowsPaths.windowsPathToWslPath("\\\\server\\share\\repo"),
+    /UNC paths are not supported/
+  );
+});
+
+test("commandForEngine wraps commands with wsl.exe for WSL2", async () => {
+  const sandboxShell = await loadFreshEsm("lib/sandbox/shell.js");
+
+  assert.deepEqual(
+    sandboxShell.commandForEngine("wsl2", "docker", ["info"]),
+    { cmd: "wsl.exe", args: ["--", "docker", "info"] }
+  );
+  assert.deepEqual(
+    sandboxShell.commandForEngine("native", "docker", ["info"]),
+    { cmd: "docker", args: ["info"] }
+  );
+});
+
+test("sandbox command modules route docker calls through engine-aware helpers", () => {
+  for (const relativePath of [
+    "lib/sandbox/commands/create.js",
+    "lib/sandbox/commands/enter.js",
+    "lib/sandbox/commands/ls.js",
+    "lib/sandbox/commands/rm.js",
+    "lib/sandbox/commands/rebuild.js"
+  ]) {
+    const content = fs.readFileSync(filePath(relativePath), "utf8");
+    assert.doesNotMatch(content, /runSafe\('docker'/, relativePath);
+    assert.doesNotMatch(content, /runOk\('docker'/, relativePath);
+    assert.doesNotMatch(content, /runInteractive\('docker'/, relativePath);
+    assert.doesNotMatch(content, /run\('docker'/, relativePath);
+    assert.doesNotMatch(content, /execFn\('docker'/, relativePath);
+  }
+});
+
+test("ensureWsl2Docker checks WSL and Docker Desktop integration", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const checks = [];
+  const engineChecks = [];
+  const messages = [];
+
+  await sandboxEngine.ensureWsl2Docker({}, (message) => messages.push(message), {
+    runOkFn(cmd, args) {
+      checks.push([cmd, ...args]);
+      return cmd === "wsl.exe" && args[0] === "--status";
+    },
+    runOkEngineFn(engine, cmd, args) {
+      engineChecks.push([engine, cmd, ...args]);
+      return engine === "wsl2" && cmd === "docker" && args[0] === "info";
+    }
+  });
+
+  assert.deepEqual(checks, [["wsl.exe", "--status"]]);
+  assert.deepEqual(engineChecks, [["wsl2", "docker", "info"]]);
+  assert.deepEqual(messages, ["Checking Docker Desktop from WSL2..."]);
+});
+
+test("buildImage converts Docker build paths for WSL2", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const calls = [];
+
+  sandboxCreate.buildImage(
+    { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "F:\\repo" },
+    [{ npmPackage: "@acme/tool" }],
+    "F:\\tmp\\Dockerfile",
+    "sig-123",
+    {
+      engine: "wsl2",
+      runFn(engine, cmd, args) {
+        calls.push({ type: "run", engine, cmd, args });
+        return args[0] === "-u" ? "1000" : "1000";
+      },
+      runVerboseFn(engine, cmd, args, opts) {
+        calls.push({ type: "verbose", engine, cmd, args, opts });
+      }
+    }
+  );
+
+  const dockerBuild = calls.find((call) => call.type === "verbose");
+  assert.equal(dockerBuild.engine, "wsl2");
+  assert.equal(dockerBuild.cmd, "docker");
+  assert.equal(dockerBuild.args.at(-3), "-f");
+  assert.equal(dockerBuild.args.at(-2), "/mnt/f/tmp/Dockerfile");
+  assert.equal(dockerBuild.args.at(-1), "/mnt/f/repo");
+});
+
+test("volumeArg converts host mount paths for WSL2", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+
+  assert.equal(
+    sandboxCreate.volumeArg("wsl2", "F:\\repo\\.agents\\workspace", "/workspace/.agents/workspace"),
+    "/mnt/f/repo/.agents/workspace:/workspace/.agents/workspace"
+  );
+  assert.equal(
+    sandboxCreate.volumeArg("native", "/repo/.ssh", "/home/devuser/.ssh", ":ro"),
+    "/repo/.ssh:/home/devuser/.ssh:ro"
+  );
+});
+
+test("rebuild buildArgs converts Docker build paths for WSL2", async () => {
+  const sandboxRebuild = await loadFreshEsm("lib/sandbox/commands/rebuild.js");
+
+  const args = sandboxRebuild.buildArgs(
+    { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "F:\\repo" },
+    [{ npmPackage: "@acme/tool" }],
+    "F:\\tmp\\Dockerfile",
+    "sig-123",
+    { engine: "wsl2", runFn: () => "1000" }
+  );
+
+  assert.equal(args.at(-3), "-f");
+  assert.equal(args.at(-2), "/mnt/f/tmp/Dockerfile");
+  assert.equal(args.at(-1), "/mnt/f/repo");
+});
+
+test("assertManagedPath rejects paths outside the sandbox root", async () => {
+  const sandboxRm = await loadFreshEsm("lib/sandbox/commands/rm.js");
+  const root = path.join(os.tmpdir(), "agent-infra-worktrees");
+
+  assert.doesNotThrow(() => sandboxRm.assertManagedPath(root, path.join(root, "feature..demo")));
+  assert.throws(
+    () => sandboxRm.assertManagedPath(root, path.join(os.tmpdir(), "agent-infra-other")),
+    /outside managed sandbox root/
+  );
 });
 
 test("commandErrorMessage prefers stderr over the generic execFileSync message", async () => {
@@ -1480,29 +1641,34 @@ test("writeSanitizedGitconfig rewrites the mounted gitconfig without replacing t
 
 test("syncGpgKeys returns false when the host has no public keys to import", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-no-public-"));
   const calls = [];
 
-  const synced = sandboxCreate.syncGpgKeys("demo-container", "/Users/demo", "demo", (cmd, args, options) => {
-    calls.push([cmd, args, options]);
-    if (cmd === "git") {
-      return "";
-    }
-    if (cmd === "gpg" && args[0] === "--export") {
-      return Buffer.alloc(0);
-    }
-    throw new Error("unexpected call");
-  }, () => {
-    throw new Error("runSafe should not be called");
-  });
+  try {
+    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd, args, options) => {
+      calls.push([cmd, args, options]);
+      if (cmd === "git") {
+        return "";
+      }
+      if (cmd === "gpg" && args[0] === "--export") {
+        return Buffer.alloc(0);
+      }
+      throw new Error("unexpected call");
+    }, () => {
+      throw new Error("runSafe should not be called");
+    });
 
-  assert.equal(synced, false);
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0][0], "git");
-  assert.deepEqual(calls[0][1], ["config", "--global", "user.signingKey"]);
-  assert.equal(calls[0][2].env.HOME, "/Users/demo");
-  assert.equal(calls[1][0], "gpg");
-  assert.deepEqual(calls[1][1], ["--export"]);
-  assert.equal(calls[1][2].env.HOME, "/Users/demo");
+    assert.equal(synced, false);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0][0], "git");
+    assert.deepEqual(calls[0][1], ["config", "--global", "user.signingKey"]);
+    assert.equal(calls[0][2].env.HOME, tmpDir);
+    assert.equal(calls[1][0], "gpg");
+    assert.deepEqual(calls[1][1], ["--export"]);
+    assert.equal(calls[1][2].env.HOME, tmpDir);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("currentKeyringFingerprint hashes the current secret keyring", async () => {
@@ -1722,10 +1888,12 @@ test("writeGpgCache creates cache files with secure permissions", async () => {
     );
 
     assert.equal(written, true);
-    assert.equal(modeBits(cacheDir), 0o700);
-    assert.equal(modeBits(path.join(cacheDir, "public.asc")), 0o600);
-    assert.equal(modeBits(path.join(cacheDir, "secret.asc")), 0o600);
-    assert.equal(modeBits(path.join(cacheDir, "state.json")), 0o600);
+    if (process.platform !== "win32") {
+      assert.equal(modeBits(cacheDir), 0o700);
+      assert.equal(modeBits(path.join(cacheDir, "public.asc")), 0o600);
+      assert.equal(modeBits(path.join(cacheDir, "secret.asc")), 0o600);
+      assert.equal(modeBits(path.join(cacheDir, "state.json")), 0o600);
+    }
     assert.equal(fs.readFileSync(path.join(cacheDir, "state.json"), "utf8"), '{\n  "fingerprint": "fingerprint-1"\n}\n');
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -2072,85 +2240,154 @@ test("syncGpgKeys still succeeds when writing the cache fails", async () => {
 
 test("syncGpgKeys returns false when the host has no secret keys to import", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-no-secret-"));
   const calls = [];
 
-  const synced = sandboxCreate.syncGpgKeys("demo-container", "/Users/demo", "demo", (cmd, args, options) => {
-    calls.push([cmd, args, options]);
-    if (cmd === "git") {
-      return "";
-    }
-    if (cmd !== "gpg") {
-      throw new Error("unexpected command");
-    }
-    if (args[0] === "--export") {
-      return Buffer.from("pub");
-    }
-    if (args[0] === "--export-secret-keys") {
-      return Buffer.alloc(0);
-    }
-    throw new Error("unexpected gpg args");
-  }, () => {
-    throw new Error("runSafe should not be called");
-  });
+  try {
+    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd, args, options) => {
+      calls.push([cmd, args, options]);
+      if (cmd === "git") {
+        return "";
+      }
+      if (cmd !== "gpg") {
+        throw new Error("unexpected command");
+      }
+      if (args[0] === "--export") {
+        return Buffer.from("pub");
+      }
+      if (args[0] === "--export-secret-keys") {
+        return Buffer.alloc(0);
+      }
+      throw new Error("unexpected gpg args");
+    }, () => {
+      throw new Error("runSafe should not be called");
+    });
 
-  assert.equal(synced, false);
-  assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
-    ["git", ["config", "--global", "user.signingKey"]],
-    ["gpg", ["--export"]],
-    ["gpg", ["--export-secret-keys"]]
-  ]);
+    assert.equal(synced, false);
+    assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
+      ["git", ["config", "--global", "user.signingKey"]],
+      ["gpg", ["--export"]],
+      ["gpg", ["--export-secret-keys"]]
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("syncGpgKeys imports host public and secret keys into the container", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-import-"));
   const calls = [];
   const runSafeCalls = [];
 
-  const synced = sandboxCreate.syncGpgKeys("demo-container", "/Users/demo", "demo", (cmd, args, options) => {
-    calls.push([cmd, args, options]);
-    if (cmd === "git") {
+  try {
+    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd, args, options) => {
+      calls.push([cmd, args, options]);
+      if (cmd === "git") {
+        return "";
+      }
+      if (cmd === "gpg" && args[0] === "--export") {
+        return Buffer.from("pub");
+      }
+      if (cmd === "gpg" && args[0] === "--export-secret-keys") {
+        return Buffer.from("sec");
+      }
+      if (cmd === "gpg" && args[0] === "--list-secret-keys") {
+        return "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
+      }
+      if (cmd === "docker" && args.at(-1) === "--import") {
+        return Buffer.from("");
+      }
+      throw new Error(`unexpected call: ${cmd} ${args.join(" ")}`);
+    }, (cmd, args) => {
+      runSafeCalls.push([cmd, args]);
       return "";
-    }
-    if (cmd === "gpg" && args[0] === "--export") {
-      return Buffer.from("pub");
-    }
-    if (cmd === "gpg" && args[0] === "--export-secret-keys") {
-      return Buffer.from("sec");
-    }
-    if (cmd === "docker" && args.at(-1) === "--import") {
-      return Buffer.from("");
-    }
-    throw new Error(`unexpected call: ${cmd} ${args.join(" ")}`);
-  }, (cmd, args) => {
-    runSafeCalls.push([cmd, args]);
-    return "";
-  });
+    });
 
-  assert.equal(synced, true);
-  assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
-    ["git", ["config", "--global", "user.signingKey"]],
-    ["gpg", ["--export"]],
-    ["gpg", ["--export-secret-keys"]],
-    ["gpg", ["--list-secret-keys", "--with-colons"]],
-    ["docker", ["exec", "-i", "demo-container", "gpg", "--import"]],
-    ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
-  ]);
-  assert.equal(calls[0][2].env.HOME, "/Users/demo");
-  assert.equal(calls[0][2].encoding, "utf8");
-  assert.equal(calls[1][2].env.HOME, "/Users/demo");
-  assert.equal(calls[3][2].env.HOME, "/Users/demo");
-  assert.equal(calls[3][2].encoding, "utf8");
-  assert.deepEqual(calls[4][2], {
-    input: Buffer.from("pub"),
-    stdio: ["pipe", "pipe", "pipe"]
-  });
-  assert.deepEqual(calls[5][2], {
-    input: Buffer.from("sec"),
-    stdio: ["pipe", "pipe", "pipe"]
-  });
-  assert.deepEqual(runSafeCalls, [
-    ["docker", ["exec", "demo-container", "gpgconf", "--launch", "gpg-agent"]]
-  ]);
+    assert.equal(synced, true);
+    assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
+      ["git", ["config", "--global", "user.signingKey"]],
+      ["gpg", ["--export"]],
+      ["gpg", ["--export-secret-keys"]],
+      ["gpg", ["--list-secret-keys", "--with-colons"]],
+      ["docker", ["exec", "-i", "demo-container", "gpg", "--import"]],
+      ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
+    ]);
+    assert.equal(calls[0][2].env.HOME, tmpDir);
+    assert.equal(calls[0][2].encoding, "utf8");
+    assert.equal(calls[1][2].env.HOME, tmpDir);
+    assert.equal(calls[3][2].env.HOME, tmpDir);
+    assert.equal(calls[3][2].encoding, "utf8");
+    assert.deepEqual(calls[4][2], {
+      input: Buffer.from("pub"),
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    assert.deepEqual(calls[5][2], {
+      input: Buffer.from("sec"),
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    assert.deepEqual(runSafeCalls, [
+      ["docker", ["exec", "demo-container", "gpgconf", "--launch", "gpg-agent"]]
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncGpgKeys can use separate host gpg and engine docker runners", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-engine-docker-"));
+  const hostCalls = [];
+  const dockerExecCalls = [];
+  const dockerSafeCalls = [];
+
+  try {
+    const synced = sandboxCreate.syncGpgKeys(
+      "demo-container",
+      tmpDir,
+      "demo",
+      (cmd, args, options) => {
+        hostCalls.push({ cmd, args, options });
+        if (cmd === "git") {
+          return "";
+        }
+        if (cmd === "gpg" && args[0] === "--export") {
+          return Buffer.from("pub");
+        }
+        if (cmd === "gpg" && args[0] === "--export-secret-keys") {
+          return Buffer.from("sec");
+        }
+        if (cmd === "gpg" && args[0] === "--list-secret-keys") {
+          return "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
+        }
+        throw new Error(`unexpected host call: ${cmd} ${args.join(" ")}`);
+      },
+      () => {
+        throw new Error("default runSafe should not handle docker calls");
+      },
+      {
+        dockerExecFn(cmd, args, options) {
+          dockerExecCalls.push({ cmd, args, input: options.input.toString("utf8") });
+        },
+        dockerRunSafeFn(cmd, args) {
+          dockerSafeCalls.push({ cmd, args });
+          return "";
+        }
+      }
+    );
+
+    assert.equal(synced, true);
+    assert.deepEqual(hostCalls.map((call) => call.cmd), ["git", "gpg", "gpg", "gpg"]);
+    assert.deepEqual(dockerExecCalls, [
+      { cmd: "docker", args: ["exec", "-i", "demo-container", "gpg", "--import"], input: "pub" },
+      { cmd: "docker", args: ["exec", "-i", "demo-container", "gpg", "--batch", "--import"], input: "sec" }
+    ]);
+    assert.deepEqual(dockerSafeCalls, [
+      { cmd: "docker", args: ["exec", "demo-container", "gpgconf", "--launch", "gpg-agent"] }
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("composeDockerfile rejects unknown runtimes", async () => {
