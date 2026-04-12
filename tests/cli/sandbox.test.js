@@ -168,7 +168,8 @@ test("composeDockerfile includes gh CLI and bash_aliases sourcing", async () => 
     const content = fs.readFileSync(dockerfilePath, "utf8");
 
     assert.match(content, /cli\.github\.com\/packages/);
-    assert.match(content, /curl wget git vim tmux file/);
+    assert.match(content, /build-essential ca-certificates gnupg lsb-release/);
+    assert.match(content, /curl wget git vim file/);
     assert.match(content, /apt-get install -y gh/);
     assert.match(content, /export GPG_TTY=\$\(tty\)/);
     assert.match(content, /\[ -f ~\/\.bash_aliases \] && \. ~\/\.bash_aliases/);
@@ -191,6 +192,8 @@ test("composeDockerfile installs tmux for in-container session recovery", async 
     const content = fs.readFileSync(dockerfilePath, "utf8");
 
     assert.match(content, /\btmux\b/);
+    assert.match(content, /TMUX_VERSION=3\.6a/);
+    assert.match(content, /apt-get purge -y pkg-config bison libevent-dev libncurses-dev/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -216,6 +219,7 @@ test("composeDockerfile configures tmux extended keys and terminal env forwardin
       content,
       /set -ga update-environment 'TERM_PROGRAM TERM_PROGRAM_VERSION LC_TERMINAL LC_TERMINAL_VERSION'/
     );
+    assert.match(content, /set -g mouse on/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

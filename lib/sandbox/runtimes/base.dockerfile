@@ -11,8 +11,10 @@ RUN (groupadd -g ${HOST_GID} devuser || true) && \
     useradd -u ${HOST_UID} -g ${HOST_GID} -m -s /bin/bash devuser
 
 RUN apt-get update && apt-get install -y \
-    curl wget git vim tmux file \
+    curl wget git vim file \
     build-essential ca-certificates gnupg lsb-release \
+    libevent-core-2.1-7 libncursesw6 libtinfo6 \
+    pkg-config bison libevent-dev libncurses-dev \
     locales \
     && locale-gen en_US.UTF-8 \
     && (curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -20,6 +22,19 @@ RUN apt-get update && apt-get install -y \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y gh \
+    && TMUX_VERSION=3.6a \
+    && wget -qO /tmp/tmux.tar.gz \
+        "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz" \
+    && tar xzf /tmp/tmux.tar.gz -C /tmp \
+    && cd /tmp/tmux-${TMUX_VERSION} \
+    && ./configure --prefix=/usr/local \
+    && make -j"$(nproc)" \
+    && make install \
+    && cd / \
+    && rm -rf /tmp/tmux.tar.gz /tmp/tmux-${TMUX_VERSION} \
+    && apt-get purge -y pkg-config bison libevent-dev libncurses-dev \
+    && apt-get autoremove -y \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Enable extended keys in CSI u format so Shift+Enter and other modified
@@ -30,6 +45,7 @@ RUN printf '%s\n' \
       'set -g extended-keys-format csi-u' \
       "set -as terminal-features 'xterm*:extkeys'" \
       "set -ga update-environment 'TERM_PROGRAM TERM_PROGRAM_VERSION LC_TERMINAL LC_TERMINAL_VERSION'" \
+      'set -g mouse on' \
     > /etc/tmux.conf
 
 ENV LANG=en_US.UTF-8
