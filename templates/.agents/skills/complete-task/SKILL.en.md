@@ -53,7 +53,7 @@ If prerequisites are not met and the user did not explicitly provide `--force`, 
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update `.agents/workspace/active/{task-id}/task.md`:
@@ -64,7 +64,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - Verify and check off all items in `## Completion Checklist` (change `- [ ]` to `- [x]`)
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Completed** by {agent} — Task moved to completed/
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Completed** by {agent} — Task moved to completed/
   ```
 
 ### 4. Move Task

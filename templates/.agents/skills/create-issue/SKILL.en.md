@@ -46,7 +46,7 @@ Create and enrich the Issue by following the "Create Issue" and "Set the Issue T
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Write back `issue_number`, update `updated_at`, and append the Create Issue Activity Log entry.

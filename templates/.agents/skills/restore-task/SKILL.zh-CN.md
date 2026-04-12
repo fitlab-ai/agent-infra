@@ -81,7 +81,7 @@ description: "从平台 Issue 评论还原本地任务文件"
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新恢复出的 `task.md`：
@@ -91,7 +91,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 保留原 `current_step`
 - 在 `## 活动日志` 追加：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Restore Task** by {agent} — Restored task from Issue #{issue-number}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Restore Task** by {agent} — Restored task from Issue #{issue-number}
   ```
 
 ### 7. 完成校验

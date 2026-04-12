@@ -29,8 +29,8 @@ const DEFAULT_REQUIRED_FIELDS = [
 
 const DEFAULT_RETRY_DELAYS_MS = [3000, 10000];
 const DEFAULT_FRESHNESS_MINUTES = 30;
-const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
-const ACTIVITY_LOG_PATTERN = /^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) — \*\*(.+?)\*\* by (.+?) — (.+)$/;
+const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?$/;
+const ACTIVITY_LOG_PATTERN = /^- (\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?) — \*\*(.+?)\*\* by (.+?) — (.+)$/;
 const BRANCH_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -1351,7 +1351,7 @@ function sleep(delayMs) {
 // === Utilities ===
 
 function minutesSinceTimestamp(timestamp) {
-  const normalized = timestamp.replace(" ", "T");
+  const normalized = timestamp.includes("T") ? timestamp : timestamp.replace(" ", "T");
   const parsed = Date.parse(normalized);
   if (Number.isNaN(parsed)) {
     return Number.POSITIVE_INFINITY;

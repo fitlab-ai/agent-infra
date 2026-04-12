@@ -71,8 +71,8 @@ type: feature|bugfix|refactor|docs|chore
 branch: <project>-<type>-<slug>
 workflow: feature-development|bug-fix|refactoring
 status: active
-created_at: {yyyy-MM-dd HH:mm:ss}
-updated_at: {yyyy-MM-dd HH:mm:ss}
+created_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
+updated_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 created_by: human
 current_step: requirement-analysis
 assigned_to: {当前 AI 代理}
@@ -85,7 +85,7 @@ assigned_to: {当前 AI 代理}
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新 `.agents/workspace/active/{task-id}/task.md`：
@@ -95,7 +95,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - `## 上下文` 中的 `- **分支**：`：更新为生成的分支名
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Task Created** by {agent} — Task created from description
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Task Created** by {agent} — Task created from description
   ```
 
 ### 4. 完成校验

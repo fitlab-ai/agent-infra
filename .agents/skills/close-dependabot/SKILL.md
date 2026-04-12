@@ -80,13 +80,13 @@ CVE：{cve-id}
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 - 添加关闭记录到 task.md
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Alert Closed** by {agent} — Dependabot alert #{alert-number} dismissed: {reason}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Alert Closed** by {agent} — Dependabot alert #{alert-number} dismissed: {reason}
   ```
 - 归档任务
 

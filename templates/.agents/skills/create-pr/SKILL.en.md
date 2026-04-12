@@ -69,7 +69,7 @@ Aggregate a reviewer-facing summary from those artifacts and maintain a single i
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 If `{task-id}` is available, update task.md with `pr_number`, `updated_at`, and append the PR Created Activity Log entry including metadata-sync and summary results.

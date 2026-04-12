@@ -80,13 +80,13 @@ If a related task exists (search for `security_alert_number: <alert-number>`):
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 - Add the dismissal record to task.md
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Alert Closed** by {agent} — Dependabot alert #{alert-number} dismissed: {reason}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Alert Closed** by {agent} — Dependabot alert #{alert-number} dismissed: {reason}
   ```
 - Archive the task
 

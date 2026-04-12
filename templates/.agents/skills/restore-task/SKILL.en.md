@@ -81,7 +81,7 @@ Write only files that were actually recovered from Issue comments. Do not invent
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update the restored `task.md`:
@@ -91,7 +91,7 @@ Update the restored `task.md`:
 - keep the original `current_step`
 - append this entry to `## Activity Log`:
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Restore Task** by {agent} — Restored task from Issue #{issue-number}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Restore Task** by {agent} — Restored task from Issue #{issue-number}
   ```
 
 ### 7. Verification Gate

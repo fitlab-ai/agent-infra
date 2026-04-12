@@ -45,8 +45,8 @@ type: feature|bugfix|refactor|docs|chore
 branch: <project>-<type>-<slug>
 workflow: feature-development|bug-fix|refactoring
 status: active
-created_at: {yyyy-MM-dd HH:mm:ss}
-updated_at: {yyyy-MM-dd HH:mm:ss}
+created_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
+updated_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 created_by: human
 current_step: requirement-analysis
 assigned_to: {current AI agent}
@@ -57,7 +57,7 @@ assigned_to: {current AI agent}
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update `.agents/workspace/active/{task-id}/task.md`:
@@ -67,7 +67,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `## Context` -> `- **Branch**:`: update it to the generated branch name
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Import Issue** by {agent} — Issue #{number} imported
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Import Issue** by {agent} — Issue #{number} imported
   ```
 
 ### 5. Assign the Issue Assignee

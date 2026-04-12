@@ -46,7 +46,7 @@ description: "从任务文件创建 GitHub Issue"
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 回写 `issue_number`，更新 `updated_at`，并追加 Create Issue 的 Activity Log。

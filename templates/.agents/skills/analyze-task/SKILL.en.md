@@ -103,7 +103,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update `.agents/workspace/active/{task-id}/task.md`:
@@ -115,7 +115,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - Mark requirement-analysis as complete in workflow progress and include the actual round when the task template supports it
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Requirement Analysis (Round {N})** by {agent} — Analysis completed → {analysis-artifact}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Requirement Analysis (Round {N})** by {agent} — Analysis completed → {analysis-artifact}
   ```
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):

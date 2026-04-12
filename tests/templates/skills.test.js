@@ -193,7 +193,7 @@ test("skills that write timestamps require date command guidance", () => {
 
       assert.match(
         content,
-        /date "\+%Y-%m-%d %H:%M:%S"/,
+        /date "\+%Y-%m-%d %H:%M:%S%:z"/,
         `${relativePath} should require the date command for timestamp writes`
       );
     });

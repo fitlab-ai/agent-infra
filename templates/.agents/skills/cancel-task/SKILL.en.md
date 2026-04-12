@@ -40,7 +40,7 @@ When syncing to the Issue, replace any existing `status:` labels with the inferr
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update `task.md` in the task directory:
@@ -50,7 +50,7 @@ Update `task.md` in the task directory:
 - `updated_at`: {current timestamp}
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Cancelled** by {agent} — {one-line cancellation reason}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Cancelled** by {agent} — {one-line cancellation reason}
   ```
 
 ### 4. Move the Task

@@ -210,7 +210,7 @@ rebuild_manifest() {
   entries_file="$tmpdir/manifest.tsv"
   month_keys_file="$tmpdir/manifest-months.tsv"
   year_keys_file="$tmpdir/manifest-years.tsv"
-  generated_at=$(date "+%Y-%m-%d %H:%M:%S")
+  generated_at=$(date "+%Y-%m-%d %H:%M:%S%:z")
 
   mkdir -p "$ARCHIVE_DIR"
   : > "$entries_file"

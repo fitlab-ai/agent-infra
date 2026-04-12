@@ -7,13 +7,13 @@ Read this file before choosing the post-commit task-state branch.
 Get the current time first:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 For every task-related commit, append this Activity Log entry in `task.md`:
 
 ```text
-- {yyyy-MM-dd HH:mm:ss} — **Commit** by {agent} — {commit hash short} {commit subject}
+- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Commit** by {agent} — {commit hash short} {commit subject}
 ```
 
 Before selecting the next step, verify:

@@ -47,13 +47,13 @@ tool: <tool-name>
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update task.md: `current_step` -> `requirement-analysis`.
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Import Code Scanning Alert** by {agent} — Code Scanning alert #{alert-number} imported
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Import Code Scanning Alert** by {agent} — Code Scanning alert #{alert-number} imported
   ```
 
 ### 4. Verification Gate

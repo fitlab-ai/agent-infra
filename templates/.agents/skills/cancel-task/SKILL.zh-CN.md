@@ -40,7 +40,7 @@ description: "取消不再需要的任务并归档"
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新任务目录中的 `task.md`：
@@ -50,7 +50,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - `updated_at`：{当前时间戳}
 - **追加**到 `## Activity Log`（不要覆盖之前记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Cancelled** by {agent} — {一行取消原因}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Cancelled** by {agent} — {一行取消原因}
   ```
 
 ### 4. 转移任务

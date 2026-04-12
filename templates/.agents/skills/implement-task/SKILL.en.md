@@ -81,7 +81,7 @@ Create `.agents/workspace/active/{task-id}/{implementation-artifact}`.
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update `.agents/workspace/active/{task-id}/task.md`:
@@ -91,7 +91,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - review the `## Requirements` section and only change items from `- [ ]` to `- [x]` when they are clearly satisfied by this round's implemented code and passing tests
 - record `{implementation-artifact}` for Round `{implementation-round}`
 - append:
-  `- {yyyy-MM-dd HH:mm:ss} — **Implementation (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {implementation-artifact}`
+  `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Implementation (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {implementation-artifact}`
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure; read `.agents/rules/issue-sync.md` first):
 - Set `status: in-progress` and refine `in:` labels from the branch diff by following `.agents/rules/issue-sync.md` (add/remove when a mapping exists, add-only when it does not)

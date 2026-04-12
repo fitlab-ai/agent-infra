@@ -48,13 +48,13 @@ ghsa_id: <GHSA-ID>
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新 task.md：`current_step` -> `requirement-analysis`。
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Import Dependabot Alert** by {agent} — Dependabot alert #{alert-number} imported
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Import Dependabot Alert** by {agent} — Dependabot alert #{alert-number} imported
   ```
 
 ### 4. 完成校验

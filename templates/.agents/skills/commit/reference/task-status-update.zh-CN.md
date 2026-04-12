@@ -7,13 +7,13 @@
 先获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 对于每一次与任务相关的提交，都要在 `task.md` 中追加以下 Activity Log：
 
 ```text
-- {yyyy-MM-dd HH:mm:ss} — **Commit** by {agent} — {commit hash short} {commit subject}
+- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Commit** by {agent} — {commit hash short} {commit subject}
 ```
 
 在决定下一步之前，先确认：

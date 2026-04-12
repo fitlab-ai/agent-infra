@@ -40,7 +40,7 @@ Before blocking, thoroughly analyze:
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update `.agents/workspace/active/{task-id}/task.md`:
@@ -49,7 +49,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `updated_at`: {current timestamp}
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Blocked** by {agent} — {one-line reason}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Blocked** by {agent} — {one-line reason}
   ```
 
 Add a blocking information section to task.md.

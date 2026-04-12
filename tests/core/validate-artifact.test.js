@@ -12,6 +12,12 @@ const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 function formatTimestamp(date) {
   const pad = (value) => String(value).padStart(2, "0");
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffsetMinutes = Math.abs(offsetMinutes);
+  const offsetHours = Math.floor(absoluteOffsetMinutes / 60);
+  const offsetRemainderMinutes = absoluteOffsetMinutes % 60;
+
   return [
     date.getFullYear(),
     pad(date.getMonth() + 1),
@@ -20,7 +26,7 @@ function formatTimestamp(date) {
     pad(date.getHours()),
     pad(date.getMinutes()),
     pad(date.getSeconds())
-  ].join(":");
+  ].join(":") + `${sign}${pad(offsetHours)}:${pad(offsetRemainderMinutes)}`;
 }
 
 function formatTimestampInTimeZone(date, timeZone) {
@@ -41,7 +47,13 @@ function formatTimestampInTimeZone(date, timeZone) {
       .map(({ type, value }) => [type, value])
   );
 
-  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+  const offsetPart = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    timeZoneName: "longOffset"
+  }).formatToParts(date).find(({ type }) => type === "timeZoneName")?.value;
+  const normalizedOffset = offsetPart === "GMT" ? "+00:00" : offsetPart?.replace("GMT", "") || "+00:00";
+
+  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}${normalizedOffset}`;
 }
 
 function write(filePathname, content) {

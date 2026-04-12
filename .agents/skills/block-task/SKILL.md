@@ -40,7 +40,7 @@ description: "标记任务为阻塞状态并记录原因"
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新 `.agents/workspace/active/{task-id}/task.md`：
@@ -49,7 +49,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - `updated_at`：{当前时间戳}
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Blocked** by {agent} — {一行原因}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Blocked** by {agent} — {一行原因}
   ```
 
 在 task.md 中添加阻塞信息部分。
