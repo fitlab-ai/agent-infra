@@ -2,24 +2,96 @@
 
 Read this file before a task skill updates a GitHub Issue.
 
+## Upstream Repository Detection
+
+When an external contributor runs `gh` inside a fork, the default target is the fork instead of the upstream repository. Detect the upstream repository first and reuse `upstream_repo` for every later `gh issue` and `gh api "repos/..."` operation.
+
+```bash
+upstream_repo=$(gh api "repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)" \
+  --jq 'if .fork then .parent.full_name else .full_name end' 2>/dev/null)
+```
+
+- non-fork repository: returns the current repository `full_name`
+- fork repository: returns the parent repository `full_name`
+- every later `gh issue` command must use `-R "$upstream_repo"`
+- every later `gh api "repos/..."` command must use `"repos/$upstream_repo/..."`
+
+## Permission Detection
+
+Run one permission check against the upstream repository before any write operation. When detection fails, treat it as no permission so the workflow degrades safely.
+
+```bash
+repo_perms=$(gh api "repos/$upstream_repo" --jq '.permissions' 2>/dev/null || echo '{}')
+has_triage=$(echo "$repo_perms" | gh api --input - --jq '.triage // false' 2>/dev/null || echo false)
+has_push=$(echo "$repo_perms" | gh api --input - --jq '.push // false' 2>/dev/null || echo false)
+```
+
+Operation-to-permission mapping:
+
+| Operation | Required permission | Notes |
+|------|---------|------|
+| add/remove labels | `has_triage` | triage is the minimum permission |
+| add/remove milestones | `has_triage` | same as above |
+| edit Issue body | `has_triage` | used by requirement checkbox sync |
+| set Issue Type | `has_push` | requires write permission |
+| set assignee | no check | skip directly when it fails |
+| publish/update comments | no check | allowed for authenticated users in public repositories |
+
+## Degradation Rules
+
+| Level | Operation type | With permission | Without permission |
+|------|---------|--------|--------|
+| silent degradation | label / milestone / Issue Type | run the `gh` command directly and also update the task comment | skip direct `gh` writes, update only the task comment, let the bot backfill |
+| direct skip | assignee | run the `gh` command directly | do nothing else |
+| normal execution | comments | run normally | run normally |
+
+Key rules:
+
+- task comment sync must continue whether write permission exists or not
+- insufficient permission only affects direct Issue metadata writes and must not stop the skill
+- keep the existing `2>/dev/null || true` error-tolerance pattern
+
+## External Contributor Locking
+
+Maintainers (`has_triage=true`) are never blocked. External contributors (`has_triage=false`) must check whether the current task already has a `task` comment author on the Issue before they start.
+
+```bash
+task_comment_author=$(gh api "repos/$upstream_repo/issues/{issue-number}/comments" \
+  --paginate --jq '[.[] | select(.body | test("<!-- sync-issue:{task-id}:task -->")) | .user.login] | first' \
+  2>/dev/null || echo "")
+current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
+```
+
+Decision rules:
+
+- no `task` comment exists: allow execution
+- the `task` comment author is the current user: allow continuation
+- the `task` comment author is another user: stop immediately and ask the contributor to coordinate with a maintainer before taking over
+
 ## Direct `status:` Label Updates
 
 If task.md contains a valid `issue_number` (not empty and not `N/A`) and the Issue state is `OPEN`, replace every existing `status:` label and add the target one:
 
 ```bash
-state=$(gh issue view {issue-number} --json state --jq '.state' 2>/dev/null)
+state=$(gh issue view {issue-number} -R "$upstream_repo" --json state --jq '.state' 2>/dev/null)
 if [ "$state" = "OPEN" ]; then
-  gh issue view {issue-number} --json labels \
+  gh issue view {issue-number} -R "$upstream_repo" --json labels \
     --jq '.labels[].name | select(startswith("status:"))' 2>/dev/null \
   | while IFS= read -r label; do
       [ -z "$label" ] && continue
-      gh issue edit {issue-number} --remove-label "$label" 2>/dev/null || true
+      if [ "$has_triage" = "true" ]; then
+        gh issue edit {issue-number} -R "$upstream_repo" --remove-label "$label" 2>/dev/null || true
+      fi
     done
-  gh issue edit {issue-number} --add-label "{target-status-label}" 2>/dev/null || true
+  if [ "$has_triage" = "true" ]; then
+    gh issue edit {issue-number} -R "$upstream_repo" --add-label "{target-status-label}" 2>/dev/null || true
+  fi
 fi
 ```
 
 Use `while IFS= read -r label` so labels like `status: in-progress` are handled line-by-line instead of being split on spaces.
+
+If `has_triage=false`, skip direct label changes, update only the task comment, and let the bot backfill from the latest task metadata.
 
 If `gh` fails, skip and continue. Do not fail the skill.
 
@@ -27,10 +99,10 @@ If `gh` fails, skip and continue. Do not fail the skill.
 
 When a skill creates or imports an Issue, automatically add the current executor as assignee:
 
-- `create-issue`: use `--assignee @me` in the `gh issue create` command
-- `import-issue`: run `gh issue edit {issue-number} --add-assignee @me 2>/dev/null || true` after import
+- `create-issue`: use `--assignee @me` in `gh issue create` and include `-R "$upstream_repo"`
+- `import-issue`: run `gh issue edit {issue-number} -R "$upstream_repo" --add-assignee @me 2>/dev/null || true` after import
 
-`@me` is resolved by `gh` CLI to the authenticated user. The operation is idempotent (adding an existing assignee is a no-op). If the command fails (e.g. insufficient permissions), skip and continue.
+`@me` is resolved by `gh` CLI to the authenticated user. The operation is idempotent. If the command fails, skip it directly and do not provide a fallback path.
 
 ## `in:` Label Sync
 
@@ -40,7 +112,7 @@ Read the `labels.in` mapping from `.agents/.airc.json`.
 git diff {base-branch}...HEAD --name-only
 ```
 
-`{base-branch}` is usually `main`; in PR context, use the PR's base branch.
+`{base-branch}` is usually `main`; in PR context, use the PR base branch.
 
 ### When a mapping exists (precise add/remove)
 
@@ -48,15 +120,18 @@ git diff {base-branch}...HEAD --name-only
 2. Match each file against the directory prefixes in `labels.in` to compute the expected `in:` label set
 3. Query the current `in:` labels on the Issue or PR
 4. Apply the diff:
-   - expected but missing -> `gh issue edit {issue-number} --add-label "in: {module}" 2>/dev/null || true`
-   - present but no longer expected -> `gh issue edit {issue-number} --remove-label "in: {module}" 2>/dev/null || true`
+   - expected but missing: only when `has_triage=true`, run `gh issue edit {issue-number} -R "$upstream_repo" --add-label "in: {module}" 2>/dev/null || true`
+   - present but no longer expected: only when `has_triage=true`, run `gh issue edit {issue-number} -R "$upstream_repo" --remove-label "in: {module}" 2>/dev/null || true`
 
 ### When no mapping exists (add-only fallback)
 
 If `.airc.json` has no `labels.in` field or it is empty:
+
 1. query existing repository `in:` labels
 2. derive the top-level directory from each changed file
-3. add matching labels only and never remove existing `in:` labels
+3. only when `has_triage=true`, add matching labels and never remove existing `in:` labels
+
+If `has_triage=false`, skip direct `in:` label edits and keep task comment sync as the source for later automation backfill.
 
 ## Artifact Comment Publishing
 
@@ -69,7 +144,7 @@ The hidden marker must remain compatible:
 Check for an existing comment before publishing:
 
 ```bash
-gh api "repos/{owner}/{repo}/issues/{issue-number}/comments" \
+gh api "repos/$upstream_repo/issues/{issue-number}/comments" \
   --paginate --jq '.[].body' \
   | grep -qF "<!-- sync-issue:{task-id}:{file-stem} -->"
 ```
@@ -99,19 +174,22 @@ Use this format:
 `{agent}` is the name of the AI agent currently executing the skill (for example `claude`, `codex`, or `gemini`).
 
 `summary` comments need extra handling:
+
 - find an existing `<!-- sync-issue:{task-id}:summary -->` comment ID first
 - create the comment when none exists
-- patch the existing comment in place when the body changed
+- patch the existing comment in place when the body changed by using `gh api "repos/$upstream_repo/issues/comments/{comment-id}" -X PATCH -f body=...`
 
 ```bash
-summary_comment_id=$(gh api "repos/{owner}/{repo}/issues/{issue-number}/comments" \
+summary_comment_id=$(gh api "repos/$upstream_repo/issues/{issue-number}/comments" \
   --paginate --jq '.[] | select(.body | startswith("<!-- sync-issue:{task-id}:summary -->")) | .id' \
   | head -n 1)
-gh api "repos/{owner}/{repo}/issues/comments/{comment-id}" -X PATCH -f body="$(cat <<'EOF'
+gh api "repos/$upstream_repo/issues/comments/{comment-id}" -X PATCH -f body="$(cat <<'EOF'
 {comment-body}
 EOF
 )"
 ```
+
+Comment publishing is not gated by `has_triage` or `has_push`.
 
 ## task.md Comment Sync
 
@@ -124,7 +202,7 @@ Hidden marker:
 Use an idempotent update path for `task.md`:
 
 1. Read the full `task.md`
-2. Wrap the YAML frontmatter (content between the `---` delimiters) inside a `<details><summary>Metadata (frontmatter)</summary>` block with a `yaml` code fence; render the remaining body as normal Markdown
+2. Wrap the YAML frontmatter (content between the `---` delimiters) inside a `<details><summary>Metadata (frontmatter)</summary>` block with a `yaml` code fence, then render the remaining body as normal Markdown
 3. Use `task` as `{file-stem}`
 4. Find an existing comment ID for the marker
 5. Create the comment when none exists
@@ -155,20 +233,23 @@ task.md comment format:
 *Generated by {agent} · Internal tracking: {task-id}*
 ```
 
-When restoring, extract the frontmatter from the `<details>` block and reassemble with the body to recover the original `task.md`.
+When restoring, extract the frontmatter from the `<details>` block and reassemble it with the body to recover the original `task.md`.
 
 Title mapping:
+
 - `task` -> `Task File`
+
+task comment sync always runs and is never downgraded.
 
 ## Backfill Rules (run before `/complete-task` archives)
 
 - Scan `task.md`, `analysis*.md`, `plan*.md`, `implementation*.md`, `review*.md`, and `refinement*.md` in the task directory
 - Check whether each `{file-stem}` was already published by its hidden marker; publish only missing artifacts
-- Backfill only appends missing comments; never delete or reorder existing comments
+- Backfill only appends missing comments and never deletes or reorders existing comments
 - Resolve `{agent}` for backfilled comments in this order:
-  1. Match the artifact filename in Activity Log (for example `→ analysis.md`) and extract the executor from `by {agent}`
-  2. If no match is found, fall back to `assigned_to` in task.md frontmatter
-  3. If `assigned_to` is also unavailable, use the current backfilling agent
+  1. match the artifact filename in Activity Log (for example `→ analysis.md`) and extract the executor from `by {agent}`
+  2. if no match is found, fall back to `assigned_to` in task.md frontmatter
+  3. if `assigned_to` is also unavailable, use the current backfilling agent
 - Derive the previous and next neighbors from Activity Log order and add this note below the title:
 
 ```markdown
@@ -178,6 +259,7 @@ Title mapping:
 - If only one neighbor exists, keep only that side of the note; if neither exists, omit the note
 
 Title mapping:
+
 - `task` -> `Task File`
 - `analysis` / `analysis-r{N}` -> `Requirements Analysis` / `Requirements Analysis (Round {N})`
 - `plan` / `plan-r{N}` -> `Technical Plan` / `Technical Plan (Round {N})`
@@ -186,6 +268,8 @@ Title mapping:
 - `refinement` / `refinement-r{N}` -> `Refinement Report (Round 1)` / `Refinement Report (Round {N})`
 - `summary` -> `Delivery Summary`
 
+Backfilled comments are also not gated by `has_triage` or `has_push`.
+
 ## Requirement Checkbox Sync
 
 Extract checked `- [x]` items from the `## Requirements` section in task.md. Skip when none exist.
@@ -193,10 +277,12 @@ Extract checked `- [x]` items from the `## Requirements` section in task.md. Ski
 Read the current Issue body:
 
 ```bash
-gh issue view {issue-number} --json body --jq '.body'
+gh issue view {issue-number} -R "$upstream_repo" --json body --jq '.body'
 ```
 
-Replace matching `- [ ] {text}` lines with `- [x] {text}` only when the body actually changes, then PATCH the full body with `gh api`.
+Replace matching `- [ ] {text}` lines with `- [x] {text}`. Use `gh api` to PATCH the full body only when the body changed and `has_triage=true`.
+
+If `has_triage=false`, skip the body PATCH, update only the task comment, and let the bot backfill from the latest task state.
 
 ## Shell Safety Rules
 
