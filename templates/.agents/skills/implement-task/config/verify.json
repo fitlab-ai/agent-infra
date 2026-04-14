@@ -29,7 +29,7 @@
       "expected_action_pattern": "Implementation \\(Round \\d+\\)",
       "freshness_minutes": 30
     },
-    "github-sync": {
+    "platform-sync": {
       "when": "issue_number_exists",
       "expected_status_label": "status: in-progress",
       "expected_comment_marker": "<!-- sync-issue:{task-id}:{artifact-stem} -->",

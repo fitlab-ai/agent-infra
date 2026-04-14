@@ -19,6 +19,6 @@
       "expected_action_pattern": "Import Code Scanning Alert",
       "freshness_minutes": 30
     },
-    "github-sync": null
+    "platform-sync": null
   }
 }

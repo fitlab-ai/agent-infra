@@ -17,7 +17,7 @@
       "expected_action_pattern": "PR Created",
       "freshness_minutes": 30
     },
-    "github-sync": {
+    "platform-sync": {
       "when": "issue_number_exists",
       "expected_pr_comment_marker": "<!-- sync-pr:{task-id}:summary -->",
       "verify_in_labels_match_pr": true,

@@ -475,7 +475,7 @@ test("validate-artifact gate passes for complete-task when completion checklist 
     assert.equal(payload.gate, "pass");
     assert.deepEqual(
       payload.checks.map((check) => check.type),
-      ["task-meta", "activity-log", "completion-checklist", "github-sync"]
+      ["task-meta", "activity-log", "completion-checklist", "platform-sync"]
     );
     assert.deepEqual(
       payload.checks.map((check) => check.status),
@@ -509,7 +509,7 @@ test("validate-artifact completion-checklist fails when a complete-task item is 
   }
 });
 
-test("validate-artifact github-sync blocks after retry exhaustion on gh network errors", () => {
+test("validate-artifact platform-sync blocks after retry exhaustion on gh network errors", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gate-blocked-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
@@ -540,7 +540,7 @@ test("validate-artifact github-sync blocks after retry exhaustion on gh network 
 
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.gate, "blocked");
-    const githubCheck = payload.checks.find((check) => check.type === "github-sync");
+    const githubCheck = payload.checks.find((check) => check.type === "platform-sync");
     assert.equal(githubCheck.status, "blocked");
     assert.equal(githubCheck.fail_type, "network_error");
   } finally {
@@ -548,8 +548,42 @@ test("validate-artifact github-sync blocks after retry exhaustion on gh network 
   }
 });
 
+test("validate-artifact platform-sync skips when no platform adapter is registered", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-skip-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const scriptCopy = path.join(tempRoot, ".agents/scripts/validate-artifact.js");
+  const verifyCopy = path.join(tempRoot, ".agents/skills/implement-task/config/verify.json");
+
+  try {
+    write(path.join(tempRoot, "package.json"), JSON.stringify({ type: "module" }, null, 2));
+    write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
+    write(verifyCopy, read(".agents/skills/implement-task/config/verify.json"));
+    write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
+    write(path.join(taskDir, "implementation.md"), loadFixture("valid-implementation.md"));
+
+    const result = spawnSync(
+      process.execPath,
+      [scriptCopy, "check", "platform-sync", taskDir, "implementation.md", "--skill", "implement-task"],
+      {
+        encoding: "utf8",
+        cwd: tempRoot,
+        env: process.env
+      }
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.type, "platform-sync");
+    assert.equal(payload.status, "pass");
+    assert.equal(payload.message, "Skipped: no platform adapter registered for 'platform-sync'");
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("validate-artifact gate passes when synced artifact and task comments match local files", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-pass-"));
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-pass-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -592,8 +626,8 @@ test("validate-artifact gate passes when synced artifact and task comments match
   }
 });
 
-test("validate-artifact github-sync fails when artifact comment content differs from the local artifact", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-artifact-mismatch-"));
+test("validate-artifact platform-sync fails when artifact comment content differs from the local artifact", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-artifact-mismatch-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -617,7 +651,7 @@ test("validate-artifact github-sync fails when artifact comment content differs 
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "implementation.md",
       "--skill",
@@ -633,7 +667,7 @@ test("validate-artifact github-sync fails when artifact comment content differs 
     assert.equal(result.status, 1);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /Comment content mismatch for 'implementation'/);
     assert.match(payload.message, /first difference near char \d+/);
@@ -642,8 +676,8 @@ test("validate-artifact github-sync fails when artifact comment content differs 
   }
 });
 
-test("validate-artifact github-sync fails when the task comment does not use the rendered frontmatter details block", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-task-mismatch-"));
+test("validate-artifact platform-sync fails when the task comment does not use the rendered frontmatter details block", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-task-mismatch-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -667,7 +701,7 @@ test("validate-artifact github-sync fails when the task comment does not use the
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "implementation.md",
       "--skill",
@@ -683,7 +717,7 @@ test("validate-artifact github-sync fails when the task comment does not use the
     assert.equal(result.status, 1);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /Comment content mismatch for 'task'/);
     assert.match(payload.message, /line \d+, column \d+/);
@@ -692,8 +726,8 @@ test("validate-artifact github-sync fails when the task comment does not use the
   }
 });
 
-test("validate-artifact github-sync fails when the Issue Type does not match task type", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-issue-type-"));
+test("validate-artifact platform-sync fails when the Issue Type does not match task type", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-issue-type-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -719,7 +753,7 @@ test("validate-artifact github-sync fails when the Issue Type does not match tas
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "implementation.md",
       "--skill",
@@ -735,7 +769,7 @@ test("validate-artifact github-sync fails when the Issue Type does not match tas
     assert.equal(result.status, 1);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /has type 'Task', expected 'Feature'/);
   } finally {
@@ -743,8 +777,8 @@ test("validate-artifact github-sync fails when the Issue Type does not match tas
   }
 });
 
-test("validate-artifact github-sync skips Issue Type verification when the REST query is unavailable", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-issue-type-skip-"));
+test("validate-artifact platform-sync skips Issue Type verification when the REST query is unavailable", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-issue-type-skip-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -768,7 +802,7 @@ test("validate-artifact github-sync skips Issue Type verification when the REST 
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "implementation.md",
       "--skill",
@@ -786,15 +820,15 @@ test("validate-artifact github-sync skips Issue Type verification when the REST 
     assert.equal(result.status, 0, result.stderr);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 
-test("validate-artifact github-sync accepts English task frontmatter summary when language override is en", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-task-en-"));
+test("validate-artifact platform-sync accepts English task frontmatter summary when language override is en", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-task-en-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -818,7 +852,7 @@ test("validate-artifact github-sync accepts English task frontmatter summary whe
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "implementation.md",
       "--skill",
@@ -835,15 +869,15 @@ test("validate-artifact github-sync accepts English task frontmatter summary whe
     assert.equal(result.status, 0, result.stderr);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 
-test("validate-artifact github-sync fails when create-pr milestone is missing", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-pr-milestone-"));
+test("validate-artifact platform-sync fails when create-pr milestone is missing", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-pr-milestone-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -869,7 +903,7 @@ test("validate-artifact github-sync fails when create-pr milestone is missing", 
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "--skill",
       "create-pr"
@@ -887,7 +921,7 @@ test("validate-artifact github-sync fails when create-pr milestone is missing", 
     assert.equal(result.status, 1);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /PR #77 has no milestone set/);
   } finally {
@@ -895,8 +929,8 @@ test("validate-artifact github-sync fails when create-pr milestone is missing", 
   }
 });
 
-test("validate-artifact github-sync fails when PR and Issue in: labels diverge", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-in-labels-"));
+test("validate-artifact platform-sync fails when PR and Issue in: labels diverge", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-in-labels-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -922,7 +956,7 @@ test("validate-artifact github-sync fails when PR and Issue in: labels diverge",
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "--skill",
       "create-pr"
@@ -940,7 +974,7 @@ test("validate-artifact github-sync fails when PR and Issue in: labels diverge",
     assert.equal(result.status, 1);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /in: labels mismatch/);
     assert.match(payload.message, /PR #77/);
@@ -950,8 +984,8 @@ test("validate-artifact github-sync fails when PR and Issue in: labels diverge",
   }
 });
 
-test("validate-artifact github-sync fails when create-pr has no assignee", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-pr-assignee-"));
+test("validate-artifact platform-sync fails when create-pr has no assignee", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-pr-assignee-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -977,7 +1011,7 @@ test("validate-artifact github-sync fails when create-pr has no assignee", () =>
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "--skill",
       "create-pr"
@@ -995,7 +1029,7 @@ test("validate-artifact github-sync fails when create-pr has no assignee", () =>
     assert.equal(result.status, 1);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /PR #77 has no assignee/);
   } finally {
@@ -1003,8 +1037,8 @@ test("validate-artifact github-sync fails when create-pr has no assignee", () =>
   }
 });
 
-test("validate-artifact github-sync skips create-pr assignee verification without push permission", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-pr-assignee-skip-"));
+test("validate-artifact platform-sync skips create-pr assignee verification without push permission", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-pr-assignee-skip-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -1030,7 +1064,7 @@ test("validate-artifact github-sync skips create-pr assignee verification withou
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "--skill",
       "create-pr"
@@ -1049,15 +1083,15 @@ test("validate-artifact github-sync skips create-pr assignee verification withou
     assert.equal(result.status, 0, result.stderr);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 
-test("validate-artifact github-sync passes when create-pr summary comment exists on the PR", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-pr-comment-pass-"));
+test("validate-artifact platform-sync passes when create-pr summary comment exists on the PR", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-pr-comment-pass-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -1081,7 +1115,7 @@ test("validate-artifact github-sync passes when create-pr summary comment exists
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "--skill",
       "create-pr"
@@ -1099,7 +1133,7 @@ test("validate-artifact github-sync passes when create-pr summary comment exists
     assert.equal(result.status, 0, result.stderr);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -1129,8 +1163,8 @@ test("template English rule contains the canonical PR summary structure", () => 
   assertHasCanonicalPrSyncStructure("templates/.agents/rules/pr-sync.github.en.md", enHeadings);
 });
 
-test("validate-artifact github-sync skips for commit when task has no pr_number", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-commit-skip-"));
+test("validate-artifact platform-sync skips for commit when task has no pr_number", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-commit-skip-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
 
   try {
@@ -1139,7 +1173,7 @@ test("validate-artifact github-sync skips for commit when task has no pr_number"
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "--skill",
       "commit"
@@ -1148,7 +1182,7 @@ test("validate-artifact github-sync skips for commit when task has no pr_number"
     assert.equal(result.status, 0, result.stderr);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
     assert.equal(payload.message, "Skipped: task has no pr_number");
   } finally {
@@ -1156,8 +1190,8 @@ test("validate-artifact github-sync skips for commit when task has no pr_number"
   }
 });
 
-test("validate-artifact github-sync passes for commit when summary comment exists on the PR", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-commit-pass-"));
+test("validate-artifact platform-sync passes for commit when summary comment exists on the PR", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-commit-pass-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -1180,7 +1214,7 @@ test("validate-artifact github-sync passes for commit when summary comment exist
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "--skill",
       "commit"
@@ -1197,15 +1231,15 @@ test("validate-artifact github-sync passes for commit when summary comment exist
     assert.equal(result.status, 0, result.stderr);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 
-test("validate-artifact github-sync fails for commit when summary comment last-commit metadata mismatches HEAD", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-commit-head-fail-"));
+test("validate-artifact platform-sync fails for commit when summary comment last-commit metadata mismatches HEAD", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-commit-head-fail-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -1228,7 +1262,7 @@ test("validate-artifact github-sync fails for commit when summary comment last-c
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "--skill",
       "commit"
@@ -1245,7 +1279,7 @@ test("validate-artifact github-sync fails for commit when summary comment last-c
     assert.equal(result.status, 1);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /last-commit metadata mismatch/);
   } finally {
@@ -1253,8 +1287,8 @@ test("validate-artifact github-sync fails for commit when summary comment last-c
   }
 });
 
-test("validate-artifact github-sync fails for commit when summary comment last-commit metadata is missing", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-commit-head-missing-"));
+test("validate-artifact platform-sync fails for commit when summary comment last-commit metadata is missing", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-commit-head-missing-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -1277,7 +1311,7 @@ test("validate-artifact github-sync fails for commit when summary comment last-c
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "--skill",
       "commit"
@@ -1294,7 +1328,7 @@ test("validate-artifact github-sync fails for commit when summary comment last-c
     assert.equal(result.status, 1);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /missing '<!-- last-commit: <sha> -->' metadata/);
   } finally {
@@ -1302,8 +1336,8 @@ test("validate-artifact github-sync fails for commit when summary comment last-c
   }
 });
 
-test("validate-artifact github-sync fails when create-pr summary comment is missing on the PR", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-pr-comment-fail-"));
+test("validate-artifact platform-sync fails when create-pr summary comment is missing on the PR", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-pr-comment-fail-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -1325,7 +1359,7 @@ test("validate-artifact github-sync fails when create-pr summary comment is miss
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "--skill",
       "create-pr"
@@ -1343,7 +1377,7 @@ test("validate-artifact github-sync fails when create-pr summary comment is miss
     assert.equal(result.status, 1);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /Expected PR comment marker/);
     assert.match(payload.message, /PR #77/);
@@ -1352,8 +1386,8 @@ test("validate-artifact github-sync fails when create-pr summary comment is miss
   }
 });
 
-test("validate-artifact github-sync fails for commit when summary comment is missing on the PR", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-commit-fail-"));
+test("validate-artifact platform-sync fails for commit when summary comment is missing on the PR", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-commit-fail-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -1373,7 +1407,7 @@ test("validate-artifact github-sync fails for commit when summary comment is mis
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "--skill",
       "commit"
@@ -1390,7 +1424,7 @@ test("validate-artifact github-sync fails for commit when summary comment is mis
     assert.equal(result.status, 1);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /Expected PR comment marker/);
     assert.match(payload.message, /PR #77/);
@@ -1399,8 +1433,8 @@ test("validate-artifact github-sync fails for commit when summary comment is mis
   }
 });
 
-test("validate-artifact github-sync fails for create-issue when the task comment is missing", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-github-sync-create-issue-task-"));
+test("validate-artifact platform-sync fails for create-issue when the task comment is missing", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-create-issue-task-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -1420,7 +1454,7 @@ test("validate-artifact github-sync fails for create-issue when the task comment
 
     const result = runValidator([
       "check",
-      "github-sync",
+      "platform-sync",
       taskDir,
       "--skill",
       "create-issue"
@@ -1436,7 +1470,7 @@ test("validate-artifact github-sync fails for create-issue when the task comment
     assert.equal(result.status, 1);
 
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.type, "github-sync");
+    assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /sync-issue:TASK-20260328-000001:task/);
   } finally {
@@ -1447,7 +1481,9 @@ test("validate-artifact github-sync fails for create-issue when the task comment
 test("verification assets are present in local and template trees", () => {
   [
     ".agents/scripts/validate-artifact.js",
+    ".agents/scripts/platform-adapters/platform-sync.js",
     "templates/.agents/scripts/validate-artifact.js",
+    "templates/.agents/scripts/platform-adapters/platform-sync.github.js",
     ".agents/skills/implement-task/config/verify.json",
     "templates/.agents/skills/implement-task/config/verify.json"
   ].forEach((relativePath) => {
@@ -1458,5 +1494,10 @@ test("verification assets are present in local and template trees", () => {
     read(".agents/scripts/validate-artifact.js"),
     read("templates/.agents/scripts/validate-artifact.js"),
     "template validate-artifact.js should stay in sync with the local script"
+  );
+  assert.equal(
+    read(".agents/scripts/platform-adapters/platform-sync.js"),
+    read("templates/.agents/scripts/platform-adapters/platform-sync.github.js"),
+    "template platform adapter should stay in sync with the local adapter"
   );
 });

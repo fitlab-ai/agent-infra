@@ -31,7 +31,7 @@
       "expected_action_pattern": "Technical Design \\(Round \\d+\\)",
       "freshness_minutes": 30
     },
-    "github-sync": {
+    "platform-sync": {
       "when": "issue_number_exists",
       "expected_status_label": "status: pending-design-work",
       "expected_comment_marker": "<!-- sync-issue:{task-id}:{artifact-stem} -->",
