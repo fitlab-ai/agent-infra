@@ -1,0 +1,122 @@
+name: Metadata Sync
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  sync-metadata:
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.issue.pull_request }}
+    steps:
+      - name: Extract metadata from task comment
+        id: metadata
+        run: |
+          body=$(jq -r '.comment.body' "$GITHUB_EVENT_PATH")
+          if ! printf '%s' "$body" | grep -qE '<!-- sync-issue:TASK-[0-9]{8}-[0-9]{6}:task -->'; then
+            printf 'is_task_comment=false\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          frontmatter=$(printf '%s\n' "$body" \
+            | tr -d '\r' \
+            | awk '
+                BEGIN { capture = 0; separators = 0 }
+                $0 == "---" {
+                  separators += 1
+                  if (separators == 1) {
+                    capture = 1
+                    next
+                  }
+                  if (separators == 2) {
+                    exit
+                  }
+                }
+                capture { print }
+              ')
+
+          type=$(printf '%s\n' "$frontmatter" \
+            | sed -n 's/^type:[[:space:]]*//p' \
+            | head -n 1 \
+            | sed 's/[[:space:]]*#.*$//' \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+            | tr '[:upper:]' '[:lower:]')
+
+          milestone=$(printf '%s\n' "$frontmatter" \
+            | sed -n 's/^milestone:[[:space:]]*//p' \
+            | head -n 1 \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+
+          printf 'is_task_comment=true\n' >> "$GITHUB_OUTPUT"
+          printf 'type=%s\n' "$type" >> "$GITHUB_OUTPUT"
+          printf 'milestone=%s\n' "$milestone" >> "$GITHUB_OUTPUT"
+
+      - name: Sync type label
+        if: steps.metadata.outputs.is_task_comment == 'true' && steps.metadata.outputs.type != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          TYPE: ${{ steps.metadata.outputs.type }}
+        run: |
+          case "$TYPE" in
+            bug|bugfix)                       TYPE_LABEL="type: bug" ;;
+            feature)                          TYPE_LABEL="type: feature" ;;
+            enhancement|refactor|refactoring) TYPE_LABEL="type: enhancement" ;;
+            docs|documentation)               TYPE_LABEL="type: documentation" ;;
+            dependency-upgrade)               TYPE_LABEL="type: dependency-upgrade" ;;
+            task|chore)                       TYPE_LABEL="type: task" ;;
+            *)                                TYPE_LABEL="" ;;
+          esac
+
+          if [ -n "$TYPE_LABEL" ]; then
+            gh issue view "$ISSUE_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json labels --jq '.labels[].name | select(startswith("type:"))' \
+              2>/dev/null \
+            | while IFS= read -r label; do
+                [ -z "$label" ] && continue
+                gh issue edit "$ISSUE_NUMBER" \
+                  --repo "$GITHUB_REPOSITORY" \
+                  --remove-label "$label" \
+                  2>/dev/null || true
+              done || true
+
+            gh issue edit "$ISSUE_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --add-label "$TYPE_LABEL" \
+              2>/dev/null || true
+          fi
+
+      - name: Sync milestone
+        if: steps.metadata.outputs.is_task_comment == 'true' && steps.metadata.outputs.milestone != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          MILESTONE: ${{ steps.metadata.outputs.milestone }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --milestone "$MILESTONE" \
+            2>/dev/null || true
+
+      - name: Sync issue type
+        if: steps.metadata.outputs.is_task_comment == 'true' && steps.metadata.outputs.type != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          TYPE: ${{ steps.metadata.outputs.type }}
+        run: |
+          case "$TYPE" in
+            bug|bugfix)          ISSUE_TYPE="Bug" ;;
+            feature|enhancement) ISSUE_TYPE="Feature" ;;
+            *)                   ISSUE_TYPE="Task" ;;
+          esac
+
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" \
+            -X PATCH \
+            -f type="$ISSUE_TYPE" \
+            --silent \
+            2>/dev/null || true
