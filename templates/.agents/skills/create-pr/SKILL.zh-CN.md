@@ -38,7 +38,7 @@ description: "创建 Pull Request 到目标分支"
 
 先检查当前分支是否已经存在 PR；如果已存在，直接告知用户 PR URL 并结束，不要重复执行元数据同步或摘要发布。
 
-执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的 “创建 PR” 命令创建 PR。
+执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的前置步骤完成认证和代码托管平台检测；随后按其中的 “创建 PR” 命令创建 PR。
 
 如果获取到 `{task-id}` 且对应任务提供了 `issue_number`，必须在 PR 正文中保留 `Closes #{issue-number}`。
 
@@ -46,9 +46,9 @@ description: "创建 Pull Request 到目标分支"
 
 对获取到 `{task-id}` 的 PR，立即同步这些核心元数据：
 - 按 `.agents/rules/issue-pr-commands.md` 查询标准 label / Issue / PR 元数据
-- 按 `.agents/rules/issue-pr-commands.md` 的 PR 更新命令添加 type label 与相关 `in:` labels
+- 按 `.agents/rules/issue-pr-commands.md` 的 PR 更新命令和权限降级规则处理 type label 与相关 `in:` labels
 - 按 `.agents/rules/issue-sync.md` 的 `in:` label 同步规则，同步更新关联 Issue 的 `in:` label 保持一致
-- 按 `.agents/rules/milestone-inference.md` 的「阶段 3：`create-pr`」复用 Issue milestone
+- 按 `.agents/rules/milestone-inference.md` 的「阶段 3：`create-pr`」及其权限规则复用 Issue milestone
 - 通过 `Closes #{issue-number}` 保持 Development 关联
 
 ### 7. 发布审查摘要

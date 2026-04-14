@@ -57,6 +57,8 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 当 `{task-id}` 存在且 task.md 包含有效 `pr_number` 时，刷新 PR 上的 `<!-- sync-pr:{task-id}:summary -->` 摘要评论；否则跳过。
 
 > 完整的触发条件、聚合规则、PATCH/POST 流程、Shell 安全约束和错误处理见 `reference/pr-summary-sync.md`（其内联引用 `.agents/rules/pr-sync.md`）。执行此步骤前先读取 `reference/pr-summary-sync.md`。
+>
+> 如果本步骤会访问代码托管平台，则先按 `.agents/rules/issue-pr-commands.md` 完成前置检测，确保 `.agents/rules/pr-sync.md` 所需的运行时上下文已就绪。
 
 失败处理与「按需更新任务状态」一致：警告但**不**阻塞已完成的 `git commit`。
 

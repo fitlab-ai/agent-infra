@@ -591,10 +591,11 @@ function buildSyncContext({ taskDir, config, artifactFile }) {
     return { earlyReturn: passResult("github-sync", "Skipped: github-sync not required for this task") };
   }
 
-  const ownerRepo = resolveOwnerRepo(taskDir);
-  if (!ownerRepo.ok) {
-    return { earlyReturn: blockedResult("github-sync", ownerRepo.message, "network_error") };
+  const upstreamRepo = resolveUpstreamRepo(taskDir);
+  if (!upstreamRepo.ok) {
+    return { earlyReturn: blockedResult("github-sync", upstreamRepo.message, "network_error") };
   }
+  const permissions = detectPermissions(upstreamRepo.value, taskDir);
 
   const marker = config.expected_comment_marker
     ? interpolate(config.expected_comment_marker, taskDir, artifactFile)
@@ -612,20 +613,38 @@ function buildSyncContext({ taskDir, config, artifactFile }) {
     artifactPath,
     issueNumber,
     prNumber,
-    ownerRepo: ownerRepo.value,
+    upstreamRepo: upstreamRepo.value,
+    hasTriage: permissions.hasTriage,
+    hasPush: permissions.hasPush,
     marker,
     prMarker
   };
 }
 
 function fetchRemoteData(context) {
-  const issueResult = withRetry(() => ghJson([
+  let issueResult = withRetry(() => ghJson([
     "issue",
     "view",
     String(context.issueNumber),
+    "-R",
+    context.upstreamRepo,
     "--json",
     "state,labels,body,milestone"
   ], context.taskDir));
+  if (!issueResult.ok && issueResult.type !== "check_failed") {
+    const fallbackIssueResult = withRetry(() => ghJson([
+      "api",
+      `repos/${context.upstreamRepo}/issues/${context.issueNumber}`
+    ], context.taskDir));
+    if (fallbackIssueResult.ok) {
+      issueResult = {
+        ok: true,
+        value: normalizeIssuePayload(fallbackIssueResult.value)
+      };
+    } else {
+      issueResult = fallbackIssueResult;
+    }
+  }
   if (!issueResult.ok) {
     return {
       earlyReturn: issueResult.type === "check_failed"
@@ -647,7 +666,7 @@ function fetchRemoteData(context) {
       "api",
       "--paginate",
       "--slurp",
-      `repos/${context.ownerRepo}/issues/${context.issueNumber}/comments?per_page=100`
+      `repos/${context.upstreamRepo}/issues/${context.issueNumber}/comments?per_page=100`
     ], context.taskDir));
 
     if (!commentsResult.ok) {
@@ -673,7 +692,7 @@ function fetchRemoteData(context) {
       "api",
       "--paginate",
       "--slurp",
-      `repos/${context.ownerRepo}/issues/${context.prNumber}/comments?per_page=100`
+      `repos/${context.upstreamRepo}/issues/${context.prNumber}/comments?per_page=100`
     ], context.taskDir));
 
     if (!prCommentsResult.ok) {
@@ -688,10 +707,10 @@ function fetchRemoteData(context) {
   }
 
   let issueType;
-  if (context.config.verify_issue_type) {
+  if (context.config.verify_issue_type && context.hasPush) {
     const issueTypeResult = withRetry(() => ghText([
       "api",
-      `repos/${context.ownerRepo}/issues/${context.issueNumber}`,
+      `repos/${context.upstreamRepo}/issues/${context.issueNumber}`,
       "--jq",
       ".type.name // empty"
     ], context.taskDir));
@@ -703,7 +722,8 @@ function fetchRemoteData(context) {
 
   let prLabels = null;
   let prMilestone;
-  if ((context.config.verify_in_labels_match_pr || context.config.verify_milestone) && context.prNumber) {
+  if (((context.config.verify_in_labels_match_pr && context.hasTriage)
+    || (context.config.verify_milestone && context.hasTriage)) && context.prNumber) {
     const prFields = [];
     if (context.config.verify_in_labels_match_pr) {
       prFields.push("labels");
@@ -765,7 +785,11 @@ function flattenComments(value) {
 }
 
 function checkStatusLabel(context, remoteData) {
-  if (!context.config.expected_status_label || remoteData.issue.state !== "OPEN") {
+  if (!context.config.expected_status_label || !context.hasTriage) {
+    return null;
+  }
+
+  if (String(remoteData.issue.state || "").toUpperCase() !== "OPEN") {
     return null;
   }
 
@@ -933,7 +957,7 @@ function checkTaskCommentContent(context, remoteData) {
 }
 
 function checkInLabelsMatchPr(context, remoteData) {
-  if (!context.config.verify_in_labels_match_pr || !context.prNumber || !remoteData.prLabels) {
+  if (!context.config.verify_in_labels_match_pr || !context.hasTriage || !context.prNumber || !remoteData.prLabels) {
     return null;
   }
 
@@ -956,7 +980,7 @@ function checkInLabelsMatchPr(context, remoteData) {
 }
 
 function checkSyncedRequirements(context, remoteData) {
-  if (!context.config.sync_checked_requirements) {
+  if (!context.config.sync_checked_requirements || !context.hasTriage) {
     return null;
   }
 
@@ -981,7 +1005,7 @@ function checkSyncedRequirements(context, remoteData) {
 }
 
 function checkIssueType(context, remoteData) {
-  if (!context.config.verify_issue_type) {
+  if (!context.config.verify_issue_type || !context.hasPush) {
     return null;
   }
 
@@ -1010,7 +1034,7 @@ function checkIssueType(context, remoteData) {
 }
 
 function checkMilestone(context, remoteData) {
-  if (!context.config.verify_milestone) {
+  if (!context.config.verify_milestone || !context.hasTriage) {
     return null;
   }
 
@@ -1200,6 +1224,15 @@ function formatLabelList(labels) {
 
 // === GitHub API ===
 
+function normalizeIssuePayload(payload) {
+  return {
+    state: String(payload?.state || "").toUpperCase(),
+    labels: Array.isArray(payload?.labels) ? payload.labels : [],
+    body: typeof payload?.body === "string" ? payload.body : "",
+    milestone: payload?.milestone ?? null
+  };
+}
+
 function parseIssueNumber(value) {
   if (isBlank(value) || value === "N/A") {
     return null;
@@ -1211,6 +1244,30 @@ function parseIssueNumber(value) {
 
 function parsePrNumber(value) {
   return parseIssueNumber(value);
+}
+
+function resolveUpstreamRepo(taskDir) {
+  const ownerRepo = resolveOwnerRepo(taskDir);
+  if (!ownerRepo.ok) {
+    return ownerRepo;
+  }
+
+  const upstreamResult = ghText([
+    "api",
+    `repos/${ownerRepo.value}`,
+    "--jq",
+    "if .fork then .parent.full_name else .full_name end"
+  ], taskDir);
+
+  if (!upstreamResult.ok) {
+    return upstreamResult;
+  }
+
+  if (isBlank(upstreamResult.value)) {
+    return { ok: false, message: "Unable to resolve upstream repository" };
+  }
+
+  return { ok: true, value: upstreamResult.value };
 }
 
 function resolveOwnerRepo(taskDir) {
@@ -1230,6 +1287,28 @@ function resolveOwnerRepo(taskDir) {
   }
 
   return { ok: true, value: sshMatch[1] };
+}
+
+function detectPermissions(upstreamRepo, taskDir) {
+  const permissionsResult = ghJson([
+    "api",
+    `repos/${upstreamRepo}`,
+    "--jq",
+    ".permissions"
+  ], taskDir);
+
+  if (!permissionsResult.ok) {
+    return { hasTriage: false, hasPush: false };
+  }
+
+  const permissions = permissionsResult.value && typeof permissionsResult.value === "object"
+    ? permissionsResult.value
+    : {};
+
+  return {
+    hasTriage: permissions.triage === true,
+    hasPush: permissions.push === true
+  };
 }
 
 function ghJson(args, cwd) {

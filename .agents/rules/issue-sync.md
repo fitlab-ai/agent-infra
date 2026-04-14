@@ -22,8 +22,8 @@ upstream_repo=$(gh api "repos/$(gh repo view --json nameWithOwner -q .nameWithOw
 
 ```bash
 repo_perms=$(gh api "repos/$upstream_repo" --jq '.permissions' 2>/dev/null || echo '{}')
-has_triage=$(echo "$repo_perms" | gh api --input - --jq '.triage // false' 2>/dev/null || echo false)
-has_push=$(echo "$repo_perms" | gh api --input - --jq '.push // false' 2>/dev/null || echo false)
+has_triage=$(printf '%s' "$repo_perms" | grep -q '"triage":true' 2>/dev/null && echo true || echo false)
+has_push=$(printf '%s' "$repo_perms" | grep -q '"push":true' 2>/dev/null && echo true || echo false)
 ```
 
 操作与权限映射：

@@ -17,7 +17,7 @@ description: "从 GitHub Issue 导入并创建任务"
 
 ### 1. 获取 Issue 信息
 
-执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的 “读取 Issue” 命令获取 Issue 信息。
+执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的前置步骤完成认证和代码托管平台检测；随后按其中的 “读取 Issue” 命令获取 Issue 信息。
 
 提取：issue 编号、标题、描述、标签。
 任务标题直接使用 Issue 的原始标题（保持 Issue 标题的原始语言）。

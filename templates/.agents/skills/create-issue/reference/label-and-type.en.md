@@ -44,11 +44,16 @@ Issue Type fallback mapping:
 
 Before creating the Issue, read `.agents/rules/issue-pr-commands.md` and use its "Create an Issue" command template.
 
+Before calling the creation command, follow `.agents/rules/issue-sync.md` / `.agents/rules/issue-pr-commands.md` to complete the prerequisite authentication and code-hosting platform detection steps.
+
 If no valid labels remain, omit label arguments.
 
 For milestone inference, read `.agents/rules/milestone-inference.md` and follow "Phase 1: `create-issue`" before creating the Issue.
 
 Issue Type setup follows the matching commands in `.agents/rules/issue-pr-commands.md`.
+
+- handle direct writes for labels, milestones, `in:` labels, and Issue Type by following the permission-degradation rules in `.agents/rules/issue-pr-commands.md` and `.agents/rules/issue-sync.md`
+- when those rules say to skip a direct write, continue without failing Issue creation
 
 `in:` labels (coarse selection):
 
@@ -61,6 +66,6 @@ Use the returned labels to do semantic matching against the task.md title and de
 
 Principle: prefer missing labels over wrong labels. Coarse selection does not need to be perfect because implement-task / create-pr will refine `in:` labels from actual changed files later.
 
-Only add relevant `in:` labels. Do not fail Issue creation when `in:` labels are unavailable or irrelevant.
+Handle relevant `in:` labels by following the permission-degradation rules in `.agents/rules/issue-sync.md`. Do not fail Issue creation when `in:` labels are unavailable, irrelevant, or skipped by those rules.
 
 Skip unavailable labels, Issue Types, or milestones without failing the Issue creation flow.

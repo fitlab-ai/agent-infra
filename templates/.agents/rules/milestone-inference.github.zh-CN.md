@@ -7,6 +7,7 @@
 - milestone 在技能生命周期中逐步收窄：版本线 -> 具体版本 -> 复用
 - 任一步骤推断失败时都必须回退，不得阻塞技能执行
 - 如果 `gh` CLI 不可用、未认证，或 GitHub API 请求失败，跳过 milestone 处理并继续
+- 在执行 repo 级 `gh api`、`gh issue edit` 或 Issue 查询前，调用方必须先完成 `upstream_repo` / `has_triage` 检测
 - 只使用仓库中实际存在的 milestone；目标 milestone 不存在时按各阶段 fallback 处理
 
 ## 分支模式检测
@@ -35,11 +36,13 @@ git branch -r | grep -v 'HEAD' | grep -E 'origin/[0-9]+\.[0-9]+\.x$'
 版本线查询建议：
 
 ```bash
-gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" \
+gh api "repos/$upstream_repo/milestones?state=open&per_page=100" \
   --jq '.[].title'
 ```
 
 只匹配 `X.Y.x` 格式的标题；按 major、minor 数值升序取最小版本线。
+
+Milestone 直设属于 `has_triage` 权限范围；如果调用方检测到 `has_triage=false`，则省略 `--milestone` 并继续。
 
 ## 阶段 2：`implement-task`
 
@@ -60,15 +63,17 @@ gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" \
 4. 找到目标具体版本后，执行：
 
 ```bash
-gh issue edit {issue-number} --milestone "{version}"
+if [ "$has_triage" = "true" ]; then
+  gh issue edit {issue-number} -R "$upstream_repo" --milestone "{version}"
+fi
 ```
 
-5. 如果目标 milestone 不存在或无法可靠判断 -> 保持原 milestone 不变
+5. 如果 `has_triage=false`、目标 milestone 不存在，或无法可靠判断 -> 保持原 milestone 不变
 
 具体版本查询建议：
 
 ```bash
-gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" \
+gh api "repos/$upstream_repo/milestones?state=open&per_page=100" \
   --jq '.[].title'
 ```
 
@@ -94,9 +99,11 @@ git merge-base --is-ancestor origin/main HEAD
 2. Issue 有 milestone -> 执行：
 
 ```bash
-gh pr edit {pr-number} --milestone "{milestone}"
+if [ "$has_triage" = "true" ]; then
+  gh pr edit {pr-number} --milestone "{milestone}"
+fi
 ```
 
-3. Issue 没有 milestone -> 跳过，不设置 PR milestone
+3. Issue 没有 milestone，或 `has_triage=false` -> 跳过，不设置 PR milestone
 
 不要再使用 `task.md`、分支名、tag 或 `General Backlog` 为 PR 单独推断 milestone。

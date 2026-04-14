@@ -70,6 +70,8 @@
 
 已有评论必须通过 Issues comments API 获取，而不是单独的 PR comments API。
 
+调用方在执行本章节前，必须先按 `.agents/rules/issue-pr-commands.md` / `.agents/rules/issue-sync.md` 完成 `upstream_repo` 检测。
+
 处理顺序：
 1. 获取 PR 上现有 comments，查找以 `<!-- sync-pr:{task-id}:summary -->` 开头的评论 ID
 2. 渲染评论正文时，始终写入当前 `git rev-parse HEAD` 的结果到 `<!-- last-commit: {git-head-sha} -->`
@@ -80,7 +82,7 @@
 更新已有评论时，使用如下模式：
 
 ```bash
-gh api "repos/{owner}/{repo}/issues/comments/{comment-id}" -X PATCH -f body="$(cat <<'EOF'
+gh api "repos/$upstream_repo/issues/comments/{comment-id}" -X PATCH -f body="$(cat <<'EOF'
 {comment-body}
 EOF
 )"

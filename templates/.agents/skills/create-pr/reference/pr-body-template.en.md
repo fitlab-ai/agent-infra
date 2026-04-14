@@ -27,6 +27,8 @@ git diff <target-branch>...HEAD
 
 Read `.agents/rules/issue-pr-commands.md` before this step.
 
+Before syncing linked Issue metadata, complete authentication and code-hosting platform detection through that rule. Keep `gh pr list` / `gh pr edit` on the current repository.
+
 Before syncing labels, verify the standard label system:
 
 ```bash
@@ -50,11 +52,13 @@ Type label mapping:
 
 Metadata sync order:
 1. query Issue labels and milestone via the Issue read command in `.agents/rules/issue-pr-commands.md`
-2. add the mapped type label via the PR update command in `.agents/rules/issue-pr-commands.md`
-3. inherit non-`type:` and non-`status:` Issue labels via repeated PR update commands from the same rule
-4. refine the PR `in:` labels by following `.agents/rules/issue-sync.md`, and keep the linked Issue `in:` labels in sync with the same result
-5. handle the milestone by following "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md`, reusing the Issue milestone directly
+2. handle the mapped type label via the PR update command and permission-degradation rules in `.agents/rules/issue-pr-commands.md`
+3. handle inheritance of non-`type:` and non-`status:` Issue labels via repeated PR update commands and the same permission-degradation rules
+4. refine the PR `in:` labels by following `.agents/rules/issue-sync.md`, including its permission-degradation rules, and keep the linked Issue `in:` labels in sync with the same result
+5. handle the milestone by following "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md`, including its permission rules, and reuse the Issue milestone directly
 6. ensure the PR body contains `Closes #{issue-number}` or an equivalent closing keyword
+
+If those rules say to skip the direct metadata writes above, keep only the PR body linkage plus later comment sync.
 
 Milestone rule:
 - Follow "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md`
@@ -63,7 +67,7 @@ Milestone rule:
 ## Create the PR
 
 - Extract `issue_number` from task.md when this work belongs to an active task
-- If `issue_number` exists, query the Issue via `.agents/rules/issue-pr-commands.md`
+- If `issue_number` exists, complete the prerequisite code-hosting platform detection steps first, then query the Issue via `.agents/rules/issue-pr-commands.md`
 - Before calling the PR creation command, check whether the current branch already has a PR. If it does, report the PR URL and state, then stop without repeating metadata sync or summary publication
 - Use HEREDOC to pass the PR body
 - Replace `{$IssueNumber}` in the template when present

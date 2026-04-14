@@ -7,6 +7,7 @@ Read this file before `create-issue`, `implement-task`, or `create-pr` handles a
 - Narrow the milestone over the skill lifecycle: release line -> concrete version -> reuse
 - Every phase must fall back safely instead of blocking the skill
 - If `gh` is unavailable, unauthenticated, or the GitHub API call fails, skip milestone handling and continue
+- Before any repository-scoped `gh api`, `gh issue edit`, or Issue lookup runs, the caller must resolve `upstream_repo` and `has_triage`
 - Only use milestones that actually exist in the repository; if a target milestone is unavailable, apply the fallback for that phase
 
 ## Branch Mode Detection
@@ -35,11 +36,13 @@ Priority:
 Suggested release-line query:
 
 ```bash
-gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" \
+gh api "repos/$upstream_repo/milestones?state=open&per_page=100" \
   --jq '.[].title'
 ```
 
 Only match titles in `X.Y.x` format and choose the smallest major/minor pair numerically.
+
+Direct milestone writes are triage-gated. When the caller detected `has_triage=false`, omit `--milestone` and continue.
 
 ## Phase 2: `implement-task`
 
@@ -60,15 +63,17 @@ Sequence:
 4. When a target concrete version is found, run:
 
 ```bash
-gh issue edit {issue-number} --milestone "{version}"
+if [ "$has_triage" = "true" ]; then
+  gh issue edit {issue-number} -R "$upstream_repo" --milestone "{version}"
+fi
 ```
 
-5. If the target milestone does not exist or the branch ancestry cannot be determined reliably, keep the original milestone unchanged
+5. If `has_triage=false`, the target milestone does not exist, or the branch ancestry cannot be determined reliably, keep the original milestone unchanged
 
 Suggested concrete-version query:
 
 ```bash
-gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" \
+gh api "repos/$upstream_repo/milestones?state=open&per_page=100" \
   --jq '.[].title'
 ```
 
@@ -94,9 +99,11 @@ Sequence:
 2. If the Issue has a milestone, run:
 
 ```bash
-gh pr edit {pr-number} --milestone "{milestone}"
+if [ "$has_triage" = "true" ]; then
+  gh pr edit {pr-number} --milestone "{milestone}"
+fi
 ```
 
-3. If the Issue has no milestone, skip PR milestone assignment
+3. If the Issue has no milestone, or `has_triage=false`, skip PR milestone assignment
 
 Do not infer a PR milestone separately from task.md, branch names, tags, or `General Backlog`.

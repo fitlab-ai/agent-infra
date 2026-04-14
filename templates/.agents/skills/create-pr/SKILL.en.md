@@ -38,7 +38,7 @@ Confirm whether the current branch already has an upstream. Push with `git push 
 
 Check whether the current branch already has a PR first; if one exists, show the PR URL and stop without repeating metadata sync or summary publication.
 
-Read `.agents/rules/issue-pr-commands.md` before this step, then create the PR with its "Create a PR" command template.
+Read `.agents/rules/issue-pr-commands.md` before this step, follow its prerequisite steps to complete authentication and code-hosting platform detection, then create the PR with its "Create a PR" command template.
 
 If `{task-id}` is available and the related task provides `issue_number`, keep `Closes #{issue-number}` in the PR body.
 
@@ -46,9 +46,9 @@ If `{task-id}` is available and the related task provides `issue_number`, keep `
 
 For PRs where `{task-id}` is available, sync the core metadata immediately:
 - query standard labels, Issue metadata, and PR metadata via `.agents/rules/issue-pr-commands.md`
-- add the mapped type label and relevant `in:` labels with the PR update command from `.agents/rules/issue-pr-commands.md`
+- apply the mapped type label and related `in:` labels by following the PR update commands and permission-degradation rules in `.agents/rules/issue-pr-commands.md`
 - sync the linked Issue `in:` labels to match by following the `in:` label sync rule in `.agents/rules/issue-sync.md`
-- reuse the Issue milestone by following "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md`
+- reuse the Issue milestone by following "Phase 3: `create-pr`" and its permission rules in `.agents/rules/milestone-inference.md`
 - keep Development linking in the PR body with `Closes #{issue-number}` when applicable
 
 ### 7. Publish the Review Summary

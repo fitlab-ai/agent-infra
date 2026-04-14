@@ -21,7 +21,7 @@ Create the base GitHub Issue from `task.md` and write `issue_number` back to the
 
 Check:
 - `.agents/workspace/active/{task-id}/task.md`
-- read `.agents/rules/issue-pr-commands.md` first, then use its authentication commands to verify platform access
+- read `.agents/rules/issue-pr-commands.md` first, then follow its prerequisite steps to complete authentication and code-hosting platform detection
 
 If `issue_number` already exists and is not empty or `N/A`, confirm with the user before creating a replacement Issue.
 
@@ -40,6 +40,8 @@ Detect `.github/ISSUE_TEMPLATE` files and decide whether to use a matched templa
 ### 4. Create the Issue
 
 Create and enrich the Issue by following the "Create Issue" and "Set the Issue Type" sections in `.agents/rules/issue-pr-commands.md`. Omit label arguments when nothing valid remains.
+
+Handle labels, milestone, Issue Type, and assignee behavior by following the permission-degradation rules in `.agents/rules/issue-pr-commands.md` and `.agents/rules/issue-sync.md`.
 
 ### 5. Update Task Status
 

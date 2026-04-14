@@ -17,7 +17,7 @@ Import the specified GitHub Issue and create a task. Argument: issue number.
 
 ### 1. Retrieve Issue Information
 
-Read `.agents/rules/issue-pr-commands.md` first, then use its "Read an Issue" command to load the Issue data.
+Read `.agents/rules/issue-pr-commands.md` first, follow its prerequisite steps to complete authentication and code-hosting platform detection, then load the Issue data with its "Read an Issue" command.
 
 Extract: issue number, title, description, and labels.
 Use the Issue title as-is for the task title (preserve the Issue's original language).

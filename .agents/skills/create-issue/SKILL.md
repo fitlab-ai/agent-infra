@@ -21,7 +21,7 @@ description: "从任务文件创建 GitHub Issue"
 
 检查：
 - `.agents/workspace/active/{task-id}/task.md`
-- 执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的认证命令验证当前平台访问能力
+- 执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的前置步骤完成认证和代码托管平台检测
 
 如果 `issue_number` 已存在且既不为空也不为 `N/A`，创建前必须先与用户确认。
 
@@ -40,6 +40,8 @@ description: "从任务文件创建 GitHub Issue"
 ### 4. 创建 Issue
 
 按 `.agents/rules/issue-pr-commands.md` 中的 “创建 Issue” 与 “Issue Type 设置” 规则创建并补充 Issue；如果没有有效 label，就省略 label 参数。
+
+Label、milestone、Issue Type 和 assignee 的具体处理方式，都按 `.agents/rules/issue-pr-commands.md` 与 `.agents/rules/issue-sync.md` 中的权限降级规则执行。
 
 ### 5. 更新任务状态
 

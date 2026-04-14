@@ -8,6 +8,21 @@ function readJson(envName) {
   return filePath ? JSON.parse(fs.readFileSync(filePath, "utf8")) : null;
 }
 
+function buildRepoPayload() {
+  const fullName = process.env.GH_FAKE_REPO_FULL_NAME || "fitlab-ai/agent-infra";
+  const parentFullName = process.env.GH_FAKE_UPSTREAM_REPO || fullName;
+  const permissions = process.env.GH_FAKE_PERMISSIONS
+    ? JSON.parse(process.env.GH_FAKE_PERMISSIONS)
+    : { triage: true, push: true };
+
+  return {
+    full_name: fullName,
+    fork: process.env.GH_FAKE_REPO_FORK === "true",
+    parent: { full_name: parentFullName },
+    permissions
+  };
+}
+
 if (process.env.GH_FAKE_FAIL) {
   console.error(process.env.GH_FAKE_FAIL);
   process.exit(1);
@@ -23,14 +38,37 @@ if (args[0] === "pr" && args[1] === "view") {
   process.exit(0);
 }
 
+// IMPORTANT: keep this route ahead of deeper repo-scoped routes because refine-task
+// verification now resolves repo metadata before falling through to issue endpoints.
+if (args[0] === "api" && args[1] && /^repos\/[^/]+\/[^/]+$/.test(args[1])) {
+  const repoPayload = buildRepoPayload();
+  const jqIndex = args.indexOf("--jq");
+
+  if (jqIndex !== -1) {
+    const query = args[jqIndex + 1] || "";
+    if (query === "if .fork then .parent.full_name else .full_name end") {
+      process.stdout.write(repoPayload.fork ? repoPayload.parent.full_name : repoPayload.full_name);
+      process.exit(0);
+    }
+
+    if (query === ".permissions") {
+      process.stdout.write(JSON.stringify(repoPayload.permissions));
+      process.exit(0);
+    }
+  }
+
+  process.stdout.write(JSON.stringify(repoPayload));
+  process.exit(0);
+}
+
 if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(args[1])) {
-  if (process.env.GH_FAKE_ISSUE_REST_FAIL) {
+  const jqIndex = args.indexOf("--jq");
+  if (process.env.GH_FAKE_ISSUE_REST_FAIL && jqIndex !== -1) {
     console.error(process.env.GH_FAKE_ISSUE_REST_FAIL);
     process.exit(1);
   }
 
   const restIssue = readJson("GH_FAKE_ISSUE_REST_PATH") ?? readJson("GH_FAKE_ISSUE_PATH");
-  const jqIndex = args.indexOf("--jq");
   if (jqIndex !== -1) {
     process.stdout.write(restIssue?.type?.name || "");
     process.exit(0);
