@@ -98,5 +98,45 @@ if (args[0] === "api" && args.some((arg) => /\/issues\/\d+\/comments\?per_page=1
   process.exit(0);
 }
 
+if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(args[1])) {
+  const commentsPath = process.env.GH_FAKE_COMMENTS_PATH;
+  const inputIndex = args.indexOf("--input");
+  const inputPath = inputIndex === -1 ? "" : args[inputIndex + 1];
+  const comments = commentsPath ? JSON.parse(fs.readFileSync(commentsPath, "utf8")) : [];
+  const payload = inputPath ? JSON.parse(fs.readFileSync(inputPath, "utf8")) : {};
+  const nextId = comments.reduce((max, comment) => Math.max(max, Number(comment.id || 0)), 0) + 1;
+  const comment = { id: nextId, body: payload.body || "" };
+
+  comments.push(comment);
+  if (commentsPath) {
+    fs.writeFileSync(commentsPath, JSON.stringify(comments));
+  }
+  process.stdout.write(JSON.stringify(comment));
+  process.exit(0);
+}
+
+if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/issues\/comments\/\d+$/.test(args[1])) {
+  const commentsPath = process.env.GH_FAKE_COMMENTS_PATH;
+  const inputIndex = args.indexOf("--input");
+  const inputPath = inputIndex === -1 ? "" : args[inputIndex + 1];
+  const match = args[1].match(/\/issues\/comments\/(\d+)$/);
+  const commentId = match ? Number(match[1]) : 0;
+  const comments = commentsPath ? JSON.parse(fs.readFileSync(commentsPath, "utf8")) : [];
+  const payload = inputPath ? JSON.parse(fs.readFileSync(inputPath, "utf8")) : {};
+  const comment = comments.find((item) => Number(item.id) === commentId);
+
+  if (!comment) {
+    console.error(`comment not found: ${commentId}`);
+    process.exit(1);
+  }
+
+  comment.body = payload.body || "";
+  if (commentsPath) {
+    fs.writeFileSync(commentsPath, JSON.stringify(comments));
+  }
+  process.stdout.write(JSON.stringify(comment));
+  process.exit(0);
+}
+
 console.error(`unexpected gh args: ${args.join(" ")}`);
 process.exit(1);

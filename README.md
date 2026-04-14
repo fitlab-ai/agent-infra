@@ -201,6 +201,14 @@ The sandbox image also preinstalls `gh`. When `gh auth token` succeeds on the ho
 
 `ai sandbox exec` also forwards a small terminal-detection whitelist (`TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `LC_TERMINAL`, `LC_TERMINAL_VERSION`) into the container. This keeps interactive TUIs aligned with the host terminal for behaviors such as Claude Code's Shift+Enter newline support, without passing through the full host environment.
 
+### Windows sandbox prerequisites
+
+On Windows, `ai sandbox` uses WSL2 as the container engine boundary. Before running `ai sandbox create`, install Windows 11 with WSL2, configure a default Linux distribution, install Docker Desktop, and enable Docker Desktop's WSL integration for that distribution.
+
+You can run the CLI from PowerShell or Git Bash, but the project path must be visible from WSL, such as `C:\Users\you\project` or another drive mounted under `/mnt/<drive>`. UNC paths are not supported for sandbox mounts. If the Windows entrypoint cannot reach Docker through WSL2, run the same command from inside the WSL distribution as a fallback.
+
+`ai sandbox vm` manages only the macOS Colima VM. On Windows, manage Docker Desktop and WSL2 with their native tools.
+
 <a id="architecture-overview"></a>
 
 ## Architecture Overview
