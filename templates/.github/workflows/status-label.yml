@@ -40,19 +40,23 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          gh issue view "$ISSUE_NUMBER" \
+          current_status_labels=$(gh issue view "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --json labels --jq '.labels[].name | select(startswith("status:"))' \
-            2>/dev/null \
-          | while IFS= read -r label; do
-              [ -z "$label" ] && continue
+            2>/dev/null || true)
+          printf '%s\n' "$current_status_labels" | while IFS= read -r label; do
+            [ -z "$label" ] && continue
+            if [ "$label" != "status: waiting-for-triage" ]; then
               gh issue edit "$ISSUE_NUMBER" \
                 --repo "$GITHUB_REPOSITORY" \
                 --remove-label "$label"
-            done || true
-          gh issue edit "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --add-label "status: waiting-for-triage"
+            fi
+          done || true
+          if ! printf '%s\n' "$current_status_labels" | grep -qxF "status: waiting-for-triage"; then
+            gh issue edit "$ISSUE_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --add-label "status: waiting-for-triage"
+          fi
 
       - name: Clean status labels on PR merge
         if: >-

@@ -48,3 +48,13 @@ test("metadata-sync workflow only replaces type labels when the mapped label is 
     );
   });
 });
+
+test("metadata-sync workflow skips noop type label updates", () => {
+  workflowTargets.forEach((relativePath) => {
+    const content = read(relativePath);
+
+    assert.match(content, /current_type_labels=\$\(gh issue view/, `${relativePath} should cache current type labels before diffing`);
+    assert.match(content, /if \[ "\$label" != "\$TYPE_LABEL" \]; then[\s\S]*--remove-label "\$label"/, `${relativePath} should only remove stale type labels`);
+    assert.match(content, /if ! printf '%s\\n' "\$current_type_labels" \| grep -qxF "\$TYPE_LABEL"; then[\s\S]*--add-label "\$TYPE_LABEL"/, `${relativePath} should only add the mapped type label when it is missing`);
+  });
+});
