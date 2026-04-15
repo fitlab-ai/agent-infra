@@ -11,7 +11,7 @@ description: "重构 Issue/PR 标题为 Conventional Commits 格式"
 
 ### 1. 识别目标并获取信息
 
-执行前先读取 `.agents/rules/issue-pr-commands.md`。
+执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的前置步骤完成认证和代码托管平台检测。
 
 尝试判断 ID 是 Issue 还是 PR：
 - 先按规则文件中的“读取 Issue”命令获取 Issue 信息
@@ -58,6 +58,8 @@ Issue/PR #{id} 分析结果：
 - 对于 Issue：按 `.agents/rules/issue-pr-commands.md` 中的 “Issue 更新” 命令设置标题
 - 对于 PR：按 `.agents/rules/issue-pr-commands.md` 中的 “PR 更新” 命令设置标题
 
+标题修改需要写权限，按 `.agents/rules/issue-pr-commands.md` 与 `.agents/rules/issue-sync.md` 中的权限降级规则执行；无权限时跳过修改操作并告知用户。
+
 ### 5. 告知用户
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
@@ -65,6 +67,8 @@ Issue/PR #{id} 分析结果：
 如果修改了 Issue 标题，提示无需额外同步命令；后续按任务当前阶段继续执行对应工作流技能。
 
 如果修改了 PR 标题，提示 `create-pr` 已内联发布 reviewer 摘要，无需额外同步命令；后续按任务当前阶段继续执行对应工作流技能。
+
+如果因权限不足跳过了标题修改，额外提示用户建议标题仍可手动应用到代码托管平台页面。
 
 ## 优势
 
