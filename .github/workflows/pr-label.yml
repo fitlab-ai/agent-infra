@@ -1,0 +1,75 @@
+name: PR Label & Assignee
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label-and-assign:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+
+      - name: Sync in-labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          changed_files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+            --paginate --jq '[.[].filename]')
+
+          should_labels=$(jq -rn \
+            --argjson files "$changed_files" \
+            --argjson mapping "$(jq '.labels.in // {}' .agents/.airc.json)" \
+            '$mapping
+            | to_entries
+            | map(select(.value | any(. as $prefix | $files | any(startswith($prefix)))))
+            | map("in: " + .key)
+            | .[]?')
+
+          current_labels=$(gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json labels --jq '.labels[].name | select(startswith("in: "))' \
+            2>/dev/null || true)
+
+          printf '%s\n' "$should_labels" | while IFS= read -r label; do
+            [ -z "$label" ] && continue
+            if ! printf '%s\n' "$current_labels" | grep -qxF "$label"; then
+              gh pr edit "$PR_NUMBER" \
+                --repo "$GITHUB_REPOSITORY" \
+                --add-label "$label" 2>/dev/null || true
+            fi
+          done
+
+          printf '%s\n' "$current_labels" | while IFS= read -r label; do
+            [ -z "$label" ] && continue
+            if ! printf '%s\n' "$should_labels" | grep -qxF "$label"; then
+              gh pr edit "$PR_NUMBER" \
+                --repo "$GITHUB_REPOSITORY" \
+                --remove-label "$label" 2>/dev/null || true
+            fi
+          done
+
+      - name: Assign PR creator if unassigned
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CREATOR: ${{ github.event.pull_request.user.login }}
+          ASSIGNEES_JSON: ${{ toJSON(github.event.pull_request.assignees) }}
+        run: |
+          count=$(printf '%s' "$ASSIGNEES_JSON" | jq 'length')
+          if [ "$count" -eq 0 ]; then
+            gh pr edit "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --add-assignee "$CREATOR" 2>/dev/null || true
+          fi
