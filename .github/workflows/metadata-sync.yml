@@ -72,22 +72,27 @@ jobs:
           esac
 
           if [ -n "$TYPE_LABEL" ]; then
-            gh issue view "$ISSUE_NUMBER" \
+            current_type_labels=$(gh issue view "$ISSUE_NUMBER" \
               --repo "$GITHUB_REPOSITORY" \
               --json labels --jq '.labels[].name | select(startswith("type:"))' \
-              2>/dev/null \
-            | while IFS= read -r label; do
-                [ -z "$label" ] && continue
+              2>/dev/null || true)
+
+            printf '%s\n' "$current_type_labels" | while IFS= read -r label; do
+              [ -z "$label" ] && continue
+              if [ "$label" != "$TYPE_LABEL" ]; then
                 gh issue edit "$ISSUE_NUMBER" \
                   --repo "$GITHUB_REPOSITORY" \
                   --remove-label "$label" \
                   2>/dev/null || true
-              done || true
+              fi
+            done || true
 
-            gh issue edit "$ISSUE_NUMBER" \
-              --repo "$GITHUB_REPOSITORY" \
-              --add-label "$TYPE_LABEL" \
-              2>/dev/null || true
+            if ! printf '%s\n' "$current_type_labels" | grep -qxF "$TYPE_LABEL"; then
+              gh issue edit "$ISSUE_NUMBER" \
+                --repo "$GITHUB_REPOSITORY" \
+                --add-label "$TYPE_LABEL" \
+                2>/dev/null || true
+            fi
           fi
 
       - name: Sync milestone
