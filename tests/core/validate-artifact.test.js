@@ -145,7 +145,7 @@ function runValidator(args, options = {}) {
 }
 
 function initGitRepo(repoRoot) {
-  const initResult = spawnSync("git", ["init", "-q"], {
+  const initResult = spawnSync("git", ["init", "-q", "-b", "main"], {
     cwd: repoRoot,
     encoding: "utf8"
   });
