@@ -27,7 +27,6 @@ test("status-label workflow skips noop triage relabeling on reopen", () => {
 
     assert.match(content, /Checkout shared scripts/, `${relativePath} should check out the shared scripts before status sync runs`);
     assert.match(content, /\.github\/scripts\/sync-labels-to-set\.sh[\s\S]*--target "status: waiting-for-triage"/, `${relativePath} should delegate reopen relabeling to the shared script`);
-    assert.doesNotMatch(content, /current_status_labels=\$\(gh issue view/, `${relativePath} should no longer inline the reopen diff logic`);
   });
 });
 

@@ -50,12 +50,3 @@ test("metadata-sync workflow only replaces type labels when the mapped label is 
     );
   });
 });
-
-test("metadata-sync workflow skips noop type label updates", () => {
-  workflowTargets.forEach((relativePath) => {
-    const content = read(relativePath);
-
-    assert.doesNotMatch(content, /current_type_labels=\$\(gh issue view/, `${relativePath} should no longer inline type label diff logic in the workflow`);
-    assert.match(content, /\.github\/scripts\/sync-labels-to-set\.sh/, `${relativePath} should rely on the shared script for noop-safe type updates`);
-  });
-});

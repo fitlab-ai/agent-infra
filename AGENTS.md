@@ -55,7 +55,7 @@ node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js
 
 ### 测试编写规约
 
-1. **禁止关键词语义断言**：不要通过匹配自然语言措辞来验证 skill 文档内容（如 `assert.match(content, /某段具体描述/)`）。SKILL.md 的文案会频繁调整，绑定措辞的测试极其脆弱。只做结构性检查：frontmatter 合法性、步骤编号连续、引用完整性、体积阈值等。参见 `998edee`。
+1. **禁止关键词语义断言**：不要通过匹配自然语言措辞来验证 skill 文档内容（如 `assert.match(content, /某段具体描述/)`）。SKILL.md 的文案会频繁调整，绑定措辞的测试极其脆弱。只做结构性检查：frontmatter 合法性、步骤编号连续、引用完整性、体积阈值等。
 2. **禁止反向删除断言**：已删除的功能不需要断言其不存在（如 `assert.doesNotMatch(content, /removedField/)`）。删除即彻底删除，不要用测试永久记住一个不再存在的概念，否则会形成无止境的测试债务。
 
 ## 提交与 PR 规范
