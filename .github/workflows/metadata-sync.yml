@@ -54,6 +54,13 @@ jobs:
           printf 'type=%s\n' "$type" >> "$GITHUB_OUTPUT"
           printf 'milestone=%s\n' "$milestone" >> "$GITHUB_OUTPUT"
 
+      - name: Checkout shared scripts
+        if: steps.metadata.outputs.is_task_comment == 'true' && steps.metadata.outputs.type != ''
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
       - name: Sync type label
         if: steps.metadata.outputs.is_task_comment == 'true' && steps.metadata.outputs.type != ''
         env:
@@ -72,27 +79,11 @@ jobs:
           esac
 
           if [ -n "$TYPE_LABEL" ]; then
-            current_type_labels=$(gh issue view "$ISSUE_NUMBER" \
+            .github/scripts/sync-labels-to-set.sh \
               --repo "$GITHUB_REPOSITORY" \
-              --json labels --jq '.labels[].name | select(startswith("type:"))' \
-              2>/dev/null || true)
-
-            printf '%s\n' "$current_type_labels" | while IFS= read -r label; do
-              [ -z "$label" ] && continue
-              if [ "$label" != "$TYPE_LABEL" ]; then
-                gh issue edit "$ISSUE_NUMBER" \
-                  --repo "$GITHUB_REPOSITORY" \
-                  --remove-label "$label" \
-                  2>/dev/null || true
-              fi
-            done || true
-
-            if ! printf '%s\n' "$current_type_labels" | grep -qxF "$TYPE_LABEL"; then
-              gh issue edit "$ISSUE_NUMBER" \
-                --repo "$GITHUB_REPOSITORY" \
-                --add-label "$TYPE_LABEL" \
-                2>/dev/null || true
-            fi
+              --issue "$ISSUE_NUMBER" \
+              --prefix "type:" \
+              --target "$TYPE_LABEL"
           fi
 
       - name: Sync milestone

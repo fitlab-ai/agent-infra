@@ -56,6 +56,7 @@ const DEFAULTS = {
       ".claude/hooks/",
       ".gemini/commands/",
       ".github/hooks/check-version-format.sh",
+      ".github/scripts/",
       ".opencode/commands/"
     ],
     "merged": [

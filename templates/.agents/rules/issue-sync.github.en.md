@@ -70,20 +70,22 @@ Decision rules:
 
 ## Direct `status:` Label Updates
 
-If task.md contains a valid `issue_number` (not empty and not `N/A`) and the Issue state is `OPEN`, replace every existing `status:` label and add the target one:
+Algorithm note: keep the flow below aligned with `.github/scripts/sync-labels-to-set.sh` (set-diff sync). This is the AI agent-side equivalent implementation for the `target_set = {"{target-status-label}"}` case. If either side changes, update the other one in the same patch to avoid drift between the agent and the bot.
+
+If task.md contains a valid `issue_number` (not empty and not `N/A`) and the Issue state is `OPEN`, sync the `status:` labels to the target value with an idempotent set diff:
 
 ```bash
 state=$(gh issue view {issue-number} -R "$upstream_repo" --json state --jq '.state' 2>/dev/null)
 if [ "$state" = "OPEN" ]; then
-  gh issue view {issue-number} -R "$upstream_repo" --json labels \
-    --jq '.labels[].name | select(startswith("status:"))' 2>/dev/null \
-  | while IFS= read -r label; do
-      [ -z "$label" ] && continue
-      if [ "$has_triage" = "true" ]; then
-        gh issue edit {issue-number} -R "$upstream_repo" --remove-label "$label" 2>/dev/null || true
-      fi
-    done
-  if [ "$has_triage" = "true" ]; then
+  current_status_labels=$(gh issue view {issue-number} -R "$upstream_repo" \
+    --json labels --jq '.labels[].name | select(startswith("status:"))' 2>/dev/null || true)
+  printf '%s\n' "$current_status_labels" | while IFS= read -r label; do
+    [ -z "$label" ] && continue
+    if [ "$label" != "{target-status-label}" ] && [ "$has_triage" = "true" ]; then
+      gh issue edit {issue-number} -R "$upstream_repo" --remove-label "$label" 2>/dev/null || true
+    fi
+  done
+  if [ "$has_triage" = "true" ] && ! printf '%s\n' "$current_status_labels" | grep -qxF "{target-status-label}"; then
     gh issue edit {issue-number} -R "$upstream_repo" --add-label "{target-status-label}" 2>/dev/null || true
   fi
 fi
