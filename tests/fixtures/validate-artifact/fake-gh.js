@@ -94,7 +94,7 @@ if (args[0] === "api" && args.some((arg) => /\/issues\/\d+\/comments\?per_page=1
     comments = readJson("GH_FAKE_COMMENTS_PATH");
   }
 
-  process.stdout.write(JSON.stringify([comments]));
+  process.stdout.write(JSON.stringify(comments ? [comments] : []));
   process.exit(0);
 }
 

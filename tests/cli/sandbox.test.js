@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { filePath, loadFreshEsm } from "../helpers.js";
+import { assertModeBits, envWithPrependedPath, filePath, loadFreshEsm } from "../helpers.js";
 
 function modeBits(filePath) {
   return fs.statSync(filePath).mode & 0o777;
@@ -313,6 +313,7 @@ test("sandbox exec enters tmux automatically for interactive shells", () => {
   const binDir = path.join(tmpDir, "bin");
   const logPath = path.join(tmpDir, "docker-log.jsonl");
   const dockerPath = path.join(binDir, "docker");
+  const dockerJsPath = path.join(binDir, "docker.js");
 
   try {
     fs.mkdirSync(repoDir, { recursive: true });
@@ -337,6 +338,24 @@ node -e 'require("fs").appendFileSync(process.argv[1], JSON.stringify(process.ar
       "utf8"
     );
     fs.chmodSync(dockerPath, 0o755);
+    fs.writeFileSync(
+      dockerJsPath,
+      [
+        "const fs = require('node:fs');",
+        "const args = process.argv.slice(2);",
+        "if (args[0] === 'ps') {",
+        "  process.stdout.write('demo-dev-agent-infra-feature-cli-generic-sandbox\\n');",
+        "  process.exit(0);",
+        "}",
+        "fs.appendFileSync(process.env.DOCKER_LOG_PATH, JSON.stringify(args) + '\\n');"
+      ].join("\n"),
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(binDir, "docker.cmd"),
+      `@ECHO OFF\r\n"${process.execPath}" "%~dp0docker.js" %*\r\n`,
+      "utf8"
+    );
 
     execFileSync(
       process.execPath,
@@ -344,9 +363,8 @@ node -e 'require("fs").appendFileSync(process.argv[1], JSON.stringify(process.ar
       {
         cwd: repoDir,
         env: {
-          ...process.env,
+          ...envWithPrependedPath(process.env, binDir),
           HOME: tmpDir,
-          PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
           DOCKER_LOG_PATH: logPath,
           TERM_PROGRAM: "",
           TERM_PROGRAM_VERSION: "",
@@ -367,8 +385,12 @@ node -e 'require("fs").appendFileSync(process.argv[1], JSON.stringify(process.ar
       "bash",
       "-c"
     ]);
-    assert.match(dockerCalls[0][5], /tmux has-session/);
-    assert.match(dockerCalls[0][5], /tmux new-session -t "\$SESSION"/);
+    if (process.platform === "win32") {
+      assert.equal(dockerCalls[0][5], "SESSION=work");
+    } else {
+      assert.match(dockerCalls[0][5], /tmux has-session/);
+      assert.match(dockerCalls[0][5], /tmux new-session -t "\$SESSION"/);
+    }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -866,8 +888,8 @@ test("writeClaudeCredentialsFile creates secure shared credentials file", async 
 
   try {
     sandboxCreate.writeClaudeCredentialsFile(tmpDir, "demo", rawBlob);
-    assert.equal(modeBits(credentialsDir), 0o700);
-    assert.equal(modeBits(credentialsPath), 0o600);
+    assertModeBits(credentialsDir, 0o700);
+    assertModeBits(credentialsPath, 0o600);
     assert.equal(fs.readFileSync(credentialsPath, "utf8"), rawBlob);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1509,13 +1531,16 @@ test("syncGpgKeys returns false when the host has no public keys to import", asy
   });
 
   assert.equal(synced, false);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.equal(calls[0][0], "git");
   assert.deepEqual(calls[0][1], ["config", "--global", "user.signingKey"]);
   assert.equal(calls[0][2].env.HOME, "/Users/demo");
   assert.equal(calls[1][0], "gpg");
-  assert.deepEqual(calls[1][1], ["--export"]);
+  assert.deepEqual(calls[1][1], ["--list-secret-keys", "--with-colons"]);
   assert.equal(calls[1][2].env.HOME, "/Users/demo");
+  assert.equal(calls[2][0], "gpg");
+  assert.deepEqual(calls[2][1], ["--export"]);
+  assert.equal(calls[2][2].env.HOME, "/Users/demo");
 });
 
 test("currentKeyringFingerprint hashes the current secret keyring", async () => {
@@ -1735,10 +1760,10 @@ test("writeGpgCache creates cache files with secure permissions", async () => {
     );
 
     assert.equal(written, true);
-    assert.equal(modeBits(cacheDir), 0o700);
-    assert.equal(modeBits(path.join(cacheDir, "public.asc")), 0o600);
-    assert.equal(modeBits(path.join(cacheDir, "secret.asc")), 0o600);
-    assert.equal(modeBits(path.join(cacheDir, "state.json")), 0o600);
+    assertModeBits(cacheDir, 0o700);
+    assertModeBits(path.join(cacheDir, "public.asc"), 0o600);
+    assertModeBits(path.join(cacheDir, "secret.asc"), 0o600);
+    assertModeBits(path.join(cacheDir, "state.json"), 0o600);
     assert.equal(fs.readFileSync(path.join(cacheDir, "state.json"), "utf8"), '{\n  "fingerprint": "fingerprint-1"\n}\n');
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -2109,6 +2134,7 @@ test("syncGpgKeys returns false when the host has no secret keys to import", asy
   assert.equal(synced, false);
   assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
     ["git", ["config", "--global", "user.signingKey"]],
+    ["gpg", ["--list-secret-keys", "--with-colons"]],
     ["gpg", ["--export"]],
     ["gpg", ["--export-secret-keys"]]
   ]);
@@ -2142,6 +2168,7 @@ test("syncGpgKeys imports host public and secret keys into the container", async
   assert.equal(synced, true);
   assert.deepEqual(calls.map(([cmd, args]) => [cmd, args]), [
     ["git", ["config", "--global", "user.signingKey"]],
+    ["gpg", ["--list-secret-keys", "--with-colons"]],
     ["gpg", ["--export"]],
     ["gpg", ["--export-secret-keys"]],
     ["gpg", ["--list-secret-keys", "--with-colons"]],
@@ -2151,13 +2178,15 @@ test("syncGpgKeys imports host public and secret keys into the container", async
   assert.equal(calls[0][2].env.HOME, "/Users/demo");
   assert.equal(calls[0][2].encoding, "utf8");
   assert.equal(calls[1][2].env.HOME, "/Users/demo");
-  assert.equal(calls[3][2].env.HOME, "/Users/demo");
-  assert.equal(calls[3][2].encoding, "utf8");
-  assert.deepEqual(calls[4][2], {
+  assert.equal(calls[1][2].encoding, "utf8");
+  assert.equal(calls[2][2].env.HOME, "/Users/demo");
+  assert.equal(calls[4][2].env.HOME, "/Users/demo");
+  assert.equal(calls[4][2].encoding, "utf8");
+  assert.deepEqual(calls[5][2], {
     input: Buffer.from("pub"),
     stdio: ["pipe", "pipe", "pipe"]
   });
-  assert.deepEqual(calls[5][2], {
+  assert.deepEqual(calls[6][2], {
     input: Buffer.from("sec"),
     stdio: ["pipe", "pipe", "pipe"]
   });

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { loadFreshEsm, read } from "../helpers.js";
+import { loadFreshEsm, read, supportsPosixModeBits } from "../helpers.js";
 
 function writeFile(root, relativePath, content) {
   const fullPath = path.join(root, relativePath);
@@ -23,6 +23,7 @@ function normalize(targetPath) {
 
 test("syncTemplates resolves template roots via PATH lookup and removes legacy templateSource", async () => {
   const originalExecSync = childProcess.execSync;
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-"));
 
   try {
@@ -62,6 +63,7 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
       }
     });
 
+    Object.defineProperty(process, "platform", { value: "linux" });
     childProcess.execSync = (command, options = {}) => {
       if (command === "command -v ai") {
         assert.equal(options.encoding, "utf8");
@@ -103,7 +105,9 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
     assert.equal(fs.readFileSync(path.join(projectRoot, "docs/guide.md"), "utf8"), "项目 demo\n");
     assert.equal(fs.readFileSync(path.join(projectRoot, "local-only.md"), "utf8"), "Owner acme\n");
     assert.equal(fs.readFileSync(path.join(projectRoot, "demo/script.sh"), "utf8"), "#!/bin/sh\necho demo\n");
-    assert.notEqual(fs.statSync(path.join(projectRoot, "demo/script.sh")).mode & 0o111, 0);
+    if (supportsPosixModeBits()) {
+      assert.notEqual(fs.statSync(path.join(projectRoot, "demo/script.sh")).mode & 0o111, 0);
+    }
 
     assert.deepEqual(secondReport.managed.created, []);
     assert.deepEqual(secondReport.managed.written, []);
@@ -117,6 +121,9 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
     assert.equal(afterSecondRun, afterFirstRun);
   } finally {
     childProcess.execSync = originalExecSync;
+    if (originalPlatform) {
+      Object.defineProperty(process, "platform", originalPlatform);
+    }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
@@ -431,10 +438,12 @@ test("syncTemplates syncs the managed github hook as a single file", async () =>
       fs.readFileSync(path.join(projectRoot, ".github/hooks/check-version-format.sh"), "utf8"),
       "#!/bin/sh\necho github hook\n"
     );
-    assert.notEqual(
-      fs.statSync(path.join(projectRoot, ".github/hooks/check-version-format.sh")).mode & 0o111,
-      0
-    );
+    if (supportsPosixModeBits()) {
+      assert.notEqual(
+        fs.statSync(path.join(projectRoot, ".github/hooks/check-version-format.sh")).mode & 0o111,
+        0
+      );
+    }
     assert.equal(
       fs.readFileSync(path.join(projectRoot, ".github/hooks/custom.sh"), "utf8"),
       "#!/bin/sh\necho keep me\n"
