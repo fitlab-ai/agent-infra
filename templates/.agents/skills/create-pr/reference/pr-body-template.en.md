@@ -27,7 +27,7 @@ git diff <target-branch>...HEAD
 
 Read `.agents/rules/issue-pr-commands.md` before this step.
 
-Before syncing linked Issue metadata, complete authentication and code-hosting platform detection through that rule. Keep `gh pr list` / `gh pr edit` on the current repository.
+Before syncing linked Issue metadata, complete authentication and code-hosting platform detection through that rule. Keep `gh pr list` / `gh pr create` on the current repository.
 
 Before syncing labels, verify the standard label system:
 
@@ -52,13 +52,12 @@ Type label mapping:
 
 Metadata sync order:
 1. query Issue labels and milestone via the Issue read command in `.agents/rules/issue-pr-commands.md`
-2. handle the mapped type label via the PR update command and permission-degradation rules in `.agents/rules/issue-pr-commands.md`
-3. handle inheritance of non-`type:` and non-`status:` Issue labels via repeated PR update commands and the same permission-degradation rules
-4. copy the current Issue `in:` labels to the PR (commit already computed them, so do not recompute them here and do not write back to the Issue)
-5. handle the milestone by following "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md`, including its permission rules, and reuse the Issue milestone directly
-6. ensure the PR body contains `Closes #{issue-number}` or an equivalent closing keyword
+2. build `{label-args}` from the mapped type label, non-`type:` / non-`status:` Issue labels, and the current Issue `in:` labels (commit already computed them, so do not recompute them here and do not write back to the Issue)
+3. build `{milestone-arg}` by following "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md` and reusing the Issue milestone directly
+4. pass `{label-args}` and `{milestone-arg}` atomically to `gh pr create` by using the create-PR command template and permission-degradation rules in `.agents/rules/issue-pr-commands.md`
+5. ensure the PR body contains `Closes #{issue-number}` or an equivalent closing keyword
 
-If those rules say to skip the direct metadata writes above, keep only the PR body linkage plus later comment sync.
+If those rules say to skip the direct metadata arguments above, keep only the PR body linkage plus later comment sync.
 
 Milestone rule:
 - Follow "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md`

@@ -895,6 +895,7 @@ test("validate-artifact platform-sync fails when create-pr milestone is missing"
       body: "# Issue\n"
     }));
     writeJson(prPath, buildPrPayload({
+      labels: [{ name: "type: enhancement" }],
       milestone: null
     }));
     writeJson(prCommentsPath, [
@@ -948,7 +949,7 @@ test("validate-artifact platform-sync fails when PR and Issue in: labels diverge
       body: "# Issue\n"
     }));
     writeJson(prPath, buildPrPayload({
-      labels: [{ name: "in: cli" }, { name: "in: core" }]
+      labels: [{ name: "type: enhancement" }, { name: "in: cli" }, { name: "in: core" }]
     }));
     writeJson(prCommentsPath, [
       { body: "<!-- sync-pr:TASK-20260328-000001:summary -->\n## Review Summary\n\nLooks good." }
@@ -984,6 +985,176 @@ test("validate-artifact platform-sync fails when PR and Issue in: labels diverge
   }
 });
 
+test("validate-artifact platform-sync fails when create-pr is missing the expected type label", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-pr-type-label-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const binDir = path.join(tempRoot, "bin");
+  const ghPath = path.join(binDir, "gh");
+  const issuePath = path.join(tempRoot, "issue.json");
+  const prPath = path.join(tempRoot, "pr.json");
+  const prCommentsPath = path.join(tempRoot, "pr-comments.json");
+
+  try {
+    initGitRepo(tempRoot);
+    writeFakeGh(ghPath);
+
+    write(path.join(taskDir, "task.md"), buildTaskContent({
+      type: "feature",
+      issue_number: "65",
+      pr_number: "77"
+    }));
+    writeJson(issuePath, buildIssuePayload({
+      labels: [{ name: "in: core" }],
+      body: "# Issue\n"
+    }));
+    writeJson(prPath, buildPrPayload({
+      labels: [{ name: "in: core" }]
+    }));
+    writeJson(prCommentsPath, [
+      { body: "<!-- sync-pr:TASK-20260328-000001:summary -->\n## Review Summary\n\nLooks good." }
+    ]);
+
+    const result = runValidator([
+      "check",
+      "platform-sync",
+      taskDir,
+      "--skill",
+      "create-pr"
+    ], {
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        GH_FAKE_ISSUE_PATH: issuePath,
+        GH_FAKE_PR_PATH: prPath,
+        GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
+        GH_FAKE_ISSUE_NUMBER: "65",
+        GH_FAKE_PR_NUMBER: "77"
+      }
+    });
+
+    assert.equal(result.status, 1);
+
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.type, "platform-sync");
+    assert.equal(payload.status, "fail");
+    assert.match(payload.message, /Expected type label 'type: feature' not found on PR #77/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact platform-sync passes when create-pr includes the expected type label", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-pr-type-label-pass-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const binDir = path.join(tempRoot, "bin");
+  const ghPath = path.join(binDir, "gh");
+  const issuePath = path.join(tempRoot, "issue.json");
+  const prPath = path.join(tempRoot, "pr.json");
+  const prCommentsPath = path.join(tempRoot, "pr-comments.json");
+
+  try {
+    initGitRepo(tempRoot);
+    writeFakeGh(ghPath);
+
+    write(path.join(taskDir, "task.md"), buildTaskContent({
+      type: "feature",
+      issue_number: "65",
+      pr_number: "77"
+    }));
+    writeJson(issuePath, buildIssuePayload({
+      labels: [{ name: "in: core" }],
+      body: "# Issue\n"
+    }));
+    writeJson(prPath, buildPrPayload({
+      labels: [{ name: "type: feature" }, { name: "in: core" }]
+    }));
+    writeJson(prCommentsPath, [
+      { body: "<!-- sync-pr:TASK-20260328-000001:summary -->\n## Review Summary\n\nLooks good." }
+    ]);
+
+    const result = runValidator([
+      "check",
+      "platform-sync",
+      taskDir,
+      "--skill",
+      "create-pr"
+    ], {
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        GH_FAKE_ISSUE_PATH: issuePath,
+        GH_FAKE_PR_PATH: prPath,
+        GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
+        GH_FAKE_ISSUE_NUMBER: "65",
+        GH_FAKE_PR_NUMBER: "77"
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.type, "platform-sync");
+    assert.equal(payload.status, "pass");
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact platform-sync skips create-pr type label verification without triage permission", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-pr-type-label-skip-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const binDir = path.join(tempRoot, "bin");
+  const ghPath = path.join(binDir, "gh");
+  const issuePath = path.join(tempRoot, "issue.json");
+  const prPath = path.join(tempRoot, "pr.json");
+  const prCommentsPath = path.join(tempRoot, "pr-comments.json");
+
+  try {
+    initGitRepo(tempRoot);
+    writeFakeGh(ghPath);
+
+    write(path.join(taskDir, "task.md"), buildTaskContent({
+      type: "feature",
+      issue_number: "65",
+      pr_number: "77"
+    }));
+    writeJson(issuePath, buildIssuePayload({
+      labels: [{ name: "in: core" }],
+      body: "# Issue\n"
+    }));
+    writeJson(prPath, buildPrPayload({
+      labels: [{ name: "in: core" }]
+    }));
+    writeJson(prCommentsPath, [
+      { body: "<!-- sync-pr:TASK-20260328-000001:summary -->\n## Review Summary\n\nLooks good." }
+    ]);
+
+    const result = runValidator([
+      "check",
+      "platform-sync",
+      taskDir,
+      "--skill",
+      "create-pr"
+    ], {
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        GH_FAKE_ISSUE_PATH: issuePath,
+        GH_FAKE_PR_PATH: prPath,
+        GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
+        GH_FAKE_ISSUE_NUMBER: "65",
+        GH_FAKE_PR_NUMBER: "77",
+        GH_FAKE_PERMISSIONS: JSON.stringify({ triage: false, push: false })
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.type, "platform-sync");
+    assert.equal(payload.status, "pass");
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("validate-artifact platform-sync fails when create-pr has no assignee", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-pr-assignee-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
@@ -1003,6 +1174,7 @@ test("validate-artifact platform-sync fails when create-pr has no assignee", () 
       body: "# Issue\n"
     }));
     writeJson(prPath, buildPrPayload({
+      labels: [{ name: "type: enhancement" }],
       assignees: []
     }));
     writeJson(prCommentsPath, [
@@ -1056,6 +1228,7 @@ test("validate-artifact platform-sync skips create-pr assignee verification with
       body: "# Issue\n"
     }));
     writeJson(prPath, buildPrPayload({
+      labels: [{ name: "type: enhancement" }],
       assignees: []
     }));
     writeJson(prCommentsPath, [
@@ -1108,7 +1281,9 @@ test("validate-artifact platform-sync passes when create-pr summary comment exis
       labels: [],
       body: "# Issue\n"
     }));
-    writeJson(prPath, buildPrPayload());
+    writeJson(prPath, buildPrPayload({
+      labels: [{ name: "type: enhancement" }]
+    }));
     writeJson(prCommentsPath, [
       { body: "<!-- sync-pr:TASK-20260328-000001:summary -->\n## Review Summary\n\nLooks good." }
     ]);

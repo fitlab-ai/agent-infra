@@ -99,11 +99,20 @@ gh pr list --state {state} --base {base-branch} --json number,title,url,headRefN
 创建 PR：
 
 ```bash
-gh pr create --base "{target-branch}" --title "{title}" --assignee @me --body "$(cat <<'EOF'
+gh pr create --base "{target-branch}" --title "{title}" --assignee @me \
+  {label-args} {milestone-arg} \
+  --body "$(cat <<'EOF'
 {pr-body}
 EOF
 )"
 ```
+
+- `{label-args}` 由调用方按有效 label 列表展开为多个 `--label "{label}"`
+- 仅当 `has_triage=true` 时传入 `{label-args}`；否则整体省略并继续
+- 没有有效 label 时省略全部 `--label`
+- `{milestone-arg}` 展开为 `--milestone "{milestone}"`
+- 仅当 `has_triage=true` 时传入 `{milestone-arg}`；否则整体省略并继续
+- `{milestone-arg}` 为空时整体省略
 
 ## PR 更新
 

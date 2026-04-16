@@ -27,7 +27,7 @@ git diff <target-branch>...HEAD
 
 执行前先读取 `.agents/rules/issue-pr-commands.md`。
 
-同步关联 Issue 元数据前，先按该规则完成认证和代码托管平台检测；`gh pr list` / `gh pr edit` 仍保持作用于当前仓库。
+同步关联 Issue 元数据前，先按该规则完成认证和代码托管平台检测；`gh pr list` / `gh pr create` 仍保持作用于当前仓库。
 
 在同步 label 之前，先确认标准 label 体系已经存在：
 
@@ -52,13 +52,12 @@ Type label 映射：
 
 元数据同步顺序：
 1. 按 `.agents/rules/issue-pr-commands.md` 的 Issue 读取命令查询关联 Issue 的 labels 和 milestone
-2. 按 `.agents/rules/issue-pr-commands.md` 的 PR 更新命令和权限降级规则处理映射后的 type label
-3. 按同一规则的 PR 更新命令和权限降级规则处理非 `type:`、非 `status:` 的 Issue labels 继承
-4. 将 Issue 当前的 `in:` labels 复制到 PR（commit 阶段已完成计算，此处不重新计算也不反向更新 Issue）
-5. 按 `.agents/rules/milestone-inference.md` 的「阶段 3：`create-pr`」及其权限规则处理 milestone，直接复用 Issue milestone
-6. 确保 PR 正文包含 `Closes #{issue-number}` 或等价的 closing keyword
+2. 构建 `{label-args}`：包含映射后的 type label、非 `type:`/`status:` 的 Issue labels，以及 Issue 当前的 `in:` labels（commit 阶段已完成计算，此处不重新计算也不反向更新 Issue）
+3. 构建 `{milestone-arg}`：按 `.agents/rules/milestone-inference.md` 的「阶段 3：`create-pr`」直接复用 Issue milestone
+4. 按 `.agents/rules/issue-pr-commands.md` 的创建 PR 命令模板与权限降级规则，将 `{label-args}` 和 `{milestone-arg}` 原子化传入 `gh pr create`
+5. 确保 PR 正文包含 `Closes #{issue-number}` 或等价的 closing keyword
 
-如果上述规则判定应跳过直接元数据写入，则只保留 PR 正文中的关联信息与后续评论同步。
+如果上述规则判定应跳过直接元数据参数写入，则只保留 PR 正文中的关联信息与后续评论同步。
 
 Milestone 规则：
 - 按 `.agents/rules/milestone-inference.md` 的「阶段 3：`create-pr`」处理

@@ -82,6 +82,7 @@ export function check({ taskDir, config, artifactFile }, shared) {
     checkCommentContent,
     checkTaskCommentContent,
     checkInLabelsComputed,
+    checkPrTypeLabel,
     checkInLabelsMatchPr,
     checkPrAssignee,
     checkSyncedRequirements,
@@ -251,10 +252,11 @@ function fetchRemoteData(context) {
   let prMilestone;
   let prAssignees;
   if (((context.config.verify_in_labels_match_pr && context.hasTriage)
+    || (context.config.verify_pr_type_label && context.hasTriage)
     || (context.config.verify_milestone && context.hasTriage)
     || (context.config.verify_pr_assignee && context.hasPush)) && context.prNumber) {
     const prFields = [];
-    if (context.config.verify_in_labels_match_pr) {
+    if (context.config.verify_in_labels_match_pr || context.config.verify_pr_type_label) {
       prFields.push("labels");
     }
     if (context.config.verify_milestone) {
@@ -280,7 +282,7 @@ function fetchRemoteData(context) {
       };
     }
 
-    prLabels = context.config.verify_in_labels_match_pr
+    prLabels = (context.config.verify_in_labels_match_pr || context.config.verify_pr_type_label)
       ? extractLabelNames(prResult.value?.labels)
       : null;
     prMilestone = context.config.verify_milestone
@@ -300,6 +302,22 @@ function fetchRemoteData(context) {
     prMilestone,
     prAssignees
   };
+}
+
+function mapTaskTypeToLabel(taskType) {
+  const mapping = {
+    bug: "type: bug",
+    bugfix: "type: bug",
+    feature: "type: feature",
+    enhancement: "type: enhancement",
+    refactor: "type: enhancement",
+    refactoring: "type: enhancement",
+    documentation: "type: documentation",
+    "dependency-upgrade": "type: dependency-upgrade",
+    task: "type: task"
+  };
+
+  return mapping[taskType] || null;
 }
 
 function shouldFetchComments(config) {
@@ -477,6 +495,26 @@ function checkTaskCommentContent(context, remoteData) {
 
   return failResult(CHECK_TYPE,
     buildCommentContentMismatchMessage("task", context.issueNumber, expectedBody, commentBody),
+    "check_failed"
+  );
+}
+
+function checkPrTypeLabel(context, remoteData) {
+  if (!context.config.verify_pr_type_label || !context.hasTriage || !context.prNumber || !remoteData.prLabels) {
+    return null;
+  }
+
+  const expectedLabel = mapTaskTypeToLabel(context.task.metadata.type);
+  if (!expectedLabel) {
+    return null;
+  }
+
+  if (remoteData.prLabels.includes(expectedLabel)) {
+    return null;
+  }
+
+  return failResult(CHECK_TYPE,
+    `Expected type label '${expectedLabel}' not found on PR #${context.prNumber}`,
     "check_failed"
   );
 }

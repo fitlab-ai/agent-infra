@@ -99,11 +99,20 @@ gh pr list --state {state} --base {base-branch} --json number,title,url,headRefN
 Create a PR:
 
 ```bash
-gh pr create --base "{target-branch}" --title "{title}" --assignee @me --body "$(cat <<'EOF'
+gh pr create --base "{target-branch}" --title "{title}" --assignee @me \
+  {label-args} {milestone-arg} \
+  --body "$(cat <<'EOF'
 {pr-body}
 EOF
 )"
 ```
+
+- expand `{label-args}` into repeated `--label "{label}"` flags from the validated label list
+- pass `{label-args}` only when `has_triage=true`; otherwise omit it and continue
+- omit all `--label` flags when nothing valid remains
+- expand `{milestone-arg}` into `--milestone "{milestone}"`
+- pass `{milestone-arg}` only when `has_triage=true`; otherwise omit it and continue
+- omit `{milestone-arg}` entirely when no milestone should be set
 
 ## Update PRs
 
