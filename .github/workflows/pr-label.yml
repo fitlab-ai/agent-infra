@@ -37,28 +37,19 @@ jobs:
             | map("in: " + .key)
             | .[]?')
 
-          current_labels=$(gh pr view "$PR_NUMBER" \
+          set -- \
             --repo "$GITHUB_REPOSITORY" \
-            --json labels --jq '.labels[].name | select(startswith("in: "))' \
-            2>/dev/null || true)
+            --pr "$PR_NUMBER" \
+            --prefix "in: "
 
-          printf '%s\n' "$should_labels" | while IFS= read -r label; do
+          while IFS= read -r label; do
             [ -z "$label" ] && continue
-            if ! printf '%s\n' "$current_labels" | grep -qxF "$label"; then
-              gh pr edit "$PR_NUMBER" \
-                --repo "$GITHUB_REPOSITORY" \
-                --add-label "$label" 2>/dev/null || true
-            fi
-          done
+            set -- "$@" --target "$label"
+          done <<EOF
+          $should_labels
+          EOF
 
-          printf '%s\n' "$current_labels" | while IFS= read -r label; do
-            [ -z "$label" ] && continue
-            if ! printf '%s\n' "$should_labels" | grep -qxF "$label"; then
-              gh pr edit "$PR_NUMBER" \
-                --repo "$GITHUB_REPOSITORY" \
-                --remove-label "$label" 2>/dev/null || true
-            fi
-          done
+          .github/scripts/sync-labels-to-set.sh "$@"
 
       - name: Assign PR creator if unassigned
         env:

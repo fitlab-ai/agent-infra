@@ -28,8 +28,10 @@ test("metadata-sync workflow syncs type labels, milestones, and fallback issue t
   workflowTargets.forEach((relativePath) => {
     const content = read(relativePath);
 
-    assert.match(content, /select\(startswith\("type:"\)\)/, `${relativePath} should enumerate existing type labels before syncing`);
-    assert.match(content, /--remove-label "\$label"/, `${relativePath} should remove stale type labels`);
+    assert.match(content, /Checkout shared scripts/, `${relativePath} should check out the shared workflow scripts before syncing type labels`);
+    assert.match(content, /\.github\/scripts\/sync-labels-to-set\.sh/, `${relativePath} should delegate type label sync to the shared script`);
+    assert.match(content, /--prefix "type:"/, `${relativePath} should scope type label syncs to the type: prefix`);
+    assert.match(content, /--target "\$TYPE_LABEL"/, `${relativePath} should pass the mapped type label as the target set`);
     assert.match(content, /dependency-upgrade\) +TYPE_LABEL="type: dependency-upgrade"/, `${relativePath} should map dependency-upgrade to the matching label`);
     assert.match(content, /--milestone "\$MILESTONE"/, `${relativePath} should sync milestone values from frontmatter`);
     assert.match(content, /feature\|enhancement\) ISSUE_TYPE="Feature"/, `${relativePath} should map feature-like task types to the Feature issue type`);
@@ -43,18 +45,8 @@ test("metadata-sync workflow only replaces type labels when the mapped label is 
 
     assert.match(
       content,
-      /if \[ -n "\$TYPE_LABEL" \]; then[\s\S]*select\(startswith\("type:"\)\)[\s\S]*--remove-label "\$label"[\s\S]*--add-label "\$TYPE_LABEL"[\s\S]*fi/,
+      /if \[ -n "\$TYPE_LABEL" \]; then[\s\S]*\.github\/scripts\/sync-labels-to-set\.sh[\s\S]*--prefix "type:"[\s\S]*--target "\$TYPE_LABEL"[\s\S]*fi/,
       `${relativePath} should skip removing labels when the type value has no known mapping`
     );
-  });
-});
-
-test("metadata-sync workflow skips noop type label updates", () => {
-  workflowTargets.forEach((relativePath) => {
-    const content = read(relativePath);
-
-    assert.match(content, /current_type_labels=\$\(gh issue view/, `${relativePath} should cache current type labels before diffing`);
-    assert.match(content, /if \[ "\$label" != "\$TYPE_LABEL" \]; then[\s\S]*--remove-label "\$label"/, `${relativePath} should only remove stale type labels`);
-    assert.match(content, /if ! printf '%s\\n' "\$current_type_labels" \| grep -qxF "\$TYPE_LABEL"; then[\s\S]*--add-label "\$TYPE_LABEL"/, `${relativePath} should only add the mapped type label when it is missing`);
   });
 });

@@ -70,20 +70,22 @@ current_user=$(gh api user --jq '.login' 2>/dev/null || echo "")
 
 ## status label 设置
 
-如果 task.md 中存在有效的 `issue_number`（非空、非 `N/A`），且 Issue 状态为 `OPEN`，则替换所有 `status:` label 并设置目标值：
+算法说明：下面的流程与 `.github/scripts/sync-labels-to-set.sh` 保持一致（集合差集）。本章节是 AI Agent 侧的等价实现（`target_set = {"{target-status-label}"}` 的特例）。修改任一侧时，必须同步另一侧，避免 Agent 与 Bot 的行为漂移。
+
+如果 task.md 中存在有效的 `issue_number`（非空、非 `N/A`），且 Issue 状态为 `OPEN`，则按幂等差集方式将 `status:` label 同步到目标值：
 
 ```bash
 state=$(gh issue view {issue-number} -R "$upstream_repo" --json state --jq '.state' 2>/dev/null)
 if [ "$state" = "OPEN" ]; then
-  gh issue view {issue-number} -R "$upstream_repo" --json labels \
-    --jq '.labels[].name | select(startswith("status:"))' 2>/dev/null \
-  | while IFS= read -r label; do
-      [ -z "$label" ] && continue
-      if [ "$has_triage" = "true" ]; then
-        gh issue edit {issue-number} -R "$upstream_repo" --remove-label "$label" 2>/dev/null || true
-      fi
-    done
-  if [ "$has_triage" = "true" ]; then
+  current_status_labels=$(gh issue view {issue-number} -R "$upstream_repo" \
+    --json labels --jq '.labels[].name | select(startswith("status:"))' 2>/dev/null || true)
+  printf '%s\n' "$current_status_labels" | while IFS= read -r label; do
+    [ -z "$label" ] && continue
+    if [ "$label" != "{target-status-label}" ] && [ "$has_triage" = "true" ]; then
+      gh issue edit {issue-number} -R "$upstream_repo" --remove-label "$label" 2>/dev/null || true
+    fi
+  done
+  if [ "$has_triage" = "true" ] && ! printf '%s\n' "$current_status_labels" | grep -qxF "{target-status-label}"; then
     gh issue edit {issue-number} -R "$upstream_repo" --add-label "{target-status-label}" 2>/dev/null || true
   fi
 fi
