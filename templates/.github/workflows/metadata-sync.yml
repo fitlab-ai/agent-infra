@@ -56,7 +56,7 @@ jobs:
 
       - name: Checkout shared scripts
         if: steps.metadata.outputs.is_task_comment == 'true' && steps.metadata.outputs.type != ''
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
