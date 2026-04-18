@@ -15,6 +15,7 @@
 
 import childProcess from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -121,6 +122,292 @@ function removeEmptyDirs(dir) {
   }
   if (fs.readdirSync(dir).length === 0) {
     fs.rmdirSync(dir);
+  }
+}
+
+function parseSkillFrontmatter(filePath) {
+  const content = fs.readFileSync(filePath, 'utf8');
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) return {};
+
+  const result = {};
+  const lines = match[1].split(/\r?\n/);
+  const normalizeValue = (value) => value.replace(/^["']|["']$/g, '').trim();
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const pair = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!pair) continue;
+
+    const [, key, rawValue] = pair;
+    if (rawValue === '>') {
+      const block = [];
+      for (let offset = index + 1; offset < lines.length; offset += 1) {
+        const nextLine = lines[offset];
+        if (!/^\s+/.test(nextLine)) break;
+
+        block.push(nextLine.trim());
+        index = offset;
+      }
+      result[key] = block.join(' ').trim();
+      continue;
+    }
+
+    result[key] = normalizeValue(rawValue);
+  }
+
+  return result;
+}
+
+function listTemplateSkillNames(templateRoot) {
+  const templateSkillsDir = path.join(templateRoot, '.agents/skills');
+  if (!fs.existsSync(templateSkillsDir)) return new Set();
+
+  return new Set(
+    fs.readdirSync(templateSkillsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+  );
+}
+
+function detectCustomSkills(projectRoot, templateSkillNames) {
+  const skillsDir = path.join(projectRoot, '.agents/skills');
+  if (!fs.existsSync(skillsDir)) return [];
+
+  return fs.readdirSync(skillsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !templateSkillNames.has(entry.name))
+    .map((entry) => {
+      const skillMd = path.join(skillsDir, entry.name, 'SKILL.md');
+      if (!fs.existsSync(skillMd)) return null;
+
+      const meta = parseSkillFrontmatter(skillMd);
+      return {
+        dirName: entry.name,
+        name: meta.name || entry.name,
+        description: meta.description || '',
+        args: meta.args || null
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.dirName.localeCompare(right.dirName));
+}
+
+function isCustomProtected(targetPath, customSkills, project) {
+  const normalized = norm(targetPath);
+
+  return customSkills.some(({ dirName }) => (
+    normalized.startsWith(`.agents/skills/${dirName}/`) ||
+    normalized === `.claude/commands/${dirName}.md` ||
+    normalized === `.opencode/commands/${dirName}.md` ||
+    normalized === '.gemini/commands/' + project + '/' + dirName + '.toml'
+  ));
+}
+
+function expandHome(inputPath) {
+  if (inputPath === '~') return os.homedir();
+  if (inputPath.startsWith('~/')) {
+    return path.join(os.homedir(), inputPath.slice(2));
+  }
+
+  return path.resolve(inputPath);
+}
+
+function writeIfChanged(projectRoot, targetPath, content, reportBucket) {
+  const fullPath = path.join(projectRoot, targetPath);
+  const exists = fs.existsSync(fullPath);
+
+  if (exists && fs.readFileSync(fullPath, 'utf8') === content) {
+    reportBucket.unchanged.push(targetPath);
+    return;
+  }
+
+  const dir = path.dirname(fullPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(fullPath, content, 'utf8');
+
+  (exists ? reportBucket.updated : reportBucket.generated).push(targetPath);
+}
+
+function syncCustomSkillSources(projectRoot, sources, report, templateSkillNames) {
+  const skillsDir = path.join(projectRoot, '.agents/skills');
+  const syncedSkills = new Map();
+
+  for (const source of sources) {
+    if (source?.type !== 'local') continue;
+    if (typeof source.path !== 'string' || source.path.trim() === '') {
+      report.custom.sourceErrors.push({ source: String(source?.path || ''), reason: 'invalid path' });
+      continue;
+    }
+
+    const srcDir = expandHome(source.path);
+    if (!fs.existsSync(srcDir) || !fs.statSync(srcDir).isDirectory()) {
+      report.custom.sourceErrors.push({ source: source.path, reason: 'directory not found' });
+      continue;
+    }
+
+    for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (templateSkillNames.has(entry.name)) {
+        report.custom.sourceErrors.push({
+          source: source.path,
+          reason: `skill ${entry.name} conflicts with built-in skill`
+        });
+        continue;
+      }
+
+      const skillSrcDir = path.join(srcDir, entry.name);
+      const skillMd = path.join(skillSrcDir, 'SKILL.md');
+      if (!fs.existsSync(skillMd)) continue;
+
+      const skillDstDir = path.join(skillsDir, entry.name);
+      const trackedFiles = syncedSkills.get(entry.name) || new Set();
+      syncedSkills.set(entry.name, trackedFiles);
+
+      for (const srcFile of walkDir(skillSrcDir)) {
+        const relPath = norm(path.relative(skillSrcDir, srcFile));
+        const dstFile = path.join(skillDstDir, relPath);
+        const projectPath = norm(path.relative(projectRoot, dstFile));
+        const srcContent = fs.readFileSync(srcFile);
+        const existed = fs.existsSync(dstFile);
+
+        trackedFiles.add(relPath);
+
+        if (existed) {
+          const dstContent = fs.readFileSync(dstFile);
+          if (srcContent.equals(dstContent)) {
+            report.custom.unchanged.push(projectPath);
+            continue;
+          }
+        }
+
+        const dir = path.dirname(dstFile);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(dstFile, srcContent);
+
+        (existed ? report.custom.updated : report.custom.generated).push(projectPath);
+      }
+    }
+  }
+
+  return syncedSkills;
+}
+
+function cleanStaleSyncedFiles(projectRoot, syncedSkills, report) {
+  const skillsDir = path.join(projectRoot, '.agents/skills');
+
+  for (const [skillName, expectedFiles] of syncedSkills) {
+    const skillDir = path.join(skillsDir, skillName);
+    if (!fs.existsSync(skillDir)) continue;
+
+    const actualFiles = walkDir(skillDir).map((filePath) => norm(path.relative(skillDir, filePath)));
+    const removedBefore = report.custom.removed.length;
+
+    for (const actualFile of actualFiles) {
+      if (expectedFiles.has(actualFile)) continue;
+
+      const staleFile = path.join(skillDir, actualFile);
+      fs.unlinkSync(staleFile);
+      report.custom.removed.push(norm(path.relative(projectRoot, staleFile)));
+    }
+
+    if (report.custom.removed.length > removedBefore) {
+      removeEmptyDirs(skillDir);
+    }
+  }
+}
+
+function generateClaudeCommand(skill, lang) {
+  const isZhCN = lang === 'zh-CN';
+  const lines = ['---', `description: ${JSON.stringify(skill.description)}`];
+
+  if (skill.args) {
+    lines.push(`usage: ${JSON.stringify(`/${skill.dirName} ${skill.args}`)}`);
+  }
+
+  lines.push('---', '');
+  lines.push(
+    isZhCN
+      ? `读取并执行 \`.agents/skills/${skill.dirName}/SKILL.md\` 中的 ${skill.dirName} 技能。`
+      : `Read and execute the ${skill.dirName} skill from \`.agents/skills/${skill.dirName}/SKILL.md\`.`
+  );
+  lines.push('');
+  lines.push(isZhCN ? '严格按照技能中定义的所有步骤执行。' : 'Follow all steps defined in the skill exactly.');
+
+  return `${lines.join('\n')}\n`;
+}
+
+function generateGeminiCommand(skill, lang) {
+  const isZhCN = lang === 'zh-CN';
+  const promptLines = [];
+
+  if (skill.args) {
+    promptLines.push(isZhCN ? '参数：{{args}}' : 'Arguments: {{args}}');
+    promptLines.push('');
+  }
+
+  promptLines.push(
+    isZhCN
+      ? `读取并执行 \`.agents/skills/${skill.dirName}/SKILL.md\` 中的 ${skill.dirName} 技能。`
+      : `Read and execute the ${skill.dirName} skill from \`.agents/skills/${skill.dirName}/SKILL.md\`.`
+  );
+  promptLines.push('');
+  promptLines.push(isZhCN ? '严格按照技能中定义的所有步骤执行。' : 'Follow all steps defined in the skill exactly.');
+
+  return [
+    `description = ${JSON.stringify(skill.description)}`,
+    'prompt = """',
+    ...promptLines,
+    '"""'
+  ].join('\n') + '\n';
+}
+
+function generateOpenCodeCommand(skill, lang) {
+  const isZhCN = lang === 'zh-CN';
+  const lines = [
+    '---',
+    `description: ${JSON.stringify(skill.description)}`,
+    'agent: general',
+    'subtask: false',
+    '---',
+    ''
+  ];
+
+  if (skill.args) {
+    lines.push(isZhCN ? '参数：$ARGUMENTS' : 'Arguments: $ARGUMENTS');
+    lines.push('');
+  }
+
+  lines.push(
+    isZhCN
+      ? `读取并执行 \`.agents/skills/${skill.dirName}/SKILL.md\` 中的 ${skill.dirName} 技能。`
+      : `Read and execute the ${skill.dirName} skill from \`.agents/skills/${skill.dirName}/SKILL.md\`.`
+  );
+  lines.push('');
+  lines.push(isZhCN ? '严格按照技能中定义的所有步骤执行。' : 'Follow all steps defined in the skill exactly.');
+
+  return `${lines.join('\n')}\n`;
+}
+
+function generateCustomCommands(projectRoot, customSkills, project, lang, report) {
+  for (const skill of customSkills) {
+    writeIfChanged(
+      projectRoot,
+      `.claude/commands/${skill.dirName}.md`,
+      generateClaudeCommand(skill, lang),
+      report.custom.commands
+    );
+    writeIfChanged(
+      projectRoot,
+      '.gemini/commands/' + project + '/' + skill.dirName + '.toml',
+      generateGeminiCommand(skill, lang),
+      report.custom.commands
+    );
+    writeIfChanged(
+      projectRoot,
+      `.opencode/commands/${skill.dirName}.md`,
+      generateOpenCodeCommand(skill, lang),
+      report.custom.commands
+    );
   }
 }
 
@@ -412,6 +699,8 @@ function syncTemplates(projectRoot, templateRootOverride) {
   const { project, org, language: lang = 'en' } = cfg;
   const platformType = cfg.platform?.type || DEFAULTS.platform.type;
   const vars = { project, org };
+  const templateSkillNames = listTemplateSkillNames(templateRoot);
+  const protectedCustomSkills = detectCustomSkills(projectRoot, templateSkillNames);
 
   const managed = [...(cfg.files.managed || [])];
   const merged  = [...(cfg.files.merged  || [])];
@@ -422,6 +711,15 @@ function syncTemplates(projectRoot, templateRootOverride) {
     templateRoot: norm(templateRoot),
     registryAdded: [],
     managed: { written: [], created: [], unchanged: [], skippedMerged: [], removed: [] },
+    custom: {
+      detected: [],
+      generated: [],
+      updated: [],
+      unchanged: [],
+      removed: [],
+      sourceErrors: [],
+      commands: { generated: [], updated: [], unchanged: [] }
+    },
     ejected: { created: [], skipped: [] },
     merged:  { pending: [] },
     configUpdated: false,
@@ -497,6 +795,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
         for (const projFile of projFiles) {
           if (expectedTargets.has(projFile)) continue;
           if (projFile === configPathRel) continue;
+          if (isCustomProtected(projFile, protectedCustomSkills, project)) continue;
           if (matchesAny(projFile, merged) || matchesAny(projFile, ejected)) continue;
 
           fs.unlinkSync(path.join(projectRoot, projFile));
@@ -508,6 +807,16 @@ function syncTemplates(projectRoot, templateRootOverride) {
       }
     }
   }
+
+  const sources = Array.isArray(cfg.skills?.sources) ? cfg.skills.sources : [];
+  if (sources.length > 0) {
+    const syncedSkills = syncCustomSkillSources(projectRoot, sources, report, templateSkillNames);
+    cleanStaleSyncedFiles(projectRoot, syncedSkills, report);
+  }
+
+  const customSkills = detectCustomSkills(projectRoot, templateSkillNames);
+  report.custom.detected = customSkills.map((skill) => skill.dirName);
+  generateCustomCommands(projectRoot, customSkills, project, lang, report);
 
   for (const entry of ejected) {
     const dstFull = path.join(projectRoot, entry);
@@ -557,6 +866,11 @@ function syncTemplates(projectRoot, templateRootOverride) {
     report.managed.written.length +
     report.managed.created.length +
     report.managed.removed.length +
+    report.custom.generated.length +
+    report.custom.updated.length +
+    report.custom.removed.length +
+    report.custom.commands.generated.length +
+    report.custom.commands.updated.length +
     report.ejected.created.length +
     report.registryAdded.length
   ) > 0;

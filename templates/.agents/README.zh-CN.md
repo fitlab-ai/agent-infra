@@ -120,6 +120,58 @@
 4. 如果你维护的是模板源码分支或私有 fork，需要先补齐对应的 `.{platform}.` 模板变体，再把该平台标识加入模板同步逻辑。
 5. 在正式推广前，先用一个测试任务完整验证工作流和 gate 校验。
 
+## 自定义 Skills
+
+项目可以在内置任务工作流之外增加自己的 skill。
+
+### 项目内本地 skill
+
+在 `.agents/skills/<name>/` 下创建目录，并添加 `SKILL.md`：
+
+```text
+.agents/skills/
+  enforce-style/
+    SKILL.md
+    reference/
+      style-guide.md
+```
+
+推荐 frontmatter：
+
+```yaml
+---
+name: enforce-style
+description: "在代码审查前应用团队风格规范"
+args: "<task-id>"   # 可选
+---
+```
+
+新增或修改自定义 skill 后，再执行一次 `update-agent-infra`。同步过程会自动检测非内置 skill，并为 Claude Code、Gemini CLI、OpenCode 生成对应命令。
+
+### 共享 skill 源
+
+如需复用团队集中维护的 skill，可在 `.agents/.airc.json` 中配置：
+
+```json
+{
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/company-skills" }
+    ]
+  }
+}
+```
+
+每个 source 都应镜像 `.agents/skills/` 的目录结构，并在每个 skill 目录根部提供 `SKILL.md`。
+
+### 同步行为
+
+- `.agents/skills/` 中手动创建的项目自定义 skill 不会被 managed 文件清理删除
+- 多个 source 按声明顺序应用；后面的自定义 source 会覆盖前面的自定义 source 文件
+- 对于仍存在于配置 source 中的 skill，如果源里删掉文件，下次同步时会删除本地对应残留文件
+- 自定义 source 不能覆盖内置 skill；如果与内置 skill 同名，会跳过该 source skill
+- 如果项目必须接管某个内置 skill 或命令，请使用 `files.ejected`
+
 ## Skill 编写规范
 
 编写或维护 `.agents/skills/*/SKILL.md` 及其模板时，步骤编号遵循以下规则：

@@ -120,6 +120,58 @@ To adapt agent-infra to a private code-hosting platform:
 4. If you maintain a fork of the template source, add matching `.{platform}.` template variants before adding that platform identifier to the sync logic.
 5. Validate the customized workflow on a test task before rolling it out broadly.
 
+## Custom Skills
+
+Projects can add their own skills alongside the built-in task workflow.
+
+### Local project skills
+
+Create a directory under `.agents/skills/<name>/` and add a `SKILL.md` file:
+
+```text
+.agents/skills/
+  enforce-style/
+    SKILL.md
+    reference/
+      style-guide.md
+```
+
+Recommended frontmatter:
+
+```yaml
+---
+name: enforce-style
+description: "Apply the team style guide before code review"
+args: "<task-id>"   # optional
+---
+```
+
+After adding or updating a custom skill, run `update-agent-infra` again. The sync step detects non-built-in skills and generates matching commands for Claude Code, Gemini CLI, and OpenCode automatically.
+
+### Shared skill sources
+
+To reuse centralized team skills, configure `.agents/.airc.json`:
+
+```json
+{
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/company-skills" }
+    ]
+  }
+}
+```
+
+Each source should mirror the `.agents/skills/` layout and include `SKILL.md` at the root of every skill directory.
+
+### Sync behavior
+
+- Custom project skills in `.agents/skills/` are protected from managed-file cleanup
+- Source entries are applied in order; later custom sources overwrite earlier custom sources
+- Files deleted from an existing configured source are removed locally on the next sync for that sourced skill
+- Built-in skills are not overridable by custom sources; if a source skill name conflicts with a built-in skill, the source copy is skipped
+- Use `files.ejected` if the project must take ownership of a built-in skill or command
+
 ## Skill Authoring Conventions
 
 When writing or updating `.agents/skills/*/SKILL.md` files and their templates, keep step numbering consistent:
