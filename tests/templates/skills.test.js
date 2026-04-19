@@ -199,3 +199,60 @@ test("skills that write timestamps require date command guidance", () => {
     });
   });
 });
+
+test("workflow skill docs update task comments before publishing artifact comments", () => {
+  const orderedCommentSkills = [
+    ["analyze-task", "{analysis-artifact}"],
+    ["plan-task", "{plan-artifact}"],
+    ["implement-task", "{implementation-artifact}"],
+    ["review-task", "{review-artifact}"],
+    ["refine-task", "{refinement-artifact}"]
+  ];
+
+  orderedCommentSkills.forEach(([skill, artifact]) => {
+    skillDocPaths(skill).forEach((relativePath) => {
+      const content = read(relativePath);
+      const taskCommentIndex = content.indexOf("<!-- sync-issue:{task-id}:task -->");
+      const artifactCommentIndex = relativePath.includes(".en.")
+        ? content.indexOf(`Publish the \`${artifact}\` comment`)
+        : content.indexOf(`发布 \`${artifact}\` 评论`);
+
+      assert.notEqual(taskCommentIndex, -1, `${relativePath} should include the task comment sync marker`);
+      assert.notEqual(artifactCommentIndex, -1, `${relativePath} should include the artifact comment publish step`);
+      assert.ok(
+        taskCommentIndex < artifactCommentIndex,
+        `${relativePath} should sync the task comment before publishing the artifact comment`
+      );
+    });
+  });
+});
+
+test("import-issue requires task comment sync in local and template configs", () => {
+  [
+    ".agents/skills/import-issue/config/verify.json",
+    "templates/.agents/skills/import-issue/config/verify.json"
+  ].forEach((relativePath) => {
+    const config = JSON.parse(read(relativePath));
+
+    assert.equal(
+      config.checks["platform-sync"]?.verify_task_comment_content,
+      true,
+      `${relativePath} should require task comment verification`
+    );
+  });
+});
+
+test("import-issue checklists include the task comment sync step", () => {
+  skillDocPaths("import-issue").forEach((relativePath) => {
+    const content = read(relativePath);
+    const expectedChecklistItem = relativePath.includes(".en.")
+      ? "- [ ] Synced the task comment to the Issue"
+      : "- [ ] 同步了 task 评论到 Issue";
+
+    assert.match(
+      content,
+      new RegExp(escapeRegExp(expectedChecklistItem)),
+      `${relativePath} should include the task comment sync checklist item`
+    );
+  });
+});

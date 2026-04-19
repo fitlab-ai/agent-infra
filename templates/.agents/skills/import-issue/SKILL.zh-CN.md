@@ -74,7 +74,13 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 如果 task.md 中存在有效的 `issue_number`，按 `.agents/rules/issue-pr-commands.md` 的 Issue 更新命令为当前执行者添加 assignee；Assignee 同步的边界仍遵循 `.agents/rules/issue-sync.md`。
 
-### 6. 完成校验
+### 6. 同步到 Issue
+
+如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
+- 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
+- 创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论（按 issue-sync.md 的 task.md 评论同步规则）
+
+### 7. 完成校验
 
 运行完成校验，确认任务产物和同步状态符合规范：
 
@@ -89,7 +95,7 @@ node .agents/scripts/validate-artifact.js gate import-issue .agents/workspace/ac
 
 将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 
-### 7. 告知用户
+### 8. 告知用户
 
 > 仅在校验通过后执行本步骤。
 
@@ -119,6 +125,7 @@ Issue #{number} 已导入。
 - [ ] 更新了 `current_step` 为 requirement-analysis
 - [ ] 更新了 `updated_at` 为当前时间
 - [ ] 追加了 Activity Log 条目到 task.md
+- [ ] 同步了 task 评论到 Issue
 - [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
 - [ ] **没有修改任何业务代码**
 

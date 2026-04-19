@@ -95,8 +95,8 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续；执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测）：
 - 按 issue-sync.md 设置 `status: in-progress`
-- 发布 `{implementation-artifact}` 评论
 - 创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论（按 issue-sync.md 的 task.md 评论同步规则）
+- 发布 `{implementation-artifact}` 评论
 
 ### 10. 完成校验
 

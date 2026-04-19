@@ -74,7 +74,13 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 
 If task.md contains a valid `issue_number`, use the Issue update command from `.agents/rules/issue-pr-commands.md` to add the current executor as an assignee. The behavioral boundary still follows `.agents/rules/issue-sync.md`.
 
-### 6. Verification Gate
+### 6. Sync to the Issue
+
+If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
+- Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
+- Create or update the `<!-- sync-issue:{task-id}:task -->` comment (follow the task.md comment sync rule in issue-sync.md)
+
+### 7. Verification Gate
 
 Run the verification gate to confirm the task artifact and sync state are valid:
 
@@ -89,7 +95,7 @@ Handle the result as follows:
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 
-### 7. Inform User
+### 8. Inform User
 
 > Execute this step only after the verification gate passes.
 
@@ -119,6 +125,7 @@ Next step - run requirements analysis:
 - [ ] Updated `current_step` to requirement-analysis
 - [ ] Updated `updated_at` to the current time
 - [ ] Appended an Activity Log entry to task.md
+- [ ] Synced the task comment to the Issue
 - [ ] Informed the user of the next step (must include all TUI command formats; do not filter)
 - [ ] **Did not modify any business code**
 
