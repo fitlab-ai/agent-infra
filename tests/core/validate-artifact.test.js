@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { filePath, exists, read } from "../helpers.js";
+import { filePath, exists, pathWithPrependedBin, read, writeNodeCommandShim } from "../helpers.js";
 
 const scriptPath = filePath(".agents/scripts/validate-artifact.js");
 const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -134,13 +134,22 @@ function buildCompletedTaskContent(checklistLines, overrides = {}) {
 }
 
 function runValidator(args, options = {}) {
+  const env = {
+    ...process.env,
+    ...options.env
+  };
+  if (env.PATH) {
+    for (const key of Object.keys(env)) {
+      if (key.toLowerCase() === "path") {
+        env[key] = env.PATH;
+      }
+    }
+  }
+
   return spawnSync(process.execPath, [scriptPath, ...args], {
     encoding: "utf8",
     cwd: filePath("."),
-    env: {
-      ...process.env,
-      ...options.env
-    }
+    env
   });
 }
 
@@ -160,7 +169,11 @@ function initGitRepo(repoRoot) {
 
 function writeFakeGh(filePathname) {
   write(filePathname, loadFixture("fake-gh.js"));
-  fs.chmodSync(filePathname, 0o755);
+  if (process.platform === "win32") {
+    writeNodeCommandShim(filePathname, filePathname);
+  } else {
+    fs.chmodSync(filePathname, 0o755);
+  }
 }
 
 function buildArtifactMarker(taskId, artifactFile) {
@@ -531,7 +544,7 @@ test("validate-artifact platform-sync blocks after retry exhaustion on gh networ
 
     const result = runValidator(["gate", "implement-task", taskDir, "implementation.md"], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
       }
     });
@@ -607,7 +620,7 @@ test("validate-artifact gate passes when synced artifact and task comments match
 
     const result = runValidator(["gate", "implement-task", taskDir, "implementation.md"], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_COMMENTS_PATH: commentsPath
       }
@@ -658,7 +671,7 @@ test("validate-artifact platform-sync fails when artifact comment content differ
       "implement-task"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_COMMENTS_PATH: commentsPath
       }
@@ -708,7 +721,7 @@ test("validate-artifact platform-sync fails when the task comment does not use t
       "implement-task"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_COMMENTS_PATH: commentsPath
       }
@@ -760,7 +773,7 @@ test("validate-artifact platform-sync fails when the Issue Type does not match t
       "implement-task"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_COMMENTS_PATH: commentsPath
       }
@@ -809,7 +822,7 @@ test("validate-artifact platform-sync skips Issue Type verification when the RES
       "implement-task"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_COMMENTS_PATH: commentsPath,
         GH_FAKE_ISSUE_REST_FAIL: "Issue Types are unavailable",
@@ -859,7 +872,7 @@ test("validate-artifact platform-sync accepts English task frontmatter summary w
       "implement-task"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_COMMENTS_PATH: commentsPath,
         VALIDATE_ARTIFACT_LANGUAGE: "en"
@@ -910,7 +923,7 @@ test("validate-artifact platform-sync fails when create-pr milestone is missing"
       "create-pr"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_PATH: prPath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
@@ -963,7 +976,7 @@ test("validate-artifact platform-sync fails when PR and Issue in: labels diverge
       "create-pr"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_PATH: prPath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
@@ -1022,7 +1035,7 @@ test("validate-artifact platform-sync fails when create-pr is missing the expect
       "create-pr"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_PATH: prPath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
@@ -1079,7 +1092,7 @@ test("validate-artifact platform-sync passes when create-pr includes the expecte
       "create-pr"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_PATH: prPath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
@@ -1135,7 +1148,7 @@ test("validate-artifact platform-sync skips create-pr type label verification wi
       "create-pr"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_PATH: prPath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
@@ -1189,7 +1202,7 @@ test("validate-artifact platform-sync fails when create-pr has no assignee", () 
       "create-pr"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_PATH: prPath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
@@ -1243,7 +1256,7 @@ test("validate-artifact platform-sync skips create-pr assignee verification with
       "create-pr"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_PATH: prPath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
@@ -1296,7 +1309,7 @@ test("validate-artifact platform-sync passes when create-pr summary comment exis
       "create-pr"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_PATH: prPath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
@@ -1395,7 +1408,7 @@ test("validate-artifact platform-sync passes for commit when summary comment exi
       "commit"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
         GH_FAKE_ISSUE_NUMBER: "65",
@@ -1443,7 +1456,7 @@ test("validate-artifact platform-sync fails for commit when summary comment last
       "commit"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
         GH_FAKE_ISSUE_NUMBER: "65",
@@ -1492,7 +1505,7 @@ test("validate-artifact platform-sync fails for commit when summary comment last
       "commit"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
         GH_FAKE_ISSUE_NUMBER: "65",
@@ -1540,7 +1553,7 @@ test("validate-artifact platform-sync fails when create-pr summary comment is mi
       "create-pr"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_PATH: prPath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
@@ -1588,7 +1601,7 @@ test("validate-artifact platform-sync fails for commit when summary comment is m
       "commit"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
         GH_FAKE_ISSUE_NUMBER: "65",
@@ -1635,7 +1648,7 @@ test("validate-artifact platform-sync fails for create-issue when the task comme
       "create-issue"
     ], {
       env: {
-        PATH: `${binDir}:${process.env.PATH}`,
+        PATH: pathWithPrependedBin(binDir),
         GH_FAKE_ISSUE_PATH: issuePath,
         GH_FAKE_COMMENTS_PATH: commentsPath,
         GH_FAKE_ISSUE_NUMBER: "65"

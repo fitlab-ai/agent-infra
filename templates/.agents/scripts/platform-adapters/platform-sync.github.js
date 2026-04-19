@@ -935,22 +935,22 @@ function resolveUpstreamRepo(taskDir) {
     return ownerRepo;
   }
 
-  const upstreamResult = ghText([
+  const repoResult = ghJson([
     "api",
-    `repos/${ownerRepo.value}`,
-    "--jq",
-    "if .fork then .parent.full_name else .full_name end"
+    `repos/${ownerRepo.value}`
   ], taskDir);
 
-  if (!upstreamResult.ok) {
-    return upstreamResult;
+  if (!repoResult.ok) {
+    return repoResult;
   }
 
-  if (isBlank(upstreamResult.value)) {
+  const repo = repoResult.value && typeof repoResult.value === "object" ? repoResult.value : {};
+  const upstreamRepo = repo.fork ? repo.parent?.full_name : repo.full_name;
+  if (isBlank(upstreamRepo)) {
     return { ok: false, message: "Unable to resolve upstream repository" };
   }
 
-  return { ok: true, value: upstreamResult.value };
+  return { ok: true, value: upstreamRepo };
 }
 
 function resolveOwnerRepo(taskDir) {
@@ -1017,11 +1017,12 @@ function ghText(args, cwd) {
 }
 
 function ghCommand(args, cwd) {
-  const result = spawnSync("gh", args, {
+  const command = resolveCommand("gh");
+  const result = spawnSync(command, args, commandOptions(command, {
     cwd,
     encoding: "utf8",
     env: process.env
-  });
+  }));
 
   if (result.status !== 0) {
     const stderr = `${result.stderr || ""}${result.stdout || ""}`.trim();
@@ -1037,11 +1038,12 @@ function ghPaginatedJson(args, cwd) {
 }
 
 function gitText(args, cwd) {
-  const result = spawnSync("git", args, {
+  const command = resolveCommand("git");
+  const result = spawnSync(command, args, commandOptions(command, {
     cwd,
     encoding: "utf8",
     env: process.env
-  });
+  }));
 
   if (result.status !== 0) {
     const stderr = `${result.stderr || ""}${result.stdout || ""}`.trim();
@@ -1108,6 +1110,39 @@ function sleep(delayMs) {
   }
 
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+}
+
+function resolveCommand(cmd) {
+  if (process.platform !== "win32" || path.extname(cmd)) {
+    return cmd;
+  }
+
+  const pathValue = process.env.Path || process.env.PATH || "";
+  const extensions = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .filter(Boolean);
+
+  for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
+    for (const extension of extensions) {
+      const lowerCandidate = path.join(dir, `${cmd}${extension.toLowerCase()}`);
+      if (fs.existsSync(lowerCandidate)) {
+        return lowerCandidate;
+      }
+      const upperCandidate = path.join(dir, `${cmd}${extension.toUpperCase()}`);
+      if (fs.existsSync(upperCandidate)) {
+        return upperCandidate;
+      }
+    }
+  }
+
+  return cmd;
+}
+
+function commandOptions(cmd, options) {
+  if (process.platform === "win32" && /\.(?:bat|cmd)$/i.test(cmd)) {
+    return { ...options, shell: true };
+  }
+  return options;
 }
 
 function interpolate(template, taskDir, artifactFile) {

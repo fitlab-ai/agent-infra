@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
+const realPlatform = process.platform;
 
 function filePath(relativePath) {
   return path.join(rootDir, relativePath);
@@ -14,6 +15,59 @@ function exists(relativePath) {
 
 function read(relativePath) {
   return fs.readFileSync(filePath(relativePath), "utf8");
+}
+
+function pathWithPrependedBin(binDir, envPath = process.env.PATH || "") {
+  return [binDir, envPath].filter(Boolean).join(path.delimiter);
+}
+
+function envWithPrependedPath(env, binDir) {
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") || "PATH";
+  const nextPath = pathWithPrependedBin(binDir, env[pathKey] || "");
+  return {
+    ...env,
+    [pathKey]: nextPath,
+    PATH: nextPath
+  };
+}
+
+function supportsPosixModeBits() {
+  return realPlatform !== "win32";
+}
+
+function assertModeBits(filePathname, expectedMode) {
+  if (!supportsPosixModeBits()) {
+    return;
+  }
+
+  const actualMode = fs.statSync(filePathname).mode & 0o777;
+  assertEqual(actualMode, expectedMode);
+}
+
+function assertEqual(actual, expected) {
+  if (actual !== expected) {
+    throw new Error(`Expected mode ${expected.toString(8)}, got ${actual.toString(8)}`);
+  }
+}
+
+function writeNodeCommandShim(commandPath, scriptPath) {
+  fs.mkdirSync(path.dirname(commandPath), { recursive: true });
+  if (process.platform === "win32") {
+    fs.writeFileSync(
+      `${commandPath}.cmd`,
+      `@ECHO OFF\r\n"${process.execPath}" "${scriptPath}" %*\r\n`,
+      "utf8"
+    );
+    return `${commandPath}.cmd`;
+  }
+
+  fs.writeFileSync(
+    commandPath,
+    `#!/bin/sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`,
+    "utf8"
+  );
+  fs.chmodSync(commandPath, 0o755);
+  return commandPath;
 }
 
 function listFilesRecursive(relativeDir) {
@@ -260,15 +314,20 @@ const commandSpecs = {
 export {
   buildCommandSyncFiles,
   commandSpecs,
+  envWithPrependedPath,
   escapeRegExp,
   exists,
   filePath,
+  assertModeBits,
   langTemplate,
   listFilesRecursive,
   listSkillNames,
   loadFreshEsm,
   parseFrontmatter,
+  pathWithPrependedBin,
   read,
   renderPlaceholders,
+  supportsPosixModeBits,
+  writeNodeCommandShim,
   skillDocPaths
 };

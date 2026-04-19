@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { exists, filePath, read } from "../helpers.js";
+import { envWithPrependedPath, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../helpers.js";
 
 test("bootstrap CLI files exist", () => {
   assert.ok(exists("install.sh"), "install.sh should exist");
@@ -19,8 +19,15 @@ test("bootstrap CLI files exist", () => {
   assert.match(nodeCli, /agent-infra/);
   assert.match(nodeCli, /sandbox/);
 
-  const nodeStats = fs.statSync(filePath("bin/cli.js"));
-  assert.ok(nodeStats.mode & 0o111, "bin/cli.js should be executable");
+  if (supportsPosixModeBits()) {
+    const nodeStats = fs.statSync(filePath("bin/cli.js"));
+    assert.ok(nodeStats.mode & 0o111, "bin/cli.js should be executable");
+  } else {
+    const output = execFileSync(process.execPath, [filePath("bin/cli.js"), "version"], {
+      encoding: "utf8"
+    });
+    assert.match(output, /^agent-infra v/);
+  }
 });
 
 test("cli version output stays in sync with package.json", () => {
@@ -150,8 +157,9 @@ test("installed sync-templates.js executes inside a type=module project", () => 
       "module",
       "package.json should remain an ESM package after init"
     );
+    const pathBinDir = path.join(tmpDir, ".path-bin");
     const packageRoot = path.join(
-      tmpDir,
+      pathBinDir,
       "node_modules",
       "@fitlab-ai",
       "agent-infra"
@@ -169,9 +177,15 @@ test("installed sync-templates.js executes inside a type=module project", () => 
       mode: 0o755
     });
     fs.writeFileSync(path.join(localTemplateRoot, "README.md"), "Hello {{project}}\n", "utf8");
-    const pathBinDir = path.join(tmpDir, ".path-bin");
     fs.mkdirSync(pathBinDir, { recursive: true });
-    fs.symlinkSync(path.join(packageRoot, "bin", "cli.js"), path.join(pathBinDir, "ai"));
+    try {
+      fs.symlinkSync(path.join(packageRoot, "bin", "cli.js"), path.join(pathBinDir, "ai"));
+    } catch (error) {
+      if (process.platform !== "win32" || error.code !== "EPERM") {
+        throw error;
+      }
+      writeNodeCommandShim(path.join(pathBinDir, "ai"), path.join(packageRoot, "bin", "cli.js"));
+    }
     fs.writeFileSync(
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
@@ -191,16 +205,13 @@ test("installed sync-templates.js executes inside a type=module project", () => 
       {
         cwd: tmpDir,
         encoding: "utf8",
-        env: {
-          ...process.env,
-          PATH: `${pathBinDir}:${process.env.PATH || ""}`
-        }
+        env: envWithPrependedPath(process.env, pathBinDir)
       }
     );
     const report = JSON.parse(output);
 
     assert.ok(!report.error, "sync-templates.js should run without ESM loader errors");
-    assert.equal(report.templateRoot, fs.realpathSync(localTemplateRoot));
+    assert.equal(report.templateRoot.replace(/\\/g, "/"), fs.realpathSync(localTemplateRoot).replace(/\\/g, "/"));
     assert.equal(fs.readFileSync(path.join(tmpDir, "README.md"), "utf8"), "Hello esmproj\n");
     assert.ok(
       fs.existsSync(
@@ -232,10 +243,11 @@ test("agent-infra init rejects invalid input", () => {
 
     try {
       assert.throws(() => {
-        execSync(
-          `printf '${input}' | node "${cli}" init`,
-          { cwd: tmpDir, stdio: "pipe" }
-        );
+        execFileSync(process.execPath, [cli, "init"], {
+          cwd: tmpDir,
+          input: input.replace(/\\n/g, "\n"),
+          stdio: "pipe"
+        });
       }, `should reject: ${desc}`);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
