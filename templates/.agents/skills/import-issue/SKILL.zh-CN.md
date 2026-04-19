@@ -78,6 +78,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
+- 检查 Issue 当前 milestone；如果未设置，先读取 `.agents/rules/milestone-inference.md`，按其中的「阶段 1：`create-issue`」规则推断并设置 milestone；如果 `has_triage=false` 或推断不确定，跳过并继续
 - 创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论（按 issue-sync.md 的 task.md 评论同步规则）
 
 ### 7. 完成校验

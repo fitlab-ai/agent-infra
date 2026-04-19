@@ -50,17 +50,18 @@ Goal: narrow the Issue milestone from a release line to a concrete version when 
 
 Preconditions:
 - task.md contains a valid `issue_number`
-- the current Issue milestone matches the release-line format `X.Y.x`
+- the current Issue milestone matches the release-line format `X.Y.x` or is `General Backlog`
 
 Sequence:
 1. Query the current Issue milestone
-2. If it is not in `X.Y.x` format, treat it as already specific enough and keep it unchanged
-3. If it is in `X.Y.x` format, narrow it according to branch mode:
+2. If it is `General Backlog`, re-infer the release line using Phase 1, then try to narrow it to a concrete version; if inference fails, keep `General Backlog` unchanged
+3. If it is not in `X.Y.x` format, treat it as already specific enough and keep it unchanged
+4. If it is in `X.Y.x` format, narrow it according to branch mode:
    - Trunk mode: query open concrete-version milestones on that release line (for example `0.4.4`) and choose the latest one
    - Multi-version branch mode:
      - If the task branch was created from `origin/X.Y.x`, choose the latest concrete version on that line
      - If the task branch was created from `main`, find the highest release line and choose the latest concrete version on that line
-4. When a target concrete version is found, run:
+5. When a target concrete version is found, run:
 
 ```bash
 if [ "$has_triage" = "true" ]; then
@@ -68,7 +69,7 @@ if [ "$has_triage" = "true" ]; then
 fi
 ```
 
-5. If `has_triage=false`, the target milestone does not exist, or the branch ancestry cannot be determined reliably, keep the original milestone unchanged
+6. If `has_triage=false`, the target milestone does not exist, or the branch ancestry cannot be determined reliably, keep the original milestone unchanged
 
 Suggested concrete-version query:
 

@@ -50,17 +50,18 @@ Milestone 设置属于 `has_triage` 权限范围；如果调用方检测到 `has
 
 前置条件：
 - `task.md` 存在有效 `issue_number`
-- 当前 Issue milestone 为版本线格式 `X.Y.x`
+- 当前 Issue milestone 为版本线格式 `X.Y.x` 或 `General Backlog`
 
 执行顺序：
 1. 查询 Issue 当前 milestone
-2. 如果 milestone 不是 `X.Y.x` 格式 -> 视为已足够具体，保持不变
-3. 如果 milestone 是 `X.Y.x` -> 按分支模式收窄：
+2. 如果 milestone 是 `General Backlog` -> 按阶段 1 规则重新推断版本线，再尝试收窄到具体版本；如果推断失败则保持 `General Backlog` 不变
+3. 如果 milestone 不是 `X.Y.x` 格式 -> 视为已足够具体，保持不变
+4. 如果 milestone 是 `X.Y.x` -> 按分支模式收窄：
    - 主干模式：查询该版本线下 open 的具体版本 milestone（如 `0.4.4`），取最新版本
    - 多版本分支模式：
      - 当前任务分支来自 `origin/X.Y.x` release line -> 在该版本线下取最新具体版本
      - 当前任务分支来自 `main` -> 找最高版本线，再取该版本线下的最新具体版本
-4. 找到目标具体版本后，执行：
+5. 找到目标具体版本后，执行：
 
 ```bash
 if [ "$has_triage" = "true" ]; then
@@ -68,7 +69,7 @@ if [ "$has_triage" = "true" ]; then
 fi
 ```
 
-5. 如果 `has_triage=false`、目标 milestone 不存在，或无法可靠判断 -> 保持原 milestone 不变
+6. 如果 `has_triage=false`、目标 milestone 不存在，或无法可靠判断 -> 保持原 milestone 不变
 
 具体版本查询建议：
 

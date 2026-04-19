@@ -78,6 +78,7 @@ If task.md contains a valid `issue_number`, use the Issue update command from `.
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
 - Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
+- Check the Issue's current milestone; if it is unset, read `.agents/rules/milestone-inference.md` and infer plus set the milestone using "Stage 1: `create-issue`". If `has_triage=false` or the inference is uncertain, skip and continue
 - Create or update the `<!-- sync-issue:{task-id}:task -->` comment (follow the task.md comment sync rule in issue-sync.md)
 
 ### 7. Verification Gate
