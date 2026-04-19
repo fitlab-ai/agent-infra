@@ -496,7 +496,7 @@ The generated `.agents/.airc.json` file is the central contract between the boot
   "project": "my-project",
   "org": "my-org",
   "language": "en",
-  "templateVersion": "v0.5.5",
+  "templateVersion": "v0.5.6",
   "skills": {
     "sources": [
       { "type": "local", "path": "~/company-skills" }
