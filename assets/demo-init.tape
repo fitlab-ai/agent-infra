@@ -26,7 +26,7 @@ Enter
 Sleep 1.5s
 
 # ── Prepare a demo project directory ──
-Type "mkdir -p /tmp/my-awesome-project && cd /tmp/my-awesome-project"
+Type "rm -rf /tmp/my-awesome-project && mkdir -p /tmp/my-awesome-project && cd /tmp/my-awesome-project"
 Enter
 Sleep 500ms
 
