@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const EXIT_CODE = {
@@ -27,7 +26,6 @@ const DEFAULT_REQUIRED_FIELDS = [
   "assigned_to"
 ];
 
-const DEFAULT_RETRY_DELAYS_MS = [3000, 10000];
 const DEFAULT_FRESHNESS_MINUTES = 30;
 const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?$/;
 const ACTIVITY_LOG_PATTERN = /^- (\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?) — \*\*(.+?)\*\* by (.+?) — (.+)$/;
@@ -590,179 +588,6 @@ function parseIssueNumber(value) {
 
 function parsePrNumber(value) {
   return parseIssueNumber(value);
-}
-
-function resolveOwnerRepo(taskDir) {
-  const command = resolveCommand("git");
-  const gitResult = spawnSync(command, ["remote", "get-url", "origin"], commandOptions(command, {
-    cwd: taskDir,
-    encoding: "utf8"
-  }));
-
-  if (gitResult.status !== 0) {
-    const stderr = (gitResult.stderr || "").trim();
-    const stdout = (gitResult.stdout || "").trim();
-    return { ok: false, message: `Unable to resolve git remote: ${stderr || stdout}` };
-  }
-
-  const remote = gitResult.stdout.trim();
-  const sshMatch = remote.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
-  if (!sshMatch) {
-    return { ok: false, message: `Unable to parse owner/repo from remote '${remote}'` };
-  }
-
-  return { ok: true, value: sshMatch[1] };
-}
-
-function ghJson(args, cwd) {
-  const result = ghCommand(args, cwd);
-  if (!result.ok) {
-    return result;
-  }
-
-  try {
-    return { ok: true, value: JSON.parse(result.value || "null") };
-  } catch (error) {
-    return { ok: false, type: "network_error", message: `Invalid JSON from gh: ${error.message}` };
-  }
-}
-
-function ghText(args, cwd) {
-  const result = ghCommand(args, cwd);
-  if (!result.ok) {
-    return result;
-  }
-
-  return { ok: true, value: String(result.value || "").trim() };
-}
-
-function ghCommand(args, cwd) {
-  const command = resolveCommand("gh");
-  const result = spawnSync(command, args, commandOptions(command, {
-    cwd,
-    encoding: "utf8",
-    env: process.env
-  }));
-
-  if (result.status !== 0) {
-    const stderr = `${result.stderr || ""}${result.stdout || ""}`.trim();
-    const classified = classifyGhFailure(stderr, args);
-    return { ok: false, type: classified.type, message: classified.message };
-  }
-
-  return { ok: true, value: result.stdout };
-}
-
-function ghPaginatedJson(args, cwd) {
-  return ghJson(args, cwd);
-}
-
-function gitText(args, cwd) {
-  const command = resolveCommand("git");
-  const result = spawnSync(command, args, commandOptions(command, {
-    cwd,
-    encoding: "utf8",
-    env: process.env
-  }));
-
-  if (result.status !== 0) {
-    const stderr = `${result.stderr || ""}${result.stdout || ""}`.trim();
-    return {
-      ok: false,
-      type: "check_failed",
-      message: stderr || `git ${args.join(" ")} failed`
-    };
-  }
-
-  return { ok: true, value: String(result.stdout || "").trim() };
-}
-
-function withRetry(operation) {
-  const delays = getRetryDelays();
-  let lastFailure = null;
-
-  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
-    const result = operation();
-    if (result.ok) {
-      return result;
-    }
-
-    lastFailure = result;
-    if (result.type === "check_failed") {
-      return result;
-    }
-
-    if (attempt < delays.length) {
-      sleep(delays[attempt]);
-    }
-  }
-
-  return lastFailure || { ok: false, type: "network_error", message: "Unknown GitHub sync failure" };
-}
-
-function classifyGhFailure(stderr, args) {
-  const message = stderr || `gh ${args.join(" ")} failed`;
-
-  if (/not found|could not resolve to an issue|http 404/i.test(message)) {
-    return { type: "check_failed", message };
-  }
-
-  return { type: "network_error", message };
-}
-
-function getRetryDelays() {
-  const override = process.env.VALIDATE_ARTIFACT_RETRY_DELAYS_MS;
-  if (!override) {
-    return DEFAULT_RETRY_DELAYS_MS;
-  }
-
-  const parsed = override
-    .split(",")
-    .map((value) => Number(value.trim()))
-    .filter((value) => Number.isFinite(value) && value >= 0);
-
-  return parsed.length > 0 ? parsed : DEFAULT_RETRY_DELAYS_MS;
-}
-
-function sleep(delayMs) {
-  if (delayMs <= 0) {
-    return;
-  }
-
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
-}
-
-function resolveCommand(cmd) {
-  if (process.platform !== "win32" || path.extname(cmd)) {
-    return cmd;
-  }
-
-  const pathValue = process.env.Path || process.env.PATH || "";
-  const extensions = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
-    .split(";")
-    .filter(Boolean);
-
-  for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
-    for (const extension of extensions) {
-      const lowerCandidate = path.join(dir, `${cmd}${extension.toLowerCase()}`);
-      if (fs.existsSync(lowerCandidate)) {
-        return lowerCandidate;
-      }
-      const upperCandidate = path.join(dir, `${cmd}${extension.toUpperCase()}`);
-      if (fs.existsSync(upperCandidate)) {
-        return upperCandidate;
-      }
-    }
-  }
-
-  return cmd;
-}
-
-function commandOptions(cmd, options) {
-  if (process.platform === "win32" && /\.(?:bat|cmd)$/i.test(cmd)) {
-    return { ...options, shell: true };
-  }
-  return options;
 }
 
 // === Utilities ===
