@@ -32,5 +32,8 @@ Thumbs.db
 .env
 .env.*
 
+# Demo GIF local settings
+assets/demo-settings.tape
+
 # Temp files
 tmp/

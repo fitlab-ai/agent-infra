@@ -1,0 +1,13 @@
+# Local VHS overrides for demo GIF generation (copy to demo-settings.tape)
+#
+# VHS captures frames via browser screenshots. The capture rate varies by
+# machine, causing GIF duration differences. Tune Framerate to match your
+# machine's actual capture throughput:
+#
+#   Framerate too high (e.g. 50) → VHS drops frames → GIF plays too fast
+#   Framerate too low  (e.g. 10) → GIF looks choppy
+#
+# Recommended: start with 25, run `npm run demo:regen`, check duration.
+# Only Set commands are allowed here — they are prepended to the main tape.
+
+Set Framerate 25
