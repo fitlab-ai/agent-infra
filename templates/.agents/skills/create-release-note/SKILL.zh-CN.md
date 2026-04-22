@@ -119,7 +119,7 @@ git log v<prev-version>..v<version> \
 
 ## Contributors
 
-@contributor1, @contributor2, @contributor3
+@contributor1, @contributor2, @contributor3, @reporter1 (reported #N)
 ```
 
 **格式规则**：
@@ -130,6 +130,7 @@ git log v<prev-version>..v<version> \
    - **数据源**：
      - PR author：来自步骤 4 的 `gh pr list --json author`
      - Commit co-authors：来自步骤 4 的 `git log ... --format='%(trailers:key=Co-authored-by,valueonly,unfold)'`
+     - Issue reporters：来自步骤 5 收集的关联 Issue 的 author（`gh issue view` 返回的 `author.login`）
    - **贡献数定义**：`该人的 PR 数 + 该人作为 co-author 的 commit 数`（同一身份跨来源合并计数）
    - **Name → `@login` 映射**：
      - `Co-authored-by` 原始格式为 `Name <email>`，需要推断对应的 GitHub `@login`
@@ -141,6 +142,12 @@ git log v<prev-version>..v<version> \
      - 若仍无法可靠确定 login，则输出 `@{Name 首 token 小写}`，并在 `Contributors` 段落下追加 `<!-- TODO(reviewer): 确认 {原始 Name <email>} 的 GitHub login -->`
    - **排序**：按贡献数降序；贡献数相同时按 login 字典序
    - **去重**：以最终映射后的 `@login` 为键
+   - **Issue reporter 规则**：
+     - 从步骤 5 收集到的每个关联 Issue 中提取 `author.login`
+     - 如果该 login 已存在于 PR author 或 co-author 的最终映射列表中，跳过（代码贡献已包含该用户）
+     - 仅报告贡献的用户以 `@login (reported #N)` 格式展示；同一 reporter 报告多个 Issue 时使用 `@login (reported #N1, #N2)`
+     - Reporter 在 Contributors 段落中排在代码贡献者之后，以逗号分隔追加
+     - Reporter 之间按报告的 Issue 数量降序排列，数量相同时按 login 字典序
 5. 空部分：省略没有条目的部分
 
 ### 8. 展示并确认

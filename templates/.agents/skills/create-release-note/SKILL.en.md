@@ -119,7 +119,7 @@ If no historical release notes exist, use the following default Markdown format:
 
 ## Contributors
 
-@contributor1, @contributor2, @contributor3
+@contributor1, @contributor2, @contributor3, @reporter1 (reported #N)
 ```
 
 **Format rules**:
@@ -130,6 +130,7 @@ If no historical release notes exist, use the following default Markdown format:
    - **Data sources**:
      - PR authors from Step 4 `gh pr list --json author`
      - Commit co-authors from Step 4 `git log ... --format='%(trailers:key=Co-authored-by,valueonly,unfold)'`
+     - Issue reporters from linked Issues collected in Step 5 (`author.login` returned by `gh issue view`)
    - **Contribution count**: `PR count + co-authored commit count` for the same identity, merged across both sources
    - **Name -> `@login` mapping**:
      - Raw `Co-authored-by` values are `Name <email>` and must be mapped to a GitHub `@login`
@@ -141,6 +142,12 @@ If no historical release notes exist, use the following default Markdown format:
      - If the login still cannot be determined reliably, output `@{lowercased first Name token}` and append `<!-- TODO(reviewer): confirm GitHub login for {original Name <email>} -->` below the `Contributors` section
    - **Sorting**: descending by contribution count, then lexicographically by login for ties
    - **Deduplication**: use the final mapped `@login` as the key
+   - **Issue reporter rules**:
+     - Extract `author.login` from each linked Issue collected in Step 5
+     - If the login already exists in the final mapped PR author or co-author list, skip it (code contribution already covers this user)
+     - Reporter-only contributors use the format `@login (reported #N)`; if the same reporter reported multiple Issues, use `@login (reported #N1, #N2)`
+     - Reporters are appended after code contributors in the Contributors section, separated by commas
+     - Sort reporters by reported Issue count descending, then lexicographically by login for ties
 5. Empty sections: Omit sections with no entries
 
 ### 8. Present and Confirm
