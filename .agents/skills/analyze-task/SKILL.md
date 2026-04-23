@@ -143,7 +143,7 @@ node .agents/scripts/validate-artifact.js gate analyze-task .agents/workspace/ac
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了 `customTools`，读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`{name}` 替换为技能名，`&#123;project&#125;` 替换为项目名）。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义工具（`customTools`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 
 输出格式：
 ```
@@ -172,7 +172,7 @@ node .agents/scripts/validate-artifact.js gate analyze-task .agents/workspace/ac
 - [ ] 更新了 task.md 中的 `assigned_to`
 - [ ] 追加了 Activity Log 条目到 task.md
 - [ ] 在工作流进度中标记了 requirement-analysis 为已完成
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，含 customTools，不要筛选）
+- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，含自定义工具，不要筛选）
 - [ ] **没有修改任何业务代码**
 
 ## 停止

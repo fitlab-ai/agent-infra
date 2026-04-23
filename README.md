@@ -427,6 +427,54 @@ When `update-agent-infra` runs:
 - Built-in skills always win over custom sources; if a source defines a skill with the same name as a built-in skill, agent-infra skips that custom source skill instead of overriding the built-in one
 - If you truly need to replace a built-in skill or command, use the existing `ejected` mechanism and own that file in the project
 
+## Custom Tool Configuration
+
+Use the top-level `.agents/.airc.json` `customTools` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom tool directory.
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `name` | Yes | Display name shown in reports and next-step guidance, for example `Acme TUI`. |
+| `dir` | Yes | Command directory relative to the project root, for example `.acme/commands`. The path must stay inside the project root. |
+| `invoke` | Yes | User-facing command template used in next-step guidance. |
+
+Supported `invoke` placeholders:
+
+| Placeholder | Replaced with | Example |
+|-------------|---------------|---------|
+| `${skillName}` | The skill command name, such as `review-task` or `commit`. | `acme ${skillName}` -> `acme review-task` |
+| `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
+
+Non-namespaced custom tool:
+
+```json
+{
+  "customTools": [
+    {
+      "name": "Acme TUI",
+      "dir": ".acme/commands",
+      "invoke": "acme ${skillName}"
+    }
+  ]
+}
+```
+
+Namespaced custom tool:
+
+```json
+{
+  "project": "agent-infra",
+  "customTools": [
+    {
+      "name": "Internal Gemini",
+      "dir": ".internal-gemini/commands",
+      "invoke": "/${projectName}:${skillName}"
+    }
+  ]
+}
+```
+
+`customTools` should contain one entry per custom TUI. To let `update-agent-infra` generate command files for custom skills, keep at least one existing command file in `dir` that references a built-in skill path such as `.agents/skills/analyze-task/SKILL.md`; agent-infra uses that file as the format reference.
+
 <a id="prebuilt-workflows"></a>
 
 ## Prebuilt Workflows
@@ -507,6 +555,13 @@ The generated `.agents/.airc.json` file is the central contract between the boot
       { "type": "local", "path": "~/private-skills" }
     ]
   },
+  "customTools": [
+    {
+      "name": "Acme TUI",
+      "dir": ".acme/commands",
+      "invoke": "acme ${skillName}"
+    }
+  ],
   "files": {
     "managed": [
       ".agents/workspace/README.md",
@@ -539,6 +594,7 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 | `templates.sources` | Optional ordered list of external template sources. Only `type: "local"` is supported today. |
 | `skills` | Optional custom skill sync configuration. |
 | `skills.sources` | Optional ordered list of external custom skill sources. Only `type: "local"` is supported today. |
+| `customTools` | Optional top-level list of custom AI TUI adapters. |
 | `files` | Per-path update strategy configuration for managed, merged, and ejected files. |
 
 ### External template and skill sources

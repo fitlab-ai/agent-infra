@@ -87,7 +87,7 @@ test("syncTemplates learns custom TUI command format from existing command files
     );
 
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme {name}" }],
+      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }],
       templates: { sources: [{ type: "local", path: sourceRoot }] },
       files: {
         managed: [
@@ -124,7 +124,7 @@ test("syncTemplates skips custom TUI generation when the reference directory is 
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme {name}" }]
+      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }]
     });
     fs.mkdirSync(path.join(projectRoot, ".acme/commands"), { recursive: true });
 
@@ -149,7 +149,7 @@ test("syncTemplates skips custom TUI generation when reference files do not iden
     const templateRoot = makeTemplateRoot(tmpDir);
     const sourceRoot = makeReferenceSource(tmpDir, "description: Analyze requirements\nskill: missing reference\n");
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme {name}" }],
+      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }],
       templates: { sources: [{ type: "local", path: sourceRoot }] },
       files: {
         managed: [
@@ -195,7 +195,7 @@ test("syncTemplates skips mismatched reference descriptions and uses the next va
       "description: Analyze requirements for analyze-task\nskill: .agents/skills/analyze-task/SKILL.md\n"
     );
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme {name}" }],
+      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }],
       templates: { sources: [{ type: "local", path: sourceRoot }] },
       files: {
         managed: [
@@ -244,7 +244,7 @@ test("syncTemplates protects generated custom TUI command files during managed c
       "description: Analyze requirements for analyze-task\nskill: .agents/skills/analyze-task/SKILL.md\n"
     );
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: "./.acme/commands", invoke: "acme {name}" }],
+      customTools: [{ name: "Acme TUI", dir: "./.acme/commands", invoke: "acme ${skillName}" }],
       templates: { sources: [{ type: "local", path: sourceRoot }] },
       files: {
         managed: [
@@ -282,7 +282,7 @@ test("syncTemplates removes stale custom TUI files that only contain a custom sk
       "description: Analyze requirements for analyze-task\nskill: .agents/skills/analyze-task/SKILL.md\n"
     );
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme {name}" }],
+      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }],
       templates: { sources: [{ type: "local", path: sourceRoot }] },
       files: {
         managed: [
@@ -316,7 +316,7 @@ test("syncTemplates rejects custom TUI directories outside the project root", as
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: "../outside", invoke: "acme {name}" }]
+      customTools: [{ name: "Acme TUI", dir: "../outside", invoke: "acme ${skillName}" }]
     });
 
     const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
@@ -356,8 +356,8 @@ test("syncTemplates generates commands for multiple custom TUI tools and custom 
     );
     makeProject(projectRoot, {
       customTools: [
-        { name: "Acme TUI", dir: ".acme/commands", invoke: "acme {name}" },
-        { name: "Beta TUI", dir: ".beta/prompts", invoke: "beta run {name}" }
+        { name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" },
+        { name: "Beta TUI", dir: ".beta/prompts", invoke: "beta run ${skillName}" }
       ],
       templates: { sources: [{ type: "local", path: sourceRoot }] },
       files: {

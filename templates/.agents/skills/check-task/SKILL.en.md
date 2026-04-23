@@ -100,7 +100,7 @@ Next step:
 
 ### 5. Recommend Next Action
 
-Recommend the appropriate next skill based on the current workflow state. You must show command formats for all TUI columns in the table below, not just the current AI agent. If `.agents/.airc.json` configures `customTools`, read each tool's `name` and `invoke`, then add the matching command line in the same format (`{name}` becomes the skill name and `&#123;project&#125;` becomes the project name).
+Recommend the appropriate next skill based on the current workflow state. You must show command formats for all TUI columns in the table below, not just the current AI agent. If `.agents/.airc.json` configures custom tools (via `customTools`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 > **⚠️ CONDITION CHECK — you must choose the single matching row in the table below based on `status`, `current_step`, the latest artifacts, and the latest review result:**
 >

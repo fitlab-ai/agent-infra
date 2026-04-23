@@ -106,7 +106,7 @@ node .agents/scripts/validate-artifact.js gate cancel-task .agents/workspace/com
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了 `customTools`，读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`{name}` 替换为技能名，`&#123;project&#125;` 替换为项目名）。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义工具（`customTools`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 
 输出格式：
 ```
@@ -128,7 +128,7 @@ node .agents/scripts/validate-artifact.js gate cancel-task .agents/workspace/com
 - [ ] 已将任务目录移动到 `.agents/workspace/completed/`
 - [ ] 已在存在 Issue 时完成 Issue 同步
 - [ ] 已运行 gate 校验并通过
-- [ ] 已向用户展示完整的下一步命令（含 customTools）
+- [ ] 已向用户展示完整的下一步命令（含自定义工具）
 
 ## 注意事项
 
