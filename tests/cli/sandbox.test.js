@@ -2258,6 +2258,38 @@ test("resolveTaskBranch reads branch from task frontmatter", async () => {
   }
 });
 
+test("resolveTaskBranch strips matching quotes from task branch metadata", async () => {
+  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-quotes-"));
+  const cases = [
+    ["TASK-20260401-180010", "branch: \"agent-infra-feature-cli-generic-sandbox\""],
+    ["TASK-20260401-180011", "branch: 'agent-infra-feature-cli-generic-sandbox'"]
+  ];
+
+  try {
+    for (const [taskId, branchLine] of cases) {
+      const taskDir = path.join(tmpDir, ".agents", "workspace", "active", taskId);
+      fs.mkdirSync(taskDir, { recursive: true });
+      fs.writeFileSync(path.join(taskDir, "task.md"), [
+        "---",
+        `id: ${taskId}`,
+        "type: feature",
+        branchLine,
+        "---",
+        "",
+        "# task"
+      ].join("\n"));
+
+      assert.equal(
+        taskResolver.resolveTaskBranch(taskId, tmpDir),
+        "agent-infra-feature-cli-generic-sandbox"
+      );
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("resolveTaskBranch falls back to the context branch for legacy tasks", async () => {
   const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-context-"));
@@ -2279,6 +2311,33 @@ test("resolveTaskBranch falls back to the context branch for legacy tasks", asyn
     assert.equal(
       taskResolver.resolveTaskBranch("TASK-20260401-180001", tmpDir),
       "agent-infra-feature-cli-generic-sandbox"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveTaskBranch strips matching quotes from legacy context branch metadata", async () => {
+  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-context-quotes-"));
+  const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180012");
+
+  try {
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, "task.md"), [
+      "---",
+      "id: TASK-20260401-180012",
+      "type: feature",
+      "---",
+      "",
+      "## Context",
+      "",
+      "- **Branch**：\"feature/quoted-context\""
+    ].join("\n"));
+
+    assert.equal(
+      taskResolver.resolveTaskBranch("TASK-20260401-180012", tmpDir),
+      "feature/quoted-context"
     );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
