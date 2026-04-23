@@ -2344,6 +2344,65 @@ test("resolveTaskBranch strips matching quotes from legacy context branch metada
   }
 });
 
+for (const workspaceDir of ["completed", "blocked", "archive"]) {
+  test(`resolveTaskBranch resolves tasks in ${workspaceDir} directory`, async () => {
+    const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-sandbox-task-${workspaceDir}-`));
+    const taskDir = path.join(tmpDir, ".agents", "workspace", workspaceDir, "TASK-20260401-180003");
+
+    try {
+      fs.mkdirSync(taskDir, { recursive: true });
+      fs.writeFileSync(path.join(taskDir, "task.md"), [
+        "---",
+        "id: TASK-20260401-180003",
+        "type: bugfix",
+        "branch: agent-infra-bugfix-some-fix",
+        "---",
+        "",
+        "# task"
+      ].join("\n"));
+
+      assert.equal(
+        taskResolver.resolveTaskBranch("TASK-20260401-180003", tmpDir),
+        "agent-infra-bugfix-some-fix"
+      );
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("resolveTaskBranch prefers active over completed when both exist", async () => {
+  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-priority-"));
+  const activeDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180004");
+  const completedDir = path.join(tmpDir, ".agents", "workspace", "completed", "TASK-20260401-180004");
+
+  try {
+    fs.mkdirSync(activeDir, { recursive: true });
+    fs.mkdirSync(completedDir, { recursive: true });
+    fs.writeFileSync(path.join(activeDir, "task.md"), [
+      "---",
+      "id: TASK-20260401-180004",
+      "branch: agent-infra-bugfix-active-wins",
+      "---"
+    ].join("\n"));
+    fs.writeFileSync(path.join(completedDir, "task.md"), [
+      "---",
+      "id: TASK-20260401-180004",
+      "branch: agent-infra-bugfix-should-be-ignored",
+      "---"
+    ].join("\n"));
+
+    assert.equal(
+      taskResolver.resolveTaskBranch("TASK-20260401-180004", tmpDir),
+      "agent-infra-bugfix-active-wins"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("resolveTaskBranch rejects missing task files and missing branch metadata", async () => {
   const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-errors-"));
