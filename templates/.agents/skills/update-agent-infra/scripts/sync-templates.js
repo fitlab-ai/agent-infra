@@ -24,6 +24,7 @@ const DEFAULTS = {
     "type": "github"
   },
   "sandbox": {
+    "engine": null,
     "runtimes": [
       "node20"
     ],

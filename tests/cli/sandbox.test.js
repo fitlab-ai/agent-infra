@@ -95,6 +95,64 @@ test("sandbox create fails before preparing a temporary Dockerfile when Claude c
   }
 });
 
+test("sandbox vm stop warns instead of stopping when OrbStack is not running", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-vm-stop-orb-"));
+  const repoDir = path.join(tmpDir, "repo");
+  const binDir = path.join(tmpDir, "bin");
+  const orbPath = path.join(binDir, "orb");
+  const orbLogPath = path.join(tmpDir, "orb-log.txt");
+  const previousCwd = process.cwd();
+  const previousEnv = { ...process.env };
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+
+  try {
+    fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
+    fs.mkdirSync(binDir, { recursive: true });
+    execSync("git init", { cwd: repoDir, stdio: "pipe" });
+    fs.writeFileSync(
+      path.join(repoDir, ".agents", ".airc.json"),
+      JSON.stringify({
+        project: "demo",
+        sandbox: { engine: "orbstack" }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+    fs.writeFileSync(
+      orbPath,
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$1" >> "$ORB_LOG_PATH"
+if [ "$1" = "status" ]; then
+  exit 1
+fi
+exit 0
+`,
+      "utf8"
+    );
+    fs.chmodSync(orbPath, 0o755);
+
+    Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });
+    process.chdir(repoDir);
+    process.env = {
+      ...envWithPrependedPath(process.env, binDir),
+      HOME: tmpDir,
+      ORB_LOG_PATH: orbLogPath
+    };
+
+    const sandboxVm = await loadFreshEsm("lib/sandbox/commands/vm.js");
+    await sandboxVm.vm(["stop"]);
+
+    assert.deepEqual(fs.readFileSync(orbLogPath, "utf8").trim().split("\n"), ["status"]);
+  } finally {
+    process.chdir(previousCwd);
+    process.env = previousEnv;
+    if (originalPlatformDescriptor) {
+      Object.defineProperty(process, "platform", originalPlatformDescriptor);
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => {
   const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-config-"));
@@ -118,8 +176,68 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     assert.equal(config.imageName, "demo-sandbox:latest");
     assert.deepEqual(config.runtimes, ["node20"]);
     assert.deepEqual(config.tools, ["claude-code", "codex", "opencode", "gemini-cli"]);
+    assert.equal(config.engine, null);
     assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
     assert.equal(config.worktreeBase, path.join(process.env.HOME, ".agent-infra", "worktrees", "demo"));
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig preserves configured sandbox engine", async () => {
+  const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-config-"));
+  const previousCwd = process.cwd();
+
+  try {
+    execSync("git init", { cwd: tmpDir, stdio: "pipe" });
+    fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, ".agents", ".airc.json"),
+      JSON.stringify({
+        project: "demo",
+        org: "fitlab-ai",
+        sandbox: { engine: "orbstack" }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+
+    process.chdir(tmpDir);
+    const config = sandboxConfig.loadConfig();
+
+    assert.equal(config.engine, "orbstack");
+    assert.deepEqual(config.runtimes, ["node20"]);
+    assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig rejects unsupported sandbox engine values", async () => {
+  const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-invalid-"));
+  const previousCwd = process.cwd();
+
+  try {
+    execSync("git init", { cwd: tmpDir, stdio: "pipe" });
+    fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, ".agents", ".airc.json"),
+      JSON.stringify({
+        project: "demo",
+        sandbox: { engine: "podman" }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+
+    process.chdir(tmpDir);
+
+    assert.throws(
+      () => sandboxConfig.loadConfig(),
+      /invalid "sandbox\.engine" value "podman".*only affects macOS/s
+    );
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1260,6 +1378,169 @@ test("ensureColima uses verbose commands for install and startup", async () => {
     ["colima", "status"],
     ["docker", "info"]
   ]);
+});
+
+test("detectEngine honors configured macOS sandbox engines", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const dependencies = {
+    platformFn: () => "darwin",
+    runOkFn() {
+      throw new Error("docker auto-detection should be skipped for explicit engines");
+    }
+  };
+
+  assert.equal(sandboxEngine.detectEngine({ engine: "orbstack" }, dependencies), "orbstack");
+  assert.equal(sandboxEngine.detectEngine({ engine: "colima" }, dependencies), "colima");
+  assert.equal(sandboxEngine.detectEngine({ engine: "docker-desktop" }, dependencies), "docker-desktop");
+});
+
+test("detectEngine rejects unsupported configured sandbox engines early", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  assert.throws(
+    () => sandboxEngine.detectEngine({ engine: "podman" }, { platformFn: () => "darwin" }),
+    /Expected one of: null, auto, colima, orbstack, docker-desktop.*only affects macOS/s
+  );
+});
+
+test("detectEngine auto-detects a running macOS Docker daemon before falling back to Colima", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const checks = [];
+
+  assert.equal(sandboxEngine.detectEngine(
+    { engine: null },
+    {
+      platformFn: () => "darwin",
+      runOkFn(cmd, args) {
+        checks.push([cmd, ...args]);
+        return true;
+      }
+    }
+  ), "docker-desktop");
+
+  assert.equal(sandboxEngine.detectEngine(
+    {},
+    {
+      platformFn: () => "darwin",
+      runOkFn: () => false
+    }
+  ), "colima");
+  assert.deepEqual(checks, [["docker", "info"]]);
+});
+
+test("detectEngine keeps non-macOS platform behavior independent of sandbox engine config", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  assert.equal(
+    sandboxEngine.detectEngine({ engine: "orbstack" }, { platformFn: () => "linux" }),
+    "native"
+  );
+  assert.equal(
+    sandboxEngine.detectEngine({ engine: "orbstack" }, { platformFn: () => "win32" }),
+    "wsl2"
+  );
+});
+
+test("ensureOrbStack installs OrbStack and starts the Docker daemon", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const messages = [];
+  const verboseCalls = [];
+  const checks = [];
+  let dockerInfoChecks = 0;
+
+  await sandboxEngine.ensureOrbStack(
+    {},
+    (message) => messages.push(message),
+    {
+      runOkFn(cmd, args) {
+        checks.push([cmd, ...args]);
+        if (cmd === "which") {
+          return false;
+        }
+        if (cmd === "docker" && args[0] === "info") {
+          dockerInfoChecks += 1;
+          return dockerInfoChecks > 1;
+        }
+        throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
+      },
+      runVerboseFn(cmd, args) {
+        verboseCalls.push([cmd, ...args]);
+      }
+    }
+  );
+
+  assert.deepEqual(messages, [
+    "Installing OrbStack via Homebrew...",
+    "Starting OrbStack..."
+  ]);
+  assert.deepEqual(verboseCalls, [
+    ["brew", "install", "--cask", "orbstack"],
+    ["orb", "start"]
+  ]);
+  assert.deepEqual(checks, [
+    ["which", "orb"],
+    ["docker", "info"],
+    ["docker", "info"]
+  ]);
+});
+
+test("ensureDockerDesktop reports when Docker Desktop is not running", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  await assert.rejects(
+    () => sandboxEngine.ensureDockerDesktop({}, null, { runOkFn: () => false }),
+    /Docker Desktop is not running/
+  );
+});
+
+test("startManagedVm uses OrbStack status instead of Docker daemon state", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const checks = [];
+  const verboseCalls = [];
+
+  const result = sandboxEngine.startManagedVm(
+    { engine: "orbstack" },
+    {
+      platformFn: () => "darwin",
+      runOkFn(cmd, args) {
+        checks.push([cmd, ...args]);
+        if (cmd === "docker") {
+          throw new Error("docker info must not decide explicit OrbStack VM state");
+        }
+        return false;
+      },
+      runVerboseFn(cmd, args) {
+        verboseCalls.push([cmd, ...args]);
+      }
+    }
+  );
+
+  assert.equal(result, "started");
+  assert.deepEqual(checks, [["orb", "status"]]);
+  assert.deepEqual(verboseCalls, [["orb", "start"]]);
+});
+
+test("stopManagedVm reports unsupported engines instead of silently returning", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  assert.throws(
+    () => sandboxEngine.stopManagedVm(
+      { engine: "docker-desktop" },
+      { platformFn: () => "darwin", runFn: () => assert.fail("unexpected stop command") }
+    ),
+    /VM management is unavailable for engine 'Docker Desktop'/
+  );
+});
+
+test("isVmManaged and engineDisplayName describe supported engines", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const macDependencies = { platformFn: () => "darwin" };
+
+  assert.equal(sandboxEngine.isVmManaged({ engine: "colima" }, macDependencies), true);
+  assert.equal(sandboxEngine.isVmManaged({ engine: "orbstack" }, macDependencies), true);
+  assert.equal(sandboxEngine.isVmManaged({ engine: "docker-desktop" }, macDependencies), false);
+  assert.equal(sandboxEngine.engineDisplayName("orbstack"), "OrbStack");
+  assert.equal(sandboxEngine.engineDisplayName("docker-desktop"), "Docker Desktop");
 });
 
 test("hostHasGpgKeys reports whether the host keyring is available", async () => {

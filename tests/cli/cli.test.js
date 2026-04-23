@@ -62,6 +62,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.ok(!config.branchPrefix, "branchPrefix should not exist");
     assert.ok(!config.source, "consumer projects should not have source: self");
     assert.deepEqual(config.sandbox, {
+      engine: null,
       runtimes: ["node20"],
       tools: ["claude-code", "codex", "opencode", "gemini-cli"],
       dockerfile: null,
@@ -449,6 +450,7 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     );
     assert.deepEqual(updated.platform, { type: "github" }, "update should backfill default platform config");
     assert.deepEqual(updated.sandbox, {
+      engine: null,
       runtimes: ["node20"],
       tools: ["claude-code", "codex", "opencode", "gemini-cli"],
       dockerfile: null,
