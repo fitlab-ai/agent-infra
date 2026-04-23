@@ -137,6 +137,73 @@ test("agent-infra init generates seed files in a temp directory", () => {
   }
 });
 
+test("agent-infra init accepts a custom platform selected from the menu", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    const output = execSync(
+      `printf 'testproj\\ntestorg\\n\\n2\\nmy-platform\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe", encoding: "utf8" }
+    );
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+    assert.deepEqual(config.platform, { type: "my-platform" });
+    assert.match(
+      output,
+      /Custom platform 'my-platform' selected\. Built-in templates are only complete for github;/,
+      "init should warn when built-in templates do not fully support the selected custom platform"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra init remains compatible with direct platform input", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    execSync(
+      `printf 'testproj\\ntestorg\\n\\ngithub\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe" }
+    );
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+    assert.deepEqual(config.platform, { type: "github" });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra init warns when a custom platform is entered directly", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    const output = execSync(
+      `printf 'testproj\\ntestorg\\n\\ngitea\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe", encoding: "utf8" }
+    );
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+    assert.deepEqual(config.platform, { type: "gitea" });
+    assert.match(
+      output,
+      /Custom platform 'gitea' selected\. Built-in templates are only complete for github;/,
+      "init should warn when an unlisted platform is accepted through direct input"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("installed sync-templates.js executes inside a type=module project", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-esm-"));
   const cli = filePath("bin/cli.js");
