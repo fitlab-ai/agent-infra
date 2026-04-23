@@ -140,6 +140,15 @@ test("agent-infra init generates seed files in a temp directory", () => {
   }
 });
 
+test("agent-infra init defaults macOS sandbox engine to Colima", () => {
+  const initSource = read("lib/init.js");
+
+  assert.match(
+    initSource,
+    /select\(\s*'Sandbox engine \(macOS\)',\s*\[\s*'colima',\s*'orbstack',\s*'docker-desktop'\s*\],\s*'colima'\s*\)/s
+  );
+});
+
 test("agent-infra init accepts a custom platform selected from the menu", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
   const cli = filePath("bin/cli.js");

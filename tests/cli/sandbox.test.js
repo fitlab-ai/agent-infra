@@ -1399,33 +1399,21 @@ test("detectEngine rejects unsupported configured sandbox engines early", async 
 
   assert.throws(
     () => sandboxEngine.detectEngine({ engine: "podman" }, { platformFn: () => "darwin" }),
-    /Expected one of: null, auto, colima, orbstack, docker-desktop.*only affects macOS/s
+    /Expected one of: null, colima, orbstack, docker-desktop.*only affects macOS/s
   );
 });
 
-test("detectEngine auto-detects a running macOS Docker daemon before falling back to Colima", async () => {
+test("detectEngine returns Colima on macOS when no engine is configured", async () => {
   const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
-  const checks = [];
-
-  assert.equal(sandboxEngine.detectEngine(
-    { engine: null },
-    {
-      platformFn: () => "darwin",
-      runOkFn(cmd, args) {
-        checks.push([cmd, ...args]);
-        return true;
-      }
+  const dependencies = {
+    platformFn: () => "darwin",
+    runOkFn() {
+      throw new Error("docker auto-detection should not run for missing engines");
     }
-  ), "docker-desktop");
+  };
 
-  assert.equal(sandboxEngine.detectEngine(
-    {},
-    {
-      platformFn: () => "darwin",
-      runOkFn: () => false
-    }
-  ), "colima");
-  assert.deepEqual(checks, [["docker", "info"]]);
+  assert.equal(sandboxEngine.detectEngine({ engine: null }, dependencies), "colima");
+  assert.equal(sandboxEngine.detectEngine({}, dependencies), "colima");
 });
 
 test("detectEngine keeps non-macOS platform behavior independent of sandbox engine config", async () => {
