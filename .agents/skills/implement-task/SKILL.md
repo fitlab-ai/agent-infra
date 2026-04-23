@@ -117,7 +117,7 @@ node .agents/scripts/validate-artifact.js gate implement-task .agents/workspace/
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义工具（`customTools`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。输出格式见 `reference/output-template.md`。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTools`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。输出格式见 `reference/output-template.md`。
 
 ## 完成检查清单
 
@@ -125,7 +125,7 @@ node .agents/scripts/validate-artifact.js gate implement-task .agents/workspace/
 - [ ] 已创建 `{implementation-artifact}`
 - [ ] 所有必需测试通过
 - [ ] 已更新 task.md 并追加 Activity Log
-- [ ] 已向用户展示所有 TUI 格式的下一步命令（含自定义工具）
+- [ ] 已向用户展示所有 TUI 格式的下一步命令（含自定义 TUI）
 
 ## 停止
 

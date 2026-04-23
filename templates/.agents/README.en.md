@@ -193,9 +193,9 @@ Each source should mirror the `.agents/skills/` layout and include `SKILL.md` at
 - Built-in skills are not overridable by custom sources; if a source skill name conflicts with a built-in skill, the source copy is skipped
 - Use `files.ejected` if the project must take ownership of a built-in skill or command
 
-## Custom Tool Configuration
+## Custom TUI Configuration
 
-Use the top-level `.agents/.airc.json` `customTools` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom tool directory.
+Use the top-level `.agents/.airc.json` `customTools` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom TUI directory.
 
 | Field | Required | Meaning |
 |-------|----------|---------|
@@ -210,7 +210,7 @@ Supported `invoke` placeholders:
 | `${skillName}` | The skill command name, such as `review-task` or `commit`. | `acme ${skillName}` -> `acme review-task` |
 | `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
 
-Non-namespaced custom tool:
+Non-namespaced custom TUI:
 
 ```json
 {
@@ -224,7 +224,7 @@ Non-namespaced custom tool:
 }
 ```
 
-Namespaced custom tool:
+Namespaced custom TUI:
 
 ```json
 {

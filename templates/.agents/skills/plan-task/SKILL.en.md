@@ -121,7 +121,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom tools (via `customTools`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTools`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 Output format:
 ```
@@ -157,7 +157,7 @@ Next step - implement the task:
 - [ ] Marked technical-design as complete in workflow progress
 - [ ] Appended an Activity Log entry to task.md
 - [ ] Informed the user that this is a human review checkpoint
-- [ ] Informed the user of the next step (must include all TUI command formats, including any custom tools; do not filter)
+- [ ] Informed the user of the next step (must include all TUI command formats, including any custom TUIs; do not filter)
 
 ## STOP
 

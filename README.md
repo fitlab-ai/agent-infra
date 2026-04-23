@@ -427,9 +427,9 @@ When `update-agent-infra` runs:
 - Built-in skills always win over custom sources; if a source defines a skill with the same name as a built-in skill, agent-infra skips that custom source skill instead of overriding the built-in one
 - If you truly need to replace a built-in skill or command, use the existing `ejected` mechanism and own that file in the project
 
-## Custom Tool Configuration
+## Custom TUI Configuration
 
-Use the top-level `.agents/.airc.json` `customTools` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom tool directory.
+Use the top-level `.agents/.airc.json` `customTools` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom TUI directory.
 
 | Field | Required | Meaning |
 |-------|----------|---------|
@@ -444,7 +444,7 @@ Supported `invoke` placeholders:
 | `${skillName}` | The skill command name, such as `review-task` or `commit`. | `acme ${skillName}` -> `acme review-task` |
 | `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
 
-Non-namespaced custom tool:
+Non-namespaced custom TUI:
 
 ```json
 {
@@ -458,7 +458,7 @@ Non-namespaced custom tool:
 }
 ```
 
-Namespaced custom tool:
+Namespaced custom TUI:
 
 ```json
 {

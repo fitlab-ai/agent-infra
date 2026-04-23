@@ -427,9 +427,9 @@ args: "<task-id>"   # 可选
 - 内置 skill 始终优先于自定义 source；如果 source 里出现与内置 skill 同名的目录，agent-infra 会跳过该 source skill，而不是覆盖内置实现
 - 如果你确实需要替换内置 skill 或命令，请使用现有的 `ejected` 机制，让项目自己接管该文件
 
-## 自定义工具配置
+## 自定义 TUI 配置
 
-当团队使用的 AI TUI 不属于内置命令目标时，可以在 `.agents/.airc.json` 顶层配置 `customTools` 数组。该配置用于让 agent-infra 输出正确的下一步命令，并通过学习自定义工具目录中的既有命令文件，为项目自定义 skill 生成同格式命令。
+当团队使用的 AI TUI 不属于内置命令目标时，可以在 `.agents/.airc.json` 顶层配置 `customTools` 数组。该配置用于让 agent-infra 输出正确的下一步命令，并通过学习自定义 TUI 目录中的既有命令文件，为项目自定义 skill 生成同格式命令。
 
 | 字段 | 必填 | 含义 |
 |------|------|------|
@@ -444,7 +444,7 @@ args: "<task-id>"   # 可选
 | `${skillName}` | skill 命令名，例如 `review-task` 或 `commit`。 | `acme ${skillName}` -> `acme review-task` |
 | `${projectName}` | `.airc.json` 中的 `project` 值，适用于带命名空间的命令。 | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
 
-不带命名空间的自定义工具：
+不带命名空间的自定义 TUI：
 
 ```json
 {
@@ -458,7 +458,7 @@ args: "<task-id>"   # 可选
 }
 ```
 
-带命名空间的自定义工具：
+带命名空间的自定义 TUI：
 
 ```json
 {
