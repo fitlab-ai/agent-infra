@@ -497,6 +497,11 @@ import-issue #42                    从 GitHub Issue 导入任务
   "org": "my-org",
   "language": "en",
   "templateVersion": "v0.5.6",
+  "templates": {
+    "sources": [
+      { "type": "local", "path": "~/company-templates" }
+    ]
+  },
   "skills": {
     "sources": [
       { "type": "local", "path": "~/company-skills" }
@@ -530,9 +535,35 @@ import-issue #42                    从 GitHub Issue 导入任务
 | `org` | 生成元数据和链接时使用的 GitHub 组织或拥有者。 |
 | `language` | 渲染模板时采用的项目主语言或区域设置。 |
 | `templateVersion` | 当前安装的模板版本，用于升级和差异追踪。 |
+| `templates` | 可选的外部模板叠加配置。 |
+| `templates.sources` | 可选的外部模板源列表，按顺序应用。当前仅支持 `type: "local"`。 |
 | `skills` | 可选的自定义 skill 同步配置。 |
 | `skills.sources` | 可选的外部自定义 skill 源列表，按顺序应用。当前仅支持 `type: "local"`。 |
 | `files` | 针对具体路径配置 `managed`、`merged`、`ejected` 三类更新策略。 |
+
+### 外部模板与 skill 源
+
+当团队在仓库外维护公司内部平台模板、私有规则或共享自定义 skill 时，可以使用外部源。你可以在 `agent-infra init` 时配置，也可以之后手动编辑 `.agents/.airc.json`：
+
+```json
+{
+  "templates": {
+    "sources": [
+      { "type": "local", "path": "~/company-templates" },
+      { "type": "local", "path": "~/team-overrides/templates" }
+    ]
+  },
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/company-skills" }
+    ]
+  }
+}
+```
+
+模板源优先级是内置模板优先，外部源作为补充。外部源中与内置模板同路径的文件会被忽略，并记录到 `templateSources.conflicts`；多个外部源之间，后面的条目覆盖前面的条目，冲突同样会记录。Skill 源使用相同的本地源结构，但自定义 skill 不能替换内置 skill。
+
+外部模板文件和 skill 脚本可能包含 AI 工作流会执行的 JavaScript 或 shell 命令。只使用可信的本地路径。
 
 <a id="file-management-strategies"></a>
 

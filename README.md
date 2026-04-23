@@ -497,6 +497,11 @@ The generated `.agents/.airc.json` file is the central contract between the boot
   "org": "my-org",
   "language": "en",
   "templateVersion": "v0.5.6",
+  "templates": {
+    "sources": [
+      { "type": "local", "path": "~/company-templates" }
+    ]
+  },
   "skills": {
     "sources": [
       { "type": "local", "path": "~/company-skills" }
@@ -530,9 +535,35 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 | `org` | GitHub organization or owner used by generated metadata and links. |
 | `language` | Primary project language or locale used by rendered templates. |
 | `templateVersion` | Installed template version for future upgrades and drift tracking. |
+| `templates` | Optional external template overlay configuration. |
+| `templates.sources` | Optional ordered list of external template sources. Only `type: "local"` is supported today. |
 | `skills` | Optional custom skill sync configuration. |
 | `skills.sources` | Optional ordered list of external custom skill sources. Only `type: "local"` is supported today. |
 | `files` | Per-path update strategy configuration for managed, merged, and ejected files. |
+
+### External template and skill sources
+
+Use external sources when your team maintains company-specific platform templates, private rules, or shared custom skills outside this repository. You can configure them during `agent-infra init` or later by editing `.agents/.airc.json`:
+
+```json
+{
+  "templates": {
+    "sources": [
+      { "type": "local", "path": "~/company-templates" },
+      { "type": "local", "path": "~/team-overrides/templates" }
+    ]
+  },
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/company-skills" }
+    ]
+  }
+}
+```
+
+Template source precedence is built-in templates first, then external sources as supplements. External files with the same path as built-in templates are ignored and reported in `templateSources.conflicts`; between external sources, later entries override earlier entries and conflicts are also reported. Skill sources use the same local-source shape, but custom skills cannot replace built-in skills.
+
+External template files and skill scripts can include executable JavaScript or shell commands that AI workflows may run. Only use trusted local paths.
 
 <a id="file-management-strategies"></a>
 

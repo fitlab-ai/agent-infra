@@ -18,6 +18,23 @@ git config core.hooksPath .github/hooks
 
 这样 Git 才会调用同步到 `.github/hooks/` 下的 hook，包括 `pre-commit` 和 `check-version-format.sh`。
 
+## 外部模板与 Skill
+
+如果团队维护私有平台模板或共享自定义 skill，可在 `.agents/.airc.json` 中配置本地源：
+
+```json
+{
+  "templates": {
+    "sources": [{ "type": "local", "path": "~/company-templates" }]
+  },
+  "skills": {
+    "sources": [{ "type": "local", "path": "~/company-skills" }]
+  }
+}
+```
+
+内置模板优先级高于外部模板。多个外部模板源之间，后面的 source 覆盖前面的 source，`update-agent-infra` 会在 `templateSources.conflicts` 中报告冲突。外部模板和 skill 可能包含可执行脚本，只使用可信本地路径。
+
 ## 创建第一个任务
 
 1. 将任务模板复制到活跃工作区：

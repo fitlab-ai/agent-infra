@@ -120,6 +120,27 @@ To adapt agent-infra to a private code-hosting platform:
 4. If you maintain a fork of the template source, add matching `.{platform}.` template variants before adding that platform identifier to the sync logic.
 5. Validate the customized workflow on a test task before rolling it out broadly.
 
+## External Template And Skill Sources
+
+Teams can configure external template sources and shared skill sources in `.agents/.airc.json` for company platform templates, private rules, and shared custom skills:
+
+```json
+{
+  "templates": {
+    "sources": [
+      { "type": "local", "path": "~/company-templates" }
+    ]
+  },
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/company-skills" }
+    ]
+  }
+}
+```
+
+Built-in templates take priority, and external templates are supplemental. Between multiple external template sources, later sources override earlier sources. The sync report lists ignored same-path files in `templateSources.conflicts`. External templates and skills may contain scripts executed by AI workflows, so only configure trusted local paths.
+
 ## Custom Skills
 
 Projects can add their own skills alongside the built-in task workflow.
