@@ -18,6 +18,23 @@ git config core.hooksPath .github/hooks
 
 This makes Git invoke the hooks synced into `.github/hooks/`, including `pre-commit` and `check-version-format.sh`.
 
+## External Templates And Skills
+
+If your team maintains private platform templates or shared custom skills, configure local sources in `.agents/.airc.json`:
+
+```json
+{
+  "templates": {
+    "sources": [{ "type": "local", "path": "~/private-templates" }]
+  },
+  "skills": {
+    "sources": [{ "type": "local", "path": "~/private-skills" }]
+  }
+}
+```
+
+Built-in templates take priority over external templates. Later external template sources override earlier external sources, and `update-agent-infra` reports conflicts in `templateSources.conflicts`. Only use trusted local paths because external templates and skills may contain executable scripts.
+
 ## Creating Your First Task
 
 1. Copy the task template to the active workspace:

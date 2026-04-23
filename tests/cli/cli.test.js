@@ -45,7 +45,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
 
   try {
     execSync(
-      `printf 'testproj\\ntestorg\\n\\n\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\n\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
 
@@ -57,6 +57,8 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.deepEqual(config.platform, { type: "github" });
     assert.equal(config.templateVersion, `v${JSON.parse(read("package.json")).version}`);
     assert.ok(!("templateSource" in config), "init should not generate templateSource");
+    assert.ok(!("templates" in config), "blank template sources should not generate templates config");
+    assert.ok(!("skills" in config), "blank skill sources should not generate skills config");
     assert.ok(!config.branchPrefix, "branchPrefix should not exist");
     assert.ok(!config.source, "consumer projects should not have source: self");
     assert.deepEqual(config.sandbox, {
@@ -143,7 +145,7 @@ test("agent-infra init accepts a custom platform selected from the menu", () => 
 
   try {
     const output = execSync(
-      `printf 'testproj\\ntestorg\\n\\n2\\nmy-platform\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\n2\\nmy-platform\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe", encoding: "utf8" }
     );
 
@@ -167,7 +169,7 @@ test("agent-infra init remains compatible with direct platform input", () => {
 
   try {
     execSync(
-      `printf 'testproj\\ntestorg\\n\\ngithub\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\ngithub\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
 
@@ -186,7 +188,7 @@ test("agent-infra init warns when a custom platform is entered directly", () => 
 
   try {
     const output = execSync(
-      `printf 'testproj\\ntestorg\\n\\ngitea\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\ngitea\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe", encoding: "utf8" }
     );
 
@@ -204,6 +206,78 @@ test("agent-infra init warns when a custom platform is entered directly", () => 
   }
 });
 
+test("agent-infra init records an optional external template source for any platform", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-init-template-source-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    execSync(
+      `printf 'testproj\\ntestorg\\n\\ngithub\\n~/private-templates\\n\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe" }
+    );
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+
+    assert.deepEqual(config.platform, { type: "github" });
+    assert.deepEqual(config.templates, {
+      sources: [{ type: "local", path: "~/private-templates" }]
+    });
+    assert.ok(!("templateSource" in config), "init should not generate legacy templateSource");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra init omits optional source config when source prompts are blank", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-init-template-source-blank-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    execSync(
+      `printf 'testproj\\ntestorg\\n\\ngitea\\n\\n\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe" }
+    );
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+
+    assert.deepEqual(config.platform, { type: "gitea" });
+    assert.ok(!("templates" in config), "blank template source should not generate templates config");
+    assert.ok(!("skills" in config), "blank skill source should not generate skills config");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra init records optional external skill sources", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-init-skill-source-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    execSync(
+      `printf 'testproj\\ntestorg\\n\\ngithub\\n\\n~/private-skills, ~/team-skills\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe" }
+    );
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+
+    assert.deepEqual(config.skills, {
+      sources: [
+        { type: "local", path: "~/private-skills" },
+        { type: "local", path: "~/team-skills" }
+      ]
+    });
+    assert.ok(!("templates" in config), "blank template source should not generate templates config");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("installed sync-templates.js executes inside a type=module project", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-esm-"));
   const cli = filePath("bin/cli.js");
@@ -216,7 +290,7 @@ test("installed sync-templates.js executes inside a type=module project", () => 
     );
 
     execSync(
-      `printf 'esmproj\\nesmorg\\n\\n\\n' | node "${cli}" init`,
+      `printf 'esmproj\\nesmorg\\n\\n\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
     assert.equal(

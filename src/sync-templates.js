@@ -159,6 +159,81 @@ function expandHome(inputPath) {
   return path.resolve(inputPath);
 }
 
+function mergeTemplateSources(baseRoot, sources, report) {
+  const sourceMap = new Map();
+  const sourceMeta = new Map();
+  const conflictsByRel = new Map();
+  const baseRels = walkDir(baseRoot).map((filePath) => norm(path.relative(baseRoot, filePath)));
+
+  for (const rel of baseRels) {
+    sourceMap.set(rel, baseRoot);
+    sourceMeta.set(rel, { type: 'builtin' });
+  }
+
+  const recordConflict = (rel, winner, ignored) => {
+    const existing = conflictsByRel.get(rel);
+    if (existing) {
+      existing.winner = winner;
+      existing.ignored.push(...ignored);
+      return;
+    }
+
+    const conflict = { rel, winner, ignored: [...ignored] };
+    conflictsByRel.set(rel, conflict);
+    report.templateSources.conflicts.push(conflict);
+  };
+
+  const templateSources = Array.isArray(sources) ? sources : [];
+  for (const [index, source] of templateSources.entries()) {
+    if (source?.type !== 'local') continue;
+    if (typeof source.path !== 'string' || source.path.trim() === '') {
+      report.templateSources.errors.push({
+        index,
+        type: String(source?.type || ''),
+        path: String(source?.path || ''),
+        reason: 'invalid path'
+      });
+      continue;
+    }
+
+    const srcDir = expandHome(source.path);
+    if (!fs.existsSync(srcDir) || !fs.statSync(srcDir).isDirectory()) {
+      report.templateSources.errors.push({
+        index,
+        type: source.type,
+        path: source.path,
+        reason: 'directory not found'
+      });
+      continue;
+    }
+
+    const extRels = walkDir(srcDir).map((filePath) => norm(path.relative(srcDir, filePath)));
+    const sourceInfo = { type: source.type, path: source.path };
+    for (const rel of extRels) {
+      const existing = sourceMeta.get(rel);
+      if (existing?.type === 'builtin') {
+        recordConflict(rel, existing, [sourceInfo]);
+        continue;
+      }
+
+      if (existing) {
+        recordConflict(rel, sourceInfo, [existing]);
+      }
+
+      sourceMap.set(rel, srcDir);
+      sourceMeta.set(rel, sourceInfo);
+    }
+
+    report.templateSources.loaded += 1;
+    report.templateSources.files += extRels.length;
+  }
+
+  return {
+    mergedRels: [...sourceMap.keys()],
+    sourceMap
+  };
+}
+
 function writeIfChanged(projectRoot, targetPath, content, reportBucket) {
   const fullPath = path.join(projectRoot, targetPath);
   const exists = fs.existsSync(fullPath);
@@ -657,6 +732,13 @@ function syncTemplates(projectRoot, templateRootOverride) {
     templateVersion: version,
     templateRoot: norm(templateRoot),
     registryAdded: [],
+    templateSources: {
+      configured: 0,
+      loaded: 0,
+      files: 0,
+      errors: [],
+      conflicts: []
+    },
     managed: { written: [], created: [], unchanged: [], skippedMerged: [], removed: [] },
     custom: {
       detected: [],
@@ -681,7 +763,10 @@ function syncTemplates(projectRoot, templateRootOverride) {
     if (!known.has(e)) { merged.push(e); known.add(e); report.registryAdded.push({ entry: e, list: 'merged' }); }
   }
 
-  const allRels = walkDir(templateRoot).map(f => norm(path.relative(templateRoot, f)));
+  const templateSources = Array.isArray(cfg.templates?.sources) ? cfg.templates.sources : [];
+  report.templateSources.configured = templateSources.length;
+  const { mergedRels, sourceMap } = mergeTemplateSources(templateRoot, templateSources, report);
+  const allRels = mergedRels;
   const allSet = new Set(allRels);
   for (const entry of managed) {
     const isDir = entry.endsWith('/');
@@ -690,10 +775,14 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
     if (isDir) {
       const dir = path.join(templateRoot, entry);
-      if (!fs.existsSync(dir)) continue;
-      entryRels = walkDir(dir).map(f => norm(path.relative(templateRoot, f)));
+      const builtinRels = fs.existsSync(dir)
+        ? walkDir(dir).map((filePath) => norm(path.relative(templateRoot, filePath)))
+        : [];
+      const prefix = norm(entry);
+      const externalRels = allRels.filter((rel) => rel.startsWith(prefix) && !builtinRels.includes(rel));
+      entryRels = [...builtinRels, ...externalRels];
+      if (!entryRels.length) continue;
     } else {
-      entryRels = [];
       entryRels = entryVariantRels(entry, allSet, platformType);
       if (!entryRels.length) continue;
     }
@@ -708,7 +797,8 @@ function syncTemplates(projectRoot, templateRootOverride) {
         continue;
       }
 
-      const srcFull = path.join(templateRoot, src);
+      const srcRoot = sourceMap.get(src) || templateRoot;
+      const srcFull = path.join(srcRoot, src);
       const dstFull = path.join(projectRoot, tgt);
       const bin = isBinary(srcFull);
       const content = bin
@@ -777,7 +867,8 @@ function syncTemplates(projectRoot, templateRootOverride) {
     const src = selected.get(target);
     if (!src) continue;
 
-    const content = renderContent(fs.readFileSync(path.join(templateRoot, src), 'utf8'), vars);
+    const srcRoot = sourceMap.get(src) || templateRoot;
+    const content = renderContent(fs.readFileSync(path.join(srcRoot, src), 'utf8'), vars);
     const dir = path.dirname(dstFull);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(dstFull, content);

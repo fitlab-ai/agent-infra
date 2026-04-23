@@ -120,6 +120,27 @@
 4. 如果你维护的是模板源码分支或私有 fork，需要先补齐对应的 `.{platform}.` 模板变体，再把该平台标识加入模板同步逻辑。
 5. 在正式推广前，先用一个测试任务完整验证工作流和 gate 校验。
 
+## 外部模板与 Skill 源
+
+团队可以在 `.agents/.airc.json` 中配置外部模板源和共享 skill 源，用于接入私有平台模板、私有规则和团队维护的自定义 skill：
+
+```json
+{
+  "templates": {
+    "sources": [
+      { "type": "local", "path": "~/private-templates" }
+    ]
+  },
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/private-skills" }
+    ]
+  }
+}
+```
+
+模板源优先级为内置模板优先，外部模板只做补充；多个外部模板源之间，后面的 source 覆盖前面的 source。同步报告会在 `templateSources.conflicts` 中列出被忽略的同名文件。外部模板和 skill 可能包含会被 AI 工作流执行的脚本，只配置可信路径。
+
 ## 自定义 Skills
 
 项目可以在内置任务工作流之外增加自己的 skill。
@@ -156,7 +177,7 @@ args: "<task-id>"   # 可选
 {
   "skills": {
     "sources": [
-      { "type": "local", "path": "~/company-skills" }
+      { "type": "local", "path": "~/private-skills" }
     ]
   }
 }

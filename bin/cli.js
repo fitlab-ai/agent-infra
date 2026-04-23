@@ -35,9 +35,27 @@ Examples:
 
 const command = process.argv[2] || '';
 
+async function importCommand(importPath) {
+  try {
+    return await import(importPath);
+  } catch (error) {
+    if (error?.code === 'ERR_MODULE_NOT_FOUND') {
+      process.stderr.write(
+        'Error: Missing npm dependency. Run npm install before using agent-infra from a development checkout.\n'
+      );
+      process.stderr.write(`${error.message}\n`);
+      process.exitCode = 1;
+      return null;
+    }
+    throw error;
+  }
+}
+
 switch (command) {
   case 'init': {
-    const { cmdInit } = await import('../lib/init.js');
+    const imported = await importCommand('../lib/init.js');
+    if (!imported) break;
+    const { cmdInit } = imported;
     await cmdInit().catch((e) => {
       process.stderr.write(`Error: ${e.message}\n`);
       process.exitCode = 1;
@@ -45,7 +63,9 @@ switch (command) {
     break;
   }
   case 'update': {
-    const { cmdUpdate } = await import('../lib/update.js');
+    const imported = await importCommand('../lib/update.js');
+    if (!imported) break;
+    const { cmdUpdate } = imported;
     await cmdUpdate().catch((e) => {
       process.stderr.write(`Error: ${e.message}\n`);
       process.exitCode = 1;
@@ -53,7 +73,9 @@ switch (command) {
     break;
   }
   case 'merge': {
-    const { cmdMerge } = await import('../lib/merge.js');
+    const imported = await importCommand('../lib/merge.js');
+    if (!imported) break;
+    const { cmdMerge } = imported;
     await cmdMerge(process.argv.slice(3)).catch((e) => {
       process.stderr.write(`Error: ${e.message}\n`);
       process.exitCode = 1;
@@ -61,7 +83,9 @@ switch (command) {
     break;
   }
   case 'sandbox': {
-    const { runSandbox } = await import('../lib/sandbox/index.js');
+    const imported = await importCommand('../lib/sandbox/index.js');
+    if (!imported) break;
+    const { runSandbox } = imported;
     await runSandbox(process.argv.slice(3)).catch((e) => {
       process.stderr.write(`Error: ${e.message}\n`);
       process.exitCode = 1;

@@ -88,6 +88,13 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
       normalize(fs.realpathSync(templateRoot))
     );
     assert.equal(firstReport.configUpdated, true);
+    assert.deepEqual(firstReport.templateSources, {
+      configured: 0,
+      loaded: 0,
+      files: 0,
+      errors: [],
+      conflicts: []
+    });
     assert.ok(!("templateSource" in parsedConfig));
     assert.ok(firstReport.registryAdded.some((entry) => entry.entry === ".agents/skills/" && entry.list === "managed"));
     assert.deepEqual(firstReport.managed.created.sort(), ["demo/script.sh", "docs/empty.txt", "docs/guide.md"]);
@@ -269,6 +276,304 @@ test("syncTemplates prefers platform-specific variants and composes with zh-CN l
 
     assert.deepEqual(report.managed.created.sort(), ["docs/rule.md"]);
     assert.equal(fs.readFileSync(path.join(projectRoot, "docs/rule.md"), "utf8"), "github-zh\n");
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates includes external-only files for managed directories", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-dir-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = path.join(tmpDir, "template-root");
+    const externalRoot = path.join(tmpDir, "external-root");
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.mkdirSync(templateRoot, { recursive: true });
+    fs.mkdirSync(externalRoot, { recursive: true });
+
+    writeFile(externalRoot, ".agents/rules/custom.md", "Custom {{project}}\n");
+
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      platform: { type: "github" },
+      templates: {
+        sources: [{ type: "local", path: externalRoot }]
+      },
+      files: {
+        managed: [".agents/rules/"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+
+    assert.deepEqual(report.templateSources, {
+      configured: 1,
+      loaded: 1,
+      files: 1,
+      errors: [],
+      conflicts: []
+    });
+    assert.deepEqual(report.managed.created, [".agents/rules/custom.md"]);
+    assert.equal(
+      fs.readFileSync(path.join(projectRoot, ".agents/rules/custom.md"), "utf8"),
+      "Custom demo\n"
+    );
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates keeps built-ins authoritative and lets later external template sources override earlier sources", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-priority-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = path.join(tmpDir, "template-root");
+    const externalRootOne = path.join(tmpDir, "external-root-one");
+    const externalRootTwo = path.join(tmpDir, "external-root-two");
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.mkdirSync(templateRoot, { recursive: true });
+    fs.mkdirSync(externalRootOne, { recursive: true });
+    fs.mkdirSync(externalRootTwo, { recursive: true });
+
+    writeFile(templateRoot, "docs/rule.md", "builtin\n");
+    writeFile(externalRootOne, "docs/rule.md", "external-one\n");
+    writeFile(externalRootOne, "docs/external.md", "external-one\n");
+    writeFile(externalRootTwo, "docs/rule.md", "external-two\n");
+    writeFile(externalRootTwo, "docs/external.md", "external-two\n");
+
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      platform: { type: "github" },
+      templates: {
+        sources: [
+          { type: "local", path: externalRootOne },
+          { type: "local", path: externalRootTwo }
+        ]
+      },
+      files: {
+        managed: ["docs/"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+
+    assert.deepEqual(report.templateSources, {
+      configured: 2,
+      loaded: 2,
+      files: 4,
+      errors: [],
+      conflicts: [
+        {
+          rel: "docs/rule.md",
+          winner: { type: "builtin" },
+          ignored: [
+            { type: "local", path: externalRootOne },
+            { type: "local", path: externalRootTwo }
+          ]
+        },
+        {
+          rel: "docs/external.md",
+          winner: { type: "local", path: externalRootTwo },
+          ignored: [{ type: "local", path: externalRootOne }]
+        }
+      ]
+    });
+    assert.equal(fs.readFileSync(path.join(projectRoot, "docs/rule.md"), "utf8"), "builtin\n");
+    assert.equal(fs.readFileSync(path.join(projectRoot, "docs/external.md"), "utf8"), "external-two\n");
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates ignores external platform variants when a built-in variant already exists", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-builtin-variant-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = path.join(tmpDir, "template-root");
+    const externalRoot = path.join(tmpDir, "external-root");
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.mkdirSync(templateRoot, { recursive: true });
+    fs.mkdirSync(externalRoot, { recursive: true });
+
+    writeFile(templateRoot, "docs/rule.md", "builtin-base\n");
+    writeFile(templateRoot, "docs/rule.gitea.zh-CN.md", "builtin-gitea-zh\n");
+    writeFile(externalRoot, "docs/rule.gitea.zh-CN.md", "external-gitea-zh\n");
+
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "zh-CN",
+      platform: { type: "gitea" },
+      templates: {
+        sources: [{ type: "local", path: externalRoot }]
+      },
+      files: {
+        managed: ["docs/"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+
+    assert.deepEqual(report.templateSources.conflicts, [
+      {
+        rel: "docs/rule.gitea.zh-CN.md",
+        winner: { type: "builtin" },
+        ignored: [{ type: "local", path: externalRoot }]
+      }
+    ]);
+    assert.equal(fs.readFileSync(path.join(projectRoot, "docs/rule.md"), "utf8"), "builtin-gitea-zh\n");
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates selects platform and language variants from external template sources", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-variant-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = path.join(tmpDir, "template-root");
+    const externalRoot = path.join(tmpDir, "external-root");
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.mkdirSync(templateRoot, { recursive: true });
+    fs.mkdirSync(externalRoot, { recursive: true });
+
+    writeFile(templateRoot, "docs/rule.md", "builtin\n");
+    writeFile(externalRoot, "docs/rule.gitea.zh-CN.md", "external-gitea-zh\n");
+
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "zh-CN",
+      platform: { type: "gitea" },
+      templates: {
+        sources: [{ type: "local", path: externalRoot }]
+      },
+      files: {
+        managed: ["docs/"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+
+    assert.equal(report.templateSources.loaded, 1);
+    assert.equal(fs.readFileSync(path.join(projectRoot, "docs/rule.md"), "utf8"), "external-gitea-zh\n");
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates reports invalid external template sources and keeps built-in behavior", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-invalid-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = path.join(tmpDir, "template-root");
+    const missingRoot = path.join(tmpDir, "missing-root");
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.mkdirSync(templateRoot, { recursive: true });
+
+    writeFile(templateRoot, "README.md", "Hello {{project}}\n");
+
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      platform: { type: "github" },
+      templates: {
+        sources: [
+          { type: "local", path: "" },
+          { type: "local", path: missingRoot }
+        ]
+      },
+      files: {
+        managed: ["README.md"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+
+    assert.equal(report.templateSources.configured, 2);
+    assert.equal(report.templateSources.loaded, 0);
+    assert.equal(report.templateSources.files, 0);
+    assert.deepEqual(report.templateSources.errors, [
+      { index: 0, type: "local", path: "", reason: "invalid path" },
+      { index: 1, type: "local", path: missingRoot, reason: "directory not found" }
+    ]);
+    assert.deepEqual(report.templateSources.conflicts, []);
+    assert.equal(fs.readFileSync(path.join(projectRoot, "README.md"), "utf8"), "Hello demo\n");
   } finally {
     childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
