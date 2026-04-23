@@ -195,7 +195,7 @@ args: "<task-id>"   # 可选
 
 ## 自定义 TUI 配置
 
-当团队使用的 AI TUI 不属于内置命令目标时，可以在 `.agents/.airc.json` 顶层配置 `customTools` 数组。该配置用于让 agent-infra 输出正确的下一步命令，并通过学习自定义 TUI 目录中的既有命令文件，为项目自定义 skill 生成同格式命令。
+当团队使用的 AI TUI 不属于内置命令目标时，可以在 `.agents/.airc.json` 顶层配置 `customTUIs` 数组。该配置用于让 agent-infra 输出正确的下一步命令，并通过学习自定义 TUI 目录中的既有命令文件，为项目自定义 skill 生成同格式命令。
 
 | 字段 | 必填 | 含义 |
 |------|------|------|
@@ -214,7 +214,7 @@ args: "<task-id>"   # 可选
 
 ```json
 {
-  "customTools": [
+  "customTUIs": [
     {
       "name": "Acme TUI",
       "dir": ".acme/commands",
@@ -229,7 +229,7 @@ args: "<task-id>"   # 可选
 ```json
 {
   "project": "agent-infra",
-  "customTools": [
+  "customTUIs": [
     {
       "name": "Internal Gemini",
       "dir": ".internal-gemini/commands",
@@ -239,7 +239,7 @@ args: "<task-id>"   # 可选
 }
 ```
 
-`customTools` 每个条目对应一个自定义 TUI。若希望 `update-agent-infra` 为自定义 skill 生成命令文件，请在 `dir` 中保留至少一个引用内置 skill 路径的既有命令文件，例如 `.agents/skills/analyze-task/SKILL.md`；agent-infra 会以该文件作为格式参考。
+`customTUIs` 每个条目对应一个自定义 TUI。若希望 `update-agent-infra` 为自定义 skill 生成命令文件，请在 `dir` 中保留至少一个引用内置 skill 路径的既有命令文件，例如 `.agents/skills/analyze-task/SKILL.md`；agent-infra 会以该文件作为格式参考。
 
 ## Skill 编写规范
 

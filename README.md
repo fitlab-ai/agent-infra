@@ -429,7 +429,7 @@ When `update-agent-infra` runs:
 
 ## Custom TUI Configuration
 
-Use the top-level `.agents/.airc.json` `customTools` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom TUI directory.
+Use the top-level `.agents/.airc.json` `customTUIs` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom TUI directory.
 
 | Field | Required | Meaning |
 |-------|----------|---------|
@@ -448,7 +448,7 @@ Non-namespaced custom TUI:
 
 ```json
 {
-  "customTools": [
+  "customTUIs": [
     {
       "name": "Acme TUI",
       "dir": ".acme/commands",
@@ -463,7 +463,7 @@ Namespaced custom TUI:
 ```json
 {
   "project": "agent-infra",
-  "customTools": [
+  "customTUIs": [
     {
       "name": "Internal Gemini",
       "dir": ".internal-gemini/commands",
@@ -473,7 +473,7 @@ Namespaced custom TUI:
 }
 ```
 
-`customTools` should contain one entry per custom TUI. To let `update-agent-infra` generate command files for custom skills, keep at least one existing command file in `dir` that references a built-in skill path such as `.agents/skills/analyze-task/SKILL.md`; agent-infra uses that file as the format reference.
+`customTUIs` should contain one entry per custom TUI. To let `update-agent-infra` generate command files for custom skills, keep at least one existing command file in `dir` that references a built-in skill path such as `.agents/skills/analyze-task/SKILL.md`; agent-infra uses that file as the format reference.
 
 <a id="prebuilt-workflows"></a>
 
@@ -555,7 +555,7 @@ The generated `.agents/.airc.json` file is the central contract between the boot
       { "type": "local", "path": "~/private-skills" }
     ]
   },
-  "customTools": [
+  "customTUIs": [
     {
       "name": "Acme TUI",
       "dir": ".acme/commands",
@@ -594,7 +594,7 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 | `templates.sources` | Optional ordered list of external template sources. Only `type: "local"` is supported today. |
 | `skills` | Optional custom skill sync configuration. |
 | `skills.sources` | Optional ordered list of external custom skill sources. Only `type: "local"` is supported today. |
-| `customTools` | Optional top-level list of custom AI TUI adapters. |
+| `customTUIs` | Optional top-level list of custom AI TUI adapters. |
 | `files` | Per-path update strategy configuration for managed, merged, and ejected files. |
 
 ### External template and skill sources

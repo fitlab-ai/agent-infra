@@ -195,7 +195,7 @@ Each source should mirror the `.agents/skills/` layout and include `SKILL.md` at
 
 ## Custom TUI Configuration
 
-Use the top-level `.agents/.airc.json` `customTools` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom TUI directory.
+Use the top-level `.agents/.airc.json` `customTUIs` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom TUI directory.
 
 | Field | Required | Meaning |
 |-------|----------|---------|
@@ -214,7 +214,7 @@ Non-namespaced custom TUI:
 
 ```json
 {
-  "customTools": [
+  "customTUIs": [
     {
       "name": "Acme TUI",
       "dir": ".acme/commands",
@@ -229,7 +229,7 @@ Namespaced custom TUI:
 ```json
 {
   "project": "agent-infra",
-  "customTools": [
+  "customTUIs": [
     {
       "name": "Internal Gemini",
       "dir": ".internal-gemini/commands",
@@ -239,7 +239,7 @@ Namespaced custom TUI:
 }
 ```
 
-`customTools` should contain one entry per custom TUI. To let `update-agent-infra` generate command files for custom skills, keep at least one existing command file in `dir` that references a built-in skill path such as `.agents/skills/analyze-task/SKILL.md`; agent-infra uses that file as the format reference.
+`customTUIs` should contain one entry per custom TUI. To let `update-agent-infra` generate command files for custom skills, keep at least one existing command file in `dir` that references a built-in skill path such as `.agents/skills/analyze-task/SKILL.md`; agent-infra uses that file as the format reference.
 
 ## Skill Authoring Conventions
 

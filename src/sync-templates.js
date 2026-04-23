@@ -154,7 +154,7 @@ function detectCustomSkills(projectRoot, templateSkillNames) {
     .sort((left, right) => left.dirName.localeCompare(right.dirName));
 }
 
-function isCustomProtected(targetPath, customSkills, project, customToolCommandTargets) {
+function isCustomProtected(targetPath, customSkills, project, customTUICommandTargets) {
   const normalized = norm(targetPath);
 
   return customSkills.some(({ dirName }) => (
@@ -162,16 +162,16 @@ function isCustomProtected(targetPath, customSkills, project, customToolCommandT
     normalized === `.claude/commands/${dirName}.md` ||
     normalized === `.opencode/commands/${dirName}.md` ||
     normalized === '.gemini/commands/' + project + '/' + dirName + '.toml' ||
-    customToolCommandTargets.has(normalized)
+    customTUICommandTargets.has(normalized)
   ));
 }
 
-function recordCustomToolSkipped(report, entry) {
-  report?.custom?.customTools?.skipped?.push(entry);
+function recordCustomTUISkipped(report, entry) {
+  report?.custom?.customTUIs?.skipped?.push(entry);
 }
 
-function recordCustomToolSkippedRef(report, entry) {
-  report?.custom?.customTools?.skippedRefs?.push(entry);
+function recordCustomTUISkippedRef(report, entry) {
+  report?.custom?.customTUIs?.skippedRefs?.push(entry);
 }
 
 function expandHome(inputPath) {
@@ -434,12 +434,12 @@ function generateOpenCodeCommand(skill, lang) {
   return `${lines.join('\n')}\n`;
 }
 
-function validateCustomTools(projectRoot, customTools, report) {
-  const tools = Array.isArray(customTools) ? customTools : [];
+function validateCustomTUIs(projectRoot, customTUIs, report) {
+  const tools = Array.isArray(customTUIs) ? customTUIs : [];
   return tools
     .map((tool, index) => {
       if (typeof tool?.dir !== 'string' || tool.dir.trim() === '') {
-        recordCustomToolSkipped(report, {
+        recordCustomTUISkipped(report, {
           index,
           name: String(tool?.name || ''),
           dir: String(tool?.dir || ''),
@@ -449,7 +449,7 @@ function validateCustomTools(projectRoot, customTools, report) {
       }
 
       if (!isInsideProject(projectRoot, tool.dir)) {
-        recordCustomToolSkipped(report, {
+        recordCustomTUISkipped(report, {
           index,
           name: String(tool?.name || ''),
           dir: tool.dir,
@@ -463,18 +463,18 @@ function validateCustomTools(projectRoot, customTools, report) {
     .filter(Boolean);
 }
 
-function customToolTargetPath(tool, refFile, refSkillName, skillName) {
+function customTUITargetPath(tool, refFile, refSkillName, skillName) {
   const targetFile = refFile.includes(refSkillName)
     ? refFile.replaceAll(refSkillName, skillName)
     : `${skillName}${path.extname(refFile)}`;
   return norm(path.join(tool.dir, targetFile));
 }
 
-function findCustomToolReference(projectRoot, tool, templateSkillNames, report, logSkipped = false) {
+function findCustomTUIReference(projectRoot, tool, templateSkillNames, report, logSkipped = false) {
   const cmdDir = path.join(projectRoot, tool.dir);
   if (!fs.existsSync(cmdDir) || !fs.statSync(cmdDir).isDirectory()) {
     if (logSkipped) {
-      recordCustomToolSkipped(report, {
+      recordCustomTUISkipped(report, {
         index: tool.index,
         name: String(tool.name || ''),
         dir: tool.dir,
@@ -489,7 +489,7 @@ function findCustomToolReference(projectRoot, tool, templateSkillNames, report, 
     .sort((left, right) => left.localeCompare(right));
   if (cmdFiles.length === 0) {
     if (logSkipped) {
-      recordCustomToolSkipped(report, {
+      recordCustomTUISkipped(report, {
         index: tool.index,
         name: String(tool.name || ''),
         dir: tool.dir,
@@ -518,7 +518,7 @@ function findCustomToolReference(projectRoot, tool, templateSkillNames, report, 
     sawKnownSkillReference = true;
     if (!content.includes(meta.description)) {
       if (logSkipped) {
-        recordCustomToolSkippedRef(report, {
+        recordCustomTUISkippedRef(report, {
           index: tool.index,
           name: String(tool.name || ''),
           dir: tool.dir,
@@ -534,7 +534,7 @@ function findCustomToolReference(projectRoot, tool, templateSkillNames, report, 
   }
 
   if (logSkipped) {
-    recordCustomToolSkipped(report, {
+    recordCustomTUISkipped(report, {
       index: tool.index,
       name: String(tool.name || ''),
       dir: tool.dir,
@@ -547,14 +547,14 @@ function findCustomToolReference(projectRoot, tool, templateSkillNames, report, 
   return null;
 }
 
-function buildCustomToolCommandTargets(projectRoot, customSkills, customTools, templateSkillNames) {
+function buildCustomTUICommandTargets(projectRoot, customSkills, customTUIs, templateSkillNames) {
   const targets = new Set();
-  for (const tool of customTools) {
-    const ref = findCustomToolReference(projectRoot, tool, templateSkillNames, null, false);
+  for (const tool of customTUIs) {
+    const ref = findCustomTUIReference(projectRoot, tool, templateSkillNames, null, false);
     if (!ref) continue;
 
     for (const skill of customSkills) {
-      targets.add(customToolTargetPath(tool, ref.file, ref.skillName, skill.dirName));
+      targets.add(customTUITargetPath(tool, ref.file, ref.skillName, skill.dirName));
     }
   }
 
@@ -562,7 +562,7 @@ function buildCustomToolCommandTargets(projectRoot, customSkills, customTools, t
 }
 
 function learnAndGenerateCommands(projectRoot, customSkills, tool, templateSkillNames, report) {
-  const ref = findCustomToolReference(projectRoot, tool, templateSkillNames, report, true);
+  const ref = findCustomTUIReference(projectRoot, tool, templateSkillNames, report, true);
   if (!ref) return;
 
   for (const skill of customSkills) {
@@ -574,14 +574,14 @@ function learnAndGenerateCommands(projectRoot, customSkills, tool, templateSkill
 
     writeIfChanged(
       projectRoot,
-      customToolTargetPath(tool, ref.file, ref.skillName, skill.dirName),
+      customTUITargetPath(tool, ref.file, ref.skillName, skill.dirName),
       generated,
       report.custom.commands
     );
   }
 }
 
-function generateCustomCommands(projectRoot, customSkills, project, lang, report, customTools, templateSkillNames) {
+function generateCustomCommands(projectRoot, customSkills, project, lang, report, customTUIs, templateSkillNames) {
   for (const skill of customSkills) {
     writeIfChanged(
       projectRoot,
@@ -603,7 +603,7 @@ function generateCustomCommands(projectRoot, customSkills, project, lang, report
     );
   }
 
-  const tools = Array.isArray(customTools) ? customTools : [];
+  const tools = Array.isArray(customTUIs) ? customTUIs : [];
   for (const tool of tools) {
     learnAndGenerateCommands(projectRoot, customSkills, tool, templateSkillNames, report);
   }
@@ -896,7 +896,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const { project, org, language: lang = 'en' } = cfg;
   const platformType = cfg.platform?.type || DEFAULTS.platform.type;
-  const customToolsConfig = Array.isArray(cfg.customTools) ? cfg.customTools : [];
+  const customTUIsConfig = Array.isArray(cfg.customTUIs) ? cfg.customTUIs : [];
   const vars = { project, org };
   const templateSkillNames = listTemplateSkillNames(templateRoot);
   const protectedCustomSkills = detectCustomSkills(projectRoot, templateSkillNames);
@@ -924,7 +924,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
       unchanged: [],
       removed: [],
       sourceErrors: [],
-      customTools: { skipped: [], skippedRefs: [] },
+      customTUIs: { skipped: [], skippedRefs: [] },
       commands: { generated: [], updated: [], unchanged: [] }
     },
     ejected: { created: [], skipped: [] },
@@ -932,11 +932,11 @@ function syncTemplates(projectRoot, templateRootOverride) {
     configUpdated: false,
     selfUpdate: false
   };
-  const customTools = validateCustomTools(projectRoot, customToolsConfig, report);
-  const customToolCommandTargets = buildCustomToolCommandTargets(
+  const customTUIs = validateCustomTUIs(projectRoot, customTUIsConfig, report);
+  const customTUICommandTargets = buildCustomTUICommandTargets(
     projectRoot,
     protectedCustomSkills,
-    customTools,
+    customTUIs,
     templateSkillNames
   );
 
@@ -1017,7 +1017,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
         for (const projFile of projFiles) {
           if (expectedTargets.has(projFile)) continue;
           if (projFile === configPathRel) continue;
-          if (isCustomProtected(projFile, protectedCustomSkills, project, customToolCommandTargets)) continue;
+          if (isCustomProtected(projFile, protectedCustomSkills, project, customTUICommandTargets)) continue;
           if (matchesAny(projFile, merged) || matchesAny(projFile, ejected)) continue;
 
           fs.unlinkSync(path.join(projectRoot, projFile));
@@ -1038,7 +1038,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const customSkills = detectCustomSkills(projectRoot, templateSkillNames);
   report.custom.detected = customSkills.map((skill) => skill.dirName);
-  generateCustomCommands(projectRoot, customSkills, project, lang, report, customTools, templateSkillNames);
+  generateCustomCommands(projectRoot, customSkills, project, lang, report, customTUIs, templateSkillNames);
 
   for (const entry of ejected) {
     const dstFull = path.join(projectRoot, entry);

@@ -70,7 +70,7 @@ function makeReferenceSource(tmpDir, content) {
 }
 
 test("syncTemplates learns custom TUI command format from existing command files", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tools-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tuis-"));
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -87,7 +87,7 @@ test("syncTemplates learns custom TUI command format from existing command files
     );
 
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }],
+      customTUIs: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }],
       templates: { sources: [{ type: "local", path: sourceRoot }] },
       files: {
         managed: [
@@ -118,13 +118,13 @@ test("syncTemplates learns custom TUI command format from existing command files
 });
 
 test("syncTemplates skips custom TUI generation when the reference directory is empty", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tools-empty-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tuis-empty-"));
 
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }]
+      customTUIs: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }]
     });
     fs.mkdirSync(path.join(projectRoot, ".acme/commands"), { recursive: true });
 
@@ -133,7 +133,7 @@ test("syncTemplates skips custom TUI generation when the reference directory is 
 
     assert.equal(fs.existsSync(path.join(projectRoot, ".acme/commands/local-check.cmd")), false);
     assert.equal(report.custom.commands.generated.length, 3);
-    assert.deepEqual(report.custom.customTools.skipped, [
+    assert.deepEqual(report.custom.customTUIs.skipped, [
       { index: 0, name: "Acme TUI", dir: ".acme/commands", reason: "no command files" }
     ]);
   } finally {
@@ -142,14 +142,14 @@ test("syncTemplates skips custom TUI generation when the reference directory is 
 });
 
 test("syncTemplates skips custom TUI generation when reference files do not identify a built-in skill", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tools-no-ref-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tuis-no-ref-"));
 
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
     const sourceRoot = makeReferenceSource(tmpDir, "description: Analyze requirements\nskill: missing reference\n");
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }],
+      customTUIs: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }],
       templates: { sources: [{ type: "local", path: sourceRoot }] },
       files: {
         managed: [
@@ -169,7 +169,7 @@ test("syncTemplates skips custom TUI generation when reference files do not iden
 
     assert.equal(fs.existsSync(path.join(projectRoot, ".acme/commands/local-check.cmd")), false);
     assert.equal(report.custom.commands.generated.length, 3);
-    assert.deepEqual(report.custom.customTools.skipped, [
+    assert.deepEqual(report.custom.customTUIs.skipped, [
       { index: 0, name: "Acme TUI", dir: ".acme/commands", reason: "no usable reference command file" }
     ]);
   } finally {
@@ -178,7 +178,7 @@ test("syncTemplates skips custom TUI generation when reference files do not iden
 });
 
 test("syncTemplates skips mismatched reference descriptions and uses the next valid custom TUI reference", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tools-desc-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tuis-desc-"));
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -195,7 +195,7 @@ test("syncTemplates skips mismatched reference descriptions and uses the next va
       "description: Analyze requirements for analyze-task\nskill: .agents/skills/analyze-task/SKILL.md\n"
     );
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }],
+      customTUIs: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }],
       templates: { sources: [{ type: "local", path: sourceRoot }] },
       files: {
         managed: [
@@ -217,7 +217,7 @@ test("syncTemplates skips mismatched reference descriptions and uses the next va
     assert.match(command, /description: Manual check/);
     assert.match(command, /skill: \.agents\/skills\/local-check\/SKILL\.md/);
     assert.ok(report.custom.commands.generated.includes(".acme/commands/02-local-check.cmd"));
-    assert.deepEqual(report.custom.customTools.skippedRefs, [
+    assert.deepEqual(report.custom.customTUIs.skippedRefs, [
       {
         index: 0,
         name: "Acme TUI",
@@ -227,14 +227,14 @@ test("syncTemplates skips mismatched reference descriptions and uses the next va
         reason: "description not found in reference command file"
       }
     ]);
-    assert.deepEqual(report.custom.customTools.skipped, []);
+    assert.deepEqual(report.custom.customTUIs.skipped, []);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates protects generated custom TUI command files during managed cleanup", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tools-protect-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tuis-protect-"));
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -244,7 +244,7 @@ test("syncTemplates protects generated custom TUI command files during managed c
       "description: Analyze requirements for analyze-task\nskill: .agents/skills/analyze-task/SKILL.md\n"
     );
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: "./.acme/commands", invoke: "acme ${skillName}" }],
+      customTUIs: [{ name: "Acme TUI", dir: "./.acme/commands", invoke: "acme ${skillName}" }],
       templates: { sources: [{ type: "local", path: sourceRoot }] },
       files: {
         managed: [
@@ -272,7 +272,7 @@ test("syncTemplates protects generated custom TUI command files during managed c
 });
 
 test("syncTemplates removes stale custom TUI files that only contain a custom skill name substring", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tools-protect-exact-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tuis-protect-exact-"));
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -282,7 +282,7 @@ test("syncTemplates removes stale custom TUI files that only contain a custom sk
       "description: Analyze requirements for analyze-task\nskill: .agents/skills/analyze-task/SKILL.md\n"
     );
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }],
+      customTUIs: [{ name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" }],
       templates: { sources: [{ type: "local", path: sourceRoot }] },
       files: {
         managed: [
@@ -310,19 +310,19 @@ test("syncTemplates removes stale custom TUI files that only contain a custom sk
 });
 
 test("syncTemplates rejects custom TUI directories outside the project root", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tools-outside-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tuis-outside-"));
 
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
     makeProject(projectRoot, {
-      customTools: [{ name: "Acme TUI", dir: "../outside", invoke: "acme ${skillName}" }]
+      customTUIs: [{ name: "Acme TUI", dir: "../outside", invoke: "acme ${skillName}" }]
     });
 
     const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
-    assert.deepEqual(report.custom.customTools.skipped, [
+    assert.deepEqual(report.custom.customTUIs.skipped, [
       {
         index: 0,
         name: "Acme TUI",
@@ -338,7 +338,7 @@ test("syncTemplates rejects custom TUI directories outside the project root", as
 });
 
 test("syncTemplates generates commands for multiple custom TUI tools and custom skills", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tools-multi-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tuis-multi-"));
 
   try {
     const projectRoot = path.join(tmpDir, "project");
@@ -355,7 +355,7 @@ test("syncTemplates generates commands for multiple custom TUI tools and custom 
       "desc = Analyze requirements for analyze-task\nrun .agents/skills/analyze-task/SKILL.md\n"
     );
     makeProject(projectRoot, {
-      customTools: [
+      customTUIs: [
         { name: "Acme TUI", dir: ".acme/commands", invoke: "acme ${skillName}" },
         { name: "Beta TUI", dir: ".beta/prompts", invoke: "beta run ${skillName}" }
       ],
@@ -391,15 +391,15 @@ test("syncTemplates generates commands for multiple custom TUI tools and custom 
       fs.readFileSync(path.join(projectRoot, ".beta/prompts/cmd-local-plan.md"), "utf8"),
       /desc = Manual plan/
     );
-    assert.deepEqual(report.custom.customTools.skipped, []);
-    assert.deepEqual(report.custom.customTools.skippedRefs, []);
+    assert.deepEqual(report.custom.customTUIs.skipped, []);
+    assert.deepEqual(report.custom.customTUIs.skippedRefs, []);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("syncTemplates keeps built-in custom skill command generation unchanged without customTools", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tools-compatible-"));
+test("syncTemplates keeps built-in custom skill command generation unchanged without customTUIs", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tuis-compatible-"));
 
   try {
     const projectRoot = path.join(tmpDir, "project");
