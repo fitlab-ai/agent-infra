@@ -143,7 +143,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures `customTools`, read each tool's `name` and `invoke`, then add the matching command line in the same format (`{name}` becomes the skill name and `&#123;project&#125;` becomes the project name).
 
 Output format:
 ```
@@ -172,7 +172,7 @@ Next step - create technical plan:
 - [ ] Updated `assigned_to` in task.md
 - [ ] Appended an Activity Log entry to task.md
 - [ ] Marked requirement-analysis as complete in workflow progress
-- [ ] Informed the user of the next step (must include all TUI command formats; do not filter)
+- [ ] Informed the user of the next step (must include all TUI command formats, including customTools; do not filter)
 - [ ] **Did not modify any business code**
 
 ## STOP

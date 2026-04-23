@@ -81,7 +81,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures `customTools`, read each tool's `name` and `invoke`, then add the matching command line in the same format (`{name}` becomes the skill name and `&#123;project&#125;` becomes the project name).
 
 Show the Issue number, URL, labels, Issue Type, milestone result, confirm that `issue_number` was written back, and include the next-step commands in every TUI format:
 
@@ -98,7 +98,7 @@ Next step - run requirements analysis:
 - [ ] Used `task.md` as the only content source
 - [ ] Recorded `issue_number` in task.md
 - [ ] Updated `updated_at` and appended the Activity Log entry
-- [ ] Included all TUI formats for the next-step commands
+- [ ] Included all TUI formats, including customTools, for the next-step commands
 
 ## STOP
 

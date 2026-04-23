@@ -62,7 +62,7 @@ Title changes require write permission. Follow the permission-degradation rules 
 
 ### 5. Inform User
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures `customTools`, read each tool's `name` and `invoke`, then add the matching command line in the same format (`{name}` becomes the skill name and `&#123;project&#125;` becomes the project name).
 
 If the skill updated an Issue title, explain that no extra sync command is required; continue with the workflow skill that matches the task's current stage.
 

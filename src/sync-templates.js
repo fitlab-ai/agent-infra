@@ -33,6 +33,21 @@ const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
 
 function norm(p) { return p.replace(/\\/g, '/'); }
 
+function normDir(p) {
+  return norm(p).replace(/^\.\//, '').replace(/\/+$/, '');
+}
+
+function isInsideProject(projectRoot, relativePath) {
+  if (typeof relativePath !== 'string' || relativePath.trim() === '' || path.isAbsolute(relativePath)) {
+    return false;
+  }
+
+  const root = path.resolve(projectRoot);
+  const resolved = path.resolve(projectRoot, relativePath);
+  const rel = path.relative(root, resolved);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
 function globMatch(pattern, filePath) {
   const p = norm(pattern), f = norm(filePath);
   const globstarDir = '__GLOBSTAR_DIR__';
@@ -139,15 +154,24 @@ function detectCustomSkills(projectRoot, templateSkillNames) {
     .sort((left, right) => left.dirName.localeCompare(right.dirName));
 }
 
-function isCustomProtected(targetPath, customSkills, project) {
+function isCustomProtected(targetPath, customSkills, project, customToolCommandTargets) {
   const normalized = norm(targetPath);
 
   return customSkills.some(({ dirName }) => (
     normalized.startsWith(`.agents/skills/${dirName}/`) ||
     normalized === `.claude/commands/${dirName}.md` ||
     normalized === `.opencode/commands/${dirName}.md` ||
-    normalized === '.gemini/commands/' + project + '/' + dirName + '.toml'
+    normalized === '.gemini/commands/' + project + '/' + dirName + '.toml' ||
+    customToolCommandTargets.has(normalized)
   ));
+}
+
+function recordCustomToolSkipped(report, entry) {
+  report?.custom?.customTools?.skipped?.push(entry);
+}
+
+function recordCustomToolSkippedRef(report, entry) {
+  report?.custom?.customTools?.skippedRefs?.push(entry);
 }
 
 function expandHome(inputPath) {
@@ -410,7 +434,154 @@ function generateOpenCodeCommand(skill, lang) {
   return `${lines.join('\n')}\n`;
 }
 
-function generateCustomCommands(projectRoot, customSkills, project, lang, report) {
+function validateCustomTools(projectRoot, customTools, report) {
+  const tools = Array.isArray(customTools) ? customTools : [];
+  return tools
+    .map((tool, index) => {
+      if (typeof tool?.dir !== 'string' || tool.dir.trim() === '') {
+        recordCustomToolSkipped(report, {
+          index,
+          name: String(tool?.name || ''),
+          dir: String(tool?.dir || ''),
+          reason: 'invalid dir'
+        });
+        return null;
+      }
+
+      if (!isInsideProject(projectRoot, tool.dir)) {
+        recordCustomToolSkipped(report, {
+          index,
+          name: String(tool?.name || ''),
+          dir: tool.dir,
+          reason: 'dir must be a relative path inside the project root'
+        });
+        return null;
+      }
+
+      return { ...tool, index, dir: normDir(tool.dir) };
+    })
+    .filter(Boolean);
+}
+
+function customToolTargetPath(tool, refFile, refSkillName, skillName) {
+  const targetFile = refFile.includes(refSkillName)
+    ? refFile.replaceAll(refSkillName, skillName)
+    : `${skillName}${path.extname(refFile)}`;
+  return norm(path.join(tool.dir, targetFile));
+}
+
+function findCustomToolReference(projectRoot, tool, templateSkillNames, report, logSkipped = false) {
+  const cmdDir = path.join(projectRoot, tool.dir);
+  if (!fs.existsSync(cmdDir) || !fs.statSync(cmdDir).isDirectory()) {
+    if (logSkipped) {
+      recordCustomToolSkipped(report, {
+        index: tool.index,
+        name: String(tool.name || ''),
+        dir: tool.dir,
+        reason: 'directory not found'
+      });
+    }
+    return null;
+  }
+
+  const cmdFiles = fs.readdirSync(cmdDir)
+    .filter((file) => fs.statSync(path.join(cmdDir, file)).isFile())
+    .sort((left, right) => left.localeCompare(right));
+  if (cmdFiles.length === 0) {
+    if (logSkipped) {
+      recordCustomToolSkipped(report, {
+        index: tool.index,
+        name: String(tool.name || ''),
+        dir: tool.dir,
+        reason: 'no command files'
+      });
+    }
+    return null;
+  }
+
+  let sawKnownSkillReference = false;
+
+  for (const file of cmdFiles) {
+    const content = fs.readFileSync(path.join(cmdDir, file), 'utf8');
+    const match = content.match(/\.agents\/skills\/([^/]+)\/SKILL\.md/);
+    if (!match) continue;
+
+    const skillName = match[1];
+    if (!templateSkillNames.has(skillName)) continue;
+
+    const skillMd = path.join(projectRoot, '.agents/skills', skillName, 'SKILL.md');
+    if (!fs.existsSync(skillMd)) continue;
+
+    const meta = parseSkillFrontmatter(skillMd);
+    if (!meta.description) continue;
+
+    sawKnownSkillReference = true;
+    if (!content.includes(meta.description)) {
+      if (logSkipped) {
+        recordCustomToolSkippedRef(report, {
+          index: tool.index,
+          name: String(tool.name || ''),
+          dir: tool.dir,
+          file,
+          skill: skillName,
+          reason: 'description not found in reference command file'
+        });
+      }
+      continue;
+    }
+
+    return { content, file, skillName, skillDesc: meta.description };
+  }
+
+  if (logSkipped) {
+    recordCustomToolSkipped(report, {
+      index: tool.index,
+      name: String(tool.name || ''),
+      dir: tool.dir,
+      reason: sawKnownSkillReference
+        ? 'no reference command file with matching description'
+        : 'no usable reference command file'
+    });
+  }
+
+  return null;
+}
+
+function buildCustomToolCommandTargets(projectRoot, customSkills, customTools, templateSkillNames) {
+  const targets = new Set();
+  for (const tool of customTools) {
+    const ref = findCustomToolReference(projectRoot, tool, templateSkillNames, null, false);
+    if (!ref) continue;
+
+    for (const skill of customSkills) {
+      targets.add(customToolTargetPath(tool, ref.file, ref.skillName, skill.dirName));
+    }
+  }
+
+  return targets;
+}
+
+function learnAndGenerateCommands(projectRoot, customSkills, tool, templateSkillNames, report) {
+  const ref = findCustomToolReference(projectRoot, tool, templateSkillNames, report, true);
+  if (!ref) return;
+
+  for (const skill of customSkills) {
+    const descToken = '__AGENT_INFRA_CUSTOM_SKILL_DESCRIPTION__';
+    const generated = ref.content
+      .replaceAll(ref.skillDesc, descToken)
+      .replaceAll(ref.skillName, skill.dirName)
+      .replaceAll(descToken, skill.description);
+
+    writeIfChanged(
+      projectRoot,
+      customToolTargetPath(tool, ref.file, ref.skillName, skill.dirName),
+      generated,
+      report.custom.commands
+    );
+  }
+}
+
+function generateCustomCommands(projectRoot, customSkills, project, lang, report, customTools, templateSkillNames) {
   for (const skill of customSkills) {
     writeIfChanged(
       projectRoot,
@@ -430,6 +601,11 @@ function generateCustomCommands(projectRoot, customSkills, project, lang, report
       generateOpenCodeCommand(skill, lang),
       report.custom.commands
     );
+  }
+
+  const tools = Array.isArray(customTools) ? customTools : [];
+  for (const tool of tools) {
+    learnAndGenerateCommands(projectRoot, customSkills, tool, templateSkillNames, report);
   }
 }
 
@@ -720,6 +896,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const { project, org, language: lang = 'en' } = cfg;
   const platformType = cfg.platform?.type || DEFAULTS.platform.type;
+  const customToolsConfig = Array.isArray(cfg.customTools) ? cfg.customTools : [];
   const vars = { project, org };
   const templateSkillNames = listTemplateSkillNames(templateRoot);
   const protectedCustomSkills = detectCustomSkills(projectRoot, templateSkillNames);
@@ -747,6 +924,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
       unchanged: [],
       removed: [],
       sourceErrors: [],
+      customTools: { skipped: [], skippedRefs: [] },
       commands: { generated: [], updated: [], unchanged: [] }
     },
     ejected: { created: [], skipped: [] },
@@ -754,6 +932,13 @@ function syncTemplates(projectRoot, templateRootOverride) {
     configUpdated: false,
     selfUpdate: false
   };
+  const customTools = validateCustomTools(projectRoot, customToolsConfig, report);
+  const customToolCommandTargets = buildCustomToolCommandTargets(
+    projectRoot,
+    protectedCustomSkills,
+    customTools,
+    templateSkillNames
+  );
 
   const known = new Set([...managed, ...merged, ...ejected]);
   for (const e of (DEFAULTS.files.managed || [])) {
@@ -832,7 +1017,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
         for (const projFile of projFiles) {
           if (expectedTargets.has(projFile)) continue;
           if (projFile === configPathRel) continue;
-          if (isCustomProtected(projFile, protectedCustomSkills, project)) continue;
+          if (isCustomProtected(projFile, protectedCustomSkills, project, customToolCommandTargets)) continue;
           if (matchesAny(projFile, merged) || matchesAny(projFile, ejected)) continue;
 
           fs.unlinkSync(path.join(projectRoot, projFile));
@@ -853,7 +1038,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const customSkills = detectCustomSkills(projectRoot, templateSkillNames);
   report.custom.detected = customSkills.map((skill) => skill.dirName);
-  generateCustomCommands(projectRoot, customSkills, project, lang, report);
+  generateCustomCommands(projectRoot, customSkills, project, lang, report, customTools, templateSkillNames);
 
   for (const entry of ejected) {
     const dstFull = path.join(projectRoot, entry);
