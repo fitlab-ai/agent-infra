@@ -25,10 +25,10 @@ git config core.hooksPath .github/hooks
 ```json
 {
   "templates": {
-    "sources": [{ "type": "local", "path": "~/company-templates" }]
+    "sources": [{ "type": "local", "path": "~/private-templates" }]
   },
   "skills": {
-    "sources": [{ "type": "local", "path": "~/company-skills" }]
+    "sources": [{ "type": "local", "path": "~/private-skills" }]
   }
 }
 ```

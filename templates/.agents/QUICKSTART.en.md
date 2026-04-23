@@ -25,10 +25,10 @@ If your team maintains private platform templates or shared custom skills, confi
 ```json
 {
   "templates": {
-    "sources": [{ "type": "local", "path": "~/company-templates" }]
+    "sources": [{ "type": "local", "path": "~/private-templates" }]
   },
   "skills": {
-    "sources": [{ "type": "local", "path": "~/company-skills" }]
+    "sources": [{ "type": "local", "path": "~/private-skills" }]
   }
 }
 ```

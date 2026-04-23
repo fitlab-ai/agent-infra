@@ -122,18 +122,18 @@ To adapt agent-infra to a private code-hosting platform:
 
 ## External Template And Skill Sources
 
-Teams can configure external template sources and shared skill sources in `.agents/.airc.json` for company platform templates, private rules, and shared custom skills:
+Teams can configure external template sources and shared skill sources in `.agents/.airc.json` for private platform templates, private rules, and shared custom skills:
 
 ```json
 {
   "templates": {
     "sources": [
-      { "type": "local", "path": "~/company-templates" }
+      { "type": "local", "path": "~/private-templates" }
     ]
   },
   "skills": {
     "sources": [
-      { "type": "local", "path": "~/company-skills" }
+      { "type": "local", "path": "~/private-skills" }
     ]
   }
 }
@@ -177,7 +177,7 @@ To reuse centralized team skills, configure `.agents/.airc.json`:
 {
   "skills": {
     "sources": [
-      { "type": "local", "path": "~/company-skills" }
+      { "type": "local", "path": "~/private-skills" }
     ]
   }
 }

@@ -212,7 +212,7 @@ test("agent-infra init records an optional external template source for any plat
 
   try {
     execSync(
-      `printf 'testproj\\ntestorg\\n\\ngithub\\n~/company-templates\\n\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\ngithub\\n~/private-templates\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
 
@@ -222,7 +222,7 @@ test("agent-infra init records an optional external template source for any plat
 
     assert.deepEqual(config.platform, { type: "github" });
     assert.deepEqual(config.templates, {
-      sources: [{ type: "local", path: "~/company-templates" }]
+      sources: [{ type: "local", path: "~/private-templates" }]
     });
     assert.ok(!("templateSource" in config), "init should not generate legacy templateSource");
   } finally {
@@ -258,7 +258,7 @@ test("agent-infra init records optional external skill sources", () => {
 
   try {
     execSync(
-      `printf 'testproj\\ntestorg\\n\\ngithub\\n\\n~/company-skills, ~/team-skills\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\ngithub\\n\\n~/private-skills, ~/team-skills\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
 
@@ -268,7 +268,7 @@ test("agent-infra init records optional external skill sources", () => {
 
     assert.deepEqual(config.skills, {
       sources: [
-        { type: "local", path: "~/company-skills" },
+        { type: "local", path: "~/private-skills" },
         { type: "local", path: "~/team-skills" }
       ]
     });

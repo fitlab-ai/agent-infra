@@ -122,18 +122,18 @@
 
 ## 外部模板与 Skill 源
 
-团队可以在 `.agents/.airc.json` 中配置外部模板源和共享 skill 源，用于接入公司内部平台模板、私有规则和团队维护的自定义 skill：
+团队可以在 `.agents/.airc.json` 中配置外部模板源和共享 skill 源，用于接入私有平台模板、私有规则和团队维护的自定义 skill：
 
 ```json
 {
   "templates": {
     "sources": [
-      { "type": "local", "path": "~/company-templates" }
+      { "type": "local", "path": "~/private-templates" }
     ]
   },
   "skills": {
     "sources": [
-      { "type": "local", "path": "~/company-skills" }
+      { "type": "local", "path": "~/private-skills" }
     ]
   }
 }
@@ -177,7 +177,7 @@ args: "<task-id>"   # 可选
 {
   "skills": {
     "sources": [
-      { "type": "local", "path": "~/company-skills" }
+      { "type": "local", "path": "~/private-skills" }
     ]
   }
 }

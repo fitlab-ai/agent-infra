@@ -392,7 +392,7 @@ If you maintain reusable team skills outside the repository, declare them in `.a
 {
   "skills": {
     "sources": [
-      { "type": "local", "path": "~/company-skills" },
+      { "type": "local", "path": "~/private-skills" },
       { "type": "local", "path": "~/team-skills" }
     ]
   }
@@ -402,7 +402,7 @@ If you maintain reusable team skills outside the repository, declare them in `.a
 Expected source layout:
 
 ```text
-~/company-skills/
+~/private-skills/
   enforce-style/
     SKILL.md
   release-check/
@@ -499,12 +499,12 @@ The generated `.agents/.airc.json` file is the central contract between the boot
   "templateVersion": "v0.5.6",
   "templates": {
     "sources": [
-      { "type": "local", "path": "~/company-templates" }
+      { "type": "local", "path": "~/private-templates" }
     ]
   },
   "skills": {
     "sources": [
-      { "type": "local", "path": "~/company-skills" }
+      { "type": "local", "path": "~/private-skills" }
     ]
   },
   "files": {
@@ -543,19 +543,19 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 
 ### External template and skill sources
 
-Use external sources when your team maintains company-specific platform templates, private rules, or shared custom skills outside this repository. You can configure them during `agent-infra init` or later by editing `.agents/.airc.json`:
+Use external sources when your team maintains private platform templates, private rules, or shared custom skills outside this repository. You can configure them during `agent-infra init` or later by editing `.agents/.airc.json`:
 
 ```json
 {
   "templates": {
     "sources": [
-      { "type": "local", "path": "~/company-templates" },
+      { "type": "local", "path": "~/private-templates" },
       { "type": "local", "path": "~/team-overrides/templates" }
     ]
   },
   "skills": {
     "sources": [
-      { "type": "local", "path": "~/company-skills" }
+      { "type": "local", "path": "~/private-skills" }
     ]
   }
 }

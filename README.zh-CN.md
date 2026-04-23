@@ -392,7 +392,7 @@ args: "<task-id>"   # 可选
 {
   "skills": {
     "sources": [
-      { "type": "local", "path": "~/company-skills" },
+      { "type": "local", "path": "~/private-skills" },
       { "type": "local", "path": "~/team-skills" }
     ]
   }
@@ -402,7 +402,7 @@ args: "<task-id>"   # 可选
 源目录结构示例：
 
 ```text
-~/company-skills/
+~/private-skills/
   enforce-style/
     SKILL.md
   release-check/
@@ -499,12 +499,12 @@ import-issue #42                    从 GitHub Issue 导入任务
   "templateVersion": "v0.5.6",
   "templates": {
     "sources": [
-      { "type": "local", "path": "~/company-templates" }
+      { "type": "local", "path": "~/private-templates" }
     ]
   },
   "skills": {
     "sources": [
-      { "type": "local", "path": "~/company-skills" }
+      { "type": "local", "path": "~/private-skills" }
     ]
   },
   "files": {
@@ -543,19 +543,19 @@ import-issue #42                    从 GitHub Issue 导入任务
 
 ### 外部模板与 skill 源
 
-当团队在仓库外维护公司内部平台模板、私有规则或共享自定义 skill 时，可以使用外部源。你可以在 `agent-infra init` 时配置，也可以之后手动编辑 `.agents/.airc.json`：
+当团队在仓库外维护私有平台模板、私有规则或共享自定义 skill 时，可以使用外部源。你可以在 `agent-infra init` 时配置，也可以之后手动编辑 `.agents/.airc.json`：
 
 ```json
 {
   "templates": {
     "sources": [
-      { "type": "local", "path": "~/company-templates" },
+      { "type": "local", "path": "~/private-templates" },
       { "type": "local", "path": "~/team-overrides/templates" }
     ]
   },
   "skills": {
     "sources": [
-      { "type": "local", "path": "~/company-skills" }
+      { "type": "local", "path": "~/private-skills" }
     ]
   }
 }
