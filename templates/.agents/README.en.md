@@ -193,6 +193,54 @@ Each source should mirror the `.agents/skills/` layout and include `SKILL.md` at
 - Built-in skills are not overridable by custom sources; if a source skill name conflicts with a built-in skill, the source copy is skipped
 - Use `files.ejected` if the project must take ownership of a built-in skill or command
 
+## Custom TUI Configuration
+
+Use the top-level `.agents/.airc.json` `customTUIs` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom TUI directory.
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `name` | Yes | Display name shown in reports and next-step guidance, for example `Acme TUI`. |
+| `dir` | Yes | Command directory relative to the project root, for example `.acme/commands`. The path must stay inside the project root. |
+| `invoke` | Yes | User-facing command template used in next-step guidance. |
+
+Supported `invoke` placeholders:
+
+| Placeholder | Replaced with | Example |
+|-------------|---------------|---------|
+| `${skillName}` | The skill command name, such as `review-task` or `commit`. | `acme ${skillName}` -> `acme review-task` |
+| `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
+
+Non-namespaced custom TUI:
+
+```json
+{
+  "customTUIs": [
+    {
+      "name": "Acme TUI",
+      "dir": ".acme/commands",
+      "invoke": "acme ${skillName}"
+    }
+  ]
+}
+```
+
+Namespaced custom TUI:
+
+```json
+{
+  "project": "agent-infra",
+  "customTUIs": [
+    {
+      "name": "Internal Gemini",
+      "dir": ".internal-gemini/commands",
+      "invoke": "/${projectName}:${skillName}"
+    }
+  ]
+}
+```
+
+`customTUIs` should contain one entry per custom TUI. To let `update-agent-infra` generate command files for custom skills, keep at least one existing command file in `dir` that references a built-in skill path such as `.agents/skills/analyze-task/SKILL.md`; agent-infra uses that file as the format reference.
+
 ## Skill Authoring Conventions
 
 When writing or updating `.agents/skills/*/SKILL.md` files and their templates, keep step numbering consistent:

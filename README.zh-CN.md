@@ -427,6 +427,54 @@ args: "<task-id>"   # 可选
 - 内置 skill 始终优先于自定义 source；如果 source 里出现与内置 skill 同名的目录，agent-infra 会跳过该 source skill，而不是覆盖内置实现
 - 如果你确实需要替换内置 skill 或命令，请使用现有的 `ejected` 机制，让项目自己接管该文件
 
+## 自定义 TUI 配置
+
+当团队使用的 AI TUI 不属于内置命令目标时，可以在 `.agents/.airc.json` 顶层配置 `customTUIs` 数组。该配置用于让 agent-infra 输出正确的下一步命令，并通过学习自定义 TUI 目录中的既有命令文件，为项目自定义 skill 生成同格式命令。
+
+| 字段 | 必填 | 含义 |
+|------|------|------|
+| `name` | 是 | 报告和下一步提示中展示的工具名称，例如 `Acme TUI`。 |
+| `dir` | 是 | 相对项目根目录的命令目录，例如 `.acme/commands`。路径必须位于项目根目录内。 |
+| `invoke` | 是 | 面向用户展示的命令模板，用于生成下一步提示。 |
+
+`invoke` 支持的占位符：
+
+| 占位符 | 替换为 | 示例 |
+|--------|--------|------|
+| `${skillName}` | skill 命令名，例如 `review-task` 或 `commit`。 | `acme ${skillName}` -> `acme review-task` |
+| `${projectName}` | `.airc.json` 中的 `project` 值，适用于带命名空间的命令。 | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
+
+不带命名空间的自定义 TUI：
+
+```json
+{
+  "customTUIs": [
+    {
+      "name": "Acme TUI",
+      "dir": ".acme/commands",
+      "invoke": "acme ${skillName}"
+    }
+  ]
+}
+```
+
+带命名空间的自定义 TUI：
+
+```json
+{
+  "project": "agent-infra",
+  "customTUIs": [
+    {
+      "name": "Internal Gemini",
+      "dir": ".internal-gemini/commands",
+      "invoke": "/${projectName}:${skillName}"
+    }
+  ]
+}
+```
+
+`customTUIs` 每个条目对应一个自定义 TUI。若希望 `update-agent-infra` 为自定义 skill 生成命令文件，请在 `dir` 中保留至少一个引用内置 skill 路径的既有命令文件，例如 `.agents/skills/analyze-task/SKILL.md`；agent-infra 会以该文件作为格式参考。
+
 <a id="prebuilt-workflows"></a>
 
 ## 预置工作流
@@ -507,6 +555,13 @@ import-issue #42                    从 GitHub Issue 导入任务
       { "type": "local", "path": "~/private-skills" }
     ]
   },
+  "customTUIs": [
+    {
+      "name": "Acme TUI",
+      "dir": ".acme/commands",
+      "invoke": "acme ${skillName}"
+    }
+  ],
   "files": {
     "managed": [
       ".agents/workspace/README.md",
@@ -539,6 +594,7 @@ import-issue #42                    从 GitHub Issue 导入任务
 | `templates.sources` | 可选的外部模板源列表，按顺序应用。当前仅支持 `type: "local"`。 |
 | `skills` | 可选的自定义 skill 同步配置。 |
 | `skills.sources` | 可选的外部自定义 skill 源列表，按顺序应用。当前仅支持 `type: "local"`。 |
+| `customTUIs` | 可选的顶层自定义 AI TUI 适配配置列表。 |
 | `files` | 针对具体路径配置 `managed`、`merged`、`ejected` 三类更新策略。 |
 
 ### 外部模板与 skill 源

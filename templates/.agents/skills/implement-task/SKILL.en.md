@@ -117,7 +117,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. Use the output template in `reference/output-template.md`.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Use the output template in `reference/output-template.md`.
 
 ## Completion Checklist
 
@@ -125,7 +125,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 - [ ] Created `{implementation-artifact}`
 - [ ] All required tests passed
 - [ ] Updated task.md and appended the Activity Log entry
-- [ ] Included every TUI command format in the user-facing next step
+- [ ] Included every TUI command format, including any custom TUIs, in the user-facing next step
 
 ## STOP
 

@@ -86,7 +86,7 @@ Choose exactly one branch based on the findings:
 
 > The full four-branch output templates, selection rules, and prohibition clauses live in `reference/output-templates.md`. Read `reference/output-templates.md` before reporting the review result.
 
-Include all TUI command formats in the next-step output.
+Include all TUI command formats in the next-step output. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 ## Completion Checklist
 
@@ -94,7 +94,7 @@ Include all TUI command formats in the next-step output.
 - [ ] Created `{review-artifact}`
 - [ ] Updated task.md and appended the Activity Log entry
 - [ ] Chose exactly one verdict branch in the user output
-- [ ] Informed the user of the next step (must include all TUI command formats; do not filter)
+- [ ] Informed the user of the next step (must include all TUI command formats, including any custom TUIs; do not filter)
 
 ## Notes
 

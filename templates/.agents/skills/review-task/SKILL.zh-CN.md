@@ -86,7 +86,7 @@ node .agents/scripts/validate-artifact.js gate review-task .agents/workspace/act
 
 > 完整的 4 分支输出模板、判断规则和禁止条款见 `reference/output-templates.md`。向用户汇报审查结论前先读取 `reference/output-templates.md`。
 
-向用户展示下一步时，必须包含所有 TUI 命令格式。
+向用户展示下一步时，必须包含所有 TUI 命令格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 
 ## 完成检查清单
 
@@ -94,7 +94,7 @@ node .agents/scripts/validate-artifact.js gate review-task .agents/workspace/act
 - [ ] 已创建 `{review-artifact}`
 - [ ] 已更新 task.md 并追加 Activity Log
 - [ ] 用户输出中只选择了一个审查结论分支
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
+- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，含自定义 TUI，不要筛选）
 
 ## 注意事项
 
