@@ -62,6 +62,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.ok(!config.branchPrefix, "branchPrefix should not exist");
     assert.ok(!config.source, "consumer projects should not have source: self");
     assert.deepEqual(config.sandbox, {
+      engine: null,
       runtimes: ["node20"],
       tools: ["claude-code", "codex", "opencode", "gemini-cli"],
       dockerfile: null,
@@ -137,6 +138,15 @@ test("agent-infra init generates seed files in a temp directory", () => {
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test("agent-infra init defaults macOS sandbox engine to Colima", () => {
+  const initSource = read("lib/init.js");
+
+  assert.match(
+    initSource,
+    /select\(\s*'Sandbox engine \(macOS\)',\s*\[\s*'colima',\s*'orbstack',\s*'docker-desktop'\s*\],\s*'colima'\s*\)/s
+  );
 });
 
 test("agent-infra init accepts a custom platform selected from the menu", () => {
@@ -449,6 +459,7 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     );
     assert.deepEqual(updated.platform, { type: "github" }, "update should backfill default platform config");
     assert.deepEqual(updated.sandbox, {
+      engine: null,
       runtimes: ["node20"],
       tools: ["claude-code", "codex", "opencode", "gemini-cli"],
       dockerfile: null,
