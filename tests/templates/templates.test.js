@@ -41,6 +41,7 @@ const lowFrequencyCommands = [
   "import-dependabot",
   "init-labels",
   "init-milestones",
+  "post-release",
   "refine-title",
   "release",
   "restore-task",

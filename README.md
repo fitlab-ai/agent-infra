@@ -314,6 +314,7 @@ agent-infra ships with **a rich set of built-in AI skills**. They are organized 
 |-------|-------------|------------|----------------------|
 | `release` | Execute the version release workflow. | `version` (`X.Y.Z`) | Publish a new project release. |
 | `create-release-note` | Generate release notes from PRs and commits. | `version`, `previous-version` (optional) | Prepare a changelog before shipping. |
+| `post-release` | Run post-release follow-up tasks (version bump, artifact rebuild, optional demo capture). | None | Finalize the release cycle after pushing a release tag. |
 
 <a id="security-skills"></a>
 

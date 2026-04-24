@@ -146,6 +146,11 @@ Next steps (manual):
    - Claude Code / OpenCode: /create-release-note {version}
    - Gemini CLI: /{{project}}:create-release-note {version}
    - Codex CLI: $create-release-note {version}
+
+4. (Optional) Run post-release follow-up tasks:
+   - Claude Code / OpenCode: /post-release
+   - Gemini CLI: /{{project}}:post-release
+   - Codex CLI: $post-release
 ```
 
 ### Rollback Instructions

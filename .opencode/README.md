@@ -64,6 +64,7 @@ AI 代理的分步指令。
 ### 发布和维护
 - `release` - 创建发布版本（TODO: 需适配技术栈）
 - `create-release-note` - 生成发布说明
+- `post-release` - 执行发布后处理（版本 bump、产物重建等）
 - `refine-title` - 优化 Issue/PR 标题
 - `upgrade-dependency` - 升级依赖（TODO: 需适配技术栈）
 

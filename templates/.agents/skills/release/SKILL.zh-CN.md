@@ -146,6 +146,11 @@ bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PAT
    - Claude Code / OpenCode：/create-release-note {version}
    - Gemini CLI：/{{project}}:create-release-note {version}
    - Codex CLI：$create-release-note {version}
+
+4.（可选）执行发布后处理：
+   - Claude Code / OpenCode：/post-release
+   - Gemini CLI：/{{project}}:post-release
+   - Codex CLI：$post-release
 ```
 
 ### 回滚说明
