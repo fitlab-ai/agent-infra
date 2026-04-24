@@ -7,6 +7,10 @@ import os from "node:os";
 
 import { envWithPrependedPath, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../helpers.js";
 
+// On macOS, init prompts for sandbox engine (extra blank line input needed)
+const IS_DARWIN = os.platform() === "darwin";
+const ENGINE_NL = IS_DARWIN ? "\\n" : "";
+
 test("bootstrap CLI files exist", () => {
   assert.ok(exists("install.sh"), "install.sh should exist");
   assert.ok(exists("bin/cli.js"), "bin/cli.js (node) should exist");
@@ -45,7 +49,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
 
   try {
     execSync(
-      `printf 'testproj\\ntestorg\\n\\n\\n\\n\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
 
@@ -62,7 +66,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.ok(!config.branchPrefix, "branchPrefix should not exist");
     assert.ok(!config.source, "consumer projects should not have source: self");
     assert.deepEqual(config.sandbox, {
-      engine: null,
+      engine: IS_DARWIN ? "colima" : null,
       runtimes: ["node20"],
       tools: ["claude-code", "codex", "opencode", "gemini-cli"],
       dockerfile: null,
@@ -155,7 +159,7 @@ test("agent-infra init accepts a custom platform selected from the menu", () => 
 
   try {
     const output = execSync(
-      `printf 'testproj\\ntestorg\\n\\n2\\nmy-platform\\n\\n\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}2\\nmy-platform\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe", encoding: "utf8" }
     );
 
@@ -179,7 +183,7 @@ test("agent-infra init remains compatible with direct platform input", () => {
 
   try {
     execSync(
-      `printf 'testproj\\ntestorg\\n\\ngithub\\n\\n\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}github\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
 
@@ -198,7 +202,7 @@ test("agent-infra init warns when a custom platform is entered directly", () => 
 
   try {
     const output = execSync(
-      `printf 'testproj\\ntestorg\\n\\ngitea\\n\\n\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}gitea\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe", encoding: "utf8" }
     );
 
@@ -222,7 +226,7 @@ test("agent-infra init records an optional external template source for any plat
 
   try {
     execSync(
-      `printf 'testproj\\ntestorg\\n\\ngithub\\n~/private-templates\\n\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}github\\n~/private-templates\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
 
@@ -246,7 +250,7 @@ test("agent-infra init omits optional source config when source prompts are blan
 
   try {
     execSync(
-      `printf 'testproj\\ntestorg\\n\\ngitea\\n\\n\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}gitea\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
 
@@ -268,7 +272,7 @@ test("agent-infra init records optional external skill sources", () => {
 
   try {
     execSync(
-      `printf 'testproj\\ntestorg\\n\\ngithub\\n\\n~/private-skills, ~/team-skills\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}github\\n\\n~/private-skills, ~/team-skills\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
 
@@ -300,7 +304,7 @@ test("installed sync-templates.js executes inside a type=module project", () => 
     );
 
     execSync(
-      `printf 'esmproj\\nesmorg\\n\\n\\n\\n\\n' | node "${cli}" init`,
+      `printf 'esmproj\\nesmorg\\n\\n${ENGINE_NL}\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
     assert.equal(
@@ -386,7 +390,7 @@ test("agent-infra init rejects invalid input", () => {
   const cases = [
     { input: 'demo"x\\ntestorg\\n\\n\\n', desc: "project name with quote" },
     { input: 'testproj\\ntestorg\\nbad-lang\\n\\n', desc: "unsupported language" },
-    { input: 'testproj\\ntestorg\\n\\nbad platform\\n', desc: "invalid platform type" }
+    { input: `testproj\\ntestorg\\n\\n${ENGINE_NL}bad platform\\n`, desc: "invalid platform type" }
   ];
 
   cases.forEach(({ input, desc }) => {
