@@ -276,6 +276,7 @@ const commandSpecs = {
     en: "Design plan for task $1.",
     zh: "为任务 $1 设计方案。"
   },
+  "post-release": {},
   "refine-task": {
     usage: "<task-id>",
     en: "Refine task $1.",
