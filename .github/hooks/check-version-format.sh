@@ -21,7 +21,7 @@ template_version=$(
   exit 1
 }
 
-if ! printf '%s\n' "$template_version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+if ! printf '%s\n' "$template_version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
   echo "Error: .agents/.airc.json templateVersion must use v-prefixed semver (found: $template_version)."
   exit 1
 fi
