@@ -18,6 +18,10 @@ function writeJson(root, relativePath, value) {
 
 function makeTemplateRoot(tmpDir) {
   const templateRoot = path.join(tmpDir, "template-root");
+  writeJson(tmpDir, "package.json", {
+    name: "@fitlab-ai/agent-infra",
+    version: "0.0.0-test"
+  });
   fs.mkdirSync(path.join(templateRoot, ".agents/skills"), { recursive: true });
   fs.mkdirSync(path.join(templateRoot, ".claude/commands"), { recursive: true });
   fs.mkdirSync(path.join(templateRoot, ".gemini/commands/_project_"), { recursive: true });

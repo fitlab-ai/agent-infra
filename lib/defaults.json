@@ -41,10 +41,12 @@
       ".opencode/commands/"
     ],
     "merged": [
+      "**/post-release.*",
       "**/release.*",
       "**/test-integration.*",
       "**/test.*",
       "**/upgrade-dependency.*",
+      ".agents/skills/post-release/SKILL.*",
       ".agents/skills/release/SKILL.*",
       ".agents/skills/test-integration/SKILL.*",
       ".agents/skills/test/SKILL.*",

@@ -23,9 +23,6 @@ const DEFAULTS = JSON.parse(
   fs.readFileSync(new URL('../lib/defaults.json', import.meta.url), 'utf8')
 );
 
-const INSTALLER_VERSION = 'v' + JSON.parse(
-  fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
-).version;
 const PACKAGE_NAME = '@fitlab-ai/agent-infra';
 // Add a new identifier here only after shipping matching .{platform}. template variants.
 const KNOWN_PLATFORMS = new Set(['github']);
@@ -85,6 +82,12 @@ function removeEmptyDirs(dir) {
   if (fs.readdirSync(dir).length === 0) {
     fs.rmdirSync(dir);
   }
+}
+
+function resolveVersionFromTemplateRoot(tplRoot) {
+  const pkgPath = path.join(path.dirname(tplRoot), 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  return 'v' + pkg.version;
 }
 
 function parseSkillFrontmatter(filePath) {
@@ -891,7 +894,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
       };
     }
   }
-  const version = INSTALLER_VERSION;
+  const version = resolveVersionFromTemplateRoot(templateRoot);
   const hadTemplateSource = Object.prototype.hasOwnProperty.call(cfg, 'templateSource');
 
   const { project, org, language: lang = 'en' } = cfg;
