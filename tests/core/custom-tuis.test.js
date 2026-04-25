@@ -18,6 +18,10 @@ function writeJson(root, relativePath, value) {
 
 function makeTemplateRoot(tmpDir) {
   const templateRoot = path.join(tmpDir, "template-root");
+  writeJson(tmpDir, "package.json", {
+    name: "@fitlab-ai/agent-infra",
+    version: "0.0.0-test"
+  });
   writeFile(
     templateRoot,
     ".agents/skills/analyze-task/SKILL.md",

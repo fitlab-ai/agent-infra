@@ -114,7 +114,6 @@ git push origin vX.Y.Z
 
 - 检测最新已发布标签并解析版本
 - bump 到下一个开发版本
-- 同步更新 `.agents/.airc.json` 中的 `templateVersion`
 - 重建内联产物
 - 可选录制最新执行动图
 - 创建发布后处理提交

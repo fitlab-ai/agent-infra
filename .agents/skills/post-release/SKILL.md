@@ -34,8 +34,7 @@ npm install --package-lock-only
 ```
 
 - 读取新的 prerelease 版本号
-- 使用编辑工具更新 `.agents/.airc.json` 中的 `templateVersion` 为 `v{new-version}`
-- 确保 `package.json`、`package-lock.json` 和 `.agents/.airc.json` 中的版本保持一致
+- 确保 `package.json` 与 `package-lock.json` 的版本保持一致
 
 ### 4. 重新生成内联产物
 

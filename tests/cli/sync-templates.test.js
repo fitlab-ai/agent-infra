@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { loadFreshEsm, read, supportsPosixModeBits } from "../helpers.js";
+import { loadFreshEsm, supportsPosixModeBits } from "../helpers.js";
 
 function writeFile(root, relativePath, content) {
   const fullPath = path.join(root, relativePath);
@@ -19,6 +19,19 @@ function writeJson(root, relativePath, value) {
 
 function normalize(targetPath) {
   return targetPath.replace(/\\/g, "/");
+}
+
+function createTemplateInstall(tmpDir, version = "0.0.0-test") {
+  const installRoot = path.join(tmpDir, "install");
+  const templateRoot = path.join(installRoot, "templates");
+
+  fs.mkdirSync(templateRoot, { recursive: true });
+  writeJson(installRoot, "package.json", {
+    name: "@fitlab-ai/agent-infra",
+    version
+  });
+
+  return { installRoot, templateRoot };
 }
 
 test("syncTemplates resolves template roots via PATH lookup and removes legacy templateSource", async () => {
@@ -199,10 +212,9 @@ test("syncTemplates reports the bundled installer version with a v prefix", asyn
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = path.join(tmpDir, "template-root");
+    const { templateRoot } = createTemplateInstall(tmpDir);
 
     fs.mkdirSync(projectRoot, { recursive: true });
-    fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, "README.md", "Hello {{project}}\n");
     writeJson(projectRoot, ".agents/.airc.json", {
@@ -227,10 +239,7 @@ test("syncTemplates reports the bundled installer version with a v prefix", asyn
     const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
-    assert.equal(
-      report.templateVersion,
-      `v${JSON.parse(read("package.json")).version}`
-    );
+    assert.equal(report.templateVersion, "v0.0.0-test");
   } finally {
     childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -243,10 +252,9 @@ test("syncTemplates prefers platform-specific variants and composes with zh-CN l
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = path.join(tmpDir, "template-root");
+    const { templateRoot } = createTemplateInstall(tmpDir);
 
     fs.mkdirSync(projectRoot, { recursive: true });
-    fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, "docs/rule.md", "base\n");
     writeFile(templateRoot, "docs/rule.github.md", "github-en\n");
@@ -288,11 +296,10 @@ test("syncTemplates includes external-only files for managed directories", async
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = path.join(tmpDir, "template-root");
+    const { templateRoot } = createTemplateInstall(tmpDir);
     const externalRoot = path.join(tmpDir, "external-root");
 
     fs.mkdirSync(projectRoot, { recursive: true });
-    fs.mkdirSync(templateRoot, { recursive: true });
     fs.mkdirSync(externalRoot, { recursive: true });
 
     writeFile(externalRoot, ".agents/rules/custom.md", "Custom {{project}}\n");
@@ -346,12 +353,11 @@ test("syncTemplates keeps built-ins authoritative and lets later external templa
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = path.join(tmpDir, "template-root");
+    const { templateRoot } = createTemplateInstall(tmpDir);
     const externalRootOne = path.join(tmpDir, "external-root-one");
     const externalRootTwo = path.join(tmpDir, "external-root-two");
 
     fs.mkdirSync(projectRoot, { recursive: true });
-    fs.mkdirSync(templateRoot, { recursive: true });
     fs.mkdirSync(externalRootOne, { recursive: true });
     fs.mkdirSync(externalRootTwo, { recursive: true });
 
@@ -424,11 +430,10 @@ test("syncTemplates ignores external platform variants when a built-in variant a
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = path.join(tmpDir, "template-root");
+    const { templateRoot } = createTemplateInstall(tmpDir);
     const externalRoot = path.join(tmpDir, "external-root");
 
     fs.mkdirSync(projectRoot, { recursive: true });
-    fs.mkdirSync(templateRoot, { recursive: true });
     fs.mkdirSync(externalRoot, { recursive: true });
 
     writeFile(templateRoot, "docs/rule.md", "builtin-base\n");
@@ -480,11 +485,10 @@ test("syncTemplates selects platform and language variants from external templat
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = path.join(tmpDir, "template-root");
+    const { templateRoot } = createTemplateInstall(tmpDir);
     const externalRoot = path.join(tmpDir, "external-root");
 
     fs.mkdirSync(projectRoot, { recursive: true });
-    fs.mkdirSync(templateRoot, { recursive: true });
     fs.mkdirSync(externalRoot, { recursive: true });
 
     writeFile(templateRoot, "docs/rule.md", "builtin\n");
@@ -529,11 +533,10 @@ test("syncTemplates reports invalid external template sources and keeps built-in
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = path.join(tmpDir, "template-root");
+    const { templateRoot } = createTemplateInstall(tmpDir);
     const missingRoot = path.join(tmpDir, "missing-root");
 
     fs.mkdirSync(projectRoot, { recursive: true });
-    fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, "README.md", "Hello {{project}}\n");
 
@@ -586,10 +589,9 @@ test("syncTemplates removes stale managed files but preserves merged and ejected
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = path.join(tmpDir, "template-root");
+    const { templateRoot } = createTemplateInstall(tmpDir);
 
     fs.mkdirSync(projectRoot, { recursive: true });
-    fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, "docs/guide.md", "Guide\n");
     writeFile(templateRoot, ".agents/keep.md", "AI enabled\n");
@@ -651,10 +653,9 @@ test("syncTemplates preserves stale files that match merged glob patterns", asyn
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = path.join(tmpDir, "template-root");
+    const { templateRoot } = createTemplateInstall(tmpDir);
 
     fs.mkdirSync(projectRoot, { recursive: true });
-    fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, "docs/guide.md", "Guide\n");
     writeJson(projectRoot, ".agents/.airc.json", {
@@ -698,10 +699,9 @@ test("syncTemplates syncs the managed github hook as a single file", async () =>
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = path.join(tmpDir, "template-root");
+    const { templateRoot } = createTemplateInstall(tmpDir);
 
     fs.mkdirSync(projectRoot, { recursive: true });
-    fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(
       templateRoot,
@@ -765,10 +765,9 @@ test("syncTemplates reports github pre-commit as a merged pending file", async (
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const templateRoot = path.join(tmpDir, "template-root");
+    const { templateRoot } = createTemplateInstall(tmpDir);
 
     fs.mkdirSync(projectRoot, { recursive: true });
-    fs.mkdirSync(templateRoot, { recursive: true });
 
     writeFile(templateRoot, ".github/hooks/pre-commit", "#!/bin/sh\n");
 
