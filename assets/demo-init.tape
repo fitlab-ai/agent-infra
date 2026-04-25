@@ -59,13 +59,26 @@ Sleep 1s
 # Prompt 3: Language — choose English
 Type "en"
 Enter
+Wait+Screen /Sandbox engine/
+Sleep 1s
+
+# Prompt 4: Sandbox engine — accept default (colima)
+Enter
 Wait+Screen /Platform/
 Sleep 1s
 
-# Prompt 4: Platform type — accept default (github)
+# Prompt 5: Platform type — accept default (github)
 Enter
-Wait+Screen /initialized successfully/
-Sleep 3s
+Wait+Screen /Template sources/
+Sleep 1s
+
+# Prompt 6: Template sources — skip (Enter)
+Enter
+Sleep 1s
+
+# Prompt 7: Skill sources — skip (Enter)
+Enter
+Sleep 5s
 
 # ── Show generated structure ──
 Type "tree .agents/ .claude/ .gemini/ .opencode/ -L 2 --dirsfirst"
