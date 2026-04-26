@@ -12,6 +12,14 @@ function modeBits(filePath) {
   return fs.statSync(filePath).mode & 0o777;
 }
 
+function restoreDockerContext(previousValue) {
+  if (previousValue === undefined) {
+    delete process.env.DOCKER_CONTEXT;
+  } else {
+    process.env.DOCKER_CONTEXT = previousValue;
+  }
+}
+
 test("agent-infra sandbox help is wired into the main CLI", () => {
   const output = execFileSync(process.execPath, [filePath("bin/cli.js"), "sandbox", "--help"], {
     encoding: "utf8"
@@ -1336,48 +1344,57 @@ test("ensureColima uses verbose commands for install and startup", async () => {
   const messages = [];
   const verboseCalls = [];
   const checks = [];
+  const previousDockerContext = process.env.DOCKER_CONTEXT;
 
-  await sandboxEngine.ensureColima(
-    { vm: { cpu: 4, memory: 8, disk: 60 } },
-    (message) => messages.push(message),
-    {
-      runOkFn(cmd, args) {
-        checks.push([cmd, ...args]);
-        if (cmd === "which") {
-          return false;
+  try {
+    delete process.env.DOCKER_CONTEXT;
+
+    await sandboxEngine.ensureColima(
+      { vm: { cpu: 4, memory: 8, disk: 60 } },
+      (message) => messages.push(message),
+      {
+        runOkFn(cmd, args) {
+          checks.push([cmd, ...args]);
+          assert.equal(process.env.DOCKER_CONTEXT, "colima");
+          if (cmd === "which") {
+            return false;
+          }
+          if (cmd === "colima" && args[0] === "status") {
+            return false;
+          }
+          if (cmd === "docker" && args[0] === "info") {
+            return true;
+          }
+          throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
+        },
+        runSafeFn(cmd, args) {
+          assert.equal(cmd, "uname");
+          assert.deepEqual(args, ["-m"]);
+          return "arm64";
+        },
+        runVerboseFn(cmd, args) {
+          verboseCalls.push([cmd, ...args]);
         }
-        if (cmd === "colima" && args[0] === "status") {
-          return false;
-        }
-        if (cmd === "docker" && args[0] === "info") {
-          return true;
-        }
-        throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
-      },
-      runSafeFn(cmd, args) {
-        assert.equal(cmd, "uname");
-        assert.deepEqual(args, ["-m"]);
-        return "arm64";
-      },
-      runVerboseFn(cmd, args) {
-        verboseCalls.push([cmd, ...args]);
       }
-    }
-  );
+    );
 
-  assert.deepEqual(messages, [
-    "Installing colima + docker via Homebrew...",
-    "Starting Colima VM..."
-  ]);
-  assert.deepEqual(verboseCalls, [
-    ["brew", "install", "colima", "docker"],
-    ["colima", "start", "--cpu", "4", "--memory", "8", "--disk", "60", "--arch", "aarch64", "--vm-type=vz", "--mount-type=virtiofs"]
-  ]);
-  assert.deepEqual(checks, [
-    ["which", "colima"],
-    ["colima", "status"],
-    ["docker", "info"]
-  ]);
+    assert.equal(process.env.DOCKER_CONTEXT, "colima");
+    assert.deepEqual(messages, [
+      "Installing colima + docker via Homebrew...",
+      "Starting Colima VM..."
+    ]);
+    assert.deepEqual(verboseCalls, [
+      ["brew", "install", "colima", "docker"],
+      ["colima", "start", "--cpu", "4", "--memory", "8", "--disk", "60", "--arch", "aarch64", "--vm-type=vz", "--mount-type=virtiofs"]
+    ]);
+    assert.deepEqual(checks, [
+      ["which", "colima"],
+      ["colima", "status"],
+      ["docker", "info"]
+    ]);
+  } finally {
+    restoreDockerContext(previousDockerContext);
+  }
 });
 
 test("detectEngine honors configured macOS sandbox engines", async () => {
@@ -1429,56 +1446,97 @@ test("detectEngine keeps non-macOS platform behavior independent of sandbox engi
   );
 });
 
+test("detectEngine does not apply Docker context", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const previousDockerContext = process.env.DOCKER_CONTEXT;
+
+  try {
+    process.env.DOCKER_CONTEXT = "existing-context";
+
+    assert.equal(
+      sandboxEngine.detectEngine({ engine: null }, { platformFn: () => "linux" }),
+      "native"
+    );
+    assert.equal(process.env.DOCKER_CONTEXT, "existing-context");
+  } finally {
+    restoreDockerContext(previousDockerContext);
+  }
+});
+
 test("ensureOrbStack installs OrbStack and starts the Docker daemon", async () => {
   const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
   const messages = [];
   const verboseCalls = [];
   const checks = [];
   let dockerInfoChecks = 0;
+  const previousDockerContext = process.env.DOCKER_CONTEXT;
 
-  await sandboxEngine.ensureOrbStack(
-    {},
-    (message) => messages.push(message),
-    {
-      runOkFn(cmd, args) {
-        checks.push([cmd, ...args]);
-        if (cmd === "which") {
-          return false;
+  try {
+    delete process.env.DOCKER_CONTEXT;
+
+    await sandboxEngine.ensureOrbStack(
+      {},
+      (message) => messages.push(message),
+      {
+        runOkFn(cmd, args) {
+          checks.push([cmd, ...args]);
+          assert.equal(process.env.DOCKER_CONTEXT, "orbstack");
+          if (cmd === "which") {
+            return false;
+          }
+          if (cmd === "docker" && args[0] === "info") {
+            dockerInfoChecks += 1;
+            return dockerInfoChecks > 1;
+          }
+          throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
+        },
+        runVerboseFn(cmd, args) {
+          verboseCalls.push([cmd, ...args]);
         }
-        if (cmd === "docker" && args[0] === "info") {
-          dockerInfoChecks += 1;
-          return dockerInfoChecks > 1;
-        }
-        throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
-      },
-      runVerboseFn(cmd, args) {
-        verboseCalls.push([cmd, ...args]);
       }
-    }
-  );
+    );
 
-  assert.deepEqual(messages, [
-    "Installing OrbStack via Homebrew...",
-    "Starting OrbStack..."
-  ]);
-  assert.deepEqual(verboseCalls, [
-    ["brew", "install", "--cask", "orbstack"],
-    ["orb", "start"]
-  ]);
-  assert.deepEqual(checks, [
-    ["which", "orb"],
-    ["docker", "info"],
-    ["docker", "info"]
-  ]);
+    assert.equal(process.env.DOCKER_CONTEXT, "orbstack");
+    assert.deepEqual(messages, [
+      "Installing OrbStack via Homebrew...",
+      "Starting OrbStack..."
+    ]);
+    assert.deepEqual(verboseCalls, [
+      ["brew", "install", "--cask", "orbstack"],
+      ["orb", "start"]
+    ]);
+    assert.deepEqual(checks, [
+      ["which", "orb"],
+      ["docker", "info"],
+      ["docker", "info"]
+    ]);
+  } finally {
+    restoreDockerContext(previousDockerContext);
+  }
 });
 
 test("ensureDockerDesktop reports when Docker Desktop is not running", async () => {
   const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const previousDockerContext = process.env.DOCKER_CONTEXT;
 
-  await assert.rejects(
-    () => sandboxEngine.ensureDockerDesktop({}, null, { runOkFn: () => false }),
-    /Docker Desktop is not running/
-  );
+  try {
+    delete process.env.DOCKER_CONTEXT;
+
+    await assert.rejects(
+      () => sandboxEngine.ensureDockerDesktop({}, null, {
+        runOkFn(cmd, args) {
+          assert.equal(cmd, "docker");
+          assert.deepEqual(args, ["info"]);
+          assert.equal(process.env.DOCKER_CONTEXT, "desktop-linux");
+          return false;
+        }
+      }),
+      /Docker Desktop is not running/
+    );
+    assert.equal(process.env.DOCKER_CONTEXT, "desktop-linux");
+  } finally {
+    restoreDockerContext(previousDockerContext);
+  }
 });
 
 test("startManagedVm uses OrbStack status instead of Docker daemon state", async () => {
