@@ -24,22 +24,46 @@ description: "从 GitHub Issue 导入并创建任务"
 
 ### 2. 检查已有任务
 
-搜索 `.agents/workspace/active/` 中是否已有链接到此 Issue 的任务。
+2.1 搜索 `.agents/workspace/active/` 中是否已有链接到此 Issue 的任务。
 - 如果找到，询问用户是重新导入还是继续使用现有任务
-- 如果未找到，创建新任务
+- 如果未找到，继续执行 2.2
+
+2.2 扫描 Issue 评论中的同步标记，查找可恢复的历史任务 ID：
+
+如未在步骤 1 中已设置 `$upstream_repo`，可省略 `--repo`，脚本会自动按 issue-sync.md 的检测规则推断。
+
+```bash
+node .agents/scripts/platform-adapters/find-existing-task.js --issue <issue-number> --repo "$upstream_repo" --format json
+```
+
+- 脚本输出 `found=false`：按新 Issue 导入流程创建新任务
+- 脚本输出 `found=true`：复用 `task_id`
+- 脚本退出码 2：视为网络、认证或 GitHub API 降级，向用户展示脚本 stderr 中的失败原因后，按新 Issue 导入流程继续，不阻塞导入
 
 ### 3. 创建任务目录和文件
+
+3.1 决定 task ID 和 `created_at`。
+
+| 场景 | 触发条件 | task ID 来源 | created_at 来源 | 用户确认 |
+|---|---|---|---|---|
+| 场景 A | 2.1 命中本地任务 | 复用本地 ID | 本地保留 | 必须询问"重新导入还是继续使用现有任务" |
+| 场景 B | 2.1 无命中 + 2.2 无候选 | `date +%Y%m%d-%H%M%S` 新建 | 当前时间 | 不需要 |
+| 场景 C | 2.1 无命中 + 2.2 有候选 | 自动复用最早候选 ID | 优先用远端 frontmatter 的 `created_at`，缺失时用当前时间 | 告知即可 |
 
 ```bash
 date +%Y%m%d-%H%M%S
 ```
 
-- 创建目录：`.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
+3.2 写入任务目录和 `task.md`。
+
+- 创建目录：`.agents/workspace/active/{task-id}/`
 - 使用 `.agents/templates/task.md` 模板创建 `task.md`
+- 场景 C 优先沿用远端 frontmatter 中的 `type`、`workflow`、`branch`、`created_by`、`milestone`；缺失或损坏字段按 Issue 标签和当前规则重新推断
+- `current_step` 始终写入 `requirement-analysis`，不要恢复为远端原 `current_step`
 
 任务元数据：
 ```yaml
-id: TASK-{yyyyMMdd-HHmmss}
+id: {task-id}
 issue_number: <issue-number>
 type: feature|bugfix|refactor|docs|chore
 branch: <project>-<type>-<slug>
@@ -51,6 +75,11 @@ created_by: human
 current_step: requirement-analysis
 assigned_to: {当前 AI 代理}
 ```
+
+3.3 追加 Activity Log。
+
+- 场景 B：追加 `Import Issue`
+- 场景 C：追加 `Import Issue (Recovered)`，注明恢复的 task ID、可恢复的原 `current_step`、原 `assigned_to`，并说明 `current_step` 已重置为 `requirement-analysis`；如果部分 frontmatter 字段缺失或损坏，在同一条记录中注明 fallback
 
 ### 4. 更新任务状态
 
@@ -69,6 +98,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
   ```
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Import Issue** by {agent} — Issue #{number} imported
   ```
+  如果步骤 3.3 已经按恢复场景追加了 Activity Log，不要重复追加同义记录。
 
 ### 5. 分配 Issue Assignee
 
@@ -79,7 +109,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
 - 检查 Issue 当前 milestone；如果未设置，先读取 `.agents/rules/milestone-inference.md`，按其中的「阶段 1：`create-issue`」规则推断并设置 milestone；如果 `has_triage=false` 或推断不确定，跳过并继续
-- 创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论（按 issue-sync.md 的 task.md 评论同步规则）
+- 所有场景结束后，必须执行一次 task 留言同步，创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论，确保远端 `:task` 评论存在且内容与本地 `task.md` 一致（按 issue-sync.md 的 task.md 评论同步规则）
 
 ### 7. 完成校验
 
@@ -126,7 +156,7 @@ Issue #{number} 已导入。
 - [ ] 更新了 `current_step` 为 requirement-analysis
 - [ ] 更新了 `updated_at` 为当前时间
 - [ ] 追加了 Activity Log 条目到 task.md
-- [ ] 同步了 task 评论到 Issue
+- [ ] 同步了 task 评论到 Issue，且远端内容与本地 task.md 一致
 - [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，含自定义 TUI，不要筛选）
 - [ ] **没有修改任何业务代码**
 

@@ -16,7 +16,7 @@ description: >
 ## 2. 运行所有单元测试
 
 ```bash
-node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js
+node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js
 ```
 
 ## 3. 输出结果

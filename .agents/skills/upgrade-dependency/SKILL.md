@@ -41,7 +41,7 @@ npm install
 
 本项目无构建步骤。运行测试验证：
 ```bash
-node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js
+node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js
 ```
 
 ### 6. 运行测试

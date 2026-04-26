@@ -23,7 +23,7 @@ test("package metadata supports scoped npm publishing", () => {
   });
   assert.equal(
     pkg.scripts.prepublishOnly,
-    "node scripts/build-inline.js --check && node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js"
+    "node scripts/build-inline.js --check && node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js"
   );
 });
 
