@@ -157,6 +157,7 @@ test("update-agent-infra template copies stay in sync with working files", () =>
     [".agents/skills/create-task/config/verify.json", "templates/.agents/skills/create-task/config/verify.json"],
     [".agents/skills/import-issue/SKILL.md", "templates/.agents/skills/import-issue/SKILL.en.md"],
     [".agents/skills/import-issue/config/verify.json", "templates/.agents/skills/import-issue/config/verify.json"],
+    [".agents/scripts/platform-adapters/find-existing-task.js", "templates/.agents/scripts/platform-adapters/find-existing-task.github.js"],
     [".agents/skills/init-labels/SKILL.md", "templates/.agents/skills/init-labels/SKILL.en.md"],
     [".agents/skills/update-agent-infra/SKILL.md", "templates/.agents/skills/update-agent-infra/SKILL.en.md"],
     [".agents/skills/update-agent-infra/scripts/package.json", "templates/.agents/skills/update-agent-infra/scripts/package.json"],
@@ -174,6 +175,18 @@ test("update-agent-infra template copies stay in sync with working files", () =>
 
     assert.equal(rendered, read(source), `${templatePath} is out of sync with ${source}`);
   });
+
+  assert.equal(
+    read("templates/.agents/scripts/platform-adapters/find-existing-task.js").trim(),
+    [
+      'import { pathToFileURL } from "node:url";',
+      "",
+      "if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {",
+      "  console.log(JSON.stringify({ found: false }, null, 2));",
+      "}"
+    ].join("\n"),
+    "find-existing-task should keep a no-op platform fallback script"
+  );
 });
 
 test("Claude command disable-model-invocation settings match command frequency", () => {

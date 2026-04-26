@@ -24,7 +24,7 @@ node --version
 本项目的集成测试包含在统一测试套件中（如在临时目录中运行 `ai init` 并验证结果）。
 
 ```bash
-node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js
+node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js
 ```
 
 ## 3. 输出结果
