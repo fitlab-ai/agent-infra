@@ -16,7 +16,7 @@ Enable the shared Git hooks path before relying on the template hook chain:
 git config core.hooksPath .github/hooks
 ```
 
-This makes Git invoke the hooks synced into `.github/hooks/`, including `pre-commit` and `check-version-format.sh`.
+This makes Git invoke the hooks in the project repository's `.github/hooks/` directory, including `pre-commit` and `check-version-format.sh`.
 
 ## External Templates And Skills
 

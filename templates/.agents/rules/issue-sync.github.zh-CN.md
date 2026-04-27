@@ -1,5 +1,19 @@
 # Issue 同步规则
 
+## Marker 注册表
+
+以下隐藏标记是 Issue 同步的唯一权威注册表：
+
+| Key | Marker |
+|---|---|
+| `task` | `<!-- sync-issue:{task-id}:task -->` |
+| `artifact` | `<!-- sync-issue:{task-id}:{artifact-stem} -->` |
+| `artifactChunk` | `<!-- sync-issue:{task-id}:{artifact-stem}:{part}/{total} -->` |
+| `summary` | `<!-- sync-issue:{task-id}:summary -->` |
+| `cancel` | `<!-- sync-issue:{task-id}:cancel -->` |
+
+Skill 正文应引用 marker key，具体 marker 字符串只保留在本规则或平台适配器默认值中。
+
 在任务技能需要更新 GitHub Issue 时先读取本文件。
 
 ## Upstream 仓库检测

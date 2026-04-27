@@ -1,18 +1,18 @@
 ---
 name: create-issue
-description: "Create a GitHub Issue from a task file"
+description: "Create an Issue from a task file"
 ---
 
 # Create Issue
 
-Create the base GitHub Issue from `task.md` and write `issue_number` back to the task.
+Create the base Issue from `task.md` and write `issue_number` back to the task.
 
 ## Boundary / Critical Rules
 
 - Build the Issue title and body from `task.md` only
 - Issue title format: `type(scope): description` - map `type` from task.md (`feature` -> `feat`, `bugfix` -> `fix`, `refactor` -> `refactor`, `docs` -> `docs`, `chore` -> `chore`), infer scope from the affected module (omit it if unclear), and use the task title from task.md verbatim for the description (do not translate or rewrite)
 - Do not read `analysis.md`, `plan.md`, `implementation.md`, or review artifacts
-- The only durable outputs are the GitHub Issue and the `issue_number` update in task.md
+- The only durable outputs are the Issue and the `issue_number` update in task.md
 - After executing this skill, you **must** immediately update task.md
 
 ## Steps
@@ -31,7 +31,7 @@ Extract the title, `## Description`, `## Requirements`, `type`, and `milestone` 
 
 ### 3. Build Issue Content
 
-Detect `.github/ISSUE_TEMPLATE` files and decide whether to use a matched template path or the fallback path.
+Detect Issue templates through `.agents/rules/issue-pr-commands.md` and decide whether to use a matched template path or the fallback path.
 
 > Template detection, field mapping for `textarea`, `input`, `dropdown`, and `checkboxes`, and the fallback body rules live in `reference/template-matching.md`. Read `reference/template-matching.md` before building the body.
 
@@ -57,7 +57,7 @@ Write back `issue_number`, update `updated_at`, and append the Create Issue Acti
 
 If artifact files already exist in the task directory, backfill them in this order:
 
-1. `task.md` -> `<!-- sync-issue:{task-id}:task -->` comment (idempotent create or update)
+1. `task.md` -> the task comment marker defined in `.agents/rules/issue-sync.md` (idempotent create or update)
 2. Backfill existing `analysis*.md`, `plan*.md`, `implementation*.md`, `review*.md`, and `refinement*.md` files in filename order
 
 Every backfill action must follow the raw publishing, task.md sync, and chunking rules in `.agents/rules/issue-sync.md`.
@@ -94,7 +94,7 @@ Next step - run requirements analysis:
 
 ## Completion Checklist
 
-- [ ] Created the GitHub Issue
+- [ ] Created the Issue
 - [ ] Used `task.md` as the only content source
 - [ ] Recorded `issue_number` in task.md
 - [ ] Updated `updated_at` and appended the Activity Log entry
@@ -106,13 +106,13 @@ Stop after the checklist. Do not start detailed progress sync here.
 
 ## Notes
 
-- `create-issue` creates the base Issue; later status, comments, and checkboxes are maintained by workflow skills and GitHub Actions
+- `create-issue` creates the base Issue; later status, comments, and checkboxes are maintained by workflow skills and platform automation
 - If no valid labels survive filtering, create the Issue without labels instead of failing
 - If Issue Type or milestone setup fails, continue and record the fallback outcome
 
 ## Error Handling
 
 - Task not found: `Task {task-id} not found`
-- GitHub CLI unavailable or unauthenticated
+- the platform CLI unavailable or unauthenticated
 - Empty description in task.md
 - Issue creation failure

@@ -1,45 +1,17 @@
 # Issue Template Matching
 
-Read this file before deciding how to build the Issue body from `.github/ISSUE_TEMPLATE`.
+Read this file before deciding how to build the Issue body.
 
 ## Detect Issue Templates
 
-Search project templates with:
+Issue template detection is platform-specific. Read `.agents/rules/issue-pr-commands.md` and follow the template detection section provided by the configured platform.
 
-```bash
-rg --files .github/ISSUE_TEMPLATE -g '*.yml' -g '!config.yml'
-```
-
-If templates exist, inspect their top-level `name:` fields and choose the best match for the task title and description.
-
-Typical candidate templates:
-- `bug_report.yml` for bug work
-- `question.yml` for question or investigation work
-- `feature_request.yml` for feature work
-- `documentation.yml` for documentation work
-- `other.yml` as the general fallback
+If templates exist, inspect their top-level names and choose the best match for the task title and description. Use the candidate template guidance provided by the configured platform rule when available.
 
 If no template matches clearly, choose the nearest candidate. If templates are missing, unreadable, or parsing fails, fall back to the default body path.
 
 ## Build the Body from the Matched Template
 
-Read the matched template's:
-- `name`
-- `type:`
-- `labels:`
-- `body:`
+Build the body by following the field handling and field mapping guidance provided by the configured platform section in `.agents/rules/issue-pr-commands.md`.
 
-Field handling rules:
-- `textarea` and `input`: use `attributes.label` as the markdown heading and fill values from task.md
-- `markdown`: skip template explanation prose
-- `dropdown` and `checkboxes`: skip
-- when task.md lacks a suitable value, write `N/A`
-
-Suggested field mapping:
-
-| Template field hint | task.md source |
-|---|---|
-| `summary`, `title` | task title |
-| `description`, `problem`, `what happened`, `issue-description`, `current-content` | task description |
-| `solution`, `requirements`, `steps`, `suggested-content`, `impact`, `context`, `alternatives`, `expected` | requirements list |
-| other `textarea` / `input` fields | task description, otherwise `N/A` |
+When platform guidance is unavailable, use the default body path.

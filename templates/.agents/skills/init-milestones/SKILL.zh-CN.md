@@ -1,11 +1,11 @@
 ---
 name: init-milestones
-description: "初始化仓库的 GitHub Milestones 体系"
+description: "初始化仓库的 milestones 体系"
 ---
 
-# 初始化 GitHub Milestones
+# 初始化 milestones
 
-一次性初始化仓库的标准 GitHub Milestones 体系。
+一次性初始化仓库的标准 milestones 体系。
 
 ## 执行流程
 
@@ -75,10 +75,10 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 
 ## 错误处理
 
-- 未找到 `gh`：提示 "GitHub CLI (`gh`) is not installed"
-- 认证失败：提示 "GitHub CLI is not authenticated"
-- 仓库访问失败：提示 "Unable to access the current repository with gh"
+- 未找到平台 CLI：提示 "the platform CLI is not installed"
+- 认证失败：提示 "the platform CLI is not authenticated"
+- 仓库访问失败：提示 "Unable to access the current repository with the platform CLI"
 - 版本解析失败：提示 "Unable to determine current version baseline"
 - `--history` 模式下未找到任何 `v*` git tags：提示 "No history tags found matching v*; only standard milestones will be created"
 - 权限不足：提示 "No permission to manage milestones in this repository"
-- API 限流：提示 "GitHub API rate limit reached, please retry later"
+- API 限流：提示 "platform API rate limit reached, please retry later"

@@ -128,18 +128,18 @@ git log v<prev-version>..v<version> \
 3. 描述：使用 PR 标题，移除 `type(scope):` 前缀，首字母大写
 4. **贡献者搜集**：
    - **数据源**：
-     - PR author：来自步骤 4 的 `gh pr list --json author`
+     - PR author：来自 `.agents/rules/release-commands.md` 中已合并 PR 查询规则
      - Commit co-authors：来自步骤 4 的 `git log ... --format='%(trailers:key=Co-authored-by,valueonly,unfold)'`
-     - Issue reporters：来自步骤 5 收集的关联 Issue 的 author（`gh issue view` 返回的 `author.login`）
+     - Issue reporters：来自步骤 5 收集的关联 Issue author（由 `.agents/rules/release-commands.md` 返回）
    - **贡献数定义**：`该人的 PR 数 + 该人作为 co-author 的 commit 数`（同一身份跨来源合并计数）
    - **Name → `@login` 映射**：
-     - `Co-authored-by` 原始格式为 `Name <email>`，需要推断对应的 GitHub `@login`
-     - 优先从 email 提取：匹配 `(\d+\+)?(\S+?)@users\.noreply\.github\.com` 时，取第二个捕获组并转为小写；该正则同时覆盖 `{id}+{login}@users.noreply.github.com` 与 `{login}@users.noreply.github.com`
+     - `Co-authored-by` 原始格式为 `Name <email>`，需要推断对应的 platform `@login`
+     - 优先从 email 提取：匹配 `.agents/rules/release-commands.md` 中的平台 no-reply 邮箱规则时，按该规则推导小写 login
      - 否则按 Name 启发式：取首个空格前的 token 并转为小写（例如 `Claude Opus 4.6 (1M context)` → `@claude`、`Codex` → `@codex`、`Gemini` → `@gemini`）
      - 已出现在 PR author 列表中的 login，必须按该 login 合并计数，避免把 `Claude` 和 `@claude` 拆成两个条目
      - 同一 login 的所有 Name 变体都必须归并后再计数与排序；例如 `Claude` 与 `Claude Opus 4.6 (1M context)` 都映射到 `@claude` 时，应先合并为同一个贡献者
      - Bot 身份保留原样（如 `dependabot[bot]`）
-     - 若仍无法可靠确定 login，则输出 `@{Name 首 token 小写}`，并在 `Contributors` 段落下追加 `<!-- TODO(reviewer): 确认 {原始 Name <email>} 的 GitHub login -->`
+     - 若仍无法可靠确定 login，则输出 `@{Name 首 token 小写}`，并在 `Contributors` 段落下追加 `<!-- TODO(reviewer): 确认 {原始 Name <email>} 的 platform login -->`
    - **排序**：按贡献数降序；贡献数相同时按 login 字典序
    - **去重**：以最终映射后的 `@login` 为键
    - **Issue reporter 规则**：
@@ -156,7 +156,7 @@ git log v<prev-version>..v<version> \
 
 询问：
 1. 需要调整吗？
-2. 是否创建 GitHub Draft Release？
+2. 是否创建 draft release？
 
 ### 9. 创建 Draft Release（如确认）
 
@@ -170,7 +170,7 @@ Draft Release created.
 - Version: v{version}
 - Status: Draft
 
-Please review and publish on GitHub:
+Please review and publish on the platform:
 1. Open the URL above
 2. Review the release notes
 3. Click "Publish release"
@@ -178,7 +178,7 @@ Please review and publish on GitHub:
 
 ## 注意事项
 
-1. **需要 gh CLI**：必须安装并认证 GitHub CLI
+1. **需要 the platform CLI**：必须安装并认证 the platform CLI
 2. **标签必须存在**：先执行 release 技能创建标签
 3. **草稿模式**：创建草稿 —— 不会自动发布
 4. **分类准确性**：自动分类基于标题/scope/文件；复杂的 PR 可能需要手动调整
@@ -187,5 +187,5 @@ Please review and publish on GitHub:
 
 - 版本格式无效：提示正确格式
 - 标签未找到：建议先执行 release 技能
-- gh 未认证：提示进行认证
+- 平台 CLI 未认证：提示用户认证
 - 未找到已合并的 PR：提示检查标签和分支

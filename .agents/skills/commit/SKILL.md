@@ -64,7 +64,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 ## 7. 同步 PR 摘要（按需）
 
-当 `{task-id}` 存在且 task.md 包含有效 `pr_number` 时，刷新 PR 上的 `<!-- sync-pr:{task-id}:summary -->` 摘要评论；否则跳过。
+当 `{task-id}` 存在且 task.md 包含有效 `pr_number` 时，刷新 PR 上由 `.agents/rules/pr-sync.md` 中定义的 PR 摘要评论标记对应的摘要评论；否则跳过。
 
 > 完整的触发条件、聚合规则、PATCH/POST 流程、Shell 安全约束和错误处理见 `reference/pr-summary-sync.md`（其内联引用 `.agents/rules/pr-sync.md`）。执行此步骤前先读取 `reference/pr-summary-sync.md`。
 >

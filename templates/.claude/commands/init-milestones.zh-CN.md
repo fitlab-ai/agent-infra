@@ -1,5 +1,5 @@
 ---
-description: "初始化仓库的 GitHub Milestones 体系"
+description: "初始化仓库的 milestones 体系"
 usage: "/init-milestones [--history]"
 disable-model-invocation: true
 ---

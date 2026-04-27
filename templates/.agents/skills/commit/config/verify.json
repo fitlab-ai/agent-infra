@@ -21,7 +21,8 @@
       "when": "pr_number_exists",
       "expected_pr_comment_marker": "<!-- sync-pr:{task-id}:summary -->",
       "verify_in_labels_computed": true,
-      "verify_pr_comment_last_commit_matches_head": true
+      "verify_pr_comment_last_commit_matches_head": true,
+      "expected_pr_comment_marker_key": "prSummary"
     }
   }
 }

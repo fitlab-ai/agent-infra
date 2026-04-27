@@ -1635,7 +1635,7 @@ test("validate-artifact platform-sync fails for create-issue when the task comme
 
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
     writeJson(issuePath, buildIssuePayload({
-      labels: [],
+      labels: [{ name: "status: waiting-for-triage" }],
       body: "# Issue\n"
     }));
     writeJson(commentsPath, []);

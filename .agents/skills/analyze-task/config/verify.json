@@ -37,7 +37,9 @@
       "verify_comment_content": true,
       "verify_task_comment_content": true,
       "verify_issue_type": true,
-      "verify_milestone": true
+      "verify_milestone": true,
+      "expected_status_label_key": "pendingDesignWork",
+      "expected_comment_marker_key": "artifact"
     }
   }
 }

@@ -93,7 +93,7 @@ ls .agents/workspace/completed/{task-id}/task.md
 - 先按 `.agents/rules/issue-sync.md` 的补发规则扫描并补发未发布的 `task.md`、`analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md` 评论（`task.md` 走幂等更新路径）
 - 按 issue-sync.md 的需求复选框同步步骤，兜底同步 `## 需求` 中已勾选的条目到 Issue body
 - 不要设置 `status:` label — Issue 关闭后 status label 会被自动清除
-- 最后创建或更新 `<!-- sync-issue:{task-id}:summary -->` 标记的 summary 评论
+- 最后创建或更新 `.agents/rules/issue-sync.md` 中定义的 summary 评论标记对应的 summary 评论
 
 ### 7. 完成校验
 

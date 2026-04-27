@@ -1,11 +1,11 @@
 ---
 name: init-labels
-description: "Initialize the repository's standard GitHub Labels taxonomy"
+description: "Initialize the repository's standard labels taxonomy"
 ---
 
-# Initialize GitHub Labels
+# Initialize labels
 
-Initialize the repository's standard GitHub Labels taxonomy.
+Initialize the repository's standard labels taxonomy.
 
 ## Execution Flow
 
@@ -36,14 +36,14 @@ The script and `.agents/rules/label-milestone-setup.md` are responsible for:
 The script manages these common label families:
 - `type:` labels such as `type: bug`, `type: enhancement`, `type: feature`, `type: documentation`, `type: dependency-upgrade`, and `type: task`
 - `status:` labels such as `status: waiting-for-triage`, `status: in-progress`, and `status: waiting-for-internal-feedback`
-- GitHub-default-name labels intentionally overwritten in place: `good first issue` and `help wanted`
+- platform-default-name labels intentionally overwritten in place: `good first issue` and `help wanted`
 - Additional shared labels such as `dependencies`
 
 #### Scope
 
 | Label prefix | Issue | PR | Notes |
 |---|---|---|---|
-| `type:` | — | Yes | Issues use the native GitHub Type field; PRs need `type:` labels to drive changelog grouping |
+| `type:` | — | Yes | Issues use the native platform Type field; PRs need `type:` labels to drive changelog grouping |
 | `status:` | Yes | — | PRs already have their own state flow (Open/Draft/Merged/Closed); Issues use `status:` labels for project tracking |
 | `in:` | Yes | Yes | Both Issues and PRs need module-based filtering |
 
@@ -98,8 +98,8 @@ Next step - initialize milestones (optional):
 
 ## Error Handling
 
-- `gh` not found: prompt "GitHub CLI (`gh`) is not installed"
-- Authentication failed: prompt "GitHub CLI is not authenticated"
-- Repository access failed: prompt "Unable to access the current repository with gh"
+- platform CLI not found: prompt "the platform CLI is not installed"
+- Authentication failed: prompt "the platform CLI is not authenticated"
+- Repository access failed: prompt "Unable to access the current repository with the platform CLI"
 - Permission error: prompt "No permission to manage labels in this repository"
-- API rate limit: prompt "GitHub API rate limit reached, please retry later"
+- API rate limit: prompt "platform API rate limit reached, please retry later"

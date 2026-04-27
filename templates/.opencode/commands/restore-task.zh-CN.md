@@ -1,5 +1,5 @@
 ---
-description: "从 GitHub Issue 评论还原本地任务文件"
+description: "从 Issue 评论还原本地任务文件"
 agent: general
 subtask: false
 ---

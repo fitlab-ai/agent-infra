@@ -108,7 +108,7 @@ This project uses the following collaboration label prefixes, each with a define
 | `status:` | Yes | — | PRs already have their own state flow (Open / Draft / Merged / Closed); Issues use `status:` labels for project tracking states |
 | `in:` | Yes | Yes | Both Issues and PRs can be filtered by module |
 
-The default GitHub setup initializes these labels with the `/init-labels` command.
+Run the `/init-labels` command to initialize these labels via the platform adapter.
 
 ## Private Platform Extensions
 

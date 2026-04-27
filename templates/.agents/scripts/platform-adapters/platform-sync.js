@@ -1,3 +1,10 @@
+export function getDefaults() {
+  return {
+    statusLabels: {},
+    markers: {}
+  };
+}
+
 export function check(_context, shared) {
   return shared.passResult(
     "platform-sync",

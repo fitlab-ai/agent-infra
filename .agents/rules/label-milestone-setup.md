@@ -43,6 +43,16 @@ gh api "repos/$repo/milestones" -f title="{title}" -f description="{description}
 gh api "repos/$repo/milestones/{number}" -X PATCH -f state="{state}" -f description="{description}"
 ```
 
+## 错误提示模板
+
+GitHub 初始化脚本失败时使用以下标准提示：
+
+| 条件 | 提示 |
+|---|---|
+| CLI 缺失 | GitHub CLI (`gh`) is not installed |
+| 认证失败 | `GitHub CLI is not authenticated` |
+| API 限流 | `GitHub API rate limit reached, please retry later` |
+
 ## 约束
 
 - label 以名称作为幂等键

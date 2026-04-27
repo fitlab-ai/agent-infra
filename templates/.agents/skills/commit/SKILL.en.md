@@ -64,7 +64,7 @@ Failure handling matches "Update Task Status When Applicable": warn, but do **no
 
 ## 7. Sync PR Summary When Applicable
 
-When `{task-id}` exists and task.md contains a valid `pr_number`, refresh the PR summary comment `<!-- sync-pr:{task-id}:summary -->` on the PR. Otherwise, skip this step.
+When `{task-id}` exists and task.md contains a valid `pr_number`, refresh the PR summary comment marked with the PR summary marker defined in `.agents/rules/pr-sync.md` on the PR. Otherwise, skip this step.
 
 > The full trigger conditions, aggregation rules, PATCH/POST flow, shell-safety constraints, and error handling live in `reference/pr-summary-sync.md` (which in turn points to `.agents/rules/pr-sync.md`). Read `reference/pr-summary-sync.md` before executing this step.
 >

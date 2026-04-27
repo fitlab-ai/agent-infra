@@ -61,7 +61,7 @@ Code Scanning 告警 #{alert-number}
 
 按 `.agents/rules/security-alerts.md` 中的 Code Scanning 告警关闭命令执行关闭操作，并传入映射后的 `{api-reason}` 与用户说明。
 
-**API reason 映射**（按 GitHub Code Scanning API）：
+**API reason 映射**（按 Code Scanning API）：
 - 误报 -> `false positive`
 - 不会修复 -> `won't fix`
 - 测试代码 -> `used in tests`
@@ -96,7 +96,7 @@ Code Scanning 告警 #{alert-number} 已关闭。
 
 查看：{html_url}
 
-注意：如有需要，可在 GitHub 上重新打开。
+注意：如有需要，可在 平台上重新打开。
 
 下一步 - 完成并归档任务（如有关联任务）：
   - Claude Code / OpenCode：/complete-task {task-id}

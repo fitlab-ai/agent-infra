@@ -25,7 +25,7 @@ Extract key information:
 - `rule`: rule information (`id`, `severity`, `description`, `security_severity_level`)
 - `tool`: scanning tool information (`name`, `version`)
 - `most_recent_instance`: location (`path`, `start_line`, `end_line`) and message
-- `html_url`: GitHub alert link
+- `html_url`: alert link in the platform
 
 ### 2. Create the Task Directory and File
 

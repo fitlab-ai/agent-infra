@@ -43,6 +43,16 @@ Update a milestone:
 gh api "repos/$repo/milestones/{number}" -X PATCH -f state="{state}" -f description="{description}"
 ```
 
+## Error Prompt Templates
+
+Use these normalized prompts when the GitHub setup scripts fail:
+
+| Condition | Prompt |
+|---|---|
+| CLI missing | GitHub CLI (`gh`) is not installed |
+| Authentication failed | `GitHub CLI is not authenticated` |
+| API rate limit | `GitHub API rate limit reached, please retry later` |
+
 ## Constraints
 
 - use label names as the idempotency key

@@ -76,6 +76,41 @@ npm test
 - 模板文件使用 `{{project}}` 和 `{{org}}` 作为渲染占位符
 - 面向用户的 Markdown 文件提供双语版本（英文为主 + 中文翻译），如 README、SECURITY
 
+### 平台无关层与平台层
+
+本仓库的模板需要区分平台无关 baseline 与平台特定实现。平台特定内容只能放在以下位置：
+
+- `.agents/rules/*.{platform}.md`
+- `.agents/scripts/platform-adapters/platform-sync.{platform}.js`
+- 明确属于平台集成的脚本或工作流目录
+
+除上述位置外，`SKILL.md`、`reference/*.md`、命令面板、QUICKSTART、README 等 baseline 文件必须保持平台无关。baseline 文件应引用 `.agents/rules/*.md` 或 `.agents/scripts/` 中的抽象入口，不直接写入平台命令、路径或 schema。
+
+判断平台耦合时，先检查这些硬指标：
+
+- 平台名，如 `GitHub`
+- 平台路径，如 `.github/`
+- 平台 CLI，如 `gh CLI` 或以 `gh ` 开头的命令
+
+还要人工检查这些软指标：
+
+- 平台特定 schema 字段名，如 GitHub Issue Forms 的 `textarea`、`input`、`dropdown`、`checkboxes`、`attributes.label`
+- 平台文件命名约定，如 `.yml` Issue Form 文件名、`PULL_REQUEST_TEMPLATE.md`
+- 已在 rules/scripts 中定义过的命令或 marker 字符串副本
+
+`tests/templates/platform-coupling.test.js` 提供结构性护栏：baseline 文案不得含平台硬指标，skill reference 目录不得新增 `.github.*` 这类平台变体。测试不能覆盖所有软指标，PR 作者和 reviewer 仍需人工检查 schema 字段、命令重复和措辞包装。
+
+示例：
+
+- 反例：在 `templates/.agents/skills/create-pr/reference/pr-body-template.en.md` 中直接写 `gh pr list --limit 3 --state merged`
+- 正例：baseline reference 写“按 `.agents/rules/issue-pr-commands.md` 的最近 PR 查询命令执行”，GitHub 具体命令只放在 `issue-pr-commands.github.en.md`
+
+已采纳的架构决策：
+
+- `verify.json` 应优先通过 `expected_*_key` 引用平台 adapter 的默认值，而不是复制 marker 或 status label 字符串。
+- `platform-sync.{platform}.js#getDefaults()` 是平台默认 marker 和 status label 的单一信息源。
+- 这个 key-based 抽象是为多平台扩展保留的设计：把 N 个 skill × M 个平台的配置成本收敛为 N 个 key 引用 + M 个 adapter 默认值。
+
 ### 构建架构
 
 - `src/sync-templates.js` 是开发源码，保留可读的源码结构和对 `lib/` 数据文件的标准读取方式。

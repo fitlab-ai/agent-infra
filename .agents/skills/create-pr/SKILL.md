@@ -26,7 +26,7 @@ description: "创建 Pull Request 到目标分支"
 
 ### 3. 准备 PR 正文
 
-读取 `.github/PULL_REQUEST_TEMPLATE.md`（如存在），参考最近合并的 PR 风格，并收集 `<target-branch>` 到 `HEAD` 的全部提交。
+通过 `.agents/rules/issue-pr-commands.md` 读取 PR 模板，参考最近合并的 PR 风格，并收集 `<target-branch>` 到 `HEAD` 的全部提交。
 
 > 模板处理、HEREDOC 正文生成和 `Generated with AI assistance` 要求见 `reference/pr-body-template.md`。编写正文前先读取 `reference/pr-body-template.md`。
 
@@ -101,7 +101,7 @@ node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/activ
 
 - 必须检查分支中的全部提交，而不是只看最后一个
 - `create-pr` 不能把 type label 映射委托给其他技能，必须在获取到 `{task-id}` 时于本技能内内联处理
-- 隐藏 summary 标记必须保持 `<!-- sync-pr:{task-id}:summary -->` 以兼容已有 PR 评论
+- 隐藏 summary 标记必须保持为 `.agents/rules/pr-sync.md` 中定义的 PR 摘要评论标记，以兼容已有 PR 评论
 - 如果当前分支已存在 PR，直接告知用户 PR URL 并结束，不做重复同步
 - 如果从 Issue 继承元数据失败，继续使用 task.md 和分支推断兜底
 

@@ -1,4 +1,4 @@
-description = "Restore local task files from GitHub Issue comments"
+description = "Restore local task files from Issue comments"
 prompt = """
 Restore task from Issue: {{args}}
 

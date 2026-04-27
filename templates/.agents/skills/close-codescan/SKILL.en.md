@@ -61,7 +61,7 @@ Confirm? (y/N)
 
 Dismiss the alert by following the Code Scanning dismiss command in `.agents/rules/security-alerts.md`, passing the mapped `{api-reason}` and the user's explanation.
 
-**API reason mapping** (per the GitHub Code Scanning API):
+**API reason mapping** (per the Code Scanning API):
 - False Positive -> `false positive`
 - Won't Fix -> `won't fix`
 - Used in Tests -> `used in tests`
@@ -96,7 +96,7 @@ Explanation: {explanation}
 
 View: {html_url}
 
-Note: it can be reopened on GitHub if necessary.
+Note: it can be reopened on the platform if necessary.
 
 Next step - complete and archive the task if a related task exists:
   - Claude Code / OpenCode: /complete-task {task-id}

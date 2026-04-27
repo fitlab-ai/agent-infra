@@ -1,18 +1,18 @@
 ---
 name: create-issue
-description: "从任务文件创建 GitHub Issue"
+description: "从任务文件创建 Issue"
 ---
 
 # 创建 Issue
 
-仅从 `task.md` 创建基础 GitHub Issue，并把 `issue_number` 回写到任务文件。
+仅从 `task.md` 创建基础 Issue，并把 `issue_number` 回写到任务文件。
 
 ## 行为边界 / 关键规则
 
 - Issue 标题和正文只能来自 `task.md`
 - Issue 标题格式为 `type(scope): 描述`——type 从 task.md 的 `type` 字段映射（feature→feat, bugfix→fix, refactor→refactor, docs→docs, chore→chore），scope 从受影响模块推断（无法确定时省略），描述使用 task.md 中的任务标题原文（不要翻译或改写）
 - 不要读取 `analysis.md`、`plan.md`、`implementation.md` 或审查产物
-- 持久产物只有 GitHub Issue 本身，以及 task.md 中的 `issue_number` 更新
+- 持久产物只有 Issue 本身，以及 task.md 中的 `issue_number` 更新
 - 执行本技能后，你**必须**立即更新 task.md
 
 ## 执行步骤
@@ -31,7 +31,7 @@ description: "从任务文件创建 GitHub Issue"
 
 ### 3. 构建 Issue 内容
 
-检测 `.github/ISSUE_TEMPLATE`，决定使用模板路径还是 fallback 路径。
+通过 `.agents/rules/issue-pr-commands.md` 检测 Issue 模板，决定使用模板路径还是 fallback 路径。
 
 > 模板识别、`textarea`、`input`、`dropdown`、`checkboxes` 字段映射，以及 fallback 正文规则见 `reference/template-matching.md`。构建正文前先读取 `reference/template-matching.md`。
 
@@ -57,7 +57,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 如果任务目录中已存在产物文件，按以下顺序补发：
 
-1. `task.md` → `<!-- sync-issue:{task-id}:task -->` 评论（幂等创建或更新）
+1. `task.md` → `.agents/rules/issue-sync.md` 中定义的 task 评论标记（幂等创建或更新）
 2. 按文件名排序补发已存在的 `analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md`
 
 所有补发动作都必须遵循 `.agents/rules/issue-sync.md` 的原文发布、task.md 同步和分片规则。
@@ -94,7 +94,7 @@ node .agents/scripts/validate-artifact.js gate create-issue .agents/workspace/ac
 
 ## 完成检查清单
 
-- [ ] 已创建 GitHub Issue
+- [ ] 已创建 Issue
 - [ ] 已仅使用 `task.md` 作为内容来源
 - [ ] 已在 task.md 中记录 `issue_number`
 - [ ] 已更新 `updated_at` 并追加 Activity Log
@@ -106,13 +106,13 @@ node .agents/scripts/validate-artifact.js gate create-issue .agents/workspace/ac
 
 ## 注意事项
 
-- `create-issue` 只负责创建基础 Issue；后续状态、评论和复选框由工作流技能与 GitHub Actions 维护
+- `create-issue` 只负责创建基础 Issue；后续状态、评论和复选框由工作流技能与 platform automation 维护
 - 如果过滤后没有有效 label，允许不带 label 创建 Issue
 - 如果 Issue Type 或 milestone 设置失败，继续执行并记录结果
 
 ## 错误处理
 
 - 任务未找到：`Task {task-id} not found`
-- GitHub CLI 不可用或未认证
+- the platform CLI 不可用或未认证
 - task.md 的描述为空
 - 创建 Issue 失败
