@@ -45,6 +45,8 @@ The script outputs JSON to stdout. Parse and record the report.
   list these in the report so users know which files were ignored because a
   built-in template or later external source won
 - `managed.written` / `managed.created`: updated / newly created managed files
+- `managed.removed`: deleted managed files (including old paths removed during template migrations)
+- `managed.skippedPlatform`: managed / merged entries skipped because they belong to a different platform
 - `merged.pending`: list of merged files for AI to process
   - Each item has `target` (project-relative path) and `template` (template-root-relative path)
 - `registryAdded`: newly added file registry entries

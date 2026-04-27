@@ -61,8 +61,8 @@ test("agent quickstart and readme avoid hard-coded setup wording", () => {
     ".agents/QUICKSTART.md",
     ".agents/README.md"
   ].forEach((relativePath) => {
-    const content = read(relativePath).replaceAll(".github/hooks", "");
-    assert.doesNotMatch(content, platformTokenPattern, `${relativePath} should not contain platform tokens outside the hook path`);
+    const content = read(relativePath);
+    assert.doesNotMatch(content, platformTokenPattern, `${relativePath} should not contain platform tokens`);
     assert.doesNotMatch(content, /default GitHub setup|默认 GitHub 配置/, relativePath);
   });
 });

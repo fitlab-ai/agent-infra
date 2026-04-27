@@ -36,7 +36,7 @@
       ".claude/commands/",
       ".claude/hooks/",
       ".gemini/commands/",
-      ".github/hooks/check-version-format.sh",
+      ".git-hooks/check-version-format.sh",
       ".github/scripts/",
       ".opencode/commands/"
     ],
@@ -53,7 +53,7 @@
       ".agents/skills/upgrade-dependency/SKILL.*",
       ".claude/settings.json",
       ".gemini/settings.json",
-      ".github/hooks/pre-commit",
+      ".git-hooks/pre-commit",
       ".gitignore"
     ],
     "ejected": []

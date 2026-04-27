@@ -74,8 +74,8 @@ test("agent-infra init generates seed files in a temp directory", () => {
     }, "init should generate default sandbox config");
     assert.deepEqual(config.labels, { in: {} }, "init should generate empty labels.in defaults");
     assert.ok(
-      config.files.managed.includes(".github/hooks/check-version-format.sh"),
-      ".github/hooks/check-version-format.sh should be managed"
+      config.files.managed.includes(".git-hooks/check-version-format.sh"),
+      ".git-hooks/check-version-format.sh should be managed"
     );
     assert.ok(config.files.managed.includes(".agents/scripts/"), ".agents/scripts/ should be managed");
     assert.ok(config.files.managed.includes(".claude/hooks/"), ".claude/hooks/ should be managed");
@@ -470,7 +470,7 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
       vm: { cpu: null, memory: null, disk: null }
     }, "update should backfill default sandbox config");
     assert.deepEqual(updated.labels, { in: {} }, "update should backfill empty labels.in defaults");
-    assert.ok(updated.files.managed.includes(".github/hooks/check-version-format.sh"));
+    assert.ok(updated.files.managed.includes(".git-hooks/check-version-format.sh"));
     assert.ok(updated.files.managed.includes(".agents/skills/"));
     assert.ok(updated.files.merged.includes("**/test.*"));
 

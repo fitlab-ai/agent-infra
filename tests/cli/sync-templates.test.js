@@ -693,7 +693,7 @@ test("syncTemplates preserves stale files that match merged glob patterns", asyn
   }
 });
 
-test("syncTemplates syncs the managed github hook as a single file", async () => {
+test("syncTemplates syncs the managed shared hook as a single file", async () => {
   const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-github-hook-"));
 
@@ -705,8 +705,8 @@ test("syncTemplates syncs the managed github hook as a single file", async () =>
 
     writeFile(
       templateRoot,
-      ".github/hooks/check-version-format.sh",
-      "#!/bin/sh\necho github hook\n"
+      ".git-hooks/check-version-format.sh",
+      "#!/bin/sh\necho shared hook\n"
     );
 
     writeJson(projectRoot, ".agents/.airc.json", {
@@ -721,7 +721,7 @@ test("syncTemplates syncs the managed github hook as a single file", async () =>
       }
     });
 
-    writeFile(projectRoot, ".github/hooks/custom.sh", "#!/bin/sh\necho keep me\n");
+    writeFile(projectRoot, ".git-hooks/custom.sh", "#!/bin/sh\necho keep me\n");
 
     childProcess.execSync = (command) => {
       if (command === "git remote get-url origin") {
@@ -735,22 +735,22 @@ test("syncTemplates syncs the managed github hook as a single file", async () =>
 
     assert.ok(
       report.registryAdded.some(
-        (entry) => entry.entry === ".github/hooks/check-version-format.sh" && entry.list === "managed"
+        (entry) => entry.entry === ".git-hooks/check-version-format.sh" && entry.list === "managed"
       )
     );
-    assert.deepEqual(report.managed.created, [".github/hooks/check-version-format.sh"]);
+    assert.deepEqual(report.managed.created, [".git-hooks/check-version-format.sh"]);
     assert.equal(
-      fs.readFileSync(path.join(projectRoot, ".github/hooks/check-version-format.sh"), "utf8"),
-      "#!/bin/sh\necho github hook\n"
+      fs.readFileSync(path.join(projectRoot, ".git-hooks/check-version-format.sh"), "utf8"),
+      "#!/bin/sh\necho shared hook\n"
     );
     if (supportsPosixModeBits()) {
       assert.notEqual(
-        fs.statSync(path.join(projectRoot, ".github/hooks/check-version-format.sh")).mode & 0o111,
+        fs.statSync(path.join(projectRoot, ".git-hooks/check-version-format.sh")).mode & 0o111,
         0
       );
     }
     assert.equal(
-      fs.readFileSync(path.join(projectRoot, ".github/hooks/custom.sh"), "utf8"),
+      fs.readFileSync(path.join(projectRoot, ".git-hooks/custom.sh"), "utf8"),
       "#!/bin/sh\necho keep me\n"
     );
   } finally {
@@ -759,7 +759,7 @@ test("syncTemplates syncs the managed github hook as a single file", async () =>
   }
 });
 
-test("syncTemplates reports github pre-commit as a merged pending file", async () => {
+test("syncTemplates reports shared pre-commit as a merged pending file", async () => {
   const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-github-pre-commit-"));
 
@@ -769,7 +769,7 @@ test("syncTemplates reports github pre-commit as a merged pending file", async (
 
     fs.mkdirSync(projectRoot, { recursive: true });
 
-    writeFile(templateRoot, ".github/hooks/pre-commit", "#!/bin/sh\n");
+    writeFile(templateRoot, ".git-hooks/pre-commit", "#!/bin/sh\n");
 
     writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo",
@@ -795,12 +795,12 @@ test("syncTemplates reports github pre-commit as a merged pending file", async (
 
     assert.ok(
       report.registryAdded.some(
-        (entry) => entry.entry === ".github/hooks/pre-commit" && entry.list === "merged"
+        (entry) => entry.entry === ".git-hooks/pre-commit" && entry.list === "merged"
       )
     );
     assert.deepEqual(
-      report.merged.pending.filter((entry) => entry.target === ".github/hooks/pre-commit"),
-      [{ target: ".github/hooks/pre-commit", template: ".github/hooks/pre-commit" }]
+      report.merged.pending.filter((entry) => entry.target === ".git-hooks/pre-commit"),
+      [{ target: ".git-hooks/pre-commit", template: ".git-hooks/pre-commit" }]
     );
   } finally {
     childProcess.execSync = originalExecSync;

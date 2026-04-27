@@ -32,7 +32,7 @@ git clone git@github.com:fitlab-ai/agent-infra.git
 npm install
 
 # 启用 Git hooks（仅首次 clone 后执行一次）
-git config core.hooksPath .github/hooks
+git config core.hooksPath .git-hooks
 
 # 构建（修改 src/ 或 lib/ 后需要运行）
 npm run build
@@ -99,6 +99,15 @@ npm test
 - 已在 rules/scripts 中定义过的命令或 marker 字符串副本
 
 `tests/templates/platform-coupling.test.js` 提供结构性护栏：baseline 文案不得含平台硬指标，skill reference 目录不得新增 `.github.*` 这类平台变体。测试不能覆盖所有软指标，PR 作者和 reviewer 仍需人工检查 schema 字段、命令重复和措辞包装。
+
+### 路径级平台门控（init/sync 实施层）
+
+`templates/` 下顶层段为 `.{platform}/` 的路径（如 `.github/`、未来的 `.gitlab/`）由 `src/sync-templates.js` 按 `cfg.platform.type` 自动门控分发：
+
+- 当 `cfg.platform.type` 等于该 platform：正常分发与同步
+- 当 `cfg.platform.type` 是其他 `KNOWN_PLATFORMS` 值或自定义平台：跳过分发，并清理项目中残留的同名目录条目
+
+项目级（非平台特定）的 git hooks、配置等不应放在 `.{platform}/` 下；放在平台中性路径（如 `.git-hooks/`）才能跨平台分发。
 
 示例：
 

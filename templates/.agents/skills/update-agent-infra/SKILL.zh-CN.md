@@ -37,6 +37,8 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 - `templateRoot`：模板文件根目录绝对路径
 - `templateSources.conflicts`：外部模板源冲突列表；报告中必须显式展示，说明哪些文件因内置模板或后续外部源获胜而被忽略
 - `managed.written` / `managed.created`：已更新/新建的 managed 文件
+- `managed.removed`：被删除的 managed 文件（包括模板迁移时移除的旧路径）
+- `managed.skippedPlatform`：因归属其他平台而被跳过的 managed / merged 条目
 - `merged.pending`：需要 AI 处理的 merged 文件列表
   - 每项包含 `target`（项目中的目标路径）和 `template`（模板根目录下的相对路径）
 - `registryAdded`：新增的文件注册条目

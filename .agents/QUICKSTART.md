@@ -13,10 +13,10 @@
 在依赖模板中的 Git hook 链路前，先启用共享 hooks 路径：
 
 ```bash
-git config core.hooksPath .github/hooks
+git config core.hooksPath .git-hooks
 ```
 
-这样 Git 才会调用项目仓库 `.github/hooks/` 目录下的 hook，包括 `pre-commit` 和 `check-version-format.sh`。
+这样 Git 才会调用项目仓库 `.git-hooks/` 目录下的 hook，包括 `pre-commit` 和 `check-version-format.sh`。
 
 ## 外部模板与 Skill
 

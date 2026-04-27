@@ -32,7 +32,8 @@ test("custom platforms fall back to generic platform templates", async () => {
     ".agents/scripts/platform-adapters/platform-sync.js",
     ".agents/skills/init-labels/scripts/init-labels.sh",
     ".agents/skills/init-milestones/scripts/init-milestones.sh",
-    ".agents/skills/release/scripts/manage-milestones.sh"
+    ".agents/skills/release/scripts/manage-milestones.sh",
+    ".git-hooks/check-version-format.sh"
   ];
 
   try {
@@ -84,7 +85,8 @@ test("custom platforms fall back to generic platform templates", async () => {
       ".agents/scripts/platform-adapters/platform-sync.js",
       ".agents/skills/init-labels/scripts/init-labels.sh",
       ".agents/skills/init-milestones/scripts/init-milestones.sh",
-      ".agents/skills/release/scripts/manage-milestones.sh"
+      ".agents/skills/release/scripts/manage-milestones.sh",
+      ".git-hooks/check-version-format.sh"
     ].forEach((target) => {
       assert.equal(
         fs.readFileSync(path.join(projectRoot, target), "utf8"),
@@ -92,6 +94,11 @@ test("custom platforms fall back to generic platform templates", async () => {
         `${target} should be rendered from the generic fallback`
       );
     });
+
+    assert.ok(
+      !fs.existsSync(path.join(projectRoot, ".github/scripts/sync-labels-to-set.sh")),
+      "custom platforms should skip GitHub-owned files"
+    );
   } finally {
     childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
