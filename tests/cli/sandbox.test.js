@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { assertModeBits, envWithPrependedPath, filePath, loadFreshEsm } from "../helpers.js";
+import { restoreTerminal, runInteractive } from "../../lib/sandbox/shell.js";
 
 function modeBits(filePath) {
   return fs.statSync(filePath).mode & 0o777;
@@ -19,6 +20,113 @@ function restoreDockerContext(previousValue) {
     process.env.DOCKER_CONTEXT = previousValue;
   }
 }
+
+function withTTY(value, fn) {
+  const descriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+
+  try {
+    Object.defineProperty(process.stdout, "isTTY", { configurable: true, value });
+    return fn();
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(process.stdout, "isTTY", descriptor);
+    } else {
+      delete process.stdout.isTTY;
+    }
+  }
+}
+
+function captureStdoutWrite(fn) {
+  const originalWrite = process.stdout.write;
+  let output = "";
+
+  try {
+    process.stdout.write = (chunk, ...args) => {
+      output += String(chunk);
+      const callback = args.find((arg) => typeof arg === "function");
+      callback?.();
+      return true;
+    };
+    fn();
+    return output;
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+}
+
+function withFakeStty(exitCode, fn) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fake-stty-"));
+  const sttyPath = path.join(tmpDir, "stty");
+  const previousPath = process.env.PATH;
+
+  try {
+    fs.writeFileSync(
+      sttyPath,
+      `#!/bin/sh\nexit ${exitCode}\n`,
+      "utf8"
+    );
+    fs.chmodSync(sttyPath, 0o755);
+    process.env.PATH = `${tmpDir}${path.delimiter}${previousPath ?? ""}`;
+    return fn();
+  } finally {
+    if (previousPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = previousPath;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+test("runInteractive emits terminal reset on normal exit", () => {
+  const output = withFakeStty(0, () => withTTY(true, () => captureStdoutWrite(() => {
+    const status = runInteractive(process.execPath, ["-e", "process.exit(0)"]);
+
+    assert.equal(status, 0);
+  })));
+
+  assert.match(output, /\x1b\[\?1049l/);
+  assert.match(output, /\x1b\[\?25h/);
+  assert.match(output, /\x1b>/);
+  assert.match(output, /\x1b\[\?1006l/);
+});
+
+test("runInteractive emits terminal reset on non-zero exit", () => {
+  const output = withFakeStty(0, () => withTTY(true, () => captureStdoutWrite(() => {
+    const status = runInteractive(process.execPath, ["-e", "process.exit(7)"]);
+
+    assert.equal(status, 7);
+  })));
+
+  assert.match(output, /\x1b\[\?1049l/);
+});
+
+test("runInteractive emits terminal reset when spawn fails", () => {
+  const output = withFakeStty(0, () => withTTY(true, () => captureStdoutWrite(() => {
+    const status = runInteractive("agent-infra-missing-command", []);
+
+    assert.notEqual(status, 0);
+    assert.equal(status, 1);
+  })));
+
+  assert.match(output, /\x1b\[\?1049l/);
+});
+
+test("restoreTerminal is a no-op when stdout is not a TTY", () => {
+  const output = withTTY(false, () => captureStdoutWrite(() => {
+    restoreTerminal();
+  }));
+
+  assert.equal(output, "");
+});
+
+test("restoreTerminal does not throw when stty is unavailable", { skip: process.platform === "win32" }, () => {
+  const output = withFakeStty(1, () => withTTY(true, () => captureStdoutWrite(() => {
+    assert.doesNotThrow(() => restoreTerminal());
+  })));
+
+  assert.match(output, /\x1b\[\?1049l/);
+});
 
 test("agent-infra sandbox help is wired into the main CLI", () => {
   const output = execFileSync(process.execPath, [filePath("bin/cli.js"), "sandbox", "--help"], {
