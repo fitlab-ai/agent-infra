@@ -1,5 +1,5 @@
 ---
-description: "从 GitHub Issue 导入并创建任务"
+description: "从 Issue 导入并创建任务"
 agent: general
 subtask: false
 ---

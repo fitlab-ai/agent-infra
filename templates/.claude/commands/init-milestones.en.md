@@ -1,5 +1,5 @@
 ---
-description: "Initialize the repository's standard GitHub Milestones taxonomy"
+description: "Initialize the repository's standard milestones taxonomy"
 usage: "/init-milestones [--history]"
 disable-model-invocation: true
 ---

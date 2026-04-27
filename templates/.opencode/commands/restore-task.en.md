@@ -1,5 +1,5 @@
 ---
-description: "Restore local task files from GitHub Issue comments"
+description: "Restore local task files from Issue comments"
 agent: general
 subtask: false
 ---

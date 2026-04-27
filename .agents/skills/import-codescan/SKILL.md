@@ -25,7 +25,7 @@ description: "导入 Code Scanning 告警并创建修复任务"
 - `rule`：规则信息（id、severity、description、security_severity_level）
 - `tool`：扫描工具信息（name、version）
 - `most_recent_instance`：位置（path、start_line、end_line）、消息
-- `html_url`：GitHub 告警链接
+- `html_url`：平台告警链接
 
 ### 2. 创建任务目录和文件
 

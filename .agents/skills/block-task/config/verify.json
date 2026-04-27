@@ -22,7 +22,8 @@
     },
     "platform-sync": {
       "when": "issue_number_exists",
-      "expected_status_label": "status: blocked"
+      "expected_status_label": "status: blocked",
+      "expected_status_label_key": "blocked"
     }
   }
 }

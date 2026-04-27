@@ -99,7 +99,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
 - Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
 - Set `status: pending-design-work` by following issue-sync.md
-- Create or update the `<!-- sync-issue:{task-id}:task -->` comment (follow the task.md comment sync rule in issue-sync.md)
+- Create or update the task comment marker defined in `.agents/rules/issue-sync.md` (follow the task.md comment sync rule in issue-sync.md)
 - Publish the `{plan-artifact}` comment
 
 ### 8. Verification Gate

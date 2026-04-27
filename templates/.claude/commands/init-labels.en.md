@@ -1,5 +1,5 @@
 ---
-description: "Initialize the repository's standard GitHub Labels taxonomy"
+description: "Initialize the repository's standard labels taxonomy"
 disable-model-invocation: true
 ---
 

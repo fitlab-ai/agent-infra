@@ -1,5 +1,5 @@
 ---
-description: "Import a GitHub Issue and create a task"
+description: "Import an Issue and create a task"
 agent: general
 subtask: false
 ---

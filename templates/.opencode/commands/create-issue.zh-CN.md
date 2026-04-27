@@ -1,5 +1,5 @@
 ---
-description: "从任务文件创建 GitHub Issue"
+description: "从任务文件创建 Issue"
 agent: general
 subtask: false
 ---

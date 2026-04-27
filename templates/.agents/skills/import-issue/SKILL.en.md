@@ -1,11 +1,11 @@
 ---
 name: import-issue
-description: "Import a GitHub Issue and create a task"
+description: "Import an Issue and create a task"
 ---
 
 # Import Issue
 
-Import the specified GitHub Issue and create a task. Argument: issue number.
+Import the specified Issue and create a task. Argument: issue number.
 
 ## Boundary / Critical Rules
 
@@ -38,7 +38,7 @@ node .agents/scripts/platform-adapters/find-existing-task.js --issue <issue-numb
 
 - Script outputs `found=false`: create a new task through the normal import flow
 - Script outputs `found=true`: reuse `task_id`
-- Script exits 2: treat it as network, authentication, or GitHub API degradation; show the failure reason from script stderr to the user, then continue with the new-task import flow without blocking
+- Script exits 2: treat it as network, authentication, or platform API degradation; show the failure reason from script stderr to the user, then continue with the new-task import flow without blocking
 
 ### 3. Create the Task Directory and File
 
@@ -109,7 +109,7 @@ If task.md contains a valid `issue_number`, use the Issue update command from `.
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
 - Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
 - Check the Issue's current milestone; if it is unset, read `.agents/rules/milestone-inference.md` and infer plus set the milestone using "Stage 1: `create-issue`". If `has_triage=false` or the inference is uncertain, skip and continue
-- After every scenario, task comment sync is mandatory: create or update the `<!-- sync-issue:{task-id}:task -->` comment so the remote `:task` comment exists and matches the local `task.md` content (follow the task.md comment sync rule in issue-sync.md)
+- After every scenario, task comment sync is mandatory: create or update the task comment marker defined in `.agents/rules/issue-sync.md` so the remote `:task` comment exists and matches the local `task.md` content (follow the task.md comment sync rule in issue-sync.md)
 
 ### 7. Verification Gate
 
@@ -173,5 +173,5 @@ After completing the checklist, **stop immediately**. Do not continue to later s
 ## Error Handling
 
 - Issue not found: output "Issue #{number} not found, please check the issue number"
-- Network error: output "Cannot connect to GitHub, please check network"
+- Network error: output "Cannot connect to the platform, please check network"
 - Permission error: output "No access to this repository"

@@ -9,6 +9,26 @@ const DEFAULT_RETRY_DELAYS_MS = [3000, 10000];
 let activeShared = null;
 let repoRoot = "";
 
+export function getDefaults() {
+  return {
+    statusLabels: {
+      pendingDesignWork: "status: pending-design-work",
+      inProgress: "status: in-progress",
+      blocked: "status: blocked",
+      completed: "status: completed",
+      waitingForTriage: "status: waiting-for-triage"
+    },
+    markers: {
+      task: "<!-- sync-issue:{task-id}:task -->",
+      artifact: "<!-- sync-issue:{task-id}:{artifact-stem} -->",
+      artifactChunk: "<!-- sync-issue:{task-id}:{artifact-stem}:{part}/{total} -->",
+      summary: "<!-- sync-issue:{task-id}:summary -->",
+      cancel: "<!-- sync-issue:{task-id}:cancel -->",
+      prSummary: "<!-- sync-pr:{task-id}:summary -->"
+    }
+  };
+}
+
 function getShared() {
   if (!activeShared) {
     throw new Error("platform-sync adapter shared utilities are unavailable");
@@ -124,12 +144,16 @@ function buildSyncContext({ taskDir, config, artifactFile }) {
     return { earlyReturn: blockedResult(CHECK_TYPE, upstreamRepo.message, "network_error") };
   }
   const permissions = detectPermissions(upstreamRepo.value, taskDir);
+  const expectedValues = resolveExpectedValues(config);
+  if (!expectedValues.ok) {
+    return { earlyReturn: failResult(CHECK_TYPE, expectedValues.message, "check_failed") };
+  }
 
-  const marker = config.expected_comment_marker
-    ? interpolate(config.expected_comment_marker, taskDir, artifactFile)
+  const marker = expectedValues.commentMarker
+    ? interpolate(expectedValues.commentMarker, taskDir, artifactFile)
     : null;
-  const prMarker = config.expected_pr_comment_marker
-    ? interpolate(config.expected_pr_comment_marker, taskDir, artifactFile)
+  const prMarker = expectedValues.prCommentMarker
+    ? interpolate(expectedValues.prCommentMarker, taskDir, artifactFile)
     : null;
   const artifactPath = artifactFile ? path.join(taskDir, artifactFile) : null;
 
@@ -144,9 +168,63 @@ function buildSyncContext({ taskDir, config, artifactFile }) {
     upstreamRepo: upstreamRepo.value,
     hasTriage: permissions.hasTriage,
     hasPush: permissions.hasPush,
+    expectedStatusLabel: expectedValues.statusLabel,
     marker,
     prMarker
   };
+}
+
+function resolveExpectedValues(config) {
+  const defaults = getDefaults();
+  const statusLabel = resolveDefaultValue({
+    collection: defaults.statusLabels,
+    key: config.expected_status_label_key,
+    value: config.expected_status_label,
+    configKey: "expected_status_label_key"
+  });
+  if (!statusLabel.ok) {
+    return statusLabel;
+  }
+
+  const commentMarker = resolveDefaultValue({
+    collection: defaults.markers,
+    key: config.expected_comment_marker_key,
+    value: config.expected_comment_marker,
+    configKey: "expected_comment_marker_key"
+  });
+  if (!commentMarker.ok) {
+    return commentMarker;
+  }
+
+  const prCommentMarker = resolveDefaultValue({
+    collection: defaults.markers,
+    key: config.expected_pr_comment_marker_key,
+    value: config.expected_pr_comment_marker,
+    configKey: "expected_pr_comment_marker_key"
+  });
+  if (!prCommentMarker.ok) {
+    return prCommentMarker;
+  }
+
+  return {
+    ok: true,
+    statusLabel: statusLabel.value,
+    commentMarker: commentMarker.value,
+    prCommentMarker: prCommentMarker.value
+  };
+}
+
+function resolveDefaultValue({ collection, key, value, configKey }) {
+  if (!key) {
+    return { ok: true, value: value || null };
+  }
+
+  const resolvedValue = collection[key];
+  if (!resolvedValue) {
+    return { ok: false, message: `Unknown ${configKey}: ${key}` };
+  }
+
+  return { ok: true, value: resolvedValue };
 }
 
 function fetchRemoteData(context) {
@@ -209,7 +287,7 @@ function fetchRemoteData(context) {
   }
 
   let prComments = null;
-  if (context.config.expected_pr_comment_marker) {
+  if (context.prMarker) {
     if (!context.prNumber) {
       return {
         earlyReturn: failResult(CHECK_TYPE, "Expected a valid pr_number for PR comment verification", "check_failed")
@@ -323,7 +401,9 @@ function mapTaskTypeToLabel(taskType) {
 function shouldFetchComments(config) {
   return Boolean(
     config.expected_comment_marker
+    || config.expected_comment_marker_key
     || config.expected_pr_comment_marker
+    || config.expected_pr_comment_marker_key
     || config.verify_pr_comment_last_commit_matches_head
     || config.verify_comment_content
     || config.verify_task_comment_content
@@ -339,7 +419,7 @@ function flattenComments(value) {
 }
 
 function checkStatusLabel(context, remoteData) {
-  if (!context.config.expected_status_label || !context.hasTriage) {
+  if (!context.expectedStatusLabel || !context.hasTriage) {
     return null;
   }
 
@@ -348,12 +428,12 @@ function checkStatusLabel(context, remoteData) {
   }
 
   const labels = extractLabelNames(remoteData.issue.labels);
-  if (labels.includes(context.config.expected_status_label)) {
+  if (labels.includes(context.expectedStatusLabel)) {
     return null;
   }
 
   return failResult(CHECK_TYPE,
-    `Expected label '${context.config.expected_status_label}' not found on Issue #${context.issueNumber}`,
+    `Expected label '${context.expectedStatusLabel}' not found on Issue #${context.issueNumber}`,
     "check_failed"
   );
 }

@@ -1,5 +1,19 @@
 # Issue Sync Rules
 
+## Marker Registry
+
+These hidden markers are the canonical registry for Issue synchronization:
+
+| Key | Marker |
+|---|---|
+| `task` | `<!-- sync-issue:{task-id}:task -->` |
+| `artifact` | `<!-- sync-issue:{task-id}:{artifact-stem} -->` |
+| `artifactChunk` | `<!-- sync-issue:{task-id}:{artifact-stem}:{part}/{total} -->` |
+| `summary` | `<!-- sync-issue:{task-id}:summary -->` |
+| `cancel` | `<!-- sync-issue:{task-id}:cancel -->` |
+
+Callers should refer to the marker key in skill prose and keep concrete marker strings in this rule or the platform adapter defaults.
+
 Read this file before a task skill updates a GitHub Issue.
 
 ## Upstream Repository Detection

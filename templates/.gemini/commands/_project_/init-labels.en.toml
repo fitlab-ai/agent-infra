@@ -1,6 +1,6 @@
-description = "Initialize the repository's standard GitHub Labels taxonomy"
+description = "Initialize the repository's standard labels taxonomy"
 prompt = """
-Initialize GitHub Labels for {{project}}.
+Initialize labels for {{project}}.
 
 Read and execute the init-labels skill from `.agents/skills/init-labels/SKILL.md`.
 

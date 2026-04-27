@@ -41,7 +41,7 @@ Read `task.md` carefully to understand:
 - currently known affected files and constraints
 
 If `task.md` contains these source fields, also read the corresponding source information:
-- `issue_number` - GitHub Issue
+- `issue_number` - Issue
 - `codescan_alert_number` - Code Scanning alert
 - `security_alert_number` - Dependabot alert
 
@@ -70,7 +70,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 
 ## Requirement Source
 
-**Source type**: {User description / GitHub Issue / Code Scanning / Dependabot / Other}
+**Source type**: {User description / Issue / Code Scanning / Dependabot / Other}
 **Source summary**:
 > {Task source or key context}
 
@@ -121,7 +121,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
 - Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
 - Set `status: pending-design-work` by following issue-sync.md
-- Create or update the `<!-- sync-issue:{task-id}:task -->` comment (follow the task.md comment sync rule in issue-sync.md)
+- Create or update the task comment marker defined in `.agents/rules/issue-sync.md` (follow the task.md comment sync rule in issue-sync.md)
 - Publish the `{analysis-artifact}` comment
 
 ### 7. Verification Gate

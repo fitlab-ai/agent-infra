@@ -22,6 +22,44 @@ Before any later `gh issue` or `gh api "repos/..."` call, follow `.agents/rules/
 - keep `gh pr *` commands on the current repository without adding `-R`
 - keep organization-scoped commands such as `gh api "orgs/{owner}/..."` unchanged
 
+## Issue Template Detection
+
+Detect GitHub Issue Forms with:
+
+```bash
+rg --files .github/ISSUE_TEMPLATE -g '*.yml' -g '!config.yml'
+```
+
+Read matching form files locally before creating the Issue. If the directory is missing or no form matches the task, use the caller's fallback body format.
+
+Typical candidate templates:
+- `bug_report.yml` for bug work
+- `question.yml` for question or investigation work
+- `feature_request.yml` for feature work
+- `documentation.yml` for documentation work
+- `other.yml` as the general fallback
+
+For GitHub Issue Forms, inspect the matched form's:
+- `name`
+- `type:`
+- `labels:`
+- `body:`
+
+Field handling rules:
+- `textarea` and `input`: use `attributes.label` as the markdown heading and fill values from task.md
+- `markdown`: skip template explanation prose
+- `dropdown` and `checkboxes`: skip
+- when task.md lacks a suitable value, write `N/A`
+
+Suggested field mapping:
+
+| Template field hint | task.md source |
+|---|---|
+| `summary`, `title` | task title |
+| `description`, `problem`, `what happened`, `issue-description`, `current-content` | task description |
+| `solution`, `requirements`, `steps`, `suggested-content`, `impact`, `context`, `alternatives`, `expected` | requirements list |
+| other `textarea` / `input` fields | task description, otherwise `N/A` |
+
 ## Read and Create Issues
 
 Read an Issue:
@@ -81,6 +119,28 @@ Read Issue comments or search for existing hidden markers:
 ```bash
 gh api "repos/$upstream_repo/issues/{issue-number}/comments" --paginate
 ```
+
+## PR Template and Metadata Helpers
+
+Read a repository PR template when present:
+
+```bash
+cat .github/PULL_REQUEST_TEMPLATE.md
+```
+
+Review recent merged PRs for style:
+
+```bash
+gh pr list --limit 3 --state merged --json number,title,body
+```
+
+Verify that standard type labels exist before PR metadata sync:
+
+```bash
+gh label list --search "type:" --limit 1 --json name --jq 'length'
+```
+
+If the result is `0`, run `init-labels` before retrying PR metadata sync.
 
 ## Read and Create PRs
 

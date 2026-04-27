@@ -9,7 +9,7 @@ Restore local task workspace files from platform Issue comments that contain syn
 
 ## Boundary / Critical Rules
 
-- Restore files only from comments marked with `<!-- sync-issue:{task-id}:... -->`
+- Restore files only from comments that match the marker registry in `.agents/rules/issue-sync.md`
 - Restore into `.agents/workspace/active/{task-id}/` by default
 - Stop immediately if the target directory already exists and ask the user to resolve the conflict first
 - After executing this skill, you **must** immediately update the restored `task.md`
@@ -31,16 +31,11 @@ Read all Issue comments by following the "Read Issue comments" command in `.agen
 
 ### 3. Determine the task-id and Files to Restore
 
-Filter comments by these hidden markers:
-
-```html
-<!-- sync-issue:{task-id}:{file-stem} -->
-<!-- sync-issue:{task-id}:{file-stem}:{part}/{total} -->
-```
+Filter comments by the task, artifact, and chunked artifact markers defined in `.agents/rules/issue-sync.md`.
 
 Rules:
 - when `{task-id}` was provided, match only that task
-- when `{task-id}` was omitted, infer it from the `<!-- sync-issue:{task-id}:task -->` comment first
+- when `{task-id}` was omitted, infer it from the task comment marker first
 - if you cannot determine a unique task-id, stop and tell the user
 - ignore `summary` marker comments because they are complete-task aggregate output rather than restorable local task files
 - map `{file-stem}` back to filenames:
@@ -58,7 +53,7 @@ Read `.agents/rules/issue-sync.md` before executing this step.
 For each file:
 - collect its single comment or chunked comments
 - for `task.md` comments, reverse the `<details>` frontmatter wrapper described in issue-sync.md before reassembling the file body
-- when `{part}/{total}` exists, sort by part and verify the set is complete
+- when a chunk marker includes part and total indexes, sort by part and verify the set is complete
 - extract the file body by removing the hidden marker, heading, and footer
 - concatenate chunk bodies into the final file content
 
@@ -88,66 +83,20 @@ Update the restored `task.md`:
 - `status`: `active`
 - `assigned_to`: {current AI agent}
 - `updated_at`: {current time}
-- keep the original `current_step`
-- append this entry to `## Activity Log`:
-  ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Restore Task** by {agent} — Restored task from Issue #{issue-number}
-  ```
 
-### 7. Verification Gate
+Append an Activity Log entry indicating the task was restored from the platform Issue.
 
-Run the verification gate:
+### 7. Inform User
 
-```bash
-node .agents/scripts/validate-artifact.js gate restore-task .agents/workspace/active/{task-id} --format text
-```
-
-Handle the result as follows:
-- exit code 0 (all checks passed) -> continue to the "Inform User" step
-- exit code 1 (validation failed) -> fix the reported issues and run the gate again
-- exit code 2 (network blocked) -> stop and tell the user that human intervention is required
-
-Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
-
-### 8. Inform User
-
-> Execute this step only after the verification gate passes.
-
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
-
-Output format:
-
-```text
-Task {task-id} was restored from Issue #{issue-number}.
-
-Summary:
-- Restored files: {count}
-- Task directory: .agents/workspace/active/{task-id}/
-- Current step: {current_step}
-
-Next step - check task status:
-  - Claude Code / OpenCode: /check-task {task-id}
-  - Gemini CLI: /{{project}}:check-task {task-id}
-  - Codex CLI: $check-task {task-id}
-```
+Report the restored task id, restored file count, and the active task directory.
 
 ## Completion Checklist
 
-- [ ] Fetched and parsed Issue comments
-- [ ] Restored `task.md` and every available artifact file
-- [ ] Updated the restored task.md
-- [ ] Ran and passed the verification gate
-- [ ] Showed the next-step commands in every TUI format, including any custom TUIs
+- [ ] Fetched Issue comments from the platform
+- [ ] Restored task files locally
+- [ ] Updated restored task metadata
+- [ ] Reported the restored directory
 
-## STOP
+### 8. Stop
 
-Stop after completing the checklist. Do not continue the workflow automatically.
-
-## Error Handling
-
-- Issue missing or inaccessible
-- Platform CLI unavailable or unauthenticated
-- No sync-marked comments found
-- Unable to determine a unique `task-id`
-- Target directory already exists
-- Missing chunks or incomplete chunk ordering
+Stop after the completion checklist. Do not commit automatically.

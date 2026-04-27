@@ -129,7 +129,7 @@ bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PAT
 
 2. 推送标签：
    git push origin v{version}
-   推送后将自动触发 GitHub Release 创建和 npm 发布
+   推送后将自动触发 release 创建和 npm 发布
 
 3.（可选）生成发布说明：
    - Claude Code / OpenCode：/create-release-note {version}

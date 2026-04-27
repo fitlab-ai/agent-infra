@@ -128,18 +128,18 @@ If no historical release notes exist, use the following default Markdown format:
 3. Description: Use PR title, remove `type(scope):` prefix, capitalize first letter
 4. **Contributor collection**:
    - **Data sources**:
-     - PR authors from Step 4 `gh pr list --json author`
+     - PR authors returned by the merged-PR query rule in `.agents/rules/release-commands.md`
      - Commit co-authors from Step 4 `git log ... --format='%(trailers:key=Co-authored-by,valueonly,unfold)'`
-     - Issue reporters from linked Issues collected in Step 5 (`author.login` returned by `gh issue view`)
+     - Issue reporters from linked Issues collected in Step 5 (author login returned by `.agents/rules/release-commands.md`)
    - **Contribution count**: `PR count + co-authored commit count` for the same identity, merged across both sources
    - **Name -> `@login` mapping**:
-     - Raw `Co-authored-by` values are `Name <email>` and must be mapped to a GitHub `@login`
-     - Prefer email extraction: if it matches `(\d+\+)?(\S+?)@users\.noreply\.github\.com`, use the second capture group lowercased; this regex covers both `{id}+{login}@users.noreply.github.com` and `{login}@users.noreply.github.com`
+     - Raw `Co-authored-by` values are `Name <email>` and must be mapped to a platform `@login`
+     - Prefer email extraction: if it matches the platform no-reply email rule in `.agents/rules/release-commands.md`, use that rule to derive the lowercased login
      - Otherwise use a Name heuristic: take the first token before a space and lowercase it, for example `Claude Opus 4.6 (1M context)` -> `@claude`, `Codex` -> `@codex`, `Gemini` -> `@gemini`
      - If the login already appears in the PR author list, merge counts into that login so `Claude` and `@claude` do not become separate entries
      - Merge all Name variants that map to the same login before counting and sorting; for example, `Claude` and `Claude Opus 4.6 (1M context)` should both collapse into `@claude`
      - Preserve bot identities as-is, for example `dependabot[bot]`
-     - If the login still cannot be determined reliably, output `@{lowercased first Name token}` and append `<!-- TODO(reviewer): confirm GitHub login for {original Name <email>} -->` below the `Contributors` section
+     - If the login still cannot be determined reliably, output `@{lowercased first Name token}` and append `<!-- TODO(reviewer): confirm platform login for {original Name <email>} -->` below the `Contributors` section
    - **Sorting**: descending by contribution count, then lexicographically by login for ties
    - **Deduplication**: use the final mapped `@login` as the key
    - **Issue reporter rules**:
@@ -156,7 +156,7 @@ Show the generated release notes to the user.
 
 Ask:
 1. Need any adjustments?
-2. Create a GitHub Draft Release?
+2. Create a draft release?
 
 ### 9. Create Draft Release (If Confirmed)
 
@@ -170,7 +170,7 @@ Draft Release created.
 - Version: v{version}
 - Status: Draft
 
-Please review and publish on GitHub:
+Please review and publish on the platform:
 1. Open the URL above
 2. Review the release notes
 3. Click "Publish release"
@@ -178,7 +178,7 @@ Please review and publish on GitHub:
 
 ## Notes
 
-1. **Requires gh CLI**: Must have GitHub CLI installed and authenticated
+1. **Requires the platform CLI**: Must have the platform CLI installed and authenticated
 2. **Tags must exist**: Run the release skill first to create tags
 3. **Draft mode**: Creates a draft - won't auto-publish
 4. **Classification accuracy**: Auto-classification is based on title/scope/files; complex PRs may need manual adjustment
@@ -187,5 +187,5 @@ Please review and publish on GitHub:
 
 - Invalid version format: Prompt correct format
 - Tag not found: Suggest running the release skill first
-- gh not authenticated: Prompt to authenticate
+- The platform CLI is not authenticated: Prompt to authenticate
 - No merged PRs found: Prompt to check tags and branch

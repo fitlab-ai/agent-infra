@@ -17,11 +17,11 @@ Recommended fallback:
 - [ ] {requirement-2}
 ```
 
-Map task types to GitHub labels and Issue Types, but keep only labels that actually exist.
+Map task types to labels and Issue Types, but keep only labels that actually exist.
 
 Fallback label mapping:
 
-| task.md type | GitHub label |
+| task.md type | label |
 |---|---|
 | `bug`, `bugfix` | `type: bug` |
 | `feature` | `type: feature` |
@@ -34,7 +34,7 @@ Fallback label mapping:
 
 Issue Type fallback mapping:
 
-| task.md type | GitHub Issue Type |
+| task.md type | Issue Type |
 |---|---|
 | `bug`, `bugfix` | `Bug` |
 | `feature`, `enhancement` | `Feature` |

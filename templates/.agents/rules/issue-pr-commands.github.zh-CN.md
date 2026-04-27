@@ -22,6 +22,44 @@ gh repo view --json nameWithOwner
 - `gh pr *` 命令保持作用于当前仓库，不额外加 `-R`
 - `gh api "orgs/{owner}/..."` 这类 org 级命令保持不变
 
+## Issue 模板检测
+
+使用以下命令检测 GitHub Issue Forms：
+
+```bash
+rg --files .github/ISSUE_TEMPLATE -g '*.yml' -g '!config.yml'
+```
+
+创建 Issue 前先读取匹配的 form 文件。目录不存在或没有匹配 form 时，使用调用方定义的 fallback 正文格式。
+
+常见候选模板：
+- `bug_report.yml`：bug 工作
+- `question.yml`：问题或排查工作
+- `feature_request.yml`：功能工作
+- `documentation.yml`：文档工作
+- `other.yml`：通用 fallback
+
+对 GitHub Issue Forms，检查匹配 form 的：
+- `name`
+- `type:`
+- `labels:`
+- `body:`
+
+字段处理规则：
+- `textarea` 和 `input`：使用 `attributes.label` 作为 markdown 标题，并从 task.md 填充值
+- `markdown`：跳过模板说明文案
+- `dropdown` 和 `checkboxes`：跳过
+- task.md 缺少合适值时，写入 `N/A`
+
+建议字段映射：
+
+| 模板字段提示 | task.md 来源 |
+|---|---|
+| `summary`, `title` | 任务标题 |
+| `description`, `problem`, `what happened`, `issue-description`, `current-content` | 任务描述 |
+| `solution`, `requirements`, `steps`, `suggested-content`, `impact`, `context`, `alternatives`, `expected` | 需求列表 |
+| 其他 `textarea` / `input` 字段 | 任务描述，否则 `N/A` |
+
 ## Issue 读取与创建
 
 读取 Issue：
@@ -81,6 +119,28 @@ gh issue close {issue-number} -R "$upstream_repo" --reason "{reason}"
 ```bash
 gh api "repos/$upstream_repo/issues/{issue-number}/comments" --paginate
 ```
+
+## PR 模板与元数据辅助命令
+
+存在仓库 PR 模板时读取：
+
+```bash
+cat .github/PULL_REQUEST_TEMPLATE.md
+```
+
+参考最近合并的 PR 风格：
+
+```bash
+gh pr list --limit 3 --state merged --json number,title,body
+```
+
+PR 元数据同步前验证标准 type labels 是否存在：
+
+```bash
+gh label list --search "type:" --limit 1 --json name --jq 'length'
+```
+
+如果结果是 `0`，先运行 `init-labels`，再重试 PR 元数据同步。
 
 ## PR 读取与创建
 

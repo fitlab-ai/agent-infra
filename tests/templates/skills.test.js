@@ -212,12 +212,12 @@ test("workflow skill docs update task comments before publishing artifact commen
   orderedCommentSkills.forEach(([skill, artifact]) => {
     skillDocPaths(skill).forEach((relativePath) => {
       const content = read(relativePath);
-      const taskCommentIndex = content.indexOf("<!-- sync-issue:{task-id}:task -->");
+      const taskCommentIndex = content.indexOf(".agents/rules/issue-sync.md");
       const artifactCommentIndex = relativePath.includes(".en.")
         ? content.indexOf(`Publish the \`${artifact}\` comment`)
         : content.indexOf(`发布 \`${artifact}\` 评论`);
 
-      assert.notEqual(taskCommentIndex, -1, `${relativePath} should include the task comment sync marker`);
+      assert.notEqual(taskCommentIndex, -1, `${relativePath} should reference the task comment sync rule`);
       assert.notEqual(artifactCommentIndex, -1, `${relativePath} should include the artifact comment publish step`);
       assert.ok(
         taskCommentIndex < artifactCommentIndex,

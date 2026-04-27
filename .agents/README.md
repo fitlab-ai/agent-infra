@@ -108,7 +108,7 @@
 | `status:` | Yes | — | PR 有自身状态流转（Open / Draft / Merged / Closed）；Issue 使用 `status:` label 标记等待反馈、已确认等项目管理状态 |
 | `in:` | Yes | Yes | Issue 和 PR 均可按模块筛选 |
 
-默认 GitHub 配置下，可使用 `/init-labels` 命令一次性创建标准 labels。
+使用 `/init-labels` 命令可通过平台适配器一次性创建标准 labels。
 
 ## 私有平台扩展
 

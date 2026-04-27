@@ -1,5 +1,5 @@
 ---
-description: "Create a GitHub Issue from a task file"
+description: "Create an Issue from a task file"
 usage: "/create-issue <task-id>"
 ---
 

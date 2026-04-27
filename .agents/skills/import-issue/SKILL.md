@@ -1,11 +1,11 @@
 ---
 name: import-issue
-description: "从 GitHub Issue 导入并创建任务"
+description: "从 Issue 导入并创建任务"
 ---
 
 # 导入 Issue
 
-导入指定的 GitHub Issue 并创建任务。参数：issue 编号。
+导入指定的 Issue 并创建任务。参数：issue 编号。
 
 ## 行为边界 / 关键规则
 
@@ -38,7 +38,7 @@ node .agents/scripts/platform-adapters/find-existing-task.js --issue <issue-numb
 
 - 脚本输出 `found=false`：按新 Issue 导入流程创建新任务
 - 脚本输出 `found=true`：复用 `task_id`
-- 脚本退出码 2：视为网络、认证或 GitHub API 降级，向用户展示脚本 stderr 中的失败原因后，按新 Issue 导入流程继续，不阻塞导入
+- 脚本退出码 2：视为网络、认证或 platform API 降级，向用户展示脚本 stderr 中的失败原因后，按新 Issue 导入流程继续，不阻塞导入
 
 ### 3. 创建任务目录和文件
 
@@ -109,7 +109,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
 - 检查 Issue 当前 milestone；如果未设置，先读取 `.agents/rules/milestone-inference.md`，按其中的「阶段 1：`create-issue`」规则推断并设置 milestone；如果 `has_triage=false` 或推断不确定，跳过并继续
-- 所有场景结束后，必须执行一次 task 留言同步，创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论，确保远端 `:task` 评论存在且内容与本地 `task.md` 一致（按 issue-sync.md 的 task.md 评论同步规则）
+- 所有场景结束后，必须执行一次 task 留言同步，创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记，确保远端 `:task` 评论存在且内容与本地 `task.md` 一致（按 issue-sync.md 的 task.md 评论同步规则）
 
 ### 7. 完成校验
 
@@ -173,5 +173,5 @@ Issue #{number} 已导入。
 ## 错误处理
 
 - Issue 未找到：提示 "Issue #{number} not found, please check the issue number"
-- 网络错误：提示 "Cannot connect to GitHub, please check network"
+- 网络错误：提示 "Cannot connect to the platform, please check network"
 - 权限错误：提示 "No access to this repository"

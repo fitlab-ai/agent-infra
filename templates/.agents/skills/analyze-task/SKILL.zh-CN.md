@@ -41,7 +41,7 @@ description: "分析任务并输出需求分析文档"
 - 当前已知的受影响文件和约束
 
 如 `task.md` 包含以下来源字段，补充读取对应来源信息：
-- `issue_number` - GitHub Issue
+- `issue_number` - Issue
 - `codescan_alert_number` - Code Scanning 告警
 - `security_alert_number` - Dependabot 告警
 
@@ -70,7 +70,7 @@ description: "分析任务并输出需求分析文档"
 
 ## 需求来源
 
-**来源类型**：{用户描述 / GitHub Issue / Code Scanning / Dependabot / 其他}
+**来源类型**：{用户描述 / Issue / Code Scanning / Dependabot / 其他}
 **来源摘要**：
 > {任务来源或关键上下文}
 
@@ -121,7 +121,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
 - 按 issue-sync.md 设置 `status: pending-design-work`
-- 创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论（按 issue-sync.md 的 task.md 评论同步规则）
+- 创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记（按 issue-sync.md 的 task.md 评论同步规则）
 - 发布 `{analysis-artifact}` 评论
 
 ### 7. 完成校验

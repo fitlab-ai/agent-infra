@@ -17,11 +17,11 @@
 - [ ] {requirement-2}
 ```
 
-将任务类型映射到 GitHub label 和 Issue Type，但只保留仓库里实际存在的 label。
+将任务类型映射到 label 和 Issue Type，但只保留仓库里实际存在的 label。
 
 Fallback label 映射：
 
-| task.md type | GitHub label |
+| task.md type | label |
 |---|---|
 | `bug`, `bugfix` | `type: bug` |
 | `feature` | `type: feature` |
@@ -34,7 +34,7 @@ Fallback label 映射：
 
 Issue Type fallback 映射：
 
-| task.md type | GitHub Issue Type |
+| task.md type | Issue Type |
 |---|---|
 | `bug`, `bugfix` | `Bug` |
 | `feature`, `enhancement` | `Feature` |

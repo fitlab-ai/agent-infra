@@ -26,7 +26,7 @@ Use the explicit argument when provided. Otherwise infer the target branch from 
 
 ### 3. Prepare the PR Body
 
-Read `.github/PULL_REQUEST_TEMPLATE.md` when it exists, review recent merged PRs for style, and gather all commits between `<target-branch>` and `HEAD`.
+Read the PR template through `.agents/rules/issue-pr-commands.md`, review recent merged PRs for style, and gather all commits between `<target-branch>` and `HEAD`.
 
 > Template handling, HEREDOC body generation, and `Generated with AI assistance` requirements live in `reference/pr-body-template.md`. Read `reference/pr-body-template.md` before writing the PR body.
 
@@ -101,7 +101,7 @@ Explain the created PR URL, summarize metadata sync and summary-comment results,
 
 - Review every commit in the branch, not only the latest one
 - `create-pr` must not defer type-label mapping to another skill; inline the mapping here when `{task-id}` is available
-- Keep the hidden summary marker as `<!-- sync-pr:{task-id}:summary -->` for compatibility with existing PR comments
+- Keep the hidden summary marker as the PR summary marker defined in `.agents/rules/pr-sync.md` for compatibility with existing PR comments
 - If the current branch already has a PR, show its URL and stop without repeating sync work
 - When metadata inheritance from the Issue fails, continue with task.md and branch-based fallbacks
 

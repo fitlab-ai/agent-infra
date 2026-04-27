@@ -79,8 +79,8 @@ If a valid `issue_number` exists:
 - Remove all `in:` labels by following issue-sync.md
 - Remove the milestone by following issue-sync.md
 - Remove all assignees (skip directly when permission is insufficient; no fallback)
-- Publish a cancellation comment using the marker `<!-- sync-issue:{task-id}:cancel -->`
-- Create or update the `<!-- sync-issue:{task-id}:task -->` comment using the task-comment sync rules from `.agents/rules/issue-sync.md`
+- Publish a cancellation comment using the cancel marker defined in `.agents/rules/issue-sync.md`
+- Create or update the task comment marker defined in `.agents/rules/issue-sync.md` using the task-comment sync rules from `.agents/rules/issue-sync.md`
 - Close the Issue by following the "Close an Issue" command in `.agents/rules/issue-pr-commands.md`, using the fixed reason `not planned`
 
 The cancellation comment must include at least:

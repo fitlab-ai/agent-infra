@@ -1,8 +1,8 @@
-description = "Initialize the repository's standard GitHub Milestones taxonomy"
+description = "Initialize the repository's standard milestones taxonomy"
 prompt = """
 Initialize milestones: {{args}}
 
-Initialize GitHub Milestones for {{project}}.
+Initialize milestones for {{project}}.
 
 Read and execute the init-milestones skill from `.agents/skills/init-milestones/SKILL.md`.
 

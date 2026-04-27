@@ -1,5 +1,5 @@
 ---
-description: "初始化仓库的 GitHub Labels 体系"
+description: "初始化仓库的 labels 体系"
 disable-model-invocation: true
 ---
 

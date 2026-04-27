@@ -79,8 +79,8 @@ ls .agents/workspace/completed/{task-id}/task.md
 - 按 issue-sync.md 移除所有 `in:` labels
 - 按 issue-sync.md 移除 milestone
 - 移除全部 assignees（无权限时直接跳过，不做替代）
-- 发布取消评论，隐藏标记使用 `<!-- sync-issue:{task-id}:cancel -->`
-- 使用 `.agents/rules/issue-sync.md` 的 task.md 评论同步规则创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论
+- 发布取消评论，隐藏标记使用 `.agents/rules/issue-sync.md` 中定义的 cancel 评论标记
+- 使用 `.agents/rules/issue-sync.md` 的 task.md 评论同步规则创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记
 - 关闭 Issue：按 `.agents/rules/issue-pr-commands.md` 中的“关闭 Issue”命令执行，关闭原因固定为 `not planned`
 
 取消评论至少包含：
