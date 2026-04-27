@@ -26,7 +26,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           changed_files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
-            --paginate --jq '[.[].filename]')
+            --paginate --jq '.[].filename' | jq -Rn '[inputs]')
 
           should_labels=$(jq -rn \
             --argjson files "$changed_files" \
