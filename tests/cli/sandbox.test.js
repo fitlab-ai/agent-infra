@@ -1647,6 +1647,87 @@ test("ensureDockerDesktop reports when Docker Desktop is not running", async () 
   }
 });
 
+test("ensureNativeDocker throws install hint when docker is not installed", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  await assert.rejects(
+    () => sandboxEngine.ensureNativeDocker({}, null, {
+      runOkFn(cmd, args) {
+        assert.equal(cmd, "which");
+        assert.deepEqual(args, ["docker"]);
+        return false;
+      },
+      runSafeFn() {
+        assert.fail("docker version should not run when docker is missing");
+      }
+    }),
+    /not installed[\s\S]*docs\.docker\.com/
+  );
+});
+
+test("ensureNativeDocker throws daemon-down hint when docker info fails and version returns nothing", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const checks = [];
+
+  await assert.rejects(
+    () => sandboxEngine.ensureNativeDocker({}, null, {
+      runOkFn(cmd, args) {
+        checks.push([cmd, ...args]);
+        if (cmd === "which") {
+          return true;
+        }
+        if (cmd === "docker" && args[0] === "info") {
+          return false;
+        }
+        throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
+      },
+      runSafeFn(cmd, args) {
+        assert.equal(cmd, "docker");
+        assert.deepEqual(args, ["version", "--format", "{{.Server.Version}}"]);
+        return "";
+      }
+    }),
+    /daemon is not running[\s\S]*systemctl start docker[\s\S]*DOCKER_HOST/
+  );
+  assert.deepEqual(checks, [
+    ["which", "docker"],
+    ["docker", "info"]
+  ]);
+});
+
+test("ensureNativeDocker throws permission hint when docker info fails but version succeeds", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  await assert.rejects(
+    () => sandboxEngine.ensureNativeDocker({}, null, {
+      runOkFn(cmd, args) {
+        if (cmd === "which") {
+          return true;
+        }
+        if (cmd === "docker" && args[0] === "info") {
+          return false;
+        }
+        throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
+      },
+      runSafeFn(cmd, args) {
+        assert.equal(cmd, "docker");
+        assert.deepEqual(args, ["version", "--format", "{{.Server.Version}}"]);
+        return "25.0.0";
+      }
+    }),
+    /lack permission[\s\S]*usermod -aG docker/
+  );
+});
+
+test("ensureManagedVm gives Linux-specific message for native engine", async () => {
+  const sandboxVm = await loadFreshEsm("lib/sandbox/commands/vm.js");
+
+  assert.throws(
+    () => sandboxVm.ensureManagedVm("native"),
+    /does not use a managed VM/
+  );
+});
+
 test("startManagedVm uses OrbStack status instead of Docker daemon state", async () => {
   const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
   const checks = [];

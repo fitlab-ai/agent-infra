@@ -193,6 +193,23 @@ CLI 会收集项目元数据，向所有支持的 AI TUI 安装 `update-agent-in
 
 该命令会检测当前打包模板版本并渲染所有受管理文件。首次安装和后续升级都使用同一条命令。
 
+### Linux 前置条件
+
+Linux 会直接使用宿主机的 native Docker Engine；不需要启动或停止受管理的 VM。
+
+1. 按发行版安装 Docker Engine：<https://docs.docker.com/engine/install/>
+2. 启动并设置 daemon 开机自启：`sudo systemctl enable --now docker`
+3. 允许当前用户不带 `sudo` 运行 Docker：`sudo usermod -aG docker $USER`，然后打开新的登录 shell 或运行 `newgrp docker`
+
+当宿主机 `gpg-agent` 和签名 key 可用于沙箱初始化时，GPG signing 可以正常工作。如果 key 同步失败，`ai sandbox create` 会回退到清理后的 Git config，让提交仍可在没有宿主签名状态的情况下继续。
+
+Linux 已知限制：
+
+- 暂不支持 rootless Docker；后续跟踪：[#256](https://github.com/fitlab-ai/agent-infra/issues/256)
+- 暂不支持 Podman；后续跟踪：[#257](https://github.com/fitlab-ai/agent-infra/issues/257)
+- Fedora 或 RHEL 等启用 SELinux enforcing 的宿主机可能需要额外挂载标签处理；后续跟踪：[#258](https://github.com/fitlab-ai/agent-infra/issues/258)
+- `ai sandbox vm` 仅用于 macOS 受管理引擎。Linux 上直接使用 `ai sandbox create`、`ai sandbox exec`、`ai sandbox ls`、`ai sandbox rebuild` 和 `ai sandbox rm`。
+
 ### 沙箱 aliases 与 GitHub CLI
 
 `ai sandbox create` 在首次运行时会自动生成宿主机侧的 `~/.agent-infra/aliases/sandbox.sh`。该文件内置了 Claude、Codex、Gemini CLI 和 OpenCode 的 yolo 快捷命令模板，你可以直接修改；每次创建沙箱时，这个文件都会同步到容器内的 `/home/devuser/.bash_aliases`。

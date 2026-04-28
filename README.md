@@ -193,6 +193,23 @@ Open the project in any AI TUI and run `update-agent-infra`:
 
 This detects the packaged template version and renders all managed files. The same command is used both for first-time setup and for future template upgrades.
 
+### Linux Prerequisites
+
+Linux uses the native Docker Engine directly; there is no managed VM to start or stop.
+
+1. Install Docker Engine for your distribution: <https://docs.docker.com/engine/install/>
+2. Start and enable the daemon: `sudo systemctl enable --now docker`
+3. Allow your user to run Docker without `sudo`: `sudo usermod -aG docker $USER`, then open a new login shell or run `newgrp docker`
+
+GPG signing works when the host `gpg-agent` and signing key are available to the sandbox setup. If key sync fails, `ai sandbox create` falls back to a sanitized Git config so commits still work without host signing state.
+
+Known Linux limits:
+
+- Rootless Docker is not supported yet; follow-up: [#256](https://github.com/fitlab-ai/agent-infra/issues/256)
+- Podman is not supported yet; follow-up: [#257](https://github.com/fitlab-ai/agent-infra/issues/257)
+- SELinux-enforcing hosts such as Fedora or RHEL may need mount label handling; follow-up: [#258](https://github.com/fitlab-ai/agent-infra/issues/258)
+- `ai sandbox vm` is only for managed macOS engines. On Linux, use `ai sandbox create`, `ai sandbox exec`, `ai sandbox ls`, `ai sandbox rebuild`, and `ai sandbox rm` directly.
+
 ### Sandbox aliases and GitHub CLI
 
 `ai sandbox create` now bootstraps the host-side aliases file at `~/.agent-infra/aliases/sandbox.sh` on first run. The generated file includes ready-to-edit yolo shortcuts for Claude, Codex, Gemini CLI, and OpenCode, and every sandbox syncs that file into `/home/devuser/.bash_aliases`.
