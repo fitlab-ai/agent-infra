@@ -4,5 +4,6 @@ set -e
 script_dir=$(
   CDPATH= cd -- "$(dirname -- "$0")" && pwd
 )
+
 "$script_dir/check-utf8-encoding.sh"
 "$script_dir/check-version-format.sh"

@@ -77,7 +77,9 @@
       ".gitignore",
       ".opencode/COMMAND_STYLE_GUIDE.md",
       ".opencode/README.md",
-      "AGENTS.md"
+      "AGENTS.md",
+      "**/post-release.*",
+      ".agents/skills/post-release/SKILL.*"
     ],
     "ejected": []
   }
