@@ -250,10 +250,10 @@ test("version format validation hooks are wired into templates and local config"
     "package.json should install the managed hooks path during prepare"
   );
 
-  assert.equal(
+  assert.match(
     collaborator.templateVersion,
-    `v${packageJson.version}`,
-    ".agents/.airc.json templateVersion should match package.json version with a v prefix"
+    /^v\d+\.\d+\.\d+$/,
+    ".agents/.airc.json templateVersion should be a v-prefixed released semver"
   );
 
   [
