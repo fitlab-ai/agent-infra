@@ -7,6 +7,7 @@
   },
   "templateVersion": "v0.5.8",
   "sandbox": {
+    "engine": "orbstack",
     "runtimes": [
       "node20"
     ],
