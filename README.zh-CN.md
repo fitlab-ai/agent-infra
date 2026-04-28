@@ -545,7 +545,7 @@ import-issue #42                    从 GitHub Issue 导入任务
   "project": "my-project",
   "org": "my-org",
   "language": "en",
-  "templateVersion": "v0.5.7",
+  "templateVersion": "v0.5.8",
   "templates": {
     "sources": [
       { "type": "local", "path": "~/private-templates" }
