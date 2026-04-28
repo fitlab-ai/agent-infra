@@ -57,7 +57,7 @@ const DEFAULTS = {
       ".claude/commands/",
       ".claude/hooks/",
       ".gemini/commands/",
-      ".github/hooks/check-version-format.sh",
+      ".git-hooks/check-version-format.sh",
       ".github/scripts/",
       ".opencode/commands/"
     ],
@@ -74,7 +74,7 @@ const DEFAULTS = {
       ".agents/skills/upgrade-dependency/SKILL.*",
       ".claude/settings.json",
       ".gemini/settings.json",
-      ".github/hooks/pre-commit",
+      ".git-hooks/pre-commit",
       ".gitignore"
     ],
     "ejected": []
@@ -101,6 +101,16 @@ function isInsideProject(projectRoot, relativePath) {
   const resolved = path.resolve(projectRoot, relativePath);
   const rel = path.relative(root, resolved);
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+function isPathOwnedByOtherPlatform(relativePath, platformType) {
+  const normalized = norm(relativePath).replace(/^\.\//, '');
+  const top = normalized.split('/')[0];
+  if (!top.startsWith('.')) return false;
+
+  const candidate = top.slice(1);
+  if (!KNOWN_PLATFORMS.has(candidate)) return false;
+  return candidate !== platformType;
 }
 
 function globMatch(pattern, filePath) {
@@ -977,7 +987,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
       errors: [],
       conflicts: []
     },
-    managed: { written: [], created: [], unchanged: [], skippedMerged: [], removed: [] },
+    managed: { written: [], created: [], unchanged: [], skippedMerged: [], skippedPlatform: [], removed: [] },
     custom: {
       detected: [],
       generated: [],
@@ -1003,9 +1013,11 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const known = new Set([...managed, ...merged, ...ejected]);
   for (const e of (DEFAULTS.files.managed || [])) {
+    if (isPathOwnedByOtherPlatform(e, platformType)) continue;
     if (!known.has(e)) { managed.push(e); known.add(e); report.registryAdded.push({ entry: e, list: 'managed' }); }
   }
   for (const e of (DEFAULTS.files.merged || [])) {
+    if (isPathOwnedByOtherPlatform(e, platformType)) continue;
     if (!known.has(e)) { merged.push(e); known.add(e); report.registryAdded.push({ entry: e, list: 'merged' }); }
   }
 
@@ -1014,7 +1026,34 @@ function syncTemplates(projectRoot, templateRootOverride) {
   const { mergedRels, sourceMap } = mergeTemplateSources(templateRoot, templateSources, report);
   const allRels = mergedRels;
   const allSet = new Set(allRels);
+
+  for (const entry of [...managed, ...merged, ...ejected]) {
+    if (!isPathOwnedByOtherPlatform(entry, platformType)) continue;
+
+    if (entry.endsWith('/')) {
+      const dir = path.join(projectRoot, entry);
+      if (!fs.existsSync(dir)) continue;
+
+      for (const filePath of walkDir(dir)) {
+        fs.unlinkSync(filePath);
+        report.managed.removed.push(norm(path.relative(projectRoot, filePath)));
+      }
+      removeEmptyDirs(dir);
+      continue;
+    }
+
+    const target = path.join(projectRoot, renderPathname(entry, project));
+    if (!fs.existsSync(target)) continue;
+    fs.unlinkSync(target);
+    report.managed.removed.push(norm(path.relative(projectRoot, target)));
+  }
+
   for (const entry of managed) {
+    if (isPathOwnedByOtherPlatform(entry, platformType)) {
+      report.managed.skippedPlatform.push(entry);
+      continue;
+    }
+
     const isDir = entry.endsWith('/');
     let entryRels;
     const expectedTargets = isDir ? new Set() : null;
@@ -1123,6 +1162,11 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const mergedMap = new Map();
   for (const entry of merged) {
+    if (isPathOwnedByOtherPlatform(entry, platformType)) {
+      report.managed.skippedPlatform.push(entry);
+      continue;
+    }
+
     if (entry.includes('*')) {
       const hits = allRels.filter(r => {
         const t = norm(renderPathname(stripLangVariant(r), project));

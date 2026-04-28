@@ -13,10 +13,10 @@ This guide walks you through using multiple AI coding assistants together on a p
 Enable the shared Git hooks path before relying on the template hook chain:
 
 ```bash
-git config core.hooksPath .github/hooks
+git config core.hooksPath .git-hooks
 ```
 
-This makes Git invoke the hooks in the project repository's `.github/hooks/` directory, including `pre-commit` and `check-version-format.sh`.
+This makes Git invoke the hooks in the project repository's `.git-hooks/` directory, including `pre-commit` and `check-version-format.sh`.
 
 ## External Templates And Skills
 

@@ -29,7 +29,7 @@ repo_root=$(
   CDPATH= cd -- "$script_dir/../.." && pwd
 )
 
-if sh "$repo_root/.github/hooks/check-version-format.sh"; then
+if sh "$repo_root/.git-hooks/check-version-format.sh"; then
   echo "Claude hook: version check passed."
   exit 0
 else
