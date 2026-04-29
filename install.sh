@@ -36,21 +36,9 @@ info "Installing $NPM_PACKAGE via npm ..."
 npm install -g "$NPM_PACKAGE"
 ok "agent-infra installed successfully!"
 
-case "$(uname -s)" in
-  Linux)
-    if ! command -v docker >/dev/null 2>&1; then
-      warn "Docker is not installed. Install Docker Engine before using 'ai sandbox create': https://docs.docker.com/engine/install/"
-    elif ! docker info >/dev/null 2>&1; then
-      warn "Docker is installed, but the daemon is not ready. Try: sudo systemctl enable --now docker"
-      warn "If permission is denied, add your user to the docker group: sudo usermod -aG docker \$USER"
-    else
-      ok "Docker is ready."
-    fi
-    ;;
-  Darwin)
-    ok "macOS detected. Sandbox commands will use Colima/OrbStack via Homebrew on first run."
-    ;;
-esac
+if [ "$(uname -s)" = "Linux" ] && ! command -v docker >/dev/null 2>&1; then
+  warn "Note: 'ai sandbox' requires Docker Engine. See README 'Platform Support → Linux'."
+fi
 
 # ---------- done ----------
 echo ""

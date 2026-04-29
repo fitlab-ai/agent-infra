@@ -193,23 +193,6 @@ CLI 会收集项目元数据，向所有支持的 AI TUI 安装 `update-agent-in
 
 该命令会检测当前打包模板版本并渲染所有受管理文件。首次安装和后续升级都使用同一条命令。
 
-### Linux 前置条件
-
-Linux 会直接使用宿主机的 native Docker Engine；不需要启动或停止受管理的 VM。
-
-1. 按发行版安装 Docker Engine：<https://docs.docker.com/engine/install/>
-2. 启动并设置 daemon 开机自启：`sudo systemctl enable --now docker`
-3. 允许当前用户不带 `sudo` 运行 Docker：`sudo usermod -aG docker $USER`，然后打开新的登录 shell 或运行 `newgrp docker`
-
-当宿主机 `gpg-agent` 和签名 key 可用于沙箱初始化时，GPG signing 可以正常工作。如果 key 同步失败，`ai sandbox create` 会回退到清理后的 Git config，让提交仍可在没有宿主签名状态的情况下继续。
-
-Linux 已知限制：
-
-- 暂不支持 rootless Docker；后续跟踪：[#256](https://github.com/fitlab-ai/agent-infra/issues/256)
-- 暂不支持 Podman；后续跟踪：[#257](https://github.com/fitlab-ai/agent-infra/issues/257)
-- Fedora 或 RHEL 等启用 SELinux enforcing 的宿主机可能需要额外挂载标签处理；后续跟踪：[#258](https://github.com/fitlab-ai/agent-infra/issues/258)
-- `ai sandbox vm` 仅用于 macOS 受管理引擎。Linux 上直接使用 `ai sandbox create`、`ai sandbox exec`、`ai sandbox ls`、`ai sandbox rebuild` 和 `ai sandbox rm`。
-
 ### 沙箱 aliases 与 GitHub CLI
 
 `ai sandbox create` 在首次运行时会自动生成宿主机侧的 `~/.agent-infra/aliases/sandbox.sh`。该文件内置了 Claude、Codex、Gemini CLI 和 OpenCode 的 yolo 快捷命令模板，你可以直接修改；每次创建沙箱时，这个文件都会同步到容器内的 `/home/devuser/.bash_aliases`。
@@ -252,6 +235,48 @@ agent-infra 的结构刻意保持简单：引导 CLI 负责生成种子配置，
 │               .agents/  ·  AGENTS.md                  │
 └───────────────────────────────────────────────────────┘
 ```
+
+<a id="platform-support"></a>
+
+## 平台支持
+
+agent-infra 支持 macOS 和 Linux。CLI 本身只需要 Node.js (>=18)；容器相关功能（`ai sandbox *`）额外需要 Docker。
+
+### macOS
+
+- `ai init`、`ai sync` 等：执行 `npm install -g @fitlab-ai/agent-infra`（或 Homebrew 安装）后开箱即用。
+- `ai sandbox *`：需要 Colima、OrbStack 或 Docker Desktop。macOS 默认引擎是 Colima —— 当选用 Colima 且宿主机没有 `colima` 命令时，agent-infra 会在首次运行时通过 Homebrew 自动安装并启动。如需使用 OrbStack 或 Docker Desktop，请在 `.agents/.airc.json` 中设置 `sandbox.engine`。
+
+### Linux
+
+- `ai init`、`ai sync` 等：执行 `npm install -g @fitlab-ai/agent-infra` 后开箱即用。
+- `ai sandbox *`：需要宿主机已安装 Docker Engine。三步配置：
+
+  ```bash
+  # 1. 安装 Docker Engine —— 见 https://docs.docker.com/engine/install/
+  # 2. 启动 daemon 并设置开机自启
+  sudo systemctl enable --now docker
+  # 3. 让当前用户免 sudo 跑 docker：加入 docker 组
+  sudo usermod -aG docker $USER && newgrp docker
+  ```
+
+  验证：执行 `docker info` 应在不带 sudo 的情况下成功。
+
+  当宿主机 `gpg-agent` 和签名 key 可用时，GPG signing 可正常工作；如果 key 同步失败，`ai sandbox create` 会回退到清理后的 Git config，让提交仍可在没有宿主签名状态的情况下继续。
+
+#### Linux 已知限制
+
+下列场景在本期未做主动验证：
+
+- 以 **root**（uid 0）运行 `ai sandbox create`：image build 在 `useradd` 步骤失败。后续跟踪 [#261](https://github.com/fitlab-ai/agent-infra/issues/261)。
+- **Rootless Docker**：后续跟踪 [#256](https://github.com/fitlab-ai/agent-infra/issues/256)。
+- 用 **Podman** 替代 Docker：后续跟踪 [#257](https://github.com/fitlab-ai/agent-infra/issues/257)。
+- **SELinux enforcing** 宿主机（Fedora / RHEL）可能需要手动加挂载标签：后续跟踪 [#258](https://github.com/fitlab-ai/agent-infra/issues/258)。
+- `ai sandbox vm` 在 Linux 上是空操作。Linux 直接使用 native Docker，没有 VM 需要管理；请直接使用 `ai sandbox create`、`ai sandbox exec`、`ai sandbox ls`、`ai sandbox rebuild`、`ai sandbox rm`。
+
+### Windows
+
+WSL2 支持在 [#184](https://github.com/fitlab-ai/agent-infra/issues/184) 跟踪。
 
 <a id="what-you-get"></a>
 
