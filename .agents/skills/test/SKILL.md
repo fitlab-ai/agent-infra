@@ -16,8 +16,10 @@ description: >
 ## 2. 运行所有单元测试
 
 ```bash
-node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js
+npm test
 ```
+
+`npm test` 由 `package.json#scripts.test` 定义，内部包含 inline build 产物检查与完整单元测试。所有调用方都通过 `npm test` 访问，不要手抄底层测试路径，避免漂移。
 
 ## 3. 输出结果
 

@@ -285,6 +285,7 @@ test("version format validation hooks are wired into templates and local config"
   ].forEach(([relativePath, content]) => {
     assert.match(content, /check-utf8-encoding\.sh/, `${relativePath} should run the UTF-8 validation hook`);
     assert.match(content, /check-version-format\.sh/, `${relativePath} should run the version format validation hook`);
+    assert.match(content, /^npm test$/m, `${relativePath} should run the package test script`);
     assert.doesNotMatch(content, /\.github\/hooks\//, `${relativePath} should not delegate back to legacy github hook paths`);
   });
 

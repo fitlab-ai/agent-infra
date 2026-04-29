@@ -71,6 +71,14 @@ test("template SKILL.md files provide zh-CN variants", () => {
     });
 });
 
+test("local test skill routes Node.js test execution through npm test", () => {
+  assert.match(
+    read(".agents/skills/test/SKILL.md"),
+    /npm test/,
+    "local /test SKILL should document npm test"
+  );
+});
+
 test("skill command templates use thin adapter bodies", () => {
   const skills = listSkillNames();
 
