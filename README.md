@@ -236,6 +236,48 @@ agent-infra is intentionally simple: a bootstrap CLI creates the seed configurat
 └───────────────────────────────────────────────────────┘
 ```
 
+<a id="platform-support"></a>
+
+## Platform Support
+
+agent-infra runs on macOS and Linux. The CLI itself only needs Node.js (>=18); container-related features (`ai sandbox *`) additionally need Docker.
+
+### macOS
+
+- `ai init`, `ai sync`, etc.: works out of the box after `npm install -g @fitlab-ai/agent-infra` (or Homebrew).
+- `ai sandbox *`: requires Colima, OrbStack, or Docker Desktop. Colima is the default engine on macOS — when it is selected and the `colima` command is missing, agent-infra auto-installs and starts Colima via Homebrew on first run. To use OrbStack or Docker Desktop instead, set `sandbox.engine` in `.agents/.airc.json`.
+
+### Linux
+
+- `ai init`, `ai sync`, etc.: works out of the box after `npm install -g @fitlab-ai/agent-infra`.
+- `ai sandbox *`: requires Docker Engine on the host. Quick setup:
+
+  ```bash
+  # 1. Install Docker Engine — see https://docs.docker.com/engine/install/
+  # 2. Start the daemon and enable on boot
+  sudo systemctl enable --now docker
+  # 3. Skip 'sudo' for docker: add yourself to the docker group
+  sudo usermod -aG docker $USER && newgrp docker
+  ```
+
+  Validate with `docker info` — it should succeed without sudo.
+
+  GPG signing works when the host `gpg-agent` and signing key are available; if key sync fails, `ai sandbox create` falls back to a sanitized Git config so commits still work without host signing state.
+
+#### Known limitations on Linux
+
+These configurations are not actively tested in this release:
+
+- Running `ai sandbox create` as **root** (uid 0): image build fails on `useradd`. Track [#261](https://github.com/fitlab-ai/agent-infra/issues/261).
+- **Rootless Docker**: Track [#256](https://github.com/fitlab-ai/agent-infra/issues/256).
+- **Podman** instead of Docker: Track [#257](https://github.com/fitlab-ai/agent-infra/issues/257).
+- **SELinux-enforcing** hosts (Fedora / RHEL) may need manual mount labels: Track [#258](https://github.com/fitlab-ai/agent-infra/issues/258).
+- `ai sandbox vm` is a no-op on Linux. Linux uses native Docker directly with no VM to manage; use `ai sandbox create`, `ai sandbox exec`, `ai sandbox ls`, `ai sandbox rebuild`, `ai sandbox rm` directly.
+
+### Windows
+
+WSL2 support is tracked in [#184](https://github.com/fitlab-ai/agent-infra/issues/184).
+
 <a id="what-you-get"></a>
 
 ## What You Get

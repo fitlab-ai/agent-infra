@@ -36,6 +36,10 @@ info "Installing $NPM_PACKAGE via npm ..."
 npm install -g "$NPM_PACKAGE"
 ok "agent-infra installed successfully!"
 
+if [ "$(uname -s)" = "Linux" ] && ! command -v docker >/dev/null 2>&1; then
+  warn "Note: 'ai sandbox' requires Docker Engine. See README 'Platform Support → Linux'."
+fi
+
 # ---------- done ----------
 echo ""
 echo "  Next step: cd into your project and run:"
