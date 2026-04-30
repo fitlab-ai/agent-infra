@@ -5,7 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { loadFreshEsm, pathWithPrependedBin, read, writeNodeCommandShim } from "../helpers.js";
+import {
+  gitSafeEnv,
+  initIsolatedGitRepo,
+  loadFreshEsm,
+  pathWithPrependedBin,
+  read,
+  writeNodeCommandShim
+} from "../helpers.js";
 
 function write(filePathname, content) {
   fs.mkdirSync(path.dirname(filePathname), { recursive: true });
@@ -14,20 +21,6 @@ function write(filePathname, content) {
 
 function writeJson(filePathname, value) {
   write(filePathname, JSON.stringify(value, null, 2));
-}
-
-function initGitRepo(repoRoot) {
-  const initResult = spawnSync("git", ["init", "-q", "-b", "main"], {
-    cwd: repoRoot,
-    encoding: "utf8"
-  });
-  assert.equal(initResult.status, 0, initResult.stderr);
-
-  const remoteResult = spawnSync("git", ["remote", "add", "origin", "git@github.com:fitlab-ai/agent-infra.git"], {
-    cwd: repoRoot,
-    encoding: "utf8"
-  });
-  assert.equal(remoteResult.status, 0, remoteResult.stderr);
 }
 
 function writeFakeGh(filePathname) {
@@ -64,7 +57,7 @@ function runValidator(scriptPath, taskDir, skill, env) {
   return spawnSync(process.execPath, [scriptPath, "check", "platform-sync", taskDir, "implementation.md", "--skill", skill], {
     cwd: path.dirname(path.dirname(path.dirname(scriptPath))),
     encoding: "utf8",
-    env
+    env: gitSafeEnv(env)
   });
 }
 
@@ -102,7 +95,7 @@ test("platform-sync verification keys override legacy literal values", () => {
   const commentsPath = path.join(tempRoot, "comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     write(path.join(tempRoot, "package.json"), JSON.stringify({ type: "module" }));
     write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
     write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));
@@ -154,7 +147,7 @@ test("platform-sync verification keeps legacy literal fallback", () => {
   const issuePath = path.join(tempRoot, "issue.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     write(path.join(tempRoot, "package.json"), JSON.stringify({ type: "module" }));
     write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
     write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));

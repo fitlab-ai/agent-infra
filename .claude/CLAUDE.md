@@ -11,7 +11,7 @@ npm install
 # 构建项目：无需构建，项目由 Node.js CLI 和模板文件组成
 
 # 运行测试
-node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js
+npm test
 
 # 代码检查：暂未配置 lint 工具
 ```
@@ -51,7 +51,7 @@ node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js t
 ## 测试要求
 
 - 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 18）
-- 运行命令：`node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js`
+- 运行命令：`npm test`
 - 测试覆盖：模板文件完整性、CLI 初始化流程、占位符渲染验证
 
 ### 测试编写规约
