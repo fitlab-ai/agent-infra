@@ -268,7 +268,6 @@ agent-infra 支持 macOS 和 Linux。CLI 本身只需要 Node.js (>=18)；容器
 
 下列场景在本期未做主动验证：
 
-- 以 **root**（uid 0）运行 `ai sandbox create`：image build 在 `useradd` 步骤失败。后续跟踪 [#261](https://github.com/fitlab-ai/agent-infra/issues/261)。
 - **Rootless Docker**：后续跟踪 [#256](https://github.com/fitlab-ai/agent-infra/issues/256)。
 - 用 **Podman** 替代 Docker：后续跟踪 [#257](https://github.com/fitlab-ai/agent-infra/issues/257)。
 - **SELinux enforcing** 宿主机（Fedora / RHEL）可能需要手动加挂载标签：后续跟踪 [#258](https://github.com/fitlab-ai/agent-infra/issues/258)。

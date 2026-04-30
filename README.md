@@ -268,7 +268,6 @@ agent-infra runs on macOS and Linux. The CLI itself only needs Node.js (>=18); c
 
 These configurations are not actively tested in this release:
 
-- Running `ai sandbox create` as **root** (uid 0): image build fails on `useradd`. Track [#261](https://github.com/fitlab-ai/agent-infra/issues/261).
 - **Rootless Docker**: Track [#256](https://github.com/fitlab-ai/agent-infra/issues/256).
 - **Podman** instead of Docker: Track [#257](https://github.com/fitlab-ai/agent-infra/issues/257).
 - **SELinux-enforcing** hosts (Fedora / RHEL) may need manual mount labels: Track [#258](https://github.com/fitlab-ai/agent-infra/issues/258).
