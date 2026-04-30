@@ -1,6 +1,6 @@
 # Milestone 推断规则
 
-在 `create-issue`、`implement-task` 或 `create-pr` 处理 milestone 之前先读取本文件。
+在 `create-task` 的平台规则、`implement-task` 或 `create-pr` 处理 milestone 之前先读取本文件。
 
 ## 通用原则
 
@@ -21,7 +21,7 @@ git branch -r | grep -v 'HEAD' | grep -E 'origin/[0-9]+\.[0-9]+\.x$'
 - 有输出：多版本分支模式
 - 无输出：主干模式
 
-## 阶段 1：`create-issue`
+## 阶段 1：`create-task`（平台规则创建 Issue 时）
 
 目标：在创建 Issue 时先确定粗粒度版本线。
 

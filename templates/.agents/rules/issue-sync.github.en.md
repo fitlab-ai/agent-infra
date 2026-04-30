@@ -115,7 +115,7 @@ If `gh` fails, skip and continue. Do not fail the skill.
 
 When a skill creates or imports an Issue, automatically add the current executor as assignee:
 
-- `create-issue`: use `--assignee @me` in `gh issue create` and include `-R "$upstream_repo"`
+- When the `create-task` platform rule triggers Issue creation: use `--assignee @me` in `gh issue create` and include `-R "$upstream_repo"`
 - `import-issue`: run `gh issue edit {issue-number} -R "$upstream_repo" --add-assignee @me 2>/dev/null || true` after import
 
 `@me` is resolved by `gh` CLI to the authenticated user. The operation is idempotent. If the command fails, skip it directly and do not provide a fallback path.

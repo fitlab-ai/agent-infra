@@ -309,7 +309,7 @@ agent-infra ships with **a rich set of built-in AI skills**. They are organized 
 
 | Skill | Description | Parameters | Recommended use case |
 |-------|-------------|------------|----------------------|
-| `create-task` | Create a task scaffold from a natural-language request. | `description` | Start a new feature, bug-fix, or improvement from scratch. |
+| `create-task` | Create a task scaffold from a natural-language request and cascade Issue creation through the platform rule when available. | `description` | Start a new feature, bug-fix, or improvement from scratch. |
 | `import-issue` | Import a GitHub Issue into the local task workspace. | `issue-number` | Convert an existing Issue into an actionable task folder. |
 | `analyze-task` | Produce a requirement analysis artifact for an existing task. | `task-id` | Capture scope, risks, and impacted files before designing. |
 | `plan-task` | Write the technical implementation plan with a review checkpoint. | `task-id` | Define the approach after analysis is complete. |
@@ -334,7 +334,6 @@ agent-infra ships with **a rich set of built-in AI skills**. They are organized 
 
 | Skill | Description | Parameters | Recommended use case |
 |-------|-------------|------------|----------------------|
-| `create-issue` | Create a GitHub Issue from a task file. | `task-id` | Push a local task into GitHub tracking. |
 | `create-pr` | Open a Pull Request to an inferred or explicit target branch. | `task-id` (optional), `target-branch` (optional) | Publish reviewed changes for merge, with optional explicit task linkage after a fresh session. |
 
 <a id="code-quality"></a>
@@ -540,7 +539,7 @@ The simplest end-to-end delivery loop looks like this:
 
 ```text
 import-issue #42                    Import task from GitHub Issue
-(or: create-task "add dark mode")   Or create a task from a description
+(or: create-task "add dark mode")   Or create a task from a description; Issue creation cascades when the platform rule supports it
          |
          |  --> get task ID, e.g. T1
          v

@@ -22,6 +22,7 @@ test("custom platforms fall back to generic platform templates", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-custom-platform-"));
 
   const expectedTargets = [
+    ".agents/rules/create-issue.md",
     ".agents/rules/issue-pr-commands.md",
     ".agents/rules/issue-sync.md",
     ".agents/rules/label-milestone-setup.md",
@@ -66,6 +67,7 @@ test("custom platforms fall back to generic platform templates", async () => {
     });
 
     [
+      "create-issue",
       "issue-pr-commands",
       "issue-sync",
       "label-milestone-setup",

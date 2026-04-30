@@ -317,11 +317,6 @@ const commandSpecs = {
     en: "Complete task $1.",
     zh: "完成任务 $1。"
   },
-  "create-issue": {
-    usage: "<task-id>",
-    en: "Create Issue for task $1.",
-    zh: "为任务 $1 创建 Issue。"
-  },
   "create-pr": {
     usage: "[task-id] [target-branch]",
     en: "Create PR: $ARGUMENTS",

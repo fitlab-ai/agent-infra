@@ -115,7 +115,7 @@ fi
 
 当技能创建或导入 Issue 时，自动将当前执行者添加为 assignee：
 
-- `create-issue`：在 `gh issue create` 命令中使用 `--assignee @me` 参数，并附带 `-R "$upstream_repo"`
+- `create-task` 的平台规则触发 Issue 创建时：在 `gh issue create` 命令中使用 `--assignee @me` 参数，并附带 `-R "$upstream_repo"`
 - `import-issue`：导入后执行 `gh issue edit {issue-number} -R "$upstream_repo" --add-assignee @me 2>/dev/null || true`
 
 `@me` 由 `gh` CLI 自动解析为当前认证用户。此操作是幂等的（重复添加不会报错）。如果命令失败（如权限不足），直接跳过，不做任何替代。
