@@ -48,6 +48,8 @@
     "build": "node scripts/build-inline.js",
     "demo:regen": "sh scripts/demo-regen.sh",
     "prepare": "git config core.hooksPath .git-hooks || true",
+    "test:smoke": "node scripts/build-inline.js --check && node --test tests/templates/*.test.js tests/core/airc.test.js tests/core/release.test.js tests/core/metadata-sync-workflow.test.js tests/core/pr-label-workflow.test.js tests/core/status-label-workflow.test.js tests/core/test-tier-coverage.test.js tests/cli/lib.test.js tests/cli/sync-templates.test.js tests/scripts/sync-templates-platform-gating.test.js",
+    "test:core": "node scripts/build-inline.js --check && node --test tests/templates/*.test.js tests/core/airc.test.js tests/core/release.test.js tests/core/metadata-sync-workflow.test.js tests/core/pr-label-workflow.test.js tests/core/status-label-workflow.test.js tests/core/test-tier-coverage.test.js tests/cli/lib.test.js tests/cli/sync-templates.test.js tests/scripts/sync-templates-platform-gating.test.js tests/cli/cli.test.js tests/cli/merge.test.js tests/cli/sandbox.test.js tests/core/custom-skills.test.js tests/core/custom-tuis.test.js tests/core/demo-regen.test.js tests/scripts/find-existing-task.test.js tests/scripts/platform-adapter-defaults.test.js",
     "test": "node scripts/build-inline.js --check && node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js",
     "prepublishOnly": "node scripts/build-inline.js --check && node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js"
   }

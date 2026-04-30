@@ -8,10 +8,11 @@ script_dir=$(
 "$script_dir/check-utf8-encoding.sh"
 "$script_dir/check-version-format.sh"
 
-# Run the project's full test suite before allowing the commit.
-# package.json#scripts.test is the single source of truth.
+# Run the project's core test layer before allowing the commit.
+# package.json#scripts.test:core covers the core unit and structural checks
+# while skipping the slowest platform-sync contract suites (those run in CI).
 #
 # Clear GIT_* variables exported by the outer `git commit`; tests spawn nested
 # git repositories and must not inherit the parent repository's git context.
 unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_AUTHOR_DATE GIT_COMMITTER_DATE
-npm test
+npm run test:core
