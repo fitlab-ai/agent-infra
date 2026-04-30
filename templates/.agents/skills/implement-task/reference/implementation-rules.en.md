@@ -16,31 +16,26 @@ Follow the `implementation` step in `.agents/workflows/feature-development.yaml`
 **Implementation principles**:
 1. **Follow the plan strictly**: do not deviate from the technical plan
 2. **Work step by step**: execute the planned sequence
-3. **Keep testing continuously**: re-run tests as work progresses
+3. **Keep testing continuously**: run the **smoke subset** continuously as work progresses (see the `test` skill)
 4. **Keep it simple**: do not add unplanned features
 
 ## Run Test Verification
 
-Run the project test command. Refer to the `test` skill for project-specific commands.
+During implementation:
+- **Inner loop**: after each change, run the project's **smoke subset** (see the `test` skill) for fast feedback
+- **Before writing the implementation report**: run the **core subset** as final verification so code entering review has passed the complete core checks
 
-```bash
-# See .agents/skills/test/SKILL.md for the project's test command
-# Common patterns:
-# npm test          (Node.js)
-# mvn test          (Maven)
-# pytest            (Python)
-# go test ./...     (Go)
-```
+> Refer to the `test` skill for project-specific commands; downstream projects without layered scripts should fall back to the full project test command.
 
 If tests fail:
 - analyze the failure first and prioritize fixing issues introduced by this implementation
-- re-run tests after each fix until they pass, or confirm that the problem is an external blocker
+- after each fix, re-run at least the smoke subset, then upgrade to core for the next full-pass verification
 - only stop without producing the implementation artifact when the failure is caused by an external blocker, missing environment, or unclear requirement that cannot be resolved inside the task
 
 Two-way failure handling:
 1. implementation-caused failures:
    - fix the code, tests, docs, or fixtures introduced by this implementation
-   - re-run the test command after each fix
+   - re-run tests after each fix (smoke for the immediate fix verification, core for the round-level verification)
    - continue until all required tests pass
 2. external blockers:
    - confirm the failure comes from missing environment, unrelated upstream breakage, or unclear requirements outside this task

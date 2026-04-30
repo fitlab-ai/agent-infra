@@ -21,15 +21,54 @@ description: "执行项目完整测试流程"
 
 确认无编译错误。
 
-## 2. 运行所有单元测试
+## 2. 运行单元测试（按层级选择）
+
+本项目把测试分为三层（可选优化）；如果项目测试规模较小，可以全部映射到同一个完整测试命令。
+
+### smoke（目标 <5s）
 
 ```bash
-# TODO: 替换为你的项目测试命令
-# npm test                (Node.js)
-# mvn test                (Maven)
-# pytest                  (Python)
-# go test ./...           (Go)
+# TODO: 替换为本项目的 smoke 子集命令
+# npm run test:smoke       (Node.js)
+# pytest -m "not slow"     (Python)
+# go test -short ./...     (Go)
 ```
+
+适用场景：
+- implement-task / refine-task 内循环
+- 保存即跑 / 频繁反馈
+- 仅断言项目结构、配置、模板契约
+
+### core（目标 <15s）
+
+```bash
+# TODO: 替换为本项目的 core 子集命令
+# npm run test:core        (Node.js)
+# pytest -m "not contract" (Python)
+# go test ./...            (Go)
+```
+
+适用场景：
+- pre-commit hook（自动调用）
+- 写 implementation.md / refinement.md 报告前的最终验证
+- 推送 PR 前的本地把关
+
+### full（完整测试）
+
+```bash
+# TODO: 替换为本项目的完整测试命令
+# npm test                 (Node.js)
+# mvn test                 (Maven)
+# pytest                   (Python)
+# go test ./...            (Go)
+```
+
+适用场景：
+- release / tag 前
+- CI
+- main 合并前的最终把关
+
+如果项目暂不分层，smoke / core / full 可以全部映射到同一个完整测试命令；分层是反馈速度优化项，不是使用协作工作流的前置条件。
 
 ## 3. 输出结果
 

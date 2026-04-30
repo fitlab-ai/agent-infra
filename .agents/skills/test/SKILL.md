@@ -13,13 +13,44 @@ description: >
 
 本项目由 Node.js CLI 和模板文件组成，无需编译。跳过此步骤。
 
-## 2. 运行所有单元测试
+## 2. 运行单元测试（按层级选择）
+
+本项目把测试分为三层，按场景选择运行命令；新增测试文件默认归入 **full**，确认足够快且足够核心后，再上调到 core 或 smoke。
+
+### smoke（目标 <5s）
+
+```bash
+npm run test:smoke
+```
+
+适用场景：
+- implement-task / refine-task 内循环
+- 保存即跑 / 频繁反馈
+- 仅断言项目结构、配置、模板契约
+
+### core（目标 <15s）
+
+```bash
+npm run test:core
+```
+
+适用场景：
+- pre-commit hook（自动调用）
+- 写 implementation.md / refinement.md 报告前的最终验证
+- 推送 PR 前的本地把关
+
+### full（目标 <60s）
 
 ```bash
 npm test
 ```
 
-`npm test` 由 `package.json#scripts.test` 定义，内部包含 inline build 产物检查与完整单元测试。所有调用方都通过 `npm test` 访问，不要手抄底层测试路径，避免漂移。
+适用场景：
+- release / tag 前
+- CI（unit-tests.yml）
+- main 合并前的最终把关
+
+full 层运行全部项目测试。`npm test` 使用通配匹配项目测试文件，**新增的测试文件会自动归入 full**，这是安全网。
 
 ## 3. 输出结果
 

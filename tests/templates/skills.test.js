@@ -71,12 +71,11 @@ test("template SKILL.md files provide zh-CN variants", () => {
     });
 });
 
-test("local test skill routes Node.js test execution through npm test", () => {
-  assert.match(
-    read(".agents/skills/test/SKILL.md"),
-    /npm test/,
-    "local /test SKILL should document npm test"
-  );
+test("local test skill documents smoke / core / full layered commands", () => {
+  const content = read(".agents/skills/test/SKILL.md");
+  assert.match(content, /npm run test:smoke/, "SKILL should document the smoke layer");
+  assert.match(content, /npm run test:core/, "SKILL should document the core layer");
+  assert.match(content, /npm test/, "SKILL should still document the full layer");
 });
 
 test("skill command templates use thin adapter bodies", () => {
