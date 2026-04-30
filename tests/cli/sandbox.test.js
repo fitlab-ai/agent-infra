@@ -6,7 +6,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { assertModeBits, envWithPrependedPath, filePath, loadFreshEsm } from "../helpers.js";
+import {
+  assertModeBits,
+  envWithPrependedPath,
+  filePath,
+  gitSafeEnv,
+  loadFreshEsm,
+  withGitSafeProcessEnv
+} from "../helpers.js";
 import { restoreTerminal, runInteractive } from "../../lib/sandbox/shell.js";
 
 function modeBits(filePath) {
@@ -170,7 +177,7 @@ test("sandbox create fails before preparing a temporary Dockerfile when Claude c
   try {
     fs.mkdirSync(repoDir, { recursive: true });
     fs.mkdirSync(homeDir, { recursive: true });
-    execSync("git init", { cwd: repoDir, stdio: "pipe" });
+    execSync("git init", { cwd: repoDir, env: gitSafeEnv(), stdio: "pipe" });
     fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
     fs.writeFileSync(
       path.join(repoDir, ".agents", ".airc.json"),
@@ -185,7 +192,7 @@ test("sandbox create fails before preparing a temporary Dockerfile when Claude c
         [filePath("bin/cli.js"), "sandbox", "create", "feature/no-credentials"],
         {
           cwd: repoDir,
-          env: { ...process.env, HOME: homeDir },
+          env: gitSafeEnv({ HOME: homeDir }),
           encoding: "utf8",
           stdio: ["ignore", "pipe", "pipe"]
         }
@@ -224,7 +231,7 @@ test("sandbox vm stop warns instead of stopping when OrbStack is not running", a
   try {
     fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
     fs.mkdirSync(binDir, { recursive: true });
-    execSync("git init", { cwd: repoDir, stdio: "pipe" });
+    execSync("git init", { cwd: repoDir, env: gitSafeEnv(), stdio: "pipe" });
     fs.writeFileSync(
       path.join(repoDir, ".agents", ".airc.json"),
       JSON.stringify({
@@ -250,7 +257,7 @@ exit 0
     Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });
     process.chdir(repoDir);
     process.env = {
-      ...envWithPrependedPath(process.env, binDir),
+      ...envWithPrependedPath(gitSafeEnv(), binDir),
       HOME: tmpDir,
       ORB_LOG_PATH: orbLogPath
     };
@@ -275,7 +282,7 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
   const previousCwd = process.cwd();
 
   try {
-    execSync("git init", { cwd: tmpDir, stdio: "pipe" });
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
     fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
     fs.writeFileSync(
       path.join(tmpDir, ".agents", ".airc.json"),
@@ -284,7 +291,7 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     );
 
     process.chdir(tmpDir);
-    const config = sandboxConfig.loadConfig();
+    const config = withGitSafeProcessEnv(() => sandboxConfig.loadConfig());
 
     assert.equal(config.project, "demo");
     assert.equal(config.org, "fitlab-ai");
@@ -307,7 +314,7 @@ test("loadConfig preserves configured sandbox engine", async () => {
   const previousCwd = process.cwd();
 
   try {
-    execSync("git init", { cwd: tmpDir, stdio: "pipe" });
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
     fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
     fs.writeFileSync(
       path.join(tmpDir, ".agents", ".airc.json"),
@@ -320,7 +327,7 @@ test("loadConfig preserves configured sandbox engine", async () => {
     );
 
     process.chdir(tmpDir);
-    const config = sandboxConfig.loadConfig();
+    const config = withGitSafeProcessEnv(() => sandboxConfig.loadConfig());
 
     assert.equal(config.engine, "orbstack");
     assert.deepEqual(config.runtimes, ["node20"]);
@@ -337,7 +344,7 @@ test("loadConfig rejects unsupported sandbox engine values", async () => {
   const previousCwd = process.cwd();
 
   try {
-    execSync("git init", { cwd: tmpDir, stdio: "pipe" });
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
     fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
     fs.writeFileSync(
       path.join(tmpDir, ".agents", ".airc.json"),
@@ -351,7 +358,7 @@ test("loadConfig rejects unsupported sandbox engine values", async () => {
     process.chdir(tmpDir);
 
     assert.throws(
-      () => sandboxConfig.loadConfig(),
+      () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
       /invalid "sandbox\.engine" value "podman".*only affects macOS/s
     );
   } finally {
@@ -366,9 +373,12 @@ test("loadConfig fails when .agents/.airc.json is missing", async () => {
   const previousCwd = process.cwd();
 
   try {
-    execSync("git init", { cwd: tmpDir, stdio: "pipe" });
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
     process.chdir(tmpDir);
-    assert.throws(() => sandboxConfig.loadConfig(), /No \.agents\/\.airc\.json found/);
+    assert.throws(
+      () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
+      /No \.agents\/\.airc\.json found/
+    );
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -553,7 +563,7 @@ test("sandbox exec enters tmux automatically for interactive shells", () => {
     fs.mkdirSync(repoDir, { recursive: true });
     fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
     fs.mkdirSync(binDir, { recursive: true });
-    execSync("git init", { cwd: repoDir, stdio: "pipe" });
+    execSync("git init", { cwd: repoDir, env: gitSafeEnv(), stdio: "pipe" });
     fs.writeFileSync(
       path.join(repoDir, ".agents", ".airc.json"),
       JSON.stringify({ project: "demo", org: "fitlab-ai" }, null, 2) + "\n",
@@ -597,7 +607,7 @@ node -e 'require("fs").appendFileSync(process.argv[1], JSON.stringify(process.ar
       {
         cwd: repoDir,
         env: {
-          ...envWithPrependedPath(process.env, binDir),
+          ...envWithPrependedPath(gitSafeEnv(), binDir),
           HOME: tmpDir,
           DOCKER_LOG_PATH: logPath,
           TERM_PROGRAM: "",
@@ -2121,10 +2131,16 @@ test("getGitSigningKey reads repo-local signingKey when a worktree path is provi
   try {
     fs.mkdirSync(repoDir, { recursive: true });
     fs.mkdirSync(homeDir, { recursive: true });
-    execSync("git init", { cwd: repoDir, stdio: "pipe" });
-    execSync("git config user.signingKey LOCAL-KEY-123", { cwd: repoDir, stdio: "pipe" });
+    execSync("git init", { cwd: repoDir, env: gitSafeEnv(), stdio: "pipe" });
+    execSync("git config user.signingKey LOCAL-KEY-123", {
+      cwd: repoDir,
+      env: gitSafeEnv(),
+      stdio: "pipe"
+    });
 
-    const signingKey = sandboxCreate.getGitSigningKey({ repoPath: repoDir, home: homeDir });
+    const signingKey = withGitSafeProcessEnv(() => (
+      sandboxCreate.getGitSigningKey({ repoPath: repoDir, home: homeDir })
+    ));
 
     assert.equal(signingKey, "LOCAL-KEY-123");
   } finally {

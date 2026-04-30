@@ -5,7 +5,15 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { filePath, exists, pathWithPrependedBin, read, writeNodeCommandShim } from "../helpers.js";
+import {
+  filePath,
+  exists,
+  gitSafeEnv,
+  initIsolatedGitRepo,
+  pathWithPrependedBin,
+  read,
+  writeNodeCommandShim
+} from "../helpers.js";
 
 const scriptPath = filePath(".agents/scripts/validate-artifact.js");
 const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -134,10 +142,7 @@ function buildCompletedTaskContent(checklistLines, overrides = {}) {
 }
 
 function runValidator(args, options = {}) {
-  const env = {
-    ...process.env,
-    ...options.env
-  };
+  const env = gitSafeEnv(options.env);
   if (env.PATH) {
     for (const key of Object.keys(env)) {
       if (key.toLowerCase() === "path") {
@@ -151,20 +156,6 @@ function runValidator(args, options = {}) {
     cwd: filePath("."),
     env
   });
-}
-
-function initGitRepo(repoRoot) {
-  const initResult = spawnSync("git", ["init", "-q", "-b", "main"], {
-    cwd: repoRoot,
-    encoding: "utf8"
-  });
-  assert.equal(initResult.status, 0, initResult.stderr);
-
-  const remoteResult = spawnSync("git", ["remote", "add", "origin", "git@github.com:fitlab-ai/agent-infra.git"], {
-    cwd: repoRoot,
-    encoding: "utf8"
-  });
-  assert.equal(remoteResult.status, 0, remoteResult.stderr);
 }
 
 function writeFakeGh(filePathname) {
@@ -259,15 +250,18 @@ function assertHasCanonicalPrSyncStructure(filePathname, headings) {
 }
 
 function createHeadCommit(repoRoot) {
+  const env = gitSafeEnv();
   const emailResult = spawnSync("git", ["config", "user.email", "codex@example.com"], {
     cwd: repoRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    env
   });
   assert.equal(emailResult.status, 0, emailResult.stderr);
 
   const nameResult = spawnSync("git", ["config", "user.name", "Codex"], {
     cwd: repoRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    env
   });
   assert.equal(nameResult.status, 0, nameResult.stderr);
 
@@ -275,19 +269,22 @@ function createHeadCommit(repoRoot) {
 
   const addResult = spawnSync("git", ["add", "README.md"], {
     cwd: repoRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    env
   });
   assert.equal(addResult.status, 0, addResult.stderr);
 
   const commitResult = spawnSync("git", ["commit", "-qm", "test commit"], {
     cwd: repoRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    env
   });
   assert.equal(commitResult.status, 0, commitResult.stderr);
 
   const revParseResult = spawnSync("git", ["rev-parse", "HEAD"], {
     cwd: repoRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    env
   });
   assert.equal(revParseResult.status, 0, revParseResult.stderr);
 
@@ -604,7 +601,7 @@ test("validate-artifact gate passes when synced artifact and task comments match
   const commentsPath = path.join(tempRoot, "comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     const taskContent = buildTaskContent({ issue_number: "65" });
@@ -648,7 +645,7 @@ test("validate-artifact platform-sync fails when artifact comment content differ
   const commentsPath = path.join(tempRoot, "comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     const taskContent = buildTaskContent({ issue_number: "65" });
@@ -698,7 +695,7 @@ test("validate-artifact platform-sync fails when the task comment does not use t
   const commentsPath = path.join(tempRoot, "comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     const taskContent = buildTaskContent({ issue_number: "65" });
@@ -748,7 +745,7 @@ test("validate-artifact platform-sync fails when the Issue Type does not match t
   const commentsPath = path.join(tempRoot, "comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     const taskContent = buildTaskContent({ issue_number: "65", type: "feature" });
@@ -799,7 +796,7 @@ test("validate-artifact platform-sync skips Issue Type verification when the RES
   const commentsPath = path.join(tempRoot, "comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     const taskContent = buildTaskContent({ issue_number: "65" });
@@ -849,7 +846,7 @@ test("validate-artifact platform-sync accepts English task frontmatter summary w
   const commentsPath = path.join(tempRoot, "comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     const taskContent = buildTaskContent({ issue_number: "65" });
@@ -899,7 +896,7 @@ test("validate-artifact platform-sync fails when create-pr milestone is missing"
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_number: "77" }));
@@ -953,7 +950,7 @@ test("validate-artifact platform-sync fails when PR and Issue in: labels diverge
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_number: "77" }));
@@ -1008,7 +1005,7 @@ test("validate-artifact platform-sync fails when create-pr is missing the expect
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     write(path.join(taskDir, "task.md"), buildTaskContent({
@@ -1065,7 +1062,7 @@ test("validate-artifact platform-sync passes when create-pr includes the expecte
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     write(path.join(taskDir, "task.md"), buildTaskContent({
@@ -1121,7 +1118,7 @@ test("validate-artifact platform-sync skips create-pr type label verification wi
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     write(path.join(taskDir, "task.md"), buildTaskContent({
@@ -1178,7 +1175,7 @@ test("validate-artifact platform-sync fails when create-pr has no assignee", () 
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_number: "77" }));
@@ -1232,7 +1229,7 @@ test("validate-artifact platform-sync skips create-pr assignee verification with
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_number: "77" }));
@@ -1286,7 +1283,7 @@ test("validate-artifact platform-sync passes when create-pr summary comment exis
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_number: "77" }));
@@ -1356,7 +1353,7 @@ test("validate-artifact platform-sync skips for commit when task has no pr_numbe
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
 
     const result = runValidator([
@@ -1387,7 +1384,7 @@ test("validate-artifact platform-sync passes for commit when summary comment exi
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     const headSha = createHeadCommit(tempRoot);
     writeFakeGh(ghPath);
 
@@ -1435,7 +1432,7 @@ test("validate-artifact platform-sync fails for commit when summary comment last
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     createHeadCommit(tempRoot);
     writeFakeGh(ghPath);
 
@@ -1484,7 +1481,7 @@ test("validate-artifact platform-sync fails for commit when summary comment last
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     createHeadCommit(tempRoot);
     writeFakeGh(ghPath);
 
@@ -1534,7 +1531,7 @@ test("validate-artifact platform-sync fails when create-pr summary comment is mi
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_number: "77" }));
@@ -1583,7 +1580,7 @@ test("validate-artifact platform-sync fails for commit when summary comment is m
   const prCommentsPath = path.join(tempRoot, "pr-comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_number: "77" }));
@@ -1630,7 +1627,7 @@ test("validate-artifact platform-sync fails for create-issue when the task comme
   const commentsPath = path.join(tempRoot, "comments.json");
 
   try {
-    initGitRepo(tempRoot);
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     writeFakeGh(ghPath);
 
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
