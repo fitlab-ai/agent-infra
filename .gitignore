@@ -12,9 +12,6 @@
 # Node.js dependencies
 node_modules/
 
-# OpenCode runtime
-.opencode/bun.lock
-
 # OS files
 .DS_Store
 Thumbs.db
