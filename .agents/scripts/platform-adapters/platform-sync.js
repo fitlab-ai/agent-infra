@@ -498,7 +498,7 @@ function checkPrCommentLastCommit(context, remoteData) {
     );
   }
 
-  const headResult = withRetry(() => gitText(["rev-parse", "HEAD"], context.taskDir));
+  const headResult = resolvePrHeadSha(context);
   if (!headResult.ok) {
     return headResult.type === "check_failed"
       ? failResult(CHECK_TYPE, headResult.message, headResult.type)
@@ -1135,6 +1135,51 @@ function gitText(args, cwd) {
   }
 
   return { ok: true, value: String(result.stdout || "").trim() };
+}
+
+function resolvePrHeadSha(context) {
+  const fallback = () => withRetry(() => gitText(["rev-parse", "HEAD"], context.taskDir));
+  const branch = String(context.task?.metadata?.branch || "").trim();
+  if (!branch) {
+    return fallback();
+  }
+
+  const worktreeList = withRetry(() => gitText(["worktree", "list", "--porcelain"], context.taskDir));
+  if (!worktreeList.ok) {
+    return fallback();
+  }
+
+  const matchedWorktree = findWorktreeForBranch(worktreeList.value, branch);
+  if (!matchedWorktree) {
+    return fallback();
+  }
+
+  const headInWorktree = withRetry(() => gitText(["rev-parse", "HEAD"], matchedWorktree));
+  if (!headInWorktree.ok) {
+    return fallback();
+  }
+
+  return headInWorktree;
+}
+
+function findWorktreeForBranch(porcelainOutput, branch) {
+  let currentWorktree = "";
+  for (const rawLine of String(porcelainOutput || "").split("\n")) {
+    const line = rawLine.trimEnd();
+    if (line.startsWith("worktree ")) {
+      currentWorktree = line.slice("worktree ".length).trim();
+      continue;
+    }
+
+    if (line.startsWith("branch refs/heads/")) {
+      const usedBranch = line.slice("branch refs/heads/".length).trim();
+      if (usedBranch === branch && currentWorktree) {
+        return currentWorktree;
+      }
+    }
+  }
+
+  return null;
 }
 
 function withRetry(operation) {
