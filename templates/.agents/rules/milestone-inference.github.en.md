@@ -1,6 +1,6 @@
 # Milestone Inference Rules
 
-Read this file before `create-issue`, `implement-task`, or `create-pr` handles a milestone.
+Read this file before the `create-task` platform rule, `implement-task`, or `create-pr` handles a milestone.
 
 ## General Principles
 
@@ -21,7 +21,7 @@ git branch -r | grep -v 'HEAD' | grep -E 'origin/[0-9]+\.[0-9]+\.x$'
 - Any output: multi-version branch mode
 - No output: trunk mode
 
-## Phase 1: `create-issue`
+## Phase 1: `create-task` (when the platform rule creates an Issue)
 
 Goal: choose a coarse-grained release line when the Issue is created.
 

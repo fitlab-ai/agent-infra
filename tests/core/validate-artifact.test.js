@@ -1798,8 +1798,8 @@ test("validate-artifact platform-sync fails for commit when summary comment is m
   }
 });
 
-test("validate-artifact platform-sync fails for create-issue when the task comment is missing", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-create-issue-task-"));
+test("validate-artifact platform-sync fails for create-task when the task comment is missing", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-create-task-task-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");
   const binDir = path.join(tempRoot, "bin");
   const ghPath = path.join(binDir, "gh");
@@ -1822,7 +1822,7 @@ test("validate-artifact platform-sync fails for create-issue when the task comme
       "platform-sync",
       taskDir,
       "--skill",
-      "create-issue"
+      "create-task"
     ], {
       env: {
         PATH: pathWithPrependedBin(binDir),

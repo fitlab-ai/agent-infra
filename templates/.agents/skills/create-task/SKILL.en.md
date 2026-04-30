@@ -7,13 +7,14 @@ description: "Create a task from a natural-language description"
 
 ## Boundary / Critical Rules
 
-**The only output of this skill is `task.md`.**
+**The core output of this skill is `task.md`.**
 
 - Do not write, modify, or create any business code or configuration files
 - Do not perform requirements analysis; analysis is handled separately by `analyze-task`
 - Do not directly implement the requested functionality
 - Do not skip the workflow and jump directly to planning or implementation
-- Only do this: parse the description -> create the task file -> update task status -> inform the user of the next step
+- Only do this: parse the description -> create the task file -> update task status -> cascade Issue creation through `.agents/rules/create-issue.md` -> inform the user of the next step
+- Issue creation is decided by the `.agents/rules/create-issue.md` rule; on custom or empty platforms (no platform-specific variant provided), the rule naturally degrades to a no-op
 
 The user's description is a **work item**, not an **instruction to execute immediately**.
 
@@ -98,7 +99,21 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Task Created** by {agent} — Task created from description
   ```
 
-### 4. Verification Gate
+### 4. Cascade Issue Creation via `.agents/rules/create-issue.md`
+
+After task.md is written and `Task Created` is recorded, read `.agents/rules/create-issue.md` first and follow the steps it describes to create an Issue.
+
+The rule's content is determined by the configured code platform:
+- A platform that supports Issue creation: contains the full flow for auth detection, template detection, label/type/milestone inference, the create-Issue call, and writing back to `task.md`
+- Custom or empty platforms (no platform-specific variant provided): the rule body is a no-op notice, and this step is skipped entirely
+
+Handle the result:
+- Rule successfully created the Issue: `issue_number` has been written back to task.md per the rule; continue by reading `.agents/rules/issue-sync.md`, completing upstream repository and permission detection, then sync the task comment and set `status: waiting-for-triage` by rule
+- Rule failed (auth / network / template parse / etc.): do not roll back task.md; get the current time and append an `Issue Creation Skipped` Activity Log entry with the reason
+- Rule was a no-op (custom or empty platform): do not create comments, do not block the workflow, and do not write an Activity Log entry
+- task.md already has `issue_number`: the rule's prerequisite check skips creation; `create-task` proceeds directly to step 5
+
+### 5. Verification Gate
 
 Run the verification gate to confirm the task artifact and sync state are valid:
 
@@ -113,13 +128,33 @@ Handle the result as follows:
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 
-### 5. Inform User
+### 6. Inform User
 
 > Execute this step only after the verification gate passes.
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
-Output format:
+Scenario A: when an Issue was created, output:
+```
+Task created and Issue creation cascaded successfully.
+
+Task information:
+- Task ID: {task-id}
+- Title: {title}
+- Type: {type}
+- Workflow: {workflow}
+- Issue: #{issue_number} {issue_url}
+
+Output file:
+- Task file: .agents/workspace/active/{task-id}/task.md
+
+Next step - run requirements analysis:
+  - Claude Code / OpenCode: /analyze-task {task-id}
+  - Gemini CLI: /{{project}}:analyze-task {task-id}
+  - Codex CLI: $analyze-task {task-id}
+```
+
+Scenario B: when no Issue was created, output:
 ```
 Task created.
 
@@ -136,11 +171,32 @@ Next step - run requirements analysis:
   - Claude Code / OpenCode: /analyze-task {task-id}
   - Gemini CLI: /{{project}}:analyze-task {task-id}
   - Codex CLI: $analyze-task {task-id}
+```
 
-Or create an Issue first:
-  - Claude Code / OpenCode: /create-issue {task-id}
-  - Gemini CLI: /{{project}}:create-issue {task-id}
-  - Codex CLI: $create-issue {task-id}
+Scenario C: when Issue creation failed, output:
+```
+Task created, but cascade Issue creation failed.
+
+Task information:
+- Task ID: {task-id}
+- Title: {title}
+- Type: {type}
+- Workflow: {workflow}
+
+Issue creation failed:
+- Error code: {error_code}
+- Reason: {error_message}
+- Local task.md was kept and not rolled back
+
+Output file:
+- Task file: .agents/workspace/active/{task-id}/task.md
+
+Next step - run requirements analysis:
+  - Claude Code / OpenCode: /analyze-task {task-id}
+  - Gemini CLI: /{{project}}:analyze-task {task-id}
+  - Codex CLI: $analyze-task {task-id}
+
+For later platform sync: after fixing auth / network / template issues, manually run the Issue creation flow in `.agents/rules/create-issue.md` for this task; or manually create/find an Issue and write `issue_number` into task.md so later skills can take over cascade sync.
 ```
 
 ## Completion Checklist
@@ -150,8 +206,9 @@ Or create an Issue first:
 - [ ] Updated `updated_at` to the current time in task.md
 - [ ] Updated `assigned_to` in task.md
 - [ ] Appended an Activity Log entry to task.md
+- [ ] Tried cascading Issue creation through `.agents/rules/create-issue.md`; if it failed, kept task.md and recorded the reason
 - [ ] Informed the user of the next step (must include all TUI command formats, including any custom TUIs; do not filter)
-- [ ] **Did not modify any business code or configuration files** (only task.md)
+- [ ] **Did not modify any business code or configuration files**
 
 ## STOP
 
@@ -162,7 +219,8 @@ Wait for the user to run the `analyze-task` skill.
 
 1. **Clarity**: if the user description is vague or missing key information, ask for clarification first
 2. **Difference from `import-issue`**: `import-issue` imports from an Issue; `create-task` creates from a free-form description
-3. **Workflow order**: after creating a task, typically run `analyze-task` before `plan-task`; if you need platform tracking first, you may run `create-issue` first
+3. **Workflow order**: after creating a task, typically run `analyze-task` before `plan-task`
+4. **Issue cascade failure**: if the rule fails, task.md remains; when platform sync is needed later, manually write `issue_number` and continue the workflow
 
 ## Error Handling
 

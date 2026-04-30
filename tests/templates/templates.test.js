@@ -18,7 +18,6 @@ const highFrequencyCommands = [
   "analyze-task",
   "commit",
   "complete-task",
-  "create-issue",
   "create-pr",
   "create-task",
   "implement-task",
