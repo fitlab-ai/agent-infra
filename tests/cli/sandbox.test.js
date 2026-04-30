@@ -1336,6 +1336,58 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
   ]);
 });
 
+test("buildImage forwards HOST_UID=0 and HOST_GID=0 unchanged when host runs as root", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const calls = [];
+
+  sandboxCreate.buildImage(
+    { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "/repo" },
+    [{ npmPackage: "@acme/tool" }],
+    "/tmp/Dockerfile",
+    "sig-123",
+    {
+      runFn(cmd, args) {
+        calls.push({ type: "run", cmd, args });
+        if (cmd === "id" && args[0] === "-u") {
+          return "0";
+        }
+        if (cmd === "id" && args[0] === "-g") {
+          return "0";
+        }
+        throw new Error(`unexpected quiet command: ${cmd} ${args.join(" ")}`);
+      },
+      runVerboseFn(cmd, args, opts) {
+        calls.push({ type: "verbose", cmd, args, opts });
+      }
+    }
+  );
+
+  assert.deepEqual(calls.slice(0, 2), [
+    { type: "run", cmd: "id", args: ["-u"] },
+    { type: "run", cmd: "id", args: ["-g"] }
+  ]);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].type, "verbose");
+  assert.equal(calls[2].cmd, "docker");
+  assert.equal(calls[2].opts.cwd, "/repo");
+  assert.deepEqual(calls[2].args.slice(0, 7), [
+    "build",
+    "-t",
+    "demo-sandbox:latest",
+    "--build-arg",
+    "HOST_UID=0",
+    "--build-arg",
+    "HOST_GID=0"
+  ]);
+});
+
+test("base.dockerfile guards root host uid with useradd -o", () => {
+  const content = fs.readFileSync(filePath("lib/sandbox/runtimes/base.dockerfile"), "utf8");
+
+  assert.match(content, /if \[ "\$\{HOST_UID\}" = "0" \]/);
+  assert.match(content, /useradd -o -u \$\{HOST_UID\}/);
+});
+
 test("commandErrorMessage prefers stderr over the generic execFileSync message", async () => {
   const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
 
