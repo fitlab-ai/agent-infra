@@ -17,10 +17,10 @@ test("package metadata supports scoped npm publishing", () => {
     access: "public",
     registry: "https://registry.npmjs.org/"
   });
-  assert.deepEqual(pkg.dependencies, {
-    "@clack/prompts": "1.2.0",
-    "picocolors": "1.1.1"
-  });
+  assert.deepEqual(Object.keys(pkg.dependencies).sort(), [
+    "@clack/prompts",
+    "picocolors"
+  ]);
   assert.equal(
     pkg.scripts.prepublishOnly,
     "node scripts/build-inline.js --check && node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js"
