@@ -19,7 +19,7 @@
 ### 前置条件
 
 - Git
-- Node.js >= 18（用于内置测试运行器 `node:test`）
+- Node.js >= 22（用于内置测试运行器 `node:test`）
 - Shell（sh/bash/zsh）
 
 ### 快速开始
@@ -155,7 +155,7 @@ npm test
 
 ## 测试
 
-- 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 18）
+- 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 22）
 - 构建命令：`npm run build`（修改 `src/`、`lib/defaults.json` 或版本信息后需要运行）
 - 运行命令：`npm test`
 - 等价于：`node scripts/build-inline.js --check && node --test tests/*.test.js`

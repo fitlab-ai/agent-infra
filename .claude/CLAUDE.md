@@ -50,7 +50,7 @@ npm test
 
 ## 测试要求
 
-- 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 18）
+- 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 22）
 - 运行命令：`npm test`
 - 测试覆盖：模板文件完整性、CLI 初始化流程、占位符渲染验证
 
