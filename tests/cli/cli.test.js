@@ -293,7 +293,7 @@ test("agent-infra init records optional external skill sources", () => {
 });
 
 test("installed sync-templates.js executes inside a type=module project", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-esm-"));
+  const tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-esm-")));
   const cli = filePath("bin/cli.js");
 
   try {
