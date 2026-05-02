@@ -121,6 +121,14 @@ function assertModeBits(filePathname, expectedMode) {
   assertEqual(actualMode, expectedMode);
 }
 
+function onPlatforms(...allowed) {
+  return {
+    skip: allowed.includes(process.platform)
+      ? false
+      : `requires ${allowed.join("/")} (current: ${process.platform})`
+  };
+}
+
 function assertEqual(actual, expected) {
   if (actual !== expected) {
     throw new Error(`Expected mode ${expected.toString(8)}, got ${actual.toString(8)}`);
@@ -402,6 +410,7 @@ export {
   pathWithPrependedBin,
   read,
   renderPlaceholders,
+  onPlatforms,
   supportsPosixModeBits,
   withGitSafeProcessEnv,
   writeNodeCommandShim,

@@ -12,6 +12,7 @@ import {
   filePath,
   gitSafeEnv,
   loadFreshEsm,
+  onPlatforms,
   withGitSafeProcessEnv
 } from "../helpers.js";
 import { restoreTerminal, runInteractive } from "../../lib/sandbox/shell.js";
@@ -218,7 +219,7 @@ test("sandbox create fails before preparing a temporary Dockerfile when Claude c
   }
 });
 
-test("sandbox vm stop warns instead of stopping when OrbStack is not running", async () => {
+test("sandbox vm stop warns instead of stopping when OrbStack is not running", onPlatforms("darwin", "linux"), async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-vm-stop-orb-"));
   const repoDir = path.join(tmpDir, "repo");
   const binDir = path.join(tmpDir, "bin");
