@@ -247,6 +247,16 @@ agent-infra 支持 macOS 和 Linux。CLI 本身只需要 Node.js (>=18)；容器
 - `ai init`、`ai sync` 等：执行 `npm install -g @fitlab-ai/agent-infra`（或 Homebrew 安装）后开箱即用。
 - `ai sandbox *`：需要 Colima、OrbStack 或 Docker Desktop。macOS 默认引擎是 Colima —— 当选用 Colima 且宿主机没有 `colima` 命令时，agent-infra 会在首次运行时通过 Homebrew 自动安装并启动。如需使用 OrbStack 或 Docker Desktop，请在 `.agents/.airc.json` 中设置 `sandbox.engine`。
 
+#### 引擎资源配置
+
+| 引擎 | `vm.cpu` | `vm.memory` | `vm.disk` | 应用方式 | 说明 |
+|------|----------|-------------|-----------|----------|------|
+| Colima | 生效 | 生效 | 生效 | 启动时 | 变更需重启 VM（`ai sandbox vm stop && ai sandbox vm start`）后生效。 |
+| OrbStack | 生效 | 生效 | 警告 | 热应用 | 每次调用都会通过 `orb config set` 应用。OrbStack 通过 thin provisioning 管理磁盘。 |
+| Docker Desktop | 警告 | 警告 | 警告 | 手动 | 资源必须在 Docker Desktop GUI（Settings -> Resources）中设置。 |
+
+`vm.memory` 和 `--memory` 的单位是 GiB。
+
 ### Linux
 
 - `ai init`、`ai sync` 等：执行 `npm install -g @fitlab-ai/agent-infra` 后开箱即用。
@@ -264,6 +274,10 @@ agent-infra 支持 macOS 和 Linux。CLI 本身只需要 Node.js (>=18)；容器
 
   当宿主机 `gpg-agent` 和签名 key 可用时，GPG signing 可正常工作；如果 key 同步失败，`ai sandbox create` 会回退到清理后的 Git config，让提交仍可在没有宿主签名状态的情况下继续。
 
+#### 引擎资源配置
+
+Linux 直接使用宿主内核上的原生 Docker，没有受管 VM。`sandbox.vm.*` 与 `--cpu / --memory` 标志均不生效。如需限制容器资源，请用 `docker run --cpus / --memory` 设置单容器限制，或配置宿主 cgroups。
+
 #### Linux 已知限制
 
 下列场景在本期未做主动验证：
@@ -275,7 +289,12 @@ agent-infra 支持 macOS 和 Linux。CLI 本身只需要 Node.js (>=18)；容器
 
 ### Windows
 
-WSL2 支持在 [#184](https://github.com/fitlab-ai/agent-infra/issues/184) 跟踪。
+- `ai init`、`ai sync` 等：执行 `npm install -g @fitlab-ai/agent-infra` 后理论上可用（需 Node.js >= 18）。本期未做主动验证。
+- `ai sandbox *`：Windows 暂不支持。WSL2 是规划中的引擎——当前版本会抛出 `WSL2 sandbox engine is not implemented yet; Windows sandbox support is reserved for a future implementation`。进展跟踪 [#184](https://github.com/fitlab-ai/agent-infra/issues/184)。
+
+#### 引擎资源配置
+
+WSL2 是 Windows 规划中的 sandbox 引擎。实现后，`sandbox.vm.cpu` 与 `sandbox.vm.memory` 预计通过 `~/.wslconfig` + `wsl --shutdown` 在启动时应用（`sandbox.vm.disk` 不适用于 WSL2）。`vm.memory` 和 `--memory` 的单位是 GiB。在此之前，所有 `vm.*` 值与 `--cpu / --memory` 标志均不生效。
 
 <a id="what-you-get"></a>
 
