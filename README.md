@@ -247,6 +247,16 @@ agent-infra runs on macOS and Linux. The CLI itself only needs Node.js (>=18); c
 - `ai init`, `ai sync`, etc.: works out of the box after `npm install -g @fitlab-ai/agent-infra` (or Homebrew).
 - `ai sandbox *`: requires Colima, OrbStack, or Docker Desktop. Colima is the default engine on macOS — when it is selected and the `colima` command is missing, agent-infra auto-installs and starts Colima via Homebrew on first run. To use OrbStack or Docker Desktop instead, set `sandbox.engine` in `.agents/.airc.json`.
 
+#### Engine resource configuration
+
+| Engine | `vm.cpu` | `vm.memory` | `vm.disk` | Apply mode | Notes |
+|--------|----------|-------------|-----------|------------|-------|
+| Colima | applied | applied | applied | on-start | VM must be restarted (`ai sandbox vm stop && ai sandbox vm start`) for changes to take effect. |
+| OrbStack | applied | applied | warned | hot | Applied via `orb config set` on every invocation. OrbStack manages disk via thin provisioning. |
+| Docker Desktop | warned | warned | warned | manual | Resources must be set in Docker Desktop GUI (Settings -> Resources). |
+
+`vm.memory` and `--memory` values are expressed in GiB.
+
 ### Linux
 
 - `ai init`, `ai sync`, etc.: works out of the box after `npm install -g @fitlab-ai/agent-infra`.
@@ -264,6 +274,10 @@ agent-infra runs on macOS and Linux. The CLI itself only needs Node.js (>=18); c
 
   GPG signing works when the host `gpg-agent` and signing key are available; if key sync fails, `ai sandbox create` falls back to a sanitized Git config so commits still work without host signing state.
 
+#### Engine resource configuration
+
+Linux uses native Docker on the host kernel, so there is no managed VM. `sandbox.vm.*` and the `--cpu / --memory` flags do not apply. To cap container resources, use `docker run --cpus / --memory` per container or configure host cgroups.
+
 #### Known limitations on Linux
 
 These configurations are not actively tested in this release:
@@ -275,7 +289,12 @@ These configurations are not actively tested in this release:
 
 ### Windows
 
-WSL2 support is tracked in [#184](https://github.com/fitlab-ai/agent-infra/issues/184).
+- `ai init`, `ai sync`, etc.: should work after `npm install -g @fitlab-ai/agent-infra` (Node.js >= 18). Not actively tested in this release.
+- `ai sandbox *`: not yet supported on Windows. WSL2 is the planned engine — current releases throw `WSL2 sandbox engine is not implemented yet; Windows sandbox support is reserved for a future implementation`. Tracked in [#184](https://github.com/fitlab-ai/agent-infra/issues/184).
+
+#### Engine resource configuration
+
+WSL2 is the planned sandbox engine on Windows. When implemented, `sandbox.vm.cpu` and `sandbox.vm.memory` are expected to apply on-start via `~/.wslconfig` + `wsl --shutdown` (`sandbox.vm.disk` is not applicable to WSL2). `vm.memory` and `--memory` values are expressed in GiB. Until then, all `vm.*` values and `--cpu / --memory` flags are not honored.
 
 <a id="what-you-get"></a>
 

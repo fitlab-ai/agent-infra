@@ -1509,7 +1509,7 @@ test("ensureSandboxAliasesFile upgrades legacy OpenCode aliases to full yolo per
   }
 });
 
-test("ensureColima uses verbose commands for install and startup", async () => {
+test("ensureDocker uses Colima verbose commands for install and startup", async () => {
   const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
   const messages = [];
   const verboseCalls = [];
@@ -1519,10 +1519,11 @@ test("ensureColima uses verbose commands for install and startup", async () => {
   try {
     delete process.env.DOCKER_CONTEXT;
 
-    await sandboxEngine.ensureColima(
-      { vm: { cpu: 4, memory: 8, disk: 60 } },
+    await sandboxEngine.ensureDocker(
+      { engine: "colima", vm: { cpu: 4, memory: 8, disk: 60 } },
       (message) => messages.push(message),
       {
+        platformFn: () => "darwin",
         runOkFn(cmd, args) {
           checks.push([cmd, ...args]);
           assert.equal(process.env.DOCKER_CONTEXT, "colima");
@@ -1633,7 +1634,178 @@ test("detectEngine does not apply Docker context", async () => {
   }
 });
 
-test("ensureOrbStack installs OrbStack and starts the Docker daemon", async () => {
+test("sandbox engine adapters expose the required shape", async () => {
+  const sandboxEngines = await loadFreshEsm("lib/sandbox/engines/index.js");
+
+  for (const adapter of Object.values(sandboxEngines.ADAPTERS)) {
+    assert.equal(typeof adapter.id, "string");
+    assert.equal(typeof adapter.displayName, "string");
+    assert.ok(adapter.dockerContext === null || typeof adapter.dockerContext === "string");
+    assert.equal(typeof adapter.managed, "boolean");
+    assert.match(adapter.canApplyResources, /^(hot|on-start|never)$/);
+    assert.equal(typeof adapter.defaultResources, "function");
+    assert.equal(typeof adapter.ensure, "function");
+    assert.equal(typeof adapter.syncResources, "function");
+    if (adapter.managed) {
+      assert.equal(typeof adapter.startVm, "function");
+      assert.equal(typeof adapter.stopVm, "function");
+    }
+  }
+});
+
+test("resolveEffectiveVm merges adapter defaults without changing user values", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const colimaAdapter = {
+    defaultResources(getHost) {
+      const host = getHost();
+      return { cpu: host.cpu, memory: host.memory, disk: 60 };
+    }
+  };
+  let detectCalls = 0;
+  const orbStackAdapter = {
+    defaultResources() {
+      return null;
+    }
+  };
+  const host = { cpu: 6, memory: 8 };
+
+  assert.deepEqual(
+    sandboxEngine.resolveEffectiveVm(colimaAdapter, {}, { detectHostResourcesFn: () => host }),
+    { cpu: 6, memory: 8, disk: 60 }
+  );
+  assert.deepEqual(
+    sandboxEngine.resolveEffectiveVm(colimaAdapter, { cpu: 4 }, { detectHostResourcesFn: () => host }),
+    { cpu: 4, memory: 8, disk: 60 }
+  );
+  assert.deepEqual(
+    sandboxEngine.resolveEffectiveVm(orbStackAdapter, {}, {
+      detectHostResourcesFn: () => {
+        detectCalls += 1;
+        return host;
+      }
+    }),
+    { cpu: null, memory: null, disk: null }
+  );
+  assert.equal(detectCalls, 0);
+});
+
+test("hasUserVmConfig recognizes only explicit resource values", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  assert.equal(sandboxEngine.hasUserVmConfig({}), false);
+  assert.equal(sandboxEngine.hasUserVmConfig({ cpu: null }), false);
+  assert.equal(sandboxEngine.hasUserVmConfig({ cpu: 4 }), true);
+  assert.equal(sandboxEngine.hasUserVmConfig({ memory: 8 }), true);
+  assert.equal(sandboxEngine.hasUserVmConfig({ disk: 60 }), true);
+});
+
+test("Colima adapter warns when resource values change while VM is already running", async () => {
+  const { colimaAdapter } = await loadFreshEsm("lib/sandbox/engines/colima.js");
+  const messages = [];
+
+  assert.deepEqual(colimaAdapter.defaultResources(() => ({ cpu: 6, memory: 8 })), {
+    cpu: 6,
+    memory: 8,
+    disk: 60
+  });
+
+  colimaAdapter.syncResources(
+    { userVm: { cpu: 4 }, hasUserVmConfig: (vm) => vm.cpu != null },
+    (message) => messages.push(message),
+    {},
+    { vmJustStarted: true }
+  );
+  assert.deepEqual(messages, []);
+
+  colimaAdapter.syncResources(
+    { userVm: { cpu: 4 }, hasUserVmConfig: (vm) => vm.cpu != null },
+    (message) => messages.push(message),
+    {},
+    { vmJustStarted: false }
+  );
+  assert.match(messages[0], /Colima VM is already running/);
+});
+
+test("OrbStack adapter hot-applies CPU and memory and warns about disk", async () => {
+  const { orbstackAdapter } = await loadFreshEsm("lib/sandbox/engines/orbstack.js");
+  const verboseCalls = [];
+  const messages = [];
+
+  assert.equal(orbstackAdapter.defaultResources(), null);
+  orbstackAdapter.syncResources(
+    { vm: { cpu: 4, memory: 8, disk: 60 } },
+    (message) => messages.push(message),
+    {
+      runVerbose(cmd, args) {
+        verboseCalls.push([cmd, ...args]);
+      }
+    }
+  );
+
+  assert.deepEqual(verboseCalls, [
+    ["orb", "config", "set", "cpu", "4"],
+    ["orb", "config", "set", "memory_mib", "8192"]
+  ]);
+  assert.match(messages[0], /does not expose a fixed disk size/);
+});
+
+test("OrbStack adapter downgrades config failures to warnings", async () => {
+  const { orbstackAdapter } = await loadFreshEsm("lib/sandbox/engines/orbstack.js");
+  const messages = [];
+
+  orbstackAdapter.syncResources(
+    { vm: { cpu: 4, memory: null, disk: null } },
+    (message) => messages.push(message),
+    {
+      runVerbose() {
+        throw new Error("config failed");
+      }
+    }
+  );
+
+  assert.match(messages[0], /failed to apply OrbStack cpu=4/);
+});
+
+test("Docker Desktop adapter warns for explicit VM resources only", async () => {
+  const { dockerDesktopAdapter } = await loadFreshEsm("lib/sandbox/engines/docker-desktop.js");
+  const messages = [];
+  const hasUserVmConfig = (vm) => vm.cpu != null || vm.memory != null || vm.disk != null;
+
+  dockerDesktopAdapter.syncResources(
+    { userVm: { cpu: null }, hasUserVmConfig },
+    (message) => messages.push(message)
+  );
+  assert.deepEqual(messages, []);
+
+  dockerDesktopAdapter.syncResources(
+    { userVm: { cpu: 4 }, hasUserVmConfig },
+    (message) => messages.push(message)
+  );
+  assert.match(messages[0], /Docker Desktop manages CPU\/memory\/disk/);
+});
+
+test("native adapter warns that VM resources are not applicable", async () => {
+  const { nativeAdapter } = await loadFreshEsm("lib/sandbox/engines/native.js");
+  const messages = [];
+
+  nativeAdapter.syncResources(
+    { userVm: { memory: 8 }, hasUserVmConfig: (vm) => vm.memory != null },
+    (message) => messages.push(message)
+  );
+
+  assert.match(messages[0], /Linux native Docker has no managed VM/);
+});
+
+test("WSL2 adapter reserves VM operations for a future implementation", async () => {
+  const { wsl2Adapter } = await loadFreshEsm("lib/sandbox/engines/wsl2.js");
+
+  assert.throws(() => wsl2Adapter.defaultResources(), /Windows sandbox support is reserved/);
+  assert.throws(() => wsl2Adapter.ensure(), /WSL2 sandbox engine is not implemented yet/);
+  assert.throws(() => wsl2Adapter.syncResources(), /WSL2 sandbox engine is not implemented yet/);
+  assert.throws(() => wsl2Adapter.startVm(), /WSL2 sandbox engine is not implemented yet/);
+});
+
+test("ensureDocker installs OrbStack and starts the Docker daemon", async () => {
   const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
   const messages = [];
   const verboseCalls = [];
@@ -1644,10 +1816,11 @@ test("ensureOrbStack installs OrbStack and starts the Docker daemon", async () =
   try {
     delete process.env.DOCKER_CONTEXT;
 
-    await sandboxEngine.ensureOrbStack(
-      {},
+    await sandboxEngine.ensureDocker(
+      { engine: "orbstack", vm: { cpu: null, memory: null, disk: null } },
       (message) => messages.push(message),
       {
+        platformFn: () => "darwin",
         runOkFn(cmd, args) {
           checks.push([cmd, ...args]);
           assert.equal(process.env.DOCKER_CONTEXT, "orbstack");
@@ -1685,7 +1858,7 @@ test("ensureOrbStack installs OrbStack and starts the Docker daemon", async () =
   }
 });
 
-test("ensureDockerDesktop reports when Docker Desktop is not running", async () => {
+test("ensureDocker reports when Docker Desktop is not running", async () => {
   const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
   const previousDockerContext = process.env.DOCKER_CONTEXT;
 
@@ -1693,7 +1866,8 @@ test("ensureDockerDesktop reports when Docker Desktop is not running", async () 
     delete process.env.DOCKER_CONTEXT;
 
     await assert.rejects(
-      () => sandboxEngine.ensureDockerDesktop({}, null, {
+      () => sandboxEngine.ensureDocker({ engine: "docker-desktop" }, null, {
+        platformFn: () => "darwin",
         runOkFn(cmd, args) {
           assert.equal(cmd, "docker");
           assert.deepEqual(args, ["info"]);
@@ -1709,11 +1883,58 @@ test("ensureDockerDesktop reports when Docker Desktop is not running", async () 
   }
 });
 
-test("ensureNativeDocker throws install hint when docker is not installed", async () => {
+test("ensureDocker applies OrbStack resource flags after daemon checks", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const verboseCalls = [];
+
+  await sandboxEngine.ensureDocker(
+    { engine: "orbstack", vm: { cpu: 4, memory: null, disk: null } },
+    null,
+    {
+      platformFn: () => "darwin",
+      runOkFn(cmd, args) {
+        if (cmd === "which" && args[0] === "orb") {
+          return true;
+        }
+        if (cmd === "docker" && args[0] === "info") {
+          return true;
+        }
+        throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
+      },
+      runVerboseFn(cmd, args) {
+        verboseCalls.push([cmd, ...args]);
+      }
+    }
+  );
+
+  assert.deepEqual(verboseCalls, [["orb", "config", "set", "cpu", "4"]]);
+});
+
+test("ensureDocker warns when Docker Desktop cannot apply explicit VM resources", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const messages = [];
+
+  await sandboxEngine.ensureDocker(
+    { engine: "docker-desktop", vm: { cpu: 4, memory: null, disk: null } },
+    (message) => messages.push(message),
+    {
+      platformFn: () => "darwin",
+      runOkFn(cmd, args) {
+        assert.deepEqual([cmd, ...args], ["docker", "info"]);
+        return true;
+      }
+    }
+  );
+
+  assert.match(messages[0], /Docker Desktop manages CPU\/memory\/disk/);
+});
+
+test("ensureDocker throws native install hint when docker is not installed", async () => {
   const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
 
   await assert.rejects(
-    () => sandboxEngine.ensureNativeDocker({}, null, {
+    () => sandboxEngine.ensureDocker({}, null, {
+      platformFn: () => "linux",
       runOkFn(cmd, args) {
         assert.equal(cmd, "which");
         assert.deepEqual(args, ["docker"]);
@@ -1727,12 +1948,13 @@ test("ensureNativeDocker throws install hint when docker is not installed", asyn
   );
 });
 
-test("ensureNativeDocker throws daemon-down hint when docker info fails and version returns nothing", async () => {
+test("ensureDocker throws native daemon-down hint when docker info fails and version returns nothing", async () => {
   const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
   const checks = [];
 
   await assert.rejects(
-    () => sandboxEngine.ensureNativeDocker({}, null, {
+    () => sandboxEngine.ensureDocker({}, null, {
+      platformFn: () => "linux",
       runOkFn(cmd, args) {
         checks.push([cmd, ...args]);
         if (cmd === "which") {
@@ -1757,11 +1979,12 @@ test("ensureNativeDocker throws daemon-down hint when docker info fails and vers
   ]);
 });
 
-test("ensureNativeDocker throws permission hint when docker info fails but version succeeds", async () => {
+test("ensureDocker throws native permission hint when docker info fails but version succeeds", async () => {
   const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
 
   await assert.rejects(
-    () => sandboxEngine.ensureNativeDocker({}, null, {
+    () => sandboxEngine.ensureDocker({}, null, {
+      platformFn: () => "linux",
       runOkFn(cmd, args) {
         if (cmd === "which") {
           return true;
@@ -1787,6 +2010,15 @@ test("ensureManagedVm gives Linux-specific message for native engine", async () 
   assert.throws(
     () => sandboxVm.ensureManagedVm("native"),
     /does not use a managed VM/
+  );
+});
+
+test("ensureManagedVm points Docker Desktop users to the GUI", async () => {
+  const sandboxVm = await loadFreshEsm("lib/sandbox/commands/vm.js");
+
+  assert.throws(
+    () => sandboxVm.ensureManagedVm("docker-desktop"),
+    /VM management is unavailable[\s\S]*Docker Desktop is managed via its GUI/
   );
 });
 
@@ -1817,6 +2049,28 @@ test("startManagedVm uses OrbStack status instead of Docker daemon state", async
   assert.deepEqual(verboseCalls, [["orb", "start"]]);
 });
 
+test("startManagedVm applies OrbStack resources while leaving a running VM alone", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const verboseCalls = [];
+
+  const result = sandboxEngine.startManagedVm(
+    { engine: "orbstack", vm: { cpu: 2, memory: null, disk: null } },
+    {
+      platformFn: () => "darwin",
+      runOkFn(cmd, args) {
+        assert.deepEqual([cmd, ...args], ["orb", "status"]);
+        return true;
+      },
+      runVerboseFn(cmd, args) {
+        verboseCalls.push([cmd, ...args]);
+      }
+    }
+  );
+
+  assert.equal(result, "already-running");
+  assert.deepEqual(verboseCalls, [["orb", "config", "set", "cpu", "2"]]);
+});
+
 test("stopManagedVm reports unsupported engines instead of silently returning", async () => {
   const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
 
@@ -1827,6 +2081,30 @@ test("stopManagedVm reports unsupported engines instead of silently returning", 
     ),
     /VM management is unavailable for engine 'Docker Desktop'/
   );
+});
+
+test("stopManagedVm does not change the current Docker context", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const previousDockerContext = process.env.DOCKER_CONTEXT;
+
+  try {
+    process.env.DOCKER_CONTEXT = "existing-context";
+
+    const result = sandboxEngine.stopManagedVm(
+      { engine: "orbstack" },
+      {
+        platformFn: () => "darwin",
+        runFn(cmd, args) {
+          assert.deepEqual([cmd, ...args], ["orb", "stop"]);
+        }
+      }
+    );
+
+    assert.equal(result, "stopped");
+    assert.equal(process.env.DOCKER_CONTEXT, "existing-context");
+  } finally {
+    restoreDockerContext(previousDockerContext);
+  }
 });
 
 test("isVmManaged and engineDisplayName describe supported engines", async () => {
