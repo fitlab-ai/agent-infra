@@ -46,7 +46,10 @@ function runGh(args) {
   const ghBin = process.env.IMPORT_ISSUE_GH_BIN || "gh";
   const result = spawnSync(ghBin, args, {
     encoding: "utf8",
-    maxBuffer: 10 * 1024 * 1024
+    maxBuffer: 10 * 1024 * 1024,
+    // Windows gh installations commonly resolve to gh.cmd; Node 22 rejects
+    // direct .cmd/.bat spawning without a shell as part of BatBadBut hardening.
+    shell: process.platform === "win32"
   });
 
   if (result.error) {
