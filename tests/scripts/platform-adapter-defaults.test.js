@@ -23,6 +23,12 @@ function writeJson(filePathname, value) {
   write(filePathname, JSON.stringify(value, null, 2));
 }
 
+function linkNodeModules(tempRoot) {
+  const source = path.join(process.cwd(), "node_modules");
+  const target = path.join(tempRoot, "node_modules");
+  fs.symlinkSync(source, target, process.platform === "win32" ? "junction" : "dir");
+}
+
 function writeFakeGh(filePathname) {
   const scriptPath = `${filePathname}.cjs`;
   write(scriptPath, read("tests/fixtures/validate-artifact/fake-gh.js"));
@@ -97,6 +103,7 @@ test("platform-sync verification keys override legacy literal values", () => {
   try {
     initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     write(path.join(tempRoot, "package.json"), JSON.stringify({ type: "module" }));
+    linkNodeModules(tempRoot);
     write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
     write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));
     writeFakeGh(ghPath);
@@ -149,6 +156,7 @@ test("platform-sync verification keeps legacy literal fallback", () => {
   try {
     initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
     write(path.join(tempRoot, "package.json"), JSON.stringify({ type: "module" }));
+    linkNodeModules(tempRoot);
     write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
     write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));
     writeFakeGh(ghPath);
