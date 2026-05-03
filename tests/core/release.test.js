@@ -19,6 +19,7 @@ test("package metadata supports scoped npm publishing", () => {
   });
   assert.deepEqual(Object.keys(pkg.dependencies).sort(), [
     "@clack/prompts",
+    "cross-spawn",
     "picocolors"
   ]);
   assert.equal(
