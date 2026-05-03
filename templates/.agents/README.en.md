@@ -108,7 +108,7 @@ This project uses the following collaboration label prefixes, each with a define
 | `status:` | Yes | — | PRs already have their own state flow (Open / Draft / Merged / Closed); Issues use `status:` labels for project tracking states |
 | `in:` | Yes | Yes | Both Issues and PRs can be filtered by module |
 
-The default GitHub setup initializes these labels with the `/init-labels` command.
+Run the `/init-labels` command to initialize these labels via the platform adapter.
 
 ## Private Platform Extensions
 
@@ -119,6 +119,127 @@ To adapt agent-infra to a private code-hosting platform:
 3. Add the customized rule files to `.agents/.airc.json` `files.ejected` so future `agent-infra update` runs do not overwrite them.
 4. If you maintain a fork of the template source, add matching `.{platform}.` template variants before adding that platform identifier to the sync logic.
 5. Validate the customized workflow on a test task before rolling it out broadly.
+
+## External Template And Skill Sources
+
+Teams can configure external template sources and shared skill sources in `.agents/.airc.json` for private platform templates, private rules, and shared custom skills:
+
+```json
+{
+  "templates": {
+    "sources": [
+      { "type": "local", "path": "~/private-templates" }
+    ]
+  },
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/private-skills" }
+    ]
+  }
+}
+```
+
+Built-in templates take priority, and external templates are supplemental. Between multiple external template sources, later sources override earlier sources. The sync report lists ignored same-path files in `templateSources.conflicts`. External templates and skills may contain scripts executed by AI workflows, so only configure trusted local paths.
+
+## Custom Skills
+
+Projects can add their own skills alongside the built-in task workflow.
+
+### Local project skills
+
+Create a directory under `.agents/skills/<name>/` and add a `SKILL.md` file:
+
+```text
+.agents/skills/
+  enforce-style/
+    SKILL.md
+    reference/
+      style-guide.md
+```
+
+Recommended frontmatter:
+
+```yaml
+---
+name: enforce-style
+description: "Apply the team style guide before code review"
+args: "<task-id>"   # optional
+---
+```
+
+After adding or updating a custom skill, run `update-agent-infra` again. The sync step detects non-built-in skills and generates matching commands for Claude Code, Gemini CLI, and OpenCode automatically.
+
+### Shared skill sources
+
+To reuse centralized team skills, configure `.agents/.airc.json`:
+
+```json
+{
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/private-skills" }
+    ]
+  }
+}
+```
+
+Each source should mirror the `.agents/skills/` layout and include `SKILL.md` at the root of every skill directory.
+
+### Sync behavior
+
+- Custom project skills in `.agents/skills/` are protected from managed-file cleanup
+- Source entries are applied in order; later custom sources overwrite earlier custom sources
+- Files deleted from an existing configured source are removed locally on the next sync for that sourced skill
+- Built-in skills are not overridable by custom sources; if a source skill name conflicts with a built-in skill, the source copy is skipped
+- Use `files.ejected` if the project must take ownership of a built-in skill or command
+
+## Custom TUI Configuration
+
+Use the top-level `.agents/.airc.json` `customTUIs` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom TUI directory.
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `name` | Yes | Display name shown in reports and next-step guidance, for example `Acme TUI`. |
+| `dir` | Yes | Command directory relative to the project root, for example `.acme/commands`. The path must stay inside the project root. |
+| `invoke` | Yes | User-facing command template used in next-step guidance. |
+
+Supported `invoke` placeholders:
+
+| Placeholder | Replaced with | Example |
+|-------------|---------------|---------|
+| `${skillName}` | The skill command name, such as `review-task` or `commit`. | `acme ${skillName}` -> `acme review-task` |
+| `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
+
+Non-namespaced custom TUI:
+
+```json
+{
+  "customTUIs": [
+    {
+      "name": "Acme TUI",
+      "dir": ".acme/commands",
+      "invoke": "acme ${skillName}"
+    }
+  ]
+}
+```
+
+Namespaced custom TUI:
+
+```json
+{
+  "project": "agent-infra",
+  "customTUIs": [
+    {
+      "name": "Internal Gemini",
+      "dir": ".internal-gemini/commands",
+      "invoke": "/${projectName}:${skillName}"
+    }
+  ]
+}
+```
+
+`customTUIs` should contain one entry per custom TUI. To let `update-agent-infra` generate command files for custom skills, keep at least one existing command file in `dir` that references a built-in skill path such as `.agents/skills/analyze-task/SKILL.md`; agent-infra uses that file as the format reference.
 
 ## Skill Authoring Conventions
 

@@ -26,7 +26,7 @@ description: "创建 Pull Request 到目标分支"
 
 ### 3. 准备 PR 正文
 
-读取 `.github/PULL_REQUEST_TEMPLATE.md`（如存在），参考最近合并的 PR 风格，并收集 `<target-branch>` 到 `HEAD` 的全部提交。
+通过 `.agents/rules/issue-pr-commands.md` 读取 PR 模板，参考最近合并的 PR 风格，并收集 `<target-branch>` 到 `HEAD` 的全部提交。
 
 > 模板处理、HEREDOC 正文生成和 `Generated with AI assistance` 要求见 `reference/pr-body-template.md`。编写正文前先读取 `reference/pr-body-template.md`。
 
@@ -38,7 +38,7 @@ description: "创建 Pull Request 到目标分支"
 
 先检查当前分支是否已经存在 PR；如果已存在，直接告知用户 PR URL 并结束，不要重复执行元数据同步或摘要发布。
 
-执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的 “创建 PR” 命令创建 PR。
+执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的前置步骤完成认证和代码托管平台检测；随后按其中的 “创建 PR” 命令创建 PR。
 
 如果获取到 `{task-id}` 且对应任务提供了 `issue_number`，必须在 PR 正文中保留 `Closes #{issue-number}`。
 
@@ -46,9 +46,9 @@ description: "创建 Pull Request 到目标分支"
 
 对获取到 `{task-id}` 的 PR，立即同步这些核心元数据：
 - 按 `.agents/rules/issue-pr-commands.md` 查询标准 label / Issue / PR 元数据
-- 按 `.agents/rules/issue-pr-commands.md` 的 PR 更新命令添加 type label 与相关 `in:` labels
-- 按 `.agents/rules/issue-sync.md` 的 `in:` label 同步规则，同步更新关联 Issue 的 `in:` label 保持一致
-- 按 `.agents/rules/milestone-inference.md` 的「阶段 3：`create-pr`」复用 Issue milestone
+- 按 `.agents/rules/issue-pr-commands.md` 的 PR 更新命令和权限降级规则处理 type label
+- 将 Issue 当前的 `in:` labels 复制到 PR（不重新计算，不反向更新 Issue）
+- 按 `.agents/rules/milestone-inference.md` 的「阶段 3：`create-pr`」及其权限规则复用 Issue milestone
 - 通过 `Closes #{issue-number}` 保持 Development 关联
 
 ### 7. 发布审查摘要
@@ -69,7 +69,7 @@ description: "创建 Pull Request 到目标分支"
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 如果获取到了 `{task-id}`，更新 task.md 的 `pr_number`、`updated_at`，并追加 PR Created 的 Activity Log，记录元数据同步和摘要发布结果。
@@ -93,7 +93,7 @@ node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/activ
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 
 说明 PR URL、元数据同步结果、摘要评论结果，并在工作流真正完成后推荐执行 `complete-task {task-id}`。
 
@@ -101,7 +101,7 @@ node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/activ
 
 - 必须检查分支中的全部提交，而不是只看最后一个
 - `create-pr` 不能把 type label 映射委托给其他技能，必须在获取到 `{task-id}` 时于本技能内内联处理
-- 隐藏 summary 标记必须保持 `<!-- sync-pr:{task-id}:summary -->` 以兼容已有 PR 评论
+- 隐藏 summary 标记必须保持为 `.agents/rules/pr-sync.md` 中定义的 PR 摘要评论标记，以兼容已有 PR 评论
 - 如果当前分支已存在 PR，直接告知用户 PR URL 并结束，不做重复同步
 - 如果从 Issue 继承元数据失败，继续使用 task.md 和分支推断兜底
 

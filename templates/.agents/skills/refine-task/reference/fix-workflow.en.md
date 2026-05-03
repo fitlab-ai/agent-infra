@@ -26,11 +26,11 @@ For each fix:
 1. read the affected files
 2. apply the smallest necessary change
 3. verify the change addresses the review feedback
-4. run the relevant tests
+4. run the project's **smoke subset** for immediate feedback (see the `test` skill)
 
 ## Run Test Verification
 
-Run the project test command from the `test` skill and confirm that all required tests still pass.
+Before writing the refinement report, run the project's **core subset** as final verification and confirm that all required tests still pass. If the project does not have layered scripts, fall back to the full project test command.
 
 ## Choose the Next-Step Branch
 

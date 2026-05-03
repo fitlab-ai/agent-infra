@@ -1,13 +1,13 @@
 ---
 id: task-XXX
 type: feature                  # feature | bugfix | refactor | docs | review
-branch: ""                     # <project>-<type>-<slug>
+branch:                        # <project>-<type>-<slug>
 workflow: feature-development  # feature-development | bug-fix | code-review | refactoring
 status: open                   # open | in-progress | review | blocked | completed
-created_at: YYYY-MM-DD
-updated_at: YYYY-MM-DD
+created_at: YYYY-MM-DDTHH:mm:ss±HH:MM
+updated_at: YYYY-MM-DDTHH:mm:ss±HH:MM
 current_step: analysis         # analysis | design | implementation | review | fix | commit
-assigned_to: ""                # claude | codex | gemini | opencode | human
+assigned_to:                   # claude | codex | gemini | opencode | human
 ---
 
 # 任务：[标题]
@@ -50,7 +50,7 @@ assigned_to: ""                # claude | codex | gemini | opencode | human
 ## 活动日志
 
 <!-- 每个工作流步骤追加一条新记录，不要覆盖之前的记录。 -->
-<!-- 格式：- {yyyy-MM-dd HH:mm} — **{步骤}** by {执行者} — {简要说明} -->
+<!-- 格式：- {YYYY-MM-DD HH:mm:ss±HH:MM} — **{步骤}** by {执行者} — {简要说明} -->
 
 ## 完成检查清单
 

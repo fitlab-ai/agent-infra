@@ -24,7 +24,11 @@ Execute the following command to handle all deterministic steps at once:
 node .agents/skills/update-agent-infra/scripts/sync-templates.js
 ```
 
-The script reads `.agents/.airc.json`, automatically locates the installed `@fitlab-ai/agent-infra/templates/` directory via npm, and performs:
+The script reads `.agents/.airc.json` and automatically locates the installed
+`@fitlab-ai/agent-infra/templates/` directory via npm. Before syncing, it merges
+external template sources from `templates.sources`; built-in templates win over
+same-path external files, and later external sources win over earlier external
+sources. Conflicts are recorded in the report. The script then performs:
 - detect the template source version
 - File registry sync (`defaults.json` → `.agents/.airc.json`)
 - All managed files (language selection → exclude merged/ejected → placeholder rendering → overwrite)
@@ -37,7 +41,12 @@ The script outputs JSON to stdout. Parse and record the report.
 - `error`: error message (if non-empty, stop and report)
 - `templateVersion`: current template source version
 - `templateRoot`: absolute path to the template file root directory
+- `templateSources.conflicts`: external template source conflicts; explicitly
+  list these in the report so users know which files were ignored because a
+  built-in template or later external source won
 - `managed.written` / `managed.created`: updated / newly created managed files
+- `managed.removed`: deleted managed files (including old paths removed during template migrations)
+- `managed.skippedPlatform`: managed / merged entries skipped because they belong to a different platform
 - `merged.pending`: list of merged files for AI to process
   - Each item has `target` (project-relative path) and `template` (template-root-relative path)
 - `registryAdded`: newly added file registry entries
@@ -124,6 +133,7 @@ warning to the end of the report:
 Based on the script report and merged results, output a complete update report including:
 - Template version change
 - File registry additions
+- External template source conflicts, when `templateSources.conflicts` is non-empty
 - Managed file change details (updated, created, skipped merged files)
 - Merged file results (conflicts, remaining TODOs)
 - Ejected file processing
@@ -131,7 +141,7 @@ Based on the script report and merged results, output a complete update report i
 
 If there are changes to submit, add:
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 ```
 Next step - commit changes:

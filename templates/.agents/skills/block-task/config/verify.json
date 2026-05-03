@@ -20,9 +20,10 @@
       "expected_action_pattern": "Blocked",
       "freshness_minutes": 30
     },
-    "github-sync": {
+    "platform-sync": {
       "when": "issue_number_exists",
-      "expected_status_label": "status: blocked"
+      "expected_status_label": "status: blocked",
+      "expected_status_label_key": "blocked"
     }
   }
 }

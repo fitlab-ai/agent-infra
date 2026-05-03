@@ -7,8 +7,15 @@ ENV TZ=Asia/Shanghai
 
 ARG HOST_UID=1000
 ARG HOST_GID=1000
-RUN (groupadd -g ${HOST_GID} devuser || true) && \
-    useradd -u ${HOST_UID} -g ${HOST_GID} -m -s /bin/bash devuser
+# Root host uid 0 collides with container root; -o lets devuser share uid 0
+# while keeping a real passwd entry that USER devuser can resolve.
+RUN if [ "${HOST_UID}" = "0" ]; then \
+        (groupadd -o -g ${HOST_GID} devuser || true) && \
+        useradd -o -u ${HOST_UID} -g ${HOST_GID} -m -s /bin/bash devuser; \
+    else \
+        (groupadd -g ${HOST_GID} devuser || true) && \
+        useradd -u ${HOST_UID} -g ${HOST_GID} -m -s /bin/bash devuser; \
+    fi
 
 RUN apt-get update && apt-get install -y \
     curl wget git vim file \

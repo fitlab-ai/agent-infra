@@ -1,8 +1,8 @@
-description = "初始化仓库的 GitHub Milestones 体系"
+description = "初始化仓库的 milestones 体系"
 prompt = """
 初始化里程碑：{{args}}
 
-为 {{project}} 初始化 GitHub Milestones。
+为 {{project}} 初始化 milestones。
 
 读取并执行 `.agents/skills/init-milestones/SKILL.md` 中的 init-milestones 技能。
 

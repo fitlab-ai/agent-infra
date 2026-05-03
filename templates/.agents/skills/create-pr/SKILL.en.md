@@ -26,7 +26,7 @@ Use the explicit argument when provided. Otherwise infer the target branch from 
 
 ### 3. Prepare the PR Body
 
-Read `.github/PULL_REQUEST_TEMPLATE.md` when it exists, review recent merged PRs for style, and gather all commits between `<target-branch>` and `HEAD`.
+Read the PR template through `.agents/rules/issue-pr-commands.md`, review recent merged PRs for style, and gather all commits between `<target-branch>` and `HEAD`.
 
 > Template handling, HEREDOC body generation, and `Generated with AI assistance` requirements live in `reference/pr-body-template.md`. Read `reference/pr-body-template.md` before writing the PR body.
 
@@ -38,7 +38,7 @@ Confirm whether the current branch already has an upstream. Push with `git push 
 
 Check whether the current branch already has a PR first; if one exists, show the PR URL and stop without repeating metadata sync or summary publication.
 
-Read `.agents/rules/issue-pr-commands.md` before this step, then create the PR with its "Create a PR" command template.
+Read `.agents/rules/issue-pr-commands.md` before this step, follow its prerequisite steps to complete authentication and code-hosting platform detection, then create the PR with its "Create a PR" command template.
 
 If `{task-id}` is available and the related task provides `issue_number`, keep `Closes #{issue-number}` in the PR body.
 
@@ -46,9 +46,9 @@ If `{task-id}` is available and the related task provides `issue_number`, keep `
 
 For PRs where `{task-id}` is available, sync the core metadata immediately:
 - query standard labels, Issue metadata, and PR metadata via `.agents/rules/issue-pr-commands.md`
-- add the mapped type label and relevant `in:` labels with the PR update command from `.agents/rules/issue-pr-commands.md`
-- sync the linked Issue `in:` labels to match by following the `in:` label sync rule in `.agents/rules/issue-sync.md`
-- reuse the Issue milestone by following "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md`
+- apply the mapped type label by following the PR update commands and permission-degradation rules in `.agents/rules/issue-pr-commands.md`
+- copy the current Issue `in:` labels to the PR without recomputing them and without writing back to the Issue
+- reuse the Issue milestone by following "Phase 3: `create-pr`" and its permission rules in `.agents/rules/milestone-inference.md`
 - keep Development linking in the PR body with `Closes #{issue-number}` when applicable
 
 ### 7. Publish the Review Summary
@@ -69,7 +69,7 @@ Aggregate a reviewer-facing summary from those artifacts and maintain a single i
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 If `{task-id}` is available, update task.md with `pr_number`, `updated_at`, and append the PR Created Activity Log entry including metadata-sync and summary results.
@@ -93,7 +93,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 Explain the created PR URL, summarize metadata sync and summary-comment results, and recommend `complete-task {task-id}` once the workflow is truly done.
 
@@ -101,7 +101,7 @@ Explain the created PR URL, summarize metadata sync and summary-comment results,
 
 - Review every commit in the branch, not only the latest one
 - `create-pr` must not defer type-label mapping to another skill; inline the mapping here when `{task-id}` is available
-- Keep the hidden summary marker as `<!-- sync-pr:{task-id}:summary -->` for compatibility with existing PR comments
+- Keep the hidden summary marker as the PR summary marker defined in `.agents/rules/pr-sync.md` for compatibility with existing PR comments
 - If the current branch already has a PR, show its URL and stop without repeating sync work
 - When metadata inheritance from the Issue fails, continue with task.md and branch-based fallbacks
 

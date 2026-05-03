@@ -5,7 +5,11 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { exists, filePath, read } from "../helpers.js";
+import { envWithPrependedPath, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../helpers.js";
+
+// On macOS, init prompts for sandbox engine (extra blank line input needed)
+const IS_DARWIN = os.platform() === "darwin";
+const ENGINE_NL = IS_DARWIN ? "\\n" : "";
 
 test("bootstrap CLI files exist", () => {
   assert.ok(exists("install.sh"), "install.sh should exist");
@@ -19,8 +23,15 @@ test("bootstrap CLI files exist", () => {
   assert.match(nodeCli, /agent-infra/);
   assert.match(nodeCli, /sandbox/);
 
-  const nodeStats = fs.statSync(filePath("bin/cli.js"));
-  assert.ok(nodeStats.mode & 0o111, "bin/cli.js should be executable");
+  if (supportsPosixModeBits()) {
+    const nodeStats = fs.statSync(filePath("bin/cli.js"));
+    assert.ok(nodeStats.mode & 0o111, "bin/cli.js should be executable");
+  } else {
+    const output = execFileSync(process.execPath, [filePath("bin/cli.js"), "version"], {
+      encoding: "utf8"
+    });
+    assert.match(output, /^agent-infra v/);
+  }
 });
 
 test("cli version output stays in sync with package.json", () => {
@@ -38,7 +49,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
 
   try {
     execSync(
-      `printf 'testproj\\ntestorg\\n\\n\\n' | node "${cli}" init`,
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
 
@@ -50,9 +61,12 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.deepEqual(config.platform, { type: "github" });
     assert.equal(config.templateVersion, `v${JSON.parse(read("package.json")).version}`);
     assert.ok(!("templateSource" in config), "init should not generate templateSource");
+    assert.ok(!("templates" in config), "blank template sources should not generate templates config");
+    assert.ok(!("skills" in config), "blank skill sources should not generate skills config");
     assert.ok(!config.branchPrefix, "branchPrefix should not exist");
     assert.ok(!config.source, "consumer projects should not have source: self");
     assert.deepEqual(config.sandbox, {
+      engine: IS_DARWIN ? "colima" : null,
       runtimes: ["node20"],
       tools: ["claude-code", "codex", "opencode", "gemini-cli"],
       dockerfile: null,
@@ -60,8 +74,8 @@ test("agent-infra init generates seed files in a temp directory", () => {
     }, "init should generate default sandbox config");
     assert.deepEqual(config.labels, { in: {} }, "init should generate empty labels.in defaults");
     assert.ok(
-      config.files.managed.includes(".github/hooks/check-version-format.sh"),
-      ".github/hooks/check-version-format.sh should be managed"
+      config.files.managed.includes(".git-hooks/check-version-format.sh"),
+      ".git-hooks/check-version-format.sh should be managed"
     );
     assert.ok(config.files.managed.includes(".agents/scripts/"), ".agents/scripts/ should be managed");
     assert.ok(config.files.managed.includes(".claude/hooks/"), ".claude/hooks/ should be managed");
@@ -130,8 +144,156 @@ test("agent-infra init generates seed files in a temp directory", () => {
   }
 });
 
+test("agent-infra init defaults macOS sandbox engine to Colima", () => {
+  const initSource = read("lib/init.js");
+
+  assert.match(
+    initSource,
+    /select\(\s*'Sandbox engine \(macOS\)',\s*\[\s*'colima',\s*'orbstack',\s*'docker-desktop'\s*\],\s*'colima'\s*\)/s
+  );
+});
+
+test("agent-infra init accepts a custom platform selected from the menu", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    const output = execSync(
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}2\\nmy-platform\\n\\n\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe", encoding: "utf8" }
+    );
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+    assert.deepEqual(config.platform, { type: "my-platform" });
+    assert.match(
+      output,
+      /Custom platform 'my-platform' selected\. Built-in templates are only complete for github;/,
+      "init should warn when built-in templates do not fully support the selected custom platform"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra init remains compatible with direct platform input", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    execSync(
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}github\\n\\n\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe" }
+    );
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+    assert.deepEqual(config.platform, { type: "github" });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra init warns when a custom platform is entered directly", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    const output = execSync(
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}gitea\\n\\n\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe", encoding: "utf8" }
+    );
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+    assert.deepEqual(config.platform, { type: "gitea" });
+    assert.match(
+      output,
+      /Custom platform 'gitea' selected\. Built-in templates are only complete for github;/,
+      "init should warn when an unlisted platform is accepted through direct input"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra init records an optional external template source for any platform", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-init-template-source-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    execSync(
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}github\\n~/private-templates\\n\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe" }
+    );
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+
+    assert.deepEqual(config.platform, { type: "github" });
+    assert.deepEqual(config.templates, {
+      sources: [{ type: "local", path: "~/private-templates" }]
+    });
+    assert.ok(!("templateSource" in config), "init should not generate legacy templateSource");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra init omits optional source config when source prompts are blank", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-init-template-source-blank-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    execSync(
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}gitea\\n\\n\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe" }
+    );
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+
+    assert.deepEqual(config.platform, { type: "gitea" });
+    assert.ok(!("templates" in config), "blank template source should not generate templates config");
+    assert.ok(!("skills" in config), "blank skill source should not generate skills config");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra init records optional external skill sources", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-init-skill-source-"));
+  const cli = filePath("bin/cli.js");
+
+  try {
+    execSync(
+      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}github\\n\\n~/private-skills, ~/team-skills\\n' | node "${cli}" init`,
+      { cwd: tmpDir, stdio: "pipe" }
+    );
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+
+    assert.deepEqual(config.skills, {
+      sources: [
+        { type: "local", path: "~/private-skills" },
+        { type: "local", path: "~/team-skills" }
+      ]
+    });
+    assert.ok(!("templates" in config), "blank template source should not generate templates config");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("installed sync-templates.js executes inside a type=module project", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-esm-"));
+  const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-esm-")));
   const cli = filePath("bin/cli.js");
 
   try {
@@ -142,7 +304,7 @@ test("installed sync-templates.js executes inside a type=module project", () => 
     );
 
     execSync(
-      `printf 'esmproj\\nesmorg\\n\\n\\n' | node "${cli}" init`,
+      `printf 'esmproj\\nesmorg\\n\\n${ENGINE_NL}\\n\\n\\n' | node "${cli}" init`,
       { cwd: tmpDir, stdio: "pipe" }
     );
     assert.equal(
@@ -150,8 +312,9 @@ test("installed sync-templates.js executes inside a type=module project", () => 
       "module",
       "package.json should remain an ESM package after init"
     );
+    const pathBinDir = path.join(tmpDir, ".path-bin");
     const packageRoot = path.join(
-      tmpDir,
+      pathBinDir,
       "node_modules",
       "@fitlab-ai",
       "agent-infra"
@@ -169,9 +332,15 @@ test("installed sync-templates.js executes inside a type=module project", () => 
       mode: 0o755
     });
     fs.writeFileSync(path.join(localTemplateRoot, "README.md"), "Hello {{project}}\n", "utf8");
-    const pathBinDir = path.join(tmpDir, ".path-bin");
     fs.mkdirSync(pathBinDir, { recursive: true });
-    fs.symlinkSync(path.join(packageRoot, "bin", "cli.js"), path.join(pathBinDir, "ai"));
+    try {
+      fs.symlinkSync(path.join(packageRoot, "bin", "cli.js"), path.join(pathBinDir, "ai"));
+    } catch (error) {
+      if (process.platform !== "win32" || error.code !== "EPERM") {
+        throw error;
+      }
+      writeNodeCommandShim(path.join(pathBinDir, "ai"), path.join(packageRoot, "bin", "cli.js"));
+    }
     fs.writeFileSync(
       path.join(tmpDir, ".agents", ".airc.json"),
       JSON.stringify({
@@ -191,16 +360,13 @@ test("installed sync-templates.js executes inside a type=module project", () => 
       {
         cwd: tmpDir,
         encoding: "utf8",
-        env: {
-          ...process.env,
-          PATH: `${pathBinDir}:${process.env.PATH || ""}`
-        }
+        env: envWithPrependedPath(process.env, pathBinDir)
       }
     );
     const report = JSON.parse(output);
 
     assert.ok(!report.error, "sync-templates.js should run without ESM loader errors");
-    assert.equal(report.templateRoot, fs.realpathSync(localTemplateRoot));
+    assert.equal(report.templateRoot.replace(/\\/g, "/"), fs.realpathSync(localTemplateRoot).replace(/\\/g, "/"));
     assert.equal(fs.readFileSync(path.join(tmpDir, "README.md"), "utf8"), "Hello esmproj\n");
     assert.ok(
       fs.existsSync(
@@ -224,7 +390,7 @@ test("agent-infra init rejects invalid input", () => {
   const cases = [
     { input: 'demo"x\\ntestorg\\n\\n\\n', desc: "project name with quote" },
     { input: 'testproj\\ntestorg\\nbad-lang\\n\\n', desc: "unsupported language" },
-    { input: 'testproj\\ntestorg\\n\\nbad platform\\n', desc: "invalid platform type" }
+    { input: `testproj\\ntestorg\\n\\n${ENGINE_NL}bad platform\\n`, desc: "invalid platform type" }
   ];
 
   cases.forEach(({ input, desc }) => {
@@ -232,10 +398,11 @@ test("agent-infra init rejects invalid input", () => {
 
     try {
       assert.throws(() => {
-        execSync(
-          `printf '${input}' | node "${cli}" init`,
-          { cwd: tmpDir, stdio: "pipe" }
-        );
+        execFileSync(process.execPath, [cli, "init"], {
+          cwd: tmpDir,
+          input: input.replace(/\\n/g, "\n"),
+          stdio: "pipe"
+        });
       }, `should reject: ${desc}`);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -296,13 +463,14 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     );
     assert.deepEqual(updated.platform, { type: "github" }, "update should backfill default platform config");
     assert.deepEqual(updated.sandbox, {
+      engine: null,
       runtimes: ["node20"],
       tools: ["claude-code", "codex", "opencode", "gemini-cli"],
       dockerfile: null,
       vm: { cpu: null, memory: null, disk: null }
     }, "update should backfill default sandbox config");
     assert.deepEqual(updated.labels, { in: {} }, "update should backfill empty labels.in defaults");
-    assert.ok(updated.files.managed.includes(".github/hooks/check-version-format.sh"));
+    assert.ok(updated.files.managed.includes(".git-hooks/check-version-format.sh"));
     assert.ok(updated.files.managed.includes(".agents/skills/"));
     assert.ok(updated.files.merged.includes("**/test.*"));
 

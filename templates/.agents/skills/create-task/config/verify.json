@@ -20,6 +20,11 @@
       "expected_action_pattern": "Task Created",
       "freshness_minutes": 30
     },
-    "github-sync": null
+    "platform-sync": {
+      "when": "issue_number_exists",
+      "issue_must_exist": true,
+      "verify_task_comment_content": true,
+      "expected_status_label_key": "waitingForTriage"
+    }
   }
 }

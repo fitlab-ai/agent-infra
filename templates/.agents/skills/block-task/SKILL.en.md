@@ -40,7 +40,7 @@ Before blocking, thoroughly analyze:
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update `.agents/workspace/active/{task-id}/task.md`:
@@ -49,7 +49,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `updated_at`: {current timestamp}
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Blocked** by {agent} — {one-line reason}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Blocked** by {agent} — {one-line reason}
   ```
 
 Add a blocking information section to task.md.
@@ -70,9 +70,9 @@ ls .agents/workspace/blocked/{task-id}/task.md
 
 Check whether `task.md` includes a valid `issue_number`. If not, skip this step.
 
-> Status-label sync rules live in `.agents/rules/issue-sync.md`. Read that file before syncing.
+> Status-label sync rules live in `.agents/rules/issue-sync.md`. Read that file before syncing, and complete upstream repository detection plus permission detection.
 
-If a valid `issue_number` exists, set `status: blocked` directly.
+If a valid `issue_number` exists, set `status: blocked` by following issue-sync.md.
 
 ### 7. Verification Gate
 
@@ -93,7 +93,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 Output format:
 ```

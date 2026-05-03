@@ -16,7 +16,7 @@
   <a href="https://www.npmjs.com/package/@fitlab-ai/agent-infra"><img src="https://img.shields.io/npm/v/@fitlab-ai/agent-infra" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/@fitlab-ai/agent-infra"><img src="https://img.shields.io/npm/dm/@fitlab-ai/agent-infra" alt="npm downloads"></a>
   <a href="License.txt"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen?logo=node.js" alt="Node.js >= 18"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-%3E%3D22-brightgreen?logo=node.js" alt="Node.js >= 22"></a>
   <a href="https://github.com/fitlab-ai/agent-infra/releases"><img src="https://img.shields.io/github/v/release/fitlab-ai/agent-infra" alt="GitHub release"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
 </p>
@@ -244,6 +244,66 @@ agent-infra is intentionally simple: a bootstrap CLI creates the seed configurat
 └───────────────────────────────────────────────────────┘
 ```
 
+<a id="platform-support"></a>
+
+## Platform Support
+
+agent-infra runs on macOS and Linux. The CLI itself only needs Node.js (>=22); container-related features (`ai sandbox *`) additionally need Docker.
+
+### macOS
+
+- `ai init`, `ai sync`, etc.: works out of the box after `npm install -g @fitlab-ai/agent-infra` (or Homebrew).
+- `ai sandbox *`: requires Colima, OrbStack, or Docker Desktop. Colima is the default engine on macOS — when it is selected and the `colima` command is missing, agent-infra auto-installs and starts Colima via Homebrew on first run. To use OrbStack or Docker Desktop instead, set `sandbox.engine` in `.agents/.airc.json`.
+
+#### Engine resource configuration
+
+| Engine | `vm.cpu` | `vm.memory` | `vm.disk` | Apply mode | Notes |
+|--------|----------|-------------|-----------|------------|-------|
+| Colima | applied | applied | applied | on-start | VM must be restarted (`ai sandbox vm stop && ai sandbox vm start`) for changes to take effect. |
+| OrbStack | applied | applied | warned | hot | Applied via `orb config set` on every invocation. OrbStack manages disk via thin provisioning. |
+| Docker Desktop | warned | warned | warned | manual | Resources must be set in Docker Desktop GUI (Settings -> Resources). |
+
+`vm.memory` and `--memory` values are expressed in GiB.
+
+### Linux
+
+- `ai init`, `ai sync`, etc.: works out of the box after `npm install -g @fitlab-ai/agent-infra`.
+- `ai sandbox *`: requires Docker Engine on the host. Quick setup:
+
+  ```bash
+  # 1. Install Docker Engine — see https://docs.docker.com/engine/install/
+  # 2. Start the daemon and enable on boot
+  sudo systemctl enable --now docker
+  # 3. Skip 'sudo' for docker: add yourself to the docker group
+  sudo usermod -aG docker $USER && newgrp docker
+  ```
+
+  Validate with `docker info` — it should succeed without sudo.
+
+  GPG signing works when the host `gpg-agent` and signing key are available; if key sync fails, `ai sandbox create` falls back to a sanitized Git config so commits still work without host signing state.
+
+#### Engine resource configuration
+
+Linux uses native Docker on the host kernel, so there is no managed VM. `sandbox.vm.*` and the `--cpu / --memory` flags do not apply. To cap container resources, use `docker run --cpus / --memory` per container or configure host cgroups.
+
+#### Known limitations on Linux
+
+These configurations are not actively tested in this release:
+
+- **Rootless Docker**: Track [#256](https://github.com/fitlab-ai/agent-infra/issues/256).
+- **Podman** instead of Docker: Track [#257](https://github.com/fitlab-ai/agent-infra/issues/257).
+- **SELinux-enforcing** hosts (Fedora / RHEL) may need manual mount labels: Track [#258](https://github.com/fitlab-ai/agent-infra/issues/258).
+- `ai sandbox vm` is a no-op on Linux. Linux uses native Docker directly with no VM to manage; use `ai sandbox create`, `ai sandbox exec`, `ai sandbox ls`, `ai sandbox rebuild`, `ai sandbox rm` directly.
+
+### Windows
+
+- `ai init`, `ai sync`, etc.: should work after `npm install -g @fitlab-ai/agent-infra` (Node.js >= 18). Not actively tested in this release.
+- `ai sandbox *`: not yet supported on Windows. WSL2 is the planned engine — current releases throw `WSL2 sandbox engine is not implemented yet; Windows sandbox support is reserved for a future implementation`. Tracked in [#184](https://github.com/fitlab-ai/agent-infra/issues/184).
+
+#### Engine resource configuration
+
+WSL2 is the planned sandbox engine on Windows. When implemented, `sandbox.vm.cpu` and `sandbox.vm.memory` are expected to apply on-start via `~/.wslconfig` + `wsl --shutdown` (`sandbox.vm.disk` is not applicable to WSL2). `vm.memory` and `--memory` values are expressed in GiB. Until then, all `vm.*` values and `--cpu / --memory` flags are not honored.
+
 <a id="what-you-get"></a>
 
 ## What You Get
@@ -276,7 +336,7 @@ agent-infra ships with **a rich set of built-in AI skills**. They are organized 
 
 | Skill | Description | Parameters | Recommended use case |
 |-------|-------------|------------|----------------------|
-| `create-task` | Create a task scaffold from a natural-language request. | `description` | Start a new feature, bug-fix, or improvement from scratch. |
+| `create-task` | Create a task scaffold from a natural-language request and cascade Issue creation through the platform rule when available. | `description` | Start a new feature, bug-fix, or improvement from scratch. |
 | `import-issue` | Import a GitHub Issue into the local task workspace. | `issue-number` | Convert an existing Issue into an actionable task folder. |
 | `analyze-task` | Produce a requirement analysis artifact for an existing task. | `task-id` | Capture scope, risks, and impacted files before designing. |
 | `plan-task` | Write the technical implementation plan with a review checkpoint. | `task-id` | Define the approach after analysis is complete. |
@@ -301,7 +361,6 @@ agent-infra ships with **a rich set of built-in AI skills**. They are organized 
 
 | Skill | Description | Parameters | Recommended use case |
 |-------|-------------|------------|----------------------|
-| `create-issue` | Create a GitHub Issue from a task file. | `task-id` | Push a local task into GitHub tracking. |
 | `create-pr` | Open a Pull Request to an inferred or explicit target branch. | `task-id` (optional), `target-branch` (optional) | Publish reviewed changes for merge, with optional explicit task linkage after a fresh session. |
 
 <a id="code-quality"></a>
@@ -322,6 +381,7 @@ agent-infra ships with **a rich set of built-in AI skills**. They are organized 
 |-------|-------------|------------|----------------------|
 | `release` | Execute the version release workflow. | `version` (`X.Y.Z`) | Publish a new project release. |
 | `create-release-note` | Generate release notes from PRs and commits. | `version`, `previous-version` (optional) | Prepare a changelog before shipping. |
+| `post-release` | Run post-release follow-up tasks (version bump, artifact rebuild, optional demo capture). | None | Finalize the release cycle after pushing a release tag. |
 
 <a id="security-skills"></a>
 
@@ -349,6 +409,140 @@ agent-infra ships with **a rich set of built-in AI skills**. They are organized 
 
 > Every skill works across supported AI TUIs. The command prefix changes, but the workflow semantics stay the same.
 
+<a id="custom-skills"></a>
+
+## Custom Skills
+
+Built-in skills cover the standard delivery lifecycle, but teams often need project-specific instructions such as coding standards, deployment checks, or internal review rules. agent-infra supports that through **custom skills**.
+
+### Create a custom skill in the project
+
+Create a directory under `.agents/skills/<name>/` and add a `SKILL.md` file:
+
+```text
+.agents/skills/
+  enforce-style/
+    SKILL.md
+    reference/
+      style-guide.md
+```
+
+Minimum frontmatter:
+
+```yaml
+---
+name: enforce-style
+description: "Apply team style checks before submitting code"
+args: "<task-id>"   # optional
+---
+```
+
+- `name`: user-facing skill name
+- `description`: used when generating editor command metadata
+- `args`: optional argument hint; agent-infra uses it when generating slash commands for supported AI TUIs
+
+After adding the skill, run `update-agent-infra` again:
+
+| TUI | Command |
+|-----|---------|
+| Claude Code | `/update-agent-infra` |
+| Codex | `$update-agent-infra` |
+| Gemini CLI | `/{{project}}:update-agent-infra` |
+| OpenCode | `/update-agent-infra` |
+
+That refresh detects non-built-in skill directories in `.agents/skills/` and generates matching commands for Claude Code, Gemini CLI, and OpenCode automatically.
+
+### Sync custom skills from shared sources
+
+If you maintain reusable team skills outside the repository, declare them in `.agents/.airc.json`:
+
+```json
+{
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/private-skills" },
+      { "type": "local", "path": "~/team-skills" }
+    ]
+  }
+}
+```
+
+Expected source layout:
+
+```text
+~/private-skills/
+  enforce-style/
+    SKILL.md
+  release-check/
+    SKILL.md
+    reference/
+      checklist.md
+```
+
+Behavior:
+
+- Sources are applied in list order; later sources overwrite earlier custom sources when they define the same file
+- `type: "local"` is the only supported source type today; the structure leaves room for future source types
+- `~` in source paths is expanded to the current user's home directory
+
+### Sync behavior and conflict rules
+
+When `update-agent-infra` runs:
+
+- Manually created custom skills in `.agents/skills/` are protected from managed-file cleanup
+- Files synced from external custom sources are copied into `.agents/skills/`
+- For synced skills that still exist in a configured source, files removed from the source are also removed locally during the next sync
+- Built-in skills always win over custom sources; if a source defines a skill with the same name as a built-in skill, agent-infra skips that custom source skill instead of overriding the built-in one
+- If you truly need to replace a built-in skill or command, use the existing `ejected` mechanism and own that file in the project
+
+## Custom TUI Configuration
+
+Use the top-level `.agents/.airc.json` `customTUIs` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom TUI directory.
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `name` | Yes | Display name shown in reports and next-step guidance, for example `Acme TUI`. |
+| `dir` | Yes | Command directory relative to the project root, for example `.acme/commands`. The path must stay inside the project root. |
+| `invoke` | Yes | User-facing command template used in next-step guidance. |
+
+Supported `invoke` placeholders:
+
+| Placeholder | Replaced with | Example |
+|-------------|---------------|---------|
+| `${skillName}` | The skill command name, such as `review-task` or `commit`. | `acme ${skillName}` -> `acme review-task` |
+| `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
+
+Non-namespaced custom TUI:
+
+```json
+{
+  "customTUIs": [
+    {
+      "name": "Acme TUI",
+      "dir": ".acme/commands",
+      "invoke": "acme ${skillName}"
+    }
+  ]
+}
+```
+
+Namespaced custom TUI:
+
+```json
+{
+  "project": "agent-infra",
+  "customTUIs": [
+    {
+      "name": "Internal Gemini",
+      "dir": ".internal-gemini/commands",
+      "invoke": "/${projectName}:${skillName}"
+    }
+  ]
+}
+```
+
+`customTUIs` should contain one entry per custom TUI. To let `update-agent-infra` generate command files for custom skills, keep at least one existing command file in `dir` that references a built-in skill path such as `.agents/skills/analyze-task/SKILL.md`; agent-infra uses that file as the format reference.
+
 <a id="prebuilt-workflows"></a>
 
 ## Prebuilt Workflows
@@ -372,7 +566,7 @@ The simplest end-to-end delivery loop looks like this:
 
 ```text
 import-issue #42                    Import task from GitHub Issue
-(or: create-task "add dark mode")   Or create a task from a description
+(or: create-task "add dark mode")   Or create a task from a description; Issue creation cascades when the platform rule supports it
          |
          |  --> get task ID, e.g. T1
          v
@@ -418,7 +612,24 @@ The generated `.agents/.airc.json` file is the central contract between the boot
   "project": "my-project",
   "org": "my-org",
   "language": "en",
-  "templateVersion": "v0.5.2",
+  "templateVersion": "v0.5.9",
+  "templates": {
+    "sources": [
+      { "type": "local", "path": "~/private-templates" }
+    ]
+  },
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/private-skills" }
+    ]
+  },
+  "customTUIs": [
+    {
+      "name": "Acme TUI",
+      "dir": ".acme/commands",
+      "invoke": "acme ${skillName}"
+    }
+  ],
   "files": {
     "managed": [
       ".agents/workspace/README.md",
@@ -447,7 +658,36 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 | `org` | GitHub organization or owner used by generated metadata and links. |
 | `language` | Primary project language or locale used by rendered templates. |
 | `templateVersion` | Installed template version for future upgrades and drift tracking. |
+| `templates` | Optional external template overlay configuration. |
+| `templates.sources` | Optional ordered list of external template sources. Only `type: "local"` is supported today. |
+| `skills` | Optional custom skill sync configuration. |
+| `skills.sources` | Optional ordered list of external custom skill sources. Only `type: "local"` is supported today. |
+| `customTUIs` | Optional top-level list of custom AI TUI adapters. |
 | `files` | Per-path update strategy configuration for managed, merged, and ejected files. |
+
+### External template and skill sources
+
+Use external sources when your team maintains private platform templates, private rules, or shared custom skills outside this repository. You can configure them during `agent-infra init` or later by editing `.agents/.airc.json`:
+
+```json
+{
+  "templates": {
+    "sources": [
+      { "type": "local", "path": "~/private-templates" },
+      { "type": "local", "path": "~/team-overrides/templates" }
+    ]
+  },
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/private-skills" }
+    ]
+  }
+}
+```
+
+Template source precedence is built-in templates first, then external sources as supplements. External files with the same path as built-in templates are ignored and reported in `templateSources.conflicts`; between external sources, later entries override earlier entries and conflicts are also reported. Skill sources use the same local-source shape, but custom skills cannot replace built-in skills.
+
+External template files and skill scripts can include executable JavaScript or shell commands that AI workflows may run. Only use trusted local paths.
 
 <a id="file-management-strategies"></a>
 

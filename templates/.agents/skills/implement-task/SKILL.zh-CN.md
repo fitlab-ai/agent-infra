@@ -39,7 +39,7 @@ description: "根据技术方案实施任务并输出报告"
 
 ### 3. 收窄里程碑
 
-如果 task.md 中存在有效的 `issue_number`，按 `.agents/rules/milestone-inference.md` 的「阶段 2：`implement-task`」收窄 Issue milestone。执行前先读取该文件。
+如果 task.md 中存在有效的 `issue_number`，执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测；再读取 `.agents/rules/milestone-inference.md`，按其中的「阶段 2：`implement-task`」收窄 Issue milestone；如果 `has_triage=false`，则保持原 milestone 不变。
 
 ### 4. 确定输入方案与实现轮次
 
@@ -81,7 +81,7 @@ description: "根据技术方案实施任务并输出报告"
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新 `.agents/workspace/active/{task-id}/task.md`：
@@ -91,12 +91,12 @@ date "+%Y-%m-%d %H:%M:%S"
 - 审查 `## 需求` 段落，仅把本轮已由代码实现且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
 - 记录 Round `{implementation-round}` 的 `{implementation-artifact}`
 - 追加：
-  `- {yyyy-MM-dd HH:mm:ss} — **Implementation (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {implementation-artifact}`
+  `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Implementation (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {implementation-artifact}`
 
-如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续；执行前先读取 `.agents/rules/issue-sync.md`）：
-- 设置 `status: in-progress`，并按 `.agents/rules/issue-sync.md` 的 `in:` label 同步规则，基于分支改动精修 `in:` label（有映射时可增可删，无映射时仅补充）
-- 同步 `## 需求` 中已勾选项到 Issue body，并发布 `{implementation-artifact}` 评论
-- 创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论（按 issue-sync.md 的 task.md 评论同步规则）
+如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续；执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测）：
+- 按 issue-sync.md 设置 `status: in-progress`
+- 创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记（按 issue-sync.md 的 task.md 评论同步规则）
+- 发布 `{implementation-artifact}` 评论
 
 ### 10. 完成校验
 
@@ -117,7 +117,7 @@ node .agents/scripts/validate-artifact.js gate implement-task .agents/workspace/
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。输出格式见 `reference/output-template.md`。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。输出格式见 `reference/output-template.md`。
 
 ## 完成检查清单
 
@@ -125,7 +125,7 @@ node .agents/scripts/validate-artifact.js gate implement-task .agents/workspace/
 - [ ] 已创建 `{implementation-artifact}`
 - [ ] 所有必需测试通过
 - [ ] 已更新 task.md 并追加 Activity Log
-- [ ] 已向用户展示所有 TUI 格式的下一步命令
+- [ ] 已向用户展示所有 TUI 格式的下一步命令（含自定义 TUI）
 
 ## 停止
 

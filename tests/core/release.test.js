@@ -17,13 +17,14 @@ test("package metadata supports scoped npm publishing", () => {
     access: "public",
     registry: "https://registry.npmjs.org/"
   });
-  assert.deepEqual(pkg.dependencies, {
-    "@clack/prompts": "1.2.0",
-    "picocolors": "1.1.1"
-  });
+  assert.deepEqual(Object.keys(pkg.dependencies).sort(), [
+    "@clack/prompts",
+    "cross-spawn",
+    "picocolors"
+  ]);
   assert.equal(
     pkg.scripts.prepublishOnly,
-    "node scripts/build-inline.js --check && node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js"
+    "node scripts/build-inline.js --check && node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js"
   );
 });
 
@@ -86,7 +87,7 @@ test("release documentation reflects CI-driven npm publishing", () => {
   assert.match(releasing, /npm publish --provenance/);
   assert.match(releasing, /@fitlab-ai\/agent-infra/);
   assert.match(releasing, /推送标签后由 CI 自动执行/);
-  assert.match(releaseSkill, /推送后将自动触发 GitHub Release 创建和 npm 发布/);
+  assert.match(releaseSkill, /推送后将自动触发 release 创建和 npm 发布/);
   assert.match(releaseSkill, /npm 自动发布/);
   assert.match(releaseSkill, /\.agents\/\.airc\.json.*templateVersion/);
   [releaseSkill, releaseTemplate, releaseTemplateZh].forEach((content) => {

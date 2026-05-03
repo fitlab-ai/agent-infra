@@ -108,7 +108,7 @@
 | `status:` | Yes | — | PR 有自身状态流转（Open / Draft / Merged / Closed）；Issue 使用 `status:` label 标记等待反馈、已确认等项目管理状态 |
 | `in:` | Yes | Yes | Issue 和 PR 均可按模块筛选 |
 
-默认 GitHub 配置下，可使用 `/init-labels` 命令一次性创建标准 labels。
+使用 `/init-labels` 命令可通过平台适配器一次性创建标准 labels。
 
 ## 私有平台扩展
 
@@ -119,6 +119,127 @@
 3. 将这些自定义规则文件加入 `.agents/.airc.json` 的 `files.ejected`，避免后续执行 `agent-infra update` 时被覆盖。
 4. 如果你维护的是模板源码分支或私有 fork，需要先补齐对应的 `.{platform}.` 模板变体，再把该平台标识加入模板同步逻辑。
 5. 在正式推广前，先用一个测试任务完整验证工作流和 gate 校验。
+
+## 外部模板与 Skill 源
+
+团队可以在 `.agents/.airc.json` 中配置外部模板源和共享 skill 源，用于接入私有平台模板、私有规则和团队维护的自定义 skill：
+
+```json
+{
+  "templates": {
+    "sources": [
+      { "type": "local", "path": "~/private-templates" }
+    ]
+  },
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/private-skills" }
+    ]
+  }
+}
+```
+
+模板源优先级为内置模板优先，外部模板只做补充；多个外部模板源之间，后面的 source 覆盖前面的 source。同步报告会在 `templateSources.conflicts` 中列出被忽略的同名文件。外部模板和 skill 可能包含会被 AI 工作流执行的脚本，只配置可信路径。
+
+## 自定义 Skills
+
+项目可以在内置任务工作流之外增加自己的 skill。
+
+### 项目内本地 skill
+
+在 `.agents/skills/<name>/` 下创建目录，并添加 `SKILL.md`：
+
+```text
+.agents/skills/
+  enforce-style/
+    SKILL.md
+    reference/
+      style-guide.md
+```
+
+推荐 frontmatter：
+
+```yaml
+---
+name: enforce-style
+description: "在代码审查前应用团队风格规范"
+args: "<task-id>"   # 可选
+---
+```
+
+新增或修改自定义 skill 后，再执行一次 `update-agent-infra`。同步过程会自动检测非内置 skill，并为 Claude Code、Gemini CLI、OpenCode 生成对应命令。
+
+### 共享 skill 源
+
+如需复用团队集中维护的 skill，可在 `.agents/.airc.json` 中配置：
+
+```json
+{
+  "skills": {
+    "sources": [
+      { "type": "local", "path": "~/private-skills" }
+    ]
+  }
+}
+```
+
+每个 source 都应镜像 `.agents/skills/` 的目录结构，并在每个 skill 目录根部提供 `SKILL.md`。
+
+### 同步行为
+
+- `.agents/skills/` 中手动创建的项目自定义 skill 不会被 managed 文件清理删除
+- 多个 source 按声明顺序应用；后面的自定义 source 会覆盖前面的自定义 source 文件
+- 对于仍存在于配置 source 中的 skill，如果源里删掉文件，下次同步时会删除本地对应残留文件
+- 自定义 source 不能覆盖内置 skill；如果与内置 skill 同名，会跳过该 source skill
+- 如果项目必须接管某个内置 skill 或命令，请使用 `files.ejected`
+
+## 自定义 TUI 配置
+
+当团队使用的 AI TUI 不属于内置命令目标时，可以在 `.agents/.airc.json` 顶层配置 `customTUIs` 数组。该配置用于让 agent-infra 输出正确的下一步命令，并通过学习自定义 TUI 目录中的既有命令文件，为项目自定义 skill 生成同格式命令。
+
+| 字段 | 必填 | 含义 |
+|------|------|------|
+| `name` | 是 | 报告和下一步提示中展示的工具名称，例如 `Acme TUI`。 |
+| `dir` | 是 | 相对项目根目录的命令目录，例如 `.acme/commands`。路径必须位于项目根目录内。 |
+| `invoke` | 是 | 面向用户展示的命令模板，用于生成下一步提示。 |
+
+`invoke` 支持的占位符：
+
+| 占位符 | 替换为 | 示例 |
+|--------|--------|------|
+| `${skillName}` | skill 命令名，例如 `review-task` 或 `commit`。 | `acme ${skillName}` -> `acme review-task` |
+| `${projectName}` | `.airc.json` 中的 `project` 值，适用于带命名空间的命令。 | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
+
+不带命名空间的自定义 TUI：
+
+```json
+{
+  "customTUIs": [
+    {
+      "name": "Acme TUI",
+      "dir": ".acme/commands",
+      "invoke": "acme ${skillName}"
+    }
+  ]
+}
+```
+
+带命名空间的自定义 TUI：
+
+```json
+{
+  "project": "agent-infra",
+  "customTUIs": [
+    {
+      "name": "Internal Gemini",
+      "dir": ".internal-gemini/commands",
+      "invoke": "/${projectName}:${skillName}"
+    }
+  ]
+}
+```
+
+`customTUIs` 每个条目对应一个自定义 TUI。若希望 `update-agent-infra` 为自定义 skill 生成命令文件，请在 `dir` 中保留至少一个引用内置 skill 路径的既有命令文件，例如 `.agents/skills/analyze-task/SKILL.md`；agent-infra 会以该文件作为格式参考。
 
 ## Skill 编写规范
 

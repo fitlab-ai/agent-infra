@@ -25,7 +25,7 @@ description: "导入 Code Scanning 告警并创建修复任务"
 - `rule`：规则信息（id、severity、description、security_severity_level）
 - `tool`：扫描工具信息（name、version）
 - `most_recent_instance`：位置（path、start_line、end_line）、消息
-- `html_url`：GitHub 告警链接
+- `html_url`：平台告警链接
 
 ### 2. 创建任务目录和文件
 
@@ -47,13 +47,13 @@ tool: <tool-name>
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新 task.md：`current_step` -> `requirement-analysis`。
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Import Code Scanning Alert** by {agent} — Code Scanning alert #{alert-number} imported
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Import Code Scanning Alert** by {agent} — Code Scanning alert #{alert-number} imported
   ```
 
 ### 4. 完成校验
@@ -75,7 +75,7 @@ node .agents/scripts/validate-artifact.js gate import-codescan .agents/workspace
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 
 ```
 Code Scanning 告警 #{alert-number} 已导入。
@@ -101,7 +101,7 @@ Code Scanning 告警 #{alert-number} 已导入。
 - [ ] 更新了 task.md 中的 `current_step` 为 requirement-analysis
 - [ ] 更新了 task.md 中的 `updated_at` 为当前时间
 - [ ] 追加了 Activity Log 条目到 task.md
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
+- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，含自定义 TUI，不要筛选）
 
 ## 错误处理
 

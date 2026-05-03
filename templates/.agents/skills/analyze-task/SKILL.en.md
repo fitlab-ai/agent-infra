@@ -41,7 +41,7 @@ Read `task.md` carefully to understand:
 - currently known affected files and constraints
 
 If `task.md` contains these source fields, also read the corresponding source information:
-- `issue_number` - GitHub Issue
+- `issue_number` - Issue
 - `codescan_alert_number` - Code Scanning alert
 - `security_alert_number` - Dependabot alert
 
@@ -70,7 +70,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 
 ## Requirement Source
 
-**Source type**: {User description / GitHub Issue / Code Scanning / Dependabot / Other}
+**Source type**: {User description / Issue / Code Scanning / Dependabot / Other}
 **Source summary**:
 > {Task source or key context}
 
@@ -103,7 +103,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update `.agents/workspace/active/{task-id}/task.md`:
@@ -115,14 +115,14 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - Mark requirement-analysis as complete in workflow progress and include the actual round when the task template supports it
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Requirement Analysis (Round {N})** by {agent} — Analysis completed → {analysis-artifact}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Requirement Analysis (Round {N})** by {agent} — Analysis completed → {analysis-artifact}
   ```
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Read `.agents/rules/issue-sync.md` before syncing
-- Set `status: pending-design-work`
+- Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
+- Set `status: pending-design-work` by following issue-sync.md
+- Create or update the task comment marker defined in `.agents/rules/issue-sync.md` (follow the task.md comment sync rule in issue-sync.md)
 - Publish the `{analysis-artifact}` comment
-- Create or update the `<!-- sync-issue:{task-id}:task -->` comment (follow the task.md comment sync rule in issue-sync.md)
 
 ### 7. Verification Gate
 
@@ -143,7 +143,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 Output format:
 ```
@@ -172,7 +172,7 @@ Next step - create technical plan:
 - [ ] Updated `assigned_to` in task.md
 - [ ] Appended an Activity Log entry to task.md
 - [ ] Marked requirement-analysis as complete in workflow progress
-- [ ] Informed the user of the next step (must include all TUI command formats; do not filter)
+- [ ] Informed the user of the next step (must include all TUI command formats, including any custom TUIs; do not filter)
 - [ ] **Did not modify any business code**
 
 ## STOP

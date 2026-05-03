@@ -1,0 +1,98 @@
+name: Sandbox Linux E2E
+
+on:
+  pull_request:
+    paths:
+      - "bin/cli.js"
+      - "lib/sandbox/**"
+      - "install.sh"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/sandbox-linux-e2e.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "bin/cli.js"
+      - "lib/sandbox/**"
+      - "install.sh"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/sandbox-linux-e2e.yml"
+  workflow_dispatch:
+
+jobs:
+  sandbox-linux:
+    name: Linux native Docker sandbox lifecycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Link local CLI
+        run: npm link
+
+      - name: Prepare host state
+        run: |
+          mkdir -p "$HOME/.claude"
+          cat > "$HOME/.claude/.credentials.json" <<'JSON'
+          {
+            "accessToken": "stub-access-token",
+            "refreshToken": "stub-refresh-token",
+            "expiresAt": "2999-01-01T00:00:00.000Z",
+            "scopes": ["user:profile", "user:sessions:claude_code"]
+          }
+          JSON
+
+      - name: Prepare test repository
+        run: |
+          mkdir -p /tmp/test-repo/.agents
+          cd /tmp/test-repo
+          git init
+          git config user.name "agent-infra CI"
+          git config user.email "agent-infra-ci@example.com"
+          git branch -M main
+          cat > .agents/.airc.json <<'JSON'
+          {
+            "project": "linux-e2e",
+            "org": "fitlab-ai",
+            "sandbox": {
+              "runtimes": ["node20"],
+              "tools": ["claude-code"]
+            }
+          }
+          JSON
+          printf '# linux e2e\n' > README.md
+          git add README.md .agents/.airc.json
+          git commit -m "chore: prepare linux sandbox e2e fixture"
+
+      - name: Run sandbox lifecycle
+        working-directory: /tmp/test-repo
+        run: |
+          docker info
+          ai sandbox create test-branch main
+          ai sandbox ls
+          container="$(docker ps --filter "label=linux-e2e.sandbox.branch=test-branch" --format '{{.Names}}' | head -n 1)"
+          test -n "$container"
+          docker exec "$container" sh -lc 'echo hello && node --version'
+
+      - name: Cleanup sandbox artifacts
+        if: always()
+        run: |
+          docker ps -aq --filter "label=linux-e2e.sandbox" | xargs -r docker rm -f
+          docker images -q --filter "label=linux-e2e.sandbox" | xargs -r docker rmi -f
+          git -C /tmp/test-repo worktree remove --force "$HOME/.agent-infra/worktrees/linux-e2e/test-branch" 2>/dev/null || true
+          git -C /tmp/test-repo branch -D test-branch 2>/dev/null || true
+          rm -rf "$HOME/.agent-infra/worktrees/linux-e2e" "$HOME/.agent-infra/sandboxes"

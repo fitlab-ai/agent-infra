@@ -1,8 +1,26 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+// =====================================================================
+// CRITICAL: any test that spawns real `git` commands MUST use gitSafeEnv()
+// ---------------------------------------------------------------------
+// When `npm test` is invoked from a context that exports GIT_DIR,
+// GIT_INDEX_FILE, GIT_WORK_TREE, or similar variables, child `git`
+// processes inherit those vars and operate on the outer repository even
+// when `cwd` points at a temp directory.
+//
+// Real-world incident on this repo (2026-04-29): a sandbox signing-key
+// test leaked LOCAL-KEY-123 and core.bare=true into agent-infra's own
+// .git/config, breaking GPG signing and repository discovery.
+//
+// Tests that exec/spawn `git` must pass env: gitSafeEnv(), or use
+// initIsolatedGitRepo() for repo bootstrap.
+// =====================================================================
+
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
+const realPlatform = process.platform;
 
 function filePath(relativePath) {
   return path.join(rootDir, relativePath);
@@ -14,6 +32,127 @@ function exists(relativePath) {
 
 function read(relativePath) {
   return fs.readFileSync(filePath(relativePath), "utf8");
+}
+
+function pathWithPrependedBin(binDir, envPath = process.env.PATH || "") {
+  return [binDir, envPath].filter(Boolean).join(path.delimiter);
+}
+
+function envWithPrependedPath(env, binDir) {
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") || "PATH";
+  const nextPath = pathWithPrependedBin(binDir, env[pathKey] || "");
+  return {
+    ...env,
+    [pathKey]: nextPath,
+    PATH: nextPath
+  };
+}
+
+function gitSafeEnv(extra = {}) {
+  const env = { ...process.env, ...extra };
+  for (const key of [
+    "GIT_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_WORK_TREE",
+    "GIT_PREFIX",
+    "GIT_AUTHOR_DATE",
+    "GIT_COMMITTER_DATE",
+    "GIT_NAMESPACE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR"
+  ]) {
+    delete env[key];
+  }
+  return env;
+}
+
+function withGitSafeProcessEnv(fn, extra = {}) {
+  const previousEnv = process.env;
+  process.env = gitSafeEnv(extra);
+
+  try {
+    const result = fn();
+    if (result && typeof result.then === "function") {
+      return result.finally(() => {
+        process.env = previousEnv;
+      });
+    }
+    process.env = previousEnv;
+    return result;
+  } catch (error) {
+    process.env = previousEnv;
+    throw error;
+  }
+}
+
+function initIsolatedGitRepo(repoRoot, { remote = null } = {}) {
+  const env = gitSafeEnv();
+  const initResult = spawnSync("git", ["init", "-q", "-b", "main"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env
+  });
+  if (initResult.status !== 0) {
+    throw new Error(`git init failed: ${initResult.stderr}`);
+  }
+
+  if (remote) {
+    const remoteResult = spawnSync("git", ["remote", "add", "origin", remote], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env
+    });
+    if (remoteResult.status !== 0) {
+      throw new Error(`git remote add failed: ${remoteResult.stderr}`);
+    }
+  }
+}
+
+function supportsPosixModeBits() {
+  return realPlatform !== "win32";
+}
+
+function assertModeBits(filePathname, expectedMode) {
+  if (!supportsPosixModeBits()) {
+    return;
+  }
+
+  const actualMode = fs.statSync(filePathname).mode & 0o777;
+  assertEqual(actualMode, expectedMode);
+}
+
+function onPlatforms(...allowed) {
+  return {
+    skip: allowed.includes(process.platform)
+      ? false
+      : `requires ${allowed.join("/")} (current: ${process.platform})`
+  };
+}
+
+function assertEqual(actual, expected) {
+  if (actual !== expected) {
+    throw new Error(`Expected mode ${expected.toString(8)}, got ${actual.toString(8)}`);
+  }
+}
+
+function writeNodeCommandShim(commandPath, scriptPath) {
+  fs.mkdirSync(path.dirname(commandPath), { recursive: true });
+  if (process.platform === "win32") {
+    fs.writeFileSync(
+      `${commandPath}.cmd`,
+      `@ECHO OFF\r\n"${process.execPath}" "${scriptPath}" %*\r\n`,
+      "utf8"
+    );
+    return `${commandPath}.cmd`;
+  }
+
+  fs.writeFileSync(
+    commandPath,
+    `#!/bin/sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`,
+    "utf8"
+  );
+  fs.chmodSync(commandPath, 0o755);
+  return commandPath;
 }
 
 function listFilesRecursive(relativeDir) {
@@ -186,11 +325,6 @@ const commandSpecs = {
     en: "Complete task $1.",
     zh: "完成任务 $1。"
   },
-  "create-issue": {
-    usage: "<task-id>",
-    en: "Create Issue for task $1.",
-    zh: "为任务 $1 创建 Issue。"
-  },
   "create-pr": {
     usage: "[task-id] [target-branch]",
     en: "Create PR: $ARGUMENTS",
@@ -222,6 +356,7 @@ const commandSpecs = {
     en: "Design plan for task $1.",
     zh: "为任务 $1 设计方案。"
   },
+  "post-release": {},
   "refine-task": {
     usage: "<task-id>",
     en: "Refine task $1.",
@@ -260,15 +395,24 @@ const commandSpecs = {
 export {
   buildCommandSyncFiles,
   commandSpecs,
+  envWithPrependedPath,
   escapeRegExp,
   exists,
   filePath,
+  gitSafeEnv,
+  assertModeBits,
+  initIsolatedGitRepo,
   langTemplate,
   listFilesRecursive,
   listSkillNames,
   loadFreshEsm,
   parseFrontmatter,
+  pathWithPrependedBin,
   read,
   renderPlaceholders,
+  onPlatforms,
+  supportsPosixModeBits,
+  withGitSafeProcessEnv,
+  writeNodeCommandShim,
   skillDocPaths
 };

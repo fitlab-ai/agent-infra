@@ -92,15 +92,20 @@ function setTimestamp(targetPath, isoString) {
 }
 
 function formatLocalTimestamp(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const absoluteOffsetMinutes = Math.abs(offsetMinutes);
+
   return [
     date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0')
+    pad(date.getMonth() + 1),
+    pad(date.getDate())
   ].join('-') + ' ' + [
-    String(date.getHours()).padStart(2, '0'),
-    String(date.getMinutes()).padStart(2, '0'),
-    String(date.getSeconds()).padStart(2, '0')
-  ].join(':');
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds())
+  ].join(':') + `${sign}${pad(Math.floor(absoluteOffsetMinutes / 60))}:${pad(absoluteOffsetMinutes % 60)}`;
 }
 
 function read(relativePath) {
@@ -346,14 +351,14 @@ test('getTaskTimestamp prefers frontmatter updated_at over file mtime', () => {
   try {
     const taskDir = writeFlatTask(workspaceDir, 'active', 'TASK-20260409-020202', {
       title: 'frontmatter wins',
-      updatedAt: '2026-04-09 02:02:02'
+      updatedAt: '2026-04-09T02:02:02+08:00'
     });
 
     setTimestamp(path.join(taskDir, 'task.md'), '2026-04-09T10:00:00Z');
 
     const timestamp = getTaskTimestamp(taskDir);
     assert.deepEqual(timestamp, {
-      value: '2026-04-09 02:02:02',
+      value: '2026-04-09T02:02:02+08:00',
       source: 'frontmatter'
     });
   } finally {

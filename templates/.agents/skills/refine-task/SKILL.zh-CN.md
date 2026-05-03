@@ -51,21 +51,19 @@ description: "处理代码审查反馈并修复问题"
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新 task.md：
 - 审查 `## 需求` 段落，仅把因本轮修复而新满足且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
 - 追加：
-  `- {yyyy-MM-dd HH:mm:ss} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues → {refinement-artifact}`
+  `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues → {refinement-artifact}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
-- 执行前先读取 `.agents/rules/issue-sync.md`
-- 设置 `status: in-progress`
-- 按 `.agents/rules/issue-sync.md` 的 `in:` label 同步规则，基于分支改动精修 `in:` label（有映射时可增可删，无映射时仅补充）
-- 同步 `## 需求` 中已勾选项到 Issue body
+- 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
+- 按 issue-sync.md 设置 `status: in-progress`
+- 创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记（按 issue-sync.md 的 task.md 评论同步规则）
 - 发布 `{refinement-artifact}` 评论
-- 创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论（按 issue-sync.md 的 task.md 评论同步规则）
 
 ### 7. 完成校验
 
@@ -86,7 +84,7 @@ node .agents/scripts/validate-artifact.js gate refine-task .agents/workspace/act
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 
 输出修复摘要后，展示下一步：
 

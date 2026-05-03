@@ -70,6 +70,8 @@ Use this canonical comment body template:
 
 Fetch existing comments through the Issues comments API, not the dedicated PR comments API.
 
+Before this section runs, the caller must resolve `upstream_repo` by following `.agents/rules/issue-pr-commands.md` / `.agents/rules/issue-sync.md`.
+
 Process:
 1. Fetch existing PR comments and locate the comment ID that starts with `<!-- sync-pr:{task-id}:summary -->`
 2. When rendering the body, always write the current `git rev-parse HEAD` result into `<!-- last-commit: {git-head-sha} -->`
@@ -80,7 +82,7 @@ Process:
 When updating an existing comment, use:
 
 ```bash
-gh api "repos/{owner}/{repo}/issues/comments/{comment-id}" -X PATCH -f body="$(cat <<'EOF'
+gh api "repos/$upstream_repo/issues/comments/{comment-id}" -X PATCH -f body="$(cat <<'EOF'
 {comment-body}
 EOF
 )"

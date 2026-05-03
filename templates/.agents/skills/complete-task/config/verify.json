@@ -23,13 +23,14 @@
     "completion-checklist": {
       "require_all_checked": true
     },
-    "github-sync": {
+    "platform-sync": {
       "when": "issue_number_exists",
       "expected_comment_marker": "<!-- sync-issue:{task-id}:summary -->",
       "verify_task_comment_content": true,
       "sync_checked_requirements": true,
       "verify_issue_type": true,
-      "verify_milestone": true
+      "verify_milestone": true,
+      "expected_comment_marker_key": "summary"
     }
   }
 }

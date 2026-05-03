@@ -47,17 +47,17 @@ description: "审查任务实现并输出代码审查报告"
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新 task.md，并追加：
-`- {yyyy-MM-dd HH:mm:ss} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n} → {artifact-filename}`
+`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n} → {artifact-filename}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
-- 执行前先读取 `.agents/rules/issue-sync.md`
-- 设置 `status: in-progress`
+- 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
+- 按 issue-sync.md 设置 `status: in-progress`
+- 创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记（按 issue-sync.md 的 task.md 评论同步规则）
 - 发布 `{review-artifact}` 评论
-- 创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论（按 issue-sync.md 的 task.md 评论同步规则）
 
 ### 7. 完成校验
 
@@ -86,7 +86,7 @@ node .agents/scripts/validate-artifact.js gate review-task .agents/workspace/act
 
 > 完整的 4 分支输出模板、判断规则和禁止条款见 `reference/output-templates.md`。向用户汇报审查结论前先读取 `reference/output-templates.md`。
 
-向用户展示下一步时，必须包含所有 TUI 命令格式。
+向用户展示下一步时，必须包含所有 TUI 命令格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 
 ## 完成检查清单
 
@@ -94,7 +94,7 @@ node .agents/scripts/validate-artifact.js gate review-task .agents/workspace/act
 - [ ] 已创建 `{review-artifact}`
 - [ ] 已更新 task.md 并追加 Activity Log
 - [ ] 用户输出中只选择了一个审查结论分支
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
+- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，含自定义 TUI，不要筛选）
 
 ## 注意事项
 

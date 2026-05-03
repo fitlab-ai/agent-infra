@@ -6,11 +6,131 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { filePath, loadFreshEsm } from "../helpers.js";
+import {
+  assertModeBits,
+  envWithPrependedPath,
+  filePath,
+  gitSafeEnv,
+  loadFreshEsm,
+  onPlatforms,
+  withGitSafeProcessEnv
+} from "../helpers.js";
+import { restoreTerminal, runInteractive } from "../../lib/sandbox/shell.js";
 
-function modeBits(filePath) {
-  return fs.statSync(filePath).mode & 0o777;
+function restoreDockerContext(previousValue) {
+  if (previousValue === undefined) {
+    delete process.env.DOCKER_CONTEXT;
+  } else {
+    process.env.DOCKER_CONTEXT = previousValue;
+  }
 }
+
+function withTTY(value, fn) {
+  const descriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+
+  try {
+    Object.defineProperty(process.stdout, "isTTY", { configurable: true, value });
+    return fn();
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(process.stdout, "isTTY", descriptor);
+    } else {
+      delete process.stdout.isTTY;
+    }
+  }
+}
+
+function captureStdoutWrite(fn) {
+  const originalWrite = process.stdout.write;
+  let output = "";
+
+  try {
+    process.stdout.write = (chunk, ...args) => {
+      output += String(chunk);
+      const callback = args.find((arg) => typeof arg === "function");
+      callback?.();
+      return true;
+    };
+    fn();
+    return output;
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+}
+
+function withFakeStty(exitCode, fn) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fake-stty-"));
+  const sttyPath = path.join(tmpDir, "stty");
+  const previousPath = process.env.PATH;
+
+  try {
+    fs.writeFileSync(
+      sttyPath,
+      `#!/bin/sh\nexit ${exitCode}\n`,
+      "utf8"
+    );
+    fs.chmodSync(sttyPath, 0o755);
+    process.env.PATH = `${tmpDir}${path.delimiter}${previousPath ?? ""}`;
+    return fn();
+  } finally {
+    if (previousPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = previousPath;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+test("runInteractive emits terminal reset on normal exit", () => {
+  const output = withFakeStty(0, () => withTTY(true, () => captureStdoutWrite(() => {
+    const status = runInteractive(process.execPath, ["-e", "process.exit(0)"]);
+
+    assert.equal(status, 0);
+  })));
+
+  assert.match(output, /\x1b\[\?1049l/);
+  assert.match(output, /\x1b\[\?25h/);
+  assert.match(output, /\x1b>/);
+  assert.match(output, /\x1b\[\?1006l/);
+});
+
+test("runInteractive emits terminal reset on non-zero exit", () => {
+  const output = withFakeStty(0, () => withTTY(true, () => captureStdoutWrite(() => {
+    const status = runInteractive(process.execPath, ["-e", "process.exit(7)"]);
+
+    assert.equal(status, 7);
+  })));
+
+  assert.match(output, /\x1b\[\?1049l/);
+});
+
+test("runInteractive emits terminal reset when spawn fails", () => {
+  const output = withFakeStty(0, () => withTTY(true, () => captureStdoutWrite(() => {
+    const status = runInteractive("agent-infra-missing-command", []);
+
+    assert.notEqual(status, 0);
+    assert.equal(status, 1);
+  })));
+
+  assert.match(output, /\x1b\[\?1049l/);
+});
+
+test("restoreTerminal is a no-op when stdout is not a TTY", () => {
+  const output = withTTY(false, () => captureStdoutWrite(() => {
+    restoreTerminal();
+  }));
+
+  assert.equal(output, "");
+});
+
+test("restoreTerminal does not throw when stty is unavailable", { skip: process.platform === "win32" }, () => {
+  const output = withFakeStty(1, () => withTTY(true, () => captureStdoutWrite(() => {
+    assert.doesNotThrow(() => restoreTerminal());
+  })));
+
+  assert.match(output, /\x1b\[\?1049l/);
+});
 
 test("agent-infra sandbox help is wired into the main CLI", () => {
   const output = execFileSync(process.execPath, [filePath("bin/cli.js"), "sandbox", "--help"], {
@@ -54,7 +174,7 @@ test("sandbox create fails before preparing a temporary Dockerfile when Claude c
   try {
     fs.mkdirSync(repoDir, { recursive: true });
     fs.mkdirSync(homeDir, { recursive: true });
-    execSync("git init", { cwd: repoDir, stdio: "pipe" });
+    execSync("git init", { cwd: repoDir, env: gitSafeEnv(), stdio: "pipe" });
     fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
     fs.writeFileSync(
       path.join(repoDir, ".agents", ".airc.json"),
@@ -69,7 +189,7 @@ test("sandbox create fails before preparing a temporary Dockerfile when Claude c
         [filePath("bin/cli.js"), "sandbox", "create", "feature/no-credentials"],
         {
           cwd: repoDir,
-          env: { ...process.env, HOME: homeDir },
+          env: gitSafeEnv({ HOME: homeDir }),
           encoding: "utf8",
           stdio: ["ignore", "pipe", "pipe"]
         }
@@ -95,13 +215,71 @@ test("sandbox create fails before preparing a temporary Dockerfile when Claude c
   }
 });
 
+test("sandbox vm stop warns instead of stopping when OrbStack is not running", onPlatforms("darwin", "linux"), async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-vm-stop-orb-"));
+  const repoDir = path.join(tmpDir, "repo");
+  const binDir = path.join(tmpDir, "bin");
+  const orbPath = path.join(binDir, "orb");
+  const orbLogPath = path.join(tmpDir, "orb-log.txt");
+  const previousCwd = process.cwd();
+  const previousEnv = { ...process.env };
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+
+  try {
+    fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
+    fs.mkdirSync(binDir, { recursive: true });
+    execSync("git init", { cwd: repoDir, env: gitSafeEnv(), stdio: "pipe" });
+    fs.writeFileSync(
+      path.join(repoDir, ".agents", ".airc.json"),
+      JSON.stringify({
+        project: "demo",
+        sandbox: { engine: "orbstack" }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+    fs.writeFileSync(
+      orbPath,
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$1" >> "$ORB_LOG_PATH"
+if [ "$1" = "status" ]; then
+  exit 1
+fi
+exit 0
+`,
+      "utf8"
+    );
+    fs.chmodSync(orbPath, 0o755);
+
+    Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });
+    process.chdir(repoDir);
+    process.env = {
+      ...envWithPrependedPath(gitSafeEnv(), binDir),
+      HOME: tmpDir,
+      ORB_LOG_PATH: orbLogPath
+    };
+
+    const sandboxVm = await loadFreshEsm("lib/sandbox/commands/vm.js");
+    await sandboxVm.vm(["stop"]);
+
+    assert.deepEqual(fs.readFileSync(orbLogPath, "utf8").trim().split("\n"), ["status"]);
+  } finally {
+    process.chdir(previousCwd);
+    process.env = previousEnv;
+    if (originalPlatformDescriptor) {
+      Object.defineProperty(process, "platform", originalPlatformDescriptor);
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => {
   const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-config-"));
   const previousCwd = process.cwd();
 
   try {
-    execSync("git init", { cwd: tmpDir, stdio: "pipe" });
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
     fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
     fs.writeFileSync(
       path.join(tmpDir, ".agents", ".airc.json"),
@@ -110,7 +288,7 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     );
 
     process.chdir(tmpDir);
-    const config = sandboxConfig.loadConfig();
+    const config = withGitSafeProcessEnv(() => sandboxConfig.loadConfig());
 
     assert.equal(config.project, "demo");
     assert.equal(config.org, "fitlab-ai");
@@ -118,8 +296,68 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     assert.equal(config.imageName, "demo-sandbox:latest");
     assert.deepEqual(config.runtimes, ["node20"]);
     assert.deepEqual(config.tools, ["claude-code", "codex", "opencode", "gemini-cli"]);
+    assert.equal(config.engine, null);
     assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
     assert.equal(config.worktreeBase, path.join(process.env.HOME, ".agent-infra", "worktrees", "demo"));
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig preserves configured sandbox engine", async () => {
+  const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-config-"));
+  const previousCwd = process.cwd();
+
+  try {
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, ".agents", ".airc.json"),
+      JSON.stringify({
+        project: "demo",
+        org: "fitlab-ai",
+        sandbox: { engine: "orbstack" }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+
+    process.chdir(tmpDir);
+    const config = withGitSafeProcessEnv(() => sandboxConfig.loadConfig());
+
+    assert.equal(config.engine, "orbstack");
+    assert.deepEqual(config.runtimes, ["node20"]);
+    assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig rejects unsupported sandbox engine values", async () => {
+  const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-invalid-"));
+  const previousCwd = process.cwd();
+
+  try {
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, ".agents", ".airc.json"),
+      JSON.stringify({
+        project: "demo",
+        sandbox: { engine: "podman" }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+
+    process.chdir(tmpDir);
+
+    assert.throws(
+      () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
+      /invalid "sandbox\.engine" value "podman".*only affects macOS/s
+    );
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -132,9 +370,12 @@ test("loadConfig fails when .agents/.airc.json is missing", async () => {
   const previousCwd = process.cwd();
 
   try {
-    execSync("git init", { cwd: tmpDir, stdio: "pipe" });
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
     process.chdir(tmpDir);
-    assert.throws(() => sandboxConfig.loadConfig(), /No \.agents\/\.airc\.json found/);
+    assert.throws(
+      () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
+      /No \.agents\/\.airc\.json found/
+    );
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -317,13 +558,13 @@ test("sandbox exec enters tmux automatically for interactive shells", () => {
   const binDir = path.join(tmpDir, "bin");
   const logPath = path.join(tmpDir, "docker-log.jsonl");
   const dockerPath = path.join(binDir, "docker");
-  const dockerCmdPath = path.join(binDir, "docker.cmd");
+  const dockerJsPath = path.join(binDir, "docker.js");
 
   try {
     fs.mkdirSync(repoDir, { recursive: true });
     fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
     fs.mkdirSync(binDir, { recursive: true });
-    execSync("git init", { cwd: repoDir, stdio: "pipe" });
+    execSync("git init", { cwd: repoDir, env: gitSafeEnv(), stdio: "pipe" });
     fs.writeFileSync(
       path.join(repoDir, ".agents", ".airc.json"),
       JSON.stringify({ project: "demo", org: "fitlab-ai" }, null, 2) + "\n",
@@ -343,14 +584,21 @@ node -e 'require("fs").appendFileSync(process.argv[1], JSON.stringify(process.ar
     );
     fs.chmodSync(dockerPath, 0o755);
     fs.writeFileSync(
-      dockerCmdPath,
-      `@echo off
-if "%1"=="ps" (
-  echo demo-dev-agent-infra-feature-cli-generic-sandbox
-  exit /b 0
-)
-node -e "require('fs').appendFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)) + '\\n')" "%DOCKER_LOG_PATH%" %*
-`,
+      dockerJsPath,
+      [
+        "const fs = require('node:fs');",
+        "const args = process.argv.slice(2);",
+        "if (args[0] === 'ps') {",
+        "  process.stdout.write('demo-dev-agent-infra-feature-cli-generic-sandbox\\n');",
+        "  process.exit(0);",
+        "}",
+        "fs.appendFileSync(process.env.DOCKER_LOG_PATH, JSON.stringify(args) + '\\n');"
+      ].join("\n"),
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(binDir, "docker.cmd"),
+      `@ECHO OFF\r\n"${process.execPath}" "%~dp0docker.js" %*\r\n`,
       "utf8"
     );
 
@@ -360,10 +608,8 @@ node -e "require('fs').appendFileSync(process.argv[1], JSON.stringify(process.ar
       {
         cwd: repoDir,
         env: {
-          ...process.env,
+          ...envWithPrependedPath(gitSafeEnv(), binDir),
           HOME: tmpDir,
-          PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
-          Path: `${binDir}${path.delimiter}${process.env.Path ?? process.env.PATH}`,
           DOCKER_LOG_PATH: logPath,
           TERM_PROGRAM: "",
           TERM_PROGRAM_VERSION: "",
@@ -384,8 +630,12 @@ node -e "require('fs').appendFileSync(process.argv[1], JSON.stringify(process.ar
       "bash",
       "-c"
     ]);
-    assert.match(dockerCalls[0][5], /tmux has-session/);
-    assert.match(dockerCalls[0][5], /tmux new-session -t "\$SESSION"/);
+    if (process.platform === "win32") {
+      assert.equal(dockerCalls[0][5], "SESSION=work");
+    } else {
+      assert.match(dockerCalls[0][5], /tmux has-session/);
+      assert.match(dockerCalls[0][5], /tmux new-session -t "\$SESSION"/);
+    }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -883,10 +1133,8 @@ test("writeClaudeCredentialsFile creates secure shared credentials file", async 
 
   try {
     sandboxCreate.writeClaudeCredentialsFile(tmpDir, "demo", rawBlob);
-    if (process.platform !== "win32") {
-      assert.equal(modeBits(credentialsDir), 0o700);
-      assert.equal(modeBits(credentialsPath), 0o600);
-    }
+    assertModeBits(credentialsDir, 0o700);
+    assertModeBits(credentialsPath, 0o600);
     assert.equal(fs.readFileSync(credentialsPath, "utf8"), rawBlob);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1140,47 +1388,41 @@ test("sandbox command modules route docker calls through engine-aware helpers", 
   }
 });
 
-test("ensureWsl2Docker checks WSL and Docker Desktop integration", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
-  const checks = [];
-  const engineChecks = [];
-  const messages = [];
-
-  await sandboxEngine.ensureWsl2Docker({}, (message) => messages.push(message), {
-    runOkFn(cmd, args) {
-      checks.push([cmd, ...args]);
-      return cmd === "wsl.exe" && args[0] === "--status";
-    },
-    runOkEngineFn(engine, cmd, args) {
-      engineChecks.push([engine, cmd, ...args]);
-      return engine === "wsl2" && cmd === "docker" && args[0] === "info";
-    }
-  });
-
-  assert.deepEqual(checks, [["wsl.exe", "--status"]]);
-  assert.deepEqual(engineChecks, [["wsl2", "docker", "info"]]);
-  assert.deepEqual(messages, ["Checking Docker Desktop from WSL2..."]);
-});
-
 test("wsl2BackendStatus checks WSL2 and Docker without Colima", async () => {
   const sandboxVm = await loadFreshEsm("lib/sandbox/commands/vm.js");
   const checks = [];
-  const engineChecks = [];
 
   const status = sandboxVm.wsl2BackendStatus({
     runOkFn(cmd, args) {
       checks.push([cmd, ...args]);
-      return cmd === "wsl.exe" && args[0] === "--status";
-    },
-    runOkEngineFn(engine, cmd, args) {
-      engineChecks.push([engine, cmd, ...args]);
-      return engine === "wsl2" && cmd === "docker" && args[0] === "info";
+      return cmd === "wsl.exe" && (args[0] === "--status" || args[1] === "docker");
     }
   });
 
   assert.deepEqual(status, { wslAvailable: true, dockerAvailable: true });
-  assert.deepEqual(checks, [["wsl.exe", "--status"]]);
-  assert.deepEqual(engineChecks, [["wsl2", "docker", "info"]]);
+  assert.deepEqual(checks, [
+    ["wsl.exe", "--status"],
+    ["wsl.exe", "--", "docker", "info"]
+  ]);
+});
+
+test("WSL2 adapter checks WSL and Docker Desktop integration", async () => {
+  const { wsl2Adapter } = await loadFreshEsm("lib/sandbox/engines/wsl2.js");
+  const checks = [];
+  const messages = [];
+
+  await wsl2Adapter.ensure({}, (message) => messages.push(message), {
+    runOk(cmd, args) {
+      checks.push([cmd, ...args]);
+      return cmd === "wsl.exe" && (args[0] === "--status" || args[1] === "docker");
+    }
+  });
+
+  assert.deepEqual(checks, [
+    ["wsl.exe", "--status"],
+    ["wsl.exe", "--", "docker", "info"]
+  ]);
+  assert.deepEqual(messages, ["Checking Docker Desktop from WSL2..."]);
 });
 
 test("buildImage converts Docker build paths for WSL2", async () => {
@@ -1196,7 +1438,7 @@ test("buildImage converts Docker build paths for WSL2", async () => {
       engine: "wsl2",
       runFn(engine, cmd, args) {
         calls.push({ type: "run", engine, cmd, args });
-        return args[0] === "-u" ? "1000" : "1000";
+        return "1000";
       },
       runVerboseFn(engine, cmd, args, opts) {
         calls.push({ type: "verbose", engine, cmd, args, opts });
@@ -1250,6 +1492,60 @@ test("assertManagedPath rejects paths outside the sandbox root", async () => {
     () => sandboxRm.assertManagedPath(root, path.join(os.tmpdir(), "agent-infra-other")),
     /outside managed sandbox root/
   );
+});
+
+test("buildImage forwards HOST_UID=0 and HOST_GID=0 unchanged when host runs as root", async () => {
+  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const calls = [];
+
+  sandboxCreate.buildImage(
+    { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "/repo" },
+    [{ npmPackage: "@acme/tool" }],
+    "/tmp/Dockerfile",
+    "sig-123",
+    {
+      engine: "native",
+      runFn(engine, cmd, args) {
+        calls.push({ type: "run", engine, cmd, args });
+        if (cmd === "id" && args[0] === "-u") {
+          return "0";
+        }
+        if (cmd === "id" && args[0] === "-g") {
+          return "0";
+        }
+        throw new Error(`unexpected quiet command: ${cmd} ${args.join(" ")}`);
+      },
+      runVerboseFn(engine, cmd, args, opts) {
+        calls.push({ type: "verbose", engine, cmd, args, opts });
+      }
+    }
+  );
+
+  assert.deepEqual(calls.slice(0, 2), [
+    { type: "run", engine: "native", cmd: "id", args: ["-u"] },
+    { type: "run", engine: "native", cmd: "id", args: ["-g"] }
+  ]);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].type, "verbose");
+  assert.equal(calls[2].engine, "native");
+  assert.equal(calls[2].cmd, "docker");
+  assert.equal(calls[2].opts.cwd, "/repo");
+  assert.deepEqual(calls[2].args.slice(0, 7), [
+    "build",
+    "-t",
+    "demo-sandbox:latest",
+    "--build-arg",
+    "HOST_UID=0",
+    "--build-arg",
+    "HOST_GID=0"
+  ]);
+});
+
+test("base.dockerfile guards root host uid with useradd -o", () => {
+  const content = fs.readFileSync(filePath("lib/sandbox/runtimes/base.dockerfile"), "utf8");
+
+  assert.match(content, /if \[ "\$\{HOST_UID\}" = "0" \]/);
+  assert.match(content, /useradd -o -u \$\{HOST_UID\}/);
 });
 
 test("commandErrorMessage prefers stderr over the generic execFileSync message", async () => {
@@ -1373,33 +1669,428 @@ test("ensureSandboxAliasesFile upgrades legacy OpenCode aliases to full yolo per
   }
 });
 
-test("ensureColima uses verbose commands for install and startup", async () => {
+test("ensureDocker uses Colima verbose commands for install and startup", async () => {
   const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
   const messages = [];
   const verboseCalls = [];
   const checks = [];
+  const previousDockerContext = process.env.DOCKER_CONTEXT;
 
-  await sandboxEngine.ensureColima(
+  try {
+    delete process.env.DOCKER_CONTEXT;
+
+    await sandboxEngine.ensureDocker(
+      { engine: "colima", vm: { cpu: 4, memory: 8, disk: 60 } },
+      (message) => messages.push(message),
+      {
+        platformFn: () => "darwin",
+        runOkFn(cmd, args) {
+          checks.push([cmd, ...args]);
+          assert.equal(process.env.DOCKER_CONTEXT, "colima");
+          if (cmd === "which") {
+            return false;
+          }
+          if (cmd === "colima" && args[0] === "status") {
+            return false;
+          }
+          if (cmd === "docker" && args[0] === "info") {
+            return true;
+          }
+          throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
+        },
+        runSafeFn(cmd, args) {
+          assert.equal(cmd, "uname");
+          assert.deepEqual(args, ["-m"]);
+          return "arm64";
+        },
+        runVerboseFn(cmd, args) {
+          verboseCalls.push([cmd, ...args]);
+        }
+      }
+    );
+
+    assert.equal(process.env.DOCKER_CONTEXT, "colima");
+    assert.deepEqual(messages, [
+      "Installing colima + docker via Homebrew...",
+      "Starting Colima VM..."
+    ]);
+    assert.deepEqual(verboseCalls, [
+      ["brew", "install", "colima", "docker"],
+      ["colima", "start", "--cpu", "4", "--memory", "8", "--disk", "60", "--arch", "aarch64", "--vm-type=vz", "--mount-type=virtiofs"]
+    ]);
+    assert.deepEqual(checks, [
+      ["which", "colima"],
+      ["colima", "status"],
+      ["docker", "info"]
+    ]);
+  } finally {
+    restoreDockerContext(previousDockerContext);
+  }
+});
+
+test("detectEngine honors configured macOS sandbox engines", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const dependencies = {
+    platformFn: () => "darwin",
+    runOkFn() {
+      throw new Error("docker auto-detection should be skipped for explicit engines");
+    }
+  };
+
+  assert.equal(sandboxEngine.detectEngine({ engine: "orbstack" }, dependencies), "orbstack");
+  assert.equal(sandboxEngine.detectEngine({ engine: "colima" }, dependencies), "colima");
+  assert.equal(sandboxEngine.detectEngine({ engine: "docker-desktop" }, dependencies), "docker-desktop");
+});
+
+test("detectEngine rejects unsupported configured sandbox engines early", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  assert.throws(
+    () => sandboxEngine.detectEngine({ engine: "podman" }, { platformFn: () => "darwin" }),
+    /Expected one of: null, colima, orbstack, docker-desktop.*only affects macOS/s
+  );
+});
+
+test("detectEngine returns Colima on macOS when no engine is configured", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const dependencies = {
+    platformFn: () => "darwin",
+    runOkFn() {
+      throw new Error("docker auto-detection should not run for missing engines");
+    }
+  };
+
+  assert.equal(sandboxEngine.detectEngine({ engine: null }, dependencies), "colima");
+  assert.equal(sandboxEngine.detectEngine({}, dependencies), "colima");
+});
+
+test("detectEngine keeps non-macOS platform behavior independent of sandbox engine config", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  assert.equal(
+    sandboxEngine.detectEngine({ engine: "orbstack" }, { platformFn: () => "linux" }),
+    "native"
+  );
+  assert.equal(
+    sandboxEngine.detectEngine({ engine: "orbstack" }, { platformFn: () => "win32" }),
+    "wsl2"
+  );
+});
+
+test("detectEngine does not apply Docker context", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const previousDockerContext = process.env.DOCKER_CONTEXT;
+
+  try {
+    process.env.DOCKER_CONTEXT = "existing-context";
+
+    assert.equal(
+      sandboxEngine.detectEngine({ engine: null }, { platformFn: () => "linux" }),
+      "native"
+    );
+    assert.equal(process.env.DOCKER_CONTEXT, "existing-context");
+  } finally {
+    restoreDockerContext(previousDockerContext);
+  }
+});
+
+test("sandbox engine adapters expose the required shape", async () => {
+  const sandboxEngines = await loadFreshEsm("lib/sandbox/engines/index.js");
+
+  for (const adapter of Object.values(sandboxEngines.ADAPTERS)) {
+    assert.equal(typeof adapter.id, "string");
+    assert.equal(typeof adapter.displayName, "string");
+    assert.ok(adapter.dockerContext === null || typeof adapter.dockerContext === "string");
+    assert.equal(typeof adapter.managed, "boolean");
+    assert.match(adapter.canApplyResources, /^(hot|on-start|never)$/);
+    assert.equal(typeof adapter.defaultResources, "function");
+    assert.equal(typeof adapter.ensure, "function");
+    assert.equal(typeof adapter.syncResources, "function");
+    if (adapter.managed) {
+      assert.equal(typeof adapter.startVm, "function");
+      assert.equal(typeof adapter.stopVm, "function");
+    }
+  }
+});
+
+test("resolveEffectiveVm merges adapter defaults without changing user values", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const colimaAdapter = {
+    defaultResources(getHost) {
+      const host = getHost();
+      return { cpu: host.cpu, memory: host.memory, disk: 60 };
+    }
+  };
+  let detectCalls = 0;
+  const orbStackAdapter = {
+    defaultResources() {
+      return null;
+    }
+  };
+  const host = { cpu: 6, memory: 8 };
+
+  assert.deepEqual(
+    sandboxEngine.resolveEffectiveVm(colimaAdapter, {}, { detectHostResourcesFn: () => host }),
+    { cpu: 6, memory: 8, disk: 60 }
+  );
+  assert.deepEqual(
+    sandboxEngine.resolveEffectiveVm(colimaAdapter, { cpu: 4 }, { detectHostResourcesFn: () => host }),
+    { cpu: 4, memory: 8, disk: 60 }
+  );
+  assert.deepEqual(
+    sandboxEngine.resolveEffectiveVm(orbStackAdapter, {}, {
+      detectHostResourcesFn: () => {
+        detectCalls += 1;
+        return host;
+      }
+    }),
+    { cpu: null, memory: null, disk: null }
+  );
+  assert.equal(detectCalls, 0);
+});
+
+test("hasUserVmConfig recognizes only explicit resource values", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  assert.equal(sandboxEngine.hasUserVmConfig({}), false);
+  assert.equal(sandboxEngine.hasUserVmConfig({ cpu: null }), false);
+  assert.equal(sandboxEngine.hasUserVmConfig({ cpu: 4 }), true);
+  assert.equal(sandboxEngine.hasUserVmConfig({ memory: 8 }), true);
+  assert.equal(sandboxEngine.hasUserVmConfig({ disk: 60 }), true);
+});
+
+test("Colima adapter warns when resource values change while VM is already running", async () => {
+  const { colimaAdapter } = await loadFreshEsm("lib/sandbox/engines/colima.js");
+  const messages = [];
+
+  assert.deepEqual(colimaAdapter.defaultResources(() => ({ cpu: 6, memory: 8 })), {
+    cpu: 6,
+    memory: 8,
+    disk: 60
+  });
+
+  colimaAdapter.syncResources(
+    { userVm: { cpu: 4 }, hasUserVmConfig: (vm) => vm.cpu != null },
+    (message) => messages.push(message),
+    {},
+    { vmJustStarted: true }
+  );
+  assert.deepEqual(messages, []);
+
+  colimaAdapter.syncResources(
+    { userVm: { cpu: 4 }, hasUserVmConfig: (vm) => vm.cpu != null },
+    (message) => messages.push(message),
+    {},
+    { vmJustStarted: false }
+  );
+  assert.match(messages[0], /Colima VM is already running/);
+});
+
+test("OrbStack adapter hot-applies CPU and memory and warns about disk", async () => {
+  const { orbstackAdapter } = await loadFreshEsm("lib/sandbox/engines/orbstack.js");
+  const verboseCalls = [];
+  const messages = [];
+
+  assert.equal(orbstackAdapter.defaultResources(), null);
+  orbstackAdapter.syncResources(
     { vm: { cpu: 4, memory: 8, disk: 60 } },
     (message) => messages.push(message),
     {
-      runOkFn(cmd, args) {
+      runVerbose(cmd, args) {
+        verboseCalls.push([cmd, ...args]);
+      }
+    }
+  );
+
+  assert.deepEqual(verboseCalls, [
+    ["orb", "config", "set", "cpu", "4"],
+    ["orb", "config", "set", "memory_mib", "8192"]
+  ]);
+  assert.match(messages[0], /does not expose a fixed disk size/);
+});
+
+test("OrbStack adapter downgrades config failures to warnings", async () => {
+  const { orbstackAdapter } = await loadFreshEsm("lib/sandbox/engines/orbstack.js");
+  const messages = [];
+
+  orbstackAdapter.syncResources(
+    { vm: { cpu: 4, memory: null, disk: null } },
+    (message) => messages.push(message),
+    {
+      runVerbose() {
+        throw new Error("config failed");
+      }
+    }
+  );
+
+  assert.match(messages[0], /failed to apply OrbStack cpu=4/);
+});
+
+test("Docker Desktop adapter warns for explicit VM resources only", async () => {
+  const { dockerDesktopAdapter } = await loadFreshEsm("lib/sandbox/engines/docker-desktop.js");
+  const messages = [];
+  const hasUserVmConfig = (vm) => vm.cpu != null || vm.memory != null || vm.disk != null;
+
+  dockerDesktopAdapter.syncResources(
+    { userVm: { cpu: null }, hasUserVmConfig },
+    (message) => messages.push(message)
+  );
+  assert.deepEqual(messages, []);
+
+  dockerDesktopAdapter.syncResources(
+    { userVm: { cpu: 4 }, hasUserVmConfig },
+    (message) => messages.push(message)
+  );
+  assert.match(messages[0], /Docker Desktop manages CPU\/memory\/disk/);
+});
+
+test("native adapter warns that VM resources are not applicable", async () => {
+  const { nativeAdapter } = await loadFreshEsm("lib/sandbox/engines/native.js");
+  const messages = [];
+
+  nativeAdapter.syncResources(
+    { userVm: { memory: 8 }, hasUserVmConfig: (vm) => vm.memory != null },
+    (message) => messages.push(message)
+  );
+
+  assert.match(messages[0], /Linux native Docker has no managed VM/);
+});
+
+test("WSL2 adapter validates Docker Desktop integration and warns on explicit VM resources", async () => {
+  const { wsl2Adapter } = await loadFreshEsm("lib/sandbox/engines/wsl2.js");
+  const checks = [];
+  const messages = [];
+
+  assert.equal(wsl2Adapter.defaultResources(), null);
+  await wsl2Adapter.ensure(
+    {
+      userVm: { cpu: 2, memory: null, disk: null },
+      hasUserVmConfig(vm) {
+        return vm.cpu != null || vm.memory != null || vm.disk != null;
+      }
+    },
+    (message) => messages.push(message),
+    {
+      runOk(cmd, args) {
         checks.push([cmd, ...args]);
-        if (cmd === "which") {
+        return cmd === "wsl.exe" && (args[0] === "--status" || args[1] === "docker");
+      }
+    }
+  );
+  wsl2Adapter.syncResources(
+    {
+      userVm: { cpu: 2, memory: null, disk: null },
+      hasUserVmConfig(vm) {
+        return vm.cpu != null || vm.memory != null || vm.disk != null;
+      }
+    },
+    (message) => messages.push(message)
+  );
+
+  assert.deepEqual(checks, [
+    ["wsl.exe", "--status"],
+    ["wsl.exe", "--", "docker", "info"]
+  ]);
+  assert.match(messages[0], /Checking Docker Desktop from WSL2/);
+  assert.match(messages[1], /Docker Desktop manages CPU\/memory\/disk/);
+  assert.throws(() => wsl2Adapter.stopVm(), /wsl --shutdown/);
+});
+
+test("ensureDocker installs OrbStack and starts the Docker daemon", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const messages = [];
+  const verboseCalls = [];
+  const checks = [];
+  let dockerInfoChecks = 0;
+  const previousDockerContext = process.env.DOCKER_CONTEXT;
+
+  try {
+    delete process.env.DOCKER_CONTEXT;
+
+    await sandboxEngine.ensureDocker(
+      { engine: "orbstack", vm: { cpu: null, memory: null, disk: null } },
+      (message) => messages.push(message),
+      {
+        platformFn: () => "darwin",
+        runOkFn(cmd, args) {
+          checks.push([cmd, ...args]);
+          assert.equal(process.env.DOCKER_CONTEXT, "orbstack");
+          if (cmd === "which") {
+            return false;
+          }
+          if (cmd === "docker" && args[0] === "info") {
+            dockerInfoChecks += 1;
+            return dockerInfoChecks > 1;
+          }
+          throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
+        },
+        runVerboseFn(cmd, args) {
+          verboseCalls.push([cmd, ...args]);
+        }
+      }
+    );
+
+    assert.equal(process.env.DOCKER_CONTEXT, "orbstack");
+    assert.deepEqual(messages, [
+      "Installing OrbStack via Homebrew...",
+      "Starting OrbStack..."
+    ]);
+    assert.deepEqual(verboseCalls, [
+      ["brew", "install", "--cask", "orbstack"],
+      ["orb", "start"]
+    ]);
+    assert.deepEqual(checks, [
+      ["which", "orb"],
+      ["docker", "info"],
+      ["docker", "info"]
+    ]);
+  } finally {
+    restoreDockerContext(previousDockerContext);
+  }
+});
+
+test("ensureDocker reports when Docker Desktop is not running", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const previousDockerContext = process.env.DOCKER_CONTEXT;
+
+  try {
+    delete process.env.DOCKER_CONTEXT;
+
+    await assert.rejects(
+      () => sandboxEngine.ensureDocker({ engine: "docker-desktop" }, null, {
+        platformFn: () => "darwin",
+        runOkFn(cmd, args) {
+          assert.equal(cmd, "docker");
+          assert.deepEqual(args, ["info"]);
+          assert.equal(process.env.DOCKER_CONTEXT, "desktop-linux");
           return false;
         }
-        if (cmd === "colima" && args[0] === "status") {
-          return false;
+      }),
+      /Docker Desktop is not running/
+    );
+    assert.equal(process.env.DOCKER_CONTEXT, "desktop-linux");
+  } finally {
+    restoreDockerContext(previousDockerContext);
+  }
+});
+
+test("ensureDocker applies OrbStack resource flags after daemon checks", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const verboseCalls = [];
+
+  await sandboxEngine.ensureDocker(
+    { engine: "orbstack", vm: { cpu: 4, memory: null, disk: null } },
+    null,
+    {
+      platformFn: () => "darwin",
+      runOkFn(cmd, args) {
+        if (cmd === "which" && args[0] === "orb") {
+          return true;
         }
         if (cmd === "docker" && args[0] === "info") {
           return true;
         }
         throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
-      },
-      runSafeFn(cmd, args) {
-        assert.equal(cmd, "uname");
-        assert.deepEqual(args, ["-m"]);
-        return "arm64";
       },
       runVerboseFn(cmd, args) {
         verboseCalls.push([cmd, ...args]);
@@ -1407,19 +2098,217 @@ test("ensureColima uses verbose commands for install and startup", async () => {
     }
   );
 
-  assert.deepEqual(messages, [
-    "Installing colima + docker via Homebrew...",
-    "Starting Colima VM..."
-  ]);
-  assert.deepEqual(verboseCalls, [
-    ["brew", "install", "colima", "docker"],
-    ["colima", "start", "--cpu", "4", "--memory", "8", "--disk", "60", "--arch", "aarch64", "--vm-type=vz", "--mount-type=virtiofs"]
-  ]);
+  assert.deepEqual(verboseCalls, [["orb", "config", "set", "cpu", "4"]]);
+});
+
+test("ensureDocker warns when Docker Desktop cannot apply explicit VM resources", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const messages = [];
+
+  await sandboxEngine.ensureDocker(
+    { engine: "docker-desktop", vm: { cpu: 4, memory: null, disk: null } },
+    (message) => messages.push(message),
+    {
+      platformFn: () => "darwin",
+      runOkFn(cmd, args) {
+        assert.deepEqual([cmd, ...args], ["docker", "info"]);
+        return true;
+      }
+    }
+  );
+
+  assert.match(messages[0], /Docker Desktop manages CPU\/memory\/disk/);
+});
+
+test("ensureDocker throws native install hint when docker is not installed", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  await assert.rejects(
+    () => sandboxEngine.ensureDocker({}, null, {
+      platformFn: () => "linux",
+      runOkFn(cmd, args) {
+        assert.equal(cmd, "which");
+        assert.deepEqual(args, ["docker"]);
+        return false;
+      },
+      runSafeFn() {
+        assert.fail("docker version should not run when docker is missing");
+      }
+    }),
+    /not installed[\s\S]*docs\.docker\.com/
+  );
+});
+
+test("ensureDocker throws native daemon-down hint when docker info fails and version returns nothing", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const checks = [];
+
+  await assert.rejects(
+    () => sandboxEngine.ensureDocker({}, null, {
+      platformFn: () => "linux",
+      runOkFn(cmd, args) {
+        checks.push([cmd, ...args]);
+        if (cmd === "which") {
+          return true;
+        }
+        if (cmd === "docker" && args[0] === "info") {
+          return false;
+        }
+        throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
+      },
+      runSafeFn(cmd, args) {
+        assert.equal(cmd, "docker");
+        assert.deepEqual(args, ["version", "--format", "{{.Server.Version}}"]);
+        return "";
+      }
+    }),
+    /daemon is not running[\s\S]*systemctl start docker[\s\S]*DOCKER_HOST/
+  );
   assert.deepEqual(checks, [
-    ["which", "colima"],
-    ["colima", "status"],
+    ["which", "docker"],
     ["docker", "info"]
   ]);
+});
+
+test("ensureDocker throws native permission hint when docker info fails but version succeeds", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  await assert.rejects(
+    () => sandboxEngine.ensureDocker({}, null, {
+      platformFn: () => "linux",
+      runOkFn(cmd, args) {
+        if (cmd === "which") {
+          return true;
+        }
+        if (cmd === "docker" && args[0] === "info") {
+          return false;
+        }
+        throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
+      },
+      runSafeFn(cmd, args) {
+        assert.equal(cmd, "docker");
+        assert.deepEqual(args, ["version", "--format", "{{.Server.Version}}"]);
+        return "25.0.0";
+      }
+    }),
+    /lack permission[\s\S]*usermod -aG docker/
+  );
+});
+
+test("ensureManagedVm gives Linux-specific message for native engine", async () => {
+  const sandboxVm = await loadFreshEsm("lib/sandbox/commands/vm.js");
+
+  assert.throws(
+    () => sandboxVm.ensureManagedVm("native"),
+    /does not use a managed VM/
+  );
+});
+
+test("ensureManagedVm points Docker Desktop users to the GUI", async () => {
+  const sandboxVm = await loadFreshEsm("lib/sandbox/commands/vm.js");
+
+  assert.throws(
+    () => sandboxVm.ensureManagedVm("docker-desktop"),
+    /VM management is unavailable[\s\S]*Docker Desktop is managed via its GUI/
+  );
+});
+
+test("startManagedVm uses OrbStack status instead of Docker daemon state", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const checks = [];
+  const verboseCalls = [];
+
+  const result = sandboxEngine.startManagedVm(
+    { engine: "orbstack" },
+    {
+      platformFn: () => "darwin",
+      runOkFn(cmd, args) {
+        checks.push([cmd, ...args]);
+        if (cmd === "docker") {
+          throw new Error("docker info must not decide explicit OrbStack VM state");
+        }
+        return false;
+      },
+      runVerboseFn(cmd, args) {
+        verboseCalls.push([cmd, ...args]);
+      }
+    }
+  );
+
+  assert.equal(result, "started");
+  assert.deepEqual(checks, [["orb", "status"]]);
+  assert.deepEqual(verboseCalls, [["orb", "start"]]);
+});
+
+test("startManagedVm applies OrbStack resources while leaving a running VM alone", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const verboseCalls = [];
+
+  const result = sandboxEngine.startManagedVm(
+    { engine: "orbstack", vm: { cpu: 2, memory: null, disk: null } },
+    {
+      platformFn: () => "darwin",
+      runOkFn(cmd, args) {
+        assert.deepEqual([cmd, ...args], ["orb", "status"]);
+        return true;
+      },
+      runVerboseFn(cmd, args) {
+        verboseCalls.push([cmd, ...args]);
+      }
+    }
+  );
+
+  assert.equal(result, "already-running");
+  assert.deepEqual(verboseCalls, [["orb", "config", "set", "cpu", "2"]]);
+});
+
+test("stopManagedVm reports unsupported engines instead of silently returning", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+
+  assert.throws(
+    () => sandboxEngine.stopManagedVm(
+      { engine: "docker-desktop" },
+      { platformFn: () => "darwin", runFn: () => assert.fail("unexpected stop command") }
+    ),
+    /VM management is unavailable for engine 'Docker Desktop'/
+  );
+});
+
+test("stopManagedVm does not change the current Docker context", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const previousDockerContext = process.env.DOCKER_CONTEXT;
+
+  try {
+    process.env.DOCKER_CONTEXT = "existing-context";
+
+    const result = sandboxEngine.stopManagedVm(
+      { engine: "orbstack" },
+      {
+        platformFn: () => "darwin",
+        runFn(cmd, args) {
+          assert.deepEqual([cmd, ...args], ["orb", "stop"]);
+        }
+      }
+    );
+
+    assert.equal(result, "stopped");
+    assert.equal(process.env.DOCKER_CONTEXT, "existing-context");
+  } finally {
+    restoreDockerContext(previousDockerContext);
+  }
+});
+
+test("isVmManaged and engineDisplayName describe supported engines", async () => {
+  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const macDependencies = { platformFn: () => "darwin" };
+
+  assert.equal(sandboxEngine.isVmManaged({ engine: "colima" }, macDependencies), true);
+  assert.equal(sandboxEngine.isVmManaged({ engine: "orbstack" }, macDependencies), true);
+  assert.equal(sandboxEngine.isVmManaged({ engine: "docker-desktop" }, macDependencies), false);
+  assert.equal(sandboxEngine.isVmManaged({}, { platformFn: () => "win32" }), true);
+  assert.equal(sandboxEngine.engineDisplayName("orbstack"), "OrbStack");
+  assert.equal(sandboxEngine.engineDisplayName("docker-desktop"), "Docker Desktop");
+  assert.equal(sandboxEngine.engineDisplayName("wsl2"), "WSL2");
 });
 
 test("hostHasGpgKeys reports whether the host keyring is available", async () => {
@@ -1765,10 +2654,16 @@ test("getGitSigningKey reads repo-local signingKey when a worktree path is provi
   try {
     fs.mkdirSync(repoDir, { recursive: true });
     fs.mkdirSync(homeDir, { recursive: true });
-    execSync("git init", { cwd: repoDir, stdio: "pipe" });
-    execSync("git config user.signingKey LOCAL-KEY-123", { cwd: repoDir, stdio: "pipe" });
+    execSync("git init", { cwd: repoDir, env: gitSafeEnv(), stdio: "pipe" });
+    execSync("git config user.signingKey LOCAL-KEY-123", {
+      cwd: repoDir,
+      env: gitSafeEnv(),
+      stdio: "pipe"
+    });
 
-    const signingKey = sandboxCreate.getGitSigningKey({ repoPath: repoDir, home: homeDir });
+    const signingKey = withGitSafeProcessEnv(() => (
+      sandboxCreate.getGitSigningKey({ repoPath: repoDir, home: homeDir })
+    ));
 
     assert.equal(signingKey, "LOCAL-KEY-123");
   } finally {
@@ -1922,12 +2817,10 @@ test("writeGpgCache creates cache files with secure permissions", async () => {
     );
 
     assert.equal(written, true);
-    if (process.platform !== "win32") {
-      assert.equal(modeBits(cacheDir), 0o700);
-      assert.equal(modeBits(path.join(cacheDir, "public.asc")), 0o600);
-      assert.equal(modeBits(path.join(cacheDir, "secret.asc")), 0o600);
-      assert.equal(modeBits(path.join(cacheDir, "state.json")), 0o600);
-    }
+    assertModeBits(cacheDir, 0o700);
+    assertModeBits(path.join(cacheDir, "public.asc"), 0o600);
+    assertModeBits(path.join(cacheDir, "secret.asc"), 0o600);
+    assertModeBits(path.join(cacheDir, "state.json"), 0o600);
     assert.equal(fs.readFileSync(path.join(cacheDir, "state.json"), "utf8"), '{\n  "fingerprint": "fingerprint-1"\n}\n');
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -2476,6 +3369,38 @@ test("resolveTaskBranch reads branch from task frontmatter", async () => {
   }
 });
 
+test("resolveTaskBranch strips matching quotes from task branch metadata", async () => {
+  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-quotes-"));
+  const cases = [
+    ["TASK-20260401-180010", "branch: \"agent-infra-feature-cli-generic-sandbox\""],
+    ["TASK-20260401-180011", "branch: 'agent-infra-feature-cli-generic-sandbox'"]
+  ];
+
+  try {
+    for (const [taskId, branchLine] of cases) {
+      const taskDir = path.join(tmpDir, ".agents", "workspace", "active", taskId);
+      fs.mkdirSync(taskDir, { recursive: true });
+      fs.writeFileSync(path.join(taskDir, "task.md"), [
+        "---",
+        `id: ${taskId}`,
+        "type: feature",
+        branchLine,
+        "---",
+        "",
+        "# task"
+      ].join("\n"));
+
+      assert.equal(
+        taskResolver.resolveTaskBranch(taskId, tmpDir),
+        "agent-infra-feature-cli-generic-sandbox"
+      );
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("resolveTaskBranch falls back to the context branch for legacy tasks", async () => {
   const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-context-"));
@@ -2497,6 +3422,92 @@ test("resolveTaskBranch falls back to the context branch for legacy tasks", asyn
     assert.equal(
       taskResolver.resolveTaskBranch("TASK-20260401-180001", tmpDir),
       "agent-infra-feature-cli-generic-sandbox"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveTaskBranch strips matching quotes from legacy context branch metadata", async () => {
+  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-context-quotes-"));
+  const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180012");
+
+  try {
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, "task.md"), [
+      "---",
+      "id: TASK-20260401-180012",
+      "type: feature",
+      "---",
+      "",
+      "## Context",
+      "",
+      "- **Branch**：\"feature/quoted-context\""
+    ].join("\n"));
+
+    assert.equal(
+      taskResolver.resolveTaskBranch("TASK-20260401-180012", tmpDir),
+      "feature/quoted-context"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+for (const workspaceDir of ["completed", "blocked", "archive"]) {
+  test(`resolveTaskBranch resolves tasks in ${workspaceDir} directory`, async () => {
+    const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-sandbox-task-${workspaceDir}-`));
+    const taskDir = path.join(tmpDir, ".agents", "workspace", workspaceDir, "TASK-20260401-180003");
+
+    try {
+      fs.mkdirSync(taskDir, { recursive: true });
+      fs.writeFileSync(path.join(taskDir, "task.md"), [
+        "---",
+        "id: TASK-20260401-180003",
+        "type: bugfix",
+        "branch: agent-infra-bugfix-some-fix",
+        "---",
+        "",
+        "# task"
+      ].join("\n"));
+
+      assert.equal(
+        taskResolver.resolveTaskBranch("TASK-20260401-180003", tmpDir),
+        "agent-infra-bugfix-some-fix"
+      );
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("resolveTaskBranch prefers active over completed when both exist", async () => {
+  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-priority-"));
+  const activeDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180004");
+  const completedDir = path.join(tmpDir, ".agents", "workspace", "completed", "TASK-20260401-180004");
+
+  try {
+    fs.mkdirSync(activeDir, { recursive: true });
+    fs.mkdirSync(completedDir, { recursive: true });
+    fs.writeFileSync(path.join(activeDir, "task.md"), [
+      "---",
+      "id: TASK-20260401-180004",
+      "branch: agent-infra-bugfix-active-wins",
+      "---"
+    ].join("\n"));
+    fs.writeFileSync(path.join(completedDir, "task.md"), [
+      "---",
+      "id: TASK-20260401-180004",
+      "branch: agent-infra-bugfix-should-be-ignored",
+      "---"
+    ].join("\n"));
+
+    assert.equal(
+      taskResolver.resolveTaskBranch("TASK-20260401-180004", tmpDir),
+      "agent-infra-bugfix-active-wins"
     );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

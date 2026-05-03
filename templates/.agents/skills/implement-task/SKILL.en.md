@@ -39,7 +39,7 @@ After this step, write the final branch name back to `task.md`.
 
 ### 3. Narrow the Milestone
 
-If task.md contains a valid `issue_number`, read `.agents/rules/milestone-inference.md` and follow "Phase 2: `implement-task`" to narrow the Issue milestone before implementation starts.
+If task.md contains a valid `issue_number`, read `.agents/rules/issue-sync.md` first to complete upstream repository detection plus permission detection; then read `.agents/rules/milestone-inference.md` and follow "Phase 2: `implement-task`" to narrow the Issue milestone before implementation starts; if `has_triage=false`, keep the current milestone unchanged.
 
 ### 4. Determine the Input Plan and Implementation Round
 
@@ -81,7 +81,7 @@ Create `.agents/workspace/active/{task-id}/{implementation-artifact}`.
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update `.agents/workspace/active/{task-id}/task.md`:
@@ -91,12 +91,12 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - review the `## Requirements` section and only change items from `- [ ]` to `- [x]` when they are clearly satisfied by this round's implemented code and passing tests
 - record `{implementation-artifact}` for Round `{implementation-round}`
 - append:
-  `- {yyyy-MM-dd HH:mm:ss} — **Implementation (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {implementation-artifact}`
+  `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Implementation (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {implementation-artifact}`
 
-If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure; read `.agents/rules/issue-sync.md` first):
-- Set `status: in-progress` and refine `in:` labels from the branch diff by following `.agents/rules/issue-sync.md` (add/remove when a mapping exists, add-only when it does not)
-- Sync checked `## Requirements` items to the Issue body and publish the `{implementation-artifact}` comment
-- Create or update the `<!-- sync-issue:{task-id}:task -->` comment (follow the task.md comment sync rule in issue-sync.md)
+If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure; read `.agents/rules/issue-sync.md` first and complete upstream repository detection plus permission detection):
+- Set `status: in-progress` by following issue-sync.md
+- Create or update the task comment marker defined in `.agents/rules/issue-sync.md` (follow the task.md comment sync rule in issue-sync.md)
+- Publish the `{implementation-artifact}` comment
 
 ### 10. Verification Gate
 
@@ -117,7 +117,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. Use the output template in `reference/output-template.md`.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Use the output template in `reference/output-template.md`.
 
 ## Completion Checklist
 
@@ -125,7 +125,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 - [ ] Created `{implementation-artifact}`
 - [ ] All required tests passed
 - [ ] Updated task.md and appended the Activity Log entry
-- [ ] Included every TUI command format in the user-facing next step
+- [ ] Included every TUI command format, including any custom TUIs, in the user-facing next step
 
 ## STOP
 

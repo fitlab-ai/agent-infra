@@ -9,7 +9,7 @@ description: "从平台 Issue 评论还原本地任务文件"
 
 ## 行为边界 / 关键规则
 
-- 只从带 `<!-- sync-issue:{task-id}:... -->` 标记的评论恢复文件
+- 只从匹配 `.agents/rules/issue-sync.md` 标记注册表的评论恢复文件
 - 默认恢复到 `.agents/workspace/active/{task-id}/`
 - 如果目标目录已存在，立即停止并提示用户先处理目录冲突
 - 执行本技能后，你**必须**立即更新恢复出的 `task.md`
@@ -31,16 +31,11 @@ description: "从平台 Issue 评论还原本地任务文件"
 
 ### 3. 确定 task-id 与待恢复文件
 
-从评论中筛选隐藏标记：
-
-```html
-<!-- sync-issue:{task-id}:{file-stem} -->
-<!-- sync-issue:{task-id}:{file-stem}:{part}/{total} -->
-```
+按 `.agents/rules/issue-sync.md` 中定义的 task、artifact 和分片 artifact 标记筛选评论。
 
 处理规则：
 - 用户提供了 `{task-id}` 时，仅匹配该任务
-- 未提供时，优先从 `<!-- sync-issue:{task-id}:task -->` 评论推断
+- 未提供时，优先从 task 评论标记推断
 - 若找不到唯一 task-id，立即停止并告知用户
 - 忽略 `summary` 标记评论；它是 complete-task 的聚合产物，不对应本地任务文件
 - 将 `{file-stem}` 映射回文件名：
@@ -58,7 +53,7 @@ description: "从平台 Issue 评论还原本地任务文件"
 对每个文件执行：
 - 收集单条评论或分片评论
 - 对 `task.md` 评论按 issue-sync.md 中的 `<details>` frontmatter 格式反向拆解，提取 frontmatter 后再与正文拼合
-- 如存在 `{part}/{total}`，按 part 升序排序并校验分片完整
+- 如分片标记中存在 part 和 total 序号，按 part 升序排序并校验分片完整
 - 从评论正文中提取文件内容，去掉隐藏标记、标题和页脚
 - 拼接得到最终文件内容
 
@@ -81,73 +76,27 @@ description: "从平台 Issue 评论还原本地任务文件"
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新恢复出的 `task.md`：
 - `status`：`active`
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
-- 保留原 `current_step`
-- 在 `## 活动日志` 追加：
-  ```
-  - {yyyy-MM-dd HH:mm:ss} — **Restore Task** by {agent} — Restored task from Issue #{issue-number}
-  ```
 
-### 7. 完成校验
+追加 Activity Log，说明任务已从平台 Issue 还原。
 
-运行完成校验：
+### 7. 告知用户
 
-```bash
-node .agents/scripts/validate-artifact.js gate restore-task .agents/workspace/active/{task-id} --format text
-```
-
-处理结果：
-- 退出码 0（全部通过）-> 继续到「告知用户」步骤
-- 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
-- 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
-
-将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
-
-### 8. 告知用户
-
-> 仅在校验通过后执行本步骤。
-
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
-
-输出格式：
-
-```text
-任务 {task-id} 已从 Issue #{issue-number} 还原。
-
-摘要：
-- 恢复文件：{数量}
-- 任务目录：.agents/workspace/active/{task-id}/
-- 当前步骤：{current_step}
-
-下一步 - 查看任务状态：
-  - Claude Code / OpenCode：/check-task {task-id}
-  - Gemini CLI：/agent-infra:check-task {task-id}
-  - Codex CLI：$check-task {task-id}
-```
+报告已恢复的 task id、恢复文件数量和 active task 目录。
 
 ## 完成检查清单
 
-- [ ] 已获取并解析 Issue 评论
-- [ ] 已还原 `task.md` 和所有可用产物文件
-- [ ] 已更新恢复后的 task.md
-- [ ] 已运行并通过完成校验
-- [ ] 已向用户展示所有 TUI 格式的下一步命令
+- [ ] 已从平台获取 Issue 评论
+- [ ] 已恢复本地任务文件
+- [ ] 已更新恢复出的任务元数据
+- [ ] 已报告恢复目录
 
-## 停止
+### 8. 停止
 
-完成检查清单后立即停止。不要自动继续执行工作流。
-
-## 错误处理
-
-- Issue 不存在或无权访问
-- 平台 CLI 未认证
-- 找不到带 sync 标记的评论
-- 无法唯一确定 `task-id`
-- 目标目录已存在
-- 分片缺失或顺序不完整
+完成检查清单后立即停止。不要自动提交。

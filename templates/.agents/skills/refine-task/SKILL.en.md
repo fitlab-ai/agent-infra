@@ -51,21 +51,19 @@ Create `.agents/workspace/active/{task-id}/{refinement-artifact}`.
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update task.md:
 - review the `## Requirements` section and only change items from `- [ ]` to `- [x]` when they are newly satisfied by this round's fixes and passing tests
 - append:
-  `- {yyyy-MM-dd HH:mm:ss} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues → {refinement-artifact}`
+  `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues → {refinement-artifact}`
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Read `.agents/rules/issue-sync.md` before syncing
-- Set `status: in-progress`
-- Refine `in:` labels from the branch diff by following `.agents/rules/issue-sync.md` (add/remove when a mapping exists, add-only when it does not)
-- Sync checked `## Requirements` items to the Issue body
+- Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
+- Set `status: in-progress` by following issue-sync.md
+- Create or update the task comment marker defined in `.agents/rules/issue-sync.md` (follow the task.md comment sync rule in issue-sync.md)
 - Publish the `{refinement-artifact}` comment
-- Create or update the `<!-- sync-issue:{task-id}:task -->` comment (follow the task.md comment sync rule in issue-sync.md)
 
 ### 7. Verification Gate
 
@@ -86,7 +84,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 After summarizing the fixes, present the next step:
 

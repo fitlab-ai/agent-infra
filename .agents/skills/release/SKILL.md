@@ -110,7 +110,7 @@ bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PAT
 
 ### 9. 输出摘要
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 
 ```
 版本 v{version} 已准备好发布。
@@ -129,12 +129,17 @@ bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PAT
 
 2. 推送标签：
    git push origin v{version}
-   推送后将自动触发 GitHub Release 创建和 npm 发布
+   推送后将自动触发 release 创建和 npm 发布
 
 3.（可选）生成发布说明：
    - Claude Code / OpenCode：/create-release-note {version}
    - Gemini CLI：/agent-infra:create-release-note {version}
    - Codex CLI：$create-release-note {version}
+
+4.（可选）执行发布后处理：
+   - Claude Code / OpenCode：/post-release
+   - Gemini CLI：/agent-infra:post-release
+   - Codex CLI：$post-release
 ```
 
 ### 回滚说明

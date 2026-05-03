@@ -25,33 +25,18 @@ const targetPaths = [
   )
 ];
 
-const DEFAULTS_EXPR = [
-  'const DEFAULTS = JSON.parse(',
-  "  fs.readFileSync(new URL('../lib/defaults.json', import.meta.url), 'utf8')",
-  ');'
-].join('\n');
-
-const VERSION_EXPR = [
-  "const INSTALLER_VERSION = 'v' + JSON.parse(",
-  "  fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')",
-  ').version;'
-].join('\n');
+const DEFAULTS_EXPR = /const DEFAULTS = JSON\.parse\(\s*fs\.readFileSync\(new URL\('..\/lib\/defaults\.json', import\.meta\.url\), 'utf8'\)\s*\);/m;
 
 function buildInlineContent() {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const defaults = JSON.parse(fs.readFileSync(path.join(rootDir, 'lib', 'defaults.json'), 'utf8'));
-  const version = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')).version;
 
-  if (!source.includes(DEFAULTS_EXPR)) {
+  if (!DEFAULTS_EXPR.test(source)) {
     throw new Error('Could not find DEFAULTS expression in src/sync-templates.js');
-  }
-  if (!source.includes(VERSION_EXPR)) {
-    throw new Error('Could not find INSTALLER_VERSION expression in src/sync-templates.js');
   }
 
   return source
-    .replace(DEFAULTS_EXPR, `const DEFAULTS = ${JSON.stringify(defaults, null, 2)};`)
-    .replace(VERSION_EXPR, `const INSTALLER_VERSION = ${JSON.stringify(`v${version}`)};`);
+    .replace(DEFAULTS_EXPR, `const DEFAULTS = ${JSON.stringify(defaults, null, 2)};`);
 }
 
 function main() {

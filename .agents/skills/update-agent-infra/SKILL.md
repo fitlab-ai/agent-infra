@@ -22,7 +22,7 @@ description: "更新项目 AI 协作配置"
 node .agents/skills/update-agent-infra/scripts/sync-templates.js
 ```
 
-脚本读取 `.agents/.airc.json`，并通过 npm 自动定位已安装的 `@fitlab-ai/agent-infra/templates/` 目录，然后自动完成：
+脚本读取 `.agents/.airc.json`，并通过 npm 自动定位已安装的 `@fitlab-ai/agent-infra/templates/` 目录。同步前会合并 `templates.sources` 中配置的外部模板源；相同文件以内置模板为准，多个外部源之间后者覆盖前者，冲突会写入报告。然后自动完成：
 - 检测模板源版本
 - 同步文件注册表（`defaults.json` → `.agents/.airc.json`）
 - 处理所有 managed 文件（语言选择 → 排除 merged/ejected → 占位符渲染 → 覆盖写入）
@@ -35,7 +35,10 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 - `error`：错误信息（如非空则停止并报告）
 - `templateVersion`：模板源当前版本
 - `templateRoot`：模板文件根目录绝对路径
+- `templateSources.conflicts`：外部模板源冲突列表；报告中必须显式展示，说明哪些文件因内置模板或后续外部源获胜而被忽略
 - `managed.written` / `managed.created`：已更新/新建的 managed 文件
+- `managed.removed`：被删除的 managed 文件（包括模板迁移时移除的旧路径）
+- `managed.skippedPlatform`：因归属其他平台而被跳过的 managed / merged 条目
 - `merged.pending`：需要 AI 处理的 merged 文件列表
   - 每项包含 `target`（项目中的目标路径）和 `template`（模板根目录下的相对路径）
 - `registryAdded`：新增的文件注册条目
@@ -114,6 +117,7 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 基于脚本报告和 merged 合并结果，输出完整的更新报告，包括：
 - 模板版本变更
 - 文件注册表新增条目
+- 外部模板源冲突（如 `templateSources.conflicts` 非空，必须逐项列出）
 - managed 文件变更明细（已更新、新建、跳过的 merged 文件）
 - merged 文件合并结果（冲突、残余 TODO）
 - ejected 文件处理
@@ -121,7 +125,7 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 
 如有变更需要提交，追加：
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 
 ```
 下一步 - 提交代码：

@@ -1,11 +1,11 @@
 ---
 name: init-milestones
-description: "Initialize the repository's standard GitHub Milestones taxonomy"
+description: "Initialize the repository's standard milestones taxonomy"
 ---
 
-# Initialize GitHub Milestones
+# Initialize milestones
 
-Initialize the repository's standard GitHub Milestones taxonomy.
+Initialize the repository's standard milestones taxonomy.
 
 ## Execution Flow
 
@@ -62,7 +62,7 @@ Operational notes:
 
 ### 5. Inform User
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 After summarizing the milestone initialization, show:
 
@@ -75,10 +75,10 @@ Next step - initialize labels (optional):
 
 ## Error Handling
 
-- `gh` not found: prompt "GitHub CLI (`gh`) is not installed"
-- Authentication failed: prompt "GitHub CLI is not authenticated"
-- Repository access failed: prompt "Unable to access the current repository with gh"
+- platform CLI not found: prompt "the platform CLI is not installed"
+- Authentication failed: prompt "the platform CLI is not authenticated"
+- Repository access failed: prompt "Unable to access the current repository with the platform CLI"
 - Version detection failed: prompt "Unable to determine current version baseline"
 - No `v*` tags found in `--history` mode: prompt "No history tags found matching v*; only standard milestones will be created"
 - Permission error: prompt "No permission to manage milestones in this repository"
-- API rate limit: prompt "GitHub API rate limit reached, please retry later"
+- API rate limit: prompt "platform API rate limit reached, please retry later"

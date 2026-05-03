@@ -1,11 +1,11 @@
 ---
 name: init-labels
-description: "初始化仓库的 GitHub Labels 体系"
+description: "初始化仓库的 labels 体系"
 ---
 
-# 初始化 GitHub Labels
+# 初始化 labels
 
-一次性初始化仓库的标准 GitHub Labels 体系。
+一次性初始化仓库的标准 labels 体系。
 
 ## 执行流程
 
@@ -36,14 +36,14 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 脚本管理以下通用 label 族：
 - `type:` labels，例如 `type: bug`、`type: enhancement`、`type: feature`、`type: documentation`、`type: dependency-upgrade`、`type: task`
 - `status:` labels，例如 `status: waiting-for-triage`、`status: in-progress`、`status: waiting-for-internal-feedback`
-- 明确覆盖的 GitHub 默认同名 labels：`good first issue` 和 `help wanted`
+- 明确覆盖的 平台默认同名 labels：`good first issue` 和 `help wanted`
 - 额外通用 labels，例如 `dependencies`
 
 #### 适用范围
 
 | Label 前缀 | Issue | PR | 说明 |
 |---|---|---|---|
-| `type:` | — | Yes | Issue 使用 GitHub 原生 Type 字段；PR 无原生类型字段，需 `type:` label 驱动 changelog |
+| `type:` | — | Yes | Issue 使用 平台原生 Type 字段；PR 无原生类型字段，需 `type:` label 驱动 changelog |
 | `status:` | Yes | — | PR 有自身状态流转（Open/Draft/Merged/Closed）；Issue 使用 `status:` label 标记项目管理状态 |
 | `in:` | Yes | Yes | Issue 和 PR 均需按模块筛选 |
 
@@ -85,7 +85,7 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 
 ### 6. 告知用户
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 
 输出 labels 初始化摘要后，提示：
 
@@ -98,8 +98,8 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 
 ## 错误处理
 
-- 未找到 `gh`：提示 "GitHub CLI (`gh`) is not installed"
-- 认证失败：提示 "GitHub CLI is not authenticated"
-- 仓库访问失败：提示 "Unable to access the current repository with gh"
+- 未找到平台 CLI：提示 "the platform CLI is not installed"
+- 认证失败：提示 "the platform CLI is not authenticated"
+- 仓库访问失败：提示 "Unable to access the current repository with the platform CLI"
 - 权限不足：提示 "No permission to manage labels in this repository"
-- API 限流：提示 "GitHub API rate limit reached, please retry later"
+- API 限流：提示 "platform API rate limit reached, please retry later"

@@ -21,10 +21,11 @@
       "expected_action_pattern": "Cancelled",
       "freshness_minutes": 30
     },
-    "github-sync": {
+    "platform-sync": {
       "when": "issue_number_exists",
       "expected_comment_marker": "<!-- sync-issue:{task-id}:cancel -->",
-      "verify_task_comment_content": true
+      "verify_task_comment_content": true,
+      "expected_comment_marker_key": "cancel"
     }
   }
 }

@@ -1,0 +1,47 @@
+# Default: auto-detect text files and force LF on checkout
+* text=auto eol=lf
+
+# Source code (explicit, in case detection fails)
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.jsonc text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+
+# Shell scripts must be LF (executed on Linux/macOS, also fine on Git Bash for Windows)
+*.sh text eol=lf
+*.bash text eol=lf
+*.zsh text eol=lf
+
+# Windows-specific scripts must be CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+
+# Binary files (no diff, no merge)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.tar.gz binary
+*.tgz binary
+*.gz binary

@@ -47,17 +47,17 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update task.md and append:
-`- {yyyy-MM-dd HH:mm:ss} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n} → {artifact-filename}`
+`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n} → {artifact-filename}`
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Read `.agents/rules/issue-sync.md` before syncing
-- Set `status: in-progress`
+- Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
+- Set `status: in-progress` by following issue-sync.md
+- Create or update the task comment marker defined in `.agents/rules/issue-sync.md` (follow the task.md comment sync rule in issue-sync.md)
 - Publish the `{review-artifact}` comment
-- Create or update the `<!-- sync-issue:{task-id}:task -->` comment (follow the task.md comment sync rule in issue-sync.md)
 
 ### 7. Verification Gate
 
@@ -86,7 +86,7 @@ Choose exactly one branch based on the findings:
 
 > The full four-branch output templates, selection rules, and prohibition clauses live in `reference/output-templates.md`. Read `reference/output-templates.md` before reporting the review result.
 
-Include all TUI command formats in the next-step output.
+Include all TUI command formats in the next-step output. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 ## Completion Checklist
 
@@ -94,7 +94,7 @@ Include all TUI command formats in the next-step output.
 - [ ] Created `{review-artifact}`
 - [ ] Updated task.md and appended the Activity Log entry
 - [ ] Chose exactly one verdict branch in the user output
-- [ ] Informed the user of the next step (must include all TUI command formats; do not filter)
+- [ ] Informed the user of the next step (must include all TUI command formats, including any custom TUIs; do not filter)
 
 ## Notes
 

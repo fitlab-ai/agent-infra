@@ -40,7 +40,7 @@ description: "标记任务为阻塞状态并记录原因"
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新 `.agents/workspace/active/{task-id}/task.md`：
@@ -49,7 +49,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - `updated_at`：{当前时间戳}
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Blocked** by {agent} — {一行原因}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Blocked** by {agent} — {一行原因}
   ```
 
 在 task.md 中添加阻塞信息部分。
@@ -70,9 +70,9 @@ ls .agents/workspace/blocked/{task-id}/task.md
 
 检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过。
 
-> Issue 同步的 status label 规则见 `.agents/rules/issue-sync.md`。执行同步前先读取该文件。
+> Issue 同步的 status label 规则见 `.agents/rules/issue-sync.md`。执行同步前先读取该文件，完成 upstream 仓库检测和权限检测。
 
-如果存在有效的 `issue_number`，直接设置 `status: blocked`。
+如果存在有效的 `issue_number`，按 issue-sync.md 设置 `status: blocked`。
 
 ### 7. 完成校验
 
@@ -93,7 +93,7 @@ node .agents/scripts/validate-artifact.js gate block-task .agents/workspace/bloc
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 
 输出格式：
 ```

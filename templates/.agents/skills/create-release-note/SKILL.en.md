@@ -54,7 +54,7 @@ Read `.agents/rules/release-commands.md` before this step.
 - When generating release notes in Step 7, **must** follow both the historical format style and the full category list gathered in Step 3
 - If no historical release notes exist, use the default format defined in Step 7
 
-### 4. Collect Merged PRs
+### 4. Collect Merged PRs and Contributors
 
 Get the date range between tags, then query merged PRs:
 
@@ -70,6 +70,17 @@ Also collect direct commits without PRs:
 ```bash
 git log v<prev-version>..v<version> --format="%H %s" --no-merges
 ```
+
+Collect collaborative contributors from commit `Co-authored-by` trailers:
+
+```bash
+git log v<prev-version>..v<version> \
+  --no-merges \
+  --format='%(trailers:key=Co-authored-by,valueonly,unfold)' \
+  | grep -v '^$' | sort | uniq -c | sort -rn
+```
+
+Each output line is `Name <email>` and `uniq -c` provides the number of commits where that identity appeared as a co-author within the range.
 
 ### 5. Collect Related Issues
 
@@ -108,14 +119,35 @@ If no historical release notes exist, use the following default Markdown format:
 
 ## Contributors
 
-@contributor1, @contributor2, @contributor3
+@contributor1, @contributor2, @contributor3, @reporter1 (reported #N)
 ```
 
 **Format rules**:
 1. Item format: `- [scope] Description by @author in [#N](url)`
 2. Issue + PR: `in [#Issue](url) and [#PR](url)`
 3. Description: Use PR title, remove `type(scope):` prefix, capitalize first letter
-4. Contributors: Deduplicated, sorted by contribution count (descending)
+4. **Contributor collection**:
+   - **Data sources**:
+     - PR authors returned by the merged-PR query rule in `.agents/rules/release-commands.md`
+     - Commit co-authors from Step 4 `git log ... --format='%(trailers:key=Co-authored-by,valueonly,unfold)'`
+     - Issue reporters from linked Issues collected in Step 5 (author login returned by `.agents/rules/release-commands.md`)
+   - **Contribution count**: `PR count + co-authored commit count` for the same identity, merged across both sources
+   - **Name -> `@login` mapping**:
+     - Raw `Co-authored-by` values are `Name <email>` and must be mapped to a platform `@login`
+     - Prefer email extraction: if it matches the platform no-reply email rule in `.agents/rules/release-commands.md`, use that rule to derive the lowercased login
+     - Otherwise use a Name heuristic: take the first token before a space and lowercase it, for example `Claude Opus 4.6 (1M context)` -> `@claude`, `Codex` -> `@codex`, `Gemini` -> `@gemini`
+     - If the login already appears in the PR author list, merge counts into that login so `Claude` and `@claude` do not become separate entries
+     - Merge all Name variants that map to the same login before counting and sorting; for example, `Claude` and `Claude Opus 4.6 (1M context)` should both collapse into `@claude`
+     - Preserve bot identities as-is, for example `dependabot[bot]`
+     - If the login still cannot be determined reliably, output `@{lowercased first Name token}` and append `<!-- TODO(reviewer): confirm platform login for {original Name <email>} -->` below the `Contributors` section
+   - **Sorting**: descending by contribution count, then lexicographically by login for ties
+   - **Deduplication**: use the final mapped `@login` as the key
+   - **Issue reporter rules**:
+     - Extract `author.login` from each linked Issue collected in Step 5
+     - If the login already exists in the final mapped PR author or co-author list, skip it (code contribution already covers this user)
+     - Reporter-only contributors use the format `@login (reported #N)`; if the same reporter reported multiple Issues, use `@login (reported #N1, #N2)`
+     - Reporters are appended after code contributors in the Contributors section, separated by commas
+     - Sort reporters by reported Issue count descending, then lexicographically by login for ties
 5. Empty sections: Omit sections with no entries
 
 ### 8. Present and Confirm
@@ -124,7 +156,7 @@ Show the generated release notes to the user.
 
 Ask:
 1. Need any adjustments?
-2. Create a GitHub Draft Release?
+2. Create a draft release?
 
 ### 9. Create Draft Release (If Confirmed)
 
@@ -138,7 +170,7 @@ Draft Release created.
 - Version: v{version}
 - Status: Draft
 
-Please review and publish on GitHub:
+Please review and publish on the platform:
 1. Open the URL above
 2. Review the release notes
 3. Click "Publish release"
@@ -146,7 +178,7 @@ Please review and publish on GitHub:
 
 ## Notes
 
-1. **Requires gh CLI**: Must have GitHub CLI installed and authenticated
+1. **Requires the platform CLI**: Must have the platform CLI installed and authenticated
 2. **Tags must exist**: Run the release skill first to create tags
 3. **Draft mode**: Creates a draft - won't auto-publish
 4. **Classification accuracy**: Auto-classification is based on title/scope/files; complex PRs may need manual adjustment
@@ -155,5 +187,5 @@ Please review and publish on GitHub:
 
 - Invalid version format: Prompt correct format
 - Tag not found: Suggest running the release skill first
-- gh not authenticated: Prompt to authenticate
+- The platform CLI is not authenticated: Prompt to authenticate
 - No merged PRs found: Prompt to check tags and branch

@@ -4,15 +4,11 @@ Read this file before generating the PR title and body.
 
 ## Read the PR Template
 
-Read `.github/PULL_REQUEST_TEMPLATE.md` from the repository. If it does not exist, use the standard format.
+PR template discovery is platform-specific. Read `.agents/rules/issue-pr-commands.md` and follow the PR template section provided by the configured platform. If no template is available, use the standard format.
 
 ## Review Recent Merged PRs for Reference
 
-```bash
-gh pr list --limit 3 --state merged --json number,title,body
-```
-
-Use the recent merged PRs as style and formatting references.
+Use the recent merged PR query from `.agents/rules/issue-pr-commands.md` as style and formatting reference input.
 
 ## Analyze Current Branch Changes
 
@@ -27,17 +23,13 @@ git diff <target-branch>...HEAD
 
 Read `.agents/rules/issue-pr-commands.md` before this step.
 
-Before syncing labels, verify the standard label system:
+Before syncing linked Issue metadata, complete authentication and code-hosting platform detection through that rule.
 
-```bash
-gh label list --search "type:" --limit 1 --json name --jq 'length'
-```
-
-If the result is `0`, run `init-labels` before retrying metadata sync.
+Before syncing labels, verify the standard label system by following the label-list command in `.agents/rules/issue-pr-commands.md`. If the result shows no standard type labels, run `init-labels` before retrying metadata sync.
 
 Type label mapping:
 
-| task.md type | GitHub label |
+| task.md type | label |
 |---|---|
 | `bug`, `bugfix` | `type: bug` |
 | `feature` | `type: feature` |
@@ -50,11 +42,12 @@ Type label mapping:
 
 Metadata sync order:
 1. query Issue labels and milestone via the Issue read command in `.agents/rules/issue-pr-commands.md`
-2. add the mapped type label via the PR update command in `.agents/rules/issue-pr-commands.md`
-3. inherit non-`type:` and non-`status:` Issue labels via repeated PR update commands from the same rule
-4. refine the PR `in:` labels by following `.agents/rules/issue-sync.md`, and keep the linked Issue `in:` labels in sync with the same result
-5. handle the milestone by following "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md`, reusing the Issue milestone directly
-6. ensure the PR body contains `Closes #{issue-number}` or an equivalent closing keyword
+2. build `{label-args}` from the mapped type label, non-`type:` / non-`status:` Issue labels, and the current Issue `in:` labels (commit already computed them, so do not recompute them here and do not write back to the Issue)
+3. build `{milestone-arg}` by following "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md` and reusing the Issue milestone directly
+4. pass `{label-args}` and `{milestone-arg}` atomically by using the create-PR command template and permission-degradation rules in `.agents/rules/issue-pr-commands.md`
+5. ensure the PR body contains `Closes #{issue-number}` or an equivalent closing keyword
+
+If those rules say to skip the direct metadata arguments above, keep only the PR body linkage plus later comment sync.
 
 Milestone rule:
 - Follow "Phase 3: `create-pr`" in `.agents/rules/milestone-inference.md`
@@ -63,13 +56,13 @@ Milestone rule:
 ## Create the PR
 
 - Extract `issue_number` from task.md when this work belongs to an active task
-- If `issue_number` exists, query the Issue via `.agents/rules/issue-pr-commands.md`
+- If `issue_number` exists, complete the prerequisite code-hosting platform detection steps first, then query the Issue via `.agents/rules/issue-pr-commands.md`
 - Before calling the PR creation command, check whether the current branch already has a PR. If it does, report the PR URL and state, then stop without repeating metadata sync or summary publication
 - Use HEREDOC to pass the PR body
 - Replace `{$IssueNumber}` in the template when present
 - End the PR body with `Generated with AI assistance`
 
-Create the PR with the "Create a PR" command template in `.agents/rules/issue-pr-commands.md`.
+Create the PR with the create-PR command template in `.agents/rules/issue-pr-commands.md`.
 
 Final user output should include this follow-up path:
 

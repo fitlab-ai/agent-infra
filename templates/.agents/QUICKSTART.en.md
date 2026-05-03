@@ -13,10 +13,27 @@ This guide walks you through using multiple AI coding assistants together on a p
 Enable the shared Git hooks path before relying on the template hook chain:
 
 ```bash
-git config core.hooksPath .github/hooks
+git config core.hooksPath .git-hooks
 ```
 
-This makes Git invoke the hooks synced into `.github/hooks/`, including `pre-commit` and `check-version-format.sh`.
+This makes Git invoke the hooks in the project repository's `.git-hooks/` directory, including `pre-commit` and `check-version-format.sh`.
+
+## External Templates And Skills
+
+If your team maintains private platform templates or shared custom skills, configure local sources in `.agents/.airc.json`:
+
+```json
+{
+  "templates": {
+    "sources": [{ "type": "local", "path": "~/private-templates" }]
+  },
+  "skills": {
+    "sources": [{ "type": "local", "path": "~/private-skills" }]
+  }
+}
+```
+
+Built-in templates take priority over external templates. Later external template sources override earlier external sources, and `update-agent-infra` reports conflicts in `templateSources.conflicts`. Only use trusted local paths because external templates and skills may contain executable scripts.
 
 ## Creating Your First Task
 

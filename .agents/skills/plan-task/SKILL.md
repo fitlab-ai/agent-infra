@@ -81,7 +81,7 @@ description: "为任务设计技术方案和实施计划"
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新 `.agents/workspace/active/{task-id}/task.md`：
@@ -93,14 +93,14 @@ date "+%Y-%m-%d %H:%M:%S"
 - 在工作流进度中标记 technical-design 为已完成，并注明实际轮次（如果任务模板支持）
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Technical Design (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Technical Design (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
   ```
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
-- 执行前先读取 `.agents/rules/issue-sync.md`
-- 设置 `status: pending-design-work`
+- 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
+- 按 issue-sync.md 设置 `status: pending-design-work`
+- 创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记（按 issue-sync.md 的 task.md 评论同步规则）
 - 发布 `{plan-artifact}` 评论
-- 创建或更新 `<!-- sync-issue:{task-id}:task -->` 评论（按 issue-sync.md 的 task.md 评论同步规则）
 
 ### 8. 完成校验
 
@@ -121,7 +121,7 @@ node .agents/scripts/validate-artifact.js gate plan-task .agents/workspace/activ
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 
 输出格式：
 ```
@@ -157,7 +157,7 @@ node .agents/scripts/validate-artifact.js gate plan-task .agents/workspace/activ
 - [ ] 在工作流进度中标记了 technical-design 为已完成
 - [ ] 追加了 Activity Log 条目到 task.md
 - [ ] 告知了用户这是人工审查检查点
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，不要筛选）
+- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，含自定义 TUI，不要筛选）
 
 ## 停止
 

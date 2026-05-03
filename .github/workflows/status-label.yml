@@ -14,6 +14,16 @@ jobs:
   manage-status-labels:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout shared scripts
+        if: >-
+          (github.event_name == 'issues' && github.event.action == 'closed' && github.event.issue.state_reason == 'completed') ||
+          (github.event_name == 'issues' && github.event.action == 'reopened') ||
+          (github.event_name == 'pull_request_target' && github.event.action == 'closed' && github.event.pull_request.merged == true)
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
       - name: Remove status labels on issue close
         if: >-
           github.event_name == 'issues' &&
@@ -23,16 +33,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          gh issue view "$ISSUE_NUMBER" \
+          .github/scripts/sync-labels-to-set.sh \
             --repo "$GITHUB_REPOSITORY" \
-            --json labels --jq '.labels[].name | select(startswith("status:"))' \
-            2>/dev/null \
-          | while IFS= read -r label; do
-              [ -z "$label" ] && continue
-              gh issue edit "$ISSUE_NUMBER" \
-                --repo "$GITHUB_REPOSITORY" \
-                --remove-label "$label"
-            done || true
+            --issue "$ISSUE_NUMBER" \
+            --prefix "status:"
 
       - name: Add triage label on issue reopen
         if: github.event_name == 'issues' && github.event.action == 'reopened'
@@ -40,19 +44,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          gh issue view "$ISSUE_NUMBER" \
+          .github/scripts/sync-labels-to-set.sh \
             --repo "$GITHUB_REPOSITORY" \
-            --json labels --jq '.labels[].name | select(startswith("status:"))' \
-            2>/dev/null \
-          | while IFS= read -r label; do
-              [ -z "$label" ] && continue
-              gh issue edit "$ISSUE_NUMBER" \
-                --repo "$GITHUB_REPOSITORY" \
-                --remove-label "$label"
-            done || true
-          gh issue edit "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --add-label "status: waiting-for-triage"
+            --issue "$ISSUE_NUMBER" \
+            --prefix "status:" \
+            --target "status: waiting-for-triage"
 
       - name: Clean status labels on PR merge
         if: >-
@@ -71,15 +67,9 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --json state --jq '.state')
             if [ "$state" = "CLOSED" ]; then
-              gh issue view "$issue_number" \
+              .github/scripts/sync-labels-to-set.sh \
                 --repo "$GITHUB_REPOSITORY" \
-                --json labels --jq '.labels[].name | select(startswith("status:"))' \
-                2>/dev/null \
-              | while IFS= read -r label; do
-                  [ -z "$label" ] && continue
-                  gh issue edit "$issue_number" \
-                    --repo "$GITHUB_REPOSITORY" \
-                    --remove-label "$label"
-                done || true
+                --issue "$issue_number" \
+                --prefix "status:"
             fi
           done

@@ -14,7 +14,7 @@ test(".agents/.airc.json merged patterns use recursive command globs and explici
   const merged = collaborator.files.merged;
 
   [
-    ".github/hooks/pre-commit",
+    ".git-hooks/pre-commit",
     "**/test.*",
     "**/test-integration.*",
     "**/release.*",
@@ -57,6 +57,7 @@ test(".agents/.airc.json declares default sandbox configuration", () => {
   const collaborator = JSON.parse(read(".agents/.airc.json"));
 
   assert.deepEqual(collaborator.sandbox, {
+    engine: "orbstack",
     runtimes: ["node20"],
     tools: ["claude-code", "codex", "opencode", "gemini-cli"],
     dockerfile: null,
@@ -78,8 +79,8 @@ test(".agents/.airc.json excludes deprecated codex prompt paths", () => {
   const collaborator = JSON.parse(read(".agents/.airc.json"));
 
   assert.ok(
-    collaborator.files.managed.includes(".github/hooks/check-version-format.sh"),
-    ".github/hooks/check-version-format.sh should be in managed list"
+    collaborator.files.managed.includes(".git-hooks/check-version-format.sh"),
+    ".git-hooks/check-version-format.sh should be in managed list"
   );
   assert.ok(
     collaborator.files.managed.includes(".agents/scripts/"),

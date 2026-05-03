@@ -102,6 +102,22 @@ git push origin vX.Y.Z
 - `fitlab-ai` scope 或对应组织权限已经在 npm 准备完成
 - 目标版本尚未在 npm registry 中存在
 
+### 5. 发布后处理
+
+在发布标签推送并完成 CI 发布后，执行 `post-release` 技能准备下一轮开发版本：
+
+- Claude Code / OpenCode：`/post-release`
+- Gemini CLI：`/agent-infra:post-release`
+- Codex CLI：`$post-release`
+
+该技能负责：
+
+- 检测最新已发布标签并解析版本
+- bump 到下一个开发版本
+- 重建内联产物
+- 可选录制最新执行动图
+- 创建发布后处理提交
+
 ## 回滚流程
 
 如果本地发布准备完成后发现版本错误，可按 release 技能中的回滚步骤处理：

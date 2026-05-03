@@ -48,13 +48,13 @@ ghsa_id: <GHSA-ID>
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update task.md: `current_step` -> `requirement-analysis`.
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Import Dependabot Alert** by {agent} — Dependabot alert #{alert-number} imported
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Import Dependabot Alert** by {agent} — Dependabot alert #{alert-number} imported
   ```
 
 ### 4. Verification Gate
@@ -76,7 +76,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 ```
 Security alert #{alert-number} imported.
@@ -105,7 +105,7 @@ Next step:
 - [ ] Updated `current_step` to requirement-analysis in task.md
 - [ ] Updated `updated_at` to the current time in task.md
 - [ ] Appended an Activity Log entry to task.md
-- [ ] Informed the user of the next step (must include all TUI command formats; do not filter)
+- [ ] Informed the user of the next step (must include all TUI command formats, including any custom TUIs; do not filter)
 
 ## Error Handling
 

@@ -53,7 +53,7 @@ Please complete the missing steps first, or use --force to override.
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新 `.agents/workspace/active/{task-id}/task.md`：
@@ -64,7 +64,7 @@ date "+%Y-%m-%d %H:%M:%S"
 - 逐项验证并勾选 `## 完成检查清单` 中的所有条目（将 `- [ ]` 改为 `- [x]`）
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Completed** by {agent} — Task moved to completed/
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Completed** by {agent} — Task moved to completed/
   ```
 
 ### 4. 转移任务
@@ -87,13 +87,13 @@ ls .agents/workspace/completed/{task-id}/task.md
 
 检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过此步骤且不输出任何内容。
 
-> Issue 同步规则见 `.agents/rules/issue-sync.md`。执行同步前先读取该文件。
+> Issue 同步规则见 `.agents/rules/issue-sync.md`。执行同步前先读取该文件，完成 upstream 仓库检测和权限检测。
 
 如果存在有效的 `issue_number`：
 - 先按 `.agents/rules/issue-sync.md` 的补发规则扫描并补发未发布的 `task.md`、`analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md` 评论（`task.md` 走幂等更新路径）
-- 兜底同步 `## 需求` 中已勾选的条目到 Issue body
+- 按 issue-sync.md 的需求复选框同步步骤，兜底同步 `## 需求` 中已勾选的条目到 Issue body
 - 不要设置 `status:` label — Issue 关闭后 status label 会被自动清除
-- 最后创建或更新 `<!-- sync-issue:{task-id}:summary -->` 标记的 summary 评论
+- 最后创建或更新 `.agents/rules/issue-sync.md` 中定义的 summary 评论标记对应的 summary 评论
 
 ### 7. 完成校验
 

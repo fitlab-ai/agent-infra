@@ -38,12 +38,12 @@ test("restore-task verify configs declare the expected checks", () => {
     assert.equal(verify.skill, "restore-task");
     assert.deepEqual(
       Object.keys(verify.checks),
-      ["task-meta", "activity-log", "github-sync"],
+      ["task-meta", "activity-log", "platform-sync"],
       `${relativePath} should declare the restore-task checks`
     );
     assert.equal(verify.checks["task-meta"].require_issue_number, true);
     assert.equal(verify.checks["activity-log"].expected_action_pattern, "Restore Task");
-    assert.equal(verify.checks["github-sync"], null);
+    assert.equal(verify.checks["platform-sync"], null);
   });
 });
 

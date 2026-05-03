@@ -19,7 +19,7 @@
 ### 前置条件
 
 - Git
-- Node.js >= 18（用于内置测试运行器 `node:test`）
+- Node.js >= 22（用于内置测试运行器 `node:test`）
 - Shell（sh/bash/zsh）
 
 ### 快速开始
@@ -28,10 +28,11 @@
 # 克隆项目
 git clone git@github.com:fitlab-ai/agent-infra.git
 
-# 安装依赖：无需安装，仅使用 Node.js 内置模块
+# 安装依赖：开发检出后必须先安装真实 npm 依赖
+npm install
 
 # 启用 Git hooks（仅首次 clone 后执行一次）
-git config core.hooksPath .github/hooks
+git config core.hooksPath .git-hooks
 
 # 构建（修改 src/ 或 lib/ 后需要运行）
 npm run build
@@ -75,6 +76,50 @@ npm test
 - 模板文件使用 `{{project}}` 和 `{{org}}` 作为渲染占位符
 - 面向用户的 Markdown 文件提供双语版本（英文为主 + 中文翻译），如 README、SECURITY
 
+### 平台无关层与平台层
+
+本仓库的模板需要区分平台无关 baseline 与平台特定实现。平台特定内容只能放在以下位置：
+
+- `.agents/rules/*.{platform}.md`
+- `.agents/scripts/platform-adapters/platform-sync.{platform}.js`
+- 明确属于平台集成的脚本或工作流目录
+
+除上述位置外，`SKILL.md`、`reference/*.md`、命令面板、QUICKSTART、README 等 baseline 文件必须保持平台无关。baseline 文件应引用 `.agents/rules/*.md` 或 `.agents/scripts/` 中的抽象入口，不直接写入平台命令、路径或 schema。
+
+判断平台耦合时，先检查这些硬指标：
+
+- 平台名，如 `GitHub`
+- 平台路径，如 `.github/`
+- 平台 CLI，如 `gh CLI` 或以 `gh ` 开头的命令
+
+还要人工检查这些软指标：
+
+- 平台特定 schema 字段名，如 GitHub Issue Forms 的 `textarea`、`input`、`dropdown`、`checkboxes`、`attributes.label`
+- 平台文件命名约定，如 `.yml` Issue Form 文件名、`PULL_REQUEST_TEMPLATE.md`
+- 已在 rules/scripts 中定义过的命令或 marker 字符串副本
+
+`tests/templates/platform-coupling.test.js` 提供结构性护栏：baseline 文案不得含平台硬指标，skill reference 目录不得新增 `.github.*` 这类平台变体。测试不能覆盖所有软指标，PR 作者和 reviewer 仍需人工检查 schema 字段、命令重复和措辞包装。
+
+### 路径级平台门控（init/sync 实施层）
+
+`templates/` 下顶层段为 `.{platform}/` 的路径（如 `.github/`、未来的 `.gitlab/`）由 `src/sync-templates.js` 按 `cfg.platform.type` 自动门控分发：
+
+- 当 `cfg.platform.type` 等于该 platform：正常分发与同步
+- 当 `cfg.platform.type` 是其他 `KNOWN_PLATFORMS` 值或自定义平台：跳过分发，并清理项目中残留的同名目录条目
+
+项目级（非平台特定）的 git hooks、配置等不应放在 `.{platform}/` 下；放在平台中性路径（如 `.git-hooks/`）才能跨平台分发。
+
+示例：
+
+- 反例：在 `templates/.agents/skills/create-pr/reference/pr-body-template.en.md` 中直接写 `gh pr list --limit 3 --state merged`
+- 正例：baseline reference 写“按 `.agents/rules/issue-pr-commands.md` 的最近 PR 查询命令执行”，GitHub 具体命令只放在 `issue-pr-commands.github.en.md`
+
+已采纳的架构决策：
+
+- `verify.json` 应优先通过 `expected_*_key` 引用平台 adapter 的默认值，而不是复制 marker 或 status label 字符串。
+- `platform-sync.{platform}.js#getDefaults()` 是平台默认 marker 和 status label 的单一信息源。
+- 这个 key-based 抽象是为多平台扩展保留的设计：把 N 个 skill × M 个平台的配置成本收敛为 N 个 key 引用 + M 个 adapter 默认值。
+
 ### 构建架构
 
 - `src/sync-templates.js` 是开发源码，保留可读的源码结构和对 `lib/` 数据文件的标准读取方式。
@@ -110,7 +155,7 @@ npm test
 
 ## 测试
 
-- 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 18）
+- 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 22）
 - 构建命令：`npm run build`（修改 `src/`、`lib/defaults.json` 或版本信息后需要运行）
 - 运行命令：`npm test`
 - 等价于：`node scripts/build-inline.js --check && node --test tests/*.test.js`

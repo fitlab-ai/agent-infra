@@ -1,5 +1,5 @@
 ---
-description: "Restore local task files from GitHub Issue comments"
+description: "Restore local task files from Issue comments"
 usage: "/restore-task <issue-number> [task-id]"
 disable-model-invocation: true
 ---

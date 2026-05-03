@@ -11,7 +11,7 @@ Reformat the title of the specified Issue or PR to Conventional Commits format b
 
 ### 1. Identify Target and Fetch Information
 
-Read `.agents/rules/issue-pr-commands.md` before this step.
+Read `.agents/rules/issue-pr-commands.md` before this step, and follow its prerequisite steps to complete authentication and code-hosting platform detection.
 
 Try to determine if the ID is an Issue or PR:
 - first fetch Issue data by following the "Read an Issue" command in the rule file
@@ -58,13 +58,17 @@ If the user confirms:
 - for an Issue, update the title by following the "Update Issues" command in `.agents/rules/issue-pr-commands.md`
 - for a PR, update the title by following the "Update PRs" command in `.agents/rules/issue-pr-commands.md`
 
+Title changes require write permission. Follow the permission-degradation rules in `.agents/rules/issue-pr-commands.md` and `.agents/rules/issue-sync.md`; if permission is unavailable, skip the change and inform the user.
+
 ### 5. Inform User
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 If the skill updated an Issue title, explain that no extra sync command is required; continue with the workflow skill that matches the task's current stage.
 
 If the skill updated a PR title, explain that `create-pr` now publishes the reviewer summary inline, so no extra sync command is needed; continue with the workflow skill that matches the task's current stage.
+
+If title modification was skipped due to insufficient permissions, additionally remind the user that the suggested title can still be applied manually on the code-hosting platform page.
 
 ## Advantages
 

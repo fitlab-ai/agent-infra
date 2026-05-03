@@ -1,6 +1,6 @@
 ---
 name: cancel-task
-description: "Cancel an unneeded task and archive it"
+description: "Cancel an unneeded task and move it"
 ---
 
 # Cancel Task
@@ -40,7 +40,7 @@ When syncing to the Issue, replace any existing `status:` labels with the inferr
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update `task.md` in the task directory:
@@ -50,7 +50,7 @@ Update `task.md` in the task directory:
 - `updated_at`: {current timestamp}
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Cancelled** by {agent} — {one-line cancellation reason}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Cancelled** by {agent} — {one-line cancellation reason}
   ```
 
 ### 4. Move the Task
@@ -71,16 +71,16 @@ Confirm the task directory was moved successfully.
 
 Check whether `task.md` contains a valid `issue_number`. If not, skip this step.
 
-> Issue sync rules live in `.agents/rules/issue-sync.md`. Read that file before syncing.
+> Issue sync rules live in `.agents/rules/issue-sync.md`. Read that file before syncing, and complete upstream repository detection plus permission detection.
 > Read `.agents/rules/issue-pr-commands.md` before closing the Issue.
 
 If a valid `issue_number` exists:
-- Replace all `status:` labels with the label inferred in Step 2
-- Remove all `in:` labels
-- Remove the milestone
-- Remove all assignees
-- Publish a cancellation comment using the marker `<!-- sync-issue:{task-id}:cancel -->`
-- Create or update the `<!-- sync-issue:{task-id}:task -->` comment using the task-comment sync rules from `.agents/rules/issue-sync.md`
+- Replace all `status:` labels with the label inferred in Step 2 by following issue-sync.md
+- Remove all `in:` labels by following issue-sync.md
+- Remove the milestone by following issue-sync.md
+- Remove all assignees (skip directly when permission is insufficient; no fallback)
+- Publish a cancellation comment using the cancel marker defined in `.agents/rules/issue-sync.md`
+- Create or update the task comment marker defined in `.agents/rules/issue-sync.md` using the task-comment sync rules from `.agents/rules/issue-sync.md`
 - Close the Issue by following the "Close an Issue" command in `.agents/rules/issue-pr-commands.md`, using the fixed reason `not planned`
 
 The cancellation comment must include at least:
@@ -106,7 +106,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 Output format:
 ```

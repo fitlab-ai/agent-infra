@@ -3,6 +3,7 @@
     "type": "github"
   },
   "sandbox": {
+    "engine": null,
     "runtimes": [
       "node20"
     ],
@@ -35,21 +36,24 @@
       ".claude/commands/",
       ".claude/hooks/",
       ".gemini/commands/",
-      ".github/hooks/check-version-format.sh",
+      ".git-hooks/check-version-format.sh",
+      ".github/scripts/",
       ".opencode/commands/"
     ],
     "merged": [
+      "**/post-release.*",
       "**/release.*",
       "**/test-integration.*",
       "**/test.*",
       "**/upgrade-dependency.*",
+      ".agents/skills/post-release/SKILL.*",
       ".agents/skills/release/SKILL.*",
       ".agents/skills/test-integration/SKILL.*",
       ".agents/skills/test/SKILL.*",
       ".agents/skills/upgrade-dependency/SKILL.*",
       ".claude/settings.json",
       ".gemini/settings.json",
-      ".github/hooks/pre-commit",
+      ".git-hooks/pre-commit",
       ".gitignore"
     ],
     "ejected": []

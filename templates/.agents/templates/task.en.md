@@ -1,13 +1,13 @@
 ---
 id: task-XXX
 type: feature                  # feature | bugfix | refactor | docs | review
-branch: ""                     # <project>-<type>-<slug>
+branch:                        # <project>-<type>-<slug>
 workflow: feature-development  # feature-development | bug-fix | code-review | refactoring
 status: open                   # open | in-progress | review | blocked | completed
-created_at: YYYY-MM-DD
-updated_at: YYYY-MM-DD
+created_at: YYYY-MM-DDTHH:mm:ss±HH:MM
+updated_at: YYYY-MM-DDTHH:mm:ss±HH:MM
 current_step: analysis         # analysis | design | implementation | review | fix | commit
-assigned_to: ""                # claude | codex | gemini | opencode | human
+assigned_to:                   # claude | codex | gemini | opencode | human
 ---
 
 # Task: [Title]
@@ -50,7 +50,7 @@ assigned_to: ""                # claude | codex | gemini | opencode | human
 ## Activity Log
 
 <!-- Append a new entry for each workflow step. Do NOT overwrite previous entries. -->
-<!-- Format: - {yyyy-MM-dd HH:mm} — **{step}** by {agent} — {brief summary} -->
+<!-- Format: - {YYYY-MM-DD HH:mm:ss±HH:MM} — **{step}** by {agent} — {brief summary} -->
 
 ## Completion Checklist
 

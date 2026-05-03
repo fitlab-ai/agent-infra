@@ -80,19 +80,19 @@ If a related task exists (search for `security_alert_number: <alert-number>`):
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 - Add the dismissal record to task.md
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {yyyy-MM-dd HH:mm:ss} — **Alert Closed** by {agent} — Dependabot alert #{alert-number} dismissed: {reason}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Alert Closed** by {agent} — Dependabot alert #{alert-number} dismissed: {reason}
   ```
 - Archive the task
 
 ### 8. Inform User
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent.
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 ```
 Security alert #{alert-number} dismissed.

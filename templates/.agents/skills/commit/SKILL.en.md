@@ -39,12 +39,12 @@ Stage specific files only and run `git commit` with the prepared message.
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S"
+date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 > The full four-case status matrix, prerequisite checks, and multi-TUI next-step commands live in `reference/task-status-update.md`. Read `reference/task-status-update.md` before updating task state.
 
-> **IMPORTANT**: When showing the next step, output every TUI command format in full and directly use the standard template from `reference/task-status-update.md`.
+> **IMPORTANT**: When showing the next step, output every TUI command format in full and directly use the standard template from `reference/task-status-update.md`. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 Append the Commit Activity Log entry and choose exactly one next-step case:
 - final commit -> `complete-task {task-id}`
@@ -52,15 +52,27 @@ Append the Commit Activity Log entry and choose exactly one next-step case:
 - ready for review -> `review-task {task-id}`
 - ready for PR -> `create-pr`
 
-## 6. Sync PR Summary When Applicable
+## 6. Sync Issue Metadata When Applicable
 
-When `{task-id}` exists and task.md contains a valid `pr_number`, refresh the PR summary comment `<!-- sync-pr:{task-id}:summary -->` on the PR. Otherwise, skip this step.
+When `{task-id}` exists and task.md contains a valid `issue_number`, sync the linked Issue `in:` labels and requirement checkboxes. Otherwise, skip this step.
 
-> The full trigger conditions, aggregation rules, PATCH/POST flow, shell-safety constraints, and error handling live in `reference/pr-summary-sync.md` (which in turn points to `.agents/rules/pr-sync.md`). Read `reference/pr-summary-sync.md` before executing this step.
+> Trigger conditions, `in:` label computation rules, and requirement-checkbox sync flow live in `reference/issue-metadata-sync.md`. Read that file before running this step.
+>
+> If this step touches the code-hosting platform, complete the prerequisite checks in `.agents/rules/issue-pr-commands.md` first.
 
 Failure handling matches "Update Task Status When Applicable": warn, but do **not** block an already completed `git commit`.
 
-## 7. Verification Gate
+## 7. Sync PR Summary When Applicable
+
+When `{task-id}` exists and task.md contains a valid `pr_number`, refresh the PR summary comment marked with the PR summary marker defined in `.agents/rules/pr-sync.md` on the PR. Otherwise, skip this step.
+
+> The full trigger conditions, aggregation rules, PATCH/POST flow, shell-safety constraints, and error handling live in `reference/pr-summary-sync.md` (which in turn points to `.agents/rules/pr-sync.md`). Read `reference/pr-summary-sync.md` before executing this step.
+>
+> If this step touches the code-hosting platform, complete the prerequisite checks in `.agents/rules/issue-pr-commands.md` first so the runtime context required by `.agents/rules/pr-sync.md` is ready.
+
+Failure handling matches "Update Task Status When Applicable": warn, but do **not** block an already completed `git commit`.
+
+## 8. Verification Gate
 
 If this operation is associated with `{task-id}`, run the verification gate to confirm task metadata and sync state. If there is no task context, skip this step.
 
