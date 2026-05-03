@@ -201,6 +201,14 @@ CLI 会收集项目元数据，向所有支持的 AI TUI 安装 `update-agent-in
 
 `ai sandbox exec` 也会向容器透传一小组终端检测白名单变量（`TERM_PROGRAM`、`TERM_PROGRAM_VERSION`、`LC_TERMINAL`、`LC_TERMINAL_VERSION`）。这样可以让交互式 TUI 保持与宿主终端一致的行为，例如 Claude Code 的 `Shift+Enter` 换行支持，同时避免把整个宿主环境灌入容器。
 
+### Windows 沙箱前置条件
+
+在 Windows 上，`ai sandbox` 使用 WSL2 作为容器引擎边界。运行 `ai sandbox create` 前，请先准备 Windows 11、WSL2、默认 Linux distribution、Docker Desktop，并在 Docker Desktop 中为该 distribution 启用 WSL integration。
+
+你可以从 PowerShell 或 Git Bash 运行 CLI，但项目路径必须能被 WSL 访问，例如 `C:\Users\you\project`，或其他会挂载到 `/mnt/<drive>` 的磁盘路径。UNC 路径不支持作为沙箱挂载路径。如果 Windows 入口无法通过 WSL2 访问 Docker，可以进入对应 WSL distribution 后运行同一命令作为回退方案。
+
+`ai sandbox vm` 只管理 macOS 的 Colima VM。在 Windows 上，请使用 Docker Desktop 和 WSL2 自带工具管理后端。
+
 <a id="architecture-overview"></a>
 
 ## 架构概览

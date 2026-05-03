@@ -17,6 +17,7 @@ import {
 
 const scriptPath = filePath(".agents/scripts/validate-artifact.js");
 const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+let currentFakeGhPath = null;
 
 function formatTimestamp(date) {
   const pad = (value) => String(value).padStart(2, "0");
@@ -142,7 +143,14 @@ function buildCompletedTaskContent(checklistLines, overrides = {}) {
 }
 
 function runValidator(args, options = {}) {
-  const env = gitSafeEnv(options.env);
+  const useFakeGh = currentFakeGhPath && Object.keys(options.env || {}).some((key) => key.startsWith("GH_FAKE_"));
+  const env = gitSafeEnv({
+    ...(useFakeGh ? {
+      AGENT_INFRA_GH_BIN: process.execPath,
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([currentFakeGhPath])
+    } : {}),
+    ...options.env
+  });
   if (env.PATH) {
     for (const key of Object.keys(env)) {
       if (key.toLowerCase() === "path") {
@@ -160,11 +168,14 @@ function runValidator(args, options = {}) {
 
 function writeFakeGh(filePathname) {
   write(filePathname, loadFixture("fake-gh.js"));
+  currentFakeGhPath = filePathname;
+
   if (process.platform === "win32") {
     writeNodeCommandShim(filePathname, filePathname);
-  } else {
-    fs.chmodSync(filePathname, 0o755);
+    return;
   }
+
+  fs.chmodSync(filePathname, 0o755);
 }
 
 function buildArtifactMarker(taskId, artifactFile) {

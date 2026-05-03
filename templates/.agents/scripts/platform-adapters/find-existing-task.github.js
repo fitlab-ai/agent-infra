@@ -1,5 +1,5 @@
+import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import spawn from "cross-spawn";
 
 const markerPattern = /^<!-- sync-issue:(TASK-\d{8}-\d{6}):([a-z][a-z0-9-]*) -->$/;
 
@@ -43,8 +43,8 @@ function usage() {
 }
 
 function runGh(args) {
-  const ghBin = process.env.IMPORT_ISSUE_GH_BIN || "gh";
-  const result = spawn.sync(ghBin, args, {
+  const gh = resolveGhCommand();
+  const result = spawnSync(gh.command, [...gh.preArgs, ...args], {
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024
   });
@@ -63,6 +63,25 @@ function runGh(args) {
   }
 
   return result.stdout;
+}
+
+function resolveGhCommand() {
+  const command = process.env.IMPORT_ISSUE_GH_BIN || "gh";
+  const rawPreArgs = process.env.IMPORT_ISSUE_GH_ARGS_JSON;
+  if (!rawPreArgs) {
+    return { command, preArgs: [] };
+  }
+
+  try {
+    const preArgs = JSON.parse(rawPreArgs);
+    if (Array.isArray(preArgs) && preArgs.every((arg) => typeof arg === "string")) {
+      return { command, preArgs };
+    }
+  } catch {
+    return { command, preArgs: [] };
+  }
+
+  return { command, preArgs: [] };
 }
 
 function resolveRepo(explicitRepo) {

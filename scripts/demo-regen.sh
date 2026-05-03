@@ -48,4 +48,4 @@ ffmpeg -y -i "$webm" -i /tmp/demo-palette.png \
   "$gif" 2>/dev/null
 
 # ── Normalize frame delays to fixed target duration ──
-python3 scripts/normalize-gif-duration.py "$gif" "$target_duration"
+node scripts/normalize-gif-duration.js "$gif" "$target_duration"

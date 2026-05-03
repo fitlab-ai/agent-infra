@@ -159,6 +159,18 @@ The hidden marker must remain compatible:
 <!-- sync-issue:{task-id}:{file-stem} -->
 ```
 
+Prefer the shared sync script instead of hand-built shell or PowerShell commands in each skill:
+
+```bash
+node .agents/scripts/sync-issue-comments.js {task-dir} {artifact-file} --agent {agent}
+```
+
+Behavior requirements:
+- Sync `task.md` plus the specified artifact file by default; when no artifact file is provided, scan `task.md`, `analysis*.md`, `plan*.md`, `implementation*.md`, `review*.md`, `refinement*.md`, `summary*.md`, and `cancel*.md` in the task directory
+- Find each existing hidden marker by `{file-stem}`; create missing comments, PATCH changed comments in place, and skip unchanged comments
+- Call `gh api` with a JSON file through `--input`; do not pass long Markdown bodies through `-f body=...`
+- Keep local artifacts when sync fails; record authentication, network, or permission errors as sync blockers
+
 Check for an existing comment before publishing:
 
 ```bash
@@ -167,7 +179,7 @@ gh api "repos/$upstream_repo/issues/{issue-number}/comments" \
   | grep -qF "<!-- sync-issue:{task-id}:{file-stem} -->"
 ```
 
-Skip publishing when the marker already exists.
+Skip when the existing body is unchanged; PATCH the original comment when the body differs so the timeline comment stays current.
 
 Publishing flow:
 

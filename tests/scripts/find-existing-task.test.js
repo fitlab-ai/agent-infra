@@ -51,7 +51,8 @@ function writeFakeGh(tmpDir, comments, options = {}) {
       ...process.env,
       FAKE_GH_COMMENTS: dataPath,
       FAKE_GH_FAIL: options.fail ? "1" : "0",
-      IMPORT_ISSUE_GH_BIN: commandPath
+      IMPORT_ISSUE_GH_BIN: process.execPath,
+      IMPORT_ISSUE_GH_ARGS_JSON: JSON.stringify([fakeGhPath])
     }
   };
 }

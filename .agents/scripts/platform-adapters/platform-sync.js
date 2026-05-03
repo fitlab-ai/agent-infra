@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import spawn from "cross-spawn";
+import { spawnSync } from "node:child_process";
 
 const CHECK_TYPE = "platform-sync";
 const DEFAULT_RETRY_DELAYS_MS = [3000, 10000];
@@ -1034,7 +1034,7 @@ function resolveUpstreamRepo(taskDir) {
 }
 
 function resolveOwnerRepo(taskDir) {
-  const gitResult = spawn.sync("git", ["remote", "get-url", "origin"], {
+  const gitResult = spawnSync("git", ["remote", "get-url", "origin"], {
     cwd: taskDir,
     encoding: "utf8"
   });
@@ -1097,7 +1097,8 @@ function ghText(args, cwd) {
 }
 
 function ghCommand(args, cwd) {
-  const result = spawn.sync("gh", args, {
+  const gh = resolveGhCommand();
+  const result = spawnSync(gh.command, [...gh.preArgs, ...args], {
     cwd,
     encoding: "utf8",
     env: process.env
@@ -1112,12 +1113,31 @@ function ghCommand(args, cwd) {
   return { ok: true, value: result.stdout };
 }
 
+function resolveGhCommand() {
+  const command = process.env.AGENT_INFRA_GH_BIN || "gh";
+  const rawPreArgs = process.env.AGENT_INFRA_GH_ARGS_JSON;
+  if (!rawPreArgs) {
+    return { command, preArgs: [] };
+  }
+
+  try {
+    const preArgs = JSON.parse(rawPreArgs);
+    if (Array.isArray(preArgs) && preArgs.every((arg) => typeof arg === "string")) {
+      return { command, preArgs };
+    }
+  } catch {
+    return { command, preArgs: [] };
+  }
+
+  return { command, preArgs: [] };
+}
+
 function ghPaginatedJson(args, cwd) {
   return ghJson(args, cwd);
 }
 
 function gitText(args, cwd) {
-  const result = spawn.sync("git", args, {
+  const result = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
     env: process.env

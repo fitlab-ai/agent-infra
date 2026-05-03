@@ -159,6 +159,18 @@ git diff {base-branch}...HEAD --name-only
 <!-- sync-issue:{task-id}:{file-stem} -->
 ```
 
+优先使用统一脚本同步评论，避免各技能自行拼接 shell / PowerShell 命令：
+
+```bash
+node .agents/scripts/sync-issue-comments.js {task-dir} {artifact-file} --agent {agent}
+```
+
+行为要求：
+- 默认同时同步 `task.md` 和指定产物文件；未指定产物文件时，扫描任务目录中的 `task.md`、`analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md`、`summary*.md`、`cancel*.md`
+- 对每个 `{file-stem}` 查找已有隐藏标记；不存在则创建，正文变化则 PATCH 原评论，正文一致则跳过
+- 使用 `--input` JSON 文件调用 `gh api`，不要用 `-f body=...` 直接传大段 Markdown
+- 失败时保留本地产物，不回滚任务文件；如果是认证、网络或权限问题，记录为同步阻塞
+
 发布前先检查是否已存在同标记评论：
 
 ```bash
@@ -167,7 +179,7 @@ gh api "repos/$upstream_repo/issues/{issue-number}/comments" \
   | grep -qF "<!-- sync-issue:{task-id}:{file-stem} -->"
 ```
 
-如果已存在则跳过。
+如果已存在且正文一致则跳过；如果正文不一致则 PATCH 原评论，保持同一条时间线评论为最新内容。
 
 发布流程：
 
