@@ -59,8 +59,8 @@ function setupDemoRegenFixture({ withLocalSettings }) {
   }
   fs.writeFileSync(path.join(scriptsDir, "demo-regen.sh"), read("scripts/demo-regen.sh"), "utf8");
   fs.writeFileSync(
-    path.join(scriptsDir, "normalize-gif-duration.py"),
-    read("scripts/normalize-gif-duration.py"),
+    path.join(scriptsDir, "normalize-gif-duration.js"),
+    read("scripts/normalize-gif-duration.js"),
     "utf8"
   );
   fs.writeFileSync(sourceGifPath, makeFakeGif(4));
@@ -117,8 +117,8 @@ test("normalize-gif-duration distributes delays to hit the target duration", () 
     fs.writeFileSync(gifPath, makeFakeGif(663));
 
     const result = spawnSync(
-      "python3",
-      ["scripts/normalize-gif-duration.py", gifPath, "25"],
+      process.execPath,
+      ["scripts/normalize-gif-duration.js", gifPath, "25"],
       {
         cwd: path.resolve("."),
         encoding: "utf8"
@@ -146,8 +146,8 @@ test("normalize-gif-duration leaves files without GCE blocks unchanged", () => {
     fs.writeFileSync(gifPath, original);
 
     const result = spawnSync(
-      "python3",
-      ["scripts/normalize-gif-duration.py", gifPath, "25"],
+      process.execPath,
+      ["scripts/normalize-gif-duration.js", gifPath, "25"],
       {
         cwd: path.resolve("."),
         encoding: "utf8"

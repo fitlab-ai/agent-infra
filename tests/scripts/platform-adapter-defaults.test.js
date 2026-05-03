@@ -38,6 +38,10 @@ function writeFakeGh(filePathname) {
     write(filePathname, `#!/bin/sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`);
     fs.chmodSync(filePathname, 0o755);
   }
+  return {
+    AGENT_INFRA_GH_BIN: process.execPath,
+    AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([scriptPath])
+  };
 }
 
 function writeTask(taskDir) {
@@ -106,7 +110,7 @@ test("platform-sync verification keys override legacy literal values", () => {
     linkNodeModules(tempRoot);
     write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
     write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));
-    writeFakeGh(ghPath);
+    const ghEnv = writeFakeGh(ghPath);
     writeTask(taskDir);
     writeJson(issuePath, {
       state: "OPEN",
@@ -132,6 +136,7 @@ test("platform-sync verification keys override legacy literal values", () => {
 
     const result = runValidator(scriptCopy, taskDir, "key-priority", {
       ...process.env,
+      ...ghEnv,
       PATH: pathWithPrependedBin(binDir),
       GH_FAKE_ISSUE_PATH: issuePath,
       GH_FAKE_COMMENTS_PATH: commentsPath,
@@ -159,7 +164,7 @@ test("platform-sync verification keeps legacy literal fallback", () => {
     linkNodeModules(tempRoot);
     write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
     write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));
-    writeFakeGh(ghPath);
+    const ghEnv = writeFakeGh(ghPath);
     writeTask(taskDir);
     writeJson(issuePath, {
       state: "OPEN",
@@ -179,6 +184,7 @@ test("platform-sync verification keeps legacy literal fallback", () => {
 
     const result = runValidator(scriptCopy, taskDir, "legacy", {
       ...process.env,
+      ...ghEnv,
       PATH: pathWithPrependedBin(binDir),
       GH_FAKE_ISSUE_PATH: issuePath
     });
