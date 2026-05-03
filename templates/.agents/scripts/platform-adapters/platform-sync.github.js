@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { spawnSync } from "node:child_process";
+import spawn from "cross-spawn";
 
 const CHECK_TYPE = "platform-sync";
 const DEFAULT_RETRY_DELAYS_MS = [3000, 10000];
@@ -1034,7 +1034,7 @@ function resolveUpstreamRepo(taskDir) {
 }
 
 function resolveOwnerRepo(taskDir) {
-  const gitResult = spawnSync("git", ["remote", "get-url", "origin"], {
+  const gitResult = spawn.sync("git", ["remote", "get-url", "origin"], {
     cwd: taskDir,
     encoding: "utf8"
   });
@@ -1097,12 +1097,11 @@ function ghText(args, cwd) {
 }
 
 function ghCommand(args, cwd) {
-  const command = resolveCommand("gh");
-  const result = spawnSync(command, args, commandOptions(command, {
+  const result = spawn.sync("gh", args, {
     cwd,
     encoding: "utf8",
     env: process.env
-  }));
+  });
 
   if (result.status !== 0) {
     const stderr = `${result.stderr || ""}${result.stdout || ""}`.trim();
@@ -1118,12 +1117,11 @@ function ghPaginatedJson(args, cwd) {
 }
 
 function gitText(args, cwd) {
-  const command = resolveCommand("git");
-  const result = spawnSync(command, args, commandOptions(command, {
+  const result = spawn.sync("git", args, {
     cwd,
     encoding: "utf8",
     env: process.env
-  }));
+  });
 
   if (result.status !== 0) {
     const stderr = `${result.stderr || ""}${result.stdout || ""}`.trim();
@@ -1235,39 +1233,6 @@ function sleep(delayMs) {
   }
 
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
-}
-
-function resolveCommand(cmd) {
-  if (process.platform !== "win32" || path.extname(cmd)) {
-    return cmd;
-  }
-
-  const pathValue = process.env.Path || process.env.PATH || "";
-  const extensions = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
-    .split(";")
-    .filter(Boolean);
-
-  for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
-    for (const extension of extensions) {
-      const lowerCandidate = path.join(dir, `${cmd}${extension.toLowerCase()}`);
-      if (fs.existsSync(lowerCandidate)) {
-        return lowerCandidate;
-      }
-      const upperCandidate = path.join(dir, `${cmd}${extension.toUpperCase()}`);
-      if (fs.existsSync(upperCandidate)) {
-        return upperCandidate;
-      }
-    }
-  }
-
-  return cmd;
-}
-
-function commandOptions(cmd, options) {
-  if (process.platform === "win32" && /\.(?:bat|cmd)$/i.test(cmd)) {
-    return { ...options, shell: true };
-  }
-  return options;
 }
 
 function interpolate(template, taskDir, artifactFile) {

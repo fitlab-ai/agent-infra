@@ -11,7 +11,7 @@ description: >
 
 ## 1. 验证前置条件
 
-确认 Node.js >= 18 已安装（用于内置测试运行器）。
+确认 Node.js >= 22 已安装（用于内置测试运行器）。
 
 ```bash
 node --version

@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import spawn from "cross-spawn";
 
 const markerPattern = /^<!-- sync-issue:(TASK-\d{8}-\d{6}):([a-z][a-z0-9-]*) -->$/;
 
@@ -44,7 +44,7 @@ function usage() {
 
 function runGh(args) {
   const ghBin = process.env.IMPORT_ISSUE_GH_BIN || "gh";
-  const result = spawnSync(ghBin, args, {
+  const result = spawn.sync(ghBin, args, {
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024
   });

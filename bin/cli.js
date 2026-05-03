@@ -3,9 +3,9 @@ import { VERSION } from '../lib/version.js';
 
 // Node.js version check
 const major = parseInt(process.versions.node.split('.')[0], 10);
-if (major < 18) {
+if (major < 22) {
   process.stderr.write(
-    `agent-infra requires Node.js >= 18 (current: ${process.version})\n`
+    `agent-infra requires Node.js >= 22 (current: ${process.version})\n`
   );
   process.exit(1);
 }
