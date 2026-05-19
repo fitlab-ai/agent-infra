@@ -18,16 +18,16 @@
     "registry": "https://registry.npmjs.org/"
   },
   "bin": {
-    "agent-infra": "./bin/cli.js",
-    "ai": "./bin/cli.js"
+    "agent-infra": "./bin/cli.ts",
+    "ai": "./bin/cli.ts"
   },
   "files": [
-    "bin/cli.js",
+    "bin/cli.ts",
     "lib/",
     "templates/"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.6.0"
   },
   "keywords": [
     "ai",
@@ -50,9 +50,15 @@
     "build": "node scripts/build-inline.js",
     "demo:regen": "sh scripts/demo-regen.sh",
     "prepare": "git config core.hooksPath .git-hooks || true",
-    "test:smoke": "node scripts/build-inline.js --check && node --test tests/templates/*.test.js tests/core/airc.test.js tests/core/release.test.js tests/core/metadata-sync-workflow.test.js tests/core/pr-label-workflow.test.js tests/core/status-label-workflow.test.js tests/core/test-tier-coverage.test.js tests/cli/lib.test.js tests/cli/sync-templates.test.js tests/scripts/sync-templates-platform-gating.test.js",
-    "test:core": "node scripts/build-inline.js --check && node --test tests/templates/*.test.js tests/core/airc.test.js tests/core/release.test.js tests/core/metadata-sync-workflow.test.js tests/core/pr-label-workflow.test.js tests/core/status-label-workflow.test.js tests/core/test-tier-coverage.test.js tests/cli/lib.test.js tests/cli/sync-templates.test.js tests/scripts/sync-templates-platform-gating.test.js tests/cli/cli.test.js tests/cli/merge.test.js tests/cli/sandbox.test.js tests/core/custom-skills.test.js tests/core/custom-tuis.test.js tests/core/demo-regen.test.js tests/scripts/find-existing-task.test.js tests/scripts/platform-adapter-defaults.test.js",
-    "test": "node scripts/build-inline.js --check && node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js",
-    "prepublishOnly": "node scripts/build-inline.js --check && node --test tests/cli/*.test.js tests/templates/*.test.js tests/core/*.test.js tests/scripts/*.test.js"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.jschecks.json --noEmit",
+    "test:smoke": "node scripts/build-inline.js --check && node --experimental-strip-types --no-warnings --test tests/templates/*.test.ts tests/core/airc.test.ts tests/core/release.test.ts tests/core/metadata-sync-workflow.test.ts tests/core/pr-label-workflow.test.ts tests/core/status-label-workflow.test.ts tests/core/test-tier-coverage.test.ts tests/cli/lib.test.ts tests/cli/sync-templates.test.ts tests/scripts/sync-templates-platform-gating.test.ts",
+    "test:core": "node scripts/build-inline.js --check && node --experimental-strip-types --no-warnings --test tests/templates/*.test.ts tests/core/airc.test.ts tests/core/release.test.ts tests/core/metadata-sync-workflow.test.ts tests/core/pr-label-workflow.test.ts tests/core/status-label-workflow.test.ts tests/core/test-tier-coverage.test.ts tests/cli/lib.test.ts tests/cli/sync-templates.test.ts tests/scripts/sync-templates-platform-gating.test.ts tests/cli/cli.test.ts tests/cli/merge.test.ts tests/cli/sandbox.test.ts tests/core/custom-skills.test.ts tests/core/custom-tuis.test.ts tests/core/demo-regen.test.ts tests/scripts/find-existing-task.test.ts tests/scripts/platform-adapter-defaults.test.ts",
+    "test": "node scripts/build-inline.js --check && node --experimental-strip-types --no-warnings --test tests/cli/*.test.ts tests/templates/*.test.ts tests/core/*.test.ts tests/scripts/*.test.ts",
+    "prepublishOnly": "node scripts/build-inline.js --check && node --experimental-strip-types --no-warnings --test tests/cli/*.test.ts tests/templates/*.test.ts tests/core/*.test.ts tests/scripts/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^22.19.19",
+    "typescript": "~5.9"
   }
 }

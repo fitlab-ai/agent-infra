@@ -67,7 +67,7 @@
 # 安装依赖：开发检出后必须先安装真实 npm 依赖
 npm install
 
-# 构建项目：无需构建，项目由 Node.js CLI 和模板文件组成
+# 构建项目：无需构建，项目由 Node.js strip-types 直跑 TypeScript 源文件
 
 # 运行测试
 npm test
@@ -95,7 +95,7 @@ npm test
 
 ```
 ├── bin/                           # CLI 可执行文件
-│   └── cli.js                     # 主 CLI（Node.js）
+│   └── cli.ts                     # 主 CLI（Node.js strip-types）
 ├── .agents/                       # AI 协作配置与工作区
 │   ├── .airc.json                 # 项目配置
 │   ├── workspace/                 # 任务工作区
@@ -109,15 +109,21 @@ npm test
 
 ## 测试要求
 
-- 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 22）
+- 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 22.6.0）
 - 运行命令：`npm test`
 - 测试覆盖：模板文件完整性、CLI 初始化流程、占位符渲染验证
+
+### TypeScript 规范
+
+- 项目源码使用 Node.js strip-types 直跑 `.ts`，运行时要求 Node.js >= 22.6.0。
+- TypeScript 只使用 erasable syntax：禁止 `enum`、值级 `namespace`、class 参数属性、装饰器、`import =` 和 `export =`。
+- ESM import 继续写 `.js` 后缀，由 Node/TypeScript 按 NodeNext 规则解析到 `.ts` 源文件。
 
 ### 测试编写规约
 
 1. **禁止关键词语义断言**：不要通过匹配自然语言措辞来验证 skill 文档内容（如 `assert.match(content, /某段具体描述/)`）。SKILL.md 的文案会频繁调整，绑定措辞的测试极其脆弱。只做结构性检查：frontmatter 合法性、步骤编号连续、引用完整性、体积阈值等。
 2. **禁止反向删除断言**：已删除的功能不需要断言其不存在（如 `assert.doesNotMatch(content, /removedField/)`）。删除即彻底删除，不要用测试永久记住一个不再存在的概念，否则会形成无止境的测试债务。
-3. **平台守卫只走 helper**：跨平台测试的「整条是否运行」判定必须通过 `tests/helpers.js` 的 `onPlatforms()` 表达，不得在测试体内写 `if (process.platform === ...) return;` 早返回。同测试体内覆盖多平台行为差异（断言/构造分支）、运行时回退（如 EPERM）属于合法用例。详见 `.agents/rules/cross-platform-tests.md`。
+3. **平台守卫只走 helper**：跨平台测试的「整条是否运行」判定必须通过 `tests/helpers.ts` 的 `onPlatforms()` 表达，不得在测试体内写 `if (process.platform === ...) return;` 早返回。同测试体内覆盖多平台行为差异（断言/构造分支）、运行时回退（如 EPERM）属于合法用例。详见 `.agents/rules/cross-platform-tests.md`。
 
 ## 提交与 PR 规范
 
