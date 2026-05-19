@@ -1,4 +1,3 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -6,7 +5,14 @@ import path from 'node:path';
 const KNOWN_PLATFORMS = new Set(['github']);
 const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
 
-function renderFile(src, dst, replacements) {
+type Replacements = {
+  project: string;
+  org?: string;
+};
+
+type FileSelection = Map<string, string>;
+
+function renderFile(src: string, dst: string, replacements: Replacements): void {
   if (!fs.existsSync(src)) {
     throw new Error(`Template file not found: ${src}`);
   }
@@ -21,7 +27,7 @@ function renderFile(src, dst, replacements) {
   fs.writeFileSync(dst, content, 'utf8');
 }
 
-function copyFile(src, dst) {
+function copyFile(src: string, dst: string): void {
   if (!fs.existsSync(src)) {
     throw new Error(`Template file not found: ${src}`);
   }
@@ -37,8 +43,8 @@ function copyFile(src, dst) {
   }
 }
 
-function walkFiles(dir) {
-  const results = [];
+function walkFiles(dir: string): string[] {
+  const results: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const entryPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
@@ -50,31 +56,31 @@ function walkFiles(dir) {
   return results;
 }
 
-function containsPlaceholders(src) {
+function containsPlaceholders(src: string): boolean {
   const content = fs.readFileSync(src, 'utf8');
   return content.includes('{{project}}') || content.includes('{{org}}');
 }
 
-function variantExt(relativePath) {
+function variantExt(relativePath: string): string {
   return path.extname(relativePath);
 }
 
-function variantBase(relativePath) {
+function variantBase(relativePath: string): string {
   const ext = variantExt(relativePath);
   return relativePath.slice(0, -ext.length);
 }
 
-function withVariant(relativePath, variant) {
+function withVariant(relativePath: string, variant: string): string {
   const ext = variantExt(relativePath);
   const base = variantBase(relativePath);
   return `${base}.${variant}${ext}`;
 }
 
-function stripVariant(relativePath, variant) {
+function stripVariant(relativePath: string, variant: string): string {
   return relativePath.replace(new RegExp(`\\.${variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.`), '.');
 }
 
-function isPlatformVariant(relativePath, platform) {
+function isPlatformVariant(relativePath: string, platform: string): boolean {
   const platforms = new Set([...KNOWN_PLATFORMS, platform]);
   for (const candidate of platforms) {
     if (relativePath.includes(`.${candidate}.`)) {
@@ -84,7 +90,7 @@ function isPlatformVariant(relativePath, platform) {
   return false;
 }
 
-function isLangVariant(relativePath) {
+function isLangVariant(relativePath: string): boolean {
   for (const lang of KNOWN_LANGUAGES) {
     if (relativePath.includes(`.${lang}.`)) {
       return true;
@@ -93,8 +99,8 @@ function isLangVariant(relativePath) {
   return false;
 }
 
-function langSelect(relativePaths, language) {
-  const selected = new Map();
+function langSelect(relativePaths: string[], language: string): FileSelection {
+  const selected: FileSelection = new Map();
 
   for (const relativePath of relativePaths) {
     if (relativePath.includes(`.${language}.`)) {
@@ -109,8 +115,8 @@ function langSelect(relativePaths, language) {
   return selected;
 }
 
-function platformSelect(entries, platform) {
-  const selected = new Map();
+function platformSelect(entries: FileSelection, platform: string): FileSelection {
+  const selected: FileSelection = new Map();
 
   for (const [relativePath, src] of entries) {
     if (!relativePath.includes(`.${platform}.`)) {
@@ -132,12 +138,18 @@ function platformSelect(entries, platform) {
   return selected;
 }
 
-function selectLocalizedFiles(srcDir, language, platform = 'github') {
+function selectLocalizedFiles(srcDir: string, language: string, platform = 'github'): FileSelection {
   const relativePaths = walkFiles(srcDir).map((src) => path.relative(srcDir, src));
   return platformSelect(langSelect(relativePaths, language), platform);
 }
 
-function copySkillDir(srcDir, dstDir, replacements, language, platform = 'github') {
+function copySkillDir(
+  srcDir: string,
+  dstDir: string,
+  replacements: Replacements,
+  language: string,
+  platform = 'github'
+): void {
   if (!fs.existsSync(srcDir)) {
     throw new Error(`Template directory not found: ${srcDir}`);
   }

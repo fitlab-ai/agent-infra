@@ -1,4 +1,3 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import path from 'node:path';
 import { info, ok } from './log.ts';
@@ -7,19 +6,73 @@ const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 const TITLE_RE = /^# (.+)$/m;
 const DATE_FROM_PATH_RE = /(?:^|[/\\])(\d{4})[/\\](\d{2})[/\\](\d{2})(?:[/\\]|$)/;
-const MUTABLE_SECTIONS = ['active', 'blocked', 'completed'];
-const ALL_SECTIONS = [...MUTABLE_SECTIONS, 'archive'];
+const MUTABLE_SECTIONS = ['active', 'blocked', 'completed'] as const;
+const ALL_SECTIONS = [...MUTABLE_SECTIONS, 'archive'] as const;
+type MutableSection = typeof MUTABLE_SECTIONS[number];
+type Section = typeof ALL_SECTIONS[number];
+type MutableAction = 'copied' | 'updated' | 'moved' | 'skipped';
+type ArchiveAction = 'copied' | 'skipped';
+type SourceMode = 'workspace' | 'legacy-archive';
+type DateParts = {
+  year: string;
+  month: string;
+  day: string;
+};
+type TimestampRecord = {
+  value: string;
+  source: string;
+};
+type TaskRecord = DateParts & {
+  taskId: string;
+  taskDir: string;
+  relativePath: string;
+  title: string;
+  type: string;
+  completedAt: string;
+};
+type ArchiveManifestEntry = Omit<TaskRecord, 'taskDir'>;
+type WorkspaceRecord = {
+  taskId: string;
+  section: MutableSection;
+  taskDir: string;
+  timestamp: TimestampRecord;
+};
+type ReportEntry = {
+  action: MutableAction | ArchiveAction;
+  symbol: string;
+  taskId: string;
+  section?: Section;
+  detail: string;
+  fromSection?: MutableSection;
+  toSection?: MutableSection;
+  relativePath?: string;
+};
+type MutableCounts = Record<MutableAction, ReportEntry[]>;
+type ArchiveCounts = Record<ArchiveAction, ReportEntry[]>;
+type MergeReport = {
+  sourcePath: string;
+  backupRoot: string;
+  sections: Record<MutableSection, MutableCounts> & { archive: ArchiveCounts };
+  details: ReportEntry[];
+  backupCount: number;
+};
+type MergeMutableArgs = {
+  sourceWorkspace: string;
+  localWorkspace: string;
+  backupRoot: string;
+  report: MergeReport;
+};
 const SECTION_LABELS = {
   active: 'Active',
   blocked: 'Blocked',
   completed: 'Completed',
   archive: 'Archive'
-};
+} satisfies Record<Section, string>;
 const DIVIDER = '═'.repeat(55);
 
-function extractField(content, fieldName) {
+function extractField(content: string, fieldName: string): string | null {
   const match = content.match(FRONTMATTER_RE);
-  if (!match) {
+  if (!match || !match[1]) {
     return null;
   }
 
@@ -38,14 +91,14 @@ function extractField(content, fieldName) {
   return null;
 }
 
-function extractTitle(content) {
+function extractTitle(content: string): string | null {
   const withoutFrontmatter = content.replace(FRONTMATTER_RE, '');
   const match = withoutFrontmatter.match(TITLE_RE);
   if (!match) {
     return null;
   }
 
-  return match[1]
+  return (match[1] ?? '')
     .trim()
     .replace(/^任务：/, '')
     .replace(/^Task:\s*/, '')
@@ -53,7 +106,7 @@ function extractTitle(content) {
     .replace(/\|/g, '\\|') || null;
 }
 
-function normalizeTaskRecord(taskDir, taskFile, dateParts) {
+function normalizeTaskRecord(taskDir: string, taskFile: string, dateParts: DateParts): TaskRecord {
   const taskId = path.basename(taskDir);
   const content = fs.readFileSync(taskFile, 'utf8');
   const completedAt = extractField(content, 'completed_at');
@@ -75,13 +128,17 @@ function normalizeTaskRecord(taskDir, taskFile, dateParts) {
   };
 }
 
-function fallbackDateParts(taskDir, content) {
+function fallbackDateParts(taskDir: string, content: string): DateParts | null {
   const pathMatch = taskDir.match(DATE_FROM_PATH_RE);
   if (pathMatch) {
+    const [, year, month, day] = pathMatch;
+    if (!year || !month || !day) {
+      return null;
+    }
     return {
-      year: pathMatch[1],
-      month: pathMatch[2],
-      day: pathMatch[3]
+      year,
+      month,
+      day
     };
   }
 
@@ -91,18 +148,22 @@ function fallbackDateParts(taskDir, content) {
   const dateMatch = source?.match(/^(\d{4})-(\d{2})-(\d{2})/);
 
   if (dateMatch) {
+    const [, year, month, day] = dateMatch;
+    if (!year || !month || !day) {
+      return null;
+    }
     return {
-      year: dateMatch[1],
-      month: dateMatch[2],
-      day: dateMatch[3]
+      year,
+      month,
+      day
     };
   }
 
   return null;
 }
 
-function scanSourceTasks(sourceDir) {
-  const tasks = [];
+function scanSourceTasks(sourceDir: string): TaskRecord[] {
+  const tasks: TaskRecord[] = [];
   const years = fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir, { withFileTypes: true }) : [];
 
   for (const yearEntry of years) {
@@ -185,7 +246,7 @@ function scanSourceTasks(sourceDir) {
   return tasks.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
-function findTaskDirById(rootDir, taskId) {
+function findTaskDirById(rootDir: string, taskId: string): string | null {
   if (!fs.existsSync(rootDir)) {
     return null;
   }
@@ -218,11 +279,11 @@ function findTaskDirById(rootDir, taskId) {
   return null;
 }
 
-function taskExistsInArchive(archiveDir, taskId) {
+function taskExistsInArchive(archiveDir: string, taskId: string): string | null {
   return findTaskDirById(archiveDir, taskId);
 }
 
-function formatManifestHeader(generatedAt) {
+function formatManifestHeader(generatedAt: string): string[] {
   return [
     '# Archive Manifest',
     '',
@@ -232,8 +293,8 @@ function formatManifestHeader(generatedAt) {
   ];
 }
 
-function collectArchiveEntries(archiveDir) {
-  const entries = [];
+function collectArchiveEntries(archiveDir: string): ArchiveManifestEntry[] {
+  const entries: ArchiveManifestEntry[] = [];
   if (!fs.existsSync(archiveDir)) {
     return entries;
   }
@@ -278,6 +339,7 @@ function collectArchiveEntries(archiveDir) {
           entries.push({
             year: yearEntry.name,
             month: monthEntry.name,
+            day: dayEntry.name,
             completedAt,
             taskId: taskEntry.name,
             title,
@@ -292,29 +354,31 @@ function collectArchiveEntries(archiveDir) {
   return entries;
 }
 
-function rebuildManifests(archiveDir) {
+function rebuildManifests(archiveDir: string): void {
   fs.mkdirSync(archiveDir, { recursive: true });
   const entries = collectArchiveEntries(archiveDir);
   const generatedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
   removeManifestFiles(archiveDir);
 
-  const monthGroups = new Map();
-  const yearCounts = new Map();
-  const monthCounts = new Map();
+  const monthGroups = new Map<string, ArchiveManifestEntry[]>();
+  const yearCounts = new Map<string, number>();
+  const monthCounts = new Map<string, number>();
 
   for (const entry of entries) {
     const monthKey = `${entry.year}\t${entry.month}`;
-    if (!monthGroups.has(monthKey)) {
-      monthGroups.set(monthKey, []);
+    let monthEntries = monthGroups.get(monthKey);
+    if (!monthEntries) {
+      monthEntries = [];
+      monthGroups.set(monthKey, monthEntries);
     }
-    monthGroups.get(monthKey).push(entry);
+    monthEntries.push(entry);
     yearCounts.set(entry.year, (yearCounts.get(entry.year) || 0) + 1);
     monthCounts.set(monthKey, (monthCounts.get(monthKey) || 0) + 1);
   }
 
   for (const [monthKey, monthEntries] of [...monthGroups.entries()].sort()) {
-    const [year, month] = monthKey.split('\t');
+    const [year = '', month = ''] = monthKey.split('\t');
     const monthManifestPath = path.join(archiveDir, year, month, 'manifest.md');
     fs.mkdirSync(path.dirname(monthManifestPath), { recursive: true });
 
@@ -357,7 +421,7 @@ function rebuildManifests(archiveDir) {
 
     for (const month of [...monthGroups.keys()]
       .filter((key) => key.startsWith(`${year}\t`))
-      .map((key) => key.split('\t')[1])
+      .map((key) => key.split('\t')[1] ?? '')
       .sort()
       .reverse()) {
       lines.push(
@@ -383,7 +447,7 @@ function rebuildManifests(archiveDir) {
   fs.writeFileSync(path.join(archiveDir, 'manifest.md'), `${rootLines.join('\n')}\n`, 'utf8');
 }
 
-function removeManifestFiles(rootDir) {
+function removeManifestFiles(rootDir: string): void {
   if (!fs.existsSync(rootDir)) {
     return;
   }
@@ -404,8 +468,8 @@ function removeManifestFiles(rootDir) {
   }
 }
 
-function formatTimestamp(date) {
-  const pad = (value) => String(value).padStart(2, '0');
+function formatTimestamp(date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0');
   const offsetMinutes = -date.getTimezoneOffset();
   const sign = offsetMinutes >= 0 ? '+' : '-';
   const absoluteOffsetMinutes = Math.abs(offsetMinutes);
@@ -423,7 +487,7 @@ function formatTimestamp(date) {
   ].join(':') + `${sign}${pad(offsetHours)}:${pad(offsetRemainderMinutes)}`;
 }
 
-function formatBackupTimestamp(date) {
+function formatBackupTimestamp(date: Date): string {
   return [
     date.getFullYear(),
     String(date.getMonth() + 1).padStart(2, '0'),
@@ -431,12 +495,12 @@ function formatBackupTimestamp(date) {
   ].join('') + `-${String(date.getHours()).padStart(2, '0')}${String(date.getMinutes()).padStart(2, '0')}${String(date.getSeconds()).padStart(2, '0')}`;
 }
 
-function toPosixPath(relativePath) {
+function toPosixPath(relativePath: string): string {
   return relativePath.split(path.sep).join('/');
 }
 
-function getLatestFileMtime(taskDir) {
-  let latestMs = null;
+function getLatestFileMtime(taskDir: string): number | null {
+  let latestMs: number | null = null;
   const stack = [taskDir];
 
   while (stack.length > 0) {
@@ -460,7 +524,7 @@ function getLatestFileMtime(taskDir) {
   return latestMs;
 }
 
-function getTaskTimestamp(taskDir) {
+function getTaskTimestamp(taskDir: string): TimestampRecord {
   const taskFile = path.join(taskDir, 'task.md');
 
   if (fs.existsSync(taskFile)) {
@@ -492,8 +556,8 @@ function getTaskTimestamp(taskDir) {
   };
 }
 
-function compareTimestamps(left, right) {
-  const normalizeTimestamp = (timestamp) => (timestamp.includes('T') ? timestamp : timestamp.replace(' ', 'T'));
+function compareTimestamps(left: TimestampRecord, right: TimestampRecord): number {
+  const normalizeTimestamp = (timestamp: string): string => (timestamp.includes('T') ? timestamp : timestamp.replace(' ', 'T'));
   const leftMs = Date.parse(normalizeTimestamp(left.value));
   const rightMs = Date.parse(normalizeTimestamp(right.value));
 
@@ -504,13 +568,13 @@ function compareTimestamps(left, right) {
   return leftMs - rightMs;
 }
 
-function scanWorkspaceSection(rootDir, sectionName) {
+function scanWorkspaceSection(rootDir: string, sectionName: MutableSection): WorkspaceRecord[] {
   const sectionDir = path.join(rootDir, sectionName);
   if (!fs.existsSync(sectionDir) || !fs.statSync(sectionDir).isDirectory()) {
     return [];
   }
 
-  const records = [];
+  const records: WorkspaceRecord[] = [];
   for (const entry of fs.readdirSync(sectionDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || !TASK_ID_RE.test(entry.name)) {
       continue;
@@ -533,8 +597,8 @@ function scanWorkspaceSection(rootDir, sectionName) {
   return records.sort((left, right) => left.taskId.localeCompare(right.taskId));
 }
 
-function buildWorkspaceIndex(workspaceDir) {
-  const index = new Map();
+function buildWorkspaceIndex(workspaceDir: string): Map<string, WorkspaceRecord> {
+  const index = new Map<string, WorkspaceRecord>();
 
   for (const section of MUTABLE_SECTIONS) {
     for (const record of scanWorkspaceSection(workspaceDir, section)) {
@@ -545,21 +609,21 @@ function buildWorkspaceIndex(workspaceDir) {
   return index;
 }
 
-function backupTaskDir(backupRoot, section, taskDir, taskId) {
+function backupTaskDir(backupRoot: string, section: MutableSection, taskDir: string, taskId: string): string {
   const backupDir = path.join(backupRoot, section, taskId);
   fs.mkdirSync(path.dirname(backupDir), { recursive: true });
   fs.cpSync(taskDir, backupDir, { recursive: true });
   return backupDir;
 }
 
-function copyTaskToSection(sourceTask, workspaceDir) {
+function copyTaskToSection(sourceTask: WorkspaceRecord, workspaceDir: string): string {
   const destinationDir = path.join(workspaceDir, sourceTask.section, sourceTask.taskId);
   fs.mkdirSync(path.dirname(destinationDir), { recursive: true });
   fs.cpSync(sourceTask.taskDir, destinationDir, { recursive: true });
   return destinationDir;
 }
 
-function detectSourceMode(sourcePath) {
+function detectSourceMode(sourcePath: string): SourceMode {
   for (const section of ALL_SECTIONS) {
     const sectionDir = path.join(sourcePath, section);
     if (fs.existsSync(sectionDir) && fs.statSync(sectionDir).isDirectory()) {
@@ -570,7 +634,7 @@ function detectSourceMode(sourcePath) {
   return 'legacy-archive';
 }
 
-function createReport(sourcePath, backupRoot) {
+function createReport(sourcePath: string, backupRoot: string): MergeReport {
   return {
     sourcePath,
     backupRoot,
@@ -585,17 +649,17 @@ function createReport(sourcePath, backupRoot) {
   };
 }
 
-function recordMutable(report, reportSection, action, entry) {
+function recordMutable(report: MergeReport, reportSection: MutableSection, action: MutableAction, entry: ReportEntry): void {
   report.sections[reportSection][action].push(entry);
   report.details.push(entry);
 }
 
-function recordArchive(report, action, entry) {
+function recordArchive(report: MergeReport, action: ArchiveAction, entry: ReportEntry): void {
   report.sections.archive[action].push(entry);
   report.details.push(entry);
 }
 
-function mergeMutableSections({ sourceWorkspace, localWorkspace, backupRoot, report }) {
+function mergeMutableSections({ sourceWorkspace, localWorkspace, backupRoot, report }: MergeMutableArgs): void {
   const localIndex = buildWorkspaceIndex(localWorkspace);
 
   for (const sourceSection of MUTABLE_SECTIONS) {
@@ -680,7 +744,7 @@ function mergeMutableSections({ sourceWorkspace, localWorkspace, backupRoot, rep
   }
 }
 
-function mergeArchiveSection(sourceArchive, localArchive, report) {
+function mergeArchiveSection(sourceArchive: string, localArchive: string, report: MergeReport): number {
   const sourceTasks = scanSourceTasks(sourceArchive);
 
   for (const task of sourceTasks) {
@@ -713,7 +777,7 @@ function mergeArchiveSection(sourceArchive, localArchive, report) {
   return sourceTasks.length;
 }
 
-function printLegacyArchiveMessages(report, sourcePath) {
+function printLegacyArchiveMessages(report: MergeReport, sourcePath: string): void {
   const merged = report.sections.archive.copied;
   const skipped = report.sections.archive.skipped;
 
@@ -736,16 +800,17 @@ function printLegacyArchiveMessages(report, sourcePath) {
   process.stdout.write('\n');
 }
 
-function printSection(lines, name, counts) {
+function printSection(lines: string[], name: MutableSection, counts: MutableCounts): void {
   const title = `${SECTION_LABELS[name].padEnd(9, ' ')} (.agents/workspace/${name}/):`;
   lines.push(title);
 
-  const entries = [
+  const allEntries: Array<[MutableAction, string]> = [
     ['copied', '✓ Copied  '],
     ['updated', '↑ Updated '],
     ['moved', '⇄ Moved   '],
     ['skipped', '⊘ Skipped ']
-  ].filter(([key]) => Array.isArray(counts[key]));
+  ];
+  const entries = allEntries.filter(([key]) => Array.isArray(counts[key]));
 
   const nonZeroEntries = entries.filter(([key]) => counts[key].length > 0);
   if (nonZeroEntries.length === 0) {
@@ -760,7 +825,7 @@ function printSection(lines, name, counts) {
   lines.push('');
 }
 
-function printArchiveSection(lines, counts) {
+function printArchiveSection(lines: string[], counts: ArchiveCounts): void {
   const title = `${SECTION_LABELS.archive.padEnd(9, ' ')} (.agents/workspace/archive/):`;
   lines.push(title);
 
@@ -778,16 +843,16 @@ function printArchiveSection(lines, counts) {
   lines.push('');
 }
 
-function renderDetail(entry) {
+function renderDetail(entry: ReportEntry): string {
   if (entry.action === 'moved') {
     return `  ${entry.symbol} ${entry.taskId}  ${entry.fromSection}→${entry.toSection}  ${entry.detail}`;
   }
 
-  const label = entry.section.padEnd(9, ' ');
+  const label = (entry.section ?? '').padEnd(9, ' ');
   return `  ${entry.symbol} ${entry.taskId}  ${label} ${entry.detail}`;
 }
 
-function printReport(report) {
+function printReport(report: MergeReport): void {
   const mutableTotals = MUTABLE_SECTIONS.reduce((acc, section) => {
     acc.copied += report.sections[section].copied.length;
     acc.updated += report.sections[section].updated.length;
@@ -833,7 +898,7 @@ function printReport(report) {
   process.stdout.write(`${lines.join('\n')}\n`);
 }
 
-async function cmdMerge(args) {
+async function cmdMerge(args: string[]): Promise<void> {
   const sourcePath = args[0];
   if (!sourcePath) {
     throw new Error('Usage: agent-infra merge <source-path>');

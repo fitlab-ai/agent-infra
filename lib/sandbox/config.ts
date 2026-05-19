@@ -1,4 +1,3 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir, platform } from 'node:os';
@@ -18,7 +17,23 @@ const DEFAULTS = Object.freeze({
   }
 });
 
-function detectRepoRoot() {
+type PlatformFn = typeof platform;
+
+type SandboxConfigInput = {
+  engine?: string | null;
+  runtimes?: string[];
+  tools?: string[];
+  dockerfile?: string | null;
+  vm?: Record<string, unknown>;
+};
+
+type AircConfig = {
+  project?: unknown;
+  org?: unknown;
+  sandbox?: SandboxConfigInput;
+};
+
+function detectRepoRoot(): string {
   try {
     return execFileSync('git', ['rev-parse', '--show-toplevel'], {
       encoding: 'utf8',
@@ -39,7 +54,7 @@ function cloneDefaults() {
   };
 }
 
-export function loadConfig({ platformFn = platform } = {}) {
+export function loadConfig({ platformFn = platform }: { platformFn?: PlatformFn } = {}) {
   const repoRoot = detectRepoRoot();
   const home = homedir();
 
@@ -52,7 +67,7 @@ export function loadConfig({ platformFn = platform } = {}) {
     throw new Error('No .agents/.airc.json found. Run "ai init" first.');
   }
 
-  const airc = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  const airc = JSON.parse(fs.readFileSync(configPath, 'utf8')) as AircConfig;
   const defaults = cloneDefaults();
   const sandbox = airc.sandbox ?? {};
   const engine = validateSandboxEngine(sandbox.engine ?? defaults.engine, { platformFn });
@@ -66,7 +81,7 @@ export function loadConfig({ platformFn = platform } = {}) {
     repoRoot,
     configPath,
     project,
-    org: airc.org ?? '',
+    org: typeof airc.org === 'string' ? airc.org : '',
     home,
     containerPrefix: `${project}-dev`,
     imageName: `${project}-sandbox:latest`,

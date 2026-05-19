@@ -1,8 +1,34 @@
-// @ts-nocheck
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+type TestPlatform = "linux" | "darwin" | "win32";
+type Replacements = {
+  project: string;
+  org: string;
+};
+type Frontmatter = {
+  name: string;
+  description: string;
+};
+type CommandSpec = {
+  usage?: string;
+  en?: string;
+  zh?: string;
+};
+type SandboxFixtureOptions = {
+  project?: string;
+  org?: string;
+  sandbox?: Record<string, unknown>;
+  dockerStdoutForPs?: string;
+};
+type SandboxFixture = {
+  repoDir: string;
+  binDir: string;
+  logPath: string;
+  readDockerCalls(): string[][];
+};
 
 // =====================================================================
 // CRITICAL: any test that spawns real `git` commands MUST use gitSafeEnv()
@@ -23,7 +49,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const realPlatform = process.platform;
 
-function filePath(relativePath) {
+function filePath(relativePath: string): string {
   const directPath = path.join(rootDir, relativePath);
   if (fs.existsSync(directPath)) {
     return directPath;
@@ -40,27 +66,27 @@ function filePath(relativePath) {
 const NODE_TS_FLAGS = ["--experimental-strip-types", "--no-warnings"];
 const CLI_PATH = filePath("bin/cli.ts");
 
-function cliArgs(...args) {
+function cliArgs(...args: string[]): string[] {
   return [...NODE_TS_FLAGS, CLI_PATH, ...args];
 }
 
-function cliCommand(...args) {
+function cliCommand(...args: string[]): string {
   return [process.execPath, ...cliArgs(...args)].map((part) => JSON.stringify(part)).join(" ");
 }
 
-function exists(relativePath) {
+function exists(relativePath: string): boolean {
   return fs.existsSync(filePath(relativePath));
 }
 
-function read(relativePath) {
+function read(relativePath: string): string {
   return fs.readFileSync(filePath(relativePath), "utf8");
 }
 
-function pathWithPrependedBin(binDir, envPath = process.env.PATH || "") {
+function pathWithPrependedBin(binDir: string, envPath = process.env.PATH || ""): string {
   return [binDir, envPath].filter(Boolean).join(path.delimiter);
 }
 
-function envWithPrependedPath(env, binDir) {
+function envWithPrependedPath(env: NodeJS.ProcessEnv, binDir: string): NodeJS.ProcessEnv {
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") || "PATH";
   const nextPath = pathWithPrependedBin(binDir, env[pathKey] || "");
   return {
@@ -70,7 +96,7 @@ function envWithPrependedPath(env, binDir) {
   };
 }
 
-function gitSafeEnv(extra = {}) {
+function gitSafeEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env = { ...process.env, ...extra };
   for (const key of [
     "GIT_DIR",
@@ -88,16 +114,17 @@ function gitSafeEnv(extra = {}) {
   return env;
 }
 
-function withGitSafeProcessEnv(fn, extra = {}) {
+function withGitSafeProcessEnv<T>(fn: () => T, extra: NodeJS.ProcessEnv = {}): T {
   const previousEnv = process.env;
   process.env = gitSafeEnv(extra);
 
   try {
     const result = fn();
-    if (result && typeof result.then === "function") {
+    // Test helpers only need native Promise support; custom thenables are out of scope.
+    if (result instanceof Promise) {
       return result.finally(() => {
         process.env = previousEnv;
-      });
+      }) as T;
     }
     process.env = previousEnv;
     return result;
@@ -107,7 +134,7 @@ function withGitSafeProcessEnv(fn, extra = {}) {
   }
 }
 
-function initIsolatedGitRepo(repoRoot, { remote = null } = {}) {
+function initIsolatedGitRepo(repoRoot: string, { remote = null }: { remote?: string | null } = {}): void {
   const env = gitSafeEnv();
   const initResult = spawnSync("git", ["init", "-q", "-b", "main"], {
     cwd: repoRoot,
@@ -130,11 +157,11 @@ function initIsolatedGitRepo(repoRoot, { remote = null } = {}) {
   }
 }
 
-function supportsPosixModeBits() {
+function supportsPosixModeBits(): boolean {
   return realPlatform !== "win32";
 }
 
-function assertModeBits(filePathname, expectedMode) {
+function assertModeBits(filePathname: string, expectedMode: number): void {
   if (!supportsPosixModeBits()) {
     return;
   }
@@ -153,21 +180,21 @@ function assertModeBits(filePathname, expectedMode) {
  * Branching on process.platform inside a test remains valid when the same test
  * intentionally covers platform-specific assertions or fixture construction.
  */
-function onPlatforms(...allowed) {
+function onPlatforms(...allowed: TestPlatform[]): { skip: false | string } {
   return {
-    skip: allowed.includes(process.platform)
+    skip: allowed.includes(process.platform as TestPlatform)
       ? false
       : `requires ${allowed.join("/")} (current: ${process.platform})`
   };
 }
 
-function assertEqual(actual, expected) {
+function assertEqual(actual: number, expected: number): void {
   if (actual !== expected) {
     throw new Error(`Expected mode ${expected.toString(8)}, got ${actual.toString(8)}`);
   }
 }
 
-function writeNodeCommandShim(commandPath, scriptPath) {
+function writeNodeCommandShim(commandPath: string, scriptPath: string): string {
   fs.mkdirSync(path.dirname(commandPath), { recursive: true });
   if (process.platform === "win32") {
     fs.writeFileSync(
@@ -188,14 +215,14 @@ function writeNodeCommandShim(commandPath, scriptPath) {
 }
 
 function writeSandboxEngineFixture(
-  tmpDir,
+  tmpDir: string,
   {
     project = "demo",
     org = "fitlab-ai",
     sandbox = {},
     dockerStdoutForPs = ""
-  } = {}
-) {
+  }: SandboxFixtureOptions = {}
+): SandboxFixture {
   const repoDir = path.join(tmpDir, "repo");
   const binDir = path.join(tmpDir, "bin");
   const logPath = path.join(tmpDir, "docker-log.jsonl");
@@ -298,12 +325,12 @@ function writeSandboxEngineFixture(
         .trim()
         .split("\n")
         .filter(Boolean)
-        .map((line) => JSON.parse(line));
+        .map((line) => JSON.parse(line) as string[]);
     }
   };
 }
 
-function listFilesRecursive(relativeDir) {
+function listFilesRecursive(relativeDir: string): string[] {
   const entries = fs.readdirSync(filePath(relativeDir), { withFileTypes: true });
 
   return entries.flatMap((entry) => {
@@ -315,14 +342,14 @@ function listFilesRecursive(relativeDir) {
   });
 }
 
-function listSkillNames() {
+function listSkillNames(): string[] {
   return fs.readdirSync(filePath(".agents/skills"), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
 }
 
-function langTemplate(basePath, lang) {
+function langTemplate(basePath: string, lang: string): string {
   const ext = path.extname(basePath);
   const variant = /\.(?:en|zh-CN)(?=\.[^.]+$)/.test(basePath)
     ? basePath.replace(/\.(?:en|zh-CN)(?=\.[^.]+$)/, `.${lang}`)
@@ -334,13 +361,13 @@ function langTemplate(basePath, lang) {
   return basePath;
 }
 
-function renderPlaceholders(content, replacements) {
+function renderPlaceholders(content: string, replacements: Replacements): string {
   return content
     .replace(/\{\{project\}\}/g, replacements.project)
     .replace(/\{\{org\}\}/g, replacements.org);
 }
 
-function buildCommandSyncFiles(project) {
+function buildCommandSyncFiles(project: string): [string, string][] {
   return listSkillNames().flatMap((skill) => [
     [`.claude/commands/${skill}.md`, `templates/.claude/commands/${skill}.en.md`],
     [`.opencode/commands/${skill}.md`, `templates/.opencode/commands/${skill}.en.md`],
@@ -348,17 +375,17 @@ function buildCommandSyncFiles(project) {
   ]);
 }
 
-function escapeRegExp(value) {
+function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function loadFreshEsm(relativePath) {
+async function loadFreshEsm<T = Record<string, unknown>>(relativePath: string): Promise<T> {
   const moduleUrl = pathToFileURL(filePath(relativePath));
   moduleUrl.searchParams.set("v", `${Date.now()}-${Math.random().toString(16).slice(2)}`);
-  return import(moduleUrl.href);
+  return import(moduleUrl.href) as Promise<T>;
 }
 
-function parseFrontmatter(relativePath) {
+function parseFrontmatter(relativePath: string): Frontmatter | null {
   const content = read(relativePath);
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
 
@@ -366,14 +393,14 @@ function parseFrontmatter(relativePath) {
     return null;
   }
 
-  const lines = match[1].split(/\r?\n/);
+  const lines = (match[1] ?? "").split(/\r?\n/);
   let name = "";
   let description = "";
 
-  const normalizeValue = (value) => value.replace(/^["']|["']$/g, "").trim();
+  const normalizeValue = (value: string): string => value.replace(/^["']|["']$/g, "").trim();
 
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
+    const line = lines[index] ?? "";
 
     if (line.startsWith("name:")) {
       name = normalizeValue(line.slice("name:".length).trim());
@@ -389,7 +416,7 @@ function parseFrontmatter(relativePath) {
       const descriptionLines = [];
 
       for (let offset = index + 1; offset < lines.length; offset += 1) {
-        const descriptionLine = lines[offset];
+        const descriptionLine = lines[offset] ?? "";
         if (!/^\s+/.test(descriptionLine)) {
           break;
         }
@@ -408,7 +435,7 @@ function parseFrontmatter(relativePath) {
   return { name, description };
 }
 
-function skillDocPaths(skill) {
+function skillDocPaths(skill: string): string[] {
   return [
     `.agents/skills/${skill}/SKILL.md`,
     `templates/.agents/skills/${skill}/SKILL.en.md`,
@@ -416,7 +443,7 @@ function skillDocPaths(skill) {
   ].filter(exists);
 }
 
-const commandSpecs = {
+const commandSpecs: Record<string, CommandSpec> = {
   "analyze-task": {
     usage: "<task-id>",
     en: "Analyze task $1.",

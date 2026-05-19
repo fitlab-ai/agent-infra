@@ -1,9 +1,104 @@
-// @ts-nocheck
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { hostJoin } from './engines/wsl2-paths.ts';
+
+type ExecFn = (file: string, args: string[], options?: Record<string, unknown>) => string | Buffer | void;
+type ReadFn = (targetPath: string) => string;
+type ExistsFn = (targetPath: string) => boolean;
+type EnvFn = () => NodeJS.ProcessEnv;
+
+type SecurityClassification = 'OK' | 'LOCKED' | 'NOT_FOUND' | 'OTHER';
+
+type SecurityResult =
+  | { ok: true; stdout: string; stderr: ''; classification: 'OK' }
+  | { ok: false; stdout: ''; stderr: string; classification: Exclude<SecurityClassification, 'OK'> };
+
+type CredentialStatus = 'OK'
+  | 'MISSING'
+  | 'STALE_ACCESS'
+  | 'KEYCHAIN_LOCKED'
+  | 'KEYCHAIN_ERROR'
+  | 'KEYCHAIN_WRITE_FAILED';
+
+type CredentialInspection =
+  | { status: 'OK'; blob: string; expiresAt: unknown }
+  | { status: Exclude<CredentialStatus, 'OK' | 'KEYCHAIN_WRITE_FAILED'>; blob?: undefined; expiresAt?: unknown; detail?: string };
+
+type CredentialEndpoint = CredentialInspection & {
+  name: string;
+  project?: string;
+};
+
+type OkCredentialEndpoint = CredentialEndpoint & {
+  status: 'OK';
+  blob: string;
+};
+type ExpiringOkCredentialEndpoint = OkCredentialEndpoint & {
+  expiresAt: number;
+};
+
+type Warning = {
+  source?: string;
+  classification?: string;
+  message?: string;
+};
+
+type WriteResult =
+  | { ok: true; classification?: undefined; error?: undefined }
+  | { ok: false; classification: Exclude<SecurityClassification, 'OK'>; error: string };
+
+type InspectOptions = {
+  readFn?: ReadFn;
+  existsFn?: ExistsFn;
+  envFn?: EnvFn;
+};
+
+type WriteHostOptions = {
+  execFn?: ExecFn;
+  mkdirFn?: typeof fs.mkdirSync;
+  chmodFn?: typeof fs.chmodSync;
+  writeFileFn?: typeof fs.writeFileSync;
+  renameFn?: typeof fs.renameSync;
+  rmFn?: typeof fs.rmSync;
+  randomFn?: () => string;
+  envFn?: EnvFn;
+};
+
+type ReconcileOptions = InspectOptions & {
+  execFn?: ExecFn;
+  writeFn?: (home: string, project: string, blob: string) => void;
+  writeHostFn?: (home: string, blob: string, options?: WriteHostOptions) => WriteResult;
+  discoverFn?: (home: string) => string[];
+  projects?: string[] | null;
+  singleProject?: string | null;
+  inspection?: CredentialInspection | null;
+};
+type ReconcileResult = {
+  status: CredentialStatus;
+  authoritative: string | null;
+  expiresAt: unknown;
+  hostWritten: boolean;
+  filesWritten: string[];
+  fileErrors: Array<{ project: string; error: string }>;
+  warnings: Warning[];
+  detail?: string | null;
+};
+
+type ResolvedTool = {
+  tool: {
+    id: string;
+  };
+};
+
+type CredentialPayload = {
+  claudeAiOauth?: CredentialPayload;
+  scopes?: unknown;
+  accessToken?: unknown;
+  refreshToken?: unknown;
+  expiresAt?: unknown;
+};
 
 const LOCKED_PATTERN = /errSecInteractionNotAllowed|User interaction is not allowed/i;
 const NOT_FOUND_PATTERN = /errSecItemNotFound|specified item could not be found/i;
@@ -14,7 +109,11 @@ const REDACTION_PATTERNS = [
   { pattern: /Bearer\s+[A-Za-z0-9._~+/=-]{20,}/gi, replacement: 'Bearer [REDACTED]' }
 ];
 
-export function redactCommandError(text) {
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'unknown error';
+}
+
+export function redactCommandError(text: unknown): string {
   if (!text || typeof text !== 'string') {
     return '';
   }
@@ -27,8 +126,10 @@ export function redactCommandError(text) {
 
 export const redactSecurityOutput = redactCommandError;
 
-function extractStderrSafely(error) {
-  const stderr = error?.stderr;
+function extractStderrSafely(error: unknown): string {
+  const stderr = typeof error === 'object' && error !== null && 'stderr' in error
+    ? error.stderr
+    : undefined;
   if (Buffer.isBuffer(stderr)) {
     return stderr.toString('utf8');
   }
@@ -38,7 +139,7 @@ function extractStderrSafely(error) {
   return '';
 }
 
-function classifySecurityFailure(text) {
+function classifySecurityFailure(text: string): Exclude<SecurityClassification, 'OK'> {
   if (LOCKED_PATTERN.test(text)) {
     return 'LOCKED';
   }
@@ -48,14 +149,16 @@ function classifySecurityFailure(text) {
   return 'OTHER';
 }
 
-function runSecurity(args, options = {}, execFn = execFileSync) {
+function runSecurity(args: string[], options: Record<string, unknown> = {}, execFn: ExecFn = execFileSync): SecurityResult {
   try {
     const stdout = execFn('security', args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       ...options
     });
-    const text = typeof stdout === 'string' ? stdout : (stdout?.toString?.('utf8') ?? '');
+    const text = typeof stdout === 'string'
+      ? stdout
+      : (Buffer.isBuffer(stdout) ? stdout.toString('utf8') : '');
     return { ok: true, stdout: text, stderr: '', classification: 'OK' };
   } catch (error) {
     const stderr = redactCommandError(extractStderrSafely(error));
@@ -68,7 +171,7 @@ function runSecurity(args, options = {}, execFn = execFileSync) {
   }
 }
 
-export function buildLockedGuidance() {
+export function buildLockedGuidance(): string {
   return [
     'macOS keychain is locked (errSecInteractionNotAllowed).',
     'Options to recover:',
@@ -91,7 +194,7 @@ export function buildLockedGuidance() {
   ].join('\n');
 }
 
-export function claudeCredentialsEnvOverride(env = process.env) {
+export function claudeCredentialsEnvOverride(env: NodeJS.ProcessEnv = process.env): { path: string; source: string } | null {
   const raw = env?.AGENT_INFRA_CLAUDE_CREDENTIALS_FILE;
   if (!raw || typeof raw !== 'string') {
     return null;
@@ -99,7 +202,7 @@ export function claudeCredentialsEnvOverride(env = process.env) {
   return { path: raw, source: 'AGENT_INFRA_CLAUDE_CREDENTIALS_FILE' };
 }
 
-export function validateClaudeCredentialsEnvOverride(env = process.env) {
+export function validateClaudeCredentialsEnvOverride(env: NodeJS.ProcessEnv = process.env): void {
   const raw = env?.AGENT_INFRA_CLAUDE_CREDENTIALS_FILE;
   if (raw === undefined || raw === '') {
     return;
@@ -113,15 +216,15 @@ export function validateClaudeCredentialsEnvOverride(env = process.env) {
 
 // Reconcile treats the freshest valid endpoint as authoritative so sandbox
 // token rotations can flow back to the host credential store.
-function validateClaudeCredentialsBlob(raw, blob = null) {
+function validateClaudeCredentialsBlob(raw: unknown, blob: string | null = null): CredentialInspection {
   const trimmed = typeof raw === 'string' ? raw.trim() : '';
   if (!trimmed) {
     return { status: 'MISSING' };
   }
 
-  let parsed;
+  let parsed: CredentialPayload;
   try {
-    parsed = JSON.parse(trimmed);
+    parsed = JSON.parse(trimmed) as CredentialPayload;
   } catch {
     return { status: 'STALE_ACCESS' };
   }
@@ -141,7 +244,11 @@ function validateClaudeCredentialsBlob(raw, blob = null) {
   };
 }
 
-export function readClaudeCredentialsFile(filePath, readFn = (targetPath) => fs.readFileSync(targetPath, 'utf8'), existsFn = fs.existsSync) {
+export function readClaudeCredentialsFile(
+  filePath: string,
+  readFn: ReadFn = (targetPath) => fs.readFileSync(targetPath, 'utf8'),
+  existsFn: ExistsFn = fs.existsSync
+): CredentialInspection {
   if (!existsFn(filePath)) {
     return { status: 'MISSING' };
   }
@@ -154,7 +261,11 @@ export function readClaudeCredentialsFile(filePath, readFn = (targetPath) => fs.
   }
 }
 
-export function inspectClaudeKeychainStatus(home, execFn = execFileSync, options = {}) {
+export function inspectClaudeKeychainStatus(
+  home: string,
+  execFn: ExecFn = execFileSync,
+  options: InspectOptions = {}
+): CredentialInspection {
   const {
     readFn,
     existsFn,
@@ -192,7 +303,7 @@ export function inspectClaudeKeychainStatus(home, execFn = execFileSync, options
   return readClaudeCredentialsFile(credentialsPath, readFn, existsFn);
 }
 
-export function inspectClaudeMountFile(home, project, options = {}) {
+export function inspectClaudeMountFile(home: string, project: string, options: InspectOptions = {}): CredentialInspection {
   return readClaudeCredentialsFile(
     claudeCredentialsPath(home, project),
     options.readFn,
@@ -200,20 +311,20 @@ export function inspectClaudeMountFile(home, project, options = {}) {
   );
 }
 
-export function extractClaudeCredentialsBlob(home, execFn = execFileSync) {
+export function extractClaudeCredentialsBlob(home: string, execFn: ExecFn = execFileSync): string | null {
   const inspection = inspectClaudeKeychainStatus(home, execFn);
   return inspection.status === 'OK' ? inspection.blob : null;
 }
 
-export function claudeCredentialsDir(home, project) {
+export function claudeCredentialsDir(home: string, project: string): string {
   return hostJoin(home, '.agent-infra', 'credentials', project, 'claude-code');
 }
 
-export function claudeCredentialsPath(home, project) {
+export function claudeCredentialsPath(home: string, project: string): string {
   return hostJoin(claudeCredentialsDir(home, project), '.credentials.json');
 }
 
-export function writeClaudeCredentialsFile(home, project, blob) {
+export function writeClaudeCredentialsFile(home: string, project: string, blob: string): void {
   const dir = claudeCredentialsDir(home, project);
   const filePath = claudeCredentialsPath(home, project);
 
@@ -223,7 +334,7 @@ export function writeClaudeCredentialsFile(home, project, blob) {
   fs.chmodSync(filePath, 0o600);
 }
 
-export function discoverProjects(home) {
+export function discoverProjects(home: string): string[] {
   const credentialsRoot = hostJoin(home, '.agent-infra', 'credentials');
   if (!fs.existsSync(credentialsRoot)) {
     return [];
@@ -235,7 +346,7 @@ export function discoverProjects(home) {
     .filter((project) => fs.existsSync(claudeCredentialsPath(home, project)));
 }
 
-export function writeClaudeCredentialsToHost(home, blob, options = {}) {
+export function writeClaudeCredentialsToHost(home: string, blob: string, options: WriteHostOptions = {}): WriteResult {
   const {
     execFn = execFileSync,
     mkdirFn = fs.mkdirSync,
@@ -294,24 +405,24 @@ export function writeClaudeCredentialsToHost(home, blob, options = {}) {
     return {
       ok: false,
       classification: 'OTHER',
-      error: redactCommandError(error?.message ?? 'unknown error')
+      error: redactCommandError(errorMessage(error))
     };
   }
 }
 
-export function formatCredentialWarnings(warnings = []) {
+export function formatCredentialWarnings(warnings: Array<string | Warning> = []): string {
   return warnings
     .map((warning) => (typeof warning === 'string' ? warning : warning?.message))
     .filter(Boolean)
     .join('; ');
 }
 
-function endpointNameForFile(project) {
+function endpointNameForFile(project: string): string {
   return `file:${project}`;
 }
 
-function chooseAuthoritativeEndpoint(endpoints) {
-  const okEndpoints = endpoints.filter((endpoint) => endpoint.status === 'OK');
+function chooseAuthoritativeEndpoint(endpoints: CredentialEndpoint[]): OkCredentialEndpoint | null {
+  const okEndpoints = endpoints.filter((endpoint): endpoint is OkCredentialEndpoint => endpoint.status === 'OK');
   if (okEndpoints.length === 0) {
     return null;
   }
@@ -321,17 +432,19 @@ function chooseAuthoritativeEndpoint(endpoints) {
     return hostEndpoint;
   }
 
-  const withExpiresAt = okEndpoints.filter((endpoint) => typeof endpoint.expiresAt === 'number');
+  const withExpiresAt = okEndpoints.filter(
+    (endpoint): endpoint is ExpiringOkCredentialEndpoint => typeof endpoint.expiresAt === 'number'
+  );
   if (withExpiresAt.length > 0) {
     return withExpiresAt.reduce((best, endpoint) => (
       endpoint.expiresAt > best.expiresAt ? endpoint : best
     ));
   }
 
-  return okEndpoints.find((endpoint) => endpoint.name === 'host') ?? okEndpoints[0];
+  return okEndpoints.find((endpoint) => endpoint.name === 'host') ?? okEndpoints[0] ?? null;
 }
 
-function shouldWriteEndpoint(authoritative, target) {
+function shouldWriteEndpoint(authoritative: OkCredentialEndpoint, target: CredentialEndpoint): boolean {
   if (target.status !== 'OK') {
     return true;
   }
@@ -348,7 +461,7 @@ function shouldWriteEndpoint(authoritative, target) {
   return false;
 }
 
-export function reconcileClaudeCredentials(home, options = {}) {
+export function reconcileClaudeCredentials(home: string, options: ReconcileOptions = {}): ReconcileResult {
   const {
     execFn = execFileSync,
     writeFn = writeClaudeCredentialsFile,
@@ -388,13 +501,13 @@ export function reconcileClaudeCredentials(home, options = {}) {
       filesWritten: [],
       fileErrors: [],
       warnings: [],
-      detail: hostEndpoint.detail ?? null
+      detail: 'detail' in hostEndpoint ? hostEndpoint.detail ?? null : null
     };
   }
 
-  const warnings = [];
-  const filesWritten = [];
-  const fileErrors = [];
+  const warnings: Warning[] = [];
+  const filesWritten: string[] = [];
+  const fileErrors: Array<{ project: string; error: string }> = [];
   let hostWritten = false;
   let hostWriteFailed = false;
 
@@ -421,7 +534,7 @@ export function reconcileClaudeCredentials(home, options = {}) {
       writeFn(home, endpoint.project, authoritative.blob);
       filesWritten.push(endpoint.project);
     } catch (error) {
-      fileErrors.push({ project: endpoint.project, error: error.message });
+      fileErrors.push({ project: endpoint.project, error: errorMessage(error) });
     }
   }
 
@@ -436,7 +549,7 @@ export function reconcileClaudeCredentials(home, options = {}) {
   };
 }
 
-export function syncClaudeCredentialsFromKeychain(home, project, options = {}) {
+export function syncClaudeCredentialsFromKeychain(home: string, project: string, options: ReconcileOptions = {}) {
   const result = reconcileClaudeCredentials(home, {
     ...options,
     singleProject: project
@@ -455,7 +568,7 @@ export function syncClaudeCredentialsFromKeychain(home, project, options = {}) {
   };
 }
 
-export function formatRemaining(expiresAt) {
+export function formatRemaining(expiresAt: unknown): string {
   if (typeof expiresAt !== 'number') {
     return 'unknown';
   }
@@ -472,19 +585,19 @@ export function formatRemaining(expiresAt) {
 }
 
 export function assertClaudeCredentialsAvailable(
-  home,
-  project,
-  resolvedTools,
-  extractFn = extractClaudeCredentialsBlob,
-  writeFn = writeClaudeCredentialsFile,
-  inspectFn = inspectClaudeKeychainStatus
-) {
+  home: string,
+  project: string,
+  resolvedTools: ResolvedTool[],
+  extractFn: (home: string) => string | null = extractClaudeCredentialsBlob,
+  writeFn: (home: string, project: string, blob: string) => void = writeClaudeCredentialsFile,
+  inspectFn: (home: string) => CredentialInspection = inspectClaudeKeychainStatus
+): void {
   const claudeCodeEntry = resolvedTools.find(({ tool }) => tool.id === 'claude-code');
   if (!claudeCodeEntry) {
     return;
   }
 
-  let blob = null;
+  let blob: string | null = null;
   const hasCustomInspectFn = inspectFn !== inspectClaudeKeychainStatus;
   const hasCustomExtractFn = extractFn !== extractClaudeCredentialsBlob;
   if (hasCustomInspectFn || !hasCustomExtractFn) {
