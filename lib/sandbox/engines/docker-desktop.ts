@@ -1,5 +1,6 @@
-// @ts-nocheck
-export const dockerDesktopAdapter = {
+import type { OnMessage, SandboxAdapter } from './index.ts';
+
+export const dockerDesktopAdapter: SandboxAdapter = {
   id: 'docker-desktop',
   displayName: 'Docker Desktop',
   supportedPlatforms: ['darwin', 'linux', 'win32'],
@@ -11,7 +12,7 @@ export const dockerDesktopAdapter = {
     return null;
   },
 
-  async ensure(_config, _onMessage, { runOk }) {
+  async ensure(_config, _onMessage: OnMessage, { runOk }) {
     if (!runOk('docker', ['info'])) {
       throw new Error('Docker Desktop is not running. Please start Docker Desktop manually.');
     }
@@ -19,7 +20,7 @@ export const dockerDesktopAdapter = {
     return false;
   },
 
-  syncResources(config, onMessage) {
+  syncResources(config, onMessage: OnMessage) {
     if (!config.hasUserVmConfig?.(config.userVm)) {
       return;
     }

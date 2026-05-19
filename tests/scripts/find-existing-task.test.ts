@@ -1,13 +1,21 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import type { SpawnSyncReturns } from "node:child_process";
 
 import { filePath } from "../helpers.ts";
 
 const scriptPath = filePath(".agents/scripts/find-existing-task.js");
 
-function runScript(comments, options = {}) {
+type IssueComment = {
+  created_at: string;
+  body: string;
+};
+type RunScriptOptions = {
+  rawInput?: string;
+};
+
+function runScript(comments: IssueComment[], options: RunScriptOptions = {}) {
   const input = options.rawInput !== undefined
     ? options.rawInput
     : comments.map((c) => JSON.stringify(c)).join("\n");
@@ -20,19 +28,24 @@ function runScript(comments, options = {}) {
   });
 }
 
-function parseStdout(result) {
+function parseStdout(result: SpawnSyncReturns<string>): Record<string, unknown> & {
+  found?: boolean;
+  task_id?: string;
+  frontmatter: Record<string, string>;
+  candidates?: unknown;
+} {
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 }
 
-function comment(body, createdAt = "2026-04-12T03:51:33Z") {
+function comment(body: string, createdAt: string = "2026-04-12T03:51:33Z"): IssueComment {
   return {
     created_at: createdAt,
     body
   };
 }
 
-function taskComment(taskId, frontmatterLines = []) {
+function taskComment(taskId: string, frontmatterLines: string[] = []) {
   return [
     `<!-- sync-issue:${taskId}:task -->`,
     "## 任务文件",

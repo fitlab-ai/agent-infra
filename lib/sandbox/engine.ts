@@ -1,7 +1,7 @@
-// @ts-nocheck
 import { platform } from 'node:os';
 import { detectHostResources } from './constants.ts';
 import { ADAPTERS, enginesForPlatform, getAdapter } from './engines/index.ts';
+import type { EffectiveSandboxConfig, OnMessage, RunFns, SandboxAdapter, SandboxVmConfig } from './engines/index.ts';
 import { run, runOk, runSafe, runVerbose } from './shell.ts';
 
 export const ENGINES = Object.freeze({
@@ -18,12 +18,24 @@ const PLATFORM_DEFAULTS = Object.freeze({
   win32: ENGINES.WSL2
 });
 
+type EngineConfig = EffectiveSandboxConfig & {
+  engine?: string | null;
+};
+
+type EngineDependencies = {
+  platformFn?: typeof platform;
+  runFn?: RunFns['run'];
+  runOkFn?: RunFns['runOk'];
+  runSafeFn?: RunFns['runSafe'];
+  runVerboseFn?: RunFns['runVerbose'];
+};
+
 function runFns({
   runFn = run,
   runOkFn = runOk,
   runSafeFn = runSafe,
   runVerboseFn = runVerbose
-} = {}) {
+}: EngineDependencies = {}): RunFns {
   return {
     run: runFn,
     runOk: runOkFn,
@@ -32,13 +44,16 @@ function runFns({
   };
 }
 
-function applyDockerContext(adapter) {
+function applyDockerContext(adapter: SandboxAdapter): void {
   if (adapter.dockerContext) {
     process.env.DOCKER_CONTEXT = adapter.dockerContext;
   }
 }
 
-export function validateSandboxEngine(engine, { platformFn = platform } = {}) {
+export function validateSandboxEngine(
+  engine: string | null | undefined,
+  { platformFn = platform }: Pick<EngineDependencies, 'platformFn'> = {}
+): string | null {
   if (engine === null || engine === undefined) {
     return null;
   }
@@ -52,7 +67,7 @@ export function validateSandboxEngine(engine, { platformFn = platform } = {}) {
     );
   }
 
-  const adapter = ADAPTERS[engine];
+  const adapter = ADAPTERS[engine as keyof typeof ADAPTERS];
   if (!adapter.supportedPlatforms.includes(os)) {
     const supported = enginesForPlatform(os);
     const supportedList = supported.length > 0 ? supported.join(', ') : 'none';
@@ -65,14 +80,17 @@ export function validateSandboxEngine(engine, { platformFn = platform } = {}) {
   return engine;
 }
 
-export function detectEngine(config = {}, { platformFn = platform } = {}) {
+export function detectEngine(
+  config: EngineConfig = {},
+  { platformFn = platform }: Pick<EngineDependencies, 'platformFn'> = {}
+): string {
   const configured = validateSandboxEngine(config.engine, { platformFn });
   if (configured) {
     return configured;
   }
 
   const os = platformFn();
-  const fallback = PLATFORM_DEFAULTS[os];
+  const fallback = PLATFORM_DEFAULTS[os as keyof typeof PLATFORM_DEFAULTS];
   if (fallback) {
     return fallback;
   }
@@ -85,16 +103,16 @@ export function detectEngine(config = {}, { platformFn = platform } = {}) {
   );
 }
 
-export function hasUserVmConfig(vm = {}) {
+export function hasUserVmConfig(vm: SandboxVmConfig = {}): boolean {
   return vm.cpu != null || vm.memory != null || vm.disk != null;
 }
 
 export function resolveEffectiveVm(
-  adapter,
-  userVm = {},
-  { detectHostResourcesFn = detectHostResources } = {}
-) {
-  let host = null;
+  adapter: SandboxAdapter,
+  userVm: SandboxVmConfig = {},
+  { detectHostResourcesFn = detectHostResources }: { detectHostResourcesFn?: typeof detectHostResources } = {}
+): SandboxVmConfig {
+  let host: ReturnType<typeof detectHostResources> | null = null;
   const getHost = () => {
     host ??= detectHostResourcesFn();
     return host;
@@ -108,7 +126,7 @@ export function resolveEffectiveVm(
   };
 }
 
-function effectiveConfigFor(adapter, config) {
+function effectiveConfigFor(adapter: SandboxAdapter, config: EngineConfig): EffectiveSandboxConfig {
   const userVm = config.vm ?? {};
   return {
     ...config,
@@ -118,7 +136,11 @@ function effectiveConfigFor(adapter, config) {
   };
 }
 
-export async function ensureDocker(config, onMessage, dependencies = {}) {
+export async function ensureDocker(
+  config: EngineConfig,
+  onMessage: OnMessage,
+  dependencies: EngineDependencies = {}
+): Promise<void> {
   const engine = detectEngine(config, dependencies);
   const adapter = getAdapter(engine);
   const effectiveConfig = effectiveConfigFor(adapter, config);
@@ -128,12 +150,12 @@ export async function ensureDocker(config, onMessage, dependencies = {}) {
   adapter.syncResources(effectiveConfig, onMessage, runFns(dependencies), { vmJustStarted });
 }
 
-export function isVmManaged(config = {}, dependencies = {}) {
+export function isVmManaged(config: EngineConfig = {}, dependencies: EngineDependencies = {}): boolean {
   try {
     const engine = detectEngine(config, dependencies);
     return isManagedEngine(engine);
   } catch (error) {
-    const message = error?.message ?? '';
+    const message = error instanceof Error ? error.message : '';
     if (
       message.startsWith('sandbox: platform "')
       || / is not supported on [^.]+\. Supported engines on [^:]+: none\./.test(message)
@@ -145,7 +167,7 @@ export function isVmManaged(config = {}, dependencies = {}) {
   }
 }
 
-export function isManagedEngine(engine) {
+export function isManagedEngine(engine: string): boolean {
   try {
     return getAdapter(engine).managed;
   } catch {
@@ -153,7 +175,7 @@ export function isManagedEngine(engine) {
   }
 }
 
-export function engineDisplayName(engine) {
+export function engineDisplayName(engine: string): string {
   try {
     return getAdapter(engine).displayName;
   } catch {
@@ -162,9 +184,9 @@ export function engineDisplayName(engine) {
 }
 
 export function startManagedVm(
-  config,
-  { platformFn = platform, runOkFn = runOk, runSafeFn = runSafe, runVerboseFn = runVerbose, onMessage } = {}
-) {
+  config: EngineConfig,
+  { platformFn = platform, runOkFn = runOk, runSafeFn = runSafe, runVerboseFn = runVerbose, onMessage }: EngineDependencies & { onMessage?: OnMessage } = {}
+): 'already-running' | 'started' {
   const engine = detectEngine(config, { platformFn });
   const adapter = getAdapter(engine);
   if (!adapter.managed) {
@@ -173,6 +195,9 @@ export function startManagedVm(
 
   const effectiveConfig = effectiveConfigFor(adapter, config);
   applyDockerContext(adapter);
+  if (!adapter.startVm) {
+    throw new Error(`VM management is unavailable for engine '${adapter.displayName}'.`);
+  }
   const result = adapter.startVm(
     effectiveConfig,
     onMessage,
@@ -187,10 +212,16 @@ export function startManagedVm(
   return result;
 }
 
-export function stopManagedVm(config, { platformFn = platform, runFn = run } = {}) {
+export function stopManagedVm(
+  config: EngineConfig,
+  { platformFn = platform, runFn = run }: Pick<EngineDependencies, 'platformFn' | 'runFn'> = {}
+): 'stopped' {
   const engine = detectEngine(config, { platformFn });
   const adapter = getAdapter(engine);
   if (!adapter.managed) {
+    throw new Error(`VM management is unavailable for engine '${adapter.displayName}'.`);
+  }
+  if (!adapter.stopVm) {
     throw new Error(`VM management is unavailable for engine '${adapter.displayName}'.`);
   }
 

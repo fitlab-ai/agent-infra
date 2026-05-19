@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -6,18 +5,19 @@ import os from "node:os";
 import path from "node:path";
 
 import { loadFreshEsm } from "../helpers.ts";
+import type { SyncTemplatesModule } from "../helpers.ts";
 
-function writeFile(root, relativePath, content) {
+function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, content, "utf8");
 }
 
-function writeJson(root, relativePath, value) {
+function writeJson(root: string, relativePath: string, value: unknown) {
   writeFile(root, relativePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function makeTemplateRoot(tmpDir) {
+function makeTemplateRoot(tmpDir: string) {
   const templateRoot = path.join(tmpDir, "template-root");
   writeJson(tmpDir, "package.json", {
     name: "@fitlab-ai/agent-infra",
@@ -39,7 +39,7 @@ function makeTemplateRoot(tmpDir) {
   return templateRoot;
 }
 
-function makeProject(projectRoot, overrides = {}) {
+function makeProject(projectRoot: string, overrides: Record<string, unknown> = {}) {
   writeJson(projectRoot, ".agents/.airc.json", {
     project: "demo",
     org: "acme",
@@ -68,7 +68,7 @@ function makeProject(projectRoot, overrides = {}) {
   );
 }
 
-function makeReferenceSource(tmpDir, content) {
+function makeReferenceSource(tmpDir: string, content: string) {
   const sourceRoot = fs.mkdtempSync(path.join(tmpDir, "custom-tool-source-"));
   writeFile(sourceRoot, ".acme/commands/analyze-task.cmd", content);
   return sourceRoot;
@@ -107,7 +107,7 @@ test("syncTemplates learns custom TUI command format from existing command files
       }
     });
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
     const command = fs.readFileSync(path.join(projectRoot, ".acme/commands/local-check.cmd"), "utf8");
 
@@ -133,7 +133,7 @@ test("syncTemplates skips custom TUI generation when the reference directory is 
     });
     fs.mkdirSync(path.join(projectRoot, ".acme/commands"), { recursive: true });
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.equal(fs.existsSync(path.join(projectRoot, ".acme/commands/local-check.cmd")), false);
@@ -169,7 +169,7 @@ test("syncTemplates skips custom TUI generation when reference files do not iden
       }
     });
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.equal(fs.existsSync(path.join(projectRoot, ".acme/commands/local-check.cmd")), false);
@@ -215,7 +215,7 @@ test("syncTemplates skips mismatched reference descriptions and uses the next va
       }
     });
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
     const command = fs.readFileSync(path.join(projectRoot, ".acme/commands/02-local-check.cmd"), "utf8");
 
@@ -264,7 +264,7 @@ test("syncTemplates protects generated custom TUI command files during managed c
       }
     });
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     syncTemplates(projectRoot, templateRoot);
     const secondReport = syncTemplates(projectRoot, templateRoot);
 
@@ -303,7 +303,7 @@ test("syncTemplates removes stale custom TUI files that only contain a custom sk
     });
     writeFile(projectRoot, ".acme/commands/local-check-notes.cmd", "stale\n");
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.equal(fs.existsSync(path.join(projectRoot, ".acme/commands/local-check-notes.cmd")), false);
@@ -324,7 +324,7 @@ test("syncTemplates rejects custom TUI directories outside the project root", as
       customTUIs: [{ name: "Acme TUI", dir: "../outside", invoke: "acme ${skillName}" }]
     });
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.deepEqual(report.custom.customTUIs.skipped, [
@@ -384,7 +384,7 @@ test("syncTemplates generates commands for multiple custom TUI tools and custom 
       "---\nname: local-plan\ndescription: \"Manual plan\"\n---\n"
     );
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.equal(report.custom.commands.generated.length, 10);
@@ -411,7 +411,7 @@ test("syncTemplates keeps built-in custom skill command generation unchanged wit
     const templateRoot = makeTemplateRoot(tmpDir);
     makeProject(projectRoot);
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.deepEqual(report.custom.detected, ["local-check"]);

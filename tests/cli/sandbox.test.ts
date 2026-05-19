@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -21,7 +20,154 @@ import {
 } from "../helpers.ts";
 import { restoreTerminal, runInteractive, runVerbose } from "../../lib/sandbox/shell.ts";
 
-function restoreDockerContext(previousValue) {
+type WriteCallback = (error?: Error | null) => void;
+type DotfilesModule = {
+  dotfilesCacheDir(home: string, project: string): string;
+  materializeDotfiles(
+    srcDir: string,
+    cacheDir: string,
+    options?: { writeStderr?: (chunk: string) => void } & Record<string, unknown>
+  ): { cacheDir: string; warnings: Array<{ rel: string; reason: string }> } | null;
+};
+type SymlinkKind = "file" | "dir" | "junction";
+type FakeSelinuxFs = {
+  reads: number;
+  readFileSync(pathname: string, encoding: BufferEncoding): string;
+};
+type CommandOptions = Record<string, unknown> & {
+  env?: NodeJS.ProcessEnv;
+  input?: Buffer | string;
+  encoding?: BufferEncoding;
+  stdio?: unknown;
+};
+type CommandCall = [cmd: string, args: string[], options?: CommandOptions];
+type EngineCommandCall = [engine: string, cmd: string, args: string[], options?: CommandOptions];
+type VerboseCall = {
+  type: "run" | "verbose";
+  engine?: string;
+  cmd: string;
+  args: string[];
+  opts?: CommandOptions;
+};
+type ResolvedToolFixture = {
+  tool: {
+    envVars?: Record<string, string>;
+    id?: string;
+  };
+};
+type EnvFileResult = {
+  dockerArgs: string[];
+  cleanup(): void;
+};
+type GpgCache = {
+  pub: Buffer;
+  sec: Buffer;
+};
+type ExecFn = (cmd: string, args: string[], options?: CommandOptions) => string | Buffer | void;
+type EngineExecFn = (engine: string, cmd: string, args: string[], options?: CommandOptions) => string | Buffer | void;
+type RunSafeFn = (cmd: string, args: string[]) => string;
+type EngineRunSafeFn = (engine: string, cmd: string, args: string[]) => string;
+type SandboxCreateModule = {
+  create(args: string[]): Promise<void>;
+  buildContainerEnvFile(tools: ResolvedToolFixture[], engine: string, runSafe?: EngineRunSafeFn, options?: CommandOptions): EnvFileResult;
+  buildDotfilesVolumeArgs(engine: string, snapshotDir: string | null | undefined, existsFn?: (targetPath: string) => boolean): string[];
+  assertBranchAvailable(repoRoot: string, branch: string, options?: { allowedWorktrees?: string[]; runFn?: RunSafeFn }): void;
+  ensureClaudeOnboarding(toolDir: string, hostHomeDir?: string): void;
+  ensureClaudeSettings(toolDir: string, hostHomeDir?: string): void;
+  ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string): void;
+  ensureCodexWorkspaceTrust(toolDir: string): void;
+  ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: string): void;
+  ensureGeminiWorkspaceTrust(toolDir: string): void;
+  buildImage(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): void;
+  commandErrorMessage(error: unknown): string;
+  hostHasGpgKeys(home: string, execFn?: ExecFn): boolean;
+  ensureShellConfigSymlinks(engine: string, container: string, execFn?: EngineExecFn): void;
+  ensureSandboxAliasesFile(home: string): { created: boolean; path: string };
+  prepareHostShellConfig(config: Record<string, unknown>): {
+    hostDir: string;
+    mounts: Array<{ hostPath: string; containerPath: string; options?: string }>;
+  };
+  detectGpgConfig(content: string): boolean;
+  sanitizeGitConfig(content: string, home: string, options?: Record<string, unknown>): string;
+  writeSanitizedGitconfig(config: Record<string, unknown>): string;
+  syncGpgKeys(container: string, home: string, project: string, execFn: ExecFn, runSafeFn: RunSafeFn, options?: Record<string, unknown>): boolean;
+  currentKeyringFingerprint(home: string, execFn: ExecFn): string | null;
+  getGitSigningKey(options: Record<string, unknown>): string | null;
+  readGpgCache(home: string, project: string, fingerprintFn: ExecFn, signingKey?: string): GpgCache | null;
+  writeGpgCache(home: string, project: string, pub: Buffer, sec: Buffer, fingerprint: string, signingKey?: string): boolean;
+};
+type EnterModule = {
+  terminalEnvFlags(env?: NodeJS.ProcessEnv): string[];
+  formatCredentialSyncStatus(result: { status: string }): string;
+};
+type AdapterModule<T extends string> = Record<`${T}Adapter`, SandboxAdapterFixture>;
+type SandboxVmConfigFixture = { cpu?: number | null; memory?: number | null; disk?: number | null };
+type SandboxResourceConfig = Record<string, unknown> & {
+  vm?: SandboxVmConfigFixture;
+  userVm?: SandboxVmConfigFixture;
+  hasUserVmConfig?: (vm: SandboxVmConfigFixture | undefined) => boolean;
+};
+type SandboxAdapterFixture = {
+  id: string;
+  displayName: string;
+  supportedPlatforms: string[];
+  dockerContext: string | null;
+  managed: boolean;
+  canApplyResources: "hot" | "on-start" | "never";
+  defaultResources(getHost?: () => { cpu: number; memory: number }): Record<string, number | null> | null;
+  ensure(config?: SandboxResourceConfig, onMessage?: (message: string) => void, runFns?: Record<string, unknown>): Promise<boolean>;
+  startVm(config?: SandboxResourceConfig, onMessage?: (message: string) => void, runFns?: Record<string, unknown>): string;
+  stopVm(): never;
+  syncResources(config?: SandboxResourceConfig, onMessage?: (message: string) => void, runFns?: Record<string, unknown>, options?: Record<string, unknown>): void;
+};
+type SandboxEngineModule = {
+  detectEngine(config?: Record<string, unknown>, deps?: Record<string, unknown>): string;
+  validateSandboxEngine(engine: string | null | undefined, deps?: Record<string, unknown>): string | null;
+  hasUserVmConfig(vm?: Record<string, unknown>): boolean;
+  resolveEffectiveVm(adapter: Record<string, unknown>, userVm?: Record<string, unknown>, deps?: Record<string, unknown>): Record<string, unknown>;
+  ensureDocker(config: Record<string, unknown>, onMessage: ((message: string) => void) | null, deps?: Record<string, unknown>): Promise<void>;
+  startManagedVm(config: Record<string, unknown>, deps?: Record<string, unknown>): string;
+  stopManagedVm(config: Record<string, unknown>, deps?: Record<string, unknown>): string;
+  isVmManaged(config?: Record<string, unknown>, deps?: Record<string, unknown>): boolean;
+  engineDisplayName(engine: string): string;
+};
+type EnginesIndexModule = {
+  ADAPTERS: Record<string, SandboxAdapterFixture>;
+  enginesForPlatform(platformName: string): string[];
+};
+type NativeModule = AdapterModule<"native"> & {
+  isRootlessDocker(options: Record<string, unknown>): boolean;
+};
+type RebuildModule = {
+  buildArgs(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): string[];
+};
+type Wsl2PathsModule = {
+  hostJoin(basePath: string, ...segments: string[]): string;
+  isWindowsDrivePath(value: unknown): boolean;
+  isUncPath(value: unknown): boolean;
+  windowsPathToWslPath(value: string): string;
+  toEnginePath(engine: string, value: string): string;
+  volumeArg(engine: string, hostPath: string, containerPath: string, suffix?: string, options?: {
+    selinux?: "shared" | "none";
+    fs?: FakeSelinuxFs;
+    platform?: NodeJS.Platform;
+    env?: NodeJS.ProcessEnv;
+  }): string;
+};
+
+function required<T>(value: T | undefined, message = "expected value"): T {
+  if (value === undefined) {
+    throw new Error(message);
+  }
+  return value;
+}
+
+function assertError(error: unknown): Error {
+  assert.ok(error instanceof Error);
+  return error;
+}
+
+function restoreDockerContext(previousValue: string | undefined) {
   if (previousValue === undefined) {
     delete process.env.DOCKER_CONTEXT;
   } else {
@@ -29,7 +175,7 @@ function restoreDockerContext(previousValue) {
   }
 }
 
-function withTTY(value, fn) {
+function withTTY<T>(value: boolean, fn: () => T): T {
   const descriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
 
   try {
@@ -39,22 +185,22 @@ function withTTY(value, fn) {
     if (descriptor) {
       Object.defineProperty(process.stdout, "isTTY", descriptor);
     } else {
-      delete process.stdout.isTTY;
+      delete (process.stdout as Partial<typeof process.stdout>).isTTY;
     }
   }
 }
 
-function captureStdoutWrite(fn) {
+function captureStdoutWrite(fn: () => void): string {
   const originalWrite = process.stdout.write;
   let output = "";
 
   try {
-    process.stdout.write = (chunk, ...args) => {
+    process.stdout.write = ((chunk: string | Uint8Array, ...args: Array<string | BufferEncoding | WriteCallback>) => {
       output += String(chunk);
-      const callback = args.find((arg) => typeof arg === "function");
+      const callback = args.find((arg): arg is WriteCallback => typeof arg === "function");
       callback?.();
       return true;
-    };
+    }) as typeof process.stdout.write;
     fn();
     return output;
   } finally {
@@ -62,7 +208,7 @@ function captureStdoutWrite(fn) {
   }
 }
 
-function makeDotfilesFixture(prefix = "agent-infra-materialize-dotfiles-") {
+function makeDotfilesFixture(prefix: string = "agent-infra-materialize-dotfiles-") {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const srcDir = path.join(tmpDir, "src");
   const cacheDir = path.join(tmpDir, "cache");
@@ -72,35 +218,37 @@ function makeDotfilesFixture(prefix = "agent-infra-materialize-dotfiles-") {
   return { tmpDir, srcDir, cacheDir, externalDir };
 }
 
-function trySymlink(target, linkPath, type) {
+function trySymlink(target: string, linkPath: string, type: SymlinkKind) {
   try {
     fs.symlinkSync(target, linkPath, type);
     return true;
   } catch (error) {
-    if (["EPERM", "EACCES", "ENOTSUP"].includes(error?.code)) {
+    const code = error instanceof Error && "code" in error ? error.code : undefined;
+    if (typeof code === "string" && ["EPERM", "EACCES", "ENOTSUP"].includes(code)) {
       return false;
     }
     throw error;
   }
 }
 
-function symlinkType(type) {
+function symlinkType(type: "file" | "dir"): SymlinkKind {
   if (type === "dir" && process.platform === "win32") {
     return "junction";
   }
   return type;
 }
 
-function readMaterializeResult(sandboxDotfiles, srcDir, cacheDir, options = {}) {
-  const stderrChunks = [];
+function readMaterializeResult(sandboxDotfiles: DotfilesModule, srcDir: string, cacheDir: string, options: Record<string, unknown> = {}) {
+  const stderrChunks: string[] = [];
   const result = sandboxDotfiles.materializeDotfiles(srcDir, cacheDir, {
     writeStderr: (chunk) => stderrChunks.push(chunk),
     ...options
   });
+  assert.ok(result);
   return { result, stderr: stderrChunks.join("") };
 }
 
-function withFakeStty(exitCode, fn) {
+function withFakeStty<T>(exitCode: number, fn: () => T): T {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fake-stty-"));
   const sttyPath = path.join(tmpDir, "stty");
   const previousPath = process.env.PATH;
@@ -124,10 +272,10 @@ function withFakeStty(exitCode, fn) {
   }
 }
 
-function fakeSelinuxFs(flag) {
+function fakeSelinuxFs(flag: string): FakeSelinuxFs {
   return {
     reads: 0,
-    readFileSync(pathname, encoding) {
+    readFileSync(pathname: string, encoding: BufferEncoding) {
       assert.equal(pathname, "/sys/fs/selinux/enforce");
       assert.equal(encoding, "utf8");
       this.reads += 1;
@@ -136,7 +284,7 @@ function fakeSelinuxFs(flag) {
   };
 }
 
-function validClaudeCredentialsBlob(expiresAt) {
+function validClaudeCredentialsBlob(expiresAt: number) {
   return JSON.stringify({
     claudeAiOauth: {
       accessToken: `token-${expiresAt}`,
@@ -219,7 +367,7 @@ test("sandbox create help documents the host aliases file", () => {
 });
 
 test("sandbox create rejects invalid selinux disable environment before loading config", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const previousValue = process.env.AGENT_INFRA_SELINUX_DISABLE;
 
   try {
@@ -267,7 +415,7 @@ test("sandbox create fails before preparing a temporary Dockerfile when Claude c
       "utf8"
     );
 
-    let commandError;
+    let commandError: (Error & { stderr?: string | Buffer }) | null = null;
     try {
       execFileSync(
         process.execPath,
@@ -280,11 +428,11 @@ test("sandbox create fails before preparing a temporary Dockerfile when Claude c
         }
       );
     } catch (error) {
-      commandError = error;
+      commandError = error as Error & { stderr?: string | Buffer };
     }
 
     assert.ok(commandError);
-    assert.match(commandError.stderr, /Claude Code credentials not found on host/);
+    assert.match(String(commandError.stderr ?? ""), /Claude Code credentials not found on host/);
 
     const leakedEntries = fs.readdirSync(os.tmpdir()).filter((entry) => (
       entry.startsWith(dockerfilePrefix) && !existingEntries.has(entry)
@@ -344,7 +492,7 @@ exit 0
       ORB_LOG_PATH: orbLogPath
     };
 
-    const sandboxVm = await loadFreshEsm("lib/sandbox/commands/vm.js");
+    const sandboxVm = await loadFreshEsm<typeof import("../../lib/sandbox/commands/vm.ts")>("lib/sandbox/commands/vm.js");
     await sandboxVm.vm(["stop"]);
 
     assert.deepEqual(fs.readFileSync(orbLogPath, "utf8").trim().split("\n"), ["status"]);
@@ -359,7 +507,7 @@ exit 0
 });
 
 test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => {
-  const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
+  const sandboxConfig = await loadFreshEsm<typeof import("../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-config-"));
   const previousCwd = process.cwd();
 
@@ -383,9 +531,9 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     assert.deepEqual(config.tools, ["claude-code", "codex", "opencode", "gemini-cli"]);
     assert.equal(config.engine, null);
     assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
-    assert.equal(config.worktreeBase, path.join(process.env.HOME, ".agent-infra", "worktrees", "demo"));
-    assert.equal(config.shareBase, path.join(process.env.HOME, ".agent-infra", "share", "demo"));
-    assert.equal(config.dotfilesDir, path.join(process.env.HOME, ".agent-infra", "dotfiles"));
+    assert.equal(config.worktreeBase, path.join(process.env.HOME ?? "", ".agent-infra", "worktrees", "demo"));
+    assert.equal(config.shareBase, path.join(process.env.HOME ?? "", ".agent-infra", "share", "demo"));
+    assert.equal(config.dotfilesDir, path.join(process.env.HOME ?? "", ".agent-infra", "dotfiles"));
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -393,7 +541,7 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
 });
 
 test("dotfilesCacheDir returns project-scoped cache path under .agent-infra cache", async () => {
-  const sandboxDotfiles = await loadFreshEsm("lib/sandbox/dotfiles.js");
+  const sandboxDotfiles = await loadFreshEsm<typeof import("../../lib/sandbox/dotfiles.ts")>("lib/sandbox/dotfiles.js");
 
   assert.equal(
     sandboxDotfiles.dotfilesCacheDir("/home/u", "demo"),
@@ -402,7 +550,7 @@ test("dotfilesCacheDir returns project-scoped cache path under .agent-infra cach
 });
 
 test("loadConfig preserves configured sandbox engine", async () => {
-  const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
+  const sandboxConfig = await loadFreshEsm<typeof import("../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-config-"));
   const previousCwd = process.cwd();
 
@@ -432,7 +580,7 @@ test("loadConfig preserves configured sandbox engine", async () => {
 });
 
 test("loadConfig preserves configured darwin-only sandbox engine with platform context", async () => {
-  const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
+  const sandboxConfig = await loadFreshEsm<typeof import("../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-darwin-"));
   const previousCwd = process.cwd();
 
@@ -460,7 +608,7 @@ test("loadConfig preserves configured darwin-only sandbox engine with platform c
 });
 
 test("loadConfig rejects unsupported sandbox engine values", async () => {
-  const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
+  const sandboxConfig = await loadFreshEsm<typeof import("../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-invalid-"));
   const previousCwd = process.cwd();
 
@@ -489,7 +637,7 @@ test("loadConfig rejects unsupported sandbox engine values", async () => {
 });
 
 test("loadConfig fails when .agents/.airc.json is missing", async () => {
-  const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
+  const sandboxConfig = await loadFreshEsm<typeof import("../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-missing-config-"));
   const previousCwd = process.cwd();
 
@@ -507,7 +655,7 @@ test("loadConfig fails when .agents/.airc.json is missing", async () => {
 });
 
 test("loadConfig uses os.homedir on Windows when HOME is unset", onPlatforms("win32"), async () => {
-  const sandboxConfig = await loadFreshEsm("lib/sandbox/config.js");
+  const sandboxConfig = await loadFreshEsm<typeof import("../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-userprofile-"));
   const previousCwd = process.cwd();
   const previousHome = process.env.HOME;
@@ -544,7 +692,7 @@ test("loadConfig uses os.homedir on Windows when HOME is unset", onPlatforms("wi
 });
 
 test("composeDockerfile joins runtime fragments in order", async () => {
-  const sandboxDockerfile = await loadFreshEsm("lib/sandbox/dockerfile.js");
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-dockerfile-"));
 
   try {
@@ -573,7 +721,7 @@ test("composeDockerfile joins runtime fragments in order", async () => {
 // package was installed at least once. Form-agnostic — accepts `for` loops,
 // `xargs -n1`, or any equivalent rewrite that preserves the semantic.
 test("composeDockerfile installs each AI tool package separately", onPlatforms("linux", "darwin"), async () => {
-  const sandboxDockerfile = await loadFreshEsm("lib/sandbox/dockerfile.js");
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-ai-tools-loop-"));
   const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-npm-stub-"));
 
@@ -613,8 +761,8 @@ test("composeDockerfile installs each AI tool package separately", onPlatforms("
       : [];
     const installedPackages = invocations
       .map((line) => line.match(/^install -g (\S+)$/))
-      .filter(Boolean)
-      .map((m) => m[1]);
+      .filter((match): match is RegExpMatchArray => match !== null)
+      .map((match) => required(match[1]));
     for (const pkg of packages) {
       const count = installedPackages.filter((p) => p === pkg).length;
       assert.ok(count >= 1, `expected ${pkg} to be installed by its own 'npm install -g <pkg>' invocation, got ${count} (invocations: ${JSON.stringify(invocations)})`);
@@ -626,7 +774,7 @@ test("composeDockerfile installs each AI tool package separately", onPlatforms("
 });
 
 test("composeDockerfile includes gh CLI and bash_aliases sourcing", async () => {
-  const sandboxDockerfile = await loadFreshEsm("lib/sandbox/dockerfile.js");
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-gh-"));
 
   try {
@@ -650,7 +798,7 @@ test("composeDockerfile includes gh CLI and bash_aliases sourcing", async () => 
 });
 
 test("composeDockerfile installs tmux for in-container session recovery", async () => {
-  const sandboxDockerfile = await loadFreshEsm("lib/sandbox/dockerfile.js");
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmux-"));
 
   try {
@@ -671,7 +819,7 @@ test("composeDockerfile installs tmux for in-container session recovery", async 
 });
 
 test("composeDockerfile bakes sandbox-tmux-entry script", async () => {
-  const sandboxDockerfile = await loadFreshEsm("lib/sandbox/dockerfile.js");
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmux-entry-"));
 
   try {
@@ -696,7 +844,7 @@ test("composeDockerfile bakes sandbox-tmux-entry script", async () => {
 });
 
 test("composeDockerfile bakes sandbox-dotfiles-link script", async () => {
-  const sandboxDockerfile = await loadFreshEsm("lib/sandbox/dockerfile.js");
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-dotfiles-link-"));
 
   try {
@@ -728,7 +876,7 @@ test("composeDockerfile bakes sandbox-dotfiles-link script", async () => {
 });
 
 test("composeDockerfile invokes sandbox-dotfiles-link from sandbox-tmux-entry", async () => {
-  const sandboxDockerfile = await loadFreshEsm("lib/sandbox/dockerfile.js");
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-dotfiles-entry-"));
 
   try {
@@ -747,7 +895,7 @@ test("composeDockerfile invokes sandbox-dotfiles-link from sandbox-tmux-entry", 
 });
 
 test("composeDockerfile configures tmux extended keys and terminal env forwarding", async () => {
-  const sandboxDockerfile = await loadFreshEsm("lib/sandbox/dockerfile.js");
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmux-config-"));
 
   try {
@@ -776,7 +924,7 @@ test("composeDockerfile configures tmux extended keys and terminal env forwardin
 });
 
 test("buildContainerEnvFile writes tool env vars to a private env file", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-"));
 
   try {
@@ -784,41 +932,43 @@ test("buildContainerEnvFile writes tool env vars to a private env file", async (
       { tool: { envVars: { FOO: "bar" } } },
       { tool: { envVars: { BAZ: "qux" } } }
     ], "native", () => "", { tmpDir });
+    const envPath = required(envFile.dockerArgs[1]);
 
     assert.equal(envFile.dockerArgs[0], "--env-file");
-    assert.equal(path.dirname(path.dirname(envFile.dockerArgs[1])), tmpDir);
-    assert.equal(fs.readFileSync(envFile.dockerArgs[1], "utf8"), "FOO=bar\nBAZ=qux\n");
-    assertModeBits(path.dirname(envFile.dockerArgs[1]), 0o700);
-    assertModeBits(envFile.dockerArgs[1], 0o600);
+    assert.equal(path.dirname(path.dirname(envPath)), tmpDir);
+    assert.equal(fs.readFileSync(envPath, "utf8"), "FOO=bar\nBAZ=qux\n");
+    assertModeBits(path.dirname(envPath), 0o700);
+    assertModeBits(envPath, 0o600);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("buildContainerEnvFile stores GH_TOKEN in the env file but not docker argv", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-token-"));
 
   try {
     const envFile = sandboxCreate.buildContainerEnvFile([
       { tool: { envVars: { FOO: "bar" } } }
-    ], "native", (engine, cmd, args) => {
+    ], "native", (engine: string, cmd: string, args: string[]) => {
       assert.equal(engine, "native");
       assert.equal(cmd, "gh");
       assert.deepEqual(args, ["auth", "token"]);
       return "ghp_123456789012345678901234567890123456";
     }, { tmpDir });
 
-    assert.deepEqual(envFile.dockerArgs, ["--env-file", envFile.dockerArgs[1]]);
+    const envPath = required(envFile.dockerArgs[1]);
+    assert.deepEqual(envFile.dockerArgs, ["--env-file", envPath]);
     assert.ok(!envFile.dockerArgs.some((arg) => arg.includes("ghp_123456789012345678901234567890123456")));
-    assert.match(fs.readFileSync(envFile.dockerArgs[1], "utf8"), /GH_TOKEN=ghp_123456789012345678901234567890123456/);
+    assert.match(fs.readFileSync(envPath, "utf8"), /GH_TOKEN=ghp_123456789012345678901234567890123456/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("buildContainerEnvFile returns empty docker args when there are no env vars", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   const envFile = sandboxCreate.buildContainerEnvFile([
     { tool: { envVars: {} } }
@@ -829,14 +979,14 @@ test("buildContainerEnvFile returns empty docker args when there are no env vars
 });
 
 test("buildContainerEnvFile cleanup removes the temporary directory", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-cleanup-"));
 
   try {
     const envFile = sandboxCreate.buildContainerEnvFile([
       { tool: { envVars: { FOO: "bar" } } }
     ], "native", () => "", { tmpDir });
-    const envDir = path.dirname(envFile.dockerArgs[1]);
+    const envDir = path.dirname(required(envFile.dockerArgs[1]));
 
     assert.ok(fs.existsSync(envDir));
     envFile.cleanup();
@@ -847,7 +997,7 @@ test("buildContainerEnvFile cleanup removes the temporary directory", async () =
 });
 
 test("buildContainerEnvFile rejects newlines and removes the temporary directory", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-newline-"));
 
   try {
@@ -861,7 +1011,7 @@ test("buildContainerEnvFile rejects newlines and removes the temporary directory
 });
 
 test("buildContainerEnvFile uses engine-aware env-file paths for WSL2", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   const envFile = sandboxCreate.buildContainerEnvFile([
     { tool: { envVars: { FOO: "bar" } } }
@@ -877,7 +1027,7 @@ test("buildContainerEnvFile uses engine-aware env-file paths for WSL2", async ()
 });
 
 test("buildDotfilesVolumeArgs returns volume args when host dir exists", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   const args = sandboxCreate.buildDotfilesVolumeArgs("native", "/host/dotfiles", () => true);
 
@@ -885,7 +1035,7 @@ test("buildDotfilesVolumeArgs returns volume args when host dir exists", async (
 });
 
 test("buildDotfilesVolumeArgs returns empty when host dir is missing or falsy", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   assert.deepEqual(sandboxCreate.buildDotfilesVolumeArgs("native", "/host/dotfiles", () => false), []);
   assert.deepEqual(sandboxCreate.buildDotfilesVolumeArgs("native", null), []);
@@ -893,7 +1043,7 @@ test("buildDotfilesVolumeArgs returns empty when host dir is missing or falsy", 
 });
 
 test("buildDotfilesVolumeArgs applies engine-aware path on wsl2", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   const args = sandboxCreate.buildDotfilesVolumeArgs(
     "wsl2",
@@ -905,7 +1055,7 @@ test("buildDotfilesVolumeArgs applies engine-aware path on wsl2", async () => {
 });
 
 test("materializeDotfiles returns null when source directory is missing", async () => {
-  const sandboxDotfiles = await loadFreshEsm("lib/sandbox/dotfiles.js");
+  const sandboxDotfiles = await loadFreshEsm<typeof import("../../lib/sandbox/dotfiles.ts")>("lib/sandbox/dotfiles.js");
   const { tmpDir, srcDir, cacheDir } = makeDotfilesFixture();
 
   try {
@@ -921,7 +1071,7 @@ test("materializeDotfiles returns null when source directory is missing", async 
 });
 
 test("materializeDotfiles dereferences a regular file symlink", async () => {
-  const sandboxDotfiles = await loadFreshEsm("lib/sandbox/dotfiles.js");
+  const sandboxDotfiles = await loadFreshEsm<typeof import("../../lib/sandbox/dotfiles.ts")>("lib/sandbox/dotfiles.js");
   const { tmpDir, srcDir, cacheDir, externalDir } = makeDotfilesFixture();
 
   try {
@@ -946,7 +1096,7 @@ test("materializeDotfiles dereferences a regular file symlink", async () => {
 });
 
 test("materializeDotfiles dereferences a directory symlink", async () => {
-  const sandboxDotfiles = await loadFreshEsm("lib/sandbox/dotfiles.js");
+  const sandboxDotfiles = await loadFreshEsm<typeof import("../../lib/sandbox/dotfiles.ts")>("lib/sandbox/dotfiles.js");
   const { tmpDir, srcDir, cacheDir, externalDir } = makeDotfilesFixture();
 
   try {
@@ -973,7 +1123,7 @@ test("materializeDotfiles dereferences a directory symlink", async () => {
 });
 
 test("materializeDotfiles warns on dangling symlink and continues", async () => {
-  const sandboxDotfiles = await loadFreshEsm("lib/sandbox/dotfiles.js");
+  const sandboxDotfiles = await loadFreshEsm<typeof import("../../lib/sandbox/dotfiles.ts")>("lib/sandbox/dotfiles.js");
   const { tmpDir, srcDir, cacheDir } = makeDotfilesFixture();
 
   try {
@@ -996,7 +1146,7 @@ test("materializeDotfiles warns on dangling symlink and continues", async () => 
 });
 
 test("materializeDotfiles breaks symlink cycles via active realpath set", async () => {
-  const sandboxDotfiles = await loadFreshEsm("lib/sandbox/dotfiles.js");
+  const sandboxDotfiles = await loadFreshEsm<typeof import("../../lib/sandbox/dotfiles.ts")>("lib/sandbox/dotfiles.js");
   const { tmpDir, srcDir, cacheDir } = makeDotfilesFixture();
 
   try {
@@ -1021,7 +1171,7 @@ test("materializeDotfiles breaks symlink cycles via active realpath set", async 
 });
 
 test("materializeDotfiles caps recursion at maxDepth", async () => {
-  const sandboxDotfiles = await loadFreshEsm("lib/sandbox/dotfiles.js");
+  const sandboxDotfiles = await loadFreshEsm<typeof import("../../lib/sandbox/dotfiles.ts")>("lib/sandbox/dotfiles.js");
   const { tmpDir, srcDir, cacheDir } = makeDotfilesFixture();
 
   try {
@@ -1041,7 +1191,7 @@ test("materializeDotfiles caps recursion at maxDepth", async () => {
 });
 
 test("materializeDotfiles dereferences symlinks pointing outside the source tree", async () => {
-  const sandboxDotfiles = await loadFreshEsm("lib/sandbox/dotfiles.js");
+  const sandboxDotfiles = await loadFreshEsm<typeof import("../../lib/sandbox/dotfiles.ts")>("lib/sandbox/dotfiles.js");
   const { tmpDir, srcDir, cacheDir, externalDir } = makeDotfilesFixture();
 
   try {
@@ -1063,7 +1213,7 @@ test("materializeDotfiles dereferences symlinks pointing outside the source tree
 });
 
 test("materializeDotfiles empties cacheDir contents without removing cacheDir itself", async () => {
-  const sandboxDotfiles = await loadFreshEsm("lib/sandbox/dotfiles.js");
+  const sandboxDotfiles = await loadFreshEsm<typeof import("../../lib/sandbox/dotfiles.ts")>("lib/sandbox/dotfiles.js");
   const { tmpDir, srcDir, cacheDir } = makeDotfilesFixture();
 
   try {
@@ -1084,7 +1234,7 @@ test("materializeDotfiles empties cacheDir contents without removing cacheDir it
 });
 
 test("materializeDotfiles preserves regular files alongside symlinks", async () => {
-  const sandboxDotfiles = await loadFreshEsm("lib/sandbox/dotfiles.js");
+  const sandboxDotfiles = await loadFreshEsm<typeof import("../../lib/sandbox/dotfiles.ts")>("lib/sandbox/dotfiles.js");
   const { tmpDir, srcDir, cacheDir, externalDir } = makeDotfilesFixture();
 
   try {
@@ -1108,7 +1258,7 @@ test("materializeDotfiles preserves regular files alongside symlinks", async () 
 });
 
 test("materializeDotfiles skips fifos silently", onPlatforms("linux", "darwin"), async () => {
-  const sandboxDotfiles = await loadFreshEsm("lib/sandbox/dotfiles.js");
+  const sandboxDotfiles = await loadFreshEsm<typeof import("../../lib/sandbox/dotfiles.ts")>("lib/sandbox/dotfiles.js");
   const { tmpDir, srcDir, cacheDir } = makeDotfilesFixture();
 
   try {
@@ -1125,7 +1275,7 @@ test("materializeDotfiles skips fifos silently", onPlatforms("linux", "darwin"),
 });
 
 test("terminalEnvFlags forwards iTerm2 detection variables for Shift+Enter support", async () => {
-  const sandboxEnter = await loadFreshEsm("lib/sandbox/commands/enter.js");
+  const sandboxEnter = await loadFreshEsm<EnterModule>("lib/sandbox/commands/enter.js");
 
   const flags = sandboxEnter.terminalEnvFlags({
     TERM_PROGRAM: "iTerm.app",
@@ -1144,7 +1294,7 @@ test("terminalEnvFlags forwards iTerm2 detection variables for Shift+Enter suppo
 });
 
 test("terminalEnvFlags omits unset variables instead of forwarding empty values", async () => {
-  const sandboxEnter = await loadFreshEsm("lib/sandbox/commands/enter.js");
+  const sandboxEnter = await loadFreshEsm<EnterModule>("lib/sandbox/commands/enter.js");
 
   const flags = sandboxEnter.terminalEnvFlags({
     TERM_PROGRAM: "iTerm.app",
@@ -1156,7 +1306,7 @@ test("terminalEnvFlags omits unset variables instead of forwarding empty values"
 });
 
 test("sandbox exec formats host keychain unavailable credential sync warnings", async () => {
-  const sandboxEnter = await loadFreshEsm("lib/sandbox/commands/enter.js");
+  const sandboxEnter = await loadFreshEsm<EnterModule>("lib/sandbox/commands/enter.js");
 
   assert.equal(
     sandboxEnter.formatCredentialSyncStatus({ status: "KEYCHAIN_LOCKED" }),
@@ -1168,7 +1318,13 @@ test("sandbox exec formats host keychain unavailable credential sync warnings", 
   );
 });
 
-function spawnSandboxCli(fixture, tmpDir, args, extraEnv = {}, options = {}) {
+function spawnSandboxCli(
+  fixture: ReturnType<typeof writeSandboxEngineFixture>,
+  tmpDir: string,
+  args: string[],
+  extraEnv: NodeJS.ProcessEnv = {},
+  options: { timeout?: number } = {}
+) {
   return spawnSync(process.execPath, cliArgs("sandbox", ...args), {
     cwd: fixture.repoDir,
     env: {
@@ -1399,7 +1555,7 @@ test("claude-code tool pins CLAUDE_CONFIG_DIR so $HOME/.claude.json preseed reac
   // Code reads .claude.json from $HOME/.claude.json (outside the bind mount),
   // so the preseeded onboarding state is silently ignored and every container
   // start lands on the theme picker.
-  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
+  const sandboxTools = await loadFreshEsm<typeof import("../../lib/sandbox/tools.ts")>("lib/sandbox/tools.js");
   const tools = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
@@ -1407,12 +1563,13 @@ test("claude-code tool pins CLAUDE_CONFIG_DIR so $HOME/.claude.json preseed reac
   });
 
   assert.equal(tools.length, 1);
-  assert.equal(tools[0].containerMount, "/home/devuser/.claude");
-  assert.equal(tools[0].envVars?.CLAUDE_CONFIG_DIR, "/home/devuser/.claude");
+  const tool = required(tools[0]);
+  assert.equal(tool.containerMount, "/home/devuser/.claude");
+  assert.equal(tool.envVars?.CLAUDE_CONFIG_DIR, "/home/devuser/.claude");
 });
 
 test("opencode tool pins OPENCODE_CONFIG to the sandbox config file", async () => {
-  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
+  const sandboxTools = await loadFreshEsm<typeof import("../../lib/sandbox/tools.ts")>("lib/sandbox/tools.js");
   const tools = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
@@ -1420,21 +1577,23 @@ test("opencode tool pins OPENCODE_CONFIG to the sandbox config file", async () =
   });
 
   assert.equal(tools.length, 1);
-  assert.equal(tools[0].containerMount, "/home/devuser/.local/share/opencode");
+  const tool = required(tools[0]);
+  assert.equal(tool.containerMount, "/home/devuser/.local/share/opencode");
   assert.equal(
-    tools[0].envVars?.OPENCODE_CONFIG,
+    tool.envVars?.OPENCODE_CONFIG,
     "/home/devuser/.local/share/opencode/opencode.json"
   );
 });
 
 test("gemini-cli tool preseeds host settings for model and thinking config inheritance", async () => {
-  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
-  const [tool] = sandboxTools.resolveTools({
+  const sandboxTools = await loadFreshEsm<typeof import("../../lib/sandbox/tools.ts")>("lib/sandbox/tools.js");
+  const [maybeTool] = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
     tools: ["gemini-cli"]
   });
 
+  const tool = required(maybeTool);
   assert.ok(tool.hostPreSeedFiles?.some((entry) => (
     entry.hostPath === "/home/host-user/.gemini/settings.json"
     && entry.sandboxName === "settings.json"
@@ -1442,7 +1601,7 @@ test("gemini-cli tool preseeds host settings for model and thinking config inher
 });
 
 test("resolveTools consolidates sandbox bases under ~/.agent-infra", async () => {
-  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
+  const sandboxTools = await loadFreshEsm<typeof import("../../lib/sandbox/tools.ts")>("lib/sandbox/tools.js");
   const tools = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
@@ -1473,13 +1632,14 @@ test("resolveTools consolidates sandbox bases under ~/.agent-infra", async () =>
 });
 
 test("tool directory candidates only return consolidated paths", async () => {
-  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
-  const [tool] = sandboxTools.resolveTools({
+  const sandboxTools = await loadFreshEsm<typeof import("../../lib/sandbox/tools.ts")>("lib/sandbox/tools.js");
+  const [maybeTool] = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
     tools: ["claude-code"]
   });
 
+  const tool = required(maybeTool);
   assert.deepEqual(sandboxTools.toolProjectDirCandidates(tool, "demo"), [
     "/home/host-user/.agent-infra/sandboxes/claude-code/demo"
   ]);
@@ -1490,24 +1650,24 @@ test("tool directory candidates only return consolidated paths", async () => {
 });
 
 test("claude-code live mount uses the consolidated credentials path", async () => {
-  const sandboxTools = await loadFreshEsm("lib/sandbox/tools.js");
-  const [tool] = sandboxTools.resolveTools({
+  const sandboxTools = await loadFreshEsm<typeof import("../../lib/sandbox/tools.ts")>("lib/sandbox/tools.js");
+  const [maybeTool] = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
     tools: ["claude-code"]
   });
 
   assert.equal(
-    tool.hostLiveMounts?.[0]?.hostPath,
+    required(maybeTool).hostLiveMounts?.[0]?.hostPath,
     "/home/host-user/.agent-infra/credentials/demo/claude-code/.credentials.json"
   );
 });
 
 test("assertBranchAvailable allows branches that are not checked out in any worktree", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   assert.doesNotThrow(() => sandboxCreate.assertBranchAvailable("/repo", "feature/demo", {
-    runFn(cmd, args) {
+    runFn(cmd: string, args: string[]) {
       assert.equal(cmd, "git");
       assert.deepEqual(args, ["-C", "/repo", "worktree", "list", "--porcelain"]);
       return "worktree /repo\nbranch refs/heads/main\n";
@@ -1516,7 +1676,7 @@ test("assertBranchAvailable allows branches that are not checked out in any work
 });
 
 test("assertBranchAvailable rejects branches that are already checked out", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   assert.throws(() => sandboxCreate.assertBranchAvailable("/repo", "feature/demo", {
     runFn: () => [
@@ -1528,7 +1688,7 @@ test("assertBranchAvailable rejects branches that are already checked out", asyn
 });
 
 test("assertBranchAvailable reports the conflicting worktree path", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   assert.throws(() => sandboxCreate.assertBranchAvailable("/repo", "feature/demo", {
     runFn: () => [
@@ -1543,7 +1703,7 @@ test("assertBranchAvailable reports the conflicting worktree path", async () => 
 });
 
 test("assertBranchAvailable allows the current sandbox worktree to reuse the checked out branch", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   assert.doesNotThrow(() => sandboxCreate.assertBranchAvailable(
     "/repo",
@@ -1560,7 +1720,7 @@ test("assertBranchAvailable allows the current sandbox worktree to reuse the che
 });
 
 test("ensureClaudeOnboarding creates .claude.json with onboarding and workspace trust", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-"));
 
   try {
@@ -1574,7 +1734,7 @@ test("ensureClaudeOnboarding creates .claude.json with onboarding and workspace 
 });
 
 test("ensureClaudeOnboarding preserves existing fields", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-existing-"));
 
   try {
@@ -1594,7 +1754,7 @@ test("ensureClaudeOnboarding populates workspace trust when only hasCompletedOnb
   // written `hasCompletedOnboarding: true` without ever touching the projects
   // map (e.g. if no project was opened). We must still preseed the workspace
   // trust entry and persist it to disk.
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-partial-"));
 
   try {
@@ -1613,7 +1773,7 @@ test("ensureClaudeOnboarding populates workspace trust when only hasCompletedOnb
 });
 
 test("ensureClaudeOnboarding skips write when flag already set", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-noop-"));
   const filePath = path.join(tmpDir, ".claude.json");
 
@@ -1632,7 +1792,7 @@ test("ensureClaudeOnboarding skips write when flag already set", async () => {
 });
 
 test("ensureClaudeOnboarding inherits host model when sandbox model is absent", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-model-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-model-"));
 
@@ -1649,7 +1809,7 @@ test("ensureClaudeOnboarding inherits host model when sandbox model is absent", 
 });
 
 test("ensureClaudeOnboarding preserves existing sandbox model", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-keep-model-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-keep-model-"));
 
@@ -1666,7 +1826,7 @@ test("ensureClaudeOnboarding preserves existing sandbox model", async () => {
 });
 
 test("ensureClaudeOnboarding skips host model when it is missing", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-missing-model-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-missing-model-"));
 
@@ -1682,7 +1842,7 @@ test("ensureClaudeOnboarding skips host model when it is missing", async () => {
 });
 
 test("ensureClaudeOnboarding skips empty host model", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-empty-model-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-empty-model-"));
 
@@ -1698,7 +1858,7 @@ test("ensureClaudeOnboarding skips empty host model", async () => {
 });
 
 test("ensureClaudeOnboarding ignores malformed host json", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-malformed-host-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-malformed-"));
 
@@ -1714,7 +1874,7 @@ test("ensureClaudeOnboarding ignores malformed host json", async () => {
 });
 
 test("ensureClaudeOnboarding inherits host launch-pin flag when sandbox is absent", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-inherit-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-host-"));
 
@@ -1734,7 +1894,7 @@ test("ensureClaudeOnboarding inherits host launch-pin flag when sandbox is absen
 });
 
 test("ensureClaudeOnboarding preserves existing sandbox launch-pin flag value", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-preserve-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-host-preserve-"));
 
@@ -1759,7 +1919,7 @@ test("ensureClaudeOnboarding preserves existing sandbox launch-pin flag value", 
 });
 
 test("ensureClaudeOnboarding skips launch-pin flag when host omits it", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-omit-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-host-omit-"));
 
@@ -1775,7 +1935,7 @@ test("ensureClaudeOnboarding skips launch-pin flag when host omits it", async ()
 });
 
 test("ensureClaudeOnboarding inherits all matching launch-pin flags for future models", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-future-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-host-future-"));
 
@@ -1799,7 +1959,7 @@ test("ensureClaudeOnboarding inherits all matching launch-pin flags for future m
 });
 
 test("ensureClaudeOnboarding skips launch-pin flag values that are not strictly true", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-nonboolean-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-launchpin-host-nonboolean-"));
 
@@ -1825,7 +1985,7 @@ test("ensureClaudeOnboarding skips launch-pin flag values that are not strictly 
 });
 
 test("ensureClaudeSettings creates settings.json with skipDangerousModePermissionPrompt", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-"));
 
   try {
@@ -1838,7 +1998,7 @@ test("ensureClaudeSettings creates settings.json with skipDangerousModePermissio
 });
 
 test("ensureClaudeSettings skips write when skipDangerousModePermissionPrompt is already set", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-noop-"));
   const settingsPath = path.join(tmpDir, "settings.json");
 
@@ -1856,7 +2016,7 @@ test("ensureClaudeSettings skips write when skipDangerousModePermissionPrompt is
 });
 
 test("ensureClaudeSettings inherits host effort level when sandbox field is absent", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-effort-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-effort-"));
 
@@ -1878,7 +2038,7 @@ test("ensureClaudeSettings inherits host effort level when sandbox field is abse
 });
 
 test("ensureClaudeSettings preserves existing sandbox effort level", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-keep-effort-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-keep-effort-"));
 
@@ -1904,7 +2064,7 @@ test("ensureClaudeSettings preserves existing sandbox effort level", async () =>
 });
 
 test("ensureClaudeSettings skips missing host effort level", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-missing-effort-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-missing-effort-"));
 
@@ -1921,7 +2081,7 @@ test("ensureClaudeSettings skips missing host effort level", async () => {
 });
 
 test("ensureClaudeSettings skips empty host effort level", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-empty-effort-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-empty-effort-"));
 
@@ -1938,7 +2098,7 @@ test("ensureClaudeSettings skips empty host effort level", async () => {
 });
 
 test("ensureCodexModelInheritance creates config with host model fields", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-model-"));
 
@@ -1960,7 +2120,7 @@ test("ensureCodexModelInheritance creates config with host model fields", async 
 });
 
 test("ensureCodexModelInheritance keeps model fields before workspace trust section", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-order-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-order-"));
   const configPath = path.join(tmpDir, "config.toml");
@@ -1975,10 +2135,14 @@ test("ensureCodexModelInheritance keeps model fields before workspace trust sect
     fs.writeFileSync(configPath, '[projects."/workspace"]\ntrust_level = "trusted"\n', "utf8");
     sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
     const content = fs.readFileSync(configPath, "utf8");
-    const data = toml.parse(content);
+    const data = toml.parse(content) as {
+      model?: string;
+      model_reasoning_effort?: string;
+      projects: Record<string, { trust_level?: string }>;
+    };
     assert.equal(data.model, "gpt-5.5");
     assert.equal(data.model_reasoning_effort, "high");
-    assert.equal(data.projects["/workspace"].trust_level, "trusted");
+    assert.equal(data.projects["/workspace"]?.trust_level, "trusted");
     const lines = content.split(/\r?\n/);
     const modelLine = lines.findIndex((line) => line.startsWith("model = "));
     const sectionLine = lines.findIndex((line) => line.startsWith("[projects."));
@@ -1991,7 +2155,7 @@ test("ensureCodexModelInheritance keeps model fields before workspace trust sect
 });
 
 test("ensureCodexModelInheritance ignores model fields outside the root table", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-section-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-section-"));
 
@@ -2011,7 +2175,7 @@ test("ensureCodexModelInheritance ignores model fields outside the root table", 
 });
 
 test("ensureCodexModelInheritance preserves existing sandbox model field", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-keep-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-keep-"));
 
@@ -2034,7 +2198,7 @@ test("ensureCodexModelInheritance preserves existing sandbox model field", async
 });
 
 test("ensureCodexModelInheritance ignores malformed host config", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-malformed-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-malformed-"));
 
@@ -2050,7 +2214,7 @@ test("ensureCodexModelInheritance ignores malformed host config", async () => {
 });
 
 test("ensureCodexModelInheritance leaves malformed sandbox config alone", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-malformed-sandbox-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-valid-for-malformed-sandbox-"));
   const configPath = path.join(tmpDir, "config.toml");
@@ -2072,7 +2236,7 @@ test("ensureCodexModelInheritance leaves malformed sandbox config alone", async 
 });
 
 test("ensureOpenCodeModelInheritance creates config with host model fields", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-model-"));
 
@@ -2097,7 +2261,7 @@ test("ensureOpenCodeModelInheritance creates config with host model fields", asy
 });
 
 test("ensureOpenCodeModelInheritance preserves existing sandbox model fields", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-keep-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-keep-"));
 
@@ -2130,7 +2294,7 @@ test("ensureOpenCodeModelInheritance preserves existing sandbox model fields", a
 });
 
 test("ensureOpenCodeModelInheritance inherits small model when host model is missing", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-small-model-only-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-small-model-only-"));
 
@@ -2152,7 +2316,7 @@ test("ensureOpenCodeModelInheritance inherits small model when host model is mis
 });
 
 test("ensureOpenCodeModelInheritance skips missing host model fields", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-missing-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-missing-"));
 
@@ -2168,7 +2332,7 @@ test("ensureOpenCodeModelInheritance skips missing host model fields", async () 
 });
 
 test("ensureOpenCodeModelInheritance skips empty host model fields", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-empty-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-empty-"));
 
@@ -2188,7 +2352,7 @@ test("ensureOpenCodeModelInheritance skips empty host model fields", async () =>
 });
 
 test("ensureOpenCodeModelInheritance ignores malformed host json", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-malformed-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-malformed-"));
 
@@ -2204,7 +2368,7 @@ test("ensureOpenCodeModelInheritance ignores malformed host json", async () => {
 });
 
 test("ensureOpenCodeModelInheritance leaves malformed sandbox config alone", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-malformed-sandbox-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-valid-for-malformed-sandbox-"));
 
@@ -2226,7 +2390,7 @@ test("ensureOpenCodeModelInheritance leaves malformed sandbox config alone", asy
 });
 
 test("ensureCodexWorkspaceTrust appends workspace trust to config.toml", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-trust-"));
 
   try {
@@ -2242,7 +2406,7 @@ test("ensureCodexWorkspaceTrust appends workspace trust to config.toml", async (
 });
 
 test("ensureCodexWorkspaceTrust skips when workspace trust already exists", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-trust-noop-"));
   const configPath = path.join(tmpDir, "config.toml");
 
@@ -2257,7 +2421,7 @@ test("ensureCodexWorkspaceTrust skips when workspace trust already exists", asyn
 });
 
 test("ensureGeminiWorkspaceTrust creates trustedFolders.json with workspace trust", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gemini-trust-"));
 
   try {
@@ -2270,7 +2434,7 @@ test("ensureGeminiWorkspaceTrust creates trustedFolders.json with workspace trus
 });
 
 test("ensureGeminiWorkspaceTrust skips write when workspace trust already exists", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gemini-trust-noop-"));
   const trustPath = path.join(tmpDir, "trustedFolders.json");
 
@@ -2286,8 +2450,8 @@ test("ensureGeminiWorkspaceTrust skips write when workspace trust already exists
 });
 
 test("buildImage uses verbose docker build output while keeping host UID/GID lookups quiet", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
-  const calls = [];
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const calls: VerboseCall[] = [];
 
   sandboxCreate.buildImage(
     { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "/repo" },
@@ -2296,7 +2460,7 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
     "sig-123",
     {
       engine: "native",
-      runFn(cmd, args) {
+      runFn(cmd: string, args: string[]) {
         const [, actualCmd, actualArgs] = arguments;
         calls.push({ type: "run", cmd: actualCmd, args: actualArgs });
         if (actualCmd === "id" && actualArgs[0] === "-u") {
@@ -2310,7 +2474,7 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
       runSafeFn() {
         return "";
       },
-      runVerboseFn(engine, cmd, args, opts) {
+      runVerboseFn(engine: string, cmd: string, args: string[], opts?: CommandOptions) {
         calls.push({ type: "verbose", engine, cmd, args, opts });
       }
     }
@@ -2320,11 +2484,12 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
     { type: "run", cmd: "id", args: ["-u"] },
     { type: "run", cmd: "id", args: ["-g"] }
   ]);
-  assert.equal(calls[2].type, "verbose");
-  assert.equal(calls[2].engine, "native");
-  assert.equal(calls[2].cmd, "docker");
-  assert.equal(calls[2].opts.cwd, "/repo");
-  assert.deepEqual(calls[2].args, [
+  const buildCall = required(calls[2]);
+  assert.equal(buildCall.type, "verbose");
+  assert.equal(buildCall.engine, "native");
+  assert.equal(buildCall.cmd, "docker");
+  assert.equal(buildCall.opts?.cwd, "/repo");
+  assert.deepEqual(buildCall.args, [
     "build",
     "-t",
     "demo-sandbox:latest",
@@ -2345,7 +2510,7 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
 });
 
 test("windowsPathToWslPath converts drive paths and rejects UNC mounts", async () => {
-  const windowsPaths = await loadFreshEsm("lib/sandbox/engines/wsl2-paths.js");
+  const windowsPaths = await loadFreshEsm<Wsl2PathsModule>("lib/sandbox/engines/wsl2-paths.js");
 
   assert.equal(
     windowsPaths.windowsPathToWslPath("F:\\ai\\agent-infra"),
@@ -2363,7 +2528,7 @@ test("windowsPathToWslPath converts drive paths and rejects UNC mounts", async (
 });
 
 test("commandForEngine wraps commands with wsl.exe for WSL2", async () => {
-  const sandboxShell = await loadFreshEsm("lib/sandbox/shell.js");
+  const sandboxShell = await loadFreshEsm<typeof import("../../lib/sandbox/shell.ts")>("lib/sandbox/shell.js");
 
   assert.deepEqual(
     sandboxShell.commandForEngine("wsl2", "docker", ["info"]),
@@ -2376,7 +2541,7 @@ test("commandForEngine wraps commands with wsl.exe for WSL2", async () => {
 });
 
 test("sandbox exec routes through wsl.exe with single-arg entry script on wsl2", async () => {
-  const sandboxShell = await loadFreshEsm("lib/sandbox/shell.js");
+  const sandboxShell = await loadFreshEsm<typeof import("../../lib/sandbox/shell.ts")>("lib/sandbox/shell.js");
   const command = sandboxShell.commandForEngine("wsl2", "docker", [
     "exec",
     "-it",
@@ -2419,7 +2584,7 @@ test("sandbox command modules route docker calls through engine-aware helpers", 
 
 test("sandbox command modules do not call detectEngine without config", () => {
   const commandsDir = filePath("lib/sandbox/commands");
-  const offenders = [];
+  const offenders: string[] = [];
 
   for (const entry of fs.readdirSync(commandsDir, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith(".js")) {
@@ -2441,11 +2606,11 @@ test("sandbox command modules do not call detectEngine without config", () => {
 });
 
 test("wsl2BackendStatus checks WSL2 and Docker without Colima", async () => {
-  const sandboxVm = await loadFreshEsm("lib/sandbox/commands/vm.js");
-  const checks = [];
+  const sandboxVm = await loadFreshEsm<typeof import("../../lib/sandbox/commands/vm.ts")>("lib/sandbox/commands/vm.js");
+  const checks: string[][] = [];
 
   const status = sandboxVm.wsl2BackendStatus({
-    runOkFn(cmd, args) {
+    runOkFn(cmd: string, args: string[]) {
       checks.push([cmd, ...args]);
       return cmd === "wsl.exe" && (args[0] === "--status" || args[1] === "docker");
     }
@@ -2459,12 +2624,12 @@ test("wsl2BackendStatus checks WSL2 and Docker without Colima", async () => {
 });
 
 test("WSL2 adapter checks WSL and Docker Desktop integration", async () => {
-  const { wsl2Adapter } = await loadFreshEsm("lib/sandbox/engines/wsl2.js");
-  const checks = [];
-  const messages = [];
+  const { wsl2Adapter } = await loadFreshEsm<AdapterModule<"wsl2">>("lib/sandbox/engines/wsl2.js");
+  const checks: string[][] = [];
+  const messages: string[] = [];
 
   await wsl2Adapter.ensure({}, (message) => messages.push(message), {
-    runOk(cmd, args) {
+    runOk(cmd: string, args: string[]) {
       checks.push([cmd, ...args]);
       return cmd === "wsl.exe" && (args[0] === "--status" || args[1] === "docker");
     }
@@ -2478,8 +2643,8 @@ test("WSL2 adapter checks WSL and Docker Desktop integration", async () => {
 });
 
 test("buildImage converts Docker build paths for WSL2", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
-  const calls = [];
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const calls: VerboseCall[] = [];
 
   sandboxCreate.buildImage(
     { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "F:\\repo" },
@@ -2488,17 +2653,17 @@ test("buildImage converts Docker build paths for WSL2", async () => {
     "sig-123",
     {
       engine: "wsl2",
-      runFn(engine, cmd, args) {
+      runFn(engine: string, cmd: string, args: string[]) {
         calls.push({ type: "run", engine, cmd, args });
         return "1000";
       },
-      runVerboseFn(engine, cmd, args, opts) {
+      runVerboseFn(engine: string, cmd: string, args: string[], opts?: CommandOptions) {
         calls.push({ type: "verbose", engine, cmd, args, opts });
       }
     }
   );
 
-  const dockerBuild = calls.find((call) => call.type === "verbose");
+  const dockerBuild = required(calls.find((call) => call.type === "verbose"));
   assert.equal(dockerBuild.engine, "wsl2");
   assert.equal(dockerBuild.cmd, "docker");
   assert.equal(dockerBuild.args.at(-3), "-f");
@@ -2507,7 +2672,7 @@ test("buildImage converts Docker build paths for WSL2", async () => {
 });
 
 test("volumeArg converts host mount paths for WSL2", async () => {
-  const wsl2Paths = await loadFreshEsm("lib/sandbox/engines/wsl2-paths.js");
+  const wsl2Paths = await loadFreshEsm<Wsl2PathsModule>("lib/sandbox/engines/wsl2-paths.js");
 
   assert.equal(
     wsl2Paths.volumeArg("wsl2", "F:\\repo\\.agents\\workspace", "/workspace/.agents/workspace"),
@@ -2520,7 +2685,7 @@ test("volumeArg converts host mount paths for WSL2", async () => {
 });
 
 test("volumeArg without selinux fallback stays unchanged", async () => {
-  const wsl2Paths = await loadFreshEsm("lib/sandbox/engines/wsl2-paths.js");
+  const wsl2Paths = await loadFreshEsm<Wsl2PathsModule>("lib/sandbox/engines/wsl2-paths.js");
 
   assert.equal(
     wsl2Paths.volumeArg("native", "/repo", "/workspace", "", {
@@ -2541,7 +2706,7 @@ test("volumeArg without selinux fallback stays unchanged", async () => {
 });
 
 test("volumeArg adds shared selinux labels on native enforcing hosts", async () => {
-  const wsl2Paths = await loadFreshEsm("lib/sandbox/engines/wsl2-paths.js");
+  const wsl2Paths = await loadFreshEsm<Wsl2PathsModule>("lib/sandbox/engines/wsl2-paths.js");
   const fsImpl = fakeSelinuxFs("1\n");
 
   assert.equal(
@@ -2563,7 +2728,7 @@ test("volumeArg adds shared selinux labels on native enforcing hosts", async () 
 });
 
 test("volumeArg respects selinux label controls", async () => {
-  const wsl2Paths = await loadFreshEsm("lib/sandbox/engines/wsl2-paths.js");
+  const wsl2Paths = await loadFreshEsm<Wsl2PathsModule>("lib/sandbox/engines/wsl2-paths.js");
 
   assert.equal(
     wsl2Paths.volumeArg("native", "/repo", "/workspace", "", {
@@ -2585,7 +2750,7 @@ test("volumeArg respects selinux label controls", async () => {
 });
 
 test("volumeArg ignores selinux labels for non-native engines", async () => {
-  const wsl2Paths = await loadFreshEsm("lib/sandbox/engines/wsl2-paths.js");
+  const wsl2Paths = await loadFreshEsm<Wsl2PathsModule>("lib/sandbox/engines/wsl2-paths.js");
   const fsImpl = fakeSelinuxFs("1\n");
 
   assert.equal(
@@ -2608,7 +2773,7 @@ test("volumeArg ignores selinux labels for non-native engines", async () => {
 });
 
 test("rebuild buildArgs converts Docker build paths for WSL2", async () => {
-  const sandboxRebuild = await loadFreshEsm("lib/sandbox/commands/rebuild.js");
+  const sandboxRebuild = await loadFreshEsm<RebuildModule>("lib/sandbox/commands/rebuild.js");
 
   const args = sandboxRebuild.buildArgs(
     { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "F:\\repo" },
@@ -2624,7 +2789,7 @@ test("rebuild buildArgs converts Docker build paths for WSL2", async () => {
 });
 
 test("assertManagedPath rejects paths outside the sandbox root", async () => {
-  const sandboxRm = await loadFreshEsm("lib/sandbox/commands/rm.js");
+  const sandboxRm = await loadFreshEsm<typeof import("../../lib/sandbox/commands/rm.ts")>("lib/sandbox/commands/rm.js");
   const root = path.join(os.tmpdir(), "agent-infra-worktrees");
 
   assert.doesNotThrow(() => sandboxRm.assertManagedPath(root, path.join(root, "feature..demo")));
@@ -2635,8 +2800,8 @@ test("assertManagedPath rejects paths outside the sandbox root", async () => {
 });
 
 test("buildImage forwards HOST_UID=0 and HOST_GID=0 unchanged when host runs as root", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
-  const calls = [];
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const calls: VerboseCall[] = [];
 
   sandboxCreate.buildImage(
     { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "/repo" },
@@ -2645,7 +2810,7 @@ test("buildImage forwards HOST_UID=0 and HOST_GID=0 unchanged when host runs as 
     "sig-123",
     {
       engine: "native",
-      runFn(engine, cmd, args) {
+      runFn(engine: string, cmd: string, args: string[]) {
         calls.push({ type: "run", engine, cmd, args });
         if (cmd === "id" && args[0] === "-u") {
           return "0";
@@ -2658,7 +2823,7 @@ test("buildImage forwards HOST_UID=0 and HOST_GID=0 unchanged when host runs as 
       runSafeFn() {
         return "";
       },
-      runVerboseFn(engine, cmd, args, opts) {
+      runVerboseFn(engine: string, cmd: string, args: string[], opts?: CommandOptions) {
         calls.push({ type: "verbose", engine, cmd, args, opts });
       }
     }
@@ -2669,11 +2834,12 @@ test("buildImage forwards HOST_UID=0 and HOST_GID=0 unchanged when host runs as 
     { type: "run", engine: "native", cmd: "id", args: ["-g"] }
   ]);
   assert.equal(calls.length, 3);
-  assert.equal(calls[2].type, "verbose");
-  assert.equal(calls[2].engine, "native");
-  assert.equal(calls[2].cmd, "docker");
-  assert.equal(calls[2].opts.cwd, "/repo");
-  assert.deepEqual(calls[2].args.slice(0, 7), [
+  const buildCall = required(calls[2]);
+  assert.equal(buildCall.type, "verbose");
+  assert.equal(buildCall.engine, "native");
+  assert.equal(buildCall.cmd, "docker");
+  assert.equal(buildCall.opts?.cwd, "/repo");
+  assert.deepEqual(buildCall.args.slice(0, 7), [
     "build",
     "-t",
     "demo-sandbox:latest",
@@ -2685,7 +2851,7 @@ test("buildImage forwards HOST_UID=0 and HOST_GID=0 unchanged when host runs as 
 });
 
 test("isRootlessDocker returns true when DOCKER_HOST points at rootless socket", async () => {
-  const { isRootlessDocker } = await loadFreshEsm("lib/sandbox/engines/native.js");
+  const { isRootlessDocker } = await loadFreshEsm<NativeModule>("lib/sandbox/engines/native.js");
 
   assert.equal(
     isRootlessDocker({ env: { DOCKER_HOST: "unix:///run/user/1000/docker.sock" } }),
@@ -2694,12 +2860,12 @@ test("isRootlessDocker returns true when DOCKER_HOST points at rootless socket",
 });
 
 test("isRootlessDocker falls back to docker info SecurityOptions", async () => {
-  const { isRootlessDocker } = await loadFreshEsm("lib/sandbox/engines/native.js");
+  const { isRootlessDocker } = await loadFreshEsm<NativeModule>("lib/sandbox/engines/native.js");
 
   assert.equal(
     isRootlessDocker({
       env: {},
-      runSafe(cmd, args) {
+      runSafe(cmd: string, args: string[]) {
         assert.equal(cmd, "docker");
         assert.deepEqual(args, ["info", "--format", "{{.SecurityOptions}}"]);
         return "[name=rootless,name=seccomp=builtin]";
@@ -2710,8 +2876,8 @@ test("isRootlessDocker falls back to docker info SecurityOptions", async () => {
 });
 
 test("buildImage rewrites HOST_UID and HOST_GID to 0 when Docker is rootless", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
-  const calls = [];
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const calls: VerboseCall[] = [];
 
   sandboxCreate.buildImage(
     { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "/repo" },
@@ -2720,7 +2886,7 @@ test("buildImage rewrites HOST_UID and HOST_GID to 0 when Docker is rootless", a
     "sig-123",
     {
       engine: "native",
-      runFn(engine, cmd, args) {
+      runFn(engine: string, cmd: string, args: string[]) {
         calls.push({ type: "run", engine, cmd, args });
         if (cmd === "id" && args[0] === "-u") {
           return "1000";
@@ -2733,7 +2899,7 @@ test("buildImage rewrites HOST_UID and HOST_GID to 0 when Docker is rootless", a
       runSafeFn() {
         return "";
       },
-      runVerboseFn(engine, cmd, args, opts) {
+      runVerboseFn(engine: string, cmd: string, args: string[], opts?: CommandOptions) {
         calls.push({ type: "verbose", engine, cmd, args, opts });
       },
       env: { DOCKER_HOST: "unix:///run/user/1000/docker.sock" }
@@ -2741,8 +2907,9 @@ test("buildImage rewrites HOST_UID and HOST_GID to 0 when Docker is rootless", a
   );
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].type, "verbose");
-  assert.deepEqual(calls[0].args.slice(0, 7), [
+  const buildCall = required(calls[0]);
+  assert.equal(buildCall.type, "verbose");
+  assert.deepEqual(buildCall.args.slice(0, 7), [
     "build",
     "-t",
     "demo-sandbox:latest",
@@ -2761,7 +2928,7 @@ test("base.dockerfile guards root host uid with useradd -o", () => {
 });
 
 test("commandErrorMessage prefers stderr over the generic execFileSync message", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   const message = sandboxCreate.commandErrorMessage({
     message: "Command failed: git worktree add ...",
@@ -2772,7 +2939,7 @@ test("commandErrorMessage prefers stderr over the generic execFileSync message",
 });
 
 test("commandErrorMessage redacts tokens from fallback error messages", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   const message = sandboxCreate.commandErrorMessage({
     message: "Command failed: docker run -e GH_TOKEN=ghp_123456789012345678901234567890123456"
@@ -2786,8 +2953,9 @@ test("runVerbose error messages do not include argv", () => {
   assert.throws(
     () => runVerbose(process.execPath, ["-e", "process.exit(1)", "SECRET_ARG_VALUE"]),
     (error) => {
-      assert.match(error.message, /^Command failed with exit code 1:/);
-      assert.doesNotMatch(error.message, /SECRET_ARG_VALUE/);
+      const thrown = assertError(error);
+      assert.match(thrown.message, /^Command failed with exit code 1:/);
+      assert.doesNotMatch(thrown.message, /SECRET_ARG_VALUE/);
       return true;
     }
   );
@@ -2799,15 +2967,16 @@ test("runVerbose timeout messages do not include argv", () => {
       timeout: 1
     }),
     (error) => {
-      assert.match(error.message, /^Command timed out after 1ms:/);
-      assert.doesNotMatch(error.message, /SECRET_TIMEOUT_VALUE/);
+      const thrown = assertError(error);
+      assert.match(thrown.message, /^Command timed out after 1ms:/);
+      assert.doesNotMatch(thrown.message, /SECRET_TIMEOUT_VALUE/);
       return true;
     }
   );
 });
 
 test("ensureSandboxAliasesFile creates the default aliases once", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-defaults-"));
 
   try {
@@ -2833,7 +3002,7 @@ test("ensureSandboxAliasesFile creates the default aliases once", async () => {
 });
 
 test("ensureSandboxAliasesFile creates parent directories for the consolidated alias path", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-nested-"));
 
   try {
@@ -2847,7 +3016,7 @@ test("ensureSandboxAliasesFile creates parent directories for the consolidated a
 });
 
 test("ensureSandboxAliasesFile upgrades legacy generated alias files", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-upgrade-"));
   const aliasesPath = path.join(tmpDir, ".agent-infra", "aliases", "sandbox.sh");
   const legacyContent = [
@@ -2880,7 +3049,7 @@ test("ensureSandboxAliasesFile upgrades legacy generated alias files", async () 
 });
 
 test("ensureSandboxAliasesFile writes OpenCode full yolo permissions", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-opencode-full-yolo-"));
 
   try {
@@ -2897,7 +3066,7 @@ test("ensureSandboxAliasesFile writes OpenCode full yolo permissions", async () 
 });
 
 test("ensureSandboxAliasesFile upgrades legacy OpenCode aliases to full yolo permissions", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-aliases-opencode-upgrade-full-yolo-"));
   const aliasesPath = path.join(tmpDir, ".agent-infra", "aliases", "sandbox.sh");
 
@@ -2917,10 +3086,10 @@ test("ensureSandboxAliasesFile upgrades legacy OpenCode aliases to full yolo per
 });
 
 test("ensureDocker uses Colima verbose commands for install and startup", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
-  const messages = [];
-  const verboseCalls = [];
-  const checks = [];
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
+  const messages: string[] = [];
+  const verboseCalls: string[][] = [];
+  const checks: string[][] = [];
   const previousDockerContext = process.env.DOCKER_CONTEXT;
 
   try {
@@ -2931,7 +3100,7 @@ test("ensureDocker uses Colima verbose commands for install and startup", async 
       (message) => messages.push(message),
       {
         platformFn: () => "darwin",
-        runOkFn(cmd, args) {
+        runOkFn(cmd: string, args: string[]) {
           checks.push([cmd, ...args]);
           assert.equal(process.env.DOCKER_CONTEXT, "colima");
           if (cmd === "which") {
@@ -2945,12 +3114,12 @@ test("ensureDocker uses Colima verbose commands for install and startup", async 
           }
           throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
         },
-        runSafeFn(cmd, args) {
+        runSafeFn(cmd: string, args: string[]) {
           assert.equal(cmd, "uname");
           assert.deepEqual(args, ["-m"]);
           return "arm64";
         },
-        runVerboseFn(cmd, args) {
+        runVerboseFn(cmd: string, args: string[]) {
           verboseCalls.push([cmd, ...args]);
         }
       }
@@ -2976,8 +3145,8 @@ test("ensureDocker uses Colima verbose commands for install and startup", async 
 });
 
 test("detectEngine honors configured engine across platforms", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
-  const cases = [
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
+  const cases: Array<[string, string]> = [
     ["linux", "native"],
     ["linux", "docker-desktop"],
     ["darwin", "orbstack"],
@@ -2998,7 +3167,7 @@ test("detectEngine honors configured engine across platforms", async () => {
 });
 
 test("detectEngine rejects unsupported configured sandbox engines early", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
 
   assert.throws(
     () => sandboxEngine.detectEngine({ engine: "podman" }, { platformFn: () => "darwin" }),
@@ -3007,26 +3176,28 @@ test("detectEngine rejects unsupported configured sandbox engines early", async 
   assert.throws(
     () => sandboxEngine.detectEngine({ engine: "colima" }, { platformFn: () => "linux" }),
     (error) => {
-      assert.match(error.message, /"sandbox\.engine" value "colima" is not supported on linux/);
-      assert.match(error.message, /Supported engines on linux:/);
-      assert.match(error.message, /native/);
-      assert.match(error.message, /docker-desktop/);
+      const thrown = assertError(error);
+      assert.match(thrown.message, /"sandbox\.engine" value "colima" is not supported on linux/);
+      assert.match(thrown.message, /Supported engines on linux:/);
+      assert.match(thrown.message, /native/);
+      assert.match(thrown.message, /docker-desktop/);
       return true;
     }
   );
 });
 
 test("detectEngine throws an actionable error on unsupported platforms", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
 
   assert.throws(
     () => sandboxEngine.detectEngine({}, { platformFn: () => "freebsd" }),
     (error) => {
-      assert.match(error.message, /freebsd/);
-      assert.match(error.message, /linux \(native\)/);
-      assert.match(error.message, /darwin \(colima/);
-      assert.match(error.message, /win32 \(wsl2\)/);
-      assert.match(error.message, /agent-infra\/issues\/new/);
+      const thrown = assertError(error);
+      assert.match(thrown.message, /freebsd/);
+      assert.match(thrown.message, /linux \(native\)/);
+      assert.match(thrown.message, /darwin \(colima/);
+      assert.match(thrown.message, /win32 \(wsl2\)/);
+      assert.match(thrown.message, /agent-infra\/issues\/new/);
       return true;
     }
   );
@@ -3037,14 +3208,14 @@ test("detectEngine throws an actionable error on unsupported platforms", async (
 });
 
 test("isVmManaged returns false on unsupported platforms instead of throwing", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
 
   assert.equal(sandboxEngine.isVmManaged({}, { platformFn: () => "freebsd" }), false);
   assert.equal(sandboxEngine.isVmManaged({ engine: "native" }, { platformFn: () => "freebsd" }), false);
 });
 
 test("isVmManaged keeps invalid sandbox engine config errors actionable", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
 
   assert.throws(
     () => sandboxEngine.isVmManaged({ engine: "podman" }, { platformFn: () => "darwin" }),
@@ -3053,7 +3224,7 @@ test("isVmManaged keeps invalid sandbox engine config errors actionable", async 
 });
 
 test("detectEngine returns platform default when no engine is configured", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
 
   assert.equal(sandboxEngine.detectEngine({ engine: null }, { platformFn: () => "linux" }), "native");
   assert.equal(sandboxEngine.detectEngine({}, { platformFn: () => "linux" }), "native");
@@ -3064,7 +3235,7 @@ test("detectEngine returns platform default when no engine is configured", async
 });
 
 test("detectEngine does not apply Docker context", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
   const previousDockerContext = process.env.DOCKER_CONTEXT;
 
   try {
@@ -3081,7 +3252,7 @@ test("detectEngine does not apply Docker context", async () => {
 });
 
 test("sandbox engine adapters expose the required shape", async () => {
-  const sandboxEngines = await loadFreshEsm("lib/sandbox/engines/index.js");
+  const sandboxEngines = await loadFreshEsm<EnginesIndexModule>("lib/sandbox/engines/index.js");
   const knownPlatforms = new Set(["linux", "darwin", "win32"]);
 
   for (const adapter of Object.values(sandboxEngines.ADAPTERS)) {
@@ -3107,7 +3278,7 @@ test("sandbox engine adapters expose the required shape", async () => {
 });
 
 test("validateSandboxEngine accepts platform-supported engines", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
   const cases = [
     ["linux", "native"],
     ["linux", "docker-desktop"],
@@ -3129,7 +3300,7 @@ test("validateSandboxEngine accepts platform-supported engines", async () => {
 });
 
 test("enginesForPlatform returns correct engine sets per platform", async () => {
-  const sandboxEngines = await loadFreshEsm("lib/sandbox/engines/index.js");
+  const sandboxEngines = await loadFreshEsm<EnginesIndexModule>("lib/sandbox/engines/index.js");
 
   assert.deepEqual(sandboxEngines.enginesForPlatform("linux").sort(), ["docker-desktop", "native"]);
   assert.deepEqual(
@@ -3144,9 +3315,9 @@ test("enginesForPlatform returns correct engine sets per platform", async () => 
 });
 
 test("resolveEffectiveVm merges adapter defaults without changing user values", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
   const colimaAdapter = {
-    defaultResources(getHost) {
+    defaultResources(getHost: () => { cpu: number; memory: number }) {
       const host = getHost();
       return { cpu: host.cpu, memory: host.memory, disk: 60 };
     }
@@ -3180,7 +3351,7 @@ test("resolveEffectiveVm merges adapter defaults without changing user values", 
 });
 
 test("hasUserVmConfig recognizes only explicit resource values", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
 
   assert.equal(sandboxEngine.hasUserVmConfig({}), false);
   assert.equal(sandboxEngine.hasUserVmConfig({ cpu: null }), false);
@@ -3190,8 +3361,8 @@ test("hasUserVmConfig recognizes only explicit resource values", async () => {
 });
 
 test("Colima adapter warns when resource values change while VM is already running", async () => {
-  const { colimaAdapter } = await loadFreshEsm("lib/sandbox/engines/colima.js");
-  const messages = [];
+  const { colimaAdapter } = await loadFreshEsm<AdapterModule<"colima">>("lib/sandbox/engines/colima.js");
+  const messages: string[] = [];
 
   assert.deepEqual(colimaAdapter.defaultResources(() => ({ cpu: 6, memory: 8 })), {
     cpu: 6,
@@ -3200,33 +3371,33 @@ test("Colima adapter warns when resource values change while VM is already runni
   });
 
   colimaAdapter.syncResources(
-    { userVm: { cpu: 4 }, hasUserVmConfig: (vm) => vm.cpu != null },
-    (message) => messages.push(message),
+    { userVm: { cpu: 4 }, hasUserVmConfig: (vm) => vm?.cpu != null },
+    (message: string) => messages.push(message),
     {},
     { vmJustStarted: true }
   );
-  assert.deepEqual(messages, []);
+  assert.equal(messages.length, 0);
 
   colimaAdapter.syncResources(
-    { userVm: { cpu: 4 }, hasUserVmConfig: (vm) => vm.cpu != null },
-    (message) => messages.push(message),
+    { userVm: { cpu: 4 }, hasUserVmConfig: (vm) => vm?.cpu != null },
+    (message: string) => messages.push(message),
     {},
     { vmJustStarted: false }
   );
-  assert.match(messages[0], /Colima VM is already running/);
+  assert.match(messages[0] ?? "", /Colima VM is already running/);
 });
 
 test("OrbStack adapter hot-applies CPU and memory and warns about disk", async () => {
-  const { orbstackAdapter } = await loadFreshEsm("lib/sandbox/engines/orbstack.js");
-  const verboseCalls = [];
-  const messages = [];
+  const { orbstackAdapter } = await loadFreshEsm<AdapterModule<"orbstack">>("lib/sandbox/engines/orbstack.js");
+  const verboseCalls: string[][] = [];
+  const messages: string[] = [];
 
   assert.equal(orbstackAdapter.defaultResources(), null);
   orbstackAdapter.syncResources(
     { vm: { cpu: 4, memory: 8, disk: 60 } },
-    (message) => messages.push(message),
+    (message: string) => messages.push(message),
     {
-      runVerbose(cmd, args) {
+      runVerbose(cmd: string, args: string[]) {
         verboseCalls.push([cmd, ...args]);
       }
     }
@@ -3236,12 +3407,12 @@ test("OrbStack adapter hot-applies CPU and memory and warns about disk", async (
     ["orb", "config", "set", "cpu", "4"],
     ["orb", "config", "set", "memory_mib", "8192"]
   ]);
-  assert.match(messages[0], /does not expose a fixed disk size/);
+  assert.match(messages[0] ?? "", /does not expose a fixed disk size/);
 });
 
 test("OrbStack adapter downgrades config failures to warnings", async () => {
-  const { orbstackAdapter } = await loadFreshEsm("lib/sandbox/engines/orbstack.js");
-  const messages = [];
+  const { orbstackAdapter } = await loadFreshEsm<AdapterModule<"orbstack">>("lib/sandbox/engines/orbstack.js");
+  const messages: string[] = [];
 
   orbstackAdapter.syncResources(
     { vm: { cpu: 4, memory: null, disk: null } },
@@ -3253,55 +3424,57 @@ test("OrbStack adapter downgrades config failures to warnings", async () => {
     }
   );
 
-  assert.match(messages[0], /failed to apply OrbStack cpu=4/);
+  assert.match(messages[0] ?? "", /failed to apply OrbStack cpu=4/);
 });
 
 test("Docker Desktop adapter warns for explicit VM resources only", async () => {
-  const { dockerDesktopAdapter } = await loadFreshEsm("lib/sandbox/engines/docker-desktop.js");
-  const messages = [];
-  const hasUserVmConfig = (vm) => vm.cpu != null || vm.memory != null || vm.disk != null;
+  const { dockerDesktopAdapter } = await loadFreshEsm<AdapterModule<"dockerDesktop">>("lib/sandbox/engines/docker-desktop.js");
+  const messages: string[] = [];
+  const hasUserVmConfig = (vm: SandboxVmConfigFixture | undefined) => (
+    vm?.cpu != null || vm?.memory != null || vm?.disk != null
+  );
 
   dockerDesktopAdapter.syncResources(
     { userVm: { cpu: null }, hasUserVmConfig },
-    (message) => messages.push(message)
+    (message: string) => messages.push(message)
   );
-  assert.deepEqual(messages, []);
+  assert.equal(messages.length, 0);
 
   dockerDesktopAdapter.syncResources(
     { userVm: { cpu: 4 }, hasUserVmConfig },
-    (message) => messages.push(message)
+    (message: string) => messages.push(message)
   );
-  assert.match(messages[0], /Docker Desktop manages CPU\/memory\/disk/);
+  assert.match(messages[0] ?? "", /Docker Desktop manages CPU\/memory\/disk/);
 });
 
 test("native adapter warns that VM resources are not applicable", async () => {
-  const { nativeAdapter } = await loadFreshEsm("lib/sandbox/engines/native.js");
-  const messages = [];
+  const { nativeAdapter } = await loadFreshEsm<NativeModule>("lib/sandbox/engines/native.js");
+  const messages: string[] = [];
 
   nativeAdapter.syncResources(
-    { userVm: { memory: 8 }, hasUserVmConfig: (vm) => vm.memory != null },
-    (message) => messages.push(message)
+    { userVm: { memory: 8 }, hasUserVmConfig: (vm) => vm?.memory != null },
+    (message: string) => messages.push(message)
   );
 
-  assert.match(messages[0], /Linux native Docker has no managed VM/);
+  assert.match(messages[0] ?? "", /Linux native Docker has no managed VM/);
 });
 
 test("WSL2 adapter validates Docker Desktop integration and warns on explicit VM resources", async () => {
-  const { wsl2Adapter } = await loadFreshEsm("lib/sandbox/engines/wsl2.js");
-  const checks = [];
-  const messages = [];
+  const { wsl2Adapter } = await loadFreshEsm<AdapterModule<"wsl2">>("lib/sandbox/engines/wsl2.js");
+  const checks: string[][] = [];
+  const messages: string[] = [];
 
   assert.equal(wsl2Adapter.defaultResources(), null);
   await wsl2Adapter.ensure(
     {
       userVm: { cpu: 2, memory: null, disk: null },
-      hasUserVmConfig(vm) {
-        return vm.cpu != null || vm.memory != null || vm.disk != null;
+      hasUserVmConfig(vm: SandboxVmConfigFixture | undefined) {
+        return vm?.cpu != null || vm?.memory != null || vm?.disk != null;
       }
     },
-    (message) => messages.push(message),
+    (message: string) => messages.push(message),
     {
-      runOk(cmd, args) {
+      runOk(cmd: string, args: string[]) {
         checks.push([cmd, ...args]);
         return cmd === "wsl.exe" && (args[0] === "--status" || args[1] === "docker");
       }
@@ -3310,27 +3483,27 @@ test("WSL2 adapter validates Docker Desktop integration and warns on explicit VM
   wsl2Adapter.syncResources(
     {
       userVm: { cpu: 2, memory: null, disk: null },
-      hasUserVmConfig(vm) {
-        return vm.cpu != null || vm.memory != null || vm.disk != null;
+      hasUserVmConfig(vm: SandboxVmConfigFixture | undefined) {
+        return vm?.cpu != null || vm?.memory != null || vm?.disk != null;
       }
     },
-    (message) => messages.push(message)
+    (message: string) => messages.push(message)
   );
 
   assert.deepEqual(checks, [
     ["wsl.exe", "--status"],
     ["wsl.exe", "--", "docker", "info"]
   ]);
-  assert.match(messages[0], /Checking Docker Desktop from WSL2/);
-  assert.match(messages[1], /Docker Desktop manages CPU\/memory\/disk/);
+  assert.match(messages[0] ?? "", /Checking Docker Desktop from WSL2/);
+  assert.match(messages[1] ?? "", /Docker Desktop manages CPU\/memory\/disk/);
   assert.throws(() => wsl2Adapter.stopVm(), /wsl --shutdown/);
 });
 
 test("ensureDocker installs OrbStack and starts the Docker daemon", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
-  const messages = [];
-  const verboseCalls = [];
-  const checks = [];
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
+  const messages: string[] = [];
+  const verboseCalls: string[][] = [];
+  const checks: string[][] = [];
   let dockerInfoChecks = 0;
   const previousDockerContext = process.env.DOCKER_CONTEXT;
 
@@ -3342,7 +3515,7 @@ test("ensureDocker installs OrbStack and starts the Docker daemon", async () => 
       (message) => messages.push(message),
       {
         platformFn: () => "darwin",
-        runOkFn(cmd, args) {
+        runOkFn(cmd: string, args: string[]) {
           checks.push([cmd, ...args]);
           assert.equal(process.env.DOCKER_CONTEXT, "orbstack");
           if (cmd === "which") {
@@ -3354,7 +3527,7 @@ test("ensureDocker installs OrbStack and starts the Docker daemon", async () => 
           }
           throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
         },
-        runVerboseFn(cmd, args) {
+        runVerboseFn(cmd: string, args: string[]) {
           verboseCalls.push([cmd, ...args]);
         }
       }
@@ -3380,7 +3553,7 @@ test("ensureDocker installs OrbStack and starts the Docker daemon", async () => 
 });
 
 test("ensureDocker reports when Docker Desktop is not running", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
   const previousDockerContext = process.env.DOCKER_CONTEXT;
 
   try {
@@ -3389,7 +3562,7 @@ test("ensureDocker reports when Docker Desktop is not running", async () => {
     await assert.rejects(
       () => sandboxEngine.ensureDocker({ engine: "docker-desktop" }, null, {
         platformFn: () => "darwin",
-        runOkFn(cmd, args) {
+        runOkFn(cmd: string, args: string[]) {
           assert.equal(cmd, "docker");
           assert.deepEqual(args, ["info"]);
           assert.equal(process.env.DOCKER_CONTEXT, "desktop-linux");
@@ -3405,15 +3578,15 @@ test("ensureDocker reports when Docker Desktop is not running", async () => {
 });
 
 test("ensureDocker applies OrbStack resource flags after daemon checks", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
-  const verboseCalls = [];
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
+  const verboseCalls: string[][] = [];
 
   await sandboxEngine.ensureDocker(
     { engine: "orbstack", vm: { cpu: 4, memory: null, disk: null } },
     null,
     {
       platformFn: () => "darwin",
-      runOkFn(cmd, args) {
+      runOkFn(cmd: string, args: string[]) {
         if (cmd === "which" && args[0] === "orb") {
           return true;
         }
@@ -3422,7 +3595,7 @@ test("ensureDocker applies OrbStack resource flags after daemon checks", async (
         }
         throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
       },
-      runVerboseFn(cmd, args) {
+      runVerboseFn(cmd: string, args: string[]) {
         verboseCalls.push([cmd, ...args]);
       }
     }
@@ -3432,31 +3605,31 @@ test("ensureDocker applies OrbStack resource flags after daemon checks", async (
 });
 
 test("ensureDocker warns when Docker Desktop cannot apply explicit VM resources", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
-  const messages = [];
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
+  const messages: string[] = [];
 
   await sandboxEngine.ensureDocker(
     { engine: "docker-desktop", vm: { cpu: 4, memory: null, disk: null } },
     (message) => messages.push(message),
     {
       platformFn: () => "darwin",
-      runOkFn(cmd, args) {
+      runOkFn(cmd: string, args: string[]) {
         assert.deepEqual([cmd, ...args], ["docker", "info"]);
         return true;
       }
     }
   );
 
-  assert.match(messages[0], /Docker Desktop manages CPU\/memory\/disk/);
+  assert.match(messages[0] ?? "", /Docker Desktop manages CPU\/memory\/disk/);
 });
 
 test("ensureDocker throws native install hint when docker is not installed", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
 
   await assert.rejects(
     () => sandboxEngine.ensureDocker({}, null, {
       platformFn: () => "linux",
-      runOkFn(cmd, args) {
+      runOkFn(cmd: string, args: string[]) {
         assert.equal(cmd, "which");
         assert.deepEqual(args, ["docker"]);
         return false;
@@ -3470,13 +3643,13 @@ test("ensureDocker throws native install hint when docker is not installed", asy
 });
 
 test("ensureDocker throws native daemon-down hint when docker info fails and version returns nothing", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
-  const checks = [];
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
+  const checks: string[][] = [];
 
   await assert.rejects(
     () => sandboxEngine.ensureDocker({}, null, {
       platformFn: () => "linux",
-      runOkFn(cmd, args) {
+      runOkFn(cmd: string, args: string[]) {
         checks.push([cmd, ...args]);
         if (cmd === "which") {
           return true;
@@ -3486,7 +3659,7 @@ test("ensureDocker throws native daemon-down hint when docker info fails and ver
         }
         throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
       },
-      runSafeFn(cmd, args) {
+      runSafeFn(cmd: string, args: string[]) {
         assert.equal(cmd, "docker");
         if (args[0] === "version") {
           assert.deepEqual(args, ["version", "--format", "{{.Server.Version}}"]);
@@ -3505,7 +3678,7 @@ test("ensureDocker throws native daemon-down hint when docker info fails and ver
 });
 
 test("ensureDocker uses rootless-specific hint when rootless daemon is unreachable", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
   const previousDockerHost = process.env.DOCKER_HOST;
   process.env.DOCKER_HOST = "unix:///run/user/1000/docker.sock";
 
@@ -3513,7 +3686,7 @@ test("ensureDocker uses rootless-specific hint when rootless daemon is unreachab
     await assert.rejects(
       () => sandboxEngine.ensureDocker({}, null, {
         platformFn: () => "linux",
-        runOkFn(cmd, args) {
+        runOkFn(cmd: string, args: string[]) {
           if (cmd === "which") {
             return true;
           }
@@ -3522,7 +3695,7 @@ test("ensureDocker uses rootless-specific hint when rootless daemon is unreachab
           }
           throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
         },
-        runSafeFn(cmd, args) {
+        runSafeFn(cmd: string, args: string[]) {
           assert.equal(cmd, "docker");
           assert.deepEqual(args, ["version", "--format", "{{.Server.Version}}"]);
           return "";
@@ -3540,12 +3713,12 @@ test("ensureDocker uses rootless-specific hint when rootless daemon is unreachab
 });
 
 test("ensureDocker uses rootless permission hint when version succeeds but info fails", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
 
   await assert.rejects(
     () => sandboxEngine.ensureDocker({}, null, {
       platformFn: () => "linux",
-      runOkFn(cmd, args) {
+      runOkFn(cmd: string, args: string[]) {
         if (cmd === "which") {
           return true;
         }
@@ -3554,7 +3727,7 @@ test("ensureDocker uses rootless permission hint when version succeeds but info 
         }
         throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
       },
-      runSafeFn(cmd, args) {
+      runSafeFn(cmd: string, args: string[]) {
         assert.equal(cmd, "docker");
         if (args[0] === "version") {
           assert.deepEqual(args, ["version", "--format", "{{.Server.Version}}"]);
@@ -3569,12 +3742,12 @@ test("ensureDocker uses rootless permission hint when version succeeds but info 
 });
 
 test("ensureDocker throws native permission hint when docker info fails but version succeeds", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
 
   await assert.rejects(
     () => sandboxEngine.ensureDocker({}, null, {
       platformFn: () => "linux",
-      runOkFn(cmd, args) {
+      runOkFn(cmd: string, args: string[]) {
         if (cmd === "which") {
           return true;
         }
@@ -3583,7 +3756,7 @@ test("ensureDocker throws native permission hint when docker info fails but vers
         }
         throw new Error(`unexpected check: ${cmd} ${args.join(" ")}`);
       },
-      runSafeFn(cmd, args) {
+      runSafeFn(cmd: string, args: string[]) {
         assert.equal(cmd, "docker");
         if (args[0] === "version") {
           assert.deepEqual(args, ["version", "--format", "{{.Server.Version}}"]);
@@ -3598,7 +3771,7 @@ test("ensureDocker throws native permission hint when docker info fails but vers
 });
 
 test("ensureManagedVm gives Linux-specific message for native engine", async () => {
-  const sandboxVm = await loadFreshEsm("lib/sandbox/commands/vm.js");
+  const sandboxVm = await loadFreshEsm<typeof import("../../lib/sandbox/commands/vm.ts")>("lib/sandbox/commands/vm.js");
 
   assert.throws(
     () => sandboxVm.ensureManagedVm("native"),
@@ -3607,7 +3780,7 @@ test("ensureManagedVm gives Linux-specific message for native engine", async () 
 });
 
 test("ensureManagedVm points Docker Desktop users to the GUI", async () => {
-  const sandboxVm = await loadFreshEsm("lib/sandbox/commands/vm.js");
+  const sandboxVm = await loadFreshEsm<typeof import("../../lib/sandbox/commands/vm.ts")>("lib/sandbox/commands/vm.js");
 
   assert.throws(
     () => sandboxVm.ensureManagedVm("docker-desktop"),
@@ -3616,22 +3789,22 @@ test("ensureManagedVm points Docker Desktop users to the GUI", async () => {
 });
 
 test("startManagedVm uses OrbStack status instead of Docker daemon state", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
-  const checks = [];
-  const verboseCalls = [];
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
+  const checks: string[][] = [];
+  const verboseCalls: string[][] = [];
 
   const result = sandboxEngine.startManagedVm(
     { engine: "orbstack" },
     {
       platformFn: () => "darwin",
-      runOkFn(cmd, args) {
+      runOkFn(cmd: string, args: string[]) {
         checks.push([cmd, ...args]);
         if (cmd === "docker") {
           throw new Error("docker info must not decide explicit OrbStack VM state");
         }
         return false;
       },
-      runVerboseFn(cmd, args) {
+      runVerboseFn(cmd: string, args: string[]) {
         verboseCalls.push([cmd, ...args]);
       }
     }
@@ -3643,18 +3816,18 @@ test("startManagedVm uses OrbStack status instead of Docker daemon state", async
 });
 
 test("startManagedVm applies OrbStack resources while leaving a running VM alone", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
-  const verboseCalls = [];
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
+  const verboseCalls: string[][] = [];
 
   const result = sandboxEngine.startManagedVm(
     { engine: "orbstack", vm: { cpu: 2, memory: null, disk: null } },
     {
       platformFn: () => "darwin",
-      runOkFn(cmd, args) {
+      runOkFn(cmd: string, args: string[]) {
         assert.deepEqual([cmd, ...args], ["orb", "status"]);
         return true;
       },
-      runVerboseFn(cmd, args) {
+      runVerboseFn(cmd: string, args: string[]) {
         verboseCalls.push([cmd, ...args]);
       }
     }
@@ -3665,7 +3838,7 @@ test("startManagedVm applies OrbStack resources while leaving a running VM alone
 });
 
 test("stopManagedVm reports unsupported engines instead of silently returning", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
 
   assert.throws(
     () => sandboxEngine.stopManagedVm(
@@ -3677,7 +3850,7 @@ test("stopManagedVm reports unsupported engines instead of silently returning", 
 });
 
 test("stopManagedVm does not change the current Docker context", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
   const previousDockerContext = process.env.DOCKER_CONTEXT;
 
   try {
@@ -3687,7 +3860,7 @@ test("stopManagedVm does not change the current Docker context", async () => {
       { engine: "orbstack" },
       {
         platformFn: () => "darwin",
-        runFn(cmd, args) {
+        runFn(cmd: string, args: string[]) {
           assert.deepEqual([cmd, ...args], ["orb", "stop"]);
         }
       }
@@ -3701,7 +3874,7 @@ test("stopManagedVm does not change the current Docker context", async () => {
 });
 
 test("isVmManaged and engineDisplayName describe supported engines", async () => {
-  const sandboxEngine = await loadFreshEsm("lib/sandbox/engine.js");
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
   const macDependencies = { platformFn: () => "darwin" };
 
   assert.equal(sandboxEngine.isVmManaged({ engine: "colima" }, macDependencies), true);
@@ -3714,7 +3887,7 @@ test("isVmManaged and engineDisplayName describe supported engines", async () =>
 });
 
 test("hostHasGpgKeys reports whether the host keyring is available", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   assert.equal(sandboxCreate.hostHasGpgKeys("/Users/demo", () => "sec:u:255:22:ABCDEF:1700000000:0::::::23::0:\n"), true);
   assert.equal(sandboxCreate.hostHasGpgKeys("/Users/demo", () => {
@@ -3723,9 +3896,9 @@ test("hostHasGpgKeys reports whether the host keyring is available", async () =>
 });
 
 test("ensureShellConfigSymlinks runs a single docker exec wiring all four $HOME entries", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
-  const calls = [];
-  const fakeExec = (engine, cmd, args) => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const calls: Array<{ engine: string; cmd: string; args: string[] }> = [];
+  const fakeExec = (engine: string, cmd: string, args: string[]) => {
     calls.push({ engine, cmd, args });
     return "";
   };
@@ -3733,15 +3906,16 @@ test("ensureShellConfigSymlinks runs a single docker exec wiring all four $HOME 
   sandboxCreate.ensureShellConfigSymlinks("docker", "agent-infra-dev-demo", fakeExec);
 
   assert.equal(calls.length, 1, "single docker exec");
-  assert.equal(calls[0].engine, "docker");
-  assert.equal(calls[0].cmd, "docker");
-  assert.deepEqual(calls[0].args.slice(0, 4), [
+  const call = required(calls[0]);
+  assert.equal(call.engine, "docker");
+  assert.equal(call.cmd, "docker");
+  assert.deepEqual(call.args.slice(0, 4), [
     "exec",
     "agent-infra-dev-demo",
     "bash",
     "-lc"
   ]);
-  const script = calls[0].args[4];
+  const script = required(call.args[4]);
   for (const file of [".gitconfig", ".gitignore_global", ".stCommitMsg", ".bash_aliases"]) {
     assert.match(
       script,
@@ -3752,7 +3926,7 @@ test("ensureShellConfigSymlinks runs a single docker exec wiring all four $HOME 
 });
 
 test("prepareHostShellConfig writes sanitized config files and returns read-only mount metadata", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-shell-config-"));
 
   try {
@@ -3817,7 +3991,7 @@ test("prepareHostShellConfig writes sanitized config files and returns read-only
 });
 
 test("prepareHostShellConfig writes a minimal .gitconfig with safe.directory entries when the host has none", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-shell-config-no-gitconfig-"));
 
   try {
@@ -3849,7 +4023,7 @@ test("prepareHostShellConfig writes a minimal .gitconfig with safe.directory ent
 });
 
 test("prepareHostShellConfig removes stale files from the previous host config snapshot", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-shell-config-cleanup-"));
   const hostDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..demo");
 
@@ -3873,7 +4047,7 @@ test("prepareHostShellConfig removes stale files from the previous host config s
 });
 
 test("detectGpgConfig identifies host gitconfig that requires GPG support", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   assert.equal(sandboxCreate.detectGpgConfig("[commit]\n  gpgsign = true\n"), true);
   assert.equal(sandboxCreate.detectGpgConfig("[gpg]\n  program = /opt/homebrew/bin/gpg\n"), true);
@@ -3882,7 +4056,7 @@ test("detectGpgConfig identifies host gitconfig that requires GPG support", asyn
 });
 
 test("sanitizeGitConfig rewrites host paths and appends safe.directory entries", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const home = "/Users/demo";
   const gitconfig = [
     "[user]",
@@ -3915,7 +4089,7 @@ test("sanitizeGitConfig rewrites host paths and appends safe.directory entries",
 });
 
 test("sanitizeGitConfig rewrites Windows backslash and forward-slash host paths", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const home = "C:\\Users\\demo";
   const gitconfig = [
     "[user]",
@@ -3934,7 +4108,7 @@ test("sanitizeGitConfig rewrites Windows backslash and forward-slash host paths"
 });
 
 test("sanitizeGitConfig rewrites mixed-form Windows home paths", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const home = "C:\\Users\\demo";
   const gitconfig = [
     "[core]",
@@ -3953,7 +4127,7 @@ test("sanitizeGitConfig rewrites mixed-form Windows home paths", async () => {
 });
 
 test("sanitizeGitConfig appends missing safe.directory entries to an existing safe section", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const gitconfig = [
     "[core]",
     "  editor = vim",
@@ -3980,7 +4154,7 @@ test("sanitizeGitConfig appends missing safe.directory entries to an existing sa
 });
 
 test("sanitizeGitConfig strips GPG settings from non-gpg sections when host keys are unavailable", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const gitconfig = [
     "[commit]",
     "  gpgsign = true",
@@ -4017,7 +4191,7 @@ test("sanitizeGitConfig strips GPG settings from non-gpg sections when host keys
 });
 
 test("writeSanitizedGitconfig rewrites the mounted gitconfig without replacing the inode", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-write-sanitized-gitconfig-"));
   const hostConfigDir = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..demo");
 
@@ -4055,12 +4229,12 @@ test("writeSanitizedGitconfig rewrites the mounted gitconfig without replacing t
 });
 
 test("syncGpgKeys returns false when the host has no public keys to import", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-no-public-"));
-  const calls = [];
+  const calls: CommandCall[] = [];
 
   try {
-    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd, args, options) => {
+    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd: string, args: string[], options: CommandOptions = {}) => {
       calls.push([cmd, args, options]);
       if (cmd === "git") {
         return "";
@@ -4075,26 +4249,28 @@ test("syncGpgKeys returns false when the host has no public keys to import", asy
 
     assert.equal(synced, false);
     assert.equal(calls.length, 2);
-    assert.equal(calls[0][0], "git");
-    assert.deepEqual(calls[0][1], ["config", "--global", "user.signingKey"]);
-    assert.equal(calls[0][2].env.HOME, tmpDir);
-    assert.equal(calls[1][0], "gpg");
-    assert.deepEqual(calls[1][1], ["--export"]);
-    assert.equal(calls[1][2].env.HOME, tmpDir);
+    const gitCall = required(calls[0]);
+    const gpgCall = required(calls[1]);
+    assert.equal(gitCall[0], "git");
+    assert.deepEqual(gitCall[1], ["config", "--global", "user.signingKey"]);
+    assert.equal(gitCall[2]?.env?.HOME, tmpDir);
+    assert.equal(gpgCall[0], "gpg");
+    assert.deepEqual(gpgCall[1], ["--export"]);
+    assert.equal(gpgCall[2]?.env?.HOME, tmpDir);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("currentKeyringFingerprint hashes the current secret keyring", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const output = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
 
-  const fingerprint = sandboxCreate.currentKeyringFingerprint("/Users/demo", (cmd, args, options) => {
+  const fingerprint = sandboxCreate.currentKeyringFingerprint("/Users/demo", (cmd: string, args: string[], options: CommandOptions = {}) => {
     assert.equal(cmd, "gpg");
     assert.deepEqual(args, ["--list-secret-keys", "--with-colons"]);
     assert.equal(options.encoding, "utf8");
-    assert.equal(options.env.HOME, "/Users/demo");
+    assert.equal(options.env?.HOME, "/Users/demo");
     return output;
   });
 
@@ -4103,7 +4279,7 @@ test("currentKeyringFingerprint hashes the current secret keyring", async () => 
 });
 
 test("currentKeyringFingerprint returns null when gpg listing fails", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   const fingerprint = sandboxCreate.currentKeyringFingerprint("/Users/demo", () => {
     throw new Error("gpg failed");
@@ -4113,7 +4289,7 @@ test("currentKeyringFingerprint returns null when gpg listing fails", async () =
 });
 
 test("currentKeyringFingerprint returns null for an empty keyring listing", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   const fingerprint = sandboxCreate.currentKeyringFingerprint("/Users/demo", () => "   \n");
 
@@ -4121,15 +4297,15 @@ test("currentKeyringFingerprint returns null for an empty keyring listing", asyn
 });
 
 test("getGitSigningKey returns the configured signing key", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   const signingKey = sandboxCreate.getGitSigningKey({
     home: "/Users/demo",
-    execFn(cmd, args, options) {
+    execFn(cmd: string, args: string[], options: CommandOptions = {}) {
       assert.equal(cmd, "git");
       assert.deepEqual(args, ["config", "--global", "user.signingKey"]);
       assert.equal(options.encoding, "utf8");
-      assert.equal(options.env.HOME, "/Users/demo");
+      assert.equal(options.env?.HOME, "/Users/demo");
       return "8246B1E31A62A1D6\n";
     }
   });
@@ -4138,7 +4314,7 @@ test("getGitSigningKey returns the configured signing key", async () => {
 });
 
 test("getGitSigningKey reads repo-local signingKey when a worktree path is provided", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-signing-key-local-"));
   const repoDir = path.join(tmpDir, "repo");
   const homeDir = path.join(tmpDir, "home");
@@ -4164,7 +4340,7 @@ test("getGitSigningKey reads repo-local signingKey when a worktree path is provi
 });
 
 test("getGitSigningKey returns null when git config lookup fails", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   const signingKey = sandboxCreate.getGitSigningKey({
     home: "/Users/demo",
@@ -4177,7 +4353,7 @@ test("getGitSigningKey returns null when git config lookup fails", async () => {
 });
 
 test("getGitSigningKey returns null for empty output", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
   const signingKey = sandboxCreate.getGitSigningKey({
     home: "/Users/demo",
@@ -4188,7 +4364,7 @@ test("getGitSigningKey returns null for empty output", async () => {
 });
 
 test("readGpgCache returns null when the cache does not exist", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-missing-"));
 
   try {
@@ -4203,7 +4379,7 @@ test("readGpgCache returns null when the cache does not exist", async () => {
 });
 
 test("readGpgCache returns null when the cache is missing state metadata", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-missing-state-"));
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
@@ -4223,7 +4399,7 @@ test("readGpgCache returns null when the cache is missing state metadata", async
 });
 
 test("readGpgCache returns cached key material when the keyring fingerprint matches", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-hit-"));
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
@@ -4235,7 +4411,7 @@ test("readGpgCache returns cached key material when the keyring fingerprint matc
     fs.writeFileSync(path.join(cacheDir, "secret.asc"), "sec");
     fs.writeFileSync(path.join(cacheDir, "state.json"), `${JSON.stringify({ fingerprint })}\n`, "utf8");
 
-    const cache = sandboxCreate.readGpgCache(tmpDir, "demo", (cmd, args) => {
+    const cache = sandboxCreate.readGpgCache(tmpDir, "demo", (cmd: string, args: string[]) => {
       assert.equal(cmd, "gpg");
       assert.deepEqual(args, ["--list-secret-keys", "--with-colons"]);
       return listing;
@@ -4251,7 +4427,7 @@ test("readGpgCache returns cached key material when the keyring fingerprint matc
 });
 
 test("readGpgCache returns null when the keyring fingerprint changed", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-stale-"));
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
@@ -4270,7 +4446,7 @@ test("readGpgCache returns null when the keyring fingerprint changed", async () 
 });
 
 test("readGpgCache returns null when the cached signingKey no longer matches", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-signing-key-stale-"));
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
@@ -4295,7 +4471,7 @@ test("readGpgCache returns null when the cached signingKey no longer matches", a
 });
 
 test("writeGpgCache creates cache files with secure permissions", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-write-"));
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
@@ -4320,7 +4496,7 @@ test("writeGpgCache creates cache files with secure permissions", async () => {
 });
 
 test("writeGpgCache stores the signingKey used to build the cache", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-cache-write-signing-key-"));
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
 
@@ -4349,8 +4525,8 @@ test("syncGpgKeys reuses a caller-provided cache without re-reading from disk or
   // resolved the cache hit and signingKey, syncGpgKeys should import the
   // provided key material directly without spawning another `git config` or
   // `gpg --list-secret-keys` subprocess.
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
-  const calls = [];
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const calls: CommandCall[] = [];
   const providedCache = {
     pub: Buffer.from("pub-from-caller"),
     sec: Buffer.from("sec-from-caller")
@@ -4360,7 +4536,7 @@ test("syncGpgKeys reuses a caller-provided cache without re-reading from disk or
     "demo-container",
     "/Users/demo",
     "demo",
-    (cmd, args, options) => {
+    (cmd: string, args: string[], options: CommandOptions = {}) => {
       calls.push([cmd, args, options]);
       if (cmd === "docker" && args.at(-1) === "--import") {
         return Buffer.from("");
@@ -4379,23 +4555,23 @@ test("syncGpgKeys reuses a caller-provided cache without re-reading from disk or
     ["docker", ["exec", "-i", "demo-container", "gpg", "--import"]],
     ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
   ]);
-  assert.deepEqual(calls[0][2], {
+  assert.deepEqual(required(calls[0])[2], {
     input: Buffer.from("pub-from-caller"),
     stdio: ["pipe", "pipe", "pipe"]
   });
-  assert.deepEqual(calls[1][2], {
+  assert.deepEqual(required(calls[1])[2], {
     input: Buffer.from("sec-from-caller"),
     stdio: ["pipe", "pipe", "pipe"]
   });
 });
 
 test("syncGpgKeys invalidates cache when the effective signing key changed", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-signing-key-changed-"));
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
-  const calls = [];
+  const calls: CommandCall[] = [];
 
   try {
     fs.mkdirSync(cacheDir, { recursive: true });
@@ -4411,7 +4587,7 @@ test("syncGpgKeys invalidates cache when the effective signing key changed", asy
       "demo-container",
       tmpDir,
       "demo",
-      (cmd, args, options) => {
+      (cmd: string, args: string[], options: CommandOptions = {}) => {
         calls.push([cmd, args, options]);
         if (cmd === "git") {
           return "NEW-KEY\n";
@@ -4461,13 +4637,13 @@ test("syncGpgKeys invalidates cache when the effective signing key changed", asy
 });
 
 test("syncGpgKeys uses the cache when the keyring fingerprint matches", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-cache-hit-"));
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
   const listing = "sec:u:255:22:ABCDEF1234567890:1700000000:0::::::23::0:\n";
   const fingerprint = createHash("sha256").update(listing).digest("hex");
-  const calls = [];
-  const runSafeCalls = [];
+  const calls: CommandCall[] = [];
+  const runSafeCalls: Array<[string, string[]]> = [];
 
   try {
     fs.mkdirSync(cacheDir, { recursive: true });
@@ -4475,7 +4651,7 @@ test("syncGpgKeys uses the cache when the keyring fingerprint matches", async ()
     fs.writeFileSync(path.join(cacheDir, "secret.asc"), "sec");
     fs.writeFileSync(path.join(cacheDir, "state.json"), `${JSON.stringify({ fingerprint })}\n`, "utf8");
 
-    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd, args, options) => {
+    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd: string, args: string[], options: CommandOptions = {}) => {
       calls.push([cmd, args, options]);
       if (cmd === "gpg") {
         assert.deepEqual(args, ["--list-secret-keys", "--with-colons"]);
@@ -4485,7 +4661,7 @@ test("syncGpgKeys uses the cache when the keyring fingerprint matches", async ()
         return Buffer.from("");
       }
       throw new Error(`unexpected call: ${cmd} ${args.join(" ")}`);
-    }, (cmd, args) => {
+    }, (cmd: string, args: string[]) => {
       runSafeCalls.push([cmd, args]);
       return "";
     });
@@ -4497,13 +4673,13 @@ test("syncGpgKeys uses the cache when the keyring fingerprint matches", async ()
       ["docker", ["exec", "-i", "demo-container", "gpg", "--import"]],
       ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
     ]);
-    assert.equal(calls[0][2].env.HOME, tmpDir);
-    assert.equal(calls[0][2].encoding, "utf8");
-    assert.deepEqual(calls[2][2], {
+    assert.equal(required(calls[0])[2]?.env?.HOME, tmpDir);
+    assert.equal(required(calls[0])[2]?.encoding, "utf8");
+    assert.deepEqual(required(calls[2])[2], {
       input: Buffer.from("pub"),
       stdio: ["pipe", "pipe", "pipe"]
     });
-    assert.deepEqual(calls[3][2], {
+    assert.deepEqual(required(calls[3])[2], {
       input: Buffer.from("sec"),
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -4516,12 +4692,12 @@ test("syncGpgKeys uses the cache when the keyring fingerprint matches", async ()
 });
 
 test("syncGpgKeys exports host keys and writes the cache on a cache miss", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-cache-miss-"));
-  const calls = [];
+  const calls: CommandCall[] = [];
 
   try {
-    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd, args, options) => {
+    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd: string, args: string[], options: CommandOptions = {}) => {
       calls.push([cmd, args, options]);
       if (cmd === "gpg" && args[0] === "--export") {
         return Buffer.from("pub");
@@ -4564,12 +4740,12 @@ test("syncGpgKeys exports host keys and writes the cache on a cache miss", async
 });
 
 test("syncGpgKeys exports only the configured signing key on a cache miss", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-signing-key-"));
-  const calls = [];
+  const calls: CommandCall[] = [];
 
   try {
-    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd, args, options) => {
+    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd: string, args: string[], options: CommandOptions = {}) => {
       calls.push([cmd, args, options]);
       if (cmd === "git") {
         return "8246B1E31A62A1D6\n";
@@ -4604,22 +4780,22 @@ test("syncGpgKeys exports only the configured signing key on a cache miss", asyn
 });
 
 test("syncGpgKeys still succeeds when writing the cache fails", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-sync-cache-write-fails-"));
   const cacheDir = path.join(tmpDir, ".agent-infra", "gpg-cache", "demo");
-  const calls = [];
-  const writes = [];
+  const calls: CommandCall[] = [];
+  const writes: Array<string | Uint8Array> = [];
   const originalWrite = process.stderr.write;
 
   try {
     fs.mkdirSync(path.dirname(cacheDir), { recursive: true });
     fs.writeFileSync(cacheDir, "blocking-file");
-    process.stderr.write = (...args) => {
+    process.stderr.write = ((...args: Parameters<typeof process.stderr.write>) => {
       writes.push(args[0]);
       return true;
-    };
+    }) as typeof process.stderr.write;
 
-    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd, args, options) => {
+    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd: string, args: string[], options: CommandOptions = {}) => {
       calls.push([cmd, args, options]);
       if (cmd === "git") {
         return "";
@@ -4658,12 +4834,12 @@ test("syncGpgKeys still succeeds when writing the cache fails", async () => {
 });
 
 test("syncGpgKeys returns false when the host has no secret keys to import", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-no-secret-"));
-  const calls = [];
+  const calls: CommandCall[] = [];
 
   try {
-    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd, args, options) => {
+    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd: string, args: string[], options: CommandOptions = {}) => {
       calls.push([cmd, args, options]);
       if (cmd === "git") {
         return "";
@@ -4694,13 +4870,13 @@ test("syncGpgKeys returns false when the host has no secret keys to import", asy
 });
 
 test("syncGpgKeys imports host public and secret keys into the container", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-import-"));
-  const calls = [];
-  const runSafeCalls = [];
+  const calls: CommandCall[] = [];
+  const runSafeCalls: Array<[string, string[]]> = [];
 
   try {
-    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd, args, options) => {
+    const synced = sandboxCreate.syncGpgKeys("demo-container", tmpDir, "demo", (cmd: string, args: string[], options: CommandOptions = {}) => {
       calls.push([cmd, args, options]);
       if (cmd === "git") {
         return "";
@@ -4718,7 +4894,7 @@ test("syncGpgKeys imports host public and secret keys into the container", async
         return Buffer.from("");
       }
       throw new Error(`unexpected call: ${cmd} ${args.join(" ")}`);
-    }, (cmd, args) => {
+    }, (cmd: string, args: string[]) => {
       runSafeCalls.push([cmd, args]);
       return "";
     });
@@ -4732,16 +4908,16 @@ test("syncGpgKeys imports host public and secret keys into the container", async
       ["docker", ["exec", "-i", "demo-container", "gpg", "--import"]],
       ["docker", ["exec", "-i", "demo-container", "gpg", "--batch", "--import"]]
     ]);
-    assert.equal(calls[0][2].env.HOME, tmpDir);
-    assert.equal(calls[0][2].encoding, "utf8");
-    assert.equal(calls[1][2].env.HOME, tmpDir);
-    assert.equal(calls[3][2].env.HOME, tmpDir);
-    assert.equal(calls[3][2].encoding, "utf8");
-    assert.deepEqual(calls[4][2], {
+    assert.equal(required(calls[0])[2]?.env?.HOME, tmpDir);
+    assert.equal(required(calls[0])[2]?.encoding, "utf8");
+    assert.equal(required(calls[1])[2]?.env?.HOME, tmpDir);
+    assert.equal(required(calls[3])[2]?.env?.HOME, tmpDir);
+    assert.equal(required(calls[3])[2]?.encoding, "utf8");
+    assert.deepEqual(required(calls[4])[2], {
       input: Buffer.from("pub"),
       stdio: ["pipe", "pipe", "pipe"]
     });
-    assert.deepEqual(calls[5][2], {
+    assert.deepEqual(required(calls[5])[2], {
       input: Buffer.from("sec"),
       stdio: ["pipe", "pipe", "pipe"]
     });
@@ -4754,18 +4930,18 @@ test("syncGpgKeys imports host public and secret keys into the container", async
 });
 
 test("syncGpgKeys can use separate host gpg and engine docker runners", async () => {
-  const sandboxCreate = await loadFreshEsm("lib/sandbox/commands/create.js");
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gpg-engine-docker-"));
-  const hostCalls = [];
-  const dockerExecCalls = [];
-  const dockerSafeCalls = [];
+  const hostCalls: Array<{ cmd: string; args: string[]; options: CommandOptions }> = [];
+  const dockerExecCalls: Array<{ cmd: string; args: string[]; input: string }> = [];
+  const dockerSafeCalls: Array<{ cmd: string; args: string[] }> = [];
 
   try {
     const synced = sandboxCreate.syncGpgKeys(
       "demo-container",
       tmpDir,
       "demo",
-      (cmd, args, options) => {
+      (cmd: string, args: string[], options: CommandOptions = {}) => {
         hostCalls.push({ cmd, args, options });
         if (cmd === "git") {
           return "";
@@ -4785,10 +4961,10 @@ test("syncGpgKeys can use separate host gpg and engine docker runners", async ()
         throw new Error("default runSafe should not handle docker calls");
       },
       {
-        dockerExecFn(cmd, args, options) {
-          dockerExecCalls.push({ cmd, args, input: options.input.toString("utf8") });
+        dockerExecFn(cmd: string, args: string[], options: CommandOptions = {}) {
+          dockerExecCalls.push({ cmd, args, input: String(options.input ?? "") });
         },
-        dockerRunSafeFn(cmd, args) {
+        dockerRunSafeFn(cmd: string, args: string[]) {
           dockerSafeCalls.push({ cmd, args });
           return "";
         }
@@ -4810,7 +4986,7 @@ test("syncGpgKeys can use separate host gpg and engine docker runners", async ()
 });
 
 test("composeDockerfile rejects unknown runtimes", async () => {
-  const sandboxDockerfile = await loadFreshEsm("lib/sandbox/dockerfile.js");
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
 
   assert.throws(() => sandboxDockerfile.composeDockerfile({
     repoRoot: process.cwd(),
@@ -4821,13 +4997,13 @@ test("composeDockerfile rejects unknown runtimes", async () => {
 });
 
 test("assertValidBranchName rejects invalid branch names", async () => {
-  const sandboxConstants = await loadFreshEsm("lib/sandbox/constants.js");
+  const sandboxConstants = await loadFreshEsm<typeof import("../../lib/sandbox/constants.ts")>("lib/sandbox/constants.js");
 
   assert.throws(() => sandboxConstants.assertValidBranchName("bad branch name"), /Invalid branch name/);
 });
 
 test("share helpers compose project share namespace under shareBase", async () => {
-  const sandboxConstants = await loadFreshEsm("lib/sandbox/constants.js");
+  const sandboxConstants = await loadFreshEsm<typeof import("../../lib/sandbox/constants.ts")>("lib/sandbox/constants.js");
   const config = { shareBase: "/tmp/share/demo" };
 
   assert.equal(sandboxConstants.shareDir(config), "/tmp/share/demo");
@@ -4839,7 +5015,7 @@ test("share helpers compose project share namespace under shareBase", async () =
 });
 
 test("resolveTaskBranch returns plain branch names unchanged", async () => {
-  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const taskResolver = await loadFreshEsm<typeof import("../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
 
   assert.equal(
     taskResolver.resolveTaskBranch("agent-infra-feature-cli-generic-sandbox", process.cwd()),
@@ -4848,7 +5024,7 @@ test("resolveTaskBranch returns plain branch names unchanged", async () => {
 });
 
 test("resolveTaskBranch reads branch from task frontmatter", async () => {
-  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const taskResolver = await loadFreshEsm<typeof import("../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-frontmatter-"));
   const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180000");
 
@@ -4874,9 +5050,9 @@ test("resolveTaskBranch reads branch from task frontmatter", async () => {
 });
 
 test("resolveTaskBranch strips matching quotes from task branch metadata", async () => {
-  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const taskResolver = await loadFreshEsm<typeof import("../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-quotes-"));
-  const cases = [
+  const cases: Array<[string, string]> = [
     ["TASK-20260401-180010", "branch: \"agent-infra-feature-cli-generic-sandbox\""],
     ["TASK-20260401-180011", "branch: 'agent-infra-feature-cli-generic-sandbox'"]
   ];
@@ -4906,7 +5082,7 @@ test("resolveTaskBranch strips matching quotes from task branch metadata", async
 });
 
 test("resolveTaskBranch falls back to the context branch for legacy tasks", async () => {
-  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const taskResolver = await loadFreshEsm<typeof import("../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-context-"));
   const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180001");
 
@@ -4933,7 +5109,7 @@ test("resolveTaskBranch falls back to the context branch for legacy tasks", asyn
 });
 
 test("resolveTaskBranch strips matching quotes from legacy context branch metadata", async () => {
-  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const taskResolver = await loadFreshEsm<typeof import("../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-context-quotes-"));
   const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180012");
 
@@ -4961,7 +5137,7 @@ test("resolveTaskBranch strips matching quotes from legacy context branch metada
 
 for (const workspaceDir of ["completed", "blocked", "archive"]) {
   test(`resolveTaskBranch resolves tasks in ${workspaceDir} directory`, async () => {
-    const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+    const taskResolver = await loadFreshEsm<typeof import("../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-sandbox-task-${workspaceDir}-`));
     const taskDir = path.join(tmpDir, ".agents", "workspace", workspaceDir, "TASK-20260401-180003");
 
@@ -4988,7 +5164,7 @@ for (const workspaceDir of ["completed", "blocked", "archive"]) {
 }
 
 test("resolveTaskBranch prefers active over completed when both exist", async () => {
-  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const taskResolver = await loadFreshEsm<typeof import("../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-priority-"));
   const activeDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180004");
   const completedDir = path.join(tmpDir, ".agents", "workspace", "completed", "TASK-20260401-180004");
@@ -5019,7 +5195,7 @@ test("resolveTaskBranch prefers active over completed when both exist", async ()
 });
 
 test("resolveTaskBranch rejects missing task files and missing branch metadata", async () => {
-  const taskResolver = await loadFreshEsm("lib/sandbox/task-resolver.js");
+  const taskResolver = await loadFreshEsm<typeof import("../../lib/sandbox/task-resolver.ts")>("lib/sandbox/task-resolver.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-task-errors-"));
   const taskDir = path.join(tmpDir, ".agents", "workspace", "active", "TASK-20260401-180002");
 
@@ -5042,7 +5218,7 @@ test("resolveTaskBranch rejects missing task files and missing branch metadata",
 });
 
 test("sandbox ls format is engine-neutral and embeds raw Labels", async () => {
-  const { containerListFormat } = await loadFreshEsm("lib/sandbox/commands/ls.js");
+  const { containerListFormat } = await loadFreshEsm<typeof import("../../lib/sandbox/commands/ls.ts")>("lib/sandbox/commands/ls.js");
 
   assert.equal(
     containerListFormat(),
@@ -5051,7 +5227,7 @@ test("sandbox ls format is engine-neutral and embeds raw Labels", async () => {
 });
 
 test("sandbox ls parseLabels parses docker label CSV", async () => {
-  const { parseLabels } = await loadFreshEsm("lib/sandbox/commands/ls.js");
+  const { parseLabels } = await loadFreshEsm<typeof import("../../lib/sandbox/commands/ls.ts")>("lib/sandbox/commands/ls.js");
 
   assert.deepEqual(parseLabels(""), {});
   assert.deepEqual(parseLabels("k=v"), { k: "v" });
@@ -5062,15 +5238,15 @@ test("sandbox ls parseLabels parses docker label CSV", async () => {
 });
 
 test("runSafe forwards stderr on non-zero exit while preserving stdout return", async () => {
-  const { runSafe } = await loadFreshEsm("lib/sandbox/shell.js");
+  const { runSafe } = await loadFreshEsm<typeof import("../../lib/sandbox/shell.ts")>("lib/sandbox/shell.js");
   const originalWrite = process.stderr.write;
-  const writes = [];
+  const writes: Array<string | Uint8Array> = [];
 
   try {
-    process.stderr.write = (...args) => {
+    process.stderr.write = ((...args: Parameters<typeof process.stderr.write>) => {
       writes.push(args[0]);
       return true;
-    };
+    }) as typeof process.stderr.write;
 
     const output = runSafe(process.execPath, [
       "-e",
@@ -5085,15 +5261,15 @@ test("runSafe forwards stderr on non-zero exit while preserving stdout return", 
 });
 
 test("runSafe does not forward stderr on zero exit", async () => {
-  const { runSafe } = await loadFreshEsm("lib/sandbox/shell.js");
+  const { runSafe } = await loadFreshEsm<typeof import("../../lib/sandbox/shell.ts")>("lib/sandbox/shell.js");
   const originalWrite = process.stderr.write;
-  const writes = [];
+  const writes: Array<string | Uint8Array> = [];
 
   try {
-    process.stderr.write = (...args) => {
+    process.stderr.write = ((...args: Parameters<typeof process.stderr.write>) => {
       writes.push(args[0]);
       return true;
-    };
+    }) as typeof process.stderr.write;
 
     const output = runSafe(process.execPath, [
       "-e",

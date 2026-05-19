@@ -1,20 +1,25 @@
-// @ts-nocheck
 import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { loadConfig } from '../config.ts';
+import type { SandboxConfig } from '../config.ts';
 import { prepareDockerfile } from '../dockerfile.ts';
 import { sandboxImageConfigLabel, sandboxLabel } from '../constants.ts';
 import { detectEngine, ensureDocker } from '../engine.ts';
 import { runEngine, runOkEngine, runSafeEngine, runVerboseEngine } from '../shell.ts';
 import { resolveTools, toolNpmPackagesArg } from '../tools.ts';
+import type { SandboxTool } from '../tools.ts';
 import { toEnginePath } from '../engines/wsl2-paths.ts';
 import { resolveBuildUid } from '../engines/native.ts';
 
 const USAGE = `Usage: ai sandbox rebuild [--quiet]`;
 
-function buildSignature(preparedDockerfile, tools) {
+type PreparedDockerfile = ReturnType<typeof prepareDockerfile>;
+type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string }) => string;
+type EngineRunSafeFn = EngineRunFn;
+
+function buildSignature(preparedDockerfile: PreparedDockerfile, tools: SandboxTool[]): string {
   return createHash('sha256')
     .update(JSON.stringify({
       dockerfile: preparedDockerfile.signature,
@@ -25,14 +30,25 @@ function buildSignature(preparedDockerfile, tools) {
 }
 
 export function buildArgs(
-  config,
-  tools,
-  dockerfilePath,
-  imageSignature,
-  { engine, runFn = runEngine, runSafeFn = runSafeEngine, env = process.env } = {}
-) {
-  const { uid: hostUid, gid: hostGid } = resolveBuildUid({
+  config: SandboxConfig,
+  tools: SandboxTool[],
+  dockerfilePath: string,
+  imageSignature: string,
+  {
     engine,
+    runFn = runEngine,
+    runSafeFn = runSafeEngine,
+    env = process.env
+  }: {
+    engine?: string;
+    runFn?: EngineRunFn;
+    runSafeFn?: EngineRunSafeFn;
+    env?: NodeJS.ProcessEnv;
+  } = {}
+): string[] {
+  const selectedEngine = engine ?? detectEngine(config);
+  const { uid: hostUid, gid: hostGid } = resolveBuildUid({
+    engine: selectedEngine,
     runFn,
     runSafeFn,
     env
@@ -53,18 +69,18 @@ export function buildArgs(
     '--label',
     `${sandboxImageConfigLabel(config)}=${imageSignature}`,
     '-f',
-    toEnginePath(engine, dockerfilePath),
-    toEnginePath(engine, config.repoRoot)
+    toEnginePath(selectedEngine, dockerfilePath),
+    toEnginePath(selectedEngine, config.repoRoot)
   ];
 }
 
-function removeImageIfPresent(imageName, engine) {
+function removeImageIfPresent(imageName: string, engine: string): void {
   if (runOkEngine(engine, 'docker', ['image', 'inspect', imageName])) {
     runEngine(engine, 'docker', ['rmi', imageName]);
   }
 }
 
-export async function rebuild(args) {
+export async function rebuild(args: string[]): Promise<void> {
   const { values } = parseArgs({
     args,
     allowPositionals: true,
@@ -87,7 +103,7 @@ export async function rebuild(args) {
   const quiet = values.quiet ?? false;
   const engine = detectEngine(config);
 
-  await ensureDocker(config);
+  await ensureDocker(config, undefined);
   p.intro(pc.cyan('Rebuilding sandbox image'));
 
   try {

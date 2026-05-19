@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { loadConfig } from '../config.ts';
 import { assertValidBranchName, containerNameCandidates } from '../constants.ts';
 import { detectEngine } from '../engine.ts';
@@ -28,8 +27,8 @@ const FORWARDED_TERMINAL_ENV = [
   'LC_TERMINAL_VERSION'
 ];
 
-export function terminalEnvFlags(env = process.env) {
-  const flags = [];
+export function terminalEnvFlags(env: NodeJS.ProcessEnv = process.env): string[] {
+  const flags: string[] = [];
   for (const name of FORWARDED_TERMINAL_ENV) {
     const value = env[name];
     if (value) {
@@ -39,7 +38,10 @@ export function terminalEnvFlags(env = process.env) {
   return flags;
 }
 
-export function formatCredentialSyncStatus(result, isTTY = process.stderr.isTTY) {
+export function formatCredentialSyncStatus(
+  result: ReturnType<typeof reconcileClaudeCredentials>,
+  isTTY = process.stderr.isTTY
+): string | null {
   if (result.status === 'STALE_ACCESS') {
     return 'Warning: Claude Code credentials on host appear stale. Run "ai sandbox refresh" or "claude /login" to renew.\n';
   }
@@ -63,7 +65,7 @@ export function formatCredentialSyncStatus(result, isTTY = process.stderr.isTTY)
   return null;
 }
 
-export function enter(args) {
+export function enter(args: string[]): number {
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(`${USAGE}\n`);
     if (args.length === 0) {
@@ -75,7 +77,7 @@ export function enter(args) {
   const config = loadConfig();
   validateClaudeCredentialsEnvOverride();
   const engine = detectEngine(config);
-  const [branchOrTaskId, ...cmd] = args;
+  const [branchOrTaskId = '', ...cmd] = args;
   const branch = resolveTaskBranch(branchOrTaskId, config.repoRoot);
   assertValidBranchName(branch);
   const running = runSafeEngine(engine, 'docker', ['ps', '--format', '{{.Names}}']).split('\n');
@@ -94,7 +96,7 @@ export function enter(args) {
         process.stderr.write(message);
       }
     } catch (error) {
-      process.stderr.write(`Warning: Failed to sync Claude Code credentials: ${redactCommandError(error?.message ?? 'unknown error')}\n`);
+      process.stderr.write(`Warning: Failed to sync Claude Code credentials: ${redactCommandError(error instanceof Error ? error.message : 'unknown error')}\n`);
     }
   }
 
@@ -103,7 +105,7 @@ export function enter(args) {
     try {
       materializeDotfiles(config.dotfilesDir, dotfilesCacheDir(config.home, config.project));
     } catch (error) {
-      process.stderr.write(`Warning: dotfiles snapshot rebuild failed: ${redactCommandError(error?.message ?? 'unknown error')}\n`);
+      process.stderr.write(`Warning: dotfiles snapshot rebuild failed: ${redactCommandError(error instanceof Error ? error.message : 'unknown error')}\n`);
     }
 
     return runInteractiveEngine(engine, 'docker', ['exec', '-it', ...envFlags, container, 'bash', TMUX_ENTRY_PATH]);

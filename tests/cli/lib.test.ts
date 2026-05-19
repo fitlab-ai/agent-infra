@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import readline from "node:readline";
@@ -24,12 +23,12 @@ test("prompt does not recreate readline after close", async () => {
   const originalStdoutWrite = process.stdout.write;
   let createCount = 0;
 
-  readline.createInterface = () => {
+  readline.createInterface = (() => {
     createCount += 1;
-    const handlers = {};
+    const handlers: Record<string, () => void> = {};
 
     return {
-      on(event, handler) {
+      on(event: string, handler: () => void) {
         handlers[event] = handler;
         return this;
       },
@@ -39,11 +38,11 @@ test("prompt does not recreate readline after close", async () => {
         }
       }
     };
-  };
+  }) as unknown as typeof readline.createInterface;
   process.stdout.write = () => true;
 
   try {
-    const promptModule = await loadFreshEsm("lib/prompt.js");
+    const promptModule = await loadFreshEsm<typeof import("../../lib/prompt.ts")>("lib/prompt.js");
     const firstPrompt = promptModule.prompt("Project name", "demo");
 
     promptModule.closePrompt();

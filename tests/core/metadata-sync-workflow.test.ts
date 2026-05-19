@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -10,7 +9,7 @@ const workflowTargets = [
 ];
 
 test("metadata-sync workflow template stays in sync with the root workflow", () => {
-  const [rootPath, templatePath] = workflowTargets;
+  const [rootPath = "", templatePath = ""] = workflowTargets;
 
   assert.equal(read(rootPath), read(templatePath));
 });

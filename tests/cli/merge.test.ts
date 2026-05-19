@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -25,7 +24,21 @@ function makeTempRepo() {
   return repoDir;
 }
 
-function makeTempWorkspace(repoDir, name = 'incoming-workspace') {
+type TaskOptions = {
+  title: string;
+  type?: string;
+  completedAt: string;
+  updatedAt?: string;
+};
+type FlatTaskOptions = {
+  title?: string;
+  type?: string;
+  updatedAt?: string;
+  extraFiles?: Record<string, string>;
+  omitUpdatedAt?: boolean;
+};
+
+function makeTempWorkspace(repoDir: string, name: string = 'incoming-workspace') {
   const workspaceDir = path.join(repoDir, name);
   for (const section of ['active', 'blocked', 'completed', 'archive']) {
     fs.mkdirSync(path.join(workspaceDir, section), { recursive: true });
@@ -33,7 +46,7 @@ function makeTempWorkspace(repoDir, name = 'incoming-workspace') {
   return workspaceDir;
 }
 
-function writeTask(rootDir, relativeDir, taskId, { title, type = 'feature', completedAt, updatedAt }) {
+function writeTask(rootDir: string, relativeDir: string, taskId: string, { title, type = 'feature', completedAt, updatedAt }: TaskOptions) {
   const taskDir = path.join(rootDir, relativeDir, taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(
@@ -55,13 +68,13 @@ function writeTask(rootDir, relativeDir, taskId, { title, type = 'feature', comp
   return taskDir;
 }
 
-function writeFlatTask(rootDir, section, taskId, {
+function writeFlatTask(rootDir: string, section: string, taskId: string, {
   title,
   type = 'feature',
   updatedAt,
   extraFiles = {},
   omitUpdatedAt = false
-} = {}) {
+}: FlatTaskOptions = {}) {
   const taskDir = path.join(rootDir, section, taskId);
   const lines = [
     '---',
@@ -81,19 +94,19 @@ function writeFlatTask(rootDir, section, taskId, {
   for (const [name, content] of Object.entries(extraFiles)) {
     const filePath = path.join(taskDir, name);
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, content, 'utf8');
+    fs.writeFileSync(filePath, String(content), 'utf8');
   }
 
   return taskDir;
 }
 
-function setTimestamp(targetPath, isoString) {
+function setTimestamp(targetPath: string, isoString: string) {
   const date = new Date(isoString);
   fs.utimesSync(targetPath, date, date);
 }
 
-function formatLocalTimestamp(date) {
-  const pad = (value) => String(value).padStart(2, '0');
+function formatLocalTimestamp(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0');
   const offsetMinutes = -date.getTimezoneOffset();
   const sign = offsetMinutes >= 0 ? '+' : '-';
   const absoluteOffsetMinutes = Math.abs(offsetMinutes);
@@ -109,7 +122,7 @@ function formatLocalTimestamp(date) {
   ].join(':') + `${sign}${pad(Math.floor(absoluteOffsetMinutes / 60))}:${pad(absoluteOffsetMinutes % 60)}`;
 }
 
-function read(relativePath) {
+function read(relativePath: string) {
   return fs.readFileSync(relativePath, 'utf8');
 }
 
@@ -318,9 +331,9 @@ test('frontmatter helpers and source scanning parse archived task metadata', () 
 
     const tasks = scanSourceTasks(sourceDir);
     assert.equal(tasks.length, 1);
-    assert.equal(tasks[0].taskId, 'TASK-20260309-123456');
-    assert.equal(tasks[0].relativePath, '2026/03/09/TASK-20260309-123456/');
-    assert.equal(tasks[0].completedAt, '2026-03-09 12:34:56');
+    assert.equal(tasks[0]?.taskId, 'TASK-20260309-123456');
+    assert.equal(tasks[0]?.relativePath, '2026/03/09/TASK-20260309-123456/');
+    assert.equal(tasks[0]?.completedAt, '2026-03-09 12:34:56');
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }
@@ -477,7 +490,7 @@ test('merge workspace updates same-section task when source is newer and creates
     const backupBatches = fs.readdirSync(backupRoot);
     assert.equal(backupBatches.length, 1);
     assert.match(
-      read(path.join(backupRoot, backupBatches[0], 'active/TASK-20260409-131313/task.md')),
+      read(path.join(backupRoot, backupBatches[0] ?? '', 'active/TASK-20260409-131313/task.md')),
       /local older/
     );
   } finally {

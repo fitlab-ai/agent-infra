@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { parseArgs } from 'node:util';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
@@ -16,7 +15,7 @@ import { runOk, runSafe } from '../shell.ts';
 
 const USAGE = `Usage: ai sandbox vm <status|start|stop> [--cpu <n>] [--memory <n>]`;
 
-export function ensureManagedVm(engine) {
+export function ensureManagedVm(engine: string): void {
   if (engine === ENGINES.NATIVE) {
     throw new Error(
       "Linux native Docker does not use a managed VM. Use 'ai sandbox create' directly."
@@ -33,14 +32,17 @@ export function ensureManagedVm(engine) {
   }
 }
 
-export function wsl2BackendStatus({ runOkFn = runOk } = {}) {
+export function wsl2BackendStatus({ runOkFn = runOk }: { runOkFn?: typeof runOk } = {}): {
+  wslAvailable: boolean;
+  dockerAvailable: boolean;
+} {
   const wslAvailable = runOkFn('wsl.exe', ['--status']) || runOkFn('wsl.exe', ['--', 'true']);
   const dockerAvailable = wslAvailable && runOkFn('wsl.exe', ['--', 'docker', 'info']);
 
   return { wslAvailable, dockerAvailable };
 }
 
-function status() {
+function status(): void {
   const config = loadConfig();
   const engine = detectEngine(config);
   const name = engineDisplayName(engine);
@@ -80,7 +82,7 @@ function status() {
   process.stdout.write(`${runSafe('orb', ['status'])}\n`);
 }
 
-async function start(args) {
+async function start(args: string[]): Promise<void> {
   const { values } = parseArgs({
     args,
     allowPositionals: true,
@@ -119,7 +121,7 @@ async function start(args) {
     }
   };
 
-  const onMessage = (detail) => {
+  const onMessage = (detail: string) => {
     p.log.info(detail);
   };
 
@@ -127,7 +129,7 @@ async function start(args) {
   p.outro(pc.green('VM ready'));
 }
 
-function stop() {
+function stop(): void {
   const config = loadConfig();
   const engine = detectEngine(config);
   const name = engineDisplayName(engine);
@@ -152,7 +154,7 @@ function stop() {
   p.outro(pc.green('VM stopped'));
 }
 
-export async function vm(args) {
+export async function vm(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
 
   if (!subcommand || subcommand === '--help' || subcommand === '-h') {

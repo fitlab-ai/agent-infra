@@ -1,4 +1,3 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import path from 'node:path';
 import * as p from '@clack/prompts';
@@ -13,16 +12,16 @@ const USAGE = 'Usage: ai sandbox ls';
 const CONTAINER_LIST_HEADER = 'NAMES\tSTATUS\tBRANCH';
 
 // Exported to lock the docker/podman-compatible format in unit tests.
-export function containerListFormat() {
+export function containerListFormat(): string {
   return '{{.Names}}\t{{.Status}}\t{{.Labels}}';
 }
 
-export function parseLabels(csv) {
+export function parseLabels(csv: string): Record<string, string> {
   if (!csv) {
     return {};
   }
 
-  const labels = {};
+  const labels: Record<string, string> = {};
   for (const pair of csv.split(',')) {
     if (!pair) {
       continue;
@@ -36,7 +35,7 @@ export function parseLabels(csv) {
   return labels;
 }
 
-function listChildren(dir) {
+function listChildren(dir: string): string[] {
   if (!fs.existsSync(dir)) {
     return [];
   }
@@ -44,7 +43,7 @@ function listChildren(dir) {
   return fs.readdirSync(dir).sort().map((entry) => path.join(dir, entry));
 }
 
-export function ls(args = []) {
+export function ls(args: string[] = []): void {
   if (args.length > 0 && (args[0] === '--help' || args[0] === '-h')) {
     process.stdout.write(`${USAGE}\n`);
     return;

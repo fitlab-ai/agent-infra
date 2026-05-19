@@ -1,11 +1,23 @@
-// @ts-nocheck
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { ExecFileSyncOptions, StdioOptions, SpawnSyncOptions, SpawnSyncReturns } from 'node:child_process';
 
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
-function normalizeOptions(opts = {}, stdio) {
+type CommandOptions = {
+  cwd?: string;
+  encoding?: BufferEncoding;
+  stdio?: StdioOptions;
+  timeout?: number;
+  shell?: boolean;
+};
+
+type RunProbeOptions = CommandOptions & {
+  spawnFn?: typeof spawnSync;
+};
+
+function normalizeOptions(opts: CommandOptions = {}, stdio: StdioOptions): CommandOptions {
   return {
     cwd: opts.cwd,
     encoding: opts.encoding,
@@ -14,7 +26,7 @@ function normalizeOptions(opts = {}, stdio) {
   };
 }
 
-function resolveCommand(cmd) {
+function resolveCommand(cmd: string): string {
   if (process.platform !== 'win32' || path.extname(cmd)) {
     return cmd;
   }
@@ -40,14 +52,14 @@ function resolveCommand(cmd) {
   return cmd;
 }
 
-function commandOptions(cmd, opts) {
+function commandOptions<T extends CommandOptions>(cmd: string, opts: T): T | (T & { shell: true }) {
   if (process.platform === 'win32' && /\.(?:bat|cmd)$/i.test(cmd)) {
     return { ...opts, shell: true };
   }
   return opts;
 }
 
-export function run(cmd, args, opts = {}) {
+export function run(cmd: string, args: string[], opts: CommandOptions = {}): string {
   const resolved = resolveCommand(cmd);
   return execFileSync(resolved, args, commandOptions(resolved, {
     ...normalizeOptions(opts, ['pipe', 'pipe', 'pipe']),
@@ -55,13 +67,13 @@ export function run(cmd, args, opts = {}) {
   })).trim();
 }
 
-export function runOk(cmd, args, opts = {}) {
+export function runOk(cmd: string, args: string[], opts: CommandOptions = {}): boolean {
   const resolved = resolveCommand(cmd);
   const result = spawnSync(resolved, args, commandOptions(resolved, normalizeOptions(opts, 'pipe')));
   return result.status === 0;
 }
 
-export function restoreTerminal() {
+export function restoreTerminal(): void {
   if (!process.stdout.isTTY) {
     return;
   }
@@ -91,7 +103,7 @@ export function restoreTerminal() {
   }
 }
 
-export function runInteractive(cmd, args, opts = {}) {
+export function runInteractive(cmd: string, args: string[], opts: CommandOptions = {}): number {
   const resolved = resolveCommand(cmd);
   try {
     const result = spawnSync(resolved, args, commandOptions(resolved, normalizeOptions(opts, 'inherit')));
@@ -101,7 +113,7 @@ export function runInteractive(cmd, args, opts = {}) {
   }
 }
 
-export function runVerbose(cmd, args, opts = {}) {
+export function runVerbose(cmd: string, args: string[], opts: CommandOptions = {}): void {
   const resolved = resolveCommand(cmd);
   const result = spawnSync(resolved, args, commandOptions(resolved, normalizeOptions(opts, 'inherit')));
 
@@ -113,7 +125,7 @@ export function runVerbose(cmd, args, opts = {}) {
   }
 }
 
-export function runSafe(cmd, args, opts = {}) {
+export function runSafe(cmd: string, args: string[], opts: CommandOptions = {}): string {
   const resolved = resolveCommand(cmd);
   const result = spawnSync(resolved, args, commandOptions(resolved, {
     ...normalizeOptions(opts, ['pipe', 'pipe', 'pipe']),
@@ -125,7 +137,7 @@ export function runSafe(cmd, args, opts = {}) {
   return (result.stdout ?? '').trim();
 }
 
-export function commandForEngine(engine, cmd, args = []) {
+export function commandForEngine(engine: string, cmd: string, args: string[] = []): { cmd: string; args: string[] } {
   if (engine === 'wsl2') {
     const resolvedWrapper = resolveCommand('wsl.exe');
     return { cmd: resolvedWrapper, args: ['--', cmd, ...args] };
@@ -134,37 +146,37 @@ export function commandForEngine(engine, cmd, args = []) {
   return { cmd, args };
 }
 
-export function runEngine(engine, cmd, args, opts = {}) {
+export function runEngine(engine: string, cmd: string, args: string[], opts: CommandOptions = {}): string {
   const command = commandForEngine(engine, cmd, args);
   return run(command.cmd, command.args, opts);
 }
 
-export function execEngine(engine, cmd, args, opts = {}) {
+export function execEngine(engine: string, cmd: string, args: string[], opts: ExecFileSyncOptions = {}) {
   const command = commandForEngine(engine, cmd, args);
   return execFileSync(command.cmd, command.args, opts);
 }
 
-export function runOkEngine(engine, cmd, args, opts = {}) {
+export function runOkEngine(engine: string, cmd: string, args: string[], opts: CommandOptions = {}): boolean {
   const command = commandForEngine(engine, cmd, args);
   return runOk(command.cmd, command.args, opts);
 }
 
-export function runSafeEngine(engine, cmd, args, opts = {}) {
+export function runSafeEngine(engine: string, cmd: string, args: string[], opts: CommandOptions = {}): string {
   const command = commandForEngine(engine, cmd, args);
   return runSafe(command.cmd, command.args, opts);
 }
 
-export function runVerboseEngine(engine, cmd, args, opts = {}) {
+export function runVerboseEngine(engine: string, cmd: string, args: string[], opts: CommandOptions = {}): void {
   const command = commandForEngine(engine, cmd, args);
   return runVerbose(command.cmd, command.args, opts);
 }
 
-export function runInteractiveEngine(engine, cmd, args, opts = {}) {
+export function runInteractiveEngine(engine: string, cmd: string, args: string[], opts: CommandOptions = {}): number {
   const command = commandForEngine(engine, cmd, args);
   return runInteractive(command.cmd, command.args, opts);
 }
 
-export function runProbe(cmd, args, opts = {}) {
+export function runProbe(cmd: string, args: string[], opts: RunProbeOptions = {}): SpawnSyncReturns<string | Buffer> {
   const { spawnFn = spawnSync, ...commandOpts } = opts;
   const resolved = resolveCommand(cmd);
   return spawnFn(resolved, args, commandOptions(resolved, normalizeOptions(

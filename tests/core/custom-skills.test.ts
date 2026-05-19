@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -6,18 +5,19 @@ import os from "node:os";
 import path from "node:path";
 
 import { loadFreshEsm } from "../helpers.ts";
+import type { SyncTemplatesModule } from "../helpers.ts";
 
-function writeFile(root, relativePath, content) {
+function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, content, "utf8");
 }
 
-function writeJson(root, relativePath, value) {
+function writeJson(root: string, relativePath: string, value: unknown) {
   writeFile(root, relativePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function makeTemplateRoot(tmpDir) {
+function makeTemplateRoot(tmpDir: string) {
   const templateRoot = path.join(tmpDir, "template-root");
   writeJson(tmpDir, "package.json", {
     name: "@fitlab-ai/agent-infra",
@@ -89,7 +89,7 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
     );
     writeFile(sourceRoot, "shared-rules/reference/guide.md", "source guide\n");
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const firstReport = syncTemplates(projectRoot, templateRoot);
     const secondReport = syncTemplates(projectRoot, templateRoot);
 
@@ -164,7 +164,7 @@ test("syncTemplates cleans stale files from sourced skills without touching manu
     writeFile(sourceRoot, "shared-rules/SKILL.md", "---\nname: shared-rules\ndescription: \"Shared\"\n---\n");
     writeFile(sourceRoot, "shared-rules/reference/guide.md", "initial guide\n");
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     syncTemplates(projectRoot, templateRoot);
 
     fs.unlinkSync(path.join(sourceRoot, "shared-rules/reference/guide.md"));
@@ -230,7 +230,7 @@ test("syncTemplates reports missing sources and skips built-in skill conflicts f
     writeFile(sourceRoot, "review-task/SKILL.md", "---\nname: review-task\ndescription: \"Override\"\n---\n");
     writeFile(sourceRoot, "qa-check/SKILL.md", "---\nname: qa-check\ndescription: \"QA\"\n---\n");
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.deepEqual(report.custom.detected, ["qa-check"]);

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -6,11 +5,11 @@ import { listFilesRecursive, read } from "../helpers.ts";
 
 const platformTokenPattern = /GitHub|\.github\/|\bgh\b/;
 
-function assertPlatformAgnostic(relativePath) {
+function assertPlatformAgnostic(relativePath: string) {
   assert.doesNotMatch(read(relativePath), platformTokenPattern, `${relativePath} should stay platform-agnostic`);
 }
 
-function assertNoPlatformReferenceVariants(relativePath) {
+function assertNoPlatformReferenceVariants(relativePath: string) {
   assert.doesNotMatch(relativePath, /\.github(?:\.(?:en|zh-CN))?\.md$/, `${relativePath} should not be a platform-specific skill reference`);
 }
 

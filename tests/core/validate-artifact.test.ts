@@ -1,10 +1,10 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import type { SpawnSyncReturns } from "node:child_process";
 
 import {
   filePath,
@@ -18,10 +18,37 @@ import {
 
 const scriptPath = filePath(".agents/scripts/validate-artifact.js");
 const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-let currentFakeGhPath = null;
+let currentFakeGhPath: string | null = null;
 
-function formatTimestamp(date) {
-  const pad = (value) => String(value).padStart(2, "0");
+type FrontmatterOverrides = Record<string, string | number | boolean | null | undefined>;
+type FixtureReplacements = Record<string, string | number | boolean | null | undefined>;
+type ValidatorOptions = {
+  env?: NodeJS.ProcessEnv;
+};
+type TaskCommentOptions = {
+  summaryText?: string;
+  rawBody?: boolean;
+};
+type IssuePayloadOverrides = Record<string, unknown>;
+type ValidatorCheck = {
+  type: string;
+  status: string;
+  fail_type?: string;
+};
+type ValidatorPayload = {
+  gate: string;
+  checks: ValidatorCheck[];
+  type: string;
+  status: string;
+  message: string;
+};
+
+function parseValidatorPayload(stdout: string): ValidatorPayload {
+  return JSON.parse(stdout) as ValidatorPayload;
+}
+
+function formatTimestamp(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
   const offsetMinutes = -date.getTimezoneOffset();
   const sign = offsetMinutes >= 0 ? "+" : "-";
   const absoluteOffsetMinutes = Math.abs(offsetMinutes);
@@ -39,7 +66,7 @@ function formatTimestamp(date) {
   ].join(":") + `${sign}${pad(offsetHours)}:${pad(offsetRemainderMinutes)}`;
 }
 
-function formatTimestampInTimeZone(date, timeZone) {
+function formatTimestampInTimeZone(date: Date, timeZone: string): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -66,16 +93,16 @@ function formatTimestampInTimeZone(date, timeZone) {
   return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}${normalizedOffset}`;
 }
 
-function write(filePathname, content) {
+function write(filePathname: string, content: string) {
   fs.mkdirSync(path.dirname(filePathname), { recursive: true });
   fs.writeFileSync(filePathname, content, "utf8");
 }
 
-function writeJson(filePathname, value) {
+function writeJson(filePathname: string, value: unknown) {
   write(filePathname, JSON.stringify(value));
 }
 
-function buildTaskFrontmatter(overrides = {}) {
+function buildTaskFrontmatter(overrides: FrontmatterOverrides = {}) {
   const now = new Date();
   const metadata = {
     id: "TASK-20260328-000001",
@@ -98,17 +125,17 @@ function buildTaskFrontmatter(overrides = {}) {
   ].join("\n");
 }
 
-function loadFixture(name, replacements = {}) {
+function loadFixture(name: string, replacements: FixtureReplacements = {}) {
   let content = read(path.join("tests/fixtures/validate-artifact", name));
 
   for (const [key, value] of Object.entries(replacements)) {
-    content = content.split(`{{${key}}}`).join(value);
+    content = content.split(`{{${key}}}`).join(String(value));
   }
 
   return content;
 }
 
-function buildTaskContent(overrides = {}, replacements = {}) {
+function buildTaskContent(overrides: FrontmatterOverrides = {}, replacements: FixtureReplacements = {}) {
   return loadFixture("valid-task.md", {
     FRONTMATTER: buildTaskFrontmatter(overrides),
     NOW: formatTimestamp(new Date()),
@@ -116,7 +143,7 @@ function buildTaskContent(overrides = {}, replacements = {}) {
   });
 }
 
-function buildCompletedTaskContent(checklistLines, overrides = {}) {
+function buildCompletedTaskContent(checklistLines: string[], overrides: FrontmatterOverrides = {}) {
   const now = formatTimestamp(new Date());
   return [
     buildTaskFrontmatter({
@@ -143,7 +170,7 @@ function buildCompletedTaskContent(checklistLines, overrides = {}) {
   ].join("\n");
 }
 
-function runValidator(args, options = {}) {
+function runValidator(args: string[], options: ValidatorOptions = {}): SpawnSyncReturns<string> {
   const useFakeGh = currentFakeGhPath && Object.keys(options.env || {}).some((key) => key.startsWith("GH_FAKE_"));
   const env = gitSafeEnv({
     ...(useFakeGh ? {
@@ -167,7 +194,7 @@ function runValidator(args, options = {}) {
   });
 }
 
-function writeFakeGh(filePathname) {
+function writeFakeGh(filePathname: string) {
   write(filePathname, loadFixture("fake-gh.js"));
   currentFakeGhPath = filePathname;
 
@@ -179,11 +206,11 @@ function writeFakeGh(filePathname) {
   fs.chmodSync(filePathname, 0o755);
 }
 
-function buildArtifactMarker(taskId, artifactFile) {
+function buildArtifactMarker(taskId: string, artifactFile: string) {
   return `<!-- sync-issue:${taskId}:${path.basename(artifactFile, path.extname(artifactFile))} -->`;
 }
 
-function buildArtifactComment(taskId, artifactFile, title, body) {
+function buildArtifactComment(taskId: string, artifactFile: string, title: string, body: string) {
   return loadFixture("artifact-comment.md", {
     MARKER: buildArtifactMarker(taskId, artifactFile),
     TITLE: title,
@@ -193,7 +220,7 @@ function buildArtifactComment(taskId, artifactFile, title, body) {
   });
 }
 
-function buildTaskComment(taskId, taskContent, options = {}) {
+function buildTaskComment(taskId: string, taskContent: string, options: TaskCommentOptions = {}) {
   const match = taskContent.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   const body = match ? taskContent.slice(match[0].length).trim() : taskContent.trim();
   const summaryText = options.summaryText || "元数据 (frontmatter)";
@@ -219,15 +246,15 @@ function buildTaskComment(taskId, taskContent, options = {}) {
   });
 }
 
-function buildMilestone(title = "Sprint 24") {
+function buildMilestone(title: string = "Sprint 24") {
   return { title };
 }
 
-function buildIssueType(name = "Task") {
+function buildIssueType(name: string = "Task") {
   return { name };
 }
 
-function buildIssuePayload(overrides = {}) {
+function buildIssuePayload(overrides: IssuePayloadOverrides = {}) {
   return {
     state: "OPEN",
     labels: [{ name: "status: in-progress" }],
@@ -238,7 +265,7 @@ function buildIssuePayload(overrides = {}) {
   };
 }
 
-function buildPrPayload(overrides = {}) {
+function buildPrPayload(overrides: IssuePayloadOverrides = {}) {
   return {
     labels: [],
     milestone: buildMilestone(),
@@ -247,12 +274,12 @@ function buildPrPayload(overrides = {}) {
   };
 }
 
-function assertPointsToPrSyncRule(filePathname) {
+function assertPointsToPrSyncRule(filePathname: string) {
   const content = read(filePathname);
   assert.match(content, /`\.agents\/rules\/pr-sync\.md`/);
 }
 
-function assertHasCanonicalPrSyncStructure(filePathname, headings) {
+function assertHasCanonicalPrSyncStructure(filePathname: string, headings: RegExp[]) {
   const content = read(filePathname);
   assert.match(content, /<!-- sync-pr:\{task-id\}:summary -->/);
   assert.match(content, /<!-- last-commit: \{git-head-sha\} -->/);
@@ -261,7 +288,7 @@ function assertHasCanonicalPrSyncStructure(filePathname, headings) {
   }
 }
 
-function createHeadCommit(repoRoot) {
+function createHeadCommit(repoRoot: string): string {
   const env = gitSafeEnv();
   const emailResult = spawnSync("git", ["config", "user.email", "codex@example.com"], {
     cwd: repoRoot,
@@ -303,7 +330,7 @@ function createHeadCommit(repoRoot) {
   return revParseResult.stdout.trim();
 }
 
-function addWorktree(repoRoot, worktreePath, branch) {
+function addWorktree(repoRoot: string, worktreePath: string, branch: string) {
   const result = spawnSync("git", ["worktree", "add", worktreePath, "-b", branch], {
     cwd: repoRoot,
     encoding: "utf8",
@@ -312,7 +339,7 @@ function addWorktree(repoRoot, worktreePath, branch) {
   assert.equal(result.status, 0, result.stderr);
 }
 
-function commitInWorktree(worktreePath, message) {
+function commitInWorktree(worktreePath: string, message: string): string {
   const commitResult = spawnSync("git", ["commit", "--allow-empty", "-qm", message], {
     cwd: worktreePath,
     encoding: "utf8",
@@ -341,7 +368,7 @@ test("validate-artifact gate passes for implement-task with fresh task and artif
     const result = runValidator(["gate", "implement-task", taskDir, "implementation.md"]);
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.gate, "pass");
     assert.equal(payload.checks.length, 4);
     assert.deepEqual(
@@ -528,7 +555,7 @@ test("validate-artifact artifact check fails when a required section is missing"
     const result = runValidator(["check", "artifact", taskDir, "implementation.md", "--skill", "implement-task"]);
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "artifact");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /missing sections/i);
@@ -558,7 +585,7 @@ test("validate-artifact activity-log freshness uses local timestamps", () => {
     });
 
     assert.equal(result.status, 1);
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "activity-log");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /stale/i);
@@ -584,7 +611,7 @@ test("validate-artifact task-meta supports cancel-task cancelled_at requirements
     const result = runValidator(["check", "task-meta", taskDir, "--skill", "cancel-task"]);
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "task-meta");
     assert.equal(payload.status, "pass");
   } finally {
@@ -608,7 +635,7 @@ test("validate-artifact gate passes for complete-task when completion checklist 
     const result = runValidator(["gate", "complete-task", taskDir]);
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.gate, "pass");
     assert.deepEqual(
       payload.checks.map((check) => check.type),
@@ -637,7 +664,7 @@ test("validate-artifact completion-checklist fails when a complete-task item is 
     const result = runValidator(["check", "completion-checklist", taskDir, "--skill", "complete-task"]);
     assert.equal(result.status, 1, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "completion-checklist");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /Completion Checklist has unchecked items: 测试已编写并通过/);
@@ -675,9 +702,12 @@ test("validate-artifact platform-sync blocks after retry exhaustion on gh networ
 
     assert.equal(result.status, 2);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.gate, "blocked");
     const githubCheck = payload.checks.find((check) => check.type === "platform-sync");
+    if (!githubCheck) {
+      throw new Error("expected platform-sync check");
+    }
     assert.equal(githubCheck.status, "blocked");
     assert.equal(githubCheck.fail_type, "network_error");
   } finally {
@@ -710,7 +740,7 @@ test("validate-artifact platform-sync skips when no platform adapter is register
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
     assert.equal(payload.message, "Skipped: no platform adapter registered for 'platform-sync'");
@@ -752,7 +782,7 @@ test("validate-artifact gate passes when synced artifact and task comments match
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.gate, "pass");
     assert.deepEqual(
       payload.checks.map((check) => check.status),
@@ -803,7 +833,7 @@ test("validate-artifact platform-sync fails when artifact comment content differ
 
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /Comment content mismatch for 'implementation'/);
@@ -853,7 +883,7 @@ test("validate-artifact platform-sync fails when the task comment does not use t
 
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /Comment content mismatch for 'task'/);
@@ -905,7 +935,7 @@ test("validate-artifact platform-sync fails when the Issue Type does not match t
 
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /has type 'Task', expected 'Feature'/);
@@ -956,7 +986,7 @@ test("validate-artifact platform-sync skips Issue Type verification when the RES
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
@@ -1005,7 +1035,7 @@ test("validate-artifact platform-sync accepts English task frontmatter summary w
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
@@ -1058,7 +1088,7 @@ test("validate-artifact platform-sync fails when create-pr milestone is missing"
 
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /PR #77 has no milestone set/);
@@ -1111,7 +1141,7 @@ test("validate-artifact platform-sync fails when PR and Issue in: labels diverge
 
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /in: labels mismatch/);
@@ -1170,7 +1200,7 @@ test("validate-artifact platform-sync fails when create-pr is missing the expect
 
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /Expected type label 'type: feature' not found on PR #77/);
@@ -1227,7 +1257,7 @@ test("validate-artifact platform-sync passes when create-pr includes the expecte
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
@@ -1284,7 +1314,7 @@ test("validate-artifact platform-sync skips create-pr type label verification wi
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
@@ -1337,7 +1367,7 @@ test("validate-artifact platform-sync fails when create-pr has no assignee", () 
 
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /PR #77 has no assignee/);
@@ -1392,7 +1422,7 @@ test("validate-artifact platform-sync skips create-pr assignee verification with
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
@@ -1444,7 +1474,7 @@ test("validate-artifact platform-sync passes when create-pr summary comment exis
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
@@ -1493,7 +1523,7 @@ test("validate-artifact platform-sync skips for commit when task has no pr_numbe
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
     assert.equal(payload.message, "Skipped: task has no pr_number");
@@ -1542,7 +1572,7 @@ test("validate-artifact platform-sync passes for commit when summary comment exi
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
@@ -1595,7 +1625,7 @@ test("validate-artifact platform-sync passes for commit with last-commit from ta
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
@@ -1643,7 +1673,7 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
@@ -1695,7 +1725,7 @@ test("validate-artifact platform-sync falls back to taskDir HEAD when task branc
 
     assert.equal(result.status, 0, result.stderr);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
   } finally {
@@ -1743,7 +1773,7 @@ test("validate-artifact platform-sync fails for commit when summary comment last
 
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /last-commit metadata mismatch/);
@@ -1792,7 +1822,7 @@ test("validate-artifact platform-sync fails for commit when summary comment last
 
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /missing '<!-- last-commit: <sha> -->' metadata/);
@@ -1841,7 +1871,7 @@ test("validate-artifact platform-sync fails when create-pr summary comment is mi
 
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /Expected PR comment marker/);
@@ -1888,7 +1918,7 @@ test("validate-artifact platform-sync fails for commit when summary comment is m
 
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /Expected PR comment marker/);
@@ -1934,7 +1964,7 @@ test("validate-artifact platform-sync fails for create-task when the task commen
 
     assert.equal(result.status, 1);
 
-    const payload = JSON.parse(result.stdout);
+    const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /sync-issue:TASK-20260328-000001:task/);

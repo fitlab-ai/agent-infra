@@ -27,6 +27,30 @@ type SandboxConfigInput = {
   vm?: Record<string, unknown>;
 };
 
+type SandboxVmConfig = {
+  cpu: number | null;
+  memory: number | null;
+  disk: number | null;
+};
+
+export type SandboxConfig = {
+  repoRoot: string;
+  configPath: string;
+  project: string;
+  org: string;
+  home: string;
+  containerPrefix: string;
+  imageName: string;
+  worktreeBase: string;
+  shareBase: string;
+  dotfilesDir: string;
+  engine: string | null;
+  runtimes: string[];
+  tools: string[];
+  dockerfile: string | null;
+  vm: SandboxVmConfig;
+};
+
 type AircConfig = {
   project?: unknown;
   org?: unknown;
@@ -44,7 +68,11 @@ function detectRepoRoot(): string {
   }
 }
 
-function cloneDefaults() {
+function asPositiveNumberOrNull(value: unknown): number | null {
+  return typeof value === 'number' ? value : null;
+}
+
+function cloneDefaults(): SandboxConfigInput & { vm: SandboxVmConfig; runtimes: string[]; tools: string[] } {
   return {
     engine: DEFAULTS.engine,
     runtimes: [...DEFAULTS.runtimes],
@@ -54,7 +82,7 @@ function cloneDefaults() {
   };
 }
 
-export function loadConfig({ platformFn = platform }: { platformFn?: PlatformFn } = {}) {
+export function loadConfig({ platformFn = platform }: { platformFn?: PlatformFn } = {}): SandboxConfig {
   const repoRoot = detectRepoRoot();
   const home = homedir();
 
@@ -95,10 +123,11 @@ export function loadConfig({ platformFn = platform }: { platformFn?: PlatformFn 
     tools: Array.isArray(sandbox.tools) && sandbox.tools.length > 0
       ? [...sandbox.tools]
       : defaults.tools,
-    dockerfile: sandbox.dockerfile ?? defaults.dockerfile,
+    dockerfile: typeof sandbox.dockerfile === 'string' ? sandbox.dockerfile : defaults.dockerfile ?? null,
     vm: {
-      ...defaults.vm,
-      ...(sandbox.vm ?? {})
+      cpu: asPositiveNumberOrNull(sandbox.vm?.cpu) ?? defaults.vm.cpu,
+      memory: asPositiveNumberOrNull(sandbox.vm?.memory) ?? defaults.vm.memory,
+      disk: asPositiveNumberOrNull(sandbox.vm?.disk) ?? defaults.vm.disk
     }
   };
 }

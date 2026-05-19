@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, execSync } from "node:child_process";
@@ -8,7 +7,7 @@ import os from "node:os";
 
 import { CLI_PATH, cliArgs, cliCommand, envWithPrependedPath, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../helpers.ts";
 
-const PLATFORM_DEFAULT_ENGINES = {
+const PLATFORM_DEFAULT_ENGINES: Partial<Record<NodeJS.Platform, string>> = {
   linux: "native",
   darwin: "colima",
   win32: "wsl2"
@@ -345,7 +344,8 @@ test("installed sync-templates.js executes inside a type=module project", () => 
     try {
       fs.symlinkSync(path.join(packageRoot, "bin", "cli.js"), path.join(pathBinDir, "ai"));
     } catch (error) {
-      if (process.platform !== "win32" || error.code !== "EPERM") {
+      const code = error instanceof Error && "code" in error ? error.code : undefined;
+      if (process.platform !== "win32" || code !== "EPERM") {
         throw error;
       }
       writeNodeCommandShim(path.join(pathBinDir, "ai"), path.join(packageRoot, "bin", "cli.js"));

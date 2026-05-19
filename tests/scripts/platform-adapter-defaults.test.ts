@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -14,23 +13,24 @@ import {
   read,
   writeNodeCommandShim
 } from "../helpers.ts";
+import type { PlatformSyncModule } from "../helpers.ts";
 
-function write(filePathname, content) {
+function write(filePathname: string, content: string) {
   fs.mkdirSync(path.dirname(filePathname), { recursive: true });
   fs.writeFileSync(filePathname, content, "utf8");
 }
 
-function writeJson(filePathname, value) {
+function writeJson(filePathname: string, value: unknown) {
   write(filePathname, JSON.stringify(value, null, 2));
 }
 
-function linkNodeModules(tempRoot) {
+function linkNodeModules(tempRoot: string) {
   const source = path.join(process.cwd(), "node_modules");
   const target = path.join(tempRoot, "node_modules");
   fs.symlinkSync(source, target, process.platform === "win32" ? "junction" : "dir");
 }
 
-function writeFakeGh(filePathname) {
+function writeFakeGh(filePathname: string) {
   const scriptPath = `${filePathname}.cjs`;
   write(scriptPath, read("tests/fixtures/validate-artifact/fake-gh.js"));
   if (process.platform === "win32") {
@@ -45,7 +45,7 @@ function writeFakeGh(filePathname) {
   };
 }
 
-function writeTask(taskDir) {
+function writeTask(taskDir: string) {
   write(path.join(taskDir, "task.md"), [
     "---",
     "id: TASK-20260328-000001",
@@ -64,7 +64,7 @@ function writeTask(taskDir) {
   ].join("\n"));
 }
 
-function runValidator(scriptPath, taskDir, skill, env) {
+function runValidator(scriptPath: string, taskDir: string, skill: string, env: NodeJS.ProcessEnv) {
   return spawnSync(process.execPath, [scriptPath, "check", "platform-sync", taskDir, "implementation.md", "--skill", skill], {
     cwd: path.dirname(path.dirname(path.dirname(scriptPath))),
     encoding: "utf8",
@@ -77,7 +77,7 @@ test("platform-sync adapters expose default status labels and markers", async ()
     ".agents/scripts/platform-adapters/platform-sync.js",
     "templates/.agents/scripts/platform-adapters/platform-sync.github.js"
   ]) {
-    const { getDefaults } = await loadFreshEsm(relativePath);
+    const { getDefaults } = await loadFreshEsm<PlatformSyncModule>(relativePath);
     const defaults = getDefaults();
 
     assert.equal(defaults.statusLabels.inProgress, "status: in-progress");
@@ -91,7 +91,7 @@ test("platform-sync adapters expose default status labels and markers", async ()
 });
 
 test("platform-sync stub adapter exposes empty defaults", async () => {
-  const { getDefaults } = await loadFreshEsm("templates/.agents/scripts/platform-adapters/platform-sync.js");
+  const { getDefaults } = await loadFreshEsm<PlatformSyncModule>("templates/.agents/scripts/platform-adapters/platform-sync.js");
   assert.deepEqual(getDefaults(), { statusLabels: {}, markers: {} });
 });
 

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -7,13 +6,13 @@ import { read } from "../helpers.ts";
 
 const SCRIPT_REGEX = /node(?:\s+--experimental-strip-types)?(?:\s+--no-warnings)?\s+--test\s+(.+?)$/;
 
-function extractTestFiles(scriptValue) {
+function extractTestFiles(scriptValue: string): string[] {
   const match = scriptValue.match(SCRIPT_REGEX);
   if (!match) {
     return [];
   }
 
-  return match[1]
+  return (match[1] ?? "")
     .split(/\s+/)
     .filter(Boolean)
     .filter((arg) => arg.endsWith(".test.ts") || arg.includes("*"));

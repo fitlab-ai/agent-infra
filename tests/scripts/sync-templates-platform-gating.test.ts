@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
@@ -7,18 +6,19 @@ import os from "node:os";
 import path from "node:path";
 
 import { loadFreshEsm, read, supportsPosixModeBits } from "../helpers.ts";
+import type { SyncTemplatesModule } from "../helpers.ts";
 
-function writeFile(root, relativePath, content) {
+function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, content, "utf8");
 }
 
-function writeJson(root, relativePath, value) {
+function writeJson(root: string, relativePath: string, value: unknown) {
   writeFile(root, relativePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function createTemplateInstall(tmpDir, version = "0.0.0-test") {
+function createTemplateInstall(tmpDir: string, version: string = "0.0.0-test") {
   const installRoot = path.join(tmpDir, "install");
   const templateRoot = path.join(installRoot, "templates");
 
@@ -31,7 +31,7 @@ function createTemplateInstall(tmpDir, version = "0.0.0-test") {
   return { templateRoot };
 }
 
-function withStubbedExecSync(fn) {
+function withStubbedExecSync<T>(fn: () => T | Promise<T>): Promise<T> {
   const originalExecSync = childProcess.execSync;
   childProcess.execSync = (command) => {
     if (command === "git remote get-url origin") {
@@ -65,7 +65,7 @@ test("gitlab projects skip github-owned managed directories", async () => withSt
       files: { managed: [], merged: [], ejected: [] }
     });
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.ok(!fs.existsSync(path.join(projectRoot, ".github/scripts/sync-labels-to-set.sh")));
@@ -97,7 +97,7 @@ test("platform switch removes stale github-owned files", async () => withStubbed
     });
     writeFile(projectRoot, ".github/scripts/sync-labels-to-set.sh", "#!/bin/sh\necho stale\n");
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.ok(!fs.existsSync(path.join(projectRoot, ".github/scripts/sync-labels-to-set.sh")));
@@ -127,7 +127,7 @@ test("shared hooks are distributed to all platforms", async () => withStubbedExe
         files: { managed: [], merged: [], ejected: [] }
       });
 
-      const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+      const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
       const report = syncTemplates(projectRoot, templateRoot);
       const hookPath = path.join(projectRoot, ".git-hooks/check-version-format.sh");
 
@@ -159,7 +159,7 @@ test("custom platforms skip all known-platform directories", async () => withStu
       files: { managed: [], merged: [], ejected: [] }
     });
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.ok(!fs.existsSync(path.join(projectRoot, ".github/scripts/sync-labels-to-set.sh")));

@@ -1,4 +1,3 @@
-// @ts-nocheck
 const USAGE = `Usage: ai sandbox <command> [options]
 
 Commands:
@@ -12,7 +11,7 @@ Commands:
 
 Run 'ai sandbox <command> --help' for details.`;
 
-export async function runSandbox(args) {
+export async function runSandbox(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
 
   if (!subcommand) {

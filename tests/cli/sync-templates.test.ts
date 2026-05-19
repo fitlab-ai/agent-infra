@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
@@ -7,22 +6,23 @@ import path from "node:path";
 import os from "node:os";
 
 import { loadFreshEsm, supportsPosixModeBits } from "../helpers.ts";
+import type { SyncTemplatesModule } from "../helpers.ts";
 
-function writeFile(root, relativePath, content) {
+function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, content, "utf8");
 }
 
-function writeJson(root, relativePath, value) {
+function writeJson(root: string, relativePath: string, value: unknown) {
   writeFile(root, relativePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function normalize(targetPath) {
+function normalize(targetPath: string) {
   return targetPath.replace(/\\/g, "/");
 }
 
-function createTemplateInstall(tmpDir, version = "0.0.0-test") {
+function createTemplateInstall(tmpDir: string, version: string = "0.0.0-test") {
   const installRoot = path.join(tmpDir, "install");
   const templateRoot = path.join(installRoot, "templates");
 
@@ -79,7 +79,7 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
     });
 
     Object.defineProperty(process, "platform", { value: "linux" });
-    childProcess.execSync = (command, options = {}) => {
+    childProcess.execSync = ((command: string, options: { encoding?: BufferEncoding } = {}) => {
       if (command === "command -v ai") {
         assert.equal(options.encoding, "utf8");
         return path.join(installRoot, "bin", "cli.js");
@@ -88,9 +88,9 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
         throw new Error("not a git repo");
       }
       throw new Error(`Unexpected command: ${command}`);
-    };
+    }) as typeof childProcess.execSync;
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
 
     const firstReport = syncTemplates(projectRoot);
     const afterFirstRun = fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8");
@@ -184,7 +184,7 @@ test("syncTemplates resolves Windows npm wrappers via .cmd launchers", async () 
     });
 
     Object.defineProperty(process, "platform", { value: "win32" });
-    childProcess.execSync = (command) => {
+    childProcess.execSync = ((command) => {
       if (command === "where ai") {
         return wrapperPath;
       }
@@ -192,9 +192,9 @@ test("syncTemplates resolves Windows npm wrappers via .cmd launchers", async () 
         throw new Error("not a git repo");
       }
       throw new Error(`Unexpected command: ${command}`);
-    };
+    }) as typeof childProcess.execSync;
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot);
 
     assert.equal(normalize(report.templateRoot), normalize(templateRoot));
@@ -238,7 +238,7 @@ test("syncTemplates reports the bundled installer version with a v prefix", asyn
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.equal(report.templateVersion, "v0.0.0-test");
@@ -281,7 +281,7 @@ test("syncTemplates prefers platform-specific variants and composes with zh-CN l
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.deepEqual(report.managed.created.sort(), ["docs/rule.md"]);
@@ -328,7 +328,7 @@ test("syncTemplates includes external-only files for managed directories", async
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.deepEqual(report.templateSources, {
@@ -394,7 +394,7 @@ test("syncTemplates keeps built-ins authoritative and lets later external templa
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.deepEqual(report.templateSources, {
@@ -464,7 +464,7 @@ test("syncTemplates ignores external platform variants when a built-in variant a
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.deepEqual(report.templateSources.conflicts, [
@@ -518,7 +518,7 @@ test("syncTemplates selects platform and language variants from external templat
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.equal(report.templateSources.loaded, 1);
@@ -567,7 +567,7 @@ test("syncTemplates reports invalid external template sources and keeps built-in
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.equal(report.templateSources.configured, 2);
@@ -627,7 +627,7 @@ test("syncTemplates removes stale managed files but preserves merged and ejected
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
 
     const firstReport = syncTemplates(projectRoot, templateRoot);
     const secondReport = syncTemplates(projectRoot, templateRoot);
@@ -683,7 +683,7 @@ test("syncTemplates preserves stale files that match merged glob patterns", asyn
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.equal(fs.readFileSync(path.join(projectRoot, "docs/stale/note.md"), "utf8"), "keep merged glob\n");
@@ -732,7 +732,7 @@ test("syncTemplates syncs the managed shared hook as a single file", async () =>
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.ok(
@@ -792,7 +792,7 @@ test("syncTemplates reports shared pre-commit as a merged pending file", async (
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.ok(

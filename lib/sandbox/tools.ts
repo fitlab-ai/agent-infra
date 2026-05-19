@@ -1,26 +1,29 @@
-// @ts-nocheck
 import { safeNameCandidates, sanitizeBranchName } from './constants.ts';
 import { hostJoin } from './engines/wsl2-paths.ts';
 
-/**
- * @typedef {Object} SandboxTool
- * @property {string} id
- * @property {string} name
- * @property {string} npmPackage
- * @property {string} sandboxBase
- * @property {string} containerMount
- * @property {string} versionCmd
- * @property {string} setupHint
- * @property {Record<string, string>=} envVars
- * @property {Array<{ hostPath: string, sandboxName: string }>=} hostPreSeedFiles
- * @property {Array<{ hostDir: string, sandboxSubdir: string }>=} hostPreSeedDirs
- * @property {string[]=} pathRewriteFiles
- * @property {Array<{ hostPath: string, containerSubpath: string }>=} hostLiveMounts
- * @property {string[]=} postSetupCmds
- */
+export type SandboxTool = {
+  id: string;
+  name: string;
+  npmPackage: string;
+  sandboxBase: string;
+  containerMount: string;
+  versionCmd: string;
+  setupHint: string;
+  envVars?: Record<string, string>;
+  hostPreSeedFiles?: Array<{ hostPath: string; sandboxName: string }>;
+  hostPreSeedDirs?: Array<{ hostDir: string; sandboxSubdir: string }>;
+  pathRewriteFiles?: string[];
+  hostLiveMounts?: Array<{ hostPath: string; containerSubpath: string }>;
+  postSetupCmds?: string[];
+};
 
-function createBuiltinTools(home, project) {
-  /** @type {Record<string, SandboxTool>} */
+type ToolsConfig = {
+  home: string;
+  project: string;
+  tools: string[];
+};
+
+function createBuiltinTools(home: string, project: string): Record<string, SandboxTool> {
   return {
     'claude-code': {
       id: 'claude-code',
@@ -105,13 +108,13 @@ function createBuiltinTools(home, project) {
   };
 }
 
-function validateTool(tool) {
+function validateTool(tool: SandboxTool): void {
   if (!tool.npmPackage || !tool.containerMount.startsWith('/')) {
     throw new Error(`Invalid sandbox tool descriptor: ${tool.id}`);
   }
 }
 
-export function resolveTools(config) {
+export function resolveTools(config: ToolsConfig): SandboxTool[] {
   const builtins = createBuiltinTools(config.home, config.project);
   return config.tools.map((id) => {
     const tool = builtins[id];
@@ -123,18 +126,18 @@ export function resolveTools(config) {
   });
 }
 
-export function toolConfigDir(tool, project, branch) {
+export function toolConfigDir(tool: SandboxTool, project: string, branch: string): string {
   return hostJoin(tool.sandboxBase, project, sanitizeBranchName(branch));
 }
 
-export function toolConfigDirCandidates(tool, project, branch) {
+export function toolConfigDirCandidates(tool: SandboxTool, project: string, branch: string): string[] {
   return safeNameCandidates(branch).map((name) => hostJoin(tool.sandboxBase, project, name));
 }
 
-export function toolProjectDirCandidates(tool, project) {
+export function toolProjectDirCandidates(tool: SandboxTool, project: string): string[] {
   return [hostJoin(tool.sandboxBase, project)];
 }
 
-export function toolNpmPackagesArg(tools) {
+export function toolNpmPackagesArg(tools: SandboxTool[]): string {
   return tools.map((tool) => tool.npmPackage).join(' ');
 }

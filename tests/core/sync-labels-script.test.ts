@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -10,7 +9,18 @@ import { filePath, read } from "../helpers.ts";
 
 const scriptPath = filePath(".github/scripts/sync-labels-to-set.sh");
 
-function write(filePathname, content) {
+type RunScriptOptions = {
+  kind?: "issue" | "pr";
+  currentLabels?: string[];
+  targets?: string[];
+  prefix?: string;
+  failMode?: "" | "always" | "edit";
+};
+type FakeGhState = {
+  calls: string[][];
+};
+
+function write(filePathname: string, content: string) {
   fs.mkdirSync(path.dirname(filePathname), { recursive: true });
   fs.writeFileSync(filePathname, content, "utf8");
 }
@@ -19,7 +29,7 @@ function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "sync-labels-script-"));
 }
 
-function writeFakeGh(binDir) {
+function writeFakeGh(binDir: string) {
   const fakeGhPath = path.join(binDir, "gh");
   write(fakeGhPath, `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -83,7 +93,7 @@ process.exit(1);
   fs.chmodSync(fakeGhPath, 0o755);
 }
 
-function runScript({ kind = "issue", currentLabels = [], targets = [], prefix = "type:", failMode = "" } = {}) {
+function runScript({ kind = "issue", currentLabels = [], targets = [], prefix = "type:", failMode = "" }: RunScriptOptions = {}) {
   const tempDir = makeTempDir();
   const statePath = path.join(tempDir, "state.json");
   const binDir = path.join(tempDir, "bin");
@@ -123,7 +133,7 @@ function runScript({ kind = "issue", currentLabels = [], targets = [], prefix = 
   return { result, state };
 }
 
-function editCalls(state, kind) {
+function editCalls(state: FakeGhState, kind: "issue" | "pr") {
   return state.calls.filter((args) => args[0] === kind && args[1] === "edit");
 }
 

@@ -1,5 +1,13 @@
-// @ts-nocheck
-export function isRootlessDocker({ env = process.env, runSafe } = {}) {
+import type { OnMessage, SandboxAdapter } from './index.ts';
+
+type NativeRunSafe = (cmd: string, args: string[]) => string;
+type EngineRun = (engine: string, cmd: string, args: string[]) => string;
+type EngineRunSafe = (engine: string, cmd: string, args: string[]) => string;
+
+export function isRootlessDocker({
+  env = process.env,
+  runSafe
+}: { env?: NodeJS.ProcessEnv; runSafe?: NativeRunSafe } = {}): boolean {
   const dockerHost = env.DOCKER_HOST ?? '';
   if (dockerHost.startsWith('unix:///run/user/')) {
     return true;
@@ -17,9 +25,19 @@ export function isRootlessDocker({ env = process.env, runSafe } = {}) {
   }
 }
 
-export function resolveBuildUid({ engine, runFn, runSafeFn, env = process.env }) {
+export function resolveBuildUid({
+  engine,
+  runFn,
+  runSafeFn,
+  env = process.env
+}: {
+  engine: string;
+  runFn: EngineRun;
+  runSafeFn?: EngineRunSafe;
+  env?: NodeJS.ProcessEnv;
+}) {
   const runSafe = runSafeFn
-    ? (cmd, args) => runSafeFn(engine, cmd, args)
+    ? (cmd: string, args: string[]) => runSafeFn(engine, cmd, args)
     : undefined;
 
   if (engine === 'native' && isRootlessDocker({ env, runSafe })) {
@@ -32,7 +50,7 @@ export function resolveBuildUid({ engine, runFn, runSafeFn, env = process.env })
   };
 }
 
-export const nativeAdapter = {
+export const nativeAdapter: SandboxAdapter = {
   id: 'native',
   displayName: 'native Docker',
   supportedPlatforms: ['linux', 'win32'],
@@ -44,7 +62,7 @@ export const nativeAdapter = {
     return null;
   },
 
-  async ensure(_config, _onMessage, { runOk, runSafe }) {
+  async ensure(_config, _onMessage: OnMessage, { runOk, runSafe }) {
     if (!runOk('which', ['docker'])) {
       throw new Error([
         'Docker is not installed.',
@@ -98,7 +116,7 @@ export const nativeAdapter = {
     ].join('\n'));
   },
 
-  syncResources(config, onMessage) {
+  syncResources(config, onMessage: OnMessage) {
     if (!config.hasUserVmConfig?.(config.userVm)) {
       return;
     }

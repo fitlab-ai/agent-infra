@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
@@ -7,14 +6,15 @@ import path from "node:path";
 import os from "node:os";
 
 import { filePath, loadFreshEsm, read } from "../helpers.ts";
+import type { SyncTemplatesModule } from "../helpers.ts";
 
-function writeFile(root, relativePath, content) {
+function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, content, "utf8");
 }
 
-function writeJson(root, relativePath, value) {
+function writeJson(root: string, relativePath: string, value: unknown) {
   writeFile(root, relativePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
@@ -58,7 +58,7 @@ test("custom platforms fall back to generic platform templates", async () => {
       throw new Error(`Unexpected command: ${command}`);
     };
 
-    const { syncTemplates } = await loadFreshEsm(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, filePath("templates"));
     const created = new Set(report.managed.created);
 

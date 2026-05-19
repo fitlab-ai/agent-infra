@@ -4,13 +4,49 @@ import { nativeAdapter } from './native.ts';
 import { orbstackAdapter } from './orbstack.ts';
 import { wsl2Adapter } from './wsl2.ts';
 
-type SandboxAdapter = {
+export type SandboxVmConfig = {
+  cpu?: number | null;
+  memory?: number | null;
+  disk?: number | null;
+};
+
+export type EffectiveSandboxConfig = {
+  vm?: SandboxVmConfig;
+  userVm?: SandboxVmConfig;
+  hasUserVmConfig?: (vm?: SandboxVmConfig) => boolean;
+};
+
+export type HostResources = {
+  cpu: number;
+  memory: number;
+};
+
+export type RunFns = {
+  run: (cmd: string, args: string[]) => string;
+  runOk: (cmd: string, args: string[]) => boolean;
+  runSafe: (cmd: string, args: string[]) => string;
+  runVerbose: (cmd: string, args: string[]) => void;
+};
+
+export type OnMessage = ((message: string) => void) | undefined | null;
+
+export type SandboxAdapter = {
   id: string;
   displayName: string;
   supportedPlatforms: string[];
   dockerContext: string | null;
   managed: boolean;
   canApplyResources: string;
+  defaultResources: (getHost: () => HostResources) => SandboxVmConfig | null;
+  ensure: (config: EffectiveSandboxConfig, onMessage: OnMessage, runFns: RunFns) => Promise<boolean>;
+  startVm?: (config: EffectiveSandboxConfig, onMessage: OnMessage, runFns: RunFns) => 'already-running' | 'started';
+  stopVm?: (config: EffectiveSandboxConfig, onMessage: OnMessage, runFns: Pick<RunFns, 'run'>) => 'stopped';
+  syncResources: (
+    config: EffectiveSandboxConfig,
+    onMessage: OnMessage,
+    runFns: RunFns,
+    options?: { vmJustStarted?: boolean }
+  ) => void;
 };
 
 export const ADAPTERS = Object.freeze({

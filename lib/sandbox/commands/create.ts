@@ -1,9 +1,9 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import type { ExecFileSyncOptions, StdioOptions } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
@@ -37,6 +37,7 @@ import {
 } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
 import { resolveTools, toolConfigDirCandidates, toolNpmPackagesArg } from '../tools.ts';
+import type { SandboxTool } from '../tools.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
 import { resolveBuildUid } from '../engines/native.ts';
@@ -80,7 +81,32 @@ Host aliases:
   shell-config directory is bind-mounted at ${CONTAINER_SHELL_CONFIG_MOUNT} and
   symlinked into $HOME).`;
 
-function buildSignature(preparedDockerfile, tools) {
+type SandboxCreateConfig = ReturnType<typeof loadConfig>;
+type PreparedDockerfile = ReturnType<typeof prepareDockerfile>;
+type ResolvedTool = { tool: SandboxTool; dir: string };
+type RuntimeCheck = { name: string; cmd: string[] };
+type JsonObject = Record<string, unknown>;
+type GpgCache = { pub: Buffer; sec: Buffer } | null;
+type ExecSyncOptions = ExecFileSyncOptions & {
+  input?: Buffer | string;
+  env?: NodeJS.ProcessEnv;
+  stdio?: StdioOptions;
+  encoding?: BufferEncoding;
+};
+type ExecSyncFn = (cmd: string, args: string[], options?: ExecSyncOptions) => Buffer | string;
+type EngineExecFn = (engine: string, cmd: string, args: string[], opts?: ExecFileSyncOptions) => Buffer | string;
+type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string }) => string;
+type EngineRunSafeFn = EngineRunFn;
+type EngineRunVerboseFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string }) => void;
+type DirectRunFn = (cmd: string, args: string[], opts?: { cwd?: string }) => string;
+type DirectRunSafeFn = DirectRunFn;
+type DirectRunVerboseFn = (cmd: string, args: string[], opts?: { cwd?: string }) => void;
+type HostShellConfig = {
+  hostDir: string;
+  mounts: Array<{ hostPath: string; containerPath: string }>;
+};
+
+function buildSignature(preparedDockerfile: PreparedDockerfile, tools: SandboxTool[]): string {
   return createHash('sha256')
     .update(JSON.stringify({
       dockerfile: preparedDockerfile.signature,
@@ -90,22 +116,22 @@ function buildSignature(preparedDockerfile, tools) {
     .slice(0, 12);
 }
 
-function resolveToolDirs(config, tools, branch) {
+function resolveToolDirs(config: Pick<SandboxCreateConfig, 'project'>, tools: SandboxTool[], branch: string): ResolvedTool[] {
   return tools.map((tool) => {
     const candidates = toolConfigDirCandidates(tool, config.project, branch);
     return {
       tool,
-      dir: candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0]
+      dir: candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0] ?? ''
     };
   });
 }
 
-export function hostShellConfigDir(home, project, branch) {
+export function hostShellConfigDir(home: string, project: string, branch: string): string {
   return hostJoin(home, '.agent-infra', 'config', project, sanitizeBranchName(branch));
 }
 
-function runtimeChecks(runtimes) {
-  const checks = [];
+function runtimeChecks(runtimes: string[]): RuntimeCheck[] {
+  const checks: RuntimeCheck[] = [];
   if (runtimes.some((runtime) => runtime.startsWith('node'))) {
     checks.push({ name: 'Node.js', cmd: ['node', '--version'] });
   }
@@ -119,25 +145,25 @@ function runtimeChecks(runtimes) {
   return checks;
 }
 
-export function detectGpgConfig(gitconfig) {
+export function detectGpgConfig(gitconfig: string): boolean {
   return /\bgpgsign\s*=\s*true\b/i.test(gitconfig) || /^\s*\[gpg(?:\s|"|\])/im.test(gitconfig);
 }
 
-function appendSafeDirectories(lines, repoRoot) {
+function appendSafeDirectories(lines: string[], repoRoot: string): string[] {
   if (!repoRoot) {
     return lines;
   }
 
   const requiredDirectories = ['/workspace', repoRoot];
-  const existingDirectories = new Set();
+  const existingDirectories = new Set<string>();
   let firstSafeSectionIndex = -1;
   let inSafeSection = false;
 
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
+    const line = lines[index] ?? '';
     const sectionMatch = line.match(/^\s*\[([^\]]+)\]\s*$/);
     if (sectionMatch) {
-      inSafeSection = sectionMatch[1].trim().toLowerCase() === 'safe';
+      inSafeSection = (sectionMatch[1] ?? '').trim().toLowerCase() === 'safe';
       if (inSafeSection && firstSafeSectionIndex === -1) {
         firstSafeSectionIndex = index;
       }
@@ -150,7 +176,7 @@ function appendSafeDirectories(lines, repoRoot) {
 
     const directoryMatch = line.match(/^\s*directory\s*=\s*(.+?)\s*$/i);
     if (directoryMatch) {
-      existingDirectories.add(directoryMatch[1].trim());
+      existingDirectories.add((directoryMatch[1] ?? '').trim());
     }
   }
 
@@ -171,7 +197,7 @@ function appendSafeDirectories(lines, repoRoot) {
   const updatedLines = [...lines];
   let insertIndex = updatedLines.length;
   for (let index = firstSafeSectionIndex + 1; index < updatedLines.length; index += 1) {
-    if (/^\s*\[([^\]]+)\]\s*$/.test(updatedLines[index])) {
+    if (/^\s*\[([^\]]+)\]\s*$/.test(updatedLines[index] ?? '')) {
       insertIndex = index;
       break;
     }
@@ -185,12 +211,16 @@ function appendSafeDirectories(lines, repoRoot) {
   return updatedLines;
 }
 
-function normalizeContainerHomeSeparators(content) {
+function normalizeContainerHomeSeparators(content: string): string {
   const containerHomePattern = new RegExp(`${escapeRegExp(CONTAINER_HOME)}\\S*`, 'g');
   return content.replace(containerHomePattern, (value) => value.replaceAll('\\', '/'));
 }
 
-export function sanitizeGitConfig(gitconfig, home, { stripGpg = false, repoRoot = '' } = {}) {
+export function sanitizeGitConfig(
+  gitconfig: string,
+  home: string,
+  { stripGpg = false, repoRoot = '' }: { stripGpg?: boolean; repoRoot?: string } = {}
+): string {
   const posixHome = home.replaceAll('\\', '/');
   const normalizedGitconfig = gitconfig
     .replaceAll(home, CONTAINER_HOME)
@@ -207,8 +237,8 @@ export function sanitizeGitConfig(gitconfig, home, { stripGpg = false, repoRoot 
   for (const line of lines) {
     const sectionMatch = line.match(/^\s*\[([^\]]+)\]\s*$/);
     if (sectionMatch) {
-      const sectionName = sectionMatch[1].trim();
-      currentSection = (sectionName.match(/^([^\s"]+)/)?.[1] ?? '').toLowerCase();
+      const sectionName = (sectionMatch[1] ?? '').trim();
+      currentSection = ((sectionName.match(/^([^\s"]+)/)?.[1]) ?? '').toLowerCase();
       inGpgSection = /^gpg(?:\s+"[^"]+")?$/i.test(sectionName);
       if (stripGpg && inGpgSection) {
         continue;
@@ -242,11 +272,21 @@ export function sanitizeGitConfig(gitconfig, home, { stripGpg = false, repoRoot 
   return appendSafeDirectories(sanitized, repoRoot).join('\n');
 }
 
-export function hostHasGpgKeys(home, execFn = execFileSync) {
+export function hostHasGpgKeys(home: string, execFn: ExecSyncFn = execFileSync): boolean {
   return currentKeyringFingerprint(home, execFn) !== null;
 }
 
-export function writeSanitizedGitconfig({ home, hostConfigDir, stripGpg, repoRoot }) {
+export function writeSanitizedGitconfig({
+  home,
+  hostConfigDir,
+  stripGpg,
+  repoRoot
+}: {
+  home: string;
+  hostConfigDir: string;
+  stripGpg: boolean;
+  repoRoot: string;
+}): string {
   const gitconfigPath = hostJoin(home, '.gitconfig');
   // Always emit a sanitized .gitconfig, even when the host has none. The
   // container ~/.gitconfig is a symlink into the bound shell-config directory;
@@ -267,7 +307,7 @@ export function writeSanitizedGitconfig({ home, hostConfigDir, stripGpg, repoRoo
 // Keep in sync with the symlink block in lib/sandbox/runtimes/ai-tools.dockerfile.
 const SHELL_CONFIG_SYMLINKS = ['.gitconfig', '.gitignore_global', '.stCommitMsg', '.bash_aliases'];
 
-export function ensureShellConfigSymlinks(engine, container, execFn = execEngine) {
+export function ensureShellConfigSymlinks(engine: string, container: string, execFn: EngineExecFn = execEngine): void {
   // Idempotent symlink setup. Runs against a started container so it also
   // covers custom Dockerfiles that don't bake the symlinks into the image.
   const script = SHELL_CONFIG_SYMLINKS
@@ -276,7 +316,17 @@ export function ensureShellConfigSymlinks(engine, container, execFn = execEngine
   execFn(engine, 'docker', ['exec', container, 'bash', '-lc', script], { stdio: 'ignore' });
 }
 
-export function prepareHostShellConfig({ home, project, branch, repoRoot }) {
+export function prepareHostShellConfig({
+  home,
+  project,
+  branch,
+  repoRoot
+}: {
+  home: string;
+  project: string;
+  branch: string;
+  repoRoot: string;
+}): HostShellConfig {
   const hostDir = hostShellConfigDir(home, project, branch);
   fs.rmSync(hostDir, { recursive: true, force: true });
   fs.mkdirSync(hostDir, { recursive: true });
@@ -309,11 +359,11 @@ export function prepareHostShellConfig({ home, project, branch, repoRoot }) {
   return { hostDir, mounts };
 }
 
-function gpgCacheDir(home, project) {
+function gpgCacheDir(home: string, project: string): string {
   return hostJoin(home, '.agent-infra', 'gpg-cache', project);
 }
 
-function normalizeSigningKey(signingKey) {
+function normalizeSigningKey(signingKey: unknown): string | null {
   if (typeof signingKey !== 'string') {
     return null;
   }
@@ -322,7 +372,7 @@ function normalizeSigningKey(signingKey) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function normalizeWorktreePath(worktreePath) {
+function normalizeWorktreePath(worktreePath: string): string {
   if (!worktreePath) {
     return '';
   }
@@ -334,7 +384,15 @@ function normalizeWorktreePath(worktreePath) {
   }
 }
 
-export function getGitSigningKey({ home, repoPath = null, execFn = execFileSync } = {}) {
+export function getGitSigningKey({
+  home,
+  repoPath = null,
+  execFn = execFileSync
+}: {
+  home?: string;
+  repoPath?: string | null;
+  execFn?: ExecSyncFn;
+} = {}): string | null {
   if (!home) {
     return null;
   }
@@ -349,13 +407,13 @@ export function getGitSigningKey({ home, repoPath = null, execFn = execFileSync 
       env: { ...process.env, HOME: home },
       stdio: ['ignore', 'pipe', 'pipe']
     });
-    return normalizeSigningKey(output);
+    return normalizeSigningKey(output.toString());
   } catch {
     return null;
   }
 }
 
-export function currentKeyringFingerprint(home, execFn = execFileSync) {
+export function currentKeyringFingerprint(home: string, execFn: ExecSyncFn = execFileSync): string | null {
   const hostEnv = { ...process.env, HOME: home };
   try {
     const keyring = execFn('gpg', ['--list-secret-keys', '--with-colons'], {
@@ -363,23 +421,29 @@ export function currentKeyringFingerprint(home, execFn = execFileSync) {
       env: hostEnv,
       stdio: ['ignore', 'pipe', 'pipe']
     });
-    if (!keyring || keyring.trim().length === 0) {
+    const keyringText = keyring.toString();
+    if (!keyringText || keyringText.trim().length === 0) {
       return null;
     }
-    return createHash('sha256').update(keyring).digest('hex');
+    return createHash('sha256').update(keyringText).digest('hex');
   } catch {
     return null;
   }
 }
 
-export function readGpgCache(home, project, execFn = execFileSync, signingKey = null) {
+export function readGpgCache(
+  home: string,
+  project: string,
+  execFn: ExecSyncFn = execFileSync,
+  signingKey: string | null = null
+): GpgCache {
   const cacheDir = gpgCacheDir(home, project);
   const pubPath = path.join(cacheDir, 'public.asc');
   const secPath = path.join(cacheDir, 'secret.asc');
   const statePath = path.join(cacheDir, 'state.json');
 
   try {
-    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { fingerprint?: unknown; signingKey?: unknown };
     if (typeof state?.fingerprint !== 'string' || state.fingerprint.length === 0) {
       return null;
     }
@@ -404,7 +468,14 @@ export function readGpgCache(home, project, execFn = execFileSync, signingKey = 
   }
 }
 
-export function writeGpgCache(home, project, pub, sec, fingerprint, signingKey = null) {
+export function writeGpgCache(
+  home: string,
+  project: string,
+  pub: Buffer | string,
+  sec: Buffer | string,
+  fingerprint: string | null,
+  signingKey: string | null = null
+): boolean {
   if (!fingerprint) {
     return false;
   }
@@ -415,7 +486,7 @@ export function writeGpgCache(home, project, pub, sec, fingerprint, signingKey =
   const statePath = path.join(cacheDir, 'state.json');
 
   try {
-    const state = { fingerprint };
+    const state: { fingerprint: string; signingKey?: string } = { fingerprint };
     const normalizedSigningKey = normalizeSigningKey(signingKey);
     if (normalizedSigningKey) {
       state.signingKey = normalizedSigningKey;
@@ -440,13 +511,19 @@ export function writeGpgCache(home, project, pub, sec, fingerprint, signingKey =
 }
 
 export function syncGpgKeys(
-  container,
-  home,
-  project,
-  execFn = execFileSync,
-  runSafeFn = runSafe,
-  options = {}
-) {
+  container: string,
+  home: string,
+  project: string,
+  execFn: ExecSyncFn = execFileSync,
+  runSafeFn: DirectRunSafeFn = runSafe,
+  options: {
+    cachedOverride?: GpgCache;
+    repoPath?: string | null;
+    signingKey?: string | null;
+    dockerExecFn?: ExecSyncFn;
+    dockerRunSafeFn?: DirectRunSafeFn;
+  } = {}
+): boolean {
   const {
     cachedOverride = null,
     repoPath = null,
@@ -478,18 +555,18 @@ export function syncGpgKeys(
       ? ['--export-secret-keys', signingKey]
       : ['--export-secret-keys'];
 
-    pubKeys = execFn('gpg', exportArgs, {
+    pubKeys = Buffer.from(execFn('gpg', exportArgs, {
       env: hostEnv,
       stdio: ['ignore', 'pipe', 'pipe']
-    });
+    }));
     if (!pubKeys || pubKeys.length === 0) {
       return false;
     }
 
-    secKeys = execFn('gpg', exportSecretArgs, {
+    secKeys = Buffer.from(execFn('gpg', exportSecretArgs, {
       env: hostEnv,
       stdio: ['ignore', 'pipe', 'pipe']
-    });
+    }));
     if (!secKeys || secKeys.length === 0) {
       return false;
     }
@@ -506,11 +583,11 @@ export function syncGpgKeys(
   }
 
   dockerExecFn('docker', ['exec', '-i', container, 'gpg', '--import'], {
-    input: pubKeys,
+    input: pubKeys ?? undefined,
     stdio: ['pipe', 'pipe', 'pipe']
   });
   dockerExecFn('docker', ['exec', '-i', container, 'gpg', '--batch', '--import'], {
-    input: secKeys,
+    input: secKeys ?? undefined,
     stdio: ['pipe', 'pipe', 'pipe']
   });
 
@@ -521,7 +598,7 @@ export function syncGpgKeys(
 // Docker `--env-file` parsing has no quoting/escaping support and treats
 // leading '#' as a comment. Newlines split entries, so reject them outright.
 // Other shell metacharacters are safe because the values are not expanded.
-function formatEnvFileEntry(key, value) {
+function formatEnvFileEntry(key: string, value: string): string {
   if (String(key).includes('\n') || String(value).includes('\n')) {
     throw new Error(`Container environment variable ${key} must not contain newlines`);
   }
@@ -529,11 +606,17 @@ function formatEnvFileEntry(key, value) {
 }
 
 export function buildContainerEnvFile(
-  resolvedTools,
-  engine,
-  runSafeEngineFn = runSafeEngine,
-  options = {}
-) {
+  resolvedTools: ResolvedTool[],
+  engine: string,
+  runSafeEngineFn: EngineRunSafeFn = runSafeEngine,
+  options: {
+    mkdtempFn?: typeof fs.mkdtempSync;
+    writeFileFn?: typeof fs.writeFileSync;
+    chmodFn?: typeof fs.chmodSync;
+    rmFn?: typeof fs.rmSync;
+    tmpDir?: string;
+  } = {}
+): { dockerArgs: string[]; cleanup: () => void } {
   const {
     mkdtempFn = fs.mkdtempSync,
     writeFileFn = fs.writeFileSync,
@@ -542,7 +625,7 @@ export function buildContainerEnvFile(
     tmpDir = os.tmpdir()
   } = options;
 
-  const entries = resolvedTools.flatMap(({ tool }) => Object.entries(tool.envVars ?? {}));
+  const entries: Array<[string, string]> = resolvedTools.flatMap(({ tool }) => Object.entries(tool.envVars ?? {}));
   const ghToken = runSafeEngineFn(engine, 'gh', ['auth', 'token']);
   if (ghToken) {
     entries.push(['GH_TOKEN', ghToken]);
@@ -580,7 +663,11 @@ export function buildContainerEnvFile(
   }
 }
 
-export function buildDotfilesVolumeArgs(engine, snapshotDir, existsFn = fs.existsSync) {
+export function buildDotfilesVolumeArgs(
+  engine: string,
+  snapshotDir: string | null | undefined,
+  existsFn: typeof fs.existsSync = fs.existsSync
+): string[] {
   if (!snapshotDir || !existsFn(snapshotDir)) {
     return [];
   }
@@ -588,10 +675,10 @@ export function buildDotfilesVolumeArgs(engine, snapshotDir, existsFn = fs.exist
 }
 
 export function assertBranchAvailable(
-  repoRoot,
-  branch,
-  { allowedWorktrees = [], runFn = runSafe } = {}
-) {
+  repoRoot: string,
+  branch: string,
+  { allowedWorktrees = [], runFn = runSafe }: { allowedWorktrees?: string[]; runFn?: DirectRunSafeFn } = {}
+): void {
   const normalizedAllowedWorktrees = new Set(allowedWorktrees.map((worktree) => normalizeWorktreePath(worktree)));
   const output = runFn('git', ['-C', repoRoot, 'worktree', 'list', '--porcelain']);
   if (!output) {
@@ -621,25 +708,29 @@ export function assertBranchAvailable(
   }
 }
 
-function readHostJsonSafe(filePath) {
+function readHostJsonSafe(filePath: string): JsonObject | null {
   if (!filePath || !fs.existsSync(filePath)) {
     return null;
   }
 
   try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as JsonObject : null;
   } catch {
     return null;
   }
 }
 
-export function ensureClaudeOnboarding(toolDir, hostHomeDir) {
+export function ensureClaudeOnboarding(toolDir: string, hostHomeDir?: string): void {
   const claudeJsonPath = path.join(toolDir, '.claude.json');
-  let data = {};
+  let data: JsonObject & {
+    hasCompletedOnboarding?: boolean;
+    projects?: Record<string, { hasTrustDialogAccepted?: boolean }>;
+    model?: string;
+  } = {};
   if (fs.existsSync(claudeJsonPath)) {
     try {
-      data = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf8'));
+      data = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf8')) as typeof data;
     } catch {
       // malformed JSON, start fresh
     }
@@ -698,12 +789,12 @@ export function ensureClaudeOnboarding(toolDir, hostHomeDir) {
   }
 }
 
-export function ensureClaudeSettings(toolDir, hostHomeDir) {
+export function ensureClaudeSettings(toolDir: string, hostHomeDir?: string): void {
   const settingsPath = path.join(toolDir, 'settings.json');
-  let data = {};
+  let data: JsonObject & { skipDangerousModePermissionPrompt?: boolean; effortLevel?: string } = {};
   if (fs.existsSync(settingsPath)) {
     try {
-      data = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      data = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as typeof data;
     } catch {
       // malformed JSON, start fresh
     }
@@ -730,7 +821,7 @@ export function ensureClaudeSettings(toolDir, hostHomeDir) {
   }
 }
 
-export function ensureCodexModelInheritance(toolDir, hostHomeDir) {
+export function ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string): void {
   if (!hostHomeDir) {
     return;
   }
@@ -740,19 +831,19 @@ export function ensureCodexModelInheritance(toolDir, hostHomeDir) {
     return;
   }
 
-  let hostParsed;
+  let hostParsed: JsonObject;
   try {
-    hostParsed = toml.parse(fs.readFileSync(hostConfigPath, 'utf8'));
+    hostParsed = toml.parse(fs.readFileSync(hostConfigPath, 'utf8')) as JsonObject;
   } catch {
     return;
   }
 
   const sandboxConfigPath = path.join(toolDir, 'config.toml');
   // This rewrites sandbox-side TOML and drops comments; the host config stays untouched.
-  let sandboxParsed = {};
+  let sandboxParsed: JsonObject = {};
   if (fs.existsSync(sandboxConfigPath)) {
     try {
-      sandboxParsed = toml.parse(fs.readFileSync(sandboxConfigPath, 'utf8'));
+      sandboxParsed = toml.parse(fs.readFileSync(sandboxConfigPath, 'utf8')) as JsonObject;
     } catch {
       return;
     }
@@ -776,7 +867,7 @@ export function ensureCodexModelInheritance(toolDir, hostHomeDir) {
   }
 }
 
-export function ensureCodexWorkspaceTrust(toolDir) {
+export function ensureCodexWorkspaceTrust(toolDir: string): void {
   const configPath = path.join(toolDir, 'config.toml');
   let content = '';
   if (fs.existsSync(configPath)) {
@@ -788,7 +879,7 @@ export function ensureCodexWorkspaceTrust(toolDir) {
   }
 }
 
-export function ensureOpenCodeModelInheritance(toolDir, hostHomeDir) {
+export function ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: string): void {
   if (!hostHomeDir) {
     return;
   }
@@ -800,7 +891,7 @@ export function ensureOpenCodeModelInheritance(toolDir, hostHomeDir) {
   }
 
   const sandboxConfigPath = path.join(toolDir, 'opencode.json');
-  let sandboxJson = {};
+  let sandboxJson: JsonObject = {};
   if (fs.existsSync(sandboxConfigPath)) {
     const existing = readHostJsonSafe(sandboxConfigPath);
     if (!existing) {
@@ -826,12 +917,12 @@ export function ensureOpenCodeModelInheritance(toolDir, hostHomeDir) {
   }
 }
 
-export function ensureGeminiWorkspaceTrust(toolDir) {
+export function ensureGeminiWorkspaceTrust(toolDir: string): void {
   const trustPath = path.join(toolDir, 'trustedFolders.json');
-  let data = {};
+  let data: Record<string, string> = {};
   if (fs.existsSync(trustPath)) {
     try {
-      data = JSON.parse(fs.readFileSync(trustPath, 'utf8'));
+      data = JSON.parse(fs.readFileSync(trustPath, 'utf8')) as Record<string, string>;
     } catch {
       // malformed JSON, start fresh
     }
@@ -842,15 +933,15 @@ export function ensureGeminiWorkspaceTrust(toolDir) {
   }
 }
 
-export function sandboxAliasesPath(home) {
+export function sandboxAliasesPath(home: string): string {
   return hostJoin(home, '.agent-infra', 'aliases', 'sandbox.sh');
 }
 
-function escapeRegExp(value) {
+function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function stripManagedSandboxAliasBlocks(content) {
+function stripManagedSandboxAliasBlocks(content: string): string {
   const blockPattern = new RegExp(
     `${escapeRegExp(SANDBOX_ALIAS_BLOCK_BEGIN)}[\\s\\S]*?${escapeRegExp(SANDBOX_ALIAS_BLOCK_END)}\\n?`,
     'g'
@@ -858,7 +949,7 @@ function stripManagedSandboxAliasBlocks(content) {
   return content.replace(blockPattern, '').trimEnd();
 }
 
-function isLegacyManagedSandboxAliasFile(content) {
+function isLegacyManagedSandboxAliasFile(content: string): boolean {
   const lines = content
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -872,7 +963,7 @@ function isLegacyManagedSandboxAliasFile(content) {
   return lines.every((line) => aliasPattern.test(line));
 }
 
-export function ensureSandboxAliasesFile(home) {
+export function ensureSandboxAliasesFile(home: string): { created: boolean; path: string } {
   const aliasesPath = sandboxAliasesPath(home);
   const managedBlock = `${SANDBOX_ALIAS_BLOCK_BEGIN}\n${DEFAULT_SANDBOX_ALIASES}${SANDBOX_ALIAS_BLOCK_END}\n`;
   fs.mkdirSync(path.dirname(aliasesPath), { recursive: true });
@@ -897,12 +988,19 @@ export function ensureSandboxAliasesFile(home) {
   return { created, path: aliasesPath };
 }
 
-export function commandErrorMessage(error) {
-  const stderr = error?.stderr?.toString().trim();
-  return redactCommandError(stderr || error?.message || 'Command failed');
+export function commandErrorMessage(error: unknown): string {
+  const stderr = typeof error === 'object' && error !== null && 'stderr' in error
+    ? String(error.stderr).trim()
+    : '';
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'object' && error !== null && 'message' in error
+      ? String(error.message)
+      : 'Command failed';
+  return redactCommandError(stderr || message);
 }
 
-function runTaskCommand(cmd, args, opts = {}) {
+function runTaskCommand(cmd: string, args: string[], opts: { cwd?: string } = {}): string {
   try {
     return run(cmd, args, opts);
   } catch (error) {
@@ -910,32 +1008,39 @@ function runTaskCommand(cmd, args, opts = {}) {
   }
 }
 
-function runEngineTaskCommand(engine, cmd, args, opts = {}) {
+function runEngineTaskCommand(engine: string, cmd: string, args: string[], opts: { cwd?: string } = {}): string {
   const command = commandForEngine(engine, cmd, args);
   return runTaskCommand(command.cmd, command.args, opts);
 }
 
 export function buildImage(
-  config,
-  tools,
-  dockerfilePath,
-  imageSignature,
+  config: SandboxCreateConfig,
+  tools: SandboxTool[],
+  dockerfilePath: string,
+  imageSignature: string,
   {
     engine,
     runFn = runEngine,
     runSafeFn = runSafeEngine,
     runVerboseFn = runVerboseEngine,
     env = process.env
+  }: {
+    engine?: string;
+    runFn?: EngineRunFn;
+    runSafeFn?: EngineRunSafeFn;
+    runVerboseFn?: EngineRunVerboseFn;
+    env?: NodeJS.ProcessEnv;
   } = {}
-) {
+): void {
+  const selectedEngine = engine ?? detectEngine(config);
   const { uid: hostUid, gid: hostGid } = resolveBuildUid({
-    engine,
+    engine: selectedEngine,
     runFn,
     runSafeFn,
     env
   });
 
-  runVerboseFn(engine, 'docker', [
+  runVerboseFn(selectedEngine, 'docker', [
     'build',
     '-t',
     config.imageName,
@@ -950,12 +1055,12 @@ export function buildImage(
     '--label',
     `${sandboxImageConfigLabel(config)}=${imageSignature}`,
     '-f',
-    toEnginePath(engine, dockerfilePath),
-    toEnginePath(engine, config.repoRoot)
+    toEnginePath(selectedEngine, dockerfilePath),
+    toEnginePath(selectedEngine, config.repoRoot)
   ], { cwd: config.repoRoot });
 }
 
-export async function create(args) {
+export async function create(args: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -980,7 +1085,7 @@ export async function create(args) {
   validateClaudeCredentialsEnvOverride();
 
   const config = loadConfig();
-  const [branchOrTaskId, base] = positionals;
+  const [branchOrTaskId = '', base] = positionals;
   const branch = resolveTaskBranch(branchOrTaskId, config.repoRoot);
   assertValidBranchName(branch);
   const effectiveConfig = {
@@ -1005,7 +1110,7 @@ export async function create(args) {
     resolvedTools
   );
   const container = containerName(effectiveConfig, branch);
-  const worktree = worktreeCandidates.find((candidate) => fs.existsSync(candidate)) ?? worktreeCandidates[0];
+  const worktree = worktreeCandidates.find((candidate) => fs.existsSync(candidate)) ?? worktreeCandidates[0] ?? '';
   const shareCommon = shareCommonDir(effectiveConfig);
   const shareBranch = shareBranchDir(effectiveConfig, branch);
   const preparedDockerfile = prepareDockerfile(effectiveConfig);
@@ -1020,7 +1125,7 @@ export async function create(args) {
 
   try {
     p.log.step('Checking container engine...');
-    await ensureDocker(effectiveConfig, (detail) => {
+    await ensureDocker(effectiveConfig, (detail: string) => {
       p.log.info(`  ${detail}`);
     });
     p.log.success('Docker is ready');
@@ -1054,7 +1159,7 @@ export async function create(args) {
     await p.tasks([
       {
         title: 'Setting up git worktree',
-        task: async (message) => {
+        task: async (message: (text: string) => void) => {
           if (fs.existsSync(worktree)) {
             if (fs.readdirSync(worktree).length > 0) {
               return `Worktree exists at ${worktree}`;
@@ -1143,7 +1248,7 @@ export async function create(args) {
       },
       {
         title: `Starting container '${container}'`,
-        task: async (message) => {
+        task: async (message: (text: string) => void) => {
           const existing = runSafeEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
           const matchedContainers = containerNameCandidates(effectiveConfig, branch)
             .filter((name) => existing.includes(name));
@@ -1179,7 +1284,7 @@ export async function create(args) {
             )
             : null;
           const envFile = buildContainerEnvFile(resolvedTools, engine);
-          let hostShellConfig;
+          let hostShellConfig: HostShellConfig;
           try {
             const claudeCodeEntry = resolvedTools.find(({ tool }) => tool.id === 'claude-code');
             if (claudeCodeEntry) {
@@ -1304,8 +1409,8 @@ export async function create(args) {
                   cachedOverride: cachedGpg,
                   repoPath: worktree,
                   signingKey,
-                  dockerExecFn: (cmd, args, opts) => execEngine(engine, cmd, args, opts),
-                  dockerRunSafeFn: (cmd, args, opts) => runSafeEngine(engine, cmd, args, opts)
+                  dockerExecFn: (cmd: string, args: string[], opts?: ExecSyncOptions) => execEngine(engine, cmd, args, opts),
+                  dockerRunSafeFn: (cmd: string, args: string[], opts?: { cwd?: string }) => runSafeEngine(engine, cmd, args, opts)
                 }
               )) {
                 writeSanitizedGitconfig({

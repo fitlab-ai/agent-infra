@@ -1,10 +1,10 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { loadConfig } from '../config.ts';
+import type { SandboxConfig } from '../config.ts';
 import {
   assertValidBranchName,
   containerNameCandidates,
@@ -17,14 +17,15 @@ import { ENGINES, detectEngine, engineDisplayName, isManagedEngine, stopManagedV
 import { run, runOk, runSafe, runSafeEngine } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
 import { resolveTools, toolConfigDirCandidates, toolProjectDirCandidates } from '../tools.ts';
+import type { SandboxTool } from '../tools.ts';
 
 const USAGE = `Usage: ai sandbox rm <branch> [--all]`;
 
-function projectToolDirs(config, tools) {
+function projectToolDirs(config: SandboxConfig, tools: SandboxTool[]): string[] {
   return tools.flatMap((tool) => toolProjectDirCandidates(tool, config.project));
 }
 
-export function assertManagedPath(root, target) {
+export function assertManagedPath(root: string, target: string): void {
   const resolvedRoot = path.resolve(root);
   const resolvedTarget = path.resolve(target);
   const relative = path.relative(resolvedRoot, resolvedTarget);
@@ -35,7 +36,7 @@ export function assertManagedPath(root, target) {
   throw new Error(`Refusing to remove path outside managed sandbox root: ${target}`);
 }
 
-async function rmOne(config, tools, branch) {
+async function rmOne(config: SandboxConfig, tools: SandboxTool[], branch: string): Promise<void> {
   assertValidBranchName(branch);
   const engine = detectEngine(config);
   let effectiveBranch = branch;
@@ -56,7 +57,7 @@ async function rmOne(config, tools, branch) {
       'inspect',
       '-f',
       `{{ index .Config.Labels "${sandboxBranchLabel(config)}" }}`,
-      matchedContainers[0]
+      matchedContainers[0] ?? ''
     ]);
     if (resolvedBranch) {
       effectiveBranch = resolvedBranch;
@@ -137,7 +138,7 @@ async function rmOne(config, tools, branch) {
   p.outro(pc.green('Sandbox removed'));
 }
 
-async function rmAll(config, tools) {
+async function rmAll(config: SandboxConfig, tools: SandboxTool[]): Promise<void> {
   const engine = detectEngine(config);
   p.intro(pc.cyan(`Removing all sandboxes for ${config.project}`));
 
@@ -229,7 +230,7 @@ async function rmAll(config, tools) {
   p.outro(pc.green('All project sandboxes removed'));
 }
 
-export async function rm(args) {
+export async function rm(args: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -257,6 +258,6 @@ export async function rm(args) {
     return;
   }
 
-  const branch = resolveTaskBranch(positionals[0], config.repoRoot);
+  const branch = resolveTaskBranch(positionals[0] ?? '', config.repoRoot);
   await rmOne(config, tools, branch);
 }

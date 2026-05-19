@@ -1,10 +1,9 @@
-// @ts-nocheck
 import readline from 'node:readline';
 import { ask } from './log.ts';
 
-let _rl = null;
-let _lines = [];
-let _lineResolve = null;
+let _rl: readline.Interface | null = null;
+let _lines: string[] = [];
+let _lineResolve: ((value: string | null) => void) | null = null;
 let _stdinDone = false;
 
 function setupInterface() {
@@ -35,10 +34,10 @@ function setupInterface() {
   });
 }
 
-function nextLine() {
+function nextLine(): Promise<string | null> {
   return new Promise((resolve) => {
     if (_lines.length > 0) {
-      resolve(_lines.shift());
+      resolve(_lines.shift() ?? null);
     } else if (_stdinDone) {
       resolve(null);
     } else {
@@ -47,7 +46,7 @@ function nextLine() {
   });
 }
 
-async function prompt(question, defaultValue) {
+async function prompt(question: string, defaultValue: string): Promise<string> {
   const label = defaultValue ? `${question} [${defaultValue}]: ` : `${question}: `;
   ask(label);
 
@@ -60,8 +59,8 @@ async function prompt(question, defaultValue) {
   return line.trim() || defaultValue || '';
 }
 
-async function select(question, choices, defaultValue) {
-  const defaultIndex = choices.indexOf(defaultValue);
+async function select(question: string, choices: string[], defaultValue?: string): Promise<string> {
+  const defaultIndex = defaultValue === undefined ? -1 : choices.indexOf(defaultValue);
 
   process.stdout.write(`  ${question}:\n`);
   choices.forEach((choice, index) => {
@@ -75,19 +74,19 @@ async function select(question, choices, defaultValue) {
 
   const line = await nextLine();
   if (line === null || line.trim() === '') {
-    return defaultValue || choices[0];
+    return defaultValue || choices[0] || '';
   }
 
   const trimmed = line.trim();
   const selectedIndex = Number.parseInt(trimmed, 10);
   if (String(selectedIndex) === trimmed && selectedIndex >= 1 && selectedIndex <= choices.length) {
-    return choices[selectedIndex - 1];
+    return choices[selectedIndex - 1] ?? '';
   }
 
   return trimmed;
 }
 
-function closePrompt() {
+function closePrompt(): void {
   if (_rl) {
     _rl.close();
     _rl = null;

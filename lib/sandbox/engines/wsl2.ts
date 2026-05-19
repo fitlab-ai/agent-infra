@@ -1,5 +1,6 @@
-// @ts-nocheck
-function ensureWslAvailable(runOk) {
+import type { OnMessage, RunFns, SandboxAdapter } from './index.ts';
+
+function ensureWslAvailable(runOk: RunFns['runOk']): void {
   if (runOk('wsl.exe', ['--status']) || runOk('wsl.exe', ['--', 'true'])) {
     return;
   }
@@ -10,7 +11,7 @@ function ensureWslAvailable(runOk) {
   ].join('\n'));
 }
 
-function ensureDockerAvailable(runOk) {
+function ensureDockerAvailable(runOk: RunFns['runOk']): void {
   if (runOk('wsl.exe', ['--', 'docker', 'info'])) {
     return;
   }
@@ -21,13 +22,13 @@ function ensureDockerAvailable(runOk) {
   ].join('\n'));
 }
 
-function wsl2BackendCheck(runOk, onMessage) {
+function wsl2BackendCheck(runOk: RunFns['runOk'], onMessage: OnMessage): void {
   ensureWslAvailable(runOk);
   onMessage?.('Checking Docker Desktop from WSL2...');
   ensureDockerAvailable(runOk);
 }
 
-export const wsl2Adapter = {
+export const wsl2Adapter: SandboxAdapter = {
   id: 'wsl2',
   displayName: 'WSL2',
   supportedPlatforms: ['win32'],
@@ -39,13 +40,13 @@ export const wsl2Adapter = {
     return null;
   },
 
-  async ensure(config, onMessage, { runOk }) {
+  async ensure(config, onMessage: OnMessage, { runOk }) {
     wsl2BackendCheck(runOk, onMessage);
     void config;
     return false;
   },
 
-  startVm(config, onMessage, { runOk }) {
+  startVm(config, onMessage: OnMessage, { runOk }) {
     wsl2BackendCheck(runOk, onMessage);
     void config;
     return 'already-running';
@@ -57,7 +58,7 @@ export const wsl2Adapter = {
     );
   },
 
-  syncResources(config, onMessage) {
+  syncResources(config, onMessage: OnMessage) {
     if (!config.hasUserVmConfig?.(config.userVm)) {
       return;
     }

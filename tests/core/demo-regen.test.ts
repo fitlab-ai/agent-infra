@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -8,7 +7,7 @@ import path from "node:path";
 
 import { envWithPrependedPath, read } from "../helpers.ts";
 
-function makeFakeGif(frameCount, initialDelayCs = 2) {
+function makeFakeGif(frameCount: number, initialDelayCs: number = 2): Buffer {
   const bytes = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61];
 
   for (let index = 0; index < frameCount; index += 1) {
@@ -28,9 +27,9 @@ function makeFakeGif(frameCount, initialDelayCs = 2) {
   return Buffer.from(bytes);
 }
 
-function readGifDelays(filePath) {
+function readGifDelays(filePath: string): number[] {
   const data = fs.readFileSync(filePath);
-  const delays = [];
+  const delays: number[] = [];
 
   for (let index = 0; index < data.length - 7; index += 1) {
     if (data[index] === 0x21 && data[index + 1] === 0xF9 && data[index + 2] === 0x04) {
@@ -50,7 +49,7 @@ function resolvePythonCommand() {
   return "python3";
 }
 
-function setupDemoRegenFixture({ withLocalSettings }) {
+function setupDemoRegenFixture({ withLocalSettings }: { withLocalSettings: boolean }) {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "demo-regen-"));
   const assetsDir = path.join(repoDir, "assets");
   const scriptsDir = path.join(repoDir, "scripts");

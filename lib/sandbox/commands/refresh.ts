@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
 import {
@@ -14,7 +13,16 @@ import { runProbe } from '../shell.ts';
 
 const USAGE = 'Usage: ai sandbox refresh';
 
-export function probeClaudeStatus(spawnFn = runProbe) {
+type ReconcileOptions = NonNullable<Parameters<typeof reconcileClaudeCredentials>[1]>;
+
+type RefreshDeps = Partial<ReconcileOptions> & {
+  spawnFn?: typeof runProbe;
+  discoverFn?: typeof discoverProjects;
+  writeStdout?: (chunk: string) => unknown;
+  writeStderr?: (chunk: string) => unknown;
+};
+
+export function probeClaudeStatus(spawnFn: typeof runProbe = runProbe): { ok: boolean; stderr: string; error: string | null } {
   const result = spawnFn('claude', ['/status'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -22,12 +30,12 @@ export function probeClaudeStatus(spawnFn = runProbe) {
   });
   return {
     ok: result.status === 0,
-    stderr: result.stderr ?? '',
+    stderr: result.stderr?.toString() ?? '',
     error: result.error?.message ?? null
   };
 }
 
-export async function refresh(args, deps = {}) {
+export async function refresh(args: string[], deps: RefreshDeps = {}): Promise<number> {
   const {
     spawnFn = runProbe,
     execFn,
@@ -36,8 +44,8 @@ export async function refresh(args, deps = {}) {
     writeFn,
     writeHostFn,
     discoverFn = discoverProjects,
-    writeStdout = (chunk) => process.stdout.write(chunk),
-    writeStderr = (chunk) => process.stderr.write(chunk)
+    writeStdout = (chunk: string) => process.stdout.write(chunk),
+    writeStderr = (chunk: string) => process.stderr.write(chunk)
   } = deps;
 
   if (args[0] === '--help' || args[0] === '-h' || args[0] === 'help') {

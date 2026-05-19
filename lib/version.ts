@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { readFileSync } from 'node:fs';
 
 const { version } = JSON.parse(

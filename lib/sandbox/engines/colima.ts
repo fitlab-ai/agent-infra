@@ -1,5 +1,6 @@
-// @ts-nocheck
-function colimaArgs(config, runSafeFn) {
+import type { EffectiveSandboxConfig, HostResources, OnMessage, RunFns, SandboxAdapter } from './index.ts';
+
+function colimaArgs(config: EffectiveSandboxConfig, runSafeFn: RunFns['runSafe']): string[] {
   const arch = runSafeFn('uname', ['-m']);
   const vm = config.vm ?? {};
   const args = ['start', '--cpu', String(vm.cpu), '--memory', String(vm.memory), '--disk', String(vm.disk)];
@@ -13,7 +14,7 @@ function colimaArgs(config, runSafeFn) {
   return args;
 }
 
-export const colimaAdapter = {
+export const colimaAdapter: SandboxAdapter = {
   id: 'colima',
   displayName: 'Colima',
   supportedPlatforms: ['darwin'],
@@ -21,7 +22,7 @@ export const colimaAdapter = {
   managed: true,
   canApplyResources: 'on-start',
 
-  defaultResources(getHost) {
+  defaultResources(getHost: () => HostResources) {
     const host = getHost();
     return {
       cpu: host.cpu,
@@ -30,7 +31,7 @@ export const colimaAdapter = {
     };
   },
 
-  async ensure(config, onMessage, { runOk, runSafe, runVerbose }) {
+  async ensure(config, onMessage: OnMessage, { runOk, runSafe, runVerbose }) {
     let started = false;
 
     if (!runOk('which', ['colima'])) {
@@ -51,7 +52,7 @@ export const colimaAdapter = {
     return started;
   },
 
-  startVm(config, _onMessage, { runOk, runSafe, runVerbose }) {
+  startVm(config, _onMessage: OnMessage, { runOk, runSafe, runVerbose }) {
     if (runOk('colima', ['status'])) {
       return 'already-running';
     }
@@ -60,12 +61,12 @@ export const colimaAdapter = {
     return 'started';
   },
 
-  stopVm(_config, _onMessage, { run }) {
+  stopVm(_config, _onMessage: OnMessage, { run }) {
     run('colima', ['stop']);
     return 'stopped';
   },
 
-  syncResources(config, onMessage, _runFns, { vmJustStarted } = {}) {
+  syncResources(config, onMessage: OnMessage, _runFns, { vmJustStarted } = {}) {
     if (vmJustStarted || !config.hasUserVmConfig?.(config.userVm)) {
       return;
     }

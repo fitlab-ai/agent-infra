@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -209,7 +208,7 @@ test("skills that write timestamps require date command guidance", () => {
 });
 
 test("workflow skill docs update task comments before publishing artifact comments", () => {
-  const orderedCommentSkills = [
+  const orderedCommentSkills: Array<[string, string]> = [
     ["analyze-task", "{analysis-artifact}"],
     ["plan-task", "{plan-artifact}"],
     ["implement-task", "{implementation-artifact}"],

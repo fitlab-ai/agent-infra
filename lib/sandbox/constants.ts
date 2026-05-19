@@ -1,15 +1,26 @@
-// @ts-nocheck
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { hostJoin } from './engines/wsl2-paths.ts';
 
 const validatedBranches = new Set();
 
-function dedupe(items) {
+type SandboxPathConfig = {
+  project: string;
+  containerPrefix: string;
+  worktreeBase: string;
+  shareBase: string;
+};
+
+type HostResources = {
+  cpu: number;
+  memory: number;
+};
+
+function dedupe(items: string[]): string[] {
   return [...new Set(items)];
 }
 
-export function assertValidBranchName(branch) {
+export function assertValidBranchName(branch: string): void {
   if (validatedBranches.has(branch)) {
     return;
   }
@@ -33,61 +44,61 @@ export function assertValidBranchName(branch) {
   validatedBranches.add(branch);
 }
 
-export function sanitizeBranchName(branch) {
+export function sanitizeBranchName(branch: string): string {
   assertValidBranchName(branch);
   return branch.replace(/\//g, '..');
 }
 
-export function legacySanitizeBranchName(branch) {
+export function legacySanitizeBranchName(branch: string): string {
   assertValidBranchName(branch);
   return branch.replace(/\//g, '-');
 }
 
-export function safeNameCandidates(branch) {
+export function safeNameCandidates(branch: string): string[] {
   return dedupe([sanitizeBranchName(branch), legacySanitizeBranchName(branch)]);
 }
 
-export function containerName(config, branch) {
+export function containerName(config: Pick<SandboxPathConfig, 'containerPrefix'>, branch: string): string {
   return `${config.containerPrefix}-${sanitizeBranchName(branch)}`;
 }
 
-export function containerNameCandidates(config, branch) {
+export function containerNameCandidates(config: Pick<SandboxPathConfig, 'containerPrefix'>, branch: string): string[] {
   return safeNameCandidates(branch).map((name) => `${config.containerPrefix}-${name}`);
 }
 
-export function worktreeDir(config, branch) {
+export function worktreeDir(config: Pick<SandboxPathConfig, 'worktreeBase'>, branch: string): string {
   return hostJoin(config.worktreeBase, sanitizeBranchName(branch));
 }
 
-export function worktreeDirCandidates(config, branch) {
+export function worktreeDirCandidates(config: Pick<SandboxPathConfig, 'worktreeBase'>, branch: string): string[] {
   return safeNameCandidates(branch).map((name) => hostJoin(config.worktreeBase, name));
 }
 
-export function shareDir(config) {
+export function shareDir(config: Pick<SandboxPathConfig, 'shareBase'>): string {
   return config.shareBase;
 }
 
-export function shareCommonDir(config) {
+export function shareCommonDir(config: Pick<SandboxPathConfig, 'shareBase'>): string {
   return hostJoin(config.shareBase, 'common');
 }
 
-export function shareBranchDir(config, branch) {
+export function shareBranchDir(config: Pick<SandboxPathConfig, 'shareBase'>, branch: string): string {
   return hostJoin(config.shareBase, 'branches', sanitizeBranchName(branch));
 }
 
-export function sandboxLabel(config) {
+export function sandboxLabel(config: Pick<SandboxPathConfig, 'project'>): string {
   return `${config.project}.sandbox`;
 }
 
-export function sandboxBranchLabel(config) {
+export function sandboxBranchLabel(config: Pick<SandboxPathConfig, 'project'>): string {
   return `${sandboxLabel(config)}.branch`;
 }
 
-export function sandboxImageConfigLabel(config) {
+export function sandboxImageConfigLabel(config: Pick<SandboxPathConfig, 'project'>): string {
   return `${sandboxLabel(config)}.image-config`;
 }
 
-export function parsePositiveIntegerOption(value, optionName) {
+export function parsePositiveIntegerOption(value: unknown, optionName: string): number | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }
@@ -100,7 +111,7 @@ export function parsePositiveIntegerOption(value, optionName) {
   return parsed;
 }
 
-export function detectHostResources() {
+export function detectHostResources(): HostResources {
   // Resource hints are for engines that pre-allocate a managed VM. macOS uses
   // sysctl for Colima defaults, while the generic fallback supports WSL2 or
   // other direct callers that need conservative CPU and memory defaults.

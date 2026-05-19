@@ -1,24 +1,23 @@
-// @ts-nocheck
 import path from 'node:path';
 import { selinuxLabelForMount } from './selinux.ts';
 
 const WINDOWS_DRIVE_PATH_PATTERN = /^([A-Za-z]):[\\/](.*)$/;
 const UNC_PATH_PATTERN = /^(?:\\\\|\/\/)[^\\/]+[\\/][^\\/]+/;
 
-export function hostJoin(basePath, ...segments) {
+export function hostJoin(basePath: string, ...segments: string[]): string {
   return basePath.startsWith('/') ? path.posix.join(basePath, ...segments) : path.join(basePath, ...segments);
 }
 
-export function isWindowsDrivePath(value) {
+export function isWindowsDrivePath(value: unknown): boolean {
   return typeof value === 'string' && WINDOWS_DRIVE_PATH_PATTERN.test(value);
 }
 
-export function isUncPath(value) {
+export function isUncPath(value: unknown): boolean {
   return typeof value === 'string' && UNC_PATH_PATTERN.test(value);
 }
 
-export function windowsPathToWslPath(value) {
-  if (typeof value !== 'string' || value.length === 0) {
+export function windowsPathToWslPath(value: string): string {
+  if (value.length === 0) {
     return value;
   }
 
@@ -31,12 +30,12 @@ export function windowsPathToWslPath(value) {
     return value.replace(/\\/g, '/');
   }
 
-  const [, drive, rest] = match;
+  const [, drive = '', rest = ''] = match;
   const normalizedRest = rest.replace(/\\/g, '/').replace(/^\/+/, '');
   return `/mnt/${drive.toLowerCase()}/${normalizedRest}`;
 }
 
-export function toEnginePath(engine, value) {
+export function toEnginePath(engine: string, value: string): string {
   if (engine !== 'wsl2') {
     return value;
   }
@@ -44,7 +43,13 @@ export function toEnginePath(engine, value) {
   return windowsPathToWslPath(value);
 }
 
-export function volumeArg(engine, hostPath, containerPath, suffix = '', options = {}) {
+export function volumeArg(
+  engine: string,
+  hostPath: string,
+  containerPath: string,
+  suffix = '',
+  options: { selinux?: 'shared' | 'none'; fs?: typeof import('node:fs'); platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv } = {}
+): string {
   const { selinux = 'shared', ...selinuxOptions } = options;
   const flags = suffix.replace(/^:/, '').split(',').filter(Boolean);
 

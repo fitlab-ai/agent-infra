@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -8,11 +7,19 @@ import path from "node:path";
 
 import { read } from "../helpers.ts";
 
-function formatDate(value) {
+type CompletedTaskOptions = {
+  completedAt: string;
+  updatedAt?: string;
+  type?: string;
+  title: string;
+  extraFile?: string;
+};
+
+function formatDate(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
 
-function runArchiveScript(repoDir, ...args) {
+function runArchiveScript(repoDir: string, ...args: string[]): string {
   const result = spawnSync(
     "sh",
     [path.join(repoDir, ".agents/skills/archive-tasks/scripts/archive-tasks.sh"), ...args],
@@ -44,9 +51,9 @@ function setupRepo() {
 }
 
 function writeCompletedTask(
-  repoDir,
-  taskId,
-  { completedAt, updatedAt = completedAt, type = "feature", title, extraFile = "note.txt" }
+  repoDir: string,
+  taskId: string,
+  { completedAt, updatedAt = completedAt, type = "feature", title, extraFile = "note.txt" }: CompletedTaskOptions
 ) {
   const taskDir = path.join(repoDir, ".agents/workspace/completed", taskId);
   fs.mkdirSync(taskDir, { recursive: true });

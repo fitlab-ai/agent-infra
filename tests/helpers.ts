@@ -29,9 +29,79 @@ type SandboxFixture = {
   logPath: string;
   readDockerCalls(): string[][];
 };
+type RegistryEntry = {
+  entry: string;
+  list?: string;
+};
+type SyncTemplatesReport = {
+  templateRoot: string;
+  templateVersion: string;
+  configUpdated: boolean;
+  templateSources: {
+    configured: number;
+    loaded: number;
+    files: number;
+    errors: Array<Record<string, unknown>>;
+    conflicts: Array<Record<string, unknown>>;
+  };
+  registryAdded: RegistryEntry[];
+  managed: {
+    created: string[];
+    removed: string[];
+    written: string[];
+    unchanged: string[];
+    skippedMerged: string[];
+  };
+  merged: {
+    pending: Array<{ target: string }>;
+  };
+  ejected: {
+    preserved: string[];
+    missing: string[];
+    created: string[];
+    skipped: string[];
+  };
+  custom: {
+    detected: string[];
+    generated: string[];
+    removed: string[];
+    sourceErrors: Array<Record<string, unknown>>;
+    commands: {
+      generated: string[];
+      updated: string[];
+      unchanged: string[];
+    };
+    customTUIs: {
+      skipped: string[];
+      skippedRefs: string[];
+    };
+  };
+};
+type SyncTemplatesModule = {
+  syncTemplates(projectRoot: string, templateRootOverride?: string): SyncTemplatesReport;
+};
+type PlatformSyncModule = {
+  getDefaults(): {
+    statusLabels: {
+      inProgress: string;
+      pendingDesignWork: string;
+      waitingForTriage: string;
+    };
+    markers: Record<string, string>;
+    labels: {
+      status: string[];
+      type: string[];
+      priority: string[];
+      area: string[];
+      special: string[];
+    };
+    milestones: Array<Record<string, unknown>>;
+  };
+  check(context: unknown, shared: unknown): unknown;
+};
 
 // =====================================================================
-// CRITICAL: any test that spawns real `git` commands MUST use gitSafeEnv()
+// CRITICAL: tests that spawn real `git` commands MUST use gitSafeEnv()
 // ---------------------------------------------------------------------
 // When `npm test` is invoked from a context that exports GIT_DIR,
 // GIT_INDEX_FILE, GIT_WORK_TREE, or similar variables, child `git`
@@ -82,7 +152,7 @@ function read(relativePath: string): string {
   return fs.readFileSync(filePath(relativePath), "utf8");
 }
 
-function pathWithPrependedBin(binDir: string, envPath = process.env.PATH || ""): string {
+function pathWithPrependedBin(binDir: string, envPath: string = process.env.PATH || ""): string {
   return [binDir, envPath].filter(Boolean).join(path.delimiter);
 }
 
@@ -413,7 +483,7 @@ function parseFrontmatter(relativePath: string): Frontmatter | null {
 
     const value = line.slice("description:".length).trim();
     if (value === ">") {
-      const descriptionLines = [];
+      const descriptionLines: string[] = [];
 
       for (let offset = index + 1; offset < lines.length; offset += 1) {
         const descriptionLine = lines[offset] ?? "";
@@ -595,4 +665,10 @@ export {
   writeSandboxEngineFixture,
   writeNodeCommandShim,
   skillDocPaths
+};
+
+export type {
+  PlatformSyncModule,
+  SyncTemplatesModule,
+  SyncTemplatesReport
 };

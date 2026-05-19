@@ -1,4 +1,3 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
@@ -10,9 +9,39 @@ import { renderFile, copySkillDir, KNOWN_PLATFORMS } from './render.ts';
 import { enginesForPlatform } from './sandbox/engines/index.ts';
 import { VERSION } from './version.ts';
 
+type FileRegistry = {
+  managed: string[];
+  merged: string[];
+  ejected: string[];
+};
+
+type SourceEntry = {
+  type: 'local';
+  path: string;
+};
+
+type Defaults = {
+  files: FileRegistry;
+  sandbox: Record<string, unknown>;
+  labels: Record<string, unknown>;
+};
+
+type AgentConfig = {
+  project: string;
+  org: string;
+  language: string;
+  platform: { type: string };
+  templateVersion: string;
+  sandbox: Record<string, unknown>;
+  labels: Record<string, unknown>;
+  files: FileRegistry;
+  templates?: { sources: SourceEntry[] };
+  skills?: { sources: SourceEntry[] };
+};
+
 const defaults = JSON.parse(
   fs.readFileSync(new URL('./defaults.json', import.meta.url), 'utf8')
-);
+) as Defaults;
 
 const PLATFORM_DEFAULT_ENGINES = Object.freeze({
   linux: 'native',
@@ -20,8 +49,8 @@ const PLATFORM_DEFAULT_ENGINES = Object.freeze({
   win32: 'wsl2'
 });
 
-function isPathOwnedByOtherPlatform(relativePath, platformType) {
-  const top = String(relativePath || '').replace(/\\/g, '/').replace(/^\.\//, '').split('/')[0];
+function isPathOwnedByOtherPlatform(relativePath: string, platformType: string): boolean {
+  const top = String(relativePath || '').replace(/\\/g, '/').replace(/^\.\//, '').split('/')[0] ?? '';
   if (!top.startsWith('.')) return false;
 
   const candidate = top.slice(1);
@@ -29,7 +58,7 @@ function isPathOwnedByOtherPlatform(relativePath, platformType) {
   return candidate !== platformType;
 }
 
-function buildDefaultFiles(platformType) {
+function buildDefaultFiles(platformType: string): FileRegistry {
   return {
     managed: (defaults.files.managed || []).filter((entry) => !isPathOwnedByOtherPlatform(entry, platformType)),
     merged: (defaults.files.merged || []).filter((entry) => !isPathOwnedByOtherPlatform(entry, platformType)),
@@ -37,7 +66,7 @@ function buildDefaultFiles(platformType) {
   };
 }
 
-function detectProjectName() {
+function detectProjectName(): string {
   try {
     const url = execSync('git remote get-url origin', { stdio: ['pipe', 'pipe', 'pipe'] })
       .toString().trim().replace(/\.git$/, '');
@@ -47,16 +76,16 @@ function detectProjectName() {
   }
 }
 
-function detectOrgName() {
+function detectOrgName(): string {
   try {
     const url = execSync('git remote get-url origin', { stdio: ['pipe', 'pipe', 'pipe'] })
       .toString().trim().replace(/\.git$/, '');
     // SSH: git@github.com:org/repo  →  org
     // HTTPS: https://github.com/org/repo  →  org
     const sshMatch = url.match(/:([^/]+)\//);
-    if (sshMatch) return sshMatch[1];
+    if (sshMatch?.[1]) return sshMatch[1];
     const httpsMatch = url.match(/\/\/[^/]+\/([^/]+)\//);
-    if (httpsMatch) return httpsMatch[1];
+    if (httpsMatch?.[1]) return httpsMatch[1];
   } catch {
     // no remote
   }
@@ -65,7 +94,7 @@ function detectOrgName() {
 
 const VALID_NAME_RE = /^[a-zA-Z0-9_.@-]+$/;
 
-function parseLocalSources(input) {
+function parseLocalSources(input: string): SourceEntry[] {
   return input
     .split(',')
     .map((entry) => entry.trim())
@@ -73,7 +102,7 @@ function parseLocalSources(input) {
     .map((entry) => ({ type: 'local', path: entry }));
 }
 
-async function cmdInit() {
+async function cmdInit(): Promise<void> {
   console.log('');
   console.log('  agent-infra init');
   console.log('  ================================');
@@ -136,7 +165,7 @@ async function cmdInit() {
   }
 
   const currentPlatform = platform();
-  const defaultEngine = PLATFORM_DEFAULT_ENGINES[currentPlatform];
+  const defaultEngine = PLATFORM_DEFAULT_ENGINES[currentPlatform as keyof typeof PLATFORM_DEFAULT_ENGINES];
   const engineChoices = enginesForPlatform(currentPlatform).sort((left, right) => {
     if (left === defaultEngine) return -1;
     if (right === defaultEngine) return 1;
@@ -246,7 +275,7 @@ async function cmdInit() {
   ok('Installed .opencode/commands/update-agent-infra.md');
 
   // generate .agents/.airc.json
-  const config = {
+  const config: AgentConfig = {
     project: projectName,
     org: orgName,
     language,

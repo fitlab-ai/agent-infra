@@ -1,19 +1,41 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import path from 'node:path';
 import { info, ok, err } from './log.ts';
 import { resolveTemplateDir } from './paths.ts';
 import { renderFile, copySkillDir, KNOWN_PLATFORMS } from './render.ts';
 
+type FileRegistry = {
+  managed: string[];
+  merged: string[];
+  ejected: string[];
+};
+
+type UpdateConfig = {
+  project: string;
+  org: string;
+  language: string;
+  platform?: { type?: string };
+  sandbox?: Record<string, unknown>;
+  labels?: Record<string, unknown>;
+  files?: Partial<FileRegistry>;
+};
+
+type Defaults = {
+  platform: { type: string };
+  sandbox: Record<string, unknown>;
+  labels: Record<string, unknown>;
+  files: FileRegistry;
+};
+
 const defaults = JSON.parse(
   fs.readFileSync(new URL('./defaults.json', import.meta.url), 'utf8')
-);
+) as Defaults;
 
 const CONFIG_DIR = '.agents';
 const CONFIG_PATH = path.join(CONFIG_DIR, '.airc.json');
 
-function isPathOwnedByOtherPlatform(relativePath, platformType) {
-  const top = String(relativePath || '').replace(/\\/g, '/').replace(/^\.\//, '').split('/')[0];
+function isPathOwnedByOtherPlatform(relativePath: string, platformType: string): boolean {
+  const top = String(relativePath || '').replace(/\\/g, '/').replace(/^\.\//, '').split('/')[0] ?? '';
   if (!top.startsWith('.')) return false;
 
   const candidate = top.slice(1);
@@ -21,7 +43,7 @@ function isPathOwnedByOtherPlatform(relativePath, platformType) {
   return candidate !== platformType;
 }
 
-function syncFileRegistry(config, platformType) {
+function syncFileRegistry(config: UpdateConfig, platformType: string) {
   config.files ||= {};
   const before = JSON.stringify({
     files: {
@@ -39,7 +61,7 @@ function syncFileRegistry(config, platformType) {
     ...config.files.merged,
     ...config.files.ejected
   ];
-  const added = { managed: [], merged: [] };
+  const added: Pick<FileRegistry, 'managed' | 'merged'> = { managed: [], merged: [] };
 
   for (const entry of defaults.files.managed) {
     if (isPathOwnedByOtherPlatform(entry, platformType)) continue;
@@ -67,7 +89,7 @@ function syncFileRegistry(config, platformType) {
   return { added, changed: before !== after };
 }
 
-async function cmdUpdate() {
+async function cmdUpdate(): Promise<void> {
   console.log('');
   console.log('  agent-infra update');
   console.log('  ==================================');
@@ -91,7 +113,7 @@ async function cmdUpdate() {
   }
 
   // read project config
-  const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) as UpdateConfig;
   const { project, org, language } = config;
   const platformType = config.platform?.type || defaults.platform.type;
   const replacements = { project, org };

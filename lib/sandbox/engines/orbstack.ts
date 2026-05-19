@@ -1,5 +1,6 @@
-// @ts-nocheck
-export const orbstackAdapter = {
+import type { OnMessage, SandboxAdapter } from './index.ts';
+
+export const orbstackAdapter: SandboxAdapter = {
   id: 'orbstack',
   displayName: 'OrbStack',
   supportedPlatforms: ['darwin'],
@@ -11,7 +12,7 @@ export const orbstackAdapter = {
     return null;
   },
 
-  async ensure(_config, onMessage, { runOk, runVerbose }) {
+  async ensure(_config, onMessage: OnMessage, { runOk, runVerbose }) {
     let started = false;
 
     if (!runOk('which', ['orb'])) {
@@ -32,7 +33,7 @@ export const orbstackAdapter = {
     return started;
   },
 
-  startVm(_config, _onMessage, { runOk, runVerbose }) {
+  startVm(_config, _onMessage: OnMessage, { runOk, runVerbose }) {
     if (runOk('orb', ['status'])) {
       return 'already-running';
     }
@@ -41,12 +42,12 @@ export const orbstackAdapter = {
     return 'started';
   },
 
-  stopVm(_config, _onMessage, { run }) {
+  stopVm(_config, _onMessage: OnMessage, { run }) {
     run('orb', ['stop']);
     return 'stopped';
   },
 
-  syncResources(config, onMessage, { runVerbose }) {
+  syncResources(config, onMessage: OnMessage, { runVerbose }) {
     const vm = config?.vm ?? {};
 
     if (vm.cpu != null) {

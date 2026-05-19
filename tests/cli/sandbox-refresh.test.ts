@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -7,7 +6,31 @@ import path from "node:path";
 
 import { loadFreshEsm } from "../helpers.ts";
 
-function withHome(home, fn) {
+type ProbeResult = {
+  status: number | null;
+  stderr?: string | Buffer;
+  error?: Error;
+};
+type RefreshDeps = {
+  discoverFn?: (home: string) => string[];
+  execFn?: (cmd: string, args: string[], options?: Record<string, unknown>) => string | Buffer | void;
+  spawnFn?: (cmd: string, args: string[], options?: Record<string, unknown>) => ProbeResult;
+  readFn?: (targetPath: string) => string;
+  existsFn?: (targetPath: string) => boolean;
+  writeFn?: (home: string, project: string, blob: string) => void;
+  writeHostFn?: (home: string, blob: string, options?: Record<string, unknown>) => { ok: true } | { ok: false; classification?: string; error: string };
+  writeStdout?: (chunk: string) => unknown;
+  writeStderr?: (chunk: string) => unknown;
+};
+type RefreshModule = {
+  probeClaudeStatus(spawnFn?: NonNullable<RefreshDeps["spawnFn"]>): { ok: boolean; stderr: string; error: string | null };
+  refresh(args: string[], deps?: RefreshDeps): Promise<number>;
+};
+type ShellModule = {
+  runProbe(cmd: string, args: string[], opts?: { spawnFn?: NonNullable<RefreshDeps["spawnFn"]> } & Record<string, unknown>): ProbeResult;
+};
+
+function withHome<T>(home: string | undefined, fn: () => T): T {
   const previousHome = process.env.HOME;
   const previousUserProfile = process.env.USERPROFILE;
   if (home === undefined) {
@@ -39,7 +62,7 @@ function withHome(home, fn) {
   }
 }
 
-function withPlatform(platform, fn) {
+function withPlatform<T>(platform: NodeJS.Platform, fn: () => T): T {
   const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
   Object.defineProperty(process, "platform", { configurable: true, value: platform });
   try {
@@ -54,7 +77,7 @@ function withPlatform(platform, fn) {
 // Force a fresh empty HOME on a chosen platform so refresh tests never read the
 // developer's real ~/.agent-infra state. tmpDir is removed after fn resolves, so
 // any filesystem assertion that depends on it must run inside the callback.
-async function withTempHomeOn(platform, fn) {
+async function withTempHomeOn<T>(platform: NodeJS.Platform, fn: (home: string) => T | Promise<T>): Promise<T> {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-refresh-"));
   try {
     return await withHome(tmpDir, () => withPlatform(platform, () => fn(tmpDir)));
@@ -63,7 +86,7 @@ async function withTempHomeOn(platform, fn) {
   }
 }
 
-function validBlob(expiresAt = Date.now() + 3_600_000) {
+function validBlob(expiresAt: number = Date.now() + 3_600_000) {
   return JSON.stringify({
     claudeAiOauth: {
       accessToken: "token",
@@ -75,9 +98,9 @@ function validBlob(expiresAt = Date.now() + 3_600_000) {
 }
 
 test("probeClaudeStatus maps claude status process results", async () => {
-  const { probeClaudeStatus } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
+  const { probeClaudeStatus } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
 
-  assert.deepEqual(probeClaudeStatus((cmd, args, options) => {
+  assert.deepEqual(probeClaudeStatus((cmd, args, options = {}) => {
     assert.equal(cmd, "claude");
     assert.deepEqual(args, ["/status"]);
     assert.equal(options.timeout, 30_000);
@@ -92,7 +115,7 @@ test("probeClaudeStatus maps claude status process results", async () => {
 });
 
 test("runProbe resolves Windows command shims through the shell wrapper", async () => {
-  const { runProbe } = await loadFreshEsm("lib/sandbox/shell.js");
+  const { runProbe } = await loadFreshEsm<ShellModule>("lib/sandbox/shell.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-refresh-win32-"));
   const claudePath = path.join(tmpDir, "claude.cmd");
   const previousPath = process.env.PATH;
@@ -106,10 +129,10 @@ test("runProbe resolves Windows command shims through the shell wrapper", async 
 
     withPlatform("win32", () => {
       const result = runProbe("claude", ["/status"], {
-        spawnFn: (cmd, args, options) => {
+        spawnFn: (cmd: string, args: string[], options?: Record<string, unknown>) => {
           assert.equal(cmd, claudePath);
           assert.deepEqual(args, ["/status"]);
-          assert.equal(options.shell, true);
+          assert.equal(options?.shell, true);
           return { status: 0, stderr: "" };
         }
       });
@@ -131,8 +154,8 @@ test("runProbe resolves Windows command shims through the shell wrapper", async 
 });
 
 test("refresh batch mode lists discovered projects and syncs each one", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
-  const stdout = [];
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
+  const stdout: string[] = [];
 
   await withTempHomeOn("darwin", async (home) => {
     const code = await refresh([], {
@@ -150,8 +173,8 @@ test("refresh batch mode lists discovered projects and syncs each one", async ()
 });
 
 test("refresh batch mode writes nothing when no projects exist", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
-  const stdout = [];
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
+  const stdout: string[] = [];
 
   const code = await refresh([], {
     discoverFn: () => [],
@@ -163,8 +186,8 @@ test("refresh batch mode writes nothing when no projects exist", async () => {
 });
 
 test("refresh prints usage for help flags", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
-  const stdout = [];
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
+  const stdout: string[] = [];
 
   assert.equal(await refresh(["--help"], {
     writeStdout: (chunk) => stdout.push(chunk)
@@ -173,7 +196,7 @@ test("refresh prints usage for help flags", async () => {
 });
 
 test("refresh uses the system home directory in batch mode", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
   let seenHome = "";
 
   const code = await withHome(undefined, () => refresh([], {
@@ -190,7 +213,7 @@ test("refresh uses the system home directory in batch mode", async () => {
 });
 
 test("refresh rejects positional arguments", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
 
   await assert.rejects(
     withHome(os.tmpdir(), () => refresh(["unexpected-arg"], {
@@ -202,8 +225,8 @@ test("refresh rejects positional arguments", async () => {
 });
 
 test("refresh exits 1 with login prompt when host credentials are missing", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
-  const stderr = [];
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
+  const stderr: string[] = [];
 
   const code = await withTempHomeOn("darwin", () => refresh([], {
     discoverFn: () => ["agent-infra"],
@@ -221,8 +244,8 @@ test("refresh exits 1 with login prompt when host credentials are missing", asyn
 });
 
 test("refresh exits 1 when probe fails after stale host credentials", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
-  const stderr = [];
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
+  const stderr: string[] = [];
 
   const code = await withTempHomeOn("darwin", () => refresh([], {
     discoverFn: () => ["agent-infra"],
@@ -237,8 +260,8 @@ test("refresh exits 1 when probe fails after stale host credentials", async () =
 });
 
 test("refresh redacts tokens from failed probe stderr", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
-  const stderr = [];
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
+  const stderr: string[] = [];
 
   const code = await withTempHomeOn("darwin", () => refresh([], {
     discoverFn: () => ["agent-infra"],
@@ -257,7 +280,7 @@ test("refresh redacts tokens from failed probe stderr", async () => {
 });
 
 test("refresh succeeds after stale host credentials when probe restores valid credentials", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
   let inspected = 0;
 
   const code = await withTempHomeOn("darwin", () => refresh([], {
@@ -276,9 +299,9 @@ test("refresh succeeds after stale host credentials when probe restores valid cr
 });
 
 test("refresh reports unchanged status when destination matches blob", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
   const blob = validBlob();
-  const stdout = [];
+  const stdout: string[] = [];
 
   await withTempHomeOn("darwin", async (home) => {
     const targetDir = path.join(home, ".agent-infra", "credentials", "agent-infra", "claude-code");
@@ -297,10 +320,10 @@ test("refresh reports unchanged status when destination matches blob", async () 
 });
 
 test("refresh reconciles from a newer project file without probing claude status", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
   const hostBlob = validBlob(100);
   const fileBlob = validBlob(200);
-  const stdout = [];
+  const stdout: string[] = [];
   let probeCalled = false;
 
   await withTempHomeOn("linux", async (home) => {
@@ -330,8 +353,8 @@ test("refresh reconciles from a newer project file without probing claude status
 });
 
 test("refresh exits 1 when newer sandbox credentials cannot be written to host", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
-  const stderr = [];
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
+  const stderr: string[] = [];
 
   const code = await withTempHomeOn("darwin", () => refresh([], {
     discoverFn: () => ["agent-infra"],
@@ -352,15 +375,15 @@ test("refresh exits 1 when newer sandbox credentials cannot be written to host",
 });
 
 test("refresh emits keychain guidance when host keychain is locked", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
-  const stderr = [];
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
+  const stderr: string[] = [];
 
   const code = await withTempHomeOn("darwin", () => refresh([], {
     discoverFn: () => ["agent-infra"],
     execFn: () => {
       const error = new Error(
         'Command failed: security find-generic-password {"claudeAiOauth":{"accessToken":"sk-ant-oat01-123456789012345678901234567890"}}'
-      );
+      ) as Error & { stderr?: Buffer };
       error.stderr = Buffer.from("security: errSecInteractionNotAllowed: User interaction is not allowed.");
       throw error;
     },
@@ -376,15 +399,15 @@ test("refresh emits keychain guidance when host keychain is locked", async () =>
 });
 
 test("refresh emits keychain error detail and guidance for non-locked failures", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
-  const stderr = [];
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
+  const stderr: string[] = [];
 
   const code = await withTempHomeOn("darwin", () => refresh([], {
     discoverFn: () => ["agent-infra"],
     execFn: () => {
       const error = new Error(
         'Command failed: security find-generic-password {"claudeAiOauth":{"accessToken":"sk-ant-oat01-123456789012345678901234567890"}}'
-      );
+      ) as Error & { stderr?: Buffer };
       error.stderr = Buffer.from("security: errSecAuthFailed: Authorization failed.");
       throw error;
     },
@@ -402,7 +425,7 @@ test("refresh emits keychain error detail and guidance for non-locked failures",
 });
 
 test("refresh uses env override credentials without touching keychain", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
   const previousOverride = process.env.AGENT_INFRA_CLAUDE_CREDENTIALS_FILE;
 
   try {
@@ -435,8 +458,8 @@ test("refresh uses env override credentials without touching keychain", async ()
 });
 
 test("refresh continues on per-project sync failure and exits 1 at end", async () => {
-  const { refresh } = await loadFreshEsm("lib/sandbox/commands/refresh.js");
-  const stderr = [];
+  const { refresh } = await loadFreshEsm<RefreshModule>("lib/sandbox/commands/refresh.js");
+  const stderr: string[] = [];
 
   await withTempHomeOn("darwin", async (home) => {
     fs.writeFileSync(path.join(home, ".agent-infra"), "x", "utf8");

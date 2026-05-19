@@ -1,4 +1,3 @@
-// @ts-nocheck
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,19 +9,26 @@ const RUNTIMES_DIR = path.join(
   'runtimes'
 );
 
-function listRuntimeFragments() {
+type DockerfileConfig = {
+  repoRoot: string;
+  project: string;
+  dockerfile: string | null;
+  runtimes: string[];
+};
+
+function listRuntimeFragments(): string[] {
   return fs.readdirSync(RUNTIMES_DIR)
     .filter((file) => file.endsWith('.dockerfile'))
     .map((file) => file.replace(/\.dockerfile$/, ''));
 }
 
-export function availableRuntimes() {
+export function availableRuntimes(): string[] {
   return listRuntimeFragments()
     .filter((name) => name !== 'base' && name !== 'ai-tools')
     .sort();
 }
 
-function dockerfileContent(config) {
+function dockerfileContent(config: DockerfileConfig): string {
   if (config.dockerfile) {
     const customPath = path.resolve(config.repoRoot, config.dockerfile);
     if (!fs.existsSync(customPath)) {
@@ -53,14 +59,14 @@ function dockerfileContent(config) {
   return `${content}\n`;
 }
 
-export function dockerfileSignature(config) {
+export function dockerfileSignature(config: DockerfileConfig): string {
   return createHash('sha256')
     .update(dockerfileContent(config))
     .digest('hex')
     .slice(0, 12);
 }
 
-export function prepareDockerfile(config) {
+export function prepareDockerfile(config: DockerfileConfig): { path: string; signature: string; cleanup: () => void } {
   if (config.dockerfile) {
     const customPath = path.resolve(config.repoRoot, config.dockerfile);
     if (!fs.existsSync(customPath)) {
@@ -87,7 +93,7 @@ export function prepareDockerfile(config) {
   };
 }
 
-export function composeDockerfile(config) {
+export function composeDockerfile(config: DockerfileConfig): string {
   const content = dockerfileContent(config);
 
   const tempPath = path.join(os.tmpdir(), `${config.project}-sandbox.Dockerfile`);
