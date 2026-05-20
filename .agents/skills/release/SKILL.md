@@ -162,7 +162,7 @@ git checkout -- .
 2. **不自动推送**：所有操作仅在本地执行；用户手动推送
 3. **发布前验证**：检查当前分支，并在本技能内运行 `npm test`
 4. **内联产物**：版本更新后必须运行 `node scripts/build-inline.js`，否则嵌入的版本号和默认配置会过期
-5. **npm 自动发布**：推送标签会触发 CI 中的 `npm publish`；发布凭证由 CI OIDC + npm Trusted Publishing 自动提供（一次性维护者配置见 `RELEASE.md`），无需配置长期 `NPM_TOKEN`
+5. **npm 自动发布**：推送标签会触发 CI 中的 `npm publish`；发布凭证由 CI OIDC + npm Trusted Publishing 自动提供（一次性维护者配置见 `RELEASING.md` 的 Trusted Publisher 章节），无需配置长期 `NPM_TOKEN`
 6. **版本替换范围**：通过搜索确定需要更新哪些文件；排除 AI 工具目录
 7. **适配你的项目**：以上版本更新步骤是通用的；请根据你的项目版本方案进行定制
 8. **里程碑联动**：发布时自动创建下一轮里程碑；如果里程碑体系未初始化，建议先运行 `init-milestones`

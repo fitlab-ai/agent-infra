@@ -166,7 +166,7 @@ npm test
 
 遵循项目的发布计划和流程。在发布新版本时，请按照标签管理的规定创建一个新的 `tag`。
 
-维护者请参阅 [RELEASE.md](./RELEASE.md) 了解 npm 发布流程与一次性 Trusted Publisher 配置。
+维护者请参阅 [RELEASING.md](./RELEASING.md) 了解 npm 发布流程与 Trusted Publisher 一次性配置。
 
 ## 问题和需求跟踪
 

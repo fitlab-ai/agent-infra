@@ -39,7 +39,30 @@
 - `npm test` 全部通过
 - 待发布内容已经过代码审查
 - 本次变更的 PR 标签和标题足以生成准确的 GitHub Release Notes
-- npmjs.com 已为 `@fitlab-ai/agent-infra` 配置 GitHub Actions Trusted Publisher（详见 [`RELEASE.md`](./RELEASE.md)）
+- npmjs.com 已为 `@fitlab-ai/agent-infra` 配置 GitHub Actions Trusted Publisher（绑定字段见下文 [npm Trusted Publisher 配置](#npm-trusted-publisher-配置)）
+
+## npm Trusted Publisher 配置
+
+npm 发布走 GitHub Actions OIDC + npm Trusted Publishing，CI 不再读取长期 `NPM_TOKEN`。首次切换前，维护者必须在 npmjs.com 完成一次性绑定。
+
+### 一次性绑定字段（npmjs.com 侧）
+
+到 `https://www.npmjs.com/package/@fitlab-ai/agent-infra/access` → **Publishing access** → **Add Trusted Publisher**，填写：
+
+| 字段 | 取值 |
+|---|---|
+| Publisher | GitHub Actions |
+| Organization or user | `fitlab-ai` |
+| Repository | `agent-infra` |
+| Workflow filename | `release.yml` |
+| Environment name | 留空 |
+
+`Workflow filename` 必须与 `.github/workflows/release.yml` 完全一致；如未来重命名 workflow，需同步更新 npmjs.com 端绑定，否则发布步骤会因 OIDC 声明不匹配而 401/403。
+
+### 设计取舍
+
+- **Environment name 留空**：避免在 npmjs.com 与 workflow 之间多维护一个必须精确匹配的字段；仓库当前无 environment 级 reviewer approval 需求。
+- **`NPM_TOKEN` secret 不在代码中自动删除**：删除是一次性治理动作，必须由维护者在首次 OIDC 发布验证通过后手动到 GitHub Settings 执行。代码自动删除会破坏 [回滚到 token 发布模式（应急）](#回滚到-token-发布模式应急) 的兜底路径。
 
 ## 标准发布流程
 
@@ -99,7 +122,7 @@ git push origin vX.Y.Z
 
 发布前建议再次确认：
 
-- npmjs.com 已完成 Trusted Publisher 绑定，字段值与 [`RELEASE.md`](./RELEASE.md) 一致
+- npmjs.com 已完成 Trusted Publisher 绑定，字段值与上文 [npm Trusted Publisher 配置](#npm-trusted-publisher-配置) 一致
 - `fitlab-ai` scope 或对应组织权限已经在 npm 准备完成
 - 目标版本尚未在 npm registry 中存在
 
@@ -121,6 +144,8 @@ git push origin vX.Y.Z
 
 ## 回滚流程
 
+### 撤回错误版本（tag 回滚）
+
 如果本地发布准备完成后发现版本错误，可按 release 技能中的回滚步骤处理：
 
 ```bash
@@ -135,6 +160,17 @@ git checkout -- .
 git push origin --delete vX.Y.Z
 gh release delete vX.Y.Z --yes
 ```
+
+### 回滚到 token 发布模式（应急）
+
+如果首次 OIDC 发布因 npmjs.com Trusted Publisher 绑定缺失或字段不正确而失败：
+
+1. `git revert` 移除 release.yml 中删除 `NODE_AUTH_TOKEN` / `secrets.NPM_TOKEN` 的那次改动，恢复 token 发布路径。
+2. 如已删除 `NPM_TOKEN` GitHub secret，在 Settings → Secrets 重新生成。
+3. 重新推 tag 触发 release workflow，确认在 token 模式下能正常发包。
+4. 在不阻塞发布的窗口外，单独排查 npmjs.com Trusted Publisher 绑定字段，修复后再用新 alpha tag 重做 OIDC 切换。
+
+应急原则：先恢复已知可用的发布路径，再排查 npmjs.com 配置；不要在 release 卡住时反复改动 workflow。
 
 ## 后续优化边界
 
