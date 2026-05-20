@@ -2,27 +2,44 @@ name: Sandbox Linux E2E
 
 on:
   pull_request:
-    paths:
-      - "bin/cli.ts"
-      - "lib/sandbox/**"
-      - "install.sh"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/sandbox-linux-e2e.yml"
   push:
     branches:
       - main
-    paths:
-      - "bin/cli.ts"
-      - "lib/sandbox/**"
-      - "install.sh"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/sandbox-linux-e2e.yml"
   workflow_dispatch:
 
+# The workflow runs on every PR / push so its required status checks can
+# always report. A `detect-changes` job decides whether the real sandbox
+# lifecycle should execute; downstream jobs gate every step on its output
+# but never job-level skip, so each required check still reports success.
+
 jobs:
+  detect-changes:
+    name: Detect sandbox-relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      sandbox: ${{ steps.changed.outputs.sandbox }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Filter changed paths
+        id: changed
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            sandbox:
+              - 'bin/cli.ts'
+              - 'lib/sandbox/**'
+              - 'install.sh'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/sandbox-linux-e2e.yml'
+
   sandbox-linux:
+    needs: detect-changes
     name: Linux native Docker sandbox lifecycle (${{ matrix.mode }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -33,26 +50,35 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Skip when sandbox paths unchanged
+        if: needs.detect-changes.outputs.sandbox != 'true'
+        run: echo "No sandbox-relevant changes; reporting success without running the full lifecycle."
+
       - name: Checkout repository
+        if: needs.detect-changes.outputs.sandbox == 'true'
         uses: actions/checkout@v6
 
       - name: Setup Node.js
+        if: needs.detect-changes.outputs.sandbox == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
+        if: needs.detect-changes.outputs.sandbox == 'true'
         run: npm ci
 
       - name: Build
+        if: needs.detect-changes.outputs.sandbox == 'true'
         run: npm run build
 
       - name: Link local CLI
+        if: needs.detect-changes.outputs.sandbox == 'true'
         run: npm link
 
       - name: Setup rootless Docker
-        if: matrix.mode == 'rootless'
+        if: needs.detect-changes.outputs.sandbox == 'true' && matrix.mode == 'rootless'
         run: |
           set -euxo pipefail
           sudo apt-get update
@@ -100,6 +126,7 @@ jobs:
           docker info
 
       - name: Prepare host state
+        if: needs.detect-changes.outputs.sandbox == 'true'
         run: |
           mkdir -p "$HOME/.claude"
           cat > "$HOME/.claude/.credentials.json" <<'JSON'
@@ -112,6 +139,7 @@ jobs:
           JSON
 
       - name: Prepare test repository
+        if: needs.detect-changes.outputs.sandbox == 'true'
         run: |
           mkdir -p /tmp/test-repo/.agents
           cd /tmp/test-repo
@@ -134,6 +162,7 @@ jobs:
           git commit -m "chore: prepare linux sandbox e2e fixture"
 
       - name: Run sandbox lifecycle
+        if: needs.detect-changes.outputs.sandbox == 'true'
         working-directory: /tmp/test-repo
         run: |
           docker info
@@ -144,7 +173,7 @@ jobs:
           docker exec "$container" sh -lc 'echo hello && node --version'
 
       - name: Cleanup sandbox artifacts
-        if: always()
+        if: always() && needs.detect-changes.outputs.sandbox == 'true'
         run: |
           docker ps -aq --filter "label=linux-e2e.sandbox" | xargs -r docker rm -f
           docker images -q --filter "label=linux-e2e.sandbox" | xargs -r docker rmi -f
@@ -153,6 +182,7 @@ jobs:
           rm -rf "$HOME/.agent-infra/worktrees/linux-e2e" "$HOME/.agent-infra/sandboxes"
 
   sandbox-linux-debian:
+    needs: detect-changes
     name: Linux native Docker sandbox lifecycle (debian-12)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -167,31 +197,42 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Skip when sandbox paths unchanged
+        if: needs.detect-changes.outputs.sandbox != 'true'
+        run: echo "No sandbox-relevant changes; reporting success without running the full lifecycle."
+
       - name: Install host prerequisites
+        if: needs.detect-changes.outputs.sandbox == 'true'
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
             ca-certificates curl git xz-utils docker.io
 
       - name: Checkout repository
+        if: needs.detect-changes.outputs.sandbox == 'true'
         uses: actions/checkout@v6
 
       - name: Setup Node.js
+        if: needs.detect-changes.outputs.sandbox == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
+        if: needs.detect-changes.outputs.sandbox == 'true'
         run: npm ci
 
       - name: Build
+        if: needs.detect-changes.outputs.sandbox == 'true'
         run: npm run build
 
       - name: Link local CLI
+        if: needs.detect-changes.outputs.sandbox == 'true'
         run: npm link
 
       - name: Prepare host state
+        if: needs.detect-changes.outputs.sandbox == 'true'
         # Keep in sync with sandbox-linux job lifecycle.
         run: |
           mkdir -p "$HOME/.claude"
@@ -205,6 +246,7 @@ jobs:
           JSON
 
       - name: Prepare test repository
+        if: needs.detect-changes.outputs.sandbox == 'true'
         # Keep in sync with sandbox-linux job lifecycle.
         run: |
           mkdir -p "$DEBIAN_TEST_REPO/.agents"
@@ -228,6 +270,7 @@ jobs:
           git commit -m "chore: prepare linux sandbox e2e fixture"
 
       - name: Run sandbox lifecycle
+        if: needs.detect-changes.outputs.sandbox == 'true'
         working-directory: ${{ env.DEBIAN_TEST_REPO }}
         run: |
           docker info
@@ -238,7 +281,7 @@ jobs:
           docker exec "$container" sh -lc 'echo hello && node --version'
 
       - name: Cleanup sandbox artifacts
-        if: always()
+        if: always() && needs.detect-changes.outputs.sandbox == 'true'
         run: |
           docker ps -aq --filter "label=linux-e2e.sandbox" | xargs -r docker rm -f
           docker images -q --filter "label=linux-e2e.sandbox" | xargs -r docker rmi -f
