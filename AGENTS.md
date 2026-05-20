@@ -67,7 +67,8 @@
 # 安装依赖：开发检出后必须先安装真实 npm 依赖
 npm install
 
-# 构建项目：无需构建，项目由 Node.js strip-types 直跑 TypeScript 源文件
+# 构建项目：编译 TypeScript 源文件到 dist/
+npm run build
 
 # 运行测试
 npm test
@@ -95,7 +96,7 @@ npm test
 
 ```
 ├── bin/                           # CLI 可执行文件
-│   └── cli.ts                     # 主 CLI（Node.js strip-types）
+│   └── cli.ts                     # 主 CLI TypeScript 源文件
 ├── .agents/                       # AI 协作配置与工作区
 │   ├── .airc.json                 # 项目配置
 │   ├── workspace/                 # 任务工作区
@@ -109,15 +110,15 @@ npm test
 
 ## 测试要求
 
-- 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 22.6.0）
+- 测试框架：Node.js 内置测试运行器（`node:test`，需 Node.js >= 22）
 - 运行命令：`npm test`
 - 测试覆盖：模板文件完整性、CLI 初始化流程、占位符渲染验证
 
 ### TypeScript 规范
 
-- 项目源码使用 Node.js strip-types 直跑 `.ts`，运行时要求 Node.js >= 22.6.0。
+- 项目源码使用 TypeScript 编写，通过 `tsc` 编译到 `dist/` 后发布；运行时要求 Node.js >= 22。开发态可直接 `node --experimental-strip-types ./bin/cli.ts`。
 - TypeScript 只使用 erasable syntax：禁止 `enum`、值级 `namespace`、class 参数属性、装饰器、`import =` 和 `export =`。
-- ESM import 继续写 `.js` 后缀，由 Node/TypeScript 按 NodeNext 规则解析到 `.ts` 源文件。
+- ESM 相对 import 在源码中继续写 `.ts` 后缀，`tsc` 通过 `rewriteRelativeImportExtensions` 输出 `.js` 后缀到 `dist/`。
 
 ### 测试编写规约
 

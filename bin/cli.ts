@@ -1,11 +1,11 @@
-#!/usr/bin/env -S node --experimental-strip-types --no-warnings
+#!/usr/bin/env node
 import { VERSION } from '../lib/version.ts';
 
 // Node.js version check
-const [major = 0, minor = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
-if (major < 22 || (major === 22 && minor < 6)) {
+const [major = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
+if (major < 22) {
   process.stderr.write(
-    `agent-infra requires Node.js >= 22.6.0 (current: ${process.version})\n`
+    `agent-infra requires Node.js >= 22 (current: ${process.version})\n`
   );
   process.exit(1);
 }

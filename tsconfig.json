@@ -5,8 +5,11 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "rootDir": ".",
-    "noEmit": true,
+    "outDir": "dist",
+    "declaration": false,
+    "sourceMap": true,
     "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
@@ -16,8 +19,8 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "allowJs": false,
-    "erasableSyntaxOnly": true
+    "erasableSyntaxOnly": false
   },
-  "include": ["bin/**/*.ts", "lib/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["node_modules", "tests/fixtures", "templates", "src", "scripts", ".agents"]
+  "include": ["bin/**/*.ts", "lib/**/*.ts"],
+  "exclude": ["node_modules", "tests/fixtures", "templates", "src", "scripts", ".agents", "dist"]
 }

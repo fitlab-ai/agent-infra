@@ -12,6 +12,7 @@
 # Node.js dependencies
 node_modules/
 *.tsbuildinfo
+dist/
 
 # OS files
 .DS_Store

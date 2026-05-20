@@ -17,6 +17,13 @@ test("package metadata supports scoped npm publishing", () => {
     access: "public",
     registry: "https://registry.npmjs.org/"
   });
+  assert.deepEqual(pkg.files, [
+    "dist/",
+    "!dist/**/*.map",
+    "bin/cli.ts",
+    "lib/",
+    "templates/"
+  ]);
   assert.deepEqual(Object.keys(pkg.dependencies).sort(), [
     "@clack/prompts",
     "cross-spawn",
@@ -25,7 +32,7 @@ test("package metadata supports scoped npm publishing", () => {
   ]);
   assert.equal(
     pkg.scripts.prepublishOnly,
-    "node scripts/build-inline.js --check && node --experimental-strip-types --no-warnings --test tests/cli/*.test.ts tests/templates/*.test.ts tests/core/*.test.ts tests/scripts/*.test.ts"
+    "npm run build && node --experimental-strip-types --no-warnings --test tests/cli/*.test.ts tests/templates/*.test.ts tests/core/*.test.ts tests/scripts/*.test.ts"
   );
 });
 

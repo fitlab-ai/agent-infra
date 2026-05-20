@@ -133,11 +133,10 @@ function filePath(relativePath: string): string {
   return directPath;
 }
 
-const NODE_TS_FLAGS = ["--experimental-strip-types", "--no-warnings"];
-const CLI_PATH = filePath("bin/cli.ts");
+const CLI_PATH = filePath("dist/bin/cli.js");
 
 function cliArgs(...args: string[]): string[] {
-  return [...NODE_TS_FLAGS, CLI_PATH, ...args];
+  return [CLI_PATH, ...args];
 }
 
 function cliCommand(...args: string[]): string {
@@ -640,7 +639,6 @@ const commandSpecs: Record<string, CommandSpec> = {
 export {
   buildCommandSyncFiles,
   CLI_PATH,
-  NODE_TS_FLAGS,
   commandSpecs,
   cliArgs,
   cliCommand,

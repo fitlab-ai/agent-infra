@@ -16,7 +16,7 @@
   <a href="https://www.npmjs.com/package/@fitlab-ai/agent-infra"><img src="https://img.shields.io/npm/v/@fitlab-ai/agent-infra" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/@fitlab-ai/agent-infra"><img src="https://img.shields.io/npm/dm/@fitlab-ai/agent-infra" alt="npm downloads"></a>
   <a href="License.txt"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-%3E%3D22.6.0-brightgreen?logo=node.js" alt="Node.js >= 22.6.0"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-%3E%3D22-brightgreen?logo=node.js" alt="Node.js >= 22"></a>
   <a href="https://github.com/fitlab-ai/agent-infra/releases"><img src="https://img.shields.io/github/v/release/fitlab-ai/agent-infra" alt="GitHub release"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
 </p>
@@ -311,7 +311,7 @@ agent-infra 的结构刻意保持简单：引导 CLI 负责生成种子配置，
 
 ## 平台支持
 
-agent-infra 支持 macOS、Linux 和 Windows。CLI 本身只需要 Node.js (>=22.6.0)；容器相关功能（`ai sandbox *`）额外需要 Docker。
+agent-infra 支持 macOS、Linux 和 Windows。CLI 本身只需要 Node.js (>=22)；容器相关功能（`ai sandbox *`）额外需要 Docker。
 
 ### 沙箱引擎选择
 
@@ -432,7 +432,7 @@ Rootless 模式的已知差异：
 
 ### Windows
 
-- `ai init`、`ai sync` 等：执行 `npm install -g @fitlab-ai/agent-infra` 后理论上可用（需 Node.js >= 22.6.0）。本期未做主动验证。
+- `ai init`、`ai sync` 等：执行 `npm install -g @fitlab-ai/agent-infra` 后理论上可用（需 Node.js >= 22）。本期未做主动验证。
 - `ai sandbox *`：Windows 通过 WSL2 + Docker Desktop 支持。
 
 运行 `ai sandbox create` 前，请先准备 Windows 11、WSL2、默认 Linux distribution、Docker Desktop，并在 Docker Desktop 中为该 distribution 启用 WSL integration。
