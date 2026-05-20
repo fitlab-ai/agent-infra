@@ -165,10 +165,19 @@ gh release delete vX.Y.Z --yes
 
 如果首次 OIDC 发布因 npmjs.com Trusted Publisher 绑定缺失或字段不正确而失败：
 
-1. `git revert` 移除 release.yml 中删除 `NODE_AUTH_TOKEN` / `secrets.NPM_TOKEN` 的那次改动，恢复 token 发布路径。
+1. `git revert` 移除 release.yml 中删除 `NODE_AUTH_TOKEN` / `secrets.NPM_TOKEN` 的那次改动，让默认分支重新包含 token 模式 workflow，并记下这次恢复提交的 SHA（下文记为 `<revert-commit>`）。
 2. 如已删除 `NPM_TOKEN` GitHub secret，在 Settings → Secrets 重新生成。
-3. 重新推 tag 触发 release workflow，确认在 token 模式下能正常发包。
-4. 在不阻塞发布的窗口外，单独排查 npmjs.com Trusted Publisher 绑定字段，修复后再用新 alpha tag 重做 OIDC 切换。
+3. 重建已失败的 tag，让它指向 `<revert-commit>`——release workflow 读的是 tag 指向 commit 里的 workflow 文件，仅在分支上 revert 而不重建 tag，重跑仍会用回旧 commit 里的 OIDC workflow：
+
+   ```bash
+   git push origin --delete vX.Y.Z
+   gh release delete vX.Y.Z --yes        # 删除 tag 创建时自动生成的 GitHub Release
+   git tag -f vX.Y.Z <revert-commit>
+   git push origin vX.Y.Z
+   ```
+
+   注意：这会改变 `vX.Y.Z` 指向的 commit。如果发布策略不接受 tag 改写（签名审计、下游缓存等），改为在 `<revert-commit>` 上发布下一个补丁版本号（即 `vX.Y.{Z+1}`，例如失败的 `v1.2.3` 改发 `v1.2.4`）。
+4. 等 token 模式 release workflow 成功并完成 npm publish 后，再在另外的窗口排查 npmjs.com Trusted Publisher 绑定字段；修复后用新 alpha tag 重做 OIDC 切换。
 
 应急原则：先恢复已知可用的发布路径，再排查 npmjs.com 配置；不要在 release 卡住时反复改动 workflow。
 
