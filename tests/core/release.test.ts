@@ -43,7 +43,8 @@ test("release workflow publishes to npm on tag push", () => {
   assert.match(workflow, /registry-url: https:\/\/registry\.npmjs\.org/);
   assert.match(workflow, /run: npm test/);
   assert.match(workflow, /package\.json version \$PACKAGE_VERSION does not match tag \$GITHUB_REF_NAME/);
-  assert.match(workflow, /NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_TOKEN \}\}/);
+  assert.match(workflow, /id-token: write/);
+  assert.match(workflow, /npm install -g npm@11\b/);
   assert.match(workflow, /npm publish --provenance/);
 });
 
@@ -91,7 +92,8 @@ test("release documentation reflects CI-driven npm publishing", () => {
   const releaseScript = read(".agents/skills/release/scripts/manage-milestones.sh");
   const releaseTemplateScript = read("templates/.agents/skills/release/scripts/manage-milestones.github.sh");
 
-  assert.match(releasing, /NPM_TOKEN/);
+  assert.match(releasing, /Trusted Publisher/);
+  assert.match(releasing, /GitHub Actions OIDC/);
   assert.match(releasing, /npm publish --provenance/);
   assert.match(releasing, /@fitlab-ai\/agent-infra/);
   assert.match(releasing, /推送标签后由 CI 自动执行/);

@@ -23,6 +23,9 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: npm
 
+      - name: Upgrade npm to a Trusted-Publishing-capable version
+        run: npm install -g npm@11
+
       - name: Verify package version matches tag
         shell: bash
         run: |
@@ -41,6 +44,4 @@ jobs:
         run: npm test
 
       - name: Publish package
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --provenance

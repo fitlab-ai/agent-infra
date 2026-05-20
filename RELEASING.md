@@ -39,7 +39,7 @@
 - `npm test` 全部通过
 - 待发布内容已经过代码审查
 - 本次变更的 PR 标签和标题足以生成准确的 GitHub Release Notes
-- 仓库中的 `NPM_TOKEN` GitHub Actions secret 有效，并具备 `@fitlab-ai/agent-infra` 发布权限
+- npmjs.com 已为 `@fitlab-ai/agent-infra` 配置 GitHub Actions Trusted Publisher（详见 [`RELEASE.md`](./RELEASE.md)）
 
 ## 标准发布流程
 
@@ -71,10 +71,11 @@ git push origin vX.Y.Z
 
 - checkout 代码
 - 设置 Node.js 环境
+- 升级 npm 到支持 Trusted Publishing 的版本
 - 再次执行测试
 - 使用 `gh release create --generate-notes` 创建 GitHub Release
 - 校验 `package.json` 版本与 tag 一致
-- 使用 `npm publish --provenance` 发布 `@fitlab-ai/agent-infra`
+- 使用 GitHub Actions OIDC 和 `npm publish --provenance` 发布 `@fitlab-ai/agent-infra`
 
 `.github/release.yml` 负责定义自动生成发布说明时的分类规则。
 
@@ -94,11 +95,11 @@ git push origin vX.Y.Z
 
 - 校验 `package.json` 中的版本号与 Git tag 一致
 - 运行 `npm test`
-- 使用 `NODE_AUTH_TOKEN=${{ secrets.NPM_TOKEN }}` 执行 `npm publish --provenance`
+- 通过 GitHub Actions OIDC 和 npm Trusted Publishing 执行 `npm publish --provenance`
 
 发布前建议再次确认：
 
-- 仓库已配置有效的 `NPM_TOKEN` secret
+- npmjs.com 已完成 Trusted Publisher 绑定，字段值与 [`RELEASE.md`](./RELEASE.md) 一致
 - `fitlab-ai` scope 或对应组织权限已经在 npm 准备完成
 - 目标版本尚未在 npm registry 中存在
 
