@@ -19,6 +19,7 @@
       "required_sections": [
         "审查摘要",
         "问题清单",
+        "环境性遗留",
         "结论与建议"
       ],
       "required_patterns": [

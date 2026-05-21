@@ -53,7 +53,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update task.md and append:
-`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n} → {artifact-filename}`
+`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {artifact-filename}`
+
+Omit the bracketed segment when env-blocked = 0; append ` (+ {n} env-blocked)` when env-blocked > 0.
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
 - Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
@@ -85,6 +87,8 @@ Choose exactly one branch based on the findings:
 - no blockers, but major or minor findings -> approved with issues
 - blockers that can be fixed in a focused pass -> changes requested
 - major redesign or re-implementation needed -> rejected
+
+env-blocked counts do not influence branch selection; they are appended to the summary line only.
 
 > The full four-branch output templates, selection rules, and prohibition clauses live in `reference/output-templates.md`. Read `reference/output-templates.md` before reporting the review result.
 

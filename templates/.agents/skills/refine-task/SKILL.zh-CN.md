@@ -10,6 +10,7 @@ description: "处理代码审查反馈并修复问题"
 ## 行为边界 / 关键规则
 
 - 只修复审查产物中记录的问题
+- env-blocked 项不在修复范围内：refinement 报告必须如实保留这些项并记录“不在 AI 修复范围（环境性遗留）”，不能为了清空报告做 no-op 改动
 - 绝不自动执行 `git add` 或 `git commit`
 - 执行本技能后，你**必须**立即更新 task.md
 
@@ -59,7 +60,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 更新 task.md：
 - 审查 `## 需求` 段落，仅把因本轮修复而新满足且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
 - 追加：
-  `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues → {refinement-artifact}`
+  `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues[, skipped {n} env-blocked] → {refinement-artifact}`
+
+env-blocked > 0 时附加 `, skipped {n} env-blocked`；env-blocked = 0 时省略。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测

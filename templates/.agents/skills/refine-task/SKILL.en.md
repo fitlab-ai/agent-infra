@@ -10,6 +10,7 @@ Fix review findings and produce `refinement.md` or `refinement-r{N}.md`.
 ## Boundary / Critical Rules
 
 - Fix only the issues documented in review artifacts
+- env-blocked findings are outside the repair scope: the refinement report must preserve them and record "outside AI repair scope (environment-blocked)" instead of making no-op edits to clear the report
 - Never auto-run `git add` or `git commit`
 - After executing this skill, you **must** immediately update task.md
 
@@ -59,7 +60,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 Update task.md:
 - review the `## Requirements` section and only change items from `- [ ]` to `- [x]` when they are newly satisfied by this round's fixes and passing tests
 - append:
-  `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues → {refinement-artifact}`
+  `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues[, skipped {n} env-blocked] → {refinement-artifact}`
+
+Append `, skipped {n} env-blocked` when env-blocked > 0; omit it when env-blocked = 0.
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
 - Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection

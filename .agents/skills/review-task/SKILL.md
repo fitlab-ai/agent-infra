@@ -53,7 +53,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 更新 task.md，并追加：
-`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n} → {artifact-filename}`
+`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {artifact-filename}`
+
+env-blocked = 0 时省略括号部分；env-blocked > 0 时附加 ` (+ {n} env-blocked)`。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
@@ -85,6 +87,8 @@ node .agents/scripts/validate-artifact.js gate review-task .agents/workspace/act
 - 无 blocker，但有 major 或 minor -> 通过但有问题
 - 有 blocker，且可集中修复 -> 需要修改
 - 需要重大返工或重新实现 -> 拒绝
+
+env-blocked 的数量不参与分支选择，仅在数字摘要末尾附带显示。
 
 > 完整的 4 分支输出模板、判断规则和禁止条款见 `reference/output-templates.md`。向用户汇报审查结论前先读取 `reference/output-templates.md`。
 

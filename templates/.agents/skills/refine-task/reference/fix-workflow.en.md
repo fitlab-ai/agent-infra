@@ -20,6 +20,14 @@ Detailed priority rules:
 - Minor issues are optional only after Blockers and Majors are resolved
 - If you disagree with a finding, record that disagreement under unresolved issues instead of silently skipping it
 
+### Meta-category: env-blocked
+
+env-blocked findings are outside the repair scope. Handling rules:
+- do not write code changes for these findings
+- list them unchanged in the refinement report's "Environment-Blocked Handling" section and mark them "outside AI repair scope"
+- do not repeat them under unresolved issues, to avoid visually double-counting them
+- their destination is the PR description, where maintainers carry them as a "manual verification required" checklist
+
 ## Execute the Fixes
 
 For each fix:
@@ -51,6 +59,7 @@ Refinement status:
 - Blockers fixed: {fixed-blockers}/{total-blockers}
 - Major issues fixed: {fixed-majors}/{total-majors}
 - Minor issues fixed: {fixed-minors}/{total-minors}
+- [If env-blocked > 0] env-blocked skipped: {count}
 - All tests passing: {yes/no}
 - Review input: {review-artifact}
 - Refinement artifact: {refinement-artifact}
