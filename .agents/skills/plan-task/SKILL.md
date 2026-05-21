@@ -11,6 +11,8 @@ description: "为任务设计技术方案和实施计划"
 - 这是一个**强制性的人工审查检查点** —— 不要自动进入实现阶段
 - 执行本技能后，你**必须**立即更新 task.md 中的任务状态
 
+版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
+
 ## 执行步骤
 
 ### 1. 验证前置条件
@@ -88,6 +90,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `current_step`：technical-design
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
+- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - 记录本轮方案产物：`{plan-artifact}`（Round `{plan-round}`）
 - 如任务模板包含 `## 设计` 段落，更新为指向 `{plan-artifact}` 的链接
 - 在工作流进度中标记 technical-design 为已完成，并注明实际轮次（如果任务模板支持）

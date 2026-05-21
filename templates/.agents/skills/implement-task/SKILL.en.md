@@ -14,6 +14,8 @@ Implement the approved task and produce `implementation.md` or `implementation-r
 - Create a new implementation artifact for each round and never overwrite an older one
 - After executing this skill, you **must** immediately update task.md
 
+Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
+
 ## Steps
 
 ### 1. Verify Prerequisites
@@ -88,6 +90,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `current_step`: implementation
 - `assigned_to`: {current agent}
 - `updated_at`: {current time}
+- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
 - review the `## Requirements` section and only change items from `- [ ]` to `- [x]` when they are clearly satisfied by this round's implemented code and passing tests
 - record `{implementation-artifact}` for Round `{implementation-round}`
 - append:

@@ -2,6 +2,8 @@
 
 在选择提交后的任务状态分支之前先读取本文件。
 
+更新任务元数据前，先读取 `.agents/rules/version-stamp.md`，并随 `updated_at` 一起刷新 `agent_infra_version`。
+
 ## 更新关联任务状态
 
 先获取当前时间：
@@ -53,6 +55,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 如果仍有工作待完成：
 - 更新 `task.md` 中的 `updated_at`
+- 按 `.agents/rules/version-stamp.md` 更新 `agent_infra_version`
 - 记录这次提交完成了什么
 - 记录下一位人类或 agent 需要继续做什么
 
@@ -61,6 +64,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 如果这次提交把工作移交给代码审查：
 - 将 `current_step` 更新为 `code-review`
 - 更新 `updated_at`
+- 按 `.agents/rules/version-stamp.md` 更新 `agent_infra_version`
 - 在工作流状态中标记实现阶段已完成
 
 必带下一步命令：
@@ -76,6 +80,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 如果下一步是创建 Pull Request：
 - 更新 `updated_at`
+- 按 `.agents/rules/version-stamp.md` 更新 `agent_infra_version`
 - 在 `task.md` 中记录 PR 计划
 
 必带下一步命令：

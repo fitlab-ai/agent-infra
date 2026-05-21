@@ -7,6 +7,8 @@ description: "Commit the current changes to Git"
 
 Create a Git commit without overwriting user work and update the related task state when needed.
 
+When updating related `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
+
 ## 1. Check Local Modifications (CRITICAL)
 
 Before any edit, inspect:

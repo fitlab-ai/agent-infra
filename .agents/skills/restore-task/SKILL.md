@@ -14,6 +14,8 @@ description: "从平台 Issue 评论还原本地任务文件"
 - 如果目标目录已存在，立即停止并提示用户先处理目录冲突
 - 执行本技能后，你**必须**立即更新恢复出的 `task.md`
 
+版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
+
 ## 执行步骤
 
 ### 1. 验证输入与环境
@@ -83,6 +85,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `status`：`active`
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
+- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 
 追加 Activity Log，说明任务已从平台 Issue 还原。
 

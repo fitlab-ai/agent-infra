@@ -7,6 +7,8 @@ description: "提交当前变更到 Git"
 
 在不覆盖用户本地工作的前提下创建 Git commit，并在需要时更新关联任务状态。
 
+更新关联 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
+
 ## 1. 检查本地修改（关键）
 
 在任何编辑前先检查：

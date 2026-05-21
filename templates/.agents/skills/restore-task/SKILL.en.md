@@ -14,6 +14,8 @@ Restore local task workspace files from platform Issue comments that contain syn
 - Stop immediately if the target directory already exists and ask the user to resolve the conflict first
 - After executing this skill, you **must** immediately update the restored `task.md`
 
+Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
+
 ## Steps
 
 ### 1. Verify Input and Environment
@@ -83,6 +85,7 @@ Update the restored `task.md`:
 - `status`: `active`
 - `assigned_to`: {current AI agent}
 - `updated_at`: {current time}
+- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
 
 Append an Activity Log entry indicating the task was restored from the platform Issue.
 

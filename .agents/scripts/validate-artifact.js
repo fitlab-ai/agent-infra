@@ -22,12 +22,14 @@ const DEFAULT_REQUIRED_FIELDS = [
   "status",
   "created_at",
   "updated_at",
+  "agent_infra_version",
   "current_step",
   "assigned_to"
 ];
 
 const DEFAULT_FRESHNESS_MINUTES = 30;
 const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?$/;
+const AGENT_INFRA_VERSION_PATTERN = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const ACTIVITY_LOG_PATTERN = /^- (\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?) — \*\*(.+?)\*\* by (.+?) — (.+)$/;
 const BRANCH_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -212,8 +214,24 @@ function checkTaskMeta({ taskDir, config }) {
   const metadata = task.metadata;
   const requiredFields = config.required_fields || DEFAULT_REQUIRED_FIELDS;
   const missingFields = requiredFields.filter((field) => isBlank(metadata[field]));
-  if (missingFields.length > 0) {
-    return failResult("task-meta", `Missing required fields: ${missingFields.join(", ")}`);
+  const blockingMissingFields = missingFields.filter((field) => field !== "agent_infra_version");
+  const warnings = [];
+  if (missingFields.includes("agent_infra_version")) {
+    warnings.push("field 'agent_infra_version' missing — historical task or skipped version stamp");
+  }
+  if (blockingMissingFields.length > 0) {
+    return failResult("task-meta", `Missing required fields: ${blockingMissingFields.join(", ")}`);
+  }
+
+  if (
+    !isBlank(metadata.agent_infra_version) &&
+    metadata.agent_infra_version !== "unknown" &&
+    !AGENT_INFRA_VERSION_PATTERN.test(metadata.agent_infra_version)
+  ) {
+    return failResult(
+      "task-meta",
+      `Invalid agent_infra_version: ${metadata.agent_infra_version}`
+    );
   }
 
   const invalidDates = ["created_at", "updated_at", "completed_at", "blocked_at", "cancelled_at"]
@@ -272,7 +290,12 @@ function checkTaskMeta({ taskDir, config }) {
     }
   }
 
-  return passResult("task-meta", `Task metadata valid (${requiredFields.length} required fields checked)`);
+  const warningSuffix = warnings.length > 0 ? `; warnings: ${warnings.join("; ")}` : "";
+  return passResult(
+    "task-meta",
+    `Task metadata valid (${requiredFields.length} required fields checked${warningSuffix})`,
+    warnings
+  );
 }
 
 function validateTaskBranch(metadata) {
@@ -683,8 +706,12 @@ function buildSingleCheckSummary(status) {
   return "0 passed, 1 failed";
 }
 
-function passResult(type, message) {
-  return { type, status: "pass", message };
+function passResult(type, message, warnings = []) {
+  const result = { type, status: "pass", message };
+  if (warnings.length > 0) {
+    result.warnings = warnings;
+  }
+  return result;
 }
 
 function failResult(type, message, failType = "check_failed") {

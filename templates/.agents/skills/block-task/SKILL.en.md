@@ -17,6 +17,8 @@ description: "Mark a task as blocked and record the reason"
 - **Resource issues**: Missing access, waiting for external team, blocked by another task
 - **Decision needed**: Architecture decision pending, stakeholder approval required
 
+Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
+
 ## Steps
 
 ### 1. Verify Task Exists
@@ -47,6 +49,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `status`: blocked
 - `blocked_at`: {current timestamp}
 - `updated_at`: {current timestamp}
+- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Blocked** by {agent} — {one-line reason}

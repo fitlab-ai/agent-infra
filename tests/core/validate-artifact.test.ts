@@ -34,6 +34,7 @@ type ValidatorCheck = {
   type: string;
   status: string;
   fail_type?: string;
+  warnings?: string[];
 };
 type ValidatorPayload = {
   gate: string;
@@ -41,6 +42,7 @@ type ValidatorPayload = {
   type: string;
   status: string;
   message: string;
+  warnings?: string[];
 };
 
 function parseValidatorPayload(stdout: string): ValidatorPayload {
@@ -451,6 +453,94 @@ test("validate-artifact create-task task-meta rejects invalid branch naming", ()
     const result = runValidator(["check", "task-meta", taskDir, "--skill", "create-task"]);
     assert.equal(result.status, 1);
     assert.match(result.stdout, /Invalid branch/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact task-meta warns without blocking when agent_infra_version is missing", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-version-missing-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+
+  try {
+    write(path.join(taskDir, "task.md"), buildTaskContent());
+
+    const result = runValidator(["check", "task-meta", taskDir, "--skill", "implement-task"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /agent_infra_version.*missing/);
+
+    const payload = parseValidatorPayload(result.stdout);
+    assert.deepEqual(payload.warnings, [
+      "field 'agent_infra_version' missing — historical task or skipped version stamp"
+    ]);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact task-meta rejects malformed agent_infra_version", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-version-invalid-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+
+  try {
+    write(path.join(taskDir, "task.md"), buildTaskContent({
+      agent_infra_version: "0.6.1"
+    }));
+
+    const result = runValidator(["check", "task-meta", taskDir, "--skill", "implement-task"]);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /Invalid agent_infra_version/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact task-meta accepts unknown agent_infra_version fallback", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-version-unknown-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+
+  try {
+    write(path.join(taskDir, "task.md"), buildTaskContent({
+      agent_infra_version: "unknown"
+    }));
+
+    const result = runValidator(["check", "task-meta", taskDir, "--skill", "implement-task"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /agent_infra_version.*missing/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact task-meta accepts SemVer build metadata in agent_infra_version", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-version-build-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+
+  try {
+    write(path.join(taskDir, "task.md"), buildTaskContent({
+      agent_infra_version: "v0.6.1-alpha.0+build.7"
+    }));
+
+    const result = runValidator(["check", "task-meta", taskDir, "--skill", "implement-task"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /Invalid agent_infra_version/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact task-meta accepts stamped agent_infra_version", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-version-valid-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+
+  try {
+    write(path.join(taskDir, "task.md"), buildTaskContent({
+      agent_infra_version: "v0.6.1-alpha.0"
+    }));
+
+    const result = runValidator(["check", "task-meta", taskDir, "--skill", "implement-task"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /agent_infra_version.*missing/);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }

@@ -2,6 +2,8 @@
 
 Read this file before choosing the post-commit task-state branch.
 
+Before updating task metadata, read `.agents/rules/version-stamp.md` and refresh `agent_infra_version` together with `updated_at`.
+
 ## Update the Related Task State
 
 Get the current time first:
@@ -53,6 +55,7 @@ Next step - complete and archive the task:
 
 If more work is still pending:
 - update `updated_at` in `task.md`
+- update `agent_infra_version` from `.agents/rules/version-stamp.md`
 - record what this commit finished
 - record what the next human or agent action is
 
@@ -61,6 +64,7 @@ If more work is still pending:
 If this commit hands work over to code review:
 - update `current_step` to `code-review`
 - update `updated_at`
+- update `agent_infra_version` from `.agents/rules/version-stamp.md`
 - mark implementation as finished in the workflow state
 
 Required next-step commands:
@@ -76,6 +80,7 @@ Next step - code review:
 
 If the next step is Pull Request creation:
 - update `updated_at`
+- update `agent_infra_version` from `.agents/rules/version-stamp.md`
 - record the PR plan in `task.md`
 
 Required next-step commands:

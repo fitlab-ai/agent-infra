@@ -7,6 +7,10 @@ description: "创建 Pull Request 到目标分支"
 
 创建 Pull Request，并在与任务关联时立即补齐核心元数据和 reviewer 摘要。
 
+## 行为边界 / 关键规则
+
+版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
+
 ## 执行流程
 
 ### 1. 解析命令参数
@@ -72,7 +76,7 @@ description: "创建 Pull Request 到目标分支"
 date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
-如果获取到了 `{task-id}`，更新 task.md 的 `pr_number`、`updated_at`，并追加 PR Created 的 Activity Log，记录元数据同步和摘要发布结果。
+如果获取到了 `{task-id}`，更新 task.md 的 `pr_number`、`updated_at`、`agent_infra_version`，并追加 PR Created 的 Activity Log，记录元数据同步和摘要发布结果。
 
 ### 9. 完成校验
 

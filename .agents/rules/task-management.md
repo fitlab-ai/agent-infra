@@ -13,16 +13,24 @@
 ## 任务状态管理
 
 - 每次执行工作流命令后，必须立即更新对应任务的 `task.md`
-- 至少同步 `current_step`、`updated_at`、`assigned_to`，以及本轮产物引用
+- 至少同步 `current_step`、`updated_at`、`assigned_to`、`agent_infra_version`，以及本轮产物引用
+- 更新 `agent_infra_version` 前，先读取 `.agents/rules/version-stamp.md`
 - Activity Log 只能追加，不能覆盖历史记录
 
 ## 常见命令的状态更新要求
 
-- `import-issue`：更新 `current_step`、`updated_at`、`assigned_to`
-- `analyze-task`：更新 `current_step`、`updated_at`、`assigned_to`
-- `plan-task`：更新 `current_step`、`updated_at`
-- `implement-task`：更新 `current_step`、`updated_at`
-- `review-task`：更新 `current_step`、`updated_at`
-- `refine-task`：更新 `current_step`、`updated_at`
-- `complete-task`：更新 `status`、`completed_at`、`updated_at`
-- `block-task`：更新 `status`、`blocked_at`、`blocked_reason`
+- `create-task`：创建 `branch`、`workflow`、`status`、`created_at`、`updated_at`、`assigned_to`、`agent_infra_version`
+- `import-issue`：更新 `current_step`、`updated_at`、`assigned_to`、`agent_infra_version`
+- `import-codescan`：更新 `current_step`、`updated_at`、`assigned_to`、`agent_infra_version`
+- `import-dependabot`：更新 `current_step`、`updated_at`、`assigned_to`、`agent_infra_version`
+- `restore-task`：更新 `status`、`updated_at`、`assigned_to`、`agent_infra_version`
+- `analyze-task`：更新 `current_step`、`updated_at`、`assigned_to`、`agent_infra_version`
+- `plan-task`：更新 `current_step`、`updated_at`、`agent_infra_version`
+- `implement-task`：更新 `current_step`、`updated_at`、`agent_infra_version`
+- `review-task`：更新 `current_step`、`updated_at`、`agent_infra_version`
+- `refine-task`：更新 `current_step`、`updated_at`、`agent_infra_version`
+- `create-pr`：更新 `pr_number`、`updated_at`、`agent_infra_version`
+- `commit`：更新 `updated_at`、`agent_infra_version`；必要时更新 `current_step`（详见 `commit/reference/task-status-update.md`）
+- `complete-task`：更新 `status`、`current_step`、`completed_at`、`updated_at`、`agent_infra_version`
+- `block-task`：更新 `status`、`blocked_at`、`blocked_reason`、`updated_at`、`agent_infra_version`
+- `cancel-task`：更新 `status`、`cancelled_at`、`cancel_reason`、`updated_at`、`agent_infra_version`

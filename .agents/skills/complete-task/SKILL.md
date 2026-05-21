@@ -10,6 +10,8 @@ description: "标记任务完成并归档"
 - 本命令更新任务元数据并物理移动任务目录
 - 除非强制执行，不要转移有未完成工作流步骤的任务
 
+版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
+
 ## 执行步骤
 
 ### 1. 验证任务存在
@@ -58,8 +60,10 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 更新 `.agents/workspace/active/{task-id}/task.md`：
 - `status`：completed
+- `current_step`：completed
 - `completed_at`：{当前时间戳}
 - `updated_at`：{当前时间戳}
+- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - 标记所有工作流步骤为已完成
 - 逐项验证并勾选 `## 完成检查清单` 中的所有条目（将 `- [ ]` 改为 `- [x]`）
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：

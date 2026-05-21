@@ -17,6 +17,8 @@ description: "标记任务为阻塞状态并记录原因"
 - **资源问题**：缺少访问权限、等待外部团队、被其他任务阻塞
 - **需要决策**：待定的架构决策、需要利益相关者批准
 
+版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
+
 ## 执行步骤
 
 ### 1. 验证任务存在
@@ -47,6 +49,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `status`：blocked
 - `blocked_at`：{当前时间戳}
 - `updated_at`：{当前时间戳}
+- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Blocked** by {agent} — {一行原因}

@@ -48,6 +48,15 @@ test("cli version output stays in sync with package.json", () => {
   assert.equal(output.trim(), `agent-infra v${pkg.version}`);
 });
 
+test("cli version raw output returns the bare version string", () => {
+  const pkg = JSON.parse(read("package.json"));
+  const output = execFileSync(process.execPath, cliArgs("version", "--raw"), {
+    encoding: "utf8"
+  });
+
+  assert.equal(output.trim(), `v${pkg.version}`);
+});
+
 test("agent-infra init generates seed files in a temp directory", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-test-"));
   const cli = CLI_PATH;

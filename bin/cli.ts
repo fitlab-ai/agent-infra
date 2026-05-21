@@ -97,7 +97,11 @@ switch (command) {
     break;
   }
   case 'version': {
-    console.log(`agent-infra ${VERSION}`);
+    if (process.argv[3] === '--raw') {
+      console.log(VERSION);
+    } else {
+      console.log(`agent-infra ${VERSION}`);
+    }
     break;
   }
   case 'help':

@@ -10,6 +10,8 @@ description: "Mark a task as completed and archive it"
 - This command updates task metadata AND physically moves the task directory
 - Do not move a task that has incomplete workflow steps unless forced
 
+Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
+
 ## Steps
 
 ### 1. Verify Task Exists
@@ -58,8 +60,10 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 Update `.agents/workspace/active/{task-id}/task.md`:
 - `status`: completed
+- `current_step`: completed
 - `completed_at`: {current timestamp}
 - `updated_at`: {current timestamp}
+- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
 - Mark all workflow steps as complete
 - Verify and check off all items in `## Completion Checklist` (change `- [ ]` to `- [x]`)
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):

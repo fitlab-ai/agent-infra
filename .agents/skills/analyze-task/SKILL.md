@@ -11,6 +11,8 @@ description: "分析任务并输出需求分析文档"
 - 严格基于 `task.md` 中已有的需求、上下文和来源信息展开分析
 - 执行本技能后，你**必须**立即更新 task.md 中的任务状态
 
+版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
+
 ## 执行步骤
 
 ### 1. 验证前置条件
@@ -110,6 +112,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `current_step`：requirement-analysis
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
+- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - 记录本轮分析产物：`{analysis-artifact}`（Round `{analysis-round}`）
 - 如任务模板包含 `## 分析` 段落，更新为指向 `{analysis-artifact}` 的链接
 - 在工作流进度中标记 requirement-analysis 为已完成，并注明实际轮次（如果任务模板支持）

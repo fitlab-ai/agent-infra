@@ -7,6 +7,10 @@ description: "Create a Pull Request to a target branch"
 
 Create a Pull Request and, when task-related, sync the essential metadata and reviewer summary immediately.
 
+## Boundary / Critical Rules
+
+Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
+
 ## Execution Flow
 
 ### 1. Parse Command Arguments
@@ -72,7 +76,7 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
-If `{task-id}` is available, update task.md with `pr_number`, `updated_at`, and append the PR Created Activity Log entry including metadata-sync and summary results.
+If `{task-id}` is available, update task.md with `pr_number`, `updated_at`, `agent_infra_version`, and append the PR Created Activity Log entry including metadata-sync and summary results.
 
 ### 9. Verification Gate
 

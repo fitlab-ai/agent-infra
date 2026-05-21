@@ -61,6 +61,8 @@ test("required template files were migrated into templates/", () => {
   const requiredFiles = [
     "templates/.agents/workflows/feature-development.en.yaml",
     "templates/.agents/templates/task.en.md",
+    "templates/.agents/rules/version-stamp.en.md",
+    "templates/.agents/rules/version-stamp.zh-CN.md",
     "templates/.agents/README.en.md",
     "templates/.agents/QUICKSTART.en.md",
     "templates/.agents/skills/archive-tasks/SKILL.en.md",
@@ -135,6 +137,17 @@ test("root and template gitignore both ignore node_modules", () => {
 
   assert.match(rootGitignore, /^node_modules\/$/m);
   assert.match(templateGitignore, /^node_modules\/$/m);
+});
+
+test("task templates include agent-infra version metadata", () => {
+  for (const relativePath of [
+    ".agents/templates/task.md",
+    "templates/.agents/templates/task.en.md",
+    "templates/.agents/templates/task.zh-CN.md"
+  ]) {
+    const content = read(relativePath);
+    assert.match(content, /^agent_infra_version: v0\.0\.0\b/m, `${relativePath} should stamp the CLI version field`);
+  }
 });
 
 test("update-agent-infra template copies stay in sync with working files", () => {

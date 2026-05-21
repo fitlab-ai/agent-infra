@@ -11,6 +11,8 @@ description: "Cancel an unneeded task and move it"
 - Cancel only when the task no longer needs implementation, review, or follow-up work
 - When a valid `issue_number` exists, Issue sync is required
 
+Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
+
 ## Steps
 
 ### 1. Verify Task Exists
@@ -48,6 +50,7 @@ Update `task.md` in the task directory:
 - `cancelled_at`: {current timestamp}
 - `cancel_reason`: {cancellation reason}
 - `updated_at`: {current timestamp}
+- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Cancelled** by {agent} — {one-line cancellation reason}

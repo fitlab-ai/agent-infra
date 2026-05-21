@@ -69,6 +69,7 @@ workflow: feature-development|bug-fix|refactoring
 status: active
 created_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 updated_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
+agent_infra_version: {agent_infra_version}
 created_by: human
 current_step: requirement-analysis
 assigned_to: {current AI agent}
@@ -91,6 +92,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `current_step`: requirement-analysis
 - `assigned_to`: {current AI agent}
 - `updated_at`: {current time}
+- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
 - `## Context` -> `- **Branch**:`: update it to the generated branch name
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
@@ -161,6 +163,8 @@ Next step - run requirements analysis:
 ## STOP
 
 After completing the checklist, **stop immediately**. Do not continue to later steps.
+
+Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
 ## Notes
 

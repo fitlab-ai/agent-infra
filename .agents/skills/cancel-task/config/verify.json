@@ -9,6 +9,7 @@
         "status",
         "created_at",
         "updated_at",
+        "agent_infra_version",
         "current_step",
         "assigned_to",
         "cancelled_at",

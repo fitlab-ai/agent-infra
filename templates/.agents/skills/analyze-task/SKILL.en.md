@@ -11,6 +11,8 @@ description: "Analyze a task and produce a requirements document"
 - Base the analysis strictly on the existing requirements, context, and source information in `task.md`
 - After executing this skill, you **must** immediately update task status in task.md
 
+Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
+
 ## Steps
 
 ### 1. Verify Prerequisites
@@ -110,6 +112,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `current_step`: requirement-analysis
 - `assigned_to`: {current AI agent}
 - `updated_at`: {current time}
+- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
 - Record the analysis artifact for this round: `{analysis-artifact}` (Round `{analysis-round}`)
 - If the task template contains a `## Analysis` section, update it to link to `{analysis-artifact}`
 - Mark requirement-analysis as complete in workflow progress and include the actual round when the task template supports it

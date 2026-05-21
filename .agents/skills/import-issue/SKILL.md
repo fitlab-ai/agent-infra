@@ -69,6 +69,7 @@ workflow: feature-development|bug-fix|refactoring
 status: active
 created_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 updated_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
+agent_infra_version: {agent_infra_version}
 created_by: human
 current_step: requirement-analysis
 assigned_to: {当前 AI 代理}
@@ -91,6 +92,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `current_step`：requirement-analysis
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
+- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - `## 上下文` 中的 `- **分支**：`：更新为生成的分支名
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
@@ -161,6 +163,8 @@ Issue #{number} 已导入。
 ## 停止
 
 完成检查清单后，**立即停止**。不要继续执行后续步骤。
+
+版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 
 ## 注意事项
 

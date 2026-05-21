@@ -12,6 +12,8 @@ description: "审查任务实现并输出代码审查报告"
 - 本技能只审查代码并写报告，不修改业务代码
 - 执行本技能后，你**必须**立即更新 task.md
 
+版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
+
 ## 执行步骤
 
 ### 1. 验证前置条件

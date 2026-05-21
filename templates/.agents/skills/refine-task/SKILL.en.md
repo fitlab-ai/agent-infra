@@ -13,6 +13,8 @@ Fix review findings and produce `refinement.md` or `refinement-r{N}.md`.
 - Never auto-run `git add` or `git commit`
 - After executing this skill, you **must** immediately update task.md
 
+Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
+
 ## Steps
 
 ### 1. Verify Prerequisites

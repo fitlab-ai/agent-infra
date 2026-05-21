@@ -14,6 +14,8 @@ description: "根据技术方案实施任务并输出报告"
 - 每轮实现都创建新的实现产物，不覆盖旧文件
 - 执行本技能后，你**必须**立即更新 task.md
 
+版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
+
 ## 执行步骤
 
 ### 1. 验证前置条件
@@ -88,6 +90,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `current_step`：implementation
 - `assigned_to`：{当前代理}
 - `updated_at`：{当前时间}
+- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - 审查 `## 需求` 段落，仅把本轮已由代码实现且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
 - 记录 Round `{implementation-round}` 的 `{implementation-artifact}`
 - 追加：
