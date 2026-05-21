@@ -6,7 +6,7 @@ workflow: feature-development  # feature-development | bug-fix | code-review | r
 status: open                   # open | in-progress | review | blocked | completed
 created_at: YYYY-MM-DDTHH:mm:ss±HH:MM
 updated_at: YYYY-MM-DDTHH:mm:ss±HH:MM
-agent_infra_version: v0.0.0      # 当前 agent-infra 版本；由工作流命令刷新
+agent_infra_version: v0.0.0    # 当前 agent-infra 版本；由工作流命令刷新
 current_step: analysis         # analysis | design | implementation | review | fix | commit
 assigned_to:                   # claude | codex | gemini | opencode | human
 ---
