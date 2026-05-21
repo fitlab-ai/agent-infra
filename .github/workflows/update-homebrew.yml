@@ -167,7 +167,7 @@ jobs:
             --clobber --repo fitlab-ai/agent-infra
 
       - name: Upload bottle JSON as workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bottle-json-${{ matrix.platform }}
           path: agent-infra--*.${{ matrix.platform }}.bottle.json
