@@ -928,14 +928,14 @@ function computeExpectedInLabels(taskDir) {
     return { ok: true, labels: Array.from(labels).sort(), mode: "mapped" };
   }
 
-  const repoLabelsResult = ghJson([
+  const repoLabelsResult = withRetry(() => ghJson([
     "label",
     "list",
     "--limit",
     "200",
     "--json",
     "name"
-  ], taskDir);
+  ], taskDir));
   if (!repoLabelsResult.ok) {
     return repoLabelsResult;
   }
@@ -1015,10 +1015,10 @@ function resolveUpstreamRepo(taskDir) {
     return ownerRepo;
   }
 
-  const repoResult = ghJson([
+  const repoResult = withRetry(() => ghJson([
     "api",
     `repos/${ownerRepo.value}`
-  ], taskDir);
+  ], taskDir));
 
   if (!repoResult.ok) {
     return repoResult;
@@ -1053,12 +1053,12 @@ function resolveOwnerRepo(taskDir) {
 }
 
 function detectPermissions(upstreamRepo, taskDir) {
-  const permissionsResult = ghJson([
+  const permissionsResult = withRetry(() => ghJson([
     "api",
     `repos/${upstreamRepo}`,
     "--jq",
     ".permissions"
-  ], taskDir);
+  ], taskDir));
 
   if (!permissionsResult.ok) {
     return { hasTriage: false, hasPush: false };

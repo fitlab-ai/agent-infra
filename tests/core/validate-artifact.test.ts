@@ -805,6 +805,177 @@ test("validate-artifact platform-sync blocks after retry exhaustion on gh networ
   }
 });
 
+test("validate-artifact platform-sync retries upstream repo lookup on transient gh failure", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-retry-upstream-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const binDir = path.join(tempRoot, "bin");
+  const ghPath = path.join(binDir, "gh");
+  const issuePath = path.join(tempRoot, "issue.json");
+  const commentsPath = path.join(tempRoot, "comments.json");
+  const counterPath = path.join(tempRoot, "transient-upstream.count");
+
+  try {
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
+    writeFakeGh(ghPath);
+
+    const taskContent = buildTaskContent({ issue_number: "65" });
+    const artifactContent = loadFixture("valid-implementation.md");
+
+    write(path.join(taskDir, "task.md"), taskContent);
+    write(path.join(taskDir, "implementation.md"), artifactContent);
+    writeJson(issuePath, buildIssuePayload());
+    writeJson(commentsPath, [
+      { body: buildArtifactComment("TASK-20260328-000001", "implementation.md", "实现报告", artifactContent) },
+      { body: buildTaskComment("TASK-20260328-000001", taskContent) }
+    ]);
+    write(counterPath, "1");
+
+    const result = runValidator(["gate", "implement-task", taskDir, "implementation.md"], {
+      env: {
+        PATH: pathWithPrependedBin(binDir),
+        GH_FAKE_ISSUE_PATH: issuePath,
+        GH_FAKE_COMMENTS_PATH: commentsPath,
+        GH_FAKE_TRANSIENT_FAIL_MATCHER: "api repos/fitlab-ai/agent-infra",
+        GH_FAKE_TRANSIENT_FAIL_COUNTER_FILE: counterPath,
+        VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(fs.readFileSync(counterPath, "utf8").trim(), "0");
+
+    const payload = parseValidatorPayload(result.stdout);
+    assert.equal(payload.gate, "pass");
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact platform-sync retries permission lookup on transient gh failure", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-retry-permissions-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const binDir = path.join(tempRoot, "bin");
+  const ghPath = path.join(binDir, "gh");
+  const issuePath = path.join(tempRoot, "issue.json");
+  const commentsPath = path.join(tempRoot, "comments.json");
+  const counterPath = path.join(tempRoot, "transient-permissions.count");
+
+  try {
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
+    writeFakeGh(ghPath);
+
+    const taskContent = buildTaskContent({ issue_number: "65" });
+    const artifactContent = loadFixture("valid-implementation.md");
+
+    write(path.join(taskDir, "task.md"), taskContent);
+    write(path.join(taskDir, "implementation.md"), artifactContent);
+    writeJson(issuePath, buildIssuePayload());
+    writeJson(commentsPath, [
+      { body: buildArtifactComment("TASK-20260328-000001", "implementation.md", "实现报告", artifactContent) },
+      { body: buildTaskComment("TASK-20260328-000001", taskContent) }
+    ]);
+    write(counterPath, "1");
+
+    const result = runValidator(["gate", "implement-task", taskDir, "implementation.md"], {
+      env: {
+        PATH: pathWithPrependedBin(binDir),
+        GH_FAKE_ISSUE_PATH: issuePath,
+        GH_FAKE_COMMENTS_PATH: commentsPath,
+        GH_FAKE_TRANSIENT_FAIL_MATCHER: ".permissions",
+        GH_FAKE_TRANSIENT_FAIL_COUNTER_FILE: counterPath,
+        VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(fs.readFileSync(counterPath, "utf8").trim(), "0");
+
+    const payload = parseValidatorPayload(result.stdout);
+    assert.equal(payload.gate, "pass");
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact platform-sync retries label list fallback when in: label mapping is empty", () => {
+  const scratchRoot = filePath(".tmp");
+  fs.mkdirSync(scratchRoot, { recursive: true });
+  const tempRoot = fs.mkdtempSync(path.join(scratchRoot, "agent-infra-platform-sync-retry-labels-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const binDir = path.join(tempRoot, "bin");
+  const ghPath = path.join(binDir, "gh.cjs");
+  const issuePath = path.join(tempRoot, "issue.json");
+  const commentsPath = path.join(tempRoot, "comments.json");
+  const prCommentsPath = path.join(tempRoot, "pr-comments.json");
+  const labelsPath = path.join(tempRoot, "labels.json");
+  const counterPath = path.join(tempRoot, "transient-labels.count");
+  const scriptCopy = path.join(tempRoot, ".agents/scripts/validate-artifact.js");
+  const adapterCopy = path.join(tempRoot, ".agents/scripts/platform-adapters/platform-sync.js");
+  const verifyCopy = path.join(tempRoot, ".agents/skills/commit/config/verify.json");
+
+  try {
+    write(path.join(tempRoot, "package.json"), JSON.stringify({ type: "module" }, null, 2));
+    write(path.join(tempRoot, ".agents/.airc.json"), JSON.stringify({
+      project: "agent-infra",
+      labels: { in: {} }
+    }, null, 2));
+    write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
+    write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));
+    write(verifyCopy, read(".agents/skills/commit/config/verify.json"));
+
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
+    const headSha = createHeadCommit(tempRoot);
+    write(ghPath, loadFixture("fake-gh.js"));
+
+    write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_number: "77" }));
+    writeJson(issuePath, buildIssuePayload({ labels: [] }));
+    writeJson(commentsPath, []);
+    writeJson(prCommentsPath, [
+      {
+        body: [
+          "<!-- sync-pr:TASK-20260328-000001:summary -->",
+          `<!-- last-commit: ${headSha} -->`,
+          "## Review Summary",
+          "",
+          "Looks good."
+        ].join("\n")
+      }
+    ]);
+    writeJson(labelsPath, [{ name: "in: tests" }]);
+    write(counterPath, "1");
+
+    const result = spawnSync(
+      process.execPath,
+      [scriptCopy, "check", "platform-sync", taskDir, "--skill", "commit"],
+      {
+        encoding: "utf8",
+        cwd: tempRoot,
+        env: gitSafeEnv({
+          AGENT_INFRA_GH_BIN: process.execPath,
+          AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([ghPath]),
+          GH_FAKE_ISSUE_PATH: issuePath,
+          GH_FAKE_COMMENTS_PATH: commentsPath,
+          GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
+          GH_FAKE_LABELS_PATH: labelsPath,
+          GH_FAKE_ISSUE_NUMBER: "65",
+          GH_FAKE_PR_NUMBER: "77",
+          GH_FAKE_TRANSIENT_FAIL_MATCHER: "label list",
+          GH_FAKE_TRANSIENT_FAIL_COUNTER_FILE: counterPath,
+          VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
+        })
+      }
+    );
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(fs.readFileSync(counterPath, "utf8").trim(), "0");
+
+    const payload = parseValidatorPayload(result.stdout);
+    assert.equal(payload.status, "pass");
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("validate-artifact platform-sync skips when no platform adapter is registered", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-skip-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");

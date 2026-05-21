@@ -3,6 +3,20 @@ const fs = require("node:fs");
 
 const args = process.argv.slice(2);
 
+const transientMatcher = process.env.GH_FAKE_TRANSIENT_FAIL_MATCHER;
+const transientCounterFile = process.env.GH_FAKE_TRANSIENT_FAIL_COUNTER_FILE;
+if (transientMatcher && transientCounterFile && fs.existsSync(transientCounterFile)) {
+  const joined = args.join(" ");
+  if (joined.includes(transientMatcher)) {
+    const remaining = Number(fs.readFileSync(transientCounterFile, "utf8").trim() || "0");
+    if (remaining > 0) {
+      fs.writeFileSync(transientCounterFile, String(remaining - 1));
+      console.error("transient network error");
+      process.exit(1);
+    }
+  }
+}
+
 function readJson(envName) {
   const filePath = process.env[envName];
   return filePath ? JSON.parse(fs.readFileSync(filePath, "utf8")) : null;
@@ -35,6 +49,11 @@ if (args[0] === "issue" && args[1] === "view") {
 
 if (args[0] === "pr" && args[1] === "view") {
   process.stdout.write(JSON.stringify(readJson("GH_FAKE_PR_PATH")));
+  process.exit(0);
+}
+
+if (args[0] === "label" && args[1] === "list") {
+  process.stdout.write(JSON.stringify(readJson("GH_FAKE_LABELS_PATH") || []));
   process.exit(0);
 }
 
