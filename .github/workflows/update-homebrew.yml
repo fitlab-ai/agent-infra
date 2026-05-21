@@ -4,18 +4,31 @@ on:
   workflow_run:
     workflows: ["Release"]
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish to the Homebrew tap
+        required: true
+        type: string
 
 permissions: {}
 
 jobs:
-  update-formula:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+  prepare-formula:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout repository at released commit
+        if: ${{ github.event_name == 'workflow_run' }}
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Checkout repository for manual dispatch
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -24,9 +37,18 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Read package version from released commit
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_VERSION: ${{ inputs.version }}
         run: |
-          VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="${DISPATCH_VERSION#v}"
+          else
+            VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")
+          fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Detected version: $VERSION"
 
       - name: Wait for npm registry propagation
@@ -68,6 +90,7 @@ jobs:
             url "${TARBALL_URL}"
             sha256 "${SHA256}"
             license "MIT"
+            # __BOTTLE_BLOCK__
 
             depends_on "node"
 
@@ -91,3 +114,127 @@ jobs:
           git diff --cached --quiet && echo "No changes" && exit 0
           git commit -m "agent-infra ${VERSION}"
           git push
+
+  bake-bottle:
+    needs: prepare-formula
+    if: ${{ needs.prepare-formula.outputs.version != '' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    continue-on-error: true
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            platform: arm64_tahoe
+          - os: macos-15
+            platform: arm64_sequoia
+          - os: macos-14
+            platform: arm64_sonoma
+          - os: macos-14-large
+            platform: sonoma
+    steps:
+      - name: Configure brew tap
+        run: brew tap fitlab-ai/tap
+
+      - name: Build bottle
+        env:
+          VERSION: ${{ needs.prepare-formula.outputs.version }}
+        run: |
+          ROOT_URL="https://github.com/fitlab-ai/agent-infra/releases/download/v${VERSION}"
+          brew install --build-bottle --formula --verbose agent-infra
+          brew bottle --json --no-rebuild --root-url="$ROOT_URL" agent-infra
+
+      - name: Verify bottle artifacts
+        env:
+          VERSION: ${{ needs.prepare-formula.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          ls -la *.bottle.tar.gz *.bottle.json
+          test -f "agent-infra--${VERSION}.${PLATFORM}.bottle.tar.gz"
+          test -f "agent-infra--${VERSION}.${PLATFORM}.bottle.json"
+
+      - name: Upload bottle to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare-formula.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          gh release upload "v${VERSION}" \
+            "agent-infra--${VERSION}.${PLATFORM}.bottle.tar.gz" \
+            --clobber --repo fitlab-ai/agent-infra
+
+      - name: Upload bottle JSON as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bottle-json-${{ matrix.platform }}
+          path: agent-infra--*.${{ matrix.platform }}.bottle.json
+          retention-days: 7
+
+  publish-bottle:
+    needs: [prepare-formula, bake-bottle]
+    if: ${{ always() && needs.prepare-formula.result == 'success' }}
+    runs-on: macos-15
+    steps:
+      - name: Download all bottle JSON artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bottle-json-*
+          path: ./bottles
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: Determine bake outcome
+        id: outcome
+        run: |
+          SUCCESS_COUNT=$(find ./bottles -name '*.bottle.json' 2>/dev/null | wc -l | tr -d ' ')
+          echo "success_count=$SUCCESS_COUNT" >> "$GITHUB_OUTPUT"
+          if [ "$SUCCESS_COUNT" -eq 0 ]; then
+            echo "::warning::All bottle bake jobs failed; publishing Formula without bottle block"
+            echo "has_bottles=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Homebrew bottle publish"
+              echo ""
+              echo "No bottle artifacts were available for this version."
+              echo "The workflow will publish the Formula without a bottle block."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "has_bottles=true" >> "$GITHUB_OUTPUT"
+            echo "Found $SUCCESS_COUNT bottle JSON files (expected 4)"
+          fi
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v6
+        with:
+          repository: fitlab-ai/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Merge bottle block into Formula
+        if: steps.outcome.outputs.has_bottles == 'true'
+        working-directory: homebrew-tap
+        run: |
+          for json in ../bottles/*.bottle.json; do
+            [ -e "$json" ] || continue
+            brew bottle --merge --write --no-commit "$json"
+          done
+          sed -i.bak '/# __BOTTLE_BLOCK__/d' Formula/agent-infra.rb && rm Formula/agent-infra.rb.bak
+
+      - name: Strip placeholder when no bottles
+        if: steps.outcome.outputs.has_bottles == 'false'
+        working-directory: homebrew-tap
+        run: sed -i.bak '/# __BOTTLE_BLOCK__/d' Formula/agent-infra.rb && rm Formula/agent-infra.rb.bak
+
+      - name: Commit Formula with bottle block
+        working-directory: homebrew-tap
+        env:
+          VERSION: ${{ needs.prepare-formula.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/agent-infra.rb
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit --amend --no-edit
+          git push --force-with-lease

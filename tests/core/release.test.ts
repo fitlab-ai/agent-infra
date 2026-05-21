@@ -72,6 +72,23 @@ test("update-homebrew workflow syncs the tap after a successful release run", ()
   assert.match(workflow, /class AgentInfra < Formula/);
   assert.match(workflow, /name: Commit and push/);
   assert.match(workflow, /git commit -m "agent-infra \$\{VERSION\}"/);
+  assert.match(workflow, /workflow_dispatch:[\s\S]*inputs:[\s\S]*version:/);
+  assert.match(workflow, /prepare-formula:/);
+  assert.match(workflow, /bake-bottle:/);
+  assert.match(workflow, /publish-bottle:/);
+  assert.match(workflow, /outputs:[\s\S]*version: \$\{\{ steps\.version\.outputs\.version \}\}/);
+  assert.equal(workflow.match(/license "MIT"\n[ ]*# __BOTTLE_BLOCK__/g)?.length, 1);
+  assert.match(workflow, /os: macos-26[\s\S]*platform: arm64_tahoe/);
+  assert.match(workflow, /os: macos-15[\s\S]*platform: arm64_sequoia/);
+  assert.match(workflow, /os: macos-14[\s\S]*platform: arm64_sonoma/);
+  assert.match(workflow, /os: macos-14-large[\s\S]*platform: sonoma/);
+  assert.match(workflow, /brew install --build-bottle --formula --verbose agent-infra/);
+  assert.match(workflow, /brew bottle --json --no-rebuild --root-url="\$ROOT_URL" agent-infra/);
+  assert.match(workflow, /https:\/\/github\.com\/fitlab-ai\/agent-infra\/releases\/download\/v\$\{VERSION\}/);
+  assert.match(workflow, /gh release upload "v\$\{VERSION\}"/);
+  assert.match(workflow, /bake-bottle:[\s\S]*continue-on-error: true/);
+  assert.match(workflow, /publish-bottle:[\s\S]*if: \$\{\{ always\(\)/);
+  assert.match(workflow, /brew bottle --merge --write --no-commit "\$json"/);
 });
 
 test("CLI help advertises scoped npm install commands and Homebrew", () => {
