@@ -16,6 +16,14 @@ Fix review findings and produce `refinement.md` or `refinement-r{N}.md`.
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
+## Common Rationalizations and Rebuttals
+
+| Rationalization | Rebuttal |
+|------|------|
+| "This review comment is wrong, so I will ignore it." | If you disagree, record the reason under unresolved issues in the report; do not silently skip blocker or major findings. |
+| "I can clean up nearby code while I am here." | Scope is limited to review findings; changes outside that scope are out of bounds. |
+| "Clearing env-blocked items makes the report look better." | env-blocked findings are outside the repair scope; preserve and label them truthfully, and never use no-op edits to pad the fix count. |
+
 ## Steps
 
 ### 1. Verify Prerequisites

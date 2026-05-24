@@ -16,6 +16,17 @@ Implement the approved task and produce `implementation.md` or `implementation-r
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
+## Common Rationalizations and Rebuttals
+
+Before implementing, stop if any of these thoughts appear. They are violations:
+
+| Rationalization | Rebuttal |
+|------|------|
+| "The code is too simple to need tests." | Simple code still regresses; without a failing-to-passing case there is no completion signal, so write a test that verifies business behavior first. |
+| "Writing code first and adding tests later is faster." | Tests added after implementation often mirror the implementation; goal-driven work defines the verifiable case first and then makes it pass. |
+| "This plan is flawed, so I will improve it as I go." | Deviations from `{plan-artifact}` must be recorded in the report; if the direction is questionable, stop and confirm instead of changing it silently. |
+| "The tests passed, so I can commit this too." | This skill never runs `git add` or `git commit`; committing is a separate step explicitly requested by the user. |
+
 ## Steps
 
 ### 1. Verify Prerequisites

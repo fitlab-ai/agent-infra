@@ -9,6 +9,14 @@ Create a Git commit without overwriting user work and update the related task st
 
 When updating related `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
+## Common Rationalizations and Rebuttals
+
+| Rationalization | Rebuttal |
+|------|------|
+| "The tests already ran earlier, so I do not need to rerun them." | The staged content is the current truth; before committing, re-check `git status` and `git diff` instead of relying on memory. |
+| "`git add -A` is faster." | `git add -A` and `git add .` are forbidden; stage only explicitly listed files to avoid including unrelated changes. |
+| "This file has a copyright header, but the year can wait." | If you changed it, update the copyright year using `date +%Y`; this is a hard pre-commit check. |
+
 ## 1. Check Local Modifications (CRITICAL)
 
 Before any edit, inspect:

@@ -9,6 +9,14 @@ description: "提交当前变更到 Git"
 
 更新关联 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 
+## 常见违规借口与反驳
+
+| 借口 | 反驳 |
+|------|------|
+| 「测试之前跑过了，不用重跑」 | 暂存内容是最新现实；提交前必须重新核对 `git status`/`git diff`，不能凭记忆。 |
+| 「`git add -A` 更省事」 | 禁止 `git add -A`/`git add .`；只暂存明确列出的文件，避免带入无关改动。 |
+| 「改了带版权头的文件，年份先不动」 | 改了就更新版权年份（动态取 `date +%Y`），这是提交前的硬性检查。 |
+
 ## 1. 检查本地修改（关键）
 
 在任何编辑前先检查：

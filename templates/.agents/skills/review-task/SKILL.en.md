@@ -14,6 +14,14 @@ Review the latest implementation round and produce `review.md` or `review-r{N}.m
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
+## Common Rationalizations and Rebuttals
+
+| Rationalization | Rebuttal |
+|------|------|
+| "It was only one line, so it cannot affect behavior." | Line count is not impact; read the full `git diff` and trace the downstream effect of each change. |
+| "It looks mostly fine, so approve it." | The verdict must be backed by blocker/major/minor counts, and every finding must cite file:line; do not approve from impression. |
+| "The test change looks reasonable, so I can skim it." | Before reviewing test changes, check `.agents/rules/testing-discipline.md` item by item (see the step 4 gate). |
+
 ## Steps
 
 ### 1. Verify Prerequisites
@@ -37,6 +45,7 @@ Read the highest-round implementation artifact and, if present, the highest-roun
 Follow `.agents/workflows/feature-development.yaml` and inspect `git diff` for the full change context.
 
 > Detailed review criteria, severity rules, and reviewer expectations live in `reference/review-criteria.md`. Read `reference/review-criteria.md` before reviewing.
+> Test review gate: when `git diff` touches test files, read `.agents/rules/testing-discipline.md` first and check it item by item, especially "do not add negative assertions when a positive assertion already covers the behavior".
 
 ### 5. Write the Review Report
 

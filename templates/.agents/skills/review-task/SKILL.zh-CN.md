@@ -14,6 +14,14 @@ description: "审查任务实现并输出代码审查报告"
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 
+## 常见违规借口与反驳
+
+| 借口 | 反驳 |
+|------|------|
+| 「只改了一行，不影响功能」 | 行数不等于影响面；必须读完整 `git diff` 并定位每处改动的下游效果。 |
+| 「大体没问题，给个 Approved」 | 结论必须由 blocker/major/minor 计数支撑，每个问题引用文件:行号，不能凭印象放行。 |
+| 「测试改动看着合理，跳过细看」 | 审查测试变更前必须逐条核对 `.agents/rules/testing-discipline.md`（见步骤 4 门禁）。 |
+
 ## 执行步骤
 
 ### 1. 验证前置条件
@@ -37,6 +45,7 @@ description: "审查任务实现并输出代码审查报告"
 遵循 `.agents/workflows/feature-development.yaml`，并同时检查 `git diff` 获取完整变更上下文。
 
 > 详细审查标准、严重程度划分和 reviewer 关注点见 `reference/review-criteria.md`。执行此步骤前先读取 `reference/review-criteria.md`。
+> 测试审查硬门禁：当 `git diff` 触及测试文件时，必须先读取 `.agents/rules/testing-discipline.md` 并逐条核对（尤其"正向已覆盖时不应再加反向断言"）。
 
 ### 5. 编写审查报告
 
