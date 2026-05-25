@@ -75,7 +75,8 @@ Read `{plan-artifact}` carefully and extract:
 
 Follow `.agents/workflows/feature-development.yaml` and the plan in order.
 
-> Detailed implementation rules, testing discipline, and deviation handling live in `reference/implementation-rules.md`. Read `reference/implementation-rules.md` before executing this step.
+> Detailed implementation rules, the test execution loop, and deviation handling live in `reference/implementation-rules.md`. Read `reference/implementation-rules.md` before executing this step.
+> Test-writing discipline (RED-GREEN-REFACTOR and anti-patterns) lives in `.agents/rules/testing-discipline.md`; read it before adding or changing tests.
 
 ### 7. Run Test Verification
 

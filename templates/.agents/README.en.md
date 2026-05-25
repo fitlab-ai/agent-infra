@@ -199,15 +199,15 @@ Use the top-level `.agents/.airc.json` `customTUIs` array when your team uses an
 
 | Field | Required | Meaning |
 |-------|----------|---------|
-| `name` | Yes | Display name shown in reports and next-step guidance, for example `Acme TUI`. |
-| `dir` | Yes | Command directory relative to the project root, for example `.acme/commands`. The path must stay inside the project root. |
+| `name` | Yes | Display name shown in reports and next-step guidance, for example `<your-tui-name>`. |
+| `dir` | Yes | Command directory relative to the project root, for example `.<your-tui>/commands`. The path must stay inside the project root. |
 | `invoke` | Yes | User-facing command template used in next-step guidance. |
 
 Supported `invoke` placeholders:
 
 | Placeholder | Replaced with | Example |
 |-------------|---------------|---------|
-| `${skillName}` | The skill command name, such as `review-task` or `commit`. | `acme ${skillName}` -> `acme review-task` |
+| `${skillName}` | The skill command name, such as `review-task` or `commit`. | `<your-cli> ${skillName}` -> `<your-cli> review-task` |
 | `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
 
 Non-namespaced custom TUI:
@@ -216,9 +216,9 @@ Non-namespaced custom TUI:
 {
   "customTUIs": [
     {
-      "name": "Acme TUI",
-      "dir": ".acme/commands",
-      "invoke": "acme ${skillName}"
+      "name": "<your-tui-name>",
+      "dir": ".<your-tui>/commands",
+      "invoke": "<your-cli> ${skillName}"
     }
   ]
 }
@@ -231,8 +231,8 @@ Namespaced custom TUI:
   "project": "agent-infra",
   "customTUIs": [
     {
-      "name": "Internal Gemini",
-      "dir": ".internal-gemini/commands",
+      "name": "<your-tui-name>",
+      "dir": ".<your-tui>/commands",
       "invoke": "/${projectName}:${skillName}"
     }
   ]

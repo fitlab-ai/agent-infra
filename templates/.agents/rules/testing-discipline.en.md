@@ -22,3 +22,19 @@ assert.match(content, /^name: implement-task$/m);    // The positive assertion i
 ```
 
 If the positive assertion passes, the value is correct. The extra negative assertion adds no protection, only maintenance cost, and can become a test that permanently remembers a concept after the feature is gone.
+
+## RED-GREEN-REFACTOR rhythm
+
+During implementation, turn the requirement into a test for observable behavior before writing the code:
+
+1. **RED**: First write a failing test that reproduces the requirement or defect, and confirm that it really fails. The test should cover business behavior, inputs and outputs, or user-visible results, not internal implementation details.
+2. **GREEN**: Write the smallest amount of code needed to make the failing test pass. Do not expand behavior that is not covered by the test or the requirement.
+3. **REFACTOR**: After the tests are green, clean up names, structure, or duplication; keep the same test set passing before and after the refactor.
+
+This mirrors "Goal-Driven Execution" in AGENTS.md: define a verifiable success criterion first, then make the implementation satisfy it.
+
+## Test anti-patterns
+
+- **Over-mocking**: Stub only real boundaries such as network, filesystem, time, or randomness; do not mock the logic of the unit under test, or the test only proves that the mock followed the script.
+- **Testing implementation details**: Prefer assertions on public APIs, artifacts, state changes, or error results; avoid assertions on private functions, internal call order, or temporary data structures.
+- **Insufficient assertions**: Assertions must pin down concrete expected values; do not replace checks on key fields, counts, and boundaries with "does not throw" or "result exists".

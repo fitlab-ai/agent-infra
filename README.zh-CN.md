@@ -642,15 +642,15 @@ args: "<task-id>"   # 可选
 
 | 字段 | 必填 | 含义 |
 |------|------|------|
-| `name` | 是 | 报告和下一步提示中展示的工具名称，例如 `Acme TUI`。 |
-| `dir` | 是 | 相对项目根目录的命令目录，例如 `.acme/commands`。路径必须位于项目根目录内。 |
+| `name` | 是 | 报告和下一步提示中展示的工具名称，例如 `<your-tui-name>`。 |
+| `dir` | 是 | 相对项目根目录的命令目录，例如 `.<your-tui>/commands`。路径必须位于项目根目录内。 |
 | `invoke` | 是 | 面向用户展示的命令模板，用于生成下一步提示。 |
 
 `invoke` 支持的占位符：
 
 | 占位符 | 替换为 | 示例 |
 |--------|--------|------|
-| `${skillName}` | skill 命令名，例如 `review-task` 或 `commit`。 | `acme ${skillName}` -> `acme review-task` |
+| `${skillName}` | skill 命令名，例如 `review-task` 或 `commit`。 | `<your-cli> ${skillName}` -> `<your-cli> review-task` |
 | `${projectName}` | `.airc.json` 中的 `project` 值，适用于带命名空间的命令。 | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
 
 不带命名空间的自定义 TUI：
@@ -659,9 +659,9 @@ args: "<task-id>"   # 可选
 {
   "customTUIs": [
     {
-      "name": "Acme TUI",
-      "dir": ".acme/commands",
-      "invoke": "acme ${skillName}"
+      "name": "<your-tui-name>",
+      "dir": ".<your-tui>/commands",
+      "invoke": "<your-cli> ${skillName}"
     }
   ]
 }
@@ -674,8 +674,8 @@ args: "<task-id>"   # 可选
   "project": "agent-infra",
   "customTUIs": [
     {
-      "name": "Internal Gemini",
-      "dir": ".internal-gemini/commands",
+      "name": "<your-tui-name>",
+      "dir": ".<your-tui>/commands",
       "invoke": "/${projectName}:${skillName}"
     }
   ]
@@ -766,9 +766,9 @@ import-issue #42                    从 GitHub Issue 导入任务
   },
   "customTUIs": [
     {
-      "name": "Acme TUI",
-      "dir": ".acme/commands",
-      "invoke": "acme ${skillName}"
+      "name": "<your-tui-name>",
+      "dir": ".<your-tui>/commands",
+      "invoke": "<your-cli> ${skillName}"
     }
   ],
   "files": {

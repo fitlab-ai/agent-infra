@@ -75,7 +75,8 @@ description: "根据技术方案实施任务并输出报告"
 
 按照 `.agents/workflows/feature-development.yaml` 和方案顺序实施。
 
-> 详细实现规则、测试纪律和偏离处理见 `reference/implementation-rules.md`。执行此步骤前，先读取 `reference/implementation-rules.md`。
+> 详细实现规则、测试执行循环和偏离处理见 `reference/implementation-rules.md`。执行此步骤前，先读取 `reference/implementation-rules.md`。
+> 测试编写纪律（RED-GREEN-REFACTOR 与反模式）见 `.agents/rules/testing-discipline.md`；新增或调整测试前先读取该文件。
 
 ### 7. 运行测试验证
 
