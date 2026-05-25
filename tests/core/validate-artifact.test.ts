@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import type { SpawnSyncReturns } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 import {
   filePath,
@@ -30,6 +31,7 @@ type TaskCommentOptions = {
   rawBody?: boolean;
 };
 type IssuePayloadOverrides = Record<string, unknown>;
+type PlatformSyncConfig = Record<string, unknown>;
 type ValidatorCheck = {
   type: string;
   status: string;
@@ -256,6 +258,51 @@ function buildIssueType(name: string = "Task") {
   return { name };
 }
 
+function buildIssueFieldsPayload({
+  pinnedFields = [
+    { typename: "IssueFieldSingleSelect", name: "Priority" },
+    { typename: "IssueFieldSingleSelect", name: "Effort" }
+  ],
+  values = [
+    { typename: "IssueFieldSingleSelectValue", fieldName: "Priority", value: "High" },
+    { typename: "IssueFieldSingleSelectValue", fieldName: "Effort", value: "Medium" }
+  ]
+}: {
+  pinnedFields?: Array<{ typename: string; name: string }>;
+  values?: Array<{ typename: string; fieldName: string; value: string }>;
+} = {}) {
+  return {
+    data: {
+      repository: {
+        issue: {
+          issueType: {
+            name: "Feature",
+            pinnedFields: pinnedFields.map((field) => ({
+              __typename: field.typename,
+              id: `field-${field.name}`,
+              name: field.name
+            }))
+          },
+          issueFieldValues: {
+            nodes: values.map((value) => value.typename === "IssueFieldDateValue"
+              ? {
+                  __typename: value.typename,
+                  value: value.value,
+                  field: { name: value.fieldName }
+                }
+              : {
+                  __typename: value.typename,
+                  name: value.value,
+                  optionId: `option-${value.value}`,
+                  field: { name: value.fieldName }
+                })
+          }
+        }
+      }
+    }
+  };
+}
+
 function buildIssuePayload(overrides: IssuePayloadOverrides = {}) {
   return {
     state: "OPEN",
@@ -265,6 +312,95 @@ function buildIssuePayload(overrides: IssuePayloadOverrides = {}) {
     type: buildIssueType(),
     ...overrides
   };
+}
+
+function parseTestFrontmatter(content: string) {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) {
+    return null;
+  }
+
+  const metadata: Record<string, string> = {};
+  for (const line of match[1].split(/\r?\n/)) {
+    const field = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (field) {
+      metadata[field[1]] = field[2].trim();
+    }
+  }
+
+  return metadata;
+}
+
+async function runPlatformSyncAdapter(taskDir: string, config: PlatformSyncConfig, env: NodeJS.ProcessEnv = {}) {
+  const oldEnv: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(env)) {
+    oldEnv[key] = process.env[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  try {
+    const adapter = await import(pathToFileURL(filePath(".agents/scripts/platform-adapters/platform-sync.js")).href);
+    return adapter.check({ taskDir, config, artifactFile: undefined }, {
+      repoRoot: filePath("."),
+      loadTask(dir: string) {
+        const taskPath = path.join(dir, "task.md");
+        const content = fs.readFileSync(taskPath, "utf8");
+        const metadata = parseTestFrontmatter(content);
+        if (!metadata) {
+          return { ok: false, message: "task.md frontmatter not found or invalid" };
+        }
+        return { ok: true, content, metadata };
+      },
+      getCheckedRequirements() {
+        return [];
+      },
+      normalizeContent(value: string) {
+        return String(value || "").replace(/\r\n/g, "\n").trim();
+      },
+      isBlank(value: unknown) {
+        return value === undefined || value === null || String(value).trim() === "";
+      },
+      escapeRegExp(value: string) {
+        return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      },
+      passResult(type: string, message: string) {
+        return { type, status: "pass", message };
+      },
+      failResult(type: string, message: string, failType = "check_failed") {
+        return { type, status: "fail", message, fail_type: failType };
+      },
+      blockedResult(type: string, message: string, failType = "network_error") {
+        return { type, status: "blocked", message, fail_type: failType };
+      },
+      safeStat(filePathname: string) {
+        try {
+          return fs.statSync(filePathname);
+        } catch {
+          return null;
+        }
+      },
+      parseIssueNumber(value: unknown) {
+        const number = Number(value);
+        return Number.isInteger(number) && number > 0 ? number : null;
+      },
+      parsePrNumber(value: unknown) {
+        const number = Number(value);
+        return Number.isInteger(number) && number > 0 ? number : null;
+      }
+    });
+  } finally {
+    for (const [key, value] of Object.entries(oldEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
 }
 
 function buildPrPayload(overrides: IssuePayloadOverrides = {}) {
@@ -1250,6 +1386,151 @@ test("validate-artifact platform-sync skips Issue Type verification when the RES
     const payload = parseValidatorPayload(result.stdout);
     assert.equal(payload.type, "platform-sync");
     assert.equal(payload.status, "pass");
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact platform-sync passes when Issue fields match task frontmatter", async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-issue-fields-pass-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const binDir = path.join(tempRoot, "bin");
+  const ghPath = path.join(binDir, "gh");
+  const issuePath = path.join(tempRoot, "issue.json");
+  const issueFieldsPath = path.join(tempRoot, "issue-fields.json");
+
+  try {
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
+    writeFakeGh(ghPath);
+
+    write(path.join(taskDir, "task.md"), buildTaskContent({
+      issue_number: "65",
+      type: "feature",
+      priority: "高",
+      effort: "Medium",
+      start_date: "2026-06-01"
+    }));
+    writeJson(issuePath, buildIssuePayload());
+    writeJson(issueFieldsPath, buildIssueFieldsPayload({
+      pinnedFields: [
+        { typename: "IssueFieldSingleSelect", name: "Priority" },
+        { typename: "IssueFieldDate", name: "Start date" },
+        { typename: "IssueFieldSingleSelect", name: "Effort" }
+      ],
+      values: [
+        { typename: "IssueFieldSingleSelectValue", fieldName: "Priority", value: "High" },
+        { typename: "IssueFieldSingleSelectValue", fieldName: "Effort", value: "Medium" },
+        { typename: "IssueFieldDateValue", fieldName: "Start date", value: "2026-06-01" }
+      ]
+    }));
+
+    const result = await runPlatformSyncAdapter(taskDir, {
+      when: "issue_number_exists",
+      verify_issue_fields: true
+    }, {
+      PATH: pathWithPrependedBin(binDir),
+      AGENT_INFRA_GH_BIN: process.execPath,
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([ghPath]),
+      GH_FAKE_ISSUE_PATH: issuePath,
+      GH_FAKE_ISSUE_FIELDS_PATH: issueFieldsPath
+    });
+
+    assert.equal(result.status, "pass");
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact platform-sync fails when an Issue field differs from task frontmatter", async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-issue-fields-fail-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const binDir = path.join(tempRoot, "bin");
+  const ghPath = path.join(binDir, "gh");
+  const issuePath = path.join(tempRoot, "issue.json");
+  const issueFieldsPath = path.join(tempRoot, "issue-fields.json");
+
+  try {
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
+    writeFakeGh(ghPath);
+
+    write(path.join(taskDir, "task.md"), buildTaskContent({
+      issue_number: "65",
+      priority: "High"
+    }));
+    writeJson(issuePath, buildIssuePayload());
+    writeJson(issueFieldsPath, buildIssueFieldsPayload({
+      values: [
+        { typename: "IssueFieldSingleSelectValue", fieldName: "Priority", value: "Low" }
+      ]
+    }));
+
+    const result = await runPlatformSyncAdapter(taskDir, {
+      when: "issue_number_exists",
+      verify_issue_fields: true
+    }, {
+      PATH: pathWithPrependedBin(binDir),
+      AGENT_INFRA_GH_BIN: process.execPath,
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([ghPath]),
+      GH_FAKE_ISSUE_PATH: issuePath,
+      GH_FAKE_ISSUE_FIELDS_PATH: issueFieldsPath
+    });
+
+    assert.equal(result.status, "fail");
+    assert.match(result.message, /field 'Priority' is 'Low', expected 'High'/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("validate-artifact platform-sync skips Issue field verification when fields are inapplicable or unavailable", async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-sync-issue-fields-skip-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const binDir = path.join(tempRoot, "bin");
+  const ghPath = path.join(binDir, "gh");
+  const issuePath = path.join(tempRoot, "issue.json");
+  const issueFieldsPath = path.join(tempRoot, "issue-fields.json");
+
+  try {
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
+    writeFakeGh(ghPath);
+
+    write(path.join(taskDir, "task.md"), buildTaskContent({
+      issue_number: "65",
+      target_date: "2026-06-30"
+    }));
+    writeJson(issuePath, buildIssuePayload());
+    writeJson(issueFieldsPath, buildIssueFieldsPayload({
+      pinnedFields: [
+        { typename: "IssueFieldSingleSelect", name: "Priority" },
+        { typename: "IssueFieldSingleSelect", name: "Effort" }
+      ],
+      values: []
+    }));
+
+    const inapplicableResult = await runPlatformSyncAdapter(taskDir, {
+      when: "issue_number_exists",
+      verify_issue_fields: true
+    }, {
+      PATH: pathWithPrependedBin(binDir),
+      AGENT_INFRA_GH_BIN: process.execPath,
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([ghPath]),
+      GH_FAKE_ISSUE_PATH: issuePath,
+      GH_FAKE_ISSUE_FIELDS_PATH: issueFieldsPath
+    });
+    assert.equal(inapplicableResult.status, "pass");
+
+    const unavailableResult = await runPlatformSyncAdapter(taskDir, {
+      when: "issue_number_exists",
+      verify_issue_fields: true
+    }, {
+      PATH: pathWithPrependedBin(binDir),
+      AGENT_INFRA_GH_BIN: process.execPath,
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([ghPath]),
+      GH_FAKE_ISSUE_PATH: issuePath,
+      GH_FAKE_ISSUE_FIELDS_FAIL: "Issue fields are unavailable",
+      VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
+    });
+    assert.equal(unavailableResult.status, "pass");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }

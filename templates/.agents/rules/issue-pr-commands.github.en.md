@@ -88,6 +88,7 @@ gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH -f type="{issue-typ
 ```
 
 - set the Issue Type only when `has_push=true`; otherwise skip and continue
+- when changing an existing Issue Type, read `.agents/rules/issue-fields.md` and use Flow B so same-name pinned fields are migrated and fields absent from the new type are cleared
 
 ## Update Issues
 

@@ -48,6 +48,7 @@ Operation-to-permission mapping:
 | add/remove milestones | `has_triage` | same as above |
 | edit Issue body | `has_triage` | used by requirement checkbox sync |
 | set Issue Type | `has_push` | requires write permission |
+| set Issue fields | `has_push` | pinned custom fields; failures are non-blocking |
 | set assignee | no check | skip directly when it fails |
 | publish/update comments | no check | allowed for authenticated users in public repositories |
 
@@ -55,7 +56,7 @@ Operation-to-permission mapping:
 
 | Level | Operation type | With permission | Without permission |
 |------|---------|--------|--------|
-| silent degradation | label / milestone / Issue Type | run the `gh` command directly and also update the task comment | skip direct `gh` writes, update only the task comment, let the bot backfill |
+| silent degradation | label / milestone / Issue Type / Issue fields | run the `gh` command directly and also update the task comment | skip direct `gh` writes, update only the task comment, let the bot backfill |
 | direct skip | assignee | run the `gh` command directly | do nothing else |
 | normal execution | comments | run normally | run normally |
 

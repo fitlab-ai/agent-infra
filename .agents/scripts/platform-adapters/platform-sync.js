@@ -5,6 +5,18 @@ import spawn from "cross-spawn";
 
 const CHECK_TYPE = "platform-sync";
 const DEFAULT_RETRY_DELAYS_MS = [3000, 10000];
+const FRONTMATTER_FIELD_MAP = {
+  priority: "Priority",
+  effort: "Effort",
+  start_date: "Start date",
+  target_date: "Target date"
+};
+const OPTION_LOCALIZATION = {
+  "紧急": "Urgent",
+  "高": "High",
+  "中": "Medium",
+  "低": "Low"
+};
 
 let activeShared = null;
 let repoRoot = "";
@@ -107,6 +119,7 @@ export function check({ taskDir, config, artifactFile }, shared) {
     checkPrAssignee,
     checkSyncedRequirements,
     checkIssueType,
+    checkIssueFields,
     checkMilestone
   ];
 
@@ -326,6 +339,27 @@ function fetchRemoteData(context) {
     }
   }
 
+  let issueFields;
+  if (context.config.verify_issue_fields && context.hasPush) {
+    const [owner, name] = context.upstreamRepo.split("/");
+    const issueFieldsResult = withRetry(() => ghJson([
+      "api",
+      "graphql",
+      "-f",
+      `query=${ISSUE_FIELDS_QUERY}`,
+      "-F",
+      `owner=${owner}`,
+      "-F",
+      `name=${name}`,
+      "-F",
+      `number=${context.issueNumber}`
+    ], context.taskDir));
+
+    if (issueFieldsResult.ok) {
+      issueFields = normalizeIssueFields(issueFieldsResult.value);
+    }
+  }
+
   let prLabels = null;
   let prMilestone;
   let prAssignees;
@@ -377,6 +411,7 @@ function fetchRemoteData(context) {
     prComments,
     prLabels,
     issueType,
+    issueFields,
     prMilestone,
     prAssignees
   };
@@ -703,6 +738,45 @@ function checkIssueType(context, remoteData) {
   return null;
 }
 
+function checkIssueFields(context, remoteData) {
+  if (!context.config.verify_issue_fields || !context.hasPush) {
+    return null;
+  }
+
+  if (remoteData.issueFields === undefined) {
+    return null;
+  }
+
+  for (const [metadataKey, fieldName] of Object.entries(FRONTMATTER_FIELD_MAP)) {
+    const expectedRaw = context.task.metadata[metadataKey];
+    if (isBlank(expectedRaw) || !remoteData.issueFields.pinnedNames.has(fieldName)) {
+      continue;
+    }
+
+    const actual = remoteData.issueFields.values.get(fieldName);
+    const expected = normalizeExpectedIssueField(metadataKey, expectedRaw);
+    if (!expected) {
+      continue;
+    }
+
+    if (!actual) {
+      return failResult(CHECK_TYPE,
+        `Issue #${context.issueNumber} field '${fieldName}' is missing, expected '${expected.value}'`,
+        "check_failed"
+      );
+    }
+
+    if (actual.kind !== expected.kind || actual.value !== expected.value) {
+      return failResult(CHECK_TYPE,
+        `Issue #${context.issueNumber} field '${fieldName}' is '${actual.value}', expected '${expected.value}'`,
+        "check_failed"
+      );
+    }
+  }
+
+  return null;
+}
+
 function checkPrAssignee(context, remoteData) {
   if (!context.config.verify_pr_assignee || !context.hasPush || !context.prNumber) {
     return null;
@@ -884,6 +958,69 @@ function mapTaskTypeToIssueType(taskType) {
   };
 
   return mapping[taskType] || "Task";
+}
+
+const ISSUE_FIELDS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){issueType{name pinnedFields{__typename ... on IssueFieldSingleSelect{id name} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}} issueFieldValues(first:50){nodes{__typename ... on IssueFieldSingleSelectValue{name optionId field{... on IssueFieldSingleSelect{name}}} ... on IssueFieldDateValue{value field{... on IssueFieldDate{name}}} ... on IssueFieldTextValue{value field{... on IssueFieldText{name}}} ... on IssueFieldNumberValue{value field{... on IssueFieldNumber{name}}}}}}}}`;
+
+function normalizeIssueFields(payload) {
+  const issue = payload?.data?.repository?.issue;
+  const pinnedFields = Array.isArray(issue?.issueType?.pinnedFields)
+    ? issue.issueType.pinnedFields
+    : [];
+  const values = Array.isArray(issue?.issueFieldValues?.nodes)
+    ? issue.issueFieldValues.nodes
+    : [];
+  const pinnedNames = new Set(
+    pinnedFields
+      .map((field) => typeof field?.name === "string" ? field.name : "")
+      .filter(Boolean)
+  );
+  const normalizedValues = new Map();
+
+  for (const value of values) {
+    const fieldName = value?.field?.name;
+    if (!fieldName) {
+      continue;
+    }
+
+    if (value.__typename === "IssueFieldSingleSelectValue") {
+      normalizedValues.set(fieldName, {
+        kind: "single-select",
+        value: normalizeOptionName(value.name)
+      });
+    } else if (value.__typename === "IssueFieldDateValue") {
+      normalizedValues.set(fieldName, {
+        kind: "date",
+        value: normalizeDateValue(value.value)
+      });
+    }
+  }
+
+  return { pinnedNames, values: normalizedValues };
+}
+
+function normalizeExpectedIssueField(metadataKey, rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) {
+    return null;
+  }
+
+  if (metadataKey === "start_date" || metadataKey === "target_date") {
+    return { kind: "date", value: normalizeDateValue(value) };
+  }
+
+  return { kind: "single-select", value: normalizeOptionName(value) };
+}
+
+function normalizeOptionName(value) {
+  const normalized = String(value || "").trim();
+  return OPTION_LOCALIZATION[normalized] || normalized;
+}
+
+function normalizeDateValue(value) {
+  const normalized = String(value || "").trim();
+  const match = normalized.match(/^\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : normalized;
 }
 
 function arraysEqual(left, right) {

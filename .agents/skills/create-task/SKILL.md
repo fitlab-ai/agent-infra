@@ -78,11 +78,16 @@ created_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 updated_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 agent_infra_version: {agent_infra_version}
 created_by: human
+priority:                  # 可选；Urgent | High | Medium | Low
+effort:                    # 可选；High | Medium | Low
+start_date:                # 可选；YYYY-MM-DD
+target_date:               # 可选；YYYY-MM-DD
 current_step: requirement-analysis
 assigned_to: {当前 AI 代理}
 ```
 
 注意：`created_by` 为 `human`，因为任务来源于用户的描述。
+可选 Issue 字段元数据在创建任务时可留空；不要臆测日期。
 
 ### 3. 更新任务状态
 

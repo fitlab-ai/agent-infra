@@ -71,9 +71,15 @@ created_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 updated_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 agent_infra_version: {agent_infra_version}
 created_by: human
+priority:                  # optional; preserve source/frontmatter value when available
+effort:                    # optional; preserve source/frontmatter value when available
+start_date:                # optional; preserve explicit YYYY-MM-DD when available
+target_date:               # optional; preserve explicit YYYY-MM-DD when available
 current_step: requirement-analysis
 assigned_to: {current AI agent}
 ```
+
+Optional Issue field metadata should preserve recovered or explicit source values. If absent, leave it empty; do not invent dates.
 
 3.3 Append Activity Log entries.
 

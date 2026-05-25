@@ -71,9 +71,15 @@ created_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 updated_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 agent_infra_version: {agent_infra_version}
 created_by: human
+priority:                  # 可选；有来源/frontmatter 值时保留
+effort:                    # 可选；有来源/frontmatter 值时保留
+start_date:                # 可选；有明确 YYYY-MM-DD 时保留
+target_date:               # 可选；有明确 YYYY-MM-DD 时保留
 current_step: requirement-analysis
 assigned_to: {当前 AI 代理}
 ```
+
+可选 Issue 字段元数据应保留恢复得到或来源中明确给出的值。缺失时留空；不要臆测日期。
 
 3.3 追加 Activity Log。
 

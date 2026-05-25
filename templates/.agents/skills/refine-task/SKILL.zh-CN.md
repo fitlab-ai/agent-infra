@@ -59,6 +59,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 更新 task.md：
 - 审查 `## 需求` 段落，仅把因本轮修复而新满足且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
+- 保留明确填写的可选 Issue 字段元数据（`priority`、`effort`、`start_date`、`target_date`）；仅在审查上下文非常明确时推断 `priority` 或 `effort`，不要臆测日期
 - 追加：
   `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues[, skipped {n} env-blocked] → {refinement-artifact}`
 

@@ -88,6 +88,7 @@ gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH -f type="{issue-typ
 ```
 
 - 仅当 `has_push=true` 时执行 Issue Type 设置；否则跳过并继续
+- 变更现有 Issue Type 时，先读取 `.agents/rules/issue-fields.md` 并使用流程 B，确保同名 pinned fields 迁移，且新 type 不包含的字段被清空
 
 ## Issue 更新
 

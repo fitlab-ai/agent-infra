@@ -7,6 +7,10 @@ status: open                   # open | in-progress | review | blocked | complet
 created_at: YYYY-MM-DDTHH:mm:ss±HH:MM
 updated_at: YYYY-MM-DDTHH:mm:ss±HH:MM
 agent_infra_version: v0.0.0    # 当前 agent-infra 版本；由工作流命令刷新
+priority:                       # 可选 Issue 字段：Urgent | High | Medium | Low
+effort:                         # 可选 Issue 字段：High | Medium | Low
+start_date:                     # Feature 可选 Issue 字段：YYYY-MM-DD
+target_date:                    # Feature 可选 Issue 字段：YYYY-MM-DD
 current_step: analysis         # analysis | design | implementation | review | fix | commit
 assigned_to:                   # claude | codex | gemini | opencode | human
 ---

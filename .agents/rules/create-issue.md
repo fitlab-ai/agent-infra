@@ -149,6 +149,12 @@ gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH \
 
 设置失败不阻断流程。
 
+### 6.5 设置 Issue 字段（可选）
+
+如果 `has_push=true`，读取 `.agents/rules/issue-fields.md`，按流程 A 写入 `task.md` 中适用且非空的 `priority`、`effort`、`start_date` 和 `target_date`。
+
+字段写入失败不阻断流程。
+
 ### 7. 回写 task.md
 
 更新 task.md：

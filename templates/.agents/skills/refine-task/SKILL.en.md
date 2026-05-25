@@ -59,6 +59,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 Update task.md:
 - review the `## Requirements` section and only change items from `- [ ]` to `- [x]` when they are newly satisfied by this round's fixes and passing tests
+- preserve explicit optional Issue field metadata (`priority`, `effort`, `start_date`, `target_date`); only infer `priority` or `effort` from clear review context, and do not invent dates
 - append:
   `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Refinement (Round {N}, for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues[, skipped {n} env-blocked] → {refinement-artifact}`
 

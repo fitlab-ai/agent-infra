@@ -48,6 +48,7 @@ has_push=$(printf '%s' "$repo_perms" | grep -q '"push":true' 2>/dev/null && echo
 | 设置/移除 milestone | `has_triage` | 同上 |
 | 编辑 Issue body | `has_triage` | 需求复选框同步使用 |
 | 设置 Issue Type | `has_push` | 需要 write 权限 |
+| 设置 Issue 字段 | `has_push` | pinned custom fields；失败不阻断 |
 | 设置 assignee | 不检测 | 无权限时直接跳过 |
 | 发布/更新评论 | 无需检测 | 公开仓库中认证用户可执行 |
 
@@ -55,7 +56,7 @@ has_push=$(printf '%s' "$repo_perms" | grep -q '"push":true' 2>/dev/null && echo
 
 | 层级 | 操作类型 | 有权限 | 无权限 |
 |------|---------|--------|--------|
-| 静默降级 | label / milestone / Issue Type | 直接执行 `gh` 命令，同时更新 task 留言 | 跳过 `gh` 直接操作，仅更新 task 留言，由 bot 补位 |
+| 静默降级 | label / milestone / Issue Type / Issue 字段 | 直接执行 `gh` 命令，同时更新 task 留言 | 跳过 `gh` 直接操作，仅更新 task 留言，由 bot 补位 |
 | 直接跳过 | assignee | 直接执行 `gh` 命令 | 不做任何替代 |
 | 正常执行 | 评论 | 正常执行 | 正常执行 |
 

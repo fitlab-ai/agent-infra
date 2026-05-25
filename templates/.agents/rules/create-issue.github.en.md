@@ -149,6 +149,12 @@ gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH \
 
 Failure is non-blocking.
 
+### 6.5 Set Issue Fields (Optional)
+
+If `has_push=true`, read `.agents/rules/issue-fields.md` and follow Flow A to write any applicable non-empty `priority`, `effort`, `start_date`, and `target_date` values from `task.md`.
+
+Field write failures are non-blocking.
+
 ### 7. Write Back task.md
 
 Update task.md:

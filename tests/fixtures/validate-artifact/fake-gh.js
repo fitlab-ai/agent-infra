@@ -97,6 +97,16 @@ if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(arg
   process.exit(0);
 }
 
+if (args[0] === "api" && args[1] === "graphql") {
+  if (process.env.GH_FAKE_ISSUE_FIELDS_FAIL) {
+    console.error(process.env.GH_FAKE_ISSUE_FIELDS_FAIL);
+    process.exit(1);
+  }
+
+  process.stdout.write(JSON.stringify(readJson("GH_FAKE_ISSUE_FIELDS_PATH")));
+  process.exit(0);
+}
+
 if (args[0] === "api" && args.some((arg) => /\/issues\/\d+\/comments\?per_page=100$/.test(arg))) {
   const requestPath = args.find((arg) => /\/issues\/\d+\/comments\?per_page=100$/.test(arg)) || "";
   const match = requestPath.match(/\/issues\/(\d+)\/comments\?per_page=100$/);
