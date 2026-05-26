@@ -10,7 +10,7 @@ jobs:
     name: Publish to npm
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - name: Checkout repository
@@ -41,4 +41,22 @@ jobs:
         run: npm test
 
       - name: Publish package
-        run: npm publish --provenance
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if npm view "@fitlab-ai/agent-infra@${TAG_VERSION}" version >/dev/null 2>&1; then
+            echo "@fitlab-ai/agent-infra@${TAG_VERSION} already published, skipping"
+          else
+            npm publish --provenance
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists"
+            exit 0
+          fi
+          PRERELEASE_FLAG=""
+          case "$GITHUB_REF_NAME" in *-*) PRERELEASE_FLAG="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes $PRERELEASE_FLAG

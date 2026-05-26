@@ -44,8 +44,12 @@ test("release workflow publishes to npm on tag push", () => {
   assert.match(workflow, /run: npm test/);
   assert.match(workflow, /package\.json version \$PACKAGE_VERSION does not match tag \$GITHUB_REF_NAME/);
   assert.match(workflow, /id-token: write/);
+  assert.match(workflow, /contents: write/);
   assert.match(workflow, /node-version: 24/);
+  assert.match(workflow, /npm view "@fitlab-ai\/agent-infra@\$\{TAG_VERSION\}" version/);
   assert.match(workflow, /npm publish --provenance/);
+  assert.match(workflow, /gh release create "\$GITHUB_REF_NAME"/);
+  assert.match(workflow, /--prerelease/);
 });
 
 test("update-homebrew workflow syncs the tap after a successful release run", () => {
@@ -72,6 +76,7 @@ test("update-homebrew workflow syncs the tap after a successful release run", ()
   assert.match(workflow, /class AgentInfra < Formula/);
   assert.match(workflow, /name: Commit and push/);
   assert.match(workflow, /git commit -m "agent-infra \$\{VERSION\}"/);
+  assert.match(workflow, /name: Upload release-version artifact[\s\S]*name: release-version/);
   assert.match(workflow, /workflow_dispatch:[\s\S]*inputs:[\s\S]*version:/);
   assert.match(workflow, /prepare-formula:/);
   assert.match(workflow, /bake-bottle:/);
@@ -86,9 +91,15 @@ test("update-homebrew workflow syncs the tap after a successful release run", ()
   assert.match(workflow, /brew bottle --json --no-rebuild --root-url="\$ROOT_URL" agent-infra/);
   assert.match(workflow, /https:\/\/github\.com\/fitlab-ai\/agent-infra\/releases\/download\/v\$\{VERSION\}/);
   assert.match(workflow, /gh release upload "v\$\{VERSION\}"/);
-  assert.match(workflow, /bake-bottle:[\s\S]*continue-on-error: true/);
-  assert.match(workflow, /publish-bottle:[\s\S]*if: \$\{\{ always\(\)/);
-  assert.match(workflow, /brew bottle --merge --write --no-commit "\$json"/);
+  assert.match(workflow, /fail-fast: false/);
+  assert.match(workflow, /Expected 4 bottle JSON files but found/);
+  assert.match(workflow, /publish-bottle:[\s\S]*needs: \[prepare-formula, bake-bottle\]/);
+  assert.match(workflow, /generate-bottle-block\.mjs/);
+  assert.match(workflow, /actions\/download-artifact@v7/);
+  assert.match(
+    workflow,
+    /name: Checkout repository \(for generator script\)[\s\S]*name: Checkout homebrew-tap[\s\S]*name: Download all bottle JSON artifacts[\s\S]*name: Generate bottle block into Formula/
+  );
 });
 
 test("CLI help advertises scoped npm install commands and Homebrew", () => {
@@ -132,18 +143,23 @@ test("post-release-smoke workflow verifies npm and brew install channels", () =>
   const workflow = read(".github/workflows/post-release-smoke.yml");
 
   assert.match(workflow, /name: Post-Release Smoke/);
-  assert.match(workflow, /release:[\s\S]*types: \[published\]/);
+  assert.match(workflow, /workflow_run:[\s\S]*workflows: \["Update Homebrew Formula"\]/);
+  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /inputs:[\s\S]*version:/);
   assert.match(workflow, /permissions: \{\}/);
   assert.match(workflow, /concurrency:/);
   assert.match(workflow, /cancel-in-progress: true/);
+  assert.match(workflow, /post-release-smoke-\$\{\{ github\.event\.workflow_run\.id \|\| inputs\.version \}\}/);
 
   assert.match(workflow, /resolve-version:/);
   assert.match(workflow, /timeout-minutes: 5/);
+  assert.match(workflow, /actions: read/);
+  assert.match(workflow, /name: release-version/);
+  assert.match(workflow, /run-id: \$\{\{ github\.event\.workflow_run\.id \}\}/);
   assert.match(workflow, /EVENT_NAME: \$\{\{ github\.event_name \}\}/);
   assert.match(workflow, /DISPATCH_VERSION: \$\{\{ inputs\.version \}\}/);
-  assert.match(workflow, /RELEASE_TAG: \$\{\{ github\.event\.release\.tag_name \}\}/);
+  assert.match(workflow, /VERSION=\$\(cat release-version\.txt\)/);
   assert.match(workflow, /outputs:[\s\S]*version:/);
 
   assert.match(workflow, /npm-smoke:/);
@@ -159,7 +175,9 @@ test("post-release-smoke workflow verifies npm and brew install channels", () =>
   assert.match(workflow, /runs-on: macos-latest/);
   assert.match(workflow, /timeout-minutes: 20/);
   assert.match(workflow, /raw\.githubusercontent\.com\/fitlab-ai\/homebrew-tap\/main\/Formula\/agent-infra\.rb/);
-  assert.match(workflow, /name: brew install\s*\n\s*shell: bash/);
-  assert.match(workflow, /brew install fitlab-ai\/tap\/agent-infra/);
+  assert.match(workflow, /grep -q "bottle do"/);
+  assert.match(workflow, /name: brew install \(must pour from bottle\)/);
+  assert.match(workflow, /brew install --verbose fitlab-ai\/tap\/agent-infra/);
+  assert.match(workflow, /Pouring/);
   assert.match(workflow, /agent-infra version/);
 });

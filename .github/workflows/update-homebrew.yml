@@ -115,12 +115,20 @@ jobs:
           git commit -m "agent-infra ${VERSION}"
           git push
 
+      - name: Record release version
+        run: echo "${{ steps.version.outputs.version }}" > release-version.txt
+
+      - name: Upload release-version artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-version
+          path: release-version.txt
+
   bake-bottle:
     needs: prepare-formula
     if: ${{ needs.prepare-formula.outputs.version != '' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    continue-on-error: true
     permissions:
       contents: write
     strategy:
@@ -147,24 +155,20 @@ jobs:
           brew install --build-bottle --formula --verbose agent-infra
           brew bottle --json --no-rebuild --root-url="$ROOT_URL" agent-infra
 
-      - name: Verify bottle artifacts
-        env:
-          VERSION: ${{ needs.prepare-formula.outputs.version }}
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          ls -la *.bottle.tar.gz *.bottle.json
-          test -f "agent-infra--${VERSION}.${PLATFORM}.bottle.tar.gz"
-          test -f "agent-infra--${VERSION}.${PLATFORM}.bottle.json"
-
-      - name: Upload bottle to GitHub Release
+      - name: Rename to canonical filename and upload bottle
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.prepare-formula.outputs.version }}
           PLATFORM: ${{ matrix.platform }}
         run: |
-          gh release upload "v${VERSION}" \
-            "agent-infra--${VERSION}.${PLATFORM}.bottle.tar.gz" \
-            --clobber --repo fitlab-ai/agent-infra
+          ls -la *.bottle.tar.gz *.bottle.json
+          JSON="agent-infra--${VERSION}.${PLATFORM}.bottle.json"
+          LOCAL=$(jq -r --arg p "$PLATFORM" '.[] | .bottle.tags[$p].local_filename' "$JSON")
+          CANON=$(jq -r --arg p "$PLATFORM" '.[] | .bottle.tags[$p].filename' "$JSON")
+          test "$LOCAL" != "null" && test "$CANON" != "null"
+          test -n "$LOCAL" && test -n "$CANON" && test -f "$LOCAL"
+          mv "$LOCAL" "$CANON"
+          gh release upload "v${VERSION}" "$CANON" --clobber --repo fitlab-ai/agent-infra
 
       - name: Upload bottle JSON as workflow artifact
         uses: actions/upload-artifact@v7
@@ -175,35 +179,17 @@ jobs:
 
   publish-bottle:
     needs: [prepare-formula, bake-bottle]
-    if: ${{ always() && needs.prepare-formula.result == 'success' }}
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     steps:
-      - name: Download all bottle JSON artifacts
-        uses: actions/download-artifact@v8
+      - name: Checkout repository (for generator script)
+        uses: actions/checkout@v6
         with:
-          pattern: bottle-json-*
-          path: ./bottles
-          merge-multiple: true
-        continue-on-error: true
+          ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Determine bake outcome
-        id: outcome
-        run: |
-          SUCCESS_COUNT=$(find ./bottles -name '*.bottle.json' 2>/dev/null | wc -l | tr -d ' ')
-          echo "success_count=$SUCCESS_COUNT" >> "$GITHUB_OUTPUT"
-          if [ "$SUCCESS_COUNT" -eq 0 ]; then
-            echo "::warning::All bottle bake jobs failed; publishing Formula without bottle block"
-            echo "has_bottles=false" >> "$GITHUB_OUTPUT"
-            {
-              echo "## Homebrew bottle publish"
-              echo ""
-              echo "No bottle artifacts were available for this version."
-              echo "The workflow will publish the Formula without a bottle block."
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "has_bottles=true" >> "$GITHUB_OUTPUT"
-            echo "Found $SUCCESS_COUNT bottle JSON files (expected 4)"
-          fi
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
 
       - name: Checkout homebrew-tap
         uses: actions/checkout@v6
@@ -213,25 +199,32 @@ jobs:
           path: homebrew-tap
           fetch-depth: 0
 
-      - name: Merge bottle block into Formula
-        if: steps.outcome.outputs.has_bottles == 'true'
-        working-directory: homebrew-tap
-        run: |
-          for json in ../bottles/*.bottle.json; do
-            [ -e "$json" ] || continue
-            brew bottle --merge --write --no-commit "$json"
-          done
-          sed -i.bak '/# __BOTTLE_BLOCK__/d' Formula/agent-infra.rb && rm Formula/agent-infra.rb.bak
+      - name: Download all bottle JSON artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: bottle-json-*
+          path: ./bottles
+          merge-multiple: true
 
-      - name: Strip placeholder when no bottles
-        if: steps.outcome.outputs.has_bottles == 'false'
-        working-directory: homebrew-tap
-        run: sed -i.bak '/# __BOTTLE_BLOCK__/d' Formula/agent-infra.rb && rm Formula/agent-infra.rb.bak
+      - name: Require all four bottles
+        run: |
+          COUNT=$(find ./bottles -name '*.bottle.json' | wc -l | tr -d ' ')
+          echo "Found $COUNT bottle JSON files (expected 4)"
+          if [ "$COUNT" -ne 4 ]; then
+            echo "::error::Expected 4 bottle JSON files but found $COUNT"
+            exit 1
+          fi
+
+      - name: Generate bottle block into Formula
+        run: |
+          node .github/scripts/generate-bottle-block.mjs \
+            --bottles ./bottles \
+            --formula homebrew-tap/Formula/agent-infra.rb
+          echo "----- resulting Formula -----"
+          cat homebrew-tap/Formula/agent-infra.rb
 
       - name: Commit Formula with bottle block
         working-directory: homebrew-tap
-        env:
-          VERSION: ${{ needs.prepare-formula.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

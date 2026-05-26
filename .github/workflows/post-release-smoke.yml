@@ -1,8 +1,9 @@
 name: Post-Release Smoke
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Update Homebrew Formula"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -13,7 +14,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: post-release-smoke-${{ github.event.release.id || inputs.version }}
+  group: post-release-smoke-${{ github.event.workflow_run.id || inputs.version }}
   cancel-in-progress: true
 
 jobs:
@@ -21,21 +22,31 @@ jobs:
     name: Resolve target version
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      actions: read
     outputs:
       version: ${{ steps.pick.outputs.version }}
     steps:
-      - name: Pick version from event or input
+      - name: Download release-version artifact (workflow_run)
+        if: ${{ github.event_name == 'workflow_run' }}
+        uses: actions/download-artifact@v7
+        with:
+          name: release-version
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pick version from artifact or input
         id: pick
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           DISPATCH_VERSION: ${{ inputs.version }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             VERSION="$DISPATCH_VERSION"
           else
-            VERSION="${RELEASE_TAG#v}"
+            VERSION=$(cat release-version.txt)
           fi
           if [ -z "$VERSION" ]; then
             echo "::error::Could not resolve version"
@@ -98,7 +109,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
-      - name: Wait for Homebrew tap formula update
+      - name: Wait for Homebrew tap formula bottle block
         shell: bash
         env:
           VERSION: ${{ needs.resolve-version.outputs.version }}
@@ -106,19 +117,25 @@ jobs:
           FORMULA_URL="https://raw.githubusercontent.com/fitlab-ai/homebrew-tap/main/Formula/agent-infra.rb"
           for i in $(seq 1 60); do
             BODY=$(curl -fsSL "$FORMULA_URL" 2>/dev/null || true)
-            if printf '%s' "$BODY" | grep -qF "agent-infra-${VERSION}.tgz"; then
-              echo "Formula updated to ${VERSION}"
+            if printf '%s' "$BODY" | grep -qF "agent-infra-${VERSION}.tgz" \
+               && printf '%s' "$BODY" | grep -q "bottle do"; then
+              echo "Formula updated to ${VERSION} with bottle block"
               exit 0
             fi
-            echo "Waiting for tap formula update... (attempt $i/60)"
+            echo "Waiting for tap formula bottle block... (attempt $i/60)"
             sleep 10
           done
-          echo "::error::Tap formula not updated to ${VERSION} after 10 minutes"
+          echo "::error::Tap formula bottle block for ${VERSION} not present after 10 minutes"
           exit 1
 
-      - name: brew install
+      - name: brew install (must pour from bottle)
         shell: bash
-        run: brew install fitlab-ai/tap/agent-infra
+        run: |
+          brew install --verbose fitlab-ai/tap/agent-infra 2>&1 | tee install.log
+          if ! grep -q "Pouring" install.log; then
+            echo "::error::agent-infra was not poured from a bottle (no 'Pouring' in output)"
+            exit 1
+          fi
 
       - name: Smoke test - agent-infra version
         shell: bash
