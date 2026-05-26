@@ -28,6 +28,7 @@ test("package metadata supports scoped npm publishing", () => {
     "@clack/prompts",
     "cross-spawn",
     "picocolors",
+    "semver",
     "smol-toml"
   ]);
   assert.equal(

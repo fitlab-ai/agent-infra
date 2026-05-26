@@ -26,7 +26,7 @@ const DEFAULTS = {
   "sandbox": {
     "engine": null,
     "runtimes": [
-      "node20"
+      "node22"
     ],
     "tools": [
       "claude-code",
