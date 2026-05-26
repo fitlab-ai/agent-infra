@@ -48,6 +48,7 @@ test("release workflow publishes to npm on tag push", () => {
   assert.match(workflow, /node-version: 24/);
   assert.match(workflow, /npm view "@fitlab-ai\/agent-infra@\$\{TAG_VERSION\}" version/);
   assert.match(workflow, /npm publish --provenance/);
+  assert.match(workflow, /NPM_TAG_ARGS="--tag next"/);
   assert.match(workflow, /gh release create "\$GITHUB_REF_NAME"/);
   assert.match(workflow, /--prerelease/);
 });

@@ -46,7 +46,11 @@ jobs:
           if npm view "@fitlab-ai/agent-infra@${TAG_VERSION}" version >/dev/null 2>&1; then
             echo "@fitlab-ai/agent-infra@${TAG_VERSION} already published, skipping"
           else
-            npm publish --provenance
+            # Publish prereleases (e.g. 0.6.2-alpha.1) under the "next" dist-tag so
+            # they never move "latest"; stable versions keep the default latest tag.
+            NPM_TAG_ARGS=""
+            case "$TAG_VERSION" in *-*) NPM_TAG_ARGS="--tag next" ;; esac
+            npm publish --provenance $NPM_TAG_ARGS
           fi
 
       - name: Create GitHub Release
