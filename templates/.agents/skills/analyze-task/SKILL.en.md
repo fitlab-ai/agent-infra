@@ -49,6 +49,8 @@ If `task.md` contains these source fields, also read the corresponding source in
 
 ### 4. Perform Requirements Analysis
 
+Before analysis begins: if `start_date` in the frontmatter is empty, write today's date immediately (command: `date +%F`, format `YYYY-MM-DD`); keep any existing value. Before writing, read `.agents/rules/version-stamp.md` and refresh `updated_at` / `agent_infra_version` at the same time.
+
 Follow the `analysis` step in `.agents/workflows/feature-development.yaml`:
 
 **Required tasks** (analysis only, no business code changes):
@@ -126,6 +128,7 @@ If task.md contains a valid `issue_number`, perform these sync actions (skip and
 - Set `status: pending-design-work` by following issue-sync.md
 - Create or update the task comment marker defined in `.agents/rules/issue-sync.md` (follow the task.md comment sync rule in issue-sync.md)
 - Publish the `{analysis-artifact}` comment
+- Read `.agents/rules/issue-fields.md` and follow Flow A to sync every non-empty Issue field (`priority`/`effort`/`start_date`/`target_date`) from `task.md` to the Issue (idempotent; skip without blocking when `has_push=false` or the fetch/write fails)
 
 ### 7. Verification Gate
 

@@ -98,6 +98,7 @@ If a valid `issue_number` exists:
 - Backfill checked `## Requirements` items to the Issue body by following the requirements-checkbox sync steps in issue-sync.md
 - Do not set any `status:` label — status labels are automatically cleared when the Issue is closed
 - Finally create or update the summary comment marked with the summary marker defined in `.agents/rules/issue-sync.md`
+- Read `.agents/rules/issue-fields.md` and follow Flow A to sync every non-empty Issue field (`priority`/`effort`/`start_date`/`target_date`) from `task.md` to the Issue (idempotent; skip without blocking when `has_push=false` or the fetch/write fails)
 
 ### 7. Verification Gate
 

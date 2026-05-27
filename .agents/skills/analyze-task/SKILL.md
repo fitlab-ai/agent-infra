@@ -49,6 +49,8 @@ description: "分析任务并输出需求分析文档"
 
 ### 4. 执行需求分析
 
+开始分析前：若 frontmatter 的 `start_date` 为空，立即写入当日日期（命令 `date +%F`，格式 `YYYY-MM-DD`）；已有值则保留。写入前先读取 `.agents/rules/version-stamp.md`，并同步刷新 `updated_at` / `agent_infra_version`。
+
 遵循 `.agents/workflows/feature-development.yaml` 中的 `analysis` 步骤：
 
 **必要任务**（仅分析，不编写业务代码）：
@@ -126,6 +128,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - 按 issue-sync.md 设置 `status: pending-design-work`
 - 创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记（按 issue-sync.md 的 task.md 评论同步规则）
 - 发布 `{analysis-artifact}` 评论
+- 读取 `.agents/rules/issue-fields.md`，按流程 A 把 `task.md` 中所有非空的 Issue 字段（`priority`/`effort`/`start_date`/`target_date`）同步到 Issue（幂等；`has_push=false` 或取数/写入失败时跳过，不阻断）
 
 ### 7. 完成校验
 

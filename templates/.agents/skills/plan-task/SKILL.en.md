@@ -91,6 +91,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `assigned_to`: {current AI agent}
 - `updated_at`: {current time}
 - `agent_infra_version`: value from `.agents/rules/version-stamp.md`
+- If `target_date` is empty, write an estimated completion date based on the effort estimate (`YYYY-MM-DD`); leave it empty without blocking when no reasonable estimate exists; keep any existing value
 - Record the plan artifact for this round: `{plan-artifact}` (Round `{plan-round}`)
 - If the task template contains a `## Design` section, update it to link to `{plan-artifact}`
 - Mark technical-design as complete in workflow progress and include the actual round when the task template supports it
@@ -104,6 +105,7 @@ If task.md contains a valid `issue_number`, perform these sync actions (skip and
 - Set `status: pending-design-work` by following issue-sync.md
 - Create or update the task comment marker defined in `.agents/rules/issue-sync.md` (follow the task.md comment sync rule in issue-sync.md)
 - Publish the `{plan-artifact}` comment
+- Read `.agents/rules/issue-fields.md` and follow Flow A to sync every non-empty Issue field (`priority`/`effort`/`start_date`/`target_date`) from `task.md` to the Issue (idempotent; skip without blocking when `has_push=false` or the fetch/write fails)
 
 ### 8. Verification Gate
 

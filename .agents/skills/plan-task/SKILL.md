@@ -91,6 +91,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
 - `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
+- 若 `target_date` 为空，基于工作量评估写入预估完成日（`YYYY-MM-DD`）；无法合理预估时保持留空、不阻塞；已有值则保留
 - 记录本轮方案产物：`{plan-artifact}`（Round `{plan-round}`）
 - 如任务模板包含 `## 设计` 段落，更新为指向 `{plan-artifact}` 的链接
 - 在工作流进度中标记 technical-design 为已完成，并注明实际轮次（如果任务模板支持）
@@ -104,6 +105,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - 按 issue-sync.md 设置 `status: pending-design-work`
 - 创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记（按 issue-sync.md 的 task.md 评论同步规则）
 - 发布 `{plan-artifact}` 评论
+- 读取 `.agents/rules/issue-fields.md`，按流程 A 把 `task.md` 中所有非空的 Issue 字段（`priority`/`effort`/`start_date`/`target_date`）同步到 Issue（幂等；`has_push=false` 或取数/写入失败时跳过，不阻断）
 
 ### 8. 完成校验
 

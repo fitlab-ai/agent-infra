@@ -98,6 +98,7 @@ ls .agents/workspace/completed/{task-id}/task.md
 - 按 issue-sync.md 的需求复选框同步步骤，兜底同步 `## 需求` 中已勾选的条目到 Issue body
 - 不要设置 `status:` label — Issue 关闭后 status label 会被自动清除
 - 最后创建或更新 `.agents/rules/issue-sync.md` 中定义的 summary 评论标记对应的 summary 评论
+- 读取 `.agents/rules/issue-fields.md`，按流程 A 把 `task.md` 中所有非空的 Issue 字段（`priority`/`effort`/`start_date`/`target_date`）同步到 Issue（幂等；`has_push=false` 或取数/写入失败时跳过，不阻断）
 
 ### 7. 完成校验
 

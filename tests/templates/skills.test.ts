@@ -249,6 +249,21 @@ test("import-issue requires task comment sync in local and template configs", ()
   });
 });
 
+test("create-pr enables Issue field verification in local and template configs", () => {
+  [
+    ".agents/skills/create-pr/config/verify.json",
+    "templates/.agents/skills/create-pr/config/verify.json"
+  ].forEach((relativePath) => {
+    const config = JSON.parse(read(relativePath));
+
+    assert.equal(
+      config.checks["platform-sync"]?.verify_issue_fields,
+      true,
+      `${relativePath} should require Issue field verification`
+    );
+  });
+});
+
 test("import-issue checklists include the task comment sync step", () => {
   skillDocPaths("import-issue").forEach((relativePath) => {
     const content = read(relativePath);
