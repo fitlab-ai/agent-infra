@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const EXPECTED_TAGS = ["arm64_tahoe", "arm64_sequoia", "arm64_sonoma", "sonoma"];
 const SYMBOL_CELLARS = new Set(["any", "any_skip_relocation"]);
@@ -72,7 +73,7 @@ function getArg(args, name) {
   return index >= 0 ? args[index + 1] : undefined;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
   const bottlesDir = getArg(args, "--bottles");
   const formulaPath = getArg(args, "--formula");
