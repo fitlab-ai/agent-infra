@@ -156,31 +156,28 @@ git log v<prev-version>..v<version> \
 
 询问：
 1. 需要调整吗？
-2. 是否创建 draft release？
+2. 是否把 notes 写入该版本的 Release？
 
-### 9. 创建 Draft Release（如确认）
+### 9. 发布 Release notes（如确认）
 
-按 `.agents/rules/release-commands.md` 的 Draft Release 创建命令执行。
+按 `.agents/rules/release-commands.md` 的「发布 Release notes」命令执行（写入已由 release 工作流自动创建/发布的 Release；不存在时兜底创建）。
 
 输出：
 ```
-Draft Release created.
+Release notes 已更新。
 
-- URL: {draft-release-url}
+- URL: {release-url}
 - Version: v{version}
-- Status: Draft
+- Status: Published
 
-Please review and publish on the platform:
-1. Open the URL above
-2. Review the release notes
-3. Click "Publish release"
+发布说明已写入该 Release。如需进一步调整，可在上面的 URL 直接编辑。
 ```
 
 ## 注意事项
 
 1. **需要 the platform CLI**：必须安装并认证 the platform CLI
 2. **标签必须存在**：先执行 release 技能创建标签
-3. **草稿模式**：创建草稿 —— 不会自动发布
+3. **Release 已自动发布**：`v{version}` 的 Release 由 release 工作流自动创建并发布（给 Homebrew bottle 提供上传落点）；本技能只往该 Release 写入/刷新 notes，不再创建草稿
 4. **分类准确性**：自动分类基于标题/scope/文件；复杂的 PR 可能需要手动调整
 
 ## 错误处理

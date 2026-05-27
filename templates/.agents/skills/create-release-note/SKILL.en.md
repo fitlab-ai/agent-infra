@@ -156,31 +156,28 @@ Show the generated release notes to the user.
 
 Ask:
 1. Need any adjustments?
-2. Create a draft release?
+2. Write these notes onto the Release for this version?
 
-### 9. Create Draft Release (If Confirmed)
+### 9. Publish the Release Notes (If Confirmed)
 
-Create the draft release by following `.agents/rules/release-commands.md`.
+Write the notes by following the "Publish the Release Notes" command in `.agents/rules/release-commands.md` (it updates the Release already created and published by the release workflow, falling back to creating it if missing).
 
 Output:
 ```
-Draft Release created.
+Release notes updated.
 
-- URL: {draft-release-url}
+- URL: {release-url}
 - Version: v{version}
-- Status: Draft
+- Status: Published
 
-Please review and publish on the platform:
-1. Open the URL above
-2. Review the release notes
-3. Click "Publish release"
+The notes have been written to the Release. Edit further at the URL above if needed.
 ```
 
 ## Notes
 
 1. **Requires the platform CLI**: Must have the platform CLI installed and authenticated
 2. **Tags must exist**: Run the release skill first to create tags
-3. **Draft mode**: Creates a draft - won't auto-publish
+3. **Release auto-published**: the `v{version}` Release is created and published by the release workflow (the upload target for Homebrew bottles); this skill only writes/refreshes its notes and no longer creates a draft
 4. **Classification accuracy**: Auto-classification is based on title/scope/files; complex PRs may need manual adjustment
 
 ## Error Handling

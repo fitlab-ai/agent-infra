@@ -1,6 +1,6 @@
 # Release 平台命令
 
-在读取历史 release、查询已合并 PR，或创建 draft release 前先读取本文件。
+在读取历史 release、查询已合并 PR，或发布 Release notes 前先读取本文件。
 
 ## Release 查询
 
@@ -37,10 +37,16 @@ gh issue view {issue-number} --json number,title,labels,url,author
 
 GitHub no-reply 邮箱映射规则：如果 `Name <email>` 中的 email 匹配 `(\d+\+)?(\S+?)@users\.noreply\.github\.com`，使用第二个捕获组的小写形式作为 login。该规则同时覆盖 `{id}+{login}@users.noreply.github.com` 和 `{login}@users.noreply.github.com`。
 
-## 创建 Draft Release
+## 发布 Release notes
+
+`v{version}` 的 GitHub Release 由 release 工作流自动创建并发布，为 Homebrew bottle 提供稳定的上传落点。本命令把精修后的 notes 写到这个已存在的 Release 上；若 Release 尚不存在则兜底创建。
 
 ```bash
-gh release create "v{version}" --draft --title "v{version}" --notes-file "{notes-file}"
+if gh release view "v{version}" >/dev/null 2>&1; then
+  gh release edit "v{version}" --notes-file "{notes-file}"
+else
+  gh release create "v{version}" --title "v{version}" --notes-file "{notes-file}"
+fi
 ```
 
 失败时按调用方规则停止或提示人工介入。

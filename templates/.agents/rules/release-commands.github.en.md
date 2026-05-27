@@ -1,6 +1,6 @@
 # Release Platform Commands
 
-Read this file before loading release history, querying merged PRs, or creating a draft release.
+Read this file before loading release history, querying merged PRs, or publishing the Release notes.
 
 ## Query Releases
 
@@ -37,10 +37,16 @@ gh issue view {issue-number} --json number,title,labels,url,author
 
 Map GitHub no-reply emails with this rule: if `Name <email>` contains an email matching `(\d+\+)?(\S+?)@users\.noreply\.github\.com`, use the second capture group lowercased as the login. This covers both `{id}+{login}@users.noreply.github.com` and `{login}@users.noreply.github.com`.
 
-## Create a Draft Release
+## Publish the Release Notes
+
+The GitHub Release for `v{version}` is created and published automatically by the release workflow so Homebrew bottles have a stable upload target. This command writes the curated notes onto that existing Release, falling back to creating it if it does not exist yet.
 
 ```bash
-gh release create "v{version}" --draft --title "v{version}" --notes-file "{notes-file}"
+if gh release view "v{version}" >/dev/null 2>&1; then
+  gh release edit "v{version}" --notes-file "{notes-file}"
+else
+  gh release create "v{version}" --title "v{version}" --notes-file "{notes-file}"
+fi
 ```
 
 If commands fail, stop or escalate according to the calling skill.
