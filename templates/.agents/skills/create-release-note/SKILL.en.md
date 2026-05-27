@@ -177,7 +177,7 @@ The notes have been written to the Release. Edit further at the URL above if nee
 
 1. **Requires the platform CLI**: Must have the platform CLI installed and authenticated
 2. **Tags must exist**: Run the release skill first to create tags
-3. **Release auto-published**: the `v{version}` Release is created and published by the release workflow (the upload target for Homebrew bottles); this skill only writes/refreshes its notes and no longer creates a draft
+3. **Release auto-published**: the `v{version}` Release is created and published by the release workflow (the upload target for Homebrew bottles); this skill writes/refreshes the notes on that Release
 4. **Classification accuracy**: Auto-classification is based on title/scope/files; complex PRs may need manual adjustment
 
 ## Error Handling

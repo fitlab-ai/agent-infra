@@ -177,7 +177,7 @@ Release notes 已更新。
 
 1. **需要 the platform CLI**：必须安装并认证 the platform CLI
 2. **标签必须存在**：先执行 release 技能创建标签
-3. **Release 已自动发布**：`v{version}` 的 Release 由 release 工作流自动创建并发布（给 Homebrew bottle 提供上传落点）；本技能只往该 Release 写入/刷新 notes，不再创建草稿
+3. **Release 已自动发布**：`v{version}` 的 Release 由 release 工作流自动创建并发布（给 Homebrew bottle 提供上传落点）；本技能往该 Release 写入/刷新 notes
 4. **分类准确性**：自动分类基于标题/scope/文件；复杂的 PR 可能需要手动调整
 
 ## 错误处理
