@@ -410,10 +410,13 @@ test("sandbox create warns and continues past missing Claude credentials", () =>
       tmpDir,
       ["create", "feature/no-credentials"],
       {
-        DOCKER_EXIT_FOR_RUN: "1",
+        // Fail at ensureDocker (the first docker call) so the test exits
+        // quickly on slow CI runners (e.g. Windows). The credential gate
+        // runs before ensureDocker, so a missing claude credential will
+        // emit its warning to stderr first.
+        DOCKER_EXIT_FOR_INFO: "1",
         AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json")
-      },
-      { timeout: 5_000 }
+      }
     );
 
     assert.equal(result.signal, null);
