@@ -394,10 +394,8 @@ test("sandbox rm defaults local branch deletion confirmation to yes", () => {
   );
 });
 
-test("sandbox create fails before preparing a temporary Dockerfile when Claude credentials are missing", () => {
+test("sandbox create warns and continues past missing Claude credentials", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-no-credentials-"));
-  const repoDir = path.join(tmpDir, "repo");
-  const homeDir = path.join(tmpDir, "home");
   const project = `sandbox-no-leak-${process.pid}-${Date.now()}`;
   const dockerfilePrefix = `${project}-sandbox-`;
   const existingEntries = new Set(
@@ -405,34 +403,22 @@ test("sandbox create fails before preparing a temporary Dockerfile when Claude c
   );
 
   try {
-    fs.mkdirSync(repoDir, { recursive: true });
-    fs.mkdirSync(homeDir, { recursive: true });
-    execSync("git init", { cwd: repoDir, env: gitSafeEnv(), stdio: "pipe" });
-    fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
-    fs.writeFileSync(
-      path.join(repoDir, ".agents", ".airc.json"),
-      JSON.stringify({ project, org: "fitlab-ai" }, null, 2) + "\n",
-      "utf8"
+    const fixture = writeSandboxEngineFixture(tmpDir, { project });
+
+    const result = spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["create", "feature/no-credentials"],
+      {
+        DOCKER_EXIT_FOR_RUN: "1",
+        AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json")
+      },
+      { timeout: 5_000 }
     );
 
-    let commandError: (Error & { stderr?: string | Buffer }) | null = null;
-    try {
-      execFileSync(
-        process.execPath,
-        cliArgs("sandbox", "create", "feature/no-credentials"),
-        {
-          cwd: repoDir,
-          env: gitSafeEnv({ HOME: homeDir }),
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"]
-        }
-      );
-    } catch (error) {
-      commandError = error as Error & { stderr?: string | Buffer };
-    }
-
-    assert.ok(commandError);
-    assert.match(String(commandError.stderr ?? ""), /Claude Code credentials not found on host/);
+    assert.equal(result.signal, null);
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}\n${result.stderr}`, /WITHOUT Claude Code credentials/);
 
     const leakedEntries = fs.readdirSync(os.tmpdir()).filter((entry) => (
       entry.startsWith(dockerfilePrefix) && !existingEntries.has(entry)

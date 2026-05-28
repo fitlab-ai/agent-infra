@@ -43,7 +43,7 @@ import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
 import { resolveBuildUid } from '../engines/native.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
 import {
-  assertClaudeCredentialsAvailable,
+  prepareClaudeCredentials,
   redactCommandError,
   validateClaudeCredentialsEnvOverride
 } from '../credentials.ts';
@@ -1100,15 +1100,17 @@ export async function create(args: string[]): Promise<void> {
   assertBranchAvailable(config.repoRoot, branch, { allowedWorktrees: worktreeCandidates });
   const tools = resolveTools(effectiveConfig);
   const resolvedTools = resolveToolDirs(effectiveConfig, tools, branch);
-  // Fail fast before any filesystem/docker side effects so a missing
-  // Claude Code credential blob doesn't leave the user with a stale
-  // worktree, docker image, or temporary Dockerfile they need to manually
-  // clean up.
-  assertClaudeCredentialsAvailable(
+  // Fatal credential states still fail before filesystem/docker side effects.
+  // A genuinely missing Claude Code credential only removes Claude Code's
+  // sandbox config and credential mounts for this create run.
+  const credentialOutcome = prepareClaudeCredentials(
     effectiveConfig.home,
     effectiveConfig.project,
     resolvedTools
   );
+  const effectiveResolvedTools = credentialOutcome.status === 'SKIPPED'
+    ? resolvedTools.filter(({ tool }) => tool.id !== 'claude-code')
+    : resolvedTools;
   const container = containerName(effectiveConfig, branch);
   const worktree = worktreeCandidates.find((candidate) => fs.existsSync(candidate)) ?? worktreeCandidates[0] ?? '';
   const shareCommon = shareCommonDir(effectiveConfig);
@@ -1122,6 +1124,13 @@ export async function create(args: string[]): Promise<void> {
   p.log.info(
     `Project: ${pc.bold(effectiveConfig.project)} | Branch: ${pc.bold(branch)} | Base: ${pc.bold(baseBranch || 'HEAD')}`
   );
+  if (credentialOutcome.status === 'SKIPPED') {
+    p.log.warn(
+      'Claude Code credentials not found on host - creating this sandbox WITHOUT Claude Code credentials.\n'
+      + '  Claude Code is still installed in the image but will not be authenticated.\n'
+      + '  To enable it: run "claude" once on the host to complete login, then re-run "ai sandbox create".'
+    );
+  }
 
   try {
     p.log.step('Checking container engine...');
@@ -1206,7 +1215,7 @@ export async function create(args: string[]): Promise<void> {
       {
         title: 'Preparing tool state',
         task: async () => {
-          for (const { tool, dir } of resolvedTools) {
+          for (const { tool, dir } of effectiveResolvedTools) {
             fs.mkdirSync(dir, { recursive: true });
 
             for (const { hostPath, sandboxName } of tool.hostPreSeedFiles ?? []) {
@@ -1243,7 +1252,7 @@ export async function create(args: string[]): Promise<void> {
             }
           }
 
-          return `${resolvedTools.length} tool config directories ready`;
+          return `${effectiveResolvedTools.length} tool config directories ready`;
         }
       },
       {
@@ -1283,31 +1292,32 @@ export async function create(args: string[]): Promise<void> {
               signingKey
             )
             : null;
-          const envFile = buildContainerEnvFile(resolvedTools, engine);
+          const envFile = buildContainerEnvFile(effectiveResolvedTools, engine);
           let hostShellConfig: HostShellConfig;
           try {
-            const claudeCodeEntry = resolvedTools.find(({ tool }) => tool.id === 'claude-code');
+            const claudeCodeEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'claude-code');
             if (claudeCodeEntry) {
               ensureClaudeOnboarding(claudeCodeEntry.dir, effectiveConfig.home);
               ensureClaudeSettings(claudeCodeEntry.dir, effectiveConfig.home);
-              // Credential availability is asserted up-front in create() so we
-              // know the shared credentials file already exists at this point.
+              // prepareClaudeCredentials wrote the shared credentials file
+              // before this point. If credentials were missing, the
+              // claude-code entry was removed from effectiveResolvedTools.
             }
-            const codexEntry = resolvedTools.find(({ tool }) => tool.id === 'codex');
+            const codexEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'codex');
             if (codexEntry) {
               ensureCodexModelInheritance(codexEntry.dir, effectiveConfig.home);
               ensureCodexWorkspaceTrust(codexEntry.dir);
             }
-            const geminiEntry = resolvedTools.find(({ tool }) => tool.id === 'gemini-cli');
+            const geminiEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'gemini-cli');
             if (geminiEntry) {
               ensureGeminiWorkspaceTrust(geminiEntry.dir);
             }
-            const opencodeEntry = resolvedTools.find(({ tool }) => tool.id === 'opencode');
+            const opencodeEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'opencode');
             if (opencodeEntry) {
               // The TUI reads <toolDir>/opencode.json via OPENCODE_CONFIG pinned in tools.js.
               ensureOpenCodeModelInheritance(opencodeEntry.dir, effectiveConfig.home);
             }
-            const toolVolumes = resolvedTools.flatMap(({ tool, dir }) => [
+            const toolVolumes = effectiveResolvedTools.flatMap(({ tool, dir }) => [
               '-v',
               volumeArg(engine, dir, tool.containerMount)
             ]);
@@ -1322,7 +1332,7 @@ export async function create(args: string[]): Promise<void> {
               '-v',
               volumeArg(engine, hostPath, containerPath, ':ro')
             ]);
-            const liveMountVolumes = resolvedTools.flatMap(({ tool }) =>
+            const liveMountVolumes = effectiveResolvedTools.flatMap(({ tool }) =>
               (tool.hostLiveMounts ?? [])
                 .filter(({ hostPath }) => fs.existsSync(hostPath))
                 .flatMap(({ hostPath, containerSubpath }) => [
@@ -1435,7 +1445,7 @@ export async function create(args: string[]): Promise<void> {
             }
           }
 
-          for (const { tool } of resolvedTools) {
+          for (const { tool } of effectiveResolvedTools) {
             for (const command of tool.postSetupCmds ?? []) {
               runSafeEngine(engine, 'docker', ['exec', container, 'bash', '-lc', command]);
             }
@@ -1477,7 +1487,7 @@ export async function create(args: string[]): Promise<void> {
 
   p.outro(pc.green('Sandbox ready'));
 
-  const toolHints = resolvedTools.map(({ tool, dir }) => {
+  const toolHints = effectiveResolvedTools.map(({ tool, dir }) => {
     const hasLiveMount = (tool.hostLiveMounts ?? []).some(({ hostPath }) => fs.existsSync(hostPath));
     const hint = hasLiveMount
       ? 'Live-mounted auth/config files stay in sync with the host.'

@@ -92,6 +92,11 @@ type ResolvedTool = {
   };
 };
 
+export type ClaudeCredentialOutcome =
+  | { status: 'OK' }
+  | { status: 'SKIPPED' }
+  | { status: 'NOT_APPLICABLE' };
+
 type CredentialPayload = {
   claudeAiOauth?: CredentialPayload;
   scopes?: unknown;
@@ -584,17 +589,17 @@ export function formatRemaining(expiresAt: unknown): string {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-export function assertClaudeCredentialsAvailable(
+export function prepareClaudeCredentials(
   home: string,
   project: string,
   resolvedTools: ResolvedTool[],
   extractFn: (home: string) => string | null = extractClaudeCredentialsBlob,
   writeFn: (home: string, project: string, blob: string) => void = writeClaudeCredentialsFile,
   inspectFn: (home: string) => CredentialInspection = inspectClaudeKeychainStatus
-): void {
+): ClaudeCredentialOutcome {
   const claudeCodeEntry = resolvedTools.find(({ tool }) => tool.id === 'claude-code');
   if (!claudeCodeEntry) {
-    return;
+    return { status: 'NOT_APPLICABLE' };
   }
 
   let blob: string | null = null;
@@ -602,33 +607,51 @@ export function assertClaudeCredentialsAvailable(
   const hasCustomExtractFn = extractFn !== extractClaudeCredentialsBlob;
   if (hasCustomInspectFn || !hasCustomExtractFn) {
     const inspection = inspectFn(home);
-    if (inspection.status === 'KEYCHAIN_LOCKED') {
-      throw new Error([
-        'Claude Code credentials are stored in the macOS keychain, but the keychain is locked.',
-        '',
-        buildLockedGuidance()
-      ].join('\n'));
+    switch (inspection.status) {
+      case 'OK':
+        blob = inspection.blob;
+        break;
+      case 'MISSING':
+        return { status: 'SKIPPED' };
+      case 'KEYCHAIN_LOCKED':
+        throw new Error([
+          'Claude Code credentials are stored in the macOS keychain, but the keychain is locked.',
+          '',
+          buildLockedGuidance()
+        ].join('\n'));
+      case 'STALE_ACCESS':
+        throw new Error([
+          'Claude Code credentials on host are invalid or expired.',
+          '',
+          'The sandbox needs valid Claude Code OAuth credentials so the container can use Claude Code.',
+          '',
+          'To fix:',
+          '  1. On the host, run "claude" once and complete the OAuth login flow.',
+          '  2. Verify with "claude /status" that you see your subscription.',
+          '  3. Re-run "ai sandbox create".'
+        ].join('\n'));
+      case 'KEYCHAIN_ERROR':
+        throw new Error([
+          'Claude Code credentials could not be read from the host keychain.',
+          '',
+          inspection.detail ? `Detail: ${inspection.detail}` : 'Detail: unknown keychain error',
+          '',
+          'To fix:',
+          '  1. Unlock or repair the host keychain, then re-run "ai sandbox create".',
+          '  2. For SSH / CI, set AGENT_INFRA_CLAUDE_CREDENTIALS_FILE to an absolute path containing a valid credentials blob.'
+        ].join('\n'));
+      default: {
+        const _exhaustive: never = inspection;
+        throw new Error(`Unhandled Claude Code credential inspection status: ${(_exhaustive as { status: string }).status}`);
+      }
     }
-    blob = inspection.status === 'OK' ? inspection.blob : null;
   } else {
     blob = extractFn(home);
-  }
-
-  if (!blob) {
-    throw new Error([
-      'Claude Code credentials not found on host.',
-      '',
-      'The sandbox needs your Claude Code OAuth credentials so the container can use Claude Code.',
-      '',
-      'To fix:',
-      '  1. On the host, run "claude" once and complete the OAuth login flow.',
-      '  2. Verify with "claude /status" that you see your subscription.',
-      '  3. Re-run "ai sandbox create".',
-      '',
-      'Alternatively, if you do not need Claude Code in this sandbox,',
-      'remove "claude-code" from the "sandbox.tools" array in .agents/.airc.json.'
-    ].join('\n'));
+    if (!blob) {
+      return { status: 'SKIPPED' };
+    }
   }
 
   writeFn(home, project, blob);
+  return { status: 'OK' };
 }

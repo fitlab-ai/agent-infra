@@ -257,21 +257,22 @@ test("credential path helpers and writer manage the shared credential file", asy
   }
 });
 
-test("assertClaudeCredentialsAvailable writes credentials only when claude-code is enabled", async () => {
+test("prepareClaudeCredentials writes credentials only when claude-code is enabled", async () => {
   const credentials = await loadFreshEsm<typeof import("../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
   const writes: Array<[string, string, string]> = [];
 
-  credentials.assertClaudeCredentialsAvailable(
+  const outcome = credentials.prepareClaudeCredentials(
     "/Users/demo",
     "agent-infra",
     [{ tool: { id: "claude-code" } }],
     () => "valid-blob",
     (home: string, project: string, blob: string) => writes.push([home, project, blob])
   );
+  assert.deepEqual(outcome, { status: "OK" });
   assert.deepEqual(writes, [["/Users/demo", "agent-infra", "valid-blob"]]);
 
   let extractCalled = false;
-  credentials.assertClaudeCredentialsAvailable(
+  const missingToolOutcome = credentials.prepareClaudeCredentials(
     "/Users/demo",
     "agent-infra",
     [{ tool: { id: "codex" } }],
@@ -281,25 +282,55 @@ test("assertClaudeCredentialsAvailable writes credentials only when claude-code 
     },
     () => {}
   );
+  assert.deepEqual(missingToolOutcome, { status: "NOT_APPLICABLE" });
   assert.equal(extractCalled, false);
 });
 
-test("assertClaudeCredentialsAvailable throws a readable error when credentials are missing", async () => {
+test("prepareClaudeCredentials returns SKIPPED and writes nothing when credentials are missing", async () => {
   const credentials = await loadFreshEsm<typeof import("../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  let writeCalled = false;
 
-  assert.throws(() => credentials.assertClaudeCredentialsAvailable(
+  const outcome = credentials.prepareClaudeCredentials(
     "/Users/demo",
     "agent-infra",
     [{ tool: { id: "claude-code" } }],
     () => null,
-    () => {}
-  ), /Claude Code credentials not found on host/);
+    () => {
+      writeCalled = true;
+    },
+    () => ({ status: "MISSING" })
+  );
+
+  assert.deepEqual(outcome, { status: "SKIPPED" });
+  assert.equal(writeCalled, false);
 });
 
-test("assertClaudeCredentialsAvailable reports keychain locked guidance", async () => {
+test("prepareClaudeCredentials rejects stale and keychain error states", async () => {
   const credentials = await loadFreshEsm<typeof import("../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
 
-  assert.throws(() => credentials.assertClaudeCredentialsAvailable(
+  for (const inspection of [
+    { status: "STALE_ACCESS" as const },
+    { status: "KEYCHAIN_ERROR" as const, detail: "security failed" }
+  ]) {
+    let writeCalled = false;
+    assert.throws(() => credentials.prepareClaudeCredentials(
+      "/Users/demo",
+      "agent-infra",
+      [{ tool: { id: "claude-code" } }],
+      () => null,
+      () => {
+        writeCalled = true;
+      },
+      () => inspection
+    ), /Claude Code credentials/);
+    assert.equal(writeCalled, false);
+  }
+});
+
+test("prepareClaudeCredentials reports keychain locked guidance", async () => {
+  const credentials = await loadFreshEsm<typeof import("../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+
+  assert.throws(() => credentials.prepareClaudeCredentials(
     "/Users/demo",
     "agent-infra",
     [{ tool: { id: "claude-code" } }],
