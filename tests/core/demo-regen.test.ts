@@ -54,12 +54,15 @@ function setupDemoRegenFixture({ withLocalSettings }: { withLocalSettings: boole
   const assetsDir = path.join(repoDir, "assets");
   const scriptsDir = path.join(repoDir, "scripts");
   const binDir = path.join(repoDir, "bin");
+  const distBinDir = path.join(repoDir, "dist", "bin");
   const capturedTapePath = path.join(repoDir, "captured.tape");
+  const capturedAiOutPath = path.join(repoDir, "captured-ai-out.txt");
   const sourceGifPath = path.join(repoDir, "source.gif");
 
   fs.mkdirSync(assetsDir, { recursive: true });
   fs.mkdirSync(scriptsDir, { recursive: true });
   fs.mkdirSync(binDir, { recursive: true });
+  fs.mkdirSync(distBinDir, { recursive: true });
 
   fs.writeFileSync(path.join(assetsDir, "demo-init.tape"), read("assets/demo-init.tape"), "utf8");
   if (withLocalSettings) {
@@ -72,6 +75,19 @@ function setupDemoRegenFixture({ withLocalSettings }: { withLocalSettings: boole
     "utf8"
   );
   fs.writeFileSync(sourceGifPath, makeFakeGif(4));
+  fs.writeFileSync(
+    path.join(distBinDir, "cli.js"),
+    `#!/usr/bin/env node
+process.stdout.write("9.9.9-test\\n");
+`,
+    "utf8"
+  );
+  fs.chmodSync(path.join(distBinDir, "cli.js"), 0o755);
+  fs.writeFileSync(
+    path.join(repoDir, "package.json"),
+    JSON.stringify({ name: "fake", version: "9.9.9-test" }),
+    "utf8"
+  );
 
   // VHS shim: captures the merged tape and outputs the source GIF as a webm
   const vhsShimPath = path.join(binDir, "vhs");
@@ -81,6 +97,7 @@ function setupDemoRegenFixture({ withLocalSettings }: { withLocalSettings: boole
 set -e
 cp "$1" "$TEST_CAPTURE_TAPE"
 cp "$TEST_SOURCE_GIF" assets/demo-init.webm
+ai version --raw > "$TEST_CAPTURE_AI_OUT" 2>&1 || true
 `,
     "utf8"
   );
@@ -107,11 +124,14 @@ esac
   return {
     repoDir,
     assetsDir,
+    binDir,
     capturedTapePath,
+    capturedAiOutPath,
     sourceGifPath,
     env: {
       ...envWithPrependedPath(process.env, binDir),
       TEST_CAPTURE_TAPE: capturedTapePath,
+      TEST_CAPTURE_AI_OUT: capturedAiOutPath,
       TEST_SOURCE_GIF: sourceGifPath
     }
   };
@@ -218,6 +238,38 @@ test("demo-regen works without a local settings tape", () => {
     assert.doesNotMatch(mergedTape, /^Set Framerate 19$/m);
     assert.match(mergedTape, /Output assets\/demo-init\.webm/);
     assert.match(result.stdout, /Normalized: 4 frames, 6250ms, total 25\.0s/);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test("demo-regen shims `ai` to the local dist build, not the PATH-installed binary", () => {
+  const fixture = setupDemoRegenFixture({ withLocalSettings: false });
+  const {
+    repoDir,
+    binDir,
+    capturedAiOutPath,
+    env
+  } = fixture;
+
+  fs.writeFileSync(
+    path.join(binDir, "ai"),
+    `#!/bin/sh
+echo "GLOBAL-FAKE"
+`,
+    "utf8"
+  );
+  fs.chmodSync(path.join(binDir, "ai"), 0o755);
+
+  try {
+    const result = spawnSync("sh", ["scripts/demo-regen.sh"], {
+      cwd: repoDir,
+      encoding: "utf8",
+      env
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.readFileSync(capturedAiOutPath, "utf8").trim(), "9.9.9-test");
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }

@@ -15,9 +15,30 @@ local="assets/demo-settings.tape"
 gif="assets/demo-init.gif"
 webm="assets/demo-init.webm"
 target_duration=25  # seconds — fixed across all machines
+repo_root=$(pwd)
+local_cli="$repo_root/dist/bin/cli.js"
 
 tmp=$(mktemp).tape
-trap 'rm -f "$tmp" "$webm" /tmp/demo-palette.png' EXIT
+shim_dir=$(mktemp -d)
+trap 'rm -rf "$tmp" "$webm" /tmp/demo-palette.png "$shim_dir"' EXIT
+
+# ── Ensure local build exists and shim `ai` / `agent-infra` to it ──
+# Demo tape types `ai version` / `ai init`; without this shim those resolve
+# to whatever global `ai` is on PATH, not the current workspace build.
+if [ ! -f "$local_cli" ]; then
+  echo "demo-regen: $local_cli not found. Run 'npm run build' first." >&2
+  exit 1
+fi
+
+for name in ai agent-infra; do
+  cat >"$shim_dir/$name" <<SHIM
+#!/bin/sh
+exec node "$local_cli" "\$@"
+SHIM
+  chmod +x "$shim_dir/$name"
+done
+
+export PATH="$shim_dir:$PATH"
 
 # ── Merge local settings + switch output to WebM ──
 {
@@ -27,6 +48,13 @@ trap 'rm -f "$tmp" "$webm" /tmp/demo-palette.png' EXIT
 
 # ── Record via VHS (lossless WebM) ──
 vhs "$tmp"
+
+# ── Sanity check: local CLI version should match package.json ──
+pkg_version=$(node -p "require('./package.json').version" 2>/dev/null || echo "")
+shim_version=$("$shim_dir/ai" version --raw 2>/dev/null || echo "")
+if [ -n "$pkg_version" ] && [ -n "$shim_version" ] && [ "$pkg_version" != "$shim_version" ]; then
+  echo "demo-regen: WARNING dist/bin/cli.js reports $shim_version but package.json is $pkg_version (rebuild before recording)." >&2
+fi
 
 # ── Encode GIF with color-accurate palette ──
 # Pass 1: Generate palette with Catppuccin Mocha key colors injected.
