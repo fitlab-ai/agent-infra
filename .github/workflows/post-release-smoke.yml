@@ -30,7 +30,7 @@ jobs:
     steps:
       - name: Download release-version artifact (workflow_run)
         if: ${{ github.event_name == 'workflow_run' }}
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: release-version
           run-id: ${{ github.event.workflow_run.id }}
