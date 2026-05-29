@@ -319,13 +319,23 @@ function parseTestFrontmatter(content: string) {
   if (!match) {
     return null;
   }
+  const body = match[1];
+  if (body === undefined) {
+    return null;
+  }
 
   const metadata: Record<string, string> = {};
-  for (const line of match[1].split(/\r?\n/)) {
+  for (const line of body.split(/\r?\n/)) {
     const field = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (field) {
-      metadata[field[1]] = field[2].trim();
+    if (!field) {
+      continue;
     }
+    const key = field[1];
+    const value = field[2];
+    if (key === undefined || value === undefined) {
+      continue;
+    }
+    metadata[key] = value.trim();
   }
 
   return metadata;
