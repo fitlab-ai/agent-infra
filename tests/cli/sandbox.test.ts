@@ -5379,6 +5379,31 @@ test("sandbox ls format is engine-neutral and embeds raw Labels", async () => {
   );
 });
 
+test("sandbox ls formatContainerTable aligns header and rows by column width", async () => {
+  const { formatContainerTable } = await loadFreshEsm<typeof import("../../lib/sandbox/commands/ls.ts")>("lib/sandbox/commands/ls.js");
+
+  const rows = [
+    { name: "demo-dev-feature-x", status: "Up 2 hours", branch: "feature/short" },
+    { name: "worker", status: "Exited (0) 20 minutes ago", branch: "bugfix/align-table" },
+    { name: "agent-infra-sandbox-long", status: "Created", branch: "main" }
+  ];
+  const lines = formatContainerTable(rows);
+  const statusColumn = lines[0].indexOf("STATUS");
+  const branchColumn = lines[0].indexOf("BRANCH");
+
+  assert.equal(lines.length, rows.length + 1);
+  assert.ok(statusColumn > 0);
+  assert.ok(branchColumn > statusColumn);
+  for (let i = 0; i < rows.length; i += 1) {
+    assert.equal(lines[i + 1].indexOf(rows[i].status), statusColumn);
+    assert.equal(lines[i + 1].indexOf(rows[i].branch), branchColumn);
+  }
+  for (const line of lines) {
+    assert.equal(line.includes("\t"), false);
+    assert.doesNotMatch(line, /\s+$/);
+  }
+});
+
 test("sandbox ls parseLabels parses docker label CSV", async () => {
   const { parseLabels } = await loadFreshEsm<typeof import("../../lib/sandbox/commands/ls.ts")>("lib/sandbox/commands/ls.js");
 

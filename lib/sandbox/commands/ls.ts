@@ -9,7 +9,13 @@ import { runSafeEngine } from '../shell.ts';
 import { resolveTools, toolProjectDirCandidates } from '../tools.ts';
 
 const USAGE = 'Usage: ai sandbox ls';
-const CONTAINER_LIST_HEADER = 'NAMES\tSTATUS\tBRANCH';
+const CONTAINER_TABLE_HEADERS = ['NAMES', 'STATUS', 'BRANCH'] as const;
+
+type ContainerTableRow = {
+  name: string;
+  status: string;
+  branch: string;
+};
 
 // Exported to lock the docker/podman-compatible format in unit tests.
 export function containerListFormat(): string {
@@ -33,6 +39,22 @@ export function parseLabels(csv: string): Record<string, string> {
     labels[pair.slice(0, eq)] = pair.slice(eq + 1);
   }
   return labels;
+}
+
+export function formatContainerTable(rows: ContainerTableRow[]): string[] {
+  const columns = rows.map((row) => [row.name, row.status, row.branch] as const);
+  const widths = [
+    Math.max(CONTAINER_TABLE_HEADERS[0].length, ...rows.map((row) => row.name.length)),
+    Math.max(CONTAINER_TABLE_HEADERS[1].length, ...rows.map((row) => row.status.length)),
+    Math.max(CONTAINER_TABLE_HEADERS[2].length, ...rows.map((row) => row.branch.length))
+  ] as const;
+  const renderRow = (values: readonly [string, string, string]): string =>
+    `${values[0].padEnd(widths[0])}  ${values[1].padEnd(widths[1])}  ${values[2]}`.trimEnd();
+
+  return [
+    renderRow(CONTAINER_TABLE_HEADERS),
+    ...columns.map((column) => renderRow(column))
+  ];
 }
 
 function listChildren(dir: string): string[] {
@@ -69,11 +91,13 @@ export function ls(args: string[] = []): void {
     p.log.warn('  No sandbox containers');
   } else {
     const branchKey = sandboxBranchLabel(config);
-    process.stdout.write(`  ${CONTAINER_LIST_HEADER}\n`);
-    for (const line of containers.split('\n')) {
+    const rows = containers.split('\n').map((line) => {
       const [name = '', status = '', labelsCsv = ''] = line.split('\t');
       const branch = parseLabels(labelsCsv)[branchKey] ?? '';
-      process.stdout.write(`  ${name}\t${status}\t${branch}\n`);
+      return { name, status, branch };
+    });
+    for (const line of formatContainerTable(rows)) {
+      process.stdout.write(`  ${line}\n`);
     }
   }
 
