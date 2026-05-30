@@ -132,8 +132,8 @@ jobs:
         shell: bash
         run: |
           brew install --verbose fitlab-ai/tap/agent-infra 2>&1 | tee install.log
-          if ! grep -q "Pouring" install.log; then
-            echo "::error::agent-infra was not poured from a bottle (no 'Pouring' in output)"
+          if ! grep -q "Pouring agent-infra-" install.log; then
+            echo "::error::agent-infra was not poured from a bottle (no 'Pouring agent-infra-' in output)"
             exit 1
           fi
 

@@ -113,6 +113,6 @@ test("post-release-smoke workflow verifies npm and brew install channels", () =>
   assert.match(workflow, /grep -q "bottle do"/);
   assert.match(workflow, /name: brew install \(must pour from bottle\)/);
   assert.match(workflow, /brew install --verbose fitlab-ai\/tap\/agent-infra/);
-  assert.match(workflow, /Pouring/);
+  assert.match(workflow, /grep -q "Pouring agent-infra-"/);
   assert.match(workflow, /agent-infra version/);
 });
