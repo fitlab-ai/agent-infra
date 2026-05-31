@@ -40,3 +40,28 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Coverage report (informational)
+        if: matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        run: |
+          coverage_output=$(npm run test:coverage --silent 2>&1)
+          echo "$coverage_output" | sed -n '/start of coverage report/,/end of coverage report/p' > coverage-block.txt
+          {
+            echo "## Coverage (informational, not a gate)"
+            echo ""
+            echo "> 覆盖率仅作为薄弱区域提示；不作为 merge gate，不追求百分比目标。"
+            echo ""
+            echo '```text'
+            cat coverage-block.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.lcov
+          fail_ci_if_error: false

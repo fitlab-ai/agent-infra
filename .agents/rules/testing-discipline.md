@@ -38,3 +38,37 @@ assert.match(content, /^name: implement-task$/m);    // 正向断言已足够
 - **mock 过度**：只在网络、文件系统、时间、随机数等真实边界打桩；不要 mock 被测对象自身逻辑，否则测试只验证 mock 是否按预设运行。
 - **测试实现细节**：优先断言公开接口、产物、状态变化或错误结果；避免断言私有函数、内部调用顺序、临时数据结构。
 - **断言不充分**：断言必须锁定具体期望值；不要用"只要不抛异常""结果存在即可"替代对关键字段、数量和边界的验证。
+
+## 覆盖率定位（信息层）
+
+> CI 中通过 `node --test --experimental-test-coverage` 输出覆盖率，仅作为"哪些文件被测试薄弱"的提示，**不作为 merge gate**。
+
+### 本地运行
+
+```bash
+npm run test:coverage
+```
+
+stdout 末尾会打印按文件粒度的行 / 分支 / 函数覆盖率以及未覆盖行号。
+
+### CI 展示
+
+`.github/workflows/unit-tests.yml` 在 ubuntu-latest 分片上把覆盖率块写入 GitHub Actions 的 step summary（PR Checks 页可见）。Windows / macOS 分片不重复输出。
+
+README 顶部的 Codecov 徽章由 `.github/workflows/unit-tests.yml` 在 ubuntu-latest 分片上传 `coverage.lcov` 后由 Codecov 生成。
+
+### 边界
+
+- **不设置百分比阈值**：`--test-coverage-lines/branches/functions` 等阈值参数禁止加入；Goodhart's law 提醒我们一旦把覆盖率作为指标，开发者会写"覆盖率友好但行为弱"的测试。
+- **第三方服务仅用于徽章**：已接入 Codecov 托管 README 覆盖率徽章，但通过根 `codecov.yml` 显式关闭其 project/patch status check 与 PR 评论——Codecov 在本项目只展示数字，不参与 merge 决策。不接入 coveralls 等其他服务。
+- **不区分 tier**：当前只对 full `test` tier 输出覆盖率；smoke / core tier 的覆盖率没有独立价值。
+- **不阻塞 PR**：CI 步骤 `continue-on-error: true`，即便覆盖率采集失败也不影响 merge。
+
+### 与"测试 tier 覆盖"的关系
+
+注意区分两个概念：
+
+- **测试 tier 覆盖**（`tests/core/test-tier-coverage.test.ts` 强制 core ⊇ smoke）：管的是"哪些测试文件被纳入哪一 tier"，与代码行覆盖率正交。
+- **代码行覆盖率**（本节）：管的是"业务源码哪些行被测试触达"。
+
+两者目的不同，不要相互替代。

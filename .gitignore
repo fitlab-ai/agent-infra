@@ -36,3 +36,6 @@ assets/demo-settings.tape
 
 # Temp files
 tmp/
+
+# Coverage
+coverage.lcov

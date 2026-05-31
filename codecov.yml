@@ -1,0 +1,7 @@
+# Coverage is informational only - never a merge gate.
+# See .agents/rules/testing-discipline.md.
+coverage:
+  status:
+    project: false
+    patch: false
+comment: false
