@@ -84,7 +84,8 @@
       "AGENTS.md"
     ],
     "ejected": [
-      ".agents/rules/cross-platform-tests.md"
+      ".agents/rules/cross-platform-tests.md",
+      ".github/scripts/generate-bottle-block.mjs"
     ]
   }
 }

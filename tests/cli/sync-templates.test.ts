@@ -649,6 +649,52 @@ test("syncTemplates removes stale managed files but preserves merged and ejected
   }
 });
 
+test("syncTemplates keeps an ejected entry that has no template source under a managed directory wildcard", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-project-only-ejected-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+
+    writeFile(templateRoot, "docs/template.md", "Template\n");
+
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      platform: { type: "github" },
+      files: {
+        managed: ["docs/"],
+        merged: [],
+        ejected: ["docs/project-only.md"]
+      }
+    });
+
+    writeFile(projectRoot, "docs/template.md", "Template\n");
+    writeFile(projectRoot, "docs/project-only.md", "Project only\n");
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+
+    assert.deepEqual(report.managed.removed, []);
+    assert.equal(fs.readFileSync(path.join(projectRoot, "docs/project-only.md"), "utf8"), "Project only\n");
+    assert.deepEqual(report.ejected.skipped, ["docs/project-only.md"]);
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("syncTemplates preserves stale files that match merged glob patterns", async () => {
   const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-glob-"));

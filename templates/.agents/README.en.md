@@ -193,6 +193,23 @@ Each source should mirror the `.agents/skills/` layout and include `SKILL.md` at
 - Built-in skills are not overridable by custom sources; if a source skill name conflicts with a built-in skill, the source copy is skipped
 - Use `files.ejected` if the project must take ownership of a built-in skill or command
 
+## File Ownership and Sync Strategy
+
+The `files` field in `.agents/.airc.json` groups project files into three categories:
+
+| Category | When the template has the file | When the template does not have the file | Cleanup behavior |
+|----------|--------------------------------|------------------------------------------|------------------|
+| `managed` | Write from the template and overwrite | Treat as removed from the template | Delete the local project copy |
+| `merged` | Merge semantically by AI or humans | Do not write from the template | Keep the local project copy |
+| `ejected` | May be created from the template first; skip overwrite once it exists | Do not write from the template | Keep the local project copy |
+
+`ejected` has two common uses:
+
+1. **Taking over a built-in file**: the project needs full control over a rule, command, or config file that originally came from the template.
+2. **Declaring a project-only file**: the project owns a file under a managed directory wildcard, but the template does not contain that file; list it in `files.ejected` so sync does not treat it as a removed template file.
+
+`ejected` entries support literal paths or globs, using the same matching rules as `merged`.
+
 ## Custom TUI Configuration
 
 Use the top-level `.agents/.airc.json` `customTUIs` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom TUI directory.
