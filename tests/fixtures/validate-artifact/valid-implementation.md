@@ -3,6 +3,12 @@
 - **实现轮次**: Round 1
 - **产物文件**: `implementation.md`
 
+## 状态核对
+
+```text
+$ git status -s
+```
+
 ## 变更文件
 
 ### 新建文件
@@ -34,6 +40,14 @@ console.log("gate");
 **测试输出**:
 ```
 ok 1 - validate artifact
+```
+
+## 证据原文
+
+- 断言：实现报告校验通过。
+```text
+$ node .agents/scripts/validate-artifact.js gate implement-task .agents/workspace/active/TASK-20260328-000001 implementation.md --format text
+Verification: pass
 ```
 
 ## 与方案的差异

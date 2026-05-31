@@ -10,6 +10,10 @@
 - **实现轮次**: Round {implementation-round}
 - **产物文件**: `{implementation-artifact}`
 
+## 状态核对
+
+> 粘贴状态核对命令原文；每条命令以 `$ ` 开头。
+
 ## 变更文件
 
 ### 新建文件
@@ -41,6 +45,17 @@
 **测试输出**:
 ```
 {test-run-output}
+```
+
+
+## 证据原文
+
+> 每条“我验证了 X”断言都要配对对应 tool output 原文；gate 仅校验本段存在和至少一行 `$ `。
+
+- 断言：{verified claim}
+```text
+$ {command}
+{raw output}
 ```
 
 ## 与方案的差异

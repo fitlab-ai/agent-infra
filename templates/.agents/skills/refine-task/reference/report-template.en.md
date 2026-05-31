@@ -12,6 +12,10 @@ Use this structure when writing `refinement.md` or `refinement-r{N}.md`.
 - **Review Input**: `{review-artifact}`
 - **Implementation Context**: `{implementation-artifact}`
 
+## State Check
+
+> Paste the raw state-check command output; each command starts with `$ `.
+
 ### Review Feedback Handling
 
 #### Blocker Fixes
@@ -42,6 +46,17 @@ Use this structure when writing `refinement.md` or `refinement-r{N}.md`.
 
 #### Unresolved Issues
 - {issue}: {reason}
+
+
+## Evidence
+
+> Pair each "I verified X" claim with the corresponding raw tool output; the gate only checks that this section exists and at least one `$ ` line is present.
+
+- Claim: {verified claim}
+```text
+$ {command}
+{raw output}
+```
 
 ### Test Results After Refinement
 - All tests passing: {yes/no}

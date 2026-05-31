@@ -24,6 +24,20 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 | "I can clean up nearby code while I am here." | Scope is limited to review findings; changes outside that scope are out of bounds. |
 | "Clearing env-blocked items makes the report look better." | env-blocked findings are outside the repair scope; preserve and label them truthfully, and never use no-op edits to pad the fix count. |
 
+## Step 0: State Check (pre-execution hard gate)
+
+After loading workflow / skill / rules instructions, and before any task-state judgment or user-visible conclusion, run the state check first. Reading instruction files does not count as an external-state action or conclusion.
+
+Run these commands and paste the raw output into both the user-facing reply and this round's `## State Check` section:
+
+```bash
+git status -s
+ls -la .agents/workspace/active/{task-id}/
+tail .agents/workspace/active/{task-id}/task.md
+```
+
+Before the state check is complete, do not make external-state assertions such as "the code is unchanged", "tests passed", or "there are no other references", including in reasoning. This gate is only a structural floor; evidence pairing and authenticity still require the report template and review discipline.
+
 ## Steps
 
 ### 1. Verify Prerequisites

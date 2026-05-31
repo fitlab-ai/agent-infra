@@ -13,6 +13,10 @@ Use this template when writing `review.md` or `review-r{N}.md`.
   - `{implementation-artifact}`
   - `{refinement-artifact}` (if present)
 
+## State Check
+
+> Paste the raw state-check command output; each command starts with `$ `.
+
 ## Review Summary
 
 - **Reviewer**: {reviewer-name}
@@ -54,6 +58,17 @@ Use this template when writing `review.md` or `review-r{N}.md`.
 **Manual Verification Steps**: {steps for the human verifier}
 
 > If this round has no env-blocked findings, keep the section heading and write "None".
+
+
+## Evidence
+
+> Pair each "I verified X" claim with the corresponding raw tool output; the gate only checks that this section exists and at least one `$ ` line is present.
+
+- Claim: {verified claim}
+```text
+$ {command}
+{raw output}
+```
 
 ## Highlights
 

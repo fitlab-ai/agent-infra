@@ -12,6 +12,20 @@ description: "标记任务完成并归档"
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 
+## 第 0 步：状态核对（执行前硬约束）
+
+在加载 workflow / skill / rules 指令之后、做任何任务状态判断或用户可见结论之前，必须先执行状态核对。指令类文件读取不算对外动作或结论。
+
+运行以下命令，并把原文粘贴到回复正文和本轮产物的 `## 状态核对` 段：
+
+```bash
+git status -s
+ls -la .agents/workspace/active/{task-id}/
+tail .agents/workspace/active/{task-id}/task.md
+```
+
+状态核对完成前，禁止任何关于外部状态的断言（例如“代码没变”“测试已通过”“没有其他引用”），包括思考阶段。本门禁只提供结构下限；逐条证据配对和真实性仍需按报告模板与审查要求核对。
+
 ## 执行步骤
 
 ### 1. 验证任务存在
@@ -64,6 +78,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `completed_at`：{当前时间戳}
 - `updated_at`：{当前时间戳}
 - `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
+- 新增或更新 `## 状态核对` 段，粘贴第 0 步审计命令原文（含 `$ ` 前缀行），放在 `## 活动日志` 之前
 - 标记所有工作流步骤为已完成
 - 逐项验证并勾选 `## 完成检查清单` 中的所有条目（将 `- [ ]` 改为 `- [x]`）
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：

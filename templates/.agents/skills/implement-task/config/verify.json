@@ -22,9 +22,14 @@
         "关键代码说明",
         "测试结果",
         "与方案的差异",
-        "供审查关注的内容"
+        "供审查关注的内容",
+        "状态核对",
+        "证据原文"
       ],
-      "freshness_minutes": 30
+      "freshness_minutes": 30,
+      "required_patterns": [
+        "^\\$ "
+      ]
     },
     "activity-log": {
       "expected_action_pattern": "Implementation \\(Round \\d+\\)",

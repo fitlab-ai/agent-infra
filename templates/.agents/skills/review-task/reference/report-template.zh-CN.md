@@ -13,6 +13,10 @@
   - `{implementation-artifact}`
   - `{refinement-artifact}`（如存在）
 
+## 状态核对
+
+> 粘贴状态核对命令原文；每条命令以 `$ ` 开头。
+
 ## 审查摘要
 
 - **审查者**：{reviewer-name}
@@ -54,6 +58,17 @@
 **待人工执行的验证步骤**：{steps for the human verifier}
 
 > 如本轮无 env-blocked 项，保留段落标题并写「（无）」。
+
+
+## 证据原文
+
+> 每条“我验证了 X”断言都要配对对应 tool output 原文；gate 仅校验本段存在和至少一行 `$ `。
+
+- 断言：{verified claim}
+```text
+$ {command}
+{raw output}
+```
 
 ## 亮点
 

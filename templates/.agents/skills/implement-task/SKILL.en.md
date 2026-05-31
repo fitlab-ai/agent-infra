@@ -27,6 +27,20 @@ Before implementing, stop if any of these thoughts appear. They are violations:
 | "This plan is flawed, so I will improve it as I go." | Deviations from `{plan-artifact}` must be recorded in the report; if the direction is questionable, stop and confirm instead of changing it silently. |
 | "The tests passed, so I can commit this too." | This skill never runs `git add` or `git commit`; committing is a separate step explicitly requested by the user. |
 
+## Step 0: State Check (pre-execution hard gate)
+
+After loading workflow / skill / rules instructions, and before any task-state judgment or user-visible conclusion, run the state check first. Reading instruction files does not count as an external-state action or conclusion.
+
+Run these commands and paste the raw output into both the user-facing reply and this round's `## State Check` section:
+
+```bash
+git status -s
+ls -la .agents/workspace/active/{task-id}/
+tail .agents/workspace/active/{task-id}/task.md
+```
+
+Before the state check is complete, do not make external-state assertions such as "the code is unchanged", "tests passed", or "there are no other references", including in reasoning. This gate is only a structural floor; evidence pairing and authenticity still require the report template and review discipline.
+
 ## Steps
 
 ### 1. Verify Prerequisites

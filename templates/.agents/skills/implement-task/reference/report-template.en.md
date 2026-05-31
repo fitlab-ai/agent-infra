@@ -10,6 +10,10 @@ Use this structure when creating `implementation.md` or `implementation-r{N}.md`
 - **Implementation Round**: Round {implementation-round}
 - **Artifact File**: `{implementation-artifact}`
 
+## State Check
+
+> Paste the raw state-check command output; each command starts with `$ `.
+
 ## Modified Files
 
 ### New Files
@@ -41,6 +45,17 @@ Use this structure when creating `implementation.md` or `implementation-r{N}.md`
 **Test Output**:
 ```
 {test-run-output}
+```
+
+
+## Evidence
+
+> Pair each "I verified X" claim with the corresponding raw tool output; the gate only checks that this section exists and at least one `$ ` line is present.
+
+- Claim: {verified claim}
+```text
+$ {command}
+{raw output}
 ```
 
 ## Differences from Plan

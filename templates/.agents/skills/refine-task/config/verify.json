@@ -18,9 +18,14 @@
       "file_pattern": "refinement.md|refinement-r{N}.md",
       "required_sections": [
         "审查反馈处理",
-        "修复后的测试结果"
+        "修复后的测试结果",
+        "状态核对",
+        "证据原文"
       ],
-      "freshness_minutes": 30
+      "freshness_minutes": 30,
+      "required_patterns": [
+        "^\\$ "
+      ]
     },
     "activity-log": {
       "expected_action_pattern": "Refinement \\(Round \\d+, for .+\\)",

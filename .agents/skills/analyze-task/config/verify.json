@@ -23,9 +23,13 @@
         "相关文件",
         "影响评估",
         "技术风险",
-        "工作量和复杂度评估"
+        "工作量和复杂度评估",
+        "状态核对"
       ],
-      "freshness_minutes": 30
+      "freshness_minutes": 30,
+      "required_patterns": [
+        "^\\$ "
+      ]
     },
     "activity-log": {
       "expected_action_pattern": "Requirement Analysis \\(Round \\d+\\)",

@@ -71,6 +71,130 @@ test("template SKILL.md files provide zh-CN variants", () => {
     });
 });
 
+test("workflow skills document state check gates", () => {
+  [
+    "analyze-task",
+    "plan-task",
+    "implement-task",
+    "review-task",
+    "refine-task",
+    "complete-task"
+  ].forEach((skill) => {
+    skillDocPaths(skill).forEach((relativePath) => {
+      const content = read(relativePath);
+      const expectedHeading = relativePath.includes(".en.")
+        ? "## Step 0: State Check (pre-execution hard gate)"
+        : "## 第 0 步：状态核对（执行前硬约束）";
+
+      assert.match(
+        content,
+        new RegExp(escapeRegExp(expectedHeading)),
+        `${relativePath} should document the pre-execution state check`
+      );
+    });
+  });
+});
+
+test("workflow artifact gates require state check evidence", () => {
+  const sectionExpectations: Record<string, string[]> = {
+    "analyze-task": ["状态核对"],
+    "plan-task": ["状态核对"],
+    "implement-task": ["状态核对", "证据原文"],
+    "review-task": ["状态核对", "证据原文"],
+    "refine-task": ["状态核对", "证据原文"],
+    "complete-task": ["状态核对"]
+  };
+
+  Object.entries(sectionExpectations).forEach(([skill, sections]) => {
+    [
+      `.agents/skills/${skill}/config/verify.json`,
+      `templates/.agents/skills/${skill}/config/verify.json`
+    ].forEach((relativePath) => {
+      const config = JSON.parse(read(relativePath));
+      const artifact = config.checks.artifact;
+
+      assert.ok(artifact, `${relativePath} should declare an artifact check`);
+      sections.forEach((section) => {
+        assert.ok(
+          artifact.required_sections.includes(section),
+          `${relativePath} should require the ${section} section`
+        );
+      });
+      assert.ok(
+        artifact.required_patterns.includes("^\\$ "),
+        `${relativePath} should require a shell prompt evidence line`
+      );
+    });
+  });
+});
+
+test("workflow verify configs reject invalid multiline flag patterns", () => {
+  listFilesRecursive(".agents/skills")
+    .concat(listFilesRecursive("templates/.agents/skills"))
+    .filter((relativePath) => /\/config\/verify\.json$/.test(relativePath))
+    .forEach((relativePath) => {
+      const config = JSON.parse(read(relativePath));
+
+      (Object.values(config.checks || {}) as Array<{ required_patterns?: string[] }>).forEach((check) => {
+        for (const pattern of check?.required_patterns || []) {
+          assert.equal(
+            pattern.includes("(?m)"),
+            false,
+            `${relativePath} should not use unsupported inline multiline flags`
+          );
+        }
+      });
+    });
+});
+
+test("workflow report templates include evidence sections", () => {
+  [
+    [".agents/skills/implement-task/reference/report-template.md", "## 状态核对", "## 证据原文"],
+    [".agents/skills/review-task/reference/report-template.md", "## 状态核对", "## 证据原文"],
+    [".agents/skills/refine-task/reference/report-template.md", "## 状态核对", "## 证据原文"],
+    ["templates/.agents/skills/implement-task/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
+    ["templates/.agents/skills/review-task/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
+    ["templates/.agents/skills/refine-task/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
+    ["templates/.agents/skills/implement-task/reference/report-template.en.md", "## State Check", "## Evidence"],
+    ["templates/.agents/skills/review-task/reference/report-template.en.md", "## State Check", "## Evidence"],
+    ["templates/.agents/skills/refine-task/reference/report-template.en.md", "## State Check", "## Evidence"]
+  ].forEach(([relativePath, stateHeading, evidenceHeading]) => {
+    const content = read(relativePath);
+
+    assert.match(content, new RegExp(escapeRegExp(stateHeading)));
+    assert.match(content, new RegExp(escapeRegExp(evidenceHeading)));
+  });
+});
+
+test("workflow skill output instructions align with state check artifact gates", () => {
+  [
+    [".agents/skills/analyze-task/SKILL.md", "## 状态核对"],
+    ["templates/.agents/skills/analyze-task/SKILL.zh-CN.md", "## 状态核对"],
+    ["templates/.agents/skills/analyze-task/SKILL.en.md", "## State Check"]
+  ].forEach(([relativePath, heading]) => {
+    assert.match(
+      read(relativePath),
+      new RegExp(`^${escapeRegExp(heading)}$`, "m"),
+      `${relativePath} output template should include the state check section required by the gate`
+    );
+  });
+
+  [
+    [".agents/skills/complete-task/SKILL.md", "## 状态核对"],
+    ["templates/.agents/skills/complete-task/SKILL.zh-CN.md", "## 状态核对"],
+    ["templates/.agents/skills/complete-task/SKILL.en.md", "## State Check"]
+  ].forEach(([relativePath, heading]) => {
+    const content = read(relativePath);
+    const updateSection = content.match(/^### 3\. .+?(?=^### 4\. )/ms)?.[0] || "";
+
+    assert.match(
+      updateSection,
+      new RegExp(escapeRegExp(heading)),
+      `${relativePath} task update step should write the state check section required by the gate`
+    );
+  });
+});
+
 test("local test skill documents smoke / core / full layered commands", () => {
   const content = read(".agents/skills/test/SKILL.md");
   assert.match(content, /npm run test:smoke/, "SKILL should document the smoke layer");

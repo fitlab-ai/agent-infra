@@ -33,6 +33,16 @@
       "verify_issue_fields": false,
       "verify_milestone": true,
       "expected_comment_marker_key": "summary"
+    },
+    "artifact": {
+      "file_pattern": "task.md",
+      "required_sections": [
+        "状态核对"
+      ],
+      "required_patterns": [
+        "^\\$ "
+      ],
+      "freshness_minutes": 30
     }
   }
 }

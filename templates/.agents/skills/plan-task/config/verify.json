@@ -24,9 +24,13 @@
         "技术方法",
         "实施步骤",
         "文件清单",
-        "验证策略"
+        "验证策略",
+        "状态核对"
       ],
-      "freshness_minutes": 30
+      "freshness_minutes": 30,
+      "required_patterns": [
+        "^\\$ "
+      ]
     },
     "activity-log": {
       "expected_action_pattern": "Technical Design \\(Round \\d+\\)",

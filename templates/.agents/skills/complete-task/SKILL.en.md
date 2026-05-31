@@ -12,6 +12,20 @@ description: "Mark a task as completed and archive it"
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
+## Step 0: State Check (pre-execution hard gate)
+
+After loading workflow / skill / rules instructions, and before any task-state judgment or user-visible conclusion, run the state check first. Reading instruction files does not count as an external-state action or conclusion.
+
+Run these commands and paste the raw output into both the user-facing reply and this round's `## State Check` section:
+
+```bash
+git status -s
+ls -la .agents/workspace/active/{task-id}/
+tail .agents/workspace/active/{task-id}/task.md
+```
+
+Before the state check is complete, do not make external-state assertions such as "the code is unchanged", "tests passed", or "there are no other references", including in reasoning. This gate is only a structural floor; evidence pairing and authenticity still require the report template and review discipline.
+
 ## Steps
 
 ### 1. Verify Task Exists
@@ -64,6 +78,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `completed_at`: {current timestamp}
 - `updated_at`: {current timestamp}
 - `agent_infra_version`: value from `.agents/rules/version-stamp.md`
+- Add or update the `## State Check` section with the raw Step 0 audit command output, including `$ ` prompt lines, before `## Activity Log`
 - Mark all workflow steps as complete
 - Verify and check off all items in `## Completion Checklist` (change `- [ ]` to `- [x]`)
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):

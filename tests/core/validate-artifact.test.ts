@@ -164,6 +164,12 @@ function buildCompletedTaskContent(checklistLines: string[], overrides: Frontmat
     "",
     "- [x] 保留最新验证输出",
     "",
+    "## 状态核对",
+    "",
+    "```text",
+    "$ git status -s",
+    "```",
+    "",
     "## 活动日志",
     "",
     `- ${now} — **Completed** by codex — Task archived to completed/`,
@@ -875,11 +881,11 @@ test("validate-artifact gate passes for complete-task when completion checklist 
     assert.equal(payload.gate, "pass");
     assert.deepEqual(
       payload.checks.map((check) => check.type),
-      ["task-meta", "activity-log", "completion-checklist", "platform-sync"]
+      ["task-meta", "activity-log", "completion-checklist", "platform-sync", "artifact"]
     );
     assert.deepEqual(
       payload.checks.map((check) => check.status),
-      ["pass", "pass", "pass", "pass"]
+      ["pass", "pass", "pass", "pass", "pass"]
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
