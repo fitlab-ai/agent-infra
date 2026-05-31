@@ -278,3 +278,24 @@ test("import-issue checklists include the task comment sync step", () => {
     );
   });
 });
+
+test("analyze-task and plan-task docs require field re-estimation in update step", () => {
+  const targets: Array<[string, string]> = [
+    [".agents/skills/analyze-task/SKILL.md", "重估"],
+    [".agents/skills/plan-task/SKILL.md", "重估"],
+    ["templates/.agents/skills/analyze-task/SKILL.en.md", "re-estimate"],
+    ["templates/.agents/skills/plan-task/SKILL.en.md", "re-estimate"],
+    ["templates/.agents/skills/analyze-task/SKILL.zh-CN.md", "重估"],
+    ["templates/.agents/skills/plan-task/SKILL.zh-CN.md", "重估"]
+  ];
+
+  targets.forEach(([relativePath, reEstimateToken]) => {
+    const content = read(relativePath);
+
+    assert.match(
+      content,
+      new RegExp(escapeRegExp(reEstimateToken), "i"),
+      `${relativePath} should reference the re-estimation vocabulary token`
+    );
+  });
+});
