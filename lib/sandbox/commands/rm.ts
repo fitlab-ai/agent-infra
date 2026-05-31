@@ -15,26 +15,17 @@ import {
   worktreeDirCandidates
 } from '../constants.ts';
 import { ENGINES, detectEngine, engineDisplayName, isManagedEngine, stopManagedVm } from '../engine.ts';
-import { run, runOk, runSafe, runSafeEngine } from '../shell.ts';
+import { removeManagedDir, removeWorktreeDir } from '../managed-fs.ts';
+import { runOk, runSafe, runSafeEngine } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
 import { resolveTools, toolConfigDirCandidates, toolProjectDirCandidates } from '../tools.ts';
 import type { SandboxTool } from '../tools.ts';
 
 const USAGE = `Usage: ai sandbox rm <branch> [--all]`;
+export { assertManagedPath } from '../managed-fs.ts';
 
 function projectToolDirs(config: SandboxConfig, tools: SandboxTool[]): string[] {
   return tools.flatMap((tool) => toolProjectDirCandidates(tool, config.project));
-}
-
-export function assertManagedPath(root: string, target: string): void {
-  const resolvedRoot = path.resolve(root);
-  const resolvedTarget = path.resolve(target);
-  const relative = path.relative(resolvedRoot, resolvedTarget);
-  if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
-    return;
-  }
-
-  throw new Error(`Refusing to remove path outside managed sandbox root: ${target}`);
 }
 
 async function rmOne(config: SandboxConfig, tools: SandboxTool[], branch: string): Promise<void> {
@@ -94,12 +85,7 @@ async function rmOne(config: SandboxConfig, tools: SandboxTool[], branch: string
 
     if (shouldRemoveWorktree) {
       for (const worktree of existingWorktrees) {
-        try {
-          run('git', ['-C', config.repoRoot, 'worktree', 'remove', worktree, '--force']);
-        } catch {
-          assertManagedPath(config.worktreeBase, worktree);
-          fs.rmSync(worktree, { recursive: true, force: true });
-        }
+        removeWorktreeDir(config.repoRoot, config.worktreeBase, worktree);
       }
 
       const shouldDeleteBranch = await p.confirm({
@@ -117,15 +103,13 @@ async function rmOne(config: SandboxConfig, tools: SandboxTool[], branch: string
 
   for (const { tool, candidates } of toolCandidates) {
     for (const dir of candidates.filter((candidate) => fs.existsSync(candidate))) {
-      assertManagedPath(tool.sandboxBase, dir);
-      fs.rmSync(dir, { recursive: true, force: true });
+      removeManagedDir(tool.sandboxBase, dir);
       p.log.success(`${tool.name} state removed: ${dir}`);
     }
   }
 
   for (const dir of shellConfigDirCandidates(config, effectiveBranch).filter((candidate) => fs.existsSync(candidate))) {
-    assertManagedPath(config.shellConfigBase, dir);
-    fs.rmSync(dir, { recursive: true, force: true });
+    removeManagedDir(config.shellConfigBase, dir);
     p.log.success(`Shell config removed: ${dir}`);
   }
 
@@ -136,8 +120,7 @@ async function rmOne(config: SandboxConfig, tools: SandboxTool[], branch: string
       initialValue: true
     });
     if (!p.isCancel(shouldRemoveShare) && shouldRemoveShare) {
-      assertManagedPath(config.shareBase, shareBranch);
-      fs.rmSync(shareBranch, { recursive: true, force: true });
+      removeManagedDir(config.shareBase, shareBranch);
       p.log.success(`Share dir removed: ${shareBranch}`);
     }
   }
@@ -178,12 +161,7 @@ async function rmAll(config: SandboxConfig, tools: SandboxTool[]): Promise<void>
     if (!p.isCancel(shouldRemoveWorktrees) && shouldRemoveWorktrees) {
       for (const entry of fs.readdirSync(config.worktreeBase)) {
         const dir = path.join(config.worktreeBase, entry);
-        try {
-          run('git', ['-C', config.repoRoot, 'worktree', 'remove', dir, '--force']);
-        } catch {
-          assertManagedPath(config.worktreeBase, dir);
-          fs.rmSync(dir, { recursive: true, force: true });
-        }
+        removeWorktreeDir(config.repoRoot, config.worktreeBase, dir);
       }
       runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
     }
@@ -191,8 +169,7 @@ async function rmAll(config: SandboxConfig, tools: SandboxTool[]): Promise<void>
 
   for (const dir of projectToolDirs(config, tools)) {
     if (fs.existsSync(dir)) {
-      assertManagedPath(path.dirname(dir), dir);
-      fs.rmSync(dir, { recursive: true, force: true });
+      removeManagedDir(path.dirname(dir), dir);
       p.log.success(`Removed tool state: ${dir}`);
     }
   }
@@ -206,8 +183,7 @@ async function rmAll(config: SandboxConfig, tools: SandboxTool[]): Promise<void>
     if (!p.isCancel(shouldRemoveShellConfigs) && shouldRemoveShellConfigs) {
       for (const entry of fs.readdirSync(config.shellConfigBase)) {
         const dir = path.join(config.shellConfigBase, entry);
-        assertManagedPath(config.shellConfigBase, dir);
-        fs.rmSync(dir, { recursive: true, force: true });
+        removeManagedDir(config.shellConfigBase, dir);
       }
       p.log.success(`Project shell config dirs removed: ${config.shellConfigBase}`);
     }
@@ -219,8 +195,7 @@ async function rmAll(config: SandboxConfig, tools: SandboxTool[]): Promise<void>
       initialValue: true
     });
     if (!p.isCancel(shouldRemoveAllShares) && shouldRemoveAllShares) {
-      assertManagedPath(path.dirname(config.shareBase), config.shareBase);
-      fs.rmSync(config.shareBase, { recursive: true, force: true });
+      removeManagedDir(path.dirname(config.shareBase), config.shareBase);
       p.log.success(`Project share dirs removed: ${config.shareBase}`);
     }
   }

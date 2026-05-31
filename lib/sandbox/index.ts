@@ -6,6 +6,7 @@ Commands:
   refresh                      Sync host Claude Code credentials to all sandbox copies
   ls                           List sandboxes for the current project
   rm <branch> [--all]          Remove a sandbox or all sandboxes
+  prune [--dry-run]            Remove orphaned per-branch state dirs
   vm status|start|stop         Manage the sandbox VM (macOS) or check the backend (Windows)
   rebuild [--quiet]            Rebuild the sandbox image
 
@@ -55,6 +56,11 @@ export async function runSandbox(args: string[]): Promise<void> {
     case 'rm': {
       const { rm } = await import('./commands/rm.ts');
       await rm(rest);
+      break;
+    }
+    case 'prune': {
+      const { prune } = await import('./commands/prune.ts');
+      await prune(rest);
       break;
     }
     case 'vm': {

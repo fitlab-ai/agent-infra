@@ -100,6 +100,25 @@ type EnterModule = {
   terminalEnvFlags(env?: NodeJS.ProcessEnv): string[];
   formatCredentialSyncStatus(result: { status: string }): string;
 };
+type ManagedFsModule = {
+  assertManagedPath(root: string, target: string): void;
+  removeManagedDir(root: string, dir: string): void;
+  removeWorktreeDir(repoRoot: string, worktreeBase: string, dir: string): void;
+};
+type PruneModule = {
+  collectOrphanGroups(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, activeBranches: string[]): Array<{
+    kind: string;
+    label: string;
+    base: string;
+    dirs: string[];
+  }>;
+  removeOrphanGroups(config: Record<string, unknown>, groups: Array<{
+    kind: string;
+    label: string;
+    base: string;
+    dirs: string[];
+  }>): boolean;
+};
 type AdapterModule<T extends string> = Record<`${T}Adapter`, SandboxAdapterFixture>;
 type SandboxVmConfigFixture = { cpu?: number | null; memory?: number | null; disk?: number | null };
 type SandboxResourceConfig = Record<string, unknown> & {
@@ -354,6 +373,7 @@ test("agent-infra sandbox help is wired into the main CLI", () => {
   assert.match(output, /create <branch> \[base\]/);
   assert.match(output, /^\s+refresh\s+Sync host Claude Code credentials/m);
   assert.match(output, /rebuild \[--quiet\]/);
+  assert.match(output, /prune \[--dry-run\]/);
 });
 
 test("sandbox create help documents the host aliases file", () => {
@@ -425,8 +445,47 @@ test("sandbox rm --all cleans shell config dirs through a single confirm", () =>
 
   assert.match(
     commandSource,
-    /config\.shellConfigBase[\s\S]*?p\.confirm\(\{[\s\S]*?config\.shellConfigBase[\s\S]*?\}\);[\s\S]*?readdirSync\(config\.shellConfigBase\)[\s\S]*?assertManagedPath\(config\.shellConfigBase, dir\);[\s\S]*?fs\.rmSync\(dir, \{ recursive: true, force: true \}\);/
+    /config\.shellConfigBase[\s\S]*?p\.confirm\(\{[\s\S]*?config\.shellConfigBase[\s\S]*?\}\);[\s\S]*?readdirSync\(config\.shellConfigBase\)[\s\S]*?removeManagedDir\(config\.shellConfigBase, dir\);/
   );
+});
+
+test("managed sandbox fs helpers remove only paths under the managed root", async () => {
+  const managedFs = await loadFreshEsm<ManagedFsModule>("lib/sandbox/managed-fs.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-managed-fs-"));
+  const root = path.join(tmpDir, "root");
+  const inside = path.join(root, "feature..demo");
+
+  try {
+    fs.mkdirSync(inside, { recursive: true });
+
+    managedFs.removeManagedDir(root, inside);
+
+    assert.equal(fs.existsSync(inside), false);
+    assert.throws(
+      () => managedFs.removeManagedDir(root, path.join(tmpDir, "outside")),
+      /outside managed sandbox root/
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("managed sandbox fs worktree removal falls back to managed rm", async () => {
+  const managedFs = await loadFreshEsm<ManagedFsModule>("lib/sandbox/managed-fs.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-managed-worktree-"));
+  const worktreeBase = path.join(tmpDir, "worktrees");
+  const worktree = path.join(worktreeBase, "feature..stale");
+
+  try {
+    fs.mkdirSync(worktree, { recursive: true });
+
+    managedFs.removeWorktreeDir(tmpDir, worktreeBase, worktree);
+
+    assert.equal(fs.existsSync(worktree), false);
+    assert.equal(fs.existsSync(worktreeBase), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("sandbox create warns and continues past missing Claude credentials", () => {
@@ -5460,6 +5519,155 @@ test("sandbox ls parseLabels parses docker label CSV", async () => {
   assert.deepEqual(parseLabels("k=a=b"), { k: "a=b" });
   assert.deepEqual(parseLabels("k="), { k: "" });
   assert.deepEqual(parseLabels("k=v,"), { k: "v" });
+});
+
+test("sandbox prune collects orphaned per-branch dirs while preserving active and shared dirs", async () => {
+  const sandboxPrune = await loadFreshEsm<PruneModule>("lib/sandbox/commands/prune.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-prune-collect-"));
+  const project = "demo";
+  const config = {
+    project,
+    repoRoot: tmpDir,
+    worktreeBase: path.join(tmpDir, ".agent-infra", "worktrees", project),
+    shareBase: path.join(tmpDir, ".agent-infra", "share", project),
+    shellConfigBase: path.join(tmpDir, ".agent-infra", "config", project)
+  };
+  const tool = {
+    id: "codex",
+    name: "Codex",
+    npmPackage: "@openai/codex",
+    sandboxBase: path.join(tmpDir, ".agent-infra", "sandboxes", "codex"),
+    containerMount: "/home/devuser/.codex",
+    versionCmd: "codex --version",
+    setupHint: "fixture"
+  };
+  const activeShellDir = path.join(config.shellConfigBase, "feature..live");
+  const legacyActiveShellDir = path.join(config.shellConfigBase, "release-old");
+  const dirtyLabelShellDir = path.join(config.shellConfigBase, "dirty label");
+  const orphanShellDir = path.join(config.shellConfigBase, "feature..stale");
+  const orphanWorktreeDir = path.join(config.worktreeBase, "feature..old-worktree");
+  const shareBranchesBase = path.join(config.shareBase, "branches");
+  const activeShareDir = path.join(shareBranchesBase, "feature..live");
+  const orphanShareDir = path.join(shareBranchesBase, "feature..stale-share");
+  const commonShareDir = path.join(config.shareBase, "common");
+  const toolProjectBase = path.join(tool.sandboxBase, project);
+  const activeToolDir = path.join(toolProjectBase, "feature..live");
+  const orphanToolDir = path.join(toolProjectBase, "feature..stale-tool");
+  const otherProjectToolDir = path.join(tool.sandboxBase, "other", "feature..stale-tool");
+
+  try {
+    for (const dir of [
+      activeShellDir,
+      legacyActiveShellDir,
+      dirtyLabelShellDir,
+      orphanShellDir,
+      orphanWorktreeDir,
+      activeShareDir,
+      orphanShareDir,
+      commonShareDir,
+      activeToolDir,
+      orphanToolDir,
+      otherProjectToolDir
+    ]) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    const groups = sandboxPrune.collectOrphanGroups(config, [tool], ["feature/live", "release/old", "dirty label"]);
+    const dirs = groups.flatMap((group) => group.dirs).sort();
+
+    assert.deepEqual(dirs, [
+      orphanShellDir,
+      orphanShareDir,
+      orphanToolDir,
+      orphanWorktreeDir
+    ].sort());
+
+    const removedWorktrees = sandboxPrune.removeOrphanGroups(config, groups);
+
+    assert.equal(removedWorktrees, true);
+    assert.equal(fs.existsSync(orphanShellDir), false);
+    assert.equal(fs.existsSync(orphanWorktreeDir), false);
+    assert.equal(fs.existsSync(orphanShareDir), false);
+    assert.equal(fs.existsSync(orphanToolDir), false);
+    assert.equal(fs.existsSync(config.shellConfigBase), true);
+    assert.equal(fs.existsSync(config.worktreeBase), true);
+    assert.equal(fs.existsSync(config.shareBase), true);
+    assert.equal(fs.existsSync(commonShareDir), true);
+    assert.equal(fs.existsSync(activeShellDir), true);
+    assert.equal(fs.existsSync(legacyActiveShellDir), true);
+    assert.equal(fs.existsSync(activeShareDir), true);
+    assert.equal(fs.existsSync(activeToolDir), true);
+    assert.equal(fs.existsSync(otherProjectToolDir), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox prune aborts without deleting when docker ps fails", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-prune-ps-fails-"));
+  const project = "demo";
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project,
+      sandbox: { tools: ["codex"] }
+    });
+    const shellConfigBase = path.join(tmpDir, ".agent-infra", "config", project);
+    const branchDir = path.join(shellConfigBase, "feature..live");
+    fs.mkdirSync(branchDir, { recursive: true });
+
+    const result = spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["prune"],
+      { DOCKER_EXIT_FOR_PS: "1" }
+    );
+
+    assert.equal(result.signal, null);
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}\n${result.stderr}`, /Unable to determine active sandbox branches/);
+    assert.equal(fs.existsSync(branchDir), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox prune --dry-run lists orphans without deleting them", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-prune-dry-run-"));
+  const project = "demo";
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project,
+      sandbox: { tools: ["codex"] },
+      dockerStdoutForPs: `${project}.sandbox=true,${project}.sandbox.branch=feature/live`
+    });
+    const shellConfigBase = path.join(tmpDir, ".agent-infra", "config", project);
+    const activeShellDir = path.join(shellConfigBase, "feature..live");
+    const orphanShellDir = path.join(shellConfigBase, "feature..old");
+    fs.mkdirSync(activeShellDir, { recursive: true });
+    fs.mkdirSync(orphanShellDir, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["prune", "--dry-run"]);
+
+    assert.equal(result.signal, null);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(`${result.stdout}\n${result.stderr}`, /feature\.\.old/);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /feature\.\.live/);
+    assert.equal(fs.existsSync(activeShellDir), true);
+    assert.equal(fs.existsSync(orphanShellDir), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox prune uses a single confirmation gate for deletion", () => {
+  const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/prune.js"), "utf8");
+
+  assert.match(
+    commandSource,
+    /const shouldRemove = await p\.confirm\(\{[\s\S]*?Remove \$\{count\} orphaned sandbox state[\s\S]*?initialValue: true[\s\S]*?\}\);/
+  );
 });
 
 test("runSafe forwards stderr on non-zero exit while preserving stdout return", async () => {

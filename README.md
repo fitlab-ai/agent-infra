@@ -217,6 +217,9 @@ These paths are intentionally hardcoded; there is no `.airc.json` knob. Both
 host directories are created automatically on first `create`. When you
 `ai sandbox rm <branch>` or `ai sandbox rm --all`, you will be prompted (default
 yes) to clean up the corresponding share dirs alongside the worktrees.
+Use `ai sandbox prune --dry-run` to inspect orphaned per-branch state dirs left
+behind by older versions or interrupted cleanup, then `ai sandbox prune` to
+remove only dirs without an active sandbox container.
 Existing sandboxes pick up these mounts after `ai sandbox rm <branch>` and
 `ai sandbox create <branch>`.
 
@@ -452,7 +455,7 @@ These configurations are not actively tested in this release:
 
 - **Podman** instead of Docker: Works on Fedora 40+ and other `dnf`-based RHEL family distros (RHEL, CentOS Stream, Rocky, Alma) via the `podman-docker` shim (`sudo dnf install podman podman-docker`; optionally `sudo touch /etc/containers/nodocker` to silence its per-command notice).
 - **SELinux-enforcing** hosts (Fedora / RHEL): `ai sandbox create` automatically labels bind mounts with Docker's shared `:z` flag — no setup required. Set `AGENT_INFRA_SELINUX_DISABLE=1` to opt out for debugging.
-- `ai sandbox vm` is a no-op on Linux. Linux uses native Docker directly with no VM to manage; use `ai sandbox create`, `ai sandbox exec`, `ai sandbox refresh`, `ai sandbox ls`, `ai sandbox rebuild`, `ai sandbox rm` directly.
+- `ai sandbox vm` is a no-op on Linux. Linux uses native Docker directly with no VM to manage; use `ai sandbox create`, `ai sandbox exec`, `ai sandbox refresh`, `ai sandbox ls`, `ai sandbox rebuild`, `ai sandbox rm`, and `ai sandbox prune` directly.
 
 ### Windows
 
