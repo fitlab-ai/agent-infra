@@ -292,6 +292,85 @@ test("syncTemplates prefers platform-specific variants and composes with zh-CN l
   }
 });
 
+test("syncTemplates selects JSON language variants for managed config files", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-json-lang-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const enVerify = {
+      checks: {
+        artifact: {
+          required_sections: ["State Check"]
+        }
+      }
+    };
+    const zhVerify = {
+      checks: {
+        artifact: {
+          required_sections: ["状态核对"]
+        }
+      }
+    };
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+
+    writeJson(templateRoot, ".agents/skills/demo-task/config/verify.en.json", enVerify);
+    writeJson(templateRoot, ".agents/skills/demo-task/config/verify.zh-CN.json", zhVerify);
+
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      platform: { type: "github" },
+      files: {
+        managed: [".agents/skills/"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+
+    syncTemplates(projectRoot, templateRoot);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/skills/demo-task/config/verify.json"), "utf8")),
+      enVerify
+    );
+    assert.equal(fs.existsSync(path.join(projectRoot, ".agents/skills/demo-task/config/verify.en.json")), false);
+    assert.equal(fs.existsSync(path.join(projectRoot, ".agents/skills/demo-task/config/verify.zh-CN.json")), false);
+
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "zh-CN",
+      platform: { type: "github" },
+      files: {
+        managed: [".agents/skills/"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    syncTemplates(projectRoot, templateRoot);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/skills/demo-task/config/verify.json"), "utf8")),
+      zhVerify
+    );
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("syncTemplates includes external-only files for managed directories", async () => {
   const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-dir-"));

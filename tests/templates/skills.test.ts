@@ -96,20 +96,21 @@ test("workflow skills document state check gates", () => {
 });
 
 test("workflow artifact gates require state check evidence", () => {
-  const sectionExpectations: Record<string, string[]> = {
-    "analyze-task": ["状态核对"],
-    "plan-task": ["状态核对"],
-    "implement-task": ["状态核对", "证据原文"],
-    "review-task": ["状态核对", "证据原文"],
-    "refine-task": ["状态核对", "证据原文"],
-    "complete-task": ["状态核对"]
+  const sectionExpectations: Record<string, { en: string[]; zh: string[] }> = {
+    "analyze-task": { en: ["State Check"], zh: ["状态核对"] },
+    "plan-task": { en: ["State Check"], zh: ["状态核对"] },
+    "implement-task": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
+    "review-task": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
+    "refine-task": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
+    "complete-task": { en: ["State Check"], zh: ["状态核对"] }
   };
 
-  Object.entries(sectionExpectations).forEach(([skill, sections]) => {
+  Object.entries(sectionExpectations).forEach(([skill, sectionsByLanguage]) => {
     [
-      `.agents/skills/${skill}/config/verify.json`,
-      `templates/.agents/skills/${skill}/config/verify.json`
-    ].forEach((relativePath) => {
+      { relativePath: `.agents/skills/${skill}/config/verify.json`, sections: sectionsByLanguage.zh },
+      { relativePath: `templates/.agents/skills/${skill}/config/verify.en.json`, sections: sectionsByLanguage.en },
+      { relativePath: `templates/.agents/skills/${skill}/config/verify.zh-CN.json`, sections: sectionsByLanguage.zh }
+    ].forEach(({ relativePath, sections }) => {
       const config = JSON.parse(read(relativePath));
       const artifact = config.checks.artifact;
 
@@ -131,7 +132,7 @@ test("workflow artifact gates require state check evidence", () => {
 test("workflow verify configs reject invalid multiline flag patterns", () => {
   listFilesRecursive(".agents/skills")
     .concat(listFilesRecursive("templates/.agents/skills"))
-    .filter((relativePath) => /\/config\/verify\.json$/.test(relativePath))
+    .filter((relativePath) => /\/config\/verify(\.[\w-]+)?\.json$/.test(relativePath))
     .forEach((relativePath) => {
       const config = JSON.parse(read(relativePath));
 
@@ -145,6 +146,50 @@ test("workflow verify configs reject invalid multiline flag patterns", () => {
         }
       });
     });
+});
+
+test("workflow verify config language variants keep only artifact language fields different", () => {
+  const skills = [
+    "analyze-task",
+    "plan-task",
+    "implement-task",
+    "review-task",
+    "refine-task",
+    "complete-task"
+  ];
+
+  skills.forEach((skill) => {
+    const enPath = `templates/.agents/skills/${skill}/config/verify.en.json`;
+    const zhPath = `templates/.agents/skills/${skill}/config/verify.zh-CN.json`;
+
+    assert.ok(exists(enPath), `${skill} should provide an English verify config variant`);
+    assert.ok(exists(zhPath), `${skill} should provide a zh-CN verify config variant`);
+    // Guard the variant-only layout: a plain template verify.json would be ignored by language selection.
+    assert.equal(exists(`templates/.agents/skills/${skill}/config/verify.json`), false);
+
+    const enConfig = JSON.parse(read(enPath));
+    const zhConfig = JSON.parse(read(zhPath));
+    const enComparable = structuredClone(enConfig);
+    const zhComparable = structuredClone(zhConfig);
+
+    enComparable.checks.artifact.required_sections = [];
+    zhComparable.checks.artifact.required_sections = [];
+    enComparable.checks.artifact.required_patterns = [];
+    zhComparable.checks.artifact.required_patterns = [];
+
+    assert.deepEqual(enComparable, zhComparable, `${skill} variants should differ only in artifact language fields`);
+    assert.deepEqual(
+      JSON.parse(read(`.agents/skills/${skill}/config/verify.json`)),
+      zhConfig,
+      `${skill} deployed verify config should match the zh-CN variant`
+    );
+  });
+
+  const reviewEn = JSON.parse(read("templates/.agents/skills/review-task/config/verify.en.json"));
+  const reviewZh = JSON.parse(read("templates/.agents/skills/review-task/config/verify.zh-CN.json"));
+
+  assert.ok(reviewEn.checks.artifact.required_patterns.includes("^### Approval Decision$"));
+  assert.ok(reviewZh.checks.artifact.required_patterns.includes("^### 审查决定$"));
 });
 
 test("workflow report templates include evidence sections", () => {

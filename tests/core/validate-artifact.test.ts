@@ -2538,7 +2538,8 @@ test("verification assets are present in local and template trees", () => {
     "templates/.agents/scripts/validate-artifact.js",
     "templates/.agents/scripts/platform-adapters/platform-sync.github.js",
     ".agents/skills/implement-task/config/verify.json",
-    "templates/.agents/skills/implement-task/config/verify.json"
+    "templates/.agents/skills/implement-task/config/verify.en.json",
+    "templates/.agents/skills/implement-task/config/verify.zh-CN.json"
   ].forEach((relativePath) => {
     assert.ok(exists(relativePath), `${relativePath} should exist`);
   });

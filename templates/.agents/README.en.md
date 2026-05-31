@@ -274,6 +274,7 @@ When writing or updating `.agents/skills/*/SKILL.md` files and their templates, 
 
 - Keep SKILL.md as concise as possible; move detailed rules, long templates, and large script blocks into a sibling `reference/` or `scripts/` directory.
 - Store declarative configuration in a sibling `config/` directory, for example `config/verify.json`.
+  When `required_sections` or `required_patterns` contain language-specific text, provide `config/verify.en.json` and `config/verify.zh-CN.json`; sync strips the selected language variant back to `config/verify.json`.
 - Use explicit navigation in the skeleton, such as: `Read reference/xxx.md before executing this step.`
 - Keep scripts in `scripts/` and execute them instead of inlining long bash blocks.
 
@@ -286,6 +287,7 @@ node .agents/scripts/validate-artifact.js gate <skill-name> <task-dir> [artifact
 ```
 
 - Each skill declares its own checks in `config/verify.json`; keep the file focused on what that skill must validate
+- For language-specific artifact headings or anchors, keep only `required_sections` and language-specific `required_patterns` different between `config/verify.en.json` and `config/verify.zh-CN.json`
 - If a skill also prints next-step guidance, run the gate first and only show those instructions after the gate passes
 - For user-facing final validation, prefer `--format text` so the reply contains a readable summary instead of raw JSON
 - Shared validation logic belongs in `.agents/scripts/validate-artifact.js`; do not move detailed rules back into SKILL.md

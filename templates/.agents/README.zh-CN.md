@@ -274,6 +274,7 @@ args: "<task-id>"   # 可选
 
 - SKILL.md 正文尽可能精简，把详细规则、长模板和大段脚本拆分到同级 `reference/` 或 `scripts/` 目录。
 - 声明式配置统一放在同级 `config/` 目录，例如 `config/verify.json`。
+  当 `required_sections` 或 `required_patterns` 包含语言相关文案时，提供 `config/verify.en.json` 和 `config/verify.zh-CN.json`；sync 会把选中的语言变体剥离为 `config/verify.json`。
 - 骨架中使用明确导航，例如：`执行此步骤前，先读取 reference/xxx.md。`
 - 长脚本继续放在 `scripts/` 目录，优先执行脚本而不是内联大段 bash。
 
@@ -286,6 +287,7 @@ node .agents/scripts/validate-artifact.js gate <skill-name> <task-dir> [artifact
 ```
 
 - 每个 skill 在自己的 `config/verify.json` 中声明需要检查的事项
+- 对语言相关的产物标题或锚点，`config/verify.en.json` 和 `config/verify.zh-CN.json` 之间只应让 `required_sections` 与语言相关的 `required_patterns` 不同
 - 如果 skill 还会展示“下一步”提示，必须先通过完成校验，再输出这些指引
 - 面向用户展示最终校验结果时，优先使用 `--format text` 输出可读摘要，而不是原始 JSON
 - 共享逻辑集中在 `.agents/scripts/validate-artifact.js`，不要把详细校验规则重新塞回 SKILL.md
