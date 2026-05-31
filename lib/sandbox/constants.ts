@@ -9,6 +9,7 @@ type SandboxPathConfig = {
   containerPrefix: string;
   worktreeBase: string;
   shareBase: string;
+  shellConfigBase: string;
 };
 
 type HostResources = {
@@ -84,6 +85,14 @@ export function shareCommonDir(config: Pick<SandboxPathConfig, 'shareBase'>): st
 
 export function shareBranchDir(config: Pick<SandboxPathConfig, 'shareBase'>, branch: string): string {
   return hostJoin(config.shareBase, 'branches', sanitizeBranchName(branch));
+}
+
+export function shellConfigDir(config: Pick<SandboxPathConfig, 'shellConfigBase'>, branch: string): string {
+  return hostJoin(config.shellConfigBase, sanitizeBranchName(branch));
+}
+
+export function shellConfigDirCandidates(config: Pick<SandboxPathConfig, 'shellConfigBase'>, branch: string): string[] {
+  return safeNameCandidates(branch).map((name) => hostJoin(config.shellConfigBase, name));
 }
 
 export function sandboxLabel(config: Pick<SandboxPathConfig, 'project'>): string {

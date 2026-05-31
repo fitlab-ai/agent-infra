@@ -394,6 +394,41 @@ test("sandbox rm defaults local branch deletion confirmation to yes", () => {
   );
 });
 
+test("sandbox rm cleans per-branch shell config dir", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rm-shell-config-"));
+  const project = "demo";
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project });
+    const shellConfigBase = path.join(tmpDir, ".agent-infra", "config", project);
+    const removedBranchDir = path.join(shellConfigBase, "feature..rm-config");
+    const keptBranchDir = path.join(shellConfigBase, "feature..keep");
+    fs.mkdirSync(removedBranchDir, { recursive: true });
+    fs.mkdirSync(keptBranchDir, { recursive: true });
+    fs.writeFileSync(path.join(removedBranchDir, ".bash_aliases"), "alias demo=true\n", "utf8");
+    fs.writeFileSync(path.join(removedBranchDir, ".gitconfig"), "[user]\n", "utf8");
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "feature/rm-config"]);
+
+    assert.equal(result.signal, null);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(removedBranchDir), false);
+    assert.equal(fs.existsSync(keptBranchDir), true);
+    assert.equal(fs.existsSync(shellConfigBase), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --all cleans shell config dirs through a single confirm", () => {
+  const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/rm.js"), "utf8");
+
+  assert.match(
+    commandSource,
+    /config\.shellConfigBase[\s\S]*?p\.confirm\(\{[\s\S]*?config\.shellConfigBase[\s\S]*?\}\);[\s\S]*?readdirSync\(config\.shellConfigBase\)[\s\S]*?assertManagedPath\(config\.shellConfigBase, dir\);[\s\S]*?fs\.rmSync\(dir, \{ recursive: true, force: true \}\);/
+  );
+});
+
 test("sandbox create warns and continues past missing Claude credentials", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-no-credentials-"));
   const project = `sandbox-no-leak-${process.pid}-${Date.now()}`;
@@ -522,6 +557,7 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
     assert.equal(config.worktreeBase, path.join(process.env.HOME ?? "", ".agent-infra", "worktrees", "demo"));
     assert.equal(config.shareBase, path.join(process.env.HOME ?? "", ".agent-infra", "share", "demo"));
+    assert.equal(config.shellConfigBase, path.join(process.env.HOME ?? "", ".agent-infra", "config", "demo"));
     assert.equal(config.dotfilesDir, path.join(process.env.HOME ?? "", ".agent-infra", "dotfiles"));
   } finally {
     process.chdir(previousCwd);
@@ -5165,6 +5201,17 @@ test("share helpers compose project share namespace under shareBase", async () =
     sandboxConstants.shareBranchDir(config, "feat/foo"),
     "/tmp/share/demo/branches/feat..foo"
   );
+});
+
+test("shell config helpers compose branch dirs under shellConfigBase", async () => {
+  const sandboxConstants = await loadFreshEsm<typeof import("../../lib/sandbox/constants.ts")>("lib/sandbox/constants.js");
+  const config = { shellConfigBase: "/tmp/config/demo" };
+
+  assert.equal(sandboxConstants.shellConfigDir(config, "feat/foo"), "/tmp/config/demo/feat..foo");
+  assert.deepEqual(sandboxConstants.shellConfigDirCandidates(config, "feat/foo"), [
+    "/tmp/config/demo/feat..foo",
+    "/tmp/config/demo/feat-foo"
+  ]);
 });
 
 test("resolveTaskBranch returns plain branch names unchanged", async () => {

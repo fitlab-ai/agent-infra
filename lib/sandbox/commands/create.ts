@@ -17,9 +17,9 @@ import {
   sandboxBranchLabel,
   sandboxImageConfigLabel,
   sandboxLabel,
-  sanitizeBranchName,
   shareBranchDir,
   shareCommonDir,
+  shellConfigDir,
   worktreeDirCandidates
 } from '../constants.ts';
 import { prepareDockerfile } from '../dockerfile.ts';
@@ -127,7 +127,10 @@ function resolveToolDirs(config: Pick<SandboxCreateConfig, 'project'>, tools: Sa
 }
 
 export function hostShellConfigDir(home: string, project: string, branch: string): string {
-  return hostJoin(home, '.agent-infra', 'config', project, sanitizeBranchName(branch));
+  return shellConfigDir(
+    { shellConfigBase: hostJoin(home, '.agent-infra', 'config', project) },
+    branch
+  );
 }
 
 function runtimeChecks(runtimes: string[]): RuntimeCheck[] {

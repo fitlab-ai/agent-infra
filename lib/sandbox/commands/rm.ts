@@ -11,6 +11,7 @@ import {
   sandboxBranchLabel,
   sandboxLabel,
   shareBranchDir,
+  shellConfigDirCandidates,
   worktreeDirCandidates
 } from '../constants.ts';
 import { ENGINES, detectEngine, engineDisplayName, isManagedEngine, stopManagedVm } from '../engine.ts';
@@ -122,6 +123,12 @@ async function rmOne(config: SandboxConfig, tools: SandboxTool[], branch: string
     }
   }
 
+  for (const dir of shellConfigDirCandidates(config, effectiveBranch).filter((candidate) => fs.existsSync(candidate))) {
+    assertManagedPath(config.shellConfigBase, dir);
+    fs.rmSync(dir, { recursive: true, force: true });
+    p.log.success(`Shell config removed: ${dir}`);
+  }
+
   const shareBranch = shareBranchDir(config, effectiveBranch);
   if (fs.existsSync(shareBranch)) {
     const shouldRemoveShare = await p.confirm({
@@ -187,6 +194,22 @@ async function rmAll(config: SandboxConfig, tools: SandboxTool[]): Promise<void>
       assertManagedPath(path.dirname(dir), dir);
       fs.rmSync(dir, { recursive: true, force: true });
       p.log.success(`Removed tool state: ${dir}`);
+    }
+  }
+
+  if (fs.existsSync(config.shellConfigBase) && fs.readdirSync(config.shellConfigBase).length > 0) {
+    const shouldRemoveShellConfigs = await p.confirm({
+      message: `Remove all shell config dirs in ${config.shellConfigBase}?`,
+      initialValue: true
+    });
+
+    if (!p.isCancel(shouldRemoveShellConfigs) && shouldRemoveShellConfigs) {
+      for (const entry of fs.readdirSync(config.shellConfigBase)) {
+        const dir = path.join(config.shellConfigBase, entry);
+        assertManagedPath(config.shellConfigBase, dir);
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+      p.log.success(`Project shell config dirs removed: ${config.shellConfigBase}`);
     }
   }
 

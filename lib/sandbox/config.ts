@@ -46,6 +46,7 @@ export type SandboxConfig = {
   imageName: string;
   worktreeBase: string;
   shareBase: string;
+  shellConfigBase: string;
   dotfilesDir: string;
   engine: string | null;
   runtimes: string[];
@@ -145,6 +146,7 @@ export function loadConfig({
     imageName: `${project}-sandbox:latest`,
     worktreeBase: hostJoin(home, '.agent-infra', 'worktrees', project),
     shareBase: hostJoin(home, '.agent-infra', 'share', project),
+    shellConfigBase: hostJoin(home, '.agent-infra', 'config', project),
     dotfilesDir: hostJoin(home, '.agent-infra', 'dotfiles'),
     engine,
     runtimes,
