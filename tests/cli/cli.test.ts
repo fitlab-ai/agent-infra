@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync, execSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { CLI_PATH, cliArgs, cliCommand, envWithPrependedPath, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../helpers.ts";
+import { CLI_PATH, cliArgs, cliCommand, envWithPrependedPath, escapeRegExp, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../helpers.ts";
 
 const PLATFORM_DEFAULT_ENGINES: Partial<Record<NodeJS.Platform, string>> = {
   linux: "native",
@@ -55,6 +55,56 @@ test("cli version raw output returns the bare version string", () => {
   });
 
   assert.equal(output.trim(), `v${pkg.version}`);
+});
+
+test("cli usage header includes version (help and bare)", () => {
+  const pkg = JSON.parse(read("package.json"));
+  const expected = new RegExp(`^agent-infra v${escapeRegExp(pkg.version)} - bootstrap`);
+
+  for (const args of [["help"], []]) {
+    const output = execFileSync(process.execPath, cliArgs(...args), {
+      encoding: "utf8"
+    });
+
+    assert.match(output.split("\n")[0] ?? "", expected);
+  }
+});
+
+test("cli unknown command prints versioned usage and exits 1", () => {
+  const pkg = JSON.parse(read("package.json"));
+  const result = spawnSync(process.execPath, cliArgs("definitely-not-a-real-command"), {
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /^Unknown command: definitely-not-a-real-command/);
+  assert.match(
+    result.stdout.split("\n")[0] ?? "",
+    new RegExp(`^agent-infra v${escapeRegExp(pkg.version)} - bootstrap`)
+  );
+});
+
+test("cli --version and -v match the default version command output", () => {
+  const expected = execFileSync(process.execPath, cliArgs("version"), {
+    encoding: "utf8"
+  });
+
+  for (const flag of ["--version", "-v"]) {
+    const output = execFileSync(process.execPath, cliArgs(flag), {
+      encoding: "utf8"
+    });
+
+    assert.equal(output, expected);
+  }
+});
+
+test("cli does not intercept --version after a subcommand", () => {
+  const pkg = JSON.parse(read("package.json"));
+  const result = spawnSync(process.execPath, cliArgs("sandbox", "--version"), {
+    encoding: "utf8"
+  });
+
+  assert.notEqual(result.stdout.trim(), `agent-infra v${pkg.version}`);
 });
 
 test("agent-infra init generates seed files in a temp directory", () => {

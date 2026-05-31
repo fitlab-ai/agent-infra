@@ -10,7 +10,7 @@ if (major < 22) {
   process.exit(1);
 }
 
-const USAGE = `agent-infra - bootstrap AI collaboration infrastructure
+const USAGE = `agent-infra ${VERSION} - bootstrap AI collaboration infrastructure
 
 Usage:
   agent-infra init        Initialize a new project with update-agent-infra seed command
@@ -102,6 +102,11 @@ switch (command) {
     } else {
       console.log(`agent-infra ${VERSION}`);
     }
+    break;
+  }
+  case '--version':
+  case '-v': {
+    console.log(`agent-infra ${VERSION}`);
     break;
   }
   case 'help':
