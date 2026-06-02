@@ -39,6 +39,7 @@ import { resolveTaskBranch } from '../task-resolver.ts';
 import { resolveTools, toolConfigDirCandidates, toolNpmPackagesArg } from '../tools.ts';
 import type { SandboxTool } from '../tools.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
+import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
 import { resolveBuildUid } from '../engines/native.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
@@ -131,6 +132,13 @@ export function hostShellConfigDir(home: string, project: string, branch: string
     { shellConfigBase: hostJoin(home, '.agent-infra', 'config', project) },
     branch
   );
+}
+
+export function buildClipboardVolumeArgs(engine: string, home: string): string[] {
+  return [
+    '-v',
+    volumeArg(engine, clipboardHostDir(home), CONTAINER_CLIPBOARD_MOUNT, ':ro')
+  ];
 }
 
 function runtimeChecks(runtimes: string[]): RuntimeCheck[] {
@@ -1347,6 +1355,7 @@ export async function create(args: string[]): Promise<void> {
             fs.mkdirSync(workspaceDir, { recursive: true });
             fs.mkdirSync(shareCommon, { recursive: true });
             fs.mkdirSync(shareBranch, { recursive: true });
+            fs.mkdirSync(clipboardHostDir(effectiveConfig.home), { recursive: true, mode: 0o700 });
 
             const dotfilesSnapshot = materializeDotfiles(
               effectiveConfig.dotfilesDir,
@@ -1375,6 +1384,7 @@ export async function create(args: string[]): Promise<void> {
               volumeArg(engine, shareCommon, '/share/common'),
               '-v',
               volumeArg(engine, shareBranch, '/share/branch'),
+              ...buildClipboardVolumeArgs(engine, effectiveConfig.home),
               '-v',
               volumeArg(
                 engine,

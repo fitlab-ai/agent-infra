@@ -83,6 +83,7 @@ type SandboxCreateModule = {
   hostHasGpgKeys(home: string, execFn?: ExecFn): boolean;
   ensureShellConfigSymlinks(engine: string, container: string, execFn?: EngineExecFn): void;
   ensureSandboxAliasesFile(home: string): { created: boolean; path: string };
+  buildClipboardVolumeArgs(engine: string, home: string): string[];
   prepareHostShellConfig(config: Record<string, unknown>): {
     hostDir: string;
     mounts: Array<{ hostPath: string; containerPath: string; options?: string }>;
@@ -1792,6 +1793,20 @@ test("sandbox create resolves to configured engine", onPlatforms("linux", "darwi
     assert.ok(
       fixture.readDockerCalls().some((call) => call[0] === "build"),
       "expected sandbox create to reach docker build through the configured native engine"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox create builds clipboard mount as read-only container path", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-clipboard-"));
+
+  try {
+    assert.deepEqual(
+      sandboxCreate.buildClipboardVolumeArgs("native", tmpDir),
+      ["-v", path.join(tmpDir, ".agent-infra", "clipboard") + ":/clipboard:ro"]
     );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

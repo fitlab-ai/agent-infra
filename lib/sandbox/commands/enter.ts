@@ -11,6 +11,7 @@ import {
 import { runInteractiveEngine, runSafeEngine } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
+import { runInteractiveWithClipboardBridge } from '../clipboard/bridge.ts';
 
 const USAGE = `Usage: ai sandbox exec <branch> [cmd...]`;
 const TMUX_ENTRY_PATH = '/usr/local/bin/sandbox-tmux-entry';
@@ -65,7 +66,7 @@ export function formatCredentialSyncStatus(
   return null;
 }
 
-export function enter(args: string[]): number {
+export async function enter(args: string[]): Promise<number> {
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(`${USAGE}\n`);
     if (args.length === 0) {
@@ -108,7 +109,12 @@ export function enter(args: string[]): number {
       process.stderr.write(`Warning: dotfiles snapshot rebuild failed: ${redactCommandError(error instanceof Error ? error.message : 'unknown error')}\n`);
     }
 
-    return runInteractiveEngine(engine, 'docker', ['exec', '-it', ...envFlags, container, 'bash', TMUX_ENTRY_PATH]);
+    return runInteractiveWithClipboardBridge({
+      engine,
+      dockerArgs: ['exec', '-it', ...envFlags, container, 'bash', TMUX_ENTRY_PATH],
+      container,
+      home: config.home
+    });
   }
 
   return runInteractiveEngine(engine, 'docker', ['exec', '-it', ...envFlags, container, ...cmd]);

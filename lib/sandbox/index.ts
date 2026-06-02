@@ -34,7 +34,7 @@ export async function runSandbox(args: string[]): Promise<void> {
     }
     case 'exec': {
       const { enter } = await import('./commands/enter.ts');
-      const exitCode = enter(rest);
+      const exitCode = await enter(rest);
       if (typeof exitCode === 'number' && exitCode !== 0) {
         process.exitCode = exitCode;
       }

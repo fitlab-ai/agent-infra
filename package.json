@@ -65,5 +65,8 @@
     "@types/node": "^25.9.1",
     "@types/semver": "^7.7.1",
     "typescript": "~6.0"
+  },
+  "optionalDependencies": {
+    "@lydell/node-pty": "^1.2.0-beta.12"
   }
 }
