@@ -1,4 +1,3 @@
-import { once } from 'node:events';
 import { StringDecoder } from 'node:string_decoder';
 import { createClipboardAdapter, type ClipboardAdapter } from './index.ts';
 import { buildBracketedPaste, CtrlVDetector, type CtrlVMatch } from './keys.ts';
@@ -80,12 +79,23 @@ export async function runInteractiveWithClipboardBridge(options: BridgeOptions):
   }
 
   const command = commandForEngine(engine, 'docker', dockerArgs);
+  let child: PtyProcess;
+  try {
+    child = pty.spawn(command.cmd, command.args, {
+      name: env.TERM || 'xterm-256color',
+      cols: stdout.columns || 120,
+      rows: stdout.rows || 40,
+      cwd,
+      env
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown error';
+    return fallback(`node-pty spawn failed: ${message}`);
+  }
+
   return runBridge({
-    pty,
-    command,
+    child,
     home,
-    cwd,
-    env,
     adapter,
     writeStderr,
     stdin,
@@ -95,35 +105,22 @@ export async function runInteractiveWithClipboardBridge(options: BridgeOptions):
 }
 
 async function runBridge({
-  pty,
-  command,
+  child,
   home,
-  cwd,
-  env,
   adapter,
   writeStderr,
   stdin,
   stdout,
   detector
 }: {
-  pty: NodePty;
-  command: { cmd: string; args: string[] };
+  child: PtyProcess;
   home: string;
-  cwd: string;
-  env: NodeJS.ProcessEnv;
   adapter: ClipboardAdapter;
   writeStderr: (chunk: string) => unknown;
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WriteStream;
   detector: CtrlVDetector;
 }): Promise<number> {
-  const child = pty.spawn(command.cmd, command.args, {
-    name: env.TERM || 'xterm-256color',
-    cols: stdout.columns || 120,
-    rows: stdout.rows || 40,
-    cwd,
-    env
-  });
   let warnedPasteFailure = false;
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   const inputDecoder = new StringDecoder('utf8');
@@ -194,8 +191,7 @@ async function runBridge({
     process.on('SIGTERM', onSigterm);
     child.onData((data) => stdout.write(data));
 
-    const [event] = await onceExit(child);
-    return exitCode(event);
+    return exitCode(await onceExit(child, stdin));
   } finally {
     clearFlushTimer();
     for (const token of detector.feed(inputDecoder.end())) {
@@ -219,11 +215,30 @@ async function runBridge({
   }
 }
 
-async function onceExit(child: PtyProcess): Promise<[{ exitCode: number; signal?: number | string }]> {
-  const emitter = new EventTarget();
-  child.onExit((event) => emitter.dispatchEvent(new CustomEvent('exit', { detail: event })));
-  const [event] = await once(emitter, 'exit') as [CustomEvent<{ exitCode: number; signal?: number | string }>];
-  return [event.detail];
+function onceExit(
+  child: PtyProcess,
+  stdin: NodeJS.ReadStream
+): Promise<{ exitCode: number; signal?: number | string }> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (event: { exitCode: number; signal?: number | string }) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      stdin.off('end', onStdinEnd);
+      stdin.off('close', onStdinEnd);
+      resolve(event);
+    };
+    const onStdinEnd = () => {
+      child.kill('SIGHUP');
+      finish({ exitCode: 0, signal: 'SIGHUP' });
+    };
+
+    child.onExit(finish);
+    stdin.once('end', onStdinEnd);
+    stdin.once('close', onStdinEnd);
+  });
 }
 
 function exitCode(event: { exitCode: number; signal?: number | string }): number {

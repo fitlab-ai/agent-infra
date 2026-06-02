@@ -182,6 +182,53 @@ test("clipboard bridge falls back when optional node-pty is unavailable", async 
   assert.deepEqual(calls, [["docker", "exec", "-it", "demo", "bash"]]);
 });
 
+test("clipboard bridge falls back when node-pty spawn fails", async () => {
+  const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
+  const stdin = new EventEmitter() as EventEmitter & { isTTY: boolean };
+  const stdout = new EventEmitter() as EventEmitter & {
+    isTTY: boolean;
+    columns: number;
+    rows: number;
+  };
+  const calls: string[][] = [];
+  const stderr: string[] = [];
+
+  stdin.isTTY = true;
+  stdout.isTTY = true;
+  stdout.columns = 100;
+  stdout.rows = 30;
+
+  const exitCode = await runInteractiveWithClipboardBridge({
+    engine: "native",
+    dockerArgs: ["exec", "-it", "demo", "bash"],
+    container: "demo",
+    home: "/tmp/home",
+    platformName: "darwin",
+    stdin: stdin as never,
+    stdout: stdout as never,
+    adapter: {
+      available: () => ({ ok: true }),
+      hasImage: () => false,
+      readImagePng: () => null
+    },
+    runOk: () => true,
+    loadPty: async () => ({
+      spawn() {
+        throw new Error("cwd missing");
+      }
+    }),
+    runInteractive(_engine, cmd, args) {
+      calls.push([cmd, ...args]);
+      return 11;
+    },
+    writeStderr: (chunk) => stderr.push(chunk)
+  });
+
+  assert.equal(exitCode, 11);
+  assert.deepEqual(calls, [["docker", "exec", "-it", "demo", "bash"]]);
+  assert.match(stderr.join(""), /node-pty spawn failed: cwd missing/);
+});
+
 test("clipboard bridge injects bracketed paste for image Ctrl+V", async () => {
   const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-bridge-home-"));
@@ -484,6 +531,65 @@ test("clipboard bridge returns signal exit codes before numeric exitCode", async
   exitHandler?.({ exitCode: 0, signal: "SIGTERM" });
 
   assert.equal(await promise, 143);
+});
+
+test("clipboard bridge ends and restores terminal when stdin closes before pty onExit", async () => {
+  const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
+  const stdin = new EventEmitter() as EventEmitter & {
+    isTTY: boolean;
+    setRawMode(value: boolean): void;
+    resume(): void;
+  };
+  const stdout = new EventEmitter() as EventEmitter & {
+    isTTY: boolean;
+    columns: number;
+    rows: number;
+    write(chunk: string): void;
+  };
+  const rawModes: boolean[] = [];
+  const killSignals: Array<string | undefined> = [];
+
+  stdin.isTTY = true;
+  stdin.setRawMode = (value) => { rawModes.push(value); };
+  stdin.resume = () => {};
+  stdout.isTTY = true;
+  stdout.columns = 100;
+  stdout.rows = 30;
+  stdout.write = () => {};
+
+  const promise = runInteractiveWithClipboardBridge({
+    engine: "native",
+    dockerArgs: ["exec", "-it", "demo", "bash"],
+    container: "demo",
+    home: "/tmp/home",
+    platformName: "darwin",
+    stdin: stdin as never,
+    stdout: stdout as never,
+    adapter: {
+      available: () => ({ ok: true }),
+      hasImage: () => false,
+      readImagePng: () => null
+    },
+    runOk: () => true,
+    loadPty: async () => ({
+      spawn() {
+        return {
+          onData() {},
+          onExit() {},
+          write() {},
+          resize() {},
+          kill(signal) { killSignals.push(signal); }
+        };
+      }
+    })
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  stdin.emit("close");
+
+  assert.equal(await promise, 129);
+  assert.deepEqual(killSignals, ["SIGHUP"]);
+  assert.deepEqual(rawModes, [true, false]);
 });
 
 test("clipboard bridge forwards original Ctrl+V sequence when image handling fails", async () => {
