@@ -654,3 +654,66 @@ test("clipboard bridge forwards original Ctrl+V sequence when image handling fai
   assert.equal(stderr.length, 1);
   assert.match(stderr[0] ?? "", /probe failed/);
 });
+
+test("clipboard bridge pauses stdin on exit so the host process can exit", async () => {
+  const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
+  const stdin = new EventEmitter() as EventEmitter & {
+    isTTY: boolean;
+    setRawMode(value: boolean): void;
+    resume(): void;
+    pause(): void;
+  };
+  const stdout = new EventEmitter() as EventEmitter & {
+    isTTY: boolean;
+    columns: number;
+    rows: number;
+    write(chunk: string): void;
+  };
+  const lifecycle: string[] = [];
+  let exitHandler: ((event: { exitCode: number }) => void) | null = null;
+
+  stdin.isTTY = true;
+  stdin.setRawMode = () => {};
+  stdin.resume = () => { lifecycle.push("resume"); };
+  stdin.pause = () => { lifecycle.push("pause"); };
+  stdout.isTTY = true;
+  stdout.columns = 100;
+  stdout.rows = 30;
+  stdout.write = () => {};
+
+  const promise = runInteractiveWithClipboardBridge({
+    engine: "native",
+    dockerArgs: ["exec", "-it", "demo", "bash"],
+    container: "demo",
+    home: "/tmp/home",
+    platformName: "darwin",
+    stdin: stdin as never,
+    stdout: stdout as never,
+    adapter: {
+      available: () => ({ ok: true }),
+      hasImage: () => false,
+      readImagePng: () => null
+    },
+    runOk: () => true,
+    writeStderr: () => {},
+    loadPty: async () => ({
+      spawn() {
+        return {
+          onData() {},
+          onExit(callback) { exitHandler = callback; },
+          write() {},
+          resize() {},
+          kill() {}
+        };
+      }
+    })
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  exitHandler?.({ exitCode: 0 });
+
+  assert.equal(await promise, 0);
+  // stdin must be paused on teardown, after it was resumed, so the resumed TTY
+  // handle stops keeping the event loop alive (otherwise the CLI hangs on exit).
+  assert.deepEqual(lifecycle, ["resume", "pause"]);
+});

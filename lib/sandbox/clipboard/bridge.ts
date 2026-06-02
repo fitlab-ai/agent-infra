@@ -194,23 +194,32 @@ async function runBridge({
     return exitCode(await onceExit(child, stdin));
   } finally {
     clearFlushTimer();
-    for (const token of detector.feed(inputDecoder.end())) {
-      if (token.kind === 'text') {
-        child.write(token.raw);
-      } else {
-        handleCtrlV(token, child);
+    // The child pty is already exiting here; flushing buffered input is
+    // best-effort and must never block terminal/stdin cleanup below.
+    try {
+      for (const token of detector.feed(inputDecoder.end())) {
+        if (token.kind === 'text') {
+          child.write(token.raw);
+        } else {
+          handleCtrlV(token, child);
+        }
       }
-    }
-    for (const token of detector.flush()) {
-      if (token.kind === 'text') {
-        child.write(token.raw);
+      for (const token of detector.flush()) {
+        if (token.kind === 'text') {
+          child.write(token.raw);
+        }
       }
+    } catch {
+      // Writing to an already-closed pty can throw; ignore on teardown.
     }
     stdin.off('data', onData);
     stdout.off('resize', onResize);
     process.off('SIGINT', onSigint);
     process.off('SIGTERM', onSigterm);
     stdin.setRawMode?.(false);
+    // Release stdin so the resumed TTY handle stops keeping the event loop
+    // alive; without this the CLI hangs after the sandbox exits until Ctrl+C.
+    stdin.pause?.();
     restoreTerminal();
   }
 }
