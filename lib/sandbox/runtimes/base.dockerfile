@@ -146,7 +146,7 @@ RUN cat > /usr/local/bin/sandbox-tmux-entry <<'SCRIPT' && chmod +x /usr/local/bi
 #!/bin/sh
 set -eu
 
-sandbox-dotfiles-link >/dev/null || true
+sandbox-dotfiles-link >/dev/null 2>&1 || true
 
 SESSION=work
 
@@ -154,20 +154,21 @@ if ! command -v tmux >/dev/null 2>&1; then
   exec bash
 fi
 
-if ! tmux has-session -t "$SESSION" 2>/dev/null; then
-  exec tmux new-session -s "$SESSION"
+# Drop stale grouped sessions left by older entry-script versions (the windows
+# live on $SESSION, so killing the group members only removes view entries).
+tmux list-sessions -F '#{session_name}' 2>/dev/null | while IFS= read -r name; do
+    case "$name" in
+      "$SESSION"-*) tmux kill-session -t "$name" 2>/dev/null || true ;;
+    esac
+done
+
+# Reuse the single $SESSION; -d detaches any pre-existing client so the new
+# one becomes the sole owner of window-size, eliminating size races.
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  exec tmux attach -d -t "$SESSION"
 fi
 
-tmux list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null | \
-  while read -r name attached; do
-    [ "$name" = "$SESSION" ] && continue
-    case "$name" in
-      ''|*[!0-9]*) continue ;;
-    esac
-    [ "$attached" = "0" ] && tmux kill-session -t "$name" 2>/dev/null || true
-  done
-
-exec tmux new-session -t "$SESSION"
+exec tmux new-session -s "$SESSION"
 SCRIPT
 
 ENV LANG=en_US.UTF-8

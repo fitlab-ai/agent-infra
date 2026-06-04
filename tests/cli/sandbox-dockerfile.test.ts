@@ -247,9 +247,11 @@ test("composeDockerfile bakes sandbox-tmux-entry script", async () => {
     assert.match(content, /chmod \+x \/usr\/local\/bin\/sandbox-tmux-entry/);
     assert.match(content, /command -v tmux/);
     assert.match(content, /tmux has-session -t "\$SESSION"/);
-    assert.match(content, /tmux list-sessions -F '#\{session_name\} #\{session_attached\}'/);
+    assert.match(content, /tmux list-sessions -F '#\{session_name\}'/);
+    assert.match(content, /case "\$name" in\s*"\$SESSION"-\*\)/);
     assert.match(content, /tmux kill-session -t "\$name"/);
-    assert.match(content, /exec tmux new-session -t "\$SESSION"/);
+    assert.match(content, /exec tmux attach -d -t "\$SESSION"/);
+    assert.match(content, /exec tmux new-session -s "\$SESSION"/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -300,7 +302,7 @@ test("composeDockerfile invokes sandbox-dotfiles-link from sandbox-tmux-entry", 
     });
     const content = fs.readFileSync(dockerfilePath, "utf8");
 
-    assert.match(content, /sandbox-dotfiles-link >\/dev\/null \|\| true/);
+    assert.match(content, /sandbox-dotfiles-link[^\n]*\|\| true/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
