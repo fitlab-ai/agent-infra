@@ -60,6 +60,7 @@ test("test:core does not include slow contract suites reserved for full layer", 
   const core = pkg.scripts["test:core"];
   const fullOnly = [
     "tests/core/validate-artifact.test.ts",
+    "tests/core/validate-artifact-platform-sync.test.ts",
     "tests/core/sync-labels-script.test.ts",
     "tests/core/archive-tasks.test.ts",
   ];

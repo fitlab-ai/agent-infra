@@ -193,7 +193,7 @@ test("workflow verify config language variants keep only artifact language field
 });
 
 test("workflow report templates include evidence sections", () => {
-  [
+  const reportTemplateCases: Array<[string, string, string]> = [
     [".agents/skills/implement-task/reference/report-template.md", "## 状态核对", "## 证据原文"],
     [".agents/skills/review-task/reference/report-template.md", "## 状态核对", "## 证据原文"],
     [".agents/skills/refine-task/reference/report-template.md", "## 状态核对", "## 证据原文"],
@@ -203,7 +203,9 @@ test("workflow report templates include evidence sections", () => {
     ["templates/.agents/skills/implement-task/reference/report-template.en.md", "## State Check", "## Evidence"],
     ["templates/.agents/skills/review-task/reference/report-template.en.md", "## State Check", "## Evidence"],
     ["templates/.agents/skills/refine-task/reference/report-template.en.md", "## State Check", "## Evidence"]
-  ].forEach(([relativePath, stateHeading, evidenceHeading]) => {
+  ];
+
+  reportTemplateCases.forEach(([relativePath, stateHeading, evidenceHeading]) => {
     const content = read(relativePath);
 
     assert.match(content, new RegExp(escapeRegExp(stateHeading)));
@@ -212,11 +214,13 @@ test("workflow report templates include evidence sections", () => {
 });
 
 test("workflow skill output instructions align with state check artifact gates", () => {
-  [
+  const analyzeTaskCases: Array<[string, string]> = [
     [".agents/skills/analyze-task/SKILL.md", "## 状态核对"],
     ["templates/.agents/skills/analyze-task/SKILL.zh-CN.md", "## 状态核对"],
     ["templates/.agents/skills/analyze-task/SKILL.en.md", "## State Check"]
-  ].forEach(([relativePath, heading]) => {
+  ];
+
+  analyzeTaskCases.forEach(([relativePath, heading]) => {
     assert.match(
       read(relativePath),
       new RegExp(`^${escapeRegExp(heading)}$`, "m"),
@@ -224,11 +228,13 @@ test("workflow skill output instructions align with state check artifact gates",
     );
   });
 
-  [
+  const completeTaskCases: Array<[string, string]> = [
     [".agents/skills/complete-task/SKILL.md", "## 状态核对"],
     ["templates/.agents/skills/complete-task/SKILL.zh-CN.md", "## 状态核对"],
     ["templates/.agents/skills/complete-task/SKILL.en.md", "## State Check"]
-  ].forEach(([relativePath, heading]) => {
+  ];
+
+  completeTaskCases.forEach(([relativePath, heading]) => {
     const content = read(relativePath);
     const updateSection = content.match(/^### 3\. .+?(?=^### 4\. )/ms)?.[0] || "";
 

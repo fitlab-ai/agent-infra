@@ -11,6 +11,13 @@ type KeysModule = typeof import("../../lib/sandbox/clipboard/keys.ts");
 type PathsModule = typeof import("../../lib/sandbox/clipboard/paths.ts");
 type DarwinModule = typeof import("../../lib/sandbox/clipboard/darwin.ts");
 type BridgeModule = typeof import("../../lib/sandbox/clipboard/bridge.ts");
+type PtyExitEvent = { exitCode: number; signal?: number | string };
+type PtyExitHandler = (event: PtyExitEvent) => void;
+
+function invokeExitHandler(handler: PtyExitHandler | null, event: PtyExitEvent) {
+  assert.ok(handler, "pty exit handler should be registered");
+  handler(event);
+}
 
 test("CtrlVDetector recognizes plain, CSI-u, and modifyOtherKeys Ctrl+V sequences", async () => {
   const { CtrlVDetector } = await loadFreshEsm<KeysModule>("lib/sandbox/clipboard/keys.js");
@@ -117,13 +124,15 @@ test("darwin clipboard adapter rejects empty or invalid PNG output", async () =>
 
   const adapter = createDarwinClipboardAdapter({
     execFn(cmd, args) {
+      const script = String(args[1]);
+      const match = script.match(/POSIX file "([^"]+)"/);
+      if (match?.[1]) {
+        fs.writeFileSync(match[1], "not a png");
+      }
       if (args[1] === "clipboard info" || cmd === "osascript") {
         return "";
       }
       return "";
-    },
-    readFileFn() {
-      return Buffer.from("not a png", "utf8");
     }
   });
 
@@ -246,7 +255,7 @@ test("clipboard bridge injects bracketed paste for image Ctrl+V", async () => {
   };
   const writes: string[] = [];
   const rawModes: boolean[] = [];
-  let exitHandler: ((event: { exitCode: number }) => void) | null = null;
+  let exitHandler: PtyExitHandler | null = null;
 
   stdin.isTTY = true;
   stdin.setRawMode = (value) => { rawModes.push(value); };
@@ -285,7 +294,7 @@ test("clipboard bridge injects bracketed paste for image Ctrl+V", async () => {
 
     await new Promise((resolve) => setImmediate(resolve));
     stdin.emit("data", Buffer.from("\x1b[27;5;118~", "binary"));
-    exitHandler?.({ exitCode: 0 });
+    invokeExitHandler(exitHandler, { exitCode: 0 });
 
     assert.equal(await promise, 0);
     assert.equal(writes.length, 1);
@@ -311,7 +320,7 @@ test("clipboard bridge silently forwards Ctrl+V when the clipboard holds no imag
   };
   const writes: string[] = [];
   const stderr: string[] = [];
-  let exitHandler: ((event: { exitCode: number }) => void) | null = null;
+  let exitHandler: PtyExitHandler | null = null;
 
   stdin.isTTY = true;
   stdin.setRawMode = () => {};
@@ -350,7 +359,7 @@ test("clipboard bridge silently forwards Ctrl+V when the clipboard holds no imag
 
   await new Promise((resolve) => setImmediate(resolve));
   stdin.emit("data", Buffer.from("\x1b[27;5;118~", "binary"));
-  exitHandler?.({ exitCode: 0 });
+  invokeExitHandler(exitHandler, { exitCode: 0 });
 
   assert.equal(await promise, 0);
   assert.deepEqual(writes, ["\x1b[27;5;118~"]);
@@ -371,7 +380,7 @@ test("clipboard bridge flushes a standalone ESC after the partial-sequence delay
     write(chunk: string): void;
   };
   const writes: string[] = [];
-  let exitHandler: ((event: { exitCode: number; signal?: number | string }) => void) | null = null;
+  let exitHandler: PtyExitHandler | null = null;
 
   stdin.isTTY = true;
   stdin.setRawMode = () => {};
@@ -410,7 +419,7 @@ test("clipboard bridge flushes a standalone ESC after the partial-sequence delay
   await new Promise((resolve) => setImmediate(resolve));
   stdin.emit("data", Buffer.from("\x1b", "utf8"));
   await new Promise((resolve) => setTimeout(resolve, 50));
-  exitHandler?.({ exitCode: 0 });
+  invokeExitHandler(exitHandler, { exitCode: 0 });
 
   assert.equal(await promise, 0);
   assert.deepEqual(writes, ["\x1b"]);
@@ -430,7 +439,7 @@ test("clipboard bridge preserves UTF-8 input bytes for normal text", async () =>
     write(chunk: string): void;
   };
   const writes: string[] = [];
-  let exitHandler: ((event: { exitCode: number; signal?: number | string }) => void) | null = null;
+  let exitHandler: PtyExitHandler | null = null;
 
   stdin.isTTY = true;
   stdin.setRawMode = () => {};
@@ -469,7 +478,7 @@ test("clipboard bridge preserves UTF-8 input bytes for normal text", async () =>
   const input = Buffer.from("中文😊", "utf8");
   await new Promise((resolve) => setImmediate(resolve));
   stdin.emit("data", input);
-  exitHandler?.({ exitCode: 0 });
+  invokeExitHandler(exitHandler, { exitCode: 0 });
 
   assert.equal(await promise, 0);
   assert.deepEqual(Buffer.from(writes.join(""), "utf8"), input);
@@ -489,7 +498,7 @@ test("clipboard bridge preserves UTF-8 input split across chunks", async () => {
     write(chunk: string): void;
   };
   const writes: string[] = [];
-  let exitHandler: ((event: { exitCode: number; signal?: number | string }) => void) | null = null;
+  let exitHandler: PtyExitHandler | null = null;
 
   stdin.isTTY = true;
   stdin.setRawMode = () => {};
@@ -529,7 +538,7 @@ test("clipboard bridge preserves UTF-8 input split across chunks", async () => {
   await new Promise((resolve) => setImmediate(resolve));
   stdin.emit("data", input.subarray(0, 1));
   stdin.emit("data", input.subarray(1));
-  exitHandler?.({ exitCode: 0 });
+  invokeExitHandler(exitHandler, { exitCode: 0 });
 
   assert.equal(await promise, 0);
   assert.deepEqual(Buffer.from(writes.join(""), "utf8"), input);
@@ -548,7 +557,7 @@ test("clipboard bridge returns signal exit codes before numeric exitCode", async
     rows: number;
     write(chunk: string): void;
   };
-  let exitHandler: ((event: { exitCode: number; signal?: number | string }) => void) | null = null;
+  let exitHandler: PtyExitHandler | null = null;
 
   stdin.isTTY = true;
   stdin.setRawMode = () => {};
@@ -585,7 +594,7 @@ test("clipboard bridge returns signal exit codes before numeric exitCode", async
   });
 
   await new Promise((resolve) => setImmediate(resolve));
-  exitHandler?.({ exitCode: 0, signal: "SIGTERM" });
+  invokeExitHandler(exitHandler, { exitCode: 0, signal: "SIGTERM" });
 
   assert.equal(await promise, 143);
 });
@@ -663,7 +672,7 @@ test("clipboard bridge forwards original Ctrl+V sequence when image handling fai
   };
   const writes: string[] = [];
   const stderr: string[] = [];
-  let exitHandler: ((event: { exitCode: number }) => void) | null = null;
+  let exitHandler: PtyExitHandler | null = null;
 
   stdin.isTTY = true;
   stdin.setRawMode = () => {};
@@ -705,7 +714,7 @@ test("clipboard bridge forwards original Ctrl+V sequence when image handling fai
 
   await new Promise((resolve) => setImmediate(resolve));
   stdin.emit("data", Buffer.from("\x1b[27;5;118~", "binary"));
-  exitHandler?.({ exitCode: 0 });
+  invokeExitHandler(exitHandler, { exitCode: 0 });
 
   assert.equal(await promise, 0);
   assert.deepEqual(writes, ["\x1b[27;5;118~"]);
@@ -728,7 +737,7 @@ test("clipboard bridge pauses stdin on exit so the host process can exit", async
     write(chunk: string): void;
   };
   const lifecycle: string[] = [];
-  let exitHandler: ((event: { exitCode: number }) => void) | null = null;
+  let exitHandler: PtyExitHandler | null = null;
 
   stdin.isTTY = true;
   stdin.setRawMode = () => {};
@@ -767,7 +776,7 @@ test("clipboard bridge pauses stdin on exit so the host process can exit", async
   });
 
   await new Promise((resolve) => setImmediate(resolve));
-  exitHandler?.({ exitCode: 0 });
+  invokeExitHandler(exitHandler, { exitCode: 0 });
 
   assert.equal(await promise, 0);
   // stdin must be paused on teardown, after it was resumed, so the resumed TTY
