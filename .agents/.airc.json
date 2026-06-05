@@ -30,22 +30,28 @@
         "bin/",
         "lib/",
         "src/",
-        "tests/cli/"
+        "tests/unit/cli/",
+        "tests/integration/cli/",
+        "tests/e2e/cli/"
       ],
       "templates": [
         "templates/",
-        "tests/templates/"
+        "tests/unit/templates/"
       ],
       "core": [
         "assets/",
         "scripts/",
-        "tests/core/"
+        "tests/unit/core/",
+        "tests/integration/core/",
+        "tests/e2e/core/"
       ],
       "meta": [
         ".agents/",
         ".github/",
         "tests/helpers/",
-        "tests/scripts/"
+        "tests/unit/scripts/",
+        "tests/integration/scripts/",
+        "tests/e2e/scripts/"
       ]
     }
   },

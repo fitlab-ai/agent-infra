@@ -64,11 +64,21 @@ README 顶部的 Codecov 徽章由 `.github/workflows/unit-tests.yml` 在 ubuntu
 - **不区分 tier**：当前只对 full `test` tier 输出覆盖率；smoke / core tier 的覆盖率没有独立价值。
 - **不阻塞 PR**：CI 步骤 `continue-on-error: true`，即便覆盖率采集失败也不影响 merge。
 
+### 新测试该放哪一层
+
+测试文件放入哪一层决定它会被哪些 npm script 自动执行：
+
+- `tests/unit/<module>/`：快速、结构性或纯函数类测试；不启动真实 CLI 子进程，不依赖外部工具，适合 `test:smoke`。
+- `tests/integration/<module>/`：会组合多个模块、运行 CLI 子进程、触达临时文件系统或验证模板同步流程，但仍应保持稳定和相对快速，适合 `test:core`。
+- `tests/e2e/<module>/`：较慢的契约、平台同步、打包产物、跨进程或端到端流程测试，只在完整 `npm test` 中运行。
+
+模块继续作为第二级目录（如 `cli`、`core`、`scripts`、`templates`）。共享 helper 和 fixtures 保持在 `tests/helpers/`、`tests/helpers.ts`、`tests/fixtures/`，不要放入任一 tier。
+
 ### 与"测试 tier 覆盖"的关系
 
 注意区分两个概念：
 
-- **测试 tier 覆盖**（`tests/core/test-tier-coverage.test.ts` 强制 core ⊇ smoke）：管的是"哪些测试文件被纳入哪一 tier"，与代码行覆盖率正交。
+- **测试 tier 覆盖**（`tests/unit/core/test-tier-coverage.test.ts` 校验测试文件目录归属与 npm script tier 映射）：管的是"哪些测试文件被纳入哪一 tier"，与代码行覆盖率正交。
 - **代码行覆盖率**（本节）：管的是"业务源码哪些行被测试触达"。
 
 两者目的不同，不要相互替代。

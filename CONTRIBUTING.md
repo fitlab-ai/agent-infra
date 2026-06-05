@@ -98,7 +98,7 @@ npm test
 - 平台文件命名约定，如 `.yml` Issue Form 文件名、`PULL_REQUEST_TEMPLATE.md`
 - 已在 rules/scripts 中定义过的命令或 marker 字符串副本
 
-`tests/templates/platform-coupling.test.js` 提供结构性护栏：baseline 文案不得含平台硬指标，skill reference 目录不得新增 `.github.*` 这类平台变体。测试不能覆盖所有软指标，PR 作者和 reviewer 仍需人工检查 schema 字段、命令重复和措辞包装。
+`tests/unit/templates/platform-coupling.test.js` 提供结构性护栏：baseline 文案不得含平台硬指标，skill reference 目录不得新增 `.github.*` 这类平台变体。测试不能覆盖所有软指标，PR 作者和 reviewer 仍需人工检查 schema 字段、命令重复和措辞包装。
 
 ### 路径级平台门控（init/sync 实施层）
 
