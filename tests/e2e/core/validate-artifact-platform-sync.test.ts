@@ -170,6 +170,41 @@ const implementSyncCases = [
         message: /sync-issue:TASK-20260328-000001:task/
       });
     }
+  },
+  {
+    name: "validate-artifact platform-sync passes for create-task when the Issue has a milestone",
+    skill: "create-task",
+    issuePayload: buildIssuePayload({
+      labels: [{ name: "status: waiting-for-triage" }],
+      body: "# Issue\n"
+    }),
+    comments(taskContent: string) {
+      return [{ body: buildTaskComment(taskId, taskContent) }];
+    },
+    assertResult(result: ReturnType<typeof runValidator>) {
+      assert.equal(result.status, 0, result.stderr);
+      assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    }
+  },
+  {
+    name: "validate-artifact platform-sync fails for create-task when the Issue has no milestone",
+    skill: "create-task",
+    issuePayload: buildIssuePayload({
+      labels: [{ name: "status: waiting-for-triage" }],
+      body: "# Issue\n",
+      milestone: null
+    }),
+    comments(taskContent: string) {
+      return [{ body: buildTaskComment(taskId, taskContent) }];
+    },
+    assertResult(result: ReturnType<typeof runValidator>) {
+      assert.equal(result.status, 1);
+      assertPayloadStatus(result, {
+        type: "platform-sync",
+        status: "fail",
+        message: /has no milestone set/
+      });
+    }
   }
 ];
 

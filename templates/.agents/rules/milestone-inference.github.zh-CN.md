@@ -44,6 +44,18 @@ gh api "repos/$upstream_repo/milestones?state=open&per_page=100" \
 
 Milestone 设置属于 `has_triage` 权限范围；如果调用方检测到 `has_triage=false`，则省略 `--milestone` 并继续。
 
+### `import-issue` 调用时的兜底
+
+`import-issue` 导入既有 Issue 时，若 Issue 当前 milestone 为空，按上述优先级推断版本线（含 `General Backlog` 回退）。命中非空版本线后，回写到远端 Issue：
+
+```bash
+if [ "$has_triage" = "true" ]; then
+  gh issue edit {issue-number} -R "$upstream_repo" --milestone "{version}" 2>/dev/null || true
+fi
+```
+
+如果 `has_triage=false`、推断结果为空、或 `gh issue edit` 失败，跳过并继续，不阻断 `import-issue` 工作流。
+
 ## 阶段 2：`implement-task`
 
 目标：开始开发时，把 Issue milestone 从版本线收窄到具体版本。

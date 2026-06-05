@@ -25,6 +25,7 @@
       "when": "issue_number_exists",
       "issue_must_exist": true,
       "verify_task_comment_content": true,
+      "verify_milestone": true,
       "expected_status_label_key": "waitingForTriage"
     }
   }

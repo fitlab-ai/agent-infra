@@ -44,6 +44,18 @@ Only match titles in `X.Y.x` format and choose the smallest major/minor pair num
 
 Direct milestone writes are triage-gated. When the caller detected `has_triage=false`, omit `--milestone` and continue.
 
+### Backfill when called from `import-issue`
+
+When `import-issue` imports an existing Issue whose current milestone is empty, infer a release line using the priority above, including the `General Backlog` fallback. When a non-empty release line is found, write it back to the remote Issue:
+
+```bash
+if [ "$has_triage" = "true" ]; then
+  gh issue edit {issue-number} -R "$upstream_repo" --milestone "{version}" 2>/dev/null || true
+fi
+```
+
+If `has_triage=false`, inference returns empty, or `gh issue edit` fails, skip and continue without blocking the `import-issue` workflow.
+
 ## Phase 2: `implement-task`
 
 Goal: narrow the Issue milestone from a release line to a concrete version when implementation starts.

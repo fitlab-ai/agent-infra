@@ -116,6 +116,8 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - 支持 Issue 创建的平台：包含完整的认证检测、模板检测、label/Issue Type/milestone 推断、Issue 创建调用、`task.md` 回写流程
 - 自定义或空平台（未提供平台变体规则文件）：内容为 no-op 说明，本步骤直接跳过
 
+> **强约束**：`.agents/rules/create-issue.md` §4 中的 milestone 子步骤为必须执行项；漏设会被步骤 5 的 gate（`verify_milestone: true`）截停，导致 create-task 失败。
+
 处理结果：
 - 规则成功创建 Issue：`issue_number` 已按规则回写到 task.md；继续读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测，然后同步 task 评论并按规则设置 `status: waiting-for-triage`
 - 规则失败（认证 / 网络 / 模板解析等）：不回滚 task.md；不追加额外 Activity Log；按"场景 C：Issue 创建失败"输出向用户透出 `error_code` 与 `error_message`，让用户决定后续是否手动重试或写入 `issue_number`

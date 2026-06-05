@@ -114,7 +114,7 @@ If task.md contains a valid `issue_number`, use the Issue update command from `.
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
 - Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
-- Check the Issue's current milestone; if it is unset, read `.agents/rules/milestone-inference.md` and infer plus set the milestone using "Phase 1: `create-task` (when the platform rule creates an Issue)". If `has_triage=false` or the inference is uncertain, skip and continue
+- Check the Issue's current milestone; if it is unset, read `.agents/rules/milestone-inference.md`, infer a release line using "Phase 1: `create-task` (when the platform rule creates an Issue)", and run its "Backfill when called from `import-issue`" subsection to write back to the remote Issue. If inference fails, permissions are insufficient, or write-back fails, skip and continue without blocking the import
 - After every scenario, task comment sync is mandatory: create or update the task comment marker defined in `.agents/rules/issue-sync.md` so the remote `:task` comment exists and matches the local `task.md` content (follow the task.md comment sync rule in issue-sync.md)
 
 ### 7. Verification Gate

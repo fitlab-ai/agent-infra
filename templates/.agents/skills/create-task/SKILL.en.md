@@ -116,6 +116,8 @@ The rule's content is determined by the configured code platform:
 - A platform that supports Issue creation: contains the full flow for auth detection, template detection, label/type/milestone inference, the create-Issue call, and writing back to `task.md`
 - Custom or empty platforms (no platform-specific variant provided): the rule body is a no-op notice, and this step is skipped entirely
 
+> **Hard constraint**: the milestone sub-step in `.agents/rules/create-issue.md` §4 is mandatory; missing it fails the step 5 gate (`verify_milestone: true`) and aborts create-task.
+
 Handle the result:
 - Rule successfully created the Issue: `issue_number` has been written back to task.md per the rule; continue by reading `.agents/rules/issue-sync.md`, completing upstream repository and permission detection, then sync the task comment and set `status: waiting-for-triage` by rule
 - Rule failed (auth / network / template parse / etc.): do not roll back task.md; do NOT append an extra Activity Log entry; follow "Scenario C: Issue creation failed" output to surface `error_code` and `error_message` to the user so they can decide whether to retry manually or write `issue_number` later

@@ -115,7 +115,25 @@ When applying the Issue Type, follow the "Set Issue Type" command in `.agents/ru
 
 #### milestone
 
-Infer per `.agents/rules/milestone-inference.md` § "Stage 1: `create-task` (when the platform rule creates the Issue)". When the inference is empty or the repo lacks a matching milestone, omit the milestone.
+**Mandatory; do not skip.** This section expands `.agents/rules/milestone-inference.md` Phase 1 in place and keeps the same semantics; do not treat it as optional inference.
+
+Select the milestone using these numbered steps, with priority strictly aligned to Phase 1:
+
+1. If `has_triage=false`: omit `--milestone` immediately and skip this section.
+2. List all open milestones in the repository:
+   ```bash
+   gh api "repos/$upstream_repo/milestones?state=open&per_page=100" \
+     --jq '.[].title'
+   ```
+3. If task.md frontmatter explicitly provides a `milestone` field and that value appears in the step 2 list: use that value directly as `{milestone-arg}` and skip steps 4 / 5.
+4. Filter the step 2 result with `^[0-9]+\.[0-9]+\.x$`.
+   - Non-empty: sort by major and minor numerically, then choose the smallest release line as `{milestone-arg}`.
+5. If step 4 has no candidates: fall back to `General Backlog`.
+   - `General Backlog` exists in the step 2 result: use that milestone.
+   - `General Backlog` does not exist: omit `--milestone` only in this case.
+6. If the step 2 `gh api` call fails (network / authentication error): handle it as "no candidates" and continue to step 5.
+
+When a milestone is selected, pass the release line (or `General Backlog` or the explicit task.md value) as `{milestone-arg}` to the `gh issue create` command in step 5; keep the expansion rule at the end of §5 unchanged.
 
 ### 5. Call the GitHub CLI to Create the Issue
 
