@@ -209,6 +209,27 @@ test("composeDockerfile includes gh CLI and bash_aliases sourcing", async () => 
   }
 });
 
+test("composeDockerfile wires Asia/Shanghai zoneinfo", async () => {
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-zoneinfo-"));
+
+  try {
+    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+      repoRoot: tmpDir,
+      project: "demo",
+      runtimes: ["node20"],
+      dockerfile: null
+    });
+    const content = fs.readFileSync(dockerfilePath, "utf8");
+
+    assert.match(content, /\btzdata\b/);
+    assert.match(content, /ln\s+-snf\s+\/usr\/share\/zoneinfo\/Asia\/Shanghai\s+\/etc\/localtime/);
+    assert.match(content, /echo\s+"Asia\/Shanghai"\s*>\s*\/etc\/timezone/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("composeDockerfile installs tmux for in-container session recovery", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmux-"));
