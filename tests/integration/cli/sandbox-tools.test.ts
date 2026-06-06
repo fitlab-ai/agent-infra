@@ -71,6 +71,21 @@ type SandboxCreateModule = {
 type EnterModule = {
   terminalEnvFlags(env?: NodeJS.ProcessEnv): string[];
   formatCredentialSyncStatus(result: { status: string }): string;
+  clipboardBridgeDisabled(env?: NodeJS.ProcessEnv): boolean;
+  runSandboxInteractive(params: {
+    engine: string;
+    dockerArgs: string[];
+    container: string;
+    home: string;
+    env?: NodeJS.ProcessEnv;
+    runBridge?: (params: {
+      engine: string;
+      dockerArgs: string[];
+      container: string;
+      home: string;
+    }) => number | Promise<number>;
+    runInteractive?: (engine: string, cmd: string, args: string[]) => number;
+  }): number | Promise<number>;
 };
 
 function required<T>(value: T | undefined, message = "expected value"): T {
@@ -102,6 +117,72 @@ test("sandbox exec formats host keychain unavailable credential sync warnings", 
     sandboxEnter.formatCredentialSyncStatus({ status: "KEYCHAIN_ERROR" }),
     'Warning: Host keychain is unavailable; Claude credential sync skipped. Run "ai sandbox refresh" for details.\n'
   );
+});
+
+test("sandbox exec clipboard bridge escape hatch parses explicit truthy values", async () => {
+  const sandboxEnter = await loadFreshEsm<EnterModule>("lib/sandbox/commands/enter.js");
+
+  assert.equal(sandboxEnter.clipboardBridgeDisabled({ AI_SANDBOX_NO_CLIPBOARD_BRIDGE: "1" }), true);
+  assert.equal(sandboxEnter.clipboardBridgeDisabled({ AI_SANDBOX_NO_CLIPBOARD_BRIDGE: " TRUE " }), true);
+  assert.equal(sandboxEnter.clipboardBridgeDisabled({ AI_SANDBOX_NO_CLIPBOARD_BRIDGE: "yes" }), true);
+  assert.equal(sandboxEnter.clipboardBridgeDisabled({}), false);
+  assert.equal(sandboxEnter.clipboardBridgeDisabled({ AI_SANDBOX_NO_CLIPBOARD_BRIDGE: "" }), false);
+  assert.equal(sandboxEnter.clipboardBridgeDisabled({ AI_SANDBOX_NO_CLIPBOARD_BRIDGE: "0" }), false);
+  assert.equal(sandboxEnter.clipboardBridgeDisabled({ AI_SANDBOX_NO_CLIPBOARD_BRIDGE: "off" }), false);
+});
+
+test("sandbox exec clipboard bridge escape hatch routes around the bridge", async () => {
+  const sandboxEnter = await loadFreshEsm<EnterModule>("lib/sandbox/commands/enter.js");
+  const dockerArgs = ["exec", "-it", "demo", "bash", "/usr/local/bin/sandbox-tmux-entry"];
+  const bridgeCalls: unknown[] = [];
+  const interactiveCalls: string[][] = [];
+
+  const exitCode = await sandboxEnter.runSandboxInteractive({
+    engine: "native",
+    dockerArgs,
+    container: "demo",
+    home: "/tmp/home",
+    env: { AI_SANDBOX_NO_CLIPBOARD_BRIDGE: "1" },
+    runBridge(params) {
+      bridgeCalls.push(params);
+      return 5;
+    },
+    runInteractive(_engine, cmd, args) {
+      interactiveCalls.push([cmd, ...args]);
+      return 7;
+    }
+  });
+
+  assert.equal(exitCode, 7);
+  assert.deepEqual(interactiveCalls, [["docker", ...dockerArgs]]);
+  assert.deepEqual(bridgeCalls, []);
+});
+
+test("sandbox exec clipboard bridge route uses the bridge by default", async () => {
+  const sandboxEnter = await loadFreshEsm<EnterModule>("lib/sandbox/commands/enter.js");
+  const dockerArgs = ["exec", "-it", "demo", "bash", "/usr/local/bin/sandbox-tmux-entry"];
+  const bridgeCalls: unknown[] = [];
+  const interactiveCalls: string[][] = [];
+
+  const exitCode = await sandboxEnter.runSandboxInteractive({
+    engine: "native",
+    dockerArgs,
+    container: "demo",
+    home: "/tmp/home",
+    env: {},
+    runBridge(params) {
+      bridgeCalls.push(params);
+      return 11;
+    },
+    runInteractive(_engine, cmd, args) {
+      interactiveCalls.push([cmd, ...args]);
+      return 13;
+    }
+  });
+
+  assert.equal(exitCode, 11);
+  assert.deepEqual(bridgeCalls, [{ engine: "native", dockerArgs, container: "demo", home: "/tmp/home" }]);
+  assert.deepEqual(interactiveCalls, []);
 });
 
 function spawnSandboxCli(

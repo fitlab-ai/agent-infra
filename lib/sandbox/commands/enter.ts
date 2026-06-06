@@ -45,6 +45,37 @@ export function hostTimezoneEnvFlags(detect = detectHostTimezone): string[] {
   return tz ? ['-e', `TZ=${tz}`] : [];
 }
 
+export function clipboardBridgeDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = (env.AI_SANDBOX_NO_CLIPBOARD_BRIDGE ?? '').trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
+export function runSandboxInteractive(params: {
+  engine: string;
+  dockerArgs: string[];
+  container: string;
+  home: string;
+  env?: NodeJS.ProcessEnv;
+  runBridge?: typeof runInteractiveWithClipboardBridge;
+  runInteractive?: typeof runInteractiveEngine;
+}): number | Promise<number> {
+  const {
+    engine,
+    dockerArgs,
+    container,
+    home,
+    env = process.env,
+    runBridge = runInteractiveWithClipboardBridge,
+    runInteractive = runInteractiveEngine
+  } = params;
+
+  if (clipboardBridgeDisabled(env)) {
+    return runInteractive(engine, 'docker', dockerArgs);
+  }
+
+  return runBridge({ engine, dockerArgs, container, home });
+}
+
 export function formatCredentialSyncStatus(
   result: ReturnType<typeof reconcileClaudeCredentials>,
   isTTY = process.stderr.isTTY
@@ -115,9 +146,10 @@ export async function enter(args: string[]): Promise<number> {
       process.stderr.write(`Warning: dotfiles snapshot rebuild failed: ${redactCommandError(error instanceof Error ? error.message : 'unknown error')}\n`);
     }
 
-    return runInteractiveWithClipboardBridge({
+    const dockerArgs = ['exec', '-it', ...envFlags, container, 'bash', TMUX_ENTRY_PATH];
+    return runSandboxInteractive({
       engine,
-      dockerArgs: ['exec', '-it', ...envFlags, container, 'bash', TMUX_ENTRY_PATH],
+      dockerArgs,
       container,
       home: config.home
     });
