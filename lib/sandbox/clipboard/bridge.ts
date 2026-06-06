@@ -1,4 +1,5 @@
 import { StringDecoder } from 'node:string_decoder';
+import { spawnSync } from 'node:child_process';
 import { createClipboardAdapter, type ClipboardAdapter } from './index.ts';
 import { buildBracketedPaste, CtrlVDetector, type CtrlVMatch } from './keys.ts';
 import {
@@ -31,6 +32,26 @@ type BridgeOptions = {
 
 const FALLBACK_PREFIX = 'Warning: clipboard image paste bridge disabled';
 const PARTIAL_ESCAPE_FLUSH_MS = 30;
+
+// Node's stdin.setRawMode(true) uses libuv's RAW mode, which (unlike the
+// cfmakeraw that `docker exec -it` applies on the non-bridge path) keeps ONLCR
+// set on the shared host TTY. With ONLCR on, the kernel rewrites the bare \n
+// that tmux emits after homing the cursor inside the right pane into \r\n,
+// snapping the cursor to column 1 so the following erase/redraw wipes the left
+// pane. Clearing OPOST brings the host TTY in line with the non-bridge path.
+// Best-effort: setRawMode(false) on teardown restores the original termios, and
+// a missing/failed stty only reinstates the redraw glitch.
+function disableOutputPostProcessing(stdin: NodeJS.ReadStream): void {
+  const candidate = (stdin as { fd?: unknown }).fd;
+  if (typeof candidate !== 'number') {
+    return;
+  }
+  try {
+    spawnSync('stty', ['-opost'], { stdio: [candidate, 'ignore', 'ignore'] });
+  } catch {
+    // stty unavailable or fd is not a tty; leave the terminal as-is.
+  }
+}
 
 export async function runInteractiveWithClipboardBridge(options: BridgeOptions): Promise<number> {
   const {
@@ -185,6 +206,7 @@ async function runBridge({
 
   try {
     stdin.setRawMode?.(true);
+    disableOutputPostProcessing(stdin);
     stdin.resume();
     stdin.on('data', onData);
     stdout.on('resize', onResize);
