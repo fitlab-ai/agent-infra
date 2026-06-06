@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
+import type { ExecFileSyncOptions } from "node:child_process";
 
 import { loadFreshEsm } from "../../helpers.ts";
 
@@ -96,6 +97,7 @@ test("darwin clipboard adapter reads PNG through a temporary file", async () => 
   const execCalls: Array<{ cmd: string; args: string[]; timeout?: number }> = [];
 
   const adapter = createDarwinClipboardAdapter({
+    env: {},
     execFn(cmd, args, options) {
       execCalls.push({ cmd, args, timeout: options?.timeout });
       const script = String(args[1]);
@@ -123,6 +125,7 @@ test("darwin clipboard adapter rejects empty or invalid PNG output", async () =>
   const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
 
   const adapter = createDarwinClipboardAdapter({
+    env: {},
     execFn(cmd, args) {
       const script = String(args[1]);
       const match = script.match(/POSIX file "([^"]+)"/);
@@ -137,6 +140,121 @@ test("darwin clipboard adapter rejects empty or invalid PNG output", async () =>
   });
 
   assert.equal(adapter.readImagePng(), null);
+});
+
+test("darwin clipboard adapter reads PNG from an external command", async () => {
+  const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
+  const execCalls: Array<{ cmd: string; args: string[]; options?: ExecFileSyncOptions }> = [];
+
+  const adapter = createDarwinClipboardAdapter({
+    env: { AGENT_INFRA_CLIPBOARD_READ_PNG: "/path/to/read-clip" },
+    execFn(cmd, args, options) {
+      execCalls.push({ cmd, args, options });
+      return png;
+    }
+  });
+
+  assert.deepEqual(adapter.readImagePng(), png);
+  assert.equal(execCalls.length, 1);
+  assert.equal(execCalls[0]?.cmd, "/path/to/read-clip");
+  assert.deepEqual(execCalls[0]?.args, []);
+  assert.equal(execCalls[0]?.options?.encoding, undefined);
+  assert.equal(execCalls[0]?.options?.timeout, 5000);
+  assert.equal(execCalls[0]?.options?.maxBuffer, 64 * 1024 * 1024);
+});
+
+test("darwin clipboard external command rejects empty or invalid PNG output", async () => {
+  const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
+
+  for (const output of [Buffer.alloc(0), Buffer.from("not a png"), "\x89PNG\r\n\x1a\n"]) {
+    const adapter = createDarwinClipboardAdapter({
+      env: { AGENT_INFRA_CLIPBOARD_READ_PNG: "/path/to/read-clip" },
+      execFn() {
+        return output;
+      }
+    });
+
+    assert.equal(adapter.readImagePng(), null);
+  }
+});
+
+test("darwin clipboard external command treats read failures as no image", async () => {
+  const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
+
+  for (const error of [
+    Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }),
+    Object.assign(new Error("exit 1"), { status: 1 })
+  ]) {
+    const adapter = createDarwinClipboardAdapter({
+      env: { AGENT_INFRA_CLIPBOARD_READ_PNG: "/path/to/read-clip" },
+      execFn() {
+        throw error;
+      }
+    });
+
+    assert.equal(adapter.readImagePng(), null);
+    assert.deepEqual(adapter.available(), { ok: true });
+  }
+});
+
+test("darwin clipboard external command probes availability with bounded output", async () => {
+  const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
+  const execCalls: Array<{ cmd: string; args: string[]; options?: ExecFileSyncOptions }> = [];
+
+  const adapter = createDarwinClipboardAdapter({
+    env: { AGENT_INFRA_CLIPBOARD_READ_PNG: "/path/to/read-clip" },
+    execFn(cmd, args, options) {
+      execCalls.push({ cmd, args, options });
+      return Buffer.alloc(0);
+    }
+  });
+
+  assert.deepEqual(adapter.available(), { ok: true });
+  assert.equal(execCalls.length, 1);
+  assert.equal(execCalls[0]?.cmd, "/path/to/read-clip");
+  assert.deepEqual(execCalls[0]?.args, []);
+  assert.equal(execCalls[0]?.options?.encoding, undefined);
+  assert.equal(execCalls[0]?.options?.timeout, 2000);
+  assert.equal(execCalls[0]?.options?.maxBuffer, 64 * 1024 * 1024);
+});
+
+test("darwin clipboard external command reports spawn failures as unavailable", async () => {
+  const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
+
+  for (const code of ["ENOENT", "EACCES", "ENOTDIR"]) {
+    const adapter = createDarwinClipboardAdapter({
+      env: { AGENT_INFRA_CLIPBOARD_READ_PNG: "/path/to/read-clip" },
+      execFn() {
+        throw Object.assign(new Error(code), { code });
+      }
+    });
+    const available = adapter.available();
+
+    assert.equal(available.ok, false);
+    if (!available.ok) {
+      assert.equal(typeof available.reason, "string");
+      assert.notEqual(available.reason, "");
+    }
+  }
+});
+
+test("darwin clipboard adapter uses osascript when external command is unset or blank", async () => {
+  const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
+
+  for (const env of [{}, { AGENT_INFRA_CLIPBOARD_READ_PNG: "   " }]) {
+    const execCalls: Array<{ cmd: string; args: string[] }> = [];
+    const adapter = createDarwinClipboardAdapter({
+      env,
+      execFn(cmd, args) {
+        execCalls.push({ cmd, args });
+        return "";
+      }
+    });
+
+    assert.deepEqual(adapter.available(), { ok: true });
+    assert.equal(execCalls[0]?.cmd, "osascript");
+  }
 });
 
 test("clipboard bridge falls back on non-darwin platforms", async () => {

@@ -11,6 +11,8 @@ import type { ExecFileSyncOptions } from 'node:child_process';
 // rather tolerate a cold osascript spawn than misreport "unavailable".
 const OSASCRIPT_PROBE_TIMEOUT_MS = 2_000;
 const READ_IMAGE_TIMEOUT_MS = 5_000;
+const READ_IMAGE_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+const CLIPBOARD_READ_PNG_ENV = 'AGENT_INFRA_CLIPBOARD_READ_PNG';
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 type ExecFn = (cmd: string, args: string[], options?: ExecFileSyncOptions) => Buffer | string;
@@ -30,15 +32,22 @@ export type DarwinClipboardAdapter = {
 
 export function createDarwinClipboardAdapter({
   execFn = execFileSync,
+  env = process.env,
   mkdtempFn = fs.mkdtempSync,
   readFileFn = fs.readFileSync,
   rmFn = fs.rmSync
 }: {
   execFn?: ExecFn;
+  env?: NodeJS.ProcessEnv;
   mkdtempFn?: typeof fs.mkdtempSync;
   readFileFn?: typeof fs.readFileSync;
   rmFn?: typeof fs.rmSync;
 } = {}): DarwinClipboardAdapter {
+  const externalCmd = env[CLIPBOARD_READ_PNG_ENV]?.trim();
+  if (externalCmd) {
+    return createExternalCommandAdapter(externalCmd, { execFn });
+  }
+
   return {
     available() {
       try {
@@ -72,6 +81,42 @@ export function createDarwinClipboardAdapter({
       }
     }
   };
+}
+
+function createExternalCommandAdapter(cmd: string, { execFn }: { execFn: ExecFn }): DarwinClipboardAdapter {
+  return {
+    available() {
+      try {
+        execFn(cmd, [], { timeout: OSASCRIPT_PROBE_TIMEOUT_MS, maxBuffer: READ_IMAGE_MAX_BUFFER_BYTES });
+        return { ok: true };
+      } catch (err) {
+        if (isSpawnFailure(err)) {
+          return { ok: false, reason: `clipboard command is not executable: ${cmd}` };
+        }
+        return { ok: true };
+      }
+    },
+    readImagePng() {
+      try {
+        const out = execFn(cmd, [], {
+          timeout: READ_IMAGE_TIMEOUT_MS,
+          maxBuffer: READ_IMAGE_MAX_BUFFER_BYTES
+        });
+        if (!Buffer.isBuffer(out)) {
+          return null;
+        }
+        const png = Buffer.from(out);
+        return isPng(png) ? png : null;
+      } catch {
+        return null;
+      }
+    }
+  };
+}
+
+function isSpawnFailure(err: unknown): boolean {
+  const code = typeof err === 'object' && err !== null ? (err as { code?: unknown }).code : undefined;
+  return code === 'ENOENT' || code === 'EACCES' || code === 'ENOTDIR';
 }
 
 function isPng(buffer: Buffer): boolean {
