@@ -22,10 +22,8 @@ RUN apt-get update && apt-get install -y \
     build-essential ca-certificates gnupg lsb-release \
     libevent-core-2.1-7 libncursesw6 libtinfo6 \
     pkg-config bison libevent-dev libncurses-dev \
-    locales tzdata \
+    locales \
     && locale-gen en_US.UTF-8 \
-    && ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
-    && echo "Asia/Shanghai" > /etc/timezone \
     && (curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg) \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
