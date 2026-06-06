@@ -48,6 +48,7 @@ import {
   redactCommandError,
   validateClaudeCredentialsEnvOverride
 } from '../credentials.ts';
+import { detectHostTimezone } from '../host-timezone.ts';
 
 const OPENCODE_YOLO_PERMISSION = '{"*":"allow","read":"allow","bash":"allow","edit":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"}';
 const SANDBOX_ALIAS_BLOCK_BEGIN = '# >>> agent-infra managed aliases >>>';
@@ -1364,6 +1365,8 @@ export async function create(args: string[]): Promise<void> {
             const dotfilesMount = dotfilesSnapshot
               ? buildDotfilesVolumeArgs(engine, dotfilesSnapshot.cacheDir)
               : [];
+            const hostTz = detectHostTimezone();
+            const tzFlags = hostTz ? ['-e', `TZ=${hostTz}`] : [];
 
             runEngineTaskCommand(engine, 'docker', [
               'run',
@@ -1398,6 +1401,7 @@ export async function create(args: string[]): Promise<void> {
               ...liveMountVolumes,
               ...shellConfigVolumes,
               ...envFile.dockerArgs,
+              ...tzFlags,
               '-w',
               '/workspace',
               effectiveConfig.imageName

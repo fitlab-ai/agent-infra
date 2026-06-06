@@ -148,7 +148,8 @@ test("sandbox exec enters tmux automatically for interactive shells", onPlatform
           TERM_PROGRAM: "",
           TERM_PROGRAM_VERSION: "",
           LC_TERMINAL: "",
-          LC_TERMINAL_VERSION: ""
+          LC_TERMINAL_VERSION: "",
+          TZ: "Invalid Value"
         },
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"]

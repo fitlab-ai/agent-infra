@@ -12,6 +12,7 @@ import { runInteractiveEngine, runSafeEngine } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
 import { runInteractiveWithClipboardBridge } from '../clipboard/bridge.ts';
+import { detectHostTimezone } from '../host-timezone.ts';
 
 const USAGE = `Usage: ai sandbox exec <branch> [cmd...]`;
 const TMUX_ENTRY_PATH = '/usr/local/bin/sandbox-tmux-entry';
@@ -37,6 +38,11 @@ export function terminalEnvFlags(env: NodeJS.ProcessEnv = process.env): string[]
     }
   }
   return flags;
+}
+
+export function hostTimezoneEnvFlags(detect = detectHostTimezone): string[] {
+  const tz = detect();
+  return tz ? ['-e', `TZ=${tz}`] : [];
 }
 
 export function formatCredentialSyncStatus(
@@ -101,7 +107,7 @@ export async function enter(args: string[]): Promise<number> {
     }
   }
 
-  const envFlags = terminalEnvFlags();
+  const envFlags = [...terminalEnvFlags(), ...hostTimezoneEnvFlags()];
   if (cmd.length === 0) {
     try {
       materializeDotfiles(config.dotfilesDir, dotfilesCacheDir(config.home, config.project));

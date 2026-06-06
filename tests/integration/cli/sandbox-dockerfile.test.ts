@@ -230,6 +230,25 @@ test("composeDockerfile installs tmux for in-container session recovery", async 
   }
 });
 
+test("composeDockerfile installs tzdata for runtime TZ resolution", async () => {
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tzdata-"));
+
+  try {
+    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+      repoRoot: tmpDir,
+      project: "demo",
+      runtimes: ["node20"],
+      dockerfile: null
+    });
+    const content = fs.readFileSync(dockerfilePath, "utf8");
+
+    assert.match(content, /\btzdata\b/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("composeDockerfile bakes sandbox-tmux-entry script", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmux-entry-"));
@@ -250,6 +269,7 @@ test("composeDockerfile bakes sandbox-tmux-entry script", async () => {
     assert.match(content, /tmux list-sessions -F '#\{session_name\}'/);
     assert.match(content, /case "\$name" in\s*"\$SESSION"-\*\)/);
     assert.match(content, /tmux kill-session -t "\$name"/);
+    assert.match(content, /tmux\s+set-environment\s+-t\s+"\$SESSION"\s+TZ/);
     assert.match(content, /exec tmux attach -d -t "\$SESSION"/);
     assert.match(content, /exec tmux new-session -s "\$SESSION"/);
   } finally {
@@ -326,7 +346,7 @@ test("composeDockerfile configures tmux extended keys and terminal env forwardin
     assert.match(content, /set -as terminal-features 'xterm\*:extkeys'/);
     assert.match(
       content,
-      /set -ga update-environment 'TERM_PROGRAM TERM_PROGRAM_VERSION LC_TERMINAL LC_TERMINAL_VERSION'/
+      /set -ga update-environment 'TERM_PROGRAM TERM_PROGRAM_VERSION LC_TERMINAL LC_TERMINAL_VERSION TZ'/
     );
     assert.match(content, /set -g mouse on/);
     assert.match(content, /set -g status-interval 1/);

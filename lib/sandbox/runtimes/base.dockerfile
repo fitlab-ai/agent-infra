@@ -3,7 +3,6 @@ FROM ubuntu:22.04
 LABEL description="AI coding sandbox"
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Asia/Shanghai
 
 ARG HOST_UID=1000
 ARG HOST_GID=1000
@@ -22,7 +21,7 @@ RUN apt-get update && apt-get install -y \
     build-essential ca-certificates gnupg lsb-release \
     libevent-core-2.1-7 libncursesw6 libtinfo6 \
     pkg-config bison libevent-dev libncurses-dev \
-    locales \
+    locales tzdata \
     && locale-gen en_US.UTF-8 \
     && (curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg) \
@@ -45,13 +44,13 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Enable extended keys in CSI u format so Shift+Enter and other modified
-# keys are forwarded through tmux. Preserve terminal-detection variables
+# keys are forwarded through tmux. Preserve terminal/timezone variables
 # injected at `docker exec` time when new tmux sessions are created.
 RUN printf '%s\n' \
       'set -g extended-keys always' \
       'set -g extended-keys-format csi-u' \
       "set -as terminal-features 'xterm*:extkeys'" \
-      "set -ga update-environment 'TERM_PROGRAM TERM_PROGRAM_VERSION LC_TERMINAL LC_TERMINAL_VERSION'" \
+      "set -ga update-environment 'TERM_PROGRAM TERM_PROGRAM_VERSION LC_TERMINAL LC_TERMINAL_VERSION TZ'" \
       'set -g mouse on' \
       'set -g status-interval 1' \
       'set -g status-right-length 80' \
@@ -165,6 +164,11 @@ done
 # Reuse the single $SESSION; -d detaches any pre-existing client so the new
 # one becomes the sole owner of window-size, eliminating size races.
 if tmux has-session -t "$SESSION" 2>/dev/null; then
+  # Push the per-exec TZ into the running session's env so new
+  # windows/panes pick up the host timezone without a session kill.
+  if [ -n "${TZ:-}" ]; then
+    tmux set-environment -t "$SESSION" TZ "$TZ" 2>/dev/null || true
+  fi
   exec tmux attach -d -t "$SESSION"
 fi
 
