@@ -206,40 +206,7 @@ The sandbox image also preinstalls `gh`. When `gh auth token` succeeds on the ho
 
 On macOS, interactive `ai sandbox exec <branch>` sessions can bridge image paste into the sandbox. When you press `Ctrl+V` and the host clipboard currently holds an image, agent-infra reads the image from the host clipboard, writes a PNG under `~/.agent-infra/clipboard/`, and injects the container path as bracketed paste so Claude Code, Codex, Gemini CLI, and OpenCode can attach it. The host clipboard is only read, never rewritten. The bridge is best-effort: existing sandboxes must be rebuilt to receive the `/clipboard` mount, and if the optional pty dependency or clipboard probe is unavailable the session falls back to the normal interactive path. Set `AI_SANDBOX_NO_CLIPBOARD_BRIDGE=1` to skip the bridge and enter the normal interactive path directly when diagnosing mouse, scrolling, or other input issues.
 
-#### Custom clipboard source
-
-Set `AGENT_INFRA_CLIPBOARD_READ_PNG` when agent-infra runs on a different Mac from the one where you copy images, when you want a custom or faster clipboard reader, or when tests need a mock PNG source. The value is an executable file path, not a shell command: agent-infra runs it directly with no arguments, does not expand `~`, and does not parse pipes, redirects, or inline commands such as `"ssh macbook pngpaste -"`. Put command lines in a script file and point the env var at that file's absolute path.
-
-The command must write PNG bytes to stdout. Exit code 0 means an image is present; a non-zero exit means no image or an error. Reads time out after 5 seconds, and agent-infra still validates the PNG magic bytes before injecting anything into the sandbox.
-
-When a sandbox session starts, agent-infra runs the same command once with a 2-second availability probe before the bridge is enabled. For SSH-backed scripts, expect one extra connection and clipboard read at session startup; the next `Ctrl+V` reads again.
-
-Example remote Mac clipboard reader:
-
-```bash
-#!/usr/bin/env bash
-# read-clip.sh - emit the clipboard image of the Mac you actually use as PNG on stdout.
-# Point AGENT_INFRA_CLIPBOARD_READ_PNG at this file's absolute path (chmod +x first).
-# Exit 0 + PNG on stdout = image present; non-zero exit = no image.
-set -euo pipefail
-# Requires key-based SSH (BatchMode, no password prompt) and `pngpaste`
-# installed on the remote Mac: brew install pngpaste
-exec ssh -o BatchMode=yes macbook 'pngpaste -'
-# `pngpaste -` writes the clipboard image as PNG to stdout and exits non-zero
-# when the clipboard holds no image; agent-infra reads that as "nothing to paste".
-```
-
-Set the env var from `~/.zprofile`, `~/.zshrc`, `~/.bashrc`, or a launchd plist:
-
-```bash
-export AGENT_INFRA_CLIPBOARD_READ_PNG="$HOME/.agent-infra/read-clip.sh"
-```
-
-Use an absolute path. `$HOME` is expanded by your shell in the `export` example above; launchd plist values do not get shell expansion, so write the already-expanded path there.
-
-To debug the script itself, run `/abs/path/read-clip.sh | file -` and check for `PNG image data`. To confirm agent-infra calls it, temporarily add `echo "called $(date)" >> /tmp/clip.log` to the script and press `Ctrl+V` in the sandbox session.
-
-When `AGENT_INFRA_CLIPBOARD_READ_PNG` is set, the external source is locked in and agent-infra does not fall back to local osascript. If the command cannot be started (`ENOENT`, `EACCES`, or `ENOTDIR`), the clipboard bridge is disabled for that session and the original `Ctrl+V` is forwarded to the terminal. The executable runs with agent-infra's permissions, so do not point it at untrusted files or trust untrusted env values in root or multi-user contexts.
+To source clipboard PNG bytes from an external command instead of the built-in `osascript` path — for example when agent-infra runs on a remote Mac you SSH into, or for a custom/mock reader — set `AGENT_INFRA_CLIPBOARD_READ_PNG`. See [docs/clipboard.md](docs/clipboard.md) for the contract, an SSH example script, and debugging tips.
 
 `ai sandbox exec` and `ai sandbox refresh` reconcile Claude Code credentials in both directions across the host credential store and every sandbox project copy under `~/.agent-infra/credentials/*`. When a long-running sandbox refreshes OAuth tokens first, the next entry or refresh command writes the freshest valid copy back to the host Keychain or `~/.claude/.credentials.json`; when the host is fresher, it updates the project copies. If every copy is stale, `ai sandbox refresh` probes `claude /status` and asks you to log in only when the probe cannot recover credentials.
 
