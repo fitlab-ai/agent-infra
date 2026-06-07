@@ -298,7 +298,7 @@ test("composeDockerfile bakes sandbox-dotfiles-link script", async () => {
     assert.match(content, /\.ssh\|\.ssh\/\*/);
     assert.match(content, /\.gnupg\|\.gnupg\/\*/);
     assert.match(content, /\.config\/opencode\|\.config\/opencode\/\*/);
-    assert.match(content, /\.gitconfig\|\.gitignore_global\|\.stCommitMsg\|\.bash_aliases/);
+    assert.match(content, /\.gitconfig\|\.gitignore_global\|\.stCommitMsg\|\.bash_aliases\|README\.md/);
     assert.match(content, /mkdir -p "\$\(dirname "\$target"\)"/);
     assert.match(content, /\[ -d "\$target" \] && \[ ! -L "\$target" \]/);
     assert.match(content, /skipping %s \(existing directory; use nested path like %s\/<file> instead\)/);

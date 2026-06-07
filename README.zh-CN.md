@@ -224,6 +224,11 @@ CLI 会收集项目元数据，向所有支持的 AI TUI 安装 `update-agent-in
 可先用 `ai sandbox prune --dry-run` 查看旧版本或异常中断遗留的孤儿 per-branch 状态目录，再用 `ai sandbox prune` 只删除没有活跃 sandbox 容器对应的目录。
 已有沙箱需要执行 `ai sandbox rm <branch>` 后再执行 `ai sandbox create <branch>`，才能加载新的挂载点。
 
+首次执行 `ai sandbox create` 时，agent-infra 会在
+`~/.agent-infra/share/<project>/common/` 以及每个 `branches/<branch>/`
+目录下写入一份中英双语 `README.md`，帮助你发现这些通道。README 是幂等的，
+可以安全删除；scaffold 仅在文件缺失时写入。
+
 #### 用户级 dotfiles 通道
 
 `ai sandbox create` 还会自动挂载一条可选的只读通道，用于把宿主机用户级偏好带进沙箱：
@@ -274,6 +279,7 @@ dotfiles 树解引用到
 | `.config/opencode/*`, `.local/share/opencode/*` | OpenCode 凭证和数据使用专用 bind mount。 |
 | `.host-shell-config/*` | agent-infra 管理的 shell 和 Git 配置。 |
 | `.gitconfig`, `.gitignore_global`, `.stCommitMsg`, `.bash_aliases` | agent-infra 将这些路径软链到 `.host-shell-config/`，包含 `safe.directory` 和 GPG 同步状态。 |
+| `README.md` | agent-infra 会在 dotfiles 根目录 scaffold 一份发现性 README；link hook 会忽略它，避免遮蔽 `$HOME/README.md`。 |
 
 其他已经存在的真实目录（如 `~/.config/`、`~/.cache/`）不会被顶层 dotfile 替换。如果某个文件与这类目录冲突，钩子会打印警告并跳过：
 

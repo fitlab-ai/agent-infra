@@ -234,6 +234,11 @@ remove only dirs without an active sandbox container.
 Existing sandboxes pick up these mounts after `ai sandbox rm <branch>` and
 `ai sandbox create <branch>`.
 
+On first `ai sandbox create`, agent-infra writes a bilingual `README.md` into
+`~/.agent-infra/share/<project>/common/` and each `branches/<branch>/`
+directory to help you discover these channels. The READMEs are idempotent and
+can be safely deleted; the scaffold only writes them when missing.
+
 ### User-level dotfiles channel
 
 `ai sandbox create` also mounts an optional read-only channel for host user preferences:
@@ -298,6 +303,7 @@ target.
 | `.config/opencode/*`, `.local/share/opencode/*` | OpenCode credentials and data use dedicated bind mounts. |
 | `.host-shell-config/*` | agent-infra managed shell and Git configuration. |
 | `.gitconfig`, `.gitignore_global`, `.stCommitMsg`, `.bash_aliases` | agent-infra symlinks these to `.host-shell-config/`, including `safe.directory` and GPG sync state. |
+| `README.md` | agent-infra scaffolds a discoverability README at the dotfiles root on first create; the link hook ignores it so `$HOME/README.md` is not shadowed. |
 
 Other existing real directories, such as `~/.config/` or `~/.cache/`, are not
 replaced by top-level dotfiles. If a file conflicts with one of those

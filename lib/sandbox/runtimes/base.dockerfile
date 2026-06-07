@@ -126,7 +126,7 @@ find . -type f -print | while IFS= read -r rel; do
     .config/opencode|.config/opencode/*|\
     .local/share/opencode|.local/share/opencode/*|\
     .host-shell-config|.host-shell-config/*|\
-    .gitconfig|.gitignore_global|.stCommitMsg|.bash_aliases)
+    .gitconfig|.gitignore_global|.stCommitMsg|.bash_aliases|README.md)
       continue ;;
   esac
 

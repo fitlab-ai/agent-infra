@@ -43,6 +43,7 @@ import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
 import { resolveBuildUid } from '../engines/native.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
+import { ensureSandboxDiscoveryReadmes } from '../readme-scaffold.ts';
 import {
   prepareClaudeCredentials,
   redactCommandError,
@@ -1285,6 +1286,13 @@ export async function create(args: string[]): Promise<void> {
           const aliasesFile = ensureSandboxAliasesFile(effectiveConfig.home);
           if (aliasesFile.created) {
             message(`Created default sandbox aliases at ${aliasesFile.path}`);
+          }
+
+          const readmeResults = ensureSandboxDiscoveryReadmes(effectiveConfig, branch);
+          for (const { created, path: readmePath } of readmeResults) {
+            if (created) {
+              message(`Created discovery README at ${readmePath}`);
+            }
           }
 
           const gitconfigPath = path.join(effectiveConfig.home, '.gitconfig');
