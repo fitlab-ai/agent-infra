@@ -4,13 +4,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
-import type { ExecFileSyncOptions } from "node:child_process";
 
 import { loadFreshEsm } from "../../helpers.ts";
 
 type KeysModule = typeof import("../../../lib/sandbox/clipboard/keys.ts");
 type PathsModule = typeof import("../../../lib/sandbox/clipboard/paths.ts");
 type DarwinModule = typeof import("../../../lib/sandbox/clipboard/darwin.ts");
+type IndexModule = typeof import("../../../lib/sandbox/clipboard/index.ts");
 type BridgeModule = typeof import("../../../lib/sandbox/clipboard/bridge.ts");
 type PtyExitEvent = { exitCode: number; signal?: number | string };
 type PtyExitHandler = (event: PtyExitEvent) => void;
@@ -97,7 +97,6 @@ test("darwin clipboard adapter reads PNG through a temporary file", async () => 
   const execCalls: Array<{ cmd: string; args: string[]; timeout?: number }> = [];
 
   const adapter = createDarwinClipboardAdapter({
-    env: {},
     execFn(cmd, args, options) {
       execCalls.push({ cmd, args, timeout: options?.timeout });
       const script = String(args[1]);
@@ -125,7 +124,6 @@ test("darwin clipboard adapter rejects empty or invalid PNG output", async () =>
   const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
 
   const adapter = createDarwinClipboardAdapter({
-    env: {},
     execFn(cmd, args) {
       const script = String(args[1]);
       const match = script.match(/POSIX file "([^"]+)"/);
@@ -142,124 +140,42 @@ test("darwin clipboard adapter rejects empty or invalid PNG output", async () =>
   assert.equal(adapter.readImagePng(), null);
 });
 
-test("darwin clipboard adapter reads PNG from an external command", async () => {
-  const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
-  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
-  const execCalls: Array<{ cmd: string; args: string[]; options?: ExecFileSyncOptions }> = [];
+test("clipboard adapter factory returns the darwin adapter on macOS", async () => {
+  const { createClipboardAdapter } = await loadFreshEsm<IndexModule>("lib/sandbox/clipboard/index.js");
+  const adapter = createClipboardAdapter({ platformName: "darwin" });
 
-  const adapter = createDarwinClipboardAdapter({
-    env: { AGENT_INFRA_CLIPBOARD_READ_PNG: "/path/to/read-clip" },
-    execFn(cmd, args, options) {
-      execCalls.push({ cmd, args, options });
-      return png;
-    }
-  });
-
-  assert.deepEqual(adapter.readImagePng(), png);
-  assert.equal(execCalls.length, 1);
-  assert.equal(execCalls[0]?.cmd, "/path/to/read-clip");
-  assert.deepEqual(execCalls[0]?.args, []);
-  assert.equal(execCalls[0]?.options?.encoding, undefined);
-  assert.equal(execCalls[0]?.options?.timeout, 5000);
-  assert.equal(execCalls[0]?.options?.maxBuffer, 64 * 1024 * 1024);
+  assert.notEqual(adapter, null);
+  assert.equal(typeof adapter?.available, "function");
+  assert.equal(typeof adapter?.readImagePng, "function");
 });
 
-test("darwin clipboard external command rejects empty or invalid PNG output", async () => {
-  const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
+test("clipboard adapter factory disables linux", async () => {
+  const { createClipboardAdapter } = await loadFreshEsm<IndexModule>("lib/sandbox/clipboard/index.js");
 
-  for (const output of [Buffer.alloc(0), Buffer.from("not a png"), "\x89PNG\r\n\x1a\n"]) {
-    const adapter = createDarwinClipboardAdapter({
-      env: { AGENT_INFRA_CLIPBOARD_READ_PNG: "/path/to/read-clip" },
-      execFn() {
-        return output;
-      }
-    });
-
-    assert.equal(adapter.readImagePng(), null);
-  }
+  assert.equal(createClipboardAdapter({ platformName: "linux" }), null);
 });
 
-test("darwin clipboard external command treats read failures as no image", async () => {
-  const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
+test("clipboard adapter factory disables win32", async () => {
+  const { createClipboardAdapter } = await loadFreshEsm<IndexModule>("lib/sandbox/clipboard/index.js");
 
-  for (const error of [
-    Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }),
-    Object.assign(new Error("exit 1"), { status: 1 })
-  ]) {
-    const adapter = createDarwinClipboardAdapter({
-      env: { AGENT_INFRA_CLIPBOARD_READ_PNG: "/path/to/read-clip" },
-      execFn() {
-        throw error;
-      }
-    });
-
-    assert.equal(adapter.readImagePng(), null);
-    assert.deepEqual(adapter.available(), { ok: true });
-  }
+  assert.equal(createClipboardAdapter({ platformName: "win32" }), null);
 });
 
-test("darwin clipboard external command probes availability with bounded output", async () => {
-  const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
-  const execCalls: Array<{ cmd: string; args: string[]; options?: ExecFileSyncOptions }> = [];
+test("clipboard adapter factory disables unknown platforms", async () => {
+  const { createClipboardAdapter } = await loadFreshEsm<IndexModule>("lib/sandbox/clipboard/index.js");
 
-  const adapter = createDarwinClipboardAdapter({
-    env: { AGENT_INFRA_CLIPBOARD_READ_PNG: "/path/to/read-clip" },
-    execFn(cmd, args, options) {
-      execCalls.push({ cmd, args, options });
-      return Buffer.alloc(0);
-    }
-  });
-
-  assert.deepEqual(adapter.available(), { ok: true });
-  assert.equal(execCalls.length, 1);
-  assert.equal(execCalls[0]?.cmd, "/path/to/read-clip");
-  assert.deepEqual(execCalls[0]?.args, []);
-  assert.equal(execCalls[0]?.options?.encoding, undefined);
-  assert.equal(execCalls[0]?.options?.timeout, 2000);
-  assert.equal(execCalls[0]?.options?.maxBuffer, 64 * 1024 * 1024);
+  assert.equal(createClipboardAdapter({ platformName: "sunos" as NodeJS.Platform }), null);
 });
 
-test("darwin clipboard external command reports spawn failures as unavailable", async () => {
-  const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
-
-  for (const code of ["ENOENT", "EACCES", "ENOTDIR"]) {
-    const adapter = createDarwinClipboardAdapter({
-      env: { AGENT_INFRA_CLIPBOARD_READ_PNG: "/path/to/read-clip" },
-      execFn() {
-        throw Object.assign(new Error(code), { code });
-      }
-    });
-    const available = adapter.available();
-
-    assert.equal(available.ok, false);
-    if (!available.ok) {
-      assert.equal(typeof available.reason, "string");
-      assert.notEqual(available.reason, "");
-    }
-  }
-});
-
-test("darwin clipboard adapter uses osascript when external command is unset or blank", async () => {
-  const { createDarwinClipboardAdapter } = await loadFreshEsm<DarwinModule>("lib/sandbox/clipboard/darwin.js");
-
-  for (const env of [{}, { AGENT_INFRA_CLIPBOARD_READ_PNG: "   " }]) {
-    const execCalls: Array<{ cmd: string; args: string[] }> = [];
-    const adapter = createDarwinClipboardAdapter({
-      env,
-      execFn(cmd, args) {
-        execCalls.push({ cmd, args });
-        return "";
-      }
-    });
-
-    assert.deepEqual(adapter.available(), { ok: true });
-    assert.equal(execCalls[0]?.cmd, "osascript");
-  }
-});
-
-test("clipboard bridge falls back on non-darwin platforms", async () => {
+test("clipboard bridge falls back with adapter-null warning on linux TTYs", async () => {
   const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
+  const stdin = new EventEmitter() as EventEmitter & { isTTY: boolean };
+  const stdout = new EventEmitter() as EventEmitter & { isTTY: boolean };
   const calls: string[][] = [];
+  const stderr: string[] = [];
+
+  stdin.isTTY = true;
+  stdout.isTTY = true;
 
   const exitCode = await runInteractiveWithClipboardBridge({
     engine: "native",
@@ -267,14 +183,48 @@ test("clipboard bridge falls back on non-darwin platforms", async () => {
     container: "demo",
     home: "/tmp/home",
     platformName: "linux",
+    stdin: stdin as never,
+    stdout: stdout as never,
     runInteractive(_engine, cmd, args) {
       calls.push([cmd, ...args]);
       return 7;
-    }
+    },
+    writeStderr: (chunk) => stderr.push(chunk)
   });
 
   assert.equal(exitCode, 7);
   assert.deepEqual(calls, [["docker", "exec", "-it", "demo", "bash"]]);
+  assert.match(stderr.join(""), /clipboard image paste bridge disabled: no clipboard adapter available on this platform/);
+});
+
+test("clipboard bridge falls back with TTY warning before adapter lookup", async () => {
+  const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
+  const stdin = new EventEmitter() as EventEmitter & { isTTY: boolean };
+  const stdout = new EventEmitter() as EventEmitter & { isTTY: boolean };
+  const calls: string[][] = [];
+  const stderr: string[] = [];
+
+  stdin.isTTY = false;
+  stdout.isTTY = true;
+
+  const exitCode = await runInteractiveWithClipboardBridge({
+    engine: "native",
+    dockerArgs: ["exec", "-it", "demo", "bash"],
+    container: "demo",
+    home: "/tmp/home",
+    platformName: "linux",
+    stdin: stdin as never,
+    stdout: stdout as never,
+    runInteractive(_engine, cmd, args) {
+      calls.push([cmd, ...args]);
+      return 7;
+    },
+    writeStderr: (chunk) => stderr.push(chunk)
+  });
+
+  assert.equal(exitCode, 7);
+  assert.deepEqual(calls, [["docker", "exec", "-it", "demo", "bash"]]);
+  assert.match(stderr.join(""), /clipboard image paste bridge disabled: host stdin\/stdout is not a TTY/);
 });
 
 test("clipboard bridge falls back when optional node-pty is unavailable", async () => {

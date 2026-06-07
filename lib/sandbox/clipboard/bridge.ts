@@ -77,14 +77,11 @@ export async function runInteractiveWithClipboardBridge(options: BridgeOptions):
     return runInteractive(engine, 'docker', dockerArgs);
   }
 
-  if (platformName !== 'darwin') {
-    return runInteractive(engine, 'docker', dockerArgs);
-  }
   if (!stdin.isTTY || !stdout.isTTY) {
     return fallback('host stdin/stdout is not a TTY');
   }
   if (!adapter) {
-    return fallback('macOS clipboard adapter is unavailable');
+    return fallback('no clipboard adapter available on this platform');
   }
   const available = adapter.available();
   if (!available.ok) {
