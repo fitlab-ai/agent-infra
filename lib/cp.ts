@@ -124,6 +124,10 @@ export async function cmdCp(args: string[], deps: CpDeps = {}): Promise<number> 
     }
     uploaded = true;
 
+    // Remote write currently targets macOS only: it pipes an AppleScript to the
+    // remote `osascript` to set its NSPasteboard. This is the extension point for
+    // other remote platforms later (e.g. dispatch on remote OS to wl-copy/xclip
+    // on Linux); a non-macOS remote fails here with a clear non-zero error today.
     const setRemote = spawnFn('ssh', [
       '-o',
       'BatchMode=yes',

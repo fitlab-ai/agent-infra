@@ -13,14 +13,13 @@ if (major < 22) {
 const USAGE = `agent-infra ${VERSION} - bootstrap AI collaboration infrastructure
 
 Usage:
-  agent-infra init        Initialize a new project with update-agent-infra seed command
-  agent-infra merge       Merge tasks from another workspace directory (active/blocked/completed/archive)
-  agent-infra update      Update seed files and sync file registry for an existing project
-  agent-infra sandbox     Manage Docker-based AI sandboxes
-  agent-infra cp <ssh-alias>
-                         Copy local clipboard image to a remote macOS NSPasteboard
-  agent-infra version     Show version
-  agent-infra help        Show this help message
+  agent-infra cp <ssh-alias>  Copy local clipboard image to a remote macOS NSPasteboard
+  agent-infra help            Show this help message
+  agent-infra init            Initialize a new project with update-agent-infra seed command
+  agent-infra merge           Merge tasks from another workspace directory (active/blocked/completed/archive)
+  agent-infra sandbox         Manage Docker-based AI sandboxes
+  agent-infra update          Update seed files and sync file registry for an existing project
+  agent-infra version         Show version
 
 Shorthand: ai (e.g. ai init)
 
