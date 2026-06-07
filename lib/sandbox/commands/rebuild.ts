@@ -13,7 +13,7 @@ import type { SandboxTool } from '../tools.ts';
 import { toEnginePath } from '../engines/wsl2-paths.ts';
 import { resolveBuildUid } from '../engines/native.ts';
 
-const USAGE = `Usage: ai sandbox rebuild [--quiet]`;
+const USAGE = `Usage: ai sandbox rebuild [--quiet] [--refresh]`;
 
 type PreparedDockerfile = ReturnType<typeof prepareDockerfile>;
 type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string }) => string;
@@ -38,12 +38,14 @@ export function buildArgs(
     engine,
     runFn = runEngine,
     runSafeFn = runSafeEngine,
-    env = process.env
+    env = process.env,
+    refresh = false
   }: {
     engine?: string;
     runFn?: EngineRunFn;
     runSafeFn?: EngineRunSafeFn;
     env?: NodeJS.ProcessEnv;
+    refresh?: boolean;
   } = {}
 ): string[] {
   const selectedEngine = engine ?? detectEngine(config);
@@ -54,7 +56,7 @@ export function buildArgs(
     env
   });
 
-  return [
+  const args = [
     'build',
     '-t',
     config.imageName,
@@ -72,6 +74,12 @@ export function buildArgs(
     toEnginePath(selectedEngine, dockerfilePath),
     toEnginePath(selectedEngine, config.repoRoot)
   ];
+
+  if (refresh) {
+    args.splice(1, 0, '--no-cache', '--pull');
+  }
+
+  return args;
 }
 
 function removeImageIfPresent(imageName: string, engine: string): void {
@@ -86,6 +94,7 @@ export async function rebuild(args: string[]): Promise<void> {
     allowPositionals: true,
     strict: true,
     options: {
+      refresh: { type: 'boolean' },
       quiet: { type: 'boolean', short: 'q' },
       help: { type: 'boolean', short: 'h' }
     }
@@ -101,6 +110,7 @@ export async function rebuild(args: string[]): Promise<void> {
   const preparedDockerfile = prepareDockerfile(config);
   const imageSignature = buildSignature(preparedDockerfile, tools);
   const quiet = values.quiet ?? false;
+  const refresh = values.refresh ?? false;
   const engine = detectEngine(config);
 
   await ensureDocker(config, undefined);
@@ -113,7 +123,7 @@ export async function rebuild(args: string[]): Promise<void> {
       removeImageIfPresent(config.imageName, engine);
       spinner.stop('Old image removed');
       spinner.start('Building image...');
-      runEngine(engine, 'docker', buildArgs(config, tools, preparedDockerfile.path, imageSignature, { engine }), {
+      runEngine(engine, 'docker', buildArgs(config, tools, preparedDockerfile.path, imageSignature, { engine, refresh }), {
         cwd: config.repoRoot
       });
       spinner.stop(pc.green('Sandbox image rebuilt'));
@@ -124,7 +134,7 @@ export async function rebuild(args: string[]): Promise<void> {
       runVerboseEngine(
         engine,
         'docker',
-        buildArgs(config, tools, preparedDockerfile.path, imageSignature, { engine }),
+        buildArgs(config, tools, preparedDockerfile.path, imageSignature, { engine, refresh }),
         { cwd: config.repoRoot }
       );
       p.log.success(pc.green('Sandbox image rebuilt'));

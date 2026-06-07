@@ -116,7 +116,7 @@ test("composeDockerfile joins runtime fragments in order", async () => {
     });
     const content = fs.readFileSync(dockerfilePath, "utf8");
 
-    assert.match(content, /^FROM ubuntu:22\.04/m);
+    assert.match(content, /^FROM ubuntu:24\.04/m);
     assert.match(content, /setup_20\.x/);
     assert.match(content, /python3 python3-pip python3-venv/);
     assert.match(content, /AI_TOOL_PACKAGES build arg is required/);
@@ -223,7 +223,7 @@ test("composeDockerfile installs tmux for in-container session recovery", async 
     const content = fs.readFileSync(dockerfilePath, "utf8");
 
     assert.match(content, /\btmux\b/);
-    assert.match(content, /TMUX_VERSION=3\.6a/);
+    assert.match(content, /TMUX_VERSION=3\.6b/);
     assert.match(content, /apt-get purge -y pkg-config bison libevent-dev libncurses-dev/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

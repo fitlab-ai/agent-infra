@@ -3,12 +3,13 @@ const USAGE = `Usage: ai sandbox <command> [options]
 Commands:
   create <branch> [base]       Create a sandbox (VM + image + worktree + container)
   exec <branch> [cmd...]       Enter sandbox or run a command
-  refresh                      Sync host Claude Code credentials to all sandbox copies
   ls                           List sandboxes for the current project
-  rm <branch> [--all]          Remove a sandbox or all sandboxes
   prune [--dry-run]            Remove orphaned per-branch state dirs
+  rebuild [--quiet] [--refresh]
+                               Rebuild the sandbox image (--refresh pulls base + tools)
+  refresh                      Sync host Claude Code credentials to all sandbox copies
+  rm <branch> [--all]          Remove a sandbox or all sandboxes
   vm status|start|stop         Manage the sandbox VM (macOS) or check the backend (Windows)
-  rebuild [--quiet]            Rebuild the sandbox image
 
 Run 'ai sandbox <command> --help' for details.`;
 

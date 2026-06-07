@@ -202,6 +202,8 @@ CLI 会收集项目元数据，向所有支持的 AI TUI 安装 `update-agent-in
 
 沙箱镜像也会预装 `gh`。如果宿主机上的 `gh auth token` 能成功返回 token，`ai sandbox create` 会把它以 `GH_TOKEN` 环境变量注入容器，让你在沙箱里直接使用 `gh`，无需额外登录配置。
 
+`ai sandbox rebuild` 默认保留 Docker build cache，因此会快速重打沙箱镜像，不会刷新每个软件包。需要升级镜像时使用 `ai sandbox rebuild --refresh`：它会向 Docker 传入 `--no-cache --pull`，重新拉取当前 Ubuntu 基础镜像，并重跑 apt、tmux 编译和全局 npm 安装层。容器内 Claude Code 更新已关闭，OpenCode 启动时更新检查也已关闭；`--refresh` 是沙箱托管工具的常规升级入口。手动 `opencode upgrade` 不受该保护覆盖。Ubuntu 24.04 沙箱基础镜像提供的默认 `python3` 是 Python 3.12，因此硬编码 Python 3.10 路径的脚本可能需要调整。
+
 `ai sandbox exec` 也会向容器透传一小组终端检测白名单变量（`TERM_PROGRAM`、`TERM_PROGRAM_VERSION`、`LC_TERMINAL`、`LC_TERMINAL_VERSION`）。这样可以让交互式 TUI 保持与宿主终端一致的行为，例如 Claude Code 的 `Shift+Enter` 换行支持，同时避免把整个宿主环境灌入容器。
 
 在 macOS 上，交互式 `ai sandbox exec <branch>` 会尽力桥接宿主图片粘贴。当你按下 `Ctrl+V` 且宿主剪贴板当前是图片时，agent-infra 会从宿主剪贴板读取图片，将 PNG 写到 `~/.agent-infra/clipboard/`，再以 bracketed paste 注入容器内路径，让 Claude Code、Codex、Gemini CLI 和 OpenCode 按图片附件处理。宿主剪贴板只读，不会被改写。该能力会自动降级：已有沙箱需要重建后才有 `/clipboard` 挂载；如果可选 pty 依赖或剪贴板探测不可用，会回退到原本的交互进入方式。排查鼠标、滚动或其他输入异常时，可以设置 `AI_SANDBOX_NO_CLIPBOARD_BRIDGE=1` 跳过桥接，直接进入原本的交互路径。

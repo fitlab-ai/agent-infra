@@ -391,6 +391,24 @@ test("sandbox rebuild resolves to configured engine", onPlatforms("linux", "darw
   }
 });
 
+test("sandbox rebuild forwards refresh flags to docker build", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-refresh-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rebuild", "--refresh", "--quiet"]);
+    const buildCall = fixture.readDockerCalls().find((call) => call[0] === "build");
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(buildCall, "expected sandbox rebuild to call docker build");
+    assert.ok(buildCall.includes("--no-cache"), "expected docker build to receive --no-cache");
+    assert.ok(buildCall.includes("--pull"), "expected docker build to receive --pull");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox create resolves to configured engine", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-engine-"));
 

@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 LABEL description="AI coding sandbox"
 
@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y gh \
-    && TMUX_VERSION=3.6a \
+    && TMUX_VERSION=3.6b \
     && wget -qO /tmp/tmux.tar.gz \
         "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz" \
     && tar xzf /tmp/tmux.tar.gz -C /tmp \

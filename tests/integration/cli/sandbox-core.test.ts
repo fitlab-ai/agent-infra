@@ -119,7 +119,7 @@ test("agent-infra sandbox help is wired into the main CLI", () => {
   assert.match(output, /Usage: ai sandbox <command> \[options\]/);
   assert.match(output, /create <branch> \[base\]/);
   assert.match(output, /^\s+refresh\s+Sync host Claude Code credentials/m);
-  assert.match(output, /rebuild \[--quiet\]/);
+  assert.match(output, /^\s+rebuild \[--quiet\] \[--refresh\]\s+Rebuild the sandbox image/m);
   assert.match(output, /prune \[--dry-run\]/);
 });
 

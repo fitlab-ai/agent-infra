@@ -438,6 +438,38 @@ test("rebuild buildArgs converts Docker build paths for WSL2", async () => {
   assert.equal(args.at(-1), "/mnt/f/repo");
 });
 
+test("rebuild buildArgs adds refresh build flags after docker build", async () => {
+  const sandboxRebuild = await loadFreshEsm<RebuildModule>("lib/sandbox/commands/rebuild.js");
+
+  const args = sandboxRebuild.buildArgs(
+    { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "F:\\repo" },
+    [{ npmPackage: "@acme/tool" }],
+    "F:\\tmp\\Dockerfile",
+    "sig-123",
+    { engine: "wsl2", runFn: () => "1000", refresh: true }
+  );
+
+  assert.deepEqual(args.slice(0, 3), ["build", "--no-cache", "--pull"]);
+  assert.equal(args.at(-3), "-f");
+  assert.equal(args.at(-2), "/mnt/f/tmp/Dockerfile");
+  assert.equal(args.at(-1), "/mnt/f/repo");
+});
+
+test("rebuild buildArgs keeps Docker build cache by default", async () => {
+  const sandboxRebuild = await loadFreshEsm<RebuildModule>("lib/sandbox/commands/rebuild.js");
+
+  const args = sandboxRebuild.buildArgs(
+    { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "F:\\repo" },
+    [{ npmPackage: "@acme/tool" }],
+    "F:\\tmp\\Dockerfile",
+    "sig-123",
+    { engine: "wsl2", runFn: () => "1000" }
+  );
+
+  assert.equal(args.includes("--no-cache"), false);
+  assert.equal(args.includes("--pull"), false);
+});
+
 test("assertManagedPath rejects paths outside the sandbox root", async () => {
   const sandboxRm = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/rm.ts")>("lib/sandbox/commands/rm.js");
   const root = path.join(os.tmpdir(), "agent-infra-worktrees");

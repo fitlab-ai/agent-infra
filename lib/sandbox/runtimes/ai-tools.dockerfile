@@ -1,4 +1,6 @@
 USER devuser
+ENV DISABLE_UPDATES=1
+ENV OPENCODE_DISABLE_AUTOUPDATE=1
 ENV NPM_CONFIG_PREFIX=/home/devuser/.npm-global
 ENV PATH="/home/devuser/.npm-global/bin:${PATH}"
 
