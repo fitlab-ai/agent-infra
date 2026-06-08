@@ -38,8 +38,8 @@ type ActivityLogCase = {
   assertResult(result: ReturnType<typeof runValidator>): void;
 };
 
-function writeImplementationFixture(taskDir: string, fixture = "valid-implementation.md") {
-  write(path.join(taskDir, "implementation.md"), loadFixture(fixture));
+function writeCodeFixture(taskDir: string, fixture = "valid-code.md") {
+  write(path.join(taskDir, "code.md"), loadFixture(fixture));
 }
 
 function writeCreateTaskDocument(
@@ -57,14 +57,14 @@ function writeCreateTaskDocument(
 
 const gateCases = [
   {
-    name: "validate-artifact gate passes for implement-task with fresh task and artifact",
+    name: "validate-artifact gate passes for code-task with fresh task and artifact",
     prefix: "agent-infra-gate-pass-",
     args(taskDir: string) {
-      return ["gate", "implement-task", taskDir, "implementation.md"];
+      return ["gate", "code-task", taskDir, "code.md"];
     },
     prepare(taskDir: string) {
       write(path.join(taskDir, "task.md"), buildTaskContent());
-      writeImplementationFixture(taskDir);
+      writeCodeFixture(taskDir);
     },
     assertResult(result: ReturnType<typeof runValidator>) {
       assert.equal(result.status, 0, result.stderr);
@@ -81,15 +81,15 @@ const gateCases = [
     name: "validate-artifact gate supports human-readable text output",
     prefix: "agent-infra-gate-text-",
     args(taskDir: string) {
-      return ["gate", "implement-task", taskDir, "implementation.md", "--format", "text"];
+      return ["gate", "code-task", taskDir, "code.md", "--format", "text"];
     },
     prepare(taskDir: string) {
       write(path.join(taskDir, "task.md"), buildTaskContent());
-      writeImplementationFixture(taskDir);
+      writeCodeFixture(taskDir);
     },
     assertResult(result: ReturnType<typeof runValidator>) {
       assert.equal(result.status, 0, result.stderr);
-      assert.match(result.stdout, /^Verification: pass \| Skill: implement-task$/m);
+      assert.match(result.stdout, /^Verification: pass \| Skill: code-task$/m);
       assert.match(result.stdout, /^\s+\[pass\] task-meta - /m);
       assert.match(result.stdout, /^\s+\[pass\] artifact - /m);
       assert.match(result.stdout, /^Result: 4 passed, 0 failed - All declared checks passed$/m);
@@ -179,7 +179,7 @@ const taskMetaCases: TaskMetaCase[] = [
   },
   {
     name: "validate-artifact task-meta warns without blocking when agent_infra_version is missing",
-    skill: "implement-task",
+    skill: "code-task",
     content() {
       return buildTaskContent();
     },
@@ -194,7 +194,7 @@ const taskMetaCases: TaskMetaCase[] = [
   },
   {
     name: "validate-artifact task-meta rejects malformed agent_infra_version",
-    skill: "implement-task",
+    skill: "code-task",
     content() {
       return buildTaskContent({ agent_infra_version: "0.6.1" });
     },
@@ -205,7 +205,7 @@ const taskMetaCases: TaskMetaCase[] = [
   },
   {
     name: "validate-artifact task-meta accepts unknown agent_infra_version fallback",
-    skill: "implement-task",
+    skill: "code-task",
     content() {
       return buildTaskContent({ agent_infra_version: "unknown" });
     },
@@ -216,7 +216,7 @@ const taskMetaCases: TaskMetaCase[] = [
   },
   {
     name: "validate-artifact task-meta accepts SemVer build metadata in agent_infra_version",
-    skill: "implement-task",
+    skill: "code-task",
     content() {
       return buildTaskContent({ agent_infra_version: "v0.6.1-alpha.0+build.7" });
     },
@@ -227,7 +227,7 @@ const taskMetaCases: TaskMetaCase[] = [
   },
   {
     name: "validate-artifact task-meta accepts stamped agent_infra_version",
-    skill: "implement-task",
+    skill: "code-task",
     content() {
       return buildTaskContent({ agent_infra_version: "v0.6.1-alpha.0" });
     },
@@ -323,9 +323,9 @@ test("validate-artifact artifact check fails when a required section is missing"
   withTempRoot("agent-infra-gate-fail-", (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     write(path.join(taskDir, "task.md"), buildTaskContent());
-    writeImplementationFixture(taskDir, "missing-section-implementation.md");
+    writeCodeFixture(taskDir, "missing-section-code.md");
 
-    const result = runValidator(["check", "artifact", taskDir, "implementation.md", "--skill", "implement-task"]);
+    const result = runValidator(["check", "artifact", taskDir, "code.md", "--skill", "code-task"]);
     assert.equal(result.status, 1);
     assertPayloadStatus(result, { type: "artifact", status: "fail", message: /missing sections/i });
   })
@@ -339,9 +339,9 @@ test("validate-artifact activity-log freshness uses local timestamps", () => (
       { updated_at: staleTimestamp },
       { NOW: staleTimestamp }
     ));
-    writeImplementationFixture(taskDir);
+    writeCodeFixture(taskDir);
 
-    const result = runValidator(["check", "activity-log", taskDir, "--skill", "implement-task"], {
+    const result = runValidator(["check", "activity-log", taskDir, "--skill", "code-task"], {
       env: { TZ: localTimeZone }
     });
     assert.equal(result.status, 1);
@@ -397,9 +397,9 @@ test("verification assets are present in local and template trees", () => {
     ".agents/scripts/platform-adapters/platform-sync.js",
     "templates/.agents/scripts/validate-artifact.js",
     "templates/.agents/scripts/platform-adapters/platform-sync.github.js",
-    ".agents/skills/implement-task/config/verify.json",
-    "templates/.agents/skills/implement-task/config/verify.en.json",
-    "templates/.agents/skills/implement-task/config/verify.zh-CN.json"
+    ".agents/skills/code-task/config/verify.json",
+    "templates/.agents/skills/code-task/config/verify.en.json",
+    "templates/.agents/skills/code-task/config/verify.zh-CN.json"
   ].forEach((relativePath) => {
     assert.ok(exists(relativePath), `${relativePath} should exist`);
   });

@@ -24,7 +24,7 @@ Codex 会直接读取项目内的技能文件，例如：
 - `.agents/skills/update-agent-infra/SKILL.md`
 - `.agents/skills/create-task/SKILL.md`
 - `.agents/skills/analyze-task/SKILL.md`
-- `.agents/skills/implement-task/SKILL.md`
+- `.agents/skills/code-task/SKILL.md`
 
 `.codex/` 目录用于存放本项目的 Codex 使用文档。
 

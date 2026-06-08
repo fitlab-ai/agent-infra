@@ -21,6 +21,18 @@ const skillDocFiles = [
   .filter((relativePath) => /\/SKILL(?:\.(?:en|zh-CN))?\.md$/.test(relativePath))
   .sort();
 
+function sectionContent(content: string, heading: string): string {
+  const headingPattern = new RegExp(`^## ${escapeRegExp(heading)}\\n`, "m");
+  const match = content.match(headingPattern);
+
+  assert.ok(match, `Missing section: ${heading}`);
+  const start = (match.index || 0) + match[0].length;
+  const nextHeading = content.slice(start).search(/^## /m);
+  const end = nextHeading === -1 ? content.length : start + nextHeading;
+
+  return content.slice(start, end).trim();
+}
+
 test("all SKILL.md files have valid frontmatter", () => {
   skillDocFiles.forEach((relativePath) => {
     const frontmatter = parseFrontmatter(relativePath);
@@ -71,13 +83,24 @@ test("template SKILL.md files provide zh-CN variants", () => {
     });
 });
 
+test("template skill content does not reference deprecated lifecycle names", () => {
+  const deprecatedPattern = /\b(?:implement-task|refine-task|review-task)\b|(?:implementation|refinement)(?:\.md|-r\{N\}\.md)|\{(?:implementation|refinement)-[A-Za-z]+}/;
+  const templateFiles = listFilesRecursive("templates/.agents/skills")
+    .filter((relativePath) => /\.(?:md|toml|yaml|json)$/.test(relativePath));
+
+  templateFiles.forEach((relativePath) => {
+    assert.doesNotMatch(read(relativePath), deprecatedPattern, `${relativePath} should use the code/review-code lifecycle`);
+  });
+});
+
 test("workflow skills document state check gates", () => {
   [
     "analyze-task",
+    "review-analysis",
     "plan-task",
-    "implement-task",
-    "review-task",
-    "refine-task",
+    "review-plan",
+    "code-task",
+    "review-code",
     "complete-task"
   ].forEach((skill) => {
     skillDocPaths(skill).forEach((relativePath) => {
@@ -98,10 +121,11 @@ test("workflow skills document state check gates", () => {
 test("workflow artifact gates require state check evidence", () => {
   const sectionExpectations: Record<string, { en: string[]; zh: string[] }> = {
     "analyze-task": { en: ["State Check"], zh: ["状态核对"] },
+    "review-analysis": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
     "plan-task": { en: ["State Check"], zh: ["状态核对"] },
-    "implement-task": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
-    "review-task": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
-    "refine-task": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
+    "review-plan": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
+    "code-task": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
+    "review-code": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
     "complete-task": { en: ["State Check"], zh: ["状态核对"] }
   };
 
@@ -151,10 +175,11 @@ test("workflow verify configs reject invalid multiline flag patterns", () => {
 test("workflow verify config language variants keep only artifact language fields different", () => {
   const skills = [
     "analyze-task",
+    "review-analysis",
     "plan-task",
-    "implement-task",
-    "review-task",
-    "refine-task",
+    "review-plan",
+    "code-task",
+    "review-code",
     "complete-task"
   ];
 
@@ -185,8 +210,8 @@ test("workflow verify config language variants keep only artifact language field
     );
   });
 
-  const reviewEn = JSON.parse(read("templates/.agents/skills/review-task/config/verify.en.json"));
-  const reviewZh = JSON.parse(read("templates/.agents/skills/review-task/config/verify.zh-CN.json"));
+  const reviewEn = JSON.parse(read("templates/.agents/skills/review-code/config/verify.en.json"));
+  const reviewZh = JSON.parse(read("templates/.agents/skills/review-code/config/verify.zh-CN.json"));
 
   assert.ok(reviewEn.checks.artifact.required_patterns.includes("^### Approval Decision$"));
   assert.ok(reviewZh.checks.artifact.required_patterns.includes("^### 审查决定$"));
@@ -194,15 +219,18 @@ test("workflow verify config language variants keep only artifact language field
 
 test("workflow report templates include evidence sections", () => {
   const reportTemplateCases: Array<[string, string, string]> = [
-    [".agents/skills/implement-task/reference/report-template.md", "## 状态核对", "## 证据原文"],
-    [".agents/skills/review-task/reference/report-template.md", "## 状态核对", "## 证据原文"],
-    [".agents/skills/refine-task/reference/report-template.md", "## 状态核对", "## 证据原文"],
-    ["templates/.agents/skills/implement-task/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
-    ["templates/.agents/skills/review-task/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
-    ["templates/.agents/skills/refine-task/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
-    ["templates/.agents/skills/implement-task/reference/report-template.en.md", "## State Check", "## Evidence"],
-    ["templates/.agents/skills/review-task/reference/report-template.en.md", "## State Check", "## Evidence"],
-    ["templates/.agents/skills/refine-task/reference/report-template.en.md", "## State Check", "## Evidence"]
+    [".agents/skills/code-task/reference/report-template.md", "## 状态核对", "## 证据原文"],
+    [".agents/skills/review-analysis/reference/report-template.md", "## 状态核对", "## 证据原文"],
+    [".agents/skills/review-plan/reference/report-template.md", "## 状态核对", "## 证据原文"],
+    [".agents/skills/review-code/reference/report-template.md", "## 状态核对", "## 证据原文"],
+    ["templates/.agents/skills/code-task/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
+    ["templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
+    ["templates/.agents/skills/review-plan/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
+    ["templates/.agents/skills/review-code/reference/report-template.zh-CN.md", "## 状态核对", "## 证据原文"],
+    ["templates/.agents/skills/code-task/reference/report-template.en.md", "## State Check", "## Evidence"],
+    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "## State Check", "## Evidence"],
+    ["templates/.agents/skills/review-plan/reference/report-template.en.md", "## State Check", "## Evidence"],
+    ["templates/.agents/skills/review-code/reference/report-template.en.md", "## State Check", "## Evidence"],
   ];
 
   reportTemplateCases.forEach(([relativePath, stateHeading, evidenceHeading]) => {
@@ -211,6 +239,35 @@ test("workflow report templates include evidence sections", () => {
     assert.match(content, new RegExp(escapeRegExp(stateHeading)));
     assert.match(content, new RegExp(escapeRegExp(evidenceHeading)));
   });
+});
+
+test("review criteria keep common review principles consistent across review stages", () => {
+  const localPrinciples = [
+    ".agents/skills/review-analysis/reference/review-criteria.md",
+    ".agents/skills/review-plan/reference/review-criteria.md",
+    ".agents/skills/review-code/reference/review-criteria.md"
+  ].map((relativePath) => sectionContent(read(relativePath), "通用审查原则"));
+
+  assert.equal(localPrinciples[0], localPrinciples[1]);
+  assert.equal(localPrinciples[0], localPrinciples[2]);
+
+  const zhPrinciples = [
+    "templates/.agents/skills/review-analysis/reference/review-criteria.zh-CN.md",
+    "templates/.agents/skills/review-plan/reference/review-criteria.zh-CN.md",
+    "templates/.agents/skills/review-code/reference/review-criteria.zh-CN.md"
+  ].map((relativePath) => sectionContent(read(relativePath), "通用审查原则"));
+
+  assert.equal(zhPrinciples[0], zhPrinciples[1]);
+  assert.equal(zhPrinciples[0], zhPrinciples[2]);
+
+  const enPrinciples = [
+    "templates/.agents/skills/review-analysis/reference/review-criteria.en.md",
+    "templates/.agents/skills/review-plan/reference/review-criteria.en.md",
+    "templates/.agents/skills/review-code/reference/review-criteria.en.md"
+  ].map((relativePath) => sectionContent(read(relativePath), "Common Review Principles"));
+
+  assert.equal(enPrinciples[0], enPrinciples[1]);
+  assert.equal(enPrinciples[0], enPrinciples[2]);
 });
 
 test("workflow skill output instructions align with state check artifact gates", () => {
@@ -363,10 +420,10 @@ test("skills that write timestamps require date command guidance", () => {
     "import-codescan",
     "import-dependabot",
     "import-issue",
-    "implement-task",
+    "code-task",
     "plan-task",
-    "refine-task",
-    "review-task"
+    "code-task",
+    "review-code"
   ];
 
   timestampSkills.forEach((skill) => {
@@ -386,9 +443,9 @@ test("workflow skill docs update task comments before publishing artifact commen
   const orderedCommentSkills: Array<[string, string]> = [
     ["analyze-task", "{analysis-artifact}"],
     ["plan-task", "{plan-artifact}"],
-    ["implement-task", "{implementation-artifact}"],
-    ["review-task", "{review-artifact}"],
-    ["refine-task", "{refinement-artifact}"]
+    ["code-task", "{code-artifact}"],
+    ["review-code", "{review-artifact}"],
+    ["code-task", "{code-artifact}"]
   ];
 
   orderedCommentSkills.forEach(([skill, artifact]) => {

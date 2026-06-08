@@ -12,13 +12,13 @@
 
 ❌ 反例：
 ```ts
-assert.match(content, /^name: implement-task$/m);    // 正向已覆盖期望值
+assert.match(content, /^name: code-task$/m);         // 正向已覆盖期望值
 assert.doesNotMatch(content, /^name: wrong-name$/m); // 多余：永久记住一个不该出现的值
 ```
 
 ✅ 正例：
 ```ts
-assert.match(content, /^name: implement-task$/m);    // 正向断言已足够
+assert.match(content, /^name: code-task$/m);         // 正向断言已足够
 ```
 
 正向断言通过即证明值正确；额外的反向断言不增加保护，只增加维护成本，并会在功能删除后退化为"测试永久记住一个不再存在的概念"。

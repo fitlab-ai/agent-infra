@@ -57,7 +57,7 @@ For PRs where `{task-id}` is available, sync the core metadata immediately:
 
 ### 7. Publish the Review Summary
 
-Read the latest context artifacts when they exist: `plan.md` / `plan-r{N}.md`, `implementation.md` / `implementation-r{N}.md`, `review.md` / `review-r{N}.md`, and `refinement.md` / `refinement-r{N}.md`.
+Read the latest context artifacts when they exist: `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.md`, `code.md` / `code-r{N}.md`, and `review-code.md` / `review-code-r{N}.md`.
 
 Aggregate a reviewer-facing summary from those artifacts and maintain a single idempotent summary comment via the hidden marker.
 

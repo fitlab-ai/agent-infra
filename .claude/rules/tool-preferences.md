@@ -17,4 +17,4 @@
 可用命令从 `.claude/commands/` 自动发现。在提示符中输入 `/` 查看完整列表和描述。
 
 任务工作流的典型顺序：
-`/create-task` -> `/analyze-task` -> `/plan-task` -> `/implement-task` -> `/review-task` -> `/complete-task`
+`/create-task` -> `/analyze-task` -> `/plan-task` -> `/code-task` -> `/review-code` -> `/complete-task`

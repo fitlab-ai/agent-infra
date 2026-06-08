@@ -24,14 +24,13 @@ Within one PR, a given `{task-id}` must have only one summary comment with this 
 
 Aggregate the latest artifacts in the task directory:
 - `plan.md` or the latest `plan-r{N}.md`
-- `implementation.md` or the latest `implementation-r{N}.md`
-- `review.md` or the latest `review-r{N}.md`
-- `refinement.md` or the latest `refinement-r{N}.md`
+- `code.md` or the latest `code-r{N}.md`
+- `review-code.md` or the latest `review-code-r{N}.md`
 
 Aggregation rules:
 - extract 2-4 self-contained technical decisions from `plan*`
-- build the review-history table from `review*` and `refinement*`
-- extract the test summary from `implementation*` or `refinement*`
+- build the review-history table from `review-code*` and `code*`
+- extract the test summary from `code*`
 - if one artifact class is missing, treat it as "no data for this stage" and continue
 
 ## Comment Body Template

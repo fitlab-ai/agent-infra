@@ -42,7 +42,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 标记完成之前，验证以下所有条件：
 - [ ] 所有工作流步骤已完成（检查 task.md 中的工作流进度）
-- [ ] 代码已审查（`review.md` 或 `review-r{N}.md` 存在，且最新审查结论为 Approved；或已在外部完成审查）
+- [ ] 代码已审查（`review-code.md` 或 `review-code-r{N}.md` 存在，且最新审查结论为 Approved；或已在外部完成审查）
 - [ ] 代码已提交（没有与此任务相关的未提交变更）
 - [ ] 测试通过
 
@@ -109,7 +109,7 @@ ls .agents/workspace/completed/{task-id}/task.md
 > Issue 同步规则见 `.agents/rules/issue-sync.md`。执行同步前先读取该文件，完成 upstream 仓库检测和权限检测。
 
 如果存在有效的 `issue_number`：
-- 先按 `.agents/rules/issue-sync.md` 的补发规则扫描并补发未发布的 `task.md`、`analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md` 评论（`task.md` 走幂等更新路径）
+- 先按 `.agents/rules/issue-sync.md` 的补发规则扫描并补发未发布的 `task.md`、`analysis*.md`、`review-analysis*.md`、`plan*.md`、`review-plan*.md`、`code*.md`、`review-code*.md` 评论（`task.md` 走幂等更新路径）
 - 按 issue-sync.md 的需求复选框同步步骤，兜底同步 `## 需求` 中已勾选的条目到 Issue body
 - 不要设置 `status:` label — Issue 关闭后 status label 会被自动清除
 - 最后创建或更新 `.agents/rules/issue-sync.md` 中定义的 summary 评论标记对应的 summary 评论

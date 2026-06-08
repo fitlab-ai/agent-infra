@@ -1,4 +1,4 @@
-# Feature Development Workflow
+# Feature development workflow
 # Use this workflow when implementing a new feature.
 
 name: feature-development
@@ -6,27 +6,53 @@ description: End-to-end workflow for developing a new feature.
 
 steps:
   - name: analysis
-    description: Analyze feature requirements, explore the codebase, and identify impacted areas.
+    description: Analyze feature requirements, explore the codebase, and identify affected areas.
     recommended_agents:
       - claude
       - gemini
     tasks:
       - Read and understand the feature requirements
       - Explore the codebase to identify relevant files and modules
-      - Identify dependencies and potentially impacted areas
-      - Record findings in the task file
+      - Identify dependencies and potential impact areas
+      - Record findings in the task workspace
     inputs:
-      - Feature requirements or issue description
+      - Feature request or Issue description
       - Project codebase
     artifact_versioning:
       outputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
-          rule: "Scan existing analysis artifacts; create analysis.md for the first round, then analysis-r{N}.md for later revisions (N = current highest round + 1)"
+          rule: "Scan existing analysis artifacts; create analysis.md for round 1 and analysis-r{N}.md for later revisions (N = current highest round + 1)"
     outputs:
-      - Updated task file (analysis section)
-      - List of impacted files
+      - Requirement analysis report
+      - Affected files list
       - Identified risks or constraints
+
+  - name: analysis-review
+    description: Review whether the requirement analysis is complete, verifiable, and clearly scoped.
+    recommended_agents:
+      - claude
+      - gemini
+    tasks:
+      - Check requirement scope, constraints, and acceptance criteria
+      - Verify affected areas and risk identification
+      - Confirm the analysis is ready for design
+      - Create the requirement analysis review report
+    inputs:
+      - Latest requirement analysis report
+      - Original request or Issue description
+    artifact_versioning:
+      inputs:
+        - name: analysis
+          pattern: "analysis.md | analysis-r{N}.md"
+          rule: "Read the highest-round analysis artifact as review input"
+      outputs:
+        - name: review-analysis
+          pattern: "review-analysis.md | review-analysis-r{N}.md"
+          rule: "Scan existing requirement-analysis review artifacts; create review-analysis.md for round 1 and review-analysis-r{N}.md for later rounds (N = current highest round + 1)"
+    outputs:
+      - Requirement analysis review report
+      - Findings to fix, if any
 
   - name: design
     description: Create the technical design for the feature implementation.
@@ -36,115 +62,130 @@ steps:
     tasks:
       - Define interfaces and data structures
       - Outline the implementation approach
-      - Identify edge cases and error-handling strategies
-      - Record the design in the task file
+      - Identify edge cases and error-handling strategy
+      - Record the design in the task workspace
     inputs:
-      - Analysis results from the previous step
+      - Approved requirement analysis
       - Project architecture and conventions
     artifact_versioning:
       inputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
           rule: "Read the highest-round analysis artifact as design input"
+        - name: review-analysis
+          pattern: "review-analysis.md | review-analysis-r{N}.md"
+          rule: "Read the highest-round analysis review artifact and confirm feedback is approved or handled"
       outputs:
         - name: plan
           pattern: "plan.md | plan-r{N}.md"
-          rule: "Scan existing plan artifacts; create plan.md for the first round, then plan-r{N}.md for later revisions (N = current highest round + 1)"
+          rule: "Scan existing plan artifacts; create plan.md for round 1 and plan-r{N}.md for later revisions (N = current highest round + 1)"
     outputs:
-      - Updated task file (design section)
+      - Technical plan
       - Interface definitions
       - Implementation plan
 
-  - name: implementation
-    description: Implement the feature according to the design plan.
+  - name: design-review
+    description: Review whether the technical design is implementable, low-risk, and requirement-complete.
+    recommended_agents:
+      - claude
+      - gemini
+    tasks:
+      - Verify the plan covers the approved analysis
+      - Check architecture fit, risks, and test strategy
+      - Confirm the plan is ready for coding
+      - Create the plan review report
+    inputs:
+      - Latest technical plan
+      - Latest requirement analysis and review report
+    artifact_versioning:
+      inputs:
+        - name: plan
+          pattern: "plan.md | plan-r{N}.md"
+          rule: "Read the highest-round plan artifact as review input"
+      outputs:
+        - name: review-plan
+          pattern: "review-plan.md | review-plan-r{N}.md"
+          rule: "Scan existing plan review artifacts; create review-plan.md for round 1 and review-plan-r{N}.md for later rounds (N = current highest round + 1)"
+    outputs:
+      - Plan review report
+      - Findings to fix, if any
+
+  - name: code
+    description: Implement the approved plan; run the same stage again after code review to handle fixes.
     recommended_agents:
       - codex
       - cursor
     tasks:
       - Create a feature branch
-      - Implement the feature code
+      - Implement feature code
       - Write unit tests
       - Write integration tests when applicable
-      - Ensure the code follows project conventions
+      - Fix findings from the latest code-review artifact when in fix mode
+      - Ensure code follows project conventions
     inputs:
-      - Technical design from the previous step
+      - Approved technical design
       - Project coding standards
+      - Latest code review report when in fix mode
     artifact_versioning:
+      inputs:
+        - name: plan
+          pattern: "plan.md | plan-r{N}.md"
+          rule: "Read the highest-round plan artifact as implementation input"
+        - name: review-plan
+          pattern: "review-plan.md | review-plan-r{N}.md"
+          rule: "Read the highest-round plan review artifact and confirm feedback is approved or handled"
+        - name: review-code
+          pattern: "review-code.md | review-code-r{N}.md"
+          rule: "In fix mode, read the highest-round code review artifact and verify it matches the latest Code Review entry in task.md Activity Log"
       outputs:
-        - name: implementation
-          pattern: "implementation.md | implementation-r{N}.md"
-          rule: "Scan existing implementation artifacts; create implementation.md for the first round, then implementation-r{N}.md for later re-implementations (N = current highest round + 1)"
+        - name: code
+          pattern: "code.md | code-r{N}.md"
+          rule: "Scan existing code artifacts; create code.md for round 1 and code-r{N}.md for later fixes or reimplementation (N = current highest round + 1)"
     outputs:
-      - Feature branch with the implementation
+      - Feature branch with implementation or fixes
       - Test files
-      - Updated task file (implementation notes)
+      - Updated task notes
 
-  - name: review
-    description: Review correctness, code style, and best practices in the implementation.
+  - name: code-review
+    description: Review implementation correctness, style, and best practices.
     recommended_agents:
       - claude
     tasks:
-      - Review the correctness of the code changes
-      - Check adherence to project conventions
+      - Review code changes for correctness
+      - Check project convention compliance
       - Verify test coverage and quality
-      - Check for security and performance issues
-      - Create a review report
+      - Check security and performance risks
+      - Create the code review report
     inputs:
       - Implementation branch
       - Project conventions
     artifact_versioning:
       inputs:
-        - name: implementation
-          pattern: "implementation.md | implementation-r{N}.md"
-          rule: "Read the highest-round implementation artifact as review input"
+        - name: code
+          pattern: "code.md | code-r{N}.md"
+          rule: "Read the highest-round code artifact as review input"
       outputs:
-        - name: review
-          pattern: "review.md | review-r{N}.md"
-          rule: "Scan existing review artifacts; create review.md for the first round, then review-r{N}.md for later rounds (N = current highest round + 1)"
+        - name: review-code
+          pattern: "review-code.md | review-code-r{N}.md"
+          rule: "Scan existing code review artifacts; create review-code.md for round 1 and review-code-r{N}.md for later rounds (N = current highest round + 1)"
     outputs:
-      - Review report
-      - List of issues to fix
-
-  - name: fix
-    description: Address issues found during the review step.
-    recommended_agents:
-      - codex
-      - cursor
-    tasks:
-      - Fix all critical and major review findings
-      - Address minor issues and suggestions when appropriate
-      - Update tests as needed
-      - Verify that all tests pass
-    inputs:
-      - Review report
-      - Implementation branch
-    artifact_versioning:
-      inputs:
-        - name: review
-          pattern: "review.md | review-r{N}.md"
-          rule: "Read the highest-round review artifact and verify that it matches the latest Code Review entry in the task.md Activity Log"
-      outputs:
-        - name: refinement
-          pattern: "refinement.md | refinement-r{N}.md"
-          rule: "Scan existing refinement artifacts; create refinement.md for the first round, then refinement-r{N}.md for later rounds (N = current highest round + 1)"
-    outputs:
-      - Updated branch with fixes
-      - Updated task file
+      - Code review report
+      - Findings to fix
 
   - name: commit
-    description: Finalize the changes and create a pull request.
+    description: Finalize changes and create a pull request.
     recommended_agents:
       - claude
       - human
     tasks:
       - Ensure all tests pass
-      - Write a clear commit message that follows project conventions
+      - Write a clear commit message following conventions
       - Create a pull request with an appropriate description
-      - Link the PR to the relevant issue
+      - Link the PR to the related Issue
       - Move the task to completed
     inputs:
       - Final implementation branch
-      - Task file
+      - Task workspace
     outputs:
       - Pull request
-      - Completed task file (stored in .agents/workspace/completed/)
+      - Completed task workspace under .agents/workspace/completed/

@@ -1,0 +1,8 @@
+description = "Code a task from its technical plan and output a report"
+prompt = """
+Code task {{args}}.
+
+Read and execute the code-task skill from `.agents/skills/code-task/SKILL.md`.
+
+Follow all steps defined in the skill exactly.
+"""

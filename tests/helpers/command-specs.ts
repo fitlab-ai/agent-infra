@@ -82,10 +82,10 @@ const commandSpecs: Record<string, CommandSpec> = {
     en: "Initialize milestones: $ARGUMENTS",
     zh: "初始化里程碑：$ARGUMENTS"
   },
-  "implement-task": {
+  "code-task": {
     usage: "<task-id>",
-    en: "Implement task $1.",
-    zh: "实施任务 $1。"
+    en: "Code task $1.",
+    zh: "编码任务 $1。"
   },
   "plan-task": {
     usage: "<task-id>",
@@ -93,10 +93,15 @@ const commandSpecs: Record<string, CommandSpec> = {
     zh: "为任务 $1 设计方案。"
   },
   "post-release": {},
-  "refine-task": {
+  "review-analysis": {
     usage: "<task-id>",
-    en: "Refine task $1.",
-    zh: "修复任务 $1 的审查问题。"
+    en: "Review analysis for task $1.",
+    zh: "审查任务 $1 的需求分析。"
+  },
+  "review-plan": {
+    usage: "<task-id>",
+    en: "Review plan for task $1.",
+    zh: "审查任务 $1 的技术方案。"
   },
   "refine-title": {
     usage: "<number>",
@@ -108,10 +113,10 @@ const commandSpecs: Record<string, CommandSpec> = {
     en: "Release version $1.",
     zh: "发布版本 $1。"
   },
-  "review-task": {
+  "review-code": {
     usage: "<task-id>",
-    en: "Review task $1.",
-    zh: "审查任务 $1。"
+    en: "Review code for task $1.",
+    zh: "审查任务 $1 的代码。"
   },
   "restore-task": {
     usage: "<issue-number> [task-id]",

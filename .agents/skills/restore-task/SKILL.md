@@ -43,10 +43,11 @@ description: "从平台 Issue 评论还原本地任务文件"
 - 将 `{file-stem}` 映射回文件名：
   - `task` -> `task.md`
   - `analysis` / `analysis-r{N}` -> 对应 `.md`
+  - `review-analysis` / `review-analysis-r{N}` -> 对应 `.md`
   - `plan` / `plan-r{N}` -> 对应 `.md`
-  - `implementation` / `implementation-r{N}` -> 对应 `.md`
-  - `review` / `review-r{N}` -> 对应 `.md`
-  - `refinement` / `refinement-r{N}` -> 对应 `.md`
+  - `review-plan` / `review-plan-r{N}` -> 对应 `.md`
+  - `code` / `code-r{N}` -> 对应 `.md`
+  - `review-code` / `review-code-r{N}` -> 对应 `.md`
 
 ### 4. 处理分片并检查本地目录
 

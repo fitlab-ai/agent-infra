@@ -5,10 +5,12 @@
 根据用户意图自动映射到对应工作流命令：
 - “分析 issue #123” -> `import-issue`
 - “分析任务 TASK-20260306-143022” -> `analyze-task`
+- “审查需求分析” -> `review-analysis`
 - “设计方案” -> `plan-task`
-- “实施/实现” -> `implement-task`
-- “审查” -> `review-task`
-- “修复审查问题” -> `refine-task`
+- “审查方案/审查技术方案” -> `review-plan`
+- “实施/实现” -> `code-task`
+- “审查代码/代码审查” -> `review-code`
+- “修复审查问题” -> `code-task`
 
 ## 任务状态管理
 
@@ -25,10 +27,11 @@
 - `import-dependabot`：更新 `current_step`、`updated_at`、`assigned_to`、`agent_infra_version`
 - `restore-task`：更新 `status`、`updated_at`、`assigned_to`、`agent_infra_version`
 - `analyze-task`：更新 `current_step`、`updated_at`、`assigned_to`、`agent_infra_version`
+- `review-analysis`：更新 `current_step`、`updated_at`、`agent_infra_version`
 - `plan-task`：更新 `current_step`、`updated_at`、`agent_infra_version`
-- `implement-task`：更新 `current_step`、`updated_at`、`agent_infra_version`
-- `review-task`：更新 `current_step`、`updated_at`、`agent_infra_version`
-- `refine-task`：更新 `current_step`、`updated_at`、`agent_infra_version`
+- `review-plan`：更新 `current_step`、`updated_at`、`agent_infra_version`
+- `code-task`：更新 `current_step`、`updated_at`、`agent_infra_version`
+- `review-code`：更新 `current_step`、`updated_at`、`agent_infra_version`
 - `create-pr`：更新 `pr_number`、`updated_at`、`agent_infra_version`
 - `commit`：更新 `updated_at`、`agent_infra_version`；必要时更新 `current_step`（详见 `commit/reference/task-status-update.md`）
 - `complete-task`：更新 `status`、`current_step`、`completed_at`、`updated_at`、`agent_infra_version`

@@ -42,7 +42,7 @@ If not found in `active/`, check `blocked/` and `completed/`:
 
 Before marking complete, verify ALL of these:
 - [ ] All workflow steps are complete (check workflow progress in task.md)
-- [ ] Code has been reviewed (`review.md` or `review-r{N}.md` exists, and the latest review verdict is Approved; or review was done externally)
+- [ ] Code has been reviewed (`review-code.md` or `review-code-r{N}.md` exists, and the latest review verdict is Approved; or review was done externally)
 - [ ] Code has been committed (no uncommitted changes related to this task)
 - [ ] Tests are passing
 
@@ -109,7 +109,7 @@ Check whether `task.md` includes a valid `issue_number`. If not, skip this step 
 > Issue sync rules live in `.agents/rules/issue-sync.md`. Read that file before syncing, and complete upstream repository detection plus permission detection.
 
 If a valid `issue_number` exists:
-- First scan and backfill unpublished `task.md`, `analysis*.md`, `plan*.md`, `implementation*.md`, `review*.md`, and `refinement*.md` comments using the backfill rules in `.agents/rules/issue-sync.md` (`task.md` uses the idempotent update path)
+- First scan and backfill unpublished `task.md`, `analysis*.md`, `review-analysis*.md`, `plan*.md`, `review-plan*.md`, `code*.md`, and `review-code*.md` comments using the backfill rules in `.agents/rules/issue-sync.md` (`task.md` uses the idempotent update path)
 - Backfill checked `## Requirements` items to the Issue body by following the requirements-checkbox sync steps in issue-sync.md
 - Do not set any `status:` label — status labels are automatically cleared when the Issue is closed
 - Finally create or update the summary comment marked with the summary marker defined in `.agents/rules/issue-sync.md`

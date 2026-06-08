@@ -167,10 +167,10 @@ node .agents/scripts/validate-artifact.js gate plan-task .agents/workspace/activ
 重要：人工审查检查点。
 请在继续实现之前审查技术方案。
 
-下一步 - 实施任务：
-  - Claude Code / OpenCode：/implement-task {task-id}
-  - Gemini CLI：/agent-infra:implement-task {task-id}
-  - Codex CLI：$implement-task {task-id}
+下一步 - 审查技术方案：
+  - Claude Code / OpenCode：/review-plan {task-id}
+  - Gemini CLI：/agent-infra:review-plan {task-id}
+  - Codex CLI：$review-plan {task-id}
 ```
 
 ## 完成检查清单

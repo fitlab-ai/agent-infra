@@ -82,19 +82,19 @@ Just fix it at the application layer in LoginService.
 > AI updates the plan accordingly and confirms.
 
 ```bash
-/implement-task TASK-20260319-100000
+/code-task TASK-20260319-100000
 ```
 
 > AI writes the fix, adds a test case for `user+tag@example.com`, and runs all tests — green.
 
 ```bash
-/review-task TASK-20260319-100000
+/review-code TASK-20260319-100000
 ```
 
-> AI reviews its own implementation: *"Approved. 0 blockers, 0 major, 1 minor (missing JSDoc)."*
+> AI reviews its own code: *"Approved. 0 blockers, 0 major, 1 minor (missing JSDoc)."*
 
 ```bash
-/refine-task TASK-20260319-100000
+/code-task TASK-20260319-100000
 ```
 
 > AI fixes the minor issue and re-validates.
@@ -115,9 +115,9 @@ Every command above works the same way in Claude Code, Codex, Gemini CLI, and Op
 
 These are not thin command aliases. Each skill encapsulates standardized processes that are tedious and error-prone when done by hand:
 
-- **Structured artifacts** — every step produces a templated document (`analysis.md`, `plan.md`, `review.md`) with consistent structure, not free-form notes
+- **Structured artifacts** — every step produces a templated document (`analysis.md`, `review-analysis.md`, `plan.md`, `review-plan.md`, `code.md`, `review-code.md`) with consistent structure, not free-form notes
 - **Multi-round versioning** — requirements changed? Run `analyze-task` again to get `analysis-r2.md`; the full revision history is preserved
-- **Severity-classified reviews** — `review-task` categorizes findings into Blocker / Major / Minor with file paths and fix suggestions, not a vague "looks good"
+- **Severity-classified reviews** — `review-code` categorizes findings into Blocker / Major / Minor with file paths and fix suggestions, not a vague "looks good"
 - **Cross-tool state continuity** — `task.md` records who did what and when; Claude can analyze, Codex can implement, Gemini can review — context transfers seamlessly
 - **Audit trail and co-authorship** — every step appends to the Activity Log; the final commit includes `Co-Authored-By` lines for all participating AI agents
 
@@ -327,7 +327,7 @@ agent-infra is intentionally simple: a bootstrap CLI creates the seed configurat
 1. **Install** — `npm install -g @fitlab-ai/agent-infra` (or `brew install fitlab-ai/tap/agent-infra` on macOS, or use the shell script wrapper)
 2. **Initialize** — `ai init` in the project root to generate `.agents/.airc.json` and install the seed command
 3. **Render** — run `update-agent-infra` in any AI TUI to detect the bundled template version and generate all managed files
-4. **Develop** — use built-in skills to drive the full lifecycle: `analysis → design → implementation → review → fix → commit`
+4. **Develop** — use built-in skills to drive the full lifecycle: `analysis → analysis-review → design → design-review → code → code-review → commit`
 5. **Update** — run `update-agent-infra` again whenever a new template version is available
 
 ### Layered Architecture
@@ -524,10 +524,11 @@ agent-infra ships with **a rich set of built-in AI skills**. They are organized 
 | `create-task` | Create a task scaffold from a natural-language request and cascade Issue creation through the platform rule when available. | `description` | Start a new feature, bug-fix, or improvement from scratch. |
 | `import-issue` | Import a GitHub Issue into the local task workspace. | `issue-number` | Convert an existing Issue into an actionable task folder. |
 | `analyze-task` | Produce a requirement analysis artifact for an existing task. | `task-id` | Capture scope, risks, and impacted files before designing. |
-| `plan-task` | Write the technical implementation plan with a review checkpoint. | `task-id` | Define the approach after analysis is complete. |
-| `implement-task` | Implement the approved plan and produce an implementation report. | `task-id` | Write code, tests, and docs after plan approval. |
-| `review-task` | Review the implementation and classify findings by severity. | `task-id` | Run a structured code review before merging. |
-| `refine-task` | Fix review findings in priority order without expanding scope. | `task-id` | Address review feedback and re-validate the task. |
+| `review-analysis` | Review the requirement analysis and classify findings by severity. | `task-id` | Confirm the analysis is complete before design. |
+| `plan-task` | Write the technical plan with a review checkpoint. | `task-id` | Define the approach after analysis approval. |
+| `review-plan` | Review the technical plan and classify findings by severity. | `task-id` | Confirm the design is actionable before coding. |
+| `code-task` | Implement the approved plan or fix code review findings, producing a code report. | `task-id` | Write code, tests, and docs after plan approval, or handle review feedback. |
+| `review-code` | Review the code and classify findings by severity. | `task-id` | Run a structured code review before merging. |
 | `complete-task` | Mark the task complete and archive it after all gates pass. | `task-id` | Close out a task after review, tests, and commit are done. |
 
 <a id="task-status"></a>
@@ -694,8 +695,8 @@ Supported `invoke` placeholders:
 
 | Placeholder | Replaced with | Example |
 |-------------|---------------|---------|
-| `${skillName}` | The skill command name, such as `review-task` or `commit`. | `<your-cli> ${skillName}` -> `<your-cli> review-task` |
-| `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
+| `${skillName}` | The skill command name, such as `review-code` or `commit`. | `<your-cli> ${skillName}` -> `<your-cli> review-code` |
+| `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-code` |
 
 Non-namespaced custom TUI:
 
@@ -732,17 +733,17 @@ Namespaced custom TUI:
 
 ## Prebuilt Workflows
 
-agent-infra includes **4 prebuilt workflows**. Three of them share the same gated delivery lifecycle:
+agent-infra includes **4 prebuilt workflows**. Three of them share the same symmetric gated delivery lifecycle:
 
-`analysis -> design -> implementation -> review -> fix -> commit`
+`analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit`
 
 The fourth, `code-review`, is intentionally smaller and optimized for reviewing an existing PR or branch.
 
 | Workflow | Best for | Step chain |
 |----------|----------|------------|
-| `feature-development` | Building a new feature or capability | `analysis -> design -> implementation -> review -> fix -> commit` |
-| `bug-fix` | Diagnosing and fixing a defect with regression coverage | `analysis -> design -> implementation -> review -> fix -> commit` |
-| `refactoring` | Structural changes that should preserve behavior | `analysis -> design -> implementation -> review -> fix -> commit` |
+| `feature-development` | Building a new feature or capability | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit` |
+| `bug-fix` | Diagnosing and fixing a defect with regression coverage | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit` |
+| `refactoring` | Structural changes that should preserve behavior | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit` |
 | `code-review` | Reviewing an existing PR or branch | `analysis -> review -> report` |
 
 ### Example lifecycle
@@ -758,20 +759,33 @@ import-issue #42                    Import task from GitHub Issue
   analyze-task T1                   Requirement analysis
          |
          v
-    plan-task T1                    Design solution  <-- human review
+  review-analysis T1                Review analysis
+         |
+     Issues?
+      +--YES----> analyze-task T1
+      |
+         v
+    plan-task T1                    Design solution
          |
          v
-  implement-task T1                 Write code and tests
+  review-plan T1                    Review plan
+         |
+     Issues?
+      +--YES----> plan-task T1
+      |
          |
          v
-  +-> review-task T1                Automated code review
+  code-task T1                      Write code and tests
+         |
+         v
+  +-> review-code T1                Automated code review
   |      |
   |   Issues?
   |      +--NO-------+
   |     YES          |
   |      |           |
   |      v           |
-  |  refine-task T1  |
+  |  code-task T1 (fix mode)
   |      |           |
   +------+           |
                      |

@@ -82,19 +82,19 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 > AI 按你的要求更新方案并确认。
 
 ```bash
-/implement-task TASK-20260319-100000
+/code-task TASK-20260319-100000
 ```
 
 > AI 编写修复代码，添加 `user+tag@example.com` 的测试用例，运行全部测试 —— 通过。
 
 ```bash
-/review-task TASK-20260319-100000
+/review-code TASK-20260319-100000
 ```
 
 > AI 审查自己的实现：*"通过。0 阻塞项，0 主要问题，1 次要问题（缺少 JSDoc）。"*
 
 ```bash
-/refine-task TASK-20260319-100000
+/code-task TASK-20260319-100000
 ```
 
 > AI 修复次要问题并重新验证。
@@ -115,9 +115,9 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 
 这些不是简单的命令别名。每个 skill 都封装了手动操作时容易遗漏或不一致的标准化流程：
 
-- **结构化产物** — 每个步骤都输出模板化的文档（`analysis.md`、`plan.md`、`review.md`），格式统一，而非自由发挥的散文
+- **结构化产物** — 每个步骤都输出模板化的文档（`analysis.md`、`review-analysis.md`、`plan.md`、`review-plan.md`、`code.md`、`review-code.md`），格式统一，而非自由发挥的散文
 - **多轮版本化** — 需求变了？再执行一次 `analyze-task` 会生成 `analysis-r2.md`，完整修订历史自动保留
-- **分级审查机制** — `review-task` 按 Blocker / Major / Minor 分类问题，附带文件路径和修复建议，而非含糊的"看着没问题"
+- **分级审查机制** — `review-code` 按 Blocker / Major / Minor 分类问题，附带文件路径和修复建议，而非含糊的"看着没问题"
 - **跨工具状态延续** — `task.md` 记录了谁在什么时间做了什么；Claude 分析、Codex 实现、Gemini 审查——上下文无缝衔接
 - **审计轨迹与联合署名** — 每个步骤自动追加 Activity Log；最终提交包含所有参与 AI 的 `Co-Authored-By` 署名
 
@@ -300,7 +300,7 @@ agent-infra 的结构刻意保持简单：引导 CLI 负责生成种子配置，
 1. **安装** — `npm install -g @fitlab-ai/agent-infra`（或在 macOS 上使用 `brew install fitlab-ai/tap/agent-infra`，或使用 shell 脚本便捷封装）
 2. **初始化** — 在项目根目录运行 `ai init`，生成 `.agents/.airc.json` 并安装种子命令
 3. **渲染** — 在任意 AI TUI 中执行 `update-agent-infra`，检测当前打包模板版本并生成所有受管理文件
-4. **开发** — 使用内置 skill 驱动完整生命周期：`analysis → design → implementation → review → fix → commit`
+4. **开发** — 使用内置 skill 驱动完整生命周期：`analysis → analysis-review → design → design-review → code → code-review → commit`
 5. **升级** — 有新模板版本时再次执行 `update-agent-infra` 即可
 
 ### 分层架构
@@ -497,10 +497,11 @@ agent-infra 提供 **丰富的内置 AI skills**。它们按使用场景分组�
 | `create-task` | 根据自然语言请求创建任务骨架，并在平台规则可用时级联创建 Issue。 | `description` | 从零开始记录新功能、缺陷或改进需求。 |
 | `import-issue` | 将 GitHub Issue 导入本地任务工作区。 | `issue-number` | 把已有 Issue 转成可执行的任务目录。 |
 | `analyze-task` | 为已有任务输出需求分析产物。 | `task-id` | 在设计前明确范围、风险和受影响文件。 |
-| `plan-task` | 编写技术实施方案，并设置人工审查检查点。 | `task-id` | 分析完成后定义具体实现路径。 |
-| `implement-task` | 按批准方案实施并生成实现报告。 | `task-id` | 在方案获批后编写代码、测试和文档。 |
-| `review-task` | 审查实现结果，并按严重程度分类问题。 | `task-id` | 合入前执行结构化代码审查。 |
-| `refine-task` | 按优先级修复审查问题，不额外扩张范围。 | `task-id` | 根据 review 反馈完成修正。 |
+| `review-analysis` | 审查需求分析产物，并按严重程度分类问题。 | `task-id` | 在设计前确认分析完整可用。 |
+| `plan-task` | 编写技术实施方案，并设置审查检查点。 | `task-id` | 分析获批后定义具体实现路径。 |
+| `review-plan` | 审查技术方案，并按严重程度分类问题。 | `task-id` | 在编码前确认方案可执行。 |
+| `code-task` | 按批准方案实施，或修复代码审查问题，并生成实现报告。 | `task-id` | 在方案获批后编写代码、测试和文档，或处理 review 反馈。 |
+| `review-code` | 审查实现结果，并按严重程度分类问题。 | `task-id` | 合入前执行结构化代码审查。 |
 | `complete-task` | 在所有关卡通过后标记任务完成并归档。 | `task-id` | 测试、审查和提交都完成后收尾。 |
 
 <a id="task-status"></a>
@@ -667,8 +668,8 @@ args: "<task-id>"   # 可选
 
 | 占位符 | 替换为 | 示例 |
 |--------|--------|------|
-| `${skillName}` | skill 命令名，例如 `review-task` 或 `commit`。 | `<your-cli> ${skillName}` -> `<your-cli> review-task` |
-| `${projectName}` | `.airc.json` 中的 `project` 值，适用于带命名空间的命令。 | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
+| `${skillName}` | skill 命令名，例如 `review-code` 或 `commit`。 | `<your-cli> ${skillName}` -> `<your-cli> review-code` |
+| `${projectName}` | `.airc.json` 中的 `project` 值，适用于带命名空间的命令。 | `/${projectName}:${skillName}` -> `/agent-infra:review-code` |
 
 不带命名空间的自定义 TUI：
 
@@ -707,15 +708,15 @@ args: "<task-id>"   # 可选
 
 agent-infra 内置 **4 个预置工作流**。其中 3 个共享同一条分阶段交付链路：
 
-`analysis -> design -> implementation -> review -> fix -> commit`
+`analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit`
 
 第 4 个 `code-review` 则更轻量，专门用于审查已有 PR 或分支。
 
 | Workflow | 适用场景 | 步骤链 |
 |----------|----------|--------|
-| `feature-development` | 开发新功能或新能力 | `analysis -> design -> implementation -> review -> fix -> commit` |
-| `bug-fix` | 诊断并修复缺陷，同时补回归验证 | `analysis -> design -> implementation -> review -> fix -> commit` |
-| `refactoring` | 进行应保持行为稳定的结构性重构 | `analysis -> design -> implementation -> review -> fix -> commit` |
+| `feature-development` | 开发新功能或新能力 | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit` |
+| `bug-fix` | 诊断并修复缺陷，同时补回归验证 | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit` |
+| `refactoring` | 进行应保持行为稳定的结构性重构 | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit` |
 | `code-review` | 审查已有 Pull Request 或分支 | `analysis -> review -> report` |
 
 ### 生命周期示例
@@ -731,20 +732,33 @@ import-issue #42                    从 GitHub Issue 导入任务
   analyze-task T1                   需求分析
          |
          v
-    plan-task T1                    设计方案  <-- 人工审查
+  review-analysis T1                审查需求分析
+         |
+     有问题?
+      +--YES----> analyze-task T1
+      |
+         v
+    plan-task T1                    设计方案
          |
          v
-  implement-task T1                 编写代码与测试
+  review-plan T1                    审查技术方案
+         |
+     有问题?
+      +--YES----> plan-task T1
+      |
          |
          v
-  +-> review-task T1                自动代码审查
+  code-task T1                      编写代码与测试
+         |
+         v
+  +-> review-code T1                自动代码审查
   |      |
   |   有问题?
   |      +--NO-------+
   |     YES          |
   |      |           |
   |      v           |
-  |  refine-task T1  |
+  |  code-task T1 (fix mode)
   |      |           |
   +------+           |
                      |

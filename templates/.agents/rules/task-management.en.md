@@ -5,10 +5,12 @@
 Map user intent to the corresponding workflow command:
 - "analyze issue #123" -> `import-issue`
 - "analyze task TASK-20260306-143022" -> `analyze-task`
+- "review requirement analysis" -> `review-analysis`
 - "design a plan" -> `plan-task`
-- "implement" or "build" -> `implement-task`
-- "review" -> `review-task`
-- "fix review feedback" -> `refine-task`
+- "review a plan" or "review technical design" -> `review-plan`
+- "implement" or "build" -> `code-task`
+- "code review" or "review code" -> `review-code`
+- "fix review feedback" -> `code-task`
 
 ## Task State Management
 
@@ -25,10 +27,11 @@ Map user intent to the corresponding workflow command:
 - `import-dependabot`: update `current_step`, `updated_at`, `assigned_to`, `agent_infra_version`
 - `restore-task`: update `status`, `updated_at`, `assigned_to`, `agent_infra_version`
 - `analyze-task`: update `current_step`, `updated_at`, `assigned_to`, `agent_infra_version`
+- `review-analysis`: update `current_step`, `updated_at`, `agent_infra_version`
 - `plan-task`: update `current_step`, `updated_at`, `agent_infra_version`
-- `implement-task`: update `current_step`, `updated_at`, `agent_infra_version`
-- `review-task`: update `current_step`, `updated_at`, `agent_infra_version`
-- `refine-task`: update `current_step`, `updated_at`, `agent_infra_version`
+- `review-plan`: update `current_step`, `updated_at`, `agent_infra_version`
+- `code-task`: update `current_step`, `updated_at`, `agent_infra_version`
+- `review-code`: update `current_step`, `updated_at`, `agent_infra_version`
 - `create-pr`: update `pr_number`, `updated_at`, `agent_infra_version`
 - `commit`: update `updated_at`, `agent_infra_version`; update `current_step` when needed (see `commit/reference/task-status-update.md`)
 - `complete-task`: update `status`, `current_step`, `completed_at`, `updated_at`, `agent_infra_version`

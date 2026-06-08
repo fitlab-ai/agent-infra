@@ -20,7 +20,7 @@ For every task-related commit, append this Activity Log entry in `task.md`:
 
 Before selecting the next step, verify:
 - `current_step` and the latest workflow progress in `task.md`
-- whether the latest `review.md` / `review-r{N}.md` passed without findings
+- whether the latest `review-code.md` / `review-code-r{N}.md` passed without findings
 - whether there are still pending fixes, review work, or PR creation steps
 
 Choose exactly one case:
@@ -71,9 +71,9 @@ Required next-step commands:
 
 ```text
 Next step - code review:
-  - Claude Code / OpenCode: /review-task {task-id}
-  - Gemini CLI: /agent-infra:review-task {task-id}
-  - Codex CLI: $review-task {task-id}
+  - Claude Code / OpenCode: /review-code {task-id}
+  - Gemini CLI: /agent-infra:review-code {task-id}
+  - Codex CLI: $review-code {task-id}
 ```
 
 ### Case 4: Ready for PR

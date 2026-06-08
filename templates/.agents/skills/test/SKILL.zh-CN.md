@@ -1,74 +1,56 @@
 ---
 name: test
-description: "执行项目完整测试流程"
+description: >
+  执行项目完整测试流程（编译检查 + 单元测试）。
+  当用户要求运行测试或验证代码质量时触发。
 ---
 
 # 执行测试
 
 执行项目的完整测试流程，包括编译检查和单元测试。
 
-<!-- TODO: 将以下命令替换为你的项目实际命令 -->
-
 ## 1. 编译 / 类型检查
 
-```bash
-# TODO: 替换为你的项目编译命令
-# npx tsc --noEmit       (TypeScript)
-# mvn compile             (Maven)
-# go build ./...          (Go)
-# make build              (通用)
-```
-
-确认无编译错误。
+本项目由 Node.js CLI 和模板文件组成，无需编译。跳过此步骤。
 
 ## 2. 运行单元测试（按层级选择）
 
-本项目把测试分为三层（可选优化）；如果项目测试规模较小，可以全部映射到同一个完整测试命令。
+本项目把测试分为三层，按场景选择运行命令；新增测试文件默认归入 **full**，确认足够快且足够核心后，再上调到 core 或 smoke。
 
 ### smoke（目标 <5s）
 
 ```bash
-# TODO: 替换为本项目的 smoke 子集命令
-# npm run test:smoke       (Node.js)
-# pytest -m "not slow"     (Python)
-# go test -short ./...     (Go)
+npm run test:smoke
 ```
 
 适用场景：
-- implement-task / refine-task 内循环
+- code-task 内循环
 - 保存即跑 / 频繁反馈
 - 仅断言项目结构、配置、模板契约
 
 ### core（目标 <15s）
 
 ```bash
-# TODO: 替换为本项目的 core 子集命令
-# npm run test:core        (Node.js)
-# pytest -m "not contract" (Python)
-# go test ./...            (Go)
+npm run test:core
 ```
 
 适用场景：
 - pre-commit hook（自动调用）
-- 写 implementation.md / refinement.md 报告前的最终验证
+- 写 code.md / code-r{N}.md 报告前的最终验证
 - 推送 PR 前的本地把关
 
-### full（完整测试）
+### full（目标 <60s）
 
 ```bash
-# TODO: 替换为本项目的完整测试命令
-# npm test                 (Node.js)
-# mvn test                 (Maven)
-# pytest                   (Python)
-# go test ./...            (Go)
+npm test
 ```
 
 适用场景：
 - release / tag 前
-- CI
+- CI（unit-tests.yml）
 - main 合并前的最终把关
 
-如果项目暂不分层，smoke / core / full 可以全部映射到同一个完整测试命令；分层是反馈速度优化项，不是使用协作工作流的前置条件。
+full 层运行全部项目测试。`npm test` 使用通配匹配项目测试文件，**新增的测试文件会自动归入 full**，这是安全网。
 
 ## 3. 输出结果
 

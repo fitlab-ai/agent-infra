@@ -203,7 +203,7 @@ function runCheck(type, context) {
   }
 }
 
-// === Check Implementations ===
+// === Check Functions ===
 
 function checkTaskMeta({ taskDir, config }) {
   const task = loadTask(taskDir);

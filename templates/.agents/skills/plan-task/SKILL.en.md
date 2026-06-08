@@ -167,10 +167,10 @@ Output file:
 Important: human review checkpoint.
 Please review the technical plan before continuing to implementation.
 
-Next step - implement the task:
-  - Claude Code / OpenCode: /implement-task {task-id}
-  - Gemini CLI: /{{project}}:implement-task {task-id}
-  - Codex CLI: $implement-task {task-id}
+Next step - review the technical plan:
+  - Claude Code / OpenCode: /review-plan {task-id}
+  - Gemini CLI: /{{project}}:review-plan {task-id}
+  - Codex CLI: $review-plan {task-id}
 ```
 
 ## Completion Checklist

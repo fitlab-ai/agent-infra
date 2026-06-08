@@ -11,7 +11,7 @@ priority:                       # Optional Issue field: Urgent | High | Medium |
 effort:                         # Optional Issue field: High | Medium | Low
 start_date:                     # Optional Issue field for Feature: YYYY-MM-DD
 target_date:                    # Optional Issue field for Feature: YYYY-MM-DD
-current_step: analysis         # analysis | design | implementation | review | fix | commit
+current_step: requirement-analysis # requirement-analysis | requirement-analysis-review | technical-design | technical-design-review | code | code-review | completed
 assigned_to:                   # claude | codex | gemini | opencode | human
 ---
 
@@ -46,11 +46,11 @@ assigned_to:                   # claude | codex | gemini | opencode | human
 
 ## Implementation Notes
 
-[Notes from the implementation phase. Decisions made, trade-offs, deviations from design.]
+[Notes from the code phase. Decisions made, trade-offs, deviations from design.]
 
 ## Review Feedback
 
-<!-- Populated by review-task -->
+<!-- Populated by review-* -->
 
 ## Activity Log
 

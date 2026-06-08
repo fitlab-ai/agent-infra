@@ -24,7 +24,7 @@ npm run test:smoke
 ```
 
 适用场景：
-- implement-task / refine-task 内循环
+- code-task 内循环
 - 保存即跑 / 频繁反馈
 - 仅断言项目结构、配置、模板契约
 
@@ -36,7 +36,7 @@ npm run test:core
 
 适用场景：
 - pre-commit hook（自动调用）
-- 写 implementation.md / refinement.md 报告前的最终验证
+- 写 code.md / code-r{N}.md 报告前的最终验证
 - 推送 PR 前的本地把关
 
 ### full（目标 <60s）

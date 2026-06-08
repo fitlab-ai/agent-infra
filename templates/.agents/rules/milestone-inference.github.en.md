@@ -1,6 +1,6 @@
 # Milestone Inference Rules
 
-Read this file before the `create-task` platform rule, `implement-task`, or `create-pr` handles a milestone.
+Read this file before the `create-task` platform rule, `code-task`, or `create-pr` handles a milestone.
 
 ## General Principles
 
@@ -56,7 +56,7 @@ fi
 
 If `has_triage=false`, inference returns empty, or `gh issue edit` fails, skip and continue without blocking the `import-issue` workflow.
 
-## Phase 2: `implement-task`
+## Phase 2: `code-task`
 
 Goal: narrow the Issue milestone from a release line to a concrete version when implementation starts.
 

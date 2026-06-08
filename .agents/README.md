@@ -224,8 +224,8 @@ args: "<task-id>"   # 可选
 
 | 占位符 | 替换为 | 示例 |
 |--------|--------|------|
-| `${skillName}` | skill 命令名，例如 `review-task` 或 `commit`。 | `<your-cli> ${skillName}` -> `<your-cli> review-task` |
-| `${projectName}` | `.airc.json` 中的 `project` 值，适用于带命名空间的命令。 | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
+| `${skillName}` | skill 命令名，例如 `review-code` 或 `commit`。 | `<your-cli> ${skillName}` -> `<your-cli> review-code` |
+| `${projectName}` | `.airc.json` 中的 `project` 值，适用于带命名空间的命令。 | `/${projectName}:${skillName}` -> `/agent-infra:review-code` |
 
 不带命名空间的自定义 TUI：
 

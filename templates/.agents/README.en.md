@@ -224,8 +224,8 @@ Supported `invoke` placeholders:
 
 | Placeholder | Replaced with | Example |
 |-------------|---------------|---------|
-| `${skillName}` | The skill command name, such as `review-task` or `commit`. | `<your-cli> ${skillName}` -> `<your-cli> review-task` |
-| `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-task` |
+| `${skillName}` | The skill command name, such as `review-code` or `commit`. | `<your-cli> ${skillName}` -> `<your-cli> review-code` |
+| `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-code` |
 
 Non-namespaced custom TUI:
 

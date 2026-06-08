@@ -1,0 +1,8 @@
+description = "Review a technical plan"
+prompt = """
+Review plan for task {{args}}.
+
+Read and execute the review-plan skill from `.agents/skills/review-plan/SKILL.md`.
+
+Follow all steps defined in the skill exactly.
+"""

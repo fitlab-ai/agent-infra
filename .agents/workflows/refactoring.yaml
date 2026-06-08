@@ -29,6 +29,32 @@ steps:
       - 风险评估
       - 更新后的任务文件（分析部分）
 
+  - name: analysis-review
+    description: 审查重构分析是否覆盖依赖、风险和测试基线。
+    recommended_agents:
+      - claude
+      - gemini
+    tasks:
+      - 验证待重构范围和原因
+      - 检查依赖关系、使用者和风险识别
+      - 确认现有测试基线足以支撑设计
+      - 创建需求分析审查报告
+    inputs:
+      - 最新范围分析
+      - 重构请求或 Issue 描述
+    artifact_versioning:
+      inputs:
+        - name: analysis
+          pattern: "analysis.md | analysis-r{N}.md"
+          rule: "读取最高轮次的分析产物作为审查输入"
+      outputs:
+        - name: review-analysis
+          pattern: "review-analysis.md | review-analysis-r{N}.md"
+          rule: "扫描现有需求分析审查产物；首轮创建 review-analysis.md，后续轮次创建 review-analysis-r{N}.md（N = 当前最高轮次 + 1）"
+    outputs:
+      - 需求分析审查报告
+      - 待修正问题列表（如有）
+
   - name: design
     description: 规划重构方案以最小化风险。
     recommended_agents:
@@ -40,13 +66,16 @@ steps:
       - 规划重构前需要的额外测试
       - 在任务文件中记录重构计划
     inputs:
-      - 上一步的范围分析
+      - 已通过审查的范围分析
       - 项目架构
     artifact_versioning:
       inputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
           rule: "读取最高轮次的分析产物作为设计输入"
+        - name: review-analysis
+          pattern: "review-analysis.md | review-analysis-r{N}.md"
+          rule: "读取最高轮次的需求分析审查产物，确认分析已获通过或已处理反馈"
       outputs:
         - name: plan
           pattern: "plan.md | plan-r{N}.md"
@@ -56,8 +85,34 @@ steps:
       - 前置测试列表
       - 更新后的任务文件（设计部分）
 
-  - name: implementation
-    description: 按计划执行重构。
+  - name: design-review
+    description: 审查重构方案是否保持行为稳定、步骤可验证且风险可控。
+    recommended_agents:
+      - claude
+      - gemini
+    tasks:
+      - 验证方案覆盖已批准的范围分析
+      - 检查增量步骤、测试策略和回滚风险
+      - 确认方案足以进入编码阶段
+      - 创建技术方案审查报告
+    inputs:
+      - 最新重构计划
+      - 最新范围分析和审查报告
+    artifact_versioning:
+      inputs:
+        - name: plan
+          pattern: "plan.md | plan-r{N}.md"
+          rule: "读取最高轮次的方案产物作为审查输入"
+      outputs:
+        - name: review-plan
+          pattern: "review-plan.md | review-plan-r{N}.md"
+          rule: "扫描现有方案审查产物；首轮创建 review-plan.md，后续轮次创建 review-plan-r{N}.md（N = 当前最高轮次 + 1）"
+    outputs:
+      - 技术方案审查报告
+      - 待修正问题列表（如有）
+
+  - name: code
+    description: 按计划执行重构；在审查后再次执行同一阶段处理修复。
     recommended_agents:
       - codex
       - cursor
@@ -66,22 +121,34 @@ steps:
       - 添加前置测试（如尚未存在）
       - 增量执行重构步骤
       - 每步后验证测试通过
+      - 修复最新 code-review 产物中要求处理的问题（如处于修复模式）
       - 更新受影响的文档或注释
       - 确保代码遵循项目规范
     inputs:
-      - 上一步的重构计划
+      - 已通过审查的重构计划
       - 项目编码标准
+      - 最新代码审查报告（修复模式适用）
     artifact_versioning:
+      inputs:
+        - name: plan
+          pattern: "plan.md | plan-r{N}.md"
+          rule: "读取最高轮次的方案产物作为实现输入"
+        - name: review-plan
+          pattern: "review-plan.md | review-plan-r{N}.md"
+          rule: "读取最高轮次的方案审查产物，确认方案已获通过或已处理反馈"
+        - name: review-code
+          pattern: "review-code.md | review-code-r{N}.md"
+          rule: "修复模式读取最高轮次的代码审查产物，并校验其与 task.md Activity Log 中最近一条 Code Review 记录一致"
       outputs:
-        - name: implementation
-          pattern: "implementation.md | implementation-r{N}.md"
-          rule: "扫描现有实现产物；首轮创建 implementation.md，后续重实现创建 implementation-r{N}.md（N = 当前最高轮次 + 1）"
+        - name: code
+          pattern: "code.md | code-r{N}.md"
+          rule: "扫描现有实现产物；首轮创建 code.md，后续修复或重实现创建 code-r{N}.md（N = 当前最高轮次 + 1）"
     outputs:
       - 包含变更的重构分支
       - 更新或新增的测试文件
       - 更新后的任务文件（实现备注）
 
-  - name: review
+  - name: code-review
     description: 验证重构是否保持了行为并提升了代码质量。
     recommended_agents:
       - claude
@@ -91,49 +158,23 @@ steps:
       - 验证代码质量提升
       - 检查是否有遗漏的依赖项或使用者
       - 评估性能影响（如适用）
-      - 创建审查报告
+      - 创建代码审查报告
     inputs:
       - 重构分支
       - 原始代码用于对比
       - 测试结果
     artifact_versioning:
       inputs:
-        - name: implementation
-          pattern: "implementation.md | implementation-r{N}.md"
+        - name: code
+          pattern: "code.md | code-r{N}.md"
           rule: "读取最高轮次的实现产物作为审查输入"
       outputs:
-        - name: review
-          pattern: "review.md | review-r{N}.md"
-          rule: "扫描现有审查产物；首轮创建 review.md，后续轮次创建 review-r{N}.md（N = 当前最高轮次 + 1）"
+        - name: review-code
+          pattern: "review-code.md | review-code-r{N}.md"
+          rule: "扫描现有代码审查产物；首轮创建 review-code.md，后续轮次创建 review-code-r{N}.md（N = 当前最高轮次 + 1）"
     outputs:
-      - 审查报告
+      - 代码审查报告
       - 问题列表（如有）
-
-  - name: fix
-    description: 处理审查中发现的问题。
-    recommended_agents:
-      - codex
-      - cursor
-    tasks:
-      - 修复审查中识别的问题
-      - 根据需要更新测试
-      - 验证所有测试通过
-      - 确保无回归问题
-    inputs:
-      - 审查报告
-      - 重构分支
-    artifact_versioning:
-      inputs:
-        - name: review
-          pattern: "review.md | review-r{N}.md"
-          rule: "读取最高轮次的审查产物，并校验其与 task.md Activity Log 中最近一条 Code Review 记录一致"
-      outputs:
-        - name: refinement
-          pattern: "refinement.md | refinement-r{N}.md"
-          rule: "扫描现有修复产物；首轮创建 refinement.md，后续轮次创建 refinement-r{N}.md（N = 当前最高轮次 + 1）"
-    outputs:
-      - 包含修复的更新分支
-      - 更新后的任务文件
 
   - name: commit
     description: 最终确认重构并创建拉取请求。

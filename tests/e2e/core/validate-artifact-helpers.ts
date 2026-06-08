@@ -131,7 +131,7 @@ function buildTaskFrontmatter(overrides: FrontmatterOverrides = {}) {
     updated_at: formatTimestamp(now),
     issue_number: "N/A",
     created_by: "human",
-    current_step: "implementation",
+    current_step: "code",
     assigned_to: "codex",
     ...overrides
   };

@@ -57,7 +57,7 @@ if (args[0] === "label" && args[1] === "list") {
   process.exit(0);
 }
 
-// IMPORTANT: keep this route ahead of deeper repo-scoped routes because refine-task
+// IMPORTANT: keep this route ahead of deeper repo-scoped routes because code-task
 // verification now resolves repo metadata before falling through to issue endpoints.
 if (args[0] === "api" && args[1] && /^repos\/[^/]+\/[^/]+$/.test(args[1])) {
   const repoPayload = buildRepoPayload();

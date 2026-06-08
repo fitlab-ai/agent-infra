@@ -5,7 +5,7 @@
 ## 行为边界
 
 - Issue 标题和正文只能来自 `task.md`
-- 不读取 `analysis.md`、`plan.md`、`implementation.md` 或审查产物
+- 不读取 `analysis.md`、`review-analysis.md`、`plan.md`、`review-plan.md`、`code.md` 或代码审查产物
 - 持久产物只有：远端 Issue + `task.md` 中回写的 `issue_number`
 - Issue 创建失败时不回滚 `task.md`；当前 task 仍可继续后续工作流，未来可由用户手动写入 `issue_number`，让其它技能的级联同步接管
 

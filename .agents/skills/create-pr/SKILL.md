@@ -57,7 +57,7 @@ description: "创建 Pull Request 到目标分支"
 
 ### 7. 发布审查摘要
 
-读取最新的上下文产物：`plan.md` / `plan-r{N}.md`、`implementation.md` / `implementation-r{N}.md`、`review.md` / `review-r{N}.md`、`refinement.md` / `refinement-r{N}.md`（存在时）。
+读取最新的上下文产物：`plan.md` / `plan-r{N}.md`、`review-plan.md` / `review-plan-r{N}.md`、`code.md` / `code-r{N}.md`、`review-code.md` / `review-code-r{N}.md`（存在时）。
 
 基于这些产物聚合 reviewer 摘要，并使用隐藏标记维护唯一且幂等的摘要评论。
 

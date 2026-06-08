@@ -59,7 +59,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 追加 Commit 的 Activity Log，并且只能选择一个下一步分支：
 - 最终提交 -> `complete-task {task-id}`
 - 还有后续工作 -> 更新 task.md 后停止
-- 准备审查 -> `review-task {task-id}`
+- 准备审查 -> `review-code {task-id}`
 - 准备创建 PR -> `create-pr`
 
 ## 6. 同步 Issue 元数据（按需）

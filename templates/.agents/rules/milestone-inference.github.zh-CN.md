@@ -1,6 +1,6 @@
 # Milestone 推断规则
 
-在 `create-task` 的平台规则、`implement-task` 或 `create-pr` 处理 milestone 之前先读取本文件。
+在 `create-task` 的平台规则、`code-task` 或 `create-pr` 处理 milestone 之前先读取本文件。
 
 ## 通用原则
 
@@ -56,7 +56,7 @@ fi
 
 如果 `has_triage=false`、推断结果为空、或 `gh issue edit` 失败，跳过并继续，不阻断 `import-issue` 工作流。
 
-## 阶段 2：`implement-task`
+## 阶段 2：`code-task`
 
 目标：开始开发时，把 Issue milestone 从版本线收窄到具体版本。
 

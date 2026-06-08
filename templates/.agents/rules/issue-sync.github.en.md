@@ -123,7 +123,7 @@ When a skill creates or imports an Issue, automatically add the current executor
 
 ## `in:` Label Sync
 
-> **Trigger timing**: run `in:` label sync only after code is committed (the `commit` skill). Do not run it during `implement-task` or `refine-task`. During `create-pr`, only copy the labels from the Issue to the PR without recomputing them.
+> **Trigger timing**: run `in:` label sync only after code is committed (the `commit` skill). Do not run it during `code-task`. During `create-pr`, only copy the labels from the Issue to the PR without recomputing them.
 
 Read the `labels.in` mapping from `.agents/.airc.json`.
 
@@ -262,7 +262,7 @@ task comment sync always runs and is never downgraded.
 
 ## Backfill Rules (run before `/complete-task` archives)
 
-- Scan `task.md`, `analysis*.md`, `plan*.md`, `implementation*.md`, `review*.md`, and `refinement*.md` in the task directory
+- Scan `task.md`, `analysis*.md`, `review-analysis*.md`, `plan*.md`, `review-plan*.md`, `code*.md`, and `review-code*.md` in the task directory
 - Check whether each `{file-stem}` was already published by its hidden marker; publish only missing artifacts
 - Backfill only appends missing comments and never deletes or reorders existing comments
 - Resolve `{agent}` for backfilled comments in this order:
@@ -281,10 +281,11 @@ Title mapping:
 
 - `task` -> `Task File`
 - `analysis` / `analysis-r{N}` -> `Requirements Analysis` / `Requirements Analysis (Round {N})`
+- `review-analysis` / `review-analysis-r{N}` -> `Requirements Analysis Review (Round 1)` / `Requirements Analysis Review (Round {N})`
 - `plan` / `plan-r{N}` -> `Technical Plan` / `Technical Plan (Round {N})`
-- `implementation` / `implementation-r{N}` -> `Implementation Report (Round 1)` / `Implementation Report (Round {N})`
-- `review` / `review-r{N}` -> `Review Report (Round 1)` / `Review Report (Round {N})`
-- `refinement` / `refinement-r{N}` -> `Refinement Report (Round 1)` / `Refinement Report (Round {N})`
+- `review-plan` / `review-plan-r{N}` -> `Technical Plan Review (Round 1)` / `Technical Plan Review (Round {N})`
+- `code` / `code-r{N}` -> `Code Report (Round 1)` / `Code Report (Round {N})`
+- `review-code` / `review-code-r{N}` -> `Code Review (Round 1)` / `Code Review (Round {N})`
 - `summary` -> `Delivery Summary`
 
 Backfilled comments are also not gated by `has_triage` or `has_push`.

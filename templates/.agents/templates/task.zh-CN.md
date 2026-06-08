@@ -11,7 +11,7 @@ priority:                       # 可选 Issue 字段：Urgent | High | Medium |
 effort:                         # 可选 Issue 字段：High | Medium | Low
 start_date:                     # Feature 可选 Issue 字段：YYYY-MM-DD
 target_date:                    # Feature 可选 Issue 字段：YYYY-MM-DD
-current_step: analysis         # analysis | design | implementation | review | fix | commit
+current_step: requirement-analysis # requirement-analysis | requirement-analysis-review | technical-design | technical-design-review | code | code-review | completed
 assigned_to:                   # claude | codex | gemini | opencode | human
 ---
 
@@ -50,7 +50,7 @@ assigned_to:                   # claude | codex | gemini | opencode | human
 
 ## 审查反馈
 
-<!-- 由 review-task 填写 -->
+<!-- 由 review-* 填写 -->
 
 ## 活动日志
 

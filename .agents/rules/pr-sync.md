@@ -24,14 +24,14 @@
 
 聚合当前任务目录中的最新产物：
 - `plan.md` 或最新 `plan-r{N}.md`
-- `implementation.md` 或最新 `implementation-r{N}.md`
-- `review.md` 或最新 `review-r{N}.md`
-- `refinement.md` 或最新 `refinement-r{N}.md`
+- `code.md` 或最新 `code-r{N}.md`
+- `review-code.md` 或最新 `review-code-r{N}.md`
+- `code.md` 或最新 `code-r{N}.md`
 
 聚合规则：
 - 从 `plan*` 提取 2-4 条自包含的关键技术决策
-- 用 `review*` 与 `refinement*` 构建审查历程表
-- 从 `implementation*` 或 `refinement*` 提取测试结果摘要
+- 用 `review-code*` 与 `code*` 构建审查历程表
+- 从 `code*` 或 `code*` 提取测试结果摘要
 - 某一类产物缺失时，按“无该阶段数据”处理并继续生成
 
 ## 评论体模板

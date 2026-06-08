@@ -43,10 +43,11 @@ Rules:
 - map `{file-stem}` back to filenames:
   - `task` -> `task.md`
   - `analysis` / `analysis-r{N}` -> matching `.md`
+  - `review-analysis` / `review-analysis-r{N}` -> matching `.md`
   - `plan` / `plan-r{N}` -> matching `.md`
-  - `implementation` / `implementation-r{N}` -> matching `.md`
-  - `review` / `review-r{N}` -> matching `.md`
-  - `refinement` / `refinement-r{N}` -> matching `.md`
+  - `review-plan` / `review-plan-r{N}` -> matching `.md`
+  - `code` / `code-r{N}` -> matching `.md`
+  - `review-code` / `review-code-r{N}` -> matching `.md`
 
 ### 4. Process Chunks and Check the Local Directory
 

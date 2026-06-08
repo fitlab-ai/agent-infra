@@ -204,10 +204,10 @@ test("syncTemplates reports missing sources and skips built-in skill conflicts f
 
     writeFile(
       templateRoot,
-      ".agents/skills/review-task/SKILL.md",
-      "---\nname: review-task\ndescription: \"Built in\"\n---\n"
+      ".agents/skills/review-code/SKILL.md",
+      "---\nname: review-code\ndescription: \"Built in\"\n---\n"
     );
-    writeFile(templateRoot, ".claude/commands/review-task.md", "builtin command\n");
+    writeFile(templateRoot, ".claude/commands/review-code.md", "builtin command\n");
 
     writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo",
@@ -227,7 +227,7 @@ test("syncTemplates reports missing sources and skips built-in skill conflicts f
       }
     });
 
-    writeFile(sourceRoot, "review-task/SKILL.md", "---\nname: review-task\ndescription: \"Override\"\n---\n");
+    writeFile(sourceRoot, "review-code/SKILL.md", "---\nname: review-code\ndescription: \"Override\"\n---\n");
     writeFile(sourceRoot, "qa-check/SKILL.md", "---\nname: qa-check\ndescription: \"QA\"\n---\n");
 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
@@ -241,12 +241,12 @@ test("syncTemplates reports missing sources and skips built-in skill conflicts f
     );
     assert.ok(
       report.custom.sourceErrors.some((entry) =>
-        entry.source === sourceRoot && entry.reason === "skill review-task conflicts with built-in skill"
+        entry.source === sourceRoot && entry.reason === "skill review-code conflicts with built-in skill"
       )
     );
     assert.equal(
-      fs.readFileSync(path.join(projectRoot, ".agents/skills/review-task/SKILL.md"), "utf8"),
-      "---\nname: review-task\ndescription: \"Built in\"\n---\n"
+      fs.readFileSync(path.join(projectRoot, ".agents/skills/review-code/SKILL.md"), "utf8"),
+      "---\nname: review-code\ndescription: \"Built in\"\n---\n"
     );
     assert.equal(
       fs.readFileSync(path.join(projectRoot, ".agents/skills/qa-check/SKILL.md"), "utf8"),

@@ -44,10 +44,10 @@ const implementSyncCases = [
   {
     name: "validate-artifact gate passes when synced artifact and task comments match local files",
     gate: true,
-    skill: "implement-task",
+    skill: "code-task",
     comments(taskContent: string, artifactContent: string) {
       return [
-        { body: buildArtifactComment(taskId, "implementation.md", "实现报告", artifactContent) },
+        { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
         { body: buildTaskComment(taskId, taskContent) }
       ];
     },
@@ -63,10 +63,10 @@ const implementSyncCases = [
   },
   {
     name: "validate-artifact platform-sync fails when artifact comment content differs from the local artifact",
-    skill: "implement-task",
+    skill: "code-task",
     comments(taskContent: string) {
       return [
-        { body: buildArtifactComment(taskId, "implementation.md", "实现报告", "# 摘要\n\n这不是原文。") },
+        { body: buildArtifactComment(taskId, "code.md", "实现报告", "# 摘要\n\n这不是原文。") },
         { body: buildTaskComment(taskId, taskContent) }
       ];
     },
@@ -75,17 +75,17 @@ const implementSyncCases = [
       assertPayloadStatus(result, {
         type: "platform-sync",
         status: "fail",
-        message: /Comment content mismatch for 'implementation'/
+        message: /Comment content mismatch for 'code'/
       });
       assert.match(parseValidatorPayload(result.stdout).message, /first difference near char \d+/);
     }
   },
   {
     name: "validate-artifact platform-sync fails when the task comment does not use the rendered frontmatter details block",
-    skill: "implement-task",
+    skill: "code-task",
     comments(taskContent: string, artifactContent: string) {
       return [
-        { body: buildArtifactComment(taskId, "implementation.md", "实现报告", artifactContent) },
+        { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
         { body: buildTaskComment(taskId, taskContent, { rawBody: true }) }
       ];
     },
@@ -101,12 +101,12 @@ const implementSyncCases = [
   },
   {
     name: "validate-artifact platform-sync fails when the Issue Type does not match task type",
-    skill: "implement-task",
+    skill: "code-task",
     taskOverrides: { type: "feature" },
     issuePayload: buildIssuePayload({ type: buildIssueType("Task") }),
     comments(taskContent: string, artifactContent: string) {
       return [
-        { body: buildArtifactComment(taskId, "implementation.md", "实现报告", artifactContent) },
+        { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
         { body: buildTaskComment(taskId, taskContent) }
       ];
     },
@@ -121,14 +121,14 @@ const implementSyncCases = [
   },
   {
     name: "validate-artifact platform-sync skips Issue Type verification when the REST query is unavailable",
-    skill: "implement-task",
+    skill: "code-task",
     extraEnv: {
       GH_FAKE_ISSUE_REST_FAIL: "Issue Types are unavailable",
       VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
     },
     comments(taskContent: string, artifactContent: string) {
       return [
-        { body: buildArtifactComment(taskId, "implementation.md", "实现报告", artifactContent) },
+        { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
         { body: buildTaskComment(taskId, taskContent) }
       ];
     },
@@ -139,11 +139,11 @@ const implementSyncCases = [
   },
   {
     name: "validate-artifact platform-sync accepts English task frontmatter summary when language override is en",
-    skill: "implement-task",
+    skill: "code-task",
     extraEnv: { VALIDATE_ARTIFACT_LANGUAGE: "en" },
     comments(taskContent: string, artifactContent: string) {
       return [
-        { body: buildArtifactComment(taskId, "implementation.md", "Implementation Report", artifactContent) },
+        { body: buildArtifactComment(taskId, "code.md", "Code Report", artifactContent) },
         { body: buildTaskComment(taskId, taskContent, { summaryText: "Metadata (frontmatter)" }) }
       ];
     },
@@ -212,21 +212,21 @@ for (const c of implementSyncCases) {
   test(c.name, () => withTempRoot("agent-infra-platform-sync-", (tempRoot) => {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const taskContent = buildTaskContent({ issue_number: "65", ...c.taskOverrides });
-    const artifactContent = loadFixture("valid-implementation.md");
+    const artifactContent = loadFixture("valid-code.md");
     write(path.join(ctx.taskDir, "task.md"), taskContent);
-    if (c.skill === "implement-task") {
-      write(path.join(ctx.taskDir, "implementation.md"), artifactContent);
+    if (c.skill === "code-task") {
+      write(path.join(ctx.taskDir, "code.md"), artifactContent);
     }
     writeJson(ctx.issuePath, c.issuePayload || buildIssuePayload());
     writeJson(ctx.commentsPath, c.comments(taskContent, artifactContent));
 
     const args = c.gate
-      ? ["gate", "implement-task", ctx.taskDir, "implementation.md"]
+      ? ["gate", "code-task", ctx.taskDir, "code.md"]
       : [
           "check",
           "platform-sync",
           ctx.taskDir,
-          ...(c.skill === "implement-task" ? ["implementation.md"] : []),
+          ...(c.skill === "code-task" ? ["code.md"] : []),
           "--skill",
           c.skill
         ];
@@ -591,11 +591,11 @@ test("validate-artifact platform-sync blocks after retry exhaustion on gh networ
     const binDir = path.join(tempRoot, "bin");
     const ghPath = path.join(binDir, "gh");
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
-    write(path.join(taskDir, "implementation.md"), loadFixture("valid-implementation.md"));
+    write(path.join(taskDir, "code.md"), loadFixture("valid-code.md"));
     write(ghPath, "#!/bin/sh\necho 'network timeout' >&2\nexit 1\n");
     fs.chmodSync(ghPath, 0o755);
 
-    const result = runValidator(["gate", "implement-task", taskDir, "implementation.md"], {
+    const result = runValidator(["gate", "code-task", taskDir, "code.md"], {
       env: {
         PATH: pathWithPrependedBin(binDir),
         VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
@@ -631,17 +631,17 @@ for (const c of retryCases) {
     const ctx = setupPlatformSyncEnv(tempRoot);
     const counterPath = path.join(tempRoot, "transient.count");
     const taskContent = buildTaskContent({ issue_number: "65" });
-    const artifactContent = loadFixture("valid-implementation.md");
+    const artifactContent = loadFixture("valid-code.md");
     write(path.join(ctx.taskDir, "task.md"), taskContent);
-    write(path.join(ctx.taskDir, "implementation.md"), artifactContent);
+    write(path.join(ctx.taskDir, "code.md"), artifactContent);
     writeJson(ctx.issuePath, buildIssuePayload());
     writeJson(ctx.commentsPath, [
-      { body: buildArtifactComment(taskId, "implementation.md", "实现报告", artifactContent) },
+      { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
       { body: buildTaskComment(taskId, taskContent) }
     ]);
     write(counterPath, "1");
 
-    const result = runValidatorWithFakeGh(["gate", "implement-task", ctx.taskDir, "implementation.md"], ctx, {
+    const result = runValidatorWithFakeGh(["gate", "code-task", ctx.taskDir, "code.md"], ctx, {
       GH_FAKE_ISSUE_PATH: ctx.issuePath,
       GH_FAKE_COMMENTS_PATH: ctx.commentsPath,
       GH_FAKE_TRANSIENT_FAIL_MATCHER: c.matcher,
@@ -719,16 +719,16 @@ test("validate-artifact platform-sync skips when no platform adapter is register
   withTempRoot("agent-infra-platform-sync-skip-", (tempRoot) => {
     const taskDir = path.join(tempRoot, taskId);
     const scriptCopy = path.join(tempRoot, ".agents/scripts/validate-artifact.js");
-    const verifyCopy = path.join(tempRoot, ".agents/skills/implement-task/config/verify.json");
+    const verifyCopy = path.join(tempRoot, ".agents/skills/code-task/config/verify.json");
     write(path.join(tempRoot, "package.json"), JSON.stringify({ type: "module" }, null, 2));
     write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
-    write(verifyCopy, read(".agents/skills/implement-task/config/verify.json"));
+    write(verifyCopy, read(".agents/skills/code-task/config/verify.json"));
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
-    write(path.join(taskDir, "implementation.md"), loadFixture("valid-implementation.md"));
+    write(path.join(taskDir, "code.md"), loadFixture("valid-code.md"));
 
     const result = spawnSync(
       process.execPath,
-      [scriptCopy, "check", "platform-sync", taskDir, "implementation.md", "--skill", "implement-task"],
+      [scriptCopy, "check", "platform-sync", taskDir, "code.md", "--skill", "code-task"],
       {
         encoding: "utf8",
         cwd: tempRoot,

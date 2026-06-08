@@ -35,7 +35,7 @@ This project uses three test layers as an optional optimization; if the test sui
 ```
 
 Use for:
-- implement-task / refine-task inner loops
+- code-task inner loops
 - save-and-run / frequent feedback
 - project structure, configuration, and template contract checks
 
@@ -50,7 +50,7 @@ Use for:
 
 Use for:
 - pre-commit hook (automatic)
-- final verification before writing implementation.md / refinement.md
+- final verification before writing code.md / code-r{N}.md
 - local gate before pushing a PR
 
 ### full (complete test suite)

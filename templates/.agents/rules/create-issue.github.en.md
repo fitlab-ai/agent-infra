@@ -5,7 +5,7 @@ After `create-task` writes the local `task.md`, follow this rule to cascade Issu
 ## Boundary
 
 - Issue title and body must come from `task.md` only
-- Do not read `analysis.md`, `plan.md`, `implementation.md`, or any review artifact
+- Do not read `analysis.md`, `review-analysis.md`, `plan.md`, `review-plan.md`, `code.md`, or any review-code artifact
 - Persistent outputs are limited to the remote Issue and the `issue_number` written back to `task.md`
 - If Issue creation fails, do not roll back `task.md`; the current task remains valid for the workflow, and the user can later manually fill `issue_number` so other skills' cascade sync takes over
 

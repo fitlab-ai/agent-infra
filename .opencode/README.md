@@ -45,9 +45,9 @@ AI 代理的分步指令。
 - `import-issue` - 导入 GitHub Issue 为任务
 - `analyze-task` - 分析任务需求
 - `plan-task` - 为任务设计技术方案
-- `implement-task` - 根据方案实施任务
-- `review-task` - 审查任务实现
-- `refine-task` - 处理审查反馈
+- `code-task` - 根据方案编码任务
+- `review-code` - review-code实现
+- `code-task` - 处理审查反馈
 - `complete-task` - 标记任务完成并归档
 - `check-task` - 查看任务状态
 - `block-task` - 标记任务为阻塞

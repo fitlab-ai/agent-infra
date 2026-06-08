@@ -12,13 +12,13 @@ When a positive assertion already covers the expected behavior, do not add anoth
 
 Bad:
 ```ts
-assert.match(content, /^name: implement-task$/m);    // The positive assertion already covers the expected value.
+assert.match(content, /^name: code-task$/m);         // The positive assertion already covers the expected value.
 assert.doesNotMatch(content, /^name: wrong-name$/m); // Redundant: permanently remembers a value that should not appear.
 ```
 
 Good:
 ```ts
-assert.match(content, /^name: implement-task$/m);    // The positive assertion is enough.
+assert.match(content, /^name: code-task$/m);         // The positive assertion is enough.
 ```
 
 If the positive assertion passes, the value is correct. The extra negative assertion adds no protection, only maintenance cost, and can become a test that permanently remembers a concept after the feature is gone.

@@ -20,7 +20,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 在决定下一步之前，先确认：
 - `task.md` 中的 `current_step` 和最新工作流进度
-- 最新的 `review.md` / `review-r{N}.md` 是否无问题通过
+- 最新的 `review-code.md` / `review-code-r{N}.md` 是否无问题通过
 - 是否仍然存在待修复项、待审查工作或待创建 PR 的步骤
 
 必须且只能选择一个分支：
@@ -71,9 +71,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 ```text
 下一步 - 代码审查：
-  - Claude Code / OpenCode: /review-task {task-id}
-  - Gemini CLI: /agent-infra:review-task {task-id}
-  - Codex CLI: $review-task {task-id}
+  - Claude Code / OpenCode: /review-code {task-id}
+  - Gemini CLI: /agent-infra:review-code {task-id}
+  - Codex CLI: $review-code {task-id}
 ```
 
 ### 场景 4：准备创建 PR

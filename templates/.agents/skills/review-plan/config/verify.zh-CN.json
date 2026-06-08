@@ -1,0 +1,51 @@
+{
+  "skill": "review-plan",
+  "checks": {
+    "task-meta": {
+      "required_fields": [
+        "id",
+        "type",
+        "workflow",
+        "status",
+        "created_at",
+        "updated_at",
+        "agent_infra_version",
+        "current_step",
+        "assigned_to"
+      ],
+      "expected_step": "technical-design-review"
+    },
+    "artifact": {
+      "file_pattern": "review-plan.md|review-plan-r{N}.md",
+      "required_sections": [
+        "审查摘要",
+        "问题清单",
+        "环境性遗留",
+        "结论与建议",
+        "状态核对",
+        "证据原文"
+      ],
+      "required_patterns": [
+        "^### 审查决定$",
+        "^\\$ "
+      ],
+      "freshness_minutes": 30
+    },
+    "activity-log": {
+      "expected_action_pattern": "Plan Review \\(Round \\d+\\)",
+      "freshness_minutes": 30
+    },
+    "platform-sync": {
+      "when": "issue_number_exists",
+      "expected_status_label": "status: pending-design-work",
+      "expected_comment_marker": "<!-- sync-issue:{task-id}:{artifact-stem} -->",
+      "verify_comment_content": true,
+      "verify_task_comment_content": true,
+      "verify_issue_type": true,
+      "verify_issue_fields": false,
+      "verify_milestone": true,
+      "expected_status_label_key": "pendingDesignWork",
+      "expected_comment_marker_key": "artifact"
+    }
+  }
+}

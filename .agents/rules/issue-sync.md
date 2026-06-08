@@ -123,7 +123,7 @@ fi
 
 ## `in:` label 同步
 
-> **触发时机**：`in:` label 同步应在代码提交后（commit 技能）执行，不在 implement-task 或 refine-task 阶段执行。create-pr 阶段仅从 Issue 复制到 PR，不重新计算。
+> **触发时机**：`in:` label 同步应在代码提交后（commit 技能）执行，不在 code-task 阶段执行。create-pr 阶段仅从 Issue 复制到 PR，不重新计算。
 
 读取 `.agents/.airc.json` 的 `labels.in` 映射。
 
@@ -262,7 +262,7 @@ task 留言同步始终执行，不受权限降级影响。
 
 ## 补发规则（`/complete-task` 归档前执行）
 
-- 扫描任务目录中的 `task.md`、`analysis*.md`、`plan*.md`、`implementation*.md`、`review*.md`、`refinement*.md`
+- 扫描任务目录中的 `task.md`、`analysis*.md`、`review-analysis*.md`、`plan*.md`、`review-plan*.md`、`code*.md`、`review-code*.md`
 - 对每个 `{file-stem}` 用隐藏标记检查是否已发布；未发布则补发，已发布则跳过
 - 补发只追加缺失评论，不删除或重排已有评论
 - 补发评论的 `{agent}` 按以下顺序确定：
@@ -281,10 +281,11 @@ task 留言同步始终执行，不受权限降级影响。
 
 - `task` -> `任务文件`
 - `analysis` / `analysis-r{N}` -> `需求分析` / `需求分析（Round {N}）`
+- `review-analysis` / `review-analysis-r{N}` -> `需求分析审查（Round 1）` / `需求分析审查（Round {N}）`
 - `plan` / `plan-r{N}` -> `技术方案` / `技术方案（Round {N}）`
-- `implementation` / `implementation-r{N}` -> `实现报告（Round 1）` / `实现报告（Round {N}）`
-- `review` / `review-r{N}` -> `审查报告（Round 1）` / `审查报告（Round {N}）`
-- `refinement` / `refinement-r{N}` -> `修复报告（Round 1）` / `修复报告（Round {N}）`
+- `review-plan` / `review-plan-r{N}` -> `技术方案审查（Round 1）` / `技术方案审查（Round {N}）`
+- `code` / `code-r{N}` -> `实现报告（Round 1）` / `实现报告（Round {N}）`
+- `review-code` / `review-code-r{N}` -> `代码审查（Round 1）` / `代码审查（Round {N}）`
 - `summary` -> `交付摘要`
 
 补发评论同样不受 `has_triage` / `has_push` 限制。

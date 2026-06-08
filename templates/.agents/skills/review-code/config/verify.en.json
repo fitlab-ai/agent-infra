@@ -1,0 +1,51 @@
+{
+  "skill": "review-code",
+  "checks": {
+    "task-meta": {
+      "required_fields": [
+        "id",
+        "type",
+        "workflow",
+        "status",
+        "created_at",
+        "updated_at",
+        "agent_infra_version",
+        "current_step",
+        "assigned_to"
+      ],
+      "expected_step": "code-review"
+    },
+    "artifact": {
+      "file_pattern": "review-code.md|review-code-r{N}.md",
+      "required_sections": [
+        "Review Summary",
+        "Findings",
+        "Environment-Blocked Findings",
+        "Conclusion and Recommendations",
+        "State Check",
+        "Evidence"
+      ],
+      "required_patterns": [
+        "^### Approval Decision$",
+        "^\\$ "
+      ],
+      "freshness_minutes": 30
+    },
+    "activity-log": {
+      "expected_action_pattern": "Code Review \\(Round \\d+\\)",
+      "freshness_minutes": 30
+    },
+    "platform-sync": {
+      "when": "issue_number_exists",
+      "expected_status_label": "status: in-progress",
+      "expected_comment_marker": "<!-- sync-issue:{task-id}:{artifact-stem} -->",
+      "verify_comment_content": true,
+      "verify_task_comment_content": true,
+      "verify_issue_type": true,
+      "verify_issue_fields": false,
+      "verify_milestone": true,
+      "expected_status_label_key": "inProgress",
+      "expected_comment_marker_key": "artifact"
+    }
+  }
+}

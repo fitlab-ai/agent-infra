@@ -1,4 +1,4 @@
-# Refactoring Workflow
+# Refactoring workflow
 # Use this workflow for code refactoring tasks.
 
 name: refactoring
@@ -6,134 +6,175 @@ description: Safe and structured workflow for code refactoring.
 
 steps:
   - name: analysis
-    description: Analyze the current code and determine the refactoring scope.
+    description: Analyze the current code and define the refactoring scope.
     recommended_agents:
       - claude
       - gemini
     tasks:
-      - Identify the code to refactor and why it needs refactoring
-      - Map all dependencies and consumers of the impacted code
+      - Identify code to refactor and the reason for refactoring
+      - Map dependencies and callers for affected code
       - Assess refactoring risk and complexity
-      - Identify existing test coverage for impacted areas
-      - Record findings in the task file
+      - Identify existing test coverage for affected areas
+      - Record findings in the task workspace
     inputs:
-      - Refactoring request or issue description
+      - Refactoring request or Issue description
       - Project codebase
     artifact_versioning:
       outputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
-          rule: "Scan existing analysis artifacts; create analysis.md for the first round, then analysis-r{N}.md for later revisions (N = current highest round + 1)"
+          rule: "Scan existing analysis artifacts; create analysis.md for round 1 and analysis-r{N}.md for later revisions (N = current highest round + 1)"
     outputs:
-      - Scope analysis with dependency mapping
+      - Scope analysis with dependency map
       - Risk assessment
-      - Updated task file (analysis section)
+      - Updated task analysis notes
+
+  - name: analysis-review
+    description: Review whether the refactoring analysis covers dependencies, risks, and the test baseline.
+    recommended_agents:
+      - claude
+      - gemini
+    tasks:
+      - Verify the refactoring scope and rationale
+      - Check dependency, caller, and risk identification
+      - Confirm the existing test baseline is enough for design
+      - Create the requirement analysis review report
+    inputs:
+      - Latest scope analysis
+      - Refactoring request or Issue description
+    artifact_versioning:
+      inputs:
+        - name: analysis
+          pattern: "analysis.md | analysis-r{N}.md"
+          rule: "Read the highest-round analysis artifact as review input"
+      outputs:
+        - name: review-analysis
+          pattern: "review-analysis.md | review-analysis-r{N}.md"
+          rule: "Scan existing requirement-analysis review artifacts; create review-analysis.md for round 1 and review-analysis-r{N}.md for later rounds (N = current highest round + 1)"
+    outputs:
+      - Requirement analysis review report
+      - Findings to fix, if any
 
   - name: design
-    description: Plan the refactoring approach to minimize risk.
+    description: Plan the refactoring approach while minimizing risk.
     recommended_agents:
       - claude
     tasks:
       - Define the target architecture or code structure
-      - Plan incremental refactoring steps to avoid a single large change
+      - Plan incremental refactoring steps
       - Identify intermediate states that must remain functional
-      - Plan any additional tests needed before refactoring
-      - Record the refactoring plan in the task file
+      - Plan any extra tests needed before refactoring
+      - Record the refactoring plan in the task workspace
     inputs:
-      - Scope analysis from the previous step
+      - Approved scope analysis
       - Project architecture
     artifact_versioning:
       inputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
           rule: "Read the highest-round analysis artifact as design input"
+        - name: review-analysis
+          pattern: "review-analysis.md | review-analysis-r{N}.md"
+          rule: "Read the highest-round analysis review artifact and confirm feedback is approved or handled"
       outputs:
         - name: plan
           pattern: "plan.md | plan-r{N}.md"
-          rule: "Scan existing plan artifacts; create plan.md for the first round, then plan-r{N}.md for later revisions (N = current highest round + 1)"
+          rule: "Scan existing plan artifacts; create plan.md for round 1 and plan-r{N}.md for later revisions (N = current highest round + 1)"
     outputs:
-      - Refactoring plan with incremental steps
-      - List of prerequisite tests
-      - Updated task file (design section)
+      - Incremental refactoring plan
+      - Prerequisite test list
+      - Updated task design notes
 
-  - name: implementation
-    description: Execute the refactoring according to the plan.
+  - name: design-review
+    description: Review whether the refactoring plan preserves behavior, is verifiable step by step, and controls risk.
+    recommended_agents:
+      - claude
+      - gemini
+    tasks:
+      - Verify the plan covers the approved scope analysis
+      - Check incremental steps, test strategy, and rollback risk
+      - Confirm the plan is ready for coding
+      - Create the plan review report
+    inputs:
+      - Latest refactoring plan
+      - Latest scope analysis and review report
+    artifact_versioning:
+      inputs:
+        - name: plan
+          pattern: "plan.md | plan-r{N}.md"
+          rule: "Read the highest-round plan artifact as review input"
+      outputs:
+        - name: review-plan
+          pattern: "review-plan.md | review-plan-r{N}.md"
+          rule: "Scan existing plan review artifacts; create review-plan.md for round 1 and review-plan-r{N}.md for later rounds (N = current highest round + 1)"
+    outputs:
+      - Plan review report
+      - Findings to fix, if any
+
+  - name: code
+    description: Execute the approved refactoring plan; run the same stage again after code review to handle fixes.
     recommended_agents:
       - codex
       - cursor
     tasks:
       - Create a refactoring branch
-      - Add prerequisite tests if they do not already exist
-      - Execute the refactoring incrementally
-      - Verify tests pass after each step
-      - Update impacted documentation or comments
-      - Ensure the code follows project conventions
+      - Add prerequisite tests when not already present
+      - Execute refactoring steps incrementally
+      - Verify tests after each step
+      - Fix findings from the latest code-review artifact when in fix mode
+      - Update affected docs or comments
+      - Ensure code follows project conventions
     inputs:
-      - Refactoring plan from the previous step
+      - Approved refactoring plan
       - Project coding standards
+      - Latest code review report when in fix mode
     artifact_versioning:
+      inputs:
+        - name: plan
+          pattern: "plan.md | plan-r{N}.md"
+          rule: "Read the highest-round plan artifact as implementation input"
+        - name: review-plan
+          pattern: "review-plan.md | review-plan-r{N}.md"
+          rule: "Read the highest-round plan review artifact and confirm feedback is approved or handled"
+        - name: review-code
+          pattern: "review-code.md | review-code-r{N}.md"
+          rule: "In fix mode, read the highest-round code review artifact and verify it matches the latest Code Review entry in task.md Activity Log"
       outputs:
-        - name: implementation
-          pattern: "implementation.md | implementation-r{N}.md"
-          rule: "Scan existing implementation artifacts; create implementation.md for the first round, then implementation-r{N}.md for later re-implementations (N = current highest round + 1)"
+        - name: code
+          pattern: "code.md | code-r{N}.md"
+          rule: "Scan existing code artifacts; create code.md for round 1 and code-r{N}.md for later fixes or reimplementation (N = current highest round + 1)"
     outputs:
-      - Refactoring branch with the changes
+      - Refactoring branch with implementation or fixes
       - Updated or new test files
-      - Updated task file (implementation notes)
+      - Updated task notes
 
-  - name: review
+  - name: code-review
     description: Verify that the refactoring preserves behavior and improves code quality.
     recommended_agents:
       - claude
     tasks:
-      - Verify functional equivalence unless behavior changes are intentional
+      - Verify functional equivalence unless behavior change is intentional
       - Check that all tests pass
-      - Confirm that code quality has improved
-      - Check for missed dependencies or consumers
+      - Verify code quality improvements
+      - Check for missing dependencies or callers
       - Assess performance impact when applicable
-      - Create a review report
+      - Create the code review report
     inputs:
       - Refactoring branch
       - Original code for comparison
       - Test results
     artifact_versioning:
       inputs:
-        - name: implementation
-          pattern: "implementation.md | implementation-r{N}.md"
-          rule: "Read the highest-round implementation artifact as review input"
+        - name: code
+          pattern: "code.md | code-r{N}.md"
+          rule: "Read the highest-round code artifact as review input"
       outputs:
-        - name: review
-          pattern: "review.md | review-r{N}.md"
-          rule: "Scan existing review artifacts; create review.md for the first round, then review-r{N}.md for later rounds (N = current highest round + 1)"
+        - name: review-code
+          pattern: "review-code.md | review-code-r{N}.md"
+          rule: "Scan existing code review artifacts; create review-code.md for round 1 and review-code-r{N}.md for later rounds (N = current highest round + 1)"
     outputs:
-      - Review report
-      - List of issues if any
-
-  - name: fix
-    description: Address issues found during review.
-    recommended_agents:
-      - codex
-      - cursor
-    tasks:
-      - Fix issues identified in the review
-      - Update tests as needed
-      - Verify that all tests pass
-      - Ensure there are no regressions
-    inputs:
-      - Review report
-      - Refactoring branch
-    artifact_versioning:
-      inputs:
-        - name: review
-          pattern: "review.md | review-r{N}.md"
-          rule: "Read the highest-round review artifact and verify that it matches the latest Code Review entry in the task.md Activity Log"
-      outputs:
-        - name: refinement
-          pattern: "refinement.md | refinement-r{N}.md"
-          rule: "Scan existing refinement artifacts; create refinement.md for the first round, then refinement-r{N}.md for later rounds (N = current highest round + 1)"
-    outputs:
-      - Updated branch with fixes
-      - Updated task file
+      - Code review report
+      - Findings list, if any
 
   - name: commit
     description: Finalize the refactoring and create a pull request.
@@ -142,13 +183,13 @@ steps:
       - human
     tasks:
       - Ensure all tests pass
-      - Write a clear commit message that explains the refactoring
-      - Create a pull request with a detailed change summary
-      - Link the PR to the relevant issue
+      - Write a clear commit message explaining the refactoring
+      - Create a pull request with detailed changes
+      - Link the PR to the related Issue
       - Move the task to completed
     inputs:
       - Final refactoring branch
-      - Task file
+      - Task workspace
     outputs:
       - Pull request
-      - Completed task file (stored in .agents/workspace/completed/)
+      - Completed task workspace under .agents/workspace/completed/

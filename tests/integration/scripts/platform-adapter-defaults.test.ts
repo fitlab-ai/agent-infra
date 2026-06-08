@@ -54,7 +54,7 @@ function writeTask(taskDir: string) {
     "status: active",
     "created_at: 2026-03-28 00:00:00+00:00",
     "updated_at: 2026-03-28 00:00:00+00:00",
-    "current_step: implementation",
+    "current_step: code",
     "assigned_to: codex",
     "issue_number: 65",
     "---",
@@ -65,7 +65,7 @@ function writeTask(taskDir: string) {
 }
 
 function runValidator(scriptPath: string, taskDir: string, skill: string, env: NodeJS.ProcessEnv) {
-  return spawnSync(process.execPath, [scriptPath, "check", "platform-sync", taskDir, "implementation.md", "--skill", skill], {
+  return spawnSync(process.execPath, [scriptPath, "check", "platform-sync", taskDir, "code.md", "--skill", skill], {
     cwd: path.dirname(path.dirname(path.dirname(scriptPath))),
     encoding: "utf8",
     env: gitSafeEnv(env)
@@ -120,7 +120,7 @@ test("platform-sync verification keys override legacy literal values", () => {
       milestone: null
     });
     writeJson(commentsPath, [
-      { body: "<!-- sync-issue:TASK-20260328-000001:implementation -->\n## Implementation" }
+      { body: "<!-- sync-issue:TASK-20260328-000001:code -->\n## Code" }
     ]);
 
     writeJson(path.join(tempRoot, ".agents/skills/key-priority/config/verify.json"), {

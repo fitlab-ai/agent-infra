@@ -1,149 +1,191 @@
-# Bug Fix Workflow
-# Use this workflow when fixing a bug.
+# Bug-fix workflow
+# Use this workflow when fixing a defect.
 
 name: bug-fix
-description: Workflow for diagnosing and fixing a bug.
+description: Workflow for diagnosing and fixing a defect.
 
 steps:
   - name: analysis
-    description: Reproduce the bug, identify the root cause, and determine the scope of the fix.
+    description: Reproduce the defect, identify the root cause, and define the fix scope.
     recommended_agents:
       - claude
       - gemini
     tasks:
-      - Understand the bug report and expected behavior
-      - Reproduce the bug when possible
+      - Understand the defect report and expected behavior
+      - Reproduce the defect when possible
       - Trace the code path to identify the root cause
-      - Determine impacted files and components
-      - Record findings in the task file
+      - Determine affected files and components
+      - Record findings in the task workspace
     inputs:
-      - Bug report or issue description
+      - Defect report or Issue description
       - Reproduction steps
       - Project codebase
     artifact_versioning:
       outputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
-          rule: "Scan existing analysis artifacts; create analysis.md for the first round, then analysis-r{N}.md for later revisions (N = current highest round + 1)"
+          rule: "Scan existing analysis artifacts; create analysis.md for round 1 and analysis-r{N}.md for later revisions (N = current highest round + 1)"
     outputs:
-      - Root cause analysis
-      - List of impacted files
-      - Updated task file (analysis section)
+      - Root-cause analysis
+      - Affected files list
+      - Updated task analysis notes
+
+  - name: analysis-review
+    description: Review whether the defect analysis has sufficient reproduction evidence, a clear root cause, and a scoped fix.
+    recommended_agents:
+      - claude
+      - gemini
+    tasks:
+      - Verify reproduction evidence or the non-reproducible explanation
+      - Check root-cause reasoning and impact scope
+      - Confirm the analysis is ready for design
+      - Create the requirement analysis review report
+    inputs:
+      - Latest root-cause analysis
+      - Defect report or Issue description
+    artifact_versioning:
+      inputs:
+        - name: analysis
+          pattern: "analysis.md | analysis-r{N}.md"
+          rule: "Read the highest-round analysis artifact as review input"
+      outputs:
+        - name: review-analysis
+          pattern: "review-analysis.md | review-analysis-r{N}.md"
+          rule: "Scan existing requirement-analysis review artifacts; create review-analysis.md for round 1 and review-analysis-r{N}.md for later rounds (N = current highest round + 1)"
+    outputs:
+      - Requirement analysis review report
+      - Findings to fix, if any
 
   - name: design
-    description: Plan the fix and consider edge cases.
+    description: Plan the fix and account for edge cases.
     recommended_agents:
       - claude
     tasks:
-      - Determine the best approach for fixing the bug
-      - Identify potential side effects of the fix
-      - Plan test cases to validate the fix
-      - Record the fix plan in the task file
+      - Determine the best fix approach
+      - Identify potential side effects
+      - Plan regression tests
+      - Record the fix plan in the task workspace
     inputs:
-      - Root cause analysis from the previous step
+      - Approved root-cause analysis
       - Project architecture
     artifact_versioning:
       inputs:
         - name: analysis
           pattern: "analysis.md | analysis-r{N}.md"
           rule: "Read the highest-round analysis artifact as design input"
+        - name: review-analysis
+          pattern: "review-analysis.md | review-analysis-r{N}.md"
+          rule: "Read the highest-round analysis review artifact and confirm feedback is approved or handled"
       outputs:
         - name: plan
           pattern: "plan.md | plan-r{N}.md"
-          rule: "Scan existing plan artifacts; create plan.md for the first round, then plan-r{N}.md for later revisions (N = current highest round + 1)"
+          rule: "Scan existing plan artifacts; create plan.md for round 1 and plan-r{N}.md for later revisions (N = current highest round + 1)"
     outputs:
-      - Fix plan recorded in the task file
-      - List of test cases to add
+      - Fix plan
+      - Regression test list
 
-  - name: implementation
-    description: Implement the bug fix and add regression tests.
+  - name: design-review
+    description: Review whether the fix plan addresses the root cause, has sufficient tests, and controls side effects.
+    recommended_agents:
+      - claude
+      - gemini
+    tasks:
+      - Verify the plan covers the approved root-cause analysis
+      - Check regression test strategy and potential side effects
+      - Confirm the plan is ready for coding
+      - Create the plan review report
+    inputs:
+      - Latest fix plan
+      - Latest root-cause analysis and review report
+    artifact_versioning:
+      inputs:
+        - name: plan
+          pattern: "plan.md | plan-r{N}.md"
+          rule: "Read the highest-round plan artifact as review input"
+      outputs:
+        - name: review-plan
+          pattern: "review-plan.md | review-plan-r{N}.md"
+          rule: "Scan existing plan review artifacts; create review-plan.md for round 1 and review-plan-r{N}.md for later rounds (N = current highest round + 1)"
+    outputs:
+      - Plan review report
+      - Findings to fix, if any
+
+  - name: code
+    description: Implement the defect fix and regression coverage; run the same stage again after code review to handle fixes.
     recommended_agents:
       - codex
       - cursor
     tasks:
       - Create a bug-fix branch
       - Implement the fix
-      - Add regression tests that would fail without the fix
-      - Verify that existing tests still pass
-      - Ensure the code follows project conventions
+      - Add a regression test that fails without the fix
+      - Fix findings from the latest code-review artifact when in fix mode
+      - Verify existing tests still pass
+      - Ensure code follows project conventions
     inputs:
-      - Fix plan from the previous step
+      - Approved fix plan
       - Project coding standards
+      - Latest code review report when in fix mode
     artifact_versioning:
+      inputs:
+        - name: plan
+          pattern: "plan.md | plan-r{N}.md"
+          rule: "Read the highest-round plan artifact as implementation input"
+        - name: review-plan
+          pattern: "review-plan.md | review-plan-r{N}.md"
+          rule: "Read the highest-round plan review artifact and confirm feedback is approved or handled"
+        - name: review-code
+          pattern: "review-code.md | review-code-r{N}.md"
+          rule: "In fix mode, read the highest-round code review artifact and verify it matches the latest Code Review entry in task.md Activity Log"
       outputs:
-        - name: implementation
-          pattern: "implementation.md | implementation-r{N}.md"
-          rule: "Scan existing implementation artifacts; create implementation.md for the first round, then implementation-r{N}.md for later re-implementations (N = current highest round + 1)"
+        - name: code
+          pattern: "code.md | code-r{N}.md"
+          rule: "Scan existing code artifacts; create code.md for round 1 and code-r{N}.md for later fixes or reimplementation (N = current highest round + 1)"
     outputs:
-      - Bug-fix branch with the implementation
+      - Bug-fix branch with implementation or fixes
       - Regression test files
-      - Updated task file (implementation notes)
+      - Updated task notes
 
-  - name: review
+  - name: code-review
     description: Verify that the fix is correct and complete.
     recommended_agents:
       - claude
     tasks:
-      - Verify that the fix addresses the root cause
-      - Check whether regression tests are sufficient
-      - Ensure no new issues were introduced
-      - Verify that the fix does not break existing functionality
-      - Create a review report
+      - Verify the fix addresses the root cause
+      - Check regression test sufficiency
+      - Ensure no new problems were introduced
+      - Verify the fix does not break existing behavior
+      - Create the code review report
     inputs:
       - Bug-fix branch
-      - Root cause analysis
+      - Root-cause analysis
     artifact_versioning:
       inputs:
-        - name: implementation
-          pattern: "implementation.md | implementation-r{N}.md"
-          rule: "Read the highest-round implementation artifact as review input"
+        - name: code
+          pattern: "code.md | code-r{N}.md"
+          rule: "Read the highest-round code artifact as review input"
       outputs:
-        - name: review
-          pattern: "review.md | review-r{N}.md"
-          rule: "Scan existing review artifacts; create review.md for the first round, then review-r{N}.md for later rounds (N = current highest round + 1)"
+        - name: review-code
+          pattern: "review-code.md | review-code-r{N}.md"
+          rule: "Scan existing code review artifacts; create review-code.md for round 1 and review-code-r{N}.md for later rounds (N = current highest round + 1)"
     outputs:
-      - Review report
-      - List of issues if any
-
-  - name: fix
-    description: Address issues found during review.
-    recommended_agents:
-      - codex
-      - cursor
-    tasks:
-      - Fix issues identified in the review
-      - Update tests as needed
-      - Verify that all tests pass
-    inputs:
-      - Review report
-      - Bug-fix branch
-    artifact_versioning:
-      inputs:
-        - name: review
-          pattern: "review.md | review-r{N}.md"
-          rule: "Read the highest-round review artifact and verify that it matches the latest Code Review entry in the task.md Activity Log"
-      outputs:
-        - name: refinement
-          pattern: "refinement.md | refinement-r{N}.md"
-          rule: "Scan existing refinement artifacts; create refinement.md for the first round, then refinement-r{N}.md for later rounds (N = current highest round + 1)"
-    outputs:
-      - Updated branch with fixes
-      - Updated task file
+      - Code review report
+      - Findings list, if any
 
   - name: commit
-    description: Finalize the bug fix and create a pull request.
+    description: Finalize the defect fix and create a pull request.
     recommended_agents:
       - claude
       - human
     tasks:
       - Ensure all tests pass
-      - Write a commit message that references the bug or issue
-      - Create a pull request with a bug-fix summary
-      - Link the PR to the bug report issue
+      - Write a commit message that references the defect or Issue
+      - Create a pull request with a defect-fix description
+      - Link the PR to the defect report Issue
       - Move the task to completed
     inputs:
       - Final bug-fix branch
-      - Task file
+      - Task workspace
     outputs:
       - Pull request
-      - Completed task file (stored in .agents/workspace/completed/)
+      - Completed task workspace under .agents/workspace/completed/
