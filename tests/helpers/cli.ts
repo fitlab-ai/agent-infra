@@ -7,10 +7,6 @@ function cliArgs(...args: string[]): string[] {
   return [CLI_PATH, ...args];
 }
 
-function cliCommand(...args: string[]): string {
-  return [process.execPath, ...cliArgs(...args)].map((part) => JSON.stringify(part)).join(" ");
-}
-
 function pathWithPrependedBin(binDir: string, envPath: string = process.env.PATH || ""): string {
   return [binDir, envPath].filter(Boolean).join(path.delimiter);
 }
@@ -28,7 +24,6 @@ function envWithPrependedPath(env: NodeJS.ProcessEnv, binDir: string): NodeJS.Pr
 export {
   CLI_PATH,
   cliArgs,
-  cliCommand,
   envWithPrependedPath,
   pathWithPrependedBin
 };

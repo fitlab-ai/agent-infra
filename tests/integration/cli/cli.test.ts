@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, execSync, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { CLI_PATH, cliArgs, cliCommand, envWithPrependedPath, escapeRegExp, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../../helpers.ts";
+import { CLI_PATH, cliArgs, envWithPrependedPath, escapeRegExp, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../../helpers.ts";
 
 const PLATFORM_DEFAULT_ENGINES: Partial<Record<NodeJS.Platform, string>> = {
   linux: "native",
@@ -14,7 +14,7 @@ const PLATFORM_DEFAULT_ENGINES: Partial<Record<NodeJS.Platform, string>> = {
 };
 const CURRENT_PLATFORM = os.platform();
 const DEFAULT_SANDBOX_ENGINE = PLATFORM_DEFAULT_ENGINES[CURRENT_PLATFORM] ?? null;
-const ENGINE_NL = DEFAULT_SANDBOX_ENGINE ? "\\n" : "";
+const ENGINE_NL = DEFAULT_SANDBOX_ENGINE ? "\n" : "";
 
 test("bootstrap CLI files exist", () => {
   assert.ok(exists("install.sh"), "install.sh should exist");
@@ -112,10 +112,11 @@ test("agent-infra init generates seed files in a temp directory", () => {
   const cli = CLI_PATH;
 
   try {
-    execSync(
-      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}\\n\\n\\n' | ${cliCommand("init")}`,
-      { cwd: tmpDir, stdio: "pipe" }
-    );
+    execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: `testproj\ntestorg\n\n${ENGINE_NL}\n\n\n`,
+      stdio: "pipe"
+    });
 
     const config = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
@@ -226,10 +227,12 @@ test("agent-infra init accepts a custom platform selected from the menu", () => 
   const cli = CLI_PATH;
 
   try {
-    const output = execSync(
-      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}2\\nmy-platform\\n\\n\\n' | ${cliCommand("init")}`,
-      { cwd: tmpDir, stdio: "pipe", encoding: "utf8" }
-    );
+    const output = execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: `testproj\ntestorg\n\n${ENGINE_NL}2\nmy-platform\n\n\n`,
+      stdio: "pipe",
+      encoding: "utf8"
+    });
 
     const config = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
@@ -250,10 +253,11 @@ test("agent-infra init remains compatible with direct platform input", () => {
   const cli = CLI_PATH;
 
   try {
-    execSync(
-      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}github\\n\\n\\n' | ${cliCommand("init")}`,
-      { cwd: tmpDir, stdio: "pipe" }
-    );
+    execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: `testproj\ntestorg\n\n${ENGINE_NL}github\n\n\n`,
+      stdio: "pipe"
+    });
 
     const config = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
@@ -269,10 +273,12 @@ test("agent-infra init warns when a custom platform is entered directly", () => 
   const cli = CLI_PATH;
 
   try {
-    const output = execSync(
-      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}gitea\\n\\n\\n' | ${cliCommand("init")}`,
-      { cwd: tmpDir, stdio: "pipe", encoding: "utf8" }
-    );
+    const output = execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: `testproj\ntestorg\n\n${ENGINE_NL}gitea\n\n\n`,
+      stdio: "pipe",
+      encoding: "utf8"
+    });
 
     const config = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
@@ -293,10 +299,11 @@ test("agent-infra init records an optional external template source for any plat
   const cli = CLI_PATH;
 
   try {
-    execSync(
-      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}github\\n~/private-templates\\n\\n' | ${cliCommand("init")}`,
-      { cwd: tmpDir, stdio: "pipe" }
-    );
+    execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: `testproj\ntestorg\n\n${ENGINE_NL}github\n~/private-templates\n\n`,
+      stdio: "pipe"
+    });
 
     const config = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
@@ -317,10 +324,11 @@ test("agent-infra init omits optional source config when source prompts are blan
   const cli = CLI_PATH;
 
   try {
-    execSync(
-      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}gitea\\n\\n\\n' | ${cliCommand("init")}`,
-      { cwd: tmpDir, stdio: "pipe" }
-    );
+    execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: `testproj\ntestorg\n\n${ENGINE_NL}gitea\n\n\n`,
+      stdio: "pipe"
+    });
 
     const config = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
@@ -339,10 +347,11 @@ test("agent-infra init records optional external skill sources", () => {
   const cli = CLI_PATH;
 
   try {
-    execSync(
-      `printf 'testproj\\ntestorg\\n\\n${ENGINE_NL}github\\n\\n~/private-skills, ~/team-skills\\n' | ${cliCommand("init")}`,
-      { cwd: tmpDir, stdio: "pipe" }
-    );
+    execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: `testproj\ntestorg\n\n${ENGINE_NL}github\n\n~/private-skills, ~/team-skills\n`,
+      stdio: "pipe"
+    });
 
     const config = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
@@ -371,10 +380,11 @@ test("installed sync-templates.js executes inside a type=module project", () => 
       "utf8"
     );
 
-    execSync(
-      `printf 'esmproj\\nesmorg\\n\\n${ENGINE_NL}\\n\\n\\n' | ${cliCommand("init")}`,
-      { cwd: tmpDir, stdio: "pipe" }
-    );
+    execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: `esmproj\nesmorg\n\n${ENGINE_NL}\n\n\n`,
+      stdio: "pipe"
+    });
     assert.equal(
       JSON.parse(fs.readFileSync(path.join(tmpDir, "package.json"), "utf8")).type,
       "module",
@@ -519,7 +529,7 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
       "utf8"
     );
 
-    const output = execSync(`${cliCommand("update")}`, {
+    const output = execFileSync(process.execPath, cliArgs("update"), {
       cwd: tmpDir,
       stdio: "pipe",
       encoding: "utf8"
@@ -581,7 +591,7 @@ test("agent-infra update requires .agents/.airc.json", () => {
 
   try {
     assert.throws(() => {
-      execSync(`${cliCommand("update")}`, {
+      execFileSync(process.execPath, cliArgs("update"), {
         cwd: tmpDir,
         stdio: "pipe"
       });
