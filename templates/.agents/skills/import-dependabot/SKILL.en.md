@@ -29,7 +29,7 @@ Extract key information:
 ### 2. Create the Task Directory and File
 
 Check whether `.agents/workspace/active/` already has a task for this alert.
-- If found, ask the user whether to re-import
+- If found, **reuse the existing task by default**; do not ask the user. State clearly in the final notice: "Reused existing task `{task-id}`; not re-imported." If the user wants to re-import, they must first archive or delete the existing task
 - If not found, create a new task
 
 Create directory: `.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
@@ -110,5 +110,5 @@ Next step:
 ## Error Handling
 
 - Alert not found: output "Security alert #{number} not found"
-- Alert already closed: ask the user whether to continue with analysis
+- Alert already closed: **proceed with task creation/reuse by default** and surface the alert's current state (dismissed/fixed) in the final notice; the user may archive the task manually if desired
 - Network/permission error: output the corresponding error information

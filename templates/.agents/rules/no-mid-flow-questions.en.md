@@ -1,13 +1,35 @@
-# General Rule - No Mid-Flow Questions for Lifecycle Skills
+# General Rule - No Mid-Flow Questions During SKILL Execution
 
-> Applies only to lifecycle skills: `analyze-task` / `plan-task` / `implement-task` / `review-task` / `refine-task` (if they are renamed, update references according to the migration map from the refactoring task).
-> Non-lifecycle skills (such as `create-task`, `commit`, `complete-task`, and `import-issue`) include user confirmation as part of their core purpose and are not governed by this rule.
+> **Scope**: this rule applies to **all SKILL** executions.
+> Only the two exemption categories below may ask the user; any other mid-flow question is a violation.
 
-## No-Mid-Flow-Questions Rule
+## Exemption Categories
 
-Lifecycle skills must not ask the user questions during execution.
+### Exemption 1: Literal clarification of entry-point natural-language input
 
-Specific constraints:
+Allowed only when the SKILL's core responsibility is to process **natural-language input the user provided in this invocation**, and that input is unparseable or self-contradictory. The clarification must be about the **literal input itself**; it must not be used to solicit implementation preferences.
+
+SKILLs currently covered by this exemption:
+
+- `create-task`: may clarify the task description itself when the user-provided description is unclear
+- `refine-title`: requires the user's final confirmation (y/n) for a generated title
+
+### Exemption 2: Short confirmation before truly irreversible destructive operations
+
+Any SKILL may pause briefly before the following irreversible operations; routine design choices do not qualify:
+
+- `git push --force`, `rm -rf` against the user's worktree, etc.
+- Deleting or overwriting shared remote resources (e.g., shared GitHub labels)
+- Overwriting uncommitted local changes
+
+SKILLs currently covered by this exemption:
+
+- `init-labels`: may confirm before deleting legacy labels not in the final mapping
+- `commit`: may stop and confirm when its plan conflicts with the user's uncommitted changes
+
+## No-Mid-Flow-Questions Clause (default behavior)
+
+For every SKILL execution context not covered by the two exemptions above, the default behavior is:
 
 1. Do not call any user-question tool, including but not limited to `AskUserQuestion` and equivalent mechanisms that ask the user to choose.
 2. When uncertain, proceed with the most robust option without interrupting the flow. Use this priority order:
@@ -15,11 +37,9 @@ Specific constraints:
    2. Prefer the more reversible option
    3. Prefer the option with the smaller impact area
 3. If assumptions or open questions exist, write them into fixed artifact sections instead of leaving them suspended in the conversation:
-   - `## Assumptions`: assumptions used for this run that may be revisited later
-   - `## Open Questions`: unresolved questions for human review
-
-   If the artifact template does not reserve these sections, append them as needed. If there are no assumptions or open questions, do not force empty sections.
-4. A short confirmation is allowed only before truly irreversible destructive operations, such as `git push --force` or `rm -rf` against the user's worktree. Routine design choices do not qualify.
+   - English artifacts use `## Assumptions` / `## Open Questions`; Chinese artifacts use `## 假设` / `## 未决问题`
+   - Meaning: the assumptions section records assumptions used for this run that may be revisited later; the open questions section records unresolved questions for human review
+   - If the artifact template does not reserve these sections, append them as needed. If there are no assumptions or open questions, do not force empty sections.
 
 ## Human Review Checkpoint Semantics
 
@@ -28,10 +48,14 @@ A mandatory human review checkpoint means:
 - Stop after producing the artifact: once the skill finishes an artifact such as `plan.md`, end the current invocation and wait for the user to explicitly trigger the next skill command
 - Do not pause mid-process to ask for input: do not insert interruptions such as "Do you prefer option A or B?" between execution steps
 
-If a key decision needs human judgment during execution, follow the assumptions and open questions rule above: record it in the artifact's *Open Questions* section for the user to address at the review checkpoint.
+If a key decision needs human judgment during execution, follow the assumptions and open questions rule above: record it in the artifact's "Open Questions" / `未决问题` section for the user to address at the review checkpoint.
 
 ## Reference Format
 
-Each lifecycle SKILL.md references this rule with a single line in its "Boundary / Critical Rules" section:
+Each SKILL.md may reference this rule with a single line in its "Boundary / Critical Rules" section; the project-level AGENTS.md also carries a global pointer. Reference template:
 
 > No-mid-flow-questions rule: during execution, follow `.agents/rules/no-mid-flow-questions.md`; read it first.
+
+Chinese equivalent:
+
+> 禁言规则：执行过程中遵守 `.agents/rules/no-mid-flow-questions.md`；先读取该规则文件。

@@ -25,7 +25,7 @@ Use the Issue title as-is for the task title (preserve the Issue's original lang
 ### 2. Check for an Existing Task
 
 2.1 Search `.agents/workspace/active/` for an existing task linked to this Issue.
-- If found, ask the user whether to re-import or continue with the existing task
+- If found, **reuse the existing task by default** (Scenario A); do not ask the user. State clearly in the final notice: "Reused existing task `{task-id}`; not re-imported." If the user wants to re-import, they must first archive or delete the existing task and run this skill again
 - If not found, continue to 2.2
 
 2.2 Use the "historical task comment scan" command in `.agents/rules/issue-pr-commands.md` to scan Issue comments for sync markers and look for a recoverable historical task ID.
@@ -44,7 +44,7 @@ Exit code handling for the whole pipeline:
 
 | Scenario | Trigger | task ID source | created_at source | User confirmation |
 |---|---|---|---|---|
-| Scenario A | 2.1 finds a local task | Reuse local ID | Preserve local value | Must ask whether to re-import or continue using the existing task |
+| Scenario A | 2.1 finds a local task | Reuse local ID | Preserve local value | Reuse by default; do not ask; inform the user reuse happened |
 | Scenario B | 2.1 no match + 2.2 no candidate | Create with `date +%Y%m%d-%H%M%S` | Current time | Not required |
 | Scenario C | 2.1 no match + 2.2 any candidate | Automatically reuse the earliest candidate ID | Prefer remote frontmatter `created_at`; use current time if missing | Inform only |
 
@@ -175,7 +175,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 ## Notes
 
 1. **Issue validation**: verify that the Issue exists before continuing
-2. **Duplicate task**: if this Issue already has a linked task, ask the user before creating a new one
+2. **Duplicate task**: if this Issue already has a linked task, **reuse it by default** instead of creating a new one (do not ask the user)
 3. **Next step**: after import, run `analyze-task` before `plan-task`
 
 ## Error Handling

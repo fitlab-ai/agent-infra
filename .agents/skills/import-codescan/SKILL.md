@@ -106,5 +106,5 @@ Code Scanning 告警 #{alert-number} 已导入。
 ## 错误处理
 
 - 告警未找到：提示 "Code Scanning alert #{number} not found"
-- 告警已关闭：询问用户是否继续分析
+- 告警已关闭：**默认仍继续创建/复用任务**，并在告知用户中明确该告警当前状态（dismissed/fixed）；用户可视情况手动归档任务
 - 网络/权限错误：提示相应信息

@@ -116,13 +116,13 @@ tail .agents/workspace/active/{task-id}/task.md
 ## 依赖关系
 - {需要的依赖和与其他模块的协调}
 
-## Assumptions
+## 假设
 
 > 如本次分析依赖某些假设，列在此处；没有则可省略本段。
 
 - {本轮分析所依赖的假设}
 
-## Open Questions
+## 未决问题
 
 > 如有需要人工裁定的未决问题，列在此处；没有则可省略本段。
 

@@ -106,5 +106,5 @@ Next step:
 ## Error Handling
 
 - Alert not found: output "Code Scanning alert #{number} not found"
-- Alert already closed: ask the user whether to continue with analysis
+- Alert already closed: **proceed with task creation/reuse by default** and surface the alert's current state (dismissed/fixed) in the final notice; the user may archive the task manually if desired
 - Network/permission error: output the corresponding error information

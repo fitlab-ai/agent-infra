@@ -29,7 +29,7 @@ description: "导入 Dependabot 安全告警并创建修复任务"
 ### 2. 创建任务目录和文件
 
 检查 `.agents/workspace/active/` 中是否已存在该告警的任务。
-- 如果找到，询问用户是否重新导入
+- 如果找到，**默认复用现有任务**，不询问用户；在最终告知中明确「已复用现有任务 `{task-id}`，未重新导入」。如需重新导入，需先归档/删除已有任务
 - 如果未找到，创建新任务
 
 创建目录：`.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
@@ -110,5 +110,5 @@ node .agents/scripts/validate-artifact.js gate import-dependabot .agents/workspa
 ## 错误处理
 
 - 告警未找到：提示 "Security alert #{number} not found"
-- 告警已关闭：询问用户是否继续分析
+- 告警已关闭：**默认仍继续创建/复用任务**，并在告知用户中明确该告警当前状态（dismissed/fixed）；用户可视情况手动归档任务
 - 网络/权限错误：提示相应信息
