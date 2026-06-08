@@ -10,7 +10,6 @@ description: "分析任务并输出需求分析文档"
 - 本技能仅产出需求分析文档（`analysis.md` 或 `analysis-r{N}.md`）—— 不修改任何业务代码
 - 严格基于 `task.md` 中已有的需求、上下文和来源信息展开分析
 - 执行本技能后，你**必须**立即更新 task.md 中的任务状态
-- 禁言规则：执行过程中遵守 `.agents/rules/no-mid-flow-questions.md`；先读取该规则文件。
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 

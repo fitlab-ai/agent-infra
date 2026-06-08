@@ -11,7 +11,6 @@ Review the latest implementation round and produce `review.md` or `review-r{N}.m
 
 - This skill reviews code and writes a report; it does not modify product code
 - After executing this skill, you **must** immediately update task.md
-- No-mid-flow-questions rule: during execution, follow `.agents/rules/no-mid-flow-questions.md`; read it first.
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 

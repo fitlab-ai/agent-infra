@@ -10,7 +10,6 @@ description: "Design a technical plan for a task"
 - This skill only outputs a technical plan document (`plan.md` or `plan-r{N}.md`) and does not modify any business code
 - This is a **mandatory human review checkpoint**; do not automatically proceed to implementation
 - After executing this skill, you **must** immediately update task status in task.md
-- No-mid-flow-questions rule: during execution, follow `.agents/rules/no-mid-flow-questions.md`; read it first.
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 

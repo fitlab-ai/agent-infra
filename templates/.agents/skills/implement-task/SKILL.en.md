@@ -13,7 +13,6 @@ Implement the approved task and produce `implementation.md` or `implementation-r
 - Never auto-run `git add` or `git commit`
 - Create a new implementation artifact for each round and never overwrite an older one
 - After executing this skill, you **must** immediately update task.md
-- No-mid-flow-questions rule: during execution, follow `.agents/rules/no-mid-flow-questions.md`; read it first.
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 

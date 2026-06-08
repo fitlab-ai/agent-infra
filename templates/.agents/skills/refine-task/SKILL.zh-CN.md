@@ -13,7 +13,6 @@ description: "处理代码审查反馈并修复问题"
 - env-blocked 项不在修复范围内：refinement 报告必须如实保留这些项并记录“不在 AI 修复范围（环境性遗留）”，不能为了清空报告做 no-op 改动
 - 绝不自动执行 `git add` 或 `git commit`
 - 执行本技能后，你**必须**立即更新 task.md
-- 禁言规则：执行过程中遵守 `.agents/rules/no-mid-flow-questions.md`；先读取该规则文件。
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 

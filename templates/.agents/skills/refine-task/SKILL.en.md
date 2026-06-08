@@ -13,7 +13,6 @@ Fix review findings and produce `refinement.md` or `refinement-r{N}.md`.
 - env-blocked findings are outside the repair scope: the refinement report must preserve them and record "outside AI repair scope (environment-blocked)" instead of making no-op edits to clear the report
 - Never auto-run `git add` or `git commit`
 - After executing this skill, you **must** immediately update task.md
-- No-mid-flow-questions rule: during execution, follow `.agents/rules/no-mid-flow-questions.md`; read it first.
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 

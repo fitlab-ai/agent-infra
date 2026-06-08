@@ -50,12 +50,8 @@ A mandatory human review checkpoint means:
 
 If a key decision needs human judgment during execution, follow the assumptions and open questions rule above: record it in the artifact's "Open Questions" / `未决问题` section for the user to address at the review checkpoint.
 
-## Reference Format
+## Anchor Location
 
-Each SKILL.md may reference this rule with a single line in its "Boundary / Critical Rules" section; the project-level AGENTS.md also carries a global pointer. Reference template:
+This rule's sole global anchor lives in the project-level AGENTS.md "AI Behavior Principles" preamble, which every AI tool loads. Individual SKILL.md files no longer reference this rule, so no per-skill duplicate bullet needs to be maintained.
 
-> No-mid-flow-questions rule: during execution, follow `.agents/rules/no-mid-flow-questions.md`; read it first.
-
-Chinese equivalent:
-
-> 禁言规则：执行过程中遵守 `.agents/rules/no-mid-flow-questions.md`；先读取该规则文件。
+When executing any SKILL, if AGENTS.md's preamble notes "follow this rule first," the LLM should **proactively Read** this file to load the complete exemption list and concrete constraints.

@@ -50,12 +50,8 @@
 
 如果在执行过程中发现需要用户裁定的关键决策，按上文「假设与未决问题」处理，记录到产物的「未决问题」/`Open Questions` 段落，由用户在审查检查点统一回应。
 
-## 引用方式
+## 锚点位置
 
-各 SKILL.md 可在「行为边界 / 关键规则」段落以单行引用本规则；项目级 AGENTS.md 也对本规则有全局指引。引用模板：
+本规则的唯一全局锚点在项目级 AGENTS.md 的「AI 行为准则」preamble，所有 AI 工具加载 AGENTS.md 时即可见。各 SKILL.md 不再单独引用本规则，避免在每个 SKILL 顶部维护重复 bullet。
 
-> 禁言规则：执行过程中遵守 `.agents/rules/no-mid-flow-questions.md`；先读取该规则文件。
-
-英文等价：
-
-> No-mid-flow-questions rule: during execution, follow `.agents/rules/no-mid-flow-questions.md`; read it first.
+LLM 在执行任一 SKILL 时，若 AGENTS.md 的 preamble 已说明「优先遵循本规则」，应**主动 Read** 本文件以获取完整的例外列表与具体约束。
