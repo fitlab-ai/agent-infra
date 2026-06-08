@@ -73,14 +73,16 @@ Reminder: env-blocked findings must be carried in the PR description as a "manua
 ### Branch D: Rejected
 
 ```text
-Task {task-id} review completed. Verdict: rejected, major rework required.
+Task {task-id} review completed. Verdict: rejected, re-design the technical plan.
 - Blockers: {n} | Major: {n} | Minor: {n}[ | env-blocked: {n} (outside AI repair scope)]
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
-Next step - re-implement:
-  - Claude Code / OpenCode: /code-task {task-id}
-  - Gemini CLI: /agent-infra:code-task {task-id}
-  - Codex CLI: $code-task {task-id}
+Next step - re-design the technical plan:
+  - Claude Code / OpenCode: /plan-task {task-id}
+  - Gemini CLI: /agent-infra:plan-task {task-id}
+  - Codex CLI: $plan-task {task-id}
+
+> Note: Rejected means the implementation direction needs to be reworked end-to-end, not patched locally. `code-task/scripts/detect-mode.js` branch #7 refuses a direct `/code-task` and requires a fresh plan first.
 
 [When env-blocked > 0, append this final line:]
 Reminder: env-blocked findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.

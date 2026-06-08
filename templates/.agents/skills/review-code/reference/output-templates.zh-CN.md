@@ -73,14 +73,16 @@
 ### 场景 D：拒绝
 
 ```text
-任务 {task-id} 代码审查完成。结论：拒绝，需要重大返工。
+任务 {task-id} 代码审查完成。结论：拒绝，需要重新设计方案。
 - 阻塞项：{n} | 主要问题：{n} | 次要问题：{n}[ | 环境性遗留：{n}（不在 AI 修复范围）]
 - 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
 
-下一步 - 重新实现：
-  - Claude Code / OpenCode：/code-task {task-id}
-  - Gemini CLI：/agent-infra:code-task {task-id}
-  - Codex CLI：$code-task {task-id}
+下一步 - 重新设计技术方案：
+  - Claude Code / OpenCode：/plan-task {task-id}
+  - Gemini CLI：/agent-infra:plan-task {task-id}
+  - Codex CLI：$plan-task {task-id}
+
+> 注意：Rejected 表示实现方向需要整体重做，不是局部修复。`code-task/scripts/detect-mode.js` 分支 #7 会拒绝直接 `/code-task`，要求先重新方案设计。
 
 [当 env-blocked > 0 时，在最后附加一行：]
 提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /code-task。
