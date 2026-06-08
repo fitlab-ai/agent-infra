@@ -201,10 +201,10 @@ Summary:
 Output file:
 - Analysis report: .agents/workspace/active/{task-id}/{analysis-artifact}
 
-Next step - create technical plan:
-  - Claude Code / OpenCode: /plan-task {task-id}
-  - Gemini CLI: /{{project}}:plan-task {task-id}
-  - Codex CLI: $plan-task {task-id}
+Next step - review the analysis:
+  - Claude Code / OpenCode: /review-analysis {task-id}
+  - Gemini CLI: /{{project}}:review-analysis {task-id}
+  - Codex CLI: $review-analysis {task-id}
 ```
 
 ## Completion Checklist

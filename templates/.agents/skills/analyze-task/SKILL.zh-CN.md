@@ -201,10 +201,10 @@ node .agents/scripts/validate-artifact.js gate analyze-task .agents/workspace/ac
 产出文件：
 - 分析报告：.agents/workspace/active/{task-id}/{analysis-artifact}
 
-下一步 - 设计技术方案：
-  - Claude Code / OpenCode：/plan-task {task-id}
-  - Gemini CLI：/agent-infra:plan-task {task-id}
-  - Codex CLI：$plan-task {task-id}
+下一步 - 审查需求分析：
+  - Claude Code / OpenCode：/review-analysis {task-id}
+  - Gemini CLI：/agent-infra:review-analysis {task-id}
+  - Codex CLI：$review-analysis {task-id}
 ```
 
 ## 完成检查清单
