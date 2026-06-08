@@ -10,6 +10,7 @@ description: "为任务设计技术方案和实施计划"
 - 本技能仅产出技术方案文档（`plan.md` 或 `plan-r{N}.md`）—— 不修改任何业务代码
 - 这是一个**强制性的人工审查检查点** —— 不要自动进入实现阶段
 - 执行本技能后，你**必须**立即更新 task.md 中的任务状态
+- 禁言规则：执行过程中遵守 `.agents/rules/no-mid-flow-questions.md`；先读取该规则文件。
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 

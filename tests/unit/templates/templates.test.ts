@@ -63,6 +63,8 @@ test("required template files were migrated into templates/", () => {
     "templates/.agents/templates/task.en.md",
     "templates/.agents/rules/version-stamp.en.md",
     "templates/.agents/rules/version-stamp.zh-CN.md",
+    "templates/.agents/rules/no-mid-flow-questions.en.md",
+    "templates/.agents/rules/no-mid-flow-questions.zh-CN.md",
     "templates/.agents/README.en.md",
     "templates/.agents/QUICKSTART.en.md",
     "templates/.agents/skills/archive-tasks/SKILL.en.md",

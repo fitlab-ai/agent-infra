@@ -474,3 +474,21 @@ test("analyze-task and plan-task docs require field re-estimation in update step
     );
   });
 });
+
+test("lifecycle skills reference the no-mid-flow-questions rule", () => {
+  [
+    "analyze-task",
+    "plan-task",
+    "implement-task",
+    "review-task",
+    "refine-task"
+  ].forEach((skill) => {
+    skillDocPaths(skill).forEach((relativePath) => {
+      assert.match(
+        read(relativePath),
+        /\.agents\/rules\/no-mid-flow-questions\.md/,
+        `${relativePath} should reference the no-mid-flow-questions rule`
+      );
+    });
+  });
+});

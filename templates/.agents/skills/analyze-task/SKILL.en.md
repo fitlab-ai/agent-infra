@@ -10,6 +10,7 @@ description: "Analyze a task and produce a requirements document"
 - This skill only outputs a requirements analysis document (`analysis.md` or `analysis-r{N}.md`) and does not modify any business code
 - Base the analysis strictly on the existing requirements, context, and source information in `task.md`
 - After executing this skill, you **must** immediately update task status in task.md
+- No-mid-flow-questions rule: during execution, follow `.agents/rules/no-mid-flow-questions.md`; read it first.
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
@@ -114,6 +115,18 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 
 ## Dependencies
 - {Required dependencies and coordination with other modules}
+
+## Assumptions
+
+> If this analysis depends on assumptions, list them here; omit this section if there are none.
+
+- {assumption}
+
+## Open Questions
+
+> If there are unresolved questions for human review, list them here; omit this section if there are none.
+
+- {open question}
 
 ## Effort and Complexity Assessment
 - Complexity: {High/Medium/Low}
