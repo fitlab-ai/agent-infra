@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>From issue to merged PR in 9 commands.</strong> Define a requirement, let AI handle analysis, planning, coding, review, and delivery — you only step in when it matters.
+  <strong>From issue to merged PR in 11 commands.</strong> Define a requirement, let AI handle analysis, planning, coding, and three-stage review — you only step in when it matters.
 </p>
 
 <p align="center">
@@ -67,10 +67,22 @@ Once initialized, open the project in your AI TUI and install the latest skills:
 > AI scans the codebase, identifies `src/auth/login.ts` as the root cause, and writes `analysis.md`.
 
 ```bash
+/review-analysis TASK-20260319-100000
+```
+
+> AI self-reviews the analysis: *"Approved. 0 blockers, 0 major, 0 minor — scope and root cause are clear, proceed to design."*
+
+```bash
 /plan-task TASK-20260319-100000
 ```
 
 > AI proposes a fix plan: *"Sanitize the email input in `LoginService.validate()` and add a dedicated unit test."*
+
+```bash
+/review-plan TASK-20260319-100000
+```
+
+> AI self-reviews the plan: *"Approved with no findings. Ready for implementation."*
 >
 > **You review the plan and reply in natural language:**
 
@@ -79,7 +91,7 @@ The plan looks right, but don't change the DB schema.
 Just fix it at the application layer in LoginService.
 ```
 
-> AI updates the plan accordingly and confirms.
+> AI re-runs `/plan-task` to update the plan accordingly and confirms.
 
 ```bash
 /code-task TASK-20260319-100000
@@ -107,7 +119,7 @@ Just fix it at the application layer in LoginService.
 
 > Commit created, PR #43 opened (auto-linked to issue #42), task archived.
 
-**9 commands. 1 natural-language correction. From issue to merged PR.** That is the entire SOP — programming can have a standard operating procedure too.
+**11 commands. 1 natural-language correction. From issue to merged PR.** That is the entire SOP — programming can have a standard operating procedure too.
 
 Every command above works the same way in Claude Code, Codex, Gemini CLI, and OpenCode. Switch tools mid-task — the workflow state follows.
 

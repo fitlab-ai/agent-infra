@@ -164,7 +164,7 @@ The receiving AI should read this document first to get up to speed.
 
 ### 1. One AI Per Phase
 
-Don't have multiple AIs working on the same files simultaneously. Follow the sequential workflow: analyze, design, implement, review, fix, commit.
+Don't have multiple AIs working on the same files simultaneously. Follow the sequential workflow: analysis → analysis-review → design → design-review → code → code-review → commit (when any review finds issues, re-run the matching upstream stage).
 
 ### 2. Always Create Handoff Documents
 

@@ -82,13 +82,13 @@ Context files:
 - review-code.md:        Not started
 
 If multiple rounds exist, show all rounds and mark the latest, for example:
-- plan.md: Exists (Round 1)
-- plan-r2.md: Exists (Round 2, latest)
-- review-plan.md: Exists (Round 1)
-- code.md: Exists (Round 1)
-- code-r2.md: Exists (Round 2, latest)
-- review-code.md: Exists (Round 1)
-- review-code-r2.md: Exists (Round 2, latest)
+- plan.md:             Exists (Round 1)
+- plan-r2.md:          Exists (Round 2, latest)
+- review-plan.md:      Exists (Round 1)
+- code.md:             Exists (Round 1)
+- code-r2.md:          Exists (Round 2, latest)
+- review-code.md:      Exists (Round 1)
+- review-code-r2.md:   Exists (Round 2, latest)
 
 Next step:
   Complete implementation, then run code review
@@ -121,19 +121,19 @@ Recommend the appropriate next skill based on the current workflow state. You mu
 >
 > **Important: if the latest review report contains any issue at all, do not use the corresponding review-passed row. Use the corresponding has-issues row instead.**
 
-| Current State | Claude Code / OpenCode | Gemini CLI | Codex CLI |
-|--------------|------------------------|------------|-----------|
-| Analysis Complete | `/review-analysis {task-id}` | `/{{project}}:review-analysis {task-id}` | `$review-analysis {task-id}` |
-| Analysis Review Passed | `/plan-task {task-id}` | `/{{project}}:plan-task {task-id}` | `$plan-task {task-id}` |
-| Analysis Review Has Issues | `/analyze-task {task-id}` | `/{{project}}:analyze-task {task-id}` | `$analyze-task {task-id}` |
-| Plan Complete | `/review-plan {task-id}` | `/{{project}}:review-plan {task-id}` | `$review-plan {task-id}` |
-| Plan Review Passed | `/code-task {task-id}` | `/{{project}}:code-task {task-id}` | `$code-task {task-id}` |
-| Plan Review Has Issues | `/plan-task {task-id}` | `/{{project}}:plan-task {task-id}` | `$plan-task {task-id}` |
-| Code Complete | `/review-code {task-id}` | `/{{project}}:review-code {task-id}` | `$review-code {task-id}` |
-| Code Review Passed | `/commit` | `/{{project}}:commit` | `$commit` |
-| Code Review Has Issues | `/code-task {task-id}` | `/{{project}}:code-task {task-id}` | `$code-task {task-id}` |
-| Task Blocked | Unblock the task or provide the missing information | — | Unblock the task or provide the missing information |
-| Task Completed | No action needed | — | No action needed |
+| Current State              | Claude Code / OpenCode                              | Gemini CLI                               | Codex CLI                                           |
+|----------------------------|-----------------------------------------------------|------------------------------------------|-----------------------------------------------------|
+| Analysis Complete          | `/review-analysis {task-id}`                        | `/{{project}}:review-analysis {task-id}` | `$review-analysis {task-id}`                        |
+| Analysis Review Passed     | `/plan-task {task-id}`                              | `/{{project}}:plan-task {task-id}`       | `$plan-task {task-id}`                              |
+| Analysis Review Has Issues | `/analyze-task {task-id}`                           | `/{{project}}:analyze-task {task-id}`    | `$analyze-task {task-id}`                           |
+| Plan Complete              | `/review-plan {task-id}`                            | `/{{project}}:review-plan {task-id}`     | `$review-plan {task-id}`                            |
+| Plan Review Passed         | `/code-task {task-id}`                              | `/{{project}}:code-task {task-id}`       | `$code-task {task-id}`                              |
+| Plan Review Has Issues     | `/plan-task {task-id}`                              | `/{{project}}:plan-task {task-id}`       | `$plan-task {task-id}`                              |
+| Code Complete              | `/review-code {task-id}`                            | `/{{project}}:review-code {task-id}`     | `$review-code {task-id}`                            |
+| Code Review Passed         | `/commit`                                           | `/{{project}}:commit`                    | `$commit`                                           |
+| Code Review Has Issues     | `/code-task {task-id}`                              | `/{{project}}:code-task {task-id}`       | `$code-task {task-id}`                              |
+| Task Blocked               | Unblock the task or provide the missing information | —                                        | Unblock the task or provide the missing information |
+| Task Completed             | No action needed                                    | —                                        | No action needed                                    |
 
 ## Notes
 

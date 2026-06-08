@@ -78,17 +78,17 @@ description: "查看任务的当前状态和进度"
 - review-analysis.md：    已存在 (Round 1, latest)
 - plan.md：               已存在 (Round 1, latest)
 - review-plan.md：        已存在 (Round 1, latest)
-- code.md：     已存在 (Round 1, latest)
+- code.md：               已存在 (Round 1, latest)
 - review-code.md：        未开始
 
 如果存在多轮产物，显示所有轮次，并标记最新版本，例如：
-- plan.md：已存在 (Round 1)
-- plan-r2.md：已存在 (Round 2, latest)
-- review-plan.md：已存在 (Round 1)
-- code.md：已存在 (Round 1)
-- code-r2.md：已存在 (Round 2, latest)
-- review-code.md：已存在 (Round 1)
-- review-code-r2.md：已存在 (Round 2, latest)
+- plan.md：             已存在 (Round 1)
+- plan-r2.md：          已存在 (Round 2, latest)
+- review-plan.md：      已存在 (Round 1)
+- code.md：             已存在 (Round 1)
+- code-r2.md：          已存在 (Round 2, latest)
+- review-code.md：      已存在 (Round 1)
+- review-code-r2.md：   已存在 (Round 2, latest)
 
 下一步：
   完成实现，然后执行代码审查
@@ -121,19 +121,19 @@ description: "查看任务的当前状态和进度"
 >
 > **特别注意：只要最新审查报告中存在任何问题，就不能使用对应「审查通过」行。必须改用对应「审查有问题」行。**
 
-| 当前状态 | Claude Code / OpenCode | Gemini CLI | Codex CLI |
-|---------|----------------------|------------|-----------|
-| 分析完成 | `/review-analysis {task-id}` | `/agent-infra:review-analysis {task-id}` | `$review-analysis {task-id}` |
-| 需求分析审查通过 | `/plan-task {task-id}` | `/agent-infra:plan-task {task-id}` | `$plan-task {task-id}` |
-| 需求分析审查有问题 | `/analyze-task {task-id}` | `/agent-infra:analyze-task {task-id}` | `$analyze-task {task-id}` |
-| 计划完成 | `/review-plan {task-id}` | `/agent-infra:review-plan {task-id}` | `$review-plan {task-id}` |
-| 技术方案审查通过 | `/code-task {task-id}` | `/agent-infra:code-task {task-id}` | `$code-task {task-id}` |
-| 技术方案审查有问题 | `/plan-task {task-id}` | `/agent-infra:plan-task {task-id}` | `$plan-task {task-id}` |
-| 实现完成 | `/review-code {task-id}` | `/agent-infra:review-code {task-id}` | `$review-code {task-id}` |
-| 代码审查通过 | `/commit` | `/agent-infra:commit` | `$commit` |
-| 代码审查有问题 | `/code-task {task-id}` | `/agent-infra:code-task {task-id}` | `$code-task {task-id}` |
-| 任务被阻塞 | 解除阻塞或提供所需信息 | — | 解除阻塞或提供所需信息 |
-| 任务已完成 | 无需操作 | — | 无需操作 |
+| 当前状态           | Claude Code / OpenCode       | Gemini CLI                               | Codex CLI                    |
+|--------------------|------------------------------|------------------------------------------|------------------------------|
+| 分析完成           | `/review-analysis {task-id}` | `/agent-infra:review-analysis {task-id}` | `$review-analysis {task-id}` |
+| 需求分析审查通过   | `/plan-task {task-id}`       | `/agent-infra:plan-task {task-id}`       | `$plan-task {task-id}`       |
+| 需求分析审查有问题 | `/analyze-task {task-id}`    | `/agent-infra:analyze-task {task-id}`    | `$analyze-task {task-id}`    |
+| 计划完成           | `/review-plan {task-id}`     | `/agent-infra:review-plan {task-id}`     | `$review-plan {task-id}`     |
+| 技术方案审查通过   | `/code-task {task-id}`       | `/agent-infra:code-task {task-id}`       | `$code-task {task-id}`       |
+| 技术方案审查有问题 | `/plan-task {task-id}`       | `/agent-infra:plan-task {task-id}`       | `$plan-task {task-id}`       |
+| 实现完成           | `/review-code {task-id}`     | `/agent-infra:review-code {task-id}`     | `$review-code {task-id}`     |
+| 代码审查通过       | `/commit`                    | `/agent-infra:commit`                    | `$commit`                    |
+| 代码审查有问题     | `/code-task {task-id}`       | `/agent-infra:code-task {task-id}`       | `$code-task {task-id}`       |
+| 任务被阻塞         | 解除阻塞或提供所需信息       | —                                        | 解除阻塞或提供所需信息       |
+| 任务已完成         | 无需操作                     | —                                        | 无需操作                     |
 
 ## 注意事项
 
