@@ -8,7 +8,12 @@ import { prepareDockerfile } from '../dockerfile.ts';
 import { sandboxImageConfigLabel, sandboxLabel } from '../constants.ts';
 import { detectEngine, ensureDocker } from '../engine.ts';
 import { runEngine, runOkEngine, runSafeEngine, runVerboseEngine } from '../shell.ts';
-import { resolveTools, toolNpmPackagesArg } from '../tools.ts';
+import {
+  imageSignatureFields,
+  resolveTools,
+  toolNpmPackagesArg,
+  toolShellInstallScriptBase64
+} from '../tools.ts';
 import type { SandboxTool } from '../tools.ts';
 import { toEnginePath } from '../engines/wsl2-paths.ts';
 import { resolveBuildUid } from '../engines/native.ts';
@@ -23,7 +28,7 @@ function buildSignature(preparedDockerfile: PreparedDockerfile, tools: SandboxTo
   return createHash('sha256')
     .update(JSON.stringify({
       dockerfile: preparedDockerfile.signature,
-      tools: tools.map((tool) => tool.npmPackage)
+      tools: imageSignatureFields(tools)
     }))
     .digest('hex')
     .slice(0, 12);
@@ -66,6 +71,8 @@ export function buildArgs(
     `HOST_GID=${hostGid}`,
     '--build-arg',
     `AI_TOOL_PACKAGES=${toolNpmPackagesArg(tools)}`,
+    '--build-arg',
+    `AI_TOOLS_SHELL_INSTALL_B64=${toolShellInstallScriptBase64(tools)}`,
     '--label',
     sandboxLabel(config),
     '--label',

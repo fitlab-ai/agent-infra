@@ -36,7 +36,13 @@ import {
   runVerboseEngine
 } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
-import { resolveTools, toolConfigDirCandidates, toolNpmPackagesArg } from '../tools.ts';
+import {
+  imageSignatureFields,
+  resolveTools,
+  toolConfigDirCandidates,
+  toolNpmPackagesArg,
+  toolShellInstallScriptBase64
+} from '../tools.ts';
 import type { SandboxTool } from '../tools.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
@@ -113,7 +119,7 @@ function buildSignature(preparedDockerfile: PreparedDockerfile, tools: SandboxTo
   return createHash('sha256')
     .update(JSON.stringify({
       dockerfile: preparedDockerfile.signature,
-      tools: tools.map((tool) => tool.npmPackage)
+      tools: imageSignatureFields(tools)
     }))
     .digest('hex')
     .slice(0, 12);
@@ -1063,6 +1069,8 @@ export function buildImage(
     `HOST_GID=${hostGid}`,
     '--build-arg',
     `AI_TOOL_PACKAGES=${toolNpmPackagesArg(tools)}`,
+    '--build-arg',
+    `AI_TOOLS_SHELL_INSTALL_B64=${toolShellInstallScriptBase64(tools)}`,
     '--label',
     sandboxLabel(config),
     '--label',

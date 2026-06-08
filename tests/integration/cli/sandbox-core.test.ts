@@ -735,7 +735,7 @@ test("sandbox prune collects orphaned per-branch dirs while preserving active an
   const tool = {
     id: "codex",
     name: "Codex",
-    npmPackage: "@openai/codex",
+    install: { type: "npm", cmd: "@openai/codex" },
     sandboxBase: path.join(tmpDir, ".agent-infra", "sandboxes", "codex"),
     containerMount: "/home/devuser/.codex",
     versionCmd: "codex --version",

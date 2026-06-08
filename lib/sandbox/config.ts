@@ -6,6 +6,8 @@ import pc from 'picocolors';
 import { validateSandboxEngine } from './engine.ts';
 import { hostJoin } from './engines/wsl2-paths.ts';
 import { findRuntimeEngineMismatches } from './runtime-engines.ts';
+import { parseCustomTools } from './tools.ts';
+import type { SandboxTool } from './tools.ts';
 
 const DEFAULTS = Object.freeze({
   engine: null,
@@ -26,6 +28,7 @@ type SandboxConfigInput = {
   engine?: string | null;
   runtimes?: string[];
   tools?: string[];
+  customTools?: unknown;
   dockerfile?: string | null;
   vm?: Record<string, unknown>;
 };
@@ -51,6 +54,7 @@ export type SandboxConfig = {
   engine: string | null;
   runtimes: string[];
   tools: string[];
+  customTools: SandboxTool[];
   dockerfile: string | null;
   vm: SandboxVmConfig;
 };
@@ -136,6 +140,8 @@ export function loadConfig({
     }
   }
 
+  const customTools = parseCustomTools(sandbox.customTools, { home });
+
   return {
     repoRoot,
     configPath,
@@ -153,6 +159,7 @@ export function loadConfig({
     tools: Array.isArray(sandbox.tools) && sandbox.tools.length > 0
       ? [...sandbox.tools]
       : defaults.tools,
+    customTools,
     dockerfile,
     vm: {
       cpu: asPositiveNumberOrNull(sandbox.vm?.cpu) ?? defaults.vm.cpu,

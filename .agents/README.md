@@ -258,6 +258,76 @@ args: "<task-id>"   # 可选
 
 `customTUIs` 每个条目对应一个自定义 TUI。若希望 `update-agent-infra` 为自定义 skill 生成命令文件，请在 `dir` 中保留至少一个引用内置 skill 路径的既有命令文件，例如 `.agents/skills/analyze-task/SKILL.md`；agent-infra 会以该文件作为格式参考。
 
+## 沙箱自定义工具（Sandbox Custom Tools）
+
+上文 `customTUIs` 只负责生成 slash-command 文件，**不影响沙箱镜像**。如果要把一个非 npm 分发的 TUI（pip / cargo / curl 脚本 / 裸二进制）装进沙箱镜像、并 live-mount 它的凭证目录，需要在 `.agents/.airc.json` 的 `sandbox.customTools` 中声明。内建的四个工具（`claude-code` / `codex` / `opencode` / `gemini-cli`）行为保持不变。
+
+| 字段 | 必填 | 含义 |
+|------|------|------|
+| `id` | 是 | 小写 id，匹配 `^[a-z0-9][a-z0-9-]*$`；由 `sandbox.tools` 引用；不可与内建 id 冲突。 |
+| `name` | 是 | 报告与提示中显示的名称。 |
+| `install` | 是 | 安装描述符。`{ "type": "npm", "cmd": "<npm 包规范>" }` 执行 `npm install -g <cmd>`；`{ "type": "shell", "cmd": "<shell>" }` 在镜像构建阶段以 `devuser` 执行 shell。 |
+| `containerMount` | 是 | 容器内绝对路径，工具的配置 / 状态目录挂载点。 |
+| `versionCmd` | 是 | 沙箱用来验证工具已安装的 shell 命令。 |
+| `setupHint` | 是 | 首次启动时显示的一行说明。 |
+| `envVars` | 否 | `Record<string, string>` 形式的环境变量，导出到容器中给该工具使用。 |
+| `hostPreSeedFiles` / `hostPreSeedDirs` | 否 | 首次启动时从宿主复制到工具沙箱配置目录的文件 / 目录。 |
+| `pathRewriteFiles` | 否 | 工具配置内需要把宿主路径改写为容器路径的文件。 |
+| `hostLiveMounts` | 否 | 从宿主实时挂载（读写）到工具 `containerMount` 下的文件。 |
+| `postSetupCmds` | 否 | 首次安装完成后在容器内执行的命令。 |
+
+最小 npm 类自定义工具：
+
+```json
+{
+  "sandbox": {
+    "tools": ["claude-code", "my-npm-tool"],
+    "customTools": [
+      {
+        "id": "my-npm-tool",
+        "name": "My Npm Tool",
+        "install": { "type": "npm", "cmd": "my-npm-tool@latest" },
+        "containerMount": "/home/devuser/.my-npm-tool",
+        "versionCmd": "my-npm-tool --version",
+        "setupHint": "首次使用前请在容器内完成认证。"
+      }
+    ]
+  }
+}
+```
+
+最小 shell 类自定义工具（非 npm 分发）：
+
+```json
+{
+  "sandbox": {
+    "tools": ["my-shell-tool"],
+    "customTools": [
+      {
+        "id": "my-shell-tool",
+        "name": "My Shell Tool",
+        "install": { "type": "shell", "cmd": "curl -fsSL https://example.com/install.sh | bash" },
+        "containerMount": "/home/devuser/.my-shell-tool",
+        "versionCmd": "my-shell-tool --version",
+        "setupHint": "首次使用前请在容器内完成认证。"
+      }
+    ]
+  }
+}
+```
+
+### 信任边界与执行身份
+
+- `install.cmd` 在 `docker build` 阶段以 `devuser`（非 root）身份执行，只能写容器内文件系统，不能逃逸到宿主。信任模型与现有 `sandbox.dockerfile` 一致：你是 `.airc.json` 的作者，本次构建做什么由你负责。
+- 因为不是 root，shell 安装无法 `sudo` / `apt-get`。非 npm 分发的几条可用路径：
+  - 用户态安装器，落到 `~/.local/bin`、`~/.cargo/bin`、`~/.npm-global/bin`（如 `pipx`、`cargo install`、`curl … | bash` 配合 `INSTALL_DIR=$HOME/.local/bin`）。
+  - 确实需要 root / 系统包时，仍走原有 `sandbox.dockerfile` 字段，接管整个 Dockerfile。
+- 修改 `install.cmd` 或任何参与镜像签名的字段，下次 `ai sandbox` 命令会触发一次镜像重建。
+
+### 与 `sandbox.dockerfile` 的交互
+
+当 `sandbox.dockerfile` 指向自定义 Dockerfile 时，agent-infra 仍会把 `AI_TOOL_PACKAGES`（空格分隔的 npm 包规范）和 `AI_TOOLS_SHELL_INSTALL_B64`（base64 编码的 shell 安装脚本）作为 `--build-arg` 传入。你的自定义 Dockerfile 若未声明对应 `ARG`，shell 安装路径会被 docker build 静默忽略——这是接管 Dockerfile 后的应有代价。
+
 ## Skill 编写规范
 
 编写或维护 `.agents/skills/*/SKILL.md` 及其模板时，步骤编号遵循以下规则：

@@ -119,7 +119,8 @@ test("composeDockerfile joins runtime fragments in order", async () => {
     assert.match(content, /^FROM ubuntu:24\.04/m);
     assert.match(content, /setup_20\.x/);
     assert.match(content, /python3 python3-pip python3-venv/);
-    assert.match(content, /AI_TOOL_PACKAGES build arg is required/);
+    assert.match(content, /ARG AI_TOOL_PACKAGES=/);
+    assert.match(content, /ARG AI_TOOLS_SHELL_INSTALL_B64=/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -363,7 +364,7 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
 
   sandboxCreate.buildImage(
     { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "/repo" },
-    [{ npmPackage: "@acme/tool" }],
+    [{ install: { type: "npm", cmd: "@acme/tool" } }],
     "/tmp/Dockerfile",
     "sig-123",
     {
@@ -407,6 +408,8 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
     "HOST_GID=20",
     "--build-arg",
     "AI_TOOL_PACKAGES=@acme/tool",
+    "--build-arg",
+    "AI_TOOLS_SHELL_INSTALL_B64=",
     "--label",
     "demo.sandbox",
     "--label",
@@ -423,7 +426,7 @@ test("buildImage forwards HOST_UID=0 and HOST_GID=0 unchanged when host runs as 
 
   sandboxCreate.buildImage(
     { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "/repo" },
-    [{ npmPackage: "@acme/tool" }],
+    [{ install: { type: "npm", cmd: "@acme/tool" } }],
     "/tmp/Dockerfile",
     "sig-123",
     {
@@ -499,7 +502,7 @@ test("buildImage rewrites HOST_UID and HOST_GID to 0 when Docker is rootless", a
 
   sandboxCreate.buildImage(
     { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "/repo" },
-    [{ npmPackage: "@acme/tool" }],
+    [{ install: { type: "npm", cmd: "@acme/tool" } }],
     "/tmp/Dockerfile",
     "sig-123",
     {

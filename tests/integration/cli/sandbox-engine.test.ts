@@ -298,7 +298,7 @@ test("buildImage converts Docker build paths for WSL2", async () => {
 
   sandboxCreate.buildImage(
     { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "F:\\repo" },
-    [{ npmPackage: "@acme/tool" }],
+    [{ install: { type: "npm", cmd: "@acme/tool" } }],
     "F:\\tmp\\Dockerfile",
     "sig-123",
     {
@@ -427,7 +427,7 @@ test("rebuild buildArgs converts Docker build paths for WSL2", async () => {
 
   const args = sandboxRebuild.buildArgs(
     { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "F:\\repo" },
-    [{ npmPackage: "@acme/tool" }],
+    [{ install: { type: "npm", cmd: "@acme/tool" } }],
     "F:\\tmp\\Dockerfile",
     "sig-123",
     { engine: "wsl2", runFn: () => "1000" }
@@ -443,7 +443,7 @@ test("rebuild buildArgs adds refresh build flags after docker build", async () =
 
   const args = sandboxRebuild.buildArgs(
     { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "F:\\repo" },
-    [{ npmPackage: "@acme/tool" }],
+    [{ install: { type: "npm", cmd: "@acme/tool" } }],
     "F:\\tmp\\Dockerfile",
     "sig-123",
     { engine: "wsl2", runFn: () => "1000", refresh: true }
@@ -460,7 +460,7 @@ test("rebuild buildArgs keeps Docker build cache by default", async () => {
 
   const args = sandboxRebuild.buildArgs(
     { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "F:\\repo" },
-    [{ npmPackage: "@acme/tool" }],
+    [{ install: { type: "npm", cmd: "@acme/tool" } }],
     "F:\\tmp\\Dockerfile",
     "sig-123",
     { engine: "wsl2", runFn: () => "1000" }

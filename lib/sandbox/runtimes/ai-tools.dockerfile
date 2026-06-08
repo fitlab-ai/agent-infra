@@ -4,15 +4,19 @@ ENV OPENCODE_DISABLE_AUTOUPDATE=1
 ENV NPM_CONFIG_PREFIX=/home/devuser/.npm-global
 ENV PATH="/home/devuser/.npm-global/bin:${PATH}"
 
-ARG AI_TOOL_PACKAGES
-RUN if [ -z "${AI_TOOL_PACKAGES}" ]; then \
-      echo "AI_TOOL_PACKAGES build arg is required"; \
-      exit 1; \
-    fi && \
-    set -e && \
+ARG AI_TOOL_PACKAGES=
+RUN set -e && \
     for pkg in ${AI_TOOL_PACKAGES}; do \
       npm install -g "$pkg"; \
     done
+
+ARG AI_TOOLS_SHELL_INSTALL_B64=
+RUN if [ -n "${AI_TOOLS_SHELL_INSTALL_B64}" ]; then \
+      set -e && \
+      echo "${AI_TOOLS_SHELL_INSTALL_B64}" | base64 -d > /tmp/ai-tools-install.sh && \
+      bash /tmp/ai-tools-install.sh && \
+      rm /tmp/ai-tools-install.sh; \
+    fi
 
 RUN npm install -g pyright
 

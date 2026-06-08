@@ -1,10 +1,14 @@
 import { safeNameCandidates, sanitizeBranchName } from './constants.ts';
 import { hostJoin } from './engines/wsl2-paths.ts';
 
+export type SandboxToolInstall =
+  | { type: 'npm'; cmd: string }
+  | { type: 'shell'; cmd: string };
+
 export type SandboxTool = {
   id: string;
   name: string;
-  npmPackage: string;
+  install: SandboxToolInstall;
   sandboxBase: string;
   containerMount: string;
   versionCmd: string;
@@ -21,14 +25,17 @@ type ToolsConfig = {
   home: string;
   project: string;
   tools: string[];
+  customTools?: SandboxTool[];
 };
+
+const TOOL_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 function createBuiltinTools(home: string, project: string): Record<string, SandboxTool> {
   return {
     'claude-code': {
       id: 'claude-code',
       name: 'Claude Code',
-      npmPackage: '@anthropic-ai/claude-code@stable',
+      install: { type: 'npm', cmd: '@anthropic-ai/claude-code@stable' },
       sandboxBase: hostJoin(home, '.agent-infra', 'sandboxes', 'claude-code'),
       containerMount: '/home/devuser/.claude',
       versionCmd: 'claude --version',
@@ -58,7 +65,7 @@ function createBuiltinTools(home: string, project: string): Record<string, Sandb
     codex: {
       id: 'codex',
       name: 'Codex',
-      npmPackage: '@openai/codex',
+      install: { type: 'npm', cmd: '@openai/codex' },
       sandboxBase: hostJoin(home, '.agent-infra', 'sandboxes', 'codex'),
       containerMount: '/home/devuser/.codex',
       versionCmd: 'codex --version',
@@ -73,7 +80,7 @@ function createBuiltinTools(home: string, project: string): Record<string, Sandb
     opencode: {
       id: 'opencode',
       name: 'OpenCode',
-      npmPackage: 'opencode-ai',
+      install: { type: 'npm', cmd: 'opencode-ai' },
       sandboxBase: hostJoin(home, '.agent-infra', 'sandboxes', 'opencode'),
       containerMount: '/home/devuser/.local/share/opencode',
       versionCmd: 'opencode version',
@@ -92,7 +99,7 @@ function createBuiltinTools(home: string, project: string): Record<string, Sandb
     'gemini-cli': {
       id: 'gemini-cli',
       name: 'Gemini CLI',
-      npmPackage: '@google/gemini-cli',
+      install: { type: 'npm', cmd: '@google/gemini-cli' },
       sandboxBase: hostJoin(home, '.agent-infra', 'sandboxes', 'gemini-cli'),
       containerMount: '/home/devuser/.gemini',
       versionCmd: 'gemini --version',
@@ -108,16 +115,223 @@ function createBuiltinTools(home: string, project: string): Record<string, Sandb
   };
 }
 
+export function builtinToolIds(): string[] {
+  return Object.keys(createBuiltinTools('', ''));
+}
+
 function validateTool(tool: SandboxTool): void {
-  if (!tool.npmPackage || !tool.containerMount.startsWith('/')) {
-    throw new Error(`Invalid sandbox tool descriptor: ${tool.id}`);
+  if (!tool.id || !TOOL_ID_PATTERN.test(tool.id)) {
+    throw new Error(`Invalid sandbox tool id: ${String(tool.id)}`);
   }
+  if (!tool.name) {
+    throw new Error(`Sandbox tool ${tool.id} is missing required field: name`);
+  }
+  if (!tool.install || (tool.install.type !== 'npm' && tool.install.type !== 'shell')) {
+    throw new Error(`Sandbox tool ${tool.id} has invalid install.type`);
+  }
+  if (!tool.install.cmd) {
+    throw new Error(`Sandbox tool ${tool.id} has empty install.cmd`);
+  }
+  if (!tool.containerMount || !tool.containerMount.startsWith('/')) {
+    throw new Error(`Sandbox tool ${tool.id} containerMount must be an absolute path`);
+  }
+  if (!tool.versionCmd) {
+    throw new Error(`Sandbox tool ${tool.id} has empty versionCmd`);
+  }
+  if (!tool.setupHint) {
+    throw new Error(`Sandbox tool ${tool.id} has empty setupHint`);
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown, field: string, context: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`${context}: field "${field}" must be a string`);
+  }
+  return value;
+}
+
+function asOptionalString(value: unknown, field: string, context: string): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new Error(`${context}: field "${field}" must be a string when provided`);
+  }
+  return value;
+}
+
+function asStringRecord(value: unknown, field: string, context: string): Record<string, string> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isPlainObject(value)) {
+    throw new Error(`${context}: field "${field}" must be an object when provided`);
+  }
+  const out: Record<string, string> = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (typeof val !== 'string') {
+      throw new Error(`${context}: field "${field}.${key}" must be a string`);
+    }
+    out[key] = val;
+  }
+  return out;
+}
+
+function asStringArray(value: unknown, field: string, context: string): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${context}: field "${field}" must be an array when provided`);
+  }
+  return value.map((item, index) => {
+    if (typeof item !== 'string') {
+      throw new Error(`${context}: field "${field}[${index}]" must be a string`);
+    }
+    return item;
+  });
+}
+
+function parseInstall(value: unknown, context: string): SandboxToolInstall {
+  if (!isPlainObject(value)) {
+    throw new Error(`${context}: field "install" must be an object`);
+  }
+  const type = value.type;
+  if (type !== 'npm' && type !== 'shell') {
+    throw new Error(`${context}: field "install.type" must be "npm" or "shell"`);
+  }
+  const cmd = asString(value.cmd, 'install.cmd', context);
+  if (!cmd) {
+    throw new Error(`${context}: field "install.cmd" must be non-empty`);
+  }
+  return { type, cmd };
+}
+
+function parseHostPreSeedFiles(value: unknown, context: string): SandboxTool['hostPreSeedFiles'] {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${context}: field "hostPreSeedFiles" must be an array when provided`);
+  }
+  return value.map((item, index) => {
+    if (!isPlainObject(item)) {
+      throw new Error(`${context}: field "hostPreSeedFiles[${index}]" must be an object`);
+    }
+    return {
+      hostPath: asString(item.hostPath, `hostPreSeedFiles[${index}].hostPath`, context),
+      sandboxName: asString(item.sandboxName, `hostPreSeedFiles[${index}].sandboxName`, context)
+    };
+  });
+}
+
+function parseHostPreSeedDirs(value: unknown, context: string): SandboxTool['hostPreSeedDirs'] {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${context}: field "hostPreSeedDirs" must be an array when provided`);
+  }
+  return value.map((item, index) => {
+    if (!isPlainObject(item)) {
+      throw new Error(`${context}: field "hostPreSeedDirs[${index}]" must be an object`);
+    }
+    return {
+      hostDir: asString(item.hostDir, `hostPreSeedDirs[${index}].hostDir`, context),
+      sandboxSubdir: asString(item.sandboxSubdir, `hostPreSeedDirs[${index}].sandboxSubdir`, context)
+    };
+  });
+}
+
+function parseHostLiveMounts(value: unknown, context: string): SandboxTool['hostLiveMounts'] {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${context}: field "hostLiveMounts" must be an array when provided`);
+  }
+  return value.map((item, index) => {
+    if (!isPlainObject(item)) {
+      throw new Error(`${context}: field "hostLiveMounts[${index}]" must be an object`);
+    }
+    return {
+      hostPath: asString(item.hostPath, `hostLiveMounts[${index}].hostPath`, context),
+      containerSubpath: asString(item.containerSubpath, `hostLiveMounts[${index}].containerSubpath`, context)
+    };
+  });
+}
+
+export function parseCustomTool(
+  entry: unknown,
+  index: number,
+  options: { home: string }
+): SandboxTool {
+  const context = `customTools[${index}]`;
+  if (!isPlainObject(entry)) {
+    throw new Error(`${context} must be an object`);
+  }
+
+  const id = asString(entry.id, 'id', context);
+  if (!TOOL_ID_PATTERN.test(id)) {
+    throw new Error(`${context}: field "id" must match ${TOOL_ID_PATTERN.source}`);
+  }
+
+  const tool: SandboxTool = {
+    id,
+    name: asString(entry.name, 'name', context),
+    install: parseInstall(entry.install, context),
+    sandboxBase: hostJoin(options.home, '.agent-infra', 'sandboxes', id),
+    containerMount: asString(entry.containerMount, 'containerMount', context),
+    versionCmd: asString(entry.versionCmd, 'versionCmd', context),
+    setupHint: asString(entry.setupHint, 'setupHint', context),
+    envVars: asStringRecord(entry.envVars, 'envVars', context),
+    hostPreSeedFiles: parseHostPreSeedFiles(entry.hostPreSeedFiles, context),
+    hostPreSeedDirs: parseHostPreSeedDirs(entry.hostPreSeedDirs, context),
+    pathRewriteFiles: asStringArray(entry.pathRewriteFiles, 'pathRewriteFiles', context),
+    hostLiveMounts: parseHostLiveMounts(entry.hostLiveMounts, context),
+    postSetupCmds: asStringArray(entry.postSetupCmds, 'postSetupCmds', context)
+  };
+
+  validateTool(tool);
+  return tool;
+}
+
+export function parseCustomTools(value: unknown, options: { home: string }): SandboxTool[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error('sandbox: "customTools" must be an array');
+  }
+  return value.map((entry, index) => parseCustomTool(entry, index, options));
 }
 
 export function resolveTools(config: ToolsConfig): SandboxTool[] {
   const builtins = createBuiltinTools(config.home, config.project);
+  const customs = config.customTools ?? [];
+
+  const seen = new Set<string>();
+  for (const tool of customs) {
+    if (builtins[tool.id]) {
+      throw new Error(`Custom sandbox tool id "${tool.id}" collides with a built-in tool`);
+    }
+    if (seen.has(tool.id)) {
+      throw new Error(`Duplicate sandbox tool id "${tool.id}" in customTools`);
+    }
+    seen.add(tool.id);
+  }
+
+  const merged: Record<string, SandboxTool> = { ...builtins };
+  for (const tool of customs) {
+    merged[tool.id] = tool;
+  }
+
   return config.tools.map((id) => {
-    const tool = builtins[id];
+    const tool = merged[id];
     if (!tool) {
       throw new Error(`Unknown sandbox tool: ${id}`);
     }
@@ -139,5 +353,29 @@ export function toolProjectDirCandidates(tool: SandboxTool, project: string): st
 }
 
 export function toolNpmPackagesArg(tools: SandboxTool[]): string {
-  return tools.map((tool) => tool.npmPackage).join(' ');
+  return tools
+    .filter((tool) => tool.install.type === 'npm')
+    .map((tool) => tool.install.cmd)
+    .join(' ');
+}
+
+export function toolShellInstallScript(tools: SandboxTool[]): string {
+  const blocks = tools
+    .filter((tool) => tool.install.type === 'shell')
+    .map((tool) => `# install: ${tool.id}\n${tool.install.cmd}`);
+
+  if (blocks.length === 0) {
+    return '';
+  }
+
+  return ['#!/bin/bash', 'set -e', '', ...blocks, ''].join('\n');
+}
+
+export function toolShellInstallScriptBase64(tools: SandboxTool[]): string {
+  const script = toolShellInstallScript(tools);
+  return script ? Buffer.from(script, 'utf8').toString('base64') : '';
+}
+
+export function imageSignatureFields(tools: SandboxTool[]): Array<{ id: string; install: SandboxToolInstall }> {
+  return tools.map((tool) => ({ id: tool.id, install: tool.install }));
 }
