@@ -262,41 +262,14 @@ args: "<task-id>"   # 可选
 
 上文 `customTUIs` 只负责生成 slash-command 文件，**不影响沙箱镜像**。如果要把一个非 npm 分发的 TUI（pip / cargo / curl 脚本 / 裸二进制）装进沙箱镜像、并 live-mount 它的凭证目录，需要在 `.agents/.airc.json` 的 `sandbox.customTools` 中声明。内建的四个工具（`claude-code` / `codex` / `opencode` / `gemini-cli`）行为保持不变。
 
-| 字段 | 必填 | 含义 |
-|------|------|------|
-| `id` | 是 | 小写 id，匹配 `^[a-z0-9][a-z0-9-]*$`；由 `sandbox.tools` 引用；不可与内建 id 冲突。 |
-| `name` | 是 | 报告与提示中显示的名称。 |
-| `install` | 是 | 安装描述符。`{ "type": "npm", "cmd": "<npm 包规范>" }` 执行 `npm install -g <cmd>`；`{ "type": "shell", "cmd": "<shell>" }` 在镜像构建阶段以 `devuser` 执行 shell。 |
-| `containerMount` | 是 | 容器内绝对路径，工具的配置 / 状态目录挂载点。 |
-| `versionCmd` | 是 | 沙箱用来验证工具已安装的 shell 命令。 |
-| `setupHint` | 是 | 首次启动时显示的一行说明。 |
-| `envVars` | 否 | `Record<string, string>` 形式的环境变量，导出到容器中给该工具使用。 |
-| `hostPreSeedFiles` / `hostPreSeedDirs` | 否 | 首次启动时从宿主复制到工具沙箱配置目录的文件 / 目录。 |
-| `pathRewriteFiles` | 否 | 工具配置内需要把宿主路径改写为容器路径的文件。 |
-| `hostLiveMounts` | 否 | 从宿主实时挂载（读写）到工具 `containerMount` 下的文件。 |
-| `postSetupCmds` | 否 | 首次安装完成后在容器内执行的命令。 |
+### 必填字段
 
-最小 npm 类自定义工具：
+| 字段 | 含义 |
+|------|------|
+| `id` | 小写 id，匹配 `^[a-z0-9][a-z0-9-]*$`；由 `sandbox.tools` 引用；不可与内建 id 冲突。 |
+| `install` | 安装描述符。`{ "type": "npm", "cmd": "<npm 包规范>" }` 执行 `npm install -g <cmd>`；`{ "type": "shell", "cmd": "<shell>" }` 在镜像构建阶段以 `devuser` 执行 shell。`cmd` 必须非空。 |
 
-```json
-{
-  "sandbox": {
-    "tools": ["claude-code", "my-npm-tool"],
-    "customTools": [
-      {
-        "id": "my-npm-tool",
-        "name": "My Npm Tool",
-        "install": { "type": "npm", "cmd": "my-npm-tool@latest" },
-        "containerMount": "/home/devuser/.my-npm-tool",
-        "versionCmd": "my-npm-tool --version",
-        "setupHint": "首次使用前请在容器内完成认证。"
-      }
-    ]
-  }
-}
-```
-
-最小 shell 类自定义工具（非 npm 分发）：
+最小入口——把一个工具装进镜像所需的契约只有这两个字段：
 
 ```json
 {
@@ -305,11 +278,45 @@ args: "<task-id>"   # 可选
     "customTools": [
       {
         "id": "my-shell-tool",
-        "name": "My Shell Tool",
-        "install": { "type": "shell", "cmd": "curl -fsSL https://example.com/install.sh | bash" },
-        "containerMount": "/home/devuser/.my-shell-tool",
-        "versionCmd": "my-shell-tool --version",
-        "setupHint": "首次使用前请在容器内完成认证。"
+        "install": { "type": "shell", "cmd": "curl -fsSL https://example.com/install.sh | bash" }
+      }
+    ]
+  }
+}
+```
+
+### 可选集成字段
+
+只在你的工具真正需要时才加。**省略**则 loader 用合理默认值；**显式提供**则用你给的值；**显式给空串**会被拒绝（防止安装验证被绕过）。
+
+| 字段 | 省略时的默认值 | 什么时候应该提供 |
+|------|---------------|----------------|
+| `name` | `id` | 想在沙箱报告 / 提示里显示更友好的名称。 |
+| `containerMount` | `/home/devuser/.<id>` | 工具的配置 / 状态目录不在 `~/.<id>` 而在别处。必须是绝对路径。 |
+| `versionCmd` | `which <id>` | 安装后的可执行文件名与 `id` 不同（例如 id 是 `anthropic-claude`，二进制名是 `claude`）；填 `"claude --version"` 让 sandbox-create 能验证安装。 |
+| `setupHint` | `Run \`<id>\` inside the container to set up.` | setup 流程不一目了然，值得用一行说明。 |
+| `envVars` | （无） | 工具通过环境变量找配置（如 `XDG_CONFIG_HOME` 风格或自定义 `*_CONFIG` 变量）。形状：`Record<string, string>`。 |
+| `hostPreSeedFiles` / `hostPreSeedDirs` | （无） | 首次启动时从宿主复制文件 / 目录到工具沙箱配置目录。 |
+| `pathRewriteFiles` | （无） | seed 进来的文件里有宿主绝对路径，需要改写为容器路径。 |
+| `hostLiveMounts` | （无） | 把宿主凭证（如 OAuth token）实时挂进容器，读写共享。 |
+| `postSetupCmds` | （无） | 首次安装完成后在容器内执行命令（如建符号链接）。 |
+
+> **`sandboxBase` 不由用户配置。** loader 永远使用 `~/.agent-infra/sandboxes/<id>`，这样 `ai sandbox rm` / `prune` 才能找到工具状态目录。`customTools` 条目里写的任何 `sandboxBase` 都会被静默忽略。
+
+实际场景示例——`anthropic-claude` 作为用户自定义 id，二进制名是 `claude`，并把宿主凭证 live-mount 进来：
+
+```json
+{
+  "sandbox": {
+    "tools": ["claude-code", "anthropic-claude"],
+    "customTools": [
+      {
+        "id": "anthropic-claude",
+        "install": { "type": "npm", "cmd": "@anthropic-ai/claude-code@stable" },
+        "versionCmd": "claude --version",
+        "hostLiveMounts": [
+          { "hostPath": "~/.claude/.credentials.json", "containerSubpath": ".credentials.json" }
+        ]
       }
     ]
   }

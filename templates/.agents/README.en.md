@@ -262,41 +262,14 @@ Namespaced custom TUI:
 
 `customTUIs` (above) generates slash-command files but does not change the sandbox image. To install a non-npm TUI (pip / cargo / curl-based / pre-built binary) into the sandbox image and live-mount its credentials, declare it under `sandbox.customTools` in `.agents/.airc.json`. Built-in tools (`claude-code`, `codex`, `opencode`, `gemini-cli`) keep working unchanged.
 
-| Field | Required | Meaning |
-|-------|----------|---------|
-| `id` | Yes | Lowercase id matching `^[a-z0-9][a-z0-9-]*$`. Referenced from `sandbox.tools`. Must not collide with a built-in id. |
-| `name` | Yes | Display name shown in reports. |
-| `install` | Yes | Install descriptor. `{ "type": "npm", "cmd": "<npm package spec>" }` runs `npm install -g <cmd>`. `{ "type": "shell", "cmd": "<shell>" }` runs the shell command(s) as `devuser` during image build. |
-| `containerMount` | Yes | Absolute path inside the container that holds this tool's config / state directory. |
-| `versionCmd` | Yes | Shell command used by the sandbox to verify the tool is installed. |
-| `setupHint` | Yes | One-line hint shown to users during first launch. |
-| `envVars` | No | `Record<string, string>` of env vars exported into the container for this tool. |
-| `hostPreSeedFiles` / `hostPreSeedDirs` | No | Files / directories copied from host into the tool's sandbox config on first launch. |
-| `pathRewriteFiles` | No | Files inside the tool config whose host paths should be rewritten to container paths. |
-| `hostLiveMounts` | No | Files mounted live (read-write) from host into the tool's containerMount. |
-| `postSetupCmds` | No | Commands run in the container after first setup. |
+### Required fields
 
-Minimal npm-type custom tool:
+| Field | Meaning |
+|-------|---------|
+| `id` | Lowercase id matching `^[a-z0-9][a-z0-9-]*$`. Referenced from `sandbox.tools`. Must not collide with a built-in id. |
+| `install` | Install descriptor. `{ "type": "npm", "cmd": "<npm package spec>" }` runs `npm install -g <cmd>`. `{ "type": "shell", "cmd": "<shell>" }` runs the shell command(s) as `devuser` during image build. `cmd` must be non-empty. |
 
-```json
-{
-  "sandbox": {
-    "tools": ["claude-code", "my-npm-tool"],
-    "customTools": [
-      {
-        "id": "my-npm-tool",
-        "name": "My Npm Tool",
-        "install": { "type": "npm", "cmd": "my-npm-tool@latest" },
-        "containerMount": "/home/devuser/.my-npm-tool",
-        "versionCmd": "my-npm-tool --version",
-        "setupHint": "Authenticate inside the container before first use."
-      }
-    ]
-  }
-}
-```
-
-Minimal shell-type custom tool (non-npm distribution):
+Minimal entry — the contract for getting a tool into the image is just these two fields:
 
 ```json
 {
@@ -305,11 +278,45 @@ Minimal shell-type custom tool (non-npm distribution):
     "customTools": [
       {
         "id": "my-shell-tool",
-        "name": "My Shell Tool",
-        "install": { "type": "shell", "cmd": "curl -fsSL https://example.com/install.sh | bash" },
-        "containerMount": "/home/devuser/.my-shell-tool",
-        "versionCmd": "my-shell-tool --version",
-        "setupHint": "Authenticate inside the container before first use."
+        "install": { "type": "shell", "cmd": "curl -fsSL https://example.com/install.sh | bash" }
+      }
+    ]
+  }
+}
+```
+
+### Optional integration fields
+
+Add only the fields your tool actually needs. Omit them and the loader fills sensible defaults; provide them and the loader uses your value. Provide an explicit empty string and the loader rejects it (preventing silent install-verification bypass).
+
+| Field | Default when omitted | When to provide |
+|-------|---------------------|-----------------|
+| `name` | `id` | A friendlier display name in sandbox reports / hints. |
+| `containerMount` | `/home/devuser/.<id>` | Your tool stores its config / state somewhere other than `~/.<id>`. Must be an absolute path. |
+| `versionCmd` | `which <id>` | The installed binary name differs from `id` (e.g. id `anthropic-claude`, binary `claude`); set `"claude --version"` so sandbox-create can verify the install. |
+| `setupHint` | `Run \`<id>\` inside the container to set up.` | The setup story is non-obvious and worth a one-liner. |
+| `envVars` | (none) | Your tool reads config from a path the env points to (e.g. `XDG_CONFIG_HOME`-style or a custom `*_CONFIG` env). Shape: `Record<string, string>`. |
+| `hostPreSeedFiles` / `hostPreSeedDirs` | (none) | Seed the tool's sandbox dir from host files / directories on first launch. |
+| `pathRewriteFiles` | (none) | Seeded files contain absolute host paths that need rewriting to container paths. |
+| `hostLiveMounts` | (none) | Share host credentials live (e.g. OAuth tokens) with the container. Read-write. |
+| `postSetupCmds` | (none) | Run commands inside the container after first setup (e.g. symlinks). |
+
+> **`sandboxBase` is not user-configurable.** The loader always assigns `~/.agent-infra/sandboxes/<id>` so `ai sandbox rm` / `prune` can find tool state. Any `sandboxBase` value in `customTools` entries is silently ignored.
+
+Real-world example — `anthropic-claude` as a user-defined id with binary name `claude` and host credential live-mount:
+
+```json
+{
+  "sandbox": {
+    "tools": ["claude-code", "anthropic-claude"],
+    "customTools": [
+      {
+        "id": "anthropic-claude",
+        "install": { "type": "npm", "cmd": "@anthropic-ai/claude-code@stable" },
+        "versionCmd": "claude --version",
+        "hostLiveMounts": [
+          { "hostPath": "~/.claude/.credentials.json", "containerSubpath": ".credentials.json" }
+        ]
       }
     ]
   }

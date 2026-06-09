@@ -34,13 +34,15 @@ function writeAirc(repoRoot: string, body: Record<string, unknown>): void {
   );
 }
 
-test("loadConfig parses sandbox.customTools and fills sandboxBase under ~/.agent-infra/sandboxes", async () => {
+test("loadConfig parses the minimal {id, install} customTools entry and fills all other fields with defaults", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-tools-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-tools-minimal-"));
   const previousCwd = process.cwd();
 
   try {
     execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    // The minimal entry is the contract that documentation promises: 2 fields
+    // (id + install) are required; everything else gets a sensible default.
     writeAirc(tmpDir, {
       project: "demo",
       sandbox: {
@@ -48,11 +50,7 @@ test("loadConfig parses sandbox.customTools and fills sandboxBase under ~/.agent
         customTools: [
           {
             id: "my-tool",
-            name: "My Custom Tool",
-            install: { type: "shell", cmd: SHELL_INSTALL_CMD },
-            containerMount: "/home/devuser/.mytool",
-            versionCmd: "mytool --version",
-            setupHint: "fixture"
+            install: { type: "shell", cmd: SHELL_INSTALL_CMD }
           }
         ]
       }
@@ -65,10 +63,23 @@ test("loadConfig parses sandbox.customTools and fills sandboxBase under ~/.agent
     const tool = config.customTools[0];
     assert.equal(tool?.id, "my-tool");
     assert.deepEqual(tool?.install, { type: "shell", cmd: SHELL_INSTALL_CMD });
+    // Defaults derived from id
+    assert.equal(tool?.name, "my-tool");
+    assert.equal(tool?.containerMount, "/home/devuser/.my-tool");
+    assert.equal(tool?.versionCmd, "which my-tool");
+    assert.match(tool?.setupHint ?? "", /^Run/);
+    // sandboxBase is always derived; not user-configurable
     assert.equal(
       tool?.sandboxBase,
       path.join(process.env.HOME ?? "", ".agent-infra", "sandboxes", "my-tool")
     );
+    // Optional integration fields stay undefined when omitted
+    assert.equal(tool?.envVars, undefined);
+    assert.equal(tool?.hostLiveMounts, undefined);
+    assert.equal(tool?.hostPreSeedFiles, undefined);
+    assert.equal(tool?.hostPreSeedDirs, undefined);
+    assert.equal(tool?.pathRewriteFiles, undefined);
+    assert.equal(tool?.postSetupCmds, undefined);
     // tools array preserves user order, including non-builtin id
     assert.deepEqual(config.tools, ["claude-code", "my-tool"]);
   } finally {
@@ -77,7 +88,48 @@ test("loadConfig parses sandbox.customTools and fills sandboxBase under ~/.agent
   }
 });
 
-test("loadConfig rejects customTools entries with relative containerMount", async () => {
+test("loadConfig honours user-supplied versionCmd to support binary names that differ from the tool id", async () => {
+  const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-tools-versioncmd-"));
+  const previousCwd = process.cwd();
+
+  try {
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    // Realistic case: npm package is @anthropic-ai/claude-code, binary is
+    // `claude`, user picks `anthropic-claude` as a disambiguated id.
+    // The default `which anthropic-claude` would fail; user must override.
+    writeAirc(tmpDir, {
+      project: "demo",
+      sandbox: {
+        tools: ["anthropic-claude"],
+        customTools: [
+          {
+            id: "anthropic-claude",
+            install: { type: "npm", cmd: "@anthropic-ai/claude-code@stable" },
+            versionCmd: "claude --version",
+            hostLiveMounts: [
+              { hostPath: "/home/u/.claude/.credentials.json", containerSubpath: ".credentials.json" }
+            ]
+          }
+        ]
+      }
+    });
+
+    process.chdir(tmpDir);
+    const config = withGitSafeProcessEnv(() => sandboxConfig.loadConfig());
+
+    const tool = config.customTools[0];
+    assert.equal(tool?.versionCmd, "claude --version");
+    assert.deepEqual(tool?.hostLiveMounts, [
+      { hostPath: "/home/u/.claude/.credentials.json", containerSubpath: ".credentials.json" }
+    ]);
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig rejects an explicit relative containerMount even though the field is now optional", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-bad-mount-"));
   const previousCwd = process.cwd();
@@ -90,11 +142,8 @@ test("loadConfig rejects customTools entries with relative containerMount", asyn
         customTools: [
           {
             id: "bad-tool",
-            name: "Bad",
             install: { type: "shell", cmd: "echo hi" },
-            containerMount: "relative/path",
-            versionCmd: "bad --version",
-            setupHint: "fixture"
+            containerMount: "relative/path"
           }
         ]
       }
@@ -103,7 +152,7 @@ test("loadConfig rejects customTools entries with relative containerMount", asyn
     process.chdir(tmpDir);
     assert.throws(
       () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
-      /containerMount must be an absolute path/
+      /"containerMount" must be an absolute path/
     );
   } finally {
     process.chdir(previousCwd);
@@ -111,35 +160,33 @@ test("loadConfig rejects customTools entries with relative containerMount", asyn
   }
 });
 
-test("loadConfig rejects customTools entries with empty versionCmd", async () => {
+test("loadConfig rejects an explicit empty versionCmd to prevent bash -lc '' from silently passing", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-empty-version-"));
   const previousCwd = process.cwd();
 
   try {
     execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    // Round 4 distinguishes "omitted" (legal, use default) from "explicit empty
+    // string" (illegal). The explicit empty case would, if accepted, run
+    // `bash -lc ""` which exits 0 — silently masking install failures.
     writeAirc(tmpDir, {
       project: "demo",
       sandbox: {
         customTools: [
           {
             id: "no-version",
-            name: "Empty Version",
             install: { type: "shell", cmd: "echo hi" },
-            containerMount: "/home/devuser/.no-version",
-            versionCmd: "",
-            setupHint: "fixture"
+            versionCmd: ""
           }
         ]
       }
     });
 
     process.chdir(tmpDir);
-    // Empty versionCmd would otherwise pass through to `bash -lc ""`, which
-    // exits 0 — silently masking install failures during sandbox creation.
     assert.throws(
       () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
-      /empty versionCmd/
+      /"versionCmd" must be non-empty when provided/
     );
   } finally {
     process.chdir(previousCwd);
@@ -147,7 +194,7 @@ test("loadConfig rejects customTools entries with empty versionCmd", async () =>
   }
 });
 
-test("loadConfig rejects customTools entries with empty setupHint", async () => {
+test("loadConfig rejects an explicit empty setupHint while accepting omission", async () => {
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-custom-empty-hint-"));
   const previousCwd = process.cwd();
@@ -160,10 +207,7 @@ test("loadConfig rejects customTools entries with empty setupHint", async () => 
         customTools: [
           {
             id: "no-hint",
-            name: "Empty Hint",
             install: { type: "shell", cmd: "echo hi" },
-            containerMount: "/home/devuser/.no-hint",
-            versionCmd: "no-hint --version",
             setupHint: ""
           }
         ]
@@ -173,7 +217,7 @@ test("loadConfig rejects customTools entries with empty setupHint", async () => 
     process.chdir(tmpDir);
     assert.throws(
       () => withGitSafeProcessEnv(() => sandboxConfig.loadConfig()),
-      /empty setupHint/
+      /"setupHint" must be non-empty when provided/
     );
   } finally {
     process.chdir(previousCwd);
@@ -194,14 +238,10 @@ test("loadConfig always assigns the default sandboxBase and ignores user-supplie
         customTools: [
           {
             id: "fixed-base",
-            name: "Fixed Base",
             install: { type: "shell", cmd: "echo hi" },
-            containerMount: "/home/devuser/.fixed-base",
             // User attempts to override sandboxBase — the loader must ignore
             // it so `ai sandbox rm` / `prune` keep finding the canonical path.
-            sandboxBase: "/some/unexpected/host/path",
-            versionCmd: "fixed-base --version",
-            setupHint: "fixture"
+            sandboxBase: "/some/unexpected/host/path"
           }
         ]
       }
@@ -232,11 +272,7 @@ test("loadConfig rejects customTools entries with empty install.cmd", async () =
         customTools: [
           {
             id: "empty-cmd",
-            name: "Empty",
-            install: { type: "shell", cmd: "" },
-            containerMount: "/home/devuser/.empty",
-            versionCmd: "v",
-            setupHint: "f"
+            install: { type: "shell", cmd: "" }
           }
         ]
       }

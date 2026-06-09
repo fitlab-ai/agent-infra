@@ -123,9 +123,6 @@ function validateTool(tool: SandboxTool): void {
   if (!tool.id || !TOOL_ID_PATTERN.test(tool.id)) {
     throw new Error(`Invalid sandbox tool id: ${String(tool.id)}`);
   }
-  if (!tool.name) {
-    throw new Error(`Sandbox tool ${tool.id} is missing required field: name`);
-  }
   if (!tool.install || (tool.install.type !== 'npm' && tool.install.type !== 'shell')) {
     throw new Error(`Sandbox tool ${tool.id} has invalid install.type`);
   }
@@ -134,12 +131,6 @@ function validateTool(tool: SandboxTool): void {
   }
   if (!tool.containerMount || !tool.containerMount.startsWith('/')) {
     throw new Error(`Sandbox tool ${tool.id} containerMount must be an absolute path`);
-  }
-  if (!tool.versionCmd) {
-    throw new Error(`Sandbox tool ${tool.id} has empty versionCmd`);
-  }
-  if (!tool.setupHint) {
-    throw new Error(`Sandbox tool ${tool.id} has empty setupHint`);
   }
 }
 
@@ -154,12 +145,15 @@ function asString(value: unknown, field: string, context: string): string {
   return value;
 }
 
-function asOptionalString(value: unknown, field: string, context: string): string | undefined {
+function asOptionalNonEmptyString(value: unknown, field: string, context: string): string | undefined {
   if (value === undefined) {
     return undefined;
   }
   if (typeof value !== 'string') {
     throw new Error(`${context}: field "${field}" must be a string when provided`);
+  }
+  if (value.length === 0) {
+    throw new Error(`${context}: field "${field}" must be non-empty when provided`);
   }
   return value;
 }
@@ -280,14 +274,21 @@ export function parseCustomTool(
     throw new Error(`${context}: field "id" must match ${TOOL_ID_PATTERN.source}`);
   }
 
+  const containerMount = asOptionalNonEmptyString(entry.containerMount, 'containerMount', context)
+    ?? `/home/devuser/.${id}`;
+  if (!containerMount.startsWith('/')) {
+    throw new Error(`${context}: field "containerMount" must be an absolute path`);
+  }
+
   const tool: SandboxTool = {
     id,
-    name: asString(entry.name, 'name', context),
+    name: asOptionalNonEmptyString(entry.name, 'name', context) ?? id,
     install: parseInstall(entry.install, context),
     sandboxBase: hostJoin(options.home, '.agent-infra', 'sandboxes', id),
-    containerMount: asString(entry.containerMount, 'containerMount', context),
-    versionCmd: asString(entry.versionCmd, 'versionCmd', context),
-    setupHint: asString(entry.setupHint, 'setupHint', context),
+    containerMount,
+    versionCmd: asOptionalNonEmptyString(entry.versionCmd, 'versionCmd', context) ?? `which ${id}`,
+    setupHint: asOptionalNonEmptyString(entry.setupHint, 'setupHint', context)
+      ?? `Run \`${id}\` inside the container to set up.`,
     envVars: asStringRecord(entry.envVars, 'envVars', context),
     hostPreSeedFiles: parseHostPreSeedFiles(entry.hostPreSeedFiles, context),
     hostPreSeedDirs: parseHostPreSeedDirs(entry.hostPreSeedDirs, context),
