@@ -22,7 +22,7 @@
 - **审查者**：{reviewer-name}
 - **审查时间**：{timestamp}
 - **审查范围**：{file-count and major modules}
-- **总体结论**：{通过 / 需要修改 / 拒绝}
+- **总体结论**：{通过 / 需要修改 / 拒绝}（恰取一个；禁止写组合短语，否则 verify gate 失败）
 - **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **env-blocked**：0
 
 ## 问题清单

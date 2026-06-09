@@ -109,6 +109,8 @@ node .agents/scripts/validate-artifact.js gate review-code .agents/workspace/act
 
 > 仅在校验通过后执行本步骤。
 
+> **重要：分支名 ≠ 字段值**。以下 4 个标签是用户输出模板的分类（场景 A/B/C/D），**不是**产物 `**总体结论**：` 字段的取值。产物字段只取 3 个规范值之一（`通过` / `需要修改` / `拒绝`，或 EN 对应 `Approved` / `Changes Requested` / `Rejected`）；写成 `通过但有问题`、`通过 / 需要修改` 等组合短语会被 verify gate 拦下。
+
 必须先判断结果，再只选择一个输出分支：
 - 无 blocker、major、minor -> 通过且无问题
 - 无 blocker，但有 major 或 minor -> 通过但有问题

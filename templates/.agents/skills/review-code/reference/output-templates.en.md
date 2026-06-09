@@ -2,6 +2,8 @@
 
 Read this file before presenting the final review result to the user.
 
+> This file describes the four **user reply** categories (Branches A/B/C/D) used in the "Inform User" step. It is **not** the value of the review-code artifact's `**Overall Verdict**:` field — that field is fixed to one of three canonical tokens (`Approved` / `Changes Requested` / `Rejected`, or zh-CN `通过` / `需要修改` / `拒绝`). Do not mix the two.
+
 ## Choose Exactly One Output Branch
 
 Apply these rules in order (**note: env-blocked counts do not participate in selection**):

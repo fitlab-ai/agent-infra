@@ -21,7 +21,7 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 - **Reviewer**: {reviewer-name}
 - **Review Time**: {timestamp}
 - **Scope**: {file-count and major modules}
-- **Overall Verdict**: {Approved / Changes Requested / Rejected}
+- **Overall Verdict**: {Approved / Changes Requested / Rejected} (pick exactly one; combined phrases will fail the verify gate)
 - **Findings (AI-actionable)**: 0 blockers, 0 majors, 0 minors / **env-blocked**: 0
 
 ## Findings

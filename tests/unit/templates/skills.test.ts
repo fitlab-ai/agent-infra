@@ -531,3 +531,28 @@ test("analyze-task and plan-task docs require field re-estimation in update step
     );
   });
 });
+
+test("review-code EN verify config locks down Overall Verdict value range", () => {
+  const enConfig = JSON.parse(read("templates/.agents/skills/review-code/config/verify.en.json"));
+  const verdictPattern = (enConfig.checks.artifact.required_patterns as string[])
+    .find((p) => p.includes("Overall Verdict"));
+  assert.ok(verdictPattern, "EN verify config should include an Overall Verdict pattern");
+
+  // 与 validate-artifact.js:366 同形（multiline, 无 case-insensitive）。
+  const re = new RegExp(verdictPattern, "m");
+
+  // (A-a-en) 非规范组合短语：fail
+  const badEn = "## Review Summary\n\n- **Overall Verdict**: Approved with issues\n";
+  assert.ok(!re.test(badEn), "combined phrase 'Approved with issues' must not match EN verdict regex");
+
+  // (A-b-en) 规范 token（含全角冒号、尾随空格变体）：pass
+  for (const sample of [
+    "## Review Summary\n\n- **Overall Verdict**: Approved\n",
+    "## Review Summary\n\n- **Overall Verdict**: Changes Requested\n",
+    "## Review Summary\n\n- **Overall Verdict**: Rejected\n",
+    "## Review Summary\n\n- **Overall Verdict**：Approved\n",
+    "## Review Summary\n\n- **Overall Verdict**: Approved   \n"
+  ]) {
+    assert.ok(re.test(sample), `canonical EN sample should match: ${sample.trim()}`);
+  }
+});

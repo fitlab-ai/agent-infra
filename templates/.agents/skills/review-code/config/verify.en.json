@@ -27,7 +27,8 @@
       ],
       "required_patterns": [
         "^### Approval Decision$",
-        "^\\$ "
+        "^\\$ ",
+        "^- \\*\\*Overall Verdict\\*\\*[:：]\\s*(?:通过|需要修改|拒绝|Approved|Changes Requested|Rejected)\\s*$"
       ],
       "freshness_minutes": 30
     },
