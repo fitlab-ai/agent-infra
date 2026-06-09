@@ -266,13 +266,16 @@ test("sandbox exec '#1' triggers fetchSandboxRows and reports no-running-sandbox
 
     const dockerCalls = fixture.readDockerCalls();
     assert.equal(dockerCalls.length, 1);
-    assert.deepEqual(dockerCalls[0], [
+    // Only assert the stable prefix: '--format' value contains literal tabs
+    // which a Windows .cmd shim retokenizes into separate args before the
+    // shim's node script sees them. The format string itself is covered by
+    // the containerListFormat() unit test.
+    assert.deepEqual(dockerCalls[0]!.slice(0, 5), [
       "ps",
       "-a",
       "--filter",
       "label=demo.sandbox",
-      "--format",
-      "{{.Names}}\t{{.Status}}\t{{.Labels}}"
+      "--format"
     ]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
