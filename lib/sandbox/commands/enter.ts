@@ -1,5 +1,5 @@
 import { loadConfig } from '../config.ts';
-import { assertValidBranchName, containerNameCandidates } from '../constants.ts';
+import { assertValidBranchName, containerNameCandidates, sandboxBranchLabel, sandboxLabel } from '../constants.ts';
 import { detectEngine } from '../engine.ts';
 import {
   formatCredentialWarnings,
@@ -13,8 +13,12 @@ import { resolveTaskBranch } from '../task-resolver.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
 import { runInteractiveWithClipboardBridge } from '../clipboard/bridge.ts';
 import { detectHostTimezone } from '../host-timezone.ts';
+import { fetchSandboxRows, isTaskShortRef, resolveTaskShortRef } from './list-running.ts';
 
-const USAGE = `Usage: ai sandbox exec <branch> [cmd...]`;
+const USAGE = `Usage: ai sandbox exec <branch | TASK-id | '#N'> [cmd...]
+
+'#N' references the N-th running sandbox in 'ai sandbox ls' order (1-based).
+Quote it as '#N' to avoid shell '#' comment handling.`;
 const TMUX_ENTRY_PATH = '/usr/local/bin/sandbox-tmux-entry';
 
 // Terminal-detection variables that interactive TUIs (e.g. claude-code)
@@ -115,8 +119,14 @@ export async function enter(args: string[]): Promise<number> {
   const config = loadConfig();
   validateClaudeCredentialsEnvOverride();
   const engine = detectEngine(config);
-  const [branchOrTaskId = '', ...cmd] = args;
-  const branch = resolveTaskBranch(branchOrTaskId, config.repoRoot);
+  const [firstArg = '', ...cmd] = args;
+  let branch: string;
+  if (isTaskShortRef(firstArg)) {
+    const { running } = fetchSandboxRows(engine, sandboxLabel(config), sandboxBranchLabel(config));
+    branch = resolveTaskShortRef(firstArg, { running });
+  } else {
+    branch = resolveTaskBranch(firstArg, config.repoRoot);
+  }
   assertValidBranchName(branch);
   const running = runSafeEngine(engine, 'docker', ['ps', '--format', '{{.Names}}']).split('\n');
   const container = containerNameCandidates(config, branch).find((name) => running.includes(name));

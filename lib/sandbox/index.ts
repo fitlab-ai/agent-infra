@@ -2,7 +2,8 @@ const USAGE = `Usage: ai sandbox <command> [options]
 
 Commands:
   create <branch> [base]       Create a sandbox (VM + image + worktree + container)
-  exec <branch> [cmd...]       Enter sandbox or run a command
+  exec <branch | '#N'> [cmd...]
+                               Enter sandbox or run a command (use leftmost '#' column from 'ls')
   ls                           List sandboxes for the current project
   prune [--dry-run]            Remove orphaned per-branch state dirs
   rebuild [--quiet] [--refresh]

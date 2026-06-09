@@ -689,25 +689,151 @@ test("sandbox ls formatContainerTable aligns header and rows by column width", a
   const { formatContainerTable } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/ls.ts")>("lib/sandbox/commands/ls.js");
 
   const rows = [
-    { name: "demo-dev-feature-x", status: "Up 2 hours", branch: "feature/short" },
-    { name: "worker", status: "Exited (0) 20 minutes ago", branch: "bugfix/align-table" },
-    { name: "agent-infra-sandbox-long", status: "Created", branch: "main" }
+    { index: "1", name: "demo-dev-feature-x", status: "Up 2 hours", branch: "feature/short" },
+    { index: "", name: "worker", status: "Exited (0) 20 minutes ago", branch: "bugfix/align-table" },
+    { index: "", name: "agent-infra-sandbox-long", status: "Created", branch: "main" }
   ];
   const lines = formatContainerTable(rows);
+  const hashColumn = lines[0]!.indexOf("#");
+  const namesColumn = lines[0]!.indexOf("NAMES");
   const statusColumn = lines[0]!.indexOf("STATUS");
   const branchColumn = lines[0]!.indexOf("BRANCH");
 
   assert.equal(lines.length, rows.length + 1);
-  assert.ok(statusColumn > 0);
+  assert.equal(hashColumn, 0);
+  assert.ok(namesColumn > hashColumn);
+  assert.ok(statusColumn > namesColumn);
   assert.ok(branchColumn > statusColumn);
   for (let i = 0; i < rows.length; i += 1) {
+    assert.equal(lines[i + 1]!.indexOf(rows[i]!.name), namesColumn);
     assert.equal(lines[i + 1]!.indexOf(rows[i]!.status), statusColumn);
     assert.equal(lines[i + 1]!.indexOf(rows[i]!.branch), branchColumn);
   }
+  assert.equal(lines[1]!.slice(0, namesColumn).trim(), "1");
+  assert.equal(lines[2]!.slice(0, namesColumn).trim(), "");
+  assert.equal(lines[3]!.slice(0, namesColumn).trim(), "");
   for (const line of lines) {
     assert.equal(line.includes("\t"), false);
     assert.doesNotMatch(line, /\s+$/);
   }
+});
+
+test("sandbox list-running parseSandboxRows tags running rows by 'Up ' prefix", async () => {
+  const { parseSandboxRows } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+
+  assert.deepEqual(parseSandboxRows("", "agent-infra.branch"), []);
+
+  const rows = parseSandboxRows(
+    [
+      "demo-a\tUp 5 minutes\tagent-infra.branch=feature/a",
+      "demo-b\tExited (0) 1 hour ago\tagent-infra.branch=feature/b",
+      "demo-c\tCreated\t",
+      "demo-d\tUp About a minute\tagent-infra.branch=main"
+    ].join("\n"),
+    "agent-infra.branch"
+  );
+  assert.equal(rows.length, 4);
+  assert.equal(rows[0]!.running, true);
+  assert.equal(rows[0]!.branch, "feature/a");
+  assert.equal(rows[1]!.running, false);
+  assert.equal(rows[1]!.branch, "feature/b");
+  assert.equal(rows[2]!.running, false);
+  assert.equal(rows[2]!.branch, "");
+  assert.equal(rows[3]!.running, true);
+});
+
+test("sandbox list-running sortAndIndexSandboxRows assigns 1-based index to running only", async () => {
+  const { sortAndIndexSandboxRows } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+
+  const input = [
+    { name: "demo-c", status: "Up 1 min", branch: "feature/c", running: true, index: null },
+    { name: "demo-a", status: "Exited (0)", branch: "feature/a", running: false, index: null },
+    { name: "Demo-A", status: "Up 1 min", branch: "feature/upper", running: true, index: null },
+    { name: "demo-a", status: "Up 1 min", branch: "feature/dup", running: true, index: null },
+    { name: "demo-z", status: "Created", branch: "feature/z", running: false, index: null }
+  ];
+  const { running, nonRunning } = sortAndIndexSandboxRows(input);
+
+  assert.deepEqual(running.map((r) => r.name), ["Demo-A", "demo-a", "demo-c"]);
+  assert.deepEqual(running.map((r) => r.index), [1, 2, 3]);
+  assert.deepEqual(nonRunning.map((r) => r.name), ["demo-a", "demo-z"]);
+  for (const r of nonRunning) {
+    assert.equal(r.index, null);
+  }
+});
+
+test("sandbox list-running isTaskShortRef matches only '#<digits>' syntactically", async () => {
+  const { isTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+
+  assert.equal(isTaskShortRef("#0"), true);
+  assert.equal(isTaskShortRef("#1"), true);
+  assert.equal(isTaskShortRef("#10"), true);
+  assert.equal(isTaskShortRef("#abc"), false);
+  assert.equal(isTaskShortRef("#1a"), false);
+  assert.equal(isTaskShortRef("#1.5"), false);
+  assert.equal(isTaskShortRef("#-1"), false);
+  assert.equal(isTaskShortRef("#"), false);
+  assert.equal(isTaskShortRef("1"), false);
+  assert.equal(isTaskShortRef("main"), false);
+  assert.equal(isTaskShortRef("TASK-20260609-084122"), false);
+  assert.equal(isTaskShortRef(""), false);
+});
+
+test("sandbox list-running resolveTaskShortRef returns branch for valid index", async () => {
+  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+  const running = [
+    { name: "demo-a", status: "Up 1 min", branch: "feature/a", running: true, index: 1 },
+    { name: "demo-b", status: "Up 1 min", branch: "feature/b", running: true, index: 2 },
+    { name: "demo-c", status: "Up 1 min", branch: "main", running: true, index: 3 }
+  ];
+
+  assert.equal(resolveTaskShortRef("#1", { running }), "feature/a");
+  assert.equal(resolveTaskShortRef("#2", { running }), "feature/b");
+  assert.equal(resolveTaskShortRef("#3", { running }), "main");
+});
+
+test("sandbox list-running resolveTaskShortRef rejects '#0' with 'must be >= 1'", async () => {
+  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+
+  assert.throws(
+    () => resolveTaskShortRef("#0", { running: [] }),
+    /must be >= 1/
+  );
+});
+
+test("sandbox list-running resolveTaskShortRef rejects out-of-range index with running count", async () => {
+  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+  const running = [
+    { name: "demo-a", status: "Up 1 min", branch: "feature/a", running: true, index: 1 },
+    { name: "demo-b", status: "Up 1 min", branch: "feature/b", running: true, index: 2 },
+    { name: "demo-c", status: "Up 1 min", branch: "feature/c", running: true, index: 3 }
+  ];
+
+  assert.throws(
+    () => resolveTaskShortRef("#5", { running }),
+    /only 3 running/
+  );
+});
+
+test("sandbox list-running resolveTaskShortRef rejects when no running sandboxes", async () => {
+  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+
+  assert.throws(
+    () => resolveTaskShortRef("#1", { running: [] }),
+    /No running sandbox to reference/
+  );
+});
+
+test("sandbox list-running resolveTaskShortRef rejects when running row has empty branch label", async () => {
+  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+  const running = [
+    { name: "orphan", status: "Up 1 min", branch: "", running: true, index: 1 }
+  ];
+
+  assert.throws(
+    () => resolveTaskShortRef("#1", { running }),
+    /missing branch label/
+  );
 });
 
 test("sandbox ls parseLabels parses docker label CSV", async () => {
