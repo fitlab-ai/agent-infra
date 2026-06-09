@@ -40,8 +40,10 @@ If not found in `active/`, check `blocked/` and `completed/`:
 
 ### 2. Verify Completion Prerequisites (Failure Must Stop)
 
+**Gate read (project-level PR flow policy)**: Before running this step, read `.agents/.airc.json`'s `requiresPullRequest` field. Treat missing or `true` as "PR flow enabled" (default); treat explicit `false` as "PR flow disabled". The completion check below is pruned accordingly.
+
 Before marking complete, verify ALL of these:
-- [ ] All workflow steps are complete (check workflow progress in task.md)
+- [ ] All workflow steps are complete (check workflow progress in task.md; **for the `pr_tasks` list under each yaml `commit` step, count those items toward the missing-work decision only when `.agents/.airc.json:requiresPullRequest !== false`**)
 - [ ] Code has been reviewed (`review-code.md` or `review-code-r{N}.md` exists, and the latest review verdict is Approved; or review was done externally)
 - [ ] Code has been committed (no uncommitted changes related to this task)
 - [ ] Tests are passing

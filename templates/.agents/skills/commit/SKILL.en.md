@@ -60,7 +60,7 @@ Append the Commit Activity Log entry and choose exactly one next-step case:
 - final commit -> `complete-task {task-id}`
 - more work remains -> update task.md and stop
 - ready for review -> `review-code {task-id}`
-- ready for PR -> `create-pr`
+- ready for PR (only when the project enables the PR flow, i.e. `requiresPullRequest !== false`) -> `create-pr`
 
 ## 6. Sync Issue Metadata When Applicable
 

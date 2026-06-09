@@ -1,5 +1,8 @@
 # Feature development workflow
 # Use this workflow when implementing a new feature.
+#
+# Note: a step's `pr_tasks` list is counted toward workflow progress only when
+# `.agents/.airc.json:requiresPullRequest !== false` (see .agents/skills/complete-task/SKILL.md).
 
 name: feature-development
 description: End-to-end workflow for developing a new feature.
@@ -173,19 +176,20 @@ steps:
       - Findings to fix
 
   - name: commit
-    description: Finalize changes and create a pull request.
+    description: Finalize changes and create a pull request (the PR portion runs only when the project enables the PR flow).
     recommended_agents:
       - claude
       - human
     tasks:
       - Ensure all tests pass
       - Write a clear commit message following conventions
+      - Move the task to completed
+    pr_tasks:
       - Create a pull request with an appropriate description
       - Link the PR to the related Issue
-      - Move the task to completed
     inputs:
       - Final implementation branch
       - Task workspace
     outputs:
-      - Pull request
       - Completed task workspace under .agents/workspace/completed/
+      - Pull request (only when the project enables the PR flow)

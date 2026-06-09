@@ -40,8 +40,10 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ### 2. 验证完成前置条件（未满足则必须停止）
 
+**门控读取（项目级 PR 流程策略）**：在执行本步骤前，读取 `.agents/.airc.json` 的 `requiresPullRequest` 字段；当字段缺失或为 `true` 时视为「启用 PR 流程」（默认），仅当显式为 `false` 时视为「关闭 PR 流程」。下面的工作流步骤完成判定按此规则裁剪。
+
 标记完成之前，验证以下所有条件：
-- [ ] 所有工作流步骤已完成（检查 task.md 中的工作流进度）
+- [ ] 所有工作流步骤已完成（检查 task.md 中的工作流进度；**对 yaml 中 commit 步骤的 `pr_tasks` 列表，仅在 `.agents/.airc.json:requiresPullRequest !== false` 时计入未完成判定**）
 - [ ] 代码已审查（`review-code.md` 或 `review-code-r{N}.md` 存在，且最新审查结论为 Approved；或已在外部完成审查）
 - [ ] 代码已提交（没有与此任务相关的未提交变更）
 - [ ] 测试通过

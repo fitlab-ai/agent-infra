@@ -24,6 +24,7 @@ type Defaults = {
   files: FileRegistry;
   sandbox: Record<string, unknown>;
   labels: Record<string, unknown>;
+  requiresPullRequest: boolean;
 };
 
 type AgentConfig = {
@@ -31,6 +32,7 @@ type AgentConfig = {
   org: string;
   language: string;
   platform: { type: string };
+  requiresPullRequest: boolean;
   templateVersion: string;
   sandbox: Record<string, unknown>;
   labels: Record<string, unknown>;
@@ -207,6 +209,13 @@ async function cmdInit(): Promise<void> {
     );
   }
 
+  const requiresPRChoice = await select(
+    'Require Pull Request flow?',
+    ['yes', 'no'],
+    'yes'
+  );
+  const requiresPullRequest = requiresPRChoice !== 'no';
+
   const templateSources = parseLocalSources(await prompt(
     'Template sources (optional, comma-separated local paths, e.g. ~/my-templates; Enter to skip)',
     ''
@@ -280,6 +289,7 @@ async function cmdInit(): Promise<void> {
     org: orgName,
     language,
     platform: { type: platformType },
+    requiresPullRequest,
     templateVersion: VERSION,
     sandbox: structuredClone(defaults.sandbox),
     labels: structuredClone(defaults.labels),

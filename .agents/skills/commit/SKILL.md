@@ -60,7 +60,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - 最终提交 -> `complete-task {task-id}`
 - 还有后续工作 -> 更新 task.md 后停止
 - 准备审查 -> `review-code {task-id}`
-- 准备创建 PR -> `create-pr`
+- 准备创建 PR（仅项目启用 PR 流程，即 `requiresPullRequest !== false`）-> `create-pr`
 
 ## 6. 同步 Issue 元数据（按需）
 

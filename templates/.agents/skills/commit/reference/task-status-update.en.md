@@ -23,6 +23,8 @@ Before selecting the next step, verify:
 - whether the latest `review-code.md` / `review-code-r{N}.md` passed without findings
 - whether there are still pending fixes, review work, or PR creation steps
 
+**Gate read (project-level PR flow policy)**: Before running this step, read `.agents/.airc.json`'s `requiresPullRequest` field. Treat missing or `true` as "PR flow enabled" (default); treat explicit `false` as "PR flow disabled". All branches that depend on this field follow the same rule.
+
 Choose exactly one case:
 
 | Decision Basis | Required Case |
@@ -30,9 +32,11 @@ Choose exactly one case:
 | all workflow steps completed + latest review approved with no findings + all tests passed | Case 1: final commit |
 | unfinished steps, pending fixes, or waiting on others still exist | Case 2: more work remains |
 | this commit prepares the task for code review | Case 3: ready for review |
-| code is committed, review is done, and the next step is PR creation | Case 4: ready for PR |
+| code is committed, review is done, **and the project enables the PR flow**, with PR creation as the next step | Case 4: ready for PR |
 
 Never apply more than one case. Match the single next-step branch first, then update the task.
+
+**Gate downgrade**: When `requiresPullRequest === false`, Case 4 must never be entered; commits that would otherwise fall into Case 4 collapse into Case 1 (final commit -> `/complete-task`).
 
 ### Case 1: Final Commit
 
@@ -40,7 +44,7 @@ Prerequisites:
 - [ ] all code committed
 - [ ] all tests passed
 - [ ] code review approved
-- [ ] all workflow steps completed
+- [ ] all workflow steps completed (for the `pr_tasks` list under each yaml `commit` step, count those items toward completion only when `requiresPullRequest !== false`)
 
 Required next-step commands:
 

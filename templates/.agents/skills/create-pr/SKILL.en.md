@@ -13,6 +13,22 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 ## Execution Flow
 
+### Pre-gate: Project-level PR Flow Check
+
+**Gate read (project-level PR flow policy)**: Before running any numbered step, read `.agents/.airc.json`'s `requiresPullRequest` field. Treat missing or `true` as "PR flow enabled" (default); treat explicit `false` as "PR flow disabled".
+
+Branch on the result:
+- missing / `true` -> continue to Step 1 below
+- explicit `false` -> output the message below and **stop immediately**. Do not run any subsequent numbered step, do not trigger any PR-creation command, do not modify `pr_number` in `task.md`, and do not publish a PR summary comment:
+
+```
+This project does not enable the PR flow (`.agents/.airc.json` sets `requiresPullRequest: false`).
+No Pull Request is required; run instead:
+  - Claude Code / OpenCode: /complete-task {task-id}
+  - Gemini CLI: /agent-infra:complete-task {task-id}
+  - Codex CLI: $complete-task {task-id}
+```
+
 ### 1. Parse Command Arguments
 
 Identify arguments from the command input:

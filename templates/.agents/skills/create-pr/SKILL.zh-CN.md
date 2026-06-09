@@ -13,6 +13,22 @@ description: "创建 Pull Request 到目标分支"
 
 ## 执行流程
 
+### 前置门控：项目级 PR 流程检查
+
+**门控读取（项目级 PR 流程策略）**：在执行编号步骤前，读取 `.agents/.airc.json` 的 `requiresPullRequest` 字段；当字段缺失或为 `true` 时视为「启用 PR 流程」（默认），仅当显式为 `false` 时视为「关闭 PR 流程」。
+
+按读取结果分支：
+- 缺失 / `true` → 继续到下方第 1 步
+- 显式 `false` → 输出以下消息后**立即停止**，不要执行任何后续编号步骤、不要触发任何 PR 创建命令、不要修改 `task.md` 的 `pr_number`、不要发布 PR 摘要评论：
+
+```
+当前项目未启用 PR 流程（`.agents/.airc.json` 中 `requiresPullRequest: false`）。
+无需创建 Pull Request，请直接运行：
+  - Claude Code / OpenCode：/complete-task {task-id}
+  - Gemini CLI：/agent-infra:complete-task {task-id}
+  - Codex CLI：$complete-task {task-id}
+```
+
 ### 1. 解析命令参数
 
 从命令参数中识别：

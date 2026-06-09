@@ -23,6 +23,7 @@ const DEFAULTS = {
   "platform": {
     "type": "github"
   },
+  "requiresPullRequest": true,
   "sandbox": {
     "engine": null,
     "runtimes": [

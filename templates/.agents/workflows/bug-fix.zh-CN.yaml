@@ -1,5 +1,8 @@
 # 缺陷修复工作流
 # 修复缺陷时使用此工作流。
+#
+# 注：步骤中的 `pr_tasks` 列表仅在 `.agents/.airc.json:requiresPullRequest !== false` 时
+# 被计入工作流进度判定（详见 .agents/skills/complete-task/SKILL.md）。
 
 name: bug-fix
 description: 诊断和修复缺陷的工作流。
@@ -173,19 +176,20 @@ steps:
       - 问题列表（如有）
 
   - name: commit
-    description: 最终确认缺陷修复并创建拉取请求。
+    description: 最终确认缺陷修复并创建拉取请求（PR 部分仅在项目启用 PR 流程时执行）。
     recommended_agents:
       - claude
       - human
     tasks:
       - 确保所有测试通过
       - 编写引用缺陷/Issue 的提交信息
+      - 将任务移至已完成
+    pr_tasks:
       - 创建包含缺陷修复描述的拉取请求
       - 将 PR 关联到缺陷报告 Issue
-      - 将任务移至已完成
     inputs:
       - 最终缺陷修复分支
       - 任务文件
     outputs:
-      - 拉取请求
       - 已完成的任务文件（位于 .agents/workspace/completed/）
+      - 拉取请求（仅项目启用 PR 流程时）

@@ -15,6 +15,7 @@ type UpdateConfig = {
   org: string;
   language: string;
   platform?: { type?: string };
+  requiresPullRequest?: boolean;
   sandbox?: Record<string, unknown>;
   labels?: Record<string, unknown>;
   files?: Partial<FileRegistry>;
@@ -22,6 +23,7 @@ type UpdateConfig = {
 
 type Defaults = {
   platform: { type: string };
+  requiresPullRequest: boolean;
   sandbox: Record<string, unknown>;
   labels: Record<string, unknown>;
   files: FileRegistry;
@@ -178,6 +180,7 @@ async function cmdUpdate(): Promise<void> {
   const platformAdded = !config.platform;
   const sandboxAdded = !config.sandbox;
   const labelsAdded = !config.labels;
+  const requiresPullRequestAdded = config.requiresPullRequest === undefined;
   let configChanged = changed;
 
   if (platformAdded) {
@@ -195,6 +198,11 @@ async function cmdUpdate(): Promise<void> {
     configChanged = true;
   }
 
+  if (requiresPullRequestAdded) {
+    config.requiresPullRequest = defaults.requiresPullRequest;
+    configChanged = true;
+  }
+
   if (configChanged) {
     console.log('');
     if (hasNewEntries) {
@@ -205,7 +213,7 @@ async function cmdUpdate(): Promise<void> {
       for (const entry of added.merged) {
         ok(`  merged: ${entry}`);
       }
-    } else if (platformAdded || sandboxAdded || labelsAdded) {
+    } else if (platformAdded || sandboxAdded || labelsAdded || requiresPullRequestAdded) {
       if (platformAdded) {
         info(`Default platform config added to ${CONFIG_PATH}.`);
       }
@@ -214,6 +222,9 @@ async function cmdUpdate(): Promise<void> {
       }
       if (labelsAdded) {
         info(`Default labels.in config added to ${CONFIG_PATH}.`);
+      }
+      if (requiresPullRequestAdded) {
+        info(`Default requiresPullRequest=${defaults.requiresPullRequest} added to ${CONFIG_PATH}.`);
       }
     } else {
       info(`File registry changed in ${CONFIG_PATH}.`);
@@ -226,6 +237,9 @@ async function cmdUpdate(): Promise<void> {
     }
     if (hasNewEntries && platformAdded) {
       info(`Default platform config added to ${CONFIG_PATH}.`);
+    }
+    if (hasNewEntries && requiresPullRequestAdded) {
+      info(`Default requiresPullRequest=${defaults.requiresPullRequest} added to ${CONFIG_PATH}.`);
     }
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf8');
     ok(`Updated ${CONFIG_PATH}`);
