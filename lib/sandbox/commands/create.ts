@@ -57,10 +57,6 @@ import {
 } from '../credentials.ts';
 import { detectHostTimezone } from '../host-timezone.ts';
 
-const SANDBOX_CREATE_TRACE: (label: string) => void = process.env.AGENT_INFRA_CREATE_TRACE
-  ? (label: string) => { process.stderr.write(`[trace] ${Date.now()} ${label}\n`); }
-  : () => {};
-
 const OPENCODE_YOLO_PERMISSION = '{"*":"allow","read":"allow","bash":"allow","edit":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"}';
 const SANDBOX_ALIAS_BLOCK_BEGIN = '# >>> agent-infra managed aliases >>>';
 const SANDBOX_ALIAS_BLOCK_END = '# <<< agent-infra managed aliases <<<';
@@ -649,9 +645,7 @@ export function buildContainerEnvFile(
   } = options;
 
   const entries: Array<[string, string]> = resolvedTools.flatMap(({ tool }) => Object.entries(tool.envVars ?? {}));
-  SANDBOX_CREATE_TRACE('buildContainerEnvFile gh auth token: enter');
   const ghToken = runSafeEngineFn(engine, 'gh', ['auth', 'token']);
-  SANDBOX_CREATE_TRACE('buildContainerEnvFile gh auth token: exit');
   if (ghToken) {
     entries.push(['GH_TOKEN', ghToken]);
   }
@@ -1161,16 +1155,12 @@ export async function create(args: string[]): Promise<void> {
 
   try {
     p.log.step('Checking container engine...');
-    SANDBOX_CREATE_TRACE('ensureDocker: enter');
     await ensureDocker(effectiveConfig, (detail: string) => {
       p.log.info(`  ${detail}`);
     });
-    SANDBOX_CREATE_TRACE('ensureDocker: exit');
     p.log.success('Docker is ready');
 
-    SANDBOX_CREATE_TRACE('image inspect: enter');
     const imageExists = runOkEngine(engine, 'docker', ['image', 'inspect', effectiveConfig.imageName]);
-    SANDBOX_CREATE_TRACE('image inspect: exit');
     const currentImageSignature = imageExists
       ? runSafeEngine(engine, 'docker', [
         'image',
@@ -1184,7 +1174,6 @@ export async function create(args: string[]): Promise<void> {
 
     if (needsImageBuild) {
       p.log.step(imageExists ? 'Rebuilding stale image...' : 'Building image for first use...');
-      SANDBOX_CREATE_TRACE('buildImage: enter');
       buildImage(
         effectiveConfig,
         tools,
@@ -1192,18 +1181,15 @@ export async function create(args: string[]): Promise<void> {
         expectedImageSignature,
         { engine }
       );
-      SANDBOX_CREATE_TRACE('buildImage: exit');
       p.log.success(imageExists ? 'Image rebuilt' : 'Image built');
     } else {
       p.log.step(`Using existing image ${effectiveConfig.imageName}`);
     }
 
-    SANDBOX_CREATE_TRACE('p.tasks: enter');
     await p.tasks([
       {
         title: 'Setting up git worktree',
         task: async (message: (text: string) => void) => {
-          SANDBOX_CREATE_TRACE('task Setting up git worktree: enter');
           if (fs.existsSync(worktree)) {
             if (fs.readdirSync(worktree).length > 0) {
               return `Worktree exists at ${worktree}`;
@@ -1244,14 +1230,12 @@ export async function create(args: string[]): Promise<void> {
             ]);
           }
 
-          SANDBOX_CREATE_TRACE('task Setting up git worktree: exit');
           return `Worktree ready at ${worktree}`;
         }
       },
       {
         title: 'Preparing tool state',
         task: async () => {
-          SANDBOX_CREATE_TRACE('task Preparing tool state: enter');
           for (const { tool, dir } of effectiveResolvedTools) {
             fs.mkdirSync(dir, { recursive: true });
 
@@ -1289,14 +1273,12 @@ export async function create(args: string[]): Promise<void> {
             }
           }
 
-          SANDBOX_CREATE_TRACE('task Preparing tool state: exit');
           return `${effectiveResolvedTools.length} tool config directories ready`;
         }
       },
       {
         title: `Starting container '${container}'`,
         task: async (message: (text: string) => void) => {
-          SANDBOX_CREATE_TRACE('task Starting container: enter');
           const existing = runSafeEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
           const matchedContainers = containerNameCandidates(effectiveConfig, branch)
             .filter((name) => existing.includes(name));
@@ -1338,9 +1320,7 @@ export async function create(args: string[]): Promise<void> {
               signingKey
             )
             : null;
-          SANDBOX_CREATE_TRACE('buildContainerEnvFile: enter');
           const envFile = buildContainerEnvFile(effectiveResolvedTools, engine);
-          SANDBOX_CREATE_TRACE('buildContainerEnvFile: exit');
           let hostShellConfig: HostShellConfig;
           try {
             const claudeCodeEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'claude-code');
@@ -1404,7 +1384,6 @@ export async function create(args: string[]): Promise<void> {
             const hostTz = detectHostTimezone();
             const tzFlags = hostTz ? ['-e', `TZ=${hostTz}`] : [];
 
-            SANDBOX_CREATE_TRACE('docker run: enter');
             runEngineTaskCommand(engine, 'docker', [
               'run',
               '-d',
@@ -1505,12 +1484,10 @@ export async function create(args: string[]): Promise<void> {
             }
           }
 
-          SANDBOX_CREATE_TRACE('task Starting container: exit');
           return 'Container started';
         }
       }
     ]);
-    SANDBOX_CREATE_TRACE('p.tasks: exit');
   } finally {
     preparedDockerfile.cleanup();
   }

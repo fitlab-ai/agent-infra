@@ -8,13 +8,11 @@ type SandboxFixtureOptions = {
   sandbox?: Record<string, unknown>;
   dockerStdoutForPs?: string;
 };
-type DockerCallWithTs = { ts: number; args: string[] };
 type SandboxFixture = {
   repoDir: string;
   binDir: string;
   logPath: string;
   readDockerCalls(): string[][];
-  readDockerCallsWithTs(): DockerCallWithTs[];
 };
 
 function writeNodeCommandShim(commandPath: string, scriptPath: string): string {
@@ -84,7 +82,7 @@ function writeSandboxEngineFixture(
       `const dockerStdoutForPs = ${JSON.stringify(dockerStdoutForPs)};`,
       "const args = process.argv.slice(2);",
       "function log() {",
-      "  fs.appendFileSync(process.env.DOCKER_LOG_PATH, JSON.stringify({ ts: Date.now(), args: args }) + '\\n');",
+      "  fs.appendFileSync(process.env.DOCKER_LOG_PATH, JSON.stringify(args) + '\\n');",
       "}",
       "log();",
       "if (args[0] === 'ps') {",
@@ -151,30 +149,16 @@ function writeSandboxEngineFixture(
     binDir,
     logPath,
     readDockerCalls() {
-      return readLog(logPath).map(({ args }) => args);
-    },
-    readDockerCallsWithTs() {
-      return readLog(logPath);
+      if (!fs.existsSync(logPath)) {
+        return [];
+      }
+      return fs.readFileSync(logPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as string[]);
     }
   };
-}
-
-function readLog(logPath: string): DockerCallWithTs[] {
-  if (!fs.existsSync(logPath)) {
-    return [];
-  }
-  return fs.readFileSync(logPath, "utf8")
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const parsed = JSON.parse(line) as unknown;
-      if (Array.isArray(parsed)) {
-        return { ts: 0, args: parsed as string[] };
-      }
-      const obj = parsed as { ts: unknown; args: unknown };
-      return { ts: Number(obj.ts) || 0, args: obj.args as string[] };
-    });
 }
 
 export {
