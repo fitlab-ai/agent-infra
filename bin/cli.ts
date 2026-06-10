@@ -93,7 +93,7 @@ switch (command) {
     const { runSandbox } = imported;
     await runSandbox(process.argv.slice(3)).catch((e: unknown) => {
       process.stderr.write(`Error: ${errorMessage(e)}\n`);
-      process.exitCode = 1;
+      process.exit(1);
     });
     break;
   }

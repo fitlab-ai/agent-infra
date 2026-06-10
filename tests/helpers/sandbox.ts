@@ -52,6 +52,7 @@ function writeSandboxEngineFixture(
   const dockerJsPath = path.join(binDir, "docker.js");
   const idJsPath = path.join(binDir, "id.js");
   const whichJsPath = path.join(binDir, "which.js");
+  const ghJsPath = path.join(binDir, "gh.js");
 
   fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
   fs.mkdirSync(binDir, { recursive: true });
@@ -126,6 +127,9 @@ function writeSandboxEngineFixture(
     "utf8"
   );
   writeNodeCommandShim(path.join(binDir, "id"), idJsPath);
+
+  fs.writeFileSync(ghJsPath, "process.exit(0);\n", "utf8");
+  writeNodeCommandShim(path.join(binDir, "gh"), ghJsPath);
 
   fs.writeFileSync(
     whichJsPath,
