@@ -55,15 +55,31 @@ test("sandbox create injects the detected host timezone into docker run", onPlat
     });
     commitInitialFile(fixture.repoDir);
 
-    spawnSandboxCli(
+    const spawnStartedAt = Date.now();
+    process.stderr.write(`[diag] sandbox-create-tz spawn start at ${spawnStartedAt}\n`);
+    const result = spawnSandboxCli(
       fixture,
       tmpDir,
       ["create", "feature-x", "--cpu", "1", "--memory", "1"],
-      { DOCKER_EXIT_FOR_RUN: "1", TZ: "Europe/Paris" },
+      { DOCKER_EXIT_FOR_RUN: "1", TZ: "Europe/Paris", AGENT_INFRA_CREATE_TRACE: "1" },
       { timeout: 15_000 }
     );
 
-    const runCall = fixture.readDockerCalls().find((call) => call[0] === "run");
+    const dockerCallsWithTs = fixture.readDockerCallsWithTs();
+    const runCall = dockerCallsWithTs.map(({ args }) => args).find((call) => call[0] === "run");
+    if (!runCall || result.signal === "SIGTERM") {
+      const tailBytes = 4096;
+      const tail = (text: string | undefined) =>
+        typeof text === "string" && text.length > tailBytes ? text.slice(-tailBytes) : (text ?? "");
+      process.stderr.write(
+        `[diag] sandbox-create-tz diagnostic dump:\n`
+        + `  status=${result.status}\n`
+        + `  signal=${result.signal}\n`
+        + `  stdout(tail ${tailBytes}B)=\n${tail(result.stdout)}\n`
+        + `  stderr(tail ${tailBytes}B)=\n${tail(result.stderr)}\n`
+        + `  dockerCallsWithTs=${JSON.stringify(dockerCallsWithTs)}\n`
+      );
+    }
     assert.ok(runCall, "expected sandbox create to call docker run");
     assert.ok(
       runCall.some((arg, index) => arg === "-e" && runCall[index + 1] === "TZ=Europe/Paris"),
