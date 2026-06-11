@@ -15,6 +15,7 @@ import {
   worktreeDirCandidates
 } from '../constants.ts';
 import { ENGINES, detectEngine, engineDisplayName, isManagedEngine, stopManagedVm } from '../engine.ts';
+import { pruneSandboxDanglingImages } from '../image-prune.ts';
 import { removeManagedDir, removeWorktreeDir } from '../managed-fs.ts';
 import { runOk, runSafe, runSafeEngine } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
@@ -207,6 +208,8 @@ async function rmAll(config: SandboxConfig, tools: SandboxTool[]): Promise<void>
   if (!p.isCancel(shouldRemoveImage) && shouldRemoveImage) {
     runSafeEngine(engine, 'docker', ['rmi', config.imageName]);
   }
+
+  pruneSandboxDanglingImages(config, engine);
 
   if (isManagedEngine(engine)) {
     if (engine === ENGINES.WSL2) {

@@ -484,6 +484,72 @@ test("sandbox rebuild forwards refresh flags to docker build", onPlatforms("linu
   }
 });
 
+test("sandbox rebuild succeeds when an old image exists and rmi would fail", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-no-rmi-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rebuild", "--quiet"], {
+      DOCKER_EXIT_FOR_IMAGE_INSPECT: "0",
+      DOCKER_EXIT_FOR_RMI: "1"
+    });
+
+    assert.equal(
+      result.status,
+      0,
+      `expected rebuild to succeed even when old image exists and rmi would fail; stderr=${result.stderr}`
+    );
+    const dockerCalls = fixture.readDockerCalls();
+    const rmiCalls = dockerCalls.filter((call) => call[0] === "rmi");
+    assert.deepEqual(rmiCalls, [], "expected sandbox rebuild not to call docker rmi");
+    assert.ok(
+      dockerCalls.some((call) => call[0] === "build"),
+      "expected sandbox rebuild to still call docker build"
+    );
+    assert.ok(
+      dockerCalls.some((call) => call[0] === "image" && call[1] === "prune"),
+      "expected sandbox rebuild to still call docker image prune"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rebuild prunes project-scoped dangling images after build", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-prune-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rebuild", "--quiet"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const dockerCalls = fixture.readDockerCalls();
+    const buildIndex = dockerCalls.findIndex((call) => call[0] === "build");
+    const pruneIndex = dockerCalls.findIndex(
+      (call) => call[0] === "image" && call[1] === "prune"
+    );
+    const pruneCall = pruneIndex >= 0 ? dockerCalls[pruneIndex] : undefined;
+
+    assert.ok(pruneCall, "expected sandbox rebuild to call docker image prune");
+    assert.ok(pruneCall.includes("-f"), "expected docker image prune to be non-interactive (-f)");
+    const filterIndex = pruneCall.indexOf("--filter");
+    assert.ok(filterIndex >= 0, "expected docker image prune to use --filter");
+    assert.equal(
+      pruneCall[filterIndex + 1],
+      "label=demo.sandbox",
+      "expected docker image prune filter to scope to this project's sandbox label"
+    );
+    assert.ok(
+      buildIndex >= 0 && pruneIndex > buildIndex,
+      "expected docker image prune to run after docker build"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox create resolves to configured engine", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-engine-"));
 

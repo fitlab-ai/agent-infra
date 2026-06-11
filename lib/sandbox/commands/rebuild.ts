@@ -7,7 +7,8 @@ import type { SandboxConfig } from '../config.ts';
 import { prepareDockerfile } from '../dockerfile.ts';
 import { sandboxImageConfigLabel, sandboxLabel } from '../constants.ts';
 import { detectEngine, ensureDocker } from '../engine.ts';
-import { runEngine, runOkEngine, runSafeEngine, runVerboseEngine } from '../shell.ts';
+import { runEngine, runSafeEngine, runVerboseEngine } from '../shell.ts';
+import { pruneSandboxDanglingImages } from '../image-prune.ts';
 import {
   imageSignatureFields,
   resolveTools,
@@ -89,12 +90,6 @@ export function buildArgs(
   return args;
 }
 
-function removeImageIfPresent(imageName: string, engine: string): void {
-  if (runOkEngine(engine, 'docker', ['image', 'inspect', imageName])) {
-    runEngine(engine, 'docker', ['rmi', imageName]);
-  }
-}
-
 export async function rebuild(args: string[]): Promise<void> {
   const { values } = parseArgs({
     args,
@@ -126,17 +121,12 @@ export async function rebuild(args: string[]): Promise<void> {
   try {
     if (quiet) {
       const spinner = p.spinner();
-      spinner.start(`Removing old image ${config.imageName}...`);
-      removeImageIfPresent(config.imageName, engine);
-      spinner.stop('Old image removed');
       spinner.start('Building image...');
       runEngine(engine, 'docker', buildArgs(config, tools, preparedDockerfile.path, imageSignature, { engine, refresh }), {
         cwd: config.repoRoot
       });
       spinner.stop(pc.green('Sandbox image rebuilt'));
     } else {
-      p.log.step(`Removing old image ${config.imageName}`);
-      removeImageIfPresent(config.imageName, engine);
       p.log.step('Building image');
       runVerboseEngine(
         engine,
@@ -146,6 +136,7 @@ export async function rebuild(args: string[]): Promise<void> {
       );
       p.log.success(pc.green('Sandbox image rebuilt'));
     }
+    pruneSandboxDanglingImages(config, engine);
   } finally {
     preparedDockerfile.cleanup();
   }

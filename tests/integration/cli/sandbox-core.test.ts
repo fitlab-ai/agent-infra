@@ -196,6 +196,43 @@ test("sandbox rm --all cleans shell config dirs through a single confirm", () =>
   );
 });
 
+test("sandbox rm --all prunes project-scoped dangling images before managed-engine branch", () => {
+  const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/rm.js"), "utf8");
+
+  const rmAllMatch = commandSource.match(
+    /async function rmAll\b[\s\S]*?(?=\n(?:async function|export async function|export function)\b|$)/
+  );
+  assert.ok(rmAllMatch, "expected to locate rmAll function body in rm.js");
+  const rmAllBody = rmAllMatch[0];
+
+  const pruneIndex = rmAllBody.search(/pruneSandboxDanglingImages\(config,\s*engine\)/);
+  assert.ok(
+    pruneIndex >= 0,
+    "expected rmAll to call pruneSandboxDanglingImages(config, engine)"
+  );
+
+  const managedIndex = rmAllBody.search(/if\s*\(\s*isManagedEngine\(\s*engine\s*\)/);
+  assert.ok(
+    managedIndex >= 0,
+    "expected rmAll to contain the isManagedEngine branch"
+  );
+
+  assert.ok(
+    pruneIndex < managedIndex,
+    "expected pruneSandboxDanglingImages to run before the isManagedEngine branch (covers WSL2 early return)"
+  );
+
+  const removeImageConfirmIndex = rmAllBody.search(/Remove image \$\{config\.imageName\}\?/);
+  assert.ok(
+    removeImageConfirmIndex >= 0,
+    "expected rmAll to keep the 'Remove image?' confirm prompt"
+  );
+  assert.ok(
+    pruneIndex > removeImageConfirmIndex,
+    "expected pruneSandboxDanglingImages to run after the 'Remove image?' confirm"
+  );
+});
+
 test("managed sandbox fs helpers remove only paths under the managed root", async () => {
   const managedFs = await loadFreshEsm<ManagedFsModule>("lib/sandbox/managed-fs.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-managed-fs-"));
