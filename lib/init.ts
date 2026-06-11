@@ -30,6 +30,7 @@ type SourceEntry = {
 type Defaults = {
   files: FileRegistry;
   sandbox: Record<string, unknown>;
+  task: { shortIdLength: number };
   labels: Record<string, unknown>;
   requiresPullRequest: boolean;
 };
@@ -42,6 +43,7 @@ type AgentConfig = {
   requiresPullRequest: boolean;
   templateVersion: string;
   sandbox: Record<string, unknown>;
+  task: { shortIdLength: number };
   labels: Record<string, unknown>;
   files: FileRegistry;
   tuis: string[];
@@ -325,6 +327,7 @@ async function cmdInit(): Promise<void> {
     requiresPullRequest,
     templateVersion: VERSION,
     sandbox: structuredClone(defaults.sandbox),
+    task: structuredClone(defaults.task),
     labels: structuredClone(defaults.labels),
     files: buildDefaultFiles(platformType, enabledTUISet),
     tuis: enabledTUIs

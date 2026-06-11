@@ -22,8 +22,25 @@ description: "根据自然语言描述创建任务"
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 
-## 执行步骤
+## 任务入参短号别名
 
+如果用户传入的 `{task-id}` 入参以 `#` 开头（如 `#1`、`#7`），先调用解析器把短号翻译为完整 task ID：
+
+```bash
+if [[ "{task-id}" == "#"* ]]; then
+  resolved=$(node .agents/scripts/task-short-id.js resolve "{task-id}") || {
+    echo "Error: short id '{task-id}' not found in active task registry" >&2
+    exit 1
+  }
+  task_id="$resolved"
+else
+  task_id="{task-id}"
+fi
+```
+
+后续所有命令把 `{task-id}` 视作 `$task_id`（已是完整 `TASK-YYYYMMDD-HHMMSS` 形式）。短号仅在 active 域内有效；其语义、生命周期与 `#N` vs `TASK-…` 的作用域二分见 `.agents/rules/task-short-id.md`。
+
+## 执行步骤
 ### 1. 解析用户描述
 
 从自然语言描述中提取：
@@ -126,6 +143,14 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 ### 5. 完成校验
 
+**先调用短号分配**（保证 `short_id` 写回 task.md + 注册表 entry 已在；完成校验阶段会读取）：
+
+```bash
+node .agents/scripts/task-short-id.js alloc "$task_id"
+```
+
+如失败（退出码非 0），按提示「归档若干任务」或「调高 task.shortIdLength」处理；不要继续执行后续步骤。
+
 运行完成校验，确认任务产物和同步状态符合规范：
 
 ```bash
@@ -209,6 +234,8 @@ Issue 创建失败：
 
 后续如需平台同步：修复认证/网络/模板问题后，可按 `.agents/rules/create-issue.md` 对当前任务手动执行一次 Issue 创建；或手动创建/查找 Issue，并把 `issue_number` 写入 task.md，后续技能会接管级联同步。
 ```
+
+
 
 ## 完成检查清单
 

@@ -873,6 +873,83 @@ test("sandbox list-running resolveTaskShortRef rejects when running row has empt
   );
 });
 
+test("sandbox list-running resolveTaskShortRef hits registry and returns task.md branch", async () => {
+  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rtsr-hit-"));
+  fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
+  fs.copyFileSync(
+    path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
+    path.join(tmp, ".agents", "scripts", "task-short-id.js")
+  );
+  fs.writeFileSync(path.join(tmp, ".agents", ".airc.json"), JSON.stringify({ task: { shortIdLength: 1 } }));
+  const taskId = "TASK-20250301-000001";
+  const active = path.join(tmp, ".agents", "workspace", "active");
+  fs.mkdirSync(path.join(active, taskId), { recursive: true });
+  fs.writeFileSync(
+    path.join(active, taskId, "task.md"),
+    `---\nid: ${taskId}\nbranch: registry-branch\n---\n`
+  );
+  // Seed registry so resolve('#1') hits.
+  fs.writeFileSync(
+    path.join(active, ".short-ids.json"),
+    JSON.stringify({ version: 1, ids: { "1": taskId } })
+  );
+  const running = [
+    { name: "demo-a", status: "Up 1 min", branch: "ls-branch", running: true, index: 1 }
+  ];
+  // Registry-hit must win over the ls index.
+  assert.equal(resolveTaskShortRef("#1", { running, repoRoot: tmp }), "registry-branch");
+});
+
+test("sandbox list-running resolveTaskShortRef throws when registry hits but branch metadata missing (M-1)", async () => {
+  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rtsr-corrupt-"));
+  fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
+  fs.copyFileSync(
+    path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
+    path.join(tmp, ".agents", "scripts", "task-short-id.js")
+  );
+  fs.writeFileSync(path.join(tmp, ".agents", ".airc.json"), JSON.stringify({ task: { shortIdLength: 1 } }));
+  const taskId = "TASK-20250301-000002";
+  const active = path.join(tmp, ".agents", "workspace", "active");
+  fs.mkdirSync(path.join(active, taskId), { recursive: true });
+  // task.md exists but has no branch field
+  fs.writeFileSync(
+    path.join(active, taskId, "task.md"),
+    `---\nid: ${taskId}\n---\n# no branch field\n`
+  );
+  fs.writeFileSync(
+    path.join(active, ".short-ids.json"),
+    JSON.stringify({ version: 1, ids: { "1": taskId } })
+  );
+  const running = [
+    { name: "demo-a", status: "Up 1 min", branch: "ls-branch", running: true, index: 1 }
+  ];
+  // Registry hit but corrupt → MUST throw, NOT fall back to running[0].branch.
+  assert.throws(
+    () => resolveTaskShortRef("#1", { running, repoRoot: tmp }),
+    /no branch field/
+  );
+});
+
+test("sandbox list-running resolveTaskShortRef falls back to ls index on registry miss", async () => {
+  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rtsr-miss-"));
+  fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
+  fs.copyFileSync(
+    path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
+    path.join(tmp, ".agents", "scripts", "task-short-id.js")
+  );
+  fs.writeFileSync(path.join(tmp, ".agents", ".airc.json"), JSON.stringify({ task: { shortIdLength: 1 } }));
+  // Empty registry; no active tasks → resolve('#1') misses.
+  fs.mkdirSync(path.join(tmp, ".agents", "workspace", "active"), { recursive: true });
+  const running = [
+    { name: "demo-a", status: "Up 1 min", branch: "ls-branch", running: true, index: 1 }
+  ];
+  // Should fall back to the ls index (preserves #414 behaviour).
+  assert.equal(resolveTaskShortRef("#1", { running, repoRoot: tmp }), "ls-branch");
+});
+
 test("sandbox ls parseLabels parses docker label CSV", async () => {
   const { parseLabels } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/ls.ts")>("lib/sandbox/commands/ls.js");
 

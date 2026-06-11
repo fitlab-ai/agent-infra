@@ -19,6 +19,7 @@ type UpdateConfig = {
   platform?: { type?: string };
   requiresPullRequest?: boolean;
   sandbox?: Record<string, unknown>;
+  task?: { shortIdLength: number };
   labels?: Record<string, unknown>;
   files?: Partial<FileRegistry>;
   tuis?: unknown;
@@ -28,6 +29,7 @@ type Defaults = {
   platform: { type: string };
   requiresPullRequest: boolean;
   sandbox: Record<string, unknown>;
+  task: { shortIdLength: number };
   labels: Record<string, unknown>;
   files: FileRegistry;
 };
@@ -191,6 +193,7 @@ async function cmdUpdate(): Promise<void> {
   const hasNewEntries = added.managed.length > 0 || added.merged.length > 0;
   const platformAdded = !config.platform;
   const sandboxAdded = !config.sandbox;
+  const taskAdded = !config.task;
   const labelsAdded = !config.labels;
   const requiresPullRequestAdded = config.requiresPullRequest === undefined;
   let configChanged = changed;
@@ -202,6 +205,11 @@ async function cmdUpdate(): Promise<void> {
 
   if (sandboxAdded) {
     config.sandbox = structuredClone(defaults.sandbox);
+    configChanged = true;
+  }
+
+  if (taskAdded) {
+    config.task = structuredClone(defaults.task);
     configChanged = true;
   }
 
@@ -225,12 +233,15 @@ async function cmdUpdate(): Promise<void> {
       for (const entry of added.merged) {
         ok(`  merged: ${entry}`);
       }
-    } else if (platformAdded || sandboxAdded || labelsAdded || requiresPullRequestAdded) {
+    } else if (platformAdded || sandboxAdded || taskAdded || labelsAdded || requiresPullRequestAdded) {
       if (platformAdded) {
         info(`Default platform config added to ${CONFIG_PATH}.`);
       }
       if (sandboxAdded) {
         info(`Default sandbox config added to ${CONFIG_PATH}.`);
+      }
+      if (taskAdded) {
+        info(`Default task.shortIdLength=${defaults.task.shortIdLength} added to ${CONFIG_PATH}.`);
       }
       if (labelsAdded) {
         info(`Default labels.in config added to ${CONFIG_PATH}.`);
@@ -243,6 +254,9 @@ async function cmdUpdate(): Promise<void> {
     }
     if (hasNewEntries && sandboxAdded) {
       info(`Default sandbox config added to ${CONFIG_PATH}.`);
+    }
+    if (hasNewEntries && taskAdded) {
+      info(`Default task.shortIdLength=${defaults.task.shortIdLength} added to ${CONFIG_PATH}.`);
     }
     if (hasNewEntries && labelsAdded) {
       info(`Default labels.in config added to ${CONFIG_PATH}.`);

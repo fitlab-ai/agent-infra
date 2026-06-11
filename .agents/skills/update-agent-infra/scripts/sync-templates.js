@@ -42,6 +42,9 @@ const DEFAULTS = {
       "disk": null
     }
   },
+  "task": {
+    "shortIdLength": 1
+  },
   "labels": {
     "in": {}
   },

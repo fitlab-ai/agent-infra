@@ -123,7 +123,7 @@ export async function enter(args: string[]): Promise<number> {
   let branch: string;
   if (isTaskShortRef(firstArg)) {
     const { running } = fetchSandboxRows(engine, sandboxLabel(config), sandboxBranchLabel(config));
-    branch = resolveTaskShortRef(firstArg, { running });
+    branch = resolveTaskShortRef(firstArg, { running, repoRoot: config.repoRoot });
   } else {
     branch = resolveTaskBranch(firstArg, config.repoRoot);
   }

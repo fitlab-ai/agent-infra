@@ -16,6 +16,24 @@ Restore local task workspace files from platform Issue comments that contain syn
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
+## Task id short ref
+
+If the `{task-id}` argument begins with `#` (e.g. `#1`, `#7`), resolve the short ref to a full task id first:
+
+```bash
+if [[ "{task-id}" == "#"* ]]; then
+  resolved=$(node .agents/scripts/task-short-id.js resolve "{task-id}") || {
+    echo "Error: short id '{task-id}' not found in active task registry" >&2
+    exit 1
+  }
+  task_id="$resolved"
+else
+  task_id="{task-id}"
+fi
+```
+
+Treat `{task-id}` as `$task_id` in every downstream command (the full `TASK-YYYYMMDD-HHMMSS` form). Short ids are only valid inside the active task set; see `.agents/rules/task-short-id.md` for the lifecycle and the SKILL-vs-sandbox scope split.
+
 ## Steps
 
 ### 1. Verify Input and Environment
@@ -90,9 +108,17 @@ Update the restored `task.md`:
 
 Append an Activity Log entry indicating the task was restored from the platform Issue.
 
+**Re-allocate short id** (the task directory is back under `active/`; alloc a new `#N`, which may differ from the pre-archival value):
+
+```bash
+node .agents/scripts/task-short-id.js alloc "$task_id"
+```
+
 ### 7. Inform User
 
 Report the restored task id, restored file count, and the active task directory.
+
+
 
 ## Completion Checklist
 

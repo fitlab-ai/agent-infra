@@ -17,6 +17,24 @@ description: "提交当前变更到 Git"
 | 「`git add -A` 更省事」 | 禁止 `git add -A`/`git add .`；只暂存明确列出的文件，避免带入无关改动。 |
 | 「改了带版权头的文件，年份先不动」 | 改了就更新版权年份（动态取 `date +%Y`），这是提交前的硬性检查。 |
 
+## 任务入参短号别名
+
+如果用户传入的 `{task-id}` 入参以 `#` 开头（如 `#1`、`#7`），先调用解析器把短号翻译为完整 task ID：
+
+```bash
+if [[ "{task-id}" == "#"* ]]; then
+  resolved=$(node .agents/scripts/task-short-id.js resolve "{task-id}") || {
+    echo "Error: short id '{task-id}' not found in active task registry" >&2
+    exit 1
+  }
+  task_id="$resolved"
+else
+  task_id="{task-id}"
+fi
+```
+
+后续所有命令把 `{task-id}` 视作 `$task_id`（已是完整 `TASK-YYYYMMDD-HHMMSS` 形式）。短号仅在 active 域内有效；其语义、生命周期与 `#N` vs `TASK-…` 的作用域二分见 `.agents/rules/task-short-id.md`。
+
 ## 1. 检查本地修改（关键）
 
 在任何编辑前先检查：

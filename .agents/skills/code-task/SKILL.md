@@ -42,8 +42,25 @@ tail .agents/workspace/active/{task-id}/task.md
 
 状态核对完成前，禁止任何关于外部状态的断言（例如“代码没变”“测试已通过”“没有其他引用”），包括思考阶段。本门禁只提供结构下限；逐条证据配对和真实性仍需按报告模板与审查要求核对。
 
-## 执行步骤
+## 任务入参短号别名
 
+如果用户传入的 `{task-id}` 入参以 `#` 开头（如 `#1`、`#7`），先调用解析器把短号翻译为完整 task ID：
+
+```bash
+if [[ "{task-id}" == "#"* ]]; then
+  resolved=$(node .agents/scripts/task-short-id.js resolve "{task-id}") || {
+    echo "Error: short id '{task-id}' not found in active task registry" >&2
+    exit 1
+  }
+  task_id="$resolved"
+else
+  task_id="{task-id}"
+fi
+```
+
+后续所有命令把 `{task-id}` 视作 `$task_id`（已是完整 `TASK-YYYYMMDD-HHMMSS` 形式）。短号仅在 active 域内有效；其语义、生命周期与 `#N` vs `TASK-…` 的作用域二分见 `.agents/rules/task-short-id.md`。
+
+## 执行步骤
 ### 1. 验证前置条件
 
 先检查：

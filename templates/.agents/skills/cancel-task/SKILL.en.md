@@ -13,6 +13,24 @@ description: "Cancel an unneeded task and move it"
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
+## Task id short ref
+
+If the `{task-id}` argument begins with `#` (e.g. `#1`, `#7`), resolve the short ref to a full task id first:
+
+```bash
+if [[ "{task-id}" == "#"* ]]; then
+  resolved=$(node .agents/scripts/task-short-id.js resolve "{task-id}") || {
+    echo "Error: short id '{task-id}' not found in active task registry" >&2
+    exit 1
+  }
+  task_id="$resolved"
+else
+  task_id="{task-id}"
+fi
+```
+
+Treat `{task-id}` as `$task_id` in every downstream command (the full `TASK-YYYYMMDD-HHMMSS` form). Short ids are only valid inside the active task set; see `.agents/rules/task-short-id.md` for the lifecycle and the SKILL-vs-sandbox scope split.
+
 ## Steps
 
 ### 1. Verify Task Exists
@@ -92,6 +110,12 @@ The cancellation comment must include at least:
 
 ### 7. Verification Gate
 
+**Release short id** (after the directory has already been moved; the script is idempotent and returns 0 even if the task isn't registered):
+
+```bash
+node .agents/scripts/task-short-id.js release "$task_id" || true
+```
+
 Run the verification gate to confirm the moved task and sync state are valid:
 
 ```bash
@@ -124,6 +148,8 @@ Next step - inspect the moved task:
   - Gemini CLI: /{{project}}:check-task {task-id}
   - Codex CLI: $check-task {task-id}
 ```
+
+
 
 ## Completion Checklist
 

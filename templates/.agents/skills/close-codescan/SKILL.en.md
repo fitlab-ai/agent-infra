@@ -7,6 +7,24 @@ description: "Close a Code Scanning alert with a documented reason"
 
 Dismiss the specified Code Scanning (CodeQL) alert and record a justified reason.
 
+## Task id short ref
+
+If the `{task-id}` argument begins with `#` (e.g. `#1`, `#7`), resolve the short ref to a full task id first:
+
+```bash
+if [[ "{task-id}" == "#"* ]]; then
+  resolved=$(node .agents/scripts/task-short-id.js resolve "{task-id}") || {
+    echo "Error: short id '{task-id}' not found in active task registry" >&2
+    exit 1
+  }
+  task_id="$resolved"
+else
+  task_id="{task-id}"
+fi
+```
+
+Treat `{task-id}` as `$task_id` in every downstream command (the full `TASK-YYYYMMDD-HHMMSS` form). Short ids are only valid inside the active task set; see `.agents/rules/task-short-id.md` for the lifecycle and the SKILL-vs-sandbox scope split.
+
 ## Execution Flow
 
 ### 1. Retrieve Alert Information
@@ -81,6 +99,11 @@ date "+%Y-%m-%d %H:%M:%S%:z"
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Alert Closed** by {agent} — Code Scanning alert #{alert-number} dismissed: {reason}
   ```
 - Archive the task
+- **Release short id** (after the archive `mv` succeeded; the script is idempotent):
+
+  ```bash
+  node .agents/scripts/task-short-id.js release "$task_id" || true
+  ```
 
 ### 8. Inform User
 
@@ -117,3 +140,5 @@ Next step - complete and archive the task if a related task exists:
 - Already closed: output "Alert #{number} is already {state}"
 - Permission error: output "No permission to modify alerts"
 - User canceled: output "Cancellation acknowledged"
+
+

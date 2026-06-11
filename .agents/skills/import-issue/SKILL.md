@@ -13,6 +13,24 @@ description: "从 Issue 导入并创建任务"
 - 不要编写或修改业务代码。仅做导入
 - 执行本技能后，你**必须**立即更新任务状态
 
+## 任务入参短号别名
+
+如果用户传入的 `{task-id}` 入参以 `#` 开头（如 `#1`、`#7`），先调用解析器把短号翻译为完整 task ID：
+
+```bash
+if [[ "{task-id}" == "#"* ]]; then
+  resolved=$(node .agents/scripts/task-short-id.js resolve "{task-id}") || {
+    echo "Error: short id '{task-id}' not found in active task registry" >&2
+    exit 1
+  }
+  task_id="$resolved"
+else
+  task_id="{task-id}"
+fi
+```
+
+后续所有命令把 `{task-id}` 视作 `$task_id`（已是完整 `TASK-YYYYMMDD-HHMMSS` 形式）。短号仅在 active 域内有效；其语义、生命周期与 `#N` vs `TASK-…` 的作用域二分见 `.agents/rules/task-short-id.md`。
+
 ## 执行流程
 
 ### 1. 获取 Issue 信息
@@ -119,6 +137,14 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 ### 7. 完成校验
 
+**先调用短号分配**（保证 `short_id` 写回 task.md + 注册表 entry 已在；完成校验阶段会读取）：
+
+```bash
+node .agents/scripts/task-short-id.js alloc "$task_id"
+```
+
+如失败（退出码非 0），按提示「归档若干任务」或「调高 task.shortIdLength」处理；不要继续执行后续步骤。
+
 运行完成校验，确认任务产物和同步状态符合规范：
 
 ```bash
@@ -154,6 +180,8 @@ Issue #{number} 已导入。
   - Gemini CLI：/agent-infra:analyze-task {task-id}
   - Codex CLI：$analyze-task {task-id}
 ```
+
+
 
 ## 完成检查清单
 

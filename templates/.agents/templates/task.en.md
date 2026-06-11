@@ -7,6 +7,7 @@ status: open                   # open | in-progress | review | blocked | complet
 created_at: YYYY-MM-DDTHH:mm:ss±HH:MM
 updated_at: YYYY-MM-DDTHH:mm:ss±HH:MM
 agent_infra_version: v0.0.0    # Current agent-infra version; refreshed by workflow commands
+short_id:                       # Allocated by create-task / import-* in active window; kept as historical value after archival
 priority:                       # Optional Issue field: Urgent | High | Medium | Low
 effort:                         # Optional Issue field: High | Medium | Low
 start_date:                     # Optional Issue field for Feature: YYYY-MM-DD
