@@ -3,11 +3,18 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { platform } from 'node:os';
 import { info, ok, err } from './log.ts';
-import { prompt, select, closePrompt } from './prompt.ts';
+import { prompt, select, multiSelect, closePrompt } from './prompt.ts';
 import { resolveTemplateDir } from './paths.ts';
 import { renderFile, copySkillDir, KNOWN_PLATFORMS } from './render.ts';
 import { enginesForPlatform } from './sandbox/engines/index.ts';
 import { VERSION } from './version.ts';
+import {
+  BUILTIN_TUI_IDS,
+  BUILTIN_TUI_DISPLAY,
+  isPathOwnedByDisabledTUI,
+  resolveEnabledTUIs
+} from './builtin-tuis.ts';
+import type { BuiltinTUIId } from './builtin-tuis.ts';
 
 type FileRegistry = {
   managed: string[];
@@ -37,6 +44,7 @@ type AgentConfig = {
   sandbox: Record<string, unknown>;
   labels: Record<string, unknown>;
   files: FileRegistry;
+  tuis: string[];
   templates?: { sources: SourceEntry[] };
   skills?: { sources: SourceEntry[] };
 };
@@ -60,10 +68,15 @@ function isPathOwnedByOtherPlatform(relativePath: string, platformType: string):
   return candidate !== platformType;
 }
 
-function buildDefaultFiles(platformType: string): FileRegistry {
+function buildDefaultFiles(platformType: string, enabledTUIs: Set<BuiltinTUIId>): FileRegistry {
+  const ownedByDisabled = (entry: string) => isPathOwnedByDisabledTUI(entry, enabledTUIs);
   return {
-    managed: (defaults.files.managed || []).filter((entry) => !isPathOwnedByOtherPlatform(entry, platformType)),
-    merged: (defaults.files.merged || []).filter((entry) => !isPathOwnedByOtherPlatform(entry, platformType)),
+    managed: (defaults.files.managed || []).filter(
+      (entry) => !isPathOwnedByOtherPlatform(entry, platformType) && !ownedByDisabled(entry)
+    ),
+    merged: (defaults.files.merged || []).filter(
+      (entry) => !isPathOwnedByOtherPlatform(entry, platformType) && !ownedByDisabled(entry)
+    ),
     ejected: structuredClone(defaults.files.ejected || [])
   };
 }
@@ -216,6 +229,20 @@ async function cmdInit(): Promise<void> {
   );
   const requiresPullRequest = requiresPRChoice !== 'no';
 
+  let enabledTUIs: string[];
+  try {
+    enabledTUIs = await multiSelect(
+      'Built-in TUI command files to install/manage',
+      BUILTIN_TUI_IDS.map((id) => ({ id, label: BUILTIN_TUI_DISPLAY[id] }))
+    );
+  } catch (e) {
+    err(e instanceof Error ? e.message : String(e));
+    closePrompt();
+    process.exitCode = 1;
+    return;
+  }
+  const enabledTUISet = resolveEnabledTUIs(enabledTUIs);
+
   const templateSources = parseLocalSources(await prompt(
     'Template sources (optional, comma-separated local paths, e.g. ~/my-templates; Enter to skip)',
     ''
@@ -259,29 +286,35 @@ async function cmdInit(): Promise<void> {
   );
   ok('Installed .agents/skills/update-agent-infra/');
 
-  // install Claude command
-  renderFile(
-    path.join(templateDir, '.claude', 'commands', claudeSrc),
-    path.join('.claude', 'commands', 'update-agent-infra.md'),
-    replacements
-  );
-  ok('Installed .claude/commands/update-agent-infra.md');
+  // install Claude command (only if enabled)
+  if (enabledTUISet.has('claude-code')) {
+    renderFile(
+      path.join(templateDir, '.claude', 'commands', claudeSrc),
+      path.join('.claude', 'commands', 'update-agent-infra.md'),
+      replacements
+    );
+    ok('Installed .claude/commands/update-agent-infra.md');
+  }
 
-  // install Gemini command
-  renderFile(
-    path.join(templateDir, '.gemini', 'commands', '_project_', geminiSrc),
-    path.join('.gemini', 'commands', project, 'update-agent-infra.toml'),
-    replacements
-  );
-  ok(`Installed .gemini/commands/${project}/update-agent-infra.toml`);
+  // install Gemini command (only if enabled)
+  if (enabledTUISet.has('gemini-cli')) {
+    renderFile(
+      path.join(templateDir, '.gemini', 'commands', '_project_', geminiSrc),
+      path.join('.gemini', 'commands', project, 'update-agent-infra.toml'),
+      replacements
+    );
+    ok(`Installed .gemini/commands/${project}/update-agent-infra.toml`);
+  }
 
-  // install OpenCode command
-  renderFile(
-    path.join(templateDir, '.opencode', 'commands', opencodeSrc),
-    path.join('.opencode', 'commands', 'update-agent-infra.md'),
-    replacements
-  );
-  ok('Installed .opencode/commands/update-agent-infra.md');
+  // install OpenCode command (only if enabled)
+  if (enabledTUISet.has('opencode')) {
+    renderFile(
+      path.join(templateDir, '.opencode', 'commands', opencodeSrc),
+      path.join('.opencode', 'commands', 'update-agent-infra.md'),
+      replacements
+    );
+    ok('Installed .opencode/commands/update-agent-infra.md');
+  }
 
   // generate .agents/.airc.json
   const config: AgentConfig = {
@@ -293,7 +326,8 @@ async function cmdInit(): Promise<void> {
     templateVersion: VERSION,
     sandbox: structuredClone(defaults.sandbox),
     labels: structuredClone(defaults.labels),
-    files: buildDefaultFiles(platformType)
+    files: buildDefaultFiles(platformType, enabledTUISet),
+    tuis: enabledTUIs
   };
 
   if (sandboxEngine) {
@@ -322,9 +356,18 @@ async function cmdInit(): Promise<void> {
   console.log('');
   console.log('  Next step: open this project in any AI TUI and run:');
   console.log('');
-  console.log('    Claude Code / OpenCode:  /update-agent-infra');
-  console.log(`    Gemini CLI:              /${project}:update-agent-infra`);
-  console.log('    Codex CLI:               $update-agent-infra');
+  const claudeOrOpencode: string[] = [];
+  if (enabledTUISet.has('claude-code')) claudeOrOpencode.push('Claude Code');
+  if (enabledTUISet.has('opencode')) claudeOrOpencode.push('OpenCode');
+  if (claudeOrOpencode.length > 0) {
+    console.log(`    ${claudeOrOpencode.join(' / ')}:  /update-agent-infra`);
+  }
+  if (enabledTUISet.has('gemini-cli')) {
+    console.log(`    Gemini CLI:              /${project}:update-agent-infra`);
+  }
+  if (enabledTUISet.has('codex')) {
+    console.log('    Codex CLI:               $update-agent-infra');
+  }
   console.log('');
   console.log('  This will render all templates and set up the full');
   console.log('  AI collaboration infrastructure.');

@@ -210,6 +210,33 @@ The `files` field in `.agents/.airc.json` groups project files into three catego
 
 `ejected` entries support literal paths or globs, using the same matching rules as `merged`.
 
+## Built-in TUI Selection
+
+Use the top-level `.agents/.airc.json` `tuis` array to pick which built-in TUIs (`claude-code`, `codex`, `gemini-cli`, `opencode`) agent-infra should install command files for and keep in sync.
+
+| Value | Meaning |
+|-------|---------|
+| `tuis` missing or `null` | All four built-in TUIs are enabled (backward-compatible default). |
+| `tuis: []` | Same as missing — all four enabled (with a safety fallback so a misconfigured project cannot end up with zero managed TUIs). |
+| `tuis: [<subset>]` | Only the listed TUIs are managed. Unknown ids are ignored; if the filtered set is empty, falls back to all-enabled. |
+
+`ai init` includes an interactive multi-select for this field. Default value is all-enabled; type comma-separated numbers or ids (e.g. `1,3` or `claude-code,opencode`) to keep a subset. Invalid input (duplicate, out-of-range, unknown id, whitespace-only) aborts init with a non-zero exit code.
+
+### Side effects of disabling a TUI
+
+When you disable a built-in TUI (either via `ai init` or by hand-editing `.airc.json`), the next `ai update` / `update-agent-infra` will:
+
+- skip seed command writes for that TUI (e.g. `.gemini/commands/<project>/update-agent-infra.toml`);
+- skip the TUI's owned default entries when backfilling `files.managed` / `files.merged`;
+- **clean up existing files** under the TUI's owned path prefix (`.claude/`, `.codex/`, `.gemini/`, `.opencode/`) — these are listed in `report.managed.removed`, mirroring the cleanup behavior when switching `platform`.
+
+To opt a specific file out of this cleanup, list it in `files.ejected`; ejected entries owned by disabled TUIs are preserved as-is and are not re-created by sync.
+
+### Relation to other config fields
+
+- `tuis` controls **which TUI command files agent-infra writes and maintains**. It is independent from `sandbox.tools`, which controls **which CLIs the sandbox image installs**. Toggling one does not affect the other; the README for `sandbox.tools` lives in the Sandbox section.
+- `tuis` is independent from `customTUIs` (see below). CustomTUI command files are not removed when you disable a built-in TUI, even if the customTUI's `dir` falls under that TUI's owned prefix (e.g. a customTUI configured with `dir: ".codex/commands"` is preserved when `codex` is disabled).
+
 ## Custom TUI Configuration
 
 Use the top-level `.agents/.airc.json` `customTUIs` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom TUI directory.

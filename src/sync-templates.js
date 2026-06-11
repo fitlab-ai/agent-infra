@@ -28,6 +28,37 @@ const PACKAGE_NAME = '@fitlab-ai/agent-infra';
 const KNOWN_PLATFORMS = new Set(['github']);
 const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
 
+// Single source of truth for built-in TUI ids and owned path prefixes.
+// Keep in sync with lib/builtin-tuis.ts (enforced by tests/unit/scripts/sync-templates-consts.test.ts).
+const BUILTIN_TUI_IDS = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
+const BUILTIN_TUI_OWNED_PATH_PREFIXES = {
+  'claude-code': ['.claude/'],
+  'codex': ['.codex/'],
+  'gemini-cli': ['.gemini/'],
+  'opencode': ['.opencode/']
+};
+
+function resolveEnabledTUIs(value) {
+  if (!Array.isArray(value)) return new Set(BUILTIN_TUI_IDS);
+  const set = new Set();
+  for (const v of value) {
+    if (typeof v === 'string' && BUILTIN_TUI_IDS.includes(v)) set.add(v);
+  }
+  return set.size === 0 ? new Set(BUILTIN_TUI_IDS) : set;
+}
+
+function isPathOwnedByDisabledTUI(rel, enabledSet) {
+  const normalized = String(rel || '').replace(/\\/g, '/').replace(/^\.\//, '');
+  for (const tui of BUILTIN_TUI_IDS) {
+    if (enabledSet.has(tui)) continue;
+    for (const prefix of BUILTIN_TUI_OWNED_PATH_PREFIXES[tui]) {
+      const trimmed = prefix.replace(/\/$/, '');
+      if (normalized === trimmed || normalized.startsWith(prefix)) return true;
+    }
+  }
+  return false;
+}
+
 function norm(p) { return p.replace(/\\/g, '/'); }
 
 function normDir(p) {
@@ -594,26 +625,32 @@ function learnAndGenerateCommands(projectRoot, customSkills, tool, templateSkill
   }
 }
 
-function generateCustomCommands(projectRoot, customSkills, project, lang, report, customTUIs, templateSkillNames) {
+function generateCustomCommands(projectRoot, customSkills, project, lang, report, customTUIs, templateSkillNames, enabledTUIs) {
   for (const skill of customSkills) {
-    writeIfChanged(
-      projectRoot,
-      `.claude/commands/${skill.dirName}.md`,
-      generateClaudeCommand(skill, lang),
-      report.custom.commands
-    );
-    writeIfChanged(
-      projectRoot,
-      '.gemini/commands/' + project + '/' + skill.dirName + '.toml',
-      generateGeminiCommand(skill, lang),
-      report.custom.commands
-    );
-    writeIfChanged(
-      projectRoot,
-      `.opencode/commands/${skill.dirName}.md`,
-      generateOpenCodeCommand(skill, lang),
-      report.custom.commands
-    );
+    if (enabledTUIs.has('claude-code')) {
+      writeIfChanged(
+        projectRoot,
+        `.claude/commands/${skill.dirName}.md`,
+        generateClaudeCommand(skill, lang),
+        report.custom.commands
+      );
+    }
+    if (enabledTUIs.has('gemini-cli')) {
+      writeIfChanged(
+        projectRoot,
+        '.gemini/commands/' + project + '/' + skill.dirName + '.toml',
+        generateGeminiCommand(skill, lang),
+        report.custom.commands
+      );
+    }
+    if (enabledTUIs.has('opencode')) {
+      writeIfChanged(
+        projectRoot,
+        `.opencode/commands/${skill.dirName}.md`,
+        generateOpenCodeCommand(skill, lang),
+        report.custom.commands
+      );
+    }
   }
 
   const tools = Array.isArray(customTUIs) ? customTUIs : [];
@@ -909,6 +946,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const { project, org, language: lang = 'en' } = cfg;
   const platformType = cfg.platform?.type || DEFAULTS.platform.type;
+  const enabledTUIs = resolveEnabledTUIs(cfg.tuis);
   const customTUIsConfig = Array.isArray(cfg.customTUIs) ? cfg.customTUIs : [];
   const vars = { project, org };
   const templateSkillNames = listTemplateSkillNames(templateRoot);
@@ -929,7 +967,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
       errors: [],
       conflicts: []
     },
-    managed: { written: [], created: [], unchanged: [], skippedMerged: [], skippedPlatform: [], removed: [] },
+    managed: { written: [], created: [], unchanged: [], skippedMerged: [], skippedPlatform: [], skippedTUI: [], removed: [] },
     custom: {
       detected: [],
       generated: [],
@@ -956,10 +994,12 @@ function syncTemplates(projectRoot, templateRootOverride) {
   const known = new Set([...managed, ...merged, ...ejected]);
   for (const e of (DEFAULTS.files.managed || [])) {
     if (isPathOwnedByOtherPlatform(e, platformType)) continue;
+    if (isPathOwnedByDisabledTUI(e, enabledTUIs)) continue;
     if (!known.has(e)) { managed.push(e); known.add(e); report.registryAdded.push({ entry: e, list: 'managed' }); }
   }
   for (const e of (DEFAULTS.files.merged || [])) {
     if (isPathOwnedByOtherPlatform(e, platformType)) continue;
+    if (isPathOwnedByDisabledTUI(e, enabledTUIs)) continue;
     if (!known.has(e)) { merged.push(e); known.add(e); report.registryAdded.push({ entry: e, list: 'merged' }); }
   }
 
@@ -990,9 +1030,48 @@ function syncTemplates(projectRoot, templateRootOverride) {
     report.managed.removed.push(norm(path.relative(projectRoot, target)));
   }
 
+  // Cleanup files owned by disabled built-in TUIs. Iterates managed + merged
+  // only (ejected entries are explicitly user-retained, see ejected loop below).
+  //
+  // Protection rule: only skip files registered as customTUI command targets
+  // (e.g. a customTUI configured with dir=.codex/commands/ when codex is
+  // disabled). Built-in TUI custom-skill commands like
+  // .gemini/commands/<project>/<dirName>.toml are intentionally NOT protected
+  // here so that disabling gemini-cli actually frees the gemini directory —
+  // they will be regenerated only for still-enabled TUIs (see
+  // generateCustomCommands).
+  for (const entry of [...managed, ...merged]) {
+    if (!isPathOwnedByDisabledTUI(entry, enabledTUIs)) continue;
+
+    if (entry.endsWith('/')) {
+      const dir = path.join(projectRoot, entry);
+      if (!fs.existsSync(dir)) continue;
+
+      for (const filePath of walkDir(dir)) {
+        const relProj = norm(path.relative(projectRoot, filePath));
+        if (customTUICommandTargets.has(relProj)) continue;
+        fs.unlinkSync(filePath);
+        report.managed.removed.push(relProj);
+      }
+      removeEmptyDirs(dir);
+      continue;
+    }
+
+    const target = path.join(projectRoot, renderPathname(entry, project));
+    if (!fs.existsSync(target)) continue;
+    const relProj = norm(path.relative(projectRoot, target));
+    if (customTUICommandTargets.has(relProj)) continue;
+    fs.unlinkSync(target);
+    report.managed.removed.push(relProj);
+  }
+
   for (const entry of managed) {
     if (isPathOwnedByOtherPlatform(entry, platformType)) {
       report.managed.skippedPlatform.push(entry);
+      continue;
+    }
+    if (isPathOwnedByDisabledTUI(entry, enabledTUIs)) {
+      report.managed.skippedTUI.push(entry);
       continue;
     }
 
@@ -1080,7 +1159,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const customSkills = detectCustomSkills(projectRoot, templateSkillNames);
   report.custom.detected = customSkills.map((skill) => skill.dirName);
-  generateCustomCommands(projectRoot, customSkills, project, lang, report, customTUIs, templateSkillNames);
+  generateCustomCommands(projectRoot, customSkills, project, lang, report, customTUIs, templateSkillNames, enabledTUIs);
 
   for (const entry of ejected) {
     const dstFull = path.join(projectRoot, entry);
@@ -1088,6 +1167,9 @@ function syncTemplates(projectRoot, templateRootOverride) {
       report.ejected.skipped.push(entry);
       continue;
     }
+    // Do not (re)create ejected files for disabled TUIs. Existing files are
+    // never touched by sync (handled above); this guard only blocks creation.
+    if (isPathOwnedByDisabledTUI(entry, enabledTUIs)) continue;
 
     const selected = platformSelect(langSelect(entryVariantRels(entry, allSet, platformType), lang, allSet, project), platformType, project);
     const target = norm(renderPathname(entry, project));
@@ -1106,6 +1188,10 @@ function syncTemplates(projectRoot, templateRootOverride) {
   for (const entry of merged) {
     if (isPathOwnedByOtherPlatform(entry, platformType)) {
       report.managed.skippedPlatform.push(entry);
+      continue;
+    }
+    if (isPathOwnedByDisabledTUI(entry, enabledTUIs)) {
+      report.managed.skippedTUI.push(entry);
       continue;
     }
 

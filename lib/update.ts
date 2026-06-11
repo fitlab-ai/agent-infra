@@ -3,6 +3,8 @@ import path from 'node:path';
 import { info, ok, err } from './log.ts';
 import { resolveTemplateDir } from './paths.ts';
 import { renderFile, copySkillDir, KNOWN_PLATFORMS } from './render.ts';
+import { isPathOwnedByDisabledTUI, resolveEnabledTUIs } from './builtin-tuis.ts';
+import type { BuiltinTUIId } from './builtin-tuis.ts';
 
 type FileRegistry = {
   managed: string[];
@@ -19,6 +21,7 @@ type UpdateConfig = {
   sandbox?: Record<string, unknown>;
   labels?: Record<string, unknown>;
   files?: Partial<FileRegistry>;
+  tuis?: unknown;
 };
 
 type Defaults = {
@@ -45,7 +48,7 @@ function isPathOwnedByOtherPlatform(relativePath: string, platformType: string):
   return candidate !== platformType;
 }
 
-function syncFileRegistry(config: UpdateConfig, platformType: string) {
+function syncFileRegistry(config: UpdateConfig, platformType: string, enabledTUIs: Set<BuiltinTUIId>) {
   config.files ||= {};
   const before = JSON.stringify({
     files: {
@@ -67,6 +70,7 @@ function syncFileRegistry(config: UpdateConfig, platformType: string) {
 
   for (const entry of defaults.files.managed) {
     if (isPathOwnedByOtherPlatform(entry, platformType)) continue;
+    if (isPathOwnedByDisabledTUI(entry, enabledTUIs)) continue;
     if (!allExisting.includes(entry)) {
       config.files.managed.push(entry);
       added.managed.push(entry);
@@ -74,6 +78,7 @@ function syncFileRegistry(config: UpdateConfig, platformType: string) {
   }
   for (const entry of defaults.files.merged) {
     if (isPathOwnedByOtherPlatform(entry, platformType)) continue;
+    if (isPathOwnedByDisabledTUI(entry, enabledTUIs)) continue;
     if (!allExisting.includes(entry)) {
       config.files.merged.push(entry);
       added.merged.push(entry);
@@ -118,6 +123,7 @@ async function cmdUpdate(): Promise<void> {
   const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) as UpdateConfig;
   const { project, org, language } = config;
   const platformType = config.platform?.type || defaults.platform.type;
+  const enabledTUIs = resolveEnabledTUIs(config.tuis);
   const replacements = { project, org };
 
   info(`Updating seed files for: ${project}`);
@@ -150,32 +156,38 @@ async function cmdUpdate(): Promise<void> {
     // Ignore missing legacy script from pre-ESM installs.
   }
 
-  // update Claude command
-  renderFile(
-    path.join(templateDir, '.claude', 'commands', claudeSrc),
-    path.join('.claude', 'commands', 'update-agent-infra.md'),
-    replacements
-  );
-  ok('Updated .claude/commands/update-agent-infra.md');
+  // update Claude command (only if enabled)
+  if (enabledTUIs.has('claude-code')) {
+    renderFile(
+      path.join(templateDir, '.claude', 'commands', claudeSrc),
+      path.join('.claude', 'commands', 'update-agent-infra.md'),
+      replacements
+    );
+    ok('Updated .claude/commands/update-agent-infra.md');
+  }
 
-  // update Gemini command
-  renderFile(
-    path.join(templateDir, '.gemini', 'commands', '_project_', geminiSrc),
-    path.join('.gemini', 'commands', project, 'update-agent-infra.toml'),
-    replacements
-  );
-  ok(`Updated .gemini/commands/${project}/update-agent-infra.toml`);
+  // update Gemini command (only if enabled)
+  if (enabledTUIs.has('gemini-cli')) {
+    renderFile(
+      path.join(templateDir, '.gemini', 'commands', '_project_', geminiSrc),
+      path.join('.gemini', 'commands', project, 'update-agent-infra.toml'),
+      replacements
+    );
+    ok(`Updated .gemini/commands/${project}/update-agent-infra.toml`);
+  }
 
-  // update OpenCode command
-  renderFile(
-    path.join(templateDir, '.opencode', 'commands', opencodeSrc),
-    path.join('.opencode', 'commands', 'update-agent-infra.md'),
-    replacements
-  );
-  ok('Updated .opencode/commands/update-agent-infra.md');
+  // update OpenCode command (only if enabled)
+  if (enabledTUIs.has('opencode')) {
+    renderFile(
+      path.join(templateDir, '.opencode', 'commands', opencodeSrc),
+      path.join('.opencode', 'commands', 'update-agent-infra.md'),
+      replacements
+    );
+    ok('Updated .opencode/commands/update-agent-infra.md');
+  }
 
   // sync file registry
-  const { added, changed } = syncFileRegistry(config, platformType);
+  const { added, changed } = syncFileRegistry(config, platformType, enabledTUIs);
   const hasNewEntries = added.managed.length > 0 || added.merged.length > 0;
   const platformAdded = !config.platform;
   const sandboxAdded = !config.sandbox;
@@ -251,9 +263,18 @@ async function cmdUpdate(): Promise<void> {
   console.log('');
   console.log('  Next step: run the full update in your AI TUI:');
   console.log('');
-  console.log('    Claude Code / OpenCode:  /update-agent-infra');
-  console.log(`    Gemini CLI:              /${project}:update-agent-infra`);
-  console.log('    Codex CLI:               $update-agent-infra');
+  const claudeOrOpencode: string[] = [];
+  if (enabledTUIs.has('claude-code')) claudeOrOpencode.push('Claude Code');
+  if (enabledTUIs.has('opencode')) claudeOrOpencode.push('OpenCode');
+  if (claudeOrOpencode.length > 0) {
+    console.log(`    ${claudeOrOpencode.join(' / ')}:  /update-agent-infra`);
+  }
+  if (enabledTUIs.has('gemini-cli')) {
+    console.log(`    Gemini CLI:              /${project}:update-agent-infra`);
+  }
+  if (enabledTUIs.has('codex')) {
+    console.log('    Codex CLI:               $update-agent-infra');
+  }
   console.log('');
 }
 

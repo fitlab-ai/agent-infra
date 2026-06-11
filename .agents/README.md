@@ -210,6 +210,33 @@ args: "<task-id>"   # 可选
 
 `ejected` 条目支持字面路径或 glob，匹配规则与 `merged` 相同。
 
+## 内建 TUI 选择
+
+`.agents/.airc.json` 顶层 `tuis` 数组用于决定 agent-infra 应当为哪些内建 TUI（`claude-code`、`codex`、`gemini-cli`、`opencode`）安装并维护命令文件。
+
+| 取值 | 含义 |
+|------|------|
+| `tuis` 缺失或为 `null` | 启用全部四个内建 TUI（向后兼容默认） |
+| `tuis: []` | 等同于缺失——全部启用（安全回退，防止误配置导致无任何 TUI 被维护） |
+| `tuis: [<子集>]` | 仅维护列出的 TUI；未知 id 会被忽略；过滤后若为空则回退到全部启用 |
+
+`ai init` 会通过交互式多选询问该字段。默认值为全部启用；可输入逗号分隔的编号或 id（如 `1,3` 或 `claude-code,opencode`）来仅保留子集。非法输入（重复、超界、未知 id、纯空白）会让 init 以非零退出码终止。
+
+### 取消某个 TUI 的副作用
+
+通过 `ai init` 或手工编辑 `.airc.json` 取消某个内建 TUI 后，下一次 `ai update` / `update-agent-infra` 会：
+
+- 跳过该 TUI 的 seed 命令文件写入（例如 `.gemini/commands/<project>/update-agent-infra.toml`）；
+- 在回填 `files.managed` / `files.merged` 时跳过该 TUI owned 的默认条目；
+- **物理清理**该 TUI owned 路径前缀（`.claude/`、`.codex/`、`.gemini/`、`.opencode/`）下的已有文件——清理列表会出现在 `report.managed.removed`，与切换 `platform` 时的清理行为一致。
+
+若希望保留某个具体文件，把它加入 `files.ejected`：被 ejected 的、属于已取消 TUI 的条目会保持原状，sync 不会重新创建也不会删除。
+
+### 与其他配置字段的关系
+
+- `tuis` 控制 **agent-infra 写入与维护哪些 TUI 的命令文件**，与 `sandbox.tools`（控制**沙箱镜像里安装哪些 CLI**）相互独立。两者互不影响；`sandbox.tools` 的说明见 Sandbox 一节。
+- `tuis` 与 `customTUIs`（见下）相互独立。取消某个内建 TUI 时 customTUI 命令文件不会被清理，即便 customTUI 的 `dir` 落在该 TUI 的 owned 前缀下（例如 `dir: ".codex/commands"` 的 customTUI 在 `codex` 被取消时仍会保留）。
+
 ## 自定义 TUI 配置
 
 当团队使用的 AI TUI 不属于内置命令目标时，可以在 `.agents/.airc.json` 顶层配置 `customTUIs` 数组。该配置用于让 agent-infra 输出正确的下一步命令，并通过学习自定义 TUI 目录中的既有命令文件，为项目自定义 skill 生成同格式命令。
