@@ -354,24 +354,30 @@ async function cmdInit(): Promise<void> {
   console.log('');
   ok('Project initialized successfully!');
   console.log('');
-  console.log('  Next step: open this project in any AI TUI and run:');
-  console.log('');
-  const claudeOrOpencode: string[] = [];
-  if (enabledTUISet.has('claude-code')) claudeOrOpencode.push('Claude Code');
-  if (enabledTUISet.has('opencode')) claudeOrOpencode.push('OpenCode');
-  if (claudeOrOpencode.length > 0) {
-    console.log(`    ${claudeOrOpencode.join(' / ')}:  /update-agent-infra`);
+  if (enabledTUISet.size === 0) {
+    console.log('  No built-in TUI selected.');
+    console.log(`  Configure "customTUIs" in ${configPath} before running update-agent-infra.`);
+    console.log('');
+  } else {
+    console.log('  Next step: open this project in any AI TUI and run:');
+    console.log('');
+    const claudeOrOpencode: string[] = [];
+    if (enabledTUISet.has('claude-code')) claudeOrOpencode.push('Claude Code');
+    if (enabledTUISet.has('opencode')) claudeOrOpencode.push('OpenCode');
+    if (claudeOrOpencode.length > 0) {
+      console.log(`    ${claudeOrOpencode.join(' / ')}:  /update-agent-infra`);
+    }
+    if (enabledTUISet.has('gemini-cli')) {
+      console.log(`    Gemini CLI:              /${project}:update-agent-infra`);
+    }
+    if (enabledTUISet.has('codex')) {
+      console.log('    Codex CLI:               $update-agent-infra');
+    }
+    console.log('');
+    console.log('  This will render all templates and set up the full');
+    console.log('  AI collaboration infrastructure.');
+    console.log('');
   }
-  if (enabledTUISet.has('gemini-cli')) {
-    console.log(`    Gemini CLI:              /${project}:update-agent-infra`);
-  }
-  if (enabledTUISet.has('codex')) {
-    console.log('    Codex CLI:               $update-agent-infra');
-  }
-  console.log('');
-  console.log('  This will render all templates and set up the full');
-  console.log('  AI collaboration infrastructure.');
-  console.log('');
 }
 
 export { cmdInit };

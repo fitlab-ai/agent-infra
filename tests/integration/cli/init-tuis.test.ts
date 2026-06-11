@@ -100,6 +100,35 @@ test("ai init persists subset selection and skips seed for disabled TUIs", () =>
   }
 });
 
+test("ai init persists tuis: [] when user types 'none' and skips all built-in seed installs", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-init-tuis-none-"));
+  try {
+    const output = execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: makeInput({ tuis: "none" }),
+      stdio: "pipe",
+      encoding: "utf8"
+    });
+
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
+    assert.deepEqual(cfg.tuis, []);
+    // No built-in TUI seed command file is installed.
+    assert.ok(!fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-infra.md")));
+    assert.ok(!fs.existsSync(path.join(tmpDir, ".gemini/commands/demoproj/update-agent-infra.toml")));
+    assert.ok(!fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
+    // No built-in TUI owned default paths added to managed registry.
+    assert.ok(!cfg.files.managed.includes(".claude/commands/"));
+    assert.ok(!cfg.files.managed.includes(".gemini/commands/"));
+    assert.ok(!cfg.files.managed.includes(".opencode/commands/"));
+    assert.ok(!cfg.files.managed.includes(".codex/hooks.json"));
+    // Next-step block points users to customTUIs.
+    assert.match(output, /No built-in TUI selected/);
+    assert.match(output, /Configure "customTUIs"/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("ai init persists tuis in canonical prompt order even when user types reversed", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-init-tuis-order-"));
   try {

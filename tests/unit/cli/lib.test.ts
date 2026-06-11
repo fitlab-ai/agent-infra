@@ -81,6 +81,15 @@ test("multiSelect parses mixed numeric and id tokens", async () => {
   assert.deepEqual(result, ["claude-code", "opencode"]);
 });
 
+test("multiSelect returns empty array on explicit 'none' input", async () => {
+  const lower = await withMockedReadline("none", async (mod) => mod.multiSelect("Pick", TUI_CHOICES));
+  assert.deepEqual(lower, []);
+
+  // Case-insensitive and trim-tolerant: " NONE " should also work.
+  const padded = await withMockedReadline(" NONE ", async (mod) => mod.multiSelect("Pick", TUI_CHOICES));
+  assert.deepEqual(padded, []);
+});
+
 test("multiSelect normalizes user input order to choices order (AC2.2)", async () => {
   // User typed numeric in reverse order: 3,1 -> gemini-cli, claude-code.
   // Returned array must follow choices order: claude-code, gemini-cli.

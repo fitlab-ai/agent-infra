@@ -228,6 +228,34 @@ test("syncTemplates: customTUI dir under disabled built-in TUI owned prefix is p
   }
 });
 
+test("syncTemplates: tuis: [] disables every built-in TUI and skips all owned defaults", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-empty-"));
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = makeTemplateRoot(tmpDir);
+    makeProject(projectRoot, { tuis: [] });
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
+      ".agents/skills/update-agent-infra/scripts/sync-templates.js"
+    );
+    const report = syncTemplates(projectRoot, templateRoot) as SyncReport;
+
+    const skipped = report.managed.skippedTUI ?? [];
+    // Every built-in TUI owned default path should be skipped.
+    assert.ok(skipped.includes(".claude/commands/"));
+    assert.ok(skipped.includes(".gemini/commands/"));
+    assert.ok(skipped.includes(".opencode/commands/"));
+    assert.ok(skipped.includes(".codex/hooks.json"));
+    // No built-in TUI files written.
+    assert.ok(!fs.existsSync(path.join(projectRoot, ".claude/commands/update-agent-infra.md")));
+    assert.ok(!fs.existsSync(path.join(projectRoot, ".gemini/commands/demo/update-agent-infra.toml")));
+    assert.ok(!fs.existsSync(path.join(projectRoot, ".opencode/commands/update-agent-infra.md")));
+    assert.ok(!fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("syncTemplates: ejected entries owned by disabled TUIs are preserved and not removed", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-ejected-"));
   try {

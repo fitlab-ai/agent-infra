@@ -92,6 +92,44 @@ test("agent-infra update with subset tuis only refreshes enabled TUI seeds", () 
   }
 });
 
+test("agent-infra update with tuis: [] installs no built-in seeds and registers no owned defaults", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-empty-"));
+  try {
+    makeProject(tmpDir, {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      templateVersion: "stale",
+      tuis: [],
+      files: { managed: [], merged: [], ejected: [] }
+    });
+
+    const output = execFileSync(process.execPath, cliArgs("update"), {
+      cwd: tmpDir,
+      stdio: "pipe",
+      encoding: "utf8"
+    });
+
+    // No built-in TUI seed files installed.
+    assert.ok(!fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-infra.md")));
+    assert.ok(!fs.existsSync(path.join(tmpDir, ".gemini/commands/demo/update-agent-infra.toml")));
+    assert.ok(!fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
+
+    const updated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
+    assert.deepEqual(updated.tuis, [], "tuis: [] must be preserved verbatim, not auto-backfilled to all");
+    // No built-in TUI owned default paths registered.
+    assert.ok(!updated.files.managed.includes(".claude/commands/"));
+    assert.ok(!updated.files.managed.includes(".gemini/commands/"));
+    assert.ok(!updated.files.managed.includes(".opencode/commands/"));
+    assert.ok(!updated.files.managed.includes(".codex/hooks.json"));
+    // Next-step hint points to customTUIs configuration.
+    assert.match(output, /No built-in TUI enabled/);
+    assert.match(output, /Configure "customTUIs"/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("agent-infra update is idempotent: second run does not change tuis or duplicate entries", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-idempotent-"));
   try {

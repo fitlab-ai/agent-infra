@@ -95,13 +95,15 @@ async function multiSelect(
   choices.forEach((c, i) => {
     process.stdout.write(`      ${i + 1}) ${c.id.padEnd(idWidth)}  (${c.label})\n`);
   });
-  ask('Enter comma-separated numbers or ids to keep [default: all]: ');
+  ask('Enter comma-separated numbers or ids to keep, or "none" to select nothing [default: all]: ');
 
   setupInterface();
 
   const line = await nextLine();
   // Strictly distinguish bare Enter (null/empty string) from whitespace input.
   if (line === null || line === '') return choices.map((c) => c.id);
+  // Explicit empty selection: "none" means deliberately zero built-in choices.
+  if (line.trim().toLowerCase() === 'none') return [];
 
   const tokens = line.split(',').map((t) => t.trim());
   if (tokens.some((t) => t === '')) {
@@ -129,12 +131,11 @@ async function multiSelect(
     seenIds.add(resolvedId);
   }
 
-  if (seenIds.size === 0) {
-    throw new Error('Selection cannot be empty');
-  }
-  // Normalize to prompt order (AC2.2): users can type tokens in any order, but
-  // the persisted array follows the canonical choices order to keep .airc.json
-  // diffs stable.
+  // Normalize to prompt order: users can type tokens in any order, but the
+  // persisted array follows the canonical choices order to keep .airc.json
+  // diffs stable. An empty result here is impossible (tokens.length > 0 and
+  // every token resolves to an id), so no separate empty guard is needed —
+  // explicit "none" handled above.
   return choices.map((c) => c.id).filter((id) => seenIds.has(id));
 }
 

@@ -20,12 +20,16 @@ function isBuiltinTUIId(value: unknown): value is BuiltinTUIId {
 }
 
 function resolveEnabledTUIs(value: unknown): Set<BuiltinTUIId> {
+  // Missing field / null / non-array → full set (backward compat for legacy
+  // .airc.json predating the `tuis` field).
   if (!Array.isArray(value)) return new Set(BUILTIN_TUI_IDS);
+  // Empty array is a meaningful, user-set value: "no built-in TUI managed".
+  // This supports the customTUI-only project layout.
   const set = new Set<BuiltinTUIId>();
   for (const v of value) {
     if (isBuiltinTUIId(v)) set.add(v);
   }
-  return set.size === 0 ? new Set(BUILTIN_TUI_IDS) : set;
+  return set;
 }
 
 function isPathOwnedByDisabledTUI(rel: string, enabled: Set<BuiltinTUIId>): boolean {

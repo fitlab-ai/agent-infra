@@ -261,21 +261,27 @@ async function cmdUpdate(): Promise<void> {
   console.log('');
   ok('Seed files updated successfully!');
   console.log('');
-  console.log('  Next step: run the full update in your AI TUI:');
-  console.log('');
-  const claudeOrOpencode: string[] = [];
-  if (enabledTUIs.has('claude-code')) claudeOrOpencode.push('Claude Code');
-  if (enabledTUIs.has('opencode')) claudeOrOpencode.push('OpenCode');
-  if (claudeOrOpencode.length > 0) {
-    console.log(`    ${claudeOrOpencode.join(' / ')}:  /update-agent-infra`);
+  if (enabledTUIs.size === 0) {
+    console.log('  No built-in TUI enabled (tuis: []).');
+    console.log(`  Configure "customTUIs" in ${CONFIG_PATH} if needed.`);
+    console.log('');
+  } else {
+    console.log('  Next step: run the full update in your AI TUI:');
+    console.log('');
+    const claudeOrOpencode: string[] = [];
+    if (enabledTUIs.has('claude-code')) claudeOrOpencode.push('Claude Code');
+    if (enabledTUIs.has('opencode')) claudeOrOpencode.push('OpenCode');
+    if (claudeOrOpencode.length > 0) {
+      console.log(`    ${claudeOrOpencode.join(' / ')}:  /update-agent-infra`);
+    }
+    if (enabledTUIs.has('gemini-cli')) {
+      console.log(`    Gemini CLI:              /${project}:update-agent-infra`);
+    }
+    if (enabledTUIs.has('codex')) {
+      console.log('    Codex CLI:               $update-agent-infra');
+    }
+    console.log('');
   }
-  if (enabledTUIs.has('gemini-cli')) {
-    console.log(`    Gemini CLI:              /${project}:update-agent-infra`);
-  }
-  if (enabledTUIs.has('codex')) {
-    console.log('    Codex CLI:               $update-agent-infra');
-  }
-  console.log('');
 }
 
 export { cmdUpdate };

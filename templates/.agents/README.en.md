@@ -216,11 +216,16 @@ Use the top-level `.agents/.airc.json` `tuis` array to pick which built-in TUIs 
 
 | Value | Meaning |
 |-------|---------|
-| `tuis` missing or `null` | All four built-in TUIs are enabled (backward-compatible default). |
-| `tuis: []` | Same as missing — all four enabled (with a safety fallback so a misconfigured project cannot end up with zero managed TUIs). |
-| `tuis: [<subset>]` | Only the listed TUIs are managed. Unknown ids are ignored; if the filtered set is empty, falls back to all-enabled. |
+| `tuis` missing or `null` | All four built-in TUIs are enabled (backward-compatible default for legacy `.airc.json` predating this field). |
+| `tuis: []` | No built-in TUI is managed. Use this when the project only relies on `customTUIs` and does not need any built-in command files installed. |
+| `tuis: [<subset>]` | Only the listed TUIs are managed. Unknown ids are ignored. |
 
-`ai init` includes an interactive multi-select for this field. Default value is all-enabled; type comma-separated numbers or ids (e.g. `1,3` or `claude-code,opencode`) to keep a subset. Invalid input (duplicate, out-of-range, unknown id, whitespace-only) aborts init with a non-zero exit code.
+`ai init` includes an interactive multi-select for this field:
+
+- Press Enter to accept the default (all built-in TUIs enabled).
+- Type comma-separated numbers or ids (e.g. `1,3` or `claude-code,opencode`) to keep a subset.
+- Type `none` to explicitly disable every built-in TUI (typically combined with a `customTUIs` entry added later).
+- Invalid input (duplicate, out-of-range, unknown id, whitespace-only) aborts init with a non-zero exit code.
 
 ### Side effects of disabling a TUI
 

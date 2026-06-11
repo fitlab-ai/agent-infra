@@ -99,12 +99,14 @@ const BUILTIN_TUI_OWNED_PATH_PREFIXES = {
 };
 
 function resolveEnabledTUIs(value) {
+  // Missing field / null / non-array → full set (backward compat).
   if (!Array.isArray(value)) return new Set(BUILTIN_TUI_IDS);
+  // Empty array is a meaningful user choice: no built-in TUI managed.
   const set = new Set();
   for (const v of value) {
     if (typeof v === 'string' && BUILTIN_TUI_IDS.includes(v)) set.add(v);
   }
-  return set.size === 0 ? new Set(BUILTIN_TUI_IDS) : set;
+  return set;
 }
 
 function isPathOwnedByDisabledTUI(rel, enabledSet) {
