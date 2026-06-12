@@ -18,21 +18,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 ## Task id short ref
 
-If the `{task-id}` argument begins with `#` (e.g. `#1`, `#7`), resolve the short ref to a full task id first:
-
-```bash
-if [[ "{task-id}" == "#"* ]]; then
-  resolved=$(node .agents/scripts/task-short-id.js resolve "{task-id}") || {
-    echo "Error: short id '{task-id}' not found in active task registry" >&2
-    exit 1
-  }
-  task_id="$resolved"
-else
-  task_id="{task-id}"
-fi
-```
-
-Treat `{task-id}` as `$task_id` in every downstream command (the full `TASK-YYYYMMDD-HHMMSS` form). Short ids are only valid inside the active task set; see `.agents/rules/task-short-id.md` for the lifecycle and the SKILL-vs-sandbox scope split.
+> If `{task-id}` begins with `#`, follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
 ## Steps
 

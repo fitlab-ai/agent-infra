@@ -18,21 +18,7 @@ description: "从平台 Issue 评论还原本地任务文件"
 
 ## 任务入参短号别名
 
-如果用户传入的 `{task-id}` 入参以 `#` 开头（如 `#1`、`#7`），先调用解析器把短号翻译为完整 task ID：
-
-```bash
-if [[ "{task-id}" == "#"* ]]; then
-  resolved=$(node .agents/scripts/task-short-id.js resolve "{task-id}") || {
-    echo "Error: short id '{task-id}' not found in active task registry" >&2
-    exit 1
-  }
-  task_id="$resolved"
-else
-  task_id="{task-id}"
-fi
-```
-
-后续所有命令把 `{task-id}` 视作 `$task_id`（已是完整 `TASK-YYYYMMDD-HHMMSS` 形式）。短号仅在 active 域内有效；其语义、生命周期与 `#N` vs `TASK-…` 的作用域二分见 `.agents/rules/task-short-id.md`。
+> 如果 `{task-id}` 入参以 `#` 开头，先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
 ## 执行步骤
 ### 1. 验证输入与环境

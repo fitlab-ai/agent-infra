@@ -43,7 +43,7 @@ const DEFAULTS = {
     }
   },
   "task": {
-    "shortIdLength": 1
+    "shortIdLength": 2
   },
   "labels": {
     "in": {}

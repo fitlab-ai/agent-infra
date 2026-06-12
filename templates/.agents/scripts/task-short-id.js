@@ -7,6 +7,11 @@ const SHORT_ID_RE = /^#\d+$/;
 const REGISTRY_NAME = ".short-ids.json";
 const LOCK_NAME = ".short-ids.json.lock";
 const DEFAULT_LOCK_TIMEOUT_MS = 5000;
+// Kept in sync with lib/defaults.json's task.shortIdLength. Used when there is
+// no `--short-id-length` flag and no readable `task.shortIdLength` in
+// .agents/.airc.json (e.g. the project upgraded but hasn't re-run
+// ai update-agent-infra to backfill the field).
+const DEFAULT_SHORT_ID_LENGTH = 2;
 
 function usage() {
   return [
@@ -21,7 +26,7 @@ function usage() {
     "",
     "Options:",
     "  --active-dir <path>  Override active dir (default: <repo>/.agents/workspace/active)",
-    "  --short-id-length N  Override configured width (default: from .airc.json or 1)"
+    "  --short-id-length N  Override configured width (default: from .airc.json or 2)"
   ].join("\n");
 }
 
@@ -60,7 +65,7 @@ function readShortIdLength(repoRoot, override) {
   if (typeof override === "number" && Number.isFinite(override) && override >= 1) {
     return override;
   }
-  if (!repoRoot) return 1;
+  if (!repoRoot) return DEFAULT_SHORT_ID_LENGTH;
   try {
     const cfgPath = path.join(repoRoot, ".agents", ".airc.json");
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
@@ -69,7 +74,7 @@ function readShortIdLength(repoRoot, override) {
   } catch {
     // ignore
   }
-  return 1;
+  return DEFAULT_SHORT_ID_LENGTH;
 }
 
 function readRegistry(registryPath) {
@@ -153,11 +158,37 @@ function writeTaskMdShortId(taskMdPath, shortId) {
   fs.writeFileSync(taskMdPath, updated);
 }
 
-function allocateMinFreeInt(registry, maxN) {
+function padShortId(n, shortIdLength) {
+  return String(n).padStart(shortIdLength, "0");
+}
+
+function allocateMinFreeInt(registry, shortIdLength) {
+  const maxN = Math.pow(10, shortIdLength) - 1;
   for (let n = 1; n <= maxN; n += 1) {
-    if (!registry.ids[String(n)]) return n;
+    if (!registry.ids[padShortId(n, shortIdLength)]) return n;
   }
   return null;
+}
+
+function parseShortIdArg(arg, shortIdLength) {
+  const re = new RegExp(`^#\\d{${shortIdLength}}$`);
+  if (!re.test(arg)) {
+    const example =
+      shortIdLength === 1 ? "'#1'" : shortIdLength === 2 ? "'#01'" : `'#${"0".repeat(shortIdLength - 1)}1'`;
+    process.stderr.write(
+      `Error: invalid short id format '${arg}', ` +
+        `expected #${"N".repeat(shortIdLength)} (${shortIdLength}-digit zero-padded; e.g. ${example})\n`
+    );
+    process.exit(1);
+  }
+  const key = arg.slice(1);
+  if (Number(key) === 0) {
+    process.stderr.write(
+      `Error: short id '${arg}' is invalid (#${"0".repeat(shortIdLength)} is reserved)\n`
+    );
+    process.exit(1);
+  }
+  return key;
 }
 
 function planTransaction(registry, activeDir, shortIdLength) {
@@ -267,19 +298,20 @@ function planTransaction(registry, activeDir, shortIdLength) {
   pendingAlloc.sort((a, b) => a.taskId.localeCompare(b.taskId));
 
   for (const item of pendingAlloc) {
-    const shortId = allocateMinFreeInt({ ids: projectedIds }, maxN);
-    if (shortId === null) {
+    const n = allocateMinFreeInt({ ids: projectedIds }, shortIdLength);
+    if (n === null) {
       throw new Error("Internal invariant: pendingAlloc capacity check failed");
     }
-    projectedIds[String(shortId)] = item.taskId;
-    taskIdToKey.set(item.taskId, String(shortId));
-    plannedRegistryWrites.push({ key: String(shortId), taskId: item.taskId });
+    const key = padShortId(n, shortIdLength);
+    projectedIds[key] = item.taskId;
+    taskIdToKey.set(item.taskId, key);
+    plannedRegistryWrites.push({ key, taskId: item.taskId });
     plannedTaskMdWrites.push({
       taskMdPath: item.taskMdPath,
       originalContent: item.originalContent,
       originalAtime: item.originalAtime,
       originalMtime: item.originalMtime,
-      shortId: `#${shortId}`,
+      shortId: `#${key}`,
       kind: "4f"
     });
   }
@@ -312,25 +344,26 @@ function planTransaction(registry, activeDir, shortIdLength) {
             `${inUse}/${this._maxN} slots in use). Archive some active tasks or raise task.shortIdLength.`
         );
       }
-      const shortId = allocateMinFreeInt({ ids: this._projectedIds }, this._maxN);
-      this._projectedIds[String(shortId)] = taskId;
-      this._taskIdToKey.set(taskId, String(shortId));
-      this._plannedRegistryWrites.push({ key: String(shortId), taskId });
+      const n = allocateMinFreeInt({ ids: this._projectedIds }, this._shortIdLength);
+      const key = padShortId(n, this._shortIdLength);
+      this._projectedIds[key] = taskId;
+      this._taskIdToKey.set(taskId, key);
+      this._plannedRegistryWrites.push({ key, taskId });
       const originalStat = fs.statSync(taskMdPath);
       const originalContent = fs.readFileSync(taskMdPath, "utf8");
       // If task.md already declares the same short id (e.g. R-alloc replay), skip writing.
       const existing = originalContent.match(/^short_id:\s*(#\d+)\s*$/m);
-      if (!existing || existing[1] !== `#${shortId}`) {
+      if (!existing || existing[1] !== `#${key}`) {
         this._plannedTaskMdWrites.push({
           taskMdPath,
           originalContent,
           originalAtime: originalStat.atime,
           originalMtime: originalStat.mtime,
-          shortId: `#${shortId}`,
+          shortId: `#${key}`,
           kind: "caller-alloc"
         });
       }
-      return String(shortId);
+      return key;  // zero-padded; matches registry key
     },
 
     planRelease(taskId) {
@@ -476,6 +509,7 @@ function cmdAlloc(taskId, activeDir, registryPath, shortIdLength) {
       process.stderr.write(`${e.message}\n`);
       process.exit(1);
     }
+    // shortId is already zero-padded (returned by tx.planAlloc; matches registry key)
     process.stdout.write(`#${shortId}\n`);
   });
 }
@@ -500,23 +534,13 @@ function cmdRelease(taskId, activeDir, registryPath, shortIdLength) {
 }
 
 function cmdResolve(shortIdArg, activeDir, registryPath, shortIdLength) {
-  if (!SHORT_ID_RE.test(shortIdArg)) {
-    process.stderr.write(
-      `Error: invalid short id format '${shortIdArg}'. Use quoted '#N' (e.g. '#1').\n`
-    );
-    process.exit(1);
-  }
-  const n = shortIdArg.slice(1);
-  if (n === "0" || (n.length > 1 && n.startsWith("0"))) {
-    process.stderr.write(
-      `Error: short id '${shortIdArg}' is invalid (#0 is reserved, leading zeros not allowed).\n`
-    );
-    process.exit(1);
-  }
+  // Strict width match + reserved key check; on invalid arg, parseShortIdArg writes full
+  // stderr (including "expected #NN (N-digit zero-padded; e.g. '#01')") and exits 1.
+  const key = parseShortIdArg(shortIdArg, shortIdLength);
   return withRegistryLock(activeDir, () => {
     const registry = readRegistry(registryPath);
     const tx = planTransaction(registry, activeDir, shortIdLength);
-    const taskId = tx._projectedIds[n];
+    const taskId = tx._projectedIds[key];
     if (!taskId) {
       const hasPendingMutations =
         tx._plannedRegistryWrites.length > 0 ||
@@ -532,11 +556,11 @@ function cmdResolve(shortIdArg, activeDir, registryPath, shortIdLength) {
       }
       if (Object.keys(tx._projectedIds).length === 0) {
         process.stderr.write(
-          `Error: short id '${shortIdArg}' not found; active task registry is empty.\n`
+          `Error: short id '#${key}' not found; active task registry is empty.\n`
         );
       } else {
         process.stderr.write(
-          `Error: short id '${shortIdArg}' not found in active task registry ` +
+          `Error: short id '#${key}' not found in active task registry ` +
             `(it may have been cleaned up after archival; check 'task-short-id.js list').\n`
         );
       }
@@ -656,6 +680,8 @@ export {
   writeRegistryAtomic,
   withRegistryLock,
   writeTaskMdShortId,
+  padShortId,
+  parseShortIdArg,
   allocateMinFreeInt,
   planTransaction,
   verifyRegistry,

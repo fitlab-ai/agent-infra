@@ -74,28 +74,74 @@ function run(
   return spawnSync("node", [SCRIPT, ...args], { encoding: "utf8", cwd });
 }
 
-test("alloc and release reuse minimal free integer", () => {
+// Tests that use the single-digit semantics (#1, #2, …) explicitly request
+// shortIdLength=1 to remain independent of the project default (now 2).
+function runW1(args: string[]): SpawnSyncReturns<string> {
+  return run([...args, "--short-id-length", "1"]);
+}
+
+// Tests that exercise the zero-padded default (#01, #02, …) explicitly pin
+// shortIdLength=2 to be robust against future default changes.
+function runW2(args: string[]): SpawnSyncReturns<string> {
+  return run([...args, "--short-id-length", "2"]);
+}
+
+test("alloc and release reuse minimal free integer (shortIdLength=1)", () => {
   const tmp = mkTmp();
   const active = path.join(tmp, "active");
   fs.mkdirSync(active, { recursive: true });
   mkTask(active, "TASK-20250101-000001");
   mkTask(active, "TASK-20250101-000002");
 
-  const r1 = run(["alloc", "TASK-20250101-000001", "--active-dir", active]);
+  const r1 = runW1(["alloc", "TASK-20250101-000001", "--active-dir", active]);
   assert.equal(r1.status, 0);
   assert.equal(r1.stdout.trim(), "#1");
 
-  const r2 = run(["alloc", "TASK-20250101-000002", "--active-dir", active]);
+  const r2 = runW1(["alloc", "TASK-20250101-000002", "--active-dir", active]);
   assert.equal(r2.status, 0);
   assert.equal(r2.stdout.trim(), "#2");
 
-  const r3 = run(["release", "TASK-20250101-000001", "--active-dir", active]);
+  const r3 = runW1(["release", "TASK-20250101-000001", "--active-dir", active]);
   assert.equal(r3.status, 0);
 
   // Reallocating after release should reuse #1.
-  const r4 = run(["alloc", "TASK-20250101-000001", "--active-dir", active]);
+  const r4 = runW1(["alloc", "TASK-20250101-000001", "--active-dir", active]);
   assert.equal(r4.status, 0);
   assert.equal(r4.stdout.trim(), "#1");
+});
+
+test("alloc and release with default shortIdLength=2 emit zero-padded short ids", () => {
+  const tmp = mkTmp();
+  const active = path.join(tmp, "active");
+  fs.mkdirSync(active, { recursive: true });
+  mkTask(active, "TASK-20260101-000001");
+  mkTask(active, "TASK-20260101-000002");
+
+  const r1 = runW2(["alloc", "TASK-20260101-000001", "--active-dir", active]);
+  assert.equal(r1.status, 0);
+  assert.equal(r1.stdout.trim(), "#01");
+
+  const r2 = runW2(["alloc", "TASK-20260101-000002", "--active-dir", active]);
+  assert.equal(r2.status, 0);
+  assert.equal(r2.stdout.trim(), "#02");
+
+  // task.md and registry must both store the zero-padded form.
+  const md1 = fs.readFileSync(path.join(active, "TASK-20260101-000001", "task.md"), "utf8");
+  assert.match(md1, /^short_id: #01$/m);
+  const registry = JSON.parse(fs.readFileSync(path.join(active, ".short-ids.json"), "utf8"));
+  assert.deepEqual(registry.ids, {
+    "01": "TASK-20260101-000001",
+    "02": "TASK-20260101-000002"
+  });
+
+  // resolve must accept the zero-padded form and reject the unpadded form.
+  const hit = runW2(["resolve", "#01", "--active-dir", active]);
+  assert.equal(hit.status, 0);
+  assert.equal(hit.stdout.trim(), "TASK-20260101-000001");
+
+  const widthErr = runW2(["resolve", "#1", "--active-dir", active]);
+  assert.equal(widthErr.status, 1, `stderr=${widthErr.stderr}`);
+  assert.match(widthErr.stderr, /expected #NN \(2-digit zero-padded/);
 });
 
 test("release is idempotent (exit 0 when no entry; m-1)", () => {
@@ -104,42 +150,56 @@ test("release is idempotent (exit 0 when no entry; m-1)", () => {
   fs.mkdirSync(active, { recursive: true });
   mkTask(active, "TASK-20250101-000003");
 
-  const r = run(["release", "TASK-20250101-000003", "--active-dir", active]);
+  const r = runW1(["release", "TASK-20250101-000003", "--active-dir", active]);
   assert.equal(r.status, 0, `stderr=${r.stderr}`);
 });
 
-test("resolve returns task id on hit; error on miss", () => {
+test("resolve returns task id on hit; error on miss (shortIdLength=1)", () => {
   const tmp = mkTmp();
   const active = path.join(tmp, "active");
   fs.mkdirSync(active, { recursive: true });
   mkTask(active, "TASK-20250101-000010");
 
-  run(["alloc", "TASK-20250101-000010", "--active-dir", active]);
-  const hit = run(["resolve", "#1", "--active-dir", active]);
+  runW1(["alloc", "TASK-20250101-000010", "--active-dir", active]);
+  const hit = runW1(["resolve", "#1", "--active-dir", active]);
   assert.equal(hit.status, 0);
   assert.equal(hit.stdout.trim(), "TASK-20250101-000010");
 
-  const miss = run(["resolve", "#9", "--active-dir", active]);
+  const miss = runW1(["resolve", "#9", "--active-dir", active]);
   assert.equal(miss.status, 1);
   assert.match(miss.stderr, /not found/);
 });
 
-test("resolve rejects #0, leading-zero, malformed input", () => {
+test("resolve rejects reserved key, width mismatch, malformed input", () => {
   const tmp = mkTmp();
   const active = path.join(tmp, "active");
   fs.mkdirSync(active, { recursive: true });
 
-  const zero = run(["resolve", "#0", "--active-dir", active]);
-  assert.equal(zero.status, 1);
-  assert.match(zero.stderr, /reserved/);
+  // shortIdLength=1: #0 reserved; #abc malformed; #01 width mismatch.
+  const zero1 = runW1(["resolve", "#0", "--active-dir", active]);
+  assert.equal(zero1.status, 1);
+  assert.match(zero1.stderr, /reserved/);
 
-  const leading = run(["resolve", "#01", "--active-dir", active]);
-  assert.equal(leading.status, 1);
-  assert.match(leading.stderr, /reserved|leading/);
+  const widthErrW1 = runW1(["resolve", "#01", "--active-dir", active]);
+  assert.equal(widthErrW1.status, 1);
+  assert.match(widthErrW1.stderr, /expected #N \(1-digit zero-padded/);
 
-  const bad = run(["resolve", "#abc", "--active-dir", active]);
+  const bad = runW1(["resolve", "#abc", "--active-dir", active]);
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /invalid short id format/);
+
+  // shortIdLength=2: #00 reserved; #1 width mismatch; #001 width mismatch.
+  const zero2 = runW2(["resolve", "#00", "--active-dir", active]);
+  assert.equal(zero2.status, 1);
+  assert.match(zero2.stderr, /reserved/);
+
+  const widthErrW2 = runW2(["resolve", "#1", "--active-dir", active]);
+  assert.equal(widthErrW2.status, 1);
+  assert.match(widthErrW2.stderr, /expected #NN \(2-digit zero-padded/);
+
+  const overWidth = runW2(["resolve", "#001", "--active-dir", active]);
+  assert.equal(overWidth.status, 1);
+  assert.match(overWidth.stderr, /expected #NN/);
 });
 
 test("width exhaustion (case D): cold start aborts before any write", () => {
@@ -231,7 +291,7 @@ test("cold-start case B: registry has entry, task.md missing short_id → writes
     JSON.stringify({ version: 1, ids: { "1": taskId } })
   );
 
-  const r = run(["resolve", "#1", "--active-dir", active]);
+  const r = runW1(["resolve", "#1", "--active-dir", active]);
   assert.equal(r.status, 0, `stderr=${r.stderr}`);
   assert.equal(r.stdout.trim(), taskId);
 
@@ -250,7 +310,7 @@ test("cold-start case C (duplicate registry keys) → exit 2", () => {
     JSON.stringify({ version: 1, ids: { "1": taskId, "2": taskId } })
   );
 
-  const r = run(["resolve", "#1", "--active-dir", active]);
+  const r = runW1(["resolve", "#1", "--active-dir", active]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /duplicate registry entries/);
 });
@@ -267,7 +327,7 @@ test("stale entries are cleaned automatically (B4)", () => {
   // A real task is created.
   mkTask(active, "TASK-20250107-000001");
 
-  const r = run(["alloc", "TASK-20250107-000001", "--active-dir", active]);
+  const r = runW1(["alloc", "TASK-20250107-000001", "--active-dir", active]);
   assert.equal(r.status, 0, `stderr=${r.stderr}`);
   // Stale #3 cleaned, new task gets #1 (lowest free).
   assert.equal(r.stdout.trim(), "#1");
@@ -286,7 +346,7 @@ test("alloc rejects task id not in active (R5 B-1) without touching state", () =
   mkTask(active, "TASK-20250108-000001");
   mkTask(active, "TASK-20250108-000002");
 
-  const r = run(["alloc", "TASK-99999999-000000", "--active-dir", active]);
+  const r = runW1(["alloc", "TASK-99999999-000000", "--active-dir", active]);
   assert.equal(r.status, 1, `stderr=${r.stderr}`);
   assert.match(r.stderr, /not found in/);
 
@@ -311,9 +371,93 @@ test("alloc skips re-write when task.md already declares the same short_id", () 
   const taskMd = path.join(active, taskId, "task.md");
   const beforeMtime = fs.statSync(taskMd).mtimeMs;
 
-  const r = run(["alloc", taskId, "--active-dir", active]);
+  const r = runW1(["alloc", taskId, "--active-dir", active]);
   assert.equal(r.status, 0);
   assert.equal(r.stdout.trim(), "#1");
   // mtime unchanged because nothing to write.
   assert.equal(fs.statSync(taskMd).mtimeMs, beforeMtime);
+});
+
+// --- U-2 structural assertions: SKILL.md inline bash is gone ---
+
+test("default width is 2 even without --short-id-length flag and without task.shortIdLength in .airc.json (R4 B-1)", () => {
+  // Simulate a project that upgraded but hasn't backfilled task.shortIdLength
+  // into .agents/.airc.json yet. The script must still allocate / resolve with
+  // the default 2-digit zero-padded form (matching lib/defaults.json).
+  const tmp = mkTmp();
+  const agentsDir = path.join(tmp, ".agents");
+  const active = path.join(agentsDir, "workspace", "active");
+  fs.mkdirSync(active, { recursive: true });
+  // Stub .airc.json without a `task` key.
+  fs.writeFileSync(path.join(agentsDir, ".airc.json"), JSON.stringify({ project: "x" }));
+  const taskId = "TASK-20260601-000001";
+  fs.mkdirSync(path.join(active, taskId), { recursive: true });
+  fs.writeFileSync(
+    path.join(active, taskId, "task.md"),
+    `---\nid: ${taskId}\nbranch: x\n---\nbody\n`
+  );
+
+  // No --short-id-length: script must fall back to DEFAULT_SHORT_ID_LENGTH=2.
+  const alloc = spawnSync("node", [SCRIPT, "alloc", taskId], { encoding: "utf8", cwd: tmp });
+  assert.equal(alloc.status, 0, `alloc failed: ${alloc.stderr}`);
+  assert.equal(alloc.stdout.trim(), "#01", "default must emit zero-padded form");
+
+  const hit = spawnSync("node", [SCRIPT, "resolve", "#01"], { encoding: "utf8", cwd: tmp });
+  assert.equal(hit.status, 0);
+  assert.equal(hit.stdout.trim(), taskId);
+
+  const widthErr = spawnSync("node", [SCRIPT, "resolve", "#1"], { encoding: "utf8", cwd: tmp });
+  assert.equal(widthErr.status, 1, `stderr=${widthErr.stderr}`);
+  assert.match(widthErr.stderr, /expected #NN \(2-digit zero-padded/);
+});
+
+test("SKILL.md no longer embeds multi-line short-id bash snippet (U-2 slimming)", () => {
+  const skills = fs.readdirSync(TEMPLATES_SKILLS);
+  // Match the 5-line conditional block that used to live in every SKILL.md
+  // (`if [[ "{task-id}" == "#"* ]]; then` followed by a `node …` call).
+  const oldSnippet = /if \[\[ "\{task-id\}" == "#"\*[\s\S]+task-short-id\.js resolve/m;
+  let offenders: string[] = [];
+  for (const skill of skills) {
+    for (const lang of ["en", "zh-CN"]) {
+      const file = path.join(TEMPLATES_SKILLS, skill, `SKILL.${lang}.md`);
+      if (!fs.existsSync(file)) continue;
+      const content = fs.readFileSync(file, "utf8");
+      if (oldSnippet.test(content)) offenders.push(`${skill}/${lang}`);
+    }
+  }
+  assert.deepEqual(offenders, [], `SKILL.md still embeds old inline bash: ${offenders.join(", ")}`);
+});
+
+test("19 lifecycle SKILLs reference the centralized task-short-id rule doc (U-2)", () => {
+  const skills = [
+    "create-task", "import-issue", "import-codescan", "import-dependabot",
+    "analyze-task", "plan-task", "code-task", "review-analysis", "review-plan",
+    "review-code", "commit", "create-pr", "check-task",
+    "complete-task", "cancel-task", "block-task", "close-codescan", "close-dependabot",
+    "restore-task"
+  ];
+  const pointerRe = /rules\/task-short-id\.md/;
+  for (const skill of skills) {
+    for (const lang of ["en", "zh-CN"]) {
+      const file = path.join(TEMPLATES_SKILLS, skill, `SKILL.${lang}.md`);
+      const content = fs.readFileSync(file, "utf8");
+      assert.match(content, pointerRe, `${skill}/${lang} missing rule pointer`);
+    }
+  }
+});
+
+// --- U-3 structural assertions: rule doc declares storage + SKILL parser ---
+
+test("task-short-id rule doc declares SKILL parser + storage sections (U-2/U-3)", () => {
+  const docs = {
+    "en": path.resolve(process.cwd(), "templates/.agents/rules/task-short-id.en.md"),
+    "zh-CN": path.resolve(process.cwd(), "templates/.agents/rules/task-short-id.zh-CN.md")
+  };
+  const skillSection = { en: /^## SKILL parameter resolver$/m, "zh-CN": /^## SKILL 入参解析$/m };
+  const storageSection = { en: /^## Storage$/m, "zh-CN": /^## 存储位置$/m };
+  for (const [lang, file] of Object.entries(docs)) {
+    const content = fs.readFileSync(file, "utf8");
+    assert.match(content, skillSection[lang as keyof typeof skillSection], `${lang}: SKILL section missing`);
+    assert.match(content, storageSection[lang as keyof typeof storageSection], `${lang}: storage section missing`);
+  }
 });
