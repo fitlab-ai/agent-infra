@@ -13,6 +13,20 @@ const DEFAULT_LOCK_TIMEOUT_MS = 5000;
 // ai update-agent-infra to backfill the field).
 const DEFAULT_SHORT_ID_LENGTH = 2;
 
+// process.stdout.write / process.stderr.write are non-blocking when the
+// destination is a pipe (e.g. when spawned via child_process.spawnSync). On
+// some platforms (notably macOS) the Node process can exit before the buffer
+// flushes, leaving the parent with empty stdout. Use fs.writeSync to guarantee
+// synchronous, fully-flushed writes — this is critical because the parent
+// CLI/test code relies on stdout to carry the resolved task id / short id.
+function writeStdout(text) {
+  fs.writeSync(1, text);
+}
+
+function writeStderr(text) {
+  fs.writeSync(2, text);
+}
+
 function usage() {
   return [
     "Usage: task-short-id.js <subcommand> [args]",
@@ -85,19 +99,19 @@ function readRegistry(registryPath) {
   try {
     raw = fs.readFileSync(registryPath, "utf8");
   } catch (e) {
-    process.stderr.write(`Error: cannot read registry ${registryPath}: ${e.message}\n`);
+    writeStderr(`Error: cannot read registry ${registryPath}: ${e.message}\n`);
     process.exit(2);
   }
   try {
     const data = JSON.parse(raw);
     if (!data || typeof data !== "object" || !data.ids || typeof data.ids !== "object") {
-      process.stderr.write(`Error: registry ${registryPath} has invalid schema\n`);
+      writeStderr(`Error: registry ${registryPath} has invalid schema\n`);
       process.exit(2);
     }
     if (data.version !== 1) data.version = 1;
     return data;
   } catch (e) {
-    process.stderr.write(`Error: registry ${registryPath} is not valid JSON: ${e.message}\n`);
+    writeStderr(`Error: registry ${registryPath} is not valid JSON: ${e.message}\n`);
     process.exit(2);
   }
 }
@@ -119,7 +133,7 @@ function withRegistryLock(activeDir, fn, timeoutMs = DEFAULT_LOCK_TIMEOUT_MS) {
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
       if (Date.now() - start > timeoutMs) {
-        process.stderr.write(`Error: registry lock timeout after ${timeoutMs}ms\n`);
+        writeStderr(`Error: registry lock timeout after ${timeoutMs}ms\n`);
         process.exit(3);
       }
       const elapsed = Date.now() - start;
@@ -175,7 +189,7 @@ function parseShortIdArg(arg, shortIdLength) {
   if (!re.test(arg)) {
     const example =
       shortIdLength === 1 ? "'#1'" : shortIdLength === 2 ? "'#01'" : `'#${"0".repeat(shortIdLength - 1)}1'`;
-    process.stderr.write(
+    writeStderr(
       `Error: invalid short id format '${arg}', ` +
         `expected #${"N".repeat(shortIdLength)} (${shortIdLength}-digit zero-padded; e.g. ${example})\n`
     );
@@ -183,7 +197,7 @@ function parseShortIdArg(arg, shortIdLength) {
   }
   const key = arg.slice(1);
   if (Number(key) === 0) {
-    process.stderr.write(
+    writeStderr(
       `Error: short id '${arg}' is invalid (#${"0".repeat(shortIdLength)} is reserved)\n`
     );
     process.exit(1);
@@ -216,7 +230,7 @@ function planTransaction(registry, activeDir, shortIdLength) {
   for (const [key, taskId] of Object.entries(projectedIds)) {
     if (taskIdToKey.has(taskId)) {
       const existingKey = taskIdToKey.get(taskId);
-      process.stderr.write(
+      writeStderr(
         `Error: duplicate registry entries for taskId ${taskId} at keys [#${existingKey}, #${key}]; manual resolution required\n`
       );
       process.exit(2);
@@ -241,13 +255,13 @@ function planTransaction(registry, activeDir, shortIdLength) {
       if (projectedIds[n] === taskId) continue; // 4a
       if (taskIdToKey.has(taskId)) {
         const registryKey = taskIdToKey.get(taskId);
-        process.stderr.write(
+        writeStderr(
           `Inconsistent: task ${taskId} declares ${declared} but registry holds it at #${registryKey}\n`
         );
         process.exit(2);
       }
       if (projectedIds[n] && projectedIds[n] !== taskId) {
-        process.stderr.write(
+        writeStderr(
           `Inconsistent: task ${taskId} declares ${declared} but registry maps ${declared} to ${projectedIds[n]}\n`
         );
         process.exit(2);
@@ -286,7 +300,7 @@ function planTransaction(registry, activeDir, shortIdLength) {
   // A5: capacity pre-check
   const availableSlots = maxN - Object.keys(projectedIds).length;
   if (pendingAlloc.length > availableSlots) {
-    process.stderr.write(
+    writeStderr(
       `Error: cold-start migration needs ${pendingAlloc.length} short id(s) but only ${availableSlots} ` +
         `slot(s) available (capacity=${maxN}, in-use after stale-cleanup=${Object.keys(projectedIds).length}). ` +
         `Archive some active tasks (complete-task / cancel-task / block-task) ` +
@@ -485,13 +499,13 @@ function verifyRegistry(registry, activeDir) {
 
 function cmdAlloc(taskId, activeDir, registryPath, shortIdLength) {
   if (!TASK_ID_RE.test(taskId)) {
-    process.stderr.write(`Error: invalid task id format '${taskId}'\n`);
+    writeStderr(`Error: invalid task id format '${taskId}'\n`);
     process.exit(1);
   }
   return withRegistryLock(activeDir, () => {
     const taskMdPath = path.join(activeDir, taskId, "task.md");
     if (!fs.existsSync(taskMdPath)) {
-      process.stderr.write(`Error: task ${taskId} not found in ${activeDir} (no task.md)\n`);
+      writeStderr(`Error: task ${taskId} not found in ${activeDir} (no task.md)\n`);
       process.exit(1);
     }
     const registry = readRegistry(registryPath);
@@ -500,23 +514,23 @@ function cmdAlloc(taskId, activeDir, registryPath, shortIdLength) {
     try {
       shortId = tx.planAlloc(taskId);
     } catch (e) {
-      process.stderr.write(`${e.message}\n`);
+      writeStderr(`${e.message}\n`);
       process.exit(2);
     }
     try {
       tx.commit(registryPath);
     } catch (e) {
-      process.stderr.write(`${e.message}\n`);
+      writeStderr(`${e.message}\n`);
       process.exit(1);
     }
     // shortId is already zero-padded (returned by tx.planAlloc; matches registry key)
-    process.stdout.write(`#${shortId}\n`);
+    writeStdout(`#${shortId}\n`);
   });
 }
 
 function cmdRelease(taskId, activeDir, registryPath, shortIdLength) {
   if (!TASK_ID_RE.test(taskId)) {
-    process.stderr.write(`Error: invalid task id format '${taskId}'\n`);
+    writeStderr(`Error: invalid task id format '${taskId}'\n`);
     process.exit(1);
   }
   return withRegistryLock(activeDir, () => {
@@ -526,7 +540,7 @@ function cmdRelease(taskId, activeDir, registryPath, shortIdLength) {
     try {
       tx.commit(registryPath);
     } catch (e) {
-      process.stderr.write(`${e.message}\n`);
+      writeStderr(`${e.message}\n`);
       process.exit(1);
     }
     // idempotent exit 0
@@ -550,16 +564,16 @@ function cmdResolve(shortIdArg, activeDir, registryPath, shortIdLength) {
         try {
           tx.commit(registryPath);
         } catch (e) {
-          process.stderr.write(`${e.message}\n`);
+          writeStderr(`${e.message}\n`);
           process.exit(1);
         }
       }
       if (Object.keys(tx._projectedIds).length === 0) {
-        process.stderr.write(
+        writeStderr(
           `Error: short id '#${key}' not found; active task registry is empty.\n`
         );
       } else {
-        process.stderr.write(
+        writeStderr(
           `Error: short id '#${key}' not found in active task registry ` +
             `(it may have been cleaned up after archival; check 'task-short-id.js list').\n`
         );
@@ -569,22 +583,22 @@ function cmdResolve(shortIdArg, activeDir, registryPath, shortIdLength) {
     try {
       tx.commit(registryPath);
     } catch (e) {
-      process.stderr.write(`${e.message}\n`);
+      writeStderr(`${e.message}\n`);
       process.exit(1);
     }
-    process.stdout.write(`${taskId}\n`);
+    writeStdout(`${taskId}\n`);
   });
 }
 
 function cmdList(activeDir, registryPath, verify) {
   if (!verify) {
     const registry = readRegistry(registryPath);
-    process.stdout.write(`${JSON.stringify(registry, null, 2)}\n`);
+    writeStdout(`${JSON.stringify(registry, null, 2)}\n`);
     return;
   }
   const registry = readRegistry(registryPath);
   if (!fs.existsSync(activeDir)) {
-    process.stdout.write("");
+    writeStdout("");
     return;
   }
   const diff = verifyRegistry(registry, activeDir);
@@ -594,7 +608,7 @@ function cmdList(activeDir, registryPath, verify) {
     diff.orphans_in_registry.length > 0 ||
     diff.duplicate_registry_keys.length > 0;
   if (hasIssues) {
-    process.stdout.write(`${JSON.stringify(diff, null, 2)}\n`);
+    writeStdout(`${JSON.stringify(diff, null, 2)}\n`);
     process.exit(1);
   }
   // consistent: empty stdout, exit 0
@@ -605,11 +619,11 @@ function main(argv) {
   try {
     args = parseArgs(argv);
   } catch (e) {
-    process.stderr.write(`${e.message}\n${usage()}\n`);
+    writeStderr(`${e.message}\n${usage()}\n`);
     process.exit(1);
   }
   if (args.help || args.positional.length === 0) {
-    process.stdout.write(`${usage()}\n`);
+    writeStdout(`${usage()}\n`);
     return;
   }
   const subcommand = args.positional[0];
@@ -620,7 +634,7 @@ function main(argv) {
     ? path.join(repoRoot, ".agents", "workspace", "active")
     : null;
   if (!activeDir) {
-    process.stderr.write(
+    writeStderr(
       `Error: cannot locate active dir (no .agents/.airc.json found above ${process.cwd()})\n`
     );
     process.exit(2);
@@ -631,26 +645,26 @@ function main(argv) {
   switch (subcommand) {
     case "alloc":
       if (!args.positional[1]) {
-        process.stderr.write(`Usage: alloc <task-id>\n`);
+        writeStderr(`Usage: alloc <task-id>\n`);
         process.exit(1);
       }
       return cmdAlloc(args.positional[1], activeDir, registryPath, shortIdLength);
     case "release":
       if (!args.positional[1]) {
-        process.stderr.write(`Usage: release <task-id>\n`);
+        writeStderr(`Usage: release <task-id>\n`);
         process.exit(1);
       }
       return cmdRelease(args.positional[1], activeDir, registryPath, shortIdLength);
     case "resolve":
       if (!args.positional[1]) {
-        process.stderr.write(`Usage: resolve <#N>\n`);
+        writeStderr(`Usage: resolve <#N>\n`);
         process.exit(1);
       }
       return cmdResolve(args.positional[1], activeDir, registryPath, shortIdLength);
     case "list":
       return cmdList(activeDir, registryPath, args.verify);
     default:
-      process.stderr.write(`Unknown subcommand: ${subcommand}\n${usage()}\n`);
+      writeStderr(`Unknown subcommand: ${subcommand}\n${usage()}\n`);
       process.exit(1);
   }
 }
