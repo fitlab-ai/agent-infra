@@ -669,11 +669,17 @@ function main(argv) {
   }
 }
 
+// Compare canonicalized (symlink-resolved) paths so this script still runs as a
+// CLI when invoked through a temp-dir symlink (notably /var/folders on macOS,
+// which is a symlink to /private/var/folders; process.argv[1] keeps the
+// symlinked path while import.meta.url is auto-resolved to the realpath).
 const isCli = (() => {
   const entry = process.argv[1];
   if (!entry) return false;
   try {
-    return import.meta.url === pathToFileURL(entry).href;
+    const realEntry = fs.realpathSync(entry);
+    const realModule = fs.realpathSync(fileURLToPath(import.meta.url));
+    return realEntry === realModule;
   } catch {
     return false;
   }
