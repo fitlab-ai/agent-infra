@@ -4,6 +4,11 @@ Read this file before changing code during fix mode.
 
 ## Plan the Fixes
 
+**Verify each finding first (mandatory before editing)**: for every finding in `{review-artifact}`, Read/Grep the cited `file:line` and the corresponding `git diff` to confirm the issue is real:
+- Holds → include it in the classification and fixes below
+- Unfounded / based on a wrong `file:line` / hallucinated → do not change code; give a counter-argument in the report's `## Per-Finding Verification` section and record it under unresolved issues
+- Do not expand fixes to issues the review did not list
+
 Classify and prioritize work:
 1. **Blockers first**
 2. **Then major issues**
@@ -18,7 +23,7 @@ Detailed priority rules:
 - Blockers must all be fixed before anything else
 - Major issues should all be fixed in the same pass unless a blocker prevents progress
 - Minor issues are optional only after Blockers and Majors are resolved
-- If you disagree with a finding, record that disagreement under unresolved issues instead of silently skipping it
+- If you disagree with a finding, or judge it hallucinated after verification, do not silently skip it; give a counter-argument in the report's `## Per-Finding Verification` section and record it under unresolved issues
 
 ### Meta-category: env-blocked
 
@@ -79,7 +84,7 @@ Next step - re-review or commit:
 
 1. **Prerequisite**: a code review artifact must exist (`review-code.md` or `review-code-r{N}.md`)
 2. **No auto-commit**: do not run `git commit`
-3. **Scope discipline**: only fix reviewed issues
+3. **Scope discipline**: verify each reviewed issue one by one — fix it if it holds, rebut it if it does not; do not expand to issues the review did not list
 4. **Disagreement handling**: record any disagreement in the report
 5. **Re-review**: always recommend `review-code` as the default next step after fix mode
 6. **Consistency**: the latest review artifact, Activity Log entry, and code report must reference the same round

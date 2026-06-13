@@ -14,11 +14,13 @@ Follow the `code-review` step in `.agents/workflows/feature-development.yaml`.
 - [ ] Performance and security risks
 - [ ] Comments and documentation
 - [ ] Consistency with the approved technical plan
+- [ ] Every blocker is backed by reproducible grep/sed/nl evidence; conclusions not directly verified are declared under Self-Doubt
 
 **Common anti-examples**:
 - Checking only whether tests pass without reading the actual diff
 - Treating wording preferences as reproducible code problems
 - Misclassifying environment-limited verification gaps as blockers
+- Asserting a `file:line` or behavior from memory or impression without verifying via rg/nl
 
 ## Common Review Principles
 

@@ -23,7 +23,8 @@
         "Environment-Blocked Findings",
         "Conclusion and Recommendations",
         "State Check",
-        "Evidence"
+        "Evidence",
+        "Self-Doubt"
       ],
       "required_patterns": [
         "^### Approval Decision$",

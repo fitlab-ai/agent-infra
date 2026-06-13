@@ -21,6 +21,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 | "It was only one line, so it cannot affect behavior." | Line count is not impact; read the full `git diff` and trace the downstream effect of each change. |
 | "It looks mostly fine, so approve it." | The verdict must be backed by blocker/major/minor counts, and every finding must cite file:line; do not approve from impression. |
 | "The test change looks reasonable, so I can skim it." | Before reviewing test changes, check `.agents/rules/testing-discipline.md` item by item (see the step 4 gate). |
+| "I'm sure it's that line, no need to check." | Line numbers drift; verify `file:line` via rg/nl before concluding, and do not file a blocker you cannot reproduce. |
 
 ## Step 0: State Check (pre-execution hard gate)
 

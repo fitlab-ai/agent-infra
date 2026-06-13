@@ -66,6 +66,8 @@ Use it to understand:
 - identified technical risks
 - effort and complexity assessment
 
+**Round ≥ 2: respond to the prior review (only when a review artifact exists)**: if the task directory contains `review-plan.md` / `review-plan-r{N}.md`, read the highest-round review report; add a `## Response to Prior Review` section to this round's plan artifact, and for each finding verify it via Read/Grep before acting (holds → accept and fix; judged hallucinated/unfounded → rebut with counter-evidence rather than defaulting to compliance); record any open disagreement under `## Open Questions`. Round 1 has no review, so skip this section.
+
 ### 4. Understand the Problem
 
 - Read the relevant source files identified in the analysis

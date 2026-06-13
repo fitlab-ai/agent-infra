@@ -13,11 +13,13 @@ Follow the `analysis-review` step in `.agents/workflows/feature-development.yaml
 - [ ] Risks, edge cases, and open questions are recorded
 - [ ] The design stage has enough input to proceed
 - [ ] The analysis matches the original Issue or user request
+- [ ] Every blocker is backed by reproducible grep/sed/nl evidence; conclusions not directly verified are declared under Self-Doubt
 
 **Common anti-examples**:
 - Treating implementation design as requirement analysis and locking in technical details too early
 - Restating the Issue without adding impact scope, risks, or acceptance criteria
 - Presenting uncertain information as fact without marking assumptions or open questions
+- Asserting a `file:line` or behavior from memory or impression without verifying via rg/nl
 
 ## Common Review Principles
 

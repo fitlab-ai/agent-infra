@@ -62,6 +62,14 @@ $ {command}
 
 {describe any deviation from the approved plan}
 
+## Per-Finding Verification
+
+> Fix mode only; for an initial implementation write "(initial implementation this round, no review findings)". Read/Grep-verify each finding of the previous `review-code` before acting on it.
+
+| Finding | Reproduced? | Disposition (fix / rebut) |
+|------|----------|----------------------|
+| {finding} | {yes/no, with file:line or command} | {fix note, or counter-argument + recorded under unresolved} |
+
 ## Items for Review
 
 **Focus areas for reviewers**:

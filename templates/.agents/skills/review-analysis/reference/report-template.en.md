@@ -61,13 +61,19 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
 
 ## Evidence
 
-> Pair each "I verified X" claim with the corresponding raw tool output; the gate only checks that this section exists and at least one `$ ` line is present.
+> Pair each "I verified X" claim with the corresponding raw tool output; the gate only checks that this section exists and at least one `$ ` line is present. Every Blocker must be backed by a reproducible command (rg/grep/sed/nl) and its raw output; a judgment that cannot be reproduced must be downgraded or moved to Self-Doubt.
 
 - Claim: {verified claim}
 ```text
 $ {command}
 {raw output}
 ```
+
+## Self-Doubt
+
+> Explicitly declare conclusions, inferences, and assumptions in this review that were **not directly verified**; downstream can rebut them on this basis. Write "None" if there are none.
+
+- {an unverified conclusion or inference; note why it was not verified and the impact if it is overturned}
 
 ## Highlights
 

@@ -121,11 +121,11 @@ test("workflow skills document state check gates", () => {
 test("workflow artifact gates require state check evidence", () => {
   const sectionExpectations: Record<string, { en: string[]; zh: string[] }> = {
     "analyze-task": { en: ["State Check"], zh: ["状态核对"] },
-    "review-analysis": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
+    "review-analysis": { en: ["State Check", "Evidence", "Self-Doubt"], zh: ["状态核对", "证据原文", "自我质疑"] },
     "plan-task": { en: ["State Check"], zh: ["状态核对"] },
-    "review-plan": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
+    "review-plan": { en: ["State Check", "Evidence", "Self-Doubt"], zh: ["状态核对", "证据原文", "自我质疑"] },
     "code-task": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
-    "review-code": { en: ["State Check", "Evidence"], zh: ["状态核对", "证据原文"] },
+    "review-code": { en: ["State Check", "Evidence", "Self-Doubt"], zh: ["状态核对", "证据原文", "自我质疑"] },
     "complete-task": { en: ["State Check"], zh: ["状态核对"] }
   };
 
@@ -238,6 +238,24 @@ test("workflow report templates include evidence sections", () => {
 
     assert.match(content, new RegExp(escapeRegExp(stateHeading)));
     assert.match(content, new RegExp(escapeRegExp(evidenceHeading)));
+  });
+});
+
+test("review report templates include the self-doubt section", () => {
+  const selfDoubtCases: Array<[string, string]> = [
+    [".agents/skills/review-analysis/reference/report-template.md", "## 自我质疑"],
+    [".agents/skills/review-plan/reference/report-template.md", "## 自我质疑"],
+    [".agents/skills/review-code/reference/report-template.md", "## 自我质疑"],
+    ["templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md", "## 自我质疑"],
+    ["templates/.agents/skills/review-plan/reference/report-template.zh-CN.md", "## 自我质疑"],
+    ["templates/.agents/skills/review-code/reference/report-template.zh-CN.md", "## 自我质疑"],
+    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "## Self-Doubt"],
+    ["templates/.agents/skills/review-plan/reference/report-template.en.md", "## Self-Doubt"],
+    ["templates/.agents/skills/review-code/reference/report-template.en.md", "## Self-Doubt"],
+  ];
+
+  selfDoubtCases.forEach(([relativePath, heading]) => {
+    assert.match(read(relativePath), new RegExp(escapeRegExp(heading)));
   });
 });
 
