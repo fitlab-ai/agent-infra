@@ -77,7 +77,7 @@ test("resolveTaskBranch on non-task arg is identity", () => {
   assert.equal(resolveTaskBranch("just-a-branch-name", repoRoot), "just-a-branch-name");
 });
 
-test("resolveTaskBranch with shortIdLength=2 hits on '#01' and rejects width-mismatched '#1'", () => {
+test("resolveTaskBranch with shortIdLength=2: '#01', '#1', '1' all resolve to the same branch", () => {
   const { repoRoot, activeDir } = mkFixtureRepo(2);
   const taskId = "TASK-20260301-000001";
   const branch = "feature-zero-padded";
@@ -90,8 +90,12 @@ test("resolveTaskBranch with shortIdLength=2 hits on '#01' and rejects width-mis
   assert.equal(alloc.status, 0, `alloc failed: ${alloc.stderr}`);
   assert.equal(alloc.stdout.trim(), "#01");
 
-  // '#01' hits.
+  // Round 4 contract: bare numeric, non-padded '#N', and zero-padded '#NN' are all aliases.
   assert.equal(resolveTaskBranch("#01", repoRoot), branch);
-  // '#1' is a width error under shortIdLength=2.
-  assert.throws(() => resolveTaskBranch("#1", repoRoot), /expected #NN|not found in active task registry/);
+  assert.equal(resolveTaskBranch("#1", repoRoot), branch);
+  assert.equal(resolveTaskBranch("1", repoRoot), branch);
+  // Reserved key still rejects.
+  assert.throws(() => resolveTaskBranch("#0", repoRoot), /reserved|not found/);
+  // Over capacity still rejects.
+  assert.throws(() => resolveTaskBranch("#100", repoRoot), /exceeds|not found/);
 });

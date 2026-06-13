@@ -44,7 +44,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## 任务入参短号别名
 
-> 如果 `{task-id}` 入参以 `#` 开头，先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
+> 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -176,7 +176,9 @@ node .agents/scripts/validate-artifact.js gate code-task .agents/workspace/activ
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。输出格式见 `reference/output-template.md`。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。输出格式见 `reference/output-template.md`；修复模式输出见 `reference/fix-mode.md`。
+
+> 渲染「下一步」命令时，`{task-ref}` 按以下契约解析：读取 task.md frontmatter 的 `short_id`，若存在（形如 `#NN`）渲染为对应的**裸数字**（如 `#11` → `11`）；缺失时回退完整 `TASK-id`。其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式。
 
 ## 完成检查清单
 

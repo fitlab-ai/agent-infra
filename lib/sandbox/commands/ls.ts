@@ -6,6 +6,8 @@ import { loadConfig } from '../config.ts';
 import { sandboxBranchLabel, sandboxLabel } from '../constants.ts';
 import { detectEngine } from '../engine.ts';
 import { resolveTools, toolProjectDirCandidates } from '../tools.ts';
+import { formatTable } from '../../table.ts';
+import { lookupShortIdByBranch } from '../../task/short-id.ts';
 import { fetchSandboxRows } from './list-running.ts';
 
 export { containerListFormat, parseLabels } from './list-running.ts';
@@ -13,8 +15,10 @@ export { containerListFormat, parseLabels } from './list-running.ts';
 const USAGE = `Usage: ai sandbox ls
 
 Lists all containers for the current project. The leftmost '#' column
-numbers running sandboxes; use it as "ai sandbox exec '#N'" to enter one.
-Quote '#N' to avoid shell '#' comment handling.`;
+shows the active task short id bound to each container's branch (via
+.agents/workspace/active/.short-ids.json); '-' means no active task is
+bound to the branch. Use it as "ai sandbox exec N" or "ai sandbox exec
+'#N'" to enter the sandbox of that task.`;
 
 const CONTAINER_TABLE_HEADERS = ['#', 'NAMES', 'STATUS', 'BRANCH'] as const;
 
@@ -26,20 +30,10 @@ type ContainerTableRow = {
 };
 
 export function formatContainerTable(rows: ContainerTableRow[]): string[] {
-  const columns = rows.map((row) => [row.index, row.name, row.status, row.branch] as const);
-  const widths = [
-    Math.max(CONTAINER_TABLE_HEADERS[0].length, ...rows.map((row) => row.index.length)),
-    Math.max(CONTAINER_TABLE_HEADERS[1].length, ...rows.map((row) => row.name.length)),
-    Math.max(CONTAINER_TABLE_HEADERS[2].length, ...rows.map((row) => row.status.length)),
-    Math.max(CONTAINER_TABLE_HEADERS[3].length, ...rows.map((row) => row.branch.length))
-  ] as const;
-  const renderRow = (values: readonly [string, string, string, string]): string =>
-    `${values[0].padEnd(widths[0])}  ${values[1].padEnd(widths[1])}  ${values[2].padEnd(widths[2])}  ${values[3]}`.trimEnd();
-
-  return [
-    renderRow(CONTAINER_TABLE_HEADERS),
-    ...columns.map((column) => renderRow(column))
-  ];
+  return formatTable(
+    CONTAINER_TABLE_HEADERS,
+    rows.map((row) => [row.index, row.name, row.status, row.branch])
+  );
 }
 
 function listChildren(dir: string): string[] {
@@ -69,12 +63,15 @@ export function ls(args: string[] = []): void {
   if (ordered.length === 0) {
     p.log.warn('  No sandbox containers');
   } else {
-    const tableRows: ContainerTableRow[] = ordered.map((row) => ({
-      index: row.index === null ? '' : String(row.index),
-      name: row.name,
-      status: row.status,
-      branch: row.branch
-    }));
+    const tableRows: ContainerTableRow[] = ordered.map((row) => {
+      const shortId = row.branch ? lookupShortIdByBranch(row.branch, config.repoRoot) : null;
+      return {
+        index: shortId ?? '-',
+        name: row.name,
+        status: row.status,
+        branch: row.branch
+      };
+    });
     for (const line of formatContainerTable(tableRows)) {
       process.stdout.write(`  ${line}\n`);
     }

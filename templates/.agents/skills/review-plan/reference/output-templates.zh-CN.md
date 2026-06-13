@@ -25,9 +25,9 @@
 [- 审查报告：.agents/workspace/active/{task-id}/{review-artifact}]
 
 下一步 - 编写代码：
-  - Claude Code / OpenCode：/code-task {task-id}
-  - Gemini CLI：/agent-infra:code-task {task-id}
-  - Codex CLI：$code-task {task-id}
+  - Claude Code / OpenCode：/code-task {task-ref}
+  - Gemini CLI：/agent-infra:code-task {task-ref}
+  - Codex CLI：$code-task {task-ref}
 
 [当 env-blocked > 0 时，在最后附加一行：]
 提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /plan-task。
@@ -41,14 +41,14 @@
 - 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
 
 下一步 - 修订方案后编码（推荐）：
-  - Claude Code / OpenCode：/plan-task {task-id}
-  - Gemini CLI：/agent-infra:plan-task {task-id}
-  - Codex CLI：$plan-task {task-id}
+  - Claude Code / OpenCode：/plan-task {task-ref}
+  - Gemini CLI：/agent-infra:plan-task {task-ref}
+  - Codex CLI：$plan-task {task-ref}
 
 或直接进入编码：
-  - Claude Code / OpenCode：/code-task {task-id}
-  - Gemini CLI：/agent-infra:code-task {task-id}
-  - Codex CLI：$code-task {task-id}
+  - Claude Code / OpenCode：/code-task {task-ref}
+  - Gemini CLI：/agent-infra:code-task {task-ref}
+  - Codex CLI：$code-task {task-ref}
 
 [当 env-blocked > 0 时，在最后附加一行：]
 提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /plan-task。
@@ -62,9 +62,9 @@
 - 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
 
 下一步 - 修订技术方案：
-  - Claude Code / OpenCode：/plan-task {task-id}
-  - Gemini CLI：/agent-infra:plan-task {task-id}
-  - Codex CLI：$plan-task {task-id}
+  - Claude Code / OpenCode：/plan-task {task-ref}
+  - Gemini CLI：/agent-infra:plan-task {task-ref}
+  - Codex CLI：$plan-task {task-ref}
 
 [当 env-blocked > 0 时，在最后附加一行：]
 提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /plan-task。
@@ -78,9 +78,9 @@
 - 审查报告：.agents/workspace/active/{task-id}/{review-artifact}
 
 下一步 - 重新设计：
-  - Claude Code / OpenCode：/plan-task {task-id}
-  - Gemini CLI：/agent-infra:plan-task {task-id}
-  - Codex CLI：$plan-task {task-id}
+  - Claude Code / OpenCode：/plan-task {task-ref}
+  - Gemini CLI：/agent-infra:plan-task {task-ref}
+  - Codex CLI：$plan-task {task-ref}
 
 [当 env-blocked > 0 时，在最后附加一行：]
 提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /plan-task。

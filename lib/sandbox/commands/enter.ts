@@ -1,5 +1,5 @@
 import { loadConfig } from '../config.ts';
-import { assertValidBranchName, containerNameCandidates, sandboxBranchLabel, sandboxLabel } from '../constants.ts';
+import { assertValidBranchName, containerNameCandidates } from '../constants.ts';
 import { detectEngine } from '../engine.ts';
 import {
   formatCredentialWarnings,
@@ -13,12 +13,14 @@ import { resolveTaskBranch } from '../task-resolver.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
 import { runInteractiveWithClipboardBridge } from '../clipboard/bridge.ts';
 import { detectHostTimezone } from '../host-timezone.ts';
-import { fetchSandboxRows, isTaskShortRef, resolveTaskShortRef } from './list-running.ts';
+import { isTaskShortRef, resolveTaskShortRef } from './list-running.ts';
 
-const USAGE = `Usage: ai sandbox exec <branch | TASK-id | '#N'> [cmd...]
+const USAGE = `Usage: ai sandbox exec <branch | TASK-id | N | '#N'> [cmd...]
 
-'#N' references the N-th running sandbox in 'ai sandbox ls' order (1-based).
-Quote it as '#N' to avoid shell '#' comment handling.`;
+N (bare) and '#N' both reference the same active task short id from
+.agents/workspace/active/.short-ids.json. The legacy "#N = N-th running
+sandbox" semantics from #414 has been removed; '#N' or bare N always
+resolves to a task short id, never to a container row index.`;
 const TMUX_ENTRY_PATH = '/usr/local/bin/sandbox-tmux-entry';
 
 // Terminal-detection variables that interactive TUIs (e.g. claude-code)
@@ -122,8 +124,7 @@ export async function enter(args: string[]): Promise<number> {
   const [firstArg = '', ...cmd] = args;
   let branch: string;
   if (isTaskShortRef(firstArg)) {
-    const { running } = fetchSandboxRows(engine, sandboxLabel(config), sandboxBranchLabel(config));
-    branch = resolveTaskShortRef(firstArg, { running, repoRoot: config.repoRoot });
+    branch = resolveTaskShortRef(firstArg, { repoRoot: config.repoRoot });
   } else {
     branch = resolveTaskBranch(firstArg, config.repoRoot);
   }

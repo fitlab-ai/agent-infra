@@ -726,9 +726,9 @@ test("sandbox ls formatContainerTable aligns header and rows by column width", a
   const { formatContainerTable } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/ls.ts")>("lib/sandbox/commands/ls.js");
 
   const rows = [
-    { index: "1", name: "demo-dev-feature-x", status: "Up 2 hours", branch: "feature/short" },
-    { index: "", name: "worker", status: "Exited (0) 20 minutes ago", branch: "bugfix/align-table" },
-    { index: "", name: "agent-infra-sandbox-long", status: "Created", branch: "main" }
+    { index: "#01", name: "demo-dev-feature-x", status: "Up 2 hours", branch: "feature/short" },
+    { index: "-", name: "worker", status: "Exited (0) 20 minutes ago", branch: "bugfix/align-table" },
+    { index: "-", name: "agent-infra-sandbox-long", status: "Created", branch: "main" }
   ];
   const lines = formatContainerTable(rows);
   const hashColumn = lines[0]!.indexOf("#");
@@ -746,9 +746,9 @@ test("sandbox ls formatContainerTable aligns header and rows by column width", a
     assert.equal(lines[i + 1]!.indexOf(rows[i]!.status), statusColumn);
     assert.equal(lines[i + 1]!.indexOf(rows[i]!.branch), branchColumn);
   }
-  assert.equal(lines[1]!.slice(0, namesColumn).trim(), "1");
-  assert.equal(lines[2]!.slice(0, namesColumn).trim(), "");
-  assert.equal(lines[3]!.slice(0, namesColumn).trim(), "");
+  assert.equal(lines[1]!.slice(0, namesColumn).trim(), "#01");
+  assert.equal(lines[2]!.slice(0, namesColumn).trim(), "-");
+  assert.equal(lines[3]!.slice(0, namesColumn).trim(), "-");
   for (const line of lines) {
     assert.equal(line.includes("\t"), false);
     assert.doesNotMatch(line, /\s+$/);
@@ -799,78 +799,24 @@ test("sandbox list-running sortAndIndexSandboxRows assigns 1-based index to runn
   }
 });
 
-test("sandbox list-running isTaskShortRef matches only '#<digits>' syntactically", async () => {
+test("sandbox list-running isTaskShortRef matches '#<digits>' and bare numeric (Round 4 contract)", async () => {
   const { isTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
 
   assert.equal(isTaskShortRef("#0"), true);
   assert.equal(isTaskShortRef("#1"), true);
   assert.equal(isTaskShortRef("#10"), true);
+  assert.equal(isTaskShortRef("0"), true);
+  assert.equal(isTaskShortRef("1"), true);
+  assert.equal(isTaskShortRef("11"), true);
   assert.equal(isTaskShortRef("#abc"), false);
   assert.equal(isTaskShortRef("#1a"), false);
   assert.equal(isTaskShortRef("#1.5"), false);
   assert.equal(isTaskShortRef("#-1"), false);
   assert.equal(isTaskShortRef("#"), false);
-  assert.equal(isTaskShortRef("1"), false);
+  assert.equal(isTaskShortRef("1.5"), false);
   assert.equal(isTaskShortRef("main"), false);
   assert.equal(isTaskShortRef("TASK-20260609-084122"), false);
   assert.equal(isTaskShortRef(""), false);
-});
-
-test("sandbox list-running resolveTaskShortRef returns branch for valid index", async () => {
-  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
-  const running = [
-    { name: "demo-a", status: "Up 1 min", branch: "feature/a", running: true, index: 1 },
-    { name: "demo-b", status: "Up 1 min", branch: "feature/b", running: true, index: 2 },
-    { name: "demo-c", status: "Up 1 min", branch: "main", running: true, index: 3 }
-  ];
-
-  assert.equal(resolveTaskShortRef("#1", { running }), "feature/a");
-  assert.equal(resolveTaskShortRef("#2", { running }), "feature/b");
-  assert.equal(resolveTaskShortRef("#3", { running }), "main");
-});
-
-test("sandbox list-running resolveTaskShortRef rejects '#0' with 'must be >= 1'", async () => {
-  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
-
-  assert.throws(
-    () => resolveTaskShortRef("#0", { running: [] }),
-    /must be >= 1/
-  );
-});
-
-test("sandbox list-running resolveTaskShortRef rejects out-of-range index with running count", async () => {
-  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
-  const running = [
-    { name: "demo-a", status: "Up 1 min", branch: "feature/a", running: true, index: 1 },
-    { name: "demo-b", status: "Up 1 min", branch: "feature/b", running: true, index: 2 },
-    { name: "demo-c", status: "Up 1 min", branch: "feature/c", running: true, index: 3 }
-  ];
-
-  assert.throws(
-    () => resolveTaskShortRef("#5", { running }),
-    /only 3 running/
-  );
-});
-
-test("sandbox list-running resolveTaskShortRef rejects when no running sandboxes", async () => {
-  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
-
-  assert.throws(
-    () => resolveTaskShortRef("#1", { running: [] }),
-    /No running sandbox to reference/
-  );
-});
-
-test("sandbox list-running resolveTaskShortRef rejects when running row has empty branch label", async () => {
-  const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
-  const running = [
-    { name: "orphan", status: "Up 1 min", branch: "", running: true, index: 1 }
-  ];
-
-  assert.throws(
-    () => resolveTaskShortRef("#1", { running }),
-    /missing branch label/
-  );
 });
 
 test("sandbox list-running resolveTaskShortRef hits registry and returns task.md branch", async () => {
@@ -894,11 +840,9 @@ test("sandbox list-running resolveTaskShortRef hits registry and returns task.md
     path.join(active, ".short-ids.json"),
     JSON.stringify({ version: 1, ids: { "1": taskId } })
   );
-  const running = [
-    { name: "demo-a", status: "Up 1 min", branch: "ls-branch", running: true, index: 1 }
-  ];
-  // Registry-hit must win over the ls index.
-  assert.equal(resolveTaskShortRef("#1", { running, repoRoot: tmp }), "registry-branch");
+  // Both '#1' and bare '1' resolve to the registry-mapped branch (Round 4).
+  assert.equal(resolveTaskShortRef("#1", { repoRoot: tmp }), "registry-branch");
+  assert.equal(resolveTaskShortRef("1", { repoRoot: tmp }), "registry-branch");
 });
 
 test("sandbox list-running resolveTaskShortRef throws when registry hits but branch metadata missing (M-1)", async () => {
@@ -922,17 +866,14 @@ test("sandbox list-running resolveTaskShortRef throws when registry hits but bra
     path.join(active, ".short-ids.json"),
     JSON.stringify({ version: 1, ids: { "1": taskId } })
   );
-  const running = [
-    { name: "demo-a", status: "Up 1 min", branch: "ls-branch", running: true, index: 1 }
-  ];
-  // Registry hit but corrupt → MUST throw, NOT fall back to running[0].branch.
+  // Registry hit but corrupt → MUST throw.
   assert.throws(
-    () => resolveTaskShortRef("#1", { running, repoRoot: tmp }),
+    () => resolveTaskShortRef("#1", { repoRoot: tmp }),
     /no branch field/
   );
 });
 
-test("sandbox list-running resolveTaskShortRef falls back to ls index on registry miss", async () => {
+test("sandbox list-running resolveTaskShortRef throws on registry miss (Round 4: no ls-index fallback)", async () => {
   const { resolveTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rtsr-miss-"));
   fs.mkdirSync(path.join(tmp, ".agents", "scripts"), { recursive: true });
@@ -943,11 +884,11 @@ test("sandbox list-running resolveTaskShortRef falls back to ls index on registr
   fs.writeFileSync(path.join(tmp, ".agents", ".airc.json"), JSON.stringify({ task: { shortIdLength: 1 } }));
   // Empty registry; no active tasks → resolve('#1') misses.
   fs.mkdirSync(path.join(tmp, ".agents", "workspace", "active"), { recursive: true });
-  const running = [
-    { name: "demo-a", status: "Up 1 min", branch: "ls-branch", running: true, index: 1 }
-  ];
-  // Should fall back to the ls index (preserves #414 behaviour).
-  assert.equal(resolveTaskShortRef("#1", { running, repoRoot: tmp }), "ls-branch");
+  // The legacy ls-index fallback has been removed. miss → throw, not run[0].branch.
+  assert.throws(
+    () => resolveTaskShortRef("#1", { repoRoot: tmp }),
+    /not in the active task registry/
+  );
 });
 
 test("sandbox ls parseLabels parses docker label CSV", async () => {

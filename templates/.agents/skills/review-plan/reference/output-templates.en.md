@@ -25,9 +25,9 @@ Task {task-id} technical plan review completed. Verdict: approved.
 [- Review report: .agents/workspace/active/{task-id}/{review-artifact}]
 
 Next step - write code:
-  - Claude Code / OpenCode: /code-task {task-id}
-  - Gemini CLI: /agent-infra:code-task {task-id}
-  - Codex CLI: $code-task {task-id}
+  - Claude Code / OpenCode: /code-task {task-ref}
+  - Gemini CLI: /agent-infra:code-task {task-ref}
+  - Codex CLI: $code-task {task-ref}
 
 [When env-blocked > 0, append:]
 Reminder: env-blocked items belong in the PR description manual verification checklist and should not trigger /plan-task.
@@ -41,14 +41,14 @@ Task {task-id} technical plan review completed. Verdict: approved.
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - revise plan before coding (recommended):
-  - Claude Code / OpenCode: /plan-task {task-id}
-  - Gemini CLI: /agent-infra:plan-task {task-id}
-  - Codex CLI: $plan-task {task-id}
+  - Claude Code / OpenCode: /plan-task {task-ref}
+  - Gemini CLI: /agent-infra:plan-task {task-ref}
+  - Codex CLI: $plan-task {task-ref}
 
 Or proceed directly to coding:
-  - Claude Code / OpenCode: /code-task {task-id}
-  - Gemini CLI: /agent-infra:code-task {task-id}
-  - Codex CLI: $code-task {task-id}
+  - Claude Code / OpenCode: /code-task {task-ref}
+  - Gemini CLI: /agent-infra:code-task {task-ref}
+  - Codex CLI: $code-task {task-ref}
 
 [When env-blocked > 0, append:]
 Reminder: env-blocked items belong in the PR description manual verification checklist and should not trigger /plan-task.
@@ -62,9 +62,9 @@ Task {task-id} technical plan review completed. Verdict: changes requested.
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - revise technical plan:
-  - Claude Code / OpenCode: /plan-task {task-id}
-  - Gemini CLI: /agent-infra:plan-task {task-id}
-  - Codex CLI: $plan-task {task-id}
+  - Claude Code / OpenCode: /plan-task {task-ref}
+  - Gemini CLI: /agent-infra:plan-task {task-ref}
+  - Codex CLI: $plan-task {task-ref}
 
 [When env-blocked > 0, append:]
 Reminder: env-blocked items belong in the PR description manual verification checklist and should not trigger /plan-task.
@@ -78,9 +78,9 @@ Task {task-id} technical plan review completed. Verdict: rejected, redesign requ
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - redesign:
-  - Claude Code / OpenCode: /plan-task {task-id}
-  - Gemini CLI: /agent-infra:plan-task {task-id}
-  - Codex CLI: $plan-task {task-id}
+  - Claude Code / OpenCode: /plan-task {task-ref}
+  - Gemini CLI: /agent-infra:plan-task {task-ref}
+  - Codex CLI: $plan-task {task-ref}
 
 [When env-blocked > 0, append:]
 Reminder: env-blocked items belong in the PR description manual verification checklist and should not trigger /plan-task.

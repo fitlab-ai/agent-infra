@@ -25,9 +25,9 @@ Task {task-id} requirement analysis review completed. Verdict: approved.
 [- Review report: .agents/workspace/active/{task-id}/{review-artifact}]
 
 Next step - write the technical plan:
-  - Claude Code / OpenCode: /plan-task {task-id}
-  - Gemini CLI: /agent-infra:plan-task {task-id}
-  - Codex CLI: $plan-task {task-id}
+  - Claude Code / OpenCode: /plan-task {task-ref}
+  - Gemini CLI: /agent-infra:plan-task {task-ref}
+  - Codex CLI: $plan-task {task-ref}
 
 [When env-blocked > 0, append:]
 Reminder: env-blocked items belong in the PR description manual verification checklist and should not trigger /analyze-task.
@@ -41,14 +41,14 @@ Task {task-id} requirement analysis review completed. Verdict: approved.
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - revise analysis before continuing (recommended):
-  - Claude Code / OpenCode: /analyze-task {task-id}
-  - Gemini CLI: /agent-infra:analyze-task {task-id}
-  - Codex CLI: $analyze-task {task-id}
+  - Claude Code / OpenCode: /analyze-task {task-ref}
+  - Gemini CLI: /agent-infra:analyze-task {task-ref}
+  - Codex CLI: $analyze-task {task-ref}
 
 Or proceed directly to planning:
-  - Claude Code / OpenCode: /plan-task {task-id}
-  - Gemini CLI: /agent-infra:plan-task {task-id}
-  - Codex CLI: $plan-task {task-id}
+  - Claude Code / OpenCode: /plan-task {task-ref}
+  - Gemini CLI: /agent-infra:plan-task {task-ref}
+  - Codex CLI: $plan-task {task-ref}
 
 [When env-blocked > 0, append:]
 Reminder: env-blocked items belong in the PR description manual verification checklist and should not trigger /analyze-task.
@@ -62,9 +62,9 @@ Task {task-id} requirement analysis review completed. Verdict: changes requested
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - revise requirement analysis:
-  - Claude Code / OpenCode: /analyze-task {task-id}
-  - Gemini CLI: /agent-infra:analyze-task {task-id}
-  - Codex CLI: $analyze-task {task-id}
+  - Claude Code / OpenCode: /analyze-task {task-ref}
+  - Gemini CLI: /agent-infra:analyze-task {task-ref}
+  - Codex CLI: $analyze-task {task-ref}
 
 [When env-blocked > 0, append:]
 Reminder: env-blocked items belong in the PR description manual verification checklist and should not trigger /analyze-task.
@@ -78,9 +78,9 @@ Task {task-id} requirement analysis review completed. Verdict: rejected, fresh a
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - re-analyze:
-  - Claude Code / OpenCode: /analyze-task {task-id}
-  - Gemini CLI: /agent-infra:analyze-task {task-id}
-  - Codex CLI: $analyze-task {task-id}
+  - Claude Code / OpenCode: /analyze-task {task-ref}
+  - Gemini CLI: /agent-infra:analyze-task {task-ref}
+  - Codex CLI: $analyze-task {task-ref}
 
 [When env-blocked > 0, append:]
 Reminder: env-blocked items belong in the PR description manual verification checklist and should not trigger /analyze-task.

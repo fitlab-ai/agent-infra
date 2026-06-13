@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
-const SHORT_ID_RE = /^#\d+$/;
+const SHORT_ID_RE = /^#?\d+$/;
 const WORKSPACE_DIRS = ['active', 'completed', 'blocked', 'archive'];
 
 function resolveShortIdStrict(arg: string, repoRoot: string): string {

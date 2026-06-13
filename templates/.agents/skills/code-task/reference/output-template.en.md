@@ -14,7 +14,7 @@ Output files:
 - Code report: .agents/workspace/active/{task-id}/{code-artifact}
 
 Next step - code review:
-  - Claude Code / OpenCode: /review-code {task-id}
-  - Gemini CLI: /{{project}}:review-code {task-id}
-  - Codex CLI: $review-code {task-id}
+  - Claude Code / OpenCode: /review-code {task-ref}
+  - Gemini CLI: /{{project}}:review-code {task-ref}
+  - Codex CLI: $review-code {task-ref}
 ```

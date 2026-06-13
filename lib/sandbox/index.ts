@@ -2,9 +2,13 @@ const USAGE = `Usage: ai sandbox <command> [options]
 
 Commands:
   create <branch> [base]       Create a sandbox (VM + image + worktree + container)
-  exec <branch | '#N'> [cmd...]
-                               Enter sandbox or run a command (use leftmost '#' column from 'ls')
-  ls                           List sandboxes for the current project
+  exec <branch | TASK-id | N | '#N'> [cmd...]
+                               Enter sandbox or run a command. N (bare) is the
+                               recommended form for task short ids (e.g.
+                               'ai sandbox exec 11'); '#N' is also accepted.
+  ls                           List sandboxes for the current project (the '#'
+                               column shows the active task short id; '-' if no
+                               active task is bound to the container's branch)
   prune [--dry-run]            Remove orphaned per-branch state dirs
   rebuild [--quiet] [--refresh]
                                Rebuild the sandbox image (--refresh pulls base + tools)

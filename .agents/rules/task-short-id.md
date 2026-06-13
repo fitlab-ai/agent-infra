@@ -1,16 +1,18 @@
 # 任务短号
 
-短号让所有 SKILL 在 active 任务生命周期内可以用 `#NN` 替代完整的 22 字符
-`TASK-YYYYMMDD-HHMMSS`。
+短号让所有 SKILL 在 active 任务生命周期内可以用 `#NN` 或裸数字 `N`（推荐）替代
+完整的 22 字符 `TASK-YYYYMMDD-HHMMSS`。
 
 ## 语法
 
-- 格式：`^#\d{shortIdLength}$`（**零填充到固定宽度**；默认 `shortIdLength=2` 时
-  形如 `#01`、`#07`、`#42`）。
-- **必须**零填充到 `shortIdLength` 位（默认 2 位：`#1` 视为格式错误，应输入
-  `#01`）。这是为了视觉对齐与盲打体验。
+- 字面接受两种等价形式：
+  - **裸数字 `N`**（推荐，无需 shell 引号）：如 `1`、`7`、`42`。
+  - **`#`-前缀 `#N` / `#NN`**（兼容旧写法）：如 `#1`、`#01`、`#42`。
+- 解析规则：去前导零后取数值 `n`，若 `n == 0` 报错（保留）；若 `n > 10^shortIdLength - 1`
+  报错（超容量）；否则归一化为 `#${n.padStart(shortIdLength, '0')}`，作为注册表 key。
+- 默认 `shortIdLength=2` 时容量 `n ∈ [1, 99]`，注册表 key 形如 `01`、`07`、`42`。
 - `#00`（或 `shortIdLength=1` 时 `#0`）保留、永不分配；纯数字、不引入字母。
-- 完整 `TASK-…` 入参在所有路径下行为与现状等价；`#NN` 只是别名，不是持久化任务 ID。
+- 完整 `TASK-…` 入参在所有路径下行为与现状等价；`#NN` / 裸数字只是别名，不是持久化任务 ID。
 
 ## 生命周期
 
@@ -44,7 +46,7 @@
 | 入口                                                       | 注册表命中            | 注册表未命中                                            |
 |-----------------------------------------------------------|----------------------|--------------------------------------------------------|
 | SKILL 入参解析器（生命周期 SKILL）                          | 解析为完整 task id    | **严格报错** —— 短号不存在 / 格式错误                  |
-| `ai sandbox enter '#NN'` / `ai sandbox exec '#NN' …`      | 解析为完整 task id    | 回退到 running sandbox 的 ls 行号语义（保留 #414 行为）|
+| `ai sandbox exec <N \| '#N'>` / `ai sandbox create <N \| '#N'>`           | 解析为完整 task id 后查 task.md 取 `branch` | **严格报错** —— 不再回退到 ls 行号或字面分支名；提示用任务短号 / `TASK-id` / 分支名 |
 
 `list --verify` 严格只读：报告 active 目录 / 注册表 / 各 task.md 的 `short_id`
 三者差异，但不修改任何状态。
@@ -54,11 +56,11 @@
 任意 SKILL（含 alloc / resolve / release / re-alloc 四类生命周期入口）在收到
 `{task-id}` 入参后，必须按以下契约处理：
 
-1. 如果 `{task-id}` 字面以 `#` 开头：
+1. 如果 `{task-id}` 字面匹配 `^[#]?[0-9]+$`（裸数字 `N` 或 `#`-前缀 `#N`）：
 
 ```bash
-if [[ "{task-id}" == "#"* ]]; then
-  # 脚本本身已输出完整错误（含「expected #NN (N-digit zero-padded; e.g. '#01')」）；
+if [[ "{task-id}" =~ ^[#]?[0-9]+$ ]]; then
+  # 脚本本身已输出完整错误（含 reserved / exceeds shortIdLength capacity 等场景）；
   # 调用方只需透传退出码
   task_id=$(node .agents/scripts/task-short-id.js resolve "{task-id}") || exit 1
 else
@@ -97,21 +99,27 @@ fi
   目录并为缺字段的 task.md 补发短号；补发受字段保护约束（不刷新
   `updated_at` / `agent_infra_version`、不追加 Activity Log）
 
-`resolve('#NN')` 工作流：① 校验入参严格匹配 `^#\d{shortIdLength}$` → ② 直接以
-`NN` 作为 key 查注册表 `ids` → ③ 命中返回完整 task id，未命中按 `list --verify`
-给出修复指引退出 1。
+`resolve(<N|'#N'>)` 工作流：① 校验入参匹配 `^[#]?[0-9]+$` → ② 去前导零取
+数值 `n`，按 `n` 是否 `== 0`（保留）/ `> 10^shortIdLength - 1`（超容量）/
+正常 三类处理 → ③ 正常时以 `n.padStart(shortIdLength, '0')` 作为 key 查
+注册表 `ids` → ④ 命中返回完整 task id，未命中按 `list --verify` 给出修复指引退出 1。
 
 ## 错误场景
 
-- **短号不存在**：注册表中无 `#NN`。可能是任务已归档（短号已释放）或输入错误。
+- **短号不存在**：注册表中无对应 key。可能是任务已归档（短号已释放）或输入错误。退出码 1。
 - **注册表损坏**（同一 taskId 出现多次或 JSON 无法解析）：退出码 2，需人工处理。
-- **参数格式错误**（如 `#00`、`#abc`、`#`、`#1` 当 `shortIdLength=2` 时）：退出码 1。
+- **保留键**：解析后 `n == 0`（输入如 `0`、`#0`、`#00`）。退出码 1。
+- **超容量**：解析后 `n > 10^shortIdLength - 1`（如 `shortIdLength=2` 下 `100` 或 `#100`）。退出码 1。
+- **参数格式错误**：入参既不是 `^[#]?[0-9]+$` 也不是 `TASK-id`（如 `#abc`、`#`、`5.5`）。退出码 1。
 
 ## 跨 TUI 引号要求
 
-bash 中 `#` 是注释起始符，必须单引号：`ai sandbox exec '#03' 'npm test'`。
-Claude Code / Codex / Gemini CLI / OpenCode 在加引号时都能把 `#NN` 字面传递到
-SKILL 的 `ARGUMENTS`。
+裸数字 `N` 在所有 shell 与 TUI 中都安全无需引号，推荐写法：
+`ai sandbox exec 11 'npm test'`、`/review-analysis 11`。
+
+`#N` / `#NN` 写法仍然兼容；但 bash 中 `#` 是注释起始符，必须单引号：
+`ai sandbox exec '#03' 'npm test'`。Claude Code / Codex / Gemini CLI / OpenCode
+在加引号时都能把 `#NN` 字面传递到 SKILL 的 `ARGUMENTS`。
 
 ## 冷启动迁移
 

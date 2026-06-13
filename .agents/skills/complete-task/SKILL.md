@@ -28,7 +28,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## 任务入参短号别名
 
-> 如果 `{task-id}` 入参以 `#` 开头，先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
+> 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
 ## 执行步骤
 ### 1. 验证任务存在

@@ -43,9 +43,9 @@ Task {task-id} review completed. Verdict: approved.
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - fix before commit (recommended):
-  - Claude Code / OpenCode: /code-task {task-id}
-  - Gemini CLI: /agent-infra:code-task {task-id}
-  - Codex CLI: $code-task {task-id}
+  - Claude Code / OpenCode: /code-task {task-ref}
+  - Gemini CLI: /agent-infra:code-task {task-ref}
+  - Codex CLI: $code-task {task-ref}
 
 Or commit directly (skip fix):
   - Claude Code / OpenCode: /commit
@@ -64,9 +64,9 @@ Task {task-id} review completed. Verdict: changes requested.
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - fix the findings:
-  - Claude Code / OpenCode: /code-task {task-id}
-  - Gemini CLI: /agent-infra:code-task {task-id}
-  - Codex CLI: $code-task {task-id}
+  - Claude Code / OpenCode: /code-task {task-ref}
+  - Gemini CLI: /agent-infra:code-task {task-ref}
+  - Codex CLI: $code-task {task-ref}
 
 [When env-blocked > 0, append this final line:]
 Reminder: env-blocked findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
@@ -80,9 +80,9 @@ Task {task-id} review completed. Verdict: rejected, re-design the technical plan
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - re-design the technical plan:
-  - Claude Code / OpenCode: /plan-task {task-id}
-  - Gemini CLI: /agent-infra:plan-task {task-id}
-  - Codex CLI: $plan-task {task-id}
+  - Claude Code / OpenCode: /plan-task {task-ref}
+  - Gemini CLI: /agent-infra:plan-task {task-ref}
+  - Codex CLI: $plan-task {task-ref}
 
 > Note: Rejected means the implementation direction needs to be reworked end-to-end, not patched locally. `code-task/scripts/detect-mode.js` branch #7 refuses a direct `/code-task` and requires a fresh plan first.
 

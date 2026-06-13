@@ -185,24 +185,34 @@ function allocateMinFreeInt(registry, shortIdLength) {
 }
 
 function parseShortIdArg(arg, shortIdLength) {
-  const re = new RegExp(`^#\\d{${shortIdLength}}$`);
-  if (!re.test(arg)) {
-    const example =
-      shortIdLength === 1 ? "'#1'" : shortIdLength === 2 ? "'#01'" : `'#${"0".repeat(shortIdLength - 1)}1'`;
+  const L = shortIdLength;
+  const max = Math.pow(10, L) - 1;
+  // Accept bare numeric or '#'-prefixed; canonicalize to zero-padded key.
+  // Bare numeric is the recommended form (no shell quoting needed).
+  const m = /^#?(\d+)$/.exec(arg);
+  if (!m) {
     writeStderr(
       `Error: invalid short id format '${arg}', ` +
-        `expected #${"N".repeat(shortIdLength)} (${shortIdLength}-digit zero-padded; e.g. ${example})\n`
+        `expected bare digits (recommended) or '#'-prefixed digits; ` +
+        `e.g. '11' or '#11' (shortIdLength=${L}, max=${max})\n`
     );
     process.exit(1);
   }
-  const key = arg.slice(1);
-  if (Number(key) === 0) {
+  const n = Number(m[1]);
+  if (n === 0) {
     writeStderr(
-      `Error: short id '${arg}' is invalid (#${"0".repeat(shortIdLength)} is reserved)\n`
+      `Error: short id '${arg}' is invalid (#${"0".repeat(L)} is reserved)\n`
     );
     process.exit(1);
   }
-  return key;
+  if (n > max) {
+    writeStderr(
+      `Error: short id ${n} exceeds shortIdLength=${L} capacity (max=${max}); ` +
+        `archive tasks or raise task.shortIdLength in .agents/.airc.json\n`
+    );
+    process.exit(1);
+  }
+  return String(n).padStart(L, "0");
 }
 
 function planTransaction(registry, activeDir, shortIdLength) {
@@ -548,8 +558,8 @@ function cmdRelease(taskId, activeDir, registryPath, shortIdLength) {
 }
 
 function cmdResolve(shortIdArg, activeDir, registryPath, shortIdLength) {
-  // Strict width match + reserved key check; on invalid arg, parseShortIdArg writes full
-  // stderr (including "expected #NN (N-digit zero-padded; e.g. '#01')") and exits 1.
+  // Accepts bare digits ('11') or '#'-prefixed form ('#11', '#11', '#005'); normalized by
+  // numeric value with capacity check (n > 10^L-1) and reserved-zero rejection.
   const key = parseShortIdArg(shortIdArg, shortIdLength);
   return withRegistryLock(activeDir, () => {
     const registry = readRegistry(registryPath);

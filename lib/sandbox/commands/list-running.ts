@@ -88,13 +88,14 @@ export function fetchSandboxRows(
 }
 
 /**
- * Returns true iff `arg` is a syntactically valid task short reference ('#N').
+ * Returns true iff `arg` is a syntactically valid task short reference.
+ * Accepts both bare numeric ('11') and '#'-prefixed ('#11') forms.
  * Zero IO. Callers MUST use this as the gate before constructing any context
  * for resolveTaskShortRef — that way non-matching arguments (e.g. '#abc',
  * '#1.5', '#') never trigger sandbox list IO.
  */
 export function isTaskShortRef(arg: string): boolean {
-  return /^#\d+$/.test(arg);
+  return /^#?\d+$/.test(arg);
 }
 
 type RegistryLookup =
@@ -113,6 +114,9 @@ type RegistryLookup =
 function tryResolveFromRegistry(arg: string, repoRoot: string): RegistryLookup {
   const scriptPath = path.join(repoRoot, '.agents', 'scripts', 'task-short-id.js');
   if (!fs.existsSync(scriptPath)) return { status: 'miss' };
+  // Strip leading '#' when forwarding bare-numeric input through the script's CLI.
+  // (Script accepts both forms, but this avoids shell quoting confusion in error
+  // messages echoed back to the user.)
   const result = spawnSync('node', [scriptPath, 'resolve', arg], { encoding: 'utf8', cwd: repoRoot });
   if (result.status !== 0) return { status: 'miss' };
   const taskId = (result.stdout || '').trim();
@@ -142,47 +146,28 @@ function tryResolveFromRegistry(arg: string, repoRoot: string): RegistryLookup {
   );
 }
 
-function resolveByRunningIndex(arg: string, running: SandboxRow[]): string {
-  const n = Number(arg.slice(1));
-  if (n < 1) {
-    throw new Error(`Invalid sandbox index '${arg}': must be >= 1`);
-  }
-  if (running.length === 0) {
-    throw new Error(`No running sandbox to reference with '${arg}'`);
-  }
-  if (n > running.length) {
-    throw new Error(
-      `No running sandbox at index '${arg}' (only ${running.length} running)`
-    );
-  }
-  const row = running[n - 1]!;
-  if (!row.branch) {
-    throw new Error(
-      `Cannot resolve branch for sandbox '${arg}' (container '${row.name}' missing branch label)`
-    );
-  }
-  return row.branch;
-}
-
 /**
- * Resolve a task short reference ('#N') to a branch name for the sandbox entrypoint.
+ * Resolve a task short reference (bare 'N' or '#N') to a branch name for the
+ * sandbox entrypoint.
  *
- * Resolution order (sandbox fallback mode, plan-r7 C2):
- *   1. Try the global task-short-id registry under repoRoot. If hit, look up the
- *      branch from the matching task.md.
- *   2. Fallback to the running-sandbox list index (preserves the #414 ls-index
- *      behaviour; long-term contract per analysis-r5).
+ * Resolution order:
+ *   1. Resolve via the global task-short-id registry under repoRoot. If hit,
+ *      look up the branch from the matching task.md.
+ *   2. On miss (registry empty or short id absent), throw with an actionable
+ *      message — the legacy "#N = N-th running sandbox" fallback (#414) was
+ *      removed in favour of unambiguous short-id-only semantics.
  *
  * Precondition: callers MUST gate on isTaskShortRef(arg) === true.
  */
 export function resolveTaskShortRef(
   arg: string,
-  ctx: { running: SandboxRow[]; repoRoot?: string }
+  ctx: { repoRoot: string }
 ): string {
-  if (ctx.repoRoot) {
-    const lookup = tryResolveFromRegistry(arg, ctx.repoRoot);
-    if (lookup.status === 'hit') return lookup.branch;
-    // 'miss' falls through to ls-index fallback (preserves #414 behaviour); 'hit-but-invalid' already threw above.
-  }
-  return resolveByRunningIndex(arg, ctx.running);
+  const lookup = tryResolveFromRegistry(arg, ctx.repoRoot);
+  if (lookup.status === 'hit') return lookup.branch;
+  throw new Error(
+    `short ref '${arg}' is not in the active task registry. ` +
+      `The legacy '#N' = N-th running sandbox semantics has been removed; ` +
+      `use a task short id (e.g. 'ai sandbox exec 11'), a TASK-id, or a branch name.`
+  );
 }

@@ -134,14 +134,18 @@ test("alloc and release with default shortIdLength=2 emit zero-padded short ids"
     "02": "TASK-20260101-000002"
   });
 
-  // resolve must accept the zero-padded form and reject the unpadded form.
+  // resolve accepts both zero-padded and non-padded forms (numeric-value contract).
   const hit = runW2(["resolve", "#01", "--active-dir", active]);
   assert.equal(hit.status, 0);
   assert.equal(hit.stdout.trim(), "TASK-20260101-000001");
 
-  const widthErr = runW2(["resolve", "#1", "--active-dir", active]);
-  assert.equal(widthErr.status, 1, `stderr=${widthErr.stderr}`);
-  assert.match(widthErr.stderr, /expected #NN \(2-digit zero-padded/);
+  const unpaddedHit = runW2(["resolve", "#1", "--active-dir", active]);
+  assert.equal(unpaddedHit.status, 0, `stderr=${unpaddedHit.stderr}`);
+  assert.equal(unpaddedHit.stdout.trim(), "TASK-20260101-000001");
+
+  const bareHit = runW2(["resolve", "1", "--active-dir", active]);
+  assert.equal(bareHit.status, 0, `stderr=${bareHit.stderr}`);
+  assert.equal(bareHit.stdout.trim(), "TASK-20260101-000001");
 });
 
 test("release is idempotent (exit 0 when no entry; m-1)", () => {
@@ -170,36 +174,45 @@ test("resolve returns task id on hit; error on miss (shortIdLength=1)", () => {
   assert.match(miss.stderr, /not found/);
 });
 
-test("resolve rejects reserved key, width mismatch, malformed input", () => {
+test("resolve rejects reserved key, over capacity, malformed input", () => {
   const tmp = mkTmp();
   const active = path.join(tmp, "active");
   fs.mkdirSync(active, { recursive: true });
 
-  // shortIdLength=1: #0 reserved; #abc malformed; #01 width mismatch.
+  // shortIdLength=1: #0 and bare 0 are reserved; #abc malformed.
   const zero1 = runW1(["resolve", "#0", "--active-dir", active]);
   assert.equal(zero1.status, 1);
   assert.match(zero1.stderr, /reserved/);
 
-  const widthErrW1 = runW1(["resolve", "#01", "--active-dir", active]);
-  assert.equal(widthErrW1.status, 1);
-  assert.match(widthErrW1.stderr, /expected #N \(1-digit zero-padded/);
+  const bareZero1 = runW1(["resolve", "0", "--active-dir", active]);
+  assert.equal(bareZero1.status, 1);
+  assert.match(bareZero1.stderr, /reserved/);
+
+  // #10 exceeds shortIdLength=1 capacity (max=9).
+  const overW1 = runW1(["resolve", "#10", "--active-dir", active]);
+  assert.equal(overW1.status, 1);
+  assert.match(overW1.stderr, /exceeds shortIdLength=1 capacity/);
 
   const bad = runW1(["resolve", "#abc", "--active-dir", active]);
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /invalid short id format/);
 
-  // shortIdLength=2: #00 reserved; #1 width mismatch; #001 width mismatch.
+  // shortIdLength=2: #00 and bare 00 reserved.
   const zero2 = runW2(["resolve", "#00", "--active-dir", active]);
   assert.equal(zero2.status, 1);
   assert.match(zero2.stderr, /reserved/);
 
-  const widthErrW2 = runW2(["resolve", "#1", "--active-dir", active]);
-  assert.equal(widthErrW2.status, 1);
-  assert.match(widthErrW2.stderr, /expected #NN \(2-digit zero-padded/);
+  // #100 exceeds shortIdLength=2 capacity (max=99).
+  const overW2 = runW2(["resolve", "#100", "--active-dir", active]);
+  assert.equal(overW2.status, 1);
+  assert.match(overW2.stderr, /exceeds shortIdLength=2 capacity/);
 
-  const overWidth = runW2(["resolve", "#001", "--active-dir", active]);
-  assert.equal(overWidth.status, 1);
-  assert.match(overWidth.stderr, /expected #NN/);
+  // #001 in L=2 is now valid (numeric value=1, ≤ max=99) — registry just won't have it.
+  // Confirm format pass-through doesn't itself error.
+  const okFormat = runW2(["resolve", "#001", "--active-dir", active]);
+  // Registry empty here → exit 1 with "not found", NOT "invalid format".
+  assert.equal(okFormat.status, 1);
+  assert.doesNotMatch(okFormat.stderr, /invalid short id format/);
 });
 
 test("width exhaustion (case D): cold start aborts before any write", () => {
@@ -406,9 +419,19 @@ test("default width is 2 even without --short-id-length flag and without task.sh
   assert.equal(hit.status, 0);
   assert.equal(hit.stdout.trim(), taskId);
 
-  const widthErr = spawnSync("node", [SCRIPT, "resolve", "#1"], { encoding: "utf8", cwd: tmp });
-  assert.equal(widthErr.status, 1, `stderr=${widthErr.stderr}`);
-  assert.match(widthErr.stderr, /expected #NN \(2-digit zero-padded/);
+  // Bare numeric and non-padded #N also resolve to the same task under L=2.
+  const bareHit = spawnSync("node", [SCRIPT, "resolve", "1"], { encoding: "utf8", cwd: tmp });
+  assert.equal(bareHit.status, 0, `stderr=${bareHit.stderr}`);
+  assert.equal(bareHit.stdout.trim(), taskId);
+
+  const unpaddedHit = spawnSync("node", [SCRIPT, "resolve", "#1"], { encoding: "utf8", cwd: tmp });
+  assert.equal(unpaddedHit.status, 0, `stderr=${unpaddedHit.stderr}`);
+  assert.equal(unpaddedHit.stdout.trim(), taskId);
+
+  // Over-capacity is still rejected at the script level.
+  const overWidth = spawnSync("node", [SCRIPT, "resolve", "#100"], { encoding: "utf8", cwd: tmp });
+  assert.equal(overWidth.status, 1, `stderr=${overWidth.stderr}`);
+  assert.match(overWidth.stderr, /exceeds shortIdLength=2 capacity/);
 });
 
 test("SKILL.md no longer embeds multi-line short-id bash snippet (U-2 slimming)", () => {

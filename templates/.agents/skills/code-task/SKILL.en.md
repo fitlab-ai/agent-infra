@@ -31,7 +31,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## Task id short ref
 
-> If `{task-id}` begins with `#`, follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
+> If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
 ## Steps
 
@@ -118,4 +118,6 @@ node .agents/scripts/validate-artifact.js gate code-task .agents/workspace/activ
 
 ### 12. Tell the User
 
-Use `reference/output-template.md` and show all TUI command formats.
+Use `reference/output-template.md` (or `reference/fix-mode.md` in fix mode) and show all TUI command formats.
+
+> When rendering "Next steps" commands, `{task-ref}` follows this contract: read `short_id` from task.md frontmatter; if present (form `#NN`), render the corresponding **bare numeric** (e.g. `#11` → `11`); fall back to the full `TASK-id` otherwise. Other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form.

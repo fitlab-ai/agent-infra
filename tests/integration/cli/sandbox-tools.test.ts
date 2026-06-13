@@ -238,7 +238,7 @@ test("sandbox exec '#abc' fails branch validation without triggering docker IO",
   }
 });
 
-test("sandbox exec '#1' triggers fetchSandboxRows and reports no-running-sandbox", onPlatforms("linux", "darwin", "win32"), () => {
+test("sandbox exec '#1' on registry miss throws short-ref error (Round 4: no ls-index fallback)", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-enter-shortref-"));
 
   try {
@@ -262,21 +262,14 @@ test("sandbox exec '#1' triggers fetchSandboxRows and reports no-running-sandbox
     );
 
     assert.notEqual(result.status, 0);
-    assert.match(String(result.stderr), /No running sandbox to reference with '#1'/);
+    // Round 4: '#1' no longer falls back to "N-th running sandbox"; missing
+    // registry entry throws a short-ref-not-found error before any docker call.
+    assert.match(String(result.stderr), /not in the active task registry/);
 
+    // No docker calls should have happened — resolution failed before listing
+    // sandboxes.
     const dockerCalls = fixture.readDockerCalls();
-    assert.equal(dockerCalls.length, 1);
-    // Only assert the stable prefix: '--format' value contains literal tabs
-    // which a Windows .cmd shim retokenizes into separate args before the
-    // shim's node script sees them. The format string itself is covered by
-    // the containerListFormat() unit test.
-    assert.deepEqual(dockerCalls[0]!.slice(0, 5), [
-      "ps",
-      "-a",
-      "--filter",
-      "label=demo.sandbox",
-      "--format"
-    ]);
+    assert.equal(dockerCalls.length, 0);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

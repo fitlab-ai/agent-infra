@@ -9,7 +9,7 @@ Dismiss the specified Code Scanning (CodeQL) alert and record a justified reason
 
 ## Task id short ref
 
-> If `{task-id}` begins with `#`, follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
+> If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
 ## Execution Flow
 

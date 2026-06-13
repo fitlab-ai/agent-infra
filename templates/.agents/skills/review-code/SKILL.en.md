@@ -38,7 +38,7 @@ Before the state check is complete, do not make external-state assertions such a
 
 ## Task id short ref
 
-> If `{task-id}` begins with `#`, follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
+> If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
 ## Steps
 
@@ -120,6 +120,8 @@ Choose exactly one branch based on the findings:
 env-blocked counts do not influence branch selection; they are appended to the summary line only.
 
 > The full four-branch output templates, selection rules, and prohibition clauses live in `reference/output-templates.md`. Read `reference/output-templates.md` before reporting the review result.
+
+> When rendering "Next steps" commands, `{task-ref}` follows this contract: read `short_id` from task.md frontmatter; if present (form `#NN`), render the corresponding **bare numeric** (e.g. `#11` → `11`); fall back to the full `TASK-id` otherwise. Other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form.
 
 Include all TUI command formats in the next-step output. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 

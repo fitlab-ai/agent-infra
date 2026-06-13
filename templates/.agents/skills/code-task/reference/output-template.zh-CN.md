@@ -14,7 +14,7 @@
 - 实现报告：.agents/workspace/active/{task-id}/{code-artifact}
 
 下一步 - 代码审查：
-  - Claude Code / OpenCode：/review-code {task-id}
-  - Gemini CLI：/agent-infra:review-code {task-id}
-  - Codex CLI：$review-code {task-id}
+  - Claude Code / OpenCode：/review-code {task-ref}
+  - Gemini CLI：/agent-infra:review-code {task-ref}
+  - Codex CLI：$review-code {task-ref}
 ```

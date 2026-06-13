@@ -1,18 +1,24 @@
 # Task short id
 
 Task short ids let mobile-style SKILL invocations replace the full 22-char
-`TASK-YYYYMMDD-HHMMSS` with `#NN` while a task is active.
+`TASK-YYYYMMDD-HHMMSS` with bare numeric `N` (recommended) or `#NN` while a
+task is active.
 
 ## Syntax
 
-- Format: `^#\d{shortIdLength}$` (**zero-padded to a fixed width**; with the
-  default `shortIdLength=2`, e.g. `#01`, `#07`, `#42`).
-- **Must** be zero-padded to `shortIdLength` digits (default 2: `#1` is a format
-  error, use `#01`). This keeps things aligned and touch-typeable.
+- Two equivalent literal forms are accepted:
+  - **Bare numeric `N`** (recommended; no shell quoting needed): e.g. `1`, `7`, `42`.
+  - **`#`-prefixed `#N` / `#NN`** (compat with legacy commands): e.g. `#1`, `#01`, `#42`.
+- Resolution: drop leading zeros and take the numeric value `n`; if `n == 0`,
+  reject (reserved); if `n > 10^shortIdLength - 1`, reject (over capacity);
+  otherwise canonicalize to `#${n.padStart(shortIdLength, '0')}` as the
+  registry key.
+- With the default `shortIdLength=2`, capacity is `n ∈ [1, 99]`; registry keys
+  look like `01`, `07`, `42`.
 - `#00` (or `#0` when `shortIdLength=1`) is reserved and never allocated; digits
   only, no letters.
-- The plain `TASK-…` form keeps working everywhere; `#NN` is an alias, not the
-  persisted task id.
+- The plain `TASK-…` form keeps working everywhere; bare numeric / `#NN` is an
+  alias, not the persisted task id.
 
 ## Lifecycle
 
@@ -48,7 +54,7 @@ archiving all active tasks first (the registry key width depends on it).
 | Entrypoint                                                  | Hit                  | Miss                                                 |
 |-------------------------------------------------------------|----------------------|------------------------------------------------------|
 | SKILL parameter resolver (lifecycle SKILLs)                  | resolve to full id   | **strict error** — short id not found / invalid     |
-| `ai sandbox enter '#NN'` / `ai sandbox exec '#NN' …`        | resolve to full id   | fall back to running-sandbox ls index (`#414`)      |
+| `ai sandbox exec <N \| '#N'>` / `ai sandbox create <N \| '#N'>`           | resolve to full id, then read `branch` from task.md | **strict error** — no ls-index fallback, no literal-branch fallback; hint the user to pass a short id / `TASK-id` / branch name |
 
 `list --verify` is strictly read-only: it reports discrepancies between active
 dir, registry, and `short_id` declared in each `task.md`, but never writes.
@@ -58,12 +64,13 @@ dir, registry, and `short_id` declared in each `task.md`, but never writes.
 Any SKILL (alloc / resolve / release / re-alloc lifecycle entry-points) that
 receives a `{task-id}` argument must follow this contract:
 
-1. If `{task-id}` starts with `#`:
+1. If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric `N` or `#`-prefixed `#N`):
 
 ```bash
-if [[ "{task-id}" == "#"* ]]; then
-  # The script writes the full error message (including "expected #NN
-  # (N-digit zero-padded; e.g. '#01')") to stderr; callers only forward the exit.
+if [[ "{task-id}" =~ ^[#]?[0-9]+$ ]]; then
+  # The script writes the full error message (covering reserved / exceeds
+  # shortIdLength capacity / malformed input) to stderr; callers only forward
+  # the exit.
   task_id=$(node .agents/scripts/task-short-id.js resolve "{task-id}") || exit 1
 else
   task_id="{task-id}"
@@ -108,22 +115,33 @@ The short id system persists state in two places that stay in sync at rest:
   field write is constrained (does NOT refresh `updated_at` /
   `agent_infra_version` and does NOT append Activity Log).
 
-`resolve('#NN')` workflow: ① validate arg matches `^#\d{shortIdLength}$` →
-② look up `NN` directly as the registry `ids` key → ③ return full task id on
-hit; on miss, exit 1 with the `list --verify` repair hint.
+`resolve(<N|'#N'>)` workflow: ① validate arg matches `^[#]?[0-9]+$` →
+② strip leading zeros and take the numeric value `n`; classify as reserved
+(`n == 0`) / over capacity (`n > 10^shortIdLength - 1`) / normal → ③ on
+normal, use `n.padStart(shortIdLength, '0')` as the registry `ids` key
+→ ④ return full task id on hit; on miss, exit 1 with the `list --verify`
+repair hint.
 
 ## Error scenarios
 
-- **Short id not found**: the registry has no entry for `#NN`. Either the task
-  was archived (release freed the slot) or the input is wrong.
+- **Short id not found**: the registry has no entry for the resolved key.
+  Either the task was archived (release freed the slot) or the input is
+  wrong. Exit code 1.
 - **Registry corruption** (duplicate registry entries for the same task id, or
   the JSON is unparsable): exit code 2; manual cleanup required.
-- **Parameter format error** (e.g. `#00`, `#abc`, `#`, or `#1` when
-  `shortIdLength=2`): exit code 1.
+- **Reserved key**: the resolved `n == 0` (inputs like `0`, `#0`, `#00`). Exit code 1.
+- **Over capacity**: the resolved `n > 10^shortIdLength - 1` (e.g. `100` or
+  `#100` when `shortIdLength=2`). Exit code 1.
+- **Parameter format error**: input matches neither `^[#]?[0-9]+$` nor a
+  `TASK-id` (e.g. `#abc`, `#`, `5.5`). Exit code 1.
 
 ## Cross-TUI quoting
 
-Bash treats `#` as a comment marker. Always single-quote: `ai sandbox exec '#03' 'npm test'`.
+Bare numeric `N` is safe in every shell and TUI without quoting (recommended):
+`ai sandbox exec 11 'npm test'`, `/review-analysis 11`.
+
+The `#N` / `#NN` form is still accepted; but bash treats `#` as a comment
+marker, so it must be single-quoted: `ai sandbox exec '#03' 'npm test'`.
 Claude Code / Codex / Gemini CLI / OpenCode all forward `#NN` to SKILL
 `ARGUMENTS` literally when quoted.
 

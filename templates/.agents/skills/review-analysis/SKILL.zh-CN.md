@@ -30,7 +30,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## 任务入参短号别名
 
-> 如果 `{task-id}` 入参以 `#` 开头，先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
+> 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -91,6 +91,8 @@ node .agents/scripts/validate-artifact.js gate review-analysis .agents/workspace
 ### 8. 告知用户
 
 按 `reference/output-templates.md` 的结论分支输出，并展示所有 TUI 的下一步命令。
+
+> 渲染「下一步」命令时，`{task-ref}` 按以下契约解析：读取 task.md frontmatter 的 `short_id`，若存在（形如 `#NN`）渲染为对应的**裸数字**（如 `#11` → `11`）；缺失时回退完整 `TASK-id`。其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式。
 
 ## 完成检查清单
 

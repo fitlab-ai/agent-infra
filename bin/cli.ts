@@ -18,6 +18,7 @@ Usage:
   agent-infra init            Initialize a new project with update-agent-infra seed command
   agent-infra merge           Merge tasks from another workspace directory (active/blocked/completed/archive)
   agent-infra sandbox         Manage Docker-based AI sandboxes
+  agent-infra task            Read-only views over .agents/workspace tasks (ls / show)
   agent-infra update          Update seed files and sync file registry for an existing project
   agent-infra version         Show version
 
@@ -92,6 +93,16 @@ switch (command) {
     if (!imported) break;
     const { runSandbox } = imported;
     await runSandbox(process.argv.slice(3)).catch((e: unknown) => {
+      process.stderr.write(`Error: ${errorMessage(e)}\n`);
+      process.exit(1);
+    });
+    break;
+  }
+  case 'task': {
+    const imported = await importCommand('../lib/task/index.ts');
+    if (!imported) break;
+    const { runTask } = imported;
+    await runTask(process.argv.slice(3)).catch((e: unknown) => {
       process.stderr.write(`Error: ${errorMessage(e)}\n`);
       process.exit(1);
     });
