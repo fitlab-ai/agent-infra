@@ -147,15 +147,16 @@ function tryResolveFromRegistry(arg: string, repoRoot: string): RegistryLookup {
 }
 
 /**
+/**
  * Resolve a task short reference (bare 'N' or '#N') to a branch name for the
  * sandbox entrypoint.
  *
- * Resolution order:
- *   1. Resolve via the global task-short-id registry under repoRoot. If hit,
- *      look up the branch from the matching task.md.
- *   2. On miss (registry empty or short id absent), throw with an actionable
- *      message — the "#N = N-th running sandbox" fallback (#414) was removed
- *      in favour of unambiguous short-id-only semantics.
+ * Resolution: registry-only. Look up the short id in the global task-short-id
+ * registry under repoRoot; if hit, read the branch from the matching task.md.
+ * On miss (registry empty or short id absent), throw with an actionable
+ * message instead of falling back to a container's row position in
+ * 'ai sandbox ls' output — that fallback would make the same syntax mean
+ * different things depending on `docker ps` state.
  *
  * Precondition: callers MUST gate on isTaskShortRef(arg) === true.
  */
@@ -167,7 +168,7 @@ export function resolveTaskShortRef(
   if (lookup.status === 'hit') return lookup.branch;
   throw new Error(
     `short ref '${arg}' is not in the active task registry. ` +
-      `The '#N' = N-th running sandbox semantics from #414 has been removed; ` +
+      `'#N' and bare N resolve only via the registry (not by row position in 'ai sandbox ls'); ` +
       `use a task short id (e.g. 'ai sandbox exec 11'), a TASK-id, or a branch name.`
   );
 }
