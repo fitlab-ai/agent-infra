@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { formatTable } from '../../table.ts';
 import { parseTaskFrontmatter, extractTitle } from '../frontmatter.ts';
+import { loadShortIdByTaskId } from '../short-id.ts';
 
 const USAGE = `Usage: ai task ls [--all | --blocked | --completed]
 
@@ -75,6 +76,9 @@ type TaskRow = {
 function collectTasks(repoRoot: string, state: 'active' | 'blocked' | 'completed'): TaskRow[] {
   const dir = path.join(repoRoot, '.agents', 'workspace', state);
   if (!fs.existsSync(dir)) return [];
+  // Short ids live only in the registry and only for active tasks; archived
+  // (blocked/completed) tasks have released their short id and render '-'.
+  const shortIdByTaskId = state === 'active' ? loadShortIdByTaskId(repoRoot) : new Map<string, string>();
   const rows: TaskRow[] = [];
   for (const entry of fs.readdirSync(dir).sort()) {
     if (!TASK_ID_RE.test(entry)) continue;
@@ -83,7 +87,7 @@ function collectTasks(repoRoot: string, state: 'active' | 'blocked' | 'completed
     const content = fs.readFileSync(taskMdPath, 'utf8');
     const fm = parseTaskFrontmatter(content);
     const title = extractTitle(content);
-    const shortId = (fm.short_id ?? '').trim() || '-';
+    const shortId = shortIdByTaskId.get(entry) ?? '-';
     const shortIdNumeric = shortId.startsWith('#') ? String(Number(shortId.slice(1)) || 0) : '';
     rows.push({
       shortIdNumeric,

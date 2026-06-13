@@ -22,12 +22,12 @@ task is active.
 
 ## Lifecycle
 
-| Action     | When                                                                 | Effect on registry & task.md                                  |
+| Action     | When                                                                 | Effect on registry                                            |
 |------------|-----------------------------------------------------------------------|---------------------------------------------------------------|
-| alloc      | `create-task`, `import-issue`, `import-codescan`, `import-dependabot` | Assigns lowest free `#NN`; writes `short_id` into task.md.    |
+| alloc      | `create-task`, `import-issue`, `import-codescan`, `import-dependabot` | Assigns lowest free `#NN` in the registry.                    |
 | resolve    | Lifecycle SKILLs (`analyze-task`, `plan-task`, `code-task`, …)        | Looks up `#NN` → full task id. Does not allocate.             |
-| release    | `complete-task`, `cancel-task`, `block-task`, `close-codescan`, `close-dependabot` | Removes the registry entry; leaves task.md `short_id` as a historical value. |
-| re-alloc   | `restore-task`                                                        | Re-allocates a (possibly new) `#NN` and writes it to task.md. |
+| release    | `complete-task`, `cancel-task`, `block-task`, `close-codescan`, `close-dependabot` | Removes the registry entry. |
+| re-alloc   | `restore-task`                                                        | Re-allocates a (possibly new) `#NN` in the registry. |
 
 Short ids are valid only while a task lives in `.agents/workspace/active/`.
 Once it is moved to `completed/`, `blocked/`, or `archive/`, the `#NN` slot is
@@ -56,8 +56,8 @@ archiving all active tasks first (the registry key width depends on it).
 | SKILL parameter resolver (lifecycle SKILLs)                  | resolve to full id   | **strict error** — short id not found / invalid     |
 | `ai sandbox exec <N \| '#N'>` / `ai sandbox create <N \| '#N'>`           | resolve to full id, then read `branch` from task.md | **strict error** — no ls-index fallback, no literal-branch fallback; hint the user to pass a short id / `TASK-id` / branch name |
 
-`list --verify` is strictly read-only: it reports discrepancies between active
-dir, registry, and `short_id` declared in each `task.md`, but never writes.
+`list --verify` is strictly read-only: it reports discrepancies between the
+active dir and the registry, but never writes.
 
 ## SKILL parameter resolver
 
@@ -84,14 +84,8 @@ fi
 
 ## Storage
 
-The short id system persists state in two places that stay in sync at rest:
-
-| Location | Written by | Read by | Removed by |
-|---|---|---|---|
-| `.agents/workspace/active/.short-ids.json` (registry) | `alloc` / cold-start migration | `resolve` (authoritative) / `list` / `list --verify` | `release` / cold-start stale cleanup |
-| `short_id` frontmatter field in each task.md | `alloc` / cold-start migration | `list --verify` (consistency check) | **never** (kept as historical value after archive) |
-
-**Registry**:
+Short ids are pure local state, persisted only in the registry
+`.agents/workspace/active/.short-ids.json`; task.md does not hold the short id:
 
 - Path: `<repo-root>/.agents/workspace/active/.short-ids.json`
 - Schema: `{ "version": 1, "ids": { "01": "TASK-20260609-192644", "02": "TASK-…" } }`
@@ -99,21 +93,14 @@ The short id system persists state in two places that stay in sync at rest:
   full `TASK-…` task ids.
 - Automatically git-ignored (the whole active workspace is ignored; no new
   ignore entry needed).
-- Created on demand by the first `alloc` / `resolve`; an absent file is treated
-  as an empty registry.
-
-**`short_id` field in task.md**:
-
-- Lives in frontmatter, immediately after `id`; formatted `short_id: #01`.
-- Matches the registry key byte-for-byte (including the `#` prefix).
+- Created on demand by the first `alloc`; an absent file is treated as an empty
+  registry.
+- Short ids are assigned only by an explicit `alloc` (`create-task` /
+  `import-*` / `restore-task`); `resolve` / `list` / `release` never allocate —
+  they only clean up stale entries pointing at non-active tasks.
 - After archive (complete-task / cancel-task / block-task / close-*) the
-  registry entry is deleted immediately (the short id can be reused), but the
-  `short_id` field in task.md is kept as a historical value. The resolver
-  trusts the registry only.
-- Cold-start migration: the first `alloc` / `resolve` after an upgrade scans
-  the active directory and fills in the missing field for legacy tasks; the
-  field write is constrained (does NOT refresh `updated_at` /
-  `agent_infra_version` and does NOT append Activity Log).
+  registry entry is deleted immediately and the short id may be reused; archived
+  tasks are referenced by their full `TASK-…` id.
 
 `resolve(<N|'#N'>)` workflow: ① validate arg matches `^[#]?[0-9]+$` →
 ② strip leading zeros and take the numeric value `n`; classify as reserved
@@ -144,16 +131,3 @@ The `#N` / `#NN` form is also accepted; but bash treats `#` as a comment
 marker, so it must be single-quoted: `ai sandbox exec '#03' 'npm test'`.
 Claude Code / Codex / Gemini CLI / OpenCode all forward `#NN` to SKILL
 `ARGUMENTS` literally when quoted.
-
-## Cold-start migration
-
-When a project upgrades to a version with this feature, the first call to
-`alloc` / `resolve` runs the cold-start path:
-
-- Active tasks whose `task.md` lacks `short_id` get one allocated and written
-  back (the only frontmatter mutation; `updated_at` / `agent_infra_version`
-  are **not** refreshed and Activity Log is **not** appended).
-- If active task count exceeds `shortIdLength` capacity, the migration aborts
-  **before any write** with a capacity error.
-- If a partial write fails midway, `tx.commit()` rolls all task.md files back to
-  their original content (including `mtime` / `atime`).

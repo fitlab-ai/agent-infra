@@ -42,6 +42,13 @@ function writeTask(
   );
 }
 
+function writeRegistry(activeDir: string, ids: Record<string, string>): void {
+  fs.writeFileSync(
+    path.join(activeDir, '.short-ids.json'),
+    JSON.stringify({ version: 1, ids })
+  );
+}
+
 function runCli(args: string[], cwd: string): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync('node', [CLI_PATH, ...args], { cwd, encoding: 'utf8' });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
@@ -109,6 +116,44 @@ test('ai task ls rejects unknown flags', () => {
   const out = runCli(['task', 'ls', '--bogus'], repoRoot);
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /unknown flag/i);
+});
+
+test('ai task ls sources the active short id from the registry, ignoring task.md frontmatter', () => {
+  const { repoRoot, activeDir } = mkFixtureRepo();
+  // task.md carries a stale frontmatter short_id that must be ignored…
+  writeTask(activeDir, 'TASK-20260101-000001', { short_id: '#77', branch: 'feature-reg' });
+  // …the registry is the real source of truth.
+  writeRegistry(activeDir, { '01': 'TASK-20260101-000001' });
+  const out = runCli(['task', 'ls'], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  // SHORT column reflects the registry (#01), not the frontmatter residue (#77).
+  assert.match(out.stdout, /#01/);
+  assert.doesNotMatch(out.stdout, /#77/);
+});
+
+test('ai task ls renders "-" for an active task absent from the registry', () => {
+  const { repoRoot, activeDir } = mkFixtureRepo();
+  // Frontmatter short_id present but no registry entry → no short id.
+  writeTask(activeDir, 'TASK-20260101-000001', { short_id: '#42', branch: 'feature-noreg' });
+  const out = runCli(['task', 'ls'], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /feature-noreg/);
+  assert.doesNotMatch(out.stdout, /#42/);
+});
+
+test('ai task ls renders "-" short id for archived (completed) tasks', () => {
+  const { repoRoot, activeDir } = mkFixtureRepo();
+  writeTask(
+    path.join(repoRoot, '.agents', 'workspace', 'completed'),
+    'TASK-20260101-000003',
+    { short_id: '#03', branch: 'feature-done' }
+  );
+  // A registry under active/ must not leak short ids into archived listings.
+  writeRegistry(activeDir, { '03': 'TASK-20260101-000003' });
+  const out = runCli(['task', 'ls', '--completed'], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /feature-done/);
+  assert.doesNotMatch(out.stdout, /#03/);
 });
 
 test('ai task ls prints empty-state message when no tasks present', () => {

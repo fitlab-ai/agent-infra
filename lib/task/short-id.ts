@@ -60,6 +60,16 @@ function readBranchFromTaskMd(repoRoot: string, taskId: string): string | null {
   return m[1].trim().replace(/^(["'])(.*)\1$/, '$2');
 }
 
+function loadShortIdByTaskId(repoRoot: string): Map<string, string> {
+  const registry = readRegistry(repoRoot);
+  const map = new Map<string, string>();
+  if (!registry) return map;
+  for (const [key, taskId] of Object.entries(registry.ids)) {
+    map.set(taskId, `#${key}`);
+  }
+  return map;
+}
+
 function lookupShortIdByBranch(
   branch: string,
   repoRoot: string,
@@ -83,5 +93,5 @@ function lookupShortIdByBranch(
   return matches[0]!;
 }
 
-export { normalizeShortIdInput, lookupShortIdByBranch };
+export { normalizeShortIdInput, lookupShortIdByBranch, loadShortIdByTaskId };
 export type { NormalizeResult, NormalizeOpts };

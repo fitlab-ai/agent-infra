@@ -55,14 +55,13 @@ function mkTmp(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "tsid-"));
 }
 
-function mkTask(activeDir: string, taskId: string, withShortId?: string): string {
+function mkTask(activeDir: string, taskId: string): string {
   const dir = path.join(activeDir, taskId);
   fs.mkdirSync(dir, { recursive: true });
   const taskMd = path.join(dir, "task.md");
-  const short = withShortId ? `\nshort_id: ${withShortId}` : "";
   fs.writeFileSync(
     taskMd,
-    `---\nid: ${taskId}${short}\nbranch: x\n---\n# body\n`
+    `---\nid: ${taskId}\nbranch: x\n---\n# body\n`
   );
   return taskMd;
 }
@@ -114,8 +113,9 @@ test("alloc and release with default shortIdLength=2 emit zero-padded short ids"
   const tmp = mkTmp();
   const active = path.join(tmp, "active");
   fs.mkdirSync(active, { recursive: true });
-  mkTask(active, "TASK-20260101-000001");
+  const md1Path = mkTask(active, "TASK-20260101-000001");
   mkTask(active, "TASK-20260101-000002");
+  const md1Before = fs.readFileSync(md1Path, "utf8");
 
   const r1 = runW2(["alloc", "TASK-20260101-000001", "--active-dir", active]);
   assert.equal(r1.status, 0);
@@ -125,14 +125,14 @@ test("alloc and release with default shortIdLength=2 emit zero-padded short ids"
   assert.equal(r2.status, 0);
   assert.equal(r2.stdout.trim(), "#02");
 
-  // task.md and registry must both store the zero-padded form.
-  const md1 = fs.readFileSync(path.join(active, "TASK-20260101-000001", "task.md"), "utf8");
-  assert.match(md1, /^short_id: #01$/m);
+  // The registry is the sole store of short ids; task.md never carries one.
   const registry = JSON.parse(fs.readFileSync(path.join(active, ".short-ids.json"), "utf8"));
   assert.deepEqual(registry.ids, {
     "01": "TASK-20260101-000001",
     "02": "TASK-20260101-000002"
   });
+  // alloc must not touch task.md at all (AC-1): content is byte-identical.
+  assert.equal(fs.readFileSync(md1Path, "utf8"), md1Before);
 
   // resolve accepts both zero-padded and non-padded forms (numeric-value contract).
   const hit = runW2(["resolve", "#01", "--active-dir", active]);
@@ -215,65 +215,26 @@ test("resolve rejects reserved key, over capacity, malformed input", () => {
   assert.doesNotMatch(okFormat.stderr, /invalid short id format/);
 });
 
-test("width exhaustion (case D): cold start aborts before any write", () => {
+test("explicit alloc rejects when width is exhausted (shortIdLength=1)", () => {
   const tmp = mkTmp();
   const active = path.join(tmp, "active");
   fs.mkdirSync(active, { recursive: true });
-  const paths: string[] = [];
-  for (let i = 1; i <= 10; i += 1) {
-    paths.push(
-      mkTask(active, `TASK-20250102-${String(i).padStart(6, "0")}`)
-    );
-  }
-  const beforeMtimes = paths.map((p) => fs.statSync(p).mtimeMs);
-  const beforeContents = paths.map((p) => fs.readFileSync(p, "utf8"));
-
-  // shortIdLength=1 → capacity = 9; need 10 → fail
-  const r = run([
-    "resolve",
-    "#1",
-    "--active-dir",
-    active,
-    "--short-id-length",
-    "1"
-  ]);
-  assert.equal(r.status, 2, `unexpected exit; stderr=${r.stderr}`);
-  assert.match(r.stderr, /needs 10 short id\(s\) but only 9/);
-
-  // No fs writes: all task.md mtimes + contents preserved.
-  for (let i = 0; i < paths.length; i += 1) {
-    assert.equal(fs.statSync(paths[i]!).mtimeMs, beforeMtimes[i]);
-    assert.equal(fs.readFileSync(paths[i]!, "utf8"), beforeContents[i]);
-  }
-  // Registry must not exist.
-  assert.equal(fs.existsSync(path.join(active, ".short-ids.json")), false);
-});
-
-test("width tight boundary (case D'): 9 tasks fit exactly", () => {
-  const tmp = mkTmp();
-  const active = path.join(tmp, "active");
-  fs.mkdirSync(active, { recursive: true });
-  for (let i = 1; i <= 9; i += 1) {
-    mkTask(active, `TASK-20250103-${String(i).padStart(6, "0")}`);
-  }
-  const r = run([
-    "resolve",
-    "#1",
-    "--active-dir",
-    active,
-    "--short-id-length",
-    "1"
-  ]);
-  assert.equal(r.status, 0, `stderr=${r.stderr}`);
-  // Every task.md must now carry a short_id field.
+  // Fill all 9 slots (#1..#9) via explicit alloc.
   for (let i = 1; i <= 9; i += 1) {
     const taskId = `TASK-20250103-${String(i).padStart(6, "0")}`;
-    const content = fs.readFileSync(path.join(active, taskId, "task.md"), "utf8");
-    assert.match(content, /^short_id: #\d+$/m, `task ${taskId} missing short_id`);
+    mkTask(active, taskId);
+    const r = runW1(["alloc", taskId, "--active-dir", active]);
+    assert.equal(r.status, 0, `alloc ${i} failed: ${r.stderr}`);
   }
-  // list --verify must agree.
-  const verify = run(["list", "--verify", "--active-dir", active]);
-  assert.equal(verify.status, 0, `verify stderr=${verify.stderr}; stdout=${verify.stdout}`);
+  // A 10th explicit alloc must fail on capacity, not silently extend.
+  const overflowId = "TASK-20250103-000010";
+  mkTask(active, overflowId);
+  const r = runW1(["alloc", overflowId, "--active-dir", active]);
+  assert.equal(r.status, 2, `expected capacity failure; stderr=${r.stderr}`);
+  assert.match(r.stderr, /width exhausted/);
+  // The registry still holds exactly the 9 originally allocated entries.
+  const registry = JSON.parse(fs.readFileSync(path.join(active, ".short-ids.json"), "utf8"));
+  assert.equal(Object.keys(registry.ids).length, 9);
 });
 
 test("list --verify is strictly read-only (R3 B-1)", () => {
@@ -293,23 +254,63 @@ test("list --verify is strictly read-only (R3 B-1)", () => {
   assert.equal(fs.existsSync(path.join(active, ".short-ids.json")), false);
 });
 
-test("cold-start case B: registry has entry, task.md missing short_id → writes back", () => {
+test("list --verify exits 0 with empty stdout when active dir and registry agree", () => {
   const tmp = mkTmp();
   const active = path.join(tmp, "active");
   fs.mkdirSync(active, { recursive: true });
-  const taskId = "TASK-20250105-000001";
+  // task.md carries NO short_id — the registry alone is authoritative.
+  const taskId = "TASK-20250110-000001";
   mkTask(active, taskId);
   fs.writeFileSync(
     path.join(active, ".short-ids.json"),
     JSON.stringify({ version: 1, ids: { "1": taskId } })
   );
 
+  const r = run(["list", "--verify", "--active-dir", active, "--short-id-length", "1"]);
+  assert.equal(r.status, 0, `expected pass; stderr=${r.stderr}; stdout=${r.stdout}`);
+  assert.equal(r.stdout, "", "consistent verify must emit empty stdout");
+});
+
+test("list --verify reports missing_in_registry and orphans_in_registry diffs", () => {
+  const tmp = mkTmp();
+  const active = path.join(tmp, "active");
+  fs.mkdirSync(active, { recursive: true });
+  // One active task absent from the registry → missing_in_registry.
+  const present = "TASK-20250111-000001";
+  mkTask(active, present);
+  // One registry entry whose task dir does not exist → orphans_in_registry.
+  fs.writeFileSync(
+    path.join(active, ".short-ids.json"),
+    JSON.stringify({ version: 1, ids: { "2": "TASK-99999999-999999" } })
+  );
+
+  const r = run(["list", "--verify", "--active-dir", active, "--short-id-length", "1"]);
+  assert.equal(r.status, 1, `expected fail; stderr=${r.stderr}`);
+  // Pin the full diff shape: registry-only dimensions, no task.md dimension.
+  assert.deepEqual(JSON.parse(r.stdout), {
+    missing_in_registry: [{ taskId: present }],
+    orphans_in_registry: [{ key: "#2", taskId: "TASK-99999999-999999" }],
+    duplicate_registry_keys: []
+  });
+});
+
+test("resolve returns the task id for a registry hit without touching task.md", () => {
+  const tmp = mkTmp();
+  const active = path.join(tmp, "active");
+  fs.mkdirSync(active, { recursive: true });
+  const taskId = "TASK-20250105-000001";
+  const taskMd = mkTask(active, taskId);
+  fs.writeFileSync(
+    path.join(active, ".short-ids.json"),
+    JSON.stringify({ version: 1, ids: { "1": taskId } })
+  );
+  const before = fs.readFileSync(taskMd, "utf8");
+
   const r = runW1(["resolve", "#1", "--active-dir", active]);
   assert.equal(r.status, 0, `stderr=${r.stderr}`);
   assert.equal(r.stdout.trim(), taskId);
-
-  const taskMd = fs.readFileSync(path.join(active, taskId, "task.md"), "utf8");
-  assert.match(taskMd, /^short_id: #1$/m);
+  // resolve never writes the short id back into task.md (registry is the source).
+  assert.equal(fs.readFileSync(taskMd, "utf8"), before);
 });
 
 test("cold-start case C (duplicate registry keys) → exit 2", () => {
@@ -351,44 +352,23 @@ test("stale entries are cleaned automatically (B4)", () => {
   assert.deepEqual(list.ids, { "1": "TASK-20250107-000001" });
 });
 
-test("alloc rejects task id not in active (R5 B-1) without touching state", () => {
+test("alloc rejects a task id not in active without touching state (R5 B-1)", () => {
   const tmp = mkTmp();
   const active = path.join(tmp, "active");
   fs.mkdirSync(active, { recursive: true });
-  // Pre-existing tasks without short_id (would trigger cold-start migration).
-  mkTask(active, "TASK-20250108-000001");
-  mkTask(active, "TASK-20250108-000002");
+  const md1 = mkTask(active, "TASK-20250108-000001");
+  const md2 = mkTask(active, "TASK-20250108-000002");
+  const before1 = fs.readFileSync(md1, "utf8");
+  const before2 = fs.readFileSync(md2, "utf8");
 
   const r = runW1(["alloc", "TASK-99999999-000000", "--active-dir", active]);
   assert.equal(r.status, 1, `stderr=${r.stderr}`);
   assert.match(r.stderr, /not found in/);
 
-  // The two existing tasks must remain untouched.
-  for (const id of ["TASK-20250108-000001", "TASK-20250108-000002"]) {
-    const md = fs.readFileSync(path.join(active, id, "task.md"), "utf8");
-    assert.doesNotMatch(md, /short_id:/, `${id} mutated`);
-  }
+  // No state mutated: existing task.md files unchanged, registry not created.
+  assert.equal(fs.readFileSync(md1, "utf8"), before1);
+  assert.equal(fs.readFileSync(md2, "utf8"), before2);
   assert.equal(fs.existsSync(path.join(active, ".short-ids.json")), false);
-});
-
-test("alloc skips re-write when task.md already declares the same short_id", () => {
-  const tmp = mkTmp();
-  const active = path.join(tmp, "active");
-  fs.mkdirSync(active, { recursive: true });
-  const taskId = "TASK-20250109-000001";
-  mkTask(active, taskId, "#1");
-  fs.writeFileSync(
-    path.join(active, ".short-ids.json"),
-    JSON.stringify({ version: 1, ids: { "1": taskId } })
-  );
-  const taskMd = path.join(active, taskId, "task.md");
-  const beforeMtime = fs.statSync(taskMd).mtimeMs;
-
-  const r = runW1(["alloc", taskId, "--active-dir", active]);
-  assert.equal(r.status, 0);
-  assert.equal(r.stdout.trim(), "#1");
-  // mtime unchanged because nothing to write.
-  assert.equal(fs.statSync(taskMd).mtimeMs, beforeMtime);
 });
 
 // --- U-2 structural assertions: SKILL.md inline bash is gone ---

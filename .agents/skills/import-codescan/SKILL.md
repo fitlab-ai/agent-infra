@@ -62,7 +62,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 ### 4. 完成校验
 
-**先调用短号分配**（保证 `short_id` 写回 task.md + 注册表 entry 已在；完成校验阶段会读取）：
+**先调用短号分配**（保证注册表 entry 已分配；完成校验阶段会读取）：
 
 ```bash
 node .agents/scripts/task-short-id.js alloc "$task_id"

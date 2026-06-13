@@ -124,7 +124,7 @@ env-blocked 的数量不参与分支选择，仅在数字摘要末尾附带显�
 
 > 完整的 4 分支输出模板、判断规则和禁止条款见 `reference/output-templates.md`。向用户汇报审查结论前先读取 `reference/output-templates.md`。
 
-> 渲染「下一步」命令时，`{task-ref}` 按以下契约解析：读取 task.md frontmatter 的 `short_id`，若存在（形如 `#NN`）渲染为对应的**裸数字**（如 `#11` → `11`）；缺失时回退完整 `TASK-id`。其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式。
+> 渲染「下一步」命令时，`{task-ref}` 使用本次调用的 `{task-id}` 入参原值（裸数字 / `#NN` / 完整 `TASK-id`）原样渲染，不读取 task.md frontmatter。其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式。
 
 向用户展示下一步时，必须包含所有 TUI 命令格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
 

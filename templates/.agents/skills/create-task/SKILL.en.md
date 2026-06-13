@@ -130,7 +130,7 @@ Handle the result:
 
 ### 5. Verification Gate
 
-**Allocate short id first** (writes `short_id` back to task.md and the registry entry; the validation gate will read it):
+**Allocate short id first** (ensures the registry entry is allocated; the validation gate will read it):
 
 ```bash
 node .agents/scripts/task-short-id.js alloc "$task_id"

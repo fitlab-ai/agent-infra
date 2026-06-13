@@ -32,11 +32,11 @@ function usage() {
     "Usage: task-short-id.js <subcommand> [args]",
     "",
     "Subcommands:",
-    "  alloc <task-id>      Allocate short id for a task; writes registry + short_id to task.md",
+    "  alloc <task-id>      Allocate short id for a task in the registry",
     "  release <task-id>    Release short id (idempotent; exit 0 if not present)",
     "  resolve <#N>         Resolve short id to full task id",
     "  list                 Print registry JSON",
-    "  list --verify        Read-only check; exit 1 if active dir / registry / task.md disagree",
+    "  list --verify        Read-only check; exit 1 if active dir / registry disagree",
     "",
     "Options:",
     "  --active-dir <path>  Override active dir (default: <repo>/.agents/workspace/active)",
@@ -161,17 +161,6 @@ function withRegistryLock(activeDir, fn, timeoutMs = DEFAULT_LOCK_TIMEOUT_MS) {
   }
 }
 
-function writeTaskMdShortId(taskMdPath, shortId) {
-  const content = fs.readFileSync(taskMdPath, "utf8");
-  let updated;
-  if (/^short_id:.*$/m.test(content)) {
-    updated = content.replace(/^short_id:.*$/m, `short_id: ${shortId}`);
-  } else {
-    updated = content.replace(/^(id:.*)$/m, `$1\nshort_id: ${shortId}`);
-  }
-  fs.writeFileSync(taskMdPath, updated);
-}
-
 function padShortId(n, shortIdLength) {
   return String(n).padStart(shortIdLength, "0");
 }
@@ -226,7 +215,7 @@ function planTransaction(registry, activeDir, shortIdLength) {
       .filter((d) => fs.existsSync(path.join(activeDir, d, "task.md")))
   );
 
-  // A2: stale entries
+  // A2: stale entries (registry points at a task no longer active)
   const pendingRegistryDeletes = [];
   for (const [key, taskId] of Object.entries(registry.ids)) {
     if (!activeTaskIds.has(taskId)) pendingRegistryDeletes.push(key);
@@ -248,106 +237,17 @@ function planTransaction(registry, activeDir, shortIdLength) {
     taskIdToKey.set(taskId, key);
   }
 
-  // A4: classify each active task
+  // The registry is the sole source of truth: short ids are allocated only by
+  // explicit `alloc` (planAlloc), never inferred from task.md or auto-allocated
+  // for active tasks. Read paths (resolve/list) only run stale cleanup (A2).
   const plannedRegistryWrites = [];
-  const plannedTaskMdWrites = [];
-  const pendingAlloc = [];
 
-  for (const taskId of activeTaskIds) {
-    const taskMdPath = path.join(activeDir, taskId, "task.md");
-    const originalStat = fs.statSync(taskMdPath);
-    const originalContent = fs.readFileSync(taskMdPath, "utf8");
-    const existing = originalContent.match(/^short_id:\s*(#\d+)\s*$/m);
-
-    if (existing) {
-      const declared = existing[1];
-      const n = declared.slice(1);
-      if (projectedIds[n] === taskId) continue; // 4a
-      if (taskIdToKey.has(taskId)) {
-        const registryKey = taskIdToKey.get(taskId);
-        writeStderr(
-          `Inconsistent: task ${taskId} declares ${declared} but registry holds it at #${registryKey}\n`
-        );
-        process.exit(2);
-      }
-      if (projectedIds[n] && projectedIds[n] !== taskId) {
-        writeStderr(
-          `Inconsistent: task ${taskId} declares ${declared} but registry maps ${declared} to ${projectedIds[n]}\n`
-        );
-        process.exit(2);
-      }
-      // 4d
-      plannedRegistryWrites.push({ key: n, taskId });
-      projectedIds[n] = taskId;
-      taskIdToKey.set(taskId, n);
-      continue;
-    }
-
-    if (taskIdToKey.has(taskId)) {
-      // 4e
-      const registryKey = taskIdToKey.get(taskId);
-      plannedTaskMdWrites.push({
-        taskMdPath,
-        originalContent,
-        originalAtime: originalStat.atime,
-        originalMtime: originalStat.mtime,
-        shortId: `#${registryKey}`,
-        kind: "4e"
-      });
-      continue;
-    }
-
-    // 4f: deferred
-    pendingAlloc.push({
-      taskId,
-      taskMdPath,
-      originalContent,
-      originalAtime: originalStat.atime,
-      originalMtime: originalStat.mtime
-    });
-  }
-
-  // A5: capacity pre-check
-  const availableSlots = maxN - Object.keys(projectedIds).length;
-  if (pendingAlloc.length > availableSlots) {
-    writeStderr(
-      `Error: cold-start migration needs ${pendingAlloc.length} short id(s) but only ${availableSlots} ` +
-        `slot(s) available (capacity=${maxN}, in-use after stale-cleanup=${Object.keys(projectedIds).length}). ` +
-        `Archive some active tasks (complete-task / cancel-task / block-task) ` +
-        `or raise task.shortIdLength in .agents/.airc.json.\n`
-    );
-    process.exit(2);
-  }
-
-  pendingAlloc.sort((a, b) => a.taskId.localeCompare(b.taskId));
-
-  for (const item of pendingAlloc) {
-    const n = allocateMinFreeInt({ ids: projectedIds }, shortIdLength);
-    if (n === null) {
-      throw new Error("Internal invariant: pendingAlloc capacity check failed");
-    }
-    const key = padShortId(n, shortIdLength);
-    projectedIds[key] = item.taskId;
-    taskIdToKey.set(item.taskId, key);
-    plannedRegistryWrites.push({ key, taskId: item.taskId });
-    plannedTaskMdWrites.push({
-      taskMdPath: item.taskMdPath,
-      originalContent: item.originalContent,
-      originalAtime: item.originalAtime,
-      originalMtime: item.originalMtime,
-      shortId: `#${key}`,
-      kind: "4f"
-    });
-  }
-
-  // Build transaction object
   const tx = {
     _registry: registry,
     _activeDir: activeDir,
     _registrySnapshot: { ...registry.ids },
     _pendingRegistryDeletes: pendingRegistryDeletes,
     _plannedRegistryWrites: plannedRegistryWrites,
-    _plannedTaskMdWrites: plannedTaskMdWrites,
     _projectedIds: projectedIds,
     _taskIdToKey: taskIdToKey,
     _shortIdLength: shortIdLength,
@@ -373,20 +273,6 @@ function planTransaction(registry, activeDir, shortIdLength) {
       this._projectedIds[key] = taskId;
       this._taskIdToKey.set(taskId, key);
       this._plannedRegistryWrites.push({ key, taskId });
-      const originalStat = fs.statSync(taskMdPath);
-      const originalContent = fs.readFileSync(taskMdPath, "utf8");
-      // If task.md already declares the same short id (e.g. R-alloc replay), skip writing.
-      const existing = originalContent.match(/^short_id:\s*(#\d+)\s*$/m);
-      if (!existing || existing[1] !== `#${key}`) {
-        this._plannedTaskMdWrites.push({
-          taskMdPath,
-          originalContent,
-          originalAtime: originalStat.atime,
-          originalMtime: originalStat.mtime,
-          shortId: `#${key}`,
-          kind: "caller-alloc"
-        });
-      }
       return key;  // zero-padded; matches registry key
     },
 
@@ -396,54 +282,22 @@ function planTransaction(registry, activeDir, shortIdLength) {
       this._plannedRegistryWrites = this._plannedRegistryWrites.filter(
         (w) => w.taskId !== taskId
       );
-      this._plannedTaskMdWrites = this._plannedTaskMdWrites.filter(
-        (w) => path.basename(path.dirname(w.taskMdPath)) !== taskId
-      );
       this._pendingRegistryDeletes.push(key);
       delete this._projectedIds[key];
       this._taskIdToKey.delete(taskId);
     },
 
     commit(registryPath) {
-      // B1: apply registry mutation in memory
+      // Apply registry mutation in memory, then persist atomically.
       for (const key of this._pendingRegistryDeletes) delete this._registry.ids[key];
       for (const { key, taskId } of this._plannedRegistryWrites) {
         this._registry.ids[key] = taskId;
       }
-
-      const completedWrites = [];
-      const rollback = (reason) => {
-        for (const done of completedWrites.reverse()) {
-          try {
-            fs.writeFileSync(done.taskMdPath, done.originalContent);
-            fs.utimesSync(done.taskMdPath, done.originalAtime, done.originalMtime);
-          } catch {
-            /* best-effort */
-          }
-        }
-        this._registry.ids = this._registrySnapshot;
-        const tail =
-          completedWrites.length > 0
-            ? `; rolled back ${completedWrites.length} prior task.md write(s)`
-            : "";
-        throw new Error(`${reason}${tail}`);
-      };
-
-      // B2: write task.md per plan
-      for (const write of this._plannedTaskMdWrites) {
-        try {
-          writeTaskMdShortId(write.taskMdPath, write.shortId);
-          completedWrites.push(write);
-        } catch (e) {
-          rollback(`Failed to write short_id to ${write.taskMdPath}: ${e.message}`);
-        }
-      }
-
-      // B3: atomic registry persistence
       try {
         writeRegistryAtomic(this._registry, registryPath);
       } catch (e) {
-        rollback(`Failed to persist registry to ${registryPath}: ${e.message}`);
+        this._registry.ids = this._registrySnapshot;
+        throw new Error(`Failed to persist registry to ${registryPath}: ${e.message}`);
       }
     }
   };
@@ -459,27 +313,10 @@ function verifyRegistry(registry, activeDir) {
       .filter((d) => fs.existsSync(path.join(activeDir, d, "task.md")))
   );
   const registryTaskIds = new Set(Object.values(registry.ids));
-  const taskmdShortIds = new Map();
-  for (const taskId of activeTaskIds) {
-    const taskMdPath = path.join(activeDir, taskId, "task.md");
-    const content = fs.readFileSync(taskMdPath, "utf8");
-    const m = content.match(/^short_id:\s*(#\d+)\s*$/m);
-    taskmdShortIds.set(taskId, m ? m[1] : null);
-  }
   const missing_in_registry = [];
   for (const taskId of activeTaskIds) {
     if (!registryTaskIds.has(taskId)) {
-      missing_in_registry.push({ taskId, declared: taskmdShortIds.get(taskId) });
-    }
-  }
-  const missing_in_taskmd = [];
-  for (const [key, taskId] of Object.entries(registry.ids)) {
-    if (!activeTaskIds.has(taskId)) continue;
-    const declared = taskmdShortIds.get(taskId);
-    if (declared === null) {
-      missing_in_taskmd.push({ taskId, expected: `#${key}` });
-    } else if (declared !== `#${key}`) {
-      missing_in_taskmd.push({ taskId, expected: `#${key}`, declared });
+      missing_in_registry.push({ taskId });
     }
   }
   const orphans_in_registry = [];
@@ -501,7 +338,6 @@ function verifyRegistry(registry, activeDir) {
   }
   return {
     missing_in_registry,
-    missing_in_taskmd,
     orphans_in_registry,
     duplicate_registry_keys
   };
@@ -568,8 +404,7 @@ function cmdResolve(shortIdArg, activeDir, registryPath, shortIdLength) {
     if (!taskId) {
       const hasPendingMutations =
         tx._plannedRegistryWrites.length > 0 ||
-        tx._pendingRegistryDeletes.length > 0 ||
-        tx._plannedTaskMdWrites.length > 0;
+        tx._pendingRegistryDeletes.length > 0;
       if (hasPendingMutations) {
         try {
           tx.commit(registryPath);
@@ -614,7 +449,6 @@ function cmdList(activeDir, registryPath, verify) {
   const diff = verifyRegistry(registry, activeDir);
   const hasIssues =
     diff.missing_in_registry.length > 0 ||
-    diff.missing_in_taskmd.length > 0 ||
     diff.orphans_in_registry.length > 0 ||
     diff.duplicate_registry_keys.length > 0;
   if (hasIssues) {
@@ -709,7 +543,6 @@ export {
   readRegistry,
   writeRegistryAtomic,
   withRegistryLock,
-  writeTaskMdShortId,
   padShortId,
   parseShortIdArg,
   allocateMinFreeInt,

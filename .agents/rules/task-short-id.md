@@ -16,12 +16,12 @@
 
 ## 生命周期
 
-| 动作      | 触发时机                                                                                     | 注册表 / task.md 效应                                            |
+| 动作      | 触发时机                                                                                     | 注册表效应                                                       |
 |-----------|---------------------------------------------------------------------------------------------|------------------------------------------------------------------|
-| alloc     | `create-task`、`import-issue`、`import-codescan`、`import-dependabot`                       | 分配最小可用 `#NN`，写入 task.md 的 `short_id` 字段。              |
+| alloc     | `create-task`、`import-issue`、`import-codescan`、`import-dependabot`                       | 分配最小可用 `#NN`，写入注册表。                                  |
 | resolve   | 生命周期 SKILL（`analyze-task` / `plan-task` / `code-task` / `review-*` / `commit` / …）    | `#NN` → 完整 task id 查询，不分配。                              |
-| release   | `complete-task`、`cancel-task`、`block-task`、`close-codescan`、`close-dependabot`          | 从注册表移除；task.md 的 `short_id` 字段保留作为历史值。          |
-| re-alloc  | `restore-task`                                                                              | 重新分配（可能与历史不同），写入注册表与 task.md。               |
+| release   | `complete-task`、`cancel-task`、`block-task`、`close-codescan`、`close-dependabot`          | 从注册表移除。                                                   |
+| re-alloc  | `restore-task`                                                                              | 重新分配（可能与历史不同），写入注册表。                         |
 
 短号仅在任务处于 `.agents/workspace/active/` 期间有效；任务移动到
 `completed/` / `blocked/` / `archive/` 后短号立即释放，可被新任务复用。
@@ -48,8 +48,7 @@
 | SKILL 入参解析器（生命周期 SKILL）                          | 解析为完整 task id    | **严格报错** —— 短号不存在 / 格式错误                  |
 | `ai sandbox exec <N \| '#N'>` / `ai sandbox create <N \| '#N'>`           | 解析为完整 task id 后查 task.md 取 `branch` | **严格报错** —— 不再回退到 ls 行号或字面分支名；提示用任务短号 / `TASK-id` / 分支名 |
 
-`list --verify` 严格只读：报告 active 目录 / 注册表 / 各 task.md 的 `short_id`
-三者差异，但不修改任何状态。
+`list --verify` 严格只读：报告 active 目录 / 注册表 两者差异，但不修改任何状态。
 
 ## SKILL 入参解析
 
@@ -73,31 +72,15 @@ fi
 
 ## 存储位置
 
-短号系统跨两处持久化状态，二者在稳态时一一对应：
-
-| 位置 | 写入时机 | 读取时机 | 删除时机 |
-|---|---|---|---|
-| `.agents/workspace/active/.short-ids.json`（注册表） | `alloc` / 冷启动迁移 | `resolve` 唯一权威源 / `list` / `list --verify` | `release` / 冷启动 stale 清理 |
-| 各 task.md frontmatter 的 `short_id` 字段 | `alloc` / 冷启动迁移 | `list --verify`（比对一致性） | **永不删除**（归档后保留为历史值） |
-
-**注册表**：
+短号是纯本地状态，唯一持久化在注册表 `.agents/workspace/active/.short-ids.json`，task.md 不持有短号：
 
 - 路径：`<repo-root>/.agents/workspace/active/.short-ids.json`
 - Schema：`{ "version": 1, "ids": { "01": "TASK-20260609-192644", "02": "TASK-…" } }`
 - key 是零填充到 `task.shortIdLength` 位的字符串，value 是完整 `TASK-…` task id
 - 自动 git ignore（active 工作区整体 ignore；无需新增 ignore 条目）
-- 首次 `alloc` / `resolve` 时按需自动创建；不存在时按空注册表处理
-
-**task.md `short_id` 字段**：
-
-- 在 frontmatter 中、紧跟 `id` 字段之后；格式 `short_id: #01`
-- 与注册表 key 字面一致（含 `#` 前缀）
-- 归档（complete-task / cancel-task / block-task / close-*）后：注册表 entry 立即
-  删除（短号可被新任务复用），但 task.md `short_id` 字段保留作为历史值。解析器
-  只信任注册表
-- 冷启动迁移：升级 agent-infra 后首次 alloc / resolve 路径会扫描所有 active
-  目录并为缺字段的 task.md 补发短号；补发受字段保护约束（不刷新
-  `updated_at` / `agent_infra_version`、不追加 Activity Log）
+- 首次 `alloc` 时按需自动创建；不存在时按空注册表处理
+- 短号只由显式 `alloc`（`create-task` / `import-*` / `restore-task`）分配；`resolve` / `list` / `release` 不分配，仅在执行时自动清理指向非 active 任务的 stale entry
+- 归档（complete-task / cancel-task / block-task / close-*）后注册表 entry 立即删除，短号可被新任务复用；归档后引用任务一律用完整 `TASK-…` id
 
 `resolve(<N|'#N'>)` 工作流：① 校验入参匹配 `^[#]?[0-9]+$` → ② 去前导零取
 数值 `n`，按 `n` 是否 `== 0`（保留）/ `> 10^shortIdLength - 1`（超容量）/
@@ -120,13 +103,3 @@ fi
 `#N` / `#NN` 写法也接受；但 bash 中 `#` 是注释起始符，必须单引号：
 `ai sandbox exec '#03' 'npm test'`。Claude Code / Codex / Gemini CLI / OpenCode
 在加引号时都能把 `#NN` 字面传递到 SKILL 的 `ARGUMENTS`。
-
-## 冷启动迁移
-
-升级 agent-infra 后，首次 `alloc` / `resolve` 调用会触发冷启动迁移：
-
-- 所有 active task.md 缺 `short_id` 字段时自动补发并回写（仅修改 `short_id`
-  一行，不刷新 `updated_at` / `agent_infra_version`，不追加 Activity Log）。
-- 若 active 任务总数超过 `shortIdLength` 容量，**在任何写入之前**报错退出 2。
-- 若 task.md 写入中途失败，`tx.commit()` 按缓存的原内容回滚所有已写文件（含
-  `mtime` / `atime` 恢复）。

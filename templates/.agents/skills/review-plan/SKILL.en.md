@@ -79,4 +79,4 @@ node .agents/scripts/validate-artifact.js gate review-plan .agents/workspace/act
 
 Use the conclusion branch in `reference/output-templates.md` and show all TUI command formats.
 
-> When rendering "Next steps" commands, `{task-ref}` follows this contract: read `short_id` from task.md frontmatter; if present (form `#NN`), render the corresponding **bare numeric** (e.g. `#11` → `11`); fall back to the full `TASK-id` otherwise. Other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form.
+> When rendering "Next steps" commands, `{task-ref}` uses the verbatim `{task-id}` argument from this invocation (bare numeric / `#NN` / full `TASK-id`); it does not read task.md frontmatter. Other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form.
