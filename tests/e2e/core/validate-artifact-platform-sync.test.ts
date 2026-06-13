@@ -205,6 +205,68 @@ const implementSyncCases = [
         message: /has no milestone set/
       });
     }
+  },
+  {
+    name: "validate-artifact platform-sync fails for code-task when Issue milestone is a release line",
+    skill: "code-task",
+    issuePayload: buildIssuePayload({
+      labels: [{ name: "status: in-progress" }],
+      body: "# Issue\n",
+      milestone: { title: "0.7.x" }
+    }),
+    comments(taskContent: string, artifactContent: string) {
+      return [
+        { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
+        { body: buildTaskComment(taskId, taskContent) }
+      ];
+    },
+    assertResult(result: ReturnType<typeof runValidator>) {
+      assert.equal(result.status, 1);
+      assertPayloadStatus(result, {
+        type: "platform-sync",
+        status: "fail",
+        message: /milestone '0\.7\.x' is a release line/
+      });
+    }
+  },
+  {
+    name: "validate-artifact platform-sync passes for code-task when Issue milestone is a specific version",
+    skill: "code-task",
+    issuePayload: buildIssuePayload({
+      labels: [{ name: "status: in-progress" }],
+      body: "# Issue\n",
+      milestone: { title: "0.7.1" }
+    }),
+    comments(taskContent: string, artifactContent: string) {
+      return [
+        { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
+        { body: buildTaskComment(taskId, taskContent) }
+      ];
+    },
+    assertResult(result: ReturnType<typeof runValidator>) {
+      assert.equal(result.status, 0, result.stderr);
+      assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    }
+  },
+  {
+    name: "validate-artifact platform-sync skips code-task milestone check without triage permission",
+    skill: "code-task",
+    issuePayload: buildIssuePayload({
+      labels: [{ name: "status: in-progress" }],
+      body: "# Issue\n",
+      milestone: { title: "0.7.x" }
+    }),
+    comments(taskContent: string, artifactContent: string) {
+      return [
+        { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
+        { body: buildTaskComment(taskId, taskContent) }
+      ];
+    },
+    extraEnv: { GH_FAKE_PERMISSIONS: JSON.stringify({ triage: false, push: false }) },
+    assertResult(result: ReturnType<typeof runValidator>) {
+      assert.equal(result.status, 0, result.stderr);
+      assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    }
   }
 ];
 
@@ -351,6 +413,13 @@ const createPrCases = [
     prPayload: buildPrPayload({ labels: [{ name: "type: enhancement" }], milestone: null }),
     expectedStatus: 1,
     message: [/PR #77 has no milestone set/]
+  },
+  {
+    name: "validate-artifact platform-sync fails when create-pr PR milestone is a release line",
+    issuePayload: buildIssuePayload({ labels: [], body: "# Issue\n", milestone: { title: "0.7.1" } }),
+    prPayload: buildPrPayload({ labels: [{ name: "type: enhancement" }], milestone: { title: "0.7.x" } }),
+    expectedStatus: 1,
+    message: [/PR #77 milestone '0\.7\.x' is a release line/]
   },
   {
     name: "validate-artifact platform-sync fails when PR and Issue in: labels diverge",

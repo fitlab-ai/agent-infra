@@ -5,6 +5,7 @@ import spawn from "cross-spawn";
 
 const CHECK_TYPE = "platform-sync";
 const DEFAULT_RETRY_DELAYS_MS = [3000, 10000];
+const VERSION_LINE_REGEX = /^[0-9]+\.[0-9]+\.x$/;
 const FRONTMATTER_FIELD_MAP = {
   priority: "Priority",
   effort: "Effort",
@@ -809,6 +810,22 @@ function checkMilestone(context, remoteData) {
       `PR #${context.prNumber} has no milestone set`,
       "check_failed"
     );
+  }
+
+  if (context.config.verify_milestone_specific) {
+    const issueTitle = remoteData.issue.milestone.title;
+    if (VERSION_LINE_REGEX.test(issueTitle)) {
+      return failResult(CHECK_TYPE,
+        `Issue #${context.issueNumber} milestone '${issueTitle}' is a release line; narrow to a specific version (e.g. ${issueTitle.replace(/\.x$/, ".N")}) before continuing`,
+        "check_failed"
+      );
+    }
+    if (context.prNumber && remoteData.prMilestone?.title && VERSION_LINE_REGEX.test(remoteData.prMilestone.title)) {
+      return failResult(CHECK_TYPE,
+        `PR #${context.prNumber} milestone '${remoteData.prMilestone.title}' is a release line; narrow to a specific version before continuing`,
+        "check_failed"
+      );
+    }
   }
 
   return null;

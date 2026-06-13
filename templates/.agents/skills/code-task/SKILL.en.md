@@ -45,7 +45,9 @@ Read `reference/branch-management.md`, ensure the current branch matches the tas
 
 ### 3. Narrow the Milestone
 
-If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md` and `.agents/rules/milestone-inference.md`; follow Phase 2 for `code-task`.
+**Mandatory; do not skip.** If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md` first (upstream + permission detection), then `.agents/rules/milestone-inference.md` Phase 2 for `code-task` to narrow the Issue milestone. If `has_triage=false`, keep the existing milestone.
+
+> If this step is skipped or the Issue milestone is still a release line `X.Y.x` afterward, the step-11 `validate-artifact` gate will block the `code-task` round via `verify_milestone_specific` and require narrowing to a specific version (e.g. `0.7.1`) before proceeding.
 
 ### 4. Determine Mode and Round
 

@@ -70,7 +70,9 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ### 3. 收窄里程碑
 
-如果 task.md 中存在有效的 `issue_number`，执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测；再读取 `.agents/rules/milestone-inference.md`，按其中的「阶段 2：`code-task`」收窄 Issue milestone；如果 `has_triage=false`，则保持原 milestone 不变。
+**必须执行，不得跳过。** 如果 task.md 中存在有效的 `issue_number`，执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测；再读取 `.agents/rules/milestone-inference.md`，按其中的「阶段 2：`code-task`」收窄 Issue milestone；如果 `has_triage=false`，则保持原 milestone 不变。
+
+> 若此步骤被跳过或收窄后 Issue milestone 仍为 `X.Y.x` 版本线，步骤 11 的 `validate-artifact` gate 会通过 `verify_milestone_specific` 截停本轮 `code-task`，要求重新收窄到具体版本（如 `0.7.1`）后再继续。
 
 ### 4. 确定模式与轮次
 

@@ -81,7 +81,11 @@ if [ "$has_triage" = "true" ]; then
 fi
 ```
 
-6. 如果 `has_triage=false`、目标 milestone 不存在，或无法可靠判断 -> 保持原 milestone 不变
+6. 「无法收窄」的处理按模式和情形分流：
+   - 主干模式下版本线下**有** open 具体版本而未收窄属于规则违例，不再保留"保持原 milestone 不变"逃生口；执行步骤 5 即可。
+   - 主干模式下版本线下**没有** open 具体版本：保持原版本线 milestone 不变 —— `code-task` / `create-pr` 的 `verify_milestone_specific` gate 会 FAIL，提醒维护者补建具体版本。
+   - 多版本分支模式下 `git merge-base --is-ancestor` 两条判断都不可靠或远程引用缺失时，保持原 milestone 不变。
+   - 任意模式下 `has_triage=false`：保持原 milestone 不变，由 bot 后补。
 
 具体版本查询建议：
 

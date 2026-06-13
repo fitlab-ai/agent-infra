@@ -26,6 +26,7 @@
       "verify_pr_assignee": true,
       "verify_issue_fields": true,
       "verify_milestone": true,
+      "verify_milestone_specific": true,
       "expected_pr_comment_marker_key": "prSummary"
     }
   }

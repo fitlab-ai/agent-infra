@@ -81,7 +81,11 @@ if [ "$has_triage" = "true" ]; then
 fi
 ```
 
-6. If `has_triage=false`, the target milestone does not exist, or the branch ancestry cannot be determined reliably, keep the original milestone unchanged
+6. Handle "cannot narrow" by mode and circumstance:
+   - Trunk mode with an open concrete version available under the release line: failing to narrow is a rule violation; no "keep the original milestone" escape hatch is allowed - just apply step 5.
+   - Trunk mode with no open concrete version under the release line: keep the original release-line milestone unchanged - the `code-task` / `create-pr` `verify_milestone_specific` gate will fail and prompt maintainers to create the missing concrete version.
+   - Multi-release-line mode when both `git merge-base --is-ancestor` checks are unreliable or the remote refs are missing: keep the original milestone unchanged.
+   - In any mode, `has_triage=false`: keep the original milestone unchanged; the bot will reconcile later.
 
 Suggested concrete-version query:
 
