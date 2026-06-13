@@ -7,7 +7,7 @@
 
 - 字面接受两种等价形式：
   - **裸数字 `N`**（推荐，无需 shell 引号）：如 `1`、`7`、`42`。
-  - **`#`-前缀 `#N` / `#NN`**（兼容旧写法）：如 `#1`、`#01`、`#42`。
+  - **`#`-前缀 `#N` / `#NN`**（也接受；但 bash 需 `'...'` 引号）：如 `#1`、`#01`、`#42`。
 - 解析规则：去前导零后取数值 `n`，若 `n == 0` 报错（保留）；若 `n > 10^shortIdLength - 1`
   报错（超容量）；否则归一化为 `#${n.padStart(shortIdLength, '0')}`，作为注册表 key。
 - 默认 `shortIdLength=2` 时容量 `n ∈ [1, 99]`，注册表 key 形如 `01`、`07`、`42`。
@@ -117,7 +117,7 @@ fi
 裸数字 `N` 在所有 shell 与 TUI 中都安全无需引号，推荐写法：
 `ai sandbox exec 11 'npm test'`、`/review-analysis 11`。
 
-`#N` / `#NN` 写法仍然兼容；但 bash 中 `#` 是注释起始符，必须单引号：
+`#N` / `#NN` 写法也接受；但 bash 中 `#` 是注释起始符，必须单引号：
 `ai sandbox exec '#03' 'npm test'`。Claude Code / Codex / Gemini CLI / OpenCode
 在加引号时都能把 `#NN` 字面传递到 SKILL 的 `ARGUMENTS`。
 

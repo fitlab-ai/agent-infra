@@ -18,9 +18,9 @@ import { isTaskShortRef, resolveTaskShortRef } from './list-running.ts';
 const USAGE = `Usage: ai sandbox exec <branch | TASK-id | N | '#N'> [cmd...]
 
 N (bare) and '#N' both reference the same active task short id from
-.agents/workspace/active/.short-ids.json. The legacy "#N = N-th running
-sandbox" semantics from #414 has been removed; '#N' or bare N always
-resolves to a task short id, never to a container row index.`;
+.agents/workspace/active/.short-ids.json. The "#N = N-th running sandbox"
+semantics from #414 has been removed; '#N' or bare N always resolves to a
+task short id, never to a container row index.`;
 const TMUX_ENTRY_PATH = '/usr/local/bin/sandbox-tmux-entry';
 
 // Terminal-detection variables that interactive TUIs (e.g. claude-code)

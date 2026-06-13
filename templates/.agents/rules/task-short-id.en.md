@@ -8,7 +8,7 @@ task is active.
 
 - Two equivalent literal forms are accepted:
   - **Bare numeric `N`** (recommended; no shell quoting needed): e.g. `1`, `7`, `42`.
-  - **`#`-prefixed `#N` / `#NN`** (compat with legacy commands): e.g. `#1`, `#01`, `#42`.
+  - **`#`-prefixed `#N` / `#NN`** (also accepted; bash needs `'...'` quoting): e.g. `#1`, `#01`, `#42`.
 - Resolution: drop leading zeros and take the numeric value `n`; if `n == 0`,
   reject (reserved); if `n > 10^shortIdLength - 1`, reject (over capacity);
   otherwise canonicalize to `#${n.padStart(shortIdLength, '0')}` as the
@@ -140,7 +140,7 @@ repair hint.
 Bare numeric `N` is safe in every shell and TUI without quoting (recommended):
 `ai sandbox exec 11 'npm test'`, `/review-analysis 11`.
 
-The `#N` / `#NN` form is still accepted; but bash treats `#` as a comment
+The `#N` / `#NN` form is also accepted; but bash treats `#` as a comment
 marker, so it must be single-quoted: `ai sandbox exec '#03' 'npm test'`.
 Claude Code / Codex / Gemini CLI / OpenCode all forward `#NN` to SKILL
 `ARGUMENTS` literally when quoted.

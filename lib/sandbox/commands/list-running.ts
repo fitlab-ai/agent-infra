@@ -154,8 +154,8 @@ function tryResolveFromRegistry(arg: string, repoRoot: string): RegistryLookup {
  *   1. Resolve via the global task-short-id registry under repoRoot. If hit,
  *      look up the branch from the matching task.md.
  *   2. On miss (registry empty or short id absent), throw with an actionable
- *      message — the legacy "#N = N-th running sandbox" fallback (#414) was
- *      removed in favour of unambiguous short-id-only semantics.
+ *      message — the "#N = N-th running sandbox" fallback (#414) was removed
+ *      in favour of unambiguous short-id-only semantics.
  *
  * Precondition: callers MUST gate on isTaskShortRef(arg) === true.
  */
@@ -167,7 +167,7 @@ export function resolveTaskShortRef(
   if (lookup.status === 'hit') return lookup.branch;
   throw new Error(
     `short ref '${arg}' is not in the active task registry. ` +
-      `The legacy '#N' = N-th running sandbox semantics has been removed; ` +
+      `The '#N' = N-th running sandbox semantics from #414 has been removed; ` +
       `use a task short id (e.g. 'ai sandbox exec 11'), a TASK-id, or a branch name.`
   );
 }
