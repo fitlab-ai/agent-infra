@@ -155,12 +155,8 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - 在工作流进度中标记 requirement-analysis 为已完成，并注明实际轮次（如果任务模板支持）
 - 在追加工作流 Activity Log 条目之前，基于分析结果（业务影响、风险、依赖、阻塞条件）重估 `priority`。若重估值与 `task.md` 当前值不一致：
   - 用新值覆盖 frontmatter 的 `priority` 字段
-  - 在 `Analyze Task (Round N)` 条目之前追加一条转移记录：
-    ```
-    - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analysis Re-estimate** by {agent} — priority {old} → {new} (rationale: {基于本轮分析的简短依据})
-    ```
-  两条条目可共用同一时间戳，顺序仅通过列表位置表达。
-  若重估值与当前值一致，跳过 Re-estimate 条目。后续 Flow A 同步会读取可能更新过的 frontmatter，并自动把新值同步到 Issue。
+  - 在本轮分析产物 `{analysis-artifact}` 中追加 `## 优先级重估` 段，记录一条：`priority {old} → {new} (rationale: {基于本轮分析的简短依据})`
+  若重估值与当前值一致，跳过：不写入 `## 优先级重估` 段。后续 Flow A 同步会读取可能更新过的 frontmatter，并自动把新值同步到 Issue。
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Round {N})** by {agent} — Analysis completed → {analysis-artifact}

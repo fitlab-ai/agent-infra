@@ -117,12 +117,8 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - Mark technical-design as complete in workflow progress and include the actual round when the task template supports it
 - Before appending the workflow Activity Log entry, re-estimate `effort` based on the technical plan (number of implementation steps, files touched, test matrix scope, integration surface). If the re-estimated value differs from the current value in `task.md`:
   - Overwrite the `effort` field in frontmatter with the new value
-  - Prepend an Activity Log entry recording the transition (placed before the `Plan Task (Round N)` entry):
-    ```
-    - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Re-estimate** by {agent} — effort {old} → {new} (rationale: {short basis grounded in this plan})
-    ```
-  Both entries may share the same timestamp; ordering is conveyed by list position only.
-  If the re-estimated value matches the current value, skip the Re-estimate entry. The Flow A sync that follows reads the possibly updated frontmatter and propagates the new value to the Issue automatically.
+  - Append a `## Effort Re-estimate` section to this round's plan artifact `{plan-artifact}`, recording: `effort {old} → {new} (rationale: {short basis grounded in this plan})`
+  If the re-estimated value matches the current value, skip it: do not write the `## Effort Re-estimate` section. The Flow A sync that follows reads the possibly updated frontmatter and propagates the new value to the Issue automatically.
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Task (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
