@@ -7,8 +7,8 @@ Commands:
                                recommended form for task short ids (e.g.
                                'ai sandbox exec 11'); '#N' is also accepted.
   ls                           List sandboxes for the current project (the '#'
-                               column shows the active task short id; '-' if no
-                               active task is bound to the container's branch)
+                               column is a display-only row number; the 'SHORT'
+                               column shows the active task short id, '-' if none)
   prune [--dry-run]            Remove orphaned per-branch state dirs
   rebuild [--quiet] [--refresh]
                                Rebuild the sandbox image (--refresh pulls base + tools)

@@ -14,16 +14,17 @@ export { containerListFormat, parseLabels } from './list-running.ts';
 
 const USAGE = `Usage: ai sandbox ls
 
-Lists all containers for the current project. The leftmost '#' column
-shows the active task short id bound to each container's branch (via
-.agents/workspace/active/.short-ids.json); '-' means no active task is
-bound to the branch. Use it as "ai sandbox exec N" or "ai sandbox exec
-'#N'" to enter the sandbox of that task.`;
+Lists all containers for the current project. The '#' column is a
+display-only row number; the 'SHORT' column shows the active task short
+id bound to each container's branch (via
+.agents/workspace/active/.short-ids.json), or '-' if no active task is
+bound. Pass the SHORT value to "ai sandbox exec" (e.g. 'ai sandbox exec 11').`;
 
-const CONTAINER_TABLE_HEADERS = ['#', 'NAMES', 'STATUS', 'BRANCH'] as const;
+const CONTAINER_TABLE_HEADERS = ['#', 'SHORT', 'NAMES', 'STATUS', 'BRANCH'] as const;
 
 type ContainerTableRow = {
-  index: string;
+  row: string;
+  shortId: string;
   name: string;
   status: string;
   branch: string;
@@ -32,7 +33,7 @@ type ContainerTableRow = {
 export function formatContainerTable(rows: ContainerTableRow[]): string[] {
   return formatTable(
     CONTAINER_TABLE_HEADERS,
-    rows.map((row) => [row.index, row.name, row.status, row.branch])
+    rows.map((r) => [r.row, r.shortId, r.name, r.status, r.branch])
   );
 }
 
@@ -63,18 +64,20 @@ export function ls(args: string[] = []): void {
   if (ordered.length === 0) {
     p.log.warn('  No sandbox containers');
   } else {
-    const tableRows: ContainerTableRow[] = ordered.map((row) => {
-      const shortId = row.branch ? lookupShortIdByBranch(row.branch, config.repoRoot) : null;
+    const tableRows: ContainerTableRow[] = ordered.map((container, i) => {
+      const shortId = container.branch ? lookupShortIdByBranch(container.branch, config.repoRoot) : null;
       return {
-        index: shortId ?? '-',
-        name: row.name,
-        status: row.status,
-        branch: row.branch
+        row: String(i + 1),
+        shortId: shortId ?? '-',
+        name: container.name,
+        status: container.status,
+        branch: container.branch
       };
     });
     for (const line of formatContainerTable(tableRows)) {
       process.stdout.write(`  ${line}\n`);
     }
+    process.stdout.write(`  Total: ${ordered.length} containers\n`);
   }
 
   p.log.step('Worktrees');

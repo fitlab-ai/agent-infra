@@ -162,3 +162,21 @@ test('ai task ls prints empty-state message when no tasks present', () => {
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /No tasks under/);
 });
+
+test('ai task ls numbers rows in the # column and prints a Total tail line', () => {
+  const { repoRoot, activeDir } = mkFixtureRepo();
+  writeTask(activeDir, 'TASK-20260101-000001', { branch: 'feature-one' });
+  writeTask(activeDir, 'TASK-20260101-000002', { branch: 'feature-two' });
+  writeRegistry(activeDir, { '01': 'TASK-20260101-000001', '02': 'TASK-20260101-000002' });
+  const out = runCli(['task', 'ls'], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+
+  // The '#' column is a 1-based row number: each data row starts with its index.
+  const dataLines = out.stdout.split('\n').filter((l) => /feature-(one|two)/.test(l));
+  assert.equal(dataLines.length, 2);
+  assert.match(dataLines[0]!, /^1\b/);
+  assert.match(dataLines[1]!, /^2\b/);
+
+  // The table is followed by a Total tail line reflecting the row count.
+  assert.match(out.stdout, /^Total: 2 tasks$/m);
+});

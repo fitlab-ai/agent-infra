@@ -726,29 +726,32 @@ test("sandbox ls formatContainerTable aligns header and rows by column width", a
   const { formatContainerTable } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/ls.ts")>("lib/sandbox/commands/ls.js");
 
   const rows = [
-    { index: "#01", name: "demo-dev-feature-x", status: "Up 2 hours", branch: "feature/short" },
-    { index: "-", name: "worker", status: "Exited (0) 20 minutes ago", branch: "bugfix/align-table" },
-    { index: "-", name: "agent-infra-sandbox-long", status: "Created", branch: "main" }
+    { row: "1", shortId: "#01", name: "demo-dev-feature-x", status: "Up 2 hours", branch: "feature/short" },
+    { row: "2", shortId: "-", name: "worker", status: "Exited (0) 20 minutes ago", branch: "bugfix/align-table" },
+    { row: "3", shortId: "-", name: "agent-infra-sandbox-long", status: "Created", branch: "main" }
   ];
   const lines = formatContainerTable(rows);
   const hashColumn = lines[0]!.indexOf("#");
+  const shortColumn = lines[0]!.indexOf("SHORT");
   const namesColumn = lines[0]!.indexOf("NAMES");
   const statusColumn = lines[0]!.indexOf("STATUS");
   const branchColumn = lines[0]!.indexOf("BRANCH");
 
   assert.equal(lines.length, rows.length + 1);
   assert.equal(hashColumn, 0);
-  assert.ok(namesColumn > hashColumn);
+  assert.ok(shortColumn > hashColumn);
+  assert.ok(namesColumn > shortColumn);
   assert.ok(statusColumn > namesColumn);
   assert.ok(branchColumn > statusColumn);
   for (let i = 0; i < rows.length; i += 1) {
     assert.equal(lines[i + 1]!.indexOf(rows[i]!.name), namesColumn);
     assert.equal(lines[i + 1]!.indexOf(rows[i]!.status), statusColumn);
     assert.equal(lines[i + 1]!.indexOf(rows[i]!.branch), branchColumn);
+    // '#' column holds the 1-based row number
+    assert.equal(lines[i + 1]!.slice(0, shortColumn).trim(), rows[i]!.row);
+    // 'SHORT' column holds the task short id (or '-')
+    assert.equal(lines[i + 1]!.slice(shortColumn, namesColumn).trim(), rows[i]!.shortId);
   }
-  assert.equal(lines[1]!.slice(0, namesColumn).trim(), "#01");
-  assert.equal(lines[2]!.slice(0, namesColumn).trim(), "-");
-  assert.equal(lines[3]!.slice(0, namesColumn).trim(), "-");
   for (const line of lines) {
     assert.equal(line.includes("\t"), false);
     assert.doesNotMatch(line, /\s+$/);

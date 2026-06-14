@@ -12,7 +12,7 @@ Lists tasks under .agents/workspace/. Defaults to active tasks only.
   --blocked     Only blocked tasks
   --completed   Only completed tasks
 
-Columns: # / short_id / type / status / current_step / branch / title
+Columns: # (display-only row number) / SHORT (task short id, usable as an argument) / type / status / current_step / branch / title
 `;
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
@@ -64,7 +64,6 @@ function parseSelection(args: string[]): ParseResult {
 }
 
 type TaskRow = {
-  shortIdNumeric: string;
   shortId: string;
   type: string;
   status: string;
@@ -88,9 +87,7 @@ function collectTasks(repoRoot: string, state: 'active' | 'blocked' | 'completed
     const fm = parseTaskFrontmatter(content);
     const title = extractTitle(content);
     const shortId = shortIdByTaskId.get(entry) ?? '-';
-    const shortIdNumeric = shortId.startsWith('#') ? String(Number(shortId.slice(1)) || 0) : '';
     rows.push({
-      shortIdNumeric,
       shortId,
       type: fm.type ?? '-',
       status: fm.status ?? state,
@@ -123,8 +120,8 @@ function ls(args: string[] = []): void {
     process.stdout.write(`No tasks under .agents/workspace/${selection.join('|')}\n`);
     return;
   }
-  const tableRows = rows.map((r) => [
-    r.shortIdNumeric,
+  const tableRows = rows.map((r, i) => [
+    String(i + 1),
     r.shortId,
     r.type,
     r.status,
@@ -135,6 +132,7 @@ function ls(args: string[] = []): void {
   for (const line of formatTable(TABLE_HEADERS, tableRows)) {
     process.stdout.write(`${line}\n`);
   }
+  process.stdout.write(`Total: ${rows.length} tasks\n`);
 }
 
 export { ls };
