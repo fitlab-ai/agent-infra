@@ -45,3 +45,15 @@ process.stdout.write(hit?("#"+hit[0]):full);
 ## `#` prefix and shell quoting
 
 Short ids are always rendered with a `#` prefix as `#NN`, matching how task.md frontmatter renders `short_id`. `#` starts a comment in bash, so pasting example commands depends on the TUI (both the bare numeric `NN` and `#NN` are accepted by `task-short-id.js resolve`).
+
+## Completion timestamp line (Completed at)
+
+Every skill that reads this rule and renders "Next steps / Inform user" output appends a single completion-time line as the **very last line** of its user-facing output, so users scanning across tmux windows can tell at a glance which agent finished most recently:
+
+```text
+Completed at: YYYY-MM-DD HH:mm:ss
+```
+
+- Value command (local timezone, no offset): `date "+%Y-%m-%d %H:%M:%S"`
+- Position: it must be the last line of the entire user-facing output, after all "Next steps" commands. If a scenario has a conditional reminder line after the commands (e.g. the env-blocked reminder), the completion line goes after that reminder.
+- This line is for terminal scanning only; it is never written to any artifact file or Issue/PR comment. The single source of truth for completion time remains the Activity Log in task.md.

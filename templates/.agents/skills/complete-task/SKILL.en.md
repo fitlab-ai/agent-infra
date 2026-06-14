@@ -146,6 +146,8 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
+> The completion timestamp line (the last line of the whole output) uses `date "+%Y-%m-%d %H:%M:%S"` (local timezone, no offset) and always sits at the very end of the output for at-a-glance scanning across windows. This skill renders no "Next steps" commands but still prints the line.
+
 Output format:
 ```
 Task {task-id} completed; task directory moved to completed/.
@@ -157,6 +159,8 @@ Task info:
 
 Deliverables:
 - {List of key outputs: files modified, tests added, etc.}
+
+Completed at: {completion-time}
 ```
 
 

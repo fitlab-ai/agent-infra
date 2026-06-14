@@ -45,3 +45,15 @@ process.stdout.write(hit?("#"+hit[0]):full);
 ## `#` 前缀与 shell 引用
 
 短号统一渲染为带 `#` 前缀的 `#NN`，与 task.md frontmatter 的 `short_id` 渲染一致。`#` 在 bash 中是注释起始符，示例命令若直接粘贴需视 TUI 而定（裸数字 `NN` 与 `#NN` 都被 `task-short-id.js resolve` 接受）。
+
+## 完成时间收尾行（Completed at）
+
+所有读取本规则、并向用户渲染「下一步 / 告知用户」输出的 skill，在面向用户输出的**绝对最后一行**统一追加一行完成时间，便于用户在 tmux 多窗口扫视时一眼判断各 Agent 的完成先后：
+
+```text
+Completed at: YYYY-MM-DD HH:mm:ss
+```
+
+- 取值命令（本地时区、不带偏移）：`date "+%Y-%m-%d %H:%M:%S"`
+- 位置：必须是整段面向用户输出的最后一行，排在所有「下一步」命令之后。若某场景在命令之后还有条件性提醒行（如 env-blocked 提醒），收尾行排在该提醒行之后。
+- 该行只用于终端扫视，不写入任何产物文件或 Issue/PR 评论；完成时刻的单一事实源仍是 task.md 的 Activity Log。

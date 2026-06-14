@@ -145,6 +145,8 @@ node .agents/scripts/validate-artifact.js gate complete-task .agents/workspace/c
 
 > 仅在校验通过后执行本步骤。
 
+> 完成时间收尾行（整段输出的最后一行）取值 `date "+%Y-%m-%d %H:%M:%S"`（本地时区、不带偏移），固定放在输出的绝对末尾，便于多窗口扫视。本 skill 不渲染「下一步」命令，但仍统一打印该收尾行。
+
 输出格式：
 ```
 任务 {task-id} 已完成，任务目录已转移到 completed/。
@@ -156,6 +158,8 @@ node .agents/scripts/validate-artifact.js gate complete-task .agents/workspace/c
 
 交付物：
 - {关键产出列表：修改的文件、添加的测试等}
+
+Completed at: {completion-time}
 ```
 
 
