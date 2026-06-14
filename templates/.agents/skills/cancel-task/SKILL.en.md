@@ -57,7 +57,7 @@ Update `task.md` in the task directory:
 - `agent_infra_version`: value from `.agents/rules/version-stamp.md`
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Cancelled** by {agent} — {one-line cancellation reason}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Cancel Task** by {agent} — {one-line cancellation reason}
   ```
 
 ### 4. Move the Task

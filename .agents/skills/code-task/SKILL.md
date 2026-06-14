@@ -152,8 +152,8 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - 审查 `## 需求` 段落，仅把本轮已由代码实现且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
 - 记录 Round `{code-round}` 的 `{code-artifact}`
 - 追加：
-  - 初次实现：`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {code-artifact}`
-  - 修复模式：`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code (Round {N}, fix for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues[, skipped {n} env-blocked] → {code-artifact}`
+  - 初次实现：`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Task (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {code-artifact}`
+  - 修复模式：`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Task (Round {N}, fix for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues[, skipped {n} env-blocked] → {code-artifact}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续；执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测）：
 - 按 issue-sync.md 设置 `status: in-progress`

@@ -33,7 +33,7 @@
       "freshness_minutes": 30
     },
     "activity-log": {
-      "expected_action_pattern": "Analysis Review \\(Round \\d+\\)",
+      "expected_action_pattern": "(Review Analysis|Analysis Review) \\(Round \\d+\\)",
       "freshness_minutes": 30
     },
     "platform-sync": {

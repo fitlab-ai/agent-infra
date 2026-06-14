@@ -104,8 +104,8 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 Set `current_step` to `code`, refresh task metadata, and append one Activity Log entry:
 
-- initial implementation: `Code (Round {N})`
-- fix mode: `Code (Round {N}, fix for {review-artifact})`
+- initial implementation: `Code Task (Round {N})`
+- fix mode: `Code Task (Round {N}, fix for {review-artifact})`
 
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, then:
 - Set `status: in-progress` according to issue-sync.md

@@ -56,7 +56,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `agent_infra_version`: value from `.agents/rules/version-stamp.md`
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Blocked** by {agent} — {one-line reason}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Block Task** by {agent} — {one-line reason}
   ```
 
 Add a blocking information section to task.md.

@@ -12,4 +12,4 @@ Read this file before creating or updating the single reviewer-facing PR summary
 
 ## Result Reporting
 
-Reuse the normalized result string from `.agents/rules/pr-sync.md` in this skill's user output or `PR Created` Activity Log.
+Reuse the normalized result string from `.agents/rules/pr-sync.md` in this skill's user output or `Create PR` Activity Log.

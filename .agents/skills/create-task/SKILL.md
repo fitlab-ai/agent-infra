@@ -108,12 +108,12 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `## 上下文` 中的 `- **分支**：`：更新为生成的分支名
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Task Created** by {agent} — Task created from description
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Create Task** by {agent} — Task created from description
   ```
 
 ### 4. 按 `.agents/rules/create-issue.md` 级联创建 Issue
 
-在 task.md 落盘并记录 `Task Created` 后，先读取 `.agents/rules/create-issue.md` 并按其中描述的步骤执行 Issue 创建。
+在 task.md 落盘并记录 `Create Task` 后，先读取 `.agents/rules/create-issue.md` 并按其中描述的步骤执行 Issue 创建。
 
 规则文件由当前配置的代码平台决定其内容：
 - 支持 Issue 创建的平台：包含完整的认证检测、模板检测、label/Issue Type/milestone 推断、Issue 创建调用、`task.md` 回写流程

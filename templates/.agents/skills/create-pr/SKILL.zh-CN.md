@@ -96,7 +96,7 @@ description: "创建 Pull Request 到目标分支"
 date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
-如果获取到了 `{task-id}`，更新 task.md 的 `pr_number`、`updated_at`、`agent_infra_version`，并追加 PR Created 的 Activity Log，记录元数据同步和摘要发布结果。
+如果获取到了 `{task-id}`，更新 task.md 的 `pr_number`、`updated_at`、`agent_infra_version`，并追加 Create PR 的 Activity Log，记录元数据同步和摘要发布结果。
 
 ### 9. 完成校验
 

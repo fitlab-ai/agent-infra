@@ -84,7 +84,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `updated_at`：{当前时间}
 - `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - 追加：
-`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {artifact-filename}`
+`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Code (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {artifact-filename}`
 
 env-blocked = 0 时省略括号部分；env-blocked > 0 时附加 ` (+ {n} env-blocked)`。
 

@@ -32,7 +32,7 @@
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "Code \\(Round \\d+(?:, fix for review-code(?:-r\\d+)?\\.md)?\\)",
+      "expected_action_pattern": "(Code Task|Code) \\(Round \\d+(?:, fix for review-code(?:-r\\d+)?\\.md)?\\)",
       "freshness_minutes": 30
     },
     "platform-sync": {

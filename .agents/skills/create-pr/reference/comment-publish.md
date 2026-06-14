@@ -12,4 +12,4 @@
 
 ## 结果回传
 
-将 `.agents/rules/pr-sync.md` 中的结果回传字符串用于当前 skill 的用户输出或 `PR Created` Activity Log 复用。
+将 `.agents/rules/pr-sync.md` 中的结果回传字符串用于当前 skill 的用户输出或 `Create PR` Activity Log 复用。

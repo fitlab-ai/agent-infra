@@ -17,7 +17,7 @@
       "expected_status": "active"
     },
     "activity-log": {
-      "expected_action_pattern": "Import Code Scanning Alert",
+      "expected_action_pattern": "(Import Codescan|Import Code Scanning Alert)",
       "freshness_minutes": 30
     },
     "platform-sync": null

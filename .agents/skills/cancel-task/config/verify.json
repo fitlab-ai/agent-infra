@@ -19,7 +19,7 @@
       "require_cancelled_at": true
     },
     "activity-log": {
-      "expected_action_pattern": "Cancelled",
+      "expected_action_pattern": "(Cancel Task|Cancelled)",
       "freshness_minutes": 30
     },
     "platform-sync": {

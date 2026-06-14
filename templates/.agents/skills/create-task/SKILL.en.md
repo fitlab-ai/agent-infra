@@ -109,12 +109,12 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `## Context` -> `- **Branch**:`: update it to the generated branch name
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Task Created** by {agent} — Task created from description
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Create Task** by {agent} — Task created from description
   ```
 
 ### 4. Cascade Issue Creation via `.agents/rules/create-issue.md`
 
-After task.md is written and `Task Created` is recorded, read `.agents/rules/create-issue.md` first and follow the steps it describes to create an Issue.
+After task.md is written and `Create Task` is recorded, read `.agents/rules/create-issue.md` first and follow the steps it describes to create an Issue.
 
 The rule's content is determined by the configured code platform:
 - A platform that supports Issue creation: contains the full flow for auth detection, template detection, label/type/milestone inference, the create-Issue call, and writing back to `task.md`

@@ -8,4 +8,4 @@
 
 ## 活动日志
 
-- {{NOW}} — **Code (Round 1)** by codex — Code implemented, 2 files modified, 42 tests passed → code.md
+- {{NOW}} — **Code Task (Round 1)** by codex — Code implemented, 2 files modified, 42 tests passed → code.md

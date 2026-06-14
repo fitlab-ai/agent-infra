@@ -88,7 +88,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - 逐项验证并勾选 `## 完成检查清单` 中的所有条目（将 `- [ ]` 改为 `- [x]`）
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Completed** by {agent} — Task moved to completed/
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Complete Task** by {agent} — Task moved to completed/
   ```
 
 ### 4. 转移任务

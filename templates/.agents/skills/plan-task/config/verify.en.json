@@ -33,7 +33,7 @@
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "Technical Design \\(Round \\d+\\)",
+      "expected_action_pattern": "(Plan Task|Technical Design) \\(Round \\d+\\)",
       "freshness_minutes": 30
     },
     "platform-sync": {

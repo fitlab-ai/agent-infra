@@ -55,7 +55,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Blocked** by {agent} — {一行原因}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Block Task** by {agent} — {一行原因}
   ```
 
 在 task.md 中添加阻塞信息部分。

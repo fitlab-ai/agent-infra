@@ -34,7 +34,7 @@
       "freshness_minutes": 30
     },
     "activity-log": {
-      "expected_action_pattern": "Code Review \\(Round \\d+\\)",
+      "expected_action_pattern": "(Review Code|Code Review) \\(Round \\d+\\)",
       "freshness_minutes": 30
     },
     "platform-sync": {

@@ -141,7 +141,7 @@ steps:
           rule: "读取最高轮次的方案审查产物，确认方案已获通过或已处理反馈"
         - name: review-code
           pattern: "review-code.md | review-code-r{N}.md"
-          rule: "修复模式读取最高轮次的代码审查产物，并校验其与 task.md Activity Log 中最近一条 Code Review 记录一致"
+          rule: "修复模式读取最高轮次的代码审查产物，并校验其与 task.md Activity Log 中最近一条 Review Code 记录一致"
       outputs:
         - name: code
           pattern: "code.md | code-r{N}.md"

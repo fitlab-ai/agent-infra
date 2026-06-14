@@ -180,7 +180,7 @@ Update task.md:
 - Write `issue_number: {n}` into the frontmatter (replace if it exists; append at the end of the frontmatter otherwise)
 - Update `updated_at` to the current time (command: `date "+%Y-%m-%d %H:%M:%S%:z"`)
 
-> Do NOT append an Activity Log entry here. The Issue creation event is already captured by the GitHub Issue itself and by the frontmatter `issue_number` field; the Activity Log only records the single `create-task` skill execution anchor (`Task Created`), written by the caller SKILL step 3.
+> Do NOT append an Activity Log entry here. The Issue creation event is already captured by the GitHub Issue itself and by the frontmatter `issue_number` field; the Activity Log only records the single `create-task` skill execution anchor (`Create Task`), written by the caller SKILL step 3.
 
 ### 9. Return the Result
 

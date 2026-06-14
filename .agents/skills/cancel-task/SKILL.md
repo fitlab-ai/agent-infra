@@ -56,7 +56,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - **追加**到 `## Activity Log`（不要覆盖之前记录）：
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Cancelled** by {agent} — {一行取消原因}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Cancel Task** by {agent} — {一行取消原因}
   ```
 
 ### 4. 转移任务

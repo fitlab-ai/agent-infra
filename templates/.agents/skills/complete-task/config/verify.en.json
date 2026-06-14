@@ -18,7 +18,7 @@
       "require_completed_at": true
     },
     "activity-log": {
-      "expected_action_pattern": "Completed",
+      "expected_action_pattern": "(Complete Task|Completed)",
       "freshness_minutes": 30
     },
     "completion-checklist": {

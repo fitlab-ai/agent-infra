@@ -82,7 +82,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - Add the dismissal record to task.md
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Alert Closed** by {agent} — Code Scanning alert #{alert-number} dismissed: {reason}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Close Codescan** by {agent} — Code Scanning alert #{alert-number} dismissed: {reason}
   ```
 - Archive the task
 - **Release short id** (after the archive `mv` succeeded; the script is idempotent):

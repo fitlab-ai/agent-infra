@@ -70,8 +70,8 @@ function buildReviewTask(overrides: Record<string, string | number> = {}) {
       NOW: formatTimestamp(new Date())
     }
   ).replace(
-    "**Code (Round 1)** by codex — Code implemented, 2 files modified, 42 tests passed → code.md",
-    "**Code Review (Round 1)** by codex — Verdict: Approved, blockers: 0, major: 0, minor: 0 → review-code.md"
+    "**Code Task (Round 1)** by codex — Code implemented, 2 files modified, 42 tests passed → code.md",
+    "**Review Code (Round 1)** by codex — Verdict: Approved, blockers: 0, major: 0, minor: 0 → review-code.md"
   );
 }
 

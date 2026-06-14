@@ -89,7 +89,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - Verify and check off all items in `## Completion Checklist` (change `- [ ]` to `- [x]`)
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Completed** by {agent} — Task moved to completed/
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Complete Task** by {agent} — Task moved to completed/
   ```
 
 ### 4. Move Task

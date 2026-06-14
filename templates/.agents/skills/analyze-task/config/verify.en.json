@@ -32,7 +32,7 @@
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "Requirement Analysis \\(Round \\d+\\)",
+      "expected_action_pattern": "(Analyze Task|Requirement Analysis) \\(Round \\d+\\)",
       "freshness_minutes": 30
     },
     "platform-sync": {

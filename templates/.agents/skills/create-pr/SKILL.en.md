@@ -96,7 +96,7 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
-If `{task-id}` is available, update task.md with `pr_number`, `updated_at`, `agent_infra_version`, and append the PR Created Activity Log entry including metadata-sync and summary results.
+If `{task-id}` is available, update task.md with `pr_number`, `updated_at`, `agent_infra_version`, and append the Create PR Activity Log entry including metadata-sync and summary results.
 
 ### 9. Verification Gate
 

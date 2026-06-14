@@ -156,7 +156,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - Mark requirement-analysis as complete in workflow progress and include the actual round when the task template supports it
 - Before appending the workflow Activity Log entry, re-estimate `priority` based on the analysis findings (business impact, risks, dependencies, blockers). If the re-estimated value differs from the current value in `task.md`:
   - Overwrite the `priority` field in frontmatter with the new value
-  - Prepend an Activity Log entry recording the transition (placed before the `Requirement Analysis (Round N)` entry):
+  - Prepend an Activity Log entry recording the transition (placed before the `Analyze Task (Round N)` entry):
     ```
     - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analysis Re-estimate** by {agent} — priority {old} → {new} (rationale: {short basis grounded in this analysis})
     ```
@@ -164,7 +164,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   If the re-estimated value matches the current value, skip the Re-estimate entry. The Flow A sync that follows reads the possibly updated frontmatter and propagates the new value to the Issue automatically.
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Requirement Analysis (Round {N})** by {agent} — Analysis completed → {analysis-artifact}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Round {N})** by {agent} — Analysis completed → {analysis-artifact}
   ```
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):

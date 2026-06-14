@@ -116,7 +116,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - 在工作流进度中标记 technical-design 为已完成，并注明实际轮次（如果任务模板支持）
 - 在追加工作流 Activity Log 条目之前，基于技术方案（实施步骤数、涉及文件、测试矩阵范围、集成面）重估 `effort`。若重估值与 `task.md` 当前值不一致：
   - 用新值覆盖 frontmatter 的 `effort` 字段
-  - 在 `Technical Design (Round N)` 条目之前追加一条转移记录：
+  - 在 `Plan Task (Round N)` 条目之前追加一条转移记录：
     ```
     - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Re-estimate** by {agent} — effort {old} → {new} (rationale: {基于本轮方案的简短依据})
     ```
@@ -124,7 +124,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
   若重估值与当前值一致，跳过 Re-estimate 条目。后续 Flow A 同步会读取可能更新过的 frontmatter，并自动把新值同步到 Issue。
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Technical Design (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Task (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
   ```
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：

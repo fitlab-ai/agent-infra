@@ -65,7 +65,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Set `current_step` to `technical-design-review`, refresh task metadata, and append:
-`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Review (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {review-artifact}`
+`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Plan (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {review-artifact}`
 
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, sync the task comment, and publish the `{review-artifact}` comment.
 

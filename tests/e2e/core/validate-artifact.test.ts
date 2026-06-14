@@ -269,6 +269,16 @@ const activityLogCases: ActivityLogCase[] = [
     name: "validate-artifact activity-log passes for create-task happy path with Issue created",
     issueNumber: 296,
     activityLines(now) {
+      return [`- ${now} — **Create Task** by codex — Task created from description`];
+    },
+    assertResult(result) {
+      assert.equal(result.status, 0, result.stderr);
+    }
+  },
+  {
+    name: "validate-artifact activity-log accepts legacy create-task step name during transition",
+    issueNumber: 296,
+    activityLines(now) {
       return [`- ${now} — **Task Created** by codex — Task created from description`];
     },
     assertResult(result) {

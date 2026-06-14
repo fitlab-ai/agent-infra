@@ -57,7 +57,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 更新 task.md：`current_step` -> `requirement-analysis`。
 - **追加**到 `## Activity Log`（不要覆盖之前的记录）：
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Import Code Scanning Alert** by {agent} — Code Scanning alert #{alert-number} imported
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Import Codescan** by {agent} — Code Scanning alert #{alert-number} imported
   ```
 
 ### 4. 完成校验

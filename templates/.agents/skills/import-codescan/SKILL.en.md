@@ -57,7 +57,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 Update task.md: `current_step` -> `requirement-analysis`.
 - **Append** to `## Activity Log` (do NOT overwrite previous entries):
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Import Code Scanning Alert** by {agent} — Code Scanning alert #{alert-number} imported
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Import Codescan** by {agent} — Code Scanning alert #{alert-number} imported
   ```
 
 ### 4. Verification Gate

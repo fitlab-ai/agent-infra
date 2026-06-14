@@ -18,7 +18,7 @@
       "require_blocked_at": true
     },
     "activity-log": {
-      "expected_action_pattern": "Blocked",
+      "expected_action_pattern": "(Block Task|Blocked)",
       "freshness_minutes": 30
     },
     "platform-sync": {

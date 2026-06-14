@@ -141,7 +141,7 @@ steps:
           rule: "Read the highest-round plan review artifact and confirm feedback is approved or handled"
         - name: review-code
           pattern: "review-code.md | review-code-r{N}.md"
-          rule: "In fix mode, read the highest-round code review artifact and verify it matches the latest Code Review entry in task.md Activity Log"
+          rule: "In fix mode, read the highest-round code review artifact and verify it matches the latest Review Code entry in task.md Activity Log"
       outputs:
         - name: code
           pattern: "code.md | code-r{N}.md"
