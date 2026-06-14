@@ -29,6 +29,17 @@
           }
         ]
       }
+    ],
+    "StopFailure": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$(git rev-parse --show-toplevel)/.agents/hooks/auto-resume.sh\""
+          }
+        ]
+      }
     ]
   }
 }

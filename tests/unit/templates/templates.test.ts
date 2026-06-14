@@ -84,6 +84,7 @@ test("required template files were migrated into templates/", () => {
     "templates/.git-hooks/check-version-format.sh",
     "templates/.git-hooks/pre-commit",
     "templates/.agents/hooks/check-version-format.sh",
+    "templates/.agents/hooks/auto-resume.sh",
     "templates/.codex/hooks.json",
     "templates/.claude/settings.json",
     "templates/.claude/commands/archive-tasks.en.md",
@@ -194,6 +195,7 @@ test("update-agent-infra template copies stay in sync with working files", () =>
     [".agents/workflows/refactoring.yaml", "templates/.agents/workflows/refactoring.en.yaml"],
     [".git-hooks/check-version-format.sh", "templates/.git-hooks/check-version-format.sh"],
     [".agents/hooks/check-version-format.sh", "templates/.agents/hooks/check-version-format.sh"],
+    [".agents/hooks/auto-resume.sh", "templates/.agents/hooks/auto-resume.sh"],
     [".codex/hooks.json", "templates/.codex/hooks.json"],
     ...buildCommandSyncFiles(project),
     ...referenceSyncFiles
@@ -328,7 +330,7 @@ test("version format validation hooks are wired into templates and local config"
   ([
     [".claude/settings.json", rootClaudeSettings],
     ["templates/.claude/settings.json", templateClaudeSettings]
-  ] as Array<[string, { hooks?: { PreToolUse?: unknown; PostToolUse?: unknown } }]>).forEach(([relativePath, settings]) => {
+  ] as Array<[string, { hooks?: { PreToolUse?: unknown; PostToolUse?: unknown; StopFailure?: unknown } }]>).forEach(([relativePath, settings]) => {
     assert.deepEqual(
       settings.hooks?.PreToolUse,
       [
@@ -344,6 +346,21 @@ test("version format validation hooks are wired into templates and local config"
         }
       ],
       `${relativePath} should configure the PreToolUse version format validation hook`
+    );
+    assert.deepEqual(
+      settings.hooks?.StopFailure,
+      [
+        {
+          matcher: "",
+          hooks: [
+            {
+              type: "command",
+              command: "sh \"$(git rev-parse --show-toplevel)/.agents/hooks/auto-resume.sh\""
+            }
+          ]
+        }
+      ],
+      `${relativePath} should configure the StopFailure auto-resume hook`
     );
     assert.equal(settings.hooks?.PostToolUse, undefined, `${relativePath} should not configure a PostToolUse reminder hook`);
   });
