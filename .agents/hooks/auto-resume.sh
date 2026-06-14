@@ -22,7 +22,8 @@ RESUME_TEXT="Unexpected interruption. Please continue the unfinished operation."
 log() {
   mkdir -p "$HOME/.claude" 2>/dev/null
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S%z')" "$1" >> "$LOG"
-  lines=$(wc -l < "$LOG" 2>/dev/null || echo 0)
+  lines=$(wc -l < "$LOG" 2>/dev/null | tr -cd '0-9')
+  [ -z "$lines" ] && lines=0
   if [ "$lines" -gt 5000 ]; then
     tail -n 2500 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
   fi
@@ -56,7 +57,10 @@ now=$(date +%s)
 if [ -f "$f" ]; then
   awk -v n="$now" -v w="$WINDOW" '$1 > n - w' "$f" > "$f.tmp" 2>/dev/null && mv "$f.tmp" "$f"
 fi
-count=$( [ -f "$f" ] && wc -l < "$f" 2>/dev/null || echo 0 )
+# BSD `wc -l` (macOS) pads the count with leading spaces; strip to bare digits
+# so the integer compare and the log line stay portable across GNU/BSD.
+count=$( [ -f "$f" ] && wc -l < "$f" 2>/dev/null | tr -cd '0-9' || echo 0 )
+[ -z "$count" ] && count=0
 if [ "$count" -ge "$MAX" ]; then
   log "backoff: $count fires in 30m, skip (error=$error)"
   exit 0
