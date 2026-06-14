@@ -50,9 +50,9 @@ Required next-step commands:
 
 ```text
 Next step - complete and archive the task:
-  - Claude Code / OpenCode: /complete-task {task-id}
-  - Gemini CLI: /agent-infra:complete-task {task-id}
-  - Codex CLI: $complete-task {task-id}
+  - Claude Code / OpenCode: /complete-task {task-ref}
+  - Gemini CLI: /agent-infra:complete-task {task-ref}
+  - Codex CLI: $complete-task {task-ref}
 ```
 
 ### Case 2: More Work Remains
@@ -75,9 +75,9 @@ Required next-step commands:
 
 ```text
 Next step - code review:
-  - Claude Code / OpenCode: /review-code {task-id}
-  - Gemini CLI: /agent-infra:review-code {task-id}
-  - Codex CLI: $review-code {task-id}
+  - Claude Code / OpenCode: /review-code {task-ref}
+  - Gemini CLI: /agent-infra:review-code {task-ref}
+  - Codex CLI: $review-code {task-ref}
 ```
 
 ### Case 4: Ready for PR
@@ -91,9 +91,9 @@ Required next-step commands:
 
 ```text
 Next step - create Pull Request:
-  - Claude Code / OpenCode: /create-pr {task-id}
-  - Gemini CLI: /agent-infra:create-pr {task-id}
-  - Codex CLI: $create-pr {task-id}
+  - Claude Code / OpenCode: /create-pr {task-ref}
+  - Gemini CLI: /agent-infra:create-pr {task-ref}
+  - Codex CLI: $create-pr {task-ref}
 ```
 
 > Note: beyond the four cases, if `task.md` contains a valid `pr_number`, the commit skill must sync the PR summary via `reference/pr-summary-sync.md` before entering the verification gate.

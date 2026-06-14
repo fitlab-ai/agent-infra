@@ -28,9 +28,9 @@ Branch on the result:
 ```
 This project does not enable the PR flow (`.agents/.airc.json` sets `requiresPullRequest: false`).
 No Pull Request is required; run instead:
-  - Claude Code / OpenCode: /complete-task {task-id}
-  - Gemini CLI: /agent-infra:complete-task {task-id}
-  - Codex CLI: $complete-task {task-id}
+  - Claude Code / OpenCode: /complete-task {task-ref}
+  - Gemini CLI: /agent-infra:complete-task {task-ref}
+  - Codex CLI: $complete-task {task-ref}
 ```
 
 ### 1. Parse Command Arguments
@@ -117,7 +117,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the "Next steps" commands, read `.agents/rules/next-step-output.md` and use its short-id snippet to render `{task-ref}` in the commands as the short id `#NN` (falling back to the full TASK-id when unallocated or released).
 
 Explain the created PR URL, summarize metadata sync and summary-comment results, and recommend `complete-task {task-id}` once the workflow is truly done.
 

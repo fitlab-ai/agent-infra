@@ -55,7 +55,7 @@ For versioned artifacts (`analysis`, `review-analysis`, `plan`, `review-plan`, `
 Format the status report with a clear structure and status indicators:
 
 ```
-Task status: {task-id}
+Task status: {task-id} (short id {task-ref})
 =======================
 
 Basic info:
@@ -124,18 +124,20 @@ Recommend the appropriate next skill based on the current workflow state. You mu
 > - `current_step = code-review` and the latest code review artifact exists, but any `Blocker`, `Major`, or `Minor` issue remains, or the verdict is not a clean approval -> choose "Code Review Has Issues"
 >
 > **Important: if the latest review report contains any issue at all, do not use the corresponding review-passed row. Use the corresponding has-issues row instead.**
+>
+> Before rendering the commands in the table below, read `.agents/rules/next-step-output.md` and render `{task-ref}` in the commands as the short id `#NN` (falling back to the full TASK-id when unallocated or released).
 
 | Current State              | Claude Code / OpenCode                              | Gemini CLI                               | Codex CLI                                           |
 |----------------------------|-----------------------------------------------------|------------------------------------------|-----------------------------------------------------|
-| Analysis Complete          | `/review-analysis {task-id}`                        | `/{{project}}:review-analysis {task-id}` | `$review-analysis {task-id}`                        |
-| Analysis Review Passed     | `/plan-task {task-id}`                              | `/{{project}}:plan-task {task-id}`       | `$plan-task {task-id}`                              |
-| Analysis Review Has Issues | `/analyze-task {task-id}`                           | `/{{project}}:analyze-task {task-id}`    | `$analyze-task {task-id}`                           |
-| Plan Complete              | `/review-plan {task-id}`                            | `/{{project}}:review-plan {task-id}`     | `$review-plan {task-id}`                            |
-| Plan Review Passed         | `/code-task {task-id}`                              | `/{{project}}:code-task {task-id}`       | `$code-task {task-id}`                              |
-| Plan Review Has Issues     | `/plan-task {task-id}`                              | `/{{project}}:plan-task {task-id}`       | `$plan-task {task-id}`                              |
-| Code Complete              | `/review-code {task-id}`                            | `/{{project}}:review-code {task-id}`     | `$review-code {task-id}`                            |
+| Analysis Complete          | `/review-analysis {task-ref}`                        | `/{{project}}:review-analysis {task-ref}` | `$review-analysis {task-ref}`                        |
+| Analysis Review Passed     | `/plan-task {task-ref}`                              | `/{{project}}:plan-task {task-ref}`       | `$plan-task {task-ref}`                              |
+| Analysis Review Has Issues | `/analyze-task {task-ref}`                           | `/{{project}}:analyze-task {task-ref}`    | `$analyze-task {task-ref}`                           |
+| Plan Complete              | `/review-plan {task-ref}`                            | `/{{project}}:review-plan {task-ref}`     | `$review-plan {task-ref}`                            |
+| Plan Review Passed         | `/code-task {task-ref}`                              | `/{{project}}:code-task {task-ref}`       | `$code-task {task-ref}`                              |
+| Plan Review Has Issues     | `/plan-task {task-ref}`                              | `/{{project}}:plan-task {task-ref}`       | `$plan-task {task-ref}`                              |
+| Code Complete              | `/review-code {task-ref}`                            | `/{{project}}:review-code {task-ref}`     | `$review-code {task-ref}`                            |
 | Code Review Passed         | `/commit`                                           | `/{{project}}:commit`                    | `$commit`                                           |
-| Code Review Has Issues     | `/code-task {task-id}`                              | `/{{project}}:code-task {task-id}`       | `$code-task {task-id}`                              |
+| Code Review Has Issues     | `/code-task {task-ref}`                              | `/{{project}}:code-task {task-ref}`       | `$code-task {task-ref}`                              |
 | Task Blocked               | Unblock the task or provide the missing information | —                                        | Unblock the task or provide the missing information |
 | Task Completed             | No action needed                                    | —                                        | No action needed                                    |
 

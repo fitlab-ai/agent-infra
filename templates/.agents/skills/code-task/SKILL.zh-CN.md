@@ -181,7 +181,7 @@ node .agents/scripts/validate-artifact.js gate code-task .agents/workspace/activ
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。输出格式见 `reference/output-template.md`；修复模式输出见 `reference/fix-mode.md`。
 
-> 渲染「下一步」命令时，`{task-ref}` 使用本次调用的 `{task-id}` 入参原值（裸数字 / `#NN` / 完整 `TASK-id`）原样渲染。其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式。
+> 渲染「下一步」命令时，`{task-ref}` 为当前任务短号 `#NN`（取值与回退见 `.agents/rules/next-step-output.md`，渲染前先读取）。其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式。
 
 ## 完成检查清单
 

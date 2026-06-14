@@ -122,7 +122,7 @@ env-blocked counts do not influence branch selection; they are appended to the s
 
 > The full four-branch output templates, selection rules, and prohibition clauses live in `reference/output-templates.md`. Read `reference/output-templates.md` before reporting the review result.
 
-> When rendering "Next steps" commands, `{task-ref}` uses the verbatim `{task-id}` argument from this invocation (bare numeric / `#NN` / full `TASK-id`). Other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form.
+> When rendering "Next steps" commands, `{task-ref}` is the current task's short id `#NN` (see `.agents/rules/next-step-output.md` for lookup and fallback; read it before rendering). Other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form.
 
 Include all TUI command formats in the next-step output. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 

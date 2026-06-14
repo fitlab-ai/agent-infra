@@ -79,4 +79,4 @@ node .agents/scripts/validate-artifact.js gate review-plan .agents/workspace/act
 
 Use the conclusion branch in `reference/output-templates.md` and show all TUI command formats.
 
-> When rendering "Next steps" commands, `{task-ref}` uses the verbatim `{task-id}` argument from this invocation (bare numeric / `#NN` / full `TASK-id`). Other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form.
+> When rendering "Next steps" commands, `{task-ref}` is the current task's short id `#NN` (see `.agents/rules/next-step-output.md` for lookup and fallback; read it before rendering). Other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form.

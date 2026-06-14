@@ -93,7 +93,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 ### 8. 告知用户
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染「下一步」命令前，先读取 `.agents/rules/next-step-output.md`，按其取短号片段把命令中的 `{task-ref}` 渲染为短号 `#NN`（未分配/已释放时回退完整 TASK-id）。
 
 ```
 Code Scanning 告警 #{alert-number} 已关闭。
@@ -108,9 +108,9 @@ Code Scanning 告警 #{alert-number} 已关闭。
 注意：如有需要，可在 平台上重新打开。
 
 下一步 - 完成并归档任务（如有关联任务）：
-  - Claude Code / OpenCode：/complete-task {task-id}
-  - Gemini CLI：/agent-infra:complete-task {task-id}
-  - Codex CLI：$complete-task {task-id}
+  - Claude Code / OpenCode：/complete-task {task-ref}
+  - Gemini CLI：/agent-infra:complete-task {task-ref}
+  - Codex CLI：$complete-task {task-ref}
 ```
 
 ## 注意事项

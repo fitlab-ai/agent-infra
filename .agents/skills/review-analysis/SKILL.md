@@ -92,7 +92,7 @@ node .agents/scripts/validate-artifact.js gate review-analysis .agents/workspace
 
 按 `reference/output-templates.md` 的结论分支输出，并展示所有 TUI 的下一步命令。
 
-> 渲染「下一步」命令时，`{task-ref}` 使用本次调用的 `{task-id}` 入参原值（裸数字 / `#NN` / 完整 `TASK-id`）原样渲染。其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式。
+> 渲染「下一步」命令时，`{task-ref}` 为当前任务短号 `#NN`（取值与回退见 `.agents/rules/next-step-output.md`，渲染前先读取）。其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式。
 
 ## 完成检查清单
 

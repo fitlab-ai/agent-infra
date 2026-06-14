@@ -154,14 +154,14 @@ node .agents/scripts/validate-artifact.js gate create-task .agents/workspace/act
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染「下一步」命令前，先读取 `.agents/rules/next-step-output.md`，按其取短号片段把命令中的 `{task-ref}` 渲染为短号 `#NN`（未分配/已释放时回退完整 TASK-id）。
 
 场景 A：已创建 Issue 时输出：
 ```
 任务已创建，并已级联创建 Issue。
 
 任务信息：
-- 任务 ID：{task-id}
+- 任务 ID：{task-id}（短号 {task-ref}）
 - 标题：{title}
 - 类型：{type}
 - 工作流：{workflow}
@@ -171,9 +171,9 @@ node .agents/scripts/validate-artifact.js gate create-task .agents/workspace/act
 - 任务文件：.agents/workspace/active/{task-id}/task.md
 
 下一步 - 执行需求分析：
-  - Claude Code / OpenCode：/analyze-task {task-id}
-  - Gemini CLI：/{{project}}:analyze-task {task-id}
-  - Codex CLI：$analyze-task {task-id}
+  - Claude Code / OpenCode：/analyze-task {task-ref}
+  - Gemini CLI：/{{project}}:analyze-task {task-ref}
+  - Codex CLI：$analyze-task {task-ref}
 ```
 
 场景 B：未创建 Issue 时输出：
@@ -181,7 +181,7 @@ node .agents/scripts/validate-artifact.js gate create-task .agents/workspace/act
 任务已创建。
 
 任务信息：
-- 任务 ID：{task-id}
+- 任务 ID：{task-id}（短号 {task-ref}）
 - 标题：{title}
 - 类型：{type}
 - 工作流：{workflow}
@@ -190,9 +190,9 @@ node .agents/scripts/validate-artifact.js gate create-task .agents/workspace/act
 - 任务文件：.agents/workspace/active/{task-id}/task.md
 
 下一步 - 执行需求分析：
-  - Claude Code / OpenCode：/analyze-task {task-id}
-  - Gemini CLI：/{{project}}:analyze-task {task-id}
-  - Codex CLI：$analyze-task {task-id}
+  - Claude Code / OpenCode：/analyze-task {task-ref}
+  - Gemini CLI：/{{project}}:analyze-task {task-ref}
+  - Codex CLI：$analyze-task {task-ref}
 ```
 
 场景 C：Issue 创建失败时输出：
@@ -200,7 +200,7 @@ node .agents/scripts/validate-artifact.js gate create-task .agents/workspace/act
 任务已创建，但 Issue 级联创建失败。
 
 任务信息：
-- 任务 ID：{task-id}
+- 任务 ID：{task-id}（短号 {task-ref}）
 - 标题：{title}
 - 类型：{type}
 - 工作流：{workflow}
@@ -214,9 +214,9 @@ Issue 创建失败：
 - 任务文件：.agents/workspace/active/{task-id}/task.md
 
 下一步 - 执行需求分析：
-  - Claude Code / OpenCode：/analyze-task {task-id}
-  - Gemini CLI：/{{project}}:analyze-task {task-id}
-  - Codex CLI：$analyze-task {task-id}
+  - Claude Code / OpenCode：/analyze-task {task-ref}
+  - Gemini CLI：/{{project}}:analyze-task {task-ref}
+  - Codex CLI：$analyze-task {task-ref}
 
 后续如需平台同步：修复认证/网络/模板问题后，可按 `.agents/rules/create-issue.md` 对当前任务手动执行一次 Issue 创建；或手动创建/查找 Issue，并把 `issue_number` 写入 task.md，后续技能会接管级联同步。
 ```

@@ -54,7 +54,7 @@ description: "查看任务的当前状态和进度"
 以清晰的结构和状态指示器格式化输出：
 
 ```
-任务状态：{task-id}
+任务状态：{task-id}（短号 {task-ref}）
 =======================
 
 基本信息：
@@ -123,18 +123,20 @@ description: "查看任务的当前状态和进度"
 > - `current_step = code-review` 且最新代码审查产物存在，但仍有任何 `Blocker`、`Major` 或 `Minor` 问题，或结论不是无问题通过 → 选择「代码审查有问题」
 >
 > **特别注意：只要最新审查报告中存在任何问题，就不能使用对应「审查通过」行。必须改用对应「审查有问题」行。**
+>
+> 渲染下方表格中的命令前，先读取 `.agents/rules/next-step-output.md`，把命令中的 `{task-ref}` 渲染为短号 `#NN`（未分配/已释放时回退完整 TASK-id）。
 
 | 当前状态           | Claude Code / OpenCode       | Gemini CLI                               | Codex CLI                    |
 |--------------------|------------------------------|------------------------------------------|------------------------------|
-| 分析完成           | `/review-analysis {task-id}` | `/agent-infra:review-analysis {task-id}` | `$review-analysis {task-id}` |
-| 需求分析审查通过   | `/plan-task {task-id}`       | `/agent-infra:plan-task {task-id}`       | `$plan-task {task-id}`       |
-| 需求分析审查有问题 | `/analyze-task {task-id}`    | `/agent-infra:analyze-task {task-id}`    | `$analyze-task {task-id}`    |
-| 计划完成           | `/review-plan {task-id}`     | `/agent-infra:review-plan {task-id}`     | `$review-plan {task-id}`     |
-| 技术方案审查通过   | `/code-task {task-id}`       | `/agent-infra:code-task {task-id}`       | `$code-task {task-id}`       |
-| 技术方案审查有问题 | `/plan-task {task-id}`       | `/agent-infra:plan-task {task-id}`       | `$plan-task {task-id}`       |
-| 实现完成           | `/review-code {task-id}`     | `/agent-infra:review-code {task-id}`     | `$review-code {task-id}`     |
+| 分析完成           | `/review-analysis {task-ref}` | `/agent-infra:review-analysis {task-ref}` | `$review-analysis {task-ref}` |
+| 需求分析审查通过   | `/plan-task {task-ref}`       | `/agent-infra:plan-task {task-ref}`       | `$plan-task {task-ref}`       |
+| 需求分析审查有问题 | `/analyze-task {task-ref}`    | `/agent-infra:analyze-task {task-ref}`    | `$analyze-task {task-ref}`    |
+| 计划完成           | `/review-plan {task-ref}`     | `/agent-infra:review-plan {task-ref}`     | `$review-plan {task-ref}`     |
+| 技术方案审查通过   | `/code-task {task-ref}`       | `/agent-infra:code-task {task-ref}`       | `$code-task {task-ref}`       |
+| 技术方案审查有问题 | `/plan-task {task-ref}`       | `/agent-infra:plan-task {task-ref}`       | `$plan-task {task-ref}`       |
+| 实现完成           | `/review-code {task-ref}`     | `/agent-infra:review-code {task-ref}`     | `$review-code {task-ref}`     |
 | 代码审查通过       | `/commit`                    | `/agent-infra:commit`                    | `$commit`                    |
-| 代码审查有问题     | `/code-task {task-id}`       | `/agent-infra:code-task {task-id}`       | `$code-task {task-id}`       |
+| 代码审查有问题     | `/code-task {task-ref}`       | `/agent-infra:code-task {task-ref}`       | `$code-task {task-ref}`       |
 | 任务被阻塞         | 解除阻塞或提供所需信息       | —                                        | 解除阻塞或提供所需信息       |
 | 任务已完成         | 无需操作                     | —                                        | 无需操作                     |
 

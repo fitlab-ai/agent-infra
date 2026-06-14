@@ -50,9 +50,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 ```text
 下一步 - 完成并归档任务：
-  - Claude Code / OpenCode: /complete-task {task-id}
-  - Gemini CLI: /agent-infra:complete-task {task-id}
-  - Codex CLI: $complete-task {task-id}
+  - Claude Code / OpenCode: /complete-task {task-ref}
+  - Gemini CLI: /agent-infra:complete-task {task-ref}
+  - Codex CLI: $complete-task {task-ref}
 ```
 
 ### 场景 2：还有后续工作
@@ -75,9 +75,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 ```text
 下一步 - 代码审查：
-  - Claude Code / OpenCode: /review-code {task-id}
-  - Gemini CLI: /agent-infra:review-code {task-id}
-  - Codex CLI: $review-code {task-id}
+  - Claude Code / OpenCode: /review-code {task-ref}
+  - Gemini CLI: /agent-infra:review-code {task-ref}
+  - Codex CLI: $review-code {task-ref}
 ```
 
 ### 场景 4：准备创建 PR
@@ -91,9 +91,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 ```text
 下一步 - 创建 Pull Request：
-  - Claude Code / OpenCode: /create-pr {task-id}
-  - Gemini CLI: /agent-infra:create-pr {task-id}
-  - Codex CLI: $create-pr {task-id}
+  - Claude Code / OpenCode: /create-pr {task-ref}
+  - Gemini CLI: /agent-infra:create-pr {task-ref}
+  - Codex CLI: $create-pr {task-ref}
 ```
 
 > 注意：四个场景之外，只要 `task.md` 中存在有效 `pr_number`，commit 技能必须先按 `reference/pr-summary-sync.md` 同步 PR 摘要，再进入完成校验。

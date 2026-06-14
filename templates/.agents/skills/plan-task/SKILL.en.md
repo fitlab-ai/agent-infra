@@ -154,7 +154,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the "Next steps" commands, read `.agents/rules/next-step-output.md` and use its short-id snippet to render `{task-ref}` in the commands as the short id `#NN` (falling back to the full TASK-id when unallocated or released).
 
 Output format:
 ```
@@ -174,9 +174,9 @@ Important: human review checkpoint.
 Please review the technical plan before continuing to implementation.
 
 Next step - review the technical plan:
-  - Claude Code / OpenCode: /review-plan {task-id}
-  - Gemini CLI: /{{project}}:review-plan {task-id}
-  - Codex CLI: $review-plan {task-id}
+  - Claude Code / OpenCode: /review-plan {task-ref}
+  - Gemini CLI: /{{project}}:review-plan {task-ref}
+  - Codex CLI: $review-plan {task-ref}
 ```
 
 ## Completion Checklist

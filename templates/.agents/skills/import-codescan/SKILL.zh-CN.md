@@ -87,7 +87,7 @@ node .agents/scripts/validate-artifact.js gate import-codescan .agents/workspace
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染「下一步」命令前，先读取 `.agents/rules/next-step-output.md`，按其取短号片段把命令中的 `{task-ref}` 渲染为短号 `#NN`（未分配/已释放时回退完整 TASK-id）。
 
 ```
 Code Scanning 告警 #{alert-number} 已导入。
@@ -98,12 +98,12 @@ Code Scanning 告警 #{alert-number} 已导入。
 - 位置：{file-path}:{line-number}
 
 任务信息：
-- 任务 ID：{task-id}
+- 任务 ID：{task-id}（短号 {task-ref}）
 
 下一步：
-  - Claude Code / OpenCode：/analyze-task {task-id}
-  - Gemini CLI：/agent-infra:analyze-task {task-id}
-  - Codex CLI：$analyze-task {task-id}
+  - Claude Code / OpenCode：/analyze-task {task-ref}
+  - Gemini CLI：/agent-infra:analyze-task {task-ref}
+  - Codex CLI：$analyze-task {task-ref}
 ```
 
 

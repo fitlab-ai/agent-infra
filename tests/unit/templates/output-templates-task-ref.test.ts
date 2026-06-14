@@ -3,61 +3,62 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const RUNTIME_FILES = [
-  '.agents/skills/review-analysis/reference/output-templates.md',
-  '.agents/skills/review-plan/reference/output-templates.md',
-  '.agents/skills/review-code/reference/output-templates.md',
-  '.agents/skills/code-task/reference/output-template.md',
-  '.agents/skills/code-task/reference/fix-mode.md'
-];
+// Structurally traverse every skill markdown file (runtime + bilingual templates)
+// and assert that next-step TUI commands use the short-id placeholder {task-ref},
+// never the full-id {task-id}. This replaces the previous hard-coded file list so
+// newly added skills cannot silently regress.
+const SCAN_DIRS = ['.agents/skills', 'templates/.agents/skills'];
 
-const TEMPLATE_FILES = [
-  'templates/.agents/skills/review-analysis/reference/output-templates.en.md',
-  'templates/.agents/skills/review-plan/reference/output-templates.en.md',
-  'templates/.agents/skills/review-code/reference/output-templates.en.md',
-  'templates/.agents/skills/code-task/reference/output-template.en.md',
-  'templates/.agents/skills/code-task/reference/fix-mode.en.md',
-  'templates/.agents/skills/review-analysis/reference/output-templates.zh-CN.md',
-  'templates/.agents/skills/review-plan/reference/output-templates.zh-CN.md',
-  'templates/.agents/skills/review-code/reference/output-templates.zh-CN.md',
-  'templates/.agents/skills/code-task/reference/output-template.zh-CN.md',
-  'templates/.agents/skills/code-task/reference/fix-mode.zh-CN.md'
-];
+// A TUI command token: "/cmd", "/agent-infra:cmd", "/{{project}}:cmd" or "$cmd"
+// (bullet line or Markdown table cell) immediately followed by a task placeholder.
+// The token prefix is intentionally permissive (anything but whitespace / backtick /
+// pipe) so it also matches the "{{project}}" Gemini form and table-cell commands.
+const TUI_TOKEN = /([/$][^\s`|]+)\s+\{(task-id|task-ref)\}/g;
 
-// "Next-step" command line: a TUI prefix + invocation token + task ref.
-const NEXT_STEP_LINE = /^\s*-\s*(?:Claude Code(?:\s*\/\s*OpenCode)?|Gemini CLI|Codex CLI|OpenCode)\s*[:：]\s*[/$][A-Za-z0-9:_/{}-]+\s+\{(task-id|task-ref)\}/m;
-
-function read(p: string): string {
-  return fs.readFileSync(path.resolve(p), 'utf8');
+function listMarkdown(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listMarkdown(p));
+    else if (entry.name.endsWith('.md')) out.push(p);
+  }
+  return out;
 }
 
-for (const file of [...RUNTIME_FILES, ...TEMPLATE_FILES]) {
-  test(`${file}: next-step command lines use {task-ref}`, () => {
-    const content = read(file);
-    // No command line should still use {task-id}.
-    const stillTaskId = content
-      .split('\n')
-      .filter((line) => /^\s*-\s*(?:Claude Code(?:\s*\/\s*OpenCode)?|Gemini CLI|Codex CLI|OpenCode)\s*[:：]\s*[/$]/m.test(line))
-      .filter((line) => /\{task-id\}/.test(line));
+const files = SCAN_DIRS.flatMap((dir) => listMarkdown(path.resolve(dir)));
+
+for (const file of files) {
+  const rel = path.relative(process.cwd(), file);
+  const content = fs.readFileSync(file, 'utf8');
+  const tokens = [...content.matchAll(TUI_TOKEN)];
+  if (tokens.length === 0) continue; // file has no next-step TUI commands
+
+  test(`${rel}: next-step commands use {task-ref}, not {task-id}`, () => {
+    const offenders = tokens
+      .filter((m) => m[2] === 'task-id')
+      .map((m) => `${m[1]} {${m[2]}}`);
     assert.deepEqual(
-      stillTaskId,
+      offenders,
       [],
-      `next-step command lines should use {task-ref}, but found {task-id}:\n${stillTaskId.join('\n')}`
+      `next-step command tokens must use {task-ref}, but found {task-id}:\n${offenders.join('\n')}`
     );
-    // At least one {task-ref} must exist (file should have next-step blocks).
-    assert.match(content, /\{task-ref\}/, `${file} should contain at least one {task-ref}`);
-  });
-
-  test(`${file}: report titles and paths preserve {task-id}`, () => {
-    const content = read(file);
-    // Report-summary line ("任务 {task-id} ..." / "Task {task-id} ...") and
-    // the active-workspace path ".agents/workspace/active/{task-id}/..." must
-    // keep the full task id placeholder.
-    const hasFullPath = /\.agents\/workspace\/active\/\{task-id\}\//.test(content);
-    const hasReportSummary = /(?:任务|Task)\s+\{task-id\}/.test(content);
-    assert.ok(
-      hasFullPath || hasReportSummary,
-      `${file} should retain {task-id} in titles or paths`
-    );
+    // A file that contains TUI command tokens must reference the short id.
+    assert.ok(content.includes('{task-ref}'), `${rel} has TUI command tokens but no {task-ref}`);
   });
 }
+
+// Report titles ("任务 {task-id} ..." / "Task {task-id} ...") and artifact paths
+// (".agents/workspace/active/{task-id}/...") must keep the full {task-id} form.
+test('report titles and artifact paths keep the full {task-id}', () => {
+  const runtime = fs.readFileSync(path.resolve('.agents/skills/analyze-task/SKILL.md'), 'utf8');
+  assert.match(
+    runtime,
+    /\.agents\/workspace\/active\/\{task-id\}\//,
+    'artifact paths must keep the full {task-id}'
+  );
+  assert.match(
+    runtime,
+    /(?:任务|Task)\s+\{task-id\}/,
+    'report titles must keep the full {task-id}'
+  );
+});
