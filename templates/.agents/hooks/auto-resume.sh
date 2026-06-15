@@ -80,8 +80,25 @@ until curl -s -o /dev/null --max-time 3 "$PROBE_URL"; do
 done
 log "probe ok after ${waited}s (error=$error)"
 
-# Inject: Escape first to leave any non-input TUI state, then the resume text.
-tmux send-keys -t "$TMUX_PANE" Escape 2>/dev/null
-tmux send-keys -t "$TMUX_PANE" "$RESUME_TEXT" Enter 2>/dev/null
-log "send-keys done (error=$error)"
+# Inject the resume message with a deliberately timing-insensitive sequence:
+#   1. Escape leaves any non-input TUI state.
+#   2. A 1s settle covers every known TUI escape timeout (vim 1000ms,
+#      xterm/readline 50ms) so the next bytes are delivered as fresh input
+#      instead of being folded into the escape sequence (the dropped-`U` race).
+#   3. The text travels through a NAMED paste buffer pasted with bracketed
+#      paste (-p): the TUI ingests it as a single paste rather than per-character
+#      keypresses, so no leading char is eaten and the body is not read as a
+#      submit. The named buffer (-b) guarantees we paste exactly this text, and
+#      -d deletes it afterward so the user's anonymous paste stack is untouched.
+#   4. Enter is a separate send-keys after the paste, so the submit signal is
+#      never merged into the pasted content (the must-press-Enter race).
+# Every step stays non-blocking (2>/dev/null, exit 0 below) and logs a WARN on
+# failure so the log can localize which tmux step broke.
+log "tmux inject start (error=$error)"
+tmux send-keys -t "$TMUX_PANE" Escape 2>/dev/null || log "WARN: tmux Escape failed (error=$error)"
+sleep 1
+tmux set-buffer -b auto-resume -- "$RESUME_TEXT" 2>/dev/null || log "WARN: tmux set-buffer failed (error=$error)"
+tmux paste-buffer -t "$TMUX_PANE" -b auto-resume -p -d 2>/dev/null || log "WARN: tmux paste-buffer failed (error=$error)"
+tmux send-keys -t "$TMUX_PANE" Enter 2>/dev/null || log "WARN: tmux Enter failed (error=$error)"
+log "tmux inject done (error=$error)"
 exit 0

@@ -26,15 +26,21 @@ interface Harness {
 
 // Build an isolated HOME plus a bin dir holding tmux/curl stubs. tmux records
 // every invocation so tests can assert injection happened (or did not). curl's
-// exit code simulates network reachability for the probe gate.
-function setup(curlExit: number): Harness {
+// exit code simulates network reachability for the probe gate. When
+// failTmuxSubcommand is set, the tmux stub exits non-zero for that subcommand
+// (e.g. "paste-buffer") so the WARN-on-failure path can be exercised; the
+// default empty value never matches a real subcommand, preserving prior behaviour.
+function setup(curlExit: number, failTmuxSubcommand = ""): Harness {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "auto-resume-"));
   const home = path.join(root, "home");
   const bin = path.join(root, "bin");
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(bin, { recursive: true });
   const tmuxCalls = path.join(root, "tmux-calls.txt");
-  writeStub(path.join(bin, "tmux"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${tmuxCalls}"\n`);
+  writeStub(
+    path.join(bin, "tmux"),
+    `#!/bin/sh\nprintf '%s\\n' "$*" >> "${tmuxCalls}"\n[ "$1" = "${failTmuxSubcommand}" ] && exit 1\nexit 0\n`
+  );
   writeStub(path.join(bin, "curl"), `#!/bin/sh\nexit ${curlExit}\n`);
   return { home, bin, tmuxCalls, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
@@ -137,11 +143,35 @@ test("happy path: whitelisted error with reachable network injects the resume te
     const env = { ...baseEnv(h.home), TMUX_PANE: "%9" };
     const result = run(h, env, { session_id: "s1", error: "unknown" });
     assert.equal(result.status, 0);
-    assert.match(readLog(h.home), /send-keys done \(error=unknown\)/, "should log a completed injection");
-    assert.equal(tmuxWasCalled(h), true, "should drive tmux send-keys");
+    const log = readLog(h.home);
+    assert.match(log, /tmux inject start \(error=unknown\)/, "should log the start of injection");
+    assert.match(log, /tmux inject done \(error=unknown\)/, "should log a completed injection");
+    assert.equal(tmuxWasCalled(h), true, "should drive tmux");
     const calls = fs.readFileSync(h.tmuxCalls, "utf8");
     assert.match(calls, /send-keys -t %9 Escape/, "should send Escape to the target pane first");
-    assert.match(calls, /Unexpected interruption\. Please continue the unfinished operation\./, "should inject the resume text");
+    assert.match(
+      calls,
+      /set-buffer -b auto-resume -- .*Unexpected interruption\. Please continue the unfinished operation\./,
+      "should stage the resume text in the named paste buffer"
+    );
+    assert.match(calls, /paste-buffer -t %9 -b auto-resume -p -d/, "should paste via bracketed paste from the named buffer");
+    assert.match(calls, /send-keys -t %9 Enter/, "should submit with a separate Enter after the paste");
+  } finally {
+    h.cleanup();
+  }
+});
+
+test("a failing tmux step is logged as WARN and never blocks", POSIX, () => {
+  const h = setup(0, "paste-buffer"); // reachable network, but the paste step fails
+  try {
+    const env = { ...baseEnv(h.home), TMUX_PANE: "%9" };
+    const result = run(h, env, { session_id: "s1", error: "unknown" });
+    assert.equal(result.status, 0, "a failing tmux step must not break the non-blocking exit 0");
+    assert.match(
+      readLog(h.home),
+      /WARN: tmux paste-buffer failed \(error=unknown\)/,
+      "should log the failing tmux step as a WARN line"
+    );
   } finally {
     h.cleanup();
   }
