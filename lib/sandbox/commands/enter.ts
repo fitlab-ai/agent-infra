@@ -1,5 +1,10 @@
 import { loadConfig } from '../config.ts';
-import { assertValidBranchName, containerNameCandidates } from '../constants.ts';
+import {
+  assertValidBranchName,
+  containerNameCandidates,
+  sandboxBranchLabel,
+  sandboxLabel
+} from '../constants.ts';
 import { detectEngine } from '../engine.ts';
 import {
   formatCredentialWarnings,
@@ -8,12 +13,16 @@ import {
   redactCommandError,
   validateClaudeCredentialsEnvOverride
 } from '../credentials.ts';
-import { runInteractiveEngine, runSafeEngine } from '../shell.ts';
-import { resolveTaskBranch } from '../task-resolver.ts';
+import { runInteractiveEngine } from '../shell.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
 import { runInteractiveWithClipboardBridge } from '../clipboard/bridge.ts';
 import { detectHostTimezone } from '../host-timezone.ts';
-import { isTaskShortRef, resolveTaskShortRef } from './list-running.ts';
+import {
+  fetchSandboxRows,
+  resolveBranchArg,
+  selectSandboxContainer,
+  startSandboxContainer
+} from './list-running.ts';
 
 const USAGE = `Usage: ai sandbox exec <branch | TASK-id | N | '#N'> [cmd...]
 
@@ -122,19 +131,29 @@ export async function enter(args: string[]): Promise<number> {
   validateClaudeCredentialsEnvOverride();
   const engine = detectEngine(config);
   const [firstArg = '', ...cmd] = args;
-  let branch: string;
-  if (isTaskShortRef(firstArg)) {
-    branch = resolveTaskShortRef(firstArg, { repoRoot: config.repoRoot });
-  } else {
-    branch = resolveTaskBranch(firstArg, config.repoRoot);
-  }
+  const branch = resolveBranchArg(firstArg, { repoRoot: config.repoRoot });
   assertValidBranchName(branch);
-  const running = runSafeEngine(engine, 'docker', ['ps', '--format', '{{.Names}}']).split('\n');
-  const container = containerNameCandidates(config, branch).find((name) => running.includes(name));
 
-  if (!container) {
-    throw new Error(`No running sandbox found for branch '${branch}'`);
+  const { running, nonRunning } = fetchSandboxRows(
+    engine,
+    sandboxLabel(config),
+    sandboxBranchLabel(config)
+  );
+  const found = selectSandboxContainer(
+    [...running, ...nonRunning],
+    containerNameCandidates(config, branch)
+  );
+
+  if (!found) {
+    throw new Error(
+      `No sandbox found for branch '${branch}'. Run 'ai sandbox create ${branch}' to create one.`
+    );
   }
+  if (!found.running) {
+    process.stderr.write(`Sandbox '${found.name}' is stopped; starting it...\n`);
+    startSandboxContainer(engine, found.name);
+  }
+  const container = found.name;
 
   if (config.tools.includes('claude-code')) {
     try {

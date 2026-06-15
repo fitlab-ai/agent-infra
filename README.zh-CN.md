@@ -221,6 +221,8 @@ CLI 会收集项目元数据，向所有支持的 AI TUI 安装 `update-agent-in
 
 `ai sandbox exec` 也会向容器透传一小组终端检测白名单变量（`TERM_PROGRAM`、`TERM_PROGRAM_VERSION`、`LC_TERMINAL`、`LC_TERMINAL_VERSION`）。这样可以让交互式 TUI 保持与宿主终端一致的行为，例如 Claude Code 的 `Shift+Enter` 换行支持，同时避免把整个宿主环境灌入容器。
 
+`ai sandbox start <branch | TASK-id | N | '#N'>` 用于恢复已停止的沙箱容器——典型场景是宿主机 Docker daemon 被重启或替换（例如在已有 Docker 上安装 OrbStack 接管），导致容器变成 `Exited`。它只启动「已存在且已停止」的容器；容器不存在时会提示改用 `ai sandbox create`，已在运行的容器则保持不动。`ai sandbox exec <branch>` 会自动执行同样的恢复：当目标容器存在但已停止时，先启动容器再进入。由于每个 worktree 和各 AI 的 state 目录都持久化在宿主机，重启已停止的容器是安全的，不会丢失数据。
+
 在 macOS 上，交互式 `ai sandbox exec <branch>` 会尽力桥接宿主图片粘贴。当你按下 `Ctrl+V` 且宿主剪贴板当前是图片时，agent-infra 会从宿主剪贴板读取图片，将 PNG 写到 `~/.agent-infra/clipboard/`，再以 bracketed paste 注入容器内路径，让 Claude Code、Codex、Gemini CLI 和 OpenCode 按图片附件处理。宿主剪贴板只读，不会被改写。该能力会自动降级：已有沙箱需要重建后才有 `/clipboard` 挂载；如果可选 pty 依赖或剪贴板探测不可用，会回退到原本的交互进入方式。排查鼠标、滚动或其他输入异常时，可以设置 `AI_SANDBOX_NO_CLIPBOARD_BRIDGE=1` 跳过桥接，直接进入原本的交互路径。
 
 当你通过 SSH 在远端 Mac 上运行沙箱时，可先在手边这台 Mac 上执行 `ai cp <ssh-alias>`，把本机剪贴板图片推送到远端 Mac。典型流程是：Cmd+C 复制图片，运行 `ai cp mini`，回到已有 SSH session 后按 `Ctrl+V`；沙箱桥会读取远端 Mac 的 NSPasteboard，并按原路径注入图片。该命令只处理 PNG 图片，并使用基于 ssh key 的非交互 ssh/scp。目前发送端与远端都需为 macOS（远端通过 `osascript` 写入 NSPasteboard），后续可扩展支持其他远端平台。
@@ -460,7 +462,7 @@ Rootless 模式的已知差异：
 
 - 用 **Podman** 替代 Docker：Fedora 40+ 及其他 `dnf` 系 RHEL 发行版（RHEL、CentOS Stream、Rocky、Alma）上通过 `podman-docker` shim 已可使用（`sudo dnf install podman podman-docker`；可选 `sudo touch /etc/containers/nodocker` 抑制 podman 在每条命令前打印的提示）。
 - **SELinux enforcing** 宿主机（Fedora / RHEL）：`ai sandbox create` 会自动给 bind mount 加 Docker 共享 `:z` 标签，无需手动准备。如需排障可设 `AGENT_INFRA_SELINUX_DISABLE=1` 关闭。
-- `ai sandbox vm` 在 Linux 上是空操作。Linux 直接使用 native Docker，没有 VM 需要管理；请直接使用 `ai sandbox create`、`ai sandbox exec`、`ai sandbox refresh`、`ai sandbox ls`、`ai sandbox rebuild`、`ai sandbox rm`、`ai sandbox prune`。
+- `ai sandbox vm` 在 Linux 上是空操作。Linux 直接使用 native Docker，没有 VM 需要管理；请直接使用 `ai sandbox create`、`ai sandbox exec`、`ai sandbox start`、`ai sandbox refresh`、`ai sandbox ls`、`ai sandbox rebuild`、`ai sandbox rm`、`ai sandbox prune`。
 
 ### Windows
 

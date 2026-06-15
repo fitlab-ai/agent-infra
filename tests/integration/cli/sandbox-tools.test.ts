@@ -281,7 +281,7 @@ test("sandbox exec enters tmux automatically for interactive shells", onPlatform
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      dockerStdoutForPs: "demo-dev-agent-infra-feature-cli-generic-sandbox"
+      dockerStdoutForPs: "demo-dev-agent-infra-feature-cli-generic-sandbox\tUp 5 minutes\tdemo.sandbox.branch=agent-infra-feature-cli-generic-sandbox"
     });
 
     execFileSync(
@@ -307,7 +307,14 @@ test("sandbox exec enters tmux automatically for interactive shells", onPlatform
 
     const dockerCalls = fixture.readDockerCalls();
     assert.equal(dockerCalls.length, 2);
-    assert.deepEqual(dockerCalls[0], ["ps", "--format", "{{.Names}}"]);
+    assert.deepEqual(dockerCalls[0], [
+      "ps",
+      "-a",
+      "--filter",
+      "label=demo.sandbox",
+      "--format",
+      "{{.Names}}\t{{.Status}}\t{{.Labels}}"
+    ]);
     assert.deepEqual(dockerCalls[1], [
       "exec",
       "-it",

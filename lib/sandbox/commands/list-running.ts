@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { runSafeEngine } from '../shell.ts';
+import { runSafeEngine, runVerboseEngine } from '../shell.ts';
+import { resolveTaskBranch } from '../task-resolver.ts';
 
 export type SandboxRow = {
   name: string;
@@ -171,4 +172,45 @@ export function resolveTaskShortRef(
       `'#N' and bare N resolve only via the registry (not by row position in 'ai sandbox ls'); ` +
       `use a task short id (e.g. 'ai sandbox exec 11'), a TASK-id, or a branch name.`
   );
+}
+
+/**
+ * Resolve a sandbox command argument (`<branch | TASK-id | N | '#N'>`) to a
+ * branch name, mirroring `ai sandbox exec` so that `start` and `exec` share one
+ * input contract. Short refs go through the registry-only resolver (which throws
+ * an actionable error on a miss); everything else flows through resolveTaskBranch
+ * (plain branch names pass through unchanged, TASK-ids resolve via task.md).
+ * Callers still run assertValidBranchName on the result.
+ */
+export function resolveBranchArg(arg: string, ctx: { repoRoot: string }): string {
+  return isTaskShortRef(arg)
+    ? resolveTaskShortRef(arg, ctx)
+    : resolveTaskBranch(arg, ctx.repoRoot);
+}
+
+/**
+ * Pick the sandbox container row whose name matches one of the candidate
+ * container names (covers both the '..' and legacy '-' branch sanitizations).
+ * Pure: no IO. Returns null when no row matches.
+ */
+export function selectSandboxContainer(
+  rows: SandboxRow[],
+  candidates: string[]
+): SandboxRow | null {
+  return rows.find((row) => candidates.includes(row.name)) ?? null;
+}
+
+/**
+ * Start an existing (stopped) sandbox container by name. Throws a distinct,
+ * actionable error when `docker start` fails, so callers can tell "start failed"
+ * apart from "container not found".
+ */
+export function startSandboxContainer(engine: string, name: string): void {
+  try {
+    runVerboseEngine(engine, 'docker', ['start', name]);
+  } catch (error) {
+    throw new Error(
+      `Failed to start sandbox container '${name}': ${error instanceof Error ? error.message : 'unknown error'}`
+    );
+  }
 }

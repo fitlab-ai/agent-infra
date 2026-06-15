@@ -118,6 +118,7 @@ test("agent-infra sandbox help is wired into the main CLI", () => {
 
   assert.match(output, /Usage: ai sandbox <command> \[options\]/);
   assert.match(output, /create <branch> \[base\]/);
+  assert.match(output, /start <branch \| TASK-id \| N \| '#N'>/);
   assert.match(output, /^\s+refresh\s+Sync host Claude Code credentials/m);
   assert.match(output, /^\s+rebuild \[--quiet\] \[--refresh\]\s+Rebuild the sandbox image/m);
   assert.match(output, /prune \[--dry-run\]/);
@@ -1052,4 +1053,162 @@ test("sandbox prune uses a single confirmation gate for deletion", () => {
     commandSource,
     /const shouldRemove = await p\.confirm\(\{[\s\S]*?Remove \$\{count\} orphaned sandbox state[\s\S]*?initialValue: true[\s\S]*?\}\);/
   );
+});
+
+test("sandbox list-running selectSandboxContainer matches by candidate name (covers legacy '-')", async () => {
+  const { selectSandboxContainer } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+
+  const rows = [
+    { name: "demo-dev-feature..a", status: "Up 1 min", branch: "feature/a", running: true, index: 1 },
+    { name: "demo-dev-feature..b", status: "Exited (0) 1 hour ago", branch: "feature/b", running: false, index: null }
+  ];
+
+  // The '..' candidate matches the exited row and preserves its running flag.
+  const hit = selectSandboxContainer(rows, ["demo-dev-feature..b", "demo-dev-feature-b"]);
+  assert.equal(hit?.name, "demo-dev-feature..b");
+  assert.equal(hit?.running, false);
+
+  // A container named with the legacy '-' sanitization is matched via the legacy candidate.
+  const legacyRows = [
+    { name: "demo-dev-feature-c", status: "Exited (0)", branch: "feature/c", running: false, index: null }
+  ];
+  assert.equal(
+    selectSandboxContainer(legacyRows, ["demo-dev-feature..c", "demo-dev-feature-c"])?.name,
+    "demo-dev-feature-c"
+  );
+
+  // No candidate matches → null.
+  assert.equal(selectSandboxContainer(rows, ["demo-dev-nope"]), null);
+});
+
+test("sandbox start boots a stopped container for the branch", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-start-exited-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: "demo-dev-feature..restart\tExited (137) 5 minutes ago\tdemo.sandbox.branch=feature/restart"
+    });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["start", "feature/restart"]);
+
+    assert.equal(result.signal, null);
+    assert.equal(result.status, 0, result.stderr);
+    const calls = fixture.readDockerCalls();
+    assert.ok(
+      calls.some((call) => call[0] === "start" && call[1] === "demo-dev-feature..restart"),
+      `expected 'docker start demo-dev-feature..restart', got ${JSON.stringify(calls)}`
+    );
+    assert.match(result.stdout, /Started sandbox 'demo-dev-feature\.\.restart'/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox start reports a missing container and points to create", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-start-missing-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: "" });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["start", "feature/restart"]);
+
+    assert.equal(result.signal, null);
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}\n${result.stderr}`, /Run 'ai sandbox create feature\/restart'/);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "start"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox start is a no-op when the container is already running", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-start-running-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: "demo-dev-feature..restart\tUp 3 minutes\tdemo.sandbox.branch=feature/restart"
+    });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["start", "feature/restart"]);
+
+    assert.equal(result.signal, null);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /already running/);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "start"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox start surfaces a distinct error when docker start fails", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-start-fail-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: "demo-dev-feature..restart\tExited (137) 5 minutes ago\tdemo.sandbox.branch=feature/restart"
+    });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["start", "feature/restart"], { DOCKER_EXIT_FOR_START: "1" });
+
+    assert.equal(result.signal, null);
+    assert.notEqual(result.status, 0);
+    assert.match(
+      `${result.stdout}\n${result.stderr}`,
+      /Failed to start sandbox container 'demo-dev-feature\.\.restart'/
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox start resolves a task short id to its branch container", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-start-short-id-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: "demo-dev-registry-branch\tExited (137) 2 minutes ago\tdemo.sandbox.branch=registry-branch"
+    });
+
+    // Rewrite .airc.json with task.shortIdLength=1 so the registry key is '1',
+    // while keeping the engine the fixture relies on for detectEngine.
+    fs.writeFileSync(
+      path.join(fixture.repoDir, ".agents", ".airc.json"),
+      `${JSON.stringify({ project: "demo", org: "fitlab-ai", sandbox: { engine: "docker-desktop" }, task: { shortIdLength: 1 } }, null, 2)}\n`,
+      "utf8"
+    );
+
+    // Seed the task-short-id registry + task.md so 'start 1' resolves to 'registry-branch'.
+    const scriptsDir = path.join(fixture.repoDir, ".agents", "scripts");
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    fs.copyFileSync(
+      path.resolve(process.cwd(), "templates/.agents/scripts/task-short-id.js"),
+      path.join(scriptsDir, "task-short-id.js")
+    );
+    const taskId = "TASK-20260301-000001";
+    const active = path.join(fixture.repoDir, ".agents", "workspace", "active");
+    fs.mkdirSync(path.join(active, taskId), { recursive: true });
+    fs.writeFileSync(
+      path.join(active, taskId, "task.md"),
+      `---\nid: ${taskId}\nbranch: registry-branch\n---\n`
+    );
+    fs.writeFileSync(
+      path.join(active, ".short-ids.json"),
+      JSON.stringify({ version: 1, ids: { "1": taskId } })
+    );
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["start", "1"]);
+
+    assert.equal(result.signal, null);
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(
+      fixture.readDockerCalls().some((call) => call[0] === "start" && call[1] === "demo-dev-registry-branch"),
+      `expected 'docker start demo-dev-registry-branch', got ${JSON.stringify(fixture.readDockerCalls())}`
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
