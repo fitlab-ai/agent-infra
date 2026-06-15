@@ -121,6 +121,8 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the "Next steps" commands, read `.agents/rules/next-step-output.md` and use its short-id snippet to render `{task-ref}` in the commands as the short id `#NN` (falling back to the full TASK-id when unallocated or released).
 
+> **Optional sandbox-cleanup hint (gated)**: Render the "Optional: clean up this task's sandbox" block — placed after "Target path" and before "Next step" in the output below — only when BOTH (1) `.agents/.airc.json` has a `sandbox` field and (2) task.md's `branch` field exists and is not `main` / `master`; otherwise omit the whole block. `{branch}` is the `branch` value from the task.md you already loaded (the task has moved to completed/, so read it from `.agents/workspace/completed/{task-id}/task.md`). This block is independent of "Next steps" semantics.
+
 Output format:
 ```
 Task {task-id} cancelled; task directory moved to completed/.
@@ -128,6 +130,11 @@ Task {task-id} cancelled; task directory moved to completed/.
 Cancellation reason: {reason}
 Status label: {status-label or skipped}
 Target path: .agents/workspace/completed/{task-id}/
+
+Optional: clean up this task's sandbox
+(The task is archived; the sandbox container and per-branch config directory are not reclaimed automatically. Run this if you no longer need them:)
+
+ai sandbox rm {branch}
 
 Next step - inspect the moved task:
   - Claude Code / OpenCode: /check-task {task-ref}

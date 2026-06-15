@@ -171,7 +171,9 @@ node .agents/scripts/validate-artifact.js gate complete-task .agents/workspace/c
 
 > 仅在校验通过后执行本步骤。
 
-> 完成时间收尾行（整段输出的最后一行）取值 `date "+%Y-%m-%d %H:%M:%S"`（本地时区、不带偏移），固定放在输出的绝对末尾，便于多窗口扫视。本 skill 不渲染「下一步」命令，但仍统一打印该收尾行。
+> 完成时间收尾行（整段输出的最后一行）取值 `date "+%Y-%m-%d %H:%M:%S"`（本地时区、不带偏移），固定放在输出的绝对末尾，便于多窗口扫视。本 skill 不渲染「下一步」命令，但会在收尾行之前渲染一段**可选的沙箱清理提示**（见下方门控），且仍统一打印该收尾行。
+
+> **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) task.md 的 `branch` 字段存在且不是 `main` / `master` 时，才渲染下方输出中的「可选：清理本任务的沙箱」块；任一不满足则整段省略。`{branch}` 取已读入的 task.md 的 `branch` 值（任务此时已移动到 completed/，从 `.agents/workspace/completed/{task-id}/task.md` 读取）。该块独立于「下一步」语义，不是工作流后继命令。
 
 输出格式：
 ```
@@ -184,6 +186,11 @@ node .agents/scripts/validate-artifact.js gate complete-task .agents/workspace/c
 
 交付物：
 - {关键产出列表：修改的文件、添加的测试等}
+
+可选：清理本任务的沙箱
+（任务已归档，沙箱容器和 per-branch 配置目录不会自动回收。如果不再需要可执行：）
+
+ai sandbox rm {branch}
 
 Completed at: {completion-time}
 ```

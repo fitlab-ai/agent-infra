@@ -172,7 +172,9 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> The completion timestamp line (the last line of the whole output) uses `date "+%Y-%m-%d %H:%M:%S"` (local timezone, no offset) and always sits at the very end of the output for at-a-glance scanning across windows. This skill renders no "Next steps" commands but still prints the line.
+> The completion timestamp line (the last line of the whole output) uses `date "+%Y-%m-%d %H:%M:%S"` (local timezone, no offset) and always sits at the very end of the output for at-a-glance scanning across windows. This skill renders no "Next steps" commands, but it does render an **optional sandbox-cleanup hint** before the timestamp line (see the gate below), and still prints the line.
+
+> **Optional sandbox-cleanup hint (gated)**: Render the "Optional: clean up this task's sandbox" block in the output below only when BOTH (1) `.agents/.airc.json` has a `sandbox` field and (2) task.md's `branch` field exists and is not `main` / `master`; otherwise omit the whole block. `{branch}` is the `branch` value from the task.md you already loaded (the task has moved to completed/, so read it from `.agents/workspace/completed/{task-id}/task.md`). This block is independent of "Next steps" semantics — it is not a workflow successor command.
 
 Output format:
 ```
@@ -185,6 +187,11 @@ Task info:
 
 Deliverables:
 - {List of key outputs: files modified, tests added, etc.}
+
+Optional: clean up this task's sandbox
+(The task is archived; the sandbox container and per-branch config directory are not reclaimed automatically. Run this if you no longer need them:)
+
+ai sandbox rm {branch}
 
 Completed at: {completion-time}
 ```
