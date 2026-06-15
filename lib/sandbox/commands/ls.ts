@@ -18,7 +18,9 @@ Lists all containers for the current project. The '#' column is a
 display-only row number; the 'SHORT' column shows the active task short
 id bound to each container's branch (via
 .agents/workspace/active/.short-ids.json), or '-' if no active task is
-bound. Pass the SHORT value to "ai sandbox exec" (e.g. 'ai sandbox exec 11').`;
+bound. Pass the SHORT value to "ai sandbox exec" (e.g. 'ai sandbox exec 11').
+A '-' means no active task is bound to that branch, so the sandbox is free
+to remove with "ai sandbox rm <branch>".`;
 
 const CONTAINER_TABLE_HEADERS = ['#', 'SHORT', 'NAMES', 'STATUS', 'BRANCH'] as const;
 
@@ -78,6 +80,11 @@ export function ls(args: string[] = []): void {
       process.stdout.write(`  ${line}\n`);
     }
     process.stdout.write(`  Total: ${ordered.length} containers\n`);
+    if (tableRows.some((r) => r.shortId === '-')) {
+      process.stdout.write(
+        `  SHORT '-' = no active task bound; that sandbox is free to remove with 'ai sandbox rm <branch>'.\n`
+      );
+    }
   }
 
   p.log.step('Worktrees');

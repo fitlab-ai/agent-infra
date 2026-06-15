@@ -95,6 +95,8 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the "Next steps" commands, read `.agents/rules/next-step-output.md` and use its short-id snippet to render `{task-ref}` in the commands as the short id `#NN` (falling back to the full TASK-id when unallocated or released).
 
+> **Optional sandbox-cleanup hint (gated)**: Render the "Optional: clean up this task's sandbox" block — placed after the "Note:" line and before "Next step" in the output below — only when ALL of (1) `.agents/.airc.json` has a `sandbox` field, (2) step 7 located a related task by the alert number, and (3) that related task's task.md `branch` field exists and is not `main` / `master`; otherwise omit the whole block. `{branch}` is the `branch` value from the related task.md located in step 7. This block is independent of "Next step" semantics.
+
 ```
 Code Scanning alert #{alert-number} dismissed.
 
@@ -106,6 +108,11 @@ Explanation: {explanation}
 View: {html_url}
 
 Note: it can be reopened on the platform if necessary.
+
+Optional: clean up this task's sandbox
+(The related task's sandbox container and per-branch config directory are not reclaimed automatically. Run this if you no longer need them:)
+
+ai sandbox rm {branch}
 
 Next step - complete and archive the task if a related task exists:
   - Claude Code / OpenCode: /complete-task {task-ref}

@@ -103,6 +103,8 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染「下一步」命令前，先读取 `.agents/rules/next-step-output.md`，按其取短号片段把命令中的 `{task-ref}` 渲染为短号 `#NN`（未分配/已释放时回退完整 TASK-id）。
 
+> **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) 第 7 步按告警号定位到了关联任务、(3) 该关联任务 task.md 的 `branch` 字段存在且不是 `main` / `master` 时，才渲染下方输出中「注意：…」之后、「下一步」之前的「可选：清理本任务的沙箱」块；任一不满足则整段省略。`{branch}` 取第 7 步定位到的关联任务 task.md 的 `branch` 值。该块独立于「下一步」语义。
+
 ```
 安全告警 #{alert-number} 已关闭。
 
@@ -114,6 +116,11 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 查看：{alert-url}
 
 注意：如有需要，可在平台侧重新打开。
+
+可选：清理本任务的沙箱
+（关联任务的沙箱容器和 per-branch 配置目录不会自动回收。如果不再需要可执行：）
+
+ai sandbox rm {branch}
 
 下一步 - 完成并归档任务（如有关联任务）：
   - Claude Code / OpenCode：/complete-task {task-ref}

@@ -107,6 +107,8 @@ node .agents/scripts/validate-artifact.js gate block-task .agents/workspace/bloc
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染「下一步」命令前，先读取 `.agents/rules/next-step-output.md`，按其取短号片段把命令中的 `{task-ref}` 渲染为短号 `#NN`（未分配/已释放时回退完整 TASK-id）。
 
+> **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) task.md 的 `branch` 字段存在且不是 `main` / `master` 时，才渲染下方输出中「归档路径」之后、「解除阻塞时执行」之前的「可选：清理本任务的沙箱」块；任一不满足则整段省略。`{branch}` 取已读入的 task.md 的 `branch` 值（任务此时已移动到 blocked/，从 `.agents/workspace/blocked/{task-id}/task.md` 读取）。该块独立于「下一步」语义。
+
 输出格式：
 ```
 任务 {task-id} 已标记为阻塞。
@@ -114,6 +116,11 @@ node .agents/scripts/validate-artifact.js gate block-task .agents/workspace/bloc
 阻塞原因：{摘要}
 解除阻塞所需：{需要什么}
 归档路径：.agents/workspace/blocked/{task-id}/
+
+可选：清理本任务的沙箱
+（任务已阻塞并移到 blocked/，沙箱容器和 per-branch 配置目录不会自动回收。如果不再需要可执行：）
+
+ai sandbox rm {branch}
 
 解除阻塞时执行：
   mv .agents/workspace/blocked/{task-id} .agents/workspace/active/{task-id}

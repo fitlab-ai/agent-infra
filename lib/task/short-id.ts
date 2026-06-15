@@ -70,6 +70,16 @@ function loadShortIdByTaskId(repoRoot: string): Map<string, string> {
   return map;
 }
 
+/**
+ * Resolve a branch to its active-task short id (`#NN`), or `null` when no
+ * active task is bound to that branch.
+ *
+ * Two-state semantics: this only consults the active registry
+ * (`active/.short-ids.json`) plus each `active/{taskId}/task.md`. Tasks moved
+ * to completed/blocked/cancelled/archive have already released their short id,
+ * so their branches return `null` — in `ai sandbox ls` that surfaces as `-`,
+ * meaning the sandbox is free to remove.
+ */
 function lookupShortIdByBranch(
   branch: string,
   repoRoot: string,
