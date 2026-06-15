@@ -1,8 +1,10 @@
 # Bug-fix workflow
 # Use this workflow when fixing a defect.
 #
-# Note: a step's `pr_tasks` list is counted toward workflow progress only when
-# `.agents/.airc.json:requiresPullRequest !== false` (see .agents/skills/complete-task/SKILL.md).
+# Note: whether a step's `pr_tasks` list counts toward workflow progress follows the "PR path" rule:
+# `.agents/.airc.json:prFlow="required"` always counts; `prFlow="disabled"` never counts;
+# when the field is absent, exclude only if task.md's `pr_status=skipped`, otherwise count
+# (see .agents/skills/complete-task/SKILL.md).
 
 name: bug-fix
 description: Workflow for diagnosing and fixing a defect.
@@ -176,7 +178,7 @@ steps:
       - Findings list, if any
 
   - name: commit
-    description: Finalize the defect fix and create a pull request (the PR portion runs only when the project enables the PR flow).
+    description: Finalize the defect fix and create a pull request (the PR portion runs only on the PR path).
     recommended_agents:
       - claude
       - human
@@ -192,4 +194,4 @@ steps:
       - Task workspace
     outputs:
       - Completed task workspace under .agents/workspace/completed/
-      - Pull request (only when the project enables the PR flow)
+      - Pull request (only on the PR path)

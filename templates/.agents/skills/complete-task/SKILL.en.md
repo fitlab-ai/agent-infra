@@ -44,10 +44,36 @@ If not found in `active/`, check `blocked/` and `completed/`:
 
 ### 2. Verify Completion Prerequisites (Failure Must Stop)
 
-**Gate read (project-level PR flow policy)**: Before running this step, read `.agents/.airc.json`'s `requiresPullRequest` field. Treat missing or `true` as "PR flow enabled" (default); treat explicit `false` as "PR flow disabled". The completion check below is pruned accordingly.
+**Gate read (project-level PR flow policy)**: Before running this step, read `.agents/.airc.json`'s `prFlow` field (three states: field absent = recommend PR by default, skipping allowed; `"required"` = PR mandatory; `"disabled"` = no PR flow), and `pr_status` from `task.md` frontmatter (`pending` / `created` / `skipped`).
+
+**PR dimension decision (evaluate the `prFlow` strong constraint FIRST, then `pr_status`)**:
+
+| `prFlow` | `pr_status` | Decision |
+|---|---|---|
+| `disabled` | any | No PR path -> PR dimension satisfied, continue with the other prerequisites |
+| `required` | `created` | PR dimension satisfied, continue |
+| `required` | `pending` / `skipped` | **Stop**: under a mandatory PR flow you must run `/create-pr` first; `--skip-pr` is NOT accepted (including a pre-existing / manually-set `skipped`) |
+| absent | `created` / `skipped` | PR dimension satisfied, continue |
+| absent | `pending` | **Stop by default** and print the two-option guidance below; unless the user passes `--skip-pr` (writes `pr_status: skipped`, then continues) or `--force` |
+
+- `--skip-pr` handling: effective only when `prFlow` is not `required` -> set `pr_status` to `skipped` in `task.md`, then continue; when `prFlow=required`, ignore `--skip-pr` and stop per the table.
+- Note: `--force` may override the other prerequisites below, but does **NOT** lift the `prFlow=required` PR constraint (the only exit from the strong constraint is creating a PR).
+
+Two-option guidance for absent + `pending`:
+```
+Task {task-id} has no PR yet (pr_status: pending). Choose one:
+  - Go through the PR flow: /create-pr {task-ref}
+  - Explicitly skip and complete: /complete-task {task-ref} --skip-pr
+```
+
+Stop message for `required` + `pending`/`skipped`:
+```
+This project enforces the PR flow (prFlow: "required") and the task has no PR yet.
+Run /create-pr {task-ref} first, then complete; --skip-pr is not accepted under a mandatory PR flow.
+```
 
 Before marking complete, verify ALL of these:
-- [ ] All workflow steps are complete (check workflow progress in task.md; **for the `pr_tasks` list under each yaml `commit` step, count those items toward the missing-work decision only when `.agents/.airc.json:requiresPullRequest !== false`**)
+- [ ] All workflow steps are complete (check workflow progress in task.md; **for the `pr_tasks` list under each yaml `commit` step, decide whether to count them by the "PR path" rule: `prFlow=required` always counts; `prFlow=disabled` never counts; when absent, exclude only if `pr_status=skipped`, otherwise count**)
 - [ ] Code has been reviewed (`review-code.md` or `review-code-r{N}.md` exists, and the latest review verdict is Approved; or review was done externally)
 - [ ] Code has been committed (no uncommitted changes related to this task)
 - [ ] Tests are passing

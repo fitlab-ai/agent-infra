@@ -23,20 +23,19 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - 最新的 `review-code.md` / `review-code-r{N}.md` 是否无问题通过
 - 是否仍然存在待修复项、待审查工作或待创建 PR 的步骤
 
-**门控读取（项目级 PR 流程策略）**：在执行本步骤前，读取 `.agents/.airc.json` 的 `requiresPullRequest` 字段；当字段缺失或为 `true` 时视为「启用 PR 流程」（默认），仅当显式为 `false` 时视为「关闭 PR 流程」。所有依赖该字段的分支按此规则判定。
+**门控读取（项目级 PR 流程策略）**：在执行本步骤前，读取 `.agents/.airc.json` 的 `prFlow` 字段（三态：字段缺省 = 默认推荐 PR、允许跳过；`"required"` = 强制 PR；`"disabled"` = 强制无 PR）。所有依赖该偏好的分支按此三态判定。
 
 必须且只能选择一个分支：
 
 | 判断依据 | 必选分支 |
 |---|---|
-| 所有工作流步骤都已完成 + 最新审查无问题通过 + 所有测试通过 | 场景 1：最终提交 |
+| 所有工作流步骤都已完成 + 最新审查无问题通过 + 所有测试通过 | 场景 1：最终提交（按 `prFlow` 渲染下一步） |
 | 仍有未完成步骤、待修复项或等待他人的动作 | 场景 2：还有后续工作 |
 | 这次提交是为了把任务交给代码审查 | 场景 3：准备进入审查 |
-| 代码已提交、审查已完成，且**项目启用 PR 流程**，下一步是创建 PR | 场景 4：准备创建 PR |
 
 绝对不要同时套用多个分支。先匹配唯一的下一步分支，再更新任务。
 
-**门控降级**：当 `requiresPullRequest === false` 时，场景 4 永远不被进入；原本会落入场景 4 的提交统一收敛到场景 1（最终提交 → `/complete-task`）。
+**场景 1 下一步渲染（先判 `prFlow` 强约束）**：终态「最终提交」的下一步命令按 `prFlow` 渲染——`"disabled"` → 单选「直接完成」（`/complete-task`），永不引导创建 PR；`"required"` → 单选「走 PR 流程」（`/create-pr`）；字段缺省 → 二选一（`/create-pr` 或 `/complete-task`）。创建 PR 的动作统一由场景 1 的「走 PR 流程」选项承载，不再单列独立场景。
 
 ### 场景 1：最终提交
 
@@ -44,15 +43,40 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - [ ] 所有代码都已提交
 - [ ] 所有测试通过
 - [ ] 代码审查已通过
-- [ ] 所有工作流步骤已完成（对 yaml `commit` 步骤的 `pr_tasks` 列表，仅在 `requiresPullRequest !== false` 时计入）
+- [ ] 所有工作流步骤已完成（对 yaml `commit` 步骤的 `pr_tasks` 列表，按「走 PR 路径」判定是否计入：`prFlow=required` 始终计入；`prFlow=disabled` 不计入；缺省下仅当 `pr_status=skipped` 时不计入，否则计入）
 
-必带下一步命令：
+必带下一步命令（按 `prFlow` 渲染）：
+
+`prFlow="disabled"` → 单选「直接完成」：
 
 ```text
 下一步 - 完成并归档任务：
   - Claude Code / OpenCode: /complete-task {task-ref}
   - Gemini CLI: /agent-infra:complete-task {task-ref}
   - Codex CLI: $complete-task {task-ref}
+```
+
+`prFlow="required"` → 单选「走 PR 流程」：
+
+```text
+下一步 - 创建 Pull Request：
+  - Claude Code / OpenCode: /create-pr {task-ref}
+  - Gemini CLI: /agent-infra:create-pr {task-ref}
+  - Codex CLI: $create-pr {task-ref}
+```
+
+字段缺省 → 二选一：
+
+```text
+下一步 - 二选一：
+  - 走 PR 流程：
+    - Claude Code / OpenCode: /create-pr {task-ref}
+    - Gemini CLI: /agent-infra:create-pr {task-ref}
+    - Codex CLI: $create-pr {task-ref}
+  - 直接完成（无 PR）：
+    - Claude Code / OpenCode: /complete-task {task-ref}
+    - Gemini CLI: /agent-infra:complete-task {task-ref}
+    - Codex CLI: $complete-task {task-ref}
 ```
 
 ### 场景 2：还有后续工作
@@ -80,20 +104,4 @@ date "+%Y-%m-%d %H:%M:%S%:z"
   - Codex CLI: $review-code {task-ref}
 ```
 
-### 场景 4：准备创建 PR
-
-如果下一步是创建 Pull Request：
-- 更新 `updated_at`
-- 按 `.agents/rules/version-stamp.md` 更新 `agent_infra_version`
-- 在 `task.md` 中记录 PR 计划
-
-必带下一步命令：
-
-```text
-下一步 - 创建 Pull Request：
-  - Claude Code / OpenCode: /create-pr {task-ref}
-  - Gemini CLI: /agent-infra:create-pr {task-ref}
-  - Codex CLI: $create-pr {task-ref}
-```
-
-> 注意：四个场景之外，只要 `task.md` 中存在有效 `pr_number`，commit 技能必须先按 `reference/pr-summary-sync.md` 同步 PR 摘要，再进入完成校验。
+> 注意：上述场景之外，只要 `task.md` 中存在有效 `pr_number`，commit 技能必须先按 `reference/pr-summary-sync.md` 同步 PR 摘要，再进入完成校验。

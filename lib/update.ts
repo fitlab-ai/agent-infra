@@ -17,7 +17,8 @@ type UpdateConfig = {
   org: string;
   language: string;
   platform?: { type?: string };
-  requiresPullRequest?: boolean;
+  requiresPullRequest?: boolean;       // legacy field; read-only, migrated to prFlow then removed
+  prFlow?: 'required' | 'disabled';
   sandbox?: Record<string, unknown>;
   task?: { shortIdLength: number };
   labels?: Record<string, unknown>;
@@ -27,7 +28,6 @@ type UpdateConfig = {
 
 type Defaults = {
   platform: { type: string };
-  requiresPullRequest: boolean;
   sandbox: Record<string, unknown>;
   task: { shortIdLength: number };
   labels: Record<string, unknown>;
@@ -40,6 +40,25 @@ const defaults = JSON.parse(
 
 const CONFIG_DIR = '.agents';
 const CONFIG_PATH = path.join(CONFIG_DIR, '.airc.json');
+
+// One-time migration of the legacy project-level PR switch to the three-state
+// `prFlow` preference. `true` (the old default / "PR flow on") maps to the
+// strong constraint `required`; `false` maps to `disabled`. A missing or
+// already-migrated config is left untouched (idempotent). Returns the new
+// prFlow value when a migration happened, otherwise null.
+function migratePrFlow(config: UpdateConfig): 'required' | 'disabled' | null {
+  if (config.requiresPullRequest === true) {
+    delete config.requiresPullRequest;
+    config.prFlow = 'required';
+    return 'required';
+  }
+  if (config.requiresPullRequest === false) {
+    delete config.requiresPullRequest;
+    config.prFlow = 'disabled';
+    return 'disabled';
+  }
+  return null;
+}
 
 function isPathOwnedByOtherPlatform(relativePath: string, platformType: string): boolean {
   const top = String(relativePath || '').replace(/\\/g, '/').replace(/^\.\//, '').split('/')[0] ?? '';
@@ -195,7 +214,7 @@ async function cmdUpdate(): Promise<void> {
   const sandboxAdded = !config.sandbox;
   const taskAdded = !config.task;
   const labelsAdded = !config.labels;
-  const requiresPullRequestAdded = config.requiresPullRequest === undefined;
+  const prFlowMigrated = migratePrFlow(config);
   let configChanged = changed;
 
   if (platformAdded) {
@@ -218,8 +237,7 @@ async function cmdUpdate(): Promise<void> {
     configChanged = true;
   }
 
-  if (requiresPullRequestAdded) {
-    config.requiresPullRequest = defaults.requiresPullRequest;
+  if (prFlowMigrated) {
     configChanged = true;
   }
 
@@ -233,7 +251,7 @@ async function cmdUpdate(): Promise<void> {
       for (const entry of added.merged) {
         ok(`  merged: ${entry}`);
       }
-    } else if (platformAdded || sandboxAdded || taskAdded || labelsAdded || requiresPullRequestAdded) {
+    } else if (platformAdded || sandboxAdded || taskAdded || labelsAdded || prFlowMigrated) {
       if (platformAdded) {
         info(`Default platform config added to ${CONFIG_PATH}.`);
       }
@@ -246,8 +264,8 @@ async function cmdUpdate(): Promise<void> {
       if (labelsAdded) {
         info(`Default labels.in config added to ${CONFIG_PATH}.`);
       }
-      if (requiresPullRequestAdded) {
-        info(`Default requiresPullRequest=${defaults.requiresPullRequest} added to ${CONFIG_PATH}.`);
+      if (prFlowMigrated) {
+        info(`Migrated legacy requiresPullRequest to prFlow="${prFlowMigrated}" in ${CONFIG_PATH}.`);
       }
     } else {
       info(`File registry changed in ${CONFIG_PATH}.`);
@@ -264,8 +282,8 @@ async function cmdUpdate(): Promise<void> {
     if (hasNewEntries && platformAdded) {
       info(`Default platform config added to ${CONFIG_PATH}.`);
     }
-    if (hasNewEntries && requiresPullRequestAdded) {
-      info(`Default requiresPullRequest=${defaults.requiresPullRequest} added to ${CONFIG_PATH}.`);
+    if (hasNewEntries && prFlowMigrated) {
+      info(`Migrated legacy requiresPullRequest to prFlow="${prFlowMigrated}" in ${CONFIG_PATH}.`);
     }
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf8');
     ok(`Updated ${CONFIG_PATH}`);

@@ -80,26 +80,21 @@ Sleep 1s
 
 # Prompt 5: Platform type — accept default (github)
 Enter
-Wait+Screen /Pull Request flow/
-Sleep 1s
-
-# Prompt 6: Require Pull Request flow — accept default (yes)
-Enter
 Wait+Screen /Built-in TUI/
 Sleep 3s
 
-# Prompt 7: Built-in TUI command files — keep all four built-in TUIs
+# Prompt 6: Built-in TUI command files — keep all four built-in TUIs
 Type "1,2,3,4"
 Sleep 500ms
 Enter
 Wait+Screen /Template sources/
 Sleep 1s
 
-# Prompt 8: Template sources — skip (Enter)
+# Prompt 7: Template sources — skip (Enter)
 Enter
 Sleep 1s
 
-# Prompt 9: Skill sources — skip (Enter)
+# Prompt 8: Skill sources — skip (Enter)
 Enter
 Sleep 5s
 

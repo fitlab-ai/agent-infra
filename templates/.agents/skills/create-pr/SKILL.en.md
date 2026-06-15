@@ -19,14 +19,14 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 ### Pre-gate: Project-level PR Flow Check
 
-**Gate read (project-level PR flow policy)**: Before running any numbered step, read `.agents/.airc.json`'s `requiresPullRequest` field. Treat missing or `true` as "PR flow enabled" (default); treat explicit `false` as "PR flow disabled".
+**Gate read (project-level PR flow policy)**: Before running any numbered step, read `.agents/.airc.json`'s `prFlow` field (three states: field absent = recommend PR by default, skipping allowed; `"required"` = PR mandatory; `"disabled"` = no PR flow).
 
 Branch on the result:
-- missing / `true` -> continue to Step 1 below
-- explicit `false` -> output the message below and **stop immediately**. Do not run any subsequent numbered step, do not trigger any PR-creation command, do not modify `pr_number` in `task.md`, and do not publish a PR summary comment:
+- absent / `"required"` -> continue to Step 1 below
+- `"disabled"` -> output the message below and **stop immediately**. Do not run any subsequent numbered step, do not trigger any PR-creation command, do not modify `pr_number` / `pr_status` in `task.md`, and do not publish a PR summary comment:
 
 ```
-This project does not enable the PR flow (`.agents/.airc.json` sets `requiresPullRequest: false`).
+This project does not enable the PR flow (`.agents/.airc.json` sets `prFlow: "disabled"`).
 No Pull Request is required; run instead:
   - Claude Code / OpenCode: /complete-task {task-ref}
   - Gemini CLI: /agent-infra:complete-task {task-ref}
@@ -96,7 +96,7 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
-If `{task-id}` is available, update task.md with `pr_number`, `updated_at`, `agent_infra_version`, and append the Create PR Activity Log entry including metadata-sync and summary results.
+If `{task-id}` is available, update task.md with `pr_number`, `pr_status` (set to `created`), `updated_at`, `agent_infra_version`, and append the Create PR Activity Log entry including metadata-sync and summary results.
 
 ### 9. Verification Gate
 

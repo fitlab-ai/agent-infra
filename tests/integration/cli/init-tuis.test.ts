@@ -20,16 +20,14 @@ const ENGINE_NL = PLATFORM_DEFAULT_ENGINES[os.platform()] ? "\n" : "";
 //   3. language
 //   4. sandbox engine (only when engineChoices.length > 0; otherwise no prompt)
 //   5. platform
-//   6. requires PR
-//   7. built-in TUI multi-select       <-- new step
-//   8. template sources
-//   9. skill sources
+//   6. built-in TUI multi-select
+//   7. template sources
+//   8. skill sources
 function makeInput(parts: {
   project?: string;
   org?: string;
   language?: string;
   platform?: string;
-  requiresPR?: string;
   tuis: string;
   templateSources?: string;
   skillSources?: string;
@@ -40,7 +38,6 @@ function makeInput(parts: {
     parts.language ?? "",          // default zh-CN
     ENGINE_NL.replace(/\n$/, ""),  // engine default (bare enter when applicable)
     parts.platform ?? "github",
-    parts.requiresPR ?? "",        // default yes
     parts.tuis,
     parts.templateSources ?? "",
     parts.skillSources ?? ""

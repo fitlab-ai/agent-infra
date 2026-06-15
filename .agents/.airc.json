@@ -5,7 +5,7 @@
   "platform": {
     "type": "github"
   },
-  "requiresPullRequest": true,
+  "prFlow": "required",
   "templateVersion": "v0.7.2",
   "sandbox": {
     "engine": "orbstack",

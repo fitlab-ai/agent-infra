@@ -61,10 +61,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 > **重要**：向用户展示下一步时，必须完整输出所有 TUI 命令格式，并直接使用 `reference/task-status-update.md` 中对应场景的标准模板。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染「下一步」命令前，先读取 `.agents/rules/next-step-output.md`，按其取短号片段把命令中的 `{task-ref}` 渲染为短号 `#NN`（未分配/已释放时回退完整 TASK-id）。
 
 追加 Commit 的 Activity Log，并且只能选择一个下一步分支：
-- 最终提交 -> `complete-task {task-id}`
+- 最终提交 -> 按 `.agents/.airc.json` 的 `prFlow` 渲染下一步（`disabled` → 单选 `complete-task`；`required` → 单选 `create-pr`；缺省 → 二选一 `create-pr` / `complete-task`），详见 `reference/task-status-update.md` 场景 1
 - 还有后续工作 -> 更新 task.md 后停止
 - 准备审查 -> `review-code {task-id}`
-- 准备创建 PR（仅项目启用 PR 流程，即 `requiresPullRequest !== false`）-> `create-pr`
 
 ## 6. 同步 Issue 元数据（按需）
 

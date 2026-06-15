@@ -43,10 +43,36 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ### 2. 验证完成前置条件（未满足则必须停止）
 
-**门控读取（项目级 PR 流程策略）**：在执行本步骤前，读取 `.agents/.airc.json` 的 `requiresPullRequest` 字段；当字段缺失或为 `true` 时视为「启用 PR 流程」（默认），仅当显式为 `false` 时视为「关闭 PR 流程」。下面的工作流步骤完成判定按此规则裁剪。
+**门控读取（项目级 PR 流程策略）**：在执行本步骤前，读取 `.agents/.airc.json` 的 `prFlow` 字段（三态：字段缺省 = 默认推荐 PR、允许跳过；`"required"` = 强制 PR；`"disabled"` = 强制无 PR），以及 `task.md` frontmatter 的 `pr_status`（`pending` / `created` / `skipped`）。
+
+**PR 维度判定（先判 `prFlow` 强约束，后看 `pr_status`）**：
+
+| `prFlow` | `pr_status` | 判定 |
+|---|---|---|
+| `disabled` | 任意 | 无 PR 路径 → PR 维度满足，继续其余前置条件 |
+| `required` | `created` | PR 维度满足，继续 |
+| `required` | `pending` / `skipped` | **停止**：强制 PR 下必须先 `/create-pr`；`--skip-pr` 不被接受（含既有/手动写入的 `skipped`） |
+| 缺省 | `created` / `skipped` | PR 维度满足，继续 |
+| 缺省 | `pending` | **默认停止**并输出下方二选一引导；除非用户提供 `--skip-pr`（写 `pr_status: skipped` 后继续）或 `--force` |
+
+- `--skip-pr` 处理：仅在 `prFlow` 非 `required` 时生效——把 `task.md` 的 `pr_status` 写为 `skipped` 后继续；`prFlow=required` 时忽略 `--skip-pr` 并按上表停止。
+- 注：`--force` 可越过下方其余前置条件，但**不解除 `prFlow=required` 的 PR 强约束**（强约束的唯一出口是创建 PR）。
+
+缺省 + `pending` 的二选一引导消息：
+```
+任务 {task-id} 尚未创建 PR（pr_status: pending）。请二选一：
+  - 走 PR 流程：/create-pr {task-ref}
+  - 显式跳过并完成：/complete-task {task-ref} --skip-pr
+```
+
+`required` + `pending`/`skipped` 的停止消息：
+```
+当前项目强制 PR 流程（prFlow: "required"），任务尚未创建 PR。
+请先运行 /create-pr {task-ref} 创建 PR 后再完成；--skip-pr 在强制 PR 下不被接受。
+```
 
 标记完成之前，验证以下所有条件：
-- [ ] 所有工作流步骤已完成（检查 task.md 中的工作流进度；**对 yaml 中 commit 步骤的 `pr_tasks` 列表，仅在 `.agents/.airc.json:requiresPullRequest !== false` 时计入未完成判定**）
+- [ ] 所有工作流步骤已完成（检查 task.md 中的工作流进度；**对 yaml 中 commit 步骤的 `pr_tasks` 列表，按「走 PR 路径」判定是否计入未完成判定：`prFlow=required` 始终计入；`prFlow=disabled` 不计入；缺省下仅当 `pr_status=skipped` 时不计入，否则计入**）
 - [ ] 代码已审查（`review-code.md` 或 `review-code-r{N}.md` 存在，且最新审查结论为 Approved；或已在外部完成审查）
 - [ ] 代码已提交（没有与此任务相关的未提交变更）
 - [ ] 测试通过

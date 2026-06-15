@@ -61,10 +61,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 > **IMPORTANT**: When showing the next step, output every TUI command format in full and directly use the standard template from `reference/task-status-update.md`. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the "Next steps" commands, read `.agents/rules/next-step-output.md` and use its short-id snippet to render `{task-ref}` in the commands as the short id `#NN` (falling back to the full TASK-id when unallocated or released).
 
 Append the Commit Activity Log entry and choose exactly one next-step case:
-- final commit -> `complete-task {task-id}`
+- final commit -> render the next step by `.agents/.airc.json`'s `prFlow` (`disabled` -> single option `complete-task`; `required` -> single option `create-pr`; absent -> two options `create-pr` / `complete-task`); see Case 1 in `reference/task-status-update.md`
 - more work remains -> update task.md and stop
 - ready for review -> `review-code {task-id}`
-- ready for PR (only when the project enables the PR flow, i.e. `requiresPullRequest !== false`) -> `create-pr`
 
 ## 6. Sync Issue Metadata When Applicable
 

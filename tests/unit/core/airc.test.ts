@@ -38,14 +38,8 @@ test(".agents/.airc.json declares github as the default platform", () => {
   assert.deepEqual(collaborator.platform, { type: "github" });
 });
 
-test(".agents/.airc.json declares requiresPullRequest=true for this project", () => {
-  assert.equal(collaborator.requiresPullRequest, true);
-});
-
-const libDefaults = JSON.parse(read("lib/defaults.json"));
-
-test("lib/defaults.json defaults requiresPullRequest to true", () => {
-  assert.equal(libDefaults.requiresPullRequest, true);
+test(".agents/.airc.json declares prFlow=required for this project", () => {
+  assert.equal(collaborator.prFlow, "required");
 });
 
 const mergedPresent = [

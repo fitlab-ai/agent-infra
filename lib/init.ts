@@ -32,7 +32,6 @@ type Defaults = {
   sandbox: Record<string, unknown>;
   task: { shortIdLength: number };
   labels: Record<string, unknown>;
-  requiresPullRequest: boolean;
 };
 
 type AgentConfig = {
@@ -40,7 +39,6 @@ type AgentConfig = {
   org: string;
   language: string;
   platform: { type: string };
-  requiresPullRequest: boolean;
   templateVersion: string;
   sandbox: Record<string, unknown>;
   task: { shortIdLength: number };
@@ -224,13 +222,6 @@ async function cmdInit(): Promise<void> {
     );
   }
 
-  const requiresPRChoice = await select(
-    'Require Pull Request flow?',
-    ['yes', 'no'],
-    'yes'
-  );
-  const requiresPullRequest = requiresPRChoice !== 'no';
-
   let enabledTUIs: string[];
   try {
     enabledTUIs = await multiSelect(
@@ -324,7 +315,6 @@ async function cmdInit(): Promise<void> {
     org: orgName,
     language,
     platform: { type: platformType },
-    requiresPullRequest,
     templateVersion: VERSION,
     sandbox: structuredClone(defaults.sandbox),
     task: structuredClone(defaults.task),

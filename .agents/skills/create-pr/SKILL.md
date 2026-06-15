@@ -19,14 +19,14 @@ description: "创建 Pull Request 到目标分支"
 
 ### 前置门控：项目级 PR 流程检查
 
-**门控读取（项目级 PR 流程策略）**：在执行编号步骤前，读取 `.agents/.airc.json` 的 `requiresPullRequest` 字段；当字段缺失或为 `true` 时视为「启用 PR 流程」（默认），仅当显式为 `false` 时视为「关闭 PR 流程」。
+**门控读取（项目级 PR 流程策略）**：在执行编号步骤前，读取 `.agents/.airc.json` 的 `prFlow` 字段（三态：字段缺省 = 默认推荐 PR、允许跳过；`"required"` = 强制 PR；`"disabled"` = 强制无 PR）。
 
 按读取结果分支：
-- 缺失 / `true` → 继续到下方第 1 步
-- 显式 `false` → 输出以下消息后**立即停止**，不要执行任何后续编号步骤、不要触发任何 PR 创建命令、不要修改 `task.md` 的 `pr_number`、不要发布 PR 摘要评论：
+- 缺省 / `"required"` → 继续到下方第 1 步
+- `"disabled"` → 输出以下消息后**立即停止**，不要执行任何后续编号步骤、不要触发任何 PR 创建命令、不要修改 `task.md` 的 `pr_number` / `pr_status`、不要发布 PR 摘要评论：
 
 ```
-当前项目未启用 PR 流程（`.agents/.airc.json` 中 `requiresPullRequest: false`）。
+当前项目未启用 PR 流程（`.agents/.airc.json` 中 `prFlow: "disabled"`）。
 无需创建 Pull Request，请直接运行：
   - Claude Code / OpenCode：/complete-task {task-ref}
   - Gemini CLI：/agent-infra:complete-task {task-ref}
@@ -96,7 +96,7 @@ description: "创建 Pull Request 到目标分支"
 date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
-如果获取到了 `{task-id}`，更新 task.md 的 `pr_number`、`updated_at`、`agent_infra_version`，并追加 Create PR 的 Activity Log，记录元数据同步和摘要发布结果。
+如果获取到了 `{task-id}`，更新 task.md 的 `pr_number`、`pr_status`（设为 `created`）、`updated_at`、`agent_infra_version`，并追加 Create PR 的 Activity Log，记录元数据同步和摘要发布结果。
 
 ### 9. 完成校验
 

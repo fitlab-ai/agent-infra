@@ -101,7 +101,8 @@ for (const workflowPath of workflowPaths) {
     });
   }
 
-  test(`${workflowPath} references requiresPullRequest gating`, () => {
-    assert.match(yamlText, /requiresPullRequest/);
+  test(`${workflowPath} references prFlow / pr_status gating`, () => {
+    assert.match(yamlText, /prFlow/);
+    assert.match(yamlText, /pr_status/);
   });
 }

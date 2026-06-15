@@ -23,20 +23,19 @@ Before selecting the next step, verify:
 - whether the latest `review-code.md` / `review-code-r{N}.md` passed without findings
 - whether there are still pending fixes, review work, or PR creation steps
 
-**Gate read (project-level PR flow policy)**: Before running this step, read `.agents/.airc.json`'s `requiresPullRequest` field. Treat missing or `true` as "PR flow enabled" (default); treat explicit `false` as "PR flow disabled". All branches that depend on this field follow the same rule.
+**Gate read (project-level PR flow policy)**: Before running this step, read `.agents/.airc.json`'s `prFlow` field (three states: field absent = recommend PR by default, skipping allowed; `"required"` = PR mandatory; `"disabled"` = no PR flow). All branches that depend on this preference follow the same three states.
 
 Choose exactly one case:
 
 | Decision Basis | Required Case |
 |---|---|
-| all workflow steps completed + latest review approved with no findings + all tests passed | Case 1: final commit |
+| all workflow steps completed + latest review approved with no findings + all tests passed | Case 1: final commit (render next step by `prFlow`) |
 | unfinished steps, pending fixes, or waiting on others still exist | Case 2: more work remains |
 | this commit prepares the task for code review | Case 3: ready for review |
-| code is committed, review is done, **and the project enables the PR flow**, with PR creation as the next step | Case 4: ready for PR |
 
 Never apply more than one case. Match the single next-step branch first, then update the task.
 
-**Gate downgrade**: When `requiresPullRequest === false`, Case 4 must never be entered; commits that would otherwise fall into Case 4 collapse into Case 1 (final commit -> `/complete-task`).
+**Case 1 next-step rendering (evaluate the `prFlow` strong constraint first)**: the terminal "final commit" next step is rendered by `prFlow` -- `"disabled"` -> single option "complete directly" (`/complete-task`), never guide PR creation; `"required"` -> single option "go through the PR flow" (`/create-pr`); field absent -> two options (`/create-pr` or `/complete-task`). PR creation is carried by Case 1's "go through the PR flow" option; it is no longer a separate case.
 
 ### Case 1: Final Commit
 
@@ -44,15 +43,40 @@ Prerequisites:
 - [ ] all code committed
 - [ ] all tests passed
 - [ ] code review approved
-- [ ] all workflow steps completed (for the `pr_tasks` list under each yaml `commit` step, count those items toward completion only when `requiresPullRequest !== false`)
+- [ ] all workflow steps completed (for the `pr_tasks` list under each yaml `commit` step, decide whether to count them by the "PR path" rule: `prFlow=required` always counts; `prFlow=disabled` never counts; when absent, exclude only if `pr_status=skipped`, otherwise count)
 
-Required next-step commands:
+Required next-step commands (rendered by `prFlow`):
+
+`prFlow="disabled"` -> single option "complete directly":
 
 ```text
 Next step - complete and archive the task:
   - Claude Code / OpenCode: /complete-task {task-ref}
   - Gemini CLI: /agent-infra:complete-task {task-ref}
   - Codex CLI: $complete-task {task-ref}
+```
+
+`prFlow="required"` -> single option "go through the PR flow":
+
+```text
+Next step - create Pull Request:
+  - Claude Code / OpenCode: /create-pr {task-ref}
+  - Gemini CLI: /agent-infra:create-pr {task-ref}
+  - Codex CLI: $create-pr {task-ref}
+```
+
+field absent -> two options:
+
+```text
+Next step - choose one:
+  - Go through the PR flow:
+    - Claude Code / OpenCode: /create-pr {task-ref}
+    - Gemini CLI: /agent-infra:create-pr {task-ref}
+    - Codex CLI: $create-pr {task-ref}
+  - Complete directly (no PR):
+    - Claude Code / OpenCode: /complete-task {task-ref}
+    - Gemini CLI: /agent-infra:complete-task {task-ref}
+    - Codex CLI: $complete-task {task-ref}
 ```
 
 ### Case 2: More Work Remains
@@ -80,20 +104,4 @@ Next step - code review:
   - Codex CLI: $review-code {task-ref}
 ```
 
-### Case 4: Ready for PR
-
-If the next step is Pull Request creation:
-- update `updated_at`
-- update `agent_infra_version` from `.agents/rules/version-stamp.md`
-- record the PR plan in `task.md`
-
-Required next-step commands:
-
-```text
-Next step - create Pull Request:
-  - Claude Code / OpenCode: /create-pr {task-ref}
-  - Gemini CLI: /agent-infra:create-pr {task-ref}
-  - Codex CLI: $create-pr {task-ref}
-```
-
-> Note: beyond the four cases, if `task.md` contains a valid `pr_number`, the commit skill must sync the PR summary via `reference/pr-summary-sync.md` before entering the verification gate.
+> Note: beyond the cases above, if `task.md` contains a valid `pr_number`, the commit skill must sync the PR summary via `reference/pr-summary-sync.md` before entering the verification gate.

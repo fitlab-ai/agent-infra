@@ -19,9 +19,9 @@ const skillsWithGating = [
 ];
 
 for (const skillPath of skillsWithGating) {
-  test(`${skillPath} references requiresPullRequest gating`, () => {
+  test(`${skillPath} references prFlow gating`, () => {
     const content = read(skillPath);
-    assert.match(content, /requiresPullRequest/);
+    assert.match(content, /prFlow/);
   });
 }
 
@@ -32,17 +32,17 @@ const createPrPaths: Array<{ path: string; stopMarker: string }> = [
 ];
 
 for (const { path, stopMarker } of createPrPaths) {
-  test(`${path} describes refusal path when requiresPullRequest is false`, () => {
+  test(`${path} describes refusal path when prFlow is disabled`, () => {
     const content = read(path);
-    const gateIndex = content.indexOf("requiresPullRequest");
-    assert.ok(gateIndex >= 0, "requiresPullRequest mention required");
+    const gateIndex = content.indexOf("prFlow");
+    assert.ok(gateIndex >= 0, "prFlow mention required");
 
-    const falseIndex = content.indexOf("false", gateIndex);
+    const disabledIndex = content.indexOf("disabled", gateIndex);
     const stopIndex = content.indexOf(stopMarker, gateIndex);
 
-    assert.ok(falseIndex >= 0 && falseIndex - gateIndex < 800,
-      "expected `false` to appear near the requiresPullRequest mention");
+    assert.ok(disabledIndex >= 0 && disabledIndex - gateIndex < 800,
+      "expected `disabled` to appear near the prFlow mention");
     assert.ok(stopIndex >= 0 && stopIndex - gateIndex < 800,
-      `expected refusal language (${stopMarker}) to appear near the requiresPullRequest mention`);
+      `expected refusal language (${stopMarker}) to appear near the prFlow mention`);
   });
 }

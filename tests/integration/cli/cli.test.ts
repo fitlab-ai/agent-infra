@@ -301,7 +301,7 @@ test("agent-infra init records an optional external template source for any plat
   try {
     execFileSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
-      input: `testproj\ntestorg\n\n${ENGINE_NL}github\n\n\n~/private-templates\n\n`,
+      input: `testproj\ntestorg\n\n${ENGINE_NL}github\n\n~/private-templates\n\n`,
       stdio: "pipe"
     });
 
@@ -310,7 +310,6 @@ test("agent-infra init records an optional external template source for any plat
     );
 
     assert.deepEqual(config.platform, { type: "github" });
-    assert.equal(config.requiresPullRequest, true);
     assert.deepEqual(config.templates, {
       sources: [{ type: "local", path: "~/private-templates" }]
     });
@@ -350,7 +349,7 @@ test("agent-infra init records optional external skill sources", () => {
   try {
     execFileSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
-      input: `testproj\ntestorg\n\n${ENGINE_NL}github\n\n\n\n~/private-skills, ~/team-skills\n`,
+      input: `testproj\ntestorg\n\n${ENGINE_NL}github\n\n\n~/private-skills, ~/team-skills\n`,
       stdio: "pipe"
     });
 

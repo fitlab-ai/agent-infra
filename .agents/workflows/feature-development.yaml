@@ -1,8 +1,9 @@
 # 功能开发工作流
 # 实现新功能时使用此工作流。
 #
-# 注：步骤中的 `pr_tasks` 列表仅在 `.agents/.airc.json:requiresPullRequest !== false` 时
-# 被计入工作流进度判定（详见 .agents/skills/complete-task/SKILL.md）。
+# 注：步骤中的 `pr_tasks` 列表按「走 PR 路径」判定是否计入工作流进度：
+# `.agents/.airc.json:prFlow="required"` 始终计入；`prFlow="disabled"` 不计入；
+# 字段缺省时仅当 task.md 的 `pr_status=skipped` 排除，否则计入（详见 .agents/skills/complete-task/SKILL.md）。
 
 name: feature-development
 description: 开发新功能的端到端工作流。
@@ -176,7 +177,7 @@ steps:
       - 待修复问题列表
 
   - name: commit
-    description: 最终确认变更并创建拉取请求（PR 部分仅在项目启用 PR 流程时执行）。
+    description: 最终确认变更并创建拉取请求（PR 部分仅在走 PR 路径时执行）。
     recommended_agents:
       - claude
       - human
@@ -192,4 +193,4 @@ steps:
       - 任务文件
     outputs:
       - 已完成的任务文件（位于 .agents/workspace/completed/）
-      - 拉取请求（仅项目启用 PR 流程时）
+      - 拉取请求（仅走 PR 路径时）

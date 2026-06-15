@@ -43,39 +43,70 @@ function readUpdatedConfig(tmpDir: string): Record<string, unknown> {
   );
 }
 
-test("agent-infra update backfills missing requiresPullRequest to true", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-requires-pr-missing-"));
+function runUpdate(tmpDir: string): Record<string, unknown> {
+  execFileSync(process.execPath, cliArgs("update"), {
+    cwd: tmpDir,
+    stdio: "pipe",
+    encoding: "utf8"
+  });
+  return readUpdatedConfig(tmpDir);
+}
+
+test("agent-infra update migrates legacy requiresPullRequest=true to prFlow=required", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-prflow-true-"));
   try {
-    makeStubProject(tmpDir, {});
+    makeStubProject(tmpDir, { requiresPullRequest: true });
 
-    execFileSync(process.execPath, cliArgs("update"), {
-      cwd: tmpDir,
-      stdio: "pipe",
-      encoding: "utf8"
-    });
-
-    const updated = readUpdatedConfig(tmpDir);
-    assert.equal(updated.requiresPullRequest, true,
-      "missing requiresPullRequest field should be backfilled to true");
+    const updated = runUpdate(tmpDir);
+    assert.equal(updated.prFlow, "required",
+      "legacy requiresPullRequest=true should map to prFlow=required");
+    assert.ok(!("requiresPullRequest" in updated),
+      "legacy requiresPullRequest key should be removed after migration");
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("agent-infra update preserves an explicit requiresPullRequest=false", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-requires-pr-false-"));
+test("agent-infra update migrates legacy requiresPullRequest=false to prFlow=disabled", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-prflow-false-"));
   try {
     makeStubProject(tmpDir, { requiresPullRequest: false });
 
-    execFileSync(process.execPath, cliArgs("update"), {
-      cwd: tmpDir,
-      stdio: "pipe",
-      encoding: "utf8"
-    });
+    const updated = runUpdate(tmpDir);
+    assert.equal(updated.prFlow, "disabled",
+      "legacy requiresPullRequest=false should map to prFlow=disabled (no-PR preserved)");
+    assert.ok(!("requiresPullRequest" in updated),
+      "legacy requiresPullRequest key should be removed after migration");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
 
-    const updated = readUpdatedConfig(tmpDir);
-    assert.equal(updated.requiresPullRequest, false,
-      "explicit requiresPullRequest=false should be preserved as-is");
+test("agent-infra update leaves a config without the legacy field untouched (no prFlow added)", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-prflow-missing-"));
+  try {
+    makeStubProject(tmpDir, {});
+
+    const updated = runUpdate(tmpDir);
+    assert.ok(!("requiresPullRequest" in updated),
+      "no legacy field should be introduced");
+    assert.ok(!("prFlow" in updated),
+      "missing field means default (recommend PR); update must not add prFlow");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra update is idempotent for an already-migrated prFlow config", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-prflow-idempotent-"));
+  try {
+    makeStubProject(tmpDir, { prFlow: "required" });
+
+    const updated = runUpdate(tmpDir);
+    assert.equal(updated.prFlow, "required",
+      "already-migrated prFlow should be preserved as-is");
+    assert.ok(!("requiresPullRequest" in updated),
+      "no legacy field should be reintroduced");
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
