@@ -92,8 +92,16 @@ node .agents/scripts/validate-artifact.js gate watch-pr .agents/workspace/active
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染「下一步」命令前，先读取 `.agents/rules/next-step-output.md`，按其取短号片段把命令中的 `{task-ref}` 渲染为短号 `#NN`（未分配/已释放时回退完整 TASK-id）。
 
 按场景输出：
-- 「全绿」+ 任务锚定：说明所有 required checks 已通过、PR 可合入，并推荐下一步 `complete-task {task-ref}`（输出全部 TUI 命令格式）。
-- 「全绿」+ 仅监控降级：说明 PR 可合入；本次无关联任务，请对相应任务运行 `complete-task`。
+- 「全绿」+ 任务锚定：说明所有 required checks 已通过、PR 可合入，并按下方模板渲染下一步（`{task-ref}` 替换为短号）：
+
+  ```
+  下一步 - 完成并归档任务：
+    - Claude Code / OpenCode：/complete-task {task-ref}
+    - Gemini CLI：/agent-infra:complete-task {task-ref}
+    - Codex CLI：$complete-task {task-ref}
+  ```
+
+- 「全绿」+ 仅监控降级：说明 PR 可合入；本次无关联任务，请对相应任务运行 `complete-task`（无 `{task-ref}` 可渲染时不强行输出短号命令块）。
 - 「阻塞」：仅输出步骤 4 的阻塞说明，不推荐下一步命令。
 
 ## 完成检查清单

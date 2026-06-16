@@ -92,8 +92,16 @@ Keep the gate output in your reply as the verification evidence. Without current
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the "Next steps" commands, read `.agents/rules/next-step-output.md` and use its short-id snippet to render `{task-ref}` in the commands as the short id `#NN` (falling back to the full TASK-id when unallocated or released).
 
 Output per scenario:
-- "All green" + task-anchored: state that all required checks passed and the PR is ready to merge, and recommend the next step `complete-task {task-ref}` (output all TUI command formats).
-- "All green" + watch-only: state the PR is ready to merge; there is no linked task this run, so run `complete-task` against the relevant task.
+- "All green" + task-anchored: state that all required checks passed and the PR is ready to merge, then render the next step from the template below (`{task-ref}` becomes the short id):
+
+  ```
+  Next step - Complete and archive the task:
+    - Claude Code / OpenCode: /complete-task {task-ref}
+    - Gemini CLI: /agent-infra:complete-task {task-ref}
+    - Codex CLI: $complete-task {task-ref}
+  ```
+
+- "All green" + watch-only: state the PR is ready to merge; there is no linked task this run, so run `complete-task` against the relevant task (do not force a short-id command block when no `{task-ref}` is available).
 - "Blocked": output only the step 4 blocker explanation; do not recommend a next-step command.
 
 ## Completion Checklist
