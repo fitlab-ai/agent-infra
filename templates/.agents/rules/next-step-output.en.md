@@ -1,6 +1,9 @@
 # Next-Step Output Rule
 
-When a skill renders "Next steps" commands and the "Task info" block in its notify-user step, present the task ID consistently per this rule. Read this file before rendering next steps.
+This file defines two **independent** rules for a skill's "notify-user / Next steps" output; read this file before rendering the final output and apply both:
+
+1. **Next-step output structure**: how "Next steps" commands and the "Task info" block present the task ID (placeholders / short-id lookup / fallback).
+2. **Agent output trailing line (Completed at)**: the **very last line** of user-facing output, **independent of the "Next steps" block**, applying to normal / error / early-return paths alike.
 
 ## Placeholder semantics
 
@@ -46,9 +49,9 @@ process.stdout.write(hit?("#"+hit[0]):full);
 
 Short ids are always rendered with a `#` prefix as `#NN`, matching how task.md frontmatter renders `short_id`. `#` starts a comment in bash, so pasting example commands depends on the TUI (both the bare numeric `NN` and `#NN` are accepted by `task-short-id.js resolve`).
 
-## Completion timestamp line (Completed at)
+## Agent output trailing line (Completed at)
 
-Every skill that reads this rule and renders "Next steps / Inform user" output appends a single completion-time line as the **very last line** of its user-facing output, so users scanning across tmux windows can tell at a glance which agent finished most recently:
+This section is a standalone rule, **co-equal with the next-step output structure** and **not part of the "Next steps" block**. Every skill that renders user-facing output must append the completion-time line as the **very last line** of that output — including **complete-task, which renders no next-step commands**, and **error / early-return paths** where a precondition is unmet. This lets users scanning across tmux windows tell at a glance which agent finished most recently:
 
 ```text
 Completed at: YYYY-MM-DD HH:mm:ss

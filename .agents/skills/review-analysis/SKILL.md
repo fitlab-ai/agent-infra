@@ -92,7 +92,7 @@ node .agents/scripts/validate-artifact.js gate review-analysis .agents/workspace
 
 按 `reference/output-templates.md` 的结论分支输出，并展示所有 TUI 的下一步命令。
 
-> 渲染「下一步」命令时，`{task-ref}` 为当前任务短号 `#NN`（取值与回退见 `.agents/rules/next-step-output.md`，渲染前先读取）。其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式。
+> 渲染最终输出前先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令的 `{task-ref}` 渲染为当前任务短号 `#NN`（取值与回退见该文件），其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
 
 ## 完成检查清单
 

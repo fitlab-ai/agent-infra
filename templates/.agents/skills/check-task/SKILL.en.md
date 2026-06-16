@@ -125,7 +125,7 @@ Recommend the appropriate next skill based on the current workflow state. You mu
 >
 > **Important: if the latest review report contains any issue at all, do not use the corresponding review-passed row. Use the corresponding has-issues row instead.**
 >
-> Before rendering the commands in the table below, read `.agents/rules/next-step-output.md` and render `{task-ref}` in the commands as the short id `#NN` (falling back to the full TASK-id when unallocated or released).
+> Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the table commands below as the short id `#NN` (falling back to the full TASK-id when unallocated or released); (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
 
 | Current State              | Claude Code / OpenCode                              | Gemini CLI                               | Codex CLI                                           |
 |----------------------------|-----------------------------------------------------|------------------------------------------|-----------------------------------------------------|
