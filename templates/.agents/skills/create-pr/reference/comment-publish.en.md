@@ -9,6 +9,7 @@ Read this file before creating or updating the single reviewer-facing PR summary
 - Generate or update the `<!-- sync-pr:{task-id}:summary -->` comment with the canonical template from `.agents/rules/pr-sync.md`
 - When a matching summary comment already exists, PATCH only when the body changed; otherwise skip the write
 - In this skill, summary sync failures follow the existing `create-pr` error handling and must not roll back an already-created PR
+- Populate the "Manual Verification Required" section per the aggregation rules in `.agents/rules/pr-sync.md` (sources: plan assumptions/open questions, review-code "Environment-Blocked Findings"/"Self-Doubt"); write the explicit placeholder when there are none
 
 ## Result Reporting
 

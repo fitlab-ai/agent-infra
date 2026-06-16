@@ -9,6 +9,7 @@
 - 按 `.agents/rules/pr-sync.md` 中的唯一权威模板生成或更新 `<!-- sync-pr:{task-id}:summary -->` 评论
 - PR 已存在同标记评论时，只在正文变化时 PATCH；否则跳过写入
 - 本 skill 中，摘要同步失败沿用 `create-pr` 的现有错误处理，不回滚已经创建的 PR
+- 按 `.agents/rules/pr-sync.md` 的聚合规则填充「需人工校验」段落（来源：plan 假设/未决问题、review-code 环境性遗留/自我质疑）；无事项时写显式占位
 
 ## 结果回传
 

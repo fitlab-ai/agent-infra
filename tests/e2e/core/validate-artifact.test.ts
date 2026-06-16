@@ -391,13 +391,13 @@ test("template references point to the shared pr-sync rule", () => {
 });
 
 test("local and zh-CN rule files contain the canonical PR summary structure", () => {
-  const zhHeadings = [/## 审查摘要/, /### 关键技术决策/, /### 审查历程/, /### 测试结果/];
+  const zhHeadings = [/## 审查摘要/, /### ⚠️ 需人工校验/, /### 关键技术决策/, /### 审查历程/, /### 测试结果/];
   assertHasCanonicalPrSyncStructure(".agents/rules/pr-sync.md", zhHeadings);
   assertHasCanonicalPrSyncStructure("templates/.agents/rules/pr-sync.github.zh-CN.md", zhHeadings);
 });
 
 test("template English rule contains the canonical PR summary structure", () => {
-  const enHeadings = [/## Review Summary/, /### Key Technical Decisions/, /### Review History/, /### Test Results/];
+  const enHeadings = [/## Review Summary/, /### ⚠️ Manual Verification Required/, /### Key Technical Decisions/, /### Review History/, /### Test Results/];
   assertHasCanonicalPrSyncStructure("templates/.agents/rules/pr-sync.github.en.md", enHeadings);
 });
 

@@ -32,6 +32,7 @@ Aggregation rules:
 - build the review-history table from `review-code*` and `code*`
 - extract the test summary from `code*`
 - if one artifact class is missing, treat it as "no data for this stage" and continue
+- Manual verification section: extract items requiring human confirmation/fallback from the "Assumptions"/"Open Questions" of the latest `plan*` and the "Environment-Blocked Findings"/"Self-Doubt" sections (i.e. env-blocked items) of the latest `review-code*`; when there are none, write the explicit placeholder `- None — no items require manual verification`, never leave it empty
 
 ## Comment Body Template
 
@@ -45,6 +46,12 @@ Use this canonical comment body template:
 > **{agent}** · {task-id}
 
 **Updated At**: {current-time}
+
+### ⚠️ Manual Verification Required
+
+> Items in this change that need human confirmation/fallback; reviewers can reply under this comment once verified.
+
+- {manual-verify-item}
 
 ### Key Technical Decisions
 
