@@ -129,7 +129,7 @@ function ls(args: string[] = []): void {
     r.branch,
     r.title
   ]);
-  for (const line of formatTable(TABLE_HEADERS, tableRows)) {
+  for (const line of formatTable(TABLE_HEADERS, tableRows, { zebra: Boolean(process.stdout.isTTY) })) {
     process.stdout.write(`${line}\n`);
   }
   process.stdout.write(`Total: ${rows.length} tasks\n`);

@@ -1,7 +1,11 @@
+import pc from 'picocolors';
+
 function formatTable(
   headers: readonly string[],
-  rows: readonly (readonly string[])[]
+  rows: readonly (readonly string[])[],
+  options: { zebra?: boolean } = {}
 ): string[] {
+  const { zebra = false } = options;
   const columnCount = headers.length;
   const widths = headers.map((header, i) => {
     const headerLen = header.length;
@@ -26,7 +30,15 @@ function formatTable(
     return parts.join('  ').trimEnd();
   };
 
-  return [renderRow(headers), ...rows.map((row) => renderRow(row))];
+  const dataLines = rows.map((row, i) => {
+    const line = renderRow(row);
+    // Zebra stripes: dim even-numbered data rows (rows 2, 4, 6... -> 0-based
+    // odd index). The header and odd rows are left untouched. When zebra is
+    // off, pc.dim is never called, so the output is byte-identical to before.
+    return zebra && i % 2 === 1 ? pc.dim(line) : line;
+  });
+
+  return [renderRow(headers), ...dataLines];
 }
 
 export { formatTable };

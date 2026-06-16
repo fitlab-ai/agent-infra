@@ -32,10 +32,11 @@ type ContainerTableRow = {
   branch: string;
 };
 
-export function formatContainerTable(rows: ContainerTableRow[]): string[] {
+export function formatContainerTable(rows: ContainerTableRow[], zebra = false): string[] {
   return formatTable(
     CONTAINER_TABLE_HEADERS,
-    rows.map((r) => [r.row, r.shortId, r.name, r.status, r.branch])
+    rows.map((r) => [r.row, r.shortId, r.name, r.status, r.branch]),
+    { zebra }
   );
 }
 
@@ -76,7 +77,7 @@ export function ls(args: string[] = []): void {
         branch: container.branch
       };
     });
-    for (const line of formatContainerTable(tableRows)) {
+    for (const line of formatContainerTable(tableRows, Boolean(process.stdout.isTTY))) {
       process.stdout.write(`  ${line}\n`);
     }
     process.stdout.write(`  Total: ${ordered.length} containers\n`);
