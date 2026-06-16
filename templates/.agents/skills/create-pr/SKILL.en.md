@@ -119,7 +119,16 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the "Next steps" commands, read `.agents/rules/next-step-output.md` and use its short-id snippet to render `{task-ref}` in the commands as the short id `#NN` (falling back to the full TASK-id when unallocated or released).
 
-Explain the created PR URL, summarize metadata sync and summary-comment results, and recommend `complete-task {task-id}` once the workflow is truly done.
+Explain the created PR URL, summarize metadata sync and summary-comment results, and recommend watching the PR's checks next (render `{task-ref}` as the short id `#NN` per `.agents/rules/next-step-output.md`):
+
+```
+Next step - Watch PR checks (auto self-heal until required checks are green):
+  - Claude Code / OpenCode: /watch-pr {task-ref}
+  - Gemini CLI: /agent-infra:watch-pr {task-ref}
+  - Codex CLI: $watch-pr {task-ref}
+```
+
+Once green, `watch-pr` then guides toward `complete-task {task-ref}`.
 
 ## Notes
 

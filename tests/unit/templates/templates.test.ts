@@ -26,7 +26,8 @@ const highFrequencyCommands = [
   "review-analysis",
   "review-code",
   "review-plan",
-  "test"
+  "test",
+  "watch-pr"
 ];
 
 const lowFrequencyCommands = [

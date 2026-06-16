@@ -66,6 +66,11 @@ const commandSpecs: Record<string, CommandSpec> = {
     en: "Create PR: $ARGUMENTS",
     zh: "创建 PR：$ARGUMENTS"
   },
+  "watch-pr": {
+    usage: "[task-id | --pr <number>]",
+    en: "Watch PR checks: $ARGUMENTS",
+    zh: "监控 PR 检查：$ARGUMENTS"
+  },
   "create-release-note": {
     usage: "<ver> [prev]",
     en: "Generate release note: $ARGUMENTS",

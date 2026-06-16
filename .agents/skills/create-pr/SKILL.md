@@ -119,7 +119,16 @@ node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/activ
 
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染「下一步」命令前，先读取 `.agents/rules/next-step-output.md`，按其取短号片段把命令中的 `{task-ref}` 渲染为短号 `#NN`（未分配/已释放时回退完整 TASK-id）。
 
-说明 PR URL、元数据同步结果、摘要评论结果，并在工作流真正完成后推荐执行 `complete-task {task-id}`。
+说明 PR URL、元数据同步结果、摘要评论结果，并推荐下一步进入 PR 监控（按 `.agents/rules/next-step-output.md` 把 `{task-ref}` 渲染为短号 `#NN`）：
+
+```
+下一步 - 监控 PR 检查（required checks 全绿前自动自愈）：
+  - Claude Code / OpenCode：/watch-pr {task-ref}
+  - Gemini CLI：/agent-infra:watch-pr {task-ref}
+  - Codex CLI：$watch-pr {task-ref}
+```
+
+`watch-pr` 全绿后会再引导 `complete-task {task-ref}`。
 
 ## 注意事项
 

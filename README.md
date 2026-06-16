@@ -565,6 +565,7 @@ agent-infra ships with **a rich set of built-in AI skills**. They are organized 
 | Skill | Description | Parameters | Recommended use case |
 |-------|-------------|------------|----------------------|
 | `create-pr` | Open a Pull Request to an inferred or explicit target branch. | `task-id` (optional), `target-branch` (optional) | Publish reviewed changes for merge, with optional explicit task linkage after a fresh session. |
+| `watch-pr` | Watch a PR's required checks and self-heal failures until green. | `task-id` or `--pr <number>` (optional; defaults to the current branch's PR) | Monitor CI after create-pr and auto-fix simple failures before merging. |
 
 <a id="code-quality"></a>
 

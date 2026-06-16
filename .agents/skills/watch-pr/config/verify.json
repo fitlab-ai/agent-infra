@@ -1,0 +1,22 @@
+{
+  "skill": "watch-pr",
+  "checks": {
+    "task-meta": {
+      "required_fields": [
+        "id",
+        "type",
+        "workflow",
+        "status",
+        "created_at",
+        "updated_at",
+        "agent_infra_version",
+        "current_step",
+        "assigned_to"
+      ]
+    },
+    "activity-log": {
+      "expected_action_pattern": "(Watch PR|Watching PR) \\(Round \\d+\\)",
+      "freshness_minutes": 30
+    }
+  }
+}
