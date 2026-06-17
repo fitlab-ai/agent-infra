@@ -304,7 +304,7 @@ test("ensureSandboxDiscoveryReadmes continues after one scaffold write fails", a
   }
 });
 
-test("scaffold README links point to headings that exist in project READMEs", async () => {
+test("scaffold README links point to headings that exist in the docs sandbox pages", async () => {
   const scaffold = await loadFreshEsm<ReadmeScaffoldModule>("lib/sandbox/readme-scaffold.js");
   const tmpDir = makeTempDir("agent-infra-readme-anchor-check-");
   const dotfilesDir = path.join(tmpDir, "dotfiles");
@@ -313,17 +313,24 @@ test("scaffold README links point to headings that exist in project READMEs", as
   try {
     const results = scaffold.ensureSandboxDiscoveryReadmes({ dotfilesDir, shareBase }, "feat/x");
     const generatedReadmes = results.map((result) => fs.readFileSync(result.path, "utf8"));
-    const englishAnchors = githubHeadingAnchors(fs.readFileSync("README.md", "utf8"));
-    const chineseAnchors = githubHeadingAnchors(fs.readFileSync("README.zh-CN.md", "utf8"));
+    const englishAnchors = githubHeadingAnchors(fs.readFileSync("docs/en/sandbox.md", "utf8"));
+    const chineseAnchors = githubHeadingAnchors(fs.readFileSync("docs/zh-CN/sandbox.md", "utf8"));
 
+    let englishChecked = 0;
+    let chineseChecked = 0;
     for (const content of generatedReadmes) {
-      for (const fragment of readmeFragments(content, "README.md")) {
-        assert.equal(englishAnchors.has(fragment), true, `missing README.md anchor: ${fragment}`);
+      for (const fragment of readmeFragments(content, "docs/en/sandbox.md")) {
+        assert.equal(englishAnchors.has(fragment), true, `missing docs/en/sandbox.md anchor: ${fragment}`);
+        englishChecked += 1;
       }
-      for (const fragment of readmeFragments(content, "README.zh-CN.md")) {
-        assert.equal(chineseAnchors.has(fragment), true, `missing README.zh-CN.md anchor: ${fragment}`);
+      for (const fragment of readmeFragments(content, "docs/zh-CN/sandbox.md")) {
+        assert.equal(chineseAnchors.has(fragment), true, `missing docs/zh-CN/sandbox.md anchor: ${fragment}`);
+        chineseChecked += 1;
       }
     }
+
+    assert.ok(englishChecked > 0, "expected at least one docs/en/sandbox.md link fragment in scaffolded READMEs");
+    assert.ok(chineseChecked > 0, "expected at least one docs/zh-CN/sandbox.md link fragment in scaffolded READMEs");
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

@@ -26,19 +26,13 @@
   <strong>English</strong> · <a href="./README.zh-CN.md">中文</a>
 </p>
 
-<a id="why-agent-infra"></a>
-
 ## Why agent-infra?
 
 Teams increasingly mix Claude Code, Codex, Gemini CLI, OpenCode, and other AI TUIs in the same repository, but each tool tends to introduce its own commands, prompts, and local conventions. Without a shared layer, the result is fragmented workflows, duplicated setup, and task history that is difficult to audit.
 
 agent-infra standardizes that shared infrastructure. It gives every supported AI TUI the same task lifecycle, the same skill vocabulary, the same project governance files, isolated development sandboxes, and the same upgrade path, so teams can switch tools without rebuilding process from scratch.
 
-<a id="see-it-in-action"></a>
-
 ## See it in Action
-
-### Install & Initialize
 
 <p align="center">
   <img src="./assets/demo-init.gif" alt="CLI install and initialize demo" width="100%" style="max-width: 720px;">
@@ -55,35 +49,13 @@ Once initialized, open the project in your AI TUI and install the latest skills:
 **Scenario**: Issue #42 reports *"Login API returns 500 when email contains a plus sign"*. Here is the full fix lifecycle — AI does the heavy lifting, you stay in control:
 
 ```bash
-/import-issue 42
+/import-issue 42           # AI reads the issue, creates a task, extracts requirements
+/analyze-task <task-id>    # AI scans the codebase, finds the root cause, writes analysis.md
+/review-analysis <task-id> # AI self-reviews: "Approved. 0 blockers — proceed to design."
+/plan-task <task-id>       # AI proposes a fix plan
+/review-plan <task-id>     # AI self-reviews the plan: "Approved. Ready for implementation."
 ```
 
-> AI reads the issue, creates `TASK-20260319-100000`, and extracts requirements.
-
-```bash
-/analyze-task TASK-20260319-100000
-```
-
-> AI scans the codebase, identifies `src/auth/login.ts` as the root cause, and writes `analysis.md`.
-
-```bash
-/review-analysis TASK-20260319-100000
-```
-
-> AI self-reviews the analysis: *"Approved. 0 blockers, 0 major, 0 minor — scope and root cause are clear, proceed to design."*
-
-```bash
-/plan-task TASK-20260319-100000
-```
-
-> AI proposes a fix plan: *"Sanitize the email input in `LoginService.validate()` and add a dedicated unit test."*
-
-```bash
-/review-plan TASK-20260319-100000
-```
-
-> AI self-reviews the plan: *"Approved with no findings. Ready for implementation."*
->
 > **You review the plan and reply in natural language:**
 
 ```
@@ -94,46 +66,17 @@ Just fix it at the application layer in LoginService.
 > AI re-runs `/plan-task` to update the plan accordingly and confirms.
 
 ```bash
-/code-task TASK-20260319-100000
-```
-
-> AI writes the fix, adds a test case for `user+tag@example.com`, and runs all tests — green.
-
-```bash
-/review-code TASK-20260319-100000
-```
-
-> AI reviews its own code: *"Approved. 0 blockers, 0 major, 1 minor (missing JSDoc)."*
-
-```bash
-/code-task TASK-20260319-100000
-```
-
-> AI fixes the minor issue and re-validates.
-
-```bash
+/code-task <task-id>       # AI writes the fix, adds a test for user+tag@example.com — green
+/review-code <task-id>     # AI reviews its own code: "0 blockers, 1 minor (missing JSDoc)."
+/code-task <task-id>       # AI fixes the minor issue and re-validates
 /commit
-/create-pr TASK-20260319-100000
-/complete-task TASK-20260319-100000
+/create-pr <task-id>       # PR opened, auto-linked to issue #42
+/complete-task <task-id>   # task archived
 ```
-
-> Commit created, PR #43 opened (auto-linked to issue #42), task archived.
 
 **11 commands. 1 natural-language correction. From issue to merged PR.** That is the entire SOP — programming can have a standard operating procedure too.
 
-Every command above works the same way in Claude Code, Codex, Gemini CLI, and OpenCode. Switch tools mid-task — the workflow state follows.
-
-### What each skill does behind the scenes
-
-These are not thin command aliases. Each skill encapsulates standardized processes that are tedious and error-prone when done by hand:
-
-- **Structured artifacts** — every step produces a templated document (`analysis.md`, `review-analysis.md`, `plan.md`, `review-plan.md`, `code.md`, `review-code.md`) with consistent structure, not free-form notes
-- **Multi-round versioning** — requirements changed? Run `analyze-task` again to get `analysis-r2.md`; the full revision history is preserved
-- **Severity-classified reviews** — `review-code` categorizes findings into Blocker / Major / Minor with file paths and fix suggestions, not a vague "looks good"
-- **Cross-tool state continuity** — `task.md` records who did what and when; Claude can analyze, Codex can implement, Gemini can review — context transfers seamlessly
-- **Audit trail and co-authorship** — every step appends to the Activity Log; the final commit includes `Co-Authored-By` lines for all participating AI agents
-
-<a id="key-features"></a>
+Every command above works the same way in Claude Code, Codex, Gemini CLI, and OpenCode. Switch tools mid-task — the workflow state follows. For what each skill does under the hood, see [Built-in AI Skills](./docs/en/skills.md).
 
 ## Key Features
 
@@ -142,8 +85,6 @@ These are not thin command aliases. Each skill encapsulates standardized process
 - **Bilingual project docs**: English-first docs with synchronized Chinese translations
 - **Template-source architecture**: `templates/` mirrors the rendered project structure
 - **AI-assisted updates**: template changes can be merged while preserving project-specific customization
-
-<a id="quick-start"></a>
 
 ## Quick Start
 
@@ -211,302 +152,19 @@ Open the project in any AI TUI and run `update-agent-infra`:
 
 This detects the packaged template version and renders all managed files. The same command is used both for first-time setup and for future template upgrades.
 
-### Sandbox aliases and GitHub CLI
-
-`ai sandbox create` now bootstraps the host-side aliases file at `~/.agent-infra/aliases/sandbox.sh` on first run. The generated file includes ready-to-edit yolo shortcuts for Claude, Codex, Gemini CLI, and OpenCode, and every sandbox syncs that file into `/home/devuser/.bash_aliases`.
-
-The sandbox image also preinstalls `gh`. When `gh auth token` succeeds on the host, `ai sandbox create` injects the token into the container as `GH_TOKEN`, so `gh` commands work inside the sandbox without extra setup.
-
-`ai sandbox rebuild` keeps Docker's build cache by default, so it quickly retags the sandbox image without refreshing every package. Use `ai sandbox rebuild --refresh` when you want to upgrade the image: it passes `--no-cache --pull` to Docker, pulls the current Ubuntu base image, and reruns the apt, tmux build, and global npm install layers. Claude Code updates are disabled inside the container, and OpenCode startup update checks are disabled; `--refresh` is the routine upgrade path for sandbox-managed tools. Manual `opencode upgrade` remains outside this guard. The default `python3` provided by the Ubuntu 24.04 sandbox base is Python 3.12, so scripts that hard-code Python 3.10 paths may need adjustment.
-
-`ai sandbox exec` also forwards a small terminal-detection whitelist (`TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `LC_TERMINAL`, `LC_TERMINAL_VERSION`) into the container. This keeps interactive TUIs aligned with the host terminal for behaviors such as Claude Code's Shift+Enter newline support, without passing through the full host environment.
-
-`ai sandbox start <branch | TASK-id | N | '#N'>` recovers a sandbox container that has stopped — for example after the host Docker daemon was restarted or replaced (a common case is installing OrbStack over an existing Docker), which leaves the container `Exited`. It only starts a container that already exists and is stopped; if none exists it points you to `ai sandbox create`, and a container that is already running is left untouched. `ai sandbox exec <branch>` performs the same recovery automatically: when the target container exists but is stopped, it starts the container first and then enters it. Because each worktree and per-AI state directory is persisted on the host, restarting a stopped container is safe and loses no data.
-
-On macOS, interactive `ai sandbox exec <branch>` sessions can bridge image paste into the sandbox. When you press `Ctrl+V` and the host clipboard currently holds an image, agent-infra reads the image from the host clipboard, writes a PNG under `~/.agent-infra/clipboard/`, and injects the container path as bracketed paste so Claude Code, Codex, Gemini CLI, and OpenCode can attach it. The host clipboard is only read, never rewritten. The bridge is best-effort: existing sandboxes must be rebuilt to receive the `/clipboard` mount, and if the optional pty dependency or clipboard probe is unavailable the session falls back to the normal interactive path. Set `AI_SANDBOX_NO_CLIPBOARD_BRIDGE=1` to skip the bridge and enter the normal interactive path directly when diagnosing mouse, scrolling, or other input issues.
-
-When you run the sandbox from a remote Mac over SSH, use `ai cp <ssh-alias>` on the Mac in front of you to push the local clipboard image to that remote Mac first. Copy an image with Cmd+C, run `ai cp mini`, then return to the existing SSH session and press `Ctrl+V`; the sandbox bridge reads the remote Mac's NSPasteboard and injects the image as usual. This command handles PNG images only and uses non-interactive ssh/scp with key-based authentication. For now both the sender and the remote must be macOS—the remote NSPasteboard is written via `osascript`—but the remote-write step is the natural extension point for other platforms later.
-
-`ai sandbox exec` and `ai sandbox refresh` reconcile Claude Code credentials in both directions across the host credential store and every sandbox project copy under `~/.agent-infra/credentials/*`. When a long-running sandbox refreshes OAuth tokens first, the next entry or refresh command writes the freshest valid copy back to the host Keychain or `~/.claude/.credentials.json`; when the host is fresher, it updates the project copies. If every copy is stale, `ai sandbox refresh` probes `claude /status` and asks you to log in only when the probe cannot recover credentials.
-
-### Host-sandbox file exchange
-
-`ai sandbox create` mounts two writable directories for dropping files between
-the host and the sandbox without polluting the git worktree:
-
-- `/share/common` <- `~/.agent-infra/share/<project>/common/` - visible to every
-  sandbox of the same project, regardless of branch.
-- `/share/branch` <- `~/.agent-infra/share/<project>/branches/<branch>/` -
-  exclusive to the current branch sandbox.
-- `/clipboard` <- `~/.agent-infra/clipboard/` - read-only image paste bridge
-  storage on macOS.
-
-These paths are intentionally hardcoded; there is no `.airc.json` knob. Both
-host directories are created automatically on first `create`. When you
-`ai sandbox rm <branch>` or `ai sandbox rm --all`, you will be prompted (default
-yes) to clean up the corresponding share dirs alongside the worktrees.
-Use `ai sandbox prune --dry-run` to inspect orphaned per-branch state dirs left
-behind by older versions or interrupted cleanup, then `ai sandbox prune` to
-remove only dirs without an active sandbox container.
-Existing sandboxes pick up these mounts after `ai sandbox rm <branch>` and
-`ai sandbox create <branch>`.
-
-On first `ai sandbox create`, agent-infra writes a bilingual `README.md` into
-`~/.agent-infra/share/<project>/common/` and each `branches/<branch>/`
-directory to help you discover these channels. The READMEs are idempotent and
-can be safely deleted; the scaffold only writes them when missing.
-
-### User-level dotfiles channel
-
-`ai sandbox create` also mounts an optional read-only channel for host user preferences:
-
-- `/dotfiles` <- `~/.agent-infra/dotfiles/` - read-only, host-owned source.
-
-The host tree mirrors the expected paths under the container `$HOME`, in the
-same style as GNU stow or chezmoi:
-
-```text
-~/.agent-infra/dotfiles/
-├── .tmux.conf
-└── .config/
-    ├── lazygit/config.yml
-    └── yazi/yazi.toml
-```
-
-On each sandbox entry, `sandbox-dotfiles-link` links every file to
-`$HOME/<relative-path>` with `ln -sfn`, overriding image defaults. If the host
-directory does not exist, the mount and link step are skipped.
-
-To add future preferences such as `starship.toml` or `.gitconfig.local`, put
-files in `~/.agent-infra/dotfiles/`; no Dockerfile or `ai sandbox create`
-changes are needed.
-
-#### Symlinks as pointers to host files
-
-You can place symlinks inside `~/.agent-infra/dotfiles/` to point at real files
-on your host:
-
-```bash
-ln -s ~/.tmux.conf ~/.agent-infra/dotfiles/.tmux.conf
-ln -s ~/.config/lazygit ~/.agent-infra/dotfiles/.config/lazygit
-```
-
-Before each `ai sandbox create` and `ai sandbox enter`, agent-infra
-dereferences the dotfiles tree into
-`~/.agent-infra/.cache/dotfiles-resolved/<project>/` and mounts that snapshot
-into the container. Editing the host source file, then re-entering the sandbox,
-is enough to pick up the latest content.
-
-Dangling symlinks are skipped with a stderr warning. Symlink cycles and deeply
-nested directories beyond 32 levels are also skipped with a warning. Symlinks
-pointing outside `$HOME` are accepted as long as the host user can read the
-target.
-
-> **Do not put secrets in `~/.agent-infra/dotfiles/`.** The mount is read-only
-> inside the container, but the full preference tree is linked into every
-> project sandbox. Do not place `.ssh/`, `.aws/credentials`, `.netrc`,
-> `.gnupg/`, `.npmrc` files containing `_authToken`, AI tool OAuth/access token
-> files, or `.gitconfig` there. Use the dedicated SSH and credential channels,
-> and prefer `.gitconfig.local` with `[include]` for local Git preferences.
-
-**Protected paths** are ignored by the hook even if they appear under
-`~/.agent-infra/dotfiles/`:
-
-| Path pattern | Reason |
-|---|---|
-| `.ssh/*` | Host SSH credentials are managed by the read-only SSH mount. |
-| `.gnupg/*` | GPG private material is managed by `gpg-agent`. |
-| `.claude/*`, `.codex/*`, `.gemini/*` | AI tool credentials use dedicated bind mounts. |
-| `.config/opencode/*`, `.local/share/opencode/*` | OpenCode credentials and data use dedicated bind mounts. |
-| `.host-shell-config/*` | agent-infra managed shell and Git configuration. |
-| `.gitconfig`, `.gitignore_global`, `.stCommitMsg`, `.bash_aliases` | agent-infra symlinks these to `.host-shell-config/`, including `safe.directory` and GPG sync state. |
-| `README.md` | agent-infra scaffolds a discoverability README at the dotfiles root on first create; the link hook ignores it so `$HOME/README.md` is not shadowed. |
-
-Other existing real directories, such as `~/.config/` or `~/.cache/`, are not
-replaced by top-level dotfiles. If a file conflicts with one of those
-directories, the hook prints a warning and skips it:
-
-```text
-sandbox-dotfiles-link: skipping /home/devuser/.config (existing directory; use nested path like .config/<file> instead)
-```
-
-Use nested paths such as `~/.agent-infra/dotfiles/.config/lazygit/config.yml`
-instead of treating `.config` as a top-level file.
-
-<a id="architecture-overview"></a>
-
-## Architecture Overview
-
-agent-infra is intentionally simple: a bootstrap CLI creates the seed configuration, then AI skills and workflows take over.
-
-### End-to-End Flow
-
-1. **Install** — `npm install -g @fitlab-ai/agent-infra` (or `brew install fitlab-ai/tap/agent-infra` on macOS, or use the shell script wrapper)
-2. **Initialize** — `ai init` in the project root to generate `.agents/.airc.json` and install the seed command
-3. **Render** — run `update-agent-infra` in any AI TUI to detect the bundled template version and generate all managed files
-4. **Develop** — use built-in skills to drive the full lifecycle: `analysis → analysis-review → design → design-review → code → code-review → commit`
-5. **Update** — run `update-agent-infra` again whenever a new template version is available
-
-### Layered Architecture
-
-```text
-┌───────────────────────────────────────────────────────┐
-│                     AI TUI Layer                      │
-│  Claude Code  ·  Codex  ·  Gemini CLI  ·  OpenCode    │
-└──────────────────────────┬────────────────────────────┘
-                           │ slash commands
-                           ▼
-┌───────────────────────────────────────────────────────┐
-│                     Shared Layer                      │
-│         Skills  ·  Workflows  ·  Templates            │
-└──────────────────────────┬────────────────────────────┘
-                           │ renders into
-                           ▼
-┌───────────────────────────────────────────────────────┐
-│                    Project Layer                      │
-│               .agents/  ·  AGENTS.md                  │
-└───────────────────────────────────────────────────────┘
-```
-
-<a id="platform-support"></a>
-
-## Platform Support
-
-agent-infra runs on macOS, Linux, and Windows. The CLI itself only needs Node.js (>=22); container-related features (`ai sandbox *`) additionally need Docker.
-
-### Sandbox engine selection
-
-`sandbox.engine` in `.agents/.airc.json` selects the container engine. When it is `null` or omitted, agent-infra uses the platform default:
-
-- Linux: `native`
-- macOS: `colima`
-- Windows: `wsl2`
-
-You can override the engine in `.agents/.airc.json`. Valid engines are platform-specific:
-
-- Linux: `native`, `docker-desktop`
-- macOS: `colima`, `orbstack`, `docker-desktop`
-- Windows: `wsl2`, `native`, `docker-desktop`
-
-### macOS
-
-- `ai init`, `ai sync`, etc.: works out of the box after `npm install -g @fitlab-ai/agent-infra` (or Homebrew).
-- `ai sandbox *`: requires Colima, OrbStack, or Docker Desktop. Colima is the default engine on macOS — when it is selected and the `colima` command is missing, agent-infra auto-installs and starts Colima via Homebrew on first run. To use OrbStack or Docker Desktop instead, set `sandbox.engine` in `.agents/.airc.json`.
-
-#### Engine resource configuration
-
-| Engine | `vm.cpu` | `vm.memory` | `vm.disk` | Apply mode | Notes |
-|--------|----------|-------------|-----------|------------|-------|
-| Colima | applied | applied | applied | on-start | VM must be restarted (`ai sandbox vm stop && ai sandbox vm start`) for changes to take effect. |
-| OrbStack | applied | applied | warned | hot | Applied via `orb config set` on every invocation. OrbStack manages disk via thin provisioning. |
-| Docker Desktop | warned | warned | warned | manual | Resources must be set in Docker Desktop GUI (Settings -> Resources). |
-
-`vm.memory` and `--memory` values are expressed in GiB.
-
-#### SSH / locked keychain
-
-On macOS over SSH, the login keychain may be locked and reject non-interactive reads or writes with `errSecInteractionNotAllowed`. You can unlock it on the host and re-run `ai sandbox refresh`:
-
-```bash
-security unlock-keychain ~/Library/Keychains/login.keychain-db
-ai sandbox refresh
-```
-
-For long-lived SSH sessions or CI, bypass the keychain with `AGENT_INFRA_CLAUDE_CREDENTIALS_FILE`. macOS stores Claude Code credentials in the keychain by default, so seed the override file once from a session where the keychain is unlocked:
-
-```bash
-security unlock-keychain ~/Library/Keychains/login.keychain-db
-umask 077 && mkdir -p "$HOME/.agent-infra" && \
-  security find-generic-password -s "Claude Code-credentials" -w \
-  > "$HOME/.agent-infra/claude-credentials.json"
-chmod 600 "$HOME/.agent-infra/claude-credentials.json"
-```
-
-Then on the SSH / CI side:
-
-```bash
-export AGENT_INFRA_CLAUDE_CREDENTIALS_FILE="$HOME/.agent-infra/claude-credentials.json"
-ai sandbox refresh
-```
-
-After that, sandbox create, exec, and refresh use the file instead of the keychain for Claude Code credential reads and writes.
-
-### Linux
-
-- `ai init`, `ai sync`, etc.: works out of the box after `npm install -g @fitlab-ai/agent-infra`.
-- `ai sandbox *`: requires Docker Engine on the host. Quick setup:
-
-  ```bash
-  # 1. Install Docker Engine — see https://docs.docker.com/engine/install/
-  # 2. Start the daemon and enable on boot
-  sudo systemctl enable --now docker
-  # 3. Skip 'sudo' for docker: add yourself to the docker group
-  sudo usermod -aG docker $USER && newgrp docker
-  ```
-
-  Validate with `docker info` — it should succeed without sudo.
-
-  GPG signing works when the host `gpg-agent` and signing key are available; if key sync fails, `ai sandbox create` falls back to a sanitized Git config so commits still work without host signing state.
-
-#### Engine resource configuration
-
-Linux uses native Docker on the host kernel, so there is no managed VM. `sandbox.vm.*` and the `--cpu / --memory` flags do not apply. To cap container resources, use `docker run --cpus / --memory` per container or configure host cgroups.
-
-#### Rootless Docker (optional)
-
-**Skip this section if you followed the Quick setup above.** The Quick setup installs the default rootful Docker, which works out of the box with `ai sandbox` — no extra configuration is required.
-
-Rootless Docker is a separate Docker installation where the daemon runs as your normal user instead of `root`. It is typically chosen on shared hosts, multi-tenant servers, or when a security policy forbids a root-owned daemon. If you have intentionally installed rootless Docker (or plan to), follow the steps below; otherwise stay with rootful.
-
-To install and verify rootless Docker:
-
-```bash
-sudo apt install -y uidmap slirp4netns dbus-user-session
-dockerd-rootless-setuptool.sh install
-systemctl --user enable --now docker
-export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
-docker info
-```
-
-Add the `DOCKER_HOST` export to your shell startup file after validation.
-
-When rootless Docker is detected, agent-infra builds the sandbox image with `HOST_UID=0` and `HOST_GID=0`. Inside the container the sandbox user can read bind mounts such as `~/.ssh` without relaxing host file permissions. On the host, the daemon and container processes still run under the current user, so this does not grant host root privileges.
-
-Known rootless differences:
-
-- Networking uses slirp4netns by default and can be slower than rootful bridge networking.
-- Processes run as UID 0 inside the container, unlike rootful Docker where agent-infra mirrors the host UID.
-- The CI rootless matrix is initially allowed to fail while runner stability is observed.
-
-Troubleshooting:
-
-- If `docker info` fails, check `systemctl --user status docker` and confirm `DOCKER_HOST` points at `$XDG_RUNTIME_DIR/docker.sock`.
-- If SSH files are still unreadable inside the sandbox, confirm the shell has not overridden `DOCKER_HOST` or Docker build arguments.
-
-#### Known limitations on Linux
-
-These configurations are not actively tested in this release:
-
-- **Podman** instead of Docker: Works on Fedora 40+ and other `dnf`-based RHEL family distros (RHEL, CentOS Stream, Rocky, Alma) via the `podman-docker` shim (`sudo dnf install podman podman-docker`; optionally `sudo touch /etc/containers/nodocker` to silence its per-command notice).
-- **SELinux-enforcing** hosts (Fedora / RHEL): `ai sandbox create` automatically labels bind mounts with Docker's shared `:z` flag — no setup required. Set `AGENT_INFRA_SELINUX_DISABLE=1` to opt out for debugging.
-- `ai sandbox vm` is a no-op on Linux. Linux uses native Docker directly with no VM to manage; use `ai sandbox create`, `ai sandbox exec`, `ai sandbox start`, `ai sandbox refresh`, `ai sandbox ls`, `ai sandbox rebuild`, `ai sandbox rm`, and `ai sandbox prune` directly.
-
-### Windows
-
-- `ai init`, `ai sync`, etc.: should work after `npm install -g @fitlab-ai/agent-infra` (Node.js >= 22). Not actively tested in this release.
-- `ai sandbox *`: supported on Windows via WSL2 + Docker Desktop.
-
-Before running `ai sandbox create`, install Windows 11 with WSL2, configure a default Linux distribution, install Docker Desktop, and enable Docker Desktop's WSL integration for that distribution.
-
-You can run the CLI from PowerShell or Git Bash, but the project path must be visible from WSL, such as `C:\Users\you\project` or another drive mounted under `/mnt/<drive>`. UNC paths are not supported for sandbox mounts. If the Windows entrypoint cannot reach Docker through WSL2, run the same command from inside the WSL distribution as a fallback.
-
-`ai sandbox vm` manages only the macOS Colima VM. On Windows, manage Docker Desktop and WSL2 with their native tools.
-
-#### Engine resource configuration
-
-WSL2 is the default sandbox engine on Windows. `sandbox.vm.cpu`, `sandbox.vm.memory`, and `--cpu / --memory` flags are not applied automatically when using WSL2 — configure CPU and memory limits in Docker Desktop (Settings → Resources) instead. `sandbox.vm.disk` is not applicable to WSL2. `vm.memory` and `--memory` values are expressed in GiB.
-
-<a id="what-you-get"></a>
+## Core Commands
+
+The most-used lifecycle commands, in delivery order. The command prefix varies by TUI (`/skill` in Claude Code/OpenCode, `$skill` in Codex, `/{{project}}:skill` in Gemini CLI); the workflow semantics stay the same.
+
+| Command | Purpose |
+|---------|---------|
+| `create-task` / `import-issue` | Start a task from a description or a GitHub Issue |
+| `analyze-task` → `review-analysis` | Capture scope and risks, then review the analysis |
+| `plan-task` → `review-plan` | Design the approach, then review the plan |
+| `code-task` → `review-code` | Implement and test, then run a structured code review |
+| `commit` → `create-pr` → `complete-task` | Commit, open a PR, and archive the task |
+
+See the full catalog — task status, release, security, and project-maintenance skills — in [Built-in AI Skills](./docs/en/skills.md).
 
 ## What You Get
 
@@ -526,439 +184,23 @@ my-project/
 └── AGENTS.md              # Universal AI agent instructions
 ```
 
-<a id="built-in-ai-skills"></a>
-
-## Built-in AI Skills
-
-agent-infra ships with **a rich set of built-in AI skills**. They are organized by use case, but they all share the same design goal: every AI TUI should be able to execute the same workflow vocabulary in the same repository.
-
-<a id="task-lifecycle"></a>
-
-### Task Lifecycle
-
-| Skill | Description | Parameters | Recommended use case |
-|-------|-------------|------------|----------------------|
-| `create-task` | Create a task scaffold from a natural-language request and cascade Issue creation through the platform rule when available. | `description` | Start a new feature, bug-fix, or improvement from scratch. |
-| `import-issue` | Import a GitHub Issue into the local task workspace. | `issue-number` | Convert an existing Issue into an actionable task folder. |
-| `analyze-task` | Produce a requirement analysis artifact for an existing task. | `task-id` | Capture scope, risks, and impacted files before designing. |
-| `review-analysis` | Review the requirement analysis and classify findings by severity. | `task-id` | Confirm the analysis is complete before design. |
-| `plan-task` | Write the technical plan with a review checkpoint. | `task-id` | Define the approach after analysis approval. |
-| `review-plan` | Review the technical plan and classify findings by severity. | `task-id` | Confirm the design is actionable before coding. |
-| `code-task` | Implement the approved plan or fix code review findings, producing a code report. | `task-id` | Write code, tests, and docs after plan approval, or handle review feedback. |
-| `review-code` | Review the code and classify findings by severity. | `task-id` | Run a structured code review before merging. |
-| `complete-task` | Mark the task complete and archive it after all gates pass. | `task-id` | Close out a task after review, tests, and commit are done. |
-
-<a id="task-status"></a>
-
-### Task Status
-
-| Skill | Description | Parameters | Recommended use case |
-|-------|-------------|------------|----------------------|
-| `check-task` | Inspect the current task status, workflow progress, and next step. | `task-id` | Check progress without modifying task state. |
-| `block-task` | Move a task to blocked state and record the blocker reason. | `task-id`, `reason` (optional) | Pause work when an external dependency or decision is missing. |
-| `restore-task` | Restore local task files from GitHub Issue sync comments. | `issue-number`, `task-id` (optional) | Recover a task workspace after switching machines or clearing local state. |
-
-<a id="issue-and-pr"></a>
-
-### Issue and PR
-
-| Skill | Description | Parameters | Recommended use case |
-|-------|-------------|------------|----------------------|
-| `create-pr` | Open a Pull Request to an inferred or explicit target branch. | `task-id` (optional), `target-branch` (optional) | Publish reviewed changes for merge, with optional explicit task linkage after a fresh session. |
-| `watch-pr` | Watch a PR's required checks and self-heal failures until green. | `task-id` or `--pr <number>` (optional; defaults to the current branch's PR) | Monitor CI after create-pr and auto-fix simple failures before merging. |
-
-<a id="code-quality"></a>
-
-### Code Quality
-
-| Skill | Description | Parameters | Recommended use case |
-|-------|-------------|------------|----------------------|
-| `commit` | Create a Git commit with task updates and copyright-year checks. | None | Finalize a coherent change set after tests pass. |
-| `test` | Run the standard project validation flow. | None | Validate compile checks and unit tests after a change. |
-| `test-integration` | Run integration or end-to-end validation. | None | Verify cross-module or workflow-level behavior. |
-
-<a id="release-skills"></a>
-
-### Release
-
-| Skill | Description | Parameters | Recommended use case |
-|-------|-------------|------------|----------------------|
-| `release` | Execute the version release workflow. | `version` (`X.Y.Z`) | Publish a new project release. |
-| `create-release-note` | Generate release notes from PRs and commits. | `version`, `previous-version` (optional) | Prepare a changelog before shipping. |
-| `post-release` | Run post-release follow-up tasks (version bump, artifact rebuild, optional demo capture). | None | Finalize the release cycle after pushing a release tag. |
-
-<a id="security-skills"></a>
-
-### Security
-
-| Skill | Description | Parameters | Recommended use case |
-|-------|-------------|------------|----------------------|
-| `import-dependabot` | Import a Dependabot alert and create a remediation task. | `alert-number` | Convert a dependency security alert into a tracked fix. |
-| `close-dependabot` | Close a Dependabot alert with a documented rationale. | `alert-number` | Record why an alert does not require action. |
-| `import-codescan` | Import a Code Scanning alert and create a remediation task. | `alert-number` | Triage CodeQL findings through the normal task workflow. |
-| `close-codescan` | Close a Code Scanning alert with a documented rationale. | `alert-number` | Record why a scanning alert can be safely dismissed. |
-
-<a id="project-maintenance"></a>
-
-### Project Maintenance
-
-| Skill | Description | Parameters | Recommended use case |
-|-------|-------------|------------|----------------------|
-| `upgrade-dependency` | Upgrade a dependency from one version to another and verify it. | `package`, `old-version`, `new-version` | Perform controlled dependency maintenance. |
-| `refine-title` | Rewrite an Issue or PR title into Conventional Commits format. | `number` | Normalize inconsistent GitHub titles. |
-| `init-labels` | Initialize the repository's standard GitHub label set. | None | Bootstrap labels in a new repository. |
-| `init-milestones` | Initialize the repository's milestone structure. | None | Bootstrap milestone tracking in a new repository. |
-| `archive-tasks` | Archive completed tasks into a date-organized directory with a manifest index. | `[--days N \| --before DATE \| TASK-ID...]` | Periodically clean up the `completed/` directory. |
-| `update-agent-infra` | Update the project's collaboration infrastructure to the latest template version. | None | Refresh shared AI tooling without rebuilding local conventions. |
-
-> Every skill works across supported AI TUIs. The command prefix changes, but the workflow semantics stay the same.
-
-<a id="custom-skills"></a>
-
-## Custom Skills
-
-Built-in skills cover the standard delivery lifecycle, but teams often need project-specific instructions such as coding standards, deployment checks, or internal review rules. agent-infra supports that through **custom skills**.
-
-### Create a custom skill in the project
-
-Create a directory under `.agents/skills/<name>/` and add a `SKILL.md` file:
-
-```text
-.agents/skills/
-  enforce-style/
-    SKILL.md
-    reference/
-      style-guide.md
-```
-
-Minimum frontmatter:
-
-```yaml
----
-name: enforce-style
-description: "Apply team style checks before submitting code"
-args: "<task-id>"   # optional
----
-```
-
-- `name`: user-facing skill name
-- `description`: used when generating editor command metadata
-- `args`: optional argument hint; agent-infra uses it when generating slash commands for supported AI TUIs
-
-After adding the skill, run `update-agent-infra` again:
-
-| TUI | Command |
-|-----|---------|
-| Claude Code | `/update-agent-infra` |
-| Codex | `$update-agent-infra` |
-| Gemini CLI | `/{{project}}:update-agent-infra` |
-| OpenCode | `/update-agent-infra` |
-
-That refresh detects non-built-in skill directories in `.agents/skills/` and generates matching commands for Claude Code, Gemini CLI, and OpenCode automatically.
-
-### Sync custom skills from shared sources
-
-If you maintain reusable team skills outside the repository, declare them in `.agents/.airc.json`:
-
-```json
-{
-  "skills": {
-    "sources": [
-      { "type": "local", "path": "~/private-skills" },
-      { "type": "local", "path": "~/team-skills" }
-    ]
-  }
-}
-```
-
-Expected source layout:
-
-```text
-~/private-skills/
-  enforce-style/
-    SKILL.md
-  release-check/
-    SKILL.md
-    reference/
-      checklist.md
-```
-
-Behavior:
-
-- Sources are applied in list order; later sources overwrite earlier custom sources when they define the same file
-- `type: "local"` is the only supported source type today; the structure leaves room for future source types
-- `~` in source paths is expanded to the current user's home directory
-
-### Sync behavior and conflict rules
-
-When `update-agent-infra` runs:
-
-- Manually created custom skills in `.agents/skills/` are protected from managed-file cleanup
-- Files synced from external custom sources are copied into `.agents/skills/`
-- For synced skills that still exist in a configured source, files removed from the source are also removed locally during the next sync
-- Built-in skills always win over custom sources; if a source defines a skill with the same name as a built-in skill, agent-infra skips that custom source skill instead of overriding the built-in one
-- If you truly need to replace a built-in skill or command, use the existing `ejected` mechanism and own that file in the project
-
-## Custom TUI Configuration
-
-Use the top-level `.agents/.airc.json` `customTUIs` array when your team uses an AI TUI that is not one of the built-in command targets. This config lets agent-infra show the correct next-step commands and generate command files for project custom skills by learning from an existing command in the custom TUI directory.
-
-| Field | Required | Meaning |
-|-------|----------|---------|
-| `name` | Yes | Display name shown in reports and next-step guidance, for example `<your-tui-name>`. |
-| `dir` | Yes | Command directory relative to the project root, for example `.<your-tui>/commands`. The path must stay inside the project root. |
-| `invoke` | Yes | User-facing command template used in next-step guidance. |
-
-Supported `invoke` placeholders:
-
-| Placeholder | Replaced with | Example |
-|-------------|---------------|---------|
-| `${skillName}` | The skill command name, such as `review-code` or `commit`. | `<your-cli> ${skillName}` -> `<your-cli> review-code` |
-| `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-code` |
-
-Non-namespaced custom TUI:
-
-```json
-{
-  "customTUIs": [
-    {
-      "name": "<your-tui-name>",
-      "dir": ".<your-tui>/commands",
-      "invoke": "<your-cli> ${skillName}"
-    }
-  ]
-}
-```
-
-Namespaced custom TUI:
-
-```json
-{
-  "project": "agent-infra",
-  "customTUIs": [
-    {
-      "name": "<your-tui-name>",
-      "dir": ".<your-tui>/commands",
-      "invoke": "/${projectName}:${skillName}"
-    }
-  ]
-}
-```
-
-`customTUIs` should contain one entry per custom TUI. To let `update-agent-infra` generate command files for custom skills, keep at least one existing command file in `dir` that references a built-in skill path such as `.agents/skills/analyze-task/SKILL.md`; agent-infra uses that file as the format reference.
-
-<a id="prebuilt-workflows"></a>
-
-## Prebuilt Workflows
-
-agent-infra includes **4 prebuilt workflows**. Three of them share the same symmetric gated delivery lifecycle:
-
-`analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit`
-
-The fourth, `code-review`, is intentionally smaller and optimized for reviewing an existing PR or branch.
-
-| Workflow | Best for | Step chain |
-|----------|----------|------------|
-| `feature-development` | Building a new feature or capability | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit` |
-| `bug-fix` | Diagnosing and fixing a defect with regression coverage | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit` |
-| `refactoring` | Structural changes that should preserve behavior | `analysis -> analysis-review -> design -> design-review -> code -> code-review -> commit` |
-| `code-review` | Reviewing an existing PR or branch | `analysis -> review -> report` |
-
-### Example lifecycle
-
-The simplest end-to-end delivery loop looks like this:
-
-```text
-import-issue #42                    Import task from GitHub Issue
-(or: create-task "add dark mode")   Or create a task from a description; Issue creation cascades when the platform rule supports it
-         |
-         |  --> get task ID, e.g. T1
-         v
-  analyze-task T1                   Requirement analysis
-         |
-         v
-  review-analysis T1                Review analysis
-         |
-     Issues?
-      +--YES----> analyze-task T1
-      |
-         v
-    plan-task T1                    Design solution
-         |
-         v
-  review-plan T1                    Review plan
-         |
-     Issues?
-      +--YES----> plan-task T1
-      |
-         |
-         v
-  code-task T1                      Write code and tests
-         |
-         v
-  +-> review-code T1                Automated code review
-  |      |
-  |   Issues?
-  |      +--NO-------+
-  |     YES          |
-  |      |           |
-  |      v           |
-  |  code-task T1 (fix mode)
-  |      |           |
-  +------+           |
-                     |
-         +-----------+
-         |
-         v
-      commit                        Commit final code
-         |
-         v
-  complete-task T1                  Archive and finish
-```
-
-<a id="configuration-reference"></a>
-
-## Configuration Reference
-
-The generated `.agents/.airc.json` file is the central contract between the bootstrap CLI, templates, and future updates.
-
-### Example `.agents/.airc.json`
-
-```json
-{
-  "project": "my-project",
-  "org": "my-org",
-  "language": "en",
-  "templateVersion": "v0.6.5",
-  "templates": {
-    "sources": [
-      { "type": "local", "path": "~/private-templates" }
-    ]
-  },
-  "skills": {
-    "sources": [
-      { "type": "local", "path": "~/private-skills" }
-    ]
-  },
-  "customTUIs": [
-    {
-      "name": "<your-tui-name>",
-      "dir": ".<your-tui>/commands",
-      "invoke": "<your-cli> ${skillName}"
-    }
-  ],
-  "files": {
-    "managed": [
-      ".agents/workspace/README.md",
-      ".agents/skills/",
-      ".agents/templates/",
-      ".agents/workflows/",
-      ".claude/commands/",
-      ".gemini/commands/",
-      ".opencode/commands/"
-    ],
-    "merged": [
-      ".agents/README.md",
-      ".gitignore",
-      "AGENTS.md"
-    ],
-    "ejected": []
-  }
-}
-```
-
-### Field reference
-
-| Field | Meaning |
-|-------|---------|
-| `project` | Project name used when rendering commands, paths, and templates. |
-| `org` | GitHub organization or owner used by generated metadata and links. |
-| `language` | Primary project language or locale used by rendered templates. |
-| `templateVersion` | Installed template version for future upgrades and drift tracking. |
-| `templates` | Optional external template overlay configuration. |
-| `templates.sources` | Optional ordered list of external template sources. Only `type: "local"` is supported today. |
-| `skills` | Optional custom skill sync configuration. |
-| `skills.sources` | Optional ordered list of external custom skill sources. Only `type: "local"` is supported today. |
-| `customTUIs` | Optional top-level list of custom AI TUI adapters. |
-| `files` | Per-path update strategy configuration for managed, merged, and ejected files. |
-
-### External template and skill sources
-
-Use external sources when your team maintains private platform templates, private rules, or shared custom skills outside this repository. You can configure them during `agent-infra init` or later by editing `.agents/.airc.json`:
-
-```json
-{
-  "templates": {
-    "sources": [
-      { "type": "local", "path": "~/private-templates" },
-      { "type": "local", "path": "~/team-overrides/templates" }
-    ]
-  },
-  "skills": {
-    "sources": [
-      { "type": "local", "path": "~/private-skills" }
-    ]
-  }
-}
-```
-
-Template source precedence is built-in templates first, then external sources as supplements. External files with the same path as built-in templates are ignored and reported in `templateSources.conflicts`; between external sources, later entries override earlier entries and conflicts are also reported. Skill sources use the same local-source shape, but custom skills cannot replace built-in skills.
-
-External template files and skill scripts can include executable JavaScript or shell commands that AI workflows may run. Only use trusted local paths.
-
-<a id="file-management-strategies"></a>
-
-## File Management Strategies
-
-Each generated path is assigned an update strategy. That strategy determines how `update-agent-infra` treats the file later.
-
-| Strategy | Meaning | Update behavior |
-|----------|---------|-----------------|
-| **managed** | agent-infra fully controls the file | Re-rendered and overwritten on update |
-| **merged** | Template content and user customizations coexist | AI-assisted merge preserves local additions where possible |
-| **ejected** | Generated once and then owned by the project | Never touched again by future updates |
-
-### Example strategy configuration
-
-```json
-{
-  "files": {
-    "managed": [
-      ".agents/skills/",
-      ".agents/workspace/README.md"
-    ],
-    "merged": [
-      ".gitignore",
-      "AGENTS.md"
-    ],
-    "ejected": [
-      "docs/architecture.md"
-    ]
-  }
-}
-```
-
-### Moving a file from `managed` to `ejected`
-
-1. Remove the path from the `managed` array in `.agents/.airc.json`.
-2. Add the same path to the `ejected` array.
-3. Run `update-agent-infra` again so future updates stop managing that file.
-
-Use this when a file starts as template-owned but later becomes project-specific enough that automatic updates would create more noise than value.
-
-<a id="version-management"></a>
-
-## Version Management
-
-agent-infra uses semantic versioning through Git tags and GitHub releases. The installed template version is recorded in `.agents/.airc.json` as `templateVersion`, which gives both humans and AI tools a stable reference point for upgrades.
-
-<a id="contributing"></a>
+## Documentation
+
+In-depth guides live under [`docs/en/`](./docs/en/README.md):
+
+- [Architecture Overview](./docs/en/architecture.md) — bootstrap CLI, end-to-end flow, layered architecture
+- [Platform Support](./docs/en/platform-support.md) — macOS, Linux, Windows; sandbox engines and resources
+- [Sandbox](./docs/en/sandbox.md) — sandbox aliases, host-sandbox file exchange, user-level dotfiles channel
+- [Built-in AI Skills](./docs/en/skills.md) — the full skill catalog by use case
+- [Custom Skills](./docs/en/custom-skills.md) — create and sync project-specific skills
+- [Custom TUI Configuration](./docs/en/custom-tui.md) — adapt agent-infra to non-built-in AI TUIs
+- [Prebuilt Workflows](./docs/en/workflows.md) — the gated delivery lifecycle and example flow
+- [Configuration Reference](./docs/en/configuration.md) — `.agents/.airc.json`, external sources, version management
+- [File Management Strategies](./docs/en/file-management.md) — managed / merged / ejected update strategies
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
-
-<a id="license"></a>
 
 ## License
 
