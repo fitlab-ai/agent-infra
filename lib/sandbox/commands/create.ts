@@ -840,7 +840,34 @@ export function ensureClaudeSettings(toolDir: string, hostHomeDir?: string): voi
   }
 }
 
-export function ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string): void {
+function resolveHostCatalogPath(value: unknown, hostHomeDir: string): string | null {
+  if (typeof value !== 'string' || value === '') {
+    return null;
+  }
+  let resolved: string;
+  if (value === '~' || value.startsWith('~/') || value.startsWith('~\\')) {
+    resolved = path.join(hostHomeDir, value.slice(1).replace(/^[/\\]+/, ''));
+  } else if (path.isAbsolute(value)) {
+    resolved = value;
+  } else {
+    resolved = path.join(hostHomeDir, '.codex', value);
+  }
+  try {
+    if (!fs.statSync(resolved).isFile()) {
+      return null;
+    }
+    fs.accessSync(resolved, fs.constants.R_OK);
+    return resolved;
+  } catch {
+    return null;
+  }
+}
+
+export function ensureCodexModelInheritance(
+  toolDir: string,
+  hostHomeDir?: string,
+  containerCodexDir: string = '/home/devuser/.codex'
+): void {
   if (!hostHomeDir) {
     return;
   }
@@ -888,6 +915,22 @@ export function ensureCodexModelInheritance(toolDir: string, hostHomeDir?: strin
     }
     sandboxParsed[key] = value;
     changed = true;
+  }
+
+  if (!Object.hasOwn(sandboxParsed, 'model_catalog_json')) {
+    const hostCatalogPath = resolveHostCatalogPath(hostParsed['model_catalog_json'], hostHomeDir);
+    if (hostCatalogPath) {
+      try {
+        const basename = path.basename(hostCatalogPath);
+        const destDir = path.join(toolDir, 'model-catalogs');
+        fs.mkdirSync(destDir, { recursive: true });
+        fs.copyFileSync(hostCatalogPath, path.join(destDir, basename));
+        sandboxParsed['model_catalog_json'] = path.posix.join(containerCodexDir, 'model-catalogs', basename);
+        changed = true;
+      } catch {
+        // Copy failed (e.g. permissions): skip catalog, keep scalar inheritance intact.
+      }
+    }
   }
 
   if (changed) {
@@ -1342,7 +1385,7 @@ export async function create(args: string[]): Promise<void> {
             }
             const codexEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'codex');
             if (codexEntry) {
-              ensureCodexModelInheritance(codexEntry.dir, effectiveConfig.home);
+              ensureCodexModelInheritance(codexEntry.dir, effectiveConfig.home, codexEntry.tool.containerMount);
               ensureCodexWorkspaceTrust(codexEntry.dir);
             }
             const geminiEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'gemini-cli');

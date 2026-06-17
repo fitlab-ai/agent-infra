@@ -7,7 +7,9 @@ import * as toml from "smol-toml";
 
 import {
   filePath,
-  loadFreshEsm
+  loadFreshEsm,
+  onPlatforms,
+  supportsPosixModeBits
 } from "../../helpers.ts";
 
 type CommandOptions = Record<string, unknown> & {
@@ -41,7 +43,7 @@ type SandboxCreateModule = {
   assertBranchAvailable(repoRoot: string, branch: string, options?: { allowedWorktrees?: string[]; runFn?: RunSafeFn }): void;
   ensureClaudeOnboarding(toolDir: string, hostHomeDir?: string): void;
   ensureClaudeSettings(toolDir: string, hostHomeDir?: string): void;
-  ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string): void;
+  ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string, containerCodexDir?: string): void;
   ensureCodexWorkspaceTrust(toolDir: string): void;
   ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: string): void;
   ensureGeminiWorkspaceTrust(toolDir: string): void;
@@ -650,6 +652,300 @@ test("ensureCodexModelInheritance leaves malformed sandbox config alone", async 
     assert.doesNotThrow(() => sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome));
     assert.equal(fs.readFileSync(configPath, "utf8"), "=");
   } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance copies a relative host catalog and rewrites to the container path", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-rel-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-rel-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex", "catalogs"), { recursive: true });
+    fs.writeFileSync(path.join(hostHome, ".codex", "catalogs", "gpt.json"), '{"models":[]}', "utf8");
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      'model = "gpt-5.5"\nmodel_catalog_json = "catalogs/gpt.json"\n',
+      "utf8"
+    );
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
+    const data = toml.parse(fs.readFileSync(path.join(tmpDir, "config.toml"), "utf8")) as {
+      model?: string;
+      model_catalog_json?: string;
+    };
+    assert.equal(data.model, "gpt-5.5");
+    assert.equal(data.model_catalog_json, "/home/devuser/.codex/model-catalogs/gpt.json");
+    assert.equal(
+      fs.readFileSync(path.join(tmpDir, "model-catalogs", "gpt.json"), "utf8"),
+      '{"models":[]}'
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance copies an absolute host catalog", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-abs-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-abs-"));
+  const catalogFile = path.join(hostHome, "elsewhere", "custom.json");
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
+    fs.mkdirSync(path.dirname(catalogFile), { recursive: true });
+    fs.writeFileSync(catalogFile, '{"k":1}', "utf8");
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      `model_catalog_json = ${JSON.stringify(catalogFile)}\n`,
+      "utf8"
+    );
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
+    const data = toml.parse(fs.readFileSync(path.join(tmpDir, "config.toml"), "utf8")) as {
+      model_catalog_json?: string;
+    };
+    assert.equal(data.model_catalog_json, "/home/devuser/.codex/model-catalogs/custom.json");
+    assert.equal(fs.readFileSync(path.join(tmpDir, "model-catalogs", "custom.json"), "utf8"), '{"k":1}');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance expands a tilde host catalog path", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-tilde-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-tilde-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex", "catalogs"), { recursive: true });
+    fs.writeFileSync(path.join(hostHome, ".codex", "catalogs", "gpt.json"), "{}", "utf8");
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      'model_catalog_json = "~/.codex/catalogs/gpt.json"\n',
+      "utf8"
+    );
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
+    const data = toml.parse(fs.readFileSync(path.join(tmpDir, "config.toml"), "utf8")) as {
+      model_catalog_json?: string;
+    };
+    assert.equal(data.model_catalog_json, "/home/devuser/.codex/model-catalogs/gpt.json");
+    assert.equal(fs.existsSync(path.join(tmpDir, "model-catalogs", "gpt.json")), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance preserves an existing sandbox model_catalog_json", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-keep-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-keep-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex", "catalogs"), { recursive: true });
+    fs.writeFileSync(path.join(hostHome, ".codex", "catalogs", "gpt.json"), "{}", "utf8");
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      'model_catalog_json = "catalogs/gpt.json"\n',
+      "utf8"
+    );
+    fs.writeFileSync(path.join(tmpDir, "config.toml"), 'model_catalog_json = "/custom/path.json"\n', "utf8");
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
+    const data = toml.parse(fs.readFileSync(path.join(tmpDir, "config.toml"), "utf8")) as {
+      model_catalog_json?: string;
+    };
+    assert.equal(data.model_catalog_json, "/custom/path.json");
+    assert.equal(fs.existsSync(path.join(tmpDir, "model-catalogs")), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance skips a missing host catalog file", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-missing-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-missing-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      'model = "gpt-5.5"\nmodel_catalog_json = "/nonexistent/x.json"\n',
+      "utf8"
+    );
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
+    const data = toml.parse(fs.readFileSync(path.join(tmpDir, "config.toml"), "utf8")) as {
+      model?: string;
+      model_catalog_json?: string;
+    };
+    assert.equal(data.model, "gpt-5.5");
+    assert.equal(data.model_catalog_json, undefined);
+    assert.equal(fs.existsSync(path.join(tmpDir, "model-catalogs")), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance skips a host catalog path that is a directory", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-dir-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-dir-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex", "catalogs"), { recursive: true });
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      'model_catalog_json = "catalogs"\n',
+      "utf8"
+    );
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
+    assert.equal(fs.existsSync(path.join(tmpDir, "config.toml")), false);
+    assert.equal(fs.existsSync(path.join(tmpDir, "model-catalogs")), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance keeps catalog and model before the workspace trust section", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-order-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-order-"));
+  const configPath = path.join(tmpDir, "config.toml");
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex", "catalogs"), { recursive: true });
+    fs.writeFileSync(path.join(hostHome, ".codex", "catalogs", "gpt.json"), "{}", "utf8");
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      'model = "gpt-5.5"\nmodel_catalog_json = "catalogs/gpt.json"\n',
+      "utf8"
+    );
+    fs.writeFileSync(configPath, '[projects."/workspace"]\ntrust_level = "trusted"\n', "utf8");
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
+    const content = fs.readFileSync(configPath, "utf8");
+    const lines = content.split(/\r?\n/);
+    const catalogLine = lines.findIndex((line) => line.startsWith("model_catalog_json = "));
+    const sectionLine = lines.findIndex((line) => line.startsWith("[projects."));
+    assert.ok(catalogLine >= 0);
+    assert.ok(sectionLine > catalogLine);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance honors a non-default container codex dir", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-customdir-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-customdir-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex", "catalogs"), { recursive: true });
+    fs.writeFileSync(path.join(hostHome, ".codex", "catalogs", "gpt.json"), "{}", "utf8");
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      'model_catalog_json = "catalogs/gpt.json"\n',
+      "utf8"
+    );
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome, "/custom/codex");
+    const data = toml.parse(fs.readFileSync(path.join(tmpDir, "config.toml"), "utf8")) as {
+      model_catalog_json?: string;
+    };
+    assert.equal(data.model_catalog_json, "/custom/codex/model-catalogs/gpt.json");
+    assert.equal(fs.existsSync(path.join(tmpDir, "model-catalogs", "gpt.json")), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance skips a non-string model_catalog_json", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-nonstring-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-nonstring-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      'model = "gpt-5.5"\nmodel_catalog_json = ["a", "b"]\n',
+      "utf8"
+    );
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
+    const data = toml.parse(fs.readFileSync(path.join(tmpDir, "config.toml"), "utf8")) as {
+      model?: string;
+      model_catalog_json?: unknown;
+    };
+    assert.equal(data.model, "gpt-5.5");
+    assert.equal(data.model_catalog_json, undefined);
+    assert.equal(fs.existsSync(path.join(tmpDir, "model-catalogs")), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance skips an empty model_catalog_json", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-empty-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-empty-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      'model_catalog_json = ""\n',
+      "utf8"
+    );
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
+    assert.equal(fs.existsSync(path.join(tmpDir, "config.toml")), false);
+    assert.equal(fs.existsSync(path.join(tmpDir, "model-catalogs")), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance skips an unreadable host catalog file", onPlatforms("linux", "darwin"), async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-catalog-unreadable-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-catalog-unreadable-"));
+  const catalogFile = path.join(hostHome, ".codex", "catalogs", "gpt.json");
+
+  try {
+    if (!supportsPosixModeBits()) {
+      return;
+    }
+    fs.mkdirSync(path.dirname(catalogFile), { recursive: true });
+    fs.writeFileSync(catalogFile, "{}", "utf8");
+    fs.chmodSync(catalogFile, 0o000);
+    // Running as root bypasses the read bit; the unreadable scenario cannot be reproduced there.
+    try {
+      fs.accessSync(catalogFile, fs.constants.R_OK);
+      return;
+    } catch {
+      // Genuinely unreadable: proceed to assert safe-skip.
+    }
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      'model_catalog_json = "catalogs/gpt.json"\n',
+      "utf8"
+    );
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
+    assert.equal(fs.existsSync(path.join(tmpDir, "config.toml")), false);
+    assert.equal(fs.existsSync(path.join(tmpDir, "model-catalogs")), false);
+  } finally {
+    try {
+      fs.chmodSync(catalogFile, 0o600);
+    } catch {
+      // best-effort restore so cleanup can remove the file
+    }
     fs.rmSync(tmpDir, { recursive: true, force: true });
     fs.rmSync(hostHome, { recursive: true, force: true });
   }
