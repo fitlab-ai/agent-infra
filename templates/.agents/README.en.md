@@ -34,6 +34,7 @@ This dual-config approach ensures every AI tool receives appropriate project con
     bug-fix.yaml                # Bug fix workflow
     code-review.yaml            # Code review workflow
     refactoring.yaml            # Refactoring workflow
+  rules/                        # Collaboration rule index (see rules/README.md)
   workspace/                    # Runtime workspace (git-ignored)
     active/                     # Currently active tasks
     blocked/                    # Blocked tasks

@@ -34,6 +34,7 @@
     bug-fix.yaml                # 缺陷修复工作流
     code-review.yaml            # 代码审查工作流
     refactoring.yaml            # 重构工作流
+  rules/                        # 协作规则索引（见 rules/README.md）
   workspace/                    # 运行时工作区（已被 git ignore）
     active/                     # 当前活跃任务
     blocked/                    # 被阻塞的任务

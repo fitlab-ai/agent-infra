@@ -192,3 +192,4 @@ npm test
 
 **提交代码或创建 PR 时**，必须先读取 `.agents/rules/commit-and-pr.md`。
 **执行任务工作流命令时**，必须先读取 `.agents/rules/task-management.md`。
+**不确定该加载哪篇规则时**，先查阅 `.agents/rules/README.md` 规则索引（按业务域列出全部规则及其用途）。

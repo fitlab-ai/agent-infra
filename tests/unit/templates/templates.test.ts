@@ -168,6 +168,7 @@ test("update-agent-infra template copies stay in sync with working files", () =>
   const syncFiles: Array<[string, string]> = [
     [".agents/QUICKSTART.md", "templates/.agents/QUICKSTART.en.md"],
     [".agents/README.md", "templates/.agents/README.en.md"],
+    [".agents/rules/README.md", "templates/.agents/rules/README.en.md"],
     [".agents/templates/task.md", "templates/.agents/templates/task.en.md"],
     [".agents/skills/archive-tasks/SKILL.md", "templates/.agents/skills/archive-tasks/SKILL.en.md"],
     [".agents/skills/archive-tasks/scripts/archive-tasks.sh", "templates/.agents/skills/archive-tasks/scripts/archive-tasks.sh"],
@@ -457,5 +458,18 @@ test("template JavaScript files do not contain shebang lines", () => {
       "Homebrew rewrites shebangs to machine-specific absolute paths during installation, " +
       "which pollutes project files when synced. Use 'node <path>' to invoke these scripts."
     );
+  });
+});
+
+test("rules README index lists every rule file", () => {
+  const dir = ".agents/rules";
+  const ruleNames = fs.readdirSync(dir)
+    .filter((fileName) => fileName.endsWith(".md") && fileName !== "README.md")
+    .map((fileName) => fileName.replace(/\.md$/, ""))
+    .sort();
+  const index = read(`${dir}/README.md`);
+
+  ruleNames.forEach((name) => {
+    assert.ok(index.includes(name), `rules/README.md should reference ${name}`);
   });
 });
