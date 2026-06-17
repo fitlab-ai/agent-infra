@@ -17,49 +17,55 @@ function mkTaskDir(files: string[], subdirs: string[] = []): string {
   return dir;
 }
 
-test('enumerateArtifacts orders by lifecycle group (base before review-) then filename', () => {
-  // Intentionally shuffled on disk; the contract is the returned order.
-  const dir = mkTaskDir([
-    'review-plan.md',
-    'analysis-r2.md',
-    'verify-pr-1.md',
-    'plan.md',
-    'analysis.md',
-    'task.md',
-    'review-analysis.md',
-    'code.md'
-  ]);
+// Set a deterministic mtime (epoch seconds) so ordering tests don't depend on
+// the millisecond at which the fixture files happened to be written.
+function setMtime(dir: string, name: string, epochSeconds: number): void {
+  fs.utimesSync(path.join(dir, name), epochSeconds, epochSeconds);
+}
+
+test('enumerateArtifacts orders by mtime ascending (oldest first)', () => {
+  const dir = mkTaskDir(['task.md', 'analysis.md', 'plan.md', 'code.md']);
+  // Deliberately non-alphabetical timestamps; task.md is newest (as in real
+  // tasks, since it is rewritten every workflow step) so it lands last.
+  setMtime(dir, 'analysis.md', 1000);
+  setMtime(dir, 'plan.md', 2000);
+  setMtime(dir, 'code.md', 3000);
+  setMtime(dir, 'task.md', 4000);
   const names = enumerateArtifacts(dir).map((a) => a.name);
-  assert.deepEqual(names, [
-    'task.md', // rank 0
-    // rank 1 analysis, filename asc — 'analysis-r2.md' precedes 'analysis.md' because '-' (0x2D) < '.' (0x2E)
-    'analysis-r2.md',
-    'analysis.md',
-    'review-analysis.md', // rank 2
-    'plan.md', // rank 3
-    'review-plan.md', // rank 4
-    'code.md', // fallback rank 5, filename asc
-    'verify-pr-1.md'
-  ]);
+  assert.deepEqual(names, ['analysis.md', 'plan.md', 'code.md', 'task.md']);
 });
 
-test('enumerateArtifacts assigns stable 1-based indices', () => {
+test('enumerateArtifacts falls back to filename ascending when mtimes are equal', () => {
+  const dir = mkTaskDir(['plan.md', 'analysis.md', 'review-plan.md']);
+  setMtime(dir, 'plan.md', 5000);
+  setMtime(dir, 'analysis.md', 5000);
+  setMtime(dir, 'review-plan.md', 5000);
+  const names = enumerateArtifacts(dir).map((a) => a.name);
+  assert.deepEqual(names, ['analysis.md', 'plan.md', 'review-plan.md']);
+});
+
+test('enumerateArtifacts assigns 1-based indices in mtime order', () => {
   const dir = mkTaskDir(['task.md', 'analysis.md', 'plan.md']);
+  setMtime(dir, 'analysis.md', 100);
+  setMtime(dir, 'plan.md', 200);
+  setMtime(dir, 'task.md', 300);
   const artifacts = enumerateArtifacts(dir);
   assert.deepEqual(
     artifacts.map((a) => [a.index, a.name]),
     [
-      [1, 'task.md'],
-      [2, 'analysis.md'],
-      [3, 'plan.md']
+      [1, 'analysis.md'],
+      [2, 'plan.md'],
+      [3, 'task.md']
     ]
   );
 });
 
 test('enumerateArtifacts skips subdirectories and dotfiles', () => {
   const dir = mkTaskDir(['task.md', 'analysis.md', '.hidden'], ['sandbox-verify']);
-  const names = enumerateArtifacts(dir).map((a) => a.name);
-  assert.deepEqual(names, ['task.md', 'analysis.md']);
+  const names = enumerateArtifacts(dir)
+    .map((a) => a.name)
+    .sort();
+  assert.deepEqual(names, ['analysis.md', 'task.md']);
 });
 
 test('enumerateArtifacts returns absolute path, size and mtime per entry', () => {
@@ -82,6 +88,9 @@ test('resolveArtifact resolves a filename with or without the .md suffix', () =>
 
 test('resolveArtifact resolves a numeric index to the same path as enumeration', () => {
   const dir = mkTaskDir(['task.md', 'analysis.md', 'plan.md']);
+  setMtime(dir, 'task.md', 100);
+  setMtime(dir, 'analysis.md', 200);
+  setMtime(dir, 'plan.md', 300);
   assert.equal(resolveArtifact(dir, '1'), path.join(dir, 'task.md'));
   assert.equal(resolveArtifact(dir, '3'), path.join(dir, 'plan.md'));
 });

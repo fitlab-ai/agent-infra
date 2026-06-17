@@ -29,6 +29,9 @@ function writeTaskWithArtifacts(activeDir: string, taskId: string): void {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${taskId}\nbranch: feat\n---\n# ${taskId}\nbody\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), 'analysis body line\n');
+  // Oldest-first order: task.md (#1) then analysis.md (#2).
+  fs.utimesSync(path.join(dir, 'task.md'), 1000, 1000);
+  fs.utimesSync(path.join(dir, 'analysis.md'), 2000, 2000);
 }
 
 function runCli(args: string[], cwd: string) {

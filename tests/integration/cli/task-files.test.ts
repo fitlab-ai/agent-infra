@@ -30,6 +30,10 @@ function writeTaskWithArtifacts(activeDir: string, taskId: string): void {
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${taskId}\nbranch: feat\n---\n# ${taskId}\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), 'analysis body\n');
   fs.writeFileSync(path.join(dir, 'review-analysis.md'), 'review body\n');
+  // Deterministic mtimes (oldest first): analysis -> review-analysis -> task.
+  fs.utimesSync(path.join(dir, 'analysis.md'), 1000, 1000);
+  fs.utimesSync(path.join(dir, 'review-analysis.md'), 2000, 2000);
+  fs.utimesSync(path.join(dir, 'task.md'), 3000, 3000);
   // A subdirectory must not appear in the numbered listing.
   fs.mkdirSync(path.join(dir, 'sandbox-verify'), { recursive: true });
 }
@@ -48,10 +52,12 @@ test('ai task files <ref> prints a numbered artifact table', () => {
   assert.equal(out.status, 0, out.stderr);
   // Header columns.
   assert.match(out.stdout, /#\s+NAME\s+SIZE\s+MTIME/);
-  // task.md is artifact #1; analysis sorts before review-analysis (lifecycle order).
-  assert.match(out.stdout, /^1\s+task\.md\s+\d+\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/m);
-  assert.match(out.stdout, /^2\s+analysis\.md/m);
-  assert.match(out.stdout, /^3\s+review-analysis\.md/m);
+  // Ordered oldest-first by mtime; NAME shown without the `.md` suffix.
+  assert.match(out.stdout, /^1\s+analysis\s+\d+\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/m);
+  assert.match(out.stdout, /^2\s+review-analysis\s/m);
+  assert.match(out.stdout, /^3\s+task\s/m);
+  // Names are stripped of `.md`.
+  assert.doesNotMatch(out.stdout, /\.md/);
   // The subdirectory must not be listed.
   assert.doesNotMatch(out.stdout, /sandbox-verify/);
 });

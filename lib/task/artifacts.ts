@@ -9,55 +9,32 @@ type Artifact = {
   mtimeMs: number;
 };
 
-// Lifecycle group ranking. Lower rank sorts first; within a rank, entries sort
-// by filename ascending. `task.md` always leads, then the lifecycle order
-// analysis → review-analysis → plan → review-plan → fallback. The more specific
-// `review-*` matchers are listed before their base prefixes so the match order
-// is unambiguous, but each keeps the rank that places it AFTER its base group.
-const GROUP_MATCHERS: ReadonlyArray<{ rank: number; test: (name: string) => boolean }> = [
-  { rank: 0, test: (n) => n === 'task.md' },
-  { rank: 2, test: (n) => /^review-analysis/.test(n) },
-  { rank: 1, test: (n) => /^analysis/.test(n) },
-  { rank: 4, test: (n) => /^review-plan/.test(n) },
-  { rank: 3, test: (n) => /^plan/.test(n) }
-];
-// Anything not matched above (reports, code*, review-code*, verify-pr-*, etc.).
-const FALLBACK_RANK = 5;
-
-function groupRank(name: string): number {
-  for (const matcher of GROUP_MATCHERS) {
-    if (matcher.test(name)) return matcher.rank;
-  }
-  return FALLBACK_RANK;
-}
-
 /**
- * Enumerate a task directory's artifacts in a deterministic order: `task.md`
- * first, then by lifecycle group (analysis → review-analysis → plan →
- * review-plan → fallback), and filename-ascending within each group.
+ * Enumerate a task directory's artifacts ordered by modification time, oldest
+ * first, so the listing reads like the task's timeline. Filename ascending is a
+ * deterministic tiebreak when two files share the same mtime (e.g. written in
+ * the same millisecond).
  *
  * Only top-level regular files are included; subdirectories and dotfiles are
- * skipped so the numbered index contract stays stable and every entry is
- * something `cat` can print. The returned 1-based `index` is the single source
- * of truth shared by `files` and `cat`.
+ * skipped so every entry is something `cat` can print. The returned 1-based
+ * `index` is the source of truth shared by `files` and `cat`.
  */
 function enumerateArtifacts(taskDir: string): Artifact[] {
   const entries = fs
     .readdirSync(taskDir, { withFileTypes: true })
     .filter((dirent) => dirent.isFile() && !dirent.name.startsWith('.'))
-    .map((dirent) => dirent.name);
+    .map((dirent) => {
+      const abs = path.join(taskDir, dirent.name);
+      const stat = fs.statSync(abs);
+      return { name: dirent.name, path: abs, size: stat.size, mtimeMs: stat.mtimeMs };
+    });
 
   entries.sort((a, b) => {
-    const rankDiff = groupRank(a) - groupRank(b);
-    if (rankDiff !== 0) return rankDiff;
-    return a < b ? -1 : a > b ? 1 : 0;
+    if (a.mtimeMs !== b.mtimeMs) return a.mtimeMs - b.mtimeMs;
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
   });
 
-  return entries.map((name, i) => {
-    const abs = path.join(taskDir, name);
-    const stat = fs.statSync(abs);
-    return { index: i + 1, name, path: abs, size: stat.size, mtimeMs: stat.mtimeMs };
-  });
+  return entries.map((entry, i) => ({ index: i + 1, ...entry }));
 }
 
 /**

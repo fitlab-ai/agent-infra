@@ -37,9 +37,11 @@ function files(args: string[] = []): void {
     return;
   }
   const artifacts = enumerateArtifacts(resolved.taskDir);
+  // Show the name without the `.md` suffix so the NAME column is exactly what
+  // `ai task cat <ref> <name>` accepts (the resolver re-adds `.md`).
   const rows = artifacts.map((a) => [
     String(a.index),
-    a.name,
+    a.name.replace(/\.md$/, ''),
     String(a.size),
     formatMtime(a.mtimeMs)
   ]);
