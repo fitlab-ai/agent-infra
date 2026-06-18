@@ -93,6 +93,27 @@ function findTaskMd(repoRoot: string, taskId: string): string | null {
 }
 
 /**
+ * Enumerate every task directory under the flat workspace states
+ * (active / blocked / completed) — archive is intentionally excluded so a
+ * full-tree scan never pulls in cold data. Ordered by state, then task id
+ * ascending, giving callers a deterministic traversal.
+ */
+function enumerateTaskDirs(repoRoot: string): { taskId: string; taskDir: string }[] {
+  const out: { taskId: string; taskDir: string }[] = [];
+  for (const sub of FLAT_WORKSPACE_DIRS) {
+    const base = path.join(repoRoot, '.agents', 'workspace', sub);
+    if (!fs.existsSync(base)) continue;
+    for (const entry of fs.readdirSync(base).sort()) {
+      if (!TASK_ID_RE.test(entry)) continue;
+      const taskDir = path.join(base, entry);
+      if (!fs.existsSync(path.join(taskDir, 'task.md'))) continue;
+      out.push({ taskId: entry, taskDir });
+    }
+  }
+  return out;
+}
+
+/**
  * Resolve a task ref (bare short id, `#N`, or `TASK-YYYYMMDD-HHMMSS`) to its
  * task directory across active / blocked / completed / archive.
  *
@@ -135,5 +156,5 @@ function resolveTaskRef(arg: string): ResolveRefResult {
   return { ok: true, repoRoot, taskId, taskDir: path.dirname(taskMdPath), taskMdPath };
 }
 
-export { resolveTaskRef, TASK_ID_RE };
+export { resolveTaskRef, detectRepoRoot, enumerateTaskDirs, TASK_ID_RE };
 export type { ResolveRefResult };

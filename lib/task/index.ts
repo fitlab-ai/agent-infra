@@ -3,6 +3,7 @@ const USAGE = `Usage: ai task <command> [options]
 Commands:
   cat <ref> <artifact | N>               Print a task artifact (by name or number)
   files <ref>                            List artifacts in a task dir (numbered)
+  grep <pattern> [ref] [artifact | N]    Literal search across task artifacts (omit ref to scan all)
   log <ref>                              Render a task's activity log as a timeline
   ls [--all | --blocked | --completed]   List tasks (default: active)
   show <N | #N | TASK-id>                Print a task.md
@@ -12,6 +13,8 @@ Examples:
   ai task cat 11 analysis
   ai task cat 11 3
   ai task files 11
+  ai task grep resolveArtifact
+  ai task grep resolveArtifact 11
   ai task log 11
   ai task ls
   ai task show 11
@@ -53,6 +56,11 @@ export async function runTask(args: string[]): Promise<void> {
     case 'cat': {
       const { cat } = await import('./commands/cat.ts');
       cat(rest);
+      break;
+    }
+    case 'grep': {
+      const { grep } = await import('./commands/grep.ts');
+      grep(rest);
       break;
     }
     case 'log': {

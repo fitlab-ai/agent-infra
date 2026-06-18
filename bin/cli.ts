@@ -18,7 +18,7 @@ Usage:
   agent-infra init            Initialize a new project with update-agent-infra seed command
   agent-infra merge           Merge tasks from another workspace directory (active/blocked/completed/archive)
   agent-infra sandbox         Manage Docker-based AI sandboxes
-  agent-infra task            Read-only views over .agents/workspace tasks (ls / show / files / cat / status / log)
+  agent-infra task            Read-only views over .agents/workspace tasks (ls / show / files / cat / status / log / grep)
   agent-infra update          Update seed files and sync file registry for an existing project
   agent-infra version         Show version
 
