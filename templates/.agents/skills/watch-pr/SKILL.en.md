@@ -42,7 +42,7 @@ Using the watch command in `.agents/rules/pr-checks-commands.md`, poll `{pr#}`'s
 
 Before running this step, read the "Self-Heal Decision Tree" of `reference/monitor-and-heal.md` and "Resolve a Failing Run id and Pull Logs" of `.agents/rules/pr-checks-commands.md`.
 
-For a failing check: first deterministically resolve its failing run and pull the failure logs per the rule, then classify the failure; only when it is a locatable code-layer failure, make a minimal local fix, run the relevant tests until they pass, then **stage, commit, and push the fix** (`git add` only the related files → `git commit` per `.agents/rules/commit-and-pr.md` → `git push` to the current PR branch, recording the commit SHA), and return to step 2 to re-watch. Count fix attempts; on reaching the hard cap (default 2) or when the run is unlocatable, go to step 4.
+For a failing check: first deterministically resolve its failing run and pull the failure logs per the rule, then classify the failure; before making any local fix, read `.agents/rules/debugging-guide.md` and locate the root cause via its four-phase flow, never blindly patching and retrying; only when it is a locatable code-layer failure, make a minimal local fix, run the relevant tests until they pass, then **stage, commit, and push the fix** (`git add` only the related files → `git commit` per `.agents/rules/commit-and-pr.md` → `git push` to the current PR branch, recording the commit SHA), and return to step 2 to re-watch. Count fix attempts; on reaching the hard cap (default 2) or when the run is unlocatable, go to step 4.
 
 ### 4. Help Exit (Produce-Then-Stop)
 

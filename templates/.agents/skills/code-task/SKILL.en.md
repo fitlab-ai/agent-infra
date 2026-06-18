@@ -88,6 +88,8 @@ Follow the plan in order.
 
 Use the project test commands from the `test` skill and iterate until all required tests pass.
 
+When triaging a test failure or unexpected behavior, first read `.agents/rules/debugging-guide.md` and locate the root cause via its four-phase flow; do not blindly patch and retry.
+
 ### 9. Write the Code Report
 
 Create `.agents/workspace/active/{task-id}/{code-artifact}`.

@@ -130,6 +130,8 @@ echo "$result"
 
 如果测试失败，先尝试修复并重新运行测试。只有在确认存在外部阻塞、环境缺失或需求不明确且超出任务范围时，才可以停止。
 
+排查测试失败或行为不符合预期时，先读取 `.agents/rules/debugging-guide.md`，按其四阶段流程定位根因，禁止盲目改代码重试。
+
 ### 9. 编写实现报告
 
 创建 `.agents/workspace/active/{task-id}/{code-artifact}`。

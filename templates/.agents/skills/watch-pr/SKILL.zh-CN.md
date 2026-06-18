@@ -42,7 +42,7 @@ description: "监控 PR 的 required checks 并在失败时自愈"
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 的「自愈决策树」与 `.agents/rules/pr-checks-commands.md` 的「解析失败 run id 并拉日志」。
 
-对失败 check：先按规则确定性解析其失败 run 并拉取失败日志、判定失败类别；仅当属可定位的代码层失败时，本地最小化修复、运行对应测试通过后**暂存并提交本次修复再推送**（`git add` 仅相关文件 → 按 `.agents/rules/commit-and-pr.md` `git commit` → `git push` 到当前 PR 分支，并记录 commit SHA），再回到步骤 2 重新监控。修复尝试计数，达硬上限（默认 2）或 run 不可定位 → 转步骤 4。
+对失败 check：先按规则确定性解析其失败 run 并拉取失败日志、判定失败类别；本地修复前先读取 `.agents/rules/debugging-guide.md`，按其四阶段流程定位根因，禁止盲目改代码重试；仅当属可定位的代码层失败时，本地最小化修复、运行对应测试通过后**暂存并提交本次修复再推送**（`git add` 仅相关文件 → 按 `.agents/rules/commit-and-pr.md` `git commit` → `git push` 到当前 PR 分支，并记录 commit SHA），再回到步骤 2 重新监控。修复尝试计数，达硬上限（默认 2）或 run 不可定位 → 转步骤 4。
 
 ### 4. 求助出口（产出后停止）
 
