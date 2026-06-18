@@ -1,19 +1,19 @@
 const USAGE = `Usage: ai task <command> [options]
 
 Commands:
+  cat <ref> <artifact | N>               Print a task artifact (by name or number)
+  files <ref>                            List artifacts in a task dir (numbered)
   ls [--all | --blocked | --completed]   List tasks (default: active)
   show <N | #N | TASK-id>                Print a task.md
-  files <ref>                            List artifacts in a task dir (numbered)
-  cat <ref> <artifact | N>               Print a task artifact (by name or number)
   status <ref>                           Aggregated status view (metadata / artifacts / git / platform)
 
 Examples:
+  ai task cat 11 analysis
+  ai task cat 11 3
+  ai task files 11
   ai task ls
   ai task show 11
   ai task show TASK-20260612-162737
-  ai task files 11
-  ai task cat 11 analysis
-  ai task cat 11 3
   ai task status 11
 
 Run 'ai task <command> --help' for details.`;
