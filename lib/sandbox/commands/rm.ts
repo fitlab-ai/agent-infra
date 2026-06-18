@@ -21,15 +21,27 @@ import { runOk, runSafe, runSafeEngine } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
 import { resolveTools, toolConfigDirCandidates, toolProjectDirCandidates } from '../tools.ts';
 import type { SandboxTool } from '../tools.ts';
+import { fetchSandboxRows } from './list-running.ts';
+import { lookupShortIdByBranch } from '../../task/short-id.ts';
 
-const USAGE = `Usage: ai sandbox rm <branch> [--all]`;
+const USAGE = `Usage:
+  ai sandbox rm <branch>                    Remove one sandbox (branch | TASK-id | short id)
+  ai sandbox rm --all [--dry-run] [--yes]   Remove every sandbox not bound to an active task
+  ai sandbox rm --purge                     Tear down ALL sandboxes for the project (containers, worktrees, image, VM)`;
 export { assertManagedPath } from '../managed-fs.ts';
 
 function projectToolDirs(config: SandboxConfig, tools: SandboxTool[]): string[] {
   return tools.flatMap((tool) => toolProjectDirCandidates(tool, config.project));
 }
 
-async function rmOne(config: SandboxConfig, tools: SandboxTool[], branch: string): Promise<void> {
+type RmOneOptions = { assumeYes?: boolean; quiet?: boolean };
+
+async function rmOne(
+  config: SandboxConfig,
+  tools: SandboxTool[],
+  branch: string,
+  options: RmOneOptions = {}
+): Promise<void> {
   assertValidBranchName(branch);
   const engine = detectEngine(config);
   let effectiveBranch = branch;
@@ -39,7 +51,9 @@ async function rmOne(config: SandboxConfig, tools: SandboxTool[], branch: string
     candidates: toolConfigDirCandidates(tool, config.project, branch)
   }));
 
-  p.intro(pc.cyan(`Removing sandbox for ${branch}`));
+  if (!options.quiet) {
+    p.intro(pc.cyan(`Removing sandbox for ${branch}`));
+  }
 
   const existing = runSafeEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
   const matchedContainers = containerNameCandidates(config, branch)
@@ -74,10 +88,12 @@ async function rmOne(config: SandboxConfig, tools: SandboxTool[], branch: string
 
   const existingWorktrees = worktreeCandidates.filter((candidate) => fs.existsSync(candidate));
   if (existingWorktrees.length > 0) {
-    const shouldRemoveWorktree = await p.confirm({
-      message: `Remove worktree(s): ${existingWorktrees.join(', ')}?`,
-      initialValue: true
-    });
+    const shouldRemoveWorktree = options.assumeYes
+      ? true
+      : await p.confirm({
+          message: `Remove worktree(s): ${existingWorktrees.join(', ')}?`,
+          initialValue: true
+        });
 
     if (p.isCancel(shouldRemoveWorktree)) {
       p.outro('Cancelled');
@@ -89,10 +105,12 @@ async function rmOne(config: SandboxConfig, tools: SandboxTool[], branch: string
         removeWorktreeDir(config.repoRoot, config.worktreeBase, worktree);
       }
 
-      const shouldDeleteBranch = await p.confirm({
-        message: `Also delete local branch '${effectiveBranch}'?`,
-        initialValue: true
-      });
+      const shouldDeleteBranch = options.assumeYes
+        ? true
+        : await p.confirm({
+            message: `Also delete local branch '${effectiveBranch}'?`,
+            initialValue: true
+          });
 
       if (!p.isCancel(shouldDeleteBranch) && shouldDeleteBranch) {
         if (!runOk('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch])) {
@@ -116,20 +134,24 @@ async function rmOne(config: SandboxConfig, tools: SandboxTool[], branch: string
 
   const shareBranch = shareBranchDir(config, effectiveBranch);
   if (fs.existsSync(shareBranch)) {
-    const shouldRemoveShare = await p.confirm({
-      message: `Remove share dir for branch '${effectiveBranch}' (${shareBranch})?`,
-      initialValue: true
-    });
+    const shouldRemoveShare = options.assumeYes
+      ? true
+      : await p.confirm({
+          message: `Remove share dir for branch '${effectiveBranch}' (${shareBranch})?`,
+          initialValue: true
+        });
     if (!p.isCancel(shouldRemoveShare) && shouldRemoveShare) {
       removeManagedDir(config.shareBase, shareBranch);
       p.log.success(`Share dir removed: ${shareBranch}`);
     }
   }
 
-  p.outro(pc.green('Sandbox removed'));
+  if (!options.quiet) {
+    p.outro(pc.green('Sandbox removed'));
+  }
 }
 
-async function rmAll(config: SandboxConfig, tools: SandboxTool[]): Promise<void> {
+async function rmPurge(config: SandboxConfig, tools: SandboxTool[]): Promise<void> {
   const engine = detectEngine(config);
   p.intro(pc.cyan(`Removing all sandboxes for ${config.project}`));
 
@@ -231,6 +253,70 @@ async function rmAll(config: SandboxConfig, tools: SandboxTool[]): Promise<void>
   p.outro(pc.green('All project sandboxes removed'));
 }
 
+async function rmUnbound(
+  config: SandboxConfig,
+  tools: SandboxTool[],
+  options: { dryRun: boolean; assumeYes: boolean }
+): Promise<void> {
+  const engine = detectEngine(config);
+  const { running, nonRunning } = fetchSandboxRows(engine, sandboxLabel(config), sandboxBranchLabel(config));
+  const removable = [...running, ...nonRunning].filter(
+    (row) => row.branch && lookupShortIdByBranch(row.branch, config.repoRoot) === null
+  );
+
+  p.intro(pc.cyan(`Removing sandboxes not bound to an active task for ${config.project}`));
+
+  if (removable.length === 0) {
+    p.outro('No removable sandboxes: every container is bound to an active task (or none exist)');
+    return;
+  }
+
+  for (const row of removable) {
+    p.log.message(`${row.name}  ${row.branch}`);
+  }
+
+  if (options.dryRun) {
+    p.outro(`Dry run: ${removable.length} sandbox(es) would be removed, nothing deleted`);
+    return;
+  }
+
+  if (!options.assumeYes) {
+    if (!process.stdin.isTTY) {
+      throw new Error(
+        'Refusing to remove sandboxes without confirmation in a non-interactive shell; pass --yes to proceed.'
+      );
+    }
+    const confirmed = await p.confirm({
+      message: `Remove these ${removable.length} sandbox(es)?`,
+      initialValue: false
+    });
+    if (p.isCancel(confirmed) || !confirmed) {
+      p.outro('Cancelled');
+      return;
+    }
+  }
+
+  const failures: { branch: string; message: string }[] = [];
+  for (const row of removable) {
+    try {
+      await rmOne(config, tools, row.branch, { assumeYes: true, quiet: true });
+    } catch (error) {
+      failures.push({ branch: row.branch, message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  if (failures.length > 0) {
+    for (const failure of failures) {
+      p.log.error(`Failed to remove '${failure.branch}': ${failure.message}`);
+    }
+    throw new Error(
+      `Removed ${removable.length - failures.length}/${removable.length} sandbox(es); ${failures.length} failed`
+    );
+  }
+
+  p.outro(pc.green(`Removed ${removable.length} sandbox(es)`));
+}
+
 export async function rm(args: string[]): Promise<void> {
   const { values, positionals } = parseArgs({
     args,
@@ -238,6 +324,9 @@ export async function rm(args: string[]): Promise<void> {
     strict: true,
     options: {
       all: { type: 'boolean' },
+      purge: { type: 'boolean' },
+      'dry-run': { type: 'boolean' },
+      yes: { type: 'boolean', short: 'y' },
       help: { type: 'boolean', short: 'h' }
     }
   });
@@ -247,15 +336,35 @@ export async function rm(args: string[]): Promise<void> {
     return;
   }
 
-  if (!values.all && positionals.length !== 1) {
+  if (values.all && values.purge) {
+    throw new Error('--all and --purge are mutually exclusive');
+  }
+
+  if ((values['dry-run'] || values.yes) && !values.all) {
+    throw new Error('--dry-run and --yes only apply to --all');
+  }
+
+  if ((values.all || values.purge) && positionals.length > 0) {
+    throw new Error(`${values.all ? '--all' : '--purge'} does not take a branch argument`);
+  }
+
+  if (!values.all && !values.purge && positionals.length !== 1) {
     throw new Error(USAGE);
   }
 
   const config = loadConfig();
   const tools = resolveTools(config);
 
+  if (values.purge) {
+    await rmPurge(config, tools);
+    return;
+  }
+
   if (values.all) {
-    await rmAll(config, tools);
+    await rmUnbound(config, tools, {
+      dryRun: Boolean(values['dry-run']),
+      assumeYes: Boolean(values.yes)
+    });
     return;
   }
 

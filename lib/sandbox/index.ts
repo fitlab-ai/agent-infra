@@ -16,7 +16,9 @@ Commands:
   rebuild [--quiet] [--refresh]
                                Rebuild the sandbox image (--refresh pulls base + tools)
   refresh                      Sync host Claude Code credentials to all sandbox copies
-  rm <branch> [--all]          Remove a sandbox or all sandboxes
+  rm <branch> | --all | --purge
+                               Remove one sandbox, all sandboxes not bound to an
+                               active task (--all), or tear down everything (--purge)
   vm status|start|stop         Manage the sandbox VM (macOS) or check the backend (Windows)
 
 Run 'ai sandbox <command> --help' for details.`;

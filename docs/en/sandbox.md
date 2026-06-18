@@ -34,8 +34,13 @@ the host and the sandbox without polluting the git worktree:
 
 These paths are intentionally hardcoded; there is no `.airc.json` knob. Both
 host directories are created automatically on first `create`. When you
-`ai sandbox rm <branch>` or `ai sandbox rm --all`, you will be prompted (default
-yes) to clean up the corresponding share dirs alongside the worktrees.
+`ai sandbox rm <branch>`, you will be prompted (default yes) to clean up the
+corresponding share dirs alongside the worktrees. `ai sandbox rm --all` batch
+removes every sandbox **not bound to an active task** (i.e. the `-` rows in
+`ai sandbox ls`); add `--dry-run` to preview or `--yes` to skip the confirmation
+(required in non-interactive shells). `ai sandbox rm --purge` tears down **all**
+project sandboxes (containers, worktrees, image, VM). **Breaking change:** prior
+to this, `--all` meant the full teardown that `--purge` now performs.
 Use `ai sandbox prune --dry-run` to inspect orphaned per-branch state dirs left
 behind by older versions or interrupted cleanup, then `ai sandbox prune` to
 remove only dirs without an active sandbox container.

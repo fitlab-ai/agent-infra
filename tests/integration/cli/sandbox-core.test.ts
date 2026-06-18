@@ -156,9 +156,11 @@ test("sandbox create rejects invalid selinux disable environment before loading 
 test("sandbox rm defaults local branch deletion confirmation to yes", () => {
   const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/rm.js"), "utf8");
 
+  // The interactive confirm is gated by options.assumeYes (batch --all passes
+  // assumeYes:true); when prompting it still defaults to yes.
   assert.match(
     commandSource,
-    /const shouldDeleteBranch = await p\.confirm\(\{[\s\S]*?message: `Also delete local branch '\$\{effectiveBranch\}'\?`,[\s\S]*?initialValue: true[\s\S]*?\}\);/
+    /const shouldDeleteBranch = options\.assumeYes[\s\S]*?await p\.confirm\(\{[\s\S]*?message: `Also delete local branch '\$\{effectiveBranch\}'\?`,[\s\S]*?initialValue: true[\s\S]*?\}\);/
   );
 });
 
@@ -188,7 +190,7 @@ test("sandbox rm cleans per-branch shell config dir", () => {
   }
 });
 
-test("sandbox rm --all cleans shell config dirs through a single confirm", () => {
+test("sandbox rm --purge cleans shell config dirs through a single confirm", () => {
   const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/rm.js"), "utf8");
 
   assert.match(
@@ -197,25 +199,25 @@ test("sandbox rm --all cleans shell config dirs through a single confirm", () =>
   );
 });
 
-test("sandbox rm --all prunes project-scoped dangling images before managed-engine branch", () => {
+test("sandbox rm --purge prunes project-scoped dangling images before managed-engine branch", () => {
   const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/rm.js"), "utf8");
 
-  const rmAllMatch = commandSource.match(
-    /async function rmAll\b[\s\S]*?(?=\n(?:async function|export async function|export function)\b|$)/
+  const rmPurgeMatch = commandSource.match(
+    /async function rmPurge\b[\s\S]*?(?=\n(?:async function|export async function|export function)\b|$)/
   );
-  assert.ok(rmAllMatch, "expected to locate rmAll function body in rm.js");
-  const rmAllBody = rmAllMatch[0];
+  assert.ok(rmPurgeMatch, "expected to locate rmPurge function body in rm.js");
+  const rmPurgeBody = rmPurgeMatch[0];
 
-  const pruneIndex = rmAllBody.search(/pruneSandboxDanglingImages\(config,\s*engine\)/);
+  const pruneIndex = rmPurgeBody.search(/pruneSandboxDanglingImages\(config,\s*engine\)/);
   assert.ok(
     pruneIndex >= 0,
-    "expected rmAll to call pruneSandboxDanglingImages(config, engine)"
+    "expected rmPurge to call pruneSandboxDanglingImages(config, engine)"
   );
 
-  const managedIndex = rmAllBody.search(/if\s*\(\s*isManagedEngine\(\s*engine\s*\)/);
+  const managedIndex = rmPurgeBody.search(/if\s*\(\s*isManagedEngine\(\s*engine\s*\)/);
   assert.ok(
     managedIndex >= 0,
-    "expected rmAll to contain the isManagedEngine branch"
+    "expected rmPurge to contain the isManagedEngine branch"
   );
 
   assert.ok(
@@ -223,15 +225,196 @@ test("sandbox rm --all prunes project-scoped dangling images before managed-engi
     "expected pruneSandboxDanglingImages to run before the isManagedEngine branch (covers WSL2 early return)"
   );
 
-  const removeImageConfirmIndex = rmAllBody.search(/Remove image \$\{config\.imageName\}\?/);
+  const removeImageConfirmIndex = rmPurgeBody.search(/Remove image \$\{config\.imageName\}\?/);
   assert.ok(
     removeImageConfirmIndex >= 0,
-    "expected rmAll to keep the 'Remove image?' confirm prompt"
+    "expected rmPurge to keep the 'Remove image?' confirm prompt"
   );
   assert.ok(
     pruneIndex > removeImageConfirmIndex,
     "expected pruneSandboxDanglingImages to run after the 'Remove image?' confirm"
   );
+});
+
+function writeShortIdRegistry(repoDir: string, ids: Record<string, string>): void {
+  const activeDir = path.join(repoDir, ".agents", "workspace", "active");
+  fs.mkdirSync(activeDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(activeDir, ".short-ids.json"),
+    JSON.stringify({ version: 1, ids }, null, 2)
+  );
+}
+
+function writeActiveTaskBranch(repoDir: string, taskId: string, branch: string): void {
+  const taskDir = path.join(repoDir, ".agents", "workspace", "active", taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\nbranch: ${branch}\n---\n# body\n`);
+}
+
+function sandboxRow(name: string, branch: string, project = "demo"): string {
+  return `${name}\tUp 1 minute\t${project}.sandbox.branch=${branch},${project}.sandbox=true`;
+}
+
+function hasDockerVerb(calls: string[][], verb: string): boolean {
+  return calls.some((call) => call[0] === verb);
+}
+
+test("sandbox rm --all --dry-run lists unbound sandboxes and removes nothing", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-dry-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow("sb-orphan", "orphan-branch")
+    });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--all", "--dry-run"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /orphan-branch/);
+    const calls = fixture.readDockerCalls();
+    assert.equal(hasDockerVerb(calls, "stop"), false, "dry-run must not stop containers");
+    assert.equal(hasDockerVerb(calls, "rm"), false, "dry-run must not rm containers");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --all skips containers bound to an active task", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-skip-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-bound", "bound-branch"),
+        sandboxRow("sb-free", "free-branch")
+      ].join("\n")
+    });
+    writeShortIdRegistry(fixture.repoDir, { "07": "TASK-20260101-000001" });
+    writeActiveTaskBranch(fixture.repoDir, "TASK-20260101-000001", "bound-branch");
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--all", "--dry-run"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /free-branch/);
+    assert.doesNotMatch(result.stdout, /bound-branch/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --all exits 0 with a notice when nothing is removable", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-empty-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow("sb-bound", "bound-branch")
+    });
+    writeShortIdRegistry(fixture.repoDir, { "07": "TASK-20260101-000001" });
+    writeActiveTaskBranch(fixture.repoDir, "TASK-20260101-000001", "bound-branch");
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--all"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /No removable sandboxes/);
+    const calls = fixture.readDockerCalls();
+    assert.equal(hasDockerVerb(calls, "stop"), false);
+    assert.equal(hasDockerVerb(calls, "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --all rejects a positional branch argument", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-mutex-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--all", "feature/x"]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /--all does not take a branch argument/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --all without --yes fails safe in a non-interactive shell", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-tty-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow("sb-orphan", "orphan-branch")
+    });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--all"]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /--yes/);
+    const calls = fixture.readDockerCalls();
+    assert.equal(hasDockerVerb(calls, "stop"), false);
+    assert.equal(hasDockerVerb(calls, "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --dry-run without --all is rejected", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-dry-misuse-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--dry-run"]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /only apply to --all/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --all --yes routes each unbound branch through rmOne cleanup", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-yes-"));
+  const project = "demo";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project,
+      dockerStdoutForPs: sandboxRow("sb-cleanup", "feature/all-cleanup")
+    });
+    const shellConfigBase = path.join(tmpDir, ".agent-infra", "config", project);
+    const removedBranchDir = path.join(shellConfigBase, "feature..all-cleanup");
+    const keptBranchDir = path.join(shellConfigBase, "feature..keep");
+    fs.mkdirSync(removedBranchDir, { recursive: true });
+    fs.mkdirSync(keptBranchDir, { recursive: true });
+    fs.writeFileSync(path.join(removedBranchDir, ".bash_aliases"), "alias demo=true\n", "utf8");
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--all", "--yes"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    // The unbound branch was passed into rmOne, whose unconditional per-branch
+    // shell-config cleanup ran (observable filesystem side effect).
+    assert.equal(fs.existsSync(removedBranchDir), false);
+    // A different branch's dir is untouched (batch only targeted the unbound one).
+    assert.equal(fs.existsSync(keptBranchDir), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --all delegates to rmOne with assumeYes/quiet and aggregates failures", () => {
+  const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/rm.js"), "utf8");
+
+  const rmUnboundMatch = commandSource.match(
+    /async function rmUnbound\b[\s\S]*?(?=\n(?:async function|export async function|export function)\b|$)/
+  );
+  assert.ok(rmUnboundMatch, "expected to locate rmUnbound function body in rm.js");
+  const rmUnboundBody = rmUnboundMatch[0];
+
+  // T7b: batch path forwards the removable branch into the single-container path,
+  // suppressing per-item confirms and framing.
+  assert.match(rmUnboundBody, /rmOne\([\s\S]*?assumeYes:\s*true[\s\S]*?quiet:\s*true[\s\S]*?\)/);
+  // T8: partial-failure contract — keep going, collect failures, then throw a summary.
+  assert.match(rmUnboundBody, /try\s*\{[\s\S]*?rmOne\([\s\S]*?\}\s*catch[\s\S]*?failures\.push/);
+  assert.match(rmUnboundBody, /failures\.length[\s\S]*?throw new Error\(/);
 });
 
 test("managed sandbox fs helpers remove only paths under the managed root", async () => {
