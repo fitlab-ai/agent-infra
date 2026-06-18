@@ -40,6 +40,12 @@ test('ai task status --help prints subcommand USAGE', () => {
   assert.match(out.stdout, /Usage: ai task status/);
 });
 
+test('ai task log --help prints subcommand USAGE', () => {
+  const out = runCli(['task', 'log', '--help']);
+  assert.equal(out.status, 0);
+  assert.match(out.stdout, /Usage: ai task log/);
+});
+
 test('ai task <unknown> reports error', () => {
   const out = runCli(['task', 'wat']);
   assert.equal(out.status, 1);
