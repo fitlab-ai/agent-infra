@@ -12,17 +12,19 @@ if (major < 22) {
 
 const USAGE = `agent-infra ${VERSION} - bootstrap AI collaboration infrastructure
 
-Usage:
-  agent-infra cp <ssh-alias>  Copy local clipboard image to a remote macOS NSPasteboard
-  agent-infra help            Show this help message
-  agent-infra init            Initialize a new project with update-agent-infra seed command
-  agent-infra merge           Merge tasks from another workspace directory (active/blocked/completed/archive)
-  agent-infra sandbox         Manage Docker-based AI sandboxes
-  agent-infra task            Read-only views over .agents/workspace tasks (ls / show / files / cat / status / log / grep)
-  agent-infra update          Update seed files and sync file registry for an existing project
-  agent-infra version         Show version
+Usage: ai <command> [options]
 
-Shorthand: ai (e.g. ai init)
+Commands:
+  cp <ssh-alias>  Copy local clipboard image to a remote macOS NSPasteboard
+  help            Show this help message
+  init            Initialize a new project with update-agent-infra seed command
+  merge           Merge tasks from another workspace directory (active/blocked/completed/archive)
+  sandbox         Manage Docker-based AI sandboxes
+  task            Read-only views over .agents/workspace tasks (cat / files / grep / log / ls / show / status)
+  update          Update seed files and sync file registry for an existing project
+  version         Show version
+
+'ai' and 'agent-infra' are interchangeable; 'ai' is the shorter form.
 
 Install methods:
   npm:   npm install -g @fitlab-ai/agent-infra
@@ -31,7 +33,7 @@ Install methods:
   curl:  curl -fsSL https://raw.githubusercontent.com/fitlab-ai/agent-infra/main/install.sh | sh  (runs npm install -g internally)
 
 Examples:
-  cd my-project && agent-infra init
+  cd my-project && ai init
   npx @fitlab-ai/agent-infra init
 `;
 

@@ -38,3 +38,7 @@
 
 - [`testing-discipline.md`](testing-discipline.md) — 测试编写纪律：结构性断言优先，禁止脆弱的措辞匹配。
 - [`cross-platform-tests.md`](cross-platform-tests.md) — 跨平台测试守卫：用 `onPlatforms()` 表达平台跳过。
+
+## CLI
+
+- [`cli-help-format.md`](cli-help-format.md) — CLI help 文案约定：展示名统一 `ai`、`Usage:`+`Commands:` 结构、命令按字母序（仅顶层与命名空间级 help）。

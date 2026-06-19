@@ -58,8 +58,9 @@ test('ai task <unknown> reports error', () => {
   assert.match(out.stderr, /Unknown task command: wat/);
 });
 
-test('agent-infra USAGE mentions the task subcommand', () => {
+test('top-level USAGE lists the task command under Commands', () => {
   const out = runCli(['help']);
   assert.equal(out.status, 0);
-  assert.match(out.stdout, /agent-infra task/);
+  assert.match(out.stdout, /Usage: ai <command>/);
+  assert.match(out.stdout, /^\s+task\s+Read-only views/m);
 });

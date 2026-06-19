@@ -6,9 +6,6 @@ Commands:
                                Enter sandbox or run a command. N (bare) is the
                                recommended form for task short ids (e.g.
                                'ai sandbox exec 11'); '#N' is also accepted.
-  start <branch | TASK-id | N | '#N'>
-                               Start an existing stopped sandbox container
-                               (e.g. after the Docker daemon restarted)
   ls                           List sandboxes for the current project (the '#'
                                column is a display-only row number; the 'SHORT'
                                column shows the active task short id, '-' if none)
@@ -19,6 +16,9 @@ Commands:
   rm <branch> | --all | --purge
                                Remove one sandbox, all sandboxes not bound to an
                                active task (--all), or tear down everything (--purge)
+  start <branch | TASK-id | N | '#N'>
+                               Start an existing stopped sandbox container
+                               (e.g. after the Docker daemon restarted)
   vm status|start|stop         Manage the sandbox VM (macOS) or check the backend (Windows)
 
 Run 'ai sandbox <command> --help' for details.`;

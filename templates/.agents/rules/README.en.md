@@ -39,3 +39,7 @@ so you can quickly find "which ones to read" without opening each file.
 
 - [`testing-discipline.md`](testing-discipline.md) — Test-writing discipline: prefer structural asserts, no brittle wording matches.
 - [`cross-platform-tests.md`](cross-platform-tests.md) — Cross-platform test guards: express platform skips via `onPlatforms()`.
+
+## CLI
+
+- [`cli-help-format.md`](cli-help-format.md) — CLI help text conventions: unify display name on `ai`, `Usage:`+`Commands:` structure, alphabetical command order (top-level and namespace-level help only).
