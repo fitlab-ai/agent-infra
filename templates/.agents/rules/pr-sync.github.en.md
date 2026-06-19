@@ -32,11 +32,11 @@ Aggregation rules:
 - build the review-history table from `review-code*` and `code*`
 - extract the test summary from `code*`
 - if one artifact class is missing, treat it as "no data for this stage" and continue
-- Manual verification section: include only post-code-stage checks that still require a human to execute or judge and that the AI cannot close on its own; directional/decision issues belong to inter-stage human review checkpoints and should already be decided before code, so they do not enter this section.
-  - **Candidate sources**: `review-code*` "Environment-Blocked Findings", plus `code*` items that genuinely require a real environment, permissions, account, external system, or human judgment to confirm the effect.
-  - **Exclude**: `analysis*`/`plan*` "Assumptions"/"Open Questions", directional leftovers from `review-plan*`, `review-*` "Self-Doubt", and items an agent can close by rerunning tests, adding checks, or another fix round.
+- Manual verification section: include only post-code-stage checks that still require a human to execute or judge and that the AI cannot close on its own.
+  - **Admission boundary**: the verification result depends on a real environment, permissions, account, external system, or human judgment, and cannot be closed by an agent rerunning tests, adding checks, or continuing the fix loop.
+  - **Sources**: `review-code*` "Environment-Blocked Findings", plus `code*` items that satisfy the boundary above.
   - **Wording**: each retained item must state at least "what to verify + location (file/change/scope) + why only a human can verify it".
-  - **Placeholder**: when no item remains after filtering, write the explicit placeholder `- None — no items require manual verification`; never leave it empty.
+  - **Placeholder**: when there are no retained items, write the explicit placeholder `- None — no items require manual verification`; never leave it empty.
 
 ## Comment Body Template
 
