@@ -32,7 +32,11 @@ Aggregation rules:
 - build the review-history table from `review-code*` and `code*`
 - extract the test summary from `code*`
 - if one artifact class is missing, treat it as "no data for this stage" and continue
-- Manual verification section: extract items requiring human confirmation/fallback from the "Assumptions"/"Open Questions" of the latest `plan*` and the "Environment-Blocked Findings"/"Self-Doubt" sections (i.e. env-blocked items) of the latest `review-code*`; when there are none, write the explicit placeholder `- None — no items require manual verification`, never leave it empty
+- Manual verification section: aggregate from each stage's latest artifact in the order "filter, then clarify, then complete sources" (③→②→①) to avoid indiscriminate copying that amplifies noise.
+  - **Candidate sources (①)**: extract items of a "needs human confirmation/fallback" nature — `analysis*` "Assumptions"/"Open Questions", `plan*` "Assumptions"/"Open Questions", `review-plan*` "Environment-Blocked Findings"/"Self-Doubt", `code*` "Items for Review"/"Known Issues", `review-code*` "Environment-Blocked Findings"/"Self-Doubt".
+  - **Inclusion criteria (③, all three must hold, otherwise exclude)**: (a) the change lies within this PR's diff (exclude workspace bookkeeping such as `task.md`); (b) the conclusion is not yet approved and genuinely needs human judgment (exclude decisions already passed by review-plan/review-code, and disclaimer-style notes about external references); (c) it has a clear location (file/change/scope).
+  - **Wording (②, minimum information)**: each retained item must state at least "what to verify + location (file/change/scope) + why a human is needed"; never copy a bare sentence like "Assumption X".
+  - **Placeholder**: when no item remains after filtering, write the explicit placeholder `- None — no items require manual verification`; never leave it empty.
 
 ## Comment Body Template
 

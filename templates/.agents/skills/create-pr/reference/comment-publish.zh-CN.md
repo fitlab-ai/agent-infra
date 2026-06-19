@@ -9,7 +9,7 @@
 - 按 `.agents/rules/pr-sync.md` 中的唯一权威模板生成或更新 `<!-- sync-pr:{task-id}:summary -->` 评论
 - PR 已存在同标记评论时，只在正文变化时 PATCH；否则跳过写入
 - 本 skill 中，摘要同步失败沿用 `create-pr` 的现有错误处理，不回滚已经创建的 PR
-- 按 `.agents/rules/pr-sync.md` 的聚合规则填充「需人工校验」段落（来源：plan 假设/未决问题、review-code 环境性遗留/自我质疑）；无事项时写显式占位
+- 按 `.agents/rules/pr-sync.md` 的聚合规则填充「需人工校验」段落：来源为 `analysis*`/`plan*` 的「假设」「未决问题」、`review-plan*`/`review-code*` 的「环境性遗留」「自我质疑」、`code*` 的「供审查关注的内容」「已知问题」；按「先过滤、再写清、最后补源」（③→②→①）处理——每条须同时满足「在本 PR diff 内 + 未被批准/确需人判断 + 有明确定位」，并写明「校验什么 + 定位 + 为何需人工」；无事项时写显式占位
 
 ## 结果回传
 
