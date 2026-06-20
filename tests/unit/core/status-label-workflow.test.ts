@@ -8,6 +8,12 @@ const workflowTargets = [
   "templates/.github/workflows/status-label.yml"
 ];
 
+test("status-label workflow template stays in sync with the root workflow", () => {
+  const [rootPath = "", templatePath = ""] = workflowTargets;
+
+  assert.equal(read(rootPath), read(templatePath));
+});
+
 test("status-label workflow only removes status labels for completed issue closes", () => {
   workflowTargets.forEach((relativePath) => {
     const content = read(relativePath);
