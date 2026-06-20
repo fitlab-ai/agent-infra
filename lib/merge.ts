@@ -901,7 +901,7 @@ function printReport(report: MergeReport): void {
 async function cmdMerge(args: string[]): Promise<void> {
   const sourcePath = args[0];
   if (!sourcePath) {
-    throw new Error('Usage: agent-infra merge <source-path>');
+    throw new Error('Usage: ai merge <source-path>');
   }
 
   const resolvedSource = path.resolve(sourcePath);

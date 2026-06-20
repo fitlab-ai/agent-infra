@@ -119,7 +119,7 @@ function parseLocalSources(input: string): SourceEntry[] {
 
 async function cmdInit(): Promise<void> {
   console.log('');
-  console.log('  agent-infra init');
+  console.log('  ai init');
   console.log('  ================================');
   console.log('  Optional template and skill sources can be added now or later in .agents/.airc.json.');
   console.log('');

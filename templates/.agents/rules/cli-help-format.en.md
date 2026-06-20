@@ -4,11 +4,8 @@ Unify the help text display structure, display name, and command ordering of the
 
 ## Scope
 
-- **In scope**: top-level help (`bin/cli.ts`'s `USAGE`) and namespace-level help (e.g. `ai sandbox` / `ai task`'s `USAGE`) — their display structure, display name, and command ordering.
-- **Out of scope** (not required; align incrementally during routine maintenance of each command):
-  - Command-level `Usage:` error strings (e.g. `lib/merge.ts`'s `Usage: agent-infra merge <source-path>`).
-  - Interactive banners (e.g. the `agent-infra init` / `agent-infra update` prints in `lib/init.ts`, `lib/update.ts`).
-  - Subcommand-level `Usage: ai <ns> <cmd> ...` strings (already unified on `ai`).
+- **Display name `ai`**: applies to **all** user-facing help / usage / banner text — top-level, namespace-level, and the single-line usage / startup banners of leaf commands such as `merge` / `init` / `update`. The only exceptions: the top-level help first line keeps the brand + version line `agent-infra ${VERSION}`, and `@fitlab-ai/agent-infra` in package names / install commands / repo URLs stays as-is.
+- **Structure & ordering** (`Usage:` + `Commands:` structure, alphabetical command order): applies only to levels that carry a `Commands:` listing — top-level help (`bin/cli.ts`) and namespace-level help (e.g. `ai sandbox` / `ai task`). Leaf commands have only a single-line usage and need no `Commands:` structure.
 - This convention does **not** govern the dispatch `switch` case ordering — that is unrelated to help display.
 
 ## Display name

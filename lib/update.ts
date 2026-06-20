@@ -119,7 +119,7 @@ function syncFileRegistry(config: UpdateConfig, platformType: string, enabledTUI
 
 async function cmdUpdate(): Promise<void> {
   console.log('');
-  console.log('  agent-infra update');
+  console.log('  ai update');
   console.log('  ==================================');
   console.log('');
 
