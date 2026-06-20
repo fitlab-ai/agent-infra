@@ -25,6 +25,7 @@ so you can quickly find "which ones to read" without opening each file.
 ## Task Workflow
 
 - [`task-management.md`](task-management.md) — Task intent detection and workflow-command mapping.
+- [`review-handshake.md`](review-handshake.md) — Three-stage bidirectional review handshake: four-state disposition, symmetric evidence, disagreement ledger, convergence and post-review commit gate.
 - [`task-short-id.md`](task-short-id.md) — Resolution, allocation and lifecycle of `#NN` / bare-number short ids.
 - [`milestone-inference.md`](milestone-inference.md) — Milestone inference for create-task / code-task / create-pr.
 - [`label-milestone-setup.md`](label-milestone-setup.md) — Platform commands to initialize labels / milestones.

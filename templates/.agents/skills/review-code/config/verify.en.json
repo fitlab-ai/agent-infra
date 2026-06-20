@@ -24,12 +24,14 @@
         "Conclusion and Recommendations",
         "State Check",
         "Evidence",
-        "Self-Doubt"
+        "Self-Doubt",
+        "Review Disagreement Ledger Writeback"
       ],
       "required_patterns": [
         "^### Approval Decision$",
         "^\\$ ",
-        "^- \\*\\*Overall Verdict\\*\\*[:：]\\s*(?:通过|需要修改|拒绝|Approved|Changes Requested|Rejected)\\s*$"
+        "^- \\*\\*Overall Verdict\\*\\*[:：]\\s*(?:通过|需要修改|拒绝|Approved|Changes Requested|Rejected)\\s*$",
+        "^- \\*\\*Review Baseline Commit\\*\\*[:：]\\s*\\S"
       ],
       "freshness_minutes": 30
     },

@@ -70,10 +70,14 @@ const gateCases = [
       assert.equal(result.status, 0, result.stderr);
       const payload = parseValidatorPayload(result.stdout);
       assert.equal(payload.gate, "pass");
-      assert.equal(payload.checks.length, 4);
+      assert.equal(payload.checks.length, 5);
+      assert.deepEqual(
+        payload.checks.map((check) => check.type),
+        ["task-meta", "artifact", "activity-log", "review-ledger", "platform-sync"]
+      );
       assert.deepEqual(
         payload.checks.map((check) => check.status),
-        ["pass", "pass", "pass", "pass"]
+        ["pass", "pass", "pass", "pass", "pass"]
       );
     }
   },
@@ -92,7 +96,7 @@ const gateCases = [
       assert.match(result.stdout, /^Verification: pass \| Skill: code-task$/m);
       assert.match(result.stdout, /^\s+\[pass\] task-meta - /m);
       assert.match(result.stdout, /^\s+\[pass\] artifact - /m);
-      assert.match(result.stdout, /^Result: 4 passed, 0 failed - All declared checks passed$/m);
+      assert.match(result.stdout, /^Result: 5 passed, 0 failed - All declared checks passed$/m);
     }
   },
   {
@@ -116,11 +120,11 @@ const gateCases = [
       assert.equal(payload.gate, "pass");
       assert.deepEqual(
         payload.checks.map((check) => check.type),
-        ["task-meta", "activity-log", "completion-checklist", "platform-sync", "artifact"]
+        ["task-meta", "activity-log", "completion-checklist", "review-ledger", "post-review-commit", "platform-sync", "artifact"]
       );
       assert.deepEqual(
         payload.checks.map((check) => check.status),
-        ["pass", "pass", "pass", "pass", "pass"]
+        ["pass", "pass", "pass", "pass", "pass", "pass", "pass"]
       );
     }
   }

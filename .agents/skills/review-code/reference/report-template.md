@@ -22,6 +22,7 @@
 - **审查者**：{reviewer-name}
 - **审查时间**：{timestamp}
 - **审查范围**：{file-count and major modules}
+- **审查基线提交**：{git rev-parse HEAD 原文}（complete-task 的 post-review commit 门禁基线；详见 `.agents/rules/review-handshake.md`）
 - **总体结论**：{通过 / 需要修改 / 拒绝}（恰取一个；禁止写组合短语，否则 verify gate 失败）
 - **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **env-blocked**：0
 
@@ -59,6 +60,10 @@
 
 > 如本轮无 env-blocked 项，保留段落标题并写「（无）」。
 
+
+## 审查分歧账本回写
+
+> 把本轮每条 finding upsert 到 task.md `## 审查分歧账本`：新 finding 追加 `open` 行（id 前缀 `CD-`，stage=code），对执行方上一轮响应按回交义务改 `confirmed` / 置回 `open` / `needs-human-decision`。状态机与证据规则见 `.agents/rules/review-handshake.md`。
 
 ## 证据原文
 

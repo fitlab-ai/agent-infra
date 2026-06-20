@@ -21,6 +21,7 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 - **Reviewer**: {reviewer-name}
 - **Review Time**: {timestamp}
 - **Scope**: {file-count and major modules}
+- **Review Baseline Commit**: {raw git rev-parse HEAD} (baseline for the complete-task post-review commit gate; see `.agents/rules/review-handshake.md`)
 - **Overall Verdict**: {Approved / Changes Requested / Rejected} (pick exactly one; combined phrases will fail the verify gate)
 - **Findings (AI-actionable)**: 0 blockers, 0 majors, 0 minors / **env-blocked**: 0
 
@@ -58,6 +59,10 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 
 > If this round has no env-blocked findings, keep the section heading and write "None".
 
+
+## Review Disagreement Ledger Writeback
+
+> Upsert each finding this round into the task.md disagreement ledger: append an `open` row for new findings (id prefix `CD-`, stage=code); per the hand-back duty set the executor's prior-round responses to `confirmed` / back to `open` / `needs-human-decision`. State machine and evidence rules: `.agents/rules/review-handshake.md`.
 
 ## Evidence
 

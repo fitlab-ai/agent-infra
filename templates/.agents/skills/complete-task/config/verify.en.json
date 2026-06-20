@@ -24,6 +24,8 @@
     "completion-checklist": {
       "require_all_checked": true
     },
+    "review-ledger": {},
+    "post-review-commit": {},
     "platform-sync": {
       "when": "issue_number_exists",
       "expected_comment_marker": "<!-- sync-issue:{task-id}:summary -->",

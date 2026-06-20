@@ -66,7 +66,7 @@ Use it to understand:
 - identified technical risks
 - effort and complexity assessment
 
-**Round ≥ 2: respond to the prior review (only when a review artifact exists)**: if the task directory contains `review-plan.md` / `review-plan-r{N}.md`, read the highest-round review report; add a `## Response to Prior Review` section to this round's plan artifact, and for each finding verify it via Read/Grep before acting (holds → accept and fix; judged hallucinated/unfounded → rebut with counter-evidence rather than defaulting to compliance); record any open disagreement under `## Open Questions`. Round 1 has no review, so skip this section.
+**Round ≥ 2: respond to the prior review (only when a review artifact exists)**: if the task directory contains `review-plan.md` / `review-plan-r{N}.md`, read the highest-round review report; add a `## Response to Prior Review` section to this round's plan artifact, and for each finding verify it via Read/Grep, then dispose of it with one of the four states in `.agents/rules/review-handshake.md` (`accepted` / `adjusted` / `refuted` / `cannot-judge`) — every state needs commensurate evidence, never defaulting to compliance; write the disposition back to the matching row in the task.md disagreement ledger (stage=plan, round +1). Record any open disagreement under `## Open Questions`. Round 1 has no review, so skip this section.
 
 ### 4. Understand the Problem
 

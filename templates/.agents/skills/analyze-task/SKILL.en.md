@@ -65,7 +65,7 @@ If `task.md` contains these source fields, also read the corresponding source in
 - `codescan_alert_number` - Code Scanning alert
 - `security_alert_number` - Dependabot alert
 
-**Round ≥ 2: respond to the prior review (only when a review artifact exists)**: if the task directory contains `review-analysis.md` / `review-analysis-r{N}.md`, read the highest-round review report; add a `## Response to Prior Review` section to this round's analysis artifact, and for each finding verify it via Read/Grep before acting (holds → accept and fix; judged hallucinated/unfounded → rebut with counter-evidence rather than defaulting to compliance); record any open disagreement under `## Open Questions`. Round 1 has no review, so skip this section.
+**Round ≥ 2: respond to the prior review (only when a review artifact exists)**: if the task directory contains `review-analysis.md` / `review-analysis-r{N}.md`, read the highest-round review report; add a `## Response to Prior Review` section to this round's analysis artifact, and for each finding verify it via Read/Grep, then dispose of it with one of the four states in `.agents/rules/review-handshake.md` (`accepted` / `adjusted` / `refuted` / `cannot-judge`) — every state needs commensurate evidence, never defaulting to compliance; write the disposition back to the matching row in the task.md disagreement ledger (stage=analysis, round +1). Record any open disagreement under `## Open Questions`. Round 1 has no review, so skip this section.
 
 ### 4. Requirement Sufficiency Gate
 

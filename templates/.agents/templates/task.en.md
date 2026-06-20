@@ -53,6 +53,13 @@ pr_status: pending             # PR status: pending (default) | created (PR crea
 
 <!-- Populated by review-* -->
 
+## Review Disagreement Ledger
+
+<!-- One row per review finding; state machine / evidence rules in .agents/rules/review-handshake.md. The phase-advance and complete-task gates read this section. Keep the header when there are no disagreements. -->
+
+| id | stage | round | severity | status | evidence |
+|----|-------|-------|----------|--------|----------|
+
 ## Activity Log
 
 <!-- Append a new entry for each workflow step. Do NOT overwrite previous entries. -->

@@ -24,6 +24,7 @@
 ## 任务工作流
 
 - [`task-management.md`](task-management.md) — 任务语义识别与工作流命令映射。
+- [`review-handshake.md`](review-handshake.md) — 三阶段双向审查握手协议：四态处置、对称证据、分歧账本、收敛与 post-review commit 门禁。
 - [`task-short-id.md`](task-short-id.md) — 任务短号 `#NN` / 裸数字的解析、分配与生命周期。
 - [`milestone-inference.md`](milestone-inference.md) — create-task / code-task / create-pr 的 milestone 推断。
 - [`label-milestone-setup.md`](label-milestone-setup.md) — 初始化 label / milestone 的平台命令集。

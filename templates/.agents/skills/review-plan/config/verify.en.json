@@ -24,7 +24,8 @@
         "Conclusion and Recommendations",
         "State Check",
         "Evidence",
-        "Self-Doubt"
+        "Self-Doubt",
+        "Review Disagreement Ledger Writeback"
       ],
       "required_patterns": [
         "^### Approval Decision$",

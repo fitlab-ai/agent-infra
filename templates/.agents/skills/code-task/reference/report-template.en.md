@@ -64,11 +64,11 @@ $ {command}
 
 ## Per-Finding Verification
 
-> Fix mode only; for an initial implementation write "(initial implementation this round, no review findings)". Read/Grep-verify each finding of the previous `review-code` before acting on it.
+> Fix mode only; for an initial implementation write "(initial implementation this round, no review findings)". Read/Grep-verify each finding of the previous `review-code`, then dispose of it with one of the four states in `.agents/rules/review-handshake.md`; write the disposition and **commensurate evidence** back to the matching row in the task.md disagreement ledger (stage=code, round +1). Symmetric evidence: accepted/adjusted cite the fix `file:line`; refuted/cannot-judge cite counter-evidence `file:line` or raw command output.
 
-| Finding | Reproduced? | Disposition (fix / rebut) |
-|------|----------|----------------------|
-| {finding} | {yes/no, with file:line or command} | {fix note, or counter-argument + recorded under unresolved} |
+| Finding | Disposition | Commensurate evidence |
+|------|----------|----------|
+| {finding} | {accepted / adjusted / refuted / cannot-judge} | {fix file:line, or counter-evidence file:line / raw command output} |
 
 ## Items for Review
 

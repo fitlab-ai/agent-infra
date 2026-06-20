@@ -4,9 +4,11 @@
 
 ## 规划修复
 
-**先逐条核实（动手前必做）**：对 `{review-artifact}` 的每一条发现，先 Read/Grep 其引用的 `file:line` 与对应 `git diff`，确认问题真实存在：
-- 成立 → 纳入下方分类与修复
-- 不成立 / 基于错误 `file:line` / 幻觉 → 不改代码，在报告 `## 对审查发现的逐条核实` 给出反证，并记入 unresolved issues
+**先逐条核实（动手前必做）**：对 `{review-artifact}` 的每一条发现，先 Read/Grep 其引用的 `file:line` 与对应 `git diff`，确认问题真实存在，再按 `.agents/rules/review-handshake.md` 的四态处置，并把处置 + 相称证据回写 task.md `## 审查分歧账本` 对应行（stage=code，round +1；对称证据：每态都要附证据，"接受"不是零成本默认）：
+- `accepted` → 纳入下方分类与修复，证据指向修复点 `file:line`
+- `adjusted` → 采用替代修法，附理由，待 review-code 复核确认
+- `refuted` → 核实判定不成立 / 基于错误 `file:line` / 幻觉 → 不改代码，在报告 `## 对审查发现的逐条核实` 给出反证，待 review-code 复核确认
+- `cannot-judge` → 证据不足无法判断，交检视方/人工
 - 不擅自把修复扩大到审查未列出的问题
 
 按以下顺序分类并确定优先级：

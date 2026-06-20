@@ -64,7 +64,7 @@ tail .agents/workspace/active/{task-id}/task.md
 - `codescan_alert_number` - Code Scanning 告警
 - `security_alert_number` - Dependabot 告警
 
-**Round ≥ 2：响应上一轮审查（仅当存在审查产物时）**：若任务目录存在 `review-analysis.md` / `review-analysis-r{N}.md`，读取最高轮次的审查报告；在本轮分析产物中新增 `## 对上一轮审查的响应` 段，对每条发现先 Read/Grep 核实再处置（成立 → 接受并修正；判定为幻觉/不成立 → 附反证反驳，不默认顺从），未决分歧写入 `## 未决问题`。Round 1 无审查，跳过本段。
+**Round ≥ 2：响应上一轮审查（仅当存在审查产物时）**：若任务目录存在 `review-analysis.md` / `review-analysis-r{N}.md`，读取最高轮次的审查报告；在本轮分析产物中新增 `## 对上一轮审查的响应` 段，对每条发现先 Read/Grep 核实，再按 `.agents/rules/review-handshake.md` 的四态（`accepted` / `adjusted` / `refuted` / `cannot-judge`）处置——每态都要附相称证据，不默认顺从；并把处置回写 task.md `## 审查分歧账本` 对应行（stage=analysis，round +1）。未决分歧写入 `## 未决问题`。Round 1 无审查，跳过本段。
 
 ### 4. 入口需求充分性闸门
 

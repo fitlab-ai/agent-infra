@@ -57,7 +57,7 @@ const implementSyncCases = [
       assert.equal(payload.gate, "pass");
       assert.deepEqual(
         payload.checks.map((check) => check.status),
-        ["pass", "pass", "pass", "pass"]
+        ["pass", "pass", "pass", "pass", "pass"]
       );
     }
   },
@@ -743,6 +743,7 @@ test("validate-artifact platform-sync retries label list fallback when in: label
       labels: { in: {} }
     }, null, 2));
     write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
+    write(path.join(tempRoot, ".agents/scripts/lib/review-artifacts.js"), read(".agents/scripts/lib/review-artifacts.js"));
     write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));
     write(verifyCopy, read(".agents/skills/commit/config/verify.json"));
     initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
@@ -791,6 +792,7 @@ test("validate-artifact platform-sync skips when no platform adapter is register
     const verifyCopy = path.join(tempRoot, ".agents/skills/code-task/config/verify.json");
     write(path.join(tempRoot, "package.json"), JSON.stringify({ type: "module" }, null, 2));
     write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
+    write(path.join(tempRoot, ".agents/scripts/lib/review-artifacts.js"), read(".agents/scripts/lib/review-artifacts.js"));
     write(verifyCopy, read(".agents/skills/code-task/config/verify.json"));
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
     write(path.join(taskDir, "code.md"), loadFixture("valid-code.md"));

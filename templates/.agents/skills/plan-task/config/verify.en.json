@@ -36,6 +36,9 @@
       "expected_action_pattern": "(Plan Task|Technical Design) \\(Round \\d+\\)",
       "freshness_minutes": 30
     },
+    "review-ledger": {
+      "stage_scope": ["analysis"]
+    },
     "platform-sync": {
       "when": "issue_number_exists",
       "expected_status_label": "status: pending-design-work",

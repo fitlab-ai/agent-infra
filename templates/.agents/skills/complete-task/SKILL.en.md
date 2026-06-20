@@ -77,6 +77,16 @@ Before marking complete, verify ALL of these:
 - [ ] Code has been reviewed (`review-code.md` or `review-code-r{N}.md` exists, and the latest review verdict is Approved; or review was done externally)
 - [ ] Code has been committed (no uncommitted changes related to this task)
 - [ ] Tests are passing
+- [ ] The disagreement ledger has no unclosed disagreements and there are no un-re-reviewed post-review commits (mechanically checked by the "Pre-completion hard gate" below)
+
+**Pre-completion hard gate (run BEFORE moving the directory or releasing the short id)**: the Step 7 `gate complete-task` runs only after the directory has been `mv`-ed to `completed/` and the short id released; to avoid a gate failure occurring after those irreversible operations, run the two new completion gates on the **active directory** first:
+
+```bash
+node .agents/scripts/validate-artifact.js check review-ledger .agents/workspace/active/{task-id} --skill complete-task --format text
+node .agents/scripts/validate-artifact.js check post-review-commit .agents/workspace/active/{task-id} --skill complete-task --format text
+```
+
+A non-zero exit from either (fail/blocked) -> treat as an unmet prerequisite and **stop**, do not run Steps 3-7. `--force` does **NOT** lift this hard gate: unclosed disagreements must first be closed in the ledger (`confirmed`/`closed`/`human-decided`), and un-re-reviewed post-review commits must be re-reviewed via `review-code` or covered by a `post-review-commit` / `human-decided` exemption row in the ledger.
 
 > **⚠️ Prerequisite Branch Check — you must decide whether to continue or stop before proceeding:**
 >

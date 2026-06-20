@@ -76,6 +76,16 @@ tail .agents/workspace/active/{task-id}/task.md
 - [ ] 代码已审查（`review-code.md` 或 `review-code-r{N}.md` 存在，且最新审查结论为 Approved；或已在外部完成审查）
 - [ ] 代码已提交（没有与此任务相关的未提交变更）
 - [ ] 测试通过
+- [ ] 审查分歧账本无未关闭分歧，且无未复审的 post-review 提交（由下方「预完成硬门禁」机械校验）
+
+**预完成硬门禁（在移动目录、释放短号之前运行）**：步骤 7 的 `gate complete-task` 在目录已 `mv` 到 `completed/`、短号已释放之后才运行；为避免门禁失败发生在不可逆操作之后，必须在 **active 目录**上预先运行新增的两项完成门禁：
+
+```bash
+node .agents/scripts/validate-artifact.js check review-ledger .agents/workspace/active/{task-id} --skill complete-task --format text
+node .agents/scripts/validate-artifact.js check post-review-commit .agents/workspace/active/{task-id} --skill complete-task --format text
+```
+
+任一退出码非 0（fail/blocked）→ 按前置条件未满足处理，**停止**，不执行步骤 3-7。`--force` **不解除**本硬门禁：未关闭分歧必须先在账本闭合（`confirmed`/`closed`/`human-decided`），未复审 post-review 提交必须重新 `review-code` 或在账本追加 `post-review-commit` / `human-decided` 豁免行。
 
 > **⚠️ 前置条件分支判断 — 你必须先判断“继续”还是“停止”：**
 >

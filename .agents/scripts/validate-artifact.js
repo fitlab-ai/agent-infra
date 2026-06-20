@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+
+import { artifactName, maxRound } from "./lib/review-artifacts.js";
 
 const EXIT_CODE = {
   pass: 0,
@@ -32,6 +35,34 @@ const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\
 const AGENT_INFRA_VERSION_PATTERN = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const ACTIVITY_LOG_PATTERN = /^- (\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?) — \*\*(.+?)\*\* by (.+?) — (.+)$/;
 const BRANCH_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+// Review disagreement ledger (see .agents/rules/review-handshake.md).
+const LEDGER_SECTION_NAMES = ["审查分歧账本", "Review Disagreement Ledger"];
+const LEDGER_STATUSES = new Set([
+  "open",
+  "accepted",
+  "adjusted",
+  "refuted",
+  "cannot-judge",
+  "confirmed",
+  "needs-human-decision",
+  "closed",
+  "human-decided"
+]);
+const LEDGER_TERMINAL_OK = new Set(["confirmed", "closed", "human-decided"]);
+const DEFAULT_MAX_HANDSHAKE_ROUNDS = 3;
+const POST_REVIEW_COMMIT_STAGE = "post-review-commit";
+const DEFAULT_POST_REVIEW_GLOBS = [
+  ".agents/skills",
+  ".agents/scripts",
+  ".agents/rules",
+  ".agents/workflows",
+  "bin",
+  "lib",
+  "src",
+  "templates"
+];
+const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..", "..");
@@ -188,6 +219,10 @@ function runCheck(type, context) {
       return checkActivityLog(context);
     case "completion-checklist":
       return checkCompletionChecklist(context);
+    case "review-ledger":
+      return checkReviewLedger(context);
+    case "post-review-commit":
+      return checkPostReviewCommit(context);
     default: {
       const adapter = PLATFORM_ADAPTERS[type];
       if (!adapter) {
@@ -329,6 +364,20 @@ function loadProjectName() {
     return String(config.project || "").trim();
   } catch {
     return "";
+  }
+}
+
+function loadReviewConfig() {
+  const configPath = path.join(repoRoot, ".agents", ".airc.json");
+  if (!fs.existsSync(configPath)) {
+    return {};
+  }
+
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    return config.review && typeof config.review === "object" ? config.review : {};
+  } catch {
+    return {};
   }
 }
 
@@ -479,6 +528,169 @@ function checkCompletionChecklist({ taskDir, config }) {
   }
 
   return passResult("completion-checklist", `Completion Checklist valid (${items.length} items checked)`);
+}
+
+function parseLedgerRows(section) {
+  const rows = [];
+  for (const rawLine of String(section || "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line.startsWith("|")) {
+      continue;
+    }
+    if (/^\|[\s:|-]+\|?$/.test(line)) {
+      continue; // separator row
+    }
+    const inner = line.replace(/^\|/, "").replace(/\|$/, "");
+    const cells = inner.split("|").map((cell) => cell.trim());
+    if ((cells[0] || "").toLowerCase() === "id") {
+      continue; // header row
+    }
+    rows.push(cells);
+  }
+  return rows;
+}
+
+function resolveReviewSetting(config, key, fallback) {
+  if (config && config[key] !== undefined && config[key] !== null) {
+    return config[key];
+  }
+  const reviewConfig = loadReviewConfig();
+  if (reviewConfig[key] !== undefined && reviewConfig[key] !== null) {
+    return reviewConfig[key];
+  }
+  return fallback;
+}
+
+function checkReviewLedger({ taskDir, config }) {
+  const task = loadTask(taskDir);
+  if (!task.ok) {
+    return failResult("review-ledger", task.message);
+  }
+
+  const section = getSectionContent(task.content, LEDGER_SECTION_NAMES);
+  if (!section.trim()) {
+    return passResult("review-ledger", "No disagreement ledger section; treated as no open disagreements");
+  }
+
+  const rows = parseLedgerRows(section);
+  if (rows.length === 0) {
+    return passResult("review-ledger", "Disagreement ledger has no entries");
+  }
+
+  const stageScope = Array.isArray(config.stage_scope) ? config.stage_scope : null;
+  const maxRounds = Number(resolveReviewSetting(config, "max_handshake_rounds", DEFAULT_MAX_HANDSHAKE_ROUNDS));
+  const problems = [];
+  let inScopeCount = 0;
+
+  for (const cells of rows) {
+    if (cells.length < 6) {
+      problems.push(`malformed row (expected 6 columns): ${cells.join(" | ")}`);
+      continue;
+    }
+
+    const [id, stage, roundRaw, , status, evidence] = cells;
+    const stageScoped = stageScope ? stageScope.includes(stage) : true;
+    // post-review-commit exemption rows are consumed by the post-review-commit
+    // check, not enforced here.
+    if (stage === POST_REVIEW_COMMIT_STAGE) {
+      continue;
+    }
+    if (!stageScoped) {
+      continue;
+    }
+    inScopeCount += 1;
+
+    if (!LEDGER_STATUSES.has(status)) {
+      problems.push(`${id}: illegal status '${status}'`);
+      continue;
+    }
+    if (status !== "open" && evidence === "") {
+      problems.push(`${id}: status '${status}' requires evidence`);
+    }
+    const round = Number.parseInt(roundRaw, 10);
+    if (
+      Number.isFinite(round) &&
+      round >= maxRounds &&
+      !LEDGER_TERMINAL_OK.has(status) &&
+      status !== "needs-human-decision"
+    ) {
+      problems.push(`${id}: round ${round} reached limit ${maxRounds} without convergence; escalate to needs-human-decision`);
+    }
+    if (!LEDGER_TERMINAL_OK.has(status)) {
+      problems.push(`${id}: unresolved (status '${status}')`);
+    }
+  }
+
+  if (problems.length > 0) {
+    return failResult("review-ledger", `Unclosed/invalid disagreements: ${problems.join("; ")}`);
+  }
+
+  const scopeLabel = stageScope ? ` for stages [${stageScope.join(", ")}]` : "";
+  return passResult("review-ledger", `Disagreement ledger clean (${inScopeCount} in-scope entries terminal${scopeLabel})`);
+}
+
+function checkPostReviewCommit({ taskDir, config }) {
+  const entries = fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : [];
+  const reviewRound = maxRound(entries, "review-code");
+  if (reviewRound === 0) {
+    return passResult("post-review-commit", "No review-code artifact; check inactive");
+  }
+
+  const reviewArtifact = artifactName("review-code", reviewRound);
+  const content = fs.readFileSync(path.join(taskDir, reviewArtifact), "utf8");
+  const baselineMatch = content.match(/^[-*]?\s*\*\*(?:审查基线提交|Review Baseline Commit)\*\*[:：]\s*(.*?)\s*$/m);
+  if (!baselineMatch) {
+    return passResult(
+      "post-review-commit",
+      `${reviewArtifact} predates baseline-commit anchoring; skipped (legacy artifact)`,
+      [`${reviewArtifact} has no 审查基线提交 / Review Baseline Commit field`]
+    );
+  }
+
+  const sha = baselineMatch[1].trim().replace(/`/g, "");
+  if (!SHA_PATTERN.test(sha)) {
+    return blockedResult(
+      "post-review-commit",
+      `${reviewArtifact} has an empty or malformed 审查基线提交 SHA ('${sha}'); manual remediation required`
+    );
+  }
+
+  let gitRoot;
+  try {
+    gitRoot = execFileSync("git", ["-C", taskDir, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+  } catch {
+    return blockedResult("post-review-commit", "git unavailable or task directory is not inside a git repository");
+  }
+
+  const globs = resolveReviewSetting(config, "post_review_globs", DEFAULT_POST_REVIEW_GLOBS);
+  let commits;
+  try {
+    const out = execFileSync("git", ["-C", gitRoot, "rev-list", `${sha}..HEAD`, "--", ...globs], { encoding: "utf8" });
+    commits = out.split(/\r?\n/).filter((line) => line.trim() !== "");
+  } catch {
+    return blockedResult("post-review-commit", `git rev-list failed for baseline ${sha}; manual inspection required`);
+  }
+
+  if (commits.length === 0) {
+    return passResult("post-review-commit", `No post-review commits to code/rule paths since ${sha.slice(0, 8)}`);
+  }
+
+  const task = loadTask(taskDir);
+  const ledgerSection = task.ok ? getSectionContent(task.content, LEDGER_SECTION_NAMES) : "";
+  const exempt = parseLedgerRows(ledgerSection).some(
+    (cells) => cells[1] === POST_REVIEW_COMMIT_STAGE && cells[4] === "human-decided"
+  );
+  if (exempt) {
+    return passResult(
+      "post-review-commit",
+      `${commits.length} post-review commit(s) covered by a human-decided exemption`
+    );
+  }
+
+  return failResult(
+    "post-review-commit",
+    `${commits.length} commit(s) to code/rule paths after review baseline ${sha.slice(0, 8)}; re-run review-code or record a human-decided exemption`
+  );
 }
 
 // === File & Config Loaders ===

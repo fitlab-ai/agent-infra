@@ -35,6 +35,9 @@
       "expected_action_pattern": "(Code Task|Code) \\(Round \\d+(?:, fix for review-code(?:-r\\d+)?\\.md)?\\)",
       "freshness_minutes": 30
     },
+    "review-ledger": {
+      "stage_scope": ["analysis", "plan"]
+    },
     "platform-sync": {
       "when": "issue_number_exists",
       "expected_status_label": "status: in-progress",

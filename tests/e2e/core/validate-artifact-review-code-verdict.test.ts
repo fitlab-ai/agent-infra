@@ -27,6 +27,7 @@ function buildReviewArtifact(verdictLine: string) {
     "## 审查摘要",
     "",
     "- **审查者**：codex",
+    "- **审查基线提交**：0123456789abcdef0123456789abcdef01234567",
     `- ${verdictLine}`,
     "- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **env-blocked**：0",
     "",
@@ -37,6 +38,10 @@ function buildReviewArtifact(verdictLine: string) {
     "## 环境性遗留",
     "",
     "（无）",
+    "",
+    "## 审查分歧账本回写",
+    "",
+    "（本轮无新发现）",
     "",
     "## 证据原文",
     "",
@@ -121,5 +126,42 @@ test("review-code gate accepts canonical zh-CN verdict (A-b-zh)", async () => {
     assert.equal(payload.gate, "pass");
     const artifactCheck = payload.checks.find((c) => c.type === "artifact");
     assert.equal(artifactCheck?.status, "pass");
+  });
+});
+
+test("review-code gate fails when the baseline commit field is absent", async () => {
+  await withTempRoot("agent-infra-rcv-nobaseline-", (tempRoot) => {
+    const taskDir = path.join(tempRoot, TASK_ID);
+    write(path.join(taskDir, "task.md"), buildReviewTask());
+    const artifact = buildReviewArtifact("**总体结论**：通过")
+      .split("\n")
+      .filter((line) => !line.startsWith("- **审查基线提交**"))
+      .join("\n");
+    write(path.join(taskDir, "review-code.md"), artifact);
+
+    const result = runValidator(["gate", "review-code", taskDir, "review-code.md"]);
+
+    assert.notEqual(result.status, 0, result.stdout);
+    const artifactCheck = parseValidatorPayload(result.stdout).checks.find((c) => c.type === "artifact");
+    assert.equal(artifactCheck?.status, "fail");
+    assert.match(artifactCheck?.message || "", /审查基线提交/);
+  });
+});
+
+test("review-code gate fails when the ledger writeback section is absent", async () => {
+  await withTempRoot("agent-infra-rcv-noledger-", (tempRoot) => {
+    const taskDir = path.join(tempRoot, TASK_ID);
+    write(path.join(taskDir, "task.md"), buildReviewTask());
+    const lines = buildReviewArtifact("**总体结论**：通过").split("\n");
+    const index = lines.indexOf("## 审查分歧账本回写");
+    lines.splice(index, 3); // heading, blank line, body line
+    write(path.join(taskDir, "review-code.md"), lines.join("\n"));
+
+    const result = runValidator(["gate", "review-code", taskDir, "review-code.md"]);
+
+    assert.notEqual(result.status, 0, result.stdout);
+    const artifactCheck = parseValidatorPayload(result.stdout).checks.find((c) => c.type === "artifact");
+    assert.equal(artifactCheck?.status, "fail");
+    assert.match(artifactCheck?.message || "", /审查分歧账本回写|missing sections/);
   });
 });

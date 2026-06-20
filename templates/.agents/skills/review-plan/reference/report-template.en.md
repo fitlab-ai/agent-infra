@@ -59,6 +59,10 @@ Use this template when writing `review-plan.md` or `review-plan-r{N}.md`.
 > If this round has no env-blocked findings, keep the section heading and write "None".
 
 
+## Review Disagreement Ledger Writeback
+
+> Upsert each finding this round into the task.md disagreement ledger: append an `open` row for new findings (id prefix `PL-`, stage=plan); per the hand-back duty set the executor's prior-round responses to `confirmed` / back to `open` / `needs-human-decision`. State machine and evidence rules: `.agents/rules/review-handshake.md`.
+
 ## Evidence
 
 > Pair each "I verified X" claim with the corresponding raw tool output; the gate only checks that this section exists and at least one `$ ` line is present. Every Blocker must be backed by a reproducible command (rg/grep/sed/nl) and its raw output; a judgment that cannot be reproduced must be downgraded or moved to Self-Doubt.

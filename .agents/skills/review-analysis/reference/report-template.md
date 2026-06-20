@@ -60,6 +60,10 @@
 > 如本轮无 env-blocked 项，保留段落标题并写「（无）」。
 
 
+## 审查分歧账本回写
+
+> 把本轮每条 finding upsert 到 task.md `## 审查分歧账本`：新 finding 追加 `open` 行（id 前缀 `AN-`，stage=analysis），对执行方上一轮响应按回交义务改 `confirmed` / 置回 `open` / `needs-human-decision`。状态机与证据规则见 `.agents/rules/review-handshake.md`。
+
 ## 证据原文
 
 > 每条“我验证了 X”断言都要配对对应 tool output 原文；gate 仅校验本段存在和至少一行 `$ `。每条 Blocker 必须配可复现命令（rg/grep/sed/nl）及其原文；无法复现的判断须降级或移入「自我质疑」。
