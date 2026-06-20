@@ -1,7 +1,7 @@
 # General Rule - No Mid-Flow Questions During SKILL Execution
 
 > **Scope**: this rule applies to **all SKILL** executions.
-> Only the two exemption categories below may ask the user; any other mid-flow question is a violation.
+> Only the exemption categories listed below may ask the user; any other mid-flow question is a violation.
 
 ## Exemption Categories
 
@@ -27,9 +27,21 @@ SKILLs currently covered by this exemption:
 - `init-labels`: may confirm before deleting legacy labels not in the final mapping
 - `commit`: may stop and confirm when its plan conflicts with the user's uncommitted changes
 
+### Exemption 3: Entry-point requirement-sufficiency clarification
+
+Allowed only when a SKILL judges, **at its entry point**, whether the current task's requirement information is sufficient for a reliable analysis; it may then ask the user about the **missing requirement information** to converge the requirements. Constraints:
+
+- Limited to the `analyze-task` entry point; ask one question at a time and wait for the answer before asking the next;
+- Used only to fill requirement-sufficiency gaps; it must **not** be used to solicit implementation / technical-choice preferences (those still go into the artifact's `## Open Questions` per the default clause);
+- Exit the questioning and proceed to normal analysis once the question budget is reached or the user says "just analyze / skip".
+
+SKILLs currently covered by this exemption:
+
+- `analyze-task`: when the task description/requirements are insufficient for a reliable analysis, it may ask questions one at a time at the entry point to converge the requirements
+
 ## No-Mid-Flow-Questions Clause (default behavior)
 
-For every SKILL execution context not covered by the two exemptions above, the default behavior is:
+For every SKILL execution context not covered by any exemption above, the default behavior is:
 
 1. Do not call any user-question tool, including but not limited to `AskUserQuestion` and equivalent mechanisms that ask the user to choose.
 2. When uncertain, proceed with the most robust option without interrupting the flow. Use this priority order:

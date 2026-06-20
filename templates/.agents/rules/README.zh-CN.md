@@ -7,7 +7,7 @@
 
 ## 通用准则
 
-- [`no-mid-flow-questions.md`](no-mid-flow-questions.md) — SKILL 执行期禁言：默认不向用户提问，及两类例外。
+- [`no-mid-flow-questions.md`](no-mid-flow-questions.md) — SKILL 执行期禁言：默认不向用户提问，及规则列明的例外。
 - [`next-step-output.md`](next-step-output.md) — 「下一步」输出规则：任务短号渲染与 `Completed at` 收尾行。
 - [`version-stamp.md`](version-stamp.md) — `agent_infra_version` 版本戳的取值命令与写入时机。
 - [`debugging-guide.md`](debugging-guide.md) — 结构化调试流程：收集证据→形成假设→验证假设→修复根因，禁止盲目改代码重试。

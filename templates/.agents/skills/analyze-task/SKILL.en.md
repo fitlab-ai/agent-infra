@@ -67,7 +67,47 @@ If `task.md` contains these source fields, also read the corresponding source in
 
 **Round ≥ 2: respond to the prior review (only when a review artifact exists)**: if the task directory contains `review-analysis.md` / `review-analysis-r{N}.md`, read the highest-round review report; add a `## Response to Prior Review` section to this round's analysis artifact, and for each finding verify it via Read/Grep before acting (holds → accept and fix; judged hallucinated/unfounded → rebut with counter-evidence rather than defaulting to compliance); record any open disagreement under `## Open Questions`. Round 1 has no review, so skip this section.
 
-### 4. Perform Requirements Analysis
+### 4. Requirement Sufficiency Gate
+
+> Questions in this step are authorized by `.agents/rules/no-mid-flow-questions.md` "Exemption 3: Entry-point requirement-sufficiency clarification": only at the analyze-task entry point, only to judge and fill requirement sufficiency, one question at a time, and **never** to solicit implementation / technical-choice preferences.
+
+Runs after Step 0 state check and Step 3 (questioning is an external-state action and must come after the state-check hard gate; the judgment and state read/write need task.md first).
+
+**4.1 Read cross-round state**: read the `## Brainstorming` section of task.md (treat as first time when absent, `question_count=0`). Section format:
+
+```
+## Brainstorming
+- status: asking | done
+- question_count: <int>
+- pending_question: <text, may be empty>
+- answered:
+  - Q: … / A: …
+```
+
+**4.2 Receive the answer to the previous question**: if `pending_question` exists:
+- the user's current message yields an answer → write the answer back into `## Description` / `## Requirements`, append that `Q/A` to `answered`, and clear `pending_question` (`question_count` unchanged).
+- no answer carried → restate `pending_question` and take Scenario B early-exit below (do not increase `question_count`).
+
+**4.3 Sufficiency judgment** (objective checklist; any gap hit means insufficient):
+- description/requirements empty, or a single sentence with no verifiable acceptance criteria;
+- missing goal or impact scope (unclear what to change / who is affected);
+- requirement items contradict each other, or key terms are undefined and block analysis.
+
+**4.4 Branch**:
+
+- **Scenario A (sufficient / converged)** — any exit condition met: the checklist fully passes / the user explicitly says "just analyze / skip" / `question_count` reaches the cap (≤5). Set `## Brainstorming` `status: done` and continue the normal flow from step 5; write any remaining gaps into the analysis artifact `## Assumptions` / `## Open Questions`.
+- **Scenario B (insufficient, ask and early-exit)** — close the loop within this step and STOP early:
+  1. Decide this round's question (consistent with 4.2):
+     - if a `pending_question` already exists (the previous question is still unanswered) → restate that `pending_question`, do **not** modify it and do **not** increment `question_count`;
+     - otherwise (no pending question) → pick the single highest-value question (acceptance criteria > scope > ambiguity) and write `## Brainstorming`: `status: asking`, `pending_question: <question>`, `question_count += 1`.
+  2. Update frontmatter: `current_step: requirement-analysis`, `assigned_to`, `updated_at`, `agent_infra_version` (read `.agents/rules/version-stamp.md` first).
+  3. Append to Activity Log: `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Brainstorming)** by {agent} — Asked Q{question_count}, awaiting answer`.
+  4. Issue sync (when `issue_number` exists, skip on any failure): read `.agents/rules/issue-sync.md` first for upstream / permission detection; update only the **task comment** per the task.md comment sync rule; keep the `status` label at `pending-design-work`; do **not** publish an analysis artifact comment.
+  5. Verification (replaces the step 8 artifact gate): `node .agents/scripts/validate-artifact.js check task-meta .agents/workspace/active/{task-id} --skill analyze-task --format text` (the early-exit set `current_step: requirement-analysis`, so it should pass); also keep `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` and the task-comment sync evidence. Do **not** run the artifact gate, nor `check activity-log` / `check platform-sync` (both bind to the analysis artifact path).
+  6. User output: show only the current **single question** plus how to answer/continue (re-trigger `analyze-task {task-ref}` with the answer), and append the `Completed at` line per `.agents/rules/next-step-output.md`.
+  7. **STOP** and wait for the answer. The next trigger returns to this step.
+
+### 5. Perform Requirements Analysis
 
 Before analysis begins: if `start_date` in the frontmatter is empty, write today's date immediately (command: `date +%F`, format `YYYY-MM-DD`); keep any existing value. Before writing, read `.agents/rules/version-stamp.md` and refresh `updated_at` / `agent_infra_version` at the same time.
 
@@ -80,7 +120,9 @@ Follow the `analysis` step in `.agents/workflows/feature-development.yaml`:
 - [ ] Identify potential technical risks and dependencies
 - [ ] Assess effort and complexity
 
-### 5. Output Analysis Document
+### 6. Output Analysis Document
+
+> Steps 6–9 are the **Scenario A (normal output)** path. **Scenario B (ask and early-exit)** already finished its state update, task-comment sync, and verification inside step 4 and STOPped, so it does not enter these steps.
 
 Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 
@@ -138,7 +180,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 - Risk level: {High/Medium/Low}
 ```
 
-### 6. Update Task Status
+### 7. Update Task Status
 
 Get the current time:
 
@@ -170,7 +212,9 @@ If task.md contains a valid `issue_number`, perform these sync actions (skip and
 - Publish the `{analysis-artifact}` comment
 - Read `.agents/rules/issue-fields.md` and follow Flow A to sync every non-empty Issue field (`priority`/`effort`/`start_date`/`target_date`) from `task.md` to the Issue (idempotent; skip without blocking when `has_push=false` or the fetch/write fails)
 
-### 7. Verification Gate
+### 8. Verification Gate
+
+> This artifact gate is for **Scenario A** only; Scenario B's verification is in step 4 (`check task-meta` + explicit evidence), not the artifact gate here.
 
 Run the verification gate to confirm the task artifact and sync state are valid:
 
@@ -185,7 +229,9 @@ Handle the result as follows:
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 
-### 8. Inform User
+### 9. Inform User
+
+> This step is the **Scenario A** normal-completion output; Scenario B's single-question output is in step 4.
 
 > Execute this step only after the verification gate passes.
 

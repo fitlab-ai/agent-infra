@@ -574,3 +574,45 @@ test("review-code EN verify config locks down Overall Verdict value range", () =
     assert.ok(re.test(sample), `canonical EN sample should match: ${sample.trim()}`);
   }
 });
+
+test("analyze-task brainstorming gate adds step 4 and whitelists analyze-task in no-mid-flow rule", () => {
+  const analyzeVariants = [
+    ".agents/skills/analyze-task/SKILL.md",
+    "templates/.agents/skills/analyze-task/SKILL.zh-CN.md",
+    "templates/.agents/skills/analyze-task/SKILL.en.md"
+  ];
+
+  analyzeVariants.forEach((relativePath) => {
+    const stepNumbers = [...read(relativePath).matchAll(/^### (\d+)\. /gm)].map((match) => Number(match[1]));
+    assert.deepEqual(
+      stepNumbers,
+      [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      `${relativePath} should expose the requirement-sufficiency gate as a new step 4 with steps numbered 1..9`
+    );
+  });
+
+  const ruleVariants = [
+    ".agents/rules/no-mid-flow-questions.md",
+    "templates/.agents/rules/no-mid-flow-questions.zh-CN.md",
+    "templates/.agents/rules/no-mid-flow-questions.en.md"
+  ];
+
+  ruleVariants.forEach((relativePath) => {
+    assert.match(
+      read(relativePath),
+      /`analyze-task`/,
+      `${relativePath} should whitelist analyze-task for entry-point sufficiency clarification`
+    );
+  });
+
+  assert.equal(
+    read(".agents/skills/analyze-task/SKILL.md"),
+    read("templates/.agents/skills/analyze-task/SKILL.zh-CN.md"),
+    "deployed analyze-task SKILL should stay byte-identical to its zh-CN template variant"
+  );
+  assert.equal(
+    read(".agents/rules/no-mid-flow-questions.md"),
+    read("templates/.agents/rules/no-mid-flow-questions.zh-CN.md"),
+    "deployed no-mid-flow-questions rule should stay byte-identical to its zh-CN template variant"
+  );
+});

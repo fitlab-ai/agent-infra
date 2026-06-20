@@ -66,7 +66,47 @@ tail .agents/workspace/active/{task-id}/task.md
 
 **Round ≥ 2：响应上一轮审查（仅当存在审查产物时）**：若任务目录存在 `review-analysis.md` / `review-analysis-r{N}.md`，读取最高轮次的审查报告；在本轮分析产物中新增 `## 对上一轮审查的响应` 段，对每条发现先 Read/Grep 核实再处置（成立 → 接受并修正；判定为幻觉/不成立 → 附反证反驳，不默认顺从），未决分歧写入 `## 未决问题`。Round 1 无审查，跳过本段。
 
-### 4. 执行需求分析
+### 4. 入口需求充分性闸门
+
+> 本步骤的发问受 `.agents/rules/no-mid-flow-questions.md`「例外 3：入口式需求充分性澄清」授权：仅在 analyze-task 入口、仅用于判断并补齐需求充分性，一次只问一个问题，**绝不**借此征求实现 / 技术选型偏好。
+
+排在第 0 步状态核对与步骤 3 之后执行（提问属对外动作，须在状态核对硬闸门之后；判定与状态读写需先读到 task.md）。
+
+**4.1 读取跨轮状态**：读取 task.md 的 `## Brainstorming` 段（不存在则视为首次，`question_count=0`）。段格式：
+
+```
+## Brainstorming
+- status: asking | done
+- question_count: <int>
+- pending_question: <文本，可空>
+- answered:
+  - Q: … / A: …
+```
+
+**4.2 接收上一问的答案**：若存在 `pending_question`：
+- 用户当轮消息可解析出答案 → 把答案回写 `## 描述` / `## 需求`，把该 `Q/A` 追加进 `answered`，清空 `pending_question`（`question_count` 不变）。
+- 未携带答案 → 复述 `pending_question`，按下文场景 B 提问早退（不增加 `question_count`）。
+
+**4.3 充分性判定**（客观清单，命中任一缺口即判为不足）：
+- 描述/需求为空，或仅一句话且无可验证的验收标准；
+- 缺少目标或受影响范围（不知道要改什么 / 影响谁）；
+- 需求条目自相矛盾，或关键名词未定义而无法分析。
+
+**4.4 分流**：
+
+- **场景 A（充分 / 已收敛）**——满足任一退出条件：充分性清单全部通过 / 用户显式「直接分析 / skip」/ `question_count` 达上限（≤5）。置 `## Brainstorming` 的 `status: done`，继续步骤 5 起的正常流程；未补齐的缺口写入分析产物 `## 假设` / `## 未决问题`。
+- **场景 B（不足，提问早退）**——在本步骤内闭环并提前 STOP：
+  1. 确定本轮要问的问题（与 4.2 保持一致）：
+     - 若已存在 `pending_question`（上一问尚未得到答案）→ 复述该 `pending_question`，**不**修改它、**不**增加 `question_count`；
+     - 否则（无待答问题）→ 选最高价值的一个问题（验收标准 > 范围 > 歧义），写入 `## Brainstorming`：`status: asking`、`pending_question: <问题>`、`question_count += 1`。
+  2. 更新 frontmatter：`current_step: requirement-analysis`、`assigned_to`、`updated_at`、`agent_infra_version`（先读 `.agents/rules/version-stamp.md`）。
+  3. 追加 Activity Log：`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Brainstorming)** by {agent} — Asked Q{question_count}, awaiting answer`。
+  4. Issue 同步（存在 `issue_number` 时，任一失败跳过）：先读 `.agents/rules/issue-sync.md` 完成 upstream / 权限检测；仅按 task.md 评论同步规则更新 **task 评论**；`status` label 维持 `pending-design-work`；**不**发布分析产物评论。
+  5. 校验（替代步骤 8 的 artifact gate）：`node .agents/scripts/validate-artifact.js check task-meta .agents/workspace/active/{task-id} --skill analyze-task --format text`（早退已置 `current_step: requirement-analysis`，预期通过）；并保留 `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` 与 task 评论同步证据。**不**跑 artifact gate，也不跑 `check activity-log` / `check platform-sync`（二者绑定分析产物路径）。
+  6. 用户输出：只展示当前**单个问题** + 如何回答/继续（再次触发 `analyze-task {task-ref}` 并附答案），并按 `.agents/rules/next-step-output.md` 在末行追加 `Completed at`。
+  7. **STOP**，等待回答。下一次触发回到本步骤。
+
+### 5. 执行需求分析
 
 开始分析前：若 frontmatter 的 `start_date` 为空，立即写入当日日期（命令 `date +%F`，格式 `YYYY-MM-DD`）；已有值则保留。写入前先读取 `.agents/rules/version-stamp.md`，并同步刷新 `updated_at` / `agent_infra_version`。
 
@@ -79,7 +119,9 @@ tail .agents/workspace/active/{task-id}/task.md
 - [ ] 识别潜在技术风险和依赖
 - [ ] 评估工作量和复杂度
 
-### 5. 输出分析文档
+### 6. 输出分析文档
+
+> 步骤 6–9 属**场景 A（正常产出）**路径。**场景 B（提问早退）**已在步骤 4 内完成状态更新、task 评论同步与校验并 STOP，不进入这些步骤。
 
 创建 `.agents/workspace/active/{task-id}/{analysis-artifact}`。
 
@@ -137,7 +179,7 @@ tail .agents/workspace/active/{task-id}/task.md
 - 风险等级：{高/中/低}
 ```
 
-### 6. 更新任务状态
+### 7. 更新任务状态
 
 获取当前时间：
 
@@ -169,7 +211,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - 发布 `{analysis-artifact}` 评论
 - 读取 `.agents/rules/issue-fields.md`，按流程 A 把 `task.md` 中所有非空的 Issue 字段（`priority`/`effort`/`start_date`/`target_date`）同步到 Issue（幂等；`has_push=false` 或取数/写入失败时跳过，不阻断）
 
-### 7. 完成校验
+### 8. 完成校验
+
+> 本步骤的 artifact gate 仅用于**场景 A**；场景 B 的校验见步骤 4（`check task-meta` + 显式证据），不在此跑 artifact gate。
 
 运行完成校验，确认任务产物和同步状态符合规范：
 
@@ -184,7 +228,9 @@ node .agents/scripts/validate-artifact.js gate analyze-task .agents/workspace/ac
 
 将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 
-### 8. 告知用户
+### 9. 告知用户
+
+> 本步骤为**场景 A** 正常完成输出；场景 B 的单问输出见步骤 4。
 
 > 仅在校验通过后执行本步骤。
 
