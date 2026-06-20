@@ -38,24 +38,14 @@ export async function runTask(args: string[]): Promise<void> {
   }
 
   switch (subcommand) {
-    case 'ls': {
-      const { ls } = await import('./commands/ls.ts');
-      ls(rest);
-      break;
-    }
-    case 'show': {
-      const { show } = await import('./commands/show.ts');
-      show(rest);
+    case 'cat': {
+      const { cat } = await import('./commands/cat.ts');
+      cat(rest);
       break;
     }
     case 'files': {
       const { files } = await import('./commands/files.ts');
       files(rest);
-      break;
-    }
-    case 'cat': {
-      const { cat } = await import('./commands/cat.ts');
-      cat(rest);
       break;
     }
     case 'grep': {
@@ -66,6 +56,16 @@ export async function runTask(args: string[]): Promise<void> {
     case 'log': {
       const { log } = await import('./commands/log.ts');
       log(rest);
+      break;
+    }
+    case 'ls': {
+      const { ls } = await import('./commands/ls.ts');
+      ls(rest);
+      break;
+    }
+    case 'show': {
+      const { show } = await import('./commands/show.ts');
+      show(rest);
       break;
     }
     case 'status': {

@@ -51,6 +51,21 @@ export async function runSandbox(args: string[]): Promise<void> {
       }
       break;
     }
+    case 'ls': {
+      const { ls } = await import('./commands/ls.ts');
+      ls(rest);
+      break;
+    }
+    case 'prune': {
+      const { prune } = await import('./commands/prune.ts');
+      await prune(rest);
+      break;
+    }
+    case 'rebuild': {
+      const { rebuild } = await import('./commands/rebuild.ts');
+      await rebuild(rest);
+      break;
+    }
     case 'refresh': {
       const { refresh } = await import('./commands/refresh.ts');
       const exitCode = await refresh(rest);
@@ -59,34 +74,19 @@ export async function runSandbox(args: string[]): Promise<void> {
       }
       break;
     }
-    case 'start': {
-      const { start } = await import('./commands/start.ts');
-      await start(rest);
-      break;
-    }
-    case 'ls': {
-      const { ls } = await import('./commands/ls.ts');
-      ls(rest);
-      break;
-    }
     case 'rm': {
       const { rm } = await import('./commands/rm.ts');
       await rm(rest);
       break;
     }
-    case 'prune': {
-      const { prune } = await import('./commands/prune.ts');
-      await prune(rest);
+    case 'start': {
+      const { start } = await import('./commands/start.ts');
+      await start(rest);
       break;
     }
     case 'vm': {
       const { vm } = await import('./commands/vm.ts');
       await vm(rest);
-      break;
-    }
-    case 'rebuild': {
-      const { rebuild } = await import('./commands/rebuild.ts');
-      await rebuild(rest);
       break;
     }
     default:

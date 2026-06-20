@@ -6,7 +6,6 @@
 
 - **展示名 `ai`**：适用于**所有**面向用户的 help / usage / 交互横幅文案——顶层、命名空间级，以及 `merge` / `init` / `update` 等叶子命令的单行 usage 与启动横幅，统一用 `ai`。唯一例外：顶层 help 首行保留品牌 + 版本行 `agent-infra ${VERSION}`；包名 / 安装命令 / 仓库 URL 中的 `@fitlab-ai/agent-infra` 保持原样。
 - **结构与排序**（`Usage:` + `Commands:` 结构、命令按字母序）：仅适用于带 `Commands:` 子清单的层级——顶层 help（`bin/cli.ts`）与命名空间级 help（如 `ai sandbox` / `ai task`）。叶子命令只有单行 usage，无需 `Commands:` 结构。
-- 本约定**不约束** dispatch `switch` 的 case 排列顺序——它与 help 展示无关。
 
 ## 展示名
 
