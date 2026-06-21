@@ -35,10 +35,9 @@
 - [`commit-and-pr.md`](commit-and-pr.md) — Conventional Commits 提交信息与 PR 规范。
 - [`release-commands.md`](release-commands.md) — 读取历史 release、查询已合并 PR、发布 Release notes。
 
-## 测试与跨平台
+## 测试
 
 - [`testing-discipline.md`](testing-discipline.md) — 测试编写纪律：结构性断言优先，禁止脆弱的措辞匹配。
-- [`cross-platform-tests.md`](cross-platform-tests.md) — 跨平台测试守卫：用 `onPlatforms()` 表达平台跳过。
 
 ## CLI
 

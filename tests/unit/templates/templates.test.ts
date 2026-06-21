@@ -13,6 +13,7 @@ import {
   read,
   renderPlaceholders
 } from "../../helpers.ts";
+import { copySkillDir } from "../../../lib/render.ts";
 
 const highFrequencyCommands = [
   "analyze-task",
@@ -465,15 +466,51 @@ test("template JavaScript files do not contain shebang lines", () => {
   });
 });
 
-test("rules README index lists every rule file", () => {
+test("rules README index lists every distributed rule file", () => {
   const dir = ".agents/rules";
+  // Project-only (ejected) rules ship no template copy and are not distributed
+  // downstream, so they must not be required in the distributed README index.
+  const ejected = new Set(
+    ((JSON.parse(read(".agents/.airc.json")).files?.ejected ?? []) as string[])
+      .filter((entry) => entry.startsWith(`${dir}/`) && entry.endsWith(".md"))
+      .map((entry) => path.basename(entry, ".md"))
+  );
   const ruleNames = fs.readdirSync(dir)
     .filter((fileName) => fileName.endsWith(".md") && fileName !== "README.md")
     .map((fileName) => fileName.replace(/\.md$/, ""))
+    .filter((name) => !ejected.has(name))
     .sort();
   const index = read(`${dir}/README.md`);
 
   ruleNames.forEach((name) => {
     assert.ok(index.includes(name), `rules/README.md should reference ${name}`);
   });
+});
+
+test("rendered rules README references only distributed files", () => {
+  const collaborator = JSON.parse(read(".agents/.airc.json"));
+  const replacements = { project: collaborator.project, org: collaborator.org };
+
+  for (const language of ["en", "zh-CN"]) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rules-render-"));
+    try {
+      copySkillDir("templates/.agents/rules", tmp, replacements, language, "github");
+      const rendered = new Set(
+        fs.readdirSync(tmp).filter((fileName) => fileName.endsWith(".md"))
+      );
+      const readme = fs.readFileSync(path.join(tmp, "README.md"), "utf8");
+      const refs = [...readme.matchAll(/\]\(([^)]+\.md)\)/g)]
+        .map((match) => match[1])
+        .filter((ref): ref is string => ref !== undefined);
+
+      for (const ref of refs) {
+        assert.ok(
+          rendered.has(ref),
+          `${language} rendered rules README references ${ref}, but it is not among the rendered files`
+        );
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
 });

@@ -36,10 +36,9 @@ so you can quickly find "which ones to read" without opening each file.
 - [`commit-and-pr.md`](commit-and-pr.md) — Conventional Commits message and PR conventions.
 - [`release-commands.md`](release-commands.md) — Read past releases, query merged PRs, publish release notes.
 
-## Testing & Cross-platform
+## Testing
 
 - [`testing-discipline.md`](testing-discipline.md) — Test-writing discipline: prefer structural asserts, no brittle wording matches.
-- [`cross-platform-tests.md`](cross-platform-tests.md) — Cross-platform test guards: express platform skips via `onPlatforms()`.
 
 ## CLI
 
