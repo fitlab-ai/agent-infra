@@ -18,6 +18,14 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Commit** by {agent} — {commit hash short} {commit subject}
 ```
 
+如果提交阶段已确认最高轮 `review-code` 产物 Approved、`pre_head` 等于其审查基线提交 `R`、且 staged 差异指纹 `S` 等于其审查差异指纹 `F`，同时写入或刷新：
+
+```yaml
+last_reviewed_commit: {new_head}
+```
+
+该字段是 `complete-task` 的 `post-review-commit` gate 优先 baseline。条件不满足时不要写入或推进该字段。
+
 在决定下一步之前，先确认：
 - `task.md` 中的 `current_step` 和最新工作流进度
 - 最新的 `review-code.md` / `review-code-r{N}.md` 是否无问题通过

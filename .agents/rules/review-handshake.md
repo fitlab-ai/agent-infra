@@ -67,8 +67,10 @@
 
 ## post-review commit 门禁（仅 code 阶段）
 
-- `review-code` 在报告中记录 `审查基线提交`（`git rev-parse HEAD`）。
-- `review-code` 结论 Approved 之后，若代码 / 规则路径出现新提交，`complete-task` 的 `post-review-commit` gate 会拦截，要求重新 `review-code`。
+- `review-code` 在最高轮报告中记录 `审查基线提交`（R，`git rev-parse HEAD`）和 `审查差异指纹`（F，完整工作区 diff fingerprint）。
+- `commit` 只读取最高轮 `review-code` 产物；当该产物 Approved、提交前 HEAD 等于 R、且 staged diff fingerprint 等于 F 时，在 task.md 写入 `last_reviewed_commit`（B，新提交 SHA）。
+- `complete-task` 的 `post-review-commit` gate 优先使用 B；B 缺失或非法时回退最高轮 `review-code` 的 R。
+- 若 B / R 之后代码 / 规则路径出现新提交，gate 会拦截，要求重新 `review-code`。
 - **豁免**：在账本追加一行 `| PRC-1 | post-review-commit | - | - | human-decided | <裁定说明> |`，记录人工明确允许该批提交免复审。
 
 ## gate 行为速查

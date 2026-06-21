@@ -4,7 +4,11 @@ import process from "node:process";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { artifactName, maxRound } from "./lib/review-artifacts.js";
+import {
+  extractReviewBaseline,
+  findAuthoritativeReviewCodeArtifact,
+  resolvePostReviewGlobs
+} from "./lib/post-review-commit.js";
 
 const EXIT_CODE = {
   pass: 0,
@@ -52,16 +56,6 @@ const LEDGER_STATUSES = new Set([
 const LEDGER_TERMINAL_OK = new Set(["confirmed", "closed", "human-decided"]);
 const DEFAULT_MAX_HANDSHAKE_ROUNDS = 3;
 const POST_REVIEW_COMMIT_STAGE = "post-review-commit";
-const DEFAULT_POST_REVIEW_GLOBS = [
-  ".agents/skills",
-  ".agents/scripts",
-  ".agents/rules",
-  ".agents/workflows",
-  "bin",
-  "lib",
-  "src",
-  "templates"
-];
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -630,29 +624,9 @@ function checkReviewLedger({ taskDir, config }) {
 }
 
 function checkPostReviewCommit({ taskDir, config }) {
-  const entries = fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : [];
-  const reviewRound = maxRound(entries, "review-code");
-  if (reviewRound === 0) {
+  const reviewArtifact = findAuthoritativeReviewCodeArtifact(taskDir);
+  if (!reviewArtifact.ok) {
     return passResult("post-review-commit", "No review-code artifact; check inactive");
-  }
-
-  const reviewArtifact = artifactName("review-code", reviewRound);
-  const content = fs.readFileSync(path.join(taskDir, reviewArtifact), "utf8");
-  const baselineMatch = content.match(/^[-*]?\s*\*\*(?:审查基线提交|Review Baseline Commit)\*\*[:：]\s*(.*?)\s*$/m);
-  if (!baselineMatch) {
-    return passResult(
-      "post-review-commit",
-      `${reviewArtifact} predates baseline-commit anchoring; skipped (legacy artifact)`,
-      [`${reviewArtifact} has no 审查基线提交 / Review Baseline Commit field`]
-    );
-  }
-
-  const sha = baselineMatch[1].trim().replace(/`/g, "");
-  if (!SHA_PATTERN.test(sha)) {
-    return blockedResult(
-      "post-review-commit",
-      `${reviewArtifact} has an empty or malformed 审查基线提交 SHA ('${sha}'); manual remediation required`
-    );
   }
 
   let gitRoot;
@@ -662,7 +636,22 @@ function checkPostReviewCommit({ taskDir, config }) {
     return blockedResult("post-review-commit", "git unavailable or task directory is not inside a git repository");
   }
 
-  const globs = resolveReviewSetting(config, "post_review_globs", DEFAULT_POST_REVIEW_GLOBS);
+  const task = loadTask(taskDir);
+  const content = fs.readFileSync(reviewArtifact.path, "utf8");
+  const reviewBaseline = extractReviewBaseline(content);
+  const lastReviewedCommit = task.ok ? (task.metadata.last_reviewed_commit || "").trim() : "";
+  const baselineSource = resolvePostReviewBaseline({
+    gitRoot,
+    lastReviewedCommit,
+    reviewBaseline,
+    reviewArtifact: reviewArtifact.fileName
+  });
+  if (!baselineSource.ok) {
+    return baselineSource.result;
+  }
+
+  const sha = baselineSource.sha;
+  const globs = resolvePostReviewGlobs(config, loadReviewConfig());
   let commits;
   try {
     const out = execFileSync("git", ["-C", gitRoot, "rev-list", `${sha}..HEAD`, "--", ...globs], { encoding: "utf8" });
@@ -675,7 +664,6 @@ function checkPostReviewCommit({ taskDir, config }) {
     return passResult("post-review-commit", `No post-review commits to code/rule paths since ${sha.slice(0, 8)}`);
   }
 
-  const task = loadTask(taskDir);
   const ledgerSection = task.ok ? getSectionContent(task.content, LEDGER_SECTION_NAMES) : "";
   const exempt = parseLedgerRows(ledgerSection).some(
     (cells) => cells[1] === POST_REVIEW_COMMIT_STAGE && cells[4] === "human-decided"
@@ -691,6 +679,46 @@ function checkPostReviewCommit({ taskDir, config }) {
     "post-review-commit",
     `${commits.length} commit(s) to code/rule paths after review baseline ${sha.slice(0, 8)}; re-run review-code or record a human-decided exemption`
   );
+}
+
+function resolvePostReviewBaseline({ gitRoot, lastReviewedCommit, reviewBaseline, reviewArtifact }) {
+  if (lastReviewedCommit) {
+    if (SHA_PATTERN.test(lastReviewedCommit) && gitCommitExists(gitRoot, lastReviewedCommit)) {
+      return { ok: true, sha: lastReviewedCommit };
+    }
+  }
+
+  if (!reviewBaseline) {
+    return {
+      ok: false,
+      result: passResult(
+        "post-review-commit",
+        `${reviewArtifact} predates baseline-commit anchoring; skipped (legacy artifact)`,
+        [`${reviewArtifact} has no 审查基线提交 / Review Baseline Commit field`]
+      )
+    };
+  }
+
+  if (!SHA_PATTERN.test(reviewBaseline)) {
+    return {
+      ok: false,
+      result: blockedResult(
+        "post-review-commit",
+        `${reviewArtifact} has an empty or malformed 审查基线提交 SHA ('${reviewBaseline}'); manual remediation required`
+      )
+    };
+  }
+
+  return { ok: true, sha: reviewBaseline };
+}
+
+function gitCommitExists(gitRoot, sha) {
+  try {
+    execFileSync("git", ["-C", gitRoot, "cat-file", "-e", `${sha}^{commit}`], { encoding: "utf8" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // === File & Config Loaders ===

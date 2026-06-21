@@ -27,7 +27,7 @@ function commitCodePath(repoRoot: string, relPath: string, content: string, mess
   return git(repoRoot, ["rev-parse", "HEAD"]);
 }
 
-function buildTask(rows: string[] = []) {
+function buildTask(rows: string[] = [], frontmatterOverrides: Record<string, string> = {}) {
   const ledger = [
     "## 审查分歧账本",
     "",
@@ -37,7 +37,7 @@ function buildTask(rows: string[] = []) {
     ""
   ];
   return [
-    buildTaskFrontmatter({ id: TASK_ID, current_step: "completed" }),
+    buildTaskFrontmatter({ id: TASK_ID, current_step: "completed", ...frontmatterOverrides }),
     "",
     "# 任务：post-review commit 门禁",
     "",
@@ -48,14 +48,14 @@ function buildTask(rows: string[] = []) {
   ].join("\n");
 }
 
-function buildReviewCode(baselineLine: string | null) {
+function buildReviewCode(baselineLine: string | null, verdict = "通过") {
   return [
     "# 代码审查报告",
     "",
     ...(baselineLine === null ? [] : [`- **审查基线提交**：${baselineLine}`]),
     "## 审查摘要",
     "",
-    "- **总体结论**：通过"
+    `- **总体结论**：${verdict}`
   ].join("\n");
 }
 
@@ -90,6 +90,60 @@ test("post-review-commit passes when no commits land after the baseline", onPlat
     const baseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
     write(path.join(taskDir, "task.md"), buildTask());
     write(path.join(taskDir, "review-code.md"), buildReviewCode(baseline));
+
+    const { payload } = runCheck(taskDir);
+    assert.equal(payload.status, "pass");
+  });
+});
+
+test("post-review-commit prefers last_reviewed_commit over the review baseline", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-prc-last-reviewed-", (tempRoot) => {
+    const { taskDir } = setupRepo(tempRoot);
+    const reviewBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
+    const reviewedCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
+    write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: reviewedCommit }));
+    write(path.join(taskDir, "review-code.md"), buildReviewCode(reviewBaseline));
+
+    const { payload } = runCheck(taskDir);
+    assert.equal(payload.status, "pass");
+  });
+});
+
+test("post-review-commit fails when a code-path commit lands after last_reviewed_commit", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-prc-after-last-reviewed-", (tempRoot) => {
+    const { taskDir } = setupRepo(tempRoot);
+    const reviewBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
+    const reviewedCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
+    write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: reviewedCommit }));
+    write(path.join(taskDir, "review-code.md"), buildReviewCode(reviewBaseline));
+    commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\nextra\n", "unreviewed change");
+
+    const { payload } = runCheck(taskDir);
+    assert.equal(payload.status, "fail");
+  });
+});
+
+test("post-review-commit falls back to the review baseline when last_reviewed_commit is invalid", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-prc-invalid-last-reviewed-", (tempRoot) => {
+    const { taskDir } = setupRepo(tempRoot);
+    commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
+    const fallbackBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
+    write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: "not-a-sha" }));
+    write(path.join(taskDir, "review-code.md"), buildReviewCode(fallbackBaseline));
+
+    const { payload } = runCheck(taskDir);
+    assert.equal(payload.status, "pass");
+  });
+});
+
+test("post-review-commit fallback reads the highest-round review-code artifact", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-prc-highest-review-", (tempRoot) => {
+    const { taskDir } = setupRepo(tempRoot);
+    const oldBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
+    const highRoundBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
+    write(path.join(taskDir, "task.md"), buildTask());
+    write(path.join(taskDir, "review-code.md"), buildReviewCode(oldBaseline, "通过"));
+    write(path.join(taskDir, "review-code-r2.md"), buildReviewCode(highRoundBaseline, "需要修改"));
 
     const { payload } = runCheck(taskDir);
     assert.equal(payload.status, "pass");

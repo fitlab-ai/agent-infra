@@ -60,7 +60,10 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ### 4. 执行审查
 
-遵循 `.agents/workflows/feature-development.yaml`，并同时检查 `git diff` 获取完整变更上下文。
+遵循 `.agents/workflows/feature-development.yaml`，并同时检查完整变更上下文：
+- `git diff --binary HEAD -- <post-review-globs>` 覆盖已跟踪变更
+- `git ls-files -o --exclude-standard -z -- <post-review-globs>` 覆盖未跟踪新文件
+- `node .agents/scripts/review-diff-fingerprint.js worktree HEAD` 生成审查差异指纹，并写入报告
 
 > 详细审查标准、严重程度划分和 reviewer 关注点见 `reference/review-criteria.md`。执行此步骤前先读取 `reference/review-criteria.md`。
 > 测试审查硬门禁：当 `git diff` 触及测试文件时，必须先读取 `.agents/rules/testing-discipline.md` 并逐条核对（尤其"正向已覆盖时不应再加反向断言"）。

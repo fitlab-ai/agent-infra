@@ -28,6 +28,7 @@ function buildReviewArtifact(verdictLine: string) {
     "",
     "- **审查者**：codex",
     "- **审查基线提交**：0123456789abcdef0123456789abcdef01234567",
+    "- **审查差异指纹**：sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     `- ${verdictLine}`,
     "- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **env-blocked**：0",
     "",

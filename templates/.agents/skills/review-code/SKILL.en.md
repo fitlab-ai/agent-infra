@@ -61,7 +61,10 @@ Read the highest-round code artifact and, if present, the highest-round fix arti
 
 ### 4. Perform the Review
 
-Follow `.agents/workflows/feature-development.yaml` and inspect `git diff` for the full change context.
+Follow `.agents/workflows/feature-development.yaml` and inspect the full change context:
+- `git diff --binary HEAD -- <post-review-globs>` for tracked changes
+- `git ls-files -o --exclude-standard -z -- <post-review-globs>` for untracked new files
+- `node .agents/scripts/review-diff-fingerprint.js worktree HEAD` for the reviewed diff fingerprint; write it into the report
 
 > Detailed review criteria, severity rules, and reviewer expectations live in `reference/review-criteria.md`. Read `reference/review-criteria.md` before reviewing.
 > Test review gate: when `git diff` touches test files, read `.agents/rules/testing-discipline.md` first and check it item by item, especially "do not add negative assertions when a positive assertion already covers the behavior".

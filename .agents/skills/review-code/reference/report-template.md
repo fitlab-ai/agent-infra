@@ -23,6 +23,7 @@
 - **审查时间**：{timestamp}
 - **审查范围**：{file-count and major modules}
 - **审查基线提交**：{git rev-parse HEAD 原文}（complete-task 的 post-review commit 门禁基线；详见 `.agents/rules/review-handshake.md`）
+- **审查差异指纹**：{node .agents/scripts/review-diff-fingerprint.js worktree HEAD 原文}
 - **总体结论**：{通过 / 需要修改 / 拒绝}（恰取一个；禁止写组合短语，否则 verify gate 失败）
 - **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **env-blocked**：0
 

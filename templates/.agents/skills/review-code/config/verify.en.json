@@ -31,7 +31,8 @@
         "^### Approval Decision$",
         "^\\$ ",
         "^- \\*\\*Overall Verdict\\*\\*[:：]\\s*(?:通过|需要修改|拒绝|Approved|Changes Requested|Rejected)\\s*$",
-        "^- \\*\\*Review Baseline Commit\\*\\*[:：]\\s*\\S"
+        "^- \\*\\*Review Baseline Commit\\*\\*[:：]\\s*\\S",
+        "^- \\*\\*Reviewed Diff Fingerprint\\*\\*[:：]\\s*sha256:[0-9a-f]{64}\\s*$"
       ],
       "freshness_minutes": 30
     },

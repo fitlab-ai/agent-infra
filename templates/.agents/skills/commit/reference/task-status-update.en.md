@@ -18,6 +18,14 @@ For every task-related commit, append this Activity Log entry in `task.md`:
 - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Commit** by {agent} — {commit hash short} {commit subject}
 ```
 
+If the commit stage confirmed that the highest-round `review-code` artifact is Approved, `pre_head` equals its review baseline commit `R`, and the staged diff fingerprint `S` equals its reviewed diff fingerprint `F`, also write or refresh:
+
+```yaml
+last_reviewed_commit: {new_head}
+```
+
+This field is the preferred baseline for the `complete-task` `post-review-commit` gate. When any condition is not met, do not write or advance it.
+
 Before selecting the next step, verify:
 - `current_step` and the latest workflow progress in `task.md`
 - whether the latest `review-code.md` / `review-code-r{N}.md` passed without findings

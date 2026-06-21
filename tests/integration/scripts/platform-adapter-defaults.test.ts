@@ -111,6 +111,7 @@ test("platform-sync verification keys override legacy literal values", () => {
     linkNodeModules(tempRoot);
     write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
     write(path.join(tempRoot, ".agents/scripts/lib/review-artifacts.js"), read(".agents/scripts/lib/review-artifacts.js"));
+    write(path.join(tempRoot, ".agents/scripts/lib/post-review-commit.js"), read(".agents/scripts/lib/post-review-commit.js"));
     write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));
     const ghEnv = writeFakeGh(ghPath);
     writeTask(taskDir);
@@ -166,6 +167,7 @@ test("platform-sync verification keeps legacy literal fallback", () => {
     linkNodeModules(tempRoot);
     write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
     write(path.join(tempRoot, ".agents/scripts/lib/review-artifacts.js"), read(".agents/scripts/lib/review-artifacts.js"));
+    write(path.join(tempRoot, ".agents/scripts/lib/post-review-commit.js"), read(".agents/scripts/lib/post-review-commit.js"));
     write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));
     const ghEnv = writeFakeGh(ghPath);
     writeTask(taskDir);
