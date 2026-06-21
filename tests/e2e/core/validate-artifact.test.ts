@@ -395,14 +395,24 @@ test("template references point to the shared pr-sync rule", () => {
 });
 
 test("local and zh-CN rule files contain the canonical PR summary structure", () => {
-  const zhHeadings = [/## 审查摘要/, /### ⚠️ 需人工校验/, /### 关键技术决策/, /### 审查历程/, /### 测试结果/];
-  assertHasCanonicalPrSyncStructure(".agents/rules/pr-sync.md", zhHeadings);
-  assertHasCanonicalPrSyncStructure("templates/.agents/rules/pr-sync.github.zh-CN.md", zhHeadings);
+  // The comment-body template carries the manual-verify section as a placeholder,
+  // not a hard-coded ⚠️ heading; the two render branches are documented in prose.
+  const zhHeadings = [/## 审查摘要/, /\{manual-verify-section\}/, /### 关键技术决策/, /### 审查历程/, /### 测试结果/];
+  for (const file of [".agents/rules/pr-sync.md", "templates/.agents/rules/pr-sync.github.zh-CN.md"]) {
+    assertHasCanonicalPrSyncStructure(file, zhHeadings);
+    const content = read(file);
+    assert.match(content, /### ⚠️ 需人工校验/, `${file} should document the retained-items branch`);
+    assert.match(content, /### ✅ 无需人工校验/, `${file} should document the empty branch without the warning style`);
+  }
 });
 
 test("template English rule contains the canonical PR summary structure", () => {
-  const enHeadings = [/## Review Summary/, /### ⚠️ Manual Verification Required/, /### Key Technical Decisions/, /### Review History/, /### Test Results/];
-  assertHasCanonicalPrSyncStructure("templates/.agents/rules/pr-sync.github.en.md", enHeadings);
+  const file = "templates/.agents/rules/pr-sync.github.en.md";
+  const enHeadings = [/## Review Summary/, /\{manual-verify-section\}/, /### Key Technical Decisions/, /### Review History/, /### Test Results/];
+  assertHasCanonicalPrSyncStructure(file, enHeadings);
+  const content = read(file);
+  assert.match(content, /### ⚠️ Manual Verification Required/, "should document the retained-items branch");
+  assert.match(content, /### ✅ No Manual Verification Needed/, "should document the empty branch without the warning style");
 });
 
 test("verification assets are present in local and template trees", () => {

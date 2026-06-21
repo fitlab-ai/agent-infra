@@ -16,12 +16,13 @@ Rules:
 - If `Blocker > 0`, never use an approved template
 - Never count env-blocked items as blocker / major / minor or use them to trigger Scenario B/C/D
 - The selected scenario must include all TUI command formats
+- The count line always shows 4 numbers: the first three (Blockers / Major / Minor) must be 0 to proceed; the fourth, `Human-decision` (`{h}`), is the number of rows in task.md `## 审查分歧账本` with `stage=plan` and `status=needs-human-decision` — a "pending human ruling" item that need not be zero and does not participate in scenario selection
 
 ### Scenario A: Approved with no findings
 
 ```text
 Task {task-id} technical plan review completed. Verdict: approved.
-- Blockers: 0 | Major issues: 0 | Minor issues: 0[ | Environment-blocked: {n} (outside AI fix scope)]
+- Blockers: 0 | Major issues: 0 | Minor issues: 0 | Human-decision: {h}
 [- Review report: .agents/workspace/active/{task-id}/{review-artifact}]
 
 Next step - write code:
@@ -37,7 +38,7 @@ Reminder: env-blocked items belong in the PR description manual verification che
 
 ```text
 Task {task-id} technical plan review completed. Verdict: approved.
-- Blockers: 0 | Major issues: {n} | Minor issues: {n}[ | Environment-blocked: {n} (outside AI fix scope)]
+- Blockers: 0 | Major issues: {n} | Minor issues: {n} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - revise plan before coding (recommended):
@@ -58,7 +59,7 @@ Reminder: env-blocked items belong in the PR description manual verification che
 
 ```text
 Task {task-id} technical plan review completed. Verdict: changes requested.
-- Blockers: {n} | Major issues: {n} | Minor issues: {n}[ | Environment-blocked: {n} (outside AI fix scope)]
+- Blockers: {n} | Major issues: {n} | Minor issues: {n} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - revise technical plan:
@@ -74,7 +75,7 @@ Reminder: env-blocked items belong in the PR description manual verification che
 
 ```text
 Task {task-id} technical plan review completed. Verdict: rejected, redesign required.
-- Blockers: {n} | Major issues: {n} | Minor issues: {n}[ | Environment-blocked: {n} (outside AI fix scope)]
+- Blockers: {n} | Major issues: {n} | Minor issues: {n} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - redesign:

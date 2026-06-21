@@ -18,12 +18,13 @@ Prohibitions:
 - if `Blocker > 0`, never output an approval template
 - never count env-blocked findings as blockers / major issues / minor issues, and never use them to trigger Branch B/C/D
 - always include every TUI command format in the selected branch
+- the count line always shows 5 numbers: the first three (Blockers / Major / Minor) must be 0 to proceed; the last two are "pending human" items and need not be zero — `Manual-verify` (`{e}`) = this round's env-blocked count, `Human-decision` (`{h}`) = the number of rows in task.md `## 审查分歧账本` with `stage=code` and `status=needs-human-decision`; neither participates in branch selection
 
 ### Branch A: Approved with No Findings
 
 ```text
 Task {task-id} review completed. Verdict: approved.
-- Blockers: 0 | Major: 0 | Minor: 0[ | env-blocked: {n} (outside AI repair scope)]
+- Blockers: 0 | Major: 0 | Minor: 0 | Manual-verify: {e} | Human-decision: {h}
 [- Review report: .agents/workspace/active/{task-id}/{review-artifact}]
 
 Next step - commit the code:
@@ -39,7 +40,7 @@ Reminder: env-blocked findings must be carried in the PR description as a "manua
 
 ```text
 Task {task-id} review completed. Verdict: approved.
-- Blockers: 0 | Major: {n} | Minor: {n}[ | env-blocked: {n} (outside AI repair scope)]
+- Blockers: 0 | Major: {n} | Minor: {n} | Manual-verify: {e} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - fix before commit (recommended):
@@ -60,7 +61,7 @@ Reminder: env-blocked findings must be carried in the PR description as a "manua
 
 ```text
 Task {task-id} review completed. Verdict: changes requested.
-- Blockers: {n} | Major: {n} | Minor: {n}[ | env-blocked: {n} (outside AI repair scope)]
+- Blockers: {n} | Major: {n} | Minor: {n} | Manual-verify: {e} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - fix the findings:
@@ -76,7 +77,7 @@ Reminder: env-blocked findings must be carried in the PR description as a "manua
 
 ```text
 Task {task-id} review completed. Verdict: rejected, re-design the technical plan.
-- Blockers: {n} | Major: {n} | Minor: {n}[ | env-blocked: {n} (outside AI repair scope)]
+- Blockers: {n} | Major: {n} | Minor: {n} | Manual-verify: {e} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - re-design the technical plan:
