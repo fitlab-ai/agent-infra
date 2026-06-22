@@ -44,10 +44,12 @@ function spawnSandboxCli(
   });
 }
 
-// Treat an arg as the tool's own mount when it ends with the container path,
-// optionally followed by an SELinux relabel suffix (:z / :Z).
+// Treat an arg as the tool's own mount when its container target equals
+// containerPath, ignoring an optional SELinux relabel suffix (:z / :Z). Uses
+// plain string ops instead of building a RegExp from the path.
 function isMountFor(arg: string, containerPath: string): boolean {
-  return new RegExp(`:${containerPath.replace(/[.]/g, "\\.")}(:[zZ])?$`).test(arg);
+  const target = arg.replace(/:[zZ]$/, "");
+  return target.endsWith(`:${containerPath}`);
 }
 
 test("sandbox create mounts the codex home as tmpfs and drops its host bind", onPlatforms("linux", "darwin", "win32"), () => {
@@ -106,7 +108,12 @@ test("sandbox create mounts the codex home as tmpfs and drops its host bind", on
   }
 });
 
-test("sandbox create seeds the codex tmpfs with host config via docker cp", onPlatforms("linux", "darwin", "win32"), () => {
+// linux/darwin only: this assertion needs create to run *past* `docker run`
+// into the post-start phase. The sandbox fixture cannot do that on Windows
+// because ensureShellConfigSymlinks uses execEngine -> execFileSync('docker'),
+// which can't resolve the docker.cmd shim there. The cp arg construction is
+// covered cross-platform by the buildTmpfsSeedCpArgs unit test.
+test("sandbox create seeds the codex tmpfs with host config via docker cp", onPlatforms("linux", "darwin"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmpfs-cp-"));
 
   try {
@@ -132,7 +139,9 @@ test("sandbox create seeds the codex tmpfs with host config via docker cp", onPl
   }
 });
 
-test("sandbox create fails loudly when the codex tmpfs seed copy fails", onPlatforms("linux", "darwin", "win32"), () => {
+// linux/darwin only: same fixture limitation as the seed-copy test above — the
+// fatal cp only runs in the post-start phase, unreachable on Windows here.
+test("sandbox create fails loudly when the codex tmpfs seed copy fails", onPlatforms("linux", "darwin"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmpfs-cp-fail-"));
 
   try {
