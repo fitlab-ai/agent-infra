@@ -128,7 +128,16 @@ node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/activ
   - Codex CLI：$watch-pr {task-ref}
 ```
 
-`watch-pr` 全绿后会再引导 `complete-task {task-ref}`。
+或者，若想跳过 CI 监控、直接归档任务，改用 `complete-task`：
+
+```
+下一步（备选）- 跳过监控、直接归档任务：
+  - Claude Code / OpenCode：/complete-task {task-ref}
+  - Gemini CLI：/agent-infra:complete-task {task-ref}
+  - Codex CLI：$complete-task {task-ref}
+```
+
+`watch-pr` 为主路径，全绿后会再引导 `complete-task {task-ref}`；上面的 `complete-task` 备选块仅用于跳过 CI 监控、直接归档——两者并不等价。
 
 ## 注意事项
 

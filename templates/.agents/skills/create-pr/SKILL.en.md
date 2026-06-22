@@ -128,7 +128,16 @@ Next step - Watch PR checks (auto self-heal until required checks are green):
   - Codex CLI: $watch-pr {task-ref}
 ```
 
-Once green, `watch-pr` then guides toward `complete-task {task-ref}`.
+Alternatively, to skip CI monitoring and archive the task right away, use `complete-task` instead:
+
+```
+Next step (alternative) - Skip monitoring and archive the task directly:
+  - Claude Code / OpenCode: /complete-task {task-ref}
+  - Gemini CLI: /agent-infra:complete-task {task-ref}
+  - Codex CLI: $complete-task {task-ref}
+```
+
+`watch-pr` is the primary path; once checks are green it guides you toward `complete-task {task-ref}`. Run the `complete-task` block above directly only when you intend to skip monitoring — the two are not equivalent.
 
 ## Notes
 
