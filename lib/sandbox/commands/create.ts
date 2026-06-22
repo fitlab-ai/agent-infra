@@ -1091,19 +1091,6 @@ export function buildTmpfsRunArgs(containerMount: string, tmpfs: { size?: string
   return ['--tmpfs', `${containerMount}:rw,size=${size}`];
 }
 
-// `docker cp` args that seed a tmpfs-mounted tool dir with the host-side config
-// generated before container start. The host source path IS engine-converted
-// (wsl2 wraps docker in `wsl.exe --`, so a raw Windows path would not resolve);
-// the container destination path is not.
-export function buildTmpfsSeedCpArgs(
-  engine: string,
-  dir: string,
-  container: string,
-  containerMount: string
-): string[] {
-  return ['cp', `${toEnginePath(engine, dir)}/.`, `${container}:${containerMount}`];
-}
-
 export function buildImage(
   config: Pick<SandboxCreateConfig, 'project' | 'imageName' | 'repoRoot'> & { engine?: string | null },
   tools: SandboxTool[],
@@ -1434,6 +1421,22 @@ export async function create(args: string[]): Promise<void> {
               '-v',
               volumeArg(engine, hostPath, containerPath, ':ro')
             ]);
+            // A tmpfs containerMount starts empty, so the config seeded into the
+            // host dir before launch (config.toml, model-catalogs, ...) would be
+            // invisible in-container. Bind each seeded entry over the tmpfs as a
+            // nested mount — the same proven mechanism as hostLiveMounts/auth.json,
+            // established at `docker run` time (no post-start `docker cp`, which
+            // can land under a freshly-mounted tmpfs instead of inside it). The
+            // high-churn runtime files codex writes at CODEX_HOME root still land
+            // in the tmpfs/RAM, so the write-amplification fix is unaffected.
+            const tmpfsSeedVolumes = effectiveResolvedTools.flatMap(({ tool, dir }) =>
+              tool.tmpfs && fs.existsSync(dir)
+                ? fs.readdirSync(dir).flatMap((entry) => [
+                    '-v',
+                    volumeArg(engine, path.join(dir, entry), path.posix.join(tool.containerMount, entry))
+                  ])
+                : []
+            );
             const liveMountVolumes = effectiveResolvedTools.flatMap(({ tool }) =>
               (tool.hostLiveMounts ?? [])
                 .filter(({ hostPath }) => fs.existsSync(hostPath))
@@ -1489,6 +1492,7 @@ export async function create(args: string[]): Promise<void> {
               ...dotfilesMount,
               ...toolVolumes,
               ...tmpfsArgs,
+              ...tmpfsSeedVolumes,
               ...liveMountVolumes,
               ...shellConfigVolumes,
               ...envFile.dockerArgs,
@@ -1550,18 +1554,6 @@ export async function create(args: string[]): Promise<void> {
                   ? 'GPG key sync failed; using stripped git config fallback...'
                   : 'Host GPG keys unavailable; using stripped git config fallback...'
               );
-            }
-          }
-
-          // tmpfs-mounted tool dirs start empty, so the config/model-catalogs
-          // seeded into the host dir before launch are not visible in-container.
-          // Copy them into the tmpfs now. This is required, not best-effort:
-          // runEngineTaskCommand throws on failure so a missing config.toml /
-          // workspace trust surfaces as a create error instead of silently
-          // breaking codex.
-          for (const { tool, dir } of effectiveResolvedTools) {
-            if (tool.tmpfs) {
-              runEngineTaskCommand(engine, 'docker', buildTmpfsSeedCpArgs(engine, dir, container, tool.containerMount));
             }
           }
 

@@ -44,15 +44,15 @@ function spawnSandboxCli(
   });
 }
 
-// Treat an arg as the tool's own mount when its container target equals
-// containerPath, ignoring an optional SELinux relabel suffix (:z / :Z). Uses
-// plain string ops instead of building a RegExp from the path.
+// Treat an arg as a mount whose container target equals containerPath, ignoring
+// an optional SELinux relabel suffix (:z / :Z). Plain string ops, no RegExp from
+// the path.
 function isMountFor(arg: string, containerPath: string): boolean {
   const target = arg.replace(/:[zZ]$/, "");
   return target.endsWith(`:${containerPath}`);
 }
 
-test("sandbox create mounts the codex home as tmpfs and drops its host bind", onPlatforms("linux", "darwin", "win32"), () => {
+test("sandbox create mounts codex home as tmpfs, drops its host bind, and seeds config over it", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmpfs-run-"));
 
   try {
@@ -87,6 +87,13 @@ test("sandbox create mounts the codex home as tmpfs and drops its host bind", on
       `expected NO host bind for /home/devuser/.codex, got ${JSON.stringify(runCall)}`
     );
 
+    // Seeded config (ensureCodexWorkspaceTrust always writes config.toml) is
+    // bind-mounted over the tmpfs at run time, so it is present in-container.
+    assert.ok(
+      runCall.some((arg, index) => runCall[index - 1] === "-v" && isMountFor(arg, "/home/devuser/.codex/config.toml")),
+      `expected config.toml to be seeded as a nested bind over the tmpfs, got ${JSON.stringify(runCall)}`
+    );
+
     // auth.json is still overlaid on top of the tmpfs.
     assert.ok(
       runCall.some((arg, index) => runCall[index - 1] === "-v" && isMountFor(arg, "/home/devuser/.codex/auth.json")),
@@ -102,68 +109,6 @@ test("sandbox create mounts the codex home as tmpfs and drops its host bind", on
       runCall.some((arg, index) => arg === "--tmpfs" && String(runCall[index + 1]).startsWith("/home/devuser/.local/share/opencode")),
       false,
       `expected opencode to NOT be tmpfs, got ${JSON.stringify(runCall)}`
-    );
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-// linux/darwin only: this assertion needs create to run *past* `docker run`
-// into the post-start phase. The sandbox fixture cannot do that on Windows
-// because ensureShellConfigSymlinks uses execEngine -> execFileSync('docker'),
-// which can't resolve the docker.cmd shim there. The cp arg construction is
-// covered cross-platform by the buildTmpfsSeedCpArgs unit test.
-test("sandbox create seeds the codex tmpfs with host config via docker cp", onPlatforms("linux", "darwin"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmpfs-cp-"));
-
-  try {
-    const fixture = writeSandboxEngineFixture(tmpDir, {
-      project: "demo",
-      sandbox: { tools: ["codex"] }
-    });
-    commitInitialFile(fixture.repoDir);
-
-    // Let create run through to the post-start seed copy (no run short-circuit).
-    spawnSandboxCli(fixture, tmpDir, ["create", "feature-x", "--cpu", "1", "--memory", "1"]);
-
-    const cpCall = fixture.readDockerCalls().find(
-      (call) => call[0] === "cp" && call[call.length - 1]!.endsWith(":/home/devuser/.codex")
-    );
-    assert.ok(cpCall, `expected a 'docker cp ... :/home/devuser/.codex', got ${JSON.stringify(fixture.readDockerCalls())}`);
-    assert.ok(
-      cpCall[1]!.endsWith("/."),
-      `expected cp source to copy dir contents (end with '/.'), got ${JSON.stringify(cpCall)}`
-    );
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-// linux/darwin only: same fixture limitation as the seed-copy test above — the
-// fatal cp only runs in the post-start phase, unreachable on Windows here.
-test("sandbox create fails loudly when the codex tmpfs seed copy fails", onPlatforms("linux", "darwin"), () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-tmpfs-cp-fail-"));
-
-  try {
-    const fixture = writeSandboxEngineFixture(tmpDir, {
-      project: "demo",
-      sandbox: { tools: ["codex"] }
-    });
-    commitInitialFile(fixture.repoDir);
-
-    const result = spawnSandboxCli(
-      fixture,
-      tmpDir,
-      ["create", "feature-x", "--cpu", "1", "--memory", "1"],
-      { DOCKER_EXIT_FOR_CP: "1" }
-    );
-
-    assert.equal(result.signal, null);
-    assert.notEqual(result.status, 0);
-    // The copy must have been attempted (not silently skipped).
-    assert.ok(
-      fixture.readDockerCalls().some((call) => call[0] === "cp"),
-      `expected a docker cp attempt before failing, got ${JSON.stringify(fixture.readDockerCalls())}`
     );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

@@ -772,25 +772,3 @@ test("buildTmpfsRunArgs emits a sized --tmpfs flag for the container mount", asy
   );
 });
 
-test("buildTmpfsSeedCpArgs engine-converts the host source path for wsl2", async () => {
-  const create = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/create.ts")>("lib/sandbox/commands/create.js");
-
-  // Non-wsl2 engines pass the host path through unchanged.
-  assert.deepEqual(
-    create.buildTmpfsSeedCpArgs("docker-desktop", "/home/host/.agent-infra/sandboxes/codex/demo/x", "cont", "/home/devuser/.codex"),
-    ["cp", "/home/host/.agent-infra/sandboxes/codex/demo/x/.", "cont:/home/devuser/.codex"]
-  );
-
-  // wsl2 wraps docker in `wsl.exe --`, so a raw Windows source path would not
-  // resolve inside WSL; it must be converted to a /mnt/<drive> path.
-  const wslArgs = create.buildTmpfsSeedCpArgs(
-    "wsl2",
-    "C:\\Users\\me\\.agent-infra\\sandboxes\\codex\\demo\\x",
-    "cont",
-    "/home/devuser/.codex"
-  );
-  assert.deepEqual(
-    wslArgs,
-    ["cp", "/mnt/c/Users/me/.agent-infra/sandboxes/codex/demo/x/.", "cont:/home/devuser/.codex"]
-  );
-});
