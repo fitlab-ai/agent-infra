@@ -11,6 +11,16 @@ description: "关闭 Dependabot 安全告警并记录理由"
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
+## 步骤开始：写入 started 标记
+
+确认前置条件后、本步骤第一个产出动作之前，向 task.md `## 活动日志` 追加一条 started 标记（与本步骤 done 条目同基名 + ` [started]` 后缀，note 用 `started`）：
+
+```
+- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Close Dependabot [started]** by {agent} — started
+```
+
+`ai task log` 会把它与完成时写入的 done 条目配对成一行（进行中 → 已完成）。约定见 `.agents/rules/task-management.md` 的「Activity Log started / done 双标记约定」。
+
 ## 执行流程
 
 ### 1. 获取告警信息

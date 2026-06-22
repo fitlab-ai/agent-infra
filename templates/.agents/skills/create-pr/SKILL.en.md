@@ -15,6 +15,16 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 > If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
+## Step Start: Write the started Marker
+
+After the pre-flight gate and prerequisites pass and before this step's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this step's done entry plus a ` [started]` suffix, note `started`). Only write it when an associated `{task-id}` / task.md exists:
+
+```
+- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Create PR [started]** by {agent} — started
+```
+
+`ai task log` pairs it with the done entry written on completion onto one row (in progress → done). See the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+
 ## Execution Flow
 
 ### Pre-gate: Project-level PR Flow Check

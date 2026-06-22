@@ -58,6 +58,11 @@
 
 **gate**（`checkActivityLog`）：计算「最新 action / freshness」时跳过 `[started]` 行（升序与格式校验仍覆盖全部行），故 started 标记不会污染各 SKILL 的 `expected_action_pattern`。
 
-**写 started 的 SKILL**（仅这些工作流 SKILL，在「该轮实质工作开始时」追加 started 标记）：
-`analyze-task`、`plan-task`、`code-task`、`review-analysis`、`review-plan`、`review-code`、`commit`、`complete-task`。
-瞬时型生命周期 SKILL（`create-task`/`import-*`/`block-task`/`cancel-task`/`restore-task`/`close-*`/`create-pr`）开始即结束，**不写** started。
+**写 started 的 SKILL**：所有**会向某个任务的 `## 活动日志` 追加条目**的工作流 SKILL 都写 started，保证 `ai task log` 整张表的 STARTED 列一致完整。两种写法按技能是否已有 task.md 区分：
+
+- **常规写法（task.md 已存在）**——在「该轮实质工作开始时」（前置条件确认后、第一个产出动作前）追加 started 行，完成时写 done 行：
+  `analyze-task`、`plan-task`、`code-task`、`review-analysis`、`review-plan`、`review-code`、`commit`、`complete-task`、`create-pr`、`watch-pr`、`block-task`、`cancel-task`、`restore-task`、`close-codescan`、`close-dependabot`。
+- **延迟补写（本技能创建 task.md，开始时无文件可写）**——开始执行前先在内存记录 `started_at`，最后写活动日志时**一次性补两条**（started 行用 `started_at`、done 行用完成时间）：
+  `create-task`、`import-issue`、`import-codescan`、`import-dependabot`。
+
+**例外**：`check-task` 等只读巡检类、不代表实质工作推进的技能不写 started。无 task.md 上下文的纯操作（如无关联任务的 `commit`）同样跳过。

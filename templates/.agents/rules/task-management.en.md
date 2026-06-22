@@ -54,4 +54,11 @@ Map user intent to the corresponding workflow command:
 
 **Gate** (`checkActivityLog`): when computing the "latest action / freshness" it skips `[started]` lines (ascending-order and format checks still cover every line), so a started marker never satisfies a skill's `expected_action_pattern`.
 
-**Skills that write started** (only these workflow skills, appending the started marker when that round's real work begins): `analyze-task`, `plan-task`, `code-task`, `review-analysis`, `review-plan`, `review-code`, `commit`, `complete-task`. Transient lifecycle skills (`create-task`/`import-*`/`block-task`/`cancel-task`/`restore-task`/`close-*`/`create-pr`) begin and end at once and do **not** write started.
+**Skills that write started**: every workflow skill that **appends entries to a task's `## Activity Log`** writes started, so the STARTED column stays uniformly complete across the whole `ai task log` table. Two forms, depending on whether task.md already exists:
+
+- **Standard form (task.md already exists)** — append the started line when that round's real work begins (after prerequisites, before the first artifact action) and the done line on completion:
+  `analyze-task`, `plan-task`, `code-task`, `review-analysis`, `review-plan`, `review-code`, `commit`, `complete-task`, `create-pr`, `watch-pr`, `block-task`, `cancel-task`, `restore-task`, `close-codescan`, `close-dependabot`.
+- **Deferred form (the skill creates task.md, so there is no file to write to at the start)** — capture `started_at` in memory before running, then when writing the Activity Log at the end, **append both lines at once** (started line uses `started_at`, done line uses the completion time):
+  `create-task`, `import-issue`, `import-codescan`, `import-dependabot`.
+
+**Exceptions**: read-only inspection skills that do not represent real progress (e.g. `check-task`) do not write started. A bare operation with no task.md context (e.g. a `commit` not tied to a task) likewise skips it.

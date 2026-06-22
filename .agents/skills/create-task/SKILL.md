@@ -26,6 +26,17 @@ description: "根据自然语言描述创建任务"
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
+## 步骤开始：记录开始时间
+
+本技能会**创建** task.md，开始时尚无文件可写。先在内存记录开始时间 `started_at`（`date "+%Y-%m-%d %H:%M:%S%:z"`）；在最后写活动日志时**一次性补两条**——started 行用 `started_at`、done 行用完成时间，二者同基名（started 行 action 加 ` [started]` 后缀、note 用 `started`）：
+
+```
+- {started_at} — **Create Task [started]** by {agent} — started
+- {done_at} — **Create Task** by {agent} — {完成说明}
+```
+
+`ai task log` 会按基名把两条配对成一行（进行中 → 已完成）。约定见 `.agents/rules/task-management.md` 的「Activity Log started / done 双标记约定」。
+
 ## 执行步骤
 ### 1. 解析用户描述
 

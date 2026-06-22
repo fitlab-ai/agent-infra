@@ -21,6 +21,16 @@ Version stamp rule: before creating or updating `task.md` frontmatter, read `.ag
 
 > If the `{task-id}` argument matches `^[#]?[0-9]+$` (a bare number or `#`-prefixed), first read the "SKILL argument parsing" section of `.agents/rules/task-short-id.md` to resolve it; subsequent commands treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form.
 
+## Step Start: Write the started Marker
+
+After prerequisites pass and before this round's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this round's done entry plus a ` [started]` suffix, note `started`):
+
+```
+- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N}) [started]** by {agent} — started
+```
+
+`ai task log` pairs it with the done entry written on completion onto one row (in progress → done). See the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+
 ## Steps
 
 ### 1. Resolve Arguments

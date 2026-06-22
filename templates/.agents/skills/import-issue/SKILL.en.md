@@ -17,6 +17,22 @@ Import the specified Issue and create a task. Argument: issue number.
 
 > If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
+## Step Start: Capture the Start Time
+
+This skill **creates** task.md, so there is no file to write at the start. Capture `started_at` in memory before running (`date "+%Y-%m-%d %H:%M:%S%:z"`); when writing the Activity Log at the end, **append both lines at once** — the started line uses `started_at`, the done line uses the completion time, both sharing the base action (started line action gets a ` [started]` suffix, note `started`). The base action must match the actual import scenario:
+
+```
+# Scenario B: new Issue import
+- {started_at} — **Import Issue [started]** by {agent} — started
+- {done_at} — **Import Issue** by {agent} — {completion summary}
+
+# Scenario C: recovery from historical Issue comments
+- {started_at} — **Import Issue (Recovered) [started]** by {agent} — started
+- {done_at} — **Import Issue (Recovered)** by {agent} — {completion summary}
+```
+
+`ai task log` pairs the two by base action onto one row (in progress → done). See the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+
 ## Execution Flow
 
 ### 1. Retrieve Issue Information
