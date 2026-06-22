@@ -13,6 +13,7 @@ Follow the `design-review` step in `.agents/workflows/feature-development.yaml`.
 - [ ] Test strategy covers critical paths, regression risks, and edge cases
 - [ ] Risks, migration, rollback, or compatibility handling are sufficient
 - [ ] The plan avoids over-design and unrelated scope expansion
+- [ ] The reviewer checked whether the executor missed any key design decision that should be upgraded to `[needs-human-decision]`
 - [ ] Every blocker is backed by reproducible grep/sed/nl evidence; conclusions not directly verified are declared under Self-Doubt
 
 **Common anti-examples**:

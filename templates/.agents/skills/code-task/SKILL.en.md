@@ -11,6 +11,7 @@ Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill 
 
 - Follow the latest plan artifact: `plan.md` or `plan-r{N}.md`
 - Fix mode verifies each finding of the latest `review-code` one by one: fix it if it holds, or rebut it and record it under unresolved if it is unfounded/hallucinated; do not expand to issues the review did not list; env-blocked items are out of scope
+- If implementation encounters a key design decision not covered by the plan, record `[needs-human-decision]` / `HD-` rows according to `.agents/rules/no-mid-flow-questions.md` instead of asking mid-flow or expanding scope silently
 - Never auto-run `git add` or `git commit`
 - Create a new code artifact for each round and never overwrite an older one
 - After executing this skill, you **must** immediately update task.md

@@ -288,6 +288,30 @@ test("review criteria keep common review principles consistent across review sta
   assert.equal(enPrinciples[0], enPrinciples[2]);
 });
 
+test("review criteria require checking missed human-decision markings", () => {
+  const criteriaFiles = [
+    ".agents/skills/review-analysis/reference/review-criteria.md",
+    ".agents/skills/review-plan/reference/review-criteria.md",
+    ".agents/skills/review-code/reference/review-criteria.md",
+    "templates/.agents/skills/review-analysis/reference/review-criteria.en.md",
+    "templates/.agents/skills/review-plan/reference/review-criteria.en.md",
+    "templates/.agents/skills/review-code/reference/review-criteria.en.md",
+    "templates/.agents/skills/review-analysis/reference/review-criteria.zh-CN.md",
+    "templates/.agents/skills/review-plan/reference/review-criteria.zh-CN.md",
+    "templates/.agents/skills/review-code/reference/review-criteria.zh-CN.md"
+  ];
+
+  criteriaFiles.forEach((relativePath) => {
+    const checklistItems = [...read(relativePath).matchAll(/^- \[ \] .+$/gm)]
+      .map((match) => match[0]);
+
+    assert.ok(
+      checklistItems.some((item) => item.includes("[needs-human-decision]")),
+      `${relativePath} should include a checklist item for missed human-decision markings`
+    );
+  });
+});
+
 test("workflow skill output instructions align with state check artifact gates", () => {
   const analyzeTaskCases: Array<[string, string]> = [
     [".agents/skills/analyze-task/SKILL.md", "## 状态核对"],

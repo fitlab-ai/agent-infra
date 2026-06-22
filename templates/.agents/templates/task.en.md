@@ -60,6 +60,10 @@ pr_status: pending             # PR status: pending (default) | created (PR crea
 | id | stage | round | severity | status | evidence |
 |----|-------|-------|----------|--------|----------|
 
+## Human Rulings
+
+<!-- Humans record rulings for needs-human-decision decisions here and flip matching HD- rows in the Review Disagreement Ledger to human-decided. -->
+
 ## Activity Log
 
 <!-- Append a new entry for each workflow step. Do NOT overwrite previous entries. -->

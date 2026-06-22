@@ -133,6 +133,25 @@ test("review-ledger keeps needs-human-decision blocking until ruled", async () =
   });
 });
 
+test("review-ledger keeps HD decision rows blocking until human-decided", async () => {
+  await withTempRoot("agent-infra-ledger-hd-", (tempRoot) => {
+    const taskDir = path.join(tempRoot, TASK_ID);
+    write(path.join(taskDir, "task.md"), buildLedgerTask([
+      "| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |"
+    ]));
+
+    const blocked = runLedger("code-task", taskDir);
+    assert.equal(blocked.payload.status, "fail");
+    assert.match(blocked.payload.message, /HD-1/);
+
+    write(path.join(taskDir, "task.md"), buildLedgerTask([
+      "| HD-1 | plan | - | decision | human-decided | 人工裁决#HD-1 |"
+    ]));
+    const ruled = runLedger("code-task", taskDir);
+    assert.equal(ruled.payload.status, "pass", ruled.result.stdout);
+  });
+});
+
 test("review-ledger stage_scope only enforces stages before the caller", async () => {
   await withTempRoot("agent-infra-ledger-scope-", (tempRoot) => {
     const taskDir = path.join(tempRoot, TASK_ID);

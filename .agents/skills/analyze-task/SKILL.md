@@ -181,6 +181,7 @@ tail .agents/workspace/active/{task-id}/task.md
 ## 未决问题
 
 > 如有需要人工裁定的未决问题，列在此处；没有则可省略本段。
+> 关键设计决策按 `.agents/rules/no-mid-flow-questions.md` 的判据标记 `[needs-human-decision]` 并回写 `HD-` 账本行。
 
 - {未决问题}
 

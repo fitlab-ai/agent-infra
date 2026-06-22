@@ -97,6 +97,8 @@ Follow the `technical-design` step in `.agents/workflows/feature-development.yam
 - [ ] Define the verification strategy (tests, manual checks)
 - [ ] Assess impact and risks
 
+When this round introduces a new key design decision, record it under `## Open Questions` according to `.agents/rules/no-mid-flow-questions.md` and write the matching `HD-` ledger row.
+
 **Design principles**:
 1. **Architectural soundness**: choose the structurally correct approach; diff size is not the primary criterion. Do not pile changes onto an unsound structure just to keep the diff small
 2. **Simplicity**: given a sound architecture, prefer the simplest approach and avoid over-engineering

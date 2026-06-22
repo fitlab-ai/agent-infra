@@ -58,12 +58,26 @@
 | CD-1 | code | 1 | blocker | open | review-code.md#1 |
 ```
 
-- `id`：阶段前缀 + 序号——analysis→`AN-`、plan→`PL-`、code→`CD-`。
+- `id`：阶段前缀 + 序号——analysis→`AN-`、plan→`PL-`、code→`CD-`；执行方自提的人工裁决行使用 `HD-`。
 - `stage` ∈ `{analysis, plan, code}`（外加保留值 `post-review-commit`，仅用于 post-review 豁免行）。
 - `status` 合法枚举：`open` / `accepted` / `adjusted` / `refuted` / `cannot-judge` / `confirmed` / `needs-human-decision` / `closed` / `human-decided`。
 - **终态集合（gate 放行）**：`{confirmed, closed, human-decided}`；其余为阻塞态。
 - **写入责任**：`review-*` 提 finding → upsert `open` 行；`*-task` 响应 → 改四态并填 `evidence`、`round` +1；下一轮 `review-*` → `confirmed` / 置回 `open` / `needs-human-decision`；执行方修复经下一轮 review 验证通过 → `closed`；人工裁决 → `human-decided`。
 - **向后兼容**：task.md 无此段时，gate 视为无未决分歧而放行。
+
+### 执行方自提人工裁决行
+
+当执行方在产物 `## 未决问题` 中标记 `[needs-human-decision]` 时，必须在 task.md `## 审查分歧账本` upsert 对应 `HD-` 行：
+
+```markdown
+| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |
+```
+
+- `stage` 填该决策产生的阶段：`analysis` / `plan` / `code`。
+- `round` 填 `-`，因为它不是 review finding 的握手轮次。
+- `severity` 固定填 `decision`。
+- `status` 初始填 `needs-human-decision`，因此会被现有 gate 阻塞。
+- 人工在 task.md `## 人工裁决` 段记录裁定后，把对应 `HD-` 行翻为 `human-decided`，`evidence` 指向该裁定记录。
 
 ## post-review commit 门禁（仅 code 阶段）
 

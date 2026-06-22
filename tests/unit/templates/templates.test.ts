@@ -7,6 +7,7 @@ import path from "node:path";
 
 import {
   buildCommandSyncFiles,
+  escapeRegExp,
   exists,
   langTemplate,
   listFilesRecursive,
@@ -155,6 +156,16 @@ test("task templates include agent-infra version metadata", () => {
   ]) {
     const content = read(relativePath);
     assert.match(content, /^agent_infra_version: v0\.0\.0\b/m, `${relativePath} should stamp the CLI version field`);
+  }
+});
+
+test("task templates include human ruling sections", () => {
+  for (const [relativePath, heading] of [
+    [".agents/templates/task.md", "## 人工裁决"],
+    ["templates/.agents/templates/task.en.md", "## Human Rulings"],
+    ["templates/.agents/templates/task.zh-CN.md", "## 人工裁决"]
+  ] as Array<[string, string]>) {
+    assert.match(read(relativePath), new RegExp(`^${escapeRegExp(heading)}$`, "m"));
   }
 });
 

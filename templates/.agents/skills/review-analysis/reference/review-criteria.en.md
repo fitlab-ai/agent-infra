@@ -13,6 +13,7 @@ Follow the `analysis-review` step in `.agents/workflows/feature-development.yaml
 - [ ] Risks, edge cases, and open questions are recorded
 - [ ] The design stage has enough input to proceed
 - [ ] The analysis matches the original Issue or user request
+- [ ] The reviewer checked whether the executor missed any key design decision that should be upgraded to `[needs-human-decision]`
 - [ ] Every blocker is backed by reproducible grep/sed/nl evidence; conclusions not directly verified are declared under Self-Doubt
 
 **Common anti-examples**:

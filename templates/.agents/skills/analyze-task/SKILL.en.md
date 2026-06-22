@@ -182,6 +182,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 ## Open Questions
 
 > If there are unresolved questions for human review, list them here; omit this section if there are none.
+> Mark key design decisions with `[needs-human-decision]` and write `HD-` ledger rows according to `.agents/rules/no-mid-flow-questions.md`.
 
 - {open question}
 

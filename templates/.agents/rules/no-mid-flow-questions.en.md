@@ -53,6 +53,17 @@ For every SKILL execution context not covered by any exemption above, the defaul
    - Meaning: the assumptions section records assumptions used for this run that may be revisited later; the open questions section records unresolved questions for human review
    - If the artifact template does not reserve these sections, append them as needed. If there are no assumptions or open questions, do not force empty sections.
 
+## Key Design Decision Marking And Ledgering
+
+When an open question is a key design decision that needs human judgment, the executor must mark the item with `[needs-human-decision]` and write the matching `HD-` row to task.md `## Review Disagreement Ledger` according to `.agents/rules/review-handshake.md`.
+
+Use these checks together:
+
+- **Source test**: can the conclusion be uniquely derived from the task description, existing requirements, code conventions, or an approved plan? If not, and multiple reasonable options exist, it is a choice.
+- **Impact test**: does the choice change scope, boundaries, defaults, thresholds, become irreversible / costly, or set precedent for later tasks? Any hit upgrades it to a key design decision.
+- **Small-impact exemption**: if it is only a local, reversible, low-cost execution detail, record it under `## Assumptions` instead of upgrading it to a human ruling.
+- **Fallback**: when unsure whether it is key, treat it as key; `review-*` must check whether the executor missed any `[needs-human-decision]` markings that should have been upgraded.
+
 ## Human Review Checkpoint Semantics
 
 A mandatory human review checkpoint means:
