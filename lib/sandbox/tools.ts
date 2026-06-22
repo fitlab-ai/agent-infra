@@ -20,10 +20,12 @@ export type SandboxTool = {
   hostLiveMounts?: Array<{ hostPath: string; containerSubpath: string }>;
   postSetupCmds?: string[];
   // When set, containerMount is mounted as an in-container tmpfs (RAM) instead
-  // of bind-mounting the host config dir. Seeded config is copied into the
-  // tmpfs after container start (see create.ts). Used to keep high-churn tool
-  // logs off the host disk.
-  tmpfs?: { size?: string };
+  // of bind-mounting the host config dir, keeping high-churn tool logs off the
+  // host disk. `seed` lists the host-dir entries (relative to the tool's config
+  // dir) to bind back over the tmpfs so seeded config stays visible — it is an
+  // explicit allowlist so runtime files (e.g. logs_2.sqlite, sessions) left in
+  // the host dir are NOT re-mounted, which would defeat the tmpfs.
+  tmpfs?: { size?: string; seed?: string[] };
 };
 
 type ToolsConfig = {
@@ -78,7 +80,9 @@ function createBuiltinTools(home: string, project: string): Record<string, Sandb
       // codex churns ~/.codex/logs_2.sqlite heavily (upstream openai/codex#24275);
       // a bind-mount would write-amplify onto the host SSD via virtiofs. Mount the
       // codex home as tmpfs so those logs stay in RAM and die with the container.
-      tmpfs: { size: '512m' },
+      // Only the seeded config (config.toml, model-catalogs) is bound back over
+      // the tmpfs; runtime files like logs_2.sqlite must stay in RAM.
+      tmpfs: { size: '512m', seed: ['config.toml', 'model-catalogs'] },
       hostLiveMounts: [
         { hostPath: hostJoin(home, '.codex', 'auth.json'), containerSubpath: 'auth.json' }
       ],
@@ -276,7 +280,8 @@ function parseTmpfs(value: unknown, context: string): SandboxTool['tmpfs'] {
     throw new Error(`${context}: field "tmpfs" must be an object when provided`);
   }
   return {
-    size: asOptionalNonEmptyString(value.size, 'tmpfs.size', context)
+    size: asOptionalNonEmptyString(value.size, 'tmpfs.size', context),
+    seed: asStringArray(value.seed, 'tmpfs.seed', context)
   };
 }
 

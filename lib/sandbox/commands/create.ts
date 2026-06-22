@@ -1422,20 +1422,22 @@ export async function create(args: string[]): Promise<void> {
               volumeArg(engine, hostPath, containerPath, ':ro')
             ]);
             // A tmpfs containerMount starts empty, so the config seeded into the
-            // host dir before launch (config.toml, model-catalogs, ...) would be
-            // invisible in-container. Bind each seeded entry over the tmpfs as a
-            // nested mount — the same proven mechanism as hostLiveMounts/auth.json,
-            // established at `docker run` time (no post-start `docker cp`, which
-            // can land under a freshly-mounted tmpfs instead of inside it). The
-            // high-churn runtime files codex writes at CODEX_HOME root still land
-            // in the tmpfs/RAM, so the write-amplification fix is unaffected.
+            // host dir before launch would be invisible in-container. Bind only
+            // the explicitly declared seed entries (config.toml, model-catalogs)
+            // back over the tmpfs as nested mounts — the same proven mechanism as
+            // hostLiveMounts/auth.json, established at `docker run` time (no
+            // post-start `docker cp`, which can land under a freshly-mounted
+            // tmpfs instead of inside it). The allowlist is deliberate: any
+            // runtime files left in the host dir (e.g. a stale logs_2.sqlite or
+            // sessions/ from a previous bind-mount era) must NOT be re-mounted,
+            // or the high-churn writes would land on the host SSD again.
             const tmpfsSeedVolumes = effectiveResolvedTools.flatMap(({ tool, dir }) =>
-              tool.tmpfs && fs.existsSync(dir)
-                ? fs.readdirSync(dir).flatMap((entry) => [
-                    '-v',
-                    volumeArg(engine, path.join(dir, entry), path.posix.join(tool.containerMount, entry))
-                  ])
-                : []
+              (tool.tmpfs?.seed ?? []).flatMap((entry) => {
+                const hostPath = path.join(dir, entry);
+                return fs.existsSync(hostPath)
+                  ? ['-v', volumeArg(engine, hostPath, path.posix.join(tool.containerMount, entry))]
+                  : [];
+              })
             );
             const liveMountVolumes = effectiveResolvedTools.flatMap(({ tool }) =>
               (tool.hostLiveMounts ?? [])

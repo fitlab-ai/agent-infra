@@ -65,6 +65,12 @@ test("sandbox create mounts codex home as tmpfs, drops its host bind, and seeds 
     // still overlaid on top of the tmpfs.
     fs.mkdirSync(path.join(tmpDir, ".codex"), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, ".codex", "auth.json"), "{}\n", "utf8");
+    // A stale runtime file left in the codex sandbox dir (e.g. from the previous
+    // bind-mount era) must NOT be bound back over the tmpfs — otherwise the
+    // high-churn writes would hit the host SSD again (CD-1).
+    const codexSandboxDir = path.join(tmpDir, ".agent-infra", "sandboxes", "codex", "demo", "feature-x");
+    fs.mkdirSync(codexSandboxDir, { recursive: true });
+    fs.writeFileSync(path.join(codexSandboxDir, "logs_2.sqlite"), "stale\n", "utf8");
 
     spawnSandboxCli(
       fixture,
@@ -92,6 +98,14 @@ test("sandbox create mounts codex home as tmpfs, drops its host bind, and seeds 
     assert.ok(
       runCall.some((arg, index) => runCall[index - 1] === "-v" && isMountFor(arg, "/home/devuser/.codex/config.toml")),
       `expected config.toml to be seeded as a nested bind over the tmpfs, got ${JSON.stringify(runCall)}`
+    );
+
+    // A stale logs_2.sqlite left in the host dir must NOT be re-mounted (CD-1):
+    // only the declared seed allowlist is bound, not the whole dir.
+    assert.equal(
+      runCall.some((arg, index) => runCall[index - 1] === "-v" && isMountFor(arg, "/home/devuser/.codex/logs_2.sqlite")),
+      false,
+      `stale logs_2.sqlite must NOT be bound back over the tmpfs, got ${JSON.stringify(runCall)}`
     );
 
     // auth.json is still overlaid on top of the tmpfs.
