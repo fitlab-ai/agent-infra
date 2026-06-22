@@ -47,6 +47,16 @@ tail .agents/workspace/active/{task-id}/task.md
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
+## 步骤开始：写入 started 标记
+
+确认前置条件（步骤 1）与模式/轮次（步骤 4）后、本轮第一个产出动作之前，向 task.md `## 活动日志` 追加一条 started 标记（与本轮 done 条目同基名 + ` [started]` 后缀，note 用 `started`）：
+
+```
+- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Task (Round {N}) [started]** by {agent} — started
+```
+
+修复模式的基名须与本轮 done 一致，即 `Code Task (Round {N}, fix for {review-artifact}) [started]`。`ai task log` 会把它与步骤完成时（步骤 10）写入的 done 条目配对成一行（进行中 → 已完成）。格式与配对规则见 `.agents/rules/task-management.md` 的「Activity Log started / done 双标记约定」。
+
 ## 执行步骤
 ### 1. 验证前置条件
 

@@ -64,6 +64,7 @@ pr_status: pending             # PR status: pending (default) | created (PR crea
 
 <!-- Append a new entry for each workflow step. Do NOT overwrite previous entries. -->
 <!-- Format: - {YYYY-MM-DD HH:mm:ss±HH:MM} — **{step}** by {agent} — {brief summary} -->
+<!-- Some workflow skills also write a started marker when the step begins (action suffixed with ` [started]`) and a done entry on completion; ai task log pairs them onto one row by base action. Convention: see .agents/rules/task-management.md. -->
 
 ## Completion Checklist
 

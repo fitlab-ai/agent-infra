@@ -33,6 +33,16 @@ tail .agents/workspace/active/{task-id}/task.md
 
 > If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
+## Step Start: Write the started Marker
+
+After prerequisites (step 1) and mode/round (step 4) are confirmed and before this round's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this round's done entry plus a ` [started]` suffix, note `started`):
+
+```
+- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Task (Round {N}) [started]** by {agent} — started
+```
+
+In fix mode the base must match this round's done entry, i.e. `Code Task (Round {N}, fix for {review-artifact}) [started]`. `ai task log` pairs it with the done entry written on completion (step 10) onto one row (in progress → done). Format and pairing rules: see the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+
 ## Steps
 
 ### 1. Verify Prerequisites

@@ -4,13 +4,15 @@ import { resolveTaskRef } from '../resolve-ref.ts';
 
 const USAGE = `Usage: ai task log <N | #N | TASK-id>
 
-Renders a task's activity log as a chronological timeline table.
+Renders a task's activity log as a per-step status table. A step's start and
+completion are paired onto one row: STARTED holds the start time, DONE the
+completion time (or '(in progress)' while still running).
   <ref>   Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
 
-Columns: # (timeline position) / TIME / STEP / AGENT / NOTE
+Columns: # (row) / STEP / AGENT / STARTED / DONE / NOTE
 `;
 
-const TABLE_HEADERS = ['#', 'TIME', 'STEP', 'AGENT', 'NOTE'] as const;
+const TABLE_HEADERS = ['#', 'STEP', 'AGENT', 'STARTED', 'DONE', 'NOTE'] as const;
 
 // The activity-log H2 heading is language-dependent (zh template / en template).
 const HEADING_RE = /^##\s+(活动日志|Activity Log)\s*$/;
@@ -22,6 +24,17 @@ const ENTRY_RE =
   /^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}) — \*\*(.+?)\*\* by (.+?) — (.*)$/;
 
 type LogEntry = { time: string; step: string; agent: string; note: string };
+
+// One rendered row = one step instance. `started`/`done` are timestamps; an empty
+// `done` with a non-empty `started` means the step is still in flight, while an
+// empty `started` is a historical done-only entry (no start marker was written).
+type StepRow = { step: string; agent: string; started: string; done: string; note: string };
+
+// A start marker reuses the normal entry grammar and only suffixes its action
+// with ` [started]`; the matching done entry carries the identical base action
+// without the suffix. Pairing therefore keys on the base action (including any
+// `(Round N)`), so every round and every repeated execution pairs on its own.
+const STARTED_SUFFIX_RE = /\s*\[started\]\s*$/;
 
 function parseActivityLog(content: string): { sectionFound: boolean; entries: LogEntry[] } {
   const lines = content.split('\n');
@@ -42,6 +55,38 @@ function parseActivityLog(content: string): { sectionFound: boolean; entries: Lo
   // Ascending by time; stable tie-break on original order for equal timestamps.
   parsed.sort((a, b) => a.epoch - b.epoch || a.order - b.order);
   return { sectionFound: true, entries: parsed.map((p) => p.entry) };
+}
+
+// Collapse a chronological entry list into per-step rows: a `[started]` marker
+// opens a row, the next matching done entry fills it in place (FIFO per base
+// action). Started-only rows stay in flight; done-only entries (legacy logs with
+// no start marker) render as standalone rows. Result order = first-seen order,
+// which is already ascending because `entries` is sorted ascending.
+function pairEntries(entries: LogEntry[]): StepRow[] {
+  const rows: StepRow[] = [];
+  const open = new Map<string, StepRow[]>();
+  for (const e of entries) {
+    const isStarted = STARTED_SUFFIX_RE.test(e.step);
+    const base = e.step.replace(STARTED_SUFFIX_RE, '');
+    if (isStarted) {
+      const row: StepRow = { step: base, agent: e.agent, started: e.time, done: '', note: e.note };
+      rows.push(row);
+      const queue = open.get(base);
+      if (queue) queue.push(row);
+      else open.set(base, [row]);
+    } else {
+      const pending = open.get(base)?.shift();
+      if (pending) {
+        // Done fills the open row; the done entry carries the meaningful note.
+        pending.done = e.time;
+        pending.agent = e.agent;
+        pending.note = e.note;
+      } else {
+        rows.push({ step: base, agent: e.agent, started: '', done: e.time, note: e.note });
+      }
+    }
+  }
+  return rows;
 }
 
 function log(args: string[] = []): void {
@@ -70,11 +115,19 @@ function log(args: string[] = []): void {
     process.exitCode = 1;
     return;
   }
-  const rows = entries.map((e, idx) => [String(idx + 1), e.time, e.step, e.agent, e.note]);
+  const steps = pairEntries(entries);
+  const rows = steps.map((s, idx) => [
+    String(idx + 1),
+    s.step,
+    s.agent,
+    s.started,
+    s.done || (s.started ? '(in progress)' : ''),
+    s.note
+  ]);
   for (const line of formatTable(TABLE_HEADERS, rows, { zebra: Boolean(process.stdout.isTTY) })) {
     process.stdout.write(`${line}\n`);
   }
-  process.stdout.write(`Total: ${entries.length} entries\n`);
+  process.stdout.write(`Total: ${steps.length} steps\n`);
 }
 
-export { log, parseActivityLog };
+export { log, parseActivityLog, pairEntries };

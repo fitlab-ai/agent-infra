@@ -21,6 +21,16 @@ When updating related `task.md` frontmatter, read `.agents/rules/version-stamp.m
 
 > If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
+## Step Start: Write the started Marker
+
+Before checking local modifications, append a started marker to task.md `## Activity Log` (same base action as this step's done entry plus a ` [started]` suffix, note `started`):
+
+```
+- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Commit [started]** by {agent} — started
+```
+
+`ai task log` pairs it with the done entry written when the commit completes onto one row (in progress → done). Format and pairing rules: see the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`. Only write it when this task has a task.md (a bare commit with no task context may skip it).
+
 ## 1. Check Local Modifications (CRITICAL)
 
 Before any edit, inspect:

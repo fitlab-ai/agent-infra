@@ -31,6 +31,16 @@ Before the state check is complete, do not make external-state assertions such a
 
 > If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
+## Step Start: Write the started Marker
+
+After prerequisites pass and before this round's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this round's done entry plus a ` [started]` suffix, note `started`):
+
+```
+- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Round {N}) [started]** by {agent} — started
+```
+
+`ai task log` pairs it with the done entry written on completion (step 7) onto one row (in progress → done). Format and pairing rules: see the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+
 ## Steps
 
 ### 1. Verify Prerequisites

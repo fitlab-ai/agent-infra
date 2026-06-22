@@ -39,10 +39,11 @@ function runCli(args: string[], cwd: string) {
   return spawnSync('node', [CLI_PATH, ...args], { cwd, encoding: 'utf8' });
 }
 
-test('ai task log <ref> renders the timeline table sorted ascending with a total', () => {
+test('ai task log <ref> renders legacy done-only entries as one row each, sorted ascending', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000007';
   // Intentionally out of order in the file to prove the command sorts by time.
+  // No start markers -> every step is a done-only row (backward compatibility).
   writeTask(activeDir, taskId, '## 活动日志', [
     '- 2026-06-18 14:00:00+08:00 — **Plan Task (Round 1)** by claude — Plan completed → plan.md',
     '- 2026-06-16 15:06:43+08:00 — **Create Task** by claude — Task created from description'
@@ -51,13 +52,43 @@ test('ai task log <ref> renders the timeline table sorted ascending with a total
 
   const out = runCli(['task', 'log', '1'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
-  // Header columns.
-  assert.match(out.stdout, /#\s+TIME\s+STEP\s+AGENT\s+NOTE/);
-  // Row 1 is the earliest entry (Create Task), row 2 the later one (Plan Task).
-  assert.match(out.stdout, /^1\s+2026-06-16 15:06:43\+08:00\s+Create Task\s+claude\s+Task created/m);
-  assert.match(out.stdout, /^2\s+2026-06-18 14:00:00\+08:00\s+Plan Task \(Round 1\)\s+claude\s+Plan completed → plan\.md/m);
-  // Trailing total.
-  assert.match(out.stdout, /^Total: 2 entries$/m);
+  // New status columns.
+  assert.match(out.stdout, /#\s+STEP\s+AGENT\s+STARTED\s+DONE\s+NOTE/);
+  // Row 1 is the earliest step (Create Task): STARTED empty, DONE has the time.
+  assert.match(out.stdout, /^1\s+Create Task\s+claude\s+2026-06-16 15:06:43\+08:00\s+Task created/m);
+  assert.match(out.stdout, /^2\s+Plan Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+Plan completed → plan\.md/m);
+  // Trailing total counts rows (steps), not raw entries.
+  assert.match(out.stdout, /^Total: 2 steps$/m);
+});
+
+test('ai task log folds a started+done pair onto one row', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000011';
+  writeTask(activeDir, taskId, '## 活动日志', [
+    '- 2026-06-18 14:00:00+08:00 — **Plan Task (Round 1) [started]** by claude — started',
+    '- 2026-06-18 14:30:00+08:00 — **Plan Task (Round 1)** by claude — Plan completed → plan.md'
+  ]);
+
+  const out = runCli(['task', 'log', taskId], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  // One row: STARTED and DONE both populated, step base has the suffix stripped.
+  assert.match(out.stdout, /^1\s+Plan Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+2026-06-18 14:30:00\+08:00\s+Plan completed → plan\.md/m);
+  assert.match(out.stdout, /^Total: 1 steps$/m);
+});
+
+test('ai task log shows a started-only step as in progress', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000012';
+  writeTask(activeDir, taskId, '## 活动日志', [
+    '- 2026-06-16 15:06:43+08:00 — **Create Task** by claude — created',
+    '- 2026-06-18 14:00:00+08:00 — **Code Task (Round 1) [started]** by claude — started'
+  ]);
+
+  const out = runCli(['task', 'log', taskId], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  // In-flight row: STARTED time set, DONE rendered as '(in progress)'.
+  assert.match(out.stdout, /^2\s+Code Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+\(in progress\)\s+started/m);
+  assert.match(out.stdout, /^Total: 2 steps$/m);
 });
 
 test('ai task log locates an English "## Activity Log" section', () => {
@@ -69,8 +100,8 @@ test('ai task log locates an English "## Activity Log" section', () => {
 
   const out = runCli(['task', 'log', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
-  assert.match(out.stdout, /^1\s+2026-06-16 15:06:43\+08:00\s+Create Task\s+codex\s+created/m);
-  assert.match(out.stdout, /^Total: 1 entries$/m);
+  assert.match(out.stdout, /^1\s+Create Task\s+codex\s+2026-06-16 15:06:43\+08:00\s+created/m);
+  assert.match(out.stdout, /^Total: 1 steps$/m);
 });
 
 test('ai task log fails when the task has no activity log section', () => {

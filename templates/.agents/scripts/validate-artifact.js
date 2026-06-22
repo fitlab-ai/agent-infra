@@ -38,6 +38,10 @@ const DEFAULT_FRESHNESS_MINUTES = 30;
 const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?$/;
 const AGENT_INFRA_VERSION_PATTERN = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const ACTIVITY_LOG_PATTERN = /^- (\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?) — \*\*(.+?)\*\* by (.+?) — (.+)$/;
+// Start markers (action suffixed with ` [started]`) are excluded from the
+// "latest action" / freshness computation so a step's in-flight marker never
+// satisfies a skill's expected_action_pattern; the matching done entry does.
+const ACTIVITY_LOG_STARTED_RE = /\s*\[started\]\s*$/;
 const BRANCH_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 // Review disagreement ledger (see .agents/rules/review-handshake.md).
@@ -462,8 +466,13 @@ function checkActivityLog({ taskDir, config }) {
     }
 
     previousTimestamp = timestamp;
-    latestTimestamp = timestamp;
-    latestAction = action;
+    // Ascending order is checked over every entry, but a `[started]` marker is
+    // not a terminal action: keep latestAction/latestTimestamp on the most
+    // recent done entry so expected_action_pattern and freshness see it.
+    if (!ACTIVITY_LOG_STARTED_RE.test(action)) {
+      latestTimestamp = timestamp;
+      latestAction = action;
+    }
   }
 
   if (config.expected_action_pattern && !new RegExp(config.expected_action_pattern).test(latestAction)) {
