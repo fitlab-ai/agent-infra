@@ -1084,6 +1084,26 @@ function runEngineTaskCommand(engine: string, cmd: string, args: string[], opts:
   return runTaskCommand(command.cmd, command.args, opts);
 }
 
+// `docker run` args for mounting a tool's containerMount as an in-container
+// tmpfs. containerMount is an in-container path, so it is NOT engine-converted.
+export function buildTmpfsRunArgs(containerMount: string, tmpfs: { size?: string }): string[] {
+  const size = tmpfs.size ?? '512m';
+  return ['--tmpfs', `${containerMount}:rw,size=${size}`];
+}
+
+// `docker cp` args that seed a tmpfs-mounted tool dir with the host-side config
+// generated before container start. The host source path IS engine-converted
+// (wsl2 wraps docker in `wsl.exe --`, so a raw Windows path would not resolve);
+// the container destination path is not.
+export function buildTmpfsSeedCpArgs(
+  engine: string,
+  dir: string,
+  container: string,
+  containerMount: string
+): string[] {
+  return ['cp', `${toEnginePath(engine, dir)}/.`, `${container}:${containerMount}`];
+}
+
 export function buildImage(
   config: Pick<SandboxCreateConfig, 'project' | 'imageName' | 'repoRoot'> & { engine?: string | null },
   tools: SandboxTool[],
@@ -1397,10 +1417,12 @@ export async function create(args: string[]): Promise<void> {
               // The TUI reads <toolDir>/opencode.json via OPENCODE_CONFIG pinned in tools.js.
               ensureOpenCodeModelInheritance(opencodeEntry.dir, effectiveConfig.home);
             }
-            const toolVolumes = effectiveResolvedTools.flatMap(({ tool, dir }) => [
-              '-v',
-              volumeArg(engine, dir, tool.containerMount)
-            ]);
+            const toolVolumes = effectiveResolvedTools.flatMap(({ tool, dir }) =>
+              tool.tmpfs ? [] : ['-v', volumeArg(engine, dir, tool.containerMount)]
+            );
+            const tmpfsArgs = effectiveResolvedTools.flatMap(({ tool }) =>
+              tool.tmpfs ? buildTmpfsRunArgs(tool.containerMount, tool.tmpfs) : []
+            );
             const workspaceDir = path.join(effectiveConfig.repoRoot, '.agents', 'workspace');
             hostShellConfig = prepareHostShellConfig({
               home: effectiveConfig.home,
@@ -1466,6 +1488,7 @@ export async function create(args: string[]): Promise<void> {
               volumeArg(engine, hostJoin(effectiveConfig.home, '.ssh'), '/home/devuser/.ssh', ':ro'),
               ...dotfilesMount,
               ...toolVolumes,
+              ...tmpfsArgs,
               ...liveMountVolumes,
               ...shellConfigVolumes,
               ...envFile.dockerArgs,
@@ -1527,6 +1550,18 @@ export async function create(args: string[]): Promise<void> {
                   ? 'GPG key sync failed; using stripped git config fallback...'
                   : 'Host GPG keys unavailable; using stripped git config fallback...'
               );
+            }
+          }
+
+          // tmpfs-mounted tool dirs start empty, so the config/model-catalogs
+          // seeded into the host dir before launch are not visible in-container.
+          // Copy them into the tmpfs now. This is required, not best-effort:
+          // runEngineTaskCommand throws on failure so a missing config.toml /
+          // workspace trust surfaces as a create error instead of silently
+          // breaking codex.
+          for (const { tool, dir } of effectiveResolvedTools) {
+            if (tool.tmpfs) {
+              runEngineTaskCommand(engine, 'docker', buildTmpfsSeedCpArgs(engine, dir, container, tool.containerMount));
             }
           }
 

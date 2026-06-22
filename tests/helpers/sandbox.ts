@@ -118,6 +118,9 @@ function writeSandboxEngineFixture(
       "if (args[0] === 'start' && process.env.DOCKER_EXIT_FOR_START) {",
       "  process.exit(Number(process.env.DOCKER_EXIT_FOR_START));",
       "}",
+      "if (args[0] === 'cp' && process.env.DOCKER_EXIT_FOR_CP) {",
+      "  process.exit(Number(process.env.DOCKER_EXIT_FOR_CP));",
+      "}",
       "process.exit(0);"
     ].join("\n"),
     "utf8"

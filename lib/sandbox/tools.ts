@@ -19,6 +19,11 @@ export type SandboxTool = {
   pathRewriteFiles?: string[];
   hostLiveMounts?: Array<{ hostPath: string; containerSubpath: string }>;
   postSetupCmds?: string[];
+  // When set, containerMount is mounted as an in-container tmpfs (RAM) instead
+  // of bind-mounting the host config dir. Seeded config is copied into the
+  // tmpfs after container start (see create.ts). Used to keep high-churn tool
+  // logs off the host disk.
+  tmpfs?: { size?: string };
 };
 
 type ToolsConfig = {
@@ -70,6 +75,10 @@ function createBuiltinTools(home: string, project: string): Record<string, Sandb
       containerMount: '/home/devuser/.codex',
       versionCmd: 'codex --version',
       setupHint: 'Run codex once inside the container and choose Device Code login if needed.',
+      // codex churns ~/.codex/logs_2.sqlite heavily (upstream openai/codex#24275);
+      // a bind-mount would write-amplify onto the host SSD via virtiofs. Mount the
+      // codex home as tmpfs so those logs stay in RAM and die with the container.
+      tmpfs: { size: '512m' },
       hostLiveMounts: [
         { hostPath: hostJoin(home, '.codex', 'auth.json'), containerSubpath: 'auth.json' }
       ],
@@ -259,6 +268,18 @@ function parseHostLiveMounts(value: unknown, context: string): SandboxTool['host
   });
 }
 
+function parseTmpfs(value: unknown, context: string): SandboxTool['tmpfs'] {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isPlainObject(value)) {
+    throw new Error(`${context}: field "tmpfs" must be an object when provided`);
+  }
+  return {
+    size: asOptionalNonEmptyString(value.size, 'tmpfs.size', context)
+  };
+}
+
 export function parseCustomTool(
   entry: unknown,
   index: number,
@@ -294,7 +315,8 @@ export function parseCustomTool(
     hostPreSeedDirs: parseHostPreSeedDirs(entry.hostPreSeedDirs, context),
     pathRewriteFiles: asStringArray(entry.pathRewriteFiles, 'pathRewriteFiles', context),
     hostLiveMounts: parseHostLiveMounts(entry.hostLiveMounts, context),
-    postSetupCmds: asStringArray(entry.postSetupCmds, 'postSetupCmds', context)
+    postSetupCmds: asStringArray(entry.postSetupCmds, 'postSetupCmds', context),
+    tmpfs: parseTmpfs(entry.tmpfs, context)
   };
 
   validateTool(tool);

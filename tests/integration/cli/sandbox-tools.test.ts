@@ -706,3 +706,91 @@ test("claude-code live mount uses the consolidated credentials path", async () =
     "/home/host-user/.agent-infra/credentials/demo/claude-code/.credentials.json"
   );
 });
+
+test("codex tool declares a tmpfs mount so its high-churn logs stay in RAM", async () => {
+  const sandboxTools = await loadFreshEsm<typeof import("../../../lib/sandbox/tools.ts")>("lib/sandbox/tools.js");
+  const [maybeTool] = sandboxTools.resolveTools({
+    home: "/home/host-user",
+    project: "demo",
+    tools: ["codex"]
+  });
+
+  assert.deepEqual(required(maybeTool).tmpfs, { size: "512m" });
+});
+
+test("non-tmpfs builtin tools leave the tmpfs field unset", async () => {
+  const sandboxTools = await loadFreshEsm<typeof import("../../../lib/sandbox/tools.ts")>("lib/sandbox/tools.js");
+  const [maybeTool] = sandboxTools.resolveTools({
+    home: "/home/host-user",
+    project: "demo",
+    tools: ["claude-code"]
+  });
+
+  assert.equal(required(maybeTool).tmpfs, undefined);
+});
+
+test("parseCustomTool accepts a tmpfs object and rejects malformed tmpfs", async () => {
+  const sandboxTools = await loadFreshEsm<typeof import("../../../lib/sandbox/tools.ts")>("lib/sandbox/tools.js");
+
+  const parsed = sandboxTools.parseCustomTool(
+    { id: "ram-tool", install: { type: "shell", cmd: "echo hi" }, tmpfs: { size: "256m" } },
+    0,
+    { home: "/home/host-user" }
+  );
+  assert.deepEqual(parsed.tmpfs, { size: "256m" });
+
+  assert.throws(
+    () => sandboxTools.parseCustomTool(
+      { id: "ram-tool", install: { type: "shell", cmd: "echo hi" }, tmpfs: "512m" },
+      0,
+      { home: "/home/host-user" }
+    ),
+    /"tmpfs" must be an object/
+  );
+
+  assert.throws(
+    () => sandboxTools.parseCustomTool(
+      { id: "ram-tool", install: { type: "shell", cmd: "echo hi" }, tmpfs: { size: "" } },
+      0,
+      { home: "/home/host-user" }
+    ),
+    /"tmpfs.size" must be non-empty/
+  );
+});
+
+test("buildTmpfsRunArgs emits a sized --tmpfs flag for the container mount", async () => {
+  const create = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/create.ts")>("lib/sandbox/commands/create.js");
+
+  assert.deepEqual(
+    create.buildTmpfsRunArgs("/home/devuser/.codex", { size: "512m" }),
+    ["--tmpfs", "/home/devuser/.codex:rw,size=512m"]
+  );
+  // Missing size falls back to the 512m default.
+  assert.deepEqual(
+    create.buildTmpfsRunArgs("/home/devuser/.codex", {}),
+    ["--tmpfs", "/home/devuser/.codex:rw,size=512m"]
+  );
+});
+
+test("buildTmpfsSeedCpArgs engine-converts the host source path for wsl2", async () => {
+  const create = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/create.ts")>("lib/sandbox/commands/create.js");
+
+  // Non-wsl2 engines pass the host path through unchanged.
+  assert.deepEqual(
+    create.buildTmpfsSeedCpArgs("docker-desktop", "/home/host/.agent-infra/sandboxes/codex/demo/x", "cont", "/home/devuser/.codex"),
+    ["cp", "/home/host/.agent-infra/sandboxes/codex/demo/x/.", "cont:/home/devuser/.codex"]
+  );
+
+  // wsl2 wraps docker in `wsl.exe --`, so a raw Windows source path would not
+  // resolve inside WSL; it must be converted to a /mnt/<drive> path.
+  const wslArgs = create.buildTmpfsSeedCpArgs(
+    "wsl2",
+    "C:\\Users\\me\\.agent-infra\\sandboxes\\codex\\demo\\x",
+    "cont",
+    "/home/devuser/.codex"
+  );
+  assert.deepEqual(
+    wslArgs,
+    ["cp", "/mnt/c/Users/me/.agent-infra/sandboxes/codex/demo/x/.", "cont:/home/devuser/.codex"]
+  );
+});
