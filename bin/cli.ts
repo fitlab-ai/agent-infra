@@ -19,8 +19,8 @@ Commands:
   help            Show this help message
   init            Initialize a new project with update-agent-infra seed command
   merge           Merge tasks from another workspace directory (active/blocked/completed/archive)
-  sandbox (alias: s)  Manage Docker-based AI sandboxes
-  task (alias: t)     Read-only views over .agents/workspace tasks (cat / files / grep / log / ls / show / status)
+  sandbox, s      Manage Docker-based AI sandboxes
+  task, t         Read-only views over .agents/workspace tasks (cat / files / grep / log / ls / show / status)
   update          Update seed files and sync file registry for an existing project
   version         Show version
 

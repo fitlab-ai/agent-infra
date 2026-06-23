@@ -62,5 +62,5 @@ test('top-level USAGE lists the task command under Commands', () => {
   const out = runCli(['help']);
   assert.equal(out.status, 0);
   assert.match(out.stdout, /Usage: ai <command>/);
-  assert.match(out.stdout, /^\s+task \(alias: t\)\s+Read-only views/m);
+  assert.match(out.stdout, /^\s+task, t\s+Read-only views/m);
 });

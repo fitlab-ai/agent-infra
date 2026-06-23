@@ -76,9 +76,28 @@ test("cli usage lists top-level command aliases (help and bare)", () => {
       encoding: "utf8"
     });
 
-    assert.match(output, /^\s+sandbox \(alias: s\)\s+Manage Docker-based AI sandboxes/m);
-    assert.match(output, /^\s+task \(alias: t\)\s+Read-only views/m);
+    assert.match(output, /^\s+sandbox, s\s+Manage Docker-based AI sandboxes/m);
+    assert.match(output, /^\s+task, t\s+Read-only views/m);
   }
+});
+
+test("cli usage keeps alias command descriptions aligned", () => {
+  const output = execFileSync(process.execPath, cliArgs("help"), {
+    encoding: "utf8"
+  });
+  const rows = [
+    ["merge", "Merge tasks"],
+    ["sandbox, s", "Manage Docker-based AI sandboxes"],
+    ["task, t", "Read-only views"],
+    ["update", "Update seed files"]
+  ] as const;
+  const descriptionColumns = rows.map(([command, description]) => {
+    const line = output.split("\n").find((candidate) => candidate.trimStart().startsWith(command));
+    assert.ok(line, `Expected command row for ${command}`);
+    return line.indexOf(description);
+  });
+
+  assert.equal(new Set(descriptionColumns).size, 1);
 });
 
 test("cli unknown command prints versioned usage and exits 1", () => {
