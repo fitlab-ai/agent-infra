@@ -52,6 +52,8 @@ Map user intent to the corresponding workflow command:
 
 **Pairing and rendering** (`ai task log`): a started entry pairs with the next same-`{base}` done entry onto one row (repeated executions of the same base pair FIFO by ascending time). The STARTED column shows the start time, DONE the completion time; started with no done = in progress (DONE shows `(in progress)`); done with no started (legacy logs) = a standalone completed row. All three shapes are valid and never error.
 
+**Human columns** (`ai task log`): review step rows also show `HUMAN_DEC` and `HUMAN_VERIFY`. `HUMAN_DEC` maps canonical step prefixes (`Review Analysis` / `Review Plan` / `Review Code`) to `analysis` / `plan` / `code`, then counts current rows in `## Review Disagreement Ledger` / `## 审查分歧账本` for that stage with `status ∈ {needs-human-decision, human-decided}`; non-review rows or missing ledgers show `0`. `HUMAN_VERIFY` parses `(+ {n} env-blocked)` from the review done note and shows `0` when absent.
+
 **Gate** (`checkActivityLog`): when computing the "latest action / freshness" it skips `[started]` lines (ascending-order and format checks still cover every line), so a started marker never satisfies a skill's `expected_action_pattern`.
 
 **Skills that write started**: every workflow skill that **appends entries to a task's `## Activity Log`** writes started, so the STARTED column stays uniformly complete across the whole `ai task log` table. Two forms, depending on whether task.md already exists:

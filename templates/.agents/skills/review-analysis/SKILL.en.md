@@ -77,6 +77,8 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 Set `current_step` to `requirement-analysis-review`, refresh task metadata, and append:
 `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Analysis (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {review-artifact}`
 
+`env-blocked` is the data source for the `HUMAN_VERIFY` column in `ai task log`; do not add a parallel manual-verification field.
+
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, sync the task comment, and publish the `{review-artifact}` comment.
 
 ### 7. Run Completion Gate

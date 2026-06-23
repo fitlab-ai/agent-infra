@@ -56,6 +56,8 @@
 
 **配对与渲染**（`ai task log`）：按 `{基名}` 把 started 与其后最近的同名 done 配成一行（同基名多次执行按时间升序 FIFO 配对）。STARTED 列显示 started 时间、DONE 列显示 done 时间；只有 started 无 done = 进行中（DONE 显示 `(in progress)`）；只有 done 无 started（历史日志）= 单态完成行。三种形态都合法、不报错。
 
+**人工列**（`ai task log`）：审查步骤行额外展示 `HUMAN_DEC` 与 `HUMAN_VERIFY`。`HUMAN_DEC` 按 canonical 步骤名前缀（`Review Analysis` / `Review Plan` / `Review Code`）映射到 `analysis` / `plan` / `code`，统计 `## 审查分歧账本` 中对应阶段 `status ∈ {needs-human-decision, human-decided}` 的当前累计数量；非审查步骤或缺少账本时显示 `0`。`HUMAN_VERIFY` 解析 review done note 中的 `(+ {n} env-blocked)`，缺失时显示 `0`。
+
 **gate**（`checkActivityLog`）：计算「最新 action / freshness」时跳过 `[started]` 行（升序与格式校验仍覆盖全部行），故 started 标记不会污染各 SKILL 的 `expected_action_pattern`。
 
 **写 started 的 SKILL**：所有**会向某个任务的 `## 活动日志` 追加条目**的工作流 SKILL 都写 started，保证 `ai task log` 整张表的 STARTED 列一致完整。两种写法按技能是否已有 task.md 区分：

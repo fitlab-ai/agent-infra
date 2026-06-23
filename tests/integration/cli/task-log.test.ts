@@ -25,13 +25,22 @@ function mkFixture(): { repoRoot: string; activeDir: string } {
 }
 
 // `heading` is the activity-log H2 line; `entries` are raw '- ...' lines.
-function writeTask(activeDir: string, taskId: string, heading: string, entries: string[]): void {
+function writeTask(
+  activeDir: string,
+  taskId: string,
+  heading: string,
+  entries: string[],
+  ledgerRows: string[] = []
+): void {
   const dir = path.join(activeDir, taskId);
   fs.mkdirSync(dir, { recursive: true });
   const log = entries.length ? `${entries.join('\n')}\n` : '';
+  const ledger = ledgerRows.length
+    ? `## 审查分歧账本\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${ledgerRows.join('\n')}\n\n`
+    : '';
   fs.writeFileSync(
     path.join(dir, 'task.md'),
-    `---\nid: ${taskId}\nbranch: feat\n---\n# 任务：${taskId}\n\n${heading}\n\n${log}\n## 完成检查清单\n\n- [ ] done\n`
+    `---\nid: ${taskId}\nbranch: feat\n---\n# 任务：${taskId}\n\n${ledger}${heading}\n\n${log}\n## 完成检查清单\n\n- [ ] done\n`
   );
 }
 
@@ -52,11 +61,11 @@ test('ai task log <ref> renders legacy done-only entries as one row each, sorted
 
   const out = runCli(['task', 'log', '1'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
-  // New status columns.
-  assert.match(out.stdout, /#\s+STEP\s+AGENT\s+STARTED\s+DONE\s+NOTE/);
+  // New status and human review columns.
+  assert.match(out.stdout, /#\s+STEP\s+AGENT\s+STARTED\s+DONE\s+HUMAN_DEC\s+HUMAN_VERIFY\s+NOTE/);
   // Row 1 is the earliest step (Create Task): STARTED empty, DONE has the time.
-  assert.match(out.stdout, /^1\s+Create Task\s+claude\s+2026-06-16 15:06:43\+08:00\s+Task created/m);
-  assert.match(out.stdout, /^2\s+Plan Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+Plan completed → plan\.md/m);
+  assert.match(out.stdout, /^1\s+Create Task\s+claude\s+2026-06-16 15:06:43\+08:00\s+0\s+0\s+Task created/m);
+  assert.match(out.stdout, /^2\s+Plan Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+0\s+0\s+Plan completed → plan\.md/m);
   // Trailing total counts rows (steps), not raw entries.
   assert.match(out.stdout, /^Total: 2 steps$/m);
 });
@@ -72,7 +81,7 @@ test('ai task log folds a started+done pair onto one row', () => {
   const out = runCli(['task', 'log', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // One row: STARTED and DONE both populated, step base has the suffix stripped.
-  assert.match(out.stdout, /^1\s+Plan Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+2026-06-18 14:30:00\+08:00\s+Plan completed → plan\.md/m);
+  assert.match(out.stdout, /^1\s+Plan Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+2026-06-18 14:30:00\+08:00\s+0\s+0\s+Plan completed → plan\.md/m);
   assert.match(out.stdout, /^Total: 1 steps$/m);
 });
 
@@ -87,7 +96,7 @@ test('ai task log shows a started-only step as in progress', () => {
   const out = runCli(['task', 'log', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // In-flight row: STARTED time set, DONE rendered as '(in progress)'.
-  assert.match(out.stdout, /^2\s+Code Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+\(in progress\)\s+started/m);
+  assert.match(out.stdout, /^2\s+Code Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+\(in progress\)\s+0\s+0\s+started/m);
   assert.match(out.stdout, /^Total: 2 steps$/m);
 });
 
@@ -100,8 +109,38 @@ test('ai task log locates an English "## Activity Log" section', () => {
 
   const out = runCli(['task', 'log', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
-  assert.match(out.stdout, /^1\s+Create Task\s+codex\s+2026-06-16 15:06:43\+08:00\s+created/m);
+  assert.match(out.stdout, /^1\s+Create Task\s+codex\s+2026-06-16 15:06:43\+08:00\s+0\s+0\s+created/m);
   assert.match(out.stdout, /^Total: 1 steps$/m);
+});
+
+test('ai task log shows human counts on canonical review steps', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000013';
+  writeTask(
+    activeDir,
+    taskId,
+    '## 活动日志',
+    [
+      '- 2026-06-18 14:00:00+08:00 — **Review Analysis (Round 1) [started]** by claude — started',
+      '- 2026-06-18 14:15:00+08:00 — **Review Analysis (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0 (+ 2 env-blocked) → review-analysis.md',
+      '- 2026-06-18 15:00:00+08:00 — **Review Analysis (Round 2) [started]** by claude — started',
+      '- 2026-06-18 15:10:00+08:00 — **Review Analysis (Round 2)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0 → review-analysis-r2.md',
+      '- 2026-06-18 16:00:00+08:00 — **Review Plan (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0 (+ 1 env-blocked) → review-plan.md'
+    ],
+    [
+      '| HD-1 | analysis | - | decision | needs-human-decision | analysis.md#HD-1 |',
+      '| HD-2 | analysis | - | decision | human-decided | task.md#人工裁决 |',
+      '| PL-1 | plan | 1 | major | needs-human-decision | review-plan.md#1 |',
+      '| CD-1 | code | 1 | blocker | needs-human-decision | review-code.md#1 |',
+      '| PRC-1 | post-review-commit | - | - | human-decided | task.md#PRC-1 |'
+    ]
+  );
+
+  const out = runCli(['task', 'log', taskId], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /^1\s+Review Analysis \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+2026-06-18 14:15:00\+08:00\s+2\s+2\s+Verdict: Approved/m);
+  assert.match(out.stdout, /^2\s+Review Analysis \(Round 2\)\s+claude\s+2026-06-18 15:00:00\+08:00\s+2026-06-18 15:10:00\+08:00\s+2\s+0\s+Verdict: Approved/m);
+  assert.match(out.stdout, /^3\s+Review Plan \(Round 1\)\s+claude\s+2026-06-18 16:00:00\+08:00\s+1\s+1\s+Verdict: Approved/m);
 });
 
 test('ai task log fails when the task has no activity log section', () => {
