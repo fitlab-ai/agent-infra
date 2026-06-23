@@ -115,7 +115,7 @@ test('ai task log locates an English "## Activity Log" section', () => {
   assert.match(out.stdout, /^Total: 1 steps$/m);
 });
 
-test('ai task log folds localized human counts into the NOTE on canonical review steps (zh)', () => {
+test('ai task log folds English human counts into the NOTE on canonical review steps, even for a zh task', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000013';
   writeTask(
@@ -141,23 +141,24 @@ test('ai task log folds localized human counts into the NOTE on canonical review
   const out = runCli(['task', 'log', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // Human counts join the verdict count list (comma-separated, after minor, before ->),
-  // and the redundant `(+ N env-blocked)` fragment is removed. analysis stage has 2
+  // and the redundant `(+ N env-blocked)` fragment is removed. Labels are always English
+  // even though the task uses a Chinese activity-log heading. analysis stage has 2
   // human-decision rows (HD-1 + HD-2); both Round 1 and Round 2 show that stage total.
   assert.match(
     out.stdout,
-    /^1\s+Review Analysis \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+2026-06-18 14:15:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, 人工校验点：2, 人工裁决：2 → review-analysis\.md/m
+    /^1\s+Review Analysis \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+2026-06-18 14:15:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-verify: 2, Human-decision: 2 → review-analysis\.md/m
   );
   assert.match(
     out.stdout,
-    /^2\s+Review Analysis \(Round 2\)\s+claude\s+2026-06-18 15:00:00\+08:00\s+2026-06-18 15:10:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, 人工校验点：0, 人工裁决：2 → review-analysis-r2\.md/m
+    /^2\s+Review Analysis \(Round 2\)\s+claude\s+2026-06-18 15:00:00\+08:00\s+2026-06-18 15:10:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-verify: 0, Human-decision: 2 → review-analysis-r2\.md/m
   );
   assert.match(
     out.stdout,
-    /^3\s+Review Plan \(Round 1\)\s+claude\s+2026-06-18 16:00:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, 人工校验点：1, 人工裁决：1 → review-plan\.md/m
+    /^3\s+Review Plan \(Round 1\)\s+claude\s+2026-06-18 16:00:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-verify: 1, Human-decision: 1 → review-plan\.md/m
   );
 });
 
-test('ai task log localizes the folded human counts for an English task', () => {
+test('ai task log folds English human counts for an English task', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000014';
   writeTask(
@@ -177,6 +178,45 @@ test('ai task log localizes the folded human counts for an English task', () => 
     out.stdout,
     /^1\s+Review Code \(Round 1\)\s+claude\s+2026-06-18 16:00:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-verify: 1, Human-decision: 1 → review-code\.md/m
   );
+});
+
+test('ai task log renders a human-executed review row as `human` with a `-` STARTED placeholder', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000015';
+  // A human review entry: CJK executor name, done-only (no start marker).
+  writeTask(activeDir, taskId, '## 活动日志', [
+    '- 2026-06-18 15:32:53+08:00 — **Human Review** by 季聿阶 — Verdict: Changes Requested, blockers: 1, major: 0, minor: 0 → human-review.md'
+  ]);
+
+  const out = runCli(['task', 'log', taskId], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  // AGENT normalized to `human` (drops the CJK name -> columns stay aligned);
+  // STARTED shows the `-` placeholder since the human step has no start marker.
+  // `Human Review` is not a canonical review prefix, so NOTE carries no human counts.
+  assert.match(
+    out.stdout,
+    /^1\s+Human Review\s+human\s+-\s+2026-06-18 15:32:53\+08:00\s+Verdict: Changes Requested, blockers: 1, major: 0, minor: 0 → human-review\.md/m
+  );
+  assert.match(out.stdout, /^Total: 1 steps$/m);
+});
+
+test('ai task log keeps an AI agent (cursor) as-is with an empty STARTED on a legacy done-only row', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000016';
+  // cursor is a known AI executor; a done-only row must NOT be mistaken for human.
+  writeTask(activeDir, taskId, '## 活动日志', [
+    '- 2026-06-18 14:00:00+08:00 — **Code Task (Round 1)** by cursor — Code implemented → code.md'
+  ]);
+
+  const out = runCli(['task', 'log', taskId], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  // AGENT stays `cursor` (not `human`); STARTED stays empty (not `-`), so the next
+  // populated column after the empty STARTED is the DONE timestamp.
+  assert.match(
+    out.stdout,
+    /^1\s+Code Task \(Round 1\)\s+cursor\s+2026-06-18 14:00:00\+08:00\s+Code implemented → code\.md/m
+  );
+  assert.match(out.stdout, /^Total: 1 steps$/m);
 });
 
 test('ai task log fails when the task has no activity log section', () => {

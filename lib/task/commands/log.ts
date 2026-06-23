@@ -10,9 +10,10 @@ completion time (or '(in progress)' while still running).
   <ref>   Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
 
 Columns: # (row) / STEP / AGENT / STARTED / DONE / NOTE
-  Review-step NOTE also carries two localized human counts in the verdict list,
-  right after blockers/major/minor: manual-verify (env-blocked) and
-  human-decision (current ledger stage total).
+  A human-executed step shows AGENT as 'human' and, when it has no start marker,
+  a '-' STARTED placeholder. Review-step NOTE also carries two English human
+  counts in the verdict list, right after blockers/major/minor: manual-verify
+  (env-blocked) and human-decision (current ledger stage total).
 `;
 
 const TABLE_HEADERS = ['#', 'STEP', 'AGENT', 'STARTED', 'DONE', 'NOTE'] as const;
@@ -41,6 +42,11 @@ type StepRow = { step: string; agent: string; started: string; done: string; not
 // without the suffix. Pairing therefore keys on the base action (including any
 // `(Round N)`), so every round and every repeated execution pairs on its own.
 const STARTED_SUFFIX_RE = /\s*\[started\]\s*$/;
+// Short agent tokens that actually appear in activity logs for AI executors
+// (workflow recommended_agents claude/codex/gemini/cursor + enabled TUI opencode;
+// note these differ from the `.airc.json` long names claude-code/gemini-cli).
+// Any other executor token (a human name, possibly CJK) is treated as human.
+const KNOWN_AI_AGENTS = new Set(['claude', 'codex', 'gemini', 'opencode', 'cursor']);
 const HUMAN_DECISION_STATUSES = new Set(['needs-human-decision', 'human-decided']);
 const ENV_BLOCKED_RE = /\(\+\s*(\d+)\s+env-blocked\)/i;
 // Same match plus any leading whitespace, so folding the count into the verdict
@@ -148,22 +154,21 @@ function humanValidationCount(note: string): number {
   return match ? Number(match[1]) : 0;
 }
 
-// Labels follow the task's language; detect it from the activity-log heading
-// (the same zh/en split as HEADING_RE), defaulting to English.
-function activityLogLang(content: string): 'zh' | 'en' {
-  return /^##\s+活动日志\s*$/m.test(content) ? 'zh' : 'en';
+// A step is human-executed when its agent token is not a known AI token. Take
+// the first whitespace-delimited token and drop any trailing parenthetical
+// annotation (e.g. `季聿阶 (executed on host)` -> `季聿阶`) before the lookup.
+function isHumanAgent(agent: string): boolean {
+  const token = agent.trim().split(/\s+/)[0]?.replace(/\(.*$/, '') ?? '';
+  return token !== '' && !KNOWN_AI_AGENTS.has(token);
 }
 
 // Fold the two human counts into a review row's verdict NOTE: comma-joined, right
 // after the blockers/major/minor list and before the ` → artifact` link, mirroring
 // the review count line. The raw `(+ n env-blocked)` fragment is dropped so the
 // env-blocked number is not shown twice (it becomes the manual-verify count).
-function foldHumanCounts(note: string, decisions: number, envBlocked: number, lang: 'zh' | 'en'): string {
+function foldHumanCounts(note: string, decisions: number, envBlocked: number): string {
   const base = note.replace(ENV_BLOCKED_STRIP_RE, '');
-  const group =
-    lang === 'zh'
-      ? `人工校验点：${envBlocked}, 人工裁决：${decisions}`
-      : `Manual-verify: ${envBlocked}, Human-decision: ${decisions}`;
+  const group = `Manual-verify: ${envBlocked}, Human-decision: ${decisions}`;
   const arrow = base.indexOf(' → ');
   return arrow === -1 ? `${base}, ${group}` : `${base.slice(0, arrow)}, ${group}${base.slice(arrow)}`;
 }
@@ -196,13 +201,15 @@ function log(args: string[] = []): void {
   }
   const steps = pairEntries(entries);
   const humanDecisionCounts = countHumanDecisionsByStage(parseReviewLedger(content));
-  const lang = activityLogLang(content);
   const rows = steps.map((s, idx) => {
     const stage = reviewStageForStep(s.step);
     const note = stage
-      ? foldHumanCounts(s.note, humanDecisionCounts.get(stage) ?? 0, humanValidationCount(s.note), lang)
+      ? foldHumanCounts(s.note, humanDecisionCounts.get(stage) ?? 0, humanValidationCount(s.note))
       : s.note;
-    return [String(idx + 1), s.step, s.agent, s.started, s.done || (s.started ? '(in progress)' : ''), note];
+    const human = isHumanAgent(s.agent);
+    const agent = human ? 'human' : s.agent;
+    const started = s.started || (human ? '-' : '');
+    return [String(idx + 1), s.step, agent, started, s.done || (s.started ? '(in progress)' : ''), note];
   });
   for (const line of formatTable(TABLE_HEADERS, rows, { zebra: Boolean(process.stdout.isTTY) })) {
     process.stdout.write(`${line}\n`);
@@ -210,4 +217,4 @@ function log(args: string[] = []): void {
   process.stdout.write(`Total: ${steps.length} steps\n`);
 }
 
-export { log, parseActivityLog, pairEntries };
+export { log, parseActivityLog, pairEntries, isHumanAgent };
