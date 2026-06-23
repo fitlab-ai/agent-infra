@@ -70,6 +70,17 @@ test("cli usage header includes version (help and bare)", () => {
   }
 });
 
+test("cli usage lists top-level command aliases (help and bare)", () => {
+  for (const args of [["help"], []]) {
+    const output = execFileSync(process.execPath, cliArgs(...args), {
+      encoding: "utf8"
+    });
+
+    assert.match(output, /^\s+sandbox \(alias: s\)\s+Manage Docker-based AI sandboxes/m);
+    assert.match(output, /^\s+task \(alias: t\)\s+Read-only views/m);
+  }
+});
+
 test("cli unknown command prints versioned usage and exits 1", () => {
   const pkg = JSON.parse(read("package.json"));
   const result = spawnSync(process.execPath, cliArgs("definitely-not-a-real-command"), {
@@ -82,6 +93,37 @@ test("cli unknown command prints versioned usage and exits 1", () => {
     result.stdout.split("\n")[0] ?? "",
     new RegExp(`^agent-infra v${escapeRegExp(pkg.version)} - bootstrap`)
   );
+});
+
+test("cli single-letter aliases dispatch to the full top-level commands", () => {
+  const cases = [
+    ["s", "sandbox", /Usage: ai sandbox <command> \[options\]/],
+    ["t", "task", /Usage: ai task <command> \[options\]/]
+  ] as const;
+
+  for (const [alias, fullCommand, usage] of cases) {
+    const aliasResult = spawnSync(process.execPath, cliArgs(alias, "--help"), {
+      encoding: "utf8"
+    });
+    const fullResult = spawnSync(process.execPath, cliArgs(fullCommand, "--help"), {
+      encoding: "utf8"
+    });
+
+    assert.equal(aliasResult.status, fullResult.status);
+    assert.equal(aliasResult.stderr, fullResult.stderr);
+    assert.match(aliasResult.stdout, usage);
+  }
+});
+
+test("cli aliases do not change unknown command reporting", () => {
+  for (const command of ["x", "constructor"]) {
+    const result = spawnSync(process.execPath, cliArgs(command), {
+      encoding: "utf8"
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, new RegExp(`^Unknown command: ${escapeRegExp(command)}`));
+  }
 });
 
 test("cli --version and -v match the default version command output", () => {

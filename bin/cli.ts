@@ -19,8 +19,8 @@ Commands:
   help            Show this help message
   init            Initialize a new project with update-agent-infra seed command
   merge           Merge tasks from another workspace directory (active/blocked/completed/archive)
-  sandbox         Manage Docker-based AI sandboxes
-  task            Read-only views over .agents/workspace tasks (cat / files / grep / log / ls / show / status)
+  sandbox (alias: s)  Manage Docker-based AI sandboxes
+  task (alias: t)     Read-only views over .agents/workspace tasks (cat / files / grep / log / ls / show / status)
   update          Update seed files and sync file registry for an existing project
   version         Show version
 
@@ -37,7 +37,15 @@ Examples:
   npx @fitlab-ai/agent-infra init
 `;
 
-const command = process.argv[2] || '';
+const COMMAND_ALIASES: Record<string, string> = {
+  s: 'sandbox',
+  t: 'task'
+};
+
+const rawCommand = process.argv[2] || '';
+const command = Object.hasOwn(COMMAND_ALIASES, rawCommand)
+  ? COMMAND_ALIASES[rawCommand]
+  : rawCommand;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
