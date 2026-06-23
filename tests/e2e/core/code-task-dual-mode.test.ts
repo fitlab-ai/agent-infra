@@ -64,15 +64,72 @@ test("code-task dual-mode: branch 2 - unreviewed code returns error", () => {
   assert.equal(result.output.review_artifact, "review-code.md");
 });
 
-test("code-task dual-mode: branch 3 - review ahead of code returns error", () => {
+// #515: a maintainer may append a review-code-r{N} round against the existing latest code
+// (rev_max > code_max) after a PR is opened. This is not corruption — detect-mode defers to
+// the latest review's verdict instead of erroring. The branch is decided by verdict, so the
+// same five cases that apply to rev_max == code_max apply here.
+test("code-task dual-mode: human-supplemented review (Approved 0/0/0) refuses rerun", () => {
   const result = runDetect({
     "code.md": "# code",
     "review-code.md": zhReview("通过"),
     "review-code-r2.md": zhReview("通过")
   });
 
+  assert.equal(result.status, 1);
+  assert.equal(result.output.mode, "refused");
+  assert.equal(result.output.verdict, "Approved");
+});
+
+test("code-task dual-mode: human-supplemented review (Changes Requested) enters fix mode", () => {
+  const result = runDetect({
+    "code.md": "# code",
+    "review-code.md": zhReview("通过"),
+    "review-code-r2.md": zhReview("需要修改", "2 阻塞项，1 主要，0 次要 / **env-blocked**：0")
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.output.mode, "fix");
+  assert.equal(result.output.verdict, "Changes Requested");
+  assert.equal(result.output.next_artifact, "code-r2.md");
+  assert.equal(result.output.review_artifact, "review-code-r2.md");
+});
+
+test("code-task dual-mode: human-supplemented review (Approved-with-issues) enters optional fix mode", () => {
+  const result = runDetect({
+    "code.md": "# code",
+    "review-code.md": zhReview("通过"),
+    "review-code-r2.md": zhReview("通过", "0 阻塞项，1 主要，2 次要 / **env-blocked**：0")
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.output.mode, "fix");
+  assert.equal(result.output.verdict, "Approved-with-issues");
+  assert.equal(result.output.next_artifact, "code-r2.md");
+  assert.equal(result.output.review_artifact, "review-code-r2.md");
+});
+
+test("code-task dual-mode: human-supplemented review (Rejected) refuses local fix mode", () => {
+  const result = runDetect({
+    "code.md": "# code",
+    "review-code.md": zhReview("通过"),
+    "review-code-r2.md": zhReview("拒绝")
+  });
+
+  assert.equal(result.status, 1);
+  assert.equal(result.output.mode, "refused");
+  assert.equal(result.output.verdict, "Rejected");
+});
+
+test("code-task dual-mode: human-supplemented review with unparsable verdict still errors", () => {
+  const result = runDetect({
+    "code.md": "# code",
+    "review-code.md": zhReview("通过"),
+    "review-code-r2.md": "## 审查摘要\n\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要\n"
+  });
+
   assert.equal(result.status, 2);
   assert.equal(result.output.mode, "error");
+  assert.match(result.output.message, /cannot parse|unrecognized/);
 });
 
 test("code-task dual-mode: branch 4 - Approved with no findings refuses rerun", () => {

@@ -10,7 +10,7 @@ node .agents/skills/code-task/scripts/detect-mode.js .agents/workspace/active/{t
 
 脚本扫描任务目录中的 `plan.md` / `plan-r{N}.md`、`review-plan.md` / `review-plan-r{N}.md`、`code.md` / `code-r{N}.md` 和 `review-code.md` / `review-code-r{N}.md`。
 
-## 8 个分支
+## 7 个分支
 
 > 分支按表中自上而下的顺序评估，命中即返回；后续分支不再判定。
 
@@ -19,11 +19,16 @@ node .agents/skills/code-task/scripts/detect-mode.js .agents/workspace/active/{t
 | 无 code 产物 | `init` | 0 | 初次实现，产物为 `code.md` |
 | 最新 review-plan 已批准（`通过` 或 `通过 + major/minor 建议`，即 `Approved` 或 `Approved-with-issues`），且其「审查输入」/「Review Input」字段引用的 plan 文件 == 任务目录中最新的 `plan(-r{N})?.md`，且最新 review-plan 的 mtime > 最新 code 的 mtime | `init` | 0 | plan 已在 code 之后被批准；进入新一轮实现，`next_round = code_max + 1`、`next_artifact = code-r{next_round}.md`。**不论 review-code 是否已审**，本分支均先命中。plan 与 review-plan 的轮次独立递增（如 `plan-r5` 可被 `review-plan-r4` 批准），通过 review-plan 的「审查输入」字段建立批准关系，不要求同号 |
 | `rev_max < code_max` | `error` | 2 | 最新代码未审查，先运行 `review-code` |
-| `rev_max > code_max` | `error` | 2 | 数据状态异常，需要人工检查 |
 | 最新 review-code 为 Approved 且 0/0/0 | `refused` | 1 | 已通过，无需再次运行 `code-task` |
 | 最新 review-code 为 Approved 但有 major/minor | `fix` | 0 | 可选修复模式 |
 | 最新 review-code 为 Changes Requested | `fix` | 0 | 必需修复模式 |
 | 最新 review-code 为 Rejected | `refused` | 1 | 需要重新设计，不进入局部修复 |
+
+> 上表 4 个 verdict 分支在 `rev_max >= code_max` 时命中，均以最新 `review-code-r{rev_max}` 的结论决定：
+> - `rev_max == code_max`：AI 修复轮（`code-task` 产出代码后由 `review-code` 审查同号产物）。
+> - `rev_max > code_max`：人工补审轮——PR 创建后维护者追加一轮 `review-code-r{N}` 审查既有最新代码（#515）。此时 `fix` 模式的 `next_round = code_max + 1`。
+>
+> 若最新 `review-code` 的 verdict 无法解析，仍返回 `error`（exit 2），作为保留的异常拦截。
 
 ## verdict 解析
 

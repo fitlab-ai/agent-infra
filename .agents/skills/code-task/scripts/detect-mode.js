@@ -84,20 +84,12 @@ function main() {
       return;
     }
 
-    if (revMax > codeMax) {
-      writeResult({
-        mode: "error",
-        code_max: codeMax,
-        rev_max: revMax,
-        verdict: null,
-        next_round: null,
-        next_artifact: null,
-        review_artifact: artifactName("review-code", revMax),
-        message: `Inconsistent state: review-code round ${revMax} > code round ${codeMax}. Manual inspection required.`
-      }, 2);
-      return;
-    }
-
+    // human-supplemented-review (#515): after a PR is opened, a maintainer may append a
+    // review-code-r{N} round against the existing latest code, so rev_max > code_max.
+    // This is NOT corruption — defer to the latest review's verdict instead of erroring.
+    // rev_max === code_max (AI fix round) and rev_max > code_max (human review round)
+    // both fall through to the verdict dispatch below; fix mode uses next_round = code_max + 1.
+    // An unparsable verdict still returns error (exit 2) as the retained anomaly guard.
     const reviewArtifact = artifactName("review-code", revMax);
     const verdictResult = parseVerdict(path.join(resolvedTaskDir, reviewArtifact));
     if (!verdictResult.ok) {
