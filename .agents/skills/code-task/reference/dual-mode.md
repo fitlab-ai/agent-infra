@@ -26,7 +26,7 @@ node .agents/skills/code-task/scripts/detect-mode.js .agents/workspace/active/{t
 
 > 上表 4 个 verdict 分支在 `rev_max >= code_max` 时命中，均以最新 `review-code-r{rev_max}` 的结论决定：
 > - `rev_max == code_max`：AI 修复轮（`code-task` 产出代码后由 `review-code` 审查同号产物）。
-> - `rev_max > code_max`：人工补审轮——PR 创建后维护者追加一轮 `review-code-r{N}` 审查既有最新代码（#515）。此时 `fix` 模式的 `next_round = code_max + 1`。
+> - `rev_max > code_max`：人工补审轮——PR 创建后维护者追加一轮 `review-code-r{N}` 审查既有最新代码。此时 `fix` 模式的 `next_round = code_max + 1`。
 >
 > 若最新 `review-code` 的 verdict 无法解析，仍返回 `error`（exit 2），作为保留的异常拦截。
 

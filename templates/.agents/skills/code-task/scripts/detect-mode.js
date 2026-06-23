@@ -84,7 +84,7 @@ function main() {
       return;
     }
 
-    // human-supplemented-review (#515): after a PR is opened, a maintainer may append a
+    // human-supplemented review: after a PR is opened, a maintainer may append a
     // review-code-r{N} round against the existing latest code, so rev_max > code_max.
     // This is NOT corruption — defer to the latest review's verdict instead of erroring.
     // rev_max === code_max (AI fix round) and rev_max > code_max (human review round)

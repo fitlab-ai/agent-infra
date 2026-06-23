@@ -26,7 +26,7 @@ The script scans `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N
 
 > The four verdict branches above fire when `rev_max >= code_max`, decided by the latest `review-code-r{rev_max}` verdict:
 > - `rev_max == code_max`: AI fix round (`review-code` reviews the same-numbered code artifact produced by `code-task`).
-> - `rev_max > code_max`: human-supplemented review round — after a PR is opened a maintainer appends a `review-code-r{N}` round against the existing latest code (#515). `fix` mode then uses `next_round = code_max + 1`.
+> - `rev_max > code_max`: human-supplemented review round — after a PR is opened a maintainer appends a `review-code-r{N}` round against the existing latest code. `fix` mode then uses `next_round = code_max + 1`.
 >
 > If the latest `review-code` verdict cannot be parsed, the script still returns `error` (exit 2) as the retained anomaly guard.
 

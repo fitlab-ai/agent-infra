@@ -64,7 +64,7 @@ test("code-task dual-mode: branch 2 - unreviewed code returns error", () => {
   assert.equal(result.output.review_artifact, "review-code.md");
 });
 
-// #515: a maintainer may append a review-code-r{N} round against the existing latest code
+// A maintainer may append a review-code-r{N} round against the existing latest code
 // (rev_max > code_max) after a PR is opened. This is not corruption — detect-mode defers to
 // the latest review's verdict instead of erroring. The branch is decided by verdict, so the
 // same five cases that apply to rev_max == code_max apply here.
