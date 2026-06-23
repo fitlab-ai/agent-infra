@@ -18,7 +18,7 @@ Prohibitions:
 - if `Blocker > 0`, never output an approval template
 - never count env-blocked findings as blockers / major issues / minor issues, and never use them to trigger Branch B/C/D
 - always include every TUI command format in the selected branch
-- the count line always shows 5 numbers: the first three (Blockers / Major / Minor) must be 0 to proceed; the last two are "pending human" items and need not be zero — `Manual-verify` (`{e}`) = this round's env-blocked count, `Human-decision` (`{h}`) = the number of rows in task.md `## 审查分歧账本` with `stage=code` and `status=needs-human-decision`; neither participates in branch selection
+- the count line always shows 5 numbers: the first three (Blockers / Major / Minor) must be 0 to proceed; the last two are "pending human" items and need not be zero — `Manual-verify` (`{e}`) = this round's env-blocked count, `Human-decision` (`{h}`) = the number of rows in task.md `## 审查分歧账本` with `stage=code` and `status=needs-human-decision`; neither participates in branch selection. When `{h} > 0`, before the selected scenario's "Next steps" commands you must expand each pending ruling per the "Pending human-decision pre-block" in `.agents/rules/next-step-output.md` and prompt to resolve them first
 
 ### Branch A: Approved with No Findings
 

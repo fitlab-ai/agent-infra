@@ -1,9 +1,10 @@
 # Next-Step Output Rule
 
-This file defines two **independent** rules for a skill's "notify-user / Next steps" output; read this file before rendering the final output and apply both:
+This file defines three **independent** rules for a skill's "notify-user / Next steps" output (the 3rd applies to review-* only); read this file before rendering the final output and apply whichever rules apply:
 
 1. **Next-step output structure**: how "Next steps" commands and the "Task info" block present the task ID (placeholders / short-id lookup / fallback).
 2. **Agent output trailing line (Completed at)**: the **very last line** of user-facing output, **independent of the "Next steps" block**, applying to normal / error / early-return paths alike.
+3. **Pending human-decision pre-block**: applies only to `review-analysis` / `review-plan` / `review-code` when this stage has pending rulings (`{h} > 0`) — expand the pending items before the "Next steps" commands and prompt to resolve them first.
 
 ## Placeholder semantics
 
@@ -60,3 +61,27 @@ Completed at: YYYY-MM-DD HH:mm:ss
 - Value command (local timezone, no offset): `date "+%Y-%m-%d %H:%M:%S"`
 - Position: it must be the last line of the entire user-facing output, after all "Next steps" commands. If a scenario has a conditional reminder line after the commands (e.g. the env-blocked reminder), the completion line goes after that reminder.
 - This line is for terminal scanning only; it is never written to any artifact file or Issue/PR comment. The single source of truth for completion time remains the Activity Log in task.md.
+
+## Pending human-decision pre-block (review-* only, when {h} > 0)
+
+This section is a **third standalone rule, co-equal with the two above**, used only by the "notify-user / report conclusion" step of `review-analysis` / `review-plan` / `review-code`.
+
+`{h}` has the same meaning as the count line in each review skill's `reference/output-templates.md`: the number of rows in task.md `## 审查分歧账本` (Review Disagreement Ledger) for **this stage** (`stage ∈ {analysis|plan|code}`) whose `status = needs-human-decision` — **pending items only, excluding rows already `human-decided`**.
+
+- **`{h} = 0`**: do not emit this block; render "Next steps" exactly as the selected output-templates scenario.
+- **`{h} > 0`**: insert the block below **before** the selected scenario's "Next steps - <stage>" commands; the next-stage commands are still listed after the block.
+
+```text
+⚠️ Pending human decisions ({h}) — please rule on each before continuing to the next stage:
+  - {ledger-id} ({stage}/{severity}): {summary}
+    Location: the matching row in task.md `## 审查分歧账本` · Evidence: {evidence}
+  …(one entry per status=needs-human-decision row of this stage in task.md `## 审查分歧账本`)
+
+To resolve:
+  1. In the task.md `## 人工裁决` section, record your ruling and rationale for each item above.
+  2. Flip the status of the matching row in `## 审查分歧账本` from `needs-human-decision` to `human-decided`.
+
+Note: until all those rows are flipped to `human-decided`, running the next-stage command directly will be blocked by gates such as complete-task (`needs-human-decision` is non-terminal). The next-stage commands are still listed below for use after the decisions are made.
+```
+
+Field values: `{ledger-id}` / `{stage}` / `{severity}` / `{evidence}` come from the same-named columns of the matching `## 审查分歧账本` row; `{summary}` comes from the artifact anchor referenced by `{evidence}` (e.g. the decision title at `plan.md#HD-1`), falling back to a one-line summary of the finding when no anchor title exists.

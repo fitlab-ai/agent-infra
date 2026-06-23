@@ -312,6 +312,37 @@ test("review criteria require checking missed human-decision markings", () => {
   });
 });
 
+test("review output guidance defines a pending human-decision pre-block", () => {
+  // The shared block is defined once in next-step-output.md (source + both mirrors).
+  const ruleSources: Array<[string, string]> = [
+    [".agents/rules/next-step-output.md", "## 人工裁决待办前置块"],
+    ["templates/.agents/rules/next-step-output.zh-CN.md", "## 人工裁决待办前置块"],
+    ["templates/.agents/rules/next-step-output.en.md", "## Pending human-decision pre-block"]
+  ];
+  ruleSources.forEach(([relativePath, heading]) => {
+    assert.match(
+      read(relativePath),
+      new RegExp(`^${escapeRegExp(heading)}`, "m"),
+      `${relativePath} should define the pending human-decision pre-block section`
+    );
+  });
+
+  // Each review output template (source + both mirrors) points at the shared block.
+  const reviewSkills = ["review-analysis", "review-plan", "review-code"];
+  const templatePointers: Array<[string, string]> = [];
+  reviewSkills.forEach((skill) => {
+    templatePointers.push([`.agents/skills/${skill}/reference/output-templates.md`, "人工裁决待办前置块"]);
+    templatePointers.push([`templates/.agents/skills/${skill}/reference/output-templates.zh-CN.md`, "人工裁决待办前置块"]);
+    templatePointers.push([`templates/.agents/skills/${skill}/reference/output-templates.en.md`, "Pending human-decision pre-block"]);
+  });
+  templatePointers.forEach(([relativePath, token]) => {
+    assert.ok(
+      read(relativePath).includes(token),
+      `${relativePath} should reference the pending human-decision pre-block ("${token}")`
+    );
+  });
+});
+
 test("workflow skill output instructions align with state check artifact gates", () => {
   const analyzeTaskCases: Array<[string, string]> = [
     [".agents/skills/analyze-task/SKILL.md", "## 状态核对"],

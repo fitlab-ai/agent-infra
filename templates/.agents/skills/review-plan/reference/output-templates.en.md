@@ -16,7 +16,7 @@ Rules:
 - If `Blocker > 0`, never use an approved template
 - Never count env-blocked items as blocker / major / minor or use them to trigger Scenario B/C/D
 - The selected scenario must include all TUI command formats
-- The count line always shows 4 numbers: the first three (Blockers / Major / Minor) must be 0 to proceed; the fourth, `Human-decision` (`{h}`), is the number of rows in task.md `## 审查分歧账本` with `stage=plan` and `status=needs-human-decision` — a "pending human ruling" item that need not be zero and does not participate in scenario selection
+- The count line always shows 4 numbers: the first three (Blockers / Major / Minor) must be 0 to proceed; the fourth, `Human-decision` (`{h}`), is the number of rows in task.md `## 审查分歧账本` with `stage=plan` and `status=needs-human-decision` — a "pending human ruling" item that need not be zero and does not participate in scenario selection. When `{h} > 0`, before the selected scenario's "Next steps" commands you must expand each pending ruling per the "Pending human-decision pre-block" in `.agents/rules/next-step-output.md` and prompt to resolve them first
 
 ### Scenario A: Approved with no findings
 

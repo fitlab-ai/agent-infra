@@ -1,9 +1,10 @@
 # 下一步输出规则
 
-本文件定义 skill「告知用户 / 下一步」输出的两类**相互独立**的规则；渲染最终输出前先读取本文件并同时落实两者：
+本文件定义 skill「告知用户 / 下一步」输出的三类**相互独立**的规则（第 3 类仅 review-* 适用）；渲染最终输出前先读取本文件并落实其中适用的规则：
 
 1. **下一步输出结构**：「下一步」命令与「任务信息」段如何呈现任务 ID 形态（占位符 / 取短号 / 回退）。
 2. **Agent 输出收尾行（Completed at）**：面向用户输出的**绝对最后一行**，**独立于「下一步」块**，正常 / 错误 / 早退路径都适用。
+3. **人工裁决待办前置块**：仅 `review-analysis` / `review-plan` / `review-code`，且本阶段存在待裁决项（`{h} > 0`）时适用——在「下一步」命令前展开待裁决项并提示先完成裁决。
 
 ## 占位符语义
 
@@ -60,3 +61,27 @@ Completed at: YYYY-MM-DD HH:mm:ss
 - 取值命令（本地时区、不带偏移）：`date "+%Y-%m-%d %H:%M:%S"`
 - 位置：必须是整段面向用户输出的最后一行，排在所有「下一步」命令之后。若某场景在命令之后还有条件性提醒行（如 env-blocked 提醒），收尾行排在该提醒行之后。
 - 该行只用于终端扫视，不写入任何产物文件或 Issue/PR 评论；完成时刻的单一事实源仍是 task.md 的 Activity Log。
+
+## 人工裁决待办前置块（review-* 专用，{h} > 0 时）
+
+本节是与上面两类规则**并列的第三类独立规则**，仅 `review-analysis` / `review-plan` / `review-code` 的「向用户汇报结论」步骤使用。
+
+`{h}` 含义与各 review 技能 `reference/output-templates.md` 计数行一致：task.md `## 审查分歧账本` 中**本阶段**（`stage ∈ {analysis|plan|code}`）`status = needs-human-decision` 的行数——**只含待裁决项，不含已 `human-decided`**。
+
+- **`{h} = 0`**：不输出本块，「下一步」按 output-templates 选定场景原样渲染。
+- **`{h} > 0`**：在选定场景的「下一步 - <阶段>」命令**之前**插入下面的块；下一阶段命令仍照常列在块之后。
+
+```text
+⚠️ 待人工裁决（{h} 项）—— 请先逐项裁决，再继续下一阶段：
+  - {ledger-id}（{stage}/{severity}）：{摘要}
+    位置：task.md `## 审查分歧账本` 对应行 · 证据：{evidence}
+  …（task.md `## 审查分歧账本` 中本阶段每个 status=needs-human-decision 行一条）
+
+完成裁决：
+  1. 在 task.md `## 人工裁决` 段，逐项记录你对上述裁决项的裁定与理由。
+  2. 把 `## 审查分歧账本` 中对应行的 status 由 `needs-human-decision` 翻为 `human-decided`。
+
+说明：在上述行全部翻为 `human-decided` 之前，直接执行下一阶段命令会被 complete-task 等 gate 拦截（`needs-human-decision` 为非终态）。下一阶段命令仍列在下方，供裁决完成后使用。
+```
+
+字段取值：`{ledger-id}` / `{stage}` / `{severity}` / `{evidence}` 直接取自 `## 审查分歧账本` 对应行的同名列；`{摘要}` 取自 `{evidence}` 指向的产物锚点条目（如 `plan.md#HD-1` 的决策标题），无锚点标题时用该 finding 的一句话概述。

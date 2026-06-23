@@ -183,6 +183,7 @@ test("update-agent-infra template copies stay in sync with working files", () =>
     [".agents/README.md", "templates/.agents/README.en.md"],
     [".agents/rules/README.md", "templates/.agents/rules/README.en.md"],
     [".agents/rules/debugging-guide.md", "templates/.agents/rules/debugging-guide.en.md"],
+    [".agents/rules/next-step-output.md", "templates/.agents/rules/next-step-output.en.md"],
     [".agents/templates/task.md", "templates/.agents/templates/task.en.md"],
     [".agents/skills/archive-tasks/SKILL.md", "templates/.agents/skills/archive-tasks/SKILL.en.md"],
     [".agents/skills/archive-tasks/scripts/archive-tasks.sh", "templates/.agents/skills/archive-tasks/scripts/archive-tasks.sh"],
