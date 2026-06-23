@@ -185,7 +185,7 @@ test('ai task log renders a human-executed review row as `human` with a `-` STAR
   const taskId = 'TASK-20260101-000015';
   // A human review entry: CJK executor name, done-only (no start marker).
   writeTask(activeDir, taskId, '## 活动日志', [
-    '- 2026-06-18 15:32:53+08:00 — **Human Review** by 季聿阶 — Verdict: Changes Requested, blockers: 1, major: 0, minor: 0 → human-review.md'
+    '- 2026-06-18 15:32:53+08:00 — **Human Review** by 张三 — Verdict: Changes Requested, blockers: 1, major: 0, minor: 0 → human-review.md'
   ]);
 
   const out = runCli(['task', 'log', taskId], repoRoot);

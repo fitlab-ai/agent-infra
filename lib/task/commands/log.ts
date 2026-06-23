@@ -11,9 +11,9 @@ completion time (or '(in progress)' while still running).
 
 Columns: # (row) / STEP / AGENT / STARTED / DONE / NOTE
   A human-executed step shows AGENT as 'human' and, when it has no start marker,
-  a '-' STARTED placeholder. Review-step NOTE also carries two English human
-  counts in the verdict list, right after blockers/major/minor: manual-verify
-  (env-blocked) and human-decision (current ledger stage total).
+  a '-' STARTED placeholder. Review-step NOTE also carries two human counts in
+  the verdict list, right after blockers/major/minor: manual-verify (env-blocked)
+  and human-decision (current ledger stage total).
 `;
 
 const TABLE_HEADERS = ['#', 'STEP', 'AGENT', 'STARTED', 'DONE', 'NOTE'] as const;
@@ -156,7 +156,7 @@ function humanValidationCount(note: string): number {
 
 // A step is human-executed when its agent token is not a known AI token. Take
 // the first whitespace-delimited token and drop any trailing parenthetical
-// annotation (e.g. `季聿阶 (executed on host)` -> `季聿阶`) before the lookup.
+// annotation (e.g. `张三 (executed on host)` -> `张三`) before the lookup.
 function isHumanAgent(agent: string): boolean {
   const token = agent.trim().split(/\s+/)[0]?.replace(/\(.*$/, '') ?? '';
   return token !== '' && !KNOWN_AI_AGENTS.has(token);

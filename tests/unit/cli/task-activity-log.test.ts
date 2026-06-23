@@ -141,7 +141,7 @@ test('isHumanAgent treats every known AI token as non-human', () => {
 });
 
 test('isHumanAgent treats human executors (incl. CJK names and annotations) as human', () => {
-  for (const human of ['季聿阶', '季聿阶 (executed on host)', 'Alice', 'human']) {
+  for (const human of ['张三', '张三 (executed on host)', 'Alice', 'human']) {
     assert.equal(isHumanAgent(human), true, human);
   }
 });
