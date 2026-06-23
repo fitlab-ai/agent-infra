@@ -100,7 +100,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Code (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {artifact-filename}`
 
 env-blocked = 0 时省略括号部分；env-blocked > 0 时附加 ` (+ {n} env-blocked)`。
-`env-blocked` 是 `ai task log` 的 `HUMAN_VERIFY` 列数据源；不要新增并行人工验证字段。
+`env-blocked` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-verify`）计数的数据源；不要新增并行人工验证字段。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测

@@ -9,12 +9,13 @@ completion are paired onto one row: STARTED holds the start time, DONE the
 completion time (or '(in progress)' while still running).
   <ref>   Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
 
-Columns: # (row) / STEP / AGENT / STARTED / DONE / HUMAN_DEC / HUMAN_VERIFY / NOTE
-  HUMAN_DEC     Current stage-level human-decision ledger count.
-  HUMAN_VERIFY  Review note env-blocked count.
+Columns: # (row) / STEP / AGENT / STARTED / DONE / NOTE
+  Review-step NOTE also carries two localized human counts in the verdict list,
+  right after blockers/major/minor: manual-verify (env-blocked) and
+  human-decision (current ledger stage total).
 `;
 
-const TABLE_HEADERS = ['#', 'STEP', 'AGENT', 'STARTED', 'DONE', 'HUMAN_DEC', 'HUMAN_VERIFY', 'NOTE'] as const;
+const TABLE_HEADERS = ['#', 'STEP', 'AGENT', 'STARTED', 'DONE', 'NOTE'] as const;
 
 // The activity-log H2 heading is language-dependent (zh template / en template).
 const HEADING_RE = /^##\s+(活动日志|Activity Log)\s*$/;
@@ -42,6 +43,9 @@ type StepRow = { step: string; agent: string; started: string; done: string; not
 const STARTED_SUFFIX_RE = /\s*\[started\]\s*$/;
 const HUMAN_DECISION_STATUSES = new Set(['needs-human-decision', 'human-decided']);
 const ENV_BLOCKED_RE = /\(\+\s*(\d+)\s+env-blocked\)/i;
+// Same match plus any leading whitespace, so folding the count into the verdict
+// text drops the redundant `(+ n env-blocked)` fragment without leaving a gap.
+const ENV_BLOCKED_STRIP_RE = /\s*\(\+\s*\d+\s+env-blocked\)/i;
 const REVIEW_STAGE_PREFIXES: { prefix: string; stage: ReviewStage }[] = [
   { prefix: 'Review Analysis', stage: 'analysis' },
   { prefix: 'Review Plan', stage: 'plan' },
@@ -144,6 +148,26 @@ function humanValidationCount(note: string): number {
   return match ? Number(match[1]) : 0;
 }
 
+// Labels follow the task's language; detect it from the activity-log heading
+// (the same zh/en split as HEADING_RE), defaulting to English.
+function activityLogLang(content: string): 'zh' | 'en' {
+  return /^##\s+活动日志\s*$/m.test(content) ? 'zh' : 'en';
+}
+
+// Fold the two human counts into a review row's verdict NOTE: comma-joined, right
+// after the blockers/major/minor list and before the ` → artifact` link, mirroring
+// the review count line. The raw `(+ n env-blocked)` fragment is dropped so the
+// env-blocked number is not shown twice (it becomes the manual-verify count).
+function foldHumanCounts(note: string, decisions: number, envBlocked: number, lang: 'zh' | 'en'): string {
+  const base = note.replace(ENV_BLOCKED_STRIP_RE, '');
+  const group =
+    lang === 'zh'
+      ? `人工校验点：${envBlocked}, 人工裁决：${decisions}`
+      : `Manual-verify: ${envBlocked}, Human-decision: ${decisions}`;
+  const arrow = base.indexOf(' → ');
+  return arrow === -1 ? `${base}, ${group}` : `${base.slice(0, arrow)}, ${group}${base.slice(arrow)}`;
+}
+
 function log(args: string[] = []): void {
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(USAGE);
@@ -172,18 +196,13 @@ function log(args: string[] = []): void {
   }
   const steps = pairEntries(entries);
   const humanDecisionCounts = countHumanDecisionsByStage(parseReviewLedger(content));
+  const lang = activityLogLang(content);
   const rows = steps.map((s, idx) => {
     const stage = reviewStageForStep(s.step);
-    return [
-      String(idx + 1),
-      s.step,
-      s.agent,
-      s.started,
-      s.done || (s.started ? '(in progress)' : ''),
-      String(stage ? (humanDecisionCounts.get(stage) ?? 0) : 0),
-      String(stage ? humanValidationCount(s.note) : 0),
-      s.note
-    ];
+    const note = stage
+      ? foldHumanCounts(s.note, humanDecisionCounts.get(stage) ?? 0, humanValidationCount(s.note), lang)
+      : s.note;
+    return [String(idx + 1), s.step, s.agent, s.started, s.done || (s.started ? '(in progress)' : ''), note];
   });
   for (const line of formatTable(TABLE_HEADERS, rows, { zebra: Boolean(process.stdout.isTTY) })) {
     process.stdout.write(`${line}\n`);

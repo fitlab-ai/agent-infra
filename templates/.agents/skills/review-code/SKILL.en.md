@@ -97,7 +97,7 @@ Update task.md and append:
 `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Code (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {artifact-filename}`
 
 Omit the bracketed segment when env-blocked = 0; append ` (+ {n} env-blocked)` when env-blocked > 0.
-`env-blocked` is the data source for the `HUMAN_VERIFY` column in `ai task log`; do not add a parallel manual-verification field.
+`env-blocked` is the data source for the `Manual-verify` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
 - Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
