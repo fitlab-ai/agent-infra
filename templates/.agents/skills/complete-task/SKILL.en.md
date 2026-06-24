@@ -1,6 +1,6 @@
 ---
 name: complete-task
-description: "Mark a task as completed and archive it"
+description: "Mark a task as completed and archive it. Use when a task's work is done and verified and you want to close and archive it."
 ---
 
 # Complete Task

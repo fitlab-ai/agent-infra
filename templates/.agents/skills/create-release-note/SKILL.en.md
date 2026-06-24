@@ -1,6 +1,6 @@
 ---
 name: create-release-note
-description: "Generate release notes from PRs and commits"
+description: "Generate release notes from PRs and commits. Use when preparing a release and you need notes compiled from PRs and commits."
 ---
 
 # Create Release Notes

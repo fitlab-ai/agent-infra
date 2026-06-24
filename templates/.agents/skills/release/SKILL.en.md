@@ -1,6 +1,6 @@
 ---
 name: release
-description: "Run the version release workflow"
+description: "Run the version release workflow. Use when you are ready to cut and publish a new version."
 ---
 
 # Version Release

@@ -1,6 +1,6 @@
 ---
 name: import-codescan
-description: "导入 Code Scanning 告警并创建修复任务"
+description: "导入 Code Scanning 告警并创建修复任务。当某条 Code Scanning 告警需要转为受跟踪的修复任务时使用。"
 ---
 
 # 导入 Code Scanning 告警

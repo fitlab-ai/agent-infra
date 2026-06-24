@@ -1,6 +1,6 @@
 ---
 name: post-release
-description: "Run post-release follow-up tasks"
+description: "Run post-release follow-up tasks. Use when a release has shipped and follow-up housekeeping is needed."
 ---
 
 # Post-release Tasks

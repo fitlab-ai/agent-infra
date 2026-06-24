@@ -1,6 +1,6 @@
 ---
 name: init-milestones
-description: "初始化仓库的 milestones 体系"
+description: "初始化仓库的 milestones 体系。当初始化仓库、需要创建标准 milestone 体系时使用。"
 ---
 
 # 初始化 milestones

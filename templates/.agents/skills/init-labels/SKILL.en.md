@@ -1,6 +1,6 @@
 ---
 name: init-labels
-description: "Initialize the repository's standard labels taxonomy"
+description: "Initialize the repository's standard labels taxonomy. Use when setting up a repository and you need the standard label taxonomy created."
 ---
 
 # Initialize labels

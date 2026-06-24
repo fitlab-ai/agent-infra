@@ -1,6 +1,6 @@
 ---
 name: check-task
-description: "Check a task's current status and progress"
+description: "Check a task's current status and progress. Use when you want a quick view of a task's current status and progress."
 ---
 
 # Check Task Status

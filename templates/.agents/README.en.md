@@ -163,10 +163,12 @@ Recommended frontmatter:
 ```yaml
 ---
 name: enforce-style
-description: "Apply the team style guide before code review"
+description: "Apply the team style guide before code review. Use when you need to align the team's code style before review"
 args: "<task-id>"   # optional
 ---
 ```
+
+Write `description` as "one-line responsibility + scenario clause": after the short responsibility, append "Use when …" (the Chinese `SKILL.zh-CN.md` variant uses "当……时使用") as the cross-TUI trigger semantics, so Agent Skills-capable tools can self-discover the skill in natural conversation. Do **not** add a separate `triggers` (or similar) frontmatter field for this.
 
 After adding or updating a custom skill, run `update-agent-infra` again. The sync step detects non-built-in skills and generates matching commands for Claude Code, Gemini CLI, and OpenCode automatically.
 

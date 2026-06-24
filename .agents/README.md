@@ -163,10 +163,12 @@
 ```yaml
 ---
 name: enforce-style
-description: "在代码审查前应用团队风格规范"
+description: "在代码审查前应用团队风格规范。当需要在评审前统一团队代码风格时使用"
 args: "<task-id>"   # 可选
 ---
 ```
+
+`description` 采用「一句话职责 + 场景触发子句」写法：在简短职责描述后补充「当……时使用」（英文 `SKILL.en.md` 用「Use when …」），作为跨 TUI 的触发语义，供支持 Agent Skills 的工具在自然对话中自发现该 skill。**不要**为此新增 `triggers` 等额外 frontmatter 字段。
 
 新增或修改自定义 skill 后，再执行一次 `update-agent-infra`。同步过程会自动检测非内置 skill，并为 Claude Code、Gemini CLI、OpenCode 生成对应命令。
 

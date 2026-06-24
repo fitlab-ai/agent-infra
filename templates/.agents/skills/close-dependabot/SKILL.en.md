@@ -1,6 +1,6 @@
 ---
 name: close-dependabot
-description: "Close a Dependabot alert with a documented reason"
+description: "Close a Dependabot alert with a documented reason. Use when a Dependabot alert has been handled or dismissed and needs closing with a reason."
 ---
 
 # Dismiss Dependabot Alert

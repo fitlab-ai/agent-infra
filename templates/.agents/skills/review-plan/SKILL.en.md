@@ -1,6 +1,6 @@
 ---
 name: review-plan
-description: "Review the technical plan"
+description: "Review the technical plan. Use when a technical plan needs review before implementation."
 ---
 
 # Technical Plan Review

@@ -1,6 +1,6 @@
 ---
 name: restore-task
-description: "Restore local task files from platform Issue comments"
+description: "Restore local task files from platform Issue comments. Use when local task files are missing and need rebuilding from platform Issue comments."
 ---
 
 # Restore Task

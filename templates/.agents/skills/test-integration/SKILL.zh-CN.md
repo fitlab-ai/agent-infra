@@ -1,6 +1,6 @@
 ---
 name: test-integration
-description: "执行项目集成测试流程"
+description: "执行项目集成测试流程。当需要运行项目集成测试流程时使用。"
 ---
 
 # 运行集成测试

@@ -1,6 +1,6 @@
 ---
 name: create-pr
-description: "创建 Pull Request 到目标分支"
+description: "创建 Pull Request 到目标分支。当变更已提交、需要发起 Pull Request 评审时使用。"
 ---
 
 # 创建 Pull Request

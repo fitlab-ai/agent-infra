@@ -1,6 +1,6 @@
 ---
 name: review-analysis
-description: "审查需求分析报告"
+description: "审查需求分析报告。当需求分析需要在进入方案前接受独立审查时使用。"
 ---
 
 # 需求分析审查

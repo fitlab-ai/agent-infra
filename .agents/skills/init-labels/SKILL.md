@@ -1,6 +1,6 @@
 ---
 name: init-labels
-description: "初始化仓库的 labels 体系"
+description: "初始化仓库的 labels 体系。当初始化仓库、需要创建标准 label 体系时使用。"
 ---
 
 # 初始化 labels

@@ -1,6 +1,6 @@
 ---
 name: refine-title
-description: "重构 Issue/PR 标题为 Conventional Commits 格式"
+description: "重构 Issue/PR 标题为 Conventional Commits 格式。当某个 Issue/PR 标题需要改写为 Conventional Commits 格式时使用。"
 ---
 
 # 重构标题

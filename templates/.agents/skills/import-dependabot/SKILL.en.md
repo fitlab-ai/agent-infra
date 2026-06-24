@@ -1,6 +1,6 @@
 ---
 name: import-dependabot
-description: "Import a Dependabot alert and create a remediation task"
+description: "Import a Dependabot alert and create a remediation task. Use when a Dependabot alert needs to become a tracked remediation task."
 ---
 
 # Import Dependabot Security Alert

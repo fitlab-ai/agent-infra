@@ -1,6 +1,6 @@
 ---
 name: archive-tasks
-description: "归档已完成任务到按日期组织的目录"
+description: "归档已完成任务到按日期组织的目录。当 active 工作区已堆积已完成任务、需要整理归档时使用。"
 ---
 
 # 归档已完成任务

@@ -1,6 +1,6 @@
 ---
 name: test
-description: "Run the full project test workflow"
+description: "Run the full project test workflow. Use when you need to run the project's full test suite."
 ---
 
 # Run Tests

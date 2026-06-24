@@ -1,6 +1,6 @@
 ---
 name: close-codescan
-description: "关闭 Code Scanning 告警并记录理由"
+description: "关闭 Code Scanning 告警并记录理由。当某条 Code Scanning 告警已处理或需按理由关闭时使用。"
 ---
 
 # 关闭 Code Scanning 告警

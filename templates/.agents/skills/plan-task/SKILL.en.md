@@ -1,6 +1,6 @@
 ---
 name: plan-task
-description: "Design a technical plan for a task"
+description: "Design a technical plan for a task. Use when a requirement is understood and you need a technical design before coding."
 ---
 
 # Design Technical Plan

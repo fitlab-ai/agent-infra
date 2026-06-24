@@ -1,6 +1,6 @@
 ---
 name: release
-description: "执行版本发布流程"
+description: "执行版本发布流程。当准备切出并发布新版本时使用。"
 ---
 
 # 版本发布

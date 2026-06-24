@@ -1,6 +1,6 @@
 ---
 name: import-issue
-description: "Import an Issue and create a task"
+description: "Import an Issue and create a task. Use when you want to start work from an existing Issue and track it locally."
 ---
 
 # Import Issue

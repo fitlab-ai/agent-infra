@@ -1,6 +1,6 @@
 ---
 name: commit
-description: "提交当前变更到 Git"
+description: "提交当前变更到 Git。当需要把已完成的工作落为一次 Git 提交时使用。"
 ---
 
 # 提交代码

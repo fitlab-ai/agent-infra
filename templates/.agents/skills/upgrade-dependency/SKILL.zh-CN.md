@@ -1,6 +1,6 @@
 ---
 name: upgrade-dependency
-description: "升级项目依赖到新版本并验证"
+description: "升级项目依赖到新版本并验证。当需要升级某个依赖并验证改动时使用。"
 ---
 
 # 升级依赖

@@ -1,6 +1,6 @@
 ---
 name: import-issue
-description: "从 Issue 导入并创建任务"
+description: "从 Issue 导入并创建任务。当想从既有 Issue 开工并在本地跟踪时使用。"
 ---
 
 # 导入 Issue

@@ -1,6 +1,6 @@
 ---
 name: block-task
-description: "Mark a task as blocked and record the reason"
+description: "Mark a task as blocked and record the reason. Use when a task cannot proceed because of an external blocker and you need to park it with a reason."
 ---
 
 # Block Task
