@@ -9,6 +9,8 @@ Commands:
   ls                           List sandboxes for the current project (the '#'
                                column is a display-only row number; the 'SHORT'
                                column shows the active task short id, '-' if none)
+  show <branch | TASK-id | N | '#N'>
+                               Show one sandbox's worktree and per-tool state paths
   prune [--dry-run]            Remove orphaned per-branch state dirs
   rebuild [--quiet] [--refresh]
                                Rebuild the sandbox image (--refresh pulls base + tools)
@@ -54,6 +56,11 @@ export async function runSandbox(args: string[]): Promise<void> {
     case 'ls': {
       const { ls } = await import('./commands/ls.ts');
       ls(rest);
+      break;
+    }
+    case 'show': {
+      const { show } = await import('./commands/show.ts');
+      show(rest);
       break;
     }
     case 'prune': {

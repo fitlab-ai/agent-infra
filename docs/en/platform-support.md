@@ -119,7 +119,7 @@ These configurations are not actively tested in this release:
 
 - **Podman** instead of Docker: Works on Fedora 40+ and other `dnf`-based RHEL family distros (RHEL, CentOS Stream, Rocky, Alma) via the `podman-docker` shim (`sudo dnf install podman podman-docker`; optionally `sudo touch /etc/containers/nodocker` to silence its per-command notice).
 - **SELinux-enforcing** hosts (Fedora / RHEL): `ai sandbox create` automatically labels bind mounts with Docker's shared `:z` flag — no setup required. Set `AGENT_INFRA_SELINUX_DISABLE=1` to opt out for debugging.
-- `ai sandbox vm` is a no-op on Linux. Linux uses native Docker directly with no VM to manage; use `ai sandbox create`, `ai sandbox exec`, `ai sandbox start`, `ai sandbox refresh`, `ai sandbox ls`, `ai sandbox rebuild`, `ai sandbox rm`, and `ai sandbox prune` directly.
+- `ai sandbox vm` is a no-op on Linux. Linux uses native Docker directly with no VM to manage; use `ai sandbox create`, `ai sandbox exec`, `ai sandbox start`, `ai sandbox refresh`, `ai sandbox ls`, `ai sandbox show`, `ai sandbox rebuild`, `ai sandbox rm`, and `ai sandbox prune` directly.
 
 ## Windows
 

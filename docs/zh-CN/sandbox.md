@@ -14,6 +14,8 @@
 
 `ai sandbox start <branch | TASK-id | N | '#N'>` 用于恢复已停止的沙箱容器——典型场景是宿主机 Docker daemon 被重启或替换（例如在已有 Docker 上安装 OrbStack 接管），导致容器变成 `Exited`。它只启动「已存在且已停止」的容器；容器不存在时会提示改用 `ai sandbox create`，已在运行的容器则保持不动。`ai sandbox exec <branch>` 会自动执行同样的恢复：当目标容器存在但已停止时，先启动容器再进入。由于每个 worktree 和各 AI 的 state 目录都持久化在宿主机，重启已停止的容器是安全的，不会丢失数据。
 
+`ai sandbox ls` 保持精简：只列出当前项目的 Containers 容器表（`#` 行号、`SHORT` 任务短号，以及名称、状态、分支），不再打印 worktree 列表和各工具的 state 路径。要查看某个沙箱的这些详情，使用 `ai sandbox show <branch | TASK-id | N | '#N'>`：它会打印该分支的 worktree 路径和各工具（Claude Code、Codex、Gemini CLI、OpenCode）的 state 路径。入参契约与 `ai sandbox exec`、`ai sandbox start` 一致，因此 `ai sandbox show 11` 与 `ai sandbox show '#11'` 都会通过 `.agents/workspace/active/.short-ids.json` 解析当前任务短号。
+
 在 macOS 上，交互式 `ai sandbox exec <branch>` 会尽力桥接宿主图片粘贴。当你按下 `Ctrl+V` 且宿主剪贴板当前是图片时，agent-infra 会从宿主剪贴板读取图片，将 PNG 写到 `~/.agent-infra/clipboard/`，再以 bracketed paste 注入容器内路径，让 Claude Code、Codex、Gemini CLI 和 OpenCode 按图片附件处理。宿主剪贴板只读，不会被改写。该能力会自动降级：已有沙箱需要重建后才有 `/clipboard` 挂载；如果可选 pty 依赖或剪贴板探测不可用，会回退到原本的交互进入方式。排查鼠标、滚动或其他输入异常时，可以设置 `AI_SANDBOX_NO_CLIPBOARD_BRIDGE=1` 跳过桥接，直接进入原本的交互路径。
 
 当你通过 SSH 在远端 Mac 上运行沙箱时，可先在手边这台 Mac 上执行 `ai cp <ssh-alias>`，把本机剪贴板图片推送到远端 Mac。典型流程是：Cmd+C 复制图片，运行 `ai cp mini`，回到已有 SSH session 后按 `Ctrl+V`；沙箱桥会读取远端 Mac 的 NSPasteboard，并按原路径注入图片。该命令只处理 PNG 图片，并使用基于 ssh key 的非交互 ssh/scp。目前发送端与远端都需为 macOS（远端通过 `osascript` 写入 NSPasteboard），后续可扩展支持其他远端平台。
