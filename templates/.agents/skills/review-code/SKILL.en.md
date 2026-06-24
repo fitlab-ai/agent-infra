@@ -67,7 +67,7 @@ Scan the task directory and record:
 
 ### 3. Read Implementation and Refinement Context
 
-Read the highest-round code artifact and, if present, the highest-round fix artifact.
+Read the highest-round code artifact and, if present, the highest-round fix artifact. After reading, record the actually reviewed highest-round code artifact (and the highest-round fix artifact, if present) by filename in the report's `Review Input` field; leave it blank when it cannot be reliably determined—do not fabricate.
 
 ### 4. Perform the Review
 

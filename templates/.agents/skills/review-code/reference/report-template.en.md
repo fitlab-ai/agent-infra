@@ -10,7 +10,7 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 - **Review Round**: Round {review-round}
 - **Artifact File**: `{review-artifact}`
 - **Review Input**:
-  - `{code-artifact}`
+  - `{code-artifact}` (the highest-round implementation artifact actually reviewed—plus the highest-round fix artifact if present, e.g. `code-r2.md`; leave blank if it cannot be reliably determined)
 
 ## State Check
 
