@@ -8,103 +8,51 @@ description: "查看任务的当前状态和进度"
 ## 行为边界 / 关键规则
 
 - 本技能是**只读**操作 —— 不修改任何文件
-- 始终检查 active、blocked 和 completed 目录
+- 机械数据（frontmatter 元数据、产物分组、Git/Platform 状态，以及跨 active、blocked、completed 三目录定位任务）一律委托给确定性的 `ai task status` 命令。本技能只负责 CLI 无法产出的语义层：工作流阶段解读、审查结论解析、下一步建议。
 
 ## 任务入参短号别名
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
 ## 执行步骤
-### 1. 查找任务
 
-按以下优先顺序搜索任务：
-1. `.agents/workspace/active/{task-id}/task.md`
-2. `.agents/workspace/blocked/{task-id}/task.md`
-3. `.agents/workspace/completed/{task-id}/task.md`
+### 1. 通过 `ai task status` 收集事实
 
-注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
+运行确定性 CLI 收集全部机械数据，并以其 stdout 作为状态报告的事实基底：
 
-如果在任何目录中都未找到，提示 "Task {task-id} not found"。
+```bash
+ai task status {task-id}
+```
 
-### 2. 读取任务元数据
+该命令会跨 active、blocked、completed 三目录解析任务，并输出五段：任务头（`id`、短号、标题）、`Metadata`（frontmatter 字段）、`Artifacts`（按工作流阶段分组的产物）、`Git`（分支匹配、未提交数、ahead/behind）、`Platform`（Issue/PR 状态）。把该输出视为权威事实 —— 不要再手工复述其中任何内容。
 
-从 `task.md` 中提取：
-- `id`、`title`、`type`、`status`、`workflow`
-- `current_step`、`assigned_to`
-- `created_at`、`updated_at`
-- `issue_number`、`pr_number`（如适用）
+降级处理：
+- 若命令不可用（如 `ai` 不在 PATH 或 `dist/` 未构建）或非零退出，回退到降级读取：展示 `task.md` frontmatter 并 `ls` 任务目录，同时告知用户本次为降级输出（建议先构建或安装 CLI，如 `ai init`）。
+- 若在任何目录都未找到任务，提示 "Task {task-id} not found"。
 
-### 3. 检查上下文文件
+### 2. 解读工作流阶段与审查结论
 
-按产物类型扫描并记录以下文件的存在、轮次和状态：
-- `analysis.md`、`analysis-r{N}.md` - 需求分析
-- `plan.md`、`plan-r{N}.md` - 技术方案
-- `code.md`、`code-r2.md`、... - 实现报告
-- `review-analysis.md`、`review-analysis-r{N}.md` - 需求分析审查报告
-- `review-plan.md`、`review-plan-r{N}.md` - 技术方案审查报告
-- `review-code.md`、`review-code-r{N}.md` - 代码审查报告
+这是 CLI 不产出的语义层。基于步骤 1 的 `Artifacts` 分组与 `task.md` 的活动日志：
 
-对于版本化产物（`analysis`、`review-analysis`、`plan`、`review-plan`、`code`、`review-code`）：
-- 扫描任务目录中的所有同类版本化文件
-- 记录每类产物的最新轮次、最新文件路径和总轮次数
-- 如果 `task.md` 的 Activity Log 记录了最新轮次，优先核对其与实际文件是否一致
+- 把每个工作流阶段映射为状态指示器，并标注其最新产物与轮次：
+  - `[done]` - 步骤已完成
+  - `[current]` - 当前进行中
+  - `[pending]` - 尚未开始
+  - `[blocked]` - 被阻塞
+  - `[skipped]` - 已跳过
+- 对各阶段最新的审查产物（`review-analysis`、`review-plan`、`review-code`），读取报告正文并解析结论：总体结论（通过 / 需要修改 / 拒绝）与阻塞项 / 主要问题 / 次要问题计数。CLI 不解析审查正文，因此这一步是步骤 3 选择下一步操作的必要输入。
 
-### 4. 输出状态报告
-
-以清晰的结构和状态指示器格式化输出：
+把工作流进度作为 CLI 输出之上的叠加层呈现，标注最新轮次与解析出的审查结论，例如：
 
 ```
-任务状态：{task-id}（短号 {task-ref}）
-=======================
-
-基本信息：
-- 标题：{title}
-- 类型：{type}
-- 状态：{status}
-- 工作流：{workflow}
-- 分配给：{assigned_to}
-- 创建时间：{created_at}
-- 更新时间：{updated_at}
-
 工作流进度：
-  [已完成]    需求分析        analysis-r2.md (Round 2, latest)
-  [已完成]    需求分析审查    review-analysis.md (Round 1, latest)
-  [已完成]    技术设计        plan.md (Round 1)
-  [已完成]    技术方案审查    review-plan.md (Round 1, latest)
-  [进行中]    实现            code.md (Round 1)
-  [待处理]    代码审查        review-code.md (Round 1 will be created next)
-  [待处理]    最终提交
-
-上下文文件：
-- analysis.md：           已存在 (Round 1)
-- analysis-r2.md：        已存在 (Round 2, latest)
-- review-analysis.md：    已存在 (Round 1, latest)
-- plan.md：               已存在 (Round 1, latest)
-- review-plan.md：        已存在 (Round 1, latest)
-- code.md：               已存在 (Round 1, latest)
-- review-code.md：        未开始
-
-如果存在多轮产物，显示所有轮次，并标记最新版本，例如：
-- plan.md：             已存在 (Round 1)
-- plan-r2.md：          已存在 (Round 2, latest)
-- review-plan.md：      已存在 (Round 1)
-- code.md：             已存在 (Round 1)
-- code-r2.md：          已存在 (Round 2, latest)
-- review-code.md：      已存在 (Round 1)
-- review-code-r2.md：   已存在 (Round 2, latest)
-
-下一步：
-  完成实现，然后执行代码审查
+  [done]       需求分析        analysis.md (Round 1, latest)
+  [done]       需求分析审查    review-analysis.md (Round 1, latest, 通过)
+  [current]    技术设计        plan.md (Round 1)
+  [pending]    技术方案审查
 ```
 
-**状态指示器**：
-- `[done]` - 步骤已完成
-- `[current]` - 当前进行中
-- `[pending]` - 尚未开始
-- `[blocked]` - 被阻塞
-- `[skipped]` - 已跳过
-
-### 5. 建议下一步操作
+### 3. 建议下一步操作
 
 根据当前工作流状态，建议合适的下一个技能。必须展示下表中所有 TUI 列的命令格式，不要只展示当前 AI 代理对应的列。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）：
 
@@ -143,6 +91,6 @@ description: "查看任务的当前状态和进度"
 ## 注意事项
 
 1. **只读**：本技能仅读取和报告 —— 不修改任何文件
-2. **多目录搜索**：始终检查 active、blocked 和 completed 目录
+2. **CLI 委托**：机械数据（元数据、产物分组、Git/Platform 状态、多目录定位）来自 `ai task status`；本技能在其之上叠加语义解读
 3. **快速参考**：随时可以使用本技能检查任务在工作流中的位置
-4. **版本化产物**：`analysis`、`review-analysis`、`plan`、`review-plan`、`code`、`review-code` 都需要报告实际轮次，而不是只报告固定文件名
+4. **版本化产物**：`ai task status` 已按实际轮次分组产物；语义层仍需报告 `review-analysis`、`review-plan`、`review-code` 的最新审查结论
