@@ -58,7 +58,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ### 3. 阅读方案上下文
 
-读取最新 `{plan-artifact}`、最新分析产物、`task.md` 和关联 Issue 上下文（如有）。
+读取最新 `{plan-artifact}`、最新分析产物、`task.md` 和关联 Issue 上下文（如有）。读取后，把本轮实际检视的最高轮 plan artifact 文件名回填到报告 `审查输入` 段；无法可靠取得时留空，不要伪造。
 
 ### 4. 执行审查
 

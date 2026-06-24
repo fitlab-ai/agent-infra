@@ -52,7 +52,7 @@ Record `{plan-artifact}`, `{review-round}`, and `{review-artifact}` (`review-pla
 
 ### 3. Read Plan Context
 
-Read `{plan-artifact}`, the latest analysis artifact, `task.md`, and Issue context when available.
+Read `{plan-artifact}`, the latest analysis artifact, `task.md`, and Issue context when available. After reading, record the actually reviewed highest-round plan artifact by filename in the report's `Review Input` field; leave it blank when it cannot be reliably determined—do not fabricate.
 
 ### 4. Perform Review
 

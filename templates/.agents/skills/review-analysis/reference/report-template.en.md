@@ -10,7 +10,7 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
 - **Review Round**: Round {review-round}
 - **Artifact File**: `{review-artifact}`
 - **Review Input**:
-  - `{analysis-artifact}`
+  - `{analysis-artifact}` (the highest-round requirement-analysis artifact actually reviewed, e.g. `analysis-r2.md`; leave blank if it cannot be reliably determined)
 
 ## State Check
 

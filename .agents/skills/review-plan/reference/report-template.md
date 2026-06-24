@@ -10,8 +10,7 @@
 - **审查轮次**：第 {review-round} 轮
 - **产物文件**：`{review-artifact}`
 - **审查输入**：
-  - `{code-artifact}`
-  - `{code-artifact}`（如存在）
+  - `{plan-artifact}`（本轮实际检视的最高轮技术方案产物，如 `plan-r2.md`；无法可靠取得则留空）
 
 ## 状态核对
 

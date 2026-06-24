@@ -259,11 +259,24 @@ test("review report templates include the self-doubt section", () => {
   });
 });
 
-test("review-code report template records the reviewed code artifact", () => {
-  const reviewInputCases: Array<[string, string]> = [
-    [".agents/skills/review-code/reference/report-template.md", "审查输入"],
-    ["templates/.agents/skills/review-code/reference/report-template.zh-CN.md", "审查输入"],
-    ["templates/.agents/skills/review-code/reference/report-template.en.md", "Review Input"],
+test("review report templates record the reviewed artifact", () => {
+  // Each review stage's report template must demonstrate the actually reviewed
+  // upstream artifact as a backtick-wrapped filename in the Review Input field,
+  // not only the `{...-artifact}` placeholder, so the recorded-artifact contract
+  // cannot silently regress. Structural check only (field block + filename shape).
+  const ANALYSIS = /`analysis(?:-r\d+)?\.md`/;
+  const PLAN = /`plan(?:-r\d+)?\.md`/;
+  const CODE = /`code(?:-r\d+)?\.md`/;
+  const reviewInputCases: Array<[string, string, RegExp]> = [
+    [".agents/skills/review-analysis/reference/report-template.md", "审查输入", ANALYSIS],
+    ["templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md", "审查输入", ANALYSIS],
+    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "Review Input", ANALYSIS],
+    [".agents/skills/review-plan/reference/report-template.md", "审查输入", PLAN],
+    ["templates/.agents/skills/review-plan/reference/report-template.zh-CN.md", "审查输入", PLAN],
+    ["templates/.agents/skills/review-plan/reference/report-template.en.md", "Review Input", PLAN],
+    [".agents/skills/review-code/reference/report-template.md", "审查输入", CODE],
+    ["templates/.agents/skills/review-code/reference/report-template.zh-CN.md", "审查输入", CODE],
+    ["templates/.agents/skills/review-code/reference/report-template.en.md", "Review Input", CODE],
   ];
 
   // Collect the Review Input field header line plus its indented sub-bullets.
@@ -287,15 +300,12 @@ test("review-code report template records the reviewed code artifact", () => {
     return block.join("\n");
   };
 
-  reviewInputCases.forEach(([relativePath, field]) => {
+  reviewInputCases.forEach(([relativePath, field, artifactPattern]) => {
     const content = read(relativePath);
     assert.match(content, new RegExp(`\\*\\*${escapeRegExp(field)}\\*\\*`));
 
-    // The field must demonstrate the reviewed code artifact as a backtick-wrapped
-    // filename (e.g. `code-r2.md`), not only the `{code-artifact}` placeholder, so the
-    // recorded-artifact contract cannot silently regress. Structural check only.
     const block = extractReviewInputBlock(content, field);
-    assert.match(block, /`code(?:-r\d+)?\.md`/);
+    assert.match(block, artifactPattern);
   });
 });
 

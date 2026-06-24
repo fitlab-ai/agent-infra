@@ -52,7 +52,7 @@ Record `{analysis-artifact}`, `{review-round}`, and `{review-artifact}` (`review
 
 ### 3. Read Analysis Context
 
-Read `{analysis-artifact}`, `task.md`, and Issue context when available.
+Read `{analysis-artifact}`, `task.md`, and Issue context when available. After reading, record the actually reviewed highest-round analysis artifact by filename in the report's `Review Input` field; leave it blank when it cannot be reliably determined—do not fabricate.
 
 ### 4. Perform Review
 

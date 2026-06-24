@@ -10,7 +10,7 @@ Use this template when writing `review-plan.md` or `review-plan-r{N}.md`.
 - **Review Round**: Round {review-round}
 - **Artifact File**: `{review-artifact}`
 - **Review Input**:
-  - `{plan-artifact}`
+  - `{plan-artifact}` (the highest-round technical-plan artifact actually reviewed, e.g. `plan-r2.md`; leave blank if it cannot be reliably determined)
 
 ## State Check
 
