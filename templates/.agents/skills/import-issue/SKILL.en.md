@@ -40,7 +40,22 @@ This skill **creates** task.md, so there is no file to write at the start. Captu
 Read `.agents/rules/issue-pr-commands.md` first, follow its prerequisite steps to complete authentication and code-hosting platform detection, then load the Issue data with its "Read an Issue" command.
 
 Extract: issue number, title, description, and labels.
-Use the Issue title as-is for the task title (preserve the Issue's original language).
+
+Derive the task title from the Issue title by stripping an optional single leading Conventional Commits prefix, following the contract below; preserve the rest of the description verbatim and in its original language. This fenced contract is the authoritative, language-neutral rule — keep it byte-for-byte identical across every `import-issue` variant:
+
+```
+# title-derivation-contract
+strip-prefix: type(scope):
+prefix-types: feat fix docs style refactor perf test build ci chore revert
+single-layer-only: true
+preserve-body-colon: true
+keep-when-no-prefix: true
+example-strip: "feat(meta): create-pr summary" => "create-pr summary"
+example-keep: "修复某问题" => "修复某问题"
+example-single-layer: "feat: add A: B" => "add A: B"
+```
+
+Strip only the first layer, and only when the leading token is a `prefix-types` value optionally followed by `(scope)` and a `!`, then `:` and at least one space; a colon inside the description is never a prefix.
 
 ### 2. Check for an Existing Task
 

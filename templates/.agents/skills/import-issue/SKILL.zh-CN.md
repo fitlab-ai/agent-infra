@@ -40,7 +40,22 @@ description: "从 Issue 导入并创建任务"
 执行前先读取 `.agents/rules/issue-pr-commands.md`，并按其中的前置步骤完成认证和代码托管平台检测；随后按其中的 “读取 Issue” 命令获取 Issue 信息。
 
 提取：issue 编号、标题、描述、标签。
-任务标题直接使用 Issue 的原始标题（保持 Issue 标题的原始语言）。
+
+从 Issue 标题派生任务标题：按下方契约剥掉可选的单层前导 Conventional Commits 前缀，其余描述原文与原始语言保持不变。下方 fenced 契约是权威的、与语言无关的规则——在所有 `import-issue` 变体中保持逐字节一致：
+
+```
+# title-derivation-contract
+strip-prefix: type(scope):
+prefix-types: feat fix docs style refactor perf test build ci chore revert
+single-layer-only: true
+preserve-body-colon: true
+keep-when-no-prefix: true
+example-strip: "feat(meta): create-pr summary" => "create-pr summary"
+example-keep: "修复某问题" => "修复某问题"
+example-single-layer: "feat: add A: B" => "add A: B"
+```
+
+只剥第一层前缀，且仅当前导 token 是 `prefix-types` 之一、其后可带 `(scope)` 与 `!`，再接 `:` 和至少一个空格；描述正文中的冒号永远不算前缀。
 
 ### 2. 检查已有任务
 

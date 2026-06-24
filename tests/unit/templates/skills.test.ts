@@ -721,3 +721,61 @@ test("analyze-task brainstorming gate adds step 4 and whitelists analyze-task in
     "deployed no-mid-flow-questions rule should stay byte-identical to its zh-CN template variant"
   );
 });
+
+test("import-issue step 1 declares a structured title-derivation contract", () => {
+  // Structural guard for the CC-prefix stripping rule (Issue #494). The assertable
+  // object is a fenced, language-neutral contract block parsed by key (not prose
+  // tokens), so it verifies the strip *direction* and the boundary semantics rather
+  // than just word presence — per .agents/rules/testing-discipline.md (structural
+  // checks, no keyword-semantic assertions). A doc reading "do not strip ..." cannot
+  // satisfy strip-prefix + the removal examples below.
+  const REQUIRED_KEYS = [
+    "strip-prefix",
+    "prefix-types",
+    "single-layer-only",
+    "preserve-body-colon",
+    "keep-when-no-prefix"
+  ];
+  const contracts: string[] = [];
+
+  skillDocPaths("import-issue").forEach((relativePath) => {
+    const content = read(relativePath);
+    const step1 = content.match(/^### 1\. [\s\S]*?(?=^### \d+\. )/m)?.[0] || "";
+    assert.ok(step1, `${relativePath} should expose a step 1 section`);
+
+    const block = step1.match(/```[a-z]*\n# title-derivation-contract\n([\s\S]*?)\n```/m)?.[1];
+    assert.ok(block, `${relativePath} step 1 should declare a fenced "# title-derivation-contract" block`);
+
+    const entries: Record<string, string> = {};
+    const examples: string[] = [];
+    block!.split("\n").forEach((line) => {
+      const match = line.match(/^([a-z][a-z-]*):[ \t]*(.*)$/);
+      if (!match) return;
+      const key = match[1];
+      if (key === undefined) return;
+      const value = match[2] ?? "";
+      if (key.startsWith("example")) examples.push(value);
+      else entries[key] = value;
+    });
+
+    REQUIRED_KEYS.forEach((key) => {
+      assert.ok(key in entries, `${relativePath} contract should declare "${key}"`);
+    });
+    assert.match(entries["strip-prefix"] ?? "", /type\(scope\)/, `${relativePath} strip-prefix should target the type(scope) prefix`);
+    assert.equal(entries["single-layer-only"], "true", `${relativePath} should strip only one prefix layer`);
+    assert.equal(entries["preserve-body-colon"], "true", `${relativePath} should preserve description colons`);
+    assert.equal(entries["keep-when-no-prefix"], "true", `${relativePath} should keep titles that have no prefix`);
+    assert.ok(
+      examples.filter((example) => example.includes("=>")).length >= 3,
+      `${relativePath} contract should include >=3 transform examples (strip / keep / single-layer)`
+    );
+
+    contracts.push(block!.trim());
+  });
+
+  assert.ok(contracts.length >= 1, "import-issue should expose at least one skill doc variant");
+  // Language-neutral contract: identical across deployed + EN + zh-CN variants (no drift).
+  contracts.forEach((block) => {
+    assert.equal(block, contracts[0], "title-derivation contract should be byte-identical across all import-issue variants");
+  });
+});
