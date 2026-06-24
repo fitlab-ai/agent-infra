@@ -64,7 +64,27 @@ If this commit is associated with a task and a `review-code` artifact exists, re
 - After committing, write `last_reviewed_commit: <new_head>` to task.md frontmatter only when `pre_head == R` and `S == F`; otherwise do not advance that field
 - Do not scan backward to earlier Approved artifacts; the highest-round `review-code` artifact is the only authoritative source
 
-## 5. Update Task Status When Applicable
+## 5. Push to the Existing PR When Applicable
+
+After the commit is created, if the current branch already has an open Pull Request, push the new commit so the PR updates automatically. Otherwise keep the current behavior (the first push is still handled by `create-pr`). This is the push wrap-up of a user-initiated `commit`: it adds no extra commit and never pushes when there is no PR; it applies whether or not a task is associated.
+
+> Detect whether the current branch has an open PR — and authenticate to the platform — per `.agents/rules/issue-pr-commands.md`; if that rule is unavailable or detection fails, follow the degradation below.
+
+a. Detect whether the current branch (head) has an open PR per `.agents/rules/issue-pr-commands.md`.
+
+b. On an open PR -> push the current branch:
+
+```bash
+git push
+```
+
+c. Safe degradation (never block an already completed `git commit`; only warn the user):
+   - Platform unavailable / unauthenticated / detection failed / no open PR -> do not push; continue.
+   - `git push` fails (needs `git pull --rebase`, no upstream, network error) -> keep the local commit and tell the user to push manually.
+
+Fold the push outcome (pushed / skipped(no PR) / failed) into the next step's "Update Task Status" Activity Log note or user output.
+
+## 6. Update Task Status When Applicable
 
 Get the current time:
 
@@ -81,7 +101,7 @@ Append the Commit Activity Log entry and choose exactly one next-step case:
 - more work remains -> update task.md and stop
 - ready for review -> `review-code {task-id}`
 
-## 6. Sync Issue Metadata When Applicable
+## 7. Sync Issue Metadata When Applicable
 
 When `{task-id}` exists and task.md contains a valid `issue_number`, sync the linked Issue `in:` labels and requirement checkboxes. Otherwise, skip this step.
 
@@ -91,7 +111,7 @@ When `{task-id}` exists and task.md contains a valid `issue_number`, sync the li
 
 Failure handling matches "Update Task Status When Applicable": warn, but do **not** block an already completed `git commit`.
 
-## 7. Sync PR Summary When Applicable
+## 8. Sync PR Summary When Applicable
 
 When `{task-id}` exists and task.md contains a valid `pr_number`, refresh the PR summary comment marked with the PR summary marker defined in `.agents/rules/pr-sync.md` on the PR. Otherwise, skip this step.
 
@@ -101,7 +121,7 @@ When `{task-id}` exists and task.md contains a valid `pr_number`, refresh the PR
 
 Failure handling matches "Update Task Status When Applicable": warn, but do **not** block an already completed `git commit`.
 
-## 8. Verification Gate
+## 9. Verification Gate
 
 If this operation is associated with `{task-id}`, run the verification gate to confirm task metadata and sync state. If there is no task context, skip this step.
 

@@ -186,6 +186,12 @@ List PRs:
 gh pr list --state {state} --base {base-branch} --json number,title,url,headRefName,baseRefName
 ```
 
+Find the open PR whose head is the current branch (used by the `commit` push wrap-up):
+
+```bash
+gh pr list --head "{branch}" --state open --json number,url --jq '.[0].url // empty'
+```
+
 Create a PR:
 
 ```bash

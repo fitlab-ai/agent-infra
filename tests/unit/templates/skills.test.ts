@@ -779,3 +779,25 @@ test("import-issue step 1 declares a structured title-derivation contract", () =
     assert.equal(block, contracts[0], "title-derivation contract should be byte-identical across all import-issue variants");
   });
 });
+
+test("commit skill push-to-existing-PR step keeps level-2 steps numbered 1..9", () => {
+  // commit SKILL uses level-2 (`## N.`) step headings, which the generic
+  // consecutive-numbering test (level-3 `### N.`) does not cover. After
+  // inserting "Push to the Existing PR" as step 5, guard that all three
+  // variants stay consecutively numbered 1..9. Structural check only — no
+  // step-title/prose matching (see .agents/rules/testing-discipline.md).
+  const commitVariants = [
+    ".agents/skills/commit/SKILL.md",
+    "templates/.agents/skills/commit/SKILL.zh-CN.md",
+    "templates/.agents/skills/commit/SKILL.en.md"
+  ];
+
+  commitVariants.forEach((relativePath) => {
+    const stepNumbers = [...read(relativePath).matchAll(/^## (\d+)\. /gm)].map((match) => Number(match[1]));
+    assert.deepEqual(
+      stepNumbers,
+      [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      `${relativePath} should keep level-2 steps consecutively numbered 1..9 after adding the push step`
+    );
+  });
+});

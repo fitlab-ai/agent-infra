@@ -64,7 +64,27 @@ git diff
 - 提交后仅当 `pre_head == R` 且 `S == F` 时，在 task.md frontmatter 写入 `last_reviewed_commit: <new_head>`；否则不推进该字段
 - 不向后扫描更早的 Approved 产物；最高轮 `review-code` 产物是唯一权威来源
 
-## 5. 按需更新任务状态
+## 5. 推送到已有 PR（按需）
+
+提交完成后，如果当前分支已存在开放的 Pull Request，则把本次提交推送上去让 PR 自动更新；否则保持现状（首次推送仍由 `create-pr` 负责）。本步骤是用户已发起 `commit` 的推送收尾，不新增自动提交，也不在无 PR 时推送；与是否关联任务无关。
+
+> 检测当前分支是否有开放 PR、以及平台认证，统一按 `.agents/rules/issue-pr-commands.md` 执行；该规则不可用或检测失败时，按下方降级处理。
+
+a. 按 `.agents/rules/issue-pr-commands.md` 检测当前分支（head）是否存在开放 PR。
+
+b. 命中开放 PR -> 推送当前分支：
+
+```bash
+git push
+```
+
+c. 安全降级（不阻塞已完成的 `git commit`，仅提示用户）：
+   - 平台不可用 / 未认证 / 检测失败 / 未命中开放 PR -> 不推送，继续后续步骤。
+   - `git push` 失败（如需 `git pull --rebase`、无 upstream、网络异常）-> 保留本地提交，提示用户手动推送。
+
+把推送结果（pushed / skipped(no PR) / failed）并入下一步「更新任务状态」的 Activity Log 说明或用户输出。
+
+## 6. 按需更新任务状态
 
 获取当前时间：
 
@@ -81,7 +101,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - 还有后续工作 -> 更新 task.md 后停止
 - 准备审查 -> `review-code {task-id}`
 
-## 6. 同步 Issue 元数据（按需）
+## 7. 同步 Issue 元数据（按需）
 
 当 `{task-id}` 存在且 task.md 包含有效 `issue_number` 时，同步 `in:` label 和需求复选框到关联 Issue；否则跳过。
 
@@ -91,7 +111,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 失败处理与「按需更新任务状态」一致：警告但**不**阻塞已完成的 `git commit`。
 
-## 7. 同步 PR 摘要（按需）
+## 8. 同步 PR 摘要（按需）
 
 当 `{task-id}` 存在且 task.md 包含有效 `pr_number` 时，刷新 PR 上由 `.agents/rules/pr-sync.md` 中定义的 PR 摘要评论标记对应的摘要评论；否则跳过。
 
@@ -101,7 +121,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 
 失败处理与「按需更新任务状态」一致：警告但**不**阻塞已完成的 `git commit`。
 
-## 8. 完成校验
+## 9. 完成校验
 
 如果本次操作关联了 `{task-id}`，运行完成校验，确认任务元数据和同步状态符合规范；如果没有任务上下文，跳过本步骤。
 
