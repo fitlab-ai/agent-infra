@@ -29,7 +29,7 @@ Localized option input may be normalized before writing:
 | `中` | `Medium` |
 | `低` | `Low` |
 
-AI agents may infer `priority` and `effort` from the title and description when creating or refining tasks, but must keep date fields empty unless the user or source Issue provides explicit dates. Human edits in `task.md` take precedence.
+AI agents may infer `priority` and `effort` from the title and description when creating or refining tasks. Date fields are factual, not estimated: `start_date` is written by the analyze stage (the analysis start date) and `target_date` by the complete stage (the completion date). Human edits in `task.md` take precedence.
 
 ## GraphQL Reference
 

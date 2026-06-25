@@ -124,7 +124,6 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `assigned_to`：{当前 AI 代理}
 - `updated_at`：{当前时间}
 - `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
-- 若 `target_date` 为空，基于工作量评估写入预估完成日（`YYYY-MM-DD`）；无法合理预估时保持留空、不阻塞；已有值则保留
 - 记录本轮方案产物：`{plan-artifact}`（Round `{plan-round}`）
 - 如任务模板包含 `## 设计` 段落，更新为指向 `{plan-artifact}` 的链接
 - 在工作流进度中标记 technical-design 为已完成，并注明实际轮次（如果任务模板支持）

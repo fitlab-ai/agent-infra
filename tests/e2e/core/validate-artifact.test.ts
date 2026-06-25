@@ -257,6 +257,70 @@ const taskMetaCases: TaskMetaCase[] = [
       assert.equal(result.status, 0, result.stderr);
       assertPayloadStatus(result, { type: "task-meta", status: "pass" });
     }
+  },
+  {
+    name: "validate-artifact task-meta passes for analyze-task when start_date is present",
+    skill: "analyze-task",
+    content() {
+      return buildTaskContent({
+        current_step: "requirement-analysis",
+        start_date: "2026-06-25"
+      });
+    },
+    assertResult(result) {
+      assert.equal(result.status, 0, result.stderr);
+      assertPayloadStatus(result, { type: "task-meta", status: "pass" });
+    }
+  },
+  {
+    name: "validate-artifact task-meta fails for analyze-task when start_date is missing",
+    skill: "analyze-task",
+    content() {
+      return buildTaskContent({
+        current_step: "requirement-analysis"
+      });
+    },
+    assertResult(result) {
+      assert.equal(result.status, 1, result.stderr);
+      assertPayloadStatus(result, { type: "task-meta", status: "fail" });
+      assert.match(result.stdout, /Expected start_date to be present/);
+    }
+  },
+  {
+    name: "validate-artifact task-meta passes for complete-task when target_date is present",
+    skill: "complete-task",
+    content() {
+      const now = formatTimestamp(new Date());
+      return buildTaskContent({
+        status: "completed",
+        completed_at: now,
+        target_date: "2026-06-25"
+      }, {
+        NOW: now
+      });
+    },
+    assertResult(result) {
+      assert.equal(result.status, 0, result.stderr);
+      assertPayloadStatus(result, { type: "task-meta", status: "pass" });
+    }
+  },
+  {
+    name: "validate-artifact task-meta fails for complete-task when target_date is missing",
+    skill: "complete-task",
+    content() {
+      const now = formatTimestamp(new Date());
+      return buildTaskContent({
+        status: "completed",
+        completed_at: now
+      }, {
+        NOW: now
+      });
+    },
+    assertResult(result) {
+      assert.equal(result.status, 1, result.stderr);
+      assertPayloadStatus(result, { type: "task-meta", status: "fail" });
+      assert.match(result.stdout, /Expected target_date to be present/);
+    }
   }
 ];
 

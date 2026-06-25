@@ -29,7 +29,7 @@
 | `中` | `Medium` |
 | `低` | `Low` |
 
-AI agent 在创建或修订任务时可根据标题与描述推断 `priority` 和 `effort`，但除非用户或来源 Issue 明确提供日期，否则必须保持日期字段为空。`task.md` 中人工填写的值优先。
+AI agent 在创建或修订任务时可根据标题与描述推断 `priority` 和 `effort`。日期字段为事实值、不估算：`start_date` 由 analyze 阶段写入（= 分析开始日），`target_date` 由 complete 阶段写入（= 完成日）。`task.md` 中人工填写的值优先。
 
 ## GraphQL 参考
 

@@ -170,6 +170,7 @@ function buildCompletedTaskContent(checklistLines: string[], overrides: Frontmat
       current_step: "commit",
       completed_at: now,
       updated_at: now,
+      target_date: now.slice(0, 10),
       ...overrides
     }),
     "",

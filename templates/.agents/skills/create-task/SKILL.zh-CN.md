@@ -103,7 +103,7 @@ assigned_to: {当前 AI 代理}
 ```
 
 注意：`created_by` 为 `human`，因为任务来源于用户的描述。
-priority / effort 必填：由 AI 从任务标题与描述推断后填入（候选值见 `.agents/rules/issue-fields.md`；中文输入按本地化映射规范化）。start_date / target_date 创建时保持留空，由 analyze-task / plan-task 阶段填入；不要臆测日期。
+priority / effort 必填：由 AI 从任务标题与描述推断后填入（候选值见 `.agents/rules/issue-fields.md`；中文输入按本地化映射规范化）。start_date / target_date 创建时保持留空：`start_date` 由 analyze 阶段写入、`target_date` 由 complete 阶段写入；不要臆测日期。
 
 ### 3. 更新任务状态
 

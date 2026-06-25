@@ -13,7 +13,8 @@
         "current_step",
         "assigned_to"
       ],
-      "expected_step": "requirement-analysis"
+      "expected_step": "requirement-analysis",
+      "require_start_date": true
     },
     "artifact": {
       "file_pattern": "analysis.md|analysis-r{N}.md",

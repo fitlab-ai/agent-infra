@@ -316,6 +316,14 @@ function checkTaskMeta({ taskDir, config }) {
     return failResult("task-meta", "Expected cancelled_at to be present");
   }
 
+  if (config.require_start_date && isBlank(metadata.start_date)) {
+    return failResult("task-meta", "Expected start_date to be present");
+  }
+
+  if (config.require_target_date && isBlank(metadata.target_date)) {
+    return failResult("task-meta", "Expected target_date to be present");
+  }
+
   if (config.match_task_dir !== false) {
     const expectedTaskId = path.basename(taskDir);
     if (metadata.id !== expectedTaskId) {

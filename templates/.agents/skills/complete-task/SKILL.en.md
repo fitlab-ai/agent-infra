@@ -130,6 +130,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - `status`: completed
 - `current_step`: completed
 - `completed_at`: {current timestamp}
+- `target_date`: write the date portion (`YYYY-MM-DD`) of `completed_at` only when empty; keep any existing (human-entered) value
 - `updated_at`: {current timestamp}
 - `agent_infra_version`: value from `.agents/rules/version-stamp.md`
 - Add or update the `## State Check` section with the raw Step 0 audit command output, including `$ ` prompt lines, before `## Activity Log`

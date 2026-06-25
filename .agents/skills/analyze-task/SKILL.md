@@ -111,10 +111,10 @@ tail .agents/workspace/active/{task-id}/task.md
   1. 确定本轮要问的问题（与 4.2 保持一致）：
      - 若已存在 `pending_question`（上一问尚未得到答案）→ 复述该 `pending_question`，**不**修改它、**不**增加 `question_count`；
      - 否则（无待答问题）→ 选最高价值的一个问题（验收标准 > 范围 > 歧义），写入 `## Brainstorming`：`status: asking`、`pending_question: <问题>`、`question_count += 1`。
-  2. 更新 frontmatter：`current_step: requirement-analysis`、`assigned_to`、`updated_at`、`agent_infra_version`（先读 `.agents/rules/version-stamp.md`）。
+  2. 更新 frontmatter：`current_step: requirement-analysis`、`assigned_to`、`updated_at`、`agent_infra_version`（先读 `.agents/rules/version-stamp.md`）；若 `start_date` 为空，同时写入当日日期（`date +%F`），以满足 requirement-analysis 阶段 `start_date` 必填校验。
   3. 追加 Activity Log：`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Brainstorming)** by {agent} — Asked Q{question_count}, awaiting answer`。
   4. Issue 同步（存在 `issue_number` 时，任一失败跳过）：先读 `.agents/rules/issue-sync.md` 完成 upstream / 权限检测；仅按 task.md 评论同步规则更新 **task 评论**；`status` label 维持 `pending-design-work`；**不**发布分析产物评论。
-  5. 校验（替代步骤 8 的 artifact gate）：`node .agents/scripts/validate-artifact.js check task-meta .agents/workspace/active/{task-id} --skill analyze-task --format text`（早退已置 `current_step: requirement-analysis`，预期通过）；并保留 `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` 与 task 评论同步证据。**不**跑 artifact gate，也不跑 `check activity-log` / `check platform-sync`（二者绑定分析产物路径）。
+  5. 校验（替代步骤 8 的 artifact gate）：`node .agents/scripts/validate-artifact.js check task-meta .agents/workspace/active/{task-id} --skill analyze-task --format text`（早退已置 `current_step: requirement-analysis` 且已写入 `start_date`，预期通过）；并保留 `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` 与 task 评论同步证据。**不**跑 artifact gate，也不跑 `check activity-log` / `check platform-sync`（二者绑定分析产物路径）。
   6. 用户输出：只展示当前**单个问题** + 如何回答/继续（再次触发 `analyze-task {task-ref}` 并附答案），并按 `.agents/rules/next-step-output.md` 在末行追加 `Completed at`。
   7. **STOP**，等待回答。下一次触发回到本步骤。
 

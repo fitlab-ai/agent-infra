@@ -104,7 +104,7 @@ assigned_to: {current AI agent}
 ```
 
 Note: `created_by` is `human` because the task comes from the user's description.
-priority / effort are required: the AI infers them from the task title and description (candidates in `.agents/rules/issue-fields.md`; normalize localized input). Leave start_date / target_date empty at creation - analyze-task / plan-task fill them later; do not invent dates.
+priority / effort are required: the AI infers them from the task title and description (candidates in `.agents/rules/issue-fields.md`; normalize localized input). Leave start_date / target_date empty at creation: `start_date` is written by the analyze stage and `target_date` by the complete stage; do not invent dates.
 
 ### 3. Update Task Status
 

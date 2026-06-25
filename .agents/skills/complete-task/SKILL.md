@@ -129,6 +129,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `status`：completed
 - `current_step`：completed
 - `completed_at`：{当前时间戳}
+- `target_date`：仅当为空时写入 `completed_at` 的日期部分（`YYYY-MM-DD`）；已有值（人工填写）则保留
 - `updated_at`：{当前时间戳}
 - `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - 新增或更新 `## 状态核对` 段，粘贴第 0 步审计命令原文（含 `$ ` 前缀行），放在 `## 活动日志` 之前

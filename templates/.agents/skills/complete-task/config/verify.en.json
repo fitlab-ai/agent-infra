@@ -15,7 +15,8 @@
         "completed_at"
       ],
       "expected_status": "completed",
-      "require_completed_at": true
+      "require_completed_at": true,
+      "require_target_date": true
     },
     "activity-log": {
       "expected_action_pattern": "(Complete Task|Completed)",
