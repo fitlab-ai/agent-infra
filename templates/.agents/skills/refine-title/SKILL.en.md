@@ -1,6 +1,8 @@
 ---
 name: refine-title
-description: "Rewrite an Issue or PR title in Conventional Commits format. Use when an Issue or PR title needs rewriting into Conventional Commits format."
+description: >
+  Rewrite an Issue or PR title in Conventional Commits format.
+  Use when an Issue or PR title needs rewriting into Conventional Commits format.
 ---
 
 # Refine Title

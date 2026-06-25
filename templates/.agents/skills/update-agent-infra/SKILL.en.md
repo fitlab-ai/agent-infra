@@ -1,6 +1,8 @@
 ---
 name: update-agent-infra
-description: "Update the project AI collaboration configuration. Use when the project's AI collaboration configuration needs updating to the latest templates."
+description: >
+  Update the project AI collaboration configuration.
+  Use when the project's AI collaboration configuration needs updating to the latest templates.
 ---
 
 # Update Project

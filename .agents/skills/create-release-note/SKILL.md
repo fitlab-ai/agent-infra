@@ -1,6 +1,8 @@
 ---
 name: create-release-note
-description: "从 PR 和 commit 生成版本发布说明。当准备发版、需要从 PR 与 commit 汇总发布说明时使用。"
+description: >
+  从 PR 和 commit 生成版本发布说明。
+  当准备发版、需要从 PR 与 commit 汇总发布说明时使用。
 ---
 
 # 创建发布说明

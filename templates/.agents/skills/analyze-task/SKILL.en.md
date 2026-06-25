@@ -1,6 +1,8 @@
 ---
 name: analyze-task
-description: "Analyze a task and produce a requirements document. Use when you need to understand a task's requirements, scope, and risks before designing a solution."
+description: >
+  Analyze a task and produce a requirements document.
+  Use when you need to understand a task's requirements, scope, and risks before designing a solution.
 ---
 
 # Analyze Task

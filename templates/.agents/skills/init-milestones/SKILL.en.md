@@ -1,6 +1,8 @@
 ---
 name: init-milestones
-description: "Initialize the repository's standard milestones taxonomy. Use when setting up a repository and you need the standard milestone taxonomy created."
+description: >
+  Initialize the repository's standard milestones taxonomy.
+  Use when setting up a repository and you need the standard milestone taxonomy created.
 ---
 
 # Initialize milestones

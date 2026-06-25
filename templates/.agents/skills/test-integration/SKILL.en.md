@@ -1,6 +1,8 @@
 ---
 name: test-integration
-description: "Run the integration test workflow. Use when you need to run the project's integration tests."
+description: >
+  Run the integration test workflow.
+  Use when you need to run the project's integration tests.
 ---
 
 # Run Integration Tests

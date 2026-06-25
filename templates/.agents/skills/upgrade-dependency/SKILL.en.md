@@ -1,6 +1,8 @@
 ---
 name: upgrade-dependency
-description: "Upgrade a dependency and validate the change. Use when a dependency needs upgrading and the change validated."
+description: >
+  Upgrade a dependency and validate the change.
+  Use when a dependency needs upgrading and the change validated.
 ---
 
 # Upgrade Dependency

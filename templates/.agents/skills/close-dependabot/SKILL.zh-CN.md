@@ -1,6 +1,8 @@
 ---
 name: close-dependabot
-description: "关闭 Dependabot 安全告警并记录理由。当某条 Dependabot 安全告警已处理或需按理由关闭时使用。"
+description: >
+  关闭 Dependabot 安全告警并记录理由。
+  当某条 Dependabot 安全告警已处理或需按理由关闭时使用。
 ---
 
 # 关闭 Dependabot 告警

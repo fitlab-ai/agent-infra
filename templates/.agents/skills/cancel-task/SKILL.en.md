@@ -1,6 +1,8 @@
 ---
 name: cancel-task
-description: "Cancel an unneeded task and move it. Use when a task is no longer needed and should be dropped from active work."
+description: >
+  Cancel an unneeded task and move it.
+  Use when a task is no longer needed and should be dropped from active work.
 ---
 
 # Cancel Task

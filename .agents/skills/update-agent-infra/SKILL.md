@@ -1,6 +1,8 @@
 ---
 name: update-agent-infra
-description: "更新项目 AI 协作配置。当需要把项目 AI 协作配置更新到最新模板时使用。"
+description: >
+  更新项目 AI 协作配置。
+  当需要把项目 AI 协作配置更新到最新模板时使用。
 ---
 
 # 更新项目

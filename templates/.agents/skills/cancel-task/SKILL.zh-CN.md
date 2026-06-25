@@ -1,6 +1,8 @@
 ---
 name: cancel-task
-description: "取消不再需要的任务并转移。当某个任务不再需要、应从 active 工作中撤下时使用。"
+description: >
+  取消不再需要的任务并转移。
+  当某个任务不再需要、应从 active 工作中撤下时使用。
 ---
 
 # 取消任务

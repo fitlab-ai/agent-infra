@@ -1,6 +1,8 @@
 ---
 name: watch-pr
-description: "Watch a PR's required checks and self-heal on failure. Use when you need to monitor a PR's required checks and auto-recover on failure."
+description: >
+  Watch a PR's required checks and self-heal on failure.
+  Use when you need to monitor a PR's required checks and auto-recover on failure.
 ---
 
 # Watch Pull Request

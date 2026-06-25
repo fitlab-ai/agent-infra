@@ -1,6 +1,8 @@
 ---
 name: archive-tasks
-description: "Archive completed tasks into a date-organized workspace directory. Use when completed tasks have piled up in the active workspace and you want to tidy them into the archive."
+description: >
+  Archive completed tasks into a date-organized workspace directory.
+  Use when completed tasks have accumulated and you want to tidy them into the date-organized archive.
 ---
 
 # Archive Completed Tasks

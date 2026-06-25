@@ -1,6 +1,8 @@
 ---
 name: create-pr
-description: "Create a Pull Request to a target branch. Use when changes are committed and you need to open a Pull Request for review."
+description: >
+  Create a Pull Request to a target branch.
+  Use when changes are committed and you need to open a Pull Request for review.
 ---
 
 # Create Pull Request

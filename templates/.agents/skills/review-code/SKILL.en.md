@@ -1,6 +1,8 @@
 ---
 name: review-code
-description: "Review code implementation and output a code review report. Use when a code implementation needs review before merging."
+description: >
+  Review code implementation and output a code review report.
+  Use when a code implementation needs review before merging.
 ---
 
 # Code Review

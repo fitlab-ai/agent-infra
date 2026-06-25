@@ -1,6 +1,8 @@
 ---
 name: watch-pr
-description: "监控 PR 的 required checks 并在失败时自愈。当需要监控 PR 的 required checks 并在失败时自愈时使用。"
+description: >
+  监控 PR 的 required checks 并在失败时自愈。
+  当需要监控 PR 的 required checks 并在失败时自愈时使用。
 ---
 
 # 监控 Pull Request

@@ -1,6 +1,8 @@
 ---
 name: create-task
-description: "Create a task from a natural-language description. Use when you want to turn a free-form idea or request into a tracked task."
+description: >
+  Create a task from a natural-language description.
+  Use when you want to turn a free-form idea or request into a tracked task.
 ---
 
 # Create Task

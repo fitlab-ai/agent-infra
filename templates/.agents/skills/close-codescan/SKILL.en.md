@@ -1,6 +1,8 @@
 ---
 name: close-codescan
-description: "Close a Code Scanning alert with a documented reason. Use when a Code Scanning alert has been handled or dismissed and needs closing with a reason."
+description: >
+  Close a Code Scanning alert with a documented reason.
+  Use when a Code Scanning alert has been handled or dismissed and needs closing with a reason.
 ---
 
 # Dismiss Code Scanning Alert

@@ -1,6 +1,8 @@
 ---
 name: review-analysis
-description: "Review the requirement analysis artifact. Use when a requirements analysis needs an independent review before planning."
+description: >
+  Review the requirement analysis artifact.
+  Use when a requirements analysis needs an independent review before planning.
 ---
 
 # Requirement Analysis Review

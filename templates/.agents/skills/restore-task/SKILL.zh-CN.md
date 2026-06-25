@@ -1,6 +1,8 @@
 ---
 name: restore-task
-description: "从平台 Issue 评论还原本地任务文件。当本地任务文件缺失、需要从平台 Issue 评论还原时使用。"
+description: >
+  从平台 Issue 评论还原本地任务文件。
+  当本地任务文件缺失、需要从平台 Issue 评论还原时使用。
 ---
 
 # 还原任务

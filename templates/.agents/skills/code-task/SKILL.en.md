@@ -1,6 +1,8 @@
 ---
 name: code-task
-description: "Implement code from the technical plan and output a report. Use when an approved technical plan is ready and you need to implement it."
+description: >
+  Implement code from the technical plan and output a report.
+  Use when an approved technical plan needs implementing, or code review found issues to fix.
 ---
 
 # Code Task

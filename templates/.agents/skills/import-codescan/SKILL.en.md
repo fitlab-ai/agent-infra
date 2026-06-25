@@ -1,6 +1,8 @@
 ---
 name: import-codescan
-description: "Import a Code Scanning alert and create a remediation task. Use when a Code Scanning alert needs to become a tracked remediation task."
+description: >
+  Import a Code Scanning alert and create a remediation task.
+  Use when a Code Scanning alert needs to become a tracked remediation task.
 ---
 
 # Import Code Scanning Alert

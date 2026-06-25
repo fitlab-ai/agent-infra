@@ -1,6 +1,8 @@
 ---
 name: commit
-description: "Commit the current changes to Git. Use when finished work needs to be turned into a Git commit."
+description: >
+  Commit the current changes to Git.
+  Use when finished work needs to be turned into a Git commit.
 ---
 
 # Commit Changes
