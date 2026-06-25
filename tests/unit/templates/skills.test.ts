@@ -801,3 +801,14 @@ test("commit skill push-to-existing-PR step keeps level-2 steps numbered 1..9", 
     );
   });
 });
+
+test("deployed create-issue rule stays byte-identical to its github zh-CN template", () => {
+  // create-issue body construction delegates to `ai task issue-body`; the
+  // deployed copy is the rendered github zh-CN variant. Guard against drift the
+  // same way analyze-task / no-mid-flow-questions are guarded above.
+  assert.equal(
+    read(".agents/rules/create-issue.md"),
+    read("templates/.agents/rules/create-issue.github.zh-CN.md"),
+    "deployed create-issue rule should stay byte-identical to its github zh-CN template variant"
+  );
+});

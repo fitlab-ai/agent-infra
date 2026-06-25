@@ -22,10 +22,10 @@ After `create-task` writes the local `task.md`, follow this rule to cascade Issu
 
 Pull the following from `task.md`:
 
-- Task title (the first `# ` heading, stripped of `任务：` / `Task:` prefixes)
-- The `## Description` / `## 描述` section
-- The `## Requirements` / `## 需求` section
+- Task title (the first `# ` heading, stripped of `任务：` / `Task:` prefixes) — used to build the Issue title
 - frontmatter fields `type` and (optionally) `milestone`
+
+> The Issue **body** is not extracted by hand here. It is generated deterministically in §3 by the `ai task issue-body` command from the `## 描述` / `## 需求` sections; callers must not assemble it themselves.
 
 Build the Issue title:
 
@@ -41,45 +41,35 @@ Scope inference: read known module names from `.agents/.airc.json`'s `labels.in`
 
 ### 3. Build the Issue Body
 
+> **Mechanization boundary (mandatory)**: the Issue body is always produced deterministically by the `ai task issue-body` command; callers only pass the command's stdout to `gh issue create` via `--body-file` and must **not** assemble, rewrite, or truncate the body themselves. The command emits only the task title / `## 描述` / `## 需求` content; every other task.md scaffolding section never enters the body.
+
 Issue Form detection: follow the "Issue Template Detection" section in `.agents/rules/issue-pr-commands.md` to scan `.github/ISSUE_TEMPLATE/*.yml` (excluding `config.yml`).
 
 #### Scenario A: A matching template was detected
 
 Pick the form whose `name` (or filename) best matches the task type (e.g., a task with `type: bugfix` prefers a form whose name contains `bug`); if no match, fall back to a generic form like `other.yml`; if none, take the first form in the directory.
 
-Populate the form by following the field-handling rules in `.agents/rules/issue-pr-commands.md` § "Issue Template Detection":
+Once the form file `{form-path}` is chosen, let the command render the final body from that Issue Form and write it to the body file `{body-file}` for §5:
 
-- `textarea` / `input` fields: use `attributes.label` as a markdown heading and pull values from task.md
-- `markdown` fields: skip (these are description blurbs)
-- `dropdown` / `checkboxes` fields: skip
+```bash
+ai task issue-body {task-id} --template "{form-path}" > "{body-file}"
+```
 
-Recommended field-to-source mapping:
-
-| Template field hint | Source in task.md |
-|---|---|
-| `summary`, `title` | task title |
-| `description`, `problem`, `what happened`, `issue-description`, `current-content` | task description |
-| `solution`, `requirements`, `steps`, `suggested-content`, `impact`, `context`, `alternatives`, `expected` | requirements list (preserve checked / unchecked state as-is) |
-| Other `textarea` / `input` fields | task description, or `N/A` if missing |
-
-Whenever task.md does not provide a usable value, write `N/A`.
+The command skips `markdown` / `dropdown` / `checkboxes` fields and, for `input` / `textarea` fields, uses `attributes.label` as the heading and deterministically fills the task title / description / requirements by field `id`, writing `N/A` for fields with no reliable source (the field mapping table is the single source of truth inside the command and is not restated here). When the command exits non-zero (missing file / invalid YAML / no `body`), regenerate `{body-file}` with the Scenario B command instead.
 
 #### Scenario B: No template, or template parsing failed
 
-Fall back to the default body:
+Let the command emit the default body (only `## 描述` + `## 需求`, checkbox text preserved verbatim, missing sections filled with `N/A`) into `{body-file}`:
 
-```markdown
-## Description
-
-{task description, or N/A if missing}
-
-## Requirements
-
-- [ ] {requirement-1}
-- [ ] {requirement-2}
+```bash
+ai task issue-body {task-id} > "{body-file}"
 ```
 
-If the requirements list is empty, write `N/A` in that section.
+#### Red line: never use the entire task.md as the body
+
+In both Scenario A and B, the body may only come from `ai task issue-body` stdout and contains **only the description + requirements content** (Scenario A is the equivalent content mapped onto template fields).
+
+Wrong example (❌ forbidden): pasting the entire task.md — including scaffolding sections such as `## 分析` / `## 设计` / `## 实现备注` / `## 审查反馈` / `## 审查分歧账本` / `## 人工裁决` / `## 活动日志` / `## 完成检查清单` and `#XXX` placeholders — directly as the Issue body. Those sections only go to the `sync-issue:{task-id}:task` comment, never the body.
 
 ### 4. Resolve labels / Issue Type / milestone
 
@@ -137,17 +127,18 @@ When a milestone is selected, pass the release line (or `General Backlog` or the
 
 ### 5. Call the GitHub CLI to Create the Issue
 
-Run the "Create Issue" command from `.agents/rules/issue-pr-commands.md`:
+Run the "Create Issue" command from `.agents/rules/issue-pr-commands.md`; always use the `{body-file}` produced in §3, overriding the generic command's `--body`:
 
 ```bash
 gh issue create -R "$upstream_repo" \
   --title "{title}" \
-  --body "{body}" \
+  --body-file "{body-file}" \
   --assignee @me \
   {label-args} \
   {milestone-arg}
 ```
 
+- `{body-file}` is the body file produced in §3 by `ai task issue-body`; do **not** switch back to `--body` and assemble the body by hand
 - `{label-args}` is expanded from the result of §4 into multiple `--label "..."`; if empty, omit the entire argument
 - `{milestone-arg}` is only expanded to `--milestone "..."` when `has_triage=true` and milestone is non-empty; otherwise omit
 - `--assignee @me` requires no permission probe; on failure, skip silently

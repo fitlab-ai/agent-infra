@@ -29,7 +29,8 @@ test("package metadata supports scoped npm publishing", () => {
     "cross-spawn",
     "picocolors",
     "semver",
-    "smol-toml"
+    "smol-toml",
+    "yaml"
   ]);
   assert.match(pkg.scripts.prepublishOnly, /npm run build/);
   assert.match(pkg.scripts.prepublishOnly, /--test/);

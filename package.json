@@ -47,7 +47,8 @@
     "cross-spawn": "^7.0.6",
     "picocolors": "1.1.1",
     "semver": "^7.8.1",
-    "smol-toml": "^1.6.1"
+    "smol-toml": "^1.6.1",
+    "yaml": "^2.9.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build.js && node scripts/build-inline.js",
