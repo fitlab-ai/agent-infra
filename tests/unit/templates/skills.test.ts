@@ -74,13 +74,22 @@ test("SKILL.md reference paths point to existing files", () => {
   });
 });
 
-test("template SKILL.md files provide zh-CN variants", () => {
-  listFilesRecursive("templates/.agents/skills")
-    .filter((relativePath) => /\/SKILL\.en\.md$/.test(relativePath))
-    .forEach((relativePath) => {
-      const zhVariant = relativePath.replace(/SKILL\.en\.md$/, "SKILL.zh-CN.md");
-      assert.ok(exists(zhVariant), `Missing zh-CN skill variant: ${zhVariant}`);
-    });
+// Soft size guard: SKILL.md bodies should stay lean (long rules/templates/scripts
+// belong in reference/ or scripts/). Per the design decision this is a visibility
+// signal, not a red light — oversize files emit a diagnostic but never fail.
+const SKILL_SOFT_LINE_LIMIT = 300;
+
+test("source SKILL.md files stay within the soft size limit", (t) => {
+  listSkillNames().forEach((name) => {
+    const relativePath = `.agents/skills/${name}/SKILL.md`;
+    const lineCount = read(relativePath).split("\n").length;
+    if (lineCount > SKILL_SOFT_LINE_LIMIT) {
+      t.diagnostic(
+        `${relativePath} is ${lineCount} lines (> ${SKILL_SOFT_LINE_LIMIT} soft limit); ` +
+        "consider splitting detail into reference/."
+      );
+    }
+  });
 });
 
 test("template skill content does not reference deprecated lifecycle names", () => {

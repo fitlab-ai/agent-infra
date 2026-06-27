@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 // =====================================================================
 // CRITICAL: tests that spawn real `git` commands MUST use gitSafeEnv()
@@ -77,8 +80,24 @@ function initIsolatedGitRepo(repoRoot: string, { remote = null }: { remote?: str
   }
 }
 
+// List repo-tracked files matching the given git pathspecs, relative to the
+// repository root. Callers can pass exclude pathspecs (e.g. ":!:node_modules/**")
+// to scope the result. Uses gitSafeEnv() so it never touches an outer repo.
+function listTrackedFiles(...patterns: string[]): string[] {
+  const result = spawnSync("git", ["ls-files", "-z", ...patterns], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: gitSafeEnv()
+  });
+  if (result.status !== 0) {
+    throw new Error(`git ls-files failed: ${result.stderr}`);
+  }
+  return result.stdout.split("\0").filter((line) => line.length > 0);
+}
+
 export {
   gitSafeEnv,
   initIsolatedGitRepo,
+  listTrackedFiles,
   withGitSafeProcessEnv
 };

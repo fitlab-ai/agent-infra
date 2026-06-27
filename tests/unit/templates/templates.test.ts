@@ -499,6 +499,20 @@ test("rules README index lists every distributed rule file", () => {
   });
 });
 
+test("source rules README references only existing rule files", () => {
+  // Reverse of the index check above: every same-directory `.md` link in the
+  // source README must resolve to a real rule file. Catches dangling entries
+  // left behind when a rule is renamed or deleted. Links containing a path
+  // separator (cross-directory / external) are out of scope for the index.
+  const dir = ".agents/rules";
+  const index = read(`${dir}/README.md`);
+  const referencedNames = [...index.matchAll(/\]\(([^)/]+\.md)\)/g)].map((match) => match[1]);
+
+  [...new Set(referencedNames)].forEach((name) => {
+    assert.ok(exists(`${dir}/${name}`), `rules/README.md references missing rule file: ${name}`);
+  });
+});
+
 test("rendered rules README references only distributed files", () => {
   const collaborator = JSON.parse(read(".agents/.airc.json"));
   const replacements = { project: collaborator.project, org: collaborator.org };
