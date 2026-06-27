@@ -103,5 +103,20 @@
   },
   "task": {
     "shortIdLength": 2
+  },
+  "review": {
+    "post_review_globs": [
+      ".agents/.airc.json",
+      ".agents/rules",
+      ".agents/scripts",
+      ".agents/skills",
+      ".agents/workflows",
+      ".git-hooks/pre-commit",
+      ".github/workflows",
+      "bin",
+      "lib",
+      "src",
+      "templates"
+    ]
   }
 }

@@ -35,6 +35,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify inline build output is committed
+        run: node scripts/build-inline.js --check
+
       - name: Build
         run: npm run build
 
