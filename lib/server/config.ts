@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { homedir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 export type ServerLogConfig = {
@@ -15,6 +17,8 @@ export type ServerAdapterConfig = {
 export type ServerConfig = {
   repoRoot: string;
   log: ServerLogConfig;
+  // Absolute path to the PID file, under ~/.agent-infra/run/<project>/server.pid.
+  pidFile: string;
   heartbeatMs: number;
   adapters: Record<string, ServerAdapterConfig>;
   // command / auth are reserved for subtasks B/C; subtask A passes them
@@ -33,23 +37,54 @@ const ENV_PREFIX = 'AGENT_INFRA_SERVER_';
 // secret. Secrets belong in .agents/server.local.json or the environment.
 const SECRET_KEY_PATTERN = /secret|token|password|passwd|credential|apikey|api_key/i;
 
-const DEFAULT_LOG: ServerLogConfig = {
-  path: '.agents/server.log',
-  rotateAtBytes: 52_428_800 // 50 MiB
-};
+const DEFAULT_ROTATE_BYTES = 52_428_800; // 50 MiB
 
 export const DEFAULT_SERVER_CONFIG: {
-  log: ServerLogConfig;
+  log: { rotateAtBytes: number };
   heartbeatMs: number;
   adapters: Record<string, ServerAdapterConfig>;
 } = {
-  log: { ...DEFAULT_LOG },
+  log: { rotateAtBytes: DEFAULT_ROTATE_BYTES },
   heartbeatMs: 30_000,
   adapters: {}
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// Daemon runtime state (log + PID) lives OUTSIDE the repo, under the user's home
+// directory, keyed by the .airc.json "project" AND a stable hash of the repo
+// root path:
+//   ~/.agent-infra/logs/<project>/<repo-hash>/server.log
+//   ~/.agent-infra/run/<project>/<repo-hash>/server.pid
+// The <project> segment groups a project's checkouts for readability; the
+// <repo-hash> segment guarantees that two checkouts/worktrees of the same
+// project (same "project" but different absolute path) get ISOLATED runtime
+// dirs, so they never read/control each other's daemon. Using os.homedir() +
+// path.join keeps this correct on Windows too (C:\Users\<name>\.agent-infra\...).
+// An explicit log.path in server.json/.local/env still overrides the log default.
+function resolveProjectKey(repoRoot: string): string {
+  try {
+    const airc = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')
+    ) as { project?: unknown };
+    if (typeof airc.project === 'string' && airc.project.trim() !== '') {
+      return airc.project.trim();
+    }
+  } catch {
+    // No .airc.json / unreadable → fall back to the repo directory name.
+  }
+  return path.basename(repoRoot);
+}
+
+// Short, stable, filesystem-safe discriminator for a checkout's absolute path.
+function repoKey(repoRoot: string): string {
+  return createHash('sha256').update(repoRoot).digest('hex').slice(0, 12);
+}
+
+function runtimePath(repoRoot: string, projectKey: string, kind: 'logs' | 'run', file: string): string {
+  return path.join(homedir(), '.agent-infra', kind, projectKey, repoKey(repoRoot), file);
 }
 
 function detectRepoRoot(): string {
@@ -162,20 +197,28 @@ export function loadServerConfig({ rootDir }: { rootDir?: string } = {}): Server
   const local = readJsonIfPresent(path.join(agentsDir, 'server.local.json'));
 
   let merged: Record<string, unknown> = deepMerge<Record<string, unknown>>(
-    { log: { ...DEFAULT_LOG }, heartbeatMs: DEFAULT_SERVER_CONFIG.heartbeatMs, adapters: {} },
+    { log: { rotateAtBytes: DEFAULT_ROTATE_BYTES }, heartbeatMs: DEFAULT_SERVER_CONFIG.heartbeatMs, adapters: {} },
     committed
   );
   merged = deepMerge(merged, local);
   merged = deepMerge(merged, envOverrides(process.env));
 
+  const projectKey = resolveProjectKey(repoRoot);
+
   const log = isPlainObject(merged.log) ? merged.log : {};
-  const logPath = typeof log.path === 'string' ? log.path : DEFAULT_LOG.path;
+  // No explicit log.path → default under ~/.agent-infra/logs/<project>/.
+  // Explicit relative path resolves against the repo root; absolute is used as-is.
+  const explicitPath = typeof log.path === 'string' ? log.path : null;
+  const resolvedLogPath = explicitPath === null
+    ? runtimePath(repoRoot, projectKey, 'logs', 'server.log')
+    : (path.isAbsolute(explicitPath) ? explicitPath : path.join(repoRoot, explicitPath));
 
   return {
     repoRoot,
+    pidFile: runtimePath(repoRoot, projectKey, 'run', 'server.pid'),
     log: {
-      path: path.isAbsolute(logPath) ? logPath : path.join(repoRoot, logPath),
-      rotateAtBytes: typeof log.rotateAtBytes === 'number' ? log.rotateAtBytes : DEFAULT_LOG.rotateAtBytes
+      path: resolvedLogPath,
+      rotateAtBytes: typeof log.rotateAtBytes === 'number' ? log.rotateAtBytes : DEFAULT_ROTATE_BYTES
     },
     heartbeatMs: typeof merged.heartbeatMs === 'number' ? merged.heartbeatMs : DEFAULT_SERVER_CONFIG.heartbeatMs,
     adapters: isPlainObject(merged.adapters) ? (merged.adapters as Record<string, ServerAdapterConfig>) : {},

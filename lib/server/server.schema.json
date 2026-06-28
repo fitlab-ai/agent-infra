@@ -15,8 +15,7 @@
       "properties": {
         "path": {
           "type": "string",
-          "description": "Log file path. Relative paths resolve against the repo root.",
-          "default": ".agents/server.log"
+          "description": "Log file path. Defaults to ~/.agent-infra/logs/<project>/<repo-hash>/server.log (outside the repo; the repo-hash isolates checkouts that share a project). Relative paths resolve against the repo root; absolute paths are used as-is."
         },
         "rotateAtBytes": {
           "type": "integer",

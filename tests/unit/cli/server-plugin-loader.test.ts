@@ -9,7 +9,8 @@ import type { Adapter, AdapterCtx } from '../../../lib/server/adapters/_contract
 function makeConfig(adapters: Record<string, ServerAdapterConfig>): ServerConfig {
   return {
     repoRoot: '/tmp/none',
-    log: { path: '/tmp/none/.agents/server.log', rotateAtBytes: 1024 },
+    pidFile: '/tmp/none/.agent-infra/run/none/server.pid',
+    log: { path: '/tmp/none/.agent-infra/logs/none/server.log', rotateAtBytes: 1024 },
     heartbeatMs: 30_000,
     adapters
   };

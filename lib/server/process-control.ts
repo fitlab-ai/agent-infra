@@ -21,9 +21,6 @@ export function buildStopCommand(pid: number, platform: NodeJS.Platform): StopCo
   return { kind: 'signal', signal: 'SIGTERM' };
 }
 
-function pidFilePath(repoRoot: string): string {
-  return path.join(repoRoot, '.agents', 'server.pid');
-}
 
 // Liveness check that treats an exited-but-unreaped daemon as dead.
 //
@@ -52,9 +49,9 @@ export function isProcessAlive(pid: number): boolean {
   return true;
 }
 
-function readPid(repoRoot: string): number | null {
+function readPid(pidFile: string): number | null {
   try {
-    const raw = fs.readFileSync(pidFilePath(repoRoot), 'utf8').trim();
+    const raw = fs.readFileSync(pidFile, 'utf8').trim();
     const pid = Number.parseInt(raw, 10);
     return Number.isInteger(pid) && pid > 0 ? pid : null;
   } catch {
@@ -62,9 +59,9 @@ function readPid(repoRoot: string): number | null {
   }
 }
 
-function removePidFile(repoRoot: string): void {
+function removePidFile(pidFile: string): void {
   try {
-    fs.unlinkSync(pidFilePath(repoRoot));
+    fs.unlinkSync(pidFile);
   } catch {
     // Already gone.
   }
@@ -84,17 +81,17 @@ function enabledAdapterNames(config: ServerConfig): string[] {
 
 export async function start({ foreground = false }: StartOptions = {}): Promise<void> {
   const config = loadServerConfig();
-  const pidPath = pidFilePath(config.repoRoot);
+  const pidPath = config.pidFile;
 
   // Zombie PID cleanup: a stale PID file from a crashed daemon must not block a
   // fresh start.
-  const existing = readPid(config.repoRoot);
+  const existing = readPid(pidPath);
   if (existing !== null && isProcessAlive(existing)) {
     process.stdout.write(`server already running (pid ${existing})\n`);
     return;
   }
   if (existing !== null) {
-    removePidFile(config.repoRoot);
+    removePidFile(pidPath);
   }
 
   if (foreground) {
@@ -126,14 +123,14 @@ export async function start({ foreground = false }: StartOptions = {}): Promise<
 
 export async function stop(): Promise<void> {
   const config = loadServerConfig();
-  const pid = readPid(config.repoRoot);
+  const pid = readPid(config.pidFile);
 
   if (pid === null) {
     process.stdout.write('server is not running (no pid file)\n');
     return;
   }
   if (!isProcessAlive(pid)) {
-    removePidFile(config.repoRoot);
+    removePidFile(config.pidFile);
     process.stdout.write('server is not running (removed stale pid file)\n');
     return;
   }
@@ -152,13 +149,13 @@ export async function stop(): Promise<void> {
     }
   }
 
-  removePidFile(config.repoRoot);
+  removePidFile(config.pidFile);
   process.stdout.write(`server stopped (pid ${pid})\n`);
 }
 
 export function status(): void {
   const config = loadServerConfig();
-  const pid = readPid(config.repoRoot);
+  const pid = readPid(config.pidFile);
 
   if (pid === null || !isProcessAlive(pid)) {
     process.stdout.write('server: stopped\n');
@@ -170,7 +167,7 @@ export function status(): void {
 
   let startedAt = 'unknown';
   try {
-    startedAt = fs.statSync(pidFilePath(config.repoRoot)).mtime.toISOString();
+    startedAt = fs.statSync(config.pidFile).mtime.toISOString();
   } catch {
     // Leave as unknown.
   }
@@ -180,6 +177,7 @@ export function status(): void {
       `  pid: ${pid}\n` +
       `  started: ${startedAt}\n` +
       `  adapters: ${adapters.length > 0 ? adapters.join(', ') : '(none)'}\n` +
+      `  pid file: ${config.pidFile}\n` +
       `  log: ${config.log.path}\n`
   );
 }
