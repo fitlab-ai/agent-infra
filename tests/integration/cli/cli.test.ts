@@ -81,6 +81,19 @@ test("cli usage lists top-level command aliases (help and bare)", () => {
   }
 });
 
+test("cli server help prints server usage and exits 0", () => {
+  const result = spawnSync(process.execPath, cliArgs("server", "help"), {
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /^Usage: ai server <command>/m);
+  assert.match(result.stdout, /^\s+start\b/m);
+  assert.match(result.stdout, /^\s+stop\b/m);
+  assert.match(result.stdout, /^\s+status\b/m);
+  assert.match(result.stdout, /^\s+logs\b/m);
+});
+
 test("cli usage keeps alias command descriptions aligned", () => {
   const output = execFileSync(process.execPath, cliArgs("help"), {
     encoding: "utf8"

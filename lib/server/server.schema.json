@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/fitlab-ai/agent-infra/lib/server/server.schema.json",
+  "title": "agent-infra server configuration",
+  "description": "Schema for .agents/server.json. Secrets (appSecret, tokens, passwords) must NOT be committed here — put them in .agents/server.local.json or AGENT_INFRA_SERVER_* environment variables.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "log": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Log file path. Relative paths resolve against the repo root.",
+          "default": ".agents/server.log"
+        },
+        "rotateAtBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Rotate the log to <path>.1 at startup if it already exceeds this size.",
+          "default": 52428800
+        }
+      }
+    },
+    "heartbeatMs": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Interval between daemon heartbeat log lines, in milliseconds.",
+      "default": 30000
+    },
+    "adapters": {
+      "type": "object",
+      "description": "Per-adapter configuration. Only adapters with enabled=true are loaded.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": ["enabled"]
+      }
+    },
+    "command": {
+      "type": "object",
+      "description": "Reserved for the command protocol (subtask C).",
+      "additionalProperties": true
+    },
+    "auth": {
+      "type": "object",
+      "description": "Reserved for the auth model (subtask C).",
+      "additionalProperties": true
+    }
+  }
+}

@@ -6,6 +6,11 @@
 .agents/workspace/logs/
 .agents/workspace/.merge-backup/
 
+# agent-infra-server local secrets and runtime PID/logs
+.agents/server.local.json
+.agents/server.pid
+.agents/server.log.*
+
 # Claude Code local settings
 .claude/settings.local.json
 

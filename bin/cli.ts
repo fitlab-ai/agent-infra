@@ -20,6 +20,7 @@ Commands:
   init            Initialize a new project with update-agent-infra seed command
   merge           Merge tasks from another workspace directory (active/blocked/completed/archive)
   sandbox, s      Manage Docker-based AI sandboxes
+  server          Run the local AI collaboration daemon (start/stop/status/logs)
   task, t         Read-only views over .agents/workspace tasks (cat / files / grep / log / ls / show / status)
   update          Update seed files and sync file registry for an existing project
   version         Show version
@@ -103,6 +104,16 @@ switch (command) {
     if (!imported) break;
     const { runSandbox } = imported;
     await runSandbox(process.argv.slice(3)).catch((e: unknown) => {
+      process.stderr.write(`Error: ${errorMessage(e)}\n`);
+      process.exit(1);
+    });
+    break;
+  }
+  case 'server': {
+    const imported = await importCommand('../lib/server/index.ts');
+    if (!imported) break;
+    const { runServer } = imported;
+    await runServer(process.argv.slice(3)).catch((e: unknown) => {
       process.stderr.write(`Error: ${errorMessage(e)}\n`);
       process.exit(1);
     });
