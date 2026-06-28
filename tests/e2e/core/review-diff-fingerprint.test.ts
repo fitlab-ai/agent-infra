@@ -86,3 +86,47 @@ test("post-review globs are shared by the validator and fingerprint helper", () 
   assert.match(validator, /from "\.\/lib\/post-review-commit\.js"/);
   assert.match(validator, /resolvePostReviewGlobs\(config, loadReviewConfig\(\)\)/);
 });
+
+test("review diff fingerprint covers paths outside the legacy allowlist (fail-closed)", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-fingerprint-failclosed-", (tempRoot) => {
+    const baseline = setupRepo(tempRoot);
+    const clean = fingerprint(tempRoot, "worktree", baseline);
+
+    write(path.join(tempRoot, "scripts/x.js"), "// new generator change\n");
+    const changed = fingerprint(tempRoot, "worktree", baseline);
+    assert.notEqual(changed, clean);
+  });
+});
+
+test("review diff fingerprint covers package-lock.json by default", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-fingerprint-lockfile-", (tempRoot) => {
+    const baseline = setupRepo(tempRoot);
+    const clean = fingerprint(tempRoot, "worktree", baseline);
+
+    write(path.join(tempRoot, "package-lock.json"), "{}\n");
+    const changed = fingerprint(tempRoot, "worktree", baseline);
+    assert.notEqual(changed, clean);
+  });
+});
+
+test("review diff fingerprint honors project post_review_exclude_globs", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-fingerprint-exclude-", (tempRoot) => {
+    setupRepo(tempRoot);
+    write(
+      path.join(tempRoot, ".agents/.airc.json"),
+      JSON.stringify({ review: { post_review_exclude_globs: ["package-lock.json"] } }, null, 2) + "\n"
+    );
+    git(tempRoot, ["add", ".agents/.airc.json"]);
+    git(tempRoot, ["commit", "-qm", "add exclude config"]);
+    const baseline = git(tempRoot, ["rev-parse", "HEAD"]);
+    const clean = fingerprint(tempRoot, "worktree", baseline);
+
+    write(path.join(tempRoot, "package-lock.json"), "{}\n");
+    const excluded = fingerprint(tempRoot, "worktree", baseline);
+    assert.equal(excluded, clean);
+
+    write(path.join(tempRoot, "scripts/included.js"), "// not excluded\n");
+    const included = fingerprint(tempRoot, "worktree", baseline);
+    assert.notEqual(included, clean);
+  });
+});

@@ -217,3 +217,29 @@ test("post-review-commit blocks when the task is not inside a git repository", o
     assert.equal(payload.status, "blocked");
   });
 });
+
+test("post-review-commit fails for a commit outside the legacy allowlist (fail-closed coverage)", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-prc-failclosed-", (tempRoot) => {
+    const { taskDir } = setupRepo(tempRoot);
+    const baseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
+    write(path.join(taskDir, "task.md"), buildTask());
+    write(path.join(taskDir, "review-code.md"), buildReviewCode(baseline));
+    commitCodePath(tempRoot, "scripts/build-inline.js", "// generated\n", "post-review change to a previously-uncovered path");
+
+    const { payload } = runCheck(taskDir);
+    assert.equal(payload.status, "fail");
+  });
+});
+
+test("post-review-commit covers package-lock.json by default (no hardcoded exclusion)", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-prc-lockfile-", (tempRoot) => {
+    const { taskDir } = setupRepo(tempRoot);
+    const baseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
+    write(path.join(taskDir, "task.md"), buildTask());
+    write(path.join(taskDir, "review-code.md"), buildReviewCode(baseline));
+    commitCodePath(tempRoot, "package-lock.json", "{}\n", "post-review lockfile bump");
+
+    const { payload } = runCheck(taskDir);
+    assert.equal(payload.status, "fail");
+  });
+});

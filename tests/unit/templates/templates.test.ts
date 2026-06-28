@@ -209,6 +209,8 @@ test("update-agent-infra template copies stay in sync with working files", () =>
     [".agents/skills/update-agent-infra/scripts/sync-templates.js", "templates/.agents/skills/update-agent-infra/scripts/sync-templates.js"],
     [".agents/scripts/validate-artifact.js", "templates/.agents/scripts/validate-artifact.js"],
     [".agents/scripts/lib/review-artifacts.js", "templates/.agents/scripts/lib/review-artifacts.js"],
+    [".agents/scripts/lib/post-review-commit.js", "templates/.agents/scripts/lib/post-review-commit.js"],
+    [".agents/scripts/review-diff-fingerprint.js", "templates/.agents/scripts/review-diff-fingerprint.js"],
     [".agents/workflows/feature-development.yaml", "templates/.agents/workflows/feature-development.en.yaml"],
     [".agents/workflows/bug-fix.yaml", "templates/.agents/workflows/bug-fix.en.yaml"],
     [".agents/workflows/refactoring.yaml", "templates/.agents/workflows/refactoring.en.yaml"],
