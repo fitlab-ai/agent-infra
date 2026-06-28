@@ -6,11 +6,9 @@
 .agents/workspace/logs/
 .agents/workspace/.merge-backup/
 
-# agent-infra-server local secrets (in-repo).
-# Runtime state (PID, logs) defaults to ~/.agent-infra/; the .log.* rule only
-# matters if log.path is overridden back into the repo.
+# agent-infra-server local secrets (in-repo). Runtime state (PID, logs) lives
+# under ~/.agent-infra/, outside the repo, so it needs no ignore rule here.
 .agents/server.local.json
-.agents/server.log.*
 
 # Claude Code local settings
 .claude/settings.local.json
