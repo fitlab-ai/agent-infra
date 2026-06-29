@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ServerConfig } from './config.ts';
 import type { Adapter, AdapterCtx } from './adapters/_contract.ts';
 
@@ -10,7 +12,17 @@ export type LoadAdaptersOptions = {
   importAdapter?: ImportAdapter;
 };
 
-const defaultImportAdapter: ImportAdapter = (name) => import(`./adapters/${name}/index.ts`);
+const defaultImportAdapter: ImportAdapter = (name) => {
+  // Test-only seam: when AGENT_INFRA_SERVER_TEST_ADAPTERS_DIR is set (never in
+  // production), resolve the named adapter as a plain ESM `.js` from that
+  // fixtures dir. This lets a built daemon (`node dist/bin/cli.js`) load a test
+  // injection adapter on any node>=22 without depending on type stripping.
+  const testDir = process.env.AGENT_INFRA_SERVER_TEST_ADAPTERS_DIR;
+  if (testDir) {
+    return import(pathToFileURL(path.join(testDir, name, 'index.js')).href);
+  }
+  return import(`./adapters/${name}/index.ts`);
+};
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

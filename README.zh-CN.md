@@ -166,6 +166,29 @@ CLI 会收集项目元数据，向所有支持的 AI TUI 安装 `update-agent-in
 
 完整清单（任务状态、发布、安全、项目维护等 skill）见 [内置 AI Skills](./docs/zh-CN/skills.md)。
 
+## 启用飞书桥接
+
+本地 `ai server` 守护进程可托管 IM adapter。飞书（Lark）adapter 通过长连接接入，把群消息路由到内置命令分发器——当前 `/ping` 回复 `pong v<VERSION>`。
+
+1. 在[飞书开放平台](https://open.feishu.cn/app)创建一个**自建应用**。
+2. 申请权限 `im:message`、`im:message.receive_v1`、`im:chat`。
+3. 在**事件与回调**中启用**“使用长连接接收事件”**，并订阅 `im.message.receive_v1`。
+4. 把 **App ID** 和 **App Secret** 填入 `.agents/server.local.json`（该文件已被 git 忽略；切勿提交密钥——已提交的 `.agents/server.json` 中若含密钥会在启动时被拒绝）：
+
+   ```json
+   {
+     "adapters": {
+       "feishu": {
+         "enabled": true,
+         "appId": "<your-app-id>",
+         "appSecret": "<your-app-secret>"
+       }
+     }
+   }
+   ```
+
+5. 运行 `ai server start`，然后在飞书群里 `@bot /ping`——机器人回复 `pong v<VERSION>`。
+
 ## 安装效果
 
 安装完成后，项目将获得完整的 AI 协作基础设施：

@@ -34,6 +34,29 @@
     "adapters": {
       "type": "object",
       "description": "Per-adapter configuration. Only adapters with enabled=true are loaded.",
+      "properties": {
+        "feishu": {
+          "type": "object",
+          "description": "Feishu (Lark) IM adapter. The appSecret must NOT be committed here — put it in .agents/server.local.json or AGENT_INFRA_SERVER_adapters__feishu__appSecret.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "appId": {
+              "type": "string",
+              "description": "Feishu self-built app App ID."
+            },
+            "domain": {
+              "type": "string",
+              "enum": ["feishu", "lark"],
+              "default": "feishu",
+              "description": "Open platform domain: feishu (default) or lark."
+            }
+          },
+          "required": ["enabled"]
+        }
+      },
       "additionalProperties": {
         "type": "object",
         "properties": {
