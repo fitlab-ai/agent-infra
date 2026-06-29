@@ -78,7 +78,7 @@ This section is a **third standalone rule, co-equal with the two above**, used o
   …(one entry per status=needs-human-decision row of this stage in task.md `## 审查分歧账本`)
 
 View details:
-  - All pending decisions: ai task decisions {task-ref} (short form ai task d {task-ref})
+  - All pending decisions: ai task decisions {task-ref}
   - A single item's full background/options/impact/recommendation: ai task decisions {task-ref} <ordinal|HD-id>
 
 To resolve:

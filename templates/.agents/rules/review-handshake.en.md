@@ -81,7 +81,7 @@ When an executor judges an item to be a key design decision that needs human rul
 - `evidence` points to the stable anchor `<artifact>#HD-N` (e.g. `plan-r2.md#HD-1`), not a drift-prone line number.
 - After a human records the ruling in task.md `## Human Rulings`, flip the matching `HD-` row to `human-decided` and point `evidence` to that ruling.
 
-> View: `ai task decisions <task-ref>` (short form `ai task d`) lists all pending decisions; `ai task decisions <task-ref> <ordinal|HD-id>` expands a single item's detail block. This command shares the ledger parser `lib/task/ledger.ts` with `ai task log`; the gate parser in `.agents/scripts/validate-artifact.js` is a separate implementation and the two must be kept semantically in sync by hand.
+> View: `ai task decisions <task-ref>` lists all pending decisions; `ai task decisions <task-ref> <ordinal|HD-id>` expands a single item's detail block. This command shares the ledger parser `lib/task/ledger.ts` with `ai task log`; the gate parser in `.agents/scripts/validate-artifact.js` is a separate implementation and the two must be kept semantically in sync by hand.
 
 ## post-review commit gate (code stage only)
 

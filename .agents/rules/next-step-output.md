@@ -78,7 +78,7 @@ Completed at: YYYY-MM-DD HH:mm:ss
   …（task.md `## 审查分歧账本` 中本阶段每个 status=needs-human-decision 行一条）
 
 查看详情：
-  - 全部待裁决项：ai task decisions {task-ref}（简写 ai task d {task-ref}）
+  - 全部待裁决项：ai task decisions {task-ref}
   - 单项完整背景/选项/影响/建议：ai task decisions {task-ref} <序号|HD-id>
 
 完成裁决：

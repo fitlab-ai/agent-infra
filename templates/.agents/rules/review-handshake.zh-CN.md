@@ -81,7 +81,7 @@
 - `evidence` 指向稳定锚点 `<artifact>#HD-N`（如 `plan-r2.md#HD-1`），不依赖易漂移的行号。
 - 人工在 task.md `## 人工裁决` 段记录裁定后，把对应 `HD-` 行翻为 `human-decided`，`evidence` 指向该裁定记录。
 
-> 查看：`ai task decisions <task-ref>`（简写 `ai task d`）列出全部待裁决项；`ai task decisions <task-ref> <序号|HD-id>` 展开单项详情块。该命令的账本解析与 `ai task log` 共用 `lib/task/ledger.ts`；`.agents/scripts/validate-artifact.js` 的 gate 解析器是独立实现，二者语义须手工保持同步。
+> 查看：`ai task decisions <task-ref>` 列出全部待裁决项；`ai task decisions <task-ref> <序号|HD-id>` 展开单项详情块。该命令的账本解析与 `ai task log` 共用 `lib/task/ledger.ts`；`.agents/scripts/validate-artifact.js` 的 gate 解析器是独立实现，二者语义须手工保持同步。
 
 ## post-review commit 门禁（仅 code 阶段）
 

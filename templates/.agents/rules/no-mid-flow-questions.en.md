@@ -67,7 +67,7 @@ Use these checks together:
 - **Small-impact exemption**: if it is only a local, reversible, low-cost execution detail, record it under `## Assumptions` instead of upgrading it to a human ruling.
 - **Fallback**: when unsure whether it is key, treat it as key; `review-*` must check whether the executor missed any `[needs-human-decision]` markings that should have been upgraded.
 
-> Use `ai task decisions <task-ref>` (short form `ai task d`) to view all pending decisions of a task and their detail blocks.
+> Use `ai task decisions <task-ref>` to view all pending decisions of a task and their detail blocks.
 
 ## Human Review Checkpoint Semantics
 
