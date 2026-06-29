@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { formatTable } from '../../table.ts';
 import { resolveTaskRef } from '../resolve-ref.ts';
+import { parseLedger, HUMAN_DECISION_STATUSES, type LedgerRow } from '../ledger.ts';
 
 const USAGE = `Usage: ai task log <N | #N | TASK-id>
 
@@ -20,7 +21,6 @@ const TABLE_HEADERS = ['#', 'STEP', 'AGENT', 'STARTED', 'DONE', 'NOTE'] as const
 
 // The activity-log H2 heading is language-dependent (zh template / en template).
 const HEADING_RE = /^##\s+(活动日志|Activity Log)\s*$/;
-const LEDGER_HEADING_RE = /^##\s+(审查分歧账本|Review Disagreement Ledger)\s*$/;
 const NEXT_H2_RE = /^##\s/;
 // `- {time} — **{step}** by {agent} — {note}` ; the separator is an em-dash
 // (U+2014). STEP/AGENT are non-greedy so a note that itself contains ' — ' or
@@ -30,7 +30,6 @@ const ENTRY_RE =
 
 type LogEntry = { time: string; step: string; agent: string; note: string };
 type ReviewStage = 'analysis' | 'plan' | 'code';
-type LedgerRow = { stage: string; status: string };
 
 // One rendered row = one step instance. `started`/`done` are timestamps; an empty
 // `done` with a non-empty `started` means the step is still in flight, while an
@@ -47,7 +46,6 @@ const STARTED_SUFFIX_RE = /\s*\[started\]\s*$/;
 // note these differ from the `.airc.json` long names claude-code/gemini-cli).
 // Any other executor token (a human name, possibly CJK) is treated as human.
 const KNOWN_AI_AGENTS = new Set(['claude', 'codex', 'gemini', 'opencode', 'cursor']);
-const HUMAN_DECISION_STATUSES = new Set(['needs-human-decision', 'human-decided']);
 const ENV_BLOCKED_RE = /\(\+\s*(\d+)\s+env-blocked\)/i;
 // Same match plus any leading whitespace, so folding the count into the verdict
 // text drops the redundant `(+ n env-blocked)` fragment without leaving a gap.
@@ -107,27 +105,6 @@ function pairEntries(entries: LogEntry[]): StepRow[] {
         rows.push({ step: base, agent: e.agent, started: '', done: e.time, note: e.note });
       }
     }
-  }
-  return rows;
-}
-
-function parseReviewLedger(content: string): LedgerRow[] {
-  const lines = content.split('\n');
-  let i = 0;
-  while (i < lines.length && !LEDGER_HEADING_RE.test(lines[i]!)) i += 1;
-  if (i >= lines.length) return [];
-
-  const rows: LedgerRow[] = [];
-  for (let j = i + 1; j < lines.length; j += 1) {
-    if (NEXT_H2_RE.test(lines[j]!)) break;
-    const line = lines[j]!.trim();
-    if (!line.startsWith('|')) continue;
-    const cells = line
-      .split('|')
-      .slice(1, -1)
-      .map((cell) => cell.trim());
-    if (cells.length < 6 || cells[0] === 'id' || /^-+$/.test(cells[0] ?? '')) continue;
-    rows.push({ stage: cells[1]!, status: cells[4]! });
   }
   return rows;
 }
@@ -200,7 +177,7 @@ function log(args: string[] = []): void {
     return;
   }
   const steps = pairEntries(entries);
-  const humanDecisionCounts = countHumanDecisionsByStage(parseReviewLedger(content));
+  const humanDecisionCounts = countHumanDecisionsByStage(parseLedger(content));
   const rows = steps.map((s, idx) => {
     const stage = reviewStageForStep(s.step);
     const note = stage

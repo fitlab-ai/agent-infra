@@ -99,7 +99,7 @@ Follow the `technical-design` step in `.agents/workflows/feature-development.yam
 - [ ] Define the verification strategy (tests, manual checks)
 - [ ] Assess impact and risks
 
-When this round introduces a new key design decision, record it under `## Open Questions` according to `.agents/rules/no-mid-flow-questions.md` and write the matching `HD-` ledger row.
+When this round introduces a new key design decision, per `.agents/rules/no-mid-flow-questions.md` write its detail block (background/options/impact/recommendation) into the plan artifact's `## 人工裁决待办` (Pending Human Decisions) section as `### HD-N：<title> [needs-human-decision]` (`HD-N` is globally unique, see `.agents/rules/review-handshake.md`), and write the matching `HD-` ledger row (evidence pointing to `{plan-artifact}#HD-N`); ordinary open questions still go under `## Open Questions`.
 
 **Design principles**:
 1. **Architectural soundness**: choose the structurally correct approach; diff size is not the primary criterion. Do not pile changes onto an unsound structure just to keep the diff small

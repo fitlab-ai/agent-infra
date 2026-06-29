@@ -183,9 +183,21 @@ tail .agents/workspace/active/{task-id}/task.md
 ## 未决问题
 
 > 如有需要人工裁定的未决问题，列在此处；没有则可省略本段。
-> 关键设计决策按 `.agents/rules/no-mid-flow-questions.md` 的判据标记 `[needs-human-decision]` 并回写 `HD-` 账本行。
+> 普通未决问题列在本段；属关键设计决策的（按 `.agents/rules/no-mid-flow-questions.md` 判据），详情块改写入下方 `## 人工裁决待办` 的 `### HD-N`，本段仅保留一行指针。
 
 - {未决问题}
+
+## 人工裁决待办
+
+> 仅当本轮升级了 `[needs-human-decision]` 关键设计决策时写本段；没有则省略。
+> 每项一个 `### HD-N` 块（`HD-N` 全局唯一，见 `.agents/rules/review-handshake.md`），并在 task.md `## 审查分歧账本` upsert 对应 `HD-` 行（evidence 指向 `{analysis-artifact}#HD-N`）。
+
+### HD-{N}：{标题} [needs-human-decision]
+
+- **背景**：{为何成为待裁决项}
+- **选项**：{A / B / …}
+- **影响**：{范围 / 边界 / 先例}
+- **推荐**：{推荐选项及理由}
 
 ## 工作量和复杂度评估
 - 复杂度：{高/中/低}

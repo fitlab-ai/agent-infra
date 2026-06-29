@@ -13,7 +13,7 @@ description: >
 
 - 严格遵循最新方案产物：`plan.md` 或 `plan-r{N}.md`
 - 修复模式逐条核实最新 `review-code` 的发现：成立则修复，判定为不成立/幻觉则在报告中反驳并记入 unresolved；不擅自扩大到审查未列出的问题；env-blocked 项不在修复范围
-- 实现中遇到方案未覆盖的关键设计决策时，按 `.agents/rules/no-mid-flow-questions.md` 判据记录 `[needs-human-decision]` / `HD-` 行，不中途提问或擅自扩范围
+- 实现中遇到方案未覆盖的关键设计决策时，按 `.agents/rules/no-mid-flow-questions.md` 判据，把详情块写入实现报告的 `## 人工裁决待办` 段 `### HD-N：<标题> [needs-human-decision]`（`HD-N` 全局唯一，见 `.agents/rules/review-handshake.md`）并回写 `HD-` 账本行，不中途提问或擅自扩范围
 - 绝不自动执行 `git add` 或 `git commit`
 - 每轮实现都创建新的实现产物，不覆盖旧文件
 - 执行本技能后，你**必须**立即更新 task.md

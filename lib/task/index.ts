@@ -2,6 +2,7 @@ const USAGE = `Usage: ai task <command> [options]
 
 Commands:
   cat <ref> <artifact | N>               Print a task artifact (by name or number)
+  decisions, d <ref> [selector]          List human-decision (HD-) items, or show one's detail
   files <ref>                            List artifacts in a task dir (numbered)
   grep <pattern> [ref] [artifact | N]    Literal search across task artifacts (omit ref to scan all)
   issue-body <ref> [--template <path>]   Print a deterministic Issue body from task.md (描述 + 需求, or an Issue Form)
@@ -13,6 +14,8 @@ Commands:
 Examples:
   ai task cat 11 analysis
   ai task cat 11 3
+  ai task decisions 11
+  ai task d 11 HD-3 --format markdown
   ai task files 11
   ai task grep resolveArtifact
   ai task grep resolveArtifact 11
@@ -44,6 +47,12 @@ export async function runTask(args: string[]): Promise<void> {
     case 'cat': {
       const { cat } = await import('./commands/cat.ts');
       cat(rest);
+      break;
+    }
+    case 'decisions':
+    case 'd': {
+      const { decisions } = await import('./commands/decisions.ts');
+      decisions(rest);
       break;
     }
     case 'files': {

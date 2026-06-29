@@ -55,7 +55,10 @@ For every SKILL execution context not covered by any exemption above, the defaul
 
 ## Key Design Decision Marking And Ledgering
 
-When an open question is a key design decision that needs human judgment, the executor must mark the item with `[needs-human-decision]` and write the matching `HD-` row to task.md `## Review Disagreement Ledger` according to `.agents/rules/review-handshake.md`.
+When an open question is a key design decision that needs human judgment, the executor must:
+
+1. Write the decision's **detail block** (background / options / impact / recommendation) into the artifact's `## 人工裁决待办` (Pending Human Decisions) section, with a heading like `### HD-N：<title> [needs-human-decision]`; ordinary assumptions / open questions still go under `## Assumptions` / `## Open Questions` (`## 假设` / `## 未决问题`), and `## Open Questions` may keep a one-line pointer to the matching `### HD-N`.
+2. Upsert the matching `HD-` row in task.md `## Review Disagreement Ledger` according to `.agents/rules/review-handshake.md`, with `evidence` pointing to the stable anchor `<artifact>#HD-N`. The `HD-N` number is **globally unique** (scan existing `HD-(\d+)` in the ledger and take max+1, monotonically increasing across analysis / plan / code, never reused); see review-handshake.md for the allocation rule.
 
 Use these checks together:
 
@@ -64,6 +67,8 @@ Use these checks together:
 - **Small-impact exemption**: if it is only a local, reversible, low-cost execution detail, record it under `## Assumptions` instead of upgrading it to a human ruling.
 - **Fallback**: when unsure whether it is key, treat it as key; `review-*` must check whether the executor missed any `[needs-human-decision]` markings that should have been upgraded.
 
+> Use `ai task decisions <task-ref>` (short form `ai task d`) to view all pending decisions of a task and their detail blocks.
+
 ## Human Review Checkpoint Semantics
 
 A mandatory human review checkpoint means:
@@ -71,7 +76,7 @@ A mandatory human review checkpoint means:
 - Stop after producing the artifact: once the skill finishes an artifact such as `plan.md`, end the current invocation and wait for the user to explicitly trigger the next skill command
 - Do not pause mid-process to ask for input: do not insert interruptions such as "Do you prefer option A or B?" between execution steps
 
-If a key decision needs human judgment during execution, follow the assumptions and open questions rule above: record it in the artifact's "Open Questions" / `未决问题` section for the user to address at the review checkpoint.
+If a key decision needs human judgment during execution, follow the "Key Design Decision Marking And Ledgering" rule above: write the detail block into the artifact's `## 人工裁决待办` (Pending Human Decisions) section as `### HD-N` and upsert the `HD-` ledger row, for the user to address at the review checkpoint; ordinary open questions still go to `## Open Questions` / `未决问题`.
 
 ## Anchor Location
 

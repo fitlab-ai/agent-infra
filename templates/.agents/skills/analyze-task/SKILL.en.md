@@ -184,9 +184,21 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 ## Open Questions
 
 > If there are unresolved questions for human review, list them here; omit this section if there are none.
-> Mark key design decisions with `[needs-human-decision]` and write `HD-` ledger rows according to `.agents/rules/no-mid-flow-questions.md`.
+> Ordinary open questions go here; for key design decisions (per `.agents/rules/no-mid-flow-questions.md`), put the detail block under `## 人工裁决待办` (Pending Human Decisions) as `### HD-N` instead, and keep only a one-line pointer here.
 
 - {open question}
+
+## 人工裁决待办
+
+> Write this section only when this round upgraded a `[needs-human-decision]` key design decision; omit otherwise.
+> One `### HD-N` block per item (`HD-N` is globally unique, see `.agents/rules/review-handshake.md`), and upsert the matching `HD-` row in task.md `## Review Disagreement Ledger` (evidence pointing to `{analysis-artifact}#HD-N`).
+
+### HD-{N}：{title} [needs-human-decision]
+
+- **Background**: {why it became a pending decision}
+- **Options**: {A / B / …}
+- **Impact**: {scope / boundaries / precedent}
+- **Recommendation**: {recommended option and rationale}
 
 ## Effort and Complexity Assessment
 - Complexity: {High/Medium/Low}

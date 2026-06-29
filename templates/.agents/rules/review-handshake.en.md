@@ -67,17 +67,21 @@ The single source of truth for disagreement state is the fixed `## 审查分歧�
 
 ### Executor-raised human-ruling rows
 
-When an executor marks an item in the artifact `## Open Questions` section as `[needs-human-decision]`, it must upsert the matching `HD-` row in task.md `## Review Disagreement Ledger`:
+When an executor judges an item to be a key design decision that needs human ruling, it must write the detail block (background / options / impact / recommendation) into the artifact's `## 人工裁决待办` (Pending Human Decisions) section with a heading like `### HD-N：<title> [needs-human-decision]`, and upsert the matching `HD-` row in task.md `## Review Disagreement Ledger`:
 
 ```markdown
 | HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |
 ```
 
+- `id`: the `HD-N` number is **globally unique**. When adding a row, scan every `HD-(\d+)` in the ledger and take max+1 (start at `HD-1` when none exist); it increases monotonically across `analysis` / `plan` / `code` and is **never reused**, so selecting by `HD-id` is unambiguous.
 - `stage` is the stage where the decision arose: `analysis` / `plan` / `code`.
 - `round` is `-` because this is not a review-finding handshake round.
 - `severity` is always `decision`.
 - `status` starts as `needs-human-decision`, so the existing gate blocks it.
+- `evidence` points to the stable anchor `<artifact>#HD-N` (e.g. `plan-r2.md#HD-1`), not a drift-prone line number.
 - After a human records the ruling in task.md `## Human Rulings`, flip the matching `HD-` row to `human-decided` and point `evidence` to that ruling.
+
+> View: `ai task decisions <task-ref>` (short form `ai task d`) lists all pending decisions; `ai task decisions <task-ref> <ordinal|HD-id>` expands a single item's detail block. This command shares the ledger parser `lib/task/ledger.ts` with `ai task log`; the gate parser in `.agents/scripts/validate-artifact.js` is a separate implementation and the two must be kept semantically in sync by hand.
 
 ## post-review commit gate (code stage only)
 

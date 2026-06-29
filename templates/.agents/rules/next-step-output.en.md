@@ -77,6 +77,10 @@ This section is a **third standalone rule, co-equal with the two above**, used o
     Location: the matching row in task.md `## 审查分歧账本` · Evidence: {evidence}
   …(one entry per status=needs-human-decision row of this stage in task.md `## 审查分歧账本`)
 
+View details:
+  - All pending decisions: ai task decisions {task-ref} (short form ai task d {task-ref})
+  - A single item's full background/options/impact/recommendation: ai task decisions {task-ref} <ordinal|HD-id>
+
 To resolve:
   1. In the task.md `## 人工裁决` section, record your ruling and rationale for each item above.
   2. Flip the status of the matching row in `## 审查分歧账本` from `needs-human-decision` to `human-decided`.

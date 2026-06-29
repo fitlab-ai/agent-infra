@@ -41,4 +41,33 @@ function findSectionHeading(content: string, aliases: string[]): string {
   return aliases[0]!;
 }
 
-export { extractSection, findSectionHeading };
+/**
+ * Return the body of the first `### {headingPrefix}` sub-section, from the
+ * heading line (inclusive) to the next `### ` / `## ` heading or EOF. Used to
+ * pull a single `### HD-N` human-decision detail block out of an artifact. The
+ * prefix must be followed by a word boundary so `HD-1` does not match `HD-10`
+ * (e.g. `### HD-1`, `### HD-1：标题`, `### HD-1 [needs-human-decision]`). Leading
+ * and trailing blank lines are trimmed. Returns '' when no match is present.
+ */
+function extractSubSection(content: string, headingPrefix: string): string {
+  const lines = content.split('\n');
+  const headRe = new RegExp(`^###\\s+${escapeRegExp(headingPrefix)}(?![\\w-])`);
+  let start = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (headRe.test(lines[i]!.trim())) {
+      start = i;
+      break;
+    }
+  }
+  if (start === -1) return '';
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^###?\s+/.test(lines[i]!)) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start, end).join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+}
+
+export { extractSection, findSectionHeading, extractSubSection };

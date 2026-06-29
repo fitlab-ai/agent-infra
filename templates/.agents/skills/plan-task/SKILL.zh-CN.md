@@ -98,7 +98,7 @@ tail .agents/workspace/active/{task-id}/task.md
 - [ ] 定义验证策略（测试、手动检查）
 - [ ] 评估方案的影响和风险
 
-遇到本轮新增的关键设计决策时，按 `.agents/rules/no-mid-flow-questions.md` 判据写入 `## 未决问题`，并回写 `HD-` 账本行。
+遇到本轮新增的关键设计决策时，按 `.agents/rules/no-mid-flow-questions.md` 判据，把详情块（背景/选项/影响/推荐）写入方案产物的 `## 人工裁决待办` 段 `### HD-N：<标题> [needs-human-decision]`（`HD-N` 全局唯一，规则见 `.agents/rules/review-handshake.md`），并回写 `HD-` 账本行（evidence 指向 `{plan-artifact}#HD-N`）；普通未决问题仍写 `## 未决问题`。
 
 **设计原则**：
 1. **架构合理性**：选择结构正确的方案，改动大小不是首要依据。不要为了减少 diff 而在不合理的结构上叠加

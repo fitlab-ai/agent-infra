@@ -67,17 +67,21 @@
 
 ### 执行方自提人工裁决行
 
-当执行方在产物 `## 未决问题` 中标记 `[needs-human-decision]` 时，必须在 task.md `## 审查分歧账本` upsert 对应 `HD-` 行：
+当执行方判定某项为需人工裁定的关键设计决策时，必须把详情块（背景 / 选项 / 影响 / 推荐）写入产物的 `## 人工裁决待办` 段，标题形如 `### HD-N：<标题> [needs-human-decision]`，并在 task.md `## 审查分歧账本` upsert 对应 `HD-` 行：
 
 ```markdown
 | HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |
 ```
 
+- `id`：`HD-N` 编号**全局唯一**。新增行时扫描账本中所有 `HD-(\d+)`，取最大值 + 1（账本无 `HD-` 行则从 `HD-1` 起）；跨 `analysis` / `plan` / `code` 单调递增，**禁止复用**既有编号，避免按 `HD-id` 定位时歧义。
 - `stage` 填该决策产生的阶段：`analysis` / `plan` / `code`。
 - `round` 填 `-`，因为它不是 review finding 的握手轮次。
 - `severity` 固定填 `decision`。
 - `status` 初始填 `needs-human-decision`，因此会被现有 gate 阻塞。
+- `evidence` 指向稳定锚点 `<artifact>#HD-N`（如 `plan-r2.md#HD-1`），不依赖易漂移的行号。
 - 人工在 task.md `## 人工裁决` 段记录裁定后，把对应 `HD-` 行翻为 `human-decided`，`evidence` 指向该裁定记录。
+
+> 查看：`ai task decisions <task-ref>`（简写 `ai task d`）列出全部待裁决项；`ai task decisions <task-ref> <序号|HD-id>` 展开单项详情块。该命令的账本解析与 `ai task log` 共用 `lib/task/ledger.ts`；`.agents/scripts/validate-artifact.js` 的 gate 解析器是独立实现，二者语义须手工保持同步。
 
 ## post-review commit 门禁（仅 code 阶段）
 
