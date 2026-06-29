@@ -24,7 +24,7 @@ test("metadata-sync workflow listens to task comment create and edit events and 
   });
 });
 
-test("metadata-sync workflow syncs type labels, milestones, and fallback issue types", () => {
+test("metadata-sync workflow syncs type labels and fallback issue types", () => {
   workflowTargets.forEach((relativePath) => {
     const content = read(relativePath);
 
@@ -33,7 +33,6 @@ test("metadata-sync workflow syncs type labels, milestones, and fallback issue t
     assert.match(content, /--prefix "type:"/, `${relativePath} should scope type label syncs to the type: prefix`);
     assert.match(content, /--target "\$TYPE_LABEL"/, `${relativePath} should pass the mapped type label as the target set`);
     assert.match(content, /dependency-upgrade\) +TYPE_LABEL="type: dependency-upgrade"/, `${relativePath} should map dependency-upgrade to the matching label`);
-    assert.match(content, /--milestone "\$MILESTONE"/, `${relativePath} should sync milestone values from frontmatter`);
     assert.match(content, /feature\|enhancement\) ISSUE_TYPE="Feature"/, `${relativePath} should map feature-like task types to the Feature issue type`);
     assert.match(content, /\*\) +ISSUE_TYPE="Task"/, `${relativePath} should fall back to the Task issue type`);
   });
