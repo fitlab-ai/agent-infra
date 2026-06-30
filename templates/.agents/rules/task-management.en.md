@@ -35,7 +35,7 @@ Map user intent to the corresponding workflow command:
 - `create-pr`: update `pr_number`, `updated_at`, `agent_infra_version`
 - `commit`: update `updated_at`, `agent_infra_version`; update `current_step` when needed (see `commit/reference/task-status-update.md`)
 - `complete-task`: update `status`, `current_step`, `completed_at`, `updated_at`, `agent_infra_version`
-- `block-task`: update `status`, `blocked_at`, `blocked_reason`, `updated_at`, `agent_infra_version`
+- `block-task`: update `status`, `blocked_at`, `updated_at`, `agent_infra_version`
 - `cancel-task`: update `status`, `cancelled_at`, `cancel_reason`, `updated_at`, `agent_infra_version`
 
 ## Activity Log started / done dual-marker convention (single source of truth)

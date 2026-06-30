@@ -93,7 +93,7 @@ date +%Y%m%d-%H%M%S
 
 - Create the directory: `.agents/workspace/active/{task-id}/`
 - Use the `.agents/templates/task.md` template to create `task.md`
-- For Scenario C, prefer `type`, `workflow`, `branch`, `created_by`, and `milestone` from the remote frontmatter; infer missing or damaged fields from Issue labels and current rules
+- For Scenario C, prefer `type`, `workflow`, `branch`, and `milestone` from the remote frontmatter; infer missing or damaged fields from Issue labels and current rules
 - Always write `current_step` as `requirement-analysis`; do not restore the remote original `current_step`
 
 Task metadata:
@@ -107,7 +107,6 @@ status: active
 created_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 updated_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 agent_infra_version: {agent_infra_version}
-created_by: human
 priority:                  # optional; preserve source/frontmatter value when available
 effort:                    # optional; preserve source/frontmatter value when available
 start_date:                # optional; preserve explicit YYYY-MM-DD when available

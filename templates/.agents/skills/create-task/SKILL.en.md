@@ -94,7 +94,6 @@ status: active
 created_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 updated_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 agent_infra_version: {agent_infra_version}
-created_by: human
 priority:                  # required; inferred by the AI from the title/description; Urgent | High | Medium | Low
 effort:                    # required; inferred by the AI from the title/description; High | Medium | Low
 start_date:                # optional; YYYY-MM-DD
@@ -103,7 +102,6 @@ current_step: requirement-analysis
 assigned_to: {current AI agent}
 ```
 
-Note: `created_by` is `human` because the task comes from the user's description.
 priority / effort are required: the AI infers them from the task title and description (candidates in `.agents/rules/issue-fields.md`; normalize localized input). Leave start_date / target_date empty at creation: `start_date` is written by the analyze stage and `target_date` by the complete stage; do not invent dates.
 
 ### 3. Update Task Status

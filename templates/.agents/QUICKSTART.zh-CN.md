@@ -47,8 +47,8 @@ cp .agents/templates/task.md .agents/workspace/active/task-001.md
 
 ```yaml
 id: task-001
-type: feature          # feature | bugfix | refactor | docs | review
-status: open           # open | in-progress | review | blocked | completed
+type: feature          # feature | bugfix | refactor | docs | chore
+status: active         # active | blocked | completed
 assigned_to: claude    # claude | codex | gemini | opencode | human
 ```
 

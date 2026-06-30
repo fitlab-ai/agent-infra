@@ -55,7 +55,6 @@ Task metadata must include:
 ```yaml
 id: TASK-{yyyyMMdd-HHmmss}
 security_alert_number: <alert-number>
-severity: <critical/high/medium/low>
 cve_id: <CVE-ID>
 ghsa_id: <GHSA-ID>
 ```

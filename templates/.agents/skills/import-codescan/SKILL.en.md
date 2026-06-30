@@ -54,9 +54,6 @@ Task metadata:
 ```yaml
 id: TASK-{yyyyMMdd-HHmmss}
 codescan_alert_number: <alert-number>
-severity: <critical/high/medium/low>
-rule_id: <rule-id>
-tool: <tool-name>
 ```
 
 ### 3. Update Task Status

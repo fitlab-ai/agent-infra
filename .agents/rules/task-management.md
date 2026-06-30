@@ -35,7 +35,7 @@
 - `create-pr`：更新 `pr_number`、`updated_at`、`agent_infra_version`
 - `commit`：更新 `updated_at`、`agent_infra_version`；必要时更新 `current_step`（详见 `commit/reference/task-status-update.md`）
 - `complete-task`：更新 `status`、`current_step`、`completed_at`、`updated_at`、`agent_infra_version`
-- `block-task`：更新 `status`、`blocked_at`、`blocked_reason`、`updated_at`、`agent_infra_version`
+- `block-task`：更新 `status`、`blocked_at`、`updated_at`、`agent_infra_version`
 - `cancel-task`：更新 `status`、`cancelled_at`、`cancel_reason`、`updated_at`、`agent_infra_version`
 
 ## Activity Log started / done 双标记约定（单一事实源）

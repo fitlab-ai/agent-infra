@@ -131,7 +131,6 @@ function buildTaskFrontmatter(overrides: FrontmatterOverrides = {}) {
     created_at: formatTimestamp(new Date(now.getTime() - 60_000)),
     updated_at: formatTimestamp(now),
     issue_number: "N/A",
-    created_by: "human",
     current_step: "code",
     assigned_to: "codex",
     ...overrides

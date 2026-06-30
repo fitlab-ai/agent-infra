@@ -93,7 +93,7 @@ date +%Y%m%d-%H%M%S
 
 - 创建目录：`.agents/workspace/active/{task-id}/`
 - 使用 `.agents/templates/task.md` 模板创建 `task.md`
-- 场景 C 优先沿用远端 frontmatter 中的 `type`、`workflow`、`branch`、`created_by`、`milestone`；缺失或损坏字段按 Issue 标签和当前规则重新推断
+- 场景 C 优先沿用远端 frontmatter 中的 `type`、`workflow`、`branch`、`milestone`；缺失或损坏字段按 Issue 标签和当前规则重新推断
 - `current_step` 始终写入 `requirement-analysis`，不要恢复为远端原 `current_step`
 
 任务元数据：
@@ -107,7 +107,6 @@ status: active
 created_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 updated_at: {YYYY-MM-DD HH:mm:ss±HH:MM}
 agent_infra_version: {agent_infra_version}
-created_by: human
 priority:                  # 可选；有来源/frontmatter 值时保留
 effort:                    # 可选；有来源/frontmatter 值时保留
 start_date:                # 可选；有明确 YYYY-MM-DD 时保留

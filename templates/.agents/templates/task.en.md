@@ -1,9 +1,9 @@
 ---
 id: task-XXX
-type: feature                  # feature | bugfix | refactor | docs | review
+type: feature                  # feature | bugfix | refactor | docs | chore
 branch:                        # <project>-<type>-<slug>
-workflow: feature-development  # feature-development | bug-fix | code-review | refactoring
-status: open                   # open | in-progress | review | blocked | completed
+workflow: feature-development  # feature-development | bug-fix | refactoring
+status: active                 # active | blocked | completed
 created_at: YYYY-MM-DDTHH:mm:ss±HH:MM
 updated_at: YYYY-MM-DDTHH:mm:ss±HH:MM
 agent_infra_version: v0.0.0    # Current agent-infra version; refreshed by workflow commands
