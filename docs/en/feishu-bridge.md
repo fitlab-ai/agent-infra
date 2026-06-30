@@ -10,8 +10,6 @@ The local `ai server` daemon can host IM adapters. The Feishu adapter connects t
 2. Enable the Bot capability and add the bot to the test chat.
 3. Under Events & callbacks, choose long connection mode and subscribe to `im.message.receive_v1`.
 
-The adapter only handles `im.message.receive_v1`. Events such as `im.chat.access_event.bot_p2p_chat_entered_v1` prove that the long connection is alive, but they do not trigger `/ping`.
-
 ## Permissions
 
 Use the narrowest set that matches the chat types you want to test:
@@ -43,53 +41,6 @@ Put the app credentials in `.agents/server.local.json`. This file is git-ignored
 ```
 
 `appId` must match `cli_[0-9a-fA-F]{16}`. The daemon fails fast if `appId` or `appSecret` is missing.
-
-## Verify
-
-Build and run the current checkout when validating unpublished changes:
-
-```bash
-npm run build
-node dist/bin/cli.js server start
-node dist/bin/cli.js server status
-```
-
-Watch the latest server log:
-
-```bash
-latest_log=$(find ~/.agent-infra/logs -name server.log -exec ls -t {} + | head -1)
-tail -f "$latest_log"
-```
-
-Send a non-command first to confirm that message events reach the daemon:
-
-```text
-/hello
-```
-
-The log should show an unknown command. Then send:
-
-```text
-/ping
-```
-
-In a group chat, mention the bot:
-
-```text
-@bot /ping
-```
-
-The bot should reply:
-
-```text
-pong v<VERSION>
-```
-
-Stop the daemon when done:
-
-```bash
-node dist/bin/cli.js server stop
-```
 
 ## References
 

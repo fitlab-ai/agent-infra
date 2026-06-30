@@ -10,8 +10,6 @@
 2. 启用机器人能力，并把机器人加入测试会话。
 3. 在事件与回调中选择长连接模式，并订阅 `im.message.receive_v1`。
 
-当前 adapter 只处理 `im.message.receive_v1`。`im.chat.access_event.bot_p2p_chat_entered_v1` 这类事件只能说明长连接可用，不会触发 `/ping`。
-
 ## 权限
 
 按要验证的会话类型使用最小权限：
@@ -43,53 +41,6 @@
 ```
 
 `appId` 必须符合 `cli_[0-9a-fA-F]{16}`。如果缺少 `appId` 或 `appSecret`，daemon 会 fail fast。
-
-## 验证
-
-验证尚未发布的当前 checkout 时，直接构建并运行本地构建产物：
-
-```bash
-npm run build
-node dist/bin/cli.js server start
-node dist/bin/cli.js server status
-```
-
-查看最新 server 日志：
-
-```bash
-latest_log=$(find ~/.agent-infra/logs -name server.log -exec ls -t {} + | head -1)
-tail -f "$latest_log"
-```
-
-先发送一个非命令消息，确认消息事件已进入 daemon：
-
-```text
-/hello
-```
-
-日志中应出现 unknown command。然后发送：
-
-```text
-/ping
-```
-
-群聊中需要 @ 机器人：
-
-```text
-@机器人 /ping
-```
-
-预期机器人回复：
-
-```text
-pong v<VERSION>
-```
-
-验证完成后停止 daemon：
-
-```bash
-node dist/bin/cli.js server stop
-```
 
 ## 参考
 
