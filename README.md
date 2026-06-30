@@ -166,29 +166,6 @@ The most-used lifecycle commands, in delivery order. The command prefix varies b
 
 See the full catalog — task status, release, security, and project-maintenance skills — in [Built-in AI Skills](./docs/en/skills.md).
 
-## Enable the Feishu bridge
-
-The local `ai server` daemon can host IM adapters. The Feishu (Lark) adapter connects over a long connection and routes group messages to the built-in command dispatcher — currently `/ping` replies `pong v<VERSION>`.
-
-1. In the [Feishu Open Platform](https://open.feishu.cn/app), create a **self-built app**.
-2. Grant the permissions `im:message`, `im:message.receive_v1`, and `im:chat`.
-3. Under **Events & callbacks**, enable **"Use long connection to receive events"** and subscribe to `im.message.receive_v1`.
-4. Copy the **App ID** and **App Secret** into `.agents/server.local.json` (this file is git-ignored; never commit the secret — a secret in the committed `.agents/server.json` is refused at startup):
-
-   ```json
-   {
-     "adapters": {
-       "feishu": {
-         "enabled": true,
-         "appId": "<your-app-id>",
-         "appSecret": "<your-app-secret>"
-       }
-     }
-   }
-   ```
-
-5. Run `ai server start`, then in a Feishu group `@bot /ping` — the bot replies `pong v<VERSION>`.
-
 ## What You Get
 
 After setup, your project gains a complete AI collaboration infrastructure:
@@ -214,6 +191,7 @@ In-depth guides live under [`docs/en/`](./docs/en/README.md):
 - [Architecture Overview](./docs/en/architecture.md) — bootstrap CLI, end-to-end flow, layered architecture
 - [Platform Support](./docs/en/platform-support.md) — macOS, Linux, Windows; sandbox engines and resources
 - [Sandbox](./docs/en/sandbox.md) — sandbox aliases, host-sandbox file exchange, user-level dotfiles channel
+- [Feishu Bridge](./docs/en/feishu-bridge.md) — configure the Feishu long-connection adapter and `/ping` verification
 - [Built-in AI Skills](./docs/en/skills.md) — the full skill catalog by use case
 - [Custom Skills](./docs/en/custom-skills.md) — create and sync project-specific skills
 - [Custom TUI Configuration](./docs/en/custom-tui.md) — adapt agent-infra to non-built-in AI TUIs

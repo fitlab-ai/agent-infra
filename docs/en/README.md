@@ -9,6 +9,7 @@ In-depth documentation for agent-infra. For positioning, install, and quick star
 - [Architecture Overview](./architecture.md) — bootstrap CLI, end-to-end flow, layered architecture
 - [Platform Support](./platform-support.md) — macOS, Linux, Windows; sandbox engines and resource configuration
 - [Sandbox](./sandbox.md) — sandbox aliases, host-sandbox file exchange, user-level dotfiles channel
+- [Feishu Bridge](./feishu-bridge.md) — configure the Feishu long-connection adapter and `/ping` verification
 - [Built-in AI Skills](./skills.md) — the full skill catalog by use case
 - [Custom Skills](./custom-skills.md) — create and sync project-specific skills
 - [Custom TUI Configuration](./custom-tui.md) — adapt agent-infra to non-built-in AI TUIs
