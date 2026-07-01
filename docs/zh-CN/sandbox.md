@@ -22,6 +22,8 @@
 
 `ai sandbox exec` 和 `ai sandbox refresh` 会在宿主机凭证存储与 `~/.agent-infra/credentials/*` 下的所有沙箱项目副本之间做双向 reconcile。长时间运行的沙箱如果先刷新了 OAuth token，下一次进入或刷新命令会把最新有效副本回写到宿主 Keychain 或 `~/.claude/.credentials.json`；宿主机更新时也会继续覆盖项目副本。如果所有副本都已失效，`ai sandbox refresh` 会尝试 `claude /status` 探活，只有探活无法恢复时才提示重新登录。
 
+启用 Claude Code 时，`ai sandbox create` 还会把宿主机 `~/.claude/settings.json` 中的模型和 API provider 设置合并到沙箱内的 Claude Code settings。已有的沙箱值优先，因此沙箱内的本地覆盖会被保留。凭证仍使用上面的专用 credentials 通道；provider 环境设置只会作为 Claude Code settings 值复制。
+
 ## 宿主-沙箱文件交换
 
 `ai sandbox create` 会自动挂载两个可读写目录，方便宿主与容器之间互相 drop 文件，不污染 git 工作树：

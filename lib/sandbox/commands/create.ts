@@ -740,6 +740,63 @@ function readHostJsonSafe(filePath: string): JsonObject | null {
   }
 }
 
+const CLAUDE_SETTINGS_INHERIT_TOP_LEVEL_KEYS = [
+  'model',
+  'fallbackModel',
+  'availableModels',
+  'modelOverrides',
+  'enforceAvailableModels',
+  'advisorModel',
+  'apiKeyHelper',
+  'effortLevel'
+];
+
+function isJsonObjectRecord(value: unknown): value is JsonObject {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function mergeMissingStringEnvFields(target: JsonObject, source: JsonObject): boolean {
+  if (!isJsonObjectRecord(source.env)) {
+    return false;
+  }
+  if (Object.hasOwn(target, 'env') && !isJsonObjectRecord(target.env)) {
+    return false;
+  }
+
+  let targetEnv = target.env as JsonObject | undefined;
+  let changed = false;
+  for (const [key, value] of Object.entries(source.env)) {
+    if (typeof value !== 'string' || value === '') {
+      continue;
+    }
+    if (!targetEnv) {
+      targetEnv = {};
+      target.env = targetEnv;
+    }
+    if (!Object.hasOwn(targetEnv, key)) {
+      targetEnv[key] = value;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function mergeMissingTopLevelSettings(target: JsonObject, source: JsonObject): boolean {
+  let changed = false;
+  for (const key of CLAUDE_SETTINGS_INHERIT_TOP_LEVEL_KEYS) {
+    if (!Object.hasOwn(source, key) || Object.hasOwn(target, key)) {
+      continue;
+    }
+    const value = source[key];
+    if (value === null || value === undefined || value === '') {
+      continue;
+    }
+    target[key] = value;
+    changed = true;
+  }
+  return changed;
+}
+
 export function ensureClaudeOnboarding(toolDir: string, hostHomeDir?: string): void {
   const claudeJsonPath = path.join(toolDir, '.claude.json');
   let data: JsonObject & {
@@ -810,7 +867,7 @@ export function ensureClaudeOnboarding(toolDir: string, hostHomeDir?: string): v
 
 export function ensureClaudeSettings(toolDir: string, hostHomeDir?: string): void {
   const settingsPath = path.join(toolDir, 'settings.json');
-  let data: JsonObject & { skipDangerousModePermissionPrompt?: boolean; effortLevel?: string } = {};
+  let data: JsonObject & { skipDangerousModePermissionPrompt?: boolean } = {};
   if (fs.existsSync(settingsPath)) {
     try {
       data = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as typeof data;
@@ -825,14 +882,9 @@ export function ensureClaudeSettings(toolDir: string, hostHomeDir?: string): voi
   }
   if (hostHomeDir) {
     const hostSettings = readHostJsonSafe(path.join(hostHomeDir, '.claude', 'settings.json'));
-    if (
-      hostSettings
-      && typeof hostSettings.effortLevel === 'string'
-      && hostSettings.effortLevel !== ''
-      && !Object.hasOwn(data, 'effortLevel')
-    ) {
-      data.effortLevel = hostSettings.effortLevel;
-      changed = true;
+    if (hostSettings) {
+      changed = mergeMissingStringEnvFields(data, hostSettings) || changed;
+      changed = mergeMissingTopLevelSettings(data, hostSettings) || changed;
     }
   }
   if (changed) {

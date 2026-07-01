@@ -445,6 +445,191 @@ test("ensureClaudeSettings skips empty host effort level", async () => {
   }
 });
 
+test("ensureClaudeSettings inherits host provider env and model settings", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-provider-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-provider-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
+    fs.writeFileSync(
+      path.join(hostHome, ".claude", "settings.json"),
+      JSON.stringify({
+        env: {
+          ANTHROPIC_BASE_URL: "https://api.deepseek.example/anthropic",
+          ANTHROPIC_AUTH_TOKEN: "test-token-redacted",
+          ANTHROPIC_MODEL: "deepseek-v4-pro[1m]",
+          ANTHROPIC_OPUS_MODEL: "deepseek-v4-pro[1m]",
+          ANTHROPIC_SONNET_MODEL: "deepseek-v4-flash",
+          ANTHROPIC_HAIKU_MODEL: "deepseek-v4-flash",
+          ANTHROPIC_SMALL_FAST_MODEL: "deepseek-v4-flash",
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        },
+        model: "deepseek-v4-pro[1m]",
+        fallbackModel: "deepseek-v4-flash",
+        availableModels: ["deepseek-v4-pro[1m]", "deepseek-v4-flash"],
+        modelOverrides: {
+          opus: "deepseek-v4-pro[1m]",
+          sonnet: "deepseek-v4-flash",
+          haiku: "deepseek-v4-flash",
+          subagent: "deepseek-v4-flash"
+        },
+        enforceAvailableModels: true,
+        advisorModel: "deepseek-v4-flash",
+        apiKeyHelper: "printf test-token-redacted",
+        theme: "dark"
+      }),
+      "utf8"
+    );
+
+    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
+    assert.deepEqual(data.env, {
+      ANTHROPIC_BASE_URL: "https://api.deepseek.example/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "test-token-redacted",
+      ANTHROPIC_MODEL: "deepseek-v4-pro[1m]",
+      ANTHROPIC_OPUS_MODEL: "deepseek-v4-pro[1m]",
+      ANTHROPIC_SONNET_MODEL: "deepseek-v4-flash",
+      ANTHROPIC_HAIKU_MODEL: "deepseek-v4-flash",
+      ANTHROPIC_SMALL_FAST_MODEL: "deepseek-v4-flash",
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+    });
+    assert.equal(data.model, "deepseek-v4-pro[1m]");
+    assert.equal(data.fallbackModel, "deepseek-v4-flash");
+    assert.deepEqual(data.availableModels, ["deepseek-v4-pro[1m]", "deepseek-v4-flash"]);
+    assert.deepEqual(data.modelOverrides, {
+      opus: "deepseek-v4-pro[1m]",
+      sonnet: "deepseek-v4-flash",
+      haiku: "deepseek-v4-flash",
+      subagent: "deepseek-v4-flash"
+    });
+    assert.equal(data.enforceAvailableModels, true);
+    assert.equal(data.advisorModel, "deepseek-v4-flash");
+    assert.equal(data.apiKeyHelper, "printf test-token-redacted");
+    assert.equal(Object.hasOwn(data, "theme"), false);
+    assert.equal(data.skipDangerousModePermissionPrompt, true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureClaudeSettings preserves sandbox provider fields and fills missing env", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-provider-keep-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-provider-keep-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
+    fs.writeFileSync(
+      path.join(hostHome, ".claude", "settings.json"),
+      JSON.stringify({
+        env: {
+          ANTHROPIC_MODEL: "host-model",
+          ANTHROPIC_SMALL_FAST_MODEL: "host-fast-model"
+        },
+        model: "host-top-level-model",
+        fallbackModel: "host-fallback-model"
+      }),
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "settings.json"),
+      JSON.stringify({
+        skipDangerousModePermissionPrompt: true,
+        env: {
+          ANTHROPIC_MODEL: "sandbox-model"
+        },
+        model: "sandbox-top-level-model"
+      }),
+      "utf8"
+    );
+
+    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
+    assert.deepEqual(data.env, {
+      ANTHROPIC_MODEL: "sandbox-model",
+      ANTHROPIC_SMALL_FAST_MODEL: "host-fast-model"
+    });
+    assert.equal(data.model, "sandbox-top-level-model");
+    assert.equal(data.fallbackModel, "host-fallback-model");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureClaudeSettings skips invalid host env values and non-object sandbox env", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-provider-invalid-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-provider-invalid-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
+    fs.writeFileSync(
+      path.join(hostHome, ".claude", "settings.json"),
+      JSON.stringify({
+        env: {
+          ANTHROPIC_BASE_URL: "https://api.example.test",
+          ANTHROPIC_AUTH_TOKEN: "",
+          ANTHROPIC_MODEL: ["not", "a", "string"],
+          ANTHROPIC_SMALL_FAST_MODEL: false
+        }
+      }),
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "settings.json"),
+      JSON.stringify({
+        skipDangerousModePermissionPrompt: true,
+        env: "keep-local-env-value"
+      }),
+      "utf8"
+    );
+
+    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
+    assert.equal(data.env, "keep-local-env-value");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureClaudeSettings skips non-object host env without defaulting effort env", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-host-env-invalid-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-env-invalid-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
+    fs.writeFileSync(path.join(hostHome, ".claude", "settings.json"), JSON.stringify({ env: "invalid" }), "utf8");
+    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
+    assert.equal(Object.hasOwn(data, "env"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureClaudeSettings skips malformed host settings", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-malformed-host-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-malformed-settings-"));
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
+    fs.writeFileSync(path.join(hostHome, ".claude", "settings.json"), "{not-json:test-token-redacted", "utf8");
+    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
+    assert.deepEqual(data, { skipDangerousModePermissionPrompt: true });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
 test("ensureCodexModelInheritance creates config with host model fields", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-"));

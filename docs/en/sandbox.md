@@ -22,6 +22,8 @@ When you run the sandbox from a remote Mac over SSH, use `ai cp <ssh-alias>` on 
 
 `ai sandbox exec` and `ai sandbox refresh` reconcile Claude Code credentials in both directions across the host credential store and every sandbox project copy under `~/.agent-infra/credentials/*`. When a long-running sandbox refreshes OAuth tokens first, the next entry or refresh command writes the freshest valid copy back to the host Keychain or `~/.claude/.credentials.json`; when the host is fresher, it updates the project copies. If every copy is stale, `ai sandbox refresh` probes `claude /status` and asks you to log in only when the probe cannot recover credentials.
 
+When Claude Code is enabled, `ai sandbox create` also merges model and API provider settings from the host `~/.claude/settings.json` into the sandbox Claude Code settings. Existing sandbox values take precedence, so local sandbox overrides are preserved. Credentials still use the dedicated credentials channel above; provider environment settings are copied only as Claude Code settings values.
+
 ## Host-sandbox file exchange
 
 `ai sandbox create` mounts two writable directories for dropping files between
