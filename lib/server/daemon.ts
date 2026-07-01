@@ -3,6 +3,10 @@ import { loadServerConfig } from './config.ts';
 import { createLogger } from './logger.ts';
 import { loadAdapters, unloadAdapters } from './plugin-loader.ts';
 import type { InboundMessage } from './adapters/_contract.ts';
+import { authorize } from './auth.ts';
+import { commandHelp, parseCommand } from './protocol.ts';
+import { runAi } from './runner.ts';
+import { streamCommand } from './streamer.ts';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -36,15 +40,47 @@ export async function runDaemon(): Promise<void> {
     resolveShutdown = resolve;
   });
 
-  // Minimal built-in dispatch: only `/ping` is recognized in subtask A. The
-  // full command protocol / auth lands in subtask C.
   const dispatch = async (message: InboundMessage): Promise<void> => {
-    const text = message.text.trim();
-    if (text === '/ping') {
+    const plan = parseCommand(message.text);
+    if (plan.kind === 'ignore') return;
+    if (plan.kind === 'error') {
+      await message.reply(plan.message);
+      logger.info(`command rejected from ${message.adapter}:${message.userId}: ${plan.message}`);
+      return;
+    }
+    if (plan.kind === 'builtin' && plan.name === 'ping') {
       await message.reply(`pong ${VERSION}`);
       return;
     }
-    logger.info(`unknown command from ${message.adapter}:${message.userId}: ${text}`);
+    if (plan.kind === 'builtin' && plan.name === 'help') {
+      await message.reply(commandHelp());
+      return;
+    }
+    if (plan.kind === 'builtin' && plan.name === 'version') {
+      await message.reply(`agent-infra ${VERSION}`);
+      return;
+    }
+    if (plan.kind === 'ai') {
+      const allowed = authorize(
+        { adapter: message.adapter, userId: message.userId },
+        plan.role,
+        config.auth
+      );
+      if (!allowed.ok) {
+        await message.reply(allowed.message);
+        logger.info(`unauthorized command from ${message.adapter}:${message.userId}: ${allowed.message}`);
+        return;
+      }
+      await streamCommand(
+        {
+          title: `ai ${plan.argv.join(' ')}`,
+          chunkChars: typeof config.stream?.chunkChars === 'number' ? config.stream.chunkChars : 4000,
+          throttleMs: typeof config.stream?.throttleMs === 'number' ? config.stream.throttleMs : 1500
+        },
+        (emit) => runAi(plan.argv, { onChunk: emit }),
+        (text) => message.reply(text)
+      );
+    }
   };
 
   const ctx = { config, logger, dispatch, signal: abortController.signal };

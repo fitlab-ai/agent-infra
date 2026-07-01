@@ -70,13 +70,58 @@
     },
     "command": {
       "type": "object",
-      "description": "Reserved for the command protocol (subtask C).",
-      "additionalProperties": true
+      "description": "Command protocol defaults and skill allow-list.",
+      "additionalProperties": false,
+      "properties": {
+        "defaultTui": {
+          "type": "string",
+          "enum": ["claude", "codex", "gemini", "opencode"],
+          "default": "codex"
+        },
+        "skillTuiDefaults": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["claude", "codex", "gemini", "opencode"]
+          }
+        },
+        "allowedSkills": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
     },
     "auth": {
       "type": "object",
-      "description": "Reserved for the auth model (subtask C).",
-      "additionalProperties": true
+      "description": "Adapter-qualified user roles. Keys look like feishu:ou_xxx.",
+      "additionalProperties": false,
+      "properties": {
+        "users": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": ["read", "write", "exec"]
+              },
+              "name": { "type": "string" }
+            },
+            "required": ["role"]
+          }
+        }
+      }
+    },
+    "stream": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "throttleMs": { "type": "integer", "minimum": 0, "default": 1500 },
+        "chunkChars": { "type": "integer", "minimum": 1, "default": 4000 },
+        "tailChars": { "type": "integer", "minimum": 1, "default": 8000 },
+        "timeoutMs": { "type": "integer", "minimum": 1, "default": 1800000 }
+      }
     }
   }
 }

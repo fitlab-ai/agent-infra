@@ -21,10 +21,9 @@ export type ServerConfig = {
   pidFile: string;
   heartbeatMs: number;
   adapters: Record<string, ServerAdapterConfig>;
-  // command / auth are reserved for subtasks B/C; subtask A passes them
-  // through untouched without consuming them.
   command?: Record<string, unknown>;
   auth?: Record<string, unknown>;
+  stream?: Record<string, unknown>;
 };
 
 export type ServerValidation =
@@ -223,6 +222,7 @@ export function loadServerConfig({ rootDir }: { rootDir?: string } = {}): Server
     heartbeatMs: typeof merged.heartbeatMs === 'number' ? merged.heartbeatMs : DEFAULT_SERVER_CONFIG.heartbeatMs,
     adapters: isPlainObject(merged.adapters) ? (merged.adapters as Record<string, ServerAdapterConfig>) : {},
     command: isPlainObject(merged.command) ? merged.command : undefined,
-    auth: isPlainObject(merged.auth) ? merged.auth : undefined
+    auth: isPlainObject(merged.auth) ? merged.auth : undefined,
+    stream: isPlainObject(merged.stream) ? merged.stream : undefined
   };
 }

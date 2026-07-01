@@ -21,6 +21,8 @@ Commands:
   merge           Merge tasks from another workspace directory (active/blocked/completed/archive)
   sandbox, s      Manage Docker-based AI sandboxes
   server          Run the local AI collaboration daemon (start/stop/status/logs)
+  run             Run a whitelisted lifecycle skill through a non-interactive TUI
+  decide          Record a human decision for a task HD item
   task, t         Read-only views over .agents/workspace tasks (cat / files / grep / log / ls / show / status)
   update          Update seed files and sync file registry for an existing project
   version         Show version
@@ -117,6 +119,20 @@ switch (command) {
       process.stderr.write(`Error: ${errorMessage(e)}\n`);
       process.exit(1);
     });
+    break;
+  }
+  case 'run': {
+    const imported = await importCommand('../lib/run/index.ts');
+    if (!imported) break;
+    const { cmdRun } = imported;
+    await cmdRun(process.argv.slice(3));
+    break;
+  }
+  case 'decide': {
+    const imported = await importCommand('../lib/decide.ts');
+    if (!imported) break;
+    const { cmdDecide } = imported;
+    await cmdDecide(process.argv.slice(3));
     break;
   }
   case 'task': {

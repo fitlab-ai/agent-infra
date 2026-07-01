@@ -82,6 +82,7 @@ Every command above works the same way in Claude Code, Codex, Gemini CLI, and Op
 
 - **Multi-AI collaboration**: one shared operating model for Claude Code, Codex, Gemini CLI, and OpenCode
 - **Bootstrap CLI + skill-driven execution**: initialize once, then let AI skills drive day-to-day work
+- **IM command bridge**: route Feishu messages to built-ins, read-only task views, sandbox management, and controlled lifecycle skill runs
 - **Bilingual project docs**: English-first docs with synchronized Chinese translations
 - **Template-source architecture**: `templates/` mirrors the rendered project structure
 - **AI-assisted updates**: template changes can be merged while preserving project-specific customization
@@ -191,7 +192,7 @@ In-depth guides live under [`docs/en/`](./docs/en/README.md):
 - [Architecture Overview](./docs/en/architecture.md) — bootstrap CLI, end-to-end flow, layered architecture
 - [Platform Support](./docs/en/platform-support.md) — macOS, Linux, Windows; sandbox engines and resources
 - [Sandbox](./docs/en/sandbox.md) — sandbox aliases, host-sandbox file exchange, user-level dotfiles channel
-- [Feishu Bridge](./docs/en/feishu-bridge.md) — configure the Feishu long-connection adapter and `/ping` verification
+- [Feishu Bridge](./docs/en/feishu-bridge.md) — configure the Feishu long-connection adapter, command routing, permissions, and TUI selection
 - [Built-in AI Skills](./docs/en/skills.md) — the full skill catalog by use case
 - [Custom Skills](./docs/en/custom-skills.md) — create and sync project-specific skills
 - [Custom TUI Configuration](./docs/en/custom-tui.md) — adapt agent-infra to non-built-in AI TUIs

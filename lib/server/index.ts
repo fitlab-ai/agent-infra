@@ -10,8 +10,7 @@ Commands:
   logs [-f | --follow]   Print the daemon log ('-f' to follow new lines)
   help                   Show this help message
 
-The daemon hosts IM adapters and command routing for agent-infra. Subtask A
-ships the process skeleton only: no adapters and no command protocol yet.`;
+The daemon hosts IM adapters and command routing for agent-infra.`;
 
 export async function runServer(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
