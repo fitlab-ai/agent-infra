@@ -4,19 +4,19 @@ export type SkillRunSpec =
 
 const TASK_SKILLS = new Set([
   'analyze-task',
-  'review-analysis',
-  'plan-task',
-  'review-plan',
+  'block-task',
+  'cancel-task',
   'code-task',
+  'commit',
+  'complete-task',
+  'create-pr',
+  'plan-task',
+  'review-analysis',
   'review-code',
+  'review-plan',
   'test',
   'test-integration',
-  'commit',
-  'create-pr',
-  'complete-task',
-  'watch-pr',
-  'block-task',
-  'cancel-task'
+  'watch-pr'
 ]);
 
 export function getSkillRunSpec(skill: string): SkillRunSpec | null {

@@ -23,9 +23,9 @@ function taskSubcommand(subcommand: string): string {
 export function commandHelp(): string {
   return [
     `agent-infra ${VERSION}`,
-    'Built-ins: /ping, /help, /version',
-    'Read: /task ls|status|show|log|decisions, /sandbox ls|show|vm status',
-    'Write: /sandbox create|start, /run create-task <description>, /decide <task-ref> <HD-id> <decision>',
+    'Built-ins: /help, /ping, /version',
+    'Read: /sandbox ls|show|vm status, /task decisions|log|ls|show|status',
+    'Write: /decide <task-ref> <HD-id> <decision>, /run create-task <description>, /sandbox create|start',
     'Exec: /run <skill> <task-ref> ...'
   ].join('\n');
 }
@@ -36,9 +36,13 @@ export function parseCommand(text: string): CommandPlan {
   const words = splitWords(trimmed);
   const [command = '', subcommand = '', ...rest] = words;
 
-  if (command === '/ping') return { kind: 'builtin', name: 'ping', role: 'read', args: rest };
   if (command === '/help') return { kind: 'builtin', name: 'help', role: 'read', args: rest };
+  if (command === '/ping') return { kind: 'builtin', name: 'ping', role: 'read', args: rest };
   if (command === '/version') return { kind: 'builtin', name: 'version', role: 'read', args: rest };
+
+  if (command === '/decide') {
+    return { kind: 'ai', role: 'write', argv: ['decide', subcommand, ...rest] };
+  }
 
   if (command === '/task') {
     if (!TASK_READ.has(subcommand)) return { kind: 'error', message: 'Unknown /task command' };
@@ -69,10 +73,6 @@ export function parseCommand(text: string): CommandPlan {
     const spec = getSkillRunSpec(subcommand);
     if (!spec) return { kind: 'error', message: `Unknown skill: ${subcommand}` };
     return { kind: 'ai', role: spec.role, argv: ['run', subcommand, ...rest] };
-  }
-
-  if (command === '/decide') {
-    return { kind: 'ai', role: 'write', argv: ['decide', subcommand, ...rest] };
   }
 
   return { kind: 'error', message: `Unknown command: ${command}` };

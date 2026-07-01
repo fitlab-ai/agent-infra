@@ -54,19 +54,23 @@ Put the app credentials in `.agents/server.local.json`. This file is git-ignored
 
 `appId` must match `cli_[0-9a-fA-F]{16}`. The daemon fails fast if `appId` or `appSecret` is missing.
 
+`auth.users` is the IM authorization allow-list. Each key is `<adapter>:<user-id>`. For Feishu, use the `feishu` adapter prefix and the sender ID from `im.message.receive_v1`: the adapter prefers `open_id`, then falls back to `union_id`, then `user_id`. A key such as `feishu:ou_xxx` grants that Feishu sender the configured role; `name` is only a human-readable label.
+
 ## Commands
 
 | Command | Role | Execution |
 |---------|------|-----------|
-| `/ping`, `/help`, `/version` | public built-in | daemon |
-| `/task ls`, `/task status <ref>`, `/task show <ref>`, `/task log <ref>`, `/task decisions <ref>` | `read` | `ai task ...` |
-| `/sandbox ls`, `/sandbox show <ref>`, `/sandbox vm status` | `read` | `ai sandbox ...` |
-| `/sandbox create <ref>`, `/sandbox start <ref>` | `write` | `ai sandbox ...` |
+| `/decide <task-ref> <HD-id> <decision>` | `write` | `ai decide ...` |
+| `/help`, `/ping`, `/version` | public built-in | daemon |
 | `/run create-task <description> [--tui <name>]` | `write` | `ai run create-task ...` on the host |
 | `/run <skill> <task-ref> [args...] [--tui <name>]` | `exec` | `ai run ...`; task skills run in the matching sandbox |
-| `/decide <task-ref> <HD-id> <decision>` | `write` | `ai decide ...` |
+| `/sandbox create <ref>`, `/sandbox start <ref>` | `write` | `ai sandbox ...` |
+| `/sandbox ls`, `/sandbox show <ref>`, `/sandbox vm status` | `read` | `ai sandbox ...` |
+| `/task decisions <ref>`, `/task log <ref>`, `/task ls`, `/task show <ref>`, `/task status <ref>` | `read` | `ai task ...` |
 
 `/task` commands are read-only views. Lifecycle progress goes through `/run`. Task skills resolve `<task-ref>` to the task branch, find the matching sandbox, and fail with an instruction to run `ai sandbox create <task-ref>` if no sandbox exists. `create-task` is the only v1 skill runner that does not require an existing task or sandbox. Sandbox removal is intentionally not exposed through IM because local deletion still requires interactive confirmation.
+
+The bridge intentionally exposes the v1 allow-list above, not every local `ai task` or `ai sandbox` subcommand. `/run <skill>` accepts the built-in lifecycle skill allow-list from `ai run`; `command.allowedSkills` can narrow that list per deployment. All rows in the table have local equivalents, so verify the local path first with `ai decide ...`, `ai run ...`, `ai sandbox ...`, and `ai task ...`; task-state `ai run` commands require a matching sandbox and the selected TUI installed. After local verification passes, test the same command allow-list through Feishu. Destructive or arbitrary execution commands such as `/sandbox rm` and `/sandbox exec` are intentionally not implemented for IM.
 
 ## TUI Selection
 
@@ -81,7 +85,7 @@ Supported built-ins are `claude`, `codex`, `gemini`, and `opencode`. The generat
 
 ## Authorization
 
-Non-built-in commands are fail-closed. Add adapter-qualified users under `auth.users` and assign one of `read`, `write`, or `exec`; higher roles include lower roles. Unknown users cannot run `/task`, `/sandbox`, `/run`, or `/decide`. Built-ins remain available for connectivity checks.
+Non-built-in commands are fail-closed. Add adapter-qualified users under `auth.users` and assign one of `read`, `write`, or `exec`; higher roles include lower roles. Unknown users cannot run `/decide`, `/run`, `/sandbox`, or `/task`. Built-ins remain available for connectivity checks.
 
 ## References
 
