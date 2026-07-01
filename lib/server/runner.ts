@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
 export type RunnerResult = {
   exitCode: number | null;
@@ -12,13 +14,40 @@ export type RunnerOptions = {
   onChunk?: (chunk: string) => void | Promise<void>;
 };
 
+function resolveCommand(file: string): string {
+  if (process.platform !== 'win32' || path.extname(file)) {
+    return file;
+  }
+
+  const pathValue = process.env.Path || process.env.PATH || '';
+  const extensions = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
+  for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
+    for (const extension of extensions) {
+      const lowerCandidate = path.join(dir, `${file}${extension.toLowerCase()}`);
+      if (fs.existsSync(lowerCandidate)) return lowerCandidate;
+      const upperCandidate = path.join(dir, `${file}${extension.toUpperCase()}`);
+      if (fs.existsSync(upperCandidate)) return upperCandidate;
+    }
+  }
+
+  return file;
+}
+
+function needsShell(file: string): boolean {
+  return process.platform === 'win32' && /\.(?:bat|cmd)$/i.test(file);
+}
+
 function spawnCapture(
   file: string,
   args: string[],
   onChunk?: (chunk: string) => void | Promise<void>
 ): Promise<RunnerResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(file, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const resolvedFile = resolveCommand(file);
+    const child = spawn(resolvedFile, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: needsShell(resolvedFile)
+    });
     let stdout = '';
     let stderr = '';
     let settled = false;

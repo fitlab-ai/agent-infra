@@ -1,8 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { parseRunArgs, runSkill } from '../../../lib/run/index.ts';
 import { buildTuiCommand, renderPrompt, selectTui } from '../../../lib/run/tui.ts';
+
+const TASK_ID = 'TASK-20260430-163836';
+
+function writeTaskFixture(): string {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run-skill-repo-'));
+  const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(taskDir, 'task.md'),
+    [
+      '---',
+      `id: ${TASK_ID}`,
+      'branch: agent-infra-feature-server-command-protocol',
+      '---',
+      '',
+      '# Task'
+    ].join('\n'),
+    'utf8'
+  );
+  return repoRoot;
+}
 
 test('parseRunArgs accepts create-task without task-ref and captures --tui', () => {
   const parsed = parseRunArgs(['create-task', 'write', 'docs', '--tui', 'claude']);
@@ -56,7 +80,9 @@ test('buildTuiCommand returns argv arrays, not shell strings', () => {
 
 test('runSkill routes create-task to host and task skills to sandbox', async () => {
   const calls: string[] = [];
+  const repoRoot = writeTaskFixture();
   const createCode = await runSkill(['create-task', 'demo'], {
+    repoRoot,
     command: { defaultTui: 'codex' },
     runHost: async (command) => {
       calls.push(`host:${command.join(' ')}`);
@@ -69,7 +95,8 @@ test('runSkill routes create-task to host and task skills to sandbox', async () 
   assert.equal(createCode, 0);
   assert.match(calls[0] ?? '', /^host:codex exec/);
 
-  const taskCode = await runSkill(['code-task', '#7'], {
+  const taskCode = await runSkill(['code-task', TASK_ID], {
+    repoRoot,
     command: { defaultTui: 'codex' },
     runHost: async () => {
       throw new Error('host should not be used');
@@ -80,13 +107,15 @@ test('runSkill routes create-task to host and task skills to sandbox', async () 
     }
   });
   assert.equal(taskCode, 2);
-  assert.match(calls.at(-1) ?? '', /^sandbox:#7:codex exec/);
+  assert.match(calls.at(-1) ?? '', new RegExp(`^sandbox:${TASK_ID}:codex exec`));
 });
 
 test('runSkill forwards sandbox stdout and stderr to the ai run process output', async () => {
   const stdout: string[] = [];
   const stderr: string[] = [];
-  const code = await runSkill(['code-task', '#7'], {
+  const repoRoot = writeTaskFixture();
+  const code = await runSkill(['code-task', TASK_ID], {
+    repoRoot,
     command: { defaultTui: 'codex' },
     writeStdout: (chunk) => stdout.push(chunk),
     writeStderr: (chunk) => stderr.push(chunk),
