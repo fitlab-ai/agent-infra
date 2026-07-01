@@ -25,8 +25,8 @@ export function commandHelp(): string {
     `agent-infra ${VERSION}`,
     'Built-ins: /help, /ping, /version',
     'Read: /sandbox ls|show|vm status, /task decisions|log|ls|show|status',
-    'Write: /decide <task-ref> <HD-id> <decision>, /run create-task <description>, /sandbox create|start',
-    'Exec: /run <skill> <task-ref> ...'
+    'Write: /sandbox create|start',
+    'Exec: /decide <task-ref> <HD-id> <decision>, /run create-task <description>, /run <skill> <task-ref> ...'
   ].join('\n');
 }
 
@@ -41,7 +41,7 @@ export function parseCommand(text: string): CommandPlan {
   if (command === '/version') return { kind: 'builtin', name: 'version', role: 'read', args: rest };
 
   if (command === '/decide') {
-    return { kind: 'ai', role: 'write', argv: ['decide', subcommand, ...rest] };
+    return { kind: 'ai', role: 'exec', argv: ['decide', subcommand, ...rest] };
   }
 
   if (command === '/task') {

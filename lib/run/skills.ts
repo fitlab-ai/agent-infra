@@ -1,6 +1,6 @@
 export type SkillRunSpec =
   | { kind: 'task'; skill: string; role: 'exec'; requiresSandbox: true }
-  | { kind: 'create'; skill: 'create-task'; role: 'write'; requiresSandbox: false };
+  | { kind: 'create'; skill: 'create-task'; role: 'exec'; requiresSandbox: false };
 
 const TASK_SKILLS = new Set([
   'analyze-task',
@@ -21,7 +21,7 @@ const TASK_SKILLS = new Set([
 
 export function getSkillRunSpec(skill: string): SkillRunSpec | null {
   if (skill === 'create-task') {
-    return { kind: 'create', skill: 'create-task', role: 'write', requiresSandbox: false };
+    return { kind: 'create', skill: 'create-task', role: 'exec', requiresSandbox: false };
   }
   if (TASK_SKILLS.has(skill)) {
     return { kind: 'task', skill, role: 'exec', requiresSandbox: true };

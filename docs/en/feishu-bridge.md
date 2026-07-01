@@ -60,9 +60,9 @@ Put the app credentials in `.agents/server.local.json`. This file is git-ignored
 
 | Command | Role | Execution |
 |---------|------|-----------|
-| `/decide <task-ref> <HD-id> <decision>` | `write` | `ai decide ...` |
+| `/decide <task-ref> <HD-id> <decision>` | `exec` | `ai decide ...` |
 | `/help`, `/ping`, `/version` | public built-in | daemon |
-| `/run create-task <description> [--tui <name>]` | `write` | `ai run create-task ...` on the host |
+| `/run create-task <description> [--tui <name>]` | `exec` | `ai run create-task ...` on the host |
 | `/run <skill> <task-ref> [args...] [--tui <name>]` | `exec` | `ai run ...`; task skills run in the matching sandbox |
 | `/sandbox create <ref>`, `/sandbox start <ref>` | `write` | `ai sandbox ...` |
 | `/sandbox ls`, `/sandbox show <ref>`, `/sandbox vm status` | `read` | `ai sandbox ...` |

@@ -28,9 +28,14 @@ test('parseCommand maps sandbox and run commands with roles', () => {
     role: 'exec',
     argv: ['run', 'code-task', '#7', '--tui', 'codex']
   });
+  assert.deepEqual(parseCommand('/run create-task demo --tui codex'), {
+    kind: 'ai',
+    role: 'exec',
+    argv: ['run', 'create-task', 'demo', '--tui', 'codex']
+  });
   assert.deepEqual(parseCommand('/decide #7 HD-1 yes'), {
     kind: 'ai',
-    role: 'write',
+    role: 'exec',
     argv: ['decide', '#7', 'HD-1', 'yes']
   });
 });
