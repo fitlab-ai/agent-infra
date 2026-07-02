@@ -16,6 +16,8 @@ export type SandboxRunRequest = {
   taskRef: string;
   branch: string;
   command: string[];
+  onStdoutChunk?: (chunk: string) => void | Promise<void>;
+  onStderrChunk?: (chunk: string) => void | Promise<void>;
 };
 
 export type RunSkillOptions = {
@@ -96,13 +98,28 @@ export async function runSkill(args: string[], options: RunSkillOptions = {}): P
 
   const repoRoot = options.repoRoot ?? config?.repoRoot ?? process.cwd();
   const branch = resolveTaskBranch(parsed.taskRef, repoRoot);
-  const runSandbox = options.runSandbox ?? ((request: SandboxRunRequest) => runInSandbox(request));
-  const result = await runSandbox({ taskRef: parsed.taskRef, branch, command });
-  if (result.stdout) {
-    (options.writeStdout ?? ((chunk: string) => process.stdout.write(chunk)))(result.stdout);
+  const writeStdout = options.writeStdout ?? ((chunk: string) => process.stdout.write(chunk));
+  const writeStderr = options.writeStderr ?? ((chunk: string) => process.stderr.write(chunk));
+  let streamedStdout = false;
+  let streamedStderr = false;
+  const onStdoutChunk = (chunk: string): void => {
+    streamedStdout = true;
+    writeStdout(chunk);
+  };
+  const onStderrChunk = (chunk: string): void => {
+    streamedStderr = true;
+    writeStderr(chunk);
+  };
+  const runSandbox =
+    options.runSandbox ??
+    (({ onStdoutChunk, onStderrChunk, ...request }: SandboxRunRequest) =>
+      runInSandbox(request, { onStdoutChunk, onStderrChunk }));
+  const result = await runSandbox({ taskRef: parsed.taskRef, branch, command, onStdoutChunk, onStderrChunk });
+  if (!streamedStdout && result.stdout) {
+    writeStdout(result.stdout);
   }
-  if (result.stderr) {
-    (options.writeStderr ?? ((chunk: string) => process.stderr.write(chunk)))(result.stderr);
+  if (!streamedStderr && result.stderr) {
+    writeStderr(result.stderr);
   }
   return result.exitCode ?? (result.signal ? 1 : 0);
 }

@@ -30,24 +30,67 @@ export type SandboxCaptureOptions = {
   containerCandidates?: string[];
   rows?: SandboxRow[];
   startContainer?: (name: string) => void;
-  spawn?: (file: string, args: string[]) => Promise<SandboxCaptureResult>;
+  spawn?: (
+    file: string,
+    args: string[],
+    options?: {
+      onStdoutChunk?: (chunk: string) => void | Promise<void>;
+      onStderrChunk?: (chunk: string) => void | Promise<void>;
+    }
+  ) => Promise<SandboxCaptureResult>;
+  onStdoutChunk?: (chunk: string) => void | Promise<void>;
+  onStderrChunk?: (chunk: string) => void | Promise<void>;
 };
 
-async function spawnCapture(file: string, args: string[]): Promise<SandboxCaptureResult> {
+type SandboxChunkCallback = NonNullable<SandboxCaptureOptions['onStdoutChunk']>;
+
+async function spawnCapture(
+  file: string,
+  args: string[],
+  options: {
+    onStdoutChunk?: SandboxChunkCallback;
+    onStderrChunk?: SandboxChunkCallback;
+  } = {}
+): Promise<SandboxCaptureResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    let stdoutPending = Promise.resolve();
+    let stderrPending = Promise.resolve();
+    const rejectOnce = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    const resolveOnce = (result: SandboxCaptureResult): void => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    const enqueue = (pending: Promise<void>, callback: SandboxChunkCallback | undefined, chunk: string): Promise<void> => {
+      if (!callback) return pending;
+      return pending.then(() => callback(chunk)).then(undefined, (error) => {
+        rejectOnce(error);
+      });
+    };
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
       stdout += chunk;
+      stdoutPending = enqueue(stdoutPending, options.onStdoutChunk, chunk);
     });
     child.stderr.on('data', (chunk) => {
       stderr += chunk;
+      stderrPending = enqueue(stderrPending, options.onStderrChunk, chunk);
     });
-    child.on('error', reject);
-    child.on('close', (exitCode, signal) => resolve({ exitCode, signal, stdout, stderr }));
+    child.on('error', rejectOnce);
+    child.on('close', (exitCode, signal) => {
+      Promise.all([stdoutPending, stderrPending])
+        .then(() => resolveOnce({ exitCode, signal, stdout, stderr }))
+        .catch(rejectOnce);
+    });
   });
 }
 
@@ -80,5 +123,8 @@ export async function runInSandbox(
     found.name,
     ...request.command
   ];
-  return (options.spawn ?? spawnCapture)('docker', dockerArgs);
+  return (options.spawn ?? spawnCapture)('docker', dockerArgs, {
+    onStdoutChunk: options.onStdoutChunk,
+    onStderrChunk: options.onStderrChunk
+  });
 }

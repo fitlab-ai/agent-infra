@@ -132,6 +132,34 @@ test('runSkill forwards sandbox stdout and stderr to the ai run process output',
   assert.deepEqual(stderr, ['warning\n']);
 });
 
+test('runSkill streams sandbox stdout and stderr without repeating final buffers', async () => {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const repoRoot = writeTaskFixture();
+  const code = await runSkill(['code-task', TASK_ID], {
+    repoRoot,
+    command: { defaultTui: 'codex' },
+    writeStdout: (chunk) => stdout.push(chunk),
+    writeStderr: (chunk) => stderr.push(chunk),
+    runSandbox: async (request) => {
+      assert.equal(typeof request.onStdoutChunk, 'function');
+      assert.equal(typeof request.onStderrChunk, 'function');
+      request.onStdoutChunk?.('live out\n');
+      request.onStderrChunk?.('live err\n');
+      return {
+        exitCode: 0,
+        signal: null,
+        stdout: 'final out\n',
+        stderr: 'final err\n'
+      };
+    }
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(stdout, ['live out\n']);
+  assert.deepEqual(stderr, ['live err\n']);
+});
+
 test('runSkill honors command.allowedSkills as a narrowing allow-list', async () => {
   await assert.rejects(
     () =>
