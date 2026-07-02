@@ -180,6 +180,29 @@ test('ai task log folds English human counts for an English task', () => {
   );
 });
 
+test('ai task log replaces pre-existing human counts on canonical review steps', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000017';
+  writeTask(
+    activeDir,
+    taskId,
+    '## 活动日志',
+    [
+      '- 2026-06-18 14:00:00+08:00 — **Review Plan (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-verify: 9, Human-decision: 8 (+ 2 env-blocked) → review-plan.md'
+    ],
+    ['| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |']
+  );
+
+  const out = runCli(['task', 'log', taskId], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(
+    out.stdout,
+    /^1\s+Review Plan \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-verify: 2, Human-decision: 1 → review-plan\.md/m
+  );
+  assert.equal(out.stdout.match(/Manual-verify:/g)?.length, 1);
+  assert.equal(out.stdout.match(/Human-decision:/g)?.length, 1);
+});
+
 test('ai task log renders a human-executed review row as `human` with a `-` STARTED placeholder', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000015';

@@ -50,6 +50,7 @@ const ENV_BLOCKED_RE = /\(\+\s*(\d+)\s+env-blocked\)/i;
 // Same match plus any leading whitespace, so folding the count into the verdict
 // text drops the redundant `(+ n env-blocked)` fragment without leaving a gap.
 const ENV_BLOCKED_STRIP_RE = /\s*\(\+\s*\d+\s+env-blocked\)/i;
+const HUMAN_COUNTS_STRIP_RE = /(?:,\s*)?\bManual-verify:\s*\d+,\s*Human-decision:\s*\d+/gi;
 const REVIEW_STAGE_PREFIXES: { prefix: string; stage: ReviewStage }[] = [
   { prefix: 'Review Analysis', stage: 'analysis' },
   { prefix: 'Review Plan', stage: 'plan' },
@@ -144,7 +145,11 @@ function isHumanAgent(agent: string): boolean {
 // the review count line. The raw `(+ n env-blocked)` fragment is dropped so the
 // env-blocked number is not shown twice (it becomes the manual-verify count).
 function foldHumanCounts(note: string, decisions: number, envBlocked: number): string {
-  const base = note.replace(ENV_BLOCKED_STRIP_RE, '');
+  const base = note
+    .replace(ENV_BLOCKED_STRIP_RE, '')
+    .replace(HUMAN_COUNTS_STRIP_RE, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
   const group = `Manual-verify: ${envBlocked}, Human-decision: ${decisions}`;
   const arrow = base.indexOf(' → ');
   return arrow === -1 ? `${base}, ${group}` : `${base.slice(0, arrow)}, ${group}${base.slice(arrow)}`;
