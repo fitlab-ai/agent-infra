@@ -353,6 +353,14 @@ test("composeDockerfile configures tmux extended keys and terminal env forwardin
     assert.match(content, /set -g status-interval 1/);
     assert.match(content, /set -g status-right-length 80/);
     assert.match(content, /\/usr\/local\/bin\/cc-token-status/);
+    assert.match(content, /SETTINGS_FILE="\/home\/devuser\/\.claude\/settings\.json"/);
+    assert.match(content, /ANTHROPIC_AUTH_TOKEN/);
+    assert.match(content, /ANTHROPIC_API_KEY/);
+    assert.match(content, /apiKeyHelper/);
+    assert.ok(
+      content.indexOf('SETTINGS_FILE="/home/devuser/.claude/settings.json"')
+        < content.indexOf('CRED_FILE="/home/devuser/.claude/.credentials.json"')
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

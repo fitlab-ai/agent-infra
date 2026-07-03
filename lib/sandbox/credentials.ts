@@ -55,6 +55,11 @@ type InspectOptions = {
   envFn?: EnvFn;
 };
 
+type ProviderAuthOptions = {
+  readFn?: ReadFn;
+  existsFn?: ExistsFn;
+};
+
 type WriteHostOptions = {
   execFn?: ExecFn;
   mkdirFn?: typeof fs.mkdirSync;
@@ -113,6 +118,14 @@ const REDACTION_PATTERNS = [
   { pattern: /gh[psoru]_[A-Za-z0-9]{30,}/g, replacement: '[REDACTED github token]' },
   { pattern: /Bearer\s+[A-Za-z0-9._~+/=-]{20,}/gi, replacement: 'Bearer [REDACTED]' }
 ];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasNonEmptyString(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown error';
@@ -216,6 +229,35 @@ export function validateClaudeCredentialsEnvOverride(env: NodeJS.ProcessEnv = pr
     throw new Error(
       'Invalid AGENT_INFRA_CLAUDE_CREDENTIALS_FILE value. Expected an absolute file path.'
     );
+  }
+}
+
+export function hasClaudeProviderAuthInSettings(settings: unknown): boolean {
+  if (!isRecord(settings)) {
+    return false;
+  }
+
+  const env = isRecord(settings.env) ? settings.env : {};
+  return hasNonEmptyString(env.ANTHROPIC_AUTH_TOKEN)
+    || hasNonEmptyString(env.ANTHROPIC_API_KEY)
+    || hasNonEmptyString(settings.apiKeyHelper);
+}
+
+export function hasClaudeProviderAuth(home: string, options: ProviderAuthOptions = {}): boolean {
+  const {
+    readFn = (targetPath) => fs.readFileSync(targetPath, 'utf8'),
+    existsFn = fs.existsSync
+  } = options;
+  const settingsPath = path.join(home, '.claude', 'settings.json');
+
+  if (!existsFn(settingsPath)) {
+    return false;
+  }
+
+  try {
+    return hasClaudeProviderAuthInSettings(JSON.parse(readFn(settingsPath)));
+  } catch {
+    return false;
   }
 }
 
@@ -595,12 +637,21 @@ export function prepareClaudeCredentials(
   resolvedTools: ResolvedTool[],
   extractFn: (home: string) => string | null = extractClaudeCredentialsBlob,
   writeFn: (home: string, project: string, blob: string) => void = writeClaudeCredentialsFile,
-  inspectFn: (home: string) => CredentialInspection = inspectClaudeKeychainStatus
+  inspectFn: (home: string) => CredentialInspection = inspectClaudeKeychainStatus,
+  providerAuthFn: (home: string) => boolean = hasClaudeProviderAuth
 ): ClaudeCredentialOutcome {
   const claudeCodeEntry = resolvedTools.find(({ tool }) => tool.id === 'claude-code');
   if (!claudeCodeEntry) {
     return { status: 'NOT_APPLICABLE' };
   }
+
+  const providerAuthAvailable = () => {
+    try {
+      return providerAuthFn(home);
+    } catch {
+      return false;
+    }
+  };
 
   let blob: string | null = null;
   const hasCustomInspectFn = inspectFn !== inspectClaudeKeychainStatus;
@@ -612,7 +663,7 @@ export function prepareClaudeCredentials(
         blob = inspection.blob;
         break;
       case 'MISSING':
-        return { status: 'SKIPPED' };
+        return providerAuthAvailable() ? { status: 'OK' } : { status: 'SKIPPED' };
       case 'KEYCHAIN_LOCKED':
         throw new Error([
           'Claude Code credentials are stored in the macOS keychain, but the keychain is locked.',
@@ -620,6 +671,9 @@ export function prepareClaudeCredentials(
           buildLockedGuidance()
         ].join('\n'));
       case 'STALE_ACCESS':
+        if (providerAuthAvailable()) {
+          return { status: 'OK' };
+        }
         throw new Error([
           'Claude Code credentials on host are invalid or expired.',
           '',
@@ -648,7 +702,7 @@ export function prepareClaudeCredentials(
   } else {
     blob = extractFn(home);
     if (!blob) {
-      return { status: 'SKIPPED' };
+      return providerAuthAvailable() ? { status: 'OK' } : { status: 'SKIPPED' };
     }
   }
 

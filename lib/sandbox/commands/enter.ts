@@ -9,6 +9,7 @@ import { detectEngine } from '../engine.ts';
 import {
   formatCredentialWarnings,
   formatRemaining,
+  hasClaudeProviderAuth,
   reconcileClaudeCredentials,
   redactCommandError,
   validateClaudeCredentialsEnvOverride
@@ -93,8 +94,12 @@ export function runSandboxInteractive(params: {
 
 export function formatCredentialSyncStatus(
   result: ReturnType<typeof reconcileClaudeCredentials>,
-  isTTY = process.stderr.isTTY
+  isTTY = process.stderr.isTTY,
+  providerAuthAvailable = false
 ): string | null {
+  if (providerAuthAvailable && (result.status === 'STALE_ACCESS' || result.status === 'MISSING')) {
+    return null;
+  }
   if (result.status === 'STALE_ACCESS') {
     return 'Warning: Claude Code credentials on host appear stale. Run "ai sandbox refresh" or "claude /login" to renew.\n';
   }
@@ -158,8 +163,9 @@ export async function enter(args: string[]): Promise<number> {
   if (config.tools.includes('claude-code')) {
     try {
       // Scan all projects so a refresh from a neighbouring sandbox can still flow back to the host.
+      const providerAuthAvailable = hasClaudeProviderAuth(config.home);
       const result = reconcileClaudeCredentials(config.home);
-      const message = formatCredentialSyncStatus(result);
+      const message = formatCredentialSyncStatus(result, process.stderr.isTTY, providerAuthAvailable);
       if (message) {
         process.stderr.write(message);
       }

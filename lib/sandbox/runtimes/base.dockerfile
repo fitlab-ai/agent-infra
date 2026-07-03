@@ -61,6 +61,19 @@ RUN cat > /usr/local/bin/cc-token-status <<'SCRIPT' && chmod +x /usr/local/bin/c
 #!/bin/sh
 set -eu
 
+SETTINGS_FILE="/home/devuser/.claude/settings.json"
+if [ -r "$SETTINGS_FILE" ] && jq -e '
+  def has_nonempty($v):
+    if ($v | type) == "string" then ($v | gsub("^\\s+|\\s+$"; "") | length) > 0 else false end;
+  (if type == "object" then . else {} end) as $settings
+  | (if ($settings.env | type) == "object" then $settings.env else {} end) as $env
+  | has_nonempty($env.ANTHROPIC_AUTH_TOKEN)
+    or has_nonempty($env.ANTHROPIC_API_KEY)
+    or has_nonempty($settings.apiKeyHelper)
+' "$SETTINGS_FILE" >/dev/null 2>&1; then
+  exit 0
+fi
+
 CRED_FILE="/home/devuser/.claude/.credentials.json"
 [ -r "$CRED_FILE" ] || exit 0
 

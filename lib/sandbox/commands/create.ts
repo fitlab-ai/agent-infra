@@ -1438,9 +1438,9 @@ export async function create(args: string[]): Promise<void> {
             if (claudeCodeEntry) {
               ensureClaudeOnboarding(claudeCodeEntry.dir, effectiveConfig.home);
               ensureClaudeSettings(claudeCodeEntry.dir, effectiveConfig.home);
-              // prepareClaudeCredentials wrote the shared credentials file
-              // before this point. If credentials were missing, the
-              // claude-code entry was removed from effectiveResolvedTools.
+              // prepareClaudeCredentials wrote OAuth credentials or confirmed
+              // provider/API settings are enough for Claude Code. If no usable
+              // auth was present, the claude-code entry was removed above.
             }
             const codexEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'codex');
             if (codexEntry) {

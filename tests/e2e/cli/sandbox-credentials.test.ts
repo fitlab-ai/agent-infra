@@ -257,6 +257,48 @@ test("credential path helpers and writer manage the shared credential file", asy
   }
 });
 
+test("Claude provider auth detection accepts settings env tokens and apiKeyHelper", async () => {
+  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+
+  assert.equal(credentials.hasClaudeProviderAuthInSettings({
+    env: { ANTHROPIC_AUTH_TOKEN: "  token-value  " }
+  }), true);
+  assert.equal(credentials.hasClaudeProviderAuthInSettings({
+    env: { ANTHROPIC_API_KEY: "  api-key  " }
+  }), true);
+  assert.equal(credentials.hasClaudeProviderAuthInSettings({
+    apiKeyHelper: "  op read item  "
+  }), true);
+  assert.equal(credentials.hasClaudeProviderAuthInSettings({
+    env: { ANTHROPIC_AUTH_TOKEN: "  ", ANTHROPIC_API_KEY: "" },
+    apiKeyHelper: " "
+  }), false);
+  assert.equal(credentials.hasClaudeProviderAuthInSettings({
+    env: { ANTHROPIC_AUTH_TOKEN: 123 },
+    apiKeyHelper: ["helper"]
+  }), false);
+  assert.equal(credentials.hasClaudeProviderAuthInSettings("not-json-object"), false);
+});
+
+test("Claude provider auth detection reads settings.json conservatively", async () => {
+  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-provider-auth-"));
+  const settingsPath = path.join(tmpDir, ".claude", "settings.json");
+
+  try {
+    assert.equal(credentials.hasClaudeProviderAuth(tmpDir), false);
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(settingsPath, "{", "utf8");
+    assert.equal(credentials.hasClaudeProviderAuth(tmpDir), false);
+    fs.writeFileSync(settingsPath, JSON.stringify({
+      env: { ANTHROPIC_API_KEY: "sk-ant-api-key" }
+    }), "utf8");
+    assert.equal(credentials.hasClaudeProviderAuth(tmpDir), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("prepareClaudeCredentials writes credentials only when claude-code is enabled", async () => {
   const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
   const writes: Array<[string, string, string]> = [];
@@ -302,6 +344,51 @@ test("prepareClaudeCredentials returns SKIPPED and writes nothing when credentia
   );
 
   assert.deepEqual(outcome, { status: "SKIPPED" });
+  assert.equal(writeCalled, false);
+});
+
+test("prepareClaudeCredentials accepts provider auth when OAuth credentials are missing or stale", async () => {
+  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+
+  for (const inspection of [
+    { status: "MISSING" as const },
+    { status: "STALE_ACCESS" as const }
+  ]) {
+    let writeCalled = false;
+    const outcome = credentials.prepareClaudeCredentials(
+      "/Users/demo",
+      "agent-infra",
+      [{ tool: { id: "claude-code" } }],
+      () => null,
+      () => {
+        writeCalled = true;
+      },
+      () => inspection,
+      () => true
+    );
+
+    assert.deepEqual(outcome, { status: "OK" });
+    assert.equal(writeCalled, false);
+  }
+});
+
+test("prepareClaudeCredentials accepts provider auth when keychain extraction is empty", async () => {
+  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  let writeCalled = false;
+
+  const outcome = credentials.prepareClaudeCredentials(
+    "/Users/demo",
+    "agent-infra",
+    [{ tool: { id: "claude-code" } }],
+    () => null,
+    () => {
+      writeCalled = true;
+    },
+    credentials.inspectClaudeKeychainStatus,
+    () => true
+  );
+
+  assert.deepEqual(outcome, { status: "OK" });
   assert.equal(writeCalled, false);
 });
 

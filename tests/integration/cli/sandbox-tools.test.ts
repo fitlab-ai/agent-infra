@@ -70,7 +70,11 @@ type SandboxCreateModule = {
 };
 type EnterModule = {
   terminalEnvFlags(env?: NodeJS.ProcessEnv): string[];
-  formatCredentialSyncStatus(result: { status: string }): string;
+  formatCredentialSyncStatus(
+    result: { status: string; authoritative?: string | null; expiresAt?: unknown; filesWritten?: string[]; warnings?: unknown[] },
+    isTTY?: boolean,
+    providerAuthAvailable?: boolean
+  ): string | null;
   clipboardBridgeDisabled(env?: NodeJS.ProcessEnv): boolean;
   runSandboxInteractive(params: {
     engine: string;
@@ -116,6 +120,23 @@ test("sandbox exec formats host keychain unavailable credential sync warnings", 
   assert.equal(
     sandboxEnter.formatCredentialSyncStatus({ status: "KEYCHAIN_ERROR" }),
     'Warning: Host keychain is unavailable; Claude credential sync skipped. Run "ai sandbox refresh" for details.\n'
+  );
+});
+
+test("sandbox exec suppresses missing OAuth warnings when Claude provider auth exists", async () => {
+  const sandboxEnter = await loadFreshEsm<EnterModule>("lib/sandbox/commands/enter.js");
+
+  assert.equal(
+    sandboxEnter.formatCredentialSyncStatus({ status: "MISSING" }, false, true),
+    null
+  );
+  assert.equal(
+    sandboxEnter.formatCredentialSyncStatus({ status: "STALE_ACCESS" }, false, true),
+    null
+  );
+  assert.match(
+    sandboxEnter.formatCredentialSyncStatus({ status: "KEYCHAIN_LOCKED" }, false, true) ?? "",
+    /Host keychain is unavailable/
   );
 });
 
