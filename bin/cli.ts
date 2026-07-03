@@ -20,7 +20,7 @@ Commands:
   help            Show this help message
   init            Initialize a new project with update-agent-infra seed command
   merge           Merge tasks from another workspace directory (active/blocked/completed/archive)
-  run             Run a whitelisted lifecycle skill through a non-interactive TUI
+  run             Schedule a lifecycle skill in the task sandbox tmux session
   sandbox, s      Manage Docker-based AI sandboxes
   server          Run the local AI collaboration daemon (start/stop/status/logs)
   task, t         Read-only views over .agents/workspace tasks (cat / files / grep / log / ls / show / status)

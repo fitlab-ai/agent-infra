@@ -1,14 +1,18 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { commandForEngine } from '../../sandbox/shell.ts';
 import { resolveTaskRef } from '../resolve-ref.ts';
 import { enumerateArtifacts, type Artifact } from '../artifacts.ts';
 import { parseTaskFrontmatter, extractTitle, type Frontmatter } from '../frontmatter.ts';
 import { loadShortIdByTaskId } from '../short-id.ts';
+import { parseActivityLog, pairEntries } from './log.ts';
 
 const USAGE = `Usage: ai task status <N | #N | TASK-id>
 
-Prints an aggregated "health check" view for a task: header, metadata, an
-artifacts summary, git branch state, and best-effort GitHub issue/PR status.
+Prints an aggregated "health check" view for a task: header, metadata,
+artifacts, workflow/runtime execution state, git branch state, and best-effort
+GitHub issue/PR status.
   <ref>   Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
 
 Git and Platform rows are best-effort: a failed git/gh call degrades that row to
@@ -195,6 +199,167 @@ function collectPlatform(fm: Frontmatter, run: Runner): PlatformInfo {
   return { issue, pr };
 }
 
+type WorkflowInfo = {
+  state: string;
+  step: string;
+  agent: string;
+  startedAt: string;
+  doneAt: string;
+  stale: string;
+};
+
+const STALE_MS = 60 * 60 * 1000;
+
+function parseActivityTime(value: string): number {
+  const epoch = Date.parse(value.replace(' ', 'T'));
+  return Number.isFinite(epoch) ? epoch : Number.NaN;
+}
+
+function collectWorkflow(content: string, now: Date = new Date()): WorkflowInfo {
+  const parsed = parseActivityLog(content);
+  if (!parsed.sectionFound || parsed.entries.length === 0) {
+    return { state: 'unknown', step: DASH, agent: DASH, startedAt: DASH, doneAt: DASH, stale: DASH };
+  }
+
+  const rows = pairEntries(parsed.entries);
+  const latest = rows.at(-1);
+  if (!latest) {
+    return { state: 'unknown', step: DASH, agent: DASH, startedAt: DASH, doneAt: DASH, stale: DASH };
+  }
+
+  const inProgress = latest.started !== '' && latest.done === '';
+  const state = inProgress ? 'in-progress' : latest.done ? 'idle' : 'unknown';
+  let stale = DASH;
+  if (inProgress) {
+    const started = parseActivityTime(latest.started);
+    stale = Number.isFinite(started) ? (now.getTime() - started > STALE_MS ? 'yes' : 'no') : 'unknown';
+  }
+
+  return {
+    state,
+    step: latest.step || DASH,
+    agent: latest.agent || DASH,
+    startedAt: latest.started || DASH,
+    doneAt: latest.done || DASH,
+    stale
+  };
+}
+
+type RuntimeInfo = {
+  mode: string;
+  status: string;
+  run: string;
+  tmux: string;
+  startedAt: string;
+  finishedAt: string;
+  exitCode: string;
+  log: string;
+};
+
+type ManagedRunRecord = {
+  run_id: string;
+  engine: string;
+  container: string;
+  run_dir: string;
+  status_file: string;
+  log_file: string;
+};
+
+function latestRunRecord(taskDir: string): ManagedRunRecord | null {
+  const runsDir = path.join(taskDir, 'runs');
+  if (!fs.existsSync(runsDir)) return null;
+  const candidates: { path: string; mtimeMs: number }[] = [];
+  for (const entry of fs.readdirSync(runsDir)) {
+    if (!entry.endsWith('.json')) continue;
+    const filePath = path.join(runsDir, entry);
+    const stat = fs.statSync(filePath);
+    if (stat.isFile()) candidates.push({ path: filePath, mtimeMs: stat.mtimeMs });
+  }
+  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  for (const candidate of candidates) {
+    try {
+      const data = JSON.parse(fs.readFileSync(candidate.path, 'utf8'));
+      if (
+        typeof data?.run_id === 'string' &&
+        typeof data?.engine === 'string' &&
+        typeof data?.container === 'string' &&
+        typeof data?.run_dir === 'string'
+      ) {
+        return {
+          run_id: data.run_id,
+          engine: data.engine,
+          container: data.container,
+          run_dir: data.run_dir,
+          status_file:
+            typeof data.status_file === 'string' ? data.status_file : `${data.run_dir}/status`,
+          log_file:
+            typeof data.log_file === 'string' ? data.log_file : `${data.run_dir}/output.log`
+        };
+      }
+    } catch {
+      // Ignore malformed local records and try the next newest file.
+    }
+  }
+
+  return null;
+}
+
+function readRuntimeFile(record: ManagedRunRecord, filePath: string, run: Runner): string | null {
+  const command = commandForEngine(record.engine, 'docker', ['exec', record.container, 'cat', filePath]);
+  const output = tryRun(run, command.cmd, command.args);
+  return output === null ? null : output.trim();
+}
+
+function runtimeValue(record: ManagedRunRecord, name: string, run: Runner): string {
+  const output = readRuntimeFile(record, `${record.run_dir}/${name}`, run);
+  return output ? output : DASH;
+}
+
+function collectRuntime(taskDir: string, workflow: WorkflowInfo, run: Runner): RuntimeInfo {
+  const record = latestRunRecord(taskDir);
+  if (!record) {
+    return workflow.state === 'in-progress'
+      ? {
+          mode: 'unmanaged',
+          status: 'inferred-from-workflow',
+          run: DASH,
+          tmux: DASH,
+          startedAt: DASH,
+          finishedAt: DASH,
+          exitCode: DASH,
+          log: DASH
+        }
+      : {
+          mode: 'none',
+          status: DASH,
+          run: DASH,
+          tmux: DASH,
+          startedAt: DASH,
+          finishedAt: DASH,
+          exitCode: DASH,
+          log: DASH
+        };
+  }
+
+  const status = readRuntimeFile(record, record.status_file, run)?.trim() || 'unknown';
+  const session = runtimeValue(record, 'session', run);
+  const window = runtimeValue(record, 'window', run);
+  const pane = runtimeValue(record, 'pane', run);
+  const tmux = session !== DASH && window !== DASH && pane !== DASH ? `${session}:${window}:${pane}` : DASH;
+
+  return {
+    mode: 'managed-tmux',
+    status,
+    run: record.run_id,
+    tmux,
+    startedAt: runtimeValue(record, 'started_at', run),
+    finishedAt: runtimeValue(record, 'finished_at', run),
+    exitCode: runtimeValue(record, 'exit_code', run),
+    log: record.log_file
+  };
+}
+
 type StatusModel = {
   taskId: string;
   shortId: string;
@@ -202,6 +367,8 @@ type StatusModel = {
   issueNumber: string;
   metadata: [string, string][];
   artifacts: { count: number; groups: { stage: string; files: string[] }[] };
+  workflow: WorkflowInfo;
+  runtime: RuntimeInfo;
   git: GitInfo;
   platform: PlatformInfo;
 };
@@ -227,6 +394,34 @@ function renderStatus(model: StatusModel): string[] {
   } else {
     lines.push(...renderPairs(model.artifacts.groups.map((group) => [group.stage, group.files.join(', ')])));
   }
+
+  lines.push(
+    '',
+    'Workflow',
+    ...renderPairs([
+      ['state', model.workflow.state],
+      ['step', model.workflow.step],
+      ['agent', model.workflow.agent],
+      ['started_at', model.workflow.startedAt],
+      ['done_at', model.workflow.doneAt],
+      ['stale', model.workflow.stale]
+    ])
+  );
+
+  lines.push(
+    '',
+    'Runtime',
+    ...renderPairs([
+      ['mode', model.runtime.mode],
+      ['status', model.runtime.status],
+      ['run', model.runtime.run],
+      ['tmux', model.runtime.tmux],
+      ['started_at', model.runtime.startedAt],
+      ['finished_at', model.runtime.finishedAt],
+      ['exit_code', model.runtime.exitCode],
+      ['log', model.runtime.log]
+    ])
+  );
 
   lines.push(
     '',
@@ -272,6 +467,7 @@ function status(args: string[] = []): void {
   const fm = parseTaskFrontmatter(content);
   const run = makeRunner(resolved.repoRoot);
   const artifacts = enumerateArtifacts(resolved.taskDir);
+  const workflow = collectWorkflow(content);
 
   const model: StatusModel = {
     taskId: resolved.taskId,
@@ -280,6 +476,8 @@ function status(args: string[] = []): void {
     issueNumber: fm.issue_number && /^\d+$/.test(fm.issue_number) ? fm.issue_number : '',
     metadata: collectMetadata(fm),
     artifacts: { count: artifacts.length, groups: groupArtifacts(artifacts) },
+    workflow,
+    runtime: collectRuntime(resolved.taskDir, workflow, run),
     git: collectGit(fm.branch ?? '', run),
     platform: collectPlatform(fm, run)
   };
@@ -296,7 +494,9 @@ export {
   groupArtifacts,
   collectGit,
   collectPlatform,
+  collectWorkflow,
+  collectRuntime,
   renderStatus,
   METADATA_KEYS
 };
-export type { Runner, GitInfo, PlatformInfo, StatusModel };
+export type { Runner, GitInfo, PlatformInfo, WorkflowInfo, RuntimeInfo, StatusModel };

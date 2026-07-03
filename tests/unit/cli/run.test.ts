@@ -9,10 +9,34 @@ import { buildTuiCommand, renderPrompt, selectTui } from '../../../lib/run/tui.t
 
 const TASK_ID = 'TASK-20260430-163836';
 
-function writeTaskFixture(): string {
+function writeTaskFixture(options: { withShortId?: boolean } = {}): string {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run-skill-repo-'));
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
+  if (options.withShortId) {
+    fs.mkdirSync(path.join(repoRoot, '.agents'), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, '.agents', 'scripts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repoRoot, '.agents', '.airc.json'),
+      JSON.stringify({ task: { shortIdLength: 2 } }),
+      'utf8'
+    );
+    fs.writeFileSync(
+      path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'),
+      JSON.stringify({ version: 1, ids: { '01': TASK_ID } }),
+      'utf8'
+    );
+    fs.writeFileSync(
+      path.join(repoRoot, '.agents', 'scripts', 'task-short-id.js'),
+      [
+        "const ref = process.argv[3] || '';",
+        "const normalized = ref.replace(/^#?/, '').padStart(2, '0');",
+        `if (normalized === '01') process.stdout.write('${TASK_ID}\\n');`,
+        "else { process.stderr.write('not found\\n'); process.exit(1); }"
+      ].join('\n'),
+      'utf8'
+    );
+  }
   fs.writeFileSync(
     path.join(taskDir, 'task.md'),
     [
@@ -110,7 +134,7 @@ test('runSkill routes create-task to host and task skills to sandbox', async () 
   assert.match(calls.at(-1) ?? '', new RegExp(`^sandbox:${TASK_ID}:codex exec`));
 });
 
-test('runSkill forwards sandbox stdout and stderr to the ai run process output', async () => {
+test('runSkill prints sandbox scheduling stdout and stderr', async () => {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const repoRoot = writeTaskFixture();
@@ -122,17 +146,17 @@ test('runSkill forwards sandbox stdout and stderr to the ai run process output',
     runSandbox: async () => ({
       exitCode: 0,
       signal: null,
-      stdout: 'skill summary\n',
+      stdout: 'Started sandbox run run-test in tmux session\n',
       stderr: 'warning\n'
     })
   });
 
   assert.equal(code, 0);
-  assert.deepEqual(stdout, ['skill summary\n']);
+  assert.deepEqual(stdout, ['Started sandbox run run-test in tmux session\n']);
   assert.deepEqual(stderr, ['warning\n']);
 });
 
-test('runSkill streams sandbox stdout and stderr without repeating final buffers', async () => {
+test('runSkill schedules task skills without stdout and stderr stream callbacks', async () => {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const repoRoot = writeTaskFixture();
@@ -142,22 +166,97 @@ test('runSkill streams sandbox stdout and stderr without repeating final buffers
     writeStdout: (chunk) => stdout.push(chunk),
     writeStderr: (chunk) => stderr.push(chunk),
     runSandbox: async (request) => {
-      assert.equal(typeof request.onStdoutChunk, 'function');
-      assert.equal(typeof request.onStderrChunk, 'function');
-      request.onStdoutChunk?.('live out\n');
-      request.onStderrChunk?.('live err\n');
+      assert.equal('onStdoutChunk' in request, false);
+      assert.equal('onStderrChunk' in request, false);
       return {
         exitCode: 0,
         signal: null,
-        stdout: 'final out\n',
-        stderr: 'final err\n'
+        stdout: 'scheduled\n',
+        stderr: ''
       };
     }
   });
 
   assert.equal(code, 0);
-  assert.deepEqual(stdout, ['live out\n']);
-  assert.deepEqual(stderr, ['live err\n']);
+  assert.deepEqual(stdout, ['scheduled\n']);
+  assert.deepEqual(stderr, []);
+});
+
+test('runSkill writes a managed run record after successful task scheduling', async () => {
+  const repoRoot = writeTaskFixture();
+  const code = await runSkill(['code-task', TASK_ID], {
+    repoRoot,
+    command: { defaultTui: 'codex' },
+    runSandbox: async (request) => {
+      assert.match(request.runId ?? '', /^run-/);
+      return {
+        exitCode: 0,
+        signal: null,
+        stdout: 'scheduled\n',
+        stderr: '',
+        run: {
+          runId: request.runId!,
+          engine: 'docker',
+          container: 'agent-dev',
+          runDir: `/tmp/agent-infra-runs/${request.runId}`
+        }
+      };
+    }
+  });
+
+  assert.equal(code, 0);
+  const runsDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'runs');
+  const records = fs.readdirSync(runsDir);
+  assert.equal(records.length, 1);
+  const record = JSON.parse(fs.readFileSync(path.join(runsDir, records[0]!), 'utf8'));
+  assert.equal(record.version, 1);
+  assert.equal(record.task_id, TASK_ID);
+  assert.equal(record.task_ref, TASK_ID);
+  assert.equal(record.branch, 'agent-infra-feature-server-command-protocol');
+  assert.equal(record.engine, 'docker');
+  assert.equal(record.container, 'agent-dev');
+  assert.equal(record.status_file, `${record.run_dir}/status`);
+  assert.equal(record.log_file, `${record.run_dir}/output.log`);
+  assert.deepEqual(record.command.slice(0, 2), ['codex', 'exec']);
+});
+
+test('runSkill resolves short task refs when writing managed run records', async () => {
+  const repoRoot = writeTaskFixture({ withShortId: true });
+  const code = await runSkill(['code-task', '#1'], {
+    repoRoot,
+    command: { defaultTui: 'codex' },
+    runSandbox: async (request) => ({
+      exitCode: 0,
+      signal: null,
+      stdout: '',
+      stderr: '',
+      run: {
+        runId: request.runId!,
+        engine: 'docker',
+        container: 'agent-dev',
+        runDir: `/tmp/agent-infra-runs/${request.runId}`
+      }
+    })
+  });
+
+  assert.equal(code, 0);
+  const runsDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'runs');
+  const [recordFile] = fs.readdirSync(runsDir);
+  const record = JSON.parse(fs.readFileSync(path.join(runsDir, recordFile!), 'utf8'));
+  assert.equal(record.task_id, TASK_ID);
+  assert.equal(record.task_ref, '#01');
+});
+
+test('runSkill does not write run records for create-task host execution', async () => {
+  const repoRoot = writeTaskFixture();
+  const code = await runSkill(['create-task', 'demo'], {
+    repoRoot,
+    command: { defaultTui: 'codex' },
+    runHost: async () => ({ exitCode: 0 })
+  });
+
+  assert.equal(code, 0);
+  assert.equal(fs.existsSync(path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'runs')), false);
 });
 
 test('runSkill honors command.allowedSkills as a narrowing allow-list', async () => {
