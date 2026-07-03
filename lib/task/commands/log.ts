@@ -46,8 +46,6 @@ const STARTED_SUFFIX_RE = /\s*\[started\]\s*$/;
 // note these differ from the `.airc.json` long names claude-code/gemini-cli).
 // Any other executor token (a human name, possibly CJK) is treated as human.
 const KNOWN_AI_AGENTS = new Set(['claude', 'codex', 'gemini', 'opencode', 'cursor']);
-const MANUAL_VALIDATION_RE = /\bManual-validation:\s*(\d+)/i;
-const HUMAN_COUNTS_STRIP_RE = /(?:,\s*)?\bManual-validation:\s*\d+(?:,\s*Human-decision:\s*\d+)?/gi;
 const REVIEW_STAGE_PREFIXES: { prefix: string; stage: ReviewStage }[] = [
   { prefix: 'Review Analysis', stage: 'analysis' },
   { prefix: 'Review Plan', stage: 'plan' },
@@ -124,9 +122,31 @@ function reviewStageForStep(step: string): ReviewStage | undefined {
   return REVIEW_STAGE_PREFIXES.find(({ prefix }) => step.startsWith(prefix))?.stage;
 }
 
+function splitArtifactSuffix(note: string): { verdict: string; suffix: string } {
+  const arrow = note.indexOf(' → ');
+  return arrow === -1 ? { verdict: note, suffix: '' } : { verdict: note.slice(0, arrow), suffix: note.slice(arrow) };
+}
+
+function fieldNumber(field: string, label: string): number | undefined {
+  const trimmed = field.trim();
+  const colon = trimmed.indexOf(':');
+  if (colon === -1) return undefined;
+  if (trimmed.slice(0, colon).trim().toLowerCase() !== label) return undefined;
+  const value = Number(trimmed.slice(colon + 1).trim());
+  return Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
 function humanValidationCount(note: string): number {
-  const match = MANUAL_VALIDATION_RE.exec(note);
-  return match ? Number(match[1]) : 0;
+  const { verdict } = splitArtifactSuffix(note);
+  for (const field of verdict.split(',')) {
+    const value = fieldNumber(field, 'manual-validation');
+    if (value !== undefined) return value;
+  }
+  return 0;
+}
+
+function isHumanCountField(field: string): boolean {
+  return fieldNumber(field, 'manual-validation') !== undefined || fieldNumber(field, 'human-decision') !== undefined;
 }
 
 // A step is human-executed when its agent token is not a known AI token. Take
@@ -139,16 +159,17 @@ function isHumanAgent(agent: string): boolean {
 
 // Fold the two human counts into a review row's verdict NOTE: comma-joined, right
 // after the blockers/major/minor list and before the ` → artifact` link, mirroring
-// the review count line. The raw `Manual-validation: n` source field is replaced
-// with a normalized pair so generated rows do not duplicate human counts.
+// the review count line. Review done notes already carry `Manual-validation` as a
+// source field, so build the final verdict field list once instead of cleaning a
+// previously rendered string.
 function foldHumanCounts(note: string, decisions: number, manualValidation: number): string {
-  const base = note
-    .replace(HUMAN_COUNTS_STRIP_RE, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  const { verdict, suffix } = splitArtifactSuffix(note);
+  const fields = verdict
+    .split(',')
+    .map((field) => field.trim())
+    .filter((field) => field !== '' && !isHumanCountField(field));
   const group = `Manual-validation: ${manualValidation}, Human-decision: ${decisions}`;
-  const arrow = base.indexOf(' → ');
-  return arrow === -1 ? `${base}, ${group}` : `${base.slice(0, arrow)}, ${group}${base.slice(arrow)}`;
+  return `${[...fields, group].join(', ')}${suffix}`;
 }
 
 function log(args: string[] = []): void {
