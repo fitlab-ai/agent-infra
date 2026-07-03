@@ -31,7 +31,7 @@ function writeTask(repoRoot: string, state: string, taskId: string): string {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'task.md'),
-    `---\nid: ${taskId}\nbranch: feat-${state}\nstatus: ${state}\nissue_number: 999\n---\n# 任务：${taskId}\n`
+    `---\nid: ${taskId}\nbranch: feat-${state}\nstatus: ${state}\n---\n# 任务：${taskId}\n`
   );
   fs.writeFileSync(path.join(dir, 'analysis.md'), 'analysis body\n');
   fs.writeFileSync(path.join(dir, 'plan.md'), 'plan body\n');
@@ -47,10 +47,9 @@ function assertCoreSections(stdout: string, taskId: string): void {
   assert.match(stdout, new RegExp(`^Task ${taskId}\\b`, 'm'));
   assert.match(stdout, /^Metadata$/m);
   assert.match(stdout, /^Artifacts \(\d+\)$/m);
+  assert.match(stdout, /^Workflow$/m);
+  assert.match(stdout, /^Runtime$/m);
   assert.match(stdout, /^Git$/m);
-  // Platform is best-effort; with issue 999 / no gh network it must still render
-  // a row (degraded to '-') rather than crash the command.
-  assert.match(stdout, /^Platform$/m);
 }
 
 // Acceptance: `ai task status <ref>` must work across active / blocked / completed.

@@ -11,18 +11,17 @@ import { parseActivityLog, pairEntries } from './log.ts';
 const USAGE = `Usage: ai task status <N | #N | TASK-id>
 
 Prints an aggregated "health check" view for a task: header, metadata,
-artifacts, workflow/runtime execution state, git branch state, and best-effort
-GitHub issue/PR status.
+artifacts, workflow/runtime execution state, and git branch state.
   <ref>   Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
 
-Git and Platform rows are best-effort: a failed git/gh call degrades that row to
-'-' without failing the command.
+Git rows are best-effort: a failed git call degrades that row to '-' without
+failing the command.
 `;
 
 const DASH = '-';
 
 // Subprocess boundary: the single place this command shells out. Injectable so
-// the collectors below can be unit-tested without spawning git/gh. Returns the
+// the collectors below can be unit-tested without spawning git. Returns the
 // command's stdout; throws (like execFileSync) on a non-zero exit or spawn error.
 type Runner = (file: string, args: string[]) => string;
 
@@ -31,7 +30,7 @@ function makeRunner(cwd: string): Runner {
     execFileSync(file, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
 }
 
-// Run `run` and swallow any failure into null, so a single failing git/gh call
+// Run `run` and swallow any failure into null, so a single failing git call
 // degrades only its own field instead of aborting the whole view.
 function tryRun(run: Runner, file: string, args: string[]): string | null {
   try {
@@ -51,9 +50,7 @@ const METADATA_KEYS = [
   'branch',
   'assigned_to',
   'created_at',
-  'updated_at',
-  'issue_number',
-  'pr_status'
+  'updated_at'
 ] as const;
 
 function collectMetadata(fm: Frontmatter): [string, string][] {
@@ -157,46 +154,6 @@ function collectGit(frontmatterBranch: string, run: Runner): GitInfo {
   }
 
   return { current, frontmatter, match, exists, uncommitted, aheadBehind };
-}
-
-type PlatformInfo = { issue: string; pr: string };
-
-function collectPlatform(fm: Frontmatter, run: Runner): PlatformInfo {
-  let issue = DASH;
-  if (fm.issue_number && /^\d+$/.test(fm.issue_number)) {
-    const out = tryRun(run, 'gh', ['issue', 'view', fm.issue_number, '--json', 'state,labels']);
-    if (out !== null) {
-      try {
-        const data = JSON.parse(out);
-        const labels = Array.isArray(data.labels)
-          ? data.labels.map((label: { name: string }) => label.name).join(', ')
-          : '';
-        issue = labels ? `${data.state} [${labels}]` : `${data.state}`;
-      } catch {
-        issue = DASH;
-      }
-    }
-  }
-
-  let pr = DASH;
-  if (fm.pr_status === 'created' && fm.pr_number && /^\d+$/.test(fm.pr_number)) {
-    const out = tryRun(run, 'gh', ['pr', 'view', fm.pr_number, '--json', 'state,statusCheckRollup']);
-    if (out !== null) {
-      try {
-        const data = JSON.parse(out);
-        const rollup = Array.isArray(data.statusCheckRollup) ? data.statusCheckRollup : [];
-        const passed = rollup.filter(
-          (check: { conclusion?: string; state?: string }) =>
-            check.conclusion === 'SUCCESS' || check.state === 'SUCCESS'
-        ).length;
-        pr = rollup.length > 0 ? `${data.state}, checks: ${passed}/${rollup.length}` : `${data.state}`;
-      } catch {
-        pr = DASH;
-      }
-    }
-  }
-
-  return { issue, pr };
 }
 
 type WorkflowInfo = {
@@ -364,13 +321,11 @@ type StatusModel = {
   taskId: string;
   shortId: string;
   title: string;
-  issueNumber: string;
   metadata: [string, string][];
   artifacts: { count: number; groups: { stage: string; files: string[] }[] };
   workflow: WorkflowInfo;
   runtime: RuntimeInfo;
   git: GitInfo;
-  platform: PlatformInfo;
 };
 
 // Indent each label/value pair by two spaces and pad labels to a common width so
@@ -436,16 +391,6 @@ function renderStatus(model: StatusModel): string[] {
     ])
   );
 
-  const issueLabel = model.issueNumber ? `issue #${model.issueNumber}` : 'issue';
-  lines.push(
-    '',
-    'Platform',
-    ...renderPairs([
-      [issueLabel, model.platform.issue],
-      ['pr', model.platform.pr]
-    ])
-  );
-
   return lines;
 }
 
@@ -473,13 +418,11 @@ function status(args: string[] = []): void {
     taskId: resolved.taskId,
     shortId: loadShortIdByTaskId(resolved.repoRoot).get(resolved.taskId) ?? DASH,
     title: extractTitle(content),
-    issueNumber: fm.issue_number && /^\d+$/.test(fm.issue_number) ? fm.issue_number : '',
     metadata: collectMetadata(fm),
     artifacts: { count: artifacts.length, groups: groupArtifacts(artifacts) },
     workflow,
     runtime: collectRuntime(resolved.taskDir, workflow, run),
-    git: collectGit(fm.branch ?? '', run),
-    platform: collectPlatform(fm, run)
+    git: collectGit(fm.branch ?? '', run)
   };
 
   for (const line of renderStatus(model)) {
@@ -493,10 +436,9 @@ export {
   collectMetadata,
   groupArtifacts,
   collectGit,
-  collectPlatform,
   collectWorkflow,
   collectRuntime,
   renderStatus,
   METADATA_KEYS
 };
-export type { Runner, GitInfo, PlatformInfo, WorkflowInfo, RuntimeInfo, StatusModel };
+export type { Runner, GitInfo, WorkflowInfo, RuntimeInfo, StatusModel };

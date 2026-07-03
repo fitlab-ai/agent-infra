@@ -8,7 +8,6 @@ import {
   collectMetadata,
   groupArtifacts,
   collectGit,
-  collectPlatform,
   collectWorkflow,
   collectRuntime,
   renderStatus,
@@ -29,8 +28,7 @@ test('collectMetadata emits the fixed key order and degrades missing fields to -
     status: 'active',
     current_step: 'code',
     priority: 'High',
-    branch: 'feat',
-    issue_number: '468'
+    branch: 'feat'
   });
   assert.deepEqual(rows, [
     ['type', 'feature'],
@@ -41,9 +39,7 @@ test('collectMetadata emits the fixed key order and degrades missing fields to -
     ['branch', 'feat'],
     ['assigned_to', '-'],
     ['created_at', '-'],
-    ['updated_at', '-'],
-    ['issue_number', '468'],
-    ['pr_status', '-']
+    ['updated_at', '-']
   ]);
 });
 
@@ -138,60 +134,6 @@ test('collectGit isolates a single failing field (rev-list) without degrading th
   assert.equal(git.current, 'feat');
   assert.equal(git.uncommitted, 'clean');
   assert.equal(git.exists, 'yes');
-});
-
-// --- collectPlatform -------------------------------------------------------
-
-test('collectPlatform makes no calls when there is no issue and pr is not created', () => {
-  let calls = 0;
-  const run: Runner = () => {
-    calls += 1;
-    throw new Error('should not be called');
-  };
-  const platform = collectPlatform({}, run);
-  assert.equal(platform.issue, '-');
-  assert.equal(platform.pr, '-');
-  assert.equal(calls, 0);
-});
-
-test('collectPlatform skips the PR call when pr_status is created but pr_number is absent', () => {
-  let calls = 0;
-  const run: Runner = () => {
-    calls += 1;
-    throw new Error('should not be called');
-  };
-  const platform = collectPlatform({ pr_status: 'created' }, run);
-  assert.equal(platform.pr, '-');
-  assert.equal(calls, 0);
-});
-
-test('collectPlatform summarizes gh JSON for issue and pr', () => {
-  const run: Runner = (_file, args) => {
-    if (args[0] === 'issue') {
-      return JSON.stringify({ state: 'OPEN', labels: [{ name: 'in: cli' }, { name: 'type: feature' }] });
-    }
-    if (args[0] === 'pr') {
-      return JSON.stringify({
-        state: 'OPEN',
-        statusCheckRollup: [{ conclusion: 'SUCCESS' }, { conclusion: 'FAILURE' }]
-      });
-    }
-    throw new Error(`unexpected gh ${args.join(' ')}`);
-  };
-  const platform = collectPlatform(
-    { issue_number: '468', pr_status: 'created', pr_number: '42' },
-    run
-  );
-  assert.equal(platform.issue, 'OPEN [in: cli, type: feature]');
-  assert.equal(platform.pr, 'OPEN, checks: 1/2');
-});
-
-test('collectPlatform degrades to - when gh fails (offline)', () => {
-  const run: Runner = () => {
-    throw new Error('gh: offline');
-  };
-  const platform = collectPlatform({ issue_number: '468' }, run);
-  assert.equal(platform.issue, '-');
 });
 
 // --- collectWorkflow -------------------------------------------------------
@@ -315,7 +257,6 @@ const baseModel: StatusModel = {
   taskId: 'TASK-20260101-000001',
   shortId: '#01',
   title: 'demo title',
-  issueNumber: '468',
   metadata: [
     ['type', 'feature'],
     ['status', 'active']
@@ -353,10 +294,9 @@ const baseModel: StatusModel = {
     uncommitted: 'clean',
     aheadBehind: '-'
   },
-  platform: { issue: 'OPEN', pr: '-' }
 };
 
-test('renderStatus emits workflow and runtime before git/platform sections', () => {
+test('renderStatus emits workflow and runtime before git', () => {
   const out = renderStatus(baseModel).join('\n');
   assert.match(out, /^Task TASK-20260101-000001  \(#01\)$/m);
   assert.match(out, /^demo title$/m);
@@ -367,11 +307,8 @@ test('renderStatus emits workflow and runtime before git/platform sections', () 
   assert.match(out, /^Runtime$/m);
   assert.match(out, /^  mode +managed-tmux$/m);
   assert.match(out, /^Git$/m);
-  assert.match(out, /^Platform$/m);
   // Stage group renders its files joined, in order.
   assert.match(out, /^  plan +plan\.md, plan-r2\.md$/m);
-  // Platform issue row is labeled with the issue number.
-  assert.match(out, /^  issue #468 +OPEN$/m);
 });
 
 test('renderStatus shows (none) when a task has no artifacts', () => {
