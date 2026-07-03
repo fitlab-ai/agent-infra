@@ -6,8 +6,8 @@ Read this file before presenting the final review result to the user.
 
 ## Choose Exactly One Output Branch
 
-Apply these rules in order (**note: env-blocked counts do not participate in selection**):
-1. if `Blocker = 0` and `Major = 0` and `Minor = 0`, use Branch A (regardless of whether env-blocked > 0)
+Apply these rules in order (**note: manual-validation counts do not participate in selection**):
+1. if `Blocker = 0` and `Major = 0` and `Minor = 0`, use Branch A (regardless of whether manual-validation > 0)
 2. if `Blocker = 0` and (`Major > 0` or `Minor > 0`), use Branch B
 3. if `Blocker > 0` and the work can be repaired in a focused refinement pass, use Branch C
 4. if the task requires major redesign, broad reimplementation, or a restart, use Branch D
@@ -16,15 +16,15 @@ Prohibitions:
 - never skip the branch-selection step
 - never mix text from different branches
 - if `Blocker > 0`, never output an approval template
-- never count env-blocked findings as blockers / major issues / minor issues, and never use them to trigger Branch B/C/D
+- never count manual-validation findings as blockers / major issues / minor issues, and never use them to trigger Branch B/C/D
 - always include every TUI command format in the selected branch
-- the count line always shows 5 numbers: the first three (Blockers / Major / Minor) must be 0 to proceed; the last two are "pending human" items and need not be zero — `Manual-verify` (`{e}`) = this round's env-blocked count, `Human-decision` (`{h}`) = the number of rows in task.md `## 审查分歧账本` with `stage=code` and `status=needs-human-decision`; neither participates in branch selection. When `{h} > 0`, before the selected scenario's "Next steps" commands you must expand each pending ruling per the "Pending human-decision pre-block" in `.agents/rules/next-step-output.md` and prompt to resolve them first
+- the count line always shows 5 numbers: the first three (Blockers / Major / Minor) must be 0 to proceed; the last two are "pending human" items and need not be zero — `Manual-validation` (`{e}`) = this round's manual-validation count, `Human-decision` (`{h}`) = the number of rows in task.md `## 审查分歧账本` with `stage=code` and `status=needs-human-decision`; neither participates in branch selection. When `{h} > 0`, before the selected scenario's "Next steps" commands you must expand each pending ruling per the "Pending human-decision pre-block" in `.agents/rules/next-step-output.md` and prompt to resolve them first
 
 ### Branch A: Approved with No Findings
 
 ```text
 Task {task-id} review completed. Verdict: approved.
-- Blockers: 0 | Major: 0 | Minor: 0 | Manual-verify: {e} | Human-decision: {h}
+- Blockers: 0 | Major: 0 | Minor: 0 | Manual-validation: {e} | Human-decision: {h}
 [- Review report: .agents/workspace/active/{task-id}/{review-artifact}]
 
 Next step - commit the code:
@@ -32,15 +32,15 @@ Next step - commit the code:
   - Gemini CLI: /agent-infra:commit
   - Codex CLI: $commit
 
-[When env-blocked > 0, append this final line:]
-Reminder: env-blocked findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
+[When manual-validation > 0, append this final line:]
+Reminder: manual-validation findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
 ```
 
 ### Branch B: Approved with Findings
 
 ```text
 Task {task-id} review completed. Verdict: approved.
-- Blockers: 0 | Major: {n} | Minor: {n} | Manual-verify: {e} | Human-decision: {h}
+- Blockers: 0 | Major: {n} | Minor: {n} | Manual-validation: {e} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - fix before commit (recommended):
@@ -53,15 +53,15 @@ Or commit directly (skip fix):
   - Gemini CLI: /agent-infra:commit
   - Codex CLI: $commit
 
-[When env-blocked > 0, append this final line:]
-Reminder: env-blocked findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
+[When manual-validation > 0, append this final line:]
+Reminder: manual-validation findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
 ```
 
 ### Branch C: Changes Requested
 
 ```text
 Task {task-id} review completed. Verdict: changes requested.
-- Blockers: {n} | Major: {n} | Minor: {n} | Manual-verify: {e} | Human-decision: {h}
+- Blockers: {n} | Major: {n} | Minor: {n} | Manual-validation: {e} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - fix the findings:
@@ -69,15 +69,15 @@ Next step - fix the findings:
   - Gemini CLI: /agent-infra:code-task {task-ref}
   - Codex CLI: $code-task {task-ref}
 
-[When env-blocked > 0, append this final line:]
-Reminder: env-blocked findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
+[When manual-validation > 0, append this final line:]
+Reminder: manual-validation findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
 ```
 
 ### Branch D: Rejected
 
 ```text
 Task {task-id} review completed. Verdict: rejected, re-design the technical plan.
-- Blockers: {n} | Major: {n} | Minor: {n} | Manual-verify: {e} | Human-decision: {h}
+- Blockers: {n} | Major: {n} | Minor: {n} | Manual-validation: {e} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - re-design the technical plan:
@@ -87,6 +87,6 @@ Next step - re-design the technical plan:
 
 > Note: Rejected means the implementation direction needs to be reworked end-to-end, not patched locally. `code-task/scripts/detect-mode.js` branch #7 refuses a direct `/code-task` and requires a fresh plan first.
 
-[When env-blocked > 0, append this final line:]
-Reminder: env-blocked findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
+[When manual-validation > 0, append this final line:]
+Reminder: manual-validation findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
 ```

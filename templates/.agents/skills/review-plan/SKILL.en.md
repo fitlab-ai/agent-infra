@@ -77,9 +77,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Set `current_step` to `technical-design-review`, refresh task metadata, and append:
-`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Plan (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {review-artifact}`
+`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Plan (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}, Manual-validation: {n} → {review-artifact}`
 
-`env-blocked` is the data source for the `Manual-verify` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
+`manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, sync the task comment, and publish the `{review-artifact}` comment.
 

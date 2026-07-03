@@ -96,10 +96,10 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 ```
 
 Update task.md and append:
-`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Code (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {artifact-filename}`
+`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Code (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}, Manual-validation: {n} → {artifact-filename}`
 
-Omit the bracketed segment when env-blocked = 0; append ` (+ {n} env-blocked)` when env-blocked > 0.
-`env-blocked` is the data source for the `Manual-verify` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
+Always include the `Manual-validation: {n}` field in the done log, including when it is 0.
+`manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
 - Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
@@ -134,7 +134,7 @@ Choose exactly one branch based on the findings:
 - blockers that can be fixed in a focused pass -> changes requested
 - major redesign or re-implementation needed -> rejected
 
-env-blocked counts do not influence branch selection; they are appended to the summary line only.
+manual-validation counts do not influence branch selection; they are displayed only as manual validation counts.
 
 > The full four-branch output templates, selection rules, and prohibition clauses live in `reference/output-templates.md`. Read `reference/output-templates.md` before reporting the review result.
 

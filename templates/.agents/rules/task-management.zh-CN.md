@@ -56,7 +56,7 @@
 
 **配对与渲染**（`ai task log`）：按 `{基名}` 把 started 与其后最近的同名 done 配成一行（同基名多次执行按时间升序 FIFO 配对）。STARTED 列显示 started 时间、DONE 列显示 done 时间；只有 started 无 done = 进行中（DONE 显示 `(in progress)`）；只有 done 无 started（历史日志）= 单态完成行。三种形态都合法、不报错。
 
-**人工计数**（`ai task log`）：审查步骤行把两项人工计数并入 NOTE 的 verdict 文本，逗号分隔、紧随 `blockers/major/minor`，固定英文标签 `Manual-verify: {e}, Human-decision: {h}`。`Human-decision`（`{h}`）按 canonical 步骤名前缀（`Review Analysis` / `Review Plan` / `Review Code`）映射到 `analysis` / `plan` / `code`，统计 `## 审查分歧账本` 中对应阶段 `status ∈ {needs-human-decision, human-decided}` 的当前累计数量；`Manual-verify`（`{e}`）解析 review done note 中的 `(+ {n} env-blocked)`（解析后从展示中去重），缺失为 `0`。非审查步骤不附加人工计数。
+**人工计数**（`ai task log`）：审查步骤行把两项人工计数并入 NOTE 的 verdict 文本，逗号分隔、紧随 `blockers/major/minor`，固定英文标签 `Manual-validation: {e}, Human-decision: {h}`。`Human-decision`（`{h}`）按 canonical 步骤名前缀（`Review Analysis` / `Review Plan` / `Review Code`）映射到 `analysis` / `plan` / `code`，统计 `## 审查分歧账本` 中对应阶段 `status ∈ {needs-human-decision, human-decided}` 的当前累计数量；`Manual-validation`（`{e}`）解析 review done note 中的 `Manual-validation: {n}` 源字段（展示时归一化为同一字段），缺失为 `0`。非审查步骤不附加人工计数。
 
 **gate**（`checkActivityLog`）：计算「最新 action / freshness」时跳过 `[started]` 行（升序与格式校验仍覆盖全部行），故 started 标记不会污染各 SKILL 的 `expected_action_pattern`。
 

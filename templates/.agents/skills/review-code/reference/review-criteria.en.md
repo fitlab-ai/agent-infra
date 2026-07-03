@@ -30,7 +30,7 @@ Follow the `code-review` step in `.agents/workflows/feature-development.yaml`.
 3. **Actionable**: suggest a concrete fix
 4. **Severity-based**: clearly distinguish blockers, major issues, and minor issues
 
-## Environment-Blocked Classification
+## Manual Validation Classification
 
 Some findings cannot be closed by an AI agent in the current execution environment, for example:
 
@@ -41,11 +41,11 @@ Some findings cannot be closed by an AI agent in the current execution environme
 
 **Decision tree**: "Can the AI agent close this item independently without changing the environment?"
 - Yes -> blocker / major / minor, based on risk
-- No -> **env-blocked** (a meta-category, not part of severity ordering)
+- No -> **manual-validation** (a manual-validation meta-category, not part of severity ordering)
 
-Where env-blocked items go:
-- Record them in an independent review report section named "Environment-Blocked Findings"
-- Include them at the end of the numeric summary, for example `(+ 1 env-blocked)`
+Where manual-validation items go:
+- Record them in an independent review report section named "Manual Validation Items"
+- Record the done-note source field as `Manual-validation: 1`; `ai task log` normalizes it into review rows
 - Do **not** include them in the code-task fix loop; maintainers carry them in the PR description under manual verification
 
 Also inspect `git diff`, the latest code artifact, latest technical-plan review artifact, and `task.md` Activity Log so the report reflects the full change context.

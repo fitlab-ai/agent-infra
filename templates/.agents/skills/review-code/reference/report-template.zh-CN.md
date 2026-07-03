@@ -24,7 +24,7 @@
 - **审查基线提交**：{git rev-parse HEAD 原文}（complete-task 的 post-review commit 门禁基线；详见 `.agents/rules/review-handshake.md`）
 - **审查差异指纹**：{node .agents/scripts/review-diff-fingerprint.js worktree HEAD 原文}
 - **总体结论**：{通过 / 需要修改 / 拒绝}（恰取一个；禁止写组合短语，否则 verify gate 失败）
-- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **env-blocked**：0
+- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0
 
 ## 问题清单
 
@@ -48,17 +48,17 @@
 **文件**：`{file-path}:{line-number}`
 **建议**：{improvement suggestion}
 
-## 环境性遗留
+## 人工校验项
 
 > AI agent 在本执行环境无法闭环的项；不参与下一轮 refine。维护者在 PR description 中以「待人工验证」清单承接。
 
-#### 1. {环境性项标题}
+#### 1. {人工校验项标题}
 **文件**：`{file-path}:{line-number}`（如适用）
 **说明**：{details}
 **所需环境**：{e.g. Docker 沙箱 / macOS host / 特权 root / 第三方账号}
 **待人工执行的验证步骤**：{steps for the human verifier}
 
-> 如本轮无 env-blocked 项，保留段落标题并写「（无）」。
+> 如本轮无人工校验项，保留段落标题并写「（无）」。
 
 
 ## 审查分歧账本回写

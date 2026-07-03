@@ -4,8 +4,8 @@
 
 ## 选择唯一输出场景
 
-按以下顺序判断（**注意：env-blocked 数量不参与判断**）：
-1. 如果 `Blocker = 0` 且 `Major = 0` 且 `Minor = 0`，使用场景 A（不管 env-blocked 是否 > 0）
+按以下顺序判断（**注意：manual-validation 数量不参与判断**）：
+1. 如果 `Blocker = 0` 且 `Major = 0` 且 `Minor = 0`，使用场景 A（不管 manual-validation 是否 > 0）
 2. 如果 `Blocker = 0` 且（`Major > 0` 或 `Minor > 0`），使用场景 B
 3. 如果 `Blocker > 0`，且问题可以通过一次聚焦修复解决，使用场景 C
 4. 如果需求分析需要大范围重写或重新澄清，使用场景 D
@@ -14,7 +14,7 @@
 - 不要跳过场景判断步骤
 - 不要混用不同场景的文案
 - 只要 `Blocker > 0`，就绝对不能输出通过模板
-- env-blocked 项绝对不能被计入 blocker / major / minor 计数，也不能用作触发场景 B/C/D 的依据
+- manual-validation 项绝对不能被计入 blocker / major / minor 计数，也不能用作触发场景 B/C/D 的依据
 - 所选场景中必须包含所有 TUI 命令格式
 - 计数行固定显示 4 个数字：前三项（阻塞 / 主要 / 次要）必须为 0 才进下一步；第四项 `人工裁决`（`{h}`）= task.md `## 审查分歧账本` 中 `stage=analysis` 且 `status=needs-human-decision` 的行数，是「待人裁」项、不要求归零，也不参与场景判断。当 `{h} > 0` 时，必须在选定场景的「下一步」命令之前，按 `.agents/rules/next-step-output.md`「人工裁决待办前置块」逐项展开裁决项并提示先完成裁决
 
@@ -30,8 +30,8 @@
   - Gemini CLI：/agent-infra:plan-task {task-ref}
   - Codex CLI：$plan-task {task-ref}
 
-[当 env-blocked > 0 时，在最后附加一行：]
-提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /analyze-task。
+[当 manual-validation > 0 时，在最后附加一行：]
+提醒：manual-validation 项需在 PR description 的「待人工验证」清单中承接，不应触发 /analyze-task。
 ```
 
 ### 场景 B：通过但有问题
@@ -51,8 +51,8 @@
   - Gemini CLI：/agent-infra:plan-task {task-ref}
   - Codex CLI：$plan-task {task-ref}
 
-[当 env-blocked > 0 时，在最后附加一行：]
-提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /analyze-task。
+[当 manual-validation > 0 时，在最后附加一行：]
+提醒：manual-validation 项需在 PR description 的「待人工验证」清单中承接，不应触发 /analyze-task。
 ```
 
 ### 场景 C：需要修改
@@ -67,8 +67,8 @@
   - Gemini CLI：/agent-infra:analyze-task {task-ref}
   - Codex CLI：$analyze-task {task-ref}
 
-[当 env-blocked > 0 时，在最后附加一行：]
-提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /analyze-task。
+[当 manual-validation > 0 时，在最后附加一行：]
+提醒：manual-validation 项需在 PR description 的「待人工验证」清单中承接，不应触发 /analyze-task。
 ```
 
 ### 场景 D：拒绝
@@ -83,6 +83,6 @@
   - Gemini CLI：/agent-infra:analyze-task {task-ref}
   - Codex CLI：$analyze-task {task-ref}
 
-[当 env-blocked > 0 时，在最后附加一行：]
-提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /analyze-task。
+[当 manual-validation > 0 时，在最后附加一行：]
+提醒：manual-validation 项需在 PR description 的「待人工验证」清单中承接，不应触发 /analyze-task。
 ```

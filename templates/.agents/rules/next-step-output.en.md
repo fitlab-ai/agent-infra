@@ -59,7 +59,7 @@ Completed at: YYYY-MM-DD HH:mm:ss
 ```
 
 - Value command (local timezone, no offset): `date "+%Y-%m-%d %H:%M:%S"`
-- Position: it must be the last line of the entire user-facing output, after all "Next steps" commands. If a scenario has a conditional reminder line after the commands (e.g. the env-blocked reminder), the completion line goes after that reminder.
+- Position: it must be the last line of the entire user-facing output, after all "Next steps" commands. If a scenario has a conditional reminder line after the commands (e.g. the manual-validation reminder), the completion line goes after that reminder.
 - This line is for terminal scanning only; it is never written to any artifact file or Issue/PR comment. The single source of truth for completion time remains the Activity Log in task.md.
 
 ## Pending human-decision pre-block (review-* only, when {h} > 0)

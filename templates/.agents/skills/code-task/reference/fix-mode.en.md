@@ -27,9 +27,9 @@ Detailed priority rules:
 - Minor issues are optional only after Blockers and Majors are resolved
 - If you disagree with a finding, or judge it hallucinated after verification, do not silently skip it; give a counter-argument in the report's `## Per-Finding Verification` section and record it under unresolved issues
 
-### Meta-category: env-blocked
+### Meta-category: manual-validation
 
-env-blocked findings are outside the repair scope. Handling rules:
+manual-validation findings are outside the repair scope. Handling rules:
 - do not write code changes for these findings
 - list them unchanged in the code report's "Environment-Blocked Handling" section and mark them "outside AI repair scope"
 - do not repeat them under unresolved issues, to avoid visually double-counting them
@@ -66,7 +66,7 @@ Fix status:
 - Blockers fixed: {fixed-blockers}/{total-blockers}
 - Major issues fixed: {fixed-majors}/{total-majors}
 - Minor issues fixed: {fixed-minors}/{total-minors}
-- [If env-blocked > 0] env-blocked skipped: {count}
+- [If manual-validation > 0] manual-validation skipped: {count}
 - All tests passing: {yes/no}
 - Review input: {review-artifact}
 - Code artifact: {code-artifact}

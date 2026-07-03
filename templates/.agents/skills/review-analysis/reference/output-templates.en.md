@@ -4,8 +4,8 @@ Read this file before presenting the final review result to the user.
 
 ## Select exactly one output scenario
 
-Evaluate in this order (**env-blocked count does not participate in selection**):
-1. If `Blocker = 0`, `Major = 0`, and `Minor = 0`, use Scenario A, regardless of env-blocked count
+Evaluate in this order (**manual-validation count does not participate in selection**):
+1. If `Blocker = 0`, `Major = 0`, and `Minor = 0`, use Scenario A, regardless of manual-validation count
 2. If `Blocker = 0` and (`Major > 0` or `Minor > 0`), use Scenario B
 3. If `Blocker > 0` and the issues can be handled by one focused revision, use Scenario C
 4. If the requirement analysis needs broad rewriting or fresh clarification, use Scenario D
@@ -14,7 +14,7 @@ Rules:
 - Do not skip scenario selection
 - Do not mix text from multiple scenarios
 - If `Blocker > 0`, never use an approved template
-- Never count env-blocked items as blocker / major / minor or use them to trigger Scenario B/C/D
+- Never count manual-validation items as blocker / major / minor or use them to trigger Scenario B/C/D
 - The selected scenario must include all TUI command formats
 - The count line always shows 4 numbers: the first three (Blockers / Major / Minor) must be 0 to proceed; the fourth, `Human-decision` (`{h}`), is the number of rows in task.md `## 审查分歧账本` with `stage=analysis` and `status=needs-human-decision` — a "pending human ruling" item that need not be zero and does not participate in scenario selection. When `{h} > 0`, before the selected scenario's "Next steps" commands you must expand each pending ruling per the "Pending human-decision pre-block" in `.agents/rules/next-step-output.md` and prompt to resolve them first
 
@@ -30,8 +30,8 @@ Next step - write the technical plan:
   - Gemini CLI: /agent-infra:plan-task {task-ref}
   - Codex CLI: $plan-task {task-ref}
 
-[When env-blocked > 0, append:]
-Reminder: env-blocked items belong in the PR description manual verification checklist and should not trigger /analyze-task.
+[When manual-validation > 0, append:]
+Reminder: manual-validation items belong in the PR description manual verification checklist and should not trigger /analyze-task.
 ```
 
 ### Scenario B: Approved with findings
@@ -51,8 +51,8 @@ Or proceed directly to planning:
   - Gemini CLI: /agent-infra:plan-task {task-ref}
   - Codex CLI: $plan-task {task-ref}
 
-[When env-blocked > 0, append:]
-Reminder: env-blocked items belong in the PR description manual verification checklist and should not trigger /analyze-task.
+[When manual-validation > 0, append:]
+Reminder: manual-validation items belong in the PR description manual verification checklist and should not trigger /analyze-task.
 ```
 
 ### Scenario C: Changes requested
@@ -67,8 +67,8 @@ Next step - revise requirement analysis:
   - Gemini CLI: /agent-infra:analyze-task {task-ref}
   - Codex CLI: $analyze-task {task-ref}
 
-[When env-blocked > 0, append:]
-Reminder: env-blocked items belong in the PR description manual verification checklist and should not trigger /analyze-task.
+[When manual-validation > 0, append:]
+Reminder: manual-validation items belong in the PR description manual verification checklist and should not trigger /analyze-task.
 ```
 
 ### Scenario D: Rejected
@@ -83,6 +83,6 @@ Next step - re-analyze:
   - Gemini CLI: /agent-infra:analyze-task {task-ref}
   - Codex CLI: $analyze-task {task-ref}
 
-[When env-blocked > 0, append:]
-Reminder: env-blocked items belong in the PR description manual verification checklist and should not trigger /analyze-task.
+[When manual-validation > 0, append:]
+Reminder: manual-validation items belong in the PR description manual verification checklist and should not trigger /analyze-task.
 ```

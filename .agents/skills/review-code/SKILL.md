@@ -99,10 +99,10 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `updated_at`：{当前时间}
 - `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - 追加：
-`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Code (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {artifact-filename}`
+`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Code (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}, Manual-validation: {n} → {artifact-filename}`
 
-env-blocked = 0 时省略括号部分；env-blocked > 0 时附加 ` (+ {n} env-blocked)`。
-`env-blocked` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-verify`）计数的数据源；不要新增并行人工验证字段。
+完成日志必须始终写入 `Manual-validation: {n}` 字段，0 也保留。
+`manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
@@ -137,7 +137,7 @@ node .agents/scripts/validate-artifact.js gate review-code .agents/workspace/act
 - 有 blocker，且可集中修复 -> 需要修改
 - 需要重大返工或重新实现 -> 拒绝
 
-env-blocked 的数量不参与分支选择，仅在数字摘要末尾附带显示。
+manual-validation 的数量不参与分支选择，只作为人工校验计数显示。
 
 > 完整的 4 分支输出模板、判断规则和禁止条款见 `reference/output-templates.md`。向用户汇报审查结论前先读取 `reference/output-templates.md`。
 

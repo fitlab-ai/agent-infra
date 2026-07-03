@@ -12,7 +12,7 @@ description: >
 ## 行为边界 / 关键规则
 
 - 严格遵循最新方案产物：`plan.md` 或 `plan-r{N}.md`
-- 修复模式逐条核实最新 `review-code` 的发现：成立则修复，判定为不成立/幻觉则在报告中反驳并记入 unresolved；不擅自扩大到审查未列出的问题；env-blocked 项不在修复范围
+- 修复模式逐条核实最新 `review-code` 的发现：成立则修复，判定为不成立/幻觉则在报告中反驳并记入 unresolved；不擅自扩大到审查未列出的问题；manual-validation 项不在修复范围
 - 实现中遇到方案未覆盖的关键设计决策时，按 `.agents/rules/no-mid-flow-questions.md` 判据，把详情块写入实现报告的 `## 人工裁决待办` 段 `### HD-N：<标题> [needs-human-decision]`（`HD-N` 全局唯一，见 `.agents/rules/review-handshake.md`）并回写 `HD-` 账本行，不中途提问或擅自扩范围
 - 绝不自动执行 `git add` 或 `git commit`
 - 每轮实现都创建新的实现产物，不覆盖旧文件
@@ -168,7 +168,7 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - 记录 Round `{code-round}` 的 `{code-artifact}`
 - 追加：
   - 初次实现：`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Task (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {code-artifact}`
-  - 修复模式：`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Task (Round {N}, fix for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues[, skipped {n} env-blocked] → {code-artifact}`
+  - 修复模式：`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Task (Round {N}, fix for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues[, skipped {n} manual-validation] → {code-artifact}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续；执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测）：
 - 按 issue-sync.md 设置 `status: in-progress`

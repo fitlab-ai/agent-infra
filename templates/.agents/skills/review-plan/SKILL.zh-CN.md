@@ -88,9 +88,9 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 - `updated_at`：{当前时间}
 - `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - 追加：
-  `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Plan (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}[ (+ {n} env-blocked)] → {review-artifact}`
+  `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Plan (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}, Manual-validation: {n} → {review-artifact}`
 
-`env-blocked` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-verify`）计数的数据源；不要新增并行人工验证字段。
+`manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
 
 如果 task.md 中存在有效的 `issue_number`，执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测，然后同步 task 评论并发布 `{review-artifact}` 评论。
 

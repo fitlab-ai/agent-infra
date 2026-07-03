@@ -29,7 +29,7 @@
 3. **可执行**：给出明确可落地的修复建议
 4. **按严重程度分类**：明确区分 blocker、major 和 minor
 
-## 环境性遗留分类
+## 人工校验项分类
 
 某些发现项是 AI agent 在本执行环境**无法闭环**的，例如：
 
@@ -40,11 +40,11 @@
 
 **分类决策树**：「AI agent 能否在不改环境的前提下独立闭环这一项？」
 - 是 -> blocker / major / minor 之一（按风险定档）
-- 否 -> **env-blocked**（元类目，不参与严重程度排序）
+- 否 -> **manual-validation**（人工校验元类目，不参与严重程度排序）
 
-env-blocked 项的去向：
-- 写入 review 报告独立段落「环境性遗留」
-- 在数字摘要末尾附带显示（如 `(+ 1 env-blocked)`）
+manual-validation 项的去向：
+- 写入 review 报告独立段落「人工校验项」
+- 在 done note 中写入源字段 `Manual-validation: 1`；`ai task log` 归一化展示到 review 行
 - **不**进入 code-task 修复循环；维护者在 PR description 中以「待人工验证」清单形式承接
 
 同时检查最新需求分析产物和 `task.md` Activity Log，确保报告反映完整的分析上下文。

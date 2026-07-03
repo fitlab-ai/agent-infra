@@ -20,7 +20,7 @@
       "required_sections": [
         "Review Summary",
         "Findings",
-        "Environment-Blocked Findings",
+        "Manual Validation Items",
         "Conclusion and Recommendations",
         "State Check",
         "Evidence",

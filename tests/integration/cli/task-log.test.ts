@@ -124,10 +124,10 @@ test('ai task log folds English human counts into the NOTE on canonical review s
     '## 活动日志',
     [
       '- 2026-06-18 14:00:00+08:00 — **Review Analysis (Round 1) [started]** by claude — started',
-      '- 2026-06-18 14:15:00+08:00 — **Review Analysis (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0 (+ 2 env-blocked) → review-analysis.md',
+      '- 2026-06-18 14:15:00+08:00 — **Review Analysis (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 2 → review-analysis.md',
       '- 2026-06-18 15:00:00+08:00 — **Review Analysis (Round 2) [started]** by claude — started',
       '- 2026-06-18 15:10:00+08:00 — **Review Analysis (Round 2)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0 → review-analysis-r2.md',
-      '- 2026-06-18 16:00:00+08:00 — **Review Plan (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0 (+ 1 env-blocked) → review-plan.md'
+      '- 2026-06-18 16:00:00+08:00 — **Review Plan (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-plan.md'
     ],
     [
       '| HD-1 | analysis | - | decision | needs-human-decision | analysis.md#HD-1 |',
@@ -141,20 +141,20 @@ test('ai task log folds English human counts into the NOTE on canonical review s
   const out = runCli(['task', 'log', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // Human counts join the verdict count list (comma-separated, after minor, before ->),
-  // and the redundant `(+ N env-blocked)` fragment is removed. Labels are always English
+  // and the source `Manual-validation: N` field is normalized. Labels are always English
   // even though the task uses a Chinese activity-log heading. analysis stage has 2
   // human-decision rows (HD-1 + HD-2); both Round 1 and Round 2 show that stage total.
   assert.match(
     out.stdout,
-    /^1\s+Review Analysis \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+2026-06-18 14:15:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-verify: 2, Human-decision: 2 → review-analysis\.md/m
+    /^1\s+Review Analysis \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+2026-06-18 14:15:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 2, Human-decision: 2 → review-analysis\.md/m
   );
   assert.match(
     out.stdout,
-    /^2\s+Review Analysis \(Round 2\)\s+claude\s+2026-06-18 15:00:00\+08:00\s+2026-06-18 15:10:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-verify: 0, Human-decision: 2 → review-analysis-r2\.md/m
+    /^2\s+Review Analysis \(Round 2\)\s+claude\s+2026-06-18 15:00:00\+08:00\s+2026-06-18 15:10:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0, Human-decision: 2 → review-analysis-r2\.md/m
   );
   assert.match(
     out.stdout,
-    /^3\s+Review Plan \(Round 1\)\s+claude\s+2026-06-18 16:00:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-verify: 1, Human-decision: 1 → review-plan\.md/m
+    /^3\s+Review Plan \(Round 1\)\s+claude\s+2026-06-18 16:00:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1, Human-decision: 1 → review-plan\.md/m
   );
 });
 
@@ -166,7 +166,7 @@ test('ai task log folds English human counts for an English task', () => {
     taskId,
     '## Activity Log',
     [
-      '- 2026-06-18 16:00:00+08:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0 (+ 1 env-blocked) → review-code.md'
+      '- 2026-06-18 16:00:00+08:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1 → review-code.md'
     ],
     ['| CD-1 | code | 1 | blocker | human-decided | review-code.md#1 |'],
     '## Review Disagreement Ledger'
@@ -176,7 +176,7 @@ test('ai task log folds English human counts for an English task', () => {
   assert.equal(out.status, 0, out.stderr);
   assert.match(
     out.stdout,
-    /^1\s+Review Code \(Round 1\)\s+claude\s+2026-06-18 16:00:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-verify: 1, Human-decision: 1 → review-code\.md/m
+    /^1\s+Review Code \(Round 1\)\s+claude\s+2026-06-18 16:00:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1, Human-decision: 1 → review-code\.md/m
   );
 });
 
@@ -188,7 +188,7 @@ test('ai task log replaces pre-existing human counts on canonical review steps',
     taskId,
     '## 活动日志',
     [
-      '- 2026-06-18 14:00:00+08:00 — **Review Plan (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-verify: 9, Human-decision: 8 (+ 2 env-blocked) → review-plan.md'
+      '- 2026-06-18 14:00:00+08:00 — **Review Plan (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 9, Human-decision: 8 → review-plan.md'
     ],
     ['| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |']
   );
@@ -197,9 +197,9 @@ test('ai task log replaces pre-existing human counts on canonical review steps',
   assert.equal(out.status, 0, out.stderr);
   assert.match(
     out.stdout,
-    /^1\s+Review Plan \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-verify: 2, Human-decision: 1 → review-plan\.md/m
+    /^1\s+Review Plan \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 9, Human-decision: 1 → review-plan\.md/m
   );
-  assert.equal(out.stdout.match(/Manual-verify:/g)?.length, 1);
+  assert.equal(out.stdout.match(/Manual-validation:/g)?.length, 1);
   assert.equal(out.stdout.match(/Human-decision:/g)?.length, 1);
 });
 

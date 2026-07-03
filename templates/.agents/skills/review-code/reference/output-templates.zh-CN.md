@@ -6,8 +6,8 @@
 
 ## 选择唯一输出场景
 
-按以下顺序判断（**注意：env-blocked 数量不参与判断**）：
-1. 如果 `Blocker = 0` 且 `Major = 0` 且 `Minor = 0`，使用场景 A（不管 env-blocked 是否 > 0）
+按以下顺序判断（**注意：manual-validation 数量不参与判断**）：
+1. 如果 `Blocker = 0` 且 `Major = 0` 且 `Minor = 0`，使用场景 A（不管 manual-validation 是否 > 0）
 2. 如果 `Blocker = 0` 且（`Major > 0` 或 `Minor > 0`），使用场景 B
 3. 如果 `Blocker > 0`，且问题可以通过一次聚焦修复解决，使用场景 C
 4. 如果任务需要重大重构、大范围重写或整体重来，使用场景 D
@@ -16,9 +16,9 @@
 - 不要跳过场景判断步骤
 - 不要混用不同场景的文案
 - 只要 `Blocker > 0`，就绝对不能输出通过模板
-- env-blocked 项绝对不能被计入 blocker / major / minor 计数，也不能用作触发场景 B/C/D 的依据
+- manual-validation 项绝对不能被计入 blocker / major / minor 计数，也不能用作触发场景 B/C/D 的依据
 - 所选场景中必须包含所有 TUI 命令格式
-- 计数行固定显示 5 个数字：前三项（阻塞 / 主要 / 次要）必须为 0 才进下一步；后两项是「待人处理」项、不要求归零——`人工校验点`（`{e}`）= 本轮 env-blocked 计数，`人工裁决`（`{h}`）= task.md `## 审查分歧账本` 中 `stage=code` 且 `status=needs-human-decision` 的行数；二者均不参与场景判断。当 `{h} > 0` 时，必须在选定场景的「下一步」命令之前，按 `.agents/rules/next-step-output.md`「人工裁决待办前置块」逐项展开裁决项并提示先完成裁决
+- 计数行固定显示 5 个数字：前三项（阻塞 / 主要 / 次要）必须为 0 才进下一步；后两项是「待人处理」项、不要求归零——`人工校验点`（`{e}`）= 本轮 manual-validation 计数，`人工裁决`（`{h}`）= task.md `## 审查分歧账本` 中 `stage=code` 且 `status=needs-human-decision` 的行数；二者均不参与场景判断。当 `{h} > 0` 时，必须在选定场景的「下一步」命令之前，按 `.agents/rules/next-step-output.md`「人工裁决待办前置块」逐项展开裁决项并提示先完成裁决
 
 ### 场景 A：通过且无问题
 
@@ -32,8 +32,8 @@
   - Gemini CLI：/agent-infra:commit
   - Codex CLI：$commit
 
-[当 env-blocked > 0 时，在最后附加一行：]
-提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /code-task。
+[当 manual-validation > 0 时，在最后附加一行：]
+提醒：manual-validation 项需在 PR description 的「待人工验证」清单中承接，不应触发 /code-task。
 ```
 
 ### 场景 B：通过但有问题
@@ -53,8 +53,8 @@
   - Gemini CLI：/agent-infra:commit
   - Codex CLI：$commit
 
-[当 env-blocked > 0 时，在最后附加一行：]
-提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /code-task。
+[当 manual-validation > 0 时，在最后附加一行：]
+提醒：manual-validation 项需在 PR description 的「待人工验证」清单中承接，不应触发 /code-task。
 ```
 
 ### 场景 C：需要修改
@@ -69,8 +69,8 @@
   - Gemini CLI：/agent-infra:code-task {task-ref}
   - Codex CLI：$code-task {task-ref}
 
-[当 env-blocked > 0 时，在最后附加一行：]
-提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /code-task。
+[当 manual-validation > 0 时，在最后附加一行：]
+提醒：manual-validation 项需在 PR description 的「待人工验证」清单中承接，不应触发 /code-task。
 ```
 
 ### 场景 D：拒绝
@@ -87,6 +87,6 @@
 
 > 注意：Rejected 表示实现方向需要整体重做，不是局部修复。`code-task/scripts/detect-mode.js` 分支 #7 会拒绝直接 `/code-task`，要求先重新方案设计。
 
-[当 env-blocked > 0 时，在最后附加一行：]
-提醒：env-blocked 项需在 PR description 的「待人工验证」清单中承接，不应触发 /code-task。
+[当 manual-validation > 0 时，在最后附加一行：]
+提醒：manual-validation 项需在 PR description 的「待人工验证」清单中承接，不应触发 /code-task。
 ```

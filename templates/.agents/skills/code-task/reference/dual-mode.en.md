@@ -46,7 +46,7 @@ Verdict mapping:
 - `需要修改` / `Changes Requested` -> `Changes Requested`
 - `拒绝` / `Rejected` -> `Rejected`
 
-env-blocked counts do not affect mode selection.
+manual-validation counts do not affect mode selection.
 
 ## Output Contract
 

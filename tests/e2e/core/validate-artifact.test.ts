@@ -459,9 +459,9 @@ test("template references point to the shared pr-sync rule", () => {
 });
 
 test("local and zh-CN rule files contain the canonical PR summary structure", () => {
-  // The comment-body template carries the manual-verify section as a placeholder,
+  // The comment-body template carries the manual-validation section as a placeholder,
   // not a hard-coded ⚠️ heading; the two render branches are documented in prose.
-  const zhHeadings = [/## 审查摘要/, /\{manual-verify-section\}/, /### 关键技术决策/, /### 审查历程/, /### 测试结果/];
+  const zhHeadings = [/## 审查摘要/, /\{manual-validation-section\}/, /### 关键技术决策/, /### 审查历程/, /### 测试结果/];
   for (const file of [".agents/rules/pr-sync.md", "templates/.agents/rules/pr-sync.github.zh-CN.md"]) {
     assertHasCanonicalPrSyncStructure(file, zhHeadings);
     const content = read(file);
@@ -472,7 +472,7 @@ test("local and zh-CN rule files contain the canonical PR summary structure", ()
 
 test("template English rule contains the canonical PR summary structure", () => {
   const file = "templates/.agents/rules/pr-sync.github.en.md";
-  const enHeadings = [/## Review Summary/, /\{manual-verify-section\}/, /### Key Technical Decisions/, /### Review History/, /### Test Results/];
+  const enHeadings = [/## Review Summary/, /\{manual-validation-section\}/, /### Key Technical Decisions/, /### Review History/, /### Test Results/];
   assertHasCanonicalPrSyncStructure(file, enHeadings);
   const content = read(file);
   assert.match(content, /### ⚠️ Manual Verification Required/, "should document the retained-items branch");

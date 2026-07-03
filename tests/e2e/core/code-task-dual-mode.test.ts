@@ -20,7 +20,7 @@ function runDetect(files: Record<string, string>) {
   };
 }
 
-function zhReview(verdict: string, findings = "0 阻塞项，0 主要，0 次要 / **env-blocked**：0") {
+function zhReview(verdict: string, findings = "0 阻塞项，0 主要，0 次要 / **人工校验**：0") {
   return `## 审查摘要
 
 - **总体结论**：${verdict}
@@ -28,7 +28,7 @@ function zhReview(verdict: string, findings = "0 阻塞项，0 主要，0 次要
 `;
 }
 
-function enReview(verdict: string, findings = "0 blockers, 0 majors, 0 minors / **env-blocked**: 0") {
+function enReview(verdict: string, findings = "0 blockers, 0 majors, 0 minors / **Manual validation**: 0") {
   return `## Review Summary
 
 - **Overall Verdict**: ${verdict}
@@ -39,7 +39,7 @@ function enReview(verdict: string, findings = "0 blockers, 0 majors, 0 minors / 
 // review-plan fixtures must include the "审查输入" / "Review Input" line that names the
 // reviewed plan file; checkPlanAheadOfCode uses it to link a review-plan back to its plan
 // regardless of round-number mismatch.
-function zhReviewPlan(reviewedPlanFile: string, verdict: string, findings = "0 阻塞项，0 主要，0 次要 / **env-blocked**：0") {
+function zhReviewPlan(reviewedPlanFile: string, verdict: string, findings = "0 阻塞项，0 主要，0 次要 / **人工校验**：0") {
   return `# 技术方案审查报告
 
 - **审查输入**：
@@ -84,7 +84,7 @@ test("code-task dual-mode: human-supplemented review (Changes Requested) enters 
   const result = runDetect({
     "code.md": "# code",
     "review-code.md": zhReview("通过"),
-    "review-code-r2.md": zhReview("需要修改", "2 阻塞项，1 主要，0 次要 / **env-blocked**：0")
+    "review-code-r2.md": zhReview("需要修改", "2 阻塞项，1 主要，0 次要 / **人工校验**：0")
   });
 
   assert.equal(result.status, 0);
@@ -98,7 +98,7 @@ test("code-task dual-mode: human-supplemented review (Approved-with-issues) ente
   const result = runDetect({
     "code.md": "# code",
     "review-code.md": zhReview("通过"),
-    "review-code-r2.md": zhReview("通过", "0 阻塞项，1 主要，2 次要 / **env-blocked**：0")
+    "review-code-r2.md": zhReview("通过", "0 阻塞项，1 主要，2 次要 / **人工校验**：0")
   });
 
   assert.equal(result.status, 0);
@@ -146,7 +146,7 @@ test("code-task dual-mode: branch 4 - Approved with no findings refuses rerun", 
 test("code-task dual-mode: branch 5 - Approved with findings enters optional fix mode (zh-CN review fixture)", () => {
   const result = runDetect({
     "code.md": "# code",
-    "review-code.md": zhReview("通过", "0 阻塞项，1 主要，2 次要 / **env-blocked**：0")
+    "review-code.md": zhReview("通过", "0 阻塞项，1 主要，2 次要 / **人工校验**：0")
   });
 
   assert.equal(result.status, 0);
@@ -159,7 +159,7 @@ test("code-task dual-mode: branch 5 - Approved with findings enters optional fix
 test("code-task dual-mode: branch 5 - Approved with findings enters optional fix mode (en review fixture)", () => {
   const result = runDetect({
     "code.md": "# code",
-    "review-code.md": enReview("Approved", "0 blockers, 1 major, 2 minors / **env-blocked**: 0")
+    "review-code.md": enReview("Approved", "0 blockers, 1 major, 2 minors / **Manual validation**: 0")
   });
 
   assert.equal(result.status, 0);
@@ -171,7 +171,7 @@ test("code-task dual-mode: branch 5 - Approved with findings enters optional fix
 test("code-task dual-mode: branch 6 - Changes Requested triggers fix mode (zh-CN review fixture)", () => {
   const result = runDetect({
     "code.md": "# code",
-    "review-code.md": zhReview("需要修改", "2 阻塞项，1 主要，0 次要 / **env-blocked**：0")
+    "review-code.md": zhReview("需要修改", "2 阻塞项，1 主要，0 次要 / **人工校验**：0")
   });
 
   assert.equal(result.status, 0);
@@ -182,7 +182,7 @@ test("code-task dual-mode: branch 6 - Changes Requested triggers fix mode (zh-CN
 test("code-task dual-mode: branch 6 - Changes Requested triggers fix mode (en review fixture)", () => {
   const result = runDetect({
     "code.md": "# code",
-    "review-code.md": enReview("Changes Requested", "2 blockers, 1 major, 0 minors / **env-blocked**: 0")
+    "review-code.md": enReview("Changes Requested", "2 blockers, 1 major, 0 minors / **Manual validation**: 0")
   });
 
   assert.equal(result.status, 0);
@@ -332,7 +332,7 @@ test("code-task dual-mode: branch 2 (replan) - review-plan Approved-with-issues 
       "plan.md": "# plan",
       "review-plan.md": zhReviewPlan("plan.md", "通过"),
       "plan-r2.md": "# plan-r2",
-      "review-plan-r2.md": zhReviewPlan("plan-r2.md", "通过", "0 阻塞项，1 主要，0 次要 / **env-blocked**：0")
+      "review-plan-r2.md": zhReviewPlan("plan-r2.md", "通过", "0 阻塞项，1 主要，0 次要 / **人工校验**：0")
     },
     {
       "code.md": nowSec - 5,

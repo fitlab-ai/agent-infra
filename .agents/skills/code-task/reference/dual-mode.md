@@ -46,7 +46,7 @@ node .agents/skills/code-task/scripts/detect-mode.js .agents/workspace/active/{t
 - `需要修改` / `Changes Requested` -> `Changes Requested`
 - `拒绝` / `Rejected` -> `Rejected`
 
-env-blocked 计数不参与 mode 判定。
+manual-validation 计数不参与 mode 判定。
 
 ## 输出契约
 
