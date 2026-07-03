@@ -1,8 +1,58 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import * as semver from "semver";
+import { parse } from "yaml";
 
 import { CLI_PATH, cliArgs, filePath, read } from "../../helpers.ts";
+
+type WorkflowStep = {
+  uses?: string;
+  with?: Record<string, unknown>;
+};
+
+type ReleaseWorkflow = {
+  jobs?: Record<string, { steps?: WorkflowStep[] }>;
+};
+
+type DependabotUpdate = {
+  "package-ecosystem"?: string;
+  directory?: string;
+  ignore?: Array<{
+    "dependency-name"?: string;
+    "update-types"?: string[];
+  }>;
+};
+
+type DependabotConfig = {
+  updates?: DependabotUpdate[];
+};
+
+type LockPackage = {
+  dev?: boolean;
+  engines?: {
+    node?: string;
+  };
+  version?: string;
+};
+
+type PackageLock = {
+  packages: Record<string, LockPackage & {
+    devDependencies?: Record<string, string>;
+  }>;
+};
+
+function requireMinVersion(range: string, label: string) {
+  const version = semver.minVersion(range);
+  assert.ok(version, `${label} must be a valid semver range`);
+  return version;
+}
+
+function requireVersion(versionText: string, label: string) {
+  const version = semver.parse(versionText);
+  assert.ok(version, `${label} must be a valid semver version`);
+  return version;
+}
 
 test("package metadata supports scoped npm publishing", () => {
   const pkg = JSON.parse(read("package.json"));
@@ -36,6 +86,49 @@ test("package metadata supports scoped npm publishing", () => {
   assert.match(pkg.scripts.prepublishOnly, /npm run build/);
   assert.match(pkg.scripts.prepublishOnly, /--test/);
   assert.match(pkg.scripts.prepublishOnly, /tests\/\*\*\/\*\.test\.ts/);
+});
+
+test("Node baseline stays aligned across metadata and automation", () => {
+  const pkg = JSON.parse(read("package.json"));
+  const lock = JSON.parse(read("package-lock.json")) as PackageLock;
+
+  const engineRange = pkg.engines.node;
+  assert.equal(requireMinVersion(engineRange, "package engines.node").major, 22);
+  assert.equal(semver.satisfies("21.999.0", engineRange), false);
+
+  const typesNodeRange = pkg.devDependencies["@types/node"];
+  assert.equal(requireMinVersion(typesNodeRange, "package @types/node range").major, 22);
+  assert.equal(semver.intersects(typesNodeRange, ">=23.0.0"), false);
+
+  const rootTypesNodeRange = lock.packages[""]?.devDependencies?.["@types/node"];
+  assert.equal(requireMinVersion(rootTypesNodeRange ?? "", "lockfile root @types/node range").major, 22);
+
+  const lockedTypesNodeVersion = lock.packages["node_modules/@types/node"]?.version;
+  assert.equal(requireVersion(lockedTypesNodeVersion ?? "", "lockfile @types/node version").major, 22);
+
+  const releaseWorkflow = parse(read(".github/workflows/release.yml")) as ReleaseWorkflow;
+  const releaseSteps = releaseWorkflow.jobs?.["npm-publish"]?.steps ?? [];
+  const setupNodeStep = releaseSteps.find((step) => step.uses === "actions/setup-node@v6");
+  assert.ok(setupNodeStep, "actions/setup-node@v6 step not found in release workflow");
+  assert.equal(String(setupNodeStep?.with?.["node-version"]), "22");
+
+  const dependabot = parse(read(".github/dependabot.yml")) as DependabotConfig;
+  const npmUpdates = dependabot.updates?.find(
+    (update) => update["package-ecosystem"] === "npm" && update.directory === "/"
+  );
+  assert.ok(
+    npmUpdates?.ignore?.some(
+      (entry) =>
+        entry["dependency-name"] === "@types/node" &&
+        entry["update-types"]?.includes("version-update:semver-major")
+    )
+  );
+
+  const runtimeEngineConflicts = Object.entries(lock.packages)
+    .filter(([packagePath, meta]) => packagePath !== "" && !meta.dev && meta.engines?.node)
+    .filter(([, meta]) => !semver.intersects(meta.engines?.node ?? "", ">=22 <23"))
+    .map(([packagePath, meta]) => [packagePath, meta.engines?.node]);
+  assert.deepEqual(runtimeEngineConflicts, []);
 });
 
 test("CLI help advertises scoped npm install commands and Homebrew", () => {

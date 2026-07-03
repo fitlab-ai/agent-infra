@@ -7,6 +7,10 @@ updates:
     labels:
       - "dependencies"
     open-pull-requests-limit: 10
+    ignore:
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"

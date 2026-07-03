@@ -64,7 +64,7 @@
   },
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",
-    "@types/node": "^24.0.0",
+    "@types/node": "^22.20.0",
     "@types/semver": "^7.7.1",
     "typescript": "~6.0"
   },
