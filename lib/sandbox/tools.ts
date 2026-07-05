@@ -124,6 +124,15 @@ function createBuiltinTools(home: string, project: string): Record<string, Sandb
         { hostPath: hostJoin(home, '.gemini', 'settings.json'), sandboxName: 'settings.json' },
         { hostPath: hostJoin(home, '.gemini', 'google_accounts.json'), sandboxName: 'google_accounts.json' }
       ]
+    },
+    'agent-infra': {
+      id: 'agent-infra',
+      name: 'agent-infra CLI',
+      install: { type: 'npm', cmd: '@fitlab-ai/agent-infra@latest' },
+      sandboxBase: hostJoin(home, '.agent-infra', 'sandboxes', 'agent-infra'),
+      containerMount: '/home/devuser/.agent-infra-cli',
+      versionCmd: 'ai version --raw',
+      setupHint: 'Provides the ai and agent-infra CLI commands inside the sandbox.'
     }
   };
 }

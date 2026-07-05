@@ -295,7 +295,7 @@ Namespaced custom TUI:
 
 ## Sandbox Custom Tools
 
-`customTUIs` (above) generates slash-command files but does not change the sandbox image. To install a non-npm TUI (pip / cargo / curl-based / pre-built binary) into the sandbox image and live-mount its credentials, declare it under `sandbox.customTools` in `.agents/.airc.json`. Built-in tools (`claude-code`, `codex`, `opencode`, `gemini-cli`) keep working unchanged.
+`customTUIs` (above) generates slash-command files but does not change the sandbox image. To install a non-npm TUI (pip / cargo / curl-based / pre-built binary) into the sandbox image and live-mount its credentials, declare it under `sandbox.customTools` in `.agents/.airc.json`. Built-in sandbox tools (`claude-code`, `codex`, `opencode`, `gemini-cli`, `agent-infra`) keep working unchanged; `agent-infra` only provides the in-sandbox `ai` / `agent-infra` CLI and is not part of the `tuis` selector.
 
 ### Required fields
 

@@ -34,6 +34,20 @@ test("toolNpmPackagesArg returns space-separated npm packages and ignores shell 
   assert.equal(sandboxTools.toolNpmPackagesArg([SHELL_TOOL]), "");
 });
 
+test("toolNpmPackagesArg includes the agent-infra builtin package", async () => {
+  const sandboxTools = await loadFreshEsm<SandboxToolsModule>("lib/sandbox/tools.js");
+  const [agentInfra] = sandboxTools.resolveTools({
+    home: "/home/host-user",
+    project: "demo",
+    tools: ["agent-infra"]
+  });
+
+  assert.equal(sandboxTools.toolNpmPackagesArg([agentInfra!]), "@fitlab-ai/agent-infra@latest");
+  assert.deepEqual(sandboxTools.imageSignatureFields([agentInfra!]), [
+    { id: "agent-infra", install: { type: "npm", cmd: "@fitlab-ai/agent-infra@latest" } }
+  ]);
+});
+
 test("toolShellInstallScript returns empty string when no shell tools are present", async () => {
   const sandboxTools = await loadFreshEsm<SandboxToolsModule>("lib/sandbox/tools.js");
 

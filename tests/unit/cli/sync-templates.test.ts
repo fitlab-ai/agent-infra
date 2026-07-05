@@ -248,6 +248,91 @@ test("syncTemplates reports the bundled installer version with a v prefix", asyn
   }
 });
 
+test("syncTemplates appends agent-infra to legacy default sandbox tools regardless of ordering", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-tools-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      platform: { type: "github" },
+      sandbox: {
+        engine: null,
+        runtimes: ["node22"],
+        tools: ["claude-code", "opencode", "codex", "gemini-cli"],
+        dockerfile: null,
+        vm: { cpu: null, memory: null, disk: null }
+      },
+      files: { managed: [], merged: [], ejected: [] }
+    });
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+    const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
+
+    assert.equal(report.configUpdated, true);
+    assert.deepEqual(cfg.sandbox.tools, ["claude-code", "opencode", "codex", "gemini-cli", "agent-infra"]);
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates preserves customized sandbox tools", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-custom-tools-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      platform: { type: "github" },
+      sandbox: {
+        engine: null,
+        runtimes: ["node22"],
+        tools: ["codex"],
+        dockerfile: null,
+        vm: { cpu: null, memory: null, disk: null }
+      },
+      files: { managed: [], merged: [], ejected: [] }
+    });
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    syncTemplates(projectRoot, templateRoot);
+    const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
+
+    assert.deepEqual(cfg.sandbox.tools, ["codex"]);
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("syncTemplates prefers platform-specific variants and composes with zh-CN localization", async () => {
   const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-platform-"));

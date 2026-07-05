@@ -12,7 +12,7 @@ import type { SandboxTool } from './tools.ts';
 const DEFAULTS = Object.freeze({
   engine: null,
   runtimes: ['node22'],
-  tools: ['claude-code', 'codex', 'gemini-cli', 'opencode'],
+  tools: ['claude-code', 'codex', 'gemini-cli', 'opencode', 'agent-infra'],
   dockerfile: null,
   vm: {
     cpu: null,

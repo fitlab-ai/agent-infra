@@ -32,7 +32,8 @@ const DEFAULTS = {
       "claude-code",
       "codex",
       "gemini-cli",
-      "opencode"
+      "opencode",
+      "agent-infra"
     ],
     "dockerfile": null,
     "vm": {
@@ -86,6 +87,8 @@ const DEFAULTS = {
 };
 
 const PACKAGE_NAME = '@fitlab-ai/agent-infra';
+const LEGACY_DEFAULT_SANDBOX_TOOLS = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
+const AGENT_INFRA_SANDBOX_TOOL = 'agent-infra';
 // Add a new identifier here only after shipping matching .{platform}. template variants.
 const KNOWN_PLATFORMS = new Set(['github']);
 const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
@@ -121,6 +124,26 @@ function isPathOwnedByDisabledTUI(rel, enabledSet) {
     }
   }
   return false;
+}
+
+function isLegacyDefaultSandboxTools(value) {
+  if (!Array.isArray(value) || value.length !== LEGACY_DEFAULT_SANDBOX_TOOLS.length) {
+    return false;
+  }
+  const tools = new Set(value);
+  return LEGACY_DEFAULT_SANDBOX_TOOLS.every(tool => tools.has(tool));
+}
+
+function migrateSandboxTools(cfg) {
+  const tools = cfg.sandbox?.tools;
+  if (!isLegacyDefaultSandboxTools(tools)) {
+    return false;
+  }
+  cfg.sandbox = {
+    ...cfg.sandbox,
+    tools: [...tools, AGENT_INFRA_SANDBOX_TOOL]
+  };
+  return true;
 }
 
 function norm(p) { return p.replace(/\\/g, '/'); }
@@ -1296,6 +1319,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   ) > 0;
 
   const prevVersion = cfg.templateVersion;
+  const sandboxToolsMigrated = migrateSandboxTools(cfg);
 
   cfg.files.managed = managed;
   cfg.files.merged  = merged;
@@ -1303,7 +1327,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   cfg.templateVersion = version;
   delete cfg.templateSource;
 
-  report.configUpdated = hasChanges || prevVersion !== version || hadTemplateSource;
+  report.configUpdated = hasChanges || prevVersion !== version || hadTemplateSource || sandboxToolsMigrated;
 
   fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
 

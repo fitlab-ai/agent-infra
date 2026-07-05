@@ -28,7 +28,7 @@ test(".agents/.airc.json declares default sandbox configuration", () => {
   assert.deepEqual(collaborator.sandbox, {
     engine: "orbstack",
     runtimes: ["node22"],
-    tools: ["claude-code", "codex", "gemini-cli", "opencode"],
+    tools: ["claude-code", "codex", "gemini-cli", "opencode", "agent-infra"],
     dockerfile: null,
     vm: { cpu: null, memory: null, disk: null }
   });

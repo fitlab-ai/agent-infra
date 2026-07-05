@@ -40,6 +40,8 @@ const defaults = JSON.parse(
 
 const CONFIG_DIR = '.agents';
 const CONFIG_PATH = path.join(CONFIG_DIR, '.airc.json');
+const LEGACY_DEFAULT_SANDBOX_TOOLS = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
+const AGENT_INFRA_SANDBOX_TOOL = 'agent-infra';
 
 // One-time migration of the legacy project-level PR switch to the three-state
 // `prFlow` preference. `true` (the old default / "PR flow on") maps to the
@@ -58,6 +60,26 @@ function migratePrFlow(config: UpdateConfig): 'required' | 'disabled' | null {
     return 'disabled';
   }
   return null;
+}
+
+function isLegacyDefaultSandboxTools(value: unknown): value is string[] {
+  if (!Array.isArray(value) || value.length !== LEGACY_DEFAULT_SANDBOX_TOOLS.length) {
+    return false;
+  }
+  const tools = new Set(value);
+  return LEGACY_DEFAULT_SANDBOX_TOOLS.every((tool) => tools.has(tool));
+}
+
+function migrateSandboxTools(config: UpdateConfig): boolean {
+  const tools = config.sandbox?.tools;
+  if (!isLegacyDefaultSandboxTools(tools)) {
+    return false;
+  }
+  config.sandbox = {
+    ...config.sandbox,
+    tools: [...tools, AGENT_INFRA_SANDBOX_TOOL]
+  };
+  return true;
 }
 
 function isPathOwnedByOtherPlatform(relativePath: string, platformType: string): boolean {
@@ -215,6 +237,7 @@ async function cmdUpdate(): Promise<void> {
   const taskAdded = !config.task;
   const labelsAdded = !config.labels;
   const prFlowMigrated = migratePrFlow(config);
+  const sandboxToolsMigrated = !sandboxAdded && migrateSandboxTools(config);
   let configChanged = changed;
 
   if (platformAdded) {
@@ -238,6 +261,10 @@ async function cmdUpdate(): Promise<void> {
   }
 
   if (prFlowMigrated) {
+    configChanged = true;
+  }
+
+  if (sandboxToolsMigrated) {
     configChanged = true;
   }
 
@@ -267,6 +294,9 @@ async function cmdUpdate(): Promise<void> {
       if (prFlowMigrated) {
         info(`Migrated legacy requiresPullRequest to prFlow="${prFlowMigrated}" in ${CONFIG_PATH}.`);
       }
+      if (sandboxToolsMigrated) {
+        info(`Migrated default sandbox.tools to include ${AGENT_INFRA_SANDBOX_TOOL} in ${CONFIG_PATH}.`);
+      }
     } else {
       info(`File registry changed in ${CONFIG_PATH}.`);
     }
@@ -284,6 +314,9 @@ async function cmdUpdate(): Promise<void> {
     }
     if (hasNewEntries && prFlowMigrated) {
       info(`Migrated legacy requiresPullRequest to prFlow="${prFlowMigrated}" in ${CONFIG_PATH}.`);
+    }
+    if (hasNewEntries && sandboxToolsMigrated) {
+      info(`Migrated default sandbox.tools to include ${AGENT_INFRA_SANDBOX_TOOL} in ${CONFIG_PATH}.`);
     }
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf8');
     ok(`Updated ${CONFIG_PATH}`);

@@ -12,7 +12,7 @@ import type { SandboxConfig } from '../../../lib/sandbox/config.ts';
 
 type ShowModule = typeof import('../../../lib/sandbox/commands/show.ts');
 
-const BUILTIN_TOOL_IDS = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
+const BUILTIN_TOOL_IDS = ['claude-code', 'codex', 'gemini-cli', 'opencode', 'agent-infra'];
 
 function makeConfig(home: string): SandboxConfig {
   return {

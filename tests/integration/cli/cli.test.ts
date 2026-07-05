@@ -207,7 +207,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.deepEqual(config.sandbox, {
       engine: DEFAULT_SANDBOX_ENGINE,
       runtimes: ["node22"],
-      tools: ["claude-code", "codex", "gemini-cli", "opencode"],
+      tools: ["claude-code", "codex", "gemini-cli", "opencode", "agent-infra"],
       dockerfile: null,
       vm: { cpu: null, memory: null, disk: null }
     }, "init should generate default sandbox config");
@@ -618,7 +618,7 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     assert.deepEqual(updated.sandbox, {
       engine: null,
       runtimes: ["node22"],
-      tools: ["claude-code", "codex", "gemini-cli", "opencode"],
+      tools: ["claude-code", "codex", "gemini-cli", "opencode", "agent-infra"],
       dockerfile: null,
       vm: { cpu: null, memory: null, disk: null }
     }, "update should backfill default sandbox config");
@@ -654,6 +654,58 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     assert.ok(
       fs.existsSync(path.join(tmpDir, ".opencode", "commands", "update-agent-infra.md"))
     );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra update appends agent-infra to legacy default sandbox tools", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-sandbox-tools-"));
+  const config = {
+    project: "seedproj",
+    org: "seedorg",
+    language: "en",
+    templateVersion: "stale",
+    files: {
+      managed: [],
+      merged: [],
+      ejected: []
+    },
+    sandbox: {
+      engine: null,
+      runtimes: ["node22"],
+      tools: ["opencode", "claude-code", "gemini-cli", "codex"],
+      dockerfile: null,
+      vm: { cpu: null, memory: null, disk: null }
+    }
+  };
+
+  try {
+    fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, ".agents", ".airc.json"),
+      JSON.stringify(config, null, 2) + "\n",
+      "utf8"
+    );
+
+    const output = execFileSync(process.execPath, cliArgs("update"), {
+      cwd: tmpDir,
+      stdio: "pipe",
+      encoding: "utf8"
+    });
+
+    const updated = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+
+    assert.match(output, /Migrated default sandbox\.tools to include agent-infra/);
+    assert.deepEqual(updated.sandbox.tools, [
+      "opencode",
+      "claude-code",
+      "gemini-cli",
+      "codex",
+      "agent-infra"
+    ]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

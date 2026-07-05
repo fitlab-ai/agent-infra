@@ -16,7 +16,8 @@
       "claude-code",
       "codex",
       "gemini-cli",
-      "opencode"
+      "opencode",
+      "agent-infra"
     ],
     "dockerfile": null,
     "vm": {
