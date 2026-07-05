@@ -260,7 +260,7 @@ args: "<task-id>"   # 可选
 | 占位符 | 替换为 | 示例 |
 |--------|--------|------|
 | `${skillName}` | skill 命令名，例如 `review-code` 或 `commit`。 | `<your-cli> ${skillName}` -> `<your-cli> review-code` |
-| `${projectName}` | `.airc.json` 中的 `project` 值，适用于带命名空间的命令。 | `/${projectName}:${skillName}` -> `/agent-infra:review-code` |
+| `${projectName}` | `.airc.json` 中的 `project` 值，适用于带命名空间的命令。 | `/${projectName}:${skillName}` -> `/your-project:review-code` |
 
 不带命名空间的自定义 TUI：
 
@@ -280,7 +280,7 @@ args: "<task-id>"   # 可选
 
 ```json
 {
-  "project": "agent-infra",
+  "project": "your-project",
   "customTUIs": [
     {
       "name": "<your-tui-name>",
@@ -295,7 +295,7 @@ args: "<task-id>"   # 可选
 
 ## 沙箱自定义工具（Sandbox Custom Tools）
 
-上文 `customTUIs` 只负责生成 slash-command 文件，**不影响沙箱镜像**。如果要把一个非 npm 分发的 TUI（pip / cargo / curl 脚本 / 裸二进制）装进沙箱镜像、并 live-mount 它的凭证目录，需要在 `.agents/.airc.json` 的 `sandbox.customTools` 中声明。内建 sandbox 工具（`claude-code` / `codex` / `opencode` / `gemini-cli` / `agent-infra`）行为保持不变；其中 `agent-infra` 只提供沙箱内 `ai` / `agent-infra` CLI，不属于 `tuis` 选择列表。
+`customTUIs` 只负责生成 slash-command 文件，**不影响沙箱镜像**。如果要把一个非 npm 分发的 CLI 或工具（pip / cargo / curl 脚本 / 裸二进制）装进沙箱镜像、并 live-mount 它的凭证目录，需要在 `.agents/.airc.json` 的 `sandbox.customTools` 中声明。内建 sandbox 工具（`claude-code` / `codex` / `opencode` / `gemini-cli` / `agent-infra`）行为保持不变；其中 `agent-infra` 只提供沙箱内 `ai` / `agent-infra` CLI，不属于 `tuis` 或 `customTUIs` 配置。
 
 ### 必填字段
 

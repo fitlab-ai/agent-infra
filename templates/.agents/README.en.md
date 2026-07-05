@@ -260,7 +260,7 @@ Supported `invoke` placeholders:
 | Placeholder | Replaced with | Example |
 |-------------|---------------|---------|
 | `${skillName}` | The skill command name, such as `review-code` or `commit`. | `<your-cli> ${skillName}` -> `<your-cli> review-code` |
-| `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/agent-infra:review-code` |
+| `${projectName}` | The `.airc.json` `project` value. Use this for namespaced commands. | `/${projectName}:${skillName}` -> `/your-project:review-code` |
 
 Non-namespaced custom TUI:
 
@@ -280,7 +280,7 @@ Namespaced custom TUI:
 
 ```json
 {
-  "project": "agent-infra",
+  "project": "your-project",
   "customTUIs": [
     {
       "name": "<your-tui-name>",
@@ -295,7 +295,7 @@ Namespaced custom TUI:
 
 ## Sandbox Custom Tools
 
-`customTUIs` (above) generates slash-command files but does not change the sandbox image. To install a non-npm TUI (pip / cargo / curl-based / pre-built binary) into the sandbox image and live-mount its credentials, declare it under `sandbox.customTools` in `.agents/.airc.json`. Built-in sandbox tools (`claude-code`, `codex`, `opencode`, `gemini-cli`, `agent-infra`) keep working unchanged; `agent-infra` only provides the in-sandbox `ai` / `agent-infra` CLI and is not part of the `tuis` selector.
+`customTUIs` generates slash-command files but does not change the sandbox image. To install a non-npm CLI or tool (pip / cargo / curl-based / pre-built binary) into the sandbox image and live-mount its credentials, declare it under `sandbox.customTools` in `.agents/.airc.json`. Built-in sandbox tools (`claude-code`, `codex`, `opencode`, `gemini-cli`, `agent-infra`) keep working unchanged; `agent-infra` only provides the in-sandbox `ai` / `agent-infra` CLI and is not part of `tuis` or `customTUIs`.
 
 ### Required fields
 
