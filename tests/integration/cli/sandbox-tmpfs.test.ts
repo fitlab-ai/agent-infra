@@ -69,8 +69,12 @@ test("sandbox create mounts codex home as tmpfs, drops its host bind, and seeds 
     // bind-mount era) must NOT be bound back over the tmpfs — otherwise the
     // high-churn writes would hit the host SSD again (CD-1).
     const codexSandboxDir = path.join(tmpDir, ".agent-infra", "sandboxes", "codex", "demo", "feature-x");
-    fs.mkdirSync(codexSandboxDir, { recursive: true });
+    fs.mkdirSync(path.join(codexSandboxDir, "mcp"), { recursive: true });
+    fs.mkdirSync(path.join(codexSandboxDir, "sessions"), { recursive: true });
     fs.writeFileSync(path.join(codexSandboxDir, "logs_2.sqlite"), "stale\n", "utf8");
+    fs.writeFileSync(path.join(codexSandboxDir, "mcp.json"), "{}\n", "utf8");
+    fs.writeFileSync(path.join(codexSandboxDir, "mcp", "server.json"), "{}\n", "utf8");
+    fs.writeFileSync(path.join(codexSandboxDir, "sessions", "session.jsonl"), "{}\n", "utf8");
 
     spawnSandboxCli(
       fixture,
@@ -106,6 +110,21 @@ test("sandbox create mounts codex home as tmpfs, drops its host bind, and seeds 
       runCall.some((arg, index) => runCall[index - 1] === "-v" && isMountFor(arg, "/home/devuser/.codex/logs_2.sqlite")),
       false,
       `stale logs_2.sqlite must NOT be bound back over the tmpfs, got ${JSON.stringify(runCall)}`
+    );
+    assert.equal(
+      runCall.some((arg, index) => runCall[index - 1] === "-v" && isMountFor(arg, "/home/devuser/.codex/mcp.json")),
+      false,
+      `stale mcp.json must NOT be bound back over the tmpfs, got ${JSON.stringify(runCall)}`
+    );
+    assert.equal(
+      runCall.some((arg, index) => runCall[index - 1] === "-v" && isMountFor(arg, "/home/devuser/.codex/mcp")),
+      false,
+      `stale mcp directory must NOT be bound back over the tmpfs, got ${JSON.stringify(runCall)}`
+    );
+    assert.equal(
+      runCall.some((arg, index) => runCall[index - 1] === "-v" && isMountFor(arg, "/home/devuser/.codex/sessions")),
+      false,
+      `stale sessions directory must NOT be bound back over the tmpfs, got ${JSON.stringify(runCall)}`
     );
 
     // auth.json is still overlaid on top of the tmpfs.

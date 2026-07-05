@@ -915,6 +915,42 @@ function resolveHostCatalogPath(value: unknown, hostHomeDir: string): string | n
   }
 }
 
+const CODEX_DISABLED_FEATURE_FLAGS = ['apps', 'enable_mcp_apps'] as const;
+
+function removeCodexMcpServers(sandboxParsed: JsonObject): boolean {
+  if (!Object.hasOwn(sandboxParsed, 'mcp_servers')) {
+    return false;
+  }
+  delete sandboxParsed.mcp_servers;
+  return true;
+}
+
+function inheritDisabledCodexFeatureFlags(sandboxParsed: JsonObject, hostParsed: JsonObject): boolean {
+  if (!isJsonObjectRecord(hostParsed.features)) {
+    return false;
+  }
+  if (Object.hasOwn(sandboxParsed, 'features') && !isJsonObjectRecord(sandboxParsed.features)) {
+    return false;
+  }
+
+  let sandboxFeatures = sandboxParsed.features as JsonObject | undefined;
+  let changed = false;
+  for (const key of CODEX_DISABLED_FEATURE_FLAGS) {
+    if (hostParsed.features[key] !== false) {
+      continue;
+    }
+    if (!sandboxFeatures) {
+      sandboxFeatures = {};
+      sandboxParsed.features = sandboxFeatures;
+    }
+    if (sandboxFeatures[key] !== false) {
+      sandboxFeatures[key] = false;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 export function ensureCodexModelInheritance(
   toolDir: string,
   hostHomeDir?: string,
@@ -947,13 +983,15 @@ export function ensureCodexModelInheritance(
     }
   }
 
+  let changed = removeCodexMcpServers(sandboxParsed);
+  changed = inheritDisabledCodexFeatureFlags(sandboxParsed, hostParsed) || changed;
+
   const inheritSpecs: Array<readonly [string, 'string' | 'number']> = [
     ['model', 'string'],
     ['model_reasoning_effort', 'string'],
     ['model_auto_compact_token_limit', 'number']
   ];
 
-  let changed = false;
   for (const [key, type] of inheritSpecs) {
     if (Object.hasOwn(sandboxParsed, key)) {
       continue;

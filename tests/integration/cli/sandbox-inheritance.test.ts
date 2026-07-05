@@ -652,6 +652,94 @@ test("ensureCodexModelInheritance creates config with host model fields", async 
   }
 });
 
+test("ensureCodexModelInheritance removes MCP servers and inherits only disabled Codex features", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-mcp-clean-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-mcp-clean-"));
+  const configPath = path.join(tmpDir, "config.toml");
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      [
+        'model = "gpt-5.5"',
+        "",
+        "[features]",
+        "apps = false",
+        "enable_mcp_apps = false",
+        "future_feature = true",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    fs.writeFileSync(
+      configPath,
+      [
+        "[features]",
+        "apps = true",
+        "enable_mcp_apps = true",
+        "other_experiment = true",
+        "",
+        "[mcp_servers.demo]",
+        'command = "node"',
+        'args = ["server.js"]',
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
+
+    const data = toml.parse(fs.readFileSync(configPath, "utf8")) as {
+      model?: string;
+      features?: Record<string, unknown>;
+      mcp_servers?: unknown;
+    };
+    assert.equal(data.model, "gpt-5.5");
+    assert.equal(data.features?.apps, false);
+    assert.equal(data.features?.enable_mcp_apps, false);
+    assert.equal(data.features?.other_experiment, true);
+    assert.equal(data.features?.future_feature, undefined);
+    assert.equal(data.mcp_servers, undefined);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance does not copy enabled Codex features", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-enabled-features-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-enabled-features-"));
+  const configPath = path.join(tmpDir, "config.toml");
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      [
+        "[features]",
+        "apps = true",
+        "enable_mcp_apps = true",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    fs.writeFileSync(configPath, 'model = "gpt-5.4"\n', "utf8");
+
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome);
+
+    const data = toml.parse(fs.readFileSync(configPath, "utf8")) as {
+      features?: Record<string, unknown>;
+    };
+    assert.equal(data.features, undefined);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
 test("ensureCodexModelInheritance keeps model fields before workspace trust section", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-model-order-"));
