@@ -68,7 +68,7 @@
 | `/sandbox ls`、`/sandbox show <ref>`、`/sandbox vm status` | `read` | `ai sandbox ...` |
 | `/task decisions <ref>`、`/task log <ref>`、`/task ls`、`/task show <ref>`、`/task status <ref>` | `read` | `ai task ...` |
 
-当前 `/ping` 在飞书 adapter 中也承担输出格式 Demo：飞书端会收到 `post` 富文本和 `interactive` 卡片两条候选消息，用于在手机端对比可读性并选择后续默认格式。这是临时验证行为，不是稳定配置项。
+飞书 adapter 默认使用 `interactive` 卡片返回命令结果；这是基于手机端 Demo 验证后的默认输出载体。其他 adapter 不受影响。
 
 `/task` 命令只提供只读视图。任务推进统一走 `/run`。任务态 skill 会把 `<task-ref>` 解析到任务分支，再查找对应 sandbox；如果 sandbox 不存在，会提示先运行 `ai sandbox create <task-ref>`。`create-task` 是 v1 中唯一不要求已有任务和 sandbox 的 skill runner。沙箱删除仍需要本地交互确认，因此不通过 IM 暴露。
 

@@ -14,14 +14,11 @@ export type FeishuTransport = {
   send: (chatId: string, message: FeishuOutgoingMessage) => Promise<void>;
 };
 
-export type FeishuOutgoingMessage =
-  | { kind: 'text'; text: string }
-  | { kind: 'post'; title: string; text: string }
-  | { kind: 'interactive'; title: string; text: string };
+export type FeishuOutgoingMessage = { kind: 'interactive'; title: string; text: string };
 
 type FeishuCreateData = {
   receive_id: string;
-  msg_type: 'text' | 'post' | 'interactive';
+  msg_type: 'interactive';
   content: string;
 };
 
@@ -85,33 +82,11 @@ export function cleanFeishuText(text: string): string {
   return stripVTControlCharacters(text).replace(/\r\n/g, '\n');
 }
 
-export function textMessage(text: string): FeishuOutgoingMessage {
-  return { kind: 'text', text: cleanFeishuText(text) };
-}
-
-export function buildPingDemoMessages(text: string): FeishuOutgoingMessage[] {
-  const cleanText = cleanFeishuText(text);
-  return [
-    { kind: 'post', title: 'agent-infra /ping post demo', text: cleanText },
-    { kind: 'interactive', title: 'agent-infra /ping card demo', text: cleanText }
-  ];
+export function cardMessage(text: string): FeishuOutgoingMessage {
+  return { kind: 'interactive', title: 'agent-infra', text: cleanFeishuText(text) };
 }
 
 export function toFeishuCreateData(chatId: string, message: FeishuOutgoingMessage): FeishuCreateData {
-  if (message.kind === 'text') {
-    return { receive_id: chatId, msg_type: 'text', content: JSON.stringify({ text: message.text }) };
-  }
-
-  if (message.kind === 'post') {
-    return {
-      receive_id: chatId,
-      msg_type: 'post',
-      content: JSON.stringify({
-        zh_cn: { title: message.title, content: [[{ tag: 'text', text: message.text }]] }
-      })
-    };
-  }
-
   return {
     receive_id: chatId,
     msg_type: 'interactive',

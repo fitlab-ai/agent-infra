@@ -68,7 +68,7 @@ Put the app credentials in `.agents/server.local.json`. This file is git-ignored
 | `/sandbox ls`, `/sandbox show <ref>`, `/sandbox vm status` | `read` | `ai sandbox ...` |
 | `/task decisions <ref>`, `/task log <ref>`, `/task ls`, `/task show <ref>`, `/task status <ref>` | `read` | `ai task ...` |
 
-For now, `/ping` in the Feishu adapter also acts as an output-format demo: Feishu receives both a `post` rich-text message and an `interactive` card candidate so the mobile rendering can be compared before choosing the later default format. This is temporary validation behavior, not a stable configuration surface.
+The Feishu adapter returns command results as `interactive` cards by default; this is the default output surface selected after the mobile demo validation. Other adapters are not affected.
 
 `/task` commands are read-only views. Lifecycle progress goes through `/run`. Task skills resolve `<task-ref>` to the task branch, find the matching sandbox, and fail with an instruction to run `ai sandbox create <task-ref>` if no sandbox exists. `create-task` is the only v1 skill runner that does not require an existing task or sandbox. Sandbox removal is intentionally not exposed through IM because local deletion still requires interactive confirmation.
 

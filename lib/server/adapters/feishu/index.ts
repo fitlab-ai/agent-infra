@@ -1,5 +1,5 @@
 import type { Adapter, AdapterCtx, AdapterFactory, InboundMessage } from '../_contract.ts';
-import { buildPingDemoMessages, createFeishuTransport, normalizeMessage, textMessage } from './transport.ts';
+import { cardMessage, createFeishuTransport, normalizeMessage } from './transport.ts';
 import type { FeishuTransport } from './transport.ts';
 
 // Assemble the feishu adapter. The transport is injectable so unit tests can
@@ -26,10 +26,7 @@ export function createFeishuAdapter(
             messageId: normalized.messageId,
             raw: normalized.raw,
             reply: async (text) => {
-              const messages = normalized.text === '/ping' ? buildPingDemoMessages(text) : [textMessage(text)];
-              for (const message of messages) {
-                await transport.send(normalized.chatId, message);
-              }
+              await transport.send(normalized.chatId, cardMessage(text));
             }
           };
           await adapterCtx.dispatch(message);
@@ -42,7 +39,7 @@ export function createFeishuAdapter(
       await transport.stop();
     },
     async sendMessage(target, text) {
-      await transport.send(target.chatId, textMessage(text));
+      await transport.send(target.chatId, cardMessage(text));
     }
   };
 }

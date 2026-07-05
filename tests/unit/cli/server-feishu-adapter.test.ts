@@ -3,11 +3,10 @@ import assert from 'node:assert/strict';
 
 import feishuFactory, { createFeishuAdapter } from '../../../lib/server/adapters/feishu/index.ts';
 import {
-  buildPingDemoMessages,
+  cardMessage,
   cleanFeishuText,
   createFeishuTransport,
   normalizeMessage,
-  textMessage,
   toFeishuCreateData
 } from '../../../lib/server/adapters/feishu/transport.ts';
 import type { FeishuOutgoingMessage, FeishuTransport } from '../../../lib/server/adapters/feishu/transport.ts';
@@ -101,7 +100,7 @@ function makeCtx(dispatched: InboundMessage[]): AdapterCtx {
   };
 }
 
-test('an inbound /ping dispatches a normalized message and reply routes to send', async () => {
+test('an inbound /ping dispatches a normalized message and reply routes a card to send', async () => {
   const fake = fakeTransport();
   const dispatched: InboundMessage[] = [];
   const adapter = createFeishuAdapter({ appId: 'x' }, fake.transport);
@@ -115,8 +114,24 @@ test('an inbound /ping dispatches a normalized message and reply routes to send'
 
   await dispatched[0]?.reply('pong v9.9.9');
   assert.deepEqual(fake.sends, [
-    { chatId: 'oc_chat', message: { kind: 'post', title: 'agent-infra /ping post demo', text: 'pong v9.9.9' } },
-    { chatId: 'oc_chat', message: { kind: 'interactive', title: 'agent-infra /ping card demo', text: 'pong v9.9.9' } }
+    { chatId: 'oc_chat', message: { kind: 'interactive', title: 'agent-infra', text: 'pong v9.9.9' } }
+  ]);
+});
+
+test('a non-ping inbound reply also routes a card to send', async () => {
+  const fake = fakeTransport();
+  const dispatched: InboundMessage[] = [];
+  const adapter = createFeishuAdapter({ appId: 'x' }, fake.transport);
+
+  await adapter.start(makeCtx(dispatched));
+  await fake.fire(receiveEvent('/version'));
+
+  assert.equal(dispatched.length, 1);
+  assert.equal(dispatched[0]?.text, '/version');
+
+  await dispatched[0]?.reply('agent-infra v9.9.9');
+  assert.deepEqual(fake.sends, [
+    { chatId: 'oc_chat', message: { kind: 'interactive', title: 'agent-infra', text: 'agent-infra v9.9.9' } }
   ]);
 });
 
@@ -142,7 +157,9 @@ test('sendMessage and stop delegate to the transport', async () => {
 
   await adapter.start(makeCtx([]));
   await adapter.sendMessage({ chatId: 'oc_target' }, 'hello');
-  assert.deepEqual(fake.sends, [{ chatId: 'oc_target', message: { kind: 'text', text: 'hello' } }]);
+  assert.deepEqual(fake.sends, [
+    { chatId: 'oc_target', message: { kind: 'interactive', title: 'agent-infra', text: 'hello' } }
+  ]);
 
   await adapter.stop();
   assert.equal(fake.stopped(), true);
@@ -150,18 +167,7 @@ test('sendMessage and stop delegate to the transport', async () => {
 
 test('feishu message helpers strip ANSI and map payloads to create data', () => {
   assert.equal(cleanFeishuText('\u001b[31mred\u001b[0m\nnext'), 'red\nnext');
-  assert.deepEqual(textMessage('\u001b[32mok\u001b[0m'), { kind: 'text', text: 'ok' });
-  assert.deepEqual(buildPingDemoMessages('\u001b[33mpong v9\u001b[0m'), [
-    { kind: 'post', title: 'agent-infra /ping post demo', text: 'pong v9' },
-    { kind: 'interactive', title: 'agent-infra /ping card demo', text: 'pong v9' }
-  ]);
-
-  const postData = toFeishuCreateData('oc_chat', { kind: 'post', title: 'Post', text: 'hello' });
-  assert.equal(postData.receive_id, 'oc_chat');
-  assert.equal(postData.msg_type, 'post');
-  assert.deepEqual(JSON.parse(postData.content), {
-    zh_cn: { title: 'Post', content: [[{ tag: 'text', text: 'hello' }]] }
-  });
+  assert.deepEqual(cardMessage('\u001b[32mok\u001b[0m'), { kind: 'interactive', title: 'agent-infra', text: 'ok' });
 
   const cardData = toFeishuCreateData('oc_chat', { kind: 'interactive', title: 'Card', text: 'hello' });
   assert.equal(cardData.receive_id, 'oc_chat');
