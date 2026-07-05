@@ -1,7 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseCommand } from '../../../lib/server/protocol.ts';
+import { commandHelp, parseCommand } from '../../../lib/server/protocol.ts';
+
+test('commandHelp renders Feishu-card-friendly command lines', () => {
+  assert.deepEqual(commandHelp().split('\n').slice(1), [
+    'Built-ins:',
+    '/help',
+    '/ping',
+    '/version',
+    'Read:',
+    '/sandbox ls',
+    '/sandbox show {ref}',
+    '/sandbox vm status',
+    '/task decisions {ref}',
+    '/task log {ref}',
+    '/task ls',
+    '/task show {ref}',
+    '/task status {ref}',
+    'Write:',
+    '/sandbox create {ref}',
+    '/sandbox start {ref}',
+    'Exec:',
+    '/decide {task-ref} {HD-id} {decision}',
+    '/run create-task {description}',
+    '/run {skill} {task-ref}'
+  ]);
+});
 
 test('parseCommand handles built-ins and read-only task commands', () => {
   assert.deepEqual(parseCommand('/ping'), { kind: 'builtin', name: 'ping', role: 'read', args: [] });

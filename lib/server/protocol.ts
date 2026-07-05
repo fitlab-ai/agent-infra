@@ -23,10 +23,26 @@ function taskSubcommand(subcommand: string): string {
 export function commandHelp(): string {
   return [
     `agent-infra ${VERSION}`,
-    'Built-ins: /help, /ping, /version',
-    'Read: /sandbox ls|show|vm status, /task decisions|log|ls|show|status',
-    'Write: /sandbox create|start',
-    'Exec: /decide <task-ref> <HD-id> <decision>, /run create-task <description>, /run <skill> <task-ref> ...'
+    'Built-ins:',
+    '/help',
+    '/ping',
+    '/version',
+    'Read:',
+    '/sandbox ls',
+    '/sandbox show {ref}',
+    '/sandbox vm status',
+    '/task decisions {ref}',
+    '/task log {ref}',
+    '/task ls',
+    '/task show {ref}',
+    '/task status {ref}',
+    'Write:',
+    '/sandbox create {ref}',
+    '/sandbox start {ref}',
+    'Exec:',
+    '/decide {task-ref} {HD-id} {decision}',
+    '/run create-task {description}',
+    '/run {skill} {task-ref}'
   ].join('\n');
 }
 
