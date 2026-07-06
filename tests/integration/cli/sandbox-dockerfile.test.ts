@@ -126,6 +126,25 @@ test("composeDockerfile joins runtime fragments in order", async () => {
   }
 });
 
+test("node runtime setup fails fast on NodeSource download errors", async () => {
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-node-runtime-"));
+
+  try {
+    const dockerfilePath = sandboxDockerfile.composeDockerfile({
+      repoRoot: tmpDir,
+      project: "demo",
+      runtimes: ["node22"],
+      dockerfile: null
+    });
+    const content = fs.readFileSync(dockerfilePath, "utf8");
+
+    assert.match(content, /bash -o pipefail -c 'curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors https:\/\/deb\.nodesource\.com\/setup_22\.x \| bash -'/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 // Intent: each package in AI_TOOL_PACKAGES gets its own `npm install -g <pkg>`
 // invocation, so npm's batch-install path (which drops platform-specific
 // optionalDependencies for `npm:` aliased packages — Issue #293) is not
