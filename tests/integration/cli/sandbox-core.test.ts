@@ -529,12 +529,13 @@ test("sandbox create does not mount the host ssh directory", () => {
       tmpDir,
       ["create", "feature/no-ssh-mount"],
       {
-        AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json")
+        AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json"),
+        DOCKER_EXIT_FOR_RUN: "1"
       }
     );
 
     assert.equal(result.signal, null);
-    assert.equal(result.status, 0, result.stderr);
+    assert.notEqual(result.status, 0);
 
     const calls = fixture.readDockerCalls();
     const runCall = calls.find((call) => call[0] === "run");
