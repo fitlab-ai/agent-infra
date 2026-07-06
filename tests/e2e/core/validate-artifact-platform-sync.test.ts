@@ -508,6 +508,88 @@ for (const c of createPrCases) {
   }));
 }
 
+test("validate-artifact platform-sync passes for complete-manual-validation when PR summary shows passed manual validation", () => (
+  withTempRoot("agent-infra-platform-sync-manual-validation-pass-", (tempRoot) => {
+    const ctx = setupPlatformSyncEnv(tempRoot);
+    const taskContent = buildTaskContent({
+      issue_number: "65",
+      pr_number: "77"
+    });
+    write(path.join(ctx.taskDir, "task.md"), taskContent);
+    writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
+    writeJson(ctx.commentsPath, [{ body: buildTaskComment(taskId, taskContent) }]);
+    writeJson(ctx.prCommentsPath, [{
+      body: [
+        "<!-- sync-pr:TASK-20260328-000001:summary -->",
+        "## Review Summary",
+        "",
+        "### ✅ 人工验证已通过",
+        "",
+        "- 验证说明：staging smoke passed"
+      ].join("\n")
+    }]);
+
+    const result = runValidatorWithFakeGh([
+      "check",
+      "platform-sync",
+      ctx.taskDir,
+      "--skill",
+      "complete-manual-validation"
+    ], ctx, {
+      GH_FAKE_ISSUE_PATH: ctx.issuePath,
+      GH_FAKE_COMMENTS_PATH: ctx.commentsPath,
+      GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
+      GH_FAKE_ISSUE_NUMBER: "65",
+      GH_FAKE_PR_NUMBER: "77"
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+  })
+));
+
+test("validate-artifact platform-sync fails for complete-manual-validation when PR summary lacks the passed heading", () => (
+  withTempRoot("agent-infra-platform-sync-manual-validation-fail-", (tempRoot) => {
+    const ctx = setupPlatformSyncEnv(tempRoot);
+    const taskContent = buildTaskContent({
+      issue_number: "65",
+      pr_number: "77"
+    });
+    write(path.join(ctx.taskDir, "task.md"), taskContent);
+    writeJson(ctx.issuePath, buildIssuePayload({ labels: [], body: "# Issue\n" }));
+    writeJson(ctx.commentsPath, [{ body: buildTaskComment(taskId, taskContent) }]);
+    writeJson(ctx.prCommentsPath, [{
+      body: [
+        "<!-- sync-pr:TASK-20260328-000001:summary -->",
+        "## Review Summary",
+        "",
+        "### ⚠️ 需人工校验",
+        "",
+        "- staging smoke"
+      ].join("\n")
+    }]);
+
+    const result = runValidatorWithFakeGh([
+      "check",
+      "platform-sync",
+      ctx.taskDir,
+      "--skill",
+      "complete-manual-validation"
+    ], ctx, {
+      GH_FAKE_ISSUE_PATH: ctx.issuePath,
+      GH_FAKE_COMMENTS_PATH: ctx.commentsPath,
+      GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
+      GH_FAKE_ISSUE_NUMBER: "65",
+      GH_FAKE_PR_NUMBER: "77"
+    });
+    assert.equal(result.status, 1);
+    assertPayloadStatus(result, {
+      type: "platform-sync",
+      status: "fail",
+      message: /missing required pattern/
+    });
+  })
+));
+
 const commitCases = [
   {
     name: "validate-artifact platform-sync skips for commit when task has no pr_number",

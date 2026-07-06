@@ -61,6 +61,11 @@ const commandSpecs: Record<string, CommandSpec> = {
     en: "Complete task $1.",
     zh: "完成任务 $1。"
   },
+  "complete-manual-validation": {
+    usage: "<task-id> [pr-ref] <verification-summary>",
+    en: "Complete manual validation: $ARGUMENTS",
+    zh: "完成人工验证：$ARGUMENTS"
+  },
   "create-pr": {
     usage: "[task-id] [target-branch]",
     en: "Create PR: $ARGUMENTS",

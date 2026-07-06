@@ -1,0 +1,8 @@
+description = "Mark PR manual validation as completed and update the summary comment"
+prompt = """
+Complete manual validation: {{args}}
+
+Read and execute the complete-manual-validation skill from `.agents/skills/complete-manual-validation/SKILL.md`.
+
+Follow all steps defined in the skill exactly.
+"""

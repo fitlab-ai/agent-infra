@@ -112,6 +112,7 @@ export function check({ taskDir, config, artifactFile }, shared) {
     checkCommentMarker,
     checkPrCommentMarker,
     checkPrCommentLastCommit,
+    checkPrCommentRequiredPatterns,
     checkCommentContent,
     checkTaskCommentContent,
     checkInLabelsComputed,
@@ -551,6 +552,41 @@ function checkPrCommentLastCommit(context, remoteData) {
     `PR #${context.prNumber} summary comment last-commit metadata mismatch: expected ${expectedHead}, got ${actualHead}`,
     "check_failed"
   );
+}
+
+function checkPrCommentRequiredPatterns(context, remoteData) {
+  const patterns = context.config.expected_pr_comment_required_patterns || [];
+  if (!Array.isArray(patterns) || patterns.length === 0) {
+    return null;
+  }
+
+  if (!context.prMarker) {
+    return failResult(CHECK_TYPE,
+      "expected_pr_comment_required_patterns requires expected_pr_comment_marker",
+      "check_failed"
+    );
+  }
+
+  const comment = findCommentByMarker(remoteData.prComments, context.prMarker);
+  if (!comment) {
+    return failResult(CHECK_TYPE,
+      `Expected PR comment marker '${context.prMarker}' not found on PR #${context.prNumber}`,
+      "check_failed"
+    );
+  }
+
+  const body = String(comment.body || "");
+  for (const pattern of patterns) {
+    const regex = new RegExp(pattern, "m");
+    if (!regex.test(body)) {
+      return failResult(CHECK_TYPE,
+        `PR #${context.prNumber} summary comment is missing required pattern: ${pattern}`,
+        "check_failed"
+      );
+    }
+  }
+
+  return null;
 }
 
 function checkCommentContent(context, remoteData) {

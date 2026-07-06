@@ -446,9 +446,10 @@ test("validate-artifact completion-checklist fails when a complete-task item is 
   })
 ));
 
-test("commit and create-pr references point to the shared pr-sync rule", () => {
+test("PR summary callers reference the shared pr-sync rule", () => {
   assertPointsToPrSyncRule(".agents/skills/commit/reference/pr-summary-sync.md");
   assertPointsToPrSyncRule(".agents/skills/create-pr/reference/comment-publish.md");
+  assertPointsToPrSyncRule(".agents/skills/complete-manual-validation/reference/summary-update.md");
 });
 
 test("template references point to the shared pr-sync rule", () => {
@@ -456,6 +457,8 @@ test("template references point to the shared pr-sync rule", () => {
   assertPointsToPrSyncRule("templates/.agents/skills/commit/reference/pr-summary-sync.zh-CN.md");
   assertPointsToPrSyncRule("templates/.agents/skills/create-pr/reference/comment-publish.en.md");
   assertPointsToPrSyncRule("templates/.agents/skills/create-pr/reference/comment-publish.zh-CN.md");
+  assertPointsToPrSyncRule("templates/.agents/skills/complete-manual-validation/reference/summary-update.en.md");
+  assertPointsToPrSyncRule("templates/.agents/skills/complete-manual-validation/reference/summary-update.zh-CN.md");
 });
 
 test("local and zh-CN rule files contain the canonical PR summary structure", () => {
@@ -465,6 +468,9 @@ test("local and zh-CN rule files contain the canonical PR summary structure", ()
   for (const file of [".agents/rules/pr-sync.md", "templates/.agents/rules/pr-sync.github.zh-CN.md"]) {
     assertHasCanonicalPrSyncStructure(file, zhHeadings);
     const content = read(file);
+    assert.match(content, /complete-manual-validation/, `${file} should document the manual-validation completion caller`);
+    assert.match(content, /manual-validation\.md/, `${file} should include manual-validation artifacts as aggregation input`);
+    assert.match(content, /### ✅ 人工验证已通过/, `${file} should document the passed manual-validation branch`);
     assert.match(content, /### ⚠️ 需人工校验/, `${file} should document the retained-items branch`);
     assert.match(content, /### ✅ 无需人工校验/, `${file} should document the empty branch without the warning style`);
   }
@@ -475,6 +481,9 @@ test("template English rule contains the canonical PR summary structure", () => 
   const enHeadings = [/## Review Summary/, /\{manual-validation-section\}/, /### Key Technical Decisions/, /### Review History/, /### Test Results/];
   assertHasCanonicalPrSyncStructure(file, enHeadings);
   const content = read(file);
+  assert.match(content, /complete-manual-validation/, "should document the manual-validation completion caller");
+  assert.match(content, /manual-validation\.md/, "should include manual-validation artifacts as aggregation input");
+  assert.match(content, /### ✅ Manual Validation Passed/, "should document the passed manual-validation branch");
   assert.match(content, /### ⚠️ Manual Verification Required/, "should document the retained-items branch");
   assert.match(content, /### ✅ No Manual Verification Needed/, "should document the empty branch without the warning style");
 });

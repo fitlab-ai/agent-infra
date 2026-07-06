@@ -1,0 +1,49 @@
+{
+  "skill": "complete-manual-validation",
+  "checks": {
+    "task-meta": {
+      "required_fields": [
+        "id",
+        "type",
+        "workflow",
+        "status",
+        "created_at",
+        "updated_at",
+        "agent_infra_version",
+        "current_step",
+        "assigned_to"
+      ]
+    },
+    "artifact": {
+      "file_pattern": "manual-validation.md|manual-validation-r{N}.md",
+      "required_sections": [
+        "状态核对",
+        "验证结论",
+        "验证范围",
+        "验证详情",
+        "PR 摘要同步"
+      ],
+      "freshness_minutes": 30,
+      "required_patterns": [
+        "^\\$ "
+      ]
+    },
+    "activity-log": {
+      "expected_action_pattern": "Complete Manual Validation",
+      "freshness_minutes": 30
+    },
+    "review-ledger": {
+      "stage_scope": ["analysis", "plan", "code"]
+    },
+    "platform-sync": {
+      "when": "pr_number_exists",
+      "expected_pr_comment_marker_key": "prSummary",
+      "expected_pr_comment_required_patterns": [
+        "^### ✅ 人工验证已通过$"
+      ],
+      "verify_task_comment_content": true,
+      "verify_issue_type": true,
+      "verify_issue_fields": false
+    }
+  }
+}
