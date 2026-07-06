@@ -10,6 +10,8 @@ The default sandbox image also installs the agent-infra CLI npm package, exposin
 
 The sandbox image also preinstalls `gh`. When `gh auth token` succeeds on the host, `ai sandbox create` injects the token into the container as `GH_TOKEN`, so `gh` commands work inside the sandbox without extra setup.
 
+Host `~/.ssh` is not bind-mounted into the sandbox. GitHub access is expected to use the `gh` / HTTPS token path above; `git@github.com:*` SSH workflows need a separate, explicit setup outside the default sandbox boundary.
+
 `ai sandbox rebuild` keeps Docker's build cache by default, so it quickly retags the sandbox image without refreshing every package. Use `ai sandbox rebuild --refresh` when you want to upgrade the image: it passes `--no-cache --pull` to Docker, pulls the current Ubuntu base image, and reruns the apt, tmux build, and global npm install layers. Claude Code updates are disabled inside the container, and OpenCode startup update checks are disabled; `--refresh` is the routine upgrade path for sandbox-managed tools. Manual `opencode upgrade` remains outside this guard. The default `python3` provided by the Ubuntu 24.04 sandbox base is Python 3.12, so scripts that hard-code Python 3.10 paths may need adjustment.
 
 `ai sandbox exec` also forwards a small terminal-detection whitelist (`TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `LC_TERMINAL`, `LC_TERMINAL_VERSION`) into the container. This keeps interactive TUIs aligned with the host terminal for behaviors such as Claude Code's Shift+Enter newline support, without passing through the full host environment.
@@ -50,8 +52,8 @@ to this, `--all` meant the full teardown that `--purge` now performs.
 Use `ai sandbox prune --dry-run` to inspect orphaned per-branch state dirs left
 behind by older versions or interrupted cleanup, then `ai sandbox prune` to
 remove only dirs without an active sandbox container.
-Existing sandboxes pick up these mounts after `ai sandbox rm <branch>` and
-`ai sandbox create <branch>`.
+Existing sandboxes pick up mount changes, including removed mounts, after
+`ai sandbox rm <branch>` and `ai sandbox create <branch>`.
 
 On first `ai sandbox create`, agent-infra writes a bilingual `README.md` into
 `~/.agent-infra/share/<project>/common/` and each `branches/<branch>/`
@@ -108,15 +110,16 @@ target.
 > inside the container, but the full preference tree is linked into every
 > project sandbox. Do not place `.ssh/`, `.aws/credentials`, `.netrc`,
 > `.gnupg/`, `.npmrc` files containing `_authToken`, AI tool OAuth/access token
-> files, or `.gitconfig` there. Use the dedicated SSH and credential channels,
-> and prefer `.gitconfig.local` with `[include]` for local Git preferences.
+> files, or `.gitconfig` there. Use the dedicated credential channels; GitHub
+> access uses the `gh` / HTTPS token path. Prefer `.gitconfig.local` with
+> `[include]` for local Git preferences.
 
 **Protected paths** are ignored by the hook even if they appear under
 `~/.agent-infra/dotfiles/`:
 
 | Path pattern | Reason |
 |---|---|
-| `.ssh/*` | Host SSH credentials are managed by the read-only SSH mount. |
+| `.ssh/*` | Host SSH material is protected and is not imported through the default sandbox. |
 | `.gnupg/*` | GPG private material is managed by `gpg-agent`. |
 | `.claude/*`, `.codex/*`, `.gemini/*` | AI tool credentials use dedicated bind mounts. |
 | `.config/opencode/*`, `.local/share/opencode/*` | OpenCode credentials and data use dedicated bind mounts. |

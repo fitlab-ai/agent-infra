@@ -1579,8 +1579,6 @@ export async function create(args: string[]): Promise<void> {
                 path.join(effectiveConfig.repoRoot, '.git'),
                 `${toEnginePath(engine, effectiveConfig.repoRoot)}/.git`
               ),
-              '-v',
-              volumeArg(engine, hostJoin(effectiveConfig.home, '.ssh'), '/home/devuser/.ssh', ':ro'),
               ...dotfilesMount,
               ...toolVolumes,
               ...tmpfsArgs,

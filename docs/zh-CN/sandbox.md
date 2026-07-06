@@ -10,6 +10,8 @@
 
 沙箱镜像也会预装 `gh`。如果宿主机上的 `gh auth token` 能成功返回 token，`ai sandbox create` 会把它以 `GH_TOKEN` 环境变量注入容器，让你在沙箱里直接使用 `gh`，无需额外登录配置。
 
+宿主机 `~/.ssh` 不会 bind mount 到沙箱中。GitHub 访问默认走上面的 `gh` / HTTPS token 路径；`git@github.com:*` 这类 SSH workflow 需要在默认沙箱边界之外另行显式配置。
+
 `ai sandbox rebuild` 默认保留 Docker build cache，因此会快速重打沙箱镜像，不会刷新每个软件包。需要升级镜像时使用 `ai sandbox rebuild --refresh`：它会向 Docker 传入 `--no-cache --pull`，重新拉取当前 Ubuntu 基础镜像，并重跑 apt、tmux 编译和全局 npm 安装层。容器内 Claude Code 更新已关闭，OpenCode 启动时更新检查也已关闭；`--refresh` 是沙箱托管工具的常规升级入口。手动 `opencode upgrade` 不受该保护覆盖。Ubuntu 24.04 沙箱基础镜像提供的默认 `python3` 是 Python 3.12，因此硬编码 Python 3.10 路径的脚本可能需要调整。
 
 `ai sandbox exec` 也会向容器透传一小组终端检测白名单变量（`TERM_PROGRAM`、`TERM_PROGRAM_VERSION`、`LC_TERMINAL`、`LC_TERMINAL_VERSION`）。这样可以让交互式 TUI 保持与宿主终端一致的行为，例如 Claude Code 的 `Shift+Enter` 换行支持，同时避免把整个宿主环境灌入容器。
@@ -36,7 +38,7 @@
 
 这两条路径硬编码，不暴露 `.airc.json` 配置项。首次 `create` 时会自动创建宿主目录；执行 `ai sandbox rm <branch>` 删除时会附带询问是否清理（默认 yes）。`ai sandbox rm --all` 批量删除所有**未绑定 active 任务**的沙箱（即 `ai sandbox ls` 中短号为 `-` 的行）；可加 `--dry-run` 预览，或 `--yes` 跳过确认（非交互 shell 中必须显式传 `--yes`）。`ai sandbox rm --purge` 则拆除项目的**全部**沙箱（容器、worktree、镜像、VM）。**破坏性变更**：此前 `--all` 的语义即现在 `--purge` 的全量拆除。
 可先用 `ai sandbox prune --dry-run` 查看旧版本或异常中断遗留的孤儿 per-branch 状态目录，再用 `ai sandbox prune` 只删除没有活跃 sandbox 容器对应的目录。
-已有沙箱需要执行 `ai sandbox rm <branch>` 后再执行 `ai sandbox create <branch>`，才能加载新的挂载点。
+已有沙箱需要执行 `ai sandbox rm <branch>` 后再执行 `ai sandbox create <branch>`，才能加载挂载点变更，包括已移除的挂载。
 
 首次执行 `ai sandbox create` 时，agent-infra 会在
 `~/.agent-infra/share/<project>/common/` 以及每个 `branches/<branch>/`
@@ -81,13 +83,13 @@ dotfiles 树解引用到
 
 悬空符号链接会被跳过并在 stderr 输出警告。符号链接循环以及超过 32 层的深层目录也会被跳过并输出警告。指向 `$HOME` 之外的符号链接可以使用，只要 host 用户能读取目标。
 
-> **不要往 `~/.agent-infra/dotfiles/` 放任何凭证。** 容器内是只读挂载，但整棵偏好树会链入所有项目沙箱。不要放 `.ssh/`、`.aws/credentials`、`.netrc`、`.gnupg/`、包含 `_authToken` 的 `.npmrc`、任何 AI 工具 OAuth/access token 文件，也不要放 `.gitconfig`。SSH 和工具凭证请使用专用通道；本地 Git 偏好建议用 `.gitconfig.local` 配合 `[include]`。
+> **不要往 `~/.agent-infra/dotfiles/` 放任何凭证。** 容器内是只读挂载，但整棵偏好树会链入所有项目沙箱。不要放 `.ssh/`、`.aws/credentials`、`.netrc`、`.gnupg/`、包含 `_authToken` 的 `.npmrc`、任何 AI 工具 OAuth/access token 文件，也不要放 `.gitconfig`。请使用专用凭证通道；GitHub 访问走 `gh` / HTTPS token 路径。本地 Git 偏好建议用 `.gitconfig.local` 配合 `[include]`。
 
 **受保护路径**即使出现在 `~/.agent-infra/dotfiles/` 下，也会被钩子忽略：
 
 | 路径模式 | 原因 |
 |---|---|
-| `.ssh/*` | host SSH 凭证由只读 SSH 挂载管理。 |
+| `.ssh/*` | host SSH 材料受保护，不会通过默认沙箱导入。 |
 | `.gnupg/*` | GPG 私钥由 `gpg-agent` 管理。 |
 | `.claude/*`, `.codex/*`, `.gemini/*` | AI 工具凭证使用专用 bind mount。 |
 | `.config/opencode/*`, `.local/share/opencode/*` | OpenCode 凭证和数据使用专用 bind mount。 |

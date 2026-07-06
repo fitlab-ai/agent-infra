@@ -499,6 +499,59 @@ test("sandbox create warns and continues past missing Claude credentials", () =>
   }
 });
 
+test("sandbox create does not mount the host ssh directory", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-no-ssh-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    fs.writeFileSync(path.join(fixture.repoDir, "README.md"), "# demo\n", "utf8");
+    const addResult = spawnSync("git", ["add", "README.md"], {
+      cwd: fixture.repoDir,
+      env: gitSafeEnv()
+    });
+    assert.equal(addResult.status, 0, addResult.stderr?.toString());
+    const commitResult = spawnSync("git", [
+      "-c",
+      "user.name=Sandbox Test",
+      "-c",
+      "user.email=sandbox-test@example.com",
+      "commit",
+      "-m",
+      "initial"
+    ], {
+      cwd: fixture.repoDir,
+      env: gitSafeEnv()
+    });
+    assert.equal(commitResult.status, 0, commitResult.stderr?.toString());
+
+    const result = spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["create", "feature/no-ssh-mount"],
+      {
+        AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json")
+      }
+    );
+
+    assert.equal(result.signal, null);
+    assert.equal(result.status, 0, result.stderr);
+
+    const calls = fixture.readDockerCalls();
+    const runCall = calls.find((call) => call[0] === "run");
+    assert.ok(runCall, "expected sandbox create to invoke docker run");
+    assert.equal(
+      runCall.some((arg) => arg.includes("/home/devuser/.ssh")),
+      false,
+      "sandbox create must not mount host SSH material into the container"
+    );
+    assert.ok(runCall.some((arg) => arg.includes(":/workspace")));
+    assert.ok(runCall.some((arg) => arg.includes(":/share/common")));
+    assert.ok(runCall.some((arg) => arg.includes(":/share/branch")));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("assertBranchAvailable allows branches that are not checked out in any worktree", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 

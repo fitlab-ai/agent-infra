@@ -100,7 +100,7 @@ docker info
 
 Add the `DOCKER_HOST` export to your shell startup file after validation.
 
-When rootless Docker is detected, agent-infra builds the sandbox image with `HOST_UID=0` and `HOST_GID=0`. Inside the container the sandbox user can read bind mounts such as `~/.ssh` without relaxing host file permissions. On the host, the daemon and container processes still run under the current user, so this does not grant host root privileges.
+When rootless Docker is detected, agent-infra builds the sandbox image with `HOST_UID=0` and `HOST_GID=0`. Inside the container the sandbox user can read normal bind mounts such as the worktree and `/share/*` directories without relaxing host file permissions. On the host, the daemon and container processes still run under the current user, so this does not grant host root privileges.
 
 Known rootless differences:
 
@@ -111,7 +111,7 @@ Known rootless differences:
 Troubleshooting:
 
 - If `docker info` fails, check `systemctl --user status docker` and confirm `DOCKER_HOST` points at `$XDG_RUNTIME_DIR/docker.sock`.
-- If SSH files are still unreadable inside the sandbox, confirm the shell has not overridden `DOCKER_HOST` or Docker build arguments.
+- If expected bind-mounted project or share files are still unreadable inside the sandbox, confirm the shell has not overridden `DOCKER_HOST` or Docker build arguments.
 
 ### Known limitations on Linux
 

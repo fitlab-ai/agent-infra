@@ -329,8 +329,8 @@ test("volumeArg converts host mount paths for WSL2", async () => {
     "/mnt/f/repo/.agents/workspace:/workspace/.agents/workspace"
   );
   assert.equal(
-    wsl2Paths.volumeArg("native", "/repo/.ssh", "/home/devuser/.ssh", ":ro"),
-    "/repo/.ssh:/home/devuser/.ssh:ro"
+    wsl2Paths.volumeArg("native", "/repo/.cache", "/home/devuser/.cache-demo", ":ro"),
+    "/repo/.cache:/home/devuser/.cache-demo:ro"
   );
 });
 
@@ -368,12 +368,12 @@ test("volumeArg adds shared selinux labels on native enforcing hosts", async () 
     "/repo:/workspace:z"
   );
   assert.equal(
-    wsl2Paths.volumeArg("native", "/repo/.ssh", "/home/devuser/.ssh", ":ro", {
+    wsl2Paths.volumeArg("native", "/repo/.cache", "/home/devuser/.cache-demo", ":ro", {
       platform: "linux",
       fs: fsImpl,
       env: {}
     }),
-    "/repo/.ssh:/home/devuser/.ssh:ro,z"
+    "/repo/.cache:/home/devuser/.cache-demo:ro,z"
   );
 });
 

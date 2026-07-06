@@ -100,7 +100,7 @@ docker info
 
 验证通过后，请把 `DOCKER_HOST` export 写入 shell 启动文件。
 
-agent-infra 检测到 rootless Docker 后，会用 `HOST_UID=0` 和 `HOST_GID=0` 构建 sandbox 镜像。这样容器内 sandbox 用户可以读取 `~/.ssh` 等 bind mount，无需放宽宿主文件权限。在宿主侧，daemon 和容器进程仍以当前用户身份运行，不会获得宿主 root 权限。
+agent-infra 检测到 rootless Docker 后，会用 `HOST_UID=0` 和 `HOST_GID=0` 构建 sandbox 镜像。这样容器内 sandbox 用户可以读取 worktree 和 `/share/*` 目录等普通 bind mount，无需放宽宿主文件权限。在宿主侧，daemon 和容器进程仍以当前用户身份运行，不会获得宿主 root 权限。
 
 Rootless 模式的已知差异：
 
@@ -111,7 +111,7 @@ Rootless 模式的已知差异：
 排障：
 
 - 如果 `docker info` 失败，请检查 `systemctl --user status docker`，并确认 `DOCKER_HOST` 指向 `$XDG_RUNTIME_DIR/docker.sock`。
-- 如果 sandbox 内仍无法读取 SSH 文件，请确认 shell 没有覆盖 `DOCKER_HOST` 或 Docker build args。
+- 如果 sandbox 内仍无法读取预期的项目或 share bind mount 文件，请确认 shell 没有覆盖 `DOCKER_HOST` 或 Docker build args。
 
 ### Linux 已知限制
 
