@@ -691,13 +691,17 @@ test("resolveTools consolidates sandbox bases under ~/.agent-infra", async () =>
   const tools = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["claude-code", "codex", "opencode", "gemini-cli", "agent-infra"]
+    tools: ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"]
   });
 
   assert.deepEqual(tools.map((tool) => ({
     id: tool.id,
     sandboxBase: tool.sandboxBase
   })), [
+    {
+      id: "agent-infra",
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/agent-infra"
+    },
     {
       id: "claude-code",
       sandboxBase: "/home/host-user/.agent-infra/sandboxes/claude-code"
@@ -707,16 +711,12 @@ test("resolveTools consolidates sandbox bases under ~/.agent-infra", async () =>
       sandboxBase: "/home/host-user/.agent-infra/sandboxes/codex"
     },
     {
-      id: "opencode",
-      sandboxBase: "/home/host-user/.agent-infra/sandboxes/opencode"
-    },
-    {
       id: "gemini-cli",
       sandboxBase: "/home/host-user/.agent-infra/sandboxes/gemini-cli"
     },
     {
-      id: "agent-infra",
-      sandboxBase: "/home/host-user/.agent-infra/sandboxes/agent-infra"
+      id: "opencode",
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/opencode"
     }
   ]);
 });

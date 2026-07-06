@@ -40,8 +40,9 @@ const defaults = JSON.parse(
 
 const CONFIG_DIR = '.agents';
 const CONFIG_PATH = path.join(CONFIG_DIR, '.airc.json');
-const LEGACY_DEFAULT_SANDBOX_TOOLS = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
 const AGENT_INFRA_SANDBOX_TOOL = 'agent-infra';
+const LEGACY_DEFAULT_SANDBOX_TOOLS = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
+const DEFAULT_SANDBOX_TOOLS = [AGENT_INFRA_SANDBOX_TOOL, ...LEGACY_DEFAULT_SANDBOX_TOOLS];
 
 // One-time migration of the legacy project-level PR switch to the three-state
 // `prFlow` preference. `true` (the old default / "PR flow on") maps to the
@@ -77,7 +78,7 @@ function migrateSandboxTools(config: UpdateConfig): boolean {
   }
   config.sandbox = {
     ...config.sandbox,
-    tools: [...tools, AGENT_INFRA_SANDBOX_TOOL]
+    tools: [...DEFAULT_SANDBOX_TOOLS]
   };
   return true;
 }

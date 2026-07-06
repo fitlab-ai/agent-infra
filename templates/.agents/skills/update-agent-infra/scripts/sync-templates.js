@@ -29,11 +29,11 @@ const DEFAULTS = {
       "node22"
     ],
     "tools": [
+      "agent-infra",
       "claude-code",
       "codex",
       "gemini-cli",
-      "opencode",
-      "agent-infra"
+      "opencode"
     ],
     "dockerfile": null,
     "vm": {
@@ -87,8 +87,9 @@ const DEFAULTS = {
 };
 
 const PACKAGE_NAME = '@fitlab-ai/agent-infra';
-const LEGACY_DEFAULT_SANDBOX_TOOLS = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
 const AGENT_INFRA_SANDBOX_TOOL = 'agent-infra';
+const LEGACY_DEFAULT_SANDBOX_TOOLS = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
+const DEFAULT_SANDBOX_TOOLS = [AGENT_INFRA_SANDBOX_TOOL, ...LEGACY_DEFAULT_SANDBOX_TOOLS];
 // Add a new identifier here only after shipping matching .{platform}. template variants.
 const KNOWN_PLATFORMS = new Set(['github']);
 const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
@@ -141,7 +142,7 @@ function migrateSandboxTools(cfg) {
   }
   cfg.sandbox = {
     ...cfg.sandbox,
-    tools: [...tools, AGENT_INFRA_SANDBOX_TOOL]
+    tools: [...DEFAULT_SANDBOX_TOOLS]
   };
   return true;
 }

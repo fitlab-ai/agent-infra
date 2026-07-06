@@ -248,7 +248,7 @@ test("syncTemplates reports the bundled installer version with a v prefix", asyn
   }
 });
 
-test("syncTemplates appends agent-infra to legacy default sandbox tools regardless of ordering", async () => {
+test("syncTemplates migrates legacy default sandbox tools to canonical order", async () => {
   const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-tools-"));
 
@@ -284,7 +284,7 @@ test("syncTemplates appends agent-infra to legacy default sandbox tools regardle
     const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
 
     assert.equal(report.configUpdated, true);
-    assert.deepEqual(cfg.sandbox.tools, ["claude-code", "opencode", "codex", "gemini-cli", "agent-infra"]);
+    assert.deepEqual(cfg.sandbox.tools, ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"]);
   } finally {
     childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });

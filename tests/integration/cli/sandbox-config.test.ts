@@ -34,7 +34,7 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     assert.equal(config.containerPrefix, "demo-dev");
     assert.equal(config.imageName, "demo-sandbox:latest");
     assert.deepEqual(config.runtimes, ["node22"]);
-    assert.deepEqual(config.tools, ["claude-code", "codex", "gemini-cli", "opencode", "agent-infra"]);
+    assert.deepEqual(config.tools, ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"]);
     assert.equal(config.engine, null);
     assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
     assert.equal(config.worktreeBase, path.join(process.env.HOME ?? "", ".agent-infra", "worktrees", "demo"));

@@ -13,11 +13,11 @@
       "node22"
     ],
     "tools": [
+      "agent-infra",
       "claude-code",
       "codex",
       "gemini-cli",
-      "opencode",
-      "agent-infra"
+      "opencode"
     ],
     "dockerfile": null,
     "vm": {
