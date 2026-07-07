@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { formatTable } from '../../table.ts';
 import { resolveTaskRef } from '../resolve-ref.ts';
-import { parseLedger, HUMAN_DECISION_STATUSES, type LedgerRow } from '../ledger.ts';
+import { parseLedger, type LedgerRow } from '../ledger.ts';
 
 const USAGE = `Usage: ai task log <N | #N | TASK-id>
 
@@ -14,7 +14,7 @@ Columns: # (row) / STEP / AGENT / STARTED / DONE / NOTE
   A human-executed step shows AGENT as 'human' and, when it has no start marker,
   a '-' STARTED placeholder. Review-step NOTE also carries two human counts in
   the verdict list, right after blockers/major/minor: manual-validation
-  and human-decision (current ledger stage total).
+  and human-decision (current pending ledger stage total).
 `;
 
 const TABLE_HEADERS = ['#', 'STEP', 'AGENT', 'STARTED', 'DONE', 'NOTE'] as const;
@@ -108,7 +108,7 @@ function pairEntries(entries: LogEntry[]): StepRow[] {
 function countHumanDecisionsByStage(rows: LedgerRow[]): Map<ReviewStage, number> {
   const counts = new Map<ReviewStage, number>();
   for (const row of rows) {
-    if (!isReviewStage(row.stage) || !HUMAN_DECISION_STATUSES.has(row.status)) continue;
+    if (!isReviewStage(row.stage) || row.status !== 'needs-human-decision') continue;
     counts.set(row.stage, (counts.get(row.stage) ?? 0) + 1);
   }
   return counts;

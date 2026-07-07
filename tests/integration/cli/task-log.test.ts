@@ -142,15 +142,15 @@ test('ai task log folds English human counts into the NOTE on canonical review s
   assert.equal(out.status, 0, out.stderr);
   // Human counts join the verdict count list (comma-separated, after minor, before ->),
   // and the source `Manual-validation: N` field is normalized. Labels are always English
-  // even though the task uses a Chinese activity-log heading. analysis stage has 2
-  // human-decision rows (HD-1 + HD-2); both Round 1 and Round 2 show that stage total.
+  // even though the task uses a Chinese activity-log heading. analysis stage has 1
+  // pending human-decision row (HD-1); the human-decided HD-2 row is not pending.
   assert.match(
     out.stdout,
-    /^1\s+Review Analysis \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+2026-06-18 14:15:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 2, Human-decision: 2 → review-analysis\.md/m
+    /^1\s+Review Analysis \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+2026-06-18 14:15:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 2, Human-decision: 1 → review-analysis\.md/m
   );
   assert.match(
     out.stdout,
-    /^2\s+Review Analysis \(Round 2\)\s+claude\s+2026-06-18 15:00:00\+08:00\s+2026-06-18 15:10:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0, Human-decision: 2 → review-analysis-r2\.md/m
+    /^2\s+Review Analysis \(Round 2\)\s+claude\s+2026-06-18 15:00:00\+08:00\s+2026-06-18 15:10:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0, Human-decision: 1 → review-analysis-r2\.md/m
   );
   assert.match(
     out.stdout,
@@ -176,7 +176,7 @@ test('ai task log folds English human counts for an English task', () => {
   assert.equal(out.status, 0, out.stderr);
   assert.match(
     out.stdout,
-    /^1\s+Review Code \(Round 1\)\s+claude\s+2026-06-18 16:00:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1, Human-decision: 1 → review-code\.md/m
+    /^1\s+Review Code \(Round 1\)\s+claude\s+2026-06-18 16:00:00\+08:00\s+Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 1, Human-decision: 0 → review-code\.md/m
   );
 });
 
