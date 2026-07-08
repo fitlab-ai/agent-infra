@@ -129,7 +129,7 @@ test("sandbox create help documents the host aliases file", () => {
     encoding: "utf8"
   });
 
-  assert.match(output, /Usage: ai sandbox create <branch> \[base\] \[--cpu <n>\] \[--memory <n>\]/);
+  assert.match(output, /Usage: ai sandbox create <branch> \[base\] \[--cpu <n>\] \[--memory <n>\] \[--no-refresh\]/);
   assert.match(output, /~\/\.agent-infra\/aliases\/sandbox\.sh/);
   assert.match(output, /\/home\/devuser\/\.bash_aliases/);
 });

@@ -35,6 +35,7 @@ const DEFAULTS = {
       "gemini-cli",
       "opencode"
     ],
+    "refreshIntervalDays": 7,
     "dockerfile": null,
     "vm": {
       "cpu": null,

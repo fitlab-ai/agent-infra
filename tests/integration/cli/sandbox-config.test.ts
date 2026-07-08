@@ -36,11 +36,60 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     assert.deepEqual(config.runtimes, ["node22"]);
     assert.deepEqual(config.tools, ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"]);
     assert.equal(config.engine, null);
+    assert.equal(config.refreshIntervalDays, 7);
     assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
     assert.equal(config.worktreeBase, path.join(process.env.HOME ?? "", ".agent-infra", "worktrees", "demo"));
     assert.equal(config.shareBase, path.join(process.env.HOME ?? "", ".agent-infra", "share", "demo"));
     assert.equal(config.shellConfigBase, path.join(process.env.HOME ?? "", ".agent-infra", "config", "demo"));
     assert.equal(config.dotfilesDir, path.join(process.env.HOME ?? "", ".agent-infra", "dotfiles"));
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig parses sandbox refresh interval days", async () => {
+  const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-refresh-interval-"));
+  const previousCwd = process.cwd();
+
+  try {
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, ".agents", ".airc.json"),
+      JSON.stringify({
+        project: "demo",
+        org: "fitlab-ai",
+        sandbox: { refreshIntervalDays: 0 }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+
+    process.chdir(tmpDir);
+    assert.equal(withGitSafeProcessEnv(() => sandboxConfig.loadConfig()).refreshIntervalDays, 0);
+
+    fs.writeFileSync(
+      path.join(tmpDir, ".agents", ".airc.json"),
+      JSON.stringify({
+        project: "demo",
+        org: "fitlab-ai",
+        sandbox: { refreshIntervalDays: 3.5 }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+    assert.equal(withGitSafeProcessEnv(() => sandboxConfig.loadConfig()).refreshIntervalDays, 7);
+
+    fs.writeFileSync(
+      path.join(tmpDir, ".agents", ".airc.json"),
+      JSON.stringify({
+        project: "demo",
+        org: "fitlab-ai",
+        sandbox: { refreshIntervalDays: "7" }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+    assert.equal(withGitSafeProcessEnv(() => sandboxConfig.loadConfig()).refreshIntervalDays, 7);
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });

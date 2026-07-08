@@ -113,6 +113,13 @@ type EnginesIndexModule = {
 type RebuildModule = {
   buildArgs(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): string[];
 };
+type ImageBuildModule = {
+  buildSandboxImageArgs(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): string[];
+  isRefreshDisabled(env: NodeJS.ProcessEnv, noRefreshFlag: boolean): boolean;
+  isRefreshDue(lastRefresh: number, now: number, intervalDays: number): boolean;
+  parseImageLabels(raw: string): Record<string, string>;
+  parseRefreshTimestamp(value: string): number;
+};
 type Wsl2PathsModule = {
   hostJoin(basePath: string, ...segments: string[]): string;
   isWindowsDrivePath(value: unknown): boolean;
@@ -468,6 +475,45 @@ test("rebuild buildArgs keeps Docker build cache by default", async () => {
 
   assert.equal(args.includes("--no-cache"), false);
   assert.equal(args.includes("--pull"), false);
+});
+
+test("sandbox image build args write refresh label independently from refresh flags", async () => {
+  const imageBuild = await loadFreshEsm<ImageBuildModule>("lib/sandbox/image-build.js");
+
+  const args = imageBuild.buildSandboxImageArgs(
+    { project: "demo", imageName: "demo-sandbox:latest", repoRoot: "F:\\repo" },
+    [{ install: { type: "npm", cmd: "@acme/tool" } }],
+    "F:\\tmp\\Dockerfile",
+    "sig-123",
+    { engine: "wsl2", runFn: () => "1000", lastRefresh: 42 }
+  );
+
+  assert.equal(args.includes("--no-cache"), false);
+  assert.equal(args.includes("--pull"), false);
+  assert.ok(args.includes("demo.sandbox.last-refresh=42"));
+});
+
+test("sandbox refresh helpers parse timestamps and skip controls", async () => {
+  const imageBuild = await loadFreshEsm<ImageBuildModule>("lib/sandbox/image-build.js");
+  const oneDay = 24 * 60 * 60 * 1000;
+
+  assert.equal(imageBuild.parseRefreshTimestamp("42"), 42);
+  assert.equal(imageBuild.parseRefreshTimestamp(""), 0);
+  assert.equal(imageBuild.parseRefreshTimestamp("-1"), 0);
+  assert.equal(imageBuild.parseRefreshTimestamp("abc"), 0);
+  assert.deepEqual(imageBuild.parseImageLabels('{"demo.sandbox.last-refresh":"42","ignored":7}'), {
+    "demo.sandbox.last-refresh": "42"
+  });
+  assert.deepEqual(imageBuild.parseImageLabels("not-json"), {});
+  assert.deepEqual(imageBuild.parseImageLabels("null"), {});
+  assert.equal(imageBuild.isRefreshDue(1000, 1000 + 7 * oneDay, 7), true);
+  assert.equal(imageBuild.isRefreshDue(1000, 1000 + 6 * oneDay, 7), false);
+  assert.equal(imageBuild.isRefreshDue(1000 + oneDay, 1000, 7), false);
+  assert.equal(imageBuild.isRefreshDue(0, 1000, 0), false);
+  assert.equal(imageBuild.isRefreshDisabled({}, false), false);
+  assert.equal(imageBuild.isRefreshDisabled({ AI_SANDBOX_NO_REFRESH: " yes " }, false), true);
+  assert.equal(imageBuild.isRefreshDisabled({ AI_SANDBOX_NO_REFRESH: "0" }, false), false);
+  assert.equal(imageBuild.isRefreshDisabled({}, true), true);
 });
 
 test("assertManagedPath rejects paths outside the sandbox root", async () => {

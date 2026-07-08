@@ -107,6 +107,10 @@ export function sandboxImageConfigLabel(config: Pick<SandboxPathConfig, 'project
   return `${sandboxLabel(config)}.image-config`;
 }
 
+export function sandboxImageRefreshLabel(config: Pick<SandboxPathConfig, 'project'>): string {
+  return `${sandboxLabel(config)}.last-refresh`;
+}
+
 export function parsePositiveIntegerOption(value: unknown, optionName: string): number | undefined {
   if (value === undefined || value === null) {
     return undefined;

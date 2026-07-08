@@ -7,6 +7,7 @@ type SandboxFixtureOptions = {
   org?: string;
   sandbox?: Record<string, unknown>;
   dockerStdoutForPs?: string;
+  dockerLabelsForInspect?: Record<string, string>;
 };
 type SandboxFixture = {
   repoDir: string;
@@ -41,7 +42,8 @@ function writeSandboxEngineFixture(
     project = "demo",
     org = "fitlab-ai",
     sandbox = {},
-    dockerStdoutForPs = ""
+    dockerStdoutForPs = "",
+    dockerLabelsForInspect = {}
   }: SandboxFixtureOptions = {}
 ): SandboxFixture {
   const repoDir = path.join(tmpDir, "repo");
@@ -80,6 +82,7 @@ function writeSandboxEngineFixture(
     [
       "const fs = require('node:fs');",
       `const dockerStdoutForPs = ${JSON.stringify(dockerStdoutForPs)};`,
+      `const dockerLabelsForInspect = ${JSON.stringify(dockerLabelsForInspect)};`,
       "const args = process.argv.slice(2);",
       "function log() {",
       "  fs.appendFileSync(process.env.DOCKER_LOG_PATH, JSON.stringify(args) + '\\n');",
@@ -95,10 +98,22 @@ function writeSandboxEngineFixture(
       "  process.exit(0);",
       "}",
       "if (args[0] === 'image' && args[1] === 'inspect') {",
+      "  if (process.env.DOCKER_EXIT_FOR_IMAGE_INSPECT && Number(process.env.DOCKER_EXIT_FOR_IMAGE_INSPECT) !== 0) {",
+      "    process.exit(Number(process.env.DOCKER_EXIT_FOR_IMAGE_INSPECT));",
+      "  }",
+      "  const formatIndex = args.indexOf('--format');",
+      "  if (formatIndex >= 0 && args[formatIndex + 1] === '{{ json .Config.Labels }}') {",
+      "    const labels = process.env.DOCKER_LABELS_FOR_IMAGE_INSPECT ? JSON.parse(process.env.DOCKER_LABELS_FOR_IMAGE_INSPECT) : dockerLabelsForInspect;",
+      "    process.stdout.write(`${JSON.stringify(labels)}\\n`);",
+      "    process.exit(0);",
+      "  }",
       "  if (process.env.DOCKER_EXIT_FOR_IMAGE_INSPECT) {",
       "    process.exit(Number(process.env.DOCKER_EXIT_FOR_IMAGE_INSPECT));",
       "  }",
       "  process.exit(1);",
+      "}",
+      "if (args[0] === 'build' && process.env.DOCKER_EXIT_FOR_BUILD) {",
+      "  process.exit(Number(process.env.DOCKER_EXIT_FOR_BUILD));",
       "}",
       "if (args[0] === 'rmi') {",
       "  if (process.env.DOCKER_EXIT_FOR_RMI) {",

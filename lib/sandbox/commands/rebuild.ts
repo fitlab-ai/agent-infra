@@ -1,39 +1,26 @@
 import { parseArgs } from 'node:util';
-import { createHash } from 'node:crypto';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { loadConfig } from '../config.ts';
 import type { SandboxConfig } from '../config.ts';
 import { prepareDockerfile } from '../dockerfile.ts';
-import { sandboxImageConfigLabel, sandboxLabel } from '../constants.ts';
+import { sandboxImageRefreshLabel } from '../constants.ts';
 import { detectEngine, ensureDocker } from '../engine.ts';
-import { runEngine, runSafeEngine, runVerboseEngine } from '../shell.ts';
+import { runEngine, runOkEngine, runSafeEngine, runVerboseEngine } from '../shell.ts';
 import { pruneSandboxDanglingImages } from '../image-prune.ts';
-import {
-  imageSignatureFields,
-  resolveTools,
-  toolNpmPackagesArg,
-  toolShellInstallScriptBase64
-} from '../tools.ts';
+import { resolveTools } from '../tools.ts';
 import type { SandboxTool } from '../tools.ts';
-import { toEnginePath } from '../engines/wsl2-paths.ts';
-import { resolveBuildUid } from '../engines/native.ts';
+import {
+  buildImageSignature,
+  buildSandboxImageArgs,
+  parseImageLabels,
+  parseRefreshTimestamp
+} from '../image-build.ts';
 
 const USAGE = `Usage: ai sandbox rebuild [--quiet] [--refresh]`;
 
-type PreparedDockerfile = ReturnType<typeof prepareDockerfile>;
 type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string }) => string;
 type EngineRunSafeFn = EngineRunFn;
-
-function buildSignature(preparedDockerfile: PreparedDockerfile, tools: SandboxTool[]): string {
-  return createHash('sha256')
-    .update(JSON.stringify({
-      dockerfile: preparedDockerfile.signature,
-      tools: imageSignatureFields(tools)
-    }))
-    .digest('hex')
-    .slice(0, 12);
-}
 
 export function buildArgs(
   config: SandboxConfig,
@@ -45,49 +32,41 @@ export function buildArgs(
     runFn = runEngine,
     runSafeFn = runSafeEngine,
     env = process.env,
-    refresh = false
+    refresh = false,
+    lastRefresh
   }: {
     engine?: string;
     runFn?: EngineRunFn;
     runSafeFn?: EngineRunSafeFn;
     env?: NodeJS.ProcessEnv;
     refresh?: boolean;
+    lastRefresh?: number;
   } = {}
 ): string[] {
-  const selectedEngine = engine ?? detectEngine(config);
-  const { uid: hostUid, gid: hostGid } = resolveBuildUid({
-    engine: selectedEngine,
+  return buildSandboxImageArgs(config, tools, dockerfilePath, imageSignature, {
+    engine: engine ?? detectEngine(config),
     runFn,
     runSafeFn,
-    env
+    env,
+    refresh,
+    lastRefresh
   });
+}
 
-  const args = [
-    'build',
-    '-t',
-    config.imageName,
-    '--build-arg',
-    `HOST_UID=${hostUid}`,
-    '--build-arg',
-    `HOST_GID=${hostGid}`,
-    '--build-arg',
-    `AI_TOOL_PACKAGES=${toolNpmPackagesArg(tools)}`,
-    '--build-arg',
-    `AI_TOOLS_SHELL_INSTALL_B64=${toolShellInstallScriptBase64(tools)}`,
-    '--label',
-    sandboxLabel(config),
-    '--label',
-    `${sandboxImageConfigLabel(config)}=${imageSignature}`,
-    '-f',
-    toEnginePath(selectedEngine, dockerfilePath),
-    toEnginePath(selectedEngine, config.repoRoot)
-  ];
-
-  if (refresh) {
-    args.splice(1, 0, '--no-cache', '--pull');
+function readExistingLastRefresh(config: SandboxConfig, engine: string): number {
+  if (!runOkEngine(engine, 'docker', ['image', 'inspect', config.imageName])) {
+    return 0;
   }
 
-  return args;
+  const labels = parseImageLabels(runSafeEngine(engine, 'docker', [
+    'image',
+    'inspect',
+    '--format',
+    '{{ json .Config.Labels }}',
+    config.imageName
+  ]));
+
+  return parseRefreshTimestamp(labels[sandboxImageRefreshLabel(config)] ?? '');
 }
 
 export async function rebuild(args: string[]): Promise<void> {
@@ -110,19 +89,24 @@ export async function rebuild(args: string[]): Promise<void> {
   const config = loadConfig();
   const tools = resolveTools(config);
   const preparedDockerfile = prepareDockerfile(config);
-  const imageSignature = buildSignature(preparedDockerfile, tools);
+  const imageSignature = buildImageSignature(preparedDockerfile, tools);
   const quiet = values.quiet ?? false;
   const refresh = values.refresh ?? false;
   const engine = detectEngine(config);
 
   await ensureDocker(config, undefined);
+  const lastRefresh = refresh ? Date.now() : readExistingLastRefresh(config, engine);
   p.intro(pc.cyan('Rebuilding sandbox image'));
 
   try {
     if (quiet) {
       const spinner = p.spinner();
       spinner.start('Building image...');
-      runEngine(engine, 'docker', buildArgs(config, tools, preparedDockerfile.path, imageSignature, { engine, refresh }), {
+      runEngine(engine, 'docker', buildArgs(config, tools, preparedDockerfile.path, imageSignature, {
+        engine,
+        refresh,
+        lastRefresh
+      }), {
         cwd: config.repoRoot
       });
       spinner.stop(pc.green('Sandbox image rebuilt'));
@@ -131,7 +115,11 @@ export async function rebuild(args: string[]): Promise<void> {
       runVerboseEngine(
         engine,
         'docker',
-        buildArgs(config, tools, preparedDockerfile.path, imageSignature, { engine, refresh }),
+        buildArgs(config, tools, preparedDockerfile.path, imageSignature, {
+          engine,
+          refresh,
+          lastRefresh
+        }),
         { cwd: config.repoRoot }
       );
       p.log.success(pc.green('Sandbox image rebuilt'));

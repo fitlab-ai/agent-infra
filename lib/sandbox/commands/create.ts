@@ -16,6 +16,7 @@ import {
   parsePositiveIntegerOption,
   sandboxBranchLabel,
   sandboxImageConfigLabel,
+  sandboxImageRefreshLabel,
   sandboxLabel,
   shareBranchDir,
   shareCommonDir,
@@ -37,17 +38,13 @@ import {
 } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
 import {
-  imageSignatureFields,
   resolveTools,
-  toolConfigDirCandidates,
-  toolNpmPackagesArg,
-  toolShellInstallScriptBase64
+  toolConfigDirCandidates
 } from '../tools.ts';
 import type { SandboxTool } from '../tools.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
-import { resolveBuildUid } from '../engines/native.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
 import { ensureSandboxDiscoveryReadmes } from '../readme-scaffold.ts';
 import {
@@ -56,6 +53,14 @@ import {
   validateClaudeCredentialsEnvOverride
 } from '../credentials.ts';
 import { detectHostTimezone } from '../host-timezone.ts';
+import {
+  buildImageSignature,
+  buildSandboxImageArgs,
+  isRefreshDisabled,
+  isRefreshDue,
+  parseImageLabels,
+  parseRefreshTimestamp
+} from '../image-build.ts';
 
 const OPENCODE_YOLO_PERMISSION = '{"*":"allow","read":"allow","bash":"allow","edit":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"}';
 const SANDBOX_ALIAS_BLOCK_BEGIN = '# >>> agent-infra managed aliases >>>';
@@ -82,7 +87,7 @@ alias gy='gemini --yolo; tput ed'
 `;
 const CONTAINER_HOME = '/home/devuser';
 const CONTAINER_SHELL_CONFIG_MOUNT = `${CONTAINER_HOME}/.host-shell-config`;
-const USAGE = `Usage: ai sandbox create <branch> [base] [--cpu <n>] [--memory <n>]
+const USAGE = `Usage: ai sandbox create <branch> [base] [--cpu <n>] [--memory <n>] [--no-refresh]
 
 Host aliases:
   ${'~'}/.agent-infra/aliases/sandbox.sh is auto-created on first run and exposed
@@ -114,16 +119,6 @@ type HostShellConfig = {
   hostDir: string;
   mounts: Array<{ hostPath: string; containerPath: string }>;
 };
-
-function buildSignature(preparedDockerfile: PreparedDockerfile, tools: SandboxTool[]): string {
-  return createHash('sha256')
-    .update(JSON.stringify({
-      dockerfile: preparedDockerfile.signature,
-      tools: imageSignatureFields(tools)
-    }))
-    .digest('hex')
-    .slice(0, 12);
-}
 
 function resolveToolDirs(config: Pick<SandboxCreateConfig, 'project'>, tools: SandboxTool[], branch: string): ResolvedTool[] {
   return tools.map((tool) => {
@@ -1191,43 +1186,43 @@ export function buildImage(
     runFn = runEngine,
     runSafeFn = runSafeEngine,
     runVerboseFn = runVerboseEngine,
-    env = process.env
+    env = process.env,
+    refresh = false,
+    lastRefresh
   }: {
     engine?: string;
     runFn?: EngineRunFn;
     runSafeFn?: EngineRunSafeFn;
     runVerboseFn?: EngineRunVerboseFn;
     env?: NodeJS.ProcessEnv;
+    refresh?: boolean;
+    lastRefresh?: number;
   } = {}
 ): void {
   const selectedEngine = engine ?? detectEngine({ engine: config.engine });
-  const { uid: hostUid, gid: hostGid } = resolveBuildUid({
-    engine: selectedEngine,
-    runFn,
-    runSafeFn,
-    env
-  });
+  runVerboseFn(
+    selectedEngine,
+    'docker',
+    buildSandboxImageArgs(config, tools, dockerfilePath, imageSignature, {
+      engine: selectedEngine,
+      runFn,
+      runSafeFn,
+      env,
+      refresh,
+      lastRefresh
+    }),
+    { cwd: config.repoRoot }
+  );
+}
 
-  runVerboseFn(selectedEngine, 'docker', [
-    'build',
-    '-t',
-    config.imageName,
-    '--build-arg',
-    `HOST_UID=${hostUid}`,
-    '--build-arg',
-    `HOST_GID=${hostGid}`,
-    '--build-arg',
-    `AI_TOOL_PACKAGES=${toolNpmPackagesArg(tools)}`,
-    '--build-arg',
-    `AI_TOOLS_SHELL_INSTALL_B64=${toolShellInstallScriptBase64(tools)}`,
-    '--label',
-    sandboxLabel(config),
-    '--label',
-    `${sandboxImageConfigLabel(config)}=${imageSignature}`,
-    '-f',
-    toEnginePath(selectedEngine, dockerfilePath),
-    toEnginePath(selectedEngine, config.repoRoot)
-  ], { cwd: config.repoRoot });
+function readImageLabels(config: Pick<SandboxCreateConfig, 'imageName'> & Pick<SandboxCreateConfig, 'project'>, engine: string): Record<string, string> {
+  return parseImageLabels(runSafeEngine(engine, 'docker', [
+    'image',
+    'inspect',
+    '--format',
+    '{{ json .Config.Labels }}',
+    config.imageName
+  ]));
 }
 
 export async function create(args: string[]): Promise<void> {
@@ -1238,6 +1233,7 @@ export async function create(args: string[]): Promise<void> {
     options: {
       cpu: { type: 'string' },
       memory: { type: 'string' },
+      'no-refresh': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' }
     }
   });
@@ -1287,7 +1283,7 @@ export async function create(args: string[]): Promise<void> {
   const shareBranch = shareBranchDir(effectiveConfig, branch);
   const preparedDockerfile = prepareDockerfile(effectiveConfig);
   const baseBranch = base ?? runSafe('git', ['-C', effectiveConfig.repoRoot, 'branch', '--show-current']);
-  const expectedImageSignature = buildSignature(preparedDockerfile, tools);
+  const expectedImageSignature = buildImageSignature(preparedDockerfile, tools);
   const engine = detectEngine(effectiveConfig);
 
   p.intro(pc.cyan('AI Sandbox'));
@@ -1310,27 +1306,53 @@ export async function create(args: string[]): Promise<void> {
     p.log.success('Docker is ready');
 
     const imageExists = runOkEngine(engine, 'docker', ['image', 'inspect', effectiveConfig.imageName]);
-    const currentImageSignature = imageExists
-      ? runSafeEngine(engine, 'docker', [
-        'image',
-        'inspect',
-        '--format',
-        `{{ index .Config.Labels "${sandboxImageConfigLabel(effectiveConfig)}" }}`,
-        effectiveConfig.imageName
-      ])
-      : '';
-    const needsImageBuild = !imageExists || currentImageSignature !== expectedImageSignature;
+    const imageLabels = imageExists ? readImageLabels(effectiveConfig, engine) : {};
+    const currentImageSignature = imageLabels[sandboxImageConfigLabel(effectiveConfig)] ?? '';
+    const currentLastRefresh = parseRefreshTimestamp(imageLabels[sandboxImageRefreshLabel(effectiveConfig)] ?? '');
+    const signatureStale = !imageExists || currentImageSignature !== expectedImageSignature;
+    const now = Date.now();
+    const refreshDue = imageExists
+      && !signatureStale
+      && !isRefreshDisabled(process.env, values['no-refresh'] ?? false)
+      && isRefreshDue(currentLastRefresh, now, effectiveConfig.refreshIntervalDays);
+    const needsImageBuild = signatureStale || refreshDue;
 
     if (needsImageBuild) {
-      p.log.step(imageExists ? 'Rebuilding stale image...' : 'Building image for first use...');
-      buildImage(
-        effectiveConfig,
-        tools,
-        preparedDockerfile.path,
-        expectedImageSignature,
-        { engine }
+      const buildRefresh = !imageExists || refreshDue;
+      const buildLastRefresh = buildRefresh ? now : currentLastRefresh || 0;
+
+      p.log.step(
+        refreshDue
+          ? 'Refreshing stale image...'
+          : imageExists
+            ? 'Rebuilding stale image...'
+            : 'Building image for first use...'
       );
-      p.log.success(imageExists ? 'Image rebuilt' : 'Image built');
+      try {
+        buildImage(
+          effectiveConfig,
+          tools,
+          preparedDockerfile.path,
+          expectedImageSignature,
+          { engine, refresh: buildRefresh, lastRefresh: buildLastRefresh }
+        );
+        p.log.success(
+          refreshDue
+            ? 'Image refreshed'
+            : imageExists
+              ? 'Image rebuilt'
+              : 'Image built'
+        );
+      } catch (error) {
+        if (refreshDue && !signatureStale && imageExists) {
+          p.log.warn(
+            'Scheduled sandbox image refresh failed; continuing with the existing image. ' +
+            commandErrorMessage(error)
+          );
+        } else {
+          throw error;
+        }
+      }
     } else {
       p.log.step(`Using existing image ${effectiveConfig.imageName}`);
     }

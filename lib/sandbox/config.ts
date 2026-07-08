@@ -13,6 +13,7 @@ const DEFAULTS = Object.freeze({
   engine: null,
   runtimes: ['node22'],
   tools: ['agent-infra', 'claude-code', 'codex', 'gemini-cli', 'opencode'],
+  refreshIntervalDays: 7,
   dockerfile: null,
   vm: {
     cpu: null,
@@ -29,6 +30,7 @@ type SandboxConfigInput = {
   runtimes?: string[];
   tools?: string[];
   customTools?: unknown;
+  refreshIntervalDays?: unknown;
   dockerfile?: string | null;
   vm?: Record<string, unknown>;
 };
@@ -55,6 +57,7 @@ export type SandboxConfig = {
   runtimes: string[];
   tools: string[];
   customTools: SandboxTool[];
+  refreshIntervalDays: number;
   dockerfile: string | null;
   vm: SandboxVmConfig;
 };
@@ -80,11 +83,16 @@ function asPositiveNumberOrNull(value: unknown): number | null {
   return typeof value === 'number' ? value : null;
 }
 
-function cloneDefaults(): SandboxConfigInput & { vm: SandboxVmConfig; runtimes: string[]; tools: string[] } {
+function asNonNegativeIntegerOrDefault(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : fallback;
+}
+
+function cloneDefaults(): SandboxConfigInput & { vm: SandboxVmConfig; runtimes: string[]; tools: string[]; refreshIntervalDays: number } {
   return {
     engine: DEFAULTS.engine,
     runtimes: [...DEFAULTS.runtimes],
     tools: [...DEFAULTS.tools],
+    refreshIntervalDays: DEFAULTS.refreshIntervalDays,
     dockerfile: DEFAULTS.dockerfile,
     vm: { ...DEFAULTS.vm }
   };
@@ -160,6 +168,10 @@ export function loadConfig({
       ? [...sandbox.tools]
       : defaults.tools,
     customTools,
+    refreshIntervalDays: asNonNegativeIntegerOrDefault(
+      sandbox.refreshIntervalDays,
+      defaults.refreshIntervalDays
+    ),
     dockerfile,
     vm: {
       cpu: asPositiveNumberOrNull(sandbox.vm?.cpu) ?? defaults.vm.cpu,

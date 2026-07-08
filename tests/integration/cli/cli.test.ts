@@ -208,6 +208,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
       engine: DEFAULT_SANDBOX_ENGINE,
       runtimes: ["node22"],
       tools: ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"],
+      refreshIntervalDays: 7,
       dockerfile: null,
       vm: { cpu: null, memory: null, disk: null }
     }, "init should generate default sandbox config");
@@ -619,6 +620,7 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
       engine: null,
       runtimes: ["node22"],
       tools: ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"],
+      refreshIntervalDays: 7,
       dockerfile: null,
       vm: { cpu: null, memory: null, disk: null }
     }, "update should backfill default sandbox config");

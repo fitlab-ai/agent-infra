@@ -412,7 +412,8 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
       },
       runVerboseFn(engine: string, cmd: string, args: string[], opts?: CommandOptions) {
         calls.push({ type: "verbose", engine, cmd, args, opts });
-      }
+      },
+      lastRefresh: 42
     }
   );
 
@@ -441,6 +442,8 @@ test("buildImage uses verbose docker build output while keeping host UID/GID loo
     "demo.sandbox",
     "--label",
     "demo.sandbox.image-config=sig-123",
+    "--label",
+    "demo.sandbox.last-refresh=42",
     "-f",
     "/tmp/Dockerfile",
     "/repo"

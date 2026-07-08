@@ -91,6 +91,18 @@ type EnterModule = {
     runInteractive?: (engine: string, cmd: string, args: string[]) => number;
   }): number | Promise<number>;
 };
+type ImageBuildModule = {
+  buildImageSignature(preparedDockerfile: Record<string, unknown>, tools: Array<Record<string, unknown>>): string;
+};
+type SandboxConfigModule = {
+  loadConfig(): Record<string, unknown>;
+};
+type SandboxDockerfileModule = {
+  prepareDockerfile(config: Record<string, unknown>): Record<string, unknown> & { cleanup(): void };
+};
+type SandboxToolsModule = {
+  resolveTools(config: Record<string, unknown>): Array<Record<string, unknown>>;
+};
 
 function required<T>(value: T | undefined, message = "expected value"): T {
   if (value === undefined) {
@@ -108,6 +120,28 @@ function validClaudeCredentialsBlob(expiresAt: number) {
       expiresAt
     }
   });
+}
+
+async function sandboxImageSignature(repoDir: string): Promise<string> {
+  const imageBuild = await loadFreshEsm<ImageBuildModule>("lib/sandbox/image-build.js");
+  const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
+  const sandboxDockerfile = await loadFreshEsm<SandboxDockerfileModule>("lib/sandbox/dockerfile.js");
+  const sandboxTools = await loadFreshEsm<SandboxToolsModule>("lib/sandbox/tools.js");
+  const previousCwd = process.cwd();
+
+  try {
+    process.chdir(repoDir);
+    const config = sandboxConfig.loadConfig();
+    const tools = sandboxTools.resolveTools(config);
+    const preparedDockerfile = sandboxDockerfile.prepareDockerfile(config);
+    try {
+      return imageBuild.buildImageSignature(preparedDockerfile, tools);
+    } finally {
+      preparedDockerfile.cleanup();
+    }
+  } finally {
+    process.chdir(previousCwd);
+  }
 }
 
 test("sandbox exec formats host keychain unavailable credential sync warnings", async () => {
@@ -503,6 +537,36 @@ test("sandbox rebuild forwards refresh flags to docker build", onPlatforms("linu
     assert.ok(buildCall, "expected sandbox rebuild to call docker build");
     assert.ok(buildCall.includes("--no-cache"), "expected docker build to receive --no-cache");
     assert.ok(buildCall.includes("--pull"), "expected docker build to receive --pull");
+    assert.ok(
+      buildCall.some((arg) => /^demo\.sandbox\.last-refresh=\d+$/.test(arg)),
+      "expected docker build to receive last-refresh label"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rebuild preserves last refresh label without refresh", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-preserve-refresh-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerLabelsForInspect: {
+        "demo.sandbox.last-refresh": "1234"
+      }
+    });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rebuild", "--quiet"], {
+      DOCKER_EXIT_FOR_IMAGE_INSPECT: "0"
+    });
+    const buildCall = fixture.readDockerCalls().find((call) => call[0] === "build");
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(buildCall, "expected sandbox rebuild to call docker build");
+    assert.equal(buildCall.includes("--no-cache"), false);
+    assert.equal(buildCall.includes("--pull"), false);
+    assert.ok(buildCall.includes("demo.sandbox.last-refresh=1234"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -596,6 +660,122 @@ test("sandbox create resolves to configured engine", onPlatforms("linux", "darwi
       fixture.readDockerCalls().some((call) => call[0] === "build"),
       "expected sandbox create to reach docker build through the configured native engine"
     );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox create refreshes stale image before docker run", onPlatforms("linux", "darwin", "win32"), async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-refresh-due-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      sandbox: { tools: ["codex"] }
+    });
+    const signature = await sandboxImageSignature(fixture.repoDir);
+
+    spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["create", "feature-x", "--cpu", "1", "--memory", "1"],
+      {
+        DOCKER_EXIT_FOR_IMAGE_INSPECT: "0",
+        DOCKER_LABELS_FOR_IMAGE_INSPECT: JSON.stringify({
+          "demo.sandbox.image-config": signature,
+          "demo.sandbox.last-refresh": "0"
+        }),
+        DOCKER_EXIT_FOR_RUN: "1"
+      },
+      { timeout: 5_000 }
+    );
+
+    const dockerCalls = fixture.readDockerCalls();
+    const buildCall = dockerCalls.find((call) => call[0] === "build");
+
+    assert.ok(buildCall, "expected sandbox create to refresh stale image");
+    assert.ok(buildCall.includes("--no-cache"), "expected refresh build to receive --no-cache");
+    assert.ok(buildCall.includes("--pull"), "expected refresh build to receive --pull");
+    assert.ok(
+      buildCall.some((arg) => /^demo\.sandbox\.last-refresh=\d+$/.test(arg)),
+      "expected refresh build to write last-refresh label"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox create skips due refresh with CLI flag", onPlatforms("linux", "darwin", "win32"), async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-no-refresh-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      sandbox: { tools: ["codex"] }
+    });
+    const signature = await sandboxImageSignature(fixture.repoDir);
+
+    spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["create", "feature-x", "--cpu", "1", "--memory", "1", "--no-refresh"],
+      {
+        DOCKER_EXIT_FOR_IMAGE_INSPECT: "0",
+        DOCKER_LABELS_FOR_IMAGE_INSPECT: JSON.stringify({
+          "demo.sandbox.image-config": signature,
+          "demo.sandbox.last-refresh": "0"
+        }),
+        DOCKER_EXIT_FOR_RUN: "1"
+      },
+      { timeout: 5_000 }
+    );
+
+    assert.equal(
+      fixture.readDockerCalls().some((call) => call[0] === "build"),
+      false,
+      "expected --no-refresh to skip due refresh build"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox create continues when due refresh build fails", onPlatforms("linux", "darwin", "win32"), async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-refresh-fail-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      sandbox: { tools: ["codex"] }
+    });
+    fs.writeFileSync(path.join(fixture.repoDir, "README.md"), "fixture\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: fixture.repoDir, env: gitSafeEnv(), stdio: "pipe" });
+    execFileSync(
+      "git",
+      ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"],
+      { cwd: fixture.repoDir, env: gitSafeEnv(), stdio: "pipe" }
+    );
+    const signature = await sandboxImageSignature(fixture.repoDir);
+
+    spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["create", "feature-x", "--cpu", "1", "--memory", "1"],
+      {
+        DOCKER_EXIT_FOR_IMAGE_INSPECT: "0",
+        DOCKER_LABELS_FOR_IMAGE_INSPECT: JSON.stringify({
+          "demo.sandbox.image-config": signature,
+          "demo.sandbox.last-refresh": "0"
+        }),
+        DOCKER_EXIT_FOR_BUILD: "1",
+        DOCKER_EXIT_FOR_RUN: "1"
+      },
+      { timeout: 5_000 }
+    );
+
+    const dockerCalls = fixture.readDockerCalls();
+    assert.ok(dockerCalls.some((call) => call[0] === "build"), "expected due refresh build attempt");
+    assert.ok(dockerCalls.some((call) => call[0] === "run"), "expected create to continue to docker run");
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
