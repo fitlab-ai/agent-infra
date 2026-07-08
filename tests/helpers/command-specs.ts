@@ -86,6 +86,7 @@ const commandSpecs: Record<string, CommandSpec> = {
     en: "Task description: $ARGUMENTS",
     zh: "任务描述：$ARGUMENTS"
   },
+  "entropy-check": {},
   "init-labels": {},
   "init-milestones": {
     usage: "[--history]",

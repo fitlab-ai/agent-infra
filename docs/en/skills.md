@@ -77,6 +77,7 @@ These are not thin command aliases. Each skill encapsulates standardized process
 | `init-labels` | Initialize the repository's standard GitHub label set. | None | Bootstrap labels in a new repository. |
 | `init-milestones` | Initialize the repository's milestone structure. | None | Bootstrap milestone tracking in a new repository. |
 | `archive-tasks` | Archive completed tasks into a date-organized directory with a manifest index. | `[--days N \| --before DATE \| TASK-ID...]` | Periodically clean up the `completed/` directory. |
+| `entropy-check` | Review soft project entropy and write a structured entropy-check report. | None | Run before releases or maintenance windows to find rule overlap, document growth, dead conventions, and scattered version risks. |
 | `update-agent-infra` | Update the project's collaboration infrastructure to the latest template version. | None | Refresh shared AI tooling without rebuilding local conventions. |
 
 > Every skill works across supported AI TUIs. The command prefix changes, but the workflow semantics stay the same.

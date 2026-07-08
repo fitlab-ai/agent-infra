@@ -35,6 +35,8 @@ If there are uncommitted changes, error: "Workspace has uncommitted changes. Ple
 
 <!-- TODO: Replace with your project's pre-release verification steps -->
 
+Run the `entropy-check` skill before the normal release validation, record the report path, and check whether it reports any `release-blocking` finding.
+
 Run any checks that must pass before preparing a release:
 
 ```bash
@@ -43,10 +45,12 @@ git branch --show-current
 ```
 
 Verification guidance:
+- Run `entropy-check` and record its report path
 - Confirm the release is being prepared from the correct branch for your project
 - Run the full validation commands required by your release process
 
 Handling rules:
+- If `entropy-check` fails or reports a release-blocking finding, stop the release process and resolve or manually accept it first
 - If the current branch is unexpected, print a warning or exit based on your policy
 - If any verification command fails, stop the release process and fix the issue first
 

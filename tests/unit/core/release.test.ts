@@ -176,6 +176,20 @@ test("release documentation reflects CI-driven npm publishing", () => {
   });
 });
 
+test("release skills run entropy-check during pre-release verification", () => {
+  [
+    ".agents/skills/release/SKILL.md",
+    "templates/.agents/skills/release/SKILL.en.md",
+    "templates/.agents/skills/release/SKILL.zh-CN.md"
+  ].forEach((relativePath) => {
+    assert.match(
+      read(relativePath),
+      /entropy-check/,
+      `${relativePath} should include entropy-check in pre-release verification`
+    );
+  });
+});
+
 test("post-release-smoke workflow verifies npm and brew install channels", () => {
   const workflow = read(".github/workflows/post-release-smoke.yml");
 

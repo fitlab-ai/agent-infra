@@ -31,16 +31,28 @@ git status --short
 
 ### 3. 发布前验证
 
+先执行 `entropy-check` 技能，记录报告路径，并检查是否存在 `release-blocking` 发现：
+
+```text
+Claude Code / OpenCode：/entropy-check
+Gemini CLI：/agent-infra:entropy-check
+Codex CLI：$entropy-check
+```
+
+如果 `entropy-check` 执行失败，或报告中存在未处理的 `release-blocking` 发现，停止发布流程并先处理或由维护者裁定。
+
 ```bash
 git branch --show-current
 npm test
 ```
 
 验证要求：
+- 运行 `entropy-check` 并记录报告路径
 - 检查当前分支是否为 `main`
 - 运行完整测试套件
 
 处理规则：
+- 如果 `entropy-check` 失败或发现 release-blocking 问题，报错退出并要求先处理
 - 如果当前分支不是 `main`，输出警告但继续执行（某些维护场景可能需要从其他分支发布）
 - 如果测试失败，报错退出并要求先修复测试
 

@@ -74,6 +74,48 @@ test("SKILL.md reference paths point to existing files", () => {
   });
 });
 
+test("entropy-check defines review checklist and report template sections", () => {
+  const skill = read(".agents/skills/entropy-check/SKILL.md");
+  const checklist = read(".agents/skills/entropy-check/reference/checklist.md");
+  const reportTemplate = read(".agents/skills/entropy-check/reference/report-template.md");
+
+  [
+    "reference/checklist.md",
+    "reference/report-template.md"
+  ].forEach((referencePath) => {
+    assert.match(
+      skill,
+      new RegExp(escapeRegExp(referencePath)),
+      `.agents/skills/entropy-check/SKILL.md should reference ${referencePath}`
+    );
+  });
+
+  [
+    "Issue/PR",
+    "SKILL.md",
+    "over-design",
+    "bilingual",
+    "version"
+  ].forEach((topic) => {
+    assert.match(checklist, new RegExp(escapeRegExp(topic)), `checklist should cover ${topic}`);
+  });
+
+  [
+    "状态核对",
+    "审查范围",
+    "发现摘要",
+    "发现详情",
+    "人工裁决待办",
+    "后续任务建议"
+  ].forEach((section) => {
+    assert.match(
+      reportTemplate,
+      new RegExp(`^## ${escapeRegExp(section)}$`, "m"),
+      `report template should define ${section}`
+    );
+  });
+});
+
 // Soft size guard: SKILL.md bodies should stay lean (long rules/templates/scripts
 // belong in reference/ or scripts/). Per the design decision this is a visibility
 // signal, not a red light — oversize files emit a diagnostic but never fail.

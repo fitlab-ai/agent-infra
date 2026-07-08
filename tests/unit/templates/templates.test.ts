@@ -41,6 +41,7 @@ const lowFrequencyCommands = [
   "close-dependabot",
   "complete-manual-validation",
   "create-release-note",
+  "entropy-check",
   "import-codescan",
   "import-dependabot",
   "init-labels",
