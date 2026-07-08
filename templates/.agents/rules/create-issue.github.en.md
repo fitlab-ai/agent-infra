@@ -101,7 +101,7 @@ If the final label set is empty, omit the `--label` argument.
 | `feature`, `enhancement` | `Feature` |
 | `task`, `documentation`, `dependency-upgrade`, `chore`, `docs`, `refactor`, `refactoring`, others | `Task` |
 
-When applying the Issue Type, follow the "Set Issue Type" command in `.agents/rules/issue-pr-commands.md`; first call `gh api orgs/{owner}/issue-types` to list the org's actually available Types, and only set the inferred value when it is present in that list. Failure to set is non-blocking.
+When applying the Issue Type, follow the "Set Issue Type" command in `.agents/rules/issue-pr-commands.md`; only when the owner type is `Organization`, first call `gh api orgs/{owner}/issue-types` to list the org's actually available Types, and only set the inferred value when it is present in that list. User repositories, failed owner type probes, and failed writes are non-blocking.
 
 #### milestone
 
@@ -149,7 +149,7 @@ After success, parse the Issue number from the output (match only the `https://.
 
 ### 6. Set Issue Type (Optional)
 
-Execute only when `has_push=true` and the Issue Type inferred in §4 is in the org's actually available list:
+Execute only when `has_push=true`, the owner type is `Organization`, and the Issue Type inferred in §4 is in the org's actually available list:
 
 ```bash
 gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH \

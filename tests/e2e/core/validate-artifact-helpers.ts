@@ -278,6 +278,7 @@ function buildIssueType(name: string = "Task") {
 }
 
 function buildIssueFieldsPayload({
+  issueType = buildIssueType("Feature"),
   pinnedFields = [
     { typename: "IssueFieldSingleSelect", name: "Priority" },
     { typename: "IssueFieldSingleSelect", name: "Effort" }
@@ -287,21 +288,26 @@ function buildIssueFieldsPayload({
     { typename: "IssueFieldSingleSelectValue", fieldName: "Effort", value: "Medium" }
   ]
 }: {
+  issueType?: ReturnType<typeof buildIssueType> | null;
   pinnedFields?: Array<{ typename: string; name: string }>;
   values?: Array<{ typename: string; fieldName: string; value: string }>;
 } = {}) {
+  const normalizedIssueType = issueType
+    ? {
+        name: issueType.name,
+        pinnedFields: pinnedFields.map((field) => ({
+          __typename: field.typename,
+          id: `field-${field.name}`,
+          name: field.name
+        }))
+      }
+    : null;
+
   return {
     data: {
       repository: {
         issue: {
-          issueType: {
-            name: "Feature",
-            pinnedFields: pinnedFields.map((field) => ({
-              __typename: field.typename,
-              id: `field-${field.name}`,
-              name: field.name
-            }))
-          },
+          issueType: normalizedIssueType,
           issueFieldValues: {
             nodes: values.map((value) => value.typename === "IssueFieldDateValue"
               ? {

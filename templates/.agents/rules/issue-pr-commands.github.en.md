@@ -83,11 +83,16 @@ gh issue create -R "$upstream_repo" --title "{title}" --body "{body}" --assignee
 Set the Issue Type:
 
 ```bash
-gh api "orgs/{owner}/issue-types" --jq '.[].name'
-gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent
+owner_type=$(gh api "repos/$upstream_repo" --jq '.owner.type // empty' 2>/dev/null || true)
+if [ "$owner_type" = "Organization" ]; then
+  owner=${upstream_repo%%/*}
+  gh api "orgs/$owner/issue-types" --jq '.[].name'
+  gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent
+fi
 ```
 
 - set the Issue Type only when `has_push=true`; otherwise skip and continue
+- query and set Issue Type only when the owner type is `Organization`; skip and continue for user repositories or failed owner type probes
 - when changing an existing Issue Type, read `.agents/rules/issue-fields.md` and use Flow B so same-name pinned fields are migrated and fields absent from the new type are cleared
 
 ## Update Issues

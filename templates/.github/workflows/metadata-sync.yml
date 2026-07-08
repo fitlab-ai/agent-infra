@@ -87,6 +87,11 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           TYPE: ${{ steps.metadata.outputs.type }}
         run: |
+          OWNER_TYPE=$(gh api "repos/$GITHUB_REPOSITORY" --jq '.owner.type // empty' 2>/dev/null || true)
+          if [ "$OWNER_TYPE" != "Organization" ]; then
+            exit 0
+          fi
+
           case "$TYPE" in
             bug|bugfix)          ISSUE_TYPE="Bug" ;;
             feature|enhancement) ISSUE_TYPE="Feature" ;;

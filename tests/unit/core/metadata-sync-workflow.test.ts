@@ -24,7 +24,7 @@ test("metadata-sync workflow listens to task comment create and edit events and 
   });
 });
 
-test("metadata-sync workflow syncs type labels and fallback issue types", () => {
+test("metadata-sync workflow syncs type labels and organization issue types", () => {
   workflowTargets.forEach((relativePath) => {
     const content = read(relativePath);
 
@@ -33,8 +33,11 @@ test("metadata-sync workflow syncs type labels and fallback issue types", () => 
     assert.match(content, /--prefix "type:"/, `${relativePath} should scope type label syncs to the type: prefix`);
     assert.match(content, /--target "\$TYPE_LABEL"/, `${relativePath} should pass the mapped type label as the target set`);
     assert.match(content, /dependency-upgrade\) +TYPE_LABEL="type: dependency-upgrade"/, `${relativePath} should map dependency-upgrade to the matching label`);
+    assert.match(content, /OWNER_TYPE=\$\(gh api "repos\/\$GITHUB_REPOSITORY" --jq '\.owner\.type \/\/ empty'/, `${relativePath} should detect the repository owner type`);
+    assert.match(content, /if \[ "\$OWNER_TYPE" != "Organization" \]; then[\s\S]*exit 0[\s\S]*fi/, `${relativePath} should skip Issue Type sync outside organization repositories`);
     assert.match(content, /feature\|enhancement\) ISSUE_TYPE="Feature"/, `${relativePath} should map feature-like task types to the Feature issue type`);
     assert.match(content, /\*\) +ISSUE_TYPE="Task"/, `${relativePath} should fall back to the Task issue type`);
+    assert.match(content, /gh api "repos\/\$GITHUB_REPOSITORY\/issues\/\$ISSUE_NUMBER"[\s\S]*-f type="\$ISSUE_TYPE"/, `${relativePath} should patch the mapped Issue Type when supported`);
   });
 });
 

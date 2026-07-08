@@ -83,11 +83,16 @@ gh issue create -R "$upstream_repo" --title "{title}" --body "{body}" --assignee
 设置 Issue Type：
 
 ```bash
-gh api "orgs/{owner}/issue-types" --jq '.[].name'
-gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent
+owner_type=$(gh api "repos/$upstream_repo" --jq '.owner.type // empty' 2>/dev/null || true)
+if [ "$owner_type" = "Organization" ]; then
+  owner=${upstream_repo%%/*}
+  gh api "orgs/$owner/issue-types" --jq '.[].name'
+  gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent
+fi
 ```
 
 - 仅当 `has_push=true` 时执行 Issue Type 设置；否则跳过并继续
+- 仅当 owner type 为 `Organization` 时查询和设置 Issue Type；个人仓库或 owner type 探测失败时跳过并继续
 - 变更现有 Issue Type 时，先读取 `.agents/rules/issue-fields.md` 并使用流程 B，确保同名 pinned fields 迁移，且新 type 不包含的字段被清空
 
 ## Issue 更新

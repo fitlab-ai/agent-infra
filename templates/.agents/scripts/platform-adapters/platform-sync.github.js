@@ -159,6 +159,7 @@ function buildSyncContext({ taskDir, config, artifactFile }) {
     return { earlyReturn: blockedResult(CHECK_TYPE, upstreamRepo.message, "network_error") };
   }
   const permissions = detectPermissions(upstreamRepo.value, taskDir);
+  const repoOwnerType = detectRepoOwnerType(upstreamRepo.value, taskDir);
   const expectedValues = resolveExpectedValues(config);
   if (!expectedValues.ok) {
     return { earlyReturn: failResult(CHECK_TYPE, expectedValues.message, "check_failed") };
@@ -181,6 +182,7 @@ function buildSyncContext({ taskDir, config, artifactFile }) {
     issueNumber,
     prNumber,
     upstreamRepo: upstreamRepo.value,
+    repoOwnerType,
     hasTriage: permissions.hasTriage,
     hasPush: permissions.hasPush,
     expectedStatusLabel: expectedValues.statusLabel,
@@ -758,6 +760,10 @@ function checkIssueType(context, remoteData) {
   }
 
   if (!remoteData.issueType) {
+    if (context.repoOwnerType === "User") {
+      return null;
+    }
+
     return failResult(CHECK_TYPE,
       `Issue #${context.issueNumber} has no Issue Type set`,
       "check_failed"
@@ -1262,6 +1268,21 @@ function detectPermissions(upstreamRepo, taskDir) {
     hasTriage: permissions.triage === true,
     hasPush: permissions.push === true
   };
+}
+
+function detectRepoOwnerType(upstreamRepo, taskDir) {
+  const ownerTypeResult = withRetry(() => ghText([
+    "api",
+    `repos/${upstreamRepo}`,
+    "--jq",
+    ".owner.type // empty"
+  ], taskDir));
+
+  if (!ownerTypeResult.ok) {
+    return "unknown";
+  }
+
+  return ownerTypeResult.value || "unknown";
 }
 
 function ghJson(args, cwd) {

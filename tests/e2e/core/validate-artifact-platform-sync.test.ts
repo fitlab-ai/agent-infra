@@ -120,6 +120,41 @@ const implementSyncCases = [
     }
   },
   {
+    name: "validate-artifact platform-sync fails for organization repos when the Issue Type is missing",
+    skill: "code-task",
+    issuePayload: buildIssuePayload({ type: null }),
+    comments(taskContent: string, artifactContent: string) {
+      return [
+        { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
+        { body: buildTaskComment(taskId, taskContent) }
+      ];
+    },
+    assertResult(result: ReturnType<typeof runValidator>) {
+      assert.equal(result.status, 1);
+      assertPayloadStatus(result, {
+        type: "platform-sync",
+        status: "fail",
+        message: /has no Issue Type set/
+      });
+    }
+  },
+  {
+    name: "validate-artifact platform-sync passes for user repos when the Issue Type is missing",
+    skill: "code-task",
+    issuePayload: buildIssuePayload({ type: null }),
+    extraEnv: { GH_FAKE_REPO_OWNER_TYPE: "User" },
+    comments(taskContent: string, artifactContent: string) {
+      return [
+        { body: buildArtifactComment(taskId, "code.md", "实现报告", artifactContent) },
+        { body: buildTaskComment(taskId, taskContent) }
+      ];
+    },
+    assertResult(result: ReturnType<typeof runValidator>) {
+      assert.equal(result.status, 0, result.stderr);
+      assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    }
+  },
+  {
     name: "validate-artifact platform-sync skips Issue Type verification when the REST query is unavailable",
     skill: "code-task",
     extraEnv: {
@@ -404,6 +439,19 @@ test("validate-artifact platform-sync skips Issue field verification when fields
       VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
     });
     assert.equal(unavailableResult.status, "pass");
+
+    writeJson(ctx.issueFieldsPath, buildIssueFieldsPayload({ issueType: null }));
+    const missingTypeFieldsResult = await runPlatformSyncAdapter(ctx.taskDir, {
+      when: "issue_number_exists",
+      verify_issue_fields: true
+    }, {
+      PATH: pathWithPrependedBin(ctx.binDir),
+      AGENT_INFRA_GH_BIN: process.execPath,
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([ctx.ghPath]),
+      GH_FAKE_ISSUE_PATH: ctx.issuePath,
+      GH_FAKE_ISSUE_FIELDS_PATH: ctx.issueFieldsPath
+    });
+    assert.equal(missingTypeFieldsResult.status, "pass");
   })
 ));
 

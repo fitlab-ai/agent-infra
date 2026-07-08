@@ -101,7 +101,7 @@ ai task issue-body {task-id} > "{body-file}"
 | `feature`, `enhancement` | `Feature` |
 | `task`, `documentation`, `dependency-upgrade`, `chore`, `docs`, `refactor`, `refactoring` 及其它 | `Task` |
 
-实际设置时按 `.agents/rules/issue-pr-commands.md` 的 "设置 Issue Type" 命令；先调 `gh api orgs/{owner}/issue-types` 列出 org 实际可用的 Type，仅当推断值在列表中时才设置；设置失败不阻断流程。
+实际设置时按 `.agents/rules/issue-pr-commands.md` 的 "设置 Issue Type" 命令；仅当 owner type 为 `Organization` 时，先调 `gh api orgs/{owner}/issue-types` 列出 org 实际可用的 Type，并且仅当推断值在列表中时才设置；个人仓库、owner type 探测失败或设置失败都不阻断流程。
 
 #### milestone
 
@@ -149,7 +149,7 @@ gh issue create -R "$upstream_repo" \
 
 ### 6. 设置 Issue Type（可选）
 
-仅当 `has_push=true` 且 §4 推断的 Issue Type 在 org 实际可用列表中时执行：
+仅当 `has_push=true`、owner type 为 `Organization`，且 §4 推断的 Issue Type 在 org 实际可用列表中时执行：
 
 ```bash
 gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH \

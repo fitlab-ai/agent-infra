@@ -31,6 +31,7 @@ function buildRepoPayload() {
 
   return {
     full_name: fullName,
+    owner: { type: process.env.GH_FAKE_REPO_OWNER_TYPE || "Organization" },
     fork: process.env.GH_FAKE_REPO_FORK === "true",
     parent: { full_name: parentFullName },
     permissions
@@ -72,6 +73,11 @@ if (args[0] === "api" && args[1] && /^repos\/[^/]+\/[^/]+$/.test(args[1])) {
 
     if (query === ".permissions") {
       process.stdout.write(JSON.stringify(repoPayload.permissions));
+      process.exit(0);
+    }
+
+    if (query === ".owner.type // empty") {
+      process.stdout.write(repoPayload.owner.type);
       process.exit(0);
     }
   }
