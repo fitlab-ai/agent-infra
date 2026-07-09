@@ -859,6 +859,60 @@ test("syncTemplates keeps an ejected entry that has no template source under a m
   }
 });
 
+test("syncTemplates preserves custom skills when the template has only an empty same-name directory", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-empty-skill-dir-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.mkdirSync(path.join(templateRoot, ".agents/skills/local-check/reference"), { recursive: true });
+    writeFile(templateRoot, ".agents/skills/builtin-check/SKILL.en.md", "---\nname: builtin-check\ndescription: Built in\n---\n");
+
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      platform: { type: "github" },
+      files: {
+        managed: [".agents/skills/"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    writeFile(projectRoot, ".agents/skills/local-check/SKILL.md", "---\nname: local-check\ndescription: Local\n---\n");
+    writeFile(projectRoot, ".agents/skills/local-check/reference/checklist.md", "keep local\n");
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+
+    assert.equal(
+      fs.readFileSync(path.join(projectRoot, ".agents/skills/local-check/SKILL.md"), "utf8"),
+      "---\nname: local-check\ndescription: Local\n---\n"
+    );
+    assert.equal(
+      fs.readFileSync(path.join(projectRoot, ".agents/skills/local-check/reference/checklist.md"), "utf8"),
+      "keep local\n"
+    );
+    assert.ok(report.custom.detected.includes("local-check"));
+    assert.ok(!report.managed.removed.includes(".agents/skills/local-check/SKILL.md"));
+    assert.ok(!report.managed.removed.includes(".agents/skills/local-check/reference/checklist.md"));
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("syncTemplates preserves stale files that match merged glob patterns", async () => {
   const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-glob-"));

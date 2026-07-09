@@ -197,6 +197,12 @@ function listTemplateSkillNames(templateRoot) {
   return new Set(
     fs.readdirSync(templateSkillsDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
+      .filter((entry) => {
+        const skillDir = path.join(templateSkillsDir, entry.name);
+        return ['SKILL.md', 'SKILL.en.md', 'SKILL.zh-CN.md'].some((file) =>
+          fs.existsSync(path.join(skillDir, file))
+        );
+      })
       .map((entry) => entry.name)
   );
 }

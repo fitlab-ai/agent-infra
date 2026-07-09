@@ -281,6 +281,7 @@ test("project-local commands are not distributed through templates", () => {
     });
 
     [
+      `templates/.agents/skills/${command}`,
       `templates/.claude/commands/${command}.en.md`,
       `templates/.claude/commands/${command}.zh-CN.md`,
       `templates/.opencode/commands/${command}.en.md`,

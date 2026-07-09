@@ -1,6 +1,5 @@
 ---
 name: entropy-check
-distribution: local
 description: >
   周期性审查 agent-infra 仓库软熵增并输出结构化熵减审查报告。
   当本仓库需要在发版前或维护窗口识别规则重叠、文档膨胀、死约定和版本散落风险时使用。

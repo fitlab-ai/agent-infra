@@ -90,8 +90,6 @@ test("local entropy-check defines review checklist and report template sections"
     );
   });
 
-  assert.match(skill, /^distribution: local$/m);
-
   [
     "Issue/PR",
     "SKILL.md",
