@@ -51,6 +51,7 @@ const statusModel: StatusModel = {
   shortId: '#01',
   title: 'demo title',
   metadata: [['current_step', 'code']],
+  workflowWarnings: [],
   artifacts: { count: 1, groups: [{ stage: 'plan', files: ['plan.md'] }] },
   workflow: {
     state: 'in-progress',

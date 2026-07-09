@@ -89,6 +89,7 @@ test("required template files were migrated into templates/", () => {
     "templates/.agents/workspace/README.en.md",
     "templates/.agents/workspace/README.zh-CN.md",
     "templates/.agents/scripts/validate-artifact.js",
+    "templates/.agents/scripts/workflow-warnings.js",
     "templates/.agents/scripts/lib/review-artifacts.js",
     "templates/.git-hooks/check-version-format.sh",
     "templates/.git-hooks/pre-commit",
@@ -174,6 +175,18 @@ test("task templates include human ruling sections", () => {
   }
 });
 
+test("task templates include workflow warning sections", () => {
+  for (const [relativePath, heading] of [
+    [".agents/templates/task.md", "## 工作流告警"],
+    ["templates/.agents/templates/task.en.md", "## Workflow Warnings"],
+    ["templates/.agents/templates/task.zh-CN.md", "## 工作流告警"]
+  ] as Array<[string, string]>) {
+    const content = read(relativePath);
+    assert.match(content, new RegExp(`^${escapeRegExp(heading)}$`, "m"));
+    assert.match(content, /^\| id \| time \| step \| severity \| code \| status \| target \| message \| action \| resolved_at \| resolution \|$/m);
+  }
+});
+
 test("update-agent-infra template copies stay in sync with working files", () => {
   const collaborator = JSON.parse(read(".agents/.airc.json"));
   const project = collaborator.project;
@@ -204,6 +217,7 @@ test("update-agent-infra template copies stay in sync with working files", () =>
     [".agents/skills/import-issue/SKILL.md", "templates/.agents/skills/import-issue/SKILL.en.md"],
     [".agents/skills/import-issue/config/verify.json", "templates/.agents/skills/import-issue/config/verify.json"],
     [".agents/scripts/find-existing-task.js", "templates/.agents/scripts/find-existing-task.js"],
+    [".agents/scripts/workflow-warnings.js", "templates/.agents/scripts/workflow-warnings.js"],
     [".agents/skills/init-labels/SKILL.md", "templates/.agents/skills/init-labels/SKILL.en.md"],
     [".agents/skills/plan-task/SKILL.md", "templates/.agents/skills/plan-task/SKILL.en.md"],
     [".agents/skills/review-code/SKILL.md", "templates/.agents/skills/review-code/SKILL.en.md"],

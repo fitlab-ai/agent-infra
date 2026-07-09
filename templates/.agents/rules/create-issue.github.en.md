@@ -188,4 +188,4 @@ Hand the following back to the caller `create-task`:
 - Auth failure / command unavailable: return a structured `{code: "AUTH_FAILED", message}` to `create-task`; do not modify task.md
 - Network timeout / DNS failure: `{code: "NETWORK", message}`
 - Template parsing failure, Issue number parsing failure, other anomalies: `{code: "VALIDATION", message}`
-- All failures keep task.md untouched; `create-task` takes the "Scenario C: failure fallback" output branch and prompts the user to retry manually or fill `issue_number` later
+- All failures keep task.md untouched; `create-task` must record the structured error in `## Workflow Warnings` (`severity=ACTION_REQUIRED`, `code=ISSUE_CREATE_FAILED`, `target=issue`) before taking the "Scenario C: failure fallback" output branch and prompting the user to retry manually or fill `issue_number` later

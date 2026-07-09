@@ -6,6 +6,7 @@ import { resolveTaskRef } from '../resolve-ref.ts';
 import { enumerateArtifacts, type Artifact } from '../artifacts.ts';
 import { parseTaskFrontmatter, extractTitle, type Frontmatter } from '../frontmatter.ts';
 import { loadShortIdByTaskId } from '../short-id.ts';
+import { getOpenWorkflowWarnings, formatWorkflowWarningSummary, type WorkflowWarning } from '../workflow-warnings.ts';
 import { parseActivityLog, pairEntries } from './log.ts';
 import { statusCard, type DisplayMessage } from '../../server/display.ts';
 
@@ -323,6 +324,7 @@ type StatusModel = {
   shortId: string;
   title: string;
   metadata: [string, string][];
+  workflowWarnings: WorkflowWarning[];
   artifacts: { count: number; groups: { stage: string; files: string[] }[] };
   workflow: WorkflowInfo;
   runtime: RuntimeInfo;
@@ -358,6 +360,14 @@ function renderStatus(model: StatusModel): string[] {
   if (model.title) lines.push(model.title);
 
   lines.push('', 'Metadata', ...renderPairs(model.metadata));
+
+  if (model.workflowWarnings.length > 0) {
+    lines.push(
+      '',
+      `Workflow Warnings (${model.workflowWarnings.length} open)`,
+      ...formatWorkflowWarningSummary(model.workflowWarnings).map((line) => `  ${line}`)
+    );
+  }
 
   lines.push('', `Artifacts (${model.artifacts.count})`);
   if (model.artifacts.groups.length === 0) {
@@ -431,6 +441,7 @@ function buildFromResolved(input: BuildStatusModelInput): StatusModel {
     shortId: input.shortId ?? loadShortIdByTaskId(input.repoRoot).get(input.taskId) ?? DASH,
     title: extractTitle(content),
     metadata: collectMetadata(fm),
+    workflowWarnings: getOpenWorkflowWarnings(content),
     artifacts: { count: artifacts.length, groups: groupArtifacts(artifacts) },
     workflow,
     runtime: collectRuntime(input.taskDir, workflow, run),

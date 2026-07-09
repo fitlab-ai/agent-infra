@@ -117,6 +117,15 @@ EOF
 | `gh api` GET/PATCH/POST 失败 | 输出警告并继续；是否阻塞当前 skill 由调用方决定 |
 | `pr_number` 指向的 PR 不存在 | 输出 `PR #{pr-number} not found` 警告并继续 |
 
+当调用方存在 `{task-id}` / task 目录且 GET/PATCH/POST 失败时，记录 Workflow Warning：
+
+```bash
+node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} \
+  --step pr-sync --severity ACTION_REQUIRED --code COMMENT_SYNC_FAILED \
+  --target "pr-summary" --message "{reason}" \
+  --action "修复 GitHub API / 网络问题后重跑触发 PR 摘要同步的 workflow 步骤"
+```
+
 ## 结果回传
 
 统一回传以下结果之一，供调用方在 Activity Log 或用户输出中复用：

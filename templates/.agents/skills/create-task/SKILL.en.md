@@ -135,7 +135,7 @@ The rule's content is determined by the configured code platform:
 
 Handle the result:
 - Rule successfully created the Issue: `issue_number` has been written back to task.md per the rule; continue by reading `.agents/rules/issue-sync.md`, completing upstream repository and permission detection, then sync the task comment and set `status: waiting-for-triage` by rule
-- Rule failed (auth / network / template parse / etc.): do not roll back task.md; do NOT append an extra Activity Log entry; follow "Scenario C: Issue creation failed" output to surface `error_code` and `error_message` to the user so they can decide whether to retry manually or write `issue_number` later
+- Rule failed (auth / network / template parse / etc.): do not roll back task.md; do NOT append an extra Activity Log entry; first run `node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} --step create-task --severity ACTION_REQUIRED --code ISSUE_CREATE_FAILED --target issue --message "{error_code}: {error_message}" --action "Fix auth/network/template issues and manually retry Issue creation, or create/find an Issue and write issue_number"` to record a generic warning; then follow "Scenario C: Issue creation failed" output to surface `error_code` and `error_message`
 - Rule was a no-op (custom or empty platform): do not create comments, do not block the workflow, and do not write an Activity Log entry
 - task.md already has `issue_number`: the rule's prerequisite check skips creation; `create-task` proceeds directly to step 5
 
@@ -231,6 +231,9 @@ Next step - run requirements analysis:
   - Codex CLI: $analyze-task {task-ref}
 
 For later platform sync: after fixing auth / network / template issues, manually run the Issue creation flow in `.agents/rules/create-issue.md` for this task; or manually create/find an Issue and write `issue_number` into task.md so later skills can take over cascade sync.
+
+[ACTION REQUIRED] Workflow warnings are open:
+  - WW-N ISSUE_CREATE_FAILED (issue): Fix auth/network/template issues and manually retry Issue creation, or create/find an Issue and write issue_number
 ```
 
 

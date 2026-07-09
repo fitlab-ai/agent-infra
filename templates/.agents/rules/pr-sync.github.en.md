@@ -117,6 +117,15 @@ EOF
 | `gh api` GET/PATCH/POST fails | warn and continue; whether the current skill should block is decided by the caller |
 | `pr_number` points to a missing PR | warn with `PR #{pr-number} not found` and continue |
 
+When the caller has a `{task-id}` / task directory and GET/PATCH/POST fails, record a Workflow Warning:
+
+```bash
+node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} \
+  --step pr-sync --severity ACTION_REQUIRED --code COMMENT_SYNC_FAILED \
+  --target "pr-summary" --message "{reason}" \
+  --action "Fix GitHub API / network issues and rerun the workflow step that triggers PR summary sync"
+```
+
 ## Result Reporting
 
 Return one of these normalized results so callers can reuse it in Activity Log entries or user output:

@@ -64,6 +64,13 @@ pr_status: pending             # PR 状态：pending（默认）| created（已�
 
 <!-- 人类在此记录对 needs-human-decision 决策的裁定，并把 ## 审查分歧账本 对应 HD- 行翻为 human-decided。 -->
 
+## 工作流告警
+
+<!-- 工作流降级、平台同步失败、权限不足等需要后续注意的事件写入此段。无告警时保留表头即可。 -->
+
+| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |
+|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|
+
 ## 活动日志
 
 <!-- 每个工作流步骤追加一条新记录，不要覆盖之前的记录。 -->

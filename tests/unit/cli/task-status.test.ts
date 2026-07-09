@@ -263,6 +263,7 @@ const baseModel: StatusModel = {
     ['type', 'feature'],
     ['status', 'active']
   ],
+  workflowWarnings: [],
   artifacts: {
     count: 2,
     groups: [
@@ -311,6 +312,27 @@ test('renderStatus emits workflow and runtime before git', () => {
   assert.match(out, /^Git$/m);
   // Stage group renders its files joined, in order.
   assert.match(out, /^  plan +plan\.md, plan-r2\.md$/m);
+});
+
+test('renderStatus shows open workflow warnings after metadata', () => {
+  const out = renderStatus({
+    ...baseModel,
+    workflowWarnings: [{
+      id: 'WW-1',
+      time: '2026-07-09 12:00:00+08:00',
+      step: 'create-task',
+      severity: 'ACTION_REQUIRED',
+      code: 'ISSUE_CREATE_FAILED',
+      status: 'open',
+      target: 'issue',
+      message: 'Issue creation failed',
+      action: 'Authenticate gh and rerun create-task',
+      resolvedAt: '',
+      resolution: ''
+    }]
+  }).join('\n');
+  assert.match(out, /^Metadata[\s\S]*^Workflow Warnings \(1 open\)$/m);
+  assert.match(out, /^  WW-1 \[ACTION_REQUIRED\] ISSUE_CREATE_FAILED issue - Authenticate gh and rerun create-task$/m);
 });
 
 test('renderStatus shows (none) when a task has no artifacts', () => {

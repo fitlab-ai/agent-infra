@@ -446,6 +446,47 @@ test("validate-artifact completion-checklist fails when a complete-task item is 
   })
 ));
 
+test("validate-artifact task-meta accepts a valid workflow warning with escaped pipes", () => (
+  withTempRoot("agent-infra-workflow-warning-pass-", (tempRoot) => {
+    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    write(path.join(taskDir, "task.md"), [
+      buildTaskContent(),
+      "",
+      "## 工作流告警",
+      "",
+      "| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |",
+      "|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|",
+      String.raw`| WW-1 | 2026-07-09 12:00:00+08:00 | issue-sync | ACTION_REQUIRED | COMMENT_SYNC_FAILED | open | task-comment | failed a\\\|b | retry a\\\|b |  |  |`
+    ].join("\n"));
+
+    const result = runValidator(["check", "task-meta", taskDir, "--skill", "code-task"]);
+    assert.equal(result.status, 0, result.stderr);
+    assertPayloadStatus(result, { type: "task-meta", status: "pass" });
+  })
+));
+
+test("validate-artifact task-meta rejects invalid workflow warning lifecycle fields", () => (
+  withTempRoot("agent-infra-workflow-warning-fail-", (tempRoot) => {
+    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    write(path.join(taskDir, "task.md"), [
+      buildTaskContent(),
+      "",
+      "## Workflow Warnings",
+      "",
+      "| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |",
+      "|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|",
+      "| WW-1 | 2026-07-09 12:00:00+08:00 | issue-sync | ACTION_REQUIRED | COMMENT_SYNC_FAILED | open | task-comment | failed |  |  |  |",
+      "| WW-2 | 2026-07-09 12:01:00+08:00 | issue-sync | INFO | METADATA_SYNC_SKIPPED | resolved | label | skipped | none |  |  |"
+    ].join("\n"));
+
+    const result = runValidator(["check", "task-meta", taskDir, "--skill", "code-task"]);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /open warning requires action/);
+    assert.match(result.stdout, /illegal severity 'INFO'/);
+    assert.match(result.stdout, /resolved warning requires resolved_at and resolution/);
+  })
+));
+
 test("PR summary callers reference the shared pr-sync rule", () => {
   assertPointsToPrSyncRule(".agents/skills/commit/reference/pr-summary-sync.md");
   assertPointsToPrSyncRule(".agents/skills/create-pr/reference/comment-publish.md");

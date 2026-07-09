@@ -61,6 +61,10 @@ const LEDGER_TERMINAL_OK = new Set(["confirmed", "closed", "human-decided"]);
 const DEFAULT_MAX_HANDSHAKE_ROUNDS = 3;
 const POST_REVIEW_COMMIT_STAGE = "post-review-commit";
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
+const WORKFLOW_WARNING_SECTION_NAMES = ["工作流告警", "Workflow Warnings"];
+const WORKFLOW_WARNING_STATUSES = new Set(["open", "resolved", "ignored"]);
+const WORKFLOW_WARNING_SEVERITIES = new Set(["IMPORTANT", "ACTION_REQUIRED"]);
+const WORKFLOW_WARNING_ID_PATTERN = /^WW-\d+$/;
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..", "..");
@@ -282,6 +286,11 @@ function checkTaskMeta({ taskDir, config }) {
   const branchValidationError = validateTaskBranch(metadata);
   if (branchValidationError) {
     return failResult("task-meta", branchValidationError);
+  }
+
+  const warningValidationErrors = validateWorkflowWarnings(task.content);
+  if (warningValidationErrors.length > 0) {
+    return failResult("task-meta", `Invalid Workflow Warnings: ${warningValidationErrors.join("; ")}`);
   }
 
   const expectedStep = config.expected_step;
@@ -559,6 +568,117 @@ function parseLedgerRows(section) {
     rows.push(cells);
   }
   return rows;
+}
+
+function splitMarkdownTableRow(line) {
+  let value = String(line || "").trim();
+  if (!value.startsWith("|")) {
+    return [];
+  }
+  value = value.replace(/^\|/, "").replace(/\|$/, "");
+
+  const cells = [];
+  let cell = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === "|" && !isEscapedAt(value, index)) {
+      cells.push(unescapeMarkdownTableCell(cell.trim()));
+      cell = "";
+      continue;
+    }
+    cell += char;
+  }
+  cells.push(unescapeMarkdownTableCell(cell.trim()));
+  return cells;
+}
+
+function unescapeMarkdownTableCell(value) {
+  let output = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    const next = value[index + 1];
+    if (char === "\\" && (next === "\\" || next === "|")) {
+      output += next;
+      index += 1;
+      continue;
+    }
+    output += char;
+  }
+  return output;
+}
+
+function isEscapedAt(value, index) {
+  let backslashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor -= 1) {
+    backslashes += 1;
+  }
+  return backslashes % 2 === 1;
+}
+
+function parseWorkflowWarningRows(section) {
+  const rows = [];
+  for (const rawLine of String(section || "").split(/\r?\n/)) {
+    const cells = splitMarkdownTableRow(rawLine);
+    if (cells.length === 0) {
+      continue;
+    }
+    if ((cells[0] || "").toLowerCase() === "id") {
+      continue;
+    }
+    if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) {
+      continue;
+    }
+    rows.push(cells);
+  }
+  return rows;
+}
+
+function validateWorkflowWarnings(content) {
+  const section = getSectionContent(content, WORKFLOW_WARNING_SECTION_NAMES);
+  if (!section.trim()) {
+    return [];
+  }
+
+  const rows = parseWorkflowWarningRows(section);
+  const errors = [];
+  for (const cells of rows) {
+    if (cells.length < 11) {
+      errors.push(`malformed row (expected 11 columns): ${cells.join(" | ")}`);
+      continue;
+    }
+    const [id, time, step, severity, code, status, target, message, action, resolvedAt, resolution] = cells;
+    if (!WORKFLOW_WARNING_ID_PATTERN.test(id)) {
+      errors.push(`${id || "(empty id)"}: invalid id`);
+    }
+    if (!DATE_TIME_PATTERN.test(time)) {
+      errors.push(`${id}: invalid time '${time}'`);
+    }
+    if (isBlank(step)) {
+      errors.push(`${id}: step is required`);
+    }
+    if (!WORKFLOW_WARNING_SEVERITIES.has(severity)) {
+      errors.push(`${id}: illegal severity '${severity}'`);
+    }
+    if (isBlank(code)) {
+      errors.push(`${id}: code is required`);
+    }
+    if (!WORKFLOW_WARNING_STATUSES.has(status)) {
+      errors.push(`${id}: illegal status '${status}'`);
+    }
+    if (isBlank(target)) {
+      errors.push(`${id}: target is required`);
+    }
+    if (isBlank(message)) {
+      errors.push(`${id}: message is required`);
+    }
+    if (status === "open" && isBlank(action)) {
+      errors.push(`${id}: open warning requires action`);
+    }
+    if ((status === "resolved" || status === "ignored") && (isBlank(resolvedAt) || isBlank(resolution))) {
+      errors.push(`${id}: ${status} warning requires resolved_at and resolution`);
+    }
+  }
+  return errors;
 }
 
 function resolveReviewSetting(config, key, fallback) {

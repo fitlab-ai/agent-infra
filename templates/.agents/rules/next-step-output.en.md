@@ -1,10 +1,11 @@
 # Next-Step Output Rule
 
-This file defines three **independent** rules for a skill's "notify-user / Next steps" output (the 3rd applies to review-* only); read this file before rendering the final output and apply whichever rules apply:
+This file defines four **independent** rules for a skill's "notify-user / Next steps" output (the 3rd applies to review-* only); read this file before rendering the final output and apply whichever rules apply:
 
 1. **Next-step output structure**: how "Next steps" commands and the "Task info" block present the task ID (placeholders / short-id lookup / fallback).
 2. **Agent output trailing line (Completed at)**: the **very last line** of user-facing output, **independent of the "Next steps" block**, applying to normal / error / early-return paths alike.
 3. **Pending human-decision pre-block**: applies only to `review-analysis` / `review-plan` / `review-code` when this stage has pending rulings (`{h} > 0`) — expand the pending items before the "Next steps" commands and prompt to resolve them first.
+4. **Workflow Warnings output block**: applies when task.md has `status=open` rows in `## Workflow Warnings` — print the warning summary after all normal information and "Next steps" commands, and before `Completed at`.
 
 ## Placeholder semantics
 
@@ -61,6 +62,19 @@ Completed at: YYYY-MM-DD HH:mm:ss
 - Value command (local timezone, no offset): `date "+%Y-%m-%d %H:%M:%S"`
 - Position: it must be the last line of the entire user-facing output, after all "Next steps" commands. If a scenario has a conditional reminder line after the commands (e.g. the manual-validation reminder), the completion line goes after that reminder.
 - This line is for terminal scanning only; it is never written to any artifact file or Issue/PR comment. The single source of truth for completion time remains the Activity Log in task.md.
+
+## Workflow Warnings Output Block
+
+If the current task's `## Workflow Warnings` / `## 工作流告警` table has any `status=open` row, the skill's final user output must append a summary block after all normal information and "Next steps" commands, and before `Completed at`. When no open warning exists, do not render this block.
+
+Format:
+
+```text
+[ACTION REQUIRED] Workflow warnings are open:
+  - WW-N {code} ({target}): {action}
+```
+
+Use `[ACTION REQUIRED]` when any open row has `severity=ACTION_REQUIRED`; otherwise use `[IMPORTANT]`. `{code}`, `{target}`, and `{action}` come directly from the warning table columns.
 
 ## Pending human-decision pre-block (review-* only, when {h} > 0)
 

@@ -64,6 +64,13 @@ pr_status: pending             # PR status: pending (default) | created (PR crea
 
 <!-- Humans record rulings for needs-human-decision decisions here and flip matching HD- rows in the Review Disagreement Ledger to human-decided. -->
 
+## Workflow Warnings
+
+<!-- Workflow degradation, platform sync failures, permission gaps, and related events. Keep the header when empty. -->
+
+| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |
+|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|
+
 ## Activity Log
 
 <!-- Append a new entry for each workflow step. Do NOT overwrite previous entries. -->

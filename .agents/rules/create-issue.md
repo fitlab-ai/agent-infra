@@ -188,4 +188,4 @@ gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH \
 - 认证失败 / 命令不可用：返回结构化错误 `{code: "AUTH_FAILED", message}` 给 `create-task`，不修改 task.md
 - 网络超时 / DNS 失败：`{code: "NETWORK", message}`
 - 模板解析失败、Issue 编号解析失败、其它异常：`{code: "VALIDATION", message}`
-- 任意失败均不回滚 task.md；`create-task` 走"场景 C 失败兜底"输出，提示用户手动重试或在事后写入 `issue_number`
+- 任意失败均不回滚 task.md；`create-task` 必须把结构化错误写入 `## 工作流告警`（`severity=ACTION_REQUIRED`，`code=ISSUE_CREATE_FAILED`，`target=issue`），再走"场景 C 失败兜底"输出，提示用户手动重试或在事后写入 `issue_number`

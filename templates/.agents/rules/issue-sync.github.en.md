@@ -66,6 +66,17 @@ Key rules:
 - insufficient permission only affects direct Issue metadata writes and must not stop the skill
 - keep the existing `2>/dev/null || true` error-tolerance pattern
 
+When the caller has a `{task-id}` / task directory, permission degradation or critical sync failure must be recorded in `## Workflow Warnings`:
+
+```bash
+node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} \
+  --step issue-sync --severity IMPORTANT --code PERMISSION_DEGRADED \
+  --target "{operation}" --message "{reason}" \
+  --action "Wait for the bot/maintainer to backfill, or rerun the workflow step after permissions are available"
+```
+
+Comment create/update failures and exhausted network retries that affect reviewer visibility use `severity=ACTION_REQUIRED` with `code=COMMENT_SYNC_FAILED` or `NETWORK_RETRY_EXHAUSTED`.
+
 ## External Contributor Locking
 
 Maintainers (`has_triage=true`) are never blocked. External contributors (`has_triage=false`) must check whether the current task already has a `task` comment author on the Issue before they start.
@@ -209,6 +220,8 @@ EOF
 ```
 
 Comment publishing is not gated by `has_triage` or `has_push`.
+
+If comment lookup, creation, or update fails and the caller has a task directory, record a Workflow Warning (`step=issue-sync`, `severity=ACTION_REQUIRED`, `code=COMMENT_SYNC_FAILED`, `target={file-stem}`) and surface it in the final Workflow Warnings output block.
 
 ## task.md Comment Sync
 

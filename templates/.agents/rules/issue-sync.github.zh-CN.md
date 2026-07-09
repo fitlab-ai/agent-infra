@@ -66,6 +66,17 @@ has_push=$(printf '%s' "$repo_perms" | grep -q '"push":true' 2>/dev/null && echo
 - 权限不足只影响直接写 Issue 元数据的步骤，不中断整个技能
 - 现有 `2>/dev/null || true` 容错模式保持不变
 
+当调用方存在 `{task-id}` / task 目录时，权限降级或关键同步失败必须写入 `## 工作流告警`：
+
+```bash
+node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} \
+  --step issue-sync --severity IMPORTANT --code PERMISSION_DEGRADED \
+  --target "{operation}" --message "{reason}" \
+  --action "等待 bot/维护者补位，或在具备权限后重跑对应 workflow 步骤"
+```
+
+评论创建 / 更新失败、网络重试耗尽等影响后续 reviewer 可见性的失败使用 `severity=ACTION_REQUIRED` 和 `code=COMMENT_SYNC_FAILED` 或 `NETWORK_RETRY_EXHAUSTED`。
+
 ## 外部开发者锁定机制
 
 维护者（`has_triage=true`）不受限制。外部开发者（`has_triage=false`）在开始任务前，必须先检查 Issue 上是否已有当前任务的 `task` 留言作者。
@@ -209,6 +220,8 @@ EOF
 ```
 
 评论发布不受 `has_triage` / `has_push` 限制，认证用户可正常执行。
+
+若评论查询、创建或更新失败且调用方有关联任务目录，记录 Workflow Warning（`step=issue-sync`、`severity=ACTION_REQUIRED`、`code=COMMENT_SYNC_FAILED`、`target={file-stem}`），并在最终输出的 Workflow Warnings 块提示人工处理。
 
 ## task.md 评论同步
 

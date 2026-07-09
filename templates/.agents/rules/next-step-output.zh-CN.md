@@ -1,10 +1,11 @@
 # 下一步输出规则
 
-本文件定义 skill「告知用户 / 下一步」输出的三类**相互独立**的规则（第 3 类仅 review-* 适用）；渲染最终输出前先读取本文件并落实其中适用的规则：
+本文件定义 skill「告知用户 / 下一步」输出的四类**相互独立**的规则（第 3 类仅 review-* 适用）；渲染最终输出前先读取本文件并落实其中适用的规则：
 
 1. **下一步输出结构**：「下一步」命令与「任务信息」段如何呈现任务 ID 形态（占位符 / 取短号 / 回退）。
 2. **Agent 输出收尾行（Completed at）**：面向用户输出的**绝对最后一行**，**独立于「下一步」块**，正常 / 错误 / 早退路径都适用。
 3. **人工裁决待办前置块**：仅 `review-analysis` / `review-plan` / `review-code`，且本阶段存在待裁决项（`{h} > 0`）时适用——在「下一步」命令前展开待裁决项并提示先完成裁决。
+4. **Workflow Warnings 输出块**：当前 task.md 存在 `status=open` 的 `## 工作流告警` 行时适用——在所有常规信息和「下一步」命令之后、`Completed at` 之前输出告警摘要。
 
 ## 占位符语义
 
@@ -61,6 +62,19 @@ Completed at: YYYY-MM-DD HH:mm:ss
 - 取值命令（本地时区、不带偏移）：`date "+%Y-%m-%d %H:%M:%S"`
 - 位置：必须是整段面向用户输出的最后一行，排在所有「下一步」命令之后。若某场景在命令之后还有条件性提醒行（如 manual-validation 提醒），收尾行排在该提醒行之后。
 - 该行只用于终端扫视，不写入任何产物文件或 Issue/PR 评论；完成时刻的单一事实源仍是 task.md 的 Activity Log。
+
+## Workflow Warnings 输出块
+
+若当前任务的 `## 工作流告警` / `## Workflow Warnings` 表中存在 `status=open` 行，skill 最终输出必须在所有常规信息和「下一步」命令之后、`Completed at` 之前追加摘要块；无 open 告警时不输出本块。
+
+格式：
+
+```text
+[ACTION REQUIRED] Workflow warnings are open:
+  - WW-N {code} ({target}): {action}
+```
+
+`severity=ACTION_REQUIRED` 的行使用 `[ACTION REQUIRED]`；只有 `IMPORTANT` 行时使用 `[IMPORTANT]`。`{code}`、`{target}`、`{action}` 直接来自告警表对应列。
 
 ## 人工裁决待办前置块（review-* 专用，{h} > 0 时）
 
