@@ -41,7 +41,6 @@ const lowFrequencyCommands = [
   "close-dependabot",
   "complete-manual-validation",
   "create-release-note",
-  "entropy-check",
   "import-codescan",
   "import-dependabot",
   "init-labels",
@@ -53,6 +52,10 @@ const lowFrequencyCommands = [
   "test-integration",
   "update-agent-infra",
   "upgrade-dependency"
+];
+
+const projectLocalCommands = [
+  "entropy-check"
 ];
 
 function claudeCommandTargets(command: string): string[] {
@@ -234,7 +237,7 @@ test("update-agent-infra template copies stay in sync with working files", () =>
 });
 
 test("Claude command disable-model-invocation settings match command frequency", () => {
-  const expectedCommands = [...highFrequencyCommands, ...lowFrequencyCommands].sort();
+  const expectedCommands = [...highFrequencyCommands, ...lowFrequencyCommands, ...projectLocalCommands].sort();
   const localCommands = listFilesRecursive(".claude/commands")
     .filter((relativePath) => relativePath.endsWith(".md"))
     .map((relativePath) => path.basename(relativePath, ".md"))
@@ -260,6 +263,41 @@ test("Claude command disable-model-invocation settings match command frequency",
         `${relativePath} should disable semantic preloading for low-frequency commands`
       );
     });
+  });
+});
+
+test("project-local commands are not distributed through templates", () => {
+  const collaborator = JSON.parse(read(".agents/.airc.json"));
+  const project = collaborator.project;
+
+  projectLocalCommands.forEach((command) => {
+    [
+      `.claude/commands/${command}.md`,
+      `.opencode/commands/${command}.md`,
+      `.gemini/commands/${project}/${command}.toml`,
+      `.agents/skills/${command}/SKILL.md`
+    ].forEach((relativePath) => {
+      assert.ok(exists(relativePath), `${relativePath} should exist locally`);
+    });
+
+    [
+      `templates/.claude/commands/${command}.en.md`,
+      `templates/.claude/commands/${command}.zh-CN.md`,
+      `templates/.opencode/commands/${command}.en.md`,
+      `templates/.opencode/commands/${command}.zh-CN.md`,
+      `templates/.gemini/commands/_project_/${command}.en.toml`,
+      `templates/.gemini/commands/_project_/${command}.zh-CN.toml`,
+      `templates/.agents/skills/${command}/SKILL.en.md`,
+      `templates/.agents/skills/${command}/SKILL.zh-CN.md`
+    ].forEach((relativePath) => {
+      assert.equal(exists(relativePath), false, `${relativePath} should not be distributed`);
+    });
+
+    assert.match(
+      read(`.claude/commands/${command}.md`),
+      /^disable-model-invocation: true$/m,
+      `.claude/commands/${command}.md should stay disabled for semantic preloading`
+    );
   });
 });
 

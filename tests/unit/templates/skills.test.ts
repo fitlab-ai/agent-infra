@@ -74,7 +74,7 @@ test("SKILL.md reference paths point to existing files", () => {
   });
 });
 
-test("entropy-check defines review checklist and report template sections", () => {
+test("local entropy-check defines review checklist and report template sections", () => {
   const skill = read(".agents/skills/entropy-check/SKILL.md");
   const checklist = read(".agents/skills/entropy-check/reference/checklist.md");
   const reportTemplate = read(".agents/skills/entropy-check/reference/report-template.md");
@@ -89,6 +89,8 @@ test("entropy-check defines review checklist and report template sections", () =
       `.agents/skills/entropy-check/SKILL.md should reference ${referencePath}`
     );
   });
+
+  assert.match(skill, /^distribution: local$/m);
 
   [
     "Issue/PR",
@@ -485,7 +487,11 @@ test("local test skill documents smoke / core / full layered commands", () => {
 });
 
 test("skill command templates use thin adapter bodies", () => {
-  const skills = listSkillNames();
+  const skills = listSkillNames().filter((skill) =>
+    exists(`templates/.agents/skills/${skill}/SKILL.en.md`) ||
+    exists(`templates/.agents/skills/${skill}/SKILL.zh-CN.md`) ||
+    exists(`templates/.agents/skills/${skill}/SKILL.md`)
+  );
 
   skills.forEach((skill) => {
     const spec = commandSpecs[skill] || {};

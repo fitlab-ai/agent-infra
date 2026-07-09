@@ -1,14 +1,16 @@
 ---
 name: entropy-check
+distribution: local
 description: >
-  周期性审查项目软熵增并输出结构化熵减审查报告。
-  当需要在发版前或维护窗口识别规则重叠、文档膨胀、死约定和版本散落风险时使用。
+  周期性审查 agent-infra 仓库软熵增并输出结构化熵减审查报告。
+  当本仓库需要在发版前或维护窗口识别规则重叠、文档膨胀、死约定和版本散落风险时使用。
 ---
 
 # 熵减审查
 
 ## 行为边界 / 关键规则
 
+- 本技能是 agent-infra 仓库本地维护技能，不属于 `update-agent-infra` 分发模板。
 - 本技能不修改业务代码、规则、skill 或文档；只创建一份审查报告。
 - 报告写入 `.agents/workspace/logs/entropy-check/entropy-check-YYYYMMDD-HHMMSS.md`。
 - 发现项只给出证据与建议，不自动创建任务、不自动改文件。

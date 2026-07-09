@@ -77,7 +77,6 @@ agent-infra 提供 **丰富的内置 AI skills**。它们按使用场景分组�
 | `init-labels` | 初始化仓库标准 GitHub labels 体系。 | 无 | 新仓库首次配置 labels 时。 |
 | `init-milestones` | 初始化仓库 milestones 结构。 | 无 | 新仓库首次建立里程碑时。 |
 | `archive-tasks` | 将已完成任务按日期归档到目录中，并生成 `manifest` 索引。 | `[--days N \| --before DATE \| TASK-ID...]` | 需要定期清理 `completed/` 目录时。 |
-| `entropy-check` | 审查项目软熵增并输出结构化熵减审查报告。 | 无 | 发版前或维护窗口识别规则重叠、文档膨胀、死约定和版本散落风险。 |
 | `update-agent-infra` | 将项目协作基础设施升级到最新模板版本。 | 无 | 需要刷新共享 AI 工具层时。 |
 
 > 所有 skills 都可跨支持的 AI TUI 复用。变化的只是命令前缀，工作流语义保持一致。
