@@ -1,4 +1,5 @@
 import type { ServerConfig } from '../config.ts';
+import type { OutboundMessage } from '../display.ts';
 import type { Logger } from '../logger.ts';
 
 // Adapter contract for agent-infra-server.
@@ -19,6 +20,7 @@ export type InboundMessage = {
   messageId: string;
   raw: unknown;
   reply: (text: string) => Promise<void>;
+  replyDisplay?: (message: OutboundMessage) => Promise<void>;
 };
 
 // Runtime context passed to every adapter's start(). dispatch() is registered
@@ -36,6 +38,7 @@ export type Adapter = {
   start: (ctx: AdapterCtx) => Promise<void>;
   stop: () => Promise<void>;
   sendMessage: (target: { chatId: string }, text: string) => Promise<void>;
+  sendDisplayMessage?: (target: { chatId: string }, message: OutboundMessage) => Promise<void>;
 };
 
 // The shape of an adapter module's default export (a factory).

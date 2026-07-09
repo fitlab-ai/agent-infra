@@ -1,3 +1,4 @@
+import { streamEvent, type OutboundMessage } from './display.ts';
 import { redactSecrets } from './redact.ts';
 import type { RunnerResult } from './runner.ts';
 
@@ -19,9 +20,9 @@ function chunks(text: string, size: number): string[] {
 export async function streamCommand(
   options: StreamOptions,
   run: (emit?: (chunk: string) => Promise<void>) => Promise<RunnerResult>,
-  send: (text: string) => Promise<void>
+  send: (message: OutboundMessage) => Promise<void>
 ): Promise<RunnerResult> {
-  await send(`started ${options.title}`);
+  await send(streamEvent(options.title, 'started'));
   const size = options.chunkChars ?? 4000;
   const throttleMs = options.throttleMs ?? 0;
   let streamed = false;
@@ -34,7 +35,7 @@ export async function streamCommand(
     buffer = '';
     lastFlush = Date.now();
     for (const chunk of chunks(text, size)) {
-      await send(chunk);
+      await send(streamEvent(options.title, 'chunk', chunk));
     }
   };
 
@@ -52,6 +53,6 @@ export async function streamCommand(
     buffer += [result.stdout, result.stderr].filter(Boolean).join('\n');
   }
   await flush();
-  await send(`finished ${options.title} exitCode=${result.exitCode} signal=${result.signal ?? 'null'}`);
+  await send(streamEvent(options.title, 'finished', undefined, result.exitCode, result.signal));
   return result;
 }

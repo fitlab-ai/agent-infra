@@ -1,15 +1,92 @@
 import { VERSION } from '../version.ts';
 import { loadServerConfig } from './config.ts';
+import type { ServerConfig } from './config.ts';
 import { createLogger } from './logger.ts';
+import type { Logger } from './logger.ts';
 import { loadAdapters, unloadAdapters } from './plugin-loader.ts';
 import type { InboundMessage } from './adapters/_contract.ts';
 import { authorize } from './auth.ts';
 import { commandHelp, parseCommand } from './protocol.ts';
 import { runAi } from './runner.ts';
+import type { RunnerOptions, RunnerResult } from './runner.ts';
 import { streamCommand } from './streamer.ts';
+import { markdownMessage, replyOutbound, textMessage } from './display.ts';
+import { buildStatusModel, statusModelToDisplay, type StatusModel } from '../task/commands/status.ts';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+type MessageDispatcherOptions = {
+  config: ServerConfig;
+  logger: Pick<Logger, 'info'>;
+  runAi?: (args: string[], options?: RunnerOptions) => Promise<RunnerResult>;
+  buildStatusModel?: (ref: string) => StatusModel;
+  statusModelToDisplay?: (model: StatusModel) => ReturnType<typeof statusModelToDisplay>;
+};
+
+function isTaskStatus(argv: string[]): boolean {
+  return argv[0] === 'task' && argv[1] === 'status' && typeof argv[2] === 'string';
+}
+
+export function createMessageDispatcher(options: MessageDispatcherOptions): (message: InboundMessage) => Promise<void> {
+  const runAiImpl = options.runAi ?? runAi;
+  const buildStatusModelImpl = options.buildStatusModel ?? buildStatusModel;
+  const statusModelToDisplayImpl = options.statusModelToDisplay ?? statusModelToDisplay;
+
+  return async (message: InboundMessage): Promise<void> => {
+    const plan = parseCommand(message.text);
+    if (plan.kind === 'ignore') return;
+    if (plan.kind === 'error') {
+      await replyOutbound(message, textMessage(plan.message));
+      options.logger.info(`command rejected from ${message.adapter}:${message.userId}: ${plan.message}`);
+      return;
+    }
+    if (plan.kind === 'builtin' && plan.name === 'ping') {
+      await replyOutbound(message, textMessage(`pong ${VERSION}`));
+      return;
+    }
+    if (plan.kind === 'builtin' && plan.name === 'help') {
+      await replyOutbound(message, markdownMessage(commandHelp()));
+      return;
+    }
+    if (plan.kind === 'builtin' && plan.name === 'version') {
+      await replyOutbound(message, textMessage(`agent-infra ${VERSION}`));
+      return;
+    }
+    if (plan.kind === 'ai') {
+      const allowed = authorize(
+        { adapter: message.adapter, userId: message.userId },
+        plan.role,
+        options.config.auth
+      );
+      if (!allowed.ok) {
+        await replyOutbound(message, textMessage(allowed.message));
+        options.logger.info(`unauthorized command from ${message.adapter}:${message.userId}: ${allowed.message}`);
+        return;
+      }
+
+      if (isTaskStatus(plan.argv)) {
+        try {
+          await replyOutbound(message, statusModelToDisplayImpl(buildStatusModelImpl(plan.argv[2]!)));
+          return;
+        } catch {
+          // Fall back to the existing CLI streaming path. This preserves the
+          // old behavior for invalid refs and any status-model collection error.
+        }
+      }
+
+      await streamCommand(
+        {
+          title: `ai ${plan.argv.join(' ')}`,
+          chunkChars: typeof options.config.stream?.chunkChars === 'number' ? options.config.stream.chunkChars : 4000,
+          throttleMs: typeof options.config.stream?.throttleMs === 'number' ? options.config.stream.throttleMs : 1500
+        },
+        (emit) => runAiImpl(plan.argv, { onChunk: emit }),
+        (outbound) => replyOutbound(message, outbound)
+      );
+    }
+  };
 }
 
 // The daemon main loop. Runs in the detached child spawned by
@@ -40,48 +117,7 @@ export async function runDaemon(): Promise<void> {
     resolveShutdown = resolve;
   });
 
-  const dispatch = async (message: InboundMessage): Promise<void> => {
-    const plan = parseCommand(message.text);
-    if (plan.kind === 'ignore') return;
-    if (plan.kind === 'error') {
-      await message.reply(plan.message);
-      logger.info(`command rejected from ${message.adapter}:${message.userId}: ${plan.message}`);
-      return;
-    }
-    if (plan.kind === 'builtin' && plan.name === 'ping') {
-      await message.reply(`pong ${VERSION}`);
-      return;
-    }
-    if (plan.kind === 'builtin' && plan.name === 'help') {
-      await message.reply(commandHelp());
-      return;
-    }
-    if (plan.kind === 'builtin' && plan.name === 'version') {
-      await message.reply(`agent-infra ${VERSION}`);
-      return;
-    }
-    if (plan.kind === 'ai') {
-      const allowed = authorize(
-        { adapter: message.adapter, userId: message.userId },
-        plan.role,
-        config.auth
-      );
-      if (!allowed.ok) {
-        await message.reply(allowed.message);
-        logger.info(`unauthorized command from ${message.adapter}:${message.userId}: ${allowed.message}`);
-        return;
-      }
-      await streamCommand(
-        {
-          title: `ai ${plan.argv.join(' ')}`,
-          chunkChars: typeof config.stream?.chunkChars === 'number' ? config.stream.chunkChars : 4000,
-          throttleMs: typeof config.stream?.throttleMs === 'number' ? config.stream.throttleMs : 1500
-        },
-        (emit) => runAi(plan.argv, { onChunk: emit }),
-        (text) => message.reply(text)
-      );
-    }
-  };
+  const dispatch = createMessageDispatcher({ config, logger });
 
   const ctx = { config, logger, dispatch, signal: abortController.signal };
   const adapters = await loadAdapters(config, ctx);

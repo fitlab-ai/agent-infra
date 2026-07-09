@@ -1,5 +1,4 @@
 import * as lark from '@larksuiteoapi/node-sdk';
-import { stripVTControlCharacters } from 'node:util';
 
 // Transport layer for the feishu adapter. All @larksuiteoapi/node-sdk surface is
 // confined here so the adapter body (index.ts) depends only on this narrow
@@ -11,10 +10,10 @@ export type FeishuTransport = {
   // each inbound im.message.receive_v1.
   start: (onMessage: (raw: unknown) => Promise<void>) => Promise<void>;
   stop: () => Promise<void>;
-  send: (chatId: string, message: FeishuOutgoingMessage) => Promise<void>;
+  send: (chatId: string, message: FeishuMessagePayload) => Promise<void>;
 };
 
-export type FeishuOutgoingMessage = { kind: 'interactive'; title: string; text: string };
+export type FeishuMessagePayload = { msg_type: 'interactive'; content: string };
 
 type FeishuCreateData = {
   receive_id: string;
@@ -78,23 +77,11 @@ function resolveDomain(value: unknown): number {
   return value === 'lark' || value === 'Lark' ? lark.Domain.Lark : lark.Domain.Feishu;
 }
 
-export function cleanFeishuText(text: string): string {
-  return stripVTControlCharacters(text).replace(/\r\n/g, '\n');
-}
-
-export function cardMessage(text: string): FeishuOutgoingMessage {
-  return { kind: 'interactive', title: 'agent-infra', text: cleanFeishuText(text) };
-}
-
-export function toFeishuCreateData(chatId: string, message: FeishuOutgoingMessage): FeishuCreateData {
+export function toFeishuCreateData(chatId: string, message: FeishuMessagePayload): FeishuCreateData {
   return {
     receive_id: chatId,
-    msg_type: 'interactive',
-    content: JSON.stringify({
-      config: { wide_screen_mode: true },
-      header: { title: { tag: 'plain_text', content: message.title }, template: 'blue' },
-      elements: [{ tag: 'div', text: { tag: 'lark_md', content: message.text } }]
-    })
+    msg_type: message.msg_type,
+    content: message.content
   };
 }
 

@@ -1,5 +1,7 @@
 import type { Adapter, AdapterCtx, AdapterFactory, InboundMessage } from '../_contract.ts';
-import { cardMessage, createFeishuTransport, normalizeMessage } from './transport.ts';
+import type { OutboundMessage } from '../../display.ts';
+import { renderFeishuMessage } from './renderer.ts';
+import { createFeishuTransport, normalizeMessage } from './transport.ts';
 import type { FeishuTransport } from './transport.ts';
 
 // Assemble the feishu adapter. The transport is injectable so unit tests can
@@ -26,7 +28,10 @@ export function createFeishuAdapter(
             messageId: normalized.messageId,
             raw: normalized.raw,
             reply: async (text) => {
-              await transport.send(normalized.chatId, cardMessage(text));
+              await transport.send(normalized.chatId, renderFeishuMessage(text));
+            },
+            replyDisplay: async (message: OutboundMessage) => {
+              await transport.send(normalized.chatId, renderFeishuMessage(message));
             }
           };
           await adapterCtx.dispatch(message);
@@ -39,7 +44,10 @@ export function createFeishuAdapter(
       await transport.stop();
     },
     async sendMessage(target, text) {
-      await transport.send(target.chatId, cardMessage(text));
+      await transport.send(target.chatId, renderFeishuMessage(text));
+    },
+    async sendDisplayMessage(target, message) {
+      await transport.send(target.chatId, renderFeishuMessage(message));
     }
   };
 }

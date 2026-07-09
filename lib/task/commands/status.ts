@@ -7,6 +7,7 @@ import { enumerateArtifacts, type Artifact } from '../artifacts.ts';
 import { parseTaskFrontmatter, extractTitle, type Frontmatter } from '../frontmatter.ts';
 import { loadShortIdByTaskId } from '../short-id.ts';
 import { parseActivityLog, pairEntries } from './log.ts';
+import { statusCard, type DisplayMessage } from '../../server/display.ts';
 
 const USAGE = `Usage: ai task status <N | #N | TASK-id>
 
@@ -328,6 +329,21 @@ type StatusModel = {
   git: GitInfo;
 };
 
+type BuildStatusModelInput = {
+  taskId: string;
+  taskDir: string;
+  taskMdPath: string;
+  repoRoot: string;
+  shortId?: string;
+  run?: Runner;
+  now?: Date;
+};
+
+type BuildStatusModelOptions = {
+  run?: Runner;
+  now?: Date;
+};
+
 // Indent each label/value pair by two spaces and pad labels to a common width so
 // every section reads as an aligned "key   value" block.
 function renderPairs(rows: [string, string][]): string[] {
@@ -394,6 +410,73 @@ function renderStatus(model: StatusModel): string[] {
   return lines;
 }
 
+function modelTone(model: StatusModel): 'info' | 'success' | 'warning' | 'danger' | 'running' {
+  if (model.workflow.state === 'in-progress') return model.workflow.stale === 'yes' ? 'warning' : 'running';
+  if (model.metadata.some(([key, value]) => key === 'status' && value === 'completed')) return 'success';
+  if (model.metadata.some(([key, value]) => key === 'status' && (value === 'blocked' || value === 'cancelled'))) {
+    return 'danger';
+  }
+  return 'info';
+}
+
+function buildFromResolved(input: BuildStatusModelInput): StatusModel {
+  const content = fs.readFileSync(input.taskMdPath, 'utf8');
+  const fm = parseTaskFrontmatter(content);
+  const run = input.run ?? makeRunner(input.repoRoot);
+  const artifacts = enumerateArtifacts(input.taskDir);
+  const workflow = collectWorkflow(content, input.now);
+
+  return {
+    taskId: input.taskId,
+    shortId: input.shortId ?? loadShortIdByTaskId(input.repoRoot).get(input.taskId) ?? DASH,
+    title: extractTitle(content),
+    metadata: collectMetadata(fm),
+    artifacts: { count: artifacts.length, groups: groupArtifacts(artifacts) },
+    workflow,
+    runtime: collectRuntime(input.taskDir, workflow, run),
+    git: collectGit(fm.branch ?? '', run)
+  };
+}
+
+function buildStatusModel(ref: string, options?: BuildStatusModelOptions): StatusModel;
+function buildStatusModel(input: BuildStatusModelInput): StatusModel;
+function buildStatusModel(
+  refOrInput: string | BuildStatusModelInput,
+  options: BuildStatusModelOptions = {}
+): StatusModel {
+  if (typeof refOrInput !== 'string') {
+    return buildFromResolved(refOrInput);
+  }
+
+  const resolved = resolveTaskRef(refOrInput);
+  if (!resolved.ok) {
+    throw new Error(resolved.message);
+  }
+
+  return buildFromResolved({
+    taskId: resolved.taskId,
+    taskDir: resolved.taskDir,
+    taskMdPath: resolved.taskMdPath,
+    repoRoot: resolved.repoRoot,
+    run: options.run,
+    now: options.now
+  });
+}
+
+function statusModelToDisplay(model: StatusModel): DisplayMessage {
+  return statusCard(
+    `Task ${model.taskId} (${model.shortId})`,
+    modelTone(model),
+    [
+      ['workflow', model.workflow.state],
+      ['step', model.workflow.step],
+      ['runtime', model.runtime.status],
+      ['git', model.git.uncommitted]
+    ],
+    renderStatus(model).join('\n')
+  );
+}
+
 function status(args: string[] = []): void {
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(USAGE);
@@ -401,29 +484,14 @@ function status(args: string[] = []): void {
     return;
   }
 
-  const resolved = resolveTaskRef(args[0]!);
-  if (!resolved.ok) {
-    process.stderr.write(`ai task status: ${resolved.message}\n`);
+  let model: StatusModel;
+  try {
+    model = buildStatusModel(args[0]!);
+  } catch (error) {
+    process.stderr.write(`ai task status: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
     return;
   }
-
-  const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  const fm = parseTaskFrontmatter(content);
-  const run = makeRunner(resolved.repoRoot);
-  const artifacts = enumerateArtifacts(resolved.taskDir);
-  const workflow = collectWorkflow(content);
-
-  const model: StatusModel = {
-    taskId: resolved.taskId,
-    shortId: loadShortIdByTaskId(resolved.repoRoot).get(resolved.taskId) ?? DASH,
-    title: extractTitle(content),
-    metadata: collectMetadata(fm),
-    artifacts: { count: artifacts.length, groups: groupArtifacts(artifacts) },
-    workflow,
-    runtime: collectRuntime(resolved.taskDir, workflow, run),
-    git: collectGit(fm.branch ?? '', run)
-  };
 
   for (const line of renderStatus(model)) {
     process.stdout.write(`${line}\n`);
@@ -433,12 +501,14 @@ function status(args: string[] = []): void {
 export {
   status,
   makeRunner,
+  buildStatusModel,
   collectMetadata,
   groupArtifacts,
   collectGit,
   collectWorkflow,
   collectRuntime,
   renderStatus,
+  statusModelToDisplay,
   METADATA_KEYS
 };
-export type { Runner, GitInfo, WorkflowInfo, RuntimeInfo, StatusModel };
+export type { Runner, GitInfo, WorkflowInfo, RuntimeInfo, StatusModel, BuildStatusModelInput };

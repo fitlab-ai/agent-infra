@@ -5,12 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  buildStatusModel,
   collectMetadata,
   groupArtifacts,
   collectGit,
   collectWorkflow,
   collectRuntime,
   renderStatus,
+  statusModelToDisplay,
   type Runner,
   type StatusModel
 } from '../../../lib/task/commands/status.ts';
@@ -314,4 +316,72 @@ test('renderStatus emits workflow and runtime before git', () => {
 test('renderStatus shows (none) when a task has no artifacts', () => {
   const out = renderStatus({ ...baseModel, artifacts: { count: 0, groups: [] } }).join('\n');
   assert.match(out, /^Artifacts \(0\)\n {2}\(none\)$/m);
+});
+
+test('statusModelToDisplay maps status model to a structured status card', () => {
+  const display = statusModelToDisplay(baseModel);
+  assert.equal(display.kind, 'status-card');
+  assert.equal(display.title, 'Task TASK-20260101-000001 (#01)');
+  assert.equal(display.tone, 'running');
+  assert.deepEqual(display.fields?.slice(0, 4), [
+    ['workflow', 'in-progress'],
+    ['step', 'Code Task (Round 2)'],
+    ['runtime', 'running'],
+    ['git', 'clean']
+  ]);
+  assert.match(display.body ?? '', /Artifacts \(2\)/);
+});
+
+test('buildStatusModel constructs the model without parsing rendered stdout', () => {
+  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-build-'));
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-repo-'));
+  const taskId = 'TASK-20260101-000001';
+  const taskMdPath = path.join(taskDir, 'task.md');
+  fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# analysis\n', 'utf8');
+  fs.writeFileSync(
+    taskMdPath,
+    [
+      '---',
+      `id: ${taskId}`,
+      'type: feature',
+      'status: active',
+      'current_step: code',
+      'branch: feat',
+      '---',
+      '',
+      '# 任务：demo title',
+      '',
+      '## 活动日志',
+      '',
+      '- 2026-07-02 20:00:00+08:00 — **Code Task (Round 1) [started]** by codex — started',
+      '',
+      '## 完成检查清单'
+    ].join('\n'),
+    'utf8'
+  );
+  const run: Runner = (_file, args) => {
+    if (args.includes('--abbrev-ref')) return 'feat\n';
+    if (args.includes('--verify')) return 'deadbeef\n';
+    if (args[0] === 'status') return '';
+    throw new Error(`unexpected command ${args.join(' ')}`);
+  };
+
+  const model = buildStatusModel({
+    taskId,
+    taskDir,
+    taskMdPath,
+    repoRoot,
+    shortId: '#01',
+    run,
+    now: new Date('2026-07-02T12:30:00Z')
+  });
+
+  assert.equal(model.taskId, taskId);
+  assert.equal(model.title, 'demo title');
+  assert.equal(model.workflow.state, 'in-progress');
+  assert.equal(model.git.match, 'yes');
+  assert.deepEqual(model.artifacts.groups, [
+    { stage: 'analysis', files: ['analysis.md'] },
+    { stage: 'task', files: ['task.md'] }
+  ]);
 });
