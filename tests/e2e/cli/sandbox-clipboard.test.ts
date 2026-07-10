@@ -149,16 +149,22 @@ test("clipboard adapter factory returns the darwin adapter on macOS", async () =
   assert.equal(typeof adapter?.readImagePng, "function");
 });
 
-test("clipboard adapter factory disables linux", async () => {
+test("clipboard adapter factory returns the linux adapter", async () => {
   const { createClipboardAdapter } = await loadFreshEsm<IndexModule>("lib/sandbox/clipboard/index.js");
+  const adapter = createClipboardAdapter({ platformName: "linux" });
 
-  assert.equal(createClipboardAdapter({ platformName: "linux" }), null);
+  assert.notEqual(adapter, null);
+  assert.equal(typeof adapter?.available, "function");
+  assert.equal(typeof adapter?.readImagePng, "function");
 });
 
-test("clipboard adapter factory disables win32", async () => {
+test("clipboard adapter factory returns the win32 adapter", async () => {
   const { createClipboardAdapter } = await loadFreshEsm<IndexModule>("lib/sandbox/clipboard/index.js");
+  const adapter = createClipboardAdapter({ platformName: "win32" });
 
-  assert.equal(createClipboardAdapter({ platformName: "win32" }), null);
+  assert.notEqual(adapter, null);
+  assert.equal(typeof adapter?.available, "function");
+  assert.equal(typeof adapter?.readImagePng, "function");
 });
 
 test("clipboard adapter factory disables unknown platforms", async () => {
@@ -167,7 +173,7 @@ test("clipboard adapter factory disables unknown platforms", async () => {
   assert.equal(createClipboardAdapter({ platformName: "sunos" as NodeJS.Platform }), null);
 });
 
-test("clipboard bridge falls back with adapter-null warning on linux TTYs", async () => {
+test("clipboard bridge falls back with adapter-null warning on TTYs", async () => {
   const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
   const stdin = new EventEmitter() as EventEmitter & { isTTY: boolean };
   const stdout = new EventEmitter() as EventEmitter & { isTTY: boolean };
@@ -183,6 +189,7 @@ test("clipboard bridge falls back with adapter-null warning on linux TTYs", asyn
     container: "demo",
     home: "/tmp/home",
     platformName: "linux",
+    adapter: null,
     stdin: stdin as never,
     stdout: stdout as never,
     runInteractive(_engine, cmd, args) {

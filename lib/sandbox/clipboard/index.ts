@@ -1,7 +1,9 @@
 import { platform } from 'node:os';
 import { createDarwinClipboardAdapter, type DarwinClipboardAdapter } from './darwin.ts';
+import { createLinuxClipboardAdapter, type LinuxClipboardAdapter } from './linux.ts';
+import { createWin32ClipboardAdapter, type Win32ClipboardAdapter } from './win32.ts';
 
-export type ClipboardAdapter = DarwinClipboardAdapter;
+export type ClipboardAdapter = DarwinClipboardAdapter | LinuxClipboardAdapter | Win32ClipboardAdapter;
 
 export function createClipboardAdapter({
   platformName = platform()
@@ -10,12 +12,9 @@ export function createClipboardAdapter({
     case 'darwin':
       return createDarwinClipboardAdapter();
     case 'linux':
-      // Future work: dispatch based on $WAYLAND_DISPLAY (wl-paste) or $DISPLAY (xclip);
-      // see Issue #386 follow-up. Returning null disables the bridge for now.
-      return null;
+      return createLinuxClipboardAdapter();
     case 'win32':
-      // Future work: native Win32 clipboard reader. Returning null disables the bridge.
-      return null;
+      return createWin32ClipboardAdapter();
     default:
       return null;
   }
