@@ -380,6 +380,81 @@ test("clipboard bridge injects bracketed paste for image Ctrl+V", async () => {
   }
 });
 
+test("clipboard bridge converts pasted Windows image paths to container clipboard paths", async () => {
+  const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-bridge-home-"));
+  const stdin = new EventEmitter() as EventEmitter & {
+    isTTY: boolean;
+    setRawMode(value: boolean): void;
+    resume(): void;
+  };
+  const stdout = new EventEmitter() as EventEmitter & {
+    isTTY: boolean;
+    columns: number;
+    rows: number;
+    write(chunk: string): void;
+  };
+  const writes: string[] = [];
+  const rawModes: boolean[] = [];
+  const pastedPath = "C:\\Users\\me\\Pictures\\image.png";
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  let exitHandler: PtyExitHandler | null = null;
+  let observedText = "";
+
+  stdin.isTTY = true;
+  stdin.setRawMode = (value) => { rawModes.push(value); };
+  stdin.resume = () => {};
+  stdout.isTTY = true;
+  stdout.columns = 100;
+  stdout.rows = 30;
+  stdout.write = () => {};
+
+  try {
+    const promise = runInteractiveWithClipboardBridge({
+      engine: "native",
+      dockerArgs: ["exec", "-it", "demo", "bash"],
+      container: "demo",
+      home: tmpDir,
+      platformName: "win32",
+      stdin: stdin as never,
+      stdout: stdout as never,
+      adapter: {
+        available: () => ({ ok: true }),
+        readImagePng: () => null,
+        readImageFromPath: () => null,
+        readImageFromText: (text) => {
+          observedText = text;
+          return text === pastedPath ? png : null;
+        }
+      },
+      runOk: () => true,
+      loadPty: async () => ({
+        spawn() {
+          return {
+            onData() {},
+            onExit(callback) { exitHandler = callback; },
+            write(data) { writes.push(data); },
+            resize() {},
+            kill() {}
+          };
+        }
+      })
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    stdin.emit("data", Buffer.from(pastedPath, "utf8"));
+    invokeExitHandler(exitHandler, { exitCode: 0 });
+
+    assert.equal(await promise, 0);
+    assert.equal(observedText, pastedPath);
+    assert.equal(writes.length, 1);
+    assert.match(writes[0] ?? "", /^\x1b\[200~\/clipboard\/[a-f0-9]{16}\.png\x1b\[201~$/);
+    assert.deepEqual(rawModes, [true, false]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("clipboard bridge silently forwards Ctrl+V when the clipboard holds no image", async () => {
   const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
   const stdin = new EventEmitter() as EventEmitter & {

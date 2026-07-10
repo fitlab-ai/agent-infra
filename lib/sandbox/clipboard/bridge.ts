@@ -30,8 +30,13 @@ type BridgeOptions = {
   createDetector?: () => CtrlVDetector;
 };
 
+type TextImageClipboardAdapter = ClipboardAdapter & {
+  readImageFromText?: (text: string) => Buffer | null;
+};
+
 const FALLBACK_PREFIX = 'Warning: clipboard image paste bridge disabled';
 const PARTIAL_ESCAPE_FLUSH_MS = 30;
+const BRACKETED_PASTE_RE = /^\x1b\[200~([\s\S]*)\x1b\[201~$/u;
 
 // Node's stdin.setRawMode(true) uses libuv's RAW mode, which (unlike the
 // cfmakeraw that `docker exec -it` applies on the non-bridge path) keeps ONLCR
@@ -147,7 +152,7 @@ async function runBridge({
     clearFlushTimer();
     for (const token of detector.feed(inputDecoder.write(chunk))) {
       if (token.kind === 'text') {
-        child.write(token.raw);
+        handleText(token.raw, child);
       } else {
         handleCtrlV(token, child);
       }
@@ -157,7 +162,7 @@ async function runBridge({
         flushTimer = null;
         for (const token of detector.flush()) {
           if (token.kind === 'text') {
-            child.write(token.raw);
+            handleText(token.raw, child);
           } else {
             handleCtrlV(token, child);
           }
@@ -168,6 +173,37 @@ async function runBridge({
   const onResize = () => child.resize(stdout.columns || 120, stdout.rows || 40);
   const onSigint = () => child.kill('SIGINT');
   const onSigterm = () => child.kill('SIGTERM');
+
+  function writeImagePaste(png: Buffer, target: PtyProcess): void {
+    const filename = pngClipboardFilename(png);
+    writeClipboardPngAtomic(clipboardHostDir(home), filename, png);
+    pruneClipboardDir(clipboardHostDir(home));
+    target.write(buildBracketedPaste(containerClipboardPath(filename)));
+  }
+
+  function handleText(raw: string, target: PtyProcess): void {
+    const textAdapter = adapter as TextImageClipboardAdapter;
+    const pastedText = extractSinglePathPaste(raw);
+    if (!textAdapter.readImageFromText || pastedText === null) {
+      target.write(raw);
+      return;
+    }
+
+    try {
+      const png = textAdapter.readImageFromText(pastedText);
+      if (!png) {
+        target.write(raw);
+        return;
+      }
+      writeImagePaste(png, target);
+    } catch (error) {
+      target.write(raw);
+      if (!warnedPasteFailure) {
+        warnedPasteFailure = true;
+        writeStderr(`Warning: clipboard image paste failed; forwarded pasted text (${error instanceof Error ? error.message : 'unknown error'})\n`);
+      }
+    }
+  }
 
   function handleCtrlV(match: CtrlVMatch, target: PtyProcess): void {
     try {
@@ -181,10 +217,7 @@ async function runBridge({
         target.write(match.raw);
         return;
       }
-      const filename = pngClipboardFilename(png);
-      writeClipboardPngAtomic(clipboardHostDir(home), filename, png);
-      pruneClipboardDir(clipboardHostDir(home));
-      target.write(buildBracketedPaste(containerClipboardPath(filename)));
+      writeImagePaste(png, target);
     } catch (error) {
       target.write(match.raw);
       if (!warnedPasteFailure) {
@@ -219,14 +252,14 @@ async function runBridge({
     try {
       for (const token of detector.feed(inputDecoder.end())) {
         if (token.kind === 'text') {
-          child.write(token.raw);
+          handleText(token.raw, child);
         } else {
           handleCtrlV(token, child);
         }
       }
       for (const token of detector.flush()) {
         if (token.kind === 'text') {
-          child.write(token.raw);
+          handleText(token.raw, child);
         }
       }
     } catch {
@@ -242,6 +275,15 @@ async function runBridge({
     stdin.pause?.();
     restoreTerminal();
   }
+}
+
+function extractSinglePathPaste(raw: string): string | null {
+  const match = raw.match(BRACKETED_PASTE_RE);
+  const text = (match ? match[1] : raw)?.trim();
+  if (!text || /[\r\n]/u.test(text)) {
+    return null;
+  }
+  return text;
 }
 
 function onceExit(
