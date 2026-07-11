@@ -58,6 +58,37 @@ test("all skill doc files have consecutive step numbering", () => {
   });
 });
 
+test("complete-manual-validation skill docs retain completion control structures", () => {
+  skillDocPaths("complete-manual-validation").forEach((relativePath) => {
+    const content = read(relativePath);
+    const checklistHeading = relativePath.includes(".en.")
+      ? "Completion Checklist"
+      : "完成检查清单";
+    const checklist = sectionContent(content, checklistHeading);
+    const gateCommand = "node .agents/scripts/validate-artifact.js gate complete-manual-validation";
+    const gateIndex = content.indexOf(gateCommand);
+
+    assert.notEqual(gateIndex, -1, `${relativePath} should include the verification gate command`);
+
+    const afterGate = content.slice(gateIndex + gateCommand.length);
+    const nextStep = afterGate.search(/^### /m);
+    const gateHandling = nextStep === -1 ? afterGate : afterGate.slice(0, nextStep);
+
+    [0, 1, 2].forEach((exitCode) => {
+      assert.match(
+        gateHandling,
+        new RegExp(`^- .*\\b${exitCode}\\b`, "m"),
+        `${relativePath} should structurally handle exit code ${exitCode}`
+      );
+    });
+    assert.equal(
+      [...checklist.matchAll(/^- \[[ x]\] /gm)].length,
+      5,
+      `${relativePath} should retain five completion checklist items`
+    );
+  });
+});
+
 test("SKILL.md reference paths point to existing files", () => {
   skillDocFiles.forEach((relativePath) => {
     const content = read(relativePath);

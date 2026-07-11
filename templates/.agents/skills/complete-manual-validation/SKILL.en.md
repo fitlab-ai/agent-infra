@@ -82,7 +82,12 @@ Follow `reference/summary-update.md` to resolve the PR number, find the `sync-pr
 
 ### 5. Create the Manual Validation Artifact
 
-Before this step, read `reference/report-template.md`. Create `{manual-validation-artifact}` with state check, validation verdict, validation scope, validation details, and PR summary sync result.
+Before this step, read `reference/report-template.md`. Create `{manual-validation-artifact}` and record:
+- State check
+- Validation verdict
+- Validation scope
+- Validation details
+- PR summary sync result
 
 ### 6. Update task.md
 
@@ -113,6 +118,25 @@ Run:
 node .agents/scripts/validate-artifact.js gate complete-manual-validation .agents/workspace/active/{task-id} {manual-validation-artifact} --format text
 ```
 
+Handle the result:
+- Exit code 0 -> tell the user
+- Exit code 1 -> fix the reported problem and rerun
+- Exit code 2 -> stop and report that manual intervention is required
+
 ### 8. Tell the User
 
-Report the artifact path, PR summary sync result, and verification output. Before rendering the final output, read `.agents/rules/next-step-output.md` and append `Completed at: YYYY-MM-DD HH:mm:ss` as the absolute last line.
+Report:
+- Artifact path
+- PR summary sync result
+- Current verification output
+- Suggested next step: continue with `commit` / `create-pr`, or enter the final review flow
+
+Before rendering the final output, read `.agents/rules/next-step-output.md` and append `Completed at: YYYY-MM-DD HH:mm:ss` as the absolute last line.
+
+## Completion Checklist
+
+- [ ] Read `reference/summary-update.md`
+- [ ] Created the manual validation artifact
+- [ ] Updated the same PR summary comment, or stopped according to failure semantics
+- [ ] Updated task.md and appended the Activity Log
+- [ ] Ran the verification gate

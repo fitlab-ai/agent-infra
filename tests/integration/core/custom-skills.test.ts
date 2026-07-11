@@ -65,6 +65,7 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
         'name: local-rules',
         'description: "本地规范检查"',
         'args: "<task-id>"',
+        'claude-disable-model-invocation: true',
         "---",
         "",
         "# Local Rules",
@@ -113,10 +114,16 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
     const openCodeCommand = fs.readFileSync(path.join(projectRoot, ".opencode/commands/local-rules.md"), "utf8");
 
     assert.match(claudeCommand, /usage: "\/local-rules <task-id>"/);
+    assert.match(claudeCommand, /^disable-model-invocation: true$/m);
     assert.doesNotMatch(claudeCommand, /ARGUMENTS:/);
     assert.match(claudeCommand, /读取并执行 `\.agents\/skills\/local-rules\/SKILL\.md` 中的 local-rules 技能。/);
+    assert.doesNotMatch(geminiCommand, /disable-model-invocation/);
+    assert.doesNotMatch(openCodeCommand, /disable-model-invocation/);
     assert.match(geminiCommand, /参数：\{\{args\}\}/);
     assert.match(openCodeCommand, /参数：\$ARGUMENTS/);
+
+    const sharedClaudeCommand = fs.readFileSync(path.join(projectRoot, ".claude/commands/shared-rules.md"), "utf8");
+    assert.doesNotMatch(sharedClaudeCommand, /^disable-model-invocation: true$/m);
 
     assert.equal(firstReport.custom.commands.generated.length, 6);
     assert.equal(secondReport.custom.commands.updated.length, 0);

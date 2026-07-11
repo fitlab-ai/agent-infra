@@ -286,7 +286,8 @@ function detectCustomSkills(projectRoot, templateSkillNames) {
         dirName: entry.name,
         name: meta.name || entry.name,
         description: meta.description || '',
-        args: meta.args || null
+        args: meta.args || null,
+        claudeDisableModelInvocation: meta['claude-disable-model-invocation'] === 'true'
       };
     })
     .filter(Boolean)
@@ -507,6 +508,10 @@ function generateClaudeCommand(skill, lang) {
 
   if (skill.args) {
     lines.push(`usage: ${JSON.stringify(`/${skill.dirName} ${skill.args}`)}`);
+  }
+
+  if (skill.claudeDisableModelInvocation) {
+    lines.push('disable-model-invocation: true');
   }
 
   lines.push('---', '');

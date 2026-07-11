@@ -23,12 +23,14 @@ Minimum frontmatter:
 name: enforce-style
 description: "Apply team style checks before submitting code"
 args: "<task-id>"   # optional
+claude-disable-model-invocation: true   # optional; Claude Code only
 ---
 ```
 
 - `name`: user-facing skill name
 - `description`: used when generating editor command metadata
 - `args`: optional argument hint; agent-infra uses it when generating slash commands for supported AI TUIs
+- `claude-disable-model-invocation`: optional; when `true`, the generated Claude Code command disables model invocation. Gemini CLI and OpenCode commands are unaffected
 
 After adding the skill, run `update-agent-infra` again:
 
