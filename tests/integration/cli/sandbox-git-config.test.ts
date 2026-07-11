@@ -79,7 +79,7 @@ test("hostHasGpgKeys reports whether the host keyring is available", async () =>
   }), false);
 });
 
-test("ensureShellConfigSymlinks runs a single docker exec wiring all four $HOME entries", async () => {
+test("ensureShellConfigSymlinks wires all four $HOME entries without a shell command", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const calls: Array<{ engine: string; cmd: string; args: string[] }> = [];
   const fakeExec = (engine: string, cmd: string, args: string[]) => {
@@ -89,24 +89,18 @@ test("ensureShellConfigSymlinks runs a single docker exec wiring all four $HOME 
 
   sandboxCreate.ensureShellConfigSymlinks("docker", "agent-infra-dev-demo", fakeExec);
 
-  assert.equal(calls.length, 1, "single docker exec");
-  const call = required(calls[0]);
-  assert.equal(call.engine, "docker");
-  assert.equal(call.cmd, "docker");
-  assert.deepEqual(call.args.slice(0, 4), [
-    "exec",
-    "agent-infra-dev-demo",
-    "bash",
-    "-lc"
-  ]);
-  const script = required(call.args[4]);
-  for (const file of [".gitconfig", ".gitignore_global", ".stCommitMsg", ".bash_aliases"]) {
-    assert.match(
-      script,
-      new RegExp(`ln -sf \\.host-shell-config/${file.replace(".", "\\.")} /home/devuser/${file.replace(".", "\\.")}`),
-      `script wires ${file}`
-    );
-  }
+  assert.deepEqual(calls, [".gitconfig", ".gitignore_global", ".stCommitMsg", ".bash_aliases"].map((file) => ({
+    engine: "docker",
+    cmd: "docker",
+    args: [
+      "exec",
+      "agent-infra-dev-demo",
+      "ln",
+      "-sf",
+      `.host-shell-config/${file}`,
+      `/home/devuser/${file}`
+    ]
+  })));
 });
 
 test("prepareHostShellConfig writes sanitized config files and returns read-only mount metadata", async () => {

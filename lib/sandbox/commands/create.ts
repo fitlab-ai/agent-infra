@@ -327,12 +327,14 @@ export function writeSanitizedGitconfig({
 const SHELL_CONFIG_SYMLINKS = ['.gitconfig', '.gitignore_global', '.stCommitMsg', '.bash_aliases'];
 
 export function ensureShellConfigSymlinks(engine: string, container: string, execFn: EngineExecFn = execEngine): void {
-  // Idempotent symlink setup. Runs against a started container so it also
-  // covers custom Dockerfiles that don't bake the symlinks into the image.
-  const script = SHELL_CONFIG_SYMLINKS
-    .map((file) => `ln -sf .host-shell-config/${file} ${CONTAINER_HOME}/${file}`)
-    .join(' && ');
-  execFn(engine, 'docker', ['exec', container, 'bash', '-lc', script], { stdio: 'ignore' });
+  // Idempotent symlink setup. Avoid a shell command here because Windows .cmd
+  // engine shims would interpret metacharacters in a `bash -lc` script before
+  // forwarding it to Docker.
+  for (const file of SHELL_CONFIG_SYMLINKS) {
+    execFn(engine, 'docker', [
+      'exec', container, 'ln', '-sf', `.host-shell-config/${file}`, `${CONTAINER_HOME}/${file}`
+    ], { stdio: 'ignore' });
+  }
 }
 
 export function prepareHostShellConfig({
