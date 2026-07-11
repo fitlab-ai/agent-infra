@@ -82,12 +82,7 @@ complete-manual-validation {task-ref} [{pr-ref}] {verification-summary}
 
 ### 5. 创建人工验证产物
 
-执行此步骤前，先读取 `reference/report-template.md`。创建 `{manual-validation-artifact}`，记录：
-- 状态核对
-- 验证结论
-- 验证范围
-- 验证详情
-- PR 摘要同步结果
+执行此步骤前，先读取 `reference/report-template.md`。创建 `{manual-validation-artifact}`，记录状态核对、验证结论、验证范围、验证详情和 PR 摘要同步结果。
 
 ### 6. 更新 task.md
 
@@ -118,25 +113,6 @@ date "+%Y-%m-%d %H:%M:%S%:z"
 node .agents/scripts/validate-artifact.js gate complete-manual-validation .agents/workspace/active/{task-id} {manual-validation-artifact} --format text
 ```
 
-处理结果：
-- 退出码 0 -> 告知用户
-- 退出码 1 -> 修复问题后重新运行
-- 退出码 2 -> 停止并告知需要人工介入
-
 ### 8. 告知用户
 
-输出：
-- 产物路径
-- PR 摘要同步结果
-- 当次完成校验输出
-- 下一步建议：继续 `commit` / `create-pr` 或进入最终审查流程
-
-渲染最终输出前，先读取 `.agents/rules/next-step-output.md`，并在绝对最后一行追加 `Completed at: YYYY-MM-DD HH:mm:ss`。
-
-## 完成检查清单
-
-- [ ] 已读取 `reference/summary-update.md`
-- [ ] 已创建人工验证产物
-- [ ] 已更新同一条 PR 摘要评论，或按失败语义停止
-- [ ] 已更新 task.md 并追加 Activity Log
-- [ ] 已运行完成校验
+输出产物路径、PR 摘要同步结果和当次完成校验输出。渲染最终输出前，先读取 `.agents/rules/next-step-output.md`，并在绝对最后一行追加 `Completed at: YYYY-MM-DD HH:mm:ss`。
