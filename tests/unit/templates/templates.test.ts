@@ -195,8 +195,7 @@ test("update-agent-infra template copies stay in sync with working files", () =>
   const referenceSyncFiles: Array<[string, string]> = listFilesRecursive("templates/.agents/skills")
     .filter((relativePath) =>
       /\/reference\/.*\.md$/.test(relativePath) &&
-      relativePath.includes(".en.") &&
-      relativePath !== "templates/.agents/skills/watch-pr/reference/monitor-and-heal.en.md"
+      relativePath.includes(".en.")
     )
     .map((templatePath) => [templatePath.replace(/^templates\//, "").replace(/\.en(?=\.[^.]+$)/, ""), templatePath]);
 

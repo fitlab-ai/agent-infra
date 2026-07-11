@@ -39,11 +39,19 @@ assert.match(content, /^name: code-task$/m);         // 正向断言已足够
 - **测试实现细节**：优先断言公开接口、产物、状态变化或错误结果；避免断言私有函数、内部调用顺序、临时数据结构。
 - **断言不充分**：断言必须锁定具体期望值；不要用"只要不抛异常""结果存在即可"替代对关键字段、数量和边界的验证。
 
-## 覆盖率定位（信息层）
+## 项目级测试策略
+
+仓库特定的命令、目录约定、覆盖率阈值、CI 集成和报告服务应记录在项目自己的测试文档中。新增测试前先读取该策略，并按测试的可观察范围与运行成本选择对应层级。
+
+如果项目没有定义分层测试套件，RED 与 GREEN 验证都使用项目的完整测试命令。不要在无关改动中自行引入测试层级或覆盖率门禁。
+
+### agent-infra 项目策略
+
+#### 覆盖率定位（信息层）
 
 > CI 中通过 `node --test --experimental-test-coverage` 输出覆盖率，仅作为"哪些文件被测试薄弱"的提示，**不作为 merge gate**。
 
-### 本地运行
+##### 本地运行
 
 ```bash
 npm run test:coverage
@@ -51,20 +59,20 @@ npm run test:coverage
 
 stdout 末尾会打印按文件粒度的行 / 分支 / 函数覆盖率以及未覆盖行号。
 
-### CI 展示
+##### CI 展示
 
 `.github/workflows/unit-tests.yml` 在 ubuntu-latest 分片上把覆盖率块写入 GitHub Actions 的 step summary（PR Checks 页可见）。Windows / macOS 分片不重复输出。
 
 README 顶部的 Codecov 徽章由 `.github/workflows/unit-tests.yml` 在 ubuntu-latest 分片上传 `coverage.lcov` 后由 Codecov 生成。
 
-### 边界
+##### 边界
 
 - **不设置百分比阈值**：`--test-coverage-lines/branches/functions` 等阈值参数禁止加入；Goodhart's law 提醒我们一旦把覆盖率作为指标，开发者会写"覆盖率友好但行为弱"的测试。
 - **第三方服务仅用于徽章**：已接入 Codecov 托管 README 覆盖率徽章，但通过根 `codecov.yml` 显式关闭其 project/patch status check 与 PR 评论——Codecov 在本项目只展示数字，不参与 merge 决策。不接入 coveralls 等其他服务。
 - **不区分 tier**：当前只对 full `test` tier 输出覆盖率；smoke / core tier 的覆盖率没有独立价值。
 - **不阻塞 PR**：CI 步骤 `continue-on-error: true`，即便覆盖率采集失败也不影响 merge。
 
-### 新测试该放哪一层
+#### 新测试该放哪一层
 
 测试文件放入哪一层决定它会被哪些 npm script 自动执行：
 
@@ -74,7 +82,7 @@ README 顶部的 Codecov 徽章由 `.github/workflows/unit-tests.yml` 在 ubuntu
 
 模块继续作为第二级目录（如 `cli`、`core`、`scripts`、`templates`）。共享 helper 和 fixtures 保持在 `tests/helpers/`、`tests/helpers.ts`、`tests/fixtures/`，不要放入任一 tier。
 
-### 与"测试 tier 覆盖"的关系
+#### 与"测试 tier 覆盖"的关系
 
 注意区分两个概念：
 

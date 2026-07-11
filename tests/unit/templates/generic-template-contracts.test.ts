@@ -30,6 +30,23 @@ function bashBlocks(content: string): string[] {
   return [...content.matchAll(/```bash\r?\n([\s\S]*?)\r?\n```/g)].map((match) => match[1] ?? "");
 }
 
+function contractEntries(content: string, name: string): Record<string, string> {
+  const normalized = content.replaceAll("\r\n", "\n");
+  const prefix = `\`\`\`text\n# ${name}\n`;
+  const start = normalized.indexOf(prefix);
+  const end = start < 0 ? -1 : normalized.indexOf("\n```", start + prefix.length);
+  assert.ok(start >= 0 && end >= 0, `expected ${name} contract`);
+  const block = normalized.slice(start + prefix.length, end);
+
+  return Object.fromEntries(
+    block.split(/\r?\n/).map((line) => {
+      const separator = line.indexOf(":");
+      assert.ok(separator > 0, `invalid ${name} entry: ${line}`);
+      return [line.slice(0, separator), line.slice(separator + 1).trim()];
+    })
+  );
+}
+
 function writeFakeGh(binDir: string): void {
   const fakeGh = path.join(binDir, "gh");
   fs.mkdirSync(binDir, { recursive: true });
@@ -142,6 +159,20 @@ test("generic test skill command examples remain configurable", () => {
       assert.ok(lines.every((line) => line.trimStart().startsWith("#")), `${language} commands must be opt-in examples`);
     }
   }
+});
+
+test("watch-pr templates declare a language-neutral self-heal test command contract", () => {
+  const contracts = ["en", "zh-CN"].map((language) => contractEntries(
+    read(`templates/.agents/skills/watch-pr/reference/monitor-and-heal.${language}.md`),
+    "self-heal-test-command-contract"
+  ));
+
+  const expected = {
+    primary: "failing-job-command",
+    "fallback-source": "project-test-skill",
+    unknown: "help"
+  };
+  assert.deepEqual(contracts, [expected, expected]);
 });
 
 test("milestone initialization follows SemVer precedence and preserves wide numeric fields", onPlatforms("linux", "darwin"), () => {

@@ -1099,3 +1099,60 @@ test("syncTemplates reports shared pre-commit as a merged pending file", async (
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("syncTemplates preserves project testing discipline as a merged file", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-testing-discipline-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const target = ".agents/rules/testing-discipline.md";
+    const localPolicy = "Project-specific testing policy\n";
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    writeFile(templateRoot, ".agents/rules/testing-discipline.en.md", "Common testing discipline\n");
+    writeFile(templateRoot, ".agents/rules/testing-discipline.zh-CN.md", "通用测试纪律\n");
+    writeFile(projectRoot, target, localPolicy);
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "zh-CN",
+      platform: { type: "github" },
+      files: {
+        managed: [".agents/rules/"],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const firstReport = syncTemplates(projectRoot, templateRoot);
+    const secondReport = syncTemplates(projectRoot, templateRoot);
+
+    assert.ok(
+      firstReport.registryAdded.some(
+        (entry) => entry.entry === ".agents/rules/testing-discipline.*" && entry.list === "merged"
+      )
+    );
+    assert.equal(fs.readFileSync(path.join(projectRoot, target), "utf8"), localPolicy);
+    assert.ok(firstReport.managed.skippedMerged.includes(target));
+    assert.ok(secondReport.managed.skippedMerged.includes(target));
+    assert.deepEqual(
+      firstReport.merged.pending.filter((entry) => entry.target === target),
+      [{ target, template: ".agents/rules/testing-discipline.zh-CN.md" }]
+    );
+    assert.deepEqual(firstReport.managed.written, []);
+    assert.deepEqual(secondReport.managed.written, []);
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

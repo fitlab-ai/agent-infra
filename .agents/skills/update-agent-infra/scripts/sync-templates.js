@@ -73,6 +73,7 @@ const DEFAULTS = {
       "**/test-integration.*",
       "**/test.*",
       "**/upgrade-dependency.*",
+      ".agents/rules/testing-discipline.*",
       ".agents/skills/post-release/SKILL.*",
       ".agents/skills/release/SKILL.*",
       ".agents/skills/test-integration/SKILL.*",

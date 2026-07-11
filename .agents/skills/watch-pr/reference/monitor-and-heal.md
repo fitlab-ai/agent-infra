@@ -12,6 +12,13 @@
 
 ## 自愈决策树
 
+```text
+# self-heal-test-command-contract
+primary: failing-job-command
+fallback-source: project-test-skill
+unknown: help
+```
+
 对每个失败 check，按下列顺序判定「自愈」还是「求助」：
 
 1. **能否定位到对应的 CI run**（按规则的「解析失败 run id」）？否 → 求助。
@@ -22,7 +29,7 @@
 4. 满足「可定位 + 代码层 + 未达上限」时执行一次自愈：
    - 自愈前先 `git status -s` 记录当前工作树，确保后续只纳入与本次失败相关的改动。
    - 在本地按日志定位并最小化修复（只动与该失败相关的代码 / 测试 / 配置）。
-   - 运行对应测试：优先失败 job 对应的本地命令；仓库统一回退 `npm run test:core`。**测试通过前不得提交或推送。**
+   - 运行对应测试：优先失败 job 对应的本地命令；否则读取项目 `test` skill，选择其中声明的 core 或 full 验证命令。两者均未知时进入求助出口。**测试通过前不得提交或推送。**
    - 测试通过后发布修复：按 `.agents/rules/commit-and-pr.md` 仅暂存本次相关文件（`git add <相关路径>`，避免 `git add -A` 卷入无关改动）→ 创建修复 commit（`git commit`）→ `git push` 到当前 PR 分支。
    - 记录本次修复的 commit SHA，修复计数 +1，回到 SKILL 步骤 2 重新监控。
    - 绝不执行与失败无关的「顺手优化」；不放宽 / 跳过失败的断言来「修绿」。
