@@ -578,6 +578,138 @@ test("base.dockerfile guards root host uid with useradd -o", () => {
   assert.match(content, /useradd -o -u \$\{HOST_UID\}/);
 });
 
+test("base.dockerfile handles the preinstalled ubuntu UID conflict", onPlatforms("linux", "darwin"), async (t) => {
+  const content = fs.readFileSync(filePath("lib/sandbox/runtimes/base.dockerfile"), "utf8");
+  const runBlock = content
+    .split(/^(?=FROM |USER |ENV |ARG |RUN |WORKDIR |CMD |COPY |ADD )/m)
+    .find((block) => block.startsWith("RUN ") && block.includes("useradd"));
+  assert.ok(runBlock, "expected a RUN block creating devuser");
+
+  const shellBody = runBlock.replace(/^RUN\s+/, "").replace(/\\\n\s*/g, " ").trim();
+  const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-user-stubs-"));
+  const logFile = path.join(stubDir, "invocations.log");
+  const stubs = {
+    id: [
+      "#!/bin/sh",
+      "printf 'id %s\\n' \"$*\" >> \"$INVOCATIONS_LOG\"",
+      "[ \"$*\" = \"-u ubuntu\" ] && [ -n \"$STUB_UBUNTU_UID\" ] || exit 1",
+      "printf '%s\\n' \"$STUB_UBUNTU_UID\""
+    ],
+    userdel: [
+      "#!/bin/sh",
+      "printf 'userdel %s\\n' \"$*\" >> \"$INVOCATIONS_LOG\"",
+      'exit "${STUB_USERDEL_STATUS:-0}"'
+    ],
+    groupadd: [
+      "#!/bin/sh",
+      "printf 'groupadd %s\\n' \"$*\" >> \"$INVOCATIONS_LOG\""
+    ],
+    useradd: [
+      "#!/bin/sh",
+      "printf 'useradd %s\\n' \"$*\" >> \"$INVOCATIONS_LOG\""
+    ]
+  };
+
+  try {
+    for (const [name, lines] of Object.entries(stubs)) {
+      fs.writeFileSync(path.join(stubDir, name), `${lines.join("\n")}\n`, { mode: 0o755 });
+    }
+
+    const cases = [
+      {
+        name: "removes a matching ubuntu account before creating devuser",
+        uid: "1000",
+        gid: "1000",
+        ubuntuUid: "1000",
+        userdelStatus: "0",
+        status: 0,
+        invocations: [
+          "id -u ubuntu",
+          "userdel -r ubuntu",
+          "groupadd -g 1000 devuser",
+          "useradd -u 1000 -g 1000 -m -s /bin/bash devuser"
+        ]
+      },
+      {
+        name: "preserves the macOS 501 mapping when ubuntu has UID 1000",
+        uid: "501",
+        gid: "20",
+        ubuntuUid: "1000",
+        userdelStatus: "0",
+        status: 0,
+        invocations: [
+          "id -u ubuntu",
+          "groupadd -g 20 devuser",
+          "useradd -u 501 -g 20 -m -s /bin/bash devuser"
+        ]
+      },
+      {
+        name: "creates devuser when the ubuntu account is absent",
+        uid: "1000",
+        gid: "1000",
+        ubuntuUid: "",
+        userdelStatus: "0",
+        status: 0,
+        invocations: [
+          "id -u ubuntu",
+          "groupadd -g 1000 devuser",
+          "useradd -u 1000 -g 1000 -m -s /bin/bash devuser"
+        ]
+      },
+      {
+        name: "keeps the root mapping branch unchanged",
+        uid: "0",
+        gid: "0",
+        ubuntuUid: "1000",
+        userdelStatus: "0",
+        status: 0,
+        invocations: [
+          "groupadd -o -g 0 devuser",
+          "useradd -o -u 0 -g 0 -m -s /bin/bash devuser"
+        ]
+      },
+      {
+        name: "stops before group creation when ubuntu cleanup fails",
+        uid: "1000",
+        gid: "1000",
+        ubuntuUid: "1000",
+        userdelStatus: "1",
+        status: 1,
+        invocations: [
+          "id -u ubuntu",
+          "userdel -r ubuntu"
+        ]
+      }
+    ];
+
+    for (const scenario of cases) {
+      await t.test(scenario.name, () => {
+        fs.rmSync(logFile, { force: true });
+        const result = spawnSync("/bin/sh", ["-c", shellBody], {
+          env: {
+            ...process.env,
+            PATH: `${stubDir}:${process.env.PATH}`,
+            HOST_UID: scenario.uid,
+            HOST_GID: scenario.gid,
+            INVOCATIONS_LOG: logFile,
+            STUB_UBUNTU_UID: scenario.ubuntuUid,
+            STUB_USERDEL_STATUS: scenario.userdelStatus
+          },
+          encoding: "utf8"
+        });
+        const invocations = fs.existsSync(logFile)
+          ? fs.readFileSync(logFile, "utf8").trim().split("\n").filter(Boolean)
+          : [];
+
+        assert.equal(result.status, scenario.status, result.stderr);
+        assert.deepEqual(invocations, scenario.invocations);
+      });
+    }
+  } finally {
+    fs.rmSync(stubDir, { recursive: true, force: true });
+  }
+});
+
 test("composeDockerfile rejects unknown runtimes", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
 

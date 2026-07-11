@@ -12,6 +12,9 @@ RUN if [ "${HOST_UID}" = "0" ]; then \
         (groupadd -o -g ${HOST_GID} devuser || true) && \
         useradd -o -u ${HOST_UID} -g ${HOST_GID} -m -s /bin/bash devuser; \
     else \
+        if ubuntu_uid="$(id -u ubuntu 2>/dev/null)" && [ "${ubuntu_uid}" = "${HOST_UID}" ]; then \
+            userdel -r ubuntu || exit 1; \
+        fi; \
         (groupadd -g ${HOST_GID} devuser || true) && \
         useradd -u ${HOST_UID} -g ${HOST_GID} -m -s /bin/bash devuser; \
     fi
