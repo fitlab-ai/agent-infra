@@ -98,6 +98,11 @@ Host aliases:
 type SandboxCreateConfig = ReturnType<typeof loadConfig>;
 type PreparedDockerfile = ReturnType<typeof prepareDockerfile>;
 type ResolvedTool = { tool: SandboxTool; dir: string };
+type TmpfsSeedPlanEntry = {
+  stagingPath: string;
+  targetPath: string;
+  volumeArgs: string[];
+};
 type RuntimeCheck = { name: string; cmd: string[] };
 type JsonObject = Record<string, unknown>;
 type GpgCache = { pub: Buffer; sec: Buffer } | null;
@@ -1493,6 +1498,7 @@ export async function create(args: string[]): Promise<void> {
             : null;
           const envFile = buildContainerEnvFile(effectiveResolvedTools, engine);
           let hostShellConfig: HostShellConfig;
+          let tmpfsSeedPlan: TmpfsSeedPlanEntry[] = [];
           try {
             const claudeCodeEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'claude-code');
             if (claudeCodeEntry) {
@@ -1533,22 +1539,24 @@ export async function create(args: string[]): Promise<void> {
               '-v',
               volumeArg(engine, hostPath, containerPath, ':ro')
             ]);
-            // A tmpfs containerMount starts empty, so the config seeded into the
-            // host dir before launch would be invisible in-container. Bind only
-            // the explicitly declared seed entries (config.toml, model-catalogs)
-            // back over the tmpfs as nested mounts — the same proven mechanism as
-            // hostLiveMounts/auth.json, established at `docker run` time (no
-            // post-start `docker cp`, which can land under a freshly-mounted
-            // tmpfs instead of inside it). The allowlist is deliberate: any
-            // runtime files left in the host dir (e.g. a stale logs_2.sqlite or
-            // sessions/ from a previous bind-mount era) must NOT be re-mounted,
-            // or the high-churn writes would land on the host SSD again.
-            const tmpfsSeedVolumes = effectiveResolvedTools.flatMap(({ tool, dir }) =>
-              (tool.tmpfs?.seed ?? []).flatMap((entry) => {
+            // Mount each declared seed read-only at an isolated staging path.
+            // After docker run mounts the empty tmpfs, the container's default
+            // user copies these entries into it so the runtime targets are normal,
+            // writable files rather than nested mount points. The allowlist keeps
+            // stale runtime files (logs_2.sqlite, sessions, etc.) on the host from
+            // being exposed or written through.
+            tmpfsSeedPlan = effectiveResolvedTools.flatMap(({ tool, dir }) =>
+              (tool.tmpfs?.seed ?? []).flatMap((entry, index) => {
                 const hostPath = path.join(dir, entry);
-                return fs.existsSync(hostPath)
-                  ? ['-v', volumeArg(engine, hostPath, path.posix.join(tool.containerMount, entry))]
-                  : [];
+                if (!fs.existsSync(hostPath)) {
+                  return [];
+                }
+                const stagingPath = path.posix.join('/run/agent-infra/tmpfs-seeds', tool.id, String(index));
+                return [{
+                  stagingPath,
+                  targetPath: path.posix.join(tool.containerMount, entry),
+                  volumeArgs: ['-v', volumeArg(engine, hostPath, stagingPath, ':ro')]
+                }];
               })
             );
             const liveMountVolumes = effectiveResolvedTools.flatMap(({ tool }) =>
@@ -1604,7 +1612,7 @@ export async function create(args: string[]): Promise<void> {
               ...dotfilesMount,
               ...toolVolumes,
               ...tmpfsArgs,
-              ...tmpfsSeedVolumes,
+              ...tmpfsSeedPlan.flatMap(({ volumeArgs }) => volumeArgs),
               ...liveMountVolumes,
               ...shellConfigVolumes,
               ...envFile.dockerArgs,
@@ -1615,6 +1623,15 @@ export async function create(args: string[]): Promise<void> {
             ]);
           } finally {
             envFile.cleanup();
+          }
+
+          for (const { stagingPath, targetPath } of tmpfsSeedPlan) {
+            runEngineTaskCommand(engine, 'docker', [
+              'exec', container, 'mkdir', '-p', path.posix.dirname(targetPath)
+            ]);
+            runEngineTaskCommand(engine, 'docker', [
+              'exec', container, 'cp', '-R', '--', stagingPath, targetPath
+            ]);
           }
 
           // Belt-and-suspenders: re-create the four shell-config symlinks at
