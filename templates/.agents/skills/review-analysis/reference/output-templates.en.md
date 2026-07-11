@@ -27,7 +27,7 @@ Task {task-id} requirement analysis review completed. Verdict: approved.
 
 Next step - write the technical plan:
   - Claude Code / OpenCode: /plan-task {task-ref}
-  - Gemini CLI: /agent-infra:plan-task {task-ref}
+  - Gemini CLI: /{{project}}:plan-task {task-ref}
   - Codex CLI: $plan-task {task-ref}
 
 [When manual-validation > 0, append:]
@@ -43,12 +43,12 @@ Task {task-id} requirement analysis review completed. Verdict: approved.
 
 Next step - revise analysis before continuing (recommended):
   - Claude Code / OpenCode: /analyze-task {task-ref}
-  - Gemini CLI: /agent-infra:analyze-task {task-ref}
+  - Gemini CLI: /{{project}}:analyze-task {task-ref}
   - Codex CLI: $analyze-task {task-ref}
 
 Or proceed directly to planning:
   - Claude Code / OpenCode: /plan-task {task-ref}
-  - Gemini CLI: /agent-infra:plan-task {task-ref}
+  - Gemini CLI: /{{project}}:plan-task {task-ref}
   - Codex CLI: $plan-task {task-ref}
 
 [When manual-validation > 0, append:]
@@ -64,7 +64,7 @@ Task {task-id} requirement analysis review completed. Verdict: changes requested
 
 Next step - revise requirement analysis:
   - Claude Code / OpenCode: /analyze-task {task-ref}
-  - Gemini CLI: /agent-infra:analyze-task {task-ref}
+  - Gemini CLI: /{{project}}:analyze-task {task-ref}
   - Codex CLI: $analyze-task {task-ref}
 
 [When manual-validation > 0, append:]
@@ -80,7 +80,7 @@ Task {task-id} requirement analysis review completed. Verdict: rejected, fresh a
 
 Next step - re-analyze:
   - Claude Code / OpenCode: /analyze-task {task-ref}
-  - Gemini CLI: /agent-infra:analyze-task {task-ref}
+  - Gemini CLI: /{{project}}:analyze-task {task-ref}
   - Codex CLI: $analyze-task {task-ref}
 
 [When manual-validation > 0, append:]

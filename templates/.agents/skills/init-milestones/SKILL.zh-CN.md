@@ -30,7 +30,7 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 脚本与 `.agents/rules/label-milestone-setup.md` 共同负责：
 - 创建并清理临时工作目录
 - 检测是否传入 `--history`
-- 按“最新 `v*` Git tag → `package.json` → 默认 `0.1.0`”解析版本基线
+- 扫描所有 `v*` Git tag，按 SemVer precedence 选择最高合法版本；没有合法版本时使用兼容默认值 `0.1.0`，且不读取任何生态 manifest
 - 使用平台对应的 milestones 查询命令读取当前里程碑
 - 构建目标里程碑集合，并且只创建缺失标题
 - 输出最终执行摘要
@@ -50,6 +50,7 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 
 摘要必须包含：
 - 版本基线
+- 版本基线来源
 - 是否启用 `--history`
 - 创建与跳过的里程碑数量
 - 新创建的里程碑标题
@@ -71,7 +72,7 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 ```
 下一步 - 初始化 Labels（可选）：
   - Claude Code / OpenCode：/init-labels
-  - Gemini CLI：/agent-infra:init-labels
+  - Gemini CLI：/{{project}}:init-labels
   - Codex CLI：$init-labels
 ```
 
@@ -81,6 +82,6 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 - 认证失败：提示 "the platform CLI is not authenticated"
 - 仓库访问失败：提示 "Unable to access the current repository with the platform CLI"
 - 版本解析失败：提示 "Unable to determine current version baseline"
-- `--history` 模式下未找到任何 `v*` git tags：提示 "No history tags found matching v*; only standard milestones will be created"
+- `--history` 模式下未找到合法 SemVer `v*` git tags：提示 "No valid SemVer history tags found matching v*; only standard milestones will be created"
 - 权限不足：提示 "No permission to manage milestones in this repository"
 - API 限流：提示 "platform API rate limit reached, please retry later"

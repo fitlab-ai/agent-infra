@@ -275,7 +275,7 @@ node .agents/scripts/validate-artifact.js gate analyze-task .agents/workspace/ac
 
 下一步 - 审查需求分析：
   - Claude Code / OpenCode：/review-analysis {task-ref}
-  - Gemini CLI：/agent-infra:review-analysis {task-ref}
+  - Gemini CLI：/{{project}}:review-analysis {task-ref}
   - Codex CLI：$review-analysis {task-ref}
 ```
 

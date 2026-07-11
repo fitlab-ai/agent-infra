@@ -4,7 +4,7 @@
 
 ## 分支名规则
 
-- 格式：`agent-infra-{type}-{slug}`
+- 格式：`{{project}}-{type}-{slug}`
 - 项目前缀：读取 `.agents/.airc.json` 中的 `project`
 - `{type}`：读取 `task.md` frontmatter 中的 `type`
 - `{slug}`：根据任务标题提取 3-6 个英文关键词，转为 kebab-case
@@ -23,7 +23,7 @@
 - 当前分支不一致：按下方”创建与切换命令”章节切换到已记录分支
 
 场景 B：`task.md` 未记录任务分支
-- 判断当前分支是否符合项目分支命名规范（`agent-infra-{type}-{slug}`）且语义上属于当前任务
+- 判断当前分支是否符合项目分支命名规范（`{{project}}-{type}-{slug}`）且语义上属于当前任务
 - 符合：将当前分支名回写到 `task.md`，继续
 - 不符合：生成新的任务分支名，按下方”创建与切换命令”章节创建并切换，回写到 `task.md`
 

@@ -109,7 +109,7 @@ node .agents/scripts/validate-artifact.js gate watch-pr .agents/workspace/active
   ```
   下一步 - 完成并归档任务：
     - Claude Code / OpenCode：/complete-task {task-ref}
-    - Gemini CLI：/agent-infra:complete-task {task-ref}
+    - Gemini CLI：/{{project}}:complete-task {task-ref}
     - Codex CLI：$complete-task {task-ref}
   ```
 

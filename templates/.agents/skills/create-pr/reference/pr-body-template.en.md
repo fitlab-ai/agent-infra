@@ -70,6 +70,6 @@ Final user output should include this follow-up path:
 Next steps:
   - complete the task after the workflow truly finishes:
     - Claude Code / OpenCode: /complete-task {task-ref}
-    - Gemini CLI: /agent-infra:complete-task {task-ref}
+    - Gemini CLI: /{{project}}:complete-task {task-ref}
     - Codex CLI: $complete-task {task-ref}
 ```

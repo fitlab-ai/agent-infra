@@ -183,7 +183,7 @@ node .agents/scripts/validate-artifact.js gate create-task .agents/workspace/act
 
 下一步 - 执行需求分析：
   - Claude Code / OpenCode：/analyze-task {task-ref}
-  - Gemini CLI：/agent-infra:analyze-task {task-ref}
+  - Gemini CLI：/{{project}}:analyze-task {task-ref}
   - Codex CLI：$analyze-task {task-ref}
 ```
 
@@ -202,7 +202,7 @@ node .agents/scripts/validate-artifact.js gate create-task .agents/workspace/act
 
 下一步 - 执行需求分析：
   - Claude Code / OpenCode：/analyze-task {task-ref}
-  - Gemini CLI：/agent-infra:analyze-task {task-ref}
+  - Gemini CLI：/{{project}}:analyze-task {task-ref}
   - Codex CLI：$analyze-task {task-ref}
 ```
 
@@ -226,7 +226,7 @@ Issue 创建失败：
 
 下一步 - 执行需求分析：
   - Claude Code / OpenCode：/analyze-task {task-ref}
-  - Gemini CLI：/agent-infra:analyze-task {task-ref}
+  - Gemini CLI：/{{project}}:analyze-task {task-ref}
   - Codex CLI：$analyze-task {task-ref}
 
 后续如需平台同步：修复认证/网络/模板问题后，可按 `.agents/rules/create-issue.md` 对当前任务手动执行一次 Issue 创建；或手动创建/查找 Issue，并把 `issue_number` 写入 task.md，后续技能会接管级联同步。

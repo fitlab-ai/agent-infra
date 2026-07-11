@@ -118,7 +118,7 @@ node .agents/scripts/validate-artifact.js gate import-dependabot .agents/workspa
 
 下一步：
   - Claude Code / OpenCode：/analyze-task {task-ref}
-  - Gemini CLI：/agent-infra:analyze-task {task-ref}
+  - Gemini CLI：/{{project}}:analyze-task {task-ref}
   - Codex CLI：$analyze-task {task-ref}
 ```
 

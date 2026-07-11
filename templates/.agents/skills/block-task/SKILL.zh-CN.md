@@ -140,7 +140,7 @@ ai sandbox rm {branch}
 
 下一步 - 检查任务状态（解除阻塞后）：
   - Claude Code / OpenCode：/check-task {task-ref}
-  - Gemini CLI：/agent-infra:check-task {task-ref}
+  - Gemini CLI：/{{project}}:check-task {task-ref}
   - Codex CLI：$check-task {task-ref}
 ```
 

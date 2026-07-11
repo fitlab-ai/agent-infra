@@ -109,7 +109,7 @@ Output per scenario:
   ```
   Next step - Complete and archive the task:
     - Claude Code / OpenCode: /complete-task {task-ref}
-    - Gemini CLI: /agent-infra:complete-task {task-ref}
+    - Gemini CLI: /{{project}}:complete-task {task-ref}
     - Codex CLI: $complete-task {task-ref}
   ```
 

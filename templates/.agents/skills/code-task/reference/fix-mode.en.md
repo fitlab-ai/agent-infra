@@ -74,11 +74,11 @@ Fix status:
 Next step - re-review or commit:
 - Re-review (always recommended):
   - Claude Code / OpenCode: /review-code {task-ref}
-  - Gemini CLI: /agent-infra:review-code {task-ref}
+  - Gemini CLI: /{{project}}:review-code {task-ref}
   - Codex CLI: $review-code {task-ref}
 - Commit directly (optional; only when all issues are resolved and changes are low risk):
   - Claude Code / OpenCode: /commit
-  - Gemini CLI: /agent-infra:commit
+  - Gemini CLI: /{{project}}:commit
   - Codex CLI: $commit
 ```
 

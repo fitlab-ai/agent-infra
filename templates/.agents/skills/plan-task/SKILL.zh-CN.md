@@ -183,7 +183,7 @@ node .agents/scripts/validate-artifact.js gate plan-task .agents/workspace/activ
 
 下一步 - 审查技术方案：
   - Claude Code / OpenCode：/review-plan {task-ref}
-  - Gemini CLI：/agent-infra:review-plan {task-ref}
+  - Gemini CLI：/{{project}}:review-plan {task-ref}
   - Codex CLI：$review-plan {task-ref}
 ```
 

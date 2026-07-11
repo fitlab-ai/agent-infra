@@ -60,7 +60,7 @@ Required next-step commands (rendered by `prFlow`):
 ```text
 Next step - complete and archive the task:
   - Claude Code / OpenCode: /complete-task {task-ref}
-  - Gemini CLI: /agent-infra:complete-task {task-ref}
+  - Gemini CLI: /{{project}}:complete-task {task-ref}
   - Codex CLI: $complete-task {task-ref}
 ```
 
@@ -69,7 +69,7 @@ Next step - complete and archive the task:
 ```text
 Next step - create Pull Request:
   - Claude Code / OpenCode: /create-pr {task-ref}
-  - Gemini CLI: /agent-infra:create-pr {task-ref}
+  - Gemini CLI: /{{project}}:create-pr {task-ref}
   - Codex CLI: $create-pr {task-ref}
 ```
 
@@ -79,11 +79,11 @@ field absent -> two options:
 Next step - choose one:
   - Go through the PR flow:
     - Claude Code / OpenCode: /create-pr {task-ref}
-    - Gemini CLI: /agent-infra:create-pr {task-ref}
+    - Gemini CLI: /{{project}}:create-pr {task-ref}
     - Codex CLI: $create-pr {task-ref}
   - Complete directly (no PR):
     - Claude Code / OpenCode: /complete-task {task-ref}
-    - Gemini CLI: /agent-infra:complete-task {task-ref}
+    - Gemini CLI: /{{project}}:complete-task {task-ref}
     - Codex CLI: $complete-task {task-ref}
 ```
 
@@ -108,7 +108,7 @@ Required next-step commands:
 ```text
 Next step - code review:
   - Claude Code / OpenCode: /review-code {task-ref}
-  - Gemini CLI: /agent-infra:review-code {task-ref}
+  - Gemini CLI: /{{project}}:review-code {task-ref}
   - Codex CLI: $review-code {task-ref}
 ```
 

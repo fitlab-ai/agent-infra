@@ -29,7 +29,7 @@
 
 下一步 - 提交代码：
   - Claude Code / OpenCode：/commit
-  - Gemini CLI：/agent-infra:commit
+  - Gemini CLI：/{{project}}:commit
   - Codex CLI：$commit
 
 [当 manual-validation > 0 时，在最后附加一行：]
@@ -45,12 +45,12 @@
 
 下一步 - 修复问题后提交（推荐）：
   - Claude Code / OpenCode：/code-task {task-ref}
-  - Gemini CLI：/agent-infra:code-task {task-ref}
+  - Gemini CLI：/{{project}}:code-task {task-ref}
   - Codex CLI：$code-task {task-ref}
 
 或直接提交（跳过修复）：
   - Claude Code / OpenCode：/commit
-  - Gemini CLI：/agent-infra:commit
+  - Gemini CLI：/{{project}}:commit
   - Codex CLI：$commit
 
 [当 manual-validation > 0 时，在最后附加一行：]
@@ -66,7 +66,7 @@
 
 下一步 - 修复问题：
   - Claude Code / OpenCode：/code-task {task-ref}
-  - Gemini CLI：/agent-infra:code-task {task-ref}
+  - Gemini CLI：/{{project}}:code-task {task-ref}
   - Codex CLI：$code-task {task-ref}
 
 [当 manual-validation > 0 时，在最后附加一行：]
@@ -82,7 +82,7 @@
 
 下一步 - 重新设计技术方案：
   - Claude Code / OpenCode：/plan-task {task-ref}
-  - Gemini CLI：/agent-infra:plan-task {task-ref}
+  - Gemini CLI：/{{project}}:plan-task {task-ref}
   - Codex CLI：$plan-task {task-ref}
 
 > 注意：Rejected 表示实现方向需要整体重做，不是局部修复。`code-task/scripts/detect-mode.js` 分支 #7 会拒绝直接 `/code-task`，要求先重新方案设计。

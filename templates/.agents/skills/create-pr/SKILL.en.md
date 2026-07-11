@@ -41,7 +41,7 @@ Branch on the result:
 This project does not enable the PR flow (`.agents/.airc.json` sets `prFlow: "disabled"`).
 No Pull Request is required; run instead:
   - Claude Code / OpenCode: /complete-task {task-ref}
-  - Gemini CLI: /agent-infra:complete-task {task-ref}
+  - Gemini CLI: /{{project}}:complete-task {task-ref}
   - Codex CLI: $complete-task {task-ref}
 ```
 
@@ -136,7 +136,7 @@ Explain the created PR URL, summarize metadata sync and summary-comment results,
 ```
 Next step - Watch PR checks (auto self-heal until required checks are green):
   - Claude Code / OpenCode: /watch-pr {task-ref}
-  - Gemini CLI: /agent-infra:watch-pr {task-ref}
+  - Gemini CLI: /{{project}}:watch-pr {task-ref}
   - Codex CLI: $watch-pr {task-ref}
 ```
 
@@ -145,7 +145,7 @@ Alternatively, to skip CI monitoring and archive the task right away, use `compl
 ```
 Next step (alternative) - Skip monitoring and archive the task directly:
   - Claude Code / OpenCode: /complete-task {task-ref}
-  - Gemini CLI: /agent-infra:complete-task {task-ref}
+  - Gemini CLI: /{{project}}:complete-task {task-ref}
   - Codex CLI: $complete-task {task-ref}
 ```
 

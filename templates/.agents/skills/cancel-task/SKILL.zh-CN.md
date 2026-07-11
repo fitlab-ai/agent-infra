@@ -149,7 +149,7 @@ ai sandbox rm {branch}
 
 下一步 - 查看已转移任务：
   - Claude Code / OpenCode：/check-task {task-ref}
-  - Gemini CLI：/agent-infra:check-task {task-ref}
+  - Gemini CLI：/{{project}}:check-task {task-ref}
   - Codex CLI：$check-task {task-ref}
 ```
 

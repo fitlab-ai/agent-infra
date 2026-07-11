@@ -195,7 +195,7 @@ Issue #{number} 已导入。
 
 下一步 - 执行需求分析：
   - Claude Code / OpenCode：/analyze-task {task-ref}
-  - Gemini CLI：/agent-infra:analyze-task {task-ref}
+  - Gemini CLI：/{{project}}:analyze-task {task-ref}
   - Codex CLI：$analyze-task {task-ref}
 ```
 

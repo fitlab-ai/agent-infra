@@ -15,6 +15,6 @@
 
 下一步 - 代码审查：
   - Claude Code / OpenCode：/review-code {task-ref}
-  - Gemini CLI：/agent-infra:review-code {task-ref}
+  - Gemini CLI：/{{project}}:review-code {task-ref}
   - Codex CLI：$review-code {task-ref}
 ```

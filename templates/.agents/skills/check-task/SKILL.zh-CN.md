@@ -78,15 +78,15 @@ ai task status {task-id}
 
 | 当前状态           | Claude Code / OpenCode       | Gemini CLI                               | Codex CLI                    |
 |--------------------|------------------------------|------------------------------------------|------------------------------|
-| 分析完成           | `/review-analysis {task-ref}` | `/agent-infra:review-analysis {task-ref}` | `$review-analysis {task-ref}` |
-| 需求分析审查通过   | `/plan-task {task-ref}`       | `/agent-infra:plan-task {task-ref}`       | `$plan-task {task-ref}`       |
-| 需求分析审查有问题 | `/analyze-task {task-ref}`    | `/agent-infra:analyze-task {task-ref}`    | `$analyze-task {task-ref}`    |
-| 计划完成           | `/review-plan {task-ref}`     | `/agent-infra:review-plan {task-ref}`     | `$review-plan {task-ref}`     |
-| 技术方案审查通过   | `/code-task {task-ref}`       | `/agent-infra:code-task {task-ref}`       | `$code-task {task-ref}`       |
-| 技术方案审查有问题 | `/plan-task {task-ref}`       | `/agent-infra:plan-task {task-ref}`       | `$plan-task {task-ref}`       |
-| 实现完成           | `/review-code {task-ref}`     | `/agent-infra:review-code {task-ref}`     | `$review-code {task-ref}`     |
-| 代码审查通过       | `/commit`                    | `/agent-infra:commit`                    | `$commit`                    |
-| 代码审查有问题     | `/code-task {task-ref}`       | `/agent-infra:code-task {task-ref}`       | `$code-task {task-ref}`       |
+| 分析完成           | `/review-analysis {task-ref}` | `/{{project}}:review-analysis {task-ref}` | `$review-analysis {task-ref}` |
+| 需求分析审查通过   | `/plan-task {task-ref}`       | `/{{project}}:plan-task {task-ref}`       | `$plan-task {task-ref}`       |
+| 需求分析审查有问题 | `/analyze-task {task-ref}`    | `/{{project}}:analyze-task {task-ref}`    | `$analyze-task {task-ref}`    |
+| 计划完成           | `/review-plan {task-ref}`     | `/{{project}}:review-plan {task-ref}`     | `$review-plan {task-ref}`     |
+| 技术方案审查通过   | `/code-task {task-ref}`       | `/{{project}}:code-task {task-ref}`       | `$code-task {task-ref}`       |
+| 技术方案审查有问题 | `/plan-task {task-ref}`       | `/{{project}}:plan-task {task-ref}`       | `$plan-task {task-ref}`       |
+| 实现完成           | `/review-code {task-ref}`     | `/{{project}}:review-code {task-ref}`     | `$review-code {task-ref}`     |
+| 代码审查通过       | `/commit`                    | `/{{project}}:commit`                    | `$commit`                    |
+| 代码审查有问题     | `/code-task {task-ref}`       | `/{{project}}:code-task {task-ref}`       | `$code-task {task-ref}`       |
 | 任务被阻塞         | 解除阻塞或提供所需信息       | —                                        | 解除阻塞或提供所需信息       |
 | 任务已完成         | 无需操作                     | —                                        | 无需操作                     |
 

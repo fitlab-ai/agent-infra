@@ -60,7 +60,7 @@ last_reviewed_commit: {new_head}
 ```text
 下一步 - 完成并归档任务：
   - Claude Code / OpenCode: /complete-task {task-ref}
-  - Gemini CLI: /agent-infra:complete-task {task-ref}
+  - Gemini CLI: /{{project}}:complete-task {task-ref}
   - Codex CLI: $complete-task {task-ref}
 ```
 
@@ -69,7 +69,7 @@ last_reviewed_commit: {new_head}
 ```text
 下一步 - 创建 Pull Request：
   - Claude Code / OpenCode: /create-pr {task-ref}
-  - Gemini CLI: /agent-infra:create-pr {task-ref}
+  - Gemini CLI: /{{project}}:create-pr {task-ref}
   - Codex CLI: $create-pr {task-ref}
 ```
 
@@ -79,11 +79,11 @@ last_reviewed_commit: {new_head}
 下一步 - 二选一：
   - 走 PR 流程：
     - Claude Code / OpenCode: /create-pr {task-ref}
-    - Gemini CLI: /agent-infra:create-pr {task-ref}
+    - Gemini CLI: /{{project}}:create-pr {task-ref}
     - Codex CLI: $create-pr {task-ref}
   - 直接完成（无 PR）：
     - Claude Code / OpenCode: /complete-task {task-ref}
-    - Gemini CLI: /agent-infra:complete-task {task-ref}
+    - Gemini CLI: /{{project}}:complete-task {task-ref}
     - Codex CLI: $complete-task {task-ref}
 ```
 
@@ -108,7 +108,7 @@ last_reviewed_commit: {new_head}
 ```text
 下一步 - 代码审查：
   - Claude Code / OpenCode: /review-code {task-ref}
-  - Gemini CLI: /agent-infra:review-code {task-ref}
+  - Gemini CLI: /{{project}}:review-code {task-ref}
   - Codex CLI: $review-code {task-ref}
 ```
 

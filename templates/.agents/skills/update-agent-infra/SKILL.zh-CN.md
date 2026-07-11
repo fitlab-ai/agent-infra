@@ -133,7 +133,7 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 ```
 下一步 - 提交代码：
   - Claude Code / OpenCode：/commit
-  - Gemini CLI：/agent-infra:commit
+  - Gemini CLI：/{{project}}:commit
   - Codex CLI：$commit
 ```
 

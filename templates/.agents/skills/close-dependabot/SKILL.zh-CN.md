@@ -136,7 +136,7 @@ ai sandbox rm {branch}
 
 下一步 - 完成并归档任务（如有关联任务）：
   - Claude Code / OpenCode：/complete-task {task-ref}
-  - Gemini CLI：/agent-infra:complete-task {task-ref}
+  - Gemini CLI：/{{project}}:complete-task {task-ref}
   - Codex CLI：$complete-task {task-ref}
 ```
 

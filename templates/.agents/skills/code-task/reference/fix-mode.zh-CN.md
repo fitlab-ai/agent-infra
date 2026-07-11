@@ -74,11 +74,11 @@ manual-validation 项不在修复范围。处理规则：
 下一步 - 重新审查或提交：
 - 重新审查（始终推荐）：
   - Claude Code / OpenCode：/review-code {task-ref}
-  - Gemini CLI：/agent-infra:review-code {task-ref}
+  - Gemini CLI：/{{project}}:review-code {task-ref}
   - Codex CLI：$review-code {task-ref}
 - 直接提交（可选；仅在所有问题已解决且风险可控时）：
   - Claude Code / OpenCode：/commit
-  - Gemini CLI：/agent-infra:commit
+  - Gemini CLI：/{{project}}:commit
   - Codex CLI：$commit
 ```
 

@@ -27,7 +27,7 @@ Task {task-id} technical plan review completed. Verdict: approved.
 
 Next step - write code:
   - Claude Code / OpenCode: /code-task {task-ref}
-  - Gemini CLI: /agent-infra:code-task {task-ref}
+  - Gemini CLI: /{{project}}:code-task {task-ref}
   - Codex CLI: $code-task {task-ref}
 
 [When manual-validation > 0, append:]
@@ -43,12 +43,12 @@ Task {task-id} technical plan review completed. Verdict: approved.
 
 Next step - revise plan before coding (recommended):
   - Claude Code / OpenCode: /plan-task {task-ref}
-  - Gemini CLI: /agent-infra:plan-task {task-ref}
+  - Gemini CLI: /{{project}}:plan-task {task-ref}
   - Codex CLI: $plan-task {task-ref}
 
 Or proceed directly to coding:
   - Claude Code / OpenCode: /code-task {task-ref}
-  - Gemini CLI: /agent-infra:code-task {task-ref}
+  - Gemini CLI: /{{project}}:code-task {task-ref}
   - Codex CLI: $code-task {task-ref}
 
 [When manual-validation > 0, append:]
@@ -64,7 +64,7 @@ Task {task-id} technical plan review completed. Verdict: changes requested.
 
 Next step - revise technical plan:
   - Claude Code / OpenCode: /plan-task {task-ref}
-  - Gemini CLI: /agent-infra:plan-task {task-ref}
+  - Gemini CLI: /{{project}}:plan-task {task-ref}
   - Codex CLI: $plan-task {task-ref}
 
 [When manual-validation > 0, append:]
@@ -80,7 +80,7 @@ Task {task-id} technical plan review completed. Verdict: rejected, redesign requ
 
 Next step - redesign:
   - Claude Code / OpenCode: /plan-task {task-ref}
-  - Gemini CLI: /agent-infra:plan-task {task-ref}
+  - Gemini CLI: /{{project}}:plan-task {task-ref}
   - Codex CLI: $plan-task {task-ref}
 
 [When manual-validation > 0, append:]

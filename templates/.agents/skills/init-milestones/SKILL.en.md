@@ -30,7 +30,7 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 The script and `.agents/rules/label-milestone-setup.md` are responsible for:
 - Creating and cleaning up a temporary workspace
 - Detecting whether `--history` was requested
-- Resolving the version baseline from the latest `v*` Git tag, then `package.json`, then defaulting to `0.1.0`
+- Scanning all `v*` Git tags, selecting the highest valid version by SemVer precedence, and using compatibility default `0.1.0` when none is valid, without reading ecosystem manifests
 - Listing current milestones with the platform-specific milestone query command
 - Building the desired milestone set and creating only the missing titles
 - Printing the final execution summary
@@ -50,6 +50,7 @@ When `--history` is present, each historical `vX.Y.Z` tag additionally contribut
 
 The summary must include:
 - Version baseline
+- Version baseline source
 - Whether `--history` was enabled
 - Created and skipped milestone counts
 - Newly created milestone titles
@@ -81,6 +82,6 @@ Next step - initialize labels (optional):
 - Authentication failed: prompt "the platform CLI is not authenticated"
 - Repository access failed: prompt "Unable to access the current repository with the platform CLI"
 - Version detection failed: prompt "Unable to determine current version baseline"
-- No `v*` tags found in `--history` mode: prompt "No history tags found matching v*; only standard milestones will be created"
+- No valid SemVer `v*` tags found in `--history` mode: prompt "No valid SemVer history tags found matching v*; only standard milestones will be created"
 - Permission error: prompt "No permission to manage milestones in this repository"
 - API rate limit: prompt "platform API rate limit reached, please retry later"

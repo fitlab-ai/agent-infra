@@ -11,6 +11,7 @@ import {
   listSkillNames,
   parseFrontmatter,
   read,
+  renderPlaceholders,
   skillDocPaths
 } from "../../helpers.ts";
 
@@ -767,8 +768,11 @@ test("analyze-task brainstorming gate adds step 4 and whitelists analyze-task in
 
   assert.equal(
     read(".agents/skills/analyze-task/SKILL.md"),
-    read("templates/.agents/skills/analyze-task/SKILL.zh-CN.md"),
-    "deployed analyze-task SKILL should stay byte-identical to its zh-CN template variant"
+    renderPlaceholders(read("templates/.agents/skills/analyze-task/SKILL.zh-CN.md"), {
+      project: "agent-infra",
+      org: "fitlab-ai"
+    }),
+    "deployed analyze-task SKILL should match its rendered zh-CN template variant"
   );
   assert.equal(
     read(".agents/rules/no-mid-flow-questions.md"),

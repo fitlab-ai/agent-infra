@@ -22,7 +22,7 @@ For each failing check, decide "self-heal" vs "ask for help" in this order:
 4. When "locatable + code layer + under cap" holds, perform one self-heal:
    - Before fixing, run `git status -s` to record the working tree and ensure only changes related to this failure are included.
    - Locate and make a minimal fix per the logs (touch only code / tests / config related to that failure).
-   - Run the relevant tests: prefer the local command for the failing job; fall back to `npm run test:core` repo-wide. **Do not commit or push before tests pass.**
+   - Run the relevant tests: prefer the local command for the failing job; otherwise use the project's declared full test command. If neither command is known, ask for help. **Do not commit or push before tests pass.**
    - After tests pass, publish the fix: per `.agents/rules/commit-and-pr.md` stage only the related files (`git add <paths>`, avoid `git add -A` pulling in unrelated changes) → create the fix commit (`git commit`) → `git push` to the current PR branch.
    - Record the fix commit SHA, increment the fix count, and return to SKILL step 2 to re-watch.
    - Never make unrelated "drive-by" optimizations; never loosen / skip the failing assertion to "make it green".

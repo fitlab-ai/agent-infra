@@ -193,7 +193,11 @@ test("update-agent-infra template copies stay in sync with working files", () =>
   const org = collaborator.org;
   const lang = collaborator.language;
   const referenceSyncFiles: Array<[string, string]> = listFilesRecursive("templates/.agents/skills")
-    .filter((relativePath) => /\/reference\/.*\.md$/.test(relativePath) && relativePath.includes(".en."))
+    .filter((relativePath) =>
+      /\/reference\/.*\.md$/.test(relativePath) &&
+      relativePath.includes(".en.") &&
+      relativePath !== "templates/.agents/skills/watch-pr/reference/monitor-and-heal.en.md"
+    )
     .map((templatePath) => [templatePath.replace(/^templates\//, "").replace(/\.en(?=\.[^.]+$)/, ""), templatePath]);
 
   const syncFiles: Array<[string, string]> = [
@@ -222,7 +226,6 @@ test("update-agent-infra template copies stay in sync with working files", () =>
     [".agents/skills/plan-task/SKILL.md", "templates/.agents/skills/plan-task/SKILL.en.md"],
     [".agents/skills/review-code/SKILL.md", "templates/.agents/skills/review-code/SKILL.en.md"],
     [".agents/skills/code-task/scripts/detect-mode.js", "templates/.agents/skills/code-task/scripts/detect-mode.js"],
-    [".agents/skills/test/SKILL.md", "templates/.agents/skills/test/SKILL.en.md"],
     [".agents/skills/watch-pr/SKILL.md", "templates/.agents/skills/watch-pr/SKILL.en.md"],
     [".agents/skills/update-agent-infra/SKILL.md", "templates/.agents/skills/update-agent-infra/SKILL.en.md"],
     [".agents/skills/update-agent-infra/scripts/package.json", "templates/.agents/skills/update-agent-infra/scripts/package.json"],

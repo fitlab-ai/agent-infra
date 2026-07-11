@@ -94,7 +94,7 @@ bash .agents/skills/init-labels/scripts/init-labels.sh
 ```
 下一步 - 初始化 Milestones（可选）：
   - Claude Code / OpenCode：/init-milestones
-  - Gemini CLI：/agent-infra:init-milestones
+  - Gemini CLI：/{{project}}:init-milestones
   - Codex CLI：$init-milestones
 ```
 

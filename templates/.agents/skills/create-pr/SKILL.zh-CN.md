@@ -41,7 +41,7 @@ description: >
 当前项目未启用 PR 流程（`.agents/.airc.json` 中 `prFlow: "disabled"`）。
 无需创建 Pull Request，请直接运行：
   - Claude Code / OpenCode：/complete-task {task-ref}
-  - Gemini CLI：/agent-infra:complete-task {task-ref}
+  - Gemini CLI：/{{project}}:complete-task {task-ref}
   - Codex CLI：$complete-task {task-ref}
 ```
 
@@ -136,7 +136,7 @@ node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/activ
 ```
 下一步 - 监控 PR 检查（required checks 全绿前自动自愈）：
   - Claude Code / OpenCode：/watch-pr {task-ref}
-  - Gemini CLI：/agent-infra:watch-pr {task-ref}
+  - Gemini CLI：/{{project}}:watch-pr {task-ref}
   - Codex CLI：$watch-pr {task-ref}
 ```
 
@@ -145,7 +145,7 @@ node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/activ
 ```
 下一步（备选）- 跳过监控、直接归档任务：
   - Claude Code / OpenCode：/complete-task {task-ref}
-  - Gemini CLI：/agent-infra:complete-task {task-ref}
+  - Gemini CLI：/{{project}}:complete-task {task-ref}
   - Codex CLI：$complete-task {task-ref}
 ```
 

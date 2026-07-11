@@ -27,7 +27,7 @@
 
 下一步 - 编写技术方案：
   - Claude Code / OpenCode：/plan-task {task-ref}
-  - Gemini CLI：/agent-infra:plan-task {task-ref}
+  - Gemini CLI：/{{project}}:plan-task {task-ref}
   - Codex CLI：$plan-task {task-ref}
 
 [当 manual-validation > 0 时，在最后附加一行：]
@@ -43,12 +43,12 @@
 
 下一步 - 修订分析后继续（推荐）：
   - Claude Code / OpenCode：/analyze-task {task-ref}
-  - Gemini CLI：/agent-infra:analyze-task {task-ref}
+  - Gemini CLI：/{{project}}:analyze-task {task-ref}
   - Codex CLI：$analyze-task {task-ref}
 
 或直接进入方案设计：
   - Claude Code / OpenCode：/plan-task {task-ref}
-  - Gemini CLI：/agent-infra:plan-task {task-ref}
+  - Gemini CLI：/{{project}}:plan-task {task-ref}
   - Codex CLI：$plan-task {task-ref}
 
 [当 manual-validation > 0 时，在最后附加一行：]
@@ -64,7 +64,7 @@
 
 下一步 - 修订需求分析：
   - Claude Code / OpenCode：/analyze-task {task-ref}
-  - Gemini CLI：/agent-infra:analyze-task {task-ref}
+  - Gemini CLI：/{{project}}:analyze-task {task-ref}
   - Codex CLI：$analyze-task {task-ref}
 
 [当 manual-validation > 0 时，在最后附加一行：]
@@ -80,7 +80,7 @@
 
 下一步 - 重新分析：
   - Claude Code / OpenCode：/analyze-task {task-ref}
-  - Gemini CLI：/agent-infra:analyze-task {task-ref}
+  - Gemini CLI：/{{project}}:analyze-task {task-ref}
   - Codex CLI：$analyze-task {task-ref}
 
 [当 manual-validation > 0 时，在最后附加一行：]

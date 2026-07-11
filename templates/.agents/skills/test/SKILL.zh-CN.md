@@ -11,16 +11,27 @@ description: >
 
 ## 1. 编译 / 类型检查
 
-本项目由 Node.js CLI 和模板文件组成，无需编译。跳过此步骤。
+```bash
+# TODO：替换为项目实际的编译命令
+# npx tsc --noEmit       (TypeScript)
+# mvn compile             (Maven)
+# go build ./...          (Go)
+# make build              (通用)
+```
+
+确认没有编译错误。
 
 ## 2. 运行单元测试（按层级选择）
 
-本项目把测试分为三层，按场景选择运行命令；新增测试文件默认归入 **full**，确认足够快且足够核心后，再上调到 core 或 smoke。
+三层测试是可选的反馈速度优化；如果测试套件较小，所有层级都可以映射到同一个完整测试命令。
 
 ### smoke（目标 <5s）
 
 ```bash
-npm run test:smoke
+# TODO：替换为项目的 smoke 子集命令
+# npm run test:smoke       (Node.js)
+# pytest -m "not slow"     (Python)
+# go test -short ./...     (Go)
 ```
 
 适用场景：
@@ -31,7 +42,10 @@ npm run test:smoke
 ### core（目标 <15s）
 
 ```bash
-npm run test:core
+# TODO：替换为项目的 core 子集命令
+# npm run test:core        (Node.js)
+# pytest -m "not contract" (Python)
+# go test ./...            (Go)
 ```
 
 适用场景：
@@ -39,18 +53,22 @@ npm run test:core
 - 写 code.md / code-r{N}.md 报告前的最终验证
 - 推送 PR 前的本地把关
 
-### full（目标 <60s）
+### full（完整测试套件）
 
 ```bash
-npm test
+# TODO：替换为项目的完整测试命令
+# npm test                 (Node.js)
+# mvn test                 (Maven)
+# pytest                   (Python)
+# go test ./...            (Go)
 ```
 
 适用场景：
 - release / tag 前
-- CI（unit-tests.yml）
+- CI
 - main 合并前的最终把关
 
-full 层运行全部项目测试。`npm test` 使用通配匹配项目测试文件，**新增的测试文件会自动归入 full**，这是安全网。
+如果项目尚未分层，smoke / core / full 可以全部使用完整测试命令；分层不是使用协作工作流的前置条件。
 
 ## 3. 输出结果
 
