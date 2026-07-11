@@ -170,6 +170,7 @@ test("buildContainerEnvFile falls back to the host GH token on WSL2", async () =
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-wsl2-token-"));
   const calls: string[] = [];
+  let hostEnvDir = "";
 
   try {
     const envFile = sandboxCreate.buildContainerEnvFile([], "wsl2", (engine, cmd, args) => {
@@ -177,15 +178,18 @@ test("buildContainerEnvFile falls back to the host GH token on WSL2", async () =
       return "";
     }, {
       tmpDir,
+      mkdtempFn: (prefix: string) => {
+        hostEnvDir = fs.mkdtempSync(prefix);
+        return hostEnvDir;
+      },
       runSafeFn: (cmd: string, args: string[]) => {
         calls.push(`host:${cmd}:${args.join(" ")}`);
         return "ghp_host_token";
       }
     });
-    const envPath = required(envFile.dockerArgs[1]);
 
     assert.deepEqual(calls, ["wsl2:gh:auth token", "host:gh:auth token"]);
-    assert.equal(fs.readFileSync(envPath, "utf8"), "GH_TOKEN=ghp_host_token\n");
+    assert.equal(fs.readFileSync(path.join(hostEnvDir, "env"), "utf8"), "GH_TOKEN=ghp_host_token\n");
     assert.ok(!envFile.dockerArgs.some((arg) => arg.includes("ghp_host_token")));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -195,17 +199,21 @@ test("buildContainerEnvFile falls back to the host GH token on WSL2", async () =
 test("buildContainerEnvFile keeps the WSL2 engine token as the preferred result", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-wsl2-preferred-"));
+  let hostEnvDir = "";
 
   try {
     const envFile = sandboxCreate.buildContainerEnvFile([], "wsl2", () => "ghp_engine_token", {
       tmpDir,
+      mkdtempFn: (prefix: string) => {
+        hostEnvDir = fs.mkdtempSync(prefix);
+        return hostEnvDir;
+      },
       runSafeFn: () => {
         throw new Error("host fallback must not run");
       }
     });
-    const envPath = required(envFile.dockerArgs[1]);
 
-    assert.equal(fs.readFileSync(envPath, "utf8"), "GH_TOKEN=ghp_engine_token\n");
+    assert.equal(fs.readFileSync(path.join(hostEnvDir, "env"), "utf8"), "GH_TOKEN=ghp_engine_token\n");
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
