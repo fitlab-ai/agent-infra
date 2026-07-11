@@ -23,14 +23,16 @@
 name: enforce-style
 description: "在提交代码前执行团队风格检查"
 args: "<task-id>"   # 可选
-claude-disable-model-invocation: true   # 可选；仅作用于 Claude Code
+disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器消费
 ---
 ```
 
 - `name`：对用户可见的 skill 名称
 - `description`：用于生成编辑器命令元数据
 - `args`：可选参数提示；agent-infra 会在生成支持的 AI TUI 命令时使用它
-- `claude-disable-model-invocation`：可选；设为 `true` 时，生成的 Claude Code 命令会禁用模型调用，不影响 Gemini CLI 和 OpenCode 命令
+- `disable-model-invocation`：可选通用元数据；各 TUI 适配器按自身能力决定是否消费
+
+多行 `description` 如需保留换行，使用 YAML literal block（`|`）；同步器会为各 TUI 输出对应的多行元数据格式。
 
 添加 skill 后，再执行一次 `update-agent-infra`：
 

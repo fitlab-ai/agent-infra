@@ -23,14 +23,16 @@ Minimum frontmatter:
 name: enforce-style
 description: "Apply team style checks before submitting code"
 args: "<task-id>"   # optional
-claude-disable-model-invocation: true   # optional; Claude Code only
+disable-model-invocation: true   # optional; consumed by supporting TUI adapters
 ---
 ```
 
 - `name`: user-facing skill name
 - `description`: used when generating editor command metadata
 - `args`: optional argument hint; agent-infra uses it when generating slash commands for supported AI TUIs
-- `claude-disable-model-invocation`: optional; when `true`, the generated Claude Code command disables model invocation. Gemini CLI and OpenCode commands are unaffected
+- `disable-model-invocation`: optional generic metadata; each TUI adapter consumes it according to its capabilities
+
+Use a YAML literal block (`|`) when a multiline `description` should retain its line breaks. Sync emits the corresponding multiline metadata format for each TUI.
 
 After adding the skill, run `update-agent-infra` again:
 

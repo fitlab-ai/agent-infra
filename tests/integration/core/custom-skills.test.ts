@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parse as parseToml } from "smol-toml";
+import { parse as parseYaml } from "yaml";
 
 import { loadFreshEsm } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
@@ -28,6 +30,13 @@ function makeTemplateRoot(tmpDir: string) {
   fs.mkdirSync(path.join(templateRoot, ".gemini/commands/_project_"), { recursive: true });
   fs.mkdirSync(path.join(templateRoot, ".opencode/commands"), { recursive: true });
   return templateRoot;
+}
+
+function parseMarkdownFrontmatter(content: string) {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  const frontmatter = match?.[1];
+  assert.ok(frontmatter, "generated Markdown command should include frontmatter");
+  return parseYaml(frontmatter);
 }
 
 test("syncTemplates preserves manual custom skills and generates commands for manual and sourced skills", async () => {
@@ -63,9 +72,11 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
       [
         "---",
         'name: local-rules',
-        'description: "本地规范检查"',
+        'description: |',
+        '  本地规范检查。',
+        '  当提交前需要本地规则时使用。',
         'args: "<task-id>"',
-        'claude-disable-model-invocation: true',
+        'disable-model-invocation: true',
         "---",
         "",
         "# Local Rules",
@@ -112,7 +123,9 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
       "utf8"
     );
     const openCodeCommand = fs.readFileSync(path.join(projectRoot, ".opencode/commands/local-rules.md"), "utf8");
+    const expectedDescription = "本地规范检查。\n当提交前需要本地规则时使用。";
 
+    assert.match(claudeCommand, /^description: \|-\n  本地规范检查。\n  当提交前需要本地规则时使用。$/m);
     assert.match(claudeCommand, /usage: "\/local-rules <task-id>"/);
     assert.match(claudeCommand, /^disable-model-invocation: true$/m);
     assert.doesNotMatch(claudeCommand, /ARGUMENTS:/);
@@ -121,6 +134,11 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
     assert.doesNotMatch(openCodeCommand, /disable-model-invocation/);
     assert.match(geminiCommand, /参数：\{\{args\}\}/);
     assert.match(openCodeCommand, /参数：\$ARGUMENTS/);
+    assert.match(geminiCommand, /^description = """本地规范检查。\n当提交前需要本地规则时使用。"""$/m);
+    assert.match(openCodeCommand, /^description: \|-\n  本地规范检查。\n  当提交前需要本地规则时使用。$/m);
+    assert.equal(parseMarkdownFrontmatter(claudeCommand).description, expectedDescription);
+    assert.equal(parseToml(geminiCommand).description, expectedDescription);
+    assert.equal(parseMarkdownFrontmatter(openCodeCommand).description, expectedDescription);
 
     const sharedClaudeCommand = fs.readFileSync(path.join(projectRoot, ".claude/commands/shared-rules.md"), "utf8");
     assert.doesNotMatch(sharedClaudeCommand, /^disable-model-invocation: true$/m);

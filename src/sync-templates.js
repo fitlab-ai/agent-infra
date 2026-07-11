@@ -171,7 +171,7 @@ function parseSkillFrontmatter(filePath) {
     if (!pair) continue;
 
     const [, key, rawValue] = pair;
-    if (rawValue === '>') {
+    if (rawValue === '>' || rawValue === '|') {
       const block = [];
       for (let offset = index + 1; offset < lines.length; offset += 1) {
         const nextLine = lines[offset];
@@ -180,7 +180,7 @@ function parseSkillFrontmatter(filePath) {
         block.push(nextLine.trim());
         index = offset;
       }
-      result[key] = block.join(' ').trim();
+      result[key] = block.join(rawValue === '|' ? '\n' : ' ').trim();
       continue;
     }
 
@@ -223,7 +223,7 @@ function detectCustomSkills(projectRoot, templateSkillNames) {
         name: meta.name || entry.name,
         description: meta.description || '',
         args: meta.args || null,
-        claudeDisableModelInvocation: meta['claude-disable-model-invocation'] === 'true'
+        disableModelInvocation: meta['disable-model-invocation'] === 'true'
       };
     })
     .filter(Boolean)
@@ -438,15 +438,32 @@ function cleanStaleSyncedFiles(projectRoot, syncedSkills, report) {
   }
 }
 
+function formatYamlMetadata(key, value) {
+  if (!value.includes('\n')) {
+    return [`${key}: ${JSON.stringify(value)}`];
+  }
+
+  return [`${key}: |-`, ...value.split('\n').map((line) => `  ${line}`)];
+}
+
+function formatTomlMetadata(key, value) {
+  if (!value.includes('\n')) {
+    return `${key} = ${JSON.stringify(value)}`;
+  }
+
+  const lines = value.split('\n').map((line) => JSON.stringify(line).slice(1, -1));
+  return `${key} = """${lines.join('\n')}"""`;
+}
+
 function generateClaudeCommand(skill, lang) {
   const isZhCN = lang === 'zh-CN';
-  const lines = ['---', `description: ${JSON.stringify(skill.description)}`];
+  const lines = ['---', ...formatYamlMetadata('description', skill.description)];
 
   if (skill.args) {
     lines.push(`usage: ${JSON.stringify(`/${skill.dirName} ${skill.args}`)}`);
   }
 
-  if (skill.claudeDisableModelInvocation) {
+  if (skill.disableModelInvocation) {
     lines.push('disable-model-invocation: true');
   }
 
@@ -480,7 +497,7 @@ function generateGeminiCommand(skill, lang) {
   promptLines.push(isZhCN ? '严格按照技能中定义的所有步骤执行。' : 'Follow all steps defined in the skill exactly.');
 
   return [
-    `description = ${JSON.stringify(skill.description)}`,
+    formatTomlMetadata('description', skill.description),
     'prompt = """',
     ...promptLines,
     '"""'
@@ -491,7 +508,7 @@ function generateOpenCodeCommand(skill, lang) {
   const isZhCN = lang === 'zh-CN';
   const lines = [
     '---',
-    `description: ${JSON.stringify(skill.description)}`,
+    ...formatYamlMetadata('description', skill.description),
     'agent: general',
     'subtask: false',
     '---',
