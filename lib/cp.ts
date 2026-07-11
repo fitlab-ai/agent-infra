@@ -5,8 +5,9 @@ import { platform as currentPlatform, tmpdir as defaultTmpdir } from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { createClipboardAdapter, type ClipboardAdapter } from './sandbox/clipboard/index.ts';
+import { RECEIVER_CAPABILITY, receiveRemoteClipboardPng } from './sandbox/clipboard/inbox.ts';
 
-const USAGE = 'Usage: ai cp <ssh-alias>\n\nCopy the local clipboard image (PNG) to a remote macOS NSPasteboard over ssh/scp.\n';
+const USAGE = 'Usage: ai cp <ssh-alias>\n\nCopy the local clipboard image (PNG) to a remote macOS clipboard or Linux sandbox over SSH.\n';
 const COMMAND_TIMEOUT_MS = 30_000;
 
 export type SpawnResult = {
@@ -65,6 +66,21 @@ export async function cmdCp(args: string[], deps: CpDeps = {}): Promise<number> 
     writeStderr = (chunk: string) => process.stderr.write(chunk)
   } = deps;
 
+  if (args.length === 1 && args[0] === '--remote-receive-capability') {
+    if (platform === 'linux') writeStdout(`${RECEIVER_CAPABILITY}\n`);
+    return platform === 'linux' ? 0 : 1;
+  }
+  if (args.length === 2 && args[0] === '--remote-receive-v1') {
+    try {
+      const result = receiveRemoteClipboardPng(process.env.HOME || process.env.USERPROFILE || '', args[1]!, platform);
+      writeStdout(`${result}\n`);
+      return 0;
+    } catch (error) {
+      writeStderr(`${error instanceof Error ? error.message : 'clipboard receive failed'}\n`);
+      return 1;
+    }
+  }
+
   if (args[0] === '--help' || args[0] === '-h' || args[0] === 'help') {
     writeStdout(USAGE);
     return 0;
@@ -110,6 +126,35 @@ export async function cmdCp(args: string[], deps: CpDeps = {}): Promise<number> 
     writeFileFn(localPng, png);
 
     remotePath = `/tmp/agent-infra-cp-${randomId()}.png`;
+    const remoteSystem = spawnFn('ssh', [
+      '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', alias, 'uname', '-s'
+    ]);
+    if (remoteSystem.status !== 0) {
+      writeStderr(`failed to detect remote platform on ${alias}:\n${commandDetail(remoteSystem)}\n`);
+      return 1;
+    }
+    const remotePlatform = remoteSystem.stdout.trim();
+    if (remotePlatform !== 'Darwin' && remotePlatform !== 'Linux') {
+      writeStderr(`unsupported remote platform on ${alias}: ${remotePlatform || 'unknown'}\n`);
+      return 1;
+    }
+    if (remotePlatform === 'Linux') {
+      const homeCheck = spawnFn('ssh', [
+        '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', alias, 'test', '-d', '$HOME/.agent-infra'
+      ]);
+      if (homeCheck.status !== 0) {
+        writeStderr(`remote agent-infra installation is missing on ${alias}\n`);
+        return 1;
+      }
+      const capability = spawnFn('ssh', [
+        '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', alias, 'ai', 'cp', '--remote-receive-capability'
+      ]);
+      if (capability.status !== 0 || capability.stderr !== '' || capability.stdout.replace(/\n$/u, '') !== RECEIVER_CAPABILITY) {
+        writeStderr(`remote agent-infra clipboard receiver is unavailable or incompatible on ${alias}; update agent-infra\n`);
+        return 1;
+      }
+    }
+
     const upload = spawnFn('scp', [
       '-o',
       'BatchMode=yes',
@@ -124,25 +169,21 @@ export async function cmdCp(args: string[], deps: CpDeps = {}): Promise<number> 
     }
     uploaded = true;
 
-    // Remote write currently targets macOS only: it pipes an AppleScript to the
-    // remote `osascript` to set its NSPasteboard. This is the extension point for
-    // other remote platforms later (e.g. dispatch on remote OS to wl-copy/xclip
-    // on Linux); a non-macOS remote fails here with a clear non-zero error today.
-    const setRemote = spawnFn('ssh', [
-      '-o',
-      'BatchMode=yes',
-      '-o',
-      'ConnectTimeout=10',
-      alias,
-      'osascript',
-      '-'
-    ], remoteSetScript(remotePath));
+    const setRemote = remotePlatform === 'Darwin'
+      ? spawnFn('ssh', [
+        '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', alias, 'osascript', '-'
+      ], remoteSetScript(remotePath))
+      : spawnFn('ssh', [
+        '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', alias, 'ai', 'cp', '--remote-receive-v1', remotePath
+      ]);
     if (setRemote.status !== 0) {
       writeStderr(`failed to set remote clipboard on ${alias}:\n${commandDetail(setRemote)}\n`);
       return 1;
     }
 
-    writeStdout(`copied clipboard image to ${alias}\n`);
+    writeStdout(remotePlatform === 'Linux'
+      ? `uploaded clipboard image to ${alias}; return to the SSH session and press Ctrl+V\n`
+      : `copied clipboard image to ${alias}\n`);
     return 0;
   } finally {
     if (uploaded && remotePath) {

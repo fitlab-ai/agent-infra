@@ -12,6 +12,7 @@ type PathsModule = typeof import("../../../lib/sandbox/clipboard/paths.ts");
 type DarwinModule = typeof import("../../../lib/sandbox/clipboard/darwin.ts");
 type IndexModule = typeof import("../../../lib/sandbox/clipboard/index.ts");
 type BridgeModule = typeof import("../../../lib/sandbox/clipboard/bridge.ts");
+type InboxModule = typeof import("../../../lib/sandbox/clipboard/inbox.ts");
 type PtyExitEvent = { exitCode: number; signal?: number | string };
 type PtyExitHandler = (event: PtyExitEvent) => void;
 
@@ -19,6 +20,55 @@ function invokeExitHandler(handler: PtyExitHandler | null, event: PtyExitEvent) 
   assert.ok(handler, "pty exit handler should be registered");
   handler(event);
 }
+
+test("linux clipboard receiver stores a hashed PNG and a persistent pending marker", async () => {
+  const inbox = await loadFreshEsm<InboxModule>("lib/sandbox/clipboard/inbox.js");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-inbox-home-"));
+  const agentDir = path.join(home, ".agent-infra");
+  const temp = "/tmp/agent-infra-cp-123e4567-e89b-12d3-a456-426614174000.png";
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
+  fs.mkdirSync(agentDir, { recursive: true });
+  fs.writeFileSync(temp, png);
+  try {
+    const containerPath = inbox.receiveRemoteClipboardPng(home, temp, "linux");
+    assert.match(containerPath, /^\/clipboard\/[a-f0-9]{16}\.png$/);
+    assert.equal(inbox.readPendingClipboardPath(home), containerPath);
+    assert.equal(fs.readdirSync(path.join(agentDir, "clipboard")).some((name) => name === ".pending.json"), true);
+  } finally {
+    fs.rmSync(temp, { force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("clipboard inbox distinguishes a missing marker from a malformed marker", async () => {
+  const inbox = await loadFreshEsm<InboxModule>("lib/sandbox/clipboard/inbox.js");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-inbox-marker-"));
+  const clipboard = path.join(home, ".agent-infra", "clipboard");
+  fs.mkdirSync(clipboard, { recursive: true });
+  try {
+    assert.equal(inbox.readPendingClipboardPath(home), null);
+    fs.writeFileSync(path.join(clipboard, ".pending.json"), "{broken");
+    assert.throws(() => inbox.readPendingClipboardPath(home), /invalid clipboard pending marker/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("linux clipboard receiver rejects a non-PNG before creating inbox files", async () => {
+  const inbox = await loadFreshEsm<InboxModule>("lib/sandbox/clipboard/inbox.js");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-inbox-invalid-"));
+  const agentDir = path.join(home, ".agent-infra");
+  const temp = "/tmp/agent-infra-cp-123e4567-e89b-12d3-a456-426614174001.png";
+  fs.mkdirSync(agentDir, { recursive: true });
+  fs.writeFileSync(temp, Buffer.alloc(1024 * 1024, 0x41));
+  try {
+    assert.throws(() => inbox.receiveRemoteClipboardPng(home, temp, "linux"), /not a PNG/);
+    assert.equal(fs.existsSync(path.join(agentDir, "clipboard")), false);
+  } finally {
+    fs.rmSync(temp, { force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
 
 test("CtrlVDetector recognizes plain, CSI-u, and modifyOtherKeys Ctrl+V sequences", async () => {
   const { CtrlVDetector } = await loadFreshEsm<KeysModule>("lib/sandbox/clipboard/keys.js");
@@ -377,6 +427,46 @@ test("clipboard bridge injects bracketed paste for image Ctrl+V", async () => {
     assert.deepEqual(rawModes, [true, false]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("clipboard bridge prefers a pending remote image and warns once for a malformed marker", async () => {
+  const { runInteractiveWithClipboardBridge } = await loadFreshEsm<BridgeModule>("lib/sandbox/clipboard/bridge.js");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-pending-bridge-"));
+  const clipboard = path.join(home, ".agent-infra", "clipboard");
+  fs.mkdirSync(clipboard, { recursive: true });
+  fs.writeFileSync(path.join(clipboard, "1234567890abcdef.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  fs.writeFileSync(path.join(clipboard, ".pending.json"), JSON.stringify({ version: 1, filename: "1234567890abcdef.png" }));
+  const stdin = new EventEmitter() as EventEmitter & { isTTY: boolean; setRawMode(value: boolean): void; resume(): void };
+  const stdout = new EventEmitter() as EventEmitter & { isTTY: boolean; columns: number; rows: number; write(chunk: string): void };
+  const writes: string[] = [];
+  const stderr: string[] = [];
+  let exitHandler: PtyExitHandler | null = null;
+  stdin.isTTY = true; stdin.setRawMode = () => {}; stdin.resume = () => {};
+  stdout.isTTY = true; stdout.columns = 100; stdout.rows = 30; stdout.write = () => {};
+  try {
+    const promise = runInteractiveWithClipboardBridge({
+      engine: "native", dockerArgs: ["exec", "-it", "demo", "bash"], container: "demo", home,
+      platformName: "linux", stdin: stdin as never, stdout: stdout as never,
+      adapter: { available: () => ({ ok: false, reason: "headless" }), readImagePng: () => null },
+      runOk: () => true,
+      writeStderr: (chunk) => stderr.push(chunk),
+      loadPty: async () => ({ spawn() { return {
+        onData() {}, onExit(callback) { exitHandler = callback; }, write(data) { writes.push(data); }, resize() {}, kill() {}
+      }; } })
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    stdin.emit("data", Buffer.from("\x16", "binary"));
+    fs.writeFileSync(path.join(clipboard, ".pending.json"), "{broken");
+    stdin.emit("data", Buffer.from("\x16\x16", "binary"));
+    invokeExitHandler(exitHandler, { exitCode: 0 });
+    assert.equal(await promise, 0);
+    assert.equal(writes[0], "\x1b[200~/clipboard/1234567890abcdef.png\x1b[201~");
+    assert.deepEqual(writes.slice(1), ["\x16", "\x16"]);
+    assert.equal(stderr.length, 1);
+    assert.match(stderr[0] ?? "", /invalid clipboard pending marker/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

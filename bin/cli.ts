@@ -15,7 +15,7 @@ const USAGE = `agent-infra ${VERSION} - bootstrap AI collaboration infrastructur
 Usage: ai <command> [options]
 
 Commands:
-  cp <ssh-alias>  Copy local clipboard image to a remote macOS NSPasteboard
+  cp <ssh-alias>  Copy local clipboard image to a remote macOS clipboard or Linux sandbox over SSH
   decide          Record a human decision for a task HD item
   help            Show this help message
   init            Initialize a new project with update-agent-infra seed command

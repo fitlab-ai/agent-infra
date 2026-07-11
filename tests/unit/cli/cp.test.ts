@@ -151,6 +151,7 @@ test("happy path uploads png, sets remote clipboard, and cleans up", async () =>
     },
     spawnFn: (cmd, args, input) => {
       calls.push({ cmd, args, input });
+      if (calls.length === 1) return { ...successResult(), stdout: "Darwin\n" };
       return successResult();
     }
   });
@@ -158,16 +159,16 @@ test("happy path uploads png, sets remote clipboard, and cleans up", async () =>
   assert.equal(code, 0);
   assert.equal(written.length, 1);
   assert.equal(written[0]?.data.toString(), "PNG_BYTES");
-  assert.equal(calls.length, 3);
-  assert.deepEqual(calls[0]?.args.slice(0, 4), ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]);
-  assert.equal(calls[0]?.cmd, "scp");
-  assert.equal(calls[0]?.args.at(-1), "mini:/tmp/agent-infra-cp-fixed.png");
-  assert.equal(calls[1]?.cmd, "ssh");
-  assert.deepEqual(calls[1]?.args.slice(-3), ["mini", "osascript", "-"]);
-  assert.match(calls[1]?.input ?? "", /«class PNGf»/);
-  assert.match(calls[1]?.input ?? "", /\/tmp\/agent-infra-cp-fixed\.png/);
+  assert.equal(calls.length, 4);
+  assert.equal(calls[0]?.cmd, "ssh");
+  assert.equal(calls[1]?.cmd, "scp");
+  assert.equal(calls[1]?.args.at(-1), "mini:/tmp/agent-infra-cp-fixed.png");
   assert.equal(calls[2]?.cmd, "ssh");
-  assert.deepEqual(calls[2]?.args.slice(-3), ["rm", "-f", "/tmp/agent-infra-cp-fixed.png"]);
+  assert.deepEqual(calls[2]?.args.slice(-3), ["mini", "osascript", "-"]);
+  assert.match(calls[2]?.input ?? "", /«class PNGf»/);
+  assert.match(calls[2]?.input ?? "", /\/tmp\/agent-infra-cp-fixed\.png/);
+  assert.equal(calls[3]?.cmd, "ssh");
+  assert.deepEqual(calls[3]?.args.slice(-3), ["rm", "-f", "/tmp/agent-infra-cp-fixed.png"]);
   assert.deepEqual(removed, ["/tmp/agent-infra-cp-local"]);
   assert.match(output.stdout.join(""), /copied clipboard image to mini/);
 });
@@ -189,13 +190,14 @@ test("scp failure reports captured stderr and only local cleanup runs", async ()
     },
     spawnFn: (cmd, args, input) => {
       calls.push({ cmd, args, input });
+      if (calls.length === 1) return { ...successResult(), stdout: "Darwin\n" };
       return { status: 1, stdout: "", stderr: "scp failed" };
     }
   });
 
   assert.equal(code, 1);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.cmd, "scp");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1]?.cmd, "scp");
   assert.match(output.stderr.join(""), /failed to upload image to mini/);
   assert.match(output.stderr.join(""), /scp failed/);
   assert.deepEqual(removed, ["/tmp/agent-infra-cp-local"]);
@@ -218,7 +220,8 @@ test("remote clipboard failure reports captured stderr and runs remote cleanup",
     },
     spawnFn: (cmd, args, input) => {
       calls.push({ cmd, args, input });
-      if (calls.length === 2) {
+      if (calls.length === 1) return { ...successResult(), stdout: "Darwin\n" };
+      if (calls.length === 3) {
         return { status: 255, stdout: "", stderr: "osascript failed" };
       }
       return successResult();
@@ -226,11 +229,38 @@ test("remote clipboard failure reports captured stderr and runs remote cleanup",
   });
 
   assert.equal(code, 1);
-  assert.equal(calls.length, 3);
-  assert.equal(calls[1]?.cmd, "ssh");
+  assert.equal(calls.length, 4);
   assert.equal(calls[2]?.cmd, "ssh");
-  assert.deepEqual(calls[2]?.args.slice(-3), ["rm", "-f", "/tmp/agent-infra-cp-fixed.png"]);
+  assert.equal(calls[3]?.cmd, "ssh");
+  assert.deepEqual(calls[3]?.args.slice(-3), ["rm", "-f", "/tmp/agent-infra-cp-fixed.png"]);
   assert.match(output.stderr.join(""), /failed to set remote clipboard on mini/);
   assert.match(output.stderr.join(""), /osascript failed/);
   assert.deepEqual(removed, ["/tmp/agent-infra-cp-local"]);
+});
+
+test("linux remote flow verifies the receiver before uploading and preserves the pending path", async () => {
+  const output = outputDeps();
+  const calls: SpawnCall[] = [];
+  const code = await cmdCp(["cloud"], {
+    ...output,
+    platform: "darwin",
+    createAdapter: () => imageAdapter(Buffer.from("PNG_BYTES")),
+    randomId: () => "fixed",
+    mkdtempFn: () => "/tmp/agent-infra-cp-local",
+    writeFileFn: () => {},
+    rmFn: () => {},
+    spawnFn: (cmd, args, input) => {
+      calls.push({ cmd, args, input });
+      if (calls.length === 1) return { ...successResult(), stdout: "Linux\n" };
+      if (calls.length === 2) return successResult();
+      if (calls.length === 3) return { ...successResult(), stdout: "AGENT_INFRA_CLIPBOARD_RECEIVER:v1\n" };
+      if (calls.length === 5) return { ...successResult(), stdout: "/clipboard/1234567890abcdef.png\n" };
+      return successResult();
+    }
+  });
+
+  assert.equal(code, 0);
+  assert.equal(calls[3]?.cmd, "scp");
+  assert.deepEqual(calls[4]?.args.slice(-4), ["ai", "cp", "--remote-receive-v1", "/tmp/agent-infra-cp-fixed.png"]);
+  assert.match(output.stdout.join(""), /uploaded clipboard image to cloud;.*Ctrl\+V/);
 });

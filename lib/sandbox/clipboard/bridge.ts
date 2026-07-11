@@ -9,6 +9,7 @@ import {
   pruneClipboardDir,
   writeClipboardPngAtomic
 } from './paths.ts';
+import { isClipboardInboxReadable, readPendingClipboardPath } from './inbox.ts';
 import { commandForEngine, restoreTerminal, runInteractiveEngine, runOkEngine } from '../shell.ts';
 import { loadNodePty, type NodePty, type PtyProcess } from './node-pty.ts';
 
@@ -85,13 +86,9 @@ export async function runInteractiveWithClipboardBridge(options: BridgeOptions):
   if (!stdin.isTTY || !stdout.isTTY) {
     return fallback('host stdin/stdout is not a TTY');
   }
-  if (!adapter) {
-    return fallback('no clipboard adapter available on this platform');
-  }
-  const available = adapter.available();
-  if (!available.ok) {
-    return fallback(available.reason);
-  }
+  const available = adapter?.available() ?? { ok: false as const, reason: 'no clipboard adapter available on this platform' };
+  const inboxReady = isClipboardInboxReadable(home);
+  if (!available.ok && !inboxReady) return fallback(available.reason);
   if (!runOk(engine, 'docker', ['exec', container, 'sh', '-c', '[ -d /clipboard ] && [ -r /clipboard ]'])) {
     return fallback('container /clipboard mount is missing; rebuild the sandbox to enable image paste');
   }
@@ -119,7 +116,7 @@ export async function runInteractiveWithClipboardBridge(options: BridgeOptions):
   return runBridge({
     child,
     home,
-    adapter,
+    adapter: available.ok ? adapter : null,
     writeStderr,
     stdin,
     stdout,
@@ -138,7 +135,7 @@ async function runBridge({
 }: {
   child: PtyProcess;
   home: string;
-  adapter: ClipboardAdapter;
+  adapter: ClipboardAdapter | null;
   writeStderr: (chunk: string) => unknown;
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WriteStream;
@@ -182,9 +179,9 @@ async function runBridge({
   }
 
   function handleText(raw: string, target: PtyProcess): void {
-    const textAdapter = adapter as TextImageClipboardAdapter;
+    const textAdapter = adapter as TextImageClipboardAdapter | null;
     const pastedText = extractSinglePathPaste(raw);
-    if (!textAdapter.readImageFromText || pastedText === null) {
+    if (!textAdapter || !textAdapter.readImageFromText || pastedText === null) {
       target.write(raw);
       return;
     }
@@ -207,12 +204,17 @@ async function runBridge({
 
   function handleCtrlV(match: CtrlVMatch, target: PtyProcess): void {
     try {
+      const pendingPath = readPendingClipboardPath(home);
+      if (pendingPath) {
+        target.write(buildBracketedPaste(pendingPath));
+        return;
+      }
       // readImagePng returns null both for "no image on clipboard" and for
       // unexpected read failures; both cases forward the original Ctrl+V so
       // the container app handles it as a regular keystroke. The throw branch
       // below only fires on truly unexpected exceptions (e.g. fs write
       // errors writing to the host clipboard dir).
-      const png = adapter.readImagePng();
+      const png = adapter?.readImagePng() ?? null;
       if (!png) {
         target.write(match.raw);
         return;
