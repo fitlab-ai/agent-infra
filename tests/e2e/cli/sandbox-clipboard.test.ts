@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
 
-import { loadFreshEsm } from "../../helpers.ts";
+import { loadFreshEsm, onPlatforms } from "../../helpers.ts";
 
 type KeysModule = typeof import("../../../lib/sandbox/clipboard/keys.ts");
 type PathsModule = typeof import("../../../lib/sandbox/clipboard/paths.ts");
@@ -21,7 +21,7 @@ function invokeExitHandler(handler: PtyExitHandler | null, event: PtyExitEvent) 
   handler(event);
 }
 
-test("linux clipboard receiver stores a hashed PNG and a persistent pending marker", async () => {
+test("linux clipboard receiver stores a hashed PNG and a persistent pending marker", onPlatforms("linux"), async () => {
   const inbox = await loadFreshEsm<InboxModule>("lib/sandbox/clipboard/inbox.js");
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-inbox-home-"));
   const agentDir = path.join(home, ".agent-infra");
@@ -54,7 +54,7 @@ test("clipboard inbox distinguishes a missing marker from a malformed marker", a
   }
 });
 
-test("linux clipboard receiver rejects a non-PNG before creating inbox files", async () => {
+test("linux clipboard receiver rejects a non-PNG before creating inbox files", onPlatforms("linux"), async () => {
   const inbox = await loadFreshEsm<InboxModule>("lib/sandbox/clipboard/inbox.js");
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-inbox-invalid-"));
   const agentDir = path.join(home, ".agent-infra");
