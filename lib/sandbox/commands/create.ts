@@ -629,6 +629,7 @@ export function buildContainerEnvFile(
     chmodFn?: typeof fs.chmodSync;
     rmFn?: typeof fs.rmSync;
     tmpDir?: string;
+    runSafeFn?: DirectRunSafeFn;
   } = {}
 ): { dockerArgs: string[]; cleanup: () => void } {
   const {
@@ -636,11 +637,15 @@ export function buildContainerEnvFile(
     writeFileFn = fs.writeFileSync,
     chmodFn = fs.chmodSync,
     rmFn = fs.rmSync,
-    tmpDir = os.tmpdir()
+    tmpDir = os.tmpdir(),
+    runSafeFn = runSafe
   } = options;
 
   const entries: Array<[string, string]> = resolvedTools.flatMap(({ tool }) => Object.entries(tool.envVars ?? {}));
-  const ghToken = runSafeEngineFn(engine, 'gh', ['auth', 'token']);
+  let ghToken = runSafeEngineFn(engine, 'gh', ['auth', 'token']);
+  if (!ghToken && engine === 'wsl2') {
+    ghToken = runSafeFn('gh', ['auth', 'token']);
+  }
   if (ghToken) {
     entries.push(['GH_TOKEN', ghToken]);
   }

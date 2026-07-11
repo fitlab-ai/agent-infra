@@ -166,6 +166,74 @@ test("buildContainerEnvFile stores GH_TOKEN in the env file but not docker argv"
   }
 });
 
+test("buildContainerEnvFile falls back to the host GH token on WSL2", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-wsl2-token-"));
+  const calls: string[] = [];
+
+  try {
+    const envFile = sandboxCreate.buildContainerEnvFile([], "wsl2", (engine, cmd, args) => {
+      calls.push(`${engine}:${cmd}:${args.join(" ")}`);
+      return "";
+    }, {
+      tmpDir,
+      runSafeFn: (cmd: string, args: string[]) => {
+        calls.push(`host:${cmd}:${args.join(" ")}`);
+        return "ghp_host_token";
+      }
+    });
+    const envPath = required(envFile.dockerArgs[1]);
+
+    assert.deepEqual(calls, ["wsl2:gh:auth token", "host:gh:auth token"]);
+    assert.equal(fs.readFileSync(envPath, "utf8"), "GH_TOKEN=ghp_host_token\n");
+    assert.ok(!envFile.dockerArgs.some((arg) => arg.includes("ghp_host_token")));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("buildContainerEnvFile keeps the WSL2 engine token as the preferred result", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-env-file-wsl2-preferred-"));
+
+  try {
+    const envFile = sandboxCreate.buildContainerEnvFile([], "wsl2", () => "ghp_engine_token", {
+      tmpDir,
+      runSafeFn: () => {
+        throw new Error("host fallback must not run");
+      }
+    });
+    const envPath = required(envFile.dockerArgs[1]);
+
+    assert.equal(fs.readFileSync(envPath, "utf8"), "GH_TOKEN=ghp_engine_token\n");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("buildContainerEnvFile does not use the host fallback outside WSL2", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+
+  const envFile = sandboxCreate.buildContainerEnvFile([], "native", () => "", {
+    runSafeFn: () => {
+      throw new Error("host fallback must not run");
+    }
+  });
+
+  assert.deepEqual(envFile.dockerArgs, []);
+});
+
+test("buildContainerEnvFile remains best-effort when both WSL2 token lookups fail", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+
+  const envFile = sandboxCreate.buildContainerEnvFile([], "wsl2", () => "", {
+    runSafeFn: () => ""
+  });
+
+  assert.deepEqual(envFile.dockerArgs, []);
+  assert.doesNotThrow(() => envFile.cleanup());
+});
+
 test("buildContainerEnvFile returns empty docker args when there are no env vars", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
@@ -216,6 +284,7 @@ test("buildContainerEnvFile uses engine-aware env-file paths for WSL2", async ()
     { tool: { envVars: { FOO: "bar" } } }
   ], "wsl2", () => "", {
     tmpDir: "F:\\tmp",
+    runSafeFn: () => "",
     mkdtempFn: () => "F:\\tmp\\agent-infra-env-fixed",
     writeFileFn: () => {},
     chmodFn: () => {},
