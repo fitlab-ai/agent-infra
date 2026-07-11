@@ -52,7 +52,7 @@ function resolveCommand(cmd: string): string {
   return cmd;
 }
 
-function commandOptions<T extends CommandOptions>(cmd: string, opts: T): T | (T & { shell: true }) {
+function commandOptions<T extends object>(cmd: string, opts: T): T | (T & { shell: true }) {
   if (process.platform === 'win32' && /\.(?:bat|cmd)$/i.test(cmd)) {
     return { ...opts, shell: true };
   }
@@ -153,7 +153,8 @@ export function runEngine(engine: string, cmd: string, args: string[], opts: Com
 
 export function execEngine(engine: string, cmd: string, args: string[], opts: ExecFileSyncOptions = {}) {
   const command = commandForEngine(engine, cmd, args);
-  return execFileSync(command.cmd, command.args, opts);
+  const resolved = resolveCommand(command.cmd);
+  return execFileSync(resolved, command.args, commandOptions(resolved, opts));
 }
 
 export function runOkEngine(engine: string, cmd: string, args: string[], opts: CommandOptions = {}): boolean {
