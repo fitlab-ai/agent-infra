@@ -195,6 +195,22 @@ test("commandForEngine wraps commands with wsl.exe for WSL2", async () => {
     sandboxShell.commandForEngine("native", "docker", ["info"]),
     { cmd: "docker", args: ["info"] }
   );
+  assert.deepEqual(
+    sandboxShell.commandForEngine("colima", "docker", ["ps", "-a"]),
+    { cmd: "docker", args: ["--context", "colima", "ps", "-a"] }
+  );
+  assert.deepEqual(
+    sandboxShell.commandForEngine("orbstack", "docker", ["start", "demo"]),
+    { cmd: "docker", args: ["--context", "orbstack", "start", "demo"] }
+  );
+  assert.deepEqual(
+    sandboxShell.commandForEngine("docker-desktop", "docker", ["info"]),
+    { cmd: "docker", args: ["--context", "desktop-linux", "info"] }
+  );
+  assert.deepEqual(
+    sandboxShell.commandForEngine("colima", "colima", ["status"]),
+    { cmd: "colima", args: ["status"] }
+  );
 });
 
 test("sandbox exec routes through wsl.exe with single-arg entry script on wsl2", async () => {

@@ -212,7 +212,7 @@ test('collectRuntime reads the latest managed tmux run through docker exec', () 
     JSON.stringify({
       version: 1,
       run_id: 'run-test',
-      engine: 'docker',
+      engine: 'native',
       container: 'agent-dev',
       run_dir: '/tmp/agent-infra-runs/run-test',
       status_file: '/tmp/agent-infra-runs/run-test/status',

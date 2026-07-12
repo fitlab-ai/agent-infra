@@ -14,7 +14,12 @@ type SandboxFixture = {
   binDir: string;
   logPath: string;
   readDockerCalls(): string[][];
+  readRawDockerCalls(): string[][];
 };
+
+function dockerCommandArgs(args: string[]): string[] {
+  return args[0] === "--context" && args.length >= 2 ? args.slice(2) : args;
+}
 
 function writeNodeCommandShim(commandPath: string, scriptPath: string): string {
   fs.mkdirSync(path.dirname(commandPath), { recursive: true });
@@ -83,9 +88,10 @@ function writeSandboxEngineFixture(
       "const fs = require('node:fs');",
       `const dockerStdoutForPs = ${JSON.stringify(dockerStdoutForPs)};`,
       `const dockerLabelsForInspect = ${JSON.stringify(dockerLabelsForInspect)};`,
-      "const args = process.argv.slice(2);",
+      "const rawArgs = process.argv.slice(2);",
+      "const args = rawArgs[0] === '--context' && rawArgs.length >= 2 ? rawArgs.slice(2) : rawArgs;",
       "function log() {",
-      "  fs.appendFileSync(process.env.DOCKER_LOG_PATH, JSON.stringify(args) + '\\n');",
+      "  fs.appendFileSync(process.env.DOCKER_LOG_PATH, JSON.stringify(rawArgs) + '\\n');",
       "}",
       "log();",
       "if (args[0] === 'ps') {",
@@ -178,6 +184,16 @@ function writeSandboxEngineFixture(
     binDir,
     logPath,
     readDockerCalls() {
+      if (!fs.existsSync(logPath)) {
+        return [];
+      }
+      return fs.readFileSync(logPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => dockerCommandArgs(JSON.parse(line) as string[]));
+    },
+    readRawDockerCalls() {
       if (!fs.existsSync(logPath)) {
         return [];
       }

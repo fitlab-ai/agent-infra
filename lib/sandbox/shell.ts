@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ExecFileSyncOptions, StdioOptions, SpawnSyncOptions, SpawnSyncReturns } from 'node:child_process';
+import { getAdapter } from './engines/index.ts';
 
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000;
 
@@ -141,6 +142,13 @@ export function commandForEngine(engine: string, cmd: string, args: string[] = [
   if (engine === 'wsl2') {
     const resolvedWrapper = resolveCommand('wsl.exe');
     return { cmd: resolvedWrapper, args: ['--', cmd, ...args] };
+  }
+
+  if (cmd === 'docker') {
+    const context = getAdapter(engine).dockerContext;
+    if (context) {
+      return { cmd, args: ['--context', context, ...args] };
+    }
   }
 
   return { cmd, args };

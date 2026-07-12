@@ -501,6 +501,12 @@ test("sandbox ls resolves to configured engine", onPlatforms("linux", "darwin", 
       fixture.readDockerCalls().some((call) => call[0] === "ps"),
       "expected sandbox ls to call docker ps through the configured native engine"
     );
+    assert.ok(
+      fixture.readRawDockerCalls().some((call) =>
+        call[0] === "--context" && call[1] === "desktop-linux" && call[2] === "ps"
+      ),
+      "expected sandbox ls to select the configured Docker Desktop context explicitly"
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

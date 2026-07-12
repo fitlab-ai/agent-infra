@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { loadConfig } from './config.ts';
 import { containerNameCandidates, sandboxBranchLabel, sandboxLabel } from './constants.ts';
 import { detectEngine } from './engine.ts';
+import { commandForEngine } from './shell.ts';
 import { hostTimezoneEnvFlags, terminalEnvFlags } from './commands/enter.ts';
 import {
   fetchSandboxRows,
@@ -202,7 +203,8 @@ export async function runInSandbox(
     '-lc',
     buildTmuxLauncher({ request, runId })
   ];
-  const result = await (options.spawn ?? spawnCapture)('docker', dockerArgs);
+  const command = commandForEngine(engine, 'docker', dockerArgs);
+  const result = await (options.spawn ?? spawnCapture)(command.cmd, command.args);
   return {
     ...result,
     run: {

@@ -14,7 +14,7 @@ test('runInSandbox fails clearly when no sandbox container exists', async () => 
       runInSandbox(
         { taskRef: '#7', branch: 'feature/demo', command: ['codex', 'exec', '$code-task #7'] },
         {
-          engine: 'docker',
+          engine: 'native',
           repoRoot: '/repo',
           containerCandidates: ['demo-dev-feature-demo'],
           rows: [],
@@ -30,7 +30,7 @@ test('runInSandbox starts stopped containers and schedules a tmux run without -i
   const result = await runInSandbox(
     { taskRef: '#7', branch: 'feature/demo', command: ['codex', 'exec', '$code-task #7'] },
     {
-      engine: 'docker',
+      engine: 'native',
       runId: 'run-test-123',
       repoRoot: '/repo',
       containerCandidates: ['demo-dev-feature-demo'],
@@ -45,7 +45,7 @@ test('runInSandbox starts stopped containers and schedules a tmux run without -i
   assert.equal(result.stdout, 'ok');
   assert.deepEqual(result.run, {
     runId: 'run-test-123',
-    engine: 'docker',
+    engine: 'native',
     container: 'demo-dev-feature-demo',
     runDir: '/tmp/agent-infra-runs/run-test-123'
   });
@@ -60,7 +60,7 @@ test('runInSandbox launcher creates a tmux window and run status files', async (
   const result = await runInSandbox(
     { taskRef: '#7', branch: 'feature/demo', command: ['codex', 'exec', '$code-task #7'] },
     {
-      engine: 'docker',
+      engine: 'native',
       runId: 'run-test-456',
       repoRoot: '/repo',
       containerCandidates: ['demo-dev-feature-demo'],
@@ -76,7 +76,7 @@ test('runInSandbox launcher creates a tmux window and run status files', async (
   assert.equal(result.stdout, 'started');
   assert.deepEqual(result.run, {
     runId: 'run-test-456',
-    engine: 'docker',
+    engine: 'native',
     container: 'demo-dev-feature-demo',
     runDir: '/tmp/agent-infra-runs/run-test-456'
   });
@@ -90,6 +90,27 @@ test('runInSandbox launcher creates a tmux window and run status files', async (
   assert.ok(encodedRunScript, 'launcher should embed a base64-encoded run script');
   const runScript = Buffer.from(encodedRunScript, 'base64').toString('utf8');
   assert.equal(runScript.split(PORTABLE_TIMESTAMP_COMMAND).length - 1, 2);
+});
+
+test('runInSandbox selects the configured Docker context for capture exec', async () => {
+  const calls: Array<[string, string[]]> = [];
+  await runInSandbox(
+    { taskRef: '#7', branch: 'feature/demo', command: ['codex', 'exec', '$code-task #7'] },
+    {
+      engine: 'orbstack',
+      runId: 'run-context',
+      repoRoot: '/repo',
+      containerCandidates: ['demo-dev-feature-demo'],
+      rows: [{ name: 'demo-dev-feature-demo', status: 'Up', branch: 'feature/demo', running: true, index: null }],
+      spawn: async (file, args) => {
+        calls.push([file, args]);
+        return { exitCode: 0, signal: null, stdout: '', stderr: '' };
+      }
+    }
+  );
+
+  assert.equal(calls[0]?.[0], 'docker');
+  assert.deepEqual(calls[0]?.[1].slice(0, 4), ['--context', 'orbstack', 'exec', '-e']);
 });
 
 test('portable timestamp command formats non-hour negative offsets', onPlatforms('linux', 'darwin'), () => {
