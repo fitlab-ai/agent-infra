@@ -110,7 +110,8 @@ test('runInSandbox selects the configured Docker context for capture exec', asyn
   );
 
   assert.equal(calls[0]?.[0], 'docker');
-  assert.deepEqual(calls[0]?.[1].slice(0, 4), ['--context', 'orbstack', 'exec', '-e']);
+  assert.deepEqual(calls[0]?.[1].slice(0, 3), ['--context', 'orbstack', 'exec']);
+  assert.ok(calls[0]?.[1].includes('demo-dev-feature-demo'));
 });
 
 test('portable timestamp command formats non-hour negative offsets', onPlatforms('linux', 'darwin'), () => {
