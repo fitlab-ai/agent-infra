@@ -210,7 +210,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%:z"
+date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
 Update `.agents/workspace/active/{task-id}/task.md`:

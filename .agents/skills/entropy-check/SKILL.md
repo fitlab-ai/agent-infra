@@ -31,7 +31,7 @@ mkdir -p .agents/workspace/logs/entropy-check
 ```bash
 git status -s
 git branch --show-current
-date "+%Y-%m-%d %H:%M:%S%:z"
+date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
 ### 2. 读取审查参考

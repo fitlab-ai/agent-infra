@@ -58,7 +58,7 @@ When syncing to the Issue, replace any existing `status:` labels with the inferr
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%:z"
+date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
 Update `task.md` in the task directory:

@@ -95,12 +95,12 @@ function buildRunScript(params: {
   return `#!/bin/sh
 set -u
 cd /workspace
-date "+%Y-%m-%d %H:%M:%S%:z" > ${runDir}/started_at
+date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\\([+-][0-9][0-9]\\)\\([0-9][0-9]\\)$/\\1:\\2/' > ${runDir}/started_at
 printf '%s\\n' running > ${runDir}/status
 ${command}
 code=$?
 printf '%s\\n' "$code" > ${runDir}/exit_code
-date "+%Y-%m-%d %H:%M:%S%:z" > ${runDir}/finished_at
+date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\\([+-][0-9][0-9]\\)\\([0-9][0-9]\\)$/\\1:\\2/' > ${runDir}/finished_at
 if [ "$code" -eq 0 ]; then
   printf '%s\\n' completed > ${runDir}/status
 else

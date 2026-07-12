@@ -169,7 +169,7 @@ gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH \
 更新 task.md：
 
 - 把 `issue_number: {n}` 写入 frontmatter（已存在则替换；不存在则在 frontmatter 末尾追加）
-- 更新 `updated_at` 为当前时间（命令：`date "+%Y-%m-%d %H:%M:%S%:z"`）
+- 更新 `updated_at` 为当前时间（命令：`date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'`）
 
 > 不要在此追加 Activity Log 条目。Issue 创建事件已由 GitHub Issue 自身和 frontmatter `issue_number` 承载；Activity Log 仅记录 `create-task` skill 一次执行的整体锚点（`Create Task`），由调用方 SKILL 步骤 3 写入。
 

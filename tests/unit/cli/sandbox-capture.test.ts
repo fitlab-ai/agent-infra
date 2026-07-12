@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 
 import { runInSandbox } from '../../../lib/sandbox/capture.ts';
+import { onPlatforms } from '../../helpers.ts';
+
+const PORTABLE_TIMESTAMP_COMMAND =
+  `date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\\([+-][0-9][0-9]\\)\\([0-9][0-9]\\)$/\\1:\\2/'`;
 
 test('runInSandbox fails clearly when no sandbox container exists', async () => {
   await assert.rejects(
@@ -81,4 +86,18 @@ test('runInSandbox launcher creates a tmux window and run status files', async (
   assert.match(launcher, /tmux send-keys -t/);
   assert.ok(launcher.includes('/tmp/agent-infra-runs/run-test-456'));
   assert.match(launcher, /status/);
+  const encodedRunScript = launcher.match(/printf '%s' '([^']+)' \| base64 -d/)?.[1];
+  assert.ok(encodedRunScript, 'launcher should embed a base64-encoded run script');
+  const runScript = Buffer.from(encodedRunScript, 'base64').toString('utf8');
+  assert.equal(runScript.split(PORTABLE_TIMESTAMP_COMMAND).length - 1, 2);
+});
+
+test('portable timestamp command formats non-hour negative offsets', onPlatforms('linux', 'darwin'), () => {
+  const result = spawnSync('sh', ['-c', PORTABLE_TIMESTAMP_COMMAND], {
+    encoding: 'utf8',
+    env: { ...process.env, TZ: 'America/St_Johns' }
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout.trim(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}-\d{2}:30$/);
 });

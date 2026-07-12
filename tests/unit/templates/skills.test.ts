@@ -617,32 +617,37 @@ test("skill command templates use thin adapter bodies", () => {
 });
 
 test("skills that write timestamps require date command guidance", () => {
+  const portableTimestampCommand =
+    `date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\\([+-][0-9][0-9]\\)\\([0-9][0-9]\\)$/\\1:\\2/'`;
   const timestampSkills = [
     "analyze-task",
     "block-task",
     "cancel-task",
     "close-codescan",
     "close-dependabot",
+    "code-task",
     "commit",
+    "complete-manual-validation",
     "complete-task",
     "create-pr",
     "create-task",
     "import-codescan",
     "import-dependabot",
     "import-issue",
-    "code-task",
     "plan-task",
-    "code-task",
-    "review-code"
+    "restore-task",
+    "review-analysis",
+    "review-code",
+    "review-plan",
+    "watch-pr"
   ];
 
   timestampSkills.forEach((skill) => {
     skillDocPaths(skill).forEach((relativePath) => {
       const content = read(relativePath);
 
-      assert.match(
-        content,
-        /date "\+%Y-%m-%d %H:%M:%S%:z"/,
+      assert.ok(
+        content.includes(portableTimestampCommand),
         `${relativePath} should require the date command for timestamp writes`
       );
     });

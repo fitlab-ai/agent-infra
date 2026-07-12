@@ -96,7 +96,7 @@ If a related task exists (search for `security_alert_number: <alert-number>`):
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%:z"
+date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
 - Add the dismissal record to task.md

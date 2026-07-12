@@ -105,7 +105,7 @@ description: >
 获取当前时间：
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%:z"
+date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
 如果获取到了 `{task-id}`，更新 task.md 的 `pr_number`、`pr_status`（设为 `created`）、`updated_at`、`agent_infra_version`，并追加 Create PR 的 Activity Log，记录元数据同步和摘要发布结果。

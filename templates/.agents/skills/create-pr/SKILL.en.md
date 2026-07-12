@@ -105,7 +105,7 @@ Aggregate a reviewer-facing summary from those artifacts and maintain a single i
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%:z"
+date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
 If `{task-id}` is available, update task.md with `pr_number`, `pr_status` (set to `created`), `updated_at`, `agent_infra_version`, and append the Create PR Activity Log entry including metadata-sync and summary results.

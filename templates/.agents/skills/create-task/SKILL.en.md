@@ -30,7 +30,7 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 ## Step Start: Capture the Start Time
 
-This skill **creates** task.md, so there is no file to write at the start. Capture `started_at` in memory before running (`date "+%Y-%m-%d %H:%M:%S%:z"`); when writing the Activity Log at the end, **append both lines at once** — the started line uses `started_at`, the done line uses the completion time, both sharing the base action (started line action gets a ` [started]` suffix, note `started`):
+This skill **creates** task.md, so there is no file to write at the start. Capture `started_at` in memory before running (`date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'`); when writing the Activity Log at the end, **append both lines at once** — the started line uses `started_at`, the done line uses the completion time, both sharing the base action (started line action gets a ` [started]` suffix, note `started`):
 
 ```
 - {started_at} — **Create Task [started]** by {agent} — started
@@ -109,7 +109,7 @@ priority / effort are required: the AI infers them from the task title and descr
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%:z"
+date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
 Update `.agents/workspace/active/{task-id}/task.md`:

@@ -95,7 +95,7 @@ Write only files that were actually recovered from Issue comments. Do not invent
 Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%:z"
+date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
 Update the restored `task.md`:

@@ -13,7 +13,7 @@ $ git status -s
 $ git branch --show-current
 {output}
 
-$ date "+%Y-%m-%d %H:%M:%S%:z"
+$ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 {output}
 ```
 

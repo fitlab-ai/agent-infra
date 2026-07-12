@@ -9,7 +9,7 @@ Before updating task metadata, read `.agents/rules/version-stamp.md` and refresh
 Get the current time first:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%:z"
+date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
 For every task-related commit, append this Activity Log entry in `task.md`:
