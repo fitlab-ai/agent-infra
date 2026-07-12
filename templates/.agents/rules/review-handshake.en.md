@@ -85,8 +85,8 @@ When an executor judges an item to be a key design decision that needs human rul
 
 ## post-review commit gate (code stage only)
 
-- The highest-round `review-code` report records `Review Baseline Commit` (R, `git rev-parse HEAD`) and `Reviewed Diff Fingerprint` (F, full worktree diff fingerprint).
-- `commit` reads only the highest-round `review-code` artifact. When that artifact is Approved, the pre-commit HEAD equals R, and the staged diff fingerprint equals F, task.md receives `last_reviewed_commit` (B, the new commit SHA).
+- `review-code` captures `Review Baseline Commit` (R, `git rev-parse HEAD`) once, computes `Reviewed Diff Fingerprint` (F, the full worktree diff fingerprint) from that same R, and records both in the highest-round report. When the round is Approved it also writes `last_reviewed_commit: R` (B) to task.md; a non-Approved round preserves the existing B.
+- `commit` reads only the highest-round `review-code` artifact. When that artifact is Approved, the pre-commit HEAD equals R, and the staged diff fingerprint equals F, it advances task.md B to the new commit SHA.
 - The `complete-task` `post-review-commit` gate prefers B; when B is absent or invalid, it falls back to R from the highest-round `review-code` artifact.
 - If new commits touch code / rule paths after B / R, the gate blocks and requires a fresh `review-code`.
 - **Exemption**: append a ledger row `| PRC-1 | post-review-commit | - | - | human-decided | <ruling note> |` recording that a human explicitly allowed those commits without re-review.

@@ -21,8 +21,8 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 - **Reviewer**: {reviewer-name}
 - **Review Time**: {timestamp}
 - **Scope**: {file-count and major modules}
-- **Review Baseline Commit**: {raw git rev-parse HEAD} (baseline for the complete-task post-review commit gate; see `.agents/rules/review-handshake.md`)
-- **Reviewed Diff Fingerprint**: {raw node .agents/scripts/review-diff-fingerprint.js worktree HEAD}
+- **Review Baseline Commit**: {raw R captured once for this round} (baseline for the complete-task post-review commit gate; see `.agents/rules/review-handshake.md`)
+- **Reviewed Diff Fingerprint**: {raw node .agents/scripts/review-diff-fingerprint.js worktree "$R"}
 - **Overall Verdict**: {Approved / Changes Requested / Rejected} (pick exactly one; combined phrases will fail the verify gate)
 - **Findings (AI-actionable)**: 0 blockers, 0 majors, 0 minors / **Manual validation**: 0
 

@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   extractReviewBaseline,
+  extractReviewDiffFingerprint,
   findAuthoritativeReviewCodeArtifact,
+  parseReviewVerdict,
   resolvePostReviewGlobs
 } from "./lib/post-review-commit.js";
 
@@ -223,6 +225,8 @@ function runCheck(type, context) {
       return checkCompletionChecklist(context);
     case "review-ledger":
       return checkReviewLedger(context);
+    case "review-fact":
+      return checkReviewFact(context);
     case "post-review-commit":
       return checkPostReviewCommit(context);
     default: {
@@ -815,6 +819,95 @@ function checkPostReviewCommit({ taskDir, config }) {
   return failResult(
     "post-review-commit",
     `${commits.length} commit(s) to code/rule paths after review baseline ${sha.slice(0, 8)}; re-run review-code or record a human-decided exemption`
+  );
+}
+
+function checkReviewFact({ taskDir, artifactFile }) {
+  const resolvedArtifact = resolveArtifactPath(
+    taskDir,
+    "review-code.md|review-code-r{N}.md",
+    artifactFile
+  );
+  if (!resolvedArtifact.ok) {
+    return failResult("review-fact", resolvedArtifact.message);
+  }
+
+  const task = loadTask(taskDir);
+  if (!task.ok) {
+    return failResult("review-fact", task.message);
+  }
+
+  const content = fs.readFileSync(resolvedArtifact.path, "utf8");
+  const verdict = parseReviewVerdict(content);
+  const reviewBaseline = extractReviewBaseline(content);
+  const reviewedFingerprint = extractReviewDiffFingerprint(content);
+
+  if (!["通过", "需要修改", "拒绝", "Approved", "Changes Requested", "Rejected"].includes(verdict)) {
+    return failResult("review-fact", `Unsupported review verdict '${verdict}'`);
+  }
+
+  let gitRoot;
+  let head;
+  let baseline;
+  try {
+    gitRoot = execFileSync("git", ["-C", taskDir, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+    head = execFileSync("git", ["-C", gitRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    baseline = execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewBaseline}^{commit}`], { encoding: "utf8" }).trim();
+  } catch {
+    return blockedResult(
+      "review-fact",
+      `Unable to resolve review baseline '${reviewBaseline}' in the task repository; re-run review-code`
+    );
+  }
+
+  if (baseline !== head) {
+    return failResult(
+      "review-fact",
+      `Review baseline ${baseline.slice(0, 8)} does not match current HEAD ${head.slice(0, 8)}; re-run review-code`
+    );
+  }
+
+  let actualFingerprint;
+  try {
+    actualFingerprint = execFileSync(
+      process.execPath,
+      [path.join(repoRoot, ".agents", "scripts", "review-diff-fingerprint.js"), "worktree", baseline],
+      { cwd: gitRoot, encoding: "utf8" }
+    ).trim();
+  } catch {
+    return blockedResult(
+      "review-fact",
+      `Unable to recompute reviewed diff fingerprint from baseline ${baseline.slice(0, 8)}; re-run review-code`
+    );
+  }
+
+  if (actualFingerprint !== reviewedFingerprint) {
+    return failResult(
+      "review-fact",
+      `Reviewed diff fingerprint does not match the current worktree for baseline ${baseline.slice(0, 8)}; re-run review-code`
+    );
+  }
+
+  if (["通过", "Approved"].includes(verdict)) {
+    const lastReviewedCommit = String(task.metadata.last_reviewed_commit || "").trim();
+    let reviewedCommit = "";
+    try {
+      reviewedCommit = execFileSync("git", ["-C", gitRoot, "rev-parse", `${lastReviewedCommit}^{commit}`], { encoding: "utf8" }).trim();
+    } catch {
+      // The failure below names the missing or invalid task review fact.
+    }
+
+    if (reviewedCommit !== baseline) {
+      return failResult(
+        "review-fact",
+        `Approved review must set task last_reviewed_commit to baseline ${baseline.slice(0, 8)}`
+      );
+    }
+  }
+
+  return passResult(
+    "review-fact",
+    `Review fact valid for ${path.basename(resolvedArtifact.path)} at ${baseline.slice(0, 8)}`
   );
 }
 

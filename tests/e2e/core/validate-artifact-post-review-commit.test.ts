@@ -123,6 +123,33 @@ test("post-review-commit fails when a code-path commit lands after last_reviewed
   });
 });
 
+test("post-review-commit passes after a supplemental approved review advances last_reviewed_commit to HEAD", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-prc-supplemental-review-", (tempRoot) => {
+    const { taskDir } = setupRepo(tempRoot);
+    const oldReviewedCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "old reviewed change");
+    const supplementalBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\ncommitted\n", "committed before supplemental review");
+    write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: supplementalBaseline }));
+    write(path.join(taskDir, "review-code.md"), buildReviewCode(oldReviewedCommit, "通过"));
+    write(path.join(taskDir, "review-code-r2.md"), buildReviewCode(supplementalBaseline, "通过"));
+
+    const { payload } = runCheck(taskDir);
+    assert.equal(payload.status, "pass");
+  });
+});
+
+test("post-review-commit still fails when a commit lands after the supplemental review fact", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-prc-after-supplemental-review-", (tempRoot) => {
+    const { taskDir } = setupRepo(tempRoot);
+    const supplementalBaseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "supplementally reviewed change");
+    write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: supplementalBaseline }));
+    write(path.join(taskDir, "review-code-r2.md"), buildReviewCode(supplementalBaseline, "通过"));
+    commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\nunreviewed\n", "unreviewed follow-up");
+
+    const { payload } = runCheck(taskDir);
+    assert.equal(payload.status, "fail");
+  });
+});
+
 test("post-review-commit falls back to the review baseline when last_reviewed_commit is invalid", onPlatforms("linux", "darwin", "win32"), async () => {
   await withTempRoot("agent-infra-prc-invalid-last-reviewed-", (tempRoot) => {
     const { taskDir } = setupRepo(tempRoot);

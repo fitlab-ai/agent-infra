@@ -36,6 +36,7 @@
       ],
       "freshness_minutes": 30
     },
+    "review-fact": {},
     "activity-log": {
       "expected_action_pattern": "(Review Code|Code Review) \\(Round \\d+\\)",
       "freshness_minutes": 30
