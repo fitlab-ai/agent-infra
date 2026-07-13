@@ -12,6 +12,7 @@ import type { RunnerOptions, RunnerResult } from './runner.ts';
 import { streamCommand } from './streamer.ts';
 import { markdownMessage, replyOutbound, textMessage } from './display.ts';
 import { buildStatusModel, statusModelToDisplay, type StatusModel } from '../task/commands/status.ts';
+import { getProcessStartTime, removePidRecordIfMatches } from './process-state.ts';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -110,6 +111,7 @@ export async function runDaemon(): Promise<void> {
 
   const logger = createLogger(config.log);
   logger.info(`daemon starting agent-infra ${VERSION} pid=${process.pid}`);
+  const ownStartTime = getProcessStartTime(process.pid);
 
   const abortController = new AbortController();
   let resolveShutdown: () => void = () => {};
@@ -135,6 +137,13 @@ export async function runDaemon(): Promise<void> {
       await unloadAdapters(adapters);
       clearInterval(heartbeat);
       logger.close();
+      if (ownStartTime !== null) {
+        removePidRecordIfMatches(config.pidFile, {
+          version: 1,
+          pid: process.pid,
+          startTime: ownStartTime
+        });
+      }
       resolveShutdown();
     })();
   };
