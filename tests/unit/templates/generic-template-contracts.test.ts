@@ -60,17 +60,34 @@ case "$1:$2" in
     esac
     exit 0
     ;;
-  api:*) exit 0 ;;
+  api:*)
+    case "$2" in
+      *"milestones?state=all"*) printf '%s' "\${MILESTONE_EXISTING_TSV:-}" ;;
+    esac
+    exit 0
+    ;;
 esac
 exit 1
 `, "utf8");
   fs.chmodSync(fakeGh, 0o755);
 }
 
-function runMilestoneScript(tags: string[], options: { arguments?: string[]; manifestVersion?: string } = {}) {
+function runMilestoneScript(
+  tags: string[],
+  options: {
+    arguments?: string[];
+    existingMilestones?: { state?: "open" | "closed"; title: string }[];
+    manifestVersion?: string;
+  } = {}
+) {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "generic-milestones-"));
   const binDir = path.join(repoDir, "bin");
-  const env = gitSafeEnv({ PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}` });
+  const env = gitSafeEnv({
+    MILESTONE_EXISTING_TSV: (options.existingMilestones ?? [])
+      .map(({ state = "open", title }) => `${title}\t${state}\n`)
+      .join(""),
+    PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`
+  });
 
   try {
     initIsolatedGitRepo(repoDir);
@@ -121,6 +138,15 @@ function runMilestoneScript(tags: string[], options: { arguments?: string[]; man
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }
+}
+
+function milestoneActions(stdout: string): { created: string[]; skipped: string[] } {
+  return {
+    created: [...stdout.matchAll(/^Created milestone: (.+) \((?:open|closed)\)$/gm)]
+      .map((match) => match[1] ?? ""),
+    skipped: [...stdout.matchAll(/^Skip existing milestone: (.+)$/gm)]
+      .map((match) => match[1] ?? "")
+  };
 }
 
 test("template Gemini commands derive their namespace from the project placeholder", () => {
@@ -224,7 +250,8 @@ test("milestone initialization follows SemVer precedence and preserves wide nume
       baseline: "0.1.0",
       source: "compatibility default",
       line: "0.1.x",
-      next: "0.1.1",
+      next: "0.1.0",
+      created: ["General Backlog", "0.1.x", "0.1.0"],
       manifestVersion: "9.8.7"
     },
     {
@@ -243,7 +270,22 @@ test("milestone initialization follows SemVer precedence and preserves wide nume
     assert.match(result.stdout, new RegExp(`^Version baseline source: ${escapeRegExp(fixture.source)}$`, "m"));
     assert.match(result.stdout, new RegExp(`^Line milestone: ${escapeRegExp(fixture.line)}$`, "m"));
     assert.match(result.stdout, new RegExp(`^Next version milestone: ${escapeRegExp(fixture.next)}$`, "m"));
+    if (fixture.created) {
+      assert.deepEqual(milestoneActions(result.stdout).created, fixture.created);
+    }
   }
+});
+
+test("milestone initialization skips an existing compatibility baseline by title", onPlatforms("linux", "darwin"), () => {
+  const result = runMilestoneScript(["v1.0.0-01"], {
+    existingMilestones: [{ title: "0.1.0" }]
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.deepEqual(milestoneActions(result.stdout), {
+    created: ["General Backlog", "0.1.x"],
+    skipped: ["0.1.0"]
+  });
 });
 
 test("milestone history mode derives milestones only from valid SemVer tags", onPlatforms("linux", "darwin"), () => {

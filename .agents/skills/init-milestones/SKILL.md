@@ -40,7 +40,7 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 按固定描述创建以下里程碑：
 - `General Backlog`：`All unsorted backlogged tasks may be completed in a future version.`（state=`open`）
 - `{major}.{minor}.x`：`Issues that we want to resolve in {major}.{minor} line.`（state=`open`）
-- `{major}.{minor}.{patch+1}`：`Issues that we want to release in v{major}.{minor}.{patch+1}.`（state=`open`）
+- 具体版本：兼容默认来源使用基线 `0.1.0`；合法 tag 来源使用 `{major}.{minor}.{patch+1}`。描述为 `Issues that we want to release in v{version}.`（state=`open`）
 
 当传入 `--history` 时，每个历史 `vX.Y.Z` tag 还会额外贡献：
 - `X.Y.x` 作为开启状态的线里程碑
@@ -59,7 +59,7 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 执行说明：
 - Milestone titles are treated as the idempotency key.
 - General Backlog 是未分类工作的兜底里程碑。
-- 不带 `--history` 时，只为下一次 patch 发布创建版本里程碑。
+- 不带 `--history` 时，只创建一个标准版本里程碑：兼容默认来源使用基线 `0.1.0`，合法 tag 来源使用下一次 patch 版本。
 - 历史 `X.Y.Z` tag 会生成开启状态的 `X.Y.x` 和关闭状态的 `X.Y.Z`。
 - 标签较多的仓库可能触发平台 API rate limit。
 

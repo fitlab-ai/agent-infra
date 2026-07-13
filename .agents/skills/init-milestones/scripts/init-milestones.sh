@@ -189,17 +189,18 @@ IFS="$previous_ifs"
 current_version="$major.$minor.$patch"
 if [ "$selected_tag" = "-" ]; then
   version_source="compatibility default"
+  version_milestone="$current_version"
 else
   version_source="git tag $selected_tag"
+  version_milestone="$major.$minor.$next_patch"
 fi
 
 line_milestone="$major.$minor.x"
-next_version="$major.$minor.$next_patch"
 
 echo "Detected version baseline: $current_version"
 echo "Version baseline source: $version_source"
 echo "Line milestone: $line_milestone"
-echo "Next version milestone: $next_version"
+echo "Next version milestone: $version_milestone"
 
 repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 
@@ -213,7 +214,7 @@ cat "$tmpdir/existing.tsv"
 cat <<EOF > "$tmpdir/desired.tsv"
 General Backlog	All unsorted backlogged tasks may be completed in a future version.	open
 $line_milestone	Issues that we want to resolve in $major.$minor line.	open
-$next_version	Issues that we want to release in v$next_version.	open
+$version_milestone	Issues that we want to release in v$version_milestone.	open
 EOF
 
 if [ "$history_mode" = "true" ]; then
@@ -285,7 +286,7 @@ echo
 echo "Notes:"
 echo "- Milestone titles are treated as the idempotency key."
 echo "- General Backlog is the fallback milestone for unsorted work."
-echo "- Without --history, version milestones are created only for the next patch release."
+echo "- Without --history, a single version milestone is created based on the detected baseline."
 
 if [ "$history_mode" = "true" ]; then
   echo "- Historical X.Y.Z tags create X.Y.x milestones as open and X.Y.Z milestones as closed."

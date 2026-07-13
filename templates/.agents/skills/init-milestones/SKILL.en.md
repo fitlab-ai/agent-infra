@@ -40,7 +40,7 @@ The script and `.agents/rules/label-milestone-setup.md` are responsible for:
 Create the following milestones with fixed descriptions:
 - `General Backlog`: `All unsorted backlogged tasks may be completed in a future version.` (state=`open`)
 - `{major}.{minor}.x`: `Issues that we want to resolve in {major}.{minor} line.` (state=`open`)
-- `{major}.{minor}.{patch+1}`: `Issues that we want to release in v{major}.{minor}.{patch+1}.` (state=`open`)
+- Release version: use compatibility baseline `0.1.0` for the default source, or `{major}.{minor}.{patch+1}` for a valid tag source. The description is `Issues that we want to release in v{version}.` (state=`open`)
 
 When `--history` is present, each historical `vX.Y.Z` tag additionally contributes:
 - `X.Y.x` as an open line milestone
@@ -59,7 +59,7 @@ The summary must include:
 Operational notes:
 - Milestone titles are treated as the idempotency key.
 - General Backlog is the fallback milestone for unsorted work.
-- Without `--history`, version milestones are created only for the next patch release.
+- Without `--history`, create one standard release milestone: compatibility baseline `0.1.0` for the default source, or the next patch version for a valid tag source.
 - Historical `X.Y.Z` tags create `X.Y.x` milestones as open and `X.Y.Z` milestones as closed.
 - Repositories with many tags may hit the platform API rate limit.
 
