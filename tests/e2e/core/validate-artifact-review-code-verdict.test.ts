@@ -33,16 +33,22 @@ function setupReviewRepo(tempRoot: string) {
   git(tempRoot, ["add", "-A"]);
   git(tempRoot, ["commit", "-qm", "reviewed"]);
   const baseline = git(tempRoot, ["rev-parse", "HEAD"]);
-  const result = spawnSync(process.execPath, [fingerprintScript, "worktree", baseline], {
+  const result = spawnSync(process.execPath, [fingerprintScript, "worktree", baseline, "--format", "json"], {
     cwd: tempRoot,
     encoding: "utf8",
     env: gitSafeEnv()
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  return { taskDir: path.join(tempRoot, TASK_ID), baseline, reviewedFingerprint: result.stdout.trim() };
+  const snapshot = JSON.parse(result.stdout) as { fingerprint: string; tree: string };
+  return {
+    taskDir: path.join(tempRoot, TASK_ID),
+    baseline,
+    reviewedFingerprint: snapshot.fingerprint,
+    reviewedTree: snapshot.tree
+  };
 }
 
-function buildReviewArtifact(verdictLine: string, baseline: string, reviewedFingerprint: string) {
+function buildReviewArtifact(verdictLine: string, baseline: string, reviewedFingerprint: string, reviewedTree: string) {
   return [
     "# 代码审查报告",
     "",
@@ -57,6 +63,7 @@ function buildReviewArtifact(verdictLine: string, baseline: string, reviewedFing
     "- **审查者**：codex",
     `- **审查基线提交**：${baseline}`,
     `- **审查差异指纹**：${reviewedFingerprint}`,
+    `- **审查快照树**：${reviewedTree}`,
     `- ${verdictLine}`,
     "- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0",
     "",
@@ -112,11 +119,11 @@ function buildReviewTask(baseline: string, overrides: Record<string, string | nu
 
 test("review-code gate rejects combined zh-CN verdict phrase (A-a-zh)", async () => {
   await withTempRoot("agent-infra-rcv-bad-", (tempRoot) => {
-    const { taskDir, baseline, reviewedFingerprint } = setupReviewRepo(tempRoot);
+    const { taskDir, baseline, reviewedFingerprint, reviewedTree } = setupReviewRepo(tempRoot);
     write(path.join(taskDir, "task.md"), buildReviewTask(baseline));
     write(
       path.join(taskDir, "review-code.md"),
-      buildReviewArtifact("**总体结论**：通过但有问题", baseline, reviewedFingerprint)
+      buildReviewArtifact("**总体结论**：通过但有问题", baseline, reviewedFingerprint, reviewedTree)
     );
 
     const result = runValidator(["gate", "review-code", taskDir, "review-code.md"]);
@@ -142,11 +149,11 @@ test("review-code gate rejects combined zh-CN verdict phrase (A-a-zh)", async ()
 
 test("review-code gate accepts canonical zh-CN verdict (A-b-zh)", async () => {
   await withTempRoot("agent-infra-rcv-good-", (tempRoot) => {
-    const { taskDir, baseline, reviewedFingerprint } = setupReviewRepo(tempRoot);
+    const { taskDir, baseline, reviewedFingerprint, reviewedTree } = setupReviewRepo(tempRoot);
     write(path.join(taskDir, "task.md"), buildReviewTask(baseline));
     write(
       path.join(taskDir, "review-code.md"),
-      buildReviewArtifact("**总体结论**：通过", baseline, reviewedFingerprint)
+      buildReviewArtifact("**总体结论**：通过", baseline, reviewedFingerprint, reviewedTree)
     );
 
     const result = runValidator(["gate", "review-code", taskDir, "review-code.md"]);
@@ -161,9 +168,9 @@ test("review-code gate accepts canonical zh-CN verdict (A-b-zh)", async () => {
 
 test("review-code gate fails when the baseline commit field is absent", async () => {
   await withTempRoot("agent-infra-rcv-nobaseline-", (tempRoot) => {
-    const { taskDir, baseline, reviewedFingerprint } = setupReviewRepo(tempRoot);
+    const { taskDir, baseline, reviewedFingerprint, reviewedTree } = setupReviewRepo(tempRoot);
     write(path.join(taskDir, "task.md"), buildReviewTask(baseline));
-    const artifact = buildReviewArtifact("**总体结论**：通过", baseline, reviewedFingerprint)
+    const artifact = buildReviewArtifact("**总体结论**：通过", baseline, reviewedFingerprint, reviewedTree)
       .split("\n")
       .filter((line) => !line.startsWith("- **审查基线提交**"))
       .join("\n");
@@ -180,9 +187,9 @@ test("review-code gate fails when the baseline commit field is absent", async ()
 
 test("review-code gate fails when the ledger writeback section is absent", async () => {
   await withTempRoot("agent-infra-rcv-noledger-", (tempRoot) => {
-    const { taskDir, baseline, reviewedFingerprint } = setupReviewRepo(tempRoot);
+    const { taskDir, baseline, reviewedFingerprint, reviewedTree } = setupReviewRepo(tempRoot);
     write(path.join(taskDir, "task.md"), buildReviewTask(baseline));
-    const lines = buildReviewArtifact("**总体结论**：通过", baseline, reviewedFingerprint).split("\n");
+    const lines = buildReviewArtifact("**总体结论**：通过", baseline, reviewedFingerprint, reviewedTree).split("\n");
     const index = lines.indexOf("## 审查分歧账本回写");
     lines.splice(index, 3); // heading, blank line, body line
     write(path.join(taskDir, "review-code.md"), lines.join("\n"));

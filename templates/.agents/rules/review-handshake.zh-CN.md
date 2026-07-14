@@ -85,10 +85,11 @@
 
 ## post-review commit 门禁（仅 code 阶段）
 
-- `review-code` 一次性捕获 `审查基线提交`（R，`git rev-parse HEAD`），以同一 R 计算 `审查差异指纹`（F，完整工作区 diff fingerprint）并写入最高轮报告；本轮 Approved 时同时在 task.md 写入 `last_reviewed_commit: R`（B），非 Approved 时保留既有 B。
-- `commit` 只读取最高轮 `review-code` 产物；当该产物 Approved、提交前 HEAD 等于 R、且 staged diff fingerprint 等于 F 时，把 task.md 的 B 推进为新提交 SHA。
-- `complete-task` 的 `post-review-commit` gate 优先使用 B；B 缺失或非法时回退最高轮 `review-code` 的 R。
-- 若 B / R 之后代码 / 规则路径出现新提交，gate 会拦截，要求重新 `review-code`。
+- `review-code` 一次性捕获审查基线 `R`（diff base）、完整工作区差异指纹 `F` 与规范化快照树 `T`；Approved 且快照干净时可令 `B=R`，Approved 且含未提交差异时清除/不写 `B`。
+- `commit` 只读取最高轮 Approved `review-code` 产物；提交前比较 `pre_head == R`、完整工作区树 `W == T`、规范化暂存树 `S == T`，任一失配都在 `git commit` 前阻断并报告两组 added/missing/different 路径。
+- 成功提交后令 `B=last_reviewed_commit=<new_head>`；`B` 只表示已经落到 Git commit 的审查锚点。
+- `complete-task` 的 `post-review-commit` gate 只使用 B；B 缺失、畸形或对象不存在时报告 `reviewed snapshot was not anchored`，不得回退 R。
+- 若 B 之后代码 / 规则路径出现新提交，gate 会拦截，要求重新 `review-code`。
 - **豁免**：在账本追加一行 `| PRC-1 | post-review-commit | - | - | human-decided | <裁定说明> |`，记录人工明确允许该批提交免复审。
 
 ## gate 行为速查

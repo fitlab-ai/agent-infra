@@ -61,9 +61,11 @@ git diff
 只暂存明确列出的文件，然后执行 `git commit`。
 
 如果本次提交关联任务且存在 `review-code` 产物，在提交前读取最高轮 `review-code` 产物：
-- 若该产物 `总体结论` / `Overall Verdict` 为 Approved，解析 `审查基线提交` / `Review Baseline Commit` 为 `R`，解析 `审查差异指纹` / `Reviewed Diff Fingerprint` 为 `F`
-- 暂存明确文件后运行 `node .agents/scripts/review-diff-fingerprint.js staged <R>` 得到 `S`，并记录 `pre_head=$(git rev-parse HEAD)`
-- 提交后仅当 `pre_head == R` 且 `S == F` 时，在 task.md frontmatter 写入 `last_reviewed_commit: <new_head>`；否则不推进该字段
+- 若该产物 `总体结论` / `Overall Verdict` 为 Approved，解析 `R`、`F` 与 `审查快照树` / `Reviewed Snapshot Tree`（`T`）
+- 暂存明确文件后记录 `pre_head=$(git rev-parse HEAD)`，并以 helper 的 JSON 模式生成当前完整工作区树 `W` 与规范化暂存树 `S`
+- 在 `git commit` 前要求 `pre_head == R && W == T && S == T`；分别运行 helper 的 `compare` 模式生成 worktree/staged 的 added、missing、different 路径诊断
+- 任一条件不满足时进入 `reference/task-status-update.md` 的“场景 4：提交前快照阻断”，不得执行 `git commit`、push、成功状态更新、PR 摘要同步或完成 gate
+- 全部相等并成功提交后，在 task.md frontmatter 写入 `last_reviewed_commit: <new_head>`
 - 不向后扫描更早的 Approved 产物；最高轮 `review-code` 产物是唯一权威来源
 
 ## 5. 推送到已有 PR（按需）

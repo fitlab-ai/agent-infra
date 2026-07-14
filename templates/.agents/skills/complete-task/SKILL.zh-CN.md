@@ -97,7 +97,7 @@ node .agents/scripts/validate-artifact.js check review-ledger .agents/workspace/
 node .agents/scripts/validate-artifact.js check post-review-commit .agents/workspace/active/{task-id} --skill complete-task --format text
 ```
 
-任一退出码非 0（fail/blocked）→ 按前置条件未满足处理，**停止**，不执行步骤 3-7。`--force` **不解除**本硬门禁：未关闭分歧必须先在账本闭合（`confirmed`/`closed`/`human-decided`），未复审 post-review 提交必须重新 `review-code` 或在账本追加 `post-review-commit` / `human-decided` 豁免行。
+任一退出码非 0（fail/blocked）→ 按前置条件未满足处理，**停止**，不执行步骤 3-7。若输出包含 `reviewed snapshot was not anchored`，必须先重新 `commit` 或 `review-code`；不得回退审查基线。`--force` **不解除**本硬门禁：未关闭分歧必须先在账本闭合（`confirmed`/`closed`/`human-decided`），已锚点后的未复审提交必须重新 `review-code` 或在账本追加 `post-review-commit` / `human-decided` 豁免行。
 
 > **⚠️ 前置条件分支判断 — 你必须先判断“继续”还是“停止”：**
 >

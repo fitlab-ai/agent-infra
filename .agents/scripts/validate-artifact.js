@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   extractReviewBaseline,
   extractReviewDiffFingerprint,
+  extractReviewedSnapshotTree,
   findAuthoritativeReviewCodeArtifact,
   parseReviewVerdict,
   resolvePostReviewGlobs
@@ -779,12 +780,10 @@ function checkPostReviewCommit({ taskDir, config }) {
 
   const task = loadTask(taskDir);
   const content = fs.readFileSync(reviewArtifact.path, "utf8");
-  const reviewBaseline = extractReviewBaseline(content);
   const lastReviewedCommit = task.ok ? (task.metadata.last_reviewed_commit || "").trim() : "";
   const baselineSource = resolvePostReviewBaseline({
     gitRoot,
     lastReviewedCommit,
-    reviewBaseline,
     reviewArtifact: reviewArtifact.fileName
   });
   if (!baselineSource.ok) {
@@ -818,7 +817,7 @@ function checkPostReviewCommit({ taskDir, config }) {
 
   return failResult(
     "post-review-commit",
-    `${commits.length} commit(s) to code/rule paths after review baseline ${sha.slice(0, 8)}; re-run review-code or record a human-decided exemption`
+    `${commits.length} commit(s) to code/rule paths after reviewed commit ${sha.slice(0, 8)}; re-run review-code or record a human-decided exemption`
   );
 }
 
@@ -841,6 +840,7 @@ function checkReviewFact({ taskDir, artifactFile }) {
   const verdict = parseReviewVerdict(content);
   const reviewBaseline = extractReviewBaseline(content);
   const reviewedFingerprint = extractReviewDiffFingerprint(content);
+  const reviewedTree = extractReviewedSnapshotTree(content);
 
   if (!["通过", "需要修改", "拒绝", "Approved", "Changes Requested", "Rejected"].includes(verdict)) {
     return failResult("review-fact", `Unsupported review verdict '${verdict}'`);
@@ -867,13 +867,13 @@ function checkReviewFact({ taskDir, artifactFile }) {
     );
   }
 
-  let actualFingerprint;
+  let actualSnapshot;
   try {
-    actualFingerprint = execFileSync(
+    actualSnapshot = JSON.parse(execFileSync(
       process.execPath,
-      [path.join(repoRoot, ".agents", "scripts", "review-diff-fingerprint.js"), "worktree", baseline],
+      [path.join(repoRoot, ".agents", "scripts", "review-diff-fingerprint.js"), "worktree", baseline, "--format", "json"],
       { cwd: gitRoot, encoding: "utf8" }
-    ).trim();
+    ));
   } catch {
     return blockedResult(
       "review-fact",
@@ -881,26 +881,37 @@ function checkReviewFact({ taskDir, artifactFile }) {
     );
   }
 
-  if (actualFingerprint !== reviewedFingerprint) {
+  if (actualSnapshot.fingerprint !== reviewedFingerprint) {
     return failResult(
       "review-fact",
       `Reviewed diff fingerprint does not match the current worktree for baseline ${baseline.slice(0, 8)}; re-run review-code`
     );
   }
 
+  if (!reviewedTree || actualSnapshot.tree !== reviewedTree) {
+    return failResult(
+      "review-fact",
+      `Reviewed snapshot tree does not match the current worktree for baseline ${baseline.slice(0, 8)}; re-run review-code`
+    );
+  }
+
   if (["通过", "Approved"].includes(verdict)) {
     const lastReviewedCommit = String(task.metadata.last_reviewed_commit || "").trim();
-    let reviewedCommit = "";
-    try {
-      reviewedCommit = execFileSync("git", ["-C", gitRoot, "rev-parse", `${lastReviewedCommit}^{commit}`], { encoding: "utf8" }).trim();
-    } catch {
-      // The failure below names the missing or invalid task review fact.
-    }
-
-    if (reviewedCommit !== baseline) {
+    const cleanSnapshot = actualSnapshot.tree === execFileSync(
+      "git",
+      ["-C", gitRoot, "rev-parse", `${baseline}^{tree}`],
+      { encoding: "utf8" }
+    ).trim();
+    if (cleanSnapshot && lastReviewedCommit !== baseline) {
       return failResult(
         "review-fact",
-        `Approved review must set task last_reviewed_commit to baseline ${baseline.slice(0, 8)}`
+        `Approved clean review must set task last_reviewed_commit to baseline ${baseline.slice(0, 8)}`
+      );
+    }
+    if (!cleanSnapshot && lastReviewedCommit) {
+      return failResult(
+        "review-fact",
+        "Approved review with uncommitted changes must remain unanchored until commit"
       );
     }
   }
@@ -911,35 +922,18 @@ function checkReviewFact({ taskDir, artifactFile }) {
   );
 }
 
-function resolvePostReviewBaseline({ gitRoot, lastReviewedCommit, reviewBaseline, reviewArtifact }) {
-  if (lastReviewedCommit) {
-    if (SHA_PATTERN.test(lastReviewedCommit) && gitCommitExists(gitRoot, lastReviewedCommit)) {
-      return { ok: true, sha: lastReviewedCommit };
-    }
+function resolvePostReviewBaseline({ gitRoot, lastReviewedCommit, reviewArtifact }) {
+  if (SHA_PATTERN.test(lastReviewedCommit) && gitCommitExists(gitRoot, lastReviewedCommit)) {
+    return { ok: true, sha: lastReviewedCommit };
   }
 
-  if (!reviewBaseline) {
-    return {
-      ok: false,
-      result: passResult(
-        "post-review-commit",
-        `${reviewArtifact} predates baseline-commit anchoring; skipped (legacy artifact)`,
-        [`${reviewArtifact} has no 审查基线提交 / Review Baseline Commit field`]
-      )
-    };
-  }
-
-  if (!SHA_PATTERN.test(reviewBaseline)) {
-    return {
-      ok: false,
-      result: blockedResult(
-        "post-review-commit",
-        `${reviewArtifact} has an empty or malformed 审查基线提交 SHA ('${reviewBaseline}'); manual remediation required`
-      )
-    };
-  }
-
-  return { ok: true, sha: reviewBaseline };
+  return {
+    ok: false,
+    result: blockedResult(
+      "post-review-commit",
+      `${reviewArtifact}: reviewed snapshot was not anchored to a valid commit; re-run commit or review-code`
+    )
+  };
 }
 
 function gitCommitExists(gitRoot, sha) {
@@ -1035,22 +1029,41 @@ function parseFrontmatter(content) {
 function getSectionContent(content, names) {
   const lines = content.split(/\r?\n/);
 
+  function visibleHeadings() {
+    const headings = [];
+    let fence = null;
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (fence) {
+        const closer = line.match(/^ {0,3}(`+|~+)\s*$/);
+        if (closer && closer[1][0] === fence.character && closer[1].length >= fence.length) {
+          fence = null;
+        }
+        continue;
+      }
+      const opener = line.match(/^ {0,3}(`{3,}|~{3,})(?:[^`~].*)?$/);
+      if (opener) {
+        fence = { character: opener[1][0], length: opener[1].length };
+        continue;
+      }
+      if (line.startsWith("## ")) {
+        headings.push({ index, text: line.trim() });
+      }
+    }
+    return headings;
+  }
+
+  const headings = visibleHeadings();
+
   for (const name of names) {
     const heading = `## ${name}`;
-    const startIndex = lines.findIndex((line) => line.trim() === heading);
-    if (startIndex === -1) {
+    const position = headings.findIndex((item) => item.text === heading);
+    if (position === -1) {
       continue;
     }
-
-    const sectionLines = [];
-    for (let index = startIndex + 1; index < lines.length; index += 1) {
-      if (lines[index].startsWith("## ")) {
-        break;
-      }
-      sectionLines.push(lines[index]);
-    }
-
-    return sectionLines.join("\n").trim();
+    const startIndex = headings[position].index;
+    const endIndex = headings[position + 1]?.index ?? lines.length;
+    return lines.slice(startIndex + 1, endIndex).join("\n").trim();
   }
 
   return "";

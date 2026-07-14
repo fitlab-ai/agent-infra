@@ -76,7 +76,7 @@ tail .agents/workspace/active/{task-id}/task.md
 - 一次性记录 `R=$(git rev-parse HEAD)`；本轮报告、指纹和任务审查事实都复用该 R，禁止稍后重新读取 HEAD 代替
 - `git diff --binary "$R" -- <post-review-globs>` 覆盖已跟踪变更
 - `git ls-files -o --exclude-standard -z -- <post-review-globs>` 覆盖未跟踪新文件
-- `node .agents/scripts/review-diff-fingerprint.js worktree "$R"` 生成审查差异指纹，并写入报告
+- `node .agents/scripts/review-diff-fingerprint.js worktree "$R" --format json` 一次生成审查差异指纹 `F` 与审查快照树 `T`，并写入报告
 
 > 详细审查标准、严重程度划分和 reviewer 关注点见 `reference/review-criteria.md`。执行此步骤前先读取 `reference/review-criteria.md`。
 > 测试审查硬门禁：当 `git diff` 触及测试文件时，必须先读取 `.agents/rules/testing-discipline.md` 并逐条核对（尤其"正向已覆盖时不应再加反向断言"）。
@@ -99,7 +99,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 - `assigned_to`：{当前代理}
 - `updated_at`：{当前时间}
 - `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
-- 若本轮 `总体结论` / `Overall Verdict` 为 `通过` / `Approved`，写入 `last_reviewed_commit: {R}`；是否存在工作区 diff 不影响写入，重复写同一 R 幂等
+- 若本轮 `总体结论` / `Overall Verdict` 为 `通过` / `Approved` 且 `T == R^{tree}`，写入 `last_reviewed_commit: {R}`；若 Approved 快照包含未提交差异，则清除既有 `last_reviewed_commit`，等待 `commit` 锚定
 - 若本轮结论不是 Approved，保留既有 `last_reviewed_commit`，不得推进或清空
 - 追加：
 `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Code (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}, Manual-validation: {n} → {artifact-filename}`

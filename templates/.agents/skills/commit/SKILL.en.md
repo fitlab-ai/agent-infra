@@ -61,9 +61,11 @@ Review status, diff, and recent history, then prepare a Conventional Commit with
 Stage specific files only and run `git commit` with the prepared message.
 
 If this commit is associated with a task and a `review-code` artifact exists, read the highest-round `review-code` artifact before committing:
-- If that artifact's `Overall Verdict` / `总体结论` is Approved, parse `Review Baseline Commit` / `审查基线提交` as `R`, and `Reviewed Diff Fingerprint` / `审查差异指纹` as `F`
-- After staging the explicit files, run `node .agents/scripts/review-diff-fingerprint.js staged <R>` to get `S`, and record `pre_head=$(git rev-parse HEAD)`
-- After committing, write `last_reviewed_commit: <new_head>` to task.md frontmatter only when `pre_head == R` and `S == F`; otherwise do not advance that field
+- If that artifact's `Overall Verdict` / `总体结论` is Approved, parse `R`, `F`, and `Reviewed Snapshot Tree` / `审查快照树` (`T`)
+- After staging the explicit files, record `pre_head=$(git rev-parse HEAD)` and use the helper's JSON mode to generate the complete worktree tree `W` and normalized staged tree `S`
+- Before `git commit`, require `pre_head == R && W == T && S == T`; use the helper's `compare` mode to produce added, missing, and different diagnostics for both worktree and staged snapshots
+- If any condition fails, enter Scenario 4 in `reference/task-status-update.md`; do not run `git commit`, push, successful state updates, PR summary sync, or the completion gate
+- After all comparisons match and the commit succeeds, write `last_reviewed_commit: <new_head>` to task.md frontmatter
 - Do not scan backward to earlier Approved artifacts; the highest-round `review-code` artifact is the only authoritative source
 
 ## 5. Push to the Existing PR When Applicable

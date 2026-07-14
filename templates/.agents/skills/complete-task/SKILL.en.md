@@ -98,7 +98,7 @@ node .agents/scripts/validate-artifact.js check review-ledger .agents/workspace/
 node .agents/scripts/validate-artifact.js check post-review-commit .agents/workspace/active/{task-id} --skill complete-task --format text
 ```
 
-A non-zero exit from either (fail/blocked) -> treat as an unmet prerequisite and **stop**, do not run Steps 3-7. `--force` does **NOT** lift this hard gate: unclosed disagreements must first be closed in the ledger (`confirmed`/`closed`/`human-decided`), and un-re-reviewed post-review commits must be re-reviewed via `review-code` or covered by a `post-review-commit` / `human-decided` exemption row in the ledger.
+A non-zero exit from either (fail/blocked) -> treat as an unmet prerequisite and **stop**, do not run Steps 3-7. If the output contains `reviewed snapshot was not anchored`, rerun `commit` or `review-code`; never fall back to the review baseline. `--force` does **NOT** lift this hard gate: unclosed disagreements must first be closed in the ledger (`confirmed`/`closed`/`human-decided`), and un-re-reviewed commits after an anchor must be re-reviewed via `review-code` or covered by a `post-review-commit` / `human-decided` exemption row in the ledger.
 
 > **⚠️ Prerequisite Branch Check — you must decide whether to continue or stop before proceeding:**
 >

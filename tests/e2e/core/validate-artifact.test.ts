@@ -446,6 +446,52 @@ test("validate-artifact completion-checklist fails when a complete-task item is 
   })
 ));
 
+test("validate-artifact completion-checklist ignores fenced historical checklists", () => (
+  withTempRoot("agent-infra-complete-task-fenced-checklist-", (tempRoot) => {
+    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    const fencedHistory = [
+      "```text",
+      "## 完成检查清单",
+      "- [ ] 历史未完成项",
+      "```",
+      ""
+    ].join("\n");
+    const content = buildCompletedTaskContent([
+      "- [x] 所有需求已满足",
+      "- [x] 测试已编写并通过",
+      "- [x] 代码已审查"
+    ]);
+    write(path.join(taskDir, "task.md"), content.replace("## 完成检查清单", `${fencedHistory}## 完成检查清单`));
+
+    const result = runValidator(["check", "completion-checklist", taskDir, "--skill", "complete-task"]);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assertPayloadStatus(result, { type: "completion-checklist", status: "pass" });
+  })
+));
+
+test("validate-artifact section parsing honors tilde, longer, and mismatched fence closers", () => (
+  withTempRoot("agent-infra-complete-task-fence-variants-", (tempRoot) => {
+    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    const checklist = [
+      "- [x] 所有需求已满足",
+      "- [x] 测试已编写并通过",
+      "- [x] 代码已审查"
+    ];
+    const fencedHistories = [
+      "~~~text\n## 完成检查清单\n- [ ] 历史未完成项\n~~~~",
+      "````text\n## 完成检查清单\n- [ ] 历史未完成项\n```\n## Completion Checklist\n- [ ] 仍在 fence 内\n`````",
+      "~~~text\n## 完成检查清单\n- [ ] 历史未完成项\n```\n## Completion Checklist\n- [ ] 仍在 fence 内\n~~~"
+    ];
+
+    for (const [index, history] of fencedHistories.entries()) {
+      const content = buildCompletedTaskContent(checklist);
+      write(path.join(taskDir, "task.md"), content.replace("## 完成检查清单", `${history}\n\n## 完成检查清单`));
+      const result = runValidator(["check", "completion-checklist", taskDir, "--skill", "complete-task"]);
+      assert.equal(result.status, 0, `case ${index}: ${result.stderr || result.stdout}`);
+    }
+  })
+));
+
 test("validate-artifact task-meta accepts a valid workflow warning with escaped pipes", () => (
   withTempRoot("agent-infra-workflow-warning-pass-", (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");

@@ -85,10 +85,11 @@ When an executor judges an item to be a key design decision that needs human rul
 
 ## post-review commit gate (code stage only)
 
-- `review-code` captures `Review Baseline Commit` (R, `git rev-parse HEAD`) once, computes `Reviewed Diff Fingerprint` (F, the full worktree diff fingerprint) from that same R, and records both in the highest-round report. When the round is Approved it also writes `last_reviewed_commit: R` (B) to task.md; a non-Approved round preserves the existing B.
-- `commit` reads only the highest-round `review-code` artifact. When that artifact is Approved, the pre-commit HEAD equals R, and the staged diff fingerprint equals F, it advances task.md B to the new commit SHA.
-- The `complete-task` `post-review-commit` gate prefers B; when B is absent or invalid, it falls back to R from the highest-round `review-code` artifact.
-- If new commits touch code / rule paths after B / R, the gate blocks and requires a fresh `review-code`.
+- `review-code` captures the review baseline `R` (diff base), full-worktree diff fingerprint `F`, and normalized snapshot tree `T`. An Approved clean snapshot may set `B=R`; an Approved snapshot with uncommitted changes clears or omits `B`.
+- `commit` reads only the highest-round Approved `review-code` artifact. Before committing it requires `pre_head == R`, complete worktree tree `W == T`, and normalized staged tree `S == T`; any mismatch blocks before `git commit` and reports added, missing, and different paths for both comparisons.
+- After a successful commit it sets `B=last_reviewed_commit=<new_head>`; B means only a reviewed snapshot anchored to a Git commit.
+- The `complete-task` `post-review-commit` gate uses only B. When B is absent, malformed, or missing as a Git object, it reports `reviewed snapshot was not anchored` and never falls back to R.
+- If new commits touch code / rule paths after B, the gate blocks and requires a fresh `review-code`.
 - **Exemption**: append a ledger row `| PRC-1 | post-review-commit | - | - | human-decided | <ruling note> |` recording that a human explicitly allowed those commits without re-review.
 
 ## Gate behavior cheat sheet

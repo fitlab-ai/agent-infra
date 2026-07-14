@@ -47,6 +47,11 @@ export function extractReviewDiffFingerprint(content) {
   return match ? match[1].trim().replace(/`/g, "") : "";
 }
 
+export function extractReviewedSnapshotTree(content) {
+  const match = String(content).match(/^[-*]?\s*\*\*(?:审查快照树|Reviewed Snapshot Tree)\*\*[:：]\s*(.*?)\s*$/m);
+  return match ? match[1].trim().replace(/`/g, "") : "";
+}
+
 export function parseReviewVerdict(content) {
   const match = String(content).match(/^[-*]?\s*\*\*(?:总体结论|Overall Verdict)\*\*[:：]\s*(.*?)\s*$/m);
   return match ? match[1].trim() : "";

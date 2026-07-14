@@ -27,6 +27,30 @@ function fingerprint(repoRoot: string, mode: "worktree" | "staged", baseline: st
   return value;
 }
 
+type Snapshot = { baseline: string; fingerprint: string; tree: string };
+
+function snapshot(repoRoot: string, mode: "worktree" | "staged", baseline: string): Snapshot {
+  const result = spawnSync(process.execPath, [fingerprintScript, mode, baseline, "--format", "json"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: gitSafeEnv()
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return JSON.parse(result.stdout) as Snapshot;
+}
+
+function compare(repoRoot: string, expected: string, actual: string) {
+  const result = spawnSync(process.execPath, [fingerprintScript, "compare", expected, actual, "--format", "json"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: gitSafeEnv()
+  });
+  return {
+    status: result.status,
+    payload: JSON.parse(result.stdout) as { equal: boolean; added: string[]; missing: string[]; different: string[] }
+  };
+}
+
 function setupRepo(tempRoot: string) {
   initIsolatedGitRepo(tempRoot);
   git(tempRoot, ["config", "user.email", "codex@example.com"]);
@@ -53,6 +77,57 @@ test("review diff fingerprint includes tracked changes, deletions, and untracked
     git(tempRoot, ["add", ".agents/skills/existing.md", ".agents/skills/delete-me.md", ".agents/skills/new file.md"]);
     const staged = fingerprint(tempRoot, "staged", baseline);
     assert.equal(staged, worktree);
+  });
+});
+
+test("review snapshots produce comparable worktree and staged trees without mutating the real index", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-snapshot-equal-", (tempRoot) => {
+    const baseline = setupRepo(tempRoot);
+    write(path.join(tempRoot, ".agents/skills/existing.md"), "base\nchanged\n");
+    fs.rmSync(path.join(tempRoot, ".agents/skills/delete-me.md"));
+    write(path.join(tempRoot, ".agents/skills/new\nfile.md"), "new\n");
+
+    const worktree = snapshot(tempRoot, "worktree", baseline);
+    git(tempRoot, ["add", ".agents/skills/existing.md", ".agents/skills/delete-me.md", ".agents/skills/new\nfile.md"]);
+    const statusBefore = git(tempRoot, ["status", "--short"]);
+    const staged = snapshot(tempRoot, "staged", baseline);
+    const statusAfter = git(tempRoot, ["status", "--short"]);
+
+    assert.equal(worktree.baseline, baseline);
+    assert.match(worktree.fingerprint, /^sha256:[0-9a-f]{64}$/);
+    assert.match(worktree.tree, /^[0-9a-f]{40,64}$/);
+    assert.equal(staged.tree, worktree.tree);
+    assert.equal(statusAfter, statusBefore);
+    assert.deepEqual(compare(tempRoot, worktree.tree, staged.tree), {
+      status: 0,
+      payload: { equal: true, added: [], missing: [], different: [] }
+    });
+  });
+});
+
+test("review snapshot comparison classifies added, missing, and different paths", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-snapshot-compare-", (tempRoot) => {
+    const baseline = setupRepo(tempRoot);
+    write(path.join(tempRoot, ".agents/skills/existing.md"), "base\nreviewed\n");
+    fs.rmSync(path.join(tempRoot, ".agents/skills/delete-me.md"));
+    write(path.join(tempRoot, ".agents/skills/reviewed-only.md"), "reviewed\n");
+    const reviewed = snapshot(tempRoot, "worktree", baseline);
+
+    git(tempRoot, ["add", ".agents/skills/existing.md", ".agents/skills/delete-me.md"]);
+    write(path.join(tempRoot, ".agents/skills/existing.md"), "base\nstaged-different\n");
+    git(tempRoot, ["add", ".agents/skills/existing.md"]);
+    write(path.join(tempRoot, ".agents/skills/staged-only.md"), "staged\n");
+    git(tempRoot, ["add", ".agents/skills/staged-only.md"]);
+    const staged = snapshot(tempRoot, "staged", baseline);
+    const result = compare(tempRoot, reviewed.tree, staged.tree);
+
+    assert.equal(result.status, 1);
+    assert.deepEqual(result.payload, {
+      equal: false,
+      added: [".agents/skills/staged-only.md"],
+      missing: [".agents/skills/reviewed-only.md"],
+      different: [".agents/skills/existing.md"]
+    });
   });
 });
 

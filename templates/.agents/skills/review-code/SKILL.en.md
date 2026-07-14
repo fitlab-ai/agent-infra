@@ -77,7 +77,7 @@ Follow `.agents/workflows/feature-development.yaml` and inspect the full change 
 - Capture `R=$(git rev-parse HEAD)` exactly once; reuse that R for this round's report, fingerprint, and task review fact, and do not re-read HEAD later as a substitute
 - `git diff --binary "$R" -- <post-review-globs>` for tracked changes
 - `git ls-files -o --exclude-standard -z -- <post-review-globs>` for untracked new files
-- `node .agents/scripts/review-diff-fingerprint.js worktree "$R"` for the reviewed diff fingerprint; write it into the report
+- `node .agents/scripts/review-diff-fingerprint.js worktree "$R" --format json` to generate the reviewed diff fingerprint `F` and reviewed snapshot tree `T` together; write both into the report
 
 > Detailed review criteria, severity rules, and reviewer expectations live in `reference/review-criteria.md`. Read `reference/review-criteria.md` before reviewing.
 > Test review gate: when `git diff` touches test files, read `.agents/rules/testing-discipline.md` first and check it item by item, especially "do not add negative assertions when a positive assertion already covers the behavior".
@@ -97,7 +97,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
 Update task.md:
-- When this round's `Overall Verdict` / `总体结论` is `Approved` / `通过`, write `last_reviewed_commit: {R}`; the presence of a worktree diff does not affect this write, and repeating the same R is idempotent
+- When this round's `Overall Verdict` / `总体结论` is `Approved` / `通过` and `T == R^{tree}`, write `last_reviewed_commit: {R}`; when the Approved snapshot contains uncommitted changes, clear any existing `last_reviewed_commit` until `commit` anchors it
 - When this round is not Approved, preserve the existing `last_reviewed_commit`; do not advance or clear it
 - Append:
 `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Code (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}, Manual-validation: {n} → {artifact-filename}`

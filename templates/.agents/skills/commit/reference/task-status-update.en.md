@@ -18,13 +18,40 @@ For every task-related commit, append this Activity Log entry in `task.md`:
 - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Commit** by {agent} — {commit hash short} {commit subject}
 ```
 
-If the commit stage confirmed that the highest-round `review-code` artifact is Approved, `pre_head` equals its review baseline commit `R`, and the staged diff fingerprint `S` equals its reviewed diff fingerprint `F`, also write or refresh:
+If the commit stage confirmed that the highest-round `review-code` artifact is Approved, `pre_head == R`, complete worktree tree `W == T`, and normalized staged tree `S == T`, also write or refresh after a successful commit:
 
 ```yaml
 last_reviewed_commit: {new_head}
 ```
 
-This field is the preferred baseline for the `complete-task` `post-review-commit` gate. When any condition is not met, do not write or advance it.
+This field is the only baseline for the `complete-task` `post-review-commit` gate. When any condition is not met, do not write or advance it.
+
+### Scenario 4: pre-commit snapshot block
+
+This scenario ends the run before `git commit` and does not enter the successful post-commit scenario selection below. When any of `pre_head != R`, `W != T`, or `S != T` applies:
+
+- Do not run `git commit`, push, successful state updates, Issue/PR success sync, or the commit completion gate; preserve the current worktree and index.
+- Refresh task `updated_at`, `assigned_to`, and `agent_infra_version`, then append a done log with action `Commit`: `Blocked before git commit: reviewed snapshot mismatch (worktree added={a}, missing={m}, different={d}; staged added={a}, missing={m}, different={d})`.
+- User output must include `No commit was created.` and show Added/Missing/Different under both `Current worktree vs reviewed snapshot` and `Staged snapshot vs reviewed snapshot`; render an empty set as `- (none)` and list paths only in user output.
+- When `pre_head != R` or `W != T`, the only next step is a fresh `review-code`; when only `W == T && S != T`, tell the user to fix staging and rerun `commit` without re-review.
+
+Full re-review commands:
+
+```text
+Next step - re-run code review:
+  - Claude Code / OpenCode: /review-code {task-ref}
+  - Gemini CLI: /{{project}}:review-code {task-ref}
+  - Codex CLI: $review-code {task-ref}
+```
+
+Full staging-only retry commands:
+
+```text
+Next step - fix staging and retry commit:
+  - Claude Code / OpenCode: /commit {task-ref}
+  - Gemini CLI: /{{project}}:commit {task-ref}
+  - Codex CLI: $commit {task-ref}
+```
 
 Before selecting the next step, verify:
 - `current_step` and the latest workflow progress in `task.md`
