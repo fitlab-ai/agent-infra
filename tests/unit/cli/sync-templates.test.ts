@@ -205,7 +205,7 @@ test("syncTemplates resolves Windows npm wrappers via .cmd launchers", async () 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot);
 
-    assert.equal(normalize(report.templateRoot), normalize(templateRoot));
+    assert.equal(normalize(report.templateRoot), normalize(fs.realpathSync(templateRoot)));
     assert.equal(fs.readFileSync(path.join(projectRoot, "README.md"), "utf8"), "Hello demo\n");
   } finally {
     childProcess.execSync = originalExecSync;

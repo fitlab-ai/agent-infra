@@ -899,11 +899,15 @@ function findCommentByMarker(comments, marker) {
   return (comments || []).find((comment) => typeof comment.body === "string" && comment.body.includes(marker)) || null;
 }
 
+function isGeneratedMarkerLine(line) {
+  return line.startsWith("<!--") && line.endsWith("-->");
+}
+
 function extractCommentBody(commentBody) {
   const lines = String(commentBody || "").split(/\r?\n/);
 
   let start = 0;
-  while (start < lines.length && (lines[start].trim() === "" || /^<!--.*-->$/.test(lines[start].trim()))) {
+  while (start < lines.length && (lines[start].trim() === "" || isGeneratedMarkerLine(lines[start].trim()))) {
     start += 1;
   }
 
