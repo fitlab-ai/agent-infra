@@ -83,12 +83,13 @@ test("review diff fingerprint includes tracked changes, deletions, and untracked
 test("review snapshots produce comparable worktree and staged trees without mutating the real index", onPlatforms("linux", "darwin", "win32"), async () => {
   await withTempRoot("agent-infra-snapshot-equal-", (tempRoot) => {
     const baseline = setupRepo(tempRoot);
+    const newFile = process.platform === "win32" ? ".agents/skills/new file.md" : ".agents/skills/new\nfile.md";
     write(path.join(tempRoot, ".agents/skills/existing.md"), "base\nchanged\n");
     fs.rmSync(path.join(tempRoot, ".agents/skills/delete-me.md"));
-    write(path.join(tempRoot, ".agents/skills/new\nfile.md"), "new\n");
+    write(path.join(tempRoot, newFile), "new\n");
 
     const worktree = snapshot(tempRoot, "worktree", baseline);
-    git(tempRoot, ["add", ".agents/skills/existing.md", ".agents/skills/delete-me.md", ".agents/skills/new\nfile.md"]);
+    git(tempRoot, ["add", ".agents/skills/existing.md", ".agents/skills/delete-me.md", newFile]);
     const statusBefore = git(tempRoot, ["status", "--short"]);
     const staged = snapshot(tempRoot, "staged", baseline);
     const statusAfter = git(tempRoot, ["status", "--short"]);
