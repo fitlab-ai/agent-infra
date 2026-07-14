@@ -12,6 +12,34 @@ The sandbox image also preinstalls `gh`. When `gh auth token` succeeds on the ho
 
 Host `~/.ssh` is not bind-mounted into the sandbox. GitHub access is expected to use the `gh` / HTTPS token path above; `git@github.com:*` SSH workflows need a separate, explicit setup outside the default sandbox boundary.
 
+## Runtime proxy inheritance
+
+`ai sandbox create <branch> --inherit-proxy` copies standard host proxy variables into the new container environment. `-P` is the short form of the same boolean switch. The default remains off: if you do not pass the switch, agent-infra does not read or inject host proxy variables.
+
+The copied allowlist is fixed:
+
+- `http_proxy` / `HTTP_PROXY`
+- `https_proxy` / `HTTPS_PROXY`
+- `all_proxy` / `ALL_PROXY`
+- `no_proxy` / `NO_PROXY`
+
+Only variables that exist and are not empty strings are copied. Values are passed through unchanged by key and value: agent-infra does not parse proxy URLs, infer missing uppercase or lowercase variants, merge conflicts, interpret `NO_PROXY`, or add WebSocket-specific variables. If both uppercase and lowercase variants are set, both are written and the client inside the container decides which one it uses; prefer keeping host values consistent.
+
+Proxy values are written through the same private Docker `--env-file` path used for tool environment variables and `GH_TOKEN`, so credentials do not appear in the Docker argv or project configuration. The values are still container environment variables after creation, so every process in that container can read them. Avoid placing real proxy credentials in shell history or committed files; if credentials are required, set them in the host environment only for the create command.
+
+Example without credentials:
+
+```bash
+HTTP_PROXY=http://proxy.internal:8080 \
+HTTPS_PROXY=http://proxy.internal:8080 \
+NO_PROXY=localhost,127.0.0.1 \
+ai sandbox create feature/proxy --inherit-proxy
+```
+
+The proxy environment is captured at container creation time. `ai sandbox start` and `ai sandbox exec` do not refresh it. If the proxy entrypoint address changes, or if you need to fully remove proxy variables from a sandbox, remove and recreate the container. If the entrypoint address stays stable, switching between PROXY and DIRECT mode should happen in the proxy layer behind that address; simply stopping the proxy while leaving container proxy variables set will usually break clients.
+
+This feature covers only container runtime environment variables. Docker daemon proxy settings, image pulls, BuildKit, and image build proxy forwarding are separate build-time concerns and are not handled by `--inherit-proxy`.
+
 `ai sandbox rebuild` keeps Docker's build cache by default, so it quickly retags the sandbox image without refreshing every package. Use `ai sandbox rebuild --refresh` when you want to upgrade the image: it passes `--no-cache --pull` to Docker, pulls the current Ubuntu base image, and reruns the apt, tmux build, and global npm install layers. Claude Code updates are disabled inside the container, and OpenCode startup update checks are disabled; `--refresh` is the routine upgrade path for sandbox-managed tools. Manual `opencode upgrade` remains outside this guard. The default `python3` provided by the Ubuntu 24.04 sandbox base is Python 3.12, so scripts that hard-code Python 3.10 paths may need adjustment.
 
 `ai sandbox exec` also forwards a small terminal-detection whitelist (`TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `LC_TERMINAL`, `LC_TERMINAL_VERSION`) into the container. This keeps interactive TUIs aligned with the host terminal for behaviors such as Claude Code's Shift+Enter newline support, without passing through the full host environment.

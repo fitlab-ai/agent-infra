@@ -12,6 +12,34 @@
 
 宿主机 `~/.ssh` 不会 bind mount 到沙箱中。GitHub 访问默认走上面的 `gh` / HTTPS token 路径；`git@github.com:*` 这类 SSH workflow 需要在默认沙箱边界之外另行显式配置。
 
+## 运行时代理继承
+
+`ai sandbox create <branch> --inherit-proxy` 会把宿主机上的标准代理变量复制进新容器环境。`-P` 是同一个布尔开关的短写法。默认仍然关闭：不传该开关时，agent-infra 不读取也不注入宿主代理变量。
+
+固定白名单如下：
+
+- `http_proxy` / `HTTP_PROXY`
+- `https_proxy` / `HTTPS_PROXY`
+- `all_proxy` / `ALL_PROXY`
+- `no_proxy` / `NO_PROXY`
+
+只有已存在且不是空字符串的变量会被复制。键和值都会原样传递：agent-infra 不解析代理 URL，不补齐缺失的大小写变体，不合并冲突，不解释 `NO_PROXY`，也不新增 WebSocket 专用变量。如果大小写变体同时存在，它们都会写入容器，最终由容器内客户端决定使用哪一个；建议在宿主机上保持这些值一致。
+
+代理值通过与工具环境变量和 `GH_TOKEN` 相同的私有 Docker `--env-file` 路径写入，因此凭据不会出现在 Docker argv 或项目配置中。但创建后它们仍是容器环境变量，容器内所有进程都可以读取。不要把真实代理凭据写进 shell history 或提交到仓库；如果必须使用凭据，只在执行 create 命令时通过宿主环境提供。
+
+无凭据示例：
+
+```bash
+HTTP_PROXY=http://proxy.internal:8080 \
+HTTPS_PROXY=http://proxy.internal:8080 \
+NO_PROXY=localhost,127.0.0.1 \
+ai sandbox create feature/proxy --inherit-proxy
+```
+
+代理环境只在容器创建时捕获。`ai sandbox start` 和 `ai sandbox exec` 不会刷新这些变量。代理入口地址变化，或需要彻底移除沙箱里的代理变量时，需要删除并重新创建容器。如果入口地址保持稳定，PROXY / DIRECT 模式切换应在该地址背后的代理层完成；仅停止代理进程但保留容器代理变量通常会导致客户端连接失败。
+
+本能力只覆盖容器运行时环境变量。Docker daemon 代理、镜像拉取、BuildKit 和镜像构建期代理传递属于独立的构建期问题，不由 `--inherit-proxy` 处理。
+
 `ai sandbox rebuild` 默认保留 Docker build cache，因此会快速重打沙箱镜像，不会刷新每个软件包。需要升级镜像时使用 `ai sandbox rebuild --refresh`：它会向 Docker 传入 `--no-cache --pull`，重新拉取当前 Ubuntu 基础镜像，并重跑 apt、tmux 编译和全局 npm 安装层。容器内 Claude Code 更新已关闭，OpenCode 启动时更新检查也已关闭；`--refresh` 是沙箱托管工具的常规升级入口。手动 `opencode upgrade` 不受该保护覆盖。Ubuntu 24.04 沙箱基础镜像提供的默认 `python3` 是 Python 3.12，因此硬编码 Python 3.10 路径的脚本可能需要调整。
 
 `ai sandbox exec` 也会向容器透传一小组终端检测白名单变量（`TERM_PROGRAM`、`TERM_PROGRAM_VERSION`、`LC_TERMINAL`、`LC_TERMINAL_VERSION`）。这样可以让交互式 TUI 保持与宿主终端一致的行为，例如 Claude Code 的 `Shift+Enter` 换行支持，同时避免把整个宿主环境灌入容器。

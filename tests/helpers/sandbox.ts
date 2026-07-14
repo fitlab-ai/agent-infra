@@ -13,8 +13,10 @@ type SandboxFixture = {
   repoDir: string;
   binDir: string;
   logPath: string;
+  envFileLogPath: string;
   readDockerCalls(): string[][];
   readRawDockerCalls(): string[][];
+  readCapturedEnvFiles(): string[];
 };
 
 function dockerCommandArgs(args: string[]): string[] {
@@ -54,6 +56,7 @@ function writeSandboxEngineFixture(
   const repoDir = path.join(tmpDir, "repo");
   const binDir = path.join(tmpDir, "bin");
   const logPath = path.join(tmpDir, "docker-log.jsonl");
+  const envFileLogPath = path.join(tmpDir, "docker-env-files.jsonl");
   const dockerJsPath = path.join(binDir, "docker.js");
   const idJsPath = path.join(binDir, "id.js");
   const whichJsPath = path.join(binDir, "which.js");
@@ -93,7 +96,17 @@ function writeSandboxEngineFixture(
       "function log() {",
       "  fs.appendFileSync(process.env.DOCKER_LOG_PATH, JSON.stringify(rawArgs) + '\\n');",
       "}",
+      "function captureEnvFile() {",
+      "  if (!process.env.DOCKER_ENV_FILE_LOG_PATH || args[0] !== 'run') return;",
+      "  const index = args.indexOf('--env-file');",
+      "  if (index < 0 || !args[index + 1]) return;",
+      "  const envPath = args[index + 1];",
+      "  let content = '';",
+      "  try { content = fs.readFileSync(envPath, 'utf8'); } catch (error) { content = `__READ_ERROR__:${error.message}`; }",
+      "  fs.appendFileSync(process.env.DOCKER_ENV_FILE_LOG_PATH, JSON.stringify({ path: envPath, content }) + '\\n');",
+      "}",
       "log();",
+      "captureEnvFile();",
       "if (args[0] === 'ps') {",
       "  if (dockerStdoutForPs) {",
       "    process.stdout.write(dockerStdoutForPs.endsWith('\\n') ? dockerStdoutForPs : `${dockerStdoutForPs}\\n`);",
@@ -183,6 +196,7 @@ function writeSandboxEngineFixture(
     repoDir,
     binDir,
     logPath,
+    envFileLogPath,
     readDockerCalls() {
       if (!fs.existsSync(logPath)) {
         return [];
@@ -202,6 +216,16 @@ function writeSandboxEngineFixture(
         .split("\n")
         .filter(Boolean)
         .map((line) => JSON.parse(line) as string[]);
+    },
+    readCapturedEnvFiles() {
+      if (!fs.existsSync(envFileLogPath)) {
+        return [];
+      }
+      return fs.readFileSync(envFileLogPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => (JSON.parse(line) as { content: string }).content);
     }
   };
 }

@@ -87,13 +87,27 @@ alias gy='gemini --yolo; tput ed'
 `;
 const CONTAINER_HOME = '/home/devuser';
 const CONTAINER_SHELL_CONFIG_MOUNT = `${CONTAINER_HOME}/.host-shell-config`;
-const USAGE = `Usage: ai sandbox create <branch> [base] [--cpu <n>] [--memory <n>] [--no-refresh]
+const USAGE = `Usage: ai sandbox create <branch> [base] [--cpu <n>] [--memory <n>] [--no-refresh] [--inherit-proxy|-P]
 
 Host aliases:
   ${'~'}/.agent-infra/aliases/sandbox.sh is auto-created on first run and exposed
   as ${CONTAINER_HOME}/.bash_aliases inside the sandbox container (the host
   shell-config directory is bind-mounted at ${CONTAINER_SHELL_CONFIG_MOUNT} and
-  symlinked into $HOME).`;
+  symlinked into $HOME).
+
+Proxy:
+  --inherit-proxy, -P  Copy non-empty standard host proxy variables into the
+                       container environment through the private env file.`;
+const HOST_PROXY_ENV_KEYS = [
+  'http_proxy',
+  'HTTP_PROXY',
+  'https_proxy',
+  'HTTPS_PROXY',
+  'all_proxy',
+  'ALL_PROXY',
+  'no_proxy',
+  'NO_PROXY'
+] as const;
 
 type SandboxCreateConfig = ReturnType<typeof loadConfig>;
 type PreparedDockerfile = ReturnType<typeof prepareDockerfile>;
@@ -626,11 +640,19 @@ function formatEnvFileEntry(key: string, value: string): string {
   return `${key}=${value}`;
 }
 
+export function collectHostProxyEntries(env: NodeJS.ProcessEnv): Array<[string, string]> {
+  return HOST_PROXY_ENV_KEYS.flatMap((key) => {
+    const value = env[key];
+    return typeof value === 'string' && value !== '' ? [[key, value]] : [];
+  });
+}
+
 export function buildContainerEnvFile(
   resolvedTools: ResolvedTool[],
   engine: string,
   runSafeEngineFn: EngineRunSafeFn = runSafeEngine,
   options: {
+    additionalEntries?: Array<[string, string]>;
     mkdtempFn?: typeof fs.mkdtempSync;
     writeFileFn?: typeof fs.writeFileSync;
     chmodFn?: typeof fs.chmodSync;
@@ -640,6 +662,7 @@ export function buildContainerEnvFile(
   } = {}
 ): { dockerArgs: string[]; cleanup: () => void } {
   const {
+    additionalEntries = [],
     mkdtempFn = fs.mkdtempSync,
     writeFileFn = fs.writeFileSync,
     chmodFn = fs.chmodSync,
@@ -649,6 +672,7 @@ export function buildContainerEnvFile(
   } = options;
 
   const entries: Array<[string, string]> = resolvedTools.flatMap(({ tool }) => Object.entries(tool.envVars ?? {}));
+  entries.push(...additionalEntries);
   let ghToken = runSafeEngineFn(engine, 'gh', ['auth', 'token']);
   if (!ghToken && engine === 'wsl2') {
     ghToken = runSafeFn('gh', ['auth', 'token']);
@@ -1246,6 +1270,7 @@ export async function create(args: string[]): Promise<void> {
       cpu: { type: 'string' },
       memory: { type: 'string' },
       'no-refresh': { type: 'boolean' },
+      'inherit-proxy': { type: 'boolean', short: 'P' },
       help: { type: 'boolean', short: 'h' }
     }
   });
@@ -1503,7 +1528,10 @@ export async function create(args: string[]): Promise<void> {
               signingKey
             )
             : null;
-          const envFile = buildContainerEnvFile(effectiveResolvedTools, engine);
+          const proxyEntries = values['inherit-proxy'] ? collectHostProxyEntries(process.env) : [];
+          const envFile = buildContainerEnvFile(effectiveResolvedTools, engine, undefined, {
+            additionalEntries: proxyEntries
+          });
           let hostShellConfig: HostShellConfig;
           let tmpfsSeedPlan: TmpfsSeedPlanEntry[] = [];
           try {
