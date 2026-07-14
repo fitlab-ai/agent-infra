@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -345,6 +346,45 @@ test("composeDockerfile invokes sandbox-dotfiles-link from sandbox-tmux-entry", 
     assert.match(content, /sandbox-dotfiles-link[^\n]*\|\| true/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("base.dockerfile rejects empty or non-executable runtime scripts", () => {
+  const content = fs.readFileSync(filePath("lib/sandbox/runtimes/base.dockerfile"), "utf8");
+  const assertionBlock = content
+    .split(/^(?=FROM |USER |ENV |ARG |RUN |WORKDIR |CMD |COPY |ADD )/m)
+    .find((block) => block.startsWith("RUN ") && block.includes("test -s /usr/local/bin/cc-token-status"));
+
+  assert.ok(assertionBlock, "expected a RUN block validating baked runtime scripts");
+  for (const script of ["cc-token-status", "sandbox-dotfiles-link", "sandbox-tmux-entry"]) {
+    assert.match(assertionBlock, new RegExp(`test -s /usr/local/bin/${script}`));
+    assert.match(assertionBlock, new RegExp(`test -x /usr/local/bin/${script}`));
+  }
+  assert.ok(
+    content.indexOf(assertionBlock) < content.indexOf("ENV LANG=en_US.UTF-8"),
+    "expected runtime script validation before the final environment declarations"
+  );
+});
+
+test("built-in Dockerfile signature covers the runtime script validation", async () => {
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
+  const config = {
+    repoRoot: "/repo",
+    project: "demo",
+    runtimes: ["node20"],
+    dockerfile: null
+  };
+  const dockerfilePath = sandboxDockerfile.composeDockerfile(config);
+
+  try {
+    const content = fs.readFileSync(dockerfilePath, "utf8");
+    assert.match(content, /test -s \/usr\/local\/bin\/sandbox-tmux-entry/);
+    assert.equal(
+      sandboxDockerfile.dockerfileSignature(config),
+      createHash("sha256").update(content).digest("hex").slice(0, 12)
+    );
+  } finally {
+    fs.rmSync(dockerfilePath, { force: true });
   }
 });
 

@@ -2,7 +2,7 @@
 
 [← Back to README](../../README.md) · [中文](../zh-CN/platform-support.md)
 
-agent-infra runs on macOS, Linux, and Windows. The CLI itself only needs Node.js (>=22.9.0); container-related features (`ai sandbox *`) additionally need Docker.
+agent-infra runs on macOS, Linux, and Windows. The CLI itself only needs Node.js (>=22.9.0); container-related features (`ai sandbox *`) additionally need Docker with Docker Buildx and a working BuildKit builder. Verify the build prerequisite with `docker buildx inspect --bootstrap`.
 
 ## Sandbox engine selection
 
@@ -21,7 +21,7 @@ You can override the engine in `.agents/.airc.json`. Valid engines are platform-
 ## macOS
 
 - `ai init`, `ai sync`, etc.: works out of the box after `npm install -g @fitlab-ai/agent-infra` (or Homebrew).
-- `ai sandbox *`: requires Colima, OrbStack, or Docker Desktop. Colima is the default engine on macOS — when it is selected and the `colima` command is missing, agent-infra auto-installs and starts Colima via Homebrew on first run. To use OrbStack or Docker Desktop instead, set `sandbox.engine` in `.agents/.airc.json`.
+- `ai sandbox *`: requires Colima, OrbStack, or Docker Desktop. Colima is the default engine on macOS — when it is selected and the `colima` command is missing, agent-infra auto-installs Colima, the Docker CLI, and `docker-buildx` via Homebrew, then starts Colima on first run. To use OrbStack or Docker Desktop instead, set `sandbox.engine` in `.agents/.airc.json`. If the BuildKit check fails for an existing Colima installation, run `brew install docker-buildx`; for Docker Desktop or OrbStack, upgrade or repair the selected engine.
 
 ### Engine resource configuration
 
@@ -74,7 +74,7 @@ After that, sandbox create, exec, and refresh use the file instead of the keycha
   sudo usermod -aG docker $USER && newgrp docker
   ```
 
-  Validate with `docker info` — it should succeed without sudo.
+  Validate with `docker info` and `docker buildx inspect --bootstrap` — both should succeed without sudo. If the second command fails, install the Docker Buildx CLI plugin supplied for your Docker Engine distribution, then retry it.
 
   GPG signing works when the host `gpg-agent` and signing key are available; if key sync fails, `ai sandbox create` falls back to a sanitized Git config so commits still work without host signing state.
 
@@ -127,6 +127,8 @@ These configurations are not actively tested in this release:
 - `ai sandbox *`: supported on Windows via WSL2 + Docker Desktop.
 
 Before running `ai sandbox create`, install Windows 11 with WSL2, configure a default Linux distribution, install Docker Desktop, and enable Docker Desktop's WSL integration for that distribution.
+
+Run `docker buildx inspect --bootstrap` through the same WSL2 integration before creating or rebuilding a sandbox. If it fails, upgrade or repair Docker Desktop and confirm Buildx is available in the selected distribution.
 
 You can run the CLI from PowerShell or Git Bash, but the project path must be visible from WSL, such as `C:\Users\you\project` or another drive mounted under `/mnt/<drive>`. UNC paths are not supported for sandbox mounts. If the Windows entrypoint cannot reach Docker through WSL2, run the same command from inside the WSL distribution as a fallback.
 

@@ -2,6 +2,18 @@
 
 [← Back to README](../../README.md) · [中文](../zh-CN/sandbox.md)
 
+## Build prerequisites and troubleshooting
+
+Sandbox creation and rebuilding require Docker Buildx with a working BuildKit builder. agent-infra checks the selected engine and Docker context before inspecting or building an image:
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+If this check fails, `ai sandbox create` and `ai sandbox rebuild` stop before `docker build` and print a repair hint. For Colima, install the missing plugin with `brew install docker-buildx`; a first-time Colima setup installs `colima`, `docker`, and `docker-buildx` together. For Docker Desktop or WSL2, upgrade or repair Docker Desktop. For native Docker Engine, install the Buildx CLI plugin supplied for your distribution. OrbStack users should upgrade or repair OrbStack if its builder is unavailable.
+
+The built-in image also verifies that `cc-token-status`, `sandbox-dotfiles-link`, and `sandbox-tmux-entry` are non-empty and executable during the Docker build. A build cannot succeed with the empty scripts produced by a legacy builder. Custom Dockerfiles still require BuildKit, but they are not required to contain these built-in scripts.
+
 ## Sandbox aliases and GitHub CLI
 
 `ai sandbox create` now bootstraps the host-side aliases file at `~/.agent-infra/aliases/sandbox.sh` on first run. The generated file includes ready-to-edit yolo shortcuts for Claude, Codex, Gemini CLI, and OpenCode, and every sandbox syncs that file into `/home/devuser/.bash_aliases`.

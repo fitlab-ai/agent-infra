@@ -2,7 +2,7 @@ import { platform } from 'node:os';
 import { detectHostResources } from './constants.ts';
 import { ADAPTERS, enginesForPlatform, getAdapter } from './engines/index.ts';
 import type { EffectiveSandboxConfig, OnMessage, RunFns, SandboxAdapter, SandboxVmConfig } from './engines/index.ts';
-import { run, runOk, runSafe, runVerbose } from './shell.ts';
+import { run, runOk, runOkEngine, runSafe, runVerbose } from './shell.ts';
 
 export const ENGINES = Object.freeze({
   COLIMA: 'colima',
@@ -26,6 +26,7 @@ type EngineDependencies = {
   platformFn?: typeof platform;
   runFn?: RunFns['run'];
   runOkFn?: RunFns['runOk'];
+  runOkEngineFn?: typeof runOkEngine;
   runSafeFn?: RunFns['runSafe'];
   runVerboseFn?: RunFns['runVerbose'];
 };
@@ -47,6 +48,37 @@ function runFns({
 function applyDockerContext(adapter: SandboxAdapter): void {
   if (adapter.dockerContext) {
     process.env.DOCKER_CONTEXT = adapter.dockerContext;
+  }
+}
+
+function buildKitError(engine: string): Error {
+  let repair: string;
+  switch (engine) {
+    case ENGINES.COLIMA:
+      repair = 'Install the Docker Buildx plugin with: brew install docker-buildx';
+      break;
+    case ENGINES.DOCKER_DESKTOP:
+    case ENGINES.WSL2:
+      repair = 'Upgrade or repair Docker Desktop so Docker Buildx and BuildKit are available.';
+      break;
+    case ENGINES.NATIVE:
+      repair = 'Install the Docker Buildx plugin for your Docker Engine installation.';
+      break;
+    default:
+      repair = `Upgrade or repair ${engineDisplayName(engine)} so Docker Buildx and BuildKit are available.`;
+  }
+
+  return new Error([
+    `Docker BuildKit is not available for ${engineDisplayName(engine)}.`,
+    repair,
+    'Verify the builder with: docker buildx inspect --bootstrap',
+    'Then retry the sandbox create or rebuild command.'
+  ].join('\n'));
+}
+
+function ensureBuildKit(engine: string, runOkEngineFn: typeof runOkEngine): void {
+  if (!runOkEngineFn(engine, 'docker', ['buildx', 'inspect', '--bootstrap'])) {
+    throw buildKitError(engine);
   }
 }
 
@@ -144,10 +176,12 @@ export async function ensureDocker(
   const engine = detectEngine(config, dependencies);
   const adapter = getAdapter(engine);
   const effectiveConfig = effectiveConfigFor(adapter, config);
+  const fns = runFns(dependencies);
 
   applyDockerContext(adapter);
-  const vmJustStarted = await adapter.ensure(effectiveConfig, onMessage, runFns(dependencies));
-  adapter.syncResources(effectiveConfig, onMessage, runFns(dependencies), { vmJustStarted });
+  const vmJustStarted = await adapter.ensure(effectiveConfig, onMessage, fns);
+  ensureBuildKit(engine, dependencies.runOkEngineFn ?? runOkEngine);
+  adapter.syncResources(effectiveConfig, onMessage, fns, { vmJustStarted });
 }
 
 export function isVmManaged(config: EngineConfig = {}, dependencies: EngineDependencies = {}): boolean {

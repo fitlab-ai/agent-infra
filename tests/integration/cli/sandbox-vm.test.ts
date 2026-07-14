@@ -150,17 +150,20 @@ test("ensureDocker uses Colima verbose commands for install and startup", async 
         },
         runVerboseFn(cmd: string, args: string[]) {
           verboseCalls.push([cmd, ...args]);
+        },
+        runOkEngineFn() {
+          return true;
         }
       }
     );
 
     assert.equal(process.env.DOCKER_CONTEXT, "colima");
     assert.deepEqual(messages, [
-      "Installing colima + docker via Homebrew...",
+      "Installing colima + docker + docker-buildx via Homebrew...",
       "Starting Colima VM..."
     ]);
     assert.deepEqual(verboseCalls, [
-      ["brew", "install", "colima", "docker"],
+      ["brew", "install", "colima", "docker", "docker-buildx"],
       ["colima", "start", "--cpu", "4", "--memory", "8", "--disk", "60", "--arch", "aarch64", "--vm-type=vz", "--mount-type=virtiofs"]
     ]);
     assert.deepEqual(checks, [
@@ -388,6 +391,9 @@ test("ensureDocker installs OrbStack and starts the Docker daemon", async () => 
         },
         runVerboseFn(cmd: string, args: string[]) {
           verboseCalls.push([cmd, ...args]);
+        },
+        runOkEngineFn() {
+          return true;
         }
       }
     );
@@ -456,6 +462,9 @@ test("ensureDocker applies OrbStack resource flags after daemon checks", async (
       },
       runVerboseFn(cmd: string, args: string[]) {
         verboseCalls.push([cmd, ...args]);
+      },
+      runOkEngineFn() {
+        return true;
       }
     }
   );
@@ -474,6 +483,9 @@ test("ensureDocker warns when Docker Desktop cannot apply explicit VM resources"
       platformFn: () => "darwin",
       runOkFn(cmd: string, args: string[]) {
         assert.deepEqual([cmd, ...args], ["docker", "info"]);
+        return true;
+      },
+      runOkEngineFn() {
         return true;
       }
     }

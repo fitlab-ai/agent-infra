@@ -211,6 +211,68 @@ test("commandForEngine wraps commands with wsl.exe for WSL2", async () => {
     sandboxShell.commandForEngine("colima", "colima", ["status"]),
     { cmd: "colima", args: ["status"] }
   );
+  assert.deepEqual(
+    sandboxShell.commandForEngine("wsl2", "docker", ["buildx", "inspect", "--bootstrap"]),
+    { cmd: "wsl.exe", args: ["--", "docker", "buildx", "inspect", "--bootstrap"] }
+  );
+  assert.deepEqual(
+    sandboxShell.commandForEngine("docker-desktop", "docker", ["buildx", "inspect", "--bootstrap"]),
+    { cmd: "docker", args: ["--context", "desktop-linux", "buildx", "inspect", "--bootstrap"] }
+  );
+});
+
+test("ensureDocker probes BuildKit with the resolved engine", async () => {
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
+  const probes: Array<[string, string, string[]]> = [];
+
+  await sandboxEngine.ensureDocker(
+    { engine: "native" },
+    null,
+    {
+      platformFn: () => "linux",
+      runOkFn(cmd: string, args: string[]) {
+        return (cmd === "which" && args[0] === "docker")
+          || (cmd === "docker" && args[0] === "info");
+      },
+      runOkEngineFn(engine: string, cmd: string, args: string[]) {
+        probes.push([engine, cmd, args]);
+        return true;
+      }
+    }
+  );
+
+  assert.deepEqual(probes, [["native", "docker", ["buildx", "inspect", "--bootstrap"]]]);
+});
+
+test("ensureDocker reports a platform-specific BuildKit repair before resource sync", async () => {
+  const sandboxEngine = await loadFreshEsm<SandboxEngineModule>("lib/sandbox/engine.js");
+  const messages: string[] = [];
+
+  await assert.rejects(
+    () => sandboxEngine.ensureDocker(
+      { engine: "docker-desktop", vm: { cpu: 4 } },
+      (message) => messages.push(message),
+      {
+        platformFn: () => "darwin",
+        runOkFn(cmd: string, args: string[]) {
+          assert.deepEqual([cmd, ...args], ["docker", "info"]);
+          return true;
+        },
+        runOkEngineFn(engine: string, cmd: string, args: string[]) {
+          assert.deepEqual([engine, cmd, ...args], [
+            "docker-desktop",
+            "docker",
+            "buildx",
+            "inspect",
+            "--bootstrap"
+          ]);
+          return false;
+        }
+      }
+    ),
+    /Docker Desktop[\s\S]*docker buildx inspect --bootstrap/
+  );
+  assert.deepEqual(messages, []);
 });
 
 test("sandbox exec routes through wsl.exe with single-arg entry script on wsl2", async () => {

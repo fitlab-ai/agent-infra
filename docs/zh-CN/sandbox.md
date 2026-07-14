@@ -2,6 +2,18 @@
 
 [← 返回 README](../../README.zh-CN.md) · [English](../en/sandbox.md)
 
+## 构建前置条件与排障
+
+创建和重建沙箱需要 Docker Buildx，以及可用的 BuildKit builder。agent-infra 会在检查或构建镜像之前，针对所选引擎和 Docker context 执行：
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+如果检测失败，`ai sandbox create` 和 `ai sandbox rebuild` 会在 `docker build` 之前停止，并输出修复指引。Colima 用户可执行 `brew install docker-buildx` 安装缺失插件；首次安装 Colima 时会一并安装 `colima`、`docker` 和 `docker-buildx`。Docker Desktop 或 WSL2 用户应升级或修复 Docker Desktop；原生 Docker Engine 用户应安装当前发行版提供的 Buildx CLI 插件；OrbStack builder 不可用时应升级或修复 OrbStack。
+
+内置镜像还会在 Docker 构建期间验证 `cc-token-status`、`sandbox-dotfiles-link` 与 `sandbox-tmux-entry` 均非空且可执行，因此 legacy builder 生成空脚本时构建不会成功。自定义 Dockerfile 仍需满足 BuildKit 前置条件，但不要求包含这三个内置脚本。
+
 ## 沙箱 aliases 与 GitHub CLI
 
 `ai sandbox create` 在首次运行时会自动生成宿主机侧的 `~/.agent-infra/aliases/sandbox.sh`。该文件内置了 Claude、Codex、Gemini CLI 和 OpenCode 的 yolo 快捷命令模板，你可以直接修改；每次创建沙箱时，这个文件都会同步到容器内的 `/home/devuser/.bash_aliases`。

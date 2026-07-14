@@ -2,7 +2,7 @@
 
 [← 返回 README](../../README.zh-CN.md) · [English](../en/platform-support.md)
 
-agent-infra 支持 macOS、Linux 和 Windows。CLI 本身只需要 Node.js (>=22.9.0)；容器相关功能（`ai sandbox *`）额外需要 Docker。
+agent-infra 支持 macOS、Linux 和 Windows。CLI 本身只需要 Node.js (>=22.9.0)；容器相关功能（`ai sandbox *`）额外需要带 Docker Buildx 且 BuildKit builder 可用的 Docker。可用 `docker buildx inspect --bootstrap` 验证此前置条件。
 
 ## 沙箱引擎选择
 
@@ -21,7 +21,7 @@ agent-infra 支持 macOS、Linux 和 Windows。CLI 本身只需要 Node.js (>=22
 ## macOS
 
 - `ai init`、`ai sync` 等：执行 `npm install -g @fitlab-ai/agent-infra`（或 Homebrew 安装）后开箱即用。
-- `ai sandbox *`：需要 Colima、OrbStack 或 Docker Desktop。macOS 默认引擎是 Colima —— 当选用 Colima 且宿主机没有 `colima` 命令时，agent-infra 会在首次运行时通过 Homebrew 自动安装并启动。如需使用 OrbStack 或 Docker Desktop，请在 `.agents/.airc.json` 中设置 `sandbox.engine`。
+- `ai sandbox *`：需要 Colima、OrbStack 或 Docker Desktop。macOS 默认引擎是 Colima —— 当选用 Colima 且宿主机没有 `colima` 命令时，agent-infra 会在首次运行时通过 Homebrew 自动安装 Colima、Docker CLI 与 `docker-buildx`，然后启动 Colima。如需使用 OrbStack 或 Docker Desktop，请在 `.agents/.airc.json` 中设置 `sandbox.engine`。已有 Colima 安装若未通过 BuildKit 检测，请执行 `brew install docker-buildx`；Docker Desktop 或 OrbStack 用户应升级或修复所选引擎。
 
 ### 引擎资源配置
 
@@ -74,7 +74,7 @@ ai sandbox refresh
   sudo usermod -aG docker $USER && newgrp docker
   ```
 
-  验证：执行 `docker info` 应在不带 sudo 的情况下成功。
+  验证：`docker info` 与 `docker buildx inspect --bootstrap` 都应在不带 sudo 的情况下成功。若第二条命令失败，请安装当前 Docker Engine 发行版提供的 Docker Buildx CLI 插件，再重新验证。
 
   当宿主机 `gpg-agent` 和签名 key 可用时，GPG signing 可正常工作；如果 key 同步失败，`ai sandbox create` 会回退到清理后的 Git config，让提交仍可在没有宿主签名状态的情况下继续。
 
@@ -127,6 +127,8 @@ Rootless 模式的已知差异：
 - `ai sandbox *`：Windows 通过 WSL2 + Docker Desktop 支持。
 
 运行 `ai sandbox create` 前，请先准备 Windows 11、WSL2、默认 Linux distribution、Docker Desktop，并在 Docker Desktop 中为该 distribution 启用 WSL integration。
+
+创建或重建沙箱前，请通过同一 WSL2 integration 执行 `docker buildx inspect --bootstrap`。若失败，请升级或修复 Docker Desktop，并确认所选 distribution 中可以使用 Buildx。
 
 你可以从 PowerShell 或 Git Bash 运行 CLI，但项目路径必须能被 WSL 访问，例如 `C:\Users\you\project`，或其他会挂载到 `/mnt/<drive>` 的磁盘路径。UNC 路径不支持作为沙箱挂载路径。如果 Windows 入口无法通过 WSL2 访问 Docker，可以进入对应 WSL distribution 后运行同一命令作为回退方案。
 

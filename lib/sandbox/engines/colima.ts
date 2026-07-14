@@ -35,8 +35,8 @@ export const colimaAdapter: SandboxAdapter = {
     let started = false;
 
     if (!runOk('which', ['colima'])) {
-      onMessage?.('Installing colima + docker via Homebrew...');
-      runVerbose('brew', ['install', 'colima', 'docker']);
+      onMessage?.('Installing colima + docker + docker-buildx via Homebrew...');
+      runVerbose('brew', ['install', 'colima', 'docker', 'docker-buildx']);
     }
 
     if (!runOk('colima', ['status'])) {

@@ -191,6 +191,10 @@ fi
 exec tmux new-session -s "$SESSION"
 SCRIPT
 
+RUN test -s /usr/local/bin/cc-token-status && test -x /usr/local/bin/cc-token-status && \
+    test -s /usr/local/bin/sandbox-dotfiles-link && test -x /usr/local/bin/sandbox-dotfiles-link && \
+    test -s /usr/local/bin/sandbox-tmux-entry && test -x /usr/local/bin/sandbox-tmux-entry
+
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 ENV TERM=xterm-256color

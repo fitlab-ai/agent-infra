@@ -525,6 +525,36 @@ test("sandbox rebuild resolves to configured engine", onPlatforms("linux", "darw
       fixture.readDockerCalls().some((call) => call[0] === "build"),
       "expected sandbox rebuild to call docker build through the configured native engine"
     );
+    assert.ok(
+      fixture.readRawDockerCalls().some((call) =>
+        call[0] === "--context"
+        && call[1] === "desktop-linux"
+        && call[2] === "buildx"
+        && call[3] === "inspect"
+        && call[4] === "--bootstrap"
+      ),
+      "expected BuildKit probing to use the configured Docker Desktop context"
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rebuild fails before build when BuildKit is unavailable", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-buildkit-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const result = spawnSandboxCli(fixture, tmpDir, ["rebuild", "--quiet"], {
+      DOCKER_EXIT_FOR_BUILDX_INSPECT: "1"
+    });
+    const dockerCalls = fixture.readDockerCalls();
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /docker buildx inspect --bootstrap/);
+    assert.ok(dockerCalls.some((call) => call[0] === "buildx" && call[1] === "inspect"));
+    assert.equal(dockerCalls.some((call) => call[0] === "build"), false);
+    assert.equal(dockerCalls.some((call) => call[0] === "image" && call[1] === "prune"), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -666,6 +696,33 @@ test("sandbox create resolves to configured engine", onPlatforms("linux", "darwi
       fixture.readDockerCalls().some((call) => call[0] === "build"),
       "expected sandbox create to reach docker build through the configured native engine"
     );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox create fails before image inspection when BuildKit is unavailable", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-buildkit-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      sandbox: { tools: ["codex"] }
+    });
+    const result = spawnSandboxCli(
+      fixture,
+      tmpDir,
+      ["create", "feature-x", "--cpu", "1", "--memory", "1"],
+      { DOCKER_EXIT_FOR_BUILDX_INSPECT: "1" }
+    );
+    const dockerCalls = fixture.readDockerCalls();
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /docker buildx inspect --bootstrap/);
+    assert.ok(dockerCalls.some((call) => call[0] === "buildx" && call[1] === "inspect"));
+    assert.equal(dockerCalls.some((call) => call[0] === "image" && call[1] === "inspect"), false);
+    assert.equal(dockerCalls.some((call) => call[0] === "build"), false);
+    assert.equal(dockerCalls.some((call) => call[0] === "run"), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
