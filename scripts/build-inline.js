@@ -36,7 +36,11 @@ function buildInlineContent() {
   }
 
   return source
-    .replace(DEFAULTS_EXPR, `const DEFAULTS = ${JSON.stringify(defaults, null, 2)};`);
+    .replace(DEFAULTS_EXPR, `const DEFAULTS = ${JSON.stringify(defaults, null, 2)};`)
+    .replace(
+      "from '../.agents/scripts/lib/agent-infra-package.js'",
+      "from '../../../scripts/lib/agent-infra-package.js'"
+    );
 }
 
 function main() {

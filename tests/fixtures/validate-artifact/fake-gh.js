@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 const fs = require("node:fs");
 
-const args = process.argv.slice(2);
+let args = process.argv.slice(2);
+
+if (process.env.GH_FAKE_ARGS_PATH) {
+  fs.appendFileSync(process.env.GH_FAKE_ARGS_PATH, `${JSON.stringify(args)}\n`);
+}
+const stripPrefixCount = Number(process.env.GH_FAKE_STRIP_PREFIX_COUNT || "0");
+if (stripPrefixCount > 0) {
+  args = args.slice(stripPrefixCount);
+}
 
 const transientMatcher = process.env.GH_FAKE_TRANSIENT_FAIL_MATCHER;
 const transientCounterFile = process.env.GH_FAKE_TRANSIENT_FAIL_COUNTER_FILE;

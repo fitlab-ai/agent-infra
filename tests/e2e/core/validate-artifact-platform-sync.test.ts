@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import {
   gitSafeEnv,
   initIsolatedGitRepo,
+  onPlatforms,
   pathWithPrependedBin,
   read
 } from "../../helpers.ts";
@@ -38,6 +39,34 @@ const taskId = "TASK-20260328-000001";
 const summaryComment = "<!-- sync-pr:TASK-20260328-000001:summary -->\n## Review Summary\n\nLooks good.";
 const summaryCommentWithSha = (sha: string) => (
   `<!-- sync-pr:TASK-20260328-000001:summary -->\n<!-- last-commit: ${sha} -->\n## Review Summary\n\nLooks good.`
+);
+
+test(
+  "platform-sync preserves shell metacharacters through Windows .cmd and PATHEXT lookup",
+  onPlatforms("win32"),
+  async () => withTempRoot("agent-infra-platform-sync-win32-", async (tempRoot) => {
+    const ctx = setupPlatformSyncEnv(tempRoot);
+    const argsPath = path.join(tempRoot, "gh-args.jsonl");
+    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
+    writeJson(ctx.issuePath, buildIssuePayload());
+
+    const result = await runPlatformSyncAdapter(ctx.taskDir, {
+      when: "issue_number_exists",
+      expected_status_label: "status: in-progress"
+    }, ctx.env({
+      AGENT_INFRA_GH_BIN: "gh",
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify(["--jq", "value | value"]),
+      GH_FAKE_ARGS_PATH: argsPath,
+      GH_FAKE_STRIP_PREFIX_COUNT: "2",
+      GH_FAKE_ISSUE_PATH: ctx.issuePath
+    }));
+
+    assert.equal(result.status, "pass", result.message);
+    const calls = fs.readFileSync(argsPath, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    assert.ok(calls.length > 0);
+    assert.equal(calls[0][0], "--jq");
+    assert.equal(calls[0][1], "value | value");
+  })
 );
 
 const implementSyncCases = [
@@ -875,6 +904,7 @@ test("validate-artifact platform-sync retries label list fallback when in: label
     write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
     write(path.join(tempRoot, ".agents/scripts/lib/review-artifacts.js"), read(".agents/scripts/lib/review-artifacts.js"));
     write(path.join(tempRoot, ".agents/scripts/lib/post-review-commit.js"), read(".agents/scripts/lib/post-review-commit.js"));
+    write(path.join(tempRoot, ".agents/scripts/lib/agent-infra-package.js"), read(".agents/scripts/lib/agent-infra-package.js"));
     write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));
     write(verifyCopy, read(".agents/skills/commit/config/verify.json"));
     initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
@@ -896,6 +926,7 @@ test("validate-artifact platform-sync retries label list fallback when in: label
         encoding: "utf8",
         cwd: tempRoot,
         env: gitSafeEnv({
+          AGENT_INFRA_PACKAGE_ROOT: process.cwd(),
           AGENT_INFRA_GH_BIN: process.execPath,
           AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([ghPath]),
           GH_FAKE_ISSUE_PATH: issuePath,

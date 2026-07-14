@@ -278,6 +278,12 @@ async function cmdInit(): Promise<void> {
     platformType
   );
   ok('Installed .agents/skills/update-agent-infra/');
+  renderFile(
+    path.join(templateDir, '.agents', 'scripts', 'lib', 'agent-infra-package.js'),
+    path.join('.agents', 'scripts', 'lib', 'agent-infra-package.js'),
+    replacements
+  );
+  ok('Installed .agents/scripts/lib/agent-infra-package.js');
 
   // install Claude command (only if enabled)
   if (enabledTUISet.has('claude-code')) {
@@ -346,6 +352,9 @@ async function cmdInit(): Promise<void> {
   // done
   console.log('');
   ok('Project initialized successfully!');
+  console.log('');
+  console.log('  If this init used npx, install agent-infra persistently before update or validation:');
+  console.log('    npm install -g @fitlab-ai/agent-infra');
   console.log('');
   if (enabledTUISet.size === 0) {
     console.log('  No built-in TUI selected.');

@@ -65,10 +65,15 @@ function writeTask(taskDir: string) {
 }
 
 function runValidator(scriptPath: string, taskDir: string, skill: string, env: NodeJS.ProcessEnv) {
+  const projectRoot = path.dirname(path.dirname(path.dirname(scriptPath)));
+  write(
+    path.join(projectRoot, ".agents/scripts/lib/agent-infra-package.js"),
+    read(".agents/scripts/lib/agent-infra-package.js")
+  );
   return spawnSync(process.execPath, [scriptPath, "check", "platform-sync", taskDir, "code.md", "--skill", skill], {
     cwd: path.dirname(path.dirname(path.dirname(scriptPath))),
     encoding: "utf8",
-    env: gitSafeEnv(env)
+    env: gitSafeEnv({ AGENT_INFRA_PACKAGE_ROOT: process.cwd(), ...env })
   });
 }
 

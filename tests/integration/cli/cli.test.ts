@@ -187,10 +187,10 @@ test("agent-infra init generates seed files in a temp directory", () => {
   const cli = CLI_PATH;
 
   try {
-    execFileSync(process.execPath, cliArgs("init"), {
+    const output = execFileSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
       input: `testproj\ntestorg\n\n${ENGINE_NL}\n\n\n`,
-      stdio: "pipe"
+      encoding: "utf8"
     });
 
     const config = JSON.parse(
@@ -205,6 +205,8 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.ok(!("skills" in config), "blank skill sources should not generate skills config");
     assert.ok(!config.branchPrefix, "branchPrefix should not exist");
     assert.ok(!config.source, "consumer projects should not have source: self");
+    assert.match(output, /npm install -g @fitlab-ai\/agent-infra/);
+    assert.ok(fs.existsSync(path.join(tmpDir, ".agents/scripts/lib/agent-infra-package.js")));
     assert.deepEqual(config.sandbox, {
       engine: DEFAULT_SANDBOX_ENGINE,
       runtimes: ["node22"],
@@ -480,6 +482,12 @@ test("installed sync-templates.js executes inside a type=module project", () => 
       JSON.stringify({ name: "@fitlab-ai/agent-infra", version: "0.0.0-test" }, null, 2) + "\n",
       "utf8"
     );
+    fs.mkdirSync(path.join(packageRoot, "runtime", "platform-adapters"), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, "runtime", "platform-adapters", "platform-sync.github.js"),
+      "export {};\n",
+      "utf8"
+    );
     fs.mkdirSync(path.join(packageRoot, "bin"), { recursive: true });
     fs.writeFileSync(path.join(packageRoot, "bin", "cli.js"), "console.log('ai');\n", {
       encoding: "utf8",
@@ -603,11 +611,18 @@ test("agent-infra init seed deploys a loadable GitHub adapter without a project 
     const packageRoot = path.join(pathBinDir, "node_modules", "@fitlab-ai", "agent-infra");
     const templateRoot = path.join(packageRoot, "templates");
     const target = ".agents/scripts/platform-adapters/platform-sync.js";
+    const locatorTarget = ".agents/scripts/lib/agent-infra-package.js";
     fs.mkdirSync(path.join(packageRoot, "bin"), { recursive: true });
     fs.mkdirSync(path.join(templateRoot, ".agents/scripts/platform-adapters"), { recursive: true });
     fs.writeFileSync(
       path.join(packageRoot, "package.json"),
       JSON.stringify({ name: "@fitlab-ai/agent-infra", version: "0.0.0-test" }, null, 2) + "\n",
+      "utf8"
+    );
+    fs.mkdirSync(path.join(packageRoot, "runtime", "platform-adapters"), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, "runtime", "platform-adapters", "platform-sync.github.js"),
+      "export const getDefaults = () => ({ statusLabels: { inProgress: 'status: in-progress' }, markers: {} });\n",
       "utf8"
     );
     fs.writeFileSync(path.join(packageRoot, "bin", "cli.js"), "console.log('ai');\n", {
@@ -622,6 +637,12 @@ test("agent-infra init seed deploys a loadable GitHub adapter without a project 
     fs.writeFileSync(
       path.join(templateRoot, ".agents/scripts/platform-adapters/platform-sync.github.js"),
       read("templates/.agents/scripts/platform-adapters/platform-sync.github.js"),
+      "utf8"
+    );
+    fs.mkdirSync(path.dirname(path.join(templateRoot, locatorTarget)), { recursive: true });
+    fs.writeFileSync(
+      path.join(templateRoot, locatorTarget),
+      read("templates/.agents/scripts/lib/agent-infra-package.js"),
       "utf8"
     );
     fs.mkdirSync(pathBinDir, { recursive: true });
@@ -641,7 +662,7 @@ test("agent-infra init seed deploys a loadable GitHub adapter without a project 
       JSON.stringify({
         ...JSON.parse(fs.readFileSync(configPath, "utf8")),
         files: {
-          managed: [target],
+          managed: [target, locatorTarget],
           merged: [],
           ejected: []
         }
@@ -662,7 +683,11 @@ test("agent-infra init seed deploys a loadable GitHub adapter without a project 
     const deployedPath = path.join(tmpDir, target);
     const moduleUrl = pathToFileURL(deployedPath);
     moduleUrl.searchParams.set("v", String(Date.now()));
+    const previousPackageRoot = process.env.AGENT_INFRA_PACKAGE_ROOT;
+    process.env.AGENT_INFRA_PACKAGE_ROOT = packageRoot;
     const deployed = await import(moduleUrl.href) as { getDefaults(): { statusLabels: { inProgress: string } } };
+    if (previousPackageRoot === undefined) delete process.env.AGENT_INFRA_PACKAGE_ROOT;
+    else process.env.AGENT_INFRA_PACKAGE_ROOT = previousPackageRoot;
 
     assert.ok(!report.error);
     assert.ok(report.managed.created.includes(target));

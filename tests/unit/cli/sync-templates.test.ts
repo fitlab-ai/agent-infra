@@ -32,6 +32,11 @@ function createTemplateInstall(tmpDir: string, version: string = "0.0.0-test") {
     name: "@fitlab-ai/agent-infra",
     version
   });
+  writeFile(
+    installRoot,
+    "runtime/platform-adapters/platform-sync.github.js",
+    "export const getDefaults = () => ({ statusLabels: { inProgress: 'status: in-progress' }, markers: { task: '<!-- sync-issue:{task-id}:task -->' } });\n"
+  );
 
   return { installRoot, templateRoot };
 }
@@ -63,6 +68,7 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
       name: "@fitlab-ai/agent-infra",
       version: "0.0.0-test"
     });
+    writeFile(installRoot, "runtime/platform-adapters/platform-sync.github.js", "export {};\n");
     // Fixture for a previously installed global CLI; unrelated to this repo's bin/cli.ts.
     writeFile(installRoot, "bin/cli.js", "console.log('ai');\n");
 
@@ -170,6 +176,7 @@ test("syncTemplates resolves Windows npm wrappers via .cmd launchers", async () 
       name: "@fitlab-ai/agent-infra",
       version: "0.0.0-test"
     });
+    writeFile(packageRoot, "runtime/platform-adapters/platform-sync.github.js", "export {};\n");
     writeFile(globalRoot, "ai.cmd", "@ECHO OFF\r\n");
 
     writeJson(projectRoot, ".agents/.airc.json", {
@@ -282,6 +289,39 @@ test("guarded managed files use persisted three-way baselines", async () => {
       { target, reason: "unknown-origin" }
     ]);
   } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra package lookup failure is diagnostic and does not install into the project", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-package-missing-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    fs.mkdirSync(projectRoot, { recursive: true });
+    childProcess.execSync = (() => {
+      throw new Error("command not found");
+    }) as typeof childProcess.execSync;
+
+    const locator = await loadFreshEsm<{
+      resolveAgentInfraPackage(options: object): { packageRoot: string | null; attempts: object[] };
+      formatAgentInfraPackageError(result: object): string;
+    }>(".agents/scripts/lib/agent-infra-package.js");
+    const result = locator.resolveAgentInfraPackage({
+      env: {},
+      platform: "linux",
+      startPath: path.join(projectRoot, ".agents/scripts/lib/agent-infra-package.js")
+    });
+    const message = locator.formatAgentInfraPackageError(result);
+
+    assert.equal(result.packageRoot, null);
+    assert.match(message, /npm install -g @fitlab-ai\/agent-infra/);
+    assert.match(message, /one-time npx/i);
+    assert.equal(fs.existsSync(path.join(projectRoot, "package.json")), false);
+    assert.equal(fs.existsSync(path.join(projectRoot, "node_modules")), false);
+  } finally {
+    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
@@ -1241,11 +1281,13 @@ test("syncTemplates deploys a loadable GitHub platform adapter without downstrea
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const { templateRoot } = createTemplateInstall(tmpDir);
+    const { installRoot, templateRoot } = createTemplateInstall(tmpDir);
     const target = ".agents/scripts/platform-adapters/platform-sync.js";
+    const locatorTarget = ".agents/scripts/lib/agent-infra-package.js";
 
     fs.mkdirSync(projectRoot, { recursive: true });
     writeFile(templateRoot, target, read("templates/.agents/scripts/platform-adapters/platform-sync.js"));
+    writeFile(templateRoot, locatorTarget, read("templates/.agents/scripts/lib/agent-infra-package.js"));
     writeFile(
       templateRoot,
       ".agents/scripts/platform-adapters/platform-sync.github.js",
@@ -1257,7 +1299,7 @@ test("syncTemplates deploys a loadable GitHub platform adapter without downstrea
       language: "en",
       platform: { type: "github" },
       files: {
-        managed: [target],
+        managed: [target, locatorTarget],
         merged: [],
         ejected: []
       }
@@ -1275,9 +1317,13 @@ test("syncTemplates deploys a loadable GitHub platform adapter without downstrea
     const deployedPath = path.join(projectRoot, target);
     const moduleUrl = pathToFileURL(deployedPath);
     moduleUrl.searchParams.set("v", String(Date.now()));
+    const previousPackageRoot = process.env.AGENT_INFRA_PACKAGE_ROOT;
+    process.env.AGENT_INFRA_PACKAGE_ROOT = installRoot;
     const { getDefaults } = await import(moduleUrl.href) as PlatformSyncModule;
+    if (previousPackageRoot === undefined) delete process.env.AGENT_INFRA_PACKAGE_ROOT;
+    else process.env.AGENT_INFRA_PACKAGE_ROOT = previousPackageRoot;
 
-    assert.deepEqual(report.managed.created, [target]);
+    assert.deepEqual(report.managed.created.sort(), [locatorTarget, target].sort());
     assert.equal(fs.existsSync(path.join(projectRoot, "node_modules")), false);
     assert.equal(getDefaults().statusLabels.inProgress, "status: in-progress");
     assert.equal(getDefaults().markers.task, "<!-- sync-issue:{task-id}:task -->");
