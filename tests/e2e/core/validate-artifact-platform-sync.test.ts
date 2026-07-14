@@ -946,3 +946,54 @@ test("validate-artifact platform-sync skips when no platform adapter is register
     });
   })
 ));
+
+test("platform-sync rejects status labels on closed issues without triage permission", async () => (
+  withTempRoot("agent-infra-platform-sync-closed-status-", async (tempRoot) => {
+    const ctx = setupPlatformSyncEnv(tempRoot);
+    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
+    writeJson(ctx.issuePath, buildIssuePayload({
+      state: "CLOSED",
+      labels: [{ name: "status: in-progress" }, { name: "priority: high" }]
+    }));
+
+    const result = await runPlatformSyncAdapter(ctx.taskDir, {
+      when: "issue_number_exists",
+      verify_closed_issue_has_no_status_labels: true
+    }, {
+      PATH: pathWithPrependedBin(ctx.binDir),
+      AGENT_INFRA_GH_BIN: process.execPath,
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([ctx.ghPath]),
+      GH_FAKE_ISSUE_PATH: ctx.issuePath,
+      GH_FAKE_PERMISSIONS: JSON.stringify({ triage: false, push: false })
+    });
+
+    assert.equal(result.status, "fail");
+    assert.equal(result.fail_type, "check_failed");
+    assert.match(result.message, /status: in-progress/);
+  })
+));
+
+for (const issuePayload of [
+  buildIssuePayload({ state: "CLOSED", labels: [{ name: "priority: high" }] }),
+  buildIssuePayload({ state: "OPEN", labels: [{ name: "status: in-progress" }] })
+]) {
+  test(`platform-sync accepts lifecycle status state for ${issuePayload.state.toLowerCase()} issues`, async () => (
+    withTempRoot("agent-infra-platform-sync-valid-status-", async (tempRoot) => {
+      const ctx = setupPlatformSyncEnv(tempRoot);
+      write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
+      writeJson(ctx.issuePath, issuePayload);
+
+      const result = await runPlatformSyncAdapter(ctx.taskDir, {
+        when: "issue_number_exists",
+        verify_closed_issue_has_no_status_labels: true
+      }, {
+        PATH: pathWithPrependedBin(ctx.binDir),
+        AGENT_INFRA_GH_BIN: process.execPath,
+        AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([ctx.ghPath]),
+        GH_FAKE_ISSUE_PATH: ctx.issuePath
+      });
+
+      assert.equal(result.status, "pass");
+    })
+  ));
+}

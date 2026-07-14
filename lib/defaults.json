@@ -44,7 +44,15 @@
       ".gemini/commands/",
       ".git-hooks/check-version-format.sh",
       ".github/scripts/",
+      ".github/workflows/metadata-sync.yml",
+      ".github/workflows/pr-label.yml",
+      ".github/workflows/status-label.yml",
       ".opencode/commands/"
+    ],
+    "guardedManaged": [
+      ".github/workflows/metadata-sync.yml",
+      ".github/workflows/pr-label.yml",
+      ".github/workflows/status-label.yml"
     ],
     "merged": [
       "**/post-release.*",

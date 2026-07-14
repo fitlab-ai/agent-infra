@@ -209,6 +209,8 @@ The `files` field in `.agents/.airc.json` groups project files into three catego
 | `merged` | Merge semantically by AI or humans | Do not write from the template | Keep the local project copy |
 | `ejected` | May be created from the template first; skip overwrite once it exists | Do not write from the template | Keep the local project copy |
 
+Ordinary `managed` files keep their overwrite semantics. A small set of platform lifecycle workflows can be registered as guarded managed files. The synchronizer stores each rendered source SHA-256 in `files.managedBaselines` and uses a three-way comparison: accept template-only upgrades, preserve user-only changes, and report a conflict without overwriting when both sides changed or the origin is unknown. This mapping is tool-maintained and should not be edited manually.
+
 `ejected` has two common uses:
 
 1. **Taking over a built-in file**: the project needs full control over a rule, command, or config file that originally came from the template.

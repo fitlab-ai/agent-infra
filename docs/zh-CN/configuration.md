@@ -63,6 +63,7 @@
 | `skills.sources` | 可选的外部自定义 skill 源列表，按顺序应用。当前仅支持 `type: "local"`。 |
 | `customTUIs` | 可选的顶层自定义 AI TUI 适配配置列表。 |
 | `files` | 针对具体路径配置 `managed`、`merged`、`ejected` 三类更新策略。 |
+| `files.managedBaselines` | 工具维护的内建 guarded managed 文件 SHA-256 来源基线。请勿手工编辑；该映射用于安全三方更新 GitHub 生命周期 workflows。 |
 
 ## 外部模板与 skill 源
 

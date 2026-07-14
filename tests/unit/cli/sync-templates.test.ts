@@ -208,6 +208,83 @@ test("syncTemplates resolves Windows npm wrappers via .cmd launchers", async () 
   }
 });
 
+test("guarded managed files use persisted three-way baselines", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-guarded-managed-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const target = ".github/workflows/status-label.yml";
+    const configPath = path.join(projectRoot, ".agents/.airc.json");
+    const targetPath = path.join(projectRoot, target);
+
+    writeFile(templateRoot, target, "name: official-v1\n");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      platform: { type: "github" },
+      files: { managed: [], merged: [], ejected: [] }
+    });
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const created = syncTemplates(projectRoot, templateRoot);
+    const initialConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const baselineV1 = initialConfig.files.managedBaselines[target];
+
+    assert.equal(fs.readFileSync(targetPath, "utf8"), "name: official-v1\n");
+    assert.match(baselineV1, /^sha256:[a-f0-9]{64}$/);
+    assert.ok(created.managed.created.includes(target));
+
+    const unchanged = syncTemplates(projectRoot, templateRoot);
+    assert.ok(unchanged.managed.unchanged.includes(target));
+    assert.equal(unchanged.configUpdated, false);
+
+    fs.writeFileSync(targetPath, "name: user-copy\n", "utf8");
+    const userModified = syncTemplates(projectRoot, templateRoot);
+    assert.equal(fs.readFileSync(targetPath, "utf8"), "name: user-copy\n");
+    assert.deepEqual(userModified.managed.protected.map(({ target: item, reason }) => ({ target: item, reason })), [
+      { target, reason: "user-modified" }
+    ]);
+    assert.equal(JSON.parse(fs.readFileSync(configPath, "utf8")).files.managedBaselines[target], baselineV1);
+
+    fs.writeFileSync(targetPath, "name: official-v1\n", "utf8");
+    fs.writeFileSync(path.join(templateRoot, target), "name: official-v2\n", "utf8");
+    const officialModified = syncTemplates(projectRoot, templateRoot);
+    const baselineV2 = JSON.parse(fs.readFileSync(configPath, "utf8")).files.managedBaselines[target];
+    assert.equal(fs.readFileSync(targetPath, "utf8"), "name: official-v2\n");
+    assert.ok(officialModified.managed.written.includes(target));
+    assert.notEqual(baselineV2, baselineV1);
+
+    fs.unlinkSync(targetPath);
+    const userDeleted = syncTemplates(projectRoot, templateRoot);
+    assert.ok(!fs.existsSync(targetPath));
+    assert.deepEqual(userDeleted.managed.protected.map(({ target: item, reason }) => ({ target: item, reason })), [
+      { target, reason: "user-deleted" }
+    ]);
+
+    fs.writeFileSync(targetPath, "name: user-v2\n", "utf8");
+    fs.writeFileSync(path.join(templateRoot, target), "name: official-v3\n", "utf8");
+    const conflict = syncTemplates(projectRoot, templateRoot);
+    assert.equal(fs.readFileSync(targetPath, "utf8"), "name: user-v2\n");
+    assert.deepEqual(conflict.managed.conflicts.map(({ target: item, reason }) => ({ target: item, reason })), [
+      { target, reason: "both-modified" }
+    ]);
+    assert.equal(JSON.parse(fs.readFileSync(configPath, "utf8")).files.managedBaselines[target], baselineV2);
+
+    const withoutBaseline = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    delete withoutBaseline.files.managedBaselines[target];
+    fs.writeFileSync(configPath, `${JSON.stringify(withoutBaseline, null, 2)}\n`, "utf8");
+    const unknownOrigin = syncTemplates(projectRoot, templateRoot);
+    assert.equal(fs.readFileSync(targetPath, "utf8"), "name: user-v2\n");
+    assert.deepEqual(unknownOrigin.managed.conflicts.map(({ target: item, reason }) => ({ target: item, reason })), [
+      { target, reason: "unknown-origin" }
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("syncTemplates reports the bundled installer version with a v prefix", async () => {
   const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-installer-version-"));

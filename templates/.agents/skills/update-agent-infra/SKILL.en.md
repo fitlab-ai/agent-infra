@@ -33,7 +33,7 @@ same-path external files, and later external sources win over earlier external
 sources. Conflicts are recorded in the report. The script then performs:
 - detect the template source version
 - File registry sync (`defaults.json` → `.agents/.airc.json`)
-- All managed files (language selection → exclude merged/ejected → placeholder rendering → overwrite)
+- All managed files (language selection → exclude merged/ejected → placeholder rendering → write; built-in guarded managed files use a source-baseline three-way comparison)
 - Ejected files (create only on first install)
 - `.agents/.airc.json` update (`templateVersion`, file lists)
 
@@ -47,6 +47,8 @@ The script outputs JSON to stdout. Parse and record the report.
   list these in the report so users know which files were ignored because a
   built-in template or later external source won
 - `managed.written` / `managed.created`: updated / newly created managed files
+- `managed.protected`: guarded managed files whose local user-only modification or deletion was preserved
+- `managed.conflicts`: guarded managed files with unknown origin, two-sided changes, or ownership that cannot be proven during a platform switch; list each target, reason, and three-way hash
 - `managed.removed`: deleted managed files (including old paths removed during template migrations)
 - `managed.skippedPlatform`: managed / merged entries skipped because they belong to a different platform
 - `managed.skippedTUI`: managed / merged entries skipped because they are owned by a built-in TUI that is disabled in `tuis` (customTUI command files under the same path prefix are preserved)
@@ -55,6 +57,8 @@ The script outputs JSON to stdout. Parse and record the report.
 - `registryAdded`: newly added file registry entries
 - `selfUpdate`: whether this is a self-update scenario
 - `configUpdated`: whether `.agents/.airc.json` was updated
+
+If `managed.conflicts` is non-empty, output every conflict and stop immediately before Phase B. Do not overwrite a conflicting file or advance its `files.managedBaselines` entry.
 
 ## Phase B: Process merged files (AI intelligent merge)
 

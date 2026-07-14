@@ -63,6 +63,7 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 | `skills.sources` | Optional ordered list of external custom skill sources. Only `type: "local"` is supported today. |
 | `customTUIs` | Optional top-level list of custom AI TUI adapters. |
 | `files` | Per-path update strategy configuration for managed, merged, and ejected files. |
+| `files.managedBaselines` | Tool-maintained SHA-256 source baselines for built-in guarded managed files. Do not edit manually; they enable safe three-way updates for the GitHub lifecycle workflows. |
 
 ## External template and skill sources
 

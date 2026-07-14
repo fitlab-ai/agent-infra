@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { pathToFileURL } from "node:url";
 
 import { CLI_PATH, cliArgs, envWithPrependedPath, escapeRegExp, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../../helpers.ts";
 
@@ -533,6 +534,60 @@ test("installed sync-templates.js executes inside a type=module project", () => 
   }
 });
 
+test("GitHub init full sync installs lifecycle workflows in the downstream project", async () => {
+  const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-github-lifecycle-init-")));
+
+  try {
+    execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: `lifecycleproj\nlifecycleorg\n\n${ENGINE_NL}github\n\n\n`,
+      stdio: "pipe"
+    });
+
+    const syncPath = path.join(tmpDir, ".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const syncModule = await import(`${pathToFileURL(syncPath).href}?v=${Date.now()}`);
+    syncModule.syncTemplates(tmpDir, filePath("templates"));
+
+    const lifecycleWorkflows = ["metadata-sync.yml", "pr-label.yml", "status-label.yml"];
+    for (const workflow of lifecycleWorkflows) {
+      assert.equal(
+        fs.readFileSync(path.join(tmpDir, ".github/workflows", workflow), "utf8"),
+        read(path.join("templates/.github/workflows", workflow))
+      );
+    }
+    assert.ok(fs.existsSync(path.join(tmpDir, ".github/scripts/sync-labels-to-set.sh")));
+
+    const config = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
+    assert.deepEqual(Object.keys(config.files.managedBaselines).sort(), lifecycleWorkflows
+      .map((workflow) => `.github/workflows/${workflow}`)
+      .sort());
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("non-GitHub init full sync excludes GitHub lifecycle workflows", async () => {
+  const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-custom-lifecycle-init-")));
+
+  try {
+    execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: `lifecycleproj\nlifecycleorg\n\n${ENGINE_NL}gitea\n\n\n`,
+      stdio: "pipe"
+    });
+
+    const syncPath = path.join(tmpDir, ".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const syncModule = await import(`${pathToFileURL(syncPath).href}?v=${Date.now()}`);
+    syncModule.syncTemplates(tmpDir, filePath("templates"));
+
+    assert.ok(!fs.existsSync(path.join(tmpDir, ".github/workflows")));
+    const config = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
+    assert.equal(config.files.managedBaselines, undefined);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("build output is up-to-date", () => {
   execFileSync(process.execPath, [filePath("scripts/build-inline.js"), "--check"], {
     encoding: "utf8"
@@ -564,7 +619,7 @@ test("agent-infra init rejects invalid input", () => {
   });
 });
 
-test("agent-infra update refreshes seed files and syncs file registry", () => {
+test("agent-infra update refreshes seed files and syncs file registry", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-"));
   const cli = CLI_PATH;
   const config = {
@@ -656,6 +711,15 @@ test("agent-infra update refreshes seed files and syncs file registry", () => {
     assert.ok(
       fs.existsSync(path.join(tmpDir, ".opencode", "commands", "update-agent-infra.md"))
     );
+
+    const syncPath = path.join(tmpDir, ".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const syncModule = await import(`${pathToFileURL(syncPath).href}?v=${Date.now()}`);
+    syncModule.syncTemplates(tmpDir, filePath("templates"));
+    for (const workflow of ["metadata-sync.yml", "pr-label.yml", "status-label.yml"]) {
+      assert.ok(fs.existsSync(path.join(tmpDir, ".github/workflows", workflow)));
+    }
+    const synced = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
+    assert.equal(Object.keys(synced.files.managedBaselines).length, 3);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

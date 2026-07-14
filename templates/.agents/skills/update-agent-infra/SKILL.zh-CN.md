@@ -27,7 +27,7 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 脚本读取 `.agents/.airc.json`，并通过 npm 自动定位已安装的 `@fitlab-ai/agent-infra/templates/` 目录。同步前会合并 `templates.sources` 中配置的外部模板源；相同文件以内置模板为准，多个外部源之间后者覆盖前者，冲突会写入报告。然后自动完成：
 - 检测模板源版本
 - 同步文件注册表（`defaults.json` → `.agents/.airc.json`）
-- 处理所有 managed 文件（语言选择 → 排除 merged/ejected → 占位符渲染 → 覆盖写入）
+- 处理所有 managed 文件（语言选择 → 排除 merged/ejected → 占位符渲染 → 写入；内建 guarded managed 文件使用来源基线三方比较）
 - 处理 ejected 文件（仅首次安装时创建）
 - 更新 `.agents/.airc.json`（`templateVersion`、文件列表）
 
@@ -39,6 +39,8 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 - `templateRoot`：模板文件根目录绝对路径
 - `templateSources.conflicts`：外部模板源冲突列表；报告中必须显式展示，说明哪些文件因内置模板或后续外部源获胜而被忽略
 - `managed.written` / `managed.created`：已更新/新建的 managed 文件
+- `managed.protected`：检测到用户单边修改或删除、因此保留本地状态的 guarded managed 文件
+- `managed.conflicts`：来源未知、双边修改或平台切换时无法证明官方所有权的 guarded managed 冲突；必须逐项展示 target、reason 与三方哈希
 - `managed.removed`：被删除的 managed 文件（包括模板迁移时移除的旧路径）
 - `managed.skippedPlatform`：因归属其他平台而被跳过的 managed / merged 条目
 - `managed.skippedTUI`：因 `tuis` 中未启用对应内建 TUI 而被跳过的 managed / merged 条目（落在同一路径前缀下的 customTUI 命令文件会被保留）
@@ -47,6 +49,8 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 - `registryAdded`：新增的文件注册条目
 - `selfUpdate`：是否为自更新模式
 - `configUpdated`：`.agents/.airc.json` 是否已更新
+
+如果 `managed.conflicts` 非空，输出全部冲突并立即停止，不进入阶段 B；禁止覆盖冲突文件或推进其 `files.managedBaselines`。
 
 ## 阶段 B：处理 merged 文件（AI 智能合并）
 

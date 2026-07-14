@@ -108,6 +108,7 @@ export function check({ taskDir, config, artifactFile }, shared) {
   }
 
   const subChecks = [
+    checkClosedIssueStatusLabels,
     checkStatusLabel,
     checkCommentMarker,
     checkPrCommentMarker,
@@ -473,6 +474,27 @@ function checkStatusLabel(context, remoteData) {
 
   return failResult(CHECK_TYPE,
     `Expected label '${context.expectedStatusLabel}' not found on Issue #${context.issueNumber}`,
+    "check_failed"
+  );
+}
+
+function checkClosedIssueStatusLabels(context, remoteData) {
+  if (!context.config.verify_closed_issue_has_no_status_labels) {
+    return null;
+  }
+
+  if (String(remoteData.issue.state || "").toUpperCase() !== "CLOSED") {
+    return null;
+  }
+
+  const statusLabels = extractLabelNames(remoteData.issue.labels)
+    .filter((label) => label.startsWith("status:"));
+  if (statusLabels.length === 0) {
+    return null;
+  }
+
+  return failResult(CHECK_TYPE,
+    `Closed Issue #${context.issueNumber} retains status labels: ${statusLabels.join(", ")}`,
     "check_failed"
   );
 }

@@ -14,6 +14,7 @@
  */
 
 import childProcess from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -85,6 +86,14 @@ function migrateSandboxTools(cfg) {
 }
 
 function norm(p) { return p.replace(/\\/g, '/'); }
+
+function sha256(content) {
+  return `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`;
+}
+
+function trustedBaseline(value) {
+  return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value) ? value : null;
+}
 
 function normDir(p) {
   return norm(p).replace(/^\.\//, '').replace(/\/+$/, '');
@@ -1008,6 +1017,19 @@ function syncTemplates(projectRoot, templateRootOverride) {
   const managed = [...(cfg.files.managed || [])];
   const merged  = [...(cfg.files.merged  || [])];
   const ejected = [...(cfg.files.ejected || [])];
+  const guardedManaged = new Set((DEFAULTS.files.guardedManaged || []).map(norm));
+  const managedBaselines = cfg.files.managedBaselines && typeof cfg.files.managedBaselines === 'object'
+    && !Array.isArray(cfg.files.managedBaselines)
+    ? { ...cfg.files.managedBaselines }
+    : {};
+  let baselinesChanged = false;
+
+  for (const target of Object.keys(managedBaselines)) {
+    if (!guardedManaged.has(norm(target))) {
+      delete managedBaselines[target];
+      baselinesChanged = true;
+    }
+  }
 
   const report = {
     templateVersion: version,
@@ -1020,7 +1042,17 @@ function syncTemplates(projectRoot, templateRootOverride) {
       errors: [],
       conflicts: []
     },
-    managed: { written: [], created: [], unchanged: [], skippedMerged: [], skippedPlatform: [], skippedTUI: [], removed: [] },
+    managed: {
+      written: [],
+      created: [],
+      unchanged: [],
+      protected: [],
+      conflicts: [],
+      skippedMerged: [],
+      skippedPlatform: [],
+      skippedTUI: [],
+      removed: []
+    },
     custom: {
       detected: [],
       generated: [],
@@ -1062,6 +1094,22 @@ function syncTemplates(projectRoot, templateRootOverride) {
   const allRels = mergedRels;
   const allSet = new Set(allRels);
 
+  function renderedTemplate(entry) {
+    const target = norm(renderPathname(entry, project));
+    const selected = platformSelect(
+      langSelect(entryVariantRels(entry, allSet, platformType), lang, allSet, project),
+      platformType,
+      project
+    );
+    const src = selected.get(target);
+    if (!src) return null;
+    const srcRoot = sourceMap.get(src) || templateRoot;
+    const srcFull = path.join(srcRoot, src);
+    return isBinary(srcFull)
+      ? fs.readFileSync(srcFull)
+      : renderContent(fs.readFileSync(srcFull, 'utf8'), vars);
+  }
+
   for (const entry of [...managed, ...merged, ...ejected]) {
     if (!isPathOwnedByOtherPlatform(entry, platformType)) continue;
 
@@ -1070,17 +1118,49 @@ function syncTemplates(projectRoot, templateRootOverride) {
       if (!fs.existsSync(dir)) continue;
 
       for (const filePath of walkDir(dir)) {
+        const relativeFile = norm(path.relative(projectRoot, filePath));
+        if (guardedManaged.has(relativeFile)) continue;
         fs.unlinkSync(filePath);
-        report.managed.removed.push(norm(path.relative(projectRoot, filePath)));
+        report.managed.removed.push(relativeFile);
       }
       removeEmptyDirs(dir);
       continue;
     }
 
-    const target = path.join(projectRoot, renderPathname(entry, project));
-    if (!fs.existsSync(target)) continue;
-    fs.unlinkSync(target);
-    report.managed.removed.push(norm(path.relative(projectRoot, target)));
+    const renderedTarget = norm(renderPathname(entry, project));
+    const target = path.join(projectRoot, renderedTarget);
+    if (!guardedManaged.has(renderedTarget)) {
+      if (!fs.existsSync(target)) continue;
+      fs.unlinkSync(target);
+      report.managed.removed.push(renderedTarget);
+      continue;
+    }
+
+    const baseline = trustedBaseline(managedBaselines[renderedTarget]);
+    const templateContent = renderedTemplate(entry);
+    const templateHash = templateContent === null ? null : sha256(templateContent);
+    const localHash = fs.existsSync(target) ? sha256(fs.readFileSync(target)) : null;
+    const safeToRemove = localHash !== null && (localHash === baseline || (!baseline && localHash === templateHash));
+
+    if (safeToRemove) {
+      fs.unlinkSync(target);
+      report.managed.removed.push(renderedTarget);
+      if (Object.prototype.hasOwnProperty.call(managedBaselines, renderedTarget)) {
+        delete managedBaselines[renderedTarget];
+        baselinesChanged = true;
+      }
+      continue;
+    }
+
+    if (localHash !== null || baseline !== null) {
+      report.managed.conflicts.push({
+        target: renderedTarget,
+        reason: localHash === null ? 'platform-switch-deleted' : 'platform-switch-modified',
+        baseline,
+        local: localHash,
+        template: templateHash
+      });
+    }
   }
 
   // Cleanup files owned by disabled built-in TUIs. Iterates managed + merged
@@ -1165,6 +1245,68 @@ function syncTemplates(projectRoot, templateRootOverride) {
         : renderContent(fs.readFileSync(srcFull, 'utf8'), vars);
 
       const exists = fs.existsSync(dstFull);
+      if (guardedManaged.has(tgt)) {
+        const rawBaseline = managedBaselines[tgt];
+        const baseline = trustedBaseline(rawBaseline);
+        const templateHash = sha256(content);
+        const localHash = exists ? sha256(fs.readFileSync(dstFull)) : null;
+
+        if (rawBaseline !== undefined && baseline === null) {
+          delete managedBaselines[tgt];
+          baselinesChanged = true;
+        }
+
+        if (baseline === null && localHash !== null && localHash !== templateHash) {
+          report.managed.conflicts.push({
+            target: tgt,
+            reason: 'unknown-origin',
+            baseline: null,
+            local: localHash,
+            template: templateHash
+          });
+          continue;
+        }
+
+        if (baseline !== null && templateHash === baseline && localHash !== baseline) {
+          report.managed.protected.push({
+            target: tgt,
+            reason: localHash === null ? 'user-deleted' : 'user-modified',
+            baseline,
+            local: localHash,
+            template: templateHash
+          });
+          continue;
+        }
+
+        if (baseline !== null && localHash !== baseline && templateHash !== baseline && localHash !== templateHash) {
+          report.managed.conflicts.push({
+            target: tgt,
+            reason: 'both-modified',
+            baseline,
+            local: localHash,
+            template: templateHash
+          });
+          continue;
+        }
+
+        if (localHash === templateHash) {
+          report.managed.unchanged.push(tgt);
+          if (managedBaselines[tgt] !== templateHash) {
+            managedBaselines[tgt] = templateHash;
+            baselinesChanged = true;
+          }
+          continue;
+        }
+
+        const dir = path.dirname(dstFull);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(dstFull, content);
+        managedBaselines[tgt] = templateHash;
+        baselinesChanged = true;
+        (exists ? report.managed.written : report.managed.created).push(tgt);
+        continue;
+      }
+
       if (exists) {
         const cur = bin ? fs.readFileSync(dstFull) : fs.readFileSync(dstFull, 'utf8');
         if (bin ? content.equals(cur) : content === cur) {
@@ -1290,10 +1432,16 @@ function syncTemplates(projectRoot, templateRootOverride) {
   cfg.files.managed = managed;
   cfg.files.merged  = merged;
   cfg.files.ejected = ejected;
+  if (Object.keys(managedBaselines).length > 0) {
+    cfg.files.managedBaselines = managedBaselines;
+  } else {
+    if (Object.prototype.hasOwnProperty.call(cfg.files, 'managedBaselines')) baselinesChanged = true;
+    delete cfg.files.managedBaselines;
+  }
   cfg.templateVersion = version;
   delete cfg.templateSource;
 
-  report.configUpdated = hasChanges || prevVersion !== version || hadTemplateSource || sandboxToolsMigrated;
+  report.configUpdated = hasChanges || baselinesChanged || prevVersion !== version || hadTemplateSource || sandboxToolsMigrated;
 
   fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
 

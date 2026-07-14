@@ -19,6 +19,8 @@ type SyncTemplatesReport = {
   registryAdded: RegistryEntry[];
   managed: {
     created: string[];
+    protected: Array<{ target: string; reason: string; baseline: string | null; local: string | null; template: string }>;
+    conflicts: Array<{ target: string; reason: string; baseline: string | null; local: string | null; template: string }>;
     removed: string[];
     written: string[];
     unchanged: string[];

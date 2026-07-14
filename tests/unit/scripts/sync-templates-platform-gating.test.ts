@@ -171,3 +171,50 @@ test("custom platforms skip all known-platform directories", async () => withStu
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }));
+
+test("platform switch only removes guarded workflows with provable official ownership", async () => withStubbedExecSync(async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-guarded-platform-switch-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const target = ".github/workflows/status-label.yml";
+    const configPath = path.join(projectRoot, ".agents/.airc.json");
+
+    writeFile(templateRoot, target, "name: official\n");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      platform: { type: "github" },
+      files: { managed: [".github/"], merged: [], ejected: [] }
+    });
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    syncTemplates(projectRoot, templateRoot);
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    config.platform = { type: "gitlab" };
+    fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+
+    const removed = syncTemplates(projectRoot, templateRoot);
+    assert.ok(!fs.existsSync(path.join(projectRoot, target)));
+    assert.ok(removed.managed.removed.includes(target));
+    assert.equal(JSON.parse(fs.readFileSync(configPath, "utf8")).files.managedBaselines?.[target], undefined);
+
+    config.platform = { type: "github" };
+    fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    syncTemplates(projectRoot, templateRoot);
+    fs.writeFileSync(path.join(projectRoot, target), "name: user-copy\n", "utf8");
+    const switchedConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    switchedConfig.platform = { type: "custom" };
+    fs.writeFileSync(configPath, `${JSON.stringify(switchedConfig, null, 2)}\n`, "utf8");
+
+    const preserved = syncTemplates(projectRoot, templateRoot);
+    assert.equal(fs.readFileSync(path.join(projectRoot, target), "utf8"), "name: user-copy\n");
+    assert.deepEqual(preserved.managed.conflicts.map(({ target: item, reason }) => ({ target: item, reason })), [
+      { target, reason: "platform-switch-modified" }
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}));

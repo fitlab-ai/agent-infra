@@ -35,6 +35,7 @@
       "verify_issue_type": true,
       "verify_issue_fields": false,
       "verify_milestone": true,
+      "verify_closed_issue_has_no_status_labels": true,
       "expected_comment_marker_key": "summary"
     },
     "artifact": {
