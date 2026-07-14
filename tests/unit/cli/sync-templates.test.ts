@@ -4,9 +4,10 @@ import childProcess from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { pathToFileURL } from "node:url";
 
-import { loadFreshEsm, supportsPosixModeBits } from "../../helpers.ts";
-import type { SyncTemplatesModule } from "../../helpers.ts";
+import { loadFreshEsm, read, supportsPosixModeBits } from "../../helpers.ts";
+import type { PlatformSyncModule, SyncTemplatesModule } from "../../helpers.ts";
 
 function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
@@ -1228,6 +1229,58 @@ test("syncTemplates preserves project testing discipline as a merged file", asyn
     );
     assert.deepEqual(firstReport.managed.written, []);
     assert.deepEqual(secondReport.managed.written, []);
+  } finally {
+    childProcess.execSync = originalExecSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates deploys a loadable GitHub platform adapter without downstream dependencies", async () => {
+  const originalExecSync = childProcess.execSync;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-platform-adapter-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const target = ".agents/scripts/platform-adapters/platform-sync.js";
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    writeFile(templateRoot, target, read("templates/.agents/scripts/platform-adapters/platform-sync.js"));
+    writeFile(
+      templateRoot,
+      ".agents/scripts/platform-adapters/platform-sync.github.js",
+      read("templates/.agents/scripts/platform-adapters/platform-sync.github.js")
+    );
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      platform: { type: "github" },
+      files: {
+        managed: [target],
+        merged: [],
+        ejected: []
+      }
+    });
+
+    childProcess.execSync = (command) => {
+      if (command === "git remote get-url origin") {
+        throw new Error("not a git repo");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    };
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+    const deployedPath = path.join(projectRoot, target);
+    const moduleUrl = pathToFileURL(deployedPath);
+    moduleUrl.searchParams.set("v", String(Date.now()));
+    const { getDefaults } = await import(moduleUrl.href) as PlatformSyncModule;
+
+    assert.deepEqual(report.managed.created, [target]);
+    assert.equal(fs.existsSync(path.join(projectRoot, "node_modules")), false);
+    assert.equal(getDefaults().statusLabels.inProgress, "status: in-progress");
+    assert.equal(getDefaults().markers.task, "<!-- sync-issue:{task-id}:task -->");
   } finally {
     childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });

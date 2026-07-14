@@ -95,6 +95,59 @@ test("platform-sync stub adapter exposes empty defaults", async () => {
   assert.deepEqual(getDefaults(), { statusLabels: {}, markers: {} });
 });
 
+test("deployed platform-sync adapter runs without downstream npm metadata or dependencies", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-isolated-"));
+  const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+  const binDir = path.join(tempRoot, "bin");
+  const scriptCopy = path.join(tempRoot, ".agents/scripts/validate-artifact.js");
+  const adapterCopy = path.join(tempRoot, ".agents/scripts/platform-adapters/platform-sync.js");
+  const issuePath = path.join(tempRoot, "issue.json");
+  const commentsPath = path.join(tempRoot, "comments.json");
+
+  try {
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
+    write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
+    write(path.join(tempRoot, ".agents/scripts/lib/review-artifacts.js"), read(".agents/scripts/lib/review-artifacts.js"));
+    write(path.join(tempRoot, ".agents/scripts/lib/post-review-commit.js"), read(".agents/scripts/lib/post-review-commit.js"));
+    write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));
+    const ghEnv = writeFakeGh(path.join(binDir, "gh"));
+    writeTask(taskDir);
+    writeJson(issuePath, {
+      state: "OPEN",
+      labels: [{ name: "status: in-progress" }],
+      body: "",
+      milestone: null
+    });
+    writeJson(commentsPath, [
+      { body: "<!-- sync-issue:TASK-20260328-000001:code -->\n## Code" }
+    ]);
+    writeJson(path.join(tempRoot, ".agents/skills/isolated/config/verify.json"), {
+      checks: {
+        "platform-sync": {
+          when: "issue_number_exists",
+          expected_status_label_key: "inProgress",
+          expected_comment_marker_key: "artifact"
+        }
+      }
+    });
+
+    const result = runValidator(scriptCopy, taskDir, "isolated", {
+      ...process.env,
+      ...ghEnv,
+      PATH: pathWithPrependedBin(binDir),
+      GH_FAKE_ISSUE_PATH: issuePath,
+      GH_FAKE_COMMENTS_PATH: commentsPath,
+      GH_FAKE_ISSUE_NUMBER: "65"
+    });
+
+    assert.equal(fs.existsSync(path.join(tempRoot, "package.json")), false);
+    assert.equal(fs.existsSync(path.join(tempRoot, "node_modules")), false);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("platform-sync verification keys override legacy literal values", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-platform-defaults-"));
   const taskDir = path.join(tempRoot, "TASK-20260328-000001");

@@ -588,6 +588,92 @@ test("non-GitHub init full sync excludes GitHub lifecycle workflows", async () =
   }
 });
 
+test("agent-infra init seed deploys a loadable GitHub adapter without a project package", async () => {
+  const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-init-platform-adapter-")));
+
+  try {
+    execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: `plainproj\nplainorg\n\n${ENGINE_NL}github\n\n\n`,
+      stdio: "pipe"
+    });
+    assert.equal(fs.existsSync(path.join(tmpDir, "package.json")), false);
+
+    const pathBinDir = path.join(tmpDir, ".path-bin");
+    const packageRoot = path.join(pathBinDir, "node_modules", "@fitlab-ai", "agent-infra");
+    const templateRoot = path.join(packageRoot, "templates");
+    const target = ".agents/scripts/platform-adapters/platform-sync.js";
+    fs.mkdirSync(path.join(packageRoot, "bin"), { recursive: true });
+    fs.mkdirSync(path.join(templateRoot, ".agents/scripts/platform-adapters"), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({ name: "@fitlab-ai/agent-infra", version: "0.0.0-test" }, null, 2) + "\n",
+      "utf8"
+    );
+    fs.writeFileSync(path.join(packageRoot, "bin", "cli.js"), "console.log('ai');\n", {
+      encoding: "utf8",
+      mode: 0o755
+    });
+    fs.writeFileSync(
+      path.join(templateRoot, target),
+      read("templates/.agents/scripts/platform-adapters/platform-sync.js"),
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(templateRoot, ".agents/scripts/platform-adapters/platform-sync.github.js"),
+      read("templates/.agents/scripts/platform-adapters/platform-sync.github.js"),
+      "utf8"
+    );
+    fs.mkdirSync(pathBinDir, { recursive: true });
+    try {
+      fs.symlinkSync(path.join(packageRoot, "bin", "cli.js"), path.join(pathBinDir, "ai"));
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? error.code : undefined;
+      if (process.platform !== "win32" || code !== "EPERM") {
+        throw error;
+      }
+      writeNodeCommandShim(path.join(pathBinDir, "ai"), path.join(packageRoot, "bin", "cli.js"));
+    }
+
+    const configPath = path.join(tmpDir, ".agents", ".airc.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        ...JSON.parse(fs.readFileSync(configPath, "utf8")),
+        files: {
+          managed: [target],
+          merged: [],
+          ejected: []
+        }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+
+    const output = execFileSync(
+      process.execPath,
+      [path.join(".agents", "skills", "update-agent-infra", "scripts", "sync-templates.js")],
+      {
+        cwd: tmpDir,
+        encoding: "utf8",
+        env: envWithPrependedPath(process.env, pathBinDir)
+      }
+    );
+    const report = JSON.parse(output);
+    const deployedPath = path.join(tmpDir, target);
+    const moduleUrl = pathToFileURL(deployedPath);
+    moduleUrl.searchParams.set("v", String(Date.now()));
+    const deployed = await import(moduleUrl.href) as { getDefaults(): { statusLabels: { inProgress: string } } };
+
+    assert.ok(!report.error);
+    assert.ok(report.managed.created.includes(target));
+    assert.equal(fs.existsSync(path.join(tmpDir, "package.json")), false);
+    assert.equal(fs.existsSync(path.join(tmpDir, "node_modules")), false);
+    assert.equal(deployed.getDefaults().statusLabels.inProgress, "status: in-progress");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("build output is up-to-date", () => {
   execFileSync(process.execPath, [filePath("scripts/build-inline.js"), "--check"], {
     encoding: "utf8"
