@@ -194,6 +194,12 @@ async function cmdUpdate(): Promise<void> {
     platformType
   );
   ok('Updated .agents/skills/update-agent-infra/');
+  renderFile(
+    path.join(templateDir, '.agents', 'scripts', 'lib', 'agent-infra-package.js'),
+    path.join('.agents', 'scripts', 'lib', 'agent-infra-package.js'),
+    replacements
+  );
+  ok('Updated .agents/scripts/lib/agent-infra-package.js');
   try {
     fs.unlinkSync(path.join('.agents', 'skills', 'update-agent-infra', 'scripts', 'sync-templates.cjs'));
   } catch {
