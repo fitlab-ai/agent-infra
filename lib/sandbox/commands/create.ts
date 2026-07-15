@@ -641,8 +641,9 @@ function formatEnvFileEntry(key: string, value: string): string {
 }
 
 export function collectHostProxyEntries(env: NodeJS.ProcessEnv): Array<[string, string]> {
+  const entriesByExactKey = new Map(Object.entries(env));
   return HOST_PROXY_ENV_KEYS.flatMap((key) => {
-    const value = env[key];
+    const value = entriesByExactKey.get(key);
     return typeof value === 'string' && value !== '' ? [[key, value]] : [];
   });
 }

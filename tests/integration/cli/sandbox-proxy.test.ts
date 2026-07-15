@@ -116,6 +116,27 @@ test("collectHostProxyEntries returns only non-empty standard proxy variables in
   ]);
 });
 
+test("collectHostProxyEntries does not duplicate case-insensitive environment keys", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const env = new Proxy<NodeJS.ProcessEnv>({
+    HTTP_PROXY: "http://proxy.example:8080",
+    NO_PROXY: "localhost"
+  }, {
+    get(target, property) {
+      if (typeof property !== "string") {
+        return Reflect.get(target, property);
+      }
+      const exactKey = Object.keys(target).find((key) => key.toLowerCase() === property.toLowerCase());
+      return exactKey === undefined ? undefined : target[exactKey];
+    }
+  });
+
+  assert.deepEqual(sandboxCreate.collectHostProxyEntries(env), [
+    ["HTTP_PROXY", "http://proxy.example:8080"],
+    ["NO_PROXY", "localhost"]
+  ]);
+});
+
 test("buildContainerEnvFile appends proxy entries after tool env and before GH_TOKEN", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-proxy-env-file-"));
