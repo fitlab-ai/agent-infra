@@ -91,9 +91,6 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
         assert.equal(options.encoding, "utf8");
         return path.join(installRoot, "bin", "cli.js");
       }
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
       throw new Error(`Unexpected command: ${command}`);
     }) as typeof childProcess.execSync;
 
@@ -195,9 +192,6 @@ test("syncTemplates resolves Windows npm wrappers via .cmd launchers", async () 
     childProcess.execSync = ((command) => {
       if (command === "where ai") {
         return wrapperPath;
-      }
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
       }
       throw new Error(`Unexpected command: ${command}`);
     }) as typeof childProcess.execSync;
@@ -326,13 +320,12 @@ test("agent-infra package lookup failure is diagnostic and does not install into
   }
 });
 
-test("syncTemplates reports the bundled installer version with a v prefix", async () => {
-  const originalExecSync = childProcess.execSync;
+test("syncTemplates persists the exact prerelease template version idempotently", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-installer-version-"));
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const { templateRoot } = createTemplateInstall(tmpDir);
+    const { templateRoot } = createTemplateInstall(tmpDir, "0.8.6-alpha.0");
 
     fs.mkdirSync(projectRoot, { recursive: true });
 
@@ -342,6 +335,7 @@ test("syncTemplates reports the bundled installer version with a v prefix", asyn
       org: "acme",
       language: "en",
       platform: { type: "github" },
+      templateVersion: "v0.8.5",
       files: {
         managed: ["README.md"],
         merged: [],
@@ -349,25 +343,21 @@ test("syncTemplates reports the bundled installer version with a v prefix", asyn
       }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
-    const report = syncTemplates(projectRoot, templateRoot);
+    const firstReport = syncTemplates(projectRoot, templateRoot);
+    const config = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
+    const secondReport = syncTemplates(projectRoot, templateRoot);
 
-    assert.equal(report.templateVersion, "v0.0.0-test");
+    assert.equal(firstReport.templateVersion, "v0.8.6-alpha.0");
+    assert.equal(config.templateVersion, "v0.8.6-alpha.0");
+    assert.equal(firstReport.configUpdated, true);
+    assert.equal(secondReport.configUpdated, false);
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates migrates legacy default sandbox tools to canonical order", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-tools-"));
 
   try {
@@ -390,13 +380,6 @@ test("syncTemplates migrates legacy default sandbox tools to canonical order", a
       files: { managed: [], merged: [], ejected: [] }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
     const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
@@ -404,13 +387,11 @@ test("syncTemplates migrates legacy default sandbox tools to canonical order", a
     assert.equal(report.configUpdated, true);
     assert.deepEqual(cfg.sandbox.tools, ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"]);
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates preserves customized sandbox tools", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-custom-tools-"));
 
   try {
@@ -433,26 +414,17 @@ test("syncTemplates preserves customized sandbox tools", async () => {
       files: { managed: [], merged: [], ejected: [] }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     syncTemplates(projectRoot, templateRoot);
     const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
 
     assert.deepEqual(cfg.sandbox.tools, ["codex"]);
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates prefers platform-specific variants and composes with zh-CN localization", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-platform-"));
 
   try {
@@ -477,26 +449,17 @@ test("syncTemplates prefers platform-specific variants and composes with zh-CN l
       }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.deepEqual(report.managed.created.sort(), ["docs/rule.md"]);
     assert.equal(fs.readFileSync(path.join(projectRoot, "docs/rule.md"), "utf8"), "github-zh\n");
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates selects JSON language variants for managed config files", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-json-lang-"));
 
   try {
@@ -534,13 +497,6 @@ test("syncTemplates selects JSON language variants for managed config files", as
       }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
 
     syncTemplates(projectRoot, templateRoot);
@@ -569,13 +525,11 @@ test("syncTemplates selects JSON language variants for managed config files", as
       zhVerify
     );
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates includes external-only files for managed directories", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-dir-"));
 
   try {
@@ -603,13 +557,6 @@ test("syncTemplates includes external-only files for managed directories", async
       }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
@@ -626,13 +573,11 @@ test("syncTemplates includes external-only files for managed directories", async
       "Custom demo\n"
     );
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates keeps built-ins authoritative and lets later external template sources override earlier sources", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-priority-"));
 
   try {
@@ -669,13 +614,6 @@ test("syncTemplates keeps built-ins authoritative and lets later external templa
       }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
@@ -703,13 +641,11 @@ test("syncTemplates keeps built-ins authoritative and lets later external templa
     assert.equal(fs.readFileSync(path.join(projectRoot, "docs/rule.md"), "utf8"), "builtin\n");
     assert.equal(fs.readFileSync(path.join(projectRoot, "docs/external.md"), "utf8"), "external-two\n");
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates ignores external platform variants when a built-in variant already exists", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-builtin-variant-"));
 
   try {
@@ -739,13 +675,6 @@ test("syncTemplates ignores external platform variants when a built-in variant a
       }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
@@ -758,13 +687,11 @@ test("syncTemplates ignores external platform variants when a built-in variant a
     ]);
     assert.equal(fs.readFileSync(path.join(projectRoot, "docs/rule.md"), "utf8"), "builtin-gitea-zh\n");
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates selects platform and language variants from external template sources", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-variant-"));
 
   try {
@@ -793,26 +720,17 @@ test("syncTemplates selects platform and language variants from external templat
       }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.equal(report.templateSources.loaded, 1);
     assert.equal(fs.readFileSync(path.join(projectRoot, "docs/rule.md"), "utf8"), "external-gitea-zh\n");
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates reports invalid external template sources and keeps built-in behavior", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-template-source-invalid-"));
 
   try {
@@ -842,13 +760,6 @@ test("syncTemplates reports invalid external template sources and keeps built-in
       }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
@@ -862,13 +773,11 @@ test("syncTemplates reports invalid external template sources and keeps built-in
     assert.deepEqual(report.templateSources.conflicts, []);
     assert.equal(fs.readFileSync(path.join(projectRoot, "README.md"), "utf8"), "Hello demo\n");
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates removes stale managed files but preserves merged and ejected files", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-cleanup-"));
 
   try {
@@ -902,13 +811,6 @@ test("syncTemplates removes stale managed files but preserves merged and ejected
     writeFile(projectRoot, ".agents/keep.md", "AI enabled\n");
     writeFile(projectRoot, ".github/workflows/release.yml", "name: custom\n");
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
 
     const firstReport = syncTemplates(projectRoot, templateRoot);
@@ -926,13 +828,11 @@ test("syncTemplates removes stale managed files but preserves merged and ejected
     assert.ok(secondReport.managed.unchanged.includes(".agents/keep.md"));
     assert.deepEqual(secondReport.managed.skippedMerged, [".github/workflows/release.yml"]);
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates keeps an ejected entry that has no template source under a managed directory wildcard", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-project-only-ejected-"));
 
   try {
@@ -958,13 +858,6 @@ test("syncTemplates keeps an ejected entry that has no template source under a m
     writeFile(projectRoot, "docs/template.md", "Template\n");
     writeFile(projectRoot, "docs/project-only.md", "Project only\n");
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
@@ -972,13 +865,11 @@ test("syncTemplates keeps an ejected entry that has no template source under a m
     assert.equal(fs.readFileSync(path.join(projectRoot, "docs/project-only.md"), "utf8"), "Project only\n");
     assert.deepEqual(report.ejected.skipped, ["docs/project-only.md"]);
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates preserves custom skills when the template has only an empty same-name directory", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-empty-skill-dir-"));
 
   try {
@@ -1004,13 +895,6 @@ test("syncTemplates preserves custom skills when the template has only an empty 
     writeFile(projectRoot, ".agents/skills/local-check/SKILL.md", "---\nname: local-check\ndescription: Local\n---\n");
     writeFile(projectRoot, ".agents/skills/local-check/reference/checklist.md", "keep local\n");
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
@@ -1026,13 +910,11 @@ test("syncTemplates preserves custom skills when the template has only an empty 
     assert.ok(!report.managed.removed.includes(".agents/skills/local-check/SKILL.md"));
     assert.ok(!report.managed.removed.includes(".agents/skills/local-check/reference/checklist.md"));
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates preserves stale files that match merged glob patterns", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-glob-"));
 
   try {
@@ -1058,13 +940,6 @@ test("syncTemplates preserves stale files that match merged glob patterns", asyn
     writeFile(projectRoot, "docs/stale/note.md", "keep merged glob\n");
     writeFile(projectRoot, "docs/stale/extra.txt", "remove non-md\n");
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
@@ -1072,13 +947,11 @@ test("syncTemplates preserves stale files that match merged glob patterns", asyn
     assert.ok(!fs.existsSync(path.join(projectRoot, "docs/stale/extra.txt")));
     assert.deepEqual(report.managed.removed, ["docs/stale/extra.txt"]);
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates syncs the managed shared hook as a single file", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-github-hook-"));
 
   try {
@@ -1124,13 +997,6 @@ test("syncTemplates syncs the managed shared hook as a single file", async () =>
 
     writeFile(projectRoot, ".git-hooks/custom.sh", "#!/bin/sh\necho keep me\n");
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
@@ -1164,13 +1030,11 @@ test("syncTemplates syncs the managed shared hook as a single file", async () =>
       "#!/bin/sh\necho keep me\n"
     );
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates reports shared pre-commit as a merged pending file", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-github-pre-commit-"));
 
   try {
@@ -1193,13 +1057,6 @@ test("syncTemplates reports shared pre-commit as a merged pending file", async (
       }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
@@ -1213,13 +1070,11 @@ test("syncTemplates reports shared pre-commit as a merged pending file", async (
       [{ target: ".git-hooks/pre-commit", template: ".git-hooks/pre-commit" }]
     );
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates preserves project testing discipline as a merged file", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-testing-discipline-"));
 
   try {
@@ -1244,13 +1099,6 @@ test("syncTemplates preserves project testing discipline as a merged file", asyn
       }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const firstReport = syncTemplates(projectRoot, templateRoot);
     const secondReport = syncTemplates(projectRoot, templateRoot);
@@ -1270,13 +1118,11 @@ test("syncTemplates preserves project testing discipline as a merged file", asyn
     assert.deepEqual(firstReport.managed.written, []);
     assert.deepEqual(secondReport.managed.written, []);
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates deploys a loadable GitHub platform adapter without downstream dependencies", async () => {
-  const originalExecSync = childProcess.execSync;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-platform-adapter-"));
 
   try {
@@ -1305,13 +1151,6 @@ test("syncTemplates deploys a loadable GitHub platform adapter without downstrea
       }
     });
 
-    childProcess.execSync = (command) => {
-      if (command === "git remote get-url origin") {
-        throw new Error("not a git repo");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    };
-
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
     const deployedPath = path.join(projectRoot, target);
@@ -1328,7 +1167,6 @@ test("syncTemplates deploys a loadable GitHub platform adapter without downstrea
     assert.equal(getDefaults().statusLabels.inProgress, "status: in-progress");
     assert.equal(getDefaults().markers.task, "<!-- sync-issue:{task-id}:task -->");
   } finally {
-    childProcess.execSync = originalExecSync;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

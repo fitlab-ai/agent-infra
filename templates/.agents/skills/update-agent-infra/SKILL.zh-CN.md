@@ -35,7 +35,7 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 
 **关键字段**：
 - `error`：错误信息（如非空则停止并报告）
-- `templateVersion`：模板源当前版本
+- `templateVersion`：模板源包的精确 `v` 前缀 SemVer（可包含 prerelease 或 build metadata）
 - `templateRoot`：模板文件根目录绝对路径
 - `templateSources.conflicts`：外部模板源冲突列表；报告中必须显式展示，说明哪些文件因内置模板或后续外部源获胜而被忽略
 - `managed.written` / `managed.created`：已更新/新建的 managed 文件
@@ -47,7 +47,6 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 - `merged.pending`：需要 AI 处理的 merged 文件列表
   - 每项包含 `target`（项目中的目标路径）和 `template`（模板根目录下的相对路径）
 - `registryAdded`：新增的文件注册条目
-- `selfUpdate`：是否为自更新模式
 - `configUpdated`：`.agents/.airc.json` 是否已更新
 
 如果 `managed.conflicts` 非空，输出全部冲突并立即停止，不进入阶段 B；禁止覆盖冲突文件或推进其 `files.managedBaselines`。

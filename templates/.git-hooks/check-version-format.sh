@@ -21,7 +21,11 @@ template_version=$(
   exit 1
 }
 
-if ! printf '%s\n' "$template_version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+if ! node -e '
+  const version = process.argv[1];
+  const semver = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*)|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:(?:0|[1-9]\d*)|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+  process.exit(semver.test(version) ? 0 : 1);
+' "$template_version"; then
   echo "Error: .agents/.airc.json templateVersion must use v-prefixed semver (found: $template_version)."
   exit 1
 fi

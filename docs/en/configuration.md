@@ -56,7 +56,7 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 | `project` | Project name used when rendering commands, paths, and templates. |
 | `org` | GitHub organization or owner used by generated metadata and links. |
 | `language` | Primary project language or locale used by rendered templates. |
-| `templateVersion` | Installed template version for future upgrades and drift tracking. |
+| `templateVersion` | Exact `v`-prefixed SemVer of the installed template package, including prerelease or build metadata, for future upgrades and drift tracking. |
 | `templates` | Optional external template overlay configuration. |
 | `templates.sources` | Optional ordered list of external template sources. Only `type: "local"` is supported today. |
 | `skills` | Optional custom skill sync configuration. |
@@ -91,4 +91,4 @@ External template files and skill scripts can include executable JavaScript or s
 
 ## Version Management
 
-agent-infra uses semantic versioning through Git tags and GitHub releases. The installed template version is recorded in `.agents/.airc.json` as `templateVersion`, which gives both humans and AI tools a stable reference point for upgrades.
+agent-infra uses semantic versioning through Git tags and GitHub releases. The installed template package's exact `v`-prefixed SemVer is recorded in `.agents/.airc.json` as `templateVersion`, including any prerelease or build metadata. This gives both humans and AI tools a stable reference point for upgrades.

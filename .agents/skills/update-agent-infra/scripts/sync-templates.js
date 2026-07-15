@@ -13,7 +13,6 @@
  * Output: JSON report to stdout.
  */
 
-import childProcess from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -871,14 +870,6 @@ function isBinary(fp) {
   return false;
 }
 
-function gitUrl(dir) {
-  try {
-    return childProcess.execSync('git remote get-url origin', {
-      cwd: dir, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe']
-    }).trim();
-  } catch { return null; }
-}
-
 function langSelect(rels, lang, allSet, project) {
   const sel = new Map();
 
@@ -1021,8 +1012,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
     },
     ejected: { created: [], skipped: [] },
     merged:  { pending: [] },
-    configUpdated: false,
-    selfUpdate: false
+    configUpdated: false
   };
   const customTUIs = validateCustomTUIs(projectRoot, customTUIsConfig, report);
   const customTUICommandTargets = buildCustomTUICommandTargets(
@@ -1365,9 +1355,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
   report.merged.pending = [...mergedMap].map(
     ([target, template]) => ({ target, template })
   );
-
-  const projUrl = gitUrl(projectRoot);
-  report.selfUpdate = !!(projUrl && /fitlab-ai\/agent-infra/.test(projUrl));
 
   const hasChanges = (
     report.managed.written.length +

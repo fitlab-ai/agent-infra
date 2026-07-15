@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import * as semver from "semver";
 
 import {
   buildCommandSyncFiles,
@@ -355,12 +356,13 @@ test("version format validation hooks are wired into templates and local config"
     "package.json should install the managed hooks path during prepare"
   );
 
-  assert.match(
-    collaborator.templateVersion,
-    /^v\d+\.\d+\.\d+$/,
-    ".agents/.airc.json templateVersion should be a v-prefixed released semver"
+  assert.equal(
+    semver.valid(collaborator.templateVersion.slice(1)),
+    collaborator.templateVersion.slice(1),
+    ".agents/.airc.json templateVersion should be an exact v-prefixed semver"
   );
 
+  assert.equal(templateCheckScript, localCheckScript);
   assert.equal(templateLargeFileCheck, localLargeFileCheck);
   assert.match(localLargeFileCheck, /1024 \* 1024/, "the large-file limit should be 1 MiB");
   assert.match(localLargeFileCheck, /diff.*--cached/s, "the large-file check should inspect staged changes");
@@ -480,18 +482,27 @@ test("version format validation hooks are wired into templates and local config"
   });
 });
 
-test("version format validation hook only blocks git commit in PreToolUse mode", () => {
+test("version format validation hooks enforce exact v-prefixed semver", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-version-hook-"));
   const hooksDir = path.join(tempRoot, ".git-hooks");
   const aiHooksDir = path.join(tempRoot, ".agents", "hooks");
   const configDir = path.join(tempRoot, ".agents");
+  const configPath = path.join(configDir, ".airc.json");
 
   fs.mkdirSync(hooksDir, { recursive: true });
   fs.mkdirSync(aiHooksDir, { recursive: true });
   fs.mkdirSync(configDir, { recursive: true });
   fs.copyFileSync(".git-hooks/check-version-format.sh", path.join(hooksDir, "check-version-format.sh"));
   fs.copyFileSync(".agents/hooks/check-version-format.sh", path.join(aiHooksDir, "check-version-format.sh"));
-  fs.writeFileSync(path.join(configDir, ".airc.json"), JSON.stringify({ templateVersion: "v1.2.3" }));
+  const writeTemplateVersion = (templateVersion: string) => {
+    fs.writeFileSync(configPath, JSON.stringify({ templateVersion }));
+  };
+
+  const runGitHook = () => spawnSync(
+    "sh",
+    [path.join(hooksDir, "check-version-format.sh")],
+    { cwd: tempRoot, encoding: "utf8", input: "" }
+  );
 
   const runAiHook = (input: string) => spawnSync(
     "sh",
@@ -504,31 +515,53 @@ test("version format validation hook only blocks git commit in PreToolUse mode",
   );
 
   try {
+    const validVersions = [
+      "v0.0.0",
+      "v1.2.3",
+      "v1.2.3-alpha-beta",
+      "v1.2.3-rc.1",
+      "v1.2.3+build-x.5",
+      "v1.2.3-alpha.0+build-x.5"
+    ];
+    const invalidVersions = [
+      "1.2.3",
+      "v1.2",
+      "v01.2.3",
+      "v1.2.3-01",
+      "v1.2.3-alpha..1",
+      "v1.2.3+build..1",
+      "v1.2.3-alpha_1"
+    ];
+
+    for (const version of validVersions) {
+      writeTemplateVersion(version);
+      const result = runGitHook();
+      assert.equal(result.status, 0, `${version} should be accepted: ${result.stderr}`);
+      assert.match(result.stdout, /Version format check passed\./);
+    }
+
+    for (const version of invalidVersions) {
+      writeTemplateVersion(version);
+      const result = runGitHook();
+      assert.equal(result.status, 1, `${version} should be rejected`);
+      assert.match(result.stdout, /templateVersion must use v-prefixed semver/);
+    }
+
     const nonCommit = runAiHook(JSON.stringify({ tool_input: { command: "git status" } }));
     assert.equal(nonCommit.status, 0, "PreToolUse should skip non-git-commit commands");
     assert.equal(nonCommit.stdout, "", "PreToolUse should stay silent when skipping non-git-commit commands");
 
+    writeTemplateVersion("v1.2.3-alpha.0+build-x.5");
     const commit = runAiHook(JSON.stringify({ tool_input: { command: "git commit -m test" } }));
     assert.equal(commit.status, 0, "PreToolUse should validate git commit commands");
     assert.match(commit.stdout, /Version format check passed\./, "PreToolUse should log successful validation");
     assert.match(commit.stdout, /AI hook: version check passed\./, "PreToolUse should log successful AI-hook delegation");
 
-    fs.writeFileSync(path.join(configDir, ".airc.json"), JSON.stringify({ templateVersion: "1.2.3" }));
+    writeTemplateVersion("1.2.3");
 
     const blockedCommit = runAiHook(JSON.stringify({ tool_input: { command: "git commit -m broken" } }));
     assert.equal(blockedCommit.status, 2, "PreToolUse should block invalid git commit commands with exit 2");
     assert.match(blockedCommit.stderr, /AI hook: blocking git commit \(version format error\)\./, "PreToolUse should log blocked AI-hook delegation");
-
-    const preCommit = spawnSync(
-      "sh",
-      [path.join(hooksDir, "check-version-format.sh")],
-      {
-        cwd: tempRoot,
-        encoding: "utf8",
-        input: ""
-      }
-    );
-    assert.equal(preCommit.status, 1, "git pre-commit should fail with exit 1 on invalid versions");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }

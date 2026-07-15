@@ -56,7 +56,7 @@
 | `project` | 用于渲染命令、路径和模板内容的项目名。 |
 | `org` | 生成元数据和链接时使用的 GitHub 组织或拥有者。 |
 | `language` | 渲染模板时采用的项目主语言或区域设置。 |
-| `templateVersion` | 当前安装的模板版本，用于升级和差异追踪。 |
+| `templateVersion` | 当前安装模板包的精确 `v` 前缀 SemVer（可包含 prerelease 或 build metadata），用于升级和差异追踪。 |
 | `templates` | 可选的外部模板叠加配置。 |
 | `templates.sources` | 可选的外部模板源列表，按顺序应用。当前仅支持 `type: "local"`。 |
 | `skills` | 可选的自定义 skill 同步配置。 |
@@ -91,4 +91,4 @@
 
 ## 版本管理
 
-agent-infra 通过 Git tag 和 GitHub release 使用语义化版本号。当前安装的模板版本记录在 `.agents/.airc.json` 的 `templateVersion` 字段中，方便人和 AI 工具在升级时都能基于同一个版本基线工作。
+agent-infra 通过 Git tag 和 GitHub release 使用语义化版本号。当前安装模板包的精确 `v` 前缀 SemVer 会记录在 `.agents/.airc.json` 的 `templateVersion` 字段中，包括 prerelease 或 build metadata，方便人和 AI 工具在升级时都能基于同一个版本基线工作。

@@ -41,7 +41,7 @@ The script outputs JSON to stdout. Parse and record the report.
 
 **Key fields**:
 - `error`: error message (if non-empty, stop and report)
-- `templateVersion`: current template source version
+- `templateVersion`: exact `v`-prefixed SemVer of the template source package (including prerelease or build metadata)
 - `templateRoot`: absolute path to the template file root directory
 - `templateSources.conflicts`: external template source conflicts; explicitly
   list these in the report so users know which files were ignored because a
@@ -55,7 +55,6 @@ The script outputs JSON to stdout. Parse and record the report.
 - `merged.pending`: list of merged files for AI to process
   - Each item has `target` (project-relative path) and `template` (template-root-relative path)
 - `registryAdded`: newly added file registry entries
-- `selfUpdate`: whether this is a self-update scenario
 - `configUpdated`: whether `.agents/.airc.json` was updated
 
 If `managed.conflicts` is non-empty, output every conflict and stop immediately before Phase B. Do not overwrite a conflicting file or advance its `files.managedBaselines` entry.
