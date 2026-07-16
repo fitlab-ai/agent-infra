@@ -251,6 +251,16 @@ function sourceCandidates(engine: string, hostPath: string): string[] {
   return [...new Set(candidates.map((candidate) => normalizeMountSource(engine, candidate)))];
 }
 
+function sameHostSource(left: string, right: string): boolean {
+  try {
+    const leftStat = fs.statSync(left, { bigint: true });
+    const rightStat = fs.statSync(right, { bigint: true });
+    return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino;
+  } catch {
+    return false;
+  }
+}
+
 function hostSourceAccessible(hostPath: string, writable: boolean): boolean {
   try {
     fs.accessSync(
@@ -350,13 +360,13 @@ function targetState(
   );
   if (!compatible) return 'wrong-type';
 
-  return probe(
-    engine,
-    container,
-    'test -r "$1" && test -w "$1"',
-    [seed.targetPath],
-    runOkFn
-  ) ? 'ok' : 'inaccessible';
+  const readable = runOkFn(engine, 'docker', [
+    'exec', '--user', 'devuser', container, 'test', '-r', seed.targetPath
+  ]);
+  const writable = runOkFn(engine, 'docker', [
+    'exec', '--user', 'devuser', container, 'test', '-w', seed.targetPath
+  ]);
+  return readable && writable ? 'ok' : 'inaccessible';
 }
 
 export function collectSandboxRecoverySnapshot(params: {
@@ -426,6 +436,7 @@ export function collectSandboxRecoverySnapshot(params: {
       sourceCandidates(params.engine, hostPath).some((candidate) =>
         actualSourceCandidates.includes(candidate)
       )
+      || (actualSource !== null && sameHostSource(hostPath, actualSource))
     );
     const sourceMatches = expected.expectedType === 'tmpfs'
       ? actualSource === '' || actualSource === null
@@ -554,13 +565,13 @@ export function validateTmpfsSeedEntries(params: {
       'exec', '--user', 'devuser', params.container, 'diff', '-qr', '--',
       entry.stagingPath, entry.targetPath
     ]);
-    if (!probe(
-      params.engine,
-      params.container,
-      'test -r "$1" -a -w "$1"',
-      [entry.targetPath],
-      runOkFn
-    )) {
+    const readable = runOkFn(params.engine, 'docker', [
+      'exec', '--user', 'devuser', params.container, 'test', '-r', entry.targetPath
+    ]);
+    const writable = runOkFn(params.engine, 'docker', [
+      'exec', '--user', 'devuser', params.container, 'test', '-w', entry.targetPath
+    ]);
+    if (!readable || !writable) {
       throw new Error(`Hydrated seed target ${entry.targetPath} is not writable by devuser.`);
     }
   }

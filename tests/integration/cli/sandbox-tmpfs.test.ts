@@ -14,6 +14,7 @@ import {
 } from "../../helpers.ts";
 import {
   classifySandboxRecovery,
+  collectSandboxRecoverySnapshot,
   ensureSandboxReady,
   type SandboxRecoverySnapshot
 } from "../../../lib/sandbox/recovery.ts";
@@ -160,6 +161,52 @@ test("recovery classification maps faults to the smallest repair kind", () => {
     classifySandboxRecovery(topology).map((finding) => finding.repairKind),
     ["hard-failure"]
   );
+});
+
+test("recovery accepts bind sources that resolve to the same filesystem object", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-source-identity-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const expectedSource = path.join(
+    config.home,
+    ".agent-infra",
+    "sandboxes",
+    "codex",
+    config.project,
+    "feature..demo",
+    "config.toml"
+  );
+  const sourceAlias = path.join(tmpDir, "config-alias.toml");
+
+  try {
+    fs.linkSync(expectedSource, sourceAlias);
+    const mounts = recoveryFixtureMounts(config).map((mount) =>
+      mount.Destination === "/run/agent-infra/tmpfs-seeds/codex/0"
+        ? { ...mount, Source: sourceAlias }
+        : mount
+    );
+    const snapshot = collectSandboxRecoverySnapshot({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      container: "demo-dev-feature..demo",
+      deps: {
+        run: () => JSON.stringify([{
+          Id: "fixture-container-id",
+          Config: { Labels: { "demo.sandbox.branch": "feature/demo" } },
+          Mounts: mounts
+        }]),
+        runOk: () => true
+      }
+    });
+
+    const seedMount = snapshot.mounts.find((mount) =>
+      mount.path === "/run/agent-infra/tmpfs-seeds/codex/0"
+    );
+    assert.equal(seedMount?.sourceMatches, true);
+    assert.equal(seedMount?.sourceAccessible, true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("running permission repair re-assesses seed targets before hydration", async () => {
