@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  assertModeBits,
   loadFreshEsm
 } from "../../helpers.ts";
 
@@ -122,6 +123,10 @@ test("prepareHostShellConfig writes sanitized config files and returns read-only
     fs.writeFileSync(path.join(tmpDir, ".gitignore_global"), "node_modules/\n", "utf8");
     fs.writeFileSync(path.join(tmpDir, ".stCommitMsg"), "feat: demo\n", "utf8");
     const aliases = sandboxCreate.ensureSandboxAliasesFile(tmpDir);
+    for (const file of [".gitconfig", ".gitignore_global", ".stCommitMsg"]) {
+      fs.chmodSync(path.join(tmpDir, file), 0o600);
+    }
+    fs.chmodSync(aliases.path, 0o600);
 
     const prepared = sandboxCreate.prepareHostShellConfig({
       home: tmpDir,
@@ -163,6 +168,10 @@ test("prepareHostShellConfig writes sanitized config files and returns read-only
       fs.readFileSync(path.join(prepared.hostDir, ".bash_aliases"), "utf8"),
       fs.readFileSync(aliases.path, "utf8")
     );
+    assertModeBits(prepared.hostDir, 0o755);
+    for (const file of [".gitconfig", ".gitignore_global", ".stCommitMsg", ".bash_aliases"]) {
+      assertModeBits(path.join(prepared.hostDir, file), 0o644);
+    }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

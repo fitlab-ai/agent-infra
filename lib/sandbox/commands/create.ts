@@ -393,6 +393,18 @@ export function prepareHostShellConfig({
     fs.copyFileSync(aliasesPath, path.join(hostDir, '.bash_aliases'));
   }
 
+  // The snapshot is consumed by devuser inside the sandbox, but it may be
+  // created by a different host user (for example root in a CI job container).
+  // copyFileSync preserves restrictive source modes, so make the bind contract
+  // explicit after all files have been materialized.
+  fs.chmodSync(hostDir, 0o755);
+  for (const file of SHELL_CONFIG_SYMLINKS) {
+    const hostPath = path.join(hostDir, file);
+    if (fs.existsSync(hostPath)) {
+      fs.chmodSync(hostPath, 0o644);
+    }
+  }
+
   // Single directory bind keeps virtiofs happy: per-file rewrites inside no
   // longer race the bind layer like individual single-file binds do.
   const mounts = [{ hostPath: hostDir, containerPath: CONTAINER_SHELL_CONFIG_MOUNT }];
