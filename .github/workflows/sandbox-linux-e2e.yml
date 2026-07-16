@@ -246,6 +246,11 @@ jobs:
       - name: Run sandbox lifecycle
         working-directory: ${{ env.DEBIAN_TEST_REPO }}
         run: |
+          # The job container sees the runner workspace at both /__w and
+          # /home/runner/work, but the host Docker daemon only sees the latter.
+          # Use host-visible paths for every bind source passed to the daemon.
+          export HOME=/home/runner/work/_temp/debian-home
+          cd /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}/test-repo
           docker info
           ai sandbox create test-branch main
           ai sandbox ls
