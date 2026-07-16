@@ -16,6 +16,7 @@ import {
   classifySandboxRecovery,
   collectSandboxRecoverySnapshot,
   ensureSandboxReady,
+  prepareTmpfsMounts,
   type SandboxRecoverySnapshot
 } from "../../../lib/sandbox/recovery.ts";
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
@@ -207,6 +208,114 @@ test("recovery accepts bind sources that resolve to the same filesystem object",
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test("recovery recognizes tmpfs declared only through HostConfig on OrbStack", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-orbstack-tmpfs-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const mounts = recoveryFixtureMounts(config).filter(
+    (mount) => mount.Destination !== "/home/devuser/.codex"
+  );
+  const snapshotFor = (options: string) => collectSandboxRecoverySnapshot({
+    config,
+    engine: "native",
+    branch: "feature/demo",
+    container: "demo-dev-feature..demo",
+    deps: {
+      run: () => JSON.stringify([{
+        Id: "fixture-container-id",
+        Config: { Labels: { "demo.sandbox.branch": "feature/demo" } },
+        HostConfig: { Tmpfs: { "/home/devuser/.codex": options } },
+        Mounts: mounts
+      }]),
+      runOk: () => true
+    }
+  });
+
+  try {
+    const writable = snapshotFor("rw,size=512m");
+    assert.deepEqual(
+      writable.mounts.find((mount) => mount.path === "/home/devuser/.codex"),
+      {
+        path: "/home/devuser/.codex",
+        expectedType: "tmpfs",
+        actualType: "tmpfs",
+        expectedSource: null,
+        actualSource: "",
+        sourceMatches: true,
+        expectedRW: true,
+        actualRW: true,
+        sourceAccessible: true
+      }
+    );
+    assert.deepEqual(classifySandboxRecovery(writable), []);
+
+    const readOnly = snapshotFor("ro,size=512m");
+    assert.equal(
+      readOnly.mounts.find((mount) => mount.path === "/home/devuser/.codex")?.actualRW,
+      false
+    );
+    assert.deepEqual(
+      classifySandboxRecovery(readOnly).map((finding) => finding.repairKind),
+      ["hard-failure"]
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("tmpfs permission probe compares numeric owner, primary group, and mode", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-primary-group-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  let permissionProbe: string[] | undefined;
+
+  try {
+    const snapshot = collectSandboxRecoverySnapshot({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      container: "demo-dev-feature..demo",
+      deps: {
+        run: () => JSON.stringify([{
+          Id: "fixture-container-id",
+          Config: { Labels: { "demo.sandbox.branch": "feature/demo" } },
+          Mounts: recoveryFixtureMounts(config)
+        }]),
+        runOk: (_engine, _cmd, args) => {
+          const script = args[6] ?? "";
+          if (script.includes("stat -c")) permissionProbe = args;
+          return true;
+        }
+      }
+    });
+
+    assert.equal(snapshot.tmpfs[0]?.permissionsOk, true);
+    assert.deepEqual(permissionProbe, [
+      "exec", "--user", "devuser", "demo-dev-feature..demo", "sh", "-c",
+      'test "$(stat -c %u:%g:%a -- "$1")" = "$(id -u devuser):$(id -g devuser):700"',
+      "agent-infra-recovery", "/home/devuser/.codex"
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("tmpfs permission repair uses devuser's configured primary group", () => {
+  const writes: string[][] = [];
+
+  prepareTmpfsMounts({
+    engine: "native",
+    container: "demo-dev-feature..demo",
+    mountPaths: ["/home/devuser/.codex"],
+    deps: {
+      runVerbose: (_engine, _cmd, args) => { writes.push(args); }
+    }
+  });
+
+  assert.deepEqual(writes[0], [
+    "exec", "--user", "root", "demo-dev-feature..demo",
+    "chown", "devuser:", "--", "/home/devuser/.codex"
+  ]);
 });
 
 test("running permission repair re-assesses seed targets before hydration", async () => {

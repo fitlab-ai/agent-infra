@@ -72,6 +72,7 @@ type DockerMount = {
 type DockerInspection = {
   Id?: unknown;
   Config?: { Labels?: Record<string, string> };
+  HostConfig?: { Tmpfs?: unknown };
   Mounts?: DockerMount[];
 };
 
@@ -387,6 +388,19 @@ export function collectSandboxRecoverySnapshot(params: {
         : []
     )
   );
+  const declaredTmpfs = inspection.HostConfig?.Tmpfs;
+  if (declaredTmpfs && typeof declaredTmpfs === 'object' && !Array.isArray(declaredTmpfs)) {
+    for (const [destination, rawOptions] of Object.entries(declaredTmpfs)) {
+      if (mountsByDestination.has(destination) || typeof rawOptions !== 'string') continue;
+      const options = rawOptions.split(',').map((option) => option.trim());
+      mountsByDestination.set(destination, {
+        Type: 'tmpfs',
+        Source: '',
+        Destination: destination,
+        RW: !options.includes('ro')
+      });
+    }
+  }
   const tools = resolveTools(params.config);
   const seeds = declaredTmpfsSeedEntries(tools).map((seed) => {
     const mounted = mountsByDestination.get(seed.stagingPath)?.Type === 'bind';
@@ -406,7 +420,7 @@ export function collectSandboxRecoverySnapshot(params: {
     permissionsOk: probe(
       params.engine,
       params.container,
-      'test "$(stat -c %U:%G:%a -- "$1")" = devuser:devuser:700',
+      'test "$(stat -c %u:%g:%a -- "$1")" = "$(id -u devuser):$(id -g devuser):700"',
       [tool.containerMount],
       runOkFn
     ),
@@ -518,7 +532,7 @@ export function prepareTmpfsMounts(params: {
   const runVerboseFn = params.deps?.runVerbose ?? runVerboseEngine;
   for (const mountPath of params.mountPaths) {
     runVerboseFn(params.engine, 'docker', [
-      'exec', '--user', 'root', params.container, 'chown', 'devuser:devuser', '--', mountPath
+      'exec', '--user', 'root', params.container, 'chown', 'devuser:', '--', mountPath
     ]);
     runVerboseFn(params.engine, 'docker', [
       'exec', '--user', 'root', params.container, 'chmod', '0700', '--', mountPath
