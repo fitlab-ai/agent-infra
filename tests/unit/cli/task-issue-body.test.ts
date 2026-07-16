@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { extractSection, findSectionHeading } from "../../../lib/task/sections.ts";
+import {
+  extractSection,
+  findSectionHeading,
+  mutateTableRow,
+  upsertSection
+} from "../../../lib/task/sections.ts";
 import { renderTemplateBody } from "../../../lib/task/issue-form.ts";
 import { buildDefaultBody, issueBody } from "../../../lib/task/commands/issue-body.ts";
 
@@ -169,4 +174,212 @@ test("issueBody exits 1 with a prefixed error on an unknown task ref", () => {
   assert.equal(process.exitCode, 1);
   assert.match(captured, /^ai task issue-body: /);
   process.exitCode = originalExit;
+});
+
+test("upsertSection preserves the actual language heading and outside text", () => {
+  const input = "# T\n\n## Description\n\nold\n\n## Tail\n\nkeep\n";
+  assert.deepEqual(
+    upsertSection(input, { aliases: ["\u63cf\u8ff0", "Description"], heading: "\u63cf\u8ff0", body: "new" }),
+    {
+      content: "# T\n\n## Description\n\nnew\n\n## Tail\n\nkeep\n",
+      heading: "Description",
+      operation: "update"
+    }
+  );
+});
+
+test("upsertSection creates a missing section with the requested heading", () => {
+  assert.deepEqual(
+    upsertSection("# T\n", { aliases: ["Notes"], heading: "Notes", body: "body" }),
+    { content: "# T\n\n## Notes\n\nbody\n", heading: "Notes", operation: "create" }
+  );
+});
+
+test("upsertSection preserves existing trailing bytes when creating a missing section", () => {
+  const samples = [
+    { input: "# T", expected: "# T\n\n## Notes\n\nbody\n" },
+    { input: "# T\n", expected: "# T\n\n## Notes\n\nbody\n" },
+    { input: "# T\n\n\n\n", expected: "# T\n\n\n\n## Notes\n\nbody\n" },
+    { input: "# T\r\n", expected: "# T\r\n\r\n## Notes\r\n\r\nbody\r\n" },
+    { input: "# T\r\n\r\n\r\n", expected: "# T\r\n\r\n\r\n## Notes\r\n\r\nbody\r\n" }
+  ];
+  for (const sample of samples) {
+    const result = upsertSection(sample.input, {
+      aliases: ["Notes"],
+      heading: "Notes",
+      body: "body"
+    });
+    assert.equal(result.content, sample.expected);
+    assert.equal(result.content.startsWith(sample.input), true);
+  }
+});
+
+test("mutateTableRow merges selected cells and preserves untouched cell tokens", () => {
+  const input = "## Ledger\n\n| id | status | note |\n|----|--------|------|\n| A | open |  keep  |\n\nend\n";
+  assert.deepEqual(
+    mutateTableRow(input, {
+      kind: "table-row",
+      action: "upsert",
+      sectionAliases: ["Ledger"],
+      columns: ["id", "status", "note"],
+      keyColumn: "id",
+      key: "A",
+      values: { status: "closed" }
+    }),
+    {
+      content: "## Ledger\n\n| id | status | note |\n|----|--------|------|\n| A | closed |  keep  |\n\nend\n",
+      section: "Ledger",
+      operation: "update"
+    }
+  );
+});
+
+test("mutateTableRow supports key-only insert and repeated no-op", () => {
+  const input = "## IDs\n\n| id |\n|----|\n";
+  const first = mutateTableRow(input, {
+    kind: "table-row",
+    action: "upsert",
+    sectionAliases: ["IDs"],
+    columns: ["id"],
+    keyColumn: "id",
+    key: "A",
+    values: {}
+  });
+  assert.equal(first.operation, "insert");
+  assert.equal(first.content, "## IDs\n\n| id |\n|----|\n| A |\n");
+  const second = mutateTableRow(first.content, {
+    kind: "table-row",
+    action: "upsert",
+    sectionAliases: ["IDs"],
+    columns: ["id"],
+    keyColumn: "id",
+    key: "A",
+    values: {}
+  });
+  assert.deepEqual(second, { content: first.content, section: "IDs", operation: "update" });
+});
+
+test("mutateTableRow keeps whitespace-only cells stable for empty scalar updates", () => {
+  const input = "## Ledger\n\n| id | note |\n|----|------|\n| A |   |\n";
+  for (const value of ["", null] as const) {
+    const mutation = {
+      kind: "table-row" as const,
+      action: "upsert" as const,
+      sectionAliases: ["Ledger"],
+      columns: ["id", "note"],
+      keyColumn: "id",
+      key: "A",
+      values: { note: value }
+    };
+    const first = mutateTableRow(input, mutation);
+    const second = mutateTableRow(first.content, mutation);
+    assert.equal(first.content, input);
+    assert.equal(second.content, input);
+  }
+});
+
+test("mutateTableRow validates insert columns and delete is idempotent", () => {
+  const input = "## Ledger\n\n| id | status |\n|----|--------|\n";
+  assert.throws(
+    () => mutateTableRow(input, {
+      kind: "table-row",
+      action: "upsert",
+      sectionAliases: ["Ledger"],
+      columns: ["id", "status"],
+      keyColumn: "id",
+      key: "A",
+      values: {}
+    }),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "TABLE_MISSING_COLUMN"
+  );
+  assert.deepEqual(
+    mutateTableRow(input, {
+      kind: "table-row",
+      action: "delete",
+      sectionAliases: ["Ledger"],
+      columns: ["id", "status"],
+      keyColumn: "id",
+      key: "missing"
+    }),
+    { content: input, section: "Ledger", operation: "delete" }
+  );
+});
+
+test("upsertSection rejects ambiguous language aliases", () => {
+  assert.throws(
+    () => upsertSection(
+      "## Description\n\none\n\n## \u63cf\u8ff0\n\ntwo\n",
+      { aliases: ["Description", "\u63cf\u8ff0"], heading: "Description", body: "next" }
+    ),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "TASK_DOCUMENT_INVALID"
+  );
+});
+
+test("mutateTableRow escapes inserted cells and deletes a matching row", () => {
+  const input = "## Ledger\r\n\r\n| id | note |\r\n|----|------|\r\n";
+  const inserted = mutateTableRow(input, {
+    kind: "table-row",
+    action: "upsert",
+    sectionAliases: ["Ledger"],
+    columns: ["id", "note"],
+    keyColumn: "id",
+    key: "A|B",
+    values: { note: "x\\y|z" }
+  });
+  assert.equal(
+    inserted.content,
+    "## Ledger\r\n\r\n| id | note |\r\n|----|------|\r\n| A\\|B | x\\\\y\\|z |\r\n"
+  );
+  assert.equal(
+    mutateTableRow(inserted.content, {
+      kind: "table-row",
+      action: "delete",
+      sectionAliases: ["Ledger"],
+      columns: ["id", "note"],
+      keyColumn: "id",
+      key: "A|B"
+    }).content,
+    input
+  );
+});
+
+test("mutateTableRow returns precise validation codes", () => {
+  const base = "## Ledger\n\n| id | status |\n|----|--------|\n| A | open |\n";
+  const common = {
+    kind: "table-row" as const,
+    action: "upsert" as const,
+    sectionAliases: ["Ledger"],
+    columns: ["id", "status"],
+    keyColumn: "id",
+    key: " A "
+  };
+  const cases: { values: Record<string, string>; code: string }[] = [
+    { values: { unknown: "x" }, code: "TABLE_UNKNOWN_COLUMN" },
+    { values: { id: " A " }, code: "TABLE_KEY_COLUMN_IN_VALUES" },
+    { values: { id: " B " }, code: "TABLE_KEY_CONFLICT" },
+    { values: { status: "bad\ncell" }, code: "TABLE_CELL_INVALID" }
+  ];
+  for (const sample of cases) {
+    assert.throws(
+      () => mutateTableRow(base, { ...common, values: sample.values }),
+      (error: unknown) => error instanceof Error && "code" in error && error.code === sample.code
+    );
+  }
+
+  assert.throws(
+    () => mutateTableRow(base.replace("| A | open |\n", "| A | open |\n| A | closed |\n"), {
+      ...common,
+      values: { status: "closed" }
+    }),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "TABLE_DUPLICATE_KEY"
+  );
+
+  assert.throws(
+    () => mutateTableRow(base, {
+      ...common,
+      action: "delete",
+      values: { status: "closed" }
+    } as never),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "TABLE_DELETE_VALUES_FORBIDDEN"
+  );
 });

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { normalizeShortIdInput } from './short-id.ts';
+import { execFileSync } from 'node:child_process';
+import { normalizeShortIdInput, resolveShortIdReadOnly } from './short-id.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 // Flat-structured workspace dirs that hold tasks under `{dir}/{taskId}/task.md`.
@@ -15,8 +15,33 @@ type ResolveRefResult =
       taskId: string;
       taskDir: string;
       taskMdPath: string;
+      state: TaskWorkspaceState;
     }
-  | { ok: false; message: string };
+  | {
+      ok: false;
+      code: ResolveTaskRefErrorCode;
+      message: string;
+      repoRoot: string | null;
+      taskId: string | null;
+    };
+
+type TaskWorkspaceState = 'active' | 'blocked' | 'completed' | 'archive';
+
+type ResolveTaskRefErrorCode =
+  | 'REPO_ROOT_NOT_FOUND'
+  | 'INVALID_TASK_REF'
+  | 'SHORT_ID_RESERVED'
+  | 'SHORT_ID_CAPACITY_EXCEEDED'
+  | 'SHORT_ID_REGISTRY_NOT_FOUND'
+  | 'SHORT_ID_REGISTRY_READ_FAILED'
+  | 'SHORT_ID_REGISTRY_INVALID_JSON'
+  | 'SHORT_ID_REGISTRY_INVALID_SCHEMA'
+  | 'SHORT_ID_REGISTRY_DUPLICATE_TASK'
+  | 'SHORT_ID_NOT_FOUND'
+  | 'SHORT_ID_STALE'
+  | 'TASK_NOT_FOUND';
+
+type ResolveTaskRefOptions = { repoRoot?: string };
 
 function detectRepoRoot(): string {
   try {
@@ -38,21 +63,6 @@ function readShortIdLength(repoRoot: string): number {
     // fall through to default
   }
   return 2;
-}
-
-function resolveShortIdToTaskId(arg: string, repoRoot: string): string {
-  const scriptPath = path.join(repoRoot, '.agents', 'scripts', 'task-short-id.js');
-  if (!fs.existsSync(scriptPath)) {
-    throw new Error(`task-short-id.js not found at ${scriptPath}`);
-  }
-  const result = spawnSync('node', [scriptPath, 'resolve', arg], {
-    encoding: 'utf8',
-    cwd: repoRoot
-  });
-  if (result.status !== 0) {
-    throw new Error((result.stderr || '').trim() || `failed to resolve '${arg}'`);
-  }
-  return result.stdout.trim();
 }
 
 function listSortedNumeric(dir: string, width: number): string[] {
@@ -84,12 +94,16 @@ function findInArchive(repoRoot: string, taskId: string): string | null {
   return null;
 }
 
-function findTaskMd(repoRoot: string, taskId: string): string | null {
+function findTaskMd(
+  repoRoot: string,
+  taskId: string
+): { taskMdPath: string; state: TaskWorkspaceState } | null {
   for (const sub of FLAT_WORKSPACE_DIRS) {
     const candidate = path.join(repoRoot, '.agents', 'workspace', sub, taskId, 'task.md');
-    if (fs.existsSync(candidate)) return candidate;
+    if (fs.existsSync(candidate)) return { taskMdPath: candidate, state: sub };
   }
-  return findInArchive(repoRoot, taskId);
+  const archived = findInArchive(repoRoot, taskId);
+  return archived ? { taskMdPath: archived, state: 'archive' } : null;
 }
 
 /**
@@ -121,8 +135,19 @@ function enumerateTaskDirs(repoRoot: string): { taskId: string; taskDir: string 
  * prefix); callers prepend their own prefix so each command keeps its existing
  * stderr wording byte-for-byte.
  */
-function resolveTaskRef(arg: string): ResolveRefResult {
-  const repoRoot = detectRepoRoot();
+function resolveTaskRef(arg: string, options: ResolveTaskRefOptions = {}): ResolveRefResult {
+  let repoRoot: string;
+  try {
+    repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : detectRepoRoot();
+  } catch (error) {
+    return {
+      ok: false,
+      code: 'REPO_ROOT_NOT_FOUND',
+      message: error instanceof Error ? error.message : String(error),
+      repoRoot: null,
+      taskId: null
+    };
+  }
   let taskId: string;
   if (TASK_ID_RE.test(arg)) {
     taskId = arg;
@@ -130,31 +155,61 @@ function resolveTaskRef(arg: string): ResolveRefResult {
     const shortIdLength = readShortIdLength(repoRoot);
     const normalized = normalizeShortIdInput(arg, { shortIdLength });
     if (normalized.kind === 'error') {
-      return { ok: false, message: normalized.message };
+      return {
+        ok: false,
+        code: normalized.code,
+        message: normalized.message,
+        repoRoot,
+        taskId: null
+      };
     }
     if (normalized.kind === 'pass') {
       return {
         ok: false,
+        code: 'INVALID_TASK_REF',
         message:
           `'${arg}' is not a valid short id or TASK-id; ` +
-          `expected bare digits, '#N', or 'TASK-YYYYMMDD-HHMMSS'`
+          `expected bare digits, '#N', or 'TASK-YYYYMMDD-HHMMSS'`,
+        repoRoot,
+        taskId: null
       };
     }
-    try {
-      taskId = resolveShortIdToTaskId(normalized.value, repoRoot);
-    } catch (e) {
-      return { ok: false, message: (e as Error).message };
+    const shortResult = resolveShortIdReadOnly(normalized.value, repoRoot, { shortIdLength });
+    if (!shortResult.ok) {
+      return {
+        ok: false,
+        code: shortResult.code,
+        message: shortResult.message,
+        repoRoot,
+        taskId: shortResult.taskId
+      };
     }
+    taskId = shortResult.taskId;
   }
-  const taskMdPath = findTaskMd(repoRoot, taskId);
-  if (!taskMdPath) {
+  const located = findTaskMd(repoRoot, taskId);
+  if (!located) {
     return {
       ok: false,
-      message: `task ${taskId} not found in active / blocked / completed / archive`
+      code: 'TASK_NOT_FOUND',
+      message: `task ${taskId} not found in active / blocked / completed / archive`,
+      repoRoot,
+      taskId
     };
   }
-  return { ok: true, repoRoot, taskId, taskDir: path.dirname(taskMdPath), taskMdPath };
+  return {
+    ok: true,
+    repoRoot,
+    taskId,
+    taskDir: path.dirname(located.taskMdPath),
+    taskMdPath: located.taskMdPath,
+    state: located.state
+  };
 }
 
 export { resolveTaskRef, detectRepoRoot, enumerateTaskDirs, TASK_ID_RE };
-export type { ResolveRefResult };
+export type {
+  ResolveRefResult,
+  ResolveTaskRefErrorCode,
+  ResolveTaskRefOptions,
+  TaskWorkspaceState
+};

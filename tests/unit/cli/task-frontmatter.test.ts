@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseTaskFrontmatter, extractTitle } from '../../../lib/task/frontmatter.ts';
+import {
+  parseTaskFrontmatter,
+  parseTypedTaskFrontmatter,
+  updateTaskFrontmatter
+} from '../../../lib/task/frontmatter.ts';
+import { extractTitle } from '../../../lib/task/frontmatter.ts';
 
 test('parseTaskFrontmatter returns key/value map', () => {
   const fm = parseTaskFrontmatter('---\nid: TASK-1\ntype: feature\n---\nbody\n');
@@ -44,4 +49,38 @@ test('extractTitle pulls the first H1 (plain English)', () => {
 
 test('extractTitle returns empty string when no H1 found', () => {
   assert.equal(extractTitle('## not h1\nbody\n'), '');
+});
+
+test('typed frontmatter reads scalars and preserves empty values', () => {
+  assert.deepEqual(parseTypedTaskFrontmatter('---\nname: sample\ncount: 2\nenabled: true\nempty:\nnone: null\n---\n'), {
+    name: 'sample',
+    count: 2,
+    enabled: true,
+    empty: '',
+    none: null
+  });
+});
+
+test('updateTaskFrontmatter replaces and appends scalars without touching other bytes', () => {
+  const input = '---\r\nid: TASK-1\r\nunknown: keep # comment\r\n---\r\n# Body\r\n';
+  assert.equal(
+    updateTaskFrontmatter(input, { id: 'TASK-2', enabled: true, target_date: '' }),
+    '---\r\nid: TASK-2\r\nunknown: keep # comment\r\nenabled: true\r\ntarget_date:\r\n---\r\n# Body\r\n'
+  );
+});
+
+test('updateTaskFrontmatter rejects duplicate target keys', () => {
+  assert.throws(
+    () => updateTaskFrontmatter('---\nid: one\nid: two\n---\n', { id: 'three' }),
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'TASK_DOCUMENT_INVALID'
+  );
+});
+
+test('parseTypedTaskFrontmatter rejects nested frontmatter values', () => {
+  assert.throws(
+    () => parseTypedTaskFrontmatter('---\nlabels: [one, two]\n---\n'),
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'TASK_DOCUMENT_INVALID'
+  );
 });
