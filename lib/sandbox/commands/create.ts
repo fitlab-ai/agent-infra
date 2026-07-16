@@ -39,10 +39,18 @@ import {
 import { resolveTaskBranch } from '../task-resolver.ts';
 import {
   resolveTools,
+  tmpfsSeedStagingPath,
+  tmpfsSeedTargetPath,
   toolConfigDirCandidates
 } from '../tools.ts';
-import type { SandboxTool } from '../tools.ts';
+import type { SandboxTool, TmpfsSeedEntry } from '../tools.ts';
+import {
+  assertFreshSandboxReady,
+  hydrateTmpfsSeedEntries,
+  prepareTmpfsMounts
+} from '../recovery.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
+import { sandboxCoreBindMounts } from '../mounts.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
@@ -112,9 +120,7 @@ const HOST_PROXY_ENV_KEYS = [
 type SandboxCreateConfig = ReturnType<typeof loadConfig>;
 type PreparedDockerfile = ReturnType<typeof prepareDockerfile>;
 type ResolvedTool = { tool: SandboxTool; dir: string };
-type TmpfsSeedPlanEntry = {
-  stagingPath: string;
-  targetPath: string;
+type TmpfsSeedPlanEntry = TmpfsSeedEntry & {
   volumeArgs: string[];
 };
 type RuntimeCheck = { name: string; cmd: string[] };
@@ -1323,6 +1329,7 @@ export async function create(args: string[]): Promise<void> {
   const baseBranch = base ?? runSafe('git', ['-C', effectiveConfig.repoRoot, 'branch', '--show-current']);
   const expectedImageSignature = buildImageSignature(preparedDockerfile, tools);
   const engine = detectEngine(effectiveConfig);
+  let createdTmpfsSeedPlan: TmpfsSeedPlanEntry[] = [];
 
   p.intro(pc.cyan('AI Sandbox'));
   p.log.info(
@@ -1571,9 +1578,12 @@ export async function create(args: string[]): Promise<void> {
               branch,
               repoRoot: effectiveConfig.repoRoot
             });
-            const shellConfigVolumes = hostShellConfig.mounts.flatMap(({ hostPath, containerPath }) => [
+            const coreVolumes = sandboxCoreBindMounts(effectiveConfig, branch, {
+              worktree,
+              shellConfigHostDir: hostShellConfig.hostDir
+            }).flatMap(({ hostPaths, containerPath, readOnly }) => [
               '-v',
-              volumeArg(engine, hostPath, containerPath, ':ro')
+              volumeArg(engine, hostPaths[0]!, containerPath, readOnly ? ':ro' : '')
             ]);
             // Mount each declared seed read-only at an isolated staging path.
             // After docker run mounts the empty tmpfs, the container's default
@@ -1583,14 +1593,17 @@ export async function create(args: string[]): Promise<void> {
             // being exposed or written through.
             tmpfsSeedPlan = effectiveResolvedTools.flatMap(({ tool, dir }) =>
               (tool.tmpfs?.seed ?? []).flatMap((entry, index) => {
+                const targetPath = tmpfsSeedTargetPath(tool.containerMount, entry);
                 const hostPath = path.join(dir, entry);
                 if (!fs.existsSync(hostPath)) {
                   return [];
                 }
-                const stagingPath = path.posix.join('/run/agent-infra/tmpfs-seeds', tool.id, String(index));
+                const stagingPath = tmpfsSeedStagingPath(tool.id, index);
                 return [{
+                  toolId: tool.id,
+                  containerMount: tool.containerMount,
                   stagingPath,
-                  targetPath: path.posix.join(tool.containerMount, entry),
+                  targetPath,
                   volumeArgs: ['-v', volumeArg(engine, hostPath, stagingPath, ':ro')]
                 }];
               })
@@ -1630,14 +1643,7 @@ export async function create(args: string[]): Promise<void> {
               sandboxLabel(effectiveConfig),
               '--label',
               `${sandboxBranchLabel(effectiveConfig)}=${branch}`,
-              '-v',
-              volumeArg(engine, worktree, '/workspace'),
-              '-v',
-              volumeArg(engine, workspaceDir, '/workspace/.agents/workspace'),
-              '-v',
-              volumeArg(engine, shareCommon, '/share/common'),
-              '-v',
-              volumeArg(engine, shareBranch, '/share/branch'),
+              ...coreVolumes,
               ...buildClipboardVolumeArgs(engine, effectiveConfig.home),
               '-v',
               volumeArg(
@@ -1650,25 +1656,30 @@ export async function create(args: string[]): Promise<void> {
               ...tmpfsArgs,
               ...tmpfsSeedPlan.flatMap(({ volumeArgs }) => volumeArgs),
               ...liveMountVolumes,
-              ...shellConfigVolumes,
               ...envFile.dockerArgs,
               ...tzFlags,
               '-w',
               '/workspace',
               effectiveConfig.imageName
             ]);
+            createdTmpfsSeedPlan = tmpfsSeedPlan;
           } finally {
             envFile.cleanup();
           }
 
-          for (const { stagingPath, targetPath } of tmpfsSeedPlan) {
-            runEngineTaskCommand(engine, 'docker', [
-              'exec', container, 'mkdir', '-p', path.posix.dirname(targetPath)
-            ]);
-            runEngineTaskCommand(engine, 'docker', [
-              'exec', container, 'cp', '-R', '--', stagingPath, targetPath
-            ]);
-          }
+          prepareTmpfsMounts({
+            engine,
+            container,
+            mountPaths: effectiveResolvedTools
+              .filter(({ tool }) => tool.tmpfs)
+              .map(({ tool }) => tool.containerMount)
+          });
+          hydrateTmpfsSeedEntries({
+            engine,
+            container,
+            entries: tmpfsSeedPlan,
+            replace: true
+          });
 
           // Belt-and-suspenders: re-create the four shell-config symlinks at
           // runtime so users with a custom `sandbox.dockerfile` (which won't
@@ -1737,6 +1748,13 @@ export async function create(args: string[]): Promise<void> {
   }
 
   p.log.step('Verifying setup...');
+  assertFreshSandboxReady({
+    config: effectiveConfig,
+    engine,
+    branch,
+    container,
+    copiedEntries: createdTmpfsSeedPlan
+  });
   const runningContainers = runSafeEngine(engine, 'docker', ['ps', '--format', '{{.Names}}']).split('\n');
   const checks = [
     { name: 'Container running', ok: runningContainers.includes(container) },

@@ -91,7 +91,9 @@ test("sandbox exec injects the detected host timezone into docker exec", onPlatf
     );
 
     assert.equal(result.status, 0, result.stderr);
-    const execCall = fixture.readDockerCalls().find((call) => call[0] === "exec");
+    const execCall = fixture.readDockerCalls().find((call) =>
+      call[0] === "exec" && call.some((arg, index) => arg === "-e" && call[index + 1] === "TZ=Europe/Paris")
+    );
     assert.ok(execCall, "expected sandbox exec to call docker exec");
     assert.ok(
       execCall.some((arg, index) => arg === "-e" && execCall[index + 1] === "TZ=Europe/Paris"),

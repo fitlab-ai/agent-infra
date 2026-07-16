@@ -72,6 +72,20 @@ test('parseRunArgs requires task-ref for task skills', () => {
   });
 });
 
+test('parseRunArgs consumes --recreate as a sandbox recovery flag', () => {
+  assert.deepEqual(parseRunArgs(['code-task', '#7', '--recreate', '--tui', 'codex']), {
+    skill: 'code-task',
+    taskRef: '#7',
+    args: [],
+    tui: 'codex',
+    recreate: true
+  });
+  assert.throws(
+    () => parseRunArgs(['create-task', 'demo', '--recreate']),
+    /--recreate is only valid for sandbox task runs/
+  );
+});
+
 test('TUI selection uses cli override, per-skill default, command default, then codex', () => {
   assert.equal(selectTui('code-task', { cliTui: 'gemini', command: {} }), 'gemini');
   assert.equal(
@@ -132,6 +146,23 @@ test('runSkill routes create-task to host and task skills to sandbox', async () 
   });
   assert.equal(taskCode, 2);
   assert.match(calls.at(-1) ?? '', new RegExp(`^sandbox:${TASK_ID}:codex exec`));
+});
+
+test('runSkill forwards --recreate to sandbox readiness without adding it to the TUI prompt', async () => {
+  const repoRoot = writeTaskFixture();
+  let request: { recreate?: boolean; command: string[] } | undefined;
+  const code = await runSkill(['code-task', TASK_ID, '--recreate'], {
+    repoRoot,
+    command: { defaultTui: 'codex' },
+    runSandbox: async (value) => {
+      request = value;
+      return { exitCode: 0, signal: null, stdout: '', stderr: '' };
+    }
+  });
+
+  assert.equal(code, 0);
+  assert.equal(request?.recreate, true);
+  assert.equal(request?.command.includes('--recreate'), false);
 });
 
 test('runSkill prints sandbox scheduling stdout and stderr', async () => {

@@ -56,7 +56,11 @@ ai sandbox create feature/proxy --inherit-proxy
 
 `ai sandbox exec` 也会向容器透传一小组终端检测白名单变量（`TERM_PROGRAM`、`TERM_PROGRAM_VERSION`、`LC_TERMINAL`、`LC_TERMINAL_VERSION`）。这样可以让交互式 TUI 保持与宿主终端一致的行为，例如 Claude Code 的 `Shift+Enter` 换行支持，同时避免把整个宿主环境灌入容器。
 
-`ai sandbox start <branch | TASK-id | N | '#N'>` 用于恢复已停止的沙箱容器——典型场景是宿主机 Docker daemon 被重启或替换（例如在已有 Docker 上安装 OrbStack 接管），导致容器变成 `Exited`。它只启动「已存在且已停止」的容器；容器不存在时会提示改用 `ai sandbox create`，已在运行的容器则保持不动。`ai sandbox exec <branch>` 会自动执行同样的恢复：当目标容器存在但已停止时，先启动容器再进入。由于每个 worktree 和各 AI 的 state 目录都持久化在宿主机，重启已停止的容器是安全的，不会丢失数据。
+`ai sandbox start`、`ai sandbox exec` 与使用沙箱的 `ai run` 现在会在执行用户工作前共享同一套 ready 检查。已停止的容器启动后，agent-infra 会修复 tmpfs owner/mode，重水合容器内仍有 staging mount 的全部 seed，重建内置 Codex prompts 链接，并验证 mount topology、shell aliases、Codex 可用性、状态目录可写性以及本次实际复制的条目。已在运行的容器只接受无损结构检查：只要现有 seed target 可写，即使内容、时间戳或 inode 与宿主 staging 副本不同也会原样保留。恢复不会重放 custom `postSetupCmds`，custom `versionCmd` 结果仍只是 advisory。
+
+原地恢复失败时，命令会在进入容器或调度 tmux 前停止，不会自动替换容器。只有显式传入 `--recreate` 才授权 container-only fallback：`ai sandbox start --recreate <target>`、`ai sandbox exec --recreate <target> [cmd...]` 或 `ai run <skill> <task-ref> --recreate`。对于 `sandbox exec`，只有 target 之前的 flag 由宿主解析；target 之后的 `--recreate` 会透传给容器命令。替换会保留 worktree、local branch、宿主管理的工具 seed、shell 配置与 `/share` 数据，但会丢弃旧 container ID、writable layer、普通 `/tmp`、进程、tmux session 与其他 RAM 状态；该路径绝不会执行完整的 `ai sandbox rm`。
+
+tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/.codex` 下的 Codex 数据库、日志、session 与其他未列入 seed 的文件无法恢复；`config.toml`、`model-catalogs` 等声明式 seed 可以从只读 staging mount 重建；bind mount 的 worktree、凭据、shell 配置与 share 目录继续由宿主持久化。
 
 `ai sandbox ls` 保持精简：只列出当前项目的 Containers 容器表（`#` 行号、`SHORT` 任务短号，以及名称、状态、分支），不再打印 worktree 列表和各工具的 state 路径。要查看某个沙箱的这些详情，使用 `ai sandbox show <branch | TASK-id | N | '#N'>`：它会打印该分支的 worktree 路径和各工具（Claude Code、Codex、Gemini CLI、OpenCode）的 state 路径。入参契约与 `ai sandbox exec`、`ai sandbox start` 一致，因此 `ai sandbox show 11` 与 `ai sandbox show '#11'` 都会通过 `.agents/workspace/active/.short-ids.json` 解析当前任务短号。
 

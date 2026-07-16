@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { safeNameCandidates, sanitizeBranchName } from './constants.ts';
 import { hostJoin } from './engines/wsl2-paths.ts';
 
@@ -27,6 +28,36 @@ export type SandboxTool = {
   // dir stay out of the container and seeded config cannot write back.
   tmpfs?: { size?: string; seed?: string[] };
 };
+
+export type TmpfsSeedEntry = {
+  toolId: string;
+  containerMount: string;
+  stagingPath: string;
+  targetPath: string;
+};
+
+export function tmpfsSeedStagingPath(toolId: string, index: number): string {
+  return `/run/agent-infra/tmpfs-seeds/${toolId}/${index}`;
+}
+
+export function tmpfsSeedTargetPath(containerMount: string, entry: string): string {
+  const normalized = path.posix.normalize(entry);
+  if (path.posix.isAbsolute(entry) || normalized === '..' || normalized.startsWith('../')) {
+    throw new Error(`tmpfs seed entry must stay within ${containerMount}: ${entry}`);
+  }
+  return path.posix.join(containerMount, normalized);
+}
+
+export function declaredTmpfsSeedEntries(tools: SandboxTool[]): TmpfsSeedEntry[] {
+  return tools.flatMap((tool) =>
+    (tool.tmpfs?.seed ?? []).map((entry, index) => ({
+      toolId: tool.id,
+      containerMount: tool.containerMount,
+      stagingPath: tmpfsSeedStagingPath(tool.id, index),
+      targetPath: tmpfsSeedTargetPath(tool.containerMount, entry)
+    }))
+  );
+}
 
 type ToolsConfig = {
   home: string;

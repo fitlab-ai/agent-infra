@@ -3,6 +3,7 @@ import { loadConfig } from './config.ts';
 import { containerNameCandidates, sandboxBranchLabel, sandboxLabel } from './constants.ts';
 import { detectEngine } from './engine.ts';
 import { commandForEngine } from './shell.ts';
+import { ensureSandboxReady, type SandboxReadyResult } from './recovery.ts';
 import { hostTimezoneEnvFlags, terminalEnvFlags } from './commands/enter.ts';
 import {
   fetchSandboxRows,
@@ -16,6 +17,7 @@ export type SandboxCaptureRequest = {
   branch: string;
   command: string[];
   timeoutMs?: number;
+  recreate?: boolean;
 };
 
 export type SandboxCaptureResult = {
@@ -40,6 +42,11 @@ export type SandboxCaptureOptions = {
   containerCandidates?: string[];
   rows?: SandboxRow[];
   startContainer?: (name: string) => void;
+  ensureReady?: (params: {
+    branch: string;
+    row: SandboxRow;
+    allowRecreate: boolean;
+  }) => Promise<SandboxReadyResult>;
   spawn?: (file: string, args: string[]) => Promise<SandboxCaptureResult>;
 };
 
@@ -189,7 +196,26 @@ export async function runInSandbox(
       `Sandbox for ${request.branch} not found. Create it first with ai sandbox create ${request.taskRef}.`
     );
   }
-  if (!found.running) {
+  let container = found.name;
+  if (options.ensureReady) {
+    container = (await options.ensureReady({
+      branch: request.branch,
+      row: found,
+      allowRecreate: request.recreate ?? false
+    })).container;
+  } else if (config) {
+    container = (await ensureSandboxReady({
+      config,
+      engine,
+      branch: request.branch,
+      row: found,
+      allowRecreate: request.recreate,
+      recreate: async (targetBranch) => {
+        const { create } = await import('./commands/create.ts');
+        await create([targetBranch, '--no-refresh']);
+      }
+    })).container;
+  } else if (!found.running) {
     (options.startContainer ?? ((name: string) => startSandboxContainer(engine, name)))(found.name);
   }
   const runId = options.runId ?? createRunId();
@@ -198,7 +224,7 @@ export async function runInSandbox(
     'exec',
     ...terminalEnvFlags(),
     ...hostTimezoneEnvFlags(),
-    found.name,
+    container,
     'bash',
     '-lc',
     buildTmuxLauncher({ request, runId })
@@ -210,7 +236,7 @@ export async function runInSandbox(
     run: {
       runId,
       engine,
-      container: found.name,
+      container,
       runDir
     }
   };

@@ -6,6 +6,7 @@ import {
   sandboxLabel
 } from '../constants.ts';
 import { detectEngine } from '../engine.ts';
+import { ensureSandboxReady } from '../recovery.ts';
 import {
   formatCredentialWarnings,
   formatRemaining,
@@ -22,15 +23,15 @@ import {
   fetchSandboxRows,
   resolveBranchArg,
   selectSandboxContainer,
-  startSandboxContainer
 } from './list-running.ts';
 
-const USAGE = `Usage: ai sandbox exec <branch | TASK-id | N | '#N'> [cmd...]
+const USAGE = `Usage: ai sandbox exec [--recreate] <branch | TASK-id | N | '#N'> [cmd...]
 
 N (bare) and '#N' both reference the same active task short id from
 .agents/workspace/active/.short-ids.json. They resolve only via that
 registry — they do not reference a container's row position in
-'ai sandbox ls' output.`;
+'ai sandbox ls' output. --recreate is a host recovery flag only before the
+target; the same token after the target is passed to the container command.`;
 const TMUX_ENTRY_PATH = '/usr/local/bin/sandbox-tmux-entry';
 
 // Terminal-detection variables that interactive TUIs (e.g. claude-code)
@@ -123,6 +124,24 @@ export function formatCredentialSyncStatus(
   return null;
 }
 
+export function parseEnterArgs(args: string[]): {
+  target: string;
+  command: string[];
+  recreate: boolean;
+} {
+  let recreate = false;
+  let index = 0;
+  while (args[index] === '--recreate') {
+    recreate = true;
+    index += 1;
+  }
+  const target = args[index] ?? '';
+  if (!target) {
+    throw new Error(USAGE);
+  }
+  return { target, command: args.slice(index + 1), recreate };
+}
+
 export async function enter(args: string[]): Promise<number> {
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(`${USAGE}\n`);
@@ -135,8 +154,8 @@ export async function enter(args: string[]): Promise<number> {
   const config = loadConfig();
   validateClaudeCredentialsEnvOverride();
   const engine = detectEngine(config);
-  const [firstArg = '', ...cmd] = args;
-  const branch = resolveBranchArg(firstArg, { repoRoot: config.repoRoot });
+  const parsed = parseEnterArgs(args);
+  const branch = resolveBranchArg(parsed.target, { repoRoot: config.repoRoot });
   assertValidBranchName(branch);
 
   const { running, nonRunning } = fetchSandboxRows(
@@ -154,11 +173,19 @@ export async function enter(args: string[]): Promise<number> {
       `No sandbox found for branch '${branch}'. Run 'ai sandbox create ${branch}' to create one.`
     );
   }
-  if (!found.running) {
-    process.stderr.write(`Sandbox '${found.name}' is stopped; starting it...\n`);
-    startSandboxContainer(engine, found.name);
-  }
-  const container = found.name;
+  const ready = await ensureSandboxReady({
+    config,
+    engine,
+    branch,
+    row: found,
+    allowRecreate: parsed.recreate,
+    recreate: async (targetBranch) => {
+      const { create } = await import('./create.ts');
+      await create([targetBranch, '--no-refresh']);
+    }
+  });
+  const container = ready.container;
+  const cmd = parsed.command;
 
   if (config.tools.includes('claude-code')) {
     try {

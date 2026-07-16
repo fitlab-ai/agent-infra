@@ -13,6 +13,7 @@ export type ParsedRunArgs = {
   taskRef: string | null;
   args: string[];
   tui: string | null;
+  recreate?: true;
 };
 
 export type SandboxRunRequest = {
@@ -20,6 +21,7 @@ export type SandboxRunRequest = {
   branch: string;
   command: string[];
   runId?: string;
+  recreate?: boolean;
 };
 
 export type SandboxRunResult = RunProcessResult & {
@@ -35,14 +37,15 @@ export type RunSkillOptions = {
   writeStderr?: (chunk: string) => void;
 };
 
-const USAGE = `Usage: ai run <skill> [task-ref] [args...] [--tui <name>]
+const USAGE = `Usage: ai run <skill> [task-ref] [args...] [--tui <name>] [--recreate]
 
 Task skills are scheduled inside the sandbox tmux session; ai run returns once
-the tmux window is created.
+the tmux window is created. --recreate authorizes container-only replacement
+when in-place sandbox recovery fails; it is not included in the TUI prompt.
 
 Examples:
   ai run create-task "describe the task" --tui codex
-  ai run code-task #7 --tui codex`;
+  ai run code-task #7 --tui codex --recreate`;
 
 function extractTui(args: string[]): { rest: string[]; tui: string | null } {
   const rest: string[] = [];
@@ -65,17 +68,26 @@ export function parseRunArgs(args: string[]): ParsedRunArgs {
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     throw new Error(USAGE);
   }
-  const { rest, tui } = extractTui(args);
+  const { rest: withRecoveryFlags, tui } = extractTui(args);
+  const recreate = withRecoveryFlags.includes('--recreate');
+  const rest = withRecoveryFlags.filter((arg) => arg !== '--recreate');
   const [skill = '', maybeTaskRef, ...remaining] = rest;
   const spec = getSkillRunSpec(skill);
   if (!spec) throw new Error(`Unknown skill '${skill}'`);
   if (spec.kind === 'create') {
+    if (recreate) throw new Error('--recreate is only valid for sandbox task runs');
     const createArgs = rest.slice(1);
     if (createArgs.length === 0) throw new Error('create-task requires a description');
     return { skill, taskRef: null, args: createArgs, tui };
   }
   if (!maybeTaskRef) throw new Error(`${skill} requires a task-ref`);
-  return { skill, taskRef: maybeTaskRef, args: remaining, tui };
+  return {
+    skill,
+    taskRef: maybeTaskRef,
+    args: remaining,
+    tui,
+    ...(recreate ? { recreate: true as const } : {})
+  };
 }
 
 function assertAllowedByConfig(skill: string, commandConfig: Record<string, unknown>): void {
@@ -207,7 +219,13 @@ export async function runSkill(args: string[], options: RunSkillOptions = {}): P
   const runSandbox =
     options.runSandbox ??
     ((request: SandboxRunRequest) => runInSandbox(request));
-  const result = await runSandbox({ taskRef: parsed.taskRef, branch, command, runId });
+  const result = await runSandbox({
+    taskRef: parsed.taskRef,
+    branch,
+    command,
+    runId,
+    recreate: parsed.recreate
+  });
   if (result.stdout) {
     writeStdout(result.stdout);
   }

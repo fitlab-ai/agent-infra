@@ -12,6 +12,368 @@ import {
   onPlatforms,
   writeSandboxEngineFixture
 } from "../../helpers.ts";
+import {
+  classifySandboxRecovery,
+  ensureSandboxReady,
+  type SandboxRecoverySnapshot
+} from "../../../lib/sandbox/recovery.ts";
+import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
+import { tmpfsSeedTargetPath } from "../../../lib/sandbox/tools.ts";
+
+function healthyRecoverySnapshot(): SandboxRecoverySnapshot {
+  return {
+    identityOk: true,
+    mounts: [
+      {
+        path: "/home/devuser/.codex",
+        expectedType: "tmpfs",
+        actualType: "tmpfs",
+        expectedSource: null,
+        actualSource: "",
+        sourceMatches: true,
+        expectedRW: true,
+        actualRW: true,
+        sourceAccessible: true
+      }
+    ],
+    tmpfs: [
+      { path: "/home/devuser/.codex", permissionsOk: true, writable: true }
+    ],
+    seeds: [
+      {
+        toolId: "codex",
+        containerMount: "/home/devuser/.codex",
+        stagingPath: "/run/agent-infra/tmpfs-seeds/codex/0",
+        targetPath: "/home/devuser/.codex/config.toml",
+        mounted: true,
+        targetState: "ok"
+      }
+    ],
+    aliasesReadable: true,
+    codex: {
+      commandAvailable: true,
+      stateWritable: true,
+      promptsSourceExists: true,
+      promptsValid: true
+    }
+  };
+}
+
+function recoveryFixtureConfig(tmpDir: string): SandboxConfig {
+  const project = "demo";
+  const branchDir = "feature..demo";
+  const config = {
+    project,
+    containerPrefix: `${project}-dev`,
+    repoRoot: path.join(tmpDir, "repo"),
+    home: path.join(tmpDir, "home"),
+    worktreeBase: path.join(tmpDir, "worktrees", project),
+    shareBase: path.join(tmpDir, "share", project),
+    shellConfigBase: path.join(tmpDir, "config", project),
+    tools: ["codex"],
+    customTools: []
+  } as unknown as SandboxConfig;
+
+  for (const directory of [
+    config.repoRoot,
+    path.join(config.repoRoot, ".agents", "workspace"),
+    path.join(config.worktreeBase, branchDir),
+    path.join(config.shareBase, "common"),
+    path.join(config.shareBase, "branches", branchDir),
+    path.join(config.shellConfigBase, branchDir),
+    path.join(config.home, ".agent-infra", "sandboxes", "codex", project, branchDir, "model-catalogs")
+  ]) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
+  fs.writeFileSync(
+    path.join(config.home, ".agent-infra", "sandboxes", "codex", project, branchDir, "config.toml"),
+    "model = 'runtime-drift-must-survive'\n",
+    "utf8"
+  );
+  return config;
+}
+
+function recoveryFixtureMounts(config: SandboxConfig): Array<Record<string, unknown>> {
+  const branchDir = "feature..demo";
+  const seedDir = path.join(
+    config.home,
+    ".agent-infra",
+    "sandboxes",
+    "codex",
+    config.project,
+    branchDir
+  );
+  return [
+    { Type: "bind", Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
+    { Type: "bind", Source: path.join(config.repoRoot, ".agents", "workspace"), Destination: "/workspace/.agents/workspace", RW: true },
+    { Type: "bind", Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
+    { Type: "bind", Source: path.join(config.shareBase, "branches", branchDir), Destination: "/share/branch", RW: true },
+    { Type: "bind", Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false },
+    { Type: "tmpfs", Source: "", Destination: "/home/devuser/.codex", RW: true },
+    { Type: "bind", Source: path.join(seedDir, "config.toml"), Destination: "/run/agent-infra/tmpfs-seeds/codex/0", RW: false },
+    { Type: "bind", Source: path.join(seedDir, "model-catalogs"), Destination: "/run/agent-infra/tmpfs-seeds/codex/1", RW: false }
+  ];
+}
+
+test("recovery classification preserves healthy running seed content drift", () => {
+  const snapshot = healthyRecoverySnapshot();
+
+  assert.deepEqual(classifySandboxRecovery(snapshot), []);
+});
+
+test("tmpfs seed targets cannot escape the configured tool mount", () => {
+  assert.equal(
+    tmpfsSeedTargetPath("/home/devuser/.codex", "model-catalogs/models.json"),
+    "/home/devuser/.codex/model-catalogs/models.json"
+  );
+  assert.throws(
+    () => tmpfsSeedTargetPath("/home/devuser/.codex", "../../workspace"),
+    /must stay within/
+  );
+});
+
+test("recovery classification maps faults to the smallest repair kind", () => {
+  const permissions = healthyRecoverySnapshot();
+  permissions.tmpfs[0]!.permissionsOk = false;
+  assert.deepEqual(
+    classifySandboxRecovery(permissions).map((finding) => finding.repairKind),
+    ["permissions"]
+  );
+
+  const missingSeed = healthyRecoverySnapshot();
+  missingSeed.seeds[0]!.targetState = "missing";
+  assert.deepEqual(
+    classifySandboxRecovery(missingSeed).map((finding) => finding.repairKind),
+    ["missing-seed"]
+  );
+
+  const prompts = healthyRecoverySnapshot();
+  prompts.codex!.promptsValid = false;
+  assert.deepEqual(
+    classifySandboxRecovery(prompts).map((finding) => finding.repairKind),
+    ["builtin-link"]
+  );
+
+  const topology = healthyRecoverySnapshot();
+  topology.mounts[0]!.actualType = "bind";
+  assert.deepEqual(
+    classifySandboxRecovery(topology).map((finding) => finding.repairKind),
+    ["hard-failure"]
+  );
+});
+
+test("running permission repair re-assesses seed targets before hydration", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-permissions-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  let permissionsRepaired = false;
+  const writes: string[][] = [];
+
+  try {
+    const result = await ensureSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      row: {
+        name: "demo-dev-feature..demo",
+        status: "Up",
+        branch: "feature/demo",
+        running: true,
+        index: 1
+      },
+      deps: {
+        run: () => JSON.stringify([{
+          Id: "fixture-container-id",
+          Config: { Labels: { "demo.sandbox.branch": "feature/demo" } },
+          Mounts: recoveryFixtureMounts(config)
+        }]),
+        runOk: (_engine, _cmd, args) => {
+          const script = args[6] ?? "";
+          if (script.includes("stat -c") || script.includes(".agent-infra-ready-") || script.includes(".agent-infra-codex-state-")) {
+            return permissionsRepaired;
+          }
+          if (script.includes("test -e") || script.includes("test -L")) {
+            return permissionsRepaired;
+          }
+          return true;
+        },
+        runVerbose: (_engine, _cmd, args) => {
+          writes.push(args);
+          if (args.includes("chmod")) permissionsRepaired = true;
+        }
+      }
+    });
+
+    assert.equal(result.path, "recovered");
+    assert.equal(
+      writes.some((args) => args.includes("rm") || args.includes("cp")),
+      false,
+      `permission-only recovery must preserve existing runtime seeds, got ${JSON.stringify(writes)}`
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("recovery rejects mount and identity hard failures before writes", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-topology-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const worktreeSource = path.join(config.worktreeBase, "feature..demo");
+  const wrongWorktreeSource = path.join(tmpDir, "wrong-worktree");
+  fs.mkdirSync(wrongWorktreeSource, { recursive: true });
+  const liveSource = path.join(config.home, ".codex", "auth.json");
+  fs.mkdirSync(path.dirname(liveSource), { recursive: true });
+  fs.writeFileSync(liveSource, "{}\n", "utf8");
+  const baseMounts = recoveryFixtureMounts(config);
+  baseMounts.push({
+    Type: "bind",
+    Source: liveSource,
+    Destination: "/home/devuser/.codex/auth.json",
+    RW: true
+  });
+
+  const cases: Array<{
+    name: string;
+    labels: Record<string, string>;
+    mounts: Array<Record<string, unknown>>;
+    unavailableSource?: string;
+  }> = [
+    {
+      name: "wrong worktree source",
+      labels: { "demo.sandbox.branch": "feature/demo" },
+      mounts: baseMounts.map((mount) => mount.Destination === "/workspace"
+        ? { ...mount, Source: wrongWorktreeSource }
+        : mount)
+    },
+    {
+      name: "read-only worktree",
+      labels: { "demo.sandbox.branch": "feature/demo" },
+      mounts: baseMounts.map((mount) => mount.Destination === "/workspace"
+        ? { ...mount, RW: false }
+        : mount)
+    },
+    {
+      name: "inaccessible worktree source",
+      labels: { "demo.sandbox.branch": "feature/demo" },
+      mounts: baseMounts,
+      unavailableSource: worktreeSource
+    },
+    {
+      name: "inaccessible live mount source",
+      labels: { "demo.sandbox.branch": "feature/demo" },
+      mounts: baseMounts,
+      unavailableSource: liveSource
+    },
+    {
+      name: "missing live mount",
+      labels: { "demo.sandbox.branch": "feature/demo" },
+      mounts: baseMounts.filter((mount) => mount.Destination !== "/home/devuser/.codex/auth.json")
+    },
+    {
+      name: "missing branch label",
+      labels: {},
+      mounts: baseMounts
+    }
+  ];
+
+  try {
+    for (const running of [true, false]) {
+      for (const scenario of cases) {
+        if (scenario.unavailableSource) {
+          fs.rmSync(scenario.unavailableSource, { recursive: true, force: true });
+        }
+        let writes = 0;
+        const state = running ? "running" : "stopped";
+        await assert.rejects(
+          () => ensureSandboxReady({
+            config,
+            engine: "native",
+            branch: "feature/demo",
+            row: {
+              name: "demo-dev-feature..demo",
+              status: running ? "Up" : "Exited",
+              branch: "feature/demo",
+              running,
+              index: 1
+            },
+            deps: {
+              start: () => {},
+              run: () => JSON.stringify([{
+                Id: "fixture-container-id",
+                Config: { Labels: scenario.labels },
+                Mounts: scenario.mounts
+              }]),
+              runOk: () => true,
+              runVerbose: () => { writes += 1; }
+            }
+          }),
+          /Re-run with --recreate/,
+          `${state}: ${scenario.name}`
+        );
+        assert.equal(writes, 0, `${state}: ${scenario.name} must fail before runtime repair writes`);
+        fs.mkdirSync(worktreeSource, { recursive: true });
+        fs.mkdirSync(path.dirname(liveSource), { recursive: true });
+        fs.writeFileSync(liveSource, "{}\n", "utf8");
+      }
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("hard recovery failure requires explicit container replacement authorization", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-recreate-"));
+  let recreated = false;
+  let writes = 0;
+  const config = recoveryFixtureConfig(tmpDir);
+  const inspect = () => JSON.stringify([{
+    Id: "fixture-container-id",
+    Config: { Labels: { "demo.sandbox.branch": "feature/demo" } },
+    Mounts: recoveryFixtureMounts(config).map((mount) =>
+      mount.Destination === "/home/devuser/.codex"
+        ? { ...mount, Type: recreated ? "tmpfs" : "bind" }
+        : mount
+    )
+  }]);
+  const deps = {
+    run: () => inspect(),
+    runOk: () => true,
+    runVerbose: () => { writes += 1; },
+    fetchRows: () => ({
+      running: [{ name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 }],
+      nonRunning: []
+    })
+  };
+  const row = {
+    name: "demo-dev-feature..demo",
+    status: "Up",
+    branch: "feature/demo",
+    running: true,
+    index: 1
+  };
+
+  try {
+    await assert.rejects(
+      () => ensureSandboxReady({ config, engine: "native", branch: "feature/demo", row, deps }),
+      /Re-run with --recreate/
+    );
+    assert.equal(writes, 0, "hard mount failures must not mutate the running container");
+
+    const result = await ensureSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      row,
+      allowRecreate: true,
+      recreate: async () => { recreated = true; },
+      writeWarning: () => {},
+      deps
+    });
+    assert.equal(result.path, "recreated");
+    assert.equal(result.container, "demo-dev-feature..demo");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
 
 function commitInitialFile(repoDir: string): void {
   fs.writeFileSync(path.join(repoDir, "README.md"), "# demo\n", "utf8");
@@ -58,8 +420,8 @@ function isReadOnlyMountFor(arg: string, containerPath: string): boolean {
   return isMountFor(arg, containerPath) && arg.slice(arg.lastIndexOf(":") + 1).split(",").includes("ro");
 }
 
-function hasArgs(call: string[], expected: string[]): boolean {
-  return call.length === expected.length && call.every((arg, index) => arg === expected[index]);
+function hasSequence(call: string[], expected: string[]): boolean {
+  return call.some((_, start) => expected.every((arg, index) => call[start + index] === arg));
 }
 
 test("sandbox create copies codex seeds into tmpfs without binding their runtime targets", onPlatforms("linux", "darwin", "win32"), () => {
@@ -132,12 +494,12 @@ test("sandbox create copies codex seeds into tmpfs without binding their runtime
       runCall.some((arg, index) => runCall[index - 1] === "-v" && isReadOnlyMountFor(arg, "/run/agent-infra/tmpfs-seeds/codex/1")),
       `expected model-catalogs to have a read-only staging mount, got ${JSON.stringify(runCall)}`
     );
-    const configCopyIndex = dockerCalls.findIndex((call) => hasArgs(
-      call.slice(2),
+    const configCopyIndex = dockerCalls.findIndex((call) => hasSequence(
+      call,
       ["cp", "-R", "--", "/run/agent-infra/tmpfs-seeds/codex/0", "/home/devuser/.codex/config.toml"]
     ));
-    const catalogCopyIndex = dockerCalls.findIndex((call) => hasArgs(
-      call.slice(2),
+    const catalogCopyIndex = dockerCalls.findIndex((call) => hasSequence(
+      call,
       ["cp", "-R", "--", "/run/agent-infra/tmpfs-seeds/codex/1", "/home/devuser/.codex/model-catalogs"]
     ));
     assert.ok(
@@ -147,6 +509,20 @@ test("sandbox create copies codex seeds into tmpfs without binding their runtime
     assert.ok(
       catalogCopyIndex > configCopyIndex,
       `expected model-catalogs to be copied into tmpfs, got ${JSON.stringify(dockerCalls)}`
+    );
+    const permissionRepairIndex = dockerCalls.findIndex((call) =>
+      call.includes("chown") && call.includes("/home/devuser/.codex")
+    );
+    const contentVerifyIndex = dockerCalls.findIndex((call) =>
+      call.includes("diff") && call.includes("/run/agent-infra/tmpfs-seeds/codex/0")
+    );
+    assert.ok(
+      permissionRepairIndex >= 0 && permissionRepairIndex < configCopyIndex,
+      `expected tmpfs ownership to be repaired before seed copy, got ${JSON.stringify(dockerCalls)}`
+    );
+    assert.ok(
+      contentVerifyIndex > configCopyIndex,
+      `expected copied seed content to be verified, got ${JSON.stringify(dockerCalls)}`
     );
 
     // A stale logs_2.sqlite left in the host dir must NOT be re-mounted (CD-1):

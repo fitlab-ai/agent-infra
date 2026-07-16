@@ -2,7 +2,7 @@ const USAGE = `Usage: ai sandbox <command> [options]
 
 Commands:
   create <branch> [base]       Create a sandbox (VM + image + worktree + container)
-  exec <branch | TASK-id | N | '#N'> [cmd...]
+  exec [--recreate] <branch | TASK-id | N | '#N'> [cmd...]
                                Enter sandbox or run a command. N (bare) is the
                                recommended form for task short ids (e.g.
                                'ai sandbox exec 11'); '#N' is also accepted.
@@ -18,9 +18,9 @@ Commands:
   rm <branch> | --all | --purge
                                Remove one sandbox, all sandboxes not bound to an
                                active task (--all), or tear down everything (--purge)
-  start <branch | TASK-id | N | '#N'>
-                               Start an existing stopped sandbox container
-                               (e.g. after the Docker daemon restarted)
+  start [--recreate] <branch | TASK-id | N | '#N'>
+                               Verify or recover an existing sandbox container;
+                               optionally replace only the container on failure
   vm status|start|stop         Manage the sandbox VM (macOS) or check the backend (Windows)
 
 Run 'ai sandbox <command> --help' for details.`;

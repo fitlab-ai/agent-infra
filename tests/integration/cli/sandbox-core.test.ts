@@ -118,7 +118,7 @@ test("agent-infra sandbox help is wired into the main CLI", () => {
 
   assert.match(output, /Usage: ai sandbox <command> \[options\]/);
   assert.match(output, /create <branch> \[base\]/);
-  assert.match(output, /start <branch \| TASK-id \| N \| '#N'>/);
+  assert.match(output, /start \[--recreate\] <branch \| TASK-id \| N \| '#N'>/);
   assert.match(output, /^\s+refresh\s+Sync host Claude Code credentials/m);
   assert.match(output, /^\s+rebuild \[--quiet\] \[--refresh\]\s+Rebuild the sandbox image/m);
   assert.match(output, /prune \[--dry-run\]/);
@@ -1318,6 +1318,21 @@ test("sandbox list-running selectSandboxContainer matches by candidate name (cov
   assert.equal(selectSandboxContainer(rows, ["demo-dev-nope"]), null);
 });
 
+test("sandbox exec recognizes --recreate only before the target", async () => {
+  const { parseEnterArgs } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/enter.ts")>("lib/sandbox/commands/enter.js");
+
+  assert.deepEqual(parseEnterArgs(["--recreate", "feature/demo", "echo", "ok"]), {
+    target: "feature/demo",
+    command: ["echo", "ok"],
+    recreate: true
+  });
+  assert.deepEqual(parseEnterArgs(["feature/demo", "--recreate"]), {
+    target: "feature/demo",
+    command: ["--recreate"],
+    recreate: false
+  });
+});
+
 test("sandbox start boots a stopped container for the branch", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-start-exited-"));
 
@@ -1336,7 +1351,7 @@ test("sandbox start boots a stopped container for the branch", onPlatforms("linu
       calls.some((call) => call[0] === "start" && call[1] === "demo-dev-feature..restart"),
       `expected 'docker start demo-dev-feature..restart', got ${JSON.stringify(calls)}`
     );
-    assert.match(result.stdout, /Started sandbox 'demo-dev-feature\.\.restart'/);
+    assert.match(result.stdout, /Recovered sandbox 'demo-dev-feature\.\.restart'/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

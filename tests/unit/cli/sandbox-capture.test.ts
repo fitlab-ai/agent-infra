@@ -25,17 +25,20 @@ test('runInSandbox fails clearly when no sandbox container exists', async () => 
   );
 });
 
-test('runInSandbox starts stopped containers and schedules a tmux run without -it', async () => {
+test('runInSandbox waits for sandbox readiness before scheduling a tmux run without -it', async () => {
   const calls: string[] = [];
   const result = await runInSandbox(
-    { taskRef: '#7', branch: 'feature/demo', command: ['codex', 'exec', '$code-task #7'] },
+    { taskRef: '#7', branch: 'feature/demo', command: ['codex', 'exec', '$code-task #7'], recreate: true },
     {
       engine: 'native',
       runId: 'run-test-123',
       repoRoot: '/repo',
       containerCandidates: ['demo-dev-feature-demo'],
       rows: [{ name: 'demo-dev-feature-demo', status: 'Exited', branch: 'feature/demo', running: false, index: null }],
-      startContainer: (name) => calls.push(`start:${name}`),
+      ensureReady: async ({ branch, row, allowRecreate }) => {
+        calls.push(`ready:${branch}:${row.name}:${allowRecreate}`);
+        return { container: row.name, path: 'recovered', warnings: [] };
+      },
       spawn: async (file, args) => {
         calls.push(`${file} ${args.join(' ')}`);
         return { exitCode: 0, signal: null, stdout: 'ok', stderr: '' };
@@ -49,10 +52,34 @@ test('runInSandbox starts stopped containers and schedules a tmux run without -i
     container: 'demo-dev-feature-demo',
     runDir: '/tmp/agent-infra-runs/run-test-123'
   });
-  assert.equal(calls[0], 'start:demo-dev-feature-demo');
+  assert.equal(calls[0], 'ready:feature/demo:demo-dev-feature-demo:true');
   assert.match(calls[1] ?? '', /^docker exec /);
   assert.doesNotMatch(calls[1] ?? '', / -it /);
   assert.match(calls[1] ?? '', / bash -lc /);
+});
+
+test('runInSandbox does not create run state when readiness fails', async () => {
+  let spawned = false;
+  await assert.rejects(
+    () => runInSandbox(
+      { taskRef: '#7', branch: 'feature/demo', command: ['codex', 'exec', '$code-task #7'] },
+      {
+        engine: 'native',
+        repoRoot: '/repo',
+        containerCandidates: ['demo-dev-feature-demo'],
+        rows: [{ name: 'demo-dev-feature-demo', status: 'Up', branch: 'feature/demo', running: true, index: null }],
+        ensureReady: async () => {
+          throw new Error('sandbox recovery failed');
+        },
+        spawn: async () => {
+          spawned = true;
+          return { exitCode: 0, signal: null, stdout: '', stderr: '' };
+        }
+      }
+    ),
+    /sandbox recovery failed/
+  );
+  assert.equal(spawned, false);
 });
 
 test('runInSandbox launcher creates a tmux window and run status files', async () => {

@@ -361,7 +361,6 @@ test("sandbox exec enters tmux automatically for interactive shells", onPlatform
     );
 
     const dockerCalls = fixture.readDockerCalls();
-    assert.equal(dockerCalls.length, 2);
     // exec now queries all containers via fetchSandboxRows (docker ps -a + label filter).
     // Assert the stable prefix only: the Windows .cmd shim runs with shell:true and `%*`,
     // which splits the tab-bearing `--format` value into separate args. The exact format
@@ -373,7 +372,8 @@ test("sandbox exec enters tmux automatically for interactive shells", onPlatform
       "label=demo.sandbox",
       "--format"
     ]);
-    assert.deepEqual(dockerCalls[1], [
+    const interactiveCall = dockerCalls.find((call) => call[0] === "exec" && call.includes("-it"));
+    assert.deepEqual(interactiveCall, [
       "exec",
       "-it",
       "demo-dev-agent-infra-feature-cli-generic-sandbox",

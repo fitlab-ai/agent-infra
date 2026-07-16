@@ -14,6 +14,8 @@ import {
 type SandboxConfigModule = typeof import("../../../lib/sandbox/config.ts");
 type SandboxToolsModule = typeof import("../../../lib/sandbox/tools.ts");
 type SandboxCreateModule = typeof import("../../../lib/sandbox/commands/create.ts");
+type SandboxRecoveryModule = typeof import("../../../lib/sandbox/recovery.ts");
+type SandboxConfig = import("../../../lib/sandbox/config.ts").SandboxConfig;
 
 type VerboseCall = {
   type: "run" | "verbose";
@@ -24,6 +26,68 @@ type VerboseCall = {
 };
 
 const SHELL_INSTALL_CMD = 'curl -fsSL https://example.com/install.sh | bash';
+
+test("sandbox recovery does not replay custom postSetupCmds or versionCmd", async () => {
+  const recovery = await loadFreshEsm<SandboxRecoveryModule>("lib/sandbox/recovery.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-recovery-"));
+  const probes: string[][] = [];
+  const branchDir = "feature..demo";
+  const config = {
+    project: "demo",
+    repoRoot: path.join(tmpDir, "repo"),
+    home: path.join(tmpDir, "home"),
+    worktreeBase: path.join(tmpDir, "worktrees", "demo"),
+    shareBase: path.join(tmpDir, "share", "demo"),
+    shellConfigBase: path.join(tmpDir, "config", "demo"),
+    tools: ["custom-tool"],
+    customTools: [{
+      id: "custom-tool",
+      name: "Custom Tool",
+      install: { type: "shell", cmd: "true" },
+      sandboxBase: "/host/custom-tool",
+      containerMount: "/home/devuser/.custom-tool",
+      versionCmd: "custom-tool dangerous-version-check",
+      setupHint: "Custom tool",
+      postSetupCmds: ["custom-tool non-idempotent-setup"]
+    }]
+  } as unknown as SandboxConfig;
+  const mounts = [
+    { Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
+    { Source: path.join(config.repoRoot, ".agents", "workspace"), Destination: "/workspace/.agents/workspace", RW: true },
+    { Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
+    { Source: path.join(config.shareBase, "branches", branchDir), Destination: "/share/branch", RW: true },
+    { Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false }
+  ].map((mount) => ({ Type: "bind", ...mount }));
+  for (const mount of mounts) fs.mkdirSync(String(mount.Source), { recursive: true });
+
+  try {
+    const snapshot = recovery.collectSandboxRecoverySnapshot({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      container: "demo-dev-feature..demo",
+      deps: {
+        run: () => JSON.stringify([{
+          Id: "fixture-container-id",
+          Config: { Labels: { "demo.sandbox.branch": "feature/demo" } },
+          Mounts: mounts
+        }]),
+        runOk: (_engine, _cmd, args) => {
+          probes.push(args);
+          return true;
+        }
+      }
+    });
+
+    assert.equal(recovery.classifySandboxRecovery(snapshot).length, 0);
+    assert.equal(
+      probes.some((args) => args.some((arg) => arg.includes("custom-tool"))),
+      false
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
 
 function writeAirc(repoRoot: string, body: Record<string, unknown>): void {
   fs.mkdirSync(path.join(repoRoot, ".agents"), { recursive: true });
