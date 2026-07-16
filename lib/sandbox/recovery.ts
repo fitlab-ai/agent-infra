@@ -419,12 +419,13 @@ export function collectSandboxRecoverySnapshot(params: {
   }).map((expected) => {
     const actual = mountsByDestination.get(expected.path);
     const actualSource = typeof actual?.Source === 'string' ? actual.Source : null;
-    const normalizedActualSource = actualSource === null
-      ? null
-      : normalizeMountSource(params.engine, actualSource);
+    const actualSourceCandidates = actualSource === null
+      ? []
+      : sourceCandidates(params.engine, actualSource);
     const matchedHostPath = expected.hostPaths.find((hostPath) =>
-      normalizedActualSource !== null
-      && sourceCandidates(params.engine, hostPath).includes(normalizedActualSource)
+      sourceCandidates(params.engine, hostPath).some((candidate) =>
+        actualSourceCandidates.includes(candidate)
+      )
     );
     const sourceMatches = expected.expectedType === 'tmpfs'
       ? actualSource === '' || actualSource === null
@@ -467,7 +468,7 @@ export function collectSandboxRecoverySnapshot(params: {
           commandAvailable: probe(
             params.engine,
             params.container,
-            'command -v codex >/dev/null 2>&1',
+            'command -v codex',
             [],
             runOkFn
           ),
@@ -556,7 +557,7 @@ export function validateTmpfsSeedEntries(params: {
     if (!probe(
       params.engine,
       params.container,
-      'test -r "$1" && test -w "$1"',
+      'test -r "$1" -a -w "$1"',
       [entry.targetPath],
       runOkFn
     )) {
