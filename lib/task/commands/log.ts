@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { formatTable } from '../../table.ts';
 import { resolveTaskRef } from '../resolve-ref.ts';
-import { parseLedger, type LedgerRow } from '../ledger.ts';
+import { isReviewStage, parseLedger, type LedgerRow, type ReviewStage } from '../ledger.ts';
 
 const USAGE = `Usage: ai task log <N | #N | TASK-id>
 
@@ -29,7 +29,6 @@ const ENTRY_RE =
   /^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}) — \*\*(.+?)\*\* by (.+?) — (.*)$/;
 
 type LogEntry = { time: string; step: string; agent: string; note: string };
-type ReviewStage = 'analysis' | 'plan' | 'code';
 
 // One rendered row = one step instance. `started`/`done` are timestamps; an empty
 // `done` with a non-empty `started` means the step is still in flight, while an
@@ -112,10 +111,6 @@ function countHumanDecisionsByStage(rows: LedgerRow[]): Map<ReviewStage, number>
     counts.set(row.stage, (counts.get(row.stage) ?? 0) + 1);
   }
   return counts;
-}
-
-function isReviewStage(stage: string): stage is ReviewStage {
-  return stage === 'analysis' || stage === 'plan' || stage === 'code';
 }
 
 function reviewStageForStep(step: string): ReviewStage | undefined {

@@ -2,16 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { formatTable } from '../../table.ts';
 import { resolveTaskRef } from '../resolve-ref.ts';
-import { parseLedger, HUMAN_DECISION_STATUSES, type LedgerRow } from '../ledger.ts';
+import { isReviewStage, parseLedger, HUMAN_DECISION_STATUSES, type LedgerRow } from '../ledger.ts';
 import { extractSubSection } from '../sections.ts';
 
 const USAGE = `Usage: ai task decisions <N | #N | TASK-id> [selector] [options]
 
-Lists the human-decision (HD-) items recorded in a task's review disagreement
+Lists decision items recorded in a task's review disagreement
 ledger, or prints the full detail block for a single item. Read-only.
 
   <ref>          Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
-  [selector]     Ordinal (1-based) or HD id (e.g. 'HD-3') to show one item's detail.
+  [selector]     Ordinal (1-based) or ledger id (e.g. 'PL-3') to show one item's detail.
 
 Options:
   --all              Include already-decided (human-decided) items, not just pending.
@@ -22,9 +22,7 @@ Options:
 Aliased as 'ai task d'.
 `;
 
-const STAGES = new Set(['analysis', 'plan', 'code']);
 const FORMATS = new Set(['text', 'markdown']);
-const HD_ID_RE = /^HD-\d+$/;
 
 function fail(message: string): void {
   process.stderr.write(`ai task decisions: ${message}\n`);
@@ -86,7 +84,7 @@ function roundOf(file: string): number {
   return m ? Number.parseInt(m[1]!, 10) : 1;
 }
 
-// Locate the `### HD-N` detail block for a row. Prefer the artifact named by the
+// Locate the `### {ledger-id}` detail block for a row. Prefer the artifact named by the
 // row's evidence anchor; otherwise scan analysis/plan/code artifacts and return
 // the block from the highest-round file that contains it. Returns '' when none
 // is found (caller degrades gracefully — plan B3).
@@ -118,7 +116,7 @@ function findDetailBlock(row: LedgerRow, taskDir: string): string {
   return best;
 }
 
-// Pull the `## 人工裁决` record lines that mention this HD id, so a decided item
+// Pull the `## 人工裁决` record lines that mention this ledger id, so a decided item
 // shows the human's recorded ruling alongside its detail block.
 function findDecisionRecord(id: string, content: string): string[] {
   const lines = content.split('\n');
@@ -239,7 +237,7 @@ function decisions(args: string[] = []): void {
     process.exitCode = 1;
     return;
   }
-  if (parsed.stage !== undefined && !STAGES.has(parsed.stage)) {
+  if (parsed.stage !== undefined && !isReviewStage(parsed.stage)) {
     fail(`invalid --stage '${parsed.stage}' (expected analysis|plan|code)`);
     return;
   }
@@ -255,7 +253,7 @@ function decisions(args: string[] = []): void {
   }
 
   const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  let rows = parseLedger(content).filter((r) => HD_ID_RE.test(r.id));
+  let rows = parseLedger(content).filter((r) => isReviewStage(r.stage));
   rows = rows.filter((r) =>
     parsed.all ? HUMAN_DECISION_STATUSES.has(r.status) : r.status === 'needs-human-decision'
   );

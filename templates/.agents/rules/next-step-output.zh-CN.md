@@ -93,7 +93,7 @@ Completed at: YYYY-MM-DD HH:mm:ss
 
 查看详情：
   - 全部待裁决项：ai task decisions {task-ref}
-  - 单项完整背景/选项/影响/建议：ai task decisions {task-ref} <序号|HD-id>
+  - 单项完整背景/选项/影响/建议：ai task decisions {task-ref} <序号|账本ID>
 
 完成裁决：
   1. 在 task.md `## 人工裁决` 段，逐项记录你对上述裁决项的裁定与理由。

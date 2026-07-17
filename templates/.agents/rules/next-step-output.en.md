@@ -93,7 +93,7 @@ This section is a **third standalone rule, co-equal with the two above**, used o
 
 View details:
   - All pending decisions: ai task decisions {task-ref}
-  - A single item's full background/options/impact/recommendation: ai task decisions {task-ref} <ordinal|HD-id>
+  - A single item's full background/options/impact/recommendation: ai task decisions {task-ref} <ordinal|ledger-id>
 
 To resolve:
   1. In the task.md `## 人工裁决` section, record your ruling and rationale for each item above.

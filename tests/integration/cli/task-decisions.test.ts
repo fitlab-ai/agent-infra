@@ -28,7 +28,7 @@ function mkFixture(): { repoRoot: string; activeDir: string } {
 }
 
 // Write task.md with a ledger + a 人工裁决 record, and optional artifact files
-// holding `### HD-N` detail blocks.
+// holding `### <ledger-id>` detail blocks.
 function writeTask(
   activeDir: string,
   taskId: string,
@@ -52,25 +52,34 @@ function runCli(args: string[], cwd: string) {
   return spawnSync('node', [CLI_PATH, ...args], { cwd, encoding: 'utf8' });
 }
 
+const AN1_BLOCK = '### AN-1：分析边界待裁定 [needs-human-decision]\n\n- **说明**：分析 finding 已升级。\n';
 const HD1_BLOCK = '### HD-1：引用入口是否扩展 [needs-human-decision]\n\n- **背景**：是否支持更多入口。\n- **推荐**：(A) 仅三种标准形式。\n';
+const PL1_BLOCK = '### PL-1：方案回退范围 [needs-human-decision]\n\n- **说明**：方案 finding 已升级。\n';
+const CD1_BLOCK = '### CD-1：实现兼容边界 [needs-human-decision]\n\n- **说明**：代码 finding 已升级。\n';
 const HD3_BLOCK = '### HD-3：命令输出格式 [needs-human-decision]\n\n- **背景**：markdown 细节。\n- **推荐**：附锚点文本。\n';
 
-// A canonical fixture: HD-1 pending (analysis, has detail block in analysis.md),
-// HD-2 decided (plan), HD-3 pending (plan, detail block in plan.md), plus a
-// closed non-HD finding that must never appear in decisions output.
+// A canonical fixture spanning pending review findings, executor-raised
+// decisions, a decided row, terminal rows, and a post-review exemption.
 function writeCanonical(activeDir: string, taskId: string): void {
   writeTask(
     activeDir,
     taskId,
     [
-      '| AN-1 | analysis | 2 | blocker | closed | review-analysis-r2.md#AN-1 |',
+      '| AN-1 | analysis | 2 | minor | needs-human-decision | review-analysis-r2.md#AN-1 |',
       '| HD-1 | analysis | - | decision | needs-human-decision | analysis.md#HD-1 |',
+      '| PL-1 | plan | 3 | blocker | needs-human-decision | review-plan-r3.md#PL-1 |',
       '| HD-2 | plan | - | decision | human-decided | task.md#人工裁决 |',
-      '| HD-3 | plan | - | decision | needs-human-decision | plan.md#HD-3 |'
+      '| CD-1 | code | 3 | blocker | needs-human-decision | code-r3.md#CD-1 |',
+      '| HD-3 | plan | - | decision | needs-human-decision | plan.md#HD-3 |',
+      '| AN-2 | analysis | 2 | minor | closed | review-analysis-r2.md#AN-2 |',
+      '| PRC-1 | post-review-commit | - | - | human-decided | task.md#PRC-1 |'
     ],
     {
       artifacts: {
+        'review-analysis-r2.md': `# 分析审查\n\n${AN1_BLOCK}`,
         'analysis.md': `# 分析\n\n## 人工裁决待办\n\n${HD1_BLOCK}`,
+        'review-plan-r3.md': `# 方案审查\n\n${PL1_BLOCK}`,
+        'code-r3.md': `# 实现\n\n${CD1_BLOCK}`,
         'plan.md': `# 方案\n\n## 人工裁决待办\n\n${HD3_BLOCK}`
       },
       decisionRecords: ['- 2026-06-29 09:36:59+08:00 — **HD-2**：选择 A，采用独立段。']
@@ -117,18 +126,20 @@ test('A3: --help exits 0 with usage; no args exits 1 with usage', () => {
   assert.match(none.stdout, /Usage: ai task decisions/);
 });
 
-test('A4: default list shows pending HD rows with id/stage/severity/status/evidence/title', () => {
+test('A4: default list shows pending decision rows from every review stage', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000003';
   writeCanonical(activeDir, taskId);
   const out = runCli(['task', 'd', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
-  // Pending rows only (HD-1, HD-3); decided HD-2 and non-HD AN-1 excluded.
+  assert.match(out.stdout, /AN-1\s+analysis\s+minor\s+needs-human-decision\s+review-analysis-r2\.md#AN-1/);
   assert.match(out.stdout, /HD-1\s+analysis\s+decision\s+needs-human-decision\s+analysis\.md#HD-1/);
+  assert.match(out.stdout, /PL-1\s+plan\s+blocker\s+needs-human-decision\s+review-plan-r3\.md#PL-1/);
+  assert.match(out.stdout, /CD-1\s+code\s+blocker\s+needs-human-decision\s+code-r3\.md#CD-1/);
   assert.match(out.stdout, /HD-3\s+plan\s+decision\s+needs-human-decision\s+plan\.md#HD-3/);
   assert.doesNotMatch(out.stdout, /HD-2/);
-  assert.doesNotMatch(out.stdout, /AN-1/);
-  // Title comes from the `### HD-N` heading.
+  assert.doesNotMatch(out.stdout, /AN-2/);
+  assert.doesNotMatch(out.stdout, /PRC-1/);
   assert.match(out.stdout, /引用入口是否扩展/);
 });
 
@@ -142,18 +153,16 @@ test('A5: empty candidate set prints a notice and exits 0', () => {
   assert.match(out.stdout, /无待裁决项/);
 });
 
-test('A6: select a single item by ordinal and by HD id', () => {
+test('A6: select a review finding by ordinal and ledger id', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000005';
   writeCanonical(activeDir, taskId);
-  const byId = runCli(['task', 'd', taskId, 'HD-1'], repoRoot);
+  const byId = runCli(['task', 'd', taskId, 'PL-1'], repoRoot);
   assert.equal(byId.status, 0, byId.stderr);
-  assert.match(byId.stdout, /### HD-1：引用入口是否扩展/);
-  assert.match(byId.stdout, /推荐.*仅三种标准形式/);
-  // Ordinal 1 selects the first pending row (HD-1) -> same detail block.
-  const byOrdinal = runCli(['task', 'd', taskId, '1'], repoRoot);
+  assert.match(byId.stdout, /### PL-1：方案回退范围/);
+  const byOrdinal = runCli(['task', 'd', taskId, '3'], repoRoot);
   assert.equal(byOrdinal.status, 0, byOrdinal.stderr);
-  assert.match(byOrdinal.stdout, /### HD-1：引用入口是否扩展/);
+  assert.match(byOrdinal.stdout, /### PL-1：方案回退范围/);
 });
 
 test('A7: --all includes decided rows; --stage filters; --format markdown', () => {
@@ -164,10 +173,14 @@ test('A7: --all includes decided rows; --stage filters; --format markdown', () =
   const all = runCli(['task', 'd', taskId, '--all'], repoRoot);
   assert.equal(all.status, 0, all.stderr);
   assert.match(all.stdout, /HD-2\s+plan\s+decision\s+human-decided/);
+  assert.doesNotMatch(all.stdout, /PRC-1/);
 
   const stage = runCli(['task', 'd', taskId, '--all', '--stage', 'analysis'], repoRoot);
   assert.equal(stage.status, 0, stage.stderr);
+  assert.match(stage.stdout, /AN-1/);
   assert.match(stage.stdout, /HD-1/);
+  assert.doesNotMatch(stage.stdout, /PL-1/);
+  assert.doesNotMatch(stage.stdout, /CD-1/);
   assert.doesNotMatch(stage.stdout, /HD-3/);
 
   const md = runCli(['task', 'd', taskId, '--format', 'markdown'], repoRoot);
@@ -187,7 +200,8 @@ test('A8: command is read-only (task.md unchanged)', () => {
   const taskMd = path.join(activeDir, taskId, 'task.md');
   const before = fs.readFileSync(taskMd);
   runCli(['task', 'd', taskId], repoRoot);
-  runCli(['task', 'd', taskId, 'HD-1'], repoRoot);
+  runCli(['task', 'd', taskId, 'PL-1'], repoRoot);
+  runCli(['task', 'd', taskId, '3'], repoRoot);
   runCli(['task', 'd', taskId, '--all', '--format', 'markdown'], repoRoot);
   const after = fs.readFileSync(taskMd);
   assert.ok(before.equals(after), 'task.md must not be modified by decisions');
@@ -196,25 +210,23 @@ test('A8: command is read-only (task.md unchanged)', () => {
 test('B3: missing detail block degrades gracefully and exits 0', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000008';
-  // HD-1 references analysis.md#HD-1 but no artifact holds the block.
-  writeTask(activeDir, taskId, ['| HD-1 | analysis | - | decision | needs-human-decision | analysis.md#HD-1 |']);
-  const out = runCli(['task', 'd', taskId, 'HD-1'], repoRoot);
+  writeTask(activeDir, taskId, ['| CD-9 | code | 3 | blocker | needs-human-decision | review-code-r3.md#CD-9 |']);
+  const out = runCli(['task', 'd', taskId, 'CD-9'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /详情块未找到/);
 });
 
-test('PL-2: duplicate HD id errors on id select but works by ordinal', () => {
+test('PL-2: duplicate ledger id errors on id select but works by ordinal', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000009';
-  // Two rows sharing id HD-1 (a legacy collision the global allocator prevents).
   writeTask(activeDir, taskId, [
-    '| HD-1 | analysis | - | decision | needs-human-decision | analysis.md#HD-1 |',
-    '| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |'
+    '| PL-1 | analysis | 3 | blocker | needs-human-decision | analysis-r3.md#PL-1 |',
+    '| PL-1 | plan | 3 | blocker | needs-human-decision | plan-r3.md#PL-1 |'
   ]);
-  const byId = runCli(['task', 'd', taskId, 'HD-1'], repoRoot);
+  const byId = runCli(['task', 'd', taskId, 'PL-1'], repoRoot);
   assert.equal(byId.status, 1);
   assert.match(byId.stderr, /duplicate id/);
   const byOrdinal = runCli(['task', 'd', taskId, '2'], repoRoot);
   assert.equal(byOrdinal.status, 0, byOrdinal.stderr);
-  assert.match(byOrdinal.stdout, /HD-1 \(plan\/decision\)/);
+  assert.match(byOrdinal.stdout, /PL-1 \(plan\/blocker\)/);
 });

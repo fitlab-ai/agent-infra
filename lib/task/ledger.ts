@@ -17,10 +17,16 @@ type LedgerRow = {
   evidence: string;
 };
 
+type ReviewStage = 'analysis' | 'plan' | 'code';
+
 // Terminal statuses the completion gates treat as resolved.
 const LEDGER_TERMINAL = new Set(['confirmed', 'closed', 'human-decided']);
-// Statuses that represent an executor-raised human-decision row (pending or done).
+// Statuses that represent a decision row awaiting or carrying a human ruling.
 const HUMAN_DECISION_STATUSES = new Set(['needs-human-decision', 'human-decided']);
+
+function isReviewStage(stage: string): stage is ReviewStage {
+  return stage === 'analysis' || stage === 'plan' || stage === 'code';
+}
 
 // Parse all rows of the disagreement ledger table. Skips the heading, the
 // header row (`| id | ... |`) and the `|---|` separator; ignores non-`|` lines.
@@ -69,5 +75,5 @@ function nextHdId(rows: readonly LedgerRow[]): string {
   return `HD-${max + 1}`;
 }
 
-export { parseLedger, nextHdId, LEDGER_TERMINAL, HUMAN_DECISION_STATUSES };
-export type { LedgerRow };
+export { parseLedger, nextHdId, isReviewStage, LEDGER_TERMINAL, HUMAN_DECISION_STATUSES };
+export type { LedgerRow, ReviewStage };

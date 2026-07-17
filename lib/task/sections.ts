@@ -432,9 +432,9 @@ function findSectionHeading(content: string, aliases: string[]): string {
 /**
  * Return the body of the first `### {headingPrefix}` sub-section, from the
  * heading line (inclusive) to the next `### ` / `## ` heading or EOF. Used to
- * pull a single `### HD-N` human-decision detail block out of an artifact. The
- * prefix must be followed by a word boundary so `HD-1` does not match `HD-10`
- * (e.g. `### HD-1`, `### HD-1：标题`, `### HD-1 [needs-human-decision]`). Leading
+ * pull a single `### {ledger-id}` detail block out of an artifact. The prefix
+ * must be followed by a word boundary so `PL-1` does not match `PL-10`
+ * (e.g. `### PL-1`, `### PL-1：标题`, `### PL-1 [needs-human-decision]`). Leading
  * and trailing blank lines are trimmed. Returns '' when no match is present.
  */
 function extractSubSection(content: string, headingPrefix: string): string {

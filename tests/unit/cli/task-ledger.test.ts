@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseLedger, nextHdId } from '../../../lib/task/ledger.ts';
+import { isReviewStage, parseLedger, nextHdId } from '../../../lib/task/ledger.ts';
 
 const HEADER = '| id | stage | round | severity | status | evidence |';
 const SEP = '|----|-------|-------|----------|--------|----------|';
@@ -51,6 +51,13 @@ test('parseLedger stops at the next H2 and ignores malformed rows', () => {
   );
   assert.equal(rows.length, 1);
   assert.equal(rows[0]!.id, 'HD-1');
+});
+
+test('isReviewStage accepts workflow review stages and rejects reserved stages', () => {
+  assert.equal(isReviewStage('analysis'), true);
+  assert.equal(isReviewStage('plan'), true);
+  assert.equal(isReviewStage('code'), true);
+  assert.equal(isReviewStage('post-review-commit'), false);
 });
 
 test('nextHdId returns HD-1 for an empty ledger', () => {
