@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { formatTable } from '../../table.ts';
 import { resolveTaskRef } from '../resolve-ref.ts';
-import { isReviewStage, parseLedger, HUMAN_DECISION_STATUSES, type LedgerRow } from '../ledger.ts';
+import { isReviewStage, parseLedger, type LedgerRow, type ReviewStage } from '../ledger.ts';
+import { listDecisionItems, selectDecisionItem } from '../decision-items.ts';
 import { extractSubSection } from '../sections.ts';
 
 const USAGE = `Usage: ai task decisions <N | #N | TASK-id> [selector] [options]
@@ -121,7 +122,7 @@ function findDetailBlock(row: LedgerRow, taskDir: string): string {
 function findDecisionRecord(id: string, content: string): string[] {
   const lines = content.split('\n');
   let i = 0;
-  while (i < lines.length && !/^##\s+(人工裁决|Human Decisions?)\s*$/.test(lines[i]!)) i += 1;
+  while (i < lines.length && !/^##\s+(人工裁决|Human Rulings|Human Decisions?)\s*$/.test(lines[i]!)) i += 1;
   if (i >= lines.length) return [];
   const idRe = new RegExp(`(^|[^\\w-])${id}(?![\\w-])`);
   const out: string[] = [];
@@ -179,29 +180,12 @@ function renderDetail(
   taskDir: string,
   content: string
 ): void {
-  let row: LedgerRow | undefined;
-  if (/^\d+$/.test(selector)) {
-    const idx = Number.parseInt(selector, 10) - 1;
-    if (idx < 0 || idx >= rows.length) {
-      fail(`ordinal '${selector}' out of range (1..${rows.length})`);
-      return;
-    }
-    row = rows[idx];
-  } else {
-    const want = selector.toUpperCase();
-    const matches = rows.filter((r) => r.id.toUpperCase() === want);
-    if (matches.length === 0) {
-      fail(`no decision item matches '${selector}'`);
-      return;
-    }
-    if (matches.length > 1) {
-      fail(`duplicate id '${selector}' in ledger; select by ordinal instead`);
-      return;
-    }
-    row = matches[0];
+  const selected = selectDecisionItem(rows, selector);
+  if (!selected.ok) {
+    fail(selected.message);
+    return;
   }
-
-  const r = row!;
+  const r = selected.row;
   const block = findDetailBlock(r, taskDir);
   const lines: string[] = [];
   if (format === 'markdown') {
@@ -253,11 +237,10 @@ function decisions(args: string[] = []): void {
   }
 
   const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  let rows = parseLedger(content).filter((r) => isReviewStage(r.stage));
-  rows = rows.filter((r) =>
-    parsed.all ? HUMAN_DECISION_STATUSES.has(r.status) : r.status === 'needs-human-decision'
-  );
-  if (parsed.stage !== undefined) rows = rows.filter((r) => r.stage === parsed.stage);
+  const rows = listDecisionItems(parseLedger(content), {
+    includeDecided: parsed.all,
+    stage: parsed.stage as ReviewStage | undefined
+  });
 
   const selector = parsed.positionals[1];
   if (selector === undefined) {

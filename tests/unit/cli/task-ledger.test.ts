@@ -24,7 +24,8 @@ test('parseLedger reads all six columns and skips header/separator', () => {
     round: '2',
     severity: 'blocker',
     status: 'closed',
-    evidence: 'review-analysis-r2.md#AN-1'
+    evidence: 'review-analysis-r2.md#AN-1',
+    sourceLine: 2
   });
   assert.equal(rows[1]!.id, 'HD-1');
   assert.equal(rows[1]!.status, 'human-decided');

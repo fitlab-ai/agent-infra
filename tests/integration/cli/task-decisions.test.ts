@@ -33,7 +33,7 @@ function writeTask(
   activeDir: string,
   taskId: string,
   ledgerRows: string[],
-  opts: { artifacts?: Record<string, string>; decisionRecords?: string[] } = {}
+  opts: { artifacts?: Record<string, string>; decisionHeading?: string; decisionRecords?: string[] } = {}
 ): void {
   const dir = path.join(activeDir, taskId);
   fs.mkdirSync(dir, { recursive: true });
@@ -41,7 +41,7 @@ function writeTask(
   const records = (opts.decisionRecords ?? []).join('\n');
   fs.writeFileSync(
     path.join(dir, 'task.md'),
-    `---\nid: ${taskId}\nbranch: feat\n---\n# 任务：${taskId}\n\n${ledger}\n## 人工裁决\n\n${records}\n\n## 完成检查清单\n\n- [ ] done\n`
+    `---\nid: ${taskId}\nbranch: feat\n---\n# 任务：${taskId}\n\n${ledger}\n## ${opts.decisionHeading ?? '人工裁决'}\n\n${records}\n\n## 完成检查清单\n\n- [ ] done\n`
   );
   for (const [name, body] of Object.entries(opts.artifacts ?? {})) {
     fs.writeFileSync(path.join(dir, name), body);
@@ -207,6 +207,19 @@ test('A8: command is read-only (task.md unchanged)', () => {
   assert.ok(before.equals(after), 'task.md must not be modified by decisions');
 });
 
+test('CD-1: decided detail finds records under the Human Rulings heading', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000010';
+  writeTask(activeDir, taskId, ['| HD-2 | plan | - | decision | human-decided | task.md#HDR-1 |'], {
+    decisionHeading: 'Human Rulings',
+    decisionRecords: ['- **Original Ledger ID**: HD-2']
+  });
+
+  const out = runCli(['task', 'd', taskId, '--all', 'HD-2'], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /人工裁定：\n- \*\*Original Ledger ID\*\*: HD-2/);
+});
+
 test('B3: missing detail block degrades gracefully and exits 0', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000008';
@@ -220,7 +233,7 @@ test('PL-2: duplicate ledger id errors on id select but works by ordinal', () =>
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000009';
   writeTask(activeDir, taskId, [
-    '| PL-1 | analysis | 3 | blocker | needs-human-decision | analysis-r3.md#PL-1 |',
+    '| PL-1 | plan | 2 | major | needs-human-decision | plan-r2.md#PL-1 |',
     '| PL-1 | plan | 3 | blocker | needs-human-decision | plan-r3.md#PL-1 |'
   ]);
   const byId = runCli(['task', 'd', taskId, 'PL-1'], repoRoot);

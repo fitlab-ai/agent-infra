@@ -62,7 +62,7 @@ pr_status: pending             # PR 状态：pending（默认）| created（已�
 
 ## 人工裁决
 
-<!-- 人类在此记录对 needs-human-decision 决策的裁定，并把 ## 审查分歧账本 对应 HD- 行翻为 human-decided。 -->
+<!-- 使用 ai decide <task-ref> <序号|账本ID> <裁决内容> 写入 needs-human-decision 裁定；命令会创建 HDR-N 记录并原子更新账本、evidence 与活动日志。 -->
 
 ## 工作流告警
 

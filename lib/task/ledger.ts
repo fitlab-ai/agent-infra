@@ -15,6 +15,8 @@ type LedgerRow = {
   severity: string;
   status: string;
   evidence: string;
+  /** Zero-based line within the normalized ledger section body. */
+  sourceLine: number;
 };
 
 type ReviewStage = 'analysis' | 'plan' | 'code';
@@ -37,8 +39,10 @@ function parseLedger(content: string): LedgerRow[] {
   while (i < lines.length && !LEDGER_HEADING_RE.test(lines[i]!)) i += 1;
   if (i >= lines.length) return [];
 
+  let bodyStart = i + 1;
+  while (bodyStart < lines.length && lines[bodyStart]!.trim() === '') bodyStart += 1;
   const rows: LedgerRow[] = [];
-  for (let j = i + 1; j < lines.length; j += 1) {
+  for (let j = bodyStart; j < lines.length; j += 1) {
     if (NEXT_H2_RE.test(lines[j]!)) break;
     const line = lines[j]!.trim();
     if (!line.startsWith('|')) continue;
@@ -54,7 +58,8 @@ function parseLedger(content: string): LedgerRow[] {
       round: cells[2]!,
       severity: cells[3]!,
       status: cells[4]!,
-      evidence: cells[5]!
+      evidence: cells[5]!,
+      sourceLine: j - bodyStart
     });
   }
   return rows;

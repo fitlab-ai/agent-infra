@@ -14,6 +14,7 @@
 - [ ] 后续设计阶段是否有足够输入
 - [ ] 与原始 Issue / 用户需求是否一致
 - [ ] 已复核执行方是否漏标应升级为 `[needs-human-decision]` 的关键设计决策
+- [ ] 本轮所有 `needs-human-decision` 详情均符合 `.agents/rules/human-decision-context.md` 的自足结构
 - [ ] 每条 blocker 都配可复现的 grep/sed/nl 证据，未直接验证的结论已在「自我质疑」声明
 
 **常见反例**：

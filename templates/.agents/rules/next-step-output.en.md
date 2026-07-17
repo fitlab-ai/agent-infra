@@ -96,8 +96,9 @@ View details:
   - A single item's full background/options/impact/recommendation: ai task decisions {task-ref} <ordinal|ledger-id>
 
 To resolve:
-  1. In the task.md `## 人工裁决` section, record your ruling and rationale for each item above.
-  2. Flip the status of the matching row in `## 审查分歧账本` from `needs-human-decision` to `human-decided`.
+  - ai decide {task-ref} <ordinal|ledger-id> <decision and rationale>
+
+This command atomically creates the `HDR-N` ruling record, flips the target ledger row to `human-decided`, and updates evidence and the activity log; do not manually edit only part of the transaction.
 
 Note: until all those rows are flipped to `human-decided`, running the next-stage command directly will be blocked by gates such as complete-task (`needs-human-decision` is non-terminal). The next-stage commands are still listed below for use after the decisions are made.
 ```

@@ -1,10 +1,11 @@
 import fs from 'node:fs';
-import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { VERSION } from './version.ts';
+import { isDecisionItem, listDecisionItems, selectDecisionItem } from './task/decision-items.ts';
+import { parseLedger, type LedgerRow } from './task/ledger.ts';
+import { extractSection, findSectionHeading } from './task/sections.ts';
 import { resolveTaskRef } from './task/resolve-ref.ts';
-
-const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
+import { writeTask } from './task/write.ts';
+import type { SectionMutation } from './task/write.ts';
 
 type DecideOptions = {
   repoRoot?: string;
@@ -12,12 +13,9 @@ type DecideOptions = {
   version?: string;
 };
 
-function detectRepoRoot(): string {
-  return execFileSync('git', ['rev-parse', '--show-toplevel'], {
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe']
-  }).trim();
-}
+const LEDGER_ALIASES = ['审查分歧账本', 'Review Disagreement Ledger'];
+const DECISION_ALIASES = ['人工裁决', 'Human Rulings', 'Human Decisions', 'Human Decision'];
+const ACTIVITY_ALIASES = ['活动日志', 'Activity Log'];
 
 function defaultNow(): string {
   return new Intl.DateTimeFormat('sv-SE', {
@@ -34,84 +32,115 @@ function defaultNow(): string {
     .replace(' GMT', '');
 }
 
-function taskPath(repoRoot: string, ref: string): string {
-  if (!TASK_ID_RE.test(ref)) {
-    const resolved = resolveTaskRef(ref);
-    if (!resolved.ok) throw new Error(resolved.message);
-    if (!resolved.taskDir.includes(`${path.join('.agents', 'workspace', 'active')}${path.sep}`)) {
-      throw new Error(`task ${resolved.taskId} is not active`);
-    }
-    return resolved.taskMdPath;
+function nextDecisionRecordId(content: string): string {
+  let max = 0;
+  for (const match of content.matchAll(/^###\s+HDR-(\d+)\s*$/gm)) {
+    max = Math.max(max, Number.parseInt(match[1]!, 10));
   }
-  const candidate = path.join(repoRoot, '.agents', 'workspace', 'active', ref, 'task.md');
-  if (!fs.existsSync(candidate)) throw new Error(`active task not found: ${ref}`);
-  return candidate;
+  return `HDR-${max + 1}`;
 }
 
-function replaceFrontmatterField(content: string, field: string, value: string): string {
-  const re = new RegExp(`^${field}:.*$`, 'm');
-  if (re.test(content)) return content.replace(re, `${field}: ${value}`);
-  return content.replace(/^---\n/, `---\n${field}: ${value}\n`);
+function classifyMissingTarget(rows: LedgerRow[], selector: string): string {
+  const matches = rows.filter((row) => row.id.toUpperCase() === selector.toUpperCase());
+  const valid = matches.filter(isDecisionItem);
+  if (valid.some((row) => row.status === 'human-decided')) return `${selector} is already decided`;
+  if (valid.length > 0) return `${selector} is not a pending review decision`;
+  if (matches.length > 0 || !/^(AN|PL|CD|HD)-\d+$/i.test(selector)) {
+    return `${selector} is an invalid decision item`;
+  }
+  return `${selector} not found in review ledger`;
 }
 
-function replaceLedgerRow(content: string, hdId: string): { content: string; found: boolean; pending: boolean } {
-  const lines = content.split('\n');
-  let found = false;
-  let pending = false;
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i] as string;
-    if (!line.trim().startsWith(`| ${hdId} |`)) continue;
-    found = true;
-    const cells = line.split('|').slice(1, -1).map((cell) => cell.trim());
-    if (cells[4] !== 'needs-human-decision') break;
-    pending = true;
-    cells[4] = 'human-decided';
-    cells[5] = `task.md#${hdId}`;
-    lines[i] = `| ${cells.join(' | ')} |`;
-    break;
+function updatedLedgerBody(content: string, row: LedgerRow, recordId: string): string {
+  const body = extractSection(content, LEDGER_ALIASES);
+  if (!body) throw new Error('review disagreement ledger section is missing or empty');
+  const lines = body.split('\n');
+  const source = lines[row.sourceLine];
+  if (!source?.trim().startsWith('|')) throw new Error(`ledger source line for ${row.id} is invalid`);
+  const cells = source.split('|').slice(1, -1).map((cell) => cell.trim());
+  if (cells.length < 6 || cells[0] !== row.id || cells[4] !== 'needs-human-decision') {
+    throw new Error(`ledger source line for ${row.id} no longer matches the selected item`);
   }
-  return { content: lines.join('\n'), found, pending };
+  cells[4] = 'human-decided';
+  cells[5] = `task.md#${recordId}`;
+  lines[row.sourceLine] = `| ${cells.join(' | ')} |`;
+  return lines.join('\n');
 }
 
-function appendUnderHeading(content: string, heading: string, block: string): string {
-  if (!content.includes(`${heading}\n`)) {
-    return `${content.trimEnd()}\n\n${heading}\n\n${block}\n`;
-  }
-  const idx = content.indexOf(`${heading}\n`) + heading.length + 1;
-  const before = content.slice(0, idx);
-  const after = content.slice(idx);
-  return `${before}\n${block}\n${after.replace(/^\n/, '')}`;
+function prependBlock(body: string, block: string): string {
+  return body ? `${block}\n\n${body}` : block;
+}
+
+function appendLine(body: string, line: string): string {
+  return body ? `${body}\n${line}` : line;
 }
 
 export async function decide(args: string[], options: DecideOptions = {}): Promise<number> {
-  const [taskRef, hdId, ...decisionParts] = args;
-  if (!taskRef || !hdId || decisionParts.length === 0) {
-    process.stderr.write('Usage: ai decide <task-ref> <HD-id> <decision>\n');
+  const [taskRef, selector, ...decisionParts] = args;
+  if (!taskRef || !selector || decisionParts.length === 0) {
+    process.stderr.write('Usage: ai decide <task-ref> <ordinal|ledger-id> <decision>\n');
     return 1;
   }
   try {
-    const repoRoot = options.repoRoot ?? detectRepoRoot();
-    const file = taskPath(repoRoot, taskRef);
-    let content = fs.readFileSync(file, 'utf8');
-    const replaced = replaceLedgerRow(content, hdId);
-    if (!replaced.found) throw new Error(`${hdId} not found in review ledger`);
-    if (!replaced.pending) throw new Error(`${hdId} is not needs-human-decision`);
-    content = replaced.content;
+    const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+    if (!resolved.ok) throw new Error(resolved.message);
+    if (resolved.state !== 'active') throw new Error(`task ${resolved.taskId} is not active`);
+
+    const content = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    const allRows = parseLedger(content);
+    const candidates = listDecisionItems(allRows);
+    const selected = selectDecisionItem(candidates, selector);
+    if (!selected.ok) {
+      if (selected.code === 'not-found' && !/^-?\d+$/.test(selector)) {
+        throw new Error(classifyMissingTarget(allRows, selector));
+      }
+      throw new Error(selected.message);
+    }
+
     const now = (options.now ?? defaultNow)();
-    content = replaceFrontmatterField(content, 'updated_at', now);
-    content = replaceFrontmatterField(content, 'agent_infra_version', options.version ?? VERSION);
+    const recordId = nextDecisionRecordId(content);
+    const ledgerBody = updatedLedgerBody(content, selected.row, recordId);
+    const decisionBody = extractSection(content, DECISION_ALIASES);
+    const activityBody = extractSection(content, ACTIVITY_ALIASES);
+    if (!activityBody && !ACTIVITY_ALIASES.some((heading) => content.includes(`## ${heading}`))) {
+      throw new Error('activity log section is missing');
+    }
     const decision = decisionParts.join(' ');
-    content = appendUnderHeading(
-      content,
-      '## 人工裁决',
-      `### ${hdId}\n\n- **裁决时间**：${now}\n- **裁决结果**：${decision}`
+    const record = `### ${recordId}\n\n- **原账本 ID**：${selected.row.id}\n- **裁决时间**：${now}\n- **裁决结果**：${decision}`;
+    const mutations: SectionMutation[] = [
+      {
+        kind: 'section',
+        aliases: LEDGER_ALIASES,
+        heading: findSectionHeading(content, LEDGER_ALIASES),
+        body: ledgerBody
+      },
+      {
+        kind: 'section',
+        aliases: DECISION_ALIASES,
+        heading: findSectionHeading(content, DECISION_ALIASES),
+        body: prependBlock(decisionBody, record)
+      },
+      {
+        kind: 'section',
+        aliases: ACTIVITY_ALIASES,
+        heading: findSectionHeading(content, ACTIVITY_ALIASES),
+        body: appendLine(
+          activityBody,
+          `- ${now} — **Human Decision** by human — ${selected.row.id} decided → ${recordId}`
+        )
+      }
+    ];
+    const result = writeTask(
+      { taskRef, expectedState: 'active', mutations },
+      {
+        repoRoot: options.repoRoot,
+        metadataProvider: () => ({
+          timestamp: now,
+          agentInfraVersion: options.version ?? VERSION
+        })
+      }
     );
-    content = appendUnderHeading(
-      content,
-      '## 活动日志',
-      `- ${now} — **Human Decision** by human — ${hdId} decided`
-    );
-    fs.writeFileSync(file, content);
+    if (result.status === 'failed') throw new Error(result.error.message);
     return 0;
   } catch (error) {
     process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);

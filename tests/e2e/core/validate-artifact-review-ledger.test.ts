@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
+
+import { CLI_PATH } from "../../helpers.ts";
 
 import {
   buildTaskFrontmatter,
@@ -149,6 +153,40 @@ test("review-ledger keeps HD decision rows blocking until human-decided", async 
     ]));
     const ruled = runLedger("code-task", taskDir);
     assert.equal(ruled.payload.status, "pass", ruled.result.stdout);
+  });
+});
+
+test("review-ledger recognizes the evidence written by the real decide command", async () => {
+  await withTempRoot("agent-infra-ledger-decide-", (tempRoot) => {
+    spawnSync("git", ["init", "--quiet"], { cwd: tempRoot });
+    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({ project: "demo" }));
+    const taskDir = path.join(tempRoot, ".agents", "workspace", "active", TASK_ID);
+    const pending = [
+      buildTaskFrontmatter({ id: TASK_ID, current_step: "code-review" }),
+      "",
+      "# 任务：真实裁决门禁",
+      "",
+      ...LEDGER_HEADER,
+      "| CD-1 | code | 1 | blocker | needs-human-decision | review-code.md#CD-1 |",
+      "",
+      "## 人工裁决",
+      "",
+      "## 活动日志",
+      "",
+      "- 2026-03-28 00:00:00+00:00 — **Review Code** by codex — pending"
+    ].join("\n");
+    write(path.join(taskDir, "task.md"), pending);
+
+    assert.equal(runLedger("complete-task", taskDir).payload.status, "fail");
+    const decided = spawnSync("node", [CLI_PATH, "decide", TASK_ID, "CD-1", "accept reviewer guidance"], {
+      cwd: tempRoot,
+      encoding: "utf8"
+    });
+    assert.equal(decided.status, 0, decided.stderr);
+    const content = fs.readFileSync(path.join(taskDir, "task.md"), "utf8");
+    assert.match(content, /\| CD-1 \| code \| 1 \| blocker \| human-decided \| task\.md#HDR-1 \|/);
+    assert.match(content, /^### HDR-1$/m);
+    assert.equal(runLedger("complete-task", taskDir).payload.status, "pass");
   });
 });
 

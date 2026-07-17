@@ -75,6 +75,8 @@ test("required template files were migrated into templates/", () => {
     "templates/.agents/rules/version-stamp.zh-CN.md",
     "templates/.agents/rules/no-mid-flow-questions.en.md",
     "templates/.agents/rules/no-mid-flow-questions.zh-CN.md",
+    "templates/.agents/rules/human-decision-context.en.md",
+    "templates/.agents/rules/human-decision-context.zh-CN.md",
     "templates/.agents/README.en.md",
     "templates/.agents/QUICKSTART.en.md",
     "templates/.agents/skills/archive-tasks/SKILL.en.md",
@@ -126,6 +128,63 @@ test("required template files were migrated into templates/", () => {
 
   requiredFiles.forEach((relativePath) => {
     assert.ok(exists(relativePath), `Missing migrated template file: ${relativePath}`);
+  });
+});
+
+test("human-decision context rules define complete comparable option blocks", () => {
+  for (const [relativePath, fields, optionPattern, benefit, cost] of [
+    [
+      ".agents/rules/human-decision-context.md",
+      ["背景", "裁决目标", "影响范围", "风险", "推荐方案", "推荐理由"],
+      /^#### 方案 [A-Z]：/gm,
+      "收益",
+      "代价"
+    ],
+    [
+      "templates/.agents/rules/human-decision-context.en.md",
+      ["Background", "Decision Objective", "Impact Scope", "Risks", "Recommended Option", "Recommendation Rationale"],
+      /^#### Option [A-Z]:/gm,
+      "Benefits",
+      "Costs"
+    ],
+    [
+      "templates/.agents/rules/human-decision-context.zh-CN.md",
+      ["背景", "裁决目标", "影响范围", "风险", "推荐方案", "推荐理由"],
+      /^#### 方案 [A-Z]：/gm,
+      "收益",
+      "代价"
+    ]
+  ] as Array<[string, string[], RegExp, string, string]>) {
+    const content = read(relativePath);
+    fields.forEach((field) => assert.match(content, new RegExp(`^- \\*\\*${escapeRegExp(field)}\\*\\*`, "m")));
+    const options = [...content.matchAll(optionPattern)];
+    assert.ok(options.length >= 2, `${relativePath} should define at least two options`);
+    options.forEach((option, index) => {
+      const start = option.index ?? 0;
+      const end = options[index + 1]?.index ?? content.indexOf("```", start);
+      const block = content.slice(start, end);
+      assert.match(block, new RegExp(`^- \\*\\*${escapeRegExp(benefit)}\\*\\*`, "m"));
+      assert.match(block, new RegExp(`^- \\*\\*${escapeRegExp(cost)}\\*\\*`, "m"));
+    });
+  }
+});
+
+test("decision-producing workflow docs reference the shared context contract", () => {
+  const sources = [
+    ".agents/skills/analyze-task/SKILL.md",
+    ".agents/skills/plan-task/SKILL.md",
+    ".agents/skills/code-task/SKILL.md",
+    ...["review-analysis", "review-plan", "review-code"].flatMap((skill) => [
+      `.agents/skills/${skill}/reference/report-template.md`,
+      `.agents/skills/${skill}/reference/review-criteria.md`
+    ])
+  ];
+  const templates = sources.flatMap((source) => {
+    const base = source.replace(/^\.agents\//, "templates/.agents/");
+    return [base.replace(/\.md$/, ".en.md"), base.replace(/\.md$/, ".zh-CN.md")];
+  });
+  [...sources, ...templates].forEach((relativePath) => {
+    assert.match(read(relativePath), /\.agents\/rules\/human-decision-context\.md/);
   });
 });
 

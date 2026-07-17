@@ -60,7 +60,7 @@
 
 | 命令 | 角色 | 执行路径 |
 |------|------|----------|
-| `/decide <task-ref> <HD-id> <裁定>` | `exec` | `ai decide ...` |
+| `/decide <task-ref> <序号\|账本ID> <裁定>` | `exec` | `ai decide ...` |
 | `/help`、`/ping`、`/version` | 公开内置 | daemon |
 | `/run create-task <描述> [--tui <name>]` | `exec` | 在宿主环境执行 `ai run create-task ...` |
 | `/run <skill> <task-ref> [args...] [--tui <name>]` | `exec` | `ai run ...`；任务态 skill 在匹配沙箱中执行 |

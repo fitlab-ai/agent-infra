@@ -190,14 +190,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 ## 人工裁决待办
 
 > Write this section only when this round upgraded a `[needs-human-decision]` key design decision; omit otherwise.
-> One `### HD-N` block per item (`HD-N` is globally unique, see `.agents/rules/review-handshake.md`), and upsert the matching `HD-` row in task.md `## Review Disagreement Ledger` (evidence pointing to `{analysis-artifact}#HD-N`).
-
-### HD-{N}：{title} [needs-human-decision]
-
-- **Background**: {why it became a pending decision}
-- **Options**: {A / B / …}
-- **Impact**: {scope / boundaries / precedent}
-- **Recommendation**: {recommended option and rationale}
+> Write one self-contained `### HD-N` block per `.agents/rules/human-decision-context.md` (`HD-N` is globally unique, see `.agents/rules/review-handshake.md`), and upsert the matching `HD-` row in task.md `## Review Disagreement Ledger` (evidence pointing to `{analysis-artifact}#HD-N`).
 
 ## Effort and Complexity Assessment
 - Complexity: {High/Medium/Low}

@@ -14,6 +14,7 @@
 - [ ] 风险、迁移、回滚或兼容性处理是否充分
 - [ ] 方案是否避免过度设计和无关扩张
 - [ ] 已复核执行方是否漏标应升级为 `[needs-human-decision]` 的关键设计决策
+- [ ] 本轮所有 `needs-human-decision` 详情均符合 `.agents/rules/human-decision-context.md` 的自足结构
 - [ ] 每条 blocker 都配可复现的 grep/sed/nl 证据，未直接验证的结论已在「自我质疑」声明
 
 **常见反例**：

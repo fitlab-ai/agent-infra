@@ -62,7 +62,7 @@ pr_status: pending             # PR status: pending (default) | created (PR crea
 
 ## Human Rulings
 
-<!-- Humans record rulings for needs-human-decision decisions here and flip matching HD- rows in the Review Disagreement Ledger to human-decided. -->
+<!-- Use ai decide <task-ref> <ordinal|ledger-id> <decision> for needs-human-decision rulings; it creates an HDR-N record and atomically updates the ledger, evidence, and activity log. -->
 
 ## Workflow Warnings
 

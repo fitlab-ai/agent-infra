@@ -67,7 +67,7 @@ The single source of truth for disagreement state is the fixed `## 审查分歧�
 
 ### Executor-raised human-ruling rows
 
-When an executor judges an item to be a key design decision that needs human ruling, it must write the detail block (background / options / impact / recommendation) into the artifact's `## 人工裁决待办` (Pending Human Decisions) section with a heading like `### HD-N：<title> [needs-human-decision]`, and upsert the matching `HD-` row in task.md `## Review Disagreement Ledger`:
+When an executor judges an item to be a key design decision that needs human ruling, it must write a self-contained detail block per `.agents/rules/human-decision-context.md` into the artifact's `## 人工裁决待办` (Pending Human Decisions) section with a heading like `### HD-N：<title> [needs-human-decision]`, and upsert the matching `HD-` row in task.md `## Review Disagreement Ledger`:
 
 ```markdown
 | HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |
@@ -79,9 +79,9 @@ When an executor judges an item to be a key design decision that needs human rul
 - `severity` is always `decision`.
 - `status` starts as `needs-human-decision`, so the existing gate blocks it.
 - `evidence` points to the stable anchor `<artifact>#HD-N` (e.g. `plan-r2.md#HD-1`), not a drift-prone line number.
-- After a human records the ruling in task.md `## Human Rulings`, flip the matching `HD-` row to `human-decided` and point `evidence` to that ruling.
+- A human records the ruling with `ai decide <task-ref> <ordinal|ledger-id> <decision>`; the command flips the target row to `human-decided` and points `evidence` to an independent `HDR-N` ruling record.
 
-> View: `ai task decisions <task-ref>` lists all pending decisions from review stages; `ai task decisions <task-ref> <ordinal|ledger-id>` expands a single item's detail block. This command shares the ledger parser `lib/task/ledger.ts` with `ai task log`; the gate parser in `.agents/scripts/validate-artifact.js` is a separate implementation and the two must be kept semantically in sync by hand.
+> View: `ai task decisions <task-ref>` lists all pending decisions from review stages; `ai task decisions <task-ref> <ordinal|ledger-id>` expands a single item's detail block. The read-only view and `ai decide` share candidate and selector semantics; the gate parser in `.agents/scripts/validate-artifact.js` is a separate implementation and must be kept semantically in sync by hand.
 
 ## post-review commit gate (code stage only)
 

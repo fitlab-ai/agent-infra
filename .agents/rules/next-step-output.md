@@ -96,8 +96,9 @@ Completed at: YYYY-MM-DD HH:mm:ss
   - 单项完整背景/选项/影响/建议：ai task decisions {task-ref} <序号|账本ID>
 
 完成裁决：
-  1. 在 task.md `## 人工裁决` 段，逐项记录你对上述裁决项的裁定与理由。
-  2. 把 `## 审查分歧账本` 中对应行的 status 由 `needs-human-decision` 翻为 `human-decided`。
+  - ai decide {task-ref} <序号|账本ID> <裁决内容与理由>
+
+该命令原子写入 `HDR-N` 裁定记录、把目标账本行翻为 `human-decided`、更新 evidence 与活动日志；不要手工只修改其中一部分。
 
 说明：在上述行全部翻为 `human-decided` 之前，直接执行下一阶段命令会被 complete-task 等 gate 拦截（`needs-human-decision` 为非终态）。下一阶段命令仍列在下方，供裁决完成后使用。
 ```

@@ -57,7 +57,7 @@ For every SKILL execution context not covered by any exemption above, the defaul
 
 When an open question is a key design decision that needs human judgment, the executor must:
 
-1. Write the decision's **detail block** (background / options / impact / recommendation) into the artifact's `## 人工裁决待办` (Pending Human Decisions) section, with a heading like `### HD-N：<title> [needs-human-decision]`; ordinary assumptions / open questions still go under `## Assumptions` / `## Open Questions` (`## 假设` / `## 未决问题`), and `## Open Questions` may keep a one-line pointer to the matching `### HD-N`.
+1. Write a self-contained detail block per `.agents/rules/human-decision-context.md` into the artifact's `## 人工裁决待办` (Pending Human Decisions) section, with a heading like `### HD-N：<title> [needs-human-decision]`; ordinary assumptions / open questions still go under `## Assumptions` / `## Open Questions` (`## 假设` / `## 未决问题`), and `## Open Questions` may keep a one-line pointer to the matching `### HD-N`.
 2. Upsert the matching `HD-` row in task.md `## Review Disagreement Ledger` according to `.agents/rules/review-handshake.md`, with `evidence` pointing to the stable anchor `<artifact>#HD-N`. The `HD-N` number is **globally unique** (scan existing `HD-(\d+)` in the ledger and take max+1, monotonically increasing across analysis / plan / code, never reused); see review-handshake.md for the allocation rule.
 
 Use these checks together:

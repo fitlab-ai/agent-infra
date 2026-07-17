@@ -15,6 +15,7 @@ Follow the `code-review` step in `.agents/workflows/feature-development.yaml`.
 - [ ] Comments and documentation
 - [ ] Consistency with the approved technical plan
 - [ ] The reviewer checked whether the executor missed any key design decision that should be upgraded to `[needs-human-decision]`
+- [ ] Every `needs-human-decision` detail produced this round follows the self-contained structure in `.agents/rules/human-decision-context.md`
 - [ ] Every blocker is backed by reproducible grep/sed/nl evidence; conclusions not directly verified are declared under Self-Doubt
 
 **Common anti-examples**:

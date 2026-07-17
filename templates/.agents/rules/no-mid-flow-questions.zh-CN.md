@@ -57,7 +57,7 @@
 
 当未决问题属于需要人工裁定的关键设计决策时，执行方必须：
 
-1. 把该决策的**详情块**（背景 / 选项 / 影响 / 推荐）写入产物的 `## 人工裁决待办` 段，标题形如 `### HD-N：<标题> [needs-human-decision]`；普通假设 / 未决问题仍分别写 `## 假设` / `## 未决问题`（`## Assumptions` / `## Open Questions`），`## 未决问题` 可保留一行指针指向对应 `### HD-N`。
+1. 按 `.agents/rules/human-decision-context.md` 写出自足的详情块，放入产物的 `## 人工裁决待办` 段，标题形如 `### HD-N：<标题> [needs-human-decision]`；普通假设 / 未决问题仍分别写 `## 假设` / `## 未决问题`（`## Assumptions` / `## Open Questions`），`## 未决问题` 可保留一行指针指向对应 `### HD-N`。
 2. 按 `.agents/rules/review-handshake.md` 在 task.md `## 审查分歧账本` upsert 对应 `HD-` 行，evidence 指向稳定锚点 `<artifact>#HD-N`。`HD-N` 编号**全局唯一**（扫描账本已有 `HD-(\d+)` 取 max+1，跨 analysis / plan / code 单调递增、禁止复用），分配规则详见 review-handshake.md。
 
 判定时同时使用以下检查：
