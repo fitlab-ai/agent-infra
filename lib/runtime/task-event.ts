@@ -1,7 +1,7 @@
-import { applyTaskEvent, eventCatalog } from '../events.ts';
-import type { TaskEventRequest, Verdict } from '../events.ts';
+import { applyTaskEvent, eventCatalog } from '../task/events.ts';
+import type { TaskEventRequest, Verdict } from '../task/events.ts';
 
-const USAGE = `Usage: ai task event <N | #N | TASK-id> <event> --agent <agent> [event options] [--dry-run]
+const USAGE = `Usage: agent-infra-runtime task-event <N | #N | TASK-id> <event> --agent <agent> [event options] [--dry-run]
 
 Apply one closed-set task lifecycle event and print a structured JSON result.
 Events: ${eventCatalog.join(', ')}
@@ -21,7 +21,7 @@ function usageFailure(message: string): void {
   process.exitCode = 1;
 }
 
-function event(args: string[] = []): void {
+function taskEvent(args: string[] = []): void {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   if (args.length < 2) { usageFailure('task ref and event are required'); return; }
   const request: TaskEventRequest = { taskRef: args[0]!, event: args[1]!, agent: '' };
@@ -47,4 +47,4 @@ function event(args: string[] = []): void {
   if (result.status === 'failed') process.exitCode = 1;
 }
 
-export { event };
+export { taskEvent };

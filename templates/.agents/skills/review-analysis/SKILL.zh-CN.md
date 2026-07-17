@@ -36,7 +36,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## 步骤开始：声明 started 事件
 
-确认前置条件和轮次后、本轮第一个产出动作之前执行 `ai task event {task-id} review-analysis.started --agent {agent} --round {review-round}`。
+确认前置条件和轮次后、本轮第一个产出动作之前执行 `agent-infra-runtime task-event {task-id} review-analysis.started --agent {agent} --round {review-round}`。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -71,7 +71,7 @@ tail .agents/workspace/active/{task-id}/task.md
 ### 6. 更新任务状态
 
 更新 task.md：
-- 完成 findings、账本等业务内容更新后执行 `ai task event {task-id} review-analysis.completed --agent {agent} --round {review-round} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`。
+- 完成 findings、账本等业务内容更新后执行 `agent-infra-runtime task-event {task-id} review-analysis.completed --agent {agent} --round {review-round} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`。
 
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
 

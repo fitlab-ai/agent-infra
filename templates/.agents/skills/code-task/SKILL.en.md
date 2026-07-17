@@ -111,7 +111,7 @@ Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 
 ### 10. Update Task Status
 
-After requirement checkboxes and artifact links are updated, run the initial event `ai task event {task-id} code.completed --agent {agent} --round {code-round} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}` instead of the initial counts.
+After requirement checkboxes and artifact links are updated, run the initial event `agent-infra-runtime task-event {task-id} code.completed --agent {agent} --round {code-round} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}` instead of the initial counts.
 
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, then:
 - Set `status: in-progress` according to issue-sync.md

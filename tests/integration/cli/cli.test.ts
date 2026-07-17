@@ -6,7 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 
-import { CLI_PATH, cliArgs, envWithPrependedPath, escapeRegExp, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../../helpers.ts";
+import { CLI_PATH, RUNTIME_CLI_PATH, cliArgs, envWithPrependedPath, escapeRegExp, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../../helpers.ts";
 
 const PLATFORM_DEFAULT_ENGINES: Partial<Record<NodeJS.Platform, string>> = {
   linux: "native",
@@ -20,6 +20,7 @@ const ENGINE_NL = DEFAULT_SANDBOX_ENGINE ? "\n" : "";
 test("bootstrap CLI files exist", () => {
   assert.ok(exists("install.sh"), "install.sh should exist");
   assert.ok(exists("bin/cli.ts"), "bin/cli.ts (node) should exist");
+  assert.ok(exists("bin/runtime-cli.ts"), "bin/runtime-cli.ts should exist");
 
   const installSh = read("install.sh");
   assert.match(installSh, /npm install/);
@@ -31,7 +32,9 @@ test("bootstrap CLI files exist", () => {
 
   if (supportsPosixModeBits()) {
     const nodeStats = fs.statSync(CLI_PATH);
+    const runtimeStats = fs.statSync(RUNTIME_CLI_PATH);
     assert.ok(nodeStats.mode & 0o111, "bin/cli.ts should be executable");
+    assert.ok(runtimeStats.mode & 0o111, "bin/runtime-cli.ts should be executable");
   } else {
     const output = execFileSync(process.execPath, cliArgs("version"), {
       encoding: "utf8"
@@ -78,7 +81,7 @@ test("cli usage lists top-level command aliases (help and bare)", () => {
     });
 
     assert.match(output, /^\s+sandbox, s\s+Manage Docker-based AI sandboxes/m);
-    assert.match(output, /^\s+task, t\s+Inspect and transition/m);
+    assert.match(output, /^\s+task, t\s+Read-only views/m);
   }
 });
 
@@ -102,7 +105,7 @@ test("cli usage keeps alias command descriptions aligned", () => {
   const rows = [
     ["merge", "Merge tasks"],
     ["sandbox, s", "Manage Docker-based AI sandboxes"],
-    ["task, t", "Inspect and transition"],
+    ["task, t", "Read-only views"],
     ["update", "Update seed files"]
   ] as const;
   const descriptionColumns = rows.map(([command, description]) => {

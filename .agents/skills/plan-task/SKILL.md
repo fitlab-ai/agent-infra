@@ -38,7 +38,7 @@ tail .agents/workspace/active/{task-id}/task.md
 确认前置条件和轮次后、本轮第一个产出动作之前执行：
 
 ```bash
-ai task event {task-id} plan.started --agent {agent} --round {plan-round}
+agent-infra-runtime task-event {task-id} plan.started --agent {agent} --round {plan-round}
 ```
 
 ## 执行步骤
@@ -119,7 +119,7 @@ ai task event {task-id} plan.started --agent {agent} --round {plan-round}
   - 用新值覆盖 frontmatter 的 `effort` 字段
   - 在本轮方案产物 `{plan-artifact}` 中追加 `## 工作量重估` 段，记录一条：`effort {old} → {new} (rationale: {基于本轮方案的简短依据})`
   若重估值与当前值一致，跳过：不写入 `## 工作量重估` 段。后续 Flow A 同步会读取可能更新过的 frontmatter，并自动把新值同步到 Issue。
-- 完成业务内容更新后执行 `ai task event {task-id} plan.completed --agent {agent} --round {plan-round} --artifact {plan-artifact}`，由核心统一完成阶段、代理、时间、版本和 Activity Log 更新。
+- 完成业务内容更新后执行 `agent-infra-runtime task-event {task-id} plan.completed --agent {agent} --round {plan-round} --artifact {plan-artifact}`，由核心统一完成阶段、代理、时间、版本和 Activity Log 更新。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测

@@ -70,7 +70,7 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
 ### 6. Update Task Status
 
-After findings and ledger business updates, run `ai task event {task-id} review-plan.completed --agent {agent} --round {review-round} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`.
+After findings and ledger business updates, run `agent-infra-runtime task-event {task-id} review-plan.completed --agent {agent} --round {review-round} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`.
 
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 

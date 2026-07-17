@@ -3,7 +3,6 @@ const USAGE = `Usage: ai task <command> [options]
 Commands:
   cat <ref> <artifact | N>               Print a task artifact (by name or number)
   decisions, d <ref> [selector]          List review decisions, or show one item's detail
-  event <ref> <event> [options]           Apply a task lifecycle event and print JSON
   files <ref>                            List artifacts in a task dir (numbered)
   grep <pattern> [ref] [artifact | N]    Literal search across task artifacts (omit ref to scan all)
   issue-body <ref> [--template <path>]   Print a deterministic Issue body from task.md (描述 + 需求, or an Issue Form)
@@ -17,7 +16,6 @@ Examples:
   ai task cat 11 3
   ai task decisions 11
   ai task d 11 PL-3 --format markdown
-  ai task event 11 plan.started --agent codex --round 1
   ai task files 11
   ai task grep resolveArtifact
   ai task grep resolveArtifact 11
@@ -60,11 +58,6 @@ export async function runTask(args: string[]): Promise<void> {
     case 'files': {
       const { files } = await import('./commands/files.ts');
       files(rest);
-      break;
-    }
-    case 'event': {
-      const { event } = await import('./commands/event.ts');
-      event(rest);
       break;
     }
     case 'grep': {

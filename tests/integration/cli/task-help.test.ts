@@ -46,12 +46,6 @@ test('ai task log --help prints subcommand USAGE', () => {
   assert.match(out.stdout, /Usage: ai task log/);
 });
 
-test('ai task event --help prints subcommand USAGE', () => {
-  const out = runCli(['task', 'event', '--help']);
-  assert.equal(out.status, 0);
-  assert.match(out.stdout, /Usage: ai task event/);
-});
-
 test('ai task grep --help prints subcommand USAGE', () => {
   const out = runCli(['task', 'grep', '--help']);
   assert.equal(out.status, 0);
@@ -68,5 +62,5 @@ test('top-level USAGE lists the task command under Commands', () => {
   const out = runCli(['help']);
   assert.equal(out.status, 0);
   assert.match(out.stdout, /Usage: ai <command>/);
-  assert.match(out.stdout, /^\s+task, t\s+Inspect and transition/m);
+  assert.match(out.stdout, /^\s+task, t\s+Read-only views/m);
 });

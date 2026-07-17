@@ -45,7 +45,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## 步骤开始：声明 started 事件
 
-确认前置条件和轮次后、本轮第一个产出动作之前执行 `ai task event {task-id} review-code.started --agent {agent} --round {review-round}`。
+确认前置条件和轮次后、本轮第一个产出动作之前执行 `agent-infra-runtime task-event {task-id} review-code.started --agent {agent} --round {review-round}`。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -85,7 +85,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 - 若本轮 `总体结论` / `Overall Verdict` 为 `通过` / `Approved` 且 `T == R^{tree}`，写入 `last_reviewed_commit: {R}`；若 Approved 快照包含未提交差异，则清除既有 `last_reviewed_commit`，等待 `commit` 锚定
 - 若本轮结论不是 Approved，保留既有 `last_reviewed_commit`，不得推进或清空
-- 完成 `last_reviewed_commit`、findings、账本等业务内容更新后执行 `ai task event {task-id} review-code.completed --agent {agent} --round {review-round} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`。
+- 完成 `last_reviewed_commit`、findings、账本等业务内容更新后执行 `agent-infra-runtime task-event {task-id} review-code.completed --agent {agent} --round {review-round} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`。
 
 完成日志必须始终写入 `Manual-validation: {n}` 字段，0 也保留。
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。

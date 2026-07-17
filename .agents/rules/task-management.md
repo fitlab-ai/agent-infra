@@ -40,7 +40,7 @@
 
 ## Activity Log started / done 双标记约定（单一事实源）
 
-`analyze-task`、`review-analysis`、`plan-task`、`review-plan`、`code-task`、`review-code` 必须通过 `ai task event` 声明业务事件；事件核心统一生成 `current_step`、`assigned_to`、`updated_at`、`agent_infra_version` 和下述日志文本。其余尚未迁移的生命周期 SKILL 继续遵循本节文本协议。
+`analyze-task`、`review-analysis`、`plan-task`、`review-plan`、`code-task`、`review-code` 必须通过 `agent-infra-runtime task-event` 声明业务事件；事件核心统一生成 `current_step`、`assigned_to`、`updated_at`、`agent_infra_version` 和下述日志文本。其余尚未迁移的生命周期 SKILL 继续遵循本节文本协议。
 
 > 本节是 started/done 双标记的唯一权威定义。各 SKILL、渲染器（`lib/task/commands/log.ts`）、
 > 校验脚本（`.agents/scripts/validate-artifact.js`）的相关行为都以本节为准；改动任一端时同步本节。

@@ -651,7 +651,7 @@ test("skills that write timestamps require date command guidance", () => {
 test("event-driven workflow skills declare task events in every language variant", () => {
   for (const skill of ["analyze-task", "review-analysis", "plan-task", "review-plan", "code-task", "review-code"]) {
     for (const relativePath of skillDocPaths(skill)) {
-      assert.match(read(relativePath), /ai task event \{task-id\}/, `${relativePath} should use the event CLI`);
+      assert.match(read(relativePath), /agent-infra-runtime task-event \{task-id\}/, `${relativePath} should use the runtime CLI`);
     }
   }
 });

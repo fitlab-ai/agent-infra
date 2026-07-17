@@ -25,10 +25,12 @@ for (const file of fs.readdirSync(runtimesSrc)) {
   }
 }
 
-try {
-  fs.chmodSync(path.join(rootDir, "dist", "bin", "cli.js"), 0o755);
-  process.stdout.write("Chmod 0755 dist/bin/cli.js\n");
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`chmod skipped: ${message}\n`);
+for (const file of ["cli.js", "runtime-cli.js"]) {
+  try {
+    fs.chmodSync(path.join(rootDir, "dist", "bin", file), 0o755);
+    process.stdout.write(`Chmod 0755 dist/bin/${file}\n`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`chmod skipped for dist/bin/${file}: ${message}\n`);
+  }
 }
