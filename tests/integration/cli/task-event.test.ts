@@ -14,7 +14,8 @@ function fixture(step = 'requirement-analysis-review') {
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\ncurrent_step: ${step}\nassigned_to: claude\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.0.0\n---\n\n# Task\n\n## Activity Log\n\n`);
-  return { root, id, file: path.join(dir, 'task.md') };
+  fs.writeFileSync(path.join(dir, 'analysis.md'), '# Analysis\n');
+  return { root, id, dir, file: path.join(dir, 'task.md') };
 }
 
 function run(root: string, args: string[], env: NodeJS.ProcessEnv = process.env) {
@@ -28,20 +29,74 @@ test('internal task-event applies a started/completed pair and replays as no-op'
   assert.equal(JSON.parse(started.stdout).status, 'applied');
   const repeated = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1']);
   assert.equal(JSON.parse(repeated.stdout).status, 'no-op');
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
   const done = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md']);
   assert.equal(done.status, 0, done.stderr);
   assert.equal(JSON.parse(done.stdout).toStep, 'technical-design');
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /Plan Task \(Round 1\) \[started\]/);
   assert.match(content, /current_step: technical-design/);
+  assert.match(content, /\]\(plan\.md\)/);
 });
 
-test('dry-run returns planned without changing task bytes', () => {
+test('started derives its round and completion rejects an unlanded artifact', () => {
+  const f = fixture();
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  const startedResult = JSON.parse(started.stdout);
+  assert.equal(startedResult.round, 1);
+  assert.equal(startedResult.artifact, 'plan.md');
+  const before = fs.readFileSync(f.file);
+  const done = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md']);
+  assert.equal(done.status, 1);
+  assert.equal(JSON.parse(done.stdout).error.code, 'ARTIFACT_NOT_FOUND');
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('started replay keeps the open identity after its artifact lands', () => {
+  const f = fixture();
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+  const repeated = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  const result = JSON.parse(repeated.stdout);
+  assert.equal(result.status, 'no-op');
+  assert.equal(result.round, 1);
+  assert.equal(result.artifact, 'plan.md');
+  assert.equal((fs.readFileSync(f.file, 'utf8').match(/Plan Task \(Round 1\) \[started\]/g) ?? []).length, 1);
+});
+
+test('manual validation keeps code-review and supports multiple fixed-action rounds', () => {
+  const f = fixture('code-review');
+  for (const [round, name] of [[1, 'manual-validation.md'], [2, 'manual-validation-r2.md']] as const) {
+    const started = run(f.root, [f.id, 'manual-validation.started', '--agent', 'codex']);
+    assert.equal(started.status, 0, started.stderr);
+    assert.equal(JSON.parse(started.stdout).round, round);
+    fs.writeFileSync(path.join(f.dir, name), '# Manual validation\n');
+    const done = run(f.root, [f.id, 'manual-validation.completed', '--agent', 'codex', '--artifact', name, '--summary-result', 'summary updated']);
+    assert.equal(done.status, 0, done.stderr);
+    assert.equal(JSON.parse(done.stdout).toStep, 'code-review');
+  }
+  const content = fs.readFileSync(f.file, 'utf8');
+  assert.equal((content.match(/Complete Manual Validation \[started\]/g) ?? []).length, 2);
+  assert.match(content, /manual-validation-r2\.md/);
+});
+
+test('dry-run returns planned without changing task bytes for start and completion', () => {
   const f = fixture();
   const before = fs.readFileSync(f.file);
   const out = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1', '--dry-run']);
   assert.equal(JSON.parse(out.stdout).status, 'planned');
   assert.deepEqual(fs.readFileSync(f.file), before);
+
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+  const beforeCompletion = fs.readFileSync(f.file);
+  const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', '--dry-run']);
+  const completedResult = JSON.parse(completed.stdout);
+  assert.equal(completedResult.status, 'planned');
+  assert.equal(completedResult.operations.length, 4);
+  assert.deepEqual(fs.readFileSync(f.file), beforeCompletion);
 });
 
 test('task-event timestamps keep an ASCII offset in negative-offset timezones', () => {

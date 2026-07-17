@@ -45,13 +45,7 @@ Before the state check is complete, do not make external-state assertions such a
 
 ## Step Start: Write the started Marker
 
-After prerequisites pass and before this round's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this round's done entry plus a ` [started]` suffix, note `started`):
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Code (Round {N}) [started]** by {agent} — started
-```
-
-`ai task log` pairs it with the done entry written when the review completes onto one row (in progress → done). Format and pairing rules: see the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} review-code.started --agent {agent}`.
 
 ## Steps
 
@@ -61,11 +55,9 @@ Require:
 - `.agents/workspace/active/{task-id}/task.md`
 - at least one code artifact: `code.md` or `code-r{N}.md`
 
-### 2. Determine Review Round
+### 2. Resolve the Artifact Context
 
-Scan the task directory and record:
-- `{review-round}`
-- `{review-artifact}` as `review-code.md` or `review-code-r{N}.md`
+Run `agent-infra-internal task-artifact {task-id} inspect --family review-code`. Continue only for `ready`; take the latest `{code-artifact}` from `inputs` and `{review-round}` / `{review-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. Then run the started event and verify the returned identity.
 
 ### 3. Read Implementation and Refinement Context
 
@@ -93,7 +85,7 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 Update task.md:
 - When this round's `Overall Verdict` / `总体结论` is `Approved` / `通过` and `T == R^{tree}`, write `last_reviewed_commit: {R}`; when the Approved snapshot contains uncommitted changes, clear any existing `last_reviewed_commit` until `commit` anchors it
 - When this round is not Approved, preserve the existing `last_reviewed_commit`; do not advance or clear it
-After the `last_reviewed_commit`, findings, and ledger business updates, run `agent-infra-internal task-event {task-id} review-code.completed --agent {agent} --round {review-round} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`.
+After the `last_reviewed_commit`, findings, and ledger business updates, run `agent-infra-internal task-event {task-id} review-code.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`; the core atomically records the link, stage, and done log.
 
 Always include the `Manual-validation: {n}` field in the done log, including when it is 0.
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.

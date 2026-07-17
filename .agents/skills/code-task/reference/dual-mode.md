@@ -1,14 +1,14 @@
 # code-task 双模式判定
 
-本文件说明 `scripts/detect-mode.js` 的行为。脚本是单点真相；修改脚本时必须同步更新本文档。
+本文件说明核心 artifact lifecycle 的 code 模式判定。`task-artifact` 命令是单点真相；修改核心判定时必须同步更新本文档。
 
 ## 输入
 
 ```bash
-node .agents/skills/code-task/scripts/detect-mode.js .agents/workspace/active/{task-id}
+agent-infra-internal task-artifact {task-id} inspect --family code
 ```
 
-脚本扫描任务目录中的 `plan.md` / `plan-r{N}.md`、`review-plan.md` / `review-plan-r{N}.md`、`code.md` / `code-r{N}.md` 和 `review-code.md` / `review-code-r{N}.md`。
+核心扫描任务目录中的 `plan.md` / `plan-r{N}.md`、`review-plan.md` / `review-plan-r{N}.md`、`code.md` / `code-r{N}.md` 和 `review-code.md` / `review-code-r{N}.md`。
 
 ## 7 个分支
 

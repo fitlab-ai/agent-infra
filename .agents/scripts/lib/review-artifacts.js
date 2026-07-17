@@ -1,6 +1,5 @@
 // Shared helpers for review-artifact parsing.
-// Imported by both .agents/skills/code-task/scripts/detect-mode.js and
-// .agents/scripts/validate-artifact.js so the round/verdict vocabulary stays
+// Imported by validation and compatibility tooling so the round/verdict vocabulary stays
 // in a single source of truth (prevents the cross-file drift this lifecycle
 // is designed to eliminate).
 import fs from "node:fs";

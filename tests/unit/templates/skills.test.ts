@@ -654,7 +654,6 @@ test("skills that write timestamps require date command guidance", () => {
     "close-codescan",
     "close-dependabot",
     "commit",
-    "complete-manual-validation",
     "complete-task",
     "create-pr",
     "create-task",
@@ -677,10 +676,12 @@ test("skills that write timestamps require date command guidance", () => {
   });
 });
 
-test("event-driven workflow skills declare task events in every language variant", () => {
-  for (const skill of ["analyze-task", "review-analysis", "plan-task", "review-plan", "code-task", "review-code"]) {
+test("artifact lifecycle skills use core context and events in every language variant", () => {
+  for (const skill of ["analyze-task", "review-analysis", "plan-task", "review-plan", "code-task", "review-code", "complete-manual-validation"]) {
     for (const relativePath of skillDocPaths(skill)) {
-      assert.match(read(relativePath), /agent-infra-internal task-event \{task-id\}/, `${relativePath} should use the internal CLI`);
+      const content = read(relativePath);
+      assert.match(content, /agent-infra-internal task-artifact \{task-id\} inspect --family /, `${relativePath} should resolve artifact context through the core`);
+      assert.match(content, /agent-infra-internal task-event \{task-id\}/, `${relativePath} should apply lifecycle events through the core`);
     }
   }
 });

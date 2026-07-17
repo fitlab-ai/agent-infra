@@ -226,7 +226,6 @@ test("update-agent-infra template copies stay in sync with working files", () =>
     [".agents/skills/init-labels/SKILL.md", "templates/.agents/skills/init-labels/SKILL.en.md"],
     [".agents/skills/plan-task/SKILL.md", "templates/.agents/skills/plan-task/SKILL.en.md"],
     [".agents/skills/review-code/SKILL.md", "templates/.agents/skills/review-code/SKILL.en.md"],
-    [".agents/skills/code-task/scripts/detect-mode.js", "templates/.agents/skills/code-task/scripts/detect-mode.js"],
     [".agents/skills/watch-pr/SKILL.md", "templates/.agents/skills/watch-pr/SKILL.en.md"],
     [".agents/skills/update-agent-infra/SKILL.md", "templates/.agents/skills/update-agent-infra/SKILL.en.md"],
     [".agents/skills/update-agent-infra/scripts/package.json", "templates/.agents/skills/update-agent-infra/scripts/package.json"],

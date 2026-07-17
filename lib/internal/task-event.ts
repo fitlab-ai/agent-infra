@@ -11,7 +11,7 @@ const FLAGS: Record<string, keyof TaskEventRequest> = {
   '--agent': 'agent', '--round': 'round', '--question': 'question', '--artifact': 'artifact',
   '--fix-for': 'fixFor', '--verdict': 'verdict', '--blockers': 'blockers', '--major': 'major',
   '--minor': 'minor', '--manual-validation': 'manualValidation', '--files-modified': 'filesModified',
-  '--tests-passed': 'testsPassed'
+  '--tests-passed': 'testsPassed', '--summary-result': 'summaryResult'
 };
 const NUMERIC = new Set(['round', 'question', 'blockers', 'major', 'minor', 'manualValidation', 'filesModified', 'testsPassed']);
 

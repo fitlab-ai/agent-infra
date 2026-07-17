@@ -1,14 +1,14 @@
 # code-task dual mode
 
-This file documents `scripts/detect-mode.js`. The script is the source of truth; update this document whenever the script changes.
+This file documents the core artifact lifecycle's code-mode decision. The `task-artifact` command is the source of truth; update this document whenever the core decision changes.
 
 ## Input
 
 ```bash
-node .agents/skills/code-task/scripts/detect-mode.js .agents/workspace/active/{task-id}
+agent-infra-internal task-artifact {task-id} inspect --family code
 ```
 
-The script scans `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.md`, `code.md` / `code-r{N}.md`, and `review-code.md` / `review-code-r{N}.md` in the task directory.
+The core scans `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.md`, `code.md` / `code-r{N}.md`, and `review-code.md` / `review-code-r{N}.md` in the task directory.
 
 ## Seven Branches
 

@@ -38,7 +38,7 @@ tail .agents/workspace/active/{task-id}/task.md
 确认前置条件和轮次后、本轮第一个产出动作之前执行：
 
 ```bash
-agent-infra-internal task-event {task-id} analyze.started --agent {agent} --round {analysis-round}
+agent-infra-internal task-event {task-id} analyze.started --agent {agent}
 ```
 
 ## 执行步骤
@@ -51,16 +51,9 @@ agent-infra-internal task-event {task-id} analyze.started --agent {agent} --roun
 
 如果缺少 `task.md`，提示用户先创建或导入任务。
 
-### 2. 确定分析轮次
+### 2. 解析分析上下文
 
-扫描 `.agents/workspace/active/{task-id}/` 目录中的分析产物文件：
-- 如果不存在 `analysis.md` 且不存在 `analysis-r*.md` → 本轮为第 1 轮，产出 `analysis.md`
-- 如果存在 `analysis.md` 且不存在 `analysis-r*.md` → 本轮为第 2 轮，产出 `analysis-r2.md`
-- 如果存在 `analysis-r{N}.md` → 本轮为第 N+1 轮，产出 `analysis-r{N+1}.md`
-
-记录：
-- `{analysis-round}`：本轮分析轮次
-- `{analysis-artifact}`：本轮分析产物文件名
+运行 `agent-infra-internal task-artifact {task-id} inspect --family analysis`。仅当结果为 `ready` 时继续；从 `next.round` / `next.name` 记录 `{analysis-round}` / `{analysis-artifact}`，从 `inputs` 读取修订上下文。不得自行扫描轮次或拼装文件名。随后执行 started 事件，并以事件返回的 `artifactContext` 复核同一身份。
 
 ### 3. 阅读任务上下文
 
@@ -204,14 +197,12 @@ agent-infra-internal task-event {task-id} analyze.started --agent {agent} --roun
 ### 7. 更新任务状态
 
 更新 `.agents/workspace/active/{task-id}/task.md`：
-- 记录本轮分析产物：`{analysis-artifact}`（Round `{analysis-round}`）
-- 如任务模板包含 `## 分析` 段落，更新为指向 `{analysis-artifact}` 的链接
-- 在工作流进度中标记 requirement-analysis 为已完成，并注明实际轮次（如果任务模板支持）
+- 仅更新优先级、Brainstorming、审查响应等本技能拥有的业务内容；产物链接、阶段与完成日志由 completed 事件统一登记
 - 在追加工作流 Activity Log 条目之前，基于分析结果（业务影响、风险、依赖、阻塞条件）重估 `priority`。若重估值与 `task.md` 当前值不一致：
   - 用新值覆盖 frontmatter 的 `priority` 字段
   - 在本轮分析产物 `{analysis-artifact}` 中追加 `## 优先级重估` 段，记录一条：`priority {old} → {new} (rationale: {基于本轮分析的简短依据})`
   若重估值与当前值一致，跳过：不写入 `## 优先级重估` 段。后续 Flow A 同步会读取可能更新过的 frontmatter，并自动把新值同步到 Issue。
-- 完成业务内容更新后执行 `agent-infra-internal task-event {task-id} analyze.completed --agent {agent} --round {analysis-round} --artifact {analysis-artifact}`，由核心统一完成阶段、代理、时间、版本和 Activity Log 更新。
+- 完成业务内容更新后执行 `agent-infra-internal task-event {task-id} analyze.completed --agent {agent} --artifact {analysis-artifact}`，由核心原子登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测

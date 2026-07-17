@@ -32,15 +32,9 @@ tail .agents/workspace/active/{task-id}/task.md
 
 > If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
-## Step Start: Write the started Marker
+## Step Start: Declare the started Event
 
-After prerequisites pass and before this round's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this round's done entry plus a ` [started]` suffix, note `started`):
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Analysis (Round {N}) [started]** by {agent} — started
-```
-
-`ai task log` pairs it with the done entry written when the review completes onto one row (in progress → done). Format and pairing rules: see the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} review-analysis.started --agent {agent}`.
 
 ## Steps
 
@@ -48,9 +42,9 @@ After prerequisites pass and before this round's first artifact action, append a
 
 Require `task.md` and at least one analysis artifact: `analysis.md` or `analysis-r{N}.md`.
 
-### 2. Determine Review Round
+### 2. Resolve Review Context
 
-Record `{analysis-artifact}`, `{review-round}`, and `{review-artifact}` (`review-analysis.md` or `review-analysis-r{N}.md`).
+Run `agent-infra-internal task-artifact {task-id} inspect --family review-analysis`. Continue only for `ready`; take `{analysis-artifact}` from `inputs` and `{review-round}` / `{review-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill.
 
 ### 3. Read Analysis Context
 
@@ -70,7 +64,7 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
 ### 6. Update Task Status
 
-After findings and ledger business updates, run `agent-infra-internal task-event {task-id} review-analysis.completed --agent {agent} --round {review-round} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`.
+After findings and ledger business updates, run `agent-infra-internal task-event {task-id} review-analysis.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`; the core atomically records the link, stage, and done log.
 
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 

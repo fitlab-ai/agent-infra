@@ -32,15 +32,9 @@ tail .agents/workspace/active/{task-id}/task.md
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
-## 步骤开始：写入 started 标记
+## 步骤开始：声明 started 事件
 
-确认前置条件和产物轮次后、本轮第一个产出动作之前，向 task.md `## 活动日志` 追加一条 started 标记：
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Complete Manual Validation [started]** by {agent} — started
-```
-
-格式与配对规则见 `.agents/rules/task-management.md` 的「Activity Log started / done 双标记约定」。
+确认前置条件和产物上下文后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} manual-validation.started --agent {agent}`，并以返回的 `artifactContext` 记录本轮身份。
 
 ## 执行步骤
 
@@ -64,12 +58,9 @@ complete-manual-validation {task-ref} [{pr-ref}] {verification-summary}
 
 如果任务不存在、验证说明缺失，或无法解析有效 PR，立即停止。
 
-### 3. 确定产物轮次
+### 3. 解析产物上下文
 
-扫描任务目录：
-- 不存在 `manual-validation.md` 且不存在 `manual-validation-r*.md` -> 本轮产物为 `manual-validation.md`
-- 已存在 `manual-validation.md` 且不存在 `manual-validation-r*.md` -> 本轮产物为 `manual-validation-r2.md`
-- 已存在 `manual-validation-r{N}.md` -> 本轮产物为 `manual-validation-r{N+1}.md`
+运行 `agent-infra-internal task-artifact {task-id} inspect --family manual-validation`。仅当结果为 `ready` 时继续；从 `next.round` / `next.name` 取得本轮 round 与 `{manual-validation-artifact}`。不得自行扫描轮次或拼装文件名。随后执行 started 事件并复核返回身份。
 
 ### 4. 更新 PR 摘要
 
@@ -91,22 +82,7 @@ complete-manual-validation {task-ref} [{pr-ref}] {verification-summary}
 
 ### 6. 更新 task.md
 
-获取当前时间：
-
-```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
-```
-
-更新 `.agents/workspace/active/{task-id}/task.md`：
-- `updated_at`：{当前时间}
-- `assigned_to`：{当前代理}
-- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
-- 保持 `current_step` 不变
-- 在 `## 实现备注` 中追加 `{manual-validation-artifact}` 链接和 PR 摘要同步结果
-- 追加 Activity Log：
-  ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Complete Manual Validation** by {agent} — Manual validation passed → {manual-validation-artifact}; {summary-result}
-  ```
+执行 `agent-infra-internal task-event {task-id} manual-validation.completed --agent {agent} --artifact {manual-validation-artifact} --summary-result "{summary-result}"`，由核心在保持 `current_step` 不变的同时原子登记实现备注链接、时间/版本和完成日志。
 
 如任务存在有效 `issue_number`，按 `.agents/rules/issue-sync.md` 更新 task 评论并发布 `{manual-validation-artifact}` 评论。
 

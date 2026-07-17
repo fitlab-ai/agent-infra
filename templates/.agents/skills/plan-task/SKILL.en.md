@@ -35,13 +35,7 @@ Before the state check is complete, do not make external-state assertions such a
 
 ## Step Start: Write the started Marker
 
-After prerequisites pass and before this round's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this round's done entry plus a ` [started]` suffix, note `started`):
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Task (Round {N}) [started]** by {agent} — started
-```
-
-`ai task log` pairs it with the done entry written on completion (step 7) onto one row (in progress → done). Format and pairing rules: see the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} plan.started --agent {agent}` and verify the returned `artifactContext`.
 
 ## Steps
 
@@ -55,16 +49,9 @@ Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, for example `TASK-20260306
 
 If any required file is missing, prompt the user to complete the prerequisite step first.
 
-### 2. Determine the Plan Round
+### 2. Resolve the Artifact Context
 
-Scan `.agents/workspace/active/{task-id}/` for plan artifact files:
-- If neither `plan.md` nor `plan-r*.md` exists -> this is Round 1 and must create `plan.md`
-- If `plan.md` exists and no `plan-r*.md` exists -> this is Round 2 and must create `plan-r2.md`
-- If `plan-r{N}.md` exists -> this is Round N+1 and must create `plan-r{N+1}.md`
-
-Record:
-- `{plan-round}`: the current plan round
-- `{plan-artifact}`: the artifact filename for this round
+Run `agent-infra-internal task-artifact {task-id} inspect --family plan`. Continue only for `ready`; take the latest `{analysis-artifact}` from `inputs` and `{plan-round}` / `{plan-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. Then run the started event and verify the returned identity.
 
 ### 3. Read Requirements Analysis
 
@@ -122,7 +109,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   - Overwrite the `effort` field in frontmatter with the new value
   - Append a `## Effort Re-estimate` section to this round's plan artifact `{plan-artifact}`, recording: `effort {old} → {new} (rationale: {short basis grounded in this plan})`
   If the re-estimated value matches the current value, skip it: do not write the `## Effort Re-estimate` section. The Flow A sync that follows reads the possibly updated frontmatter and propagates the new value to the Issue automatically.
-After the business fields are updated, run `agent-infra-internal task-event {task-id} plan.completed --agent {agent} --round {plan-round} --artifact {plan-artifact}` so the core updates the stage, agent, metadata, and Activity Log.
+After the business fields are updated, run `agent-infra-internal task-event {task-id} plan.completed --agent {agent} --artifact {plan-artifact}` so the core atomically records the link, stage, agent, metadata, and Activity Log.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Task (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
   ```
 

@@ -34,13 +34,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## Step Start: Write the started Marker
 
-After confirming prerequisites and the artifact round, and before this round's first artifact action, append a started marker to task.md `## Activity Log`:
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Complete Manual Validation [started]** by {agent} — started
-```
-
-See the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} manual-validation.started --agent {agent}` and record the returned `artifactContext`.
 
 ## Steps
 
@@ -64,12 +58,9 @@ Check:
 
 Stop if the task is missing, the validation summary is missing, or no valid PR can be resolved.
 
-### 3. Determine Artifact Round
+### 3. Resolve the Artifact Context
 
-Scan the task directory:
-- no `manual-validation.md` and no `manual-validation-r*.md` -> write `manual-validation.md`
-- `manual-validation.md` exists and no `manual-validation-r*.md` -> write `manual-validation-r2.md`
-- `manual-validation-r{N}.md` exists -> write `manual-validation-r{N+1}.md`
+Run `agent-infra-internal task-artifact {task-id} inspect --family manual-validation`. Continue only for `ready`; take the round and `{manual-validation-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. Then run the started event and verify the returned identity.
 
 ### 4. Update the PR Summary
 
@@ -91,22 +82,7 @@ Before this step, read `reference/report-template.md`. Create `{manual-validatio
 
 ### 6. Update task.md
 
-Get the current time:
-
-```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
-```
-
-Update `.agents/workspace/active/{task-id}/task.md`:
-- `updated_at`: current time
-- `assigned_to`: current agent
-- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
-- keep `current_step` unchanged
-- append the `{manual-validation-artifact}` link and PR summary sync result to `## Implementation Notes`
-- append Activity Log:
-  ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Complete Manual Validation** by {agent} — Manual validation passed → {manual-validation-artifact}; {summary-result}
-  ```
+Run `agent-infra-internal task-event {task-id} manual-validation.completed --agent {agent} --artifact {manual-validation-artifact} --summary-result "{summary-result}"`. The core keeps `current_step` unchanged while atomically recording the implementation-notes link, metadata, and done log.
 
 If the task has a valid `issue_number`, follow `.agents/rules/issue-sync.md` to update the task comment and publish the `{manual-validation-artifact}` comment.
 

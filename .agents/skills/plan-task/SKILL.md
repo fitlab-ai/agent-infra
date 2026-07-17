@@ -38,7 +38,7 @@ tail .agents/workspace/active/{task-id}/task.md
 确认前置条件和轮次后、本轮第一个产出动作之前执行：
 
 ```bash
-agent-infra-internal task-event {task-id} plan.started --agent {agent} --round {plan-round}
+agent-infra-internal task-event {task-id} plan.started --agent {agent}
 ```
 
 ## 执行步骤
@@ -52,22 +52,13 @@ agent-infra-internal task-event {task-id} plan.started --agent {agent} --round {
 
 如果任一文件缺失，提示用户先完成前置步骤。
 
-### 2. 确定方案轮次
+### 2. 解析方案上下文
 
-扫描 `.agents/workspace/active/{task-id}/` 目录中的方案产物文件：
-- 如果不存在 `plan.md` 且不存在 `plan-r*.md` → 本轮为第 1 轮，产出 `plan.md`
-- 如果存在 `plan.md` 且不存在 `plan-r*.md` → 本轮为第 2 轮，产出 `plan-r2.md`
-- 如果存在 `plan-r{N}.md` → 本轮为第 N+1 轮，产出 `plan-r{N+1}.md`
-
-记录：
-- `{plan-round}`：本轮方案轮次
-- `{plan-artifact}`：本轮方案产物文件名
+运行 `agent-infra-internal task-artifact {task-id} inspect --family plan`。仅当结果为 `ready` 时继续；从 `inputs` 取得最新 `{analysis-artifact}`，从 `next.round` / `next.name` 取得 `{plan-round}` / `{plan-artifact}`。不得自行扫描轮次或拼装文件名。随后执行 started 事件并复核返回身份。
 
 ### 3. 阅读需求分析
 
-扫描任务目录中的分析产物文件（`analysis.md`、`analysis-r{N}.md`）：
-- 如果存在 `analysis-r{N}.md`，读取最高 N 的文件
-- 否则读取 `analysis.md`
+读取步骤 2 核心返回的最新 `{analysis-artifact}`，
 以理解：
 - 需求及其背景
 - 相关文件和代码结构
@@ -112,14 +103,12 @@ agent-infra-internal task-event {task-id} plan.started --agent {agent} --round {
 ### 7. 更新任务状态
 
 更新 `.agents/workspace/active/{task-id}/task.md`：
-- 记录本轮方案产物：`{plan-artifact}`（Round `{plan-round}`）
-- 如任务模板包含 `## 设计` 段落，更新为指向 `{plan-artifact}` 的链接
-- 在工作流进度中标记 technical-design 为已完成，并注明实际轮次（如果任务模板支持）
+- 仅更新工作量、审查响应等本技能拥有的业务内容；产物链接、阶段与完成日志由 completed 事件统一登记
 - 在追加工作流 Activity Log 条目之前，基于技术方案（实施步骤数、涉及文件、测试矩阵范围、集成面）重估 `effort`。若重估值与 `task.md` 当前值不一致：
   - 用新值覆盖 frontmatter 的 `effort` 字段
   - 在本轮方案产物 `{plan-artifact}` 中追加 `## 工作量重估` 段，记录一条：`effort {old} → {new} (rationale: {基于本轮方案的简短依据})`
   若重估值与当前值一致，跳过：不写入 `## 工作量重估` 段。后续 Flow A 同步会读取可能更新过的 frontmatter，并自动把新值同步到 Issue。
-- 完成业务内容更新后执行 `agent-infra-internal task-event {task-id} plan.completed --agent {agent} --round {plan-round} --artifact {plan-artifact}`，由核心统一完成阶段、代理、时间、版本和 Activity Log 更新。
+- 完成业务内容更新后执行 `agent-infra-internal task-event {task-id} plan.completed --agent {agent} --artifact {plan-artifact}`，由核心原子登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测

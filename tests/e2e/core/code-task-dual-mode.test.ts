@@ -5,15 +5,24 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const scriptPath = path.resolve(".agents/skills/code-task/scripts/detect-mode.js");
+import { INTERNAL_CLI_PATH } from "../../helpers.ts";
+
+const TASK_ID = "TASK-20260101-000001";
+
+function makeFixture(files: Record<string, string>) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-detect-mode-"));
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  const taskDir = path.join(root, ".agents", "workspace", "active", TASK_ID);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${TASK_ID}\ncurrent_step: technical-design-review\n---\n\n# Task\n`);
+  const withPlan = files["plan.md"] ? files : { "plan.md": "# plan", ...files };
+  for (const [name, content] of Object.entries(withPlan)) fs.writeFileSync(path.join(taskDir, name), content);
+  return { root, taskDir };
+}
 
 function runDetect(files: Record<string, string>) {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-detect-mode-"));
-  for (const [name, content] of Object.entries(files)) {
-    fs.writeFileSync(path.join(taskDir, name), content);
-  }
-
-  const result = spawnSync(process.execPath, [scriptPath, taskDir], { encoding: "utf8" });
+  const fixture = makeFixture(files);
+  const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, "task-artifact", TASK_ID, "inspect", "--family", "code"], { cwd: fixture.root, encoding: "utf8" });
   return {
     status: result.status,
     output: JSON.parse(result.stdout)
@@ -219,15 +228,12 @@ function runDetectWithMtimes(
   files: Record<string, string>,
   mtimes: Record<string, number> = {}
 ) {
-  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-detect-mode-"));
-  for (const [name, content] of Object.entries(files)) {
-    fs.writeFileSync(path.join(taskDir, name), content);
-  }
+  const fixture = makeFixture(files);
   for (const [name, mtimeSeconds] of Object.entries(mtimes)) {
-    fs.utimesSync(path.join(taskDir, name), mtimeSeconds, mtimeSeconds);
+    fs.utimesSync(path.join(fixture.taskDir, name), mtimeSeconds, mtimeSeconds);
   }
 
-  const result = spawnSync(process.execPath, [scriptPath, taskDir], { encoding: "utf8" });
+  const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, "task-artifact", TASK_ID, "inspect", "--family", "code"], { cwd: fixture.root, encoding: "utf8" });
   return {
     status: result.status,
     output: JSON.parse(result.stdout)

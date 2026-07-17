@@ -38,13 +38,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## Step Start: Write the started Marker
 
-After prerequisites (step 1) and mode/round (step 4) are confirmed and before this round's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this round's done entry plus a ` [started]` suffix, note `started`):
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Task (Round {N}) [started]** by {agent} — started
-```
-
-In fix mode the base must match this round's done entry, i.e. `Code Task (Round {N}, fix for {review-artifact}) [started]`. `ai task log` pairs it with the done entry written on completion (step 10) onto one row (in progress → done). Format and pairing rules: see the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+After prerequisites and mode are confirmed and before this round's first artifact action, run `agent-infra-internal task-event {task-id} code.started --agent {agent}`. The core derives the round and fix source from the artifact context; record the returned `artifactContext`.
 
 ## Steps
 
@@ -67,7 +61,7 @@ Read `reference/branch-management.md`, ensure the current branch matches the tas
 Run mode detection and preserve its exit code:
 
 ```bash
-result=$(node .agents/skills/code-task/scripts/detect-mode.js .agents/workspace/active/{task-id})
+result=$(agent-infra-internal task-artifact {task-id} inspect --family code)
 status=$?
 echo "$result"
 ```
@@ -81,9 +75,9 @@ Dispatch by `$status` and `result.mode`:
 
 > Read `reference/dual-mode.md` before this step.
 
-### 5. Determine the Input Plan
+### 5. Read Structured Inputs
 
-Read the highest-round plan artifact and use the `{code-artifact}` selected in step 4. In fix mode, also read `{review-artifact}`.
+Use only the `inputs` returned in step 4: read the selected plan artifact and, in fix mode, the selected review artifact. Use `next.name` as `{code-artifact}` and `next.round` as `{code-round}`; do not rescan or construct identities in the skill.
 
 ### 6. Read the Technical Plan
 
@@ -111,7 +105,7 @@ Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 
 ### 10. Update Task Status
 
-After requirement checkboxes and artifact links are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {agent} --round {code-round} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}` instead of the initial counts.
+After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}` instead of the initial counts. The core atomically records the artifact link, stage, metadata, and done log.
 
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, then:
 - Set `status: in-progress` according to issue-sync.md

@@ -33,15 +33,9 @@ Before the state check is complete, do not make external-state assertions such a
 
 > If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
-## Step Start: Write the started Marker
+## Step Start: Declare the started Event
 
-After prerequisites pass and before this round's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this round's done entry plus a ` [started]` suffix, note `started`):
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Round {N}) [started]** by {agent} — started
-```
-
-`ai task log` pairs it with the done entry written on completion (step 7) onto one row (in progress → done). Format and pairing rules: see the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} analyze.started --agent {agent}` and verify the returned `artifactContext`.
 
 ## Steps
 
@@ -54,16 +48,9 @@ Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, for example `TASK-20260306
 
 If `task.md` is missing, tell the user to create or import the task first.
 
-### 2. Determine the Analysis Round
+### 2. Resolve the Analysis Context
 
-Scan `.agents/workspace/active/{task-id}/` for analysis artifact files:
-- If neither `analysis.md` nor `analysis-r*.md` exists -> this is Round 1 and must create `analysis.md`
-- If `analysis.md` exists and no `analysis-r*.md` exists -> this is Round 2 and must create `analysis-r2.md`
-- If `analysis-r{N}.md` exists -> this is Round N+1 and must create `analysis-r{N+1}.md`
-
-Record:
-- `{analysis-round}`: the current analysis round
-- `{analysis-artifact}`: the artifact filename for this round
+Run `agent-infra-internal task-artifact {task-id} inspect --family analysis`. Continue only for `ready`; take `{analysis-round}` / `{analysis-artifact}` from `next.round` / `next.name` and revision inputs from `inputs`. Do not scan rounds or construct names in the skill.
 
 ### 3. Read Task Context
 
@@ -214,7 +201,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   - Overwrite the `priority` field in frontmatter with the new value
   - Append a `## Priority Re-estimate` section to this round's analysis artifact `{analysis-artifact}`, recording: `priority {old} → {new} (rationale: {short basis grounded in this analysis})`
   If the re-estimated value matches the current value, skip it: do not write the `## Priority Re-estimate` section. The Flow A sync that follows reads the possibly updated frontmatter and propagates the new value to the Issue automatically.
-After the business fields are updated, run `agent-infra-internal task-event {task-id} analyze.completed --agent {agent} --round {analysis-round} --artifact {analysis-artifact}` so the core updates the stage, agent, metadata, and Activity Log.
+After the business fields are updated, run `agent-infra-internal task-event {task-id} analyze.completed --agent {agent} --artifact {analysis-artifact}` so the core atomically records the link, stage, agent, metadata, and Activity Log.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Round {N})** by {agent} — Analysis completed → {analysis-artifact}
   ```
 

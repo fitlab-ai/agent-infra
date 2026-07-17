@@ -36,7 +36,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## 步骤开始：声明 started 事件
 
-确认前置条件和轮次后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} review-analysis.started --agent {agent} --round {review-round}`。
+确认前置条件和产物上下文后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} review-analysis.started --agent {agent}`。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -45,12 +45,9 @@ tail .agents/workspace/active/{task-id}/task.md
 - `.agents/workspace/active/{task-id}/task.md`
 - 至少一个分析产物：`analysis.md` 或 `analysis-r{N}.md`
 
-### 2. 确定审查轮次
+### 2. 解析审查上下文
 
-扫描任务目录并记录：
-- `{analysis-artifact}`：最高轮次的分析产物
-- `{review-round}`
-- `{review-artifact}`：`review-analysis.md` 或 `review-analysis-r{N}.md`
+运行 `agent-infra-internal task-artifact {task-id} inspect --family review-analysis`。仅当结果为 `ready` 时继续；从 `inputs` 取得 `{analysis-artifact}`，从 `next.round` / `next.name` 取得 `{review-round}` / `{review-artifact}`。不得自行扫描轮次或拼装文件名。随后执行 started 事件并复核返回身份。
 
 ### 3. 阅读分析上下文
 
@@ -70,8 +67,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ### 6. 更新任务状态
 
-更新 task.md：
-- 完成 findings、账本等业务内容更新后执行 `agent-infra-internal task-event {task-id} review-analysis.completed --agent {agent} --round {review-round} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`。
+更新 findings、账本等业务内容后，执行 `agent-infra-internal task-event {task-id} review-analysis.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`，由核心原子登记链接、阶段和完成日志。
 
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
 

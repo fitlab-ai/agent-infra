@@ -52,7 +52,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## 步骤开始：声明 started 事件
 
-确认前置条件与模式/轮次后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} code.started --agent {agent} --round {code-round}`；修复模式在同一命令追加 `--fix-for {review-artifact}`。
+确认前置条件与模式后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} code.started --agent {agent}`。核心根据 artifact context 推导轮次与修复来源；以返回的 `artifactContext` 记录本轮身份。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -84,10 +84,10 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ### 4. 确定模式与轮次
 
-执行 mode detection 脚本，先保存 exit code 再处理输出：
+执行共享产物查询，先保存 exit code 再处理输出：
 
 ```bash
-result=$(node .agents/skills/code-task/scripts/detect-mode.js .agents/workspace/active/{task-id})
+result=$(agent-infra-internal task-artifact {task-id} inspect --family code)
 status=$?
 echo "$result"
 ```
@@ -106,12 +106,7 @@ echo "$result"
 
 ### 5. 确定输入方案
 
-扫描 `.agents/workspace/active/{task-id}/` 并记录：
-- 最高轮次的方案文件为 `{plan-artifact}`
-- 使用步骤 4 记录的 `{code-round}` 与 `{code-artifact}`
-- 若为修复模式，同时记录 `{review-artifact}`
-
-如果存在 `plan-r{N}.md`，读取最高轮次的方案文件；否则读取 `plan.md`。
+只使用步骤 4 的结构化结果：从 `inputs` 取得 `{plan-artifact}`，从 `next_round` / `next_artifact` 取得 `{code-round}` / `{code-artifact}`；修复模式从 `review_artifact` 取得 `{review-artifact}`。不得自行扫描轮次或拼装文件名。
 
 ### 6. 阅读技术方案
 
@@ -149,10 +144,10 @@ echo "$result"
 
 更新 `.agents/workspace/active/{task-id}/task.md`：
 - 审查 `## 需求` 段落，仅把本轮已由代码实现且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
-- 记录 Round `{code-round}` 的 `{code-artifact}`
+- 产物链接、阶段与完成日志由 completed 事件统一登记
 - 完成业务内容更新后声明完成事件：
-  - 初次实现：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --round {code-round} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`
-  - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --round {code-round} --artifact {code-artifact} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
+  - 初次实现：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`
+  - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续；执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测）：
 - 按 issue-sync.md 设置 `status: in-progress`

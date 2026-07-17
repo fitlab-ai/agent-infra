@@ -34,13 +34,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## Step Start: Write the started Marker
 
-After prerequisites pass and before this round's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this round's done entry plus a ` [started]` suffix, note `started`):
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Plan (Round {N}) [started]** by {agent} — started
-```
-
-`ai task log` pairs it with the done entry written when the review completes onto one row (in progress → done). Format and pairing rules: see the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} review-plan.started --agent {agent}`.
 
 ## Steps
 
@@ -48,9 +42,9 @@ After prerequisites pass and before this round's first artifact action, append a
 
 Require `task.md` and at least one plan artifact: `plan.md` or `plan-r{N}.md`.
 
-### 2. Determine Review Round
+### 2. Resolve the Artifact Context
 
-Record `{plan-artifact}`, `{review-round}`, and `{review-artifact}` (`review-plan.md` or `review-plan-r{N}.md`).
+Run `agent-infra-internal task-artifact {task-id} inspect --family review-plan`. Continue only for `ready`; take `{plan-artifact}` from `inputs` and `{review-round}` / `{review-artifact}` from `next.round` / `next.name`. Do not scan rounds or construct names in the skill. Then run the started event and verify the returned identity.
 
 ### 3. Read Plan Context
 
@@ -70,7 +64,7 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
 ### 6. Update Task Status
 
-After findings and ledger business updates, run `agent-infra-internal task-event {task-id} review-plan.completed --agent {agent} --round {review-round} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`.
+After findings and ledger business updates, run `agent-infra-internal task-event {task-id} review-plan.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`; the core atomically records the link, stage, and done log.
 
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 

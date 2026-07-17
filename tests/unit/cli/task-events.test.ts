@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import { eventCatalog, validateTaskEventRequest } from '../../../lib/task/events.ts';
 
 test('event catalog exposes the approved closed set', () => {
-  assert.equal(eventCatalog.length, 13);
-  assert.equal(new Set(eventCatalog).size, 13);
+  assert.equal(eventCatalog.length, 15);
+  assert.equal(new Set(eventCatalog).size, 15);
+  assert.ok(eventCatalog.includes('manual-validation.started'));
+  assert.ok(eventCatalog.includes('manual-validation.completed'));
 });
 
 test('event payload validation rejects fields outside an event schema', () => {

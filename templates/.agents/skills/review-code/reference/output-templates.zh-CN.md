@@ -85,7 +85,7 @@
   - Gemini CLI：/{{project}}:plan-task {task-ref}
   - Codex CLI：$plan-task {task-ref}
 
-> 注意：Rejected 表示实现方向需要整体重做，不是局部修复。`code-task/scripts/detect-mode.js` 分支 #7 会拒绝直接 `/code-task`，要求先重新方案设计。
+> 注意：Rejected 表示实现方向需要整体重做，不是局部修复。核心 artifact lifecycle 的分支 #7 会拒绝直接 `/code-task`，要求先重新方案设计。
 
 [当 manual-validation > 0 时，在最后附加一行：]
 提醒：manual-validation 项需在 PR description 的「待人工验证」清单中承接，不应触发 /code-task。

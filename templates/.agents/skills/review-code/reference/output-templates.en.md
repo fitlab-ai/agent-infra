@@ -85,7 +85,7 @@ Next step - re-design the technical plan:
   - Gemini CLI: /{{project}}:plan-task {task-ref}
   - Codex CLI: $plan-task {task-ref}
 
-> Note: Rejected means the implementation direction needs to be reworked end-to-end, not patched locally. `code-task/scripts/detect-mode.js` branch #7 refuses a direct `/code-task` and requires a fresh plan first.
+> Note: Rejected means the implementation direction needs to be reworked end-to-end, not patched locally. Core artifact lifecycle branch #7 refuses a direct `/code-task` and requires a fresh plan first.
 
 [When manual-validation > 0, append this final line:]
 Reminder: manual-validation findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
