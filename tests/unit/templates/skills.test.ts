@@ -59,6 +59,35 @@ test("all skill doc files have consecutive step numbering", () => {
   });
 });
 
+test("all skill doc nested numbered lists are consecutive", () => {
+  skillDocFiles.forEach((relativePath) => {
+    const activeLists = new Map<number, number>();
+
+    read(relativePath).split("\n").forEach((line, lineIndex) => {
+      const item = line.match(/^( +)(\d+)\. /);
+      const indentation = line.match(/^ */)?.[0].length || 0;
+
+      if (!item) {
+        if (line.trim() !== "") {
+          for (const indent of activeLists.keys()) {
+            if (indentation <= indent) activeLists.delete(indent);
+          }
+        }
+        return;
+      }
+
+      const indent = item[1]!.length;
+      const number = Number(item[2]);
+      const expected = (activeLists.get(indent) || 0) + 1;
+      assert.equal(number, expected, `${relativePath}:${lineIndex + 1} nested list should continue with ${expected}`);
+      activeLists.set(indent, number);
+      for (const activeIndent of activeLists.keys()) {
+        if (activeIndent > indent) activeLists.delete(activeIndent);
+      }
+    });
+  });
+});
+
 test("complete-manual-validation skill docs retain completion control structures", () => {
   skillDocPaths("complete-manual-validation").forEach((relativePath) => {
     const content = read(relativePath);
@@ -651,7 +680,7 @@ test("skills that write timestamps require date command guidance", () => {
 test("event-driven workflow skills declare task events in every language variant", () => {
   for (const skill of ["analyze-task", "review-analysis", "plan-task", "review-plan", "code-task", "review-code"]) {
     for (const relativePath of skillDocPaths(skill)) {
-      assert.match(read(relativePath), /agent-infra-runtime task-event \{task-id\}/, `${relativePath} should use the runtime CLI`);
+      assert.match(read(relativePath), /agent-infra-internal task-event \{task-id\}/, `${relativePath} should use the internal CLI`);
     }
   }
 });

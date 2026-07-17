@@ -1,5 +1,5 @@
 export { filePath, exists, read, listFilesRecursive, listSkillNames } from "./helpers/paths.ts";
-export { CLI_PATH, RUNTIME_CLI_PATH, cliArgs, runtimeCliArgs, pathWithPrependedBin, envWithPrependedPath } from "./helpers/cli.ts";
+export { CLI_PATH, INTERNAL_CLI_PATH, cliArgs, internalCliArgs, pathWithPrependedBin, envWithPrependedPath } from "./helpers/cli.ts";
 export { gitSafeEnv, withGitSafeProcessEnv, initIsolatedGitRepo, listTrackedFiles } from "./helpers/git.ts";
 export { onPlatforms, supportsPosixModeBits, assertModeBits } from "./helpers/platform.ts";
 export { writeSandboxEngineFixture, writeNodeCommandShim } from "./helpers/sandbox.ts";

@@ -3,7 +3,7 @@
 const [major = 0, minor = 0] = process.versions.node.split('.').map((part) => parseInt(part, 10));
 if (major < 22 || (major === 22 && minor < 9)) {
   process.stderr.write(
-    `agent-infra-runtime requires Node.js >= 22.9.0 (current: ${process.version})\n`
+    `agent-infra-internal requires Node.js >= 22.9.0 (current: ${process.version})\n`
   );
   process.exit(1);
 }
@@ -12,7 +12,7 @@ const command = process.argv[2] || '';
 
 switch (command) {
   case 'task-event': {
-    const { taskEvent } = await import('../lib/runtime/task-event.ts');
+    const { taskEvent } = await import('../lib/internal/task-event.ts');
     taskEvent(process.argv.slice(3));
     break;
   }
@@ -20,7 +20,7 @@ switch (command) {
     process.stdout.write(`${JSON.stringify({
       status: 'failed',
       changed: false,
-      error: { code: 'RUNTIME_COMMAND_INVALID', message: `unknown runtime command '${command}'` }
+      error: { code: 'INTERNAL_COMMAND_INVALID', message: `unknown internal command '${command}'` }
     })}\n`);
     process.exitCode = 1;
 }

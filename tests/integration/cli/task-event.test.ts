@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { RUNTIME_CLI_PATH } from '../../helpers.ts';
+import { INTERNAL_CLI_PATH } from '../../helpers.ts';
 
 function fixture(step = 'requirement-analysis-review') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-event-'));
@@ -18,10 +18,10 @@ function fixture(step = 'requirement-analysis-review') {
 }
 
 function run(root: string, args: string[]) {
-  return spawnSync('node', [RUNTIME_CLI_PATH, 'task-event', ...args], { cwd: root, encoding: 'utf8' });
+  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', ...args], { cwd: root, encoding: 'utf8' });
 }
 
-test('runtime task-event applies a started/completed pair and replays as no-op', () => {
+test('internal task-event applies a started/completed pair and replays as no-op', () => {
   const f = fixture();
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1']);
   assert.equal(started.status, 0, started.stderr);

@@ -25,7 +25,7 @@ for (const file of fs.readdirSync(runtimesSrc)) {
   }
 }
 
-for (const file of ["cli.js", "runtime-cli.js"]) {
+for (const file of ["cli.js", "internal-cli.js"]) {
   try {
     fs.chmodSync(path.join(rootDir, "dist", "bin", file), 0o755);
     process.stdout.write(`Chmod 0755 dist/bin/${file}\n`);

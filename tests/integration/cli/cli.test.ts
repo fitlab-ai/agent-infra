@@ -6,7 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 
-import { CLI_PATH, RUNTIME_CLI_PATH, cliArgs, envWithPrependedPath, escapeRegExp, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../../helpers.ts";
+import { CLI_PATH, INTERNAL_CLI_PATH, cliArgs, envWithPrependedPath, escapeRegExp, exists, filePath, read, supportsPosixModeBits, writeNodeCommandShim } from "../../helpers.ts";
 
 const PLATFORM_DEFAULT_ENGINES: Partial<Record<NodeJS.Platform, string>> = {
   linux: "native",
@@ -20,7 +20,7 @@ const ENGINE_NL = DEFAULT_SANDBOX_ENGINE ? "\n" : "";
 test("bootstrap CLI files exist", () => {
   assert.ok(exists("install.sh"), "install.sh should exist");
   assert.ok(exists("bin/cli.ts"), "bin/cli.ts (node) should exist");
-  assert.ok(exists("bin/runtime-cli.ts"), "bin/runtime-cli.ts should exist");
+  assert.ok(exists("bin/internal-cli.ts"), "bin/internal-cli.ts should exist");
 
   const installSh = read("install.sh");
   assert.match(installSh, /npm install/);
@@ -32,9 +32,9 @@ test("bootstrap CLI files exist", () => {
 
   if (supportsPosixModeBits()) {
     const nodeStats = fs.statSync(CLI_PATH);
-    const runtimeStats = fs.statSync(RUNTIME_CLI_PATH);
+    const internalStats = fs.statSync(INTERNAL_CLI_PATH);
     assert.ok(nodeStats.mode & 0o111, "bin/cli.ts should be executable");
-    assert.ok(runtimeStats.mode & 0o111, "bin/runtime-cli.ts should be executable");
+    assert.ok(internalStats.mode & 0o111, "bin/internal-cli.ts should be executable");
   } else {
     const output = execFileSync(process.execPath, cliArgs("version"), {
       encoding: "utf8"

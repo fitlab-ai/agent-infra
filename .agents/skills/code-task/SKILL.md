@@ -52,7 +52,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## 步骤开始：声明 started 事件
 
-确认前置条件与模式/轮次后、本轮第一个产出动作之前执行 `agent-infra-runtime task-event {task-id} code.started --agent {agent} --round {code-round}`；修复模式在同一命令追加 `--fix-for {review-artifact}`。
+确认前置条件与模式/轮次后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} code.started --agent {agent} --round {code-round}`；修复模式在同一命令追加 `--fix-for {review-artifact}`。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -151,8 +151,8 @@ echo "$result"
 - 审查 `## 需求` 段落，仅把本轮已由代码实现且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
 - 记录 Round `{code-round}` 的 `{code-artifact}`
 - 完成业务内容更新后声明完成事件：
-  - 初次实现：`agent-infra-runtime task-event {task-id} code.completed --agent {agent} --round {code-round} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`
-  - 修复模式：`agent-infra-runtime task-event {task-id} code.completed --agent {agent} --round {code-round} --artifact {code-artifact} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
+  - 初次实现：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --round {code-round} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`
+  - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --round {code-round} --artifact {code-artifact} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续；执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测）：
 - 按 issue-sync.md 设置 `status: in-progress`
