@@ -50,15 +50,9 @@ tail .agents/workspace/active/{task-id}/task.md
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
-## 步骤开始：写入 started 标记
+## 步骤开始：声明 started 事件
 
-确认前置条件（步骤 1）与模式/轮次（步骤 4）后、本轮第一个产出动作之前，向 task.md `## 活动日志` 追加一条 started 标记（与本轮 done 条目同基名 + ` [started]` 后缀，note 用 `started`）：
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Task (Round {N}) [started]** by {agent} — started
-```
-
-修复模式的基名须与本轮 done 一致，即 `Code Task (Round {N}, fix for {review-artifact}) [started]`。`ai task log` 会把它与步骤完成时（步骤 10）写入的 done 条目配对成一行（进行中 → 已完成）。格式与配对规则见 `.agents/rules/task-management.md` 的「Activity Log started / done 双标记约定」。
+确认前置条件与模式/轮次后、本轮第一个产出动作之前执行 `ai task event {task-id} code.started --agent {agent} --round {code-round}`；修复模式在同一命令追加 `--fix-for {review-artifact}`。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -153,22 +147,12 @@ echo "$result"
 
 ### 10. 更新任务状态
 
-获取当前时间：
-
-```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
-```
-
 更新 `.agents/workspace/active/{task-id}/task.md`：
-- `current_step`：code
-- `assigned_to`：{当前代理}
-- `updated_at`：{当前时间}
-- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - 审查 `## 需求` 段落，仅把本轮已由代码实现且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
 - 记录 Round `{code-round}` 的 `{code-artifact}`
-- 追加：
-  - 初次实现：`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Task (Round {N})** by {agent} — Code implemented, {n} files modified, {n} tests passed → {code-artifact}`
-  - 修复模式：`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Code Task (Round {N}, fix for {review-artifact})** by {agent} — Fixed {n} blockers, {n} major, {n} minor issues[, skipped {n} manual-validation] → {code-artifact}`
+- 完成业务内容更新后声明完成事件：
+  - 初次实现：`ai task event {task-id} code.completed --agent {agent} --round {code-round} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`
+  - 修复模式：`ai task event {task-id} code.completed --agent {agent} --round {code-round} --artifact {code-artifact} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续；执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测）：
 - 按 issue-sync.md 设置 `status: in-progress`

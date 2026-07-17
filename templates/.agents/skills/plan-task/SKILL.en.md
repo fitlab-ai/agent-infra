@@ -114,17 +114,7 @@ Create `.agents/workspace/active/{task-id}/{plan-artifact}`.
 
 ### 7. Update Task Status
 
-Get the current time:
-
-```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
-```
-
 Update `.agents/workspace/active/{task-id}/task.md`:
-- `current_step`: technical-design
-- `assigned_to`: {current AI agent}
-- `updated_at`: {current time}
-- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
 - Record the plan artifact for this round: `{plan-artifact}` (Round `{plan-round}`)
 - If the task template contains a `## Design` section, update it to link to `{plan-artifact}`
 - Mark technical-design as complete in workflow progress and include the actual round when the task template supports it
@@ -132,8 +122,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   - Overwrite the `effort` field in frontmatter with the new value
   - Append a `## Effort Re-estimate` section to this round's plan artifact `{plan-artifact}`, recording: `effort {old} → {new} (rationale: {short basis grounded in this plan})`
   If the re-estimated value matches the current value, skip it: do not write the `## Effort Re-estimate` section. The Flow A sync that follows reads the possibly updated frontmatter and propagates the new value to the Issue automatically.
-- **Append** to `## Activity Log` (do NOT overwrite previous entries):
-  ```
+After the business fields are updated, run `ai task event {task-id} plan.completed --agent {agent} --round {plan-round} --artifact {plan-artifact}` so the core updates the stage, agent, metadata, and Activity Log.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Task (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
   ```
 

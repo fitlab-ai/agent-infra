@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseActivityLog, pairEntries, isHumanAgent } from '../../../lib/task/commands/log.ts';
+import { parseActivityLog, pairEntries } from '../../../lib/task/activity-log.ts';
+import { isHumanAgent } from '../../../lib/task/commands/log.ts';
 
 // Separator in real entries is an em-dash (U+2014), not an ASCII hyphen.
 const ZH = '## 活动日志';

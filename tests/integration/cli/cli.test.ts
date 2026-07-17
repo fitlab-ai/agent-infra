@@ -78,7 +78,7 @@ test("cli usage lists top-level command aliases (help and bare)", () => {
     });
 
     assert.match(output, /^\s+sandbox, s\s+Manage Docker-based AI sandboxes/m);
-    assert.match(output, /^\s+task, t\s+Read-only views/m);
+    assert.match(output, /^\s+task, t\s+Inspect and transition/m);
   }
 });
 
@@ -102,7 +102,7 @@ test("cli usage keeps alias command descriptions aligned", () => {
   const rows = [
     ["merge", "Merge tasks"],
     ["sandbox, s", "Manage Docker-based AI sandboxes"],
-    ["task, t", "Read-only views"],
+    ["task, t", "Inspect and transition"],
     ["update", "Update seed files"]
   ] as const;
   const descriptionColumns = rows.map(([command, description]) => {

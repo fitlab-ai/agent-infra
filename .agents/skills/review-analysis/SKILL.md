@@ -34,15 +34,9 @@ tail .agents/workspace/active/{task-id}/task.md
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
-## 步骤开始：写入 started 标记
+## 步骤开始：声明 started 事件
 
-确认前置条件后、本轮第一个产出动作之前，向 task.md `## 活动日志` 追加一条 started 标记（与本轮 done 条目同基名 + ` [started]` 后缀，note 用 `started`）：
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Analysis (Round {N}) [started]** by {agent} — started
-```
-
-`ai task log` 会把它与审查完成时写入的 done 条目配对成一行（进行中 → 已完成）。格式与配对规则见 `.agents/rules/task-management.md` 的「Activity Log started / done 双标记约定」。
+确认前置条件和轮次后、本轮第一个产出动作之前执行 `ai task event {task-id} review-analysis.started --agent {agent} --round {review-round}`。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -76,19 +70,8 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ### 6. 更新任务状态
 
-获取当前时间：
-
-```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
-```
-
 更新 task.md：
-- `current_step`：requirement-analysis-review
-- `assigned_to`：{当前代理}
-- `updated_at`：{当前时间}
-- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
-- 追加：
-  `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Analysis (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}, Manual-validation: {n} → {review-artifact}`
+- 完成 findings、账本等业务内容更新后执行 `ai task event {task-id} review-analysis.completed --agent {agent} --round {review-round} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`。
 
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
 

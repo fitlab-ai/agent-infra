@@ -111,16 +111,7 @@ Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 
 ### 10. Update Task Status
 
-Get the current time:
-
-```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
-```
-
-Set `current_step` to `code`, refresh task metadata, and append one Activity Log entry:
-
-- initial implementation: `Code Task (Round {N})`
-- fix mode: `Code Task (Round {N}, fix for {review-artifact})`
+After requirement checkboxes and artifact links are updated, run the initial event `ai task event {task-id} code.completed --agent {agent} --round {code-round} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}` instead of the initial counts.
 
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, then:
 - Set `status: in-progress` according to issue-sync.md

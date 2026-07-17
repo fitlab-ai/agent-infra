@@ -33,15 +33,13 @@ tail .agents/workspace/active/{task-id}/task.md
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
-## 步骤开始：写入 started 标记
+## 步骤开始：声明 started 事件
 
-确认前置条件后、本轮第一个产出动作之前，向 task.md `## 活动日志` 追加一条 started 标记（与本轮 done 条目同基名 + ` [started]` 后缀，note 用 `started`）：
+确认前置条件和轮次后、本轮第一个产出动作之前执行：
 
+```bash
+ai task event {task-id} plan.started --agent {agent} --round {plan-round}
 ```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Task (Round {N}) [started]** by {agent} — started
-```
-
-`ai task log` 会把它与步骤完成时（步骤 7）写入的 done 条目配对成一行（进行中 → 已完成）。格式与配对规则见 `.agents/rules/task-management.md` 的「Activity Log started / done 双标记约定」。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -113,17 +111,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ### 7. 更新任务状态
 
-获取当前时间：
-
-```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
-```
-
 更新 `.agents/workspace/active/{task-id}/task.md`：
-- `current_step`：technical-design
-- `assigned_to`：{当前 AI 代理}
-- `updated_at`：{当前时间}
-- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
 - 记录本轮方案产物：`{plan-artifact}`（Round `{plan-round}`）
 - 如任务模板包含 `## 设计` 段落，更新为指向 `{plan-artifact}` 的链接
 - 在工作流进度中标记 technical-design 为已完成，并注明实际轮次（如果任务模板支持）
@@ -131,10 +119,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
   - 用新值覆盖 frontmatter 的 `effort` 字段
   - 在本轮方案产物 `{plan-artifact}` 中追加 `## 工作量重估` 段，记录一条：`effort {old} → {new} (rationale: {基于本轮方案的简短依据})`
   若重估值与当前值一致，跳过：不写入 `## 工作量重估` 段。后续 Flow A 同步会读取可能更新过的 frontmatter，并自动把新值同步到 Issue。
-- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
-  ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Task (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
-  ```
+- 完成业务内容更新后执行 `ai task event {task-id} plan.completed --agent {agent} --round {plan-round} --artifact {plan-artifact}`，由核心统一完成阶段、代理、时间、版本和 Activity Log 更新。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测

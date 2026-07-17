@@ -176,7 +176,7 @@ function canonicalTimestamp(): string {
     .replace(' GMT', '');
 }
 
-function defaultMetadataProvider(): TaskWriteMetadata {
+function captureTaskWriteMetadata(): TaskWriteMetadata {
   return { timestamp: canonicalTimestamp(), agentInfraVersion: VERSION };
 }
 
@@ -310,7 +310,7 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
 
   let metadata: TaskWriteMetadata;
   try {
-    metadata = (options.metadataProvider ?? defaultMetadataProvider)();
+    metadata = (options.metadataProvider ?? captureTaskWriteMetadata)();
     if (
       !metadata ||
       typeof metadata.timestamp !== 'string' ||
@@ -431,7 +431,7 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
   return { ...successBase, status: 'applied', changed: true };
 }
 
-export { writeTask };
+export { writeTask, captureTaskWriteMetadata };
 export type {
   FrontmatterMutation,
   SectionMutation,

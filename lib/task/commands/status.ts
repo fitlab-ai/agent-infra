@@ -7,7 +7,7 @@ import { enumerateArtifacts, type Artifact } from '../artifacts.ts';
 import { parseTaskFrontmatter, extractTitle, type Frontmatter } from '../frontmatter.ts';
 import { loadShortIdByTaskId } from '../short-id.ts';
 import { getOpenWorkflowWarnings, formatWorkflowWarningSummary, type WorkflowWarning } from '../workflow-warnings.ts';
-import { parseActivityLog, pairEntries } from './log.ts';
+import { parseActivityLog, pairEntries } from '../activity-log.ts';
 import { statusCard, type DisplayMessage } from '../../server/display.ts';
 
 const USAGE = `Usage: ai task status <N | #N | TASK-id>

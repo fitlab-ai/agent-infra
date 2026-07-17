@@ -70,14 +70,7 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
 ### 6. Update Task Status
 
-Get the current time:
-
-```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
-```
-
-Set `current_step` to `requirement-analysis-review`, refresh task metadata, and append:
-`- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Review Analysis (Round {N})** by {agent} — Verdict: {Approved/Changes Requested/Rejected}, blockers: {n}, major: {n}, minor: {n}, Manual-validation: {n} → {review-artifact}`
+After findings and ledger business updates, run `ai task event {task-id} review-analysis.completed --agent {agent} --round {review-round} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`.
 
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 

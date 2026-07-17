@@ -40,6 +40,8 @@ Map user intent to the corresponding workflow command:
 
 ## Activity Log started / done dual-marker convention (single source of truth)
 
+`analyze-task`, `review-analysis`, `plan-task`, `review-plan`, `code-task`, and `review-code` must declare business events through `ai task event`. The event core generates `current_step`, `assigned_to`, `updated_at`, `agent_infra_version`, and the log text below. Other lifecycle skills not yet migrated continue to follow this textual protocol.
+
 > This section is the sole authoritative definition of the started/done dual marker. The skills, the renderer (`lib/task/commands/log.ts`), and the validator (`.agents/scripts/validate-artifact.js`) all defer to it; keep this section in sync when changing any of them.
 
 **Line grammar is unchanged**: both started and done use the existing entry grammar `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **{action}** by {agent} — {note}`, so the parsing regexes (`log.ts:ENTRY_RE` and `validate-artifact.js:ACTIVITY_LOG_PATTERN`) need no change.

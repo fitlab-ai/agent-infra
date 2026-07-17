@@ -112,8 +112,7 @@ Runs after Step 0 state check and Step 3 (questioning is an external-state actio
   1. Decide this round's question (consistent with 4.2):
      - if a `pending_question` already exists (the previous question is still unanswered) → restate that `pending_question`, do **not** modify it and do **not** increment `question_count`;
      - otherwise (no pending question) → pick the single highest-value question (acceptance criteria > scope > ambiguity) and write `## Brainstorming`: `status: asking`, `pending_question: <question>`, `question_count += 1`.
-  2. Update frontmatter: `current_step: requirement-analysis`, `assigned_to`, `updated_at`, `agent_infra_version` (read `.agents/rules/version-stamp.md` first); if `start_date` is empty, also write today's date (`date +%F`) to satisfy the required `start_date` check at the requirement-analysis stage.
-  3. Append to Activity Log: `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Brainstorming)** by {agent} — Asked Q{question_count}, awaiting answer`.
+  2. If `start_date` is empty, write today (`date +%F`), then run `ai task event {task-id} analyze.awaiting-input --agent {agent} --question {question_count}` so the core updates base metadata and Activity Log.
   4. Issue sync (when `issue_number` exists, skip on any failure): read `.agents/rules/issue-sync.md` first for upstream / permission detection; update only the **task comment** per the task.md comment sync rule; keep the `status` label at `pending-design-work`; do **not** publish an analysis artifact comment.
   5. Verification (replaces the step 8 artifact gate): `node .agents/scripts/validate-artifact.js check task-meta .agents/workspace/active/{task-id} --skill analyze-task --format text` (the early-exit set `current_step: requirement-analysis` and wrote `start_date`, so it should pass); also keep `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` and the task-comment sync evidence. Do **not** run the artifact gate, nor `check activity-log` / `check platform-sync` (both bind to the analysis artifact path).
   6. User output: show only the current **single question** plus how to answer/continue (re-trigger `analyze-task {task-ref}` with the answer), and append the `Completed at` line per `.agents/rules/next-step-output.md`.
@@ -207,17 +206,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 
 ### 7. Update Task Status
 
-Get the current time:
-
-```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
-```
-
 Update `.agents/workspace/active/{task-id}/task.md`:
-- `current_step`: requirement-analysis
-- `assigned_to`: {current AI agent}
-- `updated_at`: {current time}
-- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
 - Record the analysis artifact for this round: `{analysis-artifact}` (Round `{analysis-round}`)
 - If the task template contains a `## Analysis` section, update it to link to `{analysis-artifact}`
 - Mark requirement-analysis as complete in workflow progress and include the actual round when the task template supports it
@@ -225,8 +214,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   - Overwrite the `priority` field in frontmatter with the new value
   - Append a `## Priority Re-estimate` section to this round's analysis artifact `{analysis-artifact}`, recording: `priority {old} → {new} (rationale: {short basis grounded in this analysis})`
   If the re-estimated value matches the current value, skip it: do not write the `## Priority Re-estimate` section. The Flow A sync that follows reads the possibly updated frontmatter and propagates the new value to the Issue automatically.
-- **Append** to `## Activity Log` (do NOT overwrite previous entries):
-  ```
+After the business fields are updated, run `ai task event {task-id} analyze.completed --agent {agent} --round {analysis-round} --artifact {analysis-artifact}` so the core updates the stage, agent, metadata, and Activity Log.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Round {N})** by {agent} — Analysis completed → {analysis-artifact}
   ```
 
