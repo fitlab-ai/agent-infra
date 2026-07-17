@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import * as semver from "semver";
 import { parse } from "yaml";
 
-import { CLI_PATH, cliArgs, filePath, read } from "../../helpers.ts";
+import { CLI_PATH, cliArgs, filePath, listFilesRecursive, read } from "../../helpers.ts";
 
 type WorkflowStep = {
   uses?: string;
@@ -54,6 +54,13 @@ function requireVersion(versionText: string, label: string) {
   return version;
 }
 
+function requireActionStep(steps: WorkflowStep[], action: string, label: string) {
+  const prefix = `${action}@`;
+  const step = steps.find((candidate) => candidate.uses?.startsWith(prefix));
+  assert.ok(step, `${label} must use ${action}`);
+  return step;
+}
+
 test("package metadata supports scoped npm publishing", () => {
   const pkg = JSON.parse(read("package.json"));
 
@@ -90,37 +97,44 @@ test("package metadata supports scoped npm publishing", () => {
   assert.match(read("runtime/platform-adapters/platform-sync.github.js"), /from "cross-spawn"/);
 });
 
-test("Node runtime baseline and release publisher baseline stay pinned", () => {
+test("Node runtime baseline stays aligned across metadata and automation", () => {
   const pkg = JSON.parse(read("package.json"));
   const lock = JSON.parse(read("package-lock.json")) as PackageLock;
 
   const engineRange = pkg.engines.node;
-  assert.equal(requireMinVersion(engineRange, "package engines.node").version, "22.9.0");
+  const engineMinimum = requireMinVersion(engineRange, "package engines.node");
   assert.equal(lock.packages[""]?.engines?.node, engineRange);
-  assert.equal(semver.satisfies("22.8.999", engineRange), false);
-  assert.equal(semver.satisfies("22.9.0", engineRange), true);
 
   const typesNodeRange = pkg.devDependencies["@types/node"];
-  assert.equal(requireMinVersion(typesNodeRange, "package @types/node range").major, 22);
-  assert.equal(semver.intersects(typesNodeRange, ">=23.0.0"), false);
+  assert.equal(requireMinVersion(typesNodeRange, "package @types/node range").major, engineMinimum.major);
+  assert.equal(semver.intersects(typesNodeRange, `>=${engineMinimum.major + 1}.0.0`), false);
 
   const rootTypesNodeRange = lock.packages[""]?.devDependencies?.["@types/node"];
-  assert.equal(requireMinVersion(rootTypesNodeRange ?? "", "lockfile root @types/node range").major, 22);
+  assert.equal(rootTypesNodeRange, typesNodeRange);
 
   const lockedTypesNodeVersion = lock.packages["node_modules/@types/node"]?.version;
-  assert.equal(requireVersion(lockedTypesNodeVersion ?? "", "lockfile @types/node version").major, 22);
+  assert.equal(
+    semver.satisfies(requireVersion(lockedTypesNodeVersion ?? "", "lockfile @types/node version"), typesNodeRange),
+    true
+  );
 
   const releaseWorkflow = parse(read(".github/workflows/release.yml")) as ReleaseWorkflow;
   const releaseSteps = releaseWorkflow.jobs?.["npm-publish"]?.steps ?? [];
-  const setupNodeStep = releaseSteps.find((step) => step.uses === "actions/setup-node@v6");
-  assert.ok(setupNodeStep, "actions/setup-node@v6 step not found in release workflow");
-  assert.equal(String(setupNodeStep?.with?.["node-version"]), "24");
+  const setupNodeStep = requireActionStep(releaseSteps, "actions/setup-node", "release workflow");
+  const releaseNodeVersion = requireMinVersion(
+    String(setupNodeStep.with?.["node-version"] ?? ""),
+    "release workflow node-version"
+  );
+  assert.equal(semver.satisfies(releaseNodeVersion, engineRange), true);
 
   const unitTestsWorkflow = parse(read(".github/workflows/unit-tests.yml")) as ReleaseWorkflow;
   const minimumBaselineSteps = unitTestsWorkflow.jobs?.["minimum-node-baseline"]?.steps ?? [];
-  const minimumSetupNodeStep = minimumBaselineSteps.find((step) => step.uses === "actions/setup-node@v6");
-  assert.ok(minimumSetupNodeStep, "minimum Node baseline setup-node step not found");
-  assert.equal(String(minimumSetupNodeStep?.with?.["node-version"]), "22.9.0");
+  const minimumSetupNodeStep = requireActionStep(
+    minimumBaselineSteps,
+    "actions/setup-node",
+    "minimum Node baseline job"
+  );
+  assert.equal(String(minimumSetupNodeStep.with?.["node-version"]), engineMinimum.version);
 
   const dependabot = parse(read(".github/dependabot.yml")) as DependabotConfig;
   const npmUpdates = dependabot.updates?.find(
@@ -136,9 +150,62 @@ test("Node runtime baseline and release publisher baseline stay pinned", () => {
 
   const runtimeEngineConflicts = Object.entries(lock.packages)
     .filter(([packagePath, meta]) => packagePath !== "" && !meta.dev && meta.engines?.node)
-    .filter(([, meta]) => !semver.intersects(meta.engines?.node ?? "", ">=22.9.0 <23"))
+    .filter(
+      ([, meta]) =>
+        !semver.intersects(
+          meta.engines?.node ?? "",
+          `>=${engineMinimum.version} <${engineMinimum.major + 1}.0.0`
+        )
+    )
     .map(([packagePath, meta]) => [packagePath, meta.engines?.node]);
   assert.deepEqual(runtimeEngineConflicts, []);
+});
+
+test("reused GitHub Actions keep consistent refs across workflows", () => {
+  const refsByAction = new Map<string, Map<string, string[]>>();
+
+  listFilesRecursive(".github/workflows")
+    .filter((relativePath) => /\.ya?ml$/.test(relativePath))
+    .forEach((relativePath) => {
+      const workflow = parse(read(relativePath)) as ReleaseWorkflow;
+
+      Object.values(workflow.jobs ?? {}).forEach((job) => {
+        (job.steps ?? []).forEach((step) => {
+          const uses = step.uses;
+          const separator = uses?.lastIndexOf("@") ?? -1;
+          if (!uses || uses.startsWith("./") || separator < 1 || separator === uses.length - 1) {
+            return;
+          }
+
+          const action = uses.slice(0, separator);
+          const ref = uses.slice(separator + 1);
+          const refs = refsByAction.get(action) ?? new Map<string, string[]>();
+          refs.set(ref, [...(refs.get(ref) ?? []), relativePath]);
+          refsByAction.set(action, refs);
+        });
+      });
+    });
+
+  refsByAction.forEach((refs, action) => {
+    assert.equal(
+      refs.size,
+      1,
+      `${action} must use one ref across workflows: ${[...refs.entries()]
+        .map(([ref, paths]) => `${ref} in ${paths.join(", ")}`)
+        .join("; ")}`
+    );
+  });
+});
+
+test("test sources do not pin GitHub Action refs", () => {
+  const pinnedRefs = listFilesRecursive("tests")
+    .filter((relativePath) => relativePath.endsWith(".ts"))
+    .flatMap((relativePath) =>
+      [...read(relativePath).matchAll(/["'`]([A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+@[A-Za-z0-9_.-]+)/g)]
+        .map((match) => `${relativePath}: ${match[1]}`)
+    );
+
+  assert.deepEqual(pinnedRefs, []);
 });
 
 test("CLI help advertises scoped npm install commands and Homebrew", () => {

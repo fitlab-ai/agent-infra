@@ -322,10 +322,12 @@ test("agent-infra package lookup failure is diagnostic and does not install into
 
 test("syncTemplates persists the exact prerelease template version idempotently", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-installer-version-"));
+  const templatePackageVersion = "9.8.7-alpha.6";
+  const expectedTemplateVersion = `v${templatePackageVersion}`;
 
   try {
     const projectRoot = path.join(tmpDir, "project");
-    const { templateRoot } = createTemplateInstall(tmpDir, "0.8.6-alpha.0");
+    const { templateRoot } = createTemplateInstall(tmpDir, templatePackageVersion);
 
     fs.mkdirSync(projectRoot, { recursive: true });
 
@@ -348,8 +350,8 @@ test("syncTemplates persists the exact prerelease template version idempotently"
     const config = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
     const secondReport = syncTemplates(projectRoot, templateRoot);
 
-    assert.equal(firstReport.templateVersion, "v0.8.6-alpha.0");
-    assert.equal(config.templateVersion, "v0.8.6-alpha.0");
+    assert.equal(firstReport.templateVersion, expectedTemplateVersion);
+    assert.equal(config.templateVersion, expectedTemplateVersion);
     assert.equal(firstReport.configUpdated, true);
     assert.equal(secondReport.configUpdated, false);
   } finally {
