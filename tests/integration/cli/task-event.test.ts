@@ -17,8 +17,8 @@ function fixture(step = 'requirement-analysis-review') {
   return { root, id, file: path.join(dir, 'task.md') };
 }
 
-function run(root: string, args: string[]) {
-  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', ...args], { cwd: root, encoding: 'utf8' });
+function run(root: string, args: string[], env: NodeJS.ProcessEnv = process.env) {
+  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', ...args], { cwd: root, encoding: 'utf8', env });
 }
 
 test('internal task-event applies a started/completed pair and replays as no-op', () => {
@@ -42,6 +42,16 @@ test('dry-run returns planned without changing task bytes', () => {
   const out = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1', '--dry-run']);
   assert.equal(JSON.parse(out.stdout).status, 'planned');
   assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('task-event timestamps keep an ASCII offset in negative-offset timezones', () => {
+  const f = fixture();
+  const env = { ...process.env, TZ: 'America/Los_Angeles' };
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1'], env);
+  assert.equal(started.status, 0, started.stderr);
+  assert.match(JSON.parse(started.stdout).timestamp, /-\d{2}:\d{2}$/);
+  const repeated = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1'], env);
+  assert.equal(JSON.parse(repeated.stdout).status, 'no-op');
 });
 
 test('completion without an open start fails without changing the file', () => {
