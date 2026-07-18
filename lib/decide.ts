@@ -11,7 +11,7 @@ import {
 import { parseLedger, type LedgerRow } from './task/ledger.ts';
 import { extractSection, findSectionHeading } from './task/sections.ts';
 import { resolveTaskRef } from './task/resolve-ref.ts';
-import { writeTask } from './task/write.ts';
+import { canonicalTimestamp, writeTask } from './task/write.ts';
 import type { SectionMutation } from './task/write.ts';
 
 type DecideOptions = {
@@ -41,21 +41,6 @@ function parseDecisionParts(parts: string[]): { decision: string; needsImplement
   }
   if (decision.length === 0) throw new Error('decision content is required');
   return { decision: decision.join(' '), needsImplementation };
-}
-
-function defaultNow(): string {
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZoneName: 'longOffset',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  })
-    .format(new Date())
-    .replace(' GMT', '');
 }
 
 function nextDecisionRecordId(content: string): string {
@@ -127,7 +112,7 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
       throw new Error('--needs-implementation is only valid for code-stage decisions');
     }
 
-    const now = (options.now ?? defaultNow)();
+    const now = (options.now ?? canonicalTimestamp)();
     const recordId = nextDecisionRecordId(content);
     const ledgerBody = updatedLedgerBody(content, selected.row, recordId);
     const decisionBody = extractSection(content, DECISION_ALIASES);

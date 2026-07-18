@@ -25,7 +25,11 @@ function fixture(rows: string[]): { repoRoot: string; taskId: string; taskMd: st
 }
 
 function run(repoRoot: string, args: string[]) {
-  return spawnSync('node', [CLI_PATH, ...args], { cwd: repoRoot, encoding: 'utf8' });
+  return spawnSync('node', [CLI_PATH, ...args], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: { ...process.env, TZ: 'UTC' }
+  });
 }
 
 test('real CLI writes AN, PL, CD, and HD targets through full and short task refs', () => {
@@ -47,6 +51,7 @@ test('real CLI writes AN, PL, CD, and HD targets through full and short task ref
     }
     const content = fs.readFileSync(data.taskMd, 'utf8');
     assert.equal((content.match(/human-decided/g) ?? []).length, 4);
+    assert.match(content, /\| II-1 \| CD-1 \| task\.md#HDR-3 \| code \| true \| \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\+00:00 \| pending \|\s*\|/);
     assert.deepEqual([...content.matchAll(/^### HDR-(\d+)$/gm)].map((match) => match[1]), ['4', '3', '2', '1']);
     for (const id of ['AN-1', 'PL-1', 'CD-1', 'HD-1']) {
       assert.match(content, new RegExp(`\\*\\*原账本 ID\\*\\*：${id}`));

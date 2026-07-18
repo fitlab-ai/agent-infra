@@ -425,7 +425,7 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
   return { ...successBase, status: 'applied', changed: true };
 }
 
-export { writeTask, captureTaskWriteMetadata };
+export { writeTask, captureTaskWriteMetadata, canonicalTimestamp };
 export type {
   FrontmatterMutation,
   SectionMutation,
