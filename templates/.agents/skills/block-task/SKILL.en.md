@@ -3,6 +3,9 @@ name: block-task
 description: >
   Mark a task as blocked and record the reason.
   Use when a task cannot proceed because of an external blocker and you need to park it with a reason.
+  Only invoke this skill automatically when the conversation includes a resolvable task reference
+  and the corresponding task.md can be located in a task state or directory supported by this skill.
+  Explicit user invocation continues to use the existing entry point, argument parsing, and execution flow.
 ---
 
 # Block Task

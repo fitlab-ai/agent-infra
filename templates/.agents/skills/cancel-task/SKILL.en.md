@@ -3,6 +3,9 @@ name: cancel-task
 description: >
   Cancel an unneeded task and move it.
   Use when a task is no longer needed and should be dropped from active work.
+  Only invoke this skill automatically when the conversation includes a resolvable task reference
+  and the corresponding task.md can be located in a task state or directory supported by this skill.
+  Explicit user invocation continues to use the existing entry point, argument parsing, and execution flow.
 ---
 
 # Cancel Task

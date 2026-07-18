@@ -3,6 +3,9 @@ name: code-task
 description: >
   Implement code from the technical plan and output a report.
   Use when an approved technical plan needs implementing, or code review found issues to fix.
+  Only invoke this skill automatically when the conversation includes a resolvable task reference
+  and the corresponding task.md can be located in a task state or directory supported by this skill.
+  Explicit user invocation continues to use the existing entry point, argument parsing, and execution flow.
 ---
 
 # Code Task

@@ -3,6 +3,9 @@ name: complete-manual-validation
 description: >
   Mark PR manual validation as completed and update the manual-validation section
   in the existing PR summary comment in place.
+  Only invoke this skill automatically when the conversation includes a resolvable task reference
+  and the corresponding task.md can be located in a task state or directory supported by this skill.
+  Explicit user invocation continues to use the existing entry point, argument parsing, and execution flow.
 ---
 
 # Complete Manual Validation

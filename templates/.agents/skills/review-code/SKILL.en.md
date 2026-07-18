@@ -3,6 +3,9 @@ name: review-code
 description: >
   Review code implementation and output a code review report.
   Use when a code implementation needs review before merging.
+  Only invoke this skill automatically when the conversation includes a resolvable task reference
+  and the corresponding task.md can be located in a task state or directory supported by this skill.
+  Explicit user invocation continues to use the existing entry point, argument parsing, and execution flow.
 ---
 
 # Code Review

@@ -3,6 +3,9 @@ name: check-task
 description: >
   Check a task's current status and progress.
   Use when you want a quick view of a task's current status and progress.
+  Only invoke this skill automatically when the conversation includes a resolvable task reference
+  and the corresponding task.md can be located in a task state or directory supported by this skill.
+  Explicit user invocation continues to use the existing entry point, argument parsing, and execution flow.
 ---
 
 # Check Task Status
