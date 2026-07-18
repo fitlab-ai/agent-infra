@@ -35,6 +35,21 @@ function configuredWidth(repoRoot) {
   }
 }
 
+function resolveCommand(command) {
+  if (process.platform !== "win32" || path.extname(command)) return command;
+  const pathValue = process.env.Path || process.env.PATH || "";
+  const extensions = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+  for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
+    for (const extension of extensions) {
+      const candidate = path.join(dir, `${command}${extension.toLowerCase()}`);
+      if (fs.existsSync(candidate)) return candidate;
+      const upperCandidate = path.join(dir, `${command}${extension.toUpperCase()}`);
+      if (fs.existsSync(upperCandidate)) return upperCandidate;
+    }
+  }
+  return command;
+}
+
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) {
   fs.writeSync(1, "Usage: task-short-id.js <alloc|release|resolve|list> [argument] [--active-dir <path>] [--short-id-length <N>] [--verify]\n");
@@ -53,9 +68,13 @@ if (!forwarded.includes("--short-id-length")) {
   forwarded.push("--short-id-length", String(configuredWidth(repoRoot)));
 }
 const sourceCli = findSourceCli();
+const installedCli = resolveCommand("agent-infra-internal");
 const child = sourceCli
   ? spawnSync(process.execPath, ["--experimental-strip-types", sourceCli, "task-short-id", ...forwarded], { encoding: "utf8" })
-  : spawnSync("agent-infra-internal", ["task-short-id", ...forwarded], { encoding: "utf8" });
+  : spawnSync(installedCli, ["task-short-id", ...forwarded], {
+      encoding: "utf8",
+      shell: process.platform === "win32" && /\.(?:bat|cmd)$/i.test(installedCli)
+    });
 if (child.error) {
   fs.writeSync(2, `Error: ${child.error.message}\n`);
   process.exit(1);
