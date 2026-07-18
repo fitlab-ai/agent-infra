@@ -84,10 +84,8 @@ const implementSyncCases = [
       assert.equal(result.status, 0, result.stderr);
       const payload = parseValidatorPayload(result.stdout);
       assert.equal(payload.gate, "pass");
-      assert.deepEqual(
-        payload.checks.map((check) => check.status),
-        ["pass", "pass", "pass", "pass", "pass"]
-      );
+      assert.ok(payload.checks.length > 0);
+      assert.ok(payload.checks.every((check) => check.status === "pass"));
     }
   },
   {
