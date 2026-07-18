@@ -137,12 +137,20 @@ function parseTypedTaskFrontmatter(content: string): TypedFrontmatter {
 
 function updateTaskFrontmatter(
   content: string,
-  set: Readonly<Record<string, FrontmatterScalar>>
+  set: Readonly<Record<string, FrontmatterScalar>>,
+  remove: readonly string[] = []
 ): string {
   if (!set || typeof set !== 'object' || Array.isArray(set)) {
     throw new FrontmatterError('MUTATION_INVALID', 'frontmatter set must be an object');
   }
   const entries = Object.entries(set);
+  if (!Array.isArray(remove)) {
+    throw new FrontmatterError('MUTATION_INVALID', 'frontmatter remove must be an array');
+  }
+  const removeSet = new Set(remove);
+  if (removeSet.size !== remove.length) {
+    throw new FrontmatterError('MUTATION_INVALID', 'frontmatter remove keys must be unique');
+  }
   for (const [key, value] of entries) {
     if (!key || /[\r\n:]/.test(key)) {
       throw new FrontmatterError('MUTATION_INVALID', `invalid frontmatter key '${key}'`);
@@ -156,6 +164,17 @@ function updateTaskFrontmatter(
       throw new FrontmatterError('MUTATION_INVALID', `invalid scalar for '${key}'`);
     }
   }
+  for (const key of remove) {
+    if (!key || /[\r\n:]/.test(key)) {
+      throw new FrontmatterError('MUTATION_INVALID', `invalid frontmatter key '${key}'`);
+    }
+    if (Object.hasOwn(set, key)) {
+      throw new FrontmatterError(
+        'MUTATION_INVALID',
+        `frontmatter key '${key}' cannot be set and removed together`
+      );
+    }
+  }
 
   const block = locateFrontmatter(content);
   const lines = parseFrontmatterLines(content, block);
@@ -167,7 +186,7 @@ function updateTaskFrontmatter(
     indexes.set(line.key, positions);
   }
 
-  for (const [key] of entries) {
+  for (const key of [...entries.map(([entryKey]) => entryKey), ...remove]) {
     if ((indexes.get(key)?.length ?? 0) > 1) {
       throw new FrontmatterError('TASK_DOCUMENT_INVALID', `duplicate frontmatter key '${key}'`);
     }
@@ -182,11 +201,15 @@ function updateTaskFrontmatter(
     if (index === undefined) additions.push(replacement);
     else nextLines[index] = replacement;
   }
+  const retainedLines = nextLines.filter((_, index) => {
+    const key = lines[index]?.key;
+    return !key || !removeSet.has(key);
+  });
   if (additions.length > 0) {
-    if (nextLines.at(-1) === '') nextLines.splice(-1, 0, ...additions);
-    else nextLines.push(...additions);
+    if (retainedLines.at(-1) === '') retainedLines.splice(-1, 0, ...additions);
+    else retainedLines.push(...additions);
   }
-  const body = nextLines.join(block.eol);
+  const body = retainedLines.join(block.eol);
   return content.slice(0, block.bodyStart) + body + content.slice(block.bodyEnd);
 }
 

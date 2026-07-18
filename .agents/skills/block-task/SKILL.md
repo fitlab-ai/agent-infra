@@ -25,15 +25,9 @@ description: >
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
-## 步骤开始：写入 started 标记
+## 步骤开始：本地生命周期边界
 
-确认前置条件后、本步骤第一个产出动作之前，向 task.md `## 活动日志` 追加一条 started 标记（与本步骤 done 条目同基名 + ` [started]` 后缀，note 用 `started`）：
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Block Task [started]** by {agent} — started
-```
-
-`ai task log` 会把它与完成时写入的 done 条目配对成一行（进行中 → 已完成）。约定见 `.agents/rules/task-management.md` 的「Activity Log started / done 双标记约定」。
+确认前置条件后，由步骤 3 的单次 lifecycle intent 原子写入 started/done 日志、基础元数据、目录转移和短号释放；本步骤不得提前手工写入其中任一项。
 
 ## 执行步骤
 ### 1. 验证任务存在
@@ -52,37 +46,26 @@ description: >
 - [ ] 已经尝试了哪些解决方案？
 - [ ] 需要什么帮助或信息才能解除阻塞？
 
-### 3. 更新任务元数据
-
-获取当前时间：
+### 3. 执行本地生命周期意图
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
+agent-infra-internal task-lifecycle {task-id} block --agent {agent} \
+  --reason "{一行原因}" --unblock-condition "{解除阻塞条件}"
 ```
 
-更新 `.agents/workspace/active/{task-id}/task.md`：
-- `status`：blocked
-- `blocked_at`：{当前时间戳}
-- `updated_at`：{当前时间戳}
-- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
-- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
-  ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Block Task** by {agent} — {一行原因}
-  ```
+解析 stdout 单 JSON。仅 `status=applied|no-op` 视为本地完成；`status=failed` 时展示 `error` 与 `completedSteps`/`pendingSteps`，不得宣称任务已阻塞。生命周期核心统一维护 `status`/`blocked_at`、阻塞信息、Activity Log、目录与短号。
 
-在 task.md 中添加阻塞信息部分。
+### 4. 验证本地终态
 
-### 4. 移动任务到 blocked 目录
-
-```bash
-mv .agents/workspace/active/{task-id} .agents/workspace/blocked/{task-id}
-```
-
-### 5. 验证移动
+确认结构化结果的 `targetState=blocked`、目标路径为 `.agents/workspace/blocked/{task-id}`、短号效果已提交，并检查：
 
 ```bash
 ls .agents/workspace/blocked/{task-id}/task.md
 ```
+
+### 5. 保留恢复身份
+
+记录 lifecycle 结果中的请求身份与规范 metadata，供失败后以同一 intent 安全重试；不得手工补写局部状态。
 
 ### 6. 同步到 Issue（可选）
 
@@ -93,12 +76,6 @@ ls .agents/workspace/blocked/{task-id}/task.md
 如果存在有效的 `issue_number`，按 issue-sync.md 设置 `status: blocked`。
 
 ### 7. 完成校验
-
-**释放短号**（先 `mv` 目录已成功，再 release；脚本幂等，未在注册表也返回 0）：
-
-```bash
-node .agents/scripts/task-short-id.js release "$task_id" || true
-```
 
 运行完成校验，确认任务产物和同步状态符合规范：
 
@@ -135,8 +112,7 @@ node .agents/scripts/validate-artifact.js gate block-task .agents/workspace/bloc
 ai sandbox rm {branch}
 
 解除阻塞时执行：
-  mv .agents/workspace/blocked/{task-id} .agents/workspace/active/{task-id}
-  # 然后更新 task.md：status -> active，移除 blocked_at
+  agent-infra-internal task-lifecycle {task-id} activate --agent {agent} --note "{恢复说明}"
 
 下一步 - 检查任务状态（解除阻塞后）：
   - Claude Code / OpenCode：/check-task {task-ref}
@@ -159,12 +135,10 @@ ai sandbox rm {branch}
 当阻塞问题解决后：
 
 ```bash
-# 1. 移回 active
-mv .agents/workspace/blocked/{task-id} .agents/workspace/active/{task-id}
-
-# 2. 更新 task.md：设置 status 为 active，更新时间戳
-# 3. 从中断处继续（检查 current_step）
+agent-infra-internal task-lifecycle {task-id} activate --agent {agent} --note "{恢复说明}"
 ```
+
+成功后从保留的 `current_step` 继续。失败时按结构化 recovery 字段以同一 intent 重试，不手工移动目录或编辑基础元数据。
 
 ## 注意事项
 

@@ -6,11 +6,29 @@ import os from "node:os";
 import path from "node:path";
 
 import { resolveTaskBranch } from "../../../lib/sandbox/task-resolver.ts";
+import {
+  INTERNAL_CLI_PATH,
+  envWithPrependedPath,
+  writeNodeCommandShim
+} from "../../helpers.ts";
 
 const SCRIPT = path.resolve(
   process.cwd(),
   "templates/.agents/scripts/task-short-id.js"
 );
+
+function withInternalCliPath<T>(operation: () => T): T {
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "task-resolver-bin-"));
+  writeNodeCommandShim(path.join(binDir, "agent-infra-internal"), INTERNAL_CLI_PATH);
+  const original = process.env.PATH;
+  Object.assign(process.env, envWithPrependedPath(process.env, binDir));
+  try {
+    return operation();
+  } finally {
+    if (original === undefined) delete process.env.PATH;
+    else process.env.PATH = original;
+  }
+}
 
 function mkFixtureRepo(shortIdLength: number = 1): { repoRoot: string; activeDir: string } {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tr-"));
@@ -53,7 +71,7 @@ test("resolveTaskBranch passes #N through registry and resolves branch (C3 regre
   assert.equal(alloc.stdout.trim(), "#1");
 
   // Resolver should now translate #1 → branch.
-  const resolved = resolveTaskBranch("#1", repoRoot);
+  const resolved = withInternalCliPath(() => resolveTaskBranch("#1", repoRoot));
   assert.equal(resolved, branch);
 });
 
@@ -91,9 +109,11 @@ test("resolveTaskBranch with shortIdLength=2: '#01', '#1', '1' all resolve to th
   assert.equal(alloc.stdout.trim(), "#01");
 
   // Round 4 contract: bare numeric, non-padded '#N', and zero-padded '#NN' are all aliases.
-  assert.equal(resolveTaskBranch("#01", repoRoot), branch);
-  assert.equal(resolveTaskBranch("#1", repoRoot), branch);
-  assert.equal(resolveTaskBranch("1", repoRoot), branch);
+  withInternalCliPath(() => {
+    assert.equal(resolveTaskBranch("#01", repoRoot), branch);
+    assert.equal(resolveTaskBranch("#1", repoRoot), branch);
+    assert.equal(resolveTaskBranch("1", repoRoot), branch);
+  });
   // Reserved key still rejects.
   assert.throws(() => resolveTaskBranch("#0", repoRoot), /reserved|not found/);
   // Over capacity still rejects.

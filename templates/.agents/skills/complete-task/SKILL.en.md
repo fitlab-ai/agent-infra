@@ -32,15 +32,9 @@ Before the state check is complete, do not make external-state assertions such a
 
 > If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
-## Step Start: Write the started Marker
+## Step Start: Local Lifecycle Boundary
 
-After confirming the task exists and before this round's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this round's done entry plus a ` [started]` suffix, note `started`):
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Complete Task [started]** by {agent} — started
-```
-
-`ai task log` pairs it with the done entry written on completion onto one row (in progress → done). Format and pairing rules: see the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+After the task exists and passes the pre-completion gates, Step 4 declares one lifecycle intent that atomically commits base terminal fields, the started/done pair, the directory move, and short-id release. Do not write those mechanical fields first.
 
 ## Steps
 
@@ -118,36 +112,22 @@ Please complete the missing steps first, or use --force to override.
 
 If prerequisites are not met and the user did not explicitly provide `--force`, stop immediately and do not execute Steps 3-7.
 
-### 3. Update Task Metadata
+### 3. Complete Business-Only Content
 
-Get the current time:
-
-```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
-```
-
-Update `.agents/workspace/active/{task-id}/task.md`:
-- `status`: completed
-- `current_step`: completed
-- `completed_at`: {current timestamp}
-- `target_date`: write the date portion (`YYYY-MM-DD`) of `completed_at` only when empty; keep any existing (human-entered) value
-- `updated_at`: {current timestamp}
-- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
+Update only content that the lifecycle core does not own:
 - Add or update the `## State Check` section with the raw Step 0 audit command output, including `$ ` prompt lines, before `## Activity Log`
 - Mark all workflow steps as complete
 - Verify and check off all items in `## Completion Checklist` (change `- [ ]` to `- [x]`)
-- **Append** to `## Activity Log` (do NOT overwrite previous entries):
-  ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Complete Task** by {agent} — Task moved to completed/
-  ```
 
-### 4. Move Task
+Do not write `status/current_step/completed_at/updated_at/agent_infra_version`, the base Activity Log pair, the directory move, or short-id state here.
 
-Move the task directory from active to completed:
+### 4. Apply the Local Lifecycle Intent
 
 ```bash
-mv .agents/workspace/active/{task-id} .agents/workspace/completed/{task-id}
+agent-infra-internal task-lifecycle {task-id} complete --agent {agent}
 ```
+
+Only `status=applied|no-op` means local completion succeeded. On `status=failed`, show the structured error and recovery steps and retry the same intent; do not claim completion or hand-repair partial state.
 
 ### 5. Verify Move
 
@@ -171,12 +151,6 @@ If a valid `issue_number` exists:
 - Read `.agents/rules/issue-fields.md` and follow Flow A to sync every non-empty Issue field (`priority`/`effort`/`start_date`/`target_date`) from `task.md` to the Issue (idempotent; skip without blocking when `has_push=false` or the fetch/write fails)
 
 ### 7. Verification Gate
-
-**Release short id** (after the directory has already been moved; the script is idempotent and returns 0 even if the task isn't registered):
-
-```bash
-node .agents/scripts/task-short-id.js release "$task_id" || true
-```
 
 Run the verification gate to confirm the task artifact and sync state are valid:
 

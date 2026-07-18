@@ -32,15 +32,9 @@ tail .agents/workspace/active/{task-id}/task.md
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
-## 步骤开始：写入 started 标记
+## 步骤开始：本地生命周期边界
 
-确认任务存在后、本轮第一个产出动作之前，向 task.md `## 活动日志` 追加一条 started 标记（与本轮 done 条目同基名 + ` [started]` 后缀，note 用 `started`）：
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Complete Task [started]** by {agent} — started
-```
-
-`ai task log` 会把它与完成时写入的 done 条目配对成一行（进行中 → 已完成）。格式与配对规则见 `.agents/rules/task-management.md` 的「Activity Log started / done 双标记约定」。
+确认任务存在并通过预完成门禁后，由步骤 4 的单次 lifecycle intent 原子完成基础终态字段、started/done 日志、目录转移和短号释放；不得提前手工写入这些机械状态。
 
 ## 执行步骤
 ### 1. 验证任务存在
@@ -117,36 +111,22 @@ Please complete the missing steps first, or use --force to override.
 
 如果前置条件未满足且用户未明确提供 `--force`，立即停止，不执行步骤 3-7。
 
-### 3. 更新任务元数据
+### 3. 完成业务内容更新
 
-获取当前时间：
-
-```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
-```
-
-更新 `.agents/workspace/active/{task-id}/task.md`：
-- `status`：completed
-- `current_step`：completed
-- `completed_at`：{当前时间戳}
-- `target_date`：仅当为空时写入 `completed_at` 的日期部分（`YYYY-MM-DD`）；已有值（人工填写）则保留
-- `updated_at`：{当前时间戳}
-- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
+在 `.agents/workspace/active/{task-id}/task.md` 中只更新生命周期核心不负责的业务内容：
 - 新增或更新 `## 状态核对` 段，粘贴第 0 步审计命令原文（含 `$ ` 前缀行），放在 `## 活动日志` 之前
 - 标记所有工作流步骤为已完成
 - 逐项验证并勾选 `## 完成检查清单` 中的所有条目（将 `- [ ]` 改为 `- [x]`）
-- **追加**到 `## Activity Log`（不要覆盖之前的记录）：
-  ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Complete Task** by {agent} — Task moved to completed/
-  ```
 
-### 4. 转移任务
+不得在本步骤写 `status/current_step/completed_at/updated_at/agent_infra_version`、基础 Activity Log、目录或短号；这些由下一步统一提交。
 
-将任务目录从 active 移动到 completed：
+### 4. 执行本地生命周期意图
 
 ```bash
-mv .agents/workspace/active/{task-id} .agents/workspace/completed/{task-id}
+agent-infra-internal task-lifecycle {task-id} complete --agent {agent}
 ```
+
+仅 `status=applied|no-op` 视为本地完成。`status=failed` 时展示 `error` 与 completed/pending steps，以同一 intent 重试；不得宣称完成或手工补写局部状态。
 
 ### 5. 验证转移
 
@@ -170,12 +150,6 @@ ls .agents/workspace/completed/{task-id}/task.md
 - 读取 `.agents/rules/issue-fields.md`，按流程 A 把 `task.md` 中所有非空的 Issue 字段（`priority`/`effort`/`start_date`/`target_date`）同步到 Issue（幂等；`has_push=false` 或取数/写入失败时跳过，不阻断）
 
 ### 7. 完成校验
-
-**释放短号**（先 `mv` 目录已成功，再 release；脚本幂等，未在注册表也返回 0）：
-
-```bash
-node .agents/scripts/task-short-id.js release "$task_id" || true
-```
 
 运行完成校验，确认任务产物和同步状态符合规范：
 

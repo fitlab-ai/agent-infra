@@ -649,18 +649,12 @@ test("skills that write timestamps require date command guidance", () => {
   const portableTimestampCommand =
     `date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\\([+-][0-9][0-9]\\)\\([0-9][0-9]\\)$/\\1:\\2/'`;
   const timestampSkills = [
-    "block-task",
-    "cancel-task",
-    "close-codescan",
-    "close-dependabot",
     "commit",
-    "complete-task",
     "create-pr",
     "create-task",
     "import-codescan",
     "import-dependabot",
     "import-issue",
-    "restore-task",
     "watch-pr"
   ];
 

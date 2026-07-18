@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const REGISTRY_NAME = '.short-ids.json';
+const LOCK_NAME = '.short-ids.json.lock';
 
 type NormalizeResult =
   | { kind: 'shortId'; value: string }
@@ -196,6 +197,219 @@ type RegistrySchema = {
   ids: Record<string, string>;
 };
 
+type ShortIdMutationEffect = 'alloc' | 'release' | 'none';
+type ShortIdMutationResult = {
+  effect: 'allocated' | 'released' | 'unchanged';
+  shortId: string | null;
+  changed: boolean;
+};
+
+function configuredShortIdLength(repoRoot: string): number {
+  try {
+    const config = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, '.agents', '.airc.json'), 'utf8')
+    ) as { task?: { shortIdLength?: unknown } };
+    const value = config.task?.shortIdLength;
+    return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : 2;
+  } catch {
+    return 2;
+  }
+}
+
+function validateRegistry(data: unknown, registryPath: string, width: number): RegistrySchema {
+  if (
+    !data || typeof data !== 'object' || Array.isArray(data) ||
+    (data as { version?: unknown }).version !== 1 ||
+    !(data as { ids?: unknown }).ids || typeof (data as { ids?: unknown }).ids !== 'object' ||
+    Array.isArray((data as { ids?: unknown }).ids)
+  ) {
+    throw Object.assign(new Error(`registry ${registryPath} has invalid schema`), {
+      code: 'SHORT_ID_REGISTRY_INVALID_SCHEMA'
+    });
+  }
+  const registry = data as RegistrySchema;
+  const keyPattern = new RegExp(`^\\d{${width}}$`);
+  const taskIds = new Set<string>();
+  for (const [key, taskId] of Object.entries(registry.ids)) {
+    if (!keyPattern.test(key) || Number(key) < 1 || typeof taskId !== 'string' || !/^TASK-\d{8}-\d{6}$/.test(taskId)) {
+      throw Object.assign(new Error(`registry ${registryPath} has invalid schema`), {
+        code: 'SHORT_ID_REGISTRY_INVALID_SCHEMA'
+      });
+    }
+    if (taskIds.has(taskId)) {
+      throw Object.assign(new Error(`duplicate registry entries for taskId ${taskId}`), {
+        code: 'SHORT_ID_REGISTRY_DUPLICATE_TASK'
+      });
+    }
+    taskIds.add(taskId);
+  }
+  return registry;
+}
+
+function readRegistryStrict(registryPath: string, width: number): RegistrySchema {
+  if (!fs.existsSync(registryPath)) return { version: 1, ids: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+  } catch (error) {
+    throw Object.assign(new Error(`registry ${registryPath} is not valid JSON: ${String(error)}`), {
+      code: 'SHORT_ID_REGISTRY_INVALID_JSON'
+    });
+  }
+  return validateRegistry(parsed, registryPath, width);
+}
+
+function withRegistryLock<T>(activeDir: string, operation: () => T): T {
+  fs.mkdirSync(activeDir, { recursive: true });
+  const lockPath = path.join(activeDir, LOCK_NAME);
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    try {
+      fs.mkdirSync(lockPath);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (Date.now() >= deadline) {
+        throw Object.assign(new Error('registry lock timeout after 5000ms'), {
+          code: 'SHORT_ID_LOCK_TIMEOUT'
+        });
+      }
+    }
+  }
+  try {
+    return operation();
+  } finally {
+    fs.rmdirSync(lockPath);
+  }
+}
+
+function writeRegistry(registryPath: string, registry: RegistrySchema): void {
+  const temporary = `${registryPath}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
+  fs.writeFileSync(temporary, `${JSON.stringify(registry, null, 2)}\n`, { flag: 'wx' });
+  try {
+    fs.renameSync(temporary, registryPath);
+  } catch (error) {
+    try { fs.unlinkSync(temporary); } catch { /* best effort temp cleanup */ }
+    throw error;
+  }
+}
+
+function mutateShortIdRegistry(
+  repoRoot: string,
+  taskId: string,
+  requested: ShortIdMutationEffect
+): ShortIdMutationResult {
+  const activeDir = path.join(repoRoot, '.agents', 'workspace', 'active');
+  return mutateShortIdRegistryAt(activeDir, configuredShortIdLength(repoRoot), taskId, requested);
+}
+
+type ShortIdCommandRequest = {
+  operation: 'alloc' | 'release' | 'resolve' | 'list';
+  argument?: string;
+  activeDir: string;
+  shortIdLength: number;
+  verify?: boolean;
+};
+type ShortIdCommandResult = {
+  status: 'applied' | 'no-op' | 'failed';
+  changed: boolean;
+  output: string;
+  error: { code: string; message: string } | null;
+};
+
+function mutateShortIdRegistryAt(
+  activeDir: string,
+  width: number,
+  taskId: string,
+  requested: ShortIdMutationEffect
+): ShortIdMutationResult {
+  const registryPath = path.join(activeDir, REGISTRY_NAME);
+  return withRegistryLock(activeDir, () => {
+    const registry = readRegistryStrict(registryPath, width);
+    const original = JSON.stringify(registry.ids);
+    for (const [key, candidate] of Object.entries(registry.ids)) {
+      if (candidate !== taskId && !fs.existsSync(path.join(activeDir, candidate, 'task.md'))) delete registry.ids[key];
+    }
+    const existing = Object.entries(registry.ids).find(([, candidate]) => candidate === taskId);
+    let result: ShortIdMutationResult;
+    if (requested === 'alloc') {
+      if (!fs.existsSync(path.join(activeDir, taskId, 'task.md'))) {
+        throw Object.assign(new Error(`task ${taskId} not found in ${activeDir}`), { code: 'SHORT_ID_TASK_NOT_ACTIVE' });
+      }
+      if (existing) result = { effect: 'unchanged', shortId: `#${existing[0]}`, changed: false };
+      else {
+        let key: string | null = null;
+        for (let value = 1; value < 10 ** width; value += 1) {
+          const candidate = String(value).padStart(width, '0');
+          if (!registry.ids[candidate]) { key = candidate; break; }
+        }
+        if (!key) throw Object.assign(new Error(`short id width exhausted (current shortIdLength=${width})`), { code: 'SHORT_ID_CAPACITY_EXCEEDED' });
+        registry.ids[key] = taskId;
+        result = { effect: 'allocated', shortId: `#${key}`, changed: true };
+      }
+    } else if (requested === 'release') {
+      if (!existing) result = { effect: 'unchanged', shortId: null, changed: false };
+      else { delete registry.ids[existing[0]]; result = { effect: 'released', shortId: `#${existing[0]}`, changed: true }; }
+    } else result = { effect: 'unchanged', shortId: existing ? `#${existing[0]}` : null, changed: false };
+    const changed = original !== JSON.stringify(registry.ids);
+    if (changed) writeRegistry(registryPath, registry);
+    return { ...result, changed };
+  });
+}
+
+function executeShortIdCommand(request: ShortIdCommandRequest): ShortIdCommandResult {
+  try {
+    if (!Number.isInteger(request.shortIdLength) || request.shortIdLength < 1) {
+      throw Object.assign(new Error('short-id-length must be a positive integer'), { code: 'SHORT_ID_PAYLOAD_INVALID' });
+    }
+    if (request.operation === 'alloc' || request.operation === 'release') {
+      if (!request.argument || !/^TASK-\d{8}-\d{6}$/.test(request.argument)) {
+        throw Object.assign(new Error(`${request.operation} requires a full TASK-id`), { code: 'SHORT_ID_PAYLOAD_INVALID' });
+      }
+      const result = mutateShortIdRegistryAt(request.activeDir, request.shortIdLength, request.argument, request.operation);
+      return { status: result.changed ? 'applied' : 'no-op', changed: result.changed, output: result.shortId ?? '', error: null };
+    }
+    const registryPath = path.join(request.activeDir, REGISTRY_NAME);
+    if (request.operation === 'resolve') {
+      if (!request.argument) throw Object.assign(new Error('resolve requires a short id'), { code: 'SHORT_ID_PAYLOAD_INVALID' });
+      const normalized = normalizeShortIdInput(request.argument, { shortIdLength: request.shortIdLength });
+      if (normalized.kind === 'error') throw Object.assign(new Error(normalized.message), { code: normalized.code });
+      if (normalized.kind !== 'shortId') {
+        throw Object.assign(new Error(`invalid short id format '${request.argument}'`), { code: 'SHORT_ID_FORMAT_INVALID' });
+      }
+      return withRegistryLock(request.activeDir, () => {
+        const registry = readRegistryStrict(registryPath, request.shortIdLength);
+        let changed = false;
+        for (const [key, taskId] of Object.entries(registry.ids)) {
+          if (!fs.existsSync(path.join(request.activeDir, taskId, 'task.md'))) { delete registry.ids[key]; changed = true; }
+        }
+        if (changed) writeRegistry(registryPath, registry);
+        const taskId = registry.ids[normalized.value.slice(1)];
+        if (!taskId) throw Object.assign(new Error(`short id '${normalized.value}' not found in active task registry`), { code: 'SHORT_ID_NOT_FOUND' });
+        return { status: changed ? 'applied' : 'no-op', changed, output: taskId, error: null };
+      });
+    }
+    const registry = readRegistryStrict(registryPath, request.shortIdLength);
+    if (request.verify) {
+      const active = fs.existsSync(request.activeDir)
+        ? fs.readdirSync(request.activeDir).filter((entry) => /^TASK-\d{8}-\d{6}$/.test(entry) && fs.existsSync(path.join(request.activeDir, entry, 'task.md')))
+        : [];
+      const registered = new Map<string, string[]>();
+      for (const [key, taskId] of Object.entries(registry.ids)) registered.set(taskId, [...(registered.get(taskId) ?? []), key]);
+      const diff = {
+        missing_in_registry: active.filter((taskId) => !registered.has(taskId)).map((taskId) => ({ taskId })),
+        orphans_in_registry: Object.entries(registry.ids).filter(([, taskId]) => !active.includes(taskId)).map(([key, taskId]) => ({ key: `#${key}`, taskId })),
+        duplicate_registry_keys: [...registered.entries()].filter(([, keys]) => keys.length > 1).map(([taskId, keys]) => ({ taskId, keys: keys.map((key) => `#${key}`) }))
+      };
+      const clean = Object.values(diff).every((items) => items.length === 0);
+      return { status: clean ? 'no-op' : 'failed', changed: false, output: clean ? '' : JSON.stringify(diff), error: clean ? null : { code: 'SHORT_ID_VERIFY_FAILED', message: 'registry differs from active tasks' } };
+    }
+    return { status: 'no-op', changed: false, output: JSON.stringify(registry, null, 2), error: null };
+  } catch (error) {
+    return { status: 'failed', changed: false, output: '', error: { code: (error as { code?: string }).code ?? 'SHORT_ID_OPERATION_FAILED', message: error instanceof Error ? error.message : String(error) } };
+  }
+}
+
 function readRegistry(repoRoot: string): RegistrySchema | null {
   const registryPath = path.join(repoRoot, '.agents', 'workspace', 'active', REGISTRY_NAME);
   if (!fs.existsSync(registryPath)) return null;
@@ -265,11 +479,18 @@ export {
   normalizeShortIdInput,
   resolveShortIdReadOnly,
   lookupShortIdByBranch,
-  loadShortIdByTaskId
+  loadShortIdByTaskId,
+  configuredShortIdLength,
+  mutateShortIdRegistry,
+  executeShortIdCommand
 };
 export type {
   NormalizeResult,
   NormalizeOpts,
   ResolveShortIdErrorCode,
-  ResolveShortIdResult
+  ResolveShortIdResult,
+  ShortIdMutationEffect,
+  ShortIdMutationResult,
+  ShortIdCommandRequest,
+  ShortIdCommandResult
 };

@@ -22,27 +22,40 @@ test("all 4 alloc-class SKILLs invoke task-short-id.js alloc inside execution st
   }
 });
 
-test("all 5 release-class SKILLs invoke task-short-id.js release inside execution steps", () => {
-  const skills = ["complete-task", "cancel-task", "block-task", "close-codescan", "close-dependabot"];
-  for (const skill of skills) {
+test("migrated lifecycle SKILL templates invoke the typed lifecycle command", () => {
+  const intents = {
+    "complete-task": "complete",
+    "cancel-task": "cancel",
+    "block-task": "block",
+    "close-codescan": "close-codescan",
+    "close-dependabot": "close-dependabot",
+    "restore-task": "restore"
+  } as const;
+  for (const [skill, intent] of Object.entries(intents)) {
     for (const lang of ["en", "zh-CN"]) {
       const file = path.join(TEMPLATES_SKILLS, skill, `SKILL.${lang}.md`);
       const content = fs.readFileSync(file, "utf8");
-      const matches = content.match(/node \.agents\/scripts\/task-short-id\.js release/g);
-      assert.ok(
-        matches && matches.length >= 1,
-        `${skill}/${lang}: missing release call`
-      );
+      assert.match(content, new RegExp(`agent-infra-internal task-lifecycle \\{task-id\\} ${intent}`));
     }
   }
 });
 
-test("restore-task re-allocates short id", () => {
+test("migrated runtime SKILLs invoke the same lifecycle intents as templates", () => {
+  const intents = {
+    "complete-task": "complete", "cancel-task": "cancel", "block-task": "block",
+    "close-codescan": "close-codescan", "close-dependabot": "close-dependabot", "restore-task": "restore"
+  } as const;
+  for (const [skill, intent] of Object.entries(intents)) {
+    const content = fs.readFileSync(path.resolve(process.cwd(), ".agents", "skills", skill, "SKILL.md"), "utf8");
+    assert.match(content, new RegExp(`agent-infra-internal task-lifecycle \\{task-id\\} ${intent}`));
+  }
+});
+
+test("restore-task templates declare restore through lifecycle", () => {
   for (const lang of ["en", "zh-CN"]) {
     const file = path.join(TEMPLATES_SKILLS, "restore-task", `SKILL.${lang}.md`);
     const content = fs.readFileSync(file, "utf8");
-    const matches = content.match(/node \.agents\/scripts\/task-short-id\.js alloc/g);
-    assert.ok(matches && matches.length >= 1, `restore-task/${lang}: missing alloc call`);
+    assert.match(content, /agent-infra-internal task-lifecycle \{task-id\} restore/);
   }
 });
 

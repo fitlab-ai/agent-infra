@@ -13,15 +13,9 @@ Dismiss the specified Dependabot security alert and record a justified reason.
 
 > If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
-## Step Start: Write the started Marker
+## Step Start: Local Lifecycle Boundary
 
-After prerequisites pass and before this step's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this step's done entry plus a ` [started]` suffix, note `started`):
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Close Dependabot [started]** by {agent} — started
-```
-
-`ai task log` pairs it with the done entry written on completion onto one row (in progress → done). See the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+The skill still owns the security-alert API. When a related task exists, Step 7 declares exactly one local lifecycle intent that commits base metadata, the log pair, archival placement, and short-id handling.
 
 ## Execution Flow
 
@@ -93,23 +87,13 @@ Dismiss the alert by following the Dependabot dismiss command in `.agents/rules/
 ### 7. Record in the Task (If Any)
 
 If a related task exists (search for `security_alert_number: <alert-number>`):
-Get the current time:
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
+agent-infra-internal task-lifecycle {task-id} close-dependabot --agent {agent} \
+  --alert-number {alert-number} --reason "{reason}"
 ```
 
-- Add the dismissal record to task.md
-- **Append** to `## Activity Log` (do NOT overwrite previous entries):
-  ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Close Dependabot** by {agent} — Dependabot alert #{alert-number} dismissed: {reason}
-  ```
-- Archive the task
-- **Release short id** (after the archive `mv` succeeded; the script is idempotent):
-
-  ```bash
-  node .agents/scripts/task-short-id.js release "$task_id" || true
-  ```
+Only `status=applied|no-op` means local archival completed. If the API dismissal succeeded but lifecycle returns `failed`, explicitly report that remote is dismissed while local recovery remains, show recovery steps, and retry the same intent. Do not hand-edit task.md, move directories, or release the short id.
 
 ### 8. Inform User
 
@@ -153,5 +137,4 @@ Next step - complete and archive the task if a related task exists:
 - Already closed: output "Alert #{number} is already {state}"
 - Permission error: output "No permission to modify alerts"
 - User canceled: output "Cancellation acknowledged"
-
 

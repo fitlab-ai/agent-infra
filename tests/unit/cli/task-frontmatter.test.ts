@@ -69,6 +69,29 @@ test('updateTaskFrontmatter replaces and appends scalars without touching other 
   );
 });
 
+test('updateTaskFrontmatter removes named scalars while preserving surrounding bytes', () => {
+  const input = '---\r\nid: TASK-1\r\nblocked_at: 2026-01-01\r\nunknown: keep # comment\r\n---\r\n# Body\r\n';
+  assert.equal(
+    updateTaskFrontmatter(input, { id: 'TASK-2' }, ['blocked_at']),
+    '---\r\nid: TASK-2\r\nunknown: keep # comment\r\n---\r\n# Body\r\n'
+  );
+});
+
+test('updateTaskFrontmatter keeps replacement indexes stable when an earlier key is removed', () => {
+  assert.equal(
+    updateTaskFrontmatter('---\nremove_me: old\nid: TASK-1\n---\n', { id: 'TASK-2' }, ['remove_me']),
+    '---\nid: TASK-2\n---\n'
+  );
+});
+
+test('updateTaskFrontmatter rejects a key present in both set and remove', () => {
+  assert.throws(
+    () => updateTaskFrontmatter('---\nid: TASK-1\n---\n', { id: 'TASK-2' }, ['id']),
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'MUTATION_INVALID'
+  );
+});
+
 test('updateTaskFrontmatter rejects duplicate target keys', () => {
   assert.throws(
     () => updateTaskFrontmatter('---\nid: one\nid: two\n---\n', { id: 'three' }),

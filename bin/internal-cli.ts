@@ -21,6 +21,16 @@ switch (command) {
     taskEvent(process.argv.slice(3));
     break;
   }
+  case 'task-lifecycle': {
+    const { taskLifecycle } = await import('../lib/internal/task-lifecycle.ts');
+    taskLifecycle(process.argv.slice(3));
+    break;
+  }
+  case 'task-short-id': {
+    const { taskShortId } = await import('../lib/internal/task-short-id.ts');
+    taskShortId(process.argv.slice(3));
+    break;
+  }
   default:
     process.stdout.write(`${JSON.stringify({
       status: 'failed',

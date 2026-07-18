@@ -25,15 +25,9 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 > If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
 
-## Step Start: Write the started Marker
+## Step Start: Local Lifecycle Boundary
 
-After prerequisites pass and before this step's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this step's done entry plus a ` [started]` suffix, note `started`):
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Block Task [started]** by {agent} — started
-```
-
-`ai task log` pairs it with the done entry written on completion onto one row (in progress → done). See the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+After prerequisites pass, Step 3 declares one lifecycle intent that atomically writes the started/done pair, base metadata, directory move, and short-id release. Do not write those pieces manually first.
 
 ## Steps
 
@@ -53,33 +47,20 @@ Before blocking, thoroughly analyze:
 - [ ] What solutions have been attempted?
 - [ ] What help or information is needed to unblock?
 
-### 3. Update Task Metadata
-
-Get the current time:
+### 3. Apply the Local Lifecycle Intent
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
+agent-infra-internal task-lifecycle {task-id} block --agent {agent} \
+  --reason "{one-line reason}" --unblock-condition "{unblock condition}"
 ```
 
-Update `.agents/workspace/active/{task-id}/task.md`:
-- `status`: blocked
-- `blocked_at`: {current timestamp}
-- `updated_at`: {current timestamp}
-- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
-- **Append** to `## Activity Log` (do NOT overwrite previous entries):
-  ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Block Task** by {agent} — {one-line reason}
-  ```
+Only `status=applied|no-op` means the local block completed. On `status=failed`, show the structured error and recovery steps and retry the same intent; do not manually edit task.md, move the directory, or release the short id.
 
-Add a blocking information section to task.md.
+### 4. Verify the Local Final State
 
-### 4. Move Task to Blocked Directory
+Confirm `targetState=blocked`, the target path, and the committed short-id effect.
 
-```bash
-mv .agents/workspace/active/{task-id} .agents/workspace/blocked/{task-id}
-```
-
-### 5. Verify Move
+### 5. Preserve Recovery Identity
 
 ```bash
 ls .agents/workspace/blocked/{task-id}/task.md
@@ -94,12 +75,6 @@ Check whether `task.md` includes a valid `issue_number`. If not, skip this step.
 If a valid `issue_number` exists, set `status: blocked` by following issue-sync.md.
 
 ### 7. Verification Gate
-
-**Release short id** (after the directory has already been moved; the script is idempotent and returns 0 even if the task isn't registered):
-
-```bash
-node .agents/scripts/task-short-id.js release "$task_id" || true
-```
 
 Run the verification gate to confirm the task artifact and sync state are valid:
 
@@ -136,8 +111,7 @@ Optional: clean up this task's sandbox
 ai sandbox rm {branch}
 
 To unblock when the issue is resolved:
-  mv .agents/workspace/blocked/{task-id} .agents/workspace/active/{task-id}
-  # Then update task.md: status -> active, remove blocked_at
+  agent-infra-internal task-lifecycle {task-id} activate --agent {agent} --note "{activation note}"
 
 Next step - check task status after unblocking:
   - Claude Code / OpenCode: /check-task {task-ref}
@@ -160,12 +134,10 @@ Next step - check task status after unblocking:
 When the blocking issue is resolved:
 
 ```bash
-# 1. Move back to active
-mv .agents/workspace/blocked/{task-id} .agents/workspace/active/{task-id}
-
-# 2. Update task.md: set status to active, update timestamps
-# 3. Resume from where you left off (check current_step)
+agent-infra-internal task-lifecycle {task-id} activate --agent {agent} --note "{activation note}"
 ```
+
+Resume from the preserved `current_step`. On failure, retry the same intent from the structured recovery fields instead of hand-editing lifecycle state.
 
 ## Notes
 

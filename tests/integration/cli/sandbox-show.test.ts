@@ -5,7 +5,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { CLI_PATH, cliArgs, gitSafeEnv, loadFreshEsm } from '../../helpers.ts';
+import {
+  CLI_PATH,
+  INTERNAL_CLI_PATH,
+  cliArgs,
+  envWithPrependedPath,
+  gitSafeEnv,
+  loadFreshEsm,
+  writeNodeCommandShim
+} from '../../helpers.ts';
 import { worktreeDirCandidates } from '../../../lib/sandbox/constants.ts';
 import { resolveTools, toolConfigDirCandidates } from '../../../lib/sandbox/tools.ts';
 import type { SandboxConfig } from '../../../lib/sandbox/config.ts';
@@ -78,8 +86,9 @@ test('collectSandboxDetail covers the legacy (dash) sanitize candidate', async (
   assert.deepEqual(detail.worktrees, [legacyPath]);
 });
 
-function mkCliFixture(): { repoRoot: string; activeDir: string; scriptPath: string } {
+function mkCliFixture(): { repoRoot: string; activeDir: string; scriptPath: string; binDir: string } {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-show-cli-'));
+  const binDir = path.join(repoRoot, 'bin');
   spawnSync('git', ['init', '--quiet'], { cwd: repoRoot });
   const agentsDir = path.join(repoRoot, '.agents');
   fs.mkdirSync(path.join(agentsDir, 'scripts'), { recursive: true });
@@ -91,34 +100,35 @@ function mkCliFixture(): { repoRoot: string; activeDir: string; scriptPath: stri
   );
   const activeDir = path.join(agentsDir, 'workspace', 'active');
   fs.mkdirSync(activeDir, { recursive: true });
-  return { repoRoot, activeDir, scriptPath };
+  writeNodeCommandShim(path.join(binDir, 'agent-infra-internal'), INTERNAL_CLI_PATH);
+  return { repoRoot, activeDir, scriptPath, binDir };
 }
 
-function runShow(args: string[], repoRoot: string) {
+function runShow(args: string[], repoRoot: string, binDir: string) {
   return spawnSync('node', cliArgs('sandbox', 'show', ...args), {
     cwd: repoRoot,
-    env: gitSafeEnv({ HOME: repoRoot, USERPROFILE: repoRoot }),
+    env: envWithPrependedPath(gitSafeEnv({ HOME: repoRoot, USERPROFILE: repoRoot }), binDir),
     encoding: 'utf8'
   });
 }
 
 test('ai sandbox show requires an argument', () => {
-  const { repoRoot } = mkCliFixture();
-  const out = runShow([], repoRoot);
+  const { repoRoot, binDir } = mkCliFixture();
+  const out = runShow([], repoRoot, binDir);
   assert.notEqual(out.status, 0);
   assert.match(out.stdout, /Usage: ai sandbox show/);
 });
 
 test('ai sandbox show --help prints usage and exits 0', () => {
-  const { repoRoot } = mkCliFixture();
-  const out = runShow(['--help'], repoRoot);
+  const { repoRoot, binDir } = mkCliFixture();
+  const out = runShow(['--help'], repoRoot, binDir);
   assert.equal(out.status, 0, out.stderr);
   assert.match(out.stdout, /Usage: ai sandbox show/);
 });
 
 test('ai sandbox show <branch> resolves a plain branch name and renders detail', () => {
-  const { repoRoot } = mkCliFixture();
-  const out = runShow(['feature-plain'], repoRoot);
+  const { repoRoot, binDir } = mkCliFixture();
+  const out = runShow(['feature-plain'], repoRoot, binDir);
   assert.equal(out.status, 0, out.stderr);
   const combined = `${out.stdout}\n${out.stderr}`;
   assert.match(combined, /Sandbox detail for demo .* feature-plain/);
@@ -126,25 +136,29 @@ test('ai sandbox show <branch> resolves a plain branch name and renders detail',
 });
 
 test('ai sandbox show <bare-numeric> resolves the branch via the short-id registry', () => {
-  const { repoRoot, activeDir, scriptPath } = mkCliFixture();
+  const { repoRoot, activeDir, scriptPath, binDir } = mkCliFixture();
   const taskId = 'TASK-20260101-000007';
   fs.mkdirSync(path.join(activeDir, taskId), { recursive: true });
   fs.writeFileSync(
     path.join(activeDir, taskId, 'task.md'),
     `---\nid: ${taskId}\nbranch: feature-bound\n---\n# body\n`
   );
-  const alloc = spawnSync('node', [scriptPath, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
+  const alloc = spawnSync('node', [scriptPath, 'alloc', taskId], {
+    cwd: repoRoot,
+    env: envWithPrependedPath(gitSafeEnv(), binDir),
+    encoding: 'utf8'
+  });
   assert.equal(alloc.status, 0, alloc.stderr);
   assert.equal(alloc.stdout.trim(), '#01');
 
-  const out = runShow(['1'], repoRoot);
+  const out = runShow(['1'], repoRoot, binDir);
   assert.equal(out.status, 0, out.stderr);
   assert.match(`${out.stdout}\n${out.stderr}`, /Sandbox detail for demo .* feature-bound/);
 });
 
 test('ai sandbox show <unknown short id> fails with an actionable registry error', () => {
-  const { repoRoot } = mkCliFixture();
-  const out = runShow(['99'], repoRoot);
+  const { repoRoot, binDir } = mkCliFixture();
+  const out = runShow(['99'], repoRoot, binDir);
   assert.notEqual(out.status, 0);
   assert.match(`${out.stdout}\n${out.stderr}`, /registry/);
 });

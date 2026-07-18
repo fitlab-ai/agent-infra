@@ -12,7 +12,7 @@ description: >
 ## 行为边界 / 关键规则
 
 - 只从匹配 `.agents/rules/issue-sync.md` 标记注册表的评论恢复文件
-- 默认恢复到 `.agents/workspace/active/{task-id}/`
+- 先恢复到 `.agents/workspace/` 内的受控 staging，校验后由 lifecycle 原子落位到 `active/{task-id}/`
 - 如果目标目录已存在，立即停止并提示用户先处理目录冲突
 - 执行本技能后，你**必须**立即更新恢复出的 `task.md`
 
@@ -22,15 +22,9 @@ description: >
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
-## 步骤开始：写入 started 标记
+## 步骤开始：本地生命周期边界
 
-确认前置条件后、本步骤第一个产出动作之前，向 task.md `## 活动日志` 追加一条 started 标记（与本步骤 done 条目同基名 + ` [started]` 后缀，note 用 `started`）：
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Restore Task [started]** by {agent} — started
-```
-
-`ai task log` 会把它与完成时写入的 done 条目配对成一行（进行中 → 已完成）。约定见 `.agents/rules/task-management.md` 的「Activity Log started / done 双标记约定」。
+评论解析阶段不写正式 active 目录。步骤 6 的单次 restore intent 统一校验 staging，并原子完成基础元数据、started/done 日志、正式落位和短号分配。
 
 ## 执行步骤
 ### 1. 验证输入与环境
@@ -76,40 +70,28 @@ description: >
 - 拼接得到最终文件内容
 
 在写文件前检查：
-- `.agents/workspace/active/{task-id}/` 不存在
+- `.agents/workspace/active/{task-id}/`、`blocked/{task-id}/`、`completed/{task-id}/` 均不存在
+- 创建唯一 `.agents/workspace/.restore-staging-*` 路径，且与 active 位于同一文件系统
 
 如果目录已存在，立即停止并提示用户先手动处理。
 
 ### 5. 写回本地文件
 
-创建 `.agents/workspace/active/{task-id}/`，按以下顺序写回：
+创建受控 staging 目录，按以下顺序写回：
 
 1. `task.md`
 2. 其余产物文件（按文件名排序）
 
 仅写回从 Issue 评论中实际恢复出的文件，不补造缺失文件。
 
-### 6. 更新恢复后的 task.md
-
-获取当前时间：
+### 6. 执行 restore 生命周期意图
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
+agent-infra-internal task-lifecycle {task-id} restore --agent {agent} \
+  --staging-dir "{staging-dir}" --issue-number {issue-number}
 ```
 
-更新恢复出的 `task.md`：
-- `status`：`active`
-- `assigned_to`：{当前 AI 代理}
-- `updated_at`：{当前时间}
-- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
-
-追加 Activity Log，说明任务已从平台 Issue 还原。
-
-**重新分配短号**（已把任务目录写回 `active/`，需要在锁内重新 alloc；新短号可能与归档前不同）：
-
-```bash
-node .agents/scripts/task-short-id.js alloc "$task_id"
-```
+仅 `status=applied|no-op` 视为恢复完成。核心在正式 active 路径暴露前校验 task/Issue 身份、文件类型与 artifact topology，并统一更新 active 元数据、Activity Log、目录和短号。`status=failed` 时展示 recovery 字段，以同一 intent 重试；不得手工移动 staging 或分配短号。
 
 ### 7. 告知用户
 

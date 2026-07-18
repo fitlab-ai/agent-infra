@@ -21,6 +21,7 @@ import type {
 type FrontmatterMutation = {
   kind: 'frontmatter';
   set: Readonly<Record<string, FrontmatterScalar>>;
+  remove?: readonly string[];
 };
 
 type SectionMutation = {
@@ -146,6 +147,12 @@ type TaskFileSystem = {
 
 type TaskWriteOptions = {
   repoRoot?: string;
+  taskLocation?: {
+    repoRoot: string;
+    taskId: string;
+    taskMdPath: string;
+    state: TaskWorkspaceState;
+  };
   metadataProvider?: () => TaskWriteMetadata;
   randomSuffix?: () => string;
   fileSystem?: Partial<TaskFileSystem>;
@@ -211,7 +218,16 @@ function errorDetails(error: unknown, fallback: TaskWriteErrorCode): TaskWriteEr
 }
 
 function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
-  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  const resolved = options.taskLocation
+    ? {
+        ok: true as const,
+        repoRoot: options.taskLocation.repoRoot,
+        taskId: options.taskLocation.taskId,
+        taskDir: path.dirname(options.taskLocation.taskMdPath),
+        taskMdPath: options.taskLocation.taskMdPath,
+        state: options.taskLocation.state
+      }
+    : resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) {
     return failure(
       request,
@@ -262,11 +278,11 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
       }
       const before = candidate;
       if (mutation.kind === 'frontmatter') {
-        candidate = updateTaskFrontmatter(candidate, mutation.set);
+        candidate = updateTaskFrontmatter(candidate, mutation.set, mutation.remove);
         operations.push({
           index,
           kind: 'frontmatter',
-          fields: Object.keys(mutation.set),
+          fields: [...Object.keys(mutation.set), ...(mutation.remove ?? [])],
           wouldChange: candidate !== before
         });
       } else if (mutation.kind === 'section') {

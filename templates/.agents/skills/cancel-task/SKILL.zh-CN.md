@@ -19,15 +19,9 @@ description: >
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
 
-## 步骤开始：写入 started 标记
+## 步骤开始：本地生命周期边界
 
-确认前置条件后、本步骤第一个产出动作之前，向 task.md `## 活动日志` 追加一条 started 标记（与本步骤 done 条目同基名 + ` [started]` 后缀，note 用 `started`）：
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Cancel Task [started]** by {agent} — started
-```
-
-`ai task log` 会把它与完成时写入的 done 条目配对成一行（进行中 → 已完成）。约定见 `.agents/rules/task-management.md` 的「Activity Log started / done 双标记约定」。
+确认前置条件后，由步骤 3 的单次 lifecycle intent 原子完成基础元数据、started/done 日志、目录转移和短号处理；不得提前手工写入局部状态。
 
 ## 执行步骤
 ### 1. 验证任务存在
@@ -52,30 +46,17 @@ description: >
 
 后续同步到 Issue 时，使用最终推断结果替换现有 `status:` labels。
 
-### 3. 更新任务元数据
-
-获取当前时间：
+### 3. 执行本地生命周期意图
 
 ```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
+agent-infra-internal task-lifecycle {task-id} cancel --agent {agent} --reason "{一行取消原因}"
 ```
 
-更新任务目录中的 `task.md`：
-- `status`：completed
-- `cancelled_at`：{当前时间戳}
-- `cancel_reason`：{取消原因}
-- `updated_at`：{当前时间戳}
-- `agent_infra_version`：按 `.agents/rules/version-stamp.md` 取值
-- **追加**到 `## Activity Log`（不要覆盖之前记录）：
-  ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Cancel Task** by {agent} — {一行取消原因}
-  ```
+仅 `status=applied|no-op` 视为本地取消完成。`status=failed` 时展示结构化 `error` 与 recovery steps，并以同一 intent 重试；不得手工编辑 task.md、移动目录或释放短号。
 
-### 4. 转移任务
+### 4. 验证本地终态
 
-将任务目录移动到 `.agents/workspace/completed/{task-id}`。
-
-如果源目录在 `blocked/`，从 `blocked/` 移动；如果源目录在 `active/`，从 `active/` 移动。
+确认 `targetState=completed`、终态字段与短号效果符合结构化结果。
 
 ### 5. 验证转移
 
@@ -106,12 +87,6 @@ ls .agents/workspace/completed/{task-id}/task.md
 - 选定的 `status:` label
 
 ### 7. 完成校验
-
-**释放短号**（先 `mv` 目录已成功，再 release；脚本幂等，未在注册表也返回 0）：
-
-```bash
-node .agents/scripts/task-short-id.js release "$task_id" || true
-```
 
 运行完成校验，确认任务转移和同步状态符合规范：
 

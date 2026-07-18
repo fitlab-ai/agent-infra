@@ -10,8 +10,10 @@ import {
   envWithPrependedPath,
   filePath,
   gitSafeEnv,
+  INTERNAL_CLI_PATH,
   loadFreshEsm,
   onPlatforms,
+  writeNodeCommandShim,
   writeSandboxEngineFixture
 } from "../../helpers.ts";
 
@@ -109,6 +111,18 @@ function spawnSandboxCli(
     stdio: ["ignore", "pipe", "pipe"],
     timeout: options.timeout ?? 15_000
   });
+}
+
+function withInternalCliOnPath<T>(binDir: string, action: () => T): T {
+  writeNodeCommandShim(path.join(binDir, "agent-infra-internal"), INTERNAL_CLI_PATH);
+  const originalPath = process.env.PATH;
+  process.env.PATH = envWithPrependedPath(process.env, binDir).PATH;
+  try {
+    return action();
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  }
 }
 
 test("agent-infra sandbox help is wired into the main CLI", () => {
@@ -1082,8 +1096,10 @@ test("sandbox list-running resolveTaskShortRef hits registry and returns task.md
     JSON.stringify({ version: 1, ids: { "1": taskId } })
   );
   // Both '#1' and bare '1' resolve to the registry-mapped branch (Round 4).
-  assert.equal(resolveTaskShortRef("#1", { repoRoot: tmp }), "registry-branch");
-  assert.equal(resolveTaskShortRef("1", { repoRoot: tmp }), "registry-branch");
+  withInternalCliOnPath(path.join(tmp, "bin"), () => {
+    assert.equal(resolveTaskShortRef("#1", { repoRoot: tmp }), "registry-branch");
+    assert.equal(resolveTaskShortRef("1", { repoRoot: tmp }), "registry-branch");
+  });
 });
 
 test("sandbox list-running resolveTaskShortRef throws when registry hits but branch metadata missing (M-1)", async () => {
@@ -1108,10 +1124,12 @@ test("sandbox list-running resolveTaskShortRef throws when registry hits but bra
     JSON.stringify({ version: 1, ids: { "1": taskId } })
   );
   // Registry hit but corrupt → MUST throw.
-  assert.throws(
-    () => resolveTaskShortRef("#1", { repoRoot: tmp }),
-    /no branch field/
-  );
+  withInternalCliOnPath(path.join(tmp, "bin"), () => {
+    assert.throws(
+      () => resolveTaskShortRef("#1", { repoRoot: tmp }),
+      /no branch field/
+    );
+  });
 });
 
 test("sandbox list-running resolveTaskShortRef throws on registry miss (Round 4: no ls-index fallback)", async () => {
@@ -1424,6 +1442,7 @@ test("sandbox start resolves a task short id to its branch container", onPlatfor
       project: "demo",
       dockerStdoutForPs: "demo-dev-registry-branch\tExited (137) 2 minutes ago\tdemo.sandbox.branch=registry-branch"
     });
+    writeNodeCommandShim(path.join(fixture.binDir, "agent-infra-internal"), INTERNAL_CLI_PATH);
 
     // Rewrite .airc.json with task.shortIdLength=1 so the registry key is '1',
     // while keeping the engine the fixture relies on for detectEngine.

@@ -127,6 +127,17 @@ function enumerateTaskDirs(repoRoot: string): { taskId: string; taskDir: string 
   return out;
 }
 
+function locateHotTaskDirs(
+  repoRoot: string,
+  taskId: string
+): { taskId: string; taskDir: string; taskMdPath: string; state: Exclude<TaskWorkspaceState, 'archive'> }[] {
+  return FLAT_WORKSPACE_DIRS.flatMap((state) => {
+    const taskDir = path.join(repoRoot, '.agents', 'workspace', state, taskId);
+    const taskMdPath = path.join(taskDir, 'task.md');
+    return fs.existsSync(taskMdPath) ? [{ taskId, taskDir, taskMdPath, state }] : [];
+  });
+}
+
 /**
  * Resolve a task ref (bare short id, `#N`, or `TASK-YYYYMMDD-HHMMSS`) to its
  * task directory across active / blocked / completed / archive.
@@ -206,7 +217,7 @@ function resolveTaskRef(arg: string, options: ResolveTaskRefOptions = {}): Resol
   };
 }
 
-export { resolveTaskRef, detectRepoRoot, enumerateTaskDirs, TASK_ID_RE };
+export { resolveTaskRef, detectRepoRoot, enumerateTaskDirs, locateHotTaskDirs, TASK_ID_RE };
 export type {
   ResolveRefResult,
   ResolveTaskRefErrorCode,
