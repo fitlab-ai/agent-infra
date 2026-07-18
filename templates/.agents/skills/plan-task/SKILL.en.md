@@ -5,7 +5,6 @@ description: >
   Use when a requirement is understood and you need a technical design before coding.
   Only invoke this skill automatically when the conversation includes a resolvable task reference
   and the corresponding task.md can be located in a task state or directory supported by this skill.
-  Explicit user invocation continues to use the existing entry point, argument parsing, and execution flow.
 ---
 
 # Design Technical Plan

@@ -5,7 +5,6 @@ description: >
   Use when you need to understand a task's requirements, scope, and risks before designing a solution.
   Only invoke this skill automatically when the conversation includes a resolvable task reference
   and the corresponding task.md can be located in a task state or directory supported by this skill.
-  Explicit user invocation continues to use the existing entry point, argument parsing, and execution flow.
 ---
 
 # Analyze Task
