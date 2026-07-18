@@ -18,7 +18,7 @@ function makeTask(rows: string[] = [
   const taskMd = path.join(taskDir, 'task.md');
   fs.writeFileSync(
     taskMd,
-    `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: unknown\n---\n# 任务：demo\n\n## 审查分歧账本\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n\n## 人工裁决\n\n## 活动日志\n`
+    `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: unknown\n---\n# 任务：demo\n\n## 审查分歧账本\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n\n## 人工裁决\n\n## 实现输入\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n\n## 活动日志\n\n- 2026-01-01 00:00:00+00:00 — **Create Task** by codex — created\n`
   );
   return { repoRoot, taskId, taskMd };
 }
@@ -45,6 +45,47 @@ test('decide marks a legal pending row and records an independent HDR id', async
   }
 });
 
+test('code decisions require explicit implementation intent and create auditable input rows', async () => {
+  for (const [needs, expectedStatus] of [['true', 'pending'], ['false', 'not-required']] as const) {
+    const { repoRoot, taskId, taskMd } = makeTask([
+      '| CD-1 | code | 1 | major | needs-human-decision | review-code.md#CD-1 |'
+    ]);
+    try {
+      const code = await decide([
+        taskId, 'CD-1', '--needs-implementation', needs, `choose ${needs}`
+      ], {
+        repoRoot,
+        now: () => '2026-07-01 09:30:00+08:00',
+        version: '0.7.8-alpha.0'
+      });
+      assert.equal(code, 0);
+      const content = fs.readFileSync(taskMd, 'utf8');
+      assert.match(content, new RegExp(`\\| II-1 \\| CD-1 \\| task\\.md#HDR-1 \\| code \\| ${needs} \\| 2026-07-01 09:30:00\\+08:00 \\| ${expectedStatus} \\|\\s*\\|`));
+      assert.ok(content.indexOf('**Create Task**') < content.indexOf('**Human Decision**'));
+    } finally {
+      fs.rmSync(repoRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test('implementation intent validation fails before writing task.md', async () => {
+  const cases = [
+    { rows: ['| CD-1 | code | 1 | major | needs-human-decision | review-code.md#CD-1 |'], args: ['CD-1', 'missing flag'] },
+    { rows: ['| CD-1 | code | 1 | major | needs-human-decision | review-code.md#CD-1 |'], args: ['CD-1', '--needs-implementation', 'maybe', 'bad flag'] },
+    { rows: ['| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |'], args: ['HD-1', '--needs-implementation', 'true', 'wrong stage'] }
+  ];
+  for (const item of cases) {
+    const { repoRoot, taskId, taskMd } = makeTask(item.rows);
+    try {
+      const before = fs.readFileSync(taskMd);
+      assert.equal(await decide([taskId, ...item.args], { repoRoot }), 1);
+      assert.deepEqual(fs.readFileSync(taskMd), before);
+    } finally {
+      fs.rmSync(repoRoot, { recursive: true, force: true });
+    }
+  }
+});
+
 test('decide rejects ambiguous ids but uses an ordinal to update exactly one duplicate source row', async () => {
   const { repoRoot, taskId, taskMd } = makeTask([
     '| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |',
@@ -54,7 +95,7 @@ test('decide rejects ambiguous ids but uses an ordinal to update exactly one dup
     const before = fs.readFileSync(taskMd);
     assert.equal(await decide([taskId, 'HD-1', 'x'], { repoRoot }), 1);
     assert.ok(before.equals(fs.readFileSync(taskMd)), 'ambiguous selection must not write');
-    assert.equal(await decide([taskId, '2', 'choose code'], {
+    assert.equal(await decide([taskId, '2', '--needs-implementation', 'true', 'choose code'], {
       repoRoot,
       now: () => '2026-07-01 09:30:00+08:00',
       version: '0.7.8-alpha.0'

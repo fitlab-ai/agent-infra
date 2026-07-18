@@ -34,6 +34,9 @@ function taskArtifact(args: string[] = []): void {
     next_round: result.next?.round ?? null,
     next_artifact: result.next?.name ?? null,
     review_artifact: result.codeMode.reviewArtifact,
+    implementation_input: result.codeMode.implementationInput,
+    decision_id: result.codeMode.decisionId,
+    decision_evidence: result.codeMode.decisionEvidence,
     message: result.codeMode.message
   } : result;
   process.stdout.write(`${JSON.stringify(output)}\n`);

@@ -10,7 +10,14 @@ import {
 } from './artifact-lifecycle.ts';
 import type { ArtifactContextResult, ArtifactErrorCode, ArtifactFamily, ArtifactIdentity } from './artifact-lifecycle.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
+import {
+  consumeImplementationInput,
+  IMPLEMENTATION_INPUT_ALIASES,
+  parseImplementationInputs,
+  renderImplementationInputs
+} from './implementation-inputs.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
+import { findSectionHeading } from './sections.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from './write.ts';
 
@@ -31,7 +38,7 @@ type TaskEventErrorCode =
   | 'EVENT_LOG_CONFLICT' | 'EVENT_ARTIFACT_CONFLICT' | ArtifactErrorCode | TaskWriteErrorCode;
 type TaskEventRequest = {
   taskRef: string; event: TaskEventName | string; agent: string; dryRun?: boolean;
-  round?: number; question?: number; artifact?: string; fixFor?: string;
+  round?: number; question?: number; artifact?: string; fixFor?: string; implementationInput?: string;
   verdict?: Verdict; blockers?: number; major?: number; minor?: number;
   manualValidation?: number; filesModified?: number; testsPassed?: number;
   summaryResult?: string;
@@ -42,7 +49,8 @@ type TaskEventResult = {
   event: string; requestRef: string; taskId: string | null; taskMdPath: string | null;
   fromStep: string | null; toStep: string | null; action: string | null;
   phase: 'started' | 'waiting' | 'completed' | null; round: number | null;
-  artifact: string | null; fixFor: string | null; artifactContext: ArtifactContextResult | null;
+  artifact: string | null; fixFor: string | null; implementationInput: string | null;
+  artifactContext: ArtifactContextResult | null;
   timestamp: string | null; agentInfraVersion: string | null;
   operations: readonly TaskOperationSummary[]; error: TaskEventError | null;
 };
@@ -58,8 +66,8 @@ const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] 
   'plan.completed': { required: ['artifact'], optional: ['round'] },
   'review-plan.started': { optional: ['round'] },
   'review-plan.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round'] },
-  'code.started': { optional: ['round', 'fixFor'] },
-  'code.completed': { required: ['artifact'], optional: ['round', 'fixFor', 'filesModified', 'testsPassed', 'blockers', 'major', 'minor', 'manualValidation'] },
+  'code.started': { optional: ['round', 'fixFor', 'implementationInput'] },
+  'code.completed': { required: ['artifact'], optional: ['round', 'fixFor', 'implementationInput', 'filesModified', 'testsPassed', 'blockers', 'major', 'minor', 'manualValidation'] },
   'review-code.started': { optional: ['round'] },
   'review-code.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round'] },
   'manual-validation.started': { optional: ['round'] },
@@ -88,6 +96,8 @@ function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | n
     if (modeRequired.some((key) => request[key as keyof TaskEventRequest] === undefined) || forbidden.some((key) => request[key as keyof TaskEventRequest] !== undefined)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'code.completed requires either initial or fix completion payload' };
   }
   if (request.fixFor && !/^review-code(?:-r(?:[2-9]|[1-9]\d+))?\.md$/.test(request.fixFor)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'fixFor must reference a canonical review-code artifact' };
+  if (request.implementationInput && !/^II-[1-9]\d*$/.test(request.implementationInput)) return { code: 'EVENT_PAYLOAD_INVALID', message: 'implementationInput must be a canonical II-N id' };
+  if (request.fixFor && request.implementationInput) return { code: 'EVENT_PAYLOAD_INVALID', message: 'fixFor and implementationInput are mutually exclusive' };
   if (request.summaryResult !== undefined && (!request.summaryResult.trim() || /[\r\n]/.test(request.summaryResult))) return { code: 'EVENT_PAYLOAD_INVALID', message: 'summaryResult must be a non-empty single line' };
   return null;
 }
@@ -119,8 +129,10 @@ function identity(request: TaskEventRequest) {
       target: null
     } as const;
   }
-  const fix = request.fixFor ? `, fix for ${request.fixFor}` : '';
-  const action = `${spec.label} (Round ${request.round}${fix})`;
+  const qualifier = request.fixFor
+    ? `, fix for ${request.fixFor}`
+    : request.implementationInput ? `, decision ${request.implementationInput}` : '';
+  const action = `${spec.label} (Round ${request.round}${qualifier})`;
   if (phase === 'started') return { family, phase, action, note: 'started', target: null } as const;
   let note = '';
   if (family === 'analyze') note = `Analysis completed → ${request.artifact}`;
@@ -139,7 +151,8 @@ function failed(request: TaskEventRequest, error: TaskEventError, extra: Partial
     status: 'failed', changed: false, event: request.event, requestRef: request.taskRef,
     taskId: null, taskMdPath: null, fromStep: null, toStep: null, action: null,
     phase: null, round: request.round ?? null, artifact: request.artifact ?? null,
-    fixFor: request.fixFor ?? null, artifactContext: null, timestamp: null,
+    fixFor: request.fixFor ?? null, implementationInput: request.implementationInput ?? null,
+    artifactContext: null, timestamp: null,
     agentInfraVersion: null, operations: [], error, ...extra
   };
 }
@@ -153,8 +166,11 @@ function normalizeStarted(request: TaskEventRequest, repoRoot: string): { reques
   const round = context.next.round;
   if (request.round !== undefined && request.round !== round) return { error: { code: 'EVENT_ARTIFACT_CONFLICT', message: `round ${request.round} conflicts with expected round ${round}` }, context };
   const expectedFix = family === 'code' && context.codeMode?.mode === 'fix' ? context.codeMode.reviewArtifact ?? undefined : undefined;
+  const expectedImplementation = family === 'code' && context.codeMode?.mode === 'decision'
+    ? context.codeMode.implementationInput ?? undefined : undefined;
   if (request.fixFor !== undefined && request.fixFor !== expectedFix) return { error: { code: 'EVENT_ARTIFACT_CONFLICT', message: `fixFor '${request.fixFor}' conflicts with artifact context` }, context };
-  return { request: { ...request, round, artifact: context.next.name, fixFor: expectedFix }, context };
+  if (request.implementationInput !== expectedImplementation) return { error: { code: 'EVENT_ARTIFACT_CONFLICT', message: `implementationInput '${request.implementationInput ?? ''}' conflicts with artifact context` }, context };
+  return { request: { ...request, round, artifact: context.next.name, fixFor: expectedFix, implementationInput: expectedImplementation }, context };
 }
 
 function openStartedIdentity(rows: ReturnType<typeof pairEntries>, family: EventFamily) {
@@ -162,14 +178,14 @@ function openStartedIdentity(rows: ReturnType<typeof pairEntries>, family: Event
   if (family === 'manual-validation') {
     const row = rows.filter((item) => item.step === spec.label && item.started && !item.done).at(-1);
     const completed = rows.filter((item) => item.step === spec.label && item.done).length;
-    return row ? { row, round: completed + 1, fixFor: undefined } : null;
+    return row ? { row, round: completed + 1, fixFor: undefined, implementationInput: undefined } : null;
   }
   const escaped = spec.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`^${escaped} \\(Round (\\d+)(?:, fix for (review-code(?:-r\\d+)?\\.md))?\\)$`);
+  const pattern = new RegExp(`^${escaped} \\(Round (\\d+)(?:(?:, fix for (review-code(?:-r\\d+)?\\.md))|(?:, decision (II-[1-9]\\d*)))?\\)$`);
   const matches = rows.flatMap((row) => {
     if (!row.started || row.done) return [];
     const match = pattern.exec(row.step);
-    return match ? [{ row, round: Number(match[1]), fixFor: match[2] }] : [];
+    return match ? [{ row, round: Number(match[1]), fixFor: match[2], implementationInput: match[3] }] : [];
   });
   return matches.length === 1 ? matches[0] : matches.length > 1 ? { conflict: true as const } : null;
 }
@@ -199,7 +215,8 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskWriteOptions = {
       if (openIdentity.row.agent !== request.agent) return failed(request, { code: 'EVENT_LOG_CONFLICT', message: 'open started event has a different agent' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
       if (request.round !== undefined && request.round !== openIdentity.round) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `round ${request.round} conflicts with open round ${openIdentity.round}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
       if (request.fixFor !== undefined && request.fixFor !== openIdentity.fixFor) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `fixFor '${request.fixFor}' conflicts with open event` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
-      normalized = { ...request, round: openIdentity.round, artifact: artifactName(FAMILY[initialParts.family].artifact, openIdentity.round), fixFor: openIdentity.fixFor };
+      if (request.implementationInput !== openIdentity.implementationInput) return failed(request, { code: 'EVENT_ARTIFACT_CONFLICT', message: `implementationInput '${request.implementationInput ?? ''}' conflicts with open event` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+      normalized = { ...request, round: openIdentity.round, artifact: artifactName(FAMILY[initialParts.family].artifact, openIdentity.round), fixFor: openIdentity.fixFor, implementationInput: openIdentity.implementationInput };
       return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, typeof frontmatter.current_step === 'string' ? frontmatter.current_step : '', identity(normalized), openIdentity.row.started, frontmatter, null);
     }
     const result = normalizeStarted(request, resolved.repoRoot);
@@ -245,12 +262,31 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskWriteOptions = {
   const step = eventIdentity.phase === 'started' || eventIdentity.target === null ? currentStep : eventIdentity.target;
   const logStep = eventIdentity.phase === 'started' ? `${eventIdentity.action} [started]` : eventIdentity.action;
   const body = appendActivityEntry(section, { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note });
+  const frontmatterSet: Record<string, string> = { current_step: step, assigned_to: normalized.agent };
+  if (eventIdentity.phase === 'started' && normalized.implementationInput) frontmatterSet.last_reviewed_commit = '';
   const mutations: Parameters<typeof writeTask>[0]['mutations'][number][] = [
-    { kind: 'frontmatter', set: { current_step: step, assigned_to: normalized.agent } }
+    { kind: 'frontmatter', set: frontmatterSet }
   ];
   if (completedArtifact) {
     const link = buildArtifactLinkSection(content, completedArtifact);
     mutations.push({ kind: 'section', aliases: link.aliases, heading: link.heading, body: link.body });
+  }
+  if (eventIdentity.phase === 'completed' && normalized.implementationInput) {
+    let implementationRows;
+    try {
+      implementationRows = consumeImplementationInput(
+        parseImplementationInputs(content).rows,
+        normalized.implementationInput,
+        normalized.artifact!
+      );
+    } catch (error) {
+      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: error instanceof Error ? error.message : String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+    }
+    mutations.push({
+      kind: 'section', aliases: IMPLEMENTATION_INPUT_ALIASES,
+      heading: findSectionHeading(content, [...IMPLEMENTATION_INPUT_ALIASES]),
+      body: renderImplementationInputs(implementationRows)
+    });
   }
   mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body });
   const result = writeTask({ taskRef: normalized.taskRef, expectedState: 'active', dryRun: normalized.dryRun, mutations }, { ...options, metadataProvider: () => metadata });
@@ -260,7 +296,8 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskWriteOptions = {
     requestRef: normalized.taskRef, taskId: result.taskId, taskMdPath: result.taskMdPath,
     fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase,
     round: normalized.round ?? null, artifact: normalized.artifact ?? null,
-    fixFor: normalized.fixFor ?? null, artifactContext, timestamp: result.timestamp,
+    fixFor: normalized.fixFor ?? null, implementationInput: normalized.implementationInput ?? null,
+    artifactContext, timestamp: result.timestamp,
     agentInfraVersion: result.agentInfraVersion, operations: result.operations, error: null
   };
 }

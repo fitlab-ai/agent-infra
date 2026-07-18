@@ -22,6 +22,37 @@ function run(root: string, args: string[], env: NodeJS.ProcessEnv = process.env)
   return spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', ...args], { cwd: root, encoding: 'utf8', env });
 }
 
+function decisionFixture() {
+  const f = fixture('code-review');
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+  fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
+  fs.writeFileSync(path.join(f.dir, 'review-code.md'), `## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n`);
+  fs.writeFileSync(f.file, `---
+id: ${f.id}
+current_step: code-review
+assigned_to: claude
+updated_at: 2026-07-18 10:02:00+08:00
+agent_infra_version: v0.0.0
+last_reviewed_commit: abcdef1234567890
+---
+
+# Task
+
+## 实现备注
+
+## 实现输入
+
+| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |
+|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|
+| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 10:01:00+08:00 | pending | |
+
+## Activity Log
+
+- 2026-07-18 10:00:00+08:00 — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-code.md
+`);
+  return f;
+}
+
 test('internal task-event applies a started/completed pair and replays as no-op', () => {
   const f = fixture();
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1']);
@@ -116,4 +147,36 @@ test('completion without an open start fails without changing the file', () => {
   assert.equal(out.status, 1);
   assert.equal(JSON.parse(out.stdout).error.code, 'EVENT_START_MISSING');
   assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('decision code event clears the review baseline and consumes its input on completion', () => {
+  const f = decisionFixture();
+  const started = run(f.root, [
+    f.id, 'code.started', '--agent', 'codex', '--implementation-input', 'II-1'
+  ]);
+  assert.equal(started.status, 0, started.stderr);
+  const startedResult = JSON.parse(started.stdout);
+  assert.equal(startedResult.status, 'applied');
+  assert.equal(startedResult.implementationInput, 'II-1');
+  let content = fs.readFileSync(f.file, 'utf8');
+  assert.match(content, /Code Task \(Round 2, decision II-1\) \[started\]/);
+  assert.match(content, /last_reviewed_commit:\s*$/m);
+  assert.match(content, /\| II-1 .*\| pending \|\s*\|/);
+
+  fs.writeFileSync(path.join(f.dir, 'code-r2.md'), '# Code round 2\n');
+  const completed = run(f.root, [
+    f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
+    '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '4'
+  ]);
+  assert.equal(completed.status, 0, completed.stderr);
+  assert.equal(JSON.parse(completed.stdout).implementationInput, 'II-1');
+  content = fs.readFileSync(f.file, 'utf8');
+  assert.match(content, /\| II-1 .*\| consumed \| code-r2\.md \|/);
+  assert.match(content, /Code Task \(Round 2, decision II-1\).*Code implemented/);
+
+  const repeated = run(f.root, [
+    f.id, 'code.completed', '--agent', 'codex', '--artifact', 'code-r2.md',
+    '--implementation-input', 'II-1', '--files-modified', '1', '--tests-passed', '4'
+  ]);
+  assert.equal(JSON.parse(repeated.stdout).status, 'no-op');
 });

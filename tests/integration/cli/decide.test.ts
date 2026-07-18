@@ -19,7 +19,7 @@ function fixture(rows: string[]): { repoRoot: string; taskId: string; taskMd: st
   fs.copyFileSync(SHORT_ID_SCRIPT, path.join(repoRoot, '.agents', 'scripts', 'task-short-id.js'));
   fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project: 'demo' }));
   const taskMd = path.join(taskDir, 'task.md');
-  fs.writeFileSync(taskMd, `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.0.0\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n\n## Human Rulings\n\n## Activity Log\n`);
+  fs.writeFileSync(taskMd, `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.0.0\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n\n## Human Rulings\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n\n## Activity Log\n`);
   spawnSync('node', [SHORT_ID_SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
   return { repoRoot, taskId, taskMd };
 }
@@ -39,7 +39,7 @@ test('real CLI writes AN, PL, CD, and HD targets through full and short task ref
     for (const args of [
       [data.taskId, 'AN-1', 'analysis choice'],
       ['1', 'PL-1', 'plan choice'],
-      ['#1', '1', 'code choice'],
+      ['#1', '1', '--needs-implementation', 'true', 'code choice'],
       [data.taskId, 'HD-1', 'executor choice']
     ]) {
       const result = run(data.repoRoot, ['decide', ...args]);

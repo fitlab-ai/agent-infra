@@ -10,6 +10,16 @@
 - **实现轮次**: Round {code-round}
 - **产物文件**: `{code-artifact}`
 
+## 实现输入
+
+- **模式**：{init / fix / decision}
+- **方案输入**：`{plan-artifact}`
+- **审查输入**：`{review-artifact 或 N/A}`
+- **裁决输入**：`{implementation-input 或 N/A}`
+- **账本 ID**：`{decision-id 或 N/A}`
+- **裁决证据**：`{decision-evidence 或 N/A}`
+- **需求摘要**：{本轮实现输入的范围摘要}
+
 ## 状态核对
 
 > 粘贴状态核对命令原文；每条命令以 `$ ` 开头。

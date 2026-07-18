@@ -178,7 +178,7 @@ test("review-ledger recognizes the evidence written by the real decide command",
     write(path.join(taskDir, "task.md"), pending);
 
     assert.equal(runLedger("complete-task", taskDir).payload.status, "fail");
-    const decided = spawnSync("node", [CLI_PATH, "decide", TASK_ID, "CD-1", "accept reviewer guidance"], {
+    const decided = spawnSync("node", [CLI_PATH, "decide", TASK_ID, "CD-1", "--needs-implementation", "false", "accept reviewer guidance"], {
       cwd: tempRoot,
       encoding: "utf8"
     });

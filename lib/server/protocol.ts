@@ -40,7 +40,7 @@ export function commandHelp(): string {
     '/sandbox create {ref}',
     '/sandbox start {ref}',
     'Exec:',
-    '/decide {task-ref} {ordinal|ledger-id} {decision}',
+    '/decide {task-ref} {ordinal|ledger-id} [--needs-implementation true|false] {decision}',
     '/run create-task {description}',
     '/run {skill} {task-ref}'
   ].join('\n');

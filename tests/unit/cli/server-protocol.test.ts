@@ -22,7 +22,7 @@ test('commandHelp renders Feishu-card-friendly command lines', () => {
     '/sandbox create {ref}',
     '/sandbox start {ref}',
     'Exec:',
-    '/decide {task-ref} {ordinal|ledger-id} {decision}',
+    '/decide {task-ref} {ordinal|ledger-id} [--needs-implementation true|false] {decision}',
     '/run create-task {description}',
     '/run {skill} {task-ref}'
   ]);
@@ -62,6 +62,11 @@ test('parseCommand maps sandbox and run commands with roles', () => {
     kind: 'ai',
     role: 'exec',
     argv: ['decide', '#7', 'PL-1', 'yes']
+  });
+  assert.deepEqual(parseCommand('/decide #7 CD-1 --needs-implementation true yes'), {
+    kind: 'ai',
+    role: 'exec',
+    argv: ['decide', '#7', 'CD-1', '--needs-implementation', 'true', 'yes']
   });
 });
 

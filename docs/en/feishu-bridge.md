@@ -60,7 +60,7 @@ Put the app credentials in `.agents/server.local.json`. This file is git-ignored
 
 | Command | Role | Execution |
 |---------|------|-----------|
-| `/decide <task-ref> <ordinal\|ledger-id> <decision>` | `exec` | `ai decide ...` |
+| `/decide <task-ref> <ordinal\|ledger-id> [--needs-implementation true\|false] <decision>` | `exec` | `ai decide ...` |
 | `/help`, `/ping`, `/version` | public built-in | daemon |
 | `/run create-task <description> [--tui <name>]` | `exec` | `ai run create-task ...` on the host |
 | `/run <skill> <task-ref> [args...] [--tui <name>]` | `exec` | `ai run ...`; task skills run in the matching sandbox |

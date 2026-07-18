@@ -18,6 +18,7 @@
     "artifact": {
       "file_pattern": "code.md|code-r{N}.md",
       "required_sections": [
+        "Implementation Input",
         "Modified Files",
         "Key Code Explanation",
         "Test Results",
@@ -31,8 +32,9 @@
         "^\\$ "
       ]
     },
+    "implementation-input": {},
     "activity-log": {
-      "expected_action_pattern": "(Code Task|Code) \\(Round \\d+(?:, fix for review-code(?:-r\\d+)?\\.md)?\\)",
+      "expected_action_pattern": "(Code Task|Code) \\(Round \\d+(?:(?:, fix for review-code(?:-r\\d+)?\\.md)|(?:, decision II-[1-9]\\d*))?\\)",
       "freshness_minutes": 30
     },
     "review-ledger": {

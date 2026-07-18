@@ -7,7 +7,7 @@ description: >
 
 # 编码任务
 
-根据已批准的技术方案编码任务，并产出 `code.md` 或 `code-r{N}.md`。本技能支持初次实现和基于 `review-code` 反馈的修复双模式。
+根据已批准的技术方案编码任务，并产出 `code.md` 或 `code-r{N}.md`。本技能支持初次实现、基于 `review-code` 反馈的修复，以及人工裁决驱动实现三种模式。
 
 ## 行为边界 / 关键规则
 
@@ -52,7 +52,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## 步骤开始：声明 started 事件
 
-确认前置条件与模式后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} code.started --agent {agent}`。核心根据 artifact context 推导轮次与修复来源；以返回的 `artifactContext` 记录本轮身份。
+确认前置条件与模式后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} code.started --agent {agent}`。修复模式追加 `--fix-for {review-artifact}`，裁决模式追加 `--implementation-input {input-id}`。核心根据 artifact context 推导并校验轮次与输入身份；以返回的 `artifactContext` 记录本轮身份。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -98,6 +98,7 @@ echo "$result"
 |---|---|---|
 | 0 | `"init"` | 进入初次实现模式。记录 `{code-artifact}` = `result.next_artifact`、`{code-round}` = `result.next_round` |
 | 0 | `"fix"` | 进入修复模式。记录 `{code-artifact}` = `result.next_artifact`、`{code-round}` = `result.next_round`、`{review-artifact}` = `result.review_artifact` |
+| 0 | `"decision"` | 进入裁决实现模式。记录 `{code-artifact}`、`{code-round}`、`{input-id}`、`{decision-id}` 与 `{decision-evidence}` |
 | 1 | `"refused"` | 输出 `result.message` 给用户；立即停止；不写 Activity Log、不创建产物 |
 | 2 | `"error"` | 输出 `result.message` 给用户；立即停止；不写 Activity Log、不创建产物 |
 | 其他 | 任意 | 视为脚本异常，输出 `Mode detection failed: status={status}, output={result}` 并停止 |
@@ -106,7 +107,7 @@ echo "$result"
 
 ### 5. 确定输入方案
 
-只使用步骤 4 的结构化结果：从 `inputs` 取得 `{plan-artifact}`，从 `next_round` / `next_artifact` 取得 `{code-round}` / `{code-artifact}`；修复模式从 `review_artifact` 取得 `{review-artifact}`。不得自行扫描轮次或拼装文件名。
+只使用步骤 4 的结构化结果：从 `inputs` 取得 `{plan-artifact}`，从 `next_round` / `next_artifact` 取得 `{code-round}` / `{code-artifact}`；修复模式从 `review_artifact` 取得 `{review-artifact}`；裁决模式从 `implementation_input`、`decision_id`、`decision_evidence` 取得统一输入身份。不得自行扫描轮次或拼装文件名。
 
 ### 6. 阅读技术方案
 
@@ -117,6 +118,8 @@ echo "$result"
 - 约束、风险与已批准的取舍
 
 修复模式还必须读取 `{review-artifact}`，并只处理其中标记的问题。
+
+裁决模式还必须读取 task.md 中 `{input-id}` 对应行及 `{decision-evidence}` 指向的裁决记录，并只实现该裁决要求的行为变化。
 
 ### 7. 执行代码实现
 
@@ -148,6 +151,7 @@ echo "$result"
 - 完成业务内容更新后声明完成事件：
   - 初次实现：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`
   - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
+  - 裁决模式：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --implementation-input {input-id} --files-modified {n} --tests-passed {n}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续；执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测）：
 - 按 issue-sync.md 设置 `status: in-progress`

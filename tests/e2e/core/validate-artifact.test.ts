@@ -70,14 +70,14 @@ const gateCases = [
       assert.equal(result.status, 0, result.stderr);
       const payload = parseValidatorPayload(result.stdout);
       assert.equal(payload.gate, "pass");
-      assert.equal(payload.checks.length, 5);
+      assert.equal(payload.checks.length, 6);
       assert.deepEqual(
         payload.checks.map((check) => check.type),
-        ["task-meta", "artifact", "activity-log", "review-ledger", "platform-sync"]
+        ["task-meta", "artifact", "implementation-input", "activity-log", "review-ledger", "platform-sync"]
       );
       assert.deepEqual(
         payload.checks.map((check) => check.status),
-        ["pass", "pass", "pass", "pass", "pass"]
+        ["pass", "pass", "pass", "pass", "pass", "pass"]
       );
     }
   },
@@ -96,7 +96,7 @@ const gateCases = [
       assert.match(result.stdout, /^Verification: pass \| Skill: code-task$/m);
       assert.match(result.stdout, /^\s+\[pass\] task-meta - /m);
       assert.match(result.stdout, /^\s+\[pass\] artifact - /m);
-      assert.match(result.stdout, /^Result: 5 passed, 0 failed - All declared checks passed$/m);
+      assert.match(result.stdout, /^Result: 6 passed, 0 failed - All declared checks passed$/m);
     }
   },
   {

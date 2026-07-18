@@ -353,6 +353,26 @@ test("workflow report templates include evidence sections", () => {
   });
 });
 
+test("code-task report and task templates expose implementation input identity", () => {
+  for (const [relativePath, heading] of [
+    [".agents/skills/code-task/reference/report-template.md", "## 实现输入"],
+    ["templates/.agents/skills/code-task/reference/report-template.zh-CN.md", "## 实现输入"],
+    ["templates/.agents/skills/code-task/reference/report-template.en.md", "## Implementation Input"]
+  ] as Array<[string, string]>) {
+    assert.match(read(relativePath), new RegExp(escapeRegExp(heading)));
+  }
+  for (const relativePath of [
+    ".agents/templates/task.md",
+    "templates/.agents/templates/task.en.md",
+    "templates/.agents/templates/task.zh-CN.md"
+  ]) {
+    const content = read(relativePath);
+    for (const column of ["id", "ledger_id", "decision_evidence", "stage", "needs_implementation", "decided_at", "status", "consumed_by"]) {
+      assert.ok(content.includes(column), `${relativePath} should include ${column}`);
+    }
+  }
+});
+
 test("review report templates include the self-doubt section", () => {
   const selfDoubtCases: Array<[string, string]> = [
     [".agents/skills/review-analysis/reference/report-template.md", "## 自我质疑"],

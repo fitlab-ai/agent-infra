@@ -7,7 +7,7 @@ description: >
 
 # Code Task
 
-Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill supports initial implementation and fix mode based on `review-code` feedback.
+Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill supports initial implementation, fix mode based on `review-code` feedback, and human-decision-driven implementation.
 
 ## Boundary / Critical Rules
 
@@ -38,7 +38,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 ## Step Start: Write the started Marker
 
-After prerequisites and mode are confirmed and before this round's first artifact action, run `agent-infra-internal task-event {task-id} code.started --agent {agent}`. The core derives the round and fix source from the artifact context; record the returned `artifactContext`.
+After prerequisites and mode are confirmed and before this round's first artifact action, run `agent-infra-internal task-event {task-id} code.started --agent {agent}`. Append `--fix-for {review-artifact}` in fix mode or `--implementation-input {input-id}` in decision mode. The core derives and validates the round and input identity; record the returned `artifactContext`.
 
 ## Steps
 
@@ -70,6 +70,7 @@ Dispatch by `$status` and `result.mode`:
 
 - `0` + `"init"`: initial implementation; record `{code-artifact}` and `{code-round}`
 - `0` + `"fix"`: fix mode; record `{code-artifact}`, `{code-round}`, and `{review-artifact}`
+- `0` + `"decision"`: decision implementation mode; record `{code-artifact}`, `{code-round}`, `{input-id}`, `{decision-id}`, and `{decision-evidence}`
 - `1` + `"refused"`: print `result.message`, stop, and do not write an artifact or Activity Log entry
 - `2` + `"error"`: print `result.message`, stop, and do not write an artifact or Activity Log entry
 
@@ -77,11 +78,11 @@ Dispatch by `$status` and `result.mode`:
 
 ### 5. Read Structured Inputs
 
-Use only the `inputs` returned in step 4: read the selected plan artifact and, in fix mode, the selected review artifact. Use `next.name` as `{code-artifact}` and `next.round` as `{code-round}`; do not rescan or construct identities in the skill.
+Use only the structured result from step 4: read the selected plan artifact and, in fix mode, the selected review artifact. Use `next.name` as `{code-artifact}` and `next.round` as `{code-round}`. In decision mode, take the unified identity from `implementation_input`, `decision_id`, and `decision_evidence`; do not rescan or construct identities in the skill.
 
 ### 6. Read the Technical Plan
 
-Extract implementation steps, files, test strategy, constraints, risks, and approved tradeoffs.
+Extract implementation steps, files, test strategy, constraints, risks, and approved tradeoffs. In decision mode, also read the `{input-id}` row and its `{decision-evidence}` record in task.md, and implement only that ruling's requested behavior change.
 
 ### 7. Implement the Code
 
@@ -105,7 +106,7 @@ Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 
 ### 10. Update Task Status
 
-After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}` instead of the initial counts. The core atomically records the artifact link, stage, metadata, and done log.
+After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}` instead; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
 
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, then:
 - Set `status: in-progress` according to issue-sync.md

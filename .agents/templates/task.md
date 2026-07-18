@@ -62,7 +62,12 @@ pr_status: pending             # PR 状态：pending（默认）| created（已�
 
 ## 人工裁决
 
-<!-- 使用 ai decide <task-ref> <序号|账本ID> <裁决内容> 写入 needs-human-decision 裁定；命令会创建 HDR-N 记录并原子更新账本、evidence 与活动日志。 -->
+<!-- 使用 ai decide <task-ref> <序号|账本ID> [--needs-implementation true|false] <裁决内容> 写入 needs-human-decision 裁定；code 阶段必须显式声明是否需要实现。 -->
+
+## 实现输入
+
+| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |
+|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|
 
 ## 工作流告警
 

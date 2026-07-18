@@ -10,6 +10,16 @@ Use this structure when creating `code.md` or `code-r{N}.md`.
 - **Implementation Round**: Round {code-round}
 - **Artifact File**: `{code-artifact}`
 
+## Implementation Input
+
+- **Mode**: {init / fix / decision}
+- **Plan Input**: `{plan-artifact}`
+- **Review Input**: `{review-artifact or N/A}`
+- **Decision Input**: `{implementation-input or N/A}`
+- **Ledger ID**: `{decision-id or N/A}`
+- **Decision Evidence**: `{decision-evidence or N/A}`
+- **Scope Summary**: {scope of this round's implementation input}
+
 ## State Check
 
 > Paste the raw state-check command output; each command starts with `$ `.

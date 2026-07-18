@@ -62,7 +62,12 @@ pr_status: pending             # PR status: pending (default) | created (PR crea
 
 ## Human Rulings
 
-<!-- Use ai decide <task-ref> <ordinal|ledger-id> <decision> for needs-human-decision rulings; it creates an HDR-N record and atomically updates the ledger, evidence, and activity log. -->
+<!-- Use ai decide <task-ref> <ordinal|ledger-id> [--needs-implementation true|false] <decision> for needs-human-decision rulings; code-stage rulings must explicitly declare whether implementation is required. -->
+
+## Implementation Inputs
+
+| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |
+|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|
 
 ## Workflow Warnings
 

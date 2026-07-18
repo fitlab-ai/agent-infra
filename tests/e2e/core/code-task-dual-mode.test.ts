@@ -45,6 +45,26 @@ function enReview(verdict: string, findings = "0 blockers, 0 majors, 0 minors / 
 `;
 }
 
+function decisionTask(rows: string[], reviewTime = "2026-07-18 10:00:00+08:00") {
+  return `---
+id: ${TASK_ID}
+current_step: code-review
+---
+
+# Task
+
+## 实现输入
+
+| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |
+|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|
+${rows.join("\n")}
+
+## Activity Log
+
+- ${reviewTime} — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-code.md
+`;
+}
+
 // review-plan fixtures must include the "审查输入" / "Review Input" line that names the
 // reviewed plan file; checkPlanAheadOfCode uses it to link a review-plan back to its plan
 // regardless of round-number mismatch.
@@ -150,6 +170,49 @@ test("code-task dual-mode: branch 4 - Approved with no findings refuses rerun", 
   assert.equal(result.status, 1);
   assert.equal(result.output.mode, "refused");
   assert.equal(result.output.verdict, "Approved");
+});
+
+test("code-task decision mode selects the earliest post-review pending input", () => {
+  const result = runDetect({
+    "task.md": decisionTask([
+      "| II-2 | HD-2 | task.md#HDR-2 | code | true | 2026-07-18 10:02:00+08:00 | pending | |",
+      "| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 10:02:00+08:00 | pending | |"
+    ]),
+    "code.md": "# code",
+    "review-code.md": zhReview("通过")
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.output.mode, "decision");
+  assert.equal(result.output.next_artifact, "code-r2.md");
+  assert.equal(result.output.implementation_input, "II-1");
+  assert.equal(result.output.decision_id, "CD-1");
+  assert.equal(result.output.decision_evidence, "task.md#HDR-1");
+});
+
+test("code-task decision mode ignores not-required and consumed inputs", () => {
+  const result = runDetect({
+    "task.md": decisionTask([
+      "| II-1 | CD-1 | task.md#HDR-1 | code | false | 2026-07-18 10:01:00+08:00 | not-required | |",
+      "| II-2 | CD-2 | task.md#HDR-2 | code | true | 2026-07-18 10:02:00+08:00 | consumed | code.md |"
+    ]),
+    "code.md": "# code",
+    "review-code.md": zhReview("通过")
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.output.mode, "refused");
+});
+
+test("code-task decision mode rejects stale unconsumed input", () => {
+  const result = runDetect({
+    "task.md": decisionTask([
+      "| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 09:59:00+08:00 | pending | |"
+    ]),
+    "code.md": "# code",
+    "review-code.md": zhReview("通过")
+  });
+  assert.equal(result.status, 2);
+  assert.equal(result.output.mode, "error");
+  assert.match(result.output.message, /not later than/i);
 });
 
 test("code-task dual-mode: branch 5 - Approved with findings enters optional fix mode (zh-CN review fixture)", () => {

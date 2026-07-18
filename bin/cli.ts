@@ -16,7 +16,7 @@ Usage: ai <command> [options]
 
 Commands:
   cp <ssh-alias>  Copy local clipboard image to a remote macOS clipboard or Linux sandbox over SSH
-  decide          Record a human decision for a pending review decision item
+  decide          Record a ruling; code-stage decisions require explicit implementation intent
   help            Show this help message
   init            Initialize a new project with update-agent-infra seed command
   merge           Merge tasks from another workspace directory (active/blocked/completed/archive)

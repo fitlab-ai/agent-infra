@@ -1,6 +1,13 @@
 import fs from 'node:fs';
 import { VERSION } from './version.ts';
+import { appendActivityEntry, locateActivityLog } from './task/activity-log.ts';
 import { isDecisionItem, listDecisionItems, selectDecisionItem } from './task/decision-items.ts';
+import {
+  createImplementationInput,
+  IMPLEMENTATION_INPUT_ALIASES,
+  parseImplementationInputs,
+  renderImplementationInputs
+} from './task/implementation-inputs.ts';
 import { parseLedger, type LedgerRow } from './task/ledger.ts';
 import { extractSection, findSectionHeading } from './task/sections.ts';
 import { resolveTaskRef } from './task/resolve-ref.ts';
@@ -16,6 +23,25 @@ type DecideOptions = {
 const LEDGER_ALIASES = ['审查分歧账本', 'Review Disagreement Ledger'];
 const DECISION_ALIASES = ['人工裁决', 'Human Rulings', 'Human Decisions', 'Human Decision'];
 const ACTIVITY_ALIASES = ['活动日志', 'Activity Log'];
+
+function parseDecisionParts(parts: string[]): { decision: string; needsImplementation: boolean | undefined } {
+  const decision: string[] = [];
+  let needsImplementation: boolean | undefined;
+  for (let index = 0; index < parts.length; index += 1) {
+    if (parts[index] !== '--needs-implementation') {
+      decision.push(parts[index]!);
+      continue;
+    }
+    if (needsImplementation !== undefined) throw new Error("duplicate option '--needs-implementation'");
+    const value = parts[++index];
+    if (value !== 'true' && value !== 'false') {
+      throw new Error("--needs-implementation must be 'true' or 'false'");
+    }
+    needsImplementation = value === 'true';
+  }
+  if (decision.length === 0) throw new Error('decision content is required');
+  return { decision: decision.join(' '), needsImplementation };
+}
 
 function defaultNow(): string {
   return new Intl.DateTimeFormat('sv-SE', {
@@ -71,14 +97,10 @@ function prependBlock(body: string, block: string): string {
   return body ? `${block}\n\n${body}` : block;
 }
 
-function appendLine(body: string, line: string): string {
-  return body ? `${body}\n${line}` : line;
-}
-
 export async function decide(args: string[], options: DecideOptions = {}): Promise<number> {
   const [taskRef, selector, ...decisionParts] = args;
   if (!taskRef || !selector || decisionParts.length === 0) {
-    process.stderr.write('Usage: ai decide <task-ref> <ordinal|ledger-id> <decision>\n');
+    process.stderr.write('Usage: ai decide <task-ref> <ordinal|ledger-id> [--needs-implementation true|false] <decision>\n');
     return 1;
   }
   try {
@@ -97,16 +119,21 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
       throw new Error(selected.message);
     }
 
+    const parsedDecision = parseDecisionParts(decisionParts);
+    if (selected.row.stage === 'code' && parsedDecision.needsImplementation === undefined) {
+      throw new Error('code-stage decisions require --needs-implementation true|false');
+    }
+    if (selected.row.stage !== 'code' && parsedDecision.needsImplementation !== undefined) {
+      throw new Error('--needs-implementation is only valid for code-stage decisions');
+    }
+
     const now = (options.now ?? defaultNow)();
     const recordId = nextDecisionRecordId(content);
     const ledgerBody = updatedLedgerBody(content, selected.row, recordId);
     const decisionBody = extractSection(content, DECISION_ALIASES);
-    const activityBody = extractSection(content, ACTIVITY_ALIASES);
-    if (!activityBody && !ACTIVITY_ALIASES.some((heading) => content.includes(`## ${heading}`))) {
-      throw new Error('activity log section is missing');
-    }
-    const decision = decisionParts.join(' ');
-    const record = `### ${recordId}\n\n- **原账本 ID**：${selected.row.id}\n- **裁决时间**：${now}\n- **裁决结果**：${decision}`;
+    const activity = locateActivityLog(content);
+    if (!activity) throw new Error('activity log section is missing or ambiguous');
+    const record = `### ${recordId}\n\n- **原账本 ID**：${selected.row.id}\n- **裁决时间**：${now}\n- **裁决结果**：${parsedDecision.decision}`;
     const mutations: SectionMutation[] = [
       {
         kind: 'section',
@@ -123,13 +150,28 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
       {
         kind: 'section',
         aliases: ACTIVITY_ALIASES,
-        heading: findSectionHeading(content, ACTIVITY_ALIASES),
-        body: appendLine(
-          activityBody,
-          `- ${now} — **Human Decision** by human — ${selected.row.id} decided → ${recordId}`
-        )
+        heading: activity.heading,
+        body: appendActivityEntry(activity, {
+          time: now, step: 'Human Decision', agent: 'human',
+          note: `${selected.row.id} decided → ${recordId}`
+        })
       }
     ];
+    if (selected.row.stage === 'code') {
+      const implementationInputs = parseImplementationInputs(content).rows;
+      const input = createImplementationInput(implementationInputs, {
+        ledgerId: selected.row.id,
+        decisionEvidence: `task.md#${recordId}`,
+        needsImplementation: parsedDecision.needsImplementation!,
+        decidedAt: now
+      });
+      mutations.splice(2, 0, {
+        kind: 'section',
+        aliases: IMPLEMENTATION_INPUT_ALIASES,
+        heading: findSectionHeading(content, [...IMPLEMENTATION_INPUT_ALIASES]),
+        body: renderImplementationInputs([...implementationInputs, input])
+      });
+    }
     const result = writeTask(
       { taskRef, expectedState: 'active', mutations },
       {

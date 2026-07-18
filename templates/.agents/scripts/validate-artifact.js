@@ -220,6 +220,8 @@ function runCheck(type, context) {
       return checkTaskMeta(context);
     case "artifact":
       return checkArtifact(context);
+    case "implementation-input":
+      return checkImplementationInput(context);
     case "activity-log":
       return checkActivityLog(context);
     case "completion-checklist":
@@ -450,6 +452,73 @@ function checkArtifact({ taskDir, config, artifactFile }) {
     "artifact",
     `${path.basename(artifactPath)} passed (${requiredSections.length} sections, ${Math.max(0, freshnessMinutes)}m freshness window)`
   );
+}
+
+function checkImplementationInput({ taskDir, artifactFile }) {
+  const task = loadTask(taskDir);
+  if (!task.ok) return failResult("implementation-input", task.message);
+  if (!artifactFile) return failResult("implementation-input", "Artifact file is required");
+  const artifactPath = path.join(taskDir, artifactFile);
+  if (!safeStat(artifactPath)?.isFile()) return failResult("implementation-input", `Artifact not found: ${artifactFile}`);
+
+  const inputSection = getSectionContent(task.content, ["实现输入", "Implementation Inputs"]);
+  const rows = [];
+  if (inputSection) {
+    const table = inputSection.split(/\r?\n/).filter((line) => line.trim().startsWith("|"));
+    const cells = (line) => line.split("|").slice(1, -1).map((cell) => cell.trim());
+    const expected = ["id", "ledger_id", "decision_evidence", "stage", "needs_implementation", "decided_at", "status", "consumed_by"];
+    if (table.length < 2 || JSON.stringify(cells(table[0])) !== JSON.stringify(expected)) {
+      return failResult("implementation-input", "Implementation Inputs table schema is invalid");
+    }
+    const seen = new Set();
+    for (const line of table.slice(2)) {
+      const row = cells(line);
+      if (row.length !== 8 || !/^II-[1-9]\d*$/.test(row[0]) || seen.has(row[0])) {
+        return failResult("implementation-input", "Implementation Inputs table contains an invalid or duplicate id");
+      }
+      seen.add(row[0]);
+      rows.push({ id: row[0], ledgerId: row[1], evidence: row[2], stage: row[3], needs: row[4], status: row[6], consumedBy: row[7] });
+    }
+  }
+
+  const logSection = getSectionContent(task.content, ["活动日志", "Activity Log"]);
+  const doneActions = logSection.split(/\r?\n/).flatMap((line) => {
+    const match = line.trim().match(ACTIVITY_LOG_PATTERN);
+    return match && !ACTIVITY_LOG_STARTED_RE.test(match[2]) ? [match[2]] : [];
+  });
+  const latestAction = doneActions.at(-1) || "";
+  const actionDecision = /(?:Code Task|Code) \(Round \d+, decision (II-[1-9]\d*)\)/.exec(latestAction)?.[1] || null;
+  const report = fs.readFileSync(artifactPath, "utf8");
+  const reportSection = getSectionContent(report, ["实现输入", "Implementation Input"]);
+  if (!reportSection) return failResult("implementation-input", "Implementation Input report section not found");
+  const field = (zh, en) => {
+    const pattern = "^- \\*\\*(?:" + escapeRegExp(zh) + "|" + escapeRegExp(en) + ")\\*\\*[:：]\\s*`?([^`\\n]+)`?\\s*$";
+    const match = new RegExp(pattern, "m").exec(reportSection);
+    return match?.[1]?.trim() || "";
+  };
+  const reportInput = field("裁决输入", "Decision Input");
+  const reportLedger = field("账本 ID", "Ledger ID");
+  const reportEvidence = field("裁决证据", "Decision Evidence");
+
+  if (!actionDecision) {
+    if (reportInput && reportInput !== "N/A") {
+      return failResult("implementation-input", "Non-decision code action must report Decision Input as N/A");
+    }
+    return passResult("implementation-input", "Non-decision implementation input identity is consistent");
+  }
+  if (reportInput !== actionDecision) {
+    return failResult("implementation-input", `Report decision input '${reportInput}' does not match Activity Log ${actionDecision}`);
+  }
+  const matches = rows.filter((row) => row.id === actionDecision);
+  if (matches.length !== 1) return failResult("implementation-input", `${actionDecision} is missing or duplicated in task table`);
+  const row = matches[0];
+  if (row.stage !== "code" || row.needs !== "true" || row.status !== "consumed" || row.consumedBy !== artifactFile || !row.evidence) {
+    return failResult("implementation-input", `${actionDecision} is not a consumed input for ${artifactFile}`);
+  }
+  if (reportLedger !== row.ledgerId || reportEvidence !== row.evidence) {
+    return failResult("implementation-input", `${actionDecision} report identity does not match task table evidence`);
+  }
+  return passResult("implementation-input", `${actionDecision} matches Activity Log, report, and task table`);
 }
 
 function checkActivityLog({ taskDir, config }) {

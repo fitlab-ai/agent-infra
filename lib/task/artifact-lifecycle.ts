@@ -3,6 +3,8 @@ import path from 'node:path';
 
 import { resolveTaskRef } from './resolve-ref.ts';
 import type { ResolveTaskRefErrorCode, TaskWorkspaceState } from './resolve-ref.ts';
+import { locateActivityLog } from './activity-log.ts';
+import { parseImplementationInputs, selectPendingImplementationInput } from './implementation-inputs.ts';
 import { extractSection, findSectionHeading } from './sections.ts';
 
 const artifactFamilyCatalog = [
@@ -58,7 +60,7 @@ type ArtifactInventoryResult = {
   error: ArtifactError | null;
 };
 type ArtifactContextStatus = 'ready' | 'refused' | 'failed';
-type CodeArtifactMode = 'init' | 'fix' | 'refused' | 'error';
+type CodeArtifactMode = 'init' | 'fix' | 'decision' | 'refused' | 'error';
 type ArtifactContextResult = Omit<ArtifactInventoryResult, 'status'> & {
   status: ArtifactContextStatus;
   inputs: readonly ArtifactIdentity[];
@@ -68,6 +70,9 @@ type ArtifactContextResult = Omit<ArtifactInventoryResult, 'status'> & {
     reviewMax: number;
     verdict: string | null;
     reviewArtifact: string | null;
+    implementationInput: string | null;
+    decisionId: string | null;
+    decisionEvidence: string | null;
     message: string;
   } | null;
 };
@@ -325,6 +330,17 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   if (!review) return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', 'latest review-code artifact is required');
   const verdict = parseVerdict(review.path);
   if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', verdict.message);
+  if (verdict.verdict === 'Approved') {
+    const decision = resolveDecisionImplementationInput(inventory, review);
+    if ('error' in decision) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', decision.error, review.name);
+    if (decision.input) {
+      return withCodeMode(
+        inventory, [...inputs, review], 'ready', 'decision', codeMax, reviewMax,
+        verdict.verdict, review.name, `Implementation input ${decision.input.id} requires a new code round.`,
+        decision.input.id, decision.input.ledgerId, decision.input.decisionEvidence
+      );
+    }
+  }
   if (verdict.verdict === 'Approved' || verdict.verdict === 'Rejected') {
     return withCodeMode(inventory, [...inputs, review], 'refused', 'refused', codeMax, reviewMax, verdict.verdict, review.name,
       verdict.verdict === 'Approved'
@@ -336,15 +352,42 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
 }
 
 function contextFailure(inventory: ArtifactInventoryResult, code: ArtifactErrorCode, message: string, reviewArtifact: string | null = null): ArtifactContextResult {
-  return { ...inventory, status: 'failed', inputs: [], codeMode: { mode: 'error', codeMax: inventory.latest?.round ?? 0, reviewMax: 0, verdict: null, reviewArtifact, message }, error: { code, message } };
+  return { ...inventory, status: 'failed', inputs: [], codeMode: { mode: 'error', codeMax: inventory.latest?.round ?? 0, reviewMax: 0, verdict: null, reviewArtifact, implementationInput: null, decisionId: null, decisionEvidence: null, message }, error: { code, message } };
 }
 
 function withCodeMode(
   inventory: ArtifactInventoryResult, inputs: ArtifactIdentity[], status: ArtifactContextStatus,
   mode: CodeArtifactMode, codeMax: number, reviewMax: number, verdict: string | null,
-  reviewArtifact: string | null, message: string
+  reviewArtifact: string | null, message: string,
+  implementationInput: string | null = null,
+  decisionId: string | null = null,
+  decisionEvidence: string | null = null
 ): ArtifactContextResult {
-  return { ...inventory, status, inputs, codeMode: { mode, codeMax, reviewMax, verdict, reviewArtifact, message }, error: status === 'refused' ? { code: 'ARTIFACT_MODE_REFUSED', message } : null };
+  return { ...inventory, status, inputs, codeMode: { mode, codeMax, reviewMax, verdict, reviewArtifact, implementationInput, decisionId, decisionEvidence, message }, error: status === 'refused' ? { code: 'ARTIFACT_MODE_REFUSED', message } : null };
+}
+
+function resolveDecisionImplementationInput(
+  inventory: ArtifactInventoryResult,
+  review: ArtifactIdentity
+): { input: ReturnType<typeof selectPendingImplementationInput> } | { error: string } {
+  if (!inventory.taskDir) return { error: 'task directory is unavailable' };
+  let content: string;
+  try { content = fs.readFileSync(path.join(inventory.taskDir, 'task.md'), 'utf8'); }
+  catch (error) { return { error: String(error) }; }
+  let rows;
+  try { rows = parseImplementationInputs(content).rows; }
+  catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
+  const pending = rows.filter((row) => row.needsImplementation && row.status === 'pending');
+  if (pending.length === 0) return { input: null };
+  const activity = locateActivityLog(content);
+  if (!activity) return { error: 'task has no unique Activity Log section' };
+  const reviewEntries = activity.entries.filter((entry) =>
+    /^Review Code \(Round \d+\)$/.test(entry.step) && entry.note.includes(`→ ${review.name}`)
+  );
+  const completed = reviewEntries.at(-1);
+  if (!completed) return { error: `cannot find completed Activity Log identity for ${review.name}` };
+  try { return { input: selectPendingImplementationInput(rows, completed.time) }; }
+  catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
 }
 
 function normalizeVerdict(value: string): 'Approved' | 'Changes Requested' | 'Rejected' | null {

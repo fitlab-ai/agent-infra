@@ -9,7 +9,8 @@ Events: ${eventCatalog.join(', ')}
 
 const FLAGS: Record<string, keyof TaskEventRequest> = {
   '--agent': 'agent', '--round': 'round', '--question': 'question', '--artifact': 'artifact',
-  '--fix-for': 'fixFor', '--verdict': 'verdict', '--blockers': 'blockers', '--major': 'major',
+  '--fix-for': 'fixFor', '--implementation-input': 'implementationInput',
+  '--verdict': 'verdict', '--blockers': 'blockers', '--major': 'major',
   '--minor': 'minor', '--manual-validation': 'manualValidation', '--files-modified': 'filesModified',
   '--tests-passed': 'testsPassed', '--summary-result': 'summaryResult'
 };
