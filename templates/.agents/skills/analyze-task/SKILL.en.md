@@ -3,8 +3,7 @@ name: analyze-task
 description: >
   Analyze a task and produce a requirements document.
   Use when you need to understand a task's requirements, scope, and risks before designing a solution.
-  Only invoke this skill automatically when the conversation includes a resolvable task reference
-  and the corresponding task.md can be located in a task state or directory supported by this skill.
+  Only invoke this skill automatically when the conversation includes a resolvable task reference.
 ---
 
 # Analyze Task
@@ -34,6 +33,8 @@ Before the state check is complete, do not make external-state assertions such a
 ## Task id short ref
 
 > If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
+
+> Resolve the task reference, then confirm that the task is in a state or directory supported by this skill and that `task.md` exists; if it cannot be located, handle it as a missing task and stop.
 
 ## Step Start: Declare the started Event
 

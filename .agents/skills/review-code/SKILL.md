@@ -3,8 +3,7 @@ name: review-code
 description: >
   审查代码实现并输出代码审查报告。
   当代码实现需要在合入前接受审查时使用。
-  仅当对话包含可解析的任务引用，且能在本技能支持的任务状态或目录中
-  定位到对应的 task.md 时，才可自动调用本技能。
+  仅当对话包含可解析的任务引用时才可自动调用本技能。
 ---
 
 # 代码审查
@@ -44,6 +43,8 @@ tail .agents/workspace/active/{task-id}/task.md
 ## 任务入参短号别名
 
 > 如果 `{task-id}` 入参匹配 `^[#]?[0-9]+$`（裸数字或带 `#` 前缀），先读取 `.agents/rules/task-short-id.md` 的「SKILL 入参解析」段执行解析；后续命令视 `{task-id}` 为解析后的全长 `TASK-YYYYMMDD-HHMMSS` 形式。
+
+> 解析任务引用，并确认任务位于本技能支持的状态或目录且存在 `task.md`；无法定位时按未找到任务处理并停止。
 
 ## 步骤开始：声明 started 事件
 

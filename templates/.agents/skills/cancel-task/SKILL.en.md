@@ -3,8 +3,7 @@ name: cancel-task
 description: >
   Cancel an unneeded task and move it.
   Use when a task is no longer needed and should be dropped from active work.
-  Only invoke this skill automatically when the conversation includes a resolvable task reference
-  and the corresponding task.md can be located in a task state or directory supported by this skill.
+  Only invoke this skill automatically when the conversation includes a resolvable task reference.
 ---
 
 # Cancel Task
@@ -20,6 +19,8 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 ## Task id short ref
 
 > If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
+
+> Resolve the task reference, then confirm that the task is in a state or directory supported by this skill and that `task.md` exists; if it cannot be located, handle it as a missing task and stop.
 
 ## Step Start: Local Lifecycle Boundary
 
