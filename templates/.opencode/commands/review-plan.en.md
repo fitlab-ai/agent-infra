@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-Review plan for task $1.
+Review plan for task $ARGUMENTS.
 
 Read and execute the review-plan skill from `.agents/skills/review-plan/SKILL.md`.
 

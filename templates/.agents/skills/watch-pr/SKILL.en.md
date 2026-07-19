@@ -19,9 +19,9 @@ After `create-pr`, continuously watch the PR's required CI checks: when everythi
 
 Version stamp rule: before creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` and write or refresh `agent_infra_version`.
 
-## Task Argument Short-ID Alias
+## Task Context Resolution
 
-> If the `{task-id}` argument matches `^[#]?[0-9]+$` (a bare number or `#`-prefixed), first read the "SKILL argument parsing" section of `.agents/rules/task-short-id.md` to resolve it; subsequent commands treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form.
+> Keep `--pr <number>` and PR URLs on the existing PR-anchored path. Otherwise, the task path may omit the task ref and also accepts a legacy positional ref or `--task <ref>` / `-t <ref>`. Separate task scope from the full arguments, then call `agent-infra-internal task-context resolve {task-scope}` and bind `{task-id}` to the returned full `taskId`. A PR anchor and task scope are mutually exclusive.
 
 ## Step Start: Write the started Marker
 
@@ -40,7 +40,7 @@ After prerequisites pass and before this round's first artifact action, append a
 Resolve the target PR number `{pr#}` and an optional `{task-id}` via these deterministic branches:
 
 - Scenario A (argument omitted): use the current branch's PR number per `.agents/rules/pr-checks-commands.md`; then determine `{task-id}` via "Reverse-lookup task" below.
-- Scenario B (`#NN` / bare number / `TASK-id`, **task-anchored primary path**): when matching `^[#]?[0-9]+$`, resolve to the full `{task-id}` via "Task Argument Short-ID Alias" (on failure pass through the exit code; do not rewrite error handling); a `TASK-id` is used directly. Read `.agents/workspace/active/{task-id}/task.md` for `pr_number` as `{pr#}`; if `pr_number` is empty, follow "Error Handling" to prompt running `create-pr` first, then stop.
+- Scenario B (omitted task ref, positional task ref, or `--task/-t`, **task-anchored primary path**): resolve the full `{task-id}` via "Task Context Resolution" and read `.agents/workspace/active/{task-id}/task.md` for `pr_number` as `{pr#}`; if `pr_number` is empty, follow "Error Handling" to prompt running `create-pr` first, then stop.
 - Scenario C (`--pr <number>` or a PR URL): use that PR number directly as `{pr#}`; then determine `{task-id}` via "Reverse-lookup task".
 - Reverse-lookup task (scenarios A / C): search `.agents/workspace/active/*/task.md` for a task whose `pr_number == {pr#}`; on a hit, take that `{task-id}` (task-anchored); on a miss, enter the "watch-only" degraded path (no `{task-id}`, skip steps 5/6).
 

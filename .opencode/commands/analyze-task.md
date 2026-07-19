@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-分析任务 $1。
+分析任务 $ARGUMENTS。
 
 读取并执行 `.agents/skills/analyze-task/SKILL.md` 中的 analyze-task 技能。
 

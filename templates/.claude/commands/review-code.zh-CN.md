@@ -1,6 +1,6 @@
 ---
 description: "审查代码实现并输出代码审查报告"
-usage: "/review-code <task-id>"
+usage: "/review-code [task-ref | --task <ref>]"
 ---
 
 读取并执行 `.agents/skills/review-code/SKILL.md` 中的 review-code 技能。

@@ -77,13 +77,13 @@ test('ai task cat rejects a non-existent artifact name', () => {
   assert.match(out.stderr, /ai task cat: artifact 'nope' not found/);
 });
 
-test('ai task cat requires both ref and artifact arguments', () => {
+test('ai task cat requires an artifact operand', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000007';
   writeTaskWithArtifacts(activeDir, taskId);
   spawnSync('node', [SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
 
-  const out = runCli(['task', 'cat', '1'], repoRoot);
+  const out = runCli(['task', 'cat'], repoRoot);
   assert.equal(out.status, 1);
   assert.match(out.stdout, /Usage: ai task cat/);
 });

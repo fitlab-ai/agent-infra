@@ -1,5 +1,9 @@
 description = "提交当前变更到 Git"
 prompt = """
+提交 scope：{{args}}
+
+任务 scope 可省略，或通过 `--task <ref>` / `-t <ref>` 显式覆盖。
+
 读取并执行 `.agents/skills/commit/SKILL.md` 中的 commit 技能。
 
 严格按照技能中定义的所有步骤执行。

@@ -88,11 +88,11 @@ test('ai task status resolves an active task by its short id', () => {
   assert.match(out.stdout, new RegExp(`^Task ${taskId}  \\(#01\\)$`, 'm'));
 });
 
-test('ai task status requires an argument', () => {
+test('ai task status without a ref requires a matching current context', () => {
   const { repoRoot } = mkFixture();
   const out = runCli(['task', 'status'], repoRoot);
   assert.equal(out.status, 1);
-  assert.match(out.stdout, /Usage: ai task status/);
+  assert.match(out.stderr, /no active task matches current branch/);
 });
 
 test('ai task status rejects an unknown ref', () => {

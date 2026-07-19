@@ -1,13 +1,15 @@
 import fs from 'node:fs';
-import { resolveTaskRef } from '../resolve-ref.ts';
+import { parseTaskScope } from '../command-options.ts';
+import { resolveTaskContext } from '../resolve-ref.ts';
 import { extractTitle } from '../frontmatter.ts';
 import { extractSection, findSectionHeading } from '../sections.ts';
 import { renderTemplateBody, PLACEHOLDER } from '../issue-form.ts';
 import type { TaskFields } from '../issue-form.ts';
 
-const USAGE = `Usage: ai task issue-body <N | #N | TASK-id> [--template <path>]
+const USAGE = `Usage: ai task issue-body [<ref> | --task <ref> | -t <ref>] [--template <path>]
 
 Print a deterministic Issue body extracted from a task's task.md.
+  Omit <ref>           Resolve the unique active task for the current branch.
   <ref>               Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
   --template <path>   Render the final body for the given GitHub Issue Form (scenario A);
                       without it, print the default '描述 + 需求' body (scenario B).
@@ -40,28 +42,19 @@ function readTaskFields(content: string): TaskFields {
 }
 
 function issueBody(args: string[] = []): void {
-  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+  if (args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(USAGE);
-    if (args.length === 0) process.exitCode = 1;
     return;
   }
 
-  let ref: string | undefined;
   let templatePath: string | undefined;
+  const scopeArgs: string[] = [];
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]!;
     if (arg === '--template') {
       templatePath = args[i + 1];
       i += 1;
-    } else if (ref === undefined) {
-      ref = arg;
-    }
-  }
-
-  if (!ref) {
-    process.stderr.write('ai task issue-body: missing task ref\n');
-    process.exitCode = 1;
-    return;
+    } else { scopeArgs.push(arg); }
   }
   if (templatePath === undefined && args.includes('--template')) {
     process.stderr.write('ai task issue-body: --template requires a path\n');
@@ -69,7 +62,14 @@ function issueBody(args: string[] = []): void {
     return;
   }
 
-  const resolved = resolveTaskRef(ref);
+  let scope;
+  try { scope = parseTaskScope(scopeArgs); } catch (error) {
+    process.stderr.write(`ai task issue-body: ${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; return;
+  }
+  if (scope.positionals.length > 1 || (scope.explicit && scope.positionals.length > 0)) {
+    process.stderr.write('ai task issue-body: task ref must be provided once\n'); process.exitCode = 1; return;
+  }
+  const resolved = resolveTaskContext(scope.taskRef ?? scope.positionals[0]);
   if (!resolved.ok) {
     process.stderr.write(`ai task issue-body: ${resolved.message}\n`);
     process.exitCode = 1;

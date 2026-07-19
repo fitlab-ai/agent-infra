@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-编码任务 $1。
+编码任务 $ARGUMENTS。
 
 读取并执行 `.agents/skills/code-task/SKILL.md` 中的 code-task 技能。
 

@@ -13,7 +13,7 @@ test('ai task without subcommand prints USAGE and exits non-zero', () => {
   assert.equal(out.status, 1);
   assert.match(out.stdout, /Usage: ai task <command>/);
   assert.match(out.stdout, /ls \[--all/);
-  assert.match(out.stdout, /show <N \| #N \| TASK-id>/);
+  assert.match(out.stdout, /show \[--task <ref>\]/);
 });
 
 test('ai task --help prints USAGE and exits zero', () => {

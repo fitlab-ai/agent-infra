@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-为任务 $1 设计方案。
+为任务 $ARGUMENTS 设计方案。
 
 读取并执行 `.agents/skills/plan-task/SKILL.md` 中的 plan-task 技能。
 

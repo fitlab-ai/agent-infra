@@ -10,7 +10,8 @@ import {
 } from './task/implementation-inputs.ts';
 import { parseLedger, type LedgerRow } from './task/ledger.ts';
 import { extractSection, findSectionHeading } from './task/sections.ts';
-import { resolveTaskRef } from './task/resolve-ref.ts';
+import { resolveTaskContext } from './task/resolve-ref.ts';
+import { parseTaskScope } from './task/command-options.ts';
 import { canonicalTimestamp, writeTask } from './task/write.ts';
 import type { SectionMutation } from './task/write.ts';
 
@@ -83,13 +84,40 @@ function prependBlock(body: string, block: string): string {
 }
 
 export async function decide(args: string[], options: DecideOptions = {}): Promise<number> {
-  const [taskRef, selector, ...decisionParts] = args;
-  if (!taskRef || !selector || decisionParts.length === 0) {
-    process.stderr.write('Usage: ai decide <task-ref> <ordinal|ledger-id> [--needs-implementation true|false] <decision>\n');
+  let scope;
+  try { scope = parseTaskScope(args); } catch (error) {
+    process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`); return 1;
+  }
+  let item: string | undefined;
+  const operands: string[] = [];
+  for (let index = 0; index < scope.positionals.length; index += 1) {
+    const arg = scope.positionals[index]!;
+    if (arg === '--item' || arg === '-i') {
+      if (item !== undefined) { process.stderr.write("Error: duplicate option '--item'\n"); return 1; }
+      item = scope.positionals[++index];
+      if (!item) { process.stderr.write(`Error: ${arg} requires a value\n`); return 1; }
+    } else if (arg.startsWith('--item=')) {
+      if (item !== undefined) { process.stderr.write("Error: duplicate option '--item'\n"); return 1; }
+      item = arg.slice('--item='.length);
+      if (item === '') { process.stderr.write('Error: --item requires a value\n'); return 1; }
+    } else operands.push(arg);
+  }
+  let taskRef = scope.taskRef;
+  let selector = item;
+  let decisionParts: string[];
+  if (item !== undefined) {
+    decisionParts = operands;
+  } else if (!scope.explicit) {
+    [taskRef, selector, ...decisionParts] = operands;
+  } else {
+    decisionParts = [];
+  }
+  if (!selector || decisionParts.length === 0) {
+    process.stderr.write('Usage: ai decide [--task <ref>] --item <ordinal|ledger-id> [--needs-implementation true|false] <decision>\n       ai decide <task-ref> <ordinal|ledger-id> [--needs-implementation true|false] <decision>\n');
     return 1;
   }
   try {
-    const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+    const resolved = resolveTaskContext(taskRef, { repoRoot: options.repoRoot });
     if (!resolved.ok) throw new Error(resolved.message);
     if (resolved.state !== 'active') throw new Error(`task ${resolved.taskId} is not active`);
 
@@ -158,7 +186,7 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
       });
     }
     const result = writeTask(
-      { taskRef, expectedState: 'active', mutations },
+      { taskRef: resolved.taskId, expectedState: 'active', mutations },
       {
         repoRoot: options.repoRoot,
         metadataProvider: () => ({

@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-Check status of task $1.
+Check status of task $ARGUMENTS.
 
 Read and execute the check-task skill from `.agents/skills/check-task/SKILL.md`.
 

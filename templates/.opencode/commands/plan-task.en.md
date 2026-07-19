@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-Design plan for task $1.
+Design plan for task $ARGUMENTS.
 
 Read and execute the plan-task skill from `.agents/skills/plan-task/SKILL.md`.
 

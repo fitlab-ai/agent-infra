@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-查看任务 $1 的状态。
+查看任务 $ARGUMENTS 的状态。
 
 读取并执行 `.agents/skills/check-task/SKILL.md` 中的 check-task 技能。
 

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { normalizeShortIdInput, resolveShortIdReadOnly } from './short-id.ts';
+import { parseTaskFrontmatter } from './frontmatter.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 // Flat-structured workspace dirs that hold tasks under `{dir}/{taskId}/task.md`.
@@ -39,7 +40,11 @@ type ResolveTaskRefErrorCode =
   | 'SHORT_ID_REGISTRY_DUPLICATE_TASK'
   | 'SHORT_ID_NOT_FOUND'
   | 'SHORT_ID_STALE'
-  | 'TASK_NOT_FOUND';
+  | 'TASK_NOT_FOUND'
+  | 'TASK_CONTEXT_DETACHED_HEAD'
+  | 'TASK_CONTEXT_NOT_FOUND'
+  | 'TASK_CONTEXT_AMBIGUOUS'
+  | 'TASK_CONTEXT_UNREADABLE';
 
 type ResolveTaskRefOptions = { repoRoot?: string };
 
@@ -217,7 +222,97 @@ function resolveTaskRef(arg: string, options: ResolveTaskRefOptions = {}): Resol
   };
 }
 
-export { resolveTaskRef, detectRepoRoot, enumerateTaskDirs, locateHotTaskDirs, TASK_ID_RE };
+function resolveTaskContext(
+  taskRef?: string,
+  options: ResolveTaskRefOptions = {}
+): ResolveRefResult {
+  if (taskRef !== undefined) return resolveTaskRef(taskRef, options);
+
+  let repoRoot: string;
+  try {
+    repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : detectRepoRoot();
+  } catch (error) {
+    return {
+      ok: false,
+      code: 'REPO_ROOT_NOT_FOUND',
+      message: error instanceof Error ? error.message : String(error),
+      repoRoot: null,
+      taskId: null
+    };
+  }
+
+  let branch: string;
+  try {
+    branch = execFileSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe']
+    }).trim();
+  } catch {
+    return {
+      ok: false,
+      code: 'TASK_CONTEXT_DETACHED_HEAD',
+      message: 'cannot infer the current task from detached HEAD',
+      repoRoot,
+      taskId: null
+    };
+  }
+
+  const activeDir = path.join(repoRoot, '.agents', 'workspace', 'active');
+  const matches: { taskId: string; taskDir: string; taskMdPath: string }[] = [];
+  if (fs.existsSync(activeDir)) {
+    for (const entry of fs.readdirSync(activeDir).sort()) {
+      if (!TASK_ID_RE.test(entry)) continue;
+      const taskDir = path.join(activeDir, entry);
+      const taskMdPath = path.join(taskDir, 'task.md');
+      if (!fs.existsSync(taskMdPath)) continue;
+      try {
+        const frontmatter = parseTaskFrontmatter(fs.readFileSync(taskMdPath, 'utf8'));
+        if (!frontmatter.id || !frontmatter.branch) {
+          return {
+            ok: false,
+            code: 'TASK_CONTEXT_UNREADABLE',
+            message: `cannot prove current task context because ${entry}/task.md has invalid frontmatter`,
+            repoRoot,
+            taskId: null
+          };
+        }
+        if (frontmatter.branch === branch) matches.push({ taskId: entry, taskDir, taskMdPath });
+      } catch (error) {
+        return {
+          ok: false,
+          code: 'TASK_CONTEXT_UNREADABLE',
+          message: `cannot read active task candidate ${entry}: ${error instanceof Error ? error.message : String(error)}`,
+          repoRoot,
+          taskId: null
+        };
+      }
+    }
+  }
+
+  if (matches.length === 0) {
+    return {
+      ok: false,
+      code: 'TASK_CONTEXT_NOT_FOUND',
+      message: `no active task matches current branch '${branch}'; use --task <ref>`,
+      repoRoot,
+      taskId: null
+    };
+  }
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      code: 'TASK_CONTEXT_AMBIGUOUS',
+      message: `multiple active tasks match current branch '${branch}'; use --task <ref>`,
+      repoRoot,
+      taskId: null
+    };
+  }
+  const match = matches[0]!;
+  return { ok: true, repoRoot, ...match, state: 'active' };
+}
+
+export { resolveTaskRef, resolveTaskContext, detectRepoRoot, enumerateTaskDirs, locateHotTaskDirs, TASK_ID_RE };
 export type {
   ResolveRefResult,
   ResolveTaskRefErrorCode,

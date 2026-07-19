@@ -1,6 +1,6 @@
 ---
 description: "取消任务并归档"
-usage: "/cancel-task <task-id> <reason>"
+usage: "/cancel-task [task-ref | --task <ref>] <reason>"
 disable-model-invocation: true
 ---
 

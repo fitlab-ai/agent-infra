@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-Review code for task $1.
+Review code for task $ARGUMENTS.
 
 Read and execute the review-code skill from `.agents/skills/review-code/SKILL.md`.
 

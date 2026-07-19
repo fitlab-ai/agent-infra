@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-Analyze task $1.
+Analyze task $ARGUMENTS.
 
 Read and execute the analyze-task skill from `.agents/skills/analyze-task/SKILL.md`.
 

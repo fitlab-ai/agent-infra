@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-审查任务 $1 的代码。
+审查任务 $ARGUMENTS 的代码。
 
 读取并执行 `.agents/skills/review-code/SKILL.md` 中的 review-code 技能。
 

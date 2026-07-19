@@ -18,7 +18,7 @@ docker buildx inspect --bootstrap
 
 `ai sandbox create` 在首次运行时会自动生成宿主机侧的 `~/.agent-infra/aliases/sandbox.sh`。该文件内置了 Claude、Codex、Gemini CLI 和 OpenCode 的 yolo 快捷命令模板，你可以直接修改；每次创建沙箱时，这个文件都会同步到容器内的 `/home/devuser/.bash_aliases`。
 
-默认沙箱镜像也会安装 agent-infra CLI npm 包，并把 `ai` 与 `agent-infra` 暴露在容器 `PATH` 上。因此 `ai task decisions <task-ref>` 这类任务命令可以在沙箱内直接针对挂载的 `/workspace` 执行。已有沙箱镜像和容器需要刷新重建并重新创建后，才会获得这个新增的托管工具。
+默认沙箱镜像也会安装 agent-infra CLI npm 包，并把 `ai` 与 `agent-infra` 暴露在容器 `PATH` 上。在任务绑定 worktree 中，生命周期技能和适用的任务命令会从当前 symbolic branch 严格反查 `task.md.branch` 完全匹配的唯一 active task；可用 `--task <ref>` / `-t <ref>` 显式覆盖。带其他位置操作数的命令使用无歧义形式，例如 `ai task cat analysis`、`ai task decisions --item 1` 和 `ai decide --item PL-1 <decision>`。`ai task grep <pattern>` 默认仍搜索全部 hot task，只有 `--current` 或 `--task` 才收窄。宿主侧 `ai run <skill> <task-ref>` 仍要求 task ref，因为它要据此选择目标分支与 sandbox。已有沙箱镜像和容器需要刷新重建并重新创建后，才会获得这个新增的托管工具。
 
 沙箱镜像也会预装 `gh`。如果宿主机上的 `gh auth token` 能成功返回 token，`ai sandbox create` 会把它以 `GH_TOKEN` 环境变量注入容器，让你在沙箱里直接使用 `gh`，无需额外登录配置。
 

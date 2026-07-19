@@ -1,6 +1,6 @@
 ---
 description: "Check a task's current status and progress"
-usage: "/check-task <task-id>"
+usage: "/check-task [task-ref | --task <ref>]"
 disable-model-invocation: true
 ---
 

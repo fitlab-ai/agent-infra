@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { commandForEngine } from '../../sandbox/shell.ts';
-import { resolveTaskRef } from '../resolve-ref.ts';
+import { parseTaskScope } from '../command-options.ts';
+import { resolveTaskContext, resolveTaskRef } from '../resolve-ref.ts';
 import { enumerateArtifacts, type Artifact } from '../artifacts.ts';
 import { parseTaskFrontmatter, extractTitle, type Frontmatter } from '../frontmatter.ts';
 import { loadShortIdByTaskId } from '../short-id.ts';
@@ -10,10 +11,11 @@ import { getOpenWorkflowWarnings, formatWorkflowWarningSummary, type WorkflowWar
 import { parseActivityLog, pairEntries } from '../activity-log.ts';
 import { statusCard, type DisplayMessage } from '../../server/display.ts';
 
-const USAGE = `Usage: ai task status <N | #N | TASK-id>
+const USAGE = `Usage: ai task status [<N | #N | TASK-id> | --task <ref> | -t <ref>]
 
 Prints an aggregated "health check" view for a task: header, metadata,
 artifacts, workflow/runtime execution state, and git branch state.
+  Omit <ref>   Resolve the unique active task for the current branch.
   <ref>   Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
 
 Git rows are best-effort: a failed git call degrades that row to '-' without
@@ -489,15 +491,23 @@ function statusModelToDisplay(model: StatusModel): DisplayMessage {
 }
 
 function status(args: string[] = []): void {
-  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+  if (args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(USAGE);
-    if (args.length === 0) process.exitCode = 1;
     return;
   }
 
   let model: StatusModel;
   try {
-    model = buildStatusModel(args[0]!);
+    const scope = parseTaskScope(args);
+    if (scope.positionals.length > 1 || (scope.explicit && scope.positionals.length > 0)) {
+      throw new Error('task ref must be provided once');
+    }
+    const resolved = resolveTaskContext(scope.taskRef ?? scope.positionals[0]);
+    if (!resolved.ok) throw new Error(resolved.message);
+    model = buildFromResolved({
+      taskId: resolved.taskId, taskDir: resolved.taskDir, taskMdPath: resolved.taskMdPath,
+      repoRoot: resolved.repoRoot
+    });
   } catch (error) {
     process.stderr.write(`ai task status: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;

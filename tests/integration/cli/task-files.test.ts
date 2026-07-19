@@ -69,9 +69,9 @@ test('ai task files rejects an unknown ref', () => {
   assert.match(out.stderr, /ai task files:/);
 });
 
-test('ai task files requires an argument', () => {
+test('ai task files without a ref requires a matching current context', () => {
   const { repoRoot } = mkFixture();
   const out = runCli(['task', 'files'], repoRoot);
   assert.equal(out.status, 1);
-  assert.match(out.stdout, /Usage: ai task files/);
+  assert.match(out.stderr, /no active task matches current branch/);
 });

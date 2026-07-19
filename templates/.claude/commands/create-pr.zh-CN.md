@@ -1,6 +1,6 @@
 ---
 description: "创建 Pull Request 到目标分支"
-usage: "/create-pr [task-id] [target-branch]"
+usage: "/create-pr [task-ref | --task <ref>] [target-branch]"
 ---
 
 读取并执行 `.agents/skills/create-pr/SKILL.md` 中的 create-pr 技能。

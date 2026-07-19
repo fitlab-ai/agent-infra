@@ -272,9 +272,9 @@ test('ai task log rejects an unknown ref', () => {
   assert.match(out.stderr, /ai task log:/);
 });
 
-test('ai task log requires an argument', () => {
+test('ai task log without a ref requires a matching current context', () => {
   const { repoRoot } = mkFixture();
   const out = runCli(['task', 'log'], repoRoot);
   assert.equal(out.status, 1);
-  assert.match(out.stdout, /Usage: ai task log/);
+  assert.match(out.stderr, /no active task matches current branch/);
 });

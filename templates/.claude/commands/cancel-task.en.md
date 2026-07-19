@@ -1,6 +1,6 @@
 ---
 description: "Cancel a task and archive it"
-usage: "/cancel-task <task-id> <reason>"
+usage: "/cancel-task [task-ref | --task <ref>] <reason>"
 disable-model-invocation: true
 ---
 

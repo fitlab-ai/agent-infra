@@ -152,9 +152,9 @@ test('ai task show <non-numeric> rejects garbage input', () => {
   assert.match(out.stderr, /not a valid short id or TASK-id/);
 });
 
-test('ai task show requires an argument', () => {
+test('ai task show without a ref requires a matching current context', () => {
   const { repoRoot } = mkFixture();
   const out = runCli(['task', 'show'], repoRoot);
   assert.notEqual(out.status, 0);
-  assert.match(out.stdout, /Usage: ai task show/);
+  assert.match(out.stderr, /no active task matches current branch/);
 });

@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-Review analysis for task $1.
+Review analysis for task $ARGUMENTS.
 
 Read and execute the review-analysis skill from `.agents/skills/review-analysis/SKILL.md`.
 

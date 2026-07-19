@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-完成任务 $1。
+完成任务 $ARGUMENTS。
 
 读取并执行 `.agents/skills/complete-task/SKILL.md` 中的 complete-task 技能。
 

@@ -11,6 +11,11 @@ if (major < 22 || (major === 22 && minor < 9)) {
 const command = process.argv[2] || '';
 
 switch (command) {
+  case 'task-context': {
+    const { taskContext } = await import('../lib/internal/task-context.ts');
+    taskContext(process.argv.slice(3));
+    break;
+  }
   case 'task-artifact': {
     const { taskArtifact } = await import('../lib/internal/task-artifact.ts');
     taskArtifact(process.argv.slice(3));

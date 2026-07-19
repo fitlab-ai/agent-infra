@@ -1,6 +1,6 @@
 ---
 description: "标记任务完成并归档"
-usage: "/complete-task <task-id>"
+usage: "/complete-task [task-ref | --task <ref>]"
 ---
 
 读取并执行 `.agents/skills/complete-task/SKILL.md` 中的 complete-task 技能。

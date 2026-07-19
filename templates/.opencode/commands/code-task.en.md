@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-Code task $1.
+Code task $ARGUMENTS.
 
 Read and execute the code-task skill from `.agents/skills/code-task/SKILL.md`.
 

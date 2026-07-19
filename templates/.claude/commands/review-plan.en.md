@@ -1,6 +1,6 @@
 ---
 description: "Review a technical plan"
-usage: "/review-plan <task-id>"
+usage: "/review-plan [task-ref | --task <ref>]"
 ---
 
 Read and execute the review-plan skill from `.agents/skills/review-plan/SKILL.md`.

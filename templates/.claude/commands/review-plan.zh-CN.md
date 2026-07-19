@@ -1,6 +1,6 @@
 ---
 description: "审查技术方案"
-usage: "/review-plan <task-id>"
+usage: "/review-plan [task-ref | --task <ref>]"
 ---
 
 读取并执行 `.agents/skills/review-plan/SKILL.md` 中的 review-plan 技能。

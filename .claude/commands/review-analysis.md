@@ -1,6 +1,6 @@
 ---
 description: "审查需求分析报告"
-usage: "/review-analysis <task-id>"
+usage: "/review-analysis [task-ref | --task <ref>]"
 ---
 
 读取并执行 `.agents/skills/review-analysis/SKILL.md` 中的 review-analysis 技能。

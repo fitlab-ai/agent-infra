@@ -19,9 +19,11 @@ When updating related `task.md` frontmatter, read `.agents/rules/version-stamp.m
 | "`git add -A` is faster." | `git add -A` and `git add .` are forbidden; stage only explicitly listed files to avoid including unrelated changes. |
 | "This file has a copyright header, but the year can wait." | If you changed it, update the copyright year using `date +%Y`; this is a hard pre-commit check. |
 
-## Task id short ref
+## Task Context Resolution
 
-> If `{task-id}` matches `^[#]?[0-9]+$` (bare numeric or `#`-prefixed), follow the "SKILL parameter resolver" section of `.agents/rules/task-short-id.md`; treat `{task-id}` as the resolved full `TASK-YYYYMMDD-HHMMSS` form for every downstream command.
+> The entry point may omit the task ref and also accepts a legacy positional ref or `--task <ref>` / `-t <ref>`. Separate task scope from the full arguments while preserving every business operand, then call `agent-infra-internal task-context resolve {task-scope}` where `{task-scope}` is empty, one positional ref, or one task flag. Read only `taskId` from the structured result and bind `{task-id}` to that full `TASK-YYYYMMDD-HHMMSS` for downstream commands. Pass through resolution failures without scanning tasks locally.
+
+Without explicit task scope, only `TASK_CONTEXT_NOT_FOUND` may continue through the existing bare-commit path. Detached HEAD, damaged candidates, or multiple matches are ambiguity errors. Any explicit task-scope failure is fatal.
 
 ## Step Start: Write the started Marker
 

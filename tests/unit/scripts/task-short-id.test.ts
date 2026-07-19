@@ -444,13 +444,10 @@ test("SKILL.md no longer embeds multi-line short-id bash snippet (U-2 slimming)"
   assert.deepEqual(offenders, [], `SKILL.md still embeds old inline bash: ${offenders.join(", ")}`);
 });
 
-test("19 lifecycle SKILLs reference the centralized task-short-id rule doc (U-2)", () => {
+test("short-id-only lifecycle SKILLs reference the centralized task-short-id rule doc (U-2)", () => {
   const skills = [
     "create-task", "import-issue", "import-codescan", "import-dependabot",
-    "analyze-task", "plan-task", "code-task", "review-analysis", "review-plan",
-    "review-code", "commit", "create-pr", "check-task",
-    "complete-task", "cancel-task", "block-task", "close-codescan", "close-dependabot",
-    "restore-task"
+    "close-codescan", "close-dependabot", "restore-task"
   ];
   const pointerRe = /rules\/task-short-id\.md/;
   for (const skill of skills) {

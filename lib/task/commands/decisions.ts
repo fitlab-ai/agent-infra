@@ -1,20 +1,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { formatTable } from '../../table.ts';
-import { resolveTaskRef } from '../resolve-ref.ts';
+import { parseTaskScope } from '../command-options.ts';
+import { resolveTaskContext } from '../resolve-ref.ts';
 import { isReviewStage, parseLedger, type LedgerRow, type ReviewStage } from '../ledger.ts';
 import { listDecisionItems, selectDecisionItem } from '../decision-items.ts';
 import { extractSubSection } from '../sections.ts';
 
-const USAGE = `Usage: ai task decisions <N | #N | TASK-id> [selector] [options]
+const USAGE = `Usage: ai task decisions [--task <ref> | -t <ref>] [--item <selector> | -i <selector>] [options]
+       ai task decisions <ref> [selector] [options]
 
 Lists decision items recorded in a task's review disagreement
 ledger, or prints the full detail block for a single item. Read-only.
 
-  <ref>          Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
+  Omit <ref>     Resolve the unique active task for the current branch.
+  <ref>          Legacy positional task ref.
   [selector]     Ordinal (1-based) or ledger id (e.g. 'PL-3') to show one item's detail.
 
 Options:
+  -i, --item <s>    Select an item when task scope is implicit or flag-based.
   --all              Include already-decided (human-decided) items, not just pending.
   --stage <s>        Filter to one stage: analysis | plan | code.
   --format <fmt>     Output format: text (default) | markdown.
@@ -32,6 +36,7 @@ function fail(message: string): void {
 
 type ParsedArgs = {
   positionals: string[];
+  item?: string;
   all: boolean;
   stage?: string;
   format: string;
@@ -44,6 +49,15 @@ function parseArgs(args: string[]): ParsedArgs | null {
     const a = args[i]!;
     if (a === '--all') {
       out.all = true;
+    } else if (a === '--item' || a === '-i') {
+      const v = args[i + 1];
+      if (v === undefined) { fail(`${a} requires a value`); return null; }
+      if (out.item !== undefined) { fail("duplicate option '--item'"); return null; }
+      out.item = v; i += 1;
+    } else if (a.startsWith('--item=')) {
+      if (out.item !== undefined) { fail("duplicate option '--item'"); return null; }
+      out.item = a.slice('--item='.length);
+      if (out.item === '') { fail('--item requires a value'); return null; }
     } else if (a === '--stage') {
       const v = args[i + 1];
       if (v === undefined) {
@@ -214,13 +228,10 @@ function decisions(args: string[] = []): void {
     process.stdout.write(USAGE);
     return;
   }
-  const parsed = parseArgs(args);
+  let scope;
+  try { scope = parseTaskScope(args); } catch (error) { fail(error instanceof Error ? error.message : String(error)); return; }
+  const parsed = parseArgs(scope.positionals);
   if (!parsed) return;
-  if (parsed.positionals.length === 0) {
-    process.stdout.write(USAGE);
-    process.exitCode = 1;
-    return;
-  }
   if (parsed.stage !== undefined && !isReviewStage(parsed.stage)) {
     fail(`invalid --stage '${parsed.stage}' (expected analysis|plan|code)`);
     return;
@@ -230,7 +241,18 @@ function decisions(args: string[] = []): void {
     return;
   }
 
-  const resolved = resolveTaskRef(parsed.positionals[0]!);
+  let taskRef = scope.taskRef;
+  let selector = parsed.item;
+  if (parsed.item !== undefined) {
+    if (parsed.positionals.length > 0) { fail('positional task ref/selector cannot be combined with --item'); return; }
+  } else if (scope.explicit) {
+    if (parsed.positionals.length > 0) { fail('positional task ref/selector cannot be combined with --task'); return; }
+  } else {
+    if (parsed.positionals.length > 2) { fail('too many positional arguments'); return; }
+    taskRef = parsed.positionals[0];
+    selector = parsed.positionals[1];
+  }
+  const resolved = resolveTaskContext(taskRef);
   if (!resolved.ok) {
     fail(resolved.message);
     return;
@@ -242,7 +264,6 @@ function decisions(args: string[] = []): void {
     stage: parsed.stage as ReviewStage | undefined
   });
 
-  const selector = parsed.positionals[1];
   if (selector === undefined) {
     renderList(rows, parsed.format, resolved.taskDir);
   } else {

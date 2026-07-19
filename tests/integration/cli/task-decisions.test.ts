@@ -116,14 +116,14 @@ test('A2: resolves bare short id, #N, and full TASK-id; rejects unknown ref', ()
   assert.match(bad.stderr, /ai task decisions:/);
 });
 
-test('A3: --help exits 0 with usage; no args exits 1 with usage', () => {
+test('A3: --help exits 0; no args requires a matching current context', () => {
   const { repoRoot } = mkFixture();
   const help = runCli(['task', 'd', '--help'], repoRoot);
   assert.equal(help.status, 0);
   assert.match(help.stdout, /Usage: ai task decisions/);
   const none = runCli(['task', 'd'], repoRoot);
   assert.equal(none.status, 1);
-  assert.match(none.stdout, /Usage: ai task decisions/);
+  assert.match(none.stderr, /no active task matches current branch/);
 });
 
 test('A4: default list shows pending decision rows from every review stage', () => {

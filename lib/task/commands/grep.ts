@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolveTaskRef, detectRepoRoot, enumerateTaskDirs } from '../resolve-ref.ts';
+import { resolveTaskContext, resolveTaskRef, detectRepoRoot, enumerateTaskDirs } from '../resolve-ref.ts';
 import { enumerateArtifacts, resolveArtifact } from '../artifacts.ts';
 import { loadShortIdByTaskId } from '../short-id.ts';
 
 const USAGE = `Usage: ai task grep <pattern> [ref] [artifact | N]
+       ai task grep <pattern> (--current | --task <ref> | -t <ref>) [artifact | N]
 
 Literal (non-regex) line search across task artifacts.
   <pattern>          Literal substring to match (NOT a regex). Case-sensitive by default.
@@ -17,6 +18,8 @@ Literal (non-regex) line search across task artifacts.
 
 Options:
   -i, --ignore-case  Case-insensitive matching.
+  --current          Limit search to the current task context.
+  -t, --task <ref>   Limit search to an explicit task.
   --                 Treat the rest as positional (use for patterns starting with '-').
 
 Output: '{taskId} [#short] {fileStem}:{line}: {matched-line}' (short id only for active tasks).
@@ -62,14 +65,31 @@ function scanArtifact(
 function grep(args: string[] = []): void {
   const positional: string[] = [];
   let ignoreCase = false;
+  let current = false;
+  let taskRef: string | undefined;
   let optsEnded = false;
-  for (const a of args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const a = args[index]!;
     if (!optsEnded && a === '--') { optsEnded = true; continue; }
     if (!optsEnded && (a === '-h' || a === '--help')) {
       process.stdout.write(USAGE);
       return;
     }
     if (!optsEnded && (a === '-i' || a === '--ignore-case')) { ignoreCase = true; continue; }
+    if (!optsEnded && a === '--current') { current = true; continue; }
+    if (!optsEnded && (a === '--task' || a === '-t')) {
+      if (taskRef !== undefined) { process.stderr.write("ai task grep: duplicate option '--task'\n"); process.exitCode = 1; return; }
+      const value = args[++index];
+      if (!value || value.startsWith('-')) { process.stderr.write(`ai task grep: ${a} requires a value\n`); process.exitCode = 1; return; }
+      taskRef = value;
+      continue;
+    }
+    if (!optsEnded && a.startsWith('--task=')) {
+      if (taskRef !== undefined) { process.stderr.write("ai task grep: duplicate option '--task'\n"); process.exitCode = 1; return; }
+      taskRef = a.slice('--task='.length);
+      if (taskRef === '') { process.stderr.write('ai task grep: --task requires a value\n'); process.exitCode = 1; return; }
+      continue;
+    }
     if (!optsEnded && a.startsWith('-') && a !== '-') {
       process.stderr.write(`ai task grep: unknown flag: ${a}\n`);
       process.exitCode = 1;
@@ -83,19 +103,26 @@ function grep(args: string[] = []): void {
     process.exitCode = 1;
     return;
   }
-  if (positional.length > 3) {
+  if (current && taskRef !== undefined) {
+    process.stderr.write('ai task grep: --current and --task are mutually exclusive\n'); process.exitCode = 1; return;
+  }
+  if (positional.length > 3 || ((current || taskRef !== undefined) && positional.length > 2)) {
     process.stderr.write('ai task grep: too many arguments\n');
     process.exitCode = 1;
     return;
   }
 
-  const [pattern, ref, artifactOrN] = positional;
+  let [pattern, ref, artifactOrN] = positional;
+  if (current || taskRef !== undefined) {
+    artifactOrN = ref;
+    ref = taskRef;
+  }
   const matcher = makeMatcher(pattern!, ignoreCase);
   const chunks: string[] = [];
   const emit = (line: string) => chunks.push(line);
   let total = 0;
 
-  if (ref === undefined) {
+  if (ref === undefined && !current) {
     // No ref: full scan across active / blocked / completed (no archive).
     let repoRoot: string;
     try {
@@ -113,7 +140,7 @@ function grep(args: string[] = []): void {
       }
     }
   } else {
-    const resolved = resolveTaskRef(ref);
+    const resolved = current ? resolveTaskContext() : resolveTaskRef(ref!);
     if (!resolved.ok) {
       process.stderr.write(`ai task grep: ${resolved.message}\n`);
       process.exitCode = 1;

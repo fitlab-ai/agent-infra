@@ -4,7 +4,7 @@ agent: general
 subtask: false
 ---
 
-Complete task $1.
+Complete task $ARGUMENTS.
 
 Read and execute the complete-task skill from `.agents/skills/complete-task/SKILL.md`.
 

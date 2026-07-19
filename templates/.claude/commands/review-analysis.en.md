@@ -1,6 +1,6 @@
 ---
 description: "Review a requirement analysis report"
-usage: "/review-analysis <task-id>"
+usage: "/review-analysis [task-ref | --task <ref>]"
 ---
 
 Read and execute the review-analysis skill from `.agents/skills/review-analysis/SKILL.md`.

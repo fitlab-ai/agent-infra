@@ -6,9 +6,9 @@ type CommandSpec = {
 
 const commandSpecs: Record<string, CommandSpec> = {
   "analyze-task": {
-    usage: "<task-id>",
-    en: "Analyze task $1.",
-    zh: "分析任务 $1。"
+    usage: "[task-ref | --task <ref>]",
+    en: "Analyze task $ARGUMENTS.",
+    zh: "分析任务 $ARGUMENTS。"
   },
   "archive-tasks": {
     usage: "[--days N | --before YYYY-MM-DD | TASK-ID...]",
@@ -31,21 +31,25 @@ const commandSpecs: Record<string, CommandSpec> = {
     zh: "导入 Issue #$1。"
   },
   "block-task": {
-    usage: "<task-id> [reason]",
+    usage: "[task-ref | --task <ref>] [reason]",
     en: "Block task: $ARGUMENTS",
     zh: "阻塞任务：$ARGUMENTS"
   },
   "cancel-task": {
-    usage: "<task-id> <reason>",
+    usage: "[task-ref | --task <ref>] <reason>",
     en: "Cancel task: $ARGUMENTS",
     zh: "取消任务：$ARGUMENTS"
   },
   "check-task": {
-    usage: "<task-id>",
-    en: "Check status of task $1.",
-    zh: "查看任务 $1 的状态。"
+    usage: "[task-ref | --task <ref>]",
+    en: "Check status of task $ARGUMENTS.",
+    zh: "查看任务 $ARGUMENTS 的状态。"
   },
-  commit: {},
+  commit: {
+    usage: "[task-ref | --task <ref>]",
+    en: "Commit scope: $ARGUMENTS",
+    zh: "提交 scope：$ARGUMENTS"
+  },
   "close-codescan": {
     usage: "<alert-number>",
     en: "Close CodeQL alert #$1.",
@@ -57,22 +61,22 @@ const commandSpecs: Record<string, CommandSpec> = {
     zh: "关闭 Dependabot 告警 #$1。"
   },
   "complete-task": {
-    usage: "<task-id>",
-    en: "Complete task $1.",
-    zh: "完成任务 $1。"
+    usage: "[task-ref | --task <ref>]",
+    en: "Complete task $ARGUMENTS.",
+    zh: "完成任务 $ARGUMENTS。"
   },
   "complete-manual-validation": {
-    usage: "<task-id> [pr-ref] <verification-summary>",
+    usage: "[task-ref | --task <ref>] [pr-ref] <verification-summary>",
     en: "Complete manual validation: $ARGUMENTS",
     zh: "完成人工验证：$ARGUMENTS"
   },
   "create-pr": {
-    usage: "[task-id] [target-branch]",
+    usage: "[task-ref | --task <ref>] [target-branch]",
     en: "Create PR: $ARGUMENTS",
     zh: "创建 PR：$ARGUMENTS"
   },
   "watch-pr": {
-    usage: "[task-id | --pr <number>]",
+    usage: "[task-ref | --task <ref> | --pr <number>]",
     en: "Watch PR checks: $ARGUMENTS",
     zh: "监控 PR 检查：$ARGUMENTS"
   },
@@ -94,25 +98,25 @@ const commandSpecs: Record<string, CommandSpec> = {
     zh: "初始化里程碑：$ARGUMENTS"
   },
   "code-task": {
-    usage: "<task-id>",
-    en: "Code task $1.",
-    zh: "编码任务 $1。"
+    usage: "[task-ref | --task <ref>]",
+    en: "Code task $ARGUMENTS.",
+    zh: "编码任务 $ARGUMENTS。"
   },
   "plan-task": {
-    usage: "<task-id>",
-    en: "Design plan for task $1.",
-    zh: "为任务 $1 设计方案。"
+    usage: "[task-ref | --task <ref>]",
+    en: "Design plan for task $ARGUMENTS.",
+    zh: "为任务 $ARGUMENTS 设计方案。"
   },
   "post-release": {},
   "review-analysis": {
-    usage: "<task-id>",
-    en: "Review analysis for task $1.",
-    zh: "审查任务 $1 的需求分析。"
+    usage: "[task-ref | --task <ref>]",
+    en: "Review analysis for task $ARGUMENTS.",
+    zh: "审查任务 $ARGUMENTS 的需求分析。"
   },
   "review-plan": {
-    usage: "<task-id>",
-    en: "Review plan for task $1.",
-    zh: "审查任务 $1 的技术方案。"
+    usage: "[task-ref | --task <ref>]",
+    en: "Review plan for task $ARGUMENTS.",
+    zh: "审查任务 $ARGUMENTS 的技术方案。"
   },
   "refine-title": {
     usage: "<number>",
@@ -125,9 +129,9 @@ const commandSpecs: Record<string, CommandSpec> = {
     zh: "发布版本 $1。"
   },
   "review-code": {
-    usage: "<task-id>",
-    en: "Review code for task $1.",
-    zh: "审查任务 $1 的代码。"
+    usage: "[task-ref | --task <ref>]",
+    en: "Review code for task $ARGUMENTS.",
+    zh: "审查任务 $ARGUMENTS 的代码。"
   },
   "restore-task": {
     usage: "<issue-number> [task-id]",
