@@ -119,10 +119,10 @@ EOF
 
 当调用方存在 `{task-id}` / task 目录且 GET/PATCH/POST 失败时，记录 Workflow Warning：
 
-兼容脚本仅转发到 `agent-infra-internal task-warning`；不得在规则或调用方中自行写 task.md、分配 `WW-N` 或判断状态迁移。
+通过 `agent-infra-internal task-warning` 提交结构化意图；不得在规则或调用方中自行写 task.md、分配 `WW-N` 或判断状态迁移。
 
 ```bash
-node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} \
+agent-infra-internal task-warning {task-id} add \
   --step pr-sync --severity ACTION_REQUIRED --code COMMENT_SYNC_FAILED \
   --target "pr-summary" --message "{reason}" \
   --action "修复 GitHub API / 网络问题后重跑触发 PR 摘要同步的 workflow 步骤"

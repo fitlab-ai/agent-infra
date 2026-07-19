@@ -119,10 +119,10 @@ EOF
 
 When the caller has a `{task-id}` / task directory and GET/PATCH/POST fails, record a Workflow Warning:
 
-The compatibility script only forwards to `agent-infra-internal task-warning`; rules and callers must not write task.md, allocate `WW-N`, or decide transitions.
+Submit the structured intent through `agent-infra-internal task-warning`; rules and callers must not write task.md, allocate `WW-N`, or decide transitions.
 
 ```bash
-node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} \
+agent-infra-internal task-warning {task-id} add \
   --step pr-sync --severity ACTION_REQUIRED --code COMMENT_SYNC_FAILED \
   --target "pr-summary" --message "{reason}" \
   --action "Fix GitHub API / network issues and rerun the workflow step that triggers PR summary sync"

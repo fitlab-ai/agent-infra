@@ -165,5 +165,5 @@ node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/activ
 - 推送被拒绝：建议执行 `git pull --rebase`
 - 已存在 PR：直接输出当前 PR URL 并结束
 - 无法访问 Issue 元数据：跳过继承并继续
-- PR 创建失败且已关联 `{task-id}`：调用 `node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} --step create-pr --severity ACTION_REQUIRED --code PR_CREATE_FAILED --target pr --message "{reason}" --action "修复推送、权限或平台问题后重跑 create-pr"` 提交结构化 warning 意图（兼容脚本只转发到 `task-warning`），不写 `pr_number`
+- PR 创建失败且已关联 `{task-id}`：调用 `agent-infra-internal task-warning {task-id} add --step create-pr --severity ACTION_REQUIRED --code PR_CREATE_FAILED --target pr --message "{reason}" --action "修复推送、权限或平台问题后重跑 create-pr"` 提交结构化 warning 意图，不写 `pr_number`
 - PR 摘要评论失败且已关联 `{task-id}`：按 `.agents/rules/pr-sync.md` 记录 `COMMENT_SYNC_FAILED` 告警，不回滚已创建 PR
