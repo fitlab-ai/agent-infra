@@ -38,6 +38,16 @@ type TableMutationResult = {
   operation: 'insert' | 'update' | 'delete';
 };
 
+type ParsedTableRow = {
+  values: Readonly<Record<string, string>>;
+  sourceLine: number;
+};
+
+type ParsedTable = {
+  heading: string;
+  rows: readonly ParsedTableRow[];
+};
+
 type DocumentMutationErrorCode =
   | 'TASK_DOCUMENT_INVALID'
   | 'MUTATION_INVALID'
@@ -59,6 +69,70 @@ class DocumentMutationError extends Error {
     this.name = 'DocumentMutationError';
     this.code = code;
   }
+}
+
+function parseTable(
+  content: string,
+  input: { sectionAliases: readonly string[]; columns: readonly string[] }
+): ParsedTable | null {
+  validateAliases(input.sectionAliases, 'table section aliases');
+  if (
+    !Array.isArray(input.columns) || input.columns.length === 0 ||
+    input.columns.some((column) => !column || /[\r\n|]/.test(column)) ||
+    new Set(input.columns).size !== input.columns.length
+  ) {
+    throw new DocumentMutationError('MUTATION_INVALID', 'table columns are invalid');
+  }
+  const sections = matchingSections(content, input.sectionAliases);
+  if (sections.length === 0) return null;
+  if (sections.length > 1) {
+    throw new DocumentMutationError('TASK_DOCUMENT_INVALID', 'table section is ambiguous');
+  }
+  const section = sections[0]!;
+  const sectionLines = linesOf(content).filter(
+    (line) => line.start >= section.bodyStart && line.start < section.end
+  );
+  const firstContent = sectionLines.findIndex((line) => line.text.trim() !== '');
+  const tables: number[] = [];
+  for (let index = 0; index + 1 < sectionLines.length; index += 1) {
+    const header = splitTableCells(sectionLines[index]!.text);
+    const separator = splitTableCells(sectionLines[index + 1]!.text);
+    if (!header || !separator || header.cells.length !== input.columns.length) continue;
+    const names = header.cells.map((cell) => decodeCell(cell).trim());
+    if (!names.every((name, column) => name === input.columns[column])) continue;
+    if (
+      separator.cells.length === input.columns.length &&
+      separator.cells.every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell))
+    ) tables.push(index);
+  }
+  if (tables.length === 0) {
+    throw new DocumentMutationError('TABLE_NOT_FOUND', 'matching table not found');
+  }
+  if (tables.length > 1) {
+    throw new DocumentMutationError('TABLE_AMBIGUOUS', 'matching table appears more than once');
+  }
+  const rows: ParsedTableRow[] = [];
+  const seen = new Set<string>();
+  for (let index = tables[0]! + 2; index < sectionLines.length; index += 1) {
+    const line = sectionLines[index]!;
+    if (!line.text.trim()) break;
+    const parsed = splitTableCells(line.text);
+    if (!parsed) break;
+    if (parsed.cells.length !== input.columns.length) {
+      throw new DocumentMutationError('TASK_DOCUMENT_INVALID', 'table row has the wrong column count');
+    }
+    const values = Object.fromEntries(input.columns.map((column, columnIndex) => [
+      column,
+      decodeCell(parsed.cells[columnIndex]!).trim()
+    ]));
+    const key = values[input.columns[0]!]!;
+    if (seen.has(key)) {
+      throw new DocumentMutationError('TABLE_DUPLICATE_KEY', `duplicate table key '${key}'`);
+    }
+    seen.add(key);
+    rows.push({ values, sourceLine: index - Math.max(firstContent, 0) });
+  }
+  return { heading: section.heading, rows };
 }
 
 type Line = {
@@ -462,8 +536,10 @@ export {
   extractSection,
   findSectionHeading,
   extractSubSection,
+  parseTable,
   upsertSection,
-  mutateTableRow
+  mutateTableRow,
+  DocumentMutationError
 };
 export type {
   SectionMutationInput,
@@ -473,5 +549,7 @@ export type {
   TableRowDeleteMutation,
   TableRowMutation,
   TableMutationResult,
-  DocumentMutationErrorCode
+  DocumentMutationErrorCode,
+  ParsedTableRow,
+  ParsedTable
 };

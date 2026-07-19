@@ -43,15 +43,13 @@ test('parseLedger returns [] when no ledger section exists', () => {
   assert.deepEqual(parseLedger('---\nid: x\n---\n# 任务\n\n## 描述\n\nno ledger\n'), []);
 });
 
-test('parseLedger stops at the next H2 and ignores malformed rows', () => {
-  const rows = parseLedger(
+test('parseLedger rejects malformed rows instead of silently dropping state', () => {
+  assert.throws(() => parseLedger(
     ledger([
       '| HD-1 | analysis | - | decision | needs-human-decision | analysis.md#HD-1 |',
       '| too | few | cols |'
     ])
-  );
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0]!.id, 'HD-1');
+  ), { code: 'TASK_DOCUMENT_INVALID' });
 });
 
 test('isReviewStage accepts workflow review stages and rejects reserved stages', () => {

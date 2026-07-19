@@ -64,7 +64,7 @@
 
 ## 审查分歧账本回写
 
-> 把本轮每条 finding upsert 到 task.md `## 审查分歧账本`：新 finding 追加 `open` 行（id 前缀 `CD-`，stage=code），对执行方上一轮响应按回交义务改 `confirmed` / 置回 `open` / `needs-human-decision`。状态机与证据规则见 `.agents/rules/review-handshake.md`。
+> 本段记录将提交的结构化意图：新 finding 用 `task-ledger finding-upsert`，上一轮响应复核用 `finding-review`；由核心分配 `CD-N` 并校验状态机，禁止手写 task.md 表格。
 > 凡升级为 `needs-human-decision` 的 finding，必须按 `.agents/rules/human-decision-context.md` 在本报告中提供自足详情块，并让 evidence 指向该稳定锚点。
 
 ## 证据原文

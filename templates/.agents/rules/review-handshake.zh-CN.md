@@ -62,7 +62,7 @@
 - `stage` ∈ `{analysis, plan, code}`（外加保留值 `post-review-commit`，仅用于 post-review 豁免行）。
 - `status` 合法枚举：`open` / `accepted` / `adjusted` / `refuted` / `cannot-judge` / `confirmed` / `needs-human-decision` / `closed` / `human-decided`。
 - **终态集合（gate 放行）**：`{confirmed, closed, human-decided}`；其余为阻塞态。
-- **写入责任**：`review-*` 提 finding → upsert `open` 行；`*-task` 响应 → 改四态并填 `evidence`、`round` +1；下一轮 `review-*` → `confirmed` / 置回 `open` / `needs-human-decision`；执行方修复经下一轮 review 验证通过 → `closed`；人工裁决 → `human-decided`。
+- **写入责任**：调用方只提交结构化意图，不扫描编号、不拼表格行、不自行判断机械状态迁移。`review-*` 用 `agent-infra-internal task-ledger {task-id} finding-upsert|finding-review ...`；`*-task` 用 `finding-respond ...`；人工裁决由 `ai decide` 原子完成。核心统一校验并通过一次任务写入提交。
 - **向后兼容**：task.md 无此段时，gate 视为无未决分歧而放行。
 
 ### 执行方自提人工裁决行
@@ -73,7 +73,7 @@
 | HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |
 ```
 
-- `id`：`HD-N` 编号**全局唯一**。新增行时扫描账本中所有 `HD-(\d+)`，取最大值 + 1（账本无 `HD-` 行则从 `HD-1` 起）；跨 `analysis` / `plan` / `code` 单调递增，**禁止复用**既有编号，避免按 `HD-id` 定位时歧义。
+- `id`：`HD-N` 编号**全局唯一**。先调用 `agent-infra-internal task-ledger {task-id} decision-next-id` 取得 `entityId`，产出稳定标题后调用 `decision-upsert --id {HD-N} --stage {stage} --artifact {artifact}`；不得由模型扫描或分配编号。
 - `stage` 填该决策产生的阶段：`analysis` / `plan` / `code`。
 - `round` 填 `-`，因为它不是 review finding 的握手轮次。
 - `severity` 固定填 `decision`。

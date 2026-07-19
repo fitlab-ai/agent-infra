@@ -62,7 +62,7 @@ The single source of truth for disagreement state is the fixed `## 审查分歧�
 - `stage` ∈ `{analysis, plan, code}` (plus the reserved value `post-review-commit`, used only for post-review exemption rows).
 - `status` legal enum: `open` / `accepted` / `adjusted` / `refuted` / `cannot-judge` / `confirmed` / `needs-human-decision` / `closed` / `human-decided`.
 - **Terminal set (gate passes)**: `{confirmed, closed, human-decided}`; everything else is blocking.
-- **Write responsibility**: `review-*` raises a finding → upsert an `open` row; `*-task` responds → set four-state and fill `evidence`, `round` +1; next `review-*` → `confirmed` / back to `open` / `needs-human-decision`; an executor fix verified by the next review → `closed`; a human ruling → `human-decided`.
+- **Write responsibility**: callers submit structured intents only; they do not scan ids, assemble table rows, or decide mechanical transitions. `review-*` uses `agent-infra-internal task-ledger {task-id} finding-upsert|finding-review ...`; `*-task` uses `finding-respond ...`; `ai decide` applies human rulings atomically. The core validates and commits each intent through one task write.
 - **Backward compatible**: when task.md has no such section the gate treats it as no open disagreements and passes.
 
 ### Executor-raised human-ruling rows
@@ -73,7 +73,7 @@ When an executor judges an item to be a key design decision that needs human rul
 | HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |
 ```
 
-- `id`: the `HD-N` number is **globally unique**. When adding a row, scan every `HD-(\d+)` in the ledger and take max+1 (start at `HD-1` when none exist); it increases monotonically across `analysis` / `plan` / `code` and is **never reused**, so selecting by `HD-id` is unambiguous.
+- `id`: the `HD-N` number is **globally unique**. First run `agent-infra-internal task-ledger {task-id} decision-next-id` and read `entityId`; after writing the stable artifact heading, run `decision-upsert --id {HD-N} --stage {stage} --artifact {artifact}`. The model must not scan or allocate ids.
 - `stage` is the stage where the decision arose: `analysis` / `plan` / `code`.
 - `round` is `-` because this is not a review-finding handshake round.
 - `severity` is always `decision`.

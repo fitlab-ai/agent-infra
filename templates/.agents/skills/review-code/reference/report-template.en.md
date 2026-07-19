@@ -64,7 +64,7 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 
 ## Review Disagreement Ledger Writeback
 
-> Upsert each finding this round into the task.md disagreement ledger: append an `open` row for new findings (id prefix `CD-`, stage=code); per the hand-back duty set the executor's prior-round responses to `confirmed` / back to `open` / `needs-human-decision`. State machine and evidence rules: `.agents/rules/review-handshake.md`.
+> Record the structured intents to submit: use `task-ledger finding-upsert` for new findings and `finding-review` for prior responses. The core allocates `CD-N` and validates transitions; do not edit task.md table rows.
 > Every finding escalated to `needs-human-decision` must include a self-contained detail block per `.agents/rules/human-decision-context.md`, with evidence pointing to that stable anchor.
 
 ## Evidence

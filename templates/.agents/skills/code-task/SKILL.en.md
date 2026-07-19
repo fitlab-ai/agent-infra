@@ -14,7 +14,7 @@ Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill 
 
 - Follow the latest plan artifact: `plan.md` or `plan-r{N}.md`
 - Fix mode verifies each finding of the latest `review-code` one by one: fix it if it holds, or rebut it and record it under unresolved if it is unfounded/hallucinated; do not expand to issues the review did not list; manual-validation items are out of scope
-- If implementation encounters a key design decision not covered by the plan, apply `.agents/rules/no-mid-flow-questions.md` and the self-contained structure in `.agents/rules/human-decision-context.md`, write it into the implementation report's `## 人工裁决待办` (Pending Human Decisions) section as `### HD-N：<title> [needs-human-decision]` (`HD-N` is globally unique, see `.agents/rules/review-handshake.md`) and write the matching `HD-` ledger row, instead of asking mid-flow or expanding scope silently
+- If implementation encounters a key design decision not covered by the plan, run `agent-infra-internal task-ledger {task-id} decision-next-id`, write the returned `HD-N` detail block per `.agents/rules/human-decision-context.md`, then run `decision-upsert --id {HD-N} --stage code --artifact {code-artifact}`. Do not scan ids, assemble ledger rows, ask mid-flow, or silently expand scope
 - Never auto-run `git add` or `git commit`
 - Create a new code artifact for each round and never overwrite an older one
 - After executing this skill, you **must** immediately update task.md

@@ -16,6 +16,16 @@ switch (command) {
     taskContext(process.argv.slice(3));
     break;
   }
+  case 'task-ledger': {
+    const { taskLedger } = await import('../lib/internal/task-ledger.ts');
+    taskLedger(process.argv.slice(3));
+    break;
+  }
+  case 'task-warning': {
+    const { taskWarning } = await import('../lib/internal/task-warning.ts');
+    taskWarning(process.argv.slice(3));
+    break;
+  }
   case 'task-artifact': {
     const { taskArtifact } = await import('../lib/internal/task-artifact.ts');
     taskArtifact(process.argv.slice(3));

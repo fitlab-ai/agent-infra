@@ -68,7 +68,7 @@ Use it to understand:
 - identified technical risks
 - effort and complexity assessment
 
-**Round ≥ 2: respond to the prior review (only when a review artifact exists)**: if the task directory contains `review-plan.md` / `review-plan-r{N}.md`, read the highest-round review report; add a `## Response to Prior Review` section to this round's plan artifact, and for each finding verify it via Read/Grep, then dispose of it with one of the four states in `.agents/rules/review-handshake.md` (`accepted` / `adjusted` / `refuted` / `cannot-judge`) — every state needs commensurate evidence, never defaulting to compliance; write the disposition back to the matching row in the task.md disagreement ledger (stage=plan, round +1). Record any open disagreement under `## Open Questions`. Round 1 has no review, so skip this section.
+**Round ≥ 2: respond to the prior review (only when a review artifact exists)**: if the task directory contains `review-plan.md` / `review-plan-r{N}.md`, read the highest-round review report; add a `## Response to Prior Review` section and verify every finding before choosing `accepted` / `adjusted` / `refuted` / `cannot-judge`. Submit each response through `agent-infra-internal task-ledger {task-id} finding-respond --id {ledger-id} --round {plan-round} --status {state} --evidence {evidence}`. Record open disagreements under `## Open Questions`. Round 1 skips this section.
 
 ### 4. Understand the Problem
 
@@ -89,7 +89,7 @@ Follow the `technical-design` step in `.agents/workflows/feature-development.yam
 - [ ] Define the verification strategy (tests, manual checks)
 - [ ] Assess impact and risks
 
-When this round introduces a new key design decision, apply `.agents/rules/no-mid-flow-questions.md` and the self-contained structure in `.agents/rules/human-decision-context.md`, write it into the plan artifact's `## 人工裁决待办` (Pending Human Decisions) section as `### HD-N：<title> [needs-human-decision]` (`HD-N` is globally unique, see `.agents/rules/review-handshake.md`), and write the matching `HD-` ledger row (evidence pointing to `{plan-artifact}#HD-N`); ordinary open questions still go under `## Open Questions`.
+When this round introduces a new key design decision, first run `agent-infra-internal task-ledger {task-id} decision-next-id`, write the returned `HD-N` as a self-contained block under `## 人工裁决待办` (Pending Human Decisions) according to `.agents/rules/human-decision-context.md`, then run `decision-upsert --id {HD-N} --stage plan --artifact {plan-artifact}`. Ordinary open questions still go under `## Open Questions`.
 
 **Design principles**:
 1. **Architectural soundness**: choose the structurally correct approach; diff size is not the primary criterion. Do not pile changes onto an unsound structure just to keep the diff small

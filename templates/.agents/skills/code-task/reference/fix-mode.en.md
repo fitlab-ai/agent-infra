@@ -4,7 +4,7 @@ Read this file before changing code during fix mode.
 
 ## Plan the Fixes
 
-**Verify each finding first (mandatory before editing)**: for every finding in `{review-artifact}`, Read/Grep the cited `file:line` and the corresponding `git diff` to confirm the issue is real, then dispose of it with one of the four states in `.agents/rules/review-handshake.md`, and write the disposition + commensurate evidence back to the matching row in the task.md disagreement ledger (stage=code, round +1; symmetric evidence — every state needs evidence, "accept" is not a zero-cost default):
+**Verify each finding first (mandatory before editing)**: for every finding in `{review-artifact}`, Read/Grep the cited `file:line` and corresponding `git diff`, then choose one of the four states in `.agents/rules/review-handshake.md`. Submit it through `agent-infra-internal task-ledger {task-id} finding-respond --id {ledger-id} --round {code-round} --status {state} --evidence {evidence}` (every state needs commensurate evidence; "accept" is not a zero-cost default):
 - `accepted` → include it in the classification and fixes below; evidence cites the fix `file:line`
 - `adjusted` → use an alternative fix, with rationale; awaits review-code confirmation
 - `refuted` → verification judged it unfounded / a wrong `file:line` / hallucinated → do not change code; give a counter-argument in the report's `## Per-Finding Verification` section; awaits review-code confirmation

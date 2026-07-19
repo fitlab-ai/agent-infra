@@ -86,7 +86,7 @@ tail .agents/workspace/active/{task-id}/task.md
 
 - 若本轮 `总体结论` / `Overall Verdict` 为 `通过` / `Approved` 且 `T == R^{tree}`，写入 `last_reviewed_commit: {R}`；若 Approved 快照包含未提交差异，则清除既有 `last_reviewed_commit`，等待 `commit` 锚定
 - 若本轮结论不是 Approved，保留既有 `last_reviewed_commit`，不得推进或清空
-- 完成 `last_reviewed_commit`、findings、账本等业务内容更新后执行 `agent-infra-internal task-event {task-id} review-code.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`，由核心原子登记链接、阶段和完成日志。
+- 报告完成后，新 finding 逐条调用 `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`；复核上一轮响应时调用 `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {相称证据}`。不得扫描编号或手写账本行。完成 `last_reviewed_commit` 后执行 `agent-infra-internal task-event {task-id} review-code.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`。
 
 完成日志必须始终写入 `Manual-validation: {n}` 字段，0 也保留。
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。

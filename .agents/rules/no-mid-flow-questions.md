@@ -58,7 +58,7 @@
 当未决问题属于需要人工裁定的关键设计决策时，执行方必须：
 
 1. 按 `.agents/rules/human-decision-context.md` 写出自足的详情块，放入产物的 `## 人工裁决待办` 段，标题形如 `### HD-N：<标题> [needs-human-decision]`；普通假设 / 未决问题仍分别写 `## 假设` / `## 未决问题`（`## Assumptions` / `## Open Questions`），`## 未决问题` 可保留一行指针指向对应 `### HD-N`。
-2. 按 `.agents/rules/review-handshake.md` 在 task.md `## 审查分歧账本` upsert 对应 `HD-` 行，evidence 指向稳定锚点 `<artifact>#HD-N`。`HD-N` 编号**全局唯一**（扫描账本已有 `HD-(\d+)` 取 max+1，跨 analysis / plan / code 单调递增、禁止复用），分配规则详见 review-handshake.md。
+2. 先调用 `agent-infra-internal task-ledger {task-id} decision-next-id` 取得全局唯一 `HD-N`，写出详情块后调用 `decision-upsert --id {HD-N} --stage {stage} --artifact {artifact}`；由核心写入 task.md 账本并校验证据锚点，模型不得扫描编号或拼表格行。
 
 判定时同时使用以下检查：
 
@@ -76,7 +76,7 @@
 - **产出后停止**：技能完成产物（如 `plan.md`）后立即结束本轮调用，等待用户主动触发下一个技能命令
 - **不是过程中暂停征求意见**：不允许在执行步骤之间插入「请问您倾向 A 还是 B？」之类的中断
 
-如果在执行过程中发现需要用户裁定的关键决策，按上文「关键设计决策标记与落账」处理：详情块写入产物 `## 人工裁决待办` 的 `### HD-N`、回写 `HD-` 账本行，由用户在审查检查点统一回应；普通未决问题仍写 `## 未决问题` / `Open Questions`。
+如果在执行过程中发现需要用户裁定的关键决策，按上文「关键设计决策标记与落账」处理：通过 `decision-next-id` / `decision-upsert` 结构化命令登记详情块与账本身份，由用户在审查检查点统一回应；普通未决问题仍写 `## 未决问题` / `Open Questions`。
 
 ## 锚点位置
 

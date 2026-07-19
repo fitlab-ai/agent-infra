@@ -5,8 +5,10 @@
 // must be kept semantically in sync by hand (noted in review-handshake.md).
 
 // The ledger H2 heading is language-dependent (zh template / en template).
-const LEDGER_HEADING_RE = /^##\s+(审查分歧账本|Review Disagreement Ledger)\s*$/;
-const NEXT_H2_RE = /^##\s/;
+import { parseTable } from './sections.ts';
+
+const LEDGER_HEADINGS = ['审查分歧账本', 'Review Disagreement Ledger'] as const;
+const LEDGER_COLUMNS = ['id', 'stage', 'round', 'severity', 'status', 'evidence'] as const;
 
 type LedgerRow = {
   id: string;
@@ -34,35 +36,11 @@ function isReviewStage(stage: string): stage is ReviewStage {
 // header row (`| id | ... |`) and the `|---|` separator; ignores non-`|` lines.
 // Rows with fewer than 6 columns are skipped (mirrors the JS gate parser).
 function parseLedger(content: string): LedgerRow[] {
-  const lines = content.split('\n');
-  let i = 0;
-  while (i < lines.length && !LEDGER_HEADING_RE.test(lines[i]!)) i += 1;
-  if (i >= lines.length) return [];
-
-  let bodyStart = i + 1;
-  while (bodyStart < lines.length && lines[bodyStart]!.trim() === '') bodyStart += 1;
-  const rows: LedgerRow[] = [];
-  for (let j = bodyStart; j < lines.length; j += 1) {
-    if (NEXT_H2_RE.test(lines[j]!)) break;
-    const line = lines[j]!.trim();
-    if (!line.startsWith('|')) continue;
-    const cells = line
-      .split('|')
-      .slice(1, -1)
-      .map((cell) => cell.trim());
-    if (cells.length < 6) continue;
-    if (cells[0] === 'id' || /^-+$/.test(cells[0] ?? '')) continue;
-    rows.push({
-      id: cells[0]!,
-      stage: cells[1]!,
-      round: cells[2]!,
-      severity: cells[3]!,
-      status: cells[4]!,
-      evidence: cells[5]!,
-      sourceLine: j - bodyStart
-    });
-  }
-  return rows;
+  const table = parseTable(content, { sectionAliases: LEDGER_HEADINGS, columns: LEDGER_COLUMNS });
+  return table?.rows.map(({ values, sourceLine }) => ({
+    id: values.id!, stage: values.stage!, round: values.round!, severity: values.severity!,
+    status: values.status!, evidence: values.evidence!, sourceLine
+  })) ?? [];
 }
 
 // Allocate the next globally-unique human-decision id. Scans every `HD-<n>`
@@ -80,5 +58,5 @@ function nextHdId(rows: readonly LedgerRow[]): string {
   return `HD-${max + 1}`;
 }
 
-export { parseLedger, nextHdId, isReviewStage, LEDGER_TERMINAL, HUMAN_DECISION_STATUSES };
+export { LEDGER_HEADINGS, LEDGER_COLUMNS, parseLedger, nextHdId, isReviewStage, LEDGER_TERMINAL, HUMAN_DECISION_STATUSES };
 export type { LedgerRow, ReviewStage };

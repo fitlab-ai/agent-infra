@@ -134,7 +134,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 
 处理结果：
 - 规则成功创建 Issue：`issue_number` 已按规则回写到 task.md；继续读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测，然后同步 task 评论并按规则设置 `status: waiting-for-triage`
-- 规则失败（认证 / 网络 / 模板解析等）：不回滚 task.md；不追加额外 Activity Log；先调用 `node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} --step create-task --severity ACTION_REQUIRED --code ISSUE_CREATE_FAILED --target issue --message "{error_code}: {error_message}" --action "修复认证/网络/模板问题后手动重试 Issue 创建，或手动创建/找到 Issue 后写入 issue_number"` 记录通用告警；再按"场景 C：Issue 创建失败"输出向用户透出 `error_code` 与 `error_message`
+- 规则失败（认证 / 网络 / 模板解析等）：不回滚 task.md；不追加额外 Activity Log；先调用 `node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} --step create-task --severity ACTION_REQUIRED --code ISSUE_CREATE_FAILED --target issue --message "{error_code}: {error_message}" --action "修复认证/网络/模板问题后手动重试 Issue 创建，或手动创建/找到 Issue 后写入 issue_number"` 提交结构化 warning 意图（兼容脚本只转发到 `task-warning`，调用方不分配编号或写表格）；再按"场景 C：Issue 创建失败"输出
 - 规则为 no-op（自定义或空平台）：不创建评论，不阻塞后续工作流，不写 Activity Log
 - task.md 已存在 `issue_number`：规则中的前置检查会跳过；`create-task` 直接进入步骤 5
 

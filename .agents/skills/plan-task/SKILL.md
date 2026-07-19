@@ -69,7 +69,7 @@ agent-infra-internal task-event {task-id} plan.started --agent {agent}
 - 已识别的技术风险
 - 工作量和复杂度评估
 
-**Round ≥ 2：响应上一轮审查（仅当存在审查产物时）**：若任务目录存在 `review-plan.md` / `review-plan-r{N}.md`，读取最高轮次的审查报告；在本轮方案产物中新增 `## 对上一轮审查的响应` 段，对每条发现先 Read/Grep 核实，再按 `.agents/rules/review-handshake.md` 的四态（`accepted` / `adjusted` / `refuted` / `cannot-judge`）处置——每态都要附相称证据，不默认顺从；并把处置回写 task.md `## 审查分歧账本` 对应行（stage=plan，round +1）。未决分歧写入 `## 未决问题`。Round 1 无审查，跳过本段。
+**Round ≥ 2：响应上一轮审查（仅当存在审查产物时）**：若任务目录存在 `review-plan.md` / `review-plan-r{N}.md`，读取最高轮次的审查报告；在本轮方案产物中新增 `## 对上一轮审查的响应` 段，对每条发现先 Read/Grep 核实，再按 `.agents/rules/review-handshake.md` 的四态（`accepted` / `adjusted` / `refuted` / `cannot-judge`）处置——每态都要附相称证据，不默认顺从；随后逐条调用 `agent-infra-internal task-ledger {task-id} finding-respond --id {ledger-id} --round {plan-round} --status {四态} --evidence {相称证据}`。未决分歧写入 `## 未决问题`。Round 1 无审查，跳过本段。
 
 ### 4. 理解问题
 
@@ -90,7 +90,7 @@ agent-infra-internal task-event {task-id} plan.started --agent {agent}
 - [ ] 定义验证策略（测试、手动检查）
 - [ ] 评估方案的影响和风险
 
-遇到本轮新增的关键设计决策时，按 `.agents/rules/no-mid-flow-questions.md` 判据和 `.agents/rules/human-decision-context.md` 的自足详情结构，写入方案产物的 `## 人工裁决待办` 段 `### HD-N：<标题> [needs-human-decision]`（`HD-N` 全局唯一，规则见 `.agents/rules/review-handshake.md`），并回写 `HD-` 账本行（evidence 指向 `{plan-artifact}#HD-N`）；普通未决问题仍写 `## 未决问题`。
+遇到本轮新增的关键设计决策时，按 `.agents/rules/no-mid-flow-questions.md` 判据，先调用 `agent-infra-internal task-ledger {task-id} decision-next-id` 取得 `HD-N`，按 `.agents/rules/human-decision-context.md` 写入方案产物的 `## 人工裁决待办` 段 `### HD-N：<标题> [needs-human-decision]`，再调用 `decision-upsert --id {HD-N} --stage plan --artifact {plan-artifact}`；普通未决问题仍写 `## 未决问题`。
 
 **设计原则**：
 1. **架构合理性**：选择结构正确的方案，改动大小不是首要依据。不要为了减少 diff 而在不合理的结构上叠加

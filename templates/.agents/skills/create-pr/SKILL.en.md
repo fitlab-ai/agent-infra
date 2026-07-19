@@ -165,5 +165,5 @@ Next step (alternative) - Skip monitoring and archive the task directly:
 - Push rejected: suggest `git pull --rebase`
 - Existing PR found: show the current PR URL and stop
 - Inaccessible Issue metadata: skip inheritance and continue
-- PR creation failed with an associated `{task-id}`: run `node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} --step create-pr --severity ACTION_REQUIRED --code PR_CREATE_FAILED --target pr --message "{reason}" --action "Fix push, permission, or platform issues and rerun create-pr"` and do not write `pr_number`
+- PR creation failed with an associated `{task-id}`: run `node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} --step create-pr --severity ACTION_REQUIRED --code PR_CREATE_FAILED --target pr --message "{reason}" --action "Fix push, permission, or platform issues and rerun create-pr"` to submit a structured warning intent through the `task-warning` adapter, and do not write `pr_number`
 - PR summary comment failed with an associated `{task-id}`: record a `COMMENT_SYNC_FAILED` warning per `.agents/rules/pr-sync.md`, without rolling back an already-created PR

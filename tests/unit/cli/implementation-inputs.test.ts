@@ -84,3 +84,13 @@ test('consumption returns a validated immutable replacement and renderer round-t
   const content = `${HEADING}\n\n${renderImplementationInputs(consumed)}\n\n## 活动日志\n`;
   assert.deepEqual(parseImplementationInputs(content).rows, consumed);
 });
+
+test('implementation input renderer round-trips escaped identity cells', () => {
+  const rows = parseImplementationInputs(`## Implementation Inputs\n\n${renderImplementationInputs([{
+    id: 'II-1', ledgerId: String.raw`CD\\1|x`, decisionEvidence: String.raw`task.md#HDR\\1|x`,
+    stage: 'code', needsImplementation: true, decidedAt: '2026-07-01 09:30:00+08:00',
+    status: 'pending', consumedBy: ''
+  }])}`).rows;
+  assert.equal(rows[0]!.ledgerId, String.raw`CD\\1|x`);
+  assert.equal(rows[0]!.decisionEvidence, String.raw`task.md#HDR\\1|x`);
+});

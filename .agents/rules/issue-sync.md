@@ -68,6 +68,8 @@ has_push=$(printf '%s' "$repo_perms" | grep -q '"push":true' 2>/dev/null && echo
 
 当调用方存在 `{task-id}` / task 目录时，权限降级或关键同步失败必须写入 `## 工作流告警`：
 
+下列兼容脚本仅把参数转发为 `agent-infra-internal task-warning` 结构化意图；脚本自身不得读写 task.md 或判断编号/状态迁移。
+
 ```bash
 node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} \
   --step issue-sync --severity IMPORTANT --code PERMISSION_DEGRADED \

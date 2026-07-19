@@ -86,7 +86,7 @@ test('implementation intent validation fails before writing task.md', async () =
   }
 });
 
-test('decide rejects ambiguous ids but uses an ordinal to update exactly one duplicate source row', async () => {
+test('decide rejects duplicate ids for both stable and ordinal selectors without writes', async () => {
   const { repoRoot, taskId, taskMd } = makeTask([
     '| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |',
     '| HD-1 | code | - | decision | needs-human-decision | code.md#HD-1 |'
@@ -99,10 +99,8 @@ test('decide rejects ambiguous ids but uses an ordinal to update exactly one dup
       repoRoot,
       now: () => '2026-07-01 09:30:00+08:00',
       version: '0.7.8-alpha.0'
-    }), 0);
-    const content = fs.readFileSync(taskMd, 'utf8');
-    assert.match(content, /\| HD-1 \| plan \| - \| decision \| needs-human-decision \| plan\.md#HD-1 \|/);
-    assert.match(content, /\| HD-1 \| code \| - \| decision \| human-decided \| task\.md#HDR-1 \|/);
+    }), 1);
+    assert.ok(before.equals(fs.readFileSync(taskMd)));
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });
   }

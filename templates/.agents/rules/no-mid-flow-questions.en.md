@@ -58,7 +58,7 @@ For every SKILL execution context not covered by any exemption above, the defaul
 When an open question is a key design decision that needs human judgment, the executor must:
 
 1. Write a self-contained detail block per `.agents/rules/human-decision-context.md` into the artifact's `## 人工裁决待办` (Pending Human Decisions) section, with a heading like `### HD-N：<title> [needs-human-decision]`; ordinary assumptions / open questions still go under `## Assumptions` / `## Open Questions` (`## 假设` / `## 未决问题`), and `## Open Questions` may keep a one-line pointer to the matching `### HD-N`.
-2. Upsert the matching `HD-` row in task.md `## Review Disagreement Ledger` according to `.agents/rules/review-handshake.md`, with `evidence` pointing to the stable anchor `<artifact>#HD-N`. The `HD-N` number is **globally unique** (scan existing `HD-(\d+)` in the ledger and take max+1, monotonically increasing across analysis / plan / code, never reused); see review-handshake.md for the allocation rule.
+2. Run `agent-infra-internal task-ledger {task-id} decision-next-id` to obtain the globally unique `HD-N`; after writing the detail block, run `decision-upsert --id {HD-N} --stage {stage} --artifact {artifact}`. The core writes the task.md ledger row and validates its evidence anchor; the model must not scan ids or assemble table rows.
 
 Use these checks together:
 
@@ -76,7 +76,7 @@ A mandatory human review checkpoint means:
 - Stop after producing the artifact: once the skill finishes an artifact such as `plan.md`, end the current invocation and wait for the user to explicitly trigger the next skill command
 - Do not pause mid-process to ask for input: do not insert interruptions such as "Do you prefer option A or B?" between execution steps
 
-If a key decision needs human judgment during execution, follow the "Key Design Decision Marking And Ledgering" rule above: write the detail block into the artifact's `## 人工裁决待办` (Pending Human Decisions) section as `### HD-N` and upsert the `HD-` ledger row, for the user to address at the review checkpoint; ordinary open questions still go to `## Open Questions` / `未决问题`.
+If a key decision needs human judgment during execution, follow the rule above and register the detail identity through the structured `decision-next-id` / `decision-upsert` commands for the user to address at the review checkpoint; ordinary open questions still go to `## Open Questions` / `未决问题`.
 
 ## Anchor Location
 

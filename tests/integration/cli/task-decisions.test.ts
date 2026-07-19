@@ -229,7 +229,7 @@ test('B3: missing detail block degrades gracefully and exits 0', () => {
   assert.match(out.stdout, /详情块未找到/);
 });
 
-test('PL-2: duplicate ledger id errors on id select but works by ordinal', () => {
+test('PL-2: duplicate ledger id fails closed for id and ordinal selectors', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000009';
   writeTask(activeDir, taskId, [
@@ -238,8 +238,8 @@ test('PL-2: duplicate ledger id errors on id select but works by ordinal', () =>
   ]);
   const byId = runCli(['task', 'd', taskId, 'PL-1'], repoRoot);
   assert.equal(byId.status, 1);
-  assert.match(byId.stderr, /duplicate id/);
+  assert.match(byId.stderr, /duplicate table key/);
   const byOrdinal = runCli(['task', 'd', taskId, '2'], repoRoot);
-  assert.equal(byOrdinal.status, 0, byOrdinal.stderr);
-  assert.match(byOrdinal.stdout, /PL-1 \(plan\/blocker\)/);
+  assert.equal(byOrdinal.status, 1);
+  assert.match(byOrdinal.stderr, /duplicate table key/);
 });

@@ -67,7 +67,7 @@ If `task.md` contains these source fields, also read the corresponding source in
 - `codescan_alert_number` - Code Scanning alert
 - `security_alert_number` - Dependabot alert
 
-**Round ≥ 2: respond to the prior review (only when a review artifact exists)**: if the task directory contains `review-analysis.md` / `review-analysis-r{N}.md`, read the highest-round review report; add a `## Response to Prior Review` section to this round's analysis artifact, and for each finding verify it via Read/Grep, then dispose of it with one of the four states in `.agents/rules/review-handshake.md` (`accepted` / `adjusted` / `refuted` / `cannot-judge`) — every state needs commensurate evidence, never defaulting to compliance; write the disposition back to the matching row in the task.md disagreement ledger (stage=analysis, round +1). Record any open disagreement under `## Open Questions`. Round 1 has no review, so skip this section.
+**Round ≥ 2: respond to the prior review (only when a review artifact exists)**: if the task directory contains `review-analysis.md` / `review-analysis-r{N}.md`, read the highest-round review report; add a `## Response to Prior Review` section to this round's analysis artifact, and for each finding verify it via Read/Grep, then dispose of it with one of the four states in `.agents/rules/review-handshake.md` (`accepted` / `adjusted` / `refuted` / `cannot-judge`) with commensurate evidence. Submit each response through `agent-infra-internal task-ledger {task-id} finding-respond --id {ledger-id} --round {analysis-round} --status {state} --evidence {evidence}`. Record open disagreements under `## Open Questions`. Round 1 skips this section.
 
 ### 4. Requirement Sufficiency Gate
 
@@ -180,7 +180,7 @@ Create `.agents/workspace/active/{task-id}/{analysis-artifact}`.
 ## 人工裁决待办
 
 > Write this section only when this round upgraded a `[needs-human-decision]` key design decision; omit otherwise.
-> Write one self-contained `### HD-N` block per `.agents/rules/human-decision-context.md` (`HD-N` is globally unique, see `.agents/rules/review-handshake.md`), and upsert the matching `HD-` row in task.md `## Review Disagreement Ledger` (evidence pointing to `{analysis-artifact}#HD-N`).
+> First run `agent-infra-internal task-ledger {task-id} decision-next-id` to obtain `HD-N`, write the self-contained block according to `.agents/rules/human-decision-context.md`, then run `decision-upsert --id {HD-N} --stage analysis --artifact {analysis-artifact}`. Do not scan ids or assemble ledger rows.
 
 ## Effort and Complexity Assessment
 - Complexity: {High/Medium/Low}

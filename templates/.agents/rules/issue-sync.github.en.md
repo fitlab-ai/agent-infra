@@ -68,6 +68,8 @@ Key rules:
 
 When the caller has a `{task-id}` / task directory, permission degradation or critical sync failure must be recorded in `## Workflow Warnings`:
 
+The compatibility script below only forwards arguments as an `agent-infra-internal task-warning` structured intent; it must not read/write task.md or decide ids/transitions.
+
 ```bash
 node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} \
   --step issue-sync --severity IMPORTANT --code PERMISSION_DEGRADED \

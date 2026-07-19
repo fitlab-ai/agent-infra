@@ -1,3 +1,5 @@
+import { parseTable } from './sections.ts';
+
 const SECTION_ALIASES = ['实现输入', 'Implementation Inputs'] as const;
 const COLUMNS = [
   'id', 'ledger_id', 'decision_evidence', 'stage', 'needs_implementation',
@@ -24,22 +26,9 @@ type ImplementationInputDraft = {
   decidedAt: string;
 };
 
-function sectionBody(content: string): { found: boolean; body: string } {
-  const lines = content.split(/\r?\n/);
-  const indexes = lines.flatMap((line, index) => {
-    const match = /^##\s+(.+?)\s*$/.exec(line);
-    return match?.[1] && SECTION_ALIASES.includes(match[1] as typeof SECTION_ALIASES[number]) ? [index] : [];
-  });
-  if (indexes.length === 0) return { found: false, body: '' };
-  if (indexes.length !== 1) throw new Error('implementation input section is ambiguous');
-  const start = indexes[0]!;
-  const end = lines.findIndex((line, index) => index > start && /^##\s+/.test(line));
-  return { found: true, body: lines.slice(start + 1, end < 0 ? lines.length : end).join('\n') };
-}
-
 function validateInput(row: ImplementationInput): void {
   if (!/^II-[1-9]\d*$/.test(row.id)) throw new Error(`implementation input id '${row.id}' is invalid`);
-  if (!row.ledgerId || !row.decisionEvidence) throw new Error(`implementation input ${row.id} has incomplete decision identity`);
+  if (!row.ledgerId || !row.decisionEvidence || /[\r\n]/.test(row.ledgerId) || /[\r\n]/.test(row.decisionEvidence)) throw new Error(`implementation input ${row.id} has incomplete decision identity`);
   if (row.stage !== 'code') throw new Error(`implementation input ${row.id} has invalid stage`);
   if (!TIMESTAMP_RE.test(row.decidedAt) || !Number.isFinite(Date.parse(row.decidedAt.replace(' ', 'T')))) {
     throw new Error(`implementation input ${row.id} has invalid decided_at`);
@@ -52,21 +41,14 @@ function validateInput(row: ImplementationInput): void {
 }
 
 function parseImplementationInputs(content: string): { sectionFound: boolean; rows: ImplementationInput[] } {
-  const section = sectionBody(content);
-  if (!section.found) return { sectionFound: false, rows: [] };
-  const tableLines = section.body.split('\n').filter((line) => line.trim().startsWith('|'));
-  if (tableLines.length < 2) throw new Error('implementation input table is missing');
-  const parseCells = (line: string) => line.split('|').slice(1, -1).map((cell) => cell.trim());
-  const header = parseCells(tableLines[0]!);
-  if (header.length !== COLUMNS.length || header.some((cell, index) => cell !== COLUMNS[index])) {
-    throw new Error('implementation input table schema is invalid');
-  }
+  const table = parseTable(content, { sectionAliases: SECTION_ALIASES, columns: COLUMNS });
+  if (!table) return { sectionFound: false, rows: [] };
   const rows: ImplementationInput[] = [];
   const seen = new Set<string>();
-  for (const line of tableLines.slice(2)) {
-    const cells = parseCells(line);
-    if (cells.length !== COLUMNS.length) throw new Error('implementation input row has the wrong column count');
-    const [id, ledgerId, decisionEvidence, stage, needs, decidedAt, status, consumedBy] = cells;
+  for (const { values } of table.rows) {
+    const id = values.id; const ledgerId = values.ledger_id; const decisionEvidence = values.decision_evidence;
+    const stage = values.stage; const needs = values.needs_implementation; const decidedAt = values.decided_at;
+    const status = values.status; const consumedBy = values.consumed_by;
     if (needs !== 'true' && needs !== 'false') throw new Error(`implementation input ${id} has invalid needs_implementation`);
     const row: ImplementationInput = {
       id: id!, ledgerId: ledgerId!, decisionEvidence: decisionEvidence!, stage: stage as 'code',
@@ -136,7 +118,11 @@ function renderImplementationInputs(rows: readonly ImplementationInput[]): strin
   return [
     `| ${COLUMNS.join(' | ')} |`,
     '|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|',
-    ...rows.map((row) => `| ${row.id} | ${row.ledgerId} | ${row.decisionEvidence} | code | ${row.needsImplementation} | ${row.decidedAt} | ${row.status} | ${row.consumedBy} |`)
+    ...rows.map((row) => {
+      const cells = [row.id, row.ledgerId, row.decisionEvidence, 'code', String(row.needsImplementation), row.decidedAt, row.status, row.consumedBy]
+        .map((value) => value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|'));
+      return `| ${cells.join(' | ')} |`;
+    })
   ].join('\n');
 }
 

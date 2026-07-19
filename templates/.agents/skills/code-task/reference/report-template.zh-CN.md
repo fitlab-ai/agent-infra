@@ -74,7 +74,7 @@ $ {command}
 
 ## 对审查发现的逐条核实
 
-> 仅修复模式填写；初次实现写「（本轮为初次实现，无审查发现）」。对上一轮 `review-code` 的每条发现先 Read/Grep 核实，再按 `.agents/rules/review-handshake.md` 的四态处置；并把处置与**相称证据**回写 task.md `## 审查分歧账本` 对应行（stage=code，round +1）。对称证据：accepted/adjusted 附修复点 file:line，refuted/cannot-judge 附反证 file:line 或命令原文。
+> 仅修复模式填写；初次实现写「（本轮为初次实现，无审查发现）」。对上一轮 `review-code` 的每条发现先 Read/Grep 核实，再按四态处置；相称证据完成后通过 `task-ledger finding-respond` 提交结构化意图，不手写 task.md 表格。accepted/adjusted 附修复点 file:line，refuted/cannot-judge 附反证 file:line 或命令原文。
 
 | 发现 | 处置状态 | 相称证据 |
 |------|----------|----------|

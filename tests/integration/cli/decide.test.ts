@@ -61,7 +61,7 @@ test('real CLI writes AN, PL, CD, and HD targets through full and short task ref
   }
 });
 
-test('real CLI rejects duplicate ids without writes and resolves them by ordinal', () => {
+test('real CLI rejects duplicate ids without writes for stable and ordinal selectors', () => {
   const data = fixture([
     '| HD-1 | analysis | - | decision | needs-human-decision | analysis.md#HD-1 |',
     '| HD-1 | plan | - | decision | needs-human-decision | plan.md#HD-1 |'
@@ -70,14 +70,13 @@ test('real CLI rejects duplicate ids without writes and resolves them by ordinal
     const before = fs.readFileSync(data.taskMd);
     const ambiguous = run(data.repoRoot, ['decide', data.taskId, 'HD-1', 'x']);
     assert.equal(ambiguous.status, 1);
-    assert.match(ambiguous.stderr, /duplicate id/);
+    assert.match(ambiguous.stderr, /duplicate table key/);
     assert.ok(before.equals(fs.readFileSync(data.taskMd)));
 
     const selected = run(data.repoRoot, ['decide', data.taskId, '2', 'plan row']);
-    assert.equal(selected.status, 0, selected.stderr);
-    const content = fs.readFileSync(data.taskMd, 'utf8');
-    assert.match(content, /\| HD-1 \| analysis \| - \| decision \| needs-human-decision \|/);
-    assert.match(content, /\| HD-1 \| plan \| - \| decision \| human-decided \| task\.md#HDR-1 \|/);
+    assert.equal(selected.status, 1);
+    assert.match(selected.stderr, /duplicate table key/);
+    assert.ok(before.equals(fs.readFileSync(data.taskMd)));
   } finally {
     fs.rmSync(data.repoRoot, { recursive: true, force: true });
   }

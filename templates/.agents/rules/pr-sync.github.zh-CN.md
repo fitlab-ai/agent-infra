@@ -119,6 +119,8 @@ EOF
 
 当调用方存在 `{task-id}` / task 目录且 GET/PATCH/POST 失败时，记录 Workflow Warning：
 
+兼容脚本仅转发到 `agent-infra-internal task-warning`；不得在规则或调用方中自行写 task.md、分配 `WW-N` 或判断状态迁移。
+
 ```bash
 node .agents/scripts/workflow-warnings.js add .agents/workspace/active/{task-id} \
   --step pr-sync --severity ACTION_REQUIRED --code COMMENT_SYNC_FAILED \

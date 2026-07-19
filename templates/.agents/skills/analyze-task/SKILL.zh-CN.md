@@ -70,7 +70,7 @@ agent-infra-internal task-event {task-id} analyze.started --agent {agent}
 - `codescan_alert_number` - Code Scanning 告警
 - `security_alert_number` - Dependabot 告警
 
-**Round ≥ 2：响应上一轮审查（仅当存在审查产物时）**：若任务目录存在 `review-analysis.md` / `review-analysis-r{N}.md`，读取最高轮次的审查报告；在本轮分析产物中新增 `## 对上一轮审查的响应` 段，对每条发现先 Read/Grep 核实，再按 `.agents/rules/review-handshake.md` 的四态（`accepted` / `adjusted` / `refuted` / `cannot-judge`）处置——每态都要附相称证据，不默认顺从；并把处置回写 task.md `## 审查分歧账本` 对应行（stage=analysis，round +1）。未决分歧写入 `## 未决问题`。Round 1 无审查，跳过本段。
+**Round ≥ 2：响应上一轮审查（仅当存在审查产物时）**：若任务目录存在 `review-analysis.md` / `review-analysis-r{N}.md`，读取最高轮次的审查报告；在本轮分析产物中新增 `## 对上一轮审查的响应` 段，对每条发现先 Read/Grep 核实，再按 `.agents/rules/review-handshake.md` 的四态（`accepted` / `adjusted` / `refuted` / `cannot-judge`）处置——每态都要附相称证据，不默认顺从；随后逐条调用 `agent-infra-internal task-ledger {task-id} finding-respond --id {ledger-id} --round {analysis-round} --status {四态} --evidence {相称证据}`。未决分歧写入 `## 未决问题`。Round 1 无审查，跳过本段。
 
 ### 4. 入口需求充分性闸门
 
@@ -183,7 +183,7 @@ agent-infra-internal task-event {task-id} analyze.started --agent {agent}
 ## 人工裁决待办
 
 > 仅当本轮升级了 `[needs-human-decision]` 关键设计决策时写本段；没有则省略。
-> 每项按 `.agents/rules/human-decision-context.md` 写一个自足的 `### HD-N` 块（`HD-N` 全局唯一，见 `.agents/rules/review-handshake.md`），并在 task.md `## 审查分歧账本` upsert 对应 `HD-` 行（evidence 指向 `{analysis-artifact}#HD-N`）。
+> 每项先调用 `agent-infra-internal task-ledger {task-id} decision-next-id` 取得 `HD-N`，按 `.agents/rules/human-decision-context.md` 写自足 `### HD-N` 块，再调用 `decision-upsert --id {HD-N} --stage analysis --artifact {analysis-artifact}`；不得扫描编号或手写账本行。
 
 ## 工作量和复杂度评估
 - 复杂度：{高/中/低}
