@@ -22,6 +22,14 @@ function run(root: string, args: string[], env: NodeJS.ProcessEnv = process.env)
   return spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', ...args], { cwd: root, encoding: 'utf8', env });
 }
 
+function inspect(root: string, args: string[]) {
+  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-artifact', ...args], { cwd: root, encoding: 'utf8' });
+}
+
+function reviewCodeArtifact(input = 'code.md') {
+  return `# Code Review\n\n- **审查输入**：\`${input}\`\n`;
+}
+
 function decisionFixture() {
   const f = fixture('code-review');
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
@@ -146,6 +154,74 @@ test('completion without an open start fails without changing the file', () => {
   const out = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--round', '1', '--artifact', 'plan.md']);
   assert.equal(out.status, 1);
   assert.equal(JSON.parse(out.stdout).error.code, 'EVENT_START_MISSING');
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('review-code event completes the regular code review path', () => {
+  const f = fixture('code');
+  fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
+
+  const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  assert.equal(JSON.parse(started.stdout).status, 'applied');
+
+  fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewCodeArtifact());
+  const completed = run(f.root, [
+    f.id, 'review-code.completed', '--agent', 'codex', '--artifact', 'review-code.md',
+    '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
+  ]);
+  assert.equal(completed.status, 0, completed.stderr);
+  assert.equal(JSON.parse(completed.stdout).toStep, 'code-review');
+  const content = fs.readFileSync(f.file, 'utf8');
+  assert.match(content, /current_step: code-review/);
+  assert.match(content, /\]\(review-code\.md\)/);
+});
+
+test('review-code event completes a supplemental round against the latest code artifact', () => {
+  const f = fixture('code-review');
+  fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
+  fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewCodeArtifact());
+  fs.appendFileSync(
+    f.file,
+    '- 2026-01-01 00:01:00+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-code.md\n'
+  );
+
+  const artifact = inspect(f.root, [f.id, 'inspect', '--family', 'review-code']);
+  assert.equal(artifact.status, 0, artifact.stderr);
+  const artifactResult = JSON.parse(artifact.stdout);
+  assert.equal(artifactResult.status, 'ready');
+  assert.deepEqual(artifactResult.next, { round: 2, name: 'review-code-r2.md' });
+  assert.equal(artifactResult.inputs[0].name, 'code.md');
+
+  const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  const startedResult = JSON.parse(started.stdout);
+  assert.equal(startedResult.status, 'applied');
+  assert.equal(startedResult.fromStep, 'code-review');
+  assert.equal(startedResult.toStep, 'code-review');
+  assert.equal(startedResult.round, 2);
+  assert.equal(startedResult.artifact, 'review-code-r2.md');
+
+  fs.writeFileSync(path.join(f.dir, 'review-code-r2.md'), reviewCodeArtifact());
+  const completed = run(f.root, [
+    f.id, 'review-code.completed', '--agent', 'codex', '--artifact', 'review-code-r2.md',
+    '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
+  ]);
+  assert.equal(completed.status, 0, completed.stderr);
+  assert.equal(JSON.parse(completed.stdout).toStep, 'code-review');
+  const content = fs.readFileSync(f.file, 'utf8');
+  assert.match(content, /Review Code \(Round 2\) \[started\]/);
+  assert.match(content, /\]\(review-code-r2\.md\)/);
+});
+
+test('review-code event still rejects an unrelated workflow stage without changing task bytes', () => {
+  const f = fixture('technical-design');
+  fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
+  const before = fs.readFileSync(f.file);
+
+  const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
+  assert.notEqual(started.status, 0);
+  assert.equal(JSON.parse(started.stdout).error.code, 'EVENT_TRANSITION_INVALID');
   assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
