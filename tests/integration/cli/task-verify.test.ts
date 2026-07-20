@@ -21,25 +21,19 @@ test('internal task-verify passes resolved identity to the validator and preserv
 const args = process.argv.slice(2);
 const blocked = process.env.FIXTURE_BLOCKED === '1';
 const gate = blocked ? 'blocked' : 'pass';
-const normalizedArgs = args.filter((value,index) => value !== '--format' && args[index - 1] !== '--format');
+const taskId = args[2].split(/[\\\\/]/).at(-1);
+const message = [args[0], args[1], taskId, args[3]].filter(Boolean).join('|');
 const payload = args[0] === 'check'
-  ? {status:gate,skill:args[args.indexOf('--skill') + 1],type:args[1],message:normalizedArgs.join('|')}
-  : {gate,skill:args[1],checks:[{type:'fixture',status:gate,message:normalizedArgs.join('|')}],summary:'fixture',action:'fixture'};
-if (args[args.indexOf('--format') + 1] === 'text') {
-  const lines = payload.checks
-    ? [\`Verification: \${payload.gate} | Skill: \${payload.skill}\`,'',...payload.checks.map(check => \`  [\${check.status}] \${check.type} - \${check.message}\`),'',\`Result: \${payload.summary} - \${payload.action}\`]
-    : [\`Check: \${payload.status} | Skill: \${payload.skill} | Type: \${payload.type}\`,'',\`  [\${payload.status}] \${payload.type} - \${payload.message}\`,'',\`Result: 1 passed, 0 failed - Requested check passed\`];
-  process.stdout.write(lines.join('\\n') + '\\n');
-} else process.stdout.write(JSON.stringify(payload) + '\\n');
+  ? {status:gate,skill:args[args.indexOf('--skill') + 1],type:args[1],message}
+  : {gate,skill:args[1],checks:[{type:'fixture',status:gate,message}],summary:'fixture',action:'fixture'};
+process.stdout.write(JSON.stringify(payload) + '\\n');
 process.exit(blocked ? 2 : 0);
 `);
 
   const pass = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'code.completed', '--artifact', 'code.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
   assert.equal(pass.status, 0, pass.stderr);
   assert.match(pass.stdout, /Verification: pass \| Skill: code-task/);
-  assert.match(pass.stdout, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  const direct = spawnSync(process.execPath, [path.join(scripts, 'validate-artifact.js'), 'gate', 'code-task', dir, 'code.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
-  assert.equal(pass.stdout, direct.stdout);
+  assert.match(pass.stdout, /fixture - gate\|code-task\|TASK-20260101-000001\|code.md/);
 
   const preflight = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'complete-task.preflight', '--format', 'text'], { cwd: root, encoding: 'utf8' });
   assert.equal(preflight.status, 0, preflight.stderr);

@@ -21,7 +21,6 @@ type VerificationSpec = {
   mode: 'gate' | 'checks';
   checks?: readonly string[];
   artifactFamily?: ArtifactFamily;
-  stopOn: 'blocked' | 'non-pass';
 };
 type ValidatorInvocationResult = {
   status: number | null;
@@ -31,7 +30,6 @@ type ValidatorInvocationResult = {
   error?: Error;
 };
 type VerificationInvocation = {
-  args: readonly string[];
   status: 'pass' | 'fail' | 'blocked';
   exitCode: 0 | 1 | 2;
   payload: Record<string, unknown>;
@@ -56,10 +54,10 @@ type VerificationOptions = {
 };
 
 const gate = (skill: string, expectedState: VerificationSpec['expectedState'], artifactFamily?: ArtifactFamily): VerificationSpec => ({
-  skill, expectedState, mode: 'gate', ...(artifactFamily ? { artifactFamily } : {}), stopOn: 'blocked'
+  skill, expectedState, mode: 'gate', ...(artifactFamily ? { artifactFamily } : {})
 });
 const VERIFICATION_CATALOG: Readonly<Record<VerificationEvent, VerificationSpec>> = {
-  'analyze.awaiting-input': { skill: 'analyze-task', expectedState: 'active', mode: 'checks', checks: ['task-meta'], stopOn: 'non-pass' },
+  'analyze.awaiting-input': { skill: 'analyze-task', expectedState: 'active', mode: 'checks', checks: ['task-meta'] },
   'analyze.completed': gate('analyze-task', 'active', 'analysis'),
   'review-analysis.completed': gate('review-analysis', 'active', 'review-analysis'),
   'plan.completed': gate('plan-task', 'active', 'plan'),
@@ -70,7 +68,7 @@ const VERIFICATION_CATALOG: Readonly<Record<VerificationEvent, VerificationSpec>
   'block-task.completed': gate('block-task', 'blocked'),
   'cancel-task.completed': gate('cancel-task', 'completed'),
   'commit.completed': gate('commit', 'active'),
-  'complete-task.preflight': { skill: 'complete-task', expectedState: 'active', mode: 'checks', checks: ['review-ledger', 'post-review-commit'], stopOn: 'non-pass' },
+  'complete-task.preflight': { skill: 'complete-task', expectedState: 'active', mode: 'checks', checks: ['review-ledger', 'post-review-commit'] },
   'complete-task.completed': gate('complete-task', 'completed'),
   'create-pr.completed': gate('create-pr', 'active'),
   'create-task.completed': gate('create-task', 'active'),
@@ -93,7 +91,7 @@ function defaultSpawn(command: string, args: string[], options: { cwd: string })
   return { status: result.status, signal: result.signal, stdout: result.stdout ?? '', stderr: result.stderr ?? '', error: result.error };
 }
 
-function parseInvocation(args: string[], result: ValidatorInvocationResult, mode: 'gate' | 'checks'): VerificationInvocation | { error: { code: string; message: string } } {
+function parseInvocation(result: ValidatorInvocationResult, mode: 'gate' | 'checks'): VerificationInvocation | { error: { code: string; message: string } } {
   if (result.error || result.status === null || result.signal) {
     return { error: { code: 'VERIFY_EXEC_FAILED', message: result.error?.message ?? `validator terminated by ${result.signal ?? 'unknown signal'}` } };
   }
@@ -118,7 +116,7 @@ function parseInvocation(args: string[], result: ValidatorInvocationResult, mode
     || (mode === 'checks' && (typeof payload.type !== 'string' || typeof payload.message !== 'string'))) {
     return { error: { code: 'VERIFY_PROTOCOL_INVALID', message: 'validator payload is missing required result fields' } };
   }
-  return { args, status, exitCode: expected, payload };
+  return { status, exitCode: expected, payload };
 }
 
 function verifyTaskEvent(request: { taskRef: string; event: string; artifact?: string }, options: VerificationOptions = {}): TaskVerificationResult {
@@ -147,10 +145,10 @@ function verifyTaskEvent(request: { taskRef: string; event: string; artifact?: s
   const invocations: VerificationInvocation[] = [];
   const spawnValidator = options.spawnValidator ?? defaultSpawn;
   for (const args of argsList) {
-    const parsed = parseInvocation(args, spawnValidator(process.execPath, [script, ...args], { cwd: resolved.repoRoot }), spec.mode);
+    const parsed = parseInvocation(spawnValidator(process.execPath, [script, ...args], { cwd: resolved.repoRoot }), spec.mode);
     if ('error' in parsed) return failure(request, parsed.error.code, parsed.error.message, { ...identity, invocations });
     invocations.push(parsed);
-    if ((spec.stopOn === 'non-pass' && parsed.status !== 'pass') || (spec.stopOn === 'blocked' && parsed.status === 'blocked')) break;
+    if (spec.mode === 'checks' && parsed.status !== 'pass') break;
   }
   const status = invocations.some((item) => item.status === 'blocked') ? 'blocked'
     : invocations.some((item) => item.status === 'fail') ? 'fail' : 'pass';

@@ -400,14 +400,16 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 对会产生结构化产物或任务状态变更的 skill，统一在结束前运行完成校验：
 
 ```bash
-node .agents/scripts/validate-artifact.js gate <skill-name> <task-dir> [artifact-file] [--format json|text]
+agent-infra-internal task-verify {task-id} <verification-event> [--artifact <artifact>] --format text
 ```
 
 - 每个 skill 在自己的 `config/verify.json` 中声明需要检查的事项
+- typed verification catalog 将业务事件映射到 skill、workspace、artifact 和 gate/check 顺序；调用方不得自行拼接这些机械参数
 - 对语言相关的产物标题或锚点，`config/verify.en.json` 和 `config/verify.zh-CN.json` 之间只应让 `required_sections` 与语言相关的 `required_patterns` 不同
 - 如果 skill 还会展示“下一步”提示，必须先通过完成校验，再输出这些指引
-- 面向用户展示最终校验结果时，优先使用 `--format text` 输出可读摘要，而不是原始 JSON
-- 共享逻辑集中在 `.agents/scripts/validate-artifact.js`，不要把详细校验规则重新塞回 SKILL.md
+- 面向用户展示最终校验结果时使用 `--format text` 输出可读摘要
+- `.agents/scripts/validate-artifact.js` 当前仅是 `task-verify` 的迁移期内部实现，不是 SKILL 兼容入口；不要把详细校验规则重新塞回 SKILL.md
+- 当前迁移尚未完全清理；待 07/10–09/10 平台适配收敛后，10/10 必须删除剩余 direct CLI/parser、子进程协议桥和已被 typed core 取代的机械规则
 - 在回复中保留当次校验输出作为当次验证输出；没有当次校验输出，不得声明完成
 
 ## 常见问题

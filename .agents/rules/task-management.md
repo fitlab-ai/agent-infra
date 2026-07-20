@@ -23,8 +23,9 @@
 
 - 运行时 SKILL 需要记录 git、任务目录和 task.md tail 证据时，统一调用 `agent-infra-internal task-snapshot {task-id} --format text`；不得自行解析短号、扫描 workspace 或重新拼接三段状态命令。
 - 运行时 SKILL 需要执行完成门禁时，统一调用 `agent-infra-internal task-verify {task-id} <verification-event> [--artifact <artifact>] --format text`；业务事件到 skill、workspace、gate/check 顺序和产物族的映射由 typed verification catalog 唯一维护。
-- `.agents/scripts/validate-artifact.js` 继续作为底层校验引擎和兼容入口；SKILL 只声明业务事件，不传 task-dir、skill 名或特殊 check 序列。
+- `.agents/scripts/validate-artifact.js` 在系列迁移期间仅作为 `task-verify` 调用的内部校验实现，不是 SKILL 兼容入口；SKILL 只声明业务事件，不传 task-dir、skill 名或特殊 check 序列。
 - 两个入口均保持只读；验证退出码固定为 `0=pass`、`1=fail`、`2=blocked`，网络或平台阻塞不得降格为成功。
+- 当前迁移尚未完全清理：待 07/10–09/10 收敛平台适配后，10/10 必须删除 validator 剩余 direct CLI/parser、子进程协议桥和已被 typed core 取代的机械规则。
 
 ## 常见命令的状态更新要求
 
