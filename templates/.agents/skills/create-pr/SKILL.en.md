@@ -115,7 +115,7 @@ If `{task-id}` is available, update task.md with `pr_number`, `pr_status` (set t
 If this operation is associated with `{task-id}`, run the verification gate to confirm task metadata and sync state. If there is no task context, skip this step.
 
 ```bash
-node .agents/scripts/validate-artifact.js gate create-pr .agents/workspace/active/{task-id} --format text
+agent-infra-internal task-verify {task-id} create-pr.completed --format text
 ```
 
 Handle the result as follows:

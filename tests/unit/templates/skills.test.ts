@@ -95,7 +95,7 @@ test("complete-manual-validation skill docs retain completion control structures
       ? "Completion Checklist"
       : "完成检查清单";
     const checklist = sectionContent(content, checklistHeading);
-    const gateCommand = "node .agents/scripts/validate-artifact.js gate complete-manual-validation";
+    const gateCommand = "agent-infra-internal task-verify {task-id} manual-validation.completed";
     const gateIndex = content.indexOf(gateCommand);
 
     assert.notEqual(gateIndex, -1, `${relativePath} should include the verification gate command`);
@@ -213,6 +213,7 @@ test("workflow skills document state check gates", () => {
     "review-plan",
     "code-task",
     "review-code",
+    "complete-manual-validation",
     "complete-task"
   ].forEach((skill) => {
     skillDocPaths(skill).forEach((relativePath) => {
@@ -226,6 +227,60 @@ test("workflow skills document state check gates", () => {
         new RegExp(escapeRegExp(expectedHeading)),
         `${relativePath} should document the pre-execution state check`
       );
+    });
+  });
+});
+
+test("workflow state-check consumers use the typed task snapshot entrypoint", () => {
+  [
+    "analyze-task",
+    "review-analysis",
+    "plan-task",
+    "review-plan",
+    "code-task",
+    "review-code",
+    "complete-manual-validation",
+    "complete-task"
+  ].forEach((skill) => {
+    skillDocPaths(skill).forEach((relativePath) => {
+      assert.ok(
+        read(relativePath).includes("agent-infra-internal task-snapshot {task-id} --format text"),
+        `${relativePath} should use task-snapshot`
+      );
+    });
+  });
+});
+
+test("workflow verification consumers declare their business verification events", () => {
+  const expectations: Record<string, string[]> = {
+    "analyze-task": ["analyze.awaiting-input", "analyze.completed"],
+    "review-analysis": ["review-analysis.completed"],
+    "plan-task": ["plan.completed"],
+    "review-plan": ["review-plan.completed"],
+    "code-task": ["code.completed"],
+    "review-code": ["review-code.completed"],
+    "complete-manual-validation": ["manual-validation.completed"],
+    "block-task": ["block-task.completed"],
+    "cancel-task": ["cancel-task.completed"],
+    "commit": ["commit.completed"],
+    "complete-task": ["complete-task.preflight", "complete-task.completed"],
+    "create-pr": ["create-pr.completed"],
+    "create-task": ["create-task.completed"],
+    "import-codescan": ["import-codescan.completed"],
+    "import-dependabot": ["import-dependabot.completed"],
+    "import-issue": ["import-issue.completed"],
+    "watch-pr": ["watch-pr.completed"]
+  };
+
+  Object.entries(expectations).forEach(([skill, events]) => {
+    skillDocPaths(skill).forEach((relativePath) => {
+      const content = read(relativePath);
+      events.forEach((event) => {
+        assert.ok(
+          content.includes(`agent-infra-internal task-verify {task-id} ${event}`),
+          `${relativePath} should declare ${event}`
+        );
+      });
     });
   });
 });

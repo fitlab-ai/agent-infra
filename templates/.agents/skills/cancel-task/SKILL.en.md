@@ -95,7 +95,7 @@ The cancellation comment must include at least:
 Run the verification gate to confirm the moved task and sync state are valid:
 
 ```bash
-node .agents/scripts/validate-artifact.js gate cancel-task .agents/workspace/completed/{task-id} --format text
+agent-infra-internal task-verify {task-id} cancel-task.completed --format text
 ```
 
 Handle the result as follows:

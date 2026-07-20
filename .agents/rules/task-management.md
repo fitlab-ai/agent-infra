@@ -19,6 +19,13 @@
 - 更新 `agent_infra_version` 前，先读取 `.agents/rules/version-stamp.md`
 - Activity Log 只能追加，不能覆盖历史记录
 
+## 状态快照与完成验证入口
+
+- 运行时 SKILL 需要记录 git、任务目录和 task.md tail 证据时，统一调用 `agent-infra-internal task-snapshot {task-id} --format text`；不得自行解析短号、扫描 workspace 或重新拼接三段状态命令。
+- 运行时 SKILL 需要执行完成门禁时，统一调用 `agent-infra-internal task-verify {task-id} <verification-event> [--artifact <artifact>] --format text`；业务事件到 skill、workspace、gate/check 顺序和产物族的映射由 typed verification catalog 唯一维护。
+- `.agents/scripts/validate-artifact.js` 继续作为底层校验引擎和兼容入口；SKILL 只声明业务事件，不传 task-dir、skill 名或特殊 check 序列。
+- 两个入口均保持只读；验证退出码固定为 `0=pass`、`1=fail`、`2=blocked`，网络或平台阻塞不得降格为成功。
+
 ## 常见命令的状态更新要求
 
 - `create-task`：创建 `branch`、`workflow`、`status`、`created_at`、`updated_at`、`assigned_to`、`agent_infra_version`

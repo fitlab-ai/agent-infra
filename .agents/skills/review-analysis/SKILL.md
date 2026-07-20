@@ -24,9 +24,7 @@ description: >
 运行以下命令，并把原文粘贴到回复正文和本轮产物的 `## 状态核对` 段：
 
 ```bash
-git status -s
-ls -la .agents/workspace/active/{task-id}/
-tail .agents/workspace/active/{task-id}/task.md
+agent-infra-internal task-snapshot {task-id} --format text
 ```
 
 状态核对完成前，禁止任何关于外部状态的断言。
@@ -79,7 +77,7 @@ tail .agents/workspace/active/{task-id}/task.md
 ### 7. 完成校验
 
 ```bash
-node .agents/scripts/validate-artifact.js gate review-analysis .agents/workspace/active/{task-id} {review-artifact} --format text
+agent-infra-internal task-verify {task-id} review-analysis.completed --artifact {review-artifact} --format text
 ```
 
 校验通过后继续告知用户；校验失败则修复报告或 task 状态后重跑。

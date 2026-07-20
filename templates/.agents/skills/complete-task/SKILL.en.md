@@ -22,9 +22,7 @@ After loading workflow / skill / rules instructions, and before any task-state j
 Run these commands and paste the raw output into both the user-facing reply and this round's `## State Check` section:
 
 ```bash
-git status -s
-ls -la .agents/workspace/active/{task-id}/
-tail .agents/workspace/active/{task-id}/task.md
+agent-infra-internal task-snapshot {task-id} --format text
 ```
 
 Before the state check is complete, do not make external-state assertions such as "the code is unchanged", "tests passed", or "there are no other references", including in reasoning. This gate is only a structural floor; evidence pairing and authenticity still require the report template and review discipline.
@@ -91,8 +89,7 @@ Before marking complete, verify ALL of these:
 **Pre-completion hard gate (run BEFORE moving the directory or releasing the short id)**: the Step 7 `gate complete-task` runs only after the directory has been `mv`-ed to `completed/` and the short id released; to avoid a gate failure occurring after those irreversible operations, run the two new completion gates on the **active directory** first:
 
 ```bash
-node .agents/scripts/validate-artifact.js check review-ledger .agents/workspace/active/{task-id} --skill complete-task --format text
-node .agents/scripts/validate-artifact.js check post-review-commit .agents/workspace/active/{task-id} --skill complete-task --format text
+agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 ```
 
 A non-zero exit from either (fail/blocked) -> treat as an unmet prerequisite and **stop**, do not run Steps 3-7. If the output contains `reviewed snapshot was not anchored`, rerun `commit` or `review-code`; never fall back to the review baseline. `--force` does **NOT** lift this hard gate: unclosed disagreements must first be closed in the ledger (`confirmed`/`closed`/`human-decided`), and un-re-reviewed commits after an anchor must be re-reviewed via `review-code` or covered by a `post-review-commit` / `human-decided` exemption row in the ledger.
@@ -158,7 +155,7 @@ If a valid `issue_number` exists:
 Run the verification gate to confirm the task artifact and sync state are valid:
 
 ```bash
-node .agents/scripts/validate-artifact.js gate complete-task .agents/workspace/completed/{task-id} --format text
+agent-infra-internal task-verify {task-id} complete-task.completed --format text
 ```
 
 Handle the result as follows:

@@ -166,7 +166,7 @@ node .agents/scripts/task-short-id.js alloc "$task_id"
 运行完成校验，确认任务产物和同步状态符合规范：
 
 ```bash
-node .agents/scripts/validate-artifact.js gate import-issue .agents/workspace/active/{task-id} --format text
+agent-infra-internal task-verify {task-id} import-issue.completed --format text
 ```
 
 处理结果：

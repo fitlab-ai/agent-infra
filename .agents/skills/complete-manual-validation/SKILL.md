@@ -24,9 +24,7 @@ description: >
 运行以下命令，并把原文粘贴到回复正文和本轮产物的 `## 状态核对` 段：
 
 ```bash
-git status -s
-ls -la .agents/workspace/active/{task-id}/
-tail .agents/workspace/active/{task-id}/task.md
+agent-infra-internal task-snapshot {task-id} --format text
 ```
 
 ## 任务上下文解析
@@ -94,7 +92,7 @@ complete-manual-validation {task-ref} [{pr-ref}] {verification-summary}
 运行完成校验：
 
 ```bash
-node .agents/scripts/validate-artifact.js gate complete-manual-validation .agents/workspace/active/{task-id} {manual-validation-artifact} --format text
+agent-infra-internal task-verify {task-id} manual-validation.completed --artifact {manual-validation-artifact} --format text
 ```
 
 处理结果：

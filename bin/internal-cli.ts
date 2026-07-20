@@ -46,6 +46,16 @@ switch (command) {
     taskShortId(process.argv.slice(3));
     break;
   }
+  case 'task-snapshot': {
+    const { taskSnapshot } = await import('../lib/internal/task-snapshot.ts');
+    taskSnapshot(process.argv.slice(3));
+    break;
+  }
+  case 'task-verify': {
+    const { taskVerify } = await import('../lib/internal/task-verify.ts');
+    taskVerify(process.argv.slice(3));
+    break;
+  }
   default:
     process.stdout.write(`${JSON.stringify({
       status: 'failed',

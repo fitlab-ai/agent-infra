@@ -132,7 +132,7 @@ Failure handling matches "Update Task Status When Applicable": warn, but do **no
 If this operation is associated with `{task-id}`, run the verification gate to confirm task metadata and sync state. If there is no task context, skip this step.
 
 ```bash
-node .agents/scripts/validate-artifact.js gate commit .agents/workspace/active/{task-id}
+agent-infra-internal task-verify {task-id} commit.completed --format text
 ```
 
 Handle the result as follows:

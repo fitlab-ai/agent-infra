@@ -22,9 +22,7 @@ description: >
 运行以下命令，并把原文粘贴到回复正文和本轮产物的 `## 状态核对` 段：
 
 ```bash
-git status -s
-ls -la .agents/workspace/active/{task-id}/
-tail .agents/workspace/active/{task-id}/task.md
+agent-infra-internal task-snapshot {task-id} --format text
 ```
 
 状态核对完成前，禁止任何关于外部状态的断言（例如“代码没变”“测试已通过”“没有其他引用”），包括思考阶段。本门禁只提供结构下限；逐条证据配对和真实性仍需按报告模板与审查要求核对。
@@ -90,8 +88,7 @@ tail .agents/workspace/active/{task-id}/task.md
 **预完成硬门禁（在移动目录、释放短号之前运行）**：步骤 7 的 `gate complete-task` 在目录已 `mv` 到 `completed/`、短号已释放之后才运行；为避免门禁失败发生在不可逆操作之后，必须在 **active 目录**上预先运行新增的两项完成门禁：
 
 ```bash
-node .agents/scripts/validate-artifact.js check review-ledger .agents/workspace/active/{task-id} --skill complete-task --format text
-node .agents/scripts/validate-artifact.js check post-review-commit .agents/workspace/active/{task-id} --skill complete-task --format text
+agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 ```
 
 任一退出码非 0（fail/blocked）→ 按前置条件未满足处理，**停止**，不执行步骤 3-7。若输出包含 `reviewed snapshot was not anchored`，必须先重新 `commit` 或 `review-code`；不得回退审查基线。`--force` **不解除**本硬门禁：未关闭分歧必须先在账本闭合（`confirmed`/`closed`/`human-decided`），已锚点后的未复审提交必须重新 `review-code` 或在账本追加 `post-review-commit` / `human-decided` 豁免行。
@@ -157,7 +154,7 @@ ls .agents/workspace/completed/{task-id}/task.md
 运行完成校验，确认任务产物和同步状态符合规范：
 
 ```bash
-node .agents/scripts/validate-artifact.js gate complete-task .agents/workspace/completed/{task-id} --format text
+agent-infra-internal task-verify {task-id} complete-task.completed --format text
 ```
 
 处理结果：

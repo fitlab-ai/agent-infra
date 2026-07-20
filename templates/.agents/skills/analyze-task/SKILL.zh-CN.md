@@ -23,9 +23,7 @@ description: >
 运行以下命令，并把原文粘贴到回复正文和本轮产物的 `## 状态核对` 段：
 
 ```bash
-git status -s
-ls -la .agents/workspace/active/{task-id}/
-tail .agents/workspace/active/{task-id}/task.md
+agent-infra-internal task-snapshot {task-id} --format text
 ```
 
 状态核对完成前，禁止任何关于外部状态的断言（例如“代码没变”“测试已通过”“没有其他引用”），包括思考阶段。本门禁只提供结构下限；逐条证据配对和真实性仍需按报告模板与审查要求核对。
@@ -107,7 +105,7 @@ agent-infra-internal task-event {task-id} analyze.started --agent {agent}
      - 否则（无待答问题）→ 选最高价值的一个问题（验收标准 > 范围 > 歧义），写入 `## Brainstorming`：`status: asking`、`pending_question: <问题>`、`question_count += 1`。
   2. 若 `start_date` 为空，写入当日日期（`date +%F`）；随后执行 `agent-infra-internal task-event {task-id} analyze.awaiting-input --agent {agent} --question {question_count}`，由核心统一更新基础 frontmatter 和 Activity Log。
   3. Issue 同步（存在 `issue_number` 时，任一失败跳过）：先读 `.agents/rules/issue-sync.md` 完成 upstream / 权限检测；仅按 task.md 评论同步规则更新 **task 评论**；`status` label 维持 `pending-design-work`；**不**发布分析产物评论。
-  4. 校验（替代步骤 8 的 artifact gate）：`node .agents/scripts/validate-artifact.js check task-meta .agents/workspace/active/{task-id} --skill analyze-task --format text`（早退已置 `current_step: requirement-analysis` 且已写入 `start_date`，预期通过）；并保留 `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` 与 task 评论同步证据。**不**跑 artifact gate，也不跑 `check activity-log` / `check platform-sync`（二者绑定分析产物路径）。
+  4. 校验（替代步骤 8 的 artifact gate）：`agent-infra-internal task-verify {task-id} analyze.awaiting-input --format text`（早退已置 `current_step: requirement-analysis` 且已写入 `start_date`，预期通过）；并保留 `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` 与 task 评论同步证据。**不**跑 artifact gate，也不跑 `check activity-log` / `check platform-sync`（二者绑定分析产物路径）。
   5. 用户输出：只展示当前**单个问题** + 如何回答/继续（再次触发 `analyze-task {task-ref}` 并附答案），并按 `.agents/rules/next-step-output.md` 在末行追加 `Completed at`。
   6. **STOP**，等待回答。下一次触发回到本步骤。
 
@@ -214,7 +212,7 @@ agent-infra-internal task-event {task-id} analyze.started --agent {agent}
 运行完成校验，确认任务产物和同步状态符合规范：
 
 ```bash
-node .agents/scripts/validate-artifact.js gate analyze-task .agents/workspace/active/{task-id} {analysis-artifact} --format text
+agent-infra-internal task-verify {task-id} analyze.completed --artifact {analysis-artifact} --format text
 ```
 
 处理结果：

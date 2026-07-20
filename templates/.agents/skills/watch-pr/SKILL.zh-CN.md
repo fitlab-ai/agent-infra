@@ -87,7 +87,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 运行完成校验：
 
 ```bash
-node .agents/scripts/validate-artifact.js gate watch-pr .agents/workspace/active/{task-id} --format text
+agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 ```
 
 处理结果：

@@ -24,9 +24,7 @@ After loading workflow / skill / rules instructions, and before any task-state j
 Run these commands and paste the raw output into both the user-facing reply and this round's `## State Check` section:
 
 ```bash
-git status -s
-ls -la .agents/workspace/active/{task-id}/
-tail .agents/workspace/active/{task-id}/task.md
+agent-infra-internal task-snapshot {task-id} --format text
 ```
 
 ## Task Context Resolution
@@ -76,7 +74,7 @@ If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, sync 
 ### 7. Run Completion Gate
 
 ```bash
-node .agents/scripts/validate-artifact.js gate review-plan .agents/workspace/active/{task-id} {review-artifact} --format text
+agent-infra-internal task-verify {task-id} review-plan.completed --artifact {review-artifact} --format text
 ```
 
 ### 8. Tell the User

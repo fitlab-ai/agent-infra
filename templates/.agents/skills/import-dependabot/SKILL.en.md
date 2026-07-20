@@ -86,7 +86,7 @@ If this fails (non-zero exit), follow the message — archive some active tasks 
 Run the verification gate to confirm the task artifact and sync state are valid:
 
 ```bash
-node .agents/scripts/validate-artifact.js gate import-dependabot .agents/workspace/active/{task-id} --format text
+agent-infra-internal task-verify {task-id} import-dependabot.completed --format text
 ```
 
 Handle the result as follows:

@@ -94,7 +94,7 @@ ls .agents/workspace/completed/{task-id}/task.md
 运行完成校验，确认任务转移和同步状态符合规范：
 
 ```bash
-node .agents/scripts/validate-artifact.js gate cancel-task .agents/workspace/completed/{task-id} --format text
+agent-infra-internal task-verify {task-id} cancel-task.completed --format text
 ```
 
 处理结果：

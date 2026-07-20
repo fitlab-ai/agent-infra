@@ -23,9 +23,7 @@ After loading workflow / skill / rules instructions, and before any task-state j
 Run these commands and paste the raw output into both the user-facing reply and this round's `## State Check` section:
 
 ```bash
-git status -s
-ls -la .agents/workspace/active/{task-id}/
-tail .agents/workspace/active/{task-id}/task.md
+agent-infra-internal task-snapshot {task-id} --format text
 ```
 
 Before the state check is complete, do not make external-state assertions such as "the code is unchanged", "tests passed", or "there are no other references", including in reasoning. This gate is only a structural floor; evidence pairing and authenticity still require the report template and review discipline.
@@ -104,7 +102,7 @@ Runs after Step 0 state check and Step 3 (questioning is an external-state actio
      - otherwise (no pending question) → pick the single highest-value question (acceptance criteria > scope > ambiguity) and write `## Brainstorming`: `status: asking`, `pending_question: <question>`, `question_count += 1`.
   2. If `start_date` is empty, write today (`date +%F`), then run `agent-infra-internal task-event {task-id} analyze.awaiting-input --agent {agent} --question {question_count}` so the core updates base metadata and Activity Log.
   3. Issue sync (when `issue_number` exists, skip on any failure): read `.agents/rules/issue-sync.md` first for upstream / permission detection; update only the **task comment** per the task.md comment sync rule; keep the `status` label at `pending-design-work`; do **not** publish an analysis artifact comment.
-  4. Verification (replaces the step 8 artifact gate): `node .agents/scripts/validate-artifact.js check task-meta .agents/workspace/active/{task-id} --skill analyze-task --format text` (the early-exit set `current_step: requirement-analysis` and wrote `start_date`, so it should pass); also keep `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` and the task-comment sync evidence. Do **not** run the artifact gate, nor `check activity-log` / `check platform-sync` (both bind to the analysis artifact path).
+  4. Verification (replaces the step 8 artifact gate): `agent-infra-internal task-verify {task-id} analyze.awaiting-input --format text` (the early-exit set `current_step: requirement-analysis` and wrote `start_date`, so it should pass); also keep `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` and the task-comment sync evidence. Do **not** run the artifact gate, nor `check activity-log` / `check platform-sync` (both bind to the analysis artifact path).
   5. User output: show only the current **single question** plus how to answer/continue (re-trigger `analyze-task {task-ref}` with the answer), and append the `Completed at` line per `.agents/rules/next-step-output.md`.
   6. **STOP** and wait for the answer. The next trigger returns to this step.
 
@@ -215,7 +213,7 @@ If task.md contains a valid `issue_number`, perform these sync actions (skip and
 Run the verification gate to confirm the task artifact and sync state are valid:
 
 ```bash
-node .agents/scripts/validate-artifact.js gate analyze-task .agents/workspace/active/{task-id} {analysis-artifact} --format text
+agent-infra-internal task-verify {task-id} analyze.completed --artifact {analysis-artifact} --format text
 ```
 
 Handle the result as follows:

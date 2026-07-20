@@ -33,9 +33,7 @@ description: >
 运行以下命令，并把原文粘贴到回复正文和本轮产物的 `## 状态核对` 段：
 
 ```bash
-git status -s
-ls -la .agents/workspace/active/{task-id}/
-tail .agents/workspace/active/{task-id}/task.md
+agent-infra-internal task-snapshot {task-id} --format text
 ```
 
 状态核对完成前，禁止任何关于外部状态的断言（例如“代码没变”“测试已通过”“没有其他引用”），包括思考阶段。本门禁只提供结构下限；逐条证据配对和真实性仍需按报告模板与审查要求核对。
@@ -102,7 +100,7 @@ tail .agents/workspace/active/{task-id}/task.md
 运行完成校验，确认任务产物和同步状态符合规范：
 
 ```bash
-node .agents/scripts/validate-artifact.js gate review-code .agents/workspace/active/{task-id} {review-artifact} --format text
+agent-infra-internal task-verify {task-id} review-code.completed --artifact {review-artifact} --format text
 ```
 
 处理结果：

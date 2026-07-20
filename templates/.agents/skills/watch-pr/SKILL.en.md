@@ -87,7 +87,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 Run the verification gate:
 
 ```bash
-node .agents/scripts/validate-artifact.js gate watch-pr .agents/workspace/active/{task-id} --format text
+agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 ```
 
 Handle the result:

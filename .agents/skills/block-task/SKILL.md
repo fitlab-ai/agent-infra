@@ -83,7 +83,7 @@ ls .agents/workspace/blocked/{task-id}/task.md
 运行完成校验，确认任务产物和同步状态符合规范：
 
 ```bash
-node .agents/scripts/validate-artifact.js gate block-task .agents/workspace/blocked/{task-id} --format text
+agent-infra-internal task-verify {task-id} block-task.completed --format text
 ```
 
 处理结果：

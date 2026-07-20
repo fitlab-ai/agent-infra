@@ -132,7 +132,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 如果本次操作关联了 `{task-id}`，运行完成校验，确认任务元数据和同步状态符合规范；如果没有任务上下文，跳过本步骤。
 
 ```bash
-node .agents/scripts/validate-artifact.js gate commit .agents/workspace/active/{task-id}
+agent-infra-internal task-verify {task-id} commit.completed --format text
 ```
 
 处理结果：

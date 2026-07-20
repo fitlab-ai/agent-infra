@@ -24,9 +24,7 @@ After loading workflow / skill / rules instructions, and before any task-state j
 Run these commands and paste the raw output into both the user-facing reply and this round's `## State Check` section:
 
 ```bash
-git status -s
-ls -la .agents/workspace/active/{task-id}/
-tail .agents/workspace/active/{task-id}/task.md
+agent-infra-internal task-snapshot {task-id} --format text
 ```
 
 ## Task Context Resolution
@@ -94,7 +92,7 @@ If the task has a valid `issue_number`, follow `.agents/rules/issue-sync.md` to 
 Run:
 
 ```bash
-node .agents/scripts/validate-artifact.js gate complete-manual-validation .agents/workspace/active/{task-id} {manual-validation-artifact} --format text
+agent-infra-internal task-verify {task-id} manual-validation.completed --artifact {manual-validation-artifact} --format text
 ```
 
 Handle the result:

@@ -82,7 +82,7 @@ If a valid `issue_number` exists, set `status: blocked` by following issue-sync.
 Run the verification gate to confirm the task artifact and sync state are valid:
 
 ```bash
-node .agents/scripts/validate-artifact.js gate block-task .agents/workspace/blocked/{task-id} --format text
+agent-infra-internal task-verify {task-id} block-task.completed --format text
 ```
 
 Handle the result as follows:
