@@ -8,7 +8,7 @@ Run this step only when all of the following are true:
 
 If either condition is missing, skip this step.
 
-Read `.agents/rules/issue-sync.md` first so upstream repository detection and permission detection are complete before any sync work.
+Run `agent-infra-internal platform-context resolve` for upstream and capabilities; metadata writes remain in the 08/10 compatibility area of `.agents/rules/issue-sync.md`.
 
 ## `in:` Label Sync
 

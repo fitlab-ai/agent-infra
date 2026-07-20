@@ -8,7 +8,7 @@
 
 任一条件不满足时，跳过本步骤。
 
-执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测。
+执行前调用 `agent-infra-internal platform-context resolve` 取得 upstream 与 capabilities；元数据写入仍按 `.agents/rules/issue-sync.md` 的 08/10 兼容区处理。
 
 ## `in:` label 同步
 

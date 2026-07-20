@@ -1,0 +1,33 @@
+import path from 'node:path';
+
+import { resolvePlatformContext } from '../platform/context.ts';
+
+const USAGE = 'Usage: agent-infra-internal platform-context resolve [--cwd <path>]\n';
+
+function fail(message: string): void {
+  process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'PLATFORM_PAYLOAD_INVALID', message } })}\n`);
+  process.stderr.write(USAGE);
+  process.exitCode = 1;
+}
+
+function platformContext(args: string[] = []): void {
+  if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
+  if (args[0] !== 'resolve') { fail("operation must be 'resolve'"); return; }
+  let cwd = process.cwd();
+  const seen = new Set<string>();
+  for (let index = 1; index < args.length; index += 1) {
+    const flag = args[index]!;
+    if (flag !== '--cwd') { fail(`unknown option '${flag}'`); return; }
+    if (seen.has(flag)) { fail(`duplicate option '${flag}'`); return; }
+    const value = args[++index];
+    if (!value || value.startsWith('--')) { fail(`option '${flag}' requires a value`); return; }
+    seen.add(flag);
+    cwd = path.resolve(value);
+  }
+  const result = resolvePlatformContext({ cwd });
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+  if (result.status === 'failed') process.exitCode = 1;
+  if (result.status === 'blocked') process.exitCode = 2;
+}
+
+export { platformContext };

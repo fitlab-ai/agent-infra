@@ -72,7 +72,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
 
-如果 task.md 中存在有效的 `issue_number`，执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测，然后同步 task 评论并发布 `{review-artifact}` 评论。
+如果 task.md 中存在有效的 `issue_number`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {agent}`；失败按 `.agents/rules/issue-sync.md` 记录 warning。
 
 ### 7. 完成校验
 

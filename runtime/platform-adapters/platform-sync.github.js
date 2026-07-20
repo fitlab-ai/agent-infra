@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import spawn from "cross-spawn";
+import { execFileSync } from "node:child_process";
+
+import { createGitHubClient } from "../../dist/lib/platform/github-client.js";
+import { resolvePlatformContext } from "../../dist/lib/platform/context.js";
 
 const CHECK_TYPE = "platform-sync";
-const DEFAULT_RETRY_DELAYS_MS = [3000, 10000];
 const VERSION_LINE_REGEX = /^[0-9]+\.[0-9]+\.x$/;
 const FRONTMATTER_FIELD_MAP = {
   priority: "Priority",
@@ -21,6 +23,7 @@ const OPTION_LOCALIZATION = {
 
 let activeShared = null;
 let repoRoot = "";
+const githubClient = createGitHubClient();
 
 export function getDefaults() {
   return {
@@ -155,12 +158,20 @@ function buildSyncContext({ taskDir, config, artifactFile }) {
     return { earlyReturn: passResult(CHECK_TYPE, "Skipped: platform-sync not required for this task") };
   }
 
-  const upstreamRepo = resolveUpstreamRepo(taskDir);
-  if (!upstreamRepo.ok) {
-    return { earlyReturn: blockedResult(CHECK_TYPE, upstreamRepo.message, "network_error") };
+  const platformContext = resolvePlatformContext({ cwd: taskDir, client: githubClient, platformType: "github" });
+  if (platformContext.status === "failed") {
+    return { earlyReturn: failResult(CHECK_TYPE, platformContext.error?.message || "Platform context failed", "check_failed") };
   }
-  const permissions = detectPermissions(upstreamRepo.value, taskDir);
-  const repoOwnerType = detectRepoOwnerType(upstreamRepo.value, taskDir);
+  if (platformContext.status === "blocked") {
+    return { earlyReturn: blockedResult(CHECK_TYPE, platformContext.error?.message || "Platform context blocked", "network_error") };
+  }
+  if (!platformContext.platform.repository) {
+    if (platformContext.error?.code === "REMOTE_MISSING" || platformContext.error?.code === "REMOTE_INVALID") {
+      return { earlyReturn: blockedResult(CHECK_TYPE, platformContext.error.message, "network_error") };
+    }
+    return { earlyReturn: passResult(CHECK_TYPE, `Skipped: ${platformContext.error?.message || "platform unavailable"}`) };
+  }
+  const repoOwnerType = detectRepoOwnerType(platformContext.platform.repository, taskDir);
   const expectedValues = resolveExpectedValues(config);
   if (!expectedValues.ok) {
     return { earlyReturn: failResult(CHECK_TYPE, expectedValues.message, "check_failed") };
@@ -182,10 +193,10 @@ function buildSyncContext({ taskDir, config, artifactFile }) {
     artifactPath,
     issueNumber,
     prNumber,
-    upstreamRepo: upstreamRepo.value,
+    upstreamRepo: platformContext.platform.repository,
     repoOwnerType,
-    hasTriage: permissions.hasTriage,
-    hasPush: permissions.hasPush,
+    hasTriage: platformContext.capabilities.triage,
+    hasPush: platformContext.capabilities.push,
     expectedStatusLabel: expectedValues.statusLabel,
     marker,
     prMarker
@@ -1231,72 +1242,6 @@ function normalizeIssuePayload(payload) {
   };
 }
 
-function resolveUpstreamRepo(taskDir) {
-  const ownerRepo = resolveOwnerRepo(taskDir);
-  if (!ownerRepo.ok) {
-    return ownerRepo;
-  }
-
-  const repoResult = withRetry(() => ghJson([
-    "api",
-    `repos/${ownerRepo.value}`
-  ], taskDir));
-
-  if (!repoResult.ok) {
-    return repoResult;
-  }
-
-  const repo = repoResult.value && typeof repoResult.value === "object" ? repoResult.value : {};
-  const upstreamRepo = repo.fork ? repo.parent?.full_name : repo.full_name;
-  if (isBlank(upstreamRepo)) {
-    return { ok: false, message: "Unable to resolve upstream repository" };
-  }
-
-  return { ok: true, value: upstreamRepo };
-}
-
-function resolveOwnerRepo(taskDir) {
-  const gitResult = spawn.sync("git", ["remote", "get-url", "origin"], {
-    cwd: taskDir,
-    encoding: "utf8",
-    env: process.env
-  });
-
-  if (gitResult.status !== 0) {
-    return { ok: false, message: `Unable to resolve git remote: ${gitResult.stderr.trim() || gitResult.stdout.trim()}` };
-  }
-
-  const remote = gitResult.stdout.trim();
-  const sshMatch = remote.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
-  if (!sshMatch) {
-    return { ok: false, message: `Unable to parse owner/repo from remote '${remote}'` };
-  }
-
-  return { ok: true, value: sshMatch[1] };
-}
-
-function detectPermissions(upstreamRepo, taskDir) {
-  const permissionsResult = withRetry(() => ghJson([
-    "api",
-    `repos/${upstreamRepo}`,
-    "--jq",
-    ".permissions"
-  ], taskDir));
-
-  if (!permissionsResult.ok) {
-    return { hasTriage: false, hasPush: false };
-  }
-
-  const permissions = permissionsResult.value && typeof permissionsResult.value === "object"
-    ? permissionsResult.value
-    : {};
-
-  return {
-    hasTriage: permissions.triage === true,
-    hasPush: permissions.push === true
-  };
-}
-
 function detectRepoOwnerType(upstreamRepo, taskDir) {
   const ownerTypeResult = withRetry(() => ghText([
     "api",
@@ -1313,84 +1258,39 @@ function detectRepoOwnerType(upstreamRepo, taskDir) {
 }
 
 function ghJson(args, cwd) {
-  const result = ghCommand(args, cwd);
-  if (!result.ok) {
-    return result;
-  }
-
-  try {
-    return { ok: true, value: JSON.parse(result.value || "null") };
-  } catch (error) {
-    return { ok: false, type: "network_error", message: `Invalid JSON from gh: ${error.message}` };
-  }
+  return mapClientResult(githubClient.json(args, { cwd }));
 }
 
 function ghText(args, cwd) {
-  const result = ghCommand(args, cwd);
-  if (!result.ok) {
-    return result;
-  }
-
-  return { ok: true, value: String(result.value || "").trim() };
-}
-
-function ghCommand(args, cwd) {
-  const gh = resolveGhCommand();
-  const result = spawn.sync(gh.command, [...gh.preArgs, ...args], {
-    cwd,
-    encoding: "utf8",
-    env: process.env
-  });
-
-  if (result.status !== 0) {
-    const stderr = `${result.stderr || ""}${result.stdout || ""}`.trim();
-    const classified = classifyGhFailure(stderr, args);
-    return { ok: false, type: classified.type, message: classified.message };
-  }
-
-  return { ok: true, value: result.stdout };
-}
-
-function resolveGhCommand() {
-  const command = process.env.AGENT_INFRA_GH_BIN || "gh";
-  const rawPreArgs = process.env.AGENT_INFRA_GH_ARGS_JSON;
-  if (!rawPreArgs) {
-    return { command, preArgs: [] };
-  }
-
-  try {
-    const preArgs = JSON.parse(rawPreArgs);
-    if (Array.isArray(preArgs) && preArgs.every((arg) => typeof arg === "string")) {
-      return { command, preArgs };
-    }
-  } catch {
-    return { command, preArgs: [] };
-  }
-
-  return { command, preArgs: [] };
+  return mapClientResult(githubClient.text(args, { cwd }));
 }
 
 function ghPaginatedJson(args, cwd) {
   return ghJson(args, cwd);
 }
 
-function gitText(args, cwd) {
-  const result = spawn.sync("git", args, {
-    cwd,
-    encoding: "utf8",
-    env: process.env
-  });
+function mapClientResult(result) {
+  if (result.ok) return result;
+  const checkFailed = ["RESOURCE_NOT_FOUND", "PERMISSION_DENIED", "PLATFORM_REQUEST_INVALID"].includes(result.error.code);
+  return {
+    ok: false,
+    type: checkFailed ? "check_failed" : "network_error",
+    message: result.error.message
+  };
+}
 
-  if (result.status !== 0) {
-    const stderr = `${result.stderr || ""}${result.stdout || ""}`.trim();
+function gitText(args, cwd) {
+  try {
+    const value = execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+    return { ok: true, value: String(value || "").trim() };
+  } catch (error) {
+    const stderr = `${error?.stderr || ""}${error?.stdout || ""}`.trim();
     return {
       ok: false,
       type: "check_failed",
       message: stderr || `git ${args.join(" ")} failed`
     };
   }
-
-  return { ok: true, value: String(result.stdout || "").trim() };
 }
 
 function resolvePrHeadSha(context) {
@@ -1439,58 +1339,7 @@ function findWorktreeForBranch(porcelainOutput, branch) {
 }
 
 function withRetry(operation) {
-  const delays = getRetryDelays();
-  let lastFailure = null;
-
-  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
-    const result = operation();
-    if (result.ok) {
-      return result;
-    }
-
-    lastFailure = result;
-    if (result.type === "check_failed") {
-      return result;
-    }
-
-    if (attempt < delays.length) {
-      sleep(delays[attempt]);
-    }
-  }
-
-  return lastFailure || { ok: false, type: "network_error", message: "Unknown GitHub sync failure" };
-}
-
-function classifyGhFailure(stderr, args) {
-  const message = stderr || `gh ${args.join(" ")} failed`;
-
-  if (/not found|could not resolve to an issue|http 404/i.test(message)) {
-    return { type: "check_failed", message };
-  }
-
-  return { type: "network_error", message };
-}
-
-function getRetryDelays() {
-  const override = process.env.VALIDATE_ARTIFACT_RETRY_DELAYS_MS;
-  if (!override) {
-    return DEFAULT_RETRY_DELAYS_MS;
-  }
-
-  const parsed = override
-    .split(",")
-    .map((value) => Number(value.trim()))
-    .filter((value) => Number.isFinite(value) && value >= 0);
-
-  return parsed.length > 0 ? parsed : DEFAULT_RETRY_DELAYS_MS;
-}
-
-function sleep(delayMs) {
-  if (delayMs <= 0) {
-    return;
-  }
-
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+  return operation();
 }
 
 function interpolate(template, taskDir, artifactFile) {

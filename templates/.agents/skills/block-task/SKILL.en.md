@@ -73,9 +73,10 @@ ls .agents/workspace/blocked/{task-id}/task.md
 
 Check whether `task.md` includes a valid `issue_number`. If not, skip this step.
 
-> Status-label sync rules live in `.agents/rules/issue-sync.md`. Read that file before syncing, and complete upstream repository detection plus permission detection.
+> Issue metadata rules live in `.agents/rules/issue-sync.md`; `agent-infra-internal platform-context resolve` owns platform context and capability detection.
 
 If a valid `issue_number` exists, set `status: blocked` by following issue-sync.md.
+Then run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`.
 
 ### 7. Verification Gate
 

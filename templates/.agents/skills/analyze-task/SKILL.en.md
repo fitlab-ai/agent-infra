@@ -101,7 +101,7 @@ Runs after Step 0 state check and Step 3 (questioning is an external-state actio
      - if a `pending_question` already exists (the previous question is still unanswered) → restate that `pending_question`, do **not** modify it and do **not** increment `question_count`;
      - otherwise (no pending question) → pick the single highest-value question (acceptance criteria > scope > ambiguity) and write `## Brainstorming`: `status: asking`, `pending_question: <question>`, `question_count += 1`.
   2. If `start_date` is empty, write today (`date +%F`), then run `agent-infra-internal task-event {task-id} analyze.awaiting-input --agent {agent} --question {question_count}` so the core updates base metadata and Activity Log.
-  3. Issue sync (when `issue_number` exists, skip on any failure): read `.agents/rules/issue-sync.md` first for upstream / permission detection; update only the **task comment** per the task.md comment sync rule; keep the `status` label at `pending-design-work`; do **not** publish an analysis artifact comment.
+  3. Issue sync (when `issue_number` exists, skip on any failure): run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}` to update only the **task comment**; keep the `status` label at `pending-design-work`; do **not** publish an analysis artifact comment.
   4. Verification (replaces the step 8 artifact gate): `agent-infra-internal task-verify {task-id} analyze.awaiting-input --format text` (the early-exit set `current_step: requirement-analysis` and wrote `start_date`, so it should pass); also keep `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` and the task-comment sync evidence. Do **not** run the artifact gate, nor `check activity-log` / `check platform-sync` (both bind to the analysis artifact path).
   5. User output: show only the current **single question** plus how to answer/continue (re-trigger `analyze-task {task-ref}` with the answer), and append the `Completed at` line per `.agents/rules/next-step-output.md`.
   6. **STOP** and wait for the answer. The next trigger returns to this step.
@@ -200,10 +200,10 @@ After the business fields are updated, run `agent-infra-internal task-event {tas
   ```
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
+- Read `.agents/rules/issue-sync.md` before metadata sync; internal intents own platform context, capabilities, and comments
 - Set `status: pending-design-work` by following issue-sync.md
-- Create or update the task comment marker defined in `.agents/rules/issue-sync.md` (follow the task.md comment sync rule in issue-sync.md)
-- Publish the `{analysis-artifact}` comment
+- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
+- Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {analysis-artifact} --agent {agent}`
 - Read `.agents/rules/issue-fields.md` and follow Flow A to sync every non-empty Issue field (`priority`/`effort`/`start_date`/`target_date`) from `task.md` to the Issue (idempotent; skip without blocking when `has_push=false` or the fetch/write fails)
 
 ### 8. Verification Gate

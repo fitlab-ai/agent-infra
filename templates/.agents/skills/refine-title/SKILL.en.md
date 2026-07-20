@@ -60,7 +60,7 @@ If the user confirms:
 - for an Issue, update the title by following the "Update Issues" command in `.agents/rules/issue-pr-commands.md`
 - for a PR, update the title by following the "Update PRs" command in `.agents/rules/issue-pr-commands.md`
 
-Title changes require write permission. Follow the permission-degradation rules in `.agents/rules/issue-pr-commands.md` and `.agents/rules/issue-sync.md`; if permission is unavailable, skip the change and inform the user.
+Before changing a title, run `agent-infra-internal platform-context resolve` for upstream and capabilities, then use the 08/10 metadata compatibility section in `.agents/rules/issue-pr-commands.md`; if permission is unavailable, skip the change and inform the user.
 
 ### 5. Inform User
 

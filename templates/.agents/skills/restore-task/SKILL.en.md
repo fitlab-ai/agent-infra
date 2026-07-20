@@ -39,7 +39,7 @@ If the user provided `{task-id}`, validate the `TASK-{yyyyMMdd-HHmmss}` format.
 
 ### 2. Fetch Issue Comments
 
-Read all Issue comments by following the "Read Issue comments" command in `.agents/rules/issue-pr-commands.md`, preserving the original order and comment IDs.
+Run `agent-infra-internal platform-comment list --issue {issue-number}` to read all paginated comments while preserving order and comment IDs; the intent owns platform context, authentication, and upstream resolution.
 
 ### 3. Determine the task-id and Files to Restore
 

@@ -2,25 +2,11 @@
 
 在需要验证平台认证、读取 Issue / PR，或执行 Issue / PR 创建与更新前先读取本文件。
 
-## 认证与仓库信息
+## 平台上下文与能力
 
-先验证 GitHub CLI 可用且已认证：
+调用 `agent-infra-internal platform-context resolve` 取得规范 upstream、当前用户和 `comment/triage/push/admin` capabilities。调用方不得自行解释 remote、认证 stderr 或权限 JSON。`failed`/`blocked` 按调用该规则的 Skill 约定停止或降级。
 
-```bash
-gh auth status
-gh repo view --json nameWithOwner
-```
-
-如果任一命令失败，按调用该规则的 skill 约定停止或降级。
-
-## Upstream 仓库与权限检测
-
-在后续任何 `gh issue` 或 `gh api "repos/..."` 操作之前，先按 `.agents/rules/issue-sync.md` 完成 `upstream_repo`、`has_triage` 和 `has_push` 检测。
-
-- 后续所有 `gh issue` 命令统一使用 `-R "$upstream_repo"`
-- 后续所有 repo 级 `gh api` 命令统一使用 `"repos/$upstream_repo/..."`
-- `gh pr *` 命令保持作用于当前仓库，不额外加 `-R`
-- `gh api "orgs/{owner}/..."` 这类 org 级命令保持不变
+本文件其余直接 `gh issue` / `gh pr` 命令属于 08/10–09/10 的 metadata/PR 兼容区；目标仓库使用 context 返回的 `repo`。
 
 ## Issue 模板检测
 
@@ -120,40 +106,7 @@ gh issue close {issue-number} -R "$upstream_repo" --reason "{reason}"
 
 ## Issue 评论读取
 
-读取 Issue 评论或按隐藏标记查找已有评论：
-
-```bash
-gh api "repos/$upstream_repo/issues/{issue-number}/comments" --paginate
-```
-
-## 历史任务评论扫描
-
-`find-existing-task.js` 仅消费 stdin，不直接调用 `gh`。由 AI 按宿主 OS 选择下面的 pipeline 命令。
-
-POSIX（bash / zsh）：
-
-```bash
-set -o pipefail
-gh api "repos/$upstream_repo/issues/{issue-number}/comments" \
-  --paginate --jq '.[] | @json' \
-  | node .agents/scripts/find-existing-task.js
-```
-
-Windows（PowerShell 7+ / pwsh）：
-
-```powershell
-$ErrorActionPreference = 'Stop'
-gh api "repos/$upstream_repo/issues/{issue-number}/comments" `
-  --paginate --jq '.[] | @json' |
-  node .agents/scripts/find-existing-task.js
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-```
-
-在 PowerShell 5.1 上需先显式启用 UTF-8 stdio，否则 pipe 可能损坏多字节字符：
-
-```powershell
-[Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new()
-```
+统一调用 `agent-infra-internal platform-comment list --issue {issue-number}`。该 intent 负责分页、顺序、marker identity 与结构化错误；历史任务扫描直接消费其 `comments` 数组，不再拼跨平台 pipeline。
 
 ## PR 模板与元数据辅助命令
 

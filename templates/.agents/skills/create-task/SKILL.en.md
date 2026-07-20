@@ -134,7 +134,7 @@ The rule's content is determined by the configured code platform:
 > **Hard constraint**: the milestone sub-step in `.agents/rules/create-issue.md` §4 is mandatory; missing it fails the step 5 gate (`verify_milestone: true`) and aborts create-task.
 
 Handle the result:
-- Rule successfully created the Issue: `issue_number` has been written back to task.md per the rule; continue by reading `.agents/rules/issue-sync.md`, completing upstream repository and permission detection, then sync the task comment and set `status: waiting-for-triage` by rule
+- Rule successfully created the Issue: `issue_number` has been written back to task.md per the rule; run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`, then set `status: waiting-for-triage` per `.agents/rules/issue-sync.md`
 - Rule failed (auth / network / template parse / etc.): do not roll back task.md or append an extra Activity Log entry; run `agent-infra-internal task-warning {task-id} add --step create-task --severity ACTION_REQUIRED --code ISSUE_CREATE_FAILED --target issue --message "{error_code}: {error_message}" --action "Fix auth/network/template issues and manually retry Issue creation, or create/find an Issue and write issue_number"` to submit a structured warning intent (callers do not allocate ids or edit rows), then follow Scenario C
 - Rule was a no-op (custom or empty platform): do not create comments, do not block the workflow, and do not write an Activity Log entry
 - task.md already has `issue_number`: the rule's prerequisite check skips creation; `create-task` proceeds directly to step 5

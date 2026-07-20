@@ -60,7 +60,7 @@ Issue/PR #{id} 分析结果：
 - 对于 Issue：按 `.agents/rules/issue-pr-commands.md` 中的 “Issue 更新” 命令设置标题
 - 对于 PR：按 `.agents/rules/issue-pr-commands.md` 中的 “PR 更新” 命令设置标题
 
-标题修改需要写权限，按 `.agents/rules/issue-pr-commands.md` 与 `.agents/rules/issue-sync.md` 中的权限降级规则执行；无权限时跳过修改操作并告知用户。
+标题修改前调用 `agent-infra-internal platform-context resolve` 取得 upstream 与 capabilities，再按 `.agents/rules/issue-pr-commands.md` 的 08/10 元数据兼容区执行；无权限时跳过修改操作并告知用户。
 
 ### 5. 告知用户
 

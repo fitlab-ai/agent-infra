@@ -846,9 +846,9 @@ const retryCases = [
     matcher: "api repos/fitlab-ai/agent-infra"
   },
   {
-    name: "validate-artifact platform-sync retries permission lookup on transient gh failure",
+    name: "validate-artifact platform-sync retries capability context lookup on transient gh failure",
     prefix: "agent-infra-platform-sync-retry-permissions-",
-    matcher: ".permissions"
+    matcher: "api repos/fitlab-ai/agent-infra"
   }
 ];
 

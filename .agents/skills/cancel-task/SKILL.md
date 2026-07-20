@@ -73,7 +73,7 @@ ls .agents/workspace/completed/{task-id}/task.md
 
 检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过此步骤。
 
-> Issue 同步规则见 `.agents/rules/issue-sync.md`。执行同步前先读取该文件，完成 upstream 仓库检测和权限检测。
+> Issue 元数据规则见 `.agents/rules/issue-sync.md`；平台上下文、权限与评论 marker 由 internal platform intent 统一处理。
 > 关闭 Issue 前先读取 `.agents/rules/issue-pr-commands.md`。
 
 如果存在有效的 `issue_number`：
@@ -81,8 +81,8 @@ ls .agents/workspace/completed/{task-id}/task.md
 - 按 issue-sync.md 移除所有 `in:` labels
 - 按 issue-sync.md 移除 milestone
 - 移除全部 assignees（无权限时直接跳过，不做替代）
-- 发布取消评论，隐藏标记使用 `.agents/rules/issue-sync.md` 中定义的 cancel 评论标记
-- 使用 `.agents/rules/issue-sync.md` 的 task.md 评论同步规则创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记
+- 将取消正文写入临时文件，调用 `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {agent}`
+- 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
 - 关闭 Issue：按 `.agents/rules/issue-pr-commands.md` 中的“关闭 Issue”命令执行，关闭原因固定为 `not planned`
 
 取消评论至少包含：

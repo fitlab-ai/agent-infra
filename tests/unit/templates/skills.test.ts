@@ -803,26 +803,48 @@ test("workflow skill docs update task comments before publishing artifact commen
     ["analyze-task", "{analysis-artifact}"],
     ["plan-task", "{plan-artifact}"],
     ["code-task", "{code-artifact}"],
-    ["review-code", "{review-artifact}"],
-    ["code-task", "{code-artifact}"]
+    ["review-code", "{review-artifact}"]
   ];
 
   orderedCommentSkills.forEach(([skill, artifact]) => {
     skillDocPaths(skill).forEach((relativePath) => {
       const content = read(relativePath);
-      const taskCommentIndex = content.indexOf(".agents/rules/issue-sync.md");
-      const artifactCommentIndex = relativePath.includes(".en.")
-        ? content.indexOf(`Publish the \`${artifact}\` comment`)
-        : content.indexOf(`发布 \`${artifact}\` 评论`);
+      const taskCommentIndex = content.indexOf("platform-comment sync {task-id} --kind task");
+      const artifactCommentIndex = content.indexOf(`platform-comment sync {task-id} --kind artifact --artifact ${artifact}`);
 
-      assert.notEqual(taskCommentIndex, -1, `${relativePath} should reference the task comment sync rule`);
-      assert.notEqual(artifactCommentIndex, -1, `${relativePath} should include the artifact comment publish step`);
+      assert.notEqual(taskCommentIndex, -1, `${relativePath} should invoke task comment sync`);
+      assert.notEqual(artifactCommentIndex, -1, `${relativePath} should invoke artifact comment sync`);
       assert.ok(
         taskCommentIndex < artifactCommentIndex,
         `${relativePath} should sync the task comment before publishing the artifact comment`
       );
     });
   });
+});
+
+test("platform workflow docs delegate comment mechanics to internal intents", () => {
+  const requiredIntentBySkill: Record<string, string> = {
+    "analyze-task": "platform-comment sync {task-id}",
+    "block-task": "platform-comment sync {task-id}",
+    "cancel-task": "platform-comment sync {task-id}",
+    "code-task": "platform-comment sync {task-id}",
+    "complete-manual-validation": "platform-comment sync {task-id}",
+    "complete-task": "platform-comment sync {task-id}",
+    "create-task": "platform-comment sync {task-id}",
+    "import-issue": "platform-comment list --issue {issue-number}",
+    "plan-task": "platform-comment sync {task-id}",
+    "refine-title": "platform-context resolve",
+    "restore-task": "platform-comment list --issue {issue-number}",
+    "review-analysis": "platform-comment sync {task-id}",
+    "review-code": "platform-comment sync {task-id}",
+    "review-plan": "platform-comment sync {task-id}"
+  };
+
+  for (const [skill, intent] of Object.entries(requiredIntentBySkill)) {
+    for (const relativePath of skillDocPaths(skill)) {
+      assert.ok(read(relativePath).includes(intent), `${relativePath} should delegate through ${intent}`);
+    }
+  }
 });
 
 test("import-issue requires task comment sync in local and template configs", () => {

@@ -99,7 +99,7 @@ test("package metadata supports scoped npm publishing", () => {
   assert.match(pkg.scripts.prepublishOnly, /npm run build/);
   assert.match(pkg.scripts.prepublishOnly, /--test/);
   assert.match(pkg.scripts.prepublishOnly, /tests\/\*\*\/\*\.test\.ts/);
-  assert.match(read("runtime/platform-adapters/platform-sync.github.js"), /from "cross-spawn"/);
+  assert.match(read("runtime/platform-adapters/platform-sync.github.js"), /createGitHubClient/);
 });
 
 test("Node runtime baseline stays aligned across metadata and automation", () => {

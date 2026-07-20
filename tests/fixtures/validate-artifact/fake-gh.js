@@ -66,6 +66,11 @@ if (args[0] === "label" && args[1] === "list") {
   process.exit(0);
 }
 
+if (args[0] === "api" && args[1] === "user") {
+  process.stdout.write(JSON.stringify({ login: process.env.GH_FAKE_USER || "fixture-user" }));
+  process.exit(0);
+}
+
 // IMPORTANT: keep this route ahead of deeper repo-scoped routes because code-task
 // verification now resolves repo metadata before falling through to issue endpoints.
 if (args[0] === "api" && args[1] && /^repos\/[^/]+\/[^/]+$/.test(args[1])) {
@@ -146,7 +151,9 @@ if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$
   const inputIndex = args.indexOf("--input");
   const inputPath = inputIndex === -1 ? "" : args[inputIndex + 1];
   const comments = commentsPath ? JSON.parse(fs.readFileSync(commentsPath, "utf8")) : [];
-  const payload = inputPath ? JSON.parse(fs.readFileSync(inputPath, "utf8")) : {};
+  const payload = inputPath
+    ? JSON.parse(fs.readFileSync(inputPath === "-" ? 0 : inputPath, "utf8"))
+    : {};
   const nextId = comments.reduce((max, comment) => Math.max(max, Number(comment.id || 0)), 0) + 1;
   const comment = { id: nextId, body: payload.body || "" };
 
@@ -165,14 +172,23 @@ if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/issues\/comments\/\d+$
   const match = args[1].match(/\/issues\/comments\/(\d+)$/);
   const commentId = match ? Number(match[1]) : 0;
   const comments = commentsPath ? JSON.parse(fs.readFileSync(commentsPath, "utf8")) : [];
-  const payload = inputPath ? JSON.parse(fs.readFileSync(inputPath, "utf8")) : {};
-  const comment = comments.find((item) => Number(item.id) === commentId);
+  const commentIndex = comments.findIndex((item) => Number(item.id) === commentId);
+  const comment = comments[commentIndex];
 
   if (!comment) {
     console.error(`comment not found: ${commentId}`);
     process.exit(1);
   }
 
+  if (args.includes("DELETE")) {
+    comments.splice(commentIndex, 1);
+    if (commentsPath) fs.writeFileSync(commentsPath, JSON.stringify(comments));
+    process.exit(0);
+  }
+
+  const payload = inputPath
+    ? JSON.parse(fs.readFileSync(inputPath === "-" ? 0 : inputPath, "utf8"))
+    : {};
   comment.body = payload.body || "";
   if (commentsPath) {
     fs.writeFileSync(commentsPath, JSON.stringify(comments));

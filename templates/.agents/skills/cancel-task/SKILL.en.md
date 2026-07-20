@@ -74,7 +74,7 @@ Confirm the task directory was moved successfully.
 
 Check whether `task.md` contains a valid `issue_number`. If not, skip this step.
 
-> Issue sync rules live in `.agents/rules/issue-sync.md`. Read that file before syncing, and complete upstream repository detection plus permission detection.
+> Issue metadata rules live in `.agents/rules/issue-sync.md`; internal platform intents own context, capabilities, and comment markers.
 > Read `.agents/rules/issue-pr-commands.md` before closing the Issue.
 
 If a valid `issue_number` exists:
@@ -82,8 +82,8 @@ If a valid `issue_number` exists:
 - Remove all `in:` labels by following issue-sync.md
 - Remove the milestone by following issue-sync.md
 - Remove all assignees (skip directly when permission is insufficient; no fallback)
-- Publish a cancellation comment using the cancel marker defined in `.agents/rules/issue-sync.md`
-- Create or update the task comment marker defined in `.agents/rules/issue-sync.md` using the task-comment sync rules from `.agents/rules/issue-sync.md`
+- Write the cancellation body to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {agent}`
+- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
 - Close the Issue by following the "Close an Issue" command in `.agents/rules/issue-pr-commands.md`, using the fixed reason `not planned`
 
 The cancellation comment must include at least:

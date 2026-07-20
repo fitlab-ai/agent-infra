@@ -104,7 +104,7 @@ agent-infra-internal task-event {task-id} analyze.started --agent {agent}
      - 若已存在 `pending_question`（上一问尚未得到答案）→ 复述该 `pending_question`，**不**修改它、**不**增加 `question_count`；
      - 否则（无待答问题）→ 选最高价值的一个问题（验收标准 > 范围 > 歧义），写入 `## Brainstorming`：`status: asking`、`pending_question: <问题>`、`question_count += 1`。
   2. 若 `start_date` 为空，写入当日日期（`date +%F`）；随后执行 `agent-infra-internal task-event {task-id} analyze.awaiting-input --agent {agent} --question {question_count}`，由核心统一更新基础 frontmatter 和 Activity Log。
-  3. Issue 同步（存在 `issue_number` 时，任一失败跳过）：先读 `.agents/rules/issue-sync.md` 完成 upstream / 权限检测；仅按 task.md 评论同步规则更新 **task 评论**；`status` label 维持 `pending-design-work`；**不**发布分析产物评论。
+  3. Issue 同步（存在 `issue_number` 时，任一失败跳过）：调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}` 更新 **task 评论**；`status` label 维持 `pending-design-work`；**不**发布分析产物评论。
   4. 校验（替代步骤 8 的 artifact gate）：`agent-infra-internal task-verify {task-id} analyze.awaiting-input --format text`（早退已置 `current_step: requirement-analysis` 且已写入 `start_date`，预期通过）；并保留 `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` 与 task 评论同步证据。**不**跑 artifact gate，也不跑 `check activity-log` / `check platform-sync`（二者绑定分析产物路径）。
   5. 用户输出：只展示当前**单个问题** + 如何回答/继续（再次触发 `analyze-task {task-ref}` 并附答案），并按 `.agents/rules/next-step-output.md` 在末行追加 `Completed at`。
   6. **STOP**，等待回答。下一次触发回到本步骤。
@@ -199,10 +199,10 @@ agent-infra-internal task-event {task-id} analyze.started --agent {agent}
 - 完成业务内容更新后执行 `agent-infra-internal task-event {task-id} analyze.completed --agent {agent} --artifact {analysis-artifact}`，由核心原子登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
-- 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
+- 元数据同步前读取 `.agents/rules/issue-sync.md`；平台上下文、权限与评论由 internal intent 统一处理
 - 按 issue-sync.md 设置 `status: pending-design-work`
-- 创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记（按 issue-sync.md 的 task.md 评论同步规则）
-- 发布 `{analysis-artifact}` 评论
+- 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
+- 调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {analysis-artifact} --agent {agent}`
 - 读取 `.agents/rules/issue-fields.md`，按流程 A 把 `task.md` 中所有非空的 Issue 字段（`priority`/`effort`/`start_date`/`target_date`）同步到 Issue（幂等；`has_push=false` 或取数/写入失败时跳过，不阻断）
 
 ### 8. 完成校验

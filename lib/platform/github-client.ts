@@ -1,0 +1,129 @@
+import process from 'node:process';
+import spawn from 'cross-spawn';
+
+import type { PlatformError } from './types.ts';
+
+type RunResult = { status: number | null; stdout: string; stderr: string; error?: Error };
+type RunOptions = { cwd?: string; input?: string };
+type Runner = (args: string[], options: RunOptions) => RunResult;
+type RequestOptions = RunOptions & { method?: 'GET' | 'PATCH' | 'POST' | 'DELETE' };
+type ClientResult<T> = { ok: true; value: T } | { ok: false; error: PlatformError };
+
+type GitHubClient = {
+  json<T = unknown>(args: string[], options?: RequestOptions): ClientResult<T>;
+  text(args: string[], options?: RequestOptions): ClientResult<string>;
+};
+
+type ClientOptions = {
+  runner?: Runner;
+  retryDelaysMs?: number[];
+  sleep?: (delayMs: number) => void;
+};
+
+function defaultRunner(args: string[], options: RunOptions): RunResult {
+  const command = process.env.AGENT_INFRA_GH_BIN || 'gh';
+  let prefix: string[] = [];
+  try {
+    prefix = JSON.parse(process.env.AGENT_INFRA_GH_ARGS_JSON || '[]') as string[];
+  } catch {
+    prefix = [];
+  }
+  const result = spawn.sync(command, [...prefix, ...args], {
+    cwd: options.cwd,
+    encoding: 'utf8',
+    env: process.env,
+    input: options.input,
+    shell: false
+  });
+  return {
+    status: result.status,
+    stdout: String(result.stdout || ''),
+    stderr: String(result.stderr || ''),
+    error: result.error
+  };
+}
+
+function retryDelaysFromEnvironment(): number[] {
+  const raw = process.env.VALIDATE_ARTIFACT_RETRY_DELAYS_MS;
+  if (!raw) return [3000, 10000];
+  return raw.split(',').map(Number).filter((value) => Number.isFinite(value) && value >= 0);
+}
+
+function defaultSleep(delayMs: number): void {
+  if (delayMs <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+}
+
+function classifyGitHubFailure(result: RunResult): PlatformError {
+  const detail = `${result.stderr}\n${result.stdout}\n${result.error?.message || ''}`.trim();
+  const lower = detail.toLowerCase();
+  if (/\b401\b|bad credentials|authentication required|not logged into/.test(lower)) {
+    return { code: 'AUTH_REQUIRED', message: detail || 'GitHub authentication is required', retryable: false };
+  }
+  if (/\b429\b|rate limit|secondary rate|\b5\d\d\b|timeout|timed out|econnreset|enotfound|dns|tls|socket|network/.test(lower)) {
+    return { code: 'NETWORK_TRANSIENT', message: detail || 'GitHub request failed temporarily', retryable: true };
+  }
+  if (/\b403\b|resource not accessible|permission denied/.test(lower)) {
+    return { code: 'PERMISSION_DENIED', message: detail || 'GitHub permission denied', retryable: false };
+  }
+  if (/\b404\b/.test(lower)) {
+    return { code: 'RESOURCE_NOT_FOUND', message: detail || 'GitHub resource not found', retryable: false };
+  }
+  if (/\b422\b|validation failed/.test(lower)) {
+    return { code: 'PLATFORM_REQUEST_INVALID', message: detail || 'GitHub rejected the request', retryable: false };
+  }
+  if (result.error && 'code' in result.error && (result.error as NodeJS.ErrnoException).code === 'ENOENT') {
+    return { code: 'PLATFORM_DEPENDENCY_MISSING', message: detail || 'GitHub CLI is unavailable', retryable: false };
+  }
+  return { code: 'PLATFORM_REQUEST_FAILED', message: detail || 'GitHub request failed', retryable: false };
+}
+
+function createGitHubClient(options: ClientOptions = {}): GitHubClient {
+  const runner = options.runner || defaultRunner;
+  const delays = options.retryDelaysMs || retryDelaysFromEnvironment();
+  const sleep = options.sleep || defaultSleep;
+
+  function run(args: string[], request: RequestOptions = {}): ClientResult<string> {
+    const method = request.method || 'GET';
+    const retryableMethod = method === 'GET' || method === 'PATCH';
+    let attempt = 0;
+    while (true) {
+      const result = runner(args, request);
+      if (result.status === 0) return { ok: true, value: result.stdout };
+      const error = classifyGitHubFailure(result);
+      if (!retryableMethod || !error.retryable) return { ok: false, error };
+      if (attempt >= delays.length) {
+        return {
+          ok: false,
+          error: error.code === 'NETWORK_TRANSIENT'
+            ? { ...error, code: 'NETWORK_RETRY_EXHAUSTED', message: `${error.message} (retry exhausted)` }
+            : error
+        };
+      }
+      sleep(delays[attempt]!);
+      attempt += 1;
+    }
+  }
+
+  return {
+    text(args, request = {}) {
+      const result = run(args, request);
+      return result.ok ? { ok: true, value: result.value.trim() } : result;
+    },
+    json<T>(args: string[], request: RequestOptions = {}): ClientResult<T> {
+      const result = run(args, request);
+      if (!result.ok) return result;
+      try {
+        return { ok: true, value: JSON.parse(result.value || 'null') as T };
+      } catch {
+        return {
+          ok: false,
+          error: { code: 'INVALID_PLATFORM_RESPONSE', message: 'GitHub returned invalid JSON', retryable: true }
+        };
+      }
+    }
+  };
+}
+
+export { classifyGitHubFailure, createGitHubClient };
+export type { ClientResult, GitHubClient, RequestOptions, RunOptions, RunResult, Runner };

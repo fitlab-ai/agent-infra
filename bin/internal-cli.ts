@@ -11,6 +11,16 @@ if (major < 22 || (major === 22 && minor < 9)) {
 const command = process.argv[2] || '';
 
 switch (command) {
+  case 'platform-context': {
+    const { platformContext } = await import('../lib/internal/platform-context.ts');
+    platformContext(process.argv.slice(3));
+    break;
+  }
+  case 'platform-comment': {
+    const { platformComment } = await import('../lib/internal/platform-comment.ts');
+    platformComment(process.argv.slice(3));
+    break;
+  }
   case 'task-context': {
     const { taskContext } = await import('../lib/internal/task-context.ts');
     taskContext(process.argv.slice(3));

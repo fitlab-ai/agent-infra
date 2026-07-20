@@ -21,8 +21,8 @@
 ## 前置读取
 
 执行远端操作前先读取：
-- `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测。
-- `.agents/rules/pr-sync.md`，复用 PR 摘要隐藏标记、Issues comments API 和 Shell 安全规则。
+- 调用 `agent-infra-internal platform-context resolve`，复用 typed client 的 upstream、认证、capability 与无 shell transport。
+- `.agents/rules/pr-sync.md`，复用 PR 摘要隐藏标记和 09/10 聚合边界。
 
 ## 评论查找
 
@@ -69,11 +69,7 @@ summary failed: missing sync-pr summary
 
 更新已有评论时必须使用 Issues comments PATCH，具体命令遵循 `.agents/rules/pr-sync.md`。
 
-Shell 安全规则：
-- 先读取本地和远端正文，再构造完整正文。
-- heredoc 使用单引号 `<<'EOF'`。
-- 不在 heredoc 内执行变量展开或命令替换。
-- 构造含 `<!-- -->` 的正文时不用 `echo`。
+通过共享平台 client 的参数数组与 stdin 传递完整正文，不在 Skill 中拼 shell/heredoc。PR summary 专用 intent 留给 09/10；本轮保持现有 PATCH 业务语义。
 
 ## 结果回传
 

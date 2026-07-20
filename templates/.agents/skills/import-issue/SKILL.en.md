@@ -65,7 +65,7 @@ Strip only the first layer, and only when the leading token is a `prefix-types` 
 - If found, **reuse the existing task by default** (Scenario A); do not ask the user. State clearly in the final notice: "Reused existing task `{task-id}`; not re-imported." If the user wants to re-import, they must first archive or delete the existing task and run this skill again
 - If not found, continue to 2.2
 
-2.2 Use the "historical task comment scan" command in `.agents/rules/issue-pr-commands.md` to scan Issue comments for sync markers and look for a recoverable historical task ID.
+2.2 Run `agent-infra-internal platform-comment list --issue {issue-number}` to scan registered markers for a recoverable historical task ID.
 
 This command depends on `$upstream_repo` being set in step 1.
 
@@ -149,9 +149,9 @@ If task.md contains a valid `issue_number`, use the Issue update command from `.
 ### 6. Sync to the Issue
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Read `.agents/rules/issue-sync.md` before syncing, and complete upstream repository detection plus permission detection
+- Read `.agents/rules/issue-sync.md` before metadata sync
 - Check the Issue's current milestone; if it is unset, read `.agents/rules/milestone-inference.md`, infer a release line using "Phase 1: `create-task` (when the platform rule creates an Issue)", and run its "Backfill when called from `import-issue`" subsection to write back to the remote Issue. If inference fails, permissions are insufficient, or write-back fails, skip and continue without blocking the import
-- After every scenario, task comment sync is mandatory: create or update the task comment marker defined in `.agents/rules/issue-sync.md` so the remote `:task` comment exists and matches the local `task.md` content (follow the task.md comment sync rule in issue-sync.md)
+- After every scenario, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
 
 ### 7. Verification Gate
 

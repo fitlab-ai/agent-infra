@@ -140,13 +140,13 @@ ls .agents/workspace/completed/{task-id}/task.md
 
 检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过此步骤且不输出任何内容。
 
-> Issue 同步规则见 `.agents/rules/issue-sync.md`。执行同步前先读取该文件，完成 upstream 仓库检测和权限检测。
+> Issue 元数据边界见 `.agents/rules/issue-sync.md`；评论同步统一调用 internal platform intent。
 
 如果存在有效的 `issue_number`：
-- 先按 `.agents/rules/issue-sync.md` 的补发规则扫描并补发未发布的 `task.md`、`analysis*.md`、`review-analysis*.md`、`plan*.md`、`review-plan*.md`、`code*.md`、`review-code*.md` 评论（`task.md` 走幂等更新路径）
+- 先调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`；再按 artifact catalog 顺序对本地已有产物逐项调用 `platform-comment sync ... --kind artifact --artifact {artifact} --agent {artifact-agent} --backfill`
 - 按 issue-sync.md 的需求复选框同步步骤，兜底同步 `## 需求` 中已勾选的条目到 Issue body
 - 不要设置 `status:` label — 平台自动化应在 Issue 关闭后清理状态标签；预完成 platform-sync gate 会验证 CLOSED Issue 不含任何 `status:` 标签，残留时失败并要求等待或修复 workflow 后重跑
-- 最后创建或更新 `.agents/rules/issue-sync.md` 中定义的 summary 评论标记对应的 summary 评论
+- 最后把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {agent}`
 - 读取 `.agents/rules/issue-fields.md`，按流程 A 把 `task.md` 中所有非空的 Issue 字段（`priority`/`effort`/`start_date`/`target_date`）同步到 Issue（幂等；`has_push=false` 或取数/写入失败时跳过，不阻断）
 
 ### 7. 完成校验

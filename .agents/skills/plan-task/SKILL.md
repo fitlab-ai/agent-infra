@@ -112,10 +112,10 @@ agent-infra-internal task-event {task-id} plan.started --agent {agent}
 - 完成业务内容更新后执行 `agent-infra-internal task-event {task-id} plan.completed --agent {agent} --artifact {plan-artifact}`，由核心原子登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
-- 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
+- 元数据同步前读取 `.agents/rules/issue-sync.md`；平台上下文、权限与评论由 internal intent 处理
 - 按 issue-sync.md 设置 `status: pending-design-work`
-- 创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记（按 issue-sync.md 的 task.md 评论同步规则）
-- 发布 `{plan-artifact}` 评论
+- 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
+- 调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {plan-artifact} --agent {agent}`
 - 读取 `.agents/rules/issue-fields.md`，按流程 A 把 `task.md` 中所有非空的 Issue 字段（`priority`/`effort`/`start_date`/`target_date`）同步到 Issue（幂等；`has_push=false` 或取数/写入失败时跳过，不阻断）
 
 ### 8. 完成校验

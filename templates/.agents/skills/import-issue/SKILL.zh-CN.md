@@ -65,9 +65,9 @@ example-single-layer: "feat: add A: B" => "add A: B"
 - 如果找到，**默认复用现有任务**（场景 A），不询问用户；在最终告知中明确「已复用现有任务 `{task-id}`，未重新导入」。若用户希望重新导入，需要先手动归档/删除已有任务再次执行本技能
 - 如果未找到，继续执行 2.2
 
-2.2 按 `.agents/rules/issue-pr-commands.md` 的“历史任务评论扫描”命令扫描 Issue 评论中的同步标记，查找可恢复的历史任务 ID。
+2.2 调用 `agent-infra-internal platform-comment list --issue {issue-number}` 扫描注册 marker，查找可恢复的历史任务 ID。
 
-该命令依赖步骤 1 已设置的 `$upstream_repo`。
+该命令内部解析 upstream、认证与分页。
 
 退出码处理（pipeline 整体）：
 
@@ -149,9 +149,9 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ### 6. 同步到 Issue
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
-- 执行前先读取 `.agents/rules/issue-sync.md`，完成 upstream 仓库检测和权限检测
+- 元数据同步前读取 `.agents/rules/issue-sync.md`
 - 检查 Issue 当前 milestone；如果未设置，先读取 `.agents/rules/milestone-inference.md`，按其中的「阶段 1：`create-task`（平台规则创建 Issue 时）」推断版本线，并按其「`import-issue` 调用时的兜底」子节执行远端回写；推断失败、权限不足或回写失败均跳过并继续，不阻断导入
-- 所有场景结束后，必须执行一次 task 留言同步，创建或更新 `.agents/rules/issue-sync.md` 中定义的 task 评论标记，确保远端 `:task` 评论存在且内容与本地 `task.md` 一致（按 issue-sync.md 的 task.md 评论同步规则）
+- 所有场景结束后，必须调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
 
 ### 7. 完成校验
 

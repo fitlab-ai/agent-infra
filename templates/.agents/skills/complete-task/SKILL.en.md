@@ -141,13 +141,13 @@ Confirm the task directory was successfully moved.
 
 Check whether `task.md` includes a valid `issue_number`. If not, skip this step and output nothing.
 
-> Issue sync rules live in `.agents/rules/issue-sync.md`. Read that file before syncing, and complete upstream repository detection plus permission detection.
+> Issue metadata boundaries live in `.agents/rules/issue-sync.md`; comments use internal platform intents.
 
 If a valid `issue_number` exists:
-- First scan and backfill unpublished `task.md`, `analysis*.md`, `review-analysis*.md`, `plan*.md`, `review-plan*.md`, `code*.md`, and `review-code*.md` comments using the backfill rules in `.agents/rules/issue-sync.md` (`task.md` uses the idempotent update path)
+- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`, then invoke `platform-comment sync ... --kind artifact --artifact {artifact} --agent {artifact-agent} --backfill` for each existing artifact in catalog order
 - Backfill checked `## Requirements` items to the Issue body by following the requirements-checkbox sync steps in issue-sync.md
 - Do not set any `status:` label — platform automation should clear status labels after the Issue closes; the pre-completion platform-sync gate verifies that a CLOSED Issue has no `status:` labels and fails until the workflow finishes or is repaired
-- Finally create or update the summary comment marked with the summary marker defined in `.agents/rules/issue-sync.md`
+- Write the business summary to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {agent}`
 - Read `.agents/rules/issue-fields.md` and follow Flow A to sync every non-empty Issue field (`priority`/`effort`/`start_date`/`target_date`) from `task.md` to the Issue (idempotent; skip without blocking when `has_push=false` or the fetch/write fails)
 
 ### 7. Verification Gate

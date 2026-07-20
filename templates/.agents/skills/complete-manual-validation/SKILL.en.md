@@ -85,7 +85,7 @@ Before this step, read `reference/report-template.md`. Create `{manual-validatio
 
 Run `agent-infra-internal task-event {task-id} manual-validation.completed --agent {agent} --artifact {manual-validation-artifact} --summary-result "{summary-result}"`. The core keeps `current_step` unchanged while atomically recording the implementation-notes link, metadata, and done log.
 
-If the task has a valid `issue_number`, follow `.agents/rules/issue-sync.md` to update the task comment and publish the `{manual-validation-artifact}` comment.
+If the task has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {agent}`.
 
 ### 7. Verification Gate
 

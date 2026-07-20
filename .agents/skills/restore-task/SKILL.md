@@ -38,7 +38,7 @@ description: >
 
 ### 2. 获取 Issue 评论
 
-按 `.agents/rules/issue-pr-commands.md` 中的 “Issue 评论读取” 命令读取 Issue 的全部评论，保留原始顺序和评论 ID。
+调用 `agent-infra-internal platform-comment list --issue {issue-number}` 读取全部分页评论，保留原始顺序和评论 ID；平台上下文、认证和 upstream 由 internal intent 处理。
 
 ### 3. 确定 task-id 与待恢复文件
 

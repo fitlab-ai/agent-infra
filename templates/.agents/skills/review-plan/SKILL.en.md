@@ -69,7 +69,7 @@ After the report, submit each new finding with `agent-infra-internal task-ledger
 
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 
-If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, sync the task comment, and publish the `{review-artifact}` comment.
+If task.md has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {agent}`.
 
 ### 7. Run Completion Gate
 

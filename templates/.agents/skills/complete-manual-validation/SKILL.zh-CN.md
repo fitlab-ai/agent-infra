@@ -85,7 +85,7 @@ complete-manual-validation {task-ref} [{pr-ref}] {verification-summary}
 
 执行 `agent-infra-internal task-event {task-id} manual-validation.completed --agent {agent} --artifact {manual-validation-artifact} --summary-result "{summary-result}"`，由核心在保持 `current_step` 不变的同时原子登记实现备注链接、时间/版本和完成日志。
 
-如任务存在有效 `issue_number`，按 `.agents/rules/issue-sync.md` 更新 task 评论并发布 `{manual-validation-artifact}` 评论。
+如任务存在有效 `issue_number`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {agent}`。
 
 ### 7. 完成校验
 

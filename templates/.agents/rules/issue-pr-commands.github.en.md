@@ -2,25 +2,11 @@
 
 Read this file before verifying platform authentication, reading Issues / PRs, or creating and updating Issues / PRs.
 
-## Authentication and Repository Info
+## Platform Context and Capabilities
 
-Verify that GitHub CLI is available and authenticated:
+Run `agent-infra-internal platform-context resolve` to obtain canonical upstream identity, current user, and `comment/triage/push/admin` capabilities. Callers do not parse remotes, authentication stderr, or permission JSON. Handle `failed`/`blocked` according to the calling Skill.
 
-```bash
-gh auth status
-gh repo view --json nameWithOwner
-```
-
-If either command fails, stop or degrade according to the calling skill.
-
-## Upstream Repository and Permission Detection
-
-Before any later `gh issue` or `gh api "repos/..."` call, follow `.agents/rules/issue-sync.md` to resolve `upstream_repo`, `has_triage`, and `has_push`.
-
-- every later `gh issue` command must use `-R "$upstream_repo"`
-- every later repository-scoped `gh api` command must use `"repos/$upstream_repo/..."`
-- keep `gh pr *` commands on the current repository without adding `-R`
-- keep organization-scoped commands such as `gh api "orgs/{owner}/..."` unchanged
+The remaining direct `gh issue` / `gh pr` commands are the 08/10–09/10 metadata/PR compatibility area; target the repository returned in `repo`.
 
 ## Issue Template Detection
 
@@ -120,40 +106,7 @@ gh issue close {issue-number} -R "$upstream_repo" --reason "{reason}"
 
 ## Read Issue Comments
 
-Read Issue comments or search for existing hidden markers:
-
-```bash
-gh api "repos/$upstream_repo/issues/{issue-number}/comments" --paginate
-```
-
-## Historical Task Comment Scan
-
-`find-existing-task.js` only consumes stdin and does not call `gh` directly. The AI selects the pipeline command for the host OS.
-
-POSIX (bash / zsh):
-
-```bash
-set -o pipefail
-gh api "repos/$upstream_repo/issues/{issue-number}/comments" \
-  --paginate --jq '.[] | @json' \
-  | node .agents/scripts/find-existing-task.js
-```
-
-Windows (PowerShell 7+ / pwsh):
-
-```powershell
-$ErrorActionPreference = 'Stop'
-gh api "repos/$upstream_repo/issues/{issue-number}/comments" `
-  --paginate --jq '.[] | @json' |
-  node .agents/scripts/find-existing-task.js
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-```
-
-On PowerShell 5.1, explicitly enable UTF-8 stdio first; otherwise the pipe may corrupt multibyte characters:
-
-```powershell
-[Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new()
-```
+Run `agent-infra-internal platform-comment list --issue {issue-number}`. The intent owns pagination, ordering, marker identity, and structured errors; historical-task scans consume its `comments` array without cross-platform pipelines.
 
 ## PR Template and Metadata Helpers
 

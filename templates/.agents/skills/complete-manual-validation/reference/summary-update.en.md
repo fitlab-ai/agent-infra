@@ -18,8 +18,8 @@ This file only describes PR summary comment updates. The manual-validation artif
 ## Required Reads
 
 Before remote operations, read:
-- `.agents/rules/issue-sync.md` to resolve upstream repository and permissions.
-- `.agents/rules/pr-sync.md` to reuse the PR summary hidden marker, Issues comments API, and shell safety rules.
+- Run `agent-infra-internal platform-context resolve` to reuse typed upstream, authentication, capabilities, and shell-free transport.
+- `.agents/rules/pr-sync.md` for the PR summary marker and the 09/10 aggregation boundary.
 
 ## Comment Lookup
 
@@ -53,7 +53,7 @@ Later `pr-sync` aggregation renders in this priority order:
 
 ## PATCH Rules
 
-Update existing comments with Issues comments PATCH and follow the heredoc safety rules in `.agents/rules/pr-sync.md`.
+Update existing comments through the shared platform client using argument arrays and stdin. The PR-summary-specific intent remains in 09/10; preserve the existing PATCH business semantics in this round.
 
 ## Result Reporting
 
