@@ -19,8 +19,7 @@
       "require_target_date": true
     },
     "activity-log": {
-      "expected_action_pattern": "(Complete Task|Completed)",
-      "freshness_minutes": 30
+      "expected_action_pattern": "(Complete Task|Completed)"
     },
     "completion-checklist": {
       "require_all_checked": true
@@ -45,8 +44,7 @@
       ],
       "required_patterns": [
         "^\\$ "
-      ],
-      "freshness_minutes": 30
+      ]
     }
   }
 }

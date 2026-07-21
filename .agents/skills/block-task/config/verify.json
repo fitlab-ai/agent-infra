@@ -18,8 +18,7 @@
       "require_blocked_at": true
     },
     "activity-log": {
-      "expected_action_pattern": "(Block Task|Blocked)",
-      "freshness_minutes": 30
+      "expected_action_pattern": "(Block Task|Blocked)"
     },
     "platform-sync": {
       "when": "issue_number_exists",

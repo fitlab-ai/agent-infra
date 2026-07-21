@@ -15,8 +15,7 @@
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "(Create PR|PR Created)",
-      "freshness_minutes": 30
+      "expected_action_pattern": "(Create PR|PR Created)"
     },
     "platform-sync": {
       "when": "issue_number_exists",

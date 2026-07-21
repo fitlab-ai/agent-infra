@@ -103,7 +103,7 @@ function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | n
 }
 
 const FAMILY = {
-  analyze: { artifact: 'analysis', started: ['requirement-analysis', 'requirement-analysis-review'], completed: ['requirement-analysis', 'requirement-analysis-review'], target: 'requirement-analysis', label: 'Analyze Task' },
+  analyze: { artifact: 'analysis', started: ['requirement-analysis', 'requirement-analysis-review', 'code'], completed: ['requirement-analysis', 'requirement-analysis-review', 'code'], target: 'requirement-analysis', label: 'Analyze Task' },
   'review-analysis': { artifact: 'review-analysis', started: ['requirement-analysis'], completed: ['requirement-analysis'], target: 'requirement-analysis-review', label: 'Review Analysis' },
   plan: { artifact: 'plan', started: ['requirement-analysis-review', 'technical-design-review'], completed: ['requirement-analysis-review', 'technical-design-review'], target: 'technical-design', label: 'Plan Task' },
   'review-plan': { artifact: 'review-plan', started: ['technical-design'], completed: ['technical-design'], target: 'technical-design-review', label: 'Review Plan' },

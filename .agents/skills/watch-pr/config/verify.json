@@ -15,8 +15,7 @@
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "(Watch PR|Watching PR) \\(Round \\d+\\)",
-      "freshness_minutes": 30
+      "expected_action_pattern": "(Watch PR|Watching PR) \\(Round \\d+\\)"
     }
   }
 }

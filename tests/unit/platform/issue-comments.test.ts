@@ -68,6 +68,14 @@ test('chunk marker validation rejects incomplete and contradictory sets', () => 
     { id: 1, body: `${prefix} -->\na` },
     { id: 2, body: `${prefix}:1/1 -->\nb` }
   ], prefix).code, 'COMMENT_MARKER_CONFLICT');
+  assert.equal(validateRelatedMarkerSet([
+    { id: 1, body: `${prefix}:1/2 -->\na` },
+    { id: 2, body: `${prefix}:1/2 -->\nb` }
+  ], prefix).code, 'COMMENT_MARKER_CONFLICT');
+  assert.equal(validateRelatedMarkerSet([
+    { id: 1, body: `${prefix}:1/2 -->\na` },
+    { id: 2, body: `${prefix}:2/3 -->\nb` }
+  ], prefix).code, 'COMMENT_MARKER_CONFLICT');
 });
 
 function syncFixture() {
@@ -79,6 +87,10 @@ function syncFixture() {
   fs.writeFileSync(
     path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md'),
     '---\nid: TASK-20260101-000001\ntype: feature\nissue_number: 7\n---\n\n# Task\n'
+  );
+  fs.writeFileSync(
+    path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'analysis.md'),
+    '# Analysis\n'
   );
   return root;
 }
@@ -129,6 +141,62 @@ test('comment sync refuses duplicate registered markers without writing', () => 
     text() { throw new Error('write must not be attempted'); }
   } as unknown as GitHubClient;
   const result = syncPlatformComment('TASK-20260101-000001', { kind: 'task', agent: 'codex', cwd: root, client });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'COMMENT_MARKER_CONFLICT');
+});
+
+test('artifact sync isolates sibling stems and becomes a no-op on replay', () => {
+  const root = syncFixture();
+  const siblingBody = `${MARKERS.artifact('TASK-20260101-000001', 'analysis-r2')}\nexisting sibling`;
+  const comments = [{ id: 20, body: siblingBody, user: { login: 'codex' } }];
+  const client = {
+    json(args: string[], options?: { input?: string }) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      if (args.includes('POST')) {
+        const body = JSON.parse(options?.input || '{}').body;
+        comments.push({ id: 21, body, user: { login: 'codex' } });
+        return { ok: true, value: { id: 21 } };
+      }
+      throw new Error(`unexpected request: ${args.join(' ')}`);
+    },
+    text() { throw new Error('delete must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const options = { kind: 'artifact' as const, artifact: 'analysis.md', agent: 'codex', cwd: root, client };
+  const first = syncPlatformComment('TASK-20260101-000001', options);
+  assert.equal(first.status, 'applied');
+  assert.equal(comments.length, 2);
+  assert.deepEqual(comments[0], { id: 20, body: siblingBody, user: { login: 'codex' } });
+
+  const second = syncPlatformComment('TASK-20260101-000001', options);
+  assert.equal(second.status, 'no-op');
+  assert.equal(comments.length, 2);
+  assert.deepEqual(comments[0], { id: 20, body: siblingBody, user: { login: 'codex' } });
+});
+
+test('artifact sync refuses duplicate base markers without writing', () => {
+  const root = syncFixture();
+  const marker = MARKERS.artifact('TASK-20260101-000001', 'analysis');
+  const client = {
+    json(args: string[]) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: {} } };
+      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [[
+        { id: 1, body: `${marker}\na`, user: { login: 'codex' } },
+        { id: 2, body: `${marker}\nb`, user: { login: 'codex' } }
+      ]] };
+      throw new Error('write must not be attempted');
+    },
+    text() { throw new Error('write must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const result = syncPlatformComment('TASK-20260101-000001', {
+    kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client
+  });
   assert.equal(result.status, 'failed');
   assert.equal(result.error?.code, 'COMMENT_MARKER_CONFLICT');
 });

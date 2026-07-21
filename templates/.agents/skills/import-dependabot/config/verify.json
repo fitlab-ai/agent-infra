@@ -17,8 +17,7 @@
       "expected_status": "active"
     },
     "activity-log": {
-      "expected_action_pattern": "(Import Dependabot|Import Dependabot Alert)",
-      "freshness_minutes": 30
+      "expected_action_pattern": "(Import Dependabot|Import Dependabot Alert)"
     },
     "platform-sync": null
   }

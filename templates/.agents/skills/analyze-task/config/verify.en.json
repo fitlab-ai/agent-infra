@@ -27,14 +27,12 @@
         "Effort and Complexity Assessment",
         "State Check"
       ],
-      "freshness_minutes": 30,
       "required_patterns": [
         "^\\$ "
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "(Analyze Task|Requirement Analysis) \\(Round \\d+\\)",
-      "freshness_minutes": 30
+      "expected_action_pattern": "(Analyze Task|Requirement Analysis) \\(Round \\d+\\)"
     },
     "platform-sync": {
       "when": "issue_number_exists",

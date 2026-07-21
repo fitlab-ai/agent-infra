@@ -261,9 +261,11 @@ function markerPrefix(taskId: string, options: SyncOptions): string {
 }
 
 function relatedComments(comments: RemoteComment[], prefix: string): RemoteComment[] {
+  const base = `${prefix} -->`;
+  const chunkNamespace = `${prefix}:`;
   return comments.filter((comment) => {
     const first = normalizeCommentContent(comment.body).split('\n', 1)[0] || '';
-    return first.startsWith(prefix) && first.endsWith(' -->');
+    return first === base || (first.startsWith(chunkNamespace) && first.endsWith(' -->'));
   });
 }
 

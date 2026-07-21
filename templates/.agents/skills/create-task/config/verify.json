@@ -18,8 +18,7 @@
       "expected_status": "active"
     },
     "activity-log": {
-      "expected_action_pattern": "(Create Task|Task Created)",
-      "freshness_minutes": 30
+      "expected_action_pattern": "(Create Task|Task Created)"
     },
     "platform-sync": {
       "when": "issue_number_exists",

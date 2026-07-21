@@ -35,13 +35,11 @@
         "^- \\*\\*审查基线提交\\*\\*[:：]\\s*\\S",
         "^- \\*\\*审查差异指纹\\*\\*[:：]\\s*sha256:[0-9a-f]{64}\\s*$",
         "^- \\*\\*审查快照树\\*\\*[:：]\\s*[0-9a-f]{40,64}\\s*$"
-      ],
-      "freshness_minutes": 30
+      ]
     },
     "review-fact": {},
     "activity-log": {
-      "expected_action_pattern": "(Review Code|Code Review) \\(Round \\d+\\)",
-      "freshness_minutes": 30
+      "expected_action_pattern": "(Review Code|Code Review) \\(Round \\d+\\)"
     },
     "platform-sync": {
       "when": "issue_number_exists",

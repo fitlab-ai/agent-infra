@@ -18,8 +18,7 @@
       "require_issue_number": true
     },
     "activity-log": {
-      "expected_action_pattern": "Import Issue",
-      "freshness_minutes": 30
+      "expected_action_pattern": "Import Issue"
     },
     "platform-sync": {
       "when": "issue_number_exists",

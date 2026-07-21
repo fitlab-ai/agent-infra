@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 
 import {
@@ -409,7 +410,21 @@ test("validate-artifact artifact check fails when a required section is missing"
   })
 ));
 
-test("validate-artifact activity-log freshness uses local timestamps", () => (
+test("validate-artifact artifact check accepts an old valid artifact", () => (
+  withTempRoot("agent-infra-gate-old-artifact-", (tempRoot) => {
+    const taskDir = path.join(tempRoot, "TASK-20260328-000001");
+    write(path.join(taskDir, "task.md"), buildTaskContent());
+    writeCodeFixture(taskDir);
+    const old = new Date(Date.now() - 45 * 60_000);
+    fs.utimesSync(path.join(taskDir, "code.md"), old, old);
+
+    const result = runValidator(["check", "artifact", taskDir, "code.md", "--skill", "code-task"]);
+    assert.equal(result.status, 0, result.stderr);
+    assertPayloadStatus(result, { type: "artifact", status: "pass" });
+  })
+));
+
+test("validate-artifact activity-log accepts an old valid local timestamp", () => (
   withTempRoot("agent-infra-gate-stale-", (tempRoot) => {
     const taskDir = path.join(tempRoot, "TASK-20260328-000001");
     const staleTimestamp = formatTimestampInTimeZone(new Date(Date.now() - 45 * 60_000), localTimeZone);
@@ -422,8 +437,8 @@ test("validate-artifact activity-log freshness uses local timestamps", () => (
     const result = runValidator(["check", "activity-log", taskDir, "--skill", "code-task"], {
       env: { TZ: localTimeZone }
     });
-    assert.equal(result.status, 1);
-    assertPayloadStatus(result, { type: "activity-log", status: "fail", message: /stale/i });
+    assert.equal(result.status, 0, result.stderr);
+    assertPayloadStatus(result, { type: "activity-log", status: "pass" });
   })
 ));
 

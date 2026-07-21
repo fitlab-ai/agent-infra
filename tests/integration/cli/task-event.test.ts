@@ -157,6 +157,40 @@ test('completion without an open start fails without changing the file', () => {
   assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
+test('analysis can restart from code when task requirements expand', () => {
+  const f = fixture('code');
+
+  const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  const startedResult = JSON.parse(started.stdout);
+  assert.equal(startedResult.status, 'applied');
+  assert.equal(startedResult.fromStep, 'code');
+  assert.equal(startedResult.toStep, 'code');
+  assert.equal(startedResult.round, 2);
+  assert.equal(startedResult.artifact, 'analysis-r2.md');
+
+  fs.writeFileSync(path.join(f.dir, 'analysis-r2.md'), '# Analysis round 2\n');
+  const completed = run(f.root, [
+    f.id, 'analyze.completed', '--agent', 'codex', '--artifact', 'analysis-r2.md'
+  ]);
+  assert.equal(completed.status, 0, completed.stderr);
+  assert.equal(JSON.parse(completed.stdout).toStep, 'requirement-analysis');
+  const content = fs.readFileSync(f.file, 'utf8');
+  assert.match(content, /current_step: requirement-analysis/);
+  assert.match(content, /Analyze Task \(Round 2\) \[started\]/);
+  assert.match(content, /\]\(analysis-r2\.md\)/);
+});
+
+test('analysis restart still rejects an unrelated workflow stage without changing task bytes', () => {
+  const f = fixture('technical-design');
+  const before = fs.readFileSync(f.file);
+
+  const started = run(f.root, [f.id, 'analyze.started', '--agent', 'codex']);
+  assert.notEqual(started.status, 0);
+  assert.equal(JSON.parse(started.stdout).error.code, 'EVENT_TRANSITION_INVALID');
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
 test('review-code event completes the regular code review path', () => {
   const f = fixture('code');
   fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');

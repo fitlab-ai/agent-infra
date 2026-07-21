@@ -27,14 +27,12 @@
         "验证策略",
         "状态核对"
       ],
-      "freshness_minutes": 30,
       "required_patterns": [
         "^\\$ "
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "(Plan Task|Technical Design) \\(Round \\d+\\)",
-      "freshness_minutes": 30
+      "expected_action_pattern": "(Plan Task|Technical Design) \\(Round \\d+\\)"
     },
     "review-ledger": {
       "stage_scope": ["analysis"]

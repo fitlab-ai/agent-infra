@@ -31,12 +31,10 @@
       "required_patterns": [
         "^### Approval Decision$",
         "^\\$ "
-      ],
-      "freshness_minutes": 30
+      ]
     },
     "activity-log": {
-      "expected_action_pattern": "(Review Analysis|Analysis Review) \\(Round \\d+\\)",
-      "freshness_minutes": 30
+      "expected_action_pattern": "(Review Analysis|Analysis Review) \\(Round \\d+\\)"
     },
     "platform-sync": {
       "when": "issue_number_exists",

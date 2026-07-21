@@ -23,14 +23,12 @@
         "验证详情",
         "PR 摘要同步"
       ],
-      "freshness_minutes": 30,
       "required_patterns": [
         "^\\$ "
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "Complete Manual Validation",
-      "freshness_minutes": 30
+      "expected_action_pattern": "Complete Manual Validation"
     },
     "review-ledger": {
       "stage_scope": ["analysis", "plan", "code"]

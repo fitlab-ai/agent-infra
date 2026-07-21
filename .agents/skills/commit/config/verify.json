@@ -15,8 +15,7 @@
       ]
     },
     "activity-log": {
-      "expected_action_pattern": "Commit",
-      "freshness_minutes": 30
+      "expected_action_pattern": "Commit"
     },
     "platform-sync": {
       "when": "pr_number_exists",

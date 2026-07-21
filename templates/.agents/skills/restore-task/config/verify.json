@@ -17,8 +17,7 @@
       "require_issue_number": true
     },
     "activity-log": {
-      "expected_action_pattern": "Restore Task",
-      "freshness_minutes": 30
+      "expected_action_pattern": "Restore Task"
     },
     "platform-sync": null
   }

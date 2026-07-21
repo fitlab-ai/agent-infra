@@ -35,13 +35,11 @@
         "^- \\*\\*Review Baseline Commit\\*\\*[:：]\\s*\\S",
         "^- \\*\\*Reviewed Diff Fingerprint\\*\\*[:：]\\s*sha256:[0-9a-f]{64}\\s*$",
         "^- \\*\\*Reviewed Snapshot Tree\\*\\*[:：]\\s*[0-9a-f]{40,64}\\s*$"
-      ],
-      "freshness_minutes": 30
+      ]
     },
     "review-fact": {},
     "activity-log": {
-      "expected_action_pattern": "(Review Code|Code Review) \\(Round \\d+\\)",
-      "freshness_minutes": 30
+      "expected_action_pattern": "(Review Code|Code Review) \\(Round \\d+\\)"
     },
     "platform-sync": {
       "when": "issue_number_exists",

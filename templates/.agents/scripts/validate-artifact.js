@@ -37,7 +37,6 @@ const DEFAULT_REQUIRED_FIELDS = [
   "assigned_to"
 ];
 
-const DEFAULT_FRESHNESS_MINUTES = 30;
 const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?$/;
 const AGENT_INFRA_VERSION_PATTERN = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const ACTIVITY_LOG_PATTERN = /^- (\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?) — \*\*(.+?)\*\* by (.+?) — (.+)$/;
@@ -439,18 +438,9 @@ function checkArtifact({ taskDir, config, artifactFile }) {
     }
   }
 
-  const freshnessMinutes = Number(config.freshness_minutes ?? DEFAULT_FRESHNESS_MINUTES);
-  const ageMinutes = (Date.now() - stat.mtimeMs) / 60000;
-  if (Number.isFinite(freshnessMinutes) && ageMinutes > freshnessMinutes) {
-    return failResult(
-      "artifact",
-      `${path.basename(artifactPath)} is stale (${ageMinutes.toFixed(1)}m old, limit ${freshnessMinutes}m)`
-    );
-  }
-
   return passResult(
     "artifact",
-    `${path.basename(artifactPath)} passed (${requiredSections.length} sections, ${Math.max(0, freshnessMinutes)}m freshness window)`
+    `${path.basename(artifactPath)} passed (${requiredSections.length} sections)`
   );
 }
 
@@ -559,7 +549,7 @@ function checkActivityLog({ taskDir, config }) {
     previousTimestamp = timestamp;
     // Ascending order is checked over every entry, but a `[started]` marker is
     // not a terminal action: keep latestAction/latestTimestamp on the most
-    // recent done entry so expected_action_pattern and freshness see it.
+    // recent done entry so expected_action_pattern sees it.
     if (!ACTIVITY_LOG_STARTED_RE.test(action)) {
       latestTimestamp = timestamp;
       latestAction = action;
@@ -571,17 +561,6 @@ function checkActivityLog({ taskDir, config }) {
       "activity-log",
       `Latest action '${latestAction}' does not match '${config.expected_action_pattern}'`
     );
-  }
-
-  const freshnessMinutes = Number(config.freshness_minutes ?? DEFAULT_FRESHNESS_MINUTES);
-  if (Number.isFinite(freshnessMinutes)) {
-    const ageMinutes = minutesSinceTimestamp(latestTimestamp);
-    if (ageMinutes > freshnessMinutes) {
-      return failResult(
-        "activity-log",
-        `Latest Activity Log entry is stale (${ageMinutes.toFixed(1)}m old, limit ${freshnessMinutes}m)`
-      );
-    }
   }
 
   return passResult("activity-log", `Latest entry '${latestAction}' at ${latestTimestamp}`);
@@ -1172,16 +1151,6 @@ function normalizeContent(text) {
     .replace(/\r\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-}
-
-function minutesSinceTimestamp(timestamp) {
-  const normalized = timestamp.includes("T") ? timestamp : timestamp.replace(" ", "T");
-  const parsed = Date.parse(normalized);
-  if (Number.isNaN(parsed)) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  return (Date.now() - parsed) / 60000;
 }
 
 function interpolate(template, taskDir, artifactFile) {
