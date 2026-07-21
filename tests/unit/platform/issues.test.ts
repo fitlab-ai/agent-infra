@@ -102,6 +102,40 @@ test('issue sync plans dry-run without writes and applies one converging patch',
   assert.equal(patches, 1);
 });
 
+test('issue sync flattens paginated milestones and converges on a specific version', () => {
+  const root = fixture('7');
+  let patches = 0;
+  let currentMilestone = '0.8.x';
+  const client = clientFor((args, input) => {
+    const context = contextResponse(args);
+    if (context) return context;
+    const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+    if (endpoint.endsWith('/milestones?state=open&per_page=100')) return [
+      [{ title: '0.8.x', number: 80 }],
+      [{ title: '0.8.5', number: 85 }, { title: '0.8.6', number: 86 }]
+    ];
+    if (args.includes('PATCH')) {
+      patches += 1;
+      const payload = JSON.parse(input || '{}');
+      assert.deepEqual(payload, { milestone: 86 });
+      currentMilestone = '0.8.6';
+      return {};
+    }
+    return {
+      number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7',
+      state: 'open', title: 'x', body: '', labels: [], assignees: [], milestone: { title: currentMilestone }
+    };
+  });
+
+  const applied = syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', milestone: 'specific', client });
+  assert.equal(applied.status, 'applied');
+  assert.equal(patches, 1);
+
+  const replay = syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', milestone: 'specific', client });
+  assert.equal(replay.status, 'no-op');
+  assert.equal(patches, 1);
+});
+
 test('issue sync resolves organization schema and migrates type before pinned fields', () => {
   const root = fixture('7');
   const taskPath = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001', 'task.md');

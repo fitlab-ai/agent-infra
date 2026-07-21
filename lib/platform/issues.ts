@@ -576,7 +576,7 @@ function syncPlatformIssue(taskRef: string, options: SyncOptions): IssueResult {
   if (options.milestone !== undefined) {
     const listed = base.client.json<unknown>(['api', '--paginate', '--slurp', `repos/${repository}/milestones?state=open&per_page=100`], { cwd: base.resolved.repoRoot });
     if (!listed.ok) return result(listed.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, { issue: snapshot, error: listed.error });
-    milestones = (Array.isArray(listed.value) ? listed.value : []).map((item) => ({ title: String((item as { title?: string }).title || ''), number: Number((item as { number?: number }).number) })).filter((item) => item.title && Number.isInteger(item.number));
+    milestones = flattenPages(listed.value).map((item) => ({ title: String((item as { title?: string }).title || ''), number: Number((item as { number?: number }).number) })).filter((item) => item.title && Number.isInteger(item.number));
   }
   const desired: IssueDesiredState = {
     status: options.status,
