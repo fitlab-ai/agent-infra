@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 
 import { buildDefaultBody } from '../task/commands/issue-body.ts';
 import { extractTitle, parseTaskFrontmatter } from '../task/frontmatter.ts';
-import { renderTemplateBody } from '../task/issue-form.ts';
+import { requirementFieldLabels, renderTemplateBody } from '../task/issue-form.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { extractSection } from '../task/sections.ts';
 import { writeTask } from '../task/write.ts';
@@ -12,13 +12,14 @@ import { resolvePlatformContext } from './context.ts';
 import { createGitHubClient } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
 import {
+  DEFAULT_REQUIREMENT_SECTION_ANCHORS,
   chooseMilestone,
   computeInLabels,
   desiredIssueType,
   normalizeOption,
   planIssueMetadata
 } from './issue-metadata.ts';
-import type { IssueDesiredState, PlannedOperation, Requirement } from './issue-metadata.ts';
+import type { IssueDesiredState, PlannedOperation, Requirement, RequirementSectionAnchor } from './issue-metadata.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
 
@@ -272,7 +273,7 @@ function conventionalTitle(content: string, taskType: string, repoRoot: string):
   return `${type}${scope ? `(${scope})` : ''}: ${taskTitle(content)}`;
 }
 
-function deterministicIssueBody(repoRoot: string, content: string, taskType: string): string {
+function selectedIssueForm(repoRoot: string, taskType: string): string | null {
   const formDir = path.join(repoRoot, '.github', 'ISSUE_TEMPLATE');
   try {
     const files = fs.readdirSync(formDir).filter((file) => file.endsWith('.yml') && file !== 'config.yml').sort();
@@ -280,13 +281,40 @@ function deterministicIssueBody(repoRoot: string, content: string, taskType: str
     const selected = files.find((file) => tokens.some((token) => file.toLowerCase().includes(token)))
       || files.find((file) => file.toLowerCase().includes('other'))
       || files[0];
-    if (selected) return renderTemplateBody(fs.readFileSync(path.join(formDir, selected), 'utf8'), {
+    return selected ? path.join(formDir, selected) : null;
+  } catch {
+    return null;
+  }
+}
+
+function requirementSectionAnchors(repoRoot: string, taskType: string): RequirementSectionAnchor[] {
+  const anchors = [...DEFAULT_REQUIREMENT_SECTION_ANCHORS];
+  const selected = selectedIssueForm(repoRoot, taskType);
+  if (!selected) return anchors;
+  try {
+    for (const heading of requirementFieldLabels(fs.readFileSync(selected, 'utf8'))) {
+      if (!anchors.some((anchor) => anchor.level === 3 && anchor.heading === heading)) {
+        anchors.push({ level: 3, heading });
+      }
+    }
+  } catch {
+    // Invalid forms use the same default-body fallback as Issue creation.
+  }
+  return anchors;
+}
+
+function deterministicIssueBody(repoRoot: string, content: string, taskType: string): string {
+  const selected = selectedIssueForm(repoRoot, taskType);
+  if (selected) {
+    try {
+      return renderTemplateBody(fs.readFileSync(selected, 'utf8'), {
       title: taskTitle(content),
       description: extractSection(content, ['描述', 'Description']),
       requirements: extractSection(content, ['需求', 'Requirements'])
-    });
-  } catch {
-    // Invalid or unavailable forms fall back to the deterministic default body.
+      });
+    } catch {
+      // Invalid or unavailable forms fall back to the deterministic default body.
+    }
   }
   return buildDefaultBody(content);
 }
@@ -590,7 +618,9 @@ function syncPlatformIssue(taskRef: string, options: SyncOptions): IssueResult {
       ? { ...snapshot, milestone: milestoneBasis(base.resolved.repoRoot, snapshot.milestone) }
       : snapshot,
     desired, repositoryLabels: new Set(repositoryLabels), milestones: milestones.map((item) => item.title),
-    currentUser: base.context.platform.currentUser, capabilities: base.context.capabilities
+    currentUser: base.context.platform.currentUser,
+    requirementAnchors: requirementSectionAnchors(base.resolved.repoRoot, base.frontmatter.type || 'task'),
+    capabilities: base.context.capabilities
   });
   if (options.inLabels === 'none') {
     const labels = snapshot.labels.filter((label) => !label.startsWith('in:')).sort();
@@ -655,6 +685,7 @@ export {
   inspectGitHubIssueMetadata,
   inspectPlatformIssue,
   normalizeIssue,
+  requirementSectionAnchors,
   syncPlatformIssue
 };
 export type { BindOptions, CreateOptions, IssueResult, IssueSnapshot, SyncOptions };

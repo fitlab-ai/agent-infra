@@ -5,7 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import { createPlatformIssue, inspectPlatformIssue, syncPlatformIssue } from '../../../lib/platform/issues.ts';
+import {
+  createPlatformIssue,
+  inspectPlatformIssue,
+  requirementSectionAnchors,
+  syncPlatformIssue
+} from '../../../lib/platform/issues.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 
 function fixture(issueNumber = '') {
@@ -100,6 +105,92 @@ test('issue sync plans dry-run without writes and applies one converging patch',
   const replay = syncPlatformIssue('TASK-20260101-000001', { cwd: root, agent: 'codex', status: 'in-progress', client });
   assert.equal(replay.status, 'no-op');
   assert.equal(patches, 1);
+});
+
+test('requirement anchors follow the deterministically selected Issue Form', () => {
+  const root = fixture('7');
+  const formDir = path.join(root, '.github', 'ISSUE_TEMPLATE');
+  fs.mkdirSync(formDir, { recursive: true });
+  fs.writeFileSync(path.join(formDir, 'feature.yml'), [
+    'name: Feature',
+    'body:',
+    '  - type: textarea',
+    '    id: solution',
+    '    attributes:',
+    '      label: Proposed solution'
+  ].join('\n'));
+  assert.deepEqual(requirementSectionAnchors(root, 'feature'), [
+    { level: 2, heading: '需求' },
+    { level: 2, heading: 'Requirements' },
+    { level: 3, heading: 'Proposed solution' }
+  ]);
+});
+
+test('requirements sync plans, applies once, and converges on replay', () => {
+  const root = fixture('7');
+  let patches = 0;
+  let body = 'Intro\n\n## Requirements\n\nN/A\n';
+  const client = clientFor((args, input) => {
+    const context = contextResponse(args);
+    if (context) return context;
+    if (args.includes('PATCH')) {
+      patches += 1;
+      body = JSON.parse(input || '{}').body;
+      return {};
+    }
+    return {
+      number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7',
+      state: 'open', title: 'x', body, labels: [], assignees: [], milestone: null
+    };
+  });
+  const dry = syncPlatformIssue('TASK-20260101-000001', {
+    cwd: root, agent: 'codex', requirements: true, dryRun: true, client
+  });
+  assert.equal(dry.status, 'planned');
+  assert.equal(patches, 0);
+
+  const applied = syncPlatformIssue('TASK-20260101-000001', {
+    cwd: root, agent: 'codex', requirements: true, client
+  });
+  assert.equal(applied.status, 'applied');
+  assert.equal(patches, 1);
+  assert.match(body, /- \[x\] first\n- \[ \] second/);
+
+  const replay = syncPlatformIssue('TASK-20260101-000001', {
+    cwd: root, agent: 'codex', requirements: true, client
+  });
+  assert.equal(replay.status, 'no-op');
+  assert.equal(patches, 1);
+});
+
+test('requirements sync degrades without an anchor and fails before writes on ambiguity', () => {
+  const root = fixture('7');
+  let patches = 0;
+  let body = 'Hand-written issue\n';
+  const client = clientFor((args) => {
+    const context = contextResponse(args);
+    if (context) return context;
+    if (args.includes('PATCH')) patches += 1;
+    return {
+      number: 7, id: 70, node_id: 'I_7', html_url: 'https://github.com/acme/widgets/issues/7',
+      state: 'open', title: 'x', body, labels: [], assignees: [], milestone: null
+    };
+  });
+  const skipped = syncPlatformIssue('TASK-20260101-000001', {
+    cwd: root, agent: 'codex', requirements: true, client
+  });
+  assert.equal(skipped.status, 'degraded');
+  assert.deepEqual(skipped.operations, [{
+    name: 'requirements', status: 'skipped', reasonCode: 'NO_REQUIREMENTS_ANCHOR'
+  }]);
+
+  body = '## Requirements\n\n## 需求\n';
+  const failed = syncPlatformIssue('TASK-20260101-000001', {
+    cwd: root, agent: 'codex', requirements: true, client
+  });
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.error?.code, 'REQUIREMENTS_ANCHOR_AMBIGUOUS');
+  assert.equal(patches, 0);
 });
 
 test('issue sync flattens paginated milestones and converges on a specific version', () => {

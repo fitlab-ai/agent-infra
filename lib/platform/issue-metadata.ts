@@ -1,6 +1,15 @@
 import type { PlatformCapabilities, PlatformOperation } from './types.ts';
 
 type Requirement = { text: string; checked: boolean };
+type RequirementSectionAnchor = { level: 2 | 3; heading: string };
+type RequirementSectionResolution =
+  | { status: 'found'; bodyStart: number; bodyEnd: number }
+  | { status: 'missing'; code: 'NO_REQUIREMENTS_ANCHOR' }
+  | { status: 'ambiguous'; code: 'REQUIREMENTS_ANCHOR_AMBIGUOUS' };
+type RequirementSyncResult =
+  | { status: 'synced'; changed: boolean; body: string }
+  | { status: 'skipped'; changed: false; body: string; code: 'NO_REQUIREMENTS_ANCHOR' }
+  | { status: 'failed'; code: 'REQUIREMENTS_ANCHOR_AMBIGUOUS' | 'REQUIREMENT_IDENTITY_AMBIGUOUS' };
 type IssueMetadataSnapshot = {
   labels: string[];
   assignees: string[];
@@ -16,6 +25,11 @@ type IssueDesiredState = {
   state?: 'open' | 'closed';
 };
 type PlannedOperation = PlatformOperation & { value?: unknown };
+
+const DEFAULT_REQUIREMENT_SECTION_ANCHORS: RequirementSectionAnchor[] = [
+  { level: 2, heading: '需求' },
+  { level: 2, heading: 'Requirements' }
+];
 
 const TYPE_MAP: Record<string, string> = {
   bug: 'Bug', bugfix: 'Bug', feature: 'Feature', enhancement: 'Feature'
@@ -76,20 +90,91 @@ function checkboxPattern(text: string): RegExp {
   return new RegExp(`^(\\s*[-*+]\\s+\\[)([ xX])(\\]\\s+${escaped}\\s*)$`, 'gm');
 }
 
+function hasCheckedRequirement(body: string, text: string): boolean {
+  return [...body.matchAll(checkboxPattern(text))].some((match) => match[2]?.toLowerCase() === 'x');
+}
+
+function visibleHeadings(body: string): Array<{ level: number; heading: string; start: number; end: number }> {
+  const headings: Array<{ level: number; heading: string; start: number; end: number }> = [];
+  let fence: { marker: '`' | '~'; length: number } | null = null;
+  for (const match of body.matchAll(/[^\r\n]*(?:\r\n|\n|$)/g)) {
+    const raw = match[0];
+    if (!raw) break;
+    const line = raw.replace(/\r?\n$/, '');
+    const fenceMatch = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fenceMatch) {
+      const marker = fenceMatch[1]![0] as '`' | '~';
+      const length = fenceMatch[1]!.length;
+      if (!fence) fence = { marker, length };
+      else if (fence.marker === marker && length >= fence.length) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const headingMatch = /^(#{1,6})[ \t]+(.+?)[ \t]*$/.exec(line);
+    if (!headingMatch) continue;
+    const heading = headingMatch[2]!.replace(/[ \t]+#+[ \t]*$/, '').trim();
+    headings.push({
+      level: headingMatch[1]!.length,
+      heading,
+      start: match.index!,
+      end: match.index! + raw.length
+    });
+  }
+  return headings;
+}
+
+function resolveRequirementSection(
+  body: string,
+  anchors: RequirementSectionAnchor[] = DEFAULT_REQUIREMENT_SECTION_ANCHORS
+): RequirementSectionResolution {
+  const allowed = new Set(anchors.map((anchor) => `${anchor.level}\0${anchor.heading}`));
+  const headings = visibleHeadings(body);
+  const candidates = headings.flatMap((heading, index) => {
+    if (!allowed.has(`${heading.level}\0${heading.heading}`)) return [];
+    const next = headings.slice(index + 1).find((item) => item.level <= heading.level);
+    return [{ bodyStart: heading.end, bodyEnd: next?.start ?? body.length }];
+  });
+  if (candidates.length === 0) return { status: 'missing', code: 'NO_REQUIREMENTS_ANCHOR' };
+  if (candidates.length > 1) return { status: 'ambiguous', code: 'REQUIREMENTS_ANCHOR_AMBIGUOUS' };
+  return { status: 'found', ...candidates[0]! };
+}
+
 function syncRequirementCheckboxes(
   body: string,
-  requirements: Requirement[]
-): { ok: true; changed: boolean; body: string } | { ok: false; code: 'REQUIREMENT_IDENTITY_AMBIGUOUS' } {
-  let next = body;
-  for (const requirement of requirements) {
-    const pattern = checkboxPattern(requirement.text);
-    const matches = [...next.matchAll(pattern)];
-    if (matches.length > 1) return { ok: false, code: 'REQUIREMENT_IDENTITY_AMBIGUOUS' };
-    if (matches.length === 1) {
-      next = next.replace(pattern, `$1${requirement.checked ? 'x' : ' '}$3`);
-    }
+  requirements: Requirement[],
+  anchors: RequirementSectionAnchor[] = DEFAULT_REQUIREMENT_SECTION_ANCHORS
+): RequirementSyncResult {
+  if (new Set(requirements.map((requirement) => requirement.text)).size !== requirements.length) {
+    return { status: 'failed', code: 'REQUIREMENT_IDENTITY_AMBIGUOUS' };
   }
-  return { ok: true, changed: next !== body, body: next };
+  const resolution = resolveRequirementSection(body, anchors);
+  if (resolution.status === 'missing') return { status: 'skipped', changed: false, body, code: resolution.code };
+  if (resolution.status === 'ambiguous') return { status: 'failed', code: resolution.code };
+
+  const section = body.slice(resolution.bodyStart, resolution.bodyEnd);
+  const matches = requirements.map((requirement) => ({
+    requirement,
+    count: [...section.matchAll(checkboxPattern(requirement.text))].length
+  }));
+  if (matches.some((match) => match.count > 1)) {
+    return { status: 'failed', code: 'REQUIREMENT_IDENTITY_AMBIGUOUS' };
+  }
+
+  let nextSection = section;
+  const missing: Requirement[] = [];
+  for (const { requirement, count } of matches) {
+    const pattern = checkboxPattern(requirement.text);
+    if (count === 1) nextSection = nextSection.replace(pattern, `$1${requirement.checked ? 'x' : ' '}$3`);
+    else missing.push(requirement);
+  }
+  if (missing.length > 0) {
+    const newline = body.includes('\r\n') ? '\r\n' : '\n';
+    const separator = nextSection.length === 0 || nextSection.endsWith('\n') ? '' : newline;
+    const suffix = resolution.bodyEnd < body.length ? newline : '';
+    nextSection += `${separator}${missing.map((item) => `- [${item.checked ? 'x' : ' '}] ${item.text}`).join(newline)}${suffix}`;
+  }
+  const next = body.slice(0, resolution.bodyStart) + nextSection + body.slice(resolution.bodyEnd);
+  return { status: 'synced', changed: next !== body, body: next };
 }
 
 function planIssueMetadata(input: {
@@ -98,6 +183,7 @@ function planIssueMetadata(input: {
   repositoryLabels?: Set<string>;
   milestones?: string[];
   currentUser?: string | null;
+  requirementAnchors?: RequirementSectionAnchor[];
   capabilities: PlatformCapabilities;
 }): { operations: PlannedOperation[] } {
   const operations: PlannedOperation[] = [];
@@ -137,10 +223,12 @@ function planIssueMetadata(input: {
     }
   }
   if (desired.requirements !== undefined) {
-    const synced = syncRequirementCheckboxes(snapshot.body, desired.requirements);
-    operations.push(!synced.ok
+    const synced = syncRequirementCheckboxes(snapshot.body, desired.requirements, input.requirementAnchors);
+    operations.push(synced.status === 'failed'
       ? { name: 'requirements', status: 'failed', reasonCode: synced.code }
-      : synced.changed
+      : synced.status === 'skipped'
+        ? { name: 'requirements', status: 'skipped', reasonCode: synced.code }
+        : synced.changed
         ? { name: 'requirements', status: 'planned', reasonCode: null, value: synced.body }
         : { name: 'requirements', status: 'no-op', reasonCode: null });
   }
@@ -153,11 +241,22 @@ function planIssueMetadata(input: {
 }
 
 export {
+  DEFAULT_REQUIREMENT_SECTION_ANCHORS,
   chooseMilestone,
   computeInLabels,
   desiredIssueType,
+  hasCheckedRequirement,
   normalizeOption,
   planIssueMetadata,
+  resolveRequirementSection,
   syncRequirementCheckboxes
 };
-export type { IssueDesiredState, IssueMetadataSnapshot, PlannedOperation, Requirement };
+export type {
+  IssueDesiredState,
+  IssueMetadataSnapshot,
+  PlannedOperation,
+  Requirement,
+  RequirementSectionAnchor,
+  RequirementSectionResolution,
+  RequirementSyncResult
+};

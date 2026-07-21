@@ -5,7 +5,9 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import {
+  filePath,
   gitSafeEnv,
+  INTERNAL_CLI_PATH,
   initIsolatedGitRepo,
   onPlatforms,
   pathWithPrependedBin,
@@ -82,6 +84,63 @@ test("platform-sync reads Issue metadata through the shared REST snapshot adapte
     assert.equal(result.status, "pass", result.message);
     const calls = fs.readFileSync(argsPath, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line) as string[]);
     assert.ok(calls.some((args) => args[0] === "api" && /\/issues\/65$/.test(args[1] || "")));
+  });
+});
+
+test("requirements sync converges before the complete-task platform gate", async () => {
+  await withProjectTempRoot("agent-infra-requirements-convergence-", async (tempRoot) => {
+    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
+    const taskDir = path.join(tempRoot, ".agents", "workspace", "active", taskId);
+    const issuePath = path.join(tempRoot, "issue.json");
+    const commentsPath = path.join(tempRoot, "comments.json");
+    const fakeGhPath = path.join(tempRoot, "fake-gh.cjs");
+    write(path.join(tempRoot, ".agents", ".airc.json"), '{"platform":{"type":"github"}}');
+    write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65", type: "bugfix" }));
+    write(fakeGhPath, loadFixture("fake-gh.js"));
+    writeJson(issuePath, {
+      number: 65,
+      id: 650,
+      node_id: "I_65",
+      html_url: "https://github.com/fitlab-ai/agent-infra/issues/65",
+      state: "open",
+      title: "Issue",
+      body: "# Issue\n\n## Requirements\n\nN/A\n",
+      labels: [],
+      assignees: [],
+      milestone: { title: "0.7.1" },
+      type: { name: "Bug" }
+    });
+    writeJson(commentsPath, []);
+    const env = gitSafeEnv({
+      AGENT_INFRA_GH_BIN: process.execPath,
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([fakeGhPath]),
+      GH_FAKE_ISSUE_PATH: issuePath,
+      GH_FAKE_COMMENTS_PATH: commentsPath,
+      GH_FAKE_ISSUE_NUMBER: "65"
+    });
+    const runInternal = (args: string[]) => spawnSync(process.execPath, [INTERNAL_CLI_PATH, ...args], {
+      cwd: tempRoot,
+      env,
+      encoding: "utf8"
+    });
+
+    const synced = runInternal(["platform-issue", "sync", taskId, "--agent", "codex", "--requirements"]);
+    assert.equal(synced.status, 0, `${synced.stderr}\n${synced.stdout}`);
+    assert.equal(JSON.parse(synced.stdout).status, "applied");
+
+    const taskComment = runInternal(["platform-comment", "sync", taskId, "--kind", "task", "--agent", "codex"]);
+    assert.equal(taskComment.status, 0, `${taskComment.stderr}\n${taskComment.stdout}`);
+    const comments = JSON.parse(fs.readFileSync(commentsPath, "utf8"));
+    comments.push({ id: 999, body: `<!-- sync-issue:${taskId}:summary -->\nSummary` });
+    writeJson(commentsPath, comments);
+
+    const validation = spawnSync(process.execPath, [
+      filePath(".agents/scripts/validate-artifact.js"),
+      "check", "platform-sync", taskDir, "--skill", "complete-task"
+    ], { cwd: filePath("."), env, encoding: "utf8" });
+    assert.equal(validation.status, 0, `${validation.stderr}\n${validation.stdout}`);
+    assertPayloadStatus(validation, { type: "platform-sync", status: "pass" });
+    assert.match(JSON.parse(fs.readFileSync(issuePath, "utf8")).body, /- \[x\] 保留最新验证输出/);
   });
 });
 
@@ -344,6 +403,71 @@ const implementSyncCases = [
     assertResult(result: ReturnType<typeof runValidator>) {
       assert.equal(result.status, 0, result.stderr);
       assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    }
+  },
+  {
+    name: "validate-artifact platform-sync checks requirements inside the anchored section",
+    skill: "complete-task",
+    issuePayload: buildIssuePayload({
+      labels: [{ name: "status: in-progress" }],
+      body: "# Issue\n\n## Requirements\n\n* [X] 保留最新验证输出\n",
+      milestone: { title: "0.7.1" }
+    }),
+    comments(taskContent: string) {
+      return [
+        { body: buildTaskComment(taskId, taskContent) },
+        { body: `<!-- sync-issue:${taskId}:summary -->\nSummary` }
+      ];
+    },
+    assertResult(result: ReturnType<typeof runValidator>) {
+      assert.equal(result.status, 0, result.stderr);
+      assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+    }
+  },
+  {
+    name: "validate-artifact platform-sync fails when an anchored section is missing a checked requirement",
+    skill: "complete-task",
+    issuePayload: buildIssuePayload({
+      labels: [{ name: "status: in-progress" }],
+      body: "# Issue\n\n## Requirements\n\nN/A\n",
+      milestone: { title: "0.7.1" }
+    }),
+    comments(taskContent: string) {
+      return [
+        { body: buildTaskComment(taskId, taskContent) },
+        { body: `<!-- sync-issue:${taskId}:summary -->\nSummary` }
+      ];
+    },
+    assertResult(result: ReturnType<typeof runValidator>) {
+      assert.equal(result.status, 1);
+      assertPayloadStatus(result, {
+        type: "platform-sync",
+        status: "fail",
+        message: /missing checked requirements/
+      });
+    }
+  },
+  {
+    name: "validate-artifact platform-sync fails when requirement anchors are ambiguous",
+    skill: "complete-task",
+    issuePayload: buildIssuePayload({
+      labels: [{ name: "status: in-progress" }],
+      body: "# Issue\n\n## Requirements\n\n- [x] 保留最新验证输出\n\n## 需求\n\nN/A\n",
+      milestone: { title: "0.7.1" }
+    }),
+    comments(taskContent: string) {
+      return [
+        { body: buildTaskComment(taskId, taskContent) },
+        { body: `<!-- sync-issue:${taskId}:summary -->\nSummary` }
+      ];
+    },
+    assertResult(result: ReturnType<typeof runValidator>) {
+      assert.equal(result.status, 1);
+      assertPayloadStatus(result, {
+        type: "platform-sync",
+        status: "fail",
+        message: /requirements section is ambiguous/
+      });
     }
   }
 ];

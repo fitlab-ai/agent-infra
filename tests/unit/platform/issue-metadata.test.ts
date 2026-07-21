@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  DEFAULT_REQUIREMENT_SECTION_ANCHORS,
   chooseMilestone,
   computeInLabels,
   desiredIssueType,
   planIssueMetadata,
+  resolveRequirementSection,
   syncRequirementCheckboxes
 } from '../../../lib/platform/issue-metadata.ts';
 
@@ -39,18 +41,62 @@ test('metadata planner degrades only permission-bound operations', () => {
   ]);
 });
 
-test('requirement checkbox sync preserves unrelated body and fails closed on ambiguity', () => {
-  const body = 'Intro\n\n- [ ] first\n- [x] second\n\nFooter\n';
+test('requirement checkbox sync updates and appends only inside one anchored section', () => {
+  const body = 'Intro\n\n## Requirements\n\nN/A\n- [ ] first\n- [x] unknown\n\n## Footer\n\n- [ ] first\n';
   assert.deepEqual(syncRequirementCheckboxes(body, [
     { text: 'first', checked: true }, { text: 'second', checked: false }
   ]), {
-    ok: true,
+    status: 'synced',
     changed: true,
-    body: 'Intro\n\n- [x] first\n- [ ] second\n\nFooter\n'
+    body: 'Intro\n\n## Requirements\n\nN/A\n- [x] first\n- [x] unknown\n\n- [ ] second\n## Footer\n\n- [ ] first\n'
   });
-  const duplicate = syncRequirementCheckboxes('- [ ] same\n- [x] same\n', [{ text: 'same', checked: true }]);
-  assert.equal(duplicate.ok, false);
-  if (!duplicate.ok) assert.equal(duplicate.code, 'REQUIREMENT_IDENTITY_AMBIGUOUS');
+});
+
+test('requirement section resolution supports mapped H3 anchors and ignores fenced headings', () => {
+  const body = '```md\n## Requirements\n```\n\n### Expected behavior\n\nN/A\n\n### Next\n';
+  assert.deepEqual(resolveRequirementSection(body, [
+    ...DEFAULT_REQUIREMENT_SECTION_ANCHORS,
+    { level: 3, heading: 'Expected behavior' }
+  ]), {
+    status: 'found',
+    bodyStart: body.indexOf('\n\nN/A', body.indexOf('### Expected behavior')) + 1,
+    bodyEnd: body.indexOf('### Next')
+  });
+});
+
+test('requirement checkbox sync reports skipped and fails closed without candidate bodies', () => {
+  assert.deepEqual(syncRequirementCheckboxes('Intro only\n', [{ text: 'first', checked: true }]), {
+    status: 'skipped', changed: false, body: 'Intro only\n', code: 'NO_REQUIREMENTS_ANCHOR'
+  });
+
+  const duplicateAnchor = syncRequirementCheckboxes(
+    '## Requirements\n\n## 需求\n',
+    [{ text: 'first', checked: true }]
+  );
+  assert.deepEqual(duplicateAnchor, { status: 'failed', code: 'REQUIREMENTS_ANCHOR_AMBIGUOUS' });
+
+  const duplicateIdentity = syncRequirementCheckboxes(
+    '## Requirements\n\n- [ ] same\n- [x] same\n',
+    [{ text: 'same', checked: true }]
+  );
+  assert.deepEqual(duplicateIdentity, { status: 'failed', code: 'REQUIREMENT_IDENTITY_AMBIGUOUS' });
+
+  const duplicateLocalIdentity = syncRequirementCheckboxes(
+    '## Requirements\n\nN/A\n',
+    [{ text: 'same', checked: true }, { text: 'same', checked: false }]
+  );
+  assert.deepEqual(duplicateLocalIdentity, { status: 'failed', code: 'REQUIREMENT_IDENTITY_AMBIGUOUS' });
+});
+
+test('requirement checkbox sync is idempotent and preserves CRLF', () => {
+  const body = '## Requirements\r\n\r\nN/A\r\n';
+  const first = syncRequirementCheckboxes(body, [{ text: 'first', checked: true }]);
+  assert.equal(first.status, 'synced');
+  if (first.status !== 'synced') return;
+  assert.equal(first.body, '## Requirements\r\n\r\nN/A\r\n- [x] first');
+  assert.deepEqual(syncRequirementCheckboxes(first.body, [{ text: 'first', checked: true }]), {
+    status: 'synced', changed: false, body: first.body
+  });
 });
 
 test('milestone selection and task type mapping are deterministic', () => {

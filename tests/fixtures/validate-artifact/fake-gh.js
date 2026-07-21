@@ -107,6 +107,20 @@ if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(arg
   }
 
   const restIssue = readJson("GH_FAKE_ISSUE_REST_PATH") ?? readJson("GH_FAKE_ISSUE_PATH");
+  const methodIndex = args.indexOf("-X");
+  const method = methodIndex === -1 ? "GET" : args[methodIndex + 1];
+  if (method === "PATCH") {
+    const inputIndex = args.indexOf("--input");
+    const inputPath = inputIndex === -1 ? "" : args[inputIndex + 1];
+    const payload = inputPath
+      ? JSON.parse(fs.readFileSync(inputPath === "-" ? 0 : inputPath, "utf8"))
+      : {};
+    const updated = { ...restIssue, ...payload };
+    const targetPath = process.env.GH_FAKE_ISSUE_REST_PATH || process.env.GH_FAKE_ISSUE_PATH;
+    if (targetPath) fs.writeFileSync(targetPath, JSON.stringify(updated));
+    process.stdout.write(JSON.stringify(updated));
+    process.exit(0);
+  }
   if (jqIndex !== -1) {
     process.stdout.write(restIssue?.type?.name || "");
     process.exit(0);

@@ -5,7 +5,8 @@ import { execFileSync } from "node:child_process";
 
 import { createGitHubClient } from "../../dist/lib/platform/github-client.js";
 import { resolvePlatformContext } from "../../dist/lib/platform/context.js";
-import { inspectGitHubIssueMetadata } from "../../dist/lib/platform/issues.js";
+import { hasCheckedRequirement, resolveRequirementSection } from "../../dist/lib/platform/issue-metadata.js";
+import { inspectGitHubIssueMetadata, requirementSectionAnchors } from "../../dist/lib/platform/issues.js";
 
 const CHECK_TYPE = "platform-sync";
 const VERSION_LINE_REGEX = /^[0-9]+\.[0-9]+\.x$/;
@@ -769,8 +770,22 @@ function checkSyncedRequirements(context, remoteData) {
   }
 
   const issueBody = remoteData.issue.body || "";
+  const resolution = resolveRequirementSection(
+    issueBody,
+    requirementSectionAnchors(repoRoot, context.task.metadata.type || "task")
+  );
+  if (resolution.status === "missing") {
+    return null;
+  }
+  if (resolution.status === "ambiguous") {
+    return failResult(CHECK_TYPE,
+      `Issue #${context.issueNumber} requirements section is ambiguous`,
+      "check_failed"
+    );
+  }
+  const requirementBody = issueBody.slice(resolution.bodyStart, resolution.bodyEnd);
   const missingRequirements = checkedRequirements.filter(
-    (item) => !new RegExp(`^- \\[x\\] ${escapeRegExp(item)}$`, "m").test(issueBody)
+    (item) => !hasCheckedRequirement(requirementBody, item)
   );
   if (missingRequirements.length === 0) {
     return null;

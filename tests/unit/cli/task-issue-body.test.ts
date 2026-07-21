@@ -7,7 +7,7 @@ import {
   mutateTableRow,
   upsertSection
 } from "../../../lib/task/sections.ts";
-import { renderTemplateBody } from "../../../lib/task/issue-form.ts";
+import { requirementFieldLabels, renderTemplateBody } from "../../../lib/task/issue-form.ts";
 import { buildDefaultBody, issueBody } from "../../../lib/task/commands/issue-body.ts";
 
 const TASK_MD = `---
@@ -156,6 +156,11 @@ test("renderTemplateBody keeps requirement checkboxes verbatim in mapped field",
 
 test("renderTemplateBody throws on YAML without a body[] list", () => {
   assert.throws(() => renderTemplateBody("name: x\ndescription: y\n", FIELDS), /body\[\]/);
+});
+
+test("requirementFieldLabels returns labels rendered from requirement text fields", () => {
+  assert.deepEqual(requirementFieldLabels(ISSUE_FORM), ["方案 / Solution"]);
+  assert.throws(() => requirementFieldLabels("name: x\ndescription: y\n"), /body\[\]/);
 });
 
 test("issueBody exits 1 with a prefixed error on an unknown task ref", () => {

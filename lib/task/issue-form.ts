@@ -41,6 +41,24 @@ type IssueFormField = {
   attributes?: { label?: unknown };
 };
 
+function parseFormFields(formText: string): IssueFormField[] {
+  const doc = parse(formText) as { body?: unknown } | null;
+  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.body)) {
+    throw new Error('Issue Form has no body[] list');
+  }
+  return doc.body as IssueFormField[];
+}
+
+function requirementFieldLabels(formText: string): string[] {
+  return parseFormFields(formText).flatMap((raw) => {
+    if (!raw || typeof raw !== 'object') return [];
+    const type = typeof raw.type === 'string' ? raw.type : '';
+    const id = typeof raw.id === 'string' ? raw.id : '';
+    const label = typeof raw.attributes?.label === 'string' ? raw.attributes.label.trim() : '';
+    return TEXT_FIELD_TYPES.has(type) && REQUIREMENTS_IDS.has(id) && label ? [label] : [];
+  });
+}
+
 /**
  * Render the final Issue body for a GitHub Issue Form (scenario A).
  *
@@ -54,12 +72,8 @@ type IssueFormField = {
  * caller can fall back to the default body.
  */
 function renderTemplateBody(formText: string, fields: TaskFields): string {
-  const doc = parse(formText) as { body?: unknown } | null;
-  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.body)) {
-    throw new Error('Issue Form has no body[] list');
-  }
   const sections: string[] = [];
-  for (const raw of doc.body as IssueFormField[]) {
+  for (const raw of parseFormFields(formText)) {
     if (!raw || typeof raw !== 'object') continue;
     const type = typeof raw.type === 'string' ? raw.type : '';
     if (!TEXT_FIELD_TYPES.has(type)) continue;
@@ -73,5 +87,5 @@ function renderTemplateBody(formText: string, fields: TaskFields): string {
   return `${sections.join('\n\n')}\n`;
 }
 
-export { renderTemplateBody, mapFieldValue, PLACEHOLDER };
+export { requirementFieldLabels, renderTemplateBody, mapFieldValue, PLACEHOLDER };
 export type { TaskFields };
