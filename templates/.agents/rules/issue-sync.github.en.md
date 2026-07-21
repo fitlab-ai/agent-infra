@@ -1,4 +1,4 @@
-# Issue Sync Rules
+# Issue Sync
 
 ## Marker Registry
 
@@ -10,29 +10,23 @@
 | `summary` | `<!-- sync-issue:{task-id}:summary -->` |
 | `cancel` | `<!-- sync-issue:{task-id}:cancel -->` |
 
-Callers pass marker keys/resources and never construct markers. PR summary belongs to `.agents/rules/pr-sync.md`.
-
-## Platform Intents
+Comments use `platform-comment`; Issue resources use `platform-issue`:
 
 ```bash
-agent-infra-internal platform-context resolve [--cwd <path>]
-agent-infra-internal platform-comment list --issue <N> [--cwd <path>]
-agent-infra-internal platform-comment owner <task-ref>
-agent-infra-internal platform-comment sync <task-ref> \
-  --kind task|artifact|summary|cancel --agent <agent> \
-  [--artifact <canonical.md>] [--body-file <path|->] [--backfill]
+agent-infra-internal platform-issue inspect {task-id}
+agent-infra-internal platform-issue create {task-id} --agent {agent}
+agent-infra-internal platform-issue bind {task-id} --issue {number} --agent {agent}
+agent-infra-internal platform-issue sync {task-id} --agent {agent} {desired-state-flags}
 ```
 
-The typed core owns upstream discovery, authentication, capabilities, pagination, markers, idempotent writes, chunking, retry, and error classification. `applied|no-op|degraded` exit 0, `failed` exits 1, and `blocked` exits 2. Duplicate markers return `COMMENT_MARKER_CONFLICT`; external-contributor locking uses `platform-comment owner`.
+The core owns status/in labels, assignees, milestones, Issue Type, pinned fields, requirements, state, capabilities, dry-run, retries, errors, and idempotency. Omitted flags preserve values; `none` explicitly clears them. Status labels converge to at most one, and ambiguous requirement identity fails closed.
 
-## Degradation and the 08/10 Boundary
+`planned|applied|no-op|degraded` exit 0; `failed` exits 1; `blocked` exits 2.
 
-Map comment failures through `task-warning` as `PERMISSION_DEGRADED`, `COMMENT_SYNC_FAILED`, or `NETWORK_RETRY_EXHAUSTED`. Issue labels, milestone, assignee, Issue Type, fields, and requirement checkboxes remain in the 08/10 metadata compatibility area; degrade via `capabilities.triage/push` without blocking comment intents.
+Map material degraded/failed/blocked results to workflow warnings through the structured intent; callers must not edit warning rows directly:
 
 ```bash
 agent-infra-internal task-warning {task-id} add \
   --step issue-sync --severity {severity} --code {code} \
   --target {target} --message {message} --action {action}
 ```
-
-complete-task invokes `--kind task`, then catalog-ordered `--kind artifact --backfill`, and finally `--kind summary --body-file`; Skills do not scan comments or construct titles.

@@ -92,8 +92,7 @@ Always include the `Manual-validation: {n}` field in the done log, including whe
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Read `.agents/rules/issue-sync.md` before metadata sync; internal intents own platform context, capabilities, and comments
-- Set `status: in-progress` by following issue-sync.md
+- Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status in-progress`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {agent}`
 

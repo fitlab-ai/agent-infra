@@ -2,6 +2,8 @@
 
 ## Marker 注册表
 
+以下 key 及格式是 Issue 评论身份的兼容契约；调用方只传 key/资源，不自行拼 marker。
+
 | Key | Marker |
 |---|---|
 | `task` | `<!-- sync-issue:{task-id}:task -->` |
@@ -10,9 +12,11 @@
 | `summary` | `<!-- sync-issue:{task-id}:summary -->` |
 | `cancel` | `<!-- sync-issue:{task-id}:cancel -->` |
 
-调用方只传 marker key/资源，不自行拼 marker。PR summary 属于 `.agents/rules/pr-sync.md`。
+`prSummary` 属于 `.agents/rules/pr-sync.md`，本规则不实现 PR 聚合。
 
 ## 平台 intent
+
+GitHub upstream、认证、capability、分页、marker 查找、幂等 create/update、分片、重试与错误分类由 typed platform core 统一处理：
 
 ```bash
 agent-infra-internal platform-context resolve [--cwd <path>]
@@ -23,11 +27,20 @@ agent-infra-internal platform-comment sync <task-ref> \
   [--artifact <canonical.md>] [--body-file <path|->] [--backfill]
 ```
 
-typed core 统一处理 upstream、认证、capability、分页、marker、幂等写入、分片、重试和错误分类。`applied|no-op|degraded` 退出 0，`failed` 退出 1，`blocked` 退出 2。重复 marker 返回 `COMMENT_MARKER_CONFLICT`；外部贡献者锁定使用 `platform-comment owner`。
+- `applied|no-op|degraded` → exit 0；`failed` → exit 1；`blocked` → exit 2。
+- task 评论保持 `<details>` frontmatter 可逆格式；artifact 原文内联并在超过 profile 上限时使用 `artifactChunk`。
+- 相同 intent 重放必须收敛为 `no-op`；重复 marker 返回 `COMMENT_MARKER_CONFLICT` 且不写入。
+- 外部贡献者锁定统一使用 `platform-comment owner`；不同作者且无 triage 时返回 `COMMENT_OWNER_CONFLICT`。
 
-## 降级与 08/10 边界
+## 降级与告警
 
-评论失败通过 `task-warning` 映射为 `PERMISSION_DEGRADED`、`COMMENT_SYNC_FAILED` 或 `NETWORK_RETRY_EXHAUSTED`。Issue label、milestone、assignee、Issue Type、fields 和需求复选框仍属于 08/10 元数据兼容区；按 `capabilities.triage/push` 降级，不阻断评论 intent。
+平台结果不直接写 task.md。调用方在有关联任务时把关键失败映射为 workflow warning：
+
+- capability 不足：`IMPORTANT / PERMISSION_DEGRADED`
+- 评论同步永久失败：`ACTION_REQUIRED / COMMENT_SYNC_FAILED`
+- 网络重试耗尽：`ACTION_REQUIRED / NETWORK_RETRY_EXHAUSTED`
+
+使用 `agent-infra-internal task-warning {task-id} add ...` 登记；不得手写 warning 表。
 
 ```bash
 agent-infra-internal task-warning {task-id} add \
@@ -35,4 +48,25 @@ agent-infra-internal task-warning {task-id} add \
   --target {target} --message {message} --action {action}
 ```
 
-complete-task 按 artifact catalog 调用 `--kind task`、`--kind artifact --backfill`，最后以 `--kind summary --body-file` 同步摘要；Skill 不扫描评论或拼标题。
+## Issue 元数据 intent
+
+所有 Issue 元数据写入统一使用：
+
+```bash
+agent-infra-internal platform-issue inspect {task-id}
+agent-infra-internal platform-issue create {task-id} --agent {agent}
+agent-infra-internal platform-issue bind {task-id} --issue {number} --agent {agent}
+agent-infra-internal platform-issue sync {task-id} --agent {agent} {desired-state-flags}
+```
+
+`sync` 支持 status/in labels、assignee、milestone、Issue Type、pinned fields、需求复选框与 Issue state。省略 flag 表示 preserve，`none` 表示显式清空。适配层统一处理集合差集、动态 schema、权限降级、dry-run、重试、错误分类与幂等重放；SKILL 不得拼装 `gh issue`、GraphQL 或权限分支。
+
+- `planned|applied|no-op|degraded` → exit 0
+- `failed` → exit 1
+- `blocked` → exit 2
+
+status labels 始终至多一个；关闭后不保留 status label。`in:` labels 只从项目允许映射与仓库实际 labels 交集产生。需求复选框以 task.md 原文为身份，歧义时 fail closed。
+
+## 补发
+
+complete-task 按 artifact catalog 时间线遍历本地已有产物：task 使用 `--kind task`，其余使用 `--kind artifact --artifact <file> --backfill`；最后用 `--kind summary --body-file <path>` 原地同步交付摘要。core 根据 marker 决定 create/update/no-op，不由 Skill 扫描评论或拼标题。

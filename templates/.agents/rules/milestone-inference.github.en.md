@@ -1,125 +1,13 @@
-# Milestone Inference Rules
+# Milestone Inference
 
-Read this file before the `create-task` platform rule, `code-task`, or `create-pr` handles a milestone.
-
-## General Principles
-
-- Narrow the milestone over the skill lifecycle: release line -> concrete version -> reuse
-- Every phase must fall back safely instead of blocking the skill
-- If `gh` is unavailable, unauthenticated, or the GitHub API call fails, skip milestone handling and continue
-- Before any repository-scoped `gh api`, `gh issue edit`, or Issue lookup runs, the caller must resolve `upstream_repo` and `has_triage`
-- Only use milestones that actually exist in the repository; if a target milestone is unavailable, apply the fallback for that phase
-
-## Branch Mode Detection
-
-Use the following command to detect whether the repository has remote release-line branches:
+Milestones narrow through declarative Issue intents:
 
 ```bash
-git branch -r | grep -v 'HEAD' | grep -E 'origin/[0-9]+\.[0-9]+\.x$'
+# create/import phase
+agent-infra-internal platform-issue sync {task-id} --agent {agent} --milestone initial
+
+# code phase
+agent-infra-internal platform-issue sync {task-id} --agent {agent} --milestone specific
 ```
 
-- Any output: multi-version branch mode
-- No output: trunk mode
-
-## Phase 1: `create-task` (when the platform rule creates an Issue)
-
-Goal: choose a coarse-grained release line when the Issue is created.
-
-Priority:
-1. If task.md provides a valid explicit `milestone`, use it
-2. Otherwise infer a release line:
-   - Trunk mode: query open `X.Y.x` milestones and choose the lowest release line
-   - Multi-version branch mode: try open `X.Y.x` milestones and choose the lowest release line; if that is not reliable, fall back to `General Backlog`
-3. If the inferred release line does not exist, fall back to `General Backlog`
-4. If `General Backlog` also does not exist, omit `--milestone`
-
-Suggested release-line query:
-
-```bash
-gh api "repos/$upstream_repo/milestones?state=open&per_page=100" \
-  --jq '.[].title'
-```
-
-Only match titles in `X.Y.x` format and choose the smallest major/minor pair numerically.
-
-Direct milestone writes are triage-gated. When the caller detected `has_triage=false`, omit `--milestone` and continue.
-
-### Backfill when called from `import-issue`
-
-When `import-issue` imports an existing Issue whose current milestone is empty, infer a release line using the priority above, including the `General Backlog` fallback. When a non-empty release line is found, write it back to the remote Issue:
-
-```bash
-if [ "$has_triage" = "true" ]; then
-  gh issue edit {issue-number} -R "$upstream_repo" --milestone "{version}" 2>/dev/null || true
-fi
-```
-
-If `has_triage=false`, inference returns empty, or `gh issue edit` fails, skip and continue without blocking the `import-issue` workflow.
-
-## Phase 2: `code-task`
-
-Goal: narrow the Issue milestone from a release line to a concrete version when implementation starts.
-
-Preconditions:
-- task.md contains a valid `issue_number`
-- the current Issue milestone matches the release-line format `X.Y.x` or is `General Backlog`
-
-Sequence:
-1. Query the current Issue milestone
-2. If it is `General Backlog`, re-infer the release line using Phase 1, then try to narrow it to a concrete version; if inference fails, keep `General Backlog` unchanged
-3. If it is not in `X.Y.x` format, treat it as already specific enough and keep it unchanged
-4. If it is in `X.Y.x` format, narrow it according to branch mode:
-   - Trunk mode: query open concrete-version milestones on that release line (for example `0.4.4`) and choose the latest one
-   - Multi-version branch mode:
-     - If the task branch was created from `origin/X.Y.x`, choose the latest concrete version on that line
-     - If the task branch was created from `main`, find the highest release line and choose the latest concrete version on that line
-5. When a target concrete version is found, run:
-
-```bash
-if [ "$has_triage" = "true" ]; then
-  gh issue edit {issue-number} -R "$upstream_repo" --milestone "{version}"
-fi
-```
-
-6. Keep the original milestone unchanged only in the following cases (otherwise narrow per step 5):
-   - Trunk mode with no open concrete version under the release line — the `code-task` / `create-pr` `verify_milestone_specific` gate will fail and prompt maintainers to create the missing concrete version
-   - Multi-release-line mode when both `git merge-base --is-ancestor` checks are unreliable or the remote refs are missing
-   - In any mode, `has_triage=false` (the bot will reconcile later)
-
-Suggested concrete-version query:
-
-```bash
-gh api "repos/$upstream_repo/milestones?state=open&per_page=100" \
-  --jq '.[].title'
-```
-
-- Release-line match: `^X\.Y\.x$`
-- Concrete-version match: `^X\.Y\.[0-9]+$`
-- "Latest" means the largest patch number
-
-Suggested branch-origin checks:
-
-```bash
-git merge-base --is-ancestor origin/{release-line} HEAD
-git merge-base --is-ancestor origin/main HEAD
-```
-
-If neither check is reliable or the remote refs are unavailable, keep the original milestone and avoid guessing.
-
-## Phase 3: `create-pr`
-
-Goal: reuse the linked Issue milestone on the PR instead of inferring a new one.
-
-Sequence:
-1. If `issue_number` exists, query the Issue milestone
-2. If the Issue has a milestone, run:
-
-```bash
-if [ "$has_triage" = "true" ]; then
-  gh pr edit {pr-number} --milestone "{milestone}"
-fi
-```
-
-3. If the Issue has no milestone, or `has_triage=false`, skip PR milestone assignment
-
-Do not infer a PR milestone separately from task.md, branch names, tags, or `General Backlog`.
+`initial` prefers a valid task milestone, otherwise the lowest open `X.Y.x`, then `General Backlog`. `specific` narrows a release line to the highest open patch version using main/release-line ancestry. Missing facts or triage permission preserve the remote value and return skipped/degraded. `create-pr` reuses the Issue milestone in the 09/10 PR adapter.

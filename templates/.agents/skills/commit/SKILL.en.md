@@ -111,7 +111,7 @@ Append the Commit Activity Log entry and choose exactly one next-step case:
 
 When `{task-id}` exists and task.md contains a valid `issue_number`, sync the linked Issue `in:` labels and requirement checkboxes. Otherwise, skip this step.
 
-> Trigger conditions, `in:` label computation rules, and requirement-checkbox sync flow live in `reference/issue-metadata-sync.md`. Read that file before running this step.
+> Trigger conditions and the declarative `platform-issue` call live in `reference/issue-metadata-sync.md`. Read that file before running this step.
 >
 > If this step touches the code-hosting platform, complete the prerequisite checks in `.agents/rules/issue-pr-commands.md` first.
 

@@ -1,4 +1,4 @@
-type PlatformStatus = 'applied' | 'no-op' | 'degraded' | 'failed' | 'blocked';
+type PlatformStatus = 'planned' | 'applied' | 'no-op' | 'degraded' | 'failed' | 'blocked';
 
 type PlatformError = {
   code: string;
@@ -16,7 +16,7 @@ type PlatformCapabilities = {
 
 type PlatformOperation = {
   name: string;
-  status: 'applied' | 'no-op' | 'skipped' | 'failed';
+  status: 'planned' | 'applied' | 'no-op' | 'skipped' | 'failed';
   reasonCode: string | null;
 };
 

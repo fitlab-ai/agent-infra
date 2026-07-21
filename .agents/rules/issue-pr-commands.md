@@ -1,108 +1,23 @@
 # Issue / PR 平台命令
 
-在需要验证平台认证、读取 Issue / PR，或执行 Issue / PR 创建与更新前先读取本文件。
+在读取或写入 PR，或选择 Issue intent 前先读取本文件。
 
 ## 平台上下文与能力
 
 调用 `agent-infra-internal platform-context resolve` 取得规范 upstream、当前用户和 `comment/triage/push/admin` capabilities。调用方不得自行解释 remote、认证 stderr 或权限 JSON。`failed`/`blocked` 按调用该规则的 Skill 约定停止或降级。
 
-本文件其余直接 `gh issue` / `gh pr` 命令属于 08/10–09/10 的 metadata/PR 兼容区；目标仓库使用 context 返回的 `repo`。
+Issue 资源必须使用 `platform-issue`；本文件保留的直接 `gh pr` 命令属于 09/10 PR 兼容区。
 
-## Issue 模板检测
-
-使用以下命令检测 GitHub Issue Forms：
+## Issue intent
 
 ```bash
-rg --files .github/ISSUE_TEMPLATE -g '*.yml' -g '!config.yml'
+agent-infra-internal platform-issue inspect {task-id}
+agent-infra-internal platform-issue create {task-id} --agent {agent}
+agent-infra-internal platform-issue bind {task-id} --issue {number} --agent {agent}
+agent-infra-internal platform-issue sync {task-id} --agent {agent} {desired-state-flags}
 ```
 
-创建 Issue 前先读取匹配的 form 文件。目录不存在或没有匹配 form 时，使用调用方定义的 fallback 正文格式。
-
-常见候选模板：
-- `bug_report.yml`：bug 工作
-- `question.yml`：问题或排查工作
-- `feature_request.yml`：功能工作
-- `documentation.yml`：文档工作
-- `other.yml`：通用 fallback
-
-对 GitHub Issue Forms，检查匹配 form 的：
-- `name`
-- `type:`
-- `labels:`
-- `body:`
-
-字段处理规则：
-- `textarea` 和 `input`：使用 `attributes.label` 作为 markdown 标题，并从 task.md 填充值
-- `markdown`：跳过模板说明文案
-- `dropdown` 和 `checkboxes`：跳过
-- task.md 缺少合适值时，写入 `N/A`
-
-建议字段映射：
-
-| 模板字段提示 | task.md 来源 |
-|---|---|
-| `summary`, `title` | 任务标题 |
-| `description`, `problem`, `what happened`, `issue-description`, `current-content` | 任务描述 |
-| `solution`, `requirements`, `steps`, `suggested-content`, `impact`, `context`, `alternatives`, `expected` | 需求列表 |
-| 其他 `textarea` / `input` 字段 | 任务描述，否则 `N/A` |
-
-## Issue 读取与创建
-
-读取 Issue：
-
-```bash
-gh issue view {issue-number} -R "$upstream_repo" --json number,title,body,labels,state,milestone,url
-```
-
-创建 Issue：
-
-```bash
-gh issue create -R "$upstream_repo" --title "{title}" --body "{body}" --assignee @me {label-args} {milestone-arg}
-```
-
-- `{label-args}` 由调用方按有效 label 列表展开为多个 `--label`
-- 仅当 `has_triage=true` 时传入 `{label-args}`；否则整体省略并继续
-- 没有有效 label 时省略全部 `--label`
-- 仅当 `has_triage=true` 时传入 `{milestone-arg}`；否则整体省略并继续
-- `{milestone-arg}` 为空时整体省略
-
-设置 Issue Type：
-
-```bash
-owner_type=$(gh api "repos/$upstream_repo" --jq '.owner.type // empty' 2>/dev/null || true)
-if [ "$owner_type" = "Organization" ]; then
-  owner=${upstream_repo%%/*}
-  gh api "orgs/$owner/issue-types" --jq '.[].name'
-  gh api "repos/$upstream_repo/issues/{issue-number}" -X PATCH -f type="{issue-type}" --silent
-fi
-```
-
-- 仅当 `has_push=true` 时执行 Issue Type 设置；否则跳过并继续
-- 仅当 owner type 为 `Organization` 时查询和设置 Issue Type；个人仓库或 owner type 探测失败时跳过并继续
-- 变更现有 Issue Type 时，先读取 `.agents/rules/issue-fields.md` 并使用流程 B，确保同名 pinned fields 迁移，且新 type 不包含的字段被清空
-
-## Issue 更新
-
-更新标题、label、assignee 或 milestone 时使用：
-
-```bash
-gh issue edit {issue-number} -R "$upstream_repo" {edit-args}
-```
-
-常见参数：
-- `--title "{title}"`
-- `--add-label "{label}"`（仅当 `has_triage=true`）
-- `--remove-label "{label}"`（仅当 `has_triage=true`）
-- `--add-assignee @me`
-- `--milestone "{milestone}"`（仅当 `has_triage=true`）
-
-Assignee 同步不做权限预判；如果命令失败，按调用方约定静默跳过。
-
-关闭 Issue：
-
-```bash
-gh issue close {issue-number} -R "$upstream_repo" --reason "{reason}"
-```
+模板检测、确定性正文、Issue identity、labels、assignees、milestone、Issue Type、pinned fields、requirements 与关闭状态全部由 intent 处理。调用方不得直接使用 `gh issue` 或 Issue GraphQL。
 
 ## Issue 评论读取
 

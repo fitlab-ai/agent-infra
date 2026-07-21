@@ -14,11 +14,11 @@
 
 ## Issue / PR
 
-- [`issue-pr-commands.md`](issue-pr-commands.md) — 验证平台认证、读写 Issue / PR 的 GitHub 命令集。
+- [`issue-pr-commands.md`](issue-pr-commands.md) — PR 命令集与 Issue intent 入口说明。
 - [`pr-checks-commands.md`](pr-checks-commands.md) — 监控 PR required checks、拉取失败日志的命令集（`watch-pr`）。
-- [`create-issue.md`](create-issue.md) — `create-task` 落盘后级联创建 Issue 的规则。
-- [`issue-sync.md`](issue-sync.md) — task 产物与 Issue 评论 / 标签 / 字段的同步标记与流程。
-- [`issue-fields.md`](issue-fields.md) — Issue Type pinned 字段（Priority/Effort/日期）的读写流程。
+- [`create-issue.md`](create-issue.md) — `create-task` 落盘后的声明式 Issue 创建 intent。
+- [`issue-sync.md`](issue-sync.md) — Issue 评论 marker 与声明式元数据 intent 契约。
+- [`issue-fields.md`](issue-fields.md) — 动态 Issue Type pinned 字段映射边界。
 - [`pr-sync.md`](pr-sync.md) — 面向 reviewer 的唯一 PR 摘要评论的同步规则。
 
 ## 任务工作流

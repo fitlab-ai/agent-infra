@@ -69,6 +69,22 @@ test(
   })
 );
 
+test("platform-sync reads Issue metadata through the shared REST snapshot adapter", async () => {
+  await withTempRoot("agent-infra-platform-sync-shared-", async (tempRoot) => {
+    const ctx = setupPlatformSyncEnv(tempRoot);
+    const argsPath = path.join(tempRoot, "gh-args.jsonl");
+    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
+    writeJson(ctx.issuePath, buildIssuePayload());
+    const result = await runPlatformSyncAdapter(ctx.taskDir, {
+      when: "issue_number_exists",
+      expected_status_label: "status: in-progress"
+    }, ctx.env({ GH_FAKE_ARGS_PATH: argsPath, GH_FAKE_ISSUE_PATH: ctx.issuePath }));
+    assert.equal(result.status, "pass", result.message);
+    const calls = fs.readFileSync(argsPath, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line) as string[]);
+    assert.ok(calls.some((args) => args[0] === "api" && /\/issues\/65$/.test(args[1] || "")));
+  });
+});
+
 const implementSyncCases = [
   {
     name: "validate-artifact gate passes when synced artifact and task comments match local files",

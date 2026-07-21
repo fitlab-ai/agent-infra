@@ -145,10 +145,9 @@ Check whether `task.md` includes a valid `issue_number`. If not, skip this step 
 
 If a valid `issue_number` exists:
 - Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`, then invoke `platform-comment sync ... --kind artifact --artifact {artifact} --agent {artifact-agent} --backfill` for each existing artifact in catalog order
-- Backfill checked `## Requirements` items to the Issue body by following the requirements-checkbox sync steps in issue-sync.md
+- Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --requirements --fields`
 - Do not set any `status:` label — platform automation should clear status labels after the Issue closes; the pre-completion platform-sync gate verifies that a CLOSED Issue has no `status:` labels and fails until the workflow finishes or is repaired
 - Write the business summary to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {agent}`
-- Read `.agents/rules/issue-fields.md` and follow Flow A to sync every non-empty Issue field (`priority`/`effort`/`start_date`/`target_date`) from `task.md` to the Issue (idempotent; skip without blocking when `has_push=false` or the fetch/write fails)
 
 ### 7. Verification Gate
 

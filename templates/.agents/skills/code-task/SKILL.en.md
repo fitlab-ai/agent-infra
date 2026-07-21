@@ -53,7 +53,7 @@ Read `reference/branch-management.md`, ensure the current branch matches the tas
 
 ### 3. Narrow the Milestone
 
-**Mandatory; do not skip.** If task.md has a valid `issue_number`, run `agent-infra-internal platform-context resolve`, then use Phase 2 of `.agents/rules/milestone-inference.md` to narrow the Issue milestone. If `capabilities.triage=false`, keep the existing milestone.
+**Mandatory; do not skip.** If task.md has a valid `issue_number`, run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --milestone specific`.
 
 > If this step is skipped or the Issue milestone is still a release line `X.Y.x` afterward, the step-11 `validate-artifact` gate will block the `code-task` round via `verify_milestone_specific` and require narrowing to a specific version (e.g. `0.7.1`) before proceeding.
 
@@ -110,7 +110,7 @@ Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}` instead; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
 
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, then:
-- Set `status: in-progress` according to issue-sync.md
+- Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status in-progress`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {code-artifact} --agent {agent}`
 

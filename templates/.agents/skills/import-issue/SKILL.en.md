@@ -142,18 +142,14 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   ```
   If step 3.3 already appended recovery Activity Log entries, do not append a duplicate equivalent entry.
 
-### 5. Assign the Issue Assignee
-
-If task.md contains a valid `issue_number`, use the Issue update command from `.agents/rules/issue-pr-commands.md` to add the current executor as an assignee. The behavioral boundary still follows `.agents/rules/issue-sync.md`.
-
-### 6. Sync to the Issue
+### 5. Bind and Sync the Issue
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Read `.agents/rules/issue-sync.md` before metadata sync
-- Check the Issue's current milestone; if it is unset, read `.agents/rules/milestone-inference.md`, infer a release line using "Phase 1: `create-task` (when the platform rule creates an Issue)", and run its "Backfill when called from `import-issue`" subsection to write back to the remote Issue. If inference fails, permissions are insufficient, or write-back fails, skip and continue without blocking the import
+- Run `agent-infra-internal platform-issue bind {task-id} --issue {issue-number} --agent {agent}`
+- Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --assignees current --milestone initial`
 - After every scenario, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
 
-### 7. Verification Gate
+### 6. Verification Gate
 
 **Allocate short id first** (ensures the registry entry is allocated; the validation gate will read it):
 
@@ -176,7 +172,7 @@ Handle the result as follows:
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 
-### 8. Inform User
+### 7. Inform User
 
 > Execute this step only after the verification gate passes.
 

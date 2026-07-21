@@ -66,3 +66,23 @@ test("agent quickstart and readme avoid hard-coded setup wording", () => {
     assert.doesNotMatch(content, /default GitHub setup|默认 GitHub 配置/, relativePath);
   });
 });
+
+test("Issue metadata workflow documents reference the internal Issue intent", () => {
+  const runtime = [
+    "create-task", "import-issue", "analyze-task", "plan-task", "code-task",
+    "review-code", "block-task", "cancel-task", "complete-task"
+  ].map((skill) => `.agents/skills/${skill}/SKILL.md`);
+  const templates = runtime.flatMap((relativePath) => {
+    const base = relativePath.replace(/^\.agents\//, "templates/.agents/").replace(/SKILL\.md$/, "SKILL");
+    return [`${base}.en.md`, `${base}.zh-CN.md`];
+  });
+  [
+    ...runtime,
+    ...templates,
+    ".agents/skills/commit/reference/issue-metadata-sync.md",
+    "templates/.agents/skills/commit/reference/issue-metadata-sync.en.md",
+    "templates/.agents/skills/commit/reference/issue-metadata-sync.zh-CN.md"
+  ].forEach((relativePath) => {
+    assert.match(read(relativePath), /agent-infra-internal platform-issue (?:create|bind|sync)/, relativePath);
+  });
+});

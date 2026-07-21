@@ -8,15 +8,11 @@ Run this step only when all of the following are true:
 
 If either condition is missing, skip this step.
 
-Run `agent-infra-internal platform-context resolve` for upstream and capabilities; metadata writes remain in the 08/10 compatibility area of `.agents/rules/issue-sync.md`.
+Call one declarative intent. The internal core owns diff computation, repository-label filtering, capability degradation, body preservation, and idempotency:
 
-## `in:` Label Sync
-
-Follow the `in:` label sync steps in issue-sync.md and refine the Issue `in:` labels from the committed branch diff (`git diff {base-branch}...HEAD --name-only`).
-
-## Requirement Checkbox Sync
-
-Follow the requirement-checkbox sync steps in issue-sync.md and sync checked items from task.md `## Requirements` into the Issue body.
+```bash
+agent-infra-internal platform-issue sync {task-id} --agent {agent} --in-labels from-diff --base {base-branch} --requirements
+```
 
 ## Error Handling
 

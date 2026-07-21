@@ -21,6 +21,11 @@ switch (command) {
     platformComment(process.argv.slice(3));
     break;
   }
+  case 'platform-issue': {
+    const { platformIssue } = await import('../lib/internal/platform-issue.ts');
+    platformIssue(process.argv.slice(3));
+    break;
+  }
   case 'task-context': {
     const { taskContext } = await import('../lib/internal/task-context.ts');
     taskContext(process.argv.slice(3));

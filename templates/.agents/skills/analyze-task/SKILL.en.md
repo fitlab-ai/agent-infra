@@ -200,11 +200,9 @@ After the business fields are updated, run `agent-infra-internal task-event {tas
   ```
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Read `.agents/rules/issue-sync.md` before metadata sync; internal intents own platform context, capabilities, and comments
-- Set `status: pending-design-work` by following issue-sync.md
+- Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status pending-design-work --fields`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
 - Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {analysis-artifact} --agent {agent}`
-- Read `.agents/rules/issue-fields.md` and follow Flow A to sync every non-empty Issue field (`priority`/`effort`/`start_date`/`target_date`) from `task.md` to the Issue (idempotent; skip without blocking when `has_push=false` or the fetch/write fails)
 
 ### 8. Verification Gate
 

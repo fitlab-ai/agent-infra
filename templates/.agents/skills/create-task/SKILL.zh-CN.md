@@ -122,21 +122,20 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Create Task** by {agent} — Task created from description
   ```
 
-### 4. 按 `.agents/rules/create-issue.md` 级联创建 Issue
+### 4. 级联创建并同步 Issue
 
-在 task.md 落盘并记录 `Create Task` 后，先读取 `.agents/rules/create-issue.md` 并按其中描述的步骤执行 Issue 创建。
+在 task.md 落盘并记录 `Create Task` 后调用声明式 Issue intent；标题、正文、模板、身份校验、权限降级、幂等创建和 task.md 绑定均由 internal core 处理：
 
-规则文件由当前配置的代码平台决定其内容：
-- 支持 Issue 创建的平台：包含完整的认证检测、模板检测、label/Issue Type/milestone 推断、Issue 创建调用、`task.md` 回写流程
-- 自定义或空平台（未提供平台变体规则文件）：内容为 no-op 说明，本步骤直接跳过
-
-> **强约束**：`.agents/rules/create-issue.md` §4 中的 milestone 子步骤为必须执行项；漏设会被步骤 5 的 gate（`verify_milestone: true`）截停，导致 create-task 失败。
+```bash
+agent-infra-internal platform-issue create {task-id} --agent {agent}
+agent-infra-internal platform-issue sync {task-id} --agent {agent} --status waiting-for-triage --assignees current --milestone initial --issue-type --fields
+```
 
 处理结果：
-- 规则成功创建 Issue：`issue_number` 已按规则回写到 task.md；调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`，并按 `.agents/rules/issue-sync.md` 设置 `status: waiting-for-triage`
+- intent 成功创建 Issue：`issue_number` 已由任务写入内核回写；调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
 - 规则失败（认证 / 网络 / 模板解析等）：不回滚 task.md；不追加额外 Activity Log；先调用 `agent-infra-internal task-warning {task-id} add --step create-task --severity ACTION_REQUIRED --code ISSUE_CREATE_FAILED --target issue --message "{error_code}: {error_message}" --action "修复认证/网络/模板问题后手动重试 Issue 创建，或手动创建/找到 Issue 后写入 issue_number"` 提交结构化 warning 意图（调用方不分配编号或写表格）；再按"场景 C：Issue 创建失败"输出
-- 规则为 no-op（自定义或空平台）：不创建评论，不阻塞后续工作流，不写 Activity Log
-- task.md 已存在 `issue_number`：规则中的前置检查会跳过；`create-task` 直接进入步骤 5
+- intent 为 no-op/degraded：按结构化 operations 继续可执行部分；自定义或空平台不创建评论且不阻塞工作流
+- task.md 已存在有效 `issue_number`：create intent 校验绑定后返回 no-op，不重复创建
 
 ### 5. 完成校验
 

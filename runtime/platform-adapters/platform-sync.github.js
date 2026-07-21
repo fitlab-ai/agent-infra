@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 
 import { createGitHubClient } from "../../dist/lib/platform/github-client.js";
 import { resolvePlatformContext } from "../../dist/lib/platform/context.js";
+import { inspectGitHubIssueMetadata } from "../../dist/lib/platform/issues.js";
 
 const CHECK_TYPE = "platform-sync";
 const VERSION_LINE_REGEX = /^[0-9]+\.[0-9]+\.x$/;
@@ -257,29 +258,27 @@ function resolveDefaultValue({ collection, key, value, configKey }) {
 }
 
 function fetchRemoteData(context) {
-  let issueResult = withRetry(() => ghJson([
-    "issue",
-    "view",
-    String(context.issueNumber),
-    "-R",
+  const sharedIssue = inspectGitHubIssueMetadata(
+    githubClient,
     context.upstreamRepo,
-    "--json",
-    "state,labels,body,milestone"
-  ], context.taskDir));
-  if (!issueResult.ok && issueResult.type !== "check_failed") {
-    const fallbackIssueResult = withRetry(() => ghJson([
-      "api",
-      `repos/${context.upstreamRepo}/issues/${context.issueNumber}`
-    ], context.taskDir));
-    if (fallbackIssueResult.ok) {
-      issueResult = {
+    context.issueNumber,
+    context.taskDir
+  );
+  const issueResult = sharedIssue.ok
+    ? {
         ok: true,
-        value: normalizeIssuePayload(fallbackIssueResult.value)
+        value: {
+          state: sharedIssue.value.state.toUpperCase(),
+          labels: sharedIssue.value.labels.map((name) => ({ name })),
+          body: sharedIssue.value.body,
+          milestone: sharedIssue.value.milestone ? { title: sharedIssue.value.milestone } : null
+        }
+      }
+    : {
+        ok: false,
+        type: sharedIssue.error.retryable ? "network_error" : "check_failed",
+        message: sharedIssue.error.message
       };
-    } else {
-      issueResult = fallbackIssueResult;
-    }
-  }
   if (!issueResult.ok) {
     return {
       earlyReturn: issueResult.type === "check_failed"
@@ -1232,15 +1231,6 @@ function loadInLabelMapping() {
 }
 
 // === GitHub API ===
-
-function normalizeIssuePayload(payload) {
-  return {
-    state: String(payload?.state || "").toUpperCase(),
-    labels: Array.isArray(payload?.labels) ? payload.labels : [],
-    body: typeof payload?.body === "string" ? payload.body : "",
-    milestone: payload?.milestone ?? null
-  };
-}
 
 function detectRepoOwnerType(upstreamRepo, taskDir) {
   const ownerTypeResult = withRetry(() => ghText([

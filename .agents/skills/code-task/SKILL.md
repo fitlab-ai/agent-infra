@@ -79,7 +79,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ### 3. 收窄里程碑
 
-**必须执行，不得跳过。** 如果 task.md 中存在有效的 `issue_number`，先调用 `agent-infra-internal platform-context resolve` 取得 upstream 与 capability，再读取 `.agents/rules/milestone-inference.md`，按其中的「阶段 2：`code-task`」收窄 Issue milestone；如果 `capabilities.triage=false`，则保持原 milestone 不变。
+**必须执行，不得跳过。** 如果 task.md 中存在有效的 `issue_number`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --milestone specific`；里程碑推断、权限降级与幂等写入由 internal core 处理。
 
 > 若此步骤被跳过或收窄后 Issue milestone 仍为 `X.Y.x` 版本线，步骤 11 的 `validate-artifact` gate 会通过 `verify_milestone_specific` 截停本轮 `code-task`，要求重新收窄到具体版本（如 `0.7.1`）后再继续。
 
@@ -155,7 +155,7 @@ echo "$result"
   - 裁决模式：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --implementation-input {input-id} --files-modified {n} --tests-passed {n}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则记录 warning 并继续；Issue 元数据边界仍见 `.agents/rules/issue-sync.md`）：
-- 按 issue-sync.md 设置 `status: in-progress`
+- 调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status in-progress`
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
 - 调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {code-artifact} --agent {agent}`
 

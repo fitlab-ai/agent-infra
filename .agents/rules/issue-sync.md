@@ -48,14 +48,24 @@ agent-infra-internal task-warning {task-id} add \
   --target {target} --message {message} --action {action}
 ```
 
-## Issue 元数据兼容区（08/10）
+## Issue 元数据 intent
 
-07/10 只迁移平台上下文与评论。以下 Issue metadata 业务时机保持不变，具体写入将在 08/10 收敛：
+所有 Issue 元数据写入统一使用：
 
-- `status:` / `in:` label、milestone、assignee、Issue Type、pinned fields、需求复选框。
-- 元数据写入以 `capabilities.triage` / `capabilities.push` 判定；不足时只降级受限操作，评论 intent 仍继续。
-- status label 继续采用集合差集；`in:` label 仍在 commit 阶段计算；milestone 仍按 `.agents/rules/milestone-inference.md` 分阶段收窄。
-- complete-task 在评论补发后同步需求复选框和 fields；关闭后的 Issue 不保留 `status:` label。
+```bash
+agent-infra-internal platform-issue inspect {task-id}
+agent-infra-internal platform-issue create {task-id} --agent {agent}
+agent-infra-internal platform-issue bind {task-id} --issue {number} --agent {agent}
+agent-infra-internal platform-issue sync {task-id} --agent {agent} {desired-state-flags}
+```
+
+`sync` 支持 status/in labels、assignee、milestone、Issue Type、pinned fields、需求复选框与 Issue state。省略 flag 表示 preserve，`none` 表示显式清空。适配层统一处理集合差集、动态 schema、权限降级、dry-run、重试、错误分类与幂等重放；SKILL 不得拼装 `gh issue`、GraphQL 或权限分支。
+
+- `planned|applied|no-op|degraded` → exit 0
+- `failed` → exit 1
+- `blocked` → exit 2
+
+status labels 始终至多一个；关闭后不保留 status label。`in:` labels 只从项目允许映射与仓库实际 labels 交集产生。需求复选框以 task.md 原文为身份，歧义时 fail closed。
 
 ## 补发
 

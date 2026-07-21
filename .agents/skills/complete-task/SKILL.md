@@ -144,10 +144,9 @@ ls .agents/workspace/completed/{task-id}/task.md
 
 如果存在有效的 `issue_number`：
 - 先调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`；再按 artifact catalog 顺序对本地已有产物逐项调用 `platform-comment sync ... --kind artifact --artifact {artifact} --agent {artifact-agent} --backfill`
-- 按 issue-sync.md 的需求复选框同步步骤，兜底同步 `## 需求` 中已勾选的条目到 Issue body
+- 调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --requirements --fields`
 - 不要设置 `status:` label — 平台自动化应在 Issue 关闭后清理状态标签；预完成 platform-sync gate 会验证 CLOSED Issue 不含任何 `status:` 标签，残留时失败并要求等待或修复 workflow 后重跑
 - 最后把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {agent}`
-- 读取 `.agents/rules/issue-fields.md`，按流程 A 把 `task.md` 中所有非空的 Issue 字段（`priority`/`effort`/`start_date`/`target_date`）同步到 Issue（幂等；`has_push=false` 或取数/写入失败时跳过，不阻断）
 
 ### 7. 完成校验
 

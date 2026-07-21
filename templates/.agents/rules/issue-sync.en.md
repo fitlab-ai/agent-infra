@@ -14,6 +14,6 @@ These hidden markers are the canonical registry for Issue synchronization:
 
 Callers should refer to the marker key in skill prose and keep concrete marker strings in this rule or the platform adapter defaults.
 
-This code platform does not provide built-in issue synchronization.
+This code platform does not provide an Issue adapter. `platform-issue` returns structured no-op/degraded operations.
 
 Issue metadata, labels, milestones, assignees, and comments are skipped for custom platforms unless you provide matching `.{platform}.en.md` rule templates and platform adapters. Continue writing local task artifacts normally.

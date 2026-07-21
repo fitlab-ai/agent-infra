@@ -15,11 +15,11 @@ so you can quickly find "which ones to read" without opening each file.
 
 ## Issue / PR
 
-- [`issue-pr-commands.md`](issue-pr-commands.md) — GitHub commands to verify auth and read/write Issues / PRs.
+- [`issue-pr-commands.md`](issue-pr-commands.md) — PR commands and Issue intent entry points.
 - [`pr-checks-commands.md`](pr-checks-commands.md) — Commands to watch PR required checks and pull failure logs (`watch-pr`).
-- [`create-issue.md`](create-issue.md) — Cascading Issue creation after `create-task` writes `task.md`.
-- [`issue-sync.md`](issue-sync.md) — Sync markers and flow for task artifacts ↔ Issue comments / labels / fields.
-- [`issue-fields.md`](issue-fields.md) — Read/write flow for Issue Type pinned fields (Priority/Effort/dates).
+- [`create-issue.md`](create-issue.md) — Declarative Issue creation after `create-task` writes `task.md`.
+- [`issue-sync.md`](issue-sync.md) — Issue comment markers and declarative metadata intent contract.
+- [`issue-fields.md`](issue-fields.md) — Dynamic Issue Type pinned-field mapping boundary.
 - [`pr-sync.md`](pr-sync.md) — Sync rule for the single reviewer-facing PR summary comment.
 
 ## Task Workflow

@@ -8,15 +8,11 @@
 
 任一条件不满足时，跳过本步骤。
 
-执行前调用 `agent-infra-internal platform-context resolve` 取得 upstream 与 capabilities；元数据写入仍按 `.agents/rules/issue-sync.md` 的 08/10 兼容区处理。
+调用单一声明式 intent；diff、仓库 label 过滤、权限降级、正文保真与幂等写入由 internal core 处理：
 
-## `in:` label 同步
-
-按 issue-sync.md 的 `in:` label 同步步骤，基于已提交分支的改动文件（`git diff {base-branch}...HEAD --name-only`）精修 Issue 的 `in:` label。
-
-## 需求复选框同步
-
-按 issue-sync.md 的需求复选框同步步骤，将 task.md `## 需求` 中已勾选的条目同步到 Issue body。
+```bash
+agent-infra-internal platform-issue sync {task-id} --agent {agent} --in-labels from-diff --base {base-branch} --requirements
+```
 
 ## 错误处理
 

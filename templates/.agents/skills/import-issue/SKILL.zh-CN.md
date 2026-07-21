@@ -142,18 +142,14 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
   ```
   如果步骤 3.3 已经按恢复场景追加了 Activity Log，不要重复追加同义记录。
 
-### 5. 分配 Issue Assignee
-
-如果 task.md 中存在有效的 `issue_number`，按 `.agents/rules/issue-pr-commands.md` 的 Issue 更新命令为当前执行者添加 assignee；Assignee 同步的边界仍遵循 `.agents/rules/issue-sync.md`。
-
-### 6. 同步到 Issue
+### 5. 绑定并同步 Issue
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
-- 元数据同步前读取 `.agents/rules/issue-sync.md`
-- 检查 Issue 当前 milestone；如果未设置，先读取 `.agents/rules/milestone-inference.md`，按其中的「阶段 1：`create-task`（平台规则创建 Issue 时）」推断版本线，并按其「`import-issue` 调用时的兜底」子节执行远端回写；推断失败、权限不足或回写失败均跳过并继续，不阻断导入
+- 调用 `agent-infra-internal platform-issue bind {task-id} --issue {issue-number} --agent {agent}` 校验并原子绑定
+- 调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --assignees current --milestone initial`
 - 所有场景结束后，必须调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
 
-### 7. 完成校验
+### 6. 完成校验
 
 **先调用短号分配**（保证注册表 entry 已分配；完成校验阶段会读取）：
 
@@ -176,7 +172,7 @@ agent-infra-internal task-verify {task-id} import-issue.completed --format text
 
 将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 
-### 8. 告知用户
+### 7. 告知用户
 
 > 仅在校验通过后执行本步骤。
 

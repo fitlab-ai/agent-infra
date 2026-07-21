@@ -123,21 +123,20 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Create Task** by {agent} — Task created from description
   ```
 
-### 4. Cascade Issue Creation via `.agents/rules/create-issue.md`
+### 4. Cascade Issue Creation and Metadata Sync
 
-After task.md is written and `Create Task` is recorded, read `.agents/rules/create-issue.md` first and follow the steps it describes to create an Issue.
+After task.md is written, call the declarative intents; the internal core owns templates, body rendering, identity validation, capability degradation, idempotency, and task binding:
 
-The rule's content is determined by the configured code platform:
-- A platform that supports Issue creation: contains the full flow for auth detection, template detection, label/type/milestone inference, the create-Issue call, and writing back to `task.md`
-- Custom or empty platforms (no platform-specific variant provided): the rule body is a no-op notice, and this step is skipped entirely
-
-> **Hard constraint**: the milestone sub-step in `.agents/rules/create-issue.md` §4 is mandatory; missing it fails the step 5 gate (`verify_milestone: true`) and aborts create-task.
+```bash
+agent-infra-internal platform-issue create {task-id} --agent {agent}
+agent-infra-internal platform-issue sync {task-id} --agent {agent} --status waiting-for-triage --assignees current --milestone initial --issue-type --fields
+```
 
 Handle the result:
-- Rule successfully created the Issue: `issue_number` has been written back to task.md per the rule; run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`, then set `status: waiting-for-triage` per `.agents/rules/issue-sync.md`
+- Intent created the Issue: `issue_number` was written through the task writer; run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
 - Rule failed (auth / network / template parse / etc.): do not roll back task.md or append an extra Activity Log entry; run `agent-infra-internal task-warning {task-id} add --step create-task --severity ACTION_REQUIRED --code ISSUE_CREATE_FAILED --target issue --message "{error_code}: {error_message}" --action "Fix auth/network/template issues and manually retry Issue creation, or create/find an Issue and write issue_number"` to submit a structured warning intent (callers do not allocate ids or edit rows), then follow Scenario C
-- Rule was a no-op (custom or empty platform): do not create comments, do not block the workflow, and do not write an Activity Log entry
-- task.md already has `issue_number`: the rule's prerequisite check skips creation; `create-task` proceeds directly to step 5
+- Intent returned no-op/degraded: continue applicable operations without blocking the workflow
+- task.md already has a valid `issue_number`: create validates the binding and returns no-op without creating a duplicate
 
 ### 5. Verification Gate
 
