@@ -40,11 +40,17 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
 **Description**: {details}
 **Suggested Fix**: {fix suggestion}
 
-### Minor Issues (optional improvements)
+### Minor Issues (low impact, closure required)
 
 #### 1. {Improvement point}
 **File**: `{file-path}:{line-number}`
 **Suggestion**: {improvement suggestion}
+
+## Non-blocking Advisories
+
+> Record only future optimizations that do not affect the current artifact's completeness, correctness, or acceptance. Advisories do not enter the disagreement ledger, finding counts, or verdict.
+
+- {future optimization}
 
 ## Manual Validation Items
 

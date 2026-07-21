@@ -82,9 +82,10 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ### 6. 更新任务状态
 
-- 若本轮 `总体结论` / `Overall Verdict` 为 `通过` / `Approved` 且 `T == R^{tree}`，写入 `last_reviewed_commit: {R}`；若 Approved 快照包含未提交差异，则清除既有 `last_reviewed_commit`，等待 `commit` 锚定
-- 若本轮结论不是 Approved，保留既有 `last_reviewed_commit`，不得推进或清空
-- 报告完成后，新 finding 逐条调用 `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`；复核上一轮响应时调用 `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {相称证据}`。不得扫描编号或手写账本行。完成 `last_reviewed_commit` 后执行 `agent-infra-internal task-event {task-id} review-code.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`。
+- 报告完成后，新 finding 逐条调用 `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`；复核上一轮响应时调用 `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {相称证据}`。不得扫描编号或手写账本行
+- 全部账本写入完成后只调用一次 `agent-infra-internal task-ledger {task-id} stage-status --stage code`。以 `stageStatus.canAdvance` 决定 verdict 和下一步，并以 `unresolvedFindingCounts` 填写 blocker/major/minor；仅 `canAdvance=true` 可用 Approved
+- 仅当 `canAdvance=true`、本轮结论为 Approved 且 `T == R^{tree}` 时写入 `last_reviewed_commit: {R}`；Approved 快照包含未提交差异时清除旧值。否则保留既有值，不得推进或清空
+- 完成 `last_reviewed_commit` 处理后执行 `agent-infra-internal task-event {task-id} review-code.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
 
 完成日志必须始终写入 `Manual-validation: {n}` 字段，0 也保留。
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
@@ -117,9 +118,8 @@ agent-infra-internal task-verify {task-id} review-code.completed --artifact {rev
 > **重要：分支名 ≠ 字段值**。以下 4 个标签是用户输出模板的分类（场景 A/B/C/D），**不是**产物 `**总体结论**：` 字段的取值。产物字段只取 3 个规范值之一（`通过` / `需要修改` / `拒绝`，或 EN 对应 `Approved` / `Changes Requested` / `Rejected`）；写成 `通过但有问题`、`通过 / 需要修改` 等组合短语会被 verify gate 拦下。
 
 必须先判断结果，再只选择一个输出分支：
-- 无 blocker、major、minor -> 通过且无问题
-- 无 blocker，但有 major 或 minor -> 通过但有问题
-- 有 blocker，且可集中修复 -> 需要修改
+- `stageStatus.canAdvance=true` -> 通过
+- `stageStatus.canAdvance=false` 且可集中修复 -> 需要修改
 - 需要重大返工或重新实现 -> 拒绝
 
 manual-validation 的数量不参与分支选择，只作为人工校验计数显示。

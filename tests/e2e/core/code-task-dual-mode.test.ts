@@ -77,8 +77,17 @@ function zhReviewPlan(reviewedPlanFile: string, verdict: string, findings = "0 �
 ${zhReview(verdict, findings)}`;
 }
 
-test("code-task dual-mode: branch 1 - no code starts init mode", () => {
+test("code-task dual-mode: branch 1 - no code requires an approved review-plan", () => {
   const result = runDetect({});
+
+  assert.equal(result.status, 2);
+  assert.equal(result.output.mode, "error");
+});
+
+test("code-task dual-mode: branch 1 - approved plan starts init mode", () => {
+  const result = runDetect({
+    "review-plan.md": zhReviewPlan("plan.md", "通过")
+  });
 
   assert.equal(result.status, 0);
   assert.equal(result.output.mode, "init");
@@ -389,11 +398,9 @@ test("code-task dual-mode: branch 2 (replan) - precedes unreviewed-code error", 
   assert.equal(result.output.review_artifact, "review-plan-r2.md");
 });
 
-test("code-task dual-mode: branch 2 (replan) - review-plan Approved-with-issues still triggers init", () => {
+test("code-task dual-mode: branch 2 (replan) - review-plan Approved-with-issues does not trigger init", () => {
   const nowSec = Math.floor(Date.now() / 1000);
   // review-plan-r2 has Approved + 1 major → normalizes to Approved-with-issues.
-  // For review-plan that still means "plan approved with non-blocking suggestions";
-  // replan must fire.
   const result = runDetectWithMtimes(
     {
       "code.md": "# code",
@@ -413,11 +420,10 @@ test("code-task dual-mode: branch 2 (replan) - review-plan Approved-with-issues 
     }
   );
 
-  assert.equal(result.status, 0);
-  assert.equal(result.output.mode, "init");
-  assert.equal(result.output.next_round, 2);
-  assert.equal(result.output.next_artifact, "code-r2.md");
-  assert.equal(result.output.review_artifact, "review-plan-r2.md");
+  assert.equal(result.status, 1);
+  assert.equal(result.output.mode, "refused");
+  assert.equal(result.output.verdict, "Approved");
+  assert.equal(result.output.review_artifact, "review-code.md");
 });
 
 test("code-task dual-mode: branch 2 (replan) - off-number plan/review-plan linked via 审查输入", () => {

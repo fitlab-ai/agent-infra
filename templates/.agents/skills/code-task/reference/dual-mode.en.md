@@ -16,8 +16,8 @@ The core scans `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.
 
 | Condition | mode | exit | Behavior |
 |---|---|---:|---|
-| no code artifact | `init` | 0 | initial implementation, output `code.md` |
-| latest review-plan is approved (`Approved` or `Approved-with-issues`, i.e. `Overall Verdict: Approved` regardless of findings counts), its "Review Input" / "审查输入" entry names the same plan file as the latest `plan(-r{N})?.md` in the task directory, and its mtime is newer than the latest code artifact | `init` | 0 | plan has been approved after the latest code; enter a new implementation round, `next_round = code_max + 1`, `next_artifact = code-r{next_round}.md`. This branch fires regardless of whether review-code exists or passes. Plan and review-plan rounds are independent counters (e.g. `plan-r5` may be approved by `review-plan-r4`); the link is established via the review-plan's "Review Input" entry, not by matching round numbers. |
+| no code artifact, and the latest review-plan is exactly `Approved` and references the latest plan | `init` | 0 | initial implementation, output `code.md`; a missing matching approval or `Approved-with-issues` returns an error |
+| latest review-plan is exactly `Approved`, references the latest plan, and is newer than the latest code | `init` | 0 | enter a new implementation round. `Approved-with-issues` remains parse-compatible for history but is not cross-stage approval |
 | `rev_max < code_max` | `error` | 2 | latest code round is unreviewed; run `review-code` first |
 | latest review-code is Approved and a pending implementation input was decided after that review completed | `decision` | 0 | select the earliest `II-N` and enter decision-driven implementation; false/not-required and consumed inputs do not trigger |
 | latest review-code is Approved with 0/0/0 | `refused` | 1 | already approved; do not run `code-task` again |

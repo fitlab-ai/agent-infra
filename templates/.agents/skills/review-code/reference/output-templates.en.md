@@ -6,9 +6,9 @@ Read this file before presenting the final review result to the user.
 
 ## Choose Exactly One Output Branch
 
-Apply these rules in order (**note: manual-validation counts do not participate in selection**):
-1. if `Blocker = 0` and `Major = 0` and `Minor = 0`, use Branch A (regardless of whether manual-validation > 0)
-2. if `Blocker = 0` and (`Major > 0` or `Minor > 0`), use Branch B
+Select from `stage-status` (**manual-validation and advisory counts do not participate**):
+1. if `stageStatus.canAdvance=true`, use Branch A
+2. if `stageStatus.canAdvance=false` and there are no blockers, use Branch B
 3. if `Blocker > 0` and the work can be repaired in a focused refinement pass, use Branch C
 4. if the task requires major redesign, broad reimplementation, or a restart, use Branch D
 
@@ -18,7 +18,9 @@ Prohibitions:
 - if `Blocker > 0`, never output an approval template
 - never count manual-validation findings as blockers / major issues / minor issues, and never use them to trigger Branch B/C/D
 - always include every TUI command format in the selected branch
-- the count line always shows 5 numbers: the first three (Blockers / Major / Minor) must be 0 to proceed; the last two are "pending human" items and need not be zero — `Manual-validation` (`{e}`) = this round's manual-validation count, `Human-decision` (`{h}`) = the number of rows in task.md `## 审查分歧账本` with `stage=code` and `status=needs-human-decision`; neither participates in branch selection. When `{h} > 0`, before the selected scenario's "Next steps" commands you must expand each pending ruling per the "Pending human-decision pre-block" in `.agents/rules/next-step-output.md` and prompt to resolve them first
+- The count line shows 5 numbers. Manual-validation (`{e}`) does not affect selection. `Human-decision` (`{h}`) counts this stage's `needs-human-decision` rows; because those rows are unresolved, `{h} > 0` means `canAdvance=false`. Expand the "Pending human-decision pre-block" from `.agents/rules/next-step-output.md` and show revision and re-review paths only.
+
+For Branches B/C/D, follow the revision commands with re-review commands: `/review-code {task-ref}`, `/{{project}}:review-code {task-ref}`, and `$review-code {task-ref}`.
 
 ### Branch A: Approved with No Findings
 
@@ -36,22 +38,17 @@ Next step - commit the code:
 Reminder: manual-validation findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
 ```
 
-### Branch B: Approved with Findings
+### Branch B: Changes Requested (Major / Minor)
 
 ```text
-Task {task-id} review completed. Verdict: approved.
+Task {task-id} review completed. Verdict: changes requested.
 - Blockers: 0 | Major: {n} | Minor: {n} | Manual-validation: {e} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
-Next step - fix before commit (recommended):
+Next step - fix the findings:
   - Claude Code / OpenCode: /code-task {task-ref}
   - Gemini CLI: /{{project}}:code-task {task-ref}
   - Codex CLI: $code-task {task-ref}
-
-Or commit directly (skip fix):
-  - Claude Code / OpenCode: /commit
-  - Gemini CLI: /{{project}}:commit
-  - Codex CLI: $commit
 
 [When manual-validation > 0, append this final line:]
 Reminder: manual-validation findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.

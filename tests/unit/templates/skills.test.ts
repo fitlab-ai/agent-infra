@@ -761,6 +761,11 @@ test("review handshake skills submit ledger changes through structured intents",
       const content = read(relativePath);
       assert.match(content, /agent-infra-internal task-ledger \{task-id\} finding-upsert /, `${relativePath} should submit findings through the ledger core`);
       assert.match(content, /finding-review --id \{ledger-id\}/, `${relativePath} should submit review dispositions through the ledger core`);
+      const stage = skill.replace("review-", "");
+      assert.ok(
+        content.includes(`agent-infra-internal task-ledger {task-id} stage-status --stage ${stage}`),
+        `${relativePath} should derive its verdict from the shared stage status`
+      );
     }
   }
   for (const skill of ["analyze-task", "plan-task"]) {
@@ -769,6 +774,40 @@ test("review handshake skills submit ledger changes through structured intents",
       assert.match(content, /agent-infra-internal task-ledger \{task-id\} finding-respond /, `${relativePath} should submit executor responses through the ledger core`);
       assert.match(content, /decision-next-id/, `${relativePath} should inspect decision ids through the ledger core`);
       assert.match(content, /decision-upsert/, `${relativePath} should submit decision rows through the ledger core`);
+    }
+  }
+});
+
+test("review skill reports keep advisories outside the finding ledger", () => {
+  for (const skill of ["review-analysis", "review-plan", "review-code"]) {
+    const localConfig = JSON.parse(read(`.agents/skills/${skill}/config/verify.json`));
+    assert.ok(localConfig.checks.artifact.required_sections.includes("非阻塞建议"));
+
+    for (const locale of ["en", "zh-CN"]) {
+      const config = JSON.parse(read(`templates/.agents/skills/${skill}/config/verify.${locale}.json`));
+      const section = locale === "en" ? "Non-blocking Advisories" : "非阻塞建议";
+      assert.ok(config.checks.artifact.required_sections.includes(section));
+      assert.match(
+        read(`templates/.agents/skills/${skill}/reference/report-template.${locale}.md`),
+        new RegExp(`^## ${section}$`, "m")
+      );
+    }
+    assert.match(read(`.agents/skills/${skill}/reference/report-template.md`), /^## 非阻塞建议$/m);
+  }
+});
+
+test("review output templates reserve cross-stage commands for an advanceable ledger", () => {
+  const commandBySkill: Record<string, RegExp> = {
+    "review-analysis": /\/plan-task |\/agent-infra:plan-task |\/\{\{project\}\}:plan-task |\$plan-task /g,
+    "review-plan": /\/code-task |\/agent-infra:code-task |\/\{\{project\}\}:code-task |\$code-task /g,
+    "review-code": /\/commit|\/agent-infra:commit|\/\{\{project\}\}:commit|\$commit/g
+  };
+  for (const [skill, pattern] of Object.entries(commandBySkill)) {
+    for (const locale of [null, "en", "zh-CN"] as const) {
+      const relativePath = locale
+        ? `templates/.agents/skills/${skill}/reference/output-templates.${locale}.md`
+        : `.agents/skills/${skill}/reference/output-templates.md`;
+      assert.equal(read(relativePath).match(pattern)?.length, 3, `${relativePath} should expose one three-TUI advance path`);
     }
   }
 });

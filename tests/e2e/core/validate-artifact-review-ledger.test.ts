@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { CLI_PATH } from "../../helpers.ts";
+import { CLI_PATH, INTERNAL_CLI_PATH } from "../../helpers.ts";
 
 import {
   buildTaskFrontmatter,
@@ -206,6 +206,47 @@ test("review-ledger stage_scope only enforces stages before the caller", async (
     const allScoped = runLedger("complete-task", taskDir);
     assert.equal(allScoped.payload.status, "fail");
     assert.match(allScoped.payload.message, /CD-1/);
+  });
+});
+
+test("review-ledger and stage-status agree for open minor, terminal, and advisory-only stages", async () => {
+  await withTempRoot("agent-infra-ledger-parity-", (tempRoot) => {
+    spawnSync("git", ["init", "--quiet"], { cwd: tempRoot });
+    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({ project: "demo" }));
+    const taskDir = path.join(tempRoot, ".agents", "workspace", "active", TASK_ID);
+    const cases = [
+      { stage: "analysis", id: "AN-1", skill: "plan-task" },
+      { stage: "plan", id: "PL-1", skill: "code-task" },
+      { stage: "code", id: "CD-1", skill: "complete-task" }
+    ];
+
+    for (const item of cases) {
+      write(path.join(taskDir, "task.md"), buildLedgerTask([
+        `| ${item.id} | ${item.stage} | 1 | minor | open | review.md#${item.id} |`
+      ]));
+      const openStatus = spawnSync(process.execPath, [INTERNAL_CLI_PATH, "task-ledger", TASK_ID, "stage-status", "--stage", item.stage], {
+        cwd: tempRoot, encoding: "utf8"
+      });
+      assert.equal(openStatus.status, 0, openStatus.stderr);
+      assert.equal(JSON.parse(openStatus.stdout).stageStatus.canAdvance, false);
+      assert.equal(runLedger(item.skill, taskDir).payload.status, "fail");
+
+      write(path.join(taskDir, "task.md"), buildLedgerTask([
+        `| ${item.id} | ${item.stage} | 1 | minor | closed | implementation evidence |`
+      ]));
+      const terminalStatus = spawnSync(process.execPath, [INTERNAL_CLI_PATH, "task-ledger", TASK_ID, "stage-status", "--stage", item.stage], {
+        cwd: tempRoot, encoding: "utf8"
+      });
+      assert.equal(JSON.parse(terminalStatus.stdout).stageStatus.canAdvance, true);
+      assert.equal(runLedger(item.skill, taskDir).payload.status, "pass");
+    }
+
+    write(path.join(taskDir, "task.md"), buildLedgerTask([]));
+    const advisoryOnly = spawnSync(process.execPath, [INTERNAL_CLI_PATH, "task-ledger", TASK_ID, "stage-status", "--stage", "code"], {
+      cwd: tempRoot, encoding: "utf8"
+    });
+    assert.equal(JSON.parse(advisoryOnly.stdout).stageStatus.canAdvance, true);
+    assert.equal(runLedger("complete-task", taskDir).payload.status, "pass");
   });
 });
 

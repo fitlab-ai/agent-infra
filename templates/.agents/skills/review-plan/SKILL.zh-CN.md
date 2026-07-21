@@ -68,7 +68,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ### 6. 更新任务状态
 
-报告完成后，新 finding 逐条调用 `agent-infra-internal task-ledger {task-id} finding-upsert --stage plan --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`；复核上一轮响应时调用 `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {相称证据}`。不得扫描编号或手写账本行。随后执行 `agent-infra-internal task-event {task-id} review-plan.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`。
+报告完成后，新 finding 逐条调用 `agent-infra-internal task-ledger {task-id} finding-upsert --stage plan --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`；复核上一轮响应时调用 `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {相称证据}`。不得扫描编号或手写账本行。全部账本写入完成后只调用一次 `agent-infra-internal task-ledger {task-id} stage-status --stage plan`，以 `stageStatus.canAdvance` 决定 verdict 和下一步，并以 `unresolvedFindingCounts` 填写 blocker/major/minor：仅 `canAdvance=true` 可用 `approved`，否则必须用 `changes-requested` 或 `rejected`。随后执行 `agent-infra-internal task-event {task-id} review-plan.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`。
 
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
 

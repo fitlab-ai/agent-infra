@@ -40,11 +40,17 @@
 **说明**：{details}
 **修复建议**：{fix suggestion}
 
-### 次要问题（可选改进）
+### 次要问题（低影响但需闭环）
 
 #### 1. {改进点}
 **文件**：`{file-path}:{line-number}`
 **建议**：{improvement suggestion}
+
+## 非阻塞建议
+
+> 仅记录不影响当前产物完整性、正确性和验收的后续优化；不写入审查分歧账本，不计入 blocker / major / minor，也不影响结论。
+
+- {future optimization}
 
 ## 人工校验项
 

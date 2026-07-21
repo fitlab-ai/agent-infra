@@ -4,9 +4,9 @@ Read this file before presenting the final review result to the user.
 
 ## Select exactly one output scenario
 
-Evaluate in this order (**manual-validation count does not participate in selection**):
-1. If `Blocker = 0`, `Major = 0`, and `Minor = 0`, use Scenario A, regardless of manual-validation count
-2. If `Blocker = 0` and (`Major > 0` or `Minor > 0`), use Scenario B
+Select from `stage-status` (**manual-validation and advisory counts do not participate**):
+1. If `stageStatus.canAdvance=true`, use Scenario A
+2. If `stageStatus.canAdvance=false` and there are no blockers, use Scenario B
 3. If `Blocker > 0` and the issues can be handled by one focused revision, use Scenario C
 4. If the technical plan needs major redesign, broad rewriting, or a restart, use Scenario D
 
@@ -16,7 +16,9 @@ Rules:
 - If `Blocker > 0`, never use an approved template
 - Never count manual-validation items as blocker / major / minor or use them to trigger Scenario B/C/D
 - The selected scenario must include all TUI command formats
-- The count line always shows 4 numbers: the first three (Blockers / Major / Minor) must be 0 to proceed; the fourth, `Human-decision` (`{h}`), is the number of rows in task.md `## 审查分歧账本` with `stage=plan` and `status=needs-human-decision` — a "pending human ruling" item that need not be zero and does not participate in scenario selection. When `{h} > 0`, before the selected scenario's "Next steps" commands you must expand each pending ruling per the "Pending human-decision pre-block" in `.agents/rules/next-step-output.md` and prompt to resolve them first
+- The count line shows 4 numbers. `Human-decision` (`{h}`) counts this stage's `needs-human-decision` rows; because those rows are unresolved, `{h} > 0` means `canAdvance=false`. Expand the "Pending human-decision pre-block" from `.agents/rules/next-step-output.md` and show revision and re-review paths only.
+
+For Scenarios B/C/D, follow the revision commands with re-review commands: `/review-plan {task-ref}`, `/{{project}}:review-plan {task-ref}`, and `$review-plan {task-ref}`.
 
 ### Scenario A: Approved with no findings
 
@@ -34,22 +36,17 @@ Next step - write code:
 Reminder: manual-validation items belong in the PR description manual verification checklist and should not trigger /plan-task.
 ```
 
-### Scenario B: Approved with findings
+### Scenario B: Changes requested (major / minor)
 
 ```text
-Task {task-id} technical plan review completed. Verdict: approved.
+Task {task-id} technical plan review completed. Verdict: changes requested.
 - Blockers: 0 | Major issues: {n} | Minor issues: {n} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
-Next step - revise plan before coding (recommended):
+Next step - revise technical plan:
   - Claude Code / OpenCode: /plan-task {task-ref}
   - Gemini CLI: /{{project}}:plan-task {task-ref}
   - Codex CLI: $plan-task {task-ref}
-
-Or proceed directly to coding:
-  - Claude Code / OpenCode: /code-task {task-ref}
-  - Gemini CLI: /{{project}}:code-task {task-ref}
-  - Codex CLI: $code-task {task-ref}
 
 [When manual-validation > 0, append:]
 Reminder: manual-validation items belong in the PR description manual verification checklist and should not trigger /plan-task.

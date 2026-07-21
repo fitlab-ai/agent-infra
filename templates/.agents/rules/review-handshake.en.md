@@ -62,6 +62,8 @@ The single source of truth for disagreement state is the fixed `## 审查分歧�
 - `stage` ∈ `{analysis, plan, code}` (plus the reserved value `post-review-commit`, used only for post-review exemption rows).
 - `status` legal enum: `open` / `accepted` / `adjusted` / `refuted` / `cannot-judge` / `confirmed` / `needs-human-decision` / `closed` / `human-decided`.
 - **Terminal set (gate passes)**: `{confirmed, closed, human-decided}`; everything else is blocking.
+- **Severity is independent from advancement**: `blocker` / `major` / `minor` express impact only. Every formal finding blocks approval until terminal. After all writes, review verdicts, event counts, and next steps must be derived from `task-ledger stage-status --stage {stage}`.
+- **Non-blocking advisories**: only future optimizations that do not affect the current artifact's completeness, correctness, or acceptance. Advisories stay in a separate report section and never enter this ledger, finding counts, or verdict; manual-validation remains a separate category.
 - **Write responsibility**: callers submit structured intents only; they do not scan ids, assemble table rows, or decide mechanical transitions. `review-*` uses `agent-infra-internal task-ledger {task-id} finding-upsert|finding-review ...`; `*-task` uses `finding-respond ...`; `ai decide` applies human rulings atomically. The core validates and commits each intent through one task write.
 - **Backward compatible**: when task.md has no such section the gate treats it as no open disagreements and passes.
 

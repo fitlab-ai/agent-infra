@@ -62,6 +62,8 @@
 - `stage` ∈ `{analysis, plan, code}`（外加保留值 `post-review-commit`，仅用于 post-review 豁免行）。
 - `status` 合法枚举：`open` / `accepted` / `adjusted` / `refuted` / `cannot-judge` / `confirmed` / `needs-human-decision` / `closed` / `human-decided`。
 - **终态集合（gate 放行）**：`{confirmed, closed, human-decided}`；其余为阻塞态。
+- **severity 与推进解耦**：`blocker` / `major` / `minor` 只表示影响大小。任何正式 finding 只要尚未进入终态就阻止当前阶段通过；review 结论、事件计数与下一步必须在全部写入后通过 `task-ledger stage-status --stage {stage}` 从同一语义导出。
+- **非阻塞 advisory**：仅限不影响当前产物完整性、正确性和验收的后续优化。advisory 只写入报告的独立段落，不进入本账本、不进入 finding 计数、不影响 verdict；manual-validation 仍是独立分类。
 - **写入责任**：调用方只提交结构化意图，不扫描编号、不拼表格行、不自行判断机械状态迁移。`review-*` 用 `agent-infra-internal task-ledger {task-id} finding-upsert|finding-review ...`；`*-task` 用 `finding-respond ...`；人工裁决由 `ai decide` 原子完成。核心统一校验并通过一次任务写入提交。
 - **向后兼容**：task.md 无此段时，gate 视为无未决分歧而放行。
 

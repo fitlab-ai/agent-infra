@@ -47,3 +47,35 @@ test('task-ledger rejects duplicate flags and preserves bytes for dry-run', () =
     assert.deepEqual(fs.readFileSync(f.file), before);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
+
+test('task-ledger stage-status is read-only and reports unresolved minor findings', () => {
+  const f = fixture();
+  try {
+    fs.appendFileSync(f.file, '| AN-1 | analysis | 1 | minor | open | review-analysis.md#AN-1 |\n');
+    const before = fs.readFileSync(f.file);
+    const beforeMtime = fs.statSync(f.file).mtimeMs;
+    const result = run(f.root, ['7', 'stage-status', '--stage', 'analysis']);
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 'ready');
+    assert.equal(payload.changed, false);
+    assert.equal(payload.stageStatus.canAdvance, false);
+    assert.deepEqual(payload.stageStatus.unresolvedFindingCounts, { blocker: 0, major: 0, minor: 1 });
+    assert.deepEqual(fs.readFileSync(f.file), before);
+    assert.equal(fs.statSync(f.file).mtimeMs, beforeMtime);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('task-ledger stage-status rejects invalid stages and invalid ledger rows', () => {
+  const f = fixture();
+  try {
+    const badStage = run(f.root, [f.id, 'stage-status', '--stage', 'delivery']);
+    assert.equal(badStage.status, 1);
+    assert.equal(JSON.parse(badStage.stdout).error.code, 'LEDGER_PAYLOAD_INVALID');
+
+    fs.appendFileSync(f.file, '| AN-1 | analysis | 1 | advisory | open | review-analysis.md#AN-1 |\n');
+    const badLedger = run(f.root, [f.id, 'stage-status', '--stage', 'analysis']);
+    assert.equal(badLedger.status, 1);
+    assert.equal(JSON.parse(badLedger.stdout).error.code, 'LEDGER_DOCUMENT_INVALID');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});

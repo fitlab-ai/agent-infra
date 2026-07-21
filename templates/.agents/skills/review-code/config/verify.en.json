@@ -20,6 +20,7 @@
       "required_sections": [
         "Review Summary",
         "Findings",
+        "Non-blocking Advisories",
         "Manual Validation Items",
         "Conclusion and Recommendations",
         "State Check",

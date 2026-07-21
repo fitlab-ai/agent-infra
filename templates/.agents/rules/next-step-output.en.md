@@ -83,7 +83,7 @@ This section is a **third standalone rule, co-equal with the two above**, used o
 `{h}` has the same meaning as the count line in each review skill's `reference/output-templates.md`: the number of rows in task.md `## 审查分歧账本` (Review Disagreement Ledger) for **this stage** (`stage ∈ {analysis|plan|code}`) whose `status = needs-human-decision` — **pending items only, excluding rows already `human-decided`**.
 
 - **`{h} = 0`**: do not emit this block; render "Next steps" exactly as the selected output-templates scenario.
-- **`{h} > 0`**: insert the block below **before** the selected scenario's "Next steps - <stage>" commands; the next-stage commands are still listed after the block.
+- **`{h} > 0`**: insert the block below **before** the selected scenario's "Next steps - <stage>" commands. This round may list only current-artifact revision and re-review commands, never cross-stage commands.
 
 ```text
 ⚠️ Pending human decisions ({h}) — please rule on each before continuing to the next stage:
@@ -100,7 +100,7 @@ To resolve:
 
 This command atomically creates the `HDR-N` ruling record, flips the target ledger row to `human-decided`, and updates evidence and the activity log; do not manually edit only part of the transaction.
 
-Note: until all those rows are flipped to `human-decided`, running the next-stage command directly will be blocked by gates such as complete-task (`needs-human-decision` is non-terminal). The next-stage commands are still listed below for use after the decisions are made.
+Note: until all those rows are flipped to `human-decided`, the stage gate blocks advancement (`needs-human-decision` is non-terminal). After the decisions, rerun the current review and let its new `stage-status` decide whether next-stage commands may be shown.
 ```
 
 Field values: `{ledger-id}` / `{stage}` / `{severity}` / `{evidence}` come from the same-named columns of the matching `## 审查分歧账本` row; `{summary}` comes from the artifact anchor referenced by `{evidence}` (e.g. the decision title at `plan.md#HD-1`), falling back to a one-line summary of the finding when no anchor title exists.

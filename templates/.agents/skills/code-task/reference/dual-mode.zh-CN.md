@@ -16,8 +16,8 @@ agent-infra-internal task-artifact {task-id} inspect --family code
 
 | 条件 | mode | exit | 行为 |
 |---|---|---:|---|
-| 无 code 产物 | `init` | 0 | 初次实现，产物为 `code.md` |
-| 最新 review-plan 已批准（`通过` 或 `通过 + major/minor 建议`，即 `Approved` 或 `Approved-with-issues`），且其「审查输入」/「Review Input」字段引用的 plan 文件 == 任务目录中最新的 `plan(-r{N})?.md`，且最新 review-plan 的 mtime > 最新 code 的 mtime | `init` | 0 | plan 已在 code 之后被批准；进入新一轮实现，`next_round = code_max + 1`、`next_artifact = code-r{next_round}.md`。**不论 review-code 是否已审**，本分支均先命中。plan 与 review-plan 的轮次独立递增（如 `plan-r5` 可被 `review-plan-r4` 批准），通过 review-plan 的「审查输入」字段建立批准关系，不要求同号 |
+| 无 code 产物，且最新 review-plan 精确为 `Approved` 并引用最新 plan | `init` | 0 | 初次实现，产物为 `code.md`；缺少匹配审批或为 `Approved-with-issues` 时返回 error |
+| 最新 review-plan 精确为 `Approved`，且其「审查输入」/「Review Input」字段引用最新 plan，mtime 又晚于最新 code | `init` | 0 | plan 已在 code 之后获批；进入新一轮实现。`Approved-with-issues` 仅保留历史解析兼容，不构成跨阶段批准 |
 | `rev_max < code_max` | `error` | 2 | 最新代码未审查，先运行 `review-code` |
 | 最新 review-code 为 Approved 且存在审查完成后产生的 pending 实现输入 | `decision` | 0 | 选择最早 `II-N`，进入裁决驱动实现；false/not-required 与 consumed 输入不触发 |
 | 最新 review-code 为 Approved 且 0/0/0 | `refused` | 1 | 已通过，无需再次运行 `code-task` |

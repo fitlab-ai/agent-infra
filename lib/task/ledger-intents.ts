@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { LEDGER_COLUMNS, LEDGER_HEADINGS, nextHdId, parseLedger } from './ledger.ts';
+import { LEDGER_COLUMNS, LEDGER_HEADINGS, nextHdId, parseLedger, validateLedgerRows } from './ledger.ts';
 import type { LedgerRow, ReviewStage } from './ledger.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { writeTask } from './write.ts';
@@ -31,7 +31,6 @@ type LedgerIntentResult = {
 };
 
 const PREFIX: Record<ReviewStage, string> = { analysis: 'AN', plan: 'PL', code: 'CD' };
-const FINDING_STATUSES = new Set(['open', 'accepted', 'adjusted', 'refuted', 'cannot-judge', 'confirmed', 'needs-human-decision', 'closed', 'human-decided']);
 const RESPONSE = new Set<ExecutorResponse>(['accepted', 'adjusted', 'refuted', 'cannot-judge']);
 const DISPOSITION = new Set<ReviewDisposition>(['confirmed', 'closed', 'open', 'needs-human-decision']);
 const REVIEW_ARTIFACT: Record<ReviewStage, RegExp> = {
@@ -64,27 +63,6 @@ function maxHandshakeRounds(repoRoot: string): number {
     const value = parsed.review?.maxHandshakeRounds;
     return Number.isInteger(value) && Number(value) > 0 ? Number(value) : 3;
   } catch { return 3; }
-}
-
-function validateRows(rows: readonly LedgerRow[]): LedgerIntentError | null {
-  const seen = new Set<string>();
-  for (const row of rows) {
-    if (seen.has(row.id)) return { code: 'LEDGER_DUPLICATE_ID', message: `duplicate ledger id '${row.id}'` };
-    seen.add(row.id);
-    if (/^PRC-[1-9]\d*$/.test(row.id)) continue;
-    if (!/^(AN|PL|CD|HD)-[1-9]\d*$/.test(row.id)) return { code: 'LEDGER_ID_INVALID', message: `ledger id '${row.id}' is invalid` };
-    if (!['analysis', 'plan', 'code', 'post-review-commit'].includes(row.stage)) return { code: 'LEDGER_STAGE_INVALID', message: `ledger stage '${row.stage}' is invalid` };
-    if (!FINDING_STATUSES.has(row.status)) return { code: 'LEDGER_STATUS_INVALID', message: `ledger status '${row.status}' is invalid` };
-    if (row.id.startsWith('AN-') && row.stage !== 'analysis' || row.id.startsWith('PL-') && row.stage !== 'plan' || row.id.startsWith('CD-') && row.stage !== 'code') {
-      return { code: 'LEDGER_STAGE_INVALID', message: `ledger id '${row.id}' conflicts with stage '${row.stage}'` };
-    }
-    if (row.id.startsWith('HD-')) {
-      if (row.round !== '-' || row.severity !== 'decision' || !['needs-human-decision', 'human-decided'].includes(row.status)) return { code: 'LEDGER_DOCUMENT_INVALID', message: `decision row '${row.id}' is invalid` };
-    } else if (!/^[1-9]\d*$/.test(row.round) || !['blocker', 'major', 'minor'].includes(row.severity)) {
-      return { code: 'LEDGER_DOCUMENT_INVALID', message: `finding row '${row.id}' is invalid` };
-    }
-  }
-  return null;
 }
 
 function nextFindingId(rows: readonly LedgerRow[], stage: ReviewStage): string {
@@ -136,7 +114,7 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
   } catch (error) {
     return failed(intent, ledgerReadErrorCode(error), error instanceof Error ? error.message : String(error), resolved.taskId);
   }
-  const invalidRows = validateRows(rows);
+  const invalidRows = validateLedgerRows(rows);
   if (invalidRows) return failed(intent, invalidRows.code, invalidRows.message, resolved.taskId);
 
   if (intent.kind === 'decision-next-id') {

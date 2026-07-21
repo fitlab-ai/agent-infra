@@ -312,12 +312,20 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
   const reviewMax = reviewCode.latest?.round ?? 0;
   const inputs = [plan.latest];
   if (!latestCode) {
+    if (!reviewPlan.latest || reviewPlan.reviewedInput?.name !== plan.latest.name) {
+      return contextFailure(inventory, 'ARTIFACT_INPUT_MISSING', `latest plan '${plan.latest.name}' requires a matching approved review-plan`);
+    }
+    const verdict = parseVerdict(reviewPlan.latest.path);
+    if (!verdict.ok) return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', verdict.message, reviewPlan.latest.name);
+    if (verdict.verdict !== 'Approved') {
+      return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', `latest ${reviewPlan.latest.name} is not approved`, reviewPlan.latest.name);
+    }
     return withCodeMode(inventory, inputs, 'ready', 'init', codeMax, reviewMax, null, null,
       'No prior code artifact. Starting initial implementation (round 1 -> code.md).');
   }
   if (reviewPlan.latest && reviewPlan.reviewedInput?.name === plan.latest.name) {
     const verdict = parseVerdict(reviewPlan.latest.path);
-    if (verdict.ok && (verdict.verdict === 'Approved' || verdict.verdict === 'Approved-with-issues') && reviewPlan.latest.mtimeMs > latestCode.mtimeMs) {
+    if (verdict.ok && verdict.verdict === 'Approved' && reviewPlan.latest.mtimeMs > latestCode.mtimeMs) {
       return withCodeMode(inventory, inputs, 'ready', 'init', codeMax, reviewMax, verdict.verdict, reviewPlan.latest.name,
         `Latest ${reviewPlan.latest.name} is approved and newer than the latest code artifact. Entering replan-driven init.`);
     }

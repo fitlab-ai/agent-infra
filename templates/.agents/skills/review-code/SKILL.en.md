@@ -84,9 +84,10 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 ### 6. Update Task Status
 
 Update task.md:
-- When this round's `Overall Verdict` / `总体结论` is `Approved` / `通过` and `T == R^{tree}`, write `last_reviewed_commit: {R}`; when the Approved snapshot contains uncommitted changes, clear any existing `last_reviewed_commit` until `commit` anchors it
-- When this round is not Approved, preserve the existing `last_reviewed_commit`; do not advance or clear it
-After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. Do not scan ids or edit ledger rows. After updating `last_reviewed_commit`, run `agent-infra-internal task-event {task-id} review-code.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`.
+- After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. Do not scan ids or edit ledger rows
+- After all ledger writes, call `agent-infra-internal task-ledger {task-id} stage-status --stage code` exactly once. Derive the verdict and next-step branch from `stageStatus.canAdvance`, and blocker/major/minor event counts from `unresolvedFindingCounts`; only `canAdvance=true` permits Approved
+- Only when `canAdvance=true`, the verdict is Approved, and `T == R^{tree}`, write `last_reviewed_commit: {R}`. Clear an old value for an Approved snapshot with uncommitted differences; otherwise preserve the existing value and do not advance it
+- After handling `last_reviewed_commit`, run `agent-infra-internal task-event {task-id} review-code.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
 
 Always include the `Manual-validation: {n}` field in the done log, including when it is 0.
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
@@ -119,9 +120,8 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 > **Important — branch labels are not values for the verdict field**. The four labels below are user-output template categories (scenarios A/B/C/D), **not** values for the `**Overall Verdict**:` field. The field accepts exactly one of the three canonical values (`Approved` / `Changes Requested` / `Rejected`, or zh-CN `通过` / `需要修改` / `拒绝`); combined phrases like `Approved with issues` will be rejected by the verify gate.
 
 Choose exactly one branch based on the findings:
-- no blockers, no major, no minor -> approved with no issues
-- no blockers, but major or minor findings -> approved with issues
-- blockers that can be fixed in a focused pass -> changes requested
+- `stageStatus.canAdvance=true` -> approved
+- `stageStatus.canAdvance=false` and focused fixes are sufficient -> changes requested
 - major redesign or re-implementation needed -> rejected
 
 manual-validation counts do not influence branch selection; they are displayed only as manual validation counts.

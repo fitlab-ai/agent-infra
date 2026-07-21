@@ -83,7 +83,7 @@ Completed at: YYYY-MM-DD HH:mm:ss
 `{h}` 含义与各 review 技能 `reference/output-templates.md` 计数行一致：task.md `## 审查分歧账本` 中**本阶段**（`stage ∈ {analysis|plan|code}`）`status = needs-human-decision` 的行数——**只含待裁决项，不含已 `human-decided`**。
 
 - **`{h} = 0`**：不输出本块，「下一步」按 output-templates 选定场景原样渲染。
-- **`{h} > 0`**：在选定场景的「下一步 - <阶段>」命令**之前**插入下面的块；下一阶段命令仍照常列在块之后。
+- **`{h} > 0`**：在选定场景的「下一步 - <阶段>」命令**之前**插入下面的块；本轮只能列当前产物的修订与复审路径，不得列跨阶段命令。
 
 ```text
 ⚠️ 待人工裁决（{h} 项）—— 请先逐项裁决，再继续下一阶段：
@@ -100,7 +100,7 @@ Completed at: YYYY-MM-DD HH:mm:ss
 
 该命令原子写入 `HDR-N` 裁定记录、把目标账本行翻为 `human-decided`、更新 evidence 与活动日志；不要手工只修改其中一部分。
 
-说明：在上述行全部翻为 `human-decided` 之前，直接执行下一阶段命令会被 complete-task 等 gate 拦截（`needs-human-decision` 为非终态）。下一阶段命令仍列在下方，供裁决完成后使用。
+说明：在上述行全部翻为 `human-decided` 之前，阶段 gate 会拦截推进（`needs-human-decision` 为非终态）；裁决完成后重新执行当前 review，由新的 `stage-status` 结果决定是否展示下一阶段命令。
 ```
 
 字段取值：`{ledger-id}` / `{stage}` / `{severity}` / `{evidence}` 直接取自 `## 审查分歧账本` 对应行的同名列；`{摘要}` 取自 `{evidence}` 指向的产物锚点条目（如 `plan.md#HD-1` 的决策标题），无锚点标题时用该 finding 的一句话概述。

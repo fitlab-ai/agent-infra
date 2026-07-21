@@ -30,6 +30,12 @@ Follow the `design-review` step in `.agents/workflows/feature-development.yaml`.
 3. **Actionable**: suggest a concrete fix
 4. **Severity-based**: clearly distinguish blockers, major issues, and minor issues
 
+## Three-category Decision Tree
+
+1. A gap in constraints, risks, interface boundaries, validation strategy, or implementability is a formal finding. Assign blocker / major / minor by impact; severity does not control closure, so minor findings must also reach a terminal state.
+2. When there is no known defect but validation requires a real environment, permission, or human operation, classify it as manual-validation.
+3. Only a future optimization that does not affect the current plan's completeness, correctness, or acceptance is an advisory. Put it only in Non-blocking Advisories; do not add it to the ledger, finding counts, or verdict.
+
 ## Manual Validation Classification
 
 Some findings cannot be closed by an AI agent in the current execution environment, for example:
