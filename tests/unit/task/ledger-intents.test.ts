@@ -81,6 +81,46 @@ test('finding response and review enforce the handshake matrix and round', () =>
   } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
 });
 
+test('finding review closes open minor findings in the same round for every stage', () => {
+  for (const [id, stage, reviewArtifact] of [
+    ['AN-1', 'analysis', 'review-analysis.md'],
+    ['PL-1', 'plan', 'review-plan.md'],
+    ['CD-1', 'code', 'review-code.md']
+  ] as const) {
+    const evidence = `${reviewArtifact}#${id}-fixed`;
+    const f = fixture([`| ${id} | ${stage} | 1 | minor | open | ${reviewArtifact}#${id} |`]);
+    try {
+      const request = {
+        kind: 'finding-review' as const, taskRef: f.taskId, id,
+        status: 'closed' as const, evidence
+      };
+      const result = applyLedgerIntent(request, { repoRoot: f.repoRoot, metadataProvider: () => METADATA });
+      assert.equal(result.status, 'applied', id);
+      assert.equal(result.after?.status, 'closed');
+      assert.equal(result.after?.round, '1');
+      assert.equal(result.after?.evidence, evidence);
+      const repeated = applyLedgerIntent(request, { repoRoot: f.repoRoot, metadataProvider: () => METADATA });
+      assert.equal(repeated.status, 'no-op');
+    } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+  }
+});
+
+test('finding review rejects same-round close for non-minor open findings', () => {
+  for (const severity of ['blocker', 'major'] as const) {
+    const f = fixture([`| CD-1 | code | 1 | ${severity} | open | review-code.md#CD-1 |`]);
+    try {
+      const before = fs.readFileSync(f.taskMd);
+      const result = applyLedgerIntent({
+        kind: 'finding-review', taskRef: f.taskId, id: 'CD-1',
+        status: 'closed', evidence: `review-code.md#CD-1-${severity}-fixed`
+      }, { repoRoot: f.repoRoot, metadataProvider: () => METADATA });
+      assert.equal(result.status, 'failed');
+      assert.equal(result.error?.code, 'LEDGER_TRANSITION_INVALID');
+      assert.deepEqual(fs.readFileSync(f.taskMd), before);
+    } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+  }
+});
+
 test('finding review accepts every legal disposition and rejects every other disposition', () => {
   const matrix = {
     accepted: ['closed', 'open', 'needs-human-decision'],

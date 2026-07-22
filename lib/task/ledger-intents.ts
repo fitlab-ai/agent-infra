@@ -180,7 +180,8 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
           : before.status === 'adjusted' || before.status === 'refuted'
             ? new Set(['confirmed', 'open', 'needs-human-decision'])
             : before.status === 'cannot-judge' ? new Set(['open', 'needs-human-decision']) : new Set<string>();
-        if (!allowed.has(intent.status) || (intent.status === 'open' && Number(before.round) >= maxHandshakeRounds(resolved.repoRoot))) {
+        const sameRoundMinorClose = before.status === 'open' && before.severity === 'minor' && intent.status === 'closed';
+        if ((!sameRoundMinorClose && !allowed.has(intent.status)) || (intent.status === 'open' && Number(before.round) >= maxHandshakeRounds(resolved.repoRoot))) {
           return failed(intent, 'LEDGER_TRANSITION_INVALID', `finding '${intent.id}' cannot transition from ${before.status} to ${intent.status}`, resolved.taskId, intent.id);
         }
         after = { ...before, status: intent.status, evidence };

@@ -30,6 +30,10 @@ function reviewCodeArtifact(input = 'code.md') {
   return `# Code Review\n\n- **审查输入**：\`${input}\`\n`;
 }
 
+function reviewArtifact(title: string, input: string) {
+  return `# ${title}\n\n- **审查输入**：\`${input}\`\n`;
+}
+
 function decisionFixture() {
   const f = fixture('code-review');
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
@@ -190,6 +194,59 @@ test('analysis restart still rejects an unrelated workflow stage without changin
   assert.equal(JSON.parse(started.stdout).error.code, 'EVENT_TRANSITION_INVALID');
   assert.deepEqual(fs.readFileSync(f.file), before);
 });
+
+for (const scenario of [
+  {
+    family: 'review-analysis', step: 'requirement-analysis-review', input: 'analysis.md',
+    title: 'Analysis Review', first: 'review-analysis.md', second: 'review-analysis-r2.md'
+  },
+  {
+    family: 'review-plan', step: 'technical-design-review', input: 'plan.md',
+    title: 'Plan Review', first: 'review-plan.md', second: 'review-plan-r2.md'
+  }
+] as const) {
+  test(`${scenario.family} event completes a supplemental round from its review stage`, () => {
+    const f = fixture(scenario.step);
+    fs.writeFileSync(path.join(f.dir, scenario.input), `# ${scenario.input}\n`);
+    fs.writeFileSync(path.join(f.dir, scenario.first), reviewArtifact(scenario.title, scenario.input));
+
+    const started = run(f.root, [f.id, `${scenario.family}.started`, '--agent', 'codex']);
+    assert.equal(started.status, 0, started.stderr);
+    const startedResult = JSON.parse(started.stdout);
+    assert.equal(startedResult.status, 'applied');
+    assert.equal(startedResult.fromStep, scenario.step);
+    assert.equal(startedResult.toStep, scenario.step);
+    assert.equal(startedResult.round, 2);
+    assert.equal(startedResult.artifact, scenario.second);
+
+    fs.writeFileSync(path.join(f.dir, scenario.second), reviewArtifact(scenario.title, scenario.input));
+    const completed = run(f.root, [
+      f.id, `${scenario.family}.completed`, '--agent', 'codex', '--artifact', scenario.second,
+      '--verdict', 'approved', '--blockers', '0', '--major', '0', '--minor', '0', '--manual-validation', '0'
+    ]);
+    assert.equal(completed.status, 0, completed.stderr);
+    assert.equal(JSON.parse(completed.stdout).toStep, scenario.step);
+    const content = fs.readFileSync(f.file, 'utf8');
+    assert.match(content, new RegExp(scenario.second.replace('.', '\\.')));
+    assert.match(content, new RegExp(`current_step: ${scenario.step}`));
+  });
+}
+
+for (const scenario of [
+  { family: 'review-analysis', step: 'technical-design', input: 'analysis.md' },
+  { family: 'review-plan', step: 'requirement-analysis-review', input: 'plan.md' }
+] as const) {
+  test(`${scenario.family} event still rejects an unrelated workflow stage without changing task bytes`, () => {
+    const f = fixture(scenario.step);
+    fs.writeFileSync(path.join(f.dir, scenario.input), `# ${scenario.input}\n`);
+    const before = fs.readFileSync(f.file);
+
+    const started = run(f.root, [f.id, `${scenario.family}.started`, '--agent', 'codex']);
+    assert.notEqual(started.status, 0);
+    assert.equal(JSON.parse(started.stdout).error.code, 'EVENT_TRANSITION_INVALID');
+    assert.deepEqual(fs.readFileSync(f.file), before);
+  });
+}
 
 test('review-code event completes the regular code review path', () => {
   const f = fixture('code');
