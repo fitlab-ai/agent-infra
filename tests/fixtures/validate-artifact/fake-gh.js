@@ -52,6 +52,11 @@ if (process.env.GH_FAKE_FAIL) {
   process.exit(1);
 }
 
+if (args.length === 1 && args[0] === "--version") {
+  process.stdout.write(`gh version ${process.env.GH_FAKE_VERSION || "2.16.0"}\n`);
+  process.exit(0);
+}
+
 if (args[0] === "issue" && args[1] === "view") {
   process.stdout.write(JSON.stringify(readJson("GH_FAKE_ISSUE_PATH")));
   process.exit(0);
@@ -63,8 +68,8 @@ if (args[0] === "pr" && args[1] === "view") {
 }
 
 if (args[0] === "pr" && args[1] === "checks") {
-  if (process.env.GH_FAKE_REQUIRED_UNAVAILABLE === "true" && args.includes("--required")) {
-    console.error("unknown flag: --required");
+  if (process.env.GH_FAKE_CHECKS_FAIL) {
+    console.error(process.env.GH_FAKE_CHECKS_FAIL);
     process.exit(1);
   }
   process.stdout.write(JSON.stringify(readJson("GH_FAKE_CHECKS_PATH") || []));

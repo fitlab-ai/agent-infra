@@ -1,6 +1,8 @@
 import process from 'node:process';
 import spawn from 'cross-spawn';
 
+import semver from 'semver';
+
 import type { PlatformError } from './types.ts';
 
 type RunResult = { status: number | null; stdout: string; stderr: string; error?: Error };
@@ -10,6 +12,7 @@ type RequestOptions = RunOptions & { method?: 'GET' | 'PATCH' | 'POST' | 'DELETE
 type ClientResult<T> = { ok: true; value: T } | { ok: false; error: PlatformError };
 
 type GitHubClient = {
+  version(options?: RunOptions): ClientResult<string>;
   json<T = unknown>(args: string[], options?: RequestOptions): ClientResult<T>;
   text(args: string[], options?: RequestOptions): ClientResult<string>;
 };
@@ -19,6 +22,8 @@ type ClientOptions = {
   retryDelaysMs?: number[];
   sleep?: (delayMs: number) => void;
 };
+
+const MINIMUM_GITHUB_CLI_VERSION = '2.16.0';
 
 function defaultRunner(args: string[], options: RunOptions): RunResult {
   const command = process.env.AGENT_INFRA_GH_BIN || 'gh';
@@ -106,6 +111,18 @@ function createGitHubClient(options: ClientOptions = {}): GitHubClient {
   }
 
   return {
+    version(request = {}) {
+      const result = runner(['--version'], request);
+      if (result.status !== 0) return { ok: false, error: classifyGitHubFailure(result) };
+      const version = result.stdout.match(/^gh version (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\s|$)/m)?.[1];
+      if (!version || !semver.valid(version)) {
+        return {
+          ok: false,
+          error: { code: 'GH_CLI_VERSION_INVALID', message: 'GitHub CLI returned an invalid version', retryable: false }
+        };
+      }
+      return { ok: true, value: version };
+    },
     text(args, request = {}) {
       const result = run(args, request);
       return result.ok ? { ok: true, value: result.value.trim() } : result;
@@ -125,5 +142,5 @@ function createGitHubClient(options: ClientOptions = {}): GitHubClient {
   };
 }
 
-export { classifyGitHubFailure, createGitHubClient };
+export { classifyGitHubFailure, createGitHubClient, MINIMUM_GITHUB_CLI_VERSION };
 export type { ClientResult, GitHubClient, RequestOptions, RunOptions, RunResult, Runner };

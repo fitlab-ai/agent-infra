@@ -22,6 +22,7 @@ test('platform context resolves fork parent and separated capabilities', () => {
     cwd: root,
     gitRemote: () => 'git@github.com:contributor/widgets.git',
     client: {
+      version() { return { ok: true, value: '2.16.0' }; },
       json(args) {
         requested.push(args.join(' '));
         if (args.at(-1) === 'repos/contributor/widgets') {
@@ -48,6 +49,7 @@ test('platform context reports a fully resolved read-only probe as no-op', () =>
     platformType: 'github',
     gitRemote: () => 'https://github.com/acme/widgets.git',
     client: {
+      version() { return { ok: true, value: '2.16.0' }; },
       json(args) {
         if (args.at(-1) === 'user') return { ok: true, value: { login: 'maintainer' } };
         if (args.at(-1) === 'repos/acme/widgets') {
@@ -62,6 +64,42 @@ test('platform context reports a fully resolved read-only probe as no-op', () =>
   assert.equal(result.status, 'no-op');
   assert.equal(result.changed, false);
   assert.equal(result.error, null);
+});
+
+test('GitHub platform rejects unsupported gh versions before API access', () => {
+  let apiCalls = 0;
+  const result = resolvePlatformContext({
+    cwd: process.cwd(),
+    platformType: 'github',
+    gitRemote: () => 'https://github.com/acme/widgets.git',
+    client: {
+      version() { return { ok: true, value: '2.15.0' }; },
+      json() {
+        apiCalls += 1;
+        return { ok: true, value: null };
+      }
+    }
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'GH_CLI_VERSION_UNSUPPORTED');
+  assert.equal(apiCalls, 0);
+});
+
+test('non-GitHub platform does not probe gh', () => {
+  let versionCalls = 0;
+  const result = resolvePlatformContext({
+    cwd: process.cwd(),
+    platformType: 'custom',
+    client: {
+      version() {
+        versionCalls += 1;
+        return { ok: true, value: '2.16.0' };
+      },
+      json() { throw new Error('GitHub API must not be called'); }
+    }
+  });
+  assert.equal(result.error?.code, 'PLATFORM_UNSUPPORTED');
+  assert.equal(versionCalls, 0);
 });
 
 test('platform context returns observable no-op for unsupported platform and missing remote', () => {

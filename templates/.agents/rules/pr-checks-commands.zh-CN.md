@@ -11,7 +11,7 @@ agent-infra-internal platform-checks watch {task-id} \
   --interval-seconds 30 --deadline-seconds 1800
 ```
 
-结构化 `checks.state` 为 `passed|failed|pending|timed-out|cancelled|no-required`。`passed|no-required` 退出 0；确定失败/取消退出 1；pending、timeout、网络或无法精确确认 required 集合退出 2。旧平台 CLI 能力不足时必须返回 `degraded/blocked`，不得伪装为全绿。
+结构化 `checks.state` 为 `passed|failed|pending|timed-out|cancelled|no-required`。`passed|no-required` 退出 0；确定失败/取消退出 1；pending、timeout 或网络阻塞退出 2。平台 adapter 必须在操作前验证自身依赖；依赖或确定性平台错误直接透传，不执行兼容降级。
 
 ## 定位失败 run/job
 

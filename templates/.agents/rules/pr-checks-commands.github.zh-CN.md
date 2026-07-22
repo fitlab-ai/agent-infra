@@ -2,6 +2,8 @@
 
 required checks 的筛选、轮询 deadline、失败 run/job 定位和日志获取统一由 typed internal intent 执行。SKILL/模型只负责失败分类、根因分析、最小修复和授权后的提交推送。
 
+GitHub adapter 要求 `gh >= 2.16.0`。平台上下文会在任何 GitHub API、PR 或 checks 操作前检查该依赖；未选择 GitHub 平台时不探测也不依赖 `gh`。
+
 ## 快照与监控
 
 ```bash
@@ -11,7 +13,7 @@ agent-infra-internal platform-checks watch {task-id} \
   --interval-seconds 30 --deadline-seconds 1800
 ```
 
-结构化 `checks.state` 为 `passed|failed|pending|timed-out|cancelled|no-required`。`passed|no-required` 退出 0；确定失败/取消退出 1；pending、timeout、网络或无法精确确认 required 集合退出 2。旧平台 CLI 能力不足时必须返回 `degraded/blocked`，不得伪装为全绿。
+结构化 `checks.state` 为 `passed|failed|pending|timed-out|cancelled|no-required`。`passed|no-required` 退出 0；确定失败/取消退出 1；pending、timeout 或网络阻塞退出 2。依赖缺失、版本过低和确定性平台错误直接返回其原始结构化错误，不执行兼容降级。
 
 ## 定位失败 run/job
 

@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import { createGitHubClient } from './github-client.ts';
+import semver from 'semver';
+
+import { createGitHubClient, MINIMUM_GITHUB_CLI_VERSION } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
@@ -10,7 +12,10 @@ import type { PlatformResult } from './types.ts';
 type ContextOptions = {
   cwd?: string;
   gitRemote?: (cwd: string) => string | null;
-  client?: { json(args: string[], options?: Parameters<GitHubClient['json']>[1]): ReturnType<GitHubClient['json']> };
+  client?: {
+    version(options?: Parameters<GitHubClient['version']>[0]): ReturnType<GitHubClient['version']>;
+    json(args: string[], options?: Parameters<GitHubClient['json']>[1]): ReturnType<GitHubClient['json']>;
+  };
   platformType?: string;
 };
 
@@ -66,6 +71,16 @@ function resolvePlatformContext(options: ContextOptions = {}): PlatformResult {
       error: { code: 'PLATFORM_UNSUPPORTED', message: `Platform '${platform || 'none'}' has no built-in adapter`, retryable: false }
     });
   }
+  const client = options.client || createGitHubClient();
+  const version = client.version({ cwd });
+  if (!version.ok) return failure(version.error, null);
+  if (!semver.gte(version.value, MINIMUM_GITHUB_CLI_VERSION)) {
+    return failure({
+      code: 'GH_CLI_VERSION_UNSUPPORTED',
+      message: `GitHub CLI ${version.value} is unsupported; install gh >= ${MINIMUM_GITHUB_CLI_VERSION}`,
+      retryable: false
+    }, null);
+  }
   const remote = (options.gitRemote || defaultGitRemote)(cwd);
   if (!remote) {
     return platformResult('no-op', {
@@ -86,7 +101,6 @@ function resolvePlatformContext(options: ContextOptions = {}): PlatformResult {
     });
   }
 
-  const client = options.client || createGitHubClient();
   const repository = client.json(['api', `repos/${ownerRepo}`], { cwd });
   if (!repository.ok) return failure(repository.error, null);
   const repositoryValue = repository.value as { fork?: boolean; full_name?: string; parent?: { full_name?: string } } | null;

@@ -26,6 +26,7 @@ function fixture(issueNumber = '') {
 
 function clientFor(handler: (args: string[], input?: string, method?: string) => unknown): GitHubClient {
   return {
+    version() { return { ok: true, value: '2.16.0' }; },
     json(args, options = {}) {
       const value = handler(args, options.input, options.method);
       return { ok: true, value } as never;

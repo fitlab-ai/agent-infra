@@ -15,4 +15,4 @@ agent-infra-internal platform-checks logs {task-id} \
   --run {run-id} [--job {job-id}]
 ```
 
-`checks.state` is `passed|failed|pending|timed-out|cancelled|no-required`. Green/no-required exits 0; definite failure/cancellation exits 1; pending, timeout, network, or inability to prove the required set exits 2. Run resolution prefers a validated details URL and otherwise requires one exact PR-head/check-name match. Platform intents never edit business code or push.
+`checks.state` is `passed|failed|pending|timed-out|cancelled|no-required`. Green/no-required exits 0; definite failure/cancellation exits 1; pending, timeout, or network blocking exits 2. Each platform adapter validates its own dependencies before operations and preserves dependency or deterministic platform errors without compatibility degradation. Run resolution prefers a validated details URL and otherwise requires one exact PR-head/check-name match. Platform intents never edit business code or push.

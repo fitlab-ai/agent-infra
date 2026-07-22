@@ -137,17 +137,10 @@ function inspectRequiredChecks(taskRef: string, options: SharedOptions = {}): Ch
     '--json', 'name,state,bucket,link,workflow,startedAt,completedAt'
   ], { cwd: base.resolved.repoRoot });
   if (!inspected.ok) {
-    if (inspected.error.retryable) return checksResult('blocked', {
+    return checksResult(inspected.error.retryable ? 'blocked' : 'failed', {
       platform: base.context.platform, capabilities: base.context.capabilities,
       resource: { kind: 'pull-request', number: base.prNumber },
       pullRequest: { number: base.prNumber, headSha: base.pullRequest.head.sha }, error: inspected.error
-    });
-    return checksResult('blocked', {
-      platform: base.context.platform, capabilities: base.context.capabilities,
-      resource: { kind: 'pull-request', number: base.prNumber },
-      pullRequest: { number: base.prNumber, headSha: base.pullRequest.head.sha },
-      operations: [{ name: 'checks:required', status: 'skipped', reasonCode: 'REQUIRED_ONLY_UNAVAILABLE' }],
-      error: { code: 'REQUIRED_CHECKS_DEGRADED', message: inspected.error.message, retryable: false }
     });
   }
   const classified = classifyRequiredChecks(normalizeChecks(inspected.value));

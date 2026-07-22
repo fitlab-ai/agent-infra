@@ -3,6 +3,18 @@ import assert from 'node:assert/strict';
 
 import { classifyGitHubFailure, createGitHubClient } from '../../../lib/platform/github-client.ts';
 
+test('GitHub client reads the CLI version without shell parsing', () => {
+  const calls: string[][] = [];
+  const client = createGitHubClient({
+    runner(args) {
+      calls.push(args);
+      return { status: 0, stdout: 'gh version 2.16.0 (2022-09-21)\n', stderr: '' };
+    }
+  });
+  assert.deepEqual(client.version(), { ok: true, value: '2.16.0' });
+  assert.deepEqual(calls, [['--version']]);
+});
+
 test('GitHub client preserves argv and stdin without a shell', () => {
   const calls: Array<{ args: string[]; input?: string }> = [];
   const client = createGitHubClient({

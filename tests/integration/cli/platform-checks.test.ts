@@ -60,3 +60,29 @@ test('platform-checks CLI validates numeric bounds and required arguments before
     assert.equal(JSON.parse(output.stdout).error.code, 'CHECKS_PAYLOAD_INVALID');
   }
 });
+
+test('platform-checks preserves deterministic required-check errors without degradation', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-checks-cli-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
+    const taskId = 'TASK-20260101-000001';
+    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+    fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', 'pr_number: 5', '---', ''].join('\n'));
+    const fake = path.join(root, 'fake-gh.cjs');
+    fs.copyFileSync(filePath('tests/fixtures/validate-artifact/fake-gh.js'), fake);
+    const output = run(['inspect', taskId], { cwd: root, env: {
+      AGENT_INFRA_GH_BIN: process.execPath,
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([fake]),
+      GH_FAKE_CHECKS_FAIL: 'unknown flag: --required'
+    } });
+    assert.equal(output.status, 1, `${output.stderr}\n${output.stdout}`);
+    const parsed = JSON.parse(output.stdout);
+    assert.equal(parsed.status, 'failed');
+    assert.equal(parsed.error.code, 'PLATFORM_REQUEST_FAILED');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
