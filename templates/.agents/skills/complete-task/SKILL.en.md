@@ -35,7 +35,7 @@ Before the state check is complete, do not make external-state assertions such a
 
 ## Step Start: Local Lifecycle Boundary
 
-After the task exists and passes the pre-completion gates, Step 4 declares one lifecycle intent that atomically commits base terminal fields, the started/done pair, the directory move, and short-id release. Do not write those mechanical fields first.
+On the normal path, complete business updates, platform sync, and the pre-completion gate while the task is active. Only then may the lifecycle intent in Step 6 atomically commit base terminal fields, the started/done pair, the directory move, and short-id release. Do not write those mechanical fields first. An archived task may only enter `finalization-retry`; do not move it back or rerun lifecycle.
 
 ## Steps
 
@@ -46,8 +46,11 @@ Check that the task exists in `.agents/workspace/active/{task-id}/`.
 Note: `{task-id}` format is `TASK-{yyyyMMdd-HHmmss}`, e.g. `TASK-20260306-143022`
 
 If not found in `active/`, check `blocked/` and `completed/`:
-- If in `completed/`: Inform user the task is already completed
+- If in `completed/` and task.md has a matching Complete Task Activity Log entry: enter Scenario B `finalization-retry`, skip Steps 2-6, and proceed to Step 7
+- If in `completed/` without a matching entry: report the incomplete terminal identity and stop without hand-repairing it
 - If in `blocked/`: Inform user the task is blocked; suggest unblocking first
+
+Scenario A is the normal active-task path. Scenario B `finalization-retry` retries only the archived task comment and terminal gate.
 
 ### 2. Verify Completion Prerequisites (Failure Must Stop)
 
@@ -86,21 +89,13 @@ Before marking complete, verify ALL of these:
 - [ ] Tests are passing
 - [ ] The disagreement ledger has no unclosed disagreements and there are no un-re-reviewed post-review commits (mechanically checked by the "Pre-completion hard gate" below)
 
-**Pre-completion hard gate (run BEFORE moving the directory or releasing the short id)**: the Step 7 `gate complete-task` runs only after the directory has been `mv`-ed to `completed/` and the short id released; to avoid a gate failure occurring after those irreversible operations, run the two new completion gates on the **active directory** first:
-
-```bash
-agent-infra-internal task-verify {task-id} complete-task.preflight --format text
-```
-
-A non-zero exit from either (fail/blocked) -> treat as an unmet prerequisite and **stop**, do not run Steps 3-7. If the output contains `reviewed snapshot was not anchored`, rerun `commit` or `review-code`; never fall back to the review baseline. `--force` does **NOT** lift this hard gate: unclosed disagreements must first be closed in the ledger (`confirmed`/`closed`/`human-decided`), and un-re-reviewed commits after an anchor must be re-reviewed via `review-code` or covered by a `post-review-commit` / `human-decided` exemption row in the ledger.
-
 > **⚠️ Prerequisite Branch Check — you must decide whether to continue or stop before proceeding:**
 >
 > - If all conditions above are satisfied -> continue to Step 3
 > - If any condition is missing -> **stop by default** and output the prerequisite warning
 > - Only continue with unmet prerequisites when the user explicitly requested `--force`
 >
-> **Do not continue to Steps 3-7 when prerequisites are not met, and do not output "Task {task-id} completed; task directory moved to completed/."**
+> **Do not continue to Steps 3-8 when prerequisites are not met, and do not output "Task {task-id} completed; task directory moved to completed/."**
 
 If any prerequisite is not met, warn the user:
 ```
@@ -110,7 +105,7 @@ Cannot complete task {task-id} - prerequisites not met:
 Please complete the missing steps first, or use --force to override.
 ```
 
-If prerequisites are not met and the user did not explicitly provide `--force`, stop immediately and do not execute Steps 3-7.
+If prerequisites are not met and the user did not explicitly provide `--force`, stop immediately and do not execute Steps 3-8.
 
 ### 3. Complete Business-Only Content
 
@@ -119,9 +114,43 @@ Update only content that the lifecycle core does not own:
 - Mark all workflow steps as complete
 - Verify and check off all items in `## Completion Checklist` (change `- [ ]` to `- [x]`)
 
-Do not write `status/current_step/completed_at/updated_at/agent_infra_version`, the base Activity Log pair, the directory move, or short-id state here.
+Do not write `status/current_step/completed_at/updated_at/agent_infra_version`, the base Activity Log pair, the directory move, or short-id state here. Step 6 owns them.
 
-### 4. Apply the Local Lifecycle Intent
+### 4. Sync the Platform While Active
+
+Check whether task.md has a valid `issue_number`. If it does not, skip this step without output.
+
+> Issue metadata boundaries live in `.agents/rules/issue-sync.md`; comments use internal platform intents.
+
+When an `issue_number` exists, execute in this exact order:
+
+1. In artifact-catalog order, run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {artifact-agent} --backfill` for every local artifact.
+2. Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --requirements --fields`.
+3. Write the business summary to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {agent}`.
+
+Do not sync the task comment here; it requires the terminal task.md written by lifecycle. Do not set a `status:` label; platform automation clears status labels after the Issue closes.
+
+If any operation fails, the task must remain active and its short id must remain valid. Record the failure with the matching structured warning intent, then stop without entering Step 5:
+
+```bash
+agent-infra-internal task-warning {task-id} add --step complete-task --severity ACTION_REQUIRED --code {COMMENT_SYNC_FAILED|REQUIREMENTS_SYNC_FAILED|SUMMARY_SYNC_FAILED|NETWORK_RETRY_EXHAUSTED} --target {artifact|issue|summary|platform} --message "{error_code}: {error_message}" --action "Fix the platform sync problem and rerun complete-task"
+```
+
+The core deduplicates the stable `step/code/target` tuple. Callers must not allocate warning ids or edit ledger rows.
+
+### 5. Run the Active Pre-completion Hard Gate
+
+After platform writes succeed and before moving the directory or releasing the short id, run:
+
+```bash
+agent-infra-internal task-verify {task-id} complete-task.preflight --format text
+```
+
+This event runs `review-ledger`, `post-review-commit`, then `platform-sync-preflight`. On any non-zero exit (fail/blocked), keep the task active, derive the stable code/target from the gate result, record it through `task-warning ... add --step complete-task ...`, and stop. If output includes `reviewed snapshot was not anchored`, rerun `commit` or `review-code`; never fall back to the review baseline.
+
+`--force` does not lift this hard gate: close ledger disagreements, re-review or exempt post-review commits, and pass platform preflight first.
+
+### 6. Apply the Local Lifecycle Intent and Verify the Move
 
 ```bash
 agent-infra-internal task-lifecycle {task-id} complete --agent {agent}
@@ -129,27 +158,21 @@ agent-infra-internal task-lifecycle {task-id} complete --agent {agent}
 
 Only `status=applied|no-op` means local completion succeeded. On `status=failed`, show the structured error and recovery steps and retry the same intent; do not claim completion or hand-repair partial state.
 
-### 5. Verify Move
-
 ```bash
 ls .agents/workspace/completed/{task-id}/task.md
 ```
 
 Confirm the task directory was successfully moved.
 
-### 6. Sync to Issue
+### 7. Sync the Terminal Task Comment and Run the Gate
 
-Check whether `task.md` includes a valid `issue_number`. If not, skip this step and output nothing.
+Both Scenario A and Scenario B `finalization-retry` execute this step from the completed directory. If a valid `issue_number` exists, first run:
 
-> Issue metadata boundaries live in `.agents/rules/issue-sync.md`; comments use internal platform intents.
+```bash
+agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}
+```
 
-If a valid `issue_number` exists:
-- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`, then invoke `platform-comment sync ... --kind artifact --artifact {artifact} --agent {artifact-agent} --backfill` for each existing artifact in catalog order
-- Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --requirements --fields`
-- Do not set any `status:` label — platform automation should clear status labels after the Issue closes; the pre-completion platform-sync gate verifies that a CLOSED Issue has no `status:` labels and fails until the workflow finishes or is repaired
-- Write the business summary to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {agent}`
-
-### 7. Verification Gate
+If this call fails, the task is already archived and `task-warning` cannot accept it. Keep the task completed and stop. After fixing the network or platform issue, rerun complete-task; Step 1 will enter `finalization-retry` and repeat only this step.
 
 Run the verification gate to confirm the task artifact and sync state are valid:
 
@@ -160,7 +183,7 @@ agent-infra-internal task-verify {task-id} complete-task.completed --format text
 Handle the result as follows:
 - exit code 0 (all checks passed) -> continue to the "Inform User" step
 - exit code 1 (validation failed) -> fix the reported issues and run the gate again
-- exit code 2 (network blocked) -> stop and tell the user that human intervention is required
+- exit code 2 (network blocked or status-label cleanup is still pending) -> keep the task completed and stop; rerun complete-task later to enter `finalization-retry`
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 

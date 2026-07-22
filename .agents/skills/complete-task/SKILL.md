@@ -35,7 +35,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## 步骤开始：本地生命周期边界
 
-确认任务存在并通过预完成门禁后，由步骤 4 的单次 lifecycle intent 原子完成基础终态字段、started/done 日志、目录转移和短号释放；不得提前手工写入这些机械状态。
+正常完成路径在 active 阶段完成业务更新、平台同步和预完成门禁后，才由步骤 6 的单次 lifecycle intent 原子完成基础终态字段、started/done 日志、目录转移和短号释放；不得提前手工写入这些机械状态。已归档任务只允许进入 `finalization-retry` 场景，不回迁目录或重新执行 lifecycle。
 
 ## 执行步骤
 ### 1. 验证任务存在
@@ -45,8 +45,11 @@ agent-infra-internal task-snapshot {task-id} --format text
 注意：`{task-id}` 格式为 `TASK-{yyyyMMdd-HHmmss}`，例如 `TASK-20260306-143022`
 
 如果在 `active/` 中未找到，检查 `blocked/` 和 `completed/`：
-- 如果在 `completed/`：告知用户任务已完成
+- 如果在 `completed/` 且 task.md 存在匹配的 Complete Task Activity Log：进入场景 B `finalization-retry`，跳过步骤 2-6，直接执行步骤 7
+- 如果在 `completed/` 但缺少匹配日志：告知用户任务已完成但终态身份不完整并停止，不手工修补
 - 如果在 `blocked/`：告知用户任务被阻塞；建议先解除阻塞
+
+场景 A 为 active 任务的正常完成路径；场景 B `finalization-retry` 只重试归档后的 task 评论与终态门禁。
 
 ### 2. 验证完成前置条件（未满足则必须停止）
 
@@ -85,21 +88,13 @@ agent-infra-internal task-snapshot {task-id} --format text
 - [ ] 测试通过
 - [ ] 审查分歧账本无未关闭分歧，且无未复审的 post-review 提交（由下方「预完成硬门禁」机械校验）
 
-**预完成硬门禁（在移动目录、释放短号之前运行）**：步骤 7 的 `gate complete-task` 在目录已 `mv` 到 `completed/`、短号已释放之后才运行；为避免门禁失败发生在不可逆操作之后，必须在 **active 目录**上预先运行新增的两项完成门禁：
-
-```bash
-agent-infra-internal task-verify {task-id} complete-task.preflight --format text
-```
-
-任一退出码非 0（fail/blocked）→ 按前置条件未满足处理，**停止**，不执行步骤 3-7。若输出包含 `reviewed snapshot was not anchored`，必须先重新 `commit` 或 `review-code`；不得回退审查基线。`--force` **不解除**本硬门禁：未关闭分歧必须先在账本闭合（`confirmed`/`closed`/`human-decided`），已锚点后的未复审提交必须重新 `review-code` 或在账本追加 `post-review-commit` / `human-decided` 豁免行。
-
 > **⚠️ 前置条件分支判断 — 你必须先判断“继续”还是“停止”：**
 >
 > - 如果以上所有条件都满足 → 继续步骤 3
 > - 如果任意一个条件不满足 → **默认停止**，输出前置条件未满足的警告
 > - 只有用户明确要求 `--force` 时，才可以在前置条件未满足时继续
 >
-> **禁止在前置条件未满足时继续执行步骤 3-7，也不要输出「任务 {task-id} 已完成，任务目录已转移到 completed/。」**
+> **禁止在前置条件未满足时继续执行步骤 3-8，也不要输出「任务 {task-id} 已完成，任务目录已转移到 completed/。」**
 
 如果任何前置条件未满足，警告用户：
 ```
@@ -109,7 +104,7 @@ Cannot complete task {task-id} - prerequisites not met:
 Please complete the missing steps first, or use --force to override.
 ```
 
-如果前置条件未满足且用户未明确提供 `--force`，立即停止，不执行步骤 3-7。
+如果前置条件未满足且用户未明确提供 `--force`，立即停止，不执行步骤 3-8。
 
 ### 3. 完成业务内容更新
 
@@ -118,9 +113,43 @@ Please complete the missing steps first, or use --force to override.
 - 标记所有工作流步骤为已完成
 - 逐项验证并勾选 `## 完成检查清单` 中的所有条目（将 `- [ ]` 改为 `- [x]`）
 
-不得在本步骤写 `status/current_step/completed_at/updated_at/agent_infra_version`、基础 Activity Log、目录或短号；这些由下一步统一提交。
+不得在本步骤写 `status/current_step/completed_at/updated_at/agent_infra_version`、基础 Activity Log、目录或短号；这些由步骤 6 统一提交。
 
-### 4. 执行本地生命周期意图
+### 4. 在 active 阶段同步平台
+
+检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过本步骤且不输出任何内容。
+
+> Issue 元数据边界见 `.agents/rules/issue-sync.md`；评论同步统一调用 internal platform intent。
+
+如果存在有效的 `issue_number`，严格按以下顺序执行：
+
+1. 按 artifact catalog 顺序，对本地已有产物逐项调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {artifact-agent} --backfill`。
+2. 调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --requirements --fields`。
+3. 把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {agent}`。
+
+不要在本步骤同步 task 评论；它依赖 lifecycle 写入后的完整终态 task.md。不要设置 `status:` label，平台自动化应在 Issue 关闭后清理状态标签。
+
+任一操作失败时，任务仍必须位于 active 且短号仍有效；先按失败类型调用以下结构化 warning intent，再立即停止，不进入步骤 5：
+
+```bash
+agent-infra-internal task-warning {task-id} add --step complete-task --severity ACTION_REQUIRED --code {COMMENT_SYNC_FAILED|REQUIREMENTS_SYNC_FAILED|SUMMARY_SYNC_FAILED|NETWORK_RETRY_EXHAUSTED} --target {artifact|issue|summary|platform} --message "{error_code}: {error_message}" --action "修复平台同步问题后重跑 complete-task"
+```
+
+相同 `step/code/target` 组合由核心幂等去重；调用方不分配 warning id 或手写账本行。
+
+### 5. 运行 active 预完成硬门禁
+
+平台写入成功后、移动目录和释放短号之前运行：
+
+```bash
+agent-infra-internal task-verify {task-id} complete-task.preflight --format text
+```
+
+该事件依次执行 `review-ledger`、`post-review-commit`、`platform-sync-preflight`。任一退出码非 0（fail/blocked）时，任务必须继续留在 active；从 gate 结果取稳定 code/target，通过 `task-warning ... add --step complete-task ...` 落账后停止。若输出包含 `reviewed snapshot was not anchored`，必须先重新 `commit` 或 `review-code`；不得回退审查基线。
+
+`--force` 不解除本硬门禁：未关闭分歧必须先在账本闭合，未复审提交必须重新审查或具备有效豁免，平台 preflight 必须通过。
+
+### 6. 执行本地生命周期意图并验证转移
 
 ```bash
 agent-infra-internal task-lifecycle {task-id} complete --agent {agent}
@@ -128,27 +157,21 @@ agent-infra-internal task-lifecycle {task-id} complete --agent {agent}
 
 仅 `status=applied|no-op` 视为本地完成。`status=failed` 时展示 `error` 与 completed/pending steps，以同一 intent 重试；不得宣称完成或手工补写局部状态。
 
-### 5. 验证转移
-
 ```bash
 ls .agents/workspace/completed/{task-id}/task.md
 ```
 
 确认任务目录已成功移动。
 
-### 6. 同步到 Issue
+### 7. 同步终态 task 评论并完成校验
 
-检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过此步骤且不输出任何内容。
+场景 A 与场景 B `finalization-retry` 都从 completed 目录执行本步骤。若存在有效的 `issue_number`，先调用：
 
-> Issue 元数据边界见 `.agents/rules/issue-sync.md`；评论同步统一调用 internal platform intent。
+```bash
+agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}
+```
 
-如果存在有效的 `issue_number`：
-- 先调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`；再按 artifact catalog 顺序对本地已有产物逐项调用 `platform-comment sync ... --kind artifact --artifact {artifact} --agent {artifact-agent} --backfill`
-- 调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --requirements --fields`
-- 不要设置 `status:` label — 平台自动化应在 Issue 关闭后清理状态标签；预完成 platform-sync gate 会验证 CLOSED Issue 不含任何 `status:` 标签，残留时失败并要求等待或修复 workflow 后重跑
-- 最后把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {agent}`
-
-### 7. 完成校验
+该调用失败时任务已归档，不能调用只接受 active 任务的 `task-warning`；保留 completed 状态并停止。修复网络或平台问题后重跑 complete-task，会由步骤 1 进入 `finalization-retry`，只重复本步骤。
 
 运行完成校验，确认任务产物和同步状态符合规范：
 
@@ -159,7 +182,7 @@ agent-infra-internal task-verify {task-id} complete-task.completed --format text
 处理结果：
 - 退出码 0（全部通过）-> 继续到「告知用户」步骤
 - 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
-- 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
+- 退出码 2（网络中断或状态标签清理尚未收敛）-> 保留 completed 状态并停止；稍后重跑 complete-task 进入 `finalization-retry`
 
 将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 

@@ -68,7 +68,7 @@ const VERIFICATION_CATALOG: Readonly<Record<VerificationEvent, VerificationSpec>
   'block-task.completed': gate('block-task', 'blocked'),
   'cancel-task.completed': gate('cancel-task', 'completed'),
   'commit.completed': gate('commit', 'active'),
-  'complete-task.preflight': { skill: 'complete-task', expectedState: 'active', mode: 'checks', checks: ['review-ledger', 'post-review-commit'] },
+  'complete-task.preflight': { skill: 'complete-task', expectedState: 'active', mode: 'checks', checks: ['review-ledger', 'post-review-commit', 'platform-sync-preflight'] },
   'complete-task.completed': gate('complete-task', 'completed'),
   'create-pr.completed': gate('create-pr', 'active'),
   'create-task.completed': gate('create-task', 'active'),

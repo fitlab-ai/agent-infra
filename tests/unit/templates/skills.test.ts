@@ -916,6 +916,50 @@ test("create-pr enables Issue field verification in local and template configs",
   });
 });
 
+test("complete-task splits active preflight checks from completed-state checks", () => {
+  [
+    ".agents/skills/complete-task/config/verify.json",
+    "templates/.agents/skills/complete-task/config/verify.en.json",
+    "templates/.agents/skills/complete-task/config/verify.zh-CN.json"
+  ].forEach((relativePath) => {
+    const checks = JSON.parse(read(relativePath)).checks;
+
+    assert.deepEqual(checks["platform-sync-preflight"], {
+      when: "issue_number_exists",
+      expected_comment_marker: "<!-- sync-issue:{task-id}:summary -->",
+      verify_task_comment_content: false,
+      sync_checked_requirements: true,
+      verify_issue_type: true,
+      verify_issue_fields: false,
+      verify_milestone: true,
+      verify_closed_issue_has_no_status_labels: false,
+      expected_comment_marker_key: "summary"
+    });
+    assert.deepEqual(checks["platform-sync"], {
+      when: "issue_number_exists",
+      verify_task_comment_content: true,
+      verify_closed_issue_has_no_status_labels: true
+    });
+  });
+});
+
+test("complete-task docs keep remote preflight before lifecycle and terminal sync after it", () => {
+  skillDocPaths("complete-task").forEach((relativePath) => {
+    const content = read(relativePath);
+    const artifactSync = content.indexOf("platform-comment sync {task-id} --kind artifact");
+    const preflight = content.indexOf("task-verify {task-id} complete-task.preflight");
+    const lifecycle = content.indexOf("task-lifecycle {task-id} complete");
+    const taskSync = content.indexOf("platform-comment sync {task-id} --kind task");
+    const completedGate = content.indexOf("task-verify {task-id} complete-task.completed");
+
+    assert.ok(artifactSync >= 0 && artifactSync < preflight, `${relativePath} should backfill artifacts before preflight`);
+    assert.ok(preflight < lifecycle, `${relativePath} should run preflight before lifecycle completion`);
+    assert.ok(lifecycle < taskSync, `${relativePath} should sync the terminal task comment after lifecycle completion`);
+    assert.ok(taskSync < completedGate, `${relativePath} should run the completed gate after terminal task sync`);
+    assert.ok(content.includes("finalization-retry"), `${relativePath} should define the retry branch identifier`);
+  });
+});
+
 test("import-issue checklists include the task comment sync step", () => {
   skillDocPaths("import-issue").forEach((relativePath) => {
     const content = read(relativePath);

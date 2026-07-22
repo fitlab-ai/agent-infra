@@ -26,16 +26,21 @@
     },
     "review-ledger": {},
     "post-review-commit": {},
-    "platform-sync": {
+    "platform-sync-preflight": {
       "when": "issue_number_exists",
       "expected_comment_marker": "<!-- sync-issue:{task-id}:summary -->",
-      "verify_task_comment_content": true,
+      "verify_task_comment_content": false,
       "sync_checked_requirements": true,
       "verify_issue_type": true,
       "verify_issue_fields": false,
       "verify_milestone": true,
-      "verify_closed_issue_has_no_status_labels": true,
+      "verify_closed_issue_has_no_status_labels": false,
       "expected_comment_marker_key": "summary"
+    },
+    "platform-sync": {
+      "when": "issue_number_exists",
+      "verify_task_comment_content": true,
+      "verify_closed_issue_has_no_status_labels": true
     },
     "artifact": {
       "file_pattern": "task.md",
