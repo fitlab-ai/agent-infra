@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_NAME = "@fitlab-ai/agent-infra";
-const RUNTIME_RELATIVE_PATH = "runtime/platform-adapters/platform-sync.github.js";
+const DEFAULT_RUNTIME_RELATIVE_PATH = "runtime/platform-adapters/platform-sync.github.js";
 const COMMAND_NAMES = ["ai", "agent-infra"];
 
 function canonicalize(candidate) {
@@ -15,7 +15,7 @@ function canonicalize(candidate) {
   }
 }
 
-function inspectPackageRoot(candidate, source) {
+function inspectPackageRoot(candidate, source, runtimeRelativePath) {
   const canonicalRoot = canonicalize(candidate);
   if (!canonicalRoot) {
     return { source, candidate, reason: "path does not exist" };
@@ -37,7 +37,7 @@ function inspectPackageRoot(candidate, source) {
     };
   }
 
-  const runtimePath = path.join(canonicalRoot, RUNTIME_RELATIVE_PATH);
+  const runtimePath = path.join(canonicalRoot, runtimeRelativePath);
   if (!fs.existsSync(runtimePath)) {
     return { source, candidate: canonicalRoot, reason: `runtime not found at ${runtimePath}` };
   }
@@ -91,9 +91,10 @@ function resolveAgentInfraPackage(options = {}) {
   const platform = options.platform || process.platform;
   const startPath = options.startPath || fileURLToPath(import.meta.url);
   const attempts = [];
+  const runtimeRelativePath = options.runtimeRelativePath || DEFAULT_RUNTIME_RELATIVE_PATH;
 
   const tryRoot = (candidate, source) => {
-    const inspected = inspectPackageRoot(candidate, source);
+    const inspected = inspectPackageRoot(candidate, source, runtimeRelativePath);
     attempts.push(inspected);
     return inspected.packageRoot ? inspected : null;
   };

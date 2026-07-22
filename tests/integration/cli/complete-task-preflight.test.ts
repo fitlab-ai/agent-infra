@@ -94,7 +94,7 @@ test('successful preflight can archive once and release the short id', () => {
 
     const preflight = run(f.root, ['task-verify', TASK_ID, 'complete-task.preflight', '--format', 'text']);
     assert.equal(preflight.status, 0, preflight.stderr);
-    assert.equal((preflight.stdout.match(/^Check: pass/gm) ?? []).length, 3);
+    assert.equal((preflight.stdout.match(/^Check: pass/gm) ?? []).length, 4);
 
     const completed = run(f.root, ['task-lifecycle', TASK_ID, 'complete', '--agent', 'codex']);
     assert.equal(completed.status, 0, completed.stderr);

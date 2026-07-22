@@ -116,16 +116,16 @@ agent-infra-internal task-verify {task-id} create-pr.completed --format text
   - Codex CLI：$watch-pr {task-ref}
 ```
 
-或者，若想跳过 CI 监控、直接归档任务，改用 `complete-task`：
+或者，若想跳过主动监控并立即尝试完成，改用 `complete-task`；其 required-checks 硬门禁仍会对 pending/failed/head mismatch fail-closed：
 
 ```
-下一步（备选）- 跳过监控、直接归档任务：
+下一步（备选）- 跳过主动监控并尝试完成：
   - Claude Code / OpenCode：/complete-task {task-ref}
   - Gemini CLI：/agent-infra:complete-task {task-ref}
   - Codex CLI：$complete-task {task-ref}
 ```
 
-`watch-pr` 为主路径，全绿后会再引导 `complete-task {task-ref}`；上面的 `complete-task` 备选块仅用于跳过 CI 监控、直接归档——两者并不等价。
+`watch-pr` 为主路径；上面的 `complete-task` 备选块只跳过主动轮询，不跳过 required checks，也不保证立即归档。
 
 ## 注意事项
 

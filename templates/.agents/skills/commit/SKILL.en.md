@@ -60,7 +60,7 @@ Review status, diff, and recent history, then prepare a Conventional Commit with
 
 ## 4. Create the Commit
 
-Stage specific files only and run `git commit` with the prepared message.
+First detect the restricted push-only scenario: clean worktree and index, highest-round `review-code` Approved, `HEAD == last_reviewed_commit`, an open PR bound to the branch, and PR head != HEAD. When it matches, create no empty commit and skip staging; continue to Step 5 for a normal `git push` without force. Otherwise stage specific files only and run `git commit` with the prepared message.
 
 If this commit is associated with a task and a `review-code` artifact exists, read the highest-round `review-code` artifact before committing:
 - If that artifact's `Overall Verdict` / `总体结论` is Approved, parse `R`, `F`, and `Reviewed Snapshot Tree` / `审查快照树` (`T`)
@@ -72,7 +72,7 @@ If this commit is associated with a task and a `review-code` artifact exists, re
 
 ## 5. Push to the Existing PR When Applicable
 
-After the commit is created, if the current branch already has an open Pull Request, push the new commit so the PR updates automatically. Otherwise keep the current behavior (the first push is still handled by `create-pr`). This is the push wrap-up of a user-initiated `commit`: it adds no extra commit and never pushes when there is no PR; it applies whether or not a task is associated.
+After a new commit is created, or when Step 4 selects push-only, push HEAD normally if the current branch already has an open Pull Request. Otherwise keep the current behavior (the first push is still handled by `create-pr`). This adds no extra/empty commit and never pushes when there is no PR.
 
 > Detect whether the current branch has an open PR — and authenticate to the platform — per `.agents/rules/issue-pr-commands.md`; if that rule is unavailable or detection fails, follow the degradation below.
 
@@ -98,11 +98,13 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
-> The full four-case status matrix, prerequisite checks, and multi-TUI next-step commands live in `reference/task-status-update.md`. Read `reference/task-status-update.md` before updating task state.
+> The full five-case status matrix, prerequisite checks, and multi-TUI next-step commands live in `reference/task-status-update.md`. Read `reference/task-status-update.md` before updating task state.
 
 > **IMPORTANT**: When showing the next step, output every TUI command format in full and directly use the standard template from `reference/task-status-update.md`. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the short id `#NN` (falling back to the full TASK-id when unallocated or released); (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
 
 Append the Commit Activity Log entry and choose exactly one next-step case:
+- open PR and successful push -> `watch-pr {task-ref}`; this takes precedence over the final-commit `prFlow` route
+- failed push -> keep the task active and show only push/synchronization diagnostics; do not show `watch-pr` or `complete-task`
 - final commit -> render the next step by `.agents/.airc.json`'s `prFlow` (`disabled` -> single option `complete-task`; `required` -> single option `create-pr`; absent -> two options `create-pr` / `complete-task`); see Case 1 in `reference/task-status-update.md`
 - more work remains -> update task.md and stop
 - ready for review -> `review-code {task-id}`

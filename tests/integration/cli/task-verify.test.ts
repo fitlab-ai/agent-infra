@@ -37,7 +37,7 @@ process.exit(blocked ? 2 : 0);
 
   const preflight = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'complete-task.preflight', '--format', 'text'], { cwd: root, encoding: 'utf8' });
   assert.equal(preflight.status, 0, preflight.stderr);
-  assert.equal((preflight.stdout.match(/^Check: pass/gm) ?? []).length, 3);
+  assert.equal((preflight.stdout.match(/^Check: pass/gm) ?? []).length, 4);
   assert.doesNotMatch(preflight.stdout, /undefined/);
 
   const blocked = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'commit.completed'], {

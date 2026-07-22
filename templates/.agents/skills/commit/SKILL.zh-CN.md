@@ -60,7 +60,7 @@ git diff
 
 ## 4. 创建提交
 
-只暂存明确列出的文件，然后执行 `git commit`。
+先判断是否命中受限 push-only 场景：工作树与暂存区均干净、最高轮 `review-code` 为 Approved、`HEAD == last_reviewed_commit`、当前分支绑定开放 PR 且 PR head != HEAD。命中时不创建空 commit，不进入下方暂存流程，直接转步骤 5 做普通 `git push`；不得 force push。否则只暂存明确列出的文件并执行 `git commit`。
 
 如果本次提交关联任务且存在 `review-code` 产物，在提交前读取最高轮 `review-code` 产物：
 - 若该产物 `总体结论` / `Overall Verdict` 为 Approved，解析 `R`、`F` 与 `审查快照树` / `Reviewed Snapshot Tree`（`T`）
@@ -72,7 +72,7 @@ git diff
 
 ## 5. 推送到已有 PR（按需）
 
-提交完成后，如果当前分支已存在开放的 Pull Request，则把本次提交推送上去让 PR 自动更新；否则保持现状（首次推送仍由 `create-pr` 负责）。本步骤是用户已发起 `commit` 的推送收尾，不新增自动提交，也不在无 PR 时推送；与是否关联任务无关。
+新提交完成或步骤 4 命中 push-only 后，如果当前分支已存在开放的 Pull Request，则把 HEAD 普通推送上去让 PR 自动更新；否则保持现状（首次推送仍由 `create-pr` 负责）。本步骤不创建额外/空 commit，也不在无 PR 时推送；与是否关联任务无关。
 
 > 检测当前分支是否有开放 PR、以及平台认证，统一按 `.agents/rules/issue-pr-commands.md` 执行；该规则不可用或检测失败时，按下方降级处理。
 
@@ -98,11 +98,13 @@ c. 安全降级（不阻塞已完成的 `git commit`，仅提示用户）：
 date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
-> 完整的 4 种状态分支、前置条件检查和多 TUI 下一步命令见 `reference/task-status-update.md`。更新任务状态前，先读取 `reference/task-status-update.md`。
+> 完整的 5 种状态分支、前置条件检查和多 TUI 下一步命令见 `reference/task-status-update.md`。更新任务状态前，先读取 `reference/task-status-update.md`。
 
 > **重要**：向用户展示下一步时，必须完整输出所有 TUI 命令格式，并直接使用 `reference/task-status-update.md` 中对应场景的标准模板。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染最终输出前，先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令把 `{task-ref}` 渲染为短号 `#NN`（未分配/已释放时回退完整 TASK-id）；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
 
 追加 Commit 的 Activity Log，并且只能选择一个下一步分支：
+- 已有开放 PR 且 push 成功 -> `watch-pr {task-ref}`；该分支优先于最终提交的 `prFlow` 路由
+- push 失败 -> 保持任务 active，只输出推送/同步诊断，不输出 `watch-pr` 或 `complete-task`
 - 最终提交 -> 按 `.agents/.airc.json` 的 `prFlow` 渲染下一步（`disabled` → 单选 `complete-task`；`required` → 单选 `create-pr`；缺省 → 二选一 `create-pr` / `complete-task`），详见 `reference/task-status-update.md` 场景 1
 - 还有后续工作 -> 更新 task.md 后停止
 - 准备审查 -> `review-code {task-id}`

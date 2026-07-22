@@ -85,6 +85,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 - 报告完成后，新 finding 逐条调用 `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`；复核上一轮响应时调用 `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {相称证据}`。不得扫描编号或手写账本行
 - 全部账本写入完成后只调用一次 `agent-infra-internal task-ledger {task-id} stage-status --stage code`。以 `stageStatus.canAdvance` 决定 verdict 和下一步，并以 `unresolvedFindingCounts` 填写 blocker/major/minor；仅 `canAdvance=true` 可用 Approved
 - 仅当 `canAdvance=true`、本轮结论为 Approved 且 `T == R^{tree}` 时写入 `last_reviewed_commit: {R}`；Approved 快照包含未提交差异时清除旧值。否则保留既有值，不得推进或清空
+- Approved 出口继续按 `reference/output-templates.md` 采集 PR 与 required-checks 事实：未提交/未推送走 `commit`，无 PR 走 `create-pr`（无 PR 流程除外），checks 未终态走 `watch-pr`，仅 `HEAD == last_reviewed_commit == PR head` 且 checks 为 `passed|no-required` 时走 `complete-task`；不得仅按审查轮次分流
 - 完成 `last_reviewed_commit` 处理后执行 `agent-infra-internal task-event {task-id} review-code.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
 
 完成日志必须始终写入 `Manual-validation: {n}` 字段，0 也保留。

@@ -24,18 +24,59 @@
 
 ### 场景 A：通过且无问题
 
+通过后不得按轮次路由。先比较审查快照树 `T` 与基线 `R` 的树，再读取任务的 `prFlow` / `pr_number`；存在 PR 时调用 `agent-infra-internal platform-checks inspect {task-id}`。只选择以下一个互斥出口：
+
+- `T != R^{tree}`：场景 A1（提交）。
+- `T == R^{tree}` 且无 PR：`prFlow=disabled` 用场景 A4（完成），否则用场景 A2（创建 PR）。
+- 已有 PR 但 PR head != `R`：场景 A1（提交/推送）。
+- PR head = `R`，checks 为 `pending|failed|cancelled` 或平台暂不可用：场景 A3（监控），不得输出完成命令。
+- PR head = `R`，checks 为 `passed|no-required`：场景 A4（完成）。
+
+场景 A 的共同摘要：
+
 ```text
 任务 {task-id} 代码审查完成。结论：通过。
 - 阻塞项：0 | 主要问题：0 | 次要问题：0 | 人工校验点：{e} | 人工裁决：{h}
 [- 审查报告：.agents/workspace/active/{task-id}/{review-artifact}]
 
-下一步 - 提交代码：
-  - Claude Code / OpenCode：/commit
-  - Gemini CLI：/agent-infra:commit
-  - Codex CLI：$commit
-
 [当 manual-validation > 0 时，在最后附加一行：]
 提醒：manual-validation 项需在 PR description 的「待人工验证」清单中承接，不应触发 /code-task。
+```
+
+#### 场景 A1：提交或推送
+
+```text
+下一步 - 提交或推送代码：
+  - Claude Code / OpenCode：/commit {task-ref}
+  - Gemini CLI：/agent-infra:commit {task-ref}
+  - Codex CLI：$commit {task-ref}
+```
+
+#### 场景 A2：创建 Pull Request
+
+```text
+下一步 - 创建 Pull Request：
+  - Claude Code / OpenCode：/create-pr {task-ref}
+  - Gemini CLI：/agent-infra:create-pr {task-ref}
+  - Codex CLI：$create-pr {task-ref}
+```
+
+#### 场景 A3：监控 required checks
+
+```text
+下一步 - 监控 PR 检查：
+  - Claude Code / OpenCode：/watch-pr {task-ref}
+  - Gemini CLI：/agent-infra:watch-pr {task-ref}
+  - Codex CLI：$watch-pr {task-ref}
+```
+
+#### 场景 A4：完成并归档
+
+```text
+下一步 - 完成并归档任务：
+  - Claude Code / OpenCode：/complete-task {task-ref}
+  - Gemini CLI：/agent-infra:complete-task {task-ref}
+  - Codex CLI：$complete-task {task-ref}
 ```
 
 ### 场景 B：需要修改（major / minor）

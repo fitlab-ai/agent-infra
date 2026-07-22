@@ -24,18 +24,59 @@ For Branches B/C/D, follow the revision commands with re-review commands: `/revi
 
 ### Branch A: Approved with No Findings
 
+Do not route by review round. Compare reviewed snapshot tree `T` with the tree of baseline `R`, then read `prFlow` / `pr_number`; when a PR exists, call `agent-infra-internal platform-checks inspect {task-id}`. Select exactly one mutually exclusive exit:
+
+- `T != R^{tree}`: Branch A1 (commit).
+- `T == R^{tree}` without a PR: Branch A4 for `prFlow=disabled`, otherwise Branch A2 (create PR).
+- Existing PR with PR head != `R`: Branch A1 (commit/push).
+- PR head = `R` with `pending|failed|cancelled` checks or temporarily unavailable platform state: Branch A3 (watch); never show completion.
+- PR head = `R` with `passed|no-required` checks: Branch A4 (complete).
+
+Common Branch A summary:
+
 ```text
 Task {task-id} review completed. Verdict: approved.
 - Blockers: 0 | Major: 0 | Minor: 0 | Manual-validation: {e} | Human-decision: {h}
 [- Review report: .agents/workspace/active/{task-id}/{review-artifact}]
 
-Next step - commit the code:
-  - Claude Code / OpenCode: /commit
-  - Gemini CLI: /{{project}}:commit
-  - Codex CLI: $commit
-
 [When manual-validation > 0, append this final line:]
 Reminder: manual-validation findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
+```
+
+#### Branch A1: Commit or Push
+
+```text
+Next step - commit or push the code:
+  - Claude Code / OpenCode: /commit {task-ref}
+  - Gemini CLI: /{{project}}:commit {task-ref}
+  - Codex CLI: $commit {task-ref}
+```
+
+#### Branch A2: Create a Pull Request
+
+```text
+Next step - create a Pull Request:
+  - Claude Code / OpenCode: /create-pr {task-ref}
+  - Gemini CLI: /{{project}}:create-pr {task-ref}
+  - Codex CLI: $create-pr {task-ref}
+```
+
+#### Branch A3: Watch Required Checks
+
+```text
+Next step - watch PR checks:
+  - Claude Code / OpenCode: /watch-pr {task-ref}
+  - Gemini CLI: /{{project}}:watch-pr {task-ref}
+  - Codex CLI: $watch-pr {task-ref}
+```
+
+#### Branch A4: Complete and Archive
+
+```text
+Next step - complete and archive the task:
+  - Claude Code / OpenCode: /complete-task {task-ref}
+  - Gemini CLI: /{{project}}:complete-task {task-ref}
+  - Codex CLI: $complete-task {task-ref}
 ```
 
 ### Branch B: Changes Requested (Major / Minor)

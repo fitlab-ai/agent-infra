@@ -48,13 +48,13 @@ description: >
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 与 `.agents/rules/pr-checks-commands.md`。
 
-调用 `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`，按结构化 `checks.state` 分为「全绿」/「失败」/「挂起」，分别进入步骤 7、步骤 3 或步骤 4。
+进入本轮时初始化内存列表 `repairCommits=[]`。调用 `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`，按结构化 `checks.state` 分为「全绿」/「失败」/「挂起」，分别进入步骤 7、步骤 3 或步骤 4。
 
 ### 3. 失败自愈循环
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 的「自愈决策树」与 `.agents/rules/pr-checks-commands.md` 的「解析失败 run id 并拉日志」。
 
-对失败 check：调用 `platform-checks resolve-run`，再调用 `platform-checks logs` 获取保真日志并判定类别；本地修复前先读取 `.agents/rules/debugging-guide.md`，按四阶段流程定位根因。仅当属可定位的代码层失败时最小修复、运行对应测试通过后**暂存并提交本次修复再推送**（`git add` 仅相关文件 → 按 `.agents/rules/commit-and-pr.md` `git commit` → `git push`），再回到步骤 2。达硬上限（默认 2）或 run 不可定位 → 转步骤 4。
+对失败 check：调用 `platform-checks resolve-run`，再调用 `platform-checks logs` 获取保真日志并判定类别；本地修复前先读取 `.agents/rules/debugging-guide.md`，按四阶段流程定位根因。仅当属可定位的代码层失败时最小修复、运行对应测试通过后**暂存并提交本次修复再推送**（`git add` 仅相关文件 → 按 `.agents/rules/commit-and-pr.md` `git commit` → `git push`），将成功推送的 SHA 追加到 `repairCommits`，再回到步骤 2。达硬上限（默认 2）或 run 不可定位 → 转步骤 4。
 
 ### 4. 求助出口（产出后停止）
 
@@ -77,7 +77,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 - **不改** `pr_status`（保持 `created`）与 `current_step`
 - **追加**到 `## 活动日志`（不要覆盖之前的记录；`{N}` = 本任务已有 Watch PR 条目数 + 1）：
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {全绿：all required checks green / 阻塞：blocked: {简述}}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {全绿：all required checks green, repair commits: {k} [{sha 摘要}] / 阻塞：blocked: {简述}}
   ```
 
 ### 6. 完成校验
@@ -104,13 +104,24 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 > **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染最终输出前，先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令把 `{task-ref}` 渲染为短号 `#NN`（未分配/已释放时回退完整 TASK-id）；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
 
 按场景输出：
-- 「全绿」+ 任务锚定：说明所有 required checks 已通过、PR 可合入，并按下方模板渲染下一步（`{task-ref}` 替换为短号）：
+- 「全绿」+ 任务锚定：说明所有 required checks 已通过，并只按本轮是否产生修复 commit 渲染一个出口（`{task-ref}` 替换为短号）：
+
+  `repairCommits.length == 0`：
 
   ```
   下一步 - 完成并归档任务：
     - Claude Code / OpenCode：/complete-task {task-ref}
     - Gemini CLI：/{{project}}:complete-task {task-ref}
     - Codex CLI：$complete-task {task-ref}
+  ```
+
+  `repairCommits.length > 0`：
+
+  ```
+  下一步 - 重新代码审查：
+    - Claude Code / OpenCode：/review-code {task-ref}
+    - Gemini CLI：/{{project}}:review-code {task-ref}
+    - Codex CLI：$review-code {task-ref}
   ```
 
 - 「阻塞」：仅输出步骤 4 的阻塞说明，不推荐下一步命令。
@@ -126,7 +137,7 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 
 ## 停止
 
-完成检查清单后立即停止。全绿出口等待用户运行 `complete-task`；阻塞出口等待用户裁定。
+完成检查清单后立即停止。全绿出口等待用户运行所选的 `complete-task` 或 `review-code`；阻塞出口等待用户裁定。
 
 ## 注意事项
 

@@ -798,8 +798,7 @@ test("review skill reports keep advisories outside the finding ledger", () => {
 test("review output templates reserve cross-stage commands for an advanceable ledger", () => {
   const commandBySkill: Record<string, RegExp> = {
     "review-analysis": /\/plan-task |\/agent-infra:plan-task |\/\{\{project\}\}:plan-task |\$plan-task /g,
-    "review-plan": /\/code-task |\/agent-infra:code-task |\/\{\{project\}\}:code-task |\$code-task /g,
-    "review-code": /\/commit|\/agent-infra:commit|\/\{\{project\}\}:commit|\$commit/g
+    "review-plan": /\/code-task |\/agent-infra:code-task |\/\{\{project\}\}:code-task |\$code-task /g
   };
   for (const [skill, pattern] of Object.entries(commandBySkill)) {
     for (const locale of [null, "en", "zh-CN"] as const) {
@@ -807,6 +806,19 @@ test("review output templates reserve cross-stage commands for an advanceable le
         ? `templates/.agents/skills/${skill}/reference/output-templates.${locale}.md`
         : `.agents/skills/${skill}/reference/output-templates.md`;
       assert.equal(read(relativePath).match(pattern)?.length, 3, `${relativePath} should expose one three-TUI advance path`);
+    }
+  }
+
+  const approvedRoutes = ["commit", "create-pr", "watch-pr", "complete-task"];
+  for (const locale of [null, "en", "zh-CN"] as const) {
+    const relativePath = locale
+      ? `templates/.agents/skills/review-code/reference/output-templates.${locale}.md`
+      : ".agents/skills/review-code/reference/output-templates.md";
+    const content = read(relativePath);
+    for (const route of approvedRoutes) {
+      const escaped = route.replace("-", "\\-");
+      const commands = new RegExp(`/(?:agent-infra:|\\{\\{project\\}\\}:)?${escaped} |\\$${escaped} `, "g");
+      assert.equal(content.match(commands)?.length, 3, `${relativePath} should expose one three-TUI ${route} route`);
     }
   }
 });
@@ -923,6 +935,7 @@ test("complete-task splits active preflight checks from completed-state checks",
   ].forEach((relativePath) => {
     const checks = JSON.parse(read(relativePath)).checks;
 
+    assert.deepEqual(checks["required-checks"], {});
     assert.deepEqual(checks["platform-sync-preflight"], {
       when: "issue_number_exists",
       expected_comment_marker: "<!-- sync-issue:{task-id}:summary -->",

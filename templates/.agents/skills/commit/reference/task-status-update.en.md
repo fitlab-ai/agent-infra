@@ -26,6 +26,19 @@ last_reviewed_commit: {new_head}
 
 This field is the only baseline for the `complete-task` `post-review-commit` gate. When any condition is not met, do not write or advance it.
 
+### Scenario 5: Existing-PR push wrap-up
+
+After a new commit or the restricted push-only path is successfully pushed to an existing open PR, the only next step is to watch required checks for the new head:
+
+```text
+Next step - watch PR checks:
+  - Claude Code / OpenCode: /watch-pr {task-ref}
+  - Gemini CLI: /{{project}}:watch-pr {task-ref}
+  - Codex CLI: $watch-pr {task-ref}
+```
+
+If push fails, keep the task active and preserve local HEAD; show diagnostics and manual push guidance only, never `watch-pr` or `complete-task`. This scenario takes precedence over the final `prFlow` route below.
+
 ### Scenario 4: pre-commit snapshot block
 
 This scenario ends the run before `git commit` and does not enter the successful post-commit scenario selection below. When any of `pre_head != R`, `W != T`, or `S != T` applies:

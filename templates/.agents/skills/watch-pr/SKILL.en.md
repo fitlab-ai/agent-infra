@@ -48,13 +48,13 @@ Resolve the target PR number `{pr#}` and an optional `{task-id}` via these deter
 
 Before running this step, read `reference/monitor-and-heal.md` and `.agents/rules/pr-checks-commands.md`.
 
-Run `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`, then route its structured `checks.state` to the all-green, failure, or pending path.
+Initialize the in-memory list `repairCommits=[]` for this run. Run `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`, then route its structured `checks.state` to the all-green, failure, or pending path.
 
 ### 3. Failure Self-Heal Loop
 
 Before running this step, read the "Self-Heal Decision Tree" of `reference/monitor-and-heal.md` and "Resolve a Failing Run id and Pull Logs" of `.agents/rules/pr-checks-commands.md`.
 
-For a failing check, call `platform-checks resolve-run`, then `platform-checks logs` to obtain faithful logs before classification. Read `.agents/rules/debugging-guide.md` before a local fix. Only for a locatable code-layer failure, make the minimum fix, run relevant tests, then **stage, commit, and push** only the related files and return to step 2. At the cap (default 2) or when resolution fails, go to step 4.
+For a failing check, call `platform-checks resolve-run`, then `platform-checks logs` to obtain faithful logs before classification. Read `.agents/rules/debugging-guide.md` before a local fix. Only for a locatable code-layer failure, make the minimum fix, run relevant tests, then **stage, commit, and push** only the related files, append the successfully pushed SHA to `repairCommits`, and return to step 2. At the cap (default 2) or when resolution fails, go to step 4.
 
 ### 4. Help Exit (Produce-Then-Stop)
 
@@ -77,7 +77,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - **Do not change** `pr_status` (keep `created`) or `current_step`
 - **Append** to `## Activity Log` (do not overwrite prior entries; `{N}` = number of existing Watch PR entries for this task + 1):
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {green: all required checks green / blocked: blocked: {summary}}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {green: all required checks green, repair commits: {k} [{SHA summary}] / blocked: blocked: {summary}}
   ```
 
 ### 6. Verification Gate
@@ -104,13 +104,24 @@ Keep the gate output in your reply as the verification evidence. Without current
 > **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the short id `#NN` (falling back to the full TASK-id when unallocated or released); (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
 
 Output per scenario:
-- "All green" + task-anchored: state that all required checks passed and the PR is ready to merge, then render the next step from the template below (`{task-ref}` becomes the short id):
+- "All green" + task-anchored: state that all required checks passed, then render exactly one exit based on whether this run created repair commits (`{task-ref}` becomes the short id):
+
+  `repairCommits.length == 0`:
 
   ```
   Next step - Complete and archive the task:
     - Claude Code / OpenCode: /complete-task {task-ref}
     - Gemini CLI: /{{project}}:complete-task {task-ref}
     - Codex CLI: $complete-task {task-ref}
+  ```
+
+  `repairCommits.length > 0`:
+
+  ```
+  Next step - Re-run code review:
+    - Claude Code / OpenCode: /review-code {task-ref}
+    - Gemini CLI: /{{project}}:review-code {task-ref}
+    - Codex CLI: $review-code {task-ref}
   ```
 
 - "Blocked": output only the step 4 blocker explanation; do not recommend a next-step command.

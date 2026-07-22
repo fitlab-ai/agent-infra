@@ -26,6 +26,19 @@ last_reviewed_commit: {new_head}
 
 该字段是 `complete-task` 的 `post-review-commit` gate 唯一 baseline。条件不满足时不要写入或推进该字段。
 
+### 场景 5：已有 PR 推送收尾
+
+新 commit 或受限 push-only 场景成功推送到已有开放 PR 后，唯一下一步是监控新 head 的 required checks：
+
+```text
+下一步 - 监控 PR 检查：
+  - Claude Code / OpenCode: /watch-pr {task-ref}
+  - Gemini CLI: /{{project}}:watch-pr {task-ref}
+  - Codex CLI: $watch-pr {task-ref}
+```
+
+push 失败时保留任务 active 与本地 HEAD，只展示诊断和人工推送提示；不得渲染 `watch-pr` 或 `complete-task`。该场景优先于下方 `prFlow` 终态路由。
+
 ### 场景 4：提交前快照阻断
 
 此场景在 `git commit` 前终止本轮，不进入下方提交成功后的场景选择。任一 `pre_head != R`、`W != T` 或 `S != T` 命中时：

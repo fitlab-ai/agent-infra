@@ -121,11 +121,11 @@ const gateCases = [
       assert.equal(payload.gate, "pass");
       assert.deepEqual(
         payload.checks.map((check) => check.type),
-        ["task-meta", "activity-log", "completion-checklist", "review-ledger", "post-review-commit", "platform-sync-preflight", "platform-sync", "artifact"]
+        ["task-meta", "activity-log", "completion-checklist", "review-ledger", "post-review-commit", "required-checks", "platform-sync-preflight", "platform-sync", "artifact"]
       );
       assert.deepEqual(
         payload.checks.map((check) => check.status),
-        ["pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass"]
+        ["pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass"]
       );
     }
   }
@@ -594,8 +594,10 @@ test("verification assets are present in local and template trees", () => {
   [
     ".agents/scripts/validate-artifact.js",
     ".agents/scripts/platform-adapters/platform-sync.js",
+    ".agents/scripts/platform-adapters/required-checks.js",
     "templates/.agents/scripts/validate-artifact.js",
     "templates/.agents/scripts/platform-adapters/platform-sync.github.js",
+    "templates/.agents/scripts/platform-adapters/required-checks.github.js",
     ".agents/skills/code-task/config/verify.json",
     "templates/.agents/skills/code-task/config/verify.en.json",
     "templates/.agents/skills/code-task/config/verify.zh-CN.json"
@@ -612,5 +614,10 @@ test("verification assets are present in local and template trees", () => {
     read(".agents/scripts/platform-adapters/platform-sync.js"),
     read("templates/.agents/scripts/platform-adapters/platform-sync.github.js"),
     "template platform adapter should stay in sync with the local adapter"
+  );
+  assert.equal(
+    read(".agents/scripts/platform-adapters/required-checks.js"),
+    read("templates/.agents/scripts/platform-adapters/required-checks.github.js"),
+    "template required-checks adapter should stay in sync with the local adapter"
   );
 });
