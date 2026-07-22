@@ -10,7 +10,7 @@ import {
 
 test('required checks classify terminal and non-terminal states', () => {
   assert.equal(classifyRequiredChecks([]).state, 'no-required');
-  assert.equal(classifyRequiredChecks([{ name: 'build', bucket: 'pass' }]).state, 'failed');
+  assert.equal(classifyRequiredChecks([{ name: 'build', bucket: 'pass' }]).state, 'passed');
   assert.equal(classifyRequiredChecks([{ name: 'build', bucket: 'fail' }]).state, 'failed');
   assert.equal(classifyRequiredChecks([{ name: 'build', bucket: 'pending' }]).state, 'pending');
   assert.equal(classifyRequiredChecks([{ name: 'build', bucket: 'cancel' }]).state, 'cancelled');
