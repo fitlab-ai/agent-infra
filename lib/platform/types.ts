@@ -31,7 +31,7 @@ type PlatformResult = {
   status: PlatformStatus;
   changed: boolean;
   platform: { type: string | null; repository: string | null; currentUser: string | null };
-  resource: { kind: 'repository' | 'issue'; number: number | null };
+  resource: { kind: 'repository' | 'issue' | 'pull-request'; number: number | null };
   capabilities: PlatformCapabilities;
   operations: PlatformOperation[];
   comment: CommentIdentity | null;

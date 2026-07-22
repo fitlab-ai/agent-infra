@@ -725,7 +725,6 @@ test("skills that write timestamps require date command guidance", () => {
     `date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\\([+-][0-9][0-9]\\)\\([0-9][0-9]\\)$/\\1:\\2/'`;
   const timestampSkills = [
     "commit",
-    "create-pr",
     "create-task",
     "import-codescan",
     "import-dependabot",

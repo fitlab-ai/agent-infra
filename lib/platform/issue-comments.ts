@@ -445,11 +445,13 @@ export {
   MARKERS,
   chunkArtifactComment,
   findMarkerComments,
+  listRemoteComments,
   checkPlatformCommentOwner,
   listPlatformComments,
   normalizeCommentContent,
   renderTaskComment,
   syncPlatformComment,
-  validateRelatedMarkerSet
+  validateRelatedMarkerSet,
+  writeComment
 };
 export type { CommentKind, RemoteComment, RenderedChunk, SyncOptions };

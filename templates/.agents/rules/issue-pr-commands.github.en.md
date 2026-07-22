@@ -1,14 +1,32 @@
-# Issue and PR Platform Commands
+# PR Platform Intents
 
-Issue resources use declarative internal intents exclusively:
+PR lookup, creation, binding, and metadata synchronization go through typed internal intents. Skills decide branches and write titles/bodies; they do not assemble platform commands.
+
+## Inspect
 
 ```bash
-agent-infra-internal platform-issue inspect {task-id}
-agent-infra-internal platform-issue create {task-id} --agent {agent}
-agent-infra-internal platform-issue bind {task-id} --issue {number} --agent {agent}
-agent-infra-internal platform-issue sync {task-id} --agent {agent} {desired-state-flags}
+agent-infra-internal platform-pr inspect {task-id}
 ```
 
-Templates, deterministic bodies, identity, labels, assignees, milestones, Issue Type, pinned fields, requirements, and close state belong to the Issue adapter. Skills must not use direct `gh issue` or Issue GraphQL commands.
+## Create or recover
 
-PR reads and writes remain in the 09/10 compatibility path. Resolve `platform-context` first, use its upstream and capabilities, and keep PR API argv shell-free.
+```bash
+agent-infra-internal platform-pr create {task-id} \
+  --agent {agent} --base {target-branch} --head {current-branch} \
+  --title-file {title-file} --body-file {body-file}
+```
+
+The core performs exact upstream/head/base lookup. One match is reused, zero creates, and multiple matches fail closed. Unknown create outcomes are reconciled by exact identity. `--dry-run` returns only the plan.
+
+## Bind and synchronize
+
+```bash
+agent-infra-internal platform-pr bind {task-id} --pr {pr-number} --agent {agent}
+
+agent-infra-internal platform-pr sync {task-id} \
+  --agent {agent} --metadata --closing-issue
+```
+
+Conflicting bindings do not change `task.md`. Metadata comes from the linked Issue, permission-bound items degrade independently, and an already-created PR is never rolled back.
+
+Statuses `planned|applied|no-op|degraded` exit 0, `failed` exits 1, and `blocked` exits 2.

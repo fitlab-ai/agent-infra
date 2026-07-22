@@ -7,6 +7,9 @@ import { createGitHubClient } from "../../dist/lib/platform/github-client.js";
 import { resolvePlatformContext } from "../../dist/lib/platform/context.js";
 import { hasCheckedRequirement, resolveRequirementSection } from "../../dist/lib/platform/issue-metadata.js";
 import { inspectGitHubIssueMetadata, requirementSectionAnchors } from "../../dist/lib/platform/issues.js";
+import { listRemoteComments } from "../../dist/lib/platform/issue-comments.js";
+import { taskTypeLabel } from "../../dist/lib/platform/metadata-labels.js";
+import { inspectGitHubPullRequest } from "../../dist/lib/platform/pull-requests.js";
 
 const CHECK_TYPE = "platform-sync";
 const VERSION_LINE_REGEX = /^[0-9]+\.[0-9]+\.x$/;
@@ -323,22 +326,22 @@ function fetchRemoteData(context) {
       };
     }
 
-    const prCommentsResult = withRetry(() => ghPaginatedJson([
-      "api",
-      "--paginate",
-      "--slurp",
-      `repos/${context.upstreamRepo}/issues/${context.prNumber}/comments?per_page=100`
-    ], context.taskDir));
+    const prCommentsResult = listRemoteComments(
+      githubClient,
+      context.upstreamRepo,
+      context.prNumber,
+      context.taskDir
+    );
 
     if (!prCommentsResult.ok) {
       return {
-        earlyReturn: prCommentsResult.type === "check_failed"
-          ? failResult(CHECK_TYPE, prCommentsResult.message, prCommentsResult.type)
-          : blockedResult(CHECK_TYPE, prCommentsResult.message, prCommentsResult.type)
+        earlyReturn: prCommentsResult.error.retryable
+          ? blockedResult(CHECK_TYPE, prCommentsResult.error.message, "network_error")
+          : failResult(CHECK_TYPE, prCommentsResult.error.message, "check_failed")
       };
     }
 
-    prComments = flattenComments(prCommentsResult.value);
+    prComments = prCommentsResult.value;
   }
 
   let issueType;
@@ -379,46 +382,37 @@ function fetchRemoteData(context) {
   let prLabels = null;
   let prMilestone;
   let prAssignees;
+  let prHeadSha;
   if (((context.config.verify_in_labels_match_pr && context.hasTriage)
     || (context.config.verify_pr_type_label && context.hasTriage)
     || (context.config.verify_milestone && context.hasTriage)
-    || (context.config.verify_pr_assignee && context.hasPush)) && context.prNumber) {
-    const prFields = [];
-    if (context.config.verify_in_labels_match_pr || context.config.verify_pr_type_label) {
-      prFields.push("labels");
-    }
-    if (context.config.verify_milestone) {
-      prFields.push("milestone");
-    }
-    if (context.config.verify_pr_assignee) {
-      prFields.push("assignees");
-    }
-
-    const prResult = withRetry(() => ghJson([
-      "pr",
-      "view",
-      String(context.prNumber),
-      "--json",
-      prFields.join(",")
-    ], context.taskDir));
+    || (context.config.verify_pr_assignee && context.hasPush)
+    || context.config.verify_pr_comment_last_commit_matches_head) && context.prNumber) {
+    const prResult = inspectGitHubPullRequest(
+      githubClient,
+      context.upstreamRepo,
+      context.prNumber,
+      context.taskDir
+    );
 
     if (!prResult.ok) {
       return {
-        earlyReturn: prResult.type === "check_failed"
-          ? failResult(CHECK_TYPE, prResult.message, prResult.type)
-          : blockedResult(CHECK_TYPE, prResult.message, prResult.type)
+        earlyReturn: prResult.error.retryable
+          ? blockedResult(CHECK_TYPE, prResult.error.message, "network_error")
+          : failResult(CHECK_TYPE, prResult.error.message, "check_failed")
       };
     }
 
     prLabels = (context.config.verify_in_labels_match_pr || context.config.verify_pr_type_label)
-      ? extractLabelNames(prResult.value?.labels)
+      ? prResult.value.labels
       : null;
     prMilestone = context.config.verify_milestone
-      ? prResult.value?.milestone ?? null
+      ? prResult.value.milestone ? { title: prResult.value.milestone } : null
       : undefined;
     prAssignees = context.config.verify_pr_assignee
-      ? (prResult.value?.assignees || []).map((a) => a.login).filter(Boolean)
+      ? prResult.value.assignees
       : undefined;
+    prHeadSha = prResult.value.head.sha;
   }
 
   return {
@@ -429,24 +423,13 @@ function fetchRemoteData(context) {
     issueType,
     issueFields,
     prMilestone,
-    prAssignees
+    prAssignees,
+    prHeadSha
   };
 }
 
 function mapTaskTypeToLabel(taskType) {
-  const mapping = {
-    bug: "type: bug",
-    bugfix: "type: bug",
-    feature: "type: feature",
-    enhancement: "type: enhancement",
-    refactor: "type: enhancement",
-    refactoring: "type: enhancement",
-    documentation: "type: documentation",
-    "dependency-upgrade": "type: dependency-upgrade",
-    task: "type: task"
-  };
-
-  return mapping[taskType] || null;
+  return taskTypeLabel(taskType);
 }
 
 function shouldFetchComments(config) {
@@ -570,14 +553,8 @@ function checkPrCommentLastCommit(context, remoteData) {
     );
   }
 
-  const headResult = resolvePrHeadSha(context);
-  if (!headResult.ok) {
-    return headResult.type === "check_failed"
-      ? failResult(CHECK_TYPE, headResult.message, headResult.type)
-      : blockedResult(CHECK_TYPE, headResult.message, headResult.type);
-  }
-
-  const expectedHead = String(headResult.value || "").trim();
+  const expectedHead = String(remoteData.prHeadSha || "").trim();
+  if (!expectedHead) return blockedResult(CHECK_TYPE, "Unable to resolve the PR head SHA", "network_error");
   const actualHead = match[1].trim();
   if (expectedHead === actualHead) {
     return null;

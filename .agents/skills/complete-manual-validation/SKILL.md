@@ -70,7 +70,7 @@ complete-manual-validation {task-ref} [{pr-ref}] {verification-summary}
 - `.agents/rules/pr-sync.md`
 - `reference/summary-update.md`
 
-按 `reference/summary-update.md` 解析 PR 号、查找 `sync-pr` 摘要评论、提取待人工校验范围，并把人工校验段落更新为 `### ✅ 人工验证已通过`。
+按 `reference/summary-update.md` 校验 PR 绑定，从 `platform-pr summary-context` 取得 canonical 输入，并通过 `platform-pr summary-sync` 把人工校验段更新为 `### ✅ 人工验证已通过`。
 
 ### 5. 创建人工验证产物
 

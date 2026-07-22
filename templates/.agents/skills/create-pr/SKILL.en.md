@@ -17,15 +17,9 @@ Version stamp rule: when creating or updating `task.md` frontmatter, read `.agen
 
 > The entry point may omit the task ref and also accepts a legacy positional ref or `--task <ref>` / `-t <ref>`. Separate task scope from the full arguments while preserving every business operand, then call `agent-infra-internal task-context resolve {task-scope}` where `{task-scope}` is empty, one positional ref, or one task flag. Read only `taskId` from the structured result and bind `{task-id}` to that full `TASK-YYYYMMDD-HHMMSS` for downstream commands. Pass through resolution failures without scanning tasks locally.
 
-## Step Start: Write the started Marker
+## Step Start: started Marker
 
-After the pre-flight gate and prerequisites pass and before this step's first artifact action, append a started marker to task.md `## Activity Log` (same base action as this step's done entry plus a ` [started]` suffix, note `started`). Only write it when an associated `{task-id}` / task.md exists:
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Create PR [started]** by {agent} — started
-```
-
-`ai task log` pairs it with the done entry written on completion onto one row (in progress → done). See the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`.
+On a real `platform-pr create`, the typed core idempotently records `Create PR [started]` before the remote write. Dry-run does not record it, and the caller must not append a duplicate entry.
 
 ## Execution Flow
 
@@ -70,22 +64,15 @@ Read the PR template through `.agents/rules/issue-pr-commands.md`, review recent
 
 Confirm whether the current branch already has an upstream. Push with `git push -u origin <current-branch>` when required.
 
-### 5. Create the PR
+### 5. Create or Recover the PR
 
-Check whether the current branch already has a PR first; if one exists, show the PR URL and stop without repeating metadata sync or summary publication.
-
-Read `.agents/rules/issue-pr-commands.md` before this step, follow its prerequisite steps to complete authentication and code-hosting platform detection, then create the PR with its "Create a PR" command template.
+Read `.agents/rules/issue-pr-commands.md`, write the title and body to temporary files, then invoke its `platform-pr create` intent. The core first performs exact head/base lookup: one existing PR is reused and bound, zero creates, and multiple matches fail deterministically. Replays must not create duplicate PRs.
 
 If `{task-id}` is available and the related task provides `issue_number`, keep `Closes #{issue-number}` in the PR body.
 
 ### 6. Sync PR Metadata
 
-For PRs where `{task-id}` is available, sync the core metadata immediately:
-- query standard labels, Issue metadata, and PR metadata via `.agents/rules/issue-pr-commands.md`
-- apply the mapped type label by following the PR update commands and permission-degradation rules in `.agents/rules/issue-pr-commands.md`
-- copy the current Issue `in:` labels to the PR without recomputing them and without writing back to the Issue
-- reuse the Issue milestone by following "Phase 3: `create-pr`" and its permission rules in `.agents/rules/milestone-inference.md`
-- keep Development linking in the PR body with `Closes #{issue-number}` when applicable
+Run `agent-infra-internal platform-pr sync {task-id} --agent {agent} --metadata --closing-issue`. The core copies type / `in:` labels, assignee, and a specific milestone from the Issue and maintains the closing association. Permission-bound items degrade independently, and the Issue is never updated in reverse.
 
 ### 7. Publish the Review Summary
 
@@ -93,22 +80,11 @@ Read the latest context artifacts when they exist: `plan.md` / `plan-r{N}.md`, `
 
 Aggregate a reviewer-facing summary from those artifacts and maintain a single idempotent summary comment via the hidden marker.
 
-> Hidden marker handling, idempotent summary updates, review-history structure, and comment creation/update rules live in `reference/comment-publish.md` (which in turn points to `.agents/rules/pr-sync.md`). Read `reference/comment-publish.md` before publishing the summary.
->
-> **Shell safety rules** (required before publishing the comment):
-> 1. Replace `{comment-body}` with the actual inline text. Read files first, then paste the full content into the heredoc body. Do **not** use `$(cat ...)`, `$(< ...)`, `$(...)`, or `${...}` inside `<<'EOF'`.
-> 2. Do **not** use `echo` when constructing strings that contain `<!-- -->`. Use `cat <<'EOF'` heredoc or `printf '%s\n'` instead.
-> 3. The same constraints are restated in `.agents/rules/pr-sync.md`; once that rule is loaded, do not duplicate another copy of the template rules.
+> Canonical context, aggregation, and the `summary-sync` call live in `reference/comment-publish.md`, which points to `.agents/rules/pr-sync.md`. Read that reference before publishing.
 
-### 8. Update Task Status
+### 8. Confirm Task Status
 
-Get the current time:
-
-```bash
-date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
-```
-
-If `{task-id}` is available, update task.md with `pr_number`, `pr_status` (set to `created`), `updated_at`, `agent_infra_version`, and append the Create PR Activity Log entry including metadata-sync and summary results.
+After a PR is created or uniquely recovered, `platform-pr create` atomically updates `pr_number`, `pr_status`, canonical time/version metadata, and the Create PR completion log through the task write core. The caller verifies the structured result and does not edit those fields again.
 
 ### 9. Verification Gate
 
@@ -155,8 +131,7 @@ Next step (alternative) - Skip monitoring and archive the task directly:
 
 - Review every commit in the branch, not only the latest one
 - `create-pr` must not defer type-label mapping to another skill; inline the mapping here when `{task-id}` is available
-- Keep the hidden summary marker as the PR summary marker defined in `.agents/rules/pr-sync.md` for compatibility with existing PR comments
-- If the current branch already has a PR, show its URL and stop without repeating sync work
+- The summary marker and current HEAD are wrapped by `platform-pr summary-sync`
 - When metadata inheritance from the Issue fails, continue with task.md and branch-based fallbacks
 
 ## Error Handling

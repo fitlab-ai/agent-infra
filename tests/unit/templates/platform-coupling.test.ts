@@ -86,3 +86,31 @@ test("Issue metadata workflow documents reference the internal Issue intent", ()
     assert.match(read(relativePath), /agent-infra-internal platform-issue (?:create|bind|sync)/, relativePath);
   });
 });
+
+test("PR workflow documents reference typed PR and required-check intents", () => {
+  const prDocs = [
+    ".agents/skills/create-pr/SKILL.md",
+    ".agents/skills/create-pr/reference/comment-publish.md",
+    ".agents/skills/commit/reference/pr-summary-sync.md",
+    ".agents/skills/complete-manual-validation/reference/summary-update.md",
+    "templates/.agents/skills/create-pr/SKILL.en.md",
+    "templates/.agents/skills/create-pr/SKILL.zh-CN.md",
+    "templates/.agents/skills/create-pr/reference/comment-publish.en.md",
+    "templates/.agents/skills/create-pr/reference/comment-publish.zh-CN.md",
+    "templates/.agents/skills/commit/reference/pr-summary-sync.en.md",
+    "templates/.agents/skills/commit/reference/pr-summary-sync.zh-CN.md",
+    "templates/.agents/skills/complete-manual-validation/reference/summary-update.en.md",
+    "templates/.agents/skills/complete-manual-validation/reference/summary-update.zh-CN.md"
+  ];
+  prDocs.forEach((relativePath) => {
+    assert.match(read(relativePath), /agent-infra-internal platform-pr (?:create|sync|summary-context|summary-sync)/, relativePath);
+  });
+
+  [
+    ".agents/skills/watch-pr/SKILL.md",
+    "templates/.agents/skills/watch-pr/SKILL.en.md",
+    "templates/.agents/skills/watch-pr/SKILL.zh-CN.md"
+  ].forEach((relativePath) => {
+    assert.match(read(relativePath), /agent-infra-internal platform-checks watch/, relativePath);
+  });
+});

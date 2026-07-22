@@ -1,105 +1,47 @@
-# Issue / PR 平台命令
+# PR 平台意图命令
 
-在读取或写入 PR，或选择 Issue intent 前先读取本文件。
+PR 资源的定位、创建、绑定和元数据同步统一通过 typed internal intent；SKILL 只负责决定分支、标题、正文和调用时机，不直接拼装平台命令。
 
-## 平台上下文与能力
-
-调用 `agent-infra-internal platform-context resolve` 取得规范 upstream、当前用户和 `comment/triage/push/admin` capabilities。调用方不得自行解释 remote、认证 stderr 或权限 JSON。`failed`/`blocked` 按调用该规则的 Skill 约定停止或降级。
-
-Issue 资源必须使用 `platform-issue`；本文件保留的直接 `gh pr` 命令属于 09/10 PR 兼容区。
-
-## Issue intent
+## 定位
 
 ```bash
-agent-infra-internal platform-issue inspect {task-id}
-agent-infra-internal platform-issue create {task-id} --agent {agent}
-agent-infra-internal platform-issue bind {task-id} --issue {number} --agent {agent}
-agent-infra-internal platform-issue sync {task-id} --agent {agent} {desired-state-flags}
+agent-infra-internal platform-pr inspect {task-id}
 ```
 
-模板检测、确定性正文、Issue identity、labels、assignees、milestone、Issue Type、pinned fields、requirements 与关闭状态全部由 intent 处理。调用方不得直接使用 `gh issue` 或 Issue GraphQL。
+返回已绑定 PR 的规范身份；未绑定时返回 `PR_NOT_LINKED`。调用方不得按标题模糊匹配。
 
-## Issue 评论读取
+## 创建或恢复
 
-统一调用 `agent-infra-internal platform-comment list --issue {issue-number}`。该 intent 负责分页、顺序、marker identity 与结构化错误；历史任务扫描直接消费其 `comments` 数组，不再拼跨平台 pipeline。
-
-## PR 模板与元数据辅助命令
-
-存在仓库 PR 模板时读取：
+调用方把标题和正文分别写入临时文件，然后执行：
 
 ```bash
-cat .github/PULL_REQUEST_TEMPLATE.md
+agent-infra-internal platform-pr create {task-id} \
+  --agent {agent} --base {target-branch} --head {current-branch} \
+  --title-file {title-file} --body-file {body-file}
 ```
 
-参考最近合并的 PR 风格：
+core 会先按 upstream、head 和 base 精确定位；唯一既有 PR 会复用并绑定，零个才创建，多个稳定失败。远端结果未知时重新精确定位，不盲重建。`--dry-run` 只返回计划。
+
+## 显式绑定
 
 ```bash
-gh pr list --limit 3 --state merged --json number,title,body
+agent-infra-internal platform-pr bind {task-id} --pr {pr-number} --agent {agent}
 ```
 
-PR 元数据同步前验证标准 type labels 是否存在：
+冲突绑定稳定失败且不修改 `task.md`。
+
+## 元数据同步
 
 ```bash
-gh label list --search "type:" --limit 1 --json name --jq 'length'
+agent-infra-internal platform-pr sync {task-id} \
+  --agent {agent} --metadata --closing-issue
 ```
 
-如果结果是 `0`，先运行 `init-labels`，再重试 PR 元数据同步。
+core 从关联 Issue 复制 type / `in:` labels、assignee、具体 milestone，并确保 closing association。权限不足返回逐项 `skipped` 和顶层 `degraded`；不得反向修改 Issue。
 
-## PR 读取与创建
+## 状态语义
 
-读取 PR：
-
-```bash
-gh pr view {pr-number} --json number,title,body,labels,state,milestone,url,files
-```
-
-列出 PR：
-
-```bash
-gh pr list --state {state} --base {base-branch} --json number,title,url,headRefName,baseRefName
-```
-
-按 head 分支查询当前分支是否存在开放 PR（`commit` 推送收尾用）：
-
-```bash
-gh pr list --head "{branch}" --state open --json number,url --jq '.[0].url // empty'
-```
-
-创建 PR：
-
-```bash
-gh pr create --base "{target-branch}" --title "{title}" --assignee @me \
-  {label-args} {milestone-arg} \
-  --body "$(cat <<'EOF'
-{pr-body}
-EOF
-)"
-```
-
-- `{label-args}` 由调用方按有效 label 列表展开为多个 `--label "{label}"`
-- 仅当 `has_triage=true` 时传入 `{label-args}`；否则整体省略并继续
-- 没有有效 label 时省略全部 `--label`
-- `{milestone-arg}` 展开为 `--milestone "{milestone}"`
-- 仅当 `has_triage=true` 时传入 `{milestone-arg}`；否则整体省略并继续
-- `{milestone-arg}` 为空时整体省略
-
-## PR 更新
-
-更新 PR 标题、label 或 milestone：
-
-```bash
-gh pr edit {pr-number} {edit-args}
-```
-
-常见参数：
-- `--title "{title}"`
-- `--add-label "{label}"`
-- `--remove-label "{label}"`
-- `--milestone "{milestone}"`
-
-## 错误处理
-
-- 读取失败：按调用方规则决定停止还是跳过
-- 更新失败：如果调用方标记为 best-effort，输出警告并继续
-- 权限不足：按 `has_triage` / `has_push` 分支跳过直接写操作，不阻塞调用方
-- `@me` 由 `gh` CLI 解析为当前认证用户
+- `planned|applied|no-op|degraded`：退出码 0。
+- `failed`：退出码 1，确定性输入或远端错误。
+- `blocked`：退出码 2，网络、认证或结果未知，需要人工介入或安全重跑。
+- 创建后摘要或元数据同步失败不得回滚 PR；调用方按所属 SKILL 记录 warning。

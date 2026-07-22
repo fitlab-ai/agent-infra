@@ -39,22 +39,22 @@ After prerequisites pass and before this round's first artifact action, append a
 
 Resolve the target PR number `{pr#}` and an optional `{task-id}` via these deterministic branches:
 
-- Scenario A (argument omitted): use the current branch's PR number per `.agents/rules/pr-checks-commands.md`; then determine `{task-id}` via "Reverse-lookup task" below.
+- Scenario A (argument omitted): reverse-lookup the active task from the current branch, then read its `pr_number`.
 - Scenario B (omitted task ref, positional task ref, or `--task/-t`, **task-anchored primary path**): resolve the full `{task-id}` via "Task Context Resolution" and read `.agents/workspace/active/{task-id}/task.md` for `pr_number` as `{pr#}`; if `pr_number` is empty, follow "Error Handling" to prompt running `create-pr` first, then stop.
 - Scenario C (`--pr <number>` or a PR URL): use that PR number directly as `{pr#}`; then determine `{task-id}` via "Reverse-lookup task".
-- Reverse-lookup task (scenarios A / C): search `.agents/workspace/active/*/task.md` for a task whose `pr_number == {pr#}`; on a hit, take that `{task-id}` (task-anchored); on a miss, enter the "watch-only" degraded path (no `{task-id}`, skip steps 5/6).
+- Reverse-lookup task (scenarios A / C): use task context/query capabilities to find the unique active task bound to `{pr#}`. If none exists, stop and request binding first; the typed checks intent does not create a second taskless state machine.
 
 ### 2. Watch Required Checks
 
 Before running this step, read `reference/monitor-and-heal.md` and `.agents/rules/pr-checks-commands.md`.
 
-Using the watch command in `.agents/rules/pr-checks-commands.md`, poll `{pr#}`'s required checks (with an overall time cap, default 30 minutes), and classify the outcome per the "Outcome Classification" of `reference/monitor-and-heal.md` into the "all green" / "failure" / "pending" scenarios, routing to step 7 (green exit), step 3 (self-heal), or step 4 (help exit) respectively.
+Run `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`, then route its structured `checks.state` to the all-green, failure, or pending path.
 
 ### 3. Failure Self-Heal Loop
 
 Before running this step, read the "Self-Heal Decision Tree" of `reference/monitor-and-heal.md` and "Resolve a Failing Run id and Pull Logs" of `.agents/rules/pr-checks-commands.md`.
 
-For a failing check: first deterministically resolve its failing run and pull the failure logs per the rule, then classify the failure; before making any local fix, read `.agents/rules/debugging-guide.md` and locate the root cause via its four-phase flow, never blindly patching and retrying; only when it is a locatable code-layer failure, make a minimal local fix, run the relevant tests until they pass, then **stage, commit, and push the fix** (`git add` only the related files → `git commit` per `.agents/rules/commit-and-pr.md` → `git push` to the current PR branch, recording the commit SHA), and return to step 2 to re-watch. Count fix attempts; on reaching the hard cap (default 2) or when the run is unlocatable, go to step 4.
+For a failing check, call `platform-checks resolve-run`, then `platform-checks logs` to obtain faithful logs before classification. Read `.agents/rules/debugging-guide.md` before a local fix. Only for a locatable code-layer failure, make the minimum fix, run relevant tests, then **stage, commit, and push** only the related files and return to step 2. At the cap (default 2) or when resolution fails, go to step 4.
 
 ### 4. Help Exit (Produce-Then-Stop)
 
@@ -113,7 +113,6 @@ Output per scenario:
     - Codex CLI: $complete-task {task-ref}
   ```
 
-- "All green" + watch-only: state the PR is ready to merge; there is no linked task this run, so run `complete-task` against the relevant task (do not force a short-id command block when no `{task-ref}` is available).
 - "Blocked": output only the step 4 blocker explanation; do not recommend a next-step command.
 
 ## Completion Checklist

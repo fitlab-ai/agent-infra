@@ -70,7 +70,7 @@ Before this step, read:
 - `.agents/rules/pr-sync.md`
 - `reference/summary-update.md`
 
-Follow `reference/summary-update.md` to resolve the PR number, find the `sync-pr` summary comment, extract the manual-validation scope, and update the section to `### ✅ Manual Validation Passed`.
+Follow `reference/summary-update.md` to validate the PR binding, obtain canonical inputs from `platform-pr summary-context`, and update the manual-validation section through `platform-pr summary-sync` to `### ✅ Manual Validation Passed`.
 
 ### 5. Create the Manual Validation Artifact
 

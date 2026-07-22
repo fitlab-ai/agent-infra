@@ -1,21 +1,9 @@
 # Commit 阶段 PR 摘要同步
 
-> 详细聚合规则、隐藏标记、评论体模板、PATCH/POST 流程、Shell 安全约束和错误处理见 `.agents/rules/pr-sync.md`。执行本步骤前先读取该 rule。
+仅当 `{task-id}` 有效且 `task.md` 存在有效 `pr_number` 时执行；否则跳过。
 
-## 触发条件
+1. 调用 `agent-infra-internal platform-pr summary-context {task-id}` 获取 canonical 聚合输入。
+2. 按 `.agents/rules/pr-sync.md` 生成纯摘要正文并写入临时文件。
+3. 调用 `agent-infra-internal platform-pr summary-sync {task-id} --agent {agent} --body-file {summary-body-file}`。
 
-仅当以下条件同时满足时执行：
-- `{task-id}` 有效
-- `task.md` frontmatter 中存在有效 `pr_number`
-
-任一条件不满足时，跳过 PR 摘要同步并继续后续校验。
-
-## 执行要求
-
-- 按 `.agents/rules/pr-sync.md` 中的唯一权威模板生成或更新 `<!-- sync-pr:{task-id}:summary -->` 评论
-- 在本 skill 中，PR 摘要同步失败只记为警告，不阻塞已完成的 `git commit`
-- 如果摘要正文无变化，按 `summary skipped (no diff)` 处理
-
-## 结果回传
-
-将 `.agents/rules/pr-sync.md` 中的结果回传字符串用于当前 skill 的用户输出或 Activity Log 复用。
+同步失败只记录 warning，不阻塞或回滚已经完成的 commit。`no-op` 回传 `summary skipped (no diff)`。

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const fs = require("node:fs");
+const { execFileSync } = require("node:child_process");
 
 let args = process.argv.slice(2);
 
@@ -61,6 +62,15 @@ if (args[0] === "pr" && args[1] === "view") {
   process.exit(0);
 }
 
+if (args[0] === "pr" && args[1] === "checks") {
+  if (process.env.GH_FAKE_REQUIRED_UNAVAILABLE === "true" && args.includes("--required")) {
+    console.error("unknown flag: --required");
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify(readJson("GH_FAKE_CHECKS_PATH") || []));
+  process.exit(0);
+}
+
 if (args[0] === "label" && args[1] === "list") {
   process.stdout.write(JSON.stringify(readJson("GH_FAKE_LABELS_PATH") || []));
   process.exit(0);
@@ -68,6 +78,66 @@ if (args[0] === "label" && args[1] === "list") {
 
 if (args[0] === "api" && args[1] === "user") {
   process.stdout.write(JSON.stringify({ login: process.env.GH_FAKE_USER || "fixture-user" }));
+  process.exit(0);
+}
+
+if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/pulls\/\d+$/.test(args[1])) {
+  const stored = readJson("GH_FAKE_PR_PATH") || {};
+  const match = args[1].match(/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/);
+  const repository = match ? match[1] : "fitlab-ai/agent-infra";
+  const number = match ? Number(match[2]) : 1;
+  let sha = process.env.GH_FAKE_PR_HEAD_SHA || "fixture-sha";
+  if (!process.env.GH_FAKE_PR_HEAD_SHA) {
+    try {
+      sha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    } catch {}
+  }
+  process.stdout.write(JSON.stringify({
+    number,
+    node_id: `PR_${number}`,
+    html_url: `https://github.com/${repository}/pull/${number}`,
+    state: "open",
+    title: "Fixture PR",
+    body: "Fixture body",
+    draft: false,
+    head: { ref: "fixture-head", sha, repo: { full_name: repository } },
+    base: { ref: "main", repo: { full_name: repository } },
+    ...stored
+  }));
+  process.exit(0);
+}
+
+if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/pulls(?:\?|$)/.test(args[1])) {
+  const match = args[1].match(/repos\/([^/]+\/[^/]+)\/pulls/);
+  const repository = match ? match[1] : "fitlab-ai/agent-infra";
+  const pullsPath = process.env.GH_FAKE_PRS_PATH;
+  const pulls = pullsPath && fs.existsSync(pullsPath) ? JSON.parse(fs.readFileSync(pullsPath, "utf8")) : [];
+  const methodIndex = args.indexOf("-X");
+  const method = methodIndex === -1 ? "GET" : args[methodIndex + 1];
+  if (method === "POST") {
+    const inputIndex = args.indexOf("--input");
+    const payload = JSON.parse(fs.readFileSync(args[inputIndex + 1] === "-" ? 0 : args[inputIndex + 1], "utf8"));
+    const number = pulls.reduce((max, item) => Math.max(max, Number(item.number || 0)), 0) + 1;
+    const created = {
+      number,
+      node_id: `PR_${number}`,
+      html_url: `https://github.com/${repository}/pull/${number}`,
+      state: "open",
+      title: payload.title,
+      body: payload.body,
+      draft: Boolean(payload.draft),
+      head: { ref: String(payload.head).replace(/^.*:/, ""), sha: "created-sha", repo: { full_name: repository } },
+      base: { ref: payload.base, repo: { full_name: repository } },
+      labels: [],
+      assignees: [],
+      milestone: null
+    };
+    pulls.push(created);
+    if (pullsPath) fs.writeFileSync(pullsPath, JSON.stringify(pulls));
+    process.stdout.write(JSON.stringify(created));
+    process.exit(0);
+  }
+  process.stdout.write(JSON.stringify(pulls));
   process.exit(0);
 }
 
@@ -156,7 +226,8 @@ if (args[0] === "api" && args.some((arg) => /\/issues\/\d+\/comments\?per_page=1
     comments = readJson("GH_FAKE_COMMENTS_PATH");
   }
 
-  process.stdout.write(JSON.stringify(comments ? [comments] : []));
+  const remoteComments = comments?.map((comment, index) => ({ id: index + 1, ...comment })) || [];
+  process.stdout.write(JSON.stringify([remoteComments]));
   process.exit(0);
 }
 

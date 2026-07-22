@@ -902,7 +902,8 @@ test("validate-artifact platform-sync passes for commit with last-commit from ta
       GH_FAKE_ISSUE_PATH: ctx.issuePath,
       GH_FAKE_PR_COMMENTS_PATH: ctx.prCommentsPath,
       GH_FAKE_ISSUE_NUMBER: "65",
-      GH_FAKE_PR_NUMBER: "77"
+      GH_FAKE_PR_NUMBER: "77",
+      GH_FAKE_PR_HEAD_SHA: prSha
     });
     assert.equal(result.status, 0, result.stderr);
     assertPayloadStatus(result, { type: "platform-sync", status: "pass" });

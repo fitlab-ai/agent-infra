@@ -1,5 +1,45 @@
-# Issue and PR Commands
+# PR Platform Intents
 
-This code platform does not provide an Issue or pull-request adapter; internal intents return structured no-op/degraded results.
+PR lookup, creation, binding, and metadata synchronization go through typed internal intents. Skills decide branches and write titles/bodies; they do not assemble platform commands.
 
-Platform-specific automation is skipped for custom platforms unless you provide matching `.{platform}.en.md` rule templates. Keep local task artifacts as the source of truth, or install a platform-specific template pack before running the workflow.
+## Inspect
+
+```bash
+agent-infra-internal platform-pr inspect {task-id}
+```
+
+## Create or recover
+
+Write the title and body to files, then run:
+
+```bash
+agent-infra-internal platform-pr create {task-id} \
+  --agent {agent} --base {target-branch} --head {current-branch} \
+  --title-file {title-file} --body-file {body-file}
+```
+
+The core performs exact upstream/head/base lookup first. One match is reused, zero creates, and multiple matches fail closed. Unknown create outcomes are reconciled by the same exact identity rather than retried blindly. `--dry-run` returns only the plan.
+
+## Bind
+
+```bash
+agent-infra-internal platform-pr bind {task-id} --pr {pr-number} --agent {agent}
+```
+
+Conflicting bindings fail without changing `task.md`.
+
+## Synchronize metadata
+
+```bash
+agent-infra-internal platform-pr sync {task-id} \
+  --agent {agent} --metadata --closing-issue
+```
+
+The core copies type / `in:` labels, assignee, a specific milestone, and the closing association from the linked Issue. Permission-bound operations report `skipped` under top-level `degraded`; the Issue is never updated in reverse.
+
+## Status contract
+
+- `planned|applied|no-op|degraded`: exit 0.
+- `failed`: exit 1.
+- `blocked`: exit 2 for authentication, network, or unknown outcome.
+- Metadata or summary failures never roll back an already-created PR.

@@ -1,21 +1,9 @@
-# Commit-Stage PR Summary Sync
+# Commit-stage PR Summary Synchronization
 
-> For the full aggregation rules, hidden marker, comment body template, PATCH/POST flow, shell safety constraints, and error handling, read `.agents/rules/pr-sync.md` before this step.
+Run only when `{task-id}` is valid and task.md has a valid `pr_number`.
 
-## Trigger Conditions
+1. Run `agent-infra-internal platform-pr summary-context {task-id}`.
+2. Generate the plain summary body per `.agents/rules/pr-sync.md` and write it to a temporary file.
+3. Run `agent-infra-internal platform-pr summary-sync {task-id} --agent {agent} --body-file {summary-body-file}`.
 
-Run this step only when both conditions are true:
-- `{task-id}` is valid
-- `task.md` frontmatter contains a valid `pr_number`
-
-If either condition is missing, skip PR summary sync and continue to verification.
-
-## Execution Notes
-
-- Generate or update the `<!-- sync-pr:{task-id}:summary -->` comment with the canonical template from `.agents/rules/pr-sync.md`
-- In this skill, PR summary sync failures are warnings only and must not block a completed `git commit`
-- If the summary body is unchanged, treat it as `summary skipped (no diff)`
-
-## Result Reporting
-
-Reuse the normalized result string from `.agents/rules/pr-sync.md` in this skill's user output or Activity Log.
+Failure records a warning but never blocks or rolls back the completed commit. `no-op` maps to `summary skipped (no diff)`.

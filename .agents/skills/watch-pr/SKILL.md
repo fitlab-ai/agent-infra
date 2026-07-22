@@ -39,22 +39,22 @@ description: >
 
 按以下确定性分支解析出目标 PR 号 `{pr#}` 与可选 `{task-id}`：
 
-- 场景 A（省略入参）：按 `.agents/rules/pr-checks-commands.md` 取当前分支的 PR 号；随后按下方「反查任务」确定 `{task-id}`。
+- 场景 A（省略入参）：从当前分支反查 active task；定位后读取其 `pr_number`。
 - 场景 B（省略 task ref、旧位置 task ref 或 `--task/-t`，**任务锚定主路径**）：按「任务上下文解析」取得完整 `{task-id}`。读 `.agents/workspace/active/{task-id}/task.md` 取 `pr_number` 作为 `{pr#}`；`pr_number` 为空时按「错误处理」提示先 `create-pr`，停止。
 - 场景 C（`--pr <number>` 或 PR URL）：直接取该 PR 号为 `{pr#}`；随后按「反查任务」确定 `{task-id}`。
-- 反查任务（场景 A / C）：在 `.agents/workspace/active/*/task.md` 中查找 `pr_number == {pr#}` 的任务；命中则取该 `{task-id}`（任务锚定）；未命中则进入「仅监控」降级路径（无 `{task-id}`，跳过步骤 5/6）。
+- 反查任务（场景 A / C）：通过任务上下文/任务查询取得与 `{pr#}` 唯一绑定的 active task。未命中时停止并提示先绑定 PR；typed checks intent 不建立第二套无任务状态机。
 
 ### 2. 监控 required checks
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 与 `.agents/rules/pr-checks-commands.md`。
 
-按 `.agents/rules/pr-checks-commands.md` 的监控命令对 `{pr#}` 的 required checks 轮询（含总时长上限，默认 30 分钟），按 `reference/monitor-and-heal.md` 的「结果分类」分为「全绿」/「失败」/「挂起」三个场景，分别进入步骤 7 全绿出口、步骤 3 自愈、或步骤 4 求助。
+调用 `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`，按结构化 `checks.state` 分为「全绿」/「失败」/「挂起」，分别进入步骤 7、步骤 3 或步骤 4。
 
 ### 3. 失败自愈循环
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 的「自愈决策树」与 `.agents/rules/pr-checks-commands.md` 的「解析失败 run id 并拉日志」。
 
-对失败 check：先按规则确定性解析其失败 run 并拉取失败日志、判定失败类别；本地修复前先读取 `.agents/rules/debugging-guide.md`，按其四阶段流程定位根因，禁止盲目改代码重试；仅当属可定位的代码层失败时，本地最小化修复、运行对应测试通过后**暂存并提交本次修复再推送**（`git add` 仅相关文件 → 按 `.agents/rules/commit-and-pr.md` `git commit` → `git push` 到当前 PR 分支，并记录 commit SHA），再回到步骤 2 重新监控。修复尝试计数，达硬上限（默认 2）或 run 不可定位 → 转步骤 4。
+对失败 check：调用 `platform-checks resolve-run`，再调用 `platform-checks logs` 获取保真日志并判定类别；本地修复前先读取 `.agents/rules/debugging-guide.md`，按四阶段流程定位根因。仅当属可定位的代码层失败时最小修复、运行对应测试通过后**暂存并提交本次修复再推送**（`git add` 仅相关文件 → 按 `.agents/rules/commit-and-pr.md` `git commit` → `git push`），再回到步骤 2。达硬上限（默认 2）或 run 不可定位 → 转步骤 4。
 
 ### 4. 求助出口（产出后停止）
 
@@ -113,7 +113,6 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
     - Codex CLI：$complete-task {task-ref}
   ```
 
-- 「全绿」+ 仅监控降级：说明 PR 可合入；本次无关联任务，请对相应任务运行 `complete-task`（无 `{task-ref}` 可渲染时不强行输出短号命令块）。
 - 「阻塞」：仅输出步骤 4 的阻塞说明，不推荐下一步命令。
 
 ## 完成检查清单
