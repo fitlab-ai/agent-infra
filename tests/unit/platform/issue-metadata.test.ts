@@ -102,6 +102,7 @@ test('requirement checkbox sync is idempotent and preserves CRLF', () => {
 test('milestone selection and task type mapping are deterministic', () => {
   assert.equal(chooseMilestone('initial', ['0.9.x', 'General Backlog', '0.8.x']), '0.8.x');
   assert.equal(chooseMilestone('specific', ['0.8.x', '0.8.5', '0.8.7'], '0.8.x'), '0.8.7');
+  assert.equal(chooseMilestone('specific', ['0.8.6', '0.9.0'], '0.8.6'), '0.8.6');
   assert.equal(chooseMilestone('none', ['0.8.x']), null);
   assert.equal(desiredIssueType('bugfix'), 'Bug');
   assert.equal(desiredIssueType('refactor'), 'Task');

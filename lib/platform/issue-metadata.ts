@@ -63,6 +63,7 @@ function chooseMilestone(
     return lines[0]?.title || (milestones.includes('General Backlog') ? 'General Backlog' : current);
   }
   const currentParts = current ? versionParts(current) : null;
+  if (currentParts && currentParts[2] !== null) return current;
   const line = currentParts?.[2] === null ? currentParts.slice(0, 2) : null;
   const versions = parsed.filter((item) => item.parts![2] !== null && (!line || (
     item.parts![0] === line[0] && item.parts![1] === line[1]
