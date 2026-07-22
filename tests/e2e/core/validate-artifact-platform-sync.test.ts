@@ -406,8 +406,9 @@ const implementSyncCases = [
     }
   },
   {
-    name: "validate-artifact platform-sync checks requirements inside the anchored section",
+    name: "validate-artifact platform-sync-preflight checks requirements inside the anchored section",
     skill: "complete-task",
+    check: "platform-sync-preflight",
     issuePayload: buildIssuePayload({
       labels: [{ name: "status: in-progress" }],
       body: "# Issue\n\n## Requirements\n\n* [X] 保留最新验证输出\n",
@@ -421,12 +422,13 @@ const implementSyncCases = [
     },
     assertResult(result: ReturnType<typeof runValidator>) {
       assert.equal(result.status, 0, result.stderr);
-      assertPayloadStatus(result, { type: "platform-sync", status: "pass" });
+      assertPayloadStatus(result, { type: "platform-sync-preflight", status: "pass" });
     }
   },
   {
-    name: "validate-artifact platform-sync fails when an anchored section is missing a checked requirement",
+    name: "validate-artifact platform-sync-preflight fails when an anchored section is missing a checked requirement",
     skill: "complete-task",
+    check: "platform-sync-preflight",
     issuePayload: buildIssuePayload({
       labels: [{ name: "status: in-progress" }],
       body: "# Issue\n\n## Requirements\n\nN/A\n",
@@ -441,15 +443,16 @@ const implementSyncCases = [
     assertResult(result: ReturnType<typeof runValidator>) {
       assert.equal(result.status, 1);
       assertPayloadStatus(result, {
-        type: "platform-sync",
+        type: "platform-sync-preflight",
         status: "fail",
         message: /missing checked requirements/
       });
     }
   },
   {
-    name: "validate-artifact platform-sync fails when requirement anchors are ambiguous",
+    name: "validate-artifact platform-sync-preflight fails when requirement anchors are ambiguous",
     skill: "complete-task",
+    check: "platform-sync-preflight",
     issuePayload: buildIssuePayload({
       labels: [{ name: "status: in-progress" }],
       body: "# Issue\n\n## Requirements\n\n- [x] 保留最新验证输出\n\n## 需求\n\nN/A\n",
@@ -464,7 +467,7 @@ const implementSyncCases = [
     assertResult(result: ReturnType<typeof runValidator>) {
       assert.equal(result.status, 1);
       assertPayloadStatus(result, {
-        type: "platform-sync",
+        type: "platform-sync-preflight",
         status: "fail",
         message: /requirements section is ambiguous/
       });
@@ -488,7 +491,7 @@ for (const c of implementSyncCases) {
       ? ["gate", "code-task", ctx.taskDir, "code.md"]
       : [
           "check",
-          "platform-sync",
+          c.check || "platform-sync",
           ctx.taskDir,
           ...(c.skill === "code-task" ? ["code.md"] : []),
           "--skill",
