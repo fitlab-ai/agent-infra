@@ -69,4 +69,4 @@ status labels 始终至多一个；关闭后不保留 status label。`in:` label
 
 ## 补发
 
-complete-task 按 artifact catalog 时间线遍历本地已有产物：task 使用 `--kind task`，其余使用 `--kind artifact --artifact <file> --backfill`；最后用 `--kind summary --body-file <path>` 原地同步交付摘要。core 根据 marker 决定 create/update/no-op，不由 Skill 扫描评论或拼标题。
+complete-task 按 artifact catalog 时间线遍历本地已有产物：task 使用 `--kind task`，其余使用 `--kind artifact --artifact <file> --backfill`；最后用 `--kind summary --body-file <path>` 原地同步交付摘要。artifact backfill 在远端缺少 marker 时创建带“历史产物补发”提示的评论；已存在合法 marker 集合时保持原评论和分片不变并返回 `no-op`；marker 冲突仍失败。该判定由 core 完成，不由 Skill 扫描评论或拼标题。

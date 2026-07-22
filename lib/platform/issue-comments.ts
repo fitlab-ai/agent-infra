@@ -346,6 +346,28 @@ function syncPlatformComment(taskRef: string, options: SyncOptions): PlatformRes
     });
   }
 
+  // Backfill only supplies missing artifact comments; valid existing marker sets stay untouched.
+  if (options.kind === 'artifact' && options.backfill && existing.length > 0) {
+    const operations = existing.map((comment): PlatformOperation => ({
+      name: `comment:${normalizeCommentContent(comment.body).split('\n', 1)[0]}`,
+      status: 'no-op',
+      reasonCode: 'BACKFILL_ALREADY_PRESENT'
+    }));
+    return platformResult('no-op', {
+      ...contextFields(context),
+      changed: false,
+      resource: { kind: 'issue', number: issue },
+      operations,
+      comment: {
+        kind: options.kind,
+        marker: desired[0]!.marker,
+        ids: existing.map((comment) => comment.id),
+        parts: existing.length
+      },
+      error: null
+    });
+  }
+
   const repo = context.platform.repository!;
   const operations: PlatformOperation[] = [];
   const ids: number[] = [];

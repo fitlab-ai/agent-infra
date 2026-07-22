@@ -30,3 +30,7 @@ agent-infra-internal task-warning {task-id} add \
   --step issue-sync --severity {severity} --code {code} \
   --target {target} --message {message} --action {action}
 ```
+
+## Backfill
+
+During completion, artifact comments are replayed with `--kind artifact --artifact <file> --backfill`. If the remote Issue has no matching marker, the core creates a comment with a historical-backfill notice. If a valid base or chunk marker set already exists, the core returns `no-op` and preserves the existing bodies and chunks. Marker conflicts still fail without writes.

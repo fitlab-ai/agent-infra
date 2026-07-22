@@ -180,6 +180,119 @@ test('artifact sync isolates sibling stems and becomes a no-op on replay', () =>
   assert.deepEqual(comments[0], { id: 20, body: siblingBody, user: { login: 'codex' } });
 });
 
+test('artifact backfill creates a missing comment with a timeline hint', () => {
+  const root = syncFixture();
+  const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
+  const client = {
+    version() { return { ok: true, value: '2.16.0' }; },
+    json(args: string[], options?: { input?: string }) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      if (args.includes('POST')) {
+        const body = JSON.parse(options?.input || '{}').body;
+        comments.push({ id: 30, body, user: { login: 'codex' } });
+        return { ok: true, value: { id: 30 } };
+      }
+      throw new Error(`unexpected request: ${args.join(' ')}`);
+    },
+    text() { throw new Error('delete must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const result = syncPlatformComment('TASK-20260101-000001', {
+    kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client, backfill: true
+  });
+  assert.equal(result.status, 'applied');
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.comment?.ids, [30]);
+  assert.equal(comments.length, 1);
+  assert.match(comments[0]!.body, /## 需求分析（Round 1）\n\n> 历史产物补发\n/);
+});
+
+test('artifact backfill preserves an existing normal comment without remote writes', () => {
+  const root = syncFixture();
+  const marker = MARKERS.artifact('TASK-20260101-000001', 'analysis');
+  const comments = [{ id: 31, body: `${marker}\nexisting normal-stage body`, user: { login: 'codex' } }];
+  const client = {
+    version() { return { ok: true, value: '2.16.0' }; },
+    json(args: string[]) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      throw new Error('write must not be attempted');
+    },
+    text() { throw new Error('write must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const result = syncPlatformComment('TASK-20260101-000001', {
+    kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client, backfill: true
+  });
+  assert.equal(result.status, 'no-op');
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.comment, { kind: 'artifact', marker, ids: [31], parts: 1 });
+  assert.equal(result.operations?.every((operation) => operation.status === 'no-op'), true);
+});
+
+test('artifact backfill preserves an existing valid chunk set without remote writes', () => {
+  const root = syncFixture();
+  const comments = [
+    { id: 32, body: `${MARKERS.artifactChunk('TASK-20260101-000001', 'analysis', 1, 2)}\nold part 1`, user: { login: 'codex' } },
+    { id: 33, body: `${MARKERS.artifactChunk('TASK-20260101-000001', 'analysis', 2, 2)}\nold part 2`, user: { login: 'codex' } }
+  ];
+  const client = {
+    version() { return { ok: true, value: '2.16.0' }; },
+    json(args: string[]) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      throw new Error('write must not be attempted');
+    },
+    text() { throw new Error('write must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const result = syncPlatformComment('TASK-20260101-000001', {
+    kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client, backfill: true
+  });
+  assert.equal(result.status, 'no-op');
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.comment?.ids, [32, 33]);
+  assert.equal(result.comment?.parts, 2);
+});
+
+test('normal artifact sync still updates an existing comment when content changes', () => {
+  const root = syncFixture();
+  const marker = MARKERS.artifact('TASK-20260101-000001', 'analysis');
+  const comments = [{ id: 34, body: `${marker}\nstale body`, user: { login: 'codex' } }];
+  let patchCount = 0;
+  const client = {
+    version() { return { ok: true, value: '2.16.0' }; },
+    json(args: string[], options?: { input?: string }) {
+      const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
+      if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
+      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
+      if (args.includes('PATCH')) {
+        patchCount += 1;
+        comments[0]!.body = JSON.parse(options?.input || '{}').body;
+        return { ok: true, value: { id: 34 } };
+      }
+      throw new Error(`unexpected request: ${args.join(' ')}`);
+    },
+    text() { throw new Error('delete must not be attempted'); }
+  } as unknown as GitHubClient;
+
+  const result = syncPlatformComment('TASK-20260101-000001', {
+    kind: 'artifact', artifact: 'analysis.md', agent: 'codex', cwd: root, client
+  });
+  assert.equal(result.status, 'applied');
+  assert.equal(result.changed, true);
+  assert.equal(patchCount, 1);
+  assert.match(comments[0]!.body, /# Analysis/);
+});
+
 test('artifact sync refuses duplicate base markers without writing', () => {
   const root = syncFixture();
   const marker = MARKERS.artifact('TASK-20260101-000001', 'analysis');
