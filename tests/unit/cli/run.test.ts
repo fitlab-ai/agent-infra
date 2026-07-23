@@ -251,9 +251,9 @@ test('runSkill writes a managed run record after successful task scheduling', as
   assert.deepEqual(record.command.slice(0, 2), ['codex', 'exec']);
 });
 
-test('runSkill resolves short task refs when writing managed run records', async () => {
+test('runSkill resolves bare short task refs when writing managed run records', async () => {
   const repoRoot = writeTaskFixture({ withShortId: true });
-  const code = await runSkill(['code-task', '#1'], {
+  const code = await runSkill(['code-task', '1'], {
     repoRoot,
     command: { defaultTui: 'codex' },
     runSandbox: async (request) => ({
@@ -275,7 +275,7 @@ test('runSkill resolves short task refs when writing managed run records', async
   const [recordFile] = fs.readdirSync(runsDir);
   const record = JSON.parse(fs.readFileSync(path.join(runsDir, recordFile!), 'utf8'));
   assert.equal(record.task_id, TASK_ID);
-  assert.equal(record.task_ref, '#01');
+  assert.equal(record.task_ref, '01');
 });
 
 test('runSkill does not write run records for create-task host execution', async () => {

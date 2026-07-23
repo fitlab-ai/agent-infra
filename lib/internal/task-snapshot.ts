@@ -1,6 +1,6 @@
 import { collectTaskSnapshot } from '../task/snapshot.ts';
 
-const USAGE = 'Usage: agent-infra-internal task-snapshot <N | #N | TASK-id> [--format json|text]\n';
+const USAGE = 'Usage: agent-infra-internal task-snapshot <N | TASK-id> [--format json|text]\n';
 
 function fail(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'SNAPSHOT_PAYLOAD_INVALID', message } })}\n`);

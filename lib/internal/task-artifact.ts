@@ -1,6 +1,6 @@
 import { resolveArtifactContext } from '../task/artifact-lifecycle.ts';
 
-const USAGE = `Usage: agent-infra-internal task-artifact <N | #N | TASK-id> inspect --family <family>\n\nInspect one workflow artifact family and print a read-only JSON context.\n`;
+const USAGE = `Usage: agent-infra-internal task-artifact <N | TASK-id> inspect --family <family>\n\nInspect one workflow artifact family and print a read-only JSON context.\n`;
 
 function failUsage(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'ARTIFACT_PAYLOAD_INVALID', message } })}\n`);

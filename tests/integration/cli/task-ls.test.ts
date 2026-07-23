@@ -127,7 +127,7 @@ test('ai task ls sources the active short id from the registry, ignoring task.md
   const out = runCli(['task', 'ls'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // SHORT column reflects the registry (#01), not the frontmatter residue (#77).
-  assert.match(out.stdout, /#01/);
+  assert.match(out.stdout, /\b01\b/);
   assert.doesNotMatch(out.stdout, /#77/);
 });
 

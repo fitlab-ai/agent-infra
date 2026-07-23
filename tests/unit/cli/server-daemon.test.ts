@@ -48,7 +48,7 @@ function displayKind(message: OutboundMessage): DisplayMessage['kind'] {
 
 const statusModel: StatusModel = {
   taskId: 'TASK-20260101-000001',
-  shortId: '#01',
+  shortId: '01',
   title: 'demo title',
   metadata: [['current_step', 'code']],
   workflowWarnings: [],
@@ -120,7 +120,7 @@ test('dispatcher sends ai command streams as structured messages', async () => {
 });
 
 test('dispatcher renders /task status directly from StatusModel', async () => {
-  const { message, displayReplies } = inbound('/task status #01');
+  const { message, displayReplies } = inbound('/task status 01');
   const dispatch = createMessageDispatcher({
     config,
     logger: { info: () => {} },

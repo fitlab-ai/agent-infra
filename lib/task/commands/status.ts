@@ -11,12 +11,12 @@ import { getOpenWorkflowWarnings, formatWorkflowWarningSummary, type WorkflowWar
 import { parseActivityLog, pairEntries } from '../activity-log.ts';
 import { statusCard, type DisplayMessage } from '../../server/display.ts';
 
-const USAGE = `Usage: ai task status [<N | #N | TASK-id> | --task <ref> | -t <ref>]
+const USAGE = `Usage: ai task status [<N | TASK-id> | --task <ref> | -t <ref>]
 
 Prints an aggregated "health check" view for a task: header, metadata,
 artifacts, workflow/runtime execution state, and git branch state.
   Omit <ref>   Resolve the unique active task for the current branch.
-  <ref>   Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
+  <ref>   Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
 
 Git rows are best-effort: a failed git call degrades that row to '-' without
 failing the command.

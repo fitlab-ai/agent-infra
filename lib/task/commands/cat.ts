@@ -9,7 +9,7 @@ const USAGE = `Usage: ai task cat <artifact | N>
 
 Prints a task artifact's raw content to stdout.
   One positional    Uses current task context and treats the operand as the artifact.
-  <ref>            Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
+  <ref>            Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
   <artifact | N>   Artifact filename (with or without '.md'), or the number from 'ai task files'.
 `;
 

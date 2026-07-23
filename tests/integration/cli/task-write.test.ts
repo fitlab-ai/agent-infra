@@ -47,7 +47,7 @@ test('resolveTaskRef maps full and short refs without changing the registry', ()
     taskMdPath,
     state: 'active'
   });
-  assert.equal(resolveTaskRef('#01', { repoRoot }).ok, true);
+  assert.equal(resolveTaskRef('#01', { repoRoot }).ok, false);
   assert.equal(resolveTaskRef(TASK_ID, { repoRoot }).ok, true);
   assert.deepEqual(fs.readFileSync(registry), before);
   assert.equal(fs.statSync(registry).mtimeMs, beforeMtime);

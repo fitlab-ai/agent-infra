@@ -14,7 +14,7 @@ After `create-pr`, continuously watch the PR's required CI checks: when everythi
 - Only watch + self-heal the current PR's required checks; make no changes unrelated to the failing check.
 - Self-heal publishes through Git workflow intents, but **affected tests must pass first**; the attempt cap and code-layer authorization remain unchanged.
 - The help exit is "produce-then-stop": end this round, output the blocker explanation, and wait for the user to trigger the next step — **never** ask mid-flow.
-- Bare numbers / `#NN` / `TASK-id` arguments are always resolved as task short ids (see `.agents/rules/task-short-id.md`); a PR number is passed only via `--pr <number>` / a PR URL / omission (current branch), never reusing the bare-number syntax.
+- Bare numbers / `NN` / `TASK-id` arguments are always resolved as task short ids (see `.agents/rules/task-short-id.md`); a PR number is passed only via `--pr <number>` / a PR URL / omission (current branch), never reusing the bare-number syntax.
 - After running this skill (task-anchored path), you must update task.md.
 
 Version stamp rule: before creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` and write or refresh `agent_infra_version`.
@@ -101,7 +101,7 @@ Keep the gate output in your reply as the verification evidence. Without current
 
 > On the task-anchored path, execute this step only after the gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the short id `#NN` (falling back to the full TASK-id when unallocated or released); (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
+> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the short id `NN` (falling back to the full TASK-id when unallocated or released); (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
 
 Output per scenario:
 - "All green" + task-anchored: state that all required checks passed, then render exactly one exit based on whether this run created repair commits (`{task-ref}` becomes the short id):

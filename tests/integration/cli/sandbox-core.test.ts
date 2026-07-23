@@ -132,7 +132,7 @@ test("agent-infra sandbox help is wired into the main CLI", () => {
 
   assert.match(output, /Usage: ai sandbox <command> \[options\]/);
   assert.match(output, /create <branch> \[base\]/);
-  assert.match(output, /start \[--recreate\] <branch \| TASK-id \| N \| '#N'>/);
+  assert.match(output, /start \[--recreate\] <branch \| TASK-id \| N>/);
   assert.match(output, /^\s+refresh\s+Sync host Claude Code credentials/m);
   assert.match(output, /^\s+rebuild \[--quiet\] \[--refresh\]\s+Rebuild the sandbox image/m);
   assert.match(output, /prune \[--dry-run\]/);
@@ -1054,12 +1054,12 @@ test("sandbox list-running sortAndIndexSandboxRows assigns 1-based index to runn
   }
 });
 
-test("sandbox list-running isTaskShortRef matches '#<digits>' and bare numeric (Round 4 contract)", async () => {
+test("sandbox list-running isTaskShortRef matches bare numeric only", async () => {
   const { isTaskShortRef } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
 
-  assert.equal(isTaskShortRef("#0"), true);
-  assert.equal(isTaskShortRef("#1"), true);
-  assert.equal(isTaskShortRef("#10"), true);
+  assert.equal(isTaskShortRef("#0"), false);
+  assert.equal(isTaskShortRef("#1"), false);
+  assert.equal(isTaskShortRef("#10"), false);
   assert.equal(isTaskShortRef("0"), true);
   assert.equal(isTaskShortRef("1"), true);
   assert.equal(isTaskShortRef("11"), true);
@@ -1097,7 +1097,6 @@ test("sandbox list-running resolveTaskShortRef hits registry and returns task.md
   );
   // Both '#1' and bare '1' resolve to the registry-mapped branch (Round 4).
   withInternalCliOnPath(path.join(tmp, "bin"), () => {
-    assert.equal(resolveTaskShortRef("#1", { repoRoot: tmp }), "registry-branch");
     assert.equal(resolveTaskShortRef("1", { repoRoot: tmp }), "registry-branch");
   });
 });
@@ -1126,7 +1125,7 @@ test("sandbox list-running resolveTaskShortRef throws when registry hits but bra
   // Registry hit but corrupt → MUST throw.
   withInternalCliOnPath(path.join(tmp, "bin"), () => {
     assert.throws(
-      () => resolveTaskShortRef("#1", { repoRoot: tmp }),
+      () => resolveTaskShortRef("1", { repoRoot: tmp }),
       /no branch field/
     );
   });
@@ -1145,7 +1144,7 @@ test("sandbox list-running resolveTaskShortRef throws on registry miss (Round 4:
   fs.mkdirSync(path.join(tmp, ".agents", "workspace", "active"), { recursive: true });
   // The legacy ls-index fallback has been removed. miss → throw, not run[0].branch.
   assert.throws(
-    () => resolveTaskShortRef("#1", { repoRoot: tmp }),
+    () => resolveTaskShortRef("1", { repoRoot: tmp }),
     /not in the active task registry/
   );
 });

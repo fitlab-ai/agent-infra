@@ -86,13 +86,13 @@ function run(
   return spawnSync("node", [SCRIPT, ...args], { encoding: "utf8", cwd });
 }
 
-// Tests that use the single-digit semantics (#1, #2, …) explicitly request
+// Tests that use the single-digit semantics (1, 2, …) explicitly request
 // shortIdLength=1 to remain independent of the project default (now 2).
 function runW1(args: string[]): SpawnSyncReturns<string> {
   return run([...args, "--short-id-length", "1"]);
 }
 
-// Tests that exercise the zero-padded default (#01, #02, …) explicitly pin
+// Tests that exercise the zero-padded default (01, 02, …) explicitly pin
 // shortIdLength=2 to be robust against future default changes.
 function runW2(args: string[]): SpawnSyncReturns<string> {
   return run([...args, "--short-id-length", "2"]);
@@ -107,19 +107,19 @@ test("alloc and release reuse minimal free integer (shortIdLength=1)", () => {
 
   const r1 = runW1(["alloc", "TASK-20250101-000001", "--active-dir", active]);
   assert.equal(r1.status, 0);
-  assert.equal(r1.stdout.trim(), "#1");
+  assert.equal(r1.stdout.trim(), "1");
 
   const r2 = runW1(["alloc", "TASK-20250101-000002", "--active-dir", active]);
   assert.equal(r2.status, 0);
-  assert.equal(r2.stdout.trim(), "#2");
+  assert.equal(r2.stdout.trim(), "2");
 
   const r3 = runW1(["release", "TASK-20250101-000001", "--active-dir", active]);
   assert.equal(r3.status, 0);
 
-  // Reallocating after release should reuse #1.
+  // Reallocating after release should reuse 1.
   const r4 = runW1(["alloc", "TASK-20250101-000001", "--active-dir", active]);
   assert.equal(r4.status, 0);
-  assert.equal(r4.stdout.trim(), "#1");
+  assert.equal(r4.stdout.trim(), "1");
 });
 
 test("alloc and release with default shortIdLength=2 emit zero-padded short ids", () => {
@@ -132,11 +132,11 @@ test("alloc and release with default shortIdLength=2 emit zero-padded short ids"
 
   const r1 = runW2(["alloc", "TASK-20260101-000001", "--active-dir", active]);
   assert.equal(r1.status, 0);
-  assert.equal(r1.stdout.trim(), "#01");
+  assert.equal(r1.stdout.trim(), "01");
 
   const r2 = runW2(["alloc", "TASK-20260101-000002", "--active-dir", active]);
   assert.equal(r2.status, 0);
-  assert.equal(r2.stdout.trim(), "#02");
+  assert.equal(r2.stdout.trim(), "02");
 
   // The registry is the sole store of short ids; task.md never carries one.
   const registry = JSON.parse(fs.readFileSync(path.join(active, ".short-ids.json"), "utf8"));
@@ -147,12 +147,12 @@ test("alloc and release with default shortIdLength=2 emit zero-padded short ids"
   // alloc must not touch task.md at all (AC-1): content is byte-identical.
   assert.equal(fs.readFileSync(md1Path, "utf8"), md1Before);
 
-  // resolve accepts both zero-padded and non-padded forms (numeric-value contract).
-  const hit = runW2(["resolve", "#01", "--active-dir", active]);
+  // resolve accepts both zero-padded and non-padded bare forms.
+  const hit = runW2(["resolve", "01", "--active-dir", active]);
   assert.equal(hit.status, 0);
   assert.equal(hit.stdout.trim(), "TASK-20260101-000001");
 
-  const unpaddedHit = runW2(["resolve", "#1", "--active-dir", active]);
+  const unpaddedHit = runW2(["resolve", "1", "--active-dir", active]);
   assert.equal(unpaddedHit.status, 0, `stderr=${unpaddedHit.stderr}`);
   assert.equal(unpaddedHit.stdout.trim(), "TASK-20260101-000001");
 
@@ -178,11 +178,11 @@ test("resolve returns task id on hit; error on miss (shortIdLength=1)", () => {
   mkTask(active, "TASK-20250101-000010");
 
   runW1(["alloc", "TASK-20250101-000010", "--active-dir", active]);
-  const hit = runW1(["resolve", "#1", "--active-dir", active]);
+  const hit = runW1(["resolve", "1", "--active-dir", active]);
   assert.equal(hit.status, 0);
   assert.equal(hit.stdout.trim(), "TASK-20250101-000010");
 
-  const miss = runW1(["resolve", "#9", "--active-dir", active]);
+  const miss = runW1(["resolve", "9", "--active-dir", active]);
   assert.equal(miss.status, 1);
   assert.match(miss.stderr, /not found/);
 });
@@ -192,47 +192,45 @@ test("resolve rejects reserved key, over capacity, malformed input", () => {
   const active = path.join(tmp, "active");
   fs.mkdirSync(active, { recursive: true });
 
-  // shortIdLength=1: #0 and bare 0 are reserved; #abc malformed.
+  // shortIdLength=1: bare 0 is reserved; hash-prefixed forms are malformed.
   const zero1 = runW1(["resolve", "#0", "--active-dir", active]);
   assert.equal(zero1.status, 1);
-  assert.match(zero1.stderr, /reserved/);
+  assert.match(zero1.stderr, /invalid short id format/);
 
   const bareZero1 = runW1(["resolve", "0", "--active-dir", active]);
   assert.equal(bareZero1.status, 1);
   assert.match(bareZero1.stderr, /reserved/);
 
-  // #10 exceeds shortIdLength=1 capacity (max=9).
+  // Hash-prefixed input is rejected before capacity validation.
   const overW1 = runW1(["resolve", "#10", "--active-dir", active]);
   assert.equal(overW1.status, 1);
-  assert.match(overW1.stderr, /exceeds shortIdLength=1 capacity/);
+  assert.match(overW1.stderr, /invalid short id format/);
 
   const bad = runW1(["resolve", "#abc", "--active-dir", active]);
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /invalid short id format/);
 
-  // shortIdLength=2: #00 and bare 00 reserved.
+  // shortIdLength=2: hash-prefixed zero is malformed and bare 00 is reserved.
   const zero2 = runW2(["resolve", "#00", "--active-dir", active]);
   assert.equal(zero2.status, 1);
-  assert.match(zero2.stderr, /reserved/);
+  assert.match(zero2.stderr, /invalid short id format/);
 
-  // #100 exceeds shortIdLength=2 capacity (max=99).
+  // Hash-prefixed input is always malformed.
   const overW2 = runW2(["resolve", "#100", "--active-dir", active]);
   assert.equal(overW2.status, 1);
-  assert.match(overW2.stderr, /exceeds shortIdLength=2 capacity/);
+  assert.match(overW2.stderr, /invalid short id format/);
 
-  // #001 in L=2 is now valid (numeric value=1, ≤ max=99) — registry just won't have it.
-  // Confirm format pass-through doesn't itself error.
+  // Removed hash-prefixed syntax is rejected consistently.
   const okFormat = runW2(["resolve", "#001", "--active-dir", active]);
-  // Registry empty here → exit 1 with "not found", NOT "invalid format".
   assert.equal(okFormat.status, 1);
-  assert.doesNotMatch(okFormat.stderr, /invalid short id format/);
+  assert.match(okFormat.stderr, /invalid short id format/);
 });
 
 test("explicit alloc rejects when width is exhausted (shortIdLength=1)", () => {
   const tmp = mkTmp();
   const active = path.join(tmp, "active");
   fs.mkdirSync(active, { recursive: true });
-  // Fill all 9 slots (#1..#9) via explicit alloc.
+  // Fill all 9 slots (1..9) via explicit alloc.
   for (let i = 1; i <= 9; i += 1) {
     const taskId = `TASK-20250103-${String(i).padStart(6, "0")}`;
     mkTask(active, taskId);
@@ -302,7 +300,7 @@ test("list --verify reports missing_in_registry and orphans_in_registry diffs", 
   // Pin the full diff shape: registry-only dimensions, no task.md dimension.
   assert.deepEqual(JSON.parse(r.stdout), {
     missing_in_registry: [{ taskId: present }],
-    orphans_in_registry: [{ key: "#2", taskId: "TASK-99999999-999999" }],
+    orphans_in_registry: [{ key: "2", taskId: "TASK-99999999-999999" }],
     duplicate_registry_keys: []
   });
 });
@@ -319,7 +317,7 @@ test("resolve returns the task id for a registry hit without touching task.md", 
   );
   const before = fs.readFileSync(taskMd, "utf8");
 
-  const r = runW1(["resolve", "#1", "--active-dir", active]);
+  const r = runW1(["resolve", "1", "--active-dir", active]);
   assert.equal(r.status, 0, `stderr=${r.stderr}`);
   assert.equal(r.stdout.trim(), taskId);
   // resolve never writes the short id back into task.md (registry is the source).
@@ -337,7 +335,7 @@ test("cold-start case C (duplicate registry keys) → exit 2", () => {
     JSON.stringify({ version: 1, ids: { "1": taskId, "2": taskId } })
   );
 
-  const r = runW1(["resolve", "#1", "--active-dir", active]);
+  const r = runW1(["resolve", "1", "--active-dir", active]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /duplicate registry entries/);
 });
@@ -356,8 +354,8 @@ test("stale entries are cleaned automatically (B4)", () => {
 
   const r = runW1(["alloc", "TASK-20250107-000001", "--active-dir", active]);
   assert.equal(r.status, 0, `stderr=${r.stderr}`);
-  // Stale #3 cleaned, new task gets #1 (lowest free).
-  assert.equal(r.stdout.trim(), "#1");
+  // Stale 3 cleaned, new task gets 1 (lowest free).
+  assert.equal(r.stdout.trim(), "1");
 
   const list = JSON.parse(
     fs.readFileSync(path.join(active, ".short-ids.json"), "utf8")
@@ -406,23 +404,23 @@ test("default width is 2 even without --short-id-length flag and without task.sh
   // No --short-id-length: script must fall back to DEFAULT_SHORT_ID_LENGTH=2.
   const alloc = spawnSync("node", [SCRIPT, "alloc", taskId], { encoding: "utf8", cwd: tmp });
   assert.equal(alloc.status, 0, `alloc failed: ${alloc.stderr}`);
-  assert.equal(alloc.stdout.trim(), "#01", "default must emit zero-padded form");
+  assert.equal(alloc.stdout.trim(), "01", "default must emit zero-padded form");
 
-  const hit = spawnSync("node", [SCRIPT, "resolve", "#01"], { encoding: "utf8", cwd: tmp });
+  const hit = spawnSync("node", [SCRIPT, "resolve", "01"], { encoding: "utf8", cwd: tmp });
   assert.equal(hit.status, 0);
   assert.equal(hit.stdout.trim(), taskId);
 
-  // Bare numeric and non-padded #N also resolve to the same task under L=2.
+  // Non-padded bare numeric input resolves to the same task under L=2.
   const bareHit = spawnSync("node", [SCRIPT, "resolve", "1"], { encoding: "utf8", cwd: tmp });
   assert.equal(bareHit.status, 0, `stderr=${bareHit.stderr}`);
   assert.equal(bareHit.stdout.trim(), taskId);
 
-  const unpaddedHit = spawnSync("node", [SCRIPT, "resolve", "#1"], { encoding: "utf8", cwd: tmp });
+  const unpaddedHit = spawnSync("node", [SCRIPT, "resolve", "1"], { encoding: "utf8", cwd: tmp });
   assert.equal(unpaddedHit.status, 0, `stderr=${unpaddedHit.stderr}`);
   assert.equal(unpaddedHit.stdout.trim(), taskId);
 
   // Over-capacity is still rejected at the script level.
-  const overWidth = spawnSync("node", [SCRIPT, "resolve", "#100"], { encoding: "utf8", cwd: tmp });
+  const overWidth = spawnSync("node", [SCRIPT, "resolve", "100"], { encoding: "utf8", cwd: tmp });
   assert.equal(overWidth.status, 1, `stderr=${overWidth.stderr}`);
   assert.match(overWidth.stderr, /exceeds shortIdLength=2 capacity/);
 });

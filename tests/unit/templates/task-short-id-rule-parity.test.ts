@@ -13,8 +13,8 @@ function read(p: string): string {
 
 // Structural check: the SKILL parameter resolver section must contain
 // the executable bash guard literal — not just any prose mentioning it.
-const SKILL_GUARD_LITERAL = '`^[#]?[0-9]+$`';
-const SKILL_BASH_LITERAL = '[[ "{task-id}" =~ ^[#]?[0-9]+$ ]]';
+const SKILL_GUARD_LITERAL = '`^[0-9]+$`';
+const SKILL_BASH_LITERAL = '[[ "{task-id}" =~ ^[0-9]+$ ]]';
 
 test('task-short-id rule doc (runtime) embeds the executable SKILL parser guard', () => {
   const content = read(RUNTIME);

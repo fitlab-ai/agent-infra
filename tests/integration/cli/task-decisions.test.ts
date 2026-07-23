@@ -98,7 +98,7 @@ test('A1: `decisions` and `d` are equivalent', () => {
   assert.equal(a.stdout, b.stdout);
 });
 
-test('A2: resolves bare short id, #N, and full TASK-id; rejects unknown ref', () => {
+test('A2: resolves bare short id and full TASK-id; rejects removed hash and unknown refs', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000002';
   writeCanonical(activeDir, taskId);
@@ -109,7 +109,7 @@ test('A2: resolves bare short id, #N, and full TASK-id; rejects unknown ref', ()
   const hash = runCli(['task', 'd', '#1'], repoRoot);
   assert.equal(full.status, 0, full.stderr);
   assert.equal(bare.stdout, full.stdout);
-  assert.equal(hash.stdout, full.stdout);
+  assert.equal(hash.status, 1);
 
   const bad = runCli(['task', 'd', 'not-a-task'], repoRoot);
   assert.notEqual(bad.status, 0);

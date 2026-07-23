@@ -149,7 +149,7 @@ test('ai sandbox show <bare-numeric> resolves the branch via the short-id regist
     encoding: 'utf8'
   });
   assert.equal(alloc.status, 0, alloc.stderr);
-  assert.equal(alloc.stdout.trim(), '#01');
+  assert.equal(alloc.stdout.trim(), '01');
 
   const out = runShow(['1'], repoRoot, binDir);
   assert.equal(out.status, 0, out.stderr);

@@ -10,7 +10,7 @@ const USAGE = `Usage: ai task issue-body [<ref> | --task <ref> | -t <ref>] [--te
 
 Print a deterministic Issue body extracted from a task's task.md.
   Omit <ref>           Resolve the unique active task for the current branch.
-  <ref>               Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
+  <ref>               Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
   --template <path>   Render the final body for the given GitHub Issue Form (scenario A);
                       without it, print the default '描述 + 需求' body (scenario B).
 

@@ -11,7 +11,7 @@ This file defines four **independent** rules for a skill's "notify-user / Next s
 
 | Placeholder | Meaning | Rendered form |
 |-------------|---------|---------------|
-| `{task-ref}` | Current task **short id** | `#`-prefixed, e.g. `#15`; falls back to the full `TASK-id` when unavailable |
+| `{task-ref}` | Current task **short id** | Zero-padded bare digits, e.g. `15`; falls back to the full `TASK-id` when unavailable |
 | `{task-id}` | Current task **full id** | `TASK-YYYYMMDD-HHMMSS` |
 
 ## Scope
@@ -24,7 +24,7 @@ This file defines four **independent** rules for a skill's "notify-user / Next s
 
 The single source of truth for short ids is the registry `.agents/workspace/active/.short-ids.json` (via `task-short-id.js`). **Never** read the `short_id` field from task.md frontmatter (that field is not authoritative).
 
-Once the full `$task_id` is resolved, use the snippet below to look up the short id; it returns `#NN` on hit and falls back to the full `TASK-id` on miss:
+Once the full `$task_id` is resolved, use the snippet below to look up the short id; it returns bare `NN` on hit and falls back to the full `TASK-id` on miss:
 
 ```bash
 task_ref=$(node -e '
@@ -33,9 +33,9 @@ const out=cp.execSync("node .agents/scripts/task-short-id.js list",{encoding:"ut
 const ids=(JSON.parse(out).ids)||{};
 const full=process.argv[1];
 const hit=Object.entries(ids).find(([,v])=>v===full);
-process.stdout.write(hit?("#"+hit[0]):full);
+process.stdout.write(hit?hit[0]:full);
 ' "$task_id")
-# Example: $task_id=TASK-20260613-225809 -> task_ref=#15
+# Example: $task_id=TASK-20260613-225809 -> task_ref=15
 ```
 
 ## Fallback conditions
@@ -47,9 +47,9 @@ process.stdout.write(hit?("#"+hit[0]):full);
 
 `restore-task` re-allocates a short id when restoring a task (possibly different from before); the snippet picks up the new short id.
 
-## `#` prefix and shell quoting
+## Bare digits and shell safety
 
-Short ids are always rendered with a `#` prefix as `#NN`, matching how task.md frontmatter renders `short_id`. `#` starts a comment in bash, so pasting example commands depends on the TUI (both the bare numeric `NN` and `#NN` are accepted by `task-short-id.js resolve`).
+Short ids are always rendered as zero-padded bare digits `NN`. The removed `#NN` syntax must neither be generated nor accepted, avoiding bash comment interpretation.
 
 ## Agent output trailing line (Completed at)
 

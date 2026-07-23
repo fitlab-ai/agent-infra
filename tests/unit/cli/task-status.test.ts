@@ -257,7 +257,7 @@ test('collectRuntime reads the latest managed tmux run through docker exec', () 
 
 const baseModel: StatusModel = {
   taskId: 'TASK-20260101-000001',
-  shortId: '#01',
+  shortId: '01',
   title: 'demo title',
   metadata: [
     ['type', 'feature'],
@@ -301,7 +301,7 @@ const baseModel: StatusModel = {
 
 test('renderStatus emits workflow and runtime before git', () => {
   const out = renderStatus(baseModel).join('\n');
-  assert.match(out, /^Task TASK-20260101-000001  \(#01\)$/m);
+  assert.match(out, /^Task TASK-20260101-000001  \(01\)$/m);
   assert.match(out, /^demo title$/m);
   assert.match(out, /^Metadata$/m);
   assert.match(out, /^Artifacts \(2\)$/m);
@@ -343,7 +343,7 @@ test('renderStatus shows (none) when a task has no artifacts', () => {
 test('statusModelToDisplay maps status model to a structured status card', () => {
   const display = statusModelToDisplay(baseModel);
   assert.equal(display.kind, 'status-card');
-  assert.equal(display.title, 'Task TASK-20260101-000001 (#01)');
+  assert.equal(display.title, 'Task TASK-20260101-000001 (01)');
   assert.equal(display.tone, 'running');
   assert.deepEqual(display.fields?.slice(0, 4), [
     ['workflow', 'in-progress'],
@@ -393,7 +393,7 @@ test('buildStatusModel constructs the model without parsing rendered stdout', ()
     taskDir,
     taskMdPath,
     repoRoot,
-    shortId: '#01',
+    shortId: '01',
     run,
     now: new Date('2026-07-02T12:30:00Z')
   });

@@ -43,7 +43,7 @@ test('real CLI writes AN, PL, CD, and HD targets through full and short task ref
     for (const args of [
       [data.taskId, 'AN-1', 'analysis choice'],
       ['1', 'PL-1', 'plan choice'],
-      ['#1', '1', '--needs-implementation', 'true', 'code choice'],
+      ['1', '1', '--needs-implementation', 'true', 'code choice'],
       [data.taskId, 'HD-1', 'executor choice']
     ]) {
       const result = run(data.repoRoot, ['decide', ...args]);

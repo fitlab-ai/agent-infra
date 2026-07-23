@@ -13,7 +13,7 @@ import {
   selectSandboxContainer,
 } from './list-running.ts';
 
-const USAGE = `Usage: ai sandbox start [--recreate] <branch | TASK-id | N | '#N'>
+const USAGE = `Usage: ai sandbox start [--recreate] <branch | TASK-id | N>
 
 Start an existing sandbox container that has stopped (for example after the
 Docker daemon was restarted or replaced). The container must already exist:

@@ -5,13 +5,13 @@ import { resolveTaskContext } from '../resolve-ref.ts';
 import { isReviewStage, parseLedger, type LedgerRow, type ReviewStage } from '../ledger.ts';
 import { parseActivityLog, pairEntries } from '../activity-log.ts';
 
-const USAGE = `Usage: ai task log [<N | #N | TASK-id> | --task <ref> | -t <ref>]
+const USAGE = `Usage: ai task log [<N | TASK-id> | --task <ref> | -t <ref>]
 
 Renders a task's activity log as a per-step status table. A step's start and
 completion are paired onto one row: STARTED holds the start time, DONE the
 completion time (or '(in progress)' while still running).
   Omit <ref>   Resolve the unique active task for the current branch.
-  <ref>   Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
+  <ref>   Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
 
 Columns: # (row) / STEP / AGENT / STARTED / DONE / NOTE
   A human-executed step shows AGENT as 'human' and, when it has no start marker,

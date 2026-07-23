@@ -17,7 +17,7 @@ type NormalizeOpts = { shortIdLength: number };
 
 function normalizeShortIdInput(input: string, opts: NormalizeOpts): NormalizeResult {
   const L = opts.shortIdLength;
-  const m = /^#?(\d+)$/.exec(input);
+  const m = /^(\d+)$/.exec(input);
   if (!m) {
     return { kind: 'pass', value: input };
   }
@@ -26,7 +26,7 @@ function normalizeShortIdInput(input: string, opts: NormalizeOpts): NormalizeRes
     return {
       kind: 'error',
       code: 'SHORT_ID_RESERVED',
-      message: `short id '${input}' is invalid (#${'0'.repeat(L)} is reserved)`
+      message: `short id '${input}' is invalid (${'0'.repeat(L)} is reserved)`
     };
   }
   const max = Math.pow(10, L) - 1;
@@ -37,7 +37,11 @@ function normalizeShortIdInput(input: string, opts: NormalizeOpts): NormalizeRes
       message: `short id ${n} exceeds shortIdLength=${L} capacity (max=${max}); archive tasks or raise task.shortIdLength in .agents/.airc.json`
     };
   }
-  return { kind: 'shortId', value: `#${String(n).padStart(L, '0')}` };
+  return { kind: 'shortId', value: String(n).padStart(L, '0') };
+}
+
+function isRemovedHashShortIdInput(input: string): boolean {
+  return /^#\d+$/.test(input);
 }
 
 type ResolveShortIdErrorCode =
@@ -79,12 +83,12 @@ function resolveShortIdReadOnly(
     );
   }
 
-  const key = normalized.value.slice(1);
+  const key = normalized.value;
   const registryPath = path.join(repoRoot, '.agents', 'workspace', 'active', REGISTRY_NAME);
   if (!fs.existsSync(registryPath)) {
     return shortIdFailure(
       'SHORT_ID_REGISTRY_NOT_FOUND',
-      `short id '#${key}' not found; active task registry is empty.`
+      `short id '${key}' not found; active task registry is empty.`
     );
   }
 
@@ -145,7 +149,7 @@ function resolveShortIdReadOnly(
     if (existing) {
       return shortIdFailure(
         'SHORT_ID_REGISTRY_DUPLICATE_TASK',
-        `duplicate registry entries for taskId ${taskId} at keys [#${existing}, #${registryKey}]; manual resolution required`,
+        `duplicate registry entries for taskId ${taskId} at keys [${existing}, ${registryKey}]; manual resolution required`,
         taskId
       );
     }
@@ -155,8 +159,8 @@ function resolveShortIdReadOnly(
   const taskId = ids[key];
   if (!taskId) {
     const message = Object.keys(ids).length === 0
-      ? `short id '#${key}' not found; active task registry is empty.`
-      : `short id '#${key}' not found in active task registry (it may have been cleaned up after archival; check 'task-short-id.js list').`;
+      ? `short id '${key}' not found; active task registry is empty.`
+      : `short id '${key}' not found in active task registry (it may have been cleaned up after archival; check 'task-short-id.js list').`;
     return shortIdFailure('SHORT_ID_NOT_FOUND', message);
   }
   const taskMdPath = path.join(
@@ -181,8 +185,8 @@ function resolveShortIdReadOnly(
       )
     );
     const message = remainingActiveEntries.length === 0
-      ? `short id '#${key}' not found; active task registry is empty.`
-      : `short id '#${key}' not found in active task registry (it may have been cleaned up after archival; check 'task-short-id.js list').`;
+      ? `short id '${key}' not found; active task registry is empty.`
+      : `short id '${key}' not found in active task registry (it may have been cleaned up after archival; check 'task-short-id.js list').`;
     return shortIdFailure(
       'SHORT_ID_STALE',
       message,
@@ -336,7 +340,7 @@ function mutateShortIdRegistryAt(
       if (!fs.existsSync(path.join(activeDir, taskId, 'task.md'))) {
         throw Object.assign(new Error(`task ${taskId} not found in ${activeDir}`), { code: 'SHORT_ID_TASK_NOT_ACTIVE' });
       }
-      if (existing) result = { effect: 'unchanged', shortId: `#${existing[0]}`, changed: false };
+      if (existing) result = { effect: 'unchanged', shortId: existing[0], changed: false };
       else {
         let key: string | null = null;
         for (let value = 1; value < 10 ** width; value += 1) {
@@ -345,12 +349,12 @@ function mutateShortIdRegistryAt(
         }
         if (!key) throw Object.assign(new Error(`short id width exhausted (current shortIdLength=${width})`), { code: 'SHORT_ID_CAPACITY_EXCEEDED' });
         registry.ids[key] = taskId;
-        result = { effect: 'allocated', shortId: `#${key}`, changed: true };
+        result = { effect: 'allocated', shortId: key, changed: true };
       }
     } else if (requested === 'release') {
       if (!existing) result = { effect: 'unchanged', shortId: null, changed: false };
-      else { delete registry.ids[existing[0]]; result = { effect: 'released', shortId: `#${existing[0]}`, changed: true }; }
-    } else result = { effect: 'unchanged', shortId: existing ? `#${existing[0]}` : null, changed: false };
+      else { delete registry.ids[existing[0]]; result = { effect: 'released', shortId: existing[0], changed: true }; }
+    } else result = { effect: 'unchanged', shortId: existing ? existing[0] : null, changed: false };
     const changed = original !== JSON.stringify(registry.ids);
     if (changed) writeRegistry(registryPath, registry);
     return { ...result, changed };
@@ -384,7 +388,7 @@ function executeShortIdCommand(request: ShortIdCommandRequest): ShortIdCommandRe
           if (!fs.existsSync(path.join(request.activeDir, taskId, 'task.md'))) { delete registry.ids[key]; changed = true; }
         }
         if (changed) writeRegistry(registryPath, registry);
-        const taskId = registry.ids[normalized.value.slice(1)];
+        const taskId = registry.ids[normalized.value];
         if (!taskId) throw Object.assign(new Error(`short id '${normalized.value}' not found in active task registry`), { code: 'SHORT_ID_NOT_FOUND' });
         return { status: changed ? 'applied' : 'no-op', changed, output: taskId, error: null };
       });
@@ -398,8 +402,8 @@ function executeShortIdCommand(request: ShortIdCommandRequest): ShortIdCommandRe
       for (const [key, taskId] of Object.entries(registry.ids)) registered.set(taskId, [...(registered.get(taskId) ?? []), key]);
       const diff = {
         missing_in_registry: active.filter((taskId) => !registered.has(taskId)).map((taskId) => ({ taskId })),
-        orphans_in_registry: Object.entries(registry.ids).filter(([, taskId]) => !active.includes(taskId)).map(([key, taskId]) => ({ key: `#${key}`, taskId })),
-        duplicate_registry_keys: [...registered.entries()].filter(([, keys]) => keys.length > 1).map(([taskId, keys]) => ({ taskId, keys: keys.map((key) => `#${key}`) }))
+        orphans_in_registry: Object.entries(registry.ids).filter(([, taskId]) => !active.includes(taskId)).map(([key, taskId]) => ({ key, taskId })),
+        duplicate_registry_keys: [...registered.entries()].filter(([, keys]) => keys.length > 1).map(([taskId, keys]) => ({ taskId, keys }))
       };
       const clean = Object.values(diff).every((items) => items.length === 0);
       return { status: clean ? 'no-op' : 'failed', changed: false, output: clean ? '' : JSON.stringify(diff), error: clean ? null : { code: 'SHORT_ID_VERIFY_FAILED', message: 'registry differs from active tasks' } };
@@ -437,13 +441,13 @@ function loadShortIdByTaskId(repoRoot: string): Map<string, string> {
   const map = new Map<string, string>();
   if (!registry) return map;
   for (const [key, taskId] of Object.entries(registry.ids)) {
-    map.set(taskId, `#${key}`);
+    map.set(taskId, key);
   }
   return map;
 }
 
 /**
- * Resolve a branch to its active-task short id (`#NN`), or `null` when no
+ * Resolve a branch to its active-task short id (`NN`), or `null` when no
  * active task is bound to that branch.
  *
  * Two-state semantics: this only consults the active registry
@@ -463,7 +467,7 @@ function lookupShortIdByBranch(
   for (const [key, taskId] of Object.entries(registry.ids)) {
     const taskBranch = readBranchFromTaskMd(repoRoot, taskId);
     if (taskBranch && taskBranch === branch) {
-      matches.push(`#${key}`);
+      matches.push(key);
     }
   }
   if (matches.length === 0) return null;
@@ -477,6 +481,7 @@ function lookupShortIdByBranch(
 
 export {
   normalizeShortIdInput,
+  isRemovedHashShortIdInput,
   resolveShortIdReadOnly,
   lookupShortIdByBranch,
   loadShortIdByTaskId,

@@ -141,7 +141,7 @@ function resolveActiveTaskIdentity(taskRef: string, repoRoot: string): ActiveTas
     const normalized = normalizeShortIdInput(taskRef, { shortIdLength: readShortIdLength(repoRoot) });
     if (normalized.kind !== 'shortId') return null;
     resolvedTaskRef = normalized.value;
-    taskId = readActiveShortIdRegistry(repoRoot)[normalized.value.slice(1)] ?? null;
+    taskId = readActiveShortIdRegistry(repoRoot)[normalized.value] ?? null;
   }
 
   if (!taskId) return null;

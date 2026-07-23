@@ -71,7 +71,7 @@ test('matches a literal pattern and prints taskId, short id, file stem and line 
   const out = runCli(['task', 'grep', 'needle'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
   // Active task carries its short id (#01); line number is 1-based; stem drops '.md'.
-  assert.equal(out.stdout, `${taskId} #01 analysis:2: has needle here\n`);
+  assert.equal(out.stdout, `${taskId} 01 analysis:2: has needle here\n`);
 });
 
 test('no ref scans active + blocked + completed; only active rows carry a short id', () => {
@@ -88,7 +88,7 @@ test('no ref scans active + blocked + completed; only active rows carry a short 
   assert.equal(out.status, 0, out.stderr);
   const lines = out.stdout.trimEnd().split('\n');
   assert.equal(lines.length, 3);
-  assert.ok(lines.some((l) => l === `${a} #01 analysis:1: KEYWORD in active`));
+  assert.ok(lines.some((l) => l === `${a} 01 analysis:1: KEYWORD in active`));
   // blocked / completed tasks have released their short id -> token omitted.
   assert.ok(lines.some((l) => l === `${b} analysis:1: KEYWORD in blocked`));
   assert.ok(lines.some((l) => l === `${c} analysis:1: KEYWORD in completed`));

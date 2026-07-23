@@ -42,10 +42,10 @@ test('ai task show <bare-numeric> prints task.md', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000007';
   writeTask(activeDir, taskId, 'feature-seven');
-  // Allocate short id via script (first slot is #01 with empty registry).
+  // Allocate short id via script (first slot is 01 with empty registry).
   const alloc = spawnSync('node', [SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
   assert.equal(alloc.status, 0, alloc.stderr);
-  assert.equal(alloc.stdout.trim(), '#01');
+  assert.equal(alloc.stdout.trim(), '01');
 
   const out = runCli(['task', 'show', '1'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
@@ -53,15 +53,15 @@ test('ai task show <bare-numeric> prints task.md', () => {
   assert.match(out.stdout, /body for TASK-20260101-000007/);
 });
 
-test('ai task show #1 (hash form) is equivalent to bare numeric', () => {
+test('ai task show rejects removed #1 hash form', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000007';
   writeTask(activeDir, taskId, 'feature-seven');
   spawnSync('node', [SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
 
   const out = runCli(['task', 'show', '#1'], repoRoot);
-  assert.equal(out.status, 0, out.stderr);
-  assert.match(out.stdout, /TASK-20260101-000007/);
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /expected bare digits/);
 });
 
 test('ai task show <TASK-id> resolves a completed task (flat layout)', () => {

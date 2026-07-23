@@ -11,7 +11,7 @@
 
 | 占位符 | 含义 | 渲染形态 |
 |--------|------|----------|
-| `{task-ref}` | 当前任务**短号** | 带 `#` 前缀，如 `#15`；取不到时回退完整 `TASK-id` |
+| `{task-ref}` | 当前任务**短号** | 零填充裸数字，如 `15`；取不到时回退完整 `TASK-id` |
 | `{task-id}` | 当前任务**完整 ID** | `TASK-YYYYMMDD-HHMMSS` |
 
 ## 适用范围
@@ -24,7 +24,7 @@
 
 短号唯一真源是注册表 `.agents/workspace/active/.short-ids.json`（经 `task-short-id.js`）。**禁止**读取 task.md frontmatter 的 `short_id` 字段（该字段不可信）。
 
-在已解析出完整 `$task_id` 后，用以下片段反查短号；命中返回 `#NN`，未命中自动回退完整 `TASK-id`：
+在已解析出完整 `$task_id` 后，用以下片段反查短号；命中返回裸数字 `NN`，未命中自动回退完整 `TASK-id`：
 
 ```bash
 task_ref=$(node -e '
@@ -33,9 +33,9 @@ const out=cp.execSync("node .agents/scripts/task-short-id.js list",{encoding:"ut
 const ids=(JSON.parse(out).ids)||{};
 const full=process.argv[1];
 const hit=Object.entries(ids).find(([,v])=>v===full);
-process.stdout.write(hit?("#"+hit[0]):full);
+process.stdout.write(hit?hit[0]:full);
 ' "$task_id")
-# 示例：$task_id=TASK-20260613-225809 -> task_ref=#15
+# 示例：$task_id=TASK-20260613-225809 -> task_ref=15
 ```
 
 ## 回退条件
@@ -47,9 +47,9 @@ process.stdout.write(hit?("#"+hit[0]):full);
 
 `restore-task` 恢复任务时会重新分配短号（可能与历史不同），片段会取到新短号。
 
-## `#` 前缀与 shell 引用
+## 裸数字与 shell 安全
 
-短号统一渲染为带 `#` 前缀的 `#NN`，与 task.md frontmatter 的 `short_id` 渲染一致。`#` 在 bash 中是注释起始符，示例命令若直接粘贴需视 TUI 而定（裸数字 `NN` 与 `#NN` 都被 `task-short-id.js resolve` 接受）。
+短号统一渲染为零填充裸数字 `NN`。已移除的 `#NN` 语法不得生成或接受，避免 bash 将其解释为注释。
 
 ## Agent 输出收尾行（Completed at）
 

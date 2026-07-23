@@ -25,9 +25,9 @@ import {
   selectSandboxContainer,
 } from './list-running.ts';
 
-const USAGE = `Usage: ai sandbox exec [--recreate] <branch | TASK-id | N | '#N'> [cmd...]
+const USAGE = `Usage: ai sandbox exec [--recreate] <branch | TASK-id | N> [cmd...]
 
-N (bare) and '#N' both reference the same active task short id from
+N references an active task short id from
 .agents/workspace/active/.short-ids.json. They resolve only via that
 registry — they do not reference a container's row position in
 'ai sandbox ls' output. --recreate is a host recovery flag only before the

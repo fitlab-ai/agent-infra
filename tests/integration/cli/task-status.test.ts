@@ -85,7 +85,7 @@ test('ai task status resolves an active task by its short id', () => {
   assert.equal(out.status, 0, out.stderr);
   assertCoreSections(out.stdout, taskId);
   // Active task shows its short id in the header (blocked/completed would be '-').
-  assert.match(out.stdout, new RegExp(`^Task ${taskId}  \\(#01\\)$`, 'm'));
+  assert.match(out.stdout, new RegExp(`^Task ${taskId}  \\(01\\)$`, 'm'));
 });
 
 test('ai task status without a ref requires a matching current context', () => {

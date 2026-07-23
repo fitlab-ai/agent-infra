@@ -383,7 +383,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
         directory: { effect: 'move', changed: true },
         shortId: {
           effect: spec.registry === 'alloc' ? (registeredKey ? 'unchanged' : 'allocated') : spec.registry === 'release' ? (registeredKey ? 'released' : 'unchanged') : 'unchanged',
-          shortId: registeredKey ? `#${registeredKey}` : null,
+          shortId: registeredKey ?? null,
           changed: spec.registry === 'alloc' ? !registeredKey : spec.registry === 'release' ? Boolean(registeredKey) : false
         },
         timestamp: metadata.timestamp, agentInfraVersion: metadata.agentInfraVersion,

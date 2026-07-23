@@ -54,7 +54,7 @@ function writeTask(activeDir: string, taskId: string, branch: string): void {
   );
 }
 
-test("resolveTaskBranch passes #N through registry and resolves branch (C3 regression)", () => {
+test("resolveTaskBranch resolves bare N through the registry", () => {
   const { repoRoot, activeDir } = mkFixtureRepo();
   const taskId = "TASK-20250201-000001";
   const branch = "feature-test-branch";
@@ -68,17 +68,15 @@ test("resolveTaskBranch passes #N through registry and resolves branch (C3 regre
     cwd: repoRoot
   });
   assert.equal(alloc.status, 0, `alloc failed: ${alloc.stderr}`);
-  assert.equal(alloc.stdout.trim(), "#1");
+  assert.equal(alloc.stdout.trim(), "1");
 
-  // Resolver should now translate #1 → branch.
-  const resolved = withInternalCliPath(() => resolveTaskBranch("#1", repoRoot));
+  const resolved = withInternalCliPath(() => resolveTaskBranch("1", repoRoot));
   assert.equal(resolved, branch);
 });
 
-test("resolveTaskBranch throws for #N not in registry (C4 strict mode)", () => {
+test("resolveTaskBranch rejects removed #N syntax instead of treating it as a branch", () => {
   const { repoRoot } = mkFixtureRepo();
-  // No active tasks: nothing for cold-start to allocate; #1 truly absent.
-  assert.throws(() => resolveTaskBranch("#1", repoRoot), /not found/);
+  assert.throws(() => resolveTaskBranch("#1", repoRoot), /bare digits/);
 });
 
 test("resolveTaskBranch on full TASK id is unchanged (no regression)", () => {
@@ -95,7 +93,7 @@ test("resolveTaskBranch on non-task arg is identity", () => {
   assert.equal(resolveTaskBranch("just-a-branch-name", repoRoot), "just-a-branch-name");
 });
 
-test("resolveTaskBranch with shortIdLength=2: '#01', '#1', '1' all resolve to the same branch", () => {
+test("resolveTaskBranch with shortIdLength=2 accepts bare aliases and rejects hash aliases", () => {
   const { repoRoot, activeDir } = mkFixtureRepo(2);
   const taskId = "TASK-20260301-000001";
   const branch = "feature-zero-padded";
@@ -106,16 +104,12 @@ test("resolveTaskBranch with shortIdLength=2: '#01', '#1', '1' all resolve to th
     cwd: repoRoot
   });
   assert.equal(alloc.status, 0, `alloc failed: ${alloc.stderr}`);
-  assert.equal(alloc.stdout.trim(), "#01");
+  assert.equal(alloc.stdout.trim(), "01");
 
-  // Round 4 contract: bare numeric, non-padded '#N', and zero-padded '#NN' are all aliases.
   withInternalCliPath(() => {
-    assert.equal(resolveTaskBranch("#01", repoRoot), branch);
-    assert.equal(resolveTaskBranch("#1", repoRoot), branch);
+    assert.equal(resolveTaskBranch("01", repoRoot), branch);
     assert.equal(resolveTaskBranch("1", repoRoot), branch);
   });
-  // Reserved key still rejects.
-  assert.throws(() => resolveTaskBranch("#0", repoRoot), /reserved|not found/);
-  // Over capacity still rejects.
-  assert.throws(() => resolveTaskBranch("#100", repoRoot), /exceeds|not found/);
+  assert.throws(() => resolveTaskBranch("#01", repoRoot), /bare digits/);
+  assert.throws(() => resolveTaskBranch("#1", repoRoot), /bare digits/);
 });

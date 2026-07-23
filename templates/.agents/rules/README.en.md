@@ -27,7 +27,7 @@ so you can quickly find "which ones to read" without opening each file.
 - [`task-management.md`](task-management.md) — Task intent detection and workflow-command mapping.
 - [`review-handshake.md`](review-handshake.md) — Three-stage bidirectional review handshake: four-state disposition, symmetric evidence, disagreement ledger, convergence and post-review commit gate.
 - [`human-decision-context.md`](human-decision-context.md) — Self-contained context and canonical structure for new human-decision details.
-- [`task-short-id.md`](task-short-id.md) — Resolution, allocation and lifecycle of `#NN` / bare-number short ids.
+- [`task-short-id.md`](task-short-id.md) — Resolution, allocation and lifecycle of bare-number short ids.
 - [`milestone-inference.md`](milestone-inference.md) — Milestone inference for create-task / code-task / create-pr.
 - [`label-milestone-setup.md`](label-milestone-setup.md) — Platform commands to initialize labels / milestones.
 - [`security-alerts.md`](security-alerts.md) — Commands to import / close Dependabot and Code Scanning alerts.

@@ -14,7 +14,7 @@ description: >
 - 仅监控 + 自愈当前 PR 的 required checks；不做与失败 check 无关的改动。
 - 自愈通过 Git workflow intent 发布修复，但**发布前必须本地跑通相关测试**；修复上限与代码层分类授权不变。
 - 求助出口是「产出后停止」语义：停止本轮、输出阻塞说明、等待用户主动触发，**不**中途提问。
-- 裸数字 / `#NN` / `TASK-id` 入参一律按任务短号解析（见 `.agents/rules/task-short-id.md`）；PR 号只走 `--pr <number>` / PR URL / 省略（当前分支），不复用裸数字语法。
+- 裸数字 / `NN` / `TASK-id` 入参一律按任务短号解析（见 `.agents/rules/task-short-id.md`）；PR 号只走 `--pr <number>` / PR URL / 省略（当前分支），不复用裸数字语法。
 - 执行本技能（任务锚定路径）后，必须更新 task.md。
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
@@ -101,7 +101,7 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 
 > 任务锚定路径仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染最终输出前，先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令把 `{task-ref}` 渲染为短号 `#NN`（未分配/已释放时回退完整 TASK-id）；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
+> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染最终输出前，先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令把 `{task-ref}` 渲染为短号 `NN`（未分配/已释放时回退完整 TASK-id）；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
 
 按场景输出：
 - 「全绿」+ 任务锚定：说明所有 required checks 已通过，并只按本轮是否产生修复 commit 渲染一个出口（`{task-ref}` 替换为短号）：

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runSafeEngine, runVerboseEngine } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
+import { isRemovedHashShortIdInput } from '../../task/short-id.ts';
 
 export type SandboxRow = {
   name: string;
@@ -90,13 +91,13 @@ export function fetchSandboxRows(
 
 /**
  * Returns true iff `arg` is a syntactically valid task short reference.
- * Accepts both bare numeric ('11') and '#'-prefixed ('#11') forms.
+ * Accepts bare numeric ('11') task short ids.
  * Zero IO. Callers MUST use this as the gate before constructing any context
  * for resolveTaskShortRef — that way non-matching arguments (e.g. '#abc',
  * '#1.5', '#') never trigger sandbox list IO.
  */
 export function isTaskShortRef(arg: string): boolean {
-  return /^#?\d+$/.test(arg);
+  return /^\d+$/.test(arg);
 }
 
 type RegistryLookup =
@@ -115,9 +116,7 @@ type RegistryLookup =
 function tryResolveFromRegistry(arg: string, repoRoot: string): RegistryLookup {
   const scriptPath = path.join(repoRoot, '.agents', 'scripts', 'task-short-id.js');
   if (!fs.existsSync(scriptPath)) return { status: 'miss' };
-  // Strip leading '#' when forwarding bare-numeric input through the script's CLI.
-  // (Script accepts both forms, but this avoids shell quoting confusion in error
-  // messages echoed back to the user.)
+  // Forward the bare-numeric short ref to the registry script for ID resolution.
   const result = spawnSync('node', [scriptPath, 'resolve', arg], { encoding: 'utf8', cwd: repoRoot });
   if (result.status !== 0) return { status: 'miss' };
   const taskId = (result.stdout || '').trim();
@@ -149,7 +148,7 @@ function tryResolveFromRegistry(arg: string, repoRoot: string): RegistryLookup {
 
 /**
 /**
- * Resolve a task short reference (bare 'N' or '#N') to a branch name for the
+ * Resolve a bare task short reference to a branch name for the
  * sandbox entrypoint.
  *
  * Resolution: registry-only. Look up the short id in the global task-short-id
@@ -169,13 +168,13 @@ export function resolveTaskShortRef(
   if (lookup.status === 'hit') return lookup.branch;
   throw new Error(
     `short ref '${arg}' is not in the active task registry. ` +
-      `'#N' and bare N resolve only via the registry (not by row position in 'ai sandbox ls'); ` +
+      `bare N resolves only via the registry (not by row position in 'ai sandbox ls'); ` +
       `use a task short id (e.g. 'ai sandbox exec 11'), a TASK-id, or a branch name.`
   );
 }
 
 /**
- * Resolve a sandbox command argument (`<branch | TASK-id | N | '#N'>`) to a
+ * Resolve a sandbox command argument (`<branch | TASK-id | N>`) to a
  * branch name, mirroring `ai sandbox exec` so that `start` and `exec` share one
  * input contract. Short refs go through the registry-only resolver (which throws
  * an actionable error on a miss); everything else flows through resolveTaskBranch
@@ -183,6 +182,9 @@ export function resolveTaskShortRef(
  * Callers still run assertValidBranchName on the result.
  */
 export function resolveBranchArg(arg: string, ctx: { repoRoot: string }): string {
+  if (isRemovedHashShortIdInput(arg)) {
+    throw new Error(`Invalid task short id '${arg}': task short ids must use bare digits`);
+  }
   return isTaskShortRef(arg)
     ? resolveTaskShortRef(arg, ctx)
     : resolveTaskBranch(arg, ctx.repoRoot);

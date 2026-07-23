@@ -9,7 +9,7 @@ const USAGE = `Usage: ai task grep <pattern> [ref] [artifact | N]
 
 Literal (non-regex) line search across task artifacts.
   <pattern>          Literal substring to match (NOT a regex). Case-sensitive by default.
-  [ref]              Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
+  [ref]              Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
                      Omit to scan every task under active / blocked / completed
                      (archive is skipped). With a ref, narrows to that single task
                      (a TASK-id ref can also resolve an archived task).

@@ -110,7 +110,7 @@ test('activate clears terminal fields, moves to active, and allocates a short id
   assert.match(content, /status: active/);
   assert.match(content, /assigned_to: codex/);
   assert.equal(/^blocked_at:/m.test(content), false);
-  assert.equal(result.shortId.shortId, '#01');
+  assert.equal(result.shortId.shortId, '01');
 });
 
 test('security completion records the alert payload in its canonical done note', () => {
@@ -139,7 +139,7 @@ test('restore validates staging before exposing active and allocates a short id'
   assert.equal(fs.existsSync(staging), false);
   const target = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'task.md');
   assert.match(fs.readFileSync(target, 'utf8'), /status: active/);
-  assert.equal(result.shortId.shortId, '#01');
+  assert.equal(result.shortId.shortId, '01');
 });
 
 test('registry failure leaves a recoverable journal and the same request converges after repair', () => {

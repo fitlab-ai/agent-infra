@@ -7,12 +7,12 @@ import { assertValidBranchName, worktreeDirCandidates } from '../constants.ts';
 import { resolveBranchArg } from './list-running.ts';
 import { resolveTools, toolConfigDirCandidates } from '../tools.ts';
 
-const USAGE = `Usage: ai sandbox show <branch | TASK-id | N | '#N'>
+const USAGE = `Usage: ai sandbox show <branch | TASK-id | N>
 
 Shows one sandbox's worktree path and per-tool state paths (Claude Code,
 Codex, Gemini CLI, OpenCode). The argument follows the same contract as
 'ai sandbox exec' and 'ai sandbox start': N (bare) is the recommended form
-for task short ids (e.g. 'ai sandbox show 11'); '#N', a TASK-id, or a plain
+for task short ids (e.g. 'ai sandbox show 11'); a TASK-id or a plain
 branch name are also accepted. Use 'ai sandbox ls' for the container list.`;
 
 export type SandboxDetail = {

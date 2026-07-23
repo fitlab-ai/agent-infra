@@ -144,7 +144,7 @@ function locateHotTaskDirs(
 }
 
 /**
- * Resolve a task ref (bare short id, `#N`, or `TASK-YYYYMMDD-HHMMSS`) to its
+ * Resolve a task ref (bare short id or `TASK-YYYYMMDD-HHMMSS`) to its
  * task directory across active / blocked / completed / archive.
  *
  * The returned `message` on failure is command-agnostic (no `ai task <cmd>:`
@@ -185,7 +185,7 @@ function resolveTaskRef(arg: string, options: ResolveTaskRefOptions = {}): Resol
         code: 'INVALID_TASK_REF',
         message:
           `'${arg}' is not a valid short id or TASK-id; ` +
-          `expected bare digits, '#N', or 'TASK-YYYYMMDD-HHMMSS'`,
+          `expected bare digits or 'TASK-YYYYMMDD-HHMMSS'`,
         repoRoot,
         taskId: null
       };

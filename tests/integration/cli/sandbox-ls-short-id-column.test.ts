@@ -29,11 +29,11 @@ function writeRegistry(activeDir: string, ids: Record<string, string>): void {
   );
 }
 
-test('lookupShortIdByBranch returns #NN for a branch bound to an active task', () => {
+test('lookupShortIdByBranch returns bare NN for a branch bound to an active task', () => {
   const { repoRoot, activeDir } = mkFixture();
   writeTaskWithBranch(activeDir, 'TASK-20260101-000001', 'feature-bound');
   writeRegistry(activeDir, { '07': 'TASK-20260101-000001' });
-  assert.equal(lookupShortIdByBranch('feature-bound', repoRoot), '#07');
+  assert.equal(lookupShortIdByBranch('feature-bound', repoRoot), '07');
 });
 
 test("lookupShortIdByBranch returns null for branches without an active task", () => {

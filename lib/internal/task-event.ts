@@ -1,7 +1,7 @@
 import { applyTaskEvent, eventCatalog } from '../task/events.ts';
 import type { TaskEventRequest, Verdict } from '../task/events.ts';
 
-const USAGE = `Usage: agent-infra-internal task-event <N | #N | TASK-id> <event> --agent <agent> [event options] [--dry-run]
+const USAGE = `Usage: agent-infra-internal task-event <N | TASK-id> <event> --agent <agent> [event options] [--dry-run]
 
 Apply one closed-set task lifecycle event and print a structured JSON result.
 Events: ${eventCatalog.join(', ')}

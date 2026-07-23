@@ -1,9 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { isRemovedHashShortIdInput } from '../task/short-id.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
-const SHORT_ID_RE = /^#?\d+$/;
+const SHORT_ID_RE = /^\d+$/;
 const WORKSPACE_DIRS = ['active', 'completed', 'blocked', 'archive'];
 
 function resolveShortIdStrict(arg: string, repoRoot: string): string {
@@ -51,6 +52,9 @@ function resolveBranchFromTaskContent(content: string, taskId: string): string {
 }
 
 export function resolveTaskBranch(arg: string, repoRoot: string): string {
+  if (isRemovedHashShortIdInput(arg)) {
+    throw new Error(`Invalid task short id '${arg}': task short ids must use bare digits`);
+  }
   if (SHORT_ID_RE.test(arg)) {
     const taskId = resolveShortIdStrict(arg, repoRoot);
     const content = readTaskContent(repoRoot, taskId);

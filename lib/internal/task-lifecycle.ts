@@ -1,7 +1,7 @@
 import { applyTaskLifecycle, lifecycleIntentCatalog } from '../task/lifecycle.ts';
 import type { TaskLifecycleRequest } from '../task/lifecycle.ts';
 
-const USAGE = `Usage: agent-infra-internal task-lifecycle <N | #N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.join(', ')}\n`;
+const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.join(', ')}\n`;
 const FLAGS: Record<string, string> = {
   '--agent': 'agent', '--reason': 'reason', '--unblock-condition': 'unblockCondition',
   '--note': 'note', '--alert-number': 'alertNumber', '--staging-dir': 'stagingDir',

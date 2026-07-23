@@ -1,6 +1,6 @@
 import { renderTaskVerification, verifyTaskEvent } from '../task/verification.ts';
 
-const USAGE = 'Usage: agent-infra-internal task-verify <N | #N | TASK-id> <verification-event> [--artifact <canonical.md>] [--format json|text]\n';
+const USAGE = 'Usage: agent-infra-internal task-verify <N | TASK-id> <verification-event> [--artifact <canonical.md>] [--format json|text]\n';
 
 function fail(message: string): void {
   process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'VERIFY_PAYLOAD_INVALID', message } })}\n`);

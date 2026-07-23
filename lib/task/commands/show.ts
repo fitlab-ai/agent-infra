@@ -2,12 +2,11 @@ import fs from 'node:fs';
 import { parseTaskScope } from '../command-options.ts';
 import { resolveTaskContext } from '../resolve-ref.ts';
 
-const USAGE = `Usage: ai task show [<N | #N | TASK-id> | --task <ref> | -t <ref>]
+const USAGE = `Usage: ai task show [<N | TASK-id> | --task <ref> | -t <ref>]
 
 Prints the task.md content for the matching task.
   Omit the ref       Resolve the unique active task for the current branch.
   N (bare numeric)   Recommended; resolves the active short id via the registry.
-  '#N'               Compatibility form for old commands.
   TASK-YYYYMMDD-HHMMSS  Locates a task in active / blocked / completed / archive.
 `;
 

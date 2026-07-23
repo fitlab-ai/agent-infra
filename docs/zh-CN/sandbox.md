@@ -62,7 +62,9 @@ ai sandbox create feature/proxy --inherit-proxy
 
 tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/.codex` 下的 Codex 数据库、日志、session 与其他未列入 seed 的文件无法恢复；`config.toml`、`model-catalogs` 等声明式 seed 可以从只读 staging mount 重建；bind mount 的 worktree、凭据、shell 配置与 share 目录继续由宿主持久化。
 
-`ai sandbox ls` 保持精简：只列出当前项目的 Containers 容器表（`#` 行号、`SHORT` 任务短号，以及名称、状态、分支），不再打印 worktree 列表和各工具的 state 路径。要查看某个沙箱的这些详情，使用 `ai sandbox show <branch | TASK-id | N | '#N'>`：它会打印该分支的 worktree 路径和各工具（Claude Code、Codex、Gemini CLI、OpenCode）的 state 路径。入参契约与 `ai sandbox exec`、`ai sandbox start` 一致，因此 `ai sandbox show 11` 与 `ai sandbox show '#11'` 都会通过 `.agents/workspace/active/.short-ids.json` 解析当前任务短号。
+`ai sandbox ls` 保持精简：只列出当前项目的 Containers 容器表（`#` 行号、`SHORT` 任务短号，以及名称、状态、分支），不再打印 worktree 列表和各工具的 state 路径。要查看某个沙箱的这些详情，使用 `ai sandbox show <branch | TASK-id | N>`：它会打印该分支的 worktree 路径和各工具（Claude Code、Codex、Gemini CLI、OpenCode）的 state 路径。入参契约与 `ai sandbox exec`、`ai sandbox start` 一致，因此 `ai sandbox show 11` 会通过 `.agents/workspace/active/.short-ids.json` 解析当前任务短号。
+
+下一个大版本的破坏性迁移：任务短号仅使用裸数字。请把 `#NN` 改为 `NN`；引用后的 `#NN` 输入也会被拒绝。
 
 在 macOS 上，交互式 `ai sandbox exec <branch>` 会尽力桥接宿主图片粘贴。当你按下 `Ctrl+V` 且宿主剪贴板当前是图片时，agent-infra 会从宿主剪贴板读取图片，将 PNG 写到 `~/.agent-infra/clipboard/`，再以 bracketed paste 注入容器内路径，让 Claude Code、Codex、Gemini CLI 和 OpenCode 按图片附件处理。宿主剪贴板只读，不会被改写。该能力会自动降级：已有沙箱需要重建后才有 `/clipboard` 挂载；如果可选 pty 依赖或剪贴板探测不可用，会回退到原本的交互进入方式。排查鼠标、滚动或其他输入异常时，可以设置 `AI_SANDBOX_NO_CLIPBOARD_BRIDGE=1` 跳过桥接，直接进入原本的交互路径。
 

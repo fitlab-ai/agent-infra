@@ -19,7 +19,7 @@ test('internal task-snapshot resolves full and short task refs without writes', 
   fs.writeFileSync(path.join(dir, 'task.md'), '# Task\n');
   const before = fs.readFileSync(path.join(dir, 'task.md'));
 
-  for (const ref of ['1', '#01', id]) {
+  for (const ref of ['1', id]) {
     const out = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-snapshot', ref, '--format', 'json'], { cwd: root, encoding: 'utf8' });
     assert.equal(out.status, 0, out.stderr);
     assert.equal(JSON.parse(out.stdout).taskId, id);

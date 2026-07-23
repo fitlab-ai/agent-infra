@@ -293,7 +293,7 @@ test("sandbox exec '#abc' fails branch validation without triggering docker IO",
   }
 });
 
-test("sandbox exec '#1' on registry miss throws short-ref error (Round 4: no ls-index fallback)", onPlatforms("linux", "darwin", "win32"), () => {
+test("sandbox exec rejects removed '#1' syntax without docker IO", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-enter-shortref-"));
 
   try {
@@ -319,7 +319,7 @@ test("sandbox exec '#1' on registry miss throws short-ref error (Round 4: no ls-
     assert.notEqual(result.status, 0);
     // Round 4: '#1' no longer falls back to "N-th running sandbox"; missing
     // registry entry throws a short-ref-not-found error before any docker call.
-    assert.match(String(result.stderr), /not in the active task registry/);
+    assert.match(String(result.stderr), /must use bare digits/);
 
     // No docker calls should have happened — resolution failed before listing
     // sandboxes.

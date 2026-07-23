@@ -3,11 +3,11 @@ import { parseTaskScope } from '../command-options.ts';
 import { resolveTaskContext } from '../resolve-ref.ts';
 import { enumerateArtifacts } from '../artifacts.ts';
 
-const USAGE = `Usage: ai task files [<N | #N | TASK-id> | --task <ref> | -t <ref>]
+const USAGE = `Usage: ai task files [<N | TASK-id> | --task <ref> | -t <ref>]
 
 Lists the artifacts in a task directory with stable numbers.
   Omit <ref>   Resolve the unique active task for the current branch.
-  <ref>   Bare numeric / '#N' short id, or a full TASK-YYYYMMDD-HHMMSS id.
+  <ref>   Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
 
 Columns: # (artifact number, usable with 'ai task cat') / NAME / SIZE (bytes) / MTIME
 `;
