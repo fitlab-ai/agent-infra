@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 import { INTERNAL_CLI_PATH, gitSafeEnv } from '../../helpers.ts';
 
@@ -22,7 +23,7 @@ test('release-workflow CLI rebuilds inspect phase from observable facts', () => 
     execFileSync('git', ['commit', '-qm', 'initial'], { cwd: root });
     fs.writeFileSync(preload, 'globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({}), text: async () => "" });\n');
     const result = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'release-workflow', 'inspect', '0.8.6'], {
-      cwd: root, encoding: 'utf8', env: { ...gitSafeEnv(), NODE_OPTIONS: `--import=${preload}` }
+      cwd: root, encoding: 'utf8', env: { ...gitSafeEnv(), NODE_OPTIONS: `--import=${pathToFileURL(preload).href}` }
     });
     assert.equal(result.status, 0, result.stderr);
     const payload = JSON.parse(result.stdout);
