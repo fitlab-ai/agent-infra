@@ -11,7 +11,8 @@ import {
   initIsolatedGitRepo,
   onPlatforms,
   pathWithPrependedBin,
-  read
+  read,
+  writeNodeCommandShim
 } from "../../helpers.ts";
 import {
   addWorktree,
@@ -977,10 +978,11 @@ test("validate-artifact platform-sync blocks after retry exhaustion on gh networ
     const taskDir = path.join(tempRoot, taskId);
     const binDir = path.join(tempRoot, "bin");
     const ghPath = path.join(binDir, "gh");
+    const ghScriptPath = path.join(binDir, "gh.js");
     write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
     write(path.join(taskDir, "code.md"), loadFixture("valid-code.md"));
-    write(ghPath, "#!/bin/sh\necho 'network timeout' >&2\nexit 1\n");
-    fs.chmodSync(ghPath, 0o755);
+    write(ghScriptPath, "console.error('network timeout');\nprocess.exit(1);\n");
+    writeNodeCommandShim(ghPath, ghScriptPath);
 
     const result = runValidator(["gate", "code-task", taskDir, "code.md"], {
       env: {
