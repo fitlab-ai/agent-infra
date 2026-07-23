@@ -408,8 +408,7 @@ agent-infra-internal task-verify {task-id} <verification-event> [--artifact <art
 - For language-specific artifact headings or anchors, keep only `required_sections` and language-specific `required_patterns` different between `config/verify.en.json` and `config/verify.zh-CN.json`
 - If a skill also prints next-step guidance, run the gate first and only show those instructions after the gate passes
 - Use `--format text` for readable user-facing final validation
-- `.agents/scripts/validate-artifact.js` is currently a migration-only internal implementation behind `task-verify`, not a compatibility entrypoint for skills; do not move detailed validation rules back into SKILL.md
-- This migration is not fully cleaned up yet; after 07/10–09/10 consolidate the platform adapters, 10/10 must remove the remaining direct CLI/parser, subprocess protocol bridge, and mechanical rules superseded by the typed core
+- `task-verify` executes the typed catalog/check registry in-process; skills must not duplicate validation algorithms or pass mechanical check sequences
 - Keep the gate output in the reply as fresh evidence; without output from the current run, do not claim completion
 
 ## FAQ

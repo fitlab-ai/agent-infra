@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-// @ts-expect-error Runtime adapters are distributed as JavaScript modules.
-import { evaluateRequiredChecks } from "../../../runtime/platform-adapters/required-checks.github.js";
+import { evaluateRequiredChecks } from "../../../lib/platform/verification-required.ts";
 
 const shared = {
   passResult: (type: string, message: string) => ({ type, status: "pass", message }),

@@ -12,7 +12,7 @@ description: >
 ## 行为边界 / 关键规则
 
 - 仅监控 + 自愈当前 PR 的 required checks；不做与失败 check 无关的改动。
-- 自愈会修改业务代码并 `git push` 到 PR 分支，但**推送前必须本地跑通相关测试**；修复尝试有硬上限（默认 2）；仅对可定位的代码层失败（lint / format / test / 类型 / 构建）自愈，非代码层（网络 / 权限 / 外部服务 / flaky）一律转求助出口。
+- 自愈通过 Git workflow intent 发布修复，但**发布前必须本地跑通相关测试**；修复上限与代码层分类授权不变。
 - 求助出口是「产出后停止」语义：停止本轮、输出阻塞说明、等待用户主动触发，**不**中途提问。
 - 裸数字 / `#NN` / `TASK-id` 入参一律按任务短号解析（见 `.agents/rules/task-short-id.md`）；PR 号只走 `--pr <number>` / PR URL / 省略（当前分支），不复用裸数字语法。
 - 执行本技能（任务锚定路径）后，必须更新 task.md。
@@ -54,7 +54,7 @@ description: >
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 的「自愈决策树」与 `.agents/rules/pr-checks-commands.md` 的「解析失败 run id 并拉日志」。
 
-对失败 check：调用 `platform-checks resolve-run`，再调用 `platform-checks logs` 获取保真日志并判定类别；本地修复前先读取 `.agents/rules/debugging-guide.md`，按四阶段流程定位根因。仅当属可定位的代码层失败时最小修复、运行对应测试通过后**暂存并提交本次修复再推送**（`git add` 仅相关文件 → 按 `.agents/rules/commit-and-pr.md` `git commit` → `git push`），将成功推送的 SHA 追加到 `repairCommits`，再回到步骤 2。达硬上限（默认 2）或 run 不可定位 → 转步骤 4。
+只对可定位代码层失败最小修复并测试；通过后依次调用 `git-workflow commit` 与 `git-workflow push`，仅记录远端复核成功的 SHA。达硬上限或 run 不可定位时转步骤 4。
 
 ### 4. 求助出口（产出后停止）
 

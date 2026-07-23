@@ -84,7 +84,7 @@ When an executor judges an item to be a key design decision that needs human rul
 - `evidence` points to the stable anchor `<artifact>#HD-N` (e.g. `plan-r2.md#HD-1`), not a drift-prone line number.
 - A human records the ruling with `ai decide <task-ref> <ordinal|ledger-id> <decision>`; the command flips the target row to `human-decided` and points `evidence` to an independent `HDR-N` ruling record.
 
-> View: `ai task decisions <task-ref>` lists all pending decisions from review stages; `ai task decisions <task-ref> <ordinal|ledger-id>` expands a single item's detail block. The read-only view and `ai decide` share candidate and selector semantics; the gate parser in `.agents/scripts/validate-artifact.js` is a separate implementation and must be kept semantically in sync by hand.
+> Viewing, deciding, and typed verification share the `lib/task/ledger.ts` domain semantics.
 
 ## post-review commit gate (code stage only)
 

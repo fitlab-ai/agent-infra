@@ -1,8 +1,8 @@
 // Shared parser for the task.md `## 审查分歧账本` (Review Disagreement Ledger).
 // Single source of truth for ledger row parsing across `ai task` commands
 // (log, decisions) — see the plan's D1 constraint "no third parser". The gate
-// parser in `.agents/scripts/validate-artifact.js` is a separate concern and
-// must be kept semantically in sync by hand (noted in review-handshake.md).
+// verification parsing consumes this module directly, so commands and gates
+// share the same table parser.
 
 // The ledger H2 heading is language-dependent (zh template / en template).
 import { parseTable } from './sections.ts';

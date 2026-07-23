@@ -22,8 +22,8 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 - **Review Time**: {timestamp}
 - **Scope**: {file-count and major modules}
 - **Review Baseline Commit**: {raw R captured once for this round} (diff base only; see `.agents/rules/review-handshake.md`)
-- **Reviewed Diff Fingerprint**: {raw node .agents/scripts/review-diff-fingerprint.js worktree "$R"}
-- **Reviewed Snapshot Tree**: {tree field from node .agents/scripts/review-diff-fingerprint.js worktree "$R" --format json}
+- **Reviewed Diff Fingerprint**: {fingerprint field from git-workflow snapshot}
+- **Reviewed Snapshot Tree**: {tree field from git-workflow snapshot}
 - **Overall Verdict**: {Approved / Changes Requested / Rejected} (pick exactly one; combined phrases will fail the verify gate)
 - **Findings (AI-actionable)**: 0 blockers, 0 majors, 0 minors / **Manual validation**: 0
 

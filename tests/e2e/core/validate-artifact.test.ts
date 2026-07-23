@@ -83,24 +83,6 @@ const gateCases = [
     }
   },
   {
-    name: "validate-artifact gate supports human-readable text output",
-    prefix: "agent-infra-gate-text-",
-    args(taskDir: string) {
-      return ["gate", "code-task", taskDir, "code.md", "--format", "text"];
-    },
-    prepare(taskDir: string) {
-      write(path.join(taskDir, "task.md"), buildTaskContent());
-      writeCodeFixture(taskDir);
-    },
-    assertResult(result: ReturnType<typeof runValidator>) {
-      assert.equal(result.status, 0, result.stderr);
-      assert.match(result.stdout, /^Verification: pass \| Skill: code-task$/m);
-      assert.match(result.stdout, /^\s+\[pass\] task-meta - /m);
-      assert.match(result.stdout, /^\s+\[pass\] artifact - /m);
-      assert.match(result.stdout, /^Result: 6 passed, 0 failed - All declared checks passed$/m);
-    }
-  },
-  {
     name: "validate-artifact gate passes for complete-task when completion checklist is fully checked",
     prefix: "agent-infra-complete-task-pass-",
     args(taskDir: string) {
@@ -590,14 +572,12 @@ test("template English rule contains the canonical PR summary structure", () => 
   assert.match(content, /### ✅ No Manual Verification Needed/, "should document the empty branch without the warning style");
 });
 
-test("verification assets are present in local and template trees", () => {
+test("typed verification core and skill configs are present", () => {
   [
-    ".agents/scripts/validate-artifact.js",
-    ".agents/scripts/platform-adapters/platform-sync.js",
-    ".agents/scripts/platform-adapters/required-checks.js",
-    "templates/.agents/scripts/validate-artifact.js",
-    "templates/.agents/scripts/platform-adapters/platform-sync.github.js",
-    "templates/.agents/scripts/platform-adapters/required-checks.github.js",
+    "lib/task/verification.ts",
+    "lib/task/verification-engine.ts",
+    "lib/platform/verification-sync.ts",
+    "lib/platform/verification-required.ts",
     ".agents/skills/code-task/config/verify.json",
     "templates/.agents/skills/code-task/config/verify.en.json",
     "templates/.agents/skills/code-task/config/verify.zh-CN.json"
@@ -605,19 +585,4 @@ test("verification assets are present in local and template trees", () => {
     assert.ok(exists(relativePath), `${relativePath} should exist`);
   });
 
-  assert.equal(
-    read(".agents/scripts/validate-artifact.js"),
-    read("templates/.agents/scripts/validate-artifact.js"),
-    "template validate-artifact.js should stay in sync with the local script"
-  );
-  assert.equal(
-    read(".agents/scripts/platform-adapters/platform-sync.js"),
-    read("templates/.agents/scripts/platform-adapters/platform-sync.github.js"),
-    "template platform adapter should stay in sync with the local adapter"
-  );
-  assert.equal(
-    read(".agents/scripts/platform-adapters/required-checks.js"),
-    read("templates/.agents/scripts/platform-adapters/required-checks.github.js"),
-    "template required-checks adapter should stay in sync with the local adapter"
-  );
 });

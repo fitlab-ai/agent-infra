@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import type { SpawnSyncReturns } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { verifyInProcess } from "../../../lib/task/verification-engine.ts";
 
 import {
   filePath,
@@ -14,8 +15,6 @@ import {
   read,
   writeNodeCommandShim
 } from "../../helpers.ts";
-
-const scriptPath = filePath(".agents/scripts/validate-artifact.js");
 
 type FrontmatterOverrides = Record<string, string | number | boolean | null | undefined>;
 type FixtureReplacements = Record<string, string | number | boolean | null | undefined>;
@@ -28,6 +27,7 @@ type PlatformSyncConfig = Record<string, unknown>;
 type ValidatorOptions = {
   env?: NodeJS.ProcessEnv;
   fakeGhPath?: string;
+  repositoryRoot?: string;
 };
 type ValidatorCheck = {
   type: string;
@@ -211,11 +211,20 @@ function runValidator(args: string[], options: ValidatorOptions = {}): SpawnSync
     }
   }
 
-  return spawnSync(process.execPath, [scriptPath, ...args], {
-    encoding: "utf8",
-    cwd: filePath("."),
-    env
-  });
+  const previous = process.env;
+  try {
+    process.env = env;
+    const mode = args[0] === "gate" ? "gate" : "checks";
+    const skillName = mode === "gate" ? args[1]! : args[args.indexOf("--skill") + 1]!;
+    const taskDir = mode === "gate" ? args[2]! : args[2]!;
+    const artifactFile = mode === "gate" ? args[3] && !args[3]!.startsWith("--") ? args[3] : undefined : args[3] && !args[3]!.startsWith("--") ? args[3] : undefined;
+    const payload = verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: mode === "checks" ? [args[1]!] : [], repositoryRoot: options.repositoryRoot ?? filePath(".") });
+    const statusName = mode === "gate" ? payload.gate : payload.status;
+    const status = ({ pass: 0, fail: 1, blocked: 2 } as Record<string, number>)[statusName] ?? 1;
+    return { pid: 0, output: [null, `${JSON.stringify(payload)}\n`, ""], stdout: `${JSON.stringify(payload)}\n`, stderr: "", status, signal: null, error: undefined } as SpawnSyncReturns<string>;
+  } finally {
+    process.env = previous;
+  }
 }
 
 function writeFakeGh(filePathname: string) {
@@ -378,7 +387,7 @@ async function runPlatformSyncAdapter(taskDir: string, config: PlatformSyncConfi
   }
 
   try {
-    const adapter = await import(pathToFileURL(filePath(".agents/scripts/platform-adapters/platform-sync.js")).href);
+    const adapter = await import(pathToFileURL(filePath("lib/platform/verification-sync.ts")).href);
     return adapter.check({ taskDir, config, artifactFile: undefined }, {
       repoRoot: filePath("."),
       loadTask(dir: string) {

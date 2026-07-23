@@ -81,7 +81,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 **必须执行，不得跳过。** 如果 task.md 中存在有效的 `issue_number`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --milestone specific`；里程碑推断、权限降级与幂等写入由 internal core 处理。
 
-> 若此步骤被跳过或收窄后 Issue milestone 仍为 `X.Y.x` 版本线，步骤 11 的 `validate-artifact` gate 会通过 `verify_milestone_specific` 截停本轮 `code-task`，要求重新收窄到具体版本（如 `0.7.1`）后再继续。
+> 若跳过或收窄后仍为 `X.Y.x`，步骤 11 的 `task-verify code.completed` 会通过 typed milestone check 截停本轮。
 
 ### 4. 确定模式与轮次
 

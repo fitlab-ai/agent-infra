@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { filePath, gitSafeEnv, initIsolatedGitRepo, onPlatforms } from "../../helpers.ts";
+import { gitSafeEnv, initIsolatedGitRepo, onPlatforms } from "../../helpers.ts";
+import { snapshotReview } from "../../../lib/git/review-snapshot.ts";
+import { resolvePostReviewGlobs } from "../../../lib/task/review-fingerprint.ts";
 import {
   buildTaskFrontmatter,
   parseValidatorPayload,
@@ -13,7 +15,6 @@ import {
 } from "./validate-artifact-helpers.ts";
 
 const TASK_ID = "TASK-20260328-000001";
-const fingerprintScript = filePath(".agents/scripts/review-diff-fingerprint.js");
 
 function git(repoRoot: string, args: string[]) {
   const result = spawnSync("git", args, { cwd: repoRoot, encoding: "utf8", env: gitSafeEnv() });
@@ -22,13 +23,7 @@ function git(repoRoot: string, args: string[]) {
 }
 
 function snapshot(repoRoot: string, baseline: string) {
-  const jsonResult = spawnSync(process.execPath, [fingerprintScript, "worktree", baseline, "--format", "json"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    env: gitSafeEnv()
-  });
-  assert.equal(jsonResult.status, 0, jsonResult.stderr || jsonResult.stdout);
-  return JSON.parse(jsonResult.stdout) as { fingerprint: string; tree: string };
+  return snapshotReview({ cwd: repoRoot, mode: "worktree", baseline, globs: resolvePostReviewGlobs({}, {}) });
 }
 
 function setupRepo(tempRoot: string) {

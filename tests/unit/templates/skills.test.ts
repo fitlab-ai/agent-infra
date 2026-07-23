@@ -88,6 +88,22 @@ test("all skill doc nested numbered lists are consecutive", () => {
   });
 });
 
+test("Git and release consumers keep write commands behind typed workflow intents", () => {
+  const consumers = ["commit", "create-pr", "watch-pr", "release", "post-release", "complete-task", "code-task"];
+  const mutatingGit = /^\s*git\s+(?:add|commit|push|tag|checkout|switch|reset)\b/m;
+  for (const skill of consumers) {
+    for (const relativePath of skillDocPaths(skill)) {
+      const blocks = [...read(relativePath).matchAll(/```(?:bash|sh|shell)?\s*\n([\s\S]*?)```/g)].map((match) => match[1]!);
+      for (const block of blocks) assert.doesNotMatch(block, mutatingGit, `${relativePath} must delegate Git writes`);
+    }
+  }
+  for (const relativePath of skillDocPaths("release")) assert.match(read(relativePath), /release-workflow/);
+  for (const relativePath of skillDocPaths("post-release")) assert.match(read(relativePath), /release-workflow/);
+  for (const skill of ["commit", "create-pr", "watch-pr"]) {
+    for (const relativePath of skillDocPaths(skill)) assert.match(read(relativePath), /git-workflow/);
+  }
+});
+
 test("complete-manual-validation skill docs retain completion control structures", () => {
   skillDocPaths("complete-manual-validation").forEach((relativePath) => {
     const content = read(relativePath);
@@ -1014,7 +1030,7 @@ test("review-code EN verify config locks down Overall Verdict value range", () =
     .find((p) => p.includes("Overall Verdict"));
   assert.ok(verdictPattern, "EN verify config should include an Overall Verdict pattern");
 
-  // 与 validate-artifact.js:366 同形（multiline, 无 case-insensitive）。
+  // 与 artifact check 的配置正则同形（multiline, 无 case-insensitive）。
   const re = new RegExp(verdictPattern, "m");
 
   // (A-a-en) 非规范组合短语：fail

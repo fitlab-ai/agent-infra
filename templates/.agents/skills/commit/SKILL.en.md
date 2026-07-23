@@ -60,7 +60,7 @@ Review status, diff, and recent history, then prepare a Conventional Commit with
 
 ## 4. Create the Commit
 
-First detect the restricted push-only scenario: clean worktree and index, highest-round `review-code` Approved, `HEAD == last_reviewed_commit`, an open PR bound to the branch, and PR head != HEAD. When it matches, create no empty commit and skip staging; continue to Step 5 for a normal `git push` without force. Otherwise stage specific files only and run `git commit` with the prepared message.
+Detect the restricted push-only scenario first. Otherwise write message, explicit paths, and expected HEAD/tree to JSON and call `agent-infra-internal git-workflow commit --input {file}`.
 
 If this commit is associated with a task and a `review-code` artifact exists, read the highest-round `review-code` artifact before committing:
 - If that artifact's `Overall Verdict` / `总体结论` is Approved, parse `R`, `F`, and `Reviewed Snapshot Tree` / `审查快照树` (`T`)
@@ -80,9 +80,7 @@ a. Detect whether the current branch (head) has an open PR per `.agents/rules/is
 
 b. On an open PR -> push the current branch:
 
-```bash
-git push
-```
+Use `agent-infra-internal git-workflow push --input {file}` for per-ref normal push and verification. Never force push.
 
 c. Safe degradation (never block an already completed `git commit`; only warn the user):
    - Platform unavailable / unauthenticated / detection failed / no open PR -> do not push; continue.

@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { filePath, gitSafeEnv, initIsolatedGitRepo } from "../../helpers.ts";
+import { gitSafeEnv, initIsolatedGitRepo } from "../../helpers.ts";
+import { snapshotReview } from "../../../lib/git/review-snapshot.ts";
+import { resolvePostReviewGlobs } from "../../../lib/task/review-fingerprint.ts";
 import {
   buildTaskContent,
   buildTaskFrontmatter,
@@ -15,8 +17,6 @@ import {
 } from "./validate-artifact-helpers.ts";
 
 const TASK_ID = "TASK-20260328-000001";
-
-const fingerprintScript = filePath(".agents/scripts/review-diff-fingerprint.js");
 
 function git(repoRoot: string, args: string[]) {
   const result = spawnSync("git", args, { cwd: repoRoot, encoding: "utf8", env: gitSafeEnv() });
@@ -33,13 +33,7 @@ function setupReviewRepo(tempRoot: string) {
   git(tempRoot, ["add", "-A"]);
   git(tempRoot, ["commit", "-qm", "reviewed"]);
   const baseline = git(tempRoot, ["rev-parse", "HEAD"]);
-  const result = spawnSync(process.execPath, [fingerprintScript, "worktree", baseline, "--format", "json"], {
-    cwd: tempRoot,
-    encoding: "utf8",
-    env: gitSafeEnv()
-  });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  const snapshot = JSON.parse(result.stdout) as { fingerprint: string; tree: string };
+  const snapshot = snapshotReview({ cwd: tempRoot, mode: "worktree", baseline, globs: resolvePostReviewGlobs({}, {}) });
   return {
     taskDir: path.join(tempRoot, TASK_ID),
     baseline,
@@ -139,8 +133,7 @@ test("review-code gate rejects combined zh-CN verdict phrase (A-a-zh)", async ()
     assert.ok(artifactCheck, "expected an artifact check in the payload");
     assert.equal(artifactCheck.status, "fail");
     const message = artifactCheck.message || "";
-    // 锚定到 validate-artifact.js 的固定模板字符串 "is missing required pattern: {pattern}"
-    // （见 .agents/scripts/validate-artifact.js:367）。如未来要改写错误信息，作者需同时更新此测试。
+    // 验证 artifact required pattern 失败会保持结构化 fail 结果。
     assert.match(
       message,
       /missing required pattern/,

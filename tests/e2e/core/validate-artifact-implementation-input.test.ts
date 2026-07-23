@@ -3,9 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-
-const VALIDATOR = path.resolve('.agents/scripts/validate-artifact.js');
+import { verifyInProcess } from '../../../lib/task/verification-engine.ts';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'implementation-input-gate-'));
@@ -41,18 +39,17 @@ id: TASK-20260101-000001
 }
 
 function run(taskDir: string) {
-  return spawnSync(process.execPath, [
-    VALIDATOR, 'check', 'implementation-input', taskDir, 'code-r2.md',
-    '--skill', 'code-task'
-  ], { encoding: 'utf8' });
+  return verifyInProcess({
+    mode: 'checks', skillName: 'code-task', taskDir, artifactFile: 'code-r2.md',
+    checks: ['implementation-input'], repositoryRoot: process.cwd()
+  }) as { status: string };
 }
 
 test('implementation input gate accepts matching action, report, and task row', () => {
   const f = fixture();
   try {
     const result = run(f.taskDir);
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(JSON.parse(result.stdout).status, 'pass');
+    assert.equal(result.status, 'pass');
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -69,8 +66,7 @@ test('implementation input gate rejects identity and consumption mismatches', ()
       const report = path.join(f.taskDir, replacement[0].startsWith('`') ? 'code-r2.md' : 'task.md');
       fs.writeFileSync(report, fs.readFileSync(report, 'utf8').replace(replacement[0], replacement[1]));
       const result = run(f.taskDir);
-      assert.equal(result.status, 1);
-      assert.equal(JSON.parse(result.stdout).status, 'fail');
+      assert.equal(result.status, 'fail');
     } finally {
       fs.rmSync(f.root, { recursive: true, force: true });
     }

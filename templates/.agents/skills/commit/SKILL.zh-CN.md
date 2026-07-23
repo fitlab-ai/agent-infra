@@ -60,7 +60,7 @@ git diff
 
 ## 4. 创建提交
 
-先判断是否命中受限 push-only 场景：工作树与暂存区均干净、最高轮 `review-code` 为 Approved、`HEAD == last_reviewed_commit`、当前分支绑定开放 PR 且 PR head != HEAD。命中时不创建空 commit，不进入下方暂存流程，直接转步骤 5 做普通 `git push`；不得 force push。否则只暂存明确列出的文件并执行 `git commit`。
+先判断受限 push-only 场景；否则把 message、显式路径、expected HEAD/tree 写入临时 JSON，并调用 `agent-infra-internal git-workflow commit --input {file}`。core 负责范围、敏感文件、暂存树和幂等校验。
 
 如果本次提交关联任务且存在 `review-code` 产物，在提交前读取最高轮 `review-code` 产物：
 - 若该产物 `总体结论` / `Overall Verdict` 为 Approved，解析 `R`、`F` 与 `审查快照树` / `Reviewed Snapshot Tree`（`T`）
@@ -80,9 +80,7 @@ a. 按 `.agents/rules/issue-pr-commands.md` 检测当前分支（head）是否�
 
 b. 命中开放 PR -> 推送当前分支：
 
-```bash
-git push
-```
+通过 `agent-infra-internal git-workflow push --input {file}` 逐 ref 普通推送并复核，禁止 force push。
 
 c. 安全降级（不阻塞已完成的 `git commit`，仅提示用户）：
    - 平台不可用 / 未认证 / 检测失败 / 未命中开放 PR -> 不推送，继续后续步骤。

@@ -69,7 +69,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 - 一次性记录 `R=$(git rev-parse HEAD)`；本轮报告、指纹和任务审查事实都复用该 R，禁止稍后重新读取 HEAD 代替
 - `git diff --binary "$R" -- <post-review-globs>` 覆盖已跟踪变更
 - `git ls-files -o --exclude-standard -z -- <post-review-globs>` 覆盖未跟踪新文件
-- `node .agents/scripts/review-diff-fingerprint.js worktree "$R" --format json` 一次生成审查差异指纹 `F` 与审查快照树 `T`，并写入报告
+- 把 `mode=worktree`、基线 `R` 写入临时 JSON，调用 `agent-infra-internal git-workflow snapshot --input {file}` 一次生成审查差异指纹 `F` 与审查快照树 `T`，并写入报告
 
 > 详细审查标准、严重程度划分和 reviewer 关注点见 `reference/review-criteria.md`。执行此步骤前先读取 `reference/review-criteria.md`。
 > 测试审查硬门禁：当 `git diff` 触及测试文件时，必须先读取 `.agents/rules/testing-discipline.md` 并逐条核对（尤其"正向已覆盖时不应再加反向断言"）。

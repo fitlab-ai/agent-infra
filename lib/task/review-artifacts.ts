@@ -5,11 +5,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export function escapeRegExp(value) {
+export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function maxRound(entries, stem) {
+export function maxRound(entries: string[], stem: string): number {
   let max = 0;
   for (const entry of entries) {
     if (entry === `${stem}.md`) {
@@ -25,11 +25,11 @@ export function maxRound(entries, stem) {
   return max;
 }
 
-export function artifactName(stem, round) {
+export function artifactName(stem: string, round: number): string {
   return round === 1 ? `${stem}.md` : `${stem}-r${round}.md`;
 }
 
-export function normalizeVerdict(raw) {
+export function normalizeVerdict(raw: unknown): "Approved" | "Changes Requested" | "Rejected" | "" {
   const value = String(raw).trim().toLowerCase();
   if (value === "通过" || value === "approved") {
     return "Approved";
@@ -43,12 +43,12 @@ export function normalizeVerdict(raw) {
   return "";
 }
 
-export function extractSection(content, names) {
+export function extractSection(content: string, names: string[]): string {
   const lines = content.split(/\r?\n/);
   const nameSet = new Set(names);
   const start = lines.findIndex((line) => {
     const match = line.trim().match(/^##\s+(.+?)\s*$/);
-    return match ? nameSet.has(match[1]) : false;
+    return match ? nameSet.has(match[1]!) : false;
   });
 
   if (start === -1) {
@@ -57,7 +57,7 @@ export function extractSection(content, names) {
 
   const sectionLines = [];
   for (let index = start + 1; index < lines.length; index += 1) {
-    if (/^##\s+/.test(lines[index])) {
+    if (/^##\s+/.test(lines[index]!)) {
       break;
     }
     sectionLines.push(lines[index]);
@@ -68,7 +68,7 @@ export function extractSection(content, names) {
 // Parse the canonical verdict out of a review-* artifact.
 // Returns { ok, verdict, message }. Verdict collapses Approved into
 // "Approved-with-issues" when the findings counts are non-zero.
-export function parseVerdict(reviewPath) {
+export function parseVerdict(reviewPath: string) {
   if (!fs.existsSync(reviewPath)) {
     return { ok: false, verdict: null, message: `Review artifact not found: ${path.basename(reviewPath)}` };
   }
@@ -90,7 +90,7 @@ export function parseVerdict(reviewPath) {
     return {
       ok: false,
       verdict: null,
-      message: `unrecognized verdict '${verdictMatch[1].trim()}' in ${fileName}`
+      message: `unrecognized verdict '${verdictMatch[1]!.trim()}' in ${fileName}`
     };
   }
 
@@ -103,7 +103,7 @@ export function parseVerdict(reviewPath) {
     return { ok: false, verdict, message: `cannot parse findings count in ${fileName}` };
   }
 
-  const counts = findingsMatch[1].match(/(\d+)\s*(?:阻塞项|blockers?).*?(\d+)\s*(?:主要|majors?).*?(\d+)\s*(?:次要|minors?)/i);
+  const counts = findingsMatch[1]!.match(/(\d+)\s*(?:阻塞项|blockers?).*?(\d+)\s*(?:主要|majors?).*?(\d+)\s*(?:次要|minors?)/i);
   if (!counts) {
     return { ok: false, verdict, message: `cannot parse findings count in ${fileName}` };
   }

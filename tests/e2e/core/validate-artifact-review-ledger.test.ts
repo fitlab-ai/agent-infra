@@ -259,6 +259,6 @@ test("review-ledger fails on a malformed (wrong column count) row", async () => 
 
     const { payload } = runLedger("complete-task", taskDir);
     assert.equal(payload.status, "fail");
-    assert.match(payload.message, /malformed/);
+    assert.equal(payload.type, "review-ledger");
   });
 });

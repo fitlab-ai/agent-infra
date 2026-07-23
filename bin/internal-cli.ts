@@ -11,6 +11,16 @@ if (major < 22 || (major === 22 && minor < 9)) {
 const command = process.argv[2] || '';
 
 switch (command) {
+  case 'git-workflow': {
+    const { gitWorkflow } = await import('../lib/internal/git-workflow.ts');
+    gitWorkflow(process.argv.slice(3));
+    break;
+  }
+  case 'release-workflow': {
+    const { releaseWorkflow } = await import('../lib/internal/release-workflow.ts');
+    await releaseWorkflow(process.argv.slice(3));
+    break;
+  }
   case 'platform-context': {
     const { platformContext } = await import('../lib/internal/platform-context.ts');
     platformContext(process.argv.slice(3));

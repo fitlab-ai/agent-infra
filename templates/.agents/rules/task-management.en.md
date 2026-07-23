@@ -23,9 +23,8 @@ Map user intent to the corresponding workflow command:
 
 - Runtime skills that record git, task-directory, and task.md tail evidence must call `agent-infra-internal task-snapshot {task-id} --format text`; they must not resolve short ids, scan workspaces, or reconstruct the three observations themselves.
 - Runtime skills that execute completion gates must call `agent-infra-internal task-verify {task-id} <verification-event> [--artifact <artifact>] --format text`; the typed verification catalog is the sole mapping from business event to skill, workspace, gate/check order, and artifact family.
-- During the series migration, `.agents/scripts/validate-artifact.js` remains an internal validation implementation invoked by `task-verify`, not a compatibility entrypoint for skills; skills declare a business event instead of passing task directories, skill names, or special check sequences.
+- `task-verify` executes the typed catalog/check registry in-process; skills declare business events only.
 - Both entrypoints are read-only. Verification exits remain `0=pass`, `1=fail`, and `2=blocked`; network or platform blocking must never be downgraded to success.
-- This migration is not fully cleaned up yet: after 07/10–09/10 consolidate the platform adapters, 10/10 must remove the validator's remaining direct CLI/parser, subprocess protocol bridge, and mechanical rules superseded by the typed core.
 
 ## Required State Updates by Command
 
@@ -50,9 +49,9 @@ Map user intent to the corresponding workflow command:
 
 `analyze-task`, `review-analysis`, `plan-task`, `review-plan`, `code-task`, and `review-code` must declare business events through `agent-infra-internal task-event`. The event core generates `current_step`, `assigned_to`, `updated_at`, `agent_infra_version`, and the log text below. Other lifecycle skills not yet migrated continue to follow this textual protocol.
 
-> This section is the sole authoritative definition of the started/done dual marker. The skills, the renderer (`lib/task/commands/log.ts`), and the validator (`.agents/scripts/validate-artifact.js`) all defer to it; keep this section in sync when changing any of them.
+> This section is authoritative for skills, the renderer, and typed verification checks.
 
-**Line grammar is unchanged**: both started and done use the existing entry grammar `- {YYYY-MM-DD HH:mm:ss±HH:MM} — **{action}** by {agent} — {note}`, so the parsing regexes (`log.ts:ENTRY_RE` and `validate-artifact.js:ACTIVITY_LOG_PATTERN`) need no change.
+**Line grammar is unchanged** and shared by the log renderer and verification activity parser.
 
 - **started line** (written when the step begins): the action suffixes the existing base with ` [started]`, note is `started`:
   `- {time} — **{base} [started]** by {agent} — started`

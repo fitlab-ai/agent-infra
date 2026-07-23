@@ -62,7 +62,7 @@ Read the PR template through `.agents/rules/issue-pr-commands.md`, review recent
 
 ### 4. Check Remote Branch State
 
-Confirm whether the current branch already has an upstream. Push with `git push -u origin <current-branch>` when required.
+Use `agent-infra-internal git-workflow inspect` for upstream/remote facts and `git-workflow push` for a verified push.
 
 ### 5. Create or Recover the PR
 

@@ -3,13 +3,13 @@ import path from "node:path";
 import process from "node:process";
 import { execFileSync } from "node:child_process";
 
-import { createGitHubClient } from "../../dist/lib/platform/github-client.js";
-import { resolvePlatformContext } from "../../dist/lib/platform/context.js";
-import { hasCheckedRequirement, resolveRequirementSection } from "../../dist/lib/platform/issue-metadata.js";
-import { inspectGitHubIssueMetadata, requirementSectionAnchors } from "../../dist/lib/platform/issues.js";
-import { listRemoteComments } from "../../dist/lib/platform/issue-comments.js";
-import { taskTypeLabel } from "../../dist/lib/platform/metadata-labels.js";
-import { inspectGitHubPullRequest } from "../../dist/lib/platform/pull-requests.js";
+import { createGitHubClient } from "./github-client.ts";
+import { resolvePlatformContext } from "./context.ts";
+import { hasCheckedRequirement, resolveRequirementSection } from "./issue-metadata.ts";
+import { inspectGitHubIssueMetadata, requirementSectionAnchors } from "./issues.ts";
+import { listRemoteComments } from "./issue-comments.ts";
+import { taskTypeLabel } from "./metadata-labels.ts";
+import { inspectGitHubPullRequest } from "./pull-requests.ts";
 
 const CHECK_TYPE = "platform-sync";
 const VERSION_LINE_REGEX = /^[0-9]+\.[0-9]+\.x$/;
@@ -19,18 +19,18 @@ const FRONTMATTER_FIELD_MAP = {
   start_date: "Start date",
   target_date: "Target date"
 };
-const OPTION_LOCALIZATION = {
+const OPTION_LOCALIZATION: Record<string, string> = {
   "紧急": "Urgent",
   "高": "High",
   "中": "Medium",
   "低": "Low"
 };
 
-let activeShared = null;
+let activeShared: any = null;
 let repoRoot = "";
 const githubClient = createGitHubClient();
 
-export function getDefaults() {
+export function getDefaults(): any {
   return {
     statusLabels: {
       pendingDesignWork: "status: pending-design-work",
@@ -50,7 +50,7 @@ export function getDefaults() {
   };
 }
 
-function getShared() {
+function getShared(): any {
   if (!activeShared) {
     throw new Error("platform-sync adapter shared utilities are unavailable");
   }
@@ -58,51 +58,51 @@ function getShared() {
   return activeShared;
 }
 
-function loadTask(...args) {
+function loadTask(...args: any[]): any {
   return getShared().loadTask(...args);
 }
 
-function getCheckedRequirements(...args) {
+function getCheckedRequirements(...args: any[]): any {
   return getShared().getCheckedRequirements(...args);
 }
 
-function normalizeContent(...args) {
+function normalizeContent(...args: any[]): any {
   return getShared().normalizeContent(...args);
 }
 
-function isBlank(...args) {
+function isBlank(...args: any[]): any {
   return getShared().isBlank(...args);
 }
 
-function escapeRegExp(...args) {
+function escapeRegExp(...args: any[]): any {
   return getShared().escapeRegExp(...args);
 }
 
-function passResult(...args) {
+function passResult(...args: any[]): any {
   return getShared().passResult(...args);
 }
 
-function failResult(...args) {
+function failResult(...args: any[]): any {
   return getShared().failResult(...args);
 }
 
-function blockedResult(...args) {
+function blockedResult(...args: any[]): any {
   return getShared().blockedResult(...args);
 }
 
-function safeStat(...args) {
+function safeStat(...args: any[]): any {
   return getShared().safeStat(...args);
 }
 
-function parseIssueNumber(...args) {
+function parseIssueNumber(...args: any[]): any {
   return getShared().parseIssueNumber(...args);
 }
 
-function parsePrNumber(...args) {
+function parsePrNumber(...args: any[]): any {
   return getShared().parsePrNumber(...args);
 }
 
-export function check({ taskDir, config, artifactFile }, shared) {
+export function check({ taskDir, config, artifactFile }: any, shared: any): any {
   activeShared = shared;
   repoRoot = shared.repoRoot;
   const context = buildSyncContext({ taskDir, config, artifactFile });
@@ -144,7 +144,7 @@ export function check({ taskDir, config, artifactFile }, shared) {
   return passResult(CHECK_TYPE, `GitHub sync checks passed for Issue #${context.issueNumber}`);
 }
 
-function buildSyncContext({ taskDir, config, artifactFile }) {
+function buildSyncContext({ taskDir, config, artifactFile }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return { earlyReturn: failResult(CHECK_TYPE, task.message) };
@@ -208,7 +208,7 @@ function buildSyncContext({ taskDir, config, artifactFile }) {
   };
 }
 
-function resolveExpectedValues(config) {
+function resolveExpectedValues(config: any): any {
   const defaults = getDefaults();
   const statusLabel = resolveDefaultValue({
     collection: defaults.statusLabels,
@@ -248,7 +248,7 @@ function resolveExpectedValues(config) {
   };
 }
 
-function resolveDefaultValue({ collection, key, value, configKey }) {
+function resolveDefaultValue({ collection, key, value, configKey }: any): any {
   if (!key) {
     return { ok: true, value: value || null };
   }
@@ -261,7 +261,7 @@ function resolveDefaultValue({ collection, key, value, configKey }) {
   return { ok: true, value: resolvedValue };
 }
 
-function fetchRemoteData(context) {
+function fetchRemoteData(context: any): any {
   const sharedIssue = inspectGitHubIssueMetadata(
     githubClient,
     context.upstreamRepo,
@@ -428,11 +428,11 @@ function fetchRemoteData(context) {
   };
 }
 
-function mapTaskTypeToLabel(taskType) {
+function mapTaskTypeToLabel(taskType: any): any {
   return taskTypeLabel(taskType);
 }
 
-function shouldFetchComments(config) {
+function shouldFetchComments(config: any): any {
   return Boolean(
     config.expected_comment_marker
     || config.expected_comment_marker_key
@@ -444,7 +444,7 @@ function shouldFetchComments(config) {
   );
 }
 
-function flattenComments(value) {
+function flattenComments(value: any): any {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -452,7 +452,7 @@ function flattenComments(value) {
   return value.flatMap((page) => Array.isArray(page) ? page : []);
 }
 
-function checkStatusLabel(context, remoteData) {
+function checkStatusLabel(context: any, remoteData: any): any {
   if (!context.expectedStatusLabel || !context.hasTriage) {
     return null;
   }
@@ -472,7 +472,7 @@ function checkStatusLabel(context, remoteData) {
   );
 }
 
-function checkClosedIssueStatusLabels(context, remoteData) {
+function checkClosedIssueStatusLabels(context: any, remoteData: any): any {
   if (!context.config.verify_closed_issue_has_no_status_labels) {
     return null;
   }
@@ -482,7 +482,7 @@ function checkClosedIssueStatusLabels(context, remoteData) {
   }
 
   const statusLabels = extractLabelNames(remoteData.issue.labels)
-    .filter((label) => label.startsWith("status:"));
+    .filter((label: any) => label.startsWith("status:"));
   if (statusLabels.length === 0) {
     return null;
   }
@@ -493,7 +493,7 @@ function checkClosedIssueStatusLabels(context, remoteData) {
   );
 }
 
-function checkCommentMarker(context, remoteData) {
+function checkCommentMarker(context: any, remoteData: any): any {
   if (!context.marker) {
     return null;
   }
@@ -509,7 +509,7 @@ function checkCommentMarker(context, remoteData) {
   );
 }
 
-function checkPrCommentMarker(context, remoteData) {
+function checkPrCommentMarker(context: any, remoteData: any): any {
   if (!context.prMarker) {
     return null;
   }
@@ -525,7 +525,7 @@ function checkPrCommentMarker(context, remoteData) {
   );
 }
 
-function checkPrCommentLastCommit(context, remoteData) {
+function checkPrCommentLastCommit(context: any, remoteData: any): any {
   if (!context.config.verify_pr_comment_last_commit_matches_head) {
     return null;
   }
@@ -555,7 +555,7 @@ function checkPrCommentLastCommit(context, remoteData) {
 
   const expectedHead = String(remoteData.prHeadSha || "").trim();
   if (!expectedHead) return blockedResult(CHECK_TYPE, "Unable to resolve the PR head SHA", "network_error");
-  const actualHead = match[1].trim();
+  const actualHead = match[1]!.trim();
   if (expectedHead === actualHead) {
     return null;
   }
@@ -566,7 +566,7 @@ function checkPrCommentLastCommit(context, remoteData) {
   );
 }
 
-function checkPrCommentRequiredPatterns(context, remoteData) {
+function checkPrCommentRequiredPatterns(context: any, remoteData: any): any {
   const patterns = context.config.expected_pr_comment_required_patterns || [];
   if (!Array.isArray(patterns) || patterns.length === 0) {
     return null;
@@ -601,7 +601,7 @@ function checkPrCommentRequiredPatterns(context, remoteData) {
   return null;
 }
 
-function checkCommentContent(context, remoteData) {
+function checkCommentContent(context: any, remoteData: any): any {
   if (!context.config.verify_comment_content) {
     return null;
   }
@@ -636,7 +636,7 @@ function checkCommentContent(context, remoteData) {
   );
 }
 
-function checkTaskCommentContent(context, remoteData) {
+function checkTaskCommentContent(context: any, remoteData: any): any {
   if (!context.config.verify_task_comment_content) {
     return null;
   }
@@ -663,7 +663,7 @@ function checkTaskCommentContent(context, remoteData) {
   );
 }
 
-function checkPrTypeLabel(context, remoteData) {
+function checkPrTypeLabel(context: any, remoteData: any): any {
   if (!context.config.verify_pr_type_label || !context.hasTriage || !context.prNumber || !remoteData.prLabels) {
     return null;
   }
@@ -683,16 +683,16 @@ function checkPrTypeLabel(context, remoteData) {
   );
 }
 
-function checkInLabelsMatchPr(context, remoteData) {
+function checkInLabelsMatchPr(context: any, remoteData: any): any {
   if (!context.config.verify_in_labels_match_pr || !context.hasTriage || !context.prNumber || !remoteData.prLabels) {
     return null;
   }
 
   const issueInLabels = extractLabelNames(remoteData.issue.labels)
-    .filter((label) => label.startsWith("in:"))
+    .filter((label: any) => label.startsWith("in:"))
     .sort();
   const prInLabels = remoteData.prLabels
-    .filter((label) => label.startsWith("in:"))
+    .filter((label: any) => label.startsWith("in:"))
     .sort();
 
   if (arraysEqual(issueInLabels, prInLabels)) {
@@ -705,7 +705,7 @@ function checkInLabelsMatchPr(context, remoteData) {
   );
 }
 
-function checkInLabelsComputed(context, remoteData) {
+function checkInLabelsComputed(context: any, remoteData: any): any {
   if (!context.config.verify_in_labels_computed || !context.hasTriage) {
     return null;
   }
@@ -722,7 +722,7 @@ function checkInLabelsComputed(context, remoteData) {
   }
 
   const actualInLabels = extractLabelNames(remoteData.issue.labels)
-    .filter((label) => label.startsWith("in:"))
+    .filter((label: any) => label.startsWith("in:"))
     .sort();
 
   if (arraysEqual(expectedInLabels.labels, actualInLabels)) {
@@ -736,7 +736,7 @@ function checkInLabelsComputed(context, remoteData) {
   );
 }
 
-function checkSyncedRequirements(context, remoteData) {
+function checkSyncedRequirements(context: any, remoteData: any): any {
   if (!context.config.sync_checked_requirements || !context.hasTriage) {
     return null;
   }
@@ -762,7 +762,7 @@ function checkSyncedRequirements(context, remoteData) {
   }
   const requirementBody = issueBody.slice(resolution.bodyStart, resolution.bodyEnd);
   const missingRequirements = checkedRequirements.filter(
-    (item) => !hasCheckedRequirement(requirementBody, item)
+    (item: any) => !hasCheckedRequirement(requirementBody, item)
   );
   if (missingRequirements.length === 0) {
     return null;
@@ -774,7 +774,7 @@ function checkSyncedRequirements(context, remoteData) {
   );
 }
 
-function checkIssueType(context, remoteData) {
+function checkIssueType(context: any, remoteData: any): any {
   if (!context.config.verify_issue_type || !context.hasPush) {
     return null;
   }
@@ -805,7 +805,7 @@ function checkIssueType(context, remoteData) {
   return null;
 }
 
-function checkIssueFields(context, remoteData) {
+function checkIssueFields(context: any, remoteData: any): any {
   if (!context.config.verify_issue_fields || !context.hasPush) {
     return null;
   }
@@ -844,7 +844,7 @@ function checkIssueFields(context, remoteData) {
   return null;
 }
 
-function checkPrAssignee(context, remoteData) {
+function checkPrAssignee(context: any, remoteData: any): any {
   if (!context.config.verify_pr_assignee || !context.hasPush || !context.prNumber) {
     return null;
   }
@@ -859,7 +859,7 @@ function checkPrAssignee(context, remoteData) {
   return null;
 }
 
-function checkMilestone(context, remoteData) {
+function checkMilestone(context: any, remoteData: any): any {
   if (!context.config.verify_milestone || !context.hasTriage) {
     return null;
   }
@@ -897,48 +897,48 @@ function checkMilestone(context, remoteData) {
   return null;
 }
 
-function findCommentByMarker(comments, marker) {
-  return (comments || []).find((comment) => typeof comment.body === "string" && comment.body.includes(marker)) || null;
+function findCommentByMarker(comments: any, marker: any): any {
+  return (comments || []).find((comment: any) => typeof comment.body === "string" && comment.body.includes(marker)) || null;
 }
 
-function isGeneratedMarkerLine(line) {
+function isGeneratedMarkerLine(line: any): any {
   return line.startsWith("<!--") && line.endsWith("-->");
 }
 
-function extractCommentBody(commentBody) {
+function extractCommentBody(commentBody: any): any {
   const lines = String(commentBody || "").split(/\r?\n/);
 
   let start = 0;
-  while (start < lines.length && (lines[start].trim() === "" || isGeneratedMarkerLine(lines[start].trim()))) {
+  while (start < lines.length && (lines[start]!.trim() === "" || isGeneratedMarkerLine(lines[start]!.trim()))) {
     start += 1;
   }
 
-  if (start < lines.length && lines[start].startsWith("## ")) {
+  if (start < lines.length && lines[start]!.startsWith("## ")) {
     start += 1;
   }
 
-  while (start < lines.length && lines[start].trim() === "") {
+  while (start < lines.length && lines[start]!.trim() === "") {
     start += 1;
   }
 
-  if (start < lines.length && /^> \*\*.+\*\* · .+$/.test(lines[start].trim())) {
+  if (start < lines.length && /^> \*\*.+\*\* · .+$/.test(lines[start]!.trim())) {
     start += 1;
   }
 
-  while (start < lines.length && lines[start].trim() === "") {
+  while (start < lines.length && lines[start]!.trim() === "") {
     start += 1;
   }
 
   let end = lines.length;
   for (let index = lines.length - 1; index >= start; index -= 1) {
-    const trimmed = lines[index].trim();
+    const trimmed = lines[index]!.trim();
     if (trimmed === "") {
       continue;
     }
 
     if (/^\*.*\*$/.test(trimmed)) {
       end = index;
-      if (end > start && lines[end - 1].trim() === "---") {
+      if (end > start && lines[end - 1]!.trim() === "---") {
         end -= 1;
       }
     }
@@ -948,7 +948,7 @@ function extractCommentBody(commentBody) {
   return lines.slice(start, end).join("\n");
 }
 
-function buildExpectedTaskBody(taskContent) {
+function buildExpectedTaskBody(taskContent: any): any {
   const frontmatterMatch = taskContent.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (!frontmatterMatch) {
     return taskContent.trim();
@@ -968,7 +968,7 @@ function buildExpectedTaskBody(taskContent) {
   ].join("\n").trim();
 }
 
-function buildTaskFrontmatterSummary() {
+function buildTaskFrontmatterSummary(): any {
   const language = loadProjectLanguage();
   if (language === "en" || language === "en-US") {
     return "<details><summary>Metadata (frontmatter)</summary>";
@@ -977,7 +977,7 @@ function buildTaskFrontmatterSummary() {
   return "<details><summary>元数据 (frontmatter)</summary>";
 }
 
-function loadProjectLanguage() {
+function loadProjectLanguage(): any {
   const override = process.env.VALIDATE_ARTIFACT_LANGUAGE;
   if (!isBlank(override)) {
     return String(override).trim();
@@ -996,14 +996,14 @@ function loadProjectLanguage() {
   }
 }
 
-function buildCommentContentMismatchMessage(fileStem, issueNumber, localContent, commentContent) {
+function buildCommentContentMismatchMessage(fileStem: any, issueNumber: any, localContent: any, commentContent: any): any {
   const diffIndex = firstDifferenceIndex(localContent, commentContent);
   const position = indexToLineColumn(localContent, diffIndex);
 
   return `Comment content mismatch for '${fileStem}' on Issue #${issueNumber}: local file has ${localContent.length} chars, comment body has ${commentContent.length} chars (first difference near char ${diffIndex + 1}, line ${position.line}, column ${position.column})`;
 }
 
-function firstDifferenceIndex(left, right) {
+function firstDifferenceIndex(left: any, right: any): any {
   const limit = Math.max(left.length, right.length);
   for (let index = 0; index < limit; index += 1) {
     if (left[index] !== right[index]) {
@@ -1014,7 +1014,7 @@ function firstDifferenceIndex(left, right) {
   return limit;
 }
 
-function indexToLineColumn(text, index) {
+function indexToLineColumn(text: any, index: any): any {
   const prefix = text.slice(0, Math.min(index, text.length));
   const lines = prefix.split("\n");
   return {
@@ -1023,14 +1023,14 @@ function indexToLineColumn(text, index) {
   };
 }
 
-function extractLabelNames(labels) {
+function extractLabelNames(labels: any): any {
   return (labels || [])
-    .map((label) => typeof label === "string" ? label : label?.name)
-    .filter((label) => typeof label === "string" && label.length > 0);
+    .map((label: any) => typeof label === "string" ? label : label?.name)
+    .filter((label: any) => typeof label === "string" && label.length > 0);
 }
 
-function mapTaskTypeToIssueType(taskType) {
-  const mapping = {
+function mapTaskTypeToIssueType(taskType: any): any {
+  const mapping: Record<string, string> = {
     bug: "Bug",
     bugfix: "Bug",
     enhancement: "Feature",
@@ -1049,7 +1049,7 @@ function mapTaskTypeToIssueType(taskType) {
 
 const ISSUE_FIELDS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){issueType{name pinnedFields{__typename ... on IssueFieldSingleSelect{id name} ... on IssueFieldDate{id name} ... on IssueFieldText{id name} ... on IssueFieldNumber{id name}}} issueFieldValues(first:50){nodes{__typename ... on IssueFieldSingleSelectValue{name optionId field{... on IssueFieldSingleSelect{name}}} ... on IssueFieldDateValue{value field{... on IssueFieldDate{name}}} ... on IssueFieldTextValue{value field{... on IssueFieldText{name}}} ... on IssueFieldNumberValue{value field{... on IssueFieldNumber{name}}}}}}}}`;
 
-function normalizeIssueFields(payload) {
+function normalizeIssueFields(payload: any): any {
   const issue = payload?.data?.repository?.issue;
   const pinnedFields = Array.isArray(issue?.issueType?.pinnedFields)
     ? issue.issueType.pinnedFields
@@ -1059,7 +1059,7 @@ function normalizeIssueFields(payload) {
     : [];
   const pinnedNames = new Set(
     pinnedFields
-      .map((field) => typeof field?.name === "string" ? field.name : "")
+      .map((field: any) => typeof field?.name === "string" ? field.name : "")
       .filter(Boolean)
   );
   const normalizedValues = new Map();
@@ -1086,7 +1086,7 @@ function normalizeIssueFields(payload) {
   return { pinnedNames, values: normalizedValues };
 }
 
-function normalizeExpectedIssueField(metadataKey, rawValue) {
+function normalizeExpectedIssueField(metadataKey: any, rawValue: any): any {
   const value = String(rawValue || "").trim();
   if (!value) {
     return null;
@@ -1099,30 +1099,30 @@ function normalizeExpectedIssueField(metadataKey, rawValue) {
   return { kind: "single-select", value: normalizeOptionName(value) };
 }
 
-function normalizeOptionName(value) {
+function normalizeOptionName(value: any): any {
   const normalized = String(value || "").trim();
   return OPTION_LOCALIZATION[normalized] || normalized;
 }
 
-function normalizeDateValue(value) {
+function normalizeDateValue(value: any): any {
   const normalized = String(value || "").trim();
   const match = normalized.match(/^\d{4}-\d{2}-\d{2}/);
   return match ? match[0] : normalized;
 }
 
-function arraysEqual(left, right) {
+function arraysEqual(left: any, right: any): any {
   if (left.length !== right.length) {
     return false;
   }
 
-  return left.every((value, index) => value === right[index]);
+  return left.every((value: any, index: any) => value === right[index]);
 }
 
-function formatLabelList(labels) {
+function formatLabelList(labels: any): any {
   return labels.length > 0 ? labels.join(", ") : "none";
 }
 
-function computeExpectedInLabels(taskDir) {
+function computeExpectedInLabels(taskDir: any): any {
   const changedFilesResult = gitText(["diff", "main...HEAD", "--name-only"], taskDir);
   if (!changedFilesResult.ok) {
     return changedFilesResult;
@@ -1138,12 +1138,12 @@ function computeExpectedInLabels(taskDir) {
     return mapping;
   }
 
-  if (Object.keys(mapping.value).length > 0) {
+  if (Object.keys(mapping.value ?? {}).length > 0) {
     const labels = new Set();
 
     for (const file of changedFiles) {
-      for (const [label, prefixes] of Object.entries(mapping.value)) {
-        if (prefixes.some((prefix) => file.startsWith(prefix))) {
+      for (const [label, prefixes] of Object.entries(mapping.value ?? {}) as Array<[string, string[]]>) {
+        if (prefixes.some((prefix: any) => file.startsWith(prefix))) {
           labels.add(`in: ${label}`);
         }
       }
@@ -1166,7 +1166,7 @@ function computeExpectedInLabels(taskDir) {
 
   const repoInLabels = new Set(
     extractLabelNames(repoLabelsResult.value)
-      .filter((label) => label.startsWith("in:"))
+      .filter((label: any) => label.startsWith("in:"))
   );
 
   if (repoInLabels.size === 0) {
@@ -1189,7 +1189,7 @@ function computeExpectedInLabels(taskDir) {
   return { ok: true, labels: Array.from(labels).sort(), mode: "fallback" };
 }
 
-function loadInLabelMapping() {
+function loadInLabelMapping(): any {
   const configPath = path.join(repoRoot, ".agents", ".airc.json");
   if (!fs.existsSync(configPath)) {
     return { ok: true, value: {} };
@@ -1202,7 +1202,7 @@ function loadInLabelMapping() {
       return { ok: true, value: {} };
     }
 
-    const normalized = {};
+    const normalized: Record<string, string[]> = {};
     for (const [label, prefixes] of Object.entries(mapping)) {
       if (!Array.isArray(prefixes)) {
         continue;
@@ -1217,14 +1217,14 @@ function loadInLabelMapping() {
     }
 
     return { ok: true, value: normalized };
-  } catch (error) {
+  } catch (error: any) {
     return { ok: false, type: "check_failed", message: `Unable to parse .agents/.airc.json: ${error.message}` };
   }
 }
 
 // === GitHub API ===
 
-function detectRepoOwnerType(upstreamRepo, taskDir) {
+function detectRepoOwnerType(upstreamRepo: any, taskDir: any): any {
   const ownerTypeResult = withRetry(() => ghText([
     "api",
     `repos/${upstreamRepo}`,
@@ -1239,19 +1239,19 @@ function detectRepoOwnerType(upstreamRepo, taskDir) {
   return ownerTypeResult.value || "unknown";
 }
 
-function ghJson(args, cwd) {
+function ghJson(args: any, cwd: any): any {
   return mapClientResult(githubClient.json(args, { cwd }));
 }
 
-function ghText(args, cwd) {
+function ghText(args: any, cwd: any): any {
   return mapClientResult(githubClient.text(args, { cwd }));
 }
 
-function ghPaginatedJson(args, cwd) {
+function ghPaginatedJson(args: any, cwd: any): any {
   return ghJson(args, cwd);
 }
 
-function mapClientResult(result) {
+function mapClientResult(result: any): any {
   if (result.ok) return result;
   const checkFailed = ["RESOURCE_NOT_FOUND", "PERMISSION_DENIED", "PLATFORM_REQUEST_INVALID"].includes(result.error.code);
   return {
@@ -1261,11 +1261,11 @@ function mapClientResult(result) {
   };
 }
 
-function gitText(args, cwd) {
+function gitText(args: any, cwd: any): any {
   try {
     const value = execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
     return { ok: true, value: String(value || "").trim() };
-  } catch (error) {
+  } catch (error: any) {
     const stderr = `${error?.stderr || ""}${error?.stdout || ""}`.trim();
     return {
       ok: false,
@@ -1275,7 +1275,7 @@ function gitText(args, cwd) {
   }
 }
 
-function resolvePrHeadSha(context) {
+function resolvePrHeadSha(context: any): any {
   const fallback = () => withRetry(() => gitText(["rev-parse", "HEAD"], context.taskDir));
   const branch = String(context.task?.metadata?.branch || "").trim();
   if (!branch) {
@@ -1300,7 +1300,7 @@ function resolvePrHeadSha(context) {
   return headInWorktree;
 }
 
-function findWorktreeForBranch(porcelainOutput, branch) {
+function findWorktreeForBranch(porcelainOutput: any, branch: any): any {
   let currentWorktree = "";
   for (const rawLine of String(porcelainOutput || "").split("\n")) {
     const line = rawLine.trimEnd();
@@ -1320,11 +1320,11 @@ function findWorktreeForBranch(porcelainOutput, branch) {
   return null;
 }
 
-function withRetry(operation) {
+function withRetry(operation: any): any {
   return operation();
 }
 
-function interpolate(template, taskDir, artifactFile) {
+function interpolate(template: any, taskDir: any, artifactFile: any): any {
   const artifactStem = artifactFile ? path.basename(artifactFile, path.extname(artifactFile)) : "";
   return template
     .replace(/\{task-id\}/g, path.basename(taskDir))

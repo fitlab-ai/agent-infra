@@ -22,7 +22,7 @@ $ git status -s
 ## 变更文件
 
 ### 新建文件
-- `.agents/scripts/validate-artifact.js` - 共享校验引擎
+- `lib/task/verification.ts` - typed 校验编排器
 
 ### 修改文件
 - `.agents/skills/code-task/SKILL.md` - 添加完成校验步骤
@@ -30,7 +30,7 @@ $ git status -s
 ## 关键代码说明
 
 ### 校验引擎
-**文件**: `.agents/scripts/validate-artifact.js:1`
+**文件**: `lib/task/verification.ts:1`
 
 **实现逻辑**:
 完成校验按 verify.json 声明顺序执行检查。
@@ -43,7 +43,7 @@ console.log("gate");
 ## 测试结果
 
 ### 单元测试
-- 测试文件: `tests/validate-artifact.test.js`
+- 测试文件: `tests/e2e/core/validate-artifact.test.ts`
 - 测试用例数: 4
 - 通过率: 100%
 
@@ -56,7 +56,7 @@ ok 1 - validate artifact
 
 - 断言：实现报告校验通过。
 ```text
-$ node .agents/scripts/validate-artifact.js gate code-task .agents/workspace/active/TASK-20260328-000001 code.md --format text
+$ agent-infra-internal task-verify TASK-20260328-000001 code.completed --artifact code.md --format text
 Verification: pass
 ```
 

@@ -74,7 +74,7 @@ npm 发布走 GitHub Actions OIDC + npm Trusted Publishing，CI 不再读取长�
 - Gemini CLI：`/agent-infra:release X.Y.Z`
 - Codex CLI：`$release X.Y.Z`
 
-该技能负责：
+本次调用只授权 prepare。该技能通过 `release-workflow prepare` 负责：
 
 - 校验版本号格式
 - 检查工作区是否干净
@@ -83,12 +83,15 @@ npm 发布走 GitHub Actions OIDC + npm Trusted Publishing，CI 不再读取长�
 - 同步更新 `package.json` 和 `.agents/.airc.json`
 - 创建发布提交和本地标签
 
-### 2. 推送分支和标签
+prepare 完成后必须停止并展示事实快照；它不会推送任何 ref。
+
+### 2. 独立授权发布
 
 ```bash
-git push origin <current-branch>
-git push origin vX.Y.Z
+agent-infra-internal release-workflow publish X.Y.Z
 ```
+
+publish 是独立人工授权点。core 逐 ref 普通 push 并用远端事实复核；部分成功会返回 degraded，重跑只补缺失 ref，禁止 force push。
 
 推送标签后，GitHub Actions 会自动运行 `.github/workflows/release.yml`：
 
@@ -128,7 +131,7 @@ git push origin vX.Y.Z
 
 ### 5. 发布后处理
 
-在发布标签推送并完成 CI 发布后，执行 `post-release` 技能准备下一轮开发版本：
+在发布标签推送并完成 CI 发布后，执行 `post-release` 技能。它先从远端 tag、平台 Release、npm、Homebrew 和 smoke workflow 重建状态；渠道 pending/unknown 时停止，不把网络未知当作缺失：
 
 - Claude Code / OpenCode：`/post-release`
 - Gemini CLI：`/agent-infra:post-release`
@@ -141,6 +144,9 @@ git push origin vX.Y.Z
 - 重建内联产物
 - 可选录制最新执行动图
 - 创建发布后处理提交
+- 用 Git workflow intent 推送发布后提交并复核远端 SHA
+
+发布流程不维护本地 journal。prepare、publish、post 每次都从可观察事实恢复，因此可在进程中断或部分 push 后安全重跑。
 
 ## 回滚流程
 

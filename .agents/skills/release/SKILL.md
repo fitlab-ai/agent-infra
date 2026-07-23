@@ -7,183 +7,46 @@ description: >
 
 # 版本发布
 
-执行指定版本的版本发布流程。
+把发布拆为明确授权的 prepare 与 publish 两个检查点。状态由 Git、代码托管平台与包发布渠道事实重建，不维护第二套 journal。
 
-## 执行流程
+## 1. 验证输入与人工检查点
 
-### 1. 解析并验证版本号
+验证版本为 SemVer，并读取最新 entropy 报告。报告存在未处置高风险项时停止；不得替用户批准发布。
 
-从参数中提取版本。必须匹配 `X.Y.Z` 格式。
-
-解析组件：
-- MAJOR = X，MINOR = Y，PATCH = Z
-- 发布版本 = `X.Y.Z`
-
-如果格式无效，报错："Version format incorrect, expected X.Y.Z (e.g. 1.2.3)"
-
-### 2. 验证工作区干净
+## 2. 检查发布事实
 
 ```bash
-git status --short
+agent-infra-internal release-workflow inspect {version}
 ```
 
-如果有未提交的变更，报错："Workspace has uncommitted changes. Please commit or stash first."
+根据 `snapshot.phase` 报告已完成事实。`blocked` 表示外部事实不可确认，不得当作 missing。
 
-### 3. 发布前验证
+## 3. 准备发布
 
-先执行 `entropy-check` 技能，记录报告路径，并检查是否存在 `release-blocking` 发现：
-
-```text
-Claude Code / OpenCode：/entropy-check
-Gemini CLI：/agent-infra:entropy-check
-Codex CLI：$entropy-check
-```
-
-如果 `entropy-check` 执行失败，或报告中存在未处理的 `release-blocking` 发现，停止发布流程并先处理或由维护者裁定。
+用户本次调用只授权 prepare：
 
 ```bash
-git branch --show-current
-npm test
+agent-infra-internal release-workflow prepare {version} --entropy-report {path}
 ```
 
-验证要求：
-- 运行 `entropy-check` 并记录报告路径
-- 检查当前分支是否为 `main`
-- 运行完整测试套件
+core 负责 clean-tree/test、版本与内联产物、显式路径 commit 和本地 tag；操作后重新 inspect。完成后必须停止，不得隐式 publish。
 
-处理规则：
-- 如果 `entropy-check` 失败或发现 release-blocking 问题，报错退出并要求先处理
-- 如果当前分支不是 `main`，输出警告但继续执行（某些维护场景可能需要从其他分支发布）
-- 如果测试失败，报错退出并要求先修复测试
+## 4. 独立发布授权
 
-### 4. 更新版本引用
-
-更新以下文件中的版本号：
-
-1. `package.json` 中的 `"version": "X.Y.Z"`
-2. `.agents/.airc.json` 中的 `"templateVersion": "vX.Y.Z"`
-3. `SECURITY.md` 中的支持版本表格（`v{MAJOR}.{MINOR}.x | Supported`，`< v{MAJOR}.{MINOR}.0 | Not Supported`）
-4. `SECURITY.zh-CN.md` 中的支持版本表格（`v{MAJOR}.{MINOR}.x | 支持中`，`< v{MAJOR}.{MINOR}.0 | 不再支持`）
-5. 运行 `npm install --package-lock-only`，同步 `package-lock.json` 中的版本号
-
-如果当前工作区处于开发期 prerelease 版本（例如 `0.1.0-alpha.1`），也需要将其替换为目标正式版本 `X.Y.Z`。
-
-使用搜索确认旧版本号（包含可能的 prerelease 后缀）无遗漏，使用编辑工具更新。
-
-更新 `package.json` 后执行 `npm install --package-lock-only`，确保锁文件版本与 `package.json` 保持同步。
-
-**排除以下目录的版本替换**：
-- `.agents/`、`.agents/workspace/`、`.claude/`、`.codex/`、`.gemini/`、`.opencode/`（AI 工具配置）
-
-### 5. 重新生成内联产物
+只有用户随后明确要求 publish 时才执行：
 
 ```bash
-node scripts/build-inline.js
+agent-infra-internal release-workflow publish {version}
 ```
 
-执行要求：
-- 在版本号更新完成后运行，确保 `sync-templates.js` 内嵌的版本号与默认配置保持最新
-- 如果命令失败，停止发布流程并先修复构建问题
-- 构建完成后，将产物同步到工作副本，保持两处一致：
-  ```bash
-  cp templates/.agents/skills/update-agent-infra/scripts/sync-templates.js \
-     .agents/skills/update-agent-infra/scripts/sync-templates.js
-  ```
+逐 ref 普通 push；部分成功保留并返回 degraded，重跑只补未满足事实，禁止 force push。
 
-### 6. 创建发布提交
+## 5. 告知用户
 
-```bash
-git add -A
-git commit -m "chore: release v{version}"
-```
-
-### 7. 创建 Git 标签
-
-```bash
-git tag v{version}
-```
-
-### 8. 管理里程碑
-
-为已发布版本关闭对应版本里程碑，并为下一轮创建缺失的规划里程碑。
-
-执行：
-
-```bash
-bash .agents/skills/release/scripts/manage-milestones.sh "$MAJOR" "$MINOR" "$PATCH"
-```
-
-脚本负责：
-- 执行前先读取 `.agents/rules/label-milestone-setup.md`
-- 使用其中的 milestone 查询与更新命令读取和调整当前里程碑
-- 在 `{MAJOR}.{MINOR}.{PATCH}` 存在且仍为开启状态时将其关闭
-- 确保 `{MAJOR}.{MINOR}.{PATCH+1}` 与 `{MAJOR}.{MINOR}.x` 存在
-- 当 `PATCH=0` 时，同时确保 `{MAJOR}.{MINOR+1}.0` 与 `{MAJOR}.{MINOR+1}.x`
-- 输出包含已发布里程碑动作和新建数量的汇总
-
-### 9. 输出摘要
-
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
-
-```
-版本 v{version} 已准备好发布。
-
-发布信息：
-- 版本：{version}
-- 发布提交：{commit-hash}
-- 标签：v{version}
-
-已更新文件数：{数量}
-
-下一步（手动执行）：
-
-1. 推送分支：
-   git push origin {current-branch}
-
-2. 推送标签：
-   git push origin v{version}
-   推送后将自动触发 release 创建和 npm 发布
-
-3.（可选）生成发布说明：
-   - Claude Code / OpenCode：/create-release-note {version}
-   - Gemini CLI：/agent-infra:create-release-note {version}
-   - Codex CLI：$create-release-note {version}
-
-4.（可选）执行发布后处理：
-   - Claude Code / OpenCode：/post-release
-   - Gemini CLI：/agent-infra:post-release
-   - Codex CLI：$post-release
-```
-
-### 回滚说明
-
-如果出了问题：
-```bash
-# 删除标签
-git tag -d v{version}
-
-# 重置提交
-git reset --soft HEAD~1
-
-# 恢复文件
-git checkout -- .
-```
+prepare 后展示 snapshot，并提示用户单独运行 release publish；publish 后根据 snapshot 提示等待渠道完成再运行 post-release。所有 TUI 格式均需完整展示。
 
 ## 注意事项
 
-1. **需要干净的工作区**：必须没有未提交的变更
-2. **不自动推送**：所有操作仅在本地执行；用户手动推送
-3. **发布前验证**：检查当前分支，并在本技能内运行 `npm test`
-4. **内联产物**：版本更新后必须运行 `node scripts/build-inline.js`，否则嵌入的版本号和默认配置会过期
-5. **npm 自动发布**：推送标签会触发 CI 中的 `npm publish`；发布凭证由 CI OIDC + npm Trusted Publishing 自动提供（一次性维护者配置见 `RELEASING.md` 的 Trusted Publisher 章节），无需配置长期 `NPM_TOKEN`
-6. **版本替换范围**：通过搜索确定需要更新哪些文件；排除 AI 工具目录
-7. **适配你的项目**：以上版本更新步骤是通用的；请根据你的项目版本方案进行定制
-8. **里程碑联动**：发布时自动创建下一轮里程碑；如果里程碑体系未初始化，建议先运行 `init-milestones`
-
-## 错误处理
-
-- 版本格式无效：提示正确格式并退出
-- 工作区不干净：提示提交或暂存
-- 验证失败：显示失败的检查并停止发布流程
-- 产物重建失败：显示构建错误并停止发布流程
-- Git 操作失败：显示错误并提供回滚说明
+- prepare 不得触发 publish。
+- 网络 unknown 必须 blocked。
+- 不自动回滚已成功的远端 ref。

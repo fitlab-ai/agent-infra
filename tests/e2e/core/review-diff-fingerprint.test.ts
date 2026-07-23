@@ -4,10 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { filePath, gitSafeEnv, initIsolatedGitRepo, onPlatforms } from "../../helpers.ts";
+import { gitSafeEnv, initIsolatedGitRepo, onPlatforms } from "../../helpers.ts";
+import { resolvePostReviewGlobs } from "../../../lib/task/review-fingerprint.ts";
+import { compareReviewTrees, snapshotReview } from "../../../lib/git/review-snapshot.ts";
 import { withTempRoot, write } from "./validate-artifact-helpers.ts";
-
-const fingerprintScript = filePath(".agents/scripts/review-diff-fingerprint.js");
 
 function git(repoRoot: string, args: string[]) {
   const result = spawnSync("git", args, { cwd: repoRoot, encoding: "utf8", env: gitSafeEnv() });
@@ -16,13 +16,7 @@ function git(repoRoot: string, args: string[]) {
 }
 
 function fingerprint(repoRoot: string, mode: "worktree" | "staged", baseline: string) {
-  const result = spawnSync(process.execPath, [fingerprintScript, mode, baseline], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    env: gitSafeEnv()
-  });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  const value = result.stdout.trim();
+  const value = snapshotReview({ cwd: repoRoot, mode, baseline, globs: resolvePostReviewGlobs({}, {}) }).fingerprint;
   assert.match(value, /^sha256:[0-9a-f]{64}$/);
   return value;
 }
@@ -30,24 +24,14 @@ function fingerprint(repoRoot: string, mode: "worktree" | "staged", baseline: st
 type Snapshot = { baseline: string; fingerprint: string; tree: string };
 
 function snapshot(repoRoot: string, mode: "worktree" | "staged", baseline: string): Snapshot {
-  const result = spawnSync(process.execPath, [fingerprintScript, mode, baseline, "--format", "json"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    env: gitSafeEnv()
-  });
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  return JSON.parse(result.stdout) as Snapshot;
+  return snapshotReview({ cwd: repoRoot, mode, baseline, globs: resolvePostReviewGlobs({}, {}) }) as Snapshot;
 }
 
 function compare(repoRoot: string, expected: string, actual: string) {
-  const result = spawnSync(process.execPath, [fingerprintScript, "compare", expected, actual, "--format", "json"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    env: gitSafeEnv()
-  });
+  const payload = compareReviewTrees({ cwd: repoRoot, expected, actual });
   return {
-    status: result.status,
-    payload: JSON.parse(result.stdout) as { equal: boolean; added: string[]; missing: string[]; different: string[] }
+    status: payload.equal ? 0 : 1,
+    payload
   };
 }
 
@@ -157,10 +141,8 @@ test("review diff fingerprint changes when worktree changes after review", onPla
   });
 });
 
-test("post-review globs are shared by the validator and fingerprint helper", () => {
-  const validator = fs.readFileSync(filePath(".agents/scripts/validate-artifact.js"), "utf8");
-  assert.match(validator, /from "\.\/lib\/post-review-commit\.js"/);
-  assert.match(validator, /resolvePostReviewGlobs\(config, loadReviewConfig\(\)\)/);
+test("post-review globs use the shared typed helper", () => {
+  assert.deepEqual(resolvePostReviewGlobs({}, { post_review_exclude_globs: ["dist/**"] }), [":/", ":(top,exclude)dist/**"]);
 });
 
 test("review diff fingerprint covers paths outside the legacy allowlist (fail-closed)", onPlatforms("linux", "darwin", "win32"), async () => {
@@ -195,14 +177,15 @@ test("review diff fingerprint honors project post_review_exclude_globs", onPlatf
     git(tempRoot, ["add", ".agents/.airc.json"]);
     git(tempRoot, ["commit", "-qm", "add exclude config"]);
     const baseline = git(tempRoot, ["rev-parse", "HEAD"]);
-    const clean = fingerprint(tempRoot, "worktree", baseline);
+    const globs = resolvePostReviewGlobs({}, { post_review_exclude_globs: ["package-lock.json"] });
+    const clean = snapshotReview({ cwd: tempRoot, mode: "worktree", baseline, globs }).fingerprint;
 
     write(path.join(tempRoot, "package-lock.json"), "{}\n");
-    const excluded = fingerprint(tempRoot, "worktree", baseline);
+    const excluded = snapshotReview({ cwd: tempRoot, mode: "worktree", baseline, globs }).fingerprint;
     assert.equal(excluded, clean);
 
     write(path.join(tempRoot, "scripts/included.js"), "// not excluded\n");
-    const included = fingerprint(tempRoot, "worktree", baseline);
+    const included = snapshotReview({ cwd: tempRoot, mode: "worktree", baseline, globs }).fingerprint;
     assert.notEqual(included, clean);
   });
 });

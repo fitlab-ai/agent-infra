@@ -1,3 +1,4 @@
+// frontmatter, ledger, Git snapshot and platform domains are imported below.
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -11,13 +12,13 @@ import {
   findAuthoritativeReviewCodeArtifact,
   parseReviewVerdict,
   resolvePostReviewGlobs
-} from "./lib/post-review-commit.js";
-
-const EXIT_CODE = {
-  pass: 0,
-  fail: 1,
-  blocked: 2
-};
+} from "./verification-review.ts";
+import { check as checkPlatformSync } from "../platform/verification-sync.ts";
+import { check as checkRequiredChecks } from "../platform/verification-required.ts";
+import { parseTypedTaskFrontmatter } from "./frontmatter.ts";
+import { parseLedger } from "./ledger.ts";
+import { loadVerificationConfig } from "./verification-config.ts";
+import { snapshotReview } from "../git/review-snapshot.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -69,25 +70,14 @@ const WORKFLOW_WARNING_SEVERITIES = new Set(["IMPORTANT", "ACTION_REQUIRED"]);
 const WORKFLOW_WARNING_ID_PATTERN = /^WW-\d+$/;
 
 const scriptPath = fileURLToPath(import.meta.url);
-const repoRoot = path.resolve(path.dirname(scriptPath), "..", "..");
+let repoRoot = path.resolve(path.dirname(scriptPath), "..", "..");
 
-const PLATFORM_ADAPTERS = {};
+const PLATFORM_ADAPTERS: Record<string, (context: any, shared: any) => any> = {
+  "platform-sync": checkPlatformSync,
+  "platform-sync-preflight": (context: any, shared: any) => ({ ...checkPlatformSync(context, shared), type: "platform-sync-preflight" }),
+  "required-checks": checkRequiredChecks
+};
 const OPTIONAL_PLATFORM_CHECKS = new Set(["platform-sync"]);
-const adaptersDir = path.join(path.dirname(scriptPath), "platform-adapters");
-
-if (fs.existsSync(adaptersDir)) {
-  for (const file of fs.readdirSync(adaptersDir)) {
-    if (!file.endsWith(".js")) {
-      continue;
-    }
-
-    const adapterName = path.basename(file, ".js");
-    const mod = await import(new URL(`./platform-adapters/${file}`, import.meta.url));
-    if (typeof mod.check === "function") {
-      PLATFORM_ADAPTERS[adapterName] = mod.check;
-    }
-  }
-}
 
 const sharedUtils = {
   loadTask,
@@ -104,116 +94,7 @@ const sharedUtils = {
   repoRoot
 };
 
-// === CLI Entry ===
-
-function main(argv) {
-  const [mode, ...rest] = argv;
-
-  if (mode === "gate") {
-    runGate(rest);
-    return;
-  }
-
-  if (mode === "check") {
-    runSingleCheck(rest);
-    return;
-  }
-
-  printUsageAndExit();
-}
-
-function runGate(args) {
-  const { value: formatValue, rest: positional } = extractOption(args, "--format");
-  const format = normalizeFormat(formatValue);
-  const [skillName, taskDirArg, artifactFile] = positional;
-
-  if (!skillName || !taskDirArg) {
-    printUsageAndExit();
-  }
-
-  const taskDir = path.resolve(taskDirArg);
-  const verifyConfig = loadVerifyConfig(skillName);
-  const checks = [];
-
-  for (const [type, checkConfig] of Object.entries(verifyConfig.checks || {})) {
-    if (checkConfig === null) {
-      continue;
-    }
-
-    const result = runCheck(type, {
-      skillName,
-      taskDir,
-      artifactFile,
-      config: checkConfig
-    });
-
-    checks.push(result);
-
-    if (result.status === "blocked") {
-      break;
-    }
-  }
-
-  const gate = summarizeGate(checks);
-  const output = {
-    gate,
-    skill: skillName,
-    checks,
-    summary: summarizeChecks(checks),
-    action: buildAction(gate, checks)
-  };
-
-  writeOutput(output, format);
-  process.exit(EXIT_CODE[gate]);
-}
-
-function runSingleCheck(args) {
-  const { value: formatValue, rest: formatArgs } = extractOption(args, "--format");
-  const format = normalizeFormat(formatValue);
-  const { value: skillName, rest: positional } = extractOption(formatArgs, "--skill");
-
-  if (!skillName) {
-    printUsageAndExit();
-  }
-
-  const [type, taskDirArg, artifactFile] = positional;
-
-  if (!type || !taskDirArg) {
-    printUsageAndExit();
-  }
-
-  const verifyConfig = loadVerifyConfig(skillName);
-  const config = (verifyConfig.checks || {})[type];
-
-  if (config === undefined) {
-    failUsage(`Unknown check type '${type}' for skill '${skillName}'.`);
-  }
-
-  if (config === null) {
-    writeOutput({
-      type,
-      skill: skillName,
-      status: "pass",
-      message: `Check '${type}' is disabled for skill '${skillName}'.`
-    }, format);
-    process.exit(0);
-  }
-
-  const result = runCheck(type, {
-    skillName,
-    taskDir: path.resolve(taskDirArg),
-    artifactFile,
-    config
-  });
-
-  writeOutput({
-    skill: skillName,
-    ...result
-  }, format);
-  process.exit(EXIT_CODE[result.status] ?? 1);
-}
-
-function runCheck(type, context) {
+function runCheck(type: any, context: any): any {
   switch (type) {
     case "task-meta":
       return checkTaskMeta(context);
@@ -248,7 +129,7 @@ function runCheck(type, context) {
 
 // === Check Functions ===
 
-function checkTaskMeta({ taskDir, config }) {
+function checkTaskMeta({ taskDir, config }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return failResult("task-meta", task.message);
@@ -256,8 +137,8 @@ function checkTaskMeta({ taskDir, config }) {
 
   const metadata = task.metadata;
   const requiredFields = config.required_fields || DEFAULT_REQUIRED_FIELDS;
-  const missingFields = requiredFields.filter((field) => isBlank(metadata[field]));
-  const blockingMissingFields = missingFields.filter((field) => field !== "agent_infra_version");
+  const missingFields = requiredFields.filter((field: any) => isBlank(metadata[field]));
+  const blockingMissingFields = missingFields.filter((field: any) => field !== "agent_infra_version");
   const warnings = [];
   if (missingFields.includes("agent_infra_version")) {
     warnings.push("field 'agent_infra_version' missing — historical task or skipped version stamp");
@@ -350,11 +231,11 @@ function checkTaskMeta({ taskDir, config }) {
   return passResult(
     "task-meta",
     `Task metadata valid (${requiredFields.length} required fields checked${warningSuffix})`,
-    warnings
+    warnings as string[]
   );
 }
 
-function validateTaskBranch(metadata) {
+function validateTaskBranch(metadata: any): any {
   if (isBlank(metadata.branch)) {
     return null;
   }
@@ -374,7 +255,7 @@ function validateTaskBranch(metadata) {
   return null;
 }
 
-function loadProjectName() {
+function loadProjectName(): any {
   const configPath = path.join(repoRoot, ".agents", ".airc.json");
   if (!fs.existsSync(configPath)) {
     return "";
@@ -388,7 +269,7 @@ function loadProjectName() {
   }
 }
 
-function loadReviewConfig() {
+function loadReviewConfig(): any {
   const configPath = path.join(repoRoot, ".agents", ".airc.json");
   if (!fs.existsSync(configPath)) {
     return {};
@@ -402,7 +283,7 @@ function loadReviewConfig() {
   }
 }
 
-function checkArtifact({ taskDir, config, artifactFile }) {
+function checkArtifact({ taskDir, config, artifactFile }: any): any {
   const resolvedArtifact = resolveArtifactPath(taskDir, config.file_pattern, artifactFile);
   if (!resolvedArtifact.ok) {
     return failResult("artifact", resolvedArtifact.message);
@@ -421,7 +302,7 @@ function checkArtifact({ taskDir, config, artifactFile }) {
   const content = fs.readFileSync(artifactPath, "utf8");
   const requiredSections = config.required_sections || [];
   const missingSections = requiredSections.filter(
-    (section) => !new RegExp(`^##\\s+${escapeRegExp(section)}\\s*$`, "m").test(content)
+    (section: any) => !new RegExp(`^##\\s+${escapeRegExp(section)}\\s*$`, "m").test(content)
   );
 
   if (missingSections.length > 0) {
@@ -444,7 +325,7 @@ function checkArtifact({ taskDir, config, artifactFile }) {
   );
 }
 
-function checkImplementationInput({ taskDir, artifactFile }) {
+function checkImplementationInput({ taskDir, artifactFile }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) return failResult("implementation-input", task.message);
   if (!artifactFile) return failResult("implementation-input", "Artifact file is required");
@@ -454,8 +335,8 @@ function checkImplementationInput({ taskDir, artifactFile }) {
   const inputSection = getSectionContent(task.content, ["实现输入", "Implementation Inputs"]);
   const rows = [];
   if (inputSection) {
-    const table = inputSection.split(/\r?\n/).filter((line) => line.trim().startsWith("|"));
-    const cells = (line) => line.split("|").slice(1, -1).map((cell) => cell.trim());
+    const table = inputSection.split(/\r?\n/).filter((line: any) => line.trim().startsWith("|"));
+    const cells = (line: any) => line.split("|").slice(1, -1).map((cell: any) => cell.trim());
     const expected = ["id", "ledger_id", "decision_evidence", "stage", "needs_implementation", "decided_at", "status", "consumed_by"];
     if (table.length < 2 || JSON.stringify(cells(table[0])) !== JSON.stringify(expected)) {
       return failResult("implementation-input", "Implementation Inputs table schema is invalid");
@@ -472,7 +353,7 @@ function checkImplementationInput({ taskDir, artifactFile }) {
   }
 
   const logSection = getSectionContent(task.content, ["活动日志", "Activity Log"]);
-  const doneActions = logSection.split(/\r?\n/).flatMap((line) => {
+  const doneActions = logSection.split(/\r?\n/).flatMap((line: any) => {
     const match = line.trim().match(ACTIVITY_LOG_PATTERN);
     return match && !ACTIVITY_LOG_STARTED_RE.test(match[2]) ? [match[2]] : [];
   });
@@ -481,7 +362,7 @@ function checkImplementationInput({ taskDir, artifactFile }) {
   const report = fs.readFileSync(artifactPath, "utf8");
   const reportSection = getSectionContent(report, ["实现输入", "Implementation Input"]);
   if (!reportSection) return failResult("implementation-input", "Implementation Input report section not found");
-  const field = (zh, en) => {
+  const field = (zh: any, en: any) => {
     const pattern = "^- \\*\\*(?:" + escapeRegExp(zh) + "|" + escapeRegExp(en) + ")\\*\\*[:：]\\s*`?([^`\\n]+)`?\\s*$";
     const match = new RegExp(pattern, "m").exec(reportSection);
     return match?.[1]?.trim() || "";
@@ -501,7 +382,7 @@ function checkImplementationInput({ taskDir, artifactFile }) {
   }
   const matches = rows.filter((row) => row.id === actionDecision);
   if (matches.length !== 1) return failResult("implementation-input", `${actionDecision} is missing or duplicated in task table`);
-  const row = matches[0];
+  const row = matches[0]!;
   if (row.stage !== "code" || row.needs !== "true" || row.status !== "consumed" || row.consumedBy !== artifactFile || !row.evidence) {
     return failResult("implementation-input", `${actionDecision} is not a consumed input for ${artifactFile}`);
   }
@@ -511,7 +392,7 @@ function checkImplementationInput({ taskDir, artifactFile }) {
   return passResult("implementation-input", `${actionDecision} matches Activity Log, report, and task table`);
 }
 
-function checkActivityLog({ taskDir, config }) {
+function checkActivityLog({ taskDir, config }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return failResult("activity-log", task.message);
@@ -524,8 +405,8 @@ function checkActivityLog({ taskDir, config }) {
 
   const entries = logSection
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("- "));
+    .map((line: any) => line.trim())
+    .filter((line: any) => line.startsWith("- "));
 
   if (entries.length === 0) {
     return failResult("activity-log", "Activity Log has no entries");
@@ -566,7 +447,7 @@ function checkActivityLog({ taskDir, config }) {
   return passResult("activity-log", `Latest entry '${latestAction}' at ${latestTimestamp}`);
 }
 
-function checkCompletionChecklist({ taskDir, config }) {
+function checkCompletionChecklist({ taskDir, config }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return failResult("completion-checklist", task.message);
@@ -579,8 +460,8 @@ function checkCompletionChecklist({ taskDir, config }) {
 
   const items = checklist
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^- \[(?: |x|X)\] .+$/.test(line));
+    .map((line: any) => line.trim())
+    .filter((line: any) => /^- \[(?: |x|X)\] .+$/.test(line));
 
   if (items.length === 0) {
     return failResult("completion-checklist", "Completion Checklist has no checkbox items");
@@ -588,9 +469,9 @@ function checkCompletionChecklist({ taskDir, config }) {
 
   if (config.require_all_checked) {
     const unchecked = items
-      .map((line) => line.match(/^- \[ \] (.+)$/))
+      .map((line: any) => line.match(/^- \[ \] (.+)$/))
       .filter(Boolean)
-      .map((match) => match[1].trim());
+      .map((match: any) => match[1].trim());
 
     if (unchecked.length > 0) {
       return failResult(
@@ -603,27 +484,7 @@ function checkCompletionChecklist({ taskDir, config }) {
   return passResult("completion-checklist", `Completion Checklist valid (${items.length} items checked)`);
 }
 
-function parseLedgerRows(section) {
-  const rows = [];
-  for (const rawLine of String(section || "").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line.startsWith("|")) {
-      continue;
-    }
-    if (/^\|[\s:|-]+\|?$/.test(line)) {
-      continue; // separator row
-    }
-    const inner = line.replace(/^\|/, "").replace(/\|$/, "");
-    const cells = inner.split("|").map((cell) => cell.trim());
-    if ((cells[0] || "").toLowerCase() === "id") {
-      continue; // header row
-    }
-    rows.push(cells);
-  }
-  return rows;
-}
-
-function splitMarkdownTableRow(line) {
+function splitMarkdownTableRow(line: any): any {
   let value = String(line || "").trim();
   if (!value.startsWith("|")) {
     return [];
@@ -645,7 +506,7 @@ function splitMarkdownTableRow(line) {
   return cells;
 }
 
-function unescapeMarkdownTableCell(value) {
+function unescapeMarkdownTableCell(value: any): any {
   let output = "";
   for (let index = 0; index < value.length; index += 1) {
     const char = value[index];
@@ -660,7 +521,7 @@ function unescapeMarkdownTableCell(value) {
   return output;
 }
 
-function isEscapedAt(value, index) {
+function isEscapedAt(value: any, index: any): any {
   let backslashes = 0;
   for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor -= 1) {
     backslashes += 1;
@@ -668,7 +529,7 @@ function isEscapedAt(value, index) {
   return backslashes % 2 === 1;
 }
 
-function parseWorkflowWarningRows(section) {
+function parseWorkflowWarningRows(section: any): any {
   const rows = [];
   for (const rawLine of String(section || "").split(/\r?\n/)) {
     const cells = splitMarkdownTableRow(rawLine);
@@ -678,7 +539,7 @@ function parseWorkflowWarningRows(section) {
     if ((cells[0] || "").toLowerCase() === "id") {
       continue;
     }
-    if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) {
+    if (cells.every((cell: any) => /^:?-{3,}:?$/.test(cell))) {
       continue;
     }
     rows.push(cells);
@@ -686,7 +547,7 @@ function parseWorkflowWarningRows(section) {
   return rows;
 }
 
-function validateWorkflowWarnings(content) {
+function validateWorkflowWarnings(content: any): any {
   const section = getSectionContent(content, WORKFLOW_WARNING_SECTION_NAMES);
   if (!section.trim()) {
     return [];
@@ -734,7 +595,7 @@ function validateWorkflowWarnings(content) {
   return errors;
 }
 
-function resolveReviewSetting(config, key, fallback) {
+function resolveReviewSetting(config: any, key: any, fallback: any): any {
   if (config && config[key] !== undefined && config[key] !== null) {
     return config[key];
   }
@@ -745,7 +606,7 @@ function resolveReviewSetting(config, key, fallback) {
   return fallback;
 }
 
-function checkReviewLedger({ taskDir, config }) {
+function checkReviewLedger({ taskDir, config }: any): any {
   const task = loadTask(taskDir);
   if (!task.ok) {
     return failResult("review-ledger", task.message);
@@ -756,7 +617,14 @@ function checkReviewLedger({ taskDir, config }) {
     return passResult("review-ledger", "No disagreement ledger section; treated as no open disagreements");
   }
 
-  const rows = parseLedgerRows(section);
+  let rows;
+  try {
+    rows = parseLedger(task.content).map((row) => [
+      row.id, row.stage, row.round, row.severity, row.status, row.evidence
+    ]);
+  } catch (error) {
+    return failResult("review-ledger", `Invalid disagreement ledger: ${error instanceof Error ? error.message : String(error)}`);
+  }
   if (rows.length === 0) {
     return passResult("review-ledger", "Disagreement ledger has no entries");
   }
@@ -784,23 +652,23 @@ function checkReviewLedger({ taskDir, config }) {
     }
     inScopeCount += 1;
 
-    if (!LEDGER_STATUSES.has(status)) {
+    if (!LEDGER_STATUSES.has(status!)) {
       problems.push(`${id}: illegal status '${status}'`);
       continue;
     }
     if (status !== "open" && evidence === "") {
       problems.push(`${id}: status '${status}' requires evidence`);
     }
-    const round = Number.parseInt(roundRaw, 10);
+    const round = Number.parseInt(roundRaw!, 10);
     if (
       Number.isFinite(round) &&
       round >= maxRounds &&
-      !LEDGER_TERMINAL_OK.has(status) &&
+      !LEDGER_TERMINAL_OK.has(status!) &&
       status !== "needs-human-decision"
     ) {
       problems.push(`${id}: round ${round} reached limit ${maxRounds} without convergence; escalate to needs-human-decision`);
     }
-    if (!LEDGER_TERMINAL_OK.has(status)) {
+    if (!LEDGER_TERMINAL_OK.has(status!)) {
       problems.push(`${id}: unresolved (status '${status}')`);
     }
   }
@@ -813,7 +681,7 @@ function checkReviewLedger({ taskDir, config }) {
   return passResult("review-ledger", `Disagreement ledger clean (${inScopeCount} in-scope entries terminal${scopeLabel})`);
 }
 
-function checkPostReviewCommit({ taskDir, config }) {
+function checkPostReviewCommit({ taskDir, config }: any): any {
   const reviewArtifact = findAuthoritativeReviewCodeArtifact(taskDir);
   if (!reviewArtifact.ok) {
     return passResult("post-review-commit", "No review-code artifact; check inactive");
@@ -827,7 +695,7 @@ function checkPostReviewCommit({ taskDir, config }) {
   }
 
   const task = loadTask(taskDir);
-  const content = fs.readFileSync(reviewArtifact.path, "utf8");
+  const content = fs.readFileSync(reviewArtifact.path!, "utf8");
   const lastReviewedCommit = task.ok ? (task.metadata.last_reviewed_commit || "").trim() : "";
   const baselineSource = resolvePostReviewBaseline({
     gitRoot,
@@ -852,10 +720,14 @@ function checkPostReviewCommit({ taskDir, config }) {
     return passResult("post-review-commit", `No post-review commits to code/rule paths since ${sha.slice(0, 8)}`);
   }
 
-  const ledgerSection = task.ok ? getSectionContent(task.content, LEDGER_SECTION_NAMES) : "";
-  const exempt = parseLedgerRows(ledgerSection).some(
-    (cells) => cells[1] === POST_REVIEW_COMMIT_STAGE && cells[4] === "human-decided"
-  );
+  let exempt = false;
+  try {
+    exempt = task.ok && parseLedger(task.content).some(
+      (row) => row.stage === POST_REVIEW_COMMIT_STAGE && row.status === "human-decided"
+    );
+  } catch {
+    return failResult("post-review-commit", "Invalid disagreement ledger");
+  }
   if (exempt) {
     return passResult(
       "post-review-commit",
@@ -869,7 +741,7 @@ function checkPostReviewCommit({ taskDir, config }) {
   );
 }
 
-function checkReviewFact({ taskDir, artifactFile }) {
+function checkReviewFact({ taskDir, artifactFile }: any): any {
   const resolvedArtifact = resolveArtifactPath(
     taskDir,
     "review-code.md|review-code-r{N}.md",
@@ -917,11 +789,7 @@ function checkReviewFact({ taskDir, artifactFile }) {
 
   let actualSnapshot;
   try {
-    actualSnapshot = JSON.parse(execFileSync(
-      process.execPath,
-      [path.join(repoRoot, ".agents", "scripts", "review-diff-fingerprint.js"), "worktree", baseline, "--format", "json"],
-      { cwd: gitRoot, encoding: "utf8" }
-    ));
+    actualSnapshot = snapshotReview({ cwd: gitRoot, mode: "worktree", baseline, globs: resolvePostReviewGlobs({}, loadReviewConfig()) });
   } catch {
     return blockedResult(
       "review-fact",
@@ -970,7 +838,7 @@ function checkReviewFact({ taskDir, artifactFile }) {
   );
 }
 
-function resolvePostReviewBaseline({ gitRoot, lastReviewedCommit, reviewArtifact }) {
+function resolvePostReviewBaseline({ gitRoot, lastReviewedCommit, reviewArtifact }: any): any {
   if (SHA_PATTERN.test(lastReviewedCommit) && gitCommitExists(gitRoot, lastReviewedCommit)) {
     return { ok: true, sha: lastReviewedCommit };
   }
@@ -984,7 +852,7 @@ function resolvePostReviewBaseline({ gitRoot, lastReviewedCommit, reviewArtifact
   };
 }
 
-function gitCommitExists(gitRoot, sha) {
+function gitCommitExists(gitRoot: any, sha: any): any {
   try {
     execFileSync("git", ["-C", gitRoot, "cat-file", "-e", `${sha}^{commit}`], { encoding: "utf8" });
     return true;
@@ -995,31 +863,24 @@ function gitCommitExists(gitRoot, sha) {
 
 // === File & Config Loaders ===
 
-function loadVerifyConfig(skillName) {
-  const verifyPath = path.join(repoRoot, ".agents", "skills", skillName, "config", "verify.json");
-  if (!fs.existsSync(verifyPath)) {
-    failUsage(`config/verify.json not found for skill '${skillName}'`);
-  }
-
-  return JSON.parse(fs.readFileSync(verifyPath, "utf8"));
-}
-
-function loadTask(taskDir) {
+function loadTask(taskDir: any): any {
   const taskPath = path.join(taskDir, "task.md");
   if (!fs.existsSync(taskPath)) {
     return { ok: false, message: `Task file not found: ${taskPath}` };
   }
 
   const content = fs.readFileSync(taskPath, "utf8");
-  const metadata = parseFrontmatter(content);
-  if (!metadata) {
+  let metadata;
+  try {
+    metadata = Object.fromEntries(Object.entries(parseTypedTaskFrontmatter(content)).map(([key, value]) => [key, value === null ? "" : String(value)]));
+  } catch {
     return { ok: false, message: "task.md frontmatter not found or invalid" };
   }
 
   return { ok: true, content, metadata };
 }
 
-function resolveArtifactPath(taskDir, filePattern, artifactFile) {
+function resolveArtifactPath(taskDir: any, filePattern: any, artifactFile: any): any {
   if (artifactFile) {
     return { ok: true, path: path.join(taskDir, artifactFile) };
   }
@@ -1031,7 +892,7 @@ function resolveArtifactPath(taskDir, filePattern, artifactFile) {
   const entries = fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : [];
   const matches = [];
 
-  for (const pattern of filePattern.split("|").map((value) => value.trim()).filter(Boolean)) {
+  for (const pattern of filePattern.split("|").map((value: any) => value.trim()).filter(Boolean)) {
     const regex = new RegExp(`^${escapePattern(pattern)}$`);
     for (const entry of entries) {
       const match = entry.match(regex);
@@ -1051,33 +912,13 @@ function resolveArtifactPath(taskDir, filePattern, artifactFile) {
   }
 
   matches.sort((left, right) => right.round - left.round || left.fileName.localeCompare(right.fileName));
-  return { ok: true, path: path.join(taskDir, matches[0].fileName) };
+  return { ok: true, path: path.join(taskDir, matches[0]!.fileName) };
 }
 
-function parseFrontmatter(content) {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!match) {
-    return null;
-  }
-
-  const metadata = {};
-  for (const line of match[1].split(/\r?\n/)) {
-    const parsed = line.match(/^([A-Za-z0-9_]+):\s*(.*)$/);
-    if (!parsed) {
-      continue;
-    }
-
-    const [, key, rawValue] = parsed;
-    metadata[key] = rawValue.trim().replace(/^['"]|['"]$/g, "");
-  }
-
-  return metadata;
-}
-
-function getSectionContent(content, names) {
+function getSectionContent(content: any, names: any): any {
   const lines = content.split(/\r?\n/);
 
-  function visibleHeadings() {
+  function visibleHeadings(): any {
     const headings = [];
     let fence = null;
     for (let index = 0; index < lines.length; index += 1) {
@@ -1105,11 +946,11 @@ function getSectionContent(content, names) {
 
   for (const name of names) {
     const heading = `## ${name}`;
-    const position = headings.findIndex((item) => item.text === heading);
+    const position = headings.findIndex((item: any) => item.text === heading);
     if (position === -1) {
       continue;
     }
-    const startIndex = headings[position].index;
+    const startIndex = headings[position]!.index;
     const endIndex = headings[position + 1]?.index ?? lines.length;
     return lines.slice(startIndex + 1, endIndex).join("\n").trim();
   }
@@ -1117,7 +958,7 @@ function getSectionContent(content, names) {
   return "";
 }
 
-function getCheckedRequirements(content) {
+function getCheckedRequirements(content: any): any {
   const section = getSectionContent(content, ["需求", "Requirements"]);
   if (!section) {
     return [];
@@ -1125,13 +966,13 @@ function getCheckedRequirements(content) {
 
   return section
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .map((line) => line.match(/^- \[x\] (.+)$/i))
+    .map((line: any) => line.trim())
+    .map((line: any) => line.match(/^- \[x\] (.+)$/i))
     .filter(Boolean)
-    .map((match) => match[1].trim());
+    .map((match: any) => match[1].trim());
 }
 
-function parseIssueNumber(value) {
+function parseIssueNumber(value: any): any {
   if (isBlank(value) || value === "N/A") {
     return null;
   }
@@ -1140,43 +981,43 @@ function parseIssueNumber(value) {
   return match ? Number(match[0]) : null;
 }
 
-function parsePrNumber(value) {
+function parsePrNumber(value: any): any {
   return parseIssueNumber(value);
 }
 
 // === Utilities ===
 
-function normalizeContent(text) {
+function normalizeContent(text: any): any {
   return String(text || "")
     .replace(/\r\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-function interpolate(template, taskDir, artifactFile) {
+function interpolate(template: any, taskDir: any, artifactFile: any): any {
   const artifactStem = artifactFile ? path.basename(artifactFile, path.extname(artifactFile)) : "";
   return template
     .replace(/\{task-id\}/g, path.basename(taskDir))
     .replace(/\{artifact-stem\}/g, artifactStem);
 }
 
-function summarizeGate(checks) {
-  if (checks.some((check) => check.status === "blocked")) {
+function summarizeGate(checks: any): any {
+  if (checks.some((check: any) => check.status === "blocked")) {
     return "blocked";
   }
 
-  if (checks.some((check) => check.status === "fail")) {
+  if (checks.some((check: any) => check.status === "fail")) {
     return "fail";
   }
 
   return "pass";
 }
 
-function summarizeChecks(checks) {
+function summarizeChecks(checks: any): any {
   const counts = {
-    pass: checks.filter((check) => check.status === "pass").length,
-    fail: checks.filter((check) => check.status === "fail").length,
-    blocked: checks.filter((check) => check.status === "blocked").length
+    pass: checks.filter((check: any) => check.status === "pass").length,
+    fail: checks.filter((check: any) => check.status === "fail").length,
+    blocked: checks.filter((check: any) => check.status === "blocked").length
   };
 
   if (counts.blocked > 0) {
@@ -1186,12 +1027,12 @@ function summarizeChecks(checks) {
   return `${counts.pass} passed, ${counts.fail} failed`;
 }
 
-function buildAction(gate, checks) {
+function buildAction(gate: any, checks: any): any {
   if (gate === "pass") {
     return "All declared checks passed";
   }
 
-  const firstFailure = checks.find((check) => check.status !== "pass");
+  const firstFailure = checks.find((check: any) => check.status !== "pass");
   if (!firstFailure) {
     return "Review validation output";
   }
@@ -1203,47 +1044,23 @@ function buildAction(gate, checks) {
   return `Fix ${firstFailure.type} issues and re-run gate`;
 }
 
-function buildCheckAction(result) {
-  if (result.status === "pass") {
-    return "Requested check passed";
-  }
-
-  if (result.status === "blocked") {
-    return `Resolve blocked ${result.type} check and re-run check`;
-  }
-
-  return `Fix ${result.type} issues and re-run check`;
-}
-
-function buildSingleCheckSummary(status) {
-  if (status === "pass") {
-    return "1 passed, 0 failed";
-  }
-
-  if (status === "blocked") {
-    return "0 passed, 0 failed, 1 blocked";
-  }
-
-  return "0 passed, 1 failed";
-}
-
-function passResult(type, message, warnings = []) {
-  const result = { type, status: "pass", message };
+function passResult(type: any, message: any, warnings: string[] = []): any {
+  const result: { type: any; status: string; message: any; warnings?: string[] } = { type, status: "pass", message };
   if (warnings.length > 0) {
     result.warnings = warnings;
   }
   return result;
 }
 
-function failResult(type, message, failType = "check_failed") {
+function failResult(type: any, message: any, failType = "check_failed"): any {
   return { type, status: "fail", fail_type: failType, message };
 }
 
-function blockedResult(type, message, failType = "network_error") {
+function blockedResult(type: any, message: any, failType = "network_error"): any {
   return { type, status: "blocked", fail_type: failType, message };
 }
 
-function safeStat(filePath) {
+function safeStat(filePath: any): any {
   try {
     return fs.statSync(filePath);
   } catch {
@@ -1251,105 +1068,43 @@ function safeStat(filePath) {
   }
 }
 
-function escapePattern(pattern) {
+function escapePattern(pattern: any): any {
   return escapeRegExp(pattern)
     .replace(/\\\{N\\\}/g, "(\\d+)");
 }
 
-function escapeRegExp(value) {
+function escapeRegExp(value: any): any {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function isBlank(value) {
+function isBlank(value: any): any {
   return value === undefined || value === null || String(value).trim() === "";
 }
 
-function extractOption(args, name) {
-  const rest = [];
-  let value;
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === name) {
-      value = args[index + 1];
-      index += 1;
-      continue;
+function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: requestedChecks, repositoryRoot }: any): any {
+  if (repositoryRoot) repoRoot = path.resolve(repositoryRoot);
+  else {
+    let cursor = path.resolve(taskDir);
+    while (path.dirname(cursor) !== cursor && !fs.existsSync(path.join(cursor, ".agents"))) cursor = path.dirname(cursor);
+    if (fs.existsSync(path.join(cursor, ".agents"))) repoRoot = cursor;
+  }
+  const verifyConfig = loadVerificationConfig(repoRoot, skillName);
+  if (mode === "gate") {
+    const checks = [];
+    for (const [type, checkConfig] of Object.entries(verifyConfig.checks || {})) {
+      if (checkConfig === null) continue;
+      const result = runCheck(type, { skillName, taskDir: path.resolve(taskDir), artifactFile, config: checkConfig });
+      checks.push(result);
+      if (result.status === "blocked") break;
     }
-
-    const inlinePrefix = `${name}=`;
-    if (arg.startsWith(inlinePrefix)) {
-      value = arg.slice(inlinePrefix.length);
-      continue;
-    }
-
-    rest.push(arg);
+    const gate = summarizeGate(checks);
+    return { gate, skill: skillName, checks, summary: summarizeChecks(checks), action: buildAction(gate, checks) };
   }
-
-  return { value, rest };
+  const type = requestedChecks[0];
+  const config = (verifyConfig.checks || {})[type];
+  if (config === undefined) return { skill: skillName, ...failResult(type, `Unknown check type '${type}' for skill '${skillName}'.`) };
+  if (config === null) return { skill: skillName, ...passResult(type, `Check '${type}' is disabled for skill '${skillName}'.`) };
+  return { skill: skillName, ...runCheck(type, { skillName, taskDir: path.resolve(taskDir), artifactFile, config }) };
 }
 
-function normalizeFormat(value) {
-  return value === "text" ? "text" : "json";
-}
-
-function formatStatusLabel(status) {
-  if (status === "fail") {
-    return "FAIL";
-  }
-
-  if (status === "blocked") {
-    return "BLOCKED";
-  }
-
-  return "pass";
-}
-
-function writeOutput(value, format) {
-  if (format === "text") {
-    writeText(value);
-    return;
-  }
-
-  writeJson(value);
-}
-
-function writeText(value) {
-  const lines = [];
-
-  if (Array.isArray(value.checks)) {
-    lines.push(`Verification: ${value.gate} | Skill: ${value.skill}`);
-    lines.push("");
-    for (const check of value.checks) {
-      lines.push(`  [${formatStatusLabel(check.status)}] ${check.type} - ${check.message}`);
-    }
-    lines.push("");
-    lines.push(`Result: ${value.summary} - ${value.action}`);
-  } else {
-    lines.push(`Check: ${value.status} | Skill: ${value.skill} | Type: ${value.type}`);
-    lines.push("");
-    lines.push(`  [${formatStatusLabel(value.status)}] ${value.type} - ${value.message}`);
-    lines.push("");
-    lines.push(`Result: ${buildSingleCheckSummary(value.status)} - ${buildCheckAction(value)}`);
-  }
-
-  process.stdout.write(`${lines.join("\n")}\n`);
-}
-
-function writeJson(value) {
-  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
-}
-
-function printUsageAndExit() {
-  failUsage(
-    "Usage:\n" +
-      "  node .agents/scripts/validate-artifact.js gate <skill-name> <task-dir> [artifact-file] [--format json|text]\n" +
-      "  node .agents/scripts/validate-artifact.js check <type> <task-dir> [artifact-file] --skill <skill-name> [--format json|text]"
-  );
-}
-
-function failUsage(message) {
-  process.stderr.write(`${message}\n`);
-  process.exit(1);
-}
-
-main(process.argv.slice(2));
+export { verifyInProcess };

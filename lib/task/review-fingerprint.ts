@@ -1,18 +1,23 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { artifactName, maxRound } from "./review-artifacts.js";
+import { artifactName, maxRound } from "./review-artifacts.ts";
 
 // Paths excluded from the post-review coverage gate. Fail-closed: the gate
 // covers ALL tracked changes by default. This default denylist is EMPTY —
 // projects opt into exclusions explicitly via review.post_review_exclude_globs.
-export const DEFAULT_POST_REVIEW_EXCLUDES = [];
+export const DEFAULT_POST_REVIEW_EXCLUDES: string[] = [];
 
 // Returns git pathspecs selecting "all tracked changes except project excludes".
 // The leading ":/" makes coverage fail-closed (everything from the repo root);
 // each exclude becomes a top-level negative pathspec. Projects extend the
 // denylist via review.post_review_exclude_globs (union, deduped).
-export function resolvePostReviewGlobs(config = {}, reviewConfig = {}) {
+type ReviewGlobConfig = { post_review_exclude_globs?: unknown };
+
+export function resolvePostReviewGlobs(
+  config: ReviewGlobConfig = {},
+  reviewConfig: ReviewGlobConfig = {}
+): string[] {
   const projectExcludes = [
     ...(Array.isArray(reviewConfig.post_review_exclude_globs) ? reviewConfig.post_review_exclude_globs : []),
     ...(Array.isArray(config.post_review_exclude_globs) ? config.post_review_exclude_globs : [])
@@ -21,7 +26,7 @@ export function resolvePostReviewGlobs(config = {}, reviewConfig = {}) {
   return [":/", ...excludes.map((p) => `:(top,exclude)${p}`)];
 }
 
-export function findAuthoritativeReviewCodeArtifact(taskDir) {
+export function findAuthoritativeReviewCodeArtifact(taskDir: string) {
   const entries = fs.existsSync(taskDir) ? fs.readdirSync(taskDir) : [];
   const round = maxRound(entries, "review-code");
   if (round === 0) {
@@ -37,22 +42,22 @@ export function findAuthoritativeReviewCodeArtifact(taskDir) {
   };
 }
 
-export function extractReviewBaseline(content) {
+export function extractReviewBaseline(content: string): string {
   const match = String(content).match(/^[-*]?\s*\*\*(?:审查基线提交|Review Baseline Commit)\*\*[:：]\s*(.*?)\s*$/m);
-  return match ? match[1].trim().replace(/`/g, "") : "";
+  return match ? match[1]!.trim().replace(/`/g, "") : "";
 }
 
-export function extractReviewDiffFingerprint(content) {
+export function extractReviewDiffFingerprint(content: string): string {
   const match = String(content).match(/^[-*]?\s*\*\*(?:审查差异指纹|Reviewed Diff Fingerprint)\*\*[:：]\s*(.*?)\s*$/m);
-  return match ? match[1].trim().replace(/`/g, "") : "";
+  return match ? match[1]!.trim().replace(/`/g, "") : "";
 }
 
-export function extractReviewedSnapshotTree(content) {
+export function extractReviewedSnapshotTree(content: string): string {
   const match = String(content).match(/^[-*]?\s*\*\*(?:审查快照树|Reviewed Snapshot Tree)\*\*[:：]\s*(.*?)\s*$/m);
-  return match ? match[1].trim().replace(/`/g, "") : "";
+  return match ? match[1]!.trim().replace(/`/g, "") : "";
 }
 
-export function parseReviewVerdict(content) {
+export function parseReviewVerdict(content: string): string {
   const match = String(content).match(/^[-*]?\s*\*\*(?:总体结论|Overall Verdict)\*\*[:：]\s*(.*?)\s*$/m);
-  return match ? match[1].trim() : "";
+  return match ? match[1]!.trim() : "";
 }

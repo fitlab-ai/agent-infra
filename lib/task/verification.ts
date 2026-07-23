@@ -1,5 +1,7 @@
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+// Verification runs in-process; configuration, review parsing and platform
+// checks are provided by typed domain modules without a stdout protocol.
+import { verifyInProcess } from './verification-engine.ts';
 
 import { parseArtifactName } from './artifact-lifecycle.ts';
 import type { ArtifactFamily } from './artifact-lifecycle.ts';
@@ -22,13 +24,6 @@ type VerificationSpec = {
   checks?: readonly string[];
   artifactFamily?: ArtifactFamily;
 };
-type ValidatorInvocationResult = {
-  status: number | null;
-  signal: NodeJS.Signals | null;
-  stdout: string;
-  stderr: string;
-  error?: Error;
-};
 type VerificationInvocation = {
   status: 'pass' | 'fail' | 'blocked';
   exitCode: 0 | 1 | 2;
@@ -50,7 +45,7 @@ type TaskVerificationResult = {
 };
 type VerificationOptions = {
   repoRoot?: string;
-  spawnValidator?: (command: string, args: string[], options: { cwd: string }) => ValidatorInvocationResult;
+  engine?: typeof verifyInProcess;
 };
 
 const gate = (skill: string, expectedState: VerificationSpec['expectedState'], artifactFamily?: ArtifactFamily): VerificationSpec => ({
@@ -86,39 +81,6 @@ function failure(request: { taskRef: string; event: string; artifact?: string },
   };
 }
 
-function defaultSpawn(command: string, args: string[], options: { cwd: string }): ValidatorInvocationResult {
-  const result = spawnSync(command, args, { cwd: options.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  return { status: result.status, signal: result.signal, stdout: result.stdout ?? '', stderr: result.stderr ?? '', error: result.error };
-}
-
-function parseInvocation(result: ValidatorInvocationResult, mode: 'gate' | 'checks'): VerificationInvocation | { error: { code: string; message: string } } {
-  if (result.error || result.status === null || result.signal) {
-    return { error: { code: 'VERIFY_EXEC_FAILED', message: result.error?.message ?? `validator terminated by ${result.signal ?? 'unknown signal'}` } };
-  }
-  let payload: Record<string, unknown>;
-  try {
-    const value: unknown = JSON.parse(result.stdout);
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('payload must be an object');
-    payload = value as Record<string, unknown>;
-  } catch (error) {
-    return { error: { code: 'VERIFY_PROTOCOL_INVALID', message: `validator returned invalid JSON: ${error instanceof Error ? error.message : String(error)}` } };
-  }
-  const status = mode === 'gate' ? payload.gate : payload.status;
-  if (status !== 'pass' && status !== 'fail' && status !== 'blocked') {
-    return { error: { code: 'VERIFY_PROTOCOL_INVALID', message: `validator payload is missing a valid ${mode === 'gate' ? 'gate' : 'status'}` } };
-  }
-  const expected = { pass: 0, fail: 1, blocked: 2 }[status] as 0 | 1 | 2;
-  if (result.status !== expected) {
-    return { error: { code: 'VERIFY_PROTOCOL_INVALID', message: `validator status '${status}' requires exit ${expected}, received ${result.status}` } };
-  }
-  if (typeof payload.skill !== 'string'
-    || (mode === 'gate' && !Array.isArray(payload.checks))
-    || (mode === 'checks' && (typeof payload.type !== 'string' || typeof payload.message !== 'string'))) {
-    return { error: { code: 'VERIFY_PROTOCOL_INVALID', message: 'validator payload is missing required result fields' } };
-  }
-  return { status, exitCode: expected, payload };
-}
-
 function verifyTaskEvent(request: { taskRef: string; event: string; artifact?: string }, options: VerificationOptions = {}): TaskVerificationResult {
   const spec = VERIFICATION_CATALOG[request.event as VerificationEvent];
   if (!spec) return failure(request, 'VERIFY_EVENT_UNKNOWN', `unknown verification event '${request.event}'`);
@@ -138,17 +100,19 @@ function verifyTaskEvent(request: { taskRef: string; event: string; artifact?: s
     return failure(request, 'VERIFY_ARTIFACT_UNEXPECTED', `event '${request.event}' does not accept an artifact`, identity);
   }
 
-  const script = path.join(resolved.repoRoot, '.agents', 'scripts', 'validate-artifact.js');
-  const argsList = spec.mode === 'gate'
-    ? [['gate', spec.skill, resolved.taskDir, ...(request.artifact ? [request.artifact] : []), '--format', 'json']]
-    : (spec.checks ?? []).map((check) => ['check', check, resolved.taskDir, '--skill', spec.skill, '--format', 'json']);
   const invocations: VerificationInvocation[] = [];
-  const spawnValidator = options.spawnValidator ?? defaultSpawn;
-  for (const args of argsList) {
-    const parsed = parseInvocation(spawnValidator(process.execPath, [script, ...args], { cwd: resolved.repoRoot }), spec.mode);
-    if ('error' in parsed) return failure(request, parsed.error.code, parsed.error.message, { ...identity, invocations });
-    invocations.push(parsed);
-    if (spec.mode === 'checks' && parsed.status !== 'pass') break;
+  const engine = options.engine ?? verifyInProcess;
+  if (spec.mode === 'gate') {
+    const payload = engine({ mode: 'gate', skillName: spec.skill, taskDir: resolved.taskDir, artifactFile: request.artifact, checks: [], repositoryRoot: resolved.repoRoot }) as Record<string, unknown>;
+    const status = payload.gate as 'pass' | 'fail' | 'blocked';
+    invocations.push({ status, exitCode: ({ pass: 0, fail: 1, blocked: 2 } as const)[status], payload });
+  } else {
+    for (const check of spec.checks ?? []) {
+      const payload = engine({ mode: 'checks', skillName: spec.skill, taskDir: resolved.taskDir, artifactFile: request.artifact, checks: [check], repositoryRoot: resolved.repoRoot }) as Record<string, unknown>;
+      const status = payload.status as 'pass' | 'fail' | 'blocked';
+      invocations.push({ status, exitCode: ({ pass: 0, fail: 1, blocked: 2 } as const)[status], payload });
+      if (status !== 'pass') break;
+    }
   }
   const status = invocations.some((item) => item.status === 'blocked') ? 'blocked'
     : invocations.some((item) => item.status === 'fail') ? 'fail' : 'pass';
@@ -189,4 +153,4 @@ function renderTaskVerification(result: TaskVerificationResult): string {
 }
 
 export { VERIFICATION_CATALOG, renderTaskVerification, verifyTaskEvent };
-export type { TaskVerificationResult, ValidatorInvocationResult, VerificationEvent, VerificationInvocation, VerificationOptions, VerificationSpec };
+export type { TaskVerificationResult, VerificationEvent, VerificationInvocation, VerificationOptions, VerificationSpec };

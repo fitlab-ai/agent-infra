@@ -62,7 +62,7 @@ description: >
 
 ### 4. 检查远程分支状态
 
-确认当前分支是否已有 upstream；必要时执行 `git push -u origin <current-branch>`。
+调用 `agent-infra-internal git-workflow inspect` 检查 upstream/remote branch；必要时通过 `git-workflow push` 推送并复核。
 
 ### 5. 创建或恢复 PR
 

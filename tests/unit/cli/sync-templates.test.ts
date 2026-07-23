@@ -7,7 +7,7 @@ import os from "node:os";
 import { pathToFileURL } from "node:url";
 
 import { loadFreshEsm, read, supportsPosixModeBits } from "../../helpers.ts";
-import type { PlatformSyncModule, SyncTemplatesModule } from "../../helpers.ts";
+import type { SyncTemplatesModule } from "../../helpers.ts";
 
 function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
@@ -32,17 +32,6 @@ function createTemplateInstall(tmpDir: string, version: string = "0.0.0-test") {
     name: "@fitlab-ai/agent-infra",
     version
   });
-  writeFile(
-    installRoot,
-    "runtime/platform-adapters/platform-sync.github.js",
-    "export const getDefaults = () => ({ statusLabels: { inProgress: 'status: in-progress' }, markers: { task: '<!-- sync-issue:{task-id}:task -->' } });\n"
-  );
-  writeFile(
-    installRoot,
-    "runtime/platform-adapters/required-checks.github.js",
-    "export const check = (_context, shared) => shared.passResult('required-checks', 'fixture');\n"
-  );
-
   return { installRoot, templateRoot };
 }
 
@@ -73,7 +62,6 @@ test("syncTemplates resolves template roots via PATH lookup and removes legacy t
       name: "@fitlab-ai/agent-infra",
       version: "0.0.0-test"
     });
-    writeFile(installRoot, "runtime/platform-adapters/platform-sync.github.js", "export {};\n");
     // Fixture for a previously installed global CLI; unrelated to this repo's bin/cli.ts.
     writeFile(installRoot, "bin/cli.js", "console.log('ai');\n");
 
@@ -178,7 +166,6 @@ test("syncTemplates resolves Windows npm wrappers via .cmd launchers", async () 
       name: "@fitlab-ai/agent-infra",
       version: "0.0.0-test"
     });
-    writeFile(packageRoot, "runtime/platform-adapters/platform-sync.github.js", "export {};\n");
     writeFile(globalRoot, "ai.cmd", "@ECHO OFF\r\n");
 
     writeJson(projectRoot, ".agents/.airc.json", {
@@ -1124,71 +1111,6 @@ test("syncTemplates preserves project testing discipline as a merged file", asyn
     );
     assert.deepEqual(firstReport.managed.written, []);
     assert.deepEqual(secondReport.managed.written, []);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("syncTemplates deploys a loadable GitHub platform adapter without downstream dependencies", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-platform-adapter-"));
-
-  try {
-    const projectRoot = path.join(tmpDir, "project");
-    const { installRoot, templateRoot } = createTemplateInstall(tmpDir);
-    const target = ".agents/scripts/platform-adapters/platform-sync.js";
-    const requiredChecksTarget = ".agents/scripts/platform-adapters/required-checks.js";
-    const locatorTarget = ".agents/scripts/lib/agent-infra-package.js";
-
-    fs.mkdirSync(projectRoot, { recursive: true });
-    writeFile(templateRoot, target, read("templates/.agents/scripts/platform-adapters/platform-sync.js"));
-    writeFile(templateRoot, requiredChecksTarget, read("templates/.agents/scripts/platform-adapters/required-checks.js"));
-    writeFile(templateRoot, locatorTarget, read("templates/.agents/scripts/lib/agent-infra-package.js"));
-    writeFile(
-      templateRoot,
-      ".agents/scripts/platform-adapters/platform-sync.github.js",
-      read("templates/.agents/scripts/platform-adapters/platform-sync.github.js")
-    );
-    writeFile(
-      templateRoot,
-      ".agents/scripts/platform-adapters/required-checks.github.js",
-      read("templates/.agents/scripts/platform-adapters/required-checks.github.js")
-    );
-    writeJson(projectRoot, ".agents/.airc.json", {
-      project: "demo",
-      org: "acme",
-      language: "en",
-      platform: { type: "github" },
-      files: {
-        managed: [target, requiredChecksTarget, locatorTarget],
-        merged: [],
-        ejected: []
-      }
-    });
-
-    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
-    const report = syncTemplates(projectRoot, templateRoot);
-    const deployedPath = path.join(projectRoot, target);
-    const deployedRequiredChecksPath = path.join(projectRoot, requiredChecksTarget);
-    const moduleUrl = pathToFileURL(deployedPath);
-    moduleUrl.searchParams.set("v", String(Date.now()));
-    const previousPackageRoot = process.env.AGENT_INFRA_PACKAGE_ROOT;
-    process.env.AGENT_INFRA_PACKAGE_ROOT = installRoot;
-    const { getDefaults } = await import(moduleUrl.href) as PlatformSyncModule;
-    const requiredChecksModuleUrl = pathToFileURL(deployedRequiredChecksPath);
-    requiredChecksModuleUrl.searchParams.set("v", String(Date.now()));
-    const requiredChecks = await import(requiredChecksModuleUrl.href) as {
-      check(context: unknown, shared: { passResult(type: string, message: string): unknown }): { status: string };
-    };
-    if (previousPackageRoot === undefined) delete process.env.AGENT_INFRA_PACKAGE_ROOT;
-    else process.env.AGENT_INFRA_PACKAGE_ROOT = previousPackageRoot;
-
-    assert.deepEqual(report.managed.created.sort(), [locatorTarget, requiredChecksTarget, target].sort());
-    assert.equal(fs.existsSync(path.join(projectRoot, "node_modules")), false);
-    assert.equal(getDefaults().statusLabels.inProgress, "status: in-progress");
-    assert.equal(getDefaults().markers.task, "<!-- sync-issue:{task-id}:task -->");
-    assert.equal(requiredChecks.check({}, {
-      passResult: (type, message) => ({ type, status: "pass", message })
-    }).status, "pass");
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

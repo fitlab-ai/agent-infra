@@ -55,7 +55,7 @@ Read `reference/branch-management.md`, ensure the current branch matches the tas
 
 **Mandatory; do not skip.** If task.md has a valid `issue_number`, run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --milestone specific`.
 
-> If this step is skipped or the Issue milestone is still a release line `X.Y.x` afterward, the step-11 `validate-artifact` gate will block the `code-task` round via `verify_milestone_specific` and require narrowing to a specific version (e.g. `0.7.1`) before proceeding.
+> If the milestone remains `X.Y.x`, step 11 `task-verify code.completed` blocks through the typed milestone check.
 
 ### 4. Determine Mode and Round
 

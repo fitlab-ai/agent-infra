@@ -12,7 +12,7 @@ After `create-pr`, continuously watch the PR's required CI checks: when everythi
 ## Behavior Boundaries / Key Rules
 
 - Only watch + self-heal the current PR's required checks; make no changes unrelated to the failing check.
-- Self-heal modifies code and `git push`es to the PR branch, but **local tests for the affected area must pass before pushing**; fix attempts have a hard cap (default 2); only self-heal locatable code-layer failures (lint / format / test / type / build), and always route non-code failures (network / permission / external service / flaky) to the help exit.
+- Self-heal publishes through Git workflow intents, but **affected tests must pass first**; the attempt cap and code-layer authorization remain unchanged.
 - The help exit is "produce-then-stop": end this round, output the blocker explanation, and wait for the user to trigger the next step — **never** ask mid-flow.
 - Bare numbers / `#NN` / `TASK-id` arguments are always resolved as task short ids (see `.agents/rules/task-short-id.md`); a PR number is passed only via `--pr <number>` / a PR URL / omission (current branch), never reusing the bare-number syntax.
 - After running this skill (task-anchored path), you must update task.md.
@@ -54,7 +54,7 @@ Initialize the in-memory list `repairCommits=[]` for this run. Run `agent-infra-
 
 Before running this step, read the "Self-Heal Decision Tree" of `reference/monitor-and-heal.md` and "Resolve a Failing Run id and Pull Logs" of `.agents/rules/pr-checks-commands.md`.
 
-For a failing check, call `platform-checks resolve-run`, then `platform-checks logs` to obtain faithful logs before classification. Read `.agents/rules/debugging-guide.md` before a local fix. Only for a locatable code-layer failure, make the minimum fix, run relevant tests, then **stage, commit, and push** only the related files, append the successfully pushed SHA to `repairCommits`, and return to step 2. At the cap (default 2) or when resolution fails, go to step 4.
+For a locatable code-layer failure, make the minimum fix and run relevant tests. Then call `git-workflow commit` and `git-workflow push`; append only a remotely verified SHA to `repairCommits`.
 
 ### 4. Help Exit (Produce-Then-Stop)
 

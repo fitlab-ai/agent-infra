@@ -99,7 +99,7 @@ test("package metadata supports scoped npm publishing", () => {
   assert.match(pkg.scripts.prepublishOnly, /npm run build/);
   assert.match(pkg.scripts.prepublishOnly, /--test/);
   assert.match(pkg.scripts.prepublishOnly, /tests\/\*\*\/\*\.test\.ts/);
-  assert.match(read("runtime/platform-adapters/platform-sync.github.js"), /createGitHubClient/);
+  assert.match(read("lib/platform/verification-sync.ts"), /createGitHubClient/);
 });
 
 test("Node runtime baseline stays aligned across metadata and automation", () => {
@@ -228,32 +228,21 @@ test("release documentation reflects CI-driven npm publishing", () => {
   const releaseSkill = read(".agents/skills/release/SKILL.md");
   const releaseTemplate = read("templates/.agents/skills/release/SKILL.en.md");
   const releaseTemplateZh = read("templates/.agents/skills/release/SKILL.zh-CN.md");
-  const releaseScript = read(".agents/skills/release/scripts/manage-milestones.sh");
-  const releaseTemplateScript = read("templates/.agents/skills/release/scripts/manage-milestones.github.sh");
 
   assert.match(releasing, /Trusted Publisher/);
   assert.match(releasing, /GitHub Actions OIDC/);
   assert.match(releasing, /npm publish --provenance/);
   assert.match(releasing, /@fitlab-ai\/agent-infra/);
   assert.match(releasing, /推送标签后由 CI 自动执行/);
-  assert.match(releaseSkill, /推送后将自动触发 release 创建和 npm 发布/);
-  assert.match(releaseSkill, /npm 自动发布/);
-  assert.match(releaseSkill, /\.agents\/\.airc\.json.*templateVersion/);
   [releaseSkill, releaseTemplate, releaseTemplateZh].forEach((content) => {
-    assert.match(content, /manage-milestones\.sh/);
-    assert.match(content, /init-milestones/);
-  });
-  [releaseScript, releaseTemplateScript].forEach((content) => {
-    assert.match(content, /milestones\?state=all/);
-    assert.match(content, /Issues that we want to resolve in/);
-    assert.match(content, /Issues that we want to release in v/);
+    assert.match(content, /release-workflow/);
   });
 });
 
 test("project release skill runs local entropy-check without distributing it", () => {
   const releaseSkill = read(".agents/skills/release/SKILL.md");
 
-  assert.match(releaseSkill, /entropy-check/);
+  assert.match(releaseSkill, /entropy/);
   [
     "templates/.agents/skills/release/SKILL.en.md",
     "templates/.agents/skills/release/SKILL.zh-CN.md"

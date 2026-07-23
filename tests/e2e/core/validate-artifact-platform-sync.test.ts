@@ -134,10 +134,10 @@ test("requirements sync converges before the complete-task platform gate", async
     comments.push({ id: 999, body: `<!-- sync-issue:${taskId}:summary -->\nSummary` });
     writeJson(commentsPath, comments);
 
-    const validation = spawnSync(process.execPath, [
-      filePath(".agents/scripts/validate-artifact.js"),
-      "check", "platform-sync", taskDir, "--skill", "complete-task"
-    ], { cwd: filePath("."), env, encoding: "utf8" });
+    const validation = runValidator(
+      ["check", "platform-sync", taskDir, "--skill", "complete-task"],
+      { env }
+    );
     assert.equal(validation.status, 0, `${validation.stderr}\n${validation.stdout}`);
     assertPayloadStatus(validation, { type: "platform-sync", status: "pass" });
     assert.match(JSON.parse(fs.readFileSync(issuePath, "utf8")).body, /- \[x\] 保留最新验证输出/);
@@ -1023,102 +1023,6 @@ for (const c of retryCases) {
     assert.equal(parseValidatorPayload(result.stdout).gate, "pass");
   }));
 }
-
-test("validate-artifact platform-sync retries label list fallback when in: label mapping is empty", () => (
-  withProjectTempRoot("agent-infra-platform-sync-retry-labels-", (tempRoot) => {
-    const taskDir = path.join(tempRoot, taskId);
-    const binDir = path.join(tempRoot, "bin");
-    const ghPath = path.join(binDir, "gh.cjs");
-    const issuePath = path.join(tempRoot, "issue.json");
-    const commentsPath = path.join(tempRoot, "comments.json");
-    const prCommentsPath = path.join(tempRoot, "pr-comments.json");
-    const labelsPath = path.join(tempRoot, "labels.json");
-    const counterPath = path.join(tempRoot, "transient-labels.count");
-    const scriptCopy = path.join(tempRoot, ".agents/scripts/validate-artifact.js");
-    const adapterCopy = path.join(tempRoot, ".agents/scripts/platform-adapters/platform-sync.js");
-    const verifyCopy = path.join(tempRoot, ".agents/skills/commit/config/verify.json");
-
-    write(path.join(tempRoot, "package.json"), JSON.stringify({ type: "module" }, null, 2));
-    write(path.join(tempRoot, ".agents/.airc.json"), JSON.stringify({
-      project: "agent-infra",
-      labels: { in: {} }
-    }, null, 2));
-    write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
-    write(path.join(tempRoot, ".agents/scripts/lib/review-artifacts.js"), read(".agents/scripts/lib/review-artifacts.js"));
-    write(path.join(tempRoot, ".agents/scripts/lib/post-review-commit.js"), read(".agents/scripts/lib/post-review-commit.js"));
-    write(path.join(tempRoot, ".agents/scripts/lib/agent-infra-package.js"), read(".agents/scripts/lib/agent-infra-package.js"));
-    write(adapterCopy, read(".agents/scripts/platform-adapters/platform-sync.js"));
-    write(verifyCopy, read(".agents/skills/commit/config/verify.json"));
-    initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });
-    const headSha = createHeadCommit(tempRoot);
-    write(ghPath, loadFixture("fake-gh.js"));
-    fs.chmodSync(ghPath, 0o755);
-
-    write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65", pr_number: "77" }));
-    writeJson(issuePath, buildIssuePayload({ labels: [] }));
-    writeJson(commentsPath, []);
-    writeJson(prCommentsPath, [{ body: summaryCommentWithSha(headSha) }]);
-    writeJson(labelsPath, [{ name: "in: tests" }]);
-    write(counterPath, "1");
-
-    const result = spawnSync(
-      process.execPath,
-      [scriptCopy, "check", "platform-sync", taskDir, "--skill", "commit"],
-      {
-        encoding: "utf8",
-        cwd: tempRoot,
-        env: gitSafeEnv({
-          AGENT_INFRA_PACKAGE_ROOT: process.cwd(),
-          AGENT_INFRA_GH_BIN: process.execPath,
-          AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([ghPath]),
-          GH_FAKE_ISSUE_PATH: issuePath,
-          GH_FAKE_COMMENTS_PATH: commentsPath,
-          GH_FAKE_PR_COMMENTS_PATH: prCommentsPath,
-          GH_FAKE_LABELS_PATH: labelsPath,
-          GH_FAKE_ISSUE_NUMBER: "65",
-          GH_FAKE_PR_NUMBER: "77",
-          GH_FAKE_TRANSIENT_FAIL_MATCHER: "label list",
-          GH_FAKE_TRANSIENT_FAIL_COUNTER_FILE: counterPath,
-          VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
-        })
-      }
-    );
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.equal(fs.readFileSync(counterPath, "utf8").trim(), "0");
-    assertPayloadStatus(result, { status: "pass" });
-  })
-));
-
-test("validate-artifact platform-sync skips when no platform adapter is registered", () => (
-  withTempRoot("agent-infra-platform-sync-skip-", (tempRoot) => {
-    const taskDir = path.join(tempRoot, taskId);
-    const scriptCopy = path.join(tempRoot, ".agents/scripts/validate-artifact.js");
-    const verifyCopy = path.join(tempRoot, ".agents/skills/code-task/config/verify.json");
-    write(path.join(tempRoot, "package.json"), JSON.stringify({ type: "module" }, null, 2));
-    write(scriptCopy, read(".agents/scripts/validate-artifact.js"));
-    write(path.join(tempRoot, ".agents/scripts/lib/review-artifacts.js"), read(".agents/scripts/lib/review-artifacts.js"));
-    write(path.join(tempRoot, ".agents/scripts/lib/post-review-commit.js"), read(".agents/scripts/lib/post-review-commit.js"));
-    write(verifyCopy, read(".agents/skills/code-task/config/verify.json"));
-    write(path.join(taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
-    write(path.join(taskDir, "code.md"), loadFixture("valid-code.md"));
-
-    const result = spawnSync(
-      process.execPath,
-      [scriptCopy, "check", "platform-sync", taskDir, "code.md", "--skill", "code-task"],
-      {
-        encoding: "utf8",
-        cwd: tempRoot,
-        env: process.env
-      }
-    );
-    assert.equal(result.status, 0, result.stderr);
-    assertPayloadStatus(result, {
-      type: "platform-sync",
-      status: "pass",
-      message: /Skipped: no platform adapter registered for 'platform-sync'/
-    });
-  })
-));
 
 test("platform-sync rejects status labels on closed issues without triage permission", async () => (
   withTempRoot("agent-infra-platform-sync-closed-status-", async (tempRoot) => {

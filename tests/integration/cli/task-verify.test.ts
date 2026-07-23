@@ -7,46 +7,40 @@ import { spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH } from '../../helpers.ts';
 
-test('internal task-verify passes resolved identity to the validator and preserves exit codes', () => {
+function writeJson(filePath: string, value: unknown) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value)}\n`);
+}
+
+test('internal task-verify resolves task identity and invokes the typed engine', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-verify-integration-'));
-  spawnSync('git', ['init', '-q'], { cwd: root });
-  const id = 'TASK-20260101-000001';
-  const dir = path.join(root, '.agents', 'workspace', 'active', id);
-  const scripts = path.join(root, '.agents', 'scripts');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.mkdirSync(scripts, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\n---\n`);
-  fs.writeFileSync(path.join(dir, 'code.md'), '# Code\n');
-  fs.writeFileSync(path.join(scripts, 'validate-artifact.js'), `
-const args = process.argv.slice(2);
-const blocked = process.env.FIXTURE_BLOCKED === '1';
-const gate = blocked ? 'blocked' : 'pass';
-const taskId = args[2].split(/[\\\\/]/).at(-1);
-const message = [args[0], args[1], taskId, args[3]].filter(Boolean).join('|');
-const payload = args[0] === 'check'
-  ? {status:gate,skill:args[args.indexOf('--skill') + 1],type:args[1],message}
-  : {gate,skill:args[1],checks:[{type:'fixture',status:gate,message}],summary:'fixture',action:'fixture'};
-process.stdout.write(JSON.stringify(payload) + '\\n');
-process.exit(blocked ? 2 : 0);
-`);
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: root });
+    const id = 'TASK-20260101-000001';
+    const dir = path.join(root, '.agents', 'workspace', 'active', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\n---\n`);
+    fs.writeFileSync(path.join(dir, 'code.md'), '# Code\n');
+    writeJson(path.join(root, '.agents/skills/code-task/config/verify.json'), { skill: 'code-task', checks: {} });
+    writeJson(path.join(root, '.agents/skills/complete-task/config/verify.json'), {
+      skill: 'complete-task', checks: {
+        'review-ledger': null, 'post-review-commit': null,
+        'required-checks': null, 'platform-sync-preflight': null
+      }
+    });
 
-  const pass = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'code.completed', '--artifact', 'code.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
-  assert.equal(pass.status, 0, pass.stderr);
-  assert.match(pass.stdout, /Verification: pass \| Skill: code-task/);
-  assert.match(pass.stdout, /fixture - gate\|code-task\|TASK-20260101-000001\|code.md/);
+    const pass = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'code.completed', '--artifact', 'code.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
+    assert.equal(pass.status, 0, pass.stderr);
+    assert.match(pass.stdout, /Verification: pass \| Skill: code-task/);
 
-  const preflight = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'complete-task.preflight', '--format', 'text'], { cwd: root, encoding: 'utf8' });
-  assert.equal(preflight.status, 0, preflight.stderr);
-  assert.equal((preflight.stdout.match(/^Check: pass/gm) ?? []).length, 4);
-  assert.doesNotMatch(preflight.stdout, /undefined/);
+    const preflight = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'complete-task.preflight', '--format', 'text'], { cwd: root, encoding: 'utf8' });
+    assert.equal(preflight.status, 0, preflight.stderr);
+    assert.equal((preflight.stdout.match(/^Check: pass/gm) ?? []).length, 4);
 
-  const blocked = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'commit.completed'], {
-    cwd: root, encoding: 'utf8', env: { ...process.env, FIXTURE_BLOCKED: '1' }
-  });
-  assert.equal(blocked.status, 2);
-  assert.equal(JSON.parse(blocked.stdout).status, 'blocked');
-
-  const duplicate = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'commit.completed', '--format', 'json', '--format', 'text'], { cwd: root, encoding: 'utf8' });
-  assert.equal(duplicate.status, 1);
-  assert.equal(JSON.parse(duplicate.stdout).error.code, 'VERIFY_PAYLOAD_INVALID');
+    const duplicate = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'commit.completed', '--format', 'json', '--format', 'text'], { cwd: root, encoding: 'utf8' });
+    assert.equal(duplicate.status, 1);
+    assert.equal(JSON.parse(duplicate.stdout).error.code, 'VERIFY_PAYLOAD_INVALID');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

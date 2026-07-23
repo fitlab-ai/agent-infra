@@ -40,17 +40,7 @@ Build the co-author block with these rules:
 ## Create the Commit
 
 ```bash
-git add <specific-files>
-git commit -m "$(cat <<'EOF'
-<type>(<scope>): <subject>
-
-- <bullet point 1>
-- <bullet point 2>
-
-Co-Authored-By: {Your Model Name} <noreply@provider.com>
-<additional Co-Authored-By lines>
-EOF
-)"
+agent-infra-internal git-workflow commit --input {commit-intent.json}
 ```
 
 Important:

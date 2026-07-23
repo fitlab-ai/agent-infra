@@ -408,8 +408,7 @@ agent-infra-internal task-verify {task-id} <verification-event> [--artifact <art
 - 对语言相关的产物标题或锚点，`config/verify.en.json` 和 `config/verify.zh-CN.json` 之间只应让 `required_sections` 与语言相关的 `required_patterns` 不同
 - 如果 skill 还会展示“下一步”提示，必须先通过完成校验，再输出这些指引
 - 面向用户展示最终校验结果时使用 `--format text` 输出可读摘要
-- `.agents/scripts/validate-artifact.js` 当前仅是 `task-verify` 的迁移期内部实现，不是 SKILL 兼容入口；不要把详细校验规则重新塞回 SKILL.md
-- 当前迁移尚未完全清理；待 07/10–09/10 平台适配收敛后，10/10 必须删除剩余 direct CLI/parser、子进程协议桥和已被 typed core 取代的机械规则
+- `task-verify` 在进程内按 typed catalog/check registry 执行；SKILL 不得复制校验算法或传机械 check 序列
 - 在回复中保留当次校验输出作为当次验证输出；没有当次校验输出，不得声明完成
 
 ## 常见问题
