@@ -83,7 +83,7 @@ npm test
 本仓库的模板需要区分平台无关 baseline 与平台特定实现。平台特定内容只能放在以下位置：
 
 - `.agents/rules/*.{platform}.md`
-- `.agents/scripts/platform-adapters/platform-sync.{platform}.js`
+- `lib/platform/adapters.ts` 中的注册项及对应 typed provider 模块
 - 明确属于平台集成的脚本或工作流目录
 
 除上述位置外，`SKILL.md`、`reference/*.md`、命令面板、QUICKSTART、README 等 baseline 文件必须保持平台无关。baseline 文件应引用 `.agents/rules/*.md` 或 `.agents/scripts/` 中的抽象入口，不直接写入平台命令、路径或 schema。
@@ -119,7 +119,7 @@ npm test
 已采纳的架构决策：
 
 - `verify.json` 应优先通过 `expected_*_key` 引用平台 adapter 的默认值，而不是复制 marker 或 status label 字符串。
-- `platform-sync.{platform}.js#getDefaults()` 是平台默认 marker 和 status label 的单一信息源。
+- `lib/platform/adapters.ts` 是 typed 平台 provider 的注册表；provider 自有模块是平台操作与默认值的单一事实源。
 - 这个 key-based 抽象是为多平台扩展保留的设计：把 N 个 skill × M 个平台的配置成本收敛为 N 个 key 引用 + M 个 adapter 默认值。
 
 ### 构建架构

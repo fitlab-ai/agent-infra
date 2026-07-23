@@ -83,7 +83,7 @@ Refer to the project's `README.md` for more guidance on how to set up the develo
 The templates in this repository must distinguish between the platform-agnostic baseline and platform-specific implementations. Platform-specific content may only live in the following locations:
 
 - `.agents/rules/*.{platform}.md`
-- `.agents/scripts/platform-adapters/platform-sync.{platform}.js`
+- `lib/platform/adapters.ts` registrations and their typed provider modules
 - Scripts or workflow directories that explicitly belong to platform integration
 
 Apart from the locations above, baseline files such as `SKILL.md`, `reference/*.md`, command palettes, QUICKSTART, and README must remain platform-agnostic. Baseline files should reference the abstract entry points in `.agents/rules/*.md` or `.agents/scripts/` rather than embedding platform commands, paths, or schemas directly.
@@ -119,7 +119,7 @@ Examples:
 Adopted architectural decisions:
 
 - `verify.json` should prefer referencing the platform adapter's default values via `expected_*_key` rather than copying marker or status label strings.
-- `platform-sync.{platform}.js#getDefaults()` is the single source of truth for platform default markers and status labels.
+- `lib/platform/adapters.ts` is the registry for typed platform providers; provider-owned modules are the single source of truth for platform operations and defaults.
 - This key-based abstraction is a design reserved for multi-platform expansion: it collapses the configuration cost of N skills × M platforms into N key references + M adapter defaults.
 
 ### Build Architecture

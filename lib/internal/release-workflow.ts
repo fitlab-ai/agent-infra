@@ -13,6 +13,30 @@ function command(cwd: string, executable: string, args: string[]) {
   return spawnSync(executable, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
+type CommandResult = ReturnType<typeof command>;
+type CommandRunner = (cwd: string, executable: string, args: string[]) => CommandResult;
+type DemoResult = {
+  status: 'recorded' | 'skipped' | 'failed';
+  reasonCode: 'VHS_MISSING' | 'FFMPEG_MISSING' | 'DEMO_COMMAND_FAILED' | null;
+  message: string | null;
+};
+
+function runOptionalDemo(cwd: string, run: CommandRunner = command): DemoResult {
+  const vhs = run(cwd, 'vhs', ['--version']);
+  if (vhs.status !== 0) return { status: 'skipped', reasonCode: 'VHS_MISSING', message: null };
+  const ffmpeg = run(cwd, 'ffmpeg', ['-version']);
+  if (ffmpeg.status !== 0) return { status: 'skipped', reasonCode: 'FFMPEG_MISSING', message: null };
+  const demo = run(cwd, 'npm', ['run', 'demo:regen']);
+  if (demo.status !== 0) {
+    return {
+      status: 'failed',
+      reasonCode: 'DEMO_COMMAND_FAILED',
+      message: String(demo.stderr || demo.stdout)
+    };
+  }
+  return { status: 'recorded', reasonCode: null, message: null };
+}
+
 function git(cwd: string, args: string[]): string | null {
   const result = command(cwd, 'git', args);
   return result.status === 0 ? String(result.stdout).trim() : null;
@@ -125,14 +149,25 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
   if (!['published', 'post-pending'].includes(before.phase) || !channelsComplete || before.facts.smoke !== 'success') {
     process.stdout.write(`${JSON.stringify({ status: before.facts.smoke === 'failed' ? 'failed' : 'blocked', changed: false, snapshot: before, error: { code: 'RELEASE_CHANNELS_PENDING', message: 'Release channels or smoke workflow are not complete' } })}\n`); process.exitCode = before.facts.smoke === 'failed' ? 1 : 2; return;
   }
-  for (const [exe, commandArgs] of [['npm', ['run', 'build']], ['npm', ['version', 'prerelease', '--preid=alpha', '--no-git-tag-version']], ['npm', ['install', '--package-lock-only']], [process.execPath, ['scripts/build-inline.js']]] as Array<[string, string[]]>) {
+  const built = command(cwd, 'npm', ['run', 'build']);
+  if (built.status !== 0) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: true, snapshot: before, error: { code: 'RELEASE_POST_COMMAND_FAILED', message: String(built.stderr || built.stdout) } })}\n`);
+    process.exitCode = 1; return;
+  }
+  const demo = runOptionalDemo(cwd);
+  if (demo.status === 'failed') {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: true, snapshot: before, demo, error: { code: 'RELEASE_POST_DEMO_FAILED', message: demo.message } })}\n`);
+    process.exitCode = 1; return;
+  }
+  for (const [exe, commandArgs] of [['npm', ['version', 'prerelease', '--preid=alpha', '--no-git-tag-version']], ['npm', ['install', '--package-lock-only']], [process.execPath, ['scripts/build-inline.js']]] as Array<[string, string[]]>) {
     const result = command(cwd, exe, commandArgs); if (result.status !== 0) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: true, snapshot: before, error: { code: 'RELEASE_POST_COMMAND_FAILED', message: String(result.stderr || result.stdout) } })}\n`); process.exitCode = 1; return; }
   }
   const committed = commitExplicitPaths({ cwd, paths: changedPaths(cwd), message: `chore: prepare next dev iteration after v${version}` });
   if (committed.status === 'failed') { process.stdout.write(`${JSON.stringify(committed)}\n`); process.exitCode = 1; return; }
   const branch = git(cwd, ['branch', '--show-current']) || '';
   const pushed = pushGitRefs({ cwd, remote: 'origin', refs: [branch] });
-  process.stdout.write(`${JSON.stringify({ ...pushed, snapshot: releaseSnapshot(version, await inspectFacts(cwd, version)) })}\n`); process.exitCode = pushed.status === 'failed' ? 1 : pushed.status === 'degraded' ? 2 : 0;
+  process.stdout.write(`${JSON.stringify({ ...pushed, demo, snapshot: releaseSnapshot(version, await inspectFacts(cwd, version)) })}\n`); process.exitCode = pushed.status === 'failed' ? 1 : pushed.status === 'degraded' ? 2 : 0;
 }
 
-export { inspectFacts, releaseWorkflow };
+export { inspectFacts, releaseWorkflow, runOptionalDemo };
+export type { CommandRunner, DemoResult };

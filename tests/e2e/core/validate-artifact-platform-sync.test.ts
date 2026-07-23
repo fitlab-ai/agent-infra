@@ -261,7 +261,7 @@ const implementSyncCases = [
     skill: "code-task",
     extraEnv: {
       GH_FAKE_ISSUE_REST_FAIL: "Issue Types are unavailable",
-      VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
+      AGENT_INFRA_PLATFORM_RETRY_DELAYS_MS: "0,0"
     },
     comments(taskContent: string, artifactContent: string) {
       return [
@@ -606,7 +606,7 @@ test("validate-artifact platform-sync skips Issue field verification when fields
       AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([ctx.ghPath]),
       GH_FAKE_ISSUE_PATH: ctx.issuePath,
       GH_FAKE_ISSUE_FIELDS_FAIL: "Issue fields are unavailable",
-      VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
+      AGENT_INFRA_PLATFORM_RETRY_DELAYS_MS: "0,0"
     });
     assert.equal(unavailableResult.status, "pass");
 
@@ -968,7 +968,7 @@ test("validate-artifact platform-sync blocks after retry exhaustion on gh networ
     const result = runValidator(["gate", "code-task", taskDir, "code.md"], {
       env: {
         PATH: pathWithPrependedBin(binDir),
-        VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
+        AGENT_INFRA_PLATFORM_RETRY_DELAYS_MS: "0,0"
       }
     });
     assert.equal(result.status, 2);
@@ -1016,7 +1016,7 @@ for (const c of retryCases) {
       GH_FAKE_COMMENTS_PATH: ctx.commentsPath,
       GH_FAKE_TRANSIENT_FAIL_MATCHER: c.matcher,
       GH_FAKE_TRANSIENT_FAIL_COUNTER_FILE: counterPath,
-      VALIDATE_ARTIFACT_RETRY_DELAYS_MS: "0,0"
+      AGENT_INFRA_PLATFORM_RETRY_DELAYS_MS: "0,0"
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(fs.readFileSync(counterPath, "utf8").trim(), "0");

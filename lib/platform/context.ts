@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 
 import semver from 'semver';
 
+import { getPlatformAdapter, registerPlatformAdapter } from './adapters.ts';
 import { createGitHubClient, MINIMUM_GITHUB_CLI_VERSION } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
 import { platformResult } from './types.ts';
@@ -61,16 +62,9 @@ function failure(error: { code: string; message: string; retryable: boolean }, r
   });
 }
 
-function resolvePlatformContext(options: ContextOptions = {}): PlatformResult {
-  const cwd = path.resolve(options.cwd || process.cwd());
-  const repoRoot = findRepoRoot(cwd);
-  const platform = options.platformType ?? readPlatformType(repoRoot);
-  if (platform !== 'github') {
-    return platformResult('no-op', {
-      platform: { type: platform, repository: null, currentUser: null },
-      error: { code: 'PLATFORM_UNSUPPORTED', message: `Platform '${platform || 'none'}' has no built-in adapter`, retryable: false }
-    });
-  }
+function resolveGitHubContext(options: ContextOptions & { cwd: string }): PlatformResult {
+  const { cwd } = options;
+  const platform = 'github';
   const client = options.client || createGitHubClient();
   const version = client.version({ cwd });
   if (!version.ok) return failure(version.error, null);
@@ -133,6 +127,27 @@ function resolvePlatformContext(options: ContextOptions = {}): PlatformResult {
     capabilities,
     operations: [{ name: 'resolve', status: 'no-op', reasonCode: null }]
   });
+}
+
+registerPlatformAdapter({
+  type: 'github',
+  resolveContext(options) {
+    return resolveGitHubContext(options as ContextOptions & { cwd: string });
+  }
+});
+
+function resolvePlatformContext(options: ContextOptions = {}): PlatformResult {
+  const cwd = path.resolve(options.cwd || process.cwd());
+  const repoRoot = findRepoRoot(cwd);
+  const platform = options.platformType ?? readPlatformType(repoRoot);
+  const adapter = getPlatformAdapter(platform);
+  if (!adapter) {
+    return platformResult('no-op', {
+      platform: { type: platform, repository: null, currentUser: null },
+      error: { code: 'PLATFORM_UNSUPPORTED', message: `Platform '${platform || 'none'}' has no registered adapter`, retryable: false }
+    });
+  }
+  return adapter.resolveContext({ cwd, gitRemote: options.gitRemote, client: options.client });
 }
 
 export { parseGitHubRemote, resolvePlatformContext };

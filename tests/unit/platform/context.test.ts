@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { listPlatformAdapters, registerPlatformAdapter } from '../../../lib/platform/adapters.ts';
 import { parseGitHubRemote, resolvePlatformContext } from '../../../lib/platform/context.ts';
+import { platformResult } from '../../../lib/platform/types.ts';
 
 test('GitHub remote parser accepts HTTPS and SCP-like remotes', () => {
   assert.equal(parseGitHubRemote('https://github.com/acme/widgets.git'), 'acme/widgets');
@@ -112,4 +114,20 @@ test('platform context returns observable no-op for unsupported platform and mis
   const missing = resolvePlatformContext({ cwd: root, gitRemote: () => null });
   assert.equal(missing.status, 'no-op');
   assert.equal(missing.error?.code, 'REMOTE_MISSING');
+});
+
+test('platform context dispatches registered typed adapters without probing GitHub', () => {
+  registerPlatformAdapter({
+    type: 'gitlab-test',
+    resolveContext({ cwd }) {
+      return platformResult('no-op', {
+        platform: { type: 'gitlab-test', repository: `acme/${path.basename(cwd)}`, currentUser: 'tester' }
+      });
+    }
+  });
+  const result = resolvePlatformContext({ cwd: '/tmp/widgets', platformType: 'gitlab-test' });
+  assert.equal(result.platform.type, 'gitlab-test');
+  assert.equal(result.platform.repository, 'acme/widgets');
+  assert.ok(listPlatformAdapters().includes('github'));
+  assert.ok(listPlatformAdapters().includes('gitlab-test'));
 });

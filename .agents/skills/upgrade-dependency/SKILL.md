@@ -9,7 +9,7 @@ description: >
 
 将依赖包升级到指定版本，并进行构建和测试验证。
 
-本项目仅使用 Node.js 内置模块，通常无外部依赖需要升级。
+本项目使用 npm、`package.json` 和 `package-lock.json` 管理依赖。
 
 ## 执行流程
 
@@ -19,36 +19,31 @@ description: >
 
 ### 2. 查找依赖位置
 
-在依赖文件中搜索目标包：
-- `package.json`（Node.js）
-- `pom.xml`（Maven）
-- `requirements.txt` / `pyproject.toml`（Python）
-- `go.mod`（Go）
-- 其他项目特定的依赖文件
+在 `package.json` 和 `package-lock.json` 中确认目标包、当前版本和依赖类型。
 
 ### 3. 更新版本
 
-在依赖文件中更新版本号。
-
-### 4. 安装依赖
-
-如有新增外部依赖：
+使用 npm 更新依赖并同步 lockfile：
 ```bash
-npm install
+npm install {package}@{new-version}
 ```
 
-### 5. 验证构建
+### 4. 验证类型与核心测试
 
-本项目无构建步骤。运行测试验证：
 ```bash
-node --test tests/**/*.test.js
+npm run typecheck
+npm run test:core
 ```
 
-### 6. 运行测试
+### 5. 运行完整测试（高风险升级）
 
-执行项目的测试命令。参考 test 技能获取项目特定的测试命令。
+主版本升级、构建工具升级或影响多个运行路径时执行：
 
-### 7. 输出结果
+```bash
+npm test
+```
+
+### 6. 输出结果
 
 报告：
 - 修改的文件

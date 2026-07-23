@@ -305,6 +305,25 @@ test('review-code event completes a supplemental round against the latest code a
   assert.match(content, /\]\(review-code-r2\.md\)/);
 });
 
+test('review-code event allows a supplemental round after commit preparation', () => {
+  const f = fixture('commit');
+  fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');
+  fs.writeFileSync(path.join(f.dir, 'review-code.md'), reviewCodeArtifact());
+  fs.appendFileSync(
+    f.file,
+    '- 2026-01-01 00:01:00+00:00 — **Review Code (Round 1)** by codex — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-code.md\n'
+  );
+
+  const started = run(f.root, [f.id, 'review-code.started', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
+  const startedResult = JSON.parse(started.stdout);
+  assert.equal(startedResult.status, 'applied');
+  assert.equal(startedResult.fromStep, 'commit');
+  assert.equal(startedResult.toStep, 'commit');
+  assert.equal(startedResult.round, 2);
+  assert.equal(startedResult.artifact, 'review-code-r2.md');
+});
+
 test('review-code event still rejects an unrelated workflow stage without changing task bytes', () => {
   const f = fixture('technical-design');
   fs.writeFileSync(path.join(f.dir, 'code.md'), '# Code\n');

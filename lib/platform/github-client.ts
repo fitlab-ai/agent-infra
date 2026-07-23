@@ -49,7 +49,7 @@ function defaultRunner(args: string[], options: RunOptions): RunResult {
 }
 
 function retryDelaysFromEnvironment(): number[] {
-  const raw = process.env.VALIDATE_ARTIFACT_RETRY_DELAYS_MS;
+  const raw = process.env.AGENT_INFRA_PLATFORM_RETRY_DELAYS_MS;
   if (!raw) return [3000, 10000];
   return raw.split(',').map(Number).filter((value) => Number.isFinite(value) && value >= 0);
 }

@@ -4,7 +4,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_NAME = "@fitlab-ai/agent-infra";
-const DEFAULT_PACKAGE_MARKER_RELATIVE_PATH = "package.json";
 const COMMAND_NAMES = ["ai", "agent-infra"];
 
 function canonicalize(candidate) {
@@ -15,7 +14,7 @@ function canonicalize(candidate) {
   }
 }
 
-function inspectPackageRoot(candidate, source, packageMarkerRelativePath) {
+function inspectPackageRoot(candidate, source) {
   const canonicalRoot = canonicalize(candidate);
   if (!canonicalRoot) {
     return { source, candidate, reason: "path does not exist" };
@@ -37,16 +36,10 @@ function inspectPackageRoot(candidate, source, packageMarkerRelativePath) {
     };
   }
 
-  const runtimePath = path.join(canonicalRoot, packageMarkerRelativePath);
-  if (!fs.existsSync(runtimePath)) {
-    return { source, candidate: canonicalRoot, reason: `package marker not found at ${runtimePath}` };
-  }
-
   return {
     source,
     candidate: canonicalRoot,
     packageRoot: canonicalRoot,
-    runtimePath,
     templateRoot: path.join(canonicalRoot, "templates")
   };
 }
@@ -91,10 +84,8 @@ function resolveAgentInfraPackage(options = {}) {
   const platform = options.platform || process.platform;
   const startPath = options.startPath || fileURLToPath(import.meta.url);
   const attempts = [];
-  const packageMarkerRelativePath = options.runtimeRelativePath || DEFAULT_PACKAGE_MARKER_RELATIVE_PATH;
-
   const tryRoot = (candidate, source) => {
-    const inspected = inspectPackageRoot(candidate, source, packageMarkerRelativePath);
+    const inspected = inspectPackageRoot(candidate, source);
     attempts.push(inspected);
     return inspected.packageRoot ? inspected : null;
   };
@@ -127,7 +118,7 @@ function resolveAgentInfraPackage(options = {}) {
     }
   }
 
-  return { packageRoot: null, runtimePath: null, templateRoot: null, attempts };
+  return { packageRoot: null, templateRoot: null, attempts };
 }
 
 function formatAgentInfraPackageError(result) {
