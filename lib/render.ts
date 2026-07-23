@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Add a new identifier here only after shipping matching .{platform}. template variants.
-const KNOWN_PLATFORMS = new Set(['github']);
+// Built-in platform strategies. "none" deliberately selects generic templates
+// and the no-op runtime adapter instead of requiring .none.* variants.
+const KNOWN_PLATFORMS = new Set(['github', 'none']);
 const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
 
 type Replacements = {

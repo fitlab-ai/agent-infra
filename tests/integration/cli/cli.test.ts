@@ -310,7 +310,7 @@ test("agent-infra init accepts a custom platform selected from the menu", () => 
   try {
     const output = execFileSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
-      input: `testproj\ntestorg\n\n${ENGINE_NL}2\nmy-platform\n\n\n`,
+      input: `testproj\ntestorg\n\n${ENGINE_NL}3\nmy-platform\n\n\n`,
       stdio: "pipe",
       encoding: "utf8"
     });
@@ -324,6 +324,27 @@ test("agent-infra init accepts a custom platform selected from the menu", () => 
       /Custom platform 'my-platform' selected\. Built-in templates are only complete for github;/,
       "init should warn when built-in templates do not fully support the selected custom platform"
     );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("agent-infra init supports a first-class platform-free strategy", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-none-platform-"));
+  const cli = CLI_PATH;
+
+  try {
+    execFileSync(process.execPath, cliArgs("init"), {
+      cwd: tmpDir,
+      input: `testproj\ntestorg\n\n${ENGINE_NL}none\n\n\n`,
+      stdio: "pipe"
+    });
+
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
+    );
+    assert.deepEqual(config.platform, { type: "none" });
+    assert.ok(!fs.existsSync(path.join(tmpDir, ".github")));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -585,7 +606,7 @@ test("non-GitHub init full sync excludes GitHub lifecycle workflows", async () =
     const syncModule = await import(`${pathToFileURL(syncPath).href}?v=${Date.now()}`);
     syncModule.syncTemplates(tmpDir, filePath("templates"));
 
-    assert.ok(!fs.existsSync(path.join(tmpDir, ".github/workflows")));
+    assert.ok(!fs.existsSync(path.join(tmpDir, ".github")));
     const config = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
     assert.equal(config.files.managedBaselines, undefined);
   } finally {

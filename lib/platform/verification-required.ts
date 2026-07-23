@@ -3,6 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { inspectRequiredChecks } from "./pr-checks.ts";
+import { resolvePlatformContext } from "./context.ts";
 
 const CHECK_TYPE = "required-checks";
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
@@ -64,6 +65,10 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
 export function check({ taskDir }: any, shared: any): any {
   const task = shared.loadTask(taskDir);
   if (!task.ok) return shared.failResult(CHECK_TYPE, task.message);
+  const platform = resolvePlatformContext({ cwd: shared.repoRoot });
+  if (platform.platform.type !== "github") {
+    return shared.passResult(CHECK_TYPE, "Skipped: this code platform does not provide required checks");
+  }
   const prFlow = readPrFlow(shared.repoRoot);
   if (prFlow === "disabled" || task.metadata.pr_status === "skipped" || !validPrNumber(task.metadata.pr_number)) {
     return evaluateRequiredChecks({ metadata: task.metadata, localHead: null, inspection: null, prFlow }, shared);

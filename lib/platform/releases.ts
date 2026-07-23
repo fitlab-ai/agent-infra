@@ -29,6 +29,7 @@ function upsertPlatformRelease(input: { tag: string; title?: string; notesFile?:
   const inspected = inspectPlatformRelease(input.tag, options);
   if (inspected.release?.published) return { ...inspected, status: 'no-op' as const, changed: false, operations: [] };
   if (inspected.status === 'blocked' || inspected.status === 'failed') return { ...inspected, changed: false, operations: [] };
+  if (!inspected.platform.repository) return { ...inspected, status: 'no-op' as const, changed: false, operations: [] };
   const client = options.client ?? createGitHubClient();
   const args = ['release', 'create', input.tag, '--repo', inspected.platform.repository!, '--title', input.title ?? input.tag];
   if (input.notesFile) args.push('--notes-file', input.notesFile); else args.push('--generate-notes');

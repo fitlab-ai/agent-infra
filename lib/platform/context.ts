@@ -136,6 +136,16 @@ registerPlatformAdapter({
   }
 });
 
+registerPlatformAdapter({
+  type: 'none',
+  resolveContext() {
+    return platformResult('no-op', {
+      platform: { type: 'none', repository: null, currentUser: null },
+      operations: [{ name: 'resolve', status: 'no-op', reasonCode: 'PLATFORM_DISABLED' }]
+    });
+  }
+});
+
 function resolvePlatformContext(options: ContextOptions = {}): PlatformResult {
   const cwd = path.resolve(options.cwd || process.cwd());
   const repoRoot = findRepoRoot(cwd);

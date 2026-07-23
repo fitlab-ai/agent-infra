@@ -17,24 +17,35 @@ type CommandResult = ReturnType<typeof command>;
 type CommandRunner = (cwd: string, executable: string, args: string[]) => CommandResult;
 type DemoResult = {
   status: 'recorded' | 'skipped' | 'failed';
-  reasonCode: 'VHS_MISSING' | 'FFMPEG_MISSING' | 'DEMO_COMMAND_FAILED' | null;
+  reasonCode: 'VHS_MISSING' | 'FFMPEG_MISSING' | 'DEMO_COMMAND_FAILED' | 'DEMO_OUTPUT_MISSING' | null;
   message: string | null;
+  outputPath: string | null;
 };
 
 function runOptionalDemo(cwd: string, run: CommandRunner = command): DemoResult {
   const vhs = run(cwd, 'vhs', ['--version']);
-  if (vhs.status !== 0) return { status: 'skipped', reasonCode: 'VHS_MISSING', message: null };
+  if (vhs.status !== 0) return { status: 'skipped', reasonCode: 'VHS_MISSING', message: null, outputPath: null };
   const ffmpeg = run(cwd, 'ffmpeg', ['-version']);
-  if (ffmpeg.status !== 0) return { status: 'skipped', reasonCode: 'FFMPEG_MISSING', message: null };
+  if (ffmpeg.status !== 0) return { status: 'skipped', reasonCode: 'FFMPEG_MISSING', message: null, outputPath: null };
   const demo = run(cwd, 'npm', ['run', 'demo:regen']);
   if (demo.status !== 0) {
     return {
       status: 'failed',
       reasonCode: 'DEMO_COMMAND_FAILED',
-      message: String(demo.stderr || demo.stdout)
+      message: String(demo.stderr || demo.stdout),
+      outputPath: null
     };
   }
-  return { status: 'recorded', reasonCode: null, message: null };
+  const outputPath = 'assets/demo-init.gif';
+  if (!fs.existsSync(path.join(cwd, outputPath))) {
+    return {
+      status: 'failed',
+      reasonCode: 'DEMO_OUTPUT_MISSING',
+      message: `${outputPath} was not generated`,
+      outputPath: null
+    };
+  }
+  return { status: 'recorded', reasonCode: null, message: null, outputPath };
 }
 
 function git(cwd: string, args: string[]): string | null {
@@ -63,7 +74,9 @@ async function inspectFacts(cwd: string, version: string): Promise<ReleaseFacts>
     localTag: Boolean(localTagTarget && localTagTarget === head),
     localTagConflict: Boolean(localTagTarget && localTagTarget !== head),
     remoteBranch: Boolean(remoteBranch && remoteBranch.split(/\s+/)[0] === head), remoteTag: Boolean(remoteTag),
-    githubRelease: platform.status === 'blocked' ? null : Boolean(platform.release?.published),
+    githubRelease: platform.platform.type !== 'github'
+      ? true
+      : platform.status === 'blocked' ? null : Boolean(platform.release?.published),
     npm: npm.published, homebrew: homebrew.published, smoke,
     postCommit: postMessage.includes(`after v${version}`)
   };

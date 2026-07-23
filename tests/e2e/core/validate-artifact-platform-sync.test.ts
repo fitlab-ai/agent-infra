@@ -87,6 +87,23 @@ test("platform-sync reads Issue metadata through the shared REST snapshot adapte
   });
 });
 
+test("platform-sync performs no GitHub operation when the repository selects none", async () => {
+  await withTempRoot("agent-infra-platform-sync-none-", async (tempRoot) => {
+    const ctx = setupPlatformSyncEnv(tempRoot);
+    const argsPath = path.join(tempRoot, "gh-args.jsonl");
+    write(path.join(tempRoot, ".agents", ".airc.json"), '{"platform":{"type":"none"}}');
+    write(path.join(ctx.taskDir, "task.md"), buildTaskContent({ issue_number: "65" }));
+    const result = await runPlatformSyncAdapter(ctx.taskDir, {
+      when: "issue_number_exists",
+      expected_status_label: "status: in-progress"
+    }, ctx.env({ GH_FAKE_ARGS_PATH: argsPath }), tempRoot);
+
+    assert.equal(result.status, "pass", result.message);
+    assert.equal(result.message, "Skipped: platform unavailable");
+    assert.equal(fs.existsSync(argsPath), false);
+  });
+});
+
 test("requirements sync converges before the complete-task platform gate", async () => {
   await withProjectTempRoot("agent-infra-requirements-convergence-", async (tempRoot) => {
     initIsolatedGitRepo(tempRoot, { remote: "git@github.com:fitlab-ai/agent-infra.git" });

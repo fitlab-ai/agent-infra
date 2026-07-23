@@ -375,7 +375,12 @@ function parseTestFrontmatter(content: string) {
   return metadata;
 }
 
-async function runPlatformSyncAdapter(taskDir: string, config: PlatformSyncConfig, env: NodeJS.ProcessEnv = {}) {
+async function runPlatformSyncAdapter(
+  taskDir: string,
+  config: PlatformSyncConfig,
+  env: NodeJS.ProcessEnv = {},
+  repositoryRoot = filePath(".")
+) {
   const oldEnv: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(env)) {
     oldEnv[key] = process.env[key];
@@ -389,7 +394,7 @@ async function runPlatformSyncAdapter(taskDir: string, config: PlatformSyncConfi
   try {
     const adapter = await import(pathToFileURL(filePath("lib/platform/verification-sync.ts")).href);
     return adapter.check({ taskDir, config, artifactFile: undefined }, {
-      repoRoot: filePath("."),
+      repoRoot: repositoryRoot,
       loadTask(dir: string) {
         const taskPath = path.join(dir, "task.md");
         const content = fs.readFileSync(taskPath, "utf8");

@@ -131,3 +131,24 @@ test('platform context dispatches registered typed adapters without probing GitH
   assert.ok(listPlatformAdapters().includes('github'));
   assert.ok(listPlatformAdapters().includes('gitlab-test'));
 });
+
+test('none platform resolves through the built-in no-op strategy without probing GitHub', () => {
+  const result = resolvePlatformContext({
+    cwd: '/tmp/widgets',
+    platformType: 'none',
+    client: {
+      version() {
+        throw new Error('GitHub client must not be probed');
+      },
+      json() {
+        throw new Error('GitHub client must not be probed');
+      }
+    }
+  });
+  assert.equal(result.status, 'no-op');
+  assert.equal(result.platform.type, 'none');
+  assert.equal(result.platform.repository, null);
+  assert.deepEqual(result.operations, [{
+    name: 'resolve', status: 'no-op', reasonCode: 'PLATFORM_DISABLED'
+  }]);
+});

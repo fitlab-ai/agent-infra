@@ -163,7 +163,7 @@ function buildSyncContext({ taskDir, config, artifactFile }: any): any {
     return { earlyReturn: passResult(CHECK_TYPE, "Skipped: platform-sync not required for this task") };
   }
 
-  const platformContext = resolvePlatformContext({ cwd: taskDir, client: githubClient, platformType: "github" });
+  const platformContext = resolvePlatformContext({ cwd: repoRoot, client: githubClient });
   if (platformContext.status === "failed") {
     return { earlyReturn: failResult(CHECK_TYPE, platformContext.error?.message || "Platform context failed", "check_failed") };
   }

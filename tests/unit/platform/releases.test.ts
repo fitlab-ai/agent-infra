@@ -58,6 +58,29 @@ test('release upsert is idempotent once the release is published', () => {
   }
 });
 
+test('platform-free release operations are no-op without probing GitHub', () => {
+  const root = fixture();
+  fs.writeFileSync(`${root}/.agents/.airc.json`, '{"platform":{"type":"none"}}');
+  const unavailable: GitHubClient = {
+    version() {
+      throw new Error('GitHub client must not be probed');
+    },
+    json() {
+      throw new Error('GitHub client must not be probed');
+    },
+    text() {
+      throw new Error('GitHub client must not be probed');
+    }
+  };
+  try {
+    assert.equal(inspectPlatformRelease('v0.8.6', { cwd: root, client: unavailable }).status, 'no-op');
+    assert.equal(upsertPlatformRelease({ tag: 'v0.8.6' }, { cwd: root, client: unavailable }).status, 'no-op');
+    assert.equal(reconcileReleaseMilestones('0.8.6', { cwd: root, client: unavailable }).status, 'no-op');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('release milestone reconciliation closes current and ensures planning milestones idempotently', () => {
   const root = fixture();
   const milestones = [{ title: '0.8.6', number: 1, state: 'open' }];
