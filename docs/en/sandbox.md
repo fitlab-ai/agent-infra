@@ -52,6 +52,12 @@ The proxy environment is captured at container creation time. `ai sandbox start`
 
 This feature covers only container runtime environment variables. Docker daemon proxy settings, image pulls, BuildKit, and image build proxy forwarding are separate build-time concerns and are not handled by `--inherit-proxy`.
 
+## Build-time proxy inheritance
+
+Use `ai sandbox create <branch> --inherit-build-proxy` or `ai sandbox rebuild --inherit-build-proxy` (`-B`) to pass non-empty uppercase `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` values to managed Dockerfile build steps for that invocation. Values stay in the Docker child-process environment; Docker argv contains only predefined proxy argument names. This switch is independent of runtime `-P`, is rejected for custom Dockerfiles, and requires Docker Engine >=20.10.0 plus every visible BuildKit node >=0.9.0.
+
+The switch does not configure the Docker daemon or builder. Image pulls and `FROM` resolution still require proxy configuration in native Docker, Docker Desktop, OrbStack, Colima, or the WSL2 Docker integration. When `-B` is omitted, image inspection and build behavior remain unchanged.
+
 `ai sandbox rebuild` keeps Docker's build cache by default, so it quickly retags the sandbox image without refreshing every package. Use `ai sandbox rebuild --refresh` when you want to upgrade the image: it passes `--no-cache --pull` to Docker, pulls the current Ubuntu base image, and reruns the apt, tmux build, and global npm install layers. Claude Code updates are disabled inside the container, and OpenCode startup update checks are disabled; `--refresh` is the routine upgrade path for sandbox-managed tools. Manual `opencode upgrade` remains outside this guard. The default `python3` provided by the Ubuntu 24.04 sandbox base is Python 3.12, so scripts that hard-code Python 3.10 paths may need adjustment.
 
 `ai sandbox exec` also forwards a small terminal-detection whitelist (`TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `LC_TERMINAL`, `LC_TERMINAL_VERSION`) into the container. This keeps interactive TUIs aligned with the host terminal for behaviors such as Claude Code's Shift+Enter newline support, without passing through the full host environment.

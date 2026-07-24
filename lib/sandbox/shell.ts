@@ -12,6 +12,7 @@ type CommandOptions = {
   stdio?: StdioOptions;
   timeout?: number;
   shell?: boolean;
+  env?: NodeJS.ProcessEnv;
 };
 
 type RunProbeOptions = CommandOptions & {
@@ -23,7 +24,8 @@ function normalizeOptions(opts: CommandOptions = {}, stdio: StdioOptions): Comma
     cwd: opts.cwd,
     encoding: opts.encoding,
     stdio,
-    timeout: opts.timeout ?? DEFAULT_TIMEOUT_MS
+    timeout: opts.timeout ?? DEFAULT_TIMEOUT_MS,
+    env: opts.env
   };
 }
 

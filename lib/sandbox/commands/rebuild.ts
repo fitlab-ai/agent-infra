@@ -16,8 +16,14 @@ import {
   parseImageLabels,
   parseRefreshTimestamp
 } from '../image-build.ts';
+import {
+  assertBuildProxyCompatibility,
+  buildProxyFailureHint,
+  prepareBuildProxy,
+  redactBuildProxyValues
+} from '../build-proxy.ts';
 
-const USAGE = `Usage: ai sandbox rebuild [--quiet] [--refresh]`;
+const USAGE = `Usage: ai sandbox rebuild [--quiet] [--refresh] [--inherit-build-proxy|-B]`;
 
 type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string }) => string;
 type EngineRunSafeFn = EngineRunFn;
@@ -33,7 +39,8 @@ export function buildArgs(
     runSafeFn = runSafeEngine,
     env = process.env,
     refresh = false,
-    lastRefresh
+    lastRefresh,
+    buildProxyArgs = []
   }: {
     engine?: string;
     runFn?: EngineRunFn;
@@ -41,6 +48,7 @@ export function buildArgs(
     env?: NodeJS.ProcessEnv;
     refresh?: boolean;
     lastRefresh?: number;
+    buildProxyArgs?: string[];
   } = {}
 ): string[] {
   return buildSandboxImageArgs(config, tools, dockerfilePath, imageSignature, {
@@ -49,7 +57,8 @@ export function buildArgs(
     runSafeFn,
     env,
     refresh,
-    lastRefresh
+    lastRefresh,
+    buildProxyArgs
   });
 }
 
@@ -77,6 +86,7 @@ export async function rebuild(args: string[]): Promise<void> {
     options: {
       refresh: { type: 'boolean' },
       quiet: { type: 'boolean', short: 'q' },
+      'inherit-build-proxy': { type: 'boolean', short: 'B' },
       help: { type: 'boolean', short: 'h' }
     }
   });
@@ -95,6 +105,11 @@ export async function rebuild(args: string[]): Promise<void> {
   const engine = detectEngine(config);
 
   await ensureDocker(config, undefined);
+  if (values['inherit-build-proxy'] && config.dockerfile) {
+    throw new Error('Build proxy inheritance is unavailable with a custom sandbox Dockerfile.');
+  }
+  const buildProxy = prepareBuildProxy(values['inherit-build-proxy'] ?? false, process.env, engine);
+  if (values['inherit-build-proxy']) assertBuildProxyCompatibility(engine);
   const lastRefresh = refresh ? Date.now() : readExistingLastRefresh(config, engine);
   p.intro(pc.cyan('Rebuilding sandbox image'));
 
@@ -105,9 +120,11 @@ export async function rebuild(args: string[]): Promise<void> {
       runEngine(engine, 'docker', buildArgs(config, tools, preparedDockerfile.path, imageSignature, {
         engine,
         refresh,
-        lastRefresh
+        lastRefresh,
+        buildProxyArgs: buildProxy.args
       }), {
-        cwd: config.repoRoot
+        cwd: config.repoRoot,
+        env: buildProxy.env
       });
       spinner.stop(pc.green('Sandbox image rebuilt'));
     } else {
@@ -118,13 +135,18 @@ export async function rebuild(args: string[]): Promise<void> {
         buildArgs(config, tools, preparedDockerfile.path, imageSignature, {
           engine,
           refresh,
-          lastRefresh
+          lastRefresh,
+          buildProxyArgs: buildProxy.args
         }),
-        { cwd: config.repoRoot }
+        { cwd: config.repoRoot, env: buildProxy.env }
       );
       p.log.success(pc.green('Sandbox image rebuilt'));
     }
     pruneSandboxDanglingImages(config, engine);
+  } catch (error) {
+    const message = redactBuildProxyValues(error instanceof Error ? error.message : String(error), buildProxy.redactionValues);
+    const hint = values['inherit-build-proxy'] ? `\n${buildProxyFailureHint(engine)}` : '';
+    throw new Error(`${message}${hint}`);
   } finally {
     preparedDockerfile.cleanup();
   }

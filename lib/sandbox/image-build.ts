@@ -44,7 +44,8 @@ export function buildSandboxImageArgs(
     runSafeFn = runSafeEngine,
     env = process.env,
     refresh = false,
-    lastRefresh
+    lastRefresh,
+    buildProxyArgs = []
   }: {
     engine?: string;
     runFn?: EngineRunFn;
@@ -52,6 +53,7 @@ export function buildSandboxImageArgs(
     env?: NodeJS.ProcessEnv;
     refresh?: boolean;
     lastRefresh?: number;
+    buildProxyArgs?: string[];
   } = {}
 ): string[] {
   const selectedEngine = engine ?? detectEngine({ engine: config.engine });
@@ -79,6 +81,7 @@ export function buildSandboxImageArgs(
     '--label',
     `${sandboxImageConfigLabel(config)}=${imageSignature}`
   ];
+  args.push(...buildProxyArgs);
 
   if (lastRefresh !== undefined) {
     args.push('--label', `${sandboxImageRefreshLabel(config)}=${lastRefresh}`);

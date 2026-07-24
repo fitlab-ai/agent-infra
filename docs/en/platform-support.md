@@ -4,6 +4,8 @@
 
 agent-infra runs on macOS, Linux, and Windows. The CLI itself only needs Node.js (>=22.9.0); container-related features (`ai sandbox *`) additionally need Docker with Docker Buildx and a working BuildKit builder. Verify the build prerequisite with `docker buildx inspect --bootstrap`.
 
+Opt-in sandbox build proxy inheritance (`-B`) has a narrower support baseline: Docker Engine >=20.10.0 and BuildKit >=0.9.0 on every visible builder node. Proxy values are passed only to build steps; daemon/builder proxy configuration remains engine-specific on native Docker, Docker Desktop, OrbStack, Colima, and WSL2.
+
 ## Sandbox engine selection
 
 `sandbox.engine` in `.agents/.airc.json` selects the container engine. When it is `null` or omitted, agent-infra uses the platform default:

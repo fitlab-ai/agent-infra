@@ -560,6 +560,30 @@ test("sandbox rebuild fails before build when BuildKit is unavailable", onPlatfo
   }
 });
 
+test("sandbox rebuild build failure omits build-proxy guidance without -B", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-fail-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const result = spawnSandboxCli(fixture, tmpDir, ["rebuild", "--quiet"], {
+      DOCKER_EXIT_FOR_BUILD: "1"
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.equal(
+      `${result.stdout}\n${result.stderr}`.includes("Build-step proxy inheritance is enabled"),
+      false,
+      "expected a build failure without -B to omit build-proxy guidance"
+    );
+    assert.equal(
+      fixture.readDockerCalls().some((call) => call[0] === "image" && call[1] === "prune"),
+      false
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rebuild forwards refresh flags to docker build", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rebuild-refresh-"));
 
@@ -820,7 +844,7 @@ test("sandbox create continues when due refresh build fails", onPlatforms("linux
     );
     const signature = await sandboxImageSignature(fixture.repoDir);
 
-    spawnSandboxCli(
+    const result = spawnSandboxCli(
       fixture,
       tmpDir,
       ["create", "feature-x", "--cpu", "1", "--memory", "1"],
@@ -839,6 +863,11 @@ test("sandbox create continues when due refresh build fails", onPlatforms("linux
     const dockerCalls = fixture.readDockerCalls();
     assert.ok(dockerCalls.some((call) => call[0] === "build"), "expected due refresh build attempt");
     assert.ok(dockerCalls.some((call) => call[0] === "run"), "expected create to continue to docker run");
+    assert.equal(
+      `${result.stdout}\n${result.stderr}`.includes("Build-step proxy inheritance is enabled"),
+      false,
+      "expected a build failure without -B to omit build-proxy guidance"
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

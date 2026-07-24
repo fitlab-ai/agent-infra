@@ -24,6 +24,12 @@ import {
   worktreeDirCandidates
 } from '../constants.ts';
 import { prepareDockerfile } from '../dockerfile.ts';
+import {
+  assertBuildProxyCompatibility,
+  buildProxyFailureHint,
+  prepareBuildProxy,
+  redactBuildProxyValues
+} from '../build-proxy.ts';
 import { detectEngine, ensureDocker } from '../engine.ts';
 import {
   commandForEngine,
@@ -95,7 +101,7 @@ alias gy='gemini --yolo; tput ed'
 `;
 const CONTAINER_HOME = '/home/devuser';
 const CONTAINER_SHELL_CONFIG_MOUNT = `${CONTAINER_HOME}/.host-shell-config`;
-const USAGE = `Usage: ai sandbox create <branch> [base] [--cpu <n>] [--memory <n>] [--no-refresh] [--inherit-proxy|-P]
+const USAGE = `Usage: ai sandbox create <branch> [base] [--cpu <n>] [--memory <n>] [--no-refresh] [--inherit-proxy|-P] [--inherit-build-proxy|-B]
 
 Host aliases:
   ${'~'}/.agent-infra/aliases/sandbox.sh is auto-created on first run and exposed
@@ -105,7 +111,9 @@ Host aliases:
 
 Proxy:
   --inherit-proxy, -P  Copy non-empty standard host proxy variables into the
-                       container environment through the private env file.`;
+                       container environment through the private env file.
+  --inherit-build-proxy, -B  Pass uppercase HTTP_PROXY, HTTPS_PROXY, and NO_PROXY
+                             to managed image build steps for this invocation.`;
 const HOST_PROXY_ENV_KEYS = [
   'http_proxy',
   'HTTP_PROXY',
@@ -134,9 +142,9 @@ type ExecSyncOptions = ExecFileSyncOptions & {
 };
 type ExecSyncFn = (cmd: string, args: string[], options?: ExecSyncOptions) => Buffer | string;
 type EngineExecFn = (engine: string, cmd: string, args: string[], opts?: ExecFileSyncOptions) => Buffer | string;
-type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string }) => string;
+type EngineRunFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv }) => string;
 type EngineRunSafeFn = EngineRunFn;
-type EngineRunVerboseFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string }) => void;
+type EngineRunVerboseFn = (engine: string, cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv }) => void;
 type DirectRunFn = (cmd: string, args: string[], opts?: { cwd?: string }) => string;
 type DirectRunSafeFn = DirectRunFn;
 type DirectRunVerboseFn = (cmd: string, args: string[], opts?: { cwd?: string }) => void;
@@ -1231,7 +1239,9 @@ export function buildImage(
     runVerboseFn = runVerboseEngine,
     env = process.env,
     refresh = false,
-    lastRefresh
+    lastRefresh,
+    buildProxyArgs = [],
+    buildEnv
   }: {
     engine?: string;
     runFn?: EngineRunFn;
@@ -1240,6 +1250,8 @@ export function buildImage(
     env?: NodeJS.ProcessEnv;
     refresh?: boolean;
     lastRefresh?: number;
+    buildProxyArgs?: string[];
+    buildEnv?: NodeJS.ProcessEnv;
   } = {}
 ): void {
   const selectedEngine = engine ?? detectEngine({ engine: config.engine });
@@ -1252,9 +1264,10 @@ export function buildImage(
       runSafeFn,
       env,
       refresh,
-      lastRefresh
+      lastRefresh,
+      buildProxyArgs
     }),
-    { cwd: config.repoRoot }
+    { cwd: config.repoRoot, env: buildEnv }
   );
 }
 
@@ -1278,6 +1291,7 @@ export async function create(args: string[]): Promise<void> {
       memory: { type: 'string' },
       'no-refresh': { type: 'boolean' },
       'inherit-proxy': { type: 'boolean', short: 'P' },
+      'inherit-build-proxy': { type: 'boolean', short: 'B' },
       help: { type: 'boolean', short: 'h' }
     }
   });
@@ -1363,6 +1377,15 @@ export async function create(args: string[]): Promise<void> {
     const needsImageBuild = signatureStale || refreshDue;
 
     if (needsImageBuild) {
+      if (values['inherit-build-proxy'] && effectiveConfig.dockerfile) {
+        throw new Error('Build proxy inheritance is unavailable with a custom sandbox Dockerfile.');
+      }
+      const buildProxy = prepareBuildProxy(
+        values['inherit-build-proxy'] ?? false,
+        process.env,
+        engine
+      );
+      if (values['inherit-build-proxy']) assertBuildProxyCompatibility(engine);
       const buildRefresh = !imageExists || refreshDue;
       const buildLastRefresh = buildRefresh ? now : currentLastRefresh || 0;
 
@@ -1379,7 +1402,13 @@ export async function create(args: string[]): Promise<void> {
           tools,
           preparedDockerfile.path,
           expectedImageSignature,
-          { engine, refresh: buildRefresh, lastRefresh: buildLastRefresh }
+          {
+            engine,
+            refresh: buildRefresh,
+            lastRefresh: buildLastRefresh,
+            buildProxyArgs: buildProxy.args,
+            buildEnv: buildProxy.env
+          }
         );
         p.log.success(
           refreshDue
@@ -1392,10 +1421,14 @@ export async function create(args: string[]): Promise<void> {
         if (refreshDue && !signatureStale && imageExists) {
           p.log.warn(
             'Scheduled sandbox image refresh failed; continuing with the existing image. ' +
-            commandErrorMessage(error)
+            redactBuildProxyValues(commandErrorMessage(error), buildProxy.redactionValues)
+            + (values['inherit-build-proxy'] ? ` ${buildProxyFailureHint(engine)}` : '')
           );
         } else {
-          throw error;
+          const hint = values['inherit-build-proxy'] ? `\n${buildProxyFailureHint(engine)}` : '';
+          throw new Error(
+            `${redactBuildProxyValues(commandErrorMessage(error), buildProxy.redactionValues)}${hint}`
+          );
         }
       }
     } else {

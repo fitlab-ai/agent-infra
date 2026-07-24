@@ -4,6 +4,8 @@
 
 agent-infra 支持 macOS、Linux 和 Windows。CLI 本身只需要 Node.js (>=22.9.0)；容器相关功能（`ai sandbox *`）额外需要带 Docker Buildx 且 BuildKit builder 可用的 Docker。可用 `docker buildx inspect --bootstrap` 验证此前置条件。
 
+选择性启用的沙箱构建代理继承（`-B`）有更严格的支持基线：Docker Engine >=20.10.0，且所有可见 builder 节点的 BuildKit >=0.9.0。代理值只传给 build step；native Docker、Docker Desktop、OrbStack、Colima 与 WSL2 的 daemon/builder 代理仍需分别配置。
+
 ## 沙箱引擎选择
 
 `.agents/.airc.json` 中的 `sandbox.engine` 用来选择容器引擎。该字段为 `null` 或省略时，agent-infra 使用平台默认值：

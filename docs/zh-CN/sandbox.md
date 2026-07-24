@@ -52,6 +52,12 @@ ai sandbox create feature/proxy --inherit-proxy
 
 本能力只覆盖容器运行时环境变量。Docker daemon 代理、镜像拉取、BuildKit 和镜像构建期代理传递属于独立的构建期问题，不由 `--inherit-proxy` 处理。
 
+## 构建期代理继承
+
+使用 `ai sandbox create <branch> --inherit-build-proxy` 或 `ai sandbox rebuild --inherit-build-proxy`（短写 `-B`），可在本次调用中把非空的大写 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY` 传给托管 Dockerfile 的 build step。值只存在于 Docker 子进程环境，Docker argv 只包含预定义代理参数名。该开关与运行时 `-P` 相互独立；自定义 Dockerfile 会被拒绝；最低要求为 Docker Engine >=20.10.0，且所有可见 BuildKit 节点均 >=0.9.0。
+
+该开关不会配置 Docker daemon 或 builder。镜像拉取与 `FROM` 解析仍需在 native Docker、Docker Desktop、OrbStack、Colima 或 WSL2 Docker 集成中配置代理。不传 `-B` 时，镜像检查与构建行为保持不变。
+
 `ai sandbox rebuild` 默认保留 Docker build cache，因此会快速重打沙箱镜像，不会刷新每个软件包。需要升级镜像时使用 `ai sandbox rebuild --refresh`：它会向 Docker 传入 `--no-cache --pull`，重新拉取当前 Ubuntu 基础镜像，并重跑 apt、tmux 编译和全局 npm 安装层。容器内 Claude Code 更新已关闭，OpenCode 启动时更新检查也已关闭；`--refresh` 是沙箱托管工具的常规升级入口。手动 `opencode upgrade` 不受该保护覆盖。Ubuntu 24.04 沙箱基础镜像提供的默认 `python3` 是 Python 3.12，因此硬编码 Python 3.10 路径的脚本可能需要调整。
 
 `ai sandbox exec` 也会向容器透传一小组终端检测白名单变量（`TERM_PROGRAM`、`TERM_PROGRAM_VERSION`、`LC_TERMINAL`、`LC_TERMINAL_VERSION`）。这样可以让交互式 TUI 保持与宿主终端一致的行为，例如 Claude Code 的 `Shift+Enter` 换行支持，同时避免把整个宿主环境灌入容器。
