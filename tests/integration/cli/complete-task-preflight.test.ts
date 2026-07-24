@@ -106,7 +106,7 @@ test('compiled preflight runs required checks from the resolved repository root'
     assert.match(payload.invocations[2].payload.message, new RegExp(`Required checks are passed for PR head ${head}`));
     const calls = fs.readFileSync(ghLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
     const required = calls.find((call) => call.args[0] === 'pr' && call.args[1] === 'checks');
-    assert.equal(required.cwd, f.root);
+    assert.equal(fs.realpathSync.native(required.cwd), fs.realpathSync.native(f.root));
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
