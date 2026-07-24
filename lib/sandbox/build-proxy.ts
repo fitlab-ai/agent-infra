@@ -65,7 +65,7 @@ export function assertBuildProxyCompatibility(
   }
 
   const buildxRaw = runSafeEngineFn(engine, 'docker', ['buildx', 'inspect', '--bootstrap']);
-  const versions = [...buildxRaw.matchAll(/BuildKit:\s*v?(\d+\.\d+\.\d+(?:[-+][^\s]+)?)/gi)]
+  const versions = [...buildxRaw.matchAll(/BuildKit(?:\s+version)?:\s*v?(\d+\.\d+\.\d+(?:[-+][^\s]+)?)/gi)]
     .map((match) => parsedVersion(match[1] ?? ''))
     .filter((version): version is string => version !== null);
   if (versions.length === 0) {

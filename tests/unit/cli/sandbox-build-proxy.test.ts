@@ -57,6 +57,12 @@ test('assertBuildProxyCompatibility accepts boundary versions and rejects any ol
   );
 });
 
+test('assertBuildProxyCompatibility accepts OrbStack BuildKit version output', () => {
+  assert.doesNotThrow(() => assertBuildProxyCompatibility('orbstack', (_engine, _cmd, args) =>
+    args[0] === 'version' ? '26.1.0' : 'BuildKit version: v0.29.0'
+  ));
+});
+
 test('redactBuildProxyValues replaces longer secrets first', () => {
   assert.equal(
     redactBuildProxyValues('https://user:secret@proxy.test secret', ['secret', 'https://user:secret@proxy.test']),
