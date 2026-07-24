@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { INTERNAL_CLI_PATH, gitSafeEnv } from '../../helpers.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -37,6 +37,80 @@ function fixture() {
 function run(root: string, args: string[]) {
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, ...args], { cwd: root, encoding: 'utf8' });
 }
+
+test('compiled preflight runs required checks from the resolved repository root', () => {
+  const f = fixture();
+  const binDir = path.join(f.root, 'bin');
+  const ghScript = path.join(binDir, 'gh.mjs');
+  const ghLog = path.join(f.root, 'gh-calls.jsonl');
+  try {
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(path.join(f.root, 'README.md'), 'fixture\n');
+    spawnSync('git', ['config', 'user.name', 'Test User'], { cwd: f.root });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: f.root });
+    spawnSync('git', ['add', 'README.md'], { cwd: f.root });
+    const committed = spawnSync('git', ['commit', '-qm', 'fixture'], { cwd: f.root, encoding: 'utf8' });
+    assert.equal(committed.status, 0, committed.stderr);
+    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
+    spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'], { cwd: f.root });
+
+    fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), JSON.stringify({
+      platform: { type: 'github' },
+      prFlow: 'required',
+      task: { shortIdLength: 2 }
+    }));
+    fs.writeFileSync(path.join(f.root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({
+      skill: 'complete-task',
+      checks: {
+        'review-ledger': null,
+        'post-review-commit': null,
+        'required-checks': {},
+        'platform-sync-preflight': null
+      }
+    }));
+    fs.writeFileSync(path.join(f.activeDir, 'task.md'), [
+      '---', `id: ${TASK_ID}`, 'status: active', 'current_step: code-review',
+      'updated_at: 2026-01-01 00:00:00+00:00', 'agent_infra_version: v0.0.0',
+      'pr_number: 42', 'pr_status: merged', `last_reviewed_commit: ${head}`,
+      'target_date:', '---', '', '# Task', ''
+    ].join('\n'));
+    fs.writeFileSync(ghScript, [
+      "import fs from 'node:fs';",
+      "fs.appendFileSync(process.env.GH_CALL_LOG, `${JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) })}\\n`);",
+      "const args = process.argv.slice(2);",
+      "if (args[0] === '--version') console.log('gh version 2.80.0');",
+      "else if (args[0] === 'api' && args[1] === 'repos/acme/demo') console.log(JSON.stringify({ full_name: 'acme/demo', fork: false, permissions: { admin: true } }));",
+      "else if (args[0] === 'api' && args[1] === 'user') console.log(JSON.stringify({ login: 'tester' }));",
+      `else if (args[0] === 'api' && args[1] === 'repos/acme/demo/pulls/42') console.log(JSON.stringify({ number: 42, node_id: 'PR_42', html_url: 'https://github.com/acme/demo/pull/42', state: 'closed', title: 'fixture', body: '', draft: false, head: { ref: 'feature', sha: '${head}', repo: { full_name: 'acme/demo' } }, base: { ref: 'main', repo: { full_name: 'acme/demo' } }, labels: [], assignees: [], milestone: null }));`,
+      "else if (args[0] === 'pr' && args[1] === 'checks') console.log(JSON.stringify([{ name: 'test', state: 'SUCCESS', bucket: 'pass', link: 'https://github.com/acme/demo/actions/runs/1', workflow: 'CI', startedAt: null, completedAt: null }]));",
+      "else { console.error(`unexpected gh args: ${args.join(' ')}`); process.exitCode = 1; }",
+      ''
+    ].join('\n'));
+
+    const result = spawnSync(process.execPath, [
+      INTERNAL_CLI_PATH, 'task-verify', TASK_ID, 'complete-task.preflight', '--format', 'json'
+    ], {
+      cwd: f.root,
+      encoding: 'utf8',
+      env: {
+        ...gitSafeEnv(process.env),
+        AGENT_INFRA_GH_BIN: process.execPath,
+        AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([ghScript]),
+        GH_CALL_LOG: ghLog
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.invocations[2].status, 'pass');
+    assert.match(payload.invocations[2].payload.message, new RegExp(`Required checks are passed for PR head ${head}`));
+    const calls = fs.readFileSync(ghLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    const required = calls.find((call) => call.args[0] === 'pr' && call.args[1] === 'checks');
+    assert.equal(required.cwd, f.root);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
 
 test('platform-sync-preflight is a distinct typed verification result', () => {
   const f = fixture();

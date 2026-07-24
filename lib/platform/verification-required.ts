@@ -46,6 +46,9 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
   if (!inspection || inspection.status === "blocked") {
     return shared.blockedResult(CHECK_TYPE, inspection?.error?.message || "Required checks are unavailable", "network_error");
   }
+  if (inspection.status === "failed") {
+    return shared.failResult(CHECK_TYPE, inspection.error?.message || "Required checks are unavailable", "check_failed");
+  }
 
   const prHead = inspection.pullRequest?.headSha;
   if (!prHead || localHead !== reviewedHead || localHead !== prHead) {

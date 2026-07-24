@@ -69,6 +69,24 @@ test("required-checks preserves pending and unavailable snapshots as blocked", (
   }).status, "blocked");
 });
 
+test("required-checks preserves the original platform failure", () => {
+  const result = evaluate({
+    inspection: {
+      status: "failed",
+      pullRequest: null,
+      checks: { state: "pending", required: [] },
+      error: { message: "Task TASK-20260101-000001 not found" }
+    }
+  });
+
+  assert.deepEqual(result, {
+    type: "required-checks",
+    status: "fail",
+    message: "Task TASK-20260101-000001 not found",
+    fail_type: "check_failed"
+  });
+});
+
 test("required-checks reports failed and cancelled checks as failures", () => {
   for (const state of ["failed", "cancelled"]) {
     assert.equal(evaluate({

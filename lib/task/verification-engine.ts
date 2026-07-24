@@ -90,11 +90,10 @@ const sharedUtils = {
   blockedResult,
   safeStat,
   parseIssueNumber,
-  parsePrNumber,
-  repoRoot
+  parsePrNumber
 };
 
-function runCheck(type: any, context: any): any {
+function runCheck(type: any, context: any, shared: any): any {
   switch (type) {
     case "task-meta":
       return checkTaskMeta(context);
@@ -122,7 +121,7 @@ function runCheck(type: any, context: any): any {
         return failResult(type, `Unsupported check type '${type}'.`);
       }
 
-      return adapter(context, sharedUtils);
+      return adapter(context, shared);
     }
   }
 }
@@ -1089,11 +1088,12 @@ function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: reque
     if (fs.existsSync(path.join(cursor, ".agents"))) repoRoot = cursor;
   }
   const verifyConfig = loadVerificationConfig(repoRoot, skillName);
+  const shared = { ...sharedUtils, repoRoot };
   if (mode === "gate") {
     const checks = [];
     for (const [type, checkConfig] of Object.entries(verifyConfig.checks || {})) {
       if (checkConfig === null) continue;
-      const result = runCheck(type, { skillName, taskDir: path.resolve(taskDir), artifactFile, config: checkConfig });
+      const result = runCheck(type, { skillName, taskDir: path.resolve(taskDir), artifactFile, config: checkConfig }, shared);
       checks.push(result);
       if (result.status === "blocked") break;
     }
@@ -1104,7 +1104,7 @@ function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: reque
   const config = (verifyConfig.checks || {})[type];
   if (config === undefined) return { skill: skillName, ...failResult(type, `Unknown check type '${type}' for skill '${skillName}'.`) };
   if (config === null) return { skill: skillName, ...passResult(type, `Check '${type}' is disabled for skill '${skillName}'.`) };
-  return { skill: skillName, ...runCheck(type, { skillName, taskDir: path.resolve(taskDir), artifactFile, config }) };
+  return { skill: skillName, ...runCheck(type, { skillName, taskDir: path.resolve(taskDir), artifactFile, config }, shared) };
 }
 
 export { verifyInProcess };
