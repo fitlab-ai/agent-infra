@@ -54,7 +54,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git lfs ls-files --error-unmatch assets/demo-init.gif
+          git lfs ls-files -n assets/demo-init.gif | grep -q assets/demo-init.gif
           git show HEAD:assets/demo-init.gif | grep -q '^version https://git-lfs.github.com/spec/v1$'
           test "$(head -c 6 assets/demo-init.gif)" = "GIF89a" || test "$(head -c 6 assets/demo-init.gif)" = "GIF87a"
           test "$(wc -c < assets/demo-init.gif)" -le 4194304
