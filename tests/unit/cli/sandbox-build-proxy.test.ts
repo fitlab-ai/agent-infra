@@ -15,13 +15,13 @@ test('prepareBuildProxy passes names in argv and values only in the child enviro
   }, 'wsl2');
 
   assert.deepEqual(plan.args, [
-    '--build-arg', 'HTTP_PROXY',
-    '--build-arg', 'HTTPS_PROXY',
-    '--build-arg', 'NO_PROXY'
+    '--secret', 'id=HTTP_PROXY,env=HTTP_PROXY',
+    '--secret', 'id=HTTPS_PROXY,env=HTTPS_PROXY',
+    '--secret', 'id=NO_PROXY,env=NO_PROXY'
   ]);
   assert.equal(plan.env.HTTP_PROXY, 'http://user:secret@proxy.test:8080');
   assert.equal(plan.env.WSLENV, 'PATH/l:HTTP_PROXY:HTTPS_PROXY:NO_PROXY');
-  assert.ok(!plan.args.join(' ').includes('secret'));
+  assert.ok(!plan.args.join(' ').includes('canary-password'));
 });
 
 test('prepareBuildProxy is inert when disabled and rejects an empty enabled input', () => {

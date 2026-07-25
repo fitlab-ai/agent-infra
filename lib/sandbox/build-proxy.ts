@@ -41,7 +41,7 @@ export function prepareBuildProxy(
   }
 
   return {
-    args: entries.flatMap(([key]) => ['--build-arg', key]),
+    args: entries.flatMap(([key]) => ['--secret', `id=${key},env=${key}`]),
     env,
     redactionValues: entries.map(([, value]) => value)
   };

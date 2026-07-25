@@ -54,7 +54,7 @@ This feature covers only container runtime environment variables. Docker daemon 
 
 ## Build-time proxy inheritance
 
-Use `ai sandbox create <branch> --inherit-build-proxy` or `ai sandbox rebuild --inherit-build-proxy` (`-B`) to pass non-empty uppercase `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` values to managed Dockerfile build steps for that invocation. Values stay in the Docker child-process environment; Docker argv contains only predefined proxy argument names. This switch is independent of runtime `-P`, is rejected for custom Dockerfiles, and requires Docker Engine >=20.10.0 plus every visible BuildKit node >=0.9.0.
+Use `ai sandbox create <branch> --inherit-build-proxy` or `ai sandbox rebuild --inherit-build-proxy` (`-B`) to pass non-empty uppercase `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` values to managed Dockerfile network build steps for that invocation. Values stay in the Docker child-process environment and are exposed to those steps through temporary BuildKit secret mounts; Docker argv and image metadata contain only secret names. This switch is independent of runtime `-P`, is rejected for custom Dockerfiles, and requires Docker Engine >=20.10.0 plus every visible BuildKit node >=0.9.0.
 
 The switch does not configure the Docker daemon or builder. Image pulls and `FROM` resolution still require proxy configuration in native Docker, Docker Desktop, OrbStack, Colima, or the WSL2 Docker integration. When `-B` is omitted, image inspection and build behavior remain unchanged.
 

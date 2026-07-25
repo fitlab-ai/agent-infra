@@ -18,8 +18,8 @@ test('sandbox image build argv contains proxy names but never proxy values', () 
     buildProxyArgs: proxy.args
   });
 
-  assert.deepEqual(args.slice(args.indexOf('--build-arg', 10), args.indexOf('-f')), [
-    '--build-arg', 'HTTP_PROXY'
+  assert.deepEqual(args.slice(args.indexOf('--secret', 10), args.indexOf('-f')), [
+    '--secret', 'id=HTTP_PROXY,env=HTTP_PROXY'
   ]);
   assert.ok(!args.join('\0').includes(canary));
   assert.equal(proxy.env.HTTP_PROXY, canary);

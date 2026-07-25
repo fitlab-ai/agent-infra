@@ -54,7 +54,7 @@ ai sandbox create feature/proxy --inherit-proxy
 
 ## 构建期代理继承
 
-使用 `ai sandbox create <branch> --inherit-build-proxy` 或 `ai sandbox rebuild --inherit-build-proxy`（短写 `-B`），可在本次调用中把非空的大写 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY` 传给托管 Dockerfile 的 build step。值只存在于 Docker 子进程环境，Docker argv 只包含预定义代理参数名。该开关与运行时 `-P` 相互独立；自定义 Dockerfile 会被拒绝；最低要求为 Docker Engine >=20.10.0，且所有可见 BuildKit 节点均 >=0.9.0。
+使用 `ai sandbox create <branch> --inherit-build-proxy` 或 `ai sandbox rebuild --inherit-build-proxy`（短写 `-B`），可在本次调用中把非空的大写 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY` 传给托管 Dockerfile 中需要联网的 build step。值只存在于 Docker 子进程环境，并通过临时 BuildKit secret mount 暴露给这些步骤；Docker argv 与镜像元数据只包含 secret 名称。该开关与运行时 `-P` 相互独立；自定义 Dockerfile 会被拒绝；最低要求为 Docker Engine >=20.10.0，且所有可见 BuildKit 节点均 >=0.9.0。
 
 该开关不会配置 Docker daemon 或 builder。镜像拉取与 `FROM` 解析仍需在 native Docker、Docker Desktop、OrbStack、Colima 或 WSL2 Docker 集成中配置代理。不传 `-B` 时，镜像检查与构建行为保持不变。
 

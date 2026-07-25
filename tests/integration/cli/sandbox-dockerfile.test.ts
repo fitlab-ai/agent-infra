@@ -172,7 +172,11 @@ test("composeDockerfile installs each AI tool package separately", onPlatforms("
       .find((block) => block.startsWith("RUN ") && block.includes("AI_TOOL_PACKAGES"));
     assert.ok(runBlock, "expected a RUN block consuming AI_TOOL_PACKAGES");
 
-    const shellBody = runBlock.replace(/^RUN\s+/, "").replace(/\\\n\s*/g, " ").trim();
+    const shellBody = runBlock
+      .replace(/^RUN\s+/, "")
+      .replace(/\\\n\s*/g, " ")
+      .replace(/^(?:--mount=\S+\s+)+/, "")
+      .trim();
 
     const logFile = path.join(stubDir, "invocations.log");
     const npmStub = path.join(stubDir, "npm");

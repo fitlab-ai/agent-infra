@@ -5,20 +5,41 @@ ENV NPM_CONFIG_PREFIX=/home/devuser/.npm-global
 ENV PATH="/home/devuser/.npm-global/bin:${PATH}"
 
 ARG AI_TOOL_PACKAGES=
-RUN set -e && \
+RUN --mount=type=secret,id=HTTP_PROXY \
+    --mount=type=secret,id=HTTPS_PROXY \
+    --mount=type=secret,id=NO_PROXY \
+    export HTTP_PROXY="$(cat /run/secrets/HTTP_PROXY 2>/dev/null || true)" && \
+    export HTTPS_PROXY="$(cat /run/secrets/HTTPS_PROXY 2>/dev/null || true)" && \
+    export NO_PROXY="$(cat /run/secrets/NO_PROXY 2>/dev/null || true)" && \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" && \
+    set -e && \
     for pkg in ${AI_TOOL_PACKAGES}; do \
       npm install -g "$pkg"; \
     done
 
 ARG AI_TOOLS_SHELL_INSTALL_B64=
-RUN if [ -n "${AI_TOOLS_SHELL_INSTALL_B64}" ]; then \
+RUN --mount=type=secret,id=HTTP_PROXY \
+    --mount=type=secret,id=HTTPS_PROXY \
+    --mount=type=secret,id=NO_PROXY \
+    export HTTP_PROXY="$(cat /run/secrets/HTTP_PROXY 2>/dev/null || true)" && \
+    export HTTPS_PROXY="$(cat /run/secrets/HTTPS_PROXY 2>/dev/null || true)" && \
+    export NO_PROXY="$(cat /run/secrets/NO_PROXY 2>/dev/null || true)" && \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" && \
+    if [ -n "${AI_TOOLS_SHELL_INSTALL_B64}" ]; then \
       set -e && \
       echo "${AI_TOOLS_SHELL_INSTALL_B64}" | base64 -d > /tmp/ai-tools-install.sh && \
       bash /tmp/ai-tools-install.sh && \
       rm /tmp/ai-tools-install.sh; \
     fi
 
-RUN npm install -g pyright
+RUN --mount=type=secret,id=HTTP_PROXY \
+    --mount=type=secret,id=HTTPS_PROXY \
+    --mount=type=secret,id=NO_PROXY \
+    export HTTP_PROXY="$(cat /run/secrets/HTTP_PROXY 2>/dev/null || true)" && \
+    export HTTPS_PROXY="$(cat /run/secrets/HTTPS_PROXY 2>/dev/null || true)" && \
+    export NO_PROXY="$(cat /run/secrets/NO_PROXY 2>/dev/null || true)" && \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" && \
+    npm install -g pyright
 
 RUN mkdir -p /home/devuser/.local/share /home/devuser/.local/state
 
