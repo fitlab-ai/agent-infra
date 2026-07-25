@@ -11,7 +11,7 @@ description: >
 ## Boundary / Critical Rules
 
 - This skill only outputs a requirements analysis document (`analysis.md` or `analysis-r{N}.md`) and does not modify any business code
-- Base the analysis strictly on the existing requirements, context, and source information in `task.md`
+- Base the analysis strictly on the existing task input, requirements, context, and source information in `task.md`
 - After executing this skill, you **must** immediately update task status in task.md
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
@@ -56,6 +56,7 @@ Run `agent-infra-internal task-artifact {task-id} inspect --family analysis`. Co
 ### 3. Read Task Context
 
 Read `task.md` carefully to understand:
+- sources, facts and evidence, constraints, decision states, acceptance criteria, and open questions captured under `## Task Input` (fall back compatibly when the section is absent)
 - task title, description, and requirement list
 - context information (Issue, PR, branch, alert numbers, etc.)
 - currently known affected files and constraints
@@ -89,6 +90,8 @@ Runs after Step 0 state check and Step 3 (questioning is an external-state actio
 - no answer carried → restate `pending_question` and take Scenario B early-exit below (do not increase `question_count`).
 
 **4.3 Sufficiency judgment** (objective checklist; any gap hit means insufficient):
+- first aggregate `## Task Input`, description, context, requirements, and remote sources; an analysis-owned `## Requirements` section being unpopulated is not by itself insufficient;
+- goals, scope, constraints, or acceptance criteria already recorded in task input count as provided and must not be asked again;
 - description/requirements empty, or a single sentence with no verifiable acceptance criteria;
 - missing goal or impact scope (unclear what to change / who is affected);
 - requirement items contradict each other, or key terms are undefined and block analysis.

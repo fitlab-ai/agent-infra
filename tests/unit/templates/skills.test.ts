@@ -1094,6 +1094,34 @@ test("analyze-task brainstorming gate adds step 4 and whitelists analyze-task in
   );
 });
 
+test("task templates expose the same structured task-input contract", () => {
+  const variants = [
+    [".agents/templates/task.md", "任务输入", ["来源", "已确认事实与证据", "约束", "已确认决策", "候选与否决方案", "验收标准", "未决事项"]],
+    ["templates/.agents/templates/task.zh-CN.md", "任务输入", ["来源", "已确认事实与证据", "约束", "已确认决策", "候选与否决方案", "验收标准", "未决事项"]],
+    ["templates/.agents/templates/task.en.md", "Task Input", ["Sources", "Confirmed Facts and Evidence", "Constraints", "Confirmed Decisions", "Candidate and Rejected Options", "Acceptance Criteria", "Open Questions"]]
+  ] as const;
+
+  for (const [relativePath, heading, childHeadings] of variants) {
+    const content = read(relativePath);
+    const descriptionIndex = content.indexOf(relativePath.endsWith(".en.md") ? "## Description" : "## 描述");
+    const taskInputIndex = content.indexOf(`## ${heading}`);
+    const contextIndex = content.indexOf(relativePath.endsWith(".en.md") ? "## Context" : "## 上下文");
+    assert.ok(descriptionIndex < taskInputIndex && taskInputIndex < contextIndex);
+    assert.deepEqual(
+      [...content.slice(taskInputIndex, contextIndex).matchAll(/^### (.+)$/gm)].map((match) => match[1]),
+      childHeadings
+    );
+  }
+
+  assert.equal(
+    read(".agents/templates/task.md"),
+    renderPlaceholders(read("templates/.agents/templates/task.zh-CN.md"), {
+      project: "agent-infra",
+      org: "fitlab-ai"
+    })
+  );
+});
+
 test("import-issue step 1 declares a structured title-derivation contract", () => {
   // Structural guard for the CC-prefix stripping rule (Issue #494). The assertable
   // object is a fenced, language-neutral contract block parsed by key (not prose

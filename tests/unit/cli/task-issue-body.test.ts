@@ -22,6 +22,16 @@ type: refactor
 
 第二段描述，含行内 \`## 需求\` 代码（不是标题）。
 
+## 任务输入
+
+### 来源
+
+- 用户确认
+
+### 约束
+
+- 保留原始状态。
+
 ## 上下文
 
 - 分支：x
@@ -87,7 +97,9 @@ body:
 const FIELDS = {
   title: "示例任务",
   description: "第一段描述。\n\n第二段描述。",
-  requirements: "- [ ] 未完成项 A\n- [x] 已完成项 B"
+  requirements: "- [ ] 未完成项 A\n- [x] 已完成项 B",
+  taskInput: "### 来源\n\n- 用户确认\n\n### 约束\n\n- 保留原始状态。",
+  taskInputHeading: "任务输入"
 };
 
 test("extractSection returns the section body up to the next heading", () => {
@@ -114,10 +126,11 @@ test("findSectionHeading mirrors the heading actually present", () => {
   assert.equal(findSectionHeading("no section here", ["描述", "Description"]), "描述");
 });
 
-test("buildDefaultBody emits only 描述 + 需求, never scaffolding sections", () => {
+test("buildDefaultBody emits task input, description and requirements in order", () => {
   const body = buildDefaultBody(TASK_MD);
   const headings = [...body.matchAll(/^##\s+(.+)$/gm)].map((m) => m[1]!.trim());
-  assert.deepEqual(headings, ["描述", "需求"]);
+  assert.deepEqual(headings, ["任务输入", "描述", "需求"]);
+  assert.match(body, /### 来源\n\n- 用户确认/);
 });
 
 test("buildDefaultBody keeps requirement checkboxes verbatim", () => {
@@ -127,12 +140,13 @@ test("buildDefaultBody keeps requirement checkboxes verbatim", () => {
 
 test("buildDefaultBody fills empty sections with N/A", () => {
   const body = buildDefaultBody("# t\n\n## 描述\n\n## 需求\n");
-  assert.equal(body, "## 描述\n\nN/A\n\n## 需求\n\nN/A\n");
+  assert.equal(body, "## 任务输入\n\nN/A\n\n## 描述\n\nN/A\n\n## 需求\n\nN/A\n");
 });
 
 test("renderTemplateBody maps fields by id and keeps template structure", () => {
   const body = renderTemplateBody(ISSUE_FORM, FIELDS);
-  const headings = [...body.matchAll(/^###\s+(.+)$/gm)].map((m) => m[1]!.trim());
+  const formBody = body.slice(0, body.indexOf("### 任务输入"));
+  const headings = [...formBody.matchAll(/^###\s+(.+)$/gm)].map((m) => m[1]!.trim());
   // markdown / dropdown / checkboxes skipped; only input + textarea labels remain, in order
   assert.deepEqual(headings, [
     "问题摘要 / Summary",
@@ -142,6 +156,17 @@ test("renderTemplateBody maps fields by id and keeps template structure", () => 
   ]);
   assert.match(body, /### 问题摘要 \/ Summary\n\n示例任务/);
   assert.match(body, /### 详细描述 \/ Description\n\n第一段描述。/);
+});
+
+test("renderTemplateBody appends task input exactly once after form fields", () => {
+  const body = renderTemplateBody(ISSUE_FORM, FIELDS);
+  assert.equal(body.match(/^### 任务输入$/gm)?.length, 1);
+  assert.match(body, /### 任务输入\n\n### 来源\n\n- 用户确认\n\n### 约束\n\n- 保留原始状态。\n$/);
+});
+
+test("renderTemplateBody fills empty task input with N/A", () => {
+  const body = renderTemplateBody(ISSUE_FORM, { ...FIELDS, taskInput: "" });
+  assert.match(body, /### 任务输入\n\nN\/A\n$/);
 });
 
 test("renderTemplateBody fills unmappable fields with N/A", () => {

@@ -12,12 +12,13 @@ Print a deterministic Issue body extracted from a task's task.md.
   Omit <ref>           Resolve the unique active task for the current branch.
   <ref>               Bare numeric short id, or a full TASK-YYYYMMDD-HHMMSS id.
   --template <path>   Render the final body for the given GitHub Issue Form (scenario A);
-                      without it, print the default '描述 + 需求' body (scenario B).
+                      without it, print the default '任务输入 + 描述 + 需求' body (scenario B).
 
-Only the task title, '## 描述' and '## 需求' sections are ever emitted; the rest of
-task.md (scaffolding sections, placeholders) is never written to the body.
+Only the task title, '## 任务输入', '## 描述' and '## 需求' sections are ever
+emitted; the rest of task.md is never written to the body.
 `;
 
+const TASK_INPUT_ALIASES = ['任务输入', 'Task Input'];
 const DESCRIPTION_ALIASES = ['描述', 'Description'];
 const REQUIREMENTS_ALIASES = ['需求', 'Requirements'];
 
@@ -26,18 +27,22 @@ const REQUIREMENTS_ALIASES = ['需求', 'Requirements'];
  * task.md actually uses, with empty sections falling back to `N/A`.
  */
 function buildDefaultBody(content: string): string {
+  const taskInputHeading = findSectionHeading(content, TASK_INPUT_ALIASES);
   const descHeading = findSectionHeading(content, DESCRIPTION_ALIASES);
   const reqHeading = findSectionHeading(content, REQUIREMENTS_ALIASES);
+  const taskInput = extractSection(content, TASK_INPUT_ALIASES) || PLACEHOLDER;
   const description = extractSection(content, DESCRIPTION_ALIASES) || PLACEHOLDER;
   const requirements = extractSection(content, REQUIREMENTS_ALIASES) || PLACEHOLDER;
-  return `## ${descHeading}\n\n${description}\n\n## ${reqHeading}\n\n${requirements}\n`;
+  return `## ${taskInputHeading}\n\n${taskInput}\n\n## ${descHeading}\n\n${description}\n\n## ${reqHeading}\n\n${requirements}\n`;
 }
 
 function readTaskFields(content: string): TaskFields {
   return {
     title: extractTitle(content),
     description: extractSection(content, DESCRIPTION_ALIASES),
-    requirements: extractSection(content, REQUIREMENTS_ALIASES)
+    requirements: extractSection(content, REQUIREMENTS_ALIASES),
+    taskInput: extractSection(content, TASK_INPUT_ALIASES),
+    taskInputHeading: findSectionHeading(content, TASK_INPUT_ALIASES)
   };
 }
 

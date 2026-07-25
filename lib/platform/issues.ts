@@ -6,7 +6,7 @@ import { buildDefaultBody } from '../task/commands/issue-body.ts';
 import { extractTitle, parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { requirementFieldLabels, renderTemplateBody } from '../task/issue-form.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
-import { extractSection } from '../task/sections.ts';
+import { extractSection, findSectionHeading } from '../task/sections.ts';
 import { writeTask } from '../task/write.ts';
 import { resolvePlatformContext } from './context.ts';
 import { createGitHubClient } from './github-client.ts';
@@ -308,9 +308,11 @@ function deterministicIssueBody(repoRoot: string, content: string, taskType: str
   if (selected) {
     try {
       return renderTemplateBody(fs.readFileSync(selected, 'utf8'), {
-      title: taskTitle(content),
-      description: extractSection(content, ['描述', 'Description']),
-      requirements: extractSection(content, ['需求', 'Requirements'])
+        title: taskTitle(content),
+        description: extractSection(content, ['描述', 'Description']),
+        requirements: extractSection(content, ['需求', 'Requirements']),
+        taskInput: extractSection(content, ['任务输入', 'Task Input']),
+        taskInputHeading: findSectionHeading(content, ['任务输入', 'Task Input'])
       });
     } catch {
       // Invalid or unavailable forms fall back to the deterministic default body.

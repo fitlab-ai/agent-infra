@@ -52,6 +52,8 @@ description: >
   - `<slug>` 从任务标题提取 3-6 个英文关键词并转为 kebab-case
 - **详细描述**：整理后的用户原始描述
 
+执行本步骤前，先读取 `reference/context-capture.md`。把当前请求及必要前序讨论中已有的信息按来源与状态分类，准备写入 task.md 的 `## 任务输入`；缺失类别保持为空，不执行推导或分析。
+
 如果描述不清晰，**先向用户确认**再继续。
 
 **类型推断**：根据任务描述的语义，从以下候选值中选择最匹配的类型：
@@ -77,6 +79,7 @@ date +%Y%m%d-%H%M%S
 
 - 创建任务目录：`.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
 - 使用 `.agents/templates/task.md` 模板创建任务文件：`task.md`
+- 将步骤 1 捕获的结构化上下文写入 `## 任务输入`，确保任务文件脱离原会话后仍可理解
 
 **重要**：
 - 目录命名：`TASK-{yyyyMMdd-HHmmss}`（**必须**包含 `TASK-` 前缀）
@@ -239,6 +242,7 @@ Issue 创建失败：
 ## 完成检查清单
 
 - [ ] 创建了任务文件 `.agents/workspace/active/{task-id}/task.md`
+- [ ] 已按 `reference/context-capture.md` 写入并复核 `## 任务输入` 的来源与状态语义
 - [ ] 更新了 task.md 中的 `current_step` 为 requirement-analysis
 - [ ] 更新了 task.md 中的 `updated_at` 为当前时间
 - [ ] 更新了 task.md 中的 `assigned_to`

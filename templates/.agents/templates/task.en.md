@@ -22,6 +22,24 @@ pr_status: pending             # PR status: pending (default) | created (PR crea
 
 [Describe the task clearly and concisely.]
 
+## Task Input
+
+<!-- Populated by create-task from information already present in the current request and necessary prior discussion. Leave missing categories empty; do not infer them. -->
+
+### Sources
+
+### Confirmed Facts and Evidence
+
+### Constraints
+
+### Confirmed Decisions
+
+### Candidate and Rejected Options
+
+### Acceptance Criteria
+
+### Open Questions
+
 ## Context
 
 - **Related Issue**: #XXX

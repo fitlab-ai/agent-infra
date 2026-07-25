@@ -11,7 +11,7 @@ description: >
 ## 行为边界 / 关键规则
 
 - 本技能仅产出需求分析文档（`analysis.md` 或 `analysis-r{N}.md`）—— 不修改任何业务代码
-- 严格基于 `task.md` 中已有的需求、上下文和来源信息展开分析
+- 严格基于 `task.md` 中已有的任务输入、需求、上下文和来源信息展开分析
 - 执行本技能后，你**必须**立即更新 task.md 中的任务状态
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
@@ -59,6 +59,7 @@ agent-infra-internal task-event {task-id} analyze.started --agent {agent}
 ### 3. 阅读任务上下文
 
 仔细阅读 `task.md` 以理解：
+- `## 任务输入` 中已捕获的来源、事实与证据、约束、决策状态、验收标准和未决事项（栏目不存在时兼容回退）
 - 任务标题、描述和需求列表
 - 上下文信息（Issue、PR、分支、告警编号等）
 - 当前已知的受影响文件和约束
@@ -92,6 +93,8 @@ agent-infra-internal task-event {task-id} analyze.started --agent {agent}
 - 未携带答案 → 复述 `pending_question`，按下文场景 B 提问早退（不增加 `question_count`）。
 
 **4.3 充分性判定**（客观清单，命中任一缺口即判为不足）：
+- 先聚合 `## 任务输入`、描述、上下文、需求及远端来源；分析阶段尚未填写 `## 需求` 本身不构成不足；
+- 已在任务输入中记录的目标、范围、约束或验收标准视为已提供，不得重复询问；
 - 描述/需求为空，或仅一句话且无可验证的验收标准；
 - 缺少目标或受影响范围（不知道要改什么 / 影响谁）；
 - 需求条目自相矛盾，或关键名词未定义而无法分析。

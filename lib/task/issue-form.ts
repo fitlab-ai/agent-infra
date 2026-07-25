@@ -4,6 +4,8 @@ type TaskFields = {
   title: string;
   description: string;
   requirements: string;
+  taskInput: string;
+  taskInputHeading: string;
 };
 
 // Field id -> task value mapping (single source of truth, per HD-1).
@@ -84,6 +86,8 @@ function renderTemplateBody(formText: string, fields: TaskFields): string {
     const value = mapped.trim() === '' ? PLACEHOLDER : mapped;
     sections.push(`### ${label}\n\n${value}`);
   }
+  const taskInput = fields.taskInput.trim() === '' ? PLACEHOLDER : fields.taskInput;
+  sections.push(`### ${fields.taskInputHeading}\n\n${taskInput}`);
   return `${sections.join('\n\n')}\n`;
 }
 

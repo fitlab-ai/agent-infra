@@ -53,6 +53,8 @@ Extract from the natural-language description:
   - `<slug>` is a kebab-case slug built from 3-6 English keywords extracted from the task title
 - **Detailed description**: the cleaned-up original user request
 
+Before this step, read `reference/context-capture.md`. Classify the information already present in the current request and necessary prior discussion by source and state, ready to write under task.md `## Task Input`; leave missing categories empty and do not infer or analyze them.
+
 If the description is unclear, **ask the user to clarify first**.
 
 **Type inference**: choose the best matching type from the following candidates based on the semantics of the task description:
@@ -78,6 +80,7 @@ date +%Y%m%d-%H%M%S
 
 - Create the task directory: `.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
 - Use the `.agents/templates/task.md` template to create the task file: `task.md`
+- Write the structured context captured in step 1 under `## Task Input` so the task remains understandable outside the original conversation
 
 **Important**:
 - Directory naming: `TASK-{yyyyMMdd-HHmmss}` (**must** include the `TASK-` prefix)
@@ -240,6 +243,7 @@ For later platform sync: after fixing auth / network / template issues, manually
 ## Completion Checklist
 
 - [ ] Created the task file `.agents/workspace/active/{task-id}/task.md`
+- [ ] Wrote and checked `## Task Input` source and state semantics according to `reference/context-capture.md`
 - [ ] Updated `current_step` to requirement-analysis in task.md
 - [ ] Updated `updated_at` to the current time in task.md
 - [ ] Updated `assigned_to` in task.md
