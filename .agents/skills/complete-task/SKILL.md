@@ -86,7 +86,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 - [ ] 代码已审查（`review-code.md` 或 `review-code-r{N}.md` 存在，且最新审查结论为 Approved；或已在外部完成审查）
 - [ ] 代码已提交（没有与此任务相关的未提交变更）
 - [ ] 测试通过
-- [ ] 审查分歧账本无未关闭分歧、无未复审的 post-review 提交，且本地 HEAD、`last_reviewed_commit`、PR head 一致并由最新 required checks 覆盖（由下方「预完成硬门禁」机械校验）
+- [ ] 审查分歧账本无未关闭分歧、无未复审的 post-review 提交；本地 HEAD、`last_reviewed_commit`、PR head 严格一致，或已合并 squash 的平台身份、Git 拓扑与内容等价证据完整；原 PR head 的 required checks 已通过（由下方「预完成硬门禁」机械校验）
 
 > **⚠️ 前置条件分支判断 — 你必须先判断“继续”还是“停止”：**
 >
@@ -147,7 +147,7 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 
 该事件依次执行 `review-ledger`、`post-review-commit`、`required-checks`、`platform-sync-preflight`。任一退出码非 0（fail/blocked）时，任务必须继续留在 active；从 gate 结果取稳定 code/target，通过 `task-warning ... add --step complete-task ...` 落账后停止。若审查基线或 head 不一致，必须先重新 `commit` / `review-code`；checks pending/failed/cancelled 时运行 `watch-pr`；不得回退审查基线。
 
-`--force` 不解除本硬门禁：未关闭分歧必须先在账本闭合，未复审提交必须重新审查或具备有效豁免，required checks 与三重 head 对齐必须通过，平台 preflight 必须通过。
+`--force` 不解除本硬门禁：未关闭分歧必须先在账本闭合，未复审提交必须重新审查、具备有效豁免，或由绑定 PR 的权威合并快照与本地 Git 对象证明为内容等价的单父 squash merge；原 PR head 的 required checks 与平台 preflight 必须通过。平台事实、Git 对象、拓扑或内容证据缺失时 fail closed。
 
 ### 6. 执行本地生命周期意图并验证转移
 

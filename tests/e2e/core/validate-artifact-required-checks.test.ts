@@ -50,6 +50,24 @@ test("required-checks fails closed when any head differs", () => {
   }).status, "fail");
 });
 
+test("required-checks accepts only a verified merged-equivalent relation", () => {
+  const result = evaluate({
+    localHead: "b".repeat(40),
+    relation: { status: "merged-equivalent", reviewedHead: SHA, mergeCommit: "b".repeat(40) }
+  });
+  assert.equal(result.status, "pass");
+  assert.match(result.message, /verified squash merge equivalence/);
+
+  assert.equal(evaluate({
+    localHead: "b".repeat(40),
+    relation: { status: "failed", message: "squash content mismatch" }
+  }).status, "fail");
+  assert.equal(evaluate({
+    localHead: "b".repeat(40),
+    relation: { status: "blocked", message: "merge object missing" }
+  }).status, "blocked");
+});
+
 test("required-checks preserves pending and unavailable snapshots as blocked", () => {
   assert.equal(evaluate({
     inspection: {

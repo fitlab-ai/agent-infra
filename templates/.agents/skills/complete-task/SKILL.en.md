@@ -87,7 +87,7 @@ Before marking complete, verify ALL of these:
 - [ ] Code has been reviewed (`review-code.md` or `review-code-r{N}.md` exists, and the latest review verdict is Approved; or review was done externally)
 - [ ] Code has been committed (no uncommitted changes related to this task)
 - [ ] Tests are passing
-- [ ] The disagreement ledger has no unclosed disagreements, there are no un-re-reviewed post-review commits, and local HEAD, `last_reviewed_commit`, and PR head match under the latest required-checks snapshot (mechanically checked below)
+- [ ] The disagreement ledger has no unclosed disagreements or un-re-reviewed post-review commits; local HEAD, `last_reviewed_commit`, and PR head either match strictly or a merged squash has complete platform identity, Git topology, and content-equivalence evidence; required checks passed for the original PR head (mechanically checked below)
 
 > **⚠️ Prerequisite Branch Check — you must decide whether to continue or stop before proceeding:**
 >
@@ -148,7 +148,7 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 
 This event runs `review-ledger`, `post-review-commit`, `required-checks`, then `platform-sync-preflight`. On any non-zero exit (fail/blocked), keep the task active, derive the stable code/target from the gate result, record it through `task-warning ... add --step complete-task ...`, and stop. For a review/head mismatch, rerun `commit` or `review-code`; for pending/failed/cancelled checks, run `watch-pr`; never fall back to the review baseline.
 
-`--force` does not lift this hard gate: close ledger disagreements, re-review or exempt post-review commits, pass required-checks with three-way head alignment, and pass platform preflight first.
+`--force` does not lift this hard gate: close ledger disagreements; re-review or exempt post-review commits, or prove a content-equivalent single-parent squash merge from the bound PR snapshot and local Git objects; then pass required checks for the original PR head and platform preflight. Missing platform facts, Git objects, topology, or content evidence fails closed.
 
 ### 6. Apply the Local Lifecycle Intent and Verify the Move
 

@@ -22,7 +22,9 @@ type PullRequestSnapshot = {
   body: string;
   draft: boolean;
   head: { repository: string; ref: string; sha: string };
-  base: { repository: string; ref: string };
+  base: { repository: string; ref: string; sha: string };
+  mergedAt: string | null;
+  mergeCommitSha: string | null;
   labels: string[];
   assignees: string[];
   milestone: string | null;
@@ -55,7 +57,9 @@ type RemotePullRequest = {
   draft?: boolean;
   pull_request?: unknown;
   head?: { ref?: string; sha?: string; repo?: { full_name?: string } | null };
-  base?: { ref?: string; repo?: { full_name?: string } | null };
+  base?: { ref?: string; sha?: string; repo?: { full_name?: string } | null };
+  merged_at?: string | null;
+  merge_commit_sha?: string | null;
   labels?: Array<string | { name?: string }>;
   assignees?: Array<{ login?: string }>;
   milestone?: { title?: string } | null;
@@ -92,7 +96,9 @@ function normalizePullRequest(remote: RemotePullRequest, repository: string): Pu
     body: remote.body || '',
     draft: Boolean(remote.draft),
     head: { repository: headRepository, ref: remote.head.ref, sha: remote.head.sha },
-    base: { repository: baseRepository, ref: remote.base.ref },
+    base: { repository: baseRepository, ref: remote.base.ref, sha: remote.base.sha || '' },
+    mergedAt: remote.merged_at || null,
+    mergeCommitSha: remote.merge_commit_sha || null,
     labels: (remote.labels || []).map((label) => typeof label === 'string' ? label : label.name || '').filter(Boolean).sort(),
     assignees: (remote.assignees || []).map((assignee) => assignee.login || '').filter(Boolean).sort(),
     milestone: remote.milestone?.title || null

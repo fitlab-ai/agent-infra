@@ -10,11 +10,14 @@ import {
   extractReviewDiffFingerprint,
   extractReviewedSnapshotTree,
   findAuthoritativeReviewCodeArtifact,
+  loadPostReviewConfig,
   parseReviewVerdict,
   resolvePostReviewGlobs
 } from "./verification-review.ts";
 import { check as checkPlatformSync } from "../platform/verification-sync.ts";
 import { check as checkRequiredChecks } from "../platform/verification-required.ts";
+import { inspectPlatformPullRequest } from "../platform/pull-requests.ts";
+import { resolveReviewedHeadRelation } from "../platform/merged-pr-equivalence.ts";
 import { parseTypedTaskFrontmatter } from "./frontmatter.ts";
 import { parseLedger } from "./ledger.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
@@ -265,20 +268,6 @@ function loadProjectName(): any {
     return String(config.project || "").trim();
   } catch {
     return "";
-  }
-}
-
-function loadReviewConfig(): any {
-  const configPath = path.join(repoRoot, ".agents", ".airc.json");
-  if (!fs.existsSync(configPath)) {
-    return {};
-  }
-
-  try {
-    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    return config.review && typeof config.review === "object" ? config.review : {};
-  } catch {
-    return {};
   }
 }
 
@@ -598,7 +587,7 @@ function resolveReviewSetting(config: any, key: any, fallback: any): any {
   if (config && config[key] !== undefined && config[key] !== null) {
     return config[key];
   }
-  const reviewConfig = loadReviewConfig();
+  const reviewConfig = loadPostReviewConfig(repoRoot);
   if (reviewConfig[key] !== undefined && reviewConfig[key] !== null) {
     return reviewConfig[key];
   }
@@ -706,7 +695,7 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
   }
 
   const sha = baselineSource.sha;
-  const globs = resolvePostReviewGlobs(config, loadReviewConfig());
+  const globs = resolvePostReviewGlobs(config, loadPostReviewConfig(repoRoot));
   let commits;
   try {
     const out = execFileSync("git", ["-C", gitRoot, "rev-list", `${sha}..HEAD`, "--", ...globs], { encoding: "utf8" });
@@ -717,6 +706,33 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
 
   if (commits.length === 0) {
     return passResult("post-review-commit", `No post-review commits to code/rule paths since ${sha.slice(0, 8)}`);
+  }
+
+  if (task.ok && Number(task.metadata.pr_number) > 0) {
+    const inspected = inspectPlatformPullRequest(task.metadata.id, { cwd: gitRoot });
+    if (inspected.pullRequest) {
+      let localHead = "";
+      try {
+        localHead = execFileSync("git", ["-C", gitRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+      } catch {
+        return blockedResult("post-review-commit", "Unable to resolve the local HEAD");
+      }
+      const relation = resolveReviewedHeadRelation({
+        gitRoot,
+        localHead,
+        lastReviewedCommit: sha,
+        pullRequest: inspected.pullRequest,
+        pathspecs: globs
+      });
+      if (relation.status === "merged-equivalent") {
+        return passResult("post-review-commit", `Reviewed PR head is content-equivalent to squash merge ${relation.mergeCommit.slice(0, 8)}`);
+      }
+      if (relation.status === "blocked") {
+        return blockedResult("post-review-commit", relation.message);
+      }
+    } else if (inspected.status === "blocked") {
+      return blockedResult("post-review-commit", inspected.error?.message || "PR merge snapshot is unavailable");
+    }
   }
 
   let exempt = false;
@@ -788,7 +804,7 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
 
   let actualSnapshot;
   try {
-    actualSnapshot = snapshotReview({ cwd: gitRoot, mode: "worktree", baseline, globs: resolvePostReviewGlobs({}, loadReviewConfig()) });
+    actualSnapshot = snapshotReview({ cwd: gitRoot, mode: "worktree", baseline, globs: resolvePostReviewGlobs({}, loadPostReviewConfig(repoRoot)) });
   } catch {
     return blockedResult(
       "review-fact",

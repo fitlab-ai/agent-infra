@@ -3,6 +3,7 @@ export {
   extractReviewDiffFingerprint,
   extractReviewedSnapshotTree,
   findAuthoritativeReviewCodeArtifact,
+  loadPostReviewConfig,
   parseReviewVerdict,
   resolvePostReviewGlobs
 } from './review-fingerprint.ts';

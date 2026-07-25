@@ -81,7 +81,7 @@ test('compiled preflight runs required checks from the resolved repository root'
       "if (args[0] === '--version') console.log('gh version 2.80.0');",
       "else if (args[0] === 'api' && args[1] === 'repos/acme/demo') console.log(JSON.stringify({ full_name: 'acme/demo', fork: false, permissions: { admin: true } }));",
       "else if (args[0] === 'api' && args[1] === 'user') console.log(JSON.stringify({ login: 'tester' }));",
-      `else if (args[0] === 'api' && args[1] === 'repos/acme/demo/pulls/42') console.log(JSON.stringify({ number: 42, node_id: 'PR_42', html_url: 'https://github.com/acme/demo/pull/42', state: 'closed', title: 'fixture', body: '', draft: false, head: { ref: 'feature', sha: '${head}', repo: { full_name: 'acme/demo' } }, base: { ref: 'main', repo: { full_name: 'acme/demo' } }, labels: [], assignees: [], milestone: null }));`,
+      `else if (args[0] === 'api' && args[1] === 'repos/acme/demo/pulls/42') console.log(JSON.stringify({ number: 42, node_id: 'PR_42', html_url: 'https://github.com/acme/demo/pull/42', state: 'closed', title: 'fixture', body: '', draft: false, head: { ref: 'feature', sha: '${head}', repo: { full_name: 'acme/demo' } }, base: { ref: 'main', sha: '${head}', repo: { full_name: 'acme/demo' } }, merged_at: null, merge_commit_sha: null, labels: [], assignees: [], milestone: null }));`,
       "else if (args[0] === 'pr' && args[1] === 'checks') console.log(JSON.stringify([{ name: 'test', state: 'SUCCESS', bucket: 'pass', link: 'https://github.com/acme/demo/actions/runs/1', workflow: 'CI', startedAt: null, completedAt: null }]));",
       "else { console.error(`unexpected gh args: ${args.join(' ')}`); process.exitCode = 1; }",
       ''

@@ -4,6 +4,8 @@ import { execFileSync } from "node:child_process";
 
 import { inspectRequiredChecks } from "./pr-checks.ts";
 import { resolvePlatformContext } from "./context.ts";
+import { resolveReviewedHeadRelation } from "./merged-pr-equivalence.ts";
+import { loadPostReviewConfig, resolvePostReviewGlobs } from "../task/review-fingerprint.ts";
 
 const CHECK_TYPE = "required-checks";
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
@@ -50,14 +52,31 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
     return shared.failResult(CHECK_TYPE, inspection.error?.message || "Required checks are unavailable", "check_failed");
   }
 
-  const prHead = inspection.pullRequest?.headSha;
-  if (!prHead || localHead !== reviewedHead || localHead !== prHead) {
-    return shared.failResult(CHECK_TYPE, "Local HEAD, last reviewed commit, and PR head must match", "check_failed");
+  const prHead = inspection.pullRequest?.head?.sha || inspection.pullRequest?.headSha;
+  const relation = context.relation || (
+    context.gitRoot && inspection.pullRequest?.head
+      ? resolveReviewedHeadRelation({
+          gitRoot: context.gitRoot,
+          localHead,
+          lastReviewedCommit: reviewedHead,
+          pullRequest: inspection.pullRequest,
+          pathspecs: context.pathspecs || [":/"]
+        })
+      : localHead === reviewedHead && localHead === prHead
+        ? { status: "strict" }
+        : { status: "failed" }
+  );
+  if (relation.status !== "strict" && relation.status !== "merged-equivalent") {
+    const message = relation.message || "Local HEAD, last reviewed commit, and PR head must match";
+    return relation.status === "blocked"
+      ? shared.blockedResult(CHECK_TYPE, message, "dependency_error")
+      : shared.failResult(CHECK_TYPE, message, "check_failed");
   }
 
   const state = inspection.checks?.state;
   if (state === "passed" || state === "no-required") {
-    return shared.passResult(CHECK_TYPE, `Required checks are ${state} for PR head ${prHead}`);
+    const suffix = relation.status === "merged-equivalent" ? " via verified squash merge equivalence" : "";
+    return shared.passResult(CHECK_TYPE, `Required checks are ${state} for PR head ${prHead}${suffix}`);
   }
   if (state === "pending") {
     return shared.blockedResult(CHECK_TYPE, inspection.error?.message || "Required checks are pending", "check_pending");
@@ -79,5 +98,12 @@ export function check({ taskDir }: any, shared: any): any {
   const localHead = readHead(shared.repoRoot);
   if (!localHead) return evaluateRequiredChecks({ metadata: task.metadata, localHead, inspection: null, prFlow }, shared);
   const inspection = inspectRequiredChecks(task.metadata.id, { cwd: shared.repoRoot });
-  return evaluateRequiredChecks({ metadata: task.metadata, localHead, inspection, prFlow }, shared);
+  return evaluateRequiredChecks({
+    metadata: task.metadata,
+    localHead,
+    inspection,
+    prFlow,
+    gitRoot: shared.repoRoot,
+    pathspecs: resolvePostReviewGlobs({}, loadPostReviewConfig(shared.repoRoot))
+  }, shared);
 }

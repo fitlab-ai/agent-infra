@@ -12,7 +12,16 @@ export const DEFAULT_POST_REVIEW_EXCLUDES: string[] = [];
 // The leading ":/" makes coverage fail-closed (everything from the repo root);
 // each exclude becomes a top-level negative pathspec. Projects extend the
 // denylist via review.post_review_exclude_globs (union, deduped).
-type ReviewGlobConfig = { post_review_exclude_globs?: unknown };
+type ReviewGlobConfig = Record<string, unknown> & { post_review_exclude_globs?: unknown };
+
+export function loadPostReviewConfig(repoRoot: string): ReviewGlobConfig {
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, ".agents", ".airc.json"), "utf8"));
+    return config.review && typeof config.review === "object" ? config.review : {};
+  } catch {
+    return {};
+  }
+}
 
 export function resolvePostReviewGlobs(
   config: ReviewGlobConfig = {},

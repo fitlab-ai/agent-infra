@@ -92,7 +92,8 @@
 - `commit` 只读取最高轮 Approved `review-code` 产物；提交前比较 `pre_head == R`、完整工作区树 `W == T`、规范化暂存树 `S == T`，任一失配都在 `git commit` 前阻断并报告两组 added/missing/different 路径。
 - 成功提交后令 `B=last_reviewed_commit=<new_head>`；`B` 只表示已经落到 Git commit 的审查锚点。
 - `complete-task` 的 `post-review-commit` gate 只使用 B；B 缺失、畸形或对象不存在时报告 `reviewed snapshot was not anchored`，不得回退 R。
-- 若 B 之后代码 / 规则路径出现新提交，gate 会拦截，要求重新 `review-code`。
+- 若 B 之后代码 / 规则路径出现新提交，gate 会拦截，要求重新 `review-code`。唯一自动例外是绑定 GitHub PR 已合并，且平台快照证明 B 是原 PR head、merge commit 位于本地 HEAD 历史中、受审查变更与单父 squash commit 的规范化补丁完全一致，并且 merge 后受保护路径没有新提交；缺少任一平台或 Git 证据时 fail closed。
+- `required-checks` 复用同一严格 / squash 等价判定，并始终读取原 PR head 的 required checks；checks 未通过不因合并而放宽。
 - **豁免**：在账本追加一行 `| PRC-1 | post-review-commit | - | - | human-decided | <裁定说明> |`，记录人工明确允许该批提交免复审。
 
 ## gate 行为速查

@@ -8,6 +8,7 @@ import type { GitHubClient } from './github-client.ts';
 import { inspectPlatformPullRequest } from './pull-requests.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
+import type { PullRequestSnapshot } from './pull-requests.ts';
 
 type CheckBucket = 'pass' | 'fail' | 'pending' | 'cancel';
 type CheckState = 'passed' | 'failed' | 'pending' | 'timed-out' | 'cancelled' | 'no-required';
@@ -23,7 +24,7 @@ type CheckSnapshot = {
 type ChecksSnapshot = { state: Exclude<CheckState, 'timed-out'>; required: CheckSnapshot[] };
 type RunCandidate = { id: number; name: string; headSha: string; jobId?: number | null };
 type ChecksResult = PlatformResult & {
-  pullRequest: { number: number; headSha: string } | null;
+  pullRequest: PullRequestSnapshot | null;
   checks: { state: CheckState; required: CheckSnapshot[] };
   resolution?: { status: 'resolved' | 'missing' | 'ambiguous'; runId: number | null; jobId: number | null };
   logs?: { runId: number; jobId?: number; text: string };
@@ -140,7 +141,7 @@ function inspectRequiredChecks(taskRef: string, options: SharedOptions = {}): Ch
     return checksResult(inspected.error.retryable ? 'blocked' : 'failed', {
       platform: base.context.platform, capabilities: base.context.capabilities,
       resource: { kind: 'pull-request', number: base.prNumber },
-      pullRequest: { number: base.prNumber, headSha: base.pullRequest.head.sha }, error: inspected.error
+      pullRequest: base.pullRequest, error: inspected.error
     });
   }
   const classified = classifyRequiredChecks(normalizeChecks(inspected.value));
@@ -150,7 +151,7 @@ function inspectRequiredChecks(taskRef: string, options: SharedOptions = {}): Ch
   return checksResult(status, {
     platform: base.context.platform, capabilities: base.context.capabilities,
     resource: { kind: 'pull-request', number: base.prNumber },
-    pullRequest: { number: base.prNumber, headSha: base.pullRequest.head.sha }, checks: classified,
+    pullRequest: base.pullRequest, checks: classified,
     error: status === 'no-op' ? null : {
       code: classified.state === 'pending' ? 'REQUIRED_CHECKS_PENDING' : `REQUIRED_CHECKS_${classified.state.toUpperCase()}`,
       message: `Required checks are ${classified.state}`,
@@ -197,9 +198,9 @@ function resolvePlatformCheckRun(taskRef: string, options: SharedOptions & { che
   const direct = options.detailsUrl ? parseRunJobIdentity(options.detailsUrl) : null;
   if (direct) {
     const run = base.client.json<{ id?: number; head_sha?: string }>(['api', `repos/${base.context.platform.repository}/actions/runs/${direct.runId}`], { cwd: base.resolved.repoRoot });
-    if (!run.ok) return checksResult(run.error.retryable ? 'blocked' : 'failed', { platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: { number: base.prNumber, headSha: base.pullRequest.head.sha }, error: run.error });
+    if (!run.ok) return checksResult(run.error.retryable ? 'blocked' : 'failed', { platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: base.pullRequest, error: run.error });
     if (run.value.head_sha !== base.pullRequest.head.sha) return checksResult('failed', { error: { code: 'CHECK_RUN_HEAD_MISMATCH', message: 'Resolved run does not belong to the PR head SHA', retryable: false } });
-    return checksResult('no-op', { platform: base.context.platform, capabilities: base.context.capabilities, resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: { number: base.prNumber, headSha: base.pullRequest.head.sha }, resolution: { status: 'resolved', ...direct }, error: null });
+    return checksResult('no-op', { platform: base.context.platform, capabilities: base.context.capabilities, resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: base.pullRequest, resolution: { status: 'resolved', ...direct }, error: null });
   }
   const listed = base.client.json<{ check_runs?: Array<{ name?: string; details_url?: string }> }>(['api', `repos/${base.context.platform.repository}/commits/${base.pullRequest.head.sha}/check-runs`], { cwd: base.resolved.repoRoot });
   if (!listed.ok) return checksResult(listed.error.retryable ? 'blocked' : 'failed', { error: listed.error });
@@ -211,7 +212,7 @@ function resolvePlatformCheckRun(taskRef: string, options: SharedOptions & { che
   const resolution = resolveRunCandidate(candidates, base.pullRequest.head.sha, options.checkName);
   return checksResult(resolution.status === 'resolved' ? 'no-op' : 'failed', {
     platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: { number: base.prNumber, headSha: base.pullRequest.head.sha },
+    resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: base.pullRequest,
     resolution,
     error: resolution.status === 'resolved' ? null : { code: resolution.status === 'ambiguous' ? 'CHECK_RUN_AMBIGUOUS' : 'CHECK_RUN_NOT_FOUND', message: `Check run is ${resolution.status}`, retryable: false }
   });
@@ -228,7 +229,7 @@ function fetchPlatformCheckLogs(taskRef: string, options: SharedOptions & { run:
   if (!fetched.value) return checksResult('failed', { error: { code: 'CHECK_LOGS_MISSING', message: 'No failed logs are available', retryable: false } });
   return checksResult('no-op', {
     platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: { number: base.prNumber, headSha: base.pullRequest.head.sha },
+    resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: base.pullRequest,
     logs: { runId: options.run, ...(options.job ? { jobId: options.job } : {}), text: fetched.value }, error: null
   });
 }
