@@ -35,7 +35,7 @@ agent-infra standardizes that shared infrastructure. It gives every supported AI
 ## See it in Action
 
 <p align="center">
-  <img src="./assets/demo-init.gif" alt="CLI install and initialize demo" width="100%" style="max-width: 720px;">
+  <img src="./assets/demo-init.gif" alt="CLI install and initialize demo" width="720">
 </p>
 
 > The demo is stored with Git LFS. Install Git LFS and run `git lfs install`

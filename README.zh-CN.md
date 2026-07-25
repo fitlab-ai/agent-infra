@@ -35,7 +35,7 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 ## 实战演示
 
 <p align="center">
-  <img src="./assets/demo-init.gif" alt="CLI 安装初始化演示" width="100%" style="max-width: 720px;">
+  <img src="./assets/demo-init.gif" alt="CLI 安装初始化演示" width="720">
 </p>
 
 > 演示动画通过 Git LFS 存储。克隆前请安装 Git LFS 并运行 `git lfs install`；
