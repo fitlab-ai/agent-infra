@@ -48,6 +48,7 @@ const mergedPresent = [
   "**/test-integration.*",
   "**/release.*",
   "**/upgrade-dependency.*",
+  ".agents/rules/testing-discipline.*",
   ".agents/skills/test/SKILL.*",
   ".agents/skills/test-integration/SKILL.*",
   ".agents/skills/release/SKILL.*",

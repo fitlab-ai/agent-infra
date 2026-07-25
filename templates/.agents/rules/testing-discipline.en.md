@@ -41,6 +41,24 @@ This mirrors "Goal-Driven Execution" in AGENTS.md: define a verifiable success c
 
 ## Project-specific test policy
 
-Keep repository-specific commands, directory conventions, coverage thresholds, CI integration, and reporting services in the project's own test documentation. Before adding a test, inspect that local policy and place the test in the layer that matches its observable scope and runtime cost.
+Complete each item below for this repository. Record the chosen behavior and its boundaries so contributors can select and validate tests consistently.
 
-If the project does not define a layered test suite, use its complete test command for RED and GREEN verification. Do not invent a test hierarchy or coverage gate as part of an unrelated change.
+### 1. Test commands
+
+> TODO: Document the complete test command and any faster commands used during development.
+
+### 2. Test directories or tiers
+
+> TODO: Document the test directories or tiers and the rule for choosing among them.
+
+### 3. Coverage
+
+> TODO: Document how coverage is collected, any thresholds, and whether coverage blocks changes.
+
+### 4. Continuous integration
+
+> TODO: Document which CI checks run tests and which checks are blocking or informational.
+
+### 5. Reporting services
+
+> TODO: Document any external reporting services, badges, or artifacts and whether they affect acceptance.
