@@ -116,6 +116,15 @@ const HOST_PROXY_ENV_KEYS = [
   'no_proxy',
   'NO_PROXY'
 ] as const;
+const MANAGED_GITHUB_GIT_CONFIG = [
+  '[credential]',
+  '\thelper = !gh auth git-credential',
+  '[credential "https://github.com"]',
+  '\thelper =',
+  '\thelper = !gh auth git-credential',
+  '[url "https://github.com/"]',
+  '\tinsteadOf = git@github.com:'
+];
 
 type SandboxCreateConfig = ReturnType<typeof loadConfig>;
 type PreparedDockerfile = ReturnType<typeof prepareDockerfile>;
@@ -255,6 +264,16 @@ function normalizeContainerHomeSeparators(content: string): string {
   return content.replace(containerHomePattern, (value) => value.replaceAll('\\', '/'));
 }
 
+function isGitHubCliCredentialHelper(line: string): boolean {
+  const helperMatch = line.match(/^\s*helper\s*=\s*(.+?)\s*$/i);
+  if (!helperMatch) {
+    return false;
+  }
+
+  const helper = (helperMatch[1] ?? '').trim().replace(/^"(.*)"$/, '$1');
+  return /^!\s*(?:"[^"]*[\\/]+gh"|(?:\S*[\\/]+)?gh)\s+auth\s+git-credential(?:\s|$)/i.test(helper);
+}
+
 export function sanitizeGitConfig(
   gitconfig: string,
   home: string,
@@ -272,11 +291,13 @@ export function sanitizeGitConfig(
   const sanitized = [];
   let inGpgSection = false;
   let currentSection = '';
+  let currentSectionName = '';
 
   for (const line of lines) {
     const sectionMatch = line.match(/^\s*\[([^\]]+)\]\s*$/);
     if (sectionMatch) {
       const sectionName = (sectionMatch[1] ?? '').trim();
+      currentSectionName = sectionName;
       currentSection = ((sectionName.match(/^([^\s"]+)/)?.[1]) ?? '').toLowerCase();
       inGpgSection = /^gpg(?:\s+"[^"]+")?$/i.test(sectionName);
       if (stripGpg && inGpgSection) {
@@ -304,11 +325,23 @@ export function sanitizeGitConfig(
     if (stripGpg && currentSection === 'user' && /^\s*signingKey\s*=.*$/i.test(line)) {
       continue;
     }
+    if (currentSection === 'credential' && isGitHubCliCredentialHelper(line)) {
+      continue;
+    }
+    if (
+      /^url\s+"https:\/\/github\.com\/"$/i.test(currentSectionName)
+      && /^\s*insteadOf\s*=\s*git@github\.com:\s*$/i.test(line)
+    ) {
+      continue;
+    }
 
     sanitized.push(line);
   }
 
-  return appendSafeDirectories(sanitized, repoRoot).join('\n');
+  return [
+    ...appendSafeDirectories(sanitized, repoRoot),
+    ...MANAGED_GITHUB_GIT_CONFIG
+  ].join('\n');
 }
 
 export function hostHasGpgKeys(home: string, execFn: ExecSyncFn = execFileSync): boolean {

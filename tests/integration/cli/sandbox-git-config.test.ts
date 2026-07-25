@@ -70,6 +70,16 @@ function required<T>(value: T | undefined, message = "expected value"): T {
   return value;
 }
 
+const managedGitHubConfig = [
+  "[credential]",
+  "\thelper = !gh auth git-credential",
+  "[credential \"https://github.com\"]",
+  "\thelper =",
+  "\thelper = !gh auth git-credential",
+  "[url \"https://github.com/\"]",
+  "\tinsteadOf = git@github.com:"
+];
+
 test("hostHasGpgKeys reports whether the host keyring is available", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
 
@@ -156,7 +166,8 @@ test("prepareHostShellConfig writes sanitized config files and returns read-only
         "  excludesfile = /home/devuser/.gitignore_global",
         "[safe]",
         "\tdirectory = /workspace",
-        "\tdirectory = /repo"
+        "\tdirectory = /repo",
+        ...managedGitHubConfig
       ]
     );
     assert.equal(
@@ -193,7 +204,8 @@ test("prepareHostShellConfig writes a minimal .gitconfig with safe.directory ent
     assert.deepEqual(lines, [
       "[safe]",
       "\tdirectory = /workspace",
-      "\tdirectory = /repo"
+      "\tdirectory = /repo",
+      ...managedGitHubConfig
     ]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -262,7 +274,8 @@ test("sanitizeGitConfig rewrites host paths and appends safe.directory entries",
     "  excludesfile = /home/devuser/.gitignore_global",
     "[safe]",
     "\tdirectory = /workspace",
-    "\tdirectory = /repo"
+    "\tdirectory = /repo",
+    ...managedGitHubConfig
   ]);
 });
 
@@ -327,7 +340,8 @@ test("sanitizeGitConfig appends missing safe.directory entries to an existing sa
     "  directory = /workspace",
     "\tdirectory = /repo",
     "[user]",
-    "  name = Demo User"
+    "  name = Demo User",
+    ...managedGitHubConfig
   ]);
 });
 
@@ -364,8 +378,65 @@ test("sanitizeGitConfig strips GPG settings from non-gpg sections when host keys
     "  editor = vim",
     "[safe]",
     "\tdirectory = /workspace",
-    "\tdirectory = /repo"
+    "\tdirectory = /repo",
+    ...managedGitHubConfig
   ]);
+});
+
+test("sanitizeGitConfig installs one canonical GitHub credential and URL rewrite block", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const gitconfig = [
+    "[credential]",
+    "  helper = cache",
+    "  helper = !/opt/homebrew/bin/gh auth git-credential",
+    "  helper = !/usr/bin/gh auth git-credential",
+    "  helper = !gh auth git-credential",
+    "  helper = \"!/opt/homebrew/bin/gh auth git-credential\"",
+    "[credential \"https://gitlab.com\"]",
+    "  helper = store",
+    "[url \"https://github.com/\"]",
+    "  insteadOf = git@github.com:",
+    "[url \"https://gitlab.com/\"]",
+    "  insteadOf = git@gitlab.com:",
+    ""
+  ].join("\n");
+
+  const sanitized = sandboxCreate.sanitizeGitConfig(gitconfig, "/Users/demo");
+  const lines = sanitized.split("\n").filter(Boolean);
+
+  assert.deepEqual(lines, [
+    "[credential]",
+    "  helper = cache",
+    "[credential \"https://gitlab.com\"]",
+    "  helper = store",
+    "[url \"https://github.com/\"]",
+    "[url \"https://gitlab.com/\"]",
+    "  insteadOf = git@gitlab.com:",
+    ...managedGitHubConfig
+  ]);
+  assert.equal(lines.filter((line) => line === "\thelper = !gh auth git-credential").length, 2);
+  assert.equal(lines.filter((line) => line === "\tinsteadOf = git@github.com:").length, 1);
+});
+
+test("prepareHostShellConfig leaves the host gitconfig unchanged", async () => {
+  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-host-gitconfig-unchanged-"));
+  const original = "[credential]\n  helper = !/opt/homebrew/bin/gh auth git-credential\n";
+
+  try {
+    fs.writeFileSync(path.join(tmpDir, ".gitconfig"), original, "utf8");
+    sandboxCreate.ensureSandboxAliasesFile(tmpDir);
+    sandboxCreate.prepareHostShellConfig({
+      home: tmpDir,
+      project: "demo",
+      branch: "feature/demo",
+      repoRoot: "/repo"
+    });
+
+    assert.equal(fs.readFileSync(path.join(tmpDir, ".gitconfig"), "utf8"), original);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("writeSanitizedGitconfig rewrites the mounted gitconfig without replacing the inode", async () => {
@@ -399,7 +470,8 @@ test("writeSanitizedGitconfig rewrites the mounted gitconfig without replacing t
       "  name = Updated User",
       "[safe]",
       "\tdirectory = /workspace",
-      "\tdirectory = /repo"
+      "\tdirectory = /repo",
+      ...managedGitHubConfig
     ]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
