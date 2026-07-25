@@ -38,6 +38,11 @@ agent-infra standardizes that shared infrastructure. It gives every supported AI
   <img src="./assets/demo-init.gif" alt="CLI install and initialize demo" width="100%" style="max-width: 720px;">
 </p>
 
+> The demo is stored with Git LFS. Install Git LFS and run `git lfs install`
+> before cloning, or run `git lfs pull` in an existing checkout. If the image
+> is a small text pointer or is missing, verify `git lfs ls-files`, then retry
+> `git lfs pull`.
+
 Once initialized, open the project in your AI TUI and install the latest skills:
 
 ```bash

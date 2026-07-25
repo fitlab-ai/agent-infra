@@ -137,6 +137,17 @@ publish 是独立人工授权点。core 逐 ref 普通 push 并用远端事实�
 - Gemini CLI：`/agent-infra:post-release`
 - Codex CLI：`$post-release`
 
+The canonical demo is tracked by Git LFS. Release environments must install
+Git LFS and fetch LFS objects before running post-release. The workflow records
+the demo only when its explicit canonical inputs change, validates GIF magic
+and the 4 MiB limit, and advances the input digest in the same commit. Diagnose
+missing objects with `git lfs ls-files`, `git lfs pull`, and `git lfs fsck`.
+
+规范演示通过 Git LFS 跟踪。发布环境必须先安装 Git LFS 并拉取 LFS 对象。
+post-release 仅在显式 canonical inputs 变化时重录，并校验 GIF 格式和 4 MiB
+上限；输入摘要与 GIF 在同一提交中推进。对象缺失时使用 `git lfs ls-files`、
+`git lfs pull` 和 `git lfs fsck` 排查。
+
 该技能负责：
 
 - 检测最新已发布标签并解析版本

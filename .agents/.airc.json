@@ -17,6 +17,7 @@
       "claude-code",
       "codex",
       "gemini-cli",
+      "git-lfs",
       "opencode"
     ],
     "dockerfile": null,

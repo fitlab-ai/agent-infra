@@ -11,19 +11,23 @@
 set -e
 
 tape="assets/demo-init.tape"
-local="assets/demo-settings.tape"
 gif="assets/demo-init.gif"
 webm="assets/demo-init.webm"
 target_duration=25  # seconds — fixed across all machines
+max_bytes=4194304
 repo_root=$(pwd)
 local_cli="$repo_root/dist/bin/cli.js"
 
 tmp=$(mktemp).tape
 shim_dir=$(mktemp -d)
-trap 'rm -rf "$tmp" "$webm" /tmp/demo-palette.png "$shim_dir"' EXIT
+palette_base=$(mktemp "${TMPDIR:-/tmp}/demo-palette.XXXXXX")
+palette="${palette_base}.png"
+gif_tmp_base=$(mktemp "assets/demo-init.XXXXXX")
+gif_tmp="${gif_tmp_base}.gif"
+trap 'rm -rf "$tmp" "$webm" "$palette_base" "$palette" "$gif_tmp_base" "$gif_tmp" "$shim_dir"' EXIT
 
 # ── Ensure local build exists and shim `ai` / `agent-infra` to it ──
-# Demo tape types `ai version` / `ai init`; without this shim those resolve
+# Demo tape types `ai init`; without this shim it resolves
 # to whatever global `ai` is on PATH, not the current workspace build.
 if [ ! -f "$local_cli" ]; then
   echo "demo-regen: $local_cli not found. Run 'npm run build' first." >&2
@@ -33,14 +37,6 @@ fi
 for name in ai agent-infra; do
   cat >"$shim_dir/$name" <<SHIM
 #!/bin/sh
-if [ -n "\${DEMO_VERSION:-}" ] && [ "\${1:-}" = "version" ]; then
-  if [ "\${2:-}" = "--raw" ]; then
-    printf '%s\n' "\$DEMO_VERSION"
-  else
-    printf 'agent-infra %s\n' "\$DEMO_VERSION"
-  fi
-  exit 0
-fi
 exec node "$local_cli" "\$@"
 SHIM
   chmod +x "$shim_dir/$name"
@@ -48,24 +44,11 @@ done
 
 export PATH="$shim_dir:$PATH"
 
-# ── Merge local settings + switch output to WebM ──
-{
-  [ -f "$local" ] && cat "$local"
-  sed 's|Output assets/demo-init\.gif|Output assets/demo-init.webm|' "$tape"
-} > "$tmp"
+# ── Use only canonical settings and switch output to WebM ──
+sed 's|Output assets/demo-init\.gif|Output assets/demo-init.webm|' "$tape" > "$tmp"
 
 # ── Record via VHS (lossless WebM) ──
 vhs "$tmp"
-
-# ── Sanity check: local CLI version should match package.json ──
-pkg_version=$(node -p "require('./package.json').version" 2>/dev/null || echo "")
-expected_version="${DEMO_VERSION:-$pkg_version}"
-expected_version="${expected_version#v}"
-shim_version=$("$shim_dir/ai" version --raw 2>/dev/null || echo "")
-shim_version="${shim_version#v}"
-if [ -n "$expected_version" ] && [ -n "$shim_version" ] && [ "$expected_version" != "$shim_version" ]; then
-  echo "demo-regen: WARNING demo version reports $shim_version but expected $expected_version (rebuild before recording)." >&2
-fi
 
 # ── Encode GIF with color-accurate palette ──
 # Pass 1: Generate palette with Catppuccin Mocha key colors injected.
@@ -78,13 +61,13 @@ drawbox=x=20:y=0:w=20:h=20:color=0x94e2d5:t=fill,\
 drawbox=x=40:y=0:w=20:h=20:color=0xf38ba8:t=fill,\
 drawbox=x=60:y=0:w=20:h=20:color=0xf9e2af:t=fill,\
 drawbox=x=80:y=0:w=20:h=20:color=0x89b4fa:t=fill,\
-palettegen=max_colors=256:reserve_transparent=0" \
-  -frames:v 1 /tmp/demo-palette.png 2>/dev/null
+fps=15,scale=1280:-1:flags=lanczos,palettegen=max_colors=128:reserve_transparent=0" \
+  -frames:v 1 "$palette" 2>/dev/null
 
 # Pass 2: Encode GIF from original WebM using the color-accurate palette.
-ffmpeg -y -i "$webm" -i /tmp/demo-palette.png \
-  -lavfi "paletteuse=dither=bayer:bayer_scale=3" \
-  "$gif" 2>/dev/null
+ffmpeg -y -i "$webm" -i "$palette" \
+  -lavfi "fps=15,scale=1280:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3" \
+  "$gif_tmp" 2>/dev/null
 
 # ── Normalize frame delays to fixed target duration ──
 # python3 may be absent or broken; try python3 first, fall back to python — whichever passes --version wins.
@@ -96,4 +79,18 @@ for cmd in python3 python; do
   fi
 done
 : "${python:=python3}"
-"$python" scripts/normalize-gif-duration.py "$gif" "$target_duration"
+"$python" scripts/normalize-gif-duration.py "$gif_tmp" "$target_duration"
+
+header=$(dd if="$gif_tmp" bs=6 count=1 2>/dev/null || true)
+case "$header" in
+  GIF87a|GIF89a) ;;
+  *) echo "demo-regen: generated output is not a GIF." >&2; exit 1 ;;
+esac
+
+size=$(wc -c < "$gif_tmp" | tr -d ' ')
+if [ "$size" -gt "$max_bytes" ]; then
+  echo "demo-regen: generated GIF exceeds 4 MiB ($size bytes)." >&2
+  exit 1
+fi
+
+mv "$gif_tmp" "$gif"

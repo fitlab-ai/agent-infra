@@ -164,7 +164,6 @@ process.stdout.write("9.9.9-test\\n");
 set -e
 cp "$1" "$TEST_CAPTURE_TAPE"
 cp "$TEST_SOURCE_GIF" assets/demo-init.webm
-ai version --raw > "$TEST_CAPTURE_AI_OUT" 2>&1 || true
 `,
     "utf8"
   );
@@ -284,7 +283,7 @@ test("normalize-gif-duration ignores GCE-like bytes inside image data", () => {
   }
 });
 
-test("demo-regen merges local settings before running VHS and normalizes output", () => {
+test("demo-regen ignores local settings and uses canonical recording parameters", () => {
   const fixture = setupDemoRegenFixture({ withLocalSettings: true });
   const {
     repoDir,
@@ -303,7 +302,7 @@ test("demo-regen merges local settings before running VHS and normalizes output"
     assert.equal(result.status, 0, result.stderr);
 
     const mergedTape = fs.readFileSync(capturedTapePath, "utf8");
-    assert.match(mergedTape, /^Set Framerate 19$/m);
+    assert.match(mergedTape, /^Set Framerate 15$/m);
     assert.match(mergedTape, /Output assets\/demo-init\.webm/);
     assert.match(result.stdout, /Normalized: 4 frames, 6250ms, total 25\.0s/);
   } finally {
@@ -329,7 +328,6 @@ test("demo-regen works without a local settings tape", () => {
     assert.equal(result.status, 0, result.stderr);
 
     const mergedTape = fs.readFileSync(capturedTapePath, "utf8");
-    assert.doesNotMatch(mergedTape, /^Set Framerate 19$/m);
     assert.match(mergedTape, /Output assets\/demo-init\.webm/);
     assert.match(result.stdout, /Normalized: 4 frames, 6250ms, total 25\.0s/);
   } finally {
@@ -337,23 +335,12 @@ test("demo-regen works without a local settings tape", () => {
   }
 });
 
-test("demo-regen shims `ai` to the local dist build, not the PATH-installed binary", () => {
+test("demo-regen replaces the destination only after producing a valid GIF", () => {
   const fixture = setupDemoRegenFixture({ withLocalSettings: false });
   const {
     repoDir,
-    binDir,
-    capturedAiOutPath,
     env
   } = fixture;
-
-  fs.writeFileSync(
-    path.join(binDir, "ai"),
-    `#!/bin/sh
-echo "GLOBAL-FAKE"
-`,
-    "utf8"
-  );
-  fs.chmodSync(path.join(binDir, "ai"), 0o755);
 
   try {
     const result = spawnSync("sh", ["scripts/demo-regen.sh"], {
@@ -363,33 +350,7 @@ echo "GLOBAL-FAKE"
     });
 
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(fs.readFileSync(capturedAiOutPath, "utf8").trim(), "9.9.9-test");
-  } finally {
-    fs.rmSync(repoDir, { recursive: true, force: true });
-  }
-});
-
-test("demo-regen can pin the displayed demo version", () => {
-  const fixture = setupDemoRegenFixture({ withLocalSettings: false });
-  const {
-    repoDir,
-    capturedAiOutPath,
-    env
-  } = fixture;
-
-  try {
-    const result = spawnSync("sh", ["scripts/demo-regen.sh"], {
-      cwd: repoDir,
-      encoding: "utf8",
-      env: {
-        ...env,
-        DEMO_VERSION: "v0.8.0"
-      }
-    });
-
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(fs.readFileSync(capturedAiOutPath, "utf8").trim(), "v0.8.0");
-    assert.doesNotMatch(result.stderr, /WARNING/);
+    assert.equal(fs.readFileSync(path.join(repoDir, "assets/demo-init.gif")).subarray(0, 6).toString(), "GIF89a");
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }

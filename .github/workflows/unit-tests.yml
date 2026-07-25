@@ -25,6 +25,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          lfs: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -46,6 +48,18 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Verify canonical demo LFS object
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs ls-files --error-unmatch assets/demo-init.gif
+          git show HEAD:assets/demo-init.gif | grep -q '^version https://git-lfs.github.com/spec/v1$'
+          test "$(head -c 6 assets/demo-init.gif)" = "GIF89a" || test "$(head -c 6 assets/demo-init.gif)" = "GIF87a"
+          test "$(wc -c < assets/demo-init.gif)" -le 4194304
+          grep -q 'assets/demo-init.gif' README.md
+          grep -q 'assets/demo-init.gif' README.zh-CN.md
 
       - name: Coverage report (informational)
         if: matrix.os == 'ubuntu-latest'
@@ -81,6 +95,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          lfs: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v7

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import semver from 'semver';
 
@@ -17,12 +18,101 @@ type CommandResult = ReturnType<typeof command>;
 type CommandRunner = (cwd: string, executable: string, args: string[]) => CommandResult;
 type DemoResult = {
   status: 'recorded' | 'skipped' | 'failed';
-  reasonCode: 'VHS_MISSING' | 'FFMPEG_MISSING' | 'DEMO_COMMAND_FAILED' | 'DEMO_OUTPUT_MISSING' | null;
+  reasonCode: 'DEMO_INPUTS_UNCHANGED' | 'GIT_LFS_MISSING' | 'VHS_MISSING' | 'FFMPEG_MISSING'
+    | 'DEMO_COMMAND_FAILED' | 'DEMO_OUTPUT_MISSING' | 'DEMO_OUTPUT_INVALID'
+    | 'DEMO_OUTPUT_TOO_LARGE' | 'DEMO_DIGEST_FAILED' | null;
   message: string | null;
   outputPath: string | null;
 };
 
+const DEMO_INPUT_PATHS = [
+  'assets/demo-init.tape',
+  'scripts/demo-regen.sh',
+  'scripts/normalize-gif-duration.py',
+  'bin/cli.ts',
+  'lib/init.ts',
+  'lib/log.ts',
+  'lib/prompt.ts',
+  'lib/paths.ts',
+  'lib/render.ts',
+  'lib/builtin-tuis.ts',
+  'lib/sandbox/engines/',
+  'src/sync-templates.js',
+  'templates/'
+] as const;
+const DEMO_DIGEST_PATH = 'assets/demo-init.inputs.sha256';
+const DEMO_OUTPUT_PATH = 'assets/demo-init.gif';
+const DEMO_MAX_BYTES = 4 * 1024 * 1024;
+
+function demoInputFiles(cwd: string): string[] {
+  const files = new Set<string>();
+  for (const input of DEMO_INPUT_PATHS) {
+    if (input.endsWith('/')) {
+      const listed = command(cwd, 'git', ['ls-files', '--', input]);
+      if (listed.status !== 0) throw new Error(String(listed.stderr || `Unable to list ${input}`));
+      const directoryFiles = String(listed.stdout).split('\n').filter(Boolean);
+      if (!directoryFiles.length) throw new Error(`Canonical demo input directory is empty: ${input}`);
+      for (const file of directoryFiles) files.add(file.replaceAll('\\', '/'));
+    } else {
+      files.add(input);
+    }
+  }
+  const sorted = [...files].sort((left, right) => Buffer.from(left).compare(Buffer.from(right)));
+  if (!sorted.length) throw new Error('Canonical demo input set is empty');
+  for (const file of sorted) {
+    const absolute = path.join(cwd, file);
+    if (!fs.statSync(absolute).isFile()) throw new Error(`Canonical demo input is not a file: ${file}`);
+  }
+  return sorted;
+}
+
+function computeDemoInputDigest(cwd: string): string {
+  const hash = crypto.createHash('sha256');
+  for (const file of demoInputFiles(cwd)) {
+    const bytes = fs.readFileSync(path.join(cwd, file));
+    hash.update(file);
+    hash.update('\0');
+    hash.update(String(bytes.byteLength));
+    hash.update('\0');
+    hash.update(bytes);
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
+function validGif(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  const header = fs.readFileSync(filePath).subarray(0, 6).toString('ascii');
+  return header === 'GIF87a' || header === 'GIF89a';
+}
+
+function writeDigestAtomically(cwd: string, digest: string): void {
+  const target = path.join(cwd, DEMO_DIGEST_PATH);
+  const temporary = `${target}.tmp-${process.pid}`;
+  fs.writeFileSync(temporary, `${digest}\n`);
+  fs.renameSync(temporary, target);
+}
+
 function runOptionalDemo(cwd: string, run: CommandRunner = command): DemoResult {
+  let digest: string;
+  try {
+    digest = computeDemoInputDigest(cwd);
+  } catch (error) {
+    return { status: 'failed', reasonCode: 'DEMO_DIGEST_FAILED', message: String(error), outputPath: null };
+  }
+  const digestPath = path.join(cwd, DEMO_DIGEST_PATH);
+  const priorDigest = fs.existsSync(digestPath) ? fs.readFileSync(digestPath, 'utf8').trim() : '';
+  if (/^[0-9a-f]{64}$/.test(priorDigest) && priorDigest === digest) {
+    return { status: 'skipped', reasonCode: 'DEMO_INPUTS_UNCHANGED', message: null, outputPath: null };
+  }
+  const lfs = run(cwd, 'git', ['lfs', 'version']);
+  if (lfs.status !== 0) {
+    return { status: 'failed', reasonCode: 'GIT_LFS_MISSING', message: String(lfs.stderr || lfs.stdout), outputPath: null };
+  }
+  const lfsAttribute = run(cwd, 'git', ['check-attr', 'filter', '--', DEMO_OUTPUT_PATH]);
+  if (lfsAttribute.status !== 0 || !String(lfsAttribute.stdout).trim().endsWith(': lfs')) {
+    return { status: 'failed', reasonCode: 'GIT_LFS_MISSING', message: `${DEMO_OUTPUT_PATH} is not tracked by Git LFS`, outputPath: null };
+  }
   const vhs = run(cwd, 'vhs', ['--version']);
   if (vhs.status !== 0) return { status: 'skipped', reasonCode: 'VHS_MISSING', message: null, outputPath: null };
   const ffmpeg = run(cwd, 'ffmpeg', ['-version']);
@@ -36,7 +126,7 @@ function runOptionalDemo(cwd: string, run: CommandRunner = command): DemoResult 
       outputPath: null
     };
   }
-  const outputPath = 'assets/demo-init.gif';
+  const outputPath = DEMO_OUTPUT_PATH;
   if (!fs.existsSync(path.join(cwd, outputPath))) {
     return {
       status: 'failed',
@@ -45,6 +135,18 @@ function runOptionalDemo(cwd: string, run: CommandRunner = command): DemoResult 
       outputPath: null
     };
   }
+  const absoluteOutput = path.join(cwd, outputPath);
+  if (!validGif(absoluteOutput)) {
+    return { status: 'failed', reasonCode: 'DEMO_OUTPUT_INVALID', message: `${outputPath} is not a GIF`, outputPath: null };
+  }
+  if (fs.statSync(absoluteOutput).size > DEMO_MAX_BYTES) {
+    return { status: 'failed', reasonCode: 'DEMO_OUTPUT_TOO_LARGE', message: `${outputPath} exceeds 4 MiB`, outputPath: null };
+  }
+  const pointer = run(cwd, 'git', ['lfs', 'pointer', `--file=${outputPath}`]);
+  if (pointer.status !== 0 || !String(pointer.stdout).includes(`size ${fs.statSync(absoluteOutput).size}`)) {
+    return { status: 'failed', reasonCode: 'DEMO_OUTPUT_INVALID', message: 'Git LFS could not produce a matching pointer', outputPath: null };
+  }
+  writeDigestAtomically(cwd, digest);
   return { status: 'recorded', reasonCode: null, message: null, outputPath };
 }
 
@@ -182,5 +284,5 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
   process.stdout.write(`${JSON.stringify({ ...pushed, demo, snapshot: releaseSnapshot(version, await inspectFacts(cwd, version)) })}\n`); process.exitCode = pushed.status === 'failed' ? 1 : pushed.status === 'degraded' ? 2 : 0;
 }
 
-export { inspectFacts, releaseWorkflow, runOptionalDemo };
+export { computeDemoInputDigest, inspectFacts, releaseWorkflow, runOptionalDemo };
 export type { CommandRunner, DemoResult };

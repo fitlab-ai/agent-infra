@@ -38,6 +38,10 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
   <img src="./assets/demo-init.gif" alt="CLI 安装初始化演示" width="100%" style="max-width: 720px;">
 </p>
 
+> 演示动画通过 Git LFS 存储。克隆前请安装 Git LFS 并运行 `git lfs install`；
+> 已有检出可运行 `git lfs pull`。如果图片变成很小的文本指针或缺失，请先用
+> `git lfs ls-files` 核对跟踪状态，再重试 `git lfs pull`。
+
 完成初始化后，在你的 AI TUI 中打开项目并安装最新 skills：
 
 ```bash

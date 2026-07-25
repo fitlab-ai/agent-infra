@@ -5,9 +5,6 @@
 #   - agent-infra already installed (npm install -g @fitlab-ai/agent-infra)
 #   - tree installed (brew install tree)
 #
-# Machine-specific settings (e.g. Set Framerate) can be placed in
-# assets/demo-settings.tape (gitignored). See demo-settings.tape.example.
-
 Output assets/demo-init.gif
 
 Require node
@@ -20,6 +17,7 @@ Set Height 1600
 Set Padding 40
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 50ms
+Set Framerate 15
 Set WindowBar Colorful
 Set WindowBarSize 40
 
@@ -33,12 +31,6 @@ Type "autoload -Uz add-zsh-hook 2>/dev/null; add-zsh-hook -d precmd omz_termsupp
 Enter
 Sleep 200ms
 Show
-
-# ── Show version ──
-Type "ai version"
-Enter
-Wait+Screen /agent-infra/
-Sleep 1.5s
 
 # ── Prepare a demo project directory ──
 Type "rm -rf /tmp/my-awesome-project && mkdir -p /tmp/my-awesome-project && cd /tmp/my-awesome-project"
