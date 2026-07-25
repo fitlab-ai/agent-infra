@@ -1,5 +1,5 @@
 # Release 命令
 
-当前代码平台未内置发布命令支持。
+当前代码平台未提供发布说明 adapter。
 
-自定义平台会跳过远端发布自动化，除非你提供匹配的 `.{platform}.zh-CN.md` 规则模板和脚本。请继续使用本地发布产物或你的平台专属发布流程。
+调用 `agent-infra-internal platform-release-notes context` 会返回结构化的 `PLATFORM_RELEASE_NOTES_UNSUPPORTED` no-op，不得探测其他平台 client。在提供 adapter 前，发布操作同样保持 no-op。

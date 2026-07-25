@@ -21,6 +21,11 @@ switch (command) {
     await releaseWorkflow(process.argv.slice(3));
     break;
   }
+  case 'platform-release-notes': {
+    const { platformReleaseNotes } = await import('../lib/internal/platform-release-notes.ts');
+    platformReleaseNotes(process.argv.slice(3));
+    break;
+  }
   case 'platform-context': {
     const { platformContext } = await import('../lib/internal/platform-context.ts');
     platformContext(process.argv.slice(3));

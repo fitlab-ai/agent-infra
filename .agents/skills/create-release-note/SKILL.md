@@ -35,12 +35,14 @@ git rev-parse v<prev-version>
 
 ### 3. 参考历史发布说明格式与分类
 
-获取最近多条已发布的 Release Note 作为格式参考，并参考预定义的完整分类清单：
+读取一次 typed 发布说明上下文，并参考预定义的完整分类清单：
 
 执行前先读取 `.agents/rules/release-commands.md`。
 
 ```bash
-# Part A：按 `.agents/rules/release-commands.md` 的 release 查询命令逐条获取最近 3 条 Release 的 body
+agent-infra-internal platform-release-notes context \
+  --from-tag "v<prev-version>" --to-tag "v<version>" \
+  --branch "<base-branch>" --history-limit 3
 ```
 
 **Part B：完整分类清单**
@@ -58,38 +60,11 @@ git rev-parse v<prev-version>
 
 ### 4. 收集已合并的 PR 与贡献者
 
-获取标签之间的日期范围，然后查询已合并的 PR：
-
-```bash
-# 获取标签日期
-git log v<prev-version> --format=%aI -1
-git log v<version> --format=%aI -1
-
-# 获取范围内已合并的 PR（按 `.agents/rules/release-commands.md` 的 merged PR 查询命令执行）
-```
-
-同时收集没有 PR 的直接提交：
-```bash
-git log v<prev-version>..v<version> --format="%H %s" --no-merges
-```
-
-从 commit `Co-authored-by` trailer 中收集协作贡献者：
-
-```bash
-git log v<prev-version>..v<version> \
-  --no-merges \
-  --format='%(trailers:key=Co-authored-by,valueonly,unfold)' \
-  | grep -v '^$' | sort | uniq -c | sort -rn
-```
-
-输出每行一个 `Name <email>`（`uniq -c` 给出该身份在范围内作为 co-author 的 commit 数）。
+使用步骤 3 返回的 `pullRequests` 与 `commits`。每个 commit 的 `authors` 已按平台事实规范化并包含 git author 与 co-author；技能不读取平台原始字段或邮箱规则。
 
 ### 5. 收集关联 Issue
 
-从每个 PR body 中提取关联的 Issue：
-- 匹配模式：`Closes #N`、`Fixes #N`、`Resolves #N`（不区分大小写）
-
-按 `.agents/rules/release-commands.md` 的关联 Issue 查询命令读取。
+使用步骤 3 中每个 PR 的 `closingIssues`，不在通用技能中解析平台专有引用语法。
 
 ### 6. 分类变更
 
@@ -131,13 +106,12 @@ git log v<prev-version>..v<version> \
 4. **贡献者搜集**：
    - **数据源**：
      - PR author：来自 `.agents/rules/release-commands.md` 中已合并 PR 查询规则
-     - Commit co-authors：来自步骤 4 的 `git log ... --format='%(trailers:key=Co-authored-by,valueonly,unfold)'`
-     - Issue reporters：来自步骤 5 收集的关联 Issue author（由 `.agents/rules/release-commands.md` 返回）
+     - Commit co-authors：来自步骤 3 typed context 的 commit `authors`
+     - Issue reporters：来自步骤 3 typed context 的 `closingIssues[].author`
    - **贡献数定义**：`该人的 PR 数 + 该人作为 co-author 的 commit 数`（同一身份跨来源合并计数）
    - **Name → `@login` 映射**：
-     - `Co-authored-by` 原始格式为 `Name <email>`，需要推断对应的 platform `@login`
-     - 优先从 email 提取：匹配 `.agents/rules/release-commands.md` 中的平台 no-reply 邮箱规则时，按该规则推导小写 login
-     - 否则按 Name 启发式：取首个空格前的 token 并转为小写（例如 `Claude Opus 4.6 (1M context)` → `@claude`、`Codex` → `@codex`、`Gemini` → `@gemini`）
+     - `resolution` 为 `platform-user` 或 `platform-noreply` 时直接采用小写 `login`
+     - 仅当 `resolution` 为 `unresolved` 时按 Name 启发式：取首个空格前的 token 并转为小写
      - 已出现在 PR author 列表中的 login，必须按该 login 合并计数，避免把 `Claude` 和 `@claude` 拆成两个条目
      - 同一 login 的所有 Name 变体都必须归并后再计数与排序；例如 `Claude` 与 `Claude Opus 4.6 (1M context)` 都映射到 `@claude` 时，应先合并为同一个贡献者
      - Bot 身份保留原样（如 `dependabot[bot]`）
@@ -170,7 +144,12 @@ NOTES_FILE="$(mktemp "${TMPDIR:-/tmp}/agent-infra-release-notes.XXXXXX")"
 
 把 notes 内容写入 `$NOTES_FILE`。
 
-9.2 按 `.agents/rules/release-commands.md` 的「发布 Release notes」命令执行（命令中的 `{notes-file}` 用 `$NOTES_FILE`；写入已由 release 工作流自动创建/发布的 Release，不存在时兜底创建）。
+9.2 调用 typed publish intent（命令中的 `{notes-file}` 用 `$NOTES_FILE`）；它会更新已存在的 Release，不存在时创建：
+
+```bash
+agent-infra-internal platform-release-notes publish \
+  --tag "v<version>" --title "v<version>" --notes-file "$NOTES_FILE"
+```
 
 9.3 无论发布成功或失败，都删除临时文件：
 

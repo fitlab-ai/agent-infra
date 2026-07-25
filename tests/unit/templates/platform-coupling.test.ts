@@ -114,3 +114,17 @@ test("PR workflow documents reference typed PR and required-check intents", () =
     assert.match(read(relativePath), /agent-infra-internal platform-checks watch/, relativePath);
   });
 });
+
+test("release-note workflow documents reference the typed release-note intent", () => {
+  [
+    ".agents/skills/create-release-note/SKILL.md",
+    "templates/.agents/skills/create-release-note/SKILL.en.md",
+    "templates/.agents/skills/create-release-note/SKILL.zh-CN.md",
+    ".agents/rules/release-commands.md",
+    "templates/.agents/rules/release-commands.github.en.md",
+    "templates/.agents/rules/release-commands.github.zh-CN.md"
+  ].forEach((relativePath) => {
+    assert.match(read(relativePath), /agent-infra-internal platform-release-notes context/, relativePath);
+    assert.match(read(relativePath), /agent-infra-internal platform-release-notes publish/, relativePath);
+  });
+});

@@ -83,6 +83,11 @@ test("custom platforms fall back to generic platform templates", async () => {
       );
     });
 
+    assert.match(
+      fs.readFileSync(path.join(projectRoot, ".agents", "rules", "release-commands.md"), "utf8"),
+      /PLATFORM_RELEASE_NOTES_UNSUPPORTED/
+    );
+
     [
       ".agents/skills/init-labels/scripts/init-labels.sh",
       ".agents/skills/init-milestones/scripts/init-milestones.sh",

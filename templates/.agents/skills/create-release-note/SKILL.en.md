@@ -35,12 +35,14 @@ git rev-parse v<prev-version>
 
 ### 3. Reference Historical Release Notes Format and Categories
 
-Fetch multiple published release notes as format references, then use a predefined complete category list:
+Load one typed release-note context, then use a predefined complete category list:
 
 Read `.agents/rules/release-commands.md` before this step.
 
 ```bash
-# Part A: fetch the latest 3 published release bodies by following the release query commands in `.agents/rules/release-commands.md`
+agent-infra-internal platform-release-notes context \
+  --from-tag "v<prev-version>" --to-tag "v<version>" \
+  --branch "<base-branch>" --history-limit 3
 ```
 
 **Part B: Complete Category List**
@@ -58,38 +60,11 @@ Read `.agents/rules/release-commands.md` before this step.
 
 ### 4. Collect Merged PRs and Contributors
 
-Get the date range between tags, then query merged PRs:
-
-```bash
-# Get tag dates
-git log v<prev-version> --format=%aI -1
-git log v<version> --format=%aI -1
-
-# Get merged PRs in range by following the merged-PR query command in `.agents/rules/release-commands.md`
-```
-
-Also collect direct commits without PRs:
-```bash
-git log v<prev-version>..v<version> --format="%H %s" --no-merges
-```
-
-Collect collaborative contributors from commit `Co-authored-by` trailers:
-
-```bash
-git log v<prev-version>..v<version> \
-  --no-merges \
-  --format='%(trailers:key=Co-authored-by,valueonly,unfold)' \
-  | grep -v '^$' | sort | uniq -c | sort -rn
-```
-
-Each output line is `Name <email>` and `uniq -c` provides the number of commits where that identity appeared as a co-author within the range.
+Use `pullRequests` and `commits` from Step 3. Each commit's `authors` are normalized platform facts containing the git author and co-authors; the skill does not interpret raw platform fields or email rules.
 
 ### 5. Collect Related Issues
 
-From each PR body, extract linked Issues:
-- Match patterns: `Closes #N`, `Fixes #N`, `Resolves #N` (case-insensitive)
-
-Read linked Issues by following `.agents/rules/release-commands.md`.
+Use each PR's `closingIssues` from Step 3. Do not parse platform-specific reference syntax in this generic skill.
 
 ### 6. Classify Changes
 
@@ -130,14 +105,13 @@ If no historical release notes exist, use the following default Markdown format:
 3. Description: Use PR title, remove `type(scope):` prefix, capitalize first letter
 4. **Contributor collection**:
    - **Data sources**:
-     - PR authors returned by the merged-PR query rule in `.agents/rules/release-commands.md`
-     - Commit co-authors from Step 4 `git log ... --format='%(trailers:key=Co-authored-by,valueonly,unfold)'`
-     - Issue reporters from linked Issues collected in Step 5 (author login returned by `.agents/rules/release-commands.md`)
+     - PR authors from the typed context
+     - Commit co-authors from the typed context's commit `authors`
+     - Issue reporters from typed `closingIssues[].author`
    - **Contribution count**: `PR count + co-authored commit count` for the same identity, merged across both sources
    - **Name -> `@login` mapping**:
-     - Raw `Co-authored-by` values are `Name <email>` and must be mapped to a platform `@login`
-     - Prefer email extraction: if it matches the platform no-reply email rule in `.agents/rules/release-commands.md`, use that rule to derive the lowercased login
-     - Otherwise use a Name heuristic: take the first token before a space and lowercase it, for example `Claude Opus 4.6 (1M context)` -> `@claude`, `Codex` -> `@codex`, `Gemini` -> `@gemini`
+     - For `platform-user` or `platform-noreply`, use the lowercased `login`
+     - Only for `unresolved`, use the Name heuristic: take the first token before a space and lowercase it
      - If the login already appears in the PR author list, merge counts into that login so `Claude` and `@claude` do not become separate entries
      - Merge all Name variants that map to the same login before counting and sorting; for example, `Claude` and `Claude Opus 4.6 (1M context)` should both collapse into `@claude`
      - Preserve bot identities as-is, for example `dependabot[bot]`
@@ -170,7 +144,12 @@ NOTES_FILE="$(mktemp "${TMPDIR:-/tmp}/agent-infra-release-notes.XXXXXX")"
 
 Write the notes content to `$NOTES_FILE`.
 
-9.2 Publish by following the "Publish the Release Notes" command in `.agents/rules/release-commands.md` (use `$NOTES_FILE` for `{notes-file}`; it updates the Release already created and published by the release workflow, falling back to creating it if missing).
+9.2 Call the typed publish intent (use `$NOTES_FILE` for `{notes-file}`); it updates an existing Release or creates a missing one:
+
+```bash
+agent-infra-internal platform-release-notes publish \
+  --tag "v<version>" --title "v<version>" --notes-file "$NOTES_FILE"
+```
 
 9.3 Remove the temp file whether publishing succeeds or fails:
 

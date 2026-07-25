@@ -1,52 +1,22 @@
 # Release Platform Commands
 
-Read this file before loading release history, querying merged PRs, or publishing the Release notes.
+Release-note platform operations use a typed internal intent. Callers consume structured JSON and do not interpret platform commands, raw fields, identity email rules, or authentication errors.
 
-## Query Releases
-
-```bash
-gh release list --limit {limit} --json tagName,isDraft,isPrerelease
-gh release view "{tag}" --json body,url
-```
-
-## Query Merged PRs
+## Collect Release-note Context
 
 ```bash
-gh pr list --state merged --base "{branch}" --json number,title,mergedAt,labels
+agent-infra-internal platform-release-notes context \
+  --from-tag "v{prev-version}" --to-tag "v{version}" \
+  --branch "{branch}" --history-limit 3
 ```
 
-When needed, read the linked Issue:
+The result contains release history, pull requests, closing Issues, and normalized contributor identities. Unsupported platforms return a stable `PLATFORM_RELEASE_NOTES_UNSUPPORTED` no-op.
+
+## Publish Release Notes
 
 ```bash
-gh issue view {issue-number} --json number,title,labels,url
+agent-infra-internal platform-release-notes publish \
+  --tag "v{version}" --title "v{version}" --notes-file "{notes-file}"
 ```
 
-## Contributor Mapping Helpers
-
-Merged PR queries used for release notes should include authors when contributors are needed:
-
-```bash
-gh pr list --state merged --base "{branch}" --json number,title,mergedAt,labels,author
-```
-
-Linked Issue queries used for reporter attribution should include the author:
-
-```bash
-gh issue view {issue-number} --json number,title,labels,url,author
-```
-
-Map GitHub no-reply emails with this rule: if `Name <email>` contains an email matching `(\d+\+)?(\S+?)@users\.noreply\.github\.com`, use the second capture group lowercased as the login. This covers both `{id}+{login}@users.noreply.github.com` and `{login}@users.noreply.github.com`.
-
-## Publish the Release Notes
-
-The GitHub Release for `v{version}` is created and published automatically by the release workflow so Homebrew bottles have a stable upload target. This command writes the curated notes onto that existing Release, falling back to creating it if it does not exist yet.
-
-```bash
-if gh release view "v{version}" >/dev/null 2>&1; then
-  gh release edit "v{version}" --notes-file "{notes-file}"
-else
-  gh release create "v{version}" --title "v{version}" --notes-file "{notes-file}"
-fi
-```
-
-If commands fail, stop or escalate according to the calling skill.
+The command updates an existing Release or creates a missing one. `--dry-run` only plans the operation. Exit codes `0/1/2` mean success, failure, and blocked.

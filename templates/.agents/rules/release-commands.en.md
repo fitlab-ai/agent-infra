@@ -1,5 +1,5 @@
 # Release Commands
 
-This code platform does not provide built-in release commands.
+This code platform does not provide a release-note adapter.
 
-Remote release automation is skipped for custom platforms unless you provide matching `.{platform}.en.md` rule templates and scripts. Continue using local release artifacts or your platform-specific release process.
+Use `agent-infra-internal platform-release-notes context` to receive a structured `PLATFORM_RELEASE_NOTES_UNSUPPORTED` no-op. Do not probe another platform client. Publishing remains a no-op until an adapter is provided.
