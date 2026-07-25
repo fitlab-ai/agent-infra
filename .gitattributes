@@ -31,7 +31,6 @@
 *.jpg binary
 *.jpeg binary
 *.gif binary
-assets/demo-init.gif filter=lfs diff=lfs merge=lfs -text
 *.ico binary
 *.svg binary
 *.webp binary
@@ -46,3 +45,6 @@ assets/demo-init.gif filter=lfs diff=lfs merge=lfs -text
 *.tar.gz binary
 *.tgz binary
 *.gz binary
+
+# Specific file overrides (after generic rules to take precedence)
+assets/demo-init.gif filter=lfs diff=lfs merge=lfs -text
