@@ -8,8 +8,30 @@ test('npm inspector distinguishes published, missing, and blocked', async () => 
   assert.equal((await inspectNpmChannel('pkg', '1.0.0', async () => { throw new Error('offline'); })).status, 'blocked');
 });
 
-test('Homebrew inspector matches version facts and blocks unknown network state', async () => {
-  const present = await inspectHomebrewChannel('https://example/formula.rb', '1.2.3', async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => 'version "1.2.3"' }));
-  assert.equal(present.published, true);
+test('Homebrew inspector requires the target npm tarball and a bottle block', async () => {
+  const inspect = (formula: string) => inspectHomebrewChannel(
+    'https://example/formula.rb',
+    '1.2.3',
+    async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => formula })
+  );
+  assert.equal((await inspect(`
+    url "https://registry.npmjs.org/@acme/widgets/-/widgets-1.2.3.tgz"
+    bottle do
+    end
+  `)).published, true);
+  assert.equal((await inspect('version "1.2.3"')).published, false);
+  assert.equal((await inspect(`
+    url "https://registry.npmjs.org/@acme/widgets/-/widgets-1.2.2.tgz"
+    bottle do
+    end
+  `)).published, false);
+  assert.equal((await inspect(`
+    url "https://registry.npmjs.org/@acme/widgets/-/widgets-1.2.3.tgz"
+    # bottle do
+  `)).published, false);
+});
+
+test('Homebrew inspector preserves missing and blocked channel states', async () => {
+  assert.equal((await inspectHomebrewChannel('x', '1.2.3', async () => ({ ok: false, status: 404, json: async () => ({}), text: async () => '' }))).published, false);
   assert.equal((await inspectHomebrewChannel('x', '1.2.3', async () => { throw new Error('offline'); })).published, null);
 });

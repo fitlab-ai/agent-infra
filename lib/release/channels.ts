@@ -20,7 +20,10 @@ async function inspectHomebrewChannel(url: string, version: string, fetcher: Fet
     if (!response.ok) return { status: 'blocked' as const, published: null, version, error: { code: 'HOMEBREW_UNAVAILABLE', message: `formula endpoint returned ${response.status}` } };
     const formula = await response.text();
     const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return { status: 'no-op' as const, published: new RegExp(`(?:version\\s+["']${escaped}["']|/v?${escaped}\\.)`).test(formula), version, error: null };
+    const formulaUrl = /^\s*url\s+["']([^"']+)["']\s*$/m.exec(formula)?.[1] ?? '';
+    const npmTarball = new RegExp(`^https://registry\\.npmjs\\.org/.+/-/[^/]+-${escaped}\\.tgz$`).test(formulaUrl);
+    const bottle = /^\s*bottle do\s*$/m.test(formula);
+    return { status: 'no-op' as const, published: npmTarball && bottle, version, error: null };
   } catch (error) {
     return { status: 'blocked' as const, published: null, version, error: { code: 'HOMEBREW_UNAVAILABLE', message: error instanceof Error ? error.message : String(error) } };
   }

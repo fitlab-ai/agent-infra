@@ -12,6 +12,8 @@ type WorkflowStep = {
 };
 
 type ReleaseWorkflow = {
+  "run-name"?: string;
+  on?: Record<string, unknown>;
   jobs?: Record<string, { steps?: WorkflowStep[] }>;
 };
 
@@ -256,44 +258,64 @@ test("project release skill runs local entropy-check without distributing it", (
 });
 
 test("post-release-smoke workflow verifies npm and brew install channels", () => {
-  const workflow = read(".github/workflows/post-release-smoke.yml");
+  const workflow = parse(read(".github/workflows/post-release-smoke.yml")) as ReleaseWorkflow & {
+    name?: string;
+    permissions?: Record<string, unknown>;
+    concurrency?: { group?: string; "cancel-in-progress"?: boolean };
+  };
 
-  assert.match(workflow, /name: Post-Release Smoke/);
-  assert.match(workflow, /workflow_run:[\s\S]*workflows: \["Update Homebrew Formula"\]/);
-  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /inputs:[\s\S]*version:/);
-  assert.match(workflow, /permissions: \{\}/);
-  assert.match(workflow, /concurrency:/);
-  assert.match(workflow, /cancel-in-progress: true/);
-  assert.match(workflow, /post-release-smoke-\$\{\{ github\.event\.workflow_run\.id \|\| inputs\.version \}\}/);
+  assert.equal(workflow.name, "Post-Release Smoke");
+  assert.equal(
+    workflow["run-name"],
+    "${{ github.event_name == 'workflow_dispatch' && format('Post-Release Smoke v{0}', inputs.version) || 'Post-Release Smoke (automatic)' }}"
+  );
+  assert.deepEqual(workflow.on?.workflow_run, {
+    workflows: ["Update Homebrew Formula"],
+    types: ["completed"]
+  });
+  assert.deepEqual(workflow.on?.workflow_dispatch, {
+    inputs: {
+      version: {
+        description: "Version to smoke-test (without leading v), e.g. 0.5.10",
+        required: true,
+        type: "string"
+      }
+    }
+  });
+  assert.deepEqual(workflow.permissions, {});
+  assert.deepEqual(workflow.concurrency, {
+    group: "post-release-smoke-${{ github.event.workflow_run.id || inputs.version }}",
+    "cancel-in-progress": true
+  });
 
-  assert.match(workflow, /resolve-version:/);
-  assert.match(workflow, /timeout-minutes: 5/);
-  assert.match(workflow, /actions: read/);
-  assert.match(workflow, /name: release-version/);
-  assert.match(workflow, /run-id: \$\{\{ github\.event\.workflow_run\.id \}\}/);
-  assert.match(workflow, /EVENT_NAME: \$\{\{ github\.event_name \}\}/);
-  assert.match(workflow, /DISPATCH_VERSION: \$\{\{ inputs\.version \}\}/);
-  assert.match(workflow, /VERSION=\$\(cat release-version\.txt\)/);
-  assert.match(workflow, /outputs:[\s\S]*version:/);
+  const workflowText = read(".github/workflows/post-release-smoke.yml");
 
-  assert.match(workflow, /npm-smoke:/);
-  assert.match(workflow, /needs: resolve-version/);
-  assert.match(workflow, /timeout-minutes: 15/);
-  assert.match(workflow, /matrix:[\s\S]*os: \[ubuntu-latest, macos-latest, windows-latest\]/);
-  assert.match(workflow, /fail-fast: false/);
-  assert.match(workflow, /npm view "@fitlab-ai\/agent-infra@\$\{VERSION\}" version/);
-  assert.match(workflow, /npx -y "@fitlab-ai\/agent-infra@\$\{VERSION\}" version/);
-  assert.match(workflow, /npx -y "@fitlab-ai\/agent-infra@\$\{VERSION\}" sandbox --help/);
+  assert.match(workflowText, /resolve-version:/);
+  assert.match(workflowText, /timeout-minutes: 5/);
+  assert.match(workflowText, /actions: read/);
+  assert.match(workflowText, /name: release-version/);
+  assert.match(workflowText, /run-id: \$\{\{ github\.event\.workflow_run\.id \}\}/);
+  assert.match(workflowText, /EVENT_NAME: \$\{\{ github\.event_name \}\}/);
+  assert.match(workflowText, /DISPATCH_VERSION: \$\{\{ inputs\.version \}\}/);
+  assert.match(workflowText, /VERSION=\$\(cat release-version\.txt\)/);
+  assert.match(workflowText, /outputs:[\s\S]*version:/);
 
-  assert.match(workflow, /brew-smoke:/);
-  assert.match(workflow, /runs-on: macos-latest/);
-  assert.match(workflow, /timeout-minutes: 20/);
-  assert.match(workflow, /raw\.githubusercontent\.com\/fitlab-ai\/homebrew-tap\/main\/Formula\/agent-infra\.rb/);
-  assert.match(workflow, /grep -q "bottle do"/);
-  assert.match(workflow, /name: brew install \(must pour from bottle\)/);
-  assert.match(workflow, /brew install --verbose fitlab-ai\/tap\/agent-infra/);
-  assert.match(workflow, /grep -q "Pouring agent-infra-"/);
-  assert.match(workflow, /agent-infra version/);
+  assert.match(workflowText, /npm-smoke:/);
+  assert.match(workflowText, /needs: resolve-version/);
+  assert.match(workflowText, /timeout-minutes: 15/);
+  assert.match(workflowText, /matrix:[\s\S]*os: \[ubuntu-latest, macos-latest, windows-latest\]/);
+  assert.match(workflowText, /fail-fast: false/);
+  assert.match(workflowText, /npm view "@fitlab-ai\/agent-infra@\$\{VERSION\}" version/);
+  assert.match(workflowText, /npx -y "@fitlab-ai\/agent-infra@\$\{VERSION\}" version/);
+  assert.match(workflowText, /npx -y "@fitlab-ai\/agent-infra@\$\{VERSION\}" sandbox --help/);
+
+  assert.match(workflowText, /brew-smoke:/);
+  assert.match(workflowText, /runs-on: macos-latest/);
+  assert.match(workflowText, /timeout-minutes: 20/);
+  assert.match(workflowText, /raw\.githubusercontent\.com\/fitlab-ai\/homebrew-tap\/main\/Formula\/agent-infra\.rb/);
+  assert.match(workflowText, /grep -q "bottle do"/);
+  assert.match(workflowText, /name: brew install \(must pour from bottle\)/);
+  assert.match(workflowText, /brew install --verbose fitlab-ai\/tap\/agent-infra/);
+  assert.match(workflowText, /grep -q "Pouring agent-infra-"/);
+  assert.match(workflowText, /agent-infra version/);
 });

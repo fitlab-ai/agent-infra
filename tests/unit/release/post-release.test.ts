@@ -5,7 +5,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { computeDemoInputDigest, runOptionalDemo } from '../../../lib/internal/release-workflow.ts';
+import {
+  computeDemoInputDigest,
+  inspectLocalReleaseFacts,
+  inspectPostWorktree,
+  releaseSmokeStatus,
+  runOptionalDemo
+} from '../../../lib/internal/release-workflow.ts';
 import type { CommandRunner } from '../../../lib/internal/release-workflow.ts';
 
 function result(status: number, stdout = '', stderr = '') {
@@ -41,6 +47,100 @@ function recorder(calls: string[]): CommandRunner {
     return result(0);
   };
 }
+
+function commit(root: string, message: string) {
+  spawnSync('git', ['add', '.'], { cwd: root });
+  const committed = spawnSync('git', ['commit', '-qm', message], { cwd: root });
+  assert.equal(committed.status, 0, String(committed.stderr));
+}
+
+function releaseFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-release-'));
+  spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+  spawnSync('git', ['config', 'user.name', 'Codex'], { cwd: root });
+  spawnSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: root });
+  spawnSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: root });
+  spawnSync('git', ['config', 'tag.gpgsign', 'false'], { cwd: root });
+  fs.writeFileSync(path.join(root, 'tracked.txt'), 'initial\n');
+  commit(root, 'initial');
+  fs.appendFileSync(path.join(root, 'tracked.txt'), 'release\n');
+  commit(root, 'release');
+  spawnSync('git', ['tag', 'v1.2.3'], { cwd: root });
+  return root;
+}
+
+test('local release facts distinguish exact, ancestor, and divergent tags with bounded post history', () => {
+  const root = releaseFixture();
+  try {
+    assert.deepEqual(inspectLocalReleaseFacts(root, '1.2.3'), {
+      localTag: true, localTagAncestor: false, localTagConflict: false, postCommit: false
+    });
+    fs.appendFileSync(path.join(root, 'tracked.txt'), 'post\n');
+    commit(root, 'chore: prepare next dev iteration after v1.2.3');
+    fs.appendFileSync(path.join(root, 'tracked.txt'), 'ordinary\n');
+    commit(root, 'fix: ordinary follow-up');
+    assert.deepEqual(inspectLocalReleaseFacts(root, '1.2.3'), {
+      localTag: false, localTagAncestor: true, localTagConflict: false, postCommit: true
+    });
+
+    spawnSync('git', ['switch', '-q', '--orphan', 'divergent'], { cwd: root });
+    spawnSync('git', ['rm', '-q', '-rf', '.'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'other.txt'), 'other\n');
+    commit(root, 'divergent');
+    assert.deepEqual(inspectLocalReleaseFacts(root, '1.2.3'), {
+      localTag: false, localTagAncestor: false, localTagConflict: true, postCommit: false
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('smoke status binds automatic runs by tag commit and manual runs by exact version title', () => {
+  const runs = [
+    {
+      workflowName: 'Post-Release Smoke', displayTitle: 'Post-Release Smoke v1.2.3',
+      event: 'workflow_dispatch', headSha: 'main', status: 'completed', conclusion: 'success',
+      createdAt: '2026-07-26T10:00:00Z', databaseId: 20, attempt: 1
+    },
+    {
+      workflowName: 'Post-Release Smoke', displayTitle: 'Post-Release Smoke v1.2.3',
+      event: 'workflow_dispatch', headSha: 'main', status: 'in_progress', conclusion: '',
+      createdAt: '2026-07-26T11:00:00Z', databaseId: 21, attempt: 1
+    },
+    {
+      workflowName: 'Post-Release Smoke', displayTitle: 'Post-Release Smoke v9.9.9',
+      event: 'workflow_dispatch', headSha: 'main', status: 'completed', conclusion: 'success',
+      createdAt: '2026-07-26T12:00:00Z', databaseId: 22, attempt: 1
+    }
+  ];
+  assert.equal(releaseSmokeStatus(runs, '1.2.3', 'tag-sha'), 'pending');
+  assert.equal(releaseSmokeStatus([{
+    workflowName: 'Post-Release Smoke', displayTitle: 'automatic', event: 'workflow_run',
+    headSha: 'tag-sha', status: 'completed', conclusion: 'success',
+    createdAt: '2026-07-26T09:00:00Z', databaseId: 10, attempt: 1
+  }], '1.2.3', 'tag-sha'), 'success');
+  assert.equal(releaseSmokeStatus([{
+    workflowName: 'Not Post-Release Smoke', displayTitle: 'Post-Release Smoke v1.2.3',
+    event: 'workflow_dispatch', headSha: 'main', status: 'completed', conclusion: 'success',
+    createdAt: '2026-07-26T12:00:00Z', databaseId: 30, attempt: 1
+  }], '1.2.3', 'tag-sha'), null);
+});
+
+test('post worktree preflight rejects staged, unstaged, and untracked changes', () => {
+  for (const kind of ['staged', 'unstaged', 'untracked'] as const) {
+    const root = releaseFixture();
+    try {
+      if (kind === 'untracked') fs.writeFileSync(path.join(root, 'untracked.txt'), 'change\n');
+      else {
+        fs.appendFileSync(path.join(root, 'tracked.txt'), 'change\n');
+        if (kind === 'staged') spawnSync('git', ['add', 'tracked.txt'], { cwd: root });
+      }
+      assert.equal(inspectPostWorktree(root)?.code, 'WORKTREE_DIRTY');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
 
 test('demo input digest is stable and changes for canonical UX inputs', () => {
   const root = fixture();

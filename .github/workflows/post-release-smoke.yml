@@ -1,4 +1,5 @@
 name: Post-Release Smoke
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Post-Release Smoke v{0}', inputs.version) || 'Post-Release Smoke (automatic)' }}
 
 on:
   workflow_run:

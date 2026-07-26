@@ -21,7 +21,7 @@ function inspectPlatformRelease(tag: string, options: ReleaseOptions = {}) {
     return { ...platformResult(result.error.retryable ? 'blocked' : 'failed'), platform: context.platform, release: null, workflows: [], error: result.error };
   }
   const release: ReleaseSnapshot = { tag: String(result.value.tagName || tag), published: !Boolean(result.value.isDraft), draft: Boolean(result.value.isDraft), url: result.value.url ? String(result.value.url) : null };
-  const runs = client.json<unknown[]>(['run', 'list', '--repo', context.platform.repository, '--limit', '100', '--json', 'name,headBranch,status,conclusion,url'], { cwd: options.cwd });
+  const runs = client.json<unknown[]>(['run', 'list', '--repo', context.platform.repository, '--limit', '100', '--json', 'name,workflowName,displayTitle,event,headBranch,headSha,status,conclusion,createdAt,databaseId,attempt,url'], { cwd: options.cwd });
   return { ...platformResult(runs.ok ? 'no-op' : runs.error.retryable ? 'blocked' : 'degraded'), platform: context.platform, release, workflows: runs.ok ? runs.value : [], error: runs.ok ? null : runs.error };
 }
 

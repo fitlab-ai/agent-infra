@@ -150,9 +150,56 @@ function runOptionalDemo(cwd: string, run: CommandRunner = command): DemoResult 
   return { status: 'recorded', reasonCode: null, message: null, outputPath };
 }
 
-function git(cwd: string, args: string[]): string | null {
-  const result = command(cwd, 'git', args);
+function git(cwd: string, args: string[], run: CommandRunner = command): string | null {
+  const result = run(cwd, 'git', args);
   return result.status === 0 ? String(result.stdout).trim() : null;
+}
+
+function inspectLocalReleaseFacts(cwd: string, version: string, run: CommandRunner = command) {
+  const tag = `v${version}`;
+  const head = git(cwd, ['rev-parse', 'HEAD'], run);
+  const tagCommit = git(cwd, ['rev-parse', '--verify', `${tag}^{commit}`], run);
+  const localTag = Boolean(tagCommit && tagCommit === head);
+  const localTagAncestor = Boolean(
+    tagCommit && head && !localTag
+    && run(cwd, 'git', ['merge-base', '--is-ancestor', tagCommit, head]).status === 0
+  );
+  const localTagConflict = Boolean(tagCommit && !localTag && !localTagAncestor);
+  const postSubject = `chore: prepare next dev iteration after v${version}`;
+  const postLog = localTag || localTagAncestor
+    ? git(cwd, ['log', '--format=%s', `${tag}..HEAD`], run) ?? ''
+    : '';
+  const postCommit = postLog.split('\n').some((subject) => subject === postSubject);
+  return { localTag, localTagAncestor, localTagConflict, postCommit };
+}
+
+function releaseSmokeStatus(workflows: Array<Record<string, unknown>>, version: string, tagCommit: string | null): ReleaseFacts['smoke'] {
+  const manualTitle = `Post-Release Smoke v${version}`;
+  const targets = workflows.filter((run) => {
+    if (String(run.workflowName || run.name) !== 'Post-Release Smoke') return false;
+    if (String(run.event) === 'workflow_run') return Boolean(tagCommit && String(run.headSha) === tagCommit);
+    return String(run.event) === 'workflow_dispatch' && String(run.displayTitle) === manualTitle;
+  }).sort((left, right) => {
+    const leftOrder = [Date.parse(String(left.createdAt || '')) || 0, Number(left.databaseId) || 0, Number(left.attempt) || 0];
+    const rightOrder = [Date.parse(String(right.createdAt || '')) || 0, Number(right.databaseId) || 0, Number(right.attempt) || 0];
+    for (let index = 0; index < leftOrder.length; index += 1) {
+      if (leftOrder[index] !== rightOrder[index]) return rightOrder[index]! - leftOrder[index]!;
+    }
+    return 0;
+  });
+  const latest = targets[0];
+  if (!latest) return null;
+  if (String(latest.status) !== 'completed') return 'pending';
+  return String(latest.conclusion) === 'success' ? 'success' : 'failed';
+}
+
+function inspectPostWorktree(cwd: string) {
+  const inspected = inspectGitWorkflow(cwd);
+  if (!inspected.snapshot) return inspected.error ?? { code: 'GIT_INSPECT_FAILED', message: 'Unable to inspect Git repository' };
+  if (inspected.snapshot.worktree.length || inspected.snapshot.staged.length) {
+    return { code: 'WORKTREE_DIRTY', message: 'Release post requires a clean worktree' };
+  }
+  return null;
 }
 
 async function inspectFacts(cwd: string, version: string): Promise<ReleaseFacts> {
@@ -162,6 +209,7 @@ async function inspectFacts(cwd: string, version: string): Promise<ReleaseFacts>
   const branch = git(cwd, ['branch', '--show-current']) || '';
   const head = git(cwd, ['rev-parse', 'HEAD']);
   const localTagTarget = git(cwd, ['rev-parse', '--verify', `${tag}^{commit}`]);
+  const local = inspectLocalReleaseFacts(cwd, version);
   const remoteBranch = branch ? git(cwd, ['ls-remote', '--heads', 'origin', branch]) : null;
   const remoteTag = git(cwd, ['ls-remote', '--tags', 'origin', `refs/tags/${tag}`]);
   const platform = inspectPlatformRelease(tag, { cwd });
@@ -169,18 +217,14 @@ async function inspectFacts(cwd: string, version: string): Promise<ReleaseFacts>
   const formulaUrl = `https://raw.githubusercontent.com/${config.org}/homebrew-tap/main/Formula/${config.project}.rb`;
   const homebrew = await inspectHomebrewChannel(formulaUrl, version);
   const workflows = platform.workflows as Array<Record<string, unknown>>;
-  const smokeRun = workflows.find((run) => String(run.name).toLowerCase().includes('post-release-smoke') && String(run.headBranch) === tag);
-  const smoke = smokeRun ? String(smokeRun.conclusion) === 'success' ? 'success' : String(smokeRun.status) === 'completed' ? 'failed' : 'pending' : null;
-  const postMessage = git(cwd, ['log', '-1', '--pretty=%s']) || '';
+  const smoke = releaseSmokeStatus(workflows, version, localTagTarget);
   return {
-    localTag: Boolean(localTagTarget && localTagTarget === head),
-    localTagConflict: Boolean(localTagTarget && localTagTarget !== head),
+    ...local,
     remoteBranch: Boolean(remoteBranch && remoteBranch.split(/\s+/)[0] === head), remoteTag: Boolean(remoteTag),
     githubRelease: platform.platform.type !== 'github'
       ? true
       : platform.status === 'blocked' ? null : Boolean(platform.release?.published),
-    npm: npm.published, homebrew: homebrew.published, smoke,
-    postCommit: postMessage.includes(`after v${version}`)
+    npm: npm.published, homebrew: homebrew.published, smoke
   };
 }
 
@@ -218,12 +262,11 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
   }
   const before = releaseSnapshot(version, await inspectFacts(cwd, version));
   if (action === 'inspect') { process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`); return; }
+  if (before.facts.localTagConflict) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'GIT_TAG_CONFLICT', message: `Tag v${version} is not reachable from HEAD` } })}\n`);
+    process.exitCode = 1; return;
+  }
   if (action === 'prepare') {
-    if (before.facts.localTagConflict) {
-      process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'GIT_TAG_CONFLICT', message: `Tag v${version} does not point to HEAD` } })}\n`);
-      process.exitCode = 1;
-      return;
-    }
     if (before.phase !== 'unprepared') {
       const milestones = reconcileReleaseMilestones(version, { cwd });
       process.stdout.write(`${JSON.stringify({ ...milestones, snapshot: before })}\n`);
@@ -254,15 +297,24 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
     process.exitCode = failed ? 1 : blocked ? 2 : 0; return;
   }
   if (action === 'publish') {
-    if (!['prepared', 'partially-published'].includes(before.phase)) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_PHASE_INVALID', message: `Cannot publish from ${before.phase}` } })}\n`); process.exitCode = 1; return; }
+    if (!before.facts.localTag || !['prepared', 'partially-published'].includes(before.phase)) { process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_PHASE_INVALID', message: `Cannot publish from ${before.phase}` } })}\n`); process.exitCode = 1; return; }
     const branch = git(cwd, ['branch', '--show-current']) || '';
     const refs = [...(!before.facts.remoteBranch ? [branch] : []), ...(!before.facts.remoteTag ? [`refs/tags/v${version}`] : [])];
     const result = pushGitRefs({ cwd, remote: 'origin', refs });
     process.stdout.write(`${JSON.stringify({ ...result, snapshot: releaseSnapshot(version, await inspectFacts(cwd, version)) })}\n`); process.exitCode = result.status === 'failed' ? 1 : result.status === 'degraded' ? 2 : 0; return;
   }
+  if (before.phase === 'complete') {
+    process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`);
+    return;
+  }
   const channelsComplete = before.facts.githubRelease === true && before.facts.npm === true && before.facts.homebrew === true;
   if (!['published', 'post-pending'].includes(before.phase) || !channelsComplete || before.facts.smoke !== 'success') {
     process.stdout.write(`${JSON.stringify({ status: before.facts.smoke === 'failed' ? 'failed' : 'blocked', changed: false, snapshot: before, error: { code: 'RELEASE_CHANNELS_PENDING', message: 'Release channels or smoke workflow are not complete' } })}\n`); process.exitCode = before.facts.smoke === 'failed' ? 1 : 2; return;
+  }
+  const worktreeError = inspectPostWorktree(cwd);
+  if (worktreeError) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: worktreeError })}\n`);
+    process.exitCode = 1; return;
   }
   const built = command(cwd, 'npm', ['run', 'build']);
   if (built.status !== 0) {
@@ -284,5 +336,5 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
   process.stdout.write(`${JSON.stringify({ ...pushed, demo, snapshot: releaseSnapshot(version, await inspectFacts(cwd, version)) })}\n`); process.exitCode = pushed.status === 'failed' ? 1 : pushed.status === 'degraded' ? 2 : 0;
 }
 
-export { computeDemoInputDigest, inspectFacts, releaseWorkflow, runOptionalDemo };
+export { computeDemoInputDigest, inspectFacts, inspectLocalReleaseFacts, inspectPostWorktree, releaseSmokeStatus, releaseWorkflow, runOptionalDemo };
 export type { CommandRunner, DemoResult };

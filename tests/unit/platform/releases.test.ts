@@ -16,10 +16,11 @@ function fixture() {
   return root;
 }
 
-function client(release: Record<string, unknown> | null, options: { blocked?: boolean } = {}): GitHubClient {
+function client(release: Record<string, unknown> | null, options: { blocked?: boolean; calls?: string[][] } = {}): GitHubClient {
   return {
     version: () => ({ ok: true, value: '2.16.0' }),
     json(args) {
+      options.calls?.push(args);
       if (args.some((arg) => arg === 'repos/acme/widgets')) {
         return { ok: true, value: { full_name: 'acme/widgets', permissions: { admin: true } } } as never;
       }
@@ -42,6 +43,26 @@ test('release inspection distinguishes missing, published, and blocked facts', (
     assert.equal(published.release?.published, true);
     assert.equal(published.workflows.length, 1);
     assert.equal(inspectPlatformRelease('v0.8.6', { cwd: root, client: client(null, { blocked: true }) }).status, 'blocked');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('release inspection requests workflow identity and ordering fields', () => {
+  const root = fixture();
+  const calls: string[][] = [];
+  try {
+    inspectPlatformRelease(
+      'v0.8.6',
+      { cwd: root, client: client({ tagName: 'v0.8.6', isDraft: false, url: 'https://example/release' }, { calls }) }
+    );
+    const runList = calls.find((args) => args[0] === 'run' && args[1] === 'list');
+    assert.ok(runList);
+    const fields = runList[runList.indexOf('--json') + 1]!.split(',');
+    assert.deepEqual(fields, [
+      'name', 'workflowName', 'displayTitle', 'event', 'headBranch', 'headSha',
+      'status', 'conclusion', 'createdAt', 'databaseId', 'attempt', 'url'
+    ]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
