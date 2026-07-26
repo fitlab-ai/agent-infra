@@ -2,10 +2,28 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { read } from "../../helpers.ts";
+import { parseCustomTools, resolveTools } from "../../../lib/sandbox/tools.ts";
 
 const collaborator = JSON.parse(read(".agents/.airc.json"));
 const merged = collaborator.files.merged;
 const managed = collaborator.files.managed;
+const GIT_LFS_INSTALL_COMMAND = [
+  "set -eu",
+  "version=3.7.1",
+  "case \"$(uname -m)\" in",
+  "  x86_64) arch=amd64; sha256=1c0b6ee5200ca708c5cebebb18fdeb0e1c98f1af5c1a9cba205a4c0ab5a5ec08 ;;",
+  "  aarch64|arm64) arch=arm64; sha256=73a9c90eeb4312133a63c3eaee0c38c019ea7bfa0953d174809d25b18588dd8d ;;",
+  "  *) echo \"Unsupported Git LFS architecture: $(uname -m)\" >&2; exit 1 ;;",
+  "esac",
+  "archive=\"git-lfs-linux-${arch}-v${version}.tar.gz\"",
+  "tmp_dir=\"$(mktemp -d)\"",
+  "trap 'rm -rf \"$tmp_dir\"' EXIT",
+  "curl -fsSL \"https://github.com/git-lfs/git-lfs/releases/download/v${version}/${archive}\" -o \"$tmp_dir/$archive\"",
+  "printf '%s  %s\\n' \"$sha256\" \"$tmp_dir/$archive\" | sha256sum -c -",
+  "tar -xzf \"$tmp_dir/$archive\" -C \"$tmp_dir\"",
+  "mkdir -p /home/devuser/.npm-global/bin",
+  "install -m 0755 \"$tmp_dir/git-lfs-${version}/git-lfs\" /home/devuser/.npm-global/bin/git-lfs"
+].join("\n");
 
 test(".agents/.airc.json does not declare templateSource", () => {
   assert.ok(!("templateSource" in collaborator));
@@ -29,9 +47,36 @@ test(".agents/.airc.json declares default sandbox configuration", () => {
     engine: "orbstack",
     runtimes: ["node22"],
     tools: ["agent-infra", "claude-code", "codex", "gemini-cli", "git-lfs", "opencode"],
+    customTools: [
+      {
+        id: "git-lfs",
+        name: "Git LFS",
+        install: { type: "shell", cmd: GIT_LFS_INSTALL_COMMAND },
+        versionCmd: "git lfs version",
+        setupHint: "Git LFS should be installed in the sandbox image."
+      }
+    ],
     dockerfile: null,
     vm: { cpu: null, memory: null, disk: null }
   });
+});
+
+test(".agents/.airc.json resolves every selected sandbox tool", () => {
+  const customTools = parseCustomTools(collaborator.sandbox.customTools, { home: "/tmp" });
+  const tools = resolveTools({
+    home: "/tmp",
+    project: collaborator.project,
+    tools: collaborator.sandbox.tools,
+    customTools
+  });
+
+  assert.deepEqual(
+    tools.map((tool) => tool.id),
+    collaborator.sandbox.tools
+  );
+  const gitLfs = tools.find((tool) => tool.id === "git-lfs");
+  assert.deepEqual(gitLfs?.install, { type: "shell", cmd: GIT_LFS_INSTALL_COMMAND });
+  assert.equal(gitLfs?.versionCmd, "git lfs version");
 });
 
 test(".agents/.airc.json declares github as the default platform", () => {

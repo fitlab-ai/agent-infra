@@ -20,6 +20,18 @@
       "git-lfs",
       "opencode"
     ],
+    "customTools": [
+      {
+        "id": "git-lfs",
+        "name": "Git LFS",
+        "install": {
+          "type": "shell",
+          "cmd": "set -eu\nversion=3.7.1\ncase \"$(uname -m)\" in\n  x86_64) arch=amd64; sha256=1c0b6ee5200ca708c5cebebb18fdeb0e1c98f1af5c1a9cba205a4c0ab5a5ec08 ;;\n  aarch64|arm64) arch=arm64; sha256=73a9c90eeb4312133a63c3eaee0c38c019ea7bfa0953d174809d25b18588dd8d ;;\n  *) echo \"Unsupported Git LFS architecture: $(uname -m)\" >&2; exit 1 ;;\nesac\narchive=\"git-lfs-linux-${arch}-v${version}.tar.gz\"\ntmp_dir=\"$(mktemp -d)\"\ntrap 'rm -rf \"$tmp_dir\"' EXIT\ncurl -fsSL \"https://github.com/git-lfs/git-lfs/releases/download/v${version}/${archive}\" -o \"$tmp_dir/$archive\"\nprintf '%s  %s\\n' \"$sha256\" \"$tmp_dir/$archive\" | sha256sum -c -\ntar -xzf \"$tmp_dir/$archive\" -C \"$tmp_dir\"\nmkdir -p /home/devuser/.npm-global/bin\ninstall -m 0755 \"$tmp_dir/git-lfs-${version}/git-lfs\" /home/devuser/.npm-global/bin/git-lfs"
+        },
+        "versionCmd": "git lfs version",
+        "setupHint": "Git LFS should be installed in the sandbox image."
+      }
+    ],
     "dockerfile": null,
     "vm": {
       "cpu": null,
