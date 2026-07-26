@@ -951,7 +951,6 @@ test("complete-task splits active preflight checks from completed-state checks",
   ].forEach((relativePath) => {
     const checks = JSON.parse(read(relativePath)).checks;
 
-    assert.deepEqual(checks["required-checks"], {});
     assert.deepEqual(checks["platform-sync-preflight"], {
       when: "issue_number_exists",
       expected_comment_marker: "<!-- sync-issue:{task-id}:summary -->",

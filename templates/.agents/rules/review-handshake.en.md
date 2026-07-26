@@ -93,7 +93,7 @@ When an executor judges an item to be a key design decision that needs human rul
 - After a successful commit it sets `B=last_reviewed_commit=<new_head>`; B means only a reviewed snapshot anchored to a Git commit.
 - The `complete-task` `post-review-commit` gate uses only B. When B is absent, malformed, or missing as a Git object, it reports `reviewed snapshot was not anchored` and never falls back to R.
 - If new commits touch code / rule paths after B, the gate blocks and requires a fresh `review-code`. The only automatic exception is a bound merged GitHub PR whose platform snapshot proves B is the original PR head, whose merge commit is in local HEAD history, whose reviewed changes exactly match the normalized patch of a single-parent squash commit, and whose protected paths have no later commits. Missing platform or Git evidence fails closed.
-- `required-checks` reuses the same strict / squash-equivalent relation and always evaluates checks for the original PR head; merging never relaxes a non-passing checks result.
+- Required checks remain a pre-merge responsibility of branch protection / rulesets and the `review-code` / `watch-pr` routes; `complete-task` no longer re-evaluates the original PR head against current rules. The post-review-commit gate still applies the strict / squash-equivalent relation above independently.
 - **Exemption**: append a ledger row `| PRC-1 | post-review-commit | - | - | human-decided | <ruling note> |` recording that a human explicitly allowed those commits without re-review.
 
 ## Gate behavior cheat sheet

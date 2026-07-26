@@ -26,7 +26,6 @@
     },
     "review-ledger": {},
     "post-review-commit": {},
-    "required-checks": {},
     "platform-sync-preflight": {
       "when": "issue_number_exists",
       "expected_comment_marker": "<!-- sync-issue:{task-id}:summary -->",
