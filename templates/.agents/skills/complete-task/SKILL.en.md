@@ -148,7 +148,7 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 
 This event runs `review-ledger`, `post-review-commit`, then `platform-sync-preflight`. On any non-zero exit (fail/blocked), keep the task active, derive the stable code/target from the gate result, record it through `task-warning ... add --step complete-task ...`, and stop. For a review/head mismatch, rerun `commit` or `review-code`; never fall back to the review baseline.
 
-`--force` does not lift this hard gate: close ledger disagreements; re-review or exempt post-review commits, or prove a content-equivalent single-parent squash merge from the bound PR snapshot and local Git objects; then pass platform preflight. Missing platform facts, Git objects, topology, or content evidence fails closed. Required checks remain enforced before merge by branch protection / rulesets and the `review-code` / `watch-pr` routes; `complete-task` no longer re-evaluates historical PR heads against current rules.
+`--force` does not lift this hard gate: close ledger disagreements; re-review or exempt post-review commits, or prove a content-equivalent single-parent squash merge from the bound PR snapshot and local Git objects; then pass platform preflight. Missing platform facts, Git objects, topology, or content evidence fails closed. Required checks remain enforced before merge by branch protection / rulesets and the `review-code` / `watch-pr` routes.
 
 ### 6. Apply the Local Lifecycle Intent and Verify the Move
 

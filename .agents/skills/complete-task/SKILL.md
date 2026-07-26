@@ -147,7 +147,7 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 
 该事件依次执行 `review-ledger`、`post-review-commit`、`platform-sync-preflight`。任一退出码非 0（fail/blocked）时，任务必须继续留在 active；从 gate 结果取稳定 code/target，通过 `task-warning ... add --step complete-task ...` 落账后停止。若审查基线或 head 不一致，必须先重新 `commit` / `review-code`；不得回退审查基线。
 
-`--force` 不解除本硬门禁：未关闭分歧必须先在账本闭合，未复审提交必须重新审查、具备有效豁免，或由绑定 PR 的权威合并快照与本地 Git 对象证明为内容等价的单父 squash merge；平台 preflight 必须通过。平台事实、Git 对象、拓扑或内容证据缺失时 fail closed。required checks 由合并前的分支保护 / ruleset 以及 `review-code` / `watch-pr` 路由承担，`complete-task` 不再按当前规则回查历史 PR head。
+`--force` 不解除本硬门禁：未关闭分歧必须先在账本闭合，未复审提交必须重新审查、具备有效豁免，或由绑定 PR 的权威合并快照与本地 Git 对象证明为内容等价的单父 squash merge；平台 preflight 必须通过。平台事实、Git 对象、拓扑或内容证据缺失时 fail closed。required checks 由合并前的分支保护 / ruleset 以及 `review-code` / `watch-pr` 路由承担。
 
 ### 6. 执行本地生命周期意图并验证转移
 
