@@ -2,6 +2,11 @@ import fs from 'node:fs';
 
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
+import {
+  inspectPlatformRequiredChecks,
+  registerPlatformCapabilities
+} from './adapters.ts';
+import type { PlatformCheckSnapshot } from './adapters.ts';
 import { resolvePlatformContext } from './context.ts';
 import { createGitHubClient } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
@@ -12,15 +17,7 @@ import type { PullRequestSnapshot } from './pull-requests.ts';
 
 type CheckBucket = 'pass' | 'fail' | 'pending' | 'cancel';
 type CheckState = 'passed' | 'failed' | 'pending' | 'timed-out' | 'cancelled' | 'no-required';
-type CheckSnapshot = {
-  name: string;
-  bucket: CheckBucket;
-  workflow?: string | null;
-  conclusion?: string | null;
-  detailsUrl?: string | null;
-  startedAt?: string | null;
-  completedAt?: string | null;
-};
+type CheckSnapshot = PlatformCheckSnapshot;
 type ChecksSnapshot = { state: Exclude<CheckState, 'timed-out'>; required: CheckSnapshot[] };
 type RunCandidate = { id: number; name: string; headSha: string; jobId?: number | null };
 type ChecksResult = PlatformResult & {
@@ -29,6 +26,7 @@ type ChecksResult = PlatformResult & {
   resolution?: { status: 'resolved' | 'missing' | 'ambiguous'; runId: number | null; jobId: number | null };
   logs?: { runId: number; jobId?: number; text: string };
 };
+type InspectionOptions = { cwd?: string; client?: unknown };
 type SharedOptions = { cwd?: string; client?: GitHubClient };
 
 function classifyRequiredChecks(required: CheckSnapshot[]): ChecksSnapshot {
@@ -114,14 +112,27 @@ function normalizeChecks(value: unknown): CheckSnapshot[] {
   });
 }
 
-function resolvedTask(taskRef: string, options: SharedOptions) {
+registerPlatformCapabilities('github', {
+  inspectRequiredChecks({ client, repository, number, cwd }) {
+    const github = (client as GitHubClient | undefined) || createGitHubClient();
+    const inspected = github.json<unknown>([
+      'pr', 'checks', String(number), '--repo', repository, '--required',
+      '--json', 'name,state,bucket,link,workflow,startedAt,completedAt'
+    ], { cwd });
+    return inspected.ok
+      ? { ok: true, value: normalizeChecks(inspected.value) }
+      : { ok: false, error: inspected.error };
+  }
+});
+
+function resolvedTask(taskRef: string, options: InspectionOptions) {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ok: false as const, output: checksResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }) };
   const frontmatter = parseTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
   const pr = Number(frontmatter.pr_number);
   const prNumber = Number.isInteger(pr) && pr > 0 ? pr : null;
   if (!prNumber) return { ok: false as const, output: checksResult('failed', { error: { code: 'PR_NOT_LINKED', message: 'Task has no valid pr_number', retryable: false } }) };
-  const client = options.client || createGitHubClient();
+  const client = (options.client as GitHubClient | undefined) || createGitHubClient();
   const context = resolvePlatformContext({ cwd: resolved.repoRoot, client });
   if (!context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return { ok: false as const, output: checksResult(context.status, { platform: context.platform, capabilities: context.capabilities, error: context.error }) };
   const inspected = inspectPlatformPullRequest(taskRef, { cwd: resolved.repoRoot, client });
@@ -129,22 +140,30 @@ function resolvedTask(taskRef: string, options: SharedOptions) {
   return { ok: true as const, resolved, prNumber, client, context, pullRequest: inspected.pullRequest };
 }
 
-function inspectRequiredChecks(taskRef: string, options: SharedOptions = {}): ChecksResult {
+function inspectRequiredChecks(taskRef: string, options: InspectionOptions = {}): ChecksResult {
   const base = resolvedTask(taskRef, options);
   if (!base.ok) return base.output;
   const repository = base.context.platform.repository!;
-  const inspected = base.client.json<unknown>([
-    'pr', 'checks', String(base.prNumber), '--repo', repository, '--required',
-    '--json', 'name,state,bucket,link,workflow,startedAt,completedAt'
-  ], { cwd: base.resolved.repoRoot });
-  if (!inspected.ok) {
-    return checksResult(inspected.error.retryable ? 'blocked' : 'failed', {
+  const inspected = inspectPlatformRequiredChecks(base.context.platform.type, {
+    cwd: base.resolved.repoRoot,
+    repository,
+    number: base.prNumber,
+    headSha: base.pullRequest.head.sha,
+    client: options.client || base.client
+  });
+  if (!inspected.ok || !inspected.value) {
+    const error = inspected.error || {
+      code: 'REQUIRED_CHECKS_INSPECTION_INVALID',
+      message: 'Platform adapter returned no required-checks snapshot',
+      retryable: false
+    };
+    return checksResult(error.retryable ? 'blocked' : 'failed', {
       platform: base.context.platform, capabilities: base.context.capabilities,
       resource: { kind: 'pull-request', number: base.prNumber },
-      pullRequest: base.pullRequest, error: inspected.error
+      pullRequest: base.pullRequest, error
     });
   }
-  const classified = classifyRequiredChecks(normalizeChecks(inspected.value));
+  const classified = classifyRequiredChecks(inspected.value);
   const status = classified.state === 'passed' || classified.state === 'no-required'
     ? 'no-op'
     : classified.state === 'failed' || classified.state === 'cancelled' ? 'failed' : 'blocked';
@@ -160,7 +179,7 @@ function inspectRequiredChecks(taskRef: string, options: SharedOptions = {}): Ch
   });
 }
 
-async function watchPlatformChecks(taskRef: string, options: SharedOptions & {
+async function watchPlatformChecks(taskRef: string, options: InspectionOptions & {
   intervalSeconds: number;
   deadlineSeconds: number;
   signal?: AbortSignal;

@@ -4,6 +4,11 @@ import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { extractSection } from '../task/sections.ts';
 import { captureTaskWriteMetadata, writeTask } from '../task/write.ts';
+import {
+  inspectPlatformChangeRequest,
+  registerPlatformCapabilities
+} from './adapters.ts';
+import type { PlatformChangeRequestSnapshot } from './adapters.ts';
 import { resolvePlatformContext } from './context.ts';
 import { createGitHubClient } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
@@ -12,28 +17,13 @@ import { planPullRequestMetadata } from './pull-request-metadata.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
 
-type PullRequestSnapshot = {
-  repository: string;
-  number: number;
-  nodeId: string;
-  url: string;
-  state: 'open' | 'closed';
-  title: string;
-  body: string;
-  draft: boolean;
-  head: { repository: string; ref: string; sha: string };
-  base: { repository: string; ref: string; sha: string };
-  mergedAt: string | null;
-  mergeCommitSha: string | null;
-  labels: string[];
-  assignees: string[];
-  milestone: string | null;
-};
+type PullRequestSnapshot = PlatformChangeRequestSnapshot;
 
 type PullRequestResult = PlatformResult & {
   task: { id: string | null; issueNumber: number | null; prNumber: number | null };
   pullRequest: PullRequestSnapshot | null;
 };
+type InspectionOptions = { cwd?: string; client?: unknown };
 type SharedOptions = { cwd?: string; client?: GitHubClient };
 type CreateOptions = SharedOptions & {
   agent: string;
@@ -126,7 +116,7 @@ function selectPullRequest(remotes: RemotePullRequest[], repository: string, hea
   return { status: matches.length === 0 ? 'missing' : 'ambiguous', pullRequest: null };
 }
 
-function resolvedContext(taskRef: string, options: SharedOptions) {
+function resolvedContext(taskRef: string, options: InspectionOptions) {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return { ok: false as const, output: result('failed', resolved.taskId, null, null, {
     error: { code: resolved.code, message: resolved.message, retryable: false }
@@ -137,7 +127,7 @@ function resolvedContext(taskRef: string, options: SharedOptions) {
   const pr = Number(frontmatter.pr_number);
   const issueNumber = Number.isInteger(issue) && issue > 0 ? issue : null;
   const prNumber = Number.isInteger(pr) && pr > 0 ? pr : null;
-  const client = options.client || createGitHubClient();
+  const client = (options.client as GitHubClient | undefined) || createGitHubClient();
   const context = resolvePlatformContext({ cwd: resolved.repoRoot, client });
   const usable = (context.status === 'no-op' || context.status === 'degraded') && context.platform.repository;
   if (!usable) return { ok: false as const, output: result(context.status, resolved.taskId, issueNumber, prNumber, {
@@ -155,6 +145,12 @@ function inspectGitHubPullRequest(client: GitHubClient, repository: string, numb
     : { ok: false as const, error: { code: 'PR_IDENTITY_INVALID', message: 'Remote resource is not a valid pull request', retryable: false } };
 }
 
+registerPlatformCapabilities('github', {
+  inspectChangeRequest({ client, repository, number, cwd }) {
+    return inspectGitHubPullRequest((client as GitHubClient | undefined) || createGitHubClient(), repository, number, cwd);
+  }
+});
+
 function locatePullRequest(base: ReturnType<typeof resolvedContext> & { ok: true }, head: string, target: string) {
   const repository = base.context.platform.repository!;
   const listed = base.client.json<RemotePullRequest[]>([
@@ -171,18 +167,30 @@ function locatePullRequest(base: ReturnType<typeof resolvedContext> & { ok: true
     } };
 }
 
-function inspectPlatformPullRequest(taskRef: string, options: SharedOptions = {}): PullRequestResult {
+function inspectPlatformPullRequest(taskRef: string, options: InspectionOptions = {}): PullRequestResult {
   const base = resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!base.prNumber) return result('no-op', base.resolved.taskId, base.issueNumber, null, {
     platform: base.context.platform, capabilities: base.context.capabilities,
     error: { code: 'PR_NOT_LINKED', message: 'Task has no valid pr_number', retryable: false }
   });
-  const fetched = inspectGitHubPullRequest(base.client, base.context.platform.repository!, base.prNumber, base.resolved.repoRoot);
-  if (!fetched.ok) return result(fetched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
-    platform: base.context.platform, capabilities: base.context.capabilities,
-    resource: { kind: 'pull-request', number: base.prNumber }, error: fetched.error
+  const fetched = inspectPlatformChangeRequest(base.context.platform.type, {
+    cwd: base.resolved.repoRoot,
+    repository: base.context.platform.repository!,
+    number: base.prNumber,
+    client: options.client || base.client
   });
+  if (!fetched.ok || !fetched.value) {
+    const error = fetched.error || {
+      code: 'PR_INSPECTION_INVALID',
+      message: 'Platform adapter returned no change-request snapshot',
+      retryable: false
+    };
+    return result(error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      platform: base.context.platform, capabilities: base.context.capabilities,
+      resource: { kind: 'pull-request', number: base.prNumber }, error
+    });
+  }
   return result('no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
     platform: base.context.platform, capabilities: base.context.capabilities,
     resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: fetched.value, error: null

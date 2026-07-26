@@ -5,8 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
+import {
+  inspectPlatformChangeRequest,
+  registerPlatformAdapter
+} from "../../../lib/platform/adapters.ts";
 import { resolveReviewedHeadRelation } from "../../../lib/platform/merged-pr-equivalence.ts";
 import type { PullRequestSnapshot } from "../../../lib/platform/pull-requests.ts";
+import { platformResult } from "../../../lib/platform/types.ts";
 import { gitSafeEnv } from "../../helpers.ts";
 
 function git(root: string, args: string[]): string {
@@ -51,6 +56,38 @@ test("accepts an authoritative content-equivalent squash merge", () => {
     assert.deepEqual(resolveReviewedHeadRelation({
       gitRoot: f.root, localHead: f.merge, lastReviewedCommit: f.head,
       pullRequest: f.pullRequest, pathspecs: [":/"]
+    }), { status: "merged-equivalent", reviewedHead: f.head, mergeCommit: f.merge });
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("accepts a normalized squash snapshot supplied by a custom platform adapter", () => {
+  const f = fixture();
+  try {
+    registerPlatformAdapter({
+      type: "custom-merge-test",
+      resolveContext() {
+        return platformResult("no-op", {
+          platform: { type: "custom-merge-test", repository: "o/r", currentUser: "reviewer" }
+        });
+      },
+      inspectChangeRequest() {
+        return { ok: true, value: f.pullRequest };
+      }
+    });
+    const inspected = inspectPlatformChangeRequest("custom-merge-test", {
+      cwd: f.root,
+      repository: "o/r",
+      number: 1
+    });
+    assert.equal(inspected.ok, true);
+    assert.deepEqual(resolveReviewedHeadRelation({
+      gitRoot: f.root,
+      localHead: f.merge,
+      lastReviewedCommit: f.head,
+      pullRequest: inspected.value!,
+      pathspecs: [":/"]
     }), { status: "merged-equivalent", reviewedHead: f.head, mergeCommit: f.merge });
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });

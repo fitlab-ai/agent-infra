@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
+import { hasPlatformCapability } from "./adapters.ts";
 import { inspectRequiredChecks } from "./pr-checks.ts";
 import { resolvePlatformContext } from "./context.ts";
 import { resolveReviewedHeadRelation } from "./merged-pr-equivalence.ts";
@@ -87,13 +88,17 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
 export function check({ taskDir }: any, shared: any): any {
   const task = shared.loadTask(taskDir);
   if (!task.ok) return shared.failResult(CHECK_TYPE, task.message);
-  const platform = resolvePlatformContext({ cwd: shared.repoRoot });
-  if (platform.platform.type !== "github") {
-    return shared.passResult(CHECK_TYPE, "Skipped: this code platform does not provide required checks");
-  }
   const prFlow = readPrFlow(shared.repoRoot);
   if (prFlow === "disabled" || task.metadata.pr_status === "skipped" || !validPrNumber(task.metadata.pr_number)) {
     return evaluateRequiredChecks({ metadata: task.metadata, localHead: null, inspection: null, prFlow }, shared);
+  }
+  const platform = resolvePlatformContext({ cwd: shared.repoRoot });
+  if (!hasPlatformCapability(platform.platform.type, "required-checks")) {
+    return shared.blockedResult(
+      CHECK_TYPE,
+      `Platform '${platform.platform.type || "none"}' does not provide required-checks inspection`,
+      "dependency_error"
+    );
   }
   const localHead = readHead(shared.repoRoot);
   if (!localHead) return evaluateRequiredChecks({ metadata: task.metadata, localHead, inspection: null, prFlow }, shared);

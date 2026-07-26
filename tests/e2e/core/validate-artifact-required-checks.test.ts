@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-import { evaluateRequiredChecks } from "../../../lib/platform/verification-required.ts";
+import { registerPlatformAdapter } from "../../../lib/platform/adapters.ts";
+import { platformResult } from "../../../lib/platform/types.ts";
+import { check, evaluateRequiredChecks } from "../../../lib/platform/verification-required.ts";
 
 const shared = {
   passResult: (type: string, message: string) => ({ type, status: "pass", message }),
@@ -126,4 +131,37 @@ test("required-checks skips tasks without a PR or with PR flow disabled", () => 
     localHead: null,
     inspection: null
   }).status, "pass");
+});
+
+test("required-checks fails closed when an applicable platform adapter lacks checks inspection", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "required-checks-adapter-"));
+  try {
+    fs.mkdirSync(path.join(root, ".agents"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".agents", ".airc.json"), JSON.stringify({
+      platform: { type: "checks-unsupported-test" },
+      prFlow: "required"
+    }));
+    registerPlatformAdapter({
+      type: "checks-unsupported-test",
+      resolveContext() {
+        return platformResult("no-op", {
+          platform: {
+            type: "checks-unsupported-test",
+            repository: "acme/widgets",
+            currentUser: "reviewer"
+          }
+        });
+      }
+    });
+    const result = check({ taskDir: root }, {
+      ...shared,
+      repoRoot: root,
+      loadTask() {
+        return { ok: true, metadata: { id: "TASK-20260101-000001", pr_number: 42 } };
+      }
+    });
+    assert.equal(result.status, "blocked");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
