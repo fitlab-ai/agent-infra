@@ -18,6 +18,7 @@ import { check as checkPlatformSync } from "../platform/verification-sync.ts";
 import { check as checkRequiredChecks } from "../platform/verification-required.ts";
 import { inspectPlatformPullRequest } from "../platform/pull-requests.ts";
 import { resolveReviewedHeadRelation } from "../platform/merged-pr-equivalence.ts";
+import { resolveLocalReviewedCommitRelation } from "../git/reviewed-commit-equivalence.ts";
 import { parseTypedTaskFrontmatter } from "./frontmatter.ts";
 import { parseLedger } from "./ledger.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
@@ -708,15 +709,17 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
     return passResult("post-review-commit", `No post-review commits to code/rule paths since ${sha.slice(0, 8)}`);
   }
 
-  if (task.ok && Number(task.metadata.pr_number) > 0) {
+  let localHead = "";
+  try {
+    localHead = execFileSync("git", ["-C", gitRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  } catch {
+    return blockedResult("post-review-commit", "Unable to resolve the local HEAD");
+  }
+
+  const hasPullRequest = task.ok && Number(task.metadata.pr_number) > 0;
+  if (hasPullRequest) {
     const inspected = inspectPlatformPullRequest(task.metadata.id, { cwd: gitRoot });
     if (inspected.pullRequest) {
-      let localHead = "";
-      try {
-        localHead = execFileSync("git", ["-C", gitRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-      } catch {
-        return blockedResult("post-review-commit", "Unable to resolve the local HEAD");
-      }
       const relation = resolveReviewedHeadRelation({
         gitRoot,
         localHead,
@@ -732,6 +735,23 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
       }
     } else if (inspected.status === "blocked") {
       return blockedResult("post-review-commit", inspected.error?.message || "PR merge snapshot is unavailable");
+    }
+  } else if (commits.length === 1) {
+    const relation = resolveLocalReviewedCommitRelation({
+      gitRoot,
+      localHead,
+      lastReviewedCommit: sha,
+      rewrittenCommit: commits[0]!,
+      pathspecs: globs
+    });
+    if (relation.status === "local-equivalent") {
+      return passResult(
+        "post-review-commit",
+        `Reviewed commit is content-equivalent to local rewrite ${relation.rewrittenCommit.slice(0, 8)}`
+      );
+    }
+    if (relation.status === "blocked") {
+      return blockedResult("post-review-commit", relation.message);
     }
   }
 

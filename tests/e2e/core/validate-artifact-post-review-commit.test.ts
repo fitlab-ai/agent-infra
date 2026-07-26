@@ -59,8 +59,11 @@ function buildReviewCode(baselineLine: string | null, verdict = "通过") {
   ].join("\n");
 }
 
-function runCheck(taskDir: string) {
-  const result = runValidator(["check", "post-review-commit", taskDir, "--skill", "complete-task"]);
+function runCheck(taskDir: string, repositoryRoot?: string) {
+  const result = runValidator(
+    ["check", "post-review-commit", taskDir, "--skill", "complete-task"],
+    repositoryRoot ? { repositoryRoot } : {}
+  );
   return { result, payload: parseValidatorPayload(result.stdout) };
 }
 
@@ -108,6 +111,68 @@ test("post-review-commit prefers last_reviewed_commit over the review baseline",
 
     const { payload } = runCheck(taskDir);
     assert.equal(payload.status, "pass");
+  });
+});
+
+test("post-review-commit accepts an equivalent rewrite followed only by excluded-path commits", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-prc-local-equivalent-excluded-", (tempRoot) => {
+    const { taskDir } = setupRepo(tempRoot);
+    const parent = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
+    const reviewedCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
+    git(tempRoot, ["reset", "--hard", parent]);
+    commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "rewritten reviewed change");
+    commitCodePath(tempRoot, "generated.txt", "generated\n", "generated output");
+
+    write(
+      path.join(tempRoot, ".agents", "skills", "complete-task", "config", "verify.json"),
+      JSON.stringify({
+        skill: "complete-task",
+        checks: {
+          "post-review-commit": { post_review_exclude_globs: ["generated.txt"] }
+        }
+      })
+    );
+    write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: reviewedCommit }));
+    write(path.join(taskDir, "review-code.md"), buildReviewCode(reviewedCommit));
+
+    const { payload } = runCheck(taskDir, tempRoot);
+    assert.equal(payload.status, "pass");
+  });
+});
+
+test("post-review-commit rejects additional protected commits after an equivalent rewrite", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-prc-local-equivalent-later-", (tempRoot) => {
+    const { taskDir } = setupRepo(tempRoot);
+    const parent = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
+    const reviewedCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
+    git(tempRoot, ["reset", "--hard", parent]);
+    commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "rewritten reviewed change");
+    commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\nlater\n", "later protected change");
+
+    write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: reviewedCommit }));
+    write(path.join(taskDir, "review-code.md"), buildReviewCode(reviewedCommit));
+
+    const { payload } = runCheck(taskDir);
+    assert.equal(payload.status, "fail");
+  });
+});
+
+test("post-review-commit accepts a local content-equivalent recommit without a PR", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-prc-local-equivalent-", (tempRoot) => {
+    const { taskDir } = setupRepo(tempRoot);
+    const parent = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
+    const reviewedCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "reviewed change");
+    git(tempRoot, ["reset", "--hard", parent]);
+    const rewrittenCommit = commitCodePath(tempRoot, ".agents/skills/x.md", "base\nreviewed\n", "rewritten reviewed change");
+    assert.notEqual(rewrittenCommit, reviewedCommit);
+    assert.equal(git(tempRoot, ["rev-parse", `${reviewedCommit}^{tree}`]), git(tempRoot, ["rev-parse", `${rewrittenCommit}^{tree}`]));
+
+    write(path.join(taskDir, "task.md"), buildTask([], { last_reviewed_commit: reviewedCommit }));
+    write(path.join(taskDir, "review-code.md"), buildReviewCode(reviewedCommit));
+
+    const { payload } = runCheck(taskDir);
+    assert.equal(payload.status, "pass");
+    assert.match(payload.message, /content-equivalent to local rewrite/);
   });
 });
 

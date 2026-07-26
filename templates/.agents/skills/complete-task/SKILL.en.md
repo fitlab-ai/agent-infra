@@ -87,7 +87,7 @@ Before marking complete, verify ALL of these:
 - [ ] Code has been reviewed (`review-code.md` or `review-code-r{N}.md` exists, and the latest review verdict is Approved; or review was done externally)
 - [ ] Code has been committed (no uncommitted changes related to this task)
 - [ ] Tests are passing
-- [ ] The disagreement ledger has no unclosed disagreements or un-re-reviewed post-review commits; local HEAD, `last_reviewed_commit`, and PR head either match strictly or a merged squash has complete platform identity, Git topology, and content-equivalence evidence
+- [ ] The disagreement ledger has no unclosed disagreements or un-re-reviewed post-review commits; on a bound-PR path local HEAD, `last_reviewed_commit`, and PR head either match strictly or a merged squash has complete platform/Git equivalence evidence; without a valid PR, a single-parent local rewrite is content-equivalent to `last_reviewed_commit` and has no later protected commits
 
 > **⚠️ Prerequisite Branch Check — you must decide whether to continue or stop before proceeding:**
 >
@@ -148,7 +148,7 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 
 This event runs `review-ledger`, `post-review-commit`, then `platform-sync-preflight`. On any non-zero exit (fail/blocked), keep the task active, derive the stable code/target from the gate result, record it through `task-warning ... add --step complete-task ...`, and stop. For a review/head mismatch, rerun `commit` or `review-code`; never fall back to the review baseline.
 
-`--force` does not lift this hard gate: close ledger disagreements; re-review or exempt post-review commits, or prove a content-equivalent single-parent squash merge from the bound PR snapshot and local Git objects; then pass platform preflight. Missing platform facts, Git objects, topology, or content evidence fails closed. Required checks remain enforced before merge by branch protection / rulesets and the `review-code` / `watch-pr` routes.
+`--force` does not lift this hard gate: close ledger disagreements; re-review or exempt post-review commits, prove a content-equivalent single-parent squash merge from the bound PR snapshot, or, without a valid PR, prove from local Git objects that the only protected commit is a content-equivalent single-parent rewrite with no later protected commits; then pass platform preflight. Missing required platform facts, Git objects, topology, or content evidence fails closed. Required checks remain enforced before merge by branch protection / rulesets and the `review-code` / `watch-pr` routes.
 
 ### 6. Apply the Local Lifecycle Intent and Verify the Move
 
