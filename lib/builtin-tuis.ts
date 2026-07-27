@@ -1,5 +1,8 @@
-const BUILTIN_TUI_IDS = ['claude-code', 'codex', 'gemini-cli', 'opencode'] as const;
-type BuiltinTUIId = (typeof BUILTIN_TUI_IDS)[number];
+import { AGENT_CLIENT_IDS, isAgentClientId } from './agent-clients/types.ts';
+import type { AgentClientId } from './agent-clients/types.ts';
+
+const BUILTIN_TUI_IDS = AGENT_CLIENT_IDS;
+type BuiltinTUIId = AgentClientId;
 
 const BUILTIN_TUI_DISPLAY: Record<BuiltinTUIId, string> = {
   'claude-code': 'Claude Code',
@@ -16,7 +19,7 @@ const BUILTIN_TUI_OWNED_PATH_PREFIXES: Record<BuiltinTUIId, string[]> = {
 };
 
 function isBuiltinTUIId(value: unknown): value is BuiltinTUIId {
-  return typeof value === 'string' && (BUILTIN_TUI_IDS as readonly string[]).includes(value);
+  return isAgentClientId(value);
 }
 
 function resolveEnabledTUIs(value: unknown): Set<BuiltinTUIId> {
