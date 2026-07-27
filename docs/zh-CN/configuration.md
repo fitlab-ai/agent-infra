@@ -85,7 +85,7 @@
 以下三类配置概念相互独立：
 
 - `agentClients` 记录项目对内建客户端的期望状态。
-- 迁移后的 `sandbox.tools` 保存非客户端沙箱工具，包括 `agent-infra` 和自定义工具。
+- `sandbox.tools` 保存非 Agent Client 的沙箱工具，包括 `agent-infra` 和自定义工具。
 - Adapter capability 描述客户端集成能做什么；项目禁用客户端不会改变其能力声明。
 
 每项 adapter capability 使用以下标识之一：

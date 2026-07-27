@@ -85,7 +85,7 @@ An **AI Coding Agent Client**, or **Agent Client** for short, is a supported cod
 Three configuration concepts remain independent:
 
 - `agentClients` records the project's desired state for built-in clients.
-- `sandbox.tools` contains non-client sandbox tools after migration, including `agent-infra` and custom tools.
+- `sandbox.tools` contains non-Agent Client sandbox tools, including `agent-infra` and custom tools.
 - Adapter capabilities describe what a client integration can do. They do not change when a project disables that client.
 
 Each adapter capability uses one of these identifiers:
