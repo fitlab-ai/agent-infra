@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const rootDir = path.dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
@@ -65,6 +66,15 @@ function validateManifest(manifest, registry) {
   }
 }
 
+function compileRegistry() {
+  const tscPath = path.join(rootDir, 'node_modules', 'typescript', 'bin', 'tsc');
+  execFileSync(
+    process.execPath,
+    [tscPath, '-p', path.join(rootDir, 'tsconfig.json')],
+    { cwd: rootDir, stdio: 'inherit' }
+  );
+}
+
 async function buildInlineContent() {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const defaults = JSON.parse(fs.readFileSync(path.join(rootDir, 'lib', 'defaults.json'), 'utf8'));
@@ -90,8 +100,9 @@ async function buildInlineContent() {
 }
 
 async function main() {
-  const nextContent = await buildInlineContent();
   const checkOnly = process.argv.includes('--check');
+  if (checkOnly) compileRegistry();
+  const nextContent = await buildInlineContent();
 
   if (checkOnly) {
     for (const targetPath of targetPaths) {
