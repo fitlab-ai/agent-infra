@@ -34,6 +34,28 @@ Use this template when writing `review-analysis.md` or `review-analysis-r{N}.md`
 |---------|------------------|--------|--------|
 | {registry token} | {trigger or non-trigger evidence} | {yes / no / not-applicable} | {lens result} |
 
+## Requirement Analysis Coverage
+
+| perspective_id | applicability | reviewed_scope | evidence | result_or_gap |
+|----------------|---------------|----------------|----------|---------------|
+| user | {applicable / not-applicable} | {business goals, user outcomes, non-goals, and acceptance} | {source_id / artifact / file:line} | {covered / gap} |
+| maintainer | {applicable / not-applicable} | {maintenance boundaries, dependencies, compatibility, and ownership} | {source_id / artifact / file:line} | {covered / gap} |
+| operations | {applicable / not-applicable} | {deployment, runtime, observability, recovery, and support constraints} | {source_id / artifact / file:line} | {covered / gap} |
+| security | {applicable / not-applicable} | {trust boundaries, permissions, data, and abuse risks} | {source_id / artifact / file:line} | {covered / gap} |
+| testing | {applicable / not-applicable} | {inputs, actions, results, boundaries, and verification environment} | {source_id / artifact / file:line} | {covered / gap} |
+
+| quality_id | source | stakeholder | priority_or_tradeoff | verification | result_or_gap |
+|------------|--------|-------------|----------------------|--------------|---------------|
+| {stable identifier} | {source_id} | {stakeholder} | {priority or trade-off state} | {observable verification} | {covered / gap} |
+
+| evolution_id | source | confirmation_status | classification | boundary_evidence | result_or_gap |
+|--------------|--------|---------------------|----------------|-------------------|---------------|
+| {stable identifier} | {source_id} | {confirmed / unconfirmed} | {design-input / assumption / open-question} | {evidence preventing current-scope expansion} | {covered / gap} |
+
+| acceptance_id | observable_input | action | expected_result | status_or_gap |
+|---------------|------------------|--------|-----------------|---------------|
+| {stable identifier} | {observable input} | {review or verification action} | {expected result} | {verifiable / open / gap} |
+
 ## Traceability Matrix
 
 | source_id | upstream | reviewed_target | verification | status_or_gap |

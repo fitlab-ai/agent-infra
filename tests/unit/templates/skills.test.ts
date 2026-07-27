@@ -593,6 +593,40 @@ test("review report templates expose shared coverage, traceability, and finding 
   });
 });
 
+test("review-analysis report templates expose stage-specific coverage structures", () => {
+  const reportCases: Array<[string, string]> = [
+    [".agents/skills/review-analysis/reference/report-template.md", "需求分析专项覆盖"],
+    ["templates/.agents/skills/review-analysis/reference/report-template.zh-CN.md", "需求分析专项覆盖"],
+    ["templates/.agents/skills/review-analysis/reference/report-template.en.md", "Requirement Analysis Coverage"]
+  ];
+  const expectedTables = [
+    "| perspective_id | applicability | reviewed_scope | evidence | result_or_gap |",
+    "| quality_id | source | stakeholder | priority_or_tradeoff | verification | result_or_gap |",
+    "| evolution_id | source | confirmation_status | classification | boundary_evidence | result_or_gap |",
+    "| acceptance_id | observable_input | action | expected_result | status_or_gap |"
+  ];
+  const minimumPerspectives = ["user", "maintainer", "operations", "security", "testing"];
+
+  reportCases.forEach(([relativePath, heading]) => {
+    const content = read(relativePath);
+    const coverageSection = sectionContent(content, heading);
+
+    expectedTables.forEach((table) => {
+      assert.ok(coverageSection.includes(table), `${relativePath} should define ${table}`);
+    });
+    minimumPerspectives.forEach((perspective) => {
+      assert.ok(
+        coverageSection.includes(`| ${perspective} |`),
+        `${relativePath} should include the ${perspective} perspective`
+      );
+    });
+    assert.ok(
+      content.includes("| source_id | upstream | reviewed_target | verification | status_or_gap |"),
+      `${relativePath} should retain the shared traceability table`
+    );
+  });
+});
+
 test("review verify configs require shared review report sections", () => {
   for (const skill of ["review-analysis", "review-plan", "review-code"]) {
     for (const [relativePath, sections] of [
@@ -605,6 +639,18 @@ test("review verify configs require shared review report sections", () => {
         assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
       });
     }
+  }
+});
+
+test("review-analysis verify configs require stage-specific coverage", () => {
+  for (const [relativePath, section] of [
+    [".agents/skills/review-analysis/config/verify.json", "需求分析专项覆盖"],
+    ["templates/.agents/skills/review-analysis/config/verify.zh-CN.json", "需求分析专项覆盖"],
+    ["templates/.agents/skills/review-analysis/config/verify.en.json", "Requirement Analysis Coverage"]
+  ] as Array<[string, string]>) {
+    const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
+
+    assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
   }
 });
 
