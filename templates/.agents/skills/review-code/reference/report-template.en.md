@@ -27,21 +27,45 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 - **Overall Verdict**: {Approved / Changes Requested / Rejected} (pick exactly one; combined phrases will fail the verify gate)
 - **Findings (AI-actionable)**: 0 blockers, 0 majors, 0 minors / **Manual validation**: 0
 
+## Review Coverage Declaration
+
+| pass_id | scope | evidence | result | gaps_or_assumptions |
+|---------|-------|----------|--------|---------------------|
+| pass-1..5 | {scope actually reviewed} | {artifact / diff / file:line / command} | {finding or conclusion} | {gap or assumption} |
+
+| lens_id | trigger_evidence | loaded | result |
+|---------|------------------|--------|--------|
+| {registry token} | {trigger or non-trigger evidence} | {yes / no / not-applicable} | {lens result} |
+
+## Traceability Matrix
+
+| source_id | upstream | reviewed_target | verification | status_or_gap |
+|-----------|----------|-----------------|--------------|---------------|
+| {requirement/plan step} | {approved requirement or design} | {code diff} | {automated test or manual validation} | {covered / gap} |
+
 ## Findings
 
 ### Blockers (must fix)
 
 #### 1. {Issue title}
 **File**: `{file-path}:{line-number}`
-**Description**: {details}
-**Suggested Fix**: {fix suggestion}
+**Scenario**: {scenario}
+**Impact**: {impact}
+**Evidence**: {reproducible evidence}
+**Confidence**: {high / medium / low}
+**Unverified Assumptions**: {assumptions or none}
+**Fix Direction**: {fix direction}
 
 ### Major Issues (should fix)
 
 #### 1. {Issue title}
 **File**: `{file-path}:{line-number}`
-**Description**: {details}
-**Suggested Fix**: {fix suggestion}
+**Scenario**: {scenario}
+**Impact**: {impact}
+**Evidence**: {reproducible evidence}
+**Confidence**: {high / medium / low}
+**Unverified Assumptions**: {assumptions or none}
+**Fix Direction**: {fix direction}
 
 ### Minor Issues (low impact, closure required)
 

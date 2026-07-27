@@ -55,6 +55,7 @@ Read `{analysis-artifact}`, `task.md`, and Issue context when available. After r
 
 Check requirement completeness, risks, affected scope, open questions, and effort estimates.
 
+> Read `.agents/rules/review-method.md` before this step and follow its five-pass protocol for coverage, risk-lens decisions, traceability, and counterevidence.
 > Read `reference/review-criteria.md` before this step.
 
 ### 5. Write Review Report

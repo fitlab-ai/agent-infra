@@ -19,6 +19,8 @@
       "file_pattern": "review-code.md|review-code-r{N}.md",
       "required_sections": [
         "审查摘要",
+        "检视覆盖声明",
+        "追踪矩阵",
         "问题清单",
         "非阻塞建议",
         "人工校验项",

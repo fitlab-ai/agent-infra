@@ -23,35 +23,8 @@
 - 为单次需求引入不必要的新抽象、配置或框架
 - 凭印象或记忆断言 `file:line`/行为，没有用 rg/nl 复核就下结论
 
-## 通用审查原则
+## 共享方法与分类边界
 
-1. **严格但公正**：既要指出问题，也要承认做得好的部分
-2. **具体**：引用准确的文件路径和行号
-3. **可执行**：给出明确可落地的修复建议
-4. **按严重程度分类**：明确区分 blocker、major 和 minor
-
-## 三类审查项决策树
-
-1. 若问题揭示当前方案缺少约束、风险、接口边界、验证策略或可实施性，登记为正式 finding，并按影响赋予 blocker / major / minor；severity 只表示影响大小，minor 也必须闭环。
-2. 若没有已知缺陷，但只能依赖真实环境、权限或人工操作完成验证，归为 manual-validation。
-3. 仅当建议属于未来优化且不影响当前方案的完整性、正确性和验收时，归为 advisory。advisory 只写入「非阻塞建议」，不进入账本、问题计数或 verdict。
-
-## 人工校验项分类
-
-某些发现项是 AI agent 在本执行环境**无法闭环**的，例如：
-
-- 缺 Docker / 沙箱而无法跑端到端验证
-- 缺特定 OS（macOS-only 行为）
-- 缺第三方账号 / OAuth
-- 缺特权操作（root、sudo、特殊网络）
-
-**分类决策树**：「AI agent 能否在不改环境的前提下独立闭环这一项？」
-- 是 -> blocker / major / minor 之一（按风险定档）
-- 否 -> **manual-validation**（人工校验元类目，不参与严重程度排序）
-
-manual-validation 项的去向：
-- 写入 review 报告独立段落「人工校验项」
-- 在 done note 中写入源字段 `Manual-validation: 1`；`ai task log` 归一化展示到 review 行
-- **不**进入 code-task 修复循环；维护者在 PR description 中以「待人工验证」清单形式承接
+先读取 `.agents/rules/review-method.md`，按其五遍协议、风险镜头和 finding 证据契约执行；finding、manual-validation、advisory 与 `needs-human-decision` 的状态语义以 `.agents/rules/review-handshake.md` 为准。本文件只补充技术方案阶段的专项判断。
 
 同时检查最新技术方案产物、最新需求分析审查产物和 `task.md` Activity Log，确保报告反映完整的设计上下文。

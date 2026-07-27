@@ -26,6 +26,7 @@ so you can quickly find "which ones to read" without opening each file.
 
 - [`task-management.md`](task-management.md) — Task intent detection and workflow-command mapping.
 - [`review-handshake.md`](review-handshake.md) — Three-stage bidirectional review handshake: four-state disposition, symmetric evidence, disagreement ledger, convergence and post-review commit gate.
+- [`review-method.md`](review-method.md) — Shared three-stage review method: multi-pass review, risk lenses, traceability, and finding evidence.
 - [`human-decision-context.md`](human-decision-context.md) — Self-contained context and canonical structure for new human-decision details.
 - [`task-short-id.md`](task-short-id.md) — Resolution, allocation and lifecycle of bare-number short ids.
 - [`milestone-inference.md`](milestone-inference.md) — Milestone inference for create-task / code-task / create-pr.

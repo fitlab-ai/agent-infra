@@ -58,6 +58,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 重点检查需求完整性、风险识别、影响范围、开放问题和工作量评估。
 
+> 共享检视方法见 `.agents/rules/review-method.md`。执行此步骤前先读取该规则，并按五遍协议完成覆盖声明、风险镜头判断、追踪矩阵和反证检视。
 > 详细审查标准见 `reference/review-criteria.md`。执行此步骤前先读取 `reference/review-criteria.md`。
 
 ### 5. 编写审查报告

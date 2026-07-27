@@ -12,6 +12,10 @@ const PAIRS: ReadonlyArray<readonly [string, string]> = [
     '.agents/rules/review-handshake.md',
     'templates/.agents/rules/review-handshake.zh-CN.md',
   ],
+  [
+    '.agents/rules/review-method.md',
+    'templates/.agents/rules/review-method.zh-CN.md',
+  ],
 ];
 
 for (const [runtimePath, templatePath] of PAIRS) {

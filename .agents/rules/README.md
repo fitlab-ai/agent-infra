@@ -25,6 +25,7 @@
 
 - [`task-management.md`](task-management.md) — 任务语义识别与工作流命令映射。
 - [`review-handshake.md`](review-handshake.md) — 三阶段双向审查握手协议：四态处置、对称证据、分歧账本、收敛与 post-review commit 门禁。
+- [`review-method.md`](review-method.md) — 三阶段共享检视方法：多遍检视、风险镜头、追踪与 finding 证据契约。
 - [`human-decision-context.md`](human-decision-context.md) — 新建人工裁决详情的自足上下文与规范结构。
 - [`task-short-id.md`](task-short-id.md) — 裸数字任务短号的解析、分配与生命周期。
 - [`milestone-inference.md`](milestone-inference.md) — create-task / code-task / create-pr 的 milestone 推断。

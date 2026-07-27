@@ -27,21 +27,45 @@
 - **总体结论**：{通过 / 需要修改 / 拒绝}（恰取一个；禁止写组合短语，否则 verify gate 失败）
 - **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0
 
+## 检视覆盖声明
+
+| pass_id | scope | evidence | result | gaps_or_assumptions |
+|---------|-------|----------|--------|---------------------|
+| pass-1..5 | {本遍实际范围} | {artifact / diff / file:line / command} | {发现或结论} | {缺口或假设} |
+
+| lens_id | trigger_evidence | loaded | result |
+|---------|------------------|--------|--------|
+| {registry token} | {命中或未命中证据} | {yes / no / not-applicable} | {专项结论} |
+
+## 追踪矩阵
+
+| source_id | upstream | reviewed_target | verification | status_or_gap |
+|-----------|----------|-----------------|--------------|---------------|
+| {需求/方案步骤} | {已批准需求或设计} | {代码 diff} | {自动化测试或人工校验} | {covered / gap} |
+
 ## 问题清单
 
 ### 阻塞项（必须修复）
 
 #### 1. {问题标题}
 **文件**：`{file-path}:{line-number}`
-**说明**：{details}
-**修复建议**：{fix suggestion}
+**场景**：{scenario}
+**影响**：{impact}
+**证据**：{reproducible evidence}
+**置信度**：{high / medium / low}
+**未验证假设**：{assumptions or none}
+**修复方向**：{fix direction}
 
 ### 主要问题（建议修复）
 
 #### 1. {问题标题}
 **文件**：`{file-path}:{line-number}`
-**说明**：{details}
-**修复建议**：{fix suggestion}
+**场景**：{scenario}
+**影响**：{impact}
+**证据**：{reproducible evidence}
+**置信度**：{high / medium / low}
+**未验证假设**：{assumptions or none}
+**修复方向**：{fix direction}
 
 ### 次要问题（低影响但需闭环）
 

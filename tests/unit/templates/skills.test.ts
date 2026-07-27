@@ -512,33 +512,100 @@ test("review report templates record the reviewed artifact", () => {
   });
 });
 
-test("review criteria keep common review principles consistent across review stages", () => {
-  const localPrinciples = [
-    ".agents/skills/review-analysis/reference/review-criteria.md",
-    ".agents/skills/review-plan/reference/review-criteria.md",
-    ".agents/skills/review-code/reference/review-criteria.md"
-  ].map((relativePath) => sectionContent(read(relativePath), "通用审查原则"));
+test("review skills and criteria reference the shared review method", () => {
+  const reviewSkills = ["review-analysis", "review-plan", "review-code"];
+  const relativePaths = reviewSkills.flatMap((skill) => [
+    `.agents/skills/${skill}/SKILL.md`,
+    `.agents/skills/${skill}/reference/review-criteria.md`,
+    `templates/.agents/skills/${skill}/SKILL.en.md`,
+    `templates/.agents/skills/${skill}/SKILL.zh-CN.md`,
+    `templates/.agents/skills/${skill}/reference/review-criteria.en.md`,
+    `templates/.agents/skills/${skill}/reference/review-criteria.zh-CN.md`
+  ]);
 
-  assert.equal(localPrinciples[0], localPrinciples[1]);
-  assert.equal(localPrinciples[0], localPrinciples[2]);
+  assert.ok(exists(".agents/rules/review-method.md"));
+  assert.ok(exists("templates/.agents/rules/review-method.en.md"));
+  assert.ok(exists("templates/.agents/rules/review-method.zh-CN.md"));
+  relativePaths.forEach((relativePath) => {
+    assert.ok(
+      read(relativePath).includes(".agents/rules/review-method.md"),
+      `${relativePath} should reference the shared review method`
+    );
+  });
+});
 
-  const zhPrinciples = [
-    "templates/.agents/skills/review-analysis/reference/review-criteria.zh-CN.md",
-    "templates/.agents/skills/review-plan/reference/review-criteria.zh-CN.md",
-    "templates/.agents/skills/review-code/reference/review-criteria.zh-CN.md"
-  ].map((relativePath) => sectionContent(read(relativePath), "通用审查原则"));
+test("review method risk-lens references resolve in every language variant", () => {
+  const methodFiles = [
+    ".agents/rules/review-method.md",
+    "templates/.agents/rules/review-method.en.md",
+    "templates/.agents/rules/review-method.zh-CN.md"
+  ];
 
-  assert.equal(zhPrinciples[0], zhPrinciples[1]);
-  assert.equal(zhPrinciples[0], zhPrinciples[2]);
+  methodFiles.forEach((relativePath) => {
+    const references = [...read(relativePath).matchAll(/`(\.agents\/skills\/[^`]+\/reference\/[^`]+\.md)`/g)]
+      .map((match) => match[1]!);
 
-  const enPrinciples = [
-    "templates/.agents/skills/review-analysis/reference/review-criteria.en.md",
-    "templates/.agents/skills/review-plan/reference/review-criteria.en.md",
-    "templates/.agents/skills/review-code/reference/review-criteria.en.md"
-  ].map((relativePath) => sectionContent(read(relativePath), "Common Review Principles"));
+    assert.ok(references.length > 0, `${relativePath} should register at least one risk-lens reference`);
+    references.forEach((referencePath) => {
+      const resolvedPath = relativePath.startsWith("templates/")
+        ? langTemplate(`templates/${referencePath}`, relativePath.includes(".zh-CN.") ? "zh-CN" : "en")
+        : referencePath;
+      assert.ok(exists(resolvedPath), `${relativePath} references missing risk lens: ${resolvedPath}`);
+    });
+  });
+});
 
-  assert.equal(enPrinciples[0], enPrinciples[1]);
-  assert.equal(enPrinciples[0], enPrinciples[2]);
+test("review report templates expose shared coverage, traceability, and finding structures", () => {
+  const reportCases = ["review-analysis", "review-plan", "review-code"].flatMap((skill) => [
+    { relativePath: `.agents/skills/${skill}/reference/report-template.md`, coverage: "检视覆盖声明", trace: "追踪矩阵" },
+    { relativePath: `templates/.agents/skills/${skill}/reference/report-template.zh-CN.md`, coverage: "检视覆盖声明", trace: "追踪矩阵" },
+    { relativePath: `templates/.agents/skills/${skill}/reference/report-template.en.md`, coverage: "Review Coverage Declaration", trace: "Traceability Matrix" }
+  ]);
+
+  reportCases.forEach(({ relativePath, coverage, trace }) => {
+    const content = read(relativePath);
+    const coverageSection = sectionContent(content, coverage);
+    const findingsSection = sectionContent(content, relativePath.includes(".en.") ? "Findings" : "问题清单");
+
+    assert.match(content, new RegExp(`^## ${escapeRegExp(trace)}$`, "m"));
+    assert.ok(
+      coverageSection.includes("| pass_id | scope | evidence | result | gaps_or_assumptions |"),
+      `${relativePath} should define the pass coverage table`
+    );
+    assert.ok(
+      coverageSection.includes("| lens_id | trigger_evidence | loaded | result |"),
+      `${relativePath} should define the risk-lens table`
+    );
+    assert.ok(
+      content.includes("| source_id | upstream | reviewed_target | verification | status_or_gap |"),
+      `${relativePath} should define the traceability table`
+    );
+
+    const highSeverityExamples = findingsSection.split(/^### /m).slice(1, 3);
+    assert.equal(highSeverityExamples.length, 2, `${relativePath} should retain blocker and major examples`);
+    highSeverityExamples.forEach((example) => {
+      assert.equal(
+        [...example.matchAll(/^\*\*[^*]+\*\*[:：]/gm)].length,
+        7,
+        `${relativePath} blocker and major examples should expose file plus six evidence fields`
+      );
+    });
+  });
+});
+
+test("review verify configs require shared review report sections", () => {
+  for (const skill of ["review-analysis", "review-plan", "review-code"]) {
+    for (const [relativePath, sections] of [
+      [`.agents/skills/${skill}/config/verify.json`, ["检视覆盖声明", "追踪矩阵"]],
+      [`templates/.agents/skills/${skill}/config/verify.zh-CN.json`, ["检视覆盖声明", "追踪矩阵"]],
+      [`templates/.agents/skills/${skill}/config/verify.en.json`, ["Review Coverage Declaration", "Traceability Matrix"]]
+    ] as Array<[string, string[]]>) {
+      const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
+      sections.forEach((section) => {
+        assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
+      });
+    }
+  }
 });
 
 test("review criteria require checking missed human-decision markings", () => {

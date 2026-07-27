@@ -55,6 +55,7 @@ Read `{plan-artifact}`, the latest analysis artifact, `task.md`, and Issue conte
 
 Check simplicity, executability, risk control, test strategy, file coverage, and phase boundaries.
 
+> Read `.agents/rules/review-method.md` before this step and follow its five-pass protocol for coverage, risk-lens decisions, traceability, and counterevidence.
 > Read `reference/review-criteria.md` before this step.
 
 ### 5. Write Review Report

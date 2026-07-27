@@ -72,6 +72,7 @@ Follow `.agents/workflows/feature-development.yaml` and inspect the full change 
 - `git ls-files -o --exclude-standard -z -- <post-review-globs>` for untracked new files
 - Write `mode=worktree` and baseline `R` to a temporary JSON file, then call `agent-infra-internal git-workflow snapshot --input {file}` to generate the reviewed diff fingerprint `F` and reviewed snapshot tree `T` together; write both into the report
 
+> After collecting those facts, read `.agents/rules/review-method.md`, use them as readiness evidence, and run Passes 2–5 for traceability, risk lenses, counterevidence, and classification; the report must record all five passes.
 > Detailed review criteria, severity rules, and reviewer expectations live in `reference/review-criteria.md`. Read `reference/review-criteria.md` before reviewing.
 > Test review gate: when `git diff` touches test files, read `.agents/rules/testing-discipline.md` first and check it item by item, especially "do not add negative assertions when a positive assertion already covers the behavior".
 

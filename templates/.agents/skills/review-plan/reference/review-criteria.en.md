@@ -23,35 +23,8 @@ Follow the `design-review` step in `.agents/workflows/feature-development.yaml`.
 - Introducing unnecessary abstractions, configuration, or frameworks for a single-use requirement
 - Asserting a `file:line` or behavior from memory or impression without verifying via rg/nl
 
-## Common Review Principles
+## Shared Method and Classification Boundary
 
-1. **Strict but fair**: identify issues and acknowledge solid work
-2. **Specific**: cite exact file paths and line numbers
-3. **Actionable**: suggest a concrete fix
-4. **Severity-based**: clearly distinguish blockers, major issues, and minor issues
-
-## Three-category Decision Tree
-
-1. A gap in constraints, risks, interface boundaries, validation strategy, or implementability is a formal finding. Assign blocker / major / minor by impact; severity does not control closure, so minor findings must also reach a terminal state.
-2. When there is no known defect but validation requires a real environment, permission, or human operation, classify it as manual-validation.
-3. Only a future optimization that does not affect the current plan's completeness, correctness, or acceptance is an advisory. Put it only in Non-blocking Advisories; do not add it to the ledger, finding counts, or verdict.
-
-## Manual Validation Classification
-
-Some findings cannot be closed by an AI agent in the current execution environment, for example:
-
-- Missing Docker / sandbox access for end-to-end validation
-- Missing a specific OS for macOS-only behavior
-- Missing third-party accounts / OAuth
-- Missing privileged operations such as root, sudo, or special network access
-
-**Decision tree**: "Can the AI agent close this item independently without changing the environment?"
-- Yes -> blocker / major / minor, based on risk
-- No -> **manual-validation** (a manual-validation meta-category, not part of severity ordering)
-
-Where manual-validation items go:
-- Record them in an independent review report section named "Manual Validation Items"
-- Record the done-note source field as `Manual-validation: 1`; `ai task log` normalizes it into review rows
-- Do **not** include them in the code-task fix loop; maintainers carry them in the PR description under manual verification
+Read `.agents/rules/review-method.md` first and apply its five-pass protocol, risk lenses, and finding evidence contract. Finding, manual-validation, advisory, and `needs-human-decision` state semantics remain governed by `.agents/rules/review-handshake.md`. This file adds only plan-stage criteria.
 
 Also inspect the latest technical plan artifact, latest requirement-analysis review artifact, and `task.md` Activity Log so the report reflects the full design context.

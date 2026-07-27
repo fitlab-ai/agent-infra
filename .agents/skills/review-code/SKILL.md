@@ -71,6 +71,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 - `git ls-files -o --exclude-standard -z -- <post-review-globs>` 覆盖未跟踪新文件
 - 把 `mode=worktree`、基线 `R` 写入临时 JSON，调用 `agent-infra-internal git-workflow snapshot --input {file}` 一次生成审查差异指纹 `F` 与审查快照树 `T`，并写入报告
 
+> 上述事实采集完成后，先读取 `.agents/rules/review-method.md`，以其作为 readiness 证据并按 Pass 2–5 完成追踪、风险镜头、反证和归类；报告必须记录全部五遍覆盖。
 > 详细审查标准、严重程度划分和 reviewer 关注点见 `reference/review-criteria.md`。执行此步骤前先读取 `reference/review-criteria.md`。
 > 测试审查硬门禁：当 `git diff` 触及测试文件时，必须先读取 `.agents/rules/testing-discipline.md` 并逐条核对（尤其"正向已覆盖时不应再加反向断言"）。
 

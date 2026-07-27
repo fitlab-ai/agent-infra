@@ -19,6 +19,8 @@
       "file_pattern": "review-analysis.md|review-analysis-r{N}.md",
       "required_sections": [
         "Review Summary",
+        "Review Coverage Declaration",
+        "Traceability Matrix",
         "Findings",
         "Non-blocking Advisories",
         "Manual Validation Items",
