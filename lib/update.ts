@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { AGENT_CLIENT_IDS } from './agent-clients/types.ts';
 import { info, ok, err } from './log.ts';
 import { resolveTemplateDir } from './paths.ts';
 import { renderFile, copySkillDir, KNOWN_PLATFORMS } from './render.ts';
@@ -41,7 +42,7 @@ const defaults = JSON.parse(
 const CONFIG_DIR = '.agents';
 const CONFIG_PATH = path.join(CONFIG_DIR, '.airc.json');
 const AGENT_INFRA_SANDBOX_TOOL = 'agent-infra';
-const LEGACY_DEFAULT_SANDBOX_TOOLS = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
+const LEGACY_DEFAULT_SANDBOX_TOOLS = [...AGENT_CLIENT_IDS];
 const DEFAULT_SANDBOX_TOOLS = [AGENT_INFRA_SANDBOX_TOOL, ...LEGACY_DEFAULT_SANDBOX_TOOLS];
 
 // One-time migration of the legacy project-level PR switch to the three-state

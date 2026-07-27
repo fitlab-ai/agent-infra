@@ -3,6 +3,7 @@ import path from 'node:path';
 import { homedir, platform } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import pc from 'picocolors';
+import { AGENT_CLIENT_IDS } from '../agent-clients/types.ts';
 import { validateSandboxEngine } from './engine.ts';
 import { hostJoin } from './engines/wsl2-paths.ts';
 import { findRuntimeEngineMismatches } from './runtime-engines.ts';
@@ -12,7 +13,7 @@ import type { SandboxTool } from './tools.ts';
 const DEFAULTS = Object.freeze({
   engine: null,
   runtimes: ['node22'],
-  tools: ['agent-infra', 'claude-code', 'codex', 'gemini-cli', 'opencode'],
+  tools: ['agent-infra', ...AGENT_CLIENT_IDS],
   refreshIntervalDays: 7,
   dockerfile: null,
   vm: {

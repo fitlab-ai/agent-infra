@@ -1,0 +1,19 @@
+import { defineAgentClientAdapter } from '../adapter.ts';
+
+const geminiCliAdapter = defineAgentClientAdapter({
+  id: 'gemini-cli',
+  displayName: 'Gemini CLI',
+  capabilities: {
+    instructions: { level: 'compatible' },
+    skills: { level: 'compatible' },
+    commands: { level: 'integrated' },
+    hooks: { level: 'compatible' },
+    sandbox: { level: 'integrated' },
+    verification: { level: 'compatible' }
+  },
+  project: {
+    ownedPathPrefixes: ['.gemini/']
+  }
+});
+
+export { geminiCliAdapter };

@@ -102,22 +102,47 @@ const DEFAULTS = {
   }
 };
 
+const AGENT_CLIENT_MANIFEST = [
+  {
+    "id": "claude-code",
+    "displayName": "Claude Code",
+    "ownedPathPrefixes": [
+      ".claude/"
+    ]
+  },
+  {
+    "id": "codex",
+    "displayName": "Codex",
+    "ownedPathPrefixes": [
+      ".codex/"
+    ]
+  },
+  {
+    "id": "gemini-cli",
+    "displayName": "Gemini CLI",
+    "ownedPathPrefixes": [
+      ".gemini/"
+    ]
+  },
+  {
+    "id": "opencode",
+    "displayName": "OpenCode",
+    "ownedPathPrefixes": [
+      ".opencode/"
+    ]
+  }
+];
 const AGENT_INFRA_SANDBOX_TOOL = 'agent-infra';
-const LEGACY_DEFAULT_SANDBOX_TOOLS = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
+const LEGACY_DEFAULT_SANDBOX_TOOLS = AGENT_CLIENT_MANIFEST.map((entry) => entry.id);
 const DEFAULT_SANDBOX_TOOLS = [AGENT_INFRA_SANDBOX_TOOL, ...LEGACY_DEFAULT_SANDBOX_TOOLS];
 // Add a new identifier here only after shipping matching .{platform}. template variants.
 const KNOWN_PLATFORMS = new Set(['github', 'none']);
 const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
 
-// Single source of truth for built-in TUI ids and owned path prefixes.
-// Keep in sync with lib/builtin-tuis.ts (enforced by tests/unit/scripts/sync-templates-consts.test.ts).
-const BUILTIN_TUI_IDS = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
-const BUILTIN_TUI_OWNED_PATH_PREFIXES = {
-  'claude-code': ['.claude/'],
-  'codex': ['.codex/'],
-  'gemini-cli': ['.gemini/'],
-  'opencode': ['.opencode/']
-};
+const BUILTIN_TUI_IDS = AGENT_CLIENT_MANIFEST.map((entry) => entry.id);
+const BUILTIN_TUI_OWNED_PATH_PREFIXES = Object.fromEntries(
+  AGENT_CLIENT_MANIFEST.map((entry) => [entry.id, entry.ownedPathPrefixes])
+);
 
 function resolveEnabledTUIs(value) {
   // Missing field / null / non-array → full set (backward compat).

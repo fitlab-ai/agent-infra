@@ -1,22 +1,20 @@
 import { AGENT_CLIENT_IDS, isAgentClientId } from './agent-clients/types.ts';
 import type { AgentClientId } from './agent-clients/types.ts';
+import { listAgentClientAdapters } from './agent-clients/registry.ts';
 
 const BUILTIN_TUI_IDS = AGENT_CLIENT_IDS;
 type BuiltinTUIId = AgentClientId;
 
-const BUILTIN_TUI_DISPLAY: Record<BuiltinTUIId, string> = {
-  'claude-code': 'Claude Code',
-  'codex': 'Codex',
-  'gemini-cli': 'Gemini CLI',
-  'opencode': 'OpenCode'
-};
+const BUILTIN_TUI_DISPLAY = Object.fromEntries(
+  listAgentClientAdapters().map((adapter) => [adapter.id, adapter.displayName])
+) as Record<BuiltinTUIId, string>;
 
-const BUILTIN_TUI_OWNED_PATH_PREFIXES: Record<BuiltinTUIId, string[]> = {
-  'claude-code': ['.claude/'],
-  'codex': ['.codex/'],
-  'gemini-cli': ['.gemini/'],
-  'opencode': ['.opencode/']
-};
+const BUILTIN_TUI_OWNED_PATH_PREFIXES = Object.fromEntries(
+  listAgentClientAdapters().map((adapter) => [
+    adapter.id,
+    [...adapter.project.ownedPathPrefixes]
+  ])
+) as Record<BuiltinTUIId, string[]>;
 
 function isBuiltinTUIId(value: unknown): value is BuiltinTUIId {
   return isAgentClientId(value);

@@ -1,30 +1,45 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import test from "node:test";
 
 import { filePath } from "../../helpers.ts";
-import * as builtinTuis from "../../../lib/builtin-tuis.ts";
+import defaults from "../../../lib/defaults.json" with { type: "json" };
+import {
+  createAgentClientManifest
+} from "../../../lib/agent-clients/registry.ts";
 
-// Source-of-truth check: ensure src/sync-templates.js (vendored standalone
-// script) keeps BUILTIN_TUI_* constants in lockstep with lib/builtin-tuis.ts.
-// If this test fails, edit both files together.
-test("src/sync-templates.js BUILTIN_TUI_IDS matches lib/builtin-tuis.ts", () => {
+function readGeneratedManifest(target: string) {
+  const generated = fs.readFileSync(filePath(target), "utf8");
+  const match = generated.match(
+    /const AGENT_CLIENT_MANIFEST = (\[[\s\S]*?\n\]);\nconst AGENT_INFRA_SANDBOX_TOOL/
+  );
+  assert.ok(match, `expected generated manifest in ${target}`);
+  return JSON.parse(match[1]!);
+}
+
+test("src/sync-templates.js has one Agent Client manifest build placeholder", () => {
   const src = fs.readFileSync(filePath("src/sync-templates.js"), "utf8");
-  const idsMatch = src.match(/const BUILTIN_TUI_IDS = (\[[^\]]+\]);/m);
-  assert.ok(idsMatch, "expected BUILTIN_TUI_IDS literal in src/sync-templates.js");
-  const ids = JSON.parse(idsMatch![1]!.replace(/'/g, '"'));
-  assert.deepEqual(ids, [...builtinTuis.BUILTIN_TUI_IDS]);
+  assert.equal(
+    src.match(/const AGENT_CLIENT_MANIFEST = JSON\.parse\('__AGENT_CLIENT_MANIFEST__'\);/g)?.length,
+    1
+  );
 });
 
-test("src/sync-templates.js BUILTIN_TUI_OWNED_PATH_PREFIXES matches lib/builtin-tuis.ts", () => {
-  const src = fs.readFileSync(filePath("src/sync-templates.js"), "utf8");
-  const blockMatch = src.match(/const BUILTIN_TUI_OWNED_PATH_PREFIXES = (\{[\s\S]*?\});/m);
-  assert.ok(blockMatch, "expected BUILTIN_TUI_OWNED_PATH_PREFIXES literal in src/sync-templates.js");
-  // Convert the JS object literal to JSON: quote keys and use double quotes.
-  const normalized = blockMatch![1]!
-    .replace(/'([^']*)'/g, '"$1"')
-    .replace(/([{,]\s*)([a-zA-Z_][\w-]*)\s*:/g, '$1"$2":')
-    .replace(/,(\s*[}\]])/g, '$1');
-  const parsed = JSON.parse(normalized);
-  assert.deepEqual(parsed, builtinTuis.BUILTIN_TUI_OWNED_PATH_PREFIXES);
+test("generated standalone scripts project the Registry manifest", () => {
+  const expected = createAgentClientManifest();
+  const targets = [
+    "templates/.agents/skills/update-agent-infra/scripts/sync-templates.js",
+    ".agents/skills/update-agent-infra/scripts/sync-templates.js"
+  ];
+
+  for (const target of targets) {
+    assert.deepEqual(readGeneratedManifest(target), expected);
+  }
+});
+
+test("legacy defaults contain the Registry client IDs after agent-infra", () => {
+  assert.deepEqual(
+    defaults.sandbox.tools,
+    ["agent-infra", ...createAgentClientManifest().map((entry) => entry.id)]
+  );
 });
