@@ -13,6 +13,8 @@ Follow the `code-review` step in `.agents/workflows/feature-development.yaml`.
 - [ ] Error handling and edge cases
 - [ ] Performance and security risks
 - [ ] Comments and documentation
+  - [ ] 6a. New or changed documentation accurately reflects the current behavior after the change
+  - [ ] 6b. Documentation does not preserve removed functionality through backward-looking wording; use patterns such as `不再|no longer|已被移除` to guide grep, then judge in context
 - [ ] Consistency with the approved technical plan
 - [ ] The reviewer checked whether the executor missed any key design decision that should be upgraded to `[needs-human-decision]`
 - [ ] Every `needs-human-decision` detail produced this round follows the self-contained structure in `.agents/rules/human-decision-context.md`
