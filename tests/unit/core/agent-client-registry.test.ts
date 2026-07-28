@@ -22,7 +22,8 @@ import {
   getAgentClientCapability,
   listAgentClientAdapters,
   listEnabledAgentClientAdapters,
-  listEnabledAgentClientAdaptersByCapability
+  listEnabledAgentClientAdaptersByCapability,
+  listInstalledAgentClientAdapters
 } from '../../../lib/agent-clients/registry.ts';
 
 const CAPABILITY_MATRIX = {
@@ -83,6 +84,19 @@ function adapterInput(
       merged: [],
       ejected: []
     },
+    sandbox: {
+      createTool: () => ({
+        id: 'codex',
+        name: 'Codex',
+        install: { type: 'npm', cmd: '@openai/codex' },
+        sandboxBase: '/tmp/codex',
+        containerMount: '/home/devuser/.codex',
+        versionCmd: 'codex --version',
+        setupHint: 'Ready'
+      }),
+      aliases: [],
+      hooks: []
+    },
     ...overrides
   };
 }
@@ -101,7 +115,16 @@ function stateFor(enabled: readonly string[]): AgentClientState {
 
 test('adapter definitions validate their closed contract without mutating input', () => {
   const input = adapterInput();
-  const before = structuredClone(input);
+  const before = {
+    ...input,
+    capabilities: structuredClone(input.capabilities),
+    project: structuredClone(input.project),
+    sandbox: {
+      ...input.sandbox,
+      aliases: structuredClone(input.sandbox.aliases),
+      hooks: [...input.sandbox.hooks]
+    }
+  };
   const adapter = defineAgentClientAdapter(input);
 
   assert.deepEqual(input, before);
@@ -353,6 +376,10 @@ test('registry queries preserve canonical order and keep enabled separate from s
     listEnabledAgentClientAdapters(state).map((adapter) => adapter.id),
     ['codex', 'opencode']
   );
+  assert.deepEqual(
+    listInstalledAgentClientAdapters(state).map((adapter) => adapter.id),
+    ['claude-code', 'gemini-cli']
+  );
   assert.deepEqual(listEnabledAgentClientAdapters(stateFor([])), []);
   assert.deepEqual(
     listEnabledAgentClientAdapters(stateFor(AGENT_CLIENT_IDS)).map((adapter) => adapter.id),
@@ -383,6 +410,58 @@ test('registry queries preserve canonical order and keep enabled separate from s
     ),
     []
   );
+});
+
+test('sandbox descriptors validate ids, hooks, aliases, timeouts, and frozen output', () => {
+  const adapter = defineAgentClientAdapter(adapterInput({
+    sandbox: {
+      ...adapterInput().sandbox,
+      aliases: [{ name: 'xy', command: 'codex --yolo' }],
+      hooks: [{
+        id: 'prepare-state',
+        phase: 'prepare',
+        timeoutMs: 42,
+        run: async () => ({ status: 'ready' })
+      }]
+    }
+  }));
+  const tool = adapter.sandbox.createTool({ home: '/tmp/home', project: 'demo' });
+
+  assert.ok(Object.isFrozen(adapter.sandbox));
+  assert.ok(Object.isFrozen(adapter.sandbox.aliases));
+  assert.ok(Object.isFrozen(adapter.sandbox.hooks));
+  assert.ok(Object.isFrozen(tool));
+  assert.equal(tool.id, adapter.id);
+
+  assert.throws(() => defineAgentClientAdapter(adapterInput({
+    sandbox: {
+      ...adapterInput().sandbox,
+      hooks: [{
+        id: 'too-slow',
+        phase: 'prepare',
+        timeoutMs: 300_001,
+        run: async () => ({ status: 'ready' })
+      }]
+    }
+  })));
+  assert.throws(() => defineAgentClientAdapter(adapterInput({
+    sandbox: {
+      ...adapterInput().sandbox,
+      aliases: [
+        { name: 'xy', command: 'codex --yolo' },
+        { name: 'xy', command: 'codex --yolo' }
+      ]
+    }
+  })));
+  assert.throws(() => defineAgentClientAdapter(adapterInput({
+    sandbox: {
+      ...adapterInput().sandbox,
+      createTool: () => ({
+        ...adapterInput().sandbox.createTool({ home: '/tmp', project: 'demo' }),
+        id: 'other'
+      })
+    }
+  })).sandbox.createTool({ home: '/tmp', project: 'demo' }));
 });
 
 test('single adapter and capability queries reject unknown runtime IDs', () => {

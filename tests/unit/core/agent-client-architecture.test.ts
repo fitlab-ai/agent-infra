@@ -67,7 +67,8 @@ test('generic Agent Client core contains no client-specific ID literals', () => 
       const relative = path.relative(agentClientsRoot, candidate).replace(/\\/g, '/');
       return relative !== 'types.ts' && !relative.startsWith('adapters/');
     }),
-    filePath('lib/builtin-tuis.ts')
+    filePath('lib/builtin-tuis.ts'),
+    filePath('lib/sandbox/agent-client-reconciler.ts')
   ];
 
   const api = new API({ cwd: filePath('.') });

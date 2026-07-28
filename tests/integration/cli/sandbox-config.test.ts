@@ -11,6 +11,7 @@ import {
   onPlatforms,
   withGitSafeProcessEnv
 } from "../../helpers.ts";
+import { resolveTools } from "../../../lib/sandbox/tools.ts";
 
 test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
@@ -42,6 +43,46 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     assert.equal(config.shareBase, path.join(process.env.HOME ?? "", ".agent-infra", "share", "demo"));
     assert.equal(config.shellConfigBase, path.join(process.env.HOME ?? "", ".agent-infra", "config", "demo"));
     assert.equal(config.dotfilesDir, path.join(process.env.HOME ?? "", ".agent-infra", "dotfiles"));
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig gives canonical Agent Client selection priority over sandbox.tools", async () => {
+  const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-canonical-"));
+  const previousCwd = process.cwd();
+
+  try {
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, ".agents", ".airc.json"),
+      JSON.stringify({
+        project: "demo",
+        agentClients: [
+          { id: "claude-code", enabled: true, installInSandbox: false },
+          { id: "codex", enabled: true, installInSandbox: true },
+          { id: "gemini-cli", enabled: false, installInSandbox: false },
+          { id: "opencode", enabled: false, installInSandbox: false }
+        ],
+        sandbox: {
+          tools: ["agent-infra", "claude-code"]
+        }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+
+    process.chdir(tmpDir);
+    const config = withGitSafeProcessEnv(() => sandboxConfig.loadConfig());
+
+    assert.equal(config.agentClientSource, "canonical");
+    assert.deepEqual(config.tools, ["agent-infra"]);
+    assert.deepEqual(
+      resolveTools(config).map((tool) => tool.id),
+      ["agent-infra", "codex"]
+    );
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });

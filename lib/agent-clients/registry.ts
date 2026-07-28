@@ -89,6 +89,14 @@ function listEnabledAgentClientAdapters(
   );
 }
 
+function listInstalledAgentClientAdapters(
+  state: AgentClientState
+): readonly AgentClientAdapter[] {
+  return Object.freeze(
+    AGENT_CLIENT_ADAPTERS.filter((adapter) => state[adapter.id].installInSandbox)
+  );
+}
+
 function getAgentClientCapability(
   id: unknown,
   capability: AgentClientCapabilityId
@@ -131,5 +139,6 @@ export {
   getAgentClientCapability,
   listAgentClientAdapters,
   listEnabledAgentClientAdapters,
-  listEnabledAgentClientAdaptersByCapability
+  listEnabledAgentClientAdaptersByCapability,
+  listInstalledAgentClientAdapters
 };

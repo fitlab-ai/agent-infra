@@ -11,7 +11,7 @@ import { hostJoin } from '../engines/wsl2-paths.ts';
 import { removeManagedDir, removeWorktreeDir } from '../managed-fs.ts';
 import { parseLabels } from './ls.ts';
 import { runEngine, runSafe } from '../shell.ts';
-import { resolveTools } from '../tools.ts';
+import { createSandboxCapabilityPlan } from '../agent-client-reconciler.ts';
 import type { SandboxTool } from '../tools.ts';
 
 const USAGE = `Usage: ai sandbox prune [--dry-run]`;
@@ -158,7 +158,7 @@ export async function prune(args: string[]): Promise<void> {
   }
 
   const config = loadConfig();
-  const tools = resolveTools(config);
+  const tools = [...createSandboxCapabilityPlan(config).cleanupInventory];
   const engine = detectEngine(config);
   const psArgs = [
     'ps',

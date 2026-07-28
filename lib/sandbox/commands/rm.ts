@@ -19,7 +19,8 @@ import { pruneSandboxDanglingImages } from '../image-prune.ts';
 import { removeManagedDir, removeWorktreeDir } from '../managed-fs.ts';
 import { runOk, runSafe, runSafeEngine } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
-import { resolveTools, toolConfigDirCandidates, toolProjectDirCandidates } from '../tools.ts';
+import { toolConfigDirCandidates, toolProjectDirCandidates } from '../tools.ts';
+import { createSandboxCapabilityPlan } from '../agent-client-reconciler.ts';
 import type { SandboxTool } from '../tools.ts';
 import { fetchSandboxRows } from './list-running.ts';
 import { lookupShortIdByBranch } from '../../task/short-id.ts';
@@ -353,7 +354,7 @@ export async function rm(args: string[]): Promise<void> {
   }
 
   const config = loadConfig();
-  const tools = resolveTools(config);
+  const tools = [...createSandboxCapabilityPlan(config).cleanupInventory];
 
   if (values.purge) {
     await rmPurge(config, tools);

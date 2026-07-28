@@ -67,6 +67,34 @@ test('collectSandboxDetail returns empty results when nothing exists for the bra
   }
 });
 
+test('collectSandboxDetail excludes disabled clients even when host state remains', async () => {
+  const { collectSandboxDetail } = await loadFreshEsm<ShowModule>('lib/sandbox/commands/show.js');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-show-selected-'));
+  const config = {
+    ...makeConfig(home),
+    agentClientState: {
+      'claude-code': { enabled: true, installInSandbox: false },
+      codex: { enabled: true, installInSandbox: true },
+      'gemini-cli': { enabled: true, installInSandbox: false },
+      opencode: { enabled: true, installInSandbox: false }
+    }
+  };
+  const branch = 'feature/selected';
+  const legacyConfig = makeConfig(home);
+  const claude = resolveTools(legacyConfig).find((tool) => tool.id === 'claude-code')!;
+  fs.mkdirSync(
+    toolConfigDirCandidates(claude, config.project, branch)[0]!,
+    { recursive: true }
+  );
+
+  const detail = collectSandboxDetail(config, branch);
+
+  assert.deepEqual(
+    detail.toolStates.map((tool) => tool.name),
+    ['agent-infra CLI', 'Codex']
+  );
+});
+
 test('collectSandboxDetail covers the legacy (dash) sanitize candidate', async () => {
   const { collectSandboxDetail } = await loadFreshEsm<ShowModule>('lib/sandbox/commands/show.js');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-show-legacy-'));

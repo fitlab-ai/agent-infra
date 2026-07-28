@@ -24,6 +24,42 @@ The sandbox image also preinstalls `gh`. When `gh auth token` succeeds on the ho
 
 Host `~/.ssh` is not bind-mounted into the sandbox. GitHub access is expected to use the `gh` / HTTPS token path above; `git@github.com:*` SSH workflows need a separate, explicit setup outside the default sandbox boundary.
 
+## Agent Client capabilities
+
+The canonical `agentClients` entries control which Agent Clients are installed
+and mounted in a sandbox. `installInSandbox` is independent from `enabled`:
+the former controls sandbox capabilities, while the latter controls project
+assets and integrations.
+
+```json
+{
+  "agentClients": [
+    { "id": "claude-code", "enabled": true, "installInSandbox": false },
+    { "id": "codex", "enabled": true, "installInSandbox": true },
+    { "id": "gemini-cli", "enabled": false, "installInSandbox": false },
+    { "id": "opencode", "enabled": false, "installInSandbox": false }
+  ]
+}
+```
+
+Agent Client adapters declare their image package, version command, state
+directory, credential/config mounts, setup hint, aliases, and bounded lifecycle
+hooks. Non-client tools such as `agent-infra` and configured custom tools remain
+independent of this selection. After changing `installInSandbox`, rebuild the
+image and recreate affected containers. Runtime capability labels let start,
+exec, and recovery reject containers whose selected mounts or hook policy no
+longer match the current configuration.
+
+Disabling a client never deletes its host credentials, configuration, or
+history. `sandbox show` lists only currently selected tools, even when disabled
+client state remains on the host. Host state is considered for deletion only by
+explicit cleanup commands such as `sandbox rm` or `sandbox prune`.
+
+Adapter hooks run serially with a 30-second default deadline and a five-minute
+maximum. Creation-phase timeouts are fatal, entry refresh timeouts are warnings,
+and recovery inspection timeouts make the container unhealthy. This timeout is
+an internal safety boundary, not a user configuration option.
+
 ## Runtime proxy inheritance
 
 `ai sandbox create <branch> --inherit-proxy` copies standard host proxy variables into the new container environment. `-P` is the short form of the same boolean switch. The default remains off: if you do not pass the switch, agent-infra does not read or inject host proxy variables.

@@ -111,6 +111,12 @@ export function sandboxImageRefreshLabel(config: Pick<SandboxPathConfig, 'projec
   return `${sandboxLabel(config)}.last-refresh`;
 }
 
+export function sandboxRuntimeCapabilityLabel(
+  config: Pick<SandboxPathConfig, 'project'>
+): string {
+  return `agent-infra.sandbox.runtime-capability.${config.project}`;
+}
+
 export function parsePositiveIntegerOption(value: unknown, optionName: string): number | undefined {
   if (value === undefined || value === null) {
     return undefined;

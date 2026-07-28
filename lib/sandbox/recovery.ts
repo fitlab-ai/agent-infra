@@ -1,6 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { containerNameCandidates, sandboxBranchLabel, sandboxLabel } from './constants.ts';
+import {
+  containerNameCandidates,
+  sandboxBranchLabel,
+  sandboxLabel,
+  sandboxRuntimeCapabilityLabel
+} from './constants.ts';
+import { isAgentClientId } from '../agent-clients/types.ts';
+import {
+  createSandboxCapabilityPlan,
+  runBoundedSandboxHookCommand,
+  runSandboxHooks
+} from './agent-client-reconciler.ts';
 import type { SandboxConfig } from './config.ts';
 import { toEnginePath } from './engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from './mounts.ts';
@@ -9,6 +20,7 @@ import {
   declaredTmpfsSeedEntries,
   resolveTools,
   toolConfigDirCandidates,
+  type SandboxTool,
   type TmpfsSeedEntry
 } from './tools.ts';
 import {
@@ -27,6 +39,8 @@ export type SandboxRecoveryFinding = {
 
 export type SandboxRecoverySnapshot = {
   identityOk: boolean;
+  runtimeCapabilityOk?: boolean;
+  unexpectedCapabilityMounts?: string[];
   mounts: Array<{
     path: string;
     expectedType: string;
@@ -112,6 +126,19 @@ export function classifySandboxRecovery(snapshot: SandboxRecoverySnapshot): Sand
     findings.push({
       repairKind: 'hard-failure',
       message: 'Container identity does not match the requested sandbox branch.'
+    });
+  }
+  if (snapshot.runtimeCapabilityOk === false) {
+    findings.push({
+      repairKind: 'hard-failure',
+      message: 'Container runtime capability signature does not match the current sandbox plan.'
+    });
+  }
+  for (const mountPath of snapshot.unexpectedCapabilityMounts ?? []) {
+    findings.push({
+      repairKind: 'hard-failure',
+      message: `Disabled Agent Client capability remains mounted at ${mountPath}.`,
+      path: mountPath
     });
   }
 
@@ -277,11 +304,10 @@ function hostSourceAccessible(hostPath: string, writable: boolean): boolean {
 function expectedMounts(params: {
   config: SandboxConfig;
   branch: string;
-  engine: string;
+  tools: readonly SandboxTool[];
   actualMounts: Map<string, DockerMount>;
 }): ExpectedMount[] {
-  const { config, branch, actualMounts } = params;
-  const tools = resolveTools(config);
+  const { config, branch, tools, actualMounts } = params;
   const core = sandboxCoreBindMounts(config, branch).map((mount) => ({
     path: mount.containerPath,
     expectedType: 'bind' as const,
@@ -301,7 +327,13 @@ function expectedMounts(params: {
     })
   );
   const persistentTools = tools
-    .filter((tool) => !tool.tmpfs && actualMounts.has(tool.containerMount))
+    .filter((tool) =>
+      !tool.tmpfs
+      && (
+        config.agentClientSource === 'canonical'
+        || actualMounts.has(tool.containerMount)
+      )
+    )
     .map((tool) => ({
       path: tool.containerMount,
       expectedType: 'bind' as const,
@@ -401,7 +433,8 @@ export function collectSandboxRecoverySnapshot(params: {
       });
     }
   }
-  const tools = resolveTools(params.config);
+  const capabilityPlan = createSandboxCapabilityPlan(params.config);
+  const tools = [...capabilityPlan.tools];
   const seeds = declaredTmpfsSeedEntries(tools).map((seed) => {
     const mounted = mountsByDestination.get(seed.stagingPath)?.Type === 'bind';
     return {
@@ -434,11 +467,19 @@ export function collectSandboxRecoverySnapshot(params: {
   }));
   const labels = inspection.Config?.Labels ?? {};
   const branchLabel = labels[sandboxBranchLabel(params.config)];
+  const selectedToolIds = new Set(tools.map((tool) => tool.id));
+  const enforceCanonicalPlan = params.config.agentClientSource === 'canonical';
+  const unexpectedCapabilityMounts = enforceCanonicalPlan
+    ? capabilityPlan.cleanupInventory
+      .filter((tool) => isAgentClientId(tool.id) && !selectedToolIds.has(tool.id))
+      .map((tool) => tool.containerMount)
+      .filter((mountPath) => mountsByDestination.has(mountPath))
+    : [];
   const hasCodex = tools.some((tool) => tool.id === 'codex');
   const mountSnapshots = expectedMounts({
     config: params.config,
     branch: params.branch,
-    engine: params.engine,
+    tools,
     actualMounts: mountsByDestination
   }).map((expected) => {
     const actual = mountsByDestination.get(expected.path);
@@ -478,6 +519,10 @@ export function collectSandboxRecoverySnapshot(params: {
     identityOk: typeof inspection.Id === 'string'
       && inspection.Id.length > 0
       && branchLabel === params.branch,
+    runtimeCapabilityOk: enforceCanonicalPlan
+      ? labels[sandboxRuntimeCapabilityLabel(params.config)] === capabilityPlan.runtimeSignature
+      : undefined,
+    unexpectedCapabilityMounts,
     mounts: mountSnapshots,
     tmpfs,
     seeds,
@@ -676,6 +721,19 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
   let failure: Error | null = null;
 
   try {
+    const capabilityPlan = createSandboxCapabilityPlan(params.config);
+    const hookResults = await runSandboxHooks({
+      hooks: capabilityPlan.hooksByPhase['inspect-recovery'],
+      phase: 'inspect-recovery',
+      context: { config: params.config, plan: capabilityPlan },
+      runCommand: runBoundedSandboxHookCommand
+    });
+    const hookFailure = hookResults.find((result) => result.status === 'hard-failure');
+    if (hookFailure) {
+      throw new Error(
+        hookFailure.message ?? `Sandbox hook '${hookFailure.hookId}' failed.`
+      );
+    }
     if (!params.row.running) {
       startFn(params.engine, params.row.name);
       const initial = assess({

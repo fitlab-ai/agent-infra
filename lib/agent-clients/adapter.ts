@@ -7,6 +7,15 @@ import type {
   AgentClientCapabilityMap,
   AgentClientId
 } from './types.ts';
+import {
+  SANDBOX_HOOK_PHASES
+} from '../sandbox/tool-types.ts';
+import type {
+  AgentClientSandboxDescriptor,
+  SandboxAlias,
+  SandboxTool,
+  SandboxToolContext
+} from '../sandbox/tool-types.ts';
 
 type AgentClientCapabilities = AgentClientCapabilityMap;
 
@@ -23,6 +32,7 @@ type AgentClientAdapter = Readonly<{
   invocation: string;
   capabilities: AgentClientCapabilities;
   project: AgentClientProjectDescriptor;
+  sandbox: AgentClientSandboxDescriptor;
 }>;
 
 type AgentClientRegistry = Readonly<
@@ -40,6 +50,56 @@ type AgentClientManifestEntry = Readonly<{
 }>;
 
 const PROJECT_ASSET_CATEGORIES = ['managed', 'merged', 'ejected'] as const;
+const MAX_SANDBOX_HOOK_TIMEOUT_MS = 300_000;
+const TOOL_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+function freezeTool(tool: SandboxTool): SandboxTool {
+  if (typeof tool.id !== 'string' || !TOOL_ID_PATTERN.test(tool.id)) {
+    throw new Error(`Invalid sandbox tool id: ${String(tool.id)}`);
+  }
+  if (!tool.install?.cmd || !['npm', 'shell'].includes(tool.install.type)) {
+    throw new Error(`Sandbox tool '${tool.id}' has invalid install`);
+  }
+  if (!tool.containerMount.startsWith('/')) {
+    throw new Error(`Sandbox tool '${tool.id}' containerMount must be absolute`);
+  }
+  if (!tool.versionCmd) {
+    throw new Error(`Sandbox tool '${tool.id}' requires versionCmd`);
+  }
+  return Object.freeze({
+    ...tool,
+    install: Object.freeze({ ...tool.install }),
+    ...(tool.envVars ? { envVars: Object.freeze({ ...tool.envVars }) } : {}),
+    ...(tool.hostPreSeedFiles ? {
+      hostPreSeedFiles: Object.freeze(tool.hostPreSeedFiles.map((entry) => Object.freeze({ ...entry })))
+    } : {}),
+    ...(tool.hostPreSeedDirs ? {
+      hostPreSeedDirs: Object.freeze(tool.hostPreSeedDirs.map((entry) => Object.freeze({ ...entry })))
+    } : {}),
+    ...(tool.pathRewriteFiles ? { pathRewriteFiles: Object.freeze([...tool.pathRewriteFiles]) } : {}),
+    ...(tool.hostLiveMounts ? {
+      hostLiveMounts: Object.freeze(tool.hostLiveMounts.map((entry) => Object.freeze({ ...entry })))
+    } : {}),
+    ...(tool.postSetupCmds ? { postSetupCmds: Object.freeze([...tool.postSetupCmds]) } : {}),
+    ...(tool.tmpfs ? {
+      tmpfs: Object.freeze({
+        ...tool.tmpfs,
+        ...(tool.tmpfs.seed ? { seed: Object.freeze([...tool.tmpfs.seed]) } : {})
+      })
+    } : {})
+  }) as SandboxTool;
+}
+
+function freezeAliases(id: AgentClientId, aliases: readonly SandboxAlias[]): readonly SandboxAlias[] {
+  const names = new Set<string>();
+  return Object.freeze(aliases.map((alias) => {
+    if (!alias.name || !alias.command || names.has(alias.name)) {
+      throw new Error(`Agent Client '${id}' has invalid or duplicate sandbox alias '${alias.name}'`);
+    }
+    names.add(alias.name);
+    return Object.freeze({ ...alias });
+  }));
+}
 
 function isProjectRelativeLiteral(value: string): boolean {
   if (
@@ -192,6 +252,43 @@ function defineAgentClientAdapter(
     seenAssets.set(asset, category);
   }
 
+  if (!candidate.sandbox || typeof candidate.sandbox.createTool !== 'function') {
+    throw new Error(`Agent Client '${candidate.id}' requires a sandbox descriptor`);
+  }
+  const hookIds = new Set<string>();
+  const hooks = Object.freeze(candidate.sandbox.hooks.map((hook) => {
+    if (
+      !hook.id
+      || hookIds.has(hook.id)
+      || !SANDBOX_HOOK_PHASES.includes(hook.phase)
+      || typeof hook.run !== 'function'
+    ) {
+      throw new Error(`Agent Client '${candidate.id}' has an invalid sandbox hook`);
+    }
+    if (
+      hook.timeoutMs !== undefined
+      && (
+        !Number.isInteger(hook.timeoutMs)
+        || hook.timeoutMs <= 0
+        || hook.timeoutMs > MAX_SANDBOX_HOOK_TIMEOUT_MS
+      )
+    ) {
+      throw new Error(`Agent Client '${candidate.id}' hook '${hook.id}' has invalid timeoutMs`);
+    }
+    hookIds.add(hook.id);
+    return Object.freeze({ ...hook });
+  }));
+  const aliases = freezeAliases(candidate.id, candidate.sandbox.aliases);
+  const createTool = (context: SandboxToolContext): SandboxTool => {
+    const tool = freezeTool(candidate.sandbox.createTool(context));
+    if (tool.id !== candidate.id) {
+      throw new Error(
+        `Agent Client '${candidate.id}' sandbox tool id must match the adapter id`
+      );
+    }
+    return tool;
+  };
+
   return Object.freeze({
     id: candidate.id,
     displayName: candidate.displayName,
@@ -200,7 +297,8 @@ function defineAgentClientAdapter(
     project: Object.freeze({
       ownedPathPrefixes: Object.freeze(paths),
       ...projectAssets
-    })
+    }),
+    sandbox: Object.freeze({ createTool, aliases, hooks })
   });
 }
 

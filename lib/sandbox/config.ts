@@ -3,7 +3,9 @@ import path from 'node:path';
 import { homedir, platform } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import pc from 'picocolors';
-import { AGENT_CLIENT_IDS } from '../agent-clients/types.ts';
+import { normalizeAgentClients } from '../agent-clients/config.ts';
+import { AGENT_CLIENT_IDS, isAgentClientId } from '../agent-clients/types.ts';
+import type { AgentClientState } from '../agent-clients/types.ts';
 import { validateSandboxEngine } from './engine.ts';
 import { hostJoin } from './engines/wsl2-paths.ts';
 import { findRuntimeEngineMismatches } from './runtime-engines.ts';
@@ -58,6 +60,8 @@ export type SandboxConfig = {
   runtimes: string[];
   tools: string[];
   customTools: SandboxTool[];
+  agentClientState: AgentClientState;
+  agentClientSource: 'canonical' | 'legacy';
   refreshIntervalDays: number;
   dockerfile: string | null;
   vm: SandboxVmConfig;
@@ -66,6 +70,8 @@ export type SandboxConfig = {
 type AircConfig = {
   project?: unknown;
   org?: unknown;
+  agentClients?: unknown;
+  tuis?: unknown;
   sandbox?: SandboxConfigInput;
 };
 
@@ -99,6 +105,23 @@ function cloneDefaults(): SandboxConfigInput & { vm: SandboxVmConfig; runtimes: 
   };
 }
 
+function resolveSandboxToolIds(
+  sandbox: SandboxConfigInput,
+  agentClients: ReturnType<typeof normalizeAgentClients>,
+  defaults: readonly string[]
+): string[] {
+  if (Array.isArray(sandbox.tools)) {
+    const tools = sandbox.tools.filter((tool): tool is string => typeof tool === 'string');
+    return agentClients.source === 'canonical'
+      ? tools.filter((tool) => !isAgentClientId(tool))
+      : tools;
+  }
+  if (agentClients.remainingSandboxTools !== undefined) {
+    return [...agentClients.remainingSandboxTools];
+  }
+  return [...defaults];
+}
+
 export function loadConfig({
   platformFn = platform,
   writeStderr = (chunk) => process.stderr.write(chunk)
@@ -116,6 +139,17 @@ export function loadConfig({
   }
 
   const airc = JSON.parse(fs.readFileSync(configPath, 'utf8')) as AircConfig;
+  const sandboxInput = airc.sandbox;
+  const hasCanonicalAgentClients = Object.prototype.hasOwnProperty.call(airc, 'agentClients');
+  const normalizationInput = hasCanonicalAgentClients && sandboxInput
+    ? {
+        ...airc,
+        sandbox: Object.fromEntries(
+          Object.entries(sandboxInput).filter(([key]) => key !== 'tools')
+        )
+      }
+    : airc;
+  const agentClients = normalizeAgentClients(normalizationInput);
   const defaults = cloneDefaults();
   const sandbox = airc.sandbox ?? {};
   const engine = validateSandboxEngine(sandbox.engine ?? defaults.engine, { platformFn });
@@ -150,6 +184,7 @@ export function loadConfig({
   }
 
   const customTools = parseCustomTools(sandbox.customTools, { home });
+  const tools = resolveSandboxToolIds(sandbox, agentClients, defaults.tools);
 
   return {
     repoRoot,
@@ -165,10 +200,10 @@ export function loadConfig({
     dotfilesDir: hostJoin(home, '.agent-infra', 'dotfiles'),
     engine,
     runtimes,
-    tools: Array.isArray(sandbox.tools) && sandbox.tools.length > 0
-      ? [...sandbox.tools]
-      : defaults.tools,
+    tools,
     customTools,
+    agentClientState: agentClients.state,
+    agentClientSource: agentClients.source,
     refreshIntervalDays: asNonNegativeIntegerOrDefault(
       sandbox.refreshIntervalDays,
       defaults.refreshIntervalDays

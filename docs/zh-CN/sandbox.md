@@ -24,6 +24,37 @@ docker buildx inspect --bootstrap
 
 宿主机 `~/.ssh` 不会 bind mount 到沙箱中。GitHub 访问默认走上面的 `gh` / HTTPS token 路径；`git@github.com:*` 这类 SSH workflow 需要在默认沙箱边界之外另行显式配置。
 
+## Agent Client 能力
+
+canonical `agentClients` 条目决定哪些 Agent Client 会在沙箱内安装和挂载。
+`installInSandbox` 与 `enabled` 相互独立：前者控制沙箱能力，后者控制项目
+资产与集成。
+
+```json
+{
+  "agentClients": [
+    { "id": "claude-code", "enabled": true, "installInSandbox": false },
+    { "id": "codex", "enabled": true, "installInSandbox": true },
+    { "id": "gemini-cli", "enabled": false, "installInSandbox": false },
+    { "id": "opencode", "enabled": false, "installInSandbox": false }
+  ]
+}
+```
+
+Agent Client adapter 会声明镜像包、版本命令、状态目录、凭证/配置 mount、
+setup hint、alias 以及有执行时限的生命周期 hook。`agent-infra` 等非客户端
+工具和已配置的 custom tool 不受该选择影响。修改 `installInSandbox` 后，
+需要重建镜像并重新创建受影响容器。运行时能力 label 会让 start、exec 和
+recovery 拒绝 mount 或 hook 策略已与当前配置不一致的旧容器。
+
+禁用客户端绝不会删除其宿主凭证、配置或历史。即使宿主仍保留已禁用客户端
+的状态，`sandbox show` 也只展示当前选中的工具。只有显式执行
+`sandbox rm`、`sandbox prune` 等清理命令时，才会考虑删除宿主状态。
+
+adapter hook 按声明顺序串行执行，默认 deadline 为 30 秒，上限为 5 分钟。
+创建阶段超时是 fatal，进入前刷新超时只产生 warning，恢复检查超时会把
+容器判为 unhealthy。该 timeout 是内部安全边界，不是用户配置项。
+
 ## 运行时代理继承
 
 `ai sandbox create <branch> --inherit-proxy` 会把宿主机上的标准代理变量复制进新容器环境。`-P` 是同一个布尔开关的短写法。默认仍然关闭：不传该开关时，agent-infra 不读取也不注入宿主代理变量。

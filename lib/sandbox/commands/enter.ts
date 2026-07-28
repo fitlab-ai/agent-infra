@@ -8,6 +8,11 @@ import {
 import { detectEngine } from '../engine.ts';
 import { ensureSandboxReady } from '../recovery.ts';
 import {
+  createSandboxCapabilityPlan,
+  runBoundedSandboxHookCommand,
+  runSandboxHooks
+} from '../agent-client-reconciler.ts';
+import {
   formatCredentialWarnings,
   formatRemaining,
   hasClaudeProviderAuth,
@@ -186,8 +191,25 @@ export async function enter(args: string[]): Promise<number> {
   });
   const container = ready.container;
   const cmd = parsed.command;
+  const capabilityPlan = createSandboxCapabilityPlan(config);
+  const enterHookResults = await runSandboxHooks({
+    hooks: capabilityPlan.hooksByPhase['before-enter'],
+    phase: 'before-enter',
+    context: { config, plan: capabilityPlan },
+    runCommand: runBoundedSandboxHookCommand
+  });
+  for (const result of enterHookResults) {
+    if (result.status === 'fatal') {
+      throw new Error(result.message ?? `Sandbox hook '${result.hookId}' failed.`);
+    }
+    if (result.status === 'warning') {
+      process.stderr.write(
+        `Warning: ${result.message ?? `Sandbox hook '${result.hookId}' did not complete.`}\n`
+      );
+    }
+  }
 
-  if (config.tools.includes('claude-code')) {
+  if (capabilityPlan.selectedAgentClients.some((adapter) => adapter.id === 'claude-code')) {
     try {
       // Scan all projects so a refresh from a neighbouring sandbox can still flow back to the host.
       const providerAuthAvailable = hasClaudeProviderAuth(config.home);

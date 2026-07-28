@@ -1,33 +1,10 @@
 import path from 'node:path';
+import { createSandboxCapabilityPlan } from './agent-client-reconciler.ts';
 import { safeNameCandidates, sanitizeBranchName } from './constants.ts';
 import { hostJoin } from './engines/wsl2-paths.ts';
+import type { SandboxTool, SandboxToolInstall } from './tool-types.ts';
 
-export type SandboxToolInstall =
-  | { type: 'npm'; cmd: string }
-  | { type: 'shell'; cmd: string };
-
-export type SandboxTool = {
-  id: string;
-  name: string;
-  install: SandboxToolInstall;
-  sandboxBase: string;
-  containerMount: string;
-  versionCmd: string;
-  setupHint: string;
-  envVars?: Record<string, string>;
-  hostPreSeedFiles?: Array<{ hostPath: string; sandboxName: string }>;
-  hostPreSeedDirs?: Array<{ hostDir: string; sandboxSubdir: string }>;
-  pathRewriteFiles?: string[];
-  hostLiveMounts?: Array<{ hostPath: string; containerSubpath: string }>;
-  postSetupCmds?: string[];
-  // When set, containerMount is mounted as an in-container tmpfs (RAM) instead
-  // of bind-mounting the host config dir, keeping high-churn tool logs off the
-  // host disk. `seed` lists the host-dir entries (relative to the tool's config
-  // dir) to copy into the tmpfs when the container starts. It is an explicit
-  // allowlist so runtime files (e.g. logs_2.sqlite, sessions) left in the host
-  // dir stay out of the container and seeded config cannot write back.
-  tmpfs?: { size?: string; seed?: string[] };
-};
+export type { SandboxTool, SandboxToolInstall } from './tool-types.ts';
 
 export type TmpfsSeedEntry = {
   toolId: string;
@@ -64,113 +41,10 @@ type ToolsConfig = {
   project: string;
   tools: string[];
   customTools?: SandboxTool[];
+  agentClientState?: import('../agent-clients/types.ts').AgentClientState;
 };
 
 const TOOL_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-
-function createBuiltinTools(home: string, project: string): Record<string, SandboxTool> {
-  return {
-    'claude-code': {
-      id: 'claude-code',
-      name: 'Claude Code',
-      install: { type: 'npm', cmd: '@anthropic-ai/claude-code@latest' },
-      sandboxBase: hostJoin(home, '.agent-infra', 'sandboxes', 'claude-code'),
-      containerMount: '/home/devuser/.claude',
-      versionCmd: 'claude --version',
-      setupHint: 'Authenticates via host credentials live-mounted at ~/.claude/.credentials.json',
-      // Claude Code stores user data (.claude.json — onboarding state, theme,
-      // workspace trust) at $HOME/.claude.json by default, which sits OUTSIDE
-      // the bind-mounted /home/devuser/.claude tree, so our preseeded
-      // .claude.json never gets read and the theme picker re-runs on every
-      // container start. Pinning CLAUDE_CONFIG_DIR to the tool mount relocates
-      // .claude.json into the same directory as .credentials.json/settings.json,
-      // letting ensureClaudeOnboarding actually take effect.
-      envVars: { CLAUDE_CONFIG_DIR: '/home/devuser/.claude' },
-      hostPreSeedDirs: [
-        { hostDir: hostJoin(home, '.claude', 'plugins'), sandboxSubdir: 'plugins' }
-      ],
-      pathRewriteFiles: [
-        'plugins/installed_plugins.json',
-        'plugins/known_marketplaces.json'
-      ],
-      hostLiveMounts: [
-        {
-          hostPath: hostJoin(home, '.agent-infra', 'credentials', project, 'claude-code', '.credentials.json'),
-          containerSubpath: '.credentials.json'
-        }
-      ]
-    },
-    codex: {
-      id: 'codex',
-      name: 'Codex',
-      install: { type: 'npm', cmd: '@openai/codex' },
-      sandboxBase: hostJoin(home, '.agent-infra', 'sandboxes', 'codex'),
-      containerMount: '/home/devuser/.codex',
-      versionCmd: 'codex --version',
-      setupHint: 'Run codex once inside the container and choose Device Code login if needed.',
-      // codex churns ~/.codex/logs_2.sqlite heavily (upstream openai/codex#24275);
-      // a bind-mount would write-amplify onto the host SSD via virtiofs. Mount the
-      // codex home as tmpfs so those logs stay in RAM and die with the container.
-      // Seeded config (config.toml, model-catalogs) is copied into the tmpfs at
-      // startup; runtime files like logs_2.sqlite stay in RAM.
-      tmpfs: { size: '512m', seed: ['config.toml', 'model-catalogs'] },
-      hostLiveMounts: [
-        { hostPath: hostJoin(home, '.codex', 'auth.json'), containerSubpath: 'auth.json' }
-      ],
-      postSetupCmds: [
-        'test -d /workspace/.codex/commands && ln -sfn /workspace/.codex/commands /home/devuser/.codex/prompts || true'
-      ]
-    },
-    opencode: {
-      id: 'opencode',
-      name: 'OpenCode',
-      install: { type: 'npm', cmd: 'opencode-ai' },
-      sandboxBase: hostJoin(home, '.agent-infra', 'sandboxes', 'opencode'),
-      containerMount: '/home/devuser/.local/share/opencode',
-      versionCmd: 'opencode version',
-      setupHint: 'Configure OpenCode credentials inside the container before first use.',
-      // OpenCode reads opencode.json from $XDG_CONFIG_HOME/opencode by default,
-      // outside this tool mount. Pin the config file path so the inherited
-      // sandbox opencode.json is the one the TUI actually reads.
-      envVars: { OPENCODE_CONFIG: '/home/devuser/.local/share/opencode/opencode.json' },
-      hostLiveMounts: [
-        {
-          hostPath: hostJoin(home, '.local', 'share', 'opencode', 'auth.json'),
-          containerSubpath: 'auth.json'
-        }
-      ]
-    },
-    'gemini-cli': {
-      id: 'gemini-cli',
-      name: 'Gemini CLI',
-      install: { type: 'npm', cmd: '@google/gemini-cli' },
-      sandboxBase: hostJoin(home, '.agent-infra', 'sandboxes', 'gemini-cli'),
-      containerMount: '/home/devuser/.gemini',
-      versionCmd: 'gemini --version',
-      setupHint: 'Run gemini inside the container to finish authentication.',
-      hostLiveMounts: [
-        { hostPath: hostJoin(home, '.gemini', 'oauth_creds.json'), containerSubpath: 'oauth_creds.json' }
-      ],
-      hostPreSeedFiles: [
-        { hostPath: hostJoin(home, '.gemini', 'settings.json'), sandboxName: 'settings.json' },
-        { hostPath: hostJoin(home, '.gemini', 'google_accounts.json'), sandboxName: 'google_accounts.json' }
-      ]
-    },
-    'agent-infra': {
-      id: 'agent-infra',
-      name: 'agent-infra CLI',
-      install: { type: 'npm', cmd: '@fitlab-ai/agent-infra@latest' },
-      sandboxBase: hostJoin(home, '.agent-infra', 'sandboxes', 'agent-infra'),
-      containerMount: '/home/devuser/.agent-infra-cli',
-      versionCmd: 'ai version --raw',
-      setupHint: 'Provides the ai and agent-infra CLI commands inside the sandbox.'
-    }
-  };
-}
-
-export function builtinToolIds(): string[] {
-  return Object.keys(createBuiltinTools('', ''));
-}
 
 function validateTool(tool: SandboxTool): void {
   if (!tool.id || !TOOL_ID_PATTERN.test(tool.id)) {
@@ -379,33 +253,7 @@ export function parseCustomTools(value: unknown, options: { home: string }): San
 }
 
 export function resolveTools(config: ToolsConfig): SandboxTool[] {
-  const builtins = createBuiltinTools(config.home, config.project);
-  const customs = config.customTools ?? [];
-
-  const seen = new Set<string>();
-  for (const tool of customs) {
-    if (builtins[tool.id]) {
-      throw new Error(`Custom sandbox tool id "${tool.id}" collides with a built-in tool`);
-    }
-    if (seen.has(tool.id)) {
-      throw new Error(`Duplicate sandbox tool id "${tool.id}" in customTools`);
-    }
-    seen.add(tool.id);
-  }
-
-  const merged: Record<string, SandboxTool> = { ...builtins };
-  for (const tool of customs) {
-    merged[tool.id] = tool;
-  }
-
-  return config.tools.map((id) => {
-    const tool = merged[id];
-    if (!tool) {
-      throw new Error(`Unknown sandbox tool: ${id}`);
-    }
-    validateTool(tool);
-    return tool;
-  });
+  return [...createSandboxCapabilityPlan(config).tools];
 }
 
 export function toolConfigDir(tool: SandboxTool, project: string, branch: string): string {
