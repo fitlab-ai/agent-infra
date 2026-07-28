@@ -22,7 +22,7 @@ Use this template when writing `review-plan.md` or `review-plan-r{N}.md`.
 - **Review Time**: {timestamp}
 - **Scope**: {file-count and major modules}
 - **Overall Verdict**: {Approved / Changes Requested / Rejected}
-- **Findings (AI-actionable)**: 0 blockers, 0 majors, 0 minors / **Manual validation**: 0
+- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors / **Manual validation**: 0
 
 ## Review Coverage Declaration
 

@@ -22,7 +22,7 @@
 - **审查时间**：{timestamp}
 - **审查范围**：{file-count and major modules}
 - **总体结论**：{通过 / 需要修改 / 拒绝}
-- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0
+- **发现（AI 可处理）**：{unresolved-blockers} 阻塞项，{unresolved-major} 主要，{unresolved-minor} 次要 / **人工校验**：0
 
 ## 检视覆盖声明
 

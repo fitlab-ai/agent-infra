@@ -25,7 +25,7 @@
 - **审查差异指纹**：{git-workflow snapshot 输出的 fingerprint 字段}
 - **审查快照树**：{git-workflow snapshot 输出的 tree 字段}
 - **总体结论**：{通过 / 需要修改 / 拒绝}（恰取一个；禁止写组合短语，否则 verify gate 失败）
-- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0
+- **发现（AI 可处理）**：{unresolved-blockers} 阻塞项，{unresolved-major} 主要，{unresolved-minor} 次要 / **人工校验**：0
 
 ## 检视覆盖声明
 

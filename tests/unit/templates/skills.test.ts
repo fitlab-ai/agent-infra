@@ -267,6 +267,75 @@ test("workflow state-check consumers use the typed task snapshot entrypoint", ()
   });
 });
 
+test("review skills reuse one unresolved-count snapshot for reports and completion events", () => {
+  const reviewFamilies = [
+    { name: "review-analysis", stage: "analysis", event: "review-analysis.completed" },
+    { name: "review-plan", stage: "plan", event: "review-plan.completed" },
+    { name: "review-code", stage: "code", event: "review-code.completed" }
+  ];
+  const countMappings = [
+    { field: "blocker", placeholder: "{unresolved-blockers}", reportField: "blocker", flag: "--blockers" },
+    { field: "major", placeholder: "{unresolved-major}", reportField: "major", flag: "--major" },
+    { field: "minor", placeholder: "{unresolved-minor}", reportField: "minor", flag: "--minor" }
+  ];
+
+  reviewFamilies.forEach(({ name, stage, event }) => {
+    skillDocPaths(name).forEach((relativePath) => {
+      const content = read(relativePath);
+      const stageCommand = `agent-infra-internal task-ledger {task-id} stage-status --stage ${stage}`;
+      const eventCommand = `agent-infra-internal task-event {task-id} ${event}`;
+      const stageIndex = content.indexOf(stageCommand);
+      const eventIndex = content.indexOf(eventCommand);
+
+      assert.equal(
+        [...content.matchAll(new RegExp(escapeRegExp(stageCommand), "g"))].length,
+        1,
+        `${relativePath} should read the stage status exactly once`
+      );
+      assert.notEqual(eventIndex, -1, `${relativePath} should declare its completion event`);
+
+      countMappings.forEach(({ field, placeholder, reportField, flag }) => {
+        const binding = `${placeholder} = stageStatus.unresolvedFindingCounts.${field}`;
+        const reportMapping = `report-summary.${reportField} = ${placeholder}`;
+        const bindingIndex = content.indexOf(binding);
+        const reportIndex = content.indexOf(reportMapping);
+
+        assert.ok(stageIndex < bindingIndex, `${relativePath} should bind ${placeholder} after stage-status`);
+        assert.ok(bindingIndex < reportIndex, `${relativePath} should map ${placeholder} into the report`);
+        assert.ok(reportIndex < eventIndex, `${relativePath} should finalize the report before the completion event`);
+        assert.ok(
+          content.includes(`${flag} ${placeholder}`),
+          `${relativePath} should reuse ${placeholder} for ${flag}`
+        );
+      });
+    });
+  });
+});
+
+test("review report templates expose unresolved-count placeholders exactly once", () => {
+  const reportTemplates = [
+    ...["review-analysis", "review-plan", "review-code"].map(
+      (name) => `.agents/skills/${name}/reference/report-template.md`
+    ),
+    ...["review-analysis", "review-plan", "review-code"].flatMap((name) => [
+      `templates/.agents/skills/${name}/reference/report-template.zh-CN.md`,
+      `templates/.agents/skills/${name}/reference/report-template.en.md`
+    ])
+  ];
+
+  reportTemplates.forEach((relativePath) => {
+    const content = read(relativePath);
+
+    ["{unresolved-blockers}", "{unresolved-major}", "{unresolved-minor}"].forEach((placeholder) => {
+      assert.equal(
+        [...content.matchAll(new RegExp(escapeRegExp(placeholder), "g"))].length,
+        1,
+        `${relativePath} should contain ${placeholder} exactly once`
+      );
+    });
+  });
+});
+
 test("workflow verification consumers declare their business verification events", () => {
   const expectations: Record<string, string[]> = {
     "analyze-task": ["analyze.awaiting-input", "analyze.completed"],

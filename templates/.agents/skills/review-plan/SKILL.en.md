@@ -66,7 +66,20 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
 ### 6. Update Task Status
 
-After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage plan --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. Do not scan ids or edit ledger rows. After all ledger writes, call `agent-infra-internal task-ledger {task-id} stage-status --stage plan` exactly once. Derive the verdict and next-step branch from `stageStatus.canAdvance`, and blocker/major/minor event counts from `unresolvedFindingCounts`: only `canAdvance=true` permits `approved`; otherwise use `changes-requested` or `rejected`. Then run `agent-infra-internal task-event {task-id} review-plan.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {n} --major {n} --minor {n} --manual-validation {n}`.
+After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage plan --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. Do not scan ids or edit ledger rows. After all ledger writes, call `agent-infra-internal task-ledger {task-id} stage-status --stage plan` exactly once.
+
+Bind and reuse this structured mapping from that one response:
+
+```text
+{unresolved-blockers} = stageStatus.unresolvedFindingCounts.blocker
+{unresolved-major} = stageStatus.unresolvedFindingCounts.major
+{unresolved-minor} = stageStatus.unresolvedFindingCounts.minor
+report-summary.blocker = {unresolved-blockers}
+report-summary.major = {unresolved-major}
+report-summary.minor = {unresolved-minor}
+```
+
+First replace the matching placeholders in the report summary with those values. Do not preserve estimates or total findings, and do not rescan the finding list. If replacement fails or a response field is missing, stop before the completion event. Derive the verdict and next-step branch from the same response's `stageStatus.canAdvance`: only `canAdvance=true` permits `approved`; otherwise use `changes-requested` or `rejected`. Then run `agent-infra-internal task-event {task-id} review-plan.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n}`.
 
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 

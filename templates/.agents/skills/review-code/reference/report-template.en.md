@@ -25,7 +25,7 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 - **Reviewed Diff Fingerprint**: {fingerprint field from git-workflow snapshot}
 - **Reviewed Snapshot Tree**: {tree field from git-workflow snapshot}
 - **Overall Verdict**: {Approved / Changes Requested / Rejected} (pick exactly one; combined phrases will fail the verify gate)
-- **Findings (AI-actionable)**: 0 blockers, 0 majors, 0 minors / **Manual validation**: 0
+- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors / **Manual validation**: 0
 
 ## Review Coverage Declaration
 
