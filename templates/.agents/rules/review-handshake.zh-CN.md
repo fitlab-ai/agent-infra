@@ -88,7 +88,7 @@
 
 ## post-review commit 门禁（仅 code 阶段）
 
-- `review-code` 一次性捕获审查基线 `R`（diff base）、完整工作区差异指纹 `F` 与规范化快照树 `T`；Approved 且快照干净时可令 `B=R`，Approved 且含未提交差异时清除/不写 `B`。
+- `review-code` 一次性捕获审查提交 `R`（本轮 HEAD）与独立差异基线 `D`；`F` 覆盖 `D` 到当前工作区的完整差异，规范化快照树 `T` 表示当前工作区。Approved 且 `T == R^{tree}` 时可令 `B=R`，Approved 且含未提交差异时清除/不写 `B`。
 - `commit` 只读取最高轮 Approved `review-code` 产物；提交前比较 `pre_head == R`、完整工作区树 `W == T`、规范化暂存树 `S == T`，任一失配都在 `git commit` 前阻断并报告两组 added/missing/different 路径。
 - 成功提交后令 `B=last_reviewed_commit=<new_head>`；`B` 只表示已经落到 Git commit 的审查锚点。
 - `complete-task` 的 `post-review-commit` gate 只使用 B；B 缺失、畸形或对象不存在时报告 `reviewed snapshot was not anchored`，不得回退 R。

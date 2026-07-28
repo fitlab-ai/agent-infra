@@ -21,10 +21,10 @@ function fingerprint(repoRoot: string, mode: "worktree" | "staged", baseline: st
   return value;
 }
 
-type Snapshot = { baseline: string; fingerprint: string; tree: string };
+type Snapshot = { baseline: string; diffBase: string; fingerprint: string; tree: string };
 
-function snapshot(repoRoot: string, mode: "worktree" | "staged", baseline: string): Snapshot {
-  return snapshotReview({ cwd: repoRoot, mode, baseline, globs: resolvePostReviewGlobs({}, {}) }) as Snapshot;
+function snapshot(repoRoot: string, mode: "worktree" | "staged", baseline: string, diffBase?: string): Snapshot {
+  return snapshotReview({ cwd: repoRoot, mode, baseline, diffBase, globs: resolvePostReviewGlobs({}, {}) }) as Snapshot;
 }
 
 function compare(repoRoot: string, expected: string, actual: string) {
@@ -87,6 +87,24 @@ test("review snapshots produce comparable worktree and staged trees without muta
       status: 0,
       payload: { equal: true, added: [], missing: [], different: [] }
     });
+  });
+});
+
+test("review snapshot fingerprints a clean committed range from an independent diff base", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-snapshot-committed-range-", (tempRoot) => {
+    const diffBase = setupRepo(tempRoot);
+    write(path.join(tempRoot, ".agents/skills/existing.md"), "base\ncommitted\n");
+    git(tempRoot, ["add", ".agents/skills/existing.md"]);
+    git(tempRoot, ["commit", "-qm", "committed review target"]);
+    const reviewedCommit = git(tempRoot, ["rev-parse", "HEAD"]);
+
+    const emptyAtHead = snapshot(tempRoot, "worktree", reviewedCommit);
+    const committedRange = snapshot(tempRoot, "worktree", reviewedCommit, diffBase);
+
+    assert.equal(committedRange.baseline, reviewedCommit);
+    assert.equal(committedRange.diffBase, diffBase);
+    assert.equal(committedRange.tree, git(tempRoot, ["rev-parse", `${reviewedCommit}^{tree}`]));
+    assert.notEqual(committedRange.fingerprint, emptyAtHead.fingerprint);
   });
 });
 

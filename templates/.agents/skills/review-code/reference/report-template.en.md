@@ -21,7 +21,8 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 - **Reviewer**: {reviewer-name}
 - **Review Time**: {timestamp}
 - **Scope**: {file-count and major modules}
-- **Review Baseline Commit**: {raw R captured once for this round} (diff base only; see `.agents/rules/review-handshake.md`)
+- **Review Baseline Commit**: {raw reviewed commit R captured once for this round; must equal this round's HEAD}
+- **Reviewed Diff Base**: {raw D used for the complete diff/fingerprint; the merge-base of R and the PR base SHA when a PR is bound, otherwise R}
 - **Reviewed Diff Fingerprint**: {fingerprint field from git-workflow snapshot}
 - **Reviewed Snapshot Tree**: {tree field from git-workflow snapshot}
 - **Overall Verdict**: {Approved / Changes Requested / Rejected} (pick exactly one; combined phrases will fail the verify gate)

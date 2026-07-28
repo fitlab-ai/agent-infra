@@ -88,7 +88,7 @@ When an executor judges an item to be a key design decision that needs human rul
 
 ## post-review commit gate (code stage only)
 
-- `review-code` captures the review baseline `R` (diff base), full-worktree diff fingerprint `F`, and normalized snapshot tree `T`. An Approved clean snapshot may set `B=R`; an Approved snapshot with uncommitted changes clears or omits `B`.
+- `review-code` captures the reviewed commit `R` (this round's HEAD) and an independent diff base `D` exactly once. `F` covers the complete difference from D to the current worktree, while normalized snapshot tree `T` represents the current worktree. An Approved snapshot with `T == R^{tree}` may set `B=R`; an Approved snapshot with uncommitted changes clears or omits `B`.
 - `commit` reads only the highest-round Approved `review-code` artifact. Before committing it requires `pre_head == R`, complete worktree tree `W == T`, and normalized staged tree `S == T`; any mismatch blocks before `git commit` and reports added, missing, and different paths for both comparisons.
 - After a successful commit it sets `B=last_reviewed_commit=<new_head>`; B means only a reviewed snapshot anchored to a Git commit.
 - The `complete-task` `post-review-commit` gate uses only B. When B is absent, malformed, or missing as a Git object, it reports `reviewed snapshot was not anchored` and never falls back to R.

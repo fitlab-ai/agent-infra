@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   extractReviewBaseline,
+  extractReviewDiffBase,
   extractReviewDiffFingerprint,
   extractReviewedSnapshotTree,
   findAuthoritativeReviewCodeArtifact,
@@ -794,6 +795,7 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
   const content = fs.readFileSync(resolvedArtifact.path, "utf8");
   const verdict = parseReviewVerdict(content);
   const reviewBaseline = extractReviewBaseline(content);
+  const reviewDiffBase = extractReviewDiffBase(content);
   const reviewedFingerprint = extractReviewDiffFingerprint(content);
   const reviewedTree = extractReviewedSnapshotTree(content);
 
@@ -804,10 +806,16 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
   let gitRoot;
   let head;
   let baseline;
+  let diffBase;
   try {
     gitRoot = execFileSync("git", ["-C", taskDir, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
     head = execFileSync("git", ["-C", gitRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
     baseline = execFileSync("git", ["-C", gitRoot, "rev-parse", `${reviewBaseline}^{commit}`], { encoding: "utf8" }).trim();
+    diffBase = execFileSync(
+      "git",
+      ["-C", gitRoot, "rev-parse", `${reviewDiffBase || reviewBaseline}^{commit}`],
+      { encoding: "utf8" }
+    ).trim();
   } catch {
     return blockedResult(
       "review-fact",
@@ -824,7 +832,13 @@ function checkReviewFact({ taskDir, artifactFile }: any): any {
 
   let actualSnapshot;
   try {
-    actualSnapshot = snapshotReview({ cwd: gitRoot, mode: "worktree", baseline, globs: resolvePostReviewGlobs({}, loadPostReviewConfig(repoRoot)) });
+    actualSnapshot = snapshotReview({
+      cwd: gitRoot,
+      mode: "worktree",
+      baseline,
+      diffBase,
+      globs: resolvePostReviewGlobs({}, loadPostReviewConfig(repoRoot))
+    });
   } catch {
     return blockedResult(
       "review-fact",

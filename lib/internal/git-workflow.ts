@@ -27,7 +27,7 @@ function gitWorkflow(args: string[] = []): void {
     const inputIndex = rest.indexOf('--input');
     const input = inputIndex >= 0 && rest[inputIndex + 1] ? JSON.parse(fs.readFileSync(rest[inputIndex + 1]!, 'utf8')) : null;
     if (!input) result = { status: 'failed', changed: false, error: { code: 'GIT_INPUT_REQUIRED', message: '--input JSON file is required' } };
-    else if (action === 'snapshot') result = { status: 'no-op', changed: false, snapshot: snapshotReview({ cwd: cwd ?? process.cwd(), mode: input.mode, baseline: input.baseline, globs: input.globs ?? resolvePostReviewGlobs({}, {}) }), error: null };
+    else if (action === 'snapshot') result = { status: 'no-op', changed: false, snapshot: snapshotReview({ cwd: cwd ?? process.cwd(), mode: input.mode, baseline: input.baseline, diffBase: input.diffBase, globs: input.globs ?? resolvePostReviewGlobs({}, {}) }), error: null };
     else result = { status: 'no-op', changed: false, comparison: compareReviewTrees({ cwd: cwd ?? process.cwd(), expected: input.expected, actual: input.actual }), error: null };
   } else result = { status: 'failed', changed: false, error: { code: 'GIT_ACTION_INVALID', message: `Unknown git-workflow action '${action ?? ''}'` } };
   output(result);

@@ -56,6 +56,11 @@ export function extractReviewBaseline(content: string): string {
   return match ? match[1]!.trim().replace(/`/g, "") : "";
 }
 
+export function extractReviewDiffBase(content: string): string {
+  const match = String(content).match(/^[-*]?\s*\*\*(?:审查差异基线|Reviewed Diff Base)\*\*[:：]\s*(.*?)\s*$/m);
+  return match ? match[1]!.trim().replace(/`/g, "") : "";
+}
+
 export function extractReviewDiffFingerprint(content: string): string {
   const match = String(content).match(/^[-*]?\s*\*\*(?:审查差异指纹|Reviewed Diff Fingerprint)\*\*[:：]\s*(.*?)\s*$/m);
   return match ? match[1]!.trim().replace(/`/g, "") : "";

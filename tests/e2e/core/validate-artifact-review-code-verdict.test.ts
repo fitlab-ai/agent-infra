@@ -56,6 +56,7 @@ function buildReviewArtifact(verdictLine: string, baseline: string, reviewedFing
     "",
     "- **审查者**：codex",
     `- **审查基线提交**：${baseline}`,
+    `- **审查差异基线**：${baseline}`,
     `- **审查差异指纹**：${reviewedFingerprint}`,
     `- **审查快照树**：${reviewedTree}`,
     `- ${verdictLine}`,

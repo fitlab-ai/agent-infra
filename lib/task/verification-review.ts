@@ -1,5 +1,6 @@
 export {
   extractReviewBaseline,
+  extractReviewDiffBase,
   extractReviewDiffFingerprint,
   extractReviewedSnapshotTree,
   findAuthoritativeReviewCodeArtifact,

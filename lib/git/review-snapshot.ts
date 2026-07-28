@@ -40,19 +40,49 @@ function projectStaged(repoRoot: string, baseline: string, globs: string[], env:
   }
 }
 
-function snapshotReview(input: { cwd: string; mode: 'worktree' | 'staged'; baseline: string; globs: string[] }) {
-  const repoRoot = String(git(input.cwd, ['rev-parse', '--show-toplevel'])).trim();
-  const resolvedBaseline = String(git(repoRoot, ['rev-parse', '--verify', `${input.baseline}^{commit}`])).trim();
-  return withTemporaryIndex(repoRoot, resolvedBaseline, (env) => {
-    if (input.mode === 'worktree') projectWorktree(repoRoot, resolvedBaseline, input.globs, env);
-    else projectStaged(repoRoot, resolvedBaseline, input.globs, env);
-    const diff = execFileSync('git', ['diff', '--cached', '--binary', resolvedBaseline, '--', ...input.globs], { cwd: repoRoot, encoding: 'buffer', env });
+function projectSnapshot(
+  repoRoot: string,
+  mode: 'worktree' | 'staged',
+  baseline: string,
+  globs: string[]
+) {
+  return withTemporaryIndex(repoRoot, baseline, (env) => {
+    if (mode === 'worktree') projectWorktree(repoRoot, baseline, globs, env);
+    else projectStaged(repoRoot, baseline, globs, env);
     return {
-      baseline: resolvedBaseline,
-      fingerprint: `sha256:${crypto.createHash('sha256').update(diff).digest('hex')}`,
+      diff: execFileSync('git', ['diff', '--cached', '--binary', baseline, '--', ...globs], {
+        cwd: repoRoot,
+        encoding: 'buffer',
+        env
+      }),
       tree: String(git(repoRoot, ['write-tree'], { env })).trim()
     };
   });
+}
+
+function snapshotReview(input: {
+  cwd: string;
+  mode: 'worktree' | 'staged';
+  baseline: string;
+  diffBase?: string;
+  globs: string[];
+}) {
+  const repoRoot = String(git(input.cwd, ['rev-parse', '--show-toplevel'])).trim();
+  const resolvedBaseline = String(git(repoRoot, ['rev-parse', '--verify', `${input.baseline}^{commit}`])).trim();
+  const resolvedDiffBase = String(git(
+    repoRoot,
+    ['rev-parse', '--verify', `${input.diffBase || resolvedBaseline}^{commit}`]
+  )).trim();
+  const reviewed = projectSnapshot(repoRoot, input.mode, resolvedBaseline, input.globs);
+  const fingerprintSource = resolvedDiffBase === resolvedBaseline
+    ? reviewed.diff
+    : projectSnapshot(repoRoot, input.mode, resolvedDiffBase, input.globs).diff;
+  return {
+    baseline: resolvedBaseline,
+    diffBase: resolvedDiffBase,
+    fingerprint: `sha256:${crypto.createHash('sha256').update(fingerprintSource).digest('hex')}`,
+    tree: reviewed.tree
+  };
 }
 
 function compareReviewTrees(input: { cwd: string; expected: string; actual: string }) {

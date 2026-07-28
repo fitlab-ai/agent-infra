@@ -717,6 +717,27 @@ test("review-code report templates expose implementation coverage structures", (
   });
 });
 
+test("review-code templates separate reviewed commit from committed-range diff base", () => {
+  for (const relativePath of [
+    ".agents/skills/review-code/SKILL.md",
+    "templates/.agents/skills/review-code/SKILL.zh-CN.md",
+    "templates/.agents/skills/review-code/SKILL.en.md"
+  ]) {
+    const content = read(relativePath);
+    assert.ok(content.includes("platform-pr inspect"), `${relativePath} should inspect a bound PR`);
+    assert.ok(content.includes("git merge-base"), `${relativePath} should resolve a committed-range base`);
+    assert.ok(content.includes("diffBase"), `${relativePath} should pass the independent diff base to snapshot`);
+  }
+
+  for (const [relativePath, field] of [
+    [".agents/skills/review-code/reference/report-template.md", "**审查差异基线**"],
+    ["templates/.agents/skills/review-code/reference/report-template.zh-CN.md", "**审查差异基线**"],
+    ["templates/.agents/skills/review-code/reference/report-template.en.md", "**Reviewed Diff Base**"]
+  ] as Array<[string, string]>) {
+    assert.ok(read(relativePath).includes(field), `${relativePath} should record ${field}`);
+  }
+});
+
 test("review-code risk lenses and cross-platform reference chain stay complete", () => {
   const methodFiles = [
     ".agents/rules/review-method.md",
