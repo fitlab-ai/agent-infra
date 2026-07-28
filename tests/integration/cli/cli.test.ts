@@ -584,9 +584,12 @@ test("GitHub init full sync installs lifecycle workflows in the downstream proje
     assert.ok(fs.existsSync(path.join(tmpDir, ".github/scripts/sync-labels-to-set.sh")));
 
     const config = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    assert.deepEqual(Object.keys(config.files.managedBaselines).sort(), lifecycleWorkflows
-      .map((workflow) => `.github/workflows/${workflow}`)
-      .sort());
+    const baselineTargets = Object.keys(config.files.managedBaselines);
+    for (const workflow of lifecycleWorkflows) {
+      assert.ok(baselineTargets.includes(`.github/workflows/${workflow}`));
+    }
+    assert.ok(baselineTargets.some((target) => target.startsWith(".claude/commands/")));
+    assert.ok(baselineTargets.includes(".codex/hooks.json"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -608,7 +611,12 @@ test("non-GitHub init full sync excludes GitHub lifecycle workflows", async () =
 
     assert.ok(!fs.existsSync(path.join(tmpDir, ".github")));
     const config = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    assert.equal(config.files.managedBaselines, undefined);
+    const baselineTargets = Object.keys(config.files.managedBaselines);
+    assert.ok(baselineTargets.some((target) => target.startsWith(".claude/commands/")));
+    assert.ok(baselineTargets.includes(".codex/hooks.json"));
+    for (const baseline of Object.values(config.files.managedBaselines)) {
+      assert.match(String(baseline), /^sha256:[a-f0-9]{64}$/);
+    }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -745,7 +753,10 @@ test("agent-infra update refreshes seed files and syncs file registry", async ()
       assert.ok(fs.existsSync(path.join(tmpDir, ".github/workflows", workflow)));
     }
     const synced = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    assert.equal(Object.keys(synced.files.managedBaselines).length, 3);
+    const baselineTargets = Object.keys(synced.files.managedBaselines);
+    assert.ok(baselineTargets.includes(".github/workflows/metadata-sync.yml"));
+    assert.ok(baselineTargets.includes(".codex/hooks.json"));
+    assert.ok(baselineTargets.some((target) => target.startsWith(".gemini/commands/")));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

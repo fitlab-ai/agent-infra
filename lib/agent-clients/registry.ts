@@ -115,7 +115,10 @@ function createAgentClientManifest(): readonly AgentClientManifestEntry[] {
     AGENT_CLIENT_ADAPTERS.map((adapter) => Object.freeze({
       id: adapter.id,
       displayName: adapter.displayName,
-      ownedPathPrefixes: Object.freeze([...adapter.project.ownedPathPrefixes])
+      ownedPathPrefixes: Object.freeze([...adapter.project.ownedPathPrefixes]),
+      managed: Object.freeze([...adapter.project.managed]),
+      merged: Object.freeze([...adapter.project.merged]),
+      ejected: Object.freeze([...adapter.project.ejected])
     }))
   );
 }

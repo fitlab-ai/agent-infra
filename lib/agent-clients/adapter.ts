@@ -12,6 +12,9 @@ type AgentClientCapabilities = AgentClientCapabilityMap;
 
 type AgentClientProjectDescriptor = Readonly<{
   ownedPathPrefixes: readonly string[];
+  managed: readonly string[];
+  merged: readonly string[];
+  ejected: readonly string[];
 }>;
 
 type AgentClientAdapter = Readonly<{
@@ -29,7 +32,25 @@ type AgentClientManifestEntry = Readonly<{
   id: AgentClientId;
   displayName: string;
   ownedPathPrefixes: readonly string[];
+  managed: readonly string[];
+  merged: readonly string[];
+  ejected: readonly string[];
 }>;
+
+const PROJECT_ASSET_CATEGORIES = ['managed', 'merged', 'ejected'] as const;
+
+function isProjectRelativeLiteral(value: string): boolean {
+  if (
+    value.length === 0
+    || value.startsWith('/')
+    || /^[a-zA-Z]:/.test(value)
+    || value.includes('\\')
+    || /[*?[\]{}]/.test(value)
+  ) {
+    return false;
+  }
+  return !value.split('/').some((segment) => segment === '..');
+}
 
 function defineAgentClientAdapter(
   candidate: AgentClientAdapter
@@ -89,8 +110,7 @@ function defineAgentClientAdapter(
   const paths = ownedPathPrefixes.map((prefix) => {
     if (
       typeof prefix !== 'string'
-      || prefix.length === 0
-      || prefix.includes('\\')
+      || !isProjectRelativeLiteral(prefix)
       || !prefix.endsWith('/')
     ) {
       throw new Error(
@@ -103,12 +123,58 @@ function defineAgentClientAdapter(
     throw new Error(`Agent Client '${candidate.id}' has duplicate owned path prefixes`);
   }
 
+  const projectAssets = Object.fromEntries(
+    PROJECT_ASSET_CATEGORIES.map((category) => {
+      const values = candidate.project[category];
+      if (!Array.isArray(values)) {
+        throw new Error(
+          `Agent Client '${candidate.id}' has invalid '${category}' project assets`
+        );
+      }
+      const assets = values.map((asset) => {
+        if (
+          typeof asset !== 'string'
+          || !isProjectRelativeLiteral(asset)
+          || !paths.some((prefix) =>
+            asset === prefix.slice(0, -1) || asset.startsWith(prefix)
+          )
+        ) {
+          throw new Error(
+            `Agent Client '${candidate.id}' has invalid '${category}' project asset '${String(asset)}'`
+          );
+        }
+        return asset;
+      });
+      if (new Set(assets).size !== assets.length) {
+        throw new Error(
+          `Agent Client '${candidate.id}' has duplicate '${category}' project assets`
+        );
+      }
+      return [category, Object.freeze(assets)];
+    })
+  ) as Pick<AgentClientProjectDescriptor, 'managed' | 'merged' | 'ejected'>;
+
+  const categorizedAssets = PROJECT_ASSET_CATEGORIES.flatMap((category) =>
+    projectAssets[category].map((asset) => ({ asset, category }))
+  );
+  const seenAssets = new Map<string, string>();
+  for (const { asset, category } of categorizedAssets) {
+    const previous = seenAssets.get(asset);
+    if (previous) {
+      throw new Error(
+        `Agent Client '${candidate.id}' project asset '${asset}' overlaps '${previous}' and '${category}'`
+      );
+    }
+    seenAssets.set(asset, category);
+  }
+
   return Object.freeze({
     id: candidate.id,
     displayName: candidate.displayName,
     capabilities: Object.freeze(capabilities),
     project: Object.freeze({
-      ownedPathPrefixes: Object.freeze(paths)
+      ownedPathPrefixes: Object.freeze(paths),
+      ...projectAssets
     })
   });
 }

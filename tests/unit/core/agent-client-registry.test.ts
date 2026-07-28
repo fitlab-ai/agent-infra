@@ -76,7 +76,12 @@ function adapterInput(
     id: 'codex',
     displayName: 'Codex',
     capabilities: capabilityMap(),
-    project: { ownedPathPrefixes: ['.codex/'] },
+    project: {
+      ownedPathPrefixes: ['.codex/'],
+      managed: ['.codex/hooks.json'],
+      merged: [],
+      ejected: []
+    },
     ...overrides
   };
 }
@@ -105,6 +110,9 @@ test('adapter definitions validate their closed contract without mutating input'
   assert.ok(Object.isFrozen(adapter.capabilities.commands));
   assert.ok(Object.isFrozen(adapter.project));
   assert.ok(Object.isFrozen(adapter.project.ownedPathPrefixes));
+  assert.ok(Object.isFrozen(adapter.project.managed));
+  assert.ok(Object.isFrozen(adapter.project.merged));
+  assert.ok(Object.isFrozen(adapter.project.ejected));
 
   const invalidInputs: unknown[] = [
     adapterInput({ id: 'unknown' as never }),
@@ -122,14 +130,92 @@ test('adapter definitions validate their closed contract without mutating input'
           .map((capability) => [capability, { level: 'compatible' }])
       ) as AgentClientCapabilityMap
     }),
-    adapterInput({ project: { ownedPathPrefixes: [] } }),
-    adapterInput({ project: { ownedPathPrefixes: ['.codex'] } }),
-    adapterInput({ project: { ownedPathPrefixes: ['.codex\\'] } }),
-    adapterInput({ project: { ownedPathPrefixes: ['.codex/', '.codex/'] } })
+    adapterInput({
+      project: {
+        ownedPathPrefixes: [],
+        managed: [],
+        merged: [],
+        ejected: []
+      }
+    }),
+    adapterInput({
+      project: {
+        ownedPathPrefixes: ['.codex'],
+        managed: [],
+        merged: [],
+        ejected: []
+      }
+    }),
+    adapterInput({
+      project: {
+        ownedPathPrefixes: ['.codex\\'],
+        managed: [],
+        merged: [],
+        ejected: []
+      }
+    }),
+    adapterInput({
+      project: {
+        ownedPathPrefixes: ['.codex/', '.codex/'],
+        managed: [],
+        merged: [],
+        ejected: []
+      }
+    })
   ];
 
   for (const invalid of invalidInputs) {
     assert.throws(() => defineAgentClientAdapter(invalid as AgentClientAdapter));
+  }
+});
+
+test('adapter project assets must be literal owned relative paths without overlaps', () => {
+  const invalidProjects = [
+    {
+      ownedPathPrefixes: ['.codex/'],
+      managed: undefined,
+      merged: [],
+      ejected: []
+    },
+    {
+      ownedPathPrefixes: ['.codex/'],
+      managed: ['/tmp/hooks.json'],
+      merged: [],
+      ejected: []
+    },
+    {
+      ownedPathPrefixes: ['.codex/'],
+      managed: ['.codex/../outside.json'],
+      merged: [],
+      ejected: []
+    },
+    {
+      ownedPathPrefixes: ['.codex/'],
+      managed: ['.other/hooks.json'],
+      merged: [],
+      ejected: []
+    },
+    {
+      ownedPathPrefixes: ['.codex/'],
+      managed: ['.codex/hooks.json', '.codex/hooks.json'],
+      merged: [],
+      ejected: []
+    },
+    {
+      ownedPathPrefixes: ['.codex/'],
+      managed: ['.codex/hooks.json'],
+      merged: ['.codex/hooks.json'],
+      ejected: []
+    }
+  ];
+
+  for (const project of invalidProjects) {
+    assert.throws(
+      () => defineAgentClientAdapter(adapterInput({
+        project: project as AgentClientAdapter['project']
+      })),
+      /Agent Client 'codex'.*(project asset|owned path)/
+    );
   }
 });
 
@@ -193,6 +279,41 @@ test('registry is complete, canonical, deeply frozen, and matches the capability
   }
 });
 
+test('registry exposes the exact built-in project asset matrix', () => {
+  assert.deepEqual(
+    Object.fromEntries(listAgentClientAdapters().map((adapter) => [
+      adapter.id,
+      adapter.project
+    ])),
+    {
+      'claude-code': {
+        ownedPathPrefixes: ['.claude/'],
+        managed: ['.claude/commands/'],
+        merged: ['.claude/settings.json'],
+        ejected: []
+      },
+      codex: {
+        ownedPathPrefixes: ['.codex/'],
+        managed: ['.codex/hooks.json'],
+        merged: [],
+        ejected: []
+      },
+      'gemini-cli': {
+        ownedPathPrefixes: ['.gemini/'],
+        managed: ['.gemini/commands/'],
+        merged: ['.gemini/settings.json'],
+        ejected: []
+      },
+      opencode: {
+        ownedPathPrefixes: ['.opencode/'],
+        managed: ['.opencode/commands/'],
+        merged: [],
+        ejected: []
+      }
+    }
+  );
+});
+
 test('registry queries preserve canonical order and keep enabled separate from sandbox install state', () => {
   const state = stateFor(['opencode', 'codex']);
 
@@ -253,8 +374,14 @@ test('manifest is a fresh frozen JSON-safe projection of registry metadata', () 
   assert.deepEqual(JSON.parse(JSON.stringify(first)), first);
 
   for (const entry of first) {
-    assert.deepEqual(Object.keys(entry), ['id', 'displayName', 'ownedPathPrefixes']);
+    assert.deepEqual(
+      Object.keys(entry),
+      ['id', 'displayName', 'ownedPathPrefixes', 'managed', 'merged', 'ejected']
+    );
     assert.ok(Object.isFrozen(entry));
     assert.ok(Object.isFrozen(entry.ownedPathPrefixes));
+    assert.ok(Object.isFrozen(entry.managed));
+    assert.ok(Object.isFrozen(entry.merged));
+    assert.ok(Object.isFrozen(entry.ejected));
   }
 });

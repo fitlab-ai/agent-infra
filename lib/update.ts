@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { AGENT_CLIENT_IDS } from './agent-clients/types.ts';
+import { listAgentClientAdapters } from './agent-clients/registry.ts';
+import { planAgentClientProjectAssets } from './agent-clients/project-assets.ts';
 import { info, ok, err } from './log.ts';
 import { resolveTemplateDir } from './paths.ts';
 import { renderFile, copySkillDir, KNOWN_PLATFORMS } from './render.ts';
-import { isPathOwnedByDisabledTUI, resolveEnabledTUIs } from './builtin-tuis.ts';
-import type { BuiltinTUIId } from './builtin-tuis.ts';
+import { resolveEnabledTUIs } from './builtin-tuis.ts';
 
 type FileRegistry = {
   managed: string[];
@@ -93,7 +94,11 @@ function isPathOwnedByOtherPlatform(relativePath: string, platformType: string):
   return candidate !== platformType;
 }
 
-function syncFileRegistry(config: UpdateConfig, platformType: string, enabledTUIs: Set<BuiltinTUIId>) {
+function syncFileRegistry(
+  config: UpdateConfig,
+  platformType: string,
+  enabledTUIIds: ReadonlySet<string>
+) {
   config.files ||= {};
   const before = JSON.stringify({
     files: {
@@ -102,33 +107,34 @@ function syncFileRegistry(config: UpdateConfig, platformType: string, enabledTUI
       ejected: config.files.ejected || []
     }
   });
-  config.files.managed = config.files.managed || [];
-  config.files.merged = config.files.merged || [];
-  config.files.ejected = config.files.ejected || [];
-
-  const allExisting = [
-    ...config.files.managed,
-    ...config.files.merged,
-    ...config.files.ejected
-  ];
-  const added: Pick<FileRegistry, 'managed' | 'merged'> = { managed: [], merged: [] };
-
-  for (const entry of defaults.files.managed) {
-    if (isPathOwnedByOtherPlatform(entry, platformType)) continue;
-    if (isPathOwnedByDisabledTUI(entry, enabledTUIs)) continue;
-    if (!allExisting.includes(entry)) {
-      config.files.managed.push(entry);
-      added.managed.push(entry);
-    }
-  }
-  for (const entry of defaults.files.merged) {
-    if (isPathOwnedByOtherPlatform(entry, platformType)) continue;
-    if (isPathOwnedByDisabledTUI(entry, enabledTUIs)) continue;
-    if (!allExisting.includes(entry)) {
-      config.files.merged.push(entry);
-      added.merged.push(entry);
-    }
-  }
+  const current: FileRegistry = {
+    managed: config.files.managed || [],
+    merged: config.files.merged || [],
+    ejected: config.files.ejected || []
+  };
+  const sharedDefaults: FileRegistry = {
+    managed: defaults.files.managed.filter(
+      (entry) => !isPathOwnedByOtherPlatform(entry, platformType)
+    ),
+    merged: defaults.files.merged.filter(
+      (entry) => !isPathOwnedByOtherPlatform(entry, platformType)
+    ),
+    ejected: defaults.files.ejected
+  };
+  const adapters = listAgentClientAdapters();
+  const plan = planAgentClientProjectAssets({
+    current,
+    sharedDefaults,
+    enabledAdapters: adapters.filter((adapter) => enabledTUIIds.has(adapter.id)),
+    allAdapters: adapters
+  });
+  const added: Pick<FileRegistry, 'managed' | 'merged'> = {
+    managed: plan.registry.managed.filter((entry) => !current.managed.includes(entry)),
+    merged: plan.registry.merged.filter((entry) => !current.merged.includes(entry))
+  };
+  config.files.managed = [...plan.registry.managed];
+  config.files.merged = [...plan.registry.merged];
+  config.files.ejected = [...plan.registry.ejected];
 
   const after = JSON.stringify({
     files: {

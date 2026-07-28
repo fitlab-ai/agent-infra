@@ -12,7 +12,10 @@ const geminiCliAdapter = defineAgentClientAdapter({
     verification: { level: 'compatible' }
   },
   project: {
-    ownedPathPrefixes: ['.gemini/']
+    ownedPathPrefixes: ['.gemini/'],
+    managed: ['.gemini/commands/'],
+    merged: ['.gemini/settings.json'],
+    ejected: []
   }
 });
 

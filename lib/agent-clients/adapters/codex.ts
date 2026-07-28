@@ -12,7 +12,10 @@ const codexAdapter = defineAgentClientAdapter({
     verification: { level: 'compatible' }
   },
   project: {
-    ownedPathPrefixes: ['.codex/']
+    ownedPathPrefixes: ['.codex/'],
+    managed: ['.codex/hooks.json'],
+    merged: [],
+    ejected: []
   }
 });
 

@@ -53,13 +53,17 @@ function validateManifest(manifest, registry) {
     throw new Error('Agent Client manifest IDs do not match the Registry');
   }
   for (const entry of manifest) {
+    const arrayFields = ['ownedPathPrefixes', 'managed', 'merged', 'ejected'];
     if (
       typeof entry.id !== 'string'
       || typeof entry.displayName !== 'string'
       || entry.displayName.trim() === ''
-      || !Array.isArray(entry.ownedPathPrefixes)
-      || entry.ownedPathPrefixes.some((prefix) => typeof prefix !== 'string')
-      || Object.keys(entry).sort().join(',') !== 'displayName,id,ownedPathPrefixes'
+      || arrayFields.some((field) =>
+        !Array.isArray(entry[field])
+        || entry[field].some((value) => typeof value !== 'string')
+      )
+      || Object.keys(entry).sort().join(',')
+        !== 'displayName,ejected,id,managed,merged,ownedPathPrefixes'
     ) {
       throw new Error(`Invalid Agent Client manifest entry '${String(entry?.id)}'`);
     }

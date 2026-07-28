@@ -6,6 +6,7 @@ type RegistryEntry = {
   list?: string;
 };
 type SyncTemplatesReport = {
+  error?: string;
   templateRoot: string;
   templateVersion: string;
   configUpdated: boolean;
@@ -17,6 +18,7 @@ type SyncTemplatesReport = {
     conflicts: Array<Record<string, unknown>>;
   };
   registryAdded: RegistryEntry[];
+  registryRemoved: RegistryEntry[];
   managed: {
     created: string[];
     protected: Array<{ target: string; reason: string; baseline: string | null; local: string | null; template: string }>;

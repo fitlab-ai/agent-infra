@@ -85,6 +85,14 @@ function makeProject(projectRoot: string, overrides: Record<string, unknown> = {
   );
 }
 
+function canonicalAgentClients(enabled: readonly string[]) {
+  return ["claude-code", "codex", "gemini-cli", "opencode"].map((id) => ({
+    id,
+    enabled: enabled.includes(id),
+    installInSandbox: false
+  }));
+}
+
 test("syncTemplates: missing tuis field keeps full built-in TUI behavior (regression)", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-default-"));
   try {
@@ -154,7 +162,13 @@ test("syncTemplates: switching tuis cleans up previously written owned files", a
     assert.ok(secondReport.managed.removed.some((p) => p.startsWith(".gemini/commands/")));
     assert.ok(!fs.existsSync(path.join(projectRoot, ".gemini/commands/demo/update-agent-infra.toml")));
     // Empty .gemini/commands/ directory should be cleaned up.
-    assert.ok(!fs.existsSync(path.join(projectRoot, ".gemini/commands")));
+    const commandsDir = path.join(projectRoot, ".gemini/commands");
+    assert.ok(
+      !fs.existsSync(commandsDir),
+      `expected disabled Gemini commands directory to be removed, found ${
+        fs.existsSync(commandsDir) ? JSON.stringify(fs.readdirSync(commandsDir)) : "nothing"
+      }`
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -289,5 +303,112 @@ test("syncTemplates: ejected entries owned by disabled TUIs are preserved and no
     assert.ok(!report.managed.removed.includes(".codex/hooks.json"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates: canonical agentClients controls assets and rejects incomplete input", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-agent-clients-canonical-"));
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = makeTemplateRoot(tmpDir);
+    makeProject(projectRoot, {
+      tuis: ["claude-code", "codex", "gemini-cli", "opencode"],
+      agentClients: canonicalAgentClients([])
+    });
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
+      ".agents/skills/update-agent-infra/scripts/sync-templates.js"
+    );
+
+    syncTemplates(projectRoot, templateRoot);
+    assert.ok(!fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
+
+    const cfgPath = path.join(projectRoot, ".agents/.airc.json");
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    cfg.agentClients = canonicalAgentClients(["codex"]).slice(0, 3);
+    fs.writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
+    const invalidReport = syncTemplates(projectRoot, templateRoot);
+    assert.equal(invalidReport.error, "MISSING_AGENT_CLIENT at agentClients");
+    assert.ok(!fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates: disabling a client preserves modified and unknown managed files", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-safe-disable-"));
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = makeTemplateRoot(tmpDir);
+    makeProject(projectRoot, { tuis: ["gemini-cli"] });
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
+      ".agents/skills/update-agent-infra/scripts/sync-templates.js"
+    );
+    syncTemplates(projectRoot, templateRoot);
+
+    const generated = ".gemini/commands/demo/update-agent-infra.toml";
+    writeFile(projectRoot, generated, "user modified\n");
+    writeFile(projectRoot, ".gemini/commands/user-owned.toml", "user owned\n");
+    const cfgPath = path.join(projectRoot, ".agents/.airc.json");
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    cfg.tuis = [];
+    fs.writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
+
+    const report = syncTemplates(projectRoot, templateRoot);
+    assert.equal(fs.readFileSync(path.join(projectRoot, generated), "utf8"), "user modified\n");
+    assert.equal(
+      fs.readFileSync(path.join(projectRoot, ".gemini/commands/user-owned.toml"), "utf8"),
+      "user owned\n"
+    );
+    assert.ok(
+      report.managed.protected.some((entry) =>
+        entry.target === generated && entry.reason === "user-modified"
+      )
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates: every built-in client subset converges idempotently", async () => {
+  const ids = ["claude-code", "codex", "gemini-cli", "opencode"];
+  const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
+    ".agents/skills/update-agent-infra/scripts/sync-templates.js"
+  );
+
+  for (let mask = 0; mask < 16; mask += 1) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `ai-tui-matrix-${mask}-`));
+    try {
+      const projectRoot = path.join(tmpDir, "project");
+      const templateRoot = makeTemplateRoot(tmpDir);
+      const enabled = ids.filter((_, index) => (mask & (1 << index)) !== 0);
+      makeProject(projectRoot, { tuis: [...enabled].reverse() });
+
+      syncTemplates(projectRoot, templateRoot);
+      const cfgPath = path.join(projectRoot, ".agents/.airc.json");
+      const afterFirst = fs.readFileSync(cfgPath, "utf8");
+      const second = syncTemplates(projectRoot, templateRoot);
+      const afterSecond = fs.readFileSync(cfgPath, "utf8");
+
+      assert.equal(afterSecond, afterFirst, `subset ${mask}: config must be idempotent`);
+      assert.deepEqual(second.managed.created, [], `subset ${mask}: unexpected create`);
+      assert.deepEqual(second.managed.written, [], `subset ${mask}: unexpected write`);
+      assert.deepEqual(second.managed.removed, [], `subset ${mask}: unexpected removal`);
+      const config = JSON.parse(afterSecond);
+      for (const [index, id] of ids.entries()) {
+        const adapterPath = {
+          "claude-code": ".claude/commands/",
+          codex: ".codex/hooks.json",
+          "gemini-cli": ".gemini/commands/",
+          opencode: ".opencode/commands/"
+        }[id]!;
+        assert.equal(
+          config.files.managed.includes(adapterPath),
+          (mask & (1 << index)) !== 0,
+          `subset ${mask}: ${id} managed registry`
+        );
+      }
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   }
 });

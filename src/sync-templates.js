@@ -37,9 +37,6 @@ const KNOWN_PLATFORMS = new Set(['github', 'none']);
 const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
 
 const BUILTIN_TUI_IDS = AGENT_CLIENT_MANIFEST.map((entry) => entry.id);
-const BUILTIN_TUI_OWNED_PATH_PREFIXES = Object.fromEntries(
-  AGENT_CLIENT_MANIFEST.map((entry) => [entry.id, entry.ownedPathPrefixes])
-);
 
 function resolveEnabledTUIs(value) {
   // Missing field / null / non-array → full set (backward compat).
@@ -52,16 +49,99 @@ function resolveEnabledTUIs(value) {
   return set;
 }
 
-function isPathOwnedByDisabledTUI(rel, enabledSet) {
-  const normalized = String(rel || '').replace(/\\/g, '/').replace(/^\.\//, '');
-  for (const tui of BUILTIN_TUI_IDS) {
-    if (enabledSet.has(tui)) continue;
-    for (const prefix of BUILTIN_TUI_OWNED_PATH_PREFIXES[tui]) {
-      const trimmed = prefix.replace(/\/$/, '');
-      if (normalized === trimmed || normalized.startsWith(prefix)) return true;
-    }
+function resolveEnabledAgentClients(cfg) {
+  if (!Object.prototype.hasOwnProperty.call(cfg, 'agentClients')) {
+    return { enabled: resolveEnabledTUIs(cfg.tuis), error: null };
   }
-  return false;
+  if (!Array.isArray(cfg.agentClients)) {
+    return { enabled: null, error: 'INVALID_AGENT_CLIENTS at agentClients' };
+  }
+
+  const entries = new Map();
+  for (const [index, candidate] of cfg.agentClients.entries()) {
+    const entryPath = `agentClients[${index}]`;
+    if (
+      typeof candidate !== 'object'
+      || candidate === null
+      || Array.isArray(candidate)
+      || typeof candidate.id !== 'string'
+      || !BUILTIN_TUI_IDS.includes(candidate.id)
+      || typeof candidate.enabled !== 'boolean'
+      || typeof candidate.installInSandbox !== 'boolean'
+    ) {
+      return { enabled: null, error: `INVALID_AGENT_CLIENTS at ${entryPath}` };
+    }
+    if (entries.has(candidate.id)) {
+      return { enabled: null, error: `DUPLICATE_AGENT_CLIENT at ${entryPath}.id` };
+    }
+    entries.set(candidate.id, candidate.enabled);
+  }
+  if (entries.size !== BUILTIN_TUI_IDS.length) {
+    return { enabled: null, error: 'MISSING_AGENT_CLIENT at agentClients' };
+  }
+  return {
+    enabled: new Set(BUILTIN_TUI_IDS.filter((id) => entries.get(id))),
+    error: null
+  };
+}
+
+function assetMatches(entry, target) {
+  const normalizedEntry = norm(entry);
+  const normalizedTarget = norm(target);
+  return normalizedEntry.endsWith('/')
+    ? normalizedTarget.startsWith(normalizedEntry)
+    : normalizedTarget === normalizedEntry;
+}
+
+function adapterAssets(adapters, category) {
+  return adapters.flatMap((adapter) => adapter[category]);
+}
+
+function planProjectRegistry(current, sharedDefaults, enabledSet) {
+  const enabledAdapters = AGENT_CLIENT_MANIFEST.filter((adapter) => enabledSet.has(adapter.id));
+  const disabledAdapters = AGENT_CLIENT_MANIFEST.filter((adapter) => !enabledSet.has(adapter.id));
+  const allAdapterAssets = new Set(
+    AGENT_CLIENT_MANIFEST.flatMap((adapter) => [
+      ...adapter.managed,
+      ...adapter.merged,
+      ...adapter.ejected
+    ])
+  );
+  const enabled = {
+    managed: adapterAssets(enabledAdapters, 'managed'),
+    merged: adapterAssets(enabledAdapters, 'merged'),
+    ejected: adapterAssets(enabledAdapters, 'ejected')
+  };
+  const unique = (values) => [...new Set(values)];
+  const ejected = unique([
+    ...current.ejected,
+    ...enabled.ejected,
+    ...sharedDefaults.ejected
+  ]);
+  const ejectedSet = new Set(ejected);
+  const preserve = (values, enabledValues) => values.filter((entry) =>
+    !ejectedSet.has(entry)
+    && (!allAdapterAssets.has(entry) || enabledValues.includes(entry))
+  );
+  const managed = unique([
+    ...preserve(current.managed, enabled.managed),
+    ...enabled.managed.filter((entry) => !ejectedSet.has(entry)),
+    ...sharedDefaults.managed.filter((entry) => !ejectedSet.has(entry))
+  ]);
+  const managedSet = new Set(managed);
+  const merged = unique([
+    ...preserve(current.merged, enabled.merged),
+    ...enabled.merged.filter((entry) => !ejectedSet.has(entry) && !managedSet.has(entry)),
+    ...sharedDefaults.merged.filter((entry) => !ejectedSet.has(entry) && !managedSet.has(entry))
+  ]);
+
+  return {
+    registry: { managed, merged, ejected },
+    enabledManaged: enabled.managed,
+    enabledMerged: enabled.merged,
+    enabledEjected: enabled.ejected,
+    disabledManaged: adapterAssets(disabledAdapters, 'managed')
+  };
 }
 
 function isLegacyDefaultSandboxTools(value) {
@@ -686,27 +766,34 @@ function learnAndGenerateCommands(projectRoot, customSkills, tool, templateSkill
   }
 }
 
-function generateCustomCommands(projectRoot, customSkills, project, lang, report, customTUIs, templateSkillNames, enabledTUIs) {
+function generateCustomCommands(
+  projectRoot,
+  customSkills,
+  project,
+  lang,
+  report,
+  customTUIs,
+  templateSkillNames,
+  enabledTUIs,
+  managedWriter
+) {
   for (const skill of customSkills) {
     if (enabledTUIs.has('claude-code')) {
-      writeIfChanged(
-        projectRoot,
+      managedWriter(
         `.claude/commands/${skill.dirName}.md`,
         generateClaudeCommand(skill, lang),
         report.custom.commands
       );
     }
     if (enabledTUIs.has('gemini-cli')) {
-      writeIfChanged(
-        projectRoot,
+      managedWriter(
         '.gemini/commands/' + project + '/' + skill.dirName + '.toml',
         generateGeminiCommand(skill, lang),
         report.custom.commands
       );
     }
     if (enabledTUIs.has('opencode')) {
-      writeIfChanged(
-        projectRoot,
+      managedWriter(
         `.opencode/commands/${skill.dirName}.md`,
         generateOpenCodeCommand(skill, lang),
         report.custom.commands
@@ -877,16 +964,37 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const { project, org, language: lang = 'en' } = cfg;
   const platformType = cfg.platform?.type || DEFAULTS.platform.type;
-  const enabledTUIs = resolveEnabledTUIs(cfg.tuis);
+  const enabledResolution = resolveEnabledAgentClients(cfg);
+  if (enabledResolution.error) {
+    return { error: enabledResolution.error };
+  }
+  const enabledTUIs = enabledResolution.enabled;
   const customTUIsConfig = Array.isArray(cfg.customTUIs) ? cfg.customTUIs : [];
   const vars = { project, org };
   const templateSkillNames = listTemplateSkillNames(templateRoot);
   const protectedCustomSkills = detectCustomSkills(projectRoot, templateSkillNames);
 
-  const managed = [...(cfg.files.managed || [])];
-  const merged  = [...(cfg.files.merged  || [])];
-  const ejected = [...(cfg.files.ejected || [])];
+  cfg.files ||= {};
+  const currentRegistry = {
+    managed: [...(cfg.files.managed || [])],
+    merged: [...(cfg.files.merged || [])],
+    ejected: [...(cfg.files.ejected || [])]
+  };
+  const sharedDefaults = {
+    managed: (DEFAULTS.files.managed || []).filter(
+      (entry) => !isPathOwnedByOtherPlatform(entry, platformType)
+    ),
+    merged: (DEFAULTS.files.merged || []).filter(
+      (entry) => !isPathOwnedByOtherPlatform(entry, platformType)
+    ),
+    ejected: [...(DEFAULTS.files.ejected || [])]
+  };
+  const assetPlan = planProjectRegistry(currentRegistry, sharedDefaults, enabledTUIs);
+  const managed = [...assetPlan.registry.managed];
+  const merged = [...assetPlan.registry.merged];
+  const ejected = [...assetPlan.registry.ejected];
   const guardedManaged = new Set((DEFAULTS.files.guardedManaged || []).map(norm));
+  const allClientManaged = adapterAssets(AGENT_CLIENT_MANIFEST, 'managed');
   const managedBaselines = cfg.files.managedBaselines && typeof cfg.files.managedBaselines === 'object'
     && !Array.isArray(cfg.files.managedBaselines)
     ? { ...cfg.files.managedBaselines }
@@ -894,7 +1002,10 @@ function syncTemplates(projectRoot, templateRootOverride) {
   let baselinesChanged = false;
 
   for (const target of Object.keys(managedBaselines)) {
-    if (!guardedManaged.has(norm(target))) {
+    if (
+      !guardedManaged.has(norm(target))
+      && !allClientManaged.some((entry) => assetMatches(entry, target))
+    ) {
       delete managedBaselines[target];
       baselinesChanged = true;
     }
@@ -904,6 +1015,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
     templateVersion: version,
     templateRoot: norm(templateRoot),
     registryAdded: [],
+    registryRemoved: [],
     templateSources: {
       configured: 0,
       loaded: 0,
@@ -944,17 +1056,23 @@ function syncTemplates(projectRoot, templateRootOverride) {
     templateSkillNames
   );
 
-  const known = new Set([...managed, ...merged, ...ejected]);
-  for (const e of (DEFAULTS.files.managed || [])) {
-    if (isPathOwnedByOtherPlatform(e, platformType)) continue;
-    if (isPathOwnedByDisabledTUI(e, enabledTUIs)) continue;
-    if (!known.has(e)) { managed.push(e); known.add(e); report.registryAdded.push({ entry: e, list: 'managed' }); }
+  for (const category of ['managed', 'merged', 'ejected']) {
+    const before = currentRegistry[category];
+    const after = assetPlan.registry[category];
+    for (const entry of after) {
+      if (!before.includes(entry)) report.registryAdded.push({ entry, list: category });
+    }
+    for (const entry of before) {
+      if (!after.includes(entry)) report.registryRemoved.push({ entry, list: category });
+    }
   }
-  for (const e of (DEFAULTS.files.merged || [])) {
-    if (isPathOwnedByOtherPlatform(e, platformType)) continue;
-    if (isPathOwnedByDisabledTUI(e, enabledTUIs)) continue;
-    if (!known.has(e)) { merged.push(e); known.add(e); report.registryAdded.push({ entry: e, list: 'merged' }); }
-  }
+  report.managed.skippedTUI.push(
+    ...assetPlan.disabledManaged,
+    ...adapterAssets(
+      AGENT_CLIENT_MANIFEST.filter((adapter) => !enabledTUIs.has(adapter.id)),
+      'merged'
+    )
+  );
 
   const templateSources = Array.isArray(cfg.templates?.sources) ? cfg.templates.sources : [];
   report.templateSources.configured = templateSources.length;
@@ -976,6 +1094,97 @@ function syncTemplates(projectRoot, templateRootOverride) {
     return isBinary(srcFull)
       ? fs.readFileSync(srcFull)
       : renderContent(fs.readFileSync(srcFull, 'utf8'), vars);
+  }
+
+  function selectedTargetsForEntry(entry) {
+    let entryRels;
+    if (entry.endsWith('/')) {
+      const builtinDir = path.join(templateRoot, entry);
+      const builtinRels = fs.existsSync(builtinDir)
+        ? walkDir(builtinDir).map((filePath) => norm(path.relative(templateRoot, filePath)))
+        : [];
+      const prefix = norm(entry);
+      const externalRels = allRels.filter((rel) =>
+        rel.startsWith(prefix) && !builtinRels.includes(rel)
+      );
+      entryRels = [...builtinRels, ...externalRels];
+    } else {
+      entryRels = entryVariantRels(entry, allSet, platformType);
+    }
+    return platformSelect(
+      langSelect(entryRels, lang, allSet, project),
+      platformType,
+      project
+    );
+  }
+
+  function writeProtectedManaged(target, content, bucket) {
+    const dstFull = path.join(projectRoot, target);
+    const exists = fs.existsSync(dstFull);
+    const rawBaseline = managedBaselines[target];
+    const baseline = trustedBaseline(rawBaseline);
+    const templateHash = sha256(content);
+    const localHash = exists ? sha256(fs.readFileSync(dstFull)) : null;
+
+    if (rawBaseline !== undefined && baseline === null) {
+      delete managedBaselines[target];
+      baselinesChanged = true;
+    }
+    if (baseline === null && localHash !== null && localHash !== templateHash) {
+      report.managed.conflicts.push({
+        target,
+        reason: 'unknown-origin',
+        baseline: null,
+        local: localHash,
+        template: templateHash
+      });
+      return false;
+    }
+    if (baseline !== null && templateHash === baseline && localHash !== baseline) {
+      report.managed.protected.push({
+        target,
+        reason: localHash === null ? 'user-deleted' : 'user-modified',
+        baseline,
+        local: localHash,
+        template: templateHash
+      });
+      return false;
+    }
+    if (
+      baseline !== null
+      && localHash !== baseline
+      && templateHash !== baseline
+      && localHash !== templateHash
+    ) {
+      report.managed.conflicts.push({
+        target,
+        reason: 'both-modified',
+        baseline,
+        local: localHash,
+        template: templateHash
+      });
+      return false;
+    }
+    if (localHash === templateHash) {
+      bucket.unchanged.push(target);
+      if (managedBaselines[target] !== templateHash) {
+        managedBaselines[target] = templateHash;
+        baselinesChanged = true;
+      }
+      return false;
+    }
+
+    const dir = path.dirname(dstFull);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(dstFull, content);
+    managedBaselines[target] = templateHash;
+    baselinesChanged = true;
+    if (Object.prototype.hasOwnProperty.call(bucket, 'written')) {
+      (exists ? bucket.written : bucket.created).push(target);
+    } else {
+      (exists ? bucket.updated : bucket.generated).push(target);
+    }
+    return true;
   }
 
   for (const entry of [...managed, ...merged, ...ejected]) {
@@ -1031,39 +1240,81 @@ function syncTemplates(projectRoot, templateRootOverride) {
     }
   }
 
-  // Cleanup files owned by disabled built-in TUIs. Iterates managed + merged
-  // only (ejected entries are explicitly user-retained, see ejected loop below).
-  //
-  // Protection rule: only skip files registered as customTUI command targets
-  // (e.g. a customTUI configured with dir=.codex/commands/ when codex is
-  // disabled). Built-in TUI custom-skill commands like
-  // .gemini/commands/<project>/<dirName>.toml are intentionally NOT protected
-  // here so that disabling gemini-cli actually frees the gemini directory —
-  // they will be regenerated only for still-enabled TUIs (see
-  // generateCustomCommands).
-  for (const entry of [...managed, ...merged]) {
-    if (!isPathOwnedByDisabledTUI(entry, enabledTUIs)) continue;
+  // Disabled clients are converged conservatively: only exact manifest
+  // managed targets or previously baselined generated targets are candidates.
+  // Merged/ejected and content without trustworthy origin evidence are kept.
+  for (const entry of assetPlan.disabledManaged) {
+    const selectedTargets = selectedTargetsForEntry(entry);
+    const candidates = new Set(
+      Object.keys(managedBaselines).filter((target) => assetMatches(entry, target))
+    );
+    for (const target of selectedTargets.keys()) candidates.add(target);
 
-    if (entry.endsWith('/')) {
-      const dir = path.join(projectRoot, entry);
-      if (!fs.existsSync(dir)) continue;
+    for (const target of candidates) {
+      const dstFull = path.join(projectRoot, target);
+      const baseline = trustedBaseline(managedBaselines[target]);
+      const selectedSource = selectedTargets.get(target);
+      const sourceRoot = selectedSource ? (sourceMap.get(selectedSource) || templateRoot) : null;
+      const templateContent = selectedSource && sourceRoot === templateRoot
+        ? (
+            isBinary(path.join(sourceRoot, selectedSource))
+              ? fs.readFileSync(path.join(sourceRoot, selectedSource))
+              : renderContent(fs.readFileSync(path.join(sourceRoot, selectedSource), 'utf8'), vars)
+          )
+        : null;
+      const localHash = fs.existsSync(dstFull) ? sha256(fs.readFileSync(dstFull)) : null;
+      const templateHash = templateContent === null ? null : sha256(templateContent);
+      const protectedByEjection = ejected.some((pattern) =>
+        assetMatches(pattern, target) || globMatch(pattern, target)
+      );
+      const protectedByCustom = customTUICommandTargets.has(target);
 
-      for (const filePath of walkDir(dir)) {
-        const relProj = norm(path.relative(projectRoot, filePath));
-        if (customTUICommandTargets.has(relProj)) continue;
-        fs.unlinkSync(filePath);
-        report.managed.removed.push(relProj);
+      if (protectedByEjection || protectedByCustom || (sourceRoot && sourceRoot !== templateRoot)) {
+        report.managed.protected.push({
+          target,
+          reason: protectedByEjection
+            ? 'ejected'
+            : protectedByCustom
+              ? 'custom'
+              : 'external-source',
+          baseline,
+          local: localHash,
+          template: templateHash
+        });
+        continue;
       }
-      removeEmptyDirs(dir);
-      continue;
+      if (localHash === null) {
+        if (Object.prototype.hasOwnProperty.call(managedBaselines, target)) {
+          delete managedBaselines[target];
+          baselinesChanged = true;
+        }
+        continue;
+      }
+      const legacyManaged = currentRegistry.managed.includes(entry);
+      if (
+        (baseline !== null && localHash === baseline)
+        || (baseline === null && legacyManaged && templateHash !== null && localHash === templateHash)
+      ) {
+        fs.unlinkSync(dstFull);
+        report.managed.removed.push(target);
+        if (Object.prototype.hasOwnProperty.call(managedBaselines, target)) {
+          delete managedBaselines[target];
+          baselinesChanged = true;
+        }
+        removeEmptyDirs(path.dirname(dstFull));
+        continue;
+      }
+      report.managed.protected.push({
+        target,
+        reason: baseline === null ? 'unknown-origin' : 'user-modified',
+        baseline,
+        local: localHash,
+        template: templateHash
+      });
     }
-
-    const target = path.join(projectRoot, renderPathname(entry, project));
-    if (!fs.existsSync(target)) continue;
-    const relProj = norm(path.relative(projectRoot, target));
-    if (customTUICommandTargets.has(relProj)) continue;
-    fs.unlinkSync(target);
-    report.managed.removed.push(relProj);
+    if (entry.endsWith('/')) {
+      removeEmptyDirs(path.join(projectRoot, entry));
+    }
   }
 
   for (const entry of managed) {
@@ -1071,11 +1322,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       report.managed.skippedPlatform.push(entry);
       continue;
     }
-    if (isPathOwnedByDisabledTUI(entry, enabledTUIs)) {
-      report.managed.skippedTUI.push(entry);
-      continue;
-    }
-
     const isDir = entry.endsWith('/');
     let entryRels;
     const expectedTargets = isDir ? new Set() : null;
@@ -1113,65 +1359,14 @@ function syncTemplates(projectRoot, templateRootOverride) {
         : renderContent(fs.readFileSync(srcFull, 'utf8'), vars);
 
       const exists = fs.existsSync(dstFull);
-      if (guardedManaged.has(tgt)) {
-        const rawBaseline = managedBaselines[tgt];
-        const baseline = trustedBaseline(rawBaseline);
-        const templateHash = sha256(content);
-        const localHash = exists ? sha256(fs.readFileSync(dstFull)) : null;
-
-        if (rawBaseline !== undefined && baseline === null) {
-          delete managedBaselines[tgt];
-          baselinesChanged = true;
+      const clientManagedTarget = assetPlan.enabledManaged.some((asset) =>
+        assetMatches(asset, tgt)
+      );
+      if (guardedManaged.has(tgt) || (clientManagedTarget && srcRoot === templateRoot)) {
+        const written = writeProtectedManaged(tgt, content, report.managed);
+        if (written && tgt.endsWith('.sh')) {
+          try { fs.chmodSync(dstFull, 0o755); } catch { /* Windows */ }
         }
-
-        if (baseline === null && localHash !== null && localHash !== templateHash) {
-          report.managed.conflicts.push({
-            target: tgt,
-            reason: 'unknown-origin',
-            baseline: null,
-            local: localHash,
-            template: templateHash
-          });
-          continue;
-        }
-
-        if (baseline !== null && templateHash === baseline && localHash !== baseline) {
-          report.managed.protected.push({
-            target: tgt,
-            reason: localHash === null ? 'user-deleted' : 'user-modified',
-            baseline,
-            local: localHash,
-            template: templateHash
-          });
-          continue;
-        }
-
-        if (baseline !== null && localHash !== baseline && templateHash !== baseline && localHash !== templateHash) {
-          report.managed.conflicts.push({
-            target: tgt,
-            reason: 'both-modified',
-            baseline,
-            local: localHash,
-            template: templateHash
-          });
-          continue;
-        }
-
-        if (localHash === templateHash) {
-          report.managed.unchanged.push(tgt);
-          if (managedBaselines[tgt] !== templateHash) {
-            managedBaselines[tgt] = templateHash;
-            baselinesChanged = true;
-          }
-          continue;
-        }
-
-        const dir = path.dirname(dstFull);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(dstFull, content);
-        managedBaselines[tgt] = templateHash;
-        baselinesChanged = true;
-        (exists ? report.managed.written : report.managed.created).push(tgt);
         continue;
       }
 
@@ -1203,7 +1398,25 @@ function syncTemplates(projectRoot, templateRootOverride) {
           if (projFile === configPathRel) continue;
           if (isCustomProtected(projFile, protectedCustomSkills, project, customTUICommandTargets)) continue;
           if (matchesAny(projFile, merged) || matchesAny(projFile, ejected)) continue;
-
+          if (assetPlan.enabledManaged.includes(entry)) {
+            const baseline = trustedBaseline(managedBaselines[projFile]);
+            const localHash = sha256(fs.readFileSync(path.join(projectRoot, projFile)));
+            if (baseline !== null && localHash === baseline) {
+              fs.unlinkSync(path.join(projectRoot, projFile));
+              delete managedBaselines[projFile];
+              baselinesChanged = true;
+              report.managed.removed.push(projFile);
+            } else {
+              report.managed.protected.push({
+                target: projFile,
+                reason: baseline === null ? 'unknown-origin' : 'user-modified',
+                baseline,
+                local: localHash,
+                template: null
+              });
+            }
+            continue;
+          }
           fs.unlinkSync(path.join(projectRoot, projFile));
           report.managed.removed.push(projFile);
         }
@@ -1222,7 +1435,17 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const customSkills = detectCustomSkills(projectRoot, templateSkillNames);
   report.custom.detected = customSkills.map((skill) => skill.dirName);
-  generateCustomCommands(projectRoot, customSkills, project, lang, report, customTUIs, templateSkillNames, enabledTUIs);
+  generateCustomCommands(
+    projectRoot,
+    customSkills,
+    project,
+    lang,
+    report,
+    customTUIs,
+    templateSkillNames,
+    enabledTUIs,
+    writeProtectedManaged
+  );
 
   for (const entry of ejected) {
     const dstFull = path.join(projectRoot, entry);
@@ -1232,7 +1455,11 @@ function syncTemplates(projectRoot, templateRootOverride) {
     }
     // Do not (re)create ejected files for disabled TUIs. Existing files are
     // never touched by sync (handled above); this guard only blocks creation.
-    if (isPathOwnedByDisabledTUI(entry, enabledTUIs)) continue;
+    const disabledEjected = AGENT_CLIENT_MANIFEST.some((adapter) =>
+      !enabledTUIs.has(adapter.id)
+      && adapter.ejected.some((asset) => assetMatches(asset, entry))
+    );
+    if (disabledEjected) continue;
 
     const selected = platformSelect(langSelect(entryVariantRels(entry, allSet, platformType), lang, allSet, project), platformType, project);
     const target = norm(renderPathname(entry, project));
@@ -1253,11 +1480,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       report.managed.skippedPlatform.push(entry);
       continue;
     }
-    if (isPathOwnedByDisabledTUI(entry, enabledTUIs)) {
-      report.managed.skippedTUI.push(entry);
-      continue;
-    }
-
     if (entry.includes('*')) {
       const hits = allRels.filter(r => {
         const t = norm(renderPathname(stripLangVariant(r), project));
@@ -1288,7 +1510,8 @@ function syncTemplates(projectRoot, templateRootOverride) {
     report.custom.commands.generated.length +
     report.custom.commands.updated.length +
     report.ejected.created.length +
-    report.registryAdded.length
+    report.registryAdded.length +
+    report.registryRemoved.length
   ) > 0;
 
   const prevVersion = cfg.templateVersion;

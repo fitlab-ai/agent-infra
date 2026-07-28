@@ -11,10 +11,11 @@ import { VERSION } from './version.ts';
 import {
   BUILTIN_TUI_IDS,
   BUILTIN_TUI_DISPLAY,
-  isPathOwnedByDisabledTUI,
   resolveEnabledTUIs
 } from './builtin-tuis.ts';
-import type { BuiltinTUIId } from './builtin-tuis.ts';
+import { listAgentClientAdapters } from './agent-clients/registry.ts';
+import { planAgentClientProjectAssets } from './agent-clients/project-assets.ts';
+import type { AgentClientAdapter } from './agent-clients/adapter.ts';
 
 type FileRegistry = {
   managed: string[];
@@ -68,17 +69,26 @@ function isPathOwnedByOtherPlatform(relativePath: string, platformType: string):
   return candidate !== platformType;
 }
 
-function buildDefaultFiles(platformType: string, enabledTUIs: Set<BuiltinTUIId>): FileRegistry {
-  const ownedByDisabled = (entry: string) => isPathOwnedByDisabledTUI(entry, enabledTUIs);
-  return {
+function buildDefaultFiles(
+  platformType: string,
+  enabledAdapters: readonly AgentClientAdapter[]
+): FileRegistry {
+  const sharedDefaults = {
     managed: (defaults.files.managed || []).filter(
-      (entry) => !isPathOwnedByOtherPlatform(entry, platformType) && !ownedByDisabled(entry)
+      (entry) => !isPathOwnedByOtherPlatform(entry, platformType)
     ),
     merged: (defaults.files.merged || []).filter(
-      (entry) => !isPathOwnedByOtherPlatform(entry, platformType) && !ownedByDisabled(entry)
+      (entry) => !isPathOwnedByOtherPlatform(entry, platformType)
     ),
     ejected: structuredClone(defaults.files.ejected || [])
   };
+  const plan = planAgentClientProjectAssets({
+    current: { managed: [], merged: [], ejected: [] },
+    sharedDefaults,
+    enabledAdapters,
+    allAdapters: listAgentClientAdapters()
+  });
+  return structuredClone(plan.registry) as FileRegistry;
 }
 
 function detectProjectName(): string {
@@ -235,6 +245,9 @@ async function cmdInit(): Promise<void> {
     return;
   }
   const enabledTUISet = resolveEnabledTUIs(enabledTUIs);
+  const enabledAdapters = listAgentClientAdapters().filter((adapter) =>
+    enabledTUISet.has(adapter.id)
+  );
 
   const templateSources = parseLocalSources(await prompt(
     'Template sources (optional, comma-separated local paths, e.g. ~/my-templates; Enter to skip)',
@@ -325,7 +338,7 @@ async function cmdInit(): Promise<void> {
     sandbox: structuredClone(defaults.sandbox),
     task: structuredClone(defaults.task),
     labels: structuredClone(defaults.labels),
-    files: buildDefaultFiles(platformType, enabledTUISet),
+    files: buildDefaultFiles(platformType, enabledAdapters),
     tuis: enabledTUIs
   };
 

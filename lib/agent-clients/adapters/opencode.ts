@@ -12,7 +12,10 @@ const opencodeAdapter = defineAgentClientAdapter({
     verification: { level: 'compatible' }
   },
   project: {
-    ownedPathPrefixes: ['.opencode/']
+    ownedPathPrefixes: ['.opencode/'],
+    managed: ['.opencode/commands/'],
+    merged: [],
+    ejected: []
   }
 });
 

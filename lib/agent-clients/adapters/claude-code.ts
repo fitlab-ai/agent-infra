@@ -12,7 +12,10 @@ const claudeCodeAdapter = defineAgentClientAdapter({
     verification: { level: 'compatible' }
   },
   project: {
-    ownedPathPrefixes: ['.claude/']
+    ownedPathPrefixes: ['.claude/'],
+    managed: ['.claude/commands/'],
+    merged: ['.claude/settings.json'],
+    ejected: []
   }
 });
 
