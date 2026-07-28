@@ -34,6 +34,38 @@
 |---------|------------------|--------|--------|
 | {registry token} | {命中或未命中证据} | {yes / no / not-applicable} | {专项结论} |
 
+## 技术方案架构覆盖
+
+| assessment_id | classification | trigger_evidence | review_depth | result_or_gap |
+|---------------|----------------|------------------|--------------|---------------|
+| architecture-significance | {ordinary / architecture-significant} | {artifact / file:line / source_id} | {proportional / mini-atam} | {covered / gap} |
+
+> 场景 A（`ordinary`）：保留上表，记录 `Mini-ATAM: not-applicable` 及可复核理由，并删除场景 B 的表格。
+>
+> 场景 B（`architecture-significant`）：保留上表和以下五张表，并删除场景 A 的说明。
+
+| quality_scenario_id | source_id | business_driver | quality_attribute | priority | stimulus | context | expected_response | measure | result_or_gap |
+|---------------------|-----------|-----------------|-------------------|----------|----------|---------|-------------------|---------|---------------|
+| {稳定标识} | {来源标识} | {业务驱动} | {质量属性} | {优先级} | {触发} | {上下文} | {期望响应} | {可验证度量} | {covered / gap} |
+
+| decision_id | selected_option | alternative_option | benefit | cost | assumption | rejection_reason | result_or_gap |
+|-------------|-----------------|--------------------|---------|------|------------|------------------|---------------|
+| {稳定标识} | {所选方案} | {合理替代方案} | {主要收益} | {主要代价} | {假设} | {不采用原因} | {covered / gap} |
+
+| risk_id | decision_id | risk_or_sensitivity | affected_quality_attributes | tradeoff | mitigation_or_validation | result_or_gap |
+|---------|-------------|---------------------|-----------------------------|----------|--------------------------|---------------|
+| {稳定标识} | {决策标识} | {风险或敏感点} | {受影响质量属性} | {权衡} | {缓解或验证} | {covered / gap} |
+
+| decision_id | door_type | reversal_cost | migration_or_rollback | decision_status | result_or_gap |
+|-------------|-----------|---------------|-----------------------|-----------------|---------------|
+| {决策标识} | {two-way / one-way} | {逆转成本} | {迁移或回滚路径} | {resolved / needs-human-decision} | {covered / gap} |
+
+| evolution_id | scenario_type | source_id | confirmation_status | change_scenario | affected_scope | verification | result_or_gap |
+|--------------|---------------|-----------|---------------------|-----------------|----------------|--------------|---------------|
+| {稳定标识} | {evolution / migration / rollback / compatibility / operations} | {来源标识} | {confirmed / unconfirmed / not-applicable} | {变化场景} | {影响范围} | {验证方式与持续验证入口} | {covered / gap / not-applicable} |
+
+> `unconfirmed` 的未来场景不得升级为当前硬性需求；不适用项保留 `not-applicable` 及证据。
+
 ## 追踪矩阵
 
 | source_id | upstream | reviewed_target | verification | status_or_gap |

@@ -627,6 +627,48 @@ test("review-analysis report templates expose stage-specific coverage structures
   });
 });
 
+test("review-plan report templates expose architecture coverage structures", () => {
+  const reportCases: Array<[string, string]> = [
+    [".agents/skills/review-plan/reference/report-template.md", "技术方案架构覆盖"],
+    ["templates/.agents/skills/review-plan/reference/report-template.zh-CN.md", "技术方案架构覆盖"],
+    ["templates/.agents/skills/review-plan/reference/report-template.en.md", "Technical Plan Architecture Coverage"]
+  ];
+  const expectedTables = [
+    "| assessment_id | classification | trigger_evidence | review_depth | result_or_gap |",
+    "| quality_scenario_id | source_id | business_driver | quality_attribute | priority | stimulus | context | expected_response | measure | result_or_gap |",
+    "| decision_id | selected_option | alternative_option | benefit | cost | assumption | rejection_reason | result_or_gap |",
+    "| risk_id | decision_id | risk_or_sensitivity | affected_quality_attributes | tradeoff | mitigation_or_validation | result_or_gap |",
+    "| decision_id | door_type | reversal_cost | migration_or_rollback | decision_status | result_or_gap |",
+    "| evolution_id | scenario_type | source_id | confirmation_status | change_scenario | affected_scope | verification | result_or_gap |"
+  ];
+  const stableTokens = [
+    "ordinary",
+    "architecture-significant",
+    "proportional",
+    "mini-atam",
+    "not-applicable",
+    "two-way",
+    "one-way"
+  ];
+  const scenarioTypes = ["evolution", "migration", "rollback", "compatibility", "operations"];
+
+  reportCases.forEach(([relativePath, heading]) => {
+    const content = read(relativePath);
+    const coverageSection = sectionContent(content, heading);
+
+    expectedTables.forEach((table) => {
+      assert.ok(coverageSection.includes(table), `${relativePath} should define ${table}`);
+    });
+    [...stableTokens, ...scenarioTypes].forEach((token) => {
+      assert.ok(coverageSection.includes(token), `${relativePath} should include the stable token ${token}`);
+    });
+    assert.ok(
+      content.includes("| source_id | upstream | reviewed_target | verification | status_or_gap |"),
+      `${relativePath} should retain the shared traceability table`
+    );
+  });
+});
+
 test("review verify configs require shared review report sections", () => {
   for (const skill of ["review-analysis", "review-plan", "review-code"]) {
     for (const [relativePath, sections] of [
@@ -647,6 +689,18 @@ test("review-analysis verify configs require stage-specific coverage", () => {
     [".agents/skills/review-analysis/config/verify.json", "需求分析专项覆盖"],
     ["templates/.agents/skills/review-analysis/config/verify.zh-CN.json", "需求分析专项覆盖"],
     ["templates/.agents/skills/review-analysis/config/verify.en.json", "Requirement Analysis Coverage"]
+  ] as Array<[string, string]>) {
+    const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
+
+    assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
+  }
+});
+
+test("review-plan verify configs require architecture coverage", () => {
+  for (const [relativePath, section] of [
+    [".agents/skills/review-plan/config/verify.json", "技术方案架构覆盖"],
+    ["templates/.agents/skills/review-plan/config/verify.zh-CN.json", "技术方案架构覆盖"],
+    ["templates/.agents/skills/review-plan/config/verify.en.json", "Technical Plan Architecture Coverage"]
   ] as Array<[string, string]>) {
     const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
 

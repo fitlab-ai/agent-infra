@@ -34,6 +34,38 @@ Use this template when writing `review-plan.md` or `review-plan-r{N}.md`.
 |---------|------------------|--------|--------|
 | {registry token} | {trigger or non-trigger evidence} | {yes / no / not-applicable} | {lens result} |
 
+## Technical Plan Architecture Coverage
+
+| assessment_id | classification | trigger_evidence | review_depth | result_or_gap |
+|---------------|----------------|------------------|--------------|---------------|
+| architecture-significance | {ordinary / architecture-significant} | {artifact / file:line / source_id} | {proportional / mini-atam} | {covered / gap} |
+
+> Scenario A (`ordinary`): keep the table above, record `Mini-ATAM: not-applicable` with a reviewable reason, and delete the Scenario B tables.
+>
+> Scenario B (`architecture-significant`): keep the table above and the five tables below, and delete the Scenario A guidance.
+
+| quality_scenario_id | source_id | business_driver | quality_attribute | priority | stimulus | context | expected_response | measure | result_or_gap |
+|---------------------|-----------|-----------------|-------------------|----------|----------|---------|-------------------|---------|---------------|
+| {stable identifier} | {source identifier} | {business driver} | {quality attribute} | {priority} | {stimulus} | {context} | {expected response} | {verifiable measure} | {covered / gap} |
+
+| decision_id | selected_option | alternative_option | benefit | cost | assumption | rejection_reason | result_or_gap |
+|-------------|-----------------|--------------------|---------|------|------------|------------------|---------------|
+| {stable identifier} | {selected option} | {reasonable alternative} | {primary benefit} | {primary cost} | {assumption} | {rejection reason} | {covered / gap} |
+
+| risk_id | decision_id | risk_or_sensitivity | affected_quality_attributes | tradeoff | mitigation_or_validation | result_or_gap |
+|---------|-------------|---------------------|-----------------------------|----------|--------------------------|---------------|
+| {stable identifier} | {decision identifier} | {risk or sensitivity point} | {affected quality attributes} | {trade-off} | {mitigation or validation} | {covered / gap} |
+
+| decision_id | door_type | reversal_cost | migration_or_rollback | decision_status | result_or_gap |
+|-------------|-----------|---------------|-----------------------|-----------------|---------------|
+| {decision identifier} | {two-way / one-way} | {reversal cost} | {migration or rollback path} | {resolved / needs-human-decision} | {covered / gap} |
+
+| evolution_id | scenario_type | source_id | confirmation_status | change_scenario | affected_scope | verification | result_or_gap |
+|--------------|---------------|-----------|---------------------|-----------------|----------------|--------------|---------------|
+| {stable identifier} | {evolution / migration / rollback / compatibility / operations} | {source identifier} | {confirmed / unconfirmed / not-applicable} | {change scenario} | {affected scope} | {verification and continuous-validation entry point} | {covered / gap / not-applicable} |
+
+> An `unconfirmed` future scenario must not become a current hard requirement. Keep `not-applicable` with evidence for each inapplicable item.
+
 ## Traceability Matrix
 
 | source_id | upstream | reviewed_target | verification | status_or_gap |
