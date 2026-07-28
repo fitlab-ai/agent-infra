@@ -147,13 +147,13 @@ Based on the script report and merged results, output a complete update report i
 
 If there are changes to submit, add:
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
+> Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
+
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill commit`.
 
 ```
 Next step - commit changes:
-  - Claude Code / OpenCode: /commit
-  - Gemini CLI: /{{project}}:commit
-  - Codex CLI: $commit
+{next-step-commands}
 ```
 
 Output the report, then **STOP** — do not make other changes to the project.

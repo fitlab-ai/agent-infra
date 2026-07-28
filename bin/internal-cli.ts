@@ -11,6 +11,11 @@ if (major < 22 || (major === 22 && minor < 9)) {
 const command = process.argv[2] || '';
 
 switch (command) {
+  case 'agent-client': {
+    const { agentClient } = await import('../lib/internal/agent-client.ts');
+    agentClient(process.argv.slice(3));
+    break;
+  }
   case 'git-workflow': {
     const { gitWorkflow } = await import('../lib/internal/git-workflow.ts');
     gitWorkflow(process.argv.slice(3));

@@ -29,6 +29,7 @@ const DEFAULTS = JSON.parse(
 );
 
 const AGENT_CLIENT_MANIFEST = JSON.parse('__AGENT_CLIENT_MANIFEST__');
+const CUSTOM_TUI_CONTRACT = JSON.parse('__CUSTOM_TUI_CONTRACT__');
 const AGENT_INFRA_SANDBOX_TOOL = 'agent-infra';
 const LEGACY_DEFAULT_SANDBOX_TOOLS = AGENT_CLIENT_MANIFEST.map((entry) => entry.id);
 const DEFAULT_SANDBOX_TOOLS = [AGENT_INFRA_SANDBOX_TOOL, ...LEGACY_DEFAULT_SANDBOX_TOOLS];
@@ -620,9 +621,49 @@ function generateOpenCodeCommand(skill, lang) {
 }
 
 function validateCustomTUIs(projectRoot, customTUIs, report) {
-  const tools = Array.isArray(customTUIs) ? customTUIs : [];
+  if (customTUIs === undefined) return [];
+  if (!Array.isArray(customTUIs)) {
+    recordCustomTUISkipped(report, {
+      index: -1,
+      name: '',
+      dir: '',
+      reason: 'customTUIs must be an array'
+    });
+    return [];
+  }
+  const tools = customTUIs;
   return tools
     .map((tool, index) => {
+      if (
+        typeof tool !== 'object'
+        || tool === null
+        || Array.isArray(tool)
+      ) {
+        recordCustomTUISkipped(report, {
+          index,
+          name: '',
+          dir: '',
+          reason: 'invalid custom TUI'
+        });
+        return null;
+      }
+
+      for (const field of CUSTOM_TUI_CONTRACT.requiredFields) {
+        if (
+          typeof tool[field] !== 'string'
+          || tool[field].trim() === ''
+          || /[\r\n]/.test(tool[field])
+        ) {
+          recordCustomTUISkipped(report, {
+            index,
+            name: String(tool.name || ''),
+            dir: String(tool.dir || ''),
+            reason: `invalid ${field}`
+          });
+          return null;
+        }
+      }
+
       if (typeof tool?.dir !== 'string' || tool.dir.trim() === '') {
         recordCustomTUISkipped(report, {
           index,
@@ -633,12 +674,43 @@ function validateCustomTUIs(projectRoot, customTUIs, report) {
         return null;
       }
 
+      if (tool.dir.includes('\\')) {
+        recordCustomTUISkipped(report, {
+          index,
+          name: tool.name,
+          dir: tool.dir,
+          reason: 'dir must use POSIX separators'
+        });
+        return null;
+      }
+
       if (!isInsideProject(projectRoot, tool.dir)) {
         recordCustomTUISkipped(report, {
           index,
           name: String(tool?.name || ''),
           dir: tool.dir,
           reason: 'dir must be a relative path inside the project root'
+        });
+        return null;
+      }
+
+      const placeholders = [...tool.invoke.matchAll(/\$\{([^}]+)\}/g)]
+        .map((match) => match[1]);
+      if (
+        !placeholders.includes('skillName')
+        || placeholders.some((placeholder) =>
+          !CUSTOM_TUI_CONTRACT.allowedPlaceholders.includes(placeholder)
+        )
+        || tool.invoke
+          .replaceAll('${skillName}', '')
+          .replaceAll('${projectName}', '')
+          .includes('${')
+      ) {
+        recordCustomTUISkipped(report, {
+          index,
+          name: tool.name,
+          dir: tool.dir,
+          reason: 'invalid invoke placeholders'
         });
         return null;
       }

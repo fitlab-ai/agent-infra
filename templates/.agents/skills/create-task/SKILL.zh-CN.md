@@ -167,9 +167,11 @@ agent-infra-internal task-verify {task-id} create-task.completed --format text
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染最终输出前，先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令把 `{task-ref}` 渲染为短号 `NN`（未分配/已释放时回退完整 TASK-id）；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
+> 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
 场景 A：已创建 Issue 时输出：
+使用 `agent-infra-internal agent-client next-steps --skill analyze-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```
 任务已创建，并已级联创建 Issue。
 
@@ -184,12 +186,12 @@ agent-infra-internal task-verify {task-id} create-task.completed --format text
 - 任务文件：.agents/workspace/active/{task-id}/task.md
 
 下一步 - 执行需求分析：
-  - Claude Code / OpenCode：/analyze-task {task-ref}
-  - Gemini CLI：/{{project}}:analyze-task {task-ref}
-  - Codex CLI：$analyze-task {task-ref}
+{next-step-commands}
 ```
 
 场景 B：未创建 Issue 时输出：
+使用 `agent-infra-internal agent-client next-steps --skill analyze-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```
 任务已创建。
 
@@ -203,12 +205,12 @@ agent-infra-internal task-verify {task-id} create-task.completed --format text
 - 任务文件：.agents/workspace/active/{task-id}/task.md
 
 下一步 - 执行需求分析：
-  - Claude Code / OpenCode：/analyze-task {task-ref}
-  - Gemini CLI：/{{project}}:analyze-task {task-ref}
-  - Codex CLI：$analyze-task {task-ref}
+{next-step-commands}
 ```
 
 场景 C：Issue 创建失败时输出：
+使用 `agent-infra-internal agent-client next-steps --skill analyze-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```
 任务已创建，但 Issue 级联创建失败。
 
@@ -227,9 +229,7 @@ Issue 创建失败：
 - 任务文件：.agents/workspace/active/{task-id}/task.md
 
 下一步 - 执行需求分析：
-  - Claude Code / OpenCode：/analyze-task {task-ref}
-  - Gemini CLI：/{{project}}:analyze-task {task-ref}
-  - Codex CLI：$analyze-task {task-ref}
+{next-step-commands}
 
 后续如需平台同步：修复认证/网络/模板问题后，可按 `.agents/rules/create-issue.md` 对当前任务手动执行一次 Issue 创建；或手动创建/查找 Issue，并把 `issue_number` 写入 task.md，后续技能会接管级联同步。
 
@@ -248,7 +248,7 @@ Issue 创建失败：
 - [ ] 更新了 task.md 中的 `assigned_to`
 - [ ] 追加了 Activity Log 条目到 task.md
 - [ ] 已按 `.agents/rules/create-issue.md` 尝试级联创建 Issue；失败时保留 task.md 并记录原因
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，含自定义 TUI，不要筛选）
+- [ ] 已通过统一 helper 渲染已选场景的下一步命令
 - [ ] **没有修改任何业务代码或配置文件**
 
 ## 停止

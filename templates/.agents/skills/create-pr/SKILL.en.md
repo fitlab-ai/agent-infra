@@ -31,12 +31,12 @@ Branch on the result:
 - absent / `"required"` -> continue to Step 1 below
 - `"disabled"` -> output the message below and **stop immediately**. Do not run any subsequent numbered step, do not trigger any PR-creation command, do not modify `pr_number` / `pr_status` in `task.md`, and do not publish a PR summary comment:
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`.
+
 ```
 This project does not enable the PR flow (`.agents/.airc.json` sets `prFlow: "disabled"`).
 No Pull Request is required; run instead:
-  - Claude Code / OpenCode: /complete-task {task-ref}
-  - Gemini CLI: /{{project}}:complete-task {task-ref}
-  - Codex CLI: $complete-task {task-ref}
+{next-step-commands}
 ```
 
 ### 1. Parse Command Arguments
@@ -105,24 +105,24 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the short id `NN` (falling back to the full TASK-id when unallocated or released); (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
+> Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
 Explain the created PR URL, summarize metadata sync and summary-comment results, and recommend watching the PR's checks next (render `{task-ref}` as the short id `NN` per `.agents/rules/next-step-output.md`):
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}`.
+
 ```
 Next step - Watch PR checks (auto self-heal until required checks are green):
-  - Claude Code / OpenCode: /watch-pr {task-ref}
-  - Gemini CLI: /{{project}}:watch-pr {task-ref}
-  - Codex CLI: $watch-pr {task-ref}
+{next-step-commands}
 ```
 
 Alternatively, to skip active monitoring and attempt completion immediately, use `complete-task`; its required-checks hard gate still fails closed for pending/failed checks or head mismatch:
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`.
+
 ```
 Next step (alternative) - Skip active monitoring and attempt completion:
-  - Claude Code / OpenCode: /complete-task {task-ref}
-  - Gemini CLI: /{{project}}:complete-task {task-ref}
-  - Codex CLI: $complete-task {task-ref}
+{next-step-commands}
 ```
 
 `watch-pr` is the primary path. The alternative `complete-task` block skips active polling only; it never skips required checks and does not guarantee immediate archival.

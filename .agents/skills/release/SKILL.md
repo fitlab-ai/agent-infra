@@ -43,7 +43,7 @@ agent-infra-internal release-workflow publish {version}
 
 ## 5. 告知用户
 
-prepare 后展示 snapshot，并提示用户单独运行 release publish；publish 后根据 snapshot 提示等待渠道完成再运行 post-release。所有 TUI 格式均需完整展示。
+prepare 后展示 snapshot，并提示用户单独运行 release publish；publish 后根据 snapshot 提示等待渠道完成再运行 post-release。下一步客户端命令通过统一 helper 渲染。
 
 ## 注意事项
 

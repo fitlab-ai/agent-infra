@@ -168,9 +168,11 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the short id `NN` (falling back to the full TASK-id when unallocated or released); (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
+> Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
 Scenario A: when an Issue was created, output:
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill analyze-task --task-ref {task-ref}`.
+
 ```
 Task created and Issue creation cascaded successfully.
 
@@ -185,12 +187,12 @@ Output file:
 - Task file: .agents/workspace/active/{task-id}/task.md
 
 Next step - run requirements analysis:
-  - Claude Code / OpenCode: /analyze-task {task-ref}
-  - Gemini CLI: /{{project}}:analyze-task {task-ref}
-  - Codex CLI: $analyze-task {task-ref}
+{next-step-commands}
 ```
 
 Scenario B: when no Issue was created, output:
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill analyze-task --task-ref {task-ref}`.
+
 ```
 Task created.
 
@@ -204,12 +206,12 @@ Output file:
 - Task file: .agents/workspace/active/{task-id}/task.md
 
 Next step - run requirements analysis:
-  - Claude Code / OpenCode: /analyze-task {task-ref}
-  - Gemini CLI: /{{project}}:analyze-task {task-ref}
-  - Codex CLI: $analyze-task {task-ref}
+{next-step-commands}
 ```
 
 Scenario C: when Issue creation failed, output:
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill analyze-task --task-ref {task-ref}`.
+
 ```
 Task created, but cascade Issue creation failed.
 
@@ -228,9 +230,7 @@ Output file:
 - Task file: .agents/workspace/active/{task-id}/task.md
 
 Next step - run requirements analysis:
-  - Claude Code / OpenCode: /analyze-task {task-ref}
-  - Gemini CLI: /{{project}}:analyze-task {task-ref}
-  - Codex CLI: $analyze-task {task-ref}
+{next-step-commands}
 
 For later platform sync: after fixing auth / network / template issues, manually run the Issue creation flow in `.agents/rules/create-issue.md` for this task; or manually create/find an Issue and write `issue_number` into task.md so later skills can take over cascade sync.
 
@@ -249,7 +249,7 @@ For later platform sync: after fixing auth / network / template issues, manually
 - [ ] Updated `assigned_to` in task.md
 - [ ] Appended an Activity Log entry to task.md
 - [ ] Tried cascading Issue creation through `.agents/rules/create-issue.md`; if it failed, kept task.md and recorded the reason
-- [ ] Informed the user of the next step (must include all TUI command formats, including any custom TUIs; do not filter)
+- [ ] Rendered the selected next-step commands through the shared helper
 - [ ] **Did not modify any business code or configuration files**
 
 ## STOP

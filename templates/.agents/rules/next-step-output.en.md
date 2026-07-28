@@ -20,6 +20,22 @@ This file defines four **independent** rules for a skill's "notify-user / Next s
 - **"Task info" / "Task status" structured field lines** → show full id and short id together: `- Task ID: {task-id} (short id {task-ref})`.
 - **Report titles** (`Task {task-id} ... completed`) and **artifact paths** (`.agents/workspace/active/{task-id}/...`) → keep the full `{task-id}` (physical path and archive key, must not change).
 
+## Unified Client Command Rendering
+
+Next-step client commands must come from the shared helper; skills and output templates must not assemble client command tables themselves:
+
+```bash
+agent-infra-internal agent-client next-steps \
+  --skill {next-skill-name} \
+  [--task-ref {task-ref}]
+```
+
+- Pass the next skill name for the already-selected scenario. Include `--task-ref` only when that command needs a task reference.
+- The helper lists only built-in clients enabled in `.agents/.airc.json` `agentClients`, followed by valid `customTUIs` in configuration order.
+- Insert non-empty stdout verbatim at `{next-step-commands}` below the current "Next steps" heading. When stdout is empty, omit the client command block while still rendering reminders, warnings, and `Completed at`.
+- If the helper writes stderr or exits non-zero, use the current skill's error path and stop; never fall back to a hard-coded client table.
+- A complex skill selects one scenario first and invokes the helper once for that scenario; it must not pre-render every branch.
+
 ## Obtaining the short id (`{task-ref}`)
 
 The single source of truth for short ids is the registry `.agents/workspace/active/.short-ids.json` (via `task-short-id.js`). **Never** read the `short_id` field from task.md frontmatter (that field is not authoritative).

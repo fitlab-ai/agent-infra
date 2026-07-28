@@ -131,13 +131,13 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 
 如有变更需要提交，追加：
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
+> 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
+
+使用 `agent-infra-internal agent-client next-steps --skill commit` 生成本场景的 `{next-step-commands}`。
 
 ```
 下一步 - 提交代码：
-  - Claude Code / OpenCode：/commit
-  - Gemini CLI：/agent-infra:commit
-  - Codex CLI：$commit
+{next-step-commands}
 ```
 
 输出报告后**停止**，不要对项目做其他更改。

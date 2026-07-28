@@ -51,13 +51,11 @@ manual-validation 项不在修复范围。处理规则：
 
 判断规则：
 1. 始终将重新审查作为默认推荐的下一步，无论本轮修复了哪个级别的问题
-2. 直接提交仅可作为附加选项，且仅在所有问题均已解决且改动明显低风险时
-3. 如果仍有任何 `Blocker` 或 `Major` 未解决，不要提供直接提交选项
+2. 直接提交仅可作为已选分支，且仅在所有问题均已解决且改动明显低风险时
+3. 如果仍有任何 `Blocker` 或 `Major` 未解决，不要选择直接提交
+4. 只渲染已选分支，且只调用一次 helper
 
-禁止规则：
-- 绝对不要把直接提交写成唯一下一步——重新审查必须始终作为首要推荐
-
-必用输出模板：
+默认分支使用 `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}` 生成 `{next-step-commands}`：
 
 ```text
 任务 {task-id} 修复完成。
@@ -71,15 +69,15 @@ manual-validation 项不在修复范围。处理规则：
 - 审查输入：{review-artifact}
 - 修复产物：{code-artifact}
 
-下一步 - 重新审查或提交：
-- 重新审查（始终推荐）：
-  - Claude Code / OpenCode：/review-code {task-ref}
-  - Gemini CLI：/{{project}}:review-code {task-ref}
-  - Codex CLI：$review-code {task-ref}
-- 直接提交（可选；仅在所有问题已解决且风险可控时）：
-  - Claude Code / OpenCode：/commit
-  - Gemini CLI：/{{project}}:commit
-  - Codex CLI：$commit
+下一步 - 重新审查：
+{next-step-commands}
+```
+
+仅当直接提交分支满足上述条件并被选中时，改用 `agent-infra-internal agent-client next-steps --skill commit` 生成 `{next-step-commands}`，并将末尾替换为：
+
+```text
+下一步 - 直接提交：
+{next-step-commands}
 ```
 
 ## 注意事项
@@ -88,5 +86,5 @@ manual-validation 项不在修复范围。处理规则：
 2. **禁止自动提交**：不要执行 `git commit`
 3. **范围约束**：逐条核实审查列出的问题，成立则修复、不成立则反驳；不扩大到审查未列出的问题
 4. **分歧处理**：如果不同意审查意见，要在报告里明确记录
-5. **重新审查**：修复后始终推荐执行 `review-code`
+5. **重新审查**：修复后默认推荐执行 `review-code`
 6. **一致性**：最新审查产物、Activity Log 记录和修复报告必须引用同一轮次

@@ -2,6 +2,8 @@
 
 When reporting that implementation is complete, use the following standard format:
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}`.
+
 ```text
 Task {task-id} code implementation complete.
 
@@ -14,7 +16,5 @@ Output files:
 - Code report: .agents/workspace/active/{task-id}/{code-artifact}
 
 Next step - code review:
-  - Claude Code / OpenCode: /review-code {task-ref}
-  - Gemini CLI: /{{project}}:review-code {task-ref}
-  - Codex CLI: $review-code {task-ref}
+{next-step-commands}
 ```

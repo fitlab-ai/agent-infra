@@ -89,9 +89,11 @@ Only `status=applied|no-op` means local archival completed. If the API dismissal
 
 ### 8. Inform User
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the short id `NN` (falling back to the full TASK-id when unallocated or released); (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
+> Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
 > **Optional sandbox-cleanup hint (gated)**: Render the "Optional: clean up this task's sandbox" block — placed after the "Note:" line and before "Next step" in the output below — only when ALL of (1) `.agents/.airc.json` has a `sandbox` field, (2) step 7 located a related task by the alert number, and (3) that related task's task.md `branch` field exists and is not `main` / `master`; otherwise omit the whole block. `{branch}` is the `branch` value from the related task.md located in step 7. This block is independent of "Next step" semantics.
+
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`.
 
 ```
 Code Scanning alert #{alert-number} dismissed.
@@ -111,9 +113,7 @@ Optional: clean up this task's sandbox
 ai sandbox rm {branch}
 
 Next step - complete and archive the task if a related task exists:
-  - Claude Code / OpenCode: /complete-task {task-ref}
-  - Gemini CLI: /{{project}}:complete-task {task-ref}
-  - Codex CLI: $complete-task {task-ref}
+{next-step-commands}
 ```
 
 ## Notes

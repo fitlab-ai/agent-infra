@@ -28,6 +28,7 @@ const targetPaths = [
 
 const DEFAULTS_EXPR = /const DEFAULTS = JSON\.parse\(\s*fs\.readFileSync\(new URL\('..\/lib\/defaults\.json', import\.meta\.url\), 'utf8'\)\s*\);/m;
 const AGENT_CLIENT_MANIFEST_EXPR = /const AGENT_CLIENT_MANIFEST = JSON\.parse\('__AGENT_CLIENT_MANIFEST__'\);/m;
+const CUSTOM_TUI_CONTRACT_EXPR = /const CUSTOM_TUI_CONTRACT = JSON\.parse\('__CUSTOM_TUI_CONTRACT__'\);/m;
 
 function requireSingleExpression(source, expression, name) {
   const matches = source.match(new RegExp(expression.source, 'gm')) ?? [];
@@ -58,15 +59,31 @@ function validateManifest(manifest, registry) {
       typeof entry.id !== 'string'
       || typeof entry.displayName !== 'string'
       || entry.displayName.trim() === ''
+      || typeof entry.invocation !== 'string'
+      || entry.invocation.trim() === ''
       || arrayFields.some((field) =>
         !Array.isArray(entry[field])
         || entry[field].some((value) => typeof value !== 'string')
       )
       || Object.keys(entry).sort().join(',')
-        !== 'displayName,ejected,id,managed,merged,ownedPathPrefixes'
+        !== 'displayName,ejected,id,invocation,managed,merged,ownedPathPrefixes'
     ) {
       throw new Error(`Invalid Agent Client manifest entry '${String(entry?.id)}'`);
     }
+  }
+}
+
+function validateCustomTUIContract(contract) {
+  const roundTripped = JSON.parse(JSON.stringify(contract));
+  if (
+    JSON.stringify(roundTripped) !== JSON.stringify(contract)
+    || !Array.isArray(contract?.requiredFields)
+    || !Array.isArray(contract?.allowedPlaceholders)
+    || JSON.stringify(contract.requiredFields) !== JSON.stringify(['name', 'dir', 'invoke'])
+    || JSON.stringify(contract.allowedPlaceholders) !== JSON.stringify(['skillName', 'projectName'])
+    || Object.keys(contract).sort().join(',') !== 'allowedPlaceholders,requiredFields'
+  ) {
+    throw new Error('Invalid custom TUI contract');
   }
 }
 
@@ -85,17 +102,30 @@ async function buildInlineContent() {
   const registryModule = await import(
     pathToFileURL(path.join(rootDir, 'dist', 'lib', 'agent-clients', 'registry.js')).href
   );
+  const customTUIModule = await import(
+    pathToFileURL(path.join(rootDir, 'dist', 'lib', 'agent-clients', 'custom-tuis.js')).href
+  );
   const manifest = registryModule.createAgentClientManifest();
+  const customTUIContract = customTUIModule.CUSTOM_TUI_CONTRACT;
 
   requireSingleExpression(source, DEFAULTS_EXPR, 'DEFAULTS');
   requireSingleExpression(source, AGENT_CLIENT_MANIFEST_EXPR, 'AGENT_CLIENT_MANIFEST');
+  requireSingleExpression(source, CUSTOM_TUI_CONTRACT_EXPR, 'CUSTOM_TUI_CONTRACT');
   validateManifest(manifest, registryModule.AGENT_CLIENT_REGISTRY);
+  validateCustomTUIContract(customTUIContract);
 
   return source
-    .replace(DEFAULTS_EXPR, `const DEFAULTS = ${JSON.stringify(defaults, null, 2)};`)
+    .replace(
+      DEFAULTS_EXPR,
+      () => `const DEFAULTS = ${JSON.stringify(defaults, null, 2)};`
+    )
     .replace(
       AGENT_CLIENT_MANIFEST_EXPR,
-      `const AGENT_CLIENT_MANIFEST = ${JSON.stringify(manifest, null, 2)};`
+      () => `const AGENT_CLIENT_MANIFEST = ${JSON.stringify(manifest, null, 2)};`
+    )
+    .replace(
+      CUSTOM_TUI_CONTRACT_EXPR,
+      () => `const CUSTOM_TUI_CONTRACT = ${JSON.stringify(customTUIContract, null, 2)};`
     )
     .replace(
       "from '../.agents/scripts/lib/agent-infra-package.js'",
@@ -124,10 +154,22 @@ async function main() {
     return;
   }
 
-  for (const targetPath of targetPaths) {
-    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-    fs.writeFileSync(targetPath, nextContent, 'utf8');
-    process.stdout.write(`Updated ${path.relative(rootDir, targetPath)}\n`);
+  const stagedPaths = [];
+  try {
+    for (const [index, targetPath] of targetPaths.entries()) {
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      const stagedPath = `${targetPath}.tmp-${process.pid}-${index}`;
+      fs.writeFileSync(stagedPath, nextContent, { encoding: 'utf8', flag: 'wx' });
+      stagedPaths.push({ stagedPath, targetPath });
+    }
+    for (const { stagedPath, targetPath } of stagedPaths) {
+      fs.renameSync(stagedPath, targetPath);
+      process.stdout.write(`Updated ${path.relative(rootDir, targetPath)}\n`);
+    }
+  } finally {
+    for (const { stagedPath } of stagedPaths) {
+      if (fs.existsSync(stagedPath)) fs.unlinkSync(stagedPath);
+    }
   }
 }
 

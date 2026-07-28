@@ -66,10 +66,10 @@ Milestone 规则：
 
 最终用户输出应包含以下后续路径：
 
+使用 `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```text
 Next steps:
   - complete the task after the workflow truly finishes:
-    - Claude Code / OpenCode: /complete-task {task-ref}
-    - Gemini CLI: /{{project}}:complete-task {task-ref}
-    - Codex CLI: $complete-task {task-ref}
+  {next-step-commands}
 ```

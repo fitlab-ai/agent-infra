@@ -3,6 +3,7 @@ import { defineAgentClientAdapter } from '../adapter.ts';
 const opencodeAdapter = defineAgentClientAdapter({
   id: 'opencode',
   displayName: 'OpenCode',
+  invocation: '/${skillName}',
   capabilities: {
     instructions: { level: 'compatible' },
     skills: { level: 'compatible' },

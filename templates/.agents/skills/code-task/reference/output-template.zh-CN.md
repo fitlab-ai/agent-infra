@@ -2,6 +2,8 @@
 
 向用户汇报实现完成时，使用以下标准格式：
 
+使用 `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```text
 任务 {task-id} 实现完成。
 
@@ -14,7 +16,5 @@
 - 实现报告：.agents/workspace/active/{task-id}/{code-artifact}
 
 下一步 - 代码审查：
-  - Claude Code / OpenCode：/review-code {task-ref}
-  - Gemini CLI：/{{project}}:review-code {task-ref}
-  - Codex CLI：$review-code {task-ref}
+{next-step-commands}
 ```

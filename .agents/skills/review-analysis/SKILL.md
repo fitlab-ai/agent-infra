@@ -85,7 +85,7 @@ agent-infra-internal task-verify {task-id} review-analysis.completed --artifact 
 
 ### 8. 告知用户
 
-按 `reference/output-templates.md` 的结论分支输出，并展示所有 TUI 的下一步命令。
+按 `reference/output-templates.md` 的结论分支输出，并通过统一 helper 渲染已选场景的下一步命令。
 
 > 渲染最终输出前先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令的 `{task-ref}` 渲染为当前任务短号 `NN`（取值与回退见该文件），其他 `{task-id}` 占位（报告标题、路径）保持完整 TASK-id 形式；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
 
@@ -94,7 +94,7 @@ agent-infra-internal task-verify {task-id} review-analysis.completed --artifact 
 - [ ] 已审查最新分析上下文
 - [ ] 已创建 `{review-artifact}`
 - [ ] 已更新 task.md 并追加 Activity Log
-- [ ] 已展示所有 TUI 的下一步命令
+- [ ] 已通过统一 helper 渲染已选场景的下一步命令
 
 ## 注意事项
 

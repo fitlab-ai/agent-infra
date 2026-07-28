@@ -20,6 +20,7 @@ type AgentClientProjectDescriptor = Readonly<{
 type AgentClientAdapter = Readonly<{
   id: AgentClientId;
   displayName: string;
+  invocation: string;
   capabilities: AgentClientCapabilities;
   project: AgentClientProjectDescriptor;
 }>;
@@ -31,6 +32,7 @@ type AgentClientRegistry = Readonly<
 type AgentClientManifestEntry = Readonly<{
   id: AgentClientId;
   displayName: string;
+  invocation: string;
   ownedPathPrefixes: readonly string[];
   managed: readonly string[];
   merged: readonly string[];
@@ -60,6 +62,28 @@ function defineAgentClientAdapter(
   }
   if (typeof candidate.displayName !== 'string' || candidate.displayName.trim() === '') {
     throw new Error(`Agent Client '${candidate.id}' requires a display name`);
+  }
+  if (
+    typeof candidate.invocation !== 'string'
+    || candidate.invocation.trim() === ''
+    || /[\r\n]/.test(candidate.invocation)
+  ) {
+    throw new Error(`Agent Client '${candidate.id}' requires a single-line invocation`);
+  }
+  const invocationPlaceholders = [
+    ...candidate.invocation.matchAll(/\$\{([^}]+)\}/g)
+  ].map((match) => match[1]);
+  if (
+    !invocationPlaceholders.includes('skillName')
+    || invocationPlaceholders.some((placeholder) =>
+      placeholder !== 'skillName' && placeholder !== 'projectName'
+    )
+    || candidate.invocation
+      .replaceAll('${skillName}', '')
+      .replaceAll('${projectName}', '')
+      .includes('${')
+  ) {
+    throw new Error(`Agent Client '${candidate.id}' has an invalid invocation`);
   }
 
   if (
@@ -171,6 +195,7 @@ function defineAgentClientAdapter(
   return Object.freeze({
     id: candidate.id,
     displayName: candidate.displayName,
+    invocation: candidate.invocation,
     capabilities: Object.freeze(capabilities),
     project: Object.freeze({
       ownedPathPrefixes: Object.freeze(paths),

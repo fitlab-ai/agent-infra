@@ -17,10 +17,8 @@ Prohibitions:
 - never mix text from different branches
 - if `Blocker > 0`, never output an approval template
 - never count manual-validation findings as blockers / major issues / minor issues, and never use them to trigger Branch B/C/D
-- always include every TUI command format in the selected branch
+- generate `{next-step-commands}` for the selected branch through the shared helper
 - The count line shows 5 numbers. Manual-validation (`{e}`) does not affect selection. `Human-decision` (`{h}`) counts this stage's `needs-human-decision` rows; because those rows are unresolved, `{h} > 0` means `canAdvance=false`. Expand the "Pending human-decision pre-block" from `.agents/rules/next-step-output.md` and show revision and re-review paths only.
-
-For Branches B/C/D, follow the revision commands with re-review commands: `/review-code {task-ref}`, `/{{project}}:review-code {task-ref}`, and `$review-code {task-ref}`.
 
 ### Branch A: Approved with No Findings
 
@@ -45,41 +43,43 @@ Reminder: manual-validation findings must be carried in the PR description as a 
 
 #### Branch A1: Commit or Push
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}`.
+
 ```text
 Next step - commit or push the code:
-  - Claude Code / OpenCode: /commit {task-ref}
-  - Gemini CLI: /{{project}}:commit {task-ref}
-  - Codex CLI: $commit {task-ref}
+{next-step-commands}
 ```
 
 #### Branch A2: Create a Pull Request
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}`.
+
 ```text
 Next step - create a Pull Request:
-  - Claude Code / OpenCode: /create-pr {task-ref}
-  - Gemini CLI: /{{project}}:create-pr {task-ref}
-  - Codex CLI: $create-pr {task-ref}
+{next-step-commands}
 ```
 
 #### Branch A3: Watch Required Checks
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}`.
+
 ```text
 Next step - watch PR checks:
-  - Claude Code / OpenCode: /watch-pr {task-ref}
-  - Gemini CLI: /{{project}}:watch-pr {task-ref}
-  - Codex CLI: $watch-pr {task-ref}
+{next-step-commands}
 ```
 
 #### Branch A4: Complete and Archive
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`.
+
 ```text
 Next step - complete and archive the task:
-  - Claude Code / OpenCode: /complete-task {task-ref}
-  - Gemini CLI: /{{project}}:complete-task {task-ref}
-  - Codex CLI: $complete-task {task-ref}
+{next-step-commands}
 ```
 
 ### Branch B: Changes Requested (Major / Minor)
+
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill code-task --task-ref {task-ref}`.
 
 ```text
 Task {task-id} review completed. Verdict: changes requested.
@@ -87,9 +87,7 @@ Task {task-id} review completed. Verdict: changes requested.
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - fix the findings:
-  - Claude Code / OpenCode: /code-task {task-ref}
-  - Gemini CLI: /{{project}}:code-task {task-ref}
-  - Codex CLI: $code-task {task-ref}
+{next-step-commands}
 
 [When manual-validation > 0, append this final line:]
 Reminder: manual-validation findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
@@ -97,15 +95,15 @@ Reminder: manual-validation findings must be carried in the PR description as a 
 
 ### Branch C: Changes Requested
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill code-task --task-ref {task-ref}`.
+
 ```text
 Task {task-id} review completed. Verdict: changes requested.
 - Blockers: {n} | Major: {n} | Minor: {n} | Manual-validation: {e} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - fix the findings:
-  - Claude Code / OpenCode: /code-task {task-ref}
-  - Gemini CLI: /{{project}}:code-task {task-ref}
-  - Codex CLI: $code-task {task-ref}
+{next-step-commands}
 
 [When manual-validation > 0, append this final line:]
 Reminder: manual-validation findings must be carried in the PR description as a "manual verification required" checklist and should not trigger /code-task.
@@ -113,15 +111,15 @@ Reminder: manual-validation findings must be carried in the PR description as a 
 
 ### Branch D: Rejected
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill plan-task --task-ref {task-ref}`.
+
 ```text
 Task {task-id} review completed. Verdict: rejected, re-design the technical plan.
 - Blockers: {n} | Major: {n} | Minor: {n} | Manual-validation: {e} | Human-decision: {h}
 - Review report: .agents/workspace/active/{task-id}/{review-artifact}
 
 Next step - re-design the technical plan:
-  - Claude Code / OpenCode: /plan-task {task-ref}
-  - Gemini CLI: /{{project}}:plan-task {task-ref}
-  - Codex CLI: $plan-task {task-ref}
+{next-step-commands}
 
 > Note: Rejected means the implementation direction needs to be reworked end-to-end, not patched locally. Core artifact lifecycle branch #7 refuses a direct `/code-task` and requires a fresh plan first.
 

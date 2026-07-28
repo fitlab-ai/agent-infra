@@ -3,6 +3,7 @@ import { defineAgentClientAdapter } from '../adapter.ts';
 const geminiCliAdapter = defineAgentClientAdapter({
   id: 'gemini-cli',
   displayName: 'Gemini CLI',
+  invocation: '/${projectName}:${skillName}',
   capabilities: {
     instructions: { level: 'compatible' },
     skills: { level: 'compatible' },

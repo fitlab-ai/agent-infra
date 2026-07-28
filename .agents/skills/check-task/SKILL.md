@@ -59,7 +59,7 @@ ai task status {task-id}
 
 ### 3. 建议下一步操作
 
-根据当前工作流状态，建议合适的下一个技能。必须展示下表中所有 TUI 列的命令格式，不要只展示当前 AI 代理对应的列。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）：
+根据当前工作流状态，建议合适的下一个技能：
 
 > **⚠️ 条件判断 — 你必须先根据 `status`、`current_step`、最新产物和最新审查结果，选择下表中唯一匹配的一行：**
 >
@@ -77,21 +77,21 @@ ai task status {task-id}
 >
 > **特别注意：只要最新审查报告中存在任何问题，就不能使用对应「审查通过」行。必须改用对应「审查有问题」行。**
 >
-> 渲染最终输出前先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 下方表格中命令的 `{task-ref}` 渲染为短号 `NN`（未分配/已释放时回退完整 TASK-id）；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
+> 渲染最终输出前先读取 `.agents/rules/next-step-output.md`。选中可执行行后只调用一次 `agent-infra-internal agent-client next-steps --skill {next-skill} [--task-ref {task-ref}]`，将 stdout 原样输出为 `{next-step-commands}`；`任务被阻塞` 与 `任务已完成` 不调用 helper。最后追加 `Completed at` 收尾行。
 
-| 当前状态           | Claude Code / OpenCode       | Gemini CLI                               | Codex CLI                    |
-|--------------------|------------------------------|------------------------------------------|------------------------------|
-| 分析完成           | `/review-analysis {task-ref}` | `/agent-infra:review-analysis {task-ref}` | `$review-analysis {task-ref}` |
-| 需求分析审查通过   | `/plan-task {task-ref}`       | `/agent-infra:plan-task {task-ref}`       | `$plan-task {task-ref}`       |
-| 需求分析审查有问题 | `/analyze-task {task-ref}`    | `/agent-infra:analyze-task {task-ref}`    | `$analyze-task {task-ref}`    |
-| 计划完成           | `/review-plan {task-ref}`     | `/agent-infra:review-plan {task-ref}`     | `$review-plan {task-ref}`     |
-| 技术方案审查通过   | `/code-task {task-ref}`       | `/agent-infra:code-task {task-ref}`       | `$code-task {task-ref}`       |
-| 技术方案审查有问题 | `/plan-task {task-ref}`       | `/agent-infra:plan-task {task-ref}`       | `$plan-task {task-ref}`       |
-| 实现完成           | `/review-code {task-ref}`     | `/agent-infra:review-code {task-ref}`     | `$review-code {task-ref}`     |
-| 代码审查通过       | `/commit`                    | `/agent-infra:commit`                    | `$commit`                    |
-| 代码审查有问题     | `/code-task {task-ref}`       | `/agent-infra:code-task {task-ref}`       | `$code-task {task-ref}`       |
-| 任务被阻塞         | 解除阻塞或提供所需信息       | —                                        | 解除阻塞或提供所需信息       |
-| 任务已完成         | 无需操作                     | —                                        | 无需操作                     |
+| 当前状态           | next skill        | task ref |
+|--------------------|-------------------|----------|
+| 分析完成           | `review-analysis` | required |
+| 需求分析审查通过   | `plan-task`       | required |
+| 需求分析审查有问题 | `analyze-task`    | required |
+| 计划完成           | `review-plan`     | required |
+| 技术方案审查通过   | `code-task`       | required |
+| 技术方案审查有问题 | `plan-task`       | required |
+| 实现完成           | `review-code`     | required |
+| 代码审查通过       | `commit`          | omitted  |
+| 代码审查有问题     | `code-task`       | required |
+| 任务被阻塞         | —                 | —        |
+| 任务已完成         | —                 | —        |
 
 ## 注意事项
 

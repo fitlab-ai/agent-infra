@@ -26,6 +26,7 @@ function listMarkdown(dir: string): string[] {
 }
 
 const files = SCAN_DIRS.flatMap((dir) => listMarkdown(path.resolve(dir)));
+const HELPER = /agent-infra-internal agent-client next-steps --skill ([a-z0-9-]+|\{next-skill\})( --task-ref \{task-ref\}|\s+\[--task-ref \{task-ref\}\])?/g;
 
 for (const file of files) {
   const rel = path.relative(process.cwd(), file);
@@ -61,4 +62,53 @@ test('report titles and artifact paths keep the full {task-id}', () => {
     /(?:任务|Task)\s+\{task-id\}/,
     'report titles must keep the full {task-id}'
   );
+});
+
+test('runtime and bilingual next-step templates use the shared helper structure', () => {
+  const runtime = listMarkdown(path.resolve('.agents/skills'))
+    .filter((file) => fs.readFileSync(file, 'utf8').includes('{next-step-commands}'));
+  const templates = listMarkdown(path.resolve('templates/.agents/skills'))
+    .filter((file) => fs.readFileSync(file, 'utf8').includes('{next-step-commands}'));
+
+  assert.equal(runtime.length, 26);
+  assert.equal(templates.length, 52);
+
+  for (const file of [...runtime, ...templates]) {
+    const content = fs.readFileSync(file, 'utf8');
+    const helpers = [...content.matchAll(HELPER)];
+    assert.ok(helpers.length > 0, `${path.relative(process.cwd(), file)} has no helper invocation`);
+    assert.ok(
+      helpers.every((match) => match[1] && (
+        !match[2]
+        || match[2] === ' --task-ref {task-ref}'
+        || match[2].trim() === '[--task-ref {task-ref}]'
+      )),
+      `${path.relative(process.cwd(), file)} has an invalid helper invocation`
+    );
+  }
+});
+
+test('English and Chinese next-step templates have matching helper scenarios', () => {
+  const templates = listMarkdown(path.resolve('templates/.agents/skills'))
+    .filter((file) => fs.readFileSync(file, 'utf8').includes('{next-step-commands}'));
+  const bases = new Set(
+    templates.map((file) => file.replace(/\.(?:en|zh-CN)\.md$/, ''))
+  );
+
+  assert.equal(bases.size, 26);
+  for (const base of bases) {
+    const en = fs.readFileSync(`${base}.en.md`, 'utf8');
+    const zh = fs.readFileSync(`${base}.zh-CN.md`, 'utf8');
+    const scenarios = (content: string) =>
+      [...content.matchAll(HELPER)].map((match) => ({
+        skill: match[1],
+        taskRef: Boolean(match[2])
+      }));
+    assert.deepEqual(scenarios(en), scenarios(zh), path.relative(process.cwd(), base));
+    assert.equal(
+      en.match(/\{next-step-commands\}/g)?.length,
+      zh.match(/\{next-step-commands\}/g)?.length,
+      path.relative(process.cwd(), base)
+    );
+  }
 });

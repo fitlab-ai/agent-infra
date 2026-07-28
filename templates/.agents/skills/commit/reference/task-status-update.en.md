@@ -30,11 +30,11 @@ This field is the only baseline for the `complete-task` `post-review-commit` gat
 
 After a new commit or the restricted push-only path is successfully pushed to an existing open PR, the only next step is to watch required checks for the new head:
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}`.
+
 ```text
 Next step - watch PR checks:
-  - Claude Code / OpenCode: /watch-pr {task-ref}
-  - Gemini CLI: /{{project}}:watch-pr {task-ref}
-  - Codex CLI: $watch-pr {task-ref}
+{next-step-commands}
 ```
 
 If push fails, keep the task active and preserve local HEAD; show diagnostics and manual push guidance only, never `watch-pr` or `complete-task`. This scenario takes precedence over the final `prFlow` route below.
@@ -50,20 +50,20 @@ This scenario ends the run before `git commit` and does not enter the successful
 
 Full re-review commands:
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}`.
+
 ```text
 Next step - re-run code review:
-  - Claude Code / OpenCode: /review-code {task-ref}
-  - Gemini CLI: /{{project}}:review-code {task-ref}
-  - Codex CLI: $review-code {task-ref}
+{next-step-commands}
 ```
 
 Full staging-only retry commands:
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}`.
+
 ```text
 Next step - fix staging and retry commit:
-  - Claude Code / OpenCode: /commit {task-ref}
-  - Gemini CLI: /{{project}}:commit {task-ref}
-  - Codex CLI: $commit {task-ref}
+{next-step-commands}
 ```
 
 Before selecting the next step, verify:
@@ -97,34 +97,30 @@ Required next-step commands (rendered by `prFlow`):
 
 `prFlow="disabled"` -> single option "complete directly":
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`.
+
 ```text
 Next step - complete and archive the task:
-  - Claude Code / OpenCode: /complete-task {task-ref}
-  - Gemini CLI: /{{project}}:complete-task {task-ref}
-  - Codex CLI: $complete-task {task-ref}
+{next-step-commands}
 ```
 
 `prFlow="required"` -> single option "go through the PR flow":
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}`.
+
 ```text
 Next step - create Pull Request:
-  - Claude Code / OpenCode: /create-pr {task-ref}
-  - Gemini CLI: /{{project}}:create-pr {task-ref}
-  - Codex CLI: $create-pr {task-ref}
+{next-step-commands}
 ```
 
-field absent -> two options:
+field absent -> choose one path, then invoke the helper exactly once:
+
+- PR flow: `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}`
+- Complete directly: `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`
 
 ```text
-Next step - choose one:
-  - Go through the PR flow:
-    - Claude Code / OpenCode: /create-pr {task-ref}
-    - Gemini CLI: /{{project}}:create-pr {task-ref}
-    - Codex CLI: $create-pr {task-ref}
-  - Complete directly (no PR):
-    - Claude Code / OpenCode: /complete-task {task-ref}
-    - Gemini CLI: /{{project}}:complete-task {task-ref}
-    - Codex CLI: $complete-task {task-ref}
+Next step - {selected path}:
+{next-step-commands}
 ```
 
 ### Case 2: More Work Remains
@@ -145,11 +141,11 @@ If this commit hands work over to code review:
 
 Required next-step commands:
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}`.
+
 ```text
 Next step - code review:
-  - Claude Code / OpenCode: /review-code {task-ref}
-  - Gemini CLI: /{{project}}:review-code {task-ref}
-  - Codex CLI: $review-code {task-ref}
+{next-step-commands}
 ```
 
 > Note: beyond the cases above, if `task.md` contains a valid `pr_number`, the commit skill must sync the PR summary via `reference/pr-summary-sync.md` before entering the verification gate.

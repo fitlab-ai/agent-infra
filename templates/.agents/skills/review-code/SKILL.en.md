@@ -131,7 +131,7 @@ manual-validation counts do not influence branch selection; they are displayed o
 
 > Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the current task's short id `NN` (see that file for lookup and fallback), while other `{task-id}` placeholders (report titles, paths) keep the full TASK-id form; (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
 
-Include all TUI command formats in the next-step output. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
+render the selected next-step commands through the shared helper. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
 
 ## Completion Checklist
 
@@ -139,7 +139,7 @@ Include all TUI command formats in the next-step output. If `.agents/.airc.json`
 - [ ] Created `{review-artifact}`
 - [ ] Updated task.md and appended the Activity Log entry
 - [ ] Chose exactly one verdict branch in the user output
-- [ ] Informed the user of the next step (must include all TUI command formats, including any custom TUIs; do not filter)
+- [ ] Rendered the selected next-step commands through the shared helper
 
 ## Notes
 

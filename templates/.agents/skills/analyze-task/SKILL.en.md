@@ -230,9 +230,11 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the short id `NN` (falling back to the full TASK-id when unallocated or released); (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
+> Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
 Output format:
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill review-analysis --task-ref {task-ref}`.
+
 ```
 Analysis complete for task {task-id}.
 
@@ -245,9 +247,7 @@ Output file:
 - Analysis report: .agents/workspace/active/{task-id}/{analysis-artifact}
 
 Next step - review the analysis:
-  - Claude Code / OpenCode: /review-analysis {task-ref}
-  - Gemini CLI: /{{project}}:review-analysis {task-ref}
-  - Codex CLI: $review-analysis {task-ref}
+{next-step-commands}
 ```
 
 ## Completion Checklist
@@ -259,7 +259,7 @@ Next step - review the analysis:
 - [ ] Updated `assigned_to` in task.md
 - [ ] Appended an Activity Log entry to task.md
 - [ ] Marked requirement-analysis as complete in workflow progress
-- [ ] Informed the user of the next step (must include all TUI command formats, including any custom TUIs; do not filter)
+- [ ] Rendered the selected next-step commands through the shared helper
 - [ ] **Did not modify any business code**
 
 ## STOP

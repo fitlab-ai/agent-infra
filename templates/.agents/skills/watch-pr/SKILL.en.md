@@ -101,27 +101,27 @@ Keep the gate output in your reply as the verification evidence. Without current
 
 > On the task-anchored path, execute this step only after the gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the short id `NN` (falling back to the full TASK-id when unallocated or released); (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
+> Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
 Output per scenario:
 - "All green" + task-anchored: state that all required checks passed, then render exactly one exit based on whether this run created repair commits (`{task-ref}` becomes the short id):
 
   `repairCommits.length == 0`:
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`.
+
   ```
   Next step - Complete and archive the task:
-    - Claude Code / OpenCode: /complete-task {task-ref}
-    - Gemini CLI: /{{project}}:complete-task {task-ref}
-    - Codex CLI: $complete-task {task-ref}
+  {next-step-commands}
   ```
 
   `repairCommits.length > 0`:
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}`.
+
   ```
   Next step - Re-run code review:
-    - Claude Code / OpenCode: /review-code {task-ref}
-    - Gemini CLI: /{{project}}:review-code {task-ref}
-    - Codex CLI: $review-code {task-ref}
+  {next-step-commands}
   ```
 
 - "Blocked": output only the step 4 blocker explanation; do not recommend a next-step command.
@@ -133,7 +133,7 @@ Output per scenario:
 - [ ] Self-heal limited to locatable code-layer failures, with local tests passing before push and within the fix cap
 - [ ] Task-anchored path: updated task.md and appended the Watch PR Activity Log entry
 - [ ] Task-anchored path: verification gate passed
-- [ ] Showed the user all TUI next-step command formats (green exit; the blocked exit renders no next step)
+- [ ] Rendered the selected next-step commands through the shared helper
 
 ## Stop
 

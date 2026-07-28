@@ -51,13 +51,11 @@ Before writing the code report, run the project's **core subset** as final verif
 
 Decision rules:
 1. always recommend re-review as the default next step, regardless of the severity of fixed issues
-2. direct commit may be offered as an additional option only when all issues are resolved and changes are clearly low risk
-3. if any `Blocker` or `Major` remains unresolved, do not offer direct commit as an option
+2. direct commit may be selected only when all issues are resolved and the changes are clearly low risk
+3. do not select direct commit while any `Blocker` or `Major` remains unresolved
+4. render only the selected branch and invoke the helper exactly once
 
-Prohibition:
-- never present direct commit as the only next step — re-review must always be the primary recommendation
-
-Required output template:
+For the default branch, populate `{next-step-commands}` by running `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}`:
 
 ```text
 Task {task-id} fix completed.
@@ -71,15 +69,15 @@ Fix status:
 - Review input: {review-artifact}
 - Code artifact: {code-artifact}
 
-Next step - re-review or commit:
-- Re-review (always recommended):
-  - Claude Code / OpenCode: /review-code {task-ref}
-  - Gemini CLI: /{{project}}:review-code {task-ref}
-  - Codex CLI: $review-code {task-ref}
-- Commit directly (optional; only when all issues are resolved and changes are low risk):
-  - Claude Code / OpenCode: /commit
-  - Gemini CLI: /{{project}}:commit
-  - Codex CLI: $commit
+Next step - review again:
+{next-step-commands}
+```
+
+Only when the direct-commit branch satisfies the rules above and is selected, populate `{next-step-commands}` by running `agent-infra-internal agent-client next-steps --skill commit`, then replace the ending with:
+
+```text
+Next step - commit directly:
+{next-step-commands}
 ```
 
 ## Notes
@@ -88,5 +86,5 @@ Next step - re-review or commit:
 2. **No auto-commit**: do not run `git commit`
 3. **Scope discipline**: verify each reviewed issue one by one — fix it if it holds, rebut it if it does not; do not expand to issues the review did not list
 4. **Disagreement handling**: record any disagreement in the report
-5. **Re-review**: always recommend `review-code` as the default next step after fix mode
+5. **Re-review**: recommend `review-code` as the default next step after fix mode
 6. **Consistency**: the latest review artifact, Activity Log entry, and code report must reference the same round

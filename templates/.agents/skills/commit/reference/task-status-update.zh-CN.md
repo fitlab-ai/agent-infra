@@ -30,11 +30,11 @@ last_reviewed_commit: {new_head}
 
 新 commit 或受限 push-only 场景成功推送到已有开放 PR 后，唯一下一步是监控新 head 的 required checks：
 
+使用 `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```text
 下一步 - 监控 PR 检查：
-  - Claude Code / OpenCode: /watch-pr {task-ref}
-  - Gemini CLI: /{{project}}:watch-pr {task-ref}
-  - Codex CLI: $watch-pr {task-ref}
+{next-step-commands}
 ```
 
 push 失败时保留任务 active 与本地 HEAD，只展示诊断和人工推送提示；不得渲染 `watch-pr` 或 `complete-task`。该场景优先于下方 `prFlow` 终态路由。
@@ -50,20 +50,20 @@ push 失败时保留任务 active 与本地 HEAD，只展示诊断和人工推�
 
 重新审查的完整命令：
 
+使用 `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```text
 下一步 - 重新代码审查：
-  - Claude Code / OpenCode: /review-code {task-ref}
-  - Gemini CLI: /{{project}}:review-code {task-ref}
-  - Codex CLI: $review-code {task-ref}
+{next-step-commands}
 ```
 
 仅修正暂存的完整命令：
 
+使用 `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```text
 下一步 - 修正暂存后重新提交：
-  - Claude Code / OpenCode: /commit {task-ref}
-  - Gemini CLI: /{{project}}:commit {task-ref}
-  - Codex CLI: $commit {task-ref}
+{next-step-commands}
 ```
 
 在决定下一步之前，先确认：
@@ -97,34 +97,30 @@ push 失败时保留任务 active 与本地 HEAD，只展示诊断和人工推�
 
 `prFlow="disabled"` → 单选「直接完成」：
 
+使用 `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```text
 下一步 - 完成并归档任务：
-  - Claude Code / OpenCode: /complete-task {task-ref}
-  - Gemini CLI: /{{project}}:complete-task {task-ref}
-  - Codex CLI: $complete-task {task-ref}
+{next-step-commands}
 ```
 
 `prFlow="required"` → 单选「走 PR 流程」：
 
+使用 `agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```text
 下一步 - 创建 Pull Request：
-  - Claude Code / OpenCode: /create-pr {task-ref}
-  - Gemini CLI: /{{project}}:create-pr {task-ref}
-  - Codex CLI: $create-pr {task-ref}
+{next-step-commands}
 ```
 
-字段缺省 → 二选一：
+字段缺省 → 二选一。选定路径后只运行一次 helper：
+
+- 走 PR 流程：`agent-infra-internal agent-client next-steps --skill create-pr --task-ref {task-ref}`
+- 直接完成：`agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`
 
 ```text
-下一步 - 二选一：
-  - 走 PR 流程：
-    - Claude Code / OpenCode: /create-pr {task-ref}
-    - Gemini CLI: /{{project}}:create-pr {task-ref}
-    - Codex CLI: $create-pr {task-ref}
-  - 直接完成（无 PR）：
-    - Claude Code / OpenCode: /complete-task {task-ref}
-    - Gemini CLI: /{{project}}:complete-task {task-ref}
-    - Codex CLI: $complete-task {task-ref}
+下一步 - {已选路径}：
+{next-step-commands}
 ```
 
 ### 场景 2：还有后续工作
@@ -145,11 +141,11 @@ push 失败时保留任务 active 与本地 HEAD，只展示诊断和人工推�
 
 必带下一步命令：
 
+使用 `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```text
 下一步 - 代码审查：
-  - Claude Code / OpenCode: /review-code {task-ref}
-  - Gemini CLI: /{{project}}:review-code {task-ref}
-  - Codex CLI: $review-code {task-ref}
+{next-step-commands}
 ```
 
 > 注意：上述场景之外，只要 `task.md` 中存在有效 `pr_number`，commit 技能必须先按 `reference/pr-summary-sync.md` 同步 PR 摘要，再进入完成校验。

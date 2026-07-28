@@ -64,7 +64,7 @@ Issue/PR #{id} 分析结果：
 
 ### 5. 告知用户
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
+> 渲染下一步前先读取 `.agents/rules/next-step-output.md`；如需展示下一步客户端命令，按当前任务阶段调用统一 helper。
 
 如果修改了 Issue 标题，提示无需额外同步命令；后续按任务当前阶段继续执行对应工作流技能。
 

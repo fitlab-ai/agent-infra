@@ -66,10 +66,10 @@ Create the PR with the create-PR command template in `.agents/rules/issue-pr-com
 
 Final user output should include this follow-up path:
 
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`.
+
 ```text
 Next steps:
   - complete the task after the workflow truly finishes:
-    - Claude Code / OpenCode: /complete-task {task-ref}
-    - Gemini CLI: /{{project}}:complete-task {task-ref}
-    - Codex CLI: $complete-task {task-ref}
+  {next-step-commands}
 ```

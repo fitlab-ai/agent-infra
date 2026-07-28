@@ -102,11 +102,13 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Execute this step only after the verification gate passes.
 
-> **IMPORTANT**: All TUI command formats listed below must be output in full. Do not show only the format for the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name). Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the "Next steps" commands as the short id `NN` (falling back to the full TASK-id when unallocated or released); (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
+> Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
 > **Optional sandbox-cleanup hint (gated)**: Render the "Optional: clean up this task's sandbox" block — placed after "Target path" and before "Next step" in the output below — only when BOTH (1) `.agents/.airc.json` has a `sandbox` field and (2) task.md's `branch` field exists and is not `main` / `master`; otherwise omit the whole block. `{branch}` is the `branch` value from the task.md you already loaded (the task has moved to completed/, so read it from `.agents/workspace/completed/{task-id}/task.md`). This block is independent of "Next steps" semantics.
 
 Output format:
+Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill check-task --task-ref {task-ref}`.
+
 ```
 Task {task-id} cancelled; task directory moved to completed/.
 
@@ -120,9 +122,7 @@ Optional: clean up this task's sandbox
 ai sandbox rm {branch}
 
 Next step - inspect the moved task:
-  - Claude Code / OpenCode: /check-task {task-ref}
-  - Gemini CLI: /{{project}}:check-task {task-ref}
-  - Codex CLI: $check-task {task-ref}
+{next-step-commands}
 ```
 
 

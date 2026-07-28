@@ -65,15 +65,15 @@ bash .agents/skills/init-milestones/scripts/init-milestones.sh "$ARGUMENTS"
 
 ### 5. 告知用户
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。
+> 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
 输出 milestones 初始化摘要后，提示：
 
+使用 `agent-infra-internal agent-client next-steps --skill init-labels` 生成本场景的 `{next-step-commands}`。
+
 ```
 下一步 - 初始化 Labels（可选）：
-  - Claude Code / OpenCode：/init-labels
-  - Gemini CLI：/agent-infra:init-labels
-  - Codex CLI：$init-labels
+{next-step-commands}
 ```
 
 ## 错误处理

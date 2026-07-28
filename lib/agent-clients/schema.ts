@@ -32,6 +32,19 @@ const AGENT_CLIENTS_SCHEMA = {
           }
         }
       }
+    },
+    customTUIs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: true,
+        required: ['name', 'dir', 'invoke'],
+        properties: {
+          name: { type: 'string' },
+          dir: { type: 'string' },
+          invoke: { type: 'string' }
+        }
+      }
     }
   },
   definitions: {

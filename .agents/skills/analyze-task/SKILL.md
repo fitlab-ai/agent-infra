@@ -229,9 +229,11 @@ agent-infra-internal task-verify {task-id} analyze.completed --artifact {analysi
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染最终输出前，先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令把 `{task-ref}` 渲染为短号 `NN`（未分配/已释放时回退完整 TASK-id）；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
+> 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
 输出格式：
+使用 `agent-infra-internal agent-client next-steps --skill review-analysis --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```
 任务 {task-id} 分析完成。
 
@@ -244,9 +246,7 @@ agent-infra-internal task-verify {task-id} analyze.completed --artifact {analysi
 - 分析报告：.agents/workspace/active/{task-id}/{analysis-artifact}
 
 下一步 - 审查需求分析：
-  - Claude Code / OpenCode：/review-analysis {task-ref}
-  - Gemini CLI：/agent-infra:review-analysis {task-ref}
-  - Codex CLI：$review-analysis {task-ref}
+{next-step-commands}
 ```
 
 ## 完成检查清单
@@ -258,7 +258,7 @@ agent-infra-internal task-verify {task-id} analyze.completed --artifact {analysi
 - [ ] 更新了 task.md 中的 `assigned_to`
 - [ ] 追加了 Activity Log 条目到 task.md
 - [ ] 在工作流进度中标记了 requirement-analysis 为已完成
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，含自定义 TUI，不要筛选）
+- [ ] 已通过统一 helper 渲染已选场景的下一步命令
 - [ ] **没有修改任何业务代码**
 
 ## 停止

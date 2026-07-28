@@ -101,11 +101,13 @@ agent-infra-internal task-verify {task-id} cancel-task.completed --format text
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染最终输出前，先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令把 `{task-ref}` 渲染为短号 `NN`（未分配/已释放时回退完整 TASK-id）；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
+> 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
 > **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) task.md 的 `branch` 字段存在且不是 `main` / `master` 时，才渲染下方输出中「目标路径」之后、「下一步」之前的「可选：清理本任务的沙箱」块；任一不满足则整段省略。`{branch}` 取已读入的 task.md 的 `branch` 值（任务此时已移动到 completed/，从 `.agents/workspace/completed/{task-id}/task.md` 读取）。该块独立于「下一步」语义。
 
 输出格式：
+使用 `agent-infra-internal agent-client next-steps --skill check-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```
 任务 {task-id} 已取消，任务目录已转移到 completed/。
 
@@ -119,9 +121,7 @@ agent-infra-internal task-verify {task-id} cancel-task.completed --format text
 ai sandbox rm {branch}
 
 下一步 - 查看已转移任务：
-  - Claude Code / OpenCode：/check-task {task-ref}
-  - Gemini CLI：/{{project}}:check-task {task-ref}
-  - Codex CLI：$check-task {task-ref}
+{next-step-commands}
 ```
 
 
@@ -132,7 +132,7 @@ ai sandbox rm {branch}
 - [ ] 已将任务目录移动到 `.agents/workspace/completed/`
 - [ ] 已在存在 Issue 时完成 Issue 同步
 - [ ] 已运行 gate 校验并通过
-- [ ] 已向用户展示完整的下一步命令（含自定义 TUI）
+- [ ] 已通过统一 helper 渲染已选场景的下一步命令
 
 ## 注意事项
 

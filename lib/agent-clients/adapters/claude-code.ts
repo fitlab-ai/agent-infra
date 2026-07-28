@@ -3,6 +3,7 @@ import { defineAgentClientAdapter } from '../adapter.ts';
 const claudeCodeAdapter = defineAgentClientAdapter({
   id: 'claude-code',
   displayName: 'Claude Code',
+  invocation: '/${skillName}',
   capabilities: {
     instructions: { level: 'compatible' },
     skills: { level: 'compatible' },

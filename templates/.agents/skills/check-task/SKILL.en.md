@@ -59,7 +59,7 @@ Workflow progress:
 
 ### 3. Recommend Next Action
 
-Recommend the appropriate next skill based on the current workflow state. You must show command formats for all TUI columns in the table below, not just the current AI agent. If `.agents/.airc.json` configures custom TUIs (via `customTUIs`), read each tool's `name` and `invoke`, then add the matching command line in the same format (`${skillName}` becomes the skill name and `${projectName}` becomes the project name).
+Recommend the appropriate next skill based on the current workflow state.
 
 > **⚠️ CONDITION CHECK — you must choose the single matching row in the table below based on `status`, `current_step`, the latest artifacts, and the latest review result:**
 >
@@ -77,21 +77,21 @@ Recommend the appropriate next skill based on the current workflow state. You mu
 >
 > **Important: if the latest review report contains any issue at all, do not use the corresponding review-passed row. Use the corresponding has-issues row instead.**
 >
-> Before rendering the final output, read `.agents/rules/next-step-output.md` and apply both of its rules: (1) render `{task-ref}` in the table commands below as the short id `NN` (falling back to the full TASK-id when unallocated or released); (2) append the `Completed at` line as the very last line of the user-facing output (this applies to every user-facing output — success, error, and early-return paths alike, not only the success path).
+> Before rendering the final output, read `.agents/rules/next-step-output.md`. After selecting an actionable row, invoke `agent-infra-internal agent-client next-steps --skill {next-skill} [--task-ref {task-ref}]` exactly once and render stdout verbatim as `{next-step-commands}`. Do not invoke the helper for `Task Blocked` or `Task Completed`. Append the `Completed at` trailing line last.
 
-| Current State              | Claude Code / OpenCode                              | Gemini CLI                               | Codex CLI                                           |
-|----------------------------|-----------------------------------------------------|------------------------------------------|-----------------------------------------------------|
-| Analysis Complete          | `/review-analysis {task-ref}`                        | `/{{project}}:review-analysis {task-ref}` | `$review-analysis {task-ref}`                        |
-| Analysis Review Passed     | `/plan-task {task-ref}`                              | `/{{project}}:plan-task {task-ref}`       | `$plan-task {task-ref}`                              |
-| Analysis Review Has Issues | `/analyze-task {task-ref}`                           | `/{{project}}:analyze-task {task-ref}`    | `$analyze-task {task-ref}`                           |
-| Plan Complete              | `/review-plan {task-ref}`                            | `/{{project}}:review-plan {task-ref}`     | `$review-plan {task-ref}`                            |
-| Plan Review Passed         | `/code-task {task-ref}`                              | `/{{project}}:code-task {task-ref}`       | `$code-task {task-ref}`                              |
-| Plan Review Has Issues     | `/plan-task {task-ref}`                              | `/{{project}}:plan-task {task-ref}`       | `$plan-task {task-ref}`                              |
-| Code Complete              | `/review-code {task-ref}`                            | `/{{project}}:review-code {task-ref}`     | `$review-code {task-ref}`                            |
-| Code Review Passed         | `/commit`                                           | `/{{project}}:commit`                    | `$commit`                                           |
-| Code Review Has Issues     | `/code-task {task-ref}`                              | `/{{project}}:code-task {task-ref}`       | `$code-task {task-ref}`                              |
-| Task Blocked               | Unblock the task or provide the missing information | —                                        | Unblock the task or provide the missing information |
-| Task Completed             | No action needed                                    | —                                        | No action needed                                    |
+| Current State              | next skill        | task ref |
+|----------------------------|-------------------|----------|
+| Analysis Complete          | `review-analysis` | required |
+| Analysis Review Passed     | `plan-task`       | required |
+| Analysis Review Has Issues | `analyze-task`    | required |
+| Plan Complete              | `review-plan`     | required |
+| Plan Review Passed         | `code-task`       | required |
+| Plan Review Has Issues     | `plan-task`       | required |
+| Code Complete              | `review-code`     | required |
+| Code Review Passed         | `commit`          | omitted  |
+| Code Review Has Issues     | `code-task`       | required |
+| Task Blocked               | —                 | —        |
+| Task Completed             | —                 | —        |
 
 ## Notes
 

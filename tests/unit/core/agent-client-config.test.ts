@@ -90,6 +90,14 @@ test('schema is JSON-safe and derives its closed enums from shared constants', (
     schema.properties.agentClients.items.required,
     ['id', 'enabled', 'installInSandbox']
   );
+  assert.deepEqual(
+    schema.properties.customTUIs.items.required,
+    ['name', 'dir', 'invoke']
+  );
+  assert.equal(schema.properties.customTUIs.items.additionalProperties, true);
+  assert.equal(schema.properties.customTUIs.items.properties.name.type, 'string');
+  assert.equal(schema.properties.customTUIs.items.properties.dir.type, 'string');
+  assert.equal(schema.properties.customTUIs.items.properties.invoke.type, 'string');
   assert.equal(schema.properties.agentClients.items.properties.enabled.type, 'boolean');
   assert.equal(
     schema.properties.agentClients.items.properties.installInSandbox.type,

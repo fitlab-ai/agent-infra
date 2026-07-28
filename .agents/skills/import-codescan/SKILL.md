@@ -97,7 +97,9 @@ agent-infra-internal task-verify {task-id} import-codescan.completed --format te
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染最终输出前，先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令把 `{task-ref}` 渲染为短号 `NN`（未分配/已释放时回退完整 TASK-id）；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
+> 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
+
+使用 `agent-infra-internal agent-client next-steps --skill analyze-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
 
 ```
 Code Scanning 告警 #{alert-number} 已导入。
@@ -111,9 +113,7 @@ Code Scanning 告警 #{alert-number} 已导入。
 - 任务 ID：{task-id}（短号 {task-ref}）
 
 下一步：
-  - Claude Code / OpenCode：/analyze-task {task-ref}
-  - Gemini CLI：/agent-infra:analyze-task {task-ref}
-  - Codex CLI：$analyze-task {task-ref}
+{next-step-commands}
 ```
 
 
@@ -125,7 +125,7 @@ Code Scanning 告警 #{alert-number} 已导入。
 - [ ] 更新了 task.md 中的 `current_step` 为 requirement-analysis
 - [ ] 更新了 task.md 中的 `updated_at` 为当前时间
 - [ ] 追加了 Activity Log 条目到 task.md
-- [ ] 告知了用户下一步（必须展示所有 TUI 的命令格式，含自定义 TUI，不要筛选）
+- [ ] 已通过统一 helper 渲染已选场景的下一步命令
 
 ## 错误处理
 

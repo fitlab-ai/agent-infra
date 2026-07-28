@@ -75,6 +75,7 @@ function adapterInput(
   return {
     id: 'codex',
     displayName: 'Codex',
+    invocation: '$${skillName}',
     capabilities: capabilityMap(),
     project: {
       ownedPathPrefixes: ['.codex/'],
@@ -117,6 +118,11 @@ test('adapter definitions validate their closed contract without mutating input'
   const invalidInputs: unknown[] = [
     adapterInput({ id: 'unknown' as never }),
     adapterInput({ displayName: '   ' }),
+    adapterInput({ invocation: '' }),
+    adapterInput({ invocation: '$command' }),
+    adapterInput({ invocation: '$${unknown}' }),
+    adapterInput({ invocation: '$${skillName} $${unknown' }),
+    adapterInput({ invocation: '$${skillName}\nnext' }),
     adapterInput({
       capabilities: {
         ...capabilityMap(),
@@ -257,6 +263,16 @@ test('registry is complete, canonical, deeply frozen, and matches the capability
     );
   }
 
+  assert.deepEqual(
+    Object.fromEntries(adapters.map((adapter) => [adapter.id, adapter.invocation])),
+    {
+      'claude-code': '/${skillName}',
+      codex: '$${skillName}',
+      'gemini-cli': '/${projectName}:${skillName}',
+      opencode: '/${skillName}'
+    }
+  );
+
   const ownedPaths = adapters.flatMap((adapter) =>
     adapter.project.ownedPathPrefixes.map((prefix) => ({
       id: adapter.id,
@@ -312,6 +328,22 @@ test('registry exposes the exact built-in project asset matrix', () => {
       }
     }
   );
+});
+
+test('manifest projects invocation and remains deeply frozen', () => {
+  const manifest = createAgentClientManifest();
+
+  assert.deepEqual(
+    manifest.map(({ id, displayName, invocation }) => ({ id, displayName, invocation })),
+    [
+      { id: 'claude-code', displayName: 'Claude Code', invocation: '/${skillName}' },
+      { id: 'codex', displayName: 'Codex', invocation: '$${skillName}' },
+      { id: 'gemini-cli', displayName: 'Gemini CLI', invocation: '/${projectName}:${skillName}' },
+      { id: 'opencode', displayName: 'OpenCode', invocation: '/${skillName}' }
+    ]
+  );
+  assert.ok(Object.isFrozen(manifest));
+  assert.ok(manifest.every((entry) => Object.isFrozen(entry)));
 });
 
 test('registry queries preserve canonical order and keep enabled separate from sandbox install state', () => {
@@ -376,7 +408,7 @@ test('manifest is a fresh frozen JSON-safe projection of registry metadata', () 
   for (const entry of first) {
     assert.deepEqual(
       Object.keys(entry),
-      ['id', 'displayName', 'ownedPathPrefixes', 'managed', 'merged', 'ejected']
+      ['id', 'displayName', 'invocation', 'ownedPathPrefixes', 'managed', 'merged', 'ejected']
     );
     assert.ok(Object.isFrozen(entry));
     assert.ok(Object.isFrozen(entry.ownedPathPrefixes));

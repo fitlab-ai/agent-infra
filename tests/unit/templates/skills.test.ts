@@ -979,16 +979,21 @@ test("review skill reports keep advisories outside the finding ledger", () => {
 });
 
 test("review output templates reserve cross-stage commands for an advanceable ledger", () => {
-  const commandBySkill: Record<string, RegExp> = {
-    "review-analysis": /\/plan-task |\/agent-infra:plan-task |\/\{\{project\}\}:plan-task |\$plan-task /g,
-    "review-plan": /\/code-task |\/agent-infra:code-task |\/\{\{project\}\}:code-task |\$code-task /g
+  const nextSkillByReview: Record<string, string> = {
+    "review-analysis": "plan-task",
+    "review-plan": "code-task"
   };
-  for (const [skill, pattern] of Object.entries(commandBySkill)) {
+  for (const [skill, nextSkill] of Object.entries(nextSkillByReview)) {
     for (const locale of [null, "en", "zh-CN"] as const) {
       const relativePath = locale
         ? `templates/.agents/skills/${skill}/reference/output-templates.${locale}.md`
         : `.agents/skills/${skill}/reference/output-templates.md`;
-      assert.equal(read(relativePath).match(pattern)?.length, 3, `${relativePath} should expose one three-TUI advance path`);
+      const command = `agent-infra-internal agent-client next-steps --skill ${nextSkill} --task-ref {task-ref}`;
+      assert.equal(
+        read(relativePath).split(command).length - 1,
+        1,
+        `${relativePath} should expose one helper-driven advance path`
+      );
     }
   }
 
@@ -999,9 +1004,12 @@ test("review output templates reserve cross-stage commands for an advanceable le
       : ".agents/skills/review-code/reference/output-templates.md";
     const content = read(relativePath);
     for (const route of approvedRoutes) {
-      const escaped = route.replace("-", "\\-");
-      const commands = new RegExp(`/(?:agent-infra:|\\{\\{project\\}\\}:)?${escaped} |\\$${escaped} `, "g");
-      assert.equal(content.match(commands)?.length, 3, `${relativePath} should expose one three-TUI ${route} route`);
+      const command = `agent-infra-internal agent-client next-steps --skill ${route} --task-ref {task-ref}`;
+      assert.equal(
+        content.split(command).length - 1,
+        1,
+        `${relativePath} should expose one helper-driven ${route} route`
+      );
     }
   }
 });

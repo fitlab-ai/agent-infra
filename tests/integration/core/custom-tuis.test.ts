@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { loadFreshEsm } from "../../helpers.ts";
+import { normalizeCustomTUIs } from "../../../lib/agent-clients/custom-tuis.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 
 function writeFile(root: string, relativePath: string, content: string) {
@@ -337,6 +338,40 @@ test("syncTemplates rejects custom TUI directories outside the project root", as
     ]);
     assert.equal(fs.existsSync(path.join(tmpDir, "outside")), false);
     assert.equal(report.custom.commands.generated.length, 3);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("standalone and core custom TUI validators reject the same contract violations", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-tuis-parity-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = makeTemplateRoot(tmpDir);
+    const customTUIs = [
+      { name: "Bad\nName", dir: ".bad-name", invoke: "bad ${skillName}" },
+      { name: "Bad Dir", dir: ".bad\\commands", invoke: "bad ${skillName}" },
+      { name: "Missing Skill", dir: ".missing", invoke: "missing" },
+      { name: "Unknown", dir: ".unknown", invoke: "unknown ${skillName} ${other}" },
+      { name: "Malformed", dir: ".malformed", invoke: "malformed ${skillName} ${other" },
+      { name: "Multiline", dir: ".multiline", invoke: "multi ${skillName}\nnext" }
+    ];
+    makeProject(projectRoot, { customTUIs });
+
+    const core = normalizeCustomTUIs(projectRoot, customTUIs);
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
+      ".agents/skills/update-agent-infra/scripts/sync-templates.js"
+    );
+    const report = syncTemplates(projectRoot, templateRoot);
+
+    assert.deepEqual(core.items, []);
+    assert.deepEqual(
+      report.custom.customTUIs.skipped.map((entry: { index: number }) => entry.index),
+      core.diagnostics.map((diagnostic) =>
+        Number(diagnostic.path.match(/\[(\d+)\]/)?.[1])
+      )
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

@@ -11,20 +11,13 @@ import {
   initIsolatedGitRepo,
   listFilesRecursive,
   onPlatforms,
-  read,
-  renderPlaceholders
+  read
 } from "../../helpers.ts";
+import { getAgentClientAdapter } from "../../../lib/agent-clients/registry.ts";
 
 const milestoneScript = path.resolve(
   "templates/.agents/skills/init-milestones/scripts/init-milestones.github.sh"
 );
-
-function namespacedCommands(content: string): { namespace: string; skill: string }[] {
-  return [...content.matchAll(/\/([A-Za-z0-9_{}-]+):([a-z0-9-]+)/g)].map((match) => ({
-    namespace: match[1] ?? "",
-    skill: match[2] ?? ""
-  }));
-}
 
 function bashBlocks(content: string): string[] {
   return [...content.matchAll(/```bash\r?\n([\s\S]*?)\r?\n```/g)].map((match) => match[1] ?? "");
@@ -149,19 +142,11 @@ function milestoneActions(stdout: string): { created: string[]; skipped: string[
   };
 }
 
-test("template Gemini commands derive their namespace from the project placeholder", () => {
-  const commands = listFilesRecursive("templates/.agents/skills")
-    .filter((relativePath) => relativePath.endsWith(".md"))
-    .flatMap((relativePath) => namespacedCommands(read(relativePath)));
-
-  assert.ok(commands.length > 0, "expected namespaced Gemini commands in skill templates");
-  assert.deepEqual([...new Set(commands.map((command) => command.namespace))], ["{{project}}"]);
-
-  const rendered = renderPlaceholders(read("templates/.agents/skills/analyze-task/SKILL.zh-CN.md"), {
-    project: "demo",
-    org: "example"
-  });
-  assert.deepEqual([...new Set(namespacedCommands(rendered).map((command) => command.namespace))], ["demo"]);
+test("Gemini invocation derives its namespace from the project placeholder", () => {
+  assert.equal(
+    getAgentClientAdapter("gemini-cli").invocation,
+    "/${projectName}:${skillName}"
+  );
 });
 
 test("branch-management templates derive the branch prefix from the project placeholder", () => {

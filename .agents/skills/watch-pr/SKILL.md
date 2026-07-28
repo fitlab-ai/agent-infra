@@ -101,27 +101,27 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 
 > 任务锚定路径仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染最终输出前，先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令把 `{task-ref}` 渲染为短号 `NN`（未分配/已释放时回退完整 TASK-id）；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
+> 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
 按场景输出：
 - 「全绿」+ 任务锚定：说明所有 required checks 已通过，并只按本轮是否产生修复 commit 渲染一个出口（`{task-ref}` 替换为短号）：
 
   `repairCommits.length == 0`：
 
+使用 `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
   ```
   下一步 - 完成并归档任务：
-    - Claude Code / OpenCode：/complete-task {task-ref}
-    - Gemini CLI：/agent-infra:complete-task {task-ref}
-    - Codex CLI：$complete-task {task-ref}
+  {next-step-commands}
   ```
 
   `repairCommits.length > 0`：
 
+使用 `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
   ```
   下一步 - 重新代码审查：
-    - Claude Code / OpenCode：/review-code {task-ref}
-    - Gemini CLI：/agent-infra:review-code {task-ref}
-    - Codex CLI：$review-code {task-ref}
+  {next-step-commands}
   ```
 
 - 「阻塞」：仅输出步骤 4 的阻塞说明，不推荐下一步命令。
@@ -133,7 +133,7 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 - [ ] 自愈仅限可定位的代码层失败，且推送前本地测试通过、未超修复上限
 - [ ] 任务锚定路径：更新了 task.md 并追加 Watch PR 的 Activity Log
 - [ ] 任务锚定路径：完成校验通过
-- [ ] 向用户展示了所有 TUI 格式的下一步命令（全绿出口；阻塞出口不渲染下一步）
+- [ ] 已通过统一 helper 渲染已选场景的下一步命令
 
 ## 停止
 

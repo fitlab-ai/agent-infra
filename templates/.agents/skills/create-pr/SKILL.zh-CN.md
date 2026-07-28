@@ -31,12 +31,12 @@ description: >
 - 缺省 / `"required"` → 继续到下方第 1 步
 - `"disabled"` → 输出以下消息后**立即停止**，不要执行任何后续编号步骤、不要触发任何 PR 创建命令、不要修改 `task.md` 的 `pr_number` / `pr_status`、不要发布 PR 摘要评论：
 
+使用 `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```
 当前项目未启用 PR 流程（`.agents/.airc.json` 中 `prFlow: "disabled"`）。
 无需创建 Pull Request，请直接运行：
-  - Claude Code / OpenCode：/complete-task {task-ref}
-  - Gemini CLI：/{{project}}:complete-task {task-ref}
-  - Codex CLI：$complete-task {task-ref}
+{next-step-commands}
 ```
 
 ### 1. 解析命令参数
@@ -105,24 +105,24 @@ agent-infra-internal task-verify {task-id} create-pr.completed --format text
 
 > 仅在校验通过后执行本步骤。
 
-> **重要**：以下「下一步」中列出的所有 TUI 命令格式必须完整输出，不要只展示当前 AI 代理对应的格式。如果 `.agents/.airc.json` 中配置了自定义 TUI（`customTUIs`），读取每个工具的 `name` 和 `invoke`，按同样格式补充对应命令行（`${skillName}` 替换为技能名，`${projectName}` 替换为项目名）。 渲染最终输出前，先读取 `.agents/rules/next-step-output.md` 并落实其两类规则：(1) 「下一步」命令把 `{task-ref}` 渲染为短号 `NN`（未分配/已释放时回退完整 TASK-id）；(2) 在面向用户输出的绝对最后一行追加 `Completed at` 收尾行（成功、错误、早退等任何面向用户输出都适用，不限于校验通过的成功态）。
+> 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
 说明 PR URL、元数据同步结果、摘要评论结果，并推荐下一步进入 PR 监控（按 `.agents/rules/next-step-output.md` 把 `{task-ref}` 渲染为短号 `NN`）：
 
+使用 `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```
 下一步 - 监控 PR 检查（required checks 全绿前自动自愈）：
-  - Claude Code / OpenCode：/watch-pr {task-ref}
-  - Gemini CLI：/{{project}}:watch-pr {task-ref}
-  - Codex CLI：$watch-pr {task-ref}
+{next-step-commands}
 ```
 
 或者，若想跳过主动监控并立即尝试完成，改用 `complete-task`；其 required-checks 硬门禁仍会对 pending/failed/head mismatch fail-closed：
 
+使用 `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
+
 ```
 下一步（备选）- 跳过主动监控并尝试完成：
-  - Claude Code / OpenCode：/complete-task {task-ref}
-  - Gemini CLI：/{{project}}:complete-task {task-ref}
-  - Codex CLI：$complete-task {task-ref}
+{next-step-commands}
 ```
 
 `watch-pr` 为主路径；上面的 `complete-task` 备选块只跳过主动轮询，不跳过 required checks，也不保证立即归档。

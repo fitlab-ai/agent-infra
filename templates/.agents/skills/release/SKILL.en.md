@@ -39,4 +39,4 @@ Push refs normally, preserve partial success for replay, and never force push.
 
 ## 5. Report Facts
 
-Show the snapshot and every TUI command. Treat unknown external state as blocked.
+Show the snapshot and render next-step client commands through the shared helper. Treat unknown external state as blocked.
