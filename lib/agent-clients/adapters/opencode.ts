@@ -28,7 +28,7 @@ const opencodeAdapter = defineAgentClientAdapter({
       install: { type: 'npm', cmd: 'opencode-ai' },
       sandboxBase: hostJoin(home, '.agent-infra', 'sandboxes', 'opencode'),
       containerMount: '/home/devuser/.local/share/opencode',
-      versionCmd: 'opencode version',
+      versionCmd: 'opencode --version',
       setupHint: 'Configure OpenCode credentials inside the container before first use.',
       envVars: {
         OPENCODE_CONFIG: '/home/devuser/.local/share/opencode/opencode.json'

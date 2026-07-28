@@ -353,6 +353,15 @@ test('registry exposes the exact built-in project asset matrix', () => {
   );
 });
 
+test('OpenCode sandbox health check uses its version flag', () => {
+  const tool = getAgentClientAdapter('opencode').sandbox.createTool({
+    home: '/tmp/home',
+    project: 'demo'
+  });
+
+  assert.equal(tool.versionCmd, 'opencode --version');
+});
+
 test('manifest projects invocation and remains deeply frozen', () => {
   const manifest = createAgentClientManifest();
 
