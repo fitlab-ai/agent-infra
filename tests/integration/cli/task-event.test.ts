@@ -34,6 +34,60 @@ function reviewArtifact(title: string, input: string) {
   return `# ${title}\n\n- **审查输入**：\`${input}\`\n`;
 }
 
+type ReviewCounts = { blockers: number; major: number; minor: number };
+
+const reviewScenarios = [
+  {
+    family: 'review-analysis', stage: 'analysis', step: 'requirement-analysis-review',
+    input: 'analysis.md', artifact: 'review-analysis.md', title: 'Analysis Review', findingId: 'AN-1'
+  },
+  {
+    family: 'review-plan', stage: 'plan', step: 'technical-design-review',
+    input: 'plan.md', artifact: 'review-plan.md', title: 'Plan Review', findingId: 'PL-1'
+  },
+  {
+    family: 'review-code', stage: 'code', step: 'code',
+    input: 'code.md', artifact: 'review-code.md', title: 'Code Review', findingId: 'CD-1'
+  }
+] as const;
+
+function setLedger(file: string, rows: string[]) {
+  const content = fs.readFileSync(file, 'utf8');
+  const ledger = [
+    '## Review Disagreement Ledger',
+    '',
+    '| id | stage | round | severity | status | evidence |',
+    '|----|-------|-------|----------|--------|----------|',
+    ...rows,
+    ''
+  ].join('\n');
+  fs.writeFileSync(file, content.replace('## Activity Log', `${ledger}\n## Activity Log`));
+}
+
+function prepareReview(scenario: (typeof reviewScenarios)[number], rows: string[]) {
+  const f = fixture(scenario.step);
+  fs.writeFileSync(path.join(f.dir, scenario.input), `# ${scenario.input}\n`);
+  setLedger(f.file, rows);
+  const started = run(f.root, [f.id, `${scenario.family}.started`, '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr);
+  fs.writeFileSync(path.join(f.dir, scenario.artifact), reviewArtifact(scenario.title, scenario.input));
+  return f;
+}
+
+function completeReview(
+  f: ReturnType<typeof fixture>,
+  scenario: (typeof reviewScenarios)[number],
+  verdict: 'approved' | 'changes-requested' | 'rejected',
+  counts: ReviewCounts,
+  extra: string[] = []
+) {
+  return run(f.root, [
+    f.id, `${scenario.family}.completed`, '--agent', 'codex', '--artifact', scenario.artifact,
+    '--verdict', verdict, '--blockers', String(counts.blockers), '--major', String(counts.major),
+    '--minor', String(counts.minor), '--manual-validation', '0', ...extra
+  ]);
+}
+
 function decisionFixture() {
   const f = fixture('code-review');
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
@@ -282,6 +336,108 @@ test('review-code event completes the regular code review path', () => {
   const content = fs.readFileSync(f.file, 'utf8');
   assert.match(content, /current_step: code-review/);
   assert.match(content, /\]\(review-code\.md\)/);
+});
+
+for (const scenario of reviewScenarios) {
+  test(`${scenario.family} rejects approved finding counts that differ from the ${scenario.stage} ledger`, () => {
+    const f = prepareReview(scenario, [
+      `| ${scenario.findingId} | ${scenario.stage} | 1 | minor | open | ${scenario.artifact}#finding |`
+    ]);
+    const before = fs.readFileSync(f.file);
+    const completed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
+    const result = JSON.parse(completed.stdout);
+
+    assert.equal(completed.status, 1);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.changed, false);
+    assert.equal(result.error.code, 'EVENT_FINDING_COUNT_MISMATCH');
+    assert.match(result.error.message, new RegExp(`${scenario.stage} ledger`));
+    assert.match(result.error.message, /minor expected 1, received 0/);
+    assert.deepEqual(fs.readFileSync(f.file), before);
+  });
+}
+
+test('approved review completion accepts matching non-zero finding counts', () => {
+  const scenario = reviewScenarios[2];
+  const f = prepareReview(scenario, [
+    '| CD-1 | code | 1 | blocker | open | review-code.md#CD-1 |',
+    '| CD-2 | code | 1 | major | adjusted | review-code.md#CD-2 |',
+    '| CD-3 | code | 1 | minor | needs-human-decision | review-code.md#CD-3 |'
+  ]);
+  const completed = completeReview(f, scenario, 'approved', { blockers: 1, major: 1, minor: 1 });
+
+  assert.equal(completed.status, 0, completed.stderr);
+  assert.equal(JSON.parse(completed.stdout).status, 'applied');
+  assert.match(fs.readFileSync(f.file, 'utf8'), /Verdict: Approved, blockers: 1, major: 1, minor: 1/);
+});
+
+for (const verdict of ['changes-requested', 'rejected'] as const) {
+  test(`${verdict} review completion bypasses approved finding count validation`, () => {
+    const scenario = reviewScenarios[2];
+    const row = verdict === 'changes-requested'
+      ? '| invalid | invalid | invalid | invalid | invalid | invalid |'
+      : '| CD-1 | code | 1 | minor | open | review-code.md#CD-1 |';
+    const f = prepareReview(scenario, [row]);
+    const completed = completeReview(f, scenario, verdict, { blockers: 0, major: 0, minor: 0 });
+
+    assert.equal(completed.status, 0, completed.stderr);
+    assert.equal(JSON.parse(completed.stdout).status, 'applied');
+  });
+}
+
+test('approved dry-run rejects mismatched finding counts without changing task bytes', () => {
+  const scenario = reviewScenarios[1];
+  const f = prepareReview(scenario, [
+    '| PL-1 | plan | 1 | major | open | review-plan.md#PL-1 |'
+  ]);
+  const before = fs.readFileSync(f.file);
+  const completed = completeReview(
+    f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 }, ['--dry-run']
+  );
+  const result = JSON.parse(completed.stdout);
+
+  assert.equal(completed.status, 1);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error.code, 'EVENT_FINDING_COUNT_MISMATCH');
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('approved review completion reports an invalid ledger as an invalid task document', () => {
+  const scenario = reviewScenarios[0];
+  const f = prepareReview(scenario, [
+    '| invalid | analysis | 1 | minor | open | review-analysis.md#finding |'
+  ]);
+  const before = fs.readFileSync(f.file);
+  const completed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
+  const result = JSON.parse(completed.stdout);
+
+  assert.equal(completed.status, 1);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error.code, 'TASK_DOCUMENT_INVALID');
+  assert.match(result.error.message, /LEDGER_ID_INVALID/);
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('completed approved review remains a no-op after the ledger changes', () => {
+  const scenario = reviewScenarios[2];
+  const f = prepareReview(scenario, []);
+  const completed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
+  assert.equal(completed.status, 0, completed.stderr);
+
+  const content = fs.readFileSync(f.file, 'utf8');
+  fs.writeFileSync(
+    f.file,
+    content.replace(
+      '|----|-------|-------|----------|--------|----------|',
+      '|----|-------|-------|----------|--------|----------|\n| CD-1 | code | 1 | minor | open | review-code.md#CD-1 |'
+    )
+  );
+  const beforeReplay = fs.readFileSync(f.file);
+  const replayed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
+
+  assert.equal(replayed.status, 0, replayed.stderr);
+  assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
+  assert.deepEqual(fs.readFileSync(f.file), beforeReplay);
 });
 
 test('review-code event completes a supplemental round against the latest code artifact', () => {

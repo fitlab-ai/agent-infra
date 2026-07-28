@@ -16,6 +16,8 @@ import {
   parseImplementationInputs,
   renderImplementationInputs
 } from './implementation-inputs.ts';
+import { parseLedger, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
+import type { ReviewStage } from './ledger.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { findSectionHeading } from './sections.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
@@ -35,7 +37,8 @@ type Verdict = 'approved' | 'changes-requested' | 'rejected';
 type TaskEventErrorCode =
   | 'EVENT_UNKNOWN' | 'EVENT_PAYLOAD_INVALID' | 'EVENT_TRANSITION_INVALID'
   | 'EVENT_LOG_MISSING' | 'EVENT_START_MISSING' | 'EVENT_ALREADY_COMPLETED'
-  | 'EVENT_LOG_CONFLICT' | 'EVENT_ARTIFACT_CONFLICT' | ArtifactErrorCode | TaskWriteErrorCode;
+  | 'EVENT_LOG_CONFLICT' | 'EVENT_ARTIFACT_CONFLICT' | 'EVENT_FINDING_COUNT_MISMATCH'
+  | ArtifactErrorCode | TaskWriteErrorCode;
 type TaskEventRequest = {
   taskRef: string; event: TaskEventName | string; agent: string; dryRun?: boolean;
   round?: number; question?: number; artifact?: string; fixFor?: string; implementationInput?: string;
@@ -112,6 +115,45 @@ const FAMILY = {
   'manual-validation': { artifact: 'manual-validation', started: ['code-review', 'commit'], completed: ['code-review', 'commit'], target: null, label: 'Complete Manual Validation' }
 } as const;
 type EventFamily = keyof typeof FAMILY;
+
+const REVIEW_LEDGER_STAGES: Partial<Record<EventFamily, ReviewStage>> = {
+  'review-analysis': 'analysis',
+  'review-plan': 'plan',
+  'review-code': 'code'
+};
+
+function validateApprovedFindingCounts(
+  request: TaskEventRequest,
+  content: string,
+  family: EventFamily
+): TaskEventError | null {
+  const stage = REVIEW_LEDGER_STAGES[family];
+  if (request.verdict !== 'approved' || !stage) return null;
+  const rows = parseLedger(content);
+  const invalid = validateLedgerRows(rows);
+  if (invalid) return { code: 'TASK_DOCUMENT_INVALID', message: `${invalid.code}: ${invalid.message}` };
+  const expected = summarizeLedgerStage(rows, stage).unresolvedFindingCounts;
+  const received = {
+    blocker: request.blockers!,
+    major: request.major!,
+    minor: request.minor!
+  };
+  const fields = [
+    ['blocker', 'blockers'],
+    ['major', 'major'],
+    ['minor', 'minor']
+  ] as const;
+  const differences = fields.flatMap(([severity, cliField]) => (
+    expected[severity] === received[severity]
+      ? []
+      : [`${cliField} expected ${expected[severity]}, received ${received[severity]}`]
+  ));
+  if (differences.length === 0) return null;
+  return {
+    code: 'EVENT_FINDING_COUNT_MISMATCH',
+    message: `approved finding counts do not match the ${stage} ledger: ${differences.join('; ')}`
+  };
+}
 
 function eventParts(event: string): { family: EventFamily; phase: 'started' | 'waiting' | 'completed' } {
   const [family, suffix] = event.split('.') as [EventFamily, string];
@@ -256,6 +298,8 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskWriteOptions = {
   }
   const allowed = FAMILY[eventIdentity.family][eventIdentity.phase === 'started' ? 'started' : 'completed'];
   if (!(allowed as readonly string[]).includes(currentStep)) return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${normalized.event} is not allowed from '${currentStep}'` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+  const findingCountError = validateApprovedFindingCounts(normalized, content, eventIdentity.family);
+  if (findingCountError) return failed(normalized, findingCountError, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
   let metadata;
   try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
   catch (error) { return failed(normalized, { code: 'METADATA_CAPTURE_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
