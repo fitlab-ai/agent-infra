@@ -73,7 +73,15 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 > 上述事实采集完成后，先读取 `.agents/rules/review-method.md`，以其作为 readiness 证据并按 Pass 2–5 完成追踪、风险镜头、反证和归类；报告必须记录全部五遍覆盖。
 > 详细审查标准、严重程度划分和 reviewer 关注点见 `reference/review-criteria.md`。执行此步骤前先读取 `reference/review-criteria.md`。
-> 测试审查硬门禁：当 `git diff` 触及测试文件时，必须先读取 `.agents/rules/testing-discipline.md` 并逐条核对（尤其"正向已覆盖时不应再加反向断言"）。
+
+代码阶段按以下顺序落实共享五遍协议：
+- Pass 1 读取完整 diff、未跟踪文件、最新 code artifact、已批准 plan/review-plan、任务来源和测试原始结果。
+- Pass 2 建立验收/方案—实现—验证映射，并逐文件记录 changed lines、必要调用方/被调用方、状态/数据流和未覆盖区域。
+- Pass 3 先检查整体设计，再检查逐文件语义；逐行判断共享风险镜头注册表，完整读取所有命中 reference。测试变更由注册表中的 `testing-discipline` 镜头加载 `.agents/rules/testing-discipline.md`，不得维护另一份触发清单。
+- Pass 4 检查保护条件、调用约束、测试覆盖和更窄影响范围等反证。
+- Pass 5 核对 finding、manual-validation、advisory、证据类型、未验证假设、账本和 verdict。
+
+报告必须填写 `reference/report-template.md` 中的代码实现专项覆盖；镜头命中但 reference 缺失/未加载，或风险缺口未分类时不得给出通过结论。
 
 ### 5. 编写审查报告
 

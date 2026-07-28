@@ -20,6 +20,7 @@
       "required_sections": [
         "Review Summary",
         "Review Coverage Declaration",
+        "Code Implementation Coverage",
         "Traceability Matrix",
         "Findings",
         "Non-blocking Advisories",

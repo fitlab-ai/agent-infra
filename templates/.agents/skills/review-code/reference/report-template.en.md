@@ -37,6 +37,28 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 |---------|------------------|--------|--------|
 | {registry token} | {trigger or non-trigger evidence} | {yes / no / not-applicable} | {lens result} |
 
+## Code Implementation Coverage
+
+| context_id | changed_lines | related_context | uncovered_area | result_or_gap |
+|------------|---------------|-----------------|----------------|---------------|
+| {file/module} | {changed line ranges} | {callers/callees/state/data flow} | {not reviewed or none} | {result / gap} |
+
+| quality_id | applicability | evidence | result_or_gap |
+|------------|---------------|----------|---------------|
+| responsibility | {applicable / not-applicable} | {code or call evidence} | {result / gap} |
+| cohesion | {applicable / not-applicable} | {code or call evidence} | {result / gap} |
+| coupling | {applicable / not-applicable} | {dependency evidence} | {result / gap} |
+| dependency-direction | {applicable / not-applicable} | {dependency evidence} | {result / gap} |
+| abstraction-fit | {applicable / not-applicable} | {variation evidence} | {result / gap} |
+| pattern-cost | {applicable / not-applicable} | {problem, conditions, cost, simpler alternative} | {result / gap} |
+| change-locality | {applicable / not-applicable} | {change propagation evidence} | {result / gap} |
+| testability | {applicable / not-applicable} | {test seam or behavior evidence} | {result / gap} |
+| architecture-boundary | {applicable / not-applicable} | {approved plan boundary} | {result / gap} |
+
+| acceptance_id | plan_source | implementation_location | test_or_validation_evidence | status_or_gap |
+|---------------|-------------|-------------------------|-----------------------------|---------------|
+| {acceptance token} | {approved requirement/plan} | {file:line or diff} | {automated test / manual-validation / explicit gap} | {covered / gap} |
+
 ## Traceability Matrix
 
 | source_id | upstream | reviewed_target | verification | status_or_gap |
@@ -51,7 +73,7 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 **File**: `{file-path}:{line-number}`
 **Scenario**: {scenario}
 **Impact**: {impact}
-**Evidence**: {reproducible evidence}
+**Evidence**: {evidence_type: test / call-chain / state-transition / data-flow / specification-conflict / file-location} — {reproducible evidence}
 **Confidence**: {high / medium / low}
 **Unverified Assumptions**: {assumptions or none}
 **Fix Direction**: {fix direction}
@@ -62,7 +84,7 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 **File**: `{file-path}:{line-number}`
 **Scenario**: {scenario}
 **Impact**: {impact}
-**Evidence**: {reproducible evidence}
+**Evidence**: {evidence_type: test / call-chain / state-transition / data-flow / specification-conflict / file-location} — {reproducible evidence}
 **Confidence**: {high / medium / low}
 **Unverified Assumptions**: {assumptions or none}
 **Fix Direction**: {fix direction}
@@ -99,7 +121,7 @@ Use this template when writing `review-code.md` or `review-code-r{N}.md`.
 
 ## Evidence
 
-> Pair each "I verified X" claim with the corresponding raw tool output; the gate only checks that this section exists and at least one `$ ` line is present. Every Blocker must be backed by a reproducible command (rg/grep/sed/nl) and its raw output; a judgment that cannot be reproduced must be downgraded or moved to Self-Doubt.
+> Pair each "I verified X" claim with the corresponding raw tool output; the gate only checks that this section exists and at least one `$ ` line is present. Every Blocker must use reproducible test, call-chain, state-transition, data-flow, specification-conflict, or accurate-location evidence; a judgment that cannot be reproduced must be downgraded or moved to Self-Doubt.
 
 - Claim: {verified claim}
 ```text

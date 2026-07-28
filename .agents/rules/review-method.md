@@ -36,6 +36,11 @@
 | lens_id | stages | observable_trigger | required_reference | report_evidence |
 |---------|--------|--------------------|--------------------|-----------------|
 | documentation-antipatterns | code | 完整变更上下文触及描述当前行为的 Markdown、规则、skill、CLI 帮助或用户文档 | `.agents/skills/review-code/reference/documentation-antipatterns.md` | 记录触发文件、`loaded=yes` 与检视结果 |
+| testing-discipline | code | 完整变更上下文触及测试、fixture、snapshot 或测试 helper | `.agents/rules/testing-discipline.md` | 记录触发文件、`loaded=yes` 与测试纪律结论 |
+| security-risks | code | 认证授权、非可信输入、敏感数据、凭据、加密、依赖或系统边界发生变化 | `.agents/skills/review-code/reference/security-risks.md` | 记录安全边界变化、`loaded=yes` 与检视结果 |
+| migration-risks | code | 持久化格式、schema、配置/frontmatter、兼容读取或迁移/回滚发生变化 | `.agents/skills/review-code/reference/migration-risks.md` | 记录兼容或迁移触发证据、`loaded=yes` 与检视结果 |
+| concurrency-risks | code | 异步协调、共享状态、锁、重试、幂等、竞态、取消或超时发生变化 | `.agents/skills/review-code/reference/concurrency-risks.md` | 记录并发触发路径、`loaded=yes` 与检视结果 |
+| cross-platform-risks | code | OS 分支、路径、shell、权限、符号链接、换行、信号或跨平台行为发生变化 | `.agents/skills/review-code/reference/cross-platform-risks.md` | 记录平台触发证据、`loaded=yes` 与检视结果 |
 
 未命中镜头也必须记录可复核的未命中证据。`loaded` 只使用 `yes`、`no`、`not-applicable`；命中但未加载时不得给出通过结论。
 
@@ -91,4 +96,3 @@ minor 保持轻量，但仍须提供具体位置和可执行建议。finding led
 - 追踪矩阵覆盖本阶段职责，缺口已进入 finding、manual-validation、advisory 或明确假设。
 - 所有 blocker/major 满足统一证据契约，候选 finding 已完成反证检视。
 - 账本意图、人工校验、待裁决项、未验证假设与问题计数一致。
-

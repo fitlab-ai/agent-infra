@@ -44,6 +44,11 @@ mandatory when matched, and `report_evidence` defines the audit trail.
 | lens_id | stages | observable_trigger | required_reference | report_evidence |
 |---------|--------|--------------------|--------------------|-----------------|
 | documentation-antipatterns | code | The complete change context touches Markdown, rules, skills, CLI help, or user documentation that describes current behavior | `.agents/skills/review-code/reference/documentation-antipatterns.md` | Record triggering files, `loaded=yes`, and the lens result |
+| testing-discipline | code | The complete change context touches tests, fixtures, snapshots, or test helpers | `.agents/rules/testing-discipline.md` | Record triggering files, `loaded=yes`, and the test-discipline result |
+| security-risks | code | Authentication, authorization, untrusted input, sensitive data, credentials, cryptography, dependencies, or system boundaries change | `.agents/skills/review-code/reference/security-risks.md` | Record the changed security boundary, `loaded=yes`, and the lens result |
+| migration-risks | code | Persistent formats, schemas, configuration/frontmatter, compatibility reads, migrations, or rollback behavior change | `.agents/skills/review-code/reference/migration-risks.md` | Record compatibility or migration evidence, `loaded=yes`, and the lens result |
+| concurrency-risks | code | Async coordination, shared state, locks, retries, idempotency, races, cancellation, or timeouts change | `.agents/skills/review-code/reference/concurrency-risks.md` | Record the concurrency path, `loaded=yes`, and the lens result |
+| cross-platform-risks | code | OS branches, paths, shells, permissions, symlinks, newlines, signals, or cross-platform behavior change | `.agents/skills/review-code/reference/cross-platform-risks.md` | Record platform evidence, `loaded=yes`, and the lens result |
 
 Unmatched lenses still require reproducible non-trigger evidence. `loaded` accepts
 only `yes`, `no`, or `not-applicable`; a matched but unloaded lens forbids approval.
@@ -106,4 +111,3 @@ A final verdict is allowed only when:
 - The traceability matrix covers the stage responsibility, with gaps classified as a finding, manual-validation, advisory, or explicit assumption.
 - Every blocker/major satisfies the evidence contract and every candidate finding received a counterevidence pass.
 - Ledger intents, manual checks, pending decisions, unverified assumptions, and finding counts agree.
-

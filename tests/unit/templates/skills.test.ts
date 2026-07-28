@@ -669,6 +669,108 @@ test("review-plan report templates expose architecture coverage structures", () 
   });
 });
 
+test("review-code report templates expose implementation coverage structures", () => {
+  const reportCases: Array<[string, string]> = [
+    [".agents/skills/review-code/reference/report-template.md", "代码实现专项覆盖"],
+    ["templates/.agents/skills/review-code/reference/report-template.zh-CN.md", "代码实现专项覆盖"],
+    ["templates/.agents/skills/review-code/reference/report-template.en.md", "Code Implementation Coverage"]
+  ];
+  const expectedTables = [
+    "| context_id | changed_lines | related_context | uncovered_area | result_or_gap |",
+    "| quality_id | applicability | evidence | result_or_gap |",
+    "| acceptance_id | plan_source | implementation_location | test_or_validation_evidence | status_or_gap |"
+  ];
+  const qualityIds = [
+    "responsibility",
+    "cohesion",
+    "coupling",
+    "dependency-direction",
+    "abstraction-fit",
+    "pattern-cost",
+    "change-locality",
+    "testability",
+    "architecture-boundary"
+  ];
+  const evidenceTypes = [
+    "test",
+    "call-chain",
+    "state-transition",
+    "data-flow",
+    "specification-conflict",
+    "file-location"
+  ];
+
+  reportCases.forEach(([relativePath, heading]) => {
+    const content = read(relativePath);
+    const coverageSection = sectionContent(content, heading);
+    const findingsSection = sectionContent(content, relativePath.includes(".en.") ? "Findings" : "问题清单");
+
+    expectedTables.forEach((table) => {
+      assert.ok(coverageSection.includes(table), `${relativePath} should define ${table}`);
+    });
+    qualityIds.forEach((qualityId) => {
+      assert.ok(coverageSection.includes(`| ${qualityId} |`), `${relativePath} should include ${qualityId}`);
+    });
+    evidenceTypes.forEach((evidenceType) => {
+      assert.ok(findingsSection.includes(evidenceType), `${relativePath} should include ${evidenceType} evidence`);
+    });
+  });
+});
+
+test("review-code risk lenses and cross-platform reference chain stay complete", () => {
+  const methodFiles = [
+    ".agents/rules/review-method.md",
+    "templates/.agents/rules/review-method.en.md",
+    "templates/.agents/rules/review-method.zh-CN.md"
+  ];
+  const lensReferences: Record<string, string> = {
+    "documentation-antipatterns": ".agents/skills/review-code/reference/documentation-antipatterns.md",
+    "testing-discipline": ".agents/rules/testing-discipline.md",
+    "security-risks": ".agents/skills/review-code/reference/security-risks.md",
+    "migration-risks": ".agents/skills/review-code/reference/migration-risks.md",
+    "concurrency-risks": ".agents/skills/review-code/reference/concurrency-risks.md",
+    "cross-platform-risks": ".agents/skills/review-code/reference/cross-platform-risks.md"
+  };
+  const crossPlatformFiles = [
+    ".agents/skills/review-code/reference/cross-platform-risks.md",
+    "templates/.agents/skills/review-code/reference/cross-platform-risks.en.md",
+    "templates/.agents/skills/review-code/reference/cross-platform-risks.zh-CN.md"
+  ];
+  const firstLevelRiskFiles = [
+    ...crossPlatformFiles,
+    ".agents/skills/review-code/reference/security-risks.md",
+    ".agents/skills/review-code/reference/migration-risks.md",
+    ".agents/skills/review-code/reference/concurrency-risks.md",
+    "templates/.agents/skills/review-code/reference/security-risks.en.md",
+    "templates/.agents/skills/review-code/reference/security-risks.zh-CN.md",
+    "templates/.agents/skills/review-code/reference/migration-risks.en.md",
+    "templates/.agents/skills/review-code/reference/migration-risks.zh-CN.md",
+    "templates/.agents/skills/review-code/reference/concurrency-risks.en.md",
+    "templates/.agents/skills/review-code/reference/concurrency-risks.zh-CN.md"
+  ];
+
+  methodFiles.forEach((relativePath) => {
+    const content = read(relativePath);
+    Object.entries(lensReferences).forEach(([lensId, referencePath]) => {
+      assert.ok(content.includes(`| ${lensId} | code |`), `${relativePath} should register ${lensId} for code`);
+      assert.ok(content.includes(`\`${referencePath}\``), `${relativePath} should route ${lensId} to ${referencePath}`);
+    });
+  });
+
+  crossPlatformFiles.forEach((relativePath) => {
+    const content = read(relativePath);
+    assert.ok(content.includes(".agents/rules/cross-platform-tests.md"));
+    ["manual-validation", "finding", "gap"].forEach((classification) => {
+      assert.ok(content.includes(classification), `${relativePath} should define the ${classification} fallback`);
+    });
+  });
+  assert.equal(
+    firstLevelRiskFiles.filter((relativePath) => read(relativePath).includes(".agents/rules/cross-platform-tests.md")).length,
+    crossPlatformFiles.length,
+    "only the cross-platform risk references should introduce the second-level test rule"
+  );
+});
+
 test("review verify configs require shared review report sections", () => {
   for (const skill of ["review-analysis", "review-plan", "review-code"]) {
     for (const [relativePath, sections] of [
@@ -701,6 +803,18 @@ test("review-plan verify configs require architecture coverage", () => {
     [".agents/skills/review-plan/config/verify.json", "技术方案架构覆盖"],
     ["templates/.agents/skills/review-plan/config/verify.zh-CN.json", "技术方案架构覆盖"],
     ["templates/.agents/skills/review-plan/config/verify.en.json", "Technical Plan Architecture Coverage"]
+  ] as Array<[string, string]>) {
+    const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
+
+    assert.ok(requiredSections.includes(section), `${relativePath} should require ${section}`);
+  }
+});
+
+test("review-code verify configs require implementation coverage", () => {
+  for (const [relativePath, section] of [
+    [".agents/skills/review-code/config/verify.json", "代码实现专项覆盖"],
+    ["templates/.agents/skills/review-code/config/verify.zh-CN.json", "代码实现专项覆盖"],
+    ["templates/.agents/skills/review-code/config/verify.en.json", "Code Implementation Coverage"]
   ] as Array<[string, string]>) {
     const requiredSections = JSON.parse(read(relativePath)).checks.artifact.required_sections;
 

@@ -37,6 +37,28 @@
 |---------|------------------|--------|--------|
 | {registry token} | {命中或未命中证据} | {yes / no / not-applicable} | {专项结论} |
 
+## 代码实现专项覆盖
+
+| context_id | changed_lines | related_context | uncovered_area | result_or_gap |
+|------------|---------------|-----------------|----------------|---------------|
+| {file/module} | {changed line ranges} | {callers/callees/state/data flow} | {not reviewed or none} | {result / gap} |
+
+| quality_id | applicability | evidence | result_or_gap |
+|------------|---------------|----------|---------------|
+| responsibility | {applicable / not-applicable} | {code or call evidence} | {result / gap} |
+| cohesion | {applicable / not-applicable} | {code or call evidence} | {result / gap} |
+| coupling | {applicable / not-applicable} | {dependency evidence} | {result / gap} |
+| dependency-direction | {applicable / not-applicable} | {dependency evidence} | {result / gap} |
+| abstraction-fit | {applicable / not-applicable} | {variation evidence} | {result / gap} |
+| pattern-cost | {applicable / not-applicable} | {problem, conditions, cost, simpler alternative} | {result / gap} |
+| change-locality | {applicable / not-applicable} | {change propagation evidence} | {result / gap} |
+| testability | {applicable / not-applicable} | {test seam or behavior evidence} | {result / gap} |
+| architecture-boundary | {applicable / not-applicable} | {approved plan boundary} | {result / gap} |
+
+| acceptance_id | plan_source | implementation_location | test_or_validation_evidence | status_or_gap |
+|---------------|-------------|-------------------------|-----------------------------|---------------|
+| {acceptance token} | {approved requirement/plan} | {file:line or diff} | {automated test / manual-validation / explicit gap} | {covered / gap} |
+
 ## 追踪矩阵
 
 | source_id | upstream | reviewed_target | verification | status_or_gap |
@@ -51,7 +73,7 @@
 **文件**：`{file-path}:{line-number}`
 **场景**：{scenario}
 **影响**：{impact}
-**证据**：{reproducible evidence}
+**证据**：{evidence_type: test / call-chain / state-transition / data-flow / specification-conflict / file-location} — {reproducible evidence}
 **置信度**：{high / medium / low}
 **未验证假设**：{assumptions or none}
 **修复方向**：{fix direction}
@@ -62,7 +84,7 @@
 **文件**：`{file-path}:{line-number}`
 **场景**：{scenario}
 **影响**：{impact}
-**证据**：{reproducible evidence}
+**证据**：{evidence_type: test / call-chain / state-transition / data-flow / specification-conflict / file-location} — {reproducible evidence}
 **置信度**：{high / medium / low}
 **未验证假设**：{assumptions or none}
 **修复方向**：{fix direction}
@@ -99,7 +121,7 @@
 
 ## 证据原文
 
-> 每条“我验证了 X”断言都要配对对应 tool output 原文；gate 仅校验本段存在和至少一行 `$ `。每条 Blocker 必须配可复现命令（rg/grep/sed/nl）及其原文；无法复现的判断须降级或移入「自我质疑」。
+> 每条“我验证了 X”断言都要配对对应 tool output 原文；gate 仅校验本段存在和至少一行 `$ `。每条 Blocker 必须配可复现的测试、调用链、状态转换、数据流、规范冲突或准确位置证据；无法复现的判断须降级或移入「自我质疑」。
 
 - 断言：{verified claim}
 ```text

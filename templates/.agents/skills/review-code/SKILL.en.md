@@ -74,7 +74,15 @@ Follow `.agents/workflows/feature-development.yaml` and inspect the full change 
 
 > After collecting those facts, read `.agents/rules/review-method.md`, use them as readiness evidence, and run Passes 2–5 for traceability, risk lenses, counterevidence, and classification; the report must record all five passes.
 > Detailed review criteria, severity rules, and reviewer expectations live in `reference/review-criteria.md`. Read `reference/review-criteria.md` before reviewing.
-> Test review gate: when `git diff` touches test files, read `.agents/rules/testing-discipline.md` first and check it item by item, especially "do not add negative assertions when a positive assertion already covers the behavior".
+
+Apply the shared five-pass protocol to code in this order:
+- Pass 1 reads the complete diff, untracked files, latest code artifact, approved plan/review-plan, task source, and raw test results.
+- Pass 2 maps acceptance/plan → implementation → verification and records changed lines, necessary callers/callees, state/data flow, and uncovered areas per file.
+- Pass 3 reviews overall design before per-file semantics, evaluates every shared registry trigger, and reads every matched reference in full. Test changes load `.agents/rules/testing-discipline.md` through the registry's `testing-discipline` lens; do not maintain a second trigger list.
+- Pass 4 checks guards, call constraints, test coverage, and narrower impact boundaries as counterevidence.
+- Pass 5 reconciles findings, manual-validation, advisories, evidence types, unverified assumptions, ledger state, and verdict.
+
+Complete the code implementation coverage in `reference/report-template.md`. Approval is forbidden when a matched reference is missing or unloaded, or when a risk gap remains unclassified.
 
 ### 5. Write the Review Report
 
