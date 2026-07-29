@@ -1,0 +1,227 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/fitlab-ai/agent-infra/lib/benchmark/schemas/v1.0.0/subject.schema.json",
+  "title": "agent-infra benchmark subject",
+  "description": "The evaluated Agent configuration and its declared runtime conditions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "subjectId",
+    "model",
+    "agentClient",
+    "executionMode",
+    "tools",
+    "permissions",
+    "networkPolicy"
+  ],
+  "properties": {
+    "contractVersion": {
+      "$ref": "common.schema.json#/definitions/contractVersion"
+    },
+    "subjectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "modelId"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "agentClient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clientId",
+        "version"
+      ],
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "executionMode": {
+      "enum": [
+        "direct-repair",
+        "agent-infra-workflow",
+        "custom"
+      ]
+    },
+    "workflowRef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "toolId",
+          "version"
+        ],
+        "properties": {
+          "toolId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filesystem",
+        "credentials"
+      ],
+      "properties": {
+        "filesystem": {
+          "enum": [
+            "challenge-workspace-write",
+            "challenge-workspace-read-only",
+            "none"
+          ]
+        },
+        "credentials": {
+          "enum": [
+            "none",
+            "scoped"
+          ]
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "none",
+            "allowlist",
+            "unrestricted"
+          ]
+        },
+        "allowlist": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "enforcementEvidence": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "allowlist"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "allowlist"
+            ]
+          }
+        }
+      ]
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeLimitMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tokenLimit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "costLimit": {
+          "type": "number",
+          "minimum": 0
+        },
+        "costCurrency": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/definitions/extensions"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "executionMode": {
+            "enum": [
+              "agent-infra-workflow",
+              "custom"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "workflowRef"
+        ]
+      }
+    }
+  ]
+}

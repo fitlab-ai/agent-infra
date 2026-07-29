@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/fitlab-ai/agent-infra/lib/benchmark/schemas/v1.0.0/common.schema.json",
+  "title": "agent-infra benchmark common definitions",
+  "description": "Shared definitions for the agent-infra Benchmark Contract v1.0.0.",
+  "definitions": {
+    "contractVersion": {
+      "const": "1.0.0"
+    },
+    "semanticVersion": {
+      "type": "string",
+      "pattern": "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "value"
+      ],
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]+$"
+        }
+      }
+    },
+    "datasetIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasetId",
+        "datasetVersion",
+        "datasetDigest"
+      ],
+      "properties": {
+        "datasetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "datasetVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "datasetDigest": {
+          "$ref": "#/definitions/digest"
+        }
+      }
+    },
+    "caseIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "caseVersion"
+      ],
+      "properties": {
+        "caseId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "caseVersion": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "checkSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkId",
+        "status"
+      ],
+      "properties": {
+        "checkId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "blocked"
+          ]
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

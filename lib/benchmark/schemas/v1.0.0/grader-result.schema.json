@@ -1,0 +1,160 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/fitlab-ai/agent-infra/lib/benchmark/schemas/v1.0.0/grader-result.schema.json",
+  "title": "agent-infra benchmark grader result",
+  "description": "The sanitized public projection of a trusted Grader result.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "runId",
+    "dataset",
+    "case",
+    "status",
+    "checks",
+    "durationMs",
+    "sanitization"
+  ],
+  "properties": {
+    "contractVersion": {
+      "$ref": "common.schema.json#/definitions/contractVersion"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dataset": {
+      "$ref": "common.schema.json#/definitions/datasetIdentity"
+    },
+    "case": {
+      "$ref": "common.schema.json#/definitions/caseIdentity"
+    },
+    "status": {
+      "enum": [
+        "passed",
+        "failed",
+        "blocked"
+      ]
+    },
+    "failureCategory": {
+      "type": "string",
+      "minLength": 1
+    },
+    "blockCategory": {
+      "type": "string",
+      "minLength": 1
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/definitions/checkSummary"
+      }
+    },
+    "durationMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "testCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "passedTestCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "extensions": {
+          "$ref": "common.schema.json#/definitions/extensions"
+        }
+      }
+    },
+    "sanitization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowlistVersion",
+        "sanitized"
+      ],
+      "properties": {
+        "allowlistVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sanitized": {
+          "const": true
+        }
+      }
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/definitions/extensions"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "passed"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "failureCategory"
+              ]
+            },
+            {
+              "required": [
+                "blockCategory"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "failureCategory"
+        ],
+        "not": {
+          "required": [
+            "blockCategory"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "blocked"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "blockCategory"
+        ],
+        "not": {
+          "required": [
+            "failureCategory"
+          ]
+        }
+      }
+    }
+  ]
+}

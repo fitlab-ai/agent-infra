@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/fitlab-ai/agent-infra/lib/benchmark/schemas/v1.0.0/run-manifest.schema.json",
+  "title": "agent-infra benchmark run manifest",
+  "description": "Reproducibility metadata for one Subject execution of one Case.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "runId",
+    "frameworkVersion",
+    "dataset",
+    "case",
+    "subject",
+    "seed",
+    "repetitionIndex",
+    "repetitionCount",
+    "comparisonGroupId",
+    "conditionsDigest",
+    "startedAt",
+    "finishedAt"
+  ],
+  "properties": {
+    "contractVersion": {
+      "$ref": "common.schema.json#/definitions/contractVersion"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "frameworkVersion": {
+      "$ref": "common.schema.json#/definitions/semanticVersion"
+    },
+    "dataset": {
+      "$ref": "common.schema.json#/definitions/datasetIdentity"
+    },
+    "case": {
+      "$ref": "common.schema.json#/definitions/caseIdentity"
+    },
+    "subject": {
+      "$ref": "subject.schema.json"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "repetitionIndex": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "repetitionCount": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "comparisonGroupId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "conditionsDigest": {
+      "$ref": "common.schema.json#/definitions/digest"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finishedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "resultRef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "graderResult": {
+      "$ref": "grader-result.schema.json"
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "turnCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokenCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cost": {
+          "type": "number",
+          "minimum": 0
+        },
+        "costCurrency": {
+          "type": "string",
+          "minLength": 1
+        },
+        "extensions": {
+          "$ref": "common.schema.json#/definitions/extensions"
+        }
+      }
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/definitions/extensions"
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "resultRef"
+      ]
+    },
+    {
+      "required": [
+        "graderResult"
+      ]
+    }
+  ]
+}

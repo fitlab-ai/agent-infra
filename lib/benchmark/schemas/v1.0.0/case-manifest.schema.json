@@ -1,0 +1,120 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/fitlab-ai/agent-infra/lib/benchmark/schemas/v1.0.0/case-manifest.schema.json",
+  "title": "agent-infra benchmark case manifest",
+  "description": "A trusted-side Case description with an explicit Agent-visible projection.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "dataset",
+    "case",
+    "sourceRevision",
+    "sourceDigest",
+    "seed",
+    "agentVisible",
+    "graderOnly",
+    "qualification"
+  ],
+  "properties": {
+    "contractVersion": {
+      "$ref": "common.schema.json#/definitions/contractVersion"
+    },
+    "dataset": {
+      "$ref": "common.schema.json#/definitions/datasetIdentity"
+    },
+    "case": {
+      "$ref": "common.schema.json#/definitions/caseIdentity"
+    },
+    "sourceRevision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourceDigest": {
+      "$ref": "common.schema.json#/definitions/digest"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "agentVisible": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task"
+      ],
+      "properties": {
+        "task": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "digest"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "digest": {
+                "$ref": "common.schema.json#/definitions/digest"
+              }
+            }
+          }
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "graderOnly": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "graderRef",
+        "inputDigest"
+      ],
+      "properties": {
+        "graderRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputDigest": {
+          "$ref": "common.schema.json#/definitions/digest"
+        }
+      }
+    },
+    "challengeDigest": {
+      "$ref": "common.schema.json#/definitions/digest"
+    },
+    "qualification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "qualified",
+            "rejected",
+            "pending"
+          ]
+        },
+        "evidenceSummary": {
+          "type": "string"
+        }
+      }
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/definitions/extensions"
+    }
+  }
+}
