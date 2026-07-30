@@ -189,7 +189,7 @@ test("commandForEngine wraps commands with wsl.exe for WSL2", async () => {
 
   assert.deepEqual(
     sandboxShell.commandForEngine("wsl2", "docker", ["info"]),
-    { cmd: "wsl.exe", args: ["--", "docker", "info"] }
+    { cmd: "wsl.exe", args: ["--exec", "docker", "info"] }
   );
   assert.deepEqual(
     sandboxShell.commandForEngine("native", "docker", ["info"]),
@@ -213,7 +213,7 @@ test("commandForEngine wraps commands with wsl.exe for WSL2", async () => {
   );
   assert.deepEqual(
     sandboxShell.commandForEngine("wsl2", "docker", ["buildx", "inspect", "--bootstrap"]),
-    { cmd: "wsl.exe", args: ["--", "docker", "buildx", "inspect", "--bootstrap"] }
+    { cmd: "wsl.exe", args: ["--exec", "docker", "buildx", "inspect", "--bootstrap"] }
   );
   assert.deepEqual(
     sandboxShell.commandForEngine("docker-desktop", "docker", ["buildx", "inspect", "--bootstrap"]),
@@ -288,7 +288,7 @@ test("sandbox exec routes through wsl.exe with single-arg entry script on wsl2",
   assert.deepEqual(command, {
     cmd: "wsl.exe",
     args: [
-      "--",
+      "--exec",
       "docker",
       "exec",
       "-it",

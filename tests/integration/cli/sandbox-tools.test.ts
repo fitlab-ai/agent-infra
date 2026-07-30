@@ -856,8 +856,7 @@ test("sandbox create continues when due refresh build fails", onPlatforms("linux
         }),
         DOCKER_EXIT_FOR_BUILD: "1",
         DOCKER_EXIT_FOR_RUN: "1"
-      },
-      { timeout: 5_000 }
+      }
     );
 
     const dockerCalls = fixture.readDockerCalls();

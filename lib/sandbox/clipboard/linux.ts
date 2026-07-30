@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ExecFileSyncOptions } from 'node:child_process';
+import { removeDirRecursive } from '../../remove-dir.ts';
 
 const PROBE_TIMEOUT_MS = 2_000;
 const READ_IMAGE_TIMEOUT_MS = 5_000;
@@ -26,7 +27,7 @@ export function createLinuxClipboardAdapter({
   execToFileFn = execToFile,
   mkdtempFn = fs.mkdtempSync,
   readFileFn = fs.readFileSync,
-  rmFn = fs.rmSync
+  rmFn = removeDirRecursive as typeof fs.rmSync
 }: {
   env?: NodeJS.ProcessEnv;
   execFn?: ExecFn;

@@ -95,10 +95,10 @@ function makeDotfilesFixture(prefix: string = "agent-infra-materialize-dotfiles-
 function trySymlink(target: string, linkPath: string, type: SymlinkKind) {
   try {
     fs.symlinkSync(target, linkPath, type);
-    return true;
+    return fs.existsSync(linkPath) || fs.lstatSync(linkPath).isSymbolicLink();
   } catch (error) {
     const code = error instanceof Error && "code" in error ? error.code : undefined;
-    if (typeof code === "string" && ["EPERM", "EACCES", "ENOTSUP"].includes(code)) {
+    if (typeof code === "string" && ["EPERM", "EACCES", "ENOTSUP", "ENOENT"].includes(code)) {
       return false;
     }
     throw error;

@@ -513,14 +513,10 @@ test("installed sync-templates.js executes inside a type=module project", () => 
     });
     fs.writeFileSync(path.join(localTemplateRoot, "README.md"), "Hello {{project}}\n", "utf8");
     fs.mkdirSync(pathBinDir, { recursive: true });
-    try {
-      fs.symlinkSync(path.join(packageRoot, "bin", "cli.js"), path.join(pathBinDir, "ai"));
-    } catch (error) {
-      const code = error instanceof Error && "code" in error ? error.code : undefined;
-      if (process.platform !== "win32" || code !== "EPERM") {
-        throw error;
-      }
+    if (process.platform === "win32") {
       writeNodeCommandShim(path.join(pathBinDir, "ai"), path.join(packageRoot, "bin", "cli.js"));
+    } else {
+      fs.symlinkSync(path.join(packageRoot, "bin", "cli.js"), path.join(pathBinDir, "ai"));
     }
     fs.writeFileSync(
       path.join(tmpDir, ".agents", ".airc.json"),

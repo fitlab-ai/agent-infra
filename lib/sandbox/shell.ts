@@ -143,7 +143,7 @@ export function runSafe(cmd: string, args: string[], opts: CommandOptions = {}):
 export function commandForEngine(engine: string, cmd: string, args: string[] = []): { cmd: string; args: string[] } {
   if (engine === 'wsl2') {
     const resolvedWrapper = resolveCommand('wsl.exe');
-    return { cmd: resolvedWrapper, args: ['--', cmd, ...args] };
+    return { cmd: resolvedWrapper, args: ['--exec', cmd, ...args] };
   }
 
   if (cmd === 'docker') {

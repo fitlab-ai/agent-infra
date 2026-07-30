@@ -1,6 +1,6 @@
-import fs from 'node:fs';
 import path from 'node:path';
-import { run } from './shell.ts';
+import { run, runSafe } from './shell.ts';
+import { removeDirRecursive } from '../remove-dir.ts';
 
 export function assertManagedPath(root: string, target: string): void {
   const resolvedRoot = path.resolve(root);
@@ -15,13 +15,26 @@ export function assertManagedPath(root: string, target: string): void {
 
 export function removeManagedDir(root: string, dir: string): void {
   assertManagedPath(root, dir);
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeDirRecursive(dir);
 }
 
-export function removeWorktreeDir(repoRoot: string, worktreeBase: string, dir: string): void {
+export function removeWorktreeDir(
+  repoRoot: string,
+  worktreeBase: string,
+  dir: string,
+  { runFn = run, runSafeFn = runSafe }: {
+    runFn?: typeof run;
+    runSafeFn?: typeof runSafe;
+  } = {}
+): void {
   try {
-    run('git', ['-C', repoRoot, 'worktree', 'remove', dir, '--force']);
+    runFn('git', ['-C', repoRoot, 'worktree', 'remove', dir, '--force']);
   } catch {
+    // On WSL2 the worktree is registered under its `/mnt/<drive>/...` path, so
+    // `git worktree remove <windows-path>` cannot match it. Delete the managed
+    // directory directly, then prune the now-dangling worktree metadata so the
+    // branch is no longer reported as checked out.
     removeManagedDir(worktreeBase, dir);
+    runSafeFn('git', ['-C', repoRoot, 'worktree', 'prune']);
   }
 }

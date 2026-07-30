@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { removeDirRecursive } from '../remove-dir.ts';
 
 const RUNTIMES_DIR = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -88,7 +89,7 @@ export function prepareDockerfile(config: DockerfileConfig): { path: string; sig
     path: tempPath,
     signature: dockerfileSignature(config),
     cleanup() {
-      fs.rmSync(tempDir, { recursive: true, force: true });
+      removeDirRecursive(tempDir);
     }
   };
 }

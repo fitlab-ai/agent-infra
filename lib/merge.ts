@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { info, ok } from './log.ts';
+import { removeDirRecursive } from './remove-dir.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -690,7 +691,7 @@ function mergeMutableSections({ sourceWorkspace, localWorkspace, backupRoot, rep
       if (comparison > 0) {
         backupTaskDir(backupRoot, localMatch.section, localMatch.taskDir, localMatch.taskId);
         report.backupCount += 1;
-        fs.rmSync(localMatch.taskDir, { recursive: true, force: true });
+        removeDirRecursive(localMatch.taskDir);
 
         const destinationDir = copyTaskToSection(sourceTask, localWorkspace);
         localIndex.set(sourceTask.taskId, {

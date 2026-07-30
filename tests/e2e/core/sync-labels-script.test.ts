@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { filePath, read } from "../../helpers.ts";
+import { envWithPrependedPath, filePath, read, writeNodeCommandShim } from "../../helpers.ts";
 
 const scriptPath = filePath(".github/scripts/sync-labels-to-set.sh");
 
@@ -30,9 +30,8 @@ function makeTempDir() {
 }
 
 function writeFakeGh(binDir: string) {
-  const fakeGhPath = path.join(binDir, "gh");
-  write(fakeGhPath, `#!/usr/bin/env node
-const fs = require("node:fs");
+  const fakeGhScriptPath = path.join(binDir, "gh.js");
+  write(fakeGhScriptPath, `const fs = require("node:fs");
 
 const args = process.argv.slice(2);
 const statePath = process.env.GH_FAKE_STATE_PATH;
@@ -90,7 +89,15 @@ if ((args[0] === "issue" || args[0] === "pr") && args[1] === "edit") {
 process.stderr.write(\`unexpected gh args: \${args.join(" ")}\\n\`);
 process.exit(1);
 `);
-  fs.chmodSync(fakeGhPath, 0o755);
+  const fakeGhPath = path.join(binDir, "gh");
+  writeNodeCommandShim(fakeGhPath, fakeGhScriptPath);
+  if (process.platform === "win32") {
+    write(
+      fakeGhPath,
+      `#!/bin/sh\nexec "${process.execPath.replaceAll("\\", "/")}" "${fakeGhScriptPath.replaceAll("\\", "/")}" "$@"\n`
+    );
+    fs.chmodSync(fakeGhPath, 0o755);
+  }
 }
 
 function runScript({ kind = "issue", currentLabels = [], targets = [], prefix = "type:", failMode = "" }: RunScriptOptions = {}) {
@@ -122,8 +129,7 @@ function runScript({ kind = "issue", currentLabels = [], targets = [], prefix = 
   const result = spawnSync("sh", args, {
     encoding: "utf8",
     env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH}`,
+      ...envWithPrependedPath(process.env, binDir),
       GH_FAKE_STATE_PATH: statePath
     }
   });

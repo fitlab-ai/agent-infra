@@ -69,6 +69,7 @@ import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
 import { ensureSandboxDiscoveryReadmes } from '../readme-scaffold.ts';
+import { removeDirRecursive } from '../../remove-dir.ts';
 import {
   prepareClaudeCredentials,
   redactCommandError,
@@ -397,7 +398,7 @@ export function prepareHostShellConfig({
   repoRoot: string;
 }): HostShellConfig {
   const hostDir = hostShellConfigDir(home, project, branch);
-  fs.rmSync(hostDir, { recursive: true, force: true });
+  removeDirRecursive(hostDir);
   fs.mkdirSync(hostDir, { recursive: true });
 
   writeSanitizedGitconfig({
@@ -446,10 +447,19 @@ function normalizeWorktreePath(worktreePath: string): string {
     return '';
   }
 
+  const wslMount = process.platform === 'win32'
+    ? worktreePath.match(/^\/mnt\/([A-Za-z])(?:\/(.*))?$/)
+    : null;
+  const hostPath = wslMount
+    ? `${wslMount[1]!.toUpperCase()}:\\${(wslMount[2] ?? '').replace(/\//g, '\\')}`
+    : worktreePath;
+
   try {
-    return fs.existsSync(worktreePath) ? fs.realpathSync(worktreePath) : path.resolve(worktreePath);
+    const normalized = fs.existsSync(hostPath) ? fs.realpathSync(hostPath) : path.resolve(hostPath);
+    return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
   } catch {
-    return path.resolve(worktreePath);
+    const normalized = path.resolve(hostPath);
+    return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
   }
 }
 
@@ -701,7 +711,7 @@ export function buildContainerEnvFile(
     mkdtempFn = fs.mkdtempSync,
     writeFileFn = fs.writeFileSync,
     chmodFn = fs.chmodSync,
-    rmFn = fs.rmSync,
+    rmFn = removeDirRecursive as typeof fs.rmSync,
     tmpDir = os.tmpdir(),
     runSafeFn = runSafe
   } = options;
@@ -1491,7 +1501,7 @@ export async function create(args: string[]): Promise<void> {
             if (fs.readdirSync(worktree).length > 0) {
               return `Worktree exists at ${worktree}`;
             }
-            fs.rmSync(worktree, { recursive: true, force: true });
+            removeDirRecursive(worktree);
           }
 
           const branchExists = runOk('git', [

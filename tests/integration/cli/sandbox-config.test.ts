@@ -39,10 +39,10 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     assert.equal(config.engine, null);
     assert.equal(config.refreshIntervalDays, 7);
     assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
-    assert.equal(config.worktreeBase, path.join(process.env.HOME ?? "", ".agent-infra", "worktrees", "demo"));
-    assert.equal(config.shareBase, path.join(process.env.HOME ?? "", ".agent-infra", "share", "demo"));
-    assert.equal(config.shellConfigBase, path.join(process.env.HOME ?? "", ".agent-infra", "config", "demo"));
-    assert.equal(config.dotfilesDir, path.join(process.env.HOME ?? "", ".agent-infra", "dotfiles"));
+    assert.equal(config.worktreeBase, path.join(os.homedir(), ".agent-infra", "worktrees", "demo"));
+    assert.equal(config.shareBase, path.join(os.homedir(), ".agent-infra", "share", "demo"));
+    assert.equal(config.shellConfigBase, path.join(os.homedir(), ".agent-infra", "config", "demo"));
+    assert.equal(config.dotfilesDir, path.join(os.homedir(), ".agent-infra", "dotfiles"));
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });

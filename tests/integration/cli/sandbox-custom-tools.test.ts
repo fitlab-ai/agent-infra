@@ -135,7 +135,7 @@ test("loadConfig parses the minimal {id, install} customTools entry and fills al
     // sandboxBase is always derived; not user-configurable
     assert.equal(
       tool?.sandboxBase,
-      path.join(process.env.HOME ?? "", ".agent-infra", "sandboxes", "my-tool")
+      path.join(os.homedir(), ".agent-infra", "sandboxes", "my-tool")
     );
     // Optional integration fields stay undefined when omitted
     assert.equal(tool?.envVars, undefined);
@@ -315,7 +315,7 @@ test("loadConfig always assigns the default sandboxBase and ignores user-supplie
     const config = withGitSafeProcessEnv(() => sandboxConfig.loadConfig());
     assert.equal(
       config.customTools[0]?.sandboxBase,
-      path.join(process.env.HOME ?? "", ".agent-infra", "sandboxes", "fixed-base")
+      path.join(os.homedir(), ".agent-infra", "sandboxes", "fixed-base")
     );
   } finally {
     process.chdir(previousCwd);

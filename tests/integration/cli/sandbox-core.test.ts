@@ -74,7 +74,15 @@ type SandboxCreateModule = {
 type ManagedFsModule = {
   assertManagedPath(root: string, target: string): void;
   removeManagedDir(root: string, dir: string): void;
-  removeWorktreeDir(repoRoot: string, worktreeBase: string, dir: string): void;
+  removeWorktreeDir(
+    repoRoot: string,
+    worktreeBase: string,
+    dir: string,
+    deps?: {
+      runFn?: (cmd: string, args: string[]) => string;
+      runSafeFn?: (cmd: string, args: string[]) => string;
+    }
+  ): void;
 };
 type PruneModule = {
   collectOrphanGroups(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, activeBranches: string[]): Array<{
@@ -470,6 +478,39 @@ test("managed sandbox fs worktree removal falls back to managed rm", async () =>
   }
 });
 
+test("managed sandbox fs worktree removal prunes stale metadata after a fallback delete", async () => {
+  const managedFs = await loadFreshEsm<ManagedFsModule>("lib/sandbox/managed-fs.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-managed-worktree-prune-"));
+  const worktreeBase = path.join(tmpDir, "worktrees");
+  const worktree = path.join(worktreeBase, "feature..wsl2");
+  const calls: string[][] = [];
+
+  try {
+    fs.mkdirSync(worktree, { recursive: true });
+
+    managedFs.removeWorktreeDir(tmpDir, worktreeBase, worktree, {
+      // Simulate WSL2: `git worktree remove <windows-path>` cannot match the
+      // `/mnt/c/...` registration, so it throws and the directory is deleted
+      // through the managed fallback instead.
+      runFn: (cmd, args) => {
+        calls.push([cmd, ...args]);
+        throw new Error("fatal: is not a working tree");
+      },
+      runSafeFn: (cmd, args) => {
+        calls.push([cmd, ...args]);
+        return "";
+      }
+    });
+
+    assert.equal(fs.existsSync(worktree), false);
+    // The stale `/mnt/c/...` worktree record must be pruned so the branch is
+    // no longer reported as checked out and can be deleted.
+    assert.deepEqual(calls.at(-1), ["git", "-C", tmpDir, "worktree", "prune"]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox create warns and continues past missing Claude credentials", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-no-credentials-"));
   const project = `sandbox-no-leak-${process.pid}-${Date.now()}`;
@@ -622,6 +663,27 @@ test("assertBranchAvailable allows the current sandbox worktree to reuse the che
     }
   ));
 });
+
+test(
+  "assertBranchAvailable treats WSL mount and Windows drive paths as the same worktree",
+  onPlatforms("win32"),
+  async () => {
+    const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+
+    assert.doesNotThrow(() => sandboxCreate.assertBranchAvailable(
+      String.raw`C:\repo`,
+      "feature/demo",
+      {
+        allowedWorktrees: [String.raw`C:\repo\.worktrees\feature-demo`],
+        runFn: () => [
+          "worktree /mnt/c/repo/.worktrees/feature-demo",
+          "branch refs/heads/feature/demo",
+          ""
+        ].join("\n")
+      }
+    ));
+  }
+);
 
 test("ensureSandboxAliasesFile creates the default aliases once", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
