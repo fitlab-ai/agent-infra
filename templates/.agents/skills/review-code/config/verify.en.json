@@ -41,6 +41,9 @@
         "^- \\*\\*Reviewed Snapshot Tree\\*\\*[:：]\\s*[0-9a-f]{40,64}\\s*$"
       ]
     },
+    "review-summary": {
+      "stage": "code"
+    },
     "review-fact": {},
     "activity-log": {
       "expected_action_pattern": "(Review Code|Code Review) \\(Round \\d+\\)"

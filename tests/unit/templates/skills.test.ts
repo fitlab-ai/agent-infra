@@ -267,22 +267,53 @@ test("workflow state-check consumers use the typed task snapshot entrypoint", ()
   });
 });
 
-test("review skills reuse one unresolved-count snapshot for reports and completion events", () => {
+test("review skills finalize one summary snapshot before their completion event", () => {
+  const stages = [
+    { skill: "review-analysis", stage: "analysis" },
+    { skill: "review-plan", stage: "plan" },
+    { skill: "review-code", stage: "code" }
+  ];
+
+  for (const { skill, stage } of stages) {
+    for (const relativePath of skillDocPaths(skill)) {
+      const content = read(relativePath);
+      const finalizer = `agent-infra-internal task-review {task-id} finalize-summary --stage ${stage} --artifact {review-artifact}`;
+      const completion = `agent-infra-internal task-event {task-id} ${skill}.completed`;
+
+      assert.equal(
+        content.split(finalizer).length - 1,
+        1,
+        `${relativePath} should call its summary finalizer exactly once`
+      );
+      assert.equal(
+        content.match(/agent-infra-internal task-ledger \{task-id\} stage-status/g)?.length ?? 0,
+        0,
+        `${relativePath} should not read a second ledger snapshot`
+      );
+      assert.ok(
+        content.indexOf(finalizer) < content.indexOf(completion),
+        `${relativePath} should finalize the summary before completion`
+      );
+    }
+  }
+});
+
+test("review skills reuse one finalized unresolved-count snapshot for completion events", () => {
   const reviewFamilies = [
     { name: "review-analysis", stage: "analysis", event: "review-analysis.completed" },
     { name: "review-plan", stage: "plan", event: "review-plan.completed" },
     { name: "review-code", stage: "code", event: "review-code.completed" }
   ];
   const countMappings = [
-    { field: "blocker", placeholder: "{unresolved-blockers}", reportField: "blocker", flag: "--blockers" },
-    { field: "major", placeholder: "{unresolved-major}", reportField: "major", flag: "--major" },
-    { field: "minor", placeholder: "{unresolved-minor}", reportField: "minor", flag: "--minor" }
+    { field: "blocker", placeholder: "{unresolved-blockers}", flag: "--blockers" },
+    { field: "major", placeholder: "{unresolved-major}", flag: "--major" },
+    { field: "minor", placeholder: "{unresolved-minor}", flag: "--minor" }
   ];
 
   reviewFamilies.forEach(({ name, stage, event }) => {
     skillDocPaths(name).forEach((relativePath) => {
       const content = read(relativePath);
-      const stageCommand = `agent-infra-internal task-ledger {task-id} stage-status --stage ${stage}`;
+      const stageCommand = `agent-infra-internal task-review {task-id} finalize-summary --stage ${stage} --artifact {review-artifact}`;
       const eventCommand = `agent-infra-internal task-event {task-id} ${event}`;
       const stageIndex = content.indexOf(stageCommand);
       const eventIndex = content.indexOf(eventCommand);
@@ -290,19 +321,16 @@ test("review skills reuse one unresolved-count snapshot for reports and completi
       assert.equal(
         [...content.matchAll(new RegExp(escapeRegExp(stageCommand), "g"))].length,
         1,
-        `${relativePath} should read the stage status exactly once`
+        `${relativePath} should finalize one stage status snapshot`
       );
       assert.notEqual(eventIndex, -1, `${relativePath} should declare its completion event`);
 
-      countMappings.forEach(({ field, placeholder, reportField, flag }) => {
+      countMappings.forEach(({ field, placeholder, flag }) => {
         const binding = `${placeholder} = stageStatus.unresolvedFindingCounts.${field}`;
-        const reportMapping = `report-summary.${reportField} = ${placeholder}`;
         const bindingIndex = content.indexOf(binding);
-        const reportIndex = content.indexOf(reportMapping);
 
-        assert.ok(stageIndex < bindingIndex, `${relativePath} should bind ${placeholder} after stage-status`);
-        assert.ok(bindingIndex < reportIndex, `${relativePath} should map ${placeholder} into the report`);
-        assert.ok(reportIndex < eventIndex, `${relativePath} should finalize the report before the completion event`);
+        assert.ok(stageIndex < bindingIndex, `${relativePath} should bind ${placeholder} after finalization`);
+        assert.ok(bindingIndex < eventIndex, `${relativePath} should bind counts before the completion event`);
         assert.ok(
           content.includes(`${flag} ${placeholder}`),
           `${relativePath} should reuse ${placeholder} for ${flag}`
@@ -1149,8 +1177,8 @@ test("review handshake skills submit ledger changes through structured intents",
       assert.match(content, /finding-review --id \{ledger-id\}/, `${relativePath} should submit review dispositions through the ledger core`);
       const stage = skill.replace("review-", "");
       assert.ok(
-        content.includes(`agent-infra-internal task-ledger {task-id} stage-status --stage ${stage}`),
-        `${relativePath} should derive its verdict from the shared stage status`
+        content.includes(`agent-infra-internal task-review {task-id} finalize-summary --stage ${stage} --artifact {review-artifact}`),
+        `${relativePath} should derive its verdict from the finalized shared stage status`
       );
     }
   }

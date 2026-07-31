@@ -36,6 +36,9 @@
         "^\\$ "
       ]
     },
+    "review-summary": {
+      "stage": "analysis"
+    },
     "activity-log": {
       "expected_action_pattern": "(Review Analysis|Analysis Review) \\(Round \\d+\\)"
     },

@@ -76,6 +76,11 @@ switch (command) {
     taskArtifact(process.argv.slice(3));
     break;
   }
+  case 'task-review': {
+    const { taskReview } = await import('../lib/internal/task-review.ts');
+    taskReview(process.argv.slice(3));
+    break;
+  }
   case 'task-event': {
     const { taskEvent } = await import('../lib/internal/task-event.ts');
     taskEvent(process.argv.slice(3));

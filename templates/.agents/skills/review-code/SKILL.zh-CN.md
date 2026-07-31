@@ -93,7 +93,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 ### 6. 更新任务状态
 
 - 报告完成后，新 finding 逐条调用 `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`；复核上一轮响应时调用 `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {相称证据}`。不得扫描编号或手写账本行
-- 全部账本写入完成后只调用一次 `agent-infra-internal task-ledger {task-id} stage-status --stage code`
+- 全部账本写入完成后只调用一次 `agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact}`
 
   从该次返回值绑定并复用以下结构化映射：
 
@@ -101,12 +101,9 @@ agent-infra-internal task-snapshot {task-id} --format text
   {unresolved-blockers} = stageStatus.unresolvedFindingCounts.blocker
   {unresolved-major} = stageStatus.unresolvedFindingCounts.major
   {unresolved-minor} = stageStatus.unresolvedFindingCounts.minor
-  report-summary.blocker = {unresolved-blockers}
-  report-summary.major = {unresolved-major}
-  report-summary.minor = {unresolved-minor}
   ```
 
-  先用上述值替换报告模板摘要中的同名占位符，不得保留预估值、finding 总数或再次扫描问题清单；替换失败或返回字段缺失时，停止在完成事件之前。以同一次返回的 `stageStatus.canAdvance` 决定 verdict 和下一步；仅 `canAdvance=true` 可用 Approved
+  该 intent 原子最终化报告摘要并返回同一次账本快照；不得再调用 `stage-status`、手工替换占位符或扫描问题清单。最终化失败或返回字段缺失时，停止在完成事件之前。以同一次返回的 `stageStatus.canAdvance` 决定 verdict 和下一步；仅 `canAdvance=true` 可用 Approved
 - 仅当 `canAdvance=true`、本轮结论为 Approved 且 `T == R^{tree}` 时写入 `last_reviewed_commit: {R}`；Approved 快照包含未提交差异时清除旧值。否则保留既有值，不得推进或清空
 - Approved 出口继续按 `reference/output-templates.md` 采集 PR 与 required-checks 事实：未提交/未推送走 `commit`，无 PR 走 `create-pr`（无 PR 流程除外），checks 未终态走 `watch-pr`，仅 `HEAD == last_reviewed_commit == PR head` 且 checks 为 `passed|no-required` 时走 `complete-task`；不得仅按审查轮次分流
 - 完成 `last_reviewed_commit` 处理后执行 `agent-infra-internal task-event {task-id} review-code.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n}`

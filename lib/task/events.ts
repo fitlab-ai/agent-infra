@@ -18,6 +18,7 @@ import {
 } from './implementation-inputs.ts';
 import { parseLedger, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { ReviewStage } from './ledger.ts';
+import { parseReviewSummary } from './review-artifacts.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { findSectionHeading } from './sections.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
@@ -122,36 +123,63 @@ const REVIEW_LEDGER_STAGES: Partial<Record<EventFamily, ReviewStage>> = {
   'review-code': 'code'
 };
 
-function validateApprovedFindingCounts(
+function validateReviewFindingCounts(
   request: TaskEventRequest,
   content: string,
-  family: EventFamily
+  family: EventFamily,
+  artifactPath: string | null
 ): TaskEventError | null {
   const stage = REVIEW_LEDGER_STAGES[family];
-  if (request.verdict !== 'approved' || !stage) return null;
+  if (!stage || !artifactPath) return null;
   const rows = parseLedger(content);
   const invalid = validateLedgerRows(rows);
   if (invalid) return { code: 'TASK_DOCUMENT_INVALID', message: `${invalid.code}: ${invalid.message}` };
   const expected = summarizeLedgerStage(rows, stage).unresolvedFindingCounts;
-  const received = {
+  const payload = {
     blocker: request.blockers!,
     major: request.major!,
     minor: request.minor!
   };
+  let reportContent: string;
+  try {
+    reportContent = fs.readFileSync(artifactPath, 'utf8');
+  } catch (error) {
+    return { code: 'EVENT_FINDING_COUNT_MISMATCH', message: String(error) };
+  }
+  const parsed = parseReviewSummary(reportContent);
+  if (!parsed.ok || !parsed.summary.counts) {
+    return {
+      code: 'EVENT_FINDING_COUNT_MISMATCH',
+      message: parsed.ok ? 'review summary finding counts are not finalized' : parsed.message
+    };
+  }
+  const report = parsed.summary.counts;
+  const reportVerdict = parsed.summary.verdict === 'Approved'
+    ? 'approved'
+    : parsed.summary.verdict === 'Changes Requested' ? 'changes-requested' : 'rejected';
   const fields = [
     ['blocker', 'blockers'],
     ['major', 'major'],
     ['minor', 'minor']
   ] as const;
-  const differences = fields.flatMap(([severity, cliField]) => (
-    expected[severity] === received[severity]
-      ? []
-      : [`${cliField} expected ${expected[severity]}, received ${received[severity]}`]
-  ));
+  const differences = fields.flatMap(([severity, cliField]) => {
+    const values = [
+      expected[severity] === payload[severity]
+        ? null
+        : `${cliField} ledger ${expected[severity]}, payload ${payload[severity]}`,
+      expected[severity] === report[severity]
+        ? null
+        : `${cliField} ledger ${expected[severity]}, report ${report[severity]}`
+    ];
+    return values.filter((value): value is string => value !== null);
+  });
+  if (request.verdict !== reportVerdict) {
+    differences.push(`verdict report ${reportVerdict}, payload ${request.verdict}`);
+  }
   if (differences.length === 0) return null;
   return {
     code: 'EVENT_FINDING_COUNT_MISMATCH',
-    message: `approved finding counts do not match the ${stage} ledger: ${differences.join('; ')}`
+    message: `review summary, payload, and ${stage} ledger do not match: ${differences.join('; ')}`
   };
 }
 
@@ -298,7 +326,12 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskWriteOptions = {
   }
   const allowed = FAMILY[eventIdentity.family][eventIdentity.phase === 'started' ? 'started' : 'completed'];
   if (!(allowed as readonly string[]).includes(currentStep)) return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${normalized.event} is not allowed from '${currentStep}'` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-  const findingCountError = validateApprovedFindingCounts(normalized, content, eventIdentity.family);
+  const findingCountError = validateReviewFindingCounts(
+    normalized,
+    content,
+    eventIdentity.family,
+    completedArtifact?.path ?? null
+  );
   if (findingCountError) return failed(normalized, findingCountError, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
   let metadata;
   try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }

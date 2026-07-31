@@ -95,7 +95,7 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
 Update task.md:
 - After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. Do not scan ids or edit ledger rows
-- After all ledger writes, call `agent-infra-internal task-ledger {task-id} stage-status --stage code` exactly once
+- After all ledger writes, call `agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact}` exactly once
 
   Bind and reuse this structured mapping from that one response:
 
@@ -103,12 +103,9 @@ Update task.md:
   {unresolved-blockers} = stageStatus.unresolvedFindingCounts.blocker
   {unresolved-major} = stageStatus.unresolvedFindingCounts.major
   {unresolved-minor} = stageStatus.unresolvedFindingCounts.minor
-  report-summary.blocker = {unresolved-blockers}
-  report-summary.major = {unresolved-major}
-  report-summary.minor = {unresolved-minor}
   ```
 
-  First replace the matching placeholders in the report summary with those values. Do not preserve estimates or total findings, and do not rescan the finding list. If replacement fails or a response field is missing, stop before the completion event. Derive the verdict and next-step branch from the same response's `stageStatus.canAdvance`; only `canAdvance=true` permits Approved
+  The intent atomically finalizes the report summary and returns the same ledger snapshot. Do not call `stage-status`, replace placeholders manually, or rescan the finding list. If finalization fails or a response field is missing, stop before the completion event. Derive the verdict and next-step branch from the same response's `stageStatus.canAdvance`; only `canAdvance=true` permits Approved
 - Only when `canAdvance=true`, the verdict is Approved, and `T == R^{tree}`, write `last_reviewed_commit: {R}`. Clear an old value for an Approved snapshot with uncommitted differences; otherwise preserve the existing value and do not advance it
 - For an Approved exit, collect PR and required-checks facts as defined in `reference/output-templates.md`: route uncommitted/unpushed code to `commit`, no PR to `create-pr` (except no-PR flow), non-terminal checks to `watch-pr`, and route to `complete-task` only when `HEAD == last_reviewed_commit == PR head` with checks `passed|no-required`; never route by review round alone
 - After handling `last_reviewed_commit`, run `agent-infra-internal task-event {task-id} review-code.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n}`

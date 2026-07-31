@@ -5,6 +5,7 @@ import { resolveTaskRef } from './resolve-ref.ts';
 import type { ResolveTaskRefErrorCode, TaskWorkspaceState } from './resolve-ref.ts';
 import { locateActivityLog } from './activity-log.ts';
 import { parseImplementationInputs, selectPendingImplementationInput } from './implementation-inputs.ts';
+import { parseVerdict } from './review-artifacts.ts';
 import { extractSection, findSectionHeading } from './sections.ts';
 
 const artifactFamilyCatalog = [
@@ -239,21 +240,6 @@ function resolveReviewedInput(
   }
 }
 
-function extractMarkdownSection(content: string, names: readonly string[]): string {
-  const lines = content.split(/\r?\n/);
-  const allowed = new Set(names);
-  const start = lines.findIndex((line) => {
-    const match = /^##\s+(.+?)\s*$/.exec(line.trim());
-    return Boolean(match?.[1] && allowed.has(match[1]));
-  });
-  if (start === -1) return '';
-  let end = lines.length;
-  for (let index = start + 1; index < lines.length; index += 1) {
-    if (/^##\s+/.test(lines[index]!)) { end = index; break; }
-  }
-  return lines.slice(start + 1, end).join('\n');
-}
-
 function assertWritableInventory(inventory: ArtifactInventoryResult): ArtifactError | null {
   if (inventory.status === 'failed') return inventory.error;
   const blockers = inventory.diagnostics.filter((item) => BLOCKING_DIAGNOSTICS.has(item.code));
@@ -396,29 +382,6 @@ function resolveDecisionImplementationInput(
   if (!completed) return { error: `cannot find completed Activity Log identity for ${review.name}` };
   try { return { input: selectPendingImplementationInput(rows, completed.time) }; }
   catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
-}
-
-function normalizeVerdict(value: string): 'Approved' | 'Changes Requested' | 'Rejected' | null {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === '通过' || normalized === 'approved') return 'Approved';
-  if (normalized === '需要修改' || normalized === 'changes requested') return 'Changes Requested';
-  if (normalized === '拒绝' || normalized === 'rejected') return 'Rejected';
-  return null;
-}
-
-function parseVerdict(file: string): { ok: true; verdict: string } | { ok: false; message: string } {
-  let content: string;
-  try { content = fs.readFileSync(file, 'utf8'); }
-  catch (error) { return { ok: false, message: String(error) }; }
-  const summary = extractMarkdownSection(content, ['审查摘要', 'Review Summary']);
-  const verdictMatch = /^[-*]?\s*\*\*(?:总体结论|Overall Verdict)\*\*[:：]\s*(.+?)\s*$/im.exec(summary);
-  const verdict = verdictMatch?.[1] ? normalizeVerdict(verdictMatch[1]) : null;
-  if (!verdict) return { ok: false, message: `cannot parse verdict in ${path.basename(file)}` };
-  if (verdict !== 'Approved') return { ok: true, verdict };
-  const findings = /^[-*]?\s*\*\*(?:发现（AI 可处理）|Findings \(AI-actionable\))\*\*[:：]\s*(.+?)\s*$/im.exec(summary)?.[1];
-  const counts = findings?.match(/(\d+)\s*(?:阻塞项|blockers?).*?(\d+)\s*(?:主要|majors?).*?(\d+)\s*(?:次要|minors?)/i);
-  if (!counts) return { ok: false, message: `cannot parse findings count in ${path.basename(file)}` };
-  return { ok: true, verdict: counts.slice(1).some((value) => Number(value) > 0) ? 'Approved-with-issues' : 'Approved' };
 }
 
 function validateCompletedArtifact(taskDir: string, family: ArtifactFamily, name: string, round?: number): { ok: true; artifact: ArtifactIdentity } | { ok: false; error: ArtifactError } {

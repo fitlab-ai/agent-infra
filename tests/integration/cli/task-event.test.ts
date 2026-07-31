@@ -27,11 +27,16 @@ function inspect(root: string, args: string[]) {
 }
 
 function reviewCodeArtifact(input = 'code.md') {
-  return `# Code Review\n\n- **审查输入**：\`${input}\`\n`;
+  return `# Code Review\n\n- **审查输入**：\`${input}\`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n`;
 }
 
-function reviewArtifact(title: string, input: string) {
-  return `# ${title}\n\n- **审查输入**：\`${input}\`\n`;
+function reviewArtifact(
+  title: string,
+  input: string,
+  verdict = '通过',
+  counts: ReviewCounts = { blockers: 0, major: 0, minor: 0 }
+) {
+  return `# ${title}\n\n- **审查输入**：\`${input}\`\n\n## 审查摘要\n\n- **总体结论**：${verdict}\n- **发现（AI 可处理）**：${counts.blockers} 阻塞项，${counts.major} 主要，${counts.minor} 次要 / **人工校验**：0\n`;
 }
 
 type ReviewCounts = { blockers: number; major: number; minor: number };
@@ -64,13 +69,21 @@ function setLedger(file: string, rows: string[]) {
   fs.writeFileSync(file, content.replace('## Activity Log', `${ledger}\n## Activity Log`));
 }
 
-function prepareReview(scenario: (typeof reviewScenarios)[number], rows: string[]) {
+function prepareReview(
+  scenario: (typeof reviewScenarios)[number],
+  rows: string[],
+  verdict = '通过',
+  counts: ReviewCounts = { blockers: 0, major: 0, minor: 0 }
+) {
   const f = fixture(scenario.step);
   fs.writeFileSync(path.join(f.dir, scenario.input), `# ${scenario.input}\n`);
   setLedger(f.file, rows);
   const started = run(f.root, [f.id, `${scenario.family}.started`, '--agent', 'codex']);
   assert.equal(started.status, 0, started.stderr);
-  fs.writeFileSync(path.join(f.dir, scenario.artifact), reviewArtifact(scenario.title, scenario.input));
+  fs.writeFileSync(
+    path.join(f.dir, scenario.artifact),
+    reviewArtifact(scenario.title, scenario.input, verdict, counts)
+  );
   return f;
 }
 
@@ -352,7 +365,7 @@ for (const scenario of reviewScenarios) {
     assert.equal(result.changed, false);
     assert.equal(result.error.code, 'EVENT_FINDING_COUNT_MISMATCH');
     assert.match(result.error.message, new RegExp(`${scenario.stage} ledger`));
-    assert.match(result.error.message, /minor expected 1, received 0/);
+    assert.match(result.error.message, /minor ledger 1, payload 0/);
     assert.deepEqual(fs.readFileSync(f.file), before);
   });
 }
@@ -363,7 +376,7 @@ test('approved review completion accepts matching non-zero finding counts', () =
     '| CD-1 | code | 1 | blocker | open | review-code.md#CD-1 |',
     '| CD-2 | code | 1 | major | adjusted | review-code.md#CD-2 |',
     '| CD-3 | code | 1 | minor | needs-human-decision | review-code.md#CD-3 |'
-  ]);
+  ], '通过', { blockers: 1, major: 1, minor: 1 });
   const completed = completeReview(f, scenario, 'approved', { blockers: 1, major: 1, minor: 1 });
 
   assert.equal(completed.status, 0, completed.stderr);
@@ -372,18 +385,38 @@ test('approved review completion accepts matching non-zero finding counts', () =
 });
 
 for (const verdict of ['changes-requested', 'rejected'] as const) {
-  test(`${verdict} review completion bypasses approved finding count validation`, () => {
+  test(`${verdict} review completion rejects finding counts that differ from the ledger`, () => {
     const scenario = reviewScenarios[2];
-    const row = verdict === 'changes-requested'
-      ? '| invalid | invalid | invalid | invalid | invalid | invalid |'
-      : '| CD-1 | code | 1 | minor | open | review-code.md#CD-1 |';
-    const f = prepareReview(scenario, [row]);
+    const f = prepareReview(
+      scenario,
+      ['| CD-1 | code | 1 | minor | open | review-code.md#CD-1 |'],
+      verdict === 'changes-requested' ? '需要修改' : '拒绝'
+    );
+    const before = fs.readFileSync(f.file);
     const completed = completeReview(f, scenario, verdict, { blockers: 0, major: 0, minor: 0 });
 
-    assert.equal(completed.status, 0, completed.stderr);
-    assert.equal(JSON.parse(completed.stdout).status, 'applied');
+    assert.equal(completed.status, 1);
+    assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_FINDING_COUNT_MISMATCH');
+    assert.deepEqual(fs.readFileSync(f.file), before);
   });
 }
+
+test('review completion rejects unresolved summary placeholders before mutating task.md', () => {
+  const scenario = reviewScenarios[0];
+  const f = prepareReview(scenario, []);
+  const artifactPath = path.join(f.dir, scenario.artifact);
+  fs.writeFileSync(
+    artifactPath,
+    fs.readFileSync(artifactPath, 'utf8')
+      .replace('0 阻塞项，0 主要，0 次要', '{unresolved-blockers} 阻塞项，{unresolved-major} 主要，{unresolved-minor} 次要')
+  );
+  const before = fs.readFileSync(f.file);
+  const completed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
+
+  assert.equal(completed.status, 1);
+  assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_FINDING_COUNT_MISMATCH');
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
 
 test('approved dry-run rejects mismatched finding counts without changing task bytes', () => {
   const scenario = reviewScenarios[1];

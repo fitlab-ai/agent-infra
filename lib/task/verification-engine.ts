@@ -21,7 +21,8 @@ import { inspectPlatformPullRequest } from "../platform/pull-requests.ts";
 import { resolveReviewedHeadRelation } from "../platform/merged-pr-equivalence.ts";
 import { resolveLocalReviewedCommitRelation } from "../git/reviewed-commit-equivalence.ts";
 import { parseTypedTaskFrontmatter } from "./frontmatter.ts";
-import { parseLedger } from "./ledger.ts";
+import { parseLedger, summarizeLedgerStage, validateLedgerRows } from "./ledger.ts";
+import { equalCounts, parseReviewSummary } from "./review-artifacts.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
 import { snapshotReview } from "../git/review-snapshot.ts";
 
@@ -112,6 +113,8 @@ function runCheck(type: any, context: any, shared: any): any {
       return checkCompletionChecklist(context);
     case "review-ledger":
       return checkReviewLedger(context);
+    case "review-summary":
+      return checkReviewSummary(context);
     case "review-fact":
       return checkReviewFact(context);
     case "post-review-commit":
@@ -312,6 +315,43 @@ function checkArtifact({ taskDir, config, artifactFile }: any): any {
   return passResult(
     "artifact",
     `${path.basename(artifactPath)} passed (${requiredSections.length} sections)`
+  );
+}
+
+function checkReviewSummary({ taskDir, config, artifactFile }: any): any {
+  const stage = String(config.stage || "");
+  if (!["analysis", "plan", "code"].includes(stage)) {
+    return failResult("review-summary", `Invalid review stage '${stage}'`);
+  }
+  const resolvedArtifact = resolveArtifactPath(taskDir, "", artifactFile);
+  if (!resolvedArtifact.ok || !safeStat(resolvedArtifact.path)?.isFile()) {
+    return failResult("review-summary", resolvedArtifact.message || "Review artifact is missing");
+  }
+  const parsed = parseReviewSummary(fs.readFileSync(resolvedArtifact.path, "utf8"));
+  if (!parsed.ok) return failResult("review-summary", `${parsed.code}: ${parsed.message}`);
+  if (!parsed.summary.counts) {
+    return failResult("review-summary", "Review summary finding counts are not finalized");
+  }
+  const task = loadTask(taskDir);
+  if (!task.ok) return failResult("review-summary", task.message);
+  let rows;
+  try {
+    rows = parseLedger(task.content);
+  } catch (error) {
+    return failResult("review-summary", `Invalid disagreement ledger: ${String(error)}`);
+  }
+  const invalid = validateLedgerRows(rows);
+  if (invalid) return failResult("review-summary", `${invalid.code}: ${invalid.message}`);
+  const expected = summarizeLedgerStage(rows, stage as "analysis" | "plan" | "code").unresolvedFindingCounts;
+  if (!equalCounts(parsed.summary.counts, expected)) {
+    return failResult(
+      "review-summary",
+      `Review summary counts ${JSON.stringify(parsed.summary.counts)} do not match ledger ${JSON.stringify(expected)}`
+    );
+  }
+  return passResult(
+    "review-summary",
+    `${path.basename(resolvedArtifact.path)} finding counts match the ${stage} ledger`
   );
 }
 
