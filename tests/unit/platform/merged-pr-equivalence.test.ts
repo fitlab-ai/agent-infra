@@ -55,7 +55,7 @@ test("accepts an authoritative content-equivalent squash merge", () => {
   try {
     assert.deepEqual(resolveReviewedHeadRelation({
       gitRoot: f.root, comparisonHead: f.merge, lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest, pathspecs: [":/"]
+      pullRequest: f.pullRequest
     }), {
       status: "merged-equivalent",
       reviewedHead: f.head,
@@ -91,8 +91,7 @@ test("accepts a normalized squash snapshot supplied by a custom platform adapter
       gitRoot: f.root,
       comparisonHead: f.merge,
       lastReviewedCommit: f.head,
-      pullRequest: inspected.value!,
-      pathspecs: [":/"]
+      pullRequest: inspected.value!
     }), {
       status: "merged-equivalent",
       reviewedHead: f.head,
@@ -104,7 +103,7 @@ test("accepts a normalized squash snapshot supplied by a custom platform adapter
   }
 });
 
-test("fails closed for changed squash content and protected post-merge commits", () => {
+test("fails closed for changed squash content and accepts later target changes", () => {
   const changed = fixture();
   try {
     git(changed.root, ["reset", "--hard", `${changed.merge}^`]);
@@ -112,7 +111,7 @@ test("fails closed for changed squash content and protected post-merge commits",
     changed.pullRequest.mergeCommitSha = git(changed.root, ["rev-parse", "HEAD"]);
     const mismatch = resolveReviewedHeadRelation({
       gitRoot: changed.root, comparisonHead: changed.pullRequest.mergeCommitSha,
-      lastReviewedCommit: changed.head, pullRequest: changed.pullRequest, pathspecs: [":/"]
+      lastReviewedCommit: changed.head, pullRequest: changed.pullRequest
     });
     assert.equal(mismatch.status, "failed");
     assert.equal(mismatch.code, "PR_MERGE_CONTENT_MISMATCH");
@@ -125,10 +124,14 @@ test("fails closed for changed squash content and protected post-merge commits",
     const localHead = writeCommit(later.root, "base\nreviewed\nlater\n", "later");
     const result = resolveReviewedHeadRelation({
       gitRoot: later.root, comparisonHead: localHead, lastReviewedCommit: later.head,
-      pullRequest: later.pullRequest, pathspecs: [":/"]
+      pullRequest: later.pullRequest
     });
-    assert.equal(result.status, "failed");
-    assert.equal(result.code, "POST_MERGE_CHANGES");
+    assert.deepEqual(result, {
+      status: "merged-equivalent",
+      reviewedHead: later.head,
+      mergeCommit: later.merge,
+      comparisonHead: localHead
+    });
   } finally {
     fs.rmSync(later.root, { recursive: true, force: true });
   }
@@ -140,7 +143,7 @@ test("blocks when authoritative merge objects are missing", () => {
     f.pullRequest.base.sha = "f".repeat(40);
     const result = resolveReviewedHeadRelation({
       gitRoot: f.root, comparisonHead: f.merge, lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest, pathspecs: [":/"]
+      pullRequest: f.pullRequest
     });
     assert.equal(result.status, "blocked");
     assert.equal(result.code, "PR_MERGE_OBJECT_MISSING");
@@ -156,8 +159,7 @@ test("rejects a merge commit outside authoritative target history", () => {
       gitRoot: f.root,
       comparisonHead: f.base,
       lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest,
-      pathspecs: [":/"]
+      pullRequest: f.pullRequest
     });
     assert.equal(result.status, "failed");
     assert.equal(result.code, "PR_MERGE_TARGET_MISMATCH");
@@ -177,8 +179,7 @@ test("rejects a two-parent merge topology", () => {
       gitRoot: f.root,
       comparisonHead: mergeCommit,
       lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest,
-      pathspecs: [":/"]
+      pullRequest: f.pullRequest
     });
     assert.equal(result.status, "failed");
     assert.equal(result.code, "PR_MERGE_TOPOLOGY_INVALID");

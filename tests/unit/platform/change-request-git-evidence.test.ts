@@ -124,8 +124,7 @@ test("materializes merged PR evidence without changing the caller repository", (
       cwd: f.caller,
       platformType: "isolated-evidence-test",
       lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest,
-      pathspecs: [":/"]
+      pullRequest: f.pullRequest
     }), {
       status: "merged-equivalent",
       reviewedHead: f.head,
@@ -147,8 +146,7 @@ test("blocks with a stable code when platform refs cannot be fetched", () => {
       cwd: f.caller,
       platformType: "missing-evidence-ref-test",
       lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest,
-      pathspecs: [":/"]
+      pullRequest: f.pullRequest
     });
     assert.equal(result.status, "blocked");
     assert.equal(result.code, "PR_MERGE_EVIDENCE_FETCH_FAILED");
@@ -165,8 +163,7 @@ test("fails closed when fetched refs do not match the platform snapshot", () => 
       cwd: f.caller,
       platformType: "mismatched-evidence-head-test",
       lastReviewedCommit: f.head,
-      pullRequest: f.pullRequest,
-      pathspecs: [":/"]
+      pullRequest: f.pullRequest
     });
     assert.equal(result.status, "failed");
     assert.equal(result.code, "PR_MERGE_FETCHED_HEAD_MISMATCH");
@@ -183,8 +180,7 @@ test("rejects an inconsistent reviewed identity before fetching", () => {
       cwd: f.caller,
       platformType: "invalid-evidence-identity-test",
       lastReviewedCommit: "f".repeat(40),
-      pullRequest: f.pullRequest,
-      pathspecs: [":/"]
+      pullRequest: f.pullRequest
     });
     assert.equal(result.status, "failed");
     assert.equal(result.code, "PR_MERGE_IDENTITY_INVALID");

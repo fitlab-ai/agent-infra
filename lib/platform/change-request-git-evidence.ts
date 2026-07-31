@@ -58,7 +58,6 @@ function resolveMaterializedReviewedHeadRelation(input: {
   platformType: string | null;
   lastReviewedCommit: string;
   pullRequest: PullRequestSnapshot;
-  pathspecs: string[];
 }): ReviewedHeadRelation {
   const identityFailure = validMergeIdentity(input.lastReviewedCommit, input.pullRequest);
   if (identityFailure) return identityFailure;
@@ -124,8 +123,7 @@ function resolveMaterializedReviewedHeadRelation(input: {
         gitRoot: evidenceRoot,
         comparisonHead,
         lastReviewedCommit: input.lastReviewedCommit,
-        pullRequest: input.pullRequest,
-        pathspecs: input.pathspecs
+        pullRequest: input.pullRequest
       });
     }
   } catch {

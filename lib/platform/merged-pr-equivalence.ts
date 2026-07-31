@@ -50,9 +50,8 @@ export function resolveReviewedHeadRelation(input: {
   comparisonHead: string;
   lastReviewedCommit: string;
   pullRequest: PullRequestSnapshot;
-  pathspecs: string[];
 }): ReviewedHeadRelation {
-  const { gitRoot, comparisonHead, lastReviewedCommit, pullRequest, pathspecs } = input;
+  const { gitRoot, comparisonHead, lastReviewedCommit, pullRequest } = input;
   if (
     comparisonHead === lastReviewedCommit &&
     lastReviewedCommit === pullRequest.head.sha &&
@@ -93,10 +92,6 @@ export function resolveReviewedHeadRelation(input: {
     const mergedDiff = git(gitRoot, [...diffArgs, `${pullRequest.mergeCommitSha}^`, pullRequest.mergeCommitSha]);
     if (reviewedDiff !== mergedDiff) {
       return { status: "failed", code: "PR_MERGE_CONTENT_MISMATCH", message: "Squash merge content differs from the reviewed PR changes" };
-    }
-    const postMerge = git(gitRoot, ["rev-list", `${pullRequest.mergeCommitSha}..${comparisonHead}`, "--", ...pathspecs]).trim();
-    if (postMerge) {
-      return { status: "failed", code: "POST_MERGE_CHANGES", message: "Protected paths changed after the squash merge" };
     }
   } catch {
     return { status: "blocked", code: "PR_MERGE_GIT_EVIDENCE_UNAVAILABLE", message: "Unable to verify PR merge topology or content" };

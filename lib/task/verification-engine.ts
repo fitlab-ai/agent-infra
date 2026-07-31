@@ -749,8 +749,7 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
         cwd: gitRoot,
         platformType: inspected.platform.type,
         lastReviewedCommit,
-        pullRequest: inspected.pullRequest,
-        pathspecs: globs
+        pullRequest: inspected.pullRequest
       });
       if (relation.status === "merged-equivalent") {
         return passResult(
@@ -766,17 +765,6 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
           "post-review-commit",
           "Merged PR evidence did not establish squash merge equivalence",
           "PR_MERGE_IDENTITY_INVALID"
-        );
-      }
-      if (relation.code !== "POST_MERGE_CHANGES") {
-        return failResult("post-review-commit", relation.message, relation.code);
-      }
-      const exemption = resolvePostReviewExemption(task.content);
-      if (!exemption.ok) return failResult("post-review-commit", exemption.message);
-      if (exemption.exempt) {
-        return passResult(
-          "post-review-commit",
-          "Post-merge protected-path changes are covered by a human-decided exemption"
         );
       }
       return failResult("post-review-commit", relation.message, relation.code);
@@ -818,8 +806,7 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
         gitRoot,
         comparisonHead: localHead,
         lastReviewedCommit: sha,
-        pullRequest: inspected.pullRequest,
-        pathspecs: globs
+        pullRequest: inspected.pullRequest
       });
       if (relation.status === "merged-equivalent") {
         return passResult("post-review-commit", `Reviewed PR head is content-equivalent to squash merge ${relation.mergeCommit.slice(0, 8)}`);

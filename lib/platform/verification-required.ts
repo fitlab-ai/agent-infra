@@ -6,7 +6,6 @@ import { hasPlatformCapability } from "./adapters.ts";
 import { inspectRequiredChecks } from "./pr-checks.ts";
 import { resolvePlatformContext } from "./context.ts";
 import { resolveReviewedHeadRelation } from "./merged-pr-equivalence.ts";
-import { loadPostReviewConfig, resolvePostReviewGlobs } from "../task/review-fingerprint.ts";
 
 const CHECK_TYPE = "required-checks";
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
@@ -60,8 +59,7 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
           gitRoot: context.gitRoot,
           comparisonHead: localHead,
           lastReviewedCommit: reviewedHead,
-          pullRequest: inspection.pullRequest,
-          pathspecs: context.pathspecs || [":/"]
+          pullRequest: inspection.pullRequest
         })
       : localHead === reviewedHead && localHead === prHead
         ? { status: "strict" }
@@ -108,7 +106,6 @@ export function check({ taskDir }: any, shared: any): any {
     localHead,
     inspection,
     prFlow,
-    gitRoot: shared.repoRoot,
-    pathspecs: resolvePostReviewGlobs({}, loadPostReviewConfig(shared.repoRoot))
+    gitRoot: shared.repoRoot
   }, shared);
 }
