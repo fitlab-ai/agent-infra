@@ -54,9 +54,14 @@ test("accepts an authoritative content-equivalent squash merge", () => {
   const f = fixture();
   try {
     assert.deepEqual(resolveReviewedHeadRelation({
-      gitRoot: f.root, localHead: f.merge, lastReviewedCommit: f.head,
+      gitRoot: f.root, comparisonHead: f.merge, lastReviewedCommit: f.head,
       pullRequest: f.pullRequest, pathspecs: [":/"]
-    }), { status: "merged-equivalent", reviewedHead: f.head, mergeCommit: f.merge });
+    }), {
+      status: "merged-equivalent",
+      reviewedHead: f.head,
+      mergeCommit: f.merge,
+      comparisonHead: f.merge
+    });
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -84,11 +89,16 @@ test("accepts a normalized squash snapshot supplied by a custom platform adapter
     assert.equal(inspected.ok, true);
     assert.deepEqual(resolveReviewedHeadRelation({
       gitRoot: f.root,
-      localHead: f.merge,
+      comparisonHead: f.merge,
       lastReviewedCommit: f.head,
       pullRequest: inspected.value!,
       pathspecs: [":/"]
-    }), { status: "merged-equivalent", reviewedHead: f.head, mergeCommit: f.merge });
+    }), {
+      status: "merged-equivalent",
+      reviewedHead: f.head,
+      mergeCommit: f.merge,
+      comparisonHead: f.merge
+    });
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }
@@ -101,7 +111,7 @@ test("fails closed for changed squash content and protected post-merge commits",
     writeCommit(changed.root, "base\ndifferent\n", "different squash");
     changed.pullRequest.mergeCommitSha = git(changed.root, ["rev-parse", "HEAD"]);
     const mismatch = resolveReviewedHeadRelation({
-      gitRoot: changed.root, localHead: changed.pullRequest.mergeCommitSha,
+      gitRoot: changed.root, comparisonHead: changed.pullRequest.mergeCommitSha,
       lastReviewedCommit: changed.head, pullRequest: changed.pullRequest, pathspecs: [":/"]
     });
     assert.equal(mismatch.status, "failed");
@@ -114,7 +124,7 @@ test("fails closed for changed squash content and protected post-merge commits",
   try {
     const localHead = writeCommit(later.root, "base\nreviewed\nlater\n", "later");
     const result = resolveReviewedHeadRelation({
-      gitRoot: later.root, localHead, lastReviewedCommit: later.head,
+      gitRoot: later.root, comparisonHead: localHead, lastReviewedCommit: later.head,
       pullRequest: later.pullRequest, pathspecs: [":/"]
     });
     assert.equal(result.status, "failed");
@@ -129,11 +139,49 @@ test("blocks when authoritative merge objects are missing", () => {
   try {
     f.pullRequest.base.sha = "f".repeat(40);
     const result = resolveReviewedHeadRelation({
-      gitRoot: f.root, localHead: f.merge, lastReviewedCommit: f.head,
+      gitRoot: f.root, comparisonHead: f.merge, lastReviewedCommit: f.head,
       pullRequest: f.pullRequest, pathspecs: [":/"]
     });
     assert.equal(result.status, "blocked");
     assert.equal(result.code, "PR_MERGE_OBJECT_MISSING");
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a merge commit outside authoritative target history", () => {
+  const f = fixture();
+  try {
+    const result = resolveReviewedHeadRelation({
+      gitRoot: f.root,
+      comparisonHead: f.base,
+      lastReviewedCommit: f.head,
+      pullRequest: f.pullRequest,
+      pathspecs: [":/"]
+    });
+    assert.equal(result.status, "failed");
+    assert.equal(result.code, "PR_MERGE_TARGET_MISMATCH");
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a two-parent merge topology", () => {
+  const f = fixture();
+  try {
+    git(f.root, ["reset", "--hard", f.base]);
+    git(f.root, ["merge", "--no-ff", "-qm", "merge", "feature"]);
+    const mergeCommit = git(f.root, ["rev-parse", "HEAD"]);
+    f.pullRequest.mergeCommitSha = mergeCommit;
+    const result = resolveReviewedHeadRelation({
+      gitRoot: f.root,
+      comparisonHead: mergeCommit,
+      lastReviewedCommit: f.head,
+      pullRequest: f.pullRequest,
+      pathspecs: [":/"]
+    });
+    assert.equal(result.status, "failed");
+    assert.equal(result.code, "PR_MERGE_TOPOLOGY_INVALID");
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

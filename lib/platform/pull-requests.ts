@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
@@ -9,7 +10,7 @@ import {
   registerPlatformCapabilities
 } from './adapters.ts';
 import type { PlatformChangeRequestSnapshot } from './adapters.ts';
-import { resolvePlatformContext } from './context.ts';
+import { parseGitHubRemote, resolvePlatformContext } from './context.ts';
 import { createGitHubClient } from './github-client.ts';
 import type { GitHubClient } from './github-client.ts';
 import { inspectPlatformIssue } from './issues.ts';
@@ -145,9 +146,108 @@ function inspectGitHubPullRequest(client: GitHubClient, repository: string, numb
     : { ok: false as const, error: { code: 'PR_IDENTITY_INVALID', message: 'Remote resource is not a valid pull request', retryable: false } };
 }
 
+function configuredGitRemotes(cwd: string): Array<{ name: string; url: string; repository: string }> {
+  try {
+    return execFileSync('git', ['remote'], {
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+    }).split(/\r?\n/).filter(Boolean).flatMap((name) => {
+      try {
+        const url = execFileSync('git', ['config', '--get', `remote.${name}.url`], {
+          cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+        }).trim();
+        const repository = parseGitHubRemote(url);
+        return repository ? [{ name, url, repository }] : [];
+      } catch {
+        return [];
+      }
+    });
+  } catch {
+    return [];
+  }
+}
+
+function rewriteGitHubRemote(remote: string, repository: string): string | null {
+  const match = remote.trim().match(
+    /^(https?:\/\/github\.com\/|ssh:\/\/(?:git@)?github\.com\/|git@github\.com:)[^/\s]+\/[^/\s]+(?:\.git)?$/i
+  );
+  return match ? `${match[1]}${repository}.git` : null;
+}
+
+function resolveGitHubChangeRequestGitEvidence({
+  cwd,
+  repository,
+  pullRequest
+}: {
+  cwd: string;
+  repository: string;
+  pullRequest: PullRequestSnapshot;
+}) {
+  if (
+    pullRequest.repository !== repository ||
+    pullRequest.base.repository !== repository ||
+    pullRequest.number <= 0
+  ) {
+    return {
+      ok: false as const,
+      error: {
+        code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE',
+        message: 'Pull request repository identity is inconsistent',
+        retryable: false
+      }
+    };
+  }
+  const reviewedHeadRef = `refs/pull/${pullRequest.number}/head`;
+  const targetHeadRef = `refs/heads/${pullRequest.base.ref}`;
+  const refValid = (ref: string) => {
+    try {
+      execFileSync('git', ['check-ref-format', ref], {
+        cwd, encoding: 'utf8', stdio: ['ignore', 'ignore', 'ignore']
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!refValid(reviewedHeadRef) || !refValid(targetHeadRef)) {
+    return {
+      ok: false as const,
+      error: {
+        code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE',
+        message: 'Pull request Git refs are invalid',
+        retryable: false
+      }
+    };
+  }
+
+  const remotes = configuredGitRemotes(cwd);
+  const exact = remotes
+    .filter((remote) => remote.repository === repository)
+    .sort((left, right) => Number(right.name === 'origin') - Number(left.name === 'origin') ||
+      left.name.localeCompare(right.name))[0];
+  const origin = remotes.find((remote) => remote.name === 'origin');
+  const remoteUrl = exact?.url || (origin ? rewriteGitHubRemote(origin.url, repository) : null);
+  if (!remoteUrl) {
+    return {
+      ok: false as const,
+      error: {
+        code: 'PR_MERGE_EVIDENCE_SOURCE_UNAVAILABLE',
+        message: `No GitHub remote can provide evidence for ${repository}`,
+        retryable: false
+      }
+    };
+  }
+  return {
+    ok: true as const,
+    value: { remoteUrl, reviewedHeadRef, targetHeadRef }
+  };
+}
+
 registerPlatformCapabilities('github', {
   inspectChangeRequest({ client, repository, number, cwd }) {
     return inspectGitHubPullRequest((client as GitHubClient | undefined) || createGitHubClient(), repository, number, cwd);
+  },
+  resolveChangeRequestGitEvidence(context) {
+    return resolveGitHubChangeRequestGitEvidence(context);
   }
 });
 
@@ -388,6 +488,7 @@ export {
   inspectGitHubPullRequest,
   inspectPlatformPullRequest,
   normalizePullRequest,
+  resolveGitHubChangeRequestGitEvidence,
   selectPullRequest,
   syncPlatformPullRequest
 };

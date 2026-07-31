@@ -18,6 +18,7 @@ import {
 import { check as checkPlatformSync } from "../platform/verification-sync.ts";
 import { check as checkRequiredChecks } from "../platform/verification-required.ts";
 import { inspectPlatformPullRequest } from "../platform/pull-requests.ts";
+import { resolveMaterializedReviewedHeadRelation } from "../platform/change-request-git-evidence.ts";
 import { resolveReviewedHeadRelation } from "../platform/merged-pr-equivalence.ts";
 import { resolveLocalReviewedCommitRelation } from "../git/reviewed-commit-equivalence.ts";
 import { parseTypedTaskFrontmatter } from "./frontmatter.ts";
@@ -685,8 +686,63 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
   }
 
   const task = loadTask(taskDir);
-  const content = fs.readFileSync(reviewArtifact.path!, "utf8");
+  if (!task.ok) return failResult("post-review-commit", task.message);
   const lastReviewedCommit = task.ok ? (task.metadata.last_reviewed_commit || "").trim() : "";
+  const globs = resolvePostReviewGlobs(config, loadPostReviewConfig(repoRoot));
+  const hasPullRequest = Number(task.metadata.pr_number) > 0;
+  let inspected: ReturnType<typeof inspectPlatformPullRequest> | null = null;
+  if (hasPullRequest) {
+    inspected = inspectPlatformPullRequest(task.metadata.id, { cwd: gitRoot });
+    if (!inspected.pullRequest) {
+      const message = inspected.error?.message || "PR merge snapshot is unavailable";
+      const code = inspected.error?.code || "PR_INSPECTION_INVALID";
+      return inspected.status === "blocked"
+        ? blockedResult("post-review-commit", message, code)
+        : failResult("post-review-commit", message, code);
+    }
+    if (
+      inspected.pullRequest.state === "closed" &&
+      inspected.pullRequest.mergedAt &&
+      inspected.pullRequest.mergeCommitSha
+    ) {
+      const relation = resolveMaterializedReviewedHeadRelation({
+        cwd: gitRoot,
+        platformType: inspected.platform.type,
+        lastReviewedCommit,
+        pullRequest: inspected.pullRequest,
+        pathspecs: globs
+      });
+      if (relation.status === "merged-equivalent") {
+        return passResult(
+          "post-review-commit",
+          `Reviewed PR head is content-equivalent to squash merge ${relation.mergeCommit.slice(0, 8)} on target ${relation.comparisonHead.slice(0, 8)}`
+        );
+      }
+      if (relation.status === "blocked") {
+        return blockedResult("post-review-commit", relation.message, relation.code);
+      }
+      if (relation.status === "strict") {
+        return failResult(
+          "post-review-commit",
+          "Merged PR evidence did not establish squash merge equivalence",
+          "PR_MERGE_IDENTITY_INVALID"
+        );
+      }
+      if (relation.code !== "POST_MERGE_CHANGES") {
+        return failResult("post-review-commit", relation.message, relation.code);
+      }
+      const exemption = resolvePostReviewExemption(task.content);
+      if (!exemption.ok) return failResult("post-review-commit", exemption.message);
+      if (exemption.exempt) {
+        return passResult(
+          "post-review-commit",
+          "Post-merge protected-path changes are covered by a human-decided exemption"
+        );
+      }
+      return failResult("post-review-commit", relation.message, relation.code);
+    }
+  }
+
   const baselineSource = resolvePostReviewBaseline({
     gitRoot,
     lastReviewedCommit,
@@ -697,7 +753,6 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
   }
 
   const sha = baselineSource.sha;
-  const globs = resolvePostReviewGlobs(config, loadPostReviewConfig(repoRoot));
   let commits;
   try {
     const out = execFileSync("git", ["-C", gitRoot, "rev-list", `${sha}..HEAD`, "--", ...globs], { encoding: "utf8" });
@@ -717,13 +772,11 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
     return blockedResult("post-review-commit", "Unable to resolve the local HEAD");
   }
 
-  const hasPullRequest = task.ok && Number(task.metadata.pr_number) > 0;
   if (hasPullRequest) {
-    const inspected = inspectPlatformPullRequest(task.metadata.id, { cwd: gitRoot });
-    if (inspected.pullRequest) {
+    if (inspected?.pullRequest) {
       const relation = resolveReviewedHeadRelation({
         gitRoot,
-        localHead,
+        comparisonHead: localHead,
         lastReviewedCommit: sha,
         pullRequest: inspected.pullRequest,
         pathspecs: globs
@@ -732,10 +785,8 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
         return passResult("post-review-commit", `Reviewed PR head is content-equivalent to squash merge ${relation.mergeCommit.slice(0, 8)}`);
       }
       if (relation.status === "blocked") {
-        return blockedResult("post-review-commit", relation.message);
+        return blockedResult("post-review-commit", relation.message, relation.code);
       }
-    } else if (inspected.status === "blocked") {
-      return blockedResult("post-review-commit", inspected.error?.message || "PR merge snapshot is unavailable");
     }
   } else if (commits.length === 1) {
     const relation = resolveLocalReviewedCommitRelation({
@@ -756,15 +807,9 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
     }
   }
 
-  let exempt = false;
-  try {
-    exempt = task.ok && parseLedger(task.content).some(
-      (row) => row.stage === POST_REVIEW_COMMIT_STAGE && row.status === "human-decided"
-    );
-  } catch {
-    return failResult("post-review-commit", "Invalid disagreement ledger");
-  }
-  if (exempt) {
+  const exemption = resolvePostReviewExemption(task.content);
+  if (!exemption.ok) return failResult("post-review-commit", exemption.message);
+  if (exemption.exempt) {
     return passResult(
       "post-review-commit",
       `${commits.length} post-review commit(s) covered by a human-decided exemption`
@@ -775,6 +820,21 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
     "post-review-commit",
     `${commits.length} commit(s) to code/rule paths after reviewed commit ${sha.slice(0, 8)}; re-run review-code or record a human-decided exemption`
   );
+}
+
+function resolvePostReviewExemption(content: string):
+  | { ok: true; exempt: boolean }
+  | { ok: false; message: string } {
+  try {
+    return {
+      ok: true,
+      exempt: parseLedger(content).some(
+        (row) => row.stage === POST_REVIEW_COMMIT_STAGE && row.status === "human-decided"
+      )
+    };
+  } catch {
+    return { ok: false, message: "Invalid disagreement ledger" };
+  }
 }
 
 function checkReviewFact({ taskDir, artifactFile }: any): any {

@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 import type { PullRequestSnapshot } from "./pull-requests.ts";
 
@@ -6,11 +6,21 @@ const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
 type ReviewedHeadRelation =
   | { status: "strict"; reviewedHead: string }
-  | { status: "merged-equivalent"; reviewedHead: string; mergeCommit: string }
+  | {
+      status: "merged-equivalent";
+      reviewedHead: string;
+      mergeCommit: string;
+      comparisonHead: string;
+    }
   | { status: "failed" | "blocked"; code: string; message: string };
 
 function git(cwd: string, args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
 }
 
 function commitExists(gitRoot: string, sha: string): boolean {
@@ -22,27 +32,58 @@ function commitExists(gitRoot: string, sha: string): boolean {
   }
 }
 
+function isAncestor(gitRoot: string, ancestor: string, descendant: string):
+  | { status: "yes" | "no" }
+  | { status: "error" } {
+  const result = spawnSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
+    cwd: gitRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  if (result.status === 0) return { status: "yes" };
+  if (result.status === 1) return { status: "no" };
+  return { status: "error" };
+}
+
 export function resolveReviewedHeadRelation(input: {
   gitRoot: string;
-  localHead: string;
+  comparisonHead: string;
   lastReviewedCommit: string;
   pullRequest: PullRequestSnapshot;
   pathspecs: string[];
 }): ReviewedHeadRelation {
-  const { gitRoot, localHead, lastReviewedCommit, pullRequest, pathspecs } = input;
-  if (localHead === lastReviewedCommit && lastReviewedCommit === pullRequest.head.sha) {
+  const { gitRoot, comparisonHead, lastReviewedCommit, pullRequest, pathspecs } = input;
+  if (
+    comparisonHead === lastReviewedCommit &&
+    lastReviewedCommit === pullRequest.head.sha &&
+    !(pullRequest.state === "closed" && pullRequest.mergedAt && pullRequest.mergeCommitSha)
+  ) {
     return { status: "strict", reviewedHead: lastReviewedCommit };
   }
   if (pullRequest.state !== "closed" || !pullRequest.mergedAt || !pullRequest.mergeCommitSha ||
       lastReviewedCommit !== pullRequest.head.sha) {
     return { status: "failed", code: "PR_MERGE_IDENTITY_INVALID", message: "PR merge identity does not match the reviewed head" };
   }
-  const shas = [pullRequest.base.sha, pullRequest.head.sha, pullRequest.mergeCommitSha, localHead];
+  const shas = [pullRequest.base.sha, pullRequest.head.sha, pullRequest.mergeCommitSha, comparisonHead];
   if (shas.some((sha) => !SHA_PATTERN.test(sha) || !commitExists(gitRoot, sha))) {
     return { status: "blocked", code: "PR_MERGE_OBJECT_MISSING", message: "Required PR merge Git objects are unavailable" };
   }
+  const ancestry = isAncestor(gitRoot, pullRequest.mergeCommitSha, comparisonHead);
+  if (ancestry.status === "no") {
+    return {
+      status: "failed",
+      code: "PR_MERGE_TARGET_MISMATCH",
+      message: "PR merge commit is not in the authoritative target history"
+    };
+  }
+  if (ancestry.status === "error") {
+    return {
+      status: "blocked",
+      code: "PR_MERGE_GIT_EVIDENCE_UNAVAILABLE",
+      message: "Unable to verify PR merge ancestry"
+    };
+  }
   try {
-    git(gitRoot, ["merge-base", "--is-ancestor", pullRequest.mergeCommitSha, localHead]);
     const parents = git(gitRoot, ["rev-list", "--parents", "-n", "1", pullRequest.mergeCommitSha]).trim().split(/\s+/);
     if (parents.length !== 2) {
       return { status: "failed", code: "PR_MERGE_TOPOLOGY_INVALID", message: "PR merge commit is not a single-parent squash commit" };
@@ -53,7 +94,7 @@ export function resolveReviewedHeadRelation(input: {
     if (reviewedDiff !== mergedDiff) {
       return { status: "failed", code: "PR_MERGE_CONTENT_MISMATCH", message: "Squash merge content differs from the reviewed PR changes" };
     }
-    const postMerge = git(gitRoot, ["rev-list", `${pullRequest.mergeCommitSha}..${localHead}`, "--", ...pathspecs]).trim();
+    const postMerge = git(gitRoot, ["rev-list", `${pullRequest.mergeCommitSha}..${comparisonHead}`, "--", ...pathspecs]).trim();
     if (postMerge) {
       return { status: "failed", code: "POST_MERGE_CHANGES", message: "Protected paths changed after the squash merge" };
     }
@@ -63,7 +104,8 @@ export function resolveReviewedHeadRelation(input: {
   return {
     status: "merged-equivalent",
     reviewedHead: lastReviewedCommit,
-    mergeCommit: pullRequest.mergeCommitSha
+    mergeCommit: pullRequest.mergeCommitSha,
+    comparisonHead
   };
 }
 

@@ -1,7 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
-import { normalizePullRequest, selectPullRequest } from '../../../lib/platform/pull-requests.ts';
+import {
+  normalizePullRequest,
+  resolveGitHubChangeRequestGitEvidence,
+  selectPullRequest
+} from '../../../lib/platform/pull-requests.ts';
 
 const remote = (number: number, head = 'feature', base = 'main') => ({
   number,
@@ -44,4 +52,40 @@ test('PR selection fails closed for zero or multiple exact head/base matches', (
   });
   assert.equal(selectPullRequest([], 'o/r', 'feature', 'main').status, 'missing');
   assert.equal(selectPullRequest([remote(1), remote(2)], 'o/r', 'feature', 'main').status, 'ambiguous');
+});
+
+test('GitHub evidence prefers an exact upstream remote', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'github-evidence-'));
+  try {
+    assert.equal(spawnSync('git', ['init', '-q'], { cwd: root }).status, 0);
+    assert.equal(spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fork/r.git'], { cwd: root }).status, 0);
+    assert.equal(spawnSync('git', ['remote', 'add', 'upstream', 'https://github.com/o/r.git'], { cwd: root }).status, 0);
+    const pullRequest = normalizePullRequest(remote(7), 'o/r')!;
+    assert.deepEqual(resolveGitHubChangeRequestGitEvidence({
+      cwd: root, repository: 'o/r', pullRequest
+    }), {
+      ok: true,
+      value: {
+        remoteUrl: 'https://github.com/o/r.git',
+        reviewedHeadRef: 'refs/pull/7/head',
+        targetHeadRef: 'refs/heads/main'
+      }
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('GitHub evidence preserves origin transport when rewriting a fork remote', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'github-evidence-'));
+  try {
+    assert.equal(spawnSync('git', ['init', '-q'], { cwd: root }).status, 0);
+    assert.equal(spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fork/r.git'], { cwd: root }).status, 0);
+    const pullRequest = normalizePullRequest(remote(7), 'o/r')!;
+    assert.equal(resolveGitHubChangeRequestGitEvidence({
+      cwd: root, repository: 'o/r', pullRequest
+    }).value?.remoteUrl, 'git@github.com:o/r.git');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

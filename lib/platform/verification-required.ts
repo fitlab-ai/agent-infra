@@ -58,7 +58,7 @@ export function evaluateRequiredChecks(context: any, shared: any): any {
     context.gitRoot && inspection.pullRequest?.head
       ? resolveReviewedHeadRelation({
           gitRoot: context.gitRoot,
-          localHead,
+          comparisonHead: localHead,
           lastReviewedCommit: reviewedHead,
           pullRequest: inspection.pullRequest,
           pathspecs: context.pathspecs || [":/"]
