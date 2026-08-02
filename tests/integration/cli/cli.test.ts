@@ -797,7 +797,7 @@ test("agent-infra update migrates legacy sandbox client tools to canonical state
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
     );
 
-    assert.match(output, /Updated \.agents\/\.airc\.json/);
+    assert.match(output, /Updated \.agents[\\/]\.airc\.json/);
     assert.deepEqual(updated.sandbox.tools, ["agent-infra"]);
     assert.ok(updated.agentClients.every(
       (entry: { installInSandbox: boolean }) => entry.installInSandbox
