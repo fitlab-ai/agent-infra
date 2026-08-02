@@ -2,17 +2,35 @@
   "platform": {
     "type": "github"
   },
+  "agentClients": [
+    {
+      "id": "claude-code",
+      "enabled": true,
+      "installInSandbox": true
+    },
+    {
+      "id": "codex",
+      "enabled": true,
+      "installInSandbox": true
+    },
+    {
+      "id": "gemini-cli",
+      "enabled": true,
+      "installInSandbox": true
+    },
+    {
+      "id": "opencode",
+      "enabled": true,
+      "installInSandbox": true
+    }
+  ],
   "sandbox": {
     "engine": null,
     "runtimes": [
       "node22"
     ],
     "tools": [
-      "agent-infra",
-      "claude-code",
-      "codex",
-      "gemini-cli",
-      "opencode"
+      "agent-infra"
     ],
     "refreshIntervalDays": 7,
     "dockerfile": null,

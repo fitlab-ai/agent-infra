@@ -26,7 +26,7 @@ function readGeneratedManifest(target: string) {
 function readGeneratedCustomTUIContract(target: string) {
   const generated = fs.readFileSync(filePath(target), "utf8");
   const match = generated.match(
-    /const CUSTOM_TUI_CONTRACT = (\{[\s\S]*?\n\});\nconst AGENT_INFRA_SANDBOX_TOOL/
+    /const CUSTOM_TUI_CONTRACT = (\{[\s\S]*?\n\});\n\/\/ Add a new identifier/
   );
   assert.ok(match, `expected generated custom TUI contract in ${target}`);
   return JSON.parse(match[1]!);
@@ -57,10 +57,11 @@ test("generated standalone scripts project the Registry manifest", () => {
   }
 });
 
-test("legacy defaults contain the Registry client IDs after agent-infra", () => {
+test("canonical defaults keep client installation state outside sandbox tools", () => {
+  assert.deepEqual(defaults.sandbox.tools, ["agent-infra"]);
   assert.deepEqual(
-    defaults.sandbox.tools,
-    ["agent-infra", ...createAgentClientManifest().map((entry) => entry.id)]
+    defaults.agentClients.map((entry) => entry.id),
+    createAgentClientManifest().map((entry) => entry.id)
   );
 });
 

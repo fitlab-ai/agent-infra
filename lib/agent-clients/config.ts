@@ -149,6 +149,7 @@ function projectLegacyTuis(
 
 type SandboxProjection = Readonly<{
   installed: Readonly<Record<AgentClientId, boolean>>;
+  clientSignals: ReadonlySet<AgentClientId>;
   remainingTools: readonly string[] | undefined;
 }>;
 
@@ -161,6 +162,7 @@ function projectLegacySandbox(
       installed: Object.fromEntries(
         AGENT_CLIENT_IDS.map((id) => [id, true])
       ) as Readonly<Record<AgentClientId, boolean>>,
+      clientSignals: new Set<AgentClientId>(),
       remainingTools: Array.isArray(value) ? [] : undefined
     };
   }
@@ -183,6 +185,7 @@ function projectLegacySandbox(
     installed: Object.fromEntries(
       AGENT_CLIENT_IDS.map((id) => [id, installed.has(id)])
     ) as Readonly<Record<AgentClientId, boolean>>,
+    clientSignals: installed,
     remainingTools
   };
 }
@@ -240,8 +243,8 @@ function normalizeAgentClients(
     }
   }
   if (hasLegacySandboxTools) {
-    for (const id of AGENT_CLIENT_IDS) {
-      if (state[id].installInSandbox !== sandboxProjection.installed[id]) {
+    for (const id of sandboxProjection.clientSignals) {
+      if (!state[id].installInSandbox) {
         fail('LEGACY_CONFLICT', 'sandbox.tools');
       }
     }
@@ -256,7 +259,7 @@ function normalizeAgentClients(
       : undefined,
     removeLegacyTuis: hasLegacyTuis,
     changed: hasLegacyTuis
-      || hasLegacySandboxTools
+      || sandboxProjection.clientSignals.size > 0
       || !sameCanonicalOrder(input.agentClients),
     diagnostics
   };

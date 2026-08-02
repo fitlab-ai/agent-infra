@@ -152,10 +152,10 @@ test("syncTemplates: switching tuis cleans up previously written owned files", a
     syncTemplates(projectRoot, templateRoot);
     assert.ok(fs.existsSync(path.join(projectRoot, ".gemini/commands/demo/update-agent-infra.toml")));
 
-    // Flip to disable gemini-cli.
+    // Flip canonical project integration state to disable gemini-cli.
     const cfgPath = path.join(projectRoot, ".agents/.airc.json");
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-    cfg.tuis = ["claude-code"];
+    cfg.agentClients = canonicalAgentClients(["claude-code"]);
     fs.writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
 
     const secondReport = syncTemplates(projectRoot, templateRoot);
@@ -350,7 +350,7 @@ test("syncTemplates: disabling a client preserves modified and unknown managed f
     writeFile(projectRoot, ".gemini/commands/user-owned.toml", "user owned\n");
     const cfgPath = path.join(projectRoot, ".agents/.airc.json");
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-    cfg.tuis = [];
+    cfg.agentClients = canonicalAgentClients([]);
     fs.writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
 
     const report = syncTemplates(projectRoot, templateRoot);

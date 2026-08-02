@@ -19,11 +19,20 @@ import type {
 
 type AgentClientCapabilities = AgentClientCapabilityMap;
 
+type AgentClientSeedCommand = Readonly<{
+  templates: Readonly<{
+    en: string;
+    'zh-CN': string;
+  }>;
+  target: string;
+}>;
+
 type AgentClientProjectDescriptor = Readonly<{
   ownedPathPrefixes: readonly string[];
   managed: readonly string[];
   merged: readonly string[];
   ejected: readonly string[];
+  seedCommands: readonly AgentClientSeedCommand[];
 }>;
 
 type AgentClientAdapter = Readonly<{
@@ -252,6 +261,47 @@ function defineAgentClientAdapter(
     seenAssets.set(asset, category);
   }
 
+  if (!Array.isArray(candidate.project.seedCommands)) {
+    throw new Error(`Agent Client '${candidate.id}' has invalid seed commands`);
+  }
+  const seedTargets = new Set<string>();
+  const seedCommands = candidate.project.seedCommands.map((seed) => {
+    if (!seed || typeof seed !== 'object') {
+      throw new Error(`Agent Client '${candidate.id}' has an invalid seed command`);
+    }
+    const placeholders = [
+      ...seed.target.matchAll(/\$\{([^}]+)\}/g)
+    ].map((match) => match[1]);
+    const targetProbe = seed.target.replaceAll('${projectName}', 'project');
+    if (
+      placeholders.some((placeholder) => placeholder !== 'projectName')
+      || targetProbe.includes('${')
+      || !isProjectRelativeLiteral(targetProbe)
+      || !paths.some((prefix) =>
+        targetProbe === prefix.slice(0, -1) || targetProbe.startsWith(prefix)
+      )
+      || seedTargets.has(seed.target)
+    ) {
+      throw new Error(
+        `Agent Client '${candidate.id}' has invalid seed target '${String(seed.target)}'`
+      );
+    }
+    if (
+      !seed.templates
+      || typeof seed.templates.en !== 'string'
+      || typeof seed.templates['zh-CN'] !== 'string'
+      || !isProjectRelativeLiteral(seed.templates.en)
+      || !isProjectRelativeLiteral(seed.templates['zh-CN'])
+    ) {
+      throw new Error(`Agent Client '${candidate.id}' has invalid seed templates`);
+    }
+    seedTargets.add(seed.target);
+    return Object.freeze({
+      templates: Object.freeze({ ...seed.templates }),
+      target: seed.target
+    });
+  });
+
   if (!candidate.sandbox || typeof candidate.sandbox.createTool !== 'function') {
     throw new Error(`Agent Client '${candidate.id}' requires a sandbox descriptor`);
   }
@@ -296,7 +346,8 @@ function defineAgentClientAdapter(
     capabilities: Object.freeze(capabilities),
     project: Object.freeze({
       ownedPathPrefixes: Object.freeze(paths),
-      ...projectAssets
+      ...projectAssets,
+      seedCommands: Object.freeze(seedCommands)
     }),
     sandbox: Object.freeze({ createTool, aliases, hooks })
   });
@@ -308,5 +359,6 @@ export type {
   AgentClientCapabilities,
   AgentClientManifestEntry,
   AgentClientProjectDescriptor,
+  AgentClientSeedCommand,
   AgentClientRegistry
 };

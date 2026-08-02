@@ -17,7 +17,14 @@ const geminiCliAdapter = defineAgentClientAdapter({
     ownedPathPrefixes: ['.gemini/'],
     managed: ['.gemini/commands/'],
     merged: ['.gemini/settings.json'],
-    ejected: []
+    ejected: [],
+    seedCommands: [{
+      templates: {
+        en: '.gemini/commands/_project_/update-agent-infra.en.toml',
+        'zh-CN': '.gemini/commands/_project_/update-agent-infra.zh-CN.toml'
+      },
+      target: '.gemini/commands/${projectName}/update-agent-infra.toml'
+    }]
   },
   sandbox: {
     createTool: ({ home }) => ({

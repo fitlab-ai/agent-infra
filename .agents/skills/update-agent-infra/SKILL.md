@@ -43,7 +43,7 @@ node .agents/skills/update-agent-infra/scripts/sync-templates.js
 - `managed.conflicts`：来源未知、双边修改或平台切换时无法证明官方所有权的 guarded managed 冲突；必须逐项展示 target、reason 与三方哈希
 - `managed.removed`：被删除的 managed 文件（包括模板迁移时移除的旧路径）
 - `managed.skippedPlatform`：因归属其他平台而被跳过的 managed / merged 条目
-- `managed.skippedTUI`：因 `tuis` 中未启用对应内建 TUI 而被跳过的 managed / merged 条目（落在同一路径前缀下的 customTUI 命令文件会被保留）
+- `managed.skippedTUI`：因对应内建 Agent Client 的 `agentClients[].enabled` 为 `false` 而被跳过的 managed / merged 条目（旧 `tuis` 仅用于迁移；落在同一路径前缀下的 customTUI 命令文件会被保留）
 - `merged.pending`：需要 AI 处理的 merged 文件列表
   - 每项包含 `target`（项目中的目标路径）和 `template`（模板根目录下的相对路径）
 - `registryAdded`：新增的文件注册条目

@@ -218,37 +218,38 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 `ejected` 条目支持字面路径或 glob，匹配规则与 `merged` 相同。
 
-## 内建 TUI 选择
+## Agent Client 配置
 
-`.agents/.airc.json` 顶层 `tuis` 数组用于决定 agent-infra 应当为哪些内建 TUI（`claude-code`、`codex`、`gemini-cli`、`opencode`）安装并维护命令文件。
+`.agents/.airc.json` 顶层 `agentClients` 数组用于配置全部四个内建客户端（`claude-code`、`codex`、`gemini-cli`、`opencode`）。规范化后的每个条目包含三个字段：
 
-| 取值 | 含义 |
+| 字段 | 含义 |
 |------|------|
-| `tuis` 缺失或为 `null` | 启用全部四个内建 TUI（向后兼容默认，适用于本字段引入之前的 `.airc.json`） |
-| `tuis: []` | 不维护任何内建 TUI。适用于只依赖 `customTUIs`、不需要安装任何内建命令文件的项目 |
-| `tuis: [<子集>]` | 仅维护列出的 TUI；未知 id 会被忽略 |
+| `id` | 内建 Agent Client id。规范数组为每个内建客户端保留且仅保留一个条目。 |
+| `enabled` | agent-infra 是否写入并维护该客户端的项目集成与种子命令。 |
+| `installInSandbox` | 沙箱镜像是否安装该客户端 CLI；此字段与 `enabled` 相互独立。 |
 
-`ai init` 会通过交互式多选询问该字段：
+无需手工编辑 JSON，可使用：
 
-- 直接回车 = 接受默认值（全部内建 TUI 启用）。
-- 输入逗号分隔的编号或 id（如 `1,3` 或 `claude-code,opencode`）= 只保留子集。
-- 输入 `none` = 明确不启用任何内建 TUI（通常配合后续在 `customTUIs` 添加条目使用）。
-- 非法输入（重复、超界、未知 id、纯空白）会让 init 以非零退出码终止。
+```bash
+ai agent-client list
+ai agent-client status
+ai agent-client enable codex
+ai agent-client disable gemini-cli
+ai agent-client configure
+```
 
-### 取消某个 TUI 的副作用
+`enable` 和 `disable` 只修改 `enabled`；`configure` 同时编辑两个维度。`ai init` 会询问启用哪些客户端，直接回车会保留界面展示的默认值。所有客户端的 `installInSandbox` 默认均为 `true`。
 
-通过 `ai init` 或手工编辑 `.airc.json` 取消某个内建 TUI 后，下一次 `ai update` / `update-agent-infra` 会：
+旧 `tuis` 字段和 `sandbox.tools` 中的内建客户端 id 仅作为迁移输入。下一次写配置的命令会将其转换为规范 `agentClients` 数组并移除旧字段。若规范配置与旧配置冲突，命令会在修改文件前停止，要求显式解决冲突。
 
-- 跳过该 TUI 的 seed 命令文件写入（例如 `.gemini/commands/<project>/update-agent-infra.toml`）；
-- 在回填 `files.managed` / `files.merged` 时跳过该 TUI owned 的默认条目；
-- **物理清理**该 TUI owned 路径前缀（`.claude/`、`.codex/`、`.gemini/`、`.opencode/`）下的已有文件——清理列表会出现在 `report.managed.removed`，与切换 `platform` 时的清理行为一致。
+### 取消 Agent Client 的副作用
 
-若希望保留某个具体文件，把它加入 `files.ejected`：被 ejected 的、属于已取消 TUI 的条目会保持原状，sync 不会重新创建也不会删除。
+取消某个内建客户端后，协调流程会停止维护其种子命令和 owned 注册项。未修改的生成种子文件可以被删除；本地修改过的种子文件会受到保护并进入报告。`files.ejected` 中的文件仍由项目所有并会被保留。
 
 ### 与其他配置字段的关系
 
-- `tuis` 控制 **agent-infra 写入与维护哪些 TUI 的命令文件**，与 `sandbox.tools`（控制**沙箱镜像里安装哪些 CLI**）相互独立。两者互不影响；`sandbox.tools` 的说明见 Sandbox 一节。
-- `tuis` 与 `customTUIs`（见下）相互独立。取消某个内建 TUI 时 customTUI 命令文件不会被清理，即便 customTUI 的 `dir` 落在该 TUI 的 owned 前缀下（例如 `dir: ".codex/commands"` 的 customTUI 在 `codex` 被取消时仍会保留）。
+- `sandbox.tools` 现在只列出 `agent-infra` 和自定义工具等非客户端工具。内建客户端的安装状态由 `agentClients[].installInSandbox` 表达。
+- `agentClients` 与 `customTUIs`（见下）相互独立。即使自定义 TUI 目录落在已取消的内建客户端路径前缀下，其命令文件也会被保留。
 
 ## 自定义 TUI 配置
 
@@ -300,7 +301,7 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 ## 沙箱自定义工具（Sandbox Custom Tools）
 
-`customTUIs` 只负责生成 slash-command 文件，**不影响沙箱镜像**。如果要把一个非 npm 分发的 CLI 或工具（pip / cargo / curl 脚本 / 裸二进制）装进沙箱镜像、并 live-mount 它的凭证目录，需要在 `.agents/.airc.json` 的 `sandbox.customTools` 中声明。内建 sandbox 工具（`claude-code` / `codex` / `opencode` / `gemini-cli` / `agent-infra`）行为保持不变；其中 `agent-infra` 只提供沙箱内 `ai` / `agent-infra` CLI，不属于 `tuis` 或 `customTUIs` 配置。
+`customTUIs` 只负责生成 slash-command 文件，**不影响沙箱镜像**。如果要把一个非 npm 分发的 CLI 或工具（pip / cargo / curl 脚本 / 裸二进制）装进沙箱镜像、并 live-mount 它的凭证目录，需要在 `.agents/.airc.json` 的 `sandbox.customTools` 中声明。内建 Agent Client 按 `agentClients[].installInSandbox` 安装；`agent-infra` 仍是 `sandbox.tools` 中的非客户端条目，只提供沙箱内的 `ai` / `agent-infra` CLI。
 
 ### 必填字段
 

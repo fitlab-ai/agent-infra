@@ -67,6 +67,7 @@ type SyncTemplatesReport = {
 };
 type SyncTemplatesModule = {
   syncTemplates(projectRoot: string, templateRootOverride?: string): SyncTemplatesReport;
+  normalizeAgentClientConfig(input: Record<string, unknown>): Record<string, unknown>;
 };
 type PlatformSyncModule = {
   getDefaults(): {

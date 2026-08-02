@@ -51,7 +51,7 @@ The script outputs JSON to stdout. Parse and record the report.
 - `managed.conflicts`: guarded managed files with unknown origin, two-sided changes, or ownership that cannot be proven during a platform switch; list each target, reason, and three-way hash
 - `managed.removed`: deleted managed files (including old paths removed during template migrations)
 - `managed.skippedPlatform`: managed / merged entries skipped because they belong to a different platform
-- `managed.skippedTUI`: managed / merged entries skipped because they are owned by a built-in TUI that is disabled in `tuis` (customTUI command files under the same path prefix are preserved)
+- `managed.skippedTUI`: managed / merged entries skipped because they are owned by a built-in Agent Client whose `agentClients[].enabled` is `false` (legacy `tuis` is migration-only; customTUI command files under the same path prefix are preserved)
 - `merged.pending`: list of merged files for AI to process
   - Each item has `target` (project-relative path) and `template` (template-root-relative path)
 - `registryAdded`: newly added file registry entries

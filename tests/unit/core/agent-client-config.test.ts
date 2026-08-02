@@ -254,6 +254,26 @@ test('canonical and present legacy signals must be equivalent', () => {
   );
 });
 
+test('canonical config preserves non-client sandbox tools without treating them as legacy client signals', () => {
+  const result = normalizeAgentClients({
+    agentClients: canonical(['codex'], ['claude-code']),
+    sandbox: { tools: ['agent-infra', 'custom-tool'] }
+  });
+
+  assert.equal(result.source, 'canonical');
+  assert.deepEqual(result.canonical, canonical(['codex'], ['claude-code']));
+  assert.deepEqual(result.remainingSandboxTools, ['agent-infra', 'custom-tool']);
+  assert.equal(result.changed, false);
+
+  assert.equal(
+    errorCode(() => normalizeAgentClients({
+      agentClients: canonical(['codex'], ['claude-code']),
+      sandbox: { tools: ['agent-infra', 'codex'] }
+    })),
+    'LEGACY_CONFLICT'
+  );
+});
+
 test('invalid canonical input never falls back to legacy values', () => {
   assert.equal(
     errorCode(() => normalizeAgentClients({

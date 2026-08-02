@@ -6,6 +6,15 @@ import path from "node:path";
 import os from "node:os";
 
 import { CLI_PATH, cliArgs } from "../../helpers.ts";
+import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
+
+function canonical(enabled: readonly string[]) {
+  return AGENT_CLIENT_IDS.map((id) => ({
+    id,
+    enabled: enabled.includes(id),
+    installInSandbox: true
+  }));
+}
 
 function makeProject(tmpDir: string, config: Record<string, unknown>) {
   fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
@@ -46,6 +55,7 @@ test("agent-infra update without tuis field refreshes all built-in TUI seeds (ba
     const updated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
     // Update must NOT auto-write a default `tuis` field (Q7: read-only idempotency).
     assert.equal("tuis" in updated, false, "update must not auto-create tuis field for legacy configs");
+    assert.deepEqual(updated.agentClients, canonical(AGENT_CLIENT_IDS));
     // All built-in TUI owned paths still get registered.
     assert.ok(updated.files.managed.includes(".claude/commands/"));
     assert.ok(updated.files.managed.includes(".gemini/commands/"));
@@ -79,8 +89,8 @@ test("agent-infra update with subset tuis only refreshes enabled TUI seeds", () 
     assert.ok(!fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
 
     const updated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    // tuis field is preserved unchanged.
-    assert.deepEqual(updated.tuis, ["claude-code"]);
+    assert.equal("tuis" in updated, false);
+    assert.deepEqual(updated.agentClients, canonical(["claude-code"]));
     // Disabled-TUI owned default paths are NOT added to managed registry.
     assert.ok(!updated.files.managed.includes(".gemini/commands/"));
     assert.ok(!updated.files.managed.includes(".opencode/commands/"));
@@ -116,14 +126,15 @@ test("agent-infra update with tuis: [] installs no built-in seeds and registers 
     assert.ok(!fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
 
     const updated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    assert.deepEqual(updated.tuis, [], "tuis: [] must be preserved verbatim, not auto-backfilled to all");
+    assert.equal("tuis" in updated, false);
+    assert.deepEqual(updated.agentClients, canonical([]));
     // No built-in TUI owned default paths registered.
     assert.ok(!updated.files.managed.includes(".claude/commands/"));
     assert.ok(!updated.files.managed.includes(".gemini/commands/"));
     assert.ok(!updated.files.managed.includes(".opencode/commands/"));
     assert.ok(!updated.files.managed.includes(".codex/hooks.json"));
     // Next-step hint points to customTUIs configuration.
-    assert.match(output, /No built-in TUI enabled/);
+    assert.match(output, /No Agent Client project integration enabled/);
     assert.match(output, /Configure "customTUIs"/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -150,7 +161,8 @@ test("agent-infra update is idempotent: second run does not change tuis or dupli
 
     assert.equal(afterFirst, afterSecond, "second update must be a no-op");
     const cfg = JSON.parse(afterSecond);
-    assert.deepEqual(cfg.tuis, ["claude-code", "opencode"]);
+    assert.equal("tuis" in cfg, false);
+    assert.deepEqual(cfg.agentClients, canonical(["claude-code", "opencode"]));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

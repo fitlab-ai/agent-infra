@@ -141,7 +141,7 @@ ai init
 # or: agent-infra init
 ```
 
-The CLI collects project metadata, installs the `update-agent-infra` seed command for all supported AI TUIs, and generates `.agents/.airc.json`.
+The CLI collects project metadata, lets you select the enabled Agent Clients, installs their `update-agent-infra` seed commands, and generates `.agents/.airc.json`.
 
 > `ai` is a shorthand for `agent-infra`. Both commands are equivalent.
 
@@ -159,6 +159,16 @@ Open the project in any AI TUI and run `update-agent-infra`:
 This detects the packaged template version and renders all managed files. The same command is used both for first-time setup and for future template upgrades.
 
 ## Core Commands
+
+Manage the four built-in Agent Clients independently from the project lifecycle:
+
+```bash
+ai agent-client list
+ai agent-client status
+ai agent-client enable codex
+ai agent-client disable gemini-cli
+ai agent-client configure
+```
 
 The most-used lifecycle commands, in delivery order. The command prefix varies by TUI (`/skill` in Claude Code/OpenCode, `$skill` in Codex, `/{{project}}:skill` in Gemini CLI); the workflow semantics stay the same.
 

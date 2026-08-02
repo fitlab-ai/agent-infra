@@ -17,7 +17,14 @@ const claudeCodeAdapter = defineAgentClientAdapter({
     ownedPathPrefixes: ['.claude/'],
     managed: ['.claude/commands/'],
     merged: ['.claude/settings.json'],
-    ejected: []
+    ejected: [],
+    seedCommands: [{
+      templates: {
+        en: '.claude/commands/update-agent-infra.en.md',
+        'zh-CN': '.claude/commands/update-agent-infra.zh-CN.md'
+      },
+      target: '.claude/commands/update-agent-infra.md'
+    }]
   },
   sandbox: {
     createTool: ({ home, project }) => ({

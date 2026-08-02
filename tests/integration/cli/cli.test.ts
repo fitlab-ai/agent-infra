@@ -213,7 +213,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.deepEqual(config.sandbox, {
       engine: DEFAULT_SANDBOX_ENGINE,
       runtimes: ["node22"],
-      tools: ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"],
+      tools: ["agent-infra"],
       refreshIntervalDays: 7,
       dockerfile: null,
       vm: { cpu: null, memory: null, disk: null }
@@ -704,7 +704,7 @@ test("agent-infra update refreshes seed files and syncs file registry", async ()
     assert.deepEqual(updated.sandbox, {
       engine: null,
       runtimes: ["node22"],
-      tools: ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"],
+      tools: ["agent-infra"],
       refreshIntervalDays: 7,
       dockerfile: null,
       vm: { cpu: null, memory: null, disk: null }
@@ -758,7 +758,7 @@ test("agent-infra update refreshes seed files and syncs file registry", async ()
   }
 });
 
-test("agent-infra update migrates legacy default sandbox tools to canonical order", () => {
+test("agent-infra update migrates legacy sandbox client tools to canonical state", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-update-sandbox-tools-"));
   const config = {
     project: "seedproj",
@@ -797,14 +797,11 @@ test("agent-infra update migrates legacy default sandbox tools to canonical orde
       fs.readFileSync(path.join(tmpDir, ".agents", ".airc.json"), "utf8")
     );
 
-    assert.match(output, /Migrated default sandbox\.tools to include agent-infra/);
-    assert.deepEqual(updated.sandbox.tools, [
-      "agent-infra",
-      "claude-code",
-      "codex",
-      "gemini-cli",
-      "opencode"
-    ]);
+    assert.match(output, /Updated \.agents\/\.airc\.json/);
+    assert.deepEqual(updated.sandbox.tools, ["agent-infra"]);
+    assert.ok(updated.agentClients.every(
+      (entry: { installInSandbox: boolean }) => entry.installInSandbox
+    ));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

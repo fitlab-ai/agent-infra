@@ -351,7 +351,7 @@ test("syncTemplates persists the exact prerelease template version idempotently"
   }
 });
 
-test("syncTemplates migrates legacy default sandbox tools to canonical order", async () => {
+test("syncTemplates migrates legacy client tools to canonical agent-infra tooling", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-tools-"));
 
   try {
@@ -379,13 +379,22 @@ test("syncTemplates migrates legacy default sandbox tools to canonical order", a
     const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
 
     assert.equal(report.configUpdated, true);
-    assert.deepEqual(cfg.sandbox.tools, ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"]);
+    assert.deepEqual(cfg.sandbox.tools, ["agent-infra"]);
+    assert.deepEqual(
+      cfg.agentClients.map((entry: { id: string; installInSandbox: boolean }) => [entry.id, entry.installInSandbox]),
+      [
+        ["claude-code", true],
+        ["codex", true],
+        ["gemini-cli", true],
+        ["opencode", true]
+      ]
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("syncTemplates preserves customized sandbox tools", async () => {
+test("syncTemplates migrates customized legacy client selection into canonical state", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-sandbox-custom-tools-"));
 
   try {
@@ -412,7 +421,11 @@ test("syncTemplates preserves customized sandbox tools", async () => {
     syncTemplates(projectRoot, templateRoot);
     const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
 
-    assert.deepEqual(cfg.sandbox.tools, ["codex"]);
+    assert.deepEqual(cfg.sandbox.tools, ["agent-infra"]);
+    assert.equal(
+      cfg.agentClients.find((entry: { id: string }) => entry.id === "codex").installInSandbox,
+      true
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

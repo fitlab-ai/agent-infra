@@ -35,7 +35,11 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     assert.equal(config.containerPrefix, "demo-dev");
     assert.equal(config.imageName, "demo-sandbox:latest");
     assert.deepEqual(config.runtimes, ["node22"]);
-    assert.deepEqual(config.tools, ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"]);
+    assert.deepEqual(config.tools, ["agent-infra"]);
+    assert.deepEqual(
+      resolveTools(config).map((tool) => tool.id),
+      ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"]
+    );
     assert.equal(config.engine, null);
     assert.equal(config.refreshIntervalDays, 7);
     assert.deepEqual(config.vm, { cpu: null, memory: null, disk: null });
@@ -49,7 +53,7 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
   }
 });
 
-test("loadConfig gives canonical Agent Client selection priority over sandbox.tools", async () => {
+test("loadConfig combines canonical Agent Client state with non-client sandbox tools", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-canonical-"));
   const previousCwd = process.cwd();
@@ -68,7 +72,7 @@ test("loadConfig gives canonical Agent Client selection priority over sandbox.to
           { id: "opencode", enabled: false, installInSandbox: false }
         ],
         sandbox: {
-          tools: ["agent-infra", "claude-code"]
+          tools: ["agent-infra"]
         }
       }, null, 2) + "\n",
       "utf8"

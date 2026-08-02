@@ -4,7 +4,7 @@ import { homedir, platform } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import pc from 'picocolors';
 import { normalizeAgentClients } from '../agent-clients/config.ts';
-import { AGENT_CLIENT_IDS, isAgentClientId } from '../agent-clients/types.ts';
+import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientState } from '../agent-clients/types.ts';
 import { validateSandboxEngine } from './engine.ts';
 import { hostJoin } from './engines/wsl2-paths.ts';
@@ -15,7 +15,7 @@ import type { SandboxTool } from './tools.ts';
 const DEFAULTS = Object.freeze({
   engine: null,
   runtimes: ['node22'],
-  tools: ['agent-infra', ...AGENT_CLIENT_IDS],
+  tools: ['agent-infra'],
   refreshIntervalDays: 7,
   dockerfile: null,
   vm: {
@@ -140,16 +140,7 @@ export function loadConfig({
 
   const airc = JSON.parse(fs.readFileSync(configPath, 'utf8')) as AircConfig;
   const sandboxInput = airc.sandbox;
-  const hasCanonicalAgentClients = Object.prototype.hasOwnProperty.call(airc, 'agentClients');
-  const normalizationInput = hasCanonicalAgentClients && sandboxInput
-    ? {
-        ...airc,
-        sandbox: Object.fromEntries(
-          Object.entries(sandboxInput).filter(([key]) => key !== 'tools')
-        )
-      }
-    : airc;
-  const agentClients = normalizeAgentClients(normalizationInput);
+  const agentClients = normalizeAgentClients(airc);
   const defaults = cloneDefaults();
   const sandbox = airc.sandbox ?? {};
   const engine = validateSandboxEngine(sandbox.engine ?? defaults.engine, { platformFn });

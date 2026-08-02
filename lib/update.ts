@@ -1,12 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { AGENT_CLIENT_IDS } from './agent-clients/types.ts';
-import { listAgentClientAdapters } from './agent-clients/registry.ts';
-import { planAgentClientProjectAssets } from './agent-clients/project-assets.ts';
+import { normalizeAgentClients } from './agent-clients/config.ts';
+import {
+  applyAgentClientReconciliation,
+  planAgentClientReconciliation
+} from './agent-clients/reconcile.ts';
 import { info, ok, err } from './log.ts';
 import { resolveTemplateDir } from './paths.ts';
-import { renderFile, copySkillDir, KNOWN_PLATFORMS } from './render.ts';
-import { resolveEnabledTUIs } from './builtin-tuis.ts';
+import { renderFile, copySkillDir } from './render.ts';
 
 type FileRegistry = {
   managed: string[];
@@ -26,6 +27,8 @@ type UpdateConfig = {
   labels?: Record<string, unknown>;
   files?: Partial<FileRegistry>;
   tuis?: unknown;
+  agentClients?: unknown;
+  customTUIs?: unknown;
 };
 
 type Defaults = {
@@ -42,9 +45,6 @@ const defaults = JSON.parse(
 
 const CONFIG_DIR = '.agents';
 const CONFIG_PATH = path.join(CONFIG_DIR, '.airc.json');
-const AGENT_INFRA_SANDBOX_TOOL = 'agent-infra';
-const LEGACY_DEFAULT_SANDBOX_TOOLS = [...AGENT_CLIENT_IDS];
-const DEFAULT_SANDBOX_TOOLS = [AGENT_INFRA_SANDBOX_TOOL, ...LEGACY_DEFAULT_SANDBOX_TOOLS];
 
 // One-time migration of the legacy project-level PR switch to the three-state
 // `prFlow` preference. `true` (the old default / "PR flow on") maps to the
@@ -63,88 +63,6 @@ function migratePrFlow(config: UpdateConfig): 'required' | 'disabled' | null {
     return 'disabled';
   }
   return null;
-}
-
-function isLegacyDefaultSandboxTools(value: unknown): value is string[] {
-  if (!Array.isArray(value) || value.length !== LEGACY_DEFAULT_SANDBOX_TOOLS.length) {
-    return false;
-  }
-  const tools = new Set(value);
-  return LEGACY_DEFAULT_SANDBOX_TOOLS.every((tool) => tools.has(tool));
-}
-
-function migrateSandboxTools(config: UpdateConfig): boolean {
-  const tools = config.sandbox?.tools;
-  if (!isLegacyDefaultSandboxTools(tools)) {
-    return false;
-  }
-  config.sandbox = {
-    ...config.sandbox,
-    tools: [...DEFAULT_SANDBOX_TOOLS]
-  };
-  return true;
-}
-
-function isPathOwnedByOtherPlatform(relativePath: string, platformType: string): boolean {
-  const top = String(relativePath || '').replace(/\\/g, '/').replace(/^\.\//, '').split('/')[0] ?? '';
-  if (!top.startsWith('.')) return false;
-
-  const candidate = top.slice(1);
-  if (!KNOWN_PLATFORMS.has(candidate)) return false;
-  return candidate !== platformType;
-}
-
-function syncFileRegistry(
-  config: UpdateConfig,
-  platformType: string,
-  enabledTUIIds: ReadonlySet<string>
-) {
-  config.files ||= {};
-  const before = JSON.stringify({
-    files: {
-      managed: config.files.managed || [],
-      merged: config.files.merged || [],
-      ejected: config.files.ejected || []
-    }
-  });
-  const current: FileRegistry = {
-    managed: config.files.managed || [],
-    merged: config.files.merged || [],
-    ejected: config.files.ejected || []
-  };
-  const sharedDefaults: FileRegistry = {
-    managed: defaults.files.managed.filter(
-      (entry) => !isPathOwnedByOtherPlatform(entry, platformType)
-    ),
-    merged: defaults.files.merged.filter(
-      (entry) => !isPathOwnedByOtherPlatform(entry, platformType)
-    ),
-    ejected: defaults.files.ejected
-  };
-  const adapters = listAgentClientAdapters();
-  const plan = planAgentClientProjectAssets({
-    current,
-    sharedDefaults,
-    enabledAdapters: adapters.filter((adapter) => enabledTUIIds.has(adapter.id)),
-    allAdapters: adapters
-  });
-  const added: Pick<FileRegistry, 'managed' | 'merged'> = {
-    managed: plan.registry.managed.filter((entry) => !current.managed.includes(entry)),
-    merged: plan.registry.merged.filter((entry) => !current.merged.includes(entry))
-  };
-  config.files.managed = [...plan.registry.managed];
-  config.files.merged = [...plan.registry.merged];
-  config.files.ejected = [...plan.registry.ejected];
-
-  const after = JSON.stringify({
-    files: {
-      managed: config.files.managed,
-      merged: config.files.merged,
-      ejected: config.files.ejected
-    }
-  });
-
-  return { added, changed: before !== after };
 }
 
 async function cmdUpdate(): Promise<void> {
@@ -174,23 +92,35 @@ async function cmdUpdate(): Promise<void> {
   const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) as UpdateConfig;
   const { project, org, language } = config;
   const platformType = config.platform?.type || defaults.platform.type;
-  const enabledTUIs = resolveEnabledTUIs(config.tuis);
   const replacements = { project, org };
+
+  const normalizedOriginal = normalizeAgentClients(config);
+  const currentRegistry: FileRegistry = {
+    managed: config.files?.managed || [],
+    merged: config.files?.merged || [],
+    ejected: config.files?.ejected || []
+  };
+  const platformAdded = !config.platform;
+  const sandboxAdded = !config.sandbox;
+  const taskAdded = !config.task;
+  const labelsAdded = !config.labels;
+  const prFlowMigrated = migratePrFlow(config);
+  if (platformAdded) config.platform = structuredClone(defaults.platform);
+  if (sandboxAdded) config.sandbox = structuredClone(defaults.sandbox);
+  if (taskAdded) config.task = structuredClone(defaults.task);
+  if (labelsAdded) config.labels = structuredClone(defaults.labels);
+
+  const workflowPlan = planAgentClientReconciliation({
+    config: config as unknown as Record<string, unknown>,
+    mutation: { type: 'replace-state', state: normalizedOriginal.state },
+    projectRoot: process.cwd(),
+    templateRoot: templateDir,
+    platformType,
+    language
+  });
 
   info(`Updating seed files for: ${project}`);
   console.log('');
-
-  // select language-specific template filenames
-  let claudeSrc, geminiSrc, opencodeSrc;
-  if (language === 'zh-CN') {
-    claudeSrc = 'update-agent-infra.zh-CN.md';
-    geminiSrc = 'update-agent-infra.zh-CN.toml';
-    opencodeSrc = 'update-agent-infra.zh-CN.md';
-  } else {
-    claudeSrc = 'update-agent-infra.en.md';
-    geminiSrc = 'update-agent-infra.en.toml';
-    opencodeSrc = 'update-agent-infra.en.md';
-  }
 
   // update skill
   copySkillDir(
@@ -213,76 +143,19 @@ async function cmdUpdate(): Promise<void> {
     // Ignore missing legacy script from pre-ESM installs.
   }
 
-  // update Claude command (only if enabled)
-  if (enabledTUIs.has('claude-code')) {
-    renderFile(
-      path.join(templateDir, '.claude', 'commands', claudeSrc),
-      path.join('.claude', 'commands', 'update-agent-infra.md'),
-      replacements
-    );
-    ok('Updated .claude/commands/update-agent-infra.md');
-  }
-
-  // update Gemini command (only if enabled)
-  if (enabledTUIs.has('gemini-cli')) {
-    renderFile(
-      path.join(templateDir, '.gemini', 'commands', '_project_', geminiSrc),
-      path.join('.gemini', 'commands', project, 'update-agent-infra.toml'),
-      replacements
-    );
-    ok(`Updated .gemini/commands/${project}/update-agent-infra.toml`);
-  }
-
-  // update OpenCode command (only if enabled)
-  if (enabledTUIs.has('opencode')) {
-    renderFile(
-      path.join(templateDir, '.opencode', 'commands', opencodeSrc),
-      path.join('.opencode', 'commands', 'update-agent-infra.md'),
-      replacements
-    );
-    ok('Updated .opencode/commands/update-agent-infra.md');
-  }
-
-  // sync file registry
-  const { added, changed } = syncFileRegistry(config, platformType, enabledTUIs);
+  const added = {
+    managed: workflowPlan.projectAssets.registry.managed.filter(
+      (entry) => !currentRegistry.managed.includes(entry)
+    ),
+    merged: workflowPlan.projectAssets.registry.merged.filter(
+      (entry) => !currentRegistry.merged.includes(entry)
+    )
+  };
   const hasNewEntries = added.managed.length > 0 || added.merged.length > 0;
-  const platformAdded = !config.platform;
-  const sandboxAdded = !config.sandbox;
-  const taskAdded = !config.task;
-  const labelsAdded = !config.labels;
-  const prFlowMigrated = migratePrFlow(config);
-  const sandboxToolsMigrated = !sandboxAdded && migrateSandboxTools(config);
-  let configChanged = changed;
+  const reconcileResult = applyAgentClientReconciliation(workflowPlan);
+  for (const target of reconcileResult.applied) ok(`Updated ${target}`);
 
-  if (platformAdded) {
-    config.platform = structuredClone(defaults.platform);
-    configChanged = true;
-  }
-
-  if (sandboxAdded) {
-    config.sandbox = structuredClone(defaults.sandbox);
-    configChanged = true;
-  }
-
-  if (taskAdded) {
-    config.task = structuredClone(defaults.task);
-    configChanged = true;
-  }
-
-  if (labelsAdded) {
-    config.labels = structuredClone(defaults.labels);
-    configChanged = true;
-  }
-
-  if (prFlowMigrated) {
-    configChanged = true;
-  }
-
-  if (sandboxToolsMigrated) {
-    configChanged = true;
-  }
-
-  if (configChanged) {
+  if (reconcileResult.configUpdated) {
     console.log('');
     if (hasNewEntries) {
       info(`New file entries synced to ${CONFIG_PATH}:`);
@@ -308,9 +181,6 @@ async function cmdUpdate(): Promise<void> {
       if (prFlowMigrated) {
         info(`Migrated legacy requiresPullRequest to prFlow="${prFlowMigrated}" in ${CONFIG_PATH}.`);
       }
-      if (sandboxToolsMigrated) {
-        info(`Migrated default sandbox.tools to include ${AGENT_INFRA_SANDBOX_TOOL} in ${CONFIG_PATH}.`);
-      }
     } else {
       info(`File registry changed in ${CONFIG_PATH}.`);
     }
@@ -329,10 +199,6 @@ async function cmdUpdate(): Promise<void> {
     if (hasNewEntries && prFlowMigrated) {
       info(`Migrated legacy requiresPullRequest to prFlow="${prFlowMigrated}" in ${CONFIG_PATH}.`);
     }
-    if (hasNewEntries && sandboxToolsMigrated) {
-      info(`Migrated default sandbox.tools to include ${AGENT_INFRA_SANDBOX_TOOL} in ${CONFIG_PATH}.`);
-    }
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf8');
     ok(`Updated ${CONFIG_PATH}`);
   }
 
@@ -340,24 +206,15 @@ async function cmdUpdate(): Promise<void> {
   console.log('');
   ok('Seed files updated successfully!');
   console.log('');
-  if (enabledTUIs.size === 0) {
-    console.log('  No built-in TUI enabled (tuis: []).');
+  if (workflowPlan.nextSteps.length === 0) {
+    console.log('  No Agent Client project integration enabled.');
     console.log(`  Configure "customTUIs" in ${CONFIG_PATH} if needed.`);
     console.log('');
   } else {
     console.log('  Next step: run the full update in your AI TUI:');
     console.log('');
-    const claudeOrOpencode: string[] = [];
-    if (enabledTUIs.has('claude-code')) claudeOrOpencode.push('Claude Code');
-    if (enabledTUIs.has('opencode')) claudeOrOpencode.push('OpenCode');
-    if (claudeOrOpencode.length > 0) {
-      console.log(`    ${claudeOrOpencode.join(' / ')}:  /update-agent-infra`);
-    }
-    if (enabledTUIs.has('gemini-cli')) {
-      console.log(`    Gemini CLI:              /${project}:update-agent-infra`);
-    }
-    if (enabledTUIs.has('codex')) {
-      console.log('    Codex CLI:               $update-agent-infra');
+    for (const nextStep of workflowPlan.nextSteps) {
+      console.log(`    ${nextStep.displayName}: ${nextStep.command}`);
     }
     console.log('');
   }

@@ -19,7 +19,14 @@ const opencodeAdapter = defineAgentClientAdapter({
     ownedPathPrefixes: ['.opencode/'],
     managed: ['.opencode/commands/'],
     merged: [],
-    ejected: []
+    ejected: [],
+    seedCommands: [{
+      templates: {
+        en: '.opencode/commands/update-agent-infra.en.md',
+        'zh-CN': '.opencode/commands/update-agent-infra.zh-CN.md'
+      },
+      target: '.opencode/commands/update-agent-infra.md'
+    }]
   },
   sandbox: {
     createTool: ({ home }) => ({

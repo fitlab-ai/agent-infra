@@ -66,6 +66,13 @@ test("multiSelect returns all ids for bare Enter (default)", async () => {
   assert.deepEqual(result, ["claude-code", "codex", "gemini-cli", "opencode"]);
 });
 
+test("multiSelect returns configured default ids for bare Enter", async () => {
+  const result = await withMockedReadline(null, async (mod) =>
+    mod.multiSelect("Pick", TUI_CHOICES, ["codex", "opencode"])
+  );
+  assert.deepEqual(result, ["codex", "opencode"]);
+});
+
 test("multiSelect parses numeric tokens", async () => {
   const result = await withMockedReadline("1,3", async (mod) => mod.multiSelect("Pick", TUI_CHOICES));
   assert.deepEqual(result, ["claude-code", "gemini-cli"]);

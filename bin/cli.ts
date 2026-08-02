@@ -15,6 +15,7 @@ const USAGE = `agent-infra ${VERSION} - bootstrap AI collaboration infrastructur
 Usage: ai <command> [options]
 
 Commands:
+  agent-client    List, inspect, enable, disable, or configure Agent Clients
   cp <ssh-alias>  Copy local clipboard image to a remote macOS clipboard or Linux sandbox over SSH
   decide          Record a ruling; code-stage decisions require explicit implementation intent
   help            Show this help message
@@ -71,6 +72,17 @@ async function importCommand(importPath: string) {
 }
 
 switch (command) {
+  case 'agent-client': {
+    const imported = await importCommand('../lib/agent-client.ts');
+    if (!imported) break;
+    const { cmdAgentClient } = imported;
+    const code = await cmdAgentClient(process.argv.slice(3)).catch((e: unknown) => {
+      process.stderr.write(`Error: ${errorMessage(e)}\n`);
+      return 1;
+    });
+    if (code) process.exitCode = code;
+    break;
+  }
   case 'cp': {
     const imported = await importCommand('../lib/cp.ts');
     if (!imported) break;

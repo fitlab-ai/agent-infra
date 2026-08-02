@@ -6,6 +6,15 @@ import path from "node:path";
 import os from "node:os";
 
 import { CLI_PATH, cliArgs } from "../../helpers.ts";
+import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
+
+function canonical(enabled: readonly string[]) {
+  return AGENT_CLIENT_IDS.map((id) => ({
+    id,
+    enabled: enabled.includes(id),
+    installInSandbox: true
+  }));
+}
 
 const PLATFORM_DEFAULT_ENGINES: Partial<Record<NodeJS.Platform, string>> = {
   linux: "native",
@@ -54,7 +63,8 @@ test("ai init default-selects all built-in TUIs on bare Enter", () => {
     });
 
     const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    assert.deepEqual(cfg.tuis, ["claude-code", "codex", "gemini-cli", "opencode"]);
+    assert.deepEqual(cfg.agentClients, canonical(AGENT_CLIENT_IDS));
+    assert.equal("tuis" in cfg, false);
     assert.ok(fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-infra.md")));
     assert.ok(fs.existsSync(path.join(tmpDir, ".gemini/commands/demoproj/update-agent-infra.toml")));
     assert.ok(fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
@@ -74,7 +84,7 @@ test("ai init persists subset selection and skips seed for disabled TUIs", () =>
     });
 
     const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    assert.deepEqual(cfg.tuis, ["claude-code", "gemini-cli"]);
+    assert.deepEqual(cfg.agentClients, canonical(["claude-code", "gemini-cli"]));
     assert.ok(fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-infra.md")));
     assert.ok(fs.existsSync(path.join(tmpDir, ".gemini/commands/demoproj/update-agent-infra.toml")));
     assert.ok(!fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
@@ -108,7 +118,7 @@ test("ai init persists tuis: [] when user types 'none' and skips all built-in se
     });
 
     const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    assert.deepEqual(cfg.tuis, []);
+    assert.deepEqual(cfg.agentClients, canonical([]));
     // No built-in TUI seed command file is installed.
     assert.ok(!fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-infra.md")));
     assert.ok(!fs.existsSync(path.join(tmpDir, ".gemini/commands/demoproj/update-agent-infra.toml")));
@@ -119,7 +129,7 @@ test("ai init persists tuis: [] when user types 'none' and skips all built-in se
     assert.ok(!cfg.files.managed.includes(".opencode/commands/"));
     assert.ok(!cfg.files.managed.includes(".codex/hooks.json"));
     // Next-step block points users to customTUIs.
-    assert.match(output, /No built-in TUI selected/);
+    assert.match(output, /No Agent Client project integration enabled/);
     assert.match(output, /Configure "customTUIs"/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -138,7 +148,7 @@ test("ai init persists tuis in canonical prompt order even when user types rever
     });
 
     const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    assert.deepEqual(cfg.tuis, ["claude-code", "gemini-cli"]);
+    assert.deepEqual(cfg.agentClients, canonical(["claude-code", "gemini-cli"]));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

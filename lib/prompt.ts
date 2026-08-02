@@ -88,20 +88,33 @@ async function select(question: string, choices: string[], defaultValue?: string
 
 async function multiSelect(
   question: string,
-  choices: { id: string; label: string }[]
+  choices: { id: string; label: string }[],
+  defaultIds: readonly string[] = choices.map((choice) => choice.id)
 ): Promise<string[]> {
+  const choiceIds = new Set(choices.map((choice) => choice.id));
+  if (defaultIds.some((id) => !choiceIds.has(id))) {
+    throw new Error('Default selection contains an unknown id');
+  }
+  const normalizedDefaults = choices
+    .map((choice) => choice.id)
+    .filter((id) => defaultIds.includes(id));
   process.stdout.write(`  ${question}:\n`);
   const idWidth = Math.max(...choices.map((c) => c.id.length));
   choices.forEach((c, i) => {
     process.stdout.write(`      ${i + 1}) ${c.id.padEnd(idWidth)}  (${c.label})\n`);
   });
-  ask('Enter comma-separated numbers or ids to keep, or "none" to select nothing [default: all]: ');
+  const defaultLabel = normalizedDefaults.length === choices.length
+    ? 'all'
+    : normalizedDefaults.length === 0
+      ? 'none'
+      : normalizedDefaults.join(',');
+  ask(`Enter comma-separated numbers or ids to keep, or "none" to select nothing [default: ${defaultLabel}]: `);
 
   setupInterface();
 
   const line = await nextLine();
   // Strictly distinguish bare Enter (null/empty string) from whitespace input.
-  if (line === null || line === '') return choices.map((c) => c.id);
+  if (line === null || line === '') return normalizedDefaults;
   // Explicit empty selection: "none" means deliberately zero built-in choices.
   if (line.trim().toLowerCase() === 'none') return [];
 

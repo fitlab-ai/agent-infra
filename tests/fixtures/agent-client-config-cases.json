@@ -1,0 +1,55 @@
+[
+  {
+    "name": "legacy independent dimensions",
+    "input": {
+      "tuis": ["codex", "opencode"],
+      "sandbox": { "tools": ["agent-infra", "claude-code", "custom-tool"] }
+    }
+  },
+  {
+    "name": "canonical non-client tools",
+    "input": {
+      "agentClients": [
+        { "id": "claude-code", "enabled": false, "installInSandbox": true },
+        { "id": "codex", "enabled": true, "installInSandbox": false },
+        { "id": "gemini-cli", "enabled": false, "installInSandbox": false },
+        { "id": "opencode", "enabled": true, "installInSandbox": false }
+      ],
+      "sandbox": { "tools": ["agent-infra", "custom-tool"] }
+    }
+  },
+  {
+    "name": "canonical reordered",
+    "input": {
+      "agentClients": [
+        { "id": "opencode", "enabled": true, "installInSandbox": false },
+        { "id": "gemini-cli", "enabled": false, "installInSandbox": false },
+        { "id": "codex", "enabled": true, "installInSandbox": false },
+        { "id": "claude-code", "enabled": false, "installInSandbox": true }
+      ]
+    }
+  },
+  {
+    "name": "canonical legacy conflict",
+    "input": {
+      "agentClients": [
+        { "id": "claude-code", "enabled": false, "installInSandbox": false },
+        { "id": "codex", "enabled": true, "installInSandbox": false },
+        { "id": "gemini-cli", "enabled": false, "installInSandbox": false },
+        { "id": "opencode", "enabled": false, "installInSandbox": false }
+      ],
+      "tuis": ["opencode"]
+    }
+  },
+  {
+    "name": "unknown canonical id",
+    "input": {
+      "agentClients": [
+        { "id": "claude-code", "enabled": true, "installInSandbox": true },
+        { "id": "codex", "enabled": true, "installInSandbox": true },
+        { "id": "gemini-cli", "enabled": true, "installInSandbox": true },
+        { "id": "other", "enabled": true, "installInSandbox": true }
+      ]
+    }
+  }
+]

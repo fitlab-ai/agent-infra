@@ -17,7 +17,8 @@ const codexAdapter = defineAgentClientAdapter({
     ownedPathPrefixes: ['.codex/'],
     managed: ['.codex/hooks.json'],
     merged: [],
-    ejected: []
+    ejected: [],
+    seedCommands: []
   },
   sandbox: {
     createTool: ({ home }) => ({

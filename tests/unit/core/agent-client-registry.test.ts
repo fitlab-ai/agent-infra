@@ -82,7 +82,8 @@ function adapterInput(
       ownedPathPrefixes: ['.codex/'],
       managed: ['.codex/hooks.json'],
       merged: [],
-      ejected: []
+      ejected: [],
+      seedCommands: []
     },
     sandbox: {
       createTool: () => ({
@@ -137,6 +138,7 @@ test('adapter definitions validate their closed contract without mutating input'
   assert.ok(Object.isFrozen(adapter.project.managed));
   assert.ok(Object.isFrozen(adapter.project.merged));
   assert.ok(Object.isFrozen(adapter.project.ejected));
+  assert.ok(Object.isFrozen(adapter.project.seedCommands));
 
   const invalidInputs: unknown[] = [
     adapterInput({ id: 'unknown' as never }),
@@ -164,7 +166,8 @@ test('adapter definitions validate their closed contract without mutating input'
         ownedPathPrefixes: [],
         managed: [],
         merged: [],
-        ejected: []
+        ejected: [],
+        seedCommands: []
       }
     }),
     adapterInput({
@@ -172,7 +175,8 @@ test('adapter definitions validate their closed contract without mutating input'
         ownedPathPrefixes: ['.codex'],
         managed: [],
         merged: [],
-        ejected: []
+        ejected: [],
+        seedCommands: []
       }
     }),
     adapterInput({
@@ -180,7 +184,8 @@ test('adapter definitions validate their closed contract without mutating input'
         ownedPathPrefixes: ['.codex\\'],
         managed: [],
         merged: [],
-        ejected: []
+        ejected: [],
+        seedCommands: []
       }
     }),
     adapterInput({
@@ -188,7 +193,8 @@ test('adapter definitions validate their closed contract without mutating input'
         ownedPathPrefixes: ['.codex/', '.codex/'],
         managed: [],
         merged: [],
-        ejected: []
+        ejected: [],
+        seedCommands: []
       }
     })
   ];
@@ -204,37 +210,43 @@ test('adapter project assets must be literal owned relative paths without overla
       ownedPathPrefixes: ['.codex/'],
       managed: undefined,
       merged: [],
-      ejected: []
+      ejected: [],
+      seedCommands: []
     },
     {
       ownedPathPrefixes: ['.codex/'],
       managed: ['/tmp/hooks.json'],
       merged: [],
-      ejected: []
+      ejected: [],
+      seedCommands: []
     },
     {
       ownedPathPrefixes: ['.codex/'],
       managed: ['.codex/../outside.json'],
       merged: [],
-      ejected: []
+      ejected: [],
+      seedCommands: []
     },
     {
       ownedPathPrefixes: ['.codex/'],
       managed: ['.other/hooks.json'],
       merged: [],
-      ejected: []
+      ejected: [],
+      seedCommands: []
     },
     {
       ownedPathPrefixes: ['.codex/'],
       managed: ['.codex/hooks.json', '.codex/hooks.json'],
       merged: [],
-      ejected: []
+      ejected: [],
+      seedCommands: []
     },
     {
       ownedPathPrefixes: ['.codex/'],
       managed: ['.codex/hooks.json'],
       merged: ['.codex/hooks.json'],
-      ejected: []
+      ejected: [],
+      seedCommands: []
     }
   ];
 
@@ -329,28 +341,72 @@ test('registry exposes the exact built-in project asset matrix', () => {
         ownedPathPrefixes: ['.claude/'],
         managed: ['.claude/commands/'],
         merged: ['.claude/settings.json'],
-        ejected: []
+        ejected: [],
+        seedCommands: [{
+          templates: {
+            en: '.claude/commands/update-agent-infra.en.md',
+            'zh-CN': '.claude/commands/update-agent-infra.zh-CN.md'
+          },
+          target: '.claude/commands/update-agent-infra.md'
+        }]
       },
       codex: {
         ownedPathPrefixes: ['.codex/'],
         managed: ['.codex/hooks.json'],
         merged: [],
-        ejected: []
+        ejected: [],
+        seedCommands: []
       },
       'gemini-cli': {
         ownedPathPrefixes: ['.gemini/'],
         managed: ['.gemini/commands/'],
         merged: ['.gemini/settings.json'],
-        ejected: []
+        ejected: [],
+        seedCommands: [{
+          templates: {
+            en: '.gemini/commands/_project_/update-agent-infra.en.toml',
+            'zh-CN': '.gemini/commands/_project_/update-agent-infra.zh-CN.toml'
+          },
+          target: '.gemini/commands/${projectName}/update-agent-infra.toml'
+        }]
       },
       opencode: {
         ownedPathPrefixes: ['.opencode/'],
         managed: ['.opencode/commands/'],
         merged: [],
-        ejected: []
+        ejected: [],
+        seedCommands: [{
+          templates: {
+            en: '.opencode/commands/update-agent-infra.en.md',
+            'zh-CN': '.opencode/commands/update-agent-infra.zh-CN.md'
+          },
+          target: '.opencode/commands/update-agent-infra.md'
+        }]
       }
     }
   );
+});
+
+test('adapter seed commands require owned literal targets and language templates', () => {
+  assert.throws(() => defineAgentClientAdapter(adapterInput({
+    project: {
+      ...adapterInput().project,
+      seedCommands: [{
+        templates: { en: '.codex/en.md', 'zh-CN': '.codex/zh.md' },
+        target: '../outside.md'
+      }]
+    }
+  })), /invalid seed target/);
+
+  assert.throws(() => defineAgentClientAdapter(adapterInput({
+    project: {
+      ...adapterInput().project,
+      seedCommands: [{
+        templates: { en: '/tmp/en.md', 'zh-CN': '.codex/zh.md' },
+        target: '.codex/${unknown}/command.md'
+      }]
+    }
+  })), /invalid seed target|invalid seed templates/);
 });
 
 test('OpenCode sandbox health check uses its version flag', () => {

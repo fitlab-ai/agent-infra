@@ -218,37 +218,38 @@ Ordinary `managed` files keep their overwrite semantics. A small set of platform
 
 `ejected` entries support literal paths or globs, using the same matching rules as `merged`.
 
-## Built-in TUI Selection
+## Agent Client Configuration
 
-Use the top-level `.agents/.airc.json` `tuis` array to pick which built-in TUIs (`claude-code`, `codex`, `gemini-cli`, `opencode`) agent-infra should install command files for and keep in sync.
+Use the top-level `.agents/.airc.json` `agentClients` array to configure all four built-in clients (`claude-code`, `codex`, `gemini-cli`, `opencode`). Each canonical entry has three fields:
 
-| Value | Meaning |
+| Field | Meaning |
 |-------|---------|
-| `tuis` missing or `null` | All four built-in TUIs are enabled (backward-compatible default for legacy `.airc.json` predating this field). |
-| `tuis: []` | No built-in TUI is managed. Use this when the project only relies on `customTUIs` and does not need any built-in command files installed. |
-| `tuis: [<subset>]` | Only the listed TUIs are managed. Unknown ids are ignored. |
+| `id` | Built-in Agent Client id. The canonical array contains exactly one entry for each built-in client. |
+| `enabled` | Whether agent-infra writes and maintains that client's project integration and seed command. |
+| `installInSandbox` | Whether the sandbox image installs that client's CLI. This is independent from `enabled`. |
 
-`ai init` includes an interactive multi-select for this field:
+Manage these settings without hand-editing JSON:
 
-- Press Enter to accept the default (all built-in TUIs enabled).
-- Type comma-separated numbers or ids (e.g. `1,3` or `claude-code,opencode`) to keep a subset.
-- Type `none` to explicitly disable every built-in TUI (typically combined with a `customTUIs` entry added later).
-- Invalid input (duplicate, out-of-range, unknown id, whitespace-only) aborts init with a non-zero exit code.
+```bash
+ai agent-client list
+ai agent-client status
+ai agent-client enable codex
+ai agent-client disable gemini-cli
+ai agent-client configure
+```
 
-### Side effects of disabling a TUI
+`enable` and `disable` only change `enabled`; `configure` edits both dimensions. `ai init` asks which clients to enable and preserves the displayed defaults when you press Enter. All clients default to `installInSandbox: true`.
 
-When you disable a built-in TUI (either via `ai init` or by hand-editing `.airc.json`), the next `ai update` / `update-agent-infra` will:
+Legacy `tuis` and built-in client ids in `sandbox.tools` are migration inputs only. The next config-writing command converts them into the canonical `agentClients` array and removes the legacy fields. If canonical and legacy values conflict, the command stops without modifying files so the conflict can be resolved explicitly.
 
-- skip seed command writes for that TUI (e.g. `.gemini/commands/<project>/update-agent-infra.toml`);
-- skip the TUI's owned default entries when backfilling `files.managed` / `files.merged`;
-- **clean up existing files** under the TUI's owned path prefix (`.claude/`, `.codex/`, `.gemini/`, `.opencode/`) — these are listed in `report.managed.removed`, mirroring the cleanup behavior when switching `platform`.
+### Side effects of disabling an Agent Client
 
-To opt a specific file out of this cleanup, list it in `files.ejected`; ejected entries owned by disabled TUIs are preserved as-is and are not re-created by sync.
+When you disable a built-in client, reconciliation stops maintaining its seed command and owned registry entries. An unchanged generated seed may be removed; a locally modified seed is protected and reported instead. Files listed in `files.ejected` remain project-owned and are preserved.
 
 ### Relation to other config fields
 
-- `tuis` controls **which TUI command files agent-infra writes and maintains**. It is independent from `sandbox.tools`, which controls **which CLIs the sandbox image installs**. Toggling one does not affect the other; the README for `sandbox.tools` lives in the Sandbox section.
-- `tuis` is independent from `customTUIs` (see below). CustomTUI command files are not removed when you disable a built-in TUI, even if the customTUI's `dir` falls under that TUI's owned prefix (e.g. a customTUI configured with `dir: ".codex/commands"` is preserved when `codex` is disabled).
+- `sandbox.tools` now lists non-client tools such as `agent-infra` and custom tools. Built-in client installation belongs in `agentClients[].installInSandbox`.
+- `agentClients` is independent from `customTUIs` (see below). Custom TUI command files are preserved even when their directory is under a disabled built-in client's path prefix.
 
 ## Custom TUI Configuration
 
@@ -300,7 +301,7 @@ Namespaced custom TUI:
 
 ## Sandbox Custom Tools
 
-`customTUIs` generates slash-command files but does not change the sandbox image. To install a non-npm CLI or tool (pip / cargo / curl-based / pre-built binary) into the sandbox image and live-mount its credentials, declare it under `sandbox.customTools` in `.agents/.airc.json`. Built-in sandbox tools (`claude-code`, `codex`, `opencode`, `gemini-cli`, `agent-infra`) keep working unchanged; `agent-infra` only provides the in-sandbox `ai` / `agent-infra` CLI and is not part of `tuis` or `customTUIs`.
+`customTUIs` generates slash-command files but does not change the sandbox image. To install a non-npm CLI or tool (pip / cargo / curl-based / pre-built binary) into the sandbox image and live-mount its credentials, declare it under `sandbox.customTools` in `.agents/.airc.json`. Built-in Agent Clients are installed according to `agentClients[].installInSandbox`; `agent-infra` remains a non-client entry in `sandbox.tools` and only provides the in-sandbox `ai` / `agent-infra` CLI.
 
 ### Required fields
 

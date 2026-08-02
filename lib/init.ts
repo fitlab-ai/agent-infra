@@ -8,14 +8,13 @@ import { resolveTemplateDir } from './paths.ts';
 import { renderFile, copySkillDir, KNOWN_PLATFORMS } from './render.ts';
 import { enginesForPlatform } from './sandbox/engines/index.ts';
 import { VERSION } from './version.ts';
-import {
-  BUILTIN_TUI_IDS,
-  BUILTIN_TUI_DISPLAY,
-  resolveEnabledTUIs
-} from './builtin-tuis.ts';
 import { listAgentClientAdapters } from './agent-clients/registry.ts';
-import { planAgentClientProjectAssets } from './agent-clients/project-assets.ts';
-import type { AgentClientAdapter } from './agent-clients/adapter.ts';
+import { serializeAgentClients } from './agent-clients/config.ts';
+import {
+  applyAgentClientReconciliation,
+  planAgentClientReconciliation
+} from './agent-clients/reconcile.ts';
+import type { AgentClientState } from './agent-clients/types.ts';
 
 type FileRegistry = {
   managed: string[];
@@ -29,6 +28,7 @@ type SourceEntry = {
 };
 
 type Defaults = {
+  agentClients: AgentConfig['agentClients'];
   files: FileRegistry;
   sandbox: Record<string, unknown>;
   task: { shortIdLength: number };
@@ -45,7 +45,7 @@ type AgentConfig = {
   task: { shortIdLength: number };
   labels: Record<string, unknown>;
   files: FileRegistry;
-  tuis: string[];
+  agentClients: ReturnType<typeof serializeAgentClients>;
   templates?: { sources: SourceEntry[] };
   skills?: { sources: SourceEntry[] };
 };
@@ -59,37 +59,6 @@ const PLATFORM_DEFAULT_ENGINES = Object.freeze({
   darwin: 'colima',
   win32: 'wsl2'
 });
-
-function isPathOwnedByOtherPlatform(relativePath: string, platformType: string): boolean {
-  const top = String(relativePath || '').replace(/\\/g, '/').replace(/^\.\//, '').split('/')[0] ?? '';
-  if (!top.startsWith('.')) return false;
-
-  const candidate = top.slice(1);
-  if (!KNOWN_PLATFORMS.has(candidate)) return false;
-  return candidate !== platformType;
-}
-
-function buildDefaultFiles(
-  platformType: string,
-  enabledAdapters: readonly AgentClientAdapter[]
-): FileRegistry {
-  const sharedDefaults = {
-    managed: (defaults.files.managed || []).filter(
-      (entry) => !isPathOwnedByOtherPlatform(entry, platformType)
-    ),
-    merged: (defaults.files.merged || []).filter(
-      (entry) => !isPathOwnedByOtherPlatform(entry, platformType)
-    ),
-    ejected: structuredClone(defaults.files.ejected || [])
-  };
-  const plan = planAgentClientProjectAssets({
-    current: { managed: [], merged: [], ejected: [] },
-    sharedDefaults,
-    enabledAdapters,
-    allAdapters: listAgentClientAdapters()
-  });
-  return structuredClone(plan.registry) as FileRegistry;
-}
 
 function detectProjectName(): string {
   try {
@@ -232,11 +201,12 @@ async function cmdInit(): Promise<void> {
     );
   }
 
-  let enabledTUIs: string[];
+  const adapters = listAgentClientAdapters();
+  let enabledClientIds: string[];
   try {
-    enabledTUIs = await multiSelect(
-      'Built-in TUI command files to install/manage',
-      BUILTIN_TUI_IDS.map((id) => ({ id, label: BUILTIN_TUI_DISPLAY[id] }))
+    enabledClientIds = await multiSelect(
+      'Agent Client project integrations to enable',
+      adapters.map((adapter) => ({ id: adapter.id, label: adapter.displayName }))
     );
   } catch (e) {
     err(e instanceof Error ? e.message : String(e));
@@ -244,10 +214,7 @@ async function cmdInit(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const enabledTUISet = resolveEnabledTUIs(enabledTUIs);
-  const enabledAdapters = listAgentClientAdapters().filter((adapter) =>
-    enabledTUISet.has(adapter.id)
-  );
+  const enabledClientSet = new Set(enabledClientIds);
 
   const templateSources = parseLocalSources(await prompt(
     'Template sources (optional, comma-separated local paths, e.g. ~/my-templates; Enter to skip)',
@@ -262,6 +229,39 @@ async function cmdInit(): Promise<void> {
   const project = projectName;
   const replacements = { project, org: orgName };
 
+  const defaultState = Object.fromEntries(defaults.agentClients.map((entry) => [
+    entry.id,
+    {
+      enabled: enabledClientSet.has(entry.id),
+      installInSandbox: entry.installInSandbox
+    }
+  ])) as AgentClientState;
+  const config: AgentConfig = {
+    project: projectName,
+    org: orgName,
+    language,
+    platform: { type: platformType },
+    templateVersion: VERSION,
+    sandbox: structuredClone(defaults.sandbox),
+    task: structuredClone(defaults.task),
+    labels: structuredClone(defaults.labels),
+    files: { managed: [], merged: [], ejected: [] },
+    agentClients: serializeAgentClients(defaultState)
+  };
+
+  if (sandboxEngine) config.sandbox.engine = sandboxEngine;
+  if (templateSources.length > 0) config.templates = { sources: templateSources };
+  if (skillSources.length > 0) config.skills = { sources: skillSources };
+
+  const workflowPlan = planAgentClientReconciliation({
+    config: config as unknown as Record<string, unknown>,
+    mutation: { type: 'none' },
+    projectRoot: process.cwd(),
+    templateRoot: templateDir,
+    platformType,
+    language
+  });
+
   console.log('');
   if (orgName) {
     info(`Installing update-agent-infra seed command for: ${projectName} (${orgName})`);
@@ -269,18 +269,6 @@ async function cmdInit(): Promise<void> {
     info(`Installing update-agent-infra seed command for: ${projectName}`);
   }
   console.log('');
-
-  // select language-specific template filenames
-  let claudeSrc, geminiSrc, opencodeSrc;
-  if (language === 'zh-CN') {
-    claudeSrc = 'update-agent-infra.zh-CN.md';
-    geminiSrc = 'update-agent-infra.zh-CN.toml';
-    opencodeSrc = 'update-agent-infra.zh-CN.md';
-  } else {
-    claudeSrc = 'update-agent-infra.en.md';
-    geminiSrc = 'update-agent-infra.en.toml';
-    opencodeSrc = 'update-agent-infra.en.md';
-  }
 
   // install skill
   copySkillDir(
@@ -298,68 +286,8 @@ async function cmdInit(): Promise<void> {
   );
   ok('Installed .agents/scripts/lib/agent-infra-package.js');
 
-  // install Claude command (only if enabled)
-  if (enabledTUISet.has('claude-code')) {
-    renderFile(
-      path.join(templateDir, '.claude', 'commands', claudeSrc),
-      path.join('.claude', 'commands', 'update-agent-infra.md'),
-      replacements
-    );
-    ok('Installed .claude/commands/update-agent-infra.md');
-  }
-
-  // install Gemini command (only if enabled)
-  if (enabledTUISet.has('gemini-cli')) {
-    renderFile(
-      path.join(templateDir, '.gemini', 'commands', '_project_', geminiSrc),
-      path.join('.gemini', 'commands', project, 'update-agent-infra.toml'),
-      replacements
-    );
-    ok(`Installed .gemini/commands/${project}/update-agent-infra.toml`);
-  }
-
-  // install OpenCode command (only if enabled)
-  if (enabledTUISet.has('opencode')) {
-    renderFile(
-      path.join(templateDir, '.opencode', 'commands', opencodeSrc),
-      path.join('.opencode', 'commands', 'update-agent-infra.md'),
-      replacements
-    );
-    ok('Installed .opencode/commands/update-agent-infra.md');
-  }
-
-  // generate .agents/.airc.json
-  const config: AgentConfig = {
-    project: projectName,
-    org: orgName,
-    language,
-    platform: { type: platformType },
-    templateVersion: VERSION,
-    sandbox: structuredClone(defaults.sandbox),
-    task: structuredClone(defaults.task),
-    labels: structuredClone(defaults.labels),
-    files: buildDefaultFiles(platformType, enabledAdapters),
-    tuis: enabledTUIs
-  };
-
-  if (sandboxEngine) {
-    config.sandbox.engine = sandboxEngine;
-  }
-
-  if (templateSources.length > 0) {
-    config.templates = {
-      sources: templateSources
-    };
-  }
-
-  if (skillSources.length > 0) {
-    config.skills = {
-      sources: skillSources
-    };
-  }
-
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  const reconcileResult = applyAgentClientReconciliation(workflowPlan);
+  for (const target of reconcileResult.applied) ok(`Installed ${target}`);
   ok(`Generated ${configPath}`);
 
   // done
@@ -369,24 +297,15 @@ async function cmdInit(): Promise<void> {
   console.log('  If this init used npx, install agent-infra persistently before update or validation:');
   console.log('    npm install -g @fitlab-ai/agent-infra');
   console.log('');
-  if (enabledTUISet.size === 0) {
-    console.log('  No built-in TUI selected.');
+  if (workflowPlan.nextSteps.length === 0) {
+    console.log('  No Agent Client project integration enabled.');
     console.log(`  Configure "customTUIs" in ${configPath} before running update-agent-infra.`);
     console.log('');
   } else {
     console.log('  Next step: open this project in any AI TUI and run:');
     console.log('');
-    const claudeOrOpencode: string[] = [];
-    if (enabledTUISet.has('claude-code')) claudeOrOpencode.push('Claude Code');
-    if (enabledTUISet.has('opencode')) claudeOrOpencode.push('OpenCode');
-    if (claudeOrOpencode.length > 0) {
-      console.log(`    ${claudeOrOpencode.join(' / ')}:  /update-agent-infra`);
-    }
-    if (enabledTUISet.has('gemini-cli')) {
-      console.log(`    Gemini CLI:              /${project}:update-agent-infra`);
-    }
-    if (enabledTUISet.has('codex')) {
-      console.log('    Codex CLI:               $update-agent-infra');
+    for (const nextStep of workflowPlan.nextSteps) {
+      console.log(`    ${nextStep.displayName}: ${nextStep.command}`);
     }
     console.log('');
     console.log('  This will render all templates and set up the full');
