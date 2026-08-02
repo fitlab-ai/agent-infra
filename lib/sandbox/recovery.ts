@@ -8,10 +8,12 @@ import {
 } from './constants.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import {
-  createSandboxCapabilityPlan,
-  runBoundedSandboxHookCommand,
-  runSandboxHooks
+  createSandboxCapabilityPlan
 } from './agent-client-reconciler.ts';
+import type {
+  SandboxRecoveryFindingDescriptor,
+  SandboxRecoveryRepair
+} from './tool-types.ts';
 import type { SandboxConfig } from './config.ts';
 import { toEnginePath } from './engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from './mounts.ts';
@@ -35,6 +37,16 @@ export type SandboxRecoveryFinding = {
   message: string;
   path?: string;
   seed?: TmpfsSeedEntry;
+  repair?: SandboxRecoveryRepair;
+};
+
+type SandboxAgentClientCheckSnapshot = {
+  adapterId: string;
+  checkId: string;
+  applicable: boolean;
+  healthy: boolean;
+  finding: SandboxRecoveryFindingDescriptor;
+  repair?: SandboxRecoveryRepair;
 };
 
 export type SandboxRecoverySnapshot = {
@@ -62,12 +74,7 @@ export type SandboxRecoverySnapshot = {
     targetState: 'ok' | 'missing' | 'wrong-type' | 'inaccessible';
   }>;
   aliasesReadable: boolean;
-  codex?: {
-    commandAvailable: boolean;
-    stateWritable: boolean;
-    promptsSourceExists: boolean;
-    promptsValid: boolean;
-  };
+  agentClientChecks: SandboxAgentClientCheckSnapshot[];
 };
 
 export type SandboxReadyResult = {
@@ -204,25 +211,11 @@ export function classifySandboxRecovery(snapshot: SandboxRecoverySnapshot): Sand
     });
   }
 
-  if (snapshot.codex) {
-    if (!snapshot.codex.commandAvailable) {
+  for (const check of snapshot.agentClientChecks) {
+    if (check.applicable && !check.healthy) {
       findings.push({
-        repairKind: 'hard-failure',
-        message: 'Codex is not available on PATH inside the sandbox.'
-      });
-    }
-    if (!snapshot.codex.stateWritable) {
-      findings.push({
-        repairKind: 'permissions',
-        message: 'Codex state directory is not writable by devuser.',
-        path: '/home/devuser/.codex'
-      });
-    }
-    if (snapshot.codex.promptsSourceExists && !snapshot.codex.promptsValid) {
-      findings.push({
-        repairKind: 'builtin-link',
-        message: 'Codex prompts link does not point to the workspace commands directory.',
-        path: '/home/devuser/.codex/prompts'
+        ...check.finding,
+        ...(check.repair === undefined ? {} : { repair: check.repair })
       });
     }
   }
@@ -475,7 +468,6 @@ export function collectSandboxRecoverySnapshot(params: {
       .map((tool) => tool.containerMount)
       .filter((mountPath) => mountsByDestination.has(mountPath))
     : [];
-  const hasCodex = tools.some((tool) => tool.id === 'codex');
   const mountSnapshots = expectedMounts({
     config: params.config,
     branch: params.branch,
@@ -533,38 +525,31 @@ export function collectSandboxRecoverySnapshot(params: {
       ['/home/devuser/.bash_aliases'],
       runOkFn
     ),
-    codex: hasCodex
-      ? {
-          commandAvailable: probe(
-            params.engine,
-            params.container,
-            'command -v codex',
-            [],
-            runOkFn
-          ),
-          stateWritable: probe(
-            params.engine,
-            params.container,
-            'probe="$1/.agent-infra-codex-state-$$"; trap \'rm -f -- "$probe"\' EXIT; : > "$probe"',
-            ['/home/devuser/.codex'],
-            runOkFn
-          ),
-          promptsSourceExists: probe(
-            params.engine,
-            params.container,
-            'test -d "$1"',
-            ['/workspace/.codex/commands'],
-            runOkFn
-          ),
-          promptsValid: probe(
-            params.engine,
-            params.container,
-            'test "$(readlink -- "$1")" = "$2"',
-            ['/home/devuser/.codex/prompts', '/workspace/.codex/commands'],
-            runOkFn
-          )
-        }
-      : undefined
+    agentClientChecks: capabilityPlan.recoveryChecks.map(({ adapterId, check }) => {
+      const applicable = check.when === undefined || probe(
+        params.engine,
+        params.container,
+        check.when.script,
+        [...check.when.args],
+        runOkFn,
+        check.when.user
+      );
+      return {
+        adapterId,
+        checkId: check.id,
+        applicable,
+        healthy: !applicable || probe(
+          params.engine,
+          params.container,
+          check.probe.script,
+          [...check.probe.args],
+          runOkFn,
+          check.probe.user
+        ),
+        finding: check.finding,
+        ...(check.repair === undefined ? {} : { repair: check.repair })
+      };
+    })
   };
 }
 
@@ -671,10 +656,11 @@ function repairFindings(params: {
     deps: params.deps
   });
   const runVerboseFn = params.deps?.runVerbose ?? runVerboseEngine;
-  if (params.findings.some((finding) => finding.repairKind === 'builtin-link')) {
+  for (const repair of params.findings.flatMap((finding) =>
+    finding.repair === undefined ? [] : [finding.repair]
+  )) {
     runVerboseFn(params.engine, 'docker', [
-      'exec', '--user', 'devuser', params.container, 'ln', '-sfn',
-      '/workspace/.codex/commands', '/home/devuser/.codex/prompts'
+      'exec', '--user', repair.user, params.container, repair.command, ...repair.args
     ]);
   }
 }
@@ -721,19 +707,6 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
   let failure: Error | null = null;
 
   try {
-    const capabilityPlan = createSandboxCapabilityPlan(params.config);
-    const hookResults = await runSandboxHooks({
-      hooks: capabilityPlan.hooksByPhase['inspect-recovery'],
-      phase: 'inspect-recovery',
-      context: { config: params.config, plan: capabilityPlan },
-      runCommand: runBoundedSandboxHookCommand
-    });
-    const hookFailure = hookResults.find((result) => result.status === 'hard-failure');
-    if (hookFailure) {
-      throw new Error(
-        hookFailure.message ?? `Sandbox hook '${hookFailure.hookId}' failed.`
-      );
-    }
     if (!params.row.running) {
       startFn(params.engine, params.row.name);
       const initial = assess({

@@ -9,6 +9,7 @@ import { hostJoin } from './engines/wsl2-paths.ts';
 import type { AgentClientAdapter } from '../agent-clients/adapter.ts';
 import type { AgentClientState } from '../agent-clients/types.ts';
 import type {
+  AgentClientSandboxRecoveryCheck,
   AgentClientSandboxHook,
   AgentClientSandboxHookContext,
   AgentClientSandboxHookResult,
@@ -39,12 +40,29 @@ type SandboxRuntimeCapabilityProjection = Readonly<{
     phase: SandboxHookPhase;
     timeoutMs: number;
   }>[];
+  recoveryChecks: readonly Readonly<{
+    adapterId: string;
+    id: string;
+    when?: AgentClientSandboxRecoveryCheck['when'];
+    probe: AgentClientSandboxRecoveryCheck['probe'];
+    finding: Readonly<{
+      repairKind: AgentClientSandboxRecoveryCheck['finding']['repairKind'];
+      path?: string;
+    }>;
+    repair?: AgentClientSandboxRecoveryCheck['repair'];
+  }>[];
+}>;
+
+type PlannedAgentClientRecoveryCheck = Readonly<{
+  adapterId: string;
+  check: AgentClientSandboxRecoveryCheck;
 }>;
 
 type SandboxCapabilityPlan = Readonly<{
   tools: readonly SandboxTool[];
   selectedAgentClients: readonly AgentClientAdapter[];
   hooksByPhase: Readonly<Record<SandboxHookPhase, readonly AgentClientSandboxHook[]>>;
+  recoveryChecks: readonly PlannedAgentClientRecoveryCheck[];
   aliases: readonly SandboxAlias[];
   imageSignature: string;
   runtimeSignature: string;
@@ -136,8 +154,7 @@ function hooksByPhase(
     'prepare',
     'before-container-create',
     'after-container-start',
-    'before-enter',
-    'inspect-recovery'
+    'before-enter'
   ];
   return Object.freeze(Object.fromEntries(
     phases.map((phase) => [
@@ -199,10 +216,30 @@ function createSandboxCapabilityPlan(
       timeoutMs: hook.timeoutMs ?? DEFAULT_SANDBOX_HOOK_TIMEOUT_MS
     }))
   );
+  const recoveryChecks = Object.freeze(selectedAgentClients.flatMap((adapter) =>
+    (adapter.sandbox.recoveryChecks ?? []).map((check) => Object.freeze({
+      adapterId: adapter.id,
+      check
+    }))
+  ));
+  const recoveryCheckProjection = Object.freeze(recoveryChecks.map(({ adapterId, check }) =>
+    Object.freeze({
+      adapterId,
+      id: check.id,
+      ...(check.when === undefined ? {} : { when: check.when }),
+      probe: check.probe,
+      finding: Object.freeze({
+        repairKind: check.finding.repairKind,
+        ...(check.finding.path === undefined ? {} : { path: check.finding.path })
+      }),
+      ...(check.repair === undefined ? {} : { repair: check.repair })
+    })
+  ));
   const runtimeProjection = Object.freeze({
     tools: Object.freeze(tools.map(runtimeToolProjection)),
     selectedAgentClients: Object.freeze(selectedAgentClients.map((adapter) => adapter.id)),
-    hooks: Object.freeze(hookProjection)
+    hooks: Object.freeze(hookProjection),
+    recoveryChecks: recoveryCheckProjection
   });
   const cleanupInventory = Object.freeze([
     agentInfraTool(config.home),
@@ -215,6 +252,7 @@ function createSandboxCapabilityPlan(
     tools,
     selectedAgentClients,
     hooksByPhase: phaseHooks,
+    recoveryChecks,
     aliases: Object.freeze(
       listAgentClientAdapters().flatMap((adapter) => adapter.sandbox.aliases)
     ),
@@ -227,7 +265,6 @@ function createSandboxCapabilityPlan(
 
 function timeoutStatus(phase: SandboxHookPhase): SandboxHookStatus {
   if (phase === 'before-enter') return 'warning';
-  if (phase === 'inspect-recovery') return 'hard-failure';
   return 'fatal';
 }
 
@@ -336,5 +373,6 @@ export type {
   HookExecutionResult,
   SandboxCapabilityConfig,
   SandboxCapabilityPlan,
+  PlannedAgentClientRecoveryCheck,
   SandboxRuntimeCapabilityProjection
 };

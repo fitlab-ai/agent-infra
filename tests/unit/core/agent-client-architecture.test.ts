@@ -23,10 +23,11 @@ type Finding = Readonly<{
 
 function findClientIdLiterals(
   sourceFile: SourceFile,
-  displayPath: string
+  displayPath: string,
+  clientIds: readonly string[] = AGENT_CLIENT_IDS
 ): Finding[] {
   const findings: Finding[] = [];
-  const ids = new Set<string>(AGENT_CLIENT_IDS);
+  const ids = new Set<string>(clientIds);
 
   function visit(node: Node): void {
     if (
@@ -84,6 +85,39 @@ test('generic Agent Client core contains no client-specific ID literals', () => 
       const sourceFile = project.program.getSourceFile(candidate);
       assert.ok(sourceFile, `expected ${displayPath} in the TypeScript program`);
       return findClientIdLiterals(sourceFile, displayPath);
+    });
+
+    assert.deepEqual(
+      findings,
+      [],
+      findings.map((finding) =>
+        `${finding.file}:${finding.line}:${finding.column} contains ${finding.value}`
+      ).join('\n')
+    );
+  } finally {
+    snapshot.dispose();
+    api.close();
+  }
+});
+
+test('generic sandbox lifecycle contains no Codex-specific ID literals', () => {
+  const candidates = [
+    filePath('lib/sandbox/commands/create.ts'),
+    filePath('lib/sandbox/recovery.ts')
+  ];
+  const api = new API({ cwd: filePath('.') });
+  const snapshot = api.updateSnapshot({
+    openProjects: [filePath('tsconfig.test.json')]
+  });
+
+  try {
+    const project = snapshot.getProjects()[0];
+    assert.ok(project);
+    const findings = candidates.flatMap((candidate) => {
+      const displayPath = path.relative(filePath('.'), candidate).replace(/\\/g, '/');
+      const sourceFile = project.program.getSourceFile(candidate);
+      assert.ok(sourceFile, `expected ${displayPath} in the TypeScript program`);
+      return findClientIdLiterals(sourceFile, displayPath, ['codex']);
     });
 
     assert.deepEqual(

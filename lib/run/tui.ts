@@ -1,3 +1,6 @@
+import { renderAgentClientInvocation } from '../agent-clients/invocation.ts';
+import { getAgentClientAdapter } from '../agent-clients/registry.ts';
+
 export type TuiName = 'claude' | 'codex' | 'gemini' | 'opencode';
 
 const TUI_NAMES = new Set(['claude', 'codex', 'gemini', 'opencode']);
@@ -27,7 +30,12 @@ export function selectTui(
 
 export function renderPrompt(params: { tui: TuiName; skill: string; args: string[] }): string {
   const suffix = [params.skill, ...params.args].join(' ').trim();
-  if (params.tui === 'codex') return `$${suffix}`;
+  if (params.tui === 'codex') {
+    return renderAgentClientInvocation(getAgentClientAdapter('codex').invocation, {
+      skillName: params.skill,
+      args: params.args
+    });
+  }
   if (params.tui === 'gemini') return `/agent-infra:${suffix}`;
   return `/${suffix}`;
 }

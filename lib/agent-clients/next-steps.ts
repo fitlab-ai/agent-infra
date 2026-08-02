@@ -1,4 +1,5 @@
 import { listEnabledAgentClientAdapters } from './registry.ts';
+import { renderAgentClientInvocation } from './invocation.ts';
 import type { CustomTUI } from './custom-tuis.ts';
 import type { AgentClientId, AgentClientState } from './types.ts';
 
@@ -26,18 +27,6 @@ function requireSafeName(value: string, field: string): void {
   }
 }
 
-function renderInvocation(
-  invocation: string,
-  projectName: string,
-  skillName: string,
-  taskRef: string | undefined
-): string {
-  const command = invocation
-    .replaceAll('${projectName}', projectName)
-    .replaceAll('${skillName}', skillName);
-  return taskRef === undefined ? command : `${command} ${taskRef}`;
-}
-
 function renderNextStepCommands(
   input: RenderNextStepsInput
 ): readonly NextStepCommand[] {
@@ -52,11 +41,13 @@ function renderNextStepCommands(
       source: 'builtin',
       clientId: adapter.id,
       displayName: adapter.displayName,
-      command: renderInvocation(
+      command: renderAgentClientInvocation(
         adapter.invocation,
-        input.projectName,
-        input.skillName,
-        input.taskRef
+        {
+          projectName: input.projectName,
+          skillName: input.skillName,
+          args: input.taskRef === undefined ? [] : [input.taskRef]
+        }
       )
     })
   );
@@ -64,11 +55,13 @@ function renderNextStepCommands(
     (tool): NextStepCommand => Object.freeze({
       source: 'custom',
       displayName: tool.name,
-      command: renderInvocation(
+      command: renderAgentClientInvocation(
         tool.invocation,
-        input.projectName,
-        input.skillName,
-        input.taskRef
+        {
+          projectName: input.projectName,
+          skillName: input.skillName,
+          args: input.taskRef === undefined ? [] : [input.taskRef]
+        }
       )
     })
   );

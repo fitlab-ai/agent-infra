@@ -387,6 +387,76 @@ test('registry exposes the exact built-in project asset matrix', () => {
   );
 });
 
+test('Codex adapter owns its lifecycle and recovery capabilities', () => {
+  const adapter = getAgentClientAdapter('codex');
+
+  assert.deepEqual(
+    adapter.sandbox.hooks.map(({ id, phase }) => ({ id, phase })),
+    [{ id: 'codex-before-container-create', phase: 'before-container-create' }]
+  );
+  assert.deepEqual(
+    adapter.sandbox.recoveryChecks?.map(({ id, finding }) => ({
+      id,
+      repairKind: finding.repairKind
+    })),
+    [
+      { id: 'command-available', repairKind: 'hard-failure' },
+      { id: 'state-writable', repairKind: 'permissions' },
+      { id: 'prompts-link', repairKind: 'builtin-link' }
+    ]
+  );
+  assert.ok(Object.isFrozen(adapter.sandbox.recoveryChecks));
+  assert.ok(adapter.sandbox.recoveryChecks?.every((check) => Object.isFrozen(check)));
+});
+
+test('adapter recovery checks validate probes, findings, repairs, and unique IDs', () => {
+  const validCheck = {
+    id: 'prompts-link',
+    probe: { script: 'test -L "$1"', args: ['/tmp/prompts'] },
+    finding: {
+      repairKind: 'builtin-link' as const,
+      message: 'Link is missing.',
+      path: '/tmp/prompts'
+    },
+    repair: {
+      user: 'devuser',
+      command: 'ln',
+      args: ['-sfn', '/workspace/commands', '/tmp/prompts']
+    }
+  };
+  const withChecks = (
+    recoveryChecks: AgentClientAdapter['sandbox']['recoveryChecks']
+  ): AgentClientAdapter => adapterInput({
+    sandbox: {
+      ...adapterInput().sandbox,
+      recoveryChecks
+    }
+  });
+
+  const adapter = defineAgentClientAdapter(withChecks([validCheck]));
+  assert.ok(Object.isFrozen(adapter.sandbox.recoveryChecks?.[0]?.probe.args));
+  assert.ok(Object.isFrozen(adapter.sandbox.recoveryChecks?.[0]?.repair?.args));
+
+  const invalidChecks: unknown[] = [
+    {},
+    [{ ...validCheck, id: 'INVALID' }],
+    [{ ...validCheck, probe: { script: '', args: [] } }],
+    [{ ...validCheck, finding: { repairKind: 'unknown', message: 'Bad.' } }],
+    [{
+      ...validCheck,
+      finding: { repairKind: 'permissions', message: 'Not writable.' },
+      repair: undefined
+    }],
+    [{ ...validCheck, repair: undefined }],
+    [validCheck, validCheck]
+  ];
+  for (const recoveryChecks of invalidChecks) {
+    assert.throws(() => defineAgentClientAdapter(withChecks(
+      recoveryChecks as AgentClientAdapter['sandbox']['recoveryChecks']
+    )));
+  }
+});
+
 test('adapter seed commands require owned literal targets and language templates', () => {
   assert.throws(() => defineAgentClientAdapter(adapterInput({
     project: {

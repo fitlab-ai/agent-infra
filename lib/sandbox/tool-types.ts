@@ -28,8 +28,7 @@ const SANDBOX_HOOK_PHASES = [
   'prepare',
   'before-container-create',
   'after-container-start',
-  'before-enter',
-  'inspect-recovery'
+  'before-enter'
 ] as const;
 
 type SandboxHookPhase = (typeof SANDBOX_HOOK_PHASES)[number];
@@ -58,12 +57,22 @@ type AgentClientSandboxHookResult = Readonly<{
   message?: string;
 }>;
 
+type SandboxResolvedToolState = Readonly<{
+  tool: SandboxTool;
+  dir: string;
+}>;
+
+type SandboxHookCreateContext = Readonly<{
+  hostHome: string;
+  resolvedTools: readonly SandboxResolvedToolState[];
+}>;
+
 type AgentClientSandboxHookContext = Readonly<{
   signal: AbortSignal;
   runCommand(command: SandboxHookCommand): Promise<SandboxHookCommandResult>;
   config?: Readonly<Record<string, unknown>>;
   plan?: Readonly<Record<string, unknown>>;
-  inspection?: Readonly<Record<string, unknown>>;
+  create?: SandboxHookCreateContext;
 }>;
 
 type AgentClientSandboxHook = Readonly<{
@@ -78,10 +87,37 @@ type SandboxToolContext = Readonly<{
   project: string;
 }>;
 
+type SandboxRecoveryProbe = Readonly<{
+  script: string;
+  args: readonly string[];
+  user?: string;
+}>;
+
+type SandboxRecoveryFindingDescriptor = Readonly<{
+  repairKind: 'permissions' | 'builtin-link' | 'hard-failure';
+  message: string;
+  path?: string;
+}>;
+
+type SandboxRecoveryRepair = Readonly<{
+  user: string;
+  command: string;
+  args: readonly string[];
+}>;
+
+type AgentClientSandboxRecoveryCheck = Readonly<{
+  id: string;
+  when?: SandboxRecoveryProbe;
+  probe: SandboxRecoveryProbe;
+  finding: SandboxRecoveryFindingDescriptor;
+  repair?: SandboxRecoveryRepair;
+}>;
+
 type AgentClientSandboxDescriptor = Readonly<{
   createTool(context: SandboxToolContext): SandboxTool;
   aliases: readonly SandboxAlias[];
   hooks: readonly AgentClientSandboxHook[];
+  recoveryChecks?: readonly AgentClientSandboxRecoveryCheck[];
 }>;
 
 export { SANDBOX_HOOK_PHASES };
@@ -90,11 +126,17 @@ export type {
   AgentClientSandboxHook,
   AgentClientSandboxHookContext,
   AgentClientSandboxHookResult,
+  AgentClientSandboxRecoveryCheck,
   SandboxAlias,
   SandboxHookCommand,
   SandboxHookCommandResult,
   SandboxHookPhase,
   SandboxHookStatus,
+  SandboxHookCreateContext,
+  SandboxRecoveryFindingDescriptor,
+  SandboxRecoveryProbe,
+  SandboxRecoveryRepair,
+  SandboxResolvedToolState,
   SandboxTool,
   SandboxToolContext,
   SandboxToolInstall

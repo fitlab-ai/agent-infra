@@ -1,5 +1,9 @@
 import { defineAgentClientAdapter } from '../adapter.ts';
 import { hostJoin } from '../../sandbox/engines/wsl2-paths.ts';
+import {
+  codexBeforeContainerCreateHook,
+  codexRecoveryChecks
+} from './codex-sandbox.ts';
 
 const codexAdapter = defineAgentClientAdapter({
   id: 'codex',
@@ -44,7 +48,8 @@ const codexAdapter = defineAgentClientAdapter({
       { name: 'codex-yolo', command: 'codex --yolo; tput ed' },
       { name: 'xy', command: 'codex --yolo; tput ed' }
     ],
-    hooks: []
+    hooks: [codexBeforeContainerCreateHook],
+    recoveryChecks: codexRecoveryChecks
   }
 });
 

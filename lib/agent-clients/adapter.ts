@@ -11,6 +11,7 @@ import {
   SANDBOX_HOOK_PHASES
 } from '../sandbox/tool-types.ts';
 import type {
+  AgentClientSandboxRecoveryCheck,
   AgentClientSandboxDescriptor,
   SandboxAlias,
   SandboxTool,
@@ -61,6 +62,28 @@ type AgentClientManifestEntry = Readonly<{
 const PROJECT_ASSET_CATEGORIES = ['managed', 'merged', 'ejected'] as const;
 const MAX_SANDBOX_HOOK_TIMEOUT_MS = 300_000;
 const TOOL_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+function freezeRecoveryProbe(
+  id: AgentClientId,
+  checkId: string,
+  value: AgentClientSandboxRecoveryCheck['probe']
+): AgentClientSandboxRecoveryCheck['probe'] {
+  if (
+    !value
+    || typeof value.script !== 'string'
+    || value.script.trim() === ''
+    || !Array.isArray(value.args)
+    || value.args.some((arg) => typeof arg !== 'string')
+    || (value.user !== undefined && (typeof value.user !== 'string' || value.user === ''))
+  ) {
+    throw new Error(`Agent Client '${id}' recovery check '${checkId}' has an invalid probe`);
+  }
+  return Object.freeze({
+    script: value.script,
+    args: Object.freeze([...value.args]),
+    ...(value.user === undefined ? {} : { user: value.user })
+  });
+}
 
 function freezeTool(tool: SandboxTool): SandboxTool {
   if (typeof tool.id !== 'string' || !TOOL_ID_PATTERN.test(tool.id)) {
@@ -328,6 +351,80 @@ function defineAgentClientAdapter(
     hookIds.add(hook.id);
     return Object.freeze({ ...hook });
   }));
+  const recoveryCheckIds = new Set<string>();
+  if (
+    candidate.sandbox.recoveryChecks !== undefined
+    && !Array.isArray(candidate.sandbox.recoveryChecks)
+  ) {
+    throw new Error(`Agent Client '${candidate.id}' has invalid recovery checks`);
+  }
+  const recoveryChecks = Object.freeze(
+    (candidate.sandbox.recoveryChecks ?? []).map((check) => {
+      if (
+        !check
+        || typeof check.id !== 'string'
+        || !TOOL_ID_PATTERN.test(check.id)
+        || recoveryCheckIds.has(check.id)
+      ) {
+        throw new Error(`Agent Client '${candidate.id}' has an invalid recovery check`);
+      }
+      const probe = freezeRecoveryProbe(candidate.id, check.id, check.probe);
+      const when = check.when === undefined
+        ? undefined
+        : freezeRecoveryProbe(candidate.id, check.id, check.when);
+      if (
+        !check.finding
+        || !['permissions', 'builtin-link', 'hard-failure'].includes(check.finding.repairKind)
+        || typeof check.finding.message !== 'string'
+        || check.finding.message.trim() === ''
+        || (
+          check.finding.path !== undefined
+          && (typeof check.finding.path !== 'string' || !check.finding.path.startsWith('/'))
+        )
+        || (
+          check.finding.repairKind === 'permissions'
+          && check.finding.path === undefined
+        )
+      ) {
+        throw new Error(
+          `Agent Client '${candidate.id}' recovery check '${check.id}' has an invalid finding`
+        );
+      }
+      let repair: AgentClientSandboxRecoveryCheck['repair'];
+      if (check.repair !== undefined) {
+        if (
+          typeof check.repair.user !== 'string'
+          || check.repair.user === ''
+          || typeof check.repair.command !== 'string'
+          || check.repair.command === ''
+          || !Array.isArray(check.repair.args)
+          || check.repair.args.some((arg: unknown) => typeof arg !== 'string')
+        ) {
+          throw new Error(
+            `Agent Client '${candidate.id}' recovery check '${check.id}' has an invalid repair`
+          );
+        }
+        repair = Object.freeze({
+          user: check.repair.user,
+          command: check.repair.command,
+          args: Object.freeze([...check.repair.args])
+        });
+      }
+      if (check.finding.repairKind === 'builtin-link' && repair === undefined) {
+        throw new Error(
+          `Agent Client '${candidate.id}' recovery check '${check.id}' requires a repair`
+        );
+      }
+      recoveryCheckIds.add(check.id);
+      return Object.freeze({
+        id: check.id,
+        ...(when === undefined ? {} : { when }),
+        probe,
+        finding: Object.freeze({ ...check.finding }),
+        ...(repair === undefined ? {} : { repair })
+      });
+    })
+  );
   const aliases = freezeAliases(candidate.id, candidate.sandbox.aliases);
   const createTool = (context: SandboxToolContext): SandboxTool => {
     const tool = freezeTool(candidate.sandbox.createTool(context));
@@ -349,7 +446,7 @@ function defineAgentClientAdapter(
       ...projectAssets,
       seedCommands: Object.freeze(seedCommands)
     }),
-    sandbox: Object.freeze({ createTool, aliases, hooks })
+    sandbox: Object.freeze({ createTool, aliases, hooks, recoveryChecks })
   });
 }
 

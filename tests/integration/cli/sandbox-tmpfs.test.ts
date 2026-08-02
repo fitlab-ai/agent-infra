@@ -52,12 +52,26 @@ function healthyRecoverySnapshot(): SandboxRecoverySnapshot {
       }
     ],
     aliasesReadable: true,
-    codex: {
-      commandAvailable: true,
-      stateWritable: true,
-      promptsSourceExists: true,
-      promptsValid: true
-    }
+    agentClientChecks: [{
+      adapterId: 'codex',
+      checkId: 'prompts-link',
+      applicable: true,
+      healthy: true,
+      finding: {
+        repairKind: 'builtin-link',
+        message: 'Codex prompts link does not point to the workspace commands directory.',
+        path: '/home/devuser/.codex/prompts'
+      },
+      repair: {
+        user: 'devuser',
+        command: 'ln',
+        args: [
+          '-sfn',
+          '/workspace/.codex/commands',
+          '/home/devuser/.codex/prompts'
+        ]
+      }
+    }]
   };
 }
 
@@ -150,7 +164,7 @@ test("recovery classification maps faults to the smallest repair kind", () => {
   );
 
   const prompts = healthyRecoverySnapshot();
-  prompts.codex!.promptsValid = false;
+  prompts.agentClientChecks[0]!.healthy = false;
   assert.deepEqual(
     classifySandboxRecovery(prompts).map((finding) => finding.repairKind),
     ["builtin-link"]
@@ -205,6 +219,19 @@ test("recovery accepts bind sources that resolve to the same filesystem object",
     );
     assert.equal(seedMount?.sourceMatches, true);
     assert.equal(seedMount?.sourceAccessible, true);
+    assert.deepEqual(
+      snapshot.agentClientChecks.map(({ adapterId, checkId, applicable, healthy }) => ({
+        adapterId,
+        checkId,
+        applicable,
+        healthy
+      })),
+      [
+        { adapterId: 'codex', checkId: 'command-available', applicable: true, healthy: true },
+        { adapterId: 'codex', checkId: 'state-writable', applicable: true, healthy: true },
+        { adapterId: 'codex', checkId: 'prompts-link', applicable: true, healthy: true }
+      ]
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -758,6 +785,13 @@ test("sandbox create skips missing tmpfs seed entries", onPlatforms("linux", "da
       dockerCalls.some((call) => call.includes("/run/agent-infra/tmpfs-seeds/codex/1")),
       false,
       `missing model-catalogs must not have a copy command, got ${JSON.stringify(dockerCalls)}`
+    );
+    assert.equal(
+      runCall.some((arg, index) =>
+        runCall[index - 1] === "-v" && isMountFor(arg, "/home/devuser/.codex/auth.json")
+      ),
+      false,
+      `missing host auth must not block create or add an auth mount, got ${JSON.stringify(runCall)}`
     );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

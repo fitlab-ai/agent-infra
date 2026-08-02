@@ -7,7 +7,6 @@ import type { ExecFileSyncOptions, StdioOptions } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
-import * as toml from 'smol-toml';
 import { listAgentClientAdapters } from '../../agent-clients/registry.ts';
 import type { SandboxAlias } from '../tool-types.ts';
 import { loadConfig } from '../config.ts';
@@ -84,6 +83,11 @@ import {
   parseImageLabels,
   parseRefreshTimestamp
 } from '../image-build.ts';
+
+export {
+  ensureCodexModelInheritance,
+  ensureCodexWorkspaceTrust
+} from '../../agent-clients/adapters/codex-sandbox.ts';
 
 const SANDBOX_ALIAS_BLOCK_BEGIN = '# >>> agent-infra managed aliases >>>';
 const SANDBOX_ALIAS_BLOCK_END = '# <<< agent-infra managed aliases <<<';
@@ -968,154 +972,6 @@ export function ensureClaudeSettings(toolDir: string, hostHomeDir?: string): voi
   }
 }
 
-function resolveHostCatalogPath(value: unknown, hostHomeDir: string): string | null {
-  if (typeof value !== 'string' || value === '') {
-    return null;
-  }
-  let resolved: string;
-  if (value === '~' || value.startsWith('~/') || value.startsWith('~\\')) {
-    resolved = path.join(hostHomeDir, value.slice(1).replace(/^[/\\]+/, ''));
-  } else if (path.isAbsolute(value)) {
-    resolved = value;
-  } else {
-    resolved = path.join(hostHomeDir, '.codex', value);
-  }
-  try {
-    if (!fs.statSync(resolved).isFile()) {
-      return null;
-    }
-    fs.accessSync(resolved, fs.constants.R_OK);
-    return resolved;
-  } catch {
-    return null;
-  }
-}
-
-const CODEX_DISABLED_FEATURE_FLAGS = ['apps', 'enable_mcp_apps'] as const;
-
-function removeCodexMcpServers(sandboxParsed: JsonObject): boolean {
-  if (!Object.hasOwn(sandboxParsed, 'mcp_servers')) {
-    return false;
-  }
-  delete sandboxParsed.mcp_servers;
-  return true;
-}
-
-function inheritDisabledCodexFeatureFlags(sandboxParsed: JsonObject, hostParsed: JsonObject): boolean {
-  if (!isJsonObjectRecord(hostParsed.features)) {
-    return false;
-  }
-  if (Object.hasOwn(sandboxParsed, 'features') && !isJsonObjectRecord(sandboxParsed.features)) {
-    return false;
-  }
-
-  let sandboxFeatures = sandboxParsed.features as JsonObject | undefined;
-  let changed = false;
-  for (const key of CODEX_DISABLED_FEATURE_FLAGS) {
-    if (hostParsed.features[key] !== false) {
-      continue;
-    }
-    if (!sandboxFeatures) {
-      sandboxFeatures = {};
-      sandboxParsed.features = sandboxFeatures;
-    }
-    if (sandboxFeatures[key] !== false) {
-      sandboxFeatures[key] = false;
-      changed = true;
-    }
-  }
-  return changed;
-}
-
-export function ensureCodexModelInheritance(
-  toolDir: string,
-  hostHomeDir?: string,
-  containerCodexDir: string = '/home/devuser/.codex'
-): void {
-  if (!hostHomeDir) {
-    return;
-  }
-
-  const hostConfigPath = path.join(hostHomeDir, '.codex', 'config.toml');
-  if (!fs.existsSync(hostConfigPath)) {
-    return;
-  }
-
-  let hostParsed: JsonObject;
-  try {
-    hostParsed = toml.parse(fs.readFileSync(hostConfigPath, 'utf8')) as JsonObject;
-  } catch {
-    return;
-  }
-
-  const sandboxConfigPath = path.join(toolDir, 'config.toml');
-  // This rewrites sandbox-side TOML and drops comments; the host config stays untouched.
-  let sandboxParsed: JsonObject = {};
-  if (fs.existsSync(sandboxConfigPath)) {
-    try {
-      sandboxParsed = toml.parse(fs.readFileSync(sandboxConfigPath, 'utf8')) as JsonObject;
-    } catch {
-      return;
-    }
-  }
-
-  let changed = removeCodexMcpServers(sandboxParsed);
-  changed = inheritDisabledCodexFeatureFlags(sandboxParsed, hostParsed) || changed;
-
-  const inheritSpecs: Array<readonly [string, 'string' | 'number']> = [
-    ['model', 'string'],
-    ['model_reasoning_effort', 'string'],
-    ['model_auto_compact_token_limit', 'number']
-  ];
-
-  for (const [key, type] of inheritSpecs) {
-    if (Object.hasOwn(sandboxParsed, key)) {
-      continue;
-    }
-    const value = hostParsed[key];
-    if (type === 'string' && (typeof value !== 'string' || value === '')) {
-      continue;
-    }
-    if (type === 'number' && (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)) {
-      continue;
-    }
-    sandboxParsed[key] = value;
-    changed = true;
-  }
-
-  if (!Object.hasOwn(sandboxParsed, 'model_catalog_json')) {
-    const hostCatalogPath = resolveHostCatalogPath(hostParsed['model_catalog_json'], hostHomeDir);
-    if (hostCatalogPath) {
-      try {
-        const basename = path.basename(hostCatalogPath);
-        const destDir = path.join(toolDir, 'model-catalogs');
-        fs.mkdirSync(destDir, { recursive: true });
-        fs.copyFileSync(hostCatalogPath, path.join(destDir, basename));
-        sandboxParsed['model_catalog_json'] = path.posix.join(containerCodexDir, 'model-catalogs', basename);
-        changed = true;
-      } catch {
-        // Copy failed (e.g. permissions): skip catalog, keep scalar inheritance intact.
-      }
-    }
-  }
-
-  if (changed) {
-    fs.writeFileSync(sandboxConfigPath, `${toml.stringify(sandboxParsed)}\n`, 'utf8');
-  }
-}
-
-export function ensureCodexWorkspaceTrust(toolDir: string): void {
-  const configPath = path.join(toolDir, 'config.toml');
-  let content = '';
-  if (fs.existsSync(configPath)) {
-    content = fs.readFileSync(configPath, 'utf8');
-  }
-  if (!content.includes('[projects."/workspace"]')) {
-    const entry = '\n[projects."/workspace"]\ntrust_level = "trusted"\n';
-    fs.writeFileSync(configPath, content + entry, 'utf8');
-  }
-}
-
 export function ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: string): void {
   if (!hostHomeDir) {
     return;
@@ -1640,7 +1496,14 @@ export async function create(args: string[]): Promise<void> {
             const beforeCreateResults = await runSandboxHooks({
               hooks: capabilityPlan.hooksByPhase['before-container-create'],
               phase: 'before-container-create',
-              context: { config: effectiveConfig, plan: capabilityPlan },
+              context: {
+                config: effectiveConfig,
+                plan: capabilityPlan,
+                create: {
+                  hostHome: effectiveConfig.home,
+                  resolvedTools: effectiveResolvedTools
+                }
+              },
               runCommand: runBoundedSandboxHookCommand
             });
             const beforeCreateFailure = beforeCreateResults.find(
@@ -1659,11 +1522,6 @@ export async function create(args: string[]): Promise<void> {
               // prepareClaudeCredentials wrote OAuth credentials or confirmed
               // provider/API settings are enough for Claude Code. If no usable
               // auth was present, the claude-code entry was removed above.
-            }
-            const codexEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'codex');
-            if (codexEntry) {
-              ensureCodexModelInheritance(codexEntry.dir, effectiveConfig.home, codexEntry.tool.containerMount);
-              ensureCodexWorkspaceTrust(codexEntry.dir);
             }
             const geminiEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'gemini-cli');
             if (geminiEntry) {

@@ -49,6 +49,18 @@ test('capability plan selects clients only from installInSandbox while preservin
   assert.deepEqual(plan.selectedAgentClients.map((adapter) => adapter.id), ['codex']);
   assert.deepEqual(plan.tools.map((tool) => tool.id), ['agent-infra', 'codex']);
   assert.equal(plan.tools.some((tool) => tool.id === 'gemini-cli'), false);
+  assert.deepEqual(
+    plan.hooksByPhase['before-container-create'].map((hook) => hook.id),
+    ['codex-before-container-create']
+  );
+  assert.deepEqual(
+    plan.recoveryChecks.map(({ adapterId, check }) => `${adapterId}:${check.id}`),
+    [
+      'codex:command-available',
+      'codex:state-writable',
+      'codex:prompts-link'
+    ]
+  );
 });
 
 test('canonical all-false state does not fall back to legacy client tool ids', () => {
@@ -75,6 +87,26 @@ test('runtime signature is host-path independent and changes with selected capab
   assert.equal(first.runtimeSignature, movedHome.runtimeSignature);
   assert.notEqual(first.runtimeSignature, changedSelection.runtimeSignature);
   assert.equal(JSON.stringify(first.runtimeProjection).includes('/host/alice'), false);
+  assert.deepEqual(
+    first.runtimeProjection.recoveryChecks.map((check) => ({
+      keys: Object.keys(check),
+      finding: check.finding
+    })),
+    [
+      {
+        keys: ['adapterId', 'id', 'probe', 'finding'],
+        finding: { repairKind: 'hard-failure' }
+      },
+      {
+        keys: ['adapterId', 'id', 'probe', 'finding'],
+        finding: { repairKind: 'permissions', path: '/home/devuser/.codex' }
+      },
+      {
+        keys: ['adapterId', 'id', 'when', 'probe', 'finding', 'repair'],
+        finding: { repairKind: 'builtin-link', path: '/home/devuser/.codex/prompts' }
+      }
+    ]
+  );
 });
 
 test('cleanup inventory includes every registered client independent of selection', () => {
@@ -138,7 +170,7 @@ test('hook timeout aborts the hook and maps to the phase failure policy', async 
   let observedSignal: AbortSignal | undefined;
   const hook: AgentClientSandboxHook = {
     id: 'stuck',
-    phase: 'inspect-recovery',
+    phase: 'before-container-create',
     timeoutMs: 12,
     run: async (context) => {
       observedSignal = context.signal;
@@ -148,7 +180,7 @@ test('hook timeout aborts the hook and maps to the phase failure policy', async 
 
   const pending = runSandboxHooks({
     hooks: [hook],
-    phase: 'inspect-recovery',
+    phase: 'before-container-create',
     context: {},
     scheduleTimeout: (callback) => {
       triggerTimeout = callback;
@@ -162,8 +194,8 @@ test('hook timeout aborts the hook and maps to the phase failure policy', async 
   assert.equal(observedSignal?.aborted, true);
   assert.deepEqual(results, [{
     hookId: 'stuck',
-    phase: 'inspect-recovery',
-    status: 'hard-failure',
+    phase: 'before-container-create',
+    status: 'fatal',
     message: "Sandbox hook 'stuck' timed out after 12ms."
   }]);
 });
@@ -195,7 +227,8 @@ test('recovery treats a stale runtime signature and disabled client mount as har
     mounts: [],
     tmpfs: [],
     seeds: [],
-    aliasesReadable: true
+    aliasesReadable: true,
+    agentClientChecks: []
   });
 
   assert.deepEqual(

@@ -8,6 +8,7 @@ import {
 import {
   renderNextStepCommands
 } from '../../../lib/agent-clients/next-steps.ts';
+import { renderAgentClientInvocation } from '../../../lib/agent-clients/invocation.ts';
 import { AGENT_CLIENT_IDS } from '../../../lib/agent-clients/types.ts';
 import type { AgentClientState } from '../../../lib/agent-clients/types.ts';
 
@@ -19,6 +20,21 @@ function stateFor(enabled: readonly string[]): AgentClientState {
     ])
   ) as AgentClientState;
 }
+
+test('shared invocation renderer expands adapter placeholders and appends arguments', () => {
+  assert.equal(
+    renderAgentClientInvocation('/${projectName}:${skillName}', {
+      projectName: 'demo',
+      skillName: 'review-code',
+      args: ['19', '--strict']
+    }),
+    '/demo:review-code 19 --strict'
+  );
+  assert.equal(
+    renderAgentClientInvocation('$${skillName}', { skillName: 'code-task' }),
+    '$code-task'
+  );
+});
 
 test('custom TUI contract is JSON-safe and normalization preserves valid input order', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(CUSTOM_TUI_CONTRACT)), CUSTOM_TUI_CONTRACT);
