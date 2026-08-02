@@ -10,8 +10,9 @@ import { extractSubSection } from '../sections.ts';
 const USAGE = `Usage: ai task decisions [--task <ref> | -t <ref>] [--item <selector> | -i <selector>] [options]
        ai task decisions <ref> [selector] [options]
 
-Lists decision items recorded in a task's review disagreement
-ledger, or prints the full detail block for a single item. Read-only.
+Shows what still needs a maintainer's decision. Without a selector, it lists
+the choices. With a selector, it shows the explanation and how to respond.
+Read-only.
 
   Omit <ref>     Resolve the unique active task for the current branch.
   <ref>          Legacy positional task ref.
@@ -150,29 +151,31 @@ function findDecisionRecord(id: string, content: string): string[] {
 function titleOf(row: LedgerRow, taskDir: string): string {
   const block = findDetailBlock(row, taskDir);
   if (block) {
-    return block
+    const title = block
       .split('\n')[0]!
       .replace(/^###\s+/, '')
       .replace(/\s*\[needs-human-decision\]\s*$/, '')
       .trim();
+    return title.replace(new RegExp(`^${row.id}\\s*[:：]\\s*`, 'i'), '').trim();
   }
-  return row.evidence || '(无详情)';
+  return '(explanation unavailable)';
+}
+
+function trackingOf(row: LedgerRow): string {
+  return `stage=${row.stage} · severity=${row.severity} · status=${row.status} · evidence=${row.evidence}`;
 }
 
 function renderList(rows: LedgerRow[], format: string, taskDir: string): void {
   if (rows.length === 0) {
-    process.stdout.write('无待裁决项。\n');
+    process.stdout.write('No pending decisions.\n');
     return;
   }
-  const headers = ['#', 'ID', 'STAGE', 'SEVERITY', 'STATUS', 'EVIDENCE', 'TITLE'];
+  const headers = ['#', 'CHOICE', 'WHAT NEEDS A DECISION', 'TRACKING'];
   const data = rows.map((r, i) => [
     String(i + 1),
     r.id,
-    r.stage,
-    r.severity,
-    r.status,
-    r.evidence,
-    titleOf(r, taskDir)
+    titleOf(r, taskDir),
+    trackingOf(r)
   ]);
   if (format === 'markdown') {
     const sep = headers.map(() => '---');
@@ -181,10 +184,29 @@ function renderList(rows: LedgerRow[], format: string, taskDir: string): void {
       `| ${sep.join(' | ')} |`,
       ...data.map((row) => `| ${row.join(' | ')} |`)
     ];
-    process.stdout.write(`${md.join('\n')}\n`);
+    process.stdout.write(`${md.join('\n')}\n\nView one item: ai task decisions <task-ref> <ordinal|ledger-id>\n`);
     return;
   }
-  process.stdout.write(`${formatTable(headers, data).join('\n')}\n`);
+  process.stdout.write(`${formatTable(headers, data).join('\n')}\n\nView one item: ai task decisions <task-ref> <ordinal|ledger-id>\n`);
+}
+
+function renderTracking(row: LedgerRow, format: string): string[] {
+  if (format === 'markdown') {
+    return [
+      '**Tracking**',
+      `- stage: \`${row.stage}\``,
+      `- severity: \`${row.severity}\``,
+      `- status: \`${row.status}\``,
+      `- evidence: \`${row.evidence}\``
+    ];
+  }
+  return [
+    'Tracking:',
+    `stage: ${row.stage}`,
+    `severity: ${row.severity}`,
+    `status: ${row.status}`,
+    `evidence: ${row.evidence}`
+  ];
 }
 
 function renderDetail(
@@ -201,25 +223,36 @@ function renderDetail(
   }
   const r = selected.row;
   const block = findDetailBlock(r, taskDir);
+  const title = titleOf(r, taskDir);
   const lines: string[] = [];
+  const decided = r.status === 'human-decided';
   if (format === 'markdown') {
-    lines.push(`**${r.id}** (${r.stage}/${r.severity}) · status=\`${r.status}\` · evidence: \`${r.evidence}\``, '');
+    lines.push(`## ${decided ? 'Decision already recorded' : 'Decision needed'}: ${title}`, '');
+    if (!decided) {
+      lines.push('**How to record your choice**', `\`ai decide <task-ref> ${r.id} <your choice and rationale>\``, '');
+    }
+    lines.push('**Original context**', '');
   } else {
-    lines.push(`${r.id} (${r.stage}/${r.severity}) status=${r.status}`, `evidence: ${r.evidence}`, '');
+    lines.push(`${decided ? 'Decision already recorded' : 'Decision needed'}: ${title}`, '');
+    if (!decided) {
+      lines.push('How to record your choice:', `ai decide <task-ref> ${r.id} <your choice and rationale>`, '');
+    }
+    lines.push('Original context:');
   }
   if (block) {
     lines.push(block);
   } else {
     lines.push(
-      `（详情块未找到：未在任务产物中定位到 \`### ${r.id}\` 锚点，可能为历史产物或尚未写入；evidence 指向 ${r.evidence}）`
+      `This older task does not include a full explanation for ${r.id}.`,
+      'Use the tracking reference below to find the original context.'
     );
   }
-  if (r.status === 'human-decided') {
+  if (decided) {
     const record = findDecisionRecord(r.id, content);
-    if (record.length) {
-      lines.push('', '人工裁定：', ...record);
-    }
+    lines.push('', format === 'markdown' ? '**Recorded choice**' : 'Recorded choice:');
+    lines.push(...(record.length ? record : ['No separate ruling record was found.']));
   }
+  lines.push('', ...renderTracking(r, format));
   process.stdout.write(`${lines.join('\n')}\n`);
 }
 

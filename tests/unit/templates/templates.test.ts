@@ -129,39 +129,34 @@ test("required template files were migrated into templates/", () => {
 });
 
 test("human-decision context rules define complete comparable option blocks", () => {
-  for (const [relativePath, fields, optionPattern, benefit, cost] of [
-    [
-      ".agents/rules/human-decision-context.md",
-      ["背景", "裁决目标", "影响范围", "风险", "推荐方案", "推荐理由"],
-      /^#### 方案 [A-Z]：/gm,
-      "收益",
-      "代价"
-    ],
-    [
-      "templates/.agents/rules/human-decision-context.en.md",
-      ["Background", "Decision Objective", "Impact Scope", "Risks", "Recommended Option", "Recommendation Rationale"],
-      /^#### Option [A-Z]:/gm,
-      "Benefits",
-      "Costs"
-    ],
-    [
-      "templates/.agents/rules/human-decision-context.zh-CN.md",
-      ["背景", "裁决目标", "影响范围", "风险", "推荐方案", "推荐理由"],
-      /^#### 方案 [A-Z]：/gm,
-      "收益",
-      "代价"
-    ]
-  ] as Array<[string, string[], RegExp, string, string]>) {
+  for (const relativePath of [
+    ".agents/rules/human-decision-context.md",
+    "templates/.agents/rules/human-decision-context.en.md",
+    "templates/.agents/rules/human-decision-context.zh-CN.md"
+  ]) {
     const content = read(relativePath);
-    fields.forEach((field) => assert.match(content, new RegExp(`^- \\*\\*${escapeRegExp(field)}\\*\\*`, "m")));
-    const options = [...content.matchAll(optionPattern)];
-    assert.ok(options.length >= 2, `${relativePath} should define at least two options`);
-    options.forEach((option, index) => {
+    const canonical = /```markdown\n([\s\S]*?)\n```/.exec(content)?.[1];
+    assert.ok(canonical, `${relativePath} should include a canonical markdown block`);
+
+    const optionHeadings = [...canonical.matchAll(/^####\s+.+$/gm)];
+    assert.ok(optionHeadings.length >= 2, `${relativePath} should define at least two options`);
+
+    const summary = canonical.slice(0, optionHeadings[0]?.index);
+    assert.match(summary, /^###\s+\{AN-N\|PL-N\|CD-N\|HD-N\}[:：].+\[needs-human-decision\]$/m);
+    const summaryFields = [...summary.matchAll(/^- \*\*([^*]+)\*\*[:：]\s*.+$/gm)];
+    assert.equal(summaryFields.length, 6, `${relativePath} should define six summary fields`);
+    assert.equal(new Set(summaryFields.map((match) => match[1])).size, 6, `${relativePath} summary labels should be unique`);
+
+    let optionLabels: string[] | undefined;
+    optionHeadings.forEach((option, index) => {
       const start = option.index ?? 0;
-      const end = options[index + 1]?.index ?? content.indexOf("```", start);
-      const block = content.slice(start, end);
-      assert.match(block, new RegExp(`^- \\*\\*${escapeRegExp(benefit)}\\*\\*`, "m"));
-      assert.match(block, new RegExp(`^- \\*\\*${escapeRegExp(cost)}\\*\\*`, "m"));
+      const end = optionHeadings[index + 1]?.index ?? canonical.length;
+      const fields = [...canonical.slice(start, end).matchAll(/^- \*\*([^*]+)\*\*[:：]\s*.+$/gm)];
+      assert.equal(fields.length, 2, `${relativePath} option ${index + 1} should define two comparison fields`);
+      const labels = fields.map((match) => match[1]!);
+      assert.equal(new Set(labels).size, 2, `${relativePath} option ${index + 1} labels should be unique`);
+      optionLabels ??= labels;
+      assert.deepEqual(labels, optionLabels, `${relativePath} options should use the same comparison fields`);
     });
   }
 });

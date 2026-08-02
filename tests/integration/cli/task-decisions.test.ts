@@ -54,6 +54,7 @@ function runCli(args: string[], cwd: string) {
 
 const AN1_BLOCK = '### AN-1：分析边界待裁定 [needs-human-decision]\n\n- **说明**：分析 finding 已升级。\n';
 const HD1_BLOCK = '### HD-1：引用入口是否扩展 [needs-human-decision]\n\n- **背景**：是否支持更多入口。\n- **推荐**：(A) 仅三种标准形式。\n';
+const HD2_BLOCK = '### HD-2：裁定记录放在哪里 [needs-human-decision]\n\n- **背景**：需要确定裁定记录的位置。\n- **推荐**：(A) 使用独立段落。\n';
 const PL1_BLOCK = '### PL-1：方案回退范围 [needs-human-decision]\n\n- **说明**：方案 finding 已升级。\n';
 const CD1_BLOCK = '### CD-1：实现兼容边界 [needs-human-decision]\n\n- **说明**：代码 finding 已升级。\n';
 const HD3_BLOCK = '### HD-3：命令输出格式 [needs-human-decision]\n\n- **背景**：markdown 细节。\n- **推荐**：附锚点文本。\n';
@@ -80,7 +81,7 @@ function writeCanonical(activeDir: string, taskId: string): void {
         'analysis.md': `# 分析\n\n## 人工裁决待办\n\n${HD1_BLOCK}`,
         'review-plan-r3.md': `# 方案审查\n\n${PL1_BLOCK}`,
         'code-r3.md': `# 实现\n\n${CD1_BLOCK}`,
-        'plan.md': `# 方案\n\n## 人工裁决待办\n\n${HD3_BLOCK}`
+        'plan.md': `# 方案\n\n## 人工裁决待办\n\n${HD2_BLOCK}\n${HD3_BLOCK}`
       },
       decisionRecords: ['- 2026-06-29 09:36:59+08:00 — **HD-2**：选择 A，采用独立段。']
     }
@@ -121,6 +122,8 @@ test('A3: --help exits 0; no args requires a matching current context', () => {
   const help = runCli(['task', 'd', '--help'], repoRoot);
   assert.equal(help.status, 0);
   assert.match(help.stdout, /Usage: ai task decisions/);
+  assert.match(help.stdout, /Read-only\./);
+  assert.match(help.stdout, /Ordinal \(1-based\) or ledger id/);
   const none = runCli(['task', 'd'], repoRoot);
   assert.equal(none.status, 1);
   assert.match(none.stderr, /no active task matches current branch/);
@@ -132,15 +135,55 @@ test('A4: default list shows pending decision rows from every review stage', () 
   writeCanonical(activeDir, taskId);
   const out = runCli(['task', 'd', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
-  assert.match(out.stdout, /AN-1\s+analysis\s+minor\s+needs-human-decision\s+review-analysis-r2\.md#AN-1/);
-  assert.match(out.stdout, /HD-1\s+analysis\s+decision\s+needs-human-decision\s+analysis\.md#HD-1/);
-  assert.match(out.stdout, /PL-1\s+plan\s+blocker\s+needs-human-decision\s+review-plan-r3\.md#PL-1/);
-  assert.match(out.stdout, /CD-1\s+code\s+blocker\s+needs-human-decision\s+code-r3\.md#CD-1/);
-  assert.match(out.stdout, /HD-3\s+plan\s+decision\s+needs-human-decision\s+plan\.md#HD-3/);
+  assert.match(out.stdout, /#\s+CHOICE\s+WHAT NEEDS A DECISION\s+TRACKING/);
+  assert.match(out.stdout, /AN-1\s+分析边界待裁定\s+stage=analysis · severity=minor · status=needs-human-decision · evidence=review-analysis-r2\.md#AN-1/);
+  assert.match(out.stdout, /HD-1\s+引用入口是否扩展\s+stage=analysis · severity=decision · status=needs-human-decision · evidence=analysis\.md#HD-1/);
+  assert.match(out.stdout, /PL-1\s+方案回退范围\s+stage=plan · severity=blocker · status=needs-human-decision · evidence=review-plan-r3\.md#PL-1/);
+  assert.match(out.stdout, /CD-1\s+实现兼容边界\s+stage=code · severity=blocker · status=needs-human-decision · evidence=code-r3\.md#CD-1/);
+  assert.match(out.stdout, /HD-3\s+命令输出格式\s+stage=plan · severity=decision · status=needs-human-decision · evidence=plan\.md#HD-3/);
   assert.doesNotMatch(out.stdout, /HD-2/);
   assert.doesNotMatch(out.stdout, /AN-2/);
   assert.doesNotMatch(out.stdout, /PRC-1/);
-  assert.match(out.stdout, /引用入口是否扩展/);
+  assert.match(out.stdout, /View one item: ai task decisions <task-ref> <ordinal\|ledger-id>/);
+});
+
+test('CD-2 review: title cleanup keeps numeric-prefix ids distinct', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000012';
+  writeTask(activeDir, taskId, [
+    '| AN-1 | analysis | 1 | minor | needs-human-decision | analysis.md#AN-1 |',
+    '| AN-11 | analysis | 1 | minor | needs-human-decision | analysis.md#AN-11 |'
+  ], {
+    artifacts: {
+      'analysis.md': [
+        '# 分析',
+        '',
+        '### AN-1：短编号选择 [needs-human-decision]',
+        '',
+        '- **说明**：短编号。',
+        '',
+        '### AN-11：多位编号选择 [needs-human-decision]',
+        '',
+        '- **说明**：多位编号。',
+        ''
+      ].join('\n')
+    }
+  });
+
+  const list = runCli(['task', 'd', taskId], repoRoot);
+  assert.equal(list.status, 0, list.stderr);
+  assert.match(list.stdout, /AN-1\s+短编号选择\s+stage=analysis/);
+  assert.match(list.stdout, /AN-11\s+多位编号选择\s+stage=analysis/);
+
+  const short = runCli(['task', 'd', taskId, 'AN-1'], repoRoot);
+  assert.equal(short.status, 0, short.stderr);
+  assert.match(short.stdout, /Decision needed: 短编号选择/);
+  assert.match(short.stdout, /### AN-1：短编号选择/);
+
+  const long = runCli(['task', 'd', taskId, 'AN-11'], repoRoot);
+  assert.equal(long.status, 0, long.stderr);
+  assert.match(long.stdout, /Decision needed: 多位编号选择/);
+  assert.match(long.stdout, /### AN-11：多位编号选择/);
 });
 
 test('A5: empty candidate set prints a notice and exits 0', () => {
@@ -150,7 +193,7 @@ test('A5: empty candidate set prints a notice and exits 0', () => {
   writeTask(activeDir, taskId, ['| HD-1 | analysis | - | decision | human-decided | task.md#人工裁决 |']);
   const out = runCli(['task', 'd', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
-  assert.match(out.stdout, /无待裁决项/);
+  assert.equal(out.stdout, 'No pending decisions.\n');
 });
 
 test('A6: select a review finding by ordinal and ledger id', () => {
@@ -159,7 +202,12 @@ test('A6: select a review finding by ordinal and ledger id', () => {
   writeCanonical(activeDir, taskId);
   const byId = runCli(['task', 'd', taskId, 'PL-1'], repoRoot);
   assert.equal(byId.status, 0, byId.stderr);
+  assert.match(byId.stdout, /Decision needed: 方案回退范围/);
+  assert.match(byId.stdout, /How to record your choice:\nai decide <task-ref> PL-1 <your choice and rationale>/);
   assert.match(byId.stdout, /### PL-1：方案回退范围/);
+  assert.match(byId.stdout, /Tracking:\nstage: plan\nseverity: blocker\nstatus: needs-human-decision\nevidence: review-plan-r3\.md#PL-1/);
+  assert.ok(byId.stdout.indexOf('Decision needed:') < byId.stdout.indexOf('### PL-1'));
+  assert.ok(byId.stdout.indexOf('### PL-1') < byId.stdout.indexOf('Tracking:'));
   const byOrdinal = runCli(['task', 'd', taskId, '3'], repoRoot);
   assert.equal(byOrdinal.status, 0, byOrdinal.stderr);
   assert.match(byOrdinal.stdout, /### PL-1：方案回退范围/);
@@ -172,7 +220,7 @@ test('A7: --all includes decided rows; --stage filters; --format markdown', () =
 
   const all = runCli(['task', 'd', taskId, '--all'], repoRoot);
   assert.equal(all.status, 0, all.stderr);
-  assert.match(all.stdout, /HD-2\s+plan\s+decision\s+human-decided/);
+  assert.match(all.stdout, /HD-2\s+裁定记录放在哪里\s+stage=plan · severity=decision · status=human-decided/);
   assert.doesNotMatch(all.stdout, /PRC-1/);
 
   const stage = runCli(['task', 'd', taskId, '--all', '--stage', 'analysis'], repoRoot);
@@ -185,7 +233,7 @@ test('A7: --all includes decided rows; --stage filters; --format markdown', () =
 
   const md = runCli(['task', 'd', taskId, '--format', 'markdown'], repoRoot);
   assert.equal(md.status, 0, md.stderr);
-  assert.match(md.stdout, /^\| # \| ID \| STAGE \|/m);
+  assert.match(md.stdout, /^\| # \| CHOICE \| WHAT NEEDS A DECISION \| TRACKING \|$/m);
 
   const badStage = runCli(['task', 'd', taskId, '--stage', 'bogus'], repoRoot);
   assert.equal(badStage.status, 1);
@@ -217,7 +265,24 @@ test('CD-1: decided detail finds records under the Human Rulings heading', () =>
 
   const out = runCli(['task', 'd', taskId, '--all', 'HD-2'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
-  assert.match(out.stdout, /人工裁定：\n- \*\*Original Ledger ID\*\*: HD-2/);
+  assert.match(out.stdout, /Decision already recorded:/);
+  assert.match(out.stdout, /Recorded choice:\n- \*\*Original Ledger ID\*\*: HD-2/);
+  assert.match(out.stdout, /Tracking:\nstage: plan\nseverity: decision\nstatus: human-decided/);
+  assert.ok(out.stdout.indexOf('Decision already recorded:') < out.stdout.indexOf('Recorded choice:'));
+  assert.ok(out.stdout.indexOf('Recorded choice:') < out.stdout.indexOf('Tracking:'));
+});
+
+test('CD-2: decided detail keeps the original context without asking for another decision', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000011';
+  writeCanonical(activeDir, taskId);
+
+  const out = runCli(['task', 'd', taskId, '--all', 'HD-2'], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /Decision already recorded: 裁定记录放在哪里/);
+  assert.match(out.stdout, /Original context:\n### HD-2：裁定记录放在哪里/);
+  assert.match(out.stdout, /Recorded choice:\n- 2026-06-29/);
+  assert.match(out.stdout, /Tracking:/);
 });
 
 test('B3: missing detail block degrades gracefully and exits 0', () => {
@@ -226,7 +291,9 @@ test('B3: missing detail block degrades gracefully and exits 0', () => {
   writeTask(activeDir, taskId, ['| CD-9 | code | 3 | blocker | needs-human-decision | review-code-r3.md#CD-9 |']);
   const out = runCli(['task', 'd', taskId, 'CD-9'], repoRoot);
   assert.equal(out.status, 0, out.stderr);
-  assert.match(out.stdout, /详情块未找到/);
+  assert.match(out.stdout, /This older task does not include a full explanation for CD-9\./);
+  assert.match(out.stdout, /Use the tracking reference below to find the original context\./);
+  assert.match(out.stdout, /Tracking:\nstage: code\nseverity: blocker\nstatus: needs-human-decision\nevidence: review-code-r3\.md#CD-9/);
 });
 
 test('PL-2: duplicate ledger id fails closed for id and ordinal selectors', () => {

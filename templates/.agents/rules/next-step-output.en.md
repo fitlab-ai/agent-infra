@@ -102,21 +102,22 @@ This section is a **third standalone rule, co-equal with the two above**, used o
 - **`{h} > 0`**: insert the block below **before** the selected scenario's "Next steps - <stage>" commands. This round may list only current-artifact revision and re-review commands, never cross-stage commands.
 
 ```text
-⚠️ Pending human decisions ({h}) — please rule on each before continuing to the next stage:
-  - {ledger-id} ({stage}/{severity}): {summary}
-    Location: the matching row in task.md `## 审查分歧账本` · Evidence: {evidence}
-  …(one entry per status=needs-human-decision row of this stage in task.md `## 审查分歧账本`)
+⚠️ Work cannot continue yet: {h} item(s) need your decision.
+  - {ledger-id}: {summary}
+  …(one entry for each pending item in this review stage)
 
-View details:
-  - All pending decisions: ai task decisions {task-ref}
-  - A single item's full background/options/impact/recommendation: ai task decisions {task-ref} <ordinal|ledger-id>
+First, understand the choice:
+  - View all pending items: ai task decisions {task-ref}
+  - View one item's full explanation, options, and recommendation: ai task decisions {task-ref} <ordinal|ledger-id>
 
-To resolve:
-  - ai decide {task-ref} <ordinal|ledger-id> <decision and rationale>
+Then record your choice:
+  - ai decide {task-ref} <ordinal|ledger-id> <your choice and rationale>
 
-This command atomically creates the `HDR-N` ruling record, flips the target ledger row to `human-decided`, and updates evidence and the activity log; do not manually edit only part of the transaction.
+This command saves the ruling and updates the task state as one operation. Do not manually edit only part of task.md. After every choice is recorded, rerun the current review; if nothing else blocks progress, it will show the next-stage commands.
 
-Note: until all those rows are flipped to `human-decided`, the stage gate blocks advancement (`needs-human-decision` is non-terminal). After the decisions, rerun the current review and let its new `stage-status` decide whether next-stage commands may be shown.
+For troubleshooting only:
+  - {ledger-id} · stage (where it was found): {stage} · severity (impact level): {severity}
+    evidence (original explanation): {evidence}
 ```
 
-Field values: `{ledger-id}` / `{stage}` / `{severity}` / `{evidence}` come from the same-named columns of the matching `## 审查分歧账本` row; `{summary}` comes from the artifact anchor referenced by `{evidence}` (e.g. the decision title at `plan.md#HD-1`), falling back to a one-line summary of the finding when no anchor title exists.
+Field values: `{ledger-id}`, `{stage}`, `{severity}`, and `{evidence}` come from the matching `## 审查分歧账本` row. `{summary}` comes from the title referenced by `{evidence}` (for example, `plan.md#HD-1`), with a one-line problem summary as the fallback.

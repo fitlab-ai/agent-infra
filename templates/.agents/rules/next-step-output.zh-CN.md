@@ -102,21 +102,22 @@ Completed at: YYYY-MM-DD HH:mm:ss
 - **`{h} > 0`**：在选定场景的「下一步 - <阶段>」命令**之前**插入下面的块；本轮只能列当前产物的修订与复审路径，不得列跨阶段命令。
 
 ```text
-⚠️ 待人工裁决（{h} 项）—— 请先逐项裁决，再继续下一阶段：
-  - {ledger-id}（{stage}/{severity}）：{摘要}
-    位置：task.md `## 审查分歧账本` 对应行 · 证据：{evidence}
-  …（task.md `## 审查分歧账本` 中本阶段每个 status=needs-human-decision 行一条）
+⚠️ 现在还不能继续：有 {h} 件事需要你决定。
+  - {ledger-id}：{摘要}
+  …（本阶段每个待决定事项一条）
 
-查看详情：
-  - 全部待裁决项：ai task decisions {task-ref}
-  - 单项完整背景/选项/影响/建议：ai task decisions {task-ref} <序号|账本ID>
+先看懂问题：
+  - 查看全部待决定事项：ai task decisions {task-ref}
+  - 查看一项的完整说明、可选方案和建议：ai task decisions {task-ref} <序号|账本ID>
 
-完成裁决：
-  - ai decide {task-ref} <序号|账本ID> <裁决内容与理由>
+再记录你的选择：
+  - ai decide {task-ref} <序号|账本ID> <你的选择和理由>
 
-该命令原子写入 `HDR-N` 裁定记录、把目标账本行翻为 `human-decided`、更新 evidence 与活动日志；不要手工只修改其中一部分。
+这个命令会一次性保存裁定记录并更新任务状态，不要手工只改 task.md 的一部分。全部选择记录完成后，重新执行当前 review；如果没有其他问题，流程就会给出下一阶段命令。
 
-说明：在上述行全部翻为 `human-decided` 之前，阶段 gate 会拦截推进（`needs-human-decision` 为非终态）；裁决完成后重新执行当前 review，由新的 `stage-status` 结果决定是否展示下一阶段命令。
+需要排查时再看：
+  - {ledger-id} · 环节（stage）：{stage} · 影响级别（severity）：{severity}
+    原始说明位置（evidence）：{evidence}
 ```
 
-字段取值：`{ledger-id}` / `{stage}` / `{severity}` / `{evidence}` 直接取自 `## 审查分歧账本` 对应行的同名列；`{摘要}` 取自 `{evidence}` 指向的产物锚点条目（如 `plan.md#HD-1` 的决策标题），无锚点标题时用该 finding 的一句话概述。
+字段取值：`{ledger-id}` / `{stage}` / `{severity}` / `{evidence}` 直接取自 `## 审查分歧账本` 对应行；`{摘要}` 取自 `{evidence}` 指向的产物标题（如 `plan.md#HD-1`），找不到标题时使用一句话问题概述。stage 表示问题出现在哪个工作环节，severity 表示影响级别，evidence 表示原始说明所在位置。
