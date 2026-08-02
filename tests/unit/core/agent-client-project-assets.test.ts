@@ -33,6 +33,7 @@ test('project asset planning preserves user entries and appends enabled assets c
       'docs/user.md',
       '.opencode/commands/',
       '.codex/hooks.json',
+      '.codex/agents/',
       '.agents/README.md'
     ],
     merged: ['settings/user.json', '.gitignore'],
@@ -40,10 +41,12 @@ test('project asset planning preserves user entries and appends enabled assets c
   });
   assert.deepEqual(plan.enabledManaged, [
     '.codex/hooks.json',
+    '.codex/agents/',
     '.opencode/commands/'
   ]);
   assert.deepEqual(plan.disabledManaged, [
     '.claude/commands/',
+    '.claude/agents/',
     '.gemini/commands/'
   ]);
 });

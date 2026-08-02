@@ -11,6 +11,8 @@ description: >
 
 更新关联 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 
+直接调用仍要求用户显式授权。若存在 active orchestration run，只有未消费的一次性 `commitAuthorization` 可作为本轮等价授权；提交成功后必须由 orchestration core 消费，其他提交门禁保持不变。
+
 ## 常见违规借口与反驳
 
 | 借口 | 反驳 |
@@ -141,6 +143,14 @@ agent-infra-internal task-verify {task-id} commit.completed --format text
 - 退出码 2（网络中断）-> 停止执行并告知用户需要人工介入
 
 将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
+
+校验通过后，声明编排中的 commit 阶段已完成；无 active orchestration run 时该命令为 no-op，不改变直接提交路径：
+
+```bash
+agent-infra-internal task-orchestration {task-id} stage-completed --agent {agent}
+```
+
+命令失败时停止，不得把缺少完整 receipt 生命周期的 run 标记为完成。
 
 ## 注意事项
 

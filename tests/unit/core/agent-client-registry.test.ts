@@ -32,6 +32,8 @@ const CAPABILITY_MATRIX = {
     skills: 'compatible',
     commands: 'integrated',
     hooks: 'integrated',
+    subagents: 'experimental',
+    orchestration: 'experimental',
     sandbox: 'integrated',
     verification: 'compatible'
   },
@@ -40,6 +42,8 @@ const CAPABILITY_MATRIX = {
     skills: 'compatible',
     commands: 'integrated',
     hooks: 'integrated',
+    subagents: 'experimental',
+    orchestration: 'experimental',
     sandbox: 'integrated',
     verification: 'compatible'
   },
@@ -48,6 +52,8 @@ const CAPABILITY_MATRIX = {
     skills: 'compatible',
     commands: 'integrated',
     hooks: 'compatible',
+    subagents: 'unsupported',
+    orchestration: 'unsupported',
     sandbox: 'integrated',
     verification: 'compatible'
   },
@@ -56,6 +62,8 @@ const CAPABILITY_MATRIX = {
     skills: 'compatible',
     commands: 'integrated',
     hooks: 'compatible',
+    subagents: 'unsupported',
+    orchestration: 'unsupported',
     sandbox: 'integrated',
     verification: 'compatible'
   }
@@ -339,7 +347,7 @@ test('registry exposes the exact built-in project asset matrix', () => {
     {
       'claude-code': {
         ownedPathPrefixes: ['.claude/'],
-        managed: ['.claude/commands/'],
+        managed: ['.claude/commands/', '.claude/agents/'],
         merged: ['.claude/settings.json'],
         ejected: [],
         seedCommands: [{
@@ -352,7 +360,7 @@ test('registry exposes the exact built-in project asset matrix', () => {
       },
       codex: {
         ownedPathPrefixes: ['.codex/'],
-        managed: ['.codex/hooks.json'],
+        managed: ['.codex/hooks.json', '.codex/agents/'],
         merged: [],
         ejected: [],
         seedCommands: []

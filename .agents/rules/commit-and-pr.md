@@ -11,6 +11,7 @@
 
 - 绝对不要自动执行 `git commit` 或 `git add`
 - 仅在用户明确发起提交命令时才进入提交流程
+- 唯一例外：用户显式启动的 active `run-task` 可签发一次性 commit authorization；它等价于本轮提交授权，但不得放宽暂存、敏感文件、版权、测试、审查快照、HEAD/tree 或 push 门禁。
 - 完成代码修改后，提醒用户使用对应 TUI 的提交命令
 
 ## PR 提交规则

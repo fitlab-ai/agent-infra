@@ -14,12 +14,14 @@ const codexAdapter = defineAgentClientAdapter({
     skills: { level: 'compatible' },
     commands: { level: 'integrated' },
     hooks: { level: 'integrated' },
+    subagents: { level: 'experimental' },
+    orchestration: { level: 'experimental' },
     sandbox: { level: 'integrated' },
     verification: { level: 'compatible' }
   },
   project: {
     ownedPathPrefixes: ['.codex/'],
-    managed: ['.codex/hooks.json'],
+    managed: ['.codex/hooks.json', '.codex/agents/'],
     merged: [],
     ejected: [],
     seedCommands: []

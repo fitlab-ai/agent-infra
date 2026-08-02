@@ -120,6 +120,8 @@ function runCheck(type: any, context: any, shared: any): any {
       return checkReviewFact(context);
     case "post-review-commit":
       return checkPostReviewCommit(context);
+    case "orchestration-state":
+      return checkOrchestrationState(context);
     default: {
       const adapter = PLATFORM_ADAPTERS[type];
       if (!adapter) {
@@ -133,6 +135,32 @@ function runCheck(type: any, context: any, shared: any): any {
       return adapter(context, shared);
     }
   }
+}
+
+function checkOrchestrationState({ taskDir }: any): any {
+  const file = path.join(taskDir, 'orchestration.json');
+  const stat = safeStat(file);
+  if (!stat?.isFile()) return failResult('orchestration-state', 'orchestration.json is missing');
+  let run: any;
+  try {
+    run = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    return failResult('orchestration-state', `Invalid orchestration.json: ${String(error)}`);
+  }
+  if (run.schemaVersion !== 1 || !['paused', 'completed'].includes(run.status)) {
+    return failResult('orchestration-state', `Expected paused or completed run, received '${run.status}'`);
+  }
+  if (run.status === 'paused' && (!run.pause?.code || !run.pause?.message)) {
+    return failResult('orchestration-state', 'Paused run requires a stable pause code and message');
+  }
+  if (run.status === 'completed') {
+    if (run.pendingDelegation !== null || !run.commitAuthorization?.consumedAt) {
+      return failResult('orchestration-state', 'Completed run must consume commit authorization and clear pending delegation');
+    }
+  } else if (run.pendingDelegation?.status === 'sealed') {
+    return failResult('orchestration-state', 'Paused run has a sealed delegation that could still advance');
+  }
+  return passResult('orchestration-state', `Orchestration run is safely ${run.status}`);
 }
 
 // === Check Functions ===

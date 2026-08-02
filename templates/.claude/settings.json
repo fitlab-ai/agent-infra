@@ -30,6 +30,30 @@
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "matcher": "agent-infra-lifecycle-(executor|reviewer)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "agent-infra-lifecycle-(executor|reviewer)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "StopFailure": [
       {
         "matcher": "",

@@ -8,6 +8,7 @@ import { parseLedger, summarizeLedgerStage, validateLedgerRows } from './ledger.
 import type { LedgerStageStatus, ReviewStage } from './ledger.ts';
 import { finalizeReviewSummaryContent } from './review-artifacts.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
+import { validateOrchestrationStage } from './orchestration.ts';
 import type { ResolveTaskRefErrorCode } from './resolve-ref.ts';
 
 type ReviewFinalizationErrorCode =
@@ -22,6 +23,7 @@ type ReviewFinalizationErrorCode =
   | 'REVIEW_SUMMARY_PLACEHOLDER_INVALID'
   | 'REVIEW_SUMMARY_COUNT_MISMATCH'
   | 'REVIEW_ARTIFACT_CONFLICT'
+  | 'REVIEW_PROVENANCE_INVALID'
   | 'REVIEW_TEMP_WRITE_FAILED'
   | 'REVIEW_RENAME_FAILED';
 type ReviewFinalizationError = { code: ReviewFinalizationErrorCode; message: string };
@@ -162,6 +164,20 @@ function finalizeReviewSummary(
       request,
       'REVIEW_ARTIFACT_IDENTITY_INVALID',
       `${request.artifact} does not have one matching open started review event`,
+      resolved.taskId
+    );
+  }
+  const provenance = validateOrchestrationStage(request.taskRef, {
+    stage: spec.family,
+    round: parsedArtifact.round,
+    artifact: request.artifact,
+    role: 'reviewer'
+  }, { repoRoot: options.repoRoot });
+  if (provenance.status === 'failed' || provenance.status === 'paused') {
+    return failed(
+      request,
+      'REVIEW_PROVENANCE_INVALID',
+      provenance.error?.message ?? provenance.run?.pause?.message ?? 'orchestration provenance validation failed',
       resolved.taskId
     );
   }

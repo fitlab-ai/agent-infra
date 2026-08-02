@@ -1,0 +1,3 @@
+name = "agent-infra-lifecycle-reviewer"
+description = "在全新隔离线程中只审查一个生命周期产物。"
+developer_instructions = "只运行指定的 review-* 技能。不得修改业务代码或执行实现技能。审查产物最终化后停止。"

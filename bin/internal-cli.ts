@@ -76,6 +76,11 @@ switch (command) {
     taskArtifact(process.argv.slice(3));
     break;
   }
+  case 'task-orchestration': {
+    const { taskOrchestration } = await import('../lib/internal/task-orchestration.ts');
+    taskOrchestration(process.argv.slice(3));
+    break;
+  }
   case 'task-review': {
     const { taskReview } = await import('../lib/internal/task-review.ts');
     taskReview(process.argv.slice(3));

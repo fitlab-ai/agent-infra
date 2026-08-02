@@ -58,6 +58,7 @@ test('review summary parser distinguishes canonical placeholders and numeric cou
   if (placeholders.ok) {
     assert.equal(placeholders.summary.countState, 'placeholders');
     assert.equal(placeholders.summary.counts, null);
+    assert.equal(placeholders.summary.manualValidation, 0);
   }
 
   const numeric = parseReviewSummary(`## 审查摘要
@@ -70,6 +71,7 @@ test('review summary parser distinguishes canonical placeholders and numeric cou
     assert.equal(numeric.summary.countState, 'numeric');
     assert.deepEqual(numeric.summary.counts, counts);
     assert.equal(numeric.summary.verdict, 'Changes Requested');
+    assert.equal(numeric.summary.manualValidation, 0);
   }
 });
 

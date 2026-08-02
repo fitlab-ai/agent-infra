@@ -80,6 +80,8 @@
       ".agents/workflows/",
       ".agents/workspace/README.md",
       ".claude/commands/",
+      ".claude/agents/",
+      ".codex/agents/",
       ".codex/hooks.json",
       ".gemini/commands/",
       ".git-hooks/check-large-files.cjs",

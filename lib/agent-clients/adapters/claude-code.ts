@@ -10,12 +10,14 @@ const claudeCodeAdapter = defineAgentClientAdapter({
     skills: { level: 'compatible' },
     commands: { level: 'integrated' },
     hooks: { level: 'integrated' },
+    subagents: { level: 'experimental' },
+    orchestration: { level: 'experimental' },
     sandbox: { level: 'integrated' },
     verification: { level: 'compatible' }
   },
   project: {
     ownedPathPrefixes: ['.claude/'],
-    managed: ['.claude/commands/'],
+    managed: ['.claude/commands/', '.claude/agents/'],
     merged: ['.claude/settings.json'],
     ejected: [],
     seedCommands: [{

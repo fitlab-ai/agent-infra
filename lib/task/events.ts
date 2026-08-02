@@ -21,6 +21,7 @@ import type { ReviewStage } from './ledger.ts';
 import { parseReviewSummary } from './review-artifacts.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { findSectionHeading } from './sections.ts';
+import { completeOrchestrationStage, validateOrchestrationStage } from './orchestration.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from './write.ts';
 
@@ -333,6 +334,21 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskWriteOptions = {
     completedArtifact?.path ?? null
   );
   if (findingCountError) return failed(normalized, findingCountError, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+  if (eventIdentity.phase === 'completed' && !normalized.dryRun && eventIdentity.family !== 'manual-validation') {
+    const orchestrationStage = eventIdentity.family === 'analyze' ? 'analysis' : eventIdentity.family;
+    const provenance = validateOrchestrationStage(normalized.taskRef, {
+      stage: orchestrationStage,
+      round: normalized.round!,
+      artifact: normalized.artifact!,
+      role: eventIdentity.family.startsWith('review-') ? 'reviewer' : 'executor'
+    }, { repoRoot: options.repoRoot });
+    if (provenance.status === 'failed' || provenance.status === 'paused') {
+      return failed(normalized, {
+        code: 'EVENT_TRANSITION_INVALID',
+        message: provenance.error?.message ?? provenance.run?.pause?.message ?? 'orchestration provenance validation failed'
+      }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+    }
+  }
   let metadata;
   try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
   catch (error) { return failed(normalized, { code: 'METADATA_CAPTURE_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
@@ -368,6 +384,21 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskWriteOptions = {
   mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body });
   const result = writeTask({ taskRef: normalized.taskRef, expectedState: 'active', dryRun: normalized.dryRun, mutations }, { ...options, metadataProvider: () => metadata });
   if (result.status === 'failed') return failed(normalized, result.error, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
+  if (eventIdentity.phase === 'completed' && !normalized.dryRun && eventIdentity.family !== 'manual-validation') {
+    const orchestrationStage = eventIdentity.family === 'analyze' ? 'analysis' : eventIdentity.family;
+    const orchestration = completeOrchestrationStage(normalized.taskRef, {
+      stage: orchestrationStage,
+      round: normalized.round!,
+      artifact: normalized.artifact!,
+      agent: normalized.agent
+    }, { repoRoot: options.repoRoot });
+    if (orchestration.status === 'failed' || orchestration.status === 'paused') {
+      return failed(normalized, {
+        code: 'EVENT_TRANSITION_INVALID',
+        message: orchestration.error?.message ?? orchestration.run?.pause?.message ?? 'orchestration provenance validation failed'
+      }, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
+    }
+  }
   return {
     status: result.status, changed: result.changed, event: normalized.event,
     requestRef: normalized.taskRef, taskId: result.taskId, taskMdPath: result.taskMdPath,

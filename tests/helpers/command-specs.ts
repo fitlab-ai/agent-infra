@@ -133,6 +133,11 @@ const commandSpecs: Record<string, CommandSpec> = {
     en: "Review code for task $ARGUMENTS.",
     zh: "审查任务 $ARGUMENTS 的代码。"
   },
+  "run-task": {
+    usage: "[task-ref | --task <ref>]",
+    en: "Run task lifecycle $ARGUMENTS.",
+    zh: "运行任务生命周期 $ARGUMENTS。"
+  },
   "restore-task": {
     usage: "<issue-number> [task-id]",
     en: "Restore task from Issue: $ARGUMENTS",

@@ -78,6 +78,8 @@ A mandatory human review checkpoint means:
 
 If a key decision needs human judgment during execution, follow the rule above and register the detail identity through the structured `decision-next-id` / `decision-upsert` commands for the user to address at the review checkpoint; ordinary open questions still go to `## Open Questions` / `未决问题`.
 
+The `run-task` orchestrator may continue after a child skill artifact only when core mechanical state permits it; this does not bypass human decisions. When core reports a human decision, manual validation, or another stable pause condition, the orchestrator must stop without asking mid-flow or approving it itself.
+
 ## Anchor Location
 
 This rule's sole global anchor lives in the project-level AGENTS.md "AI Behavior Principles" preamble, which every AI tool loads. Individual SKILL.md files no longer reference this rule, so no per-skill duplicate bullet needs to be maintained.

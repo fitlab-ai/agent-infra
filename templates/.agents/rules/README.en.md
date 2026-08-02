@@ -25,6 +25,7 @@ so you can quickly find "which ones to read" without opening each file.
 ## Task Workflow
 
 - [`task-management.md`](task-management.md) — Task intent detection and workflow-command mapping.
+- [`lifecycle-orchestration.md`](lifecycle-orchestration.md) — Fresh executor/reviewer, one-use receipt, pause/recovery, and safe endpoint rules for `run-task`.
 - [`review-handshake.md`](review-handshake.md) — Three-stage bidirectional review handshake: four-state disposition, symmetric evidence, disagreement ledger, convergence and post-review commit gate.
 - [`review-method.md`](review-method.md) — Shared three-stage review method: multi-pass review, risk lenses, traceability, and finding evidence.
 - [`human-decision-context.md`](human-decision-context.md) — Self-contained context and canonical structure for new human-decision details.

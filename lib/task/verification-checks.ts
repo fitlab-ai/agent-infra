@@ -1,5 +1,6 @@
 const LOCAL_VERIFICATION_CHECKS = [
-  'task-meta', 'artifact', 'implementation-input', 'activity-log', 'completion-checklist'
+  'task-meta', 'artifact', 'implementation-input', 'activity-log', 'completion-checklist',
+  'orchestration-state'
 ] as const;
 
 function isLocalVerificationCheck(value: string): value is typeof LOCAL_VERIFICATION_CHECKS[number] {

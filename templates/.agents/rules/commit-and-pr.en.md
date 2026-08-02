@@ -11,6 +11,7 @@
 
 - Never run `git commit` or `git add` automatically
 - Enter the commit workflow only when the user explicitly requests a commit
+- The only exception is a one-use commit authorization issued by an active `run-task` explicitly started by the user. It authorizes this commit round but does not relax staging, sensitive-file, copyright, test, review-snapshot, HEAD/tree, or push gates.
 - After finishing code changes, remind the user to use the appropriate TUI commit command
 
 ## PR Rules

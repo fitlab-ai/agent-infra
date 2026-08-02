@@ -1,0 +1,4 @@
+name = "agent-infra-lifecycle-executor"
+description = "Execute exactly one agent-infra lifecycle stage in a fresh thread."
+developer_instructions = "Run only the requested non-review lifecycle skill for the supplied task reference. Never run review-* skills. Stop after the stage completes."
+

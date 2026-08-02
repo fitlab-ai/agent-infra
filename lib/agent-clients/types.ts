@@ -30,6 +30,8 @@ const AGENT_CLIENT_CAPABILITY_IDS = [
   'skills',
   'commands',
   'hooks',
+  'subagents',
+  'orchestration',
   'sandbox',
   'verification'
 ] as const;
@@ -38,7 +40,8 @@ const AGENT_CLIENT_SUPPORT_LEVELS = [
   'compatible',
   'integrated',
   'verified',
-  'experimental'
+  'experimental',
+  'unsupported'
 ] as const;
 
 type AgentClientCapabilityId = (typeof AGENT_CLIENT_CAPABILITY_IDS)[number];

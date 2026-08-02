@@ -123,7 +123,8 @@ const AGENT_CLIENT_MANIFEST = [
       ".claude/"
     ],
     "managed": [
-      ".claude/commands/"
+      ".claude/commands/",
+      ".claude/agents/"
     ],
     "merged": [
       ".claude/settings.json"
@@ -138,7 +139,8 @@ const AGENT_CLIENT_MANIFEST = [
       ".codex/"
     ],
     "managed": [
-      ".codex/hooks.json"
+      ".codex/hooks.json",
+      ".codex/agents/"
     ],
     "merged": [],
     "ejected": []

@@ -1,0 +1,9 @@
+{
+  "skill": "run-task",
+  "checks": {
+    "task-meta": {
+      "required_fields": ["id", "status", "updated_at", "agent_infra_version", "current_step", "assigned_to"]
+    },
+    "orchestration-state": {}
+  }
+}

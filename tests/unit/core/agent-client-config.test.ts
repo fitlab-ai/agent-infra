@@ -57,6 +57,8 @@ test('agent client vocabulary is closed, unique, and recognized by the shared gu
     'skills',
     'commands',
     'hooks',
+    'subagents',
+    'orchestration',
     'sandbox',
     'verification'
   ]);
@@ -65,7 +67,8 @@ test('agent client vocabulary is closed, unique, and recognized by the shared gu
     'compatible',
     'integrated',
     'verified',
-    'experimental'
+    'experimental',
+    'unsupported'
   ]);
   assert.equal(new Set(AGENT_CLIENT_SUPPORT_LEVELS).size, AGENT_CLIENT_SUPPORT_LEVELS.length);
   assert.equal(isAgentClientId('codex'), true);

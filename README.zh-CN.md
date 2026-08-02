@@ -55,9 +55,9 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 ```bash
 /import-issue 42           # AI 读取 Issue，创建任务，提取需求
 /analyze-task <task-id>    # AI 扫描代码库，定位根因，输出 analysis.md
-/review-analysis <task-id> # AI 自审：“通过。0 阻塞项 —— 可进入方案设计。”
+/review-analysis <task-id> # 隔离 reviewer 审查分析产物
 /plan-task <task-id>       # AI 提出修复方案
-/review-plan <task-id>     # AI 自审方案：“通过，可进入编码。”
+/review-plan <task-id>     # fresh 隔离 reviewer 审查方案
 ```
 
 > **你审查方案后用自然语言回复：**
@@ -71,7 +71,7 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 
 ```bash
 /code-task <task-id>       # AI 编写修复代码，添加 user+tag@example.com 测试 —— 通过
-/review-code <task-id>     # AI 审查自己的实现：“0 阻塞项，1 次要（缺少 JSDoc）。”
+/review-code <task-id>     # fresh 隔离 reviewer 报告一个次要问题
 /code-task <task-id>       # AI 修复次要问题并重新验证
 /commit
 /create-pr <task-id>       # PR 已创建，自动关联 Issue #42
@@ -174,6 +174,7 @@ ai agent-client configure
 | 命令 | 用途 |
 |------|------|
 | `create-task` / `import-issue` | 从描述或 GitHub Issue 创建任务 |
+| `run-task` | 从当前状态续跑生命周期，用 fresh 隔离 executor/reviewer 推进到安全提交或稳定暂停 |
 | `analyze-task` → `review-analysis` | 明确范围与风险，再审查分析 |
 | `plan-task` → `review-plan` | 设计实现路径，再审查方案 |
 | `code-task` → `review-code` | 实现并测试，再执行结构化代码审查 |

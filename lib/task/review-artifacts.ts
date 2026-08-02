@@ -11,6 +11,7 @@ type ReviewVerdict = 'Approved' | 'Changes Requested' | 'Rejected';
 type ReviewSummary = {
   verdict: ReviewVerdict;
   counts: ReviewFindingCounts | null;
+  manualValidation: number | null;
   countState: 'placeholders' | 'numeric';
 };
 type ReviewSummaryErrorCode =
@@ -112,6 +113,13 @@ function parseCounts(value: string): ReviewFindingCounts | null {
   return { blocker: blocker!, major: major!, minor: minor! };
 }
 
+function parseManualValidation(value: string): number | null {
+  const match = /\*\*(?:人工校验|Manual[- ]validation)\*\*[:：]\s*(\d+)/i.exec(value);
+  if (!match) return null;
+  const count = Number(match[1]);
+  return Number.isSafeInteger(count) ? count : null;
+}
+
 function hasCanonicalPlaceholders(value: string): boolean {
   const zh = /^\{unresolved-blockers\}\s*阻塞项，\s*\{unresolved-major\}\s*主要，\s*\{unresolved-minor\}\s*次要(?:\s*\/.*)?$/.test(value);
   const en = /^\{unresolved-blockers\}\s*blockers?,\s*\{unresolved-major\}\s*majors?,\s*\{unresolved-minor\}\s*minors?(?:\s*\/.*)?$/i.test(value);
@@ -142,7 +150,7 @@ function parseReviewSummary(content: string): ReviewSummaryParseResult {
   if (counts) {
     return {
       ok: true,
-      summary: { verdict, counts, countState: 'numeric' },
+      summary: { verdict, counts, manualValidation: parseManualValidation(findingsLine.value), countState: 'numeric' },
       findingsStart: findingsLine.start,
       findingsEnd: findingsLine.end
     };
@@ -153,7 +161,7 @@ function parseReviewSummary(content: string): ReviewSummaryParseResult {
   if (hasCanonicalPlaceholders(findingsLine.value) && placeholderOccurrences.every((count) => count === 1)) {
     return {
       ok: true,
-      summary: { verdict, counts: null, countState: 'placeholders' },
+      summary: { verdict, counts: null, manualValidation: parseManualValidation(findingsLine.value), countState: 'placeholders' },
       findingsStart: findingsLine.start,
       findingsEnd: findingsLine.end
     };

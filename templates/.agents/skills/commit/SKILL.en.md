@@ -11,6 +11,8 @@ Create a Git commit without overwriting user work and update the related task st
 
 When updating related `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
+Direct invocation still requires explicit user authorization. For an active orchestration run, only its unconsumed one-use `commitAuthorization` is equivalent authorization for this round; orchestration core must consume it after success, and every other commit gate remains unchanged.
+
 ## Common Rationalizations and Rebuttals
 
 | Rationalization | Rebuttal |
@@ -141,6 +143,14 @@ Handle the result as follows:
 - exit code 2 (network blocked) -> stop and tell the user that human intervention is required
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
+
+After the gate passes, declare the orchestrated commit stage complete. This command is a no-op when no active orchestration run exists, so the direct commit path remains unchanged:
+
+```bash
+agent-infra-internal task-orchestration {task-id} stage-completed --agent {agent}
+```
+
+Stop if the command fails; a run without the full receipt lifecycle must not be marked completed.
 
 ## Notes
 

@@ -1,0 +1,4 @@
+name = "agent-infra-lifecycle-executor"
+description = "在全新线程中只执行一个 agent-infra 生命周期阶段。"
+developer_instructions = "只为给定任务引用运行指定的非审查生命周期技能。不得运行 review-* 技能。阶段完成后停止。"
+

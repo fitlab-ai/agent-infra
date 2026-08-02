@@ -56,9 +56,9 @@ Once initialized, open the project in your AI TUI and install the latest skills:
 ```bash
 /import-issue 42           # AI reads the issue, creates a task, extracts requirements
 /analyze-task <task-id>    # AI scans the codebase, finds the root cause, writes analysis.md
-/review-analysis <task-id> # AI self-reviews: "Approved. 0 blockers — proceed to design."
+/review-analysis <task-id> # An isolated reviewer checks the analysis
 /plan-task <task-id>       # AI proposes a fix plan
-/review-plan <task-id>     # AI self-reviews the plan: "Approved. Ready for implementation."
+/review-plan <task-id>     # A fresh isolated reviewer checks the plan
 ```
 
 > **You review the plan and reply in natural language:**
@@ -72,7 +72,7 @@ Just fix it at the application layer in LoginService.
 
 ```bash
 /code-task <task-id>       # AI writes the fix, adds a test for user+tag@example.com — green
-/review-code <task-id>     # AI reviews its own code: "0 blockers, 1 minor (missing JSDoc)."
+/review-code <task-id>     # A fresh isolated reviewer reports one minor finding
 /code-task <task-id>       # AI fixes the minor issue and re-validates
 /commit
 /create-pr <task-id>       # PR opened, auto-linked to issue #42
@@ -175,6 +175,7 @@ The most-used lifecycle commands, in delivery order. The command prefix varies b
 | Command | Purpose |
 |---------|---------|
 | `create-task` / `import-issue` | Start a task from a description or a GitHub Issue |
+| `run-task` | Resume and orchestrate the lifecycle with fresh isolated executors/reviewers until a safe commit or stable pause |
 | `analyze-task` → `review-analysis` | Capture scope and risks, then review the analysis |
 | `plan-task` → `review-plan` | Design the approach, then review the plan |
 | `code-task` → `review-code` | Implement and test, then run a structured code review |

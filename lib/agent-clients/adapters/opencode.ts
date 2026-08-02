@@ -12,6 +12,8 @@ const opencodeAdapter = defineAgentClientAdapter({
     skills: { level: 'compatible' },
     commands: { level: 'integrated' },
     hooks: { level: 'compatible' },
+    subagents: { level: 'unsupported' },
+    orchestration: { level: 'unsupported' },
     sandbox: { level: 'integrated' },
     verification: { level: 'compatible' }
   },
