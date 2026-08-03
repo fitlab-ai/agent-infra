@@ -237,13 +237,21 @@ function resolvePlatformCheckRun(taskRef: string, options: SharedOptions & { che
   });
 }
 
+function fetchCheckLogText(client: GitHubClient, args: string[], cwd: string) {
+  const fetched = client.text(args, { cwd });
+  if (fetched.ok || args[0] !== 'api' || !/response contains terminal escape sequences/i.test(fetched.error.message)) {
+    return fetched;
+  }
+  return client.text([...args, '--allow-escape-sequences'], { cwd });
+}
+
 function fetchPlatformCheckLogs(taskRef: string, options: SharedOptions & { run: number; job?: number }): ChecksResult {
   const base = resolvedTask(taskRef, options);
   if (!base.ok) return base.output;
   const args = options.job
     ? ['api', `repos/${base.context.platform.repository}/actions/jobs/${options.job}/logs`]
     : ['run', 'view', String(options.run), '--repo', base.context.platform.repository!, '--log-failed'];
-  const fetched = base.client.text(args, { cwd: base.resolved.repoRoot });
+  const fetched = fetchCheckLogText(base.client, args, base.resolved.repoRoot);
   if (!fetched.ok) return checksResult(fetched.error.retryable ? 'blocked' : 'failed', { platform: base.context.platform, capabilities: base.context.capabilities, error: fetched.error });
   if (!fetched.value) return checksResult('failed', { error: { code: 'CHECK_LOGS_MISSING', message: 'No failed logs are available', retryable: false } });
   return checksResult('no-op', {
@@ -255,6 +263,7 @@ function fetchPlatformCheckLogs(taskRef: string, options: SharedOptions & { run:
 
 export {
   classifyRequiredChecks,
+  fetchCheckLogText,
   fetchPlatformCheckLogs,
   inspectRequiredChecks,
   parseRunJobIdentity,

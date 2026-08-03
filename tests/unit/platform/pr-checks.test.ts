@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 
 import {
   classifyRequiredChecks,
+  fetchCheckLogText,
   parseRunJobIdentity,
   resolveRunCandidate,
   watchRequiredChecks
 } from '../../../lib/platform/pr-checks.ts';
+import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 
 test('required checks classify terminal and non-terminal states', () => {
   assert.equal(classifyRequiredChecks([]).state, 'no-required');
@@ -39,4 +41,27 @@ test('run identity prefers validated details URLs and exact unique fallback', ()
     { id: 4, name: 'build', headSha: 'abc' },
     { id: 6, name: 'build', headSha: 'abc' }
   ], 'abc', 'build').status, 'ambiguous');
+});
+
+test('check logs retry API responses that require explicit escape-sequence output', () => {
+  const calls: string[][] = [];
+  const client = {
+    text(args: string[]) {
+      calls.push(args);
+      return args.includes('--allow-escape-sequences')
+        ? { ok: true as const, value: '\u001b[31mfailed\u001b[0m' }
+        : { ok: false as const, error: {
+          code: 'PLATFORM_REQUEST_FAILED',
+          message: 'the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway',
+          retryable: false
+        } };
+    }
+  } as GitHubClient;
+
+  const result = fetchCheckLogText(client, ['api', 'repos/o/r/actions/jobs/99/logs'], '/repo');
+  assert.deepEqual(result, { ok: true, value: '\u001b[31mfailed\u001b[0m' });
+  assert.deepEqual(calls, [
+    ['api', 'repos/o/r/actions/jobs/99/logs'],
+    ['api', 'repos/o/r/actions/jobs/99/logs', '--allow-escape-sequences']
+  ]);
 });
