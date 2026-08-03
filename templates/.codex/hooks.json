@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\"",
+            "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\" --client codex",
             "timeout": 10
           }
         ]
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\"",
+            "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\" --client codex",
             "timeout": 10
           }
         ]

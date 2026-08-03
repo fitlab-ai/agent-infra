@@ -1,6 +1,12 @@
 import { execFileSync } from 'node:child_process';
 
 const MAX_INPUT_BYTES = 64 * 1024;
+const clientIndex = process.argv.indexOf('--client');
+const client = clientIndex >= 0 ? process.argv[clientIndex + 1] : '';
+if (!['claude-code', 'codex'].includes(client)) {
+  process.stderr.write('Lifecycle delegation hook requires a supported --client value\n');
+  process.exit(1);
+}
 let input = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => {
@@ -18,36 +24,29 @@ process.stdin.on('end', () => {
     process.stderr.write('Lifecycle delegation hook received invalid JSON\n');
     process.exit(1);
   }
-  const taskRef = event.taskId || event.task_id || process.env.AGENT_INFRA_TASK_ID;
   const hook = String(event.hook_event_name || event.event || '').toLowerCase();
   const nativeAgent = event.agent_name || event.agent_type || event.agent?.name;
   if (!String(nativeAgent || '').startsWith('agent-infra-lifecycle-')) process.exit(0);
-  if (!taskRef) {
-    process.stderr.write('Managed lifecycle hook event is missing task identity\n');
-    process.exit(1);
-  }
   const start = hook.includes('start');
   const stop = hook.includes('stop');
   if (!start && !stop) {
     process.stderr.write('Managed lifecycle hook event has an unknown type\n');
     process.exit(1);
   }
-  const args = ['task-orchestration', taskRef, start ? 'hook-start' : 'hook-stop'];
+  const args = ['task-orchestration', 'auto', start ? 'hook-start' : 'hook-stop', '--client', client];
   if (start) {
     args.push(
       '--native-agent', String(nativeAgent),
       '--child-id', String(event.child_id || event.agent_id || event.thread_id || ''),
-      '--parent-id', String(event.parent_id || event.parent_session_id || ''),
-      '--spawn-mode', String(event.spawn_mode || 'unknown')
+      '--parent-id', String(event.parent_id || event.parent_session_id || event.session_id || ''),
+      '--spawn-mode', String(event.spawn_mode || 'fresh')
     );
     if (event.model) args.push('--actual-model', String(event.model));
     if (event.model_fallback_reason) args.push('--fallback-reason', String(event.model_fallback_reason));
   } else {
     args.push(
-      '--child-id', String(event.child_id || event.agent_id || event.thread_id || ''),
-      '--exit-code', String(event.exit_code ?? (event.success === false ? 1 : 0)),
-      '--after-fingerprint', String(event.workspace_fingerprint || ''),
-      '--changed-paths', Array.isArray(event.changed_paths) ? event.changed_paths.join(',') : ''
+      '--native-agent', String(nativeAgent),
+      '--child-id', String(event.child_id || event.agent_id || event.thread_id || '')
     );
   }
   try {

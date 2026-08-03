@@ -1,4 +1,5 @@
 import {
+  activateMatchingOrchestrationDelegation,
   activateOrchestrationDelegation,
   advanceOrchestration,
   beginOrResumeOrchestration,
@@ -6,12 +7,13 @@ import {
   pauseOrchestration,
   prepareOrchestrationDelegation,
   routeOrchestration,
+  sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation,
   statusOrchestration
 } from '../task/orchestration.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 
-const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref> <begin-or-resume|route|prepare|hook-start|stage-completed|hook-stop|advance|pause|status> [options]\n';
+const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|hook-start|stage-completed|hook-stop|advance|pause|status> [options]\n';
 
 function usageFailure(message: string): void {
   process.stdout.write(`${JSON.stringify({
@@ -73,32 +75,44 @@ function taskOrchestration(args: string[] = []): void {
   } else if (intent === 'status') {
     result = statusOrchestration(taskRef!);
   } else if (intent === 'prepare') {
-    const missing = requireValues(['--client', '--parent-id', '--before-fingerprint']);
+    const missing = requireValues(['--client']);
     if (missing) { usageFailure(`intent 'prepare' requires '${missing}'`); return; }
     result = prepareOrchestrationDelegation(taskRef!, {
       client: values['--client'] as AgentClientId,
-      requestedModel: values['--requested-model'],
-      parentId: values['--parent-id']!,
-      beforeFingerprint: values['--before-fingerprint']!
+      requestedModel: values['--requested-model']
     });
   } else if (intent === 'hook-start') {
-    const missing = requireValues(['--native-agent', '--child-id', '--parent-id', '--spawn-mode']);
+    const missing = requireValues([
+      ...(taskRef === 'auto' ? ['--client'] : []),
+      '--native-agent', '--child-id', '--parent-id', '--spawn-mode'
+    ]);
     if (missing) { usageFailure(`intent 'hook-start' requires '${missing}'`); return; }
-    result = activateOrchestrationDelegation(taskRef!, {
+    const event = {
       nativeAgent: values['--native-agent']!, childId: values['--child-id']!,
       parentId: values['--parent-id']!, spawnMode: values['--spawn-mode']!,
       actualModel: values['--actual-model'], modelFallbackReason: values['--fallback-reason']
-    });
+    };
+    result = taskRef === 'auto'
+      ? activateMatchingOrchestrationDelegation(values['--client'] as AgentClientId, event)
+      : activateOrchestrationDelegation(taskRef!, event);
   } else if (intent === 'hook-stop') {
-    const missing = requireValues(['--child-id', '--exit-code', '--after-fingerprint']);
-    if (missing) { usageFailure(`intent 'hook-stop' requires '${missing}'`); return; }
-    const exitCode = Number(values['--exit-code']);
-    if (!Number.isInteger(exitCode)) { usageFailure('--exit-code must be an integer'); return; }
-    result = sealOrchestrationDelegation(taskRef!, {
-      childId: values['--child-id']!, exitCode,
-      afterFingerprint: values['--after-fingerprint']!,
-      changedPaths: values['--changed-paths'] ? values['--changed-paths']!.split(',').filter(Boolean) : []
-    });
+    if (taskRef === 'auto') {
+      const missing = requireValues(['--client', '--native-agent', '--child-id']);
+      if (missing) { usageFailure(`intent 'hook-stop' requires '${missing}'`); return; }
+      result = sealMatchingOrchestrationDelegation(values['--client'] as AgentClientId, {
+        nativeAgent: values['--native-agent']!, childId: values['--child-id']!
+      });
+    } else {
+      const missing = requireValues(['--child-id', '--exit-code', '--after-fingerprint']);
+      if (missing) { usageFailure(`intent 'hook-stop' requires '${missing}'`); return; }
+      const exitCode = Number(values['--exit-code']);
+      if (!Number.isInteger(exitCode)) { usageFailure('--exit-code must be an integer'); return; }
+      result = sealOrchestrationDelegation(taskRef!, {
+        childId: values['--child-id']!, exitCode,
+        afterFingerprint: values['--after-fingerprint']!,
+        changedPaths: values['--changed-paths'] ? values['--changed-paths']!.split(',').filter(Boolean) : []
+      });
+    }
   } else if (intent === 'stage-completed') {
     const missing = requireValues(['--agent']);
     if (missing) { usageFailure(`intent 'stage-completed' requires '${missing}'`); return; }

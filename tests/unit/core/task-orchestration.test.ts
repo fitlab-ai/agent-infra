@@ -5,15 +5,21 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
+  activateMatchingOrchestrationDelegation,
   activateOrchestrationDelegation,
   advanceOrchestration,
   beginOrResumeOrchestration,
   completeCommitOrchestrationStage,
+  completeOrchestrationStage,
+  pauseOrchestration,
   prepareOrchestrationDelegation,
   readRun,
   routeOrchestration,
+  sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation
 } from '../../../lib/task/orchestration.ts';
+
+const snapshot = () => 'before-tree';
 
 function fixture(step: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-'));
@@ -50,8 +56,8 @@ test('prepare fails closed for clients without orchestration capability', () => 
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   const result = prepareOrchestrationDelegation('TASK-20260101-000001', {
-    client: 'gemini-cli', parentId: 'parent-1', beforeFingerprint: 'before'
-  }, { repoRoot: f.root });
+    client: 'gemini-cli'
+  }, { repoRoot: f.root, captureWorkspace: snapshot });
   assert.equal(result.error?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
   assert.equal(result.changed, false);
 });
@@ -112,8 +118,8 @@ test('commit authorization is issued at eligible prepare and the receipt reaches
   assert.equal(begun.run?.commitAuthorization.issuedAt, null);
 
   const prepared = prepareOrchestrationDelegation('TASK-20260101-000001', {
-    client: 'codex', parentId: 'parent-1', beforeFingerprint: 'before'
-  }, { repoRoot: f.root, id: () => 'receipt-1', now });
+    client: 'codex'
+  }, { repoRoot: f.root, id: () => 'receipt-1', now, captureWorkspace: snapshot });
   assert.equal(prepared.next?.stage, 'commit');
   assert.equal(prepared.run?.commitAuthorization.issuedAt, '2026-01-01T00:00:00.000Z');
 
@@ -127,4 +133,94 @@ test('commit authorization is issued at eligible prepare and the receipt reaches
   }, { repoRoot: f.root, now }).status, 'running');
   assert.equal(advanceOrchestration('TASK-20260101-000001', { repoRoot: f.root, now }).status, 'completed');
   assert.equal(readRun(f.taskDir)?.commitAuthorization.consumedAt, '2026-01-01T00:00:00.000Z');
+});
+
+test('native start binds the unique prepared delegation without task identity', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  prepareOrchestrationDelegation('TASK-20260101-000001', { client: 'claude-code' }, {
+    repoRoot: f.root, captureWorkspace: snapshot
+  });
+
+  const started = activateMatchingOrchestrationDelegation('claude-code', {
+    nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-native',
+    parentId: 'parent-session', spawnMode: 'fresh'
+  }, { repoRoot: f.root });
+
+  assert.equal(started.status, 'running');
+  assert.equal(started.run?.pendingDelegation?.taskId, 'TASK-20260101-000001');
+  assert.equal(started.run?.pendingDelegation?.parentId, 'parent-session');
+  assert.equal(started.run?.pendingDelegation?.childId, 'child-native');
+});
+
+test('managed native hook mismatches persist a recoverable pause', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  prepareOrchestrationDelegation('TASK-20260101-000001', { client: 'claude-code' }, {
+    repoRoot: f.root, captureWorkspace: snapshot
+  });
+
+  const started = activateMatchingOrchestrationDelegation('claude-code', {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'wrong-role',
+    parentId: 'parent-session', spawnMode: 'fresh'
+  }, { repoRoot: f.root });
+
+  assert.equal(started.status, 'paused');
+  assert.equal(started.run?.pause?.code, 'DELEGATION_ROLE_MISMATCH');
+});
+
+test('repository pending guard includes paused runs that retain a delegation', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  prepareOrchestrationDelegation('TASK-20260101-000001', { client: 'codex' }, {
+    repoRoot: f.root, captureWorkspace: snapshot
+  });
+  pauseOrchestration('TASK-20260101-000001', 'HOOK_FAILED', 'hook failed', true, { repoRoot: f.root });
+
+  const secondTaskDir = path.join(f.root, '.agents', 'workspace', 'active', 'TASK-20260101-000002');
+  fs.mkdirSync(secondTaskDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(secondTaskDir, 'task.md'),
+    '---\nid: TASK-20260101-000002\ncurrent_step: requirement-analysis\n---\n\n# Task\n'
+  );
+  beginOrResumeOrchestration('TASK-20260101-000002', { repoRoot: f.root });
+
+  const prepared = prepareOrchestrationDelegation('TASK-20260101-000002', { client: 'codex' }, {
+    repoRoot: f.root, captureWorkspace: snapshot
+  });
+
+  assert.equal(prepared.error?.code, 'ORCHESTRATION_DELEGATION_BUSY');
+  assert.equal(prepared.changed, false);
+});
+
+test('native stop derives the workspace delta before sealing the unique delegation', () => {
+  const f = fixture('requirement-analysis-review');
+  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  prepareOrchestrationDelegation('TASK-20260101-000001', { client: 'codex' }, {
+    repoRoot: f.root, captureWorkspace: snapshot
+  });
+  activateMatchingOrchestrationDelegation('codex', {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-stop',
+    parentId: 'parent-session', spawnMode: 'fresh'
+  }, { repoRoot: f.root });
+  completeOrchestrationStage('TASK-20260101-000001', {
+    stage: 'review-analysis', round: 1, artifact: 'review-analysis.md', agent: 'codex'
+  }, { repoRoot: f.root });
+
+  const stopped = sealMatchingOrchestrationDelegation('codex', {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-stop'
+  }, {
+    repoRoot: f.root,
+    captureWorkspace: () => 'after-tree',
+    diffWorkspace: () => [
+      '.agents/workspace/active/TASK-20260101-000001/review-analysis.md',
+      '.agents/workspace/active/TASK-20260101-000001/task.md',
+      '.agents/workspace/active/TASK-20260101-000001/orchestration.json'
+    ]
+  });
+
+  assert.equal(stopped.status, 'running');
+  assert.equal(stopped.run?.pendingDelegation?.status, 'sealed');
+  assert.equal(stopped.run?.pendingDelegation?.afterFingerprint, 'after-tree');
 });

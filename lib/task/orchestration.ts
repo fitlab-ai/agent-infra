@@ -11,11 +11,13 @@ import {
   activateDelegation,
   completeDelegationStage,
   consumeDelegation,
+  managedDelegationRole,
   prepareDelegation,
   sealDelegation
 } from './delegation-receipts.ts';
 import type { DelegationReceipt, DelegationRole, DelegationStage } from './delegation-receipts.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
+import { captureWorkspaceSnapshot, diffWorkspaceSnapshots } from './workspace-snapshot.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type OrchestrationRun = Readonly<{
@@ -49,7 +51,14 @@ type OrchestrationResult = Readonly<{
   next: OrchestrationNext | null;
   error: Readonly<{ code: string; message: string }> | null;
 }>;
-type OrchestrationOptions = { repoRoot?: string; id?: () => string; now?: () => string; maxSteps?: number };
+type OrchestrationOptions = {
+  repoRoot?: string;
+  id?: () => string;
+  now?: () => string;
+  maxSteps?: number;
+  captureWorkspace?: (repoRoot: string) => string;
+  diffWorkspace?: (repoRoot: string, before: string, after: string) => string[];
+};
 
 function orchestrationPath(taskDir: string): string {
   return path.join(taskDir, 'orchestration.json');
@@ -234,7 +243,7 @@ function statusOrchestration(taskRef: string, options: OrchestrationOptions = {}
 
 function prepareOrchestrationDelegation(
   taskRef: string,
-  input: Readonly<{ client: AgentClientId; requestedModel?: string; parentId: string; beforeFingerprint: string }>,
+  input: Readonly<{ client: AgentClientId; requestedModel?: string }>,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
@@ -245,10 +254,21 @@ function prepareOrchestrationDelegation(
   const run = readRun(resolved.taskDir);
   if (!run || run.status !== 'running') return failed('ORCHESTRATION_RUN_NOT_RUNNING', 'a running orchestration is required', resolved.taskId);
   if (run.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_BUSY', 'the run already has a pending delegation', resolved.taskId);
+  const repositoryPending = (['claude-code', 'codex'] as AgentClientId[])
+    .flatMap((client) => matchingDelegations(client, () => true, options));
+  if (repositoryPending.length > 0) {
+    return failed('ORCHESTRATION_DELEGATION_BUSY', 'the repository already has a pending lifecycle delegation', resolved.taskId);
+  }
   if (run.stepCount >= run.maxSteps) return pauseOrchestration(taskRef, 'ORCHESTRATION_MAX_STEPS', 'maximum orchestration steps reached', true, options);
   const routed = routeOrchestration(taskRef, options);
   if (!routed.next) return routed;
   const next = routed.next;
+  let beforeFingerprint: string;
+  try {
+    beforeFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)(resolved.repoRoot);
+  } catch (error) {
+    return failed('ORCHESTRATION_SNAPSHOT_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
+  }
   const receipt = prepareDelegation({
     taskId: resolved.taskId,
     runId: run.runId,
@@ -258,8 +278,7 @@ function prepareOrchestrationDelegation(
     artifact: next.artifact,
     client: input.client,
     requestedModel: input.requestedModel ?? null,
-    parentId: input.parentId,
-    beforeFingerprint: input.beforeFingerprint
+    beforeFingerprint
   }, { id: options.id, now: options.now });
   const updated = withUpdatedRun(run, {
     nextStage: next.stage,
@@ -270,6 +289,94 @@ function prepareOrchestrationDelegation(
   });
   saveRun(resolved.taskDir, updated);
   return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next, error: null };
+}
+
+function matchingDelegations(
+  client: AgentClientId,
+  predicate: (receipt: DelegationReceipt) => boolean,
+  options: OrchestrationOptions
+): Array<{ taskId: string; run: OrchestrationRun }> {
+  const repoRoot = options.repoRoot ?? process.cwd();
+  const activeRoot = path.join(repoRoot, '.agents', 'workspace', 'active');
+  if (!fs.existsSync(activeRoot)) return [];
+  return fs.readdirSync(activeRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) => {
+      const run = readRun(path.join(activeRoot, entry.name));
+      if (!run?.pendingDelegation) return [];
+      const receipt = run.pendingDelegation;
+      return receipt.client === client && predicate(receipt)
+        ? [{ taskId: entry.name, run }]
+        : [];
+    });
+}
+
+function uniqueMatchingDelegation(
+  client: AgentClientId,
+  predicate: (receipt: DelegationReceipt) => boolean,
+  options: OrchestrationOptions
+): { taskId: string; run: OrchestrationRun } | OrchestrationResult {
+  const matches = matchingDelegations(client, predicate, options);
+  if (matches.length === 0) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no matching lifecycle delegation exists');
+  if (matches.length > 1) return failed('ORCHESTRATION_DELEGATION_AMBIGUOUS', 'multiple lifecycle delegations match the native hook event');
+  return matches[0]!;
+}
+
+function activateMatchingOrchestrationDelegation(
+  client: AgentClientId,
+  event: Parameters<typeof activateDelegation>[1],
+  options: OrchestrationOptions = {}
+): OrchestrationResult {
+  const role = managedDelegationRole(event.nativeAgent);
+  if (!role) return failed('DELEGATION_IGNORED', `subagent '${event.nativeAgent}' is not lifecycle-managed`);
+  const matched = uniqueMatchingDelegation(
+    client,
+    (receipt) => receipt.status === 'prepared',
+    options
+  );
+  if ('status' in matched) return matched;
+  if (matched.run.receipts.some((receipt) => receipt.childId === event.childId)) {
+    return pauseOrchestration(matched.taskId, 'DELEGATION_IDENTITY_REUSED', 'native child identity was already used by this run', true, options);
+  }
+  return activateOrchestrationDelegation(matched.taskId, event, options);
+}
+
+function sealMatchingOrchestrationDelegation(
+  client: AgentClientId,
+  event: Readonly<{ nativeAgent: string; childId: string }>,
+  options: OrchestrationOptions = {}
+): OrchestrationResult {
+  const role = managedDelegationRole(event.nativeAgent);
+  if (!role) return failed('DELEGATION_IGNORED', `subagent '${event.nativeAgent}' is not lifecycle-managed`);
+  const matched = uniqueMatchingDelegation(
+    client,
+    (receipt) => receipt.status !== 'prepared',
+    options
+  );
+  if ('status' in matched) return matched;
+  const receipt = matched.run.pendingDelegation!;
+  if (receipt.role !== role) {
+    return pauseOrchestration(matched.taskId, 'DELEGATION_ROLE_MISMATCH', `managed role ${role} does not match ${receipt.role}`, true, options);
+  }
+  const repoRoot = options.repoRoot ?? process.cwd();
+  try {
+    const afterFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)(repoRoot);
+    const changedPaths = (options.diffWorkspace ?? diffWorkspaceSnapshots)(repoRoot, receipt.beforeFingerprint, afterFingerprint);
+    return sealOrchestrationDelegation(matched.taskId, {
+      childId: event.childId,
+      exitCode: 0,
+      afterFingerprint,
+      changedPaths
+    }, options);
+  } catch (error) {
+    return pauseOrchestration(
+      matched.taskId,
+      'ORCHESTRATION_SNAPSHOT_FAILED',
+      error instanceof Error ? error.message : String(error),
+      true,
+      options
+    );
+  }
 }
 
 function activateOrchestrationDelegation(
@@ -413,6 +520,7 @@ function pauseOrchestration(
 }
 
 export {
+  activateMatchingOrchestrationDelegation,
   activateOrchestrationDelegation,
   advanceOrchestration,
   beginOrResumeOrchestration,
@@ -423,6 +531,7 @@ export {
   prepareOrchestrationDelegation,
   readRun,
   routeOrchestration,
+  sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation,
   statusOrchestration,
   validateOrchestrationStage

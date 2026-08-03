@@ -14,6 +14,10 @@ function fixture() {
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+  spawnSync('git', ['add', '.'], { cwd: root });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd: root });
   return { root, id, dir };
 }
 
@@ -50,3 +54,13 @@ test('task-orchestration rejects duplicate and unknown options without writing s
   assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), false);
 });
 
+test('task-orchestration prepare derives the workspace baseline without model-supplied identity', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'begin-or-resume']).status, 0);
+
+  const prepared = run(f.root, [f.id, 'prepare', '--client', 'codex']);
+  assert.equal(prepared.status, 0, prepared.stderr);
+  const result = JSON.parse(prepared.stdout);
+  assert.equal(result.run.pendingDelegation.parentId, null);
+  assert.match(result.run.pendingDelegation.beforeFingerprint, /^[0-9a-f]{40,64}$/);
+});

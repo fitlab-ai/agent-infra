@@ -1,0 +1,8 @@
+{
+  "agent_id": "claude-child",
+  "agent_type": "agent-infra-lifecycle-reviewer",
+  "cwd": "/workspace",
+  "hook_event_name": "SubagentStart",
+  "session_id": "claude-parent",
+  "transcript_path": "/tmp/claude-parent.jsonl"
+}

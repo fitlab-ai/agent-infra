@@ -204,15 +204,17 @@ test('completed event validates orchestration provenance before writing task sta
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: f.root });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: f.root });
+  spawnSync('git', ['add', '.'], { cwd: f.root });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd: f.root });
 
   const orchestrate = (args: string[]) => spawnSync(
     'node', [INTERNAL_CLI_PATH, 'task-orchestration', f.id, ...args],
     { cwd: f.root, encoding: 'utf8' }
   );
   assert.equal(orchestrate(['begin-or-resume']).status, 0);
-  assert.equal(orchestrate([
-    'prepare', '--client', 'codex', '--parent-id', 'parent-1', '--before-fingerprint', 'before'
-  ]).status, 0);
+  assert.equal(orchestrate(['prepare', '--client', 'codex']).status, 0);
   assert.equal(orchestrate([
     'hook-start', '--native-agent', 'agent-infra-lifecycle-reviewer', '--child-id', 'child-1',
     '--parent-id', 'parent-1', '--spawn-mode', 'fresh'

@@ -18,7 +18,6 @@ const input = {
   artifact: 'review-code.md',
   client: 'codex' as const,
   requestedModel: 'review-model',
-  parentId: 'parent-1',
   beforeFingerprint: 'before'
 };
 
@@ -65,3 +64,23 @@ test('managed identities fail closed while unrelated subagents are ignored', () 
   }).code, 'DELEGATION_ROLE_MISMATCH');
 });
 
+test('reviewer write gate only permits exact paths in the current task', () => {
+  const prepared = prepareDelegation(input, { id: () => 'delegation-3' });
+  const activated = activateDelegation(prepared, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-3', parentId: 'parent-1', spawnMode: 'fresh'
+  });
+  assert.equal(activated.ok, true);
+  if (!activated.ok) return;
+  const completed = completeDelegationStage(activated.receipt, {
+    stage: 'review-code', round: 1, artifact: 'review-code.md', agent: 'codex'
+  });
+  assert.equal(completed.ok, true);
+  if (!completed.ok) return;
+
+  const crossTask = sealDelegation(completed.receipt, {
+    childId: 'child-3', exitCode: 0, afterFingerprint: 'after',
+    changedPaths: ['.agents/workspace/active/TASK-20260101-999999/review-code.md']
+  });
+  assert.equal(crossTask.ok, false);
+  assert.equal(crossTask.code, 'DELEGATION_REVIEWER_WRITE_FORBIDDEN');
+});

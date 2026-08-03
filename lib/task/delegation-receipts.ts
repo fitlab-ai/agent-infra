@@ -18,7 +18,7 @@ type DelegationReceipt = Readonly<{
   requestedModel: string | null;
   actualModel: string | null;
   modelFallbackReason: string | null;
-  parentId: string;
+  parentId: string | null;
   childId: string | null;
   spawnMode: string | null;
   agent: string | null;
@@ -41,12 +41,16 @@ const MANAGED_AGENTS = {
   'agent-infra-lifecycle-reviewer': 'reviewer'
 } as const;
 
+function managedDelegationRole(nativeAgent: string): DelegationRole | null {
+  return MANAGED_AGENTS[nativeAgent as keyof typeof MANAGED_AGENTS] ?? null;
+}
+
 function fail(code: string, message: string): ReceiptFailure {
   return { ok: false, code, message };
 }
 
 function prepareDelegation(
-  input: Omit<DelegationReceipt, 'id' | 'actualModel' | 'modelFallbackReason' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'activatedAt' | 'sealedAt' | 'consumedAt'>,
+  input: Omit<DelegationReceipt, 'id' | 'actualModel' | 'modelFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'activatedAt' | 'sealedAt' | 'consumedAt'>,
   options: { id?: () => string; now?: () => string } = {}
 ): DelegationReceipt {
   return Object.freeze({
@@ -54,6 +58,7 @@ function prepareDelegation(
     id: (options.id ?? randomUUID)(),
     actualModel: null,
     modelFallbackReason: null,
+    parentId: null,
     childId: null,
     spawnMode: null,
     agent: null,
@@ -79,11 +84,11 @@ function activateDelegation(
   }>,
   options: { now?: () => string } = {}
 ): ReceiptResult {
-  const managedRole = MANAGED_AGENTS[event.nativeAgent as keyof typeof MANAGED_AGENTS];
+  const managedRole = managedDelegationRole(event.nativeAgent);
   if (!managedRole) return fail('DELEGATION_IGNORED', `subagent '${event.nativeAgent}' is not lifecycle-managed`);
   if (receipt.status !== 'prepared') return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected prepared`);
   if (managedRole !== receipt.role) return fail('DELEGATION_ROLE_MISMATCH', `managed role ${managedRole} does not match ${receipt.role}`);
-  if (event.parentId !== receipt.parentId || !event.childId || event.childId === event.parentId) {
+  if (!event.parentId || (receipt.parentId !== null && event.parentId !== receipt.parentId) || !event.childId || event.childId === event.parentId) {
     return fail('DELEGATION_IDENTITY_INVALID', 'native parent/child identity does not match the prepared delegation');
   }
   if (event.spawnMode !== 'fresh') return fail('DELEGATION_FORK_FORBIDDEN', `spawn mode '${event.spawnMode}' is not fresh`);
@@ -94,6 +99,7 @@ function activateDelegation(
   return { ok: true, receipt: Object.freeze({
     ...receipt,
     status: 'activated',
+    parentId: event.parentId,
     childId: event.childId,
     spawnMode: event.spawnMode,
     actualModel,
@@ -125,10 +131,13 @@ function sealDelegation(
   if (receipt.status !== 'stage-completed') return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected stage-completed`);
   if (event.childId !== receipt.childId || event.exitCode !== 0) return fail('DELEGATION_STOP_INVALID', 'native stop identity or exit status is invalid');
   if (receipt.role === 'reviewer') {
-    const allowedSuffix = `/${receipt.artifact}`;
-    const disallowed = event.changedPaths.find((entry) =>
-      !entry.endsWith(allowedSuffix) && !entry.endsWith('/task.md')
-    );
+    const taskRoot = `.agents/workspace/active/${receipt.taskId}/`;
+    const allowed = new Set([
+      `${taskRoot}${receipt.artifact}`,
+      `${taskRoot}task.md`,
+      `${taskRoot}orchestration.json`
+    ]);
+    const disallowed = event.changedPaths.find((entry) => !allowed.has(entry));
     if (disallowed) return fail('DELEGATION_REVIEWER_WRITE_FORBIDDEN', `reviewer changed forbidden path '${disallowed}'`);
   }
   return { ok: true, receipt: Object.freeze({
@@ -154,6 +163,7 @@ export {
   activateDelegation,
   completeDelegationStage,
   consumeDelegation,
+  managedDelegationRole,
   prepareDelegation,
   sealDelegation
 };

@@ -12,12 +12,11 @@ description: >
 1. 解析任务引用并执行 `agent-infra-internal task-snapshot {task-id} --format text`。
 2. 调用 `agent-infra-internal task-orchestration {task-id} begin-or-resume`；若为 paused/completed，按结构化结果停止。
 3. 调用 `route` 并读取唯一 action、role、round 和 artifact；不得从审查文案自行推断。
-4. 调用 `prepare` 后，用当前客户端的 fresh 原生子 Agent 启动指定 executor/reviewer。只传短任务引用、skill 名和最小交接摘要，不传 receipt identity，不继承总控历史。
-5. 子 Agent 返回后由原生 stop hook 封存 receipt，再调用 `advance`。只有 `running` 才重复步骤 3；`paused` 或 `completed` 立即停止。
+4. 调用 `agent-infra-internal task-orchestration {task-id} prepare --client {client}`；核心自动记录工作区基线。成功后用当前客户端的 fresh 原生子 Agent 启动指定 executor/reviewer，只传短任务引用、skill 名和最小交接摘要，不传 receipt identity，不继承总控历史。
+5. 原生 start/stop hook 通过唯一 pending delegation 自动关联任务，并由核心计算工作区变化、封存 receipt；子 Agent 返回后调用 `advance`。只有 `running` 才重复步骤 3；`paused` 或 `completed` 立即停止。
 6. 每轮创建新 child；禁止 follow-up 复用 reviewer。任何 capability、hook、身份、模型降级、账本或 fingerprint 异常都调用 `pause` 并失败关闭。
 7. 完成或暂停后运行对应 typed verification，并把结构化 run 摘要、暂停原因或 commit 终点告知用户。
 
 ## 停止
 
 首版在安全 `commit` 后结束；不要继续创建 PR、监控 checks 或完成任务。
-
