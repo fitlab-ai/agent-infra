@@ -50,7 +50,11 @@ process.stdin.on('end', () => {
     );
   }
   try {
-    const output = execFileSync('agent-infra-internal', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const output = execFileSync('agent-infra-internal', args, {
+      encoding: 'utf8',
+      shell: process.platform === 'win32',
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
     process.stdout.write(output);
   } catch (error) {
     if (error.stdout) process.stdout.write(String(error.stdout));
