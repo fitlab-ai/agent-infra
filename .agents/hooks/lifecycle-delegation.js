@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 const MAX_INPUT_BYTES = 64 * 1024;
 const clientIndex = process.argv.indexOf('--client');
 const client = clientIndex >= 0 ? process.argv[clientIndex + 1] : '';
-if (!['claude-code', 'codex'].includes(client)) {
+if (client !== 'claude-code') {
   process.stderr.write('Lifecycle delegation hook requires a supported --client value\n');
   process.exit(1);
 }

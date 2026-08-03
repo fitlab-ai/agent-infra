@@ -43,7 +43,7 @@ const CAPABILITY_MATRIX = {
     commands: 'integrated',
     hooks: 'integrated',
     subagents: 'experimental',
-    orchestration: 'experimental',
+    orchestration: 'unsupported',
     sandbox: 'integrated',
     verification: 'compatible'
   },

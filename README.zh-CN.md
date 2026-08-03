@@ -174,7 +174,7 @@ ai agent-client configure
 | 命令 | 用途 |
 |------|------|
 | `create-task` / `import-issue` | 从描述或 GitHub Issue 创建任务 |
-| `run-task` | 从当前状态续跑生命周期，用 fresh 隔离 executor/reviewer 推进到安全提交或稳定暂停 |
+| `run-task` | 在 Claude Code 中从当前状态续跑生命周期，用 fresh 隔离 executor/reviewer 推进到安全提交或稳定暂停；Codex 当前因多代理运行时未暴露所需生命周期事件而失败关闭 |
 | `analyze-task` → `review-analysis` | 明确范围与风险，再审查分析 |
 | `plan-task` → `review-plan` | 设计实现路径，再审查方案 |
 | `code-task` → `review-code` | 实现并测试，再执行结构化代码审查 |

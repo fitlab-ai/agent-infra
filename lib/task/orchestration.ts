@@ -16,6 +16,7 @@ import {
   sealDelegation
 } from './delegation-receipts.ts';
 import type { DelegationReceipt, DelegationRole, DelegationStage } from './delegation-receipts.ts';
+import { getAgentClientCapability } from '../agent-clients/registry.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 import { captureWorkspaceSnapshot, diffWorkspaceSnapshots } from './workspace-snapshot.ts';
 
@@ -248,7 +249,10 @@ function prepareOrchestrationDelegation(
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  if (!['claude-code', 'codex'].includes(input.client)) {
+  if (
+    getAgentClientCapability(input.client, 'subagents').level === 'unsupported'
+    || getAgentClientCapability(input.client, 'orchestration').level === 'unsupported'
+  ) {
     return failed('ORCHESTRATION_CLIENT_UNSUPPORTED', `client '${input.client}' does not support lifecycle orchestration`, resolved.taskId);
   }
   const run = readRun(resolved.taskDir);

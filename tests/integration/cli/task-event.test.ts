@@ -202,7 +202,7 @@ test('plan event reopens technical design after commit preparation', () => {
 
 test('completed event validates orchestration provenance before writing task state', () => {
   const f = fixture();
-  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'claude-code']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
   spawnSync('git', ['config', 'user.name', 'Test'], { cwd: f.root });
   spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: f.root });
@@ -214,14 +214,14 @@ test('completed event validates orchestration provenance before writing task sta
     { cwd: f.root, encoding: 'utf8' }
   );
   assert.equal(orchestrate(['begin-or-resume']).status, 0);
-  assert.equal(orchestrate(['prepare', '--client', 'codex']).status, 0);
+  assert.equal(orchestrate(['prepare', '--client', 'claude-code']).status, 0);
   assert.equal(orchestrate([
     'hook-start', '--native-agent', 'agent-infra-lifecycle-reviewer', '--child-id', 'child-1',
     '--parent-id', 'parent-1', '--spawn-mode', 'fresh'
   ]).status, 0);
 
   const before = fs.readFileSync(f.file);
-  const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md']);
+  const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'claude-code', '--artifact', 'plan.md']);
   assert.equal(completed.status, 1);
   assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_TRANSITION_INVALID');
   assert.deepEqual(fs.readFileSync(f.file), before);

@@ -62,6 +62,16 @@ test('prepare fails closed for clients without orchestration capability', () => 
   assert.equal(result.changed, false);
 });
 
+test('prepare fails closed for Codex when native lifecycle events are not observable', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  const result = prepareOrchestrationDelegation('TASK-20260101-000001', {
+    client: 'codex'
+  }, { repoRoot: f.root, captureWorkspace: snapshot });
+  assert.equal(result.error?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
+  assert.equal(result.changed, false);
+});
+
 test('route selects one fresh role from existing lifecycle facts', () => {
   const analysis = fixture('requirement-analysis');
   assert.deepEqual(routeOrchestration('TASK-20260101-000001', { repoRoot: analysis.root }).next, {
@@ -118,7 +128,7 @@ test('commit authorization is issued at eligible prepare and the receipt reaches
   assert.equal(begun.run?.commitAuthorization.issuedAt, null);
 
   const prepared = prepareOrchestrationDelegation('TASK-20260101-000001', {
-    client: 'codex'
+    client: 'claude-code'
   }, { repoRoot: f.root, id: () => 'receipt-1', now, captureWorkspace: snapshot });
   assert.equal(prepared.next?.stage, 'commit');
   assert.equal(prepared.run?.commitAuthorization.issuedAt, '2026-01-01T00:00:00.000Z');
@@ -127,7 +137,7 @@ test('commit authorization is issued at eligible prepare and the receipt reaches
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-1', parentId: 'parent-1',
     spawnMode: 'fresh', actualModel: 'gpt-5'
   }, { repoRoot: f.root, now }).status, 'running');
-  assert.equal(completeCommitOrchestrationStage('TASK-20260101-000001', 'codex', { repoRoot: f.root }).status, 'running');
+  assert.equal(completeCommitOrchestrationStage('TASK-20260101-000001', 'claude-code', { repoRoot: f.root }).status, 'running');
   assert.equal(sealOrchestrationDelegation('TASK-20260101-000001', {
     childId: 'child-1', exitCode: 0, afterFingerprint: 'after', changedPaths: []
   }, { repoRoot: f.root, now }).status, 'running');
@@ -172,7 +182,7 @@ test('managed native hook mismatches persist a recoverable pause', () => {
 test('repository pending guard includes paused runs that retain a delegation', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-  prepareOrchestrationDelegation('TASK-20260101-000001', { client: 'codex' }, {
+  prepareOrchestrationDelegation('TASK-20260101-000001', { client: 'claude-code' }, {
     repoRoot: f.root, captureWorkspace: snapshot
   });
   pauseOrchestration('TASK-20260101-000001', 'HOOK_FAILED', 'hook failed', true, { repoRoot: f.root });
@@ -185,7 +195,7 @@ test('repository pending guard includes paused runs that retain a delegation', (
   );
   beginOrResumeOrchestration('TASK-20260101-000002', { repoRoot: f.root });
 
-  const prepared = prepareOrchestrationDelegation('TASK-20260101-000002', { client: 'codex' }, {
+  const prepared = prepareOrchestrationDelegation('TASK-20260101-000002', { client: 'claude-code' }, {
     repoRoot: f.root, captureWorkspace: snapshot
   });
 
@@ -197,18 +207,18 @@ test('native stop derives the workspace delta before sealing the unique delegati
   const f = fixture('requirement-analysis-review');
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-  prepareOrchestrationDelegation('TASK-20260101-000001', { client: 'codex' }, {
+  prepareOrchestrationDelegation('TASK-20260101-000001', { client: 'claude-code' }, {
     repoRoot: f.root, captureWorkspace: snapshot
   });
-  activateMatchingOrchestrationDelegation('codex', {
+  activateMatchingOrchestrationDelegation('claude-code', {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-stop',
     parentId: 'parent-session', spawnMode: 'fresh'
   }, { repoRoot: f.root });
   completeOrchestrationStage('TASK-20260101-000001', {
-    stage: 'review-analysis', round: 1, artifact: 'review-analysis.md', agent: 'codex'
+    stage: 'review-analysis', round: 1, artifact: 'review-analysis.md', agent: 'claude-code'
   }, { repoRoot: f.root });
 
-  const stopped = sealMatchingOrchestrationDelegation('codex', {
+  const stopped = sealMatchingOrchestrationDelegation('claude-code', {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-stop'
   }, {
     repoRoot: f.root,

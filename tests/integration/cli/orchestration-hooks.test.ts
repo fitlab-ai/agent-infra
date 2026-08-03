@@ -61,35 +61,6 @@ test('lifecycle hook maps a native Claude start payload to automatic core correl
   ]);
 });
 
-test('lifecycle hook maps native Codex start and stop payloads without invented workspace fields', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-hook-codex-'));
-  const binDir = path.join(root, 'bin');
-  const shim = path.join(root, 'internal-cli.mjs');
-  fs.writeFileSync(shim, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))\n');
-  writeNodeCommandShim(path.join(binDir, 'agent-infra-internal'), shim);
-  const env = envWithPrependedPath(process.env, binDir);
-
-  const start = run(fs.readFileSync(path.join(FIXTURES, 'codex-subagent-start.json'), 'utf8'), 'codex', env);
-  assert.equal(start.status, 0, start.stderr);
-  assert.deepEqual(JSON.parse(start.stdout), [
-    'task-orchestration', 'auto', 'hook-start',
-    '--client', 'codex',
-    '--native-agent', 'agent-infra-lifecycle-reviewer',
-    '--child-id', 'codex-child',
-    '--parent-id', 'codex-parent',
-    '--spawn-mode', 'fresh'
-  ]);
-
-  const stop = run(fs.readFileSync(path.join(FIXTURES, 'codex-subagent-stop.json'), 'utf8'), 'codex', env);
-  assert.equal(stop.status, 0, stop.stderr);
-  assert.deepEqual(JSON.parse(stop.stdout), [
-    'task-orchestration', 'auto', 'hook-stop',
-    '--client', 'codex',
-    '--native-agent', 'agent-infra-lifecycle-reviewer',
-    '--child-id', 'codex-child'
-  ]);
-});
-
 test('lifecycle hook rejects malformed payloads before invoking core', () => {
   const result = run('{');
   assert.equal(result.status, 1);

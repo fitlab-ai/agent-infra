@@ -58,7 +58,7 @@ test('task-orchestration prepare derives the workspace baseline without model-su
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'begin-or-resume']).status, 0);
 
-  const prepared = run(f.root, [f.id, 'prepare', '--client', 'codex']);
+  const prepared = run(f.root, [f.id, 'prepare', '--client', 'claude-code']);
   assert.equal(prepared.status, 0, prepared.stderr);
   const result = JSON.parse(prepared.stdout);
   assert.equal(result.run.pendingDelegation.parentId, null);
