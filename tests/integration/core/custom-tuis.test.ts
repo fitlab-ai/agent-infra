@@ -47,7 +47,7 @@ function makeProject(projectRoot: string, overrides: Record<string, unknown> = {
     language: "en",
     platform: { type: "github" },
     files: {
-      managed: [".agents/skills/", ".claude/commands/", ".gemini/commands/", ".opencode/commands/"],
+      managed: [".agents/skills/", ".claude/commands/", ".opencode/commands/"],
       merged: [],
       ejected: []
     },
@@ -99,7 +99,6 @@ test("syncTemplates learns custom TUI command format from existing command files
         managed: [
           ".agents/skills/",
           ".claude/commands/",
-          ".gemini/commands/",
           ".opencode/commands/",
           ".acme/commands/"
         ],
@@ -138,7 +137,7 @@ test("syncTemplates skips custom TUI generation when the reference directory is 
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.equal(fs.existsSync(path.join(projectRoot, ".acme/commands/local-check.cmd")), false);
-    assert.equal(report.custom.commands.generated.length, 3);
+    assert.equal(report.custom.commands.generated.length, 2);
     assert.deepEqual(report.custom.customTUIs.skipped, [
       { index: 0, name: "Acme TUI", dir: ".acme/commands", reason: "no command files" }
     ]);
@@ -161,7 +160,6 @@ test("syncTemplates skips custom TUI generation when reference files do not iden
         managed: [
           ".agents/skills/",
           ".claude/commands/",
-          ".gemini/commands/",
           ".opencode/commands/",
           ".acme/commands/"
         ],
@@ -174,7 +172,7 @@ test("syncTemplates skips custom TUI generation when reference files do not iden
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.equal(fs.existsSync(path.join(projectRoot, ".acme/commands/local-check.cmd")), false);
-    assert.equal(report.custom.commands.generated.length, 3);
+    assert.equal(report.custom.commands.generated.length, 2);
     assert.deepEqual(report.custom.customTUIs.skipped, [
       { index: 0, name: "Acme TUI", dir: ".acme/commands", reason: "no usable reference command file" }
     ]);
@@ -207,7 +205,6 @@ test("syncTemplates skips mismatched reference descriptions and uses the next va
         managed: [
           ".agents/skills/",
           ".claude/commands/",
-          ".gemini/commands/",
           ".opencode/commands/",
           ".acme/commands/"
         ],
@@ -256,7 +253,6 @@ test("syncTemplates protects generated custom TUI command files during managed c
         managed: [
           ".agents/skills/",
           ".claude/commands/",
-          ".gemini/commands/",
           ".opencode/commands/",
           ".acme/commands/"
         ],
@@ -294,7 +290,6 @@ test("syncTemplates removes stale custom TUI files that only contain a custom sk
         managed: [
           ".agents/skills/",
           ".claude/commands/",
-          ".gemini/commands/",
           ".opencode/commands/",
           ".acme/commands/"
         ],
@@ -337,7 +332,7 @@ test("syncTemplates rejects custom TUI directories outside the project root", as
       }
     ]);
     assert.equal(fs.existsSync(path.join(tmpDir, "outside")), false);
-    assert.equal(report.custom.commands.generated.length, 3);
+    assert.equal(report.custom.commands.generated.length, 2);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -404,7 +399,6 @@ test("syncTemplates generates commands for multiple custom TUI tools and custom 
         managed: [
           ".agents/skills/",
           ".claude/commands/",
-          ".gemini/commands/",
           ".opencode/commands/",
           ".acme/commands/",
           ".beta/prompts/"
@@ -422,7 +416,7 @@ test("syncTemplates generates commands for multiple custom TUI tools and custom 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
 
-    assert.equal(report.custom.commands.generated.length, 10);
+    assert.equal(report.custom.commands.generated.length, 8);
     assert.ok(report.custom.commands.generated.includes(".acme/commands/local-check.cmd"));
     assert.ok(report.custom.commands.generated.includes(".acme/commands/local-plan.cmd"));
     assert.ok(report.custom.commands.generated.includes(".beta/prompts/cmd-local-check.md"));
@@ -450,9 +444,8 @@ test("syncTemplates keeps built-in custom skill command generation unchanged wit
     const report = syncTemplates(projectRoot, templateRoot);
 
     assert.deepEqual(report.custom.detected, ["local-check"]);
-    assert.equal(report.custom.commands.generated.length, 3);
+    assert.equal(report.custom.commands.generated.length, 2);
     assert.ok(report.custom.commands.generated.includes(".claude/commands/local-check.md"));
-    assert.ok(report.custom.commands.generated.includes(".gemini/commands/demo/local-check.toml"));
     assert.ok(report.custom.commands.generated.includes(".opencode/commands/local-check.md"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

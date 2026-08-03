@@ -9,7 +9,7 @@ steps:
     description: Load context and understand the scope of changes.
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - Read the PR description and linked issues
       - Review the diff to understand what changed

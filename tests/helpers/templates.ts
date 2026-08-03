@@ -37,8 +37,7 @@ function buildCommandSyncFiles(project: string): [string, string][] {
 
   return managedSkills.flatMap((skill) => [
     [`.claude/commands/${skill}.md`, `templates/.claude/commands/${skill}.en.md`],
-    [`.opencode/commands/${skill}.md`, `templates/.opencode/commands/${skill}.en.md`],
-    [`.gemini/commands/${project}/${skill}.toml`, `templates/.gemini/commands/_project_/${skill}.en.toml`]
+    [`.opencode/commands/${skill}.md`, `templates/.opencode/commands/${skill}.en.md`]
   ]);
 }
 

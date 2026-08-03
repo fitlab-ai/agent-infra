@@ -165,4 +165,3 @@ function log(args: string[] = []): void {
 }
 
 export { log };
-

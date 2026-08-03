@@ -14,7 +14,7 @@ steps:
     description: Analyze feature requirements, explore the codebase, and identify affected areas.
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - Read and understand the feature requirements
       - Explore the codebase to identify relevant files and modules
@@ -37,7 +37,7 @@ steps:
     description: Review whether the requirement analysis is complete, verifiable, and clearly scoped.
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - Check requirement scope, constraints, and acceptance criteria
       - Verify affected areas and risk identification
@@ -63,7 +63,7 @@ steps:
     description: Create the technical design for the feature implementation.
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - Define interfaces and data structures
       - Outline the implementation approach
@@ -93,7 +93,7 @@ steps:
     description: Review whether the technical design is implementable, low-risk, and requirement-complete.
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - Verify the plan covers the approved analysis
       - Check architecture fit, risks, and test strategy

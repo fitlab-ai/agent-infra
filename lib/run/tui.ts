@@ -1,9 +1,9 @@
 import { renderAgentClientInvocation } from '../agent-clients/invocation.ts';
 import { getAgentClientAdapter } from '../agent-clients/registry.ts';
 
-export type TuiName = 'claude' | 'codex' | 'gemini' | 'opencode';
+export type TuiName = 'claude' | 'codex' | 'antigravity' | 'opencode';
 
-const TUI_NAMES = new Set(['claude', 'codex', 'gemini', 'opencode']);
+const TUI_NAMES = new Set(['claude', 'codex', 'antigravity', 'opencode']);
 
 export type CommandConfig = {
   defaultTui?: unknown;
@@ -36,13 +36,12 @@ export function renderPrompt(params: { tui: TuiName; skill: string; args: string
       args: params.args
     });
   }
-  if (params.tui === 'gemini') return `/agent-infra:${suffix}`;
   return `/${suffix}`;
 }
 
 export function buildTuiCommand(tui: TuiName, prompt: string): [string, string[]] {
   if (tui === 'claude') return ['claude', ['--dangerously-skip-permissions', '--print', prompt]];
-  if (tui === 'gemini') return ['gemini', ['--approval-mode', 'yolo', '--prompt', prompt]];
+  if (tui === 'antigravity') return ['agy', ['--dangerously-skip-permissions', '--print', prompt]];
   if (tui === 'opencode') return ['opencode', ['run', '--dangerously-skip-permissions', prompt]];
   return ['codex', ['exec', '--dangerously-bypass-approvals-and-sandbox', prompt]];
 }

@@ -41,11 +41,6 @@ function makeTemplateRoot(tmpDir: string) {
   );
   // Built-in TUI template files so the sync loop finds something to write.
   writeFile(templateRoot, ".claude/commands/update-agent-infra.md", "claude command\n");
-  writeFile(
-    templateRoot,
-    ".gemini/commands/_project_/update-agent-infra.toml",
-    "gemini command\n"
-  );
   writeFile(templateRoot, ".opencode/commands/update-agent-infra.md", "opencode command\n");
   writeFile(templateRoot, ".codex/hooks.json", "{}\n");
   return templateRoot;
@@ -55,7 +50,6 @@ function makeProject(projectRoot: string, overrides: Record<string, unknown> = {
   const baseManaged = [
     ".agents/skills/",
     ".claude/commands/",
-    ".gemini/commands/",
     ".opencode/commands/",
     ".codex/hooks.json"
   ];
@@ -86,7 +80,7 @@ function makeProject(projectRoot: string, overrides: Record<string, unknown> = {
 }
 
 function canonicalAgentClients(enabled: readonly string[]) {
-  return ["claude-code", "codex", "gemini-cli", "opencode"].map((id) => ({
+  return ["claude-code", "codex", "antigravity-cli", "opencode"].map((id) => ({
     id,
     enabled: enabled.includes(id),
     installInSandbox: false
@@ -107,7 +101,6 @@ test("syncTemplates: missing tuis field keeps full built-in TUI behavior (regres
 
     assert.equal(report.managed.skippedTUI?.length ?? 0, 0);
     assert.ok(fs.existsSync(path.join(projectRoot, ".claude/commands/update-agent-infra.md")));
-    assert.ok(fs.existsSync(path.join(projectRoot, ".gemini/commands/demo/update-agent-infra.toml")));
     assert.ok(fs.existsSync(path.join(projectRoot, ".opencode/commands/update-agent-infra.md")));
     assert.ok(fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
   } finally {
@@ -128,47 +121,37 @@ test("syncTemplates: tuis subset skips owned managed/merged entries", async () =
     const report = syncTemplates(projectRoot, templateRoot) as SyncReport;
 
     const skipped = report.managed.skippedTUI ?? [];
-    assert.ok(skipped.includes(".gemini/commands/"), `expected .gemini/commands/ in skippedTUI, got ${JSON.stringify(skipped)}`);
     assert.ok(skipped.includes(".opencode/commands/"));
     assert.ok(skipped.includes(".codex/hooks.json"));
     assert.ok(fs.existsSync(path.join(projectRoot, ".claude/commands/update-agent-infra.md")));
-    assert.ok(!fs.existsSync(path.join(projectRoot, ".gemini/commands/demo/update-agent-infra.toml")));
     assert.ok(!fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("syncTemplates: switching tuis cleans up previously written owned files", async () => {
+test("syncTemplates: Antigravity uses shared skills without client-owned project assets", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-switch-"));
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
-    makeProject(projectRoot, { tuis: ["claude-code", "gemini-cli"] });
+    makeProject(projectRoot, { tuis: ["claude-code", "antigravity-cli"] });
 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
       ".agents/skills/update-agent-infra/scripts/sync-templates.js"
     );
     syncTemplates(projectRoot, templateRoot);
-    assert.ok(fs.existsSync(path.join(projectRoot, ".gemini/commands/demo/update-agent-infra.toml")));
+    assert.ok(fs.existsSync(path.join(projectRoot, ".agents/skills/local-check/SKILL.md")));
 
-    // Flip canonical project integration state to disable gemini-cli.
+    // Flip canonical project integration state to disable antigravity-cli.
     const cfgPath = path.join(projectRoot, ".agents/.airc.json");
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
     cfg.agentClients = canonicalAgentClients(["claude-code"]);
     fs.writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
 
     const secondReport = syncTemplates(projectRoot, templateRoot);
-    assert.ok(secondReport.managed.removed.some((p) => p.startsWith(".gemini/commands/")));
-    assert.ok(!fs.existsSync(path.join(projectRoot, ".gemini/commands/demo/update-agent-infra.toml")));
-    // Empty .gemini/commands/ directory should be cleaned up.
-    const commandsDir = path.join(projectRoot, ".gemini/commands");
-    assert.ok(
-      !fs.existsSync(commandsDir),
-      `expected disabled Gemini commands directory to be removed, found ${
-        fs.existsSync(commandsDir) ? JSON.stringify(fs.readdirSync(commandsDir)) : "nothing"
-      }`
-    );
+    assert.ok(fs.existsSync(path.join(projectRoot, ".agents/skills/local-check/SKILL.md")));
+    assert.ok(!secondReport.managed.removed.some((p) => p.startsWith(".agents/skills/")));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -257,12 +240,10 @@ test("syncTemplates: tuis: [] disables every built-in TUI and skips all owned de
     const skipped = report.managed.skippedTUI ?? [];
     // Every built-in TUI owned default path should be skipped.
     assert.ok(skipped.includes(".claude/commands/"));
-    assert.ok(skipped.includes(".gemini/commands/"));
     assert.ok(skipped.includes(".opencode/commands/"));
     assert.ok(skipped.includes(".codex/hooks.json"));
     // No built-in TUI files written.
     assert.ok(!fs.existsSync(path.join(projectRoot, ".claude/commands/update-agent-infra.md")));
-    assert.ok(!fs.existsSync(path.join(projectRoot, ".gemini/commands/demo/update-agent-infra.toml")));
     assert.ok(!fs.existsSync(path.join(projectRoot, ".opencode/commands/update-agent-infra.md")));
     assert.ok(!fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
   } finally {
@@ -281,7 +262,6 @@ test("syncTemplates: ejected entries owned by disabled TUIs are preserved and no
         managed: [
           ".agents/skills/",
           ".claude/commands/",
-          ".gemini/commands/",
           ".opencode/commands/"
         ],
         merged: [],
@@ -312,7 +292,7 @@ test("syncTemplates: canonical agentClients controls assets and rejects incomple
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
     makeProject(projectRoot, {
-      tuis: ["claude-code", "codex", "gemini-cli", "opencode"],
+      tuis: ["claude-code", "codex", "antigravity-cli", "opencode"],
       agentClients: canonicalAgentClients([])
     });
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
@@ -334,43 +314,32 @@ test("syncTemplates: canonical agentClients controls assets and rejects incomple
   }
 });
 
-test("syncTemplates: disabling a client preserves modified and unknown managed files", async () => {
+test("syncTemplates: disabling Antigravity leaves shared skills untouched", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-tui-safe-disable-"));
   try {
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
-    makeProject(projectRoot, { tuis: ["gemini-cli"] });
+    makeProject(projectRoot, { tuis: ["antigravity-cli"] });
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
       ".agents/skills/update-agent-infra/scripts/sync-templates.js"
     );
     syncTemplates(projectRoot, templateRoot);
 
-    const generated = ".gemini/commands/demo/update-agent-infra.toml";
-    writeFile(projectRoot, generated, "user modified\n");
-    writeFile(projectRoot, ".gemini/commands/user-owned.toml", "user owned\n");
     const cfgPath = path.join(projectRoot, ".agents/.airc.json");
     const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
     cfg.agentClients = canonicalAgentClients([]);
     fs.writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
 
     const report = syncTemplates(projectRoot, templateRoot);
-    assert.equal(fs.readFileSync(path.join(projectRoot, generated), "utf8"), "user modified\n");
-    assert.equal(
-      fs.readFileSync(path.join(projectRoot, ".gemini/commands/user-owned.toml"), "utf8"),
-      "user owned\n"
-    );
-    assert.ok(
-      report.managed.protected.some((entry) =>
-        entry.target === generated && entry.reason === "user-modified"
-      )
-    );
+    assert.ok(fs.existsSync(path.join(projectRoot, ".agents/skills/local-check/SKILL.md")));
+    assert.ok(!report.managed.removed.some((entry) => entry.startsWith(".agents/skills/")));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test("syncTemplates: every built-in client subset converges idempotently", async () => {
-  const ids = ["claude-code", "codex", "gemini-cli", "opencode"];
+  const ids = ["claude-code", "codex", "antigravity-cli", "opencode"];
   const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
     ".agents/skills/update-agent-infra/scripts/sync-templates.js"
   );
@@ -398,9 +367,12 @@ test("syncTemplates: every built-in client subset converges idempotently", async
         const adapterPath = {
           "claude-code": ".claude/commands/",
           codex: ".codex/hooks.json",
-          "gemini-cli": ".gemini/commands/",
+          "antigravity-cli": null,
           opencode: ".opencode/commands/"
         }[id]!;
+        if (adapterPath === null) {
+          continue;
+        }
         assert.equal(
           config.files.managed.includes(adapterPath),
           (mask & (1 << index)) !== 0,

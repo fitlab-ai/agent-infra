@@ -163,7 +163,7 @@ npm test
 
 ## 多 AI 协作支持
 
-本项目支持 Claude Code、Codex、Gemini CLI、OpenCode 等多个 AI 工具协同工作。
+本项目支持 Claude Code、Codex、Antigravity CLI、OpenCode 等多个 AI 工具协同工作。
 
 **协作配置目录**：
 - `.agents/` - AI 配置和工作流定义（版本控制）

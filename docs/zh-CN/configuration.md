@@ -15,7 +15,7 @@
   "agentClients": [
     { "id": "claude-code", "enabled": true, "installInSandbox": true },
     { "id": "codex", "enabled": true, "installInSandbox": true },
-    { "id": "gemini-cli", "enabled": true, "installInSandbox": true },
+    { "id": "antigravity-cli", "enabled": true, "installInSandbox": true },
     { "id": "opencode", "enabled": true, "installInSandbox": true }
   ],
   "templates": {
@@ -42,7 +42,6 @@
       ".agents/templates/",
       ".agents/workflows/",
       ".claude/commands/",
-      ".gemini/commands/",
       ".opencode/commands/"
     ],
     "merged": [
@@ -74,11 +73,11 @@
 
 ## Agent Client 契约
 
-**AI Coding Agent Client**（简称 **Agent Client**）是受支持的编码代理应用，例如 Claude Code、Codex、Gemini CLI 或 OpenCode。Canonical `agentClients` 数组必须恰好包含每个内建客户端一次。数组顺序没有运行时语义；agent-infra 会按上方示例中的稳定顺序序列化。
+**AI Coding Agent Client**（简称 **Agent Client**）是受支持的编码代理应用，例如 Claude Code、Codex、Antigravity CLI 或 OpenCode。Canonical `agentClients` 数组必须恰好包含每个内建客户端一次。数组顺序没有运行时语义；agent-infra 会按上方示例中的稳定顺序序列化。
 
 | 字段 | 含义 |
 |------|------|
-| `id` | 封闭的内建客户端标识：`claude-code`、`codex`、`gemini-cli` 或 `opencode`。 |
+| `id` | 封闭的内建客户端标识：`claude-code`、`codex`、`antigravity-cli` 或 `opencode`。 |
 | `enabled` | 项目是否启用该客户端专属文件与集成。 |
 | `installInSandbox` | 沙箱装配是否安装该客户端；此状态与 `enabled` 相互独立。 |
 

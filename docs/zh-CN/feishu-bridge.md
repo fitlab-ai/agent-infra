@@ -83,7 +83,7 @@ bridge 有意只暴露上表中的 v1 白名单，而不是每一个本地 `ai t
 3. `command.defaultTui`
 4. 内置默认 `codex`
 
-内置支持 `claude`、`codex`、`gemini`、`opencode`。生成的 prompt 分别为 Claude Code/OpenCode 的 `/skill ...`、Codex 的 `$skill ...`、Gemini CLI 的 `/agent-infra:skill ...`。
+内置支持 `claude`、`codex`、`antigravity`、`opencode`。生成的 prompt 分别为 Claude Code/Antigravity/OpenCode 的 `/skill ...` 和 Codex 的 `$skill ...`。
 
 ## 授权
 

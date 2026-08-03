@@ -75,14 +75,14 @@
       "properties": {
         "defaultTui": {
           "type": "string",
-          "enum": ["claude", "codex", "gemini", "opencode"],
+          "enum": ["claude", "codex", "antigravity", "opencode"],
           "default": "codex"
         },
         "skillTuiDefaults": {
           "type": "object",
           "additionalProperties": {
             "type": "string",
-            "enum": ["claude", "codex", "gemini", "opencode"]
+            "enum": ["claude", "codex", "antigravity", "opencode"]
           }
         },
         "allowedSkills": {

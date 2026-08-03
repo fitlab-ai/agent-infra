@@ -83,7 +83,7 @@ The bridge intentionally exposes the v1 allow-list above, not every local `ai ta
 3. `command.defaultTui`
 4. built-in default `codex`
 
-Supported built-ins are `claude`, `codex`, `gemini`, and `opencode`. The generated prompts are `/skill ...` for Claude Code/OpenCode, `$skill ...` for Codex, and `/agent-infra:skill ...` for Gemini CLI.
+Supported built-ins are `claude`, `codex`, `antigravity`, and `opencode`. The generated prompts are `/skill ...` for Claude Code/Antigravity/OpenCode and `$skill ...` for Codex.
 
 ## Authorization
 

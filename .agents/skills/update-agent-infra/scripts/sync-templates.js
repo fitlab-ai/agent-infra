@@ -40,7 +40,7 @@ const DEFAULTS = {
       "installInSandbox": true
     },
     {
-      "id": "gemini-cli",
+      "id": "antigravity-cli",
       "enabled": true,
       "installInSandbox": true
     },
@@ -146,18 +146,12 @@ const AGENT_CLIENT_MANIFEST = [
     "ejected": []
   },
   {
-    "id": "gemini-cli",
-    "displayName": "Gemini CLI",
-    "invocation": "/${projectName}:${skillName}",
-    "ownedPathPrefixes": [
-      ".gemini/"
-    ],
-    "managed": [
-      ".gemini/commands/"
-    ],
-    "merged": [
-      ".gemini/settings.json"
-    ],
+    "id": "antigravity-cli",
+    "displayName": "Antigravity CLI",
+    "invocation": "/${skillName}",
+    "ownedPathPrefixes": [],
+    "managed": [],
+    "merged": [],
     "ejected": []
   },
   {
@@ -190,6 +184,8 @@ const KNOWN_PLATFORMS = new Set(['github', 'none']);
 const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
 
 const BUILTIN_TUI_IDS = AGENT_CLIENT_MANIFEST.map((entry) => entry.id);
+const LEGACY_TUI_IDS = { 'gemini-cli': 'antigravity-cli' };
+const RETIRED_AGENT_CLIENT_ASSETS = ['.gemini/commands/', '.gemini/settings.json'];
 
 function normalizeAgentClientConfig(cfg) {
   const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
@@ -206,13 +202,19 @@ function normalizeAgentClientConfig(cfg) {
     errorCode: code,
     errorPath: path
   });
+  const normalizeClientId = (value) => typeof value === 'string'
+    ? (own(LEGACY_TUI_IDS, value)
+        ? LEGACY_TUI_IDS[value]
+        : (BUILTIN_TUI_IDS.includes(value) ? value : null))
+    : null;
   const projectTuis = (value) => {
     if (!Array.isArray(value)) {
       return Object.fromEntries(BUILTIN_TUI_IDS.map((id) => [id, true]));
     }
     const enabled = new Set();
     for (const [index, candidate] of value.entries()) {
-      if (BUILTIN_TUI_IDS.includes(candidate)) enabled.add(candidate);
+      const id = normalizeClientId(candidate);
+      if (id) enabled.add(id);
       else diagnostics.push({ code: 'LEGACY_VALUE_IGNORED', path: `tuis[${index}]` });
     }
     return Object.fromEntries(BUILTIN_TUI_IDS.map((id) => [id, enabled.has(id)]));
@@ -228,7 +230,8 @@ function normalizeAgentClientConfig(cfg) {
     const installed = new Set();
     const remainingTools = [];
     for (const [index, candidate] of value.entries()) {
-      if (BUILTIN_TUI_IDS.includes(candidate)) installed.add(candidate);
+      const id = normalizeClientId(candidate);
+      if (id) installed.add(id);
       else if (typeof candidate === 'string') remainingTools.push(candidate);
       else diagnostics.push({ code: 'LEGACY_VALUE_IGNORED', path: `sandbox.tools[${index}]` });
     }
@@ -283,14 +286,15 @@ function normalizeAgentClientConfig(cfg) {
     ) {
       return failure('INVALID_AGENT_CLIENTS', entryPath);
     }
-    if (!BUILTIN_TUI_IDS.includes(candidate.id)) {
+    const id = normalizeClientId(candidate.id);
+    if (!id) {
       return failure('UNKNOWN_AGENT_CLIENT', `${entryPath}.id`);
     }
-    if (entries.has(candidate.id)) return failure('DUPLICATE_AGENT_CLIENT', `${entryPath}.id`);
+    if (entries.has(id)) return failure('DUPLICATE_AGENT_CLIENT', `${entryPath}.id`);
     if (typeof candidate.enabled !== 'boolean' || typeof candidate.installInSandbox !== 'boolean') {
       return failure('INVALID_AGENT_CLIENTS', entryPath);
     }
-    entries.set(candidate.id, {
+    entries.set(id, {
       enabled: candidate.enabled,
       installInSandbox: candidate.installInSandbox
     });
@@ -350,11 +354,11 @@ function planProjectRegistry(current, sharedDefaults, enabledSet) {
   const enabledAdapters = AGENT_CLIENT_MANIFEST.filter((adapter) => enabledSet.has(adapter.id));
   const disabledAdapters = AGENT_CLIENT_MANIFEST.filter((adapter) => !enabledSet.has(adapter.id));
   const allAdapterAssets = new Set(
-    AGENT_CLIENT_MANIFEST.flatMap((adapter) => [
+    [...AGENT_CLIENT_MANIFEST.flatMap((adapter) => [
       ...adapter.managed,
       ...adapter.merged,
       ...adapter.ejected
-    ])
+    ]), ...RETIRED_AGENT_CLIENT_ASSETS]
   );
   const enabled = {
     managed: adapterAssets(enabledAdapters, 'managed'),
@@ -547,14 +551,13 @@ function detectCustomSkills(projectRoot, templateSkillNames) {
     .sort((left, right) => left.dirName.localeCompare(right.dirName));
 }
 
-function isCustomProtected(targetPath, customSkills, project, customTUICommandTargets) {
+function isCustomProtected(targetPath, customSkills, customTUICommandTargets) {
   const normalized = norm(targetPath);
 
   return customSkills.some(({ dirName }) => (
     normalized.startsWith(`.agents/skills/${dirName}/`) ||
     normalized === `.claude/commands/${dirName}.md` ||
     normalized === `.opencode/commands/${dirName}.md` ||
-    normalized === '.gemini/commands/' + project + '/' + dirName + '.toml' ||
     customTUICommandTargets.has(normalized)
   ));
 }
@@ -763,15 +766,6 @@ function formatYamlMetadata(key, value) {
   return [`${key}: |-`, ...value.split('\n').map((line) => `  ${line}`)];
 }
 
-function formatTomlMetadata(key, value) {
-  if (!value.includes('\n')) {
-    return `${key} = ${JSON.stringify(value)}`;
-  }
-
-  const lines = value.split('\n').map((line) => JSON.stringify(line).slice(1, -1));
-  return `${key} = """${lines.join('\n')}"""`;
-}
-
 function generateClaudeCommand(skill, lang) {
   const isZhCN = lang === 'zh-CN';
   const lines = ['---', ...formatYamlMetadata('description', skill.description)];
@@ -794,31 +788,6 @@ function generateClaudeCommand(skill, lang) {
   lines.push(isZhCN ? '严格按照技能中定义的所有步骤执行。' : 'Follow all steps defined in the skill exactly.');
 
   return `${lines.join('\n')}\n`;
-}
-
-function generateGeminiCommand(skill, lang) {
-  const isZhCN = lang === 'zh-CN';
-  const promptLines = [];
-
-  if (skill.args) {
-    promptLines.push(isZhCN ? '参数：{{args}}' : 'Arguments: {{args}}');
-    promptLines.push('');
-  }
-
-  promptLines.push(
-    isZhCN
-      ? `读取并执行 \`.agents/skills/${skill.dirName}/SKILL.md\` 中的 ${skill.dirName} 技能。`
-      : `Read and execute the ${skill.dirName} skill from \`.agents/skills/${skill.dirName}/SKILL.md\`.`
-  );
-  promptLines.push('');
-  promptLines.push(isZhCN ? '严格按照技能中定义的所有步骤执行。' : 'Follow all steps defined in the skill exactly.');
-
-  return [
-    formatTomlMetadata('description', skill.description),
-    'prompt = """',
-    ...promptLines,
-    '"""'
-  ].join('\n') + '\n';
 }
 
 function generateOpenCodeCommand(skill, lang) {
@@ -1069,7 +1038,6 @@ function learnAndGenerateCommands(projectRoot, customSkills, tool, templateSkill
 function generateCustomCommands(
   projectRoot,
   customSkills,
-  project,
   lang,
   report,
   customTUIs,
@@ -1082,13 +1050,6 @@ function generateCustomCommands(
       managedWriter(
         `.claude/commands/${skill.dirName}.md`,
         generateClaudeCommand(skill, lang),
-        report.custom.commands
-      );
-    }
-    if (enabledTUIs.has('gemini-cli')) {
-      managedWriter(
-        '.gemini/commands/' + project + '/' + skill.dirName + '.toml',
-        generateGeminiCommand(skill, lang),
         report.custom.commands
       );
     }
@@ -1699,7 +1660,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
         for (const projFile of projFiles) {
           if (expectedTargets.has(projFile)) continue;
           if (projFile === configPathRel) continue;
-          if (isCustomProtected(projFile, protectedCustomSkills, project, customTUICommandTargets)) continue;
+          if (isCustomProtected(projFile, protectedCustomSkills, customTUICommandTargets)) continue;
           if (matchesAny(projFile, merged) || matchesAny(projFile, ejected)) continue;
           if (assetPlan.enabledManaged.includes(entry)) {
             const baseline = trustedBaseline(managedBaselines[projFile]);
@@ -1741,7 +1702,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
   generateCustomCommands(
     projectRoot,
     customSkills,
-    project,
     lang,
     report,
     customTUIs,

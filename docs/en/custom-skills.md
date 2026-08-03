@@ -40,10 +40,10 @@ After adding the skill, run `update-agent-infra` again:
 |-----|---------|
 | Claude Code | `/update-agent-infra` |
 | Codex | `$update-agent-infra` |
-| Gemini CLI | `/{{project}}:update-agent-infra` |
+| Antigravity CLI | `/update-agent-infra` |
 | OpenCode | `/update-agent-infra` |
 
-That refresh detects non-built-in skill directories in `.agents/skills/` and generates matching commands for Claude Code, Gemini CLI, and OpenCode automatically.
+That refresh detects non-built-in skill directories in `.agents/skills/`, generates matching commands for Claude Code and OpenCode, and lets Antigravity CLI discover the shared skills directly.
 
 ## Sync custom skills from shared sources
 

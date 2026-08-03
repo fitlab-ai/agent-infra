@@ -16,7 +16,7 @@ docker buildx inspect --bootstrap
 
 ## 沙箱 aliases 与 GitHub CLI
 
-`ai sandbox create` 在首次运行时会自动生成宿主机侧的 `~/.agent-infra/aliases/sandbox.sh`。该文件内置了 Claude、Codex、Gemini CLI 和 OpenCode 的 yolo 快捷命令模板，你可以直接修改；每次创建沙箱时，这个文件都会同步到容器内的 `/home/devuser/.bash_aliases`。
+`ai sandbox create` 在首次运行时会自动生成宿主机侧的 `~/.agent-infra/aliases/sandbox.sh`。该文件内置了 Claude、Codex、Antigravity CLI 和 OpenCode 的 yolo 快捷命令模板，你可以直接修改；每次创建沙箱时，这个文件都会同步到容器内的 `/home/devuser/.bash_aliases`。
 
 默认沙箱镜像也会安装 agent-infra CLI npm 包，并把 `ai` 与 `agent-infra` 暴露在容器 `PATH` 上。在任务绑定 worktree 中，生命周期技能和适用的任务命令会从当前 symbolic branch 严格反查 `task.md.branch` 完全匹配的唯一 active task；可用 `--task <ref>` / `-t <ref>` 显式覆盖。带其他位置操作数的命令使用无歧义形式，例如 `ai task cat analysis`、`ai task decisions --item 1` 和 `ai decide --item PL-1 <decision>`。`ai task grep <pattern>` 默认仍搜索全部 hot task，只有 `--current` 或 `--task` 才收窄。宿主侧 `ai run <skill> <task-ref>` 仍要求 task ref，因为它要据此选择目标分支与 sandbox。已有沙箱镜像和容器需要刷新重建并重新创建后，才会获得这个新增的托管工具。
 
@@ -35,7 +35,7 @@ canonical `agentClients` 条目决定哪些 Agent Client 会在沙箱内安装�
   "agentClients": [
     { "id": "claude-code", "enabled": true, "installInSandbox": false },
     { "id": "codex", "enabled": true, "installInSandbox": true },
-    { "id": "gemini-cli", "enabled": false, "installInSandbox": false },
+    { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
     { "id": "opencode", "enabled": false, "installInSandbox": false }
   ]
 }
@@ -46,6 +46,11 @@ setup hint、alias 以及有执行时限的生命周期 hook。`agent-infra` 等
 工具和已配置的 custom tool 不受该选择影响。修改 `installInSandbox` 后，
 需要重建镜像并重新创建受影响容器。运行时能力 label 会让 start、exec 和
 recovery 拒绝 mount 或 hook 策略已与当前配置不一致的旧容器。
+
+Antigravity adapter 使用[官方安装器](https://antigravity.google/docs/cli/install)，
+调用 `agy` 命令，并在[官方配置目录](https://antigravity.google/docs/cli/settings)
+下预置 settings、keybindings 与 MCP 配置。新建容器后需在容器内运行一次
+`agy` 完成认证。
 
 禁用客户端绝不会删除其宿主凭证、配置或历史。即使宿主仍保留已禁用客户端
 的状态，`sandbox show` 也只展示当前选中的工具。只有显式执行
@@ -99,11 +104,11 @@ ai sandbox create feature/proxy --inherit-proxy
 
 tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/.codex` 下的 Codex 数据库、日志、session 与其他未列入 seed 的文件无法恢复；`config.toml`、`model-catalogs` 等声明式 seed 可以从只读 staging mount 重建；bind mount 的 worktree、凭据、shell 配置与 share 目录继续由宿主持久化。
 
-`ai sandbox ls` 保持精简：只列出当前项目的 Containers 容器表（`#` 行号、`SHORT` 任务短号，以及名称、状态、分支），不再打印 worktree 列表和各工具的 state 路径。要查看某个沙箱的这些详情，使用 `ai sandbox show <branch | TASK-id | N>`：它会打印该分支的 worktree 路径和各工具（Claude Code、Codex、Gemini CLI、OpenCode）的 state 路径。入参契约与 `ai sandbox exec`、`ai sandbox start` 一致，因此 `ai sandbox show 11` 会通过 `.agents/workspace/active/.short-ids.json` 解析当前任务短号。
+`ai sandbox ls` 保持精简：只列出当前项目的 Containers 容器表（`#` 行号、`SHORT` 任务短号，以及名称、状态、分支），不再打印 worktree 列表和各工具的 state 路径。要查看某个沙箱的这些详情，使用 `ai sandbox show <branch | TASK-id | N>`：它会打印该分支的 worktree 路径和各工具（Claude Code、Codex、Antigravity CLI、OpenCode）的 state 路径。入参契约与 `ai sandbox exec`、`ai sandbox start` 一致，因此 `ai sandbox show 11` 会通过 `.agents/workspace/active/.short-ids.json` 解析当前任务短号。
 
 下一个大版本的破坏性迁移：任务短号仅使用裸数字。请把 `#NN` 改为 `NN`；引用后的 `#NN` 输入也会被拒绝。
 
-在 macOS 上，交互式 `ai sandbox exec <branch>` 会尽力桥接宿主图片粘贴。当你按下 `Ctrl+V` 且宿主剪贴板当前是图片时，agent-infra 会从宿主剪贴板读取图片，将 PNG 写到 `~/.agent-infra/clipboard/`，再以 bracketed paste 注入容器内路径，让 Claude Code、Codex、Gemini CLI 和 OpenCode 按图片附件处理。宿主剪贴板只读，不会被改写。该能力会自动降级：已有沙箱需要重建后才有 `/clipboard` 挂载；如果可选 pty 依赖或剪贴板探测不可用，会回退到原本的交互进入方式。排查鼠标、滚动或其他输入异常时，可以设置 `AI_SANDBOX_NO_CLIPBOARD_BRIDGE=1` 跳过桥接，直接进入原本的交互路径。
+在 macOS 上，交互式 `ai sandbox exec <branch>` 会尽力桥接宿主图片粘贴。当你按下 `Ctrl+V` 且宿主剪贴板当前是图片时，agent-infra 会从宿主剪贴板读取图片，将 PNG 写到 `~/.agent-infra/clipboard/`，再以 bracketed paste 注入容器内路径，让 Claude Code、Codex、Antigravity CLI 和 OpenCode 按图片附件处理。宿主剪贴板只读，不会被改写。该能力会自动降级：已有沙箱需要重建后才有 `/clipboard` 挂载；如果可选 pty 依赖或剪贴板探测不可用，会回退到原本的交互进入方式。排查鼠标、滚动或其他输入异常时，可以设置 `AI_SANDBOX_NO_CLIPBOARD_BRIDGE=1` 跳过桥接，直接进入原本的交互路径。
 
 当你通过 SSH 运行远端沙箱时，可先在手边这台 Mac 上执行 `ai cp <ssh-alias>`，把本机剪贴板 PNG 推送到远端 Mac 或无桌面 Linux 主机。典型流程是：Cmd+C 复制图片，运行 `ai cp mini`，回到已有 SSH session 后按 `Ctrl+V`。Darwin 继续写入 NSPasteboard；Linux 需要远端已安装兼容版本的 agent-infra，图片会写入 `~/.agent-infra/clipboard/`，再由沙箱的只读 `/clipboard` 挂载注入。命令使用基于 ssh key 的非交互 ssh/scp。
 

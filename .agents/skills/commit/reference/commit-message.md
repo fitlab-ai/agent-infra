@@ -27,7 +27,7 @@ git log --oneline -5
 |---|---|
 | `claude` | `Co-Authored-By: Claude <noreply@anthropic.com>` |
 | `codex` | `Co-Authored-By: Codex <noreply@openai.com>` |
-| `gemini` | `Co-Authored-By: Gemini <noreply@google.com>` |
+| `antigravity` | `Co-Authored-By: Antigravity <noreply@google.com>` |
 | `opencode` | `Co-Authored-By: OpenCode <noreply@opencode.ai>` |
 
 按以下规则构建 co-author 区块：

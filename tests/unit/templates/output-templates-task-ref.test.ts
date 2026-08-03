@@ -12,7 +12,7 @@ const SCAN_DIRS = ['.agents/skills', 'templates/.agents/skills'];
 // A TUI command token: "/cmd", "/agent-infra:cmd", "/{{project}}:cmd" or "$cmd"
 // (bullet line or Markdown table cell) immediately followed by a task placeholder.
 // The token prefix is intentionally permissive (anything but whitespace / backtick /
-// pipe) so it also matches the "{{project}}" Gemini form and table-cell commands.
+// pipe) so it also matches table-cell commands.
 const TUI_TOKEN = /([/$][^\s`|]+)\s+\{(task-id|task-ref)\}/g;
 
 function listMarkdown(dir: string): string[] {

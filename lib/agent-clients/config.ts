@@ -1,5 +1,6 @@
 import {
   AGENT_CLIENT_IDS,
+  LEGACY_AGENT_CLIENT_ID_ALIASES,
   isAgentClientId
 } from './types.ts';
 import type {
@@ -65,6 +66,13 @@ function fail(code: AgentClientDiagnosticCode, path: string): never {
   throw new AgentClientConfigError({ code, path });
 }
 
+function normalizeClientId(value: unknown): AgentClientId | null {
+  if (typeof value === 'string' && hasOwn(LEGACY_AGENT_CLIENT_ID_ALIASES, value)) {
+    return LEGACY_AGENT_CLIENT_ID_ALIASES[value]!;
+  }
+  return isAgentClientId(value) ? value : null;
+}
+
 function parseCanonical(value: unknown): AgentClientState {
   if (!Array.isArray(value)) fail('INVALID_AGENT_CLIENTS', 'agentClients');
 
@@ -86,10 +94,11 @@ function parseCanonical(value: unknown): AgentClientState {
     ) {
       fail('INVALID_AGENT_CLIENTS', path);
     }
-    if (!isAgentClientId(candidate.id)) {
+    const id = normalizeClientId(candidate.id);
+    if (id === null) {
       fail('UNKNOWN_AGENT_CLIENT', `${path}.id`);
     }
-    if (entries.has(candidate.id)) {
+    if (entries.has(id)) {
       fail('DUPLICATE_AGENT_CLIENT', `${path}.id`);
     }
     if (
@@ -98,7 +107,7 @@ function parseCanonical(value: unknown): AgentClientState {
     ) {
       fail('INVALID_AGENT_CLIENTS', path);
     }
-    entries.set(candidate.id, {
+    entries.set(id, {
       enabled: candidate.enabled,
       installInSandbox: candidate.installInSandbox
     });
@@ -133,8 +142,9 @@ function projectLegacyTuis(
 
   const enabled = new Set<AgentClientId>();
   for (const [index, candidate] of value.entries()) {
-    if (isAgentClientId(candidate)) {
-      enabled.add(candidate);
+    const id = normalizeClientId(candidate);
+    if (id !== null) {
+      enabled.add(id);
     } else {
       diagnostics.push({
         code: 'LEGACY_VALUE_IGNORED',
@@ -170,8 +180,9 @@ function projectLegacySandbox(
   const installed = new Set<AgentClientId>();
   const remainingTools: string[] = [];
   for (const [index, candidate] of value.entries()) {
-    if (isAgentClientId(candidate)) {
-      installed.add(candidate);
+    const id = normalizeClientId(candidate);
+    if (id !== null) {
+      installed.add(id);
     } else if (typeof candidate === 'string') {
       remainingTools.push(candidate);
     } else {

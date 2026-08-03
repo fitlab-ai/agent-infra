@@ -4,7 +4,7 @@ This guide walks you through using multiple AI coding assistants together on a p
 
 ## Prerequisites
 
-- At least one AI coding tool installed (Claude Code, Codex CLI, Gemini CLI, or OpenCode)
+- At least one AI coding tool installed (Claude Code, Codex CLI, Antigravity CLI, or OpenCode)
 - A project with `.agents/` directory set up (this project)
 - Familiarity with your project's codebase
 
@@ -66,7 +66,7 @@ cp .agents/templates/task.md .agents/workspace/active/task-001.md
 id: task-001
 type: feature          # feature | bugfix | refactor | docs | review
 status: open           # open | in-progress | review | blocked | completed
-assigned_to: claude    # claude | codex | gemini | opencode | human
+assigned_to: claude    # claude | codex | antigravity | opencode | human
 ```
 
 3. Describe the task in the body of the document.
@@ -86,11 +86,11 @@ claude
 
 Claude Code excels at codebase exploration and understanding complex relationships between files.
 
-### Phase 2: Design (Recommended: Claude Code or Gemini CLI)
+### Phase 2: Design (Recommended: Claude Code or Antigravity CLI)
 
 ```bash
-# Continue with Claude Code or switch to Gemini CLI for large codebases
-gemini
+# Continue with Claude Code or switch to Antigravity CLI for large codebases
+agy
 
 # Example prompt:
 # "Based on the analysis in .agents/workspace/active/task-001.md,
@@ -151,7 +151,7 @@ cp .agents/templates/review-report.md .agents/workspace/active/review-pr-42.md
 
 ### Refactoring
 
-1. **Analyze Scope** (Claude Code / Gemini CLI): Map all affected areas.
+1. **Analyze Scope** (Claude Code / Antigravity CLI): Map all affected areas.
 2. **Design** (Claude Code): Plan the refactoring approach.
 3. **Implement** (Codex CLI / OpenCode): Execute the refactoring.
 4. **Verify** (Claude Code): Ensure no regressions, run tests.
@@ -189,9 +189,9 @@ Even if you're switching between AIs quickly, a brief handoff note saves time an
 
 ### 3. Use the Right Tool for the Job
 
-- Complex analysis? Use Claude Code or Gemini CLI.
+- Complex analysis? Use Claude Code or Antigravity CLI.
 - Straightforward implementation? Use Codex CLI or OpenCode.
-- Large file review? Use Gemini CLI.
+- Large file review? Use Antigravity CLI.
 
 ### 4. Keep Tasks Small
 

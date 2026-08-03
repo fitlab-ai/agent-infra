@@ -38,7 +38,7 @@ test("loadConfig derives sandbox defaults from .agents/.airc.json", async () => 
     assert.deepEqual(config.tools, ["agent-infra"]);
     assert.deepEqual(
       resolveTools(config).map((tool) => tool.id),
-      ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"]
+      ["agent-infra", "claude-code", "codex", "antigravity-cli", "opencode"]
     );
     assert.equal(config.engine, null);
     assert.equal(config.refreshIntervalDays, 7);
@@ -68,7 +68,7 @@ test("loadConfig combines canonical Agent Client state with non-client sandbox t
         agentClients: [
           { id: "claude-code", enabled: true, installInSandbox: false },
           { id: "codex", enabled: true, installInSandbox: true },
-          { id: "gemini-cli", enabled: false, installInSandbox: false },
+          { id: "antigravity-cli", enabled: false, installInSandbox: false },
           { id: "opencode", enabled: false, installInSandbox: false }
         ],
         sandbox: {

@@ -1,6 +1,6 @@
 # 多 AI 协作指南
 
-本项目支持多个 AI 编程助手协同工作，包括 Claude Code、OpenAI Codex CLI、Gemini CLI、OpenCode 等。
+本项目支持多个 AI 编程助手协同工作，包括 Claude Code、OpenAI Codex CLI、Antigravity CLI、OpenCode 等。
 
 ## 双配置架构
 
@@ -10,7 +10,7 @@
 |---------|---------|---------|
 | Claude Code | `.claude/`（CLAUDE.md、commands/、settings.json） | - |
 | OpenAI Codex CLI | `AGENTS.md` | - |
-| Gemini CLI | `AGENTS.md` | - |
+| Antigravity CLI | `AGENTS.md`、`.agents/skills/` | - |
 | OpenCode | `AGENTS.md` | - |
 | 其他 AI 工具 | `AGENTS.md` | 项目 README |
 
@@ -75,7 +75,7 @@
 
 每个 AI 工具有不同的优势，请据此分配任务：
 
-| 能力 | Claude Code | Codex CLI | Gemini CLI | OpenCode |
+| 能力 | Claude Code | Codex CLI | Antigravity CLI | OpenCode |
 |-----|-------------|-----------|------------|----------|
 | 代码库分析 | 优秀 | 良好 | 优秀 | 良好 |
 | 代码审查 | 优秀 | 良好 | 良好 | 良好 |
@@ -88,7 +88,7 @@
 
 - **分析和审查** - Claude Code（推理能力强，探索全面）
 - **代码实现** - Codex CLI 或 OpenCode（代码生成快，命令式工作流顺手）
-- **大上下文任务** - Gemini CLI（大上下文窗口，适合跨文件分析）
+- **大上下文任务** - Antigravity CLI（大上下文窗口，适合跨文件分析）
 - **命令式迭代** - OpenCode（适合按工作流连续推进）
 
 ## 快速入门
@@ -173,7 +173,7 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 当生成的 TUI 命令需要禁用模型调用时，将通用可选字段 `disable-model-invocation` 设为 `true`；各 TUI 适配器按自身能力决定是否消费。多行 `description` 如需保留换行，使用 YAML literal block（`|`）；同步器会为各 TUI 输出对应的多行元数据格式。
 
-新增或修改自定义 skill 后，再执行一次 `update-agent-infra`。同步过程会自动检测非内置 skill，并为 Claude Code、Gemini CLI、OpenCode 生成对应命令。
+新增或修改自定义 skill 后，再执行一次 `update-agent-infra`。同步过程会自动检测非内置 skill，为 Claude Code 和 OpenCode 生成对应命令；Antigravity CLI 则直接发现共享 skill。
 
 ### 共享 skill 源
 
@@ -220,7 +220,7 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 ## Agent Client 配置
 
-`.agents/.airc.json` 顶层 `agentClients` 数组用于配置全部四个内建客户端（`claude-code`、`codex`、`gemini-cli`、`opencode`）。规范化后的每个条目包含三个字段：
+`.agents/.airc.json` 顶层 `agentClients` 数组用于配置全部四个内建客户端（`claude-code`、`codex`、`antigravity-cli`、`opencode`）。规范化后的每个条目包含三个字段：
 
 | 字段 | 含义 |
 |------|------|
@@ -234,7 +234,7 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 ai agent-client list
 ai agent-client status
 ai agent-client enable codex
-ai agent-client disable gemini-cli
+ai agent-client disable antigravity-cli
 ai agent-client configure
 ```
 

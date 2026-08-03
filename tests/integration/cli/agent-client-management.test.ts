@@ -131,7 +131,7 @@ test('status is read-only and configure edits both independent dimensions', () =
     const configured = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     assert.deepEqual(
       configured.agentClients,
-      canonical(['claude-code', 'opencode'], ['codex', 'gemini-cli'])
+      canonical(['claude-code', 'opencode'], ['codex', 'antigravity-cli'])
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

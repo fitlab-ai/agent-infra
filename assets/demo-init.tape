@@ -91,7 +91,7 @@ Enter
 Sleep 5s
 
 # ── Show generated structure ──
-Type "tree .agents/ .claude/ .gemini/ .opencode/ -L 2 --dirsfirst"
+Type "tree .agents/ .claude/ .opencode/ -L 2 --dirsfirst"
 Enter
 Wait
 Sleep 4s

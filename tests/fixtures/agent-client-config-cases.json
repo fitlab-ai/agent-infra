@@ -12,7 +12,7 @@
       "agentClients": [
         { "id": "claude-code", "enabled": false, "installInSandbox": true },
         { "id": "codex", "enabled": true, "installInSandbox": false },
-        { "id": "gemini-cli", "enabled": false, "installInSandbox": false },
+        { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
         { "id": "opencode", "enabled": true, "installInSandbox": false }
       ],
       "sandbox": { "tools": ["agent-infra", "custom-tool"] }
@@ -23,7 +23,7 @@
     "input": {
       "agentClients": [
         { "id": "opencode", "enabled": true, "installInSandbox": false },
-        { "id": "gemini-cli", "enabled": false, "installInSandbox": false },
+        { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
         { "id": "codex", "enabled": true, "installInSandbox": false },
         { "id": "claude-code", "enabled": false, "installInSandbox": true }
       ]
@@ -35,7 +35,7 @@
       "agentClients": [
         { "id": "claude-code", "enabled": false, "installInSandbox": false },
         { "id": "codex", "enabled": true, "installInSandbox": false },
-        { "id": "gemini-cli", "enabled": false, "installInSandbox": false },
+        { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
         { "id": "opencode", "enabled": false, "installInSandbox": false }
       ],
       "tuis": ["opencode"]
@@ -47,7 +47,7 @@
       "agentClients": [
         { "id": "claude-code", "enabled": true, "installInSandbox": true },
         { "id": "codex", "enabled": true, "installInSandbox": true },
-        { "id": "gemini-cli", "enabled": true, "installInSandbox": true },
+        { "id": "antigravity-cli", "enabled": true, "installInSandbox": true },
         { "id": "other", "enabled": true, "installInSandbox": true }
       ]
     }

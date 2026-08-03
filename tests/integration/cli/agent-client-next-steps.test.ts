@@ -8,7 +8,7 @@ import test from 'node:test';
 import { INTERNAL_CLI_PATH } from '../../helpers.ts';
 
 function canonical(enabled: readonly string[]) {
-  return ['claude-code', 'codex', 'gemini-cli', 'opencode'].map((id) => ({
+  return ['claude-code', 'codex', 'antigravity-cli', 'opencode'].map((id) => ({
     id,
     enabled: enabled.includes(id),
     installInSandbox: false
@@ -36,7 +36,7 @@ function run(root: string, args: string[]) {
 test('agent-client next-steps renders enabled built-ins and custom TUIs in text and JSON', () => {
   const root = fixture({
     project: 'demo',
-    agentClients: canonical(['codex', 'gemini-cli']),
+    agentClients: canonical(['codex', 'antigravity-cli']),
     customTUIs: [
       { name: 'Acme', dir: '.acme/commands', invoke: 'acme ${projectName}:${skillName}' }
     ]
@@ -47,7 +47,7 @@ test('agent-client next-steps renders enabled built-ins and custom TUIs in text 
   assert.equal(
     text.stdout,
     '  - Codex: $review-code 16\n'
-      + '  - Gemini CLI: /demo:review-code 16\n'
+      + '  - Antigravity CLI: /review-code 16\n'
       + '  - Acme: acme demo:review-code 16\n'
   );
   assert.equal(text.stderr, '');

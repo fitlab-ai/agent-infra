@@ -14,7 +14,7 @@ steps:
     description: Analyze the current code and define the refactoring scope.
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - Identify code to refactor and the reason for refactoring
       - Map dependencies and callers for affected code
@@ -38,7 +38,7 @@ steps:
     description: Review whether the refactoring analysis covers dependencies, risks, and the test baseline.
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - Verify the refactoring scope and rationale
       - Check dependency, caller, and risk identification
@@ -94,7 +94,7 @@ steps:
     description: Review whether the refactoring plan preserves behavior, is verifiable step by step, and controls risk.
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - Verify the plan covers the approved scope analysis
       - Check incremental steps, test strategy, and rollback risk

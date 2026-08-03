@@ -50,7 +50,7 @@ function errorCode(run: () => unknown): string {
 }
 
 test('agent client vocabulary is closed, unique, and recognized by the shared guard', () => {
-  assert.deepEqual(AGENT_CLIENT_IDS, ['claude-code', 'codex', 'gemini-cli', 'opencode']);
+  assert.deepEqual(AGENT_CLIENT_IDS, ['claude-code', 'codex', 'antigravity-cli', 'opencode']);
   assert.equal(new Set(AGENT_CLIENT_IDS).size, AGENT_CLIENT_IDS.length);
   assert.deepEqual(AGENT_CLIENT_CAPABILITY_IDS, [
     'instructions',
@@ -134,6 +134,25 @@ test('canonical input is normalized to stable ID order without mutation', () => 
   assert.equal(second.changed, false);
   assert.deepEqual(second.canonical, result.canonical);
   assert.notEqual(second.canonical, result.canonical);
+});
+
+test('Gemini client identifiers migrate to Antigravity in canonical and legacy config', () => {
+  const canonicalInput = canonical().map((entry) =>
+    entry.id === 'antigravity-cli' ? { ...entry, id: 'gemini-cli' } : entry
+  );
+  const canonicalResult = normalizeAgentClients({ agentClients: canonicalInput });
+  assert.deepEqual(canonicalResult.canonical, canonical());
+  assert.equal(canonicalResult.changed, true);
+
+  const legacyResult = normalizeAgentClients({
+    tuis: ['gemini-cli'],
+    sandbox: { tools: ['agent-infra', 'gemini-cli'] }
+  });
+  assert.deepEqual(
+    legacyResult.canonical,
+    canonical(['antigravity-cli'], ['antigravity-cli'])
+  );
+  assert.deepEqual(legacyResult.remainingSandboxTools, ['agent-infra']);
 });
 
 test('serializer returns a new stable array and does not mutate state', () => {

@@ -14,7 +14,7 @@
       "installInSandbox": true
     },
     {
-      "id": "gemini-cli",
+      "id": "antigravity-cli",
       "enabled": true,
       "installInSandbox": true
     },

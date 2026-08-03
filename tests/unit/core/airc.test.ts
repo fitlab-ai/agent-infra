@@ -46,7 +46,7 @@ test(".agents/.airc.json declares default sandbox configuration", () => {
   assert.deepEqual(collaborator.sandbox, {
     engine: "orbstack",
     runtimes: ["node22"],
-    tools: ["agent-infra", "claude-code", "codex", "gemini-cli", "git-lfs", "opencode"],
+    tools: ["agent-infra", "claude-code", "codex", "antigravity-cli", "git-lfs", "opencode"],
     customTools: [
       {
         id: "git-lfs",
@@ -72,7 +72,7 @@ test(".agents/.airc.json resolves every selected sandbox tool", () => {
 
   assert.deepEqual(
     tools.map((tool) => tool.id),
-    ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode", "git-lfs"]
+    ["agent-infra", "claude-code", "codex", "antigravity-cli", "opencode", "git-lfs"]
   );
   const gitLfs = tools.find((tool) => tool.id === "git-lfs");
   assert.deepEqual(gitLfs?.install, { type: "shell", cmd: GIT_LFS_INSTALL_COMMAND });

@@ -4,7 +4,7 @@
 
 ## 前提条件
 
-- 至少安装一个 AI 编程工具（Claude Code、Codex CLI、Gemini CLI 或 OpenCode）
+- 至少安装一个 AI 编程工具（Claude Code、Codex CLI、Antigravity CLI 或 OpenCode）
 - 项目已设置 `.agents/` 目录（本项目已就绪）
 - 熟悉你的项目代码库
 
@@ -66,7 +66,7 @@ cp .agents/templates/task.md .agents/workspace/active/task-001.md
 id: task-001
 type: feature          # feature | bugfix | refactor | docs | chore
 status: active         # active | blocked | completed
-assigned_to: claude    # claude | codex | gemini | opencode | human
+assigned_to: claude    # claude | codex | antigravity | opencode | human
 ```
 
 3. 在文档正文中描述任务。
@@ -86,11 +86,11 @@ claude
 
 Claude Code 擅长代码库探索和理解文件间的复杂关系。
 
-### 阶段 2：设计（推荐：Claude Code 或 Gemini CLI）
+### 阶段 2：设计（推荐：Claude Code 或 Antigravity CLI）
 
 ```bash
-# 继续使用 Claude Code 或切换到 Gemini CLI 处理大型代码库
-gemini
+# 继续使用 Claude Code 或切换到 Antigravity CLI 处理大型代码库
+agy
 
 # 示例提示：
 # "基于 .agents/workspace/active/task-001.md 中的分析结果，
@@ -151,7 +151,7 @@ cp .agents/templates/review-report.md .agents/workspace/active/review-pr-42.md
 
 ### 重构
 
-1. **分析范围**（Claude Code / Gemini CLI）：映射所有受影响区域。
+1. **分析范围**（Claude Code / Antigravity CLI）：映射所有受影响区域。
 2. **设计**（Claude Code）：规划重构方案。
 3. **实现**（Codex CLI / OpenCode）：执行重构。
 4. **验证**（Claude Code）：确保没有回归问题，运行测试。
@@ -189,9 +189,9 @@ cp .agents/templates/handoff.md .agents/workspace/active/handoff-task-001-phase2
 
 ### 3. 选择合适的工具
 
-- 复杂分析？使用 Claude Code 或 Gemini CLI。
+- 复杂分析？使用 Claude Code 或 Antigravity CLI。
 - 直接的实现工作？使用 Codex CLI 或 OpenCode。
-- 大文件审查？使用 Gemini CLI。
+- 大文件审查？使用 Antigravity CLI。
 
 ### 4. 保持任务小而精
 

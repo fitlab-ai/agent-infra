@@ -1102,10 +1102,6 @@ test("skill command templates use thin adapter bodies", () => {
       `templates/.opencode/commands/${skill}.en.md`,
       `templates/.opencode/commands/${skill}.zh-CN.md`
     ];
-    const tomlTargets = [
-      `templates/.gemini/commands/_project_/${skill}.en.toml`,
-      `templates/.gemini/commands/_project_/${skill}.zh-CN.toml`
-    ];
     const skillPathPattern = new RegExp(escapeRegExp(`.agents/skills/${skill}/SKILL.md`));
 
     markdownTargets.forEach((target) => {
@@ -1155,35 +1151,6 @@ test("skill command templates use thin adapter bodies", () => {
       }
     });
 
-    tomlTargets.forEach((target) => {
-      const content = read(target);
-      const isChinese = target.endsWith(".zh-CN.toml");
-      const contextLine = (isChinese ? spec.zh : spec.en)
-        ?.replace(/\$1/g, "{{args}}")
-        .replace(/\$ARGUMENTS/g, "{{args}}");
-
-      assert.match(content, /^description = "/, `${target} should declare a TOML description`);
-      assert.match(content, /^prompt = """$/m, `${target} should use a multiline TOML prompt`);
-      assert.match(content, skillPathPattern, `${target} should reference the skill file`);
-
-      if (contextLine) {
-        assert.match(
-          content,
-          new RegExp(escapeRegExp(contextLine)),
-          `${target} should include the Gemini argument context`
-        );
-      } else {
-        assert.doesNotMatch(content, /\{\{args\}\}/, `${target} should not include Gemini arguments`);
-      }
-
-      if (isChinese) {
-        assert.match(content, /读取并执行/, `${target} should use the Chinese thin adapter body`);
-        assert.match(content, /严格按照技能中定义的所有步骤执行/, `${target} should include the Chinese execution instruction`);
-      } else {
-        assert.match(content, /Read and execute the .* skill from/, `${target} should use the English thin adapter body`);
-        assert.match(content, /Follow all steps defined in the skill exactly/, `${target} should include the English execution instruction`);
-      }
-    });
   });
 });
 

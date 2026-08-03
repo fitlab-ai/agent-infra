@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parse as parseToml } from "smol-toml";
 import { parse as parseYaml } from "yaml";
 
 import { loadFreshEsm } from "../../helpers.ts";
@@ -27,7 +26,6 @@ function makeTemplateRoot(tmpDir: string) {
   });
   fs.mkdirSync(path.join(templateRoot, ".agents/skills"), { recursive: true });
   fs.mkdirSync(path.join(templateRoot, ".claude/commands"), { recursive: true });
-  fs.mkdirSync(path.join(templateRoot, ".gemini/commands/_project_"), { recursive: true });
   fs.mkdirSync(path.join(templateRoot, ".opencode/commands"), { recursive: true });
   return templateRoot;
 }
@@ -60,7 +58,7 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
         ]
       },
       files: {
-        managed: [".agents/skills/", ".claude/commands/", ".gemini/commands/", ".opencode/commands/"],
+        managed: [".agents/skills/", ".claude/commands/", ".opencode/commands/"],
         merged: [],
         ejected: []
       }
@@ -118,10 +116,6 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
     );
 
     const claudeCommand = fs.readFileSync(path.join(projectRoot, ".claude/commands/local-rules.md"), "utf8");
-    const geminiCommand = fs.readFileSync(
-      path.join(projectRoot, ".gemini/commands/demo/local-rules.toml"),
-      "utf8"
-    );
     const openCodeCommand = fs.readFileSync(path.join(projectRoot, ".opencode/commands/local-rules.md"), "utf8");
     const expectedDescription = "本地规范检查。\n当提交前需要本地规则时使用。";
 
@@ -130,24 +124,19 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
     assert.match(claudeCommand, /^disable-model-invocation: true$/m);
     assert.doesNotMatch(claudeCommand, /ARGUMENTS:/);
     assert.match(claudeCommand, /读取并执行 `\.agents\/skills\/local-rules\/SKILL\.md` 中的 local-rules 技能。/);
-    assert.doesNotMatch(geminiCommand, /disable-model-invocation/);
     assert.doesNotMatch(openCodeCommand, /disable-model-invocation/);
-    assert.match(geminiCommand, /参数：\{\{args\}\}/);
     assert.match(openCodeCommand, /参数：\$ARGUMENTS/);
-    assert.match(geminiCommand, /^description = """本地规范检查。\n当提交前需要本地规则时使用。"""$/m);
     assert.match(openCodeCommand, /^description: \|-\n  本地规范检查。\n  当提交前需要本地规则时使用。$/m);
     assert.equal(parseMarkdownFrontmatter(claudeCommand).description, expectedDescription);
-    assert.equal(parseToml(geminiCommand).description, expectedDescription);
     assert.equal(parseMarkdownFrontmatter(openCodeCommand).description, expectedDescription);
 
     const sharedClaudeCommand = fs.readFileSync(path.join(projectRoot, ".claude/commands/shared-rules.md"), "utf8");
     assert.doesNotMatch(sharedClaudeCommand, /^disable-model-invocation: true$/m);
 
-    assert.equal(firstReport.custom.commands.generated.length, 6);
+    assert.equal(firstReport.custom.commands.generated.length, 4);
     assert.equal(secondReport.custom.commands.updated.length, 0);
     assert.equal(secondReport.custom.commands.generated.length, 0);
     assert.ok(secondReport.custom.commands.unchanged.includes(".claude/commands/local-rules.md"));
-    assert.ok(secondReport.custom.commands.unchanged.includes(".gemini/commands/demo/shared-rules.toml"));
     assert.ok(fs.existsSync(path.join(projectRoot, ".agents/skills/local-rules/SKILL.md")));
     assert.ok(fs.existsSync(path.join(projectRoot, ".claude/commands/shared-rules.md")));
   } finally {
@@ -177,7 +166,7 @@ test("syncTemplates cleans stale files from sourced skills without touching manu
         ]
       },
       files: {
-        managed: [".agents/skills/", ".claude/commands/", ".gemini/commands/", ".opencode/commands/"],
+        managed: [".agents/skills/", ".claude/commands/", ".opencode/commands/"],
         merged: [],
         ejected: []
       }
@@ -246,7 +235,7 @@ test("syncTemplates reports missing sources and skips built-in skill conflicts f
         ]
       },
       files: {
-        managed: [".agents/skills/", ".claude/commands/", ".gemini/commands/", ".opencode/commands/"],
+        managed: [".agents/skills/", ".claude/commands/", ".opencode/commands/"],
         merged: [],
         ejected: []
       }

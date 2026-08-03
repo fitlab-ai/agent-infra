@@ -136,7 +136,7 @@ test('distinguishes a present-but-empty section (no valid entries)', () => {
 
 test('isHumanAgent treats every known AI token as non-human', () => {
   // The full AI token set: workflow recommended_agents + the opencode TUI.
-  for (const ai of ['claude', 'codex', 'gemini', 'opencode', 'cursor']) {
+  for (const ai of ['claude', 'codex', 'gemini', 'antigravity', 'opencode', 'cursor']) {
     assert.equal(isHumanAgent(ai), false, ai);
   }
 });
@@ -147,8 +147,8 @@ test('isHumanAgent treats human executors (incl. CJK names and annotations) as h
   }
 });
 
-test('isHumanAgent treats known long names (claude-code / gemini-cli) as non-human', () => {
-  for (const ai of ['claude-code', 'gemini-cli']) {
+test('isHumanAgent treats known long names (claude-code / gemini-cli / antigravity-cli) as non-human', () => {
+  for (const ai of ['claude-code', 'gemini-cli', 'antigravity-cli']) {
     assert.equal(isHumanAgent(ai), false, ai);
   }
 });

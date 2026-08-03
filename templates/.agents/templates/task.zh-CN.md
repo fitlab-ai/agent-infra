@@ -12,7 +12,7 @@ effort:                         # 可选 Issue 字段：High | Medium | Low
 start_date:                     # Feature 可选 Issue 字段：YYYY-MM-DD
 target_date:                    # Feature 可选 Issue 字段：YYYY-MM-DD
 current_step: requirement-analysis # requirement-analysis | requirement-analysis-review | technical-design | technical-design-review | code | code-review | completed
-assigned_to:                   # claude | codex | gemini | opencode | human
+assigned_to:                   # claude | codex | antigravity | opencode | human
 pr_status: pending             # PR 状态：pending（默认）| created（已创建 PR）| skipped（显式跳过）
 ---
 

@@ -22,9 +22,9 @@ function stateWithInstalled(installed: readonly string[]): AgentClientState {
       enabled: false,
       installInSandbox: installed.includes('codex')
     },
-    'gemini-cli': {
+    'antigravity-cli': {
       enabled: true,
-      installInSandbox: installed.includes('gemini-cli')
+      installInSandbox: installed.includes('antigravity-cli')
     },
     opencode: {
       enabled: false,
@@ -48,7 +48,7 @@ test('capability plan selects clients only from installInSandbox while preservin
 
   assert.deepEqual(plan.selectedAgentClients.map((adapter) => adapter.id), ['codex']);
   assert.deepEqual(plan.tools.map((tool) => tool.id), ['agent-infra', 'codex']);
-  assert.equal(plan.tools.some((tool) => tool.id === 'gemini-cli'), false);
+  assert.equal(plan.tools.some((tool) => tool.id === 'antigravity-cli'), false);
   assert.deepEqual(
     plan.hooksByPhase['before-container-create'].map((hook) => hook.id),
     ['codex-before-container-create']
@@ -68,7 +68,7 @@ test('canonical all-false state does not fall back to legacy client tool ids', (
     'agent-infra',
     'claude-code',
     'codex',
-    'gemini-cli',
+    'antigravity-cli',
     'opencode'
   ]));
 
@@ -114,7 +114,7 @@ test('cleanup inventory includes every registered client independent of selectio
   const full = createSandboxCapabilityPlan(config([
     'claude-code',
     'codex',
-    'gemini-cli',
+    'antigravity-cli',
     'opencode'
   ]));
 
@@ -124,7 +124,7 @@ test('cleanup inventory includes every registered client independent of selectio
   );
   assert.deepEqual(
     empty.cleanupInventory.map((tool) => tool.id),
-    ['agent-infra', 'claude-code', 'codex', 'gemini-cli', 'opencode']
+    ['agent-infra', 'claude-code', 'codex', 'antigravity-cli', 'opencode']
   );
 });
 

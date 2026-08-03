@@ -1,11 +1,15 @@
 const AGENT_CLIENT_IDS = [
   'claude-code',
   'codex',
-  'gemini-cli',
+  'antigravity-cli',
   'opencode'
 ] as const;
 
 type AgentClientId = (typeof AGENT_CLIENT_IDS)[number];
+
+const LEGACY_AGENT_CLIENT_ID_ALIASES: Readonly<Record<string, AgentClientId>> = {
+  'gemini-cli': 'antigravity-cli'
+};
 
 type AgentClientConfig = Readonly<{
   id: AgentClientId;
@@ -62,6 +66,7 @@ function isAgentClientId(value: unknown): value is AgentClientId {
 
 export {
   AGENT_CLIENT_IDS,
+  LEGACY_AGENT_CLIENT_ID_ALIASES,
   AGENT_CLIENT_CAPABILITY_IDS,
   AGENT_CLIENT_SUPPORT_LEVELS,
   isAgentClientId

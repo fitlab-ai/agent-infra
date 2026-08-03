@@ -17,7 +17,7 @@ agent-infra 的结构刻意保持简单：引导 CLI 负责生成种子配置，
 ```text
 ┌───────────────────────────────────────────────────────┐
 │                     AI TUI Layer                      │
-│  Claude Code  ·  Codex  ·  Gemini CLI  ·  OpenCode    │
+│  Claude Code  ·  Codex  ·  Antigravity CLI  ·  OpenCode    │
 └──────────────────────────┬────────────────────────────┘
                            │ slash 命令
                            ▼

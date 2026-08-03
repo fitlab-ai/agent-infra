@@ -39,7 +39,6 @@ test("command descriptions stay platform-agnostic", () => {
   [
     ...listFilesRecursive("templates/.claude/commands"),
     ...listFilesRecursive("templates/.opencode/commands"),
-    ...listFilesRecursive("templates/.gemini/commands/_project_")
   ]
     .filter((relativePath) => /\.(?:md|toml)$/.test(relativePath))
     .forEach((relativePath) => {

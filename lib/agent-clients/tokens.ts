@@ -2,18 +2,20 @@
 // activity log. Migrated from lib/task/commands/log.ts so that the write-side
 // internal commands and the rendering side share one definition.
 export const KNOWN_AI_AGENTS: ReadonlySet<string> =
-  new Set(['claude', 'codex', 'gemini', 'opencode', 'cursor']);
+  new Set(['claude', 'codex', 'gemini', 'antigravity', 'opencode', 'cursor']);
 
 // Long name -> short name mapping (HD-4, decision A): `claude-code` reuses the
-// existing orchestration precedent, `gemini-cli` is newly added.
+// existing orchestration precedent, `gemini-cli` is historical, and
+// `antigravity-cli` is the active client.
 export const AGENT_LONG_NAMES: Readonly<Record<string, string>> = {
   'claude-code': 'claude',
-  'gemini-cli': 'gemini'
+  'gemini-cli': 'gemini',
+  'antigravity-cli': 'antigravity'
 };
 
 export const AGENT_USAGE_HINT =
-  "agent must be a short token (claude/codex/gemini/opencode/cursor), " +
-  "a long name (claude-code -> claude, gemini-cli -> gemini), or 'human'";
+  "agent must be a short token (claude/codex/gemini/antigravity/opencode/cursor), " +
+  "a long name (claude-code -> claude, gemini-cli -> gemini, antigravity-cli -> antigravity), or 'human'";
 
 // Strict write-side validation: the value must be exactly a short token, a
 // long name, or 'human'; returns the normalized short token, or null when

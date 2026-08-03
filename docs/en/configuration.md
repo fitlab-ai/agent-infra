@@ -15,7 +15,7 @@ The generated `.agents/.airc.json` file is the central contract between the boot
   "agentClients": [
     { "id": "claude-code", "enabled": true, "installInSandbox": true },
     { "id": "codex", "enabled": true, "installInSandbox": true },
-    { "id": "gemini-cli", "enabled": true, "installInSandbox": true },
+    { "id": "antigravity-cli", "enabled": true, "installInSandbox": true },
     { "id": "opencode", "enabled": true, "installInSandbox": true }
   ],
   "templates": {
@@ -42,7 +42,6 @@ The generated `.agents/.airc.json` file is the central contract between the boot
       ".agents/templates/",
       ".agents/workflows/",
       ".claude/commands/",
-      ".gemini/commands/",
       ".opencode/commands/"
     ],
     "merged": [
@@ -74,11 +73,11 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 
 ## Agent Client contract
 
-An **AI Coding Agent Client**, or **Agent Client** for short, is a supported coding-agent application such as Claude Code, Codex, Gemini CLI, or OpenCode. The canonical `agentClients` array contains each built-in client exactly once. Array order has no runtime meaning; agent-infra serializes entries in the stable order shown above.
+An **AI Coding Agent Client**, or **Agent Client** for short, is a supported coding-agent application such as Claude Code, Codex, Antigravity CLI, or OpenCode. The canonical `agentClients` array contains each built-in client exactly once. Array order has no runtime meaning; agent-infra serializes entries in the stable order shown above.
 
 | Field | Meaning |
 |-------|---------|
-| `id` | Closed built-in client identifier: `claude-code`, `codex`, `gemini-cli`, or `opencode`. |
+| `id` | Closed built-in client identifier: `claude-code`, `codex`, `antigravity-cli`, or `opencode`. |
 | `enabled` | Whether the project enables client-specific files and integration. |
 | `installInSandbox` | Whether sandbox assembly should install this client. This is independent of `enabled`. |
 

@@ -87,7 +87,7 @@ test('parseRunArgs consumes --recreate as a sandbox recovery flag', () => {
 });
 
 test('TUI selection uses cli override, per-skill default, command default, then codex', () => {
-  assert.equal(selectTui('code-task', { cliTui: 'gemini', command: {} }), 'gemini');
+  assert.equal(selectTui('code-task', { cliTui: 'antigravity', command: {} }), 'antigravity');
   assert.equal(
     selectTui('review-code', {
       command: { defaultTui: 'codex', skillTuiDefaults: { 'review-code': 'claude' } }
@@ -101,7 +101,7 @@ test('TUI selection uses cli override, per-skill default, command default, then 
 test('renderPrompt uses each TUI prompt prefix', () => {
   assert.equal(renderPrompt({ tui: 'claude', skill: 'code-task', args: ['#7'] }), '/code-task #7');
   assert.equal(renderPrompt({ tui: 'opencode', skill: 'code-task', args: ['#7'] }), '/code-task #7');
-  assert.equal(renderPrompt({ tui: 'gemini', skill: 'code-task', args: ['#7'] }), '/agent-infra:code-task #7');
+  assert.equal(renderPrompt({ tui: 'antigravity', skill: 'code-task', args: ['#7'] }), '/code-task #7');
   assert.equal(renderPrompt({ tui: 'codex', skill: 'code-task', args: ['#7'] }), '$code-task #7');
 });
 
@@ -112,6 +112,10 @@ test('buildTuiCommand returns argv arrays, not shell strings', () => {
   ]);
   assert.deepEqual(buildTuiCommand('claude', '/code-task #7'), [
     'claude',
+    ['--dangerously-skip-permissions', '--print', '/code-task #7']
+  ]);
+  assert.deepEqual(buildTuiCommand('antigravity', '/code-task #7'), [
+    'agy',
     ['--dangerously-skip-permissions', '--print', '/code-task #7']
   ]);
 });

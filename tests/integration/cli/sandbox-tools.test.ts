@@ -48,7 +48,6 @@ type SandboxCreateModule = {
   ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string): void;
   ensureCodexWorkspaceTrust(toolDir: string): void;
   ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: string): void;
-  ensureGeminiWorkspaceTrust(toolDir: string): void;
   buildImage(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): void;
   commandErrorMessage(error: unknown): string;
   hostHasGpgKeys(home: string, execFn?: ExecFn): boolean;
@@ -921,19 +920,29 @@ test("opencode tool pins OPENCODE_CONFIG to the sandbox config file", async () =
   );
 });
 
-test("gemini-cli tool preseeds host settings for model and thinking config inheritance", async () => {
+test("antigravity-cli tool preseeds host settings, keybindings, and MCP config", async () => {
   const sandboxTools = await loadFreshEsm<typeof import("../../../lib/sandbox/tools.ts")>("lib/sandbox/tools.js");
   const [maybeTool] = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["gemini-cli"]
+    tools: ["antigravity-cli"]
   });
 
   const tool = required(maybeTool);
-  assert.ok(tool.hostPreSeedFiles?.some((entry) => (
-    entry.hostPath === "/home/host-user/.gemini/settings.json"
-    && entry.sandboxName === "settings.json"
-  )));
+  assert.deepEqual(tool.hostPreSeedFiles, [
+    {
+      hostPath: "/home/host-user/.gemini/antigravity-cli/settings.json",
+      sandboxName: "antigravity-cli/settings.json"
+    },
+    {
+      hostPath: "/home/host-user/.gemini/antigravity-cli/keybindings.json",
+      sandboxName: "antigravity-cli/keybindings.json"
+    },
+    {
+      hostPath: "/home/host-user/.gemini/config/mcp_config.json",
+      sandboxName: "config/mcp_config.json"
+    }
+  ]);
 });
 
 test("agent-infra tool exposes the ai CLI without credentials or tmpfs state", async () => {
@@ -962,7 +971,7 @@ test("resolveTools consolidates sandbox bases under ~/.agent-infra", async () =>
   const tools = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["agent-infra", "claude-code", "codex", "gemini-cli", "opencode"]
+    tools: ["agent-infra", "claude-code", "codex", "antigravity-cli", "opencode"]
   });
 
   assert.deepEqual(tools.map((tool) => ({
@@ -982,8 +991,8 @@ test("resolveTools consolidates sandbox bases under ~/.agent-infra", async () =>
       sandboxBase: "/home/host-user/.agent-infra/sandboxes/codex"
     },
     {
-      id: "gemini-cli",
-      sandboxBase: "/home/host-user/.agent-infra/sandboxes/gemini-cli"
+      id: "antigravity-cli",
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/antigravity-cli"
     },
     {
       id: "opencode",

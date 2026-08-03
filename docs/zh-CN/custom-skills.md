@@ -40,10 +40,10 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 |-----|------|
 | Claude Code | `/update-agent-infra` |
 | Codex | `$update-agent-infra` |
-| Gemini CLI | `/{{project}}:update-agent-infra` |
+| Antigravity CLI | `/update-agent-infra` |
 | OpenCode | `/update-agent-infra` |
 
-同步时会自动检测 `.agents/skills/` 下的非内置 skill 目录，并为 Claude Code、Gemini CLI、OpenCode 生成对应命令。
+同步时会自动检测 `.agents/skills/` 下的非内置 skill 目录，为 Claude Code 和 OpenCode 生成对应命令；Antigravity CLI 则直接发现共享 skill。
 
 ## 从共享源同步自定义 skills
 

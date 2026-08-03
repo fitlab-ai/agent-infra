@@ -106,14 +106,6 @@ test("required template files were migrated into templates/", () => {
     "templates/.claude/commands/init-labels.en.md",
     "templates/.claude/commands/init-labels.zh-CN.md",
     "templates/.claude/commands/update-agent-infra.en.md",
-    "templates/.gemini/settings.json",
-    "templates/.gemini/commands/_project_/archive-tasks.en.toml",
-    "templates/.gemini/commands/_project_/archive-tasks.zh-CN.toml",
-    "templates/.gemini/commands/_project_/init-milestones.en.toml",
-    "templates/.gemini/commands/_project_/init-milestones.zh-CN.toml",
-    "templates/.gemini/commands/_project_/init-labels.en.toml",
-    "templates/.gemini/commands/_project_/init-labels.zh-CN.toml",
-    "templates/.gemini/commands/_project_/update-agent-infra.en.toml",
     "templates/.opencode/commands/archive-tasks.en.md",
     "templates/.opencode/commands/archive-tasks.zh-CN.md",
     "templates/.opencode/commands/init-milestones.en.md",
@@ -342,7 +334,6 @@ test("project-local commands are not distributed through templates", () => {
     [
       `.claude/commands/${command}.md`,
       `.opencode/commands/${command}.md`,
-      `.gemini/commands/${project}/${command}.toml`,
       `.agents/skills/${command}/SKILL.md`
     ].forEach((relativePath) => {
       assert.ok(exists(relativePath), `${relativePath} should exist locally`);
@@ -354,8 +345,6 @@ test("project-local commands are not distributed through templates", () => {
       `templates/.claude/commands/${command}.zh-CN.md`,
       `templates/.opencode/commands/${command}.en.md`,
       `templates/.opencode/commands/${command}.zh-CN.md`,
-      `templates/.gemini/commands/_project_/${command}.en.toml`,
-      `templates/.gemini/commands/_project_/${command}.zh-CN.toml`,
       `templates/.agents/skills/${command}/SKILL.en.md`,
       `templates/.agents/skills/${command}/SKILL.zh-CN.md`
     ].forEach((relativePath) => {

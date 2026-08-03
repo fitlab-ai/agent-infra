@@ -57,13 +57,13 @@ async function withMockedReadline<T>(line: string | null, fn: (mod: PromptModule
 const TUI_CHOICES = [
   { id: "claude-code", label: "Claude Code" },
   { id: "codex", label: "Codex" },
-  { id: "gemini-cli", label: "Gemini CLI" },
+  { id: "antigravity-cli", label: "Antigravity CLI" },
   { id: "opencode", label: "OpenCode" }
 ];
 
 test("multiSelect returns all ids for bare Enter (default)", async () => {
   const result = await withMockedReadline(null, async (mod) => mod.multiSelect("Pick", TUI_CHOICES));
-  assert.deepEqual(result, ["claude-code", "codex", "gemini-cli", "opencode"]);
+  assert.deepEqual(result, ["claude-code", "codex", "antigravity-cli", "opencode"]);
 });
 
 test("multiSelect returns configured default ids for bare Enter", async () => {
@@ -75,7 +75,7 @@ test("multiSelect returns configured default ids for bare Enter", async () => {
 
 test("multiSelect parses numeric tokens", async () => {
   const result = await withMockedReadline("1,3", async (mod) => mod.multiSelect("Pick", TUI_CHOICES));
-  assert.deepEqual(result, ["claude-code", "gemini-cli"]);
+  assert.deepEqual(result, ["claude-code", "antigravity-cli"]);
 });
 
 test("multiSelect parses id tokens", async () => {
@@ -98,10 +98,10 @@ test("multiSelect returns empty array on explicit 'none' input", async () => {
 });
 
 test("multiSelect normalizes user input order to choices order (AC2.2)", async () => {
-  // User typed numeric in reverse order: 3,1 -> gemini-cli, claude-code.
-  // Returned array must follow choices order: claude-code, gemini-cli.
+  // User typed numeric in reverse order: 3,1 -> antigravity-cli, claude-code.
+  // Returned array must follow choices order: claude-code, antigravity-cli.
   const numeric = await withMockedReadline("3,1", async (mod) => mod.multiSelect("Pick", TUI_CHOICES));
-  assert.deepEqual(numeric, ["claude-code", "gemini-cli"]);
+  assert.deepEqual(numeric, ["claude-code", "antigravity-cli"]);
 
   // Same expectation for id tokens typed out of order.
   const ids = await withMockedReadline("opencode,claude-code", async (mod) => mod.multiSelect("Pick", TUI_CHOICES));
@@ -110,7 +110,7 @@ test("multiSelect normalizes user input order to choices order (AC2.2)", async (
 
 test("multiSelect allows whitespace around tokens", async () => {
   const result = await withMockedReadline(" 1 , 3 ", async (mod) => mod.multiSelect("Pick", TUI_CHOICES));
-  assert.deepEqual(result, ["claude-code", "gemini-cli"]);
+  assert.deepEqual(result, ["claude-code", "antigravity-cli"]);
 });
 
 test("multiSelect rejects whitespace-only input (not bare Enter)", async () => {

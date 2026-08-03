@@ -273,10 +273,6 @@ test("agent-infra init generates seed files in a temp directory", () => {
       "codex prompt should not be synced to the global dir"
     );
     assert.ok(
-      fs.existsSync(path.join(tmpDir, ".gemini/commands/testproj/update-agent-infra.toml")),
-      "gemini command should be installed"
-    );
-    assert.ok(
       fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")),
       "opencode command should be installed"
     );
@@ -734,11 +730,6 @@ test("agent-infra update refreshes seed files and syncs file registry", async ()
       fs.existsSync(path.join(tmpDir, ".claude", "commands", "update-agent-infra.md"))
     );
     assert.ok(
-      fs.existsSync(
-        path.join(tmpDir, ".gemini", "commands", "seedproj", "update-agent-infra.toml")
-      )
-    );
-    assert.ok(
       fs.existsSync(path.join(tmpDir, ".opencode", "commands", "update-agent-infra.md"))
     );
 
@@ -752,7 +743,6 @@ test("agent-infra update refreshes seed files and syncs file registry", async ()
     const baselineTargets = Object.keys(synced.files.managedBaselines);
     assert.ok(baselineTargets.includes(".github/workflows/metadata-sync.yml"));
     assert.ok(baselineTargets.includes(".codex/hooks.json"));
-    assert.ok(baselineTargets.some((target) => target.startsWith(".gemini/commands/")));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -773,7 +763,7 @@ test("agent-infra update migrates legacy sandbox client tools to canonical state
     sandbox: {
       engine: null,
       runtimes: ["node22"],
-      tools: ["opencode", "claude-code", "gemini-cli", "codex"],
+      tools: ["opencode", "claude-code", "antigravity-cli", "codex"],
       dockerfile: null,
       vm: { cpu: null, memory: null, disk: null }
     }

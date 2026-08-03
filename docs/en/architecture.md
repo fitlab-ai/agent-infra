@@ -17,7 +17,7 @@ agent-infra is intentionally simple: a bootstrap CLI creates the seed configurat
 ```text
 ┌───────────────────────────────────────────────────────┐
 │                     AI TUI Layer                      │
-│  Claude Code  ·  Codex  ·  Gemini CLI  ·  OpenCode    │
+│  Claude Code  ·  Codex  ·  Antigravity CLI  ·  OpenCode    │
 └──────────────────────────┬────────────────────────────┘
                            │ slash commands
                            ▼

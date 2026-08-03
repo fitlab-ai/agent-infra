@@ -1010,22 +1010,6 @@ export function ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: st
   }
 }
 
-export function ensureGeminiWorkspaceTrust(toolDir: string): void {
-  const trustPath = path.join(toolDir, 'trustedFolders.json');
-  let data: Record<string, string> = {};
-  if (fs.existsSync(trustPath)) {
-    try {
-      data = JSON.parse(fs.readFileSync(trustPath, 'utf8')) as Record<string, string>;
-    } catch {
-      // malformed JSON, start fresh
-    }
-  }
-  if (data['/workspace'] !== 'TRUST_FOLDER') {
-    data['/workspace'] = 'TRUST_FOLDER';
-    fs.writeFileSync(trustPath, JSON.stringify(data, null, 2), 'utf8');
-  }
-}
-
 export function sandboxAliasesPath(home: string): string {
   return hostJoin(home, '.agent-infra', 'aliases', 'sandbox.sh');
 }
@@ -1055,8 +1039,12 @@ function isLegacyManagedSandboxAliasFile(
     return false;
   }
 
+  const legacyAliasNames = ['gemini-yolo', 'gy'];
   const aliasPattern = new RegExp(
-    `^alias (${aliases.map((alias) => escapeRegExp(alias.name)).join('|')})=`
+    `^alias (${[
+      ...aliases.map((alias) => alias.name),
+      ...legacyAliasNames
+    ].map(escapeRegExp).join('|')})=`
   );
   return lines.every((line) => aliasPattern.test(line));
 }
@@ -1522,10 +1510,6 @@ export async function create(args: string[]): Promise<void> {
               // prepareClaudeCredentials wrote OAuth credentials or confirmed
               // provider/API settings are enough for Claude Code. If no usable
               // auth was present, the claude-code entry was removed above.
-            }
-            const geminiEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'gemini-cli');
-            if (geminiEntry) {
-              ensureGeminiWorkspaceTrust(geminiEntry.dir);
             }
             const opencodeEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'opencode');
             if (opencodeEntry) {

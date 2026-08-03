@@ -51,7 +51,6 @@ type SandboxCreateModule = {
   ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string): void;
   ensureCodexWorkspaceTrust(toolDir: string): void;
   ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: string): void;
-  ensureGeminiWorkspaceTrust(toolDir: string): void;
   buildImage(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): void;
   commandErrorMessage(error: unknown): string;
   hostHasGpgKeys(home: string, execFn?: ExecFn): boolean;
@@ -700,7 +699,7 @@ test("ensureSandboxAliasesFile creates the default aliases once", async () => {
     assert.match(content, /alias opencode-yolo='OPENCODE_PERMISSION=.*external_directory.*doom_loop.* opencode; tput ed'/);
     assert.match(content, /alias oy='OPENCODE_PERMISSION=.*external_directory.*doom_loop.* opencode; tput ed'/);
     assert.match(content, /alias xy='codex --yolo; tput ed'/);
-    assert.match(content, /alias gy='gemini --yolo; tput ed'/);
+    assert.match(content, /alias agy-yolo='agy --dangerously-skip-permissions; tput ed'/);
     assert.match(content, /# <<< agent-infra managed aliases <<</);
 
     const second = sandboxCreate.ensureSandboxAliasesFile(tmpDir);

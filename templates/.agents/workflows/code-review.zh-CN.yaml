@@ -9,7 +9,7 @@ steps:
     description: 加载上下文并理解变更范围。
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - 阅读 PR 描述和关联的 Issue
       - 审查差异以理解变更内容

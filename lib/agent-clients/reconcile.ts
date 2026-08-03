@@ -144,7 +144,8 @@ function planAgentClientReconciliation(input: Readonly<{
     current,
     sharedDefaults,
     enabledAdapters: listEnabledAgentClientAdapters(desired),
-    allAdapters: adapters
+    allAdapters: adapters,
+    retiredAssets: ['.gemini/commands/', '.gemini/settings.json']
   });
 
   const nextConfig = structuredClone(input.config);

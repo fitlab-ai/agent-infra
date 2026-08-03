@@ -219,8 +219,8 @@ function defineAgentClientAdapter(
     throw new Error(`Agent Client '${candidate.id}' has an invalid project descriptor`);
   }
   const ownedPathPrefixes = candidate.project.ownedPathPrefixes;
-  if (!Array.isArray(ownedPathPrefixes) || ownedPathPrefixes.length === 0) {
-    throw new Error(`Agent Client '${candidate.id}' requires owned path prefixes`);
+  if (!Array.isArray(ownedPathPrefixes)) {
+    throw new Error(`Agent Client '${candidate.id}' has invalid owned path prefixes`);
   }
 
   const paths = ownedPathPrefixes.map((prefix) => {

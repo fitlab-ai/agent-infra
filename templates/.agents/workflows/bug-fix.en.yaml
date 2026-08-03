@@ -14,7 +14,7 @@ steps:
     description: Reproduce the defect, identify the root cause, and define the fix scope.
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - Understand the defect report and expected behavior
       - Reproduce the defect when possible
@@ -39,7 +39,7 @@ steps:
     description: Review whether the defect analysis has sufficient reproduction evidence, a clear root cause, and a scoped fix.
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - Verify reproduction evidence or the non-reproducible explanation
       - Check root-cause reasoning and impact scope
@@ -93,7 +93,7 @@ steps:
     description: Review whether the fix plan addresses the root cause, has sufficient tests, and controls side effects.
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - Verify the plan covers the approved root-cause analysis
       - Check regression test strategy and potential side effects

@@ -13,7 +13,7 @@ steps:
     description: 分析功能需求，探索代码库，识别受影响的区域。
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - 阅读并理解功能需求
       - 探索代码库以识别相关文件和模块
@@ -36,7 +36,7 @@ steps:
     description: 审查需求分析是否完整、可验证且边界清晰。
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - 检查需求范围、约束和验收标准
       - 验证受影响区域和风险识别是否充分
@@ -62,7 +62,7 @@ steps:
     description: 为功能实现创建技术设计方案。
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - 定义接口和数据结构
       - 概述实现方案
@@ -92,7 +92,7 @@ steps:
     description: 审查技术方案是否可实施、低风险且覆盖需求。
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - 验证方案覆盖已批准的需求分析
       - 检查架构一致性、风险和测试策略

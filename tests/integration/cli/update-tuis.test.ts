@@ -49,7 +49,6 @@ test("agent-infra update without tuis field refreshes all built-in TUI seeds (ba
     });
 
     assert.ok(fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-infra.md")));
-    assert.ok(fs.existsSync(path.join(tmpDir, ".gemini/commands/demo/update-agent-infra.toml")));
     assert.ok(fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
 
     const updated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
@@ -58,7 +57,6 @@ test("agent-infra update without tuis field refreshes all built-in TUI seeds (ba
     assert.deepEqual(updated.agentClients, canonical(AGENT_CLIENT_IDS));
     // All built-in TUI owned paths still get registered.
     assert.ok(updated.files.managed.includes(".claude/commands/"));
-    assert.ok(updated.files.managed.includes(".gemini/commands/"));
     assert.ok(updated.files.managed.includes(".opencode/commands/"));
     assert.ok(updated.files.managed.includes(".codex/hooks.json"));
   } finally {
@@ -85,14 +83,12 @@ test("agent-infra update with subset tuis only refreshes enabled TUI seeds", () 
     });
 
     assert.ok(fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-infra.md")));
-    assert.ok(!fs.existsSync(path.join(tmpDir, ".gemini/commands/demo/update-agent-infra.toml")));
     assert.ok(!fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
 
     const updated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
     assert.equal("tuis" in updated, false);
     assert.deepEqual(updated.agentClients, canonical(["claude-code"]));
     // Disabled-TUI owned default paths are NOT added to managed registry.
-    assert.ok(!updated.files.managed.includes(".gemini/commands/"));
     assert.ok(!updated.files.managed.includes(".opencode/commands/"));
     assert.ok(!updated.files.managed.includes(".codex/hooks.json"));
     // Enabled TUI owned default paths ARE registered.
@@ -122,7 +118,6 @@ test("agent-infra update with tuis: [] installs no built-in seeds and registers 
 
     // No built-in TUI seed files installed.
     assert.ok(!fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-infra.md")));
-    assert.ok(!fs.existsSync(path.join(tmpDir, ".gemini/commands/demo/update-agent-infra.toml")));
     assert.ok(!fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
 
     const updated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
@@ -130,7 +125,6 @@ test("agent-infra update with tuis: [] installs no built-in seeds and registers 
     assert.deepEqual(updated.agentClients, canonical([]));
     // No built-in TUI owned default paths registered.
     assert.ok(!updated.files.managed.includes(".claude/commands/"));
-    assert.ok(!updated.files.managed.includes(".gemini/commands/"));
     assert.ok(!updated.files.managed.includes(".opencode/commands/"));
     assert.ok(!updated.files.managed.includes(".codex/hooks.json"));
     // Next-step hint points to customTUIs configuration.

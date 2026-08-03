@@ -47,9 +47,9 @@ const CAPABILITY_MATRIX = {
     sandbox: 'integrated',
     verification: 'compatible'
   },
-  'gemini-cli': {
+  'antigravity-cli': {
     instructions: 'compatible',
-    skills: 'compatible',
+    skills: 'integrated',
     commands: 'integrated',
     hooks: 'compatible',
     subagents: 'unsupported',
@@ -168,15 +168,6 @@ test('adapter definitions validate their closed contract without mutating input'
           .filter((capability) => capability !== 'hooks')
           .map((capability) => [capability, { level: 'compatible' }])
       ) as AgentClientCapabilityMap
-    }),
-    adapterInput({
-      project: {
-        ownedPathPrefixes: [],
-        managed: [],
-        merged: [],
-        ejected: [],
-        seedCommands: []
-      }
     }),
     adapterInput({
       project: {
@@ -311,7 +302,7 @@ test('registry is complete, canonical, deeply frozen, and matches the capability
     {
       'claude-code': '/${skillName}',
       codex: '$${skillName}',
-      'gemini-cli': '/${projectName}:${skillName}',
+      'antigravity-cli': '/${skillName}',
       opencode: '/${skillName}'
     }
   );
@@ -365,18 +356,12 @@ test('registry exposes the exact built-in project asset matrix', () => {
         ejected: [],
         seedCommands: []
       },
-      'gemini-cli': {
-        ownedPathPrefixes: ['.gemini/'],
-        managed: ['.gemini/commands/'],
-        merged: ['.gemini/settings.json'],
+      'antigravity-cli': {
+        ownedPathPrefixes: [],
+        managed: [],
+        merged: [],
         ejected: [],
-        seedCommands: [{
-          templates: {
-            en: '.gemini/commands/_project_/update-agent-infra.en.toml',
-            'zh-CN': '.gemini/commands/_project_/update-agent-infra.zh-CN.toml'
-          },
-          target: '.gemini/commands/${projectName}/update-agent-infra.toml'
-        }]
+        seedCommands: []
       },
       opencode: {
         ownedPathPrefixes: ['.opencode/'],
@@ -504,7 +489,7 @@ test('manifest projects invocation and remains deeply frozen', () => {
     [
       { id: 'claude-code', displayName: 'Claude Code', invocation: '/${skillName}' },
       { id: 'codex', displayName: 'Codex', invocation: '$${skillName}' },
-      { id: 'gemini-cli', displayName: 'Gemini CLI', invocation: '/${projectName}:${skillName}' },
+      { id: 'antigravity-cli', displayName: 'Antigravity CLI', invocation: '/${skillName}' },
       { id: 'opencode', displayName: 'OpenCode', invocation: '/${skillName}' }
     ]
   );
@@ -521,7 +506,7 @@ test('registry queries preserve canonical order and keep enabled separate from s
   );
   assert.deepEqual(
     listInstalledAgentClientAdapters(state).map((adapter) => adapter.id),
-    ['claude-code', 'gemini-cli']
+    ['claude-code', 'antigravity-cli']
   );
   assert.deepEqual(listEnabledAgentClientAdapters(stateFor([])), []);
   assert.deepEqual(
@@ -539,11 +524,11 @@ test('registry queries preserve canonical order and keep enabled separate from s
   );
   assert.deepEqual(
     listEnabledAgentClientAdaptersByCapability(
-      stateFor(['gemini-cli', 'opencode']),
+      stateFor(['antigravity-cli', 'opencode']),
       'hooks',
       ['compatible', 'compatible']
     ).map((adapter) => adapter.id),
-    ['gemini-cli', 'opencode']
+    ['antigravity-cli', 'opencode']
   );
   assert.deepEqual(
     listEnabledAgentClientAdaptersByCapability(

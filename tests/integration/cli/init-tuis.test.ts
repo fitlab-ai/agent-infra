@@ -66,7 +66,6 @@ test("ai init default-selects all built-in TUIs on bare Enter", () => {
     assert.deepEqual(cfg.agentClients, canonical(AGENT_CLIENT_IDS));
     assert.equal("tuis" in cfg, false);
     assert.ok(fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-infra.md")));
-    assert.ok(fs.existsSync(path.join(tmpDir, ".gemini/commands/demoproj/update-agent-infra.toml")));
     assert.ok(fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -84,9 +83,8 @@ test("ai init persists subset selection and skips seed for disabled TUIs", () =>
     });
 
     const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    assert.deepEqual(cfg.agentClients, canonical(["claude-code", "gemini-cli"]));
+    assert.deepEqual(cfg.agentClients, canonical(["claude-code", "antigravity-cli"]));
     assert.ok(fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-infra.md")));
-    assert.ok(fs.existsSync(path.join(tmpDir, ".gemini/commands/demoproj/update-agent-infra.toml")));
     assert.ok(!fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
 
     // Disabled TUI owned paths are dropped from default managed registry.
@@ -94,12 +92,11 @@ test("ai init persists subset selection and skips seed for disabled TUIs", () =>
     assert.ok(!cfg.files.managed.includes(".codex/hooks.json"));
     // Enabled TUI owned paths are kept.
     assert.ok(cfg.files.managed.includes(".claude/commands/"));
-    assert.ok(cfg.files.managed.includes(".gemini/commands/"));
 
     // Next-step hint should advertise enabled TUIs but skip disabled rows.
     const nextStep = output.slice(output.indexOf("Next step:"));
     assert.match(nextStep, /Claude Code:\s+\/update-agent-infra/);
-    assert.match(nextStep, /Gemini CLI:\s+\/demoproj:update-agent-infra/);
+    assert.match(nextStep, /Antigravity CLI:\s+\/update-agent-infra/);
     assert.doesNotMatch(nextStep, /OpenCode/);
     assert.doesNotMatch(nextStep, /\$update-agent-infra/);
   } finally {
@@ -121,11 +118,9 @@ test("ai init persists tuis: [] when user types 'none' and skips all built-in se
     assert.deepEqual(cfg.agentClients, canonical([]));
     // No built-in TUI seed command file is installed.
     assert.ok(!fs.existsSync(path.join(tmpDir, ".claude/commands/update-agent-infra.md")));
-    assert.ok(!fs.existsSync(path.join(tmpDir, ".gemini/commands/demoproj/update-agent-infra.toml")));
     assert.ok(!fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
     // No built-in TUI owned default paths added to managed registry.
     assert.ok(!cfg.files.managed.includes(".claude/commands/"));
-    assert.ok(!cfg.files.managed.includes(".gemini/commands/"));
     assert.ok(!cfg.files.managed.includes(".opencode/commands/"));
     assert.ok(!cfg.files.managed.includes(".codex/hooks.json"));
     // Next-step block points users to customTUIs.
@@ -141,14 +136,14 @@ test("ai init persists tuis in canonical prompt order even when user types rever
   try {
     execFileSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
-      // User types "3,1" -> gemini-cli, claude-code. AC2.2 requires the persisted
-      // array to follow prompt order: claude-code, gemini-cli.
+      // User types "3,1" -> antigravity-cli, claude-code. AC2.2 requires the persisted
+      // array to follow prompt order: claude-code, antigravity-cli.
       input: makeInput({ tuis: "3,1" }),
       stdio: "pipe"
     });
 
     const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    assert.deepEqual(cfg.agentClients, canonical(["claude-code", "gemini-cli"]));
+    assert.deepEqual(cfg.agentClients, canonical(["claude-code", "antigravity-cli"]));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

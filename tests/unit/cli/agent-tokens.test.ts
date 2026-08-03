@@ -12,7 +12,7 @@ import {
 // --- normalizeAgentToken: strict write-side validation ---
 
 test('normalizeAgentToken passes every standard short token through unchanged', () => {
-  for (const token of ['claude', 'codex', 'gemini', 'opencode', 'cursor']) {
+  for (const token of ['claude', 'codex', 'gemini', 'antigravity', 'opencode', 'cursor']) {
     assert.equal(normalizeAgentToken(token), token, token);
   }
 });
@@ -20,6 +20,7 @@ test('normalizeAgentToken passes every standard short token through unchanged', 
 test('normalizeAgentToken maps long names to short tokens (HD-4)', () => {
   assert.equal(normalizeAgentToken('claude-code'), 'claude');
   assert.equal(normalizeAgentToken('gemini-cli'), 'gemini');
+  assert.equal(normalizeAgentToken('antigravity-cli'), 'antigravity');
 });
 
 test('normalizeAgentToken keeps human as the single manual-executor token', () => {
@@ -34,15 +35,16 @@ test('normalizeAgentToken rejects OS / git usernames and empty values', () => {
 });
 
 test('normalizeAgentToken exposes the long-name mapping as the single source', () => {
-  assert.deepEqual(Object.keys(AGENT_LONG_NAMES).sort(), ['claude-code', 'gemini-cli']);
+  assert.deepEqual(Object.keys(AGENT_LONG_NAMES).sort(), ['antigravity-cli', 'claude-code', 'gemini-cli']);
   assert.equal(AGENT_LONG_NAMES['claude-code'], 'claude');
   assert.equal(AGENT_LONG_NAMES['gemini-cli'], 'gemini');
+  assert.equal(AGENT_LONG_NAMES['antigravity-cli'], 'antigravity');
 });
 
 // --- classifyAgent: loose rendering-side classification ---
 
 test('classifyAgent treats every known AI short and long token as ai', () => {
-  for (const token of [...KNOWN_AI_AGENTS, 'claude-code', 'gemini-cli']) {
+  for (const token of [...KNOWN_AI_AGENTS, 'claude-code', 'gemini-cli', 'antigravity-cli']) {
     assert.equal(classifyAgent(token).status, 'ai', token);
   }
 });
@@ -50,6 +52,7 @@ test('classifyAgent treats every known AI short and long token as ai', () => {
 test('classifyAgent renders known long names to their short display token', () => {
   assert.deepEqual(classifyAgent('claude-code'), { status: 'ai', display: 'claude' });
   assert.deepEqual(classifyAgent('gemini-cli'), { status: 'ai', display: 'gemini' });
+  assert.deepEqual(classifyAgent('antigravity-cli'), { status: 'ai', display: 'antigravity' });
 });
 
 test('classifyAgent renders human as human without a marker', () => {
@@ -72,5 +75,6 @@ test('classifyAgent treats an empty token as unknown (visible signal)', () => {
 test('AGENT_USAGE_HINT names the accepted token shapes', () => {
   assert.match(AGENT_USAGE_HINT, /claude-code/);
   assert.match(AGENT_USAGE_HINT, /gemini-cli/);
+  assert.match(AGENT_USAGE_HINT, /antigravity-cli/);
   assert.match(AGENT_USAGE_HINT, /human/);
 });

@@ -27,7 +27,7 @@ If the commit belongs to an active task:
 |---|---|
 | `claude` | `Co-Authored-By: Claude <noreply@anthropic.com>` |
 | `codex` | `Co-Authored-By: Codex <noreply@openai.com>` |
-| `gemini` | `Co-Authored-By: Gemini <noreply@google.com>` |
+| `antigravity` | `Co-Authored-By: Antigravity <noreply@google.com>` |
 | `opencode` | `Co-Authored-By: OpenCode <noreply@opencode.ai>` |
 
 Build the co-author block with these rules:

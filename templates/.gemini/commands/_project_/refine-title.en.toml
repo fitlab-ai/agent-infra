@@ -1,8 +1,0 @@
-description = "Rewrite an Issue or PR title in Conventional Commits format"
-prompt = """
-Refine title of #{{args}}.
-
-Read and execute the refine-title skill from `.agents/skills/refine-title/SKILL.md`.
-
-Follow all steps defined in the skill exactly.
-"""

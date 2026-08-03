@@ -1,8 +1,0 @@
-description = "Initialize the repository's standard labels taxonomy"
-prompt = """
-Initialize labels for {{project}}.
-
-Read and execute the init-labels skill from `.agents/skills/init-labels/SKILL.md`.
-
-Follow all steps defined in the skill exactly.
-"""

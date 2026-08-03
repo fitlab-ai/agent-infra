@@ -11,7 +11,7 @@ These are not thin command aliases. Each skill encapsulates standardized process
 - **Structured artifacts** — every step produces a templated document (`analysis.md`, `review-analysis.md`, `plan.md`, `review-plan.md`, `code.md`, `review-code.md`) with consistent structure, not free-form notes
 - **Multi-round versioning** — requirements changed? Run `analyze-task` again to get `analysis-r2.md`; the full revision history is preserved
 - **Severity-classified reviews** — `review-code` categorizes findings into Blocker / Major / Minor with file paths and fix suggestions, not a vague "looks good"
-- **Cross-tool state continuity** — `task.md` records who did what and when; Claude can analyze, Codex can implement, Gemini can review — context transfers seamlessly
+- **Cross-tool state continuity** — `task.md` records who did what and when; Claude can analyze, Codex can implement, Antigravity can review — context transfers seamlessly
 - **Audit trail and co-authorship** — every step appends to the Activity Log; the final commit includes `Co-Authored-By` lines for all participating AI agents
 
 ## Task Lifecycle

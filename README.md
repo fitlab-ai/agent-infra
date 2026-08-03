@@ -5,7 +5,7 @@
 <h1 align="center">Agent Infra</h1>
 
 <p align="center">
-  Collaboration infrastructure for AI coding agents — skills, workflows, and sandboxes for Claude Code, Codex, Gemini CLI, and OpenCode.
+  Collaboration infrastructure for AI coding agents — skills, workflows, and sandboxes for Claude Code, Codex, Antigravity CLI, and OpenCode.
 </p>
 
 <p align="center">
@@ -28,7 +28,7 @@
 
 ## Why agent-infra?
 
-Teams increasingly mix Claude Code, Codex, Gemini CLI, OpenCode, and other AI TUIs in the same repository, but each tool tends to introduce its own commands, prompts, and local conventions. Without a shared layer, the result is fragmented workflows, duplicated setup, and task history that is difficult to audit.
+Teams increasingly mix Claude Code, Codex, Antigravity CLI, OpenCode, and other AI TUIs in the same repository, but each tool tends to introduce its own commands, prompts, and local conventions. Without a shared layer, the result is fragmented workflows, duplicated setup, and task history that is difficult to audit.
 
 agent-infra standardizes that shared infrastructure. It gives every supported AI TUI the same task lifecycle, the same skill vocabulary, the same project governance files, isolated development sandboxes, and the same upgrade path, so teams can switch tools without rebuilding process from scratch.
 
@@ -81,11 +81,11 @@ Just fix it at the application layer in LoginService.
 
 **11 commands. 1 natural-language correction. From issue to merged PR.** That is the entire SOP — programming can have a standard operating procedure too.
 
-Every command above works the same way in Claude Code, Codex, Gemini CLI, and OpenCode. Switch tools mid-task — the workflow state follows. For what each skill does under the hood, see [Built-in AI Skills](./docs/en/skills.md).
+Every command above works the same way in Claude Code, Codex, Antigravity CLI, and OpenCode. Switch tools mid-task — the workflow state follows. For what each skill does under the hood, see [Built-in AI Skills](./docs/en/skills.md).
 
 ## Key Features
 
-- **Multi-AI collaboration**: one shared operating model for Claude Code, Codex, Gemini CLI, and OpenCode
+- **Multi-AI collaboration**: one shared operating model for Claude Code, Codex, Antigravity CLI, and OpenCode
 - **Bootstrap CLI + skill-driven execution**: initialize once, then let AI skills drive day-to-day work
 - **IM command bridge**: route Feishu messages to built-ins, read-only task views, sandbox management, and controlled lifecycle skill runs
 - **Bilingual project docs**: English-first docs with synchronized Chinese translations
@@ -153,7 +153,7 @@ Open the project in any AI TUI and run `update-agent-infra`:
 |-----|---------|
 | Claude Code | `/update-agent-infra` |
 | Codex | `$update-agent-infra` |
-| Gemini CLI | `/{{project}}:update-agent-infra` |
+| Antigravity CLI | `/update-agent-infra` |
 | OpenCode | `/update-agent-infra` |
 
 This detects the packaged template version and renders all managed files. The same command is used both for first-time setup and for future template upgrades.
@@ -166,11 +166,11 @@ Manage the four built-in Agent Clients independently from the project lifecycle:
 ai agent-client list
 ai agent-client status
 ai agent-client enable codex
-ai agent-client disable gemini-cli
+ai agent-client disable antigravity-cli
 ai agent-client configure
 ```
 
-The most-used lifecycle commands, in delivery order. The command prefix varies by TUI (`/skill` in Claude Code/OpenCode, `$skill` in Codex, `/{{project}}:skill` in Gemini CLI); the workflow semantics stay the same.
+The most-used lifecycle commands, in delivery order. The command prefix varies by TUI (`/skill` in Claude Code/Antigravity/OpenCode and `$skill` in Codex); the workflow semantics stay the same.
 
 | Command | Purpose |
 |---------|---------|
@@ -198,7 +198,6 @@ my-project/
 │   ├── workflows/         # 4 prebuilt workflows
 │   └── templates/         # Task and artifact templates
 ├── .claude/               # Claude Code config and commands
-├── .gemini/               # Gemini CLI config and commands
 ├── .opencode/             # OpenCode config and commands
 └── AGENTS.md              # Universal AI agent instructions
 ```

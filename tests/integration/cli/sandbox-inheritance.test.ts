@@ -46,7 +46,6 @@ type SandboxCreateModule = {
   ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string, containerCodexDir?: string): void;
   ensureCodexWorkspaceTrust(toolDir: string): void;
   ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: string): void;
-  ensureGeminiWorkspaceTrust(toolDir: string): void;
   buildImage(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): void;
   commandErrorMessage(error: unknown): string;
   hostHasGpgKeys(home: string, execFn?: ExecFn): boolean;
@@ -1404,35 +1403,6 @@ test("ensureCodexWorkspaceTrust skips when workspace trust already exists", asyn
     fs.writeFileSync(configPath, original, "utf8");
     sandboxCreate.ensureCodexWorkspaceTrust(tmpDir);
     assert.equal(fs.readFileSync(configPath, "utf8"), original);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("ensureGeminiWorkspaceTrust creates trustedFolders.json with workspace trust", async () => {
-  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gemini-trust-"));
-
-  try {
-    sandboxCreate.ensureGeminiWorkspaceTrust(tmpDir);
-    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "trustedFolders.json"), "utf8"));
-    assert.deepEqual(data, { "/workspace": "TRUST_FOLDER" });
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("ensureGeminiWorkspaceTrust skips write when workspace trust already exists", async () => {
-  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-gemini-trust-noop-"));
-  const trustPath = path.join(tmpDir, "trustedFolders.json");
-
-  try {
-    fs.writeFileSync(trustPath, JSON.stringify({ "/workspace": "TRUST_FOLDER" }, null, 2), "utf8");
-    const mtimeBefore = fs.statSync(trustPath).mtimeMs;
-    sandboxCreate.ensureGeminiWorkspaceTrust(tmpDir);
-    const mtimeAfter = fs.statSync(trustPath).mtimeMs;
-    assert.equal(mtimeBefore, mtimeAfter);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

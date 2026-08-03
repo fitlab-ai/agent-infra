@@ -23,6 +23,7 @@ function planAgentClientProjectAssets(input: Readonly<{
   sharedDefaults: ProjectFileRegistry;
   enabledAdapters: readonly AgentClientAdapter[];
   allAdapters: readonly AgentClientAdapter[];
+  retiredAssets?: readonly string[];
 }>): AgentClientProjectAssetPlan {
   const enabledIds = new Set(input.enabledAdapters.map((adapter) => adapter.id));
   const enabledAdapters = input.allAdapters.filter((adapter) =>
@@ -46,11 +47,11 @@ function planAgentClientProjectAssets(input: Readonly<{
   );
 
   const allAdapterAssets = new Set(
-    input.allAdapters.flatMap((adapter) => [
+    [...input.allAdapters.flatMap((adapter) => [
       ...adapter.project.managed,
       ...adapter.project.merged,
       ...adapter.project.ejected
-    ])
+    ]), ...(input.retiredAssets ?? [])]
   );
   const ejected = unique([
     ...input.current.ejected,

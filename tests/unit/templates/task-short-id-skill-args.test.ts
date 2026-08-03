@@ -89,17 +89,14 @@ for (const name of TASK_CONTEXT_SKILLS) {
   test(`TUI wrappers (${name}) preserve full task-scope arguments`, () => {
     const claude = read(path.resolve('.claude/commands', `${name}.md`));
     const opencode = read(path.resolve('.opencode/commands', `${name}.md`));
-    const gemini = read(path.resolve('.gemini/commands/agent-infra', `${name}.toml`));
     assert.ok(claude.includes('--task <ref>'));
     assert.ok(opencode.includes('$ARGUMENTS'));
-    assert.ok(gemini.includes('{{args}}'));
   });
 
   test(`TUI templates (${name}) preserve platform-specific argument variables`, () => {
     for (const locale of ['en', 'zh-CN']) {
       assert.ok(read(path.resolve('templates/.claude/commands', `${name}.${locale}.md`)).includes('--task <ref>'));
       assert.ok(read(path.resolve('templates/.opencode/commands', `${name}.${locale}.md`)).includes('$ARGUMENTS'));
-      assert.ok(read(path.resolve('templates/.gemini/commands/_project_', `${name}.${locale}.toml`)).includes('{{args}}'));
     }
   });
 }

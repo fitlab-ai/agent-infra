@@ -13,7 +13,7 @@ steps:
     description: 分析当前代码并确定重构范围。
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - 识别待重构的代码及重构原因
       - 映射受影响代码的所有依赖项和使用者
@@ -37,7 +37,7 @@ steps:
     description: 审查重构分析是否覆盖依赖、风险和测试基线。
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - 验证待重构范围和原因
       - 检查依赖关系、使用者和风险识别
@@ -93,7 +93,7 @@ steps:
     description: 审查重构方案是否保持行为稳定、步骤可验证且风险可控。
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - 验证方案覆盖已批准的范围分析
       - 检查增量步骤、测试策略和回滚风险

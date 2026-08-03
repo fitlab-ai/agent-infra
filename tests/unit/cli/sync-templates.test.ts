@@ -367,7 +367,7 @@ test("syncTemplates migrates legacy client tools to canonical agent-infra toolin
       sandbox: {
         engine: null,
         runtimes: ["node22"],
-        tools: ["claude-code", "opencode", "codex", "gemini-cli"],
+        tools: ["claude-code", "opencode", "codex", "antigravity-cli"],
         dockerfile: null,
         vm: { cpu: null, memory: null, disk: null }
       },
@@ -385,7 +385,7 @@ test("syncTemplates migrates legacy client tools to canonical agent-infra toolin
       [
         ["claude-code", true],
         ["codex", true],
-        ["gemini-cli", true],
+        ["antigravity-cli", true],
         ["opencode", true]
       ]
     );
@@ -426,6 +426,46 @@ test("syncTemplates migrates customized legacy client selection into canonical s
       cfg.agentClients.find((entry: { id: string }) => entry.id === "codex").installInSandbox,
       true
     );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates migrates Gemini client state and retires project command assets", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-gemini-migration-"));
+
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const { templateRoot } = createTemplateInstall(tmpDir);
+
+    fs.mkdirSync(projectRoot, { recursive: true });
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo",
+      org: "acme",
+      language: "en",
+      platform: { type: "github" },
+      agentClients: [
+        { id: "claude-code", enabled: true, installInSandbox: true },
+        { id: "codex", enabled: true, installInSandbox: true },
+        { id: "gemini-cli", enabled: true, installInSandbox: true },
+        { id: "opencode", enabled: true, installInSandbox: true }
+      ],
+      files: {
+        managed: [".agents/skills/", ".gemini/commands/"],
+        merged: [".gemini/settings.json"],
+        ejected: []
+      }
+    });
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+    const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
+
+    assert.equal(report.configUpdated, true);
+    assert.ok(cfg.agentClients.some((entry: { id: string }) => entry.id === "antigravity-cli"));
+    assert.ok(!cfg.agentClients.some((entry: { id: string }) => entry.id === "gemini-cli"));
+    assert.ok(!cfg.files.managed.includes(".gemini/commands/"));
+    assert.ok(!cfg.files.merged.includes(".gemini/settings.json"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

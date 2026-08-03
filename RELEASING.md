@@ -71,7 +71,7 @@ npm 发布走 GitHub Actions OIDC + npm Trusted Publishing，CI 不再读取长�
 在 AI TUI 中执行 `release` 技能：
 
 - Claude Code / OpenCode：`/release X.Y.Z`
-- Gemini CLI：`/agent-infra:release X.Y.Z`
+- Antigravity CLI：`/release X.Y.Z`
 - Codex CLI：`$release X.Y.Z`
 
 本次调用只授权 prepare。该技能通过 `release-workflow prepare` 负责：
@@ -110,7 +110,7 @@ publish 是独立人工授权点。core 逐 ref 普通 push 并用远端事实�
 如需先在本地整理说明，可执行：
 
 - Claude Code / OpenCode：`/create-release-note X.Y.Z [PREVIOUS_VERSION]`
-- Gemini CLI：`/agent-infra:create-release-note X.Y.Z [PREVIOUS_VERSION]`
+- Antigravity CLI：`/create-release-note X.Y.Z [PREVIOUS_VERSION]`
 - Codex CLI：`$create-release-note X.Y.Z [PREVIOUS_VERSION]`
 
 如果 GitHub 自动生成的说明已经足够，可以直接使用 Release 页面内容；否则手动补充亮点、迁移提示和已知限制。
@@ -134,7 +134,7 @@ publish 是独立人工授权点。core 逐 ref 普通 push 并用远端事实�
 在发布标签推送并完成 CI 发布后，执行 `post-release` 技能。它先从远端 tag、平台 Release、npm、Homebrew 和 smoke workflow 重建状态；渠道 pending/unknown 时停止，不把网络未知当作缺失：
 
 - Claude Code / OpenCode：`/post-release`
-- Gemini CLI：`/agent-infra:post-release`
+- Antigravity CLI：`/post-release`
 - Codex CLI：`$post-release`
 
 The canonical demo is tracked by Git LFS. Release environments must install

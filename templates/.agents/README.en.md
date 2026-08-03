@@ -1,6 +1,6 @@
 # Multi-AI Collaboration Guide
 
-This project supports collaboration across multiple AI coding assistants, including Claude Code, OpenAI Codex CLI, Gemini CLI, OpenCode, and others.
+This project supports collaboration across multiple AI coding assistants, including Claude Code, OpenAI Codex CLI, Antigravity CLI, OpenCode, and others.
 
 ## Dual-Config Architecture
 
@@ -10,7 +10,7 @@ Different AI tools read configuration from different locations:
 |---------|---------------|----------|
 | Claude Code | `.claude/` (CLAUDE.md, commands/, settings.json) | - |
 | OpenAI Codex CLI | `AGENTS.md` | - |
-| Gemini CLI | `AGENTS.md` | - |
+| Antigravity CLI | `AGENTS.md`, `.agents/skills/` | - |
 | OpenCode | `AGENTS.md` | - |
 | Other AI Tools | `AGENTS.md` | Project README |
 
@@ -75,7 +75,7 @@ When one AI completes a phase, it produces a **handoff document** (see `.agents/
 
 Each AI tool has different strengths. Use them accordingly:
 
-| Capability | Claude Code | Codex CLI | Gemini CLI | OpenCode |
+| Capability | Claude Code | Codex CLI | Antigravity CLI | OpenCode |
 |-----------|-------------|-----------|------------|----------|
 | Codebase analysis | Excellent | Good | Excellent | Good |
 | Code review | Excellent | Good | Good | Good |
@@ -88,7 +88,7 @@ Each AI tool has different strengths. Use them accordingly:
 
 - **Analysis & Review** - Claude Code (strong reasoning, thorough exploration)
 - **Implementation** - Codex CLI or OpenCode (fast code generation, command-driven editing)
-- **Large Context Tasks** - Gemini CLI (large context window for cross-file analysis)
+- **Large Context Tasks** - Antigravity CLI (large context window for cross-file analysis)
 - **Command-Driven Iteration** - OpenCode (workflow-friendly TUI execution)
 
 ## Quick Start
@@ -173,7 +173,7 @@ Write `description` as "one-line responsibility + scenario clause": after the sh
 
 Set the generic optional `disable-model-invocation` field to `true` when generated TUI commands should disable model invocation; each TUI adapter consumes it according to its capabilities. To preserve line breaks in a multiline `description`, use a YAML literal block (`|`); sync emits the corresponding multiline metadata format for each TUI.
 
-After adding or updating a custom skill, run `update-agent-infra` again. The sync step detects non-built-in skills and generates matching commands for Claude Code, Gemini CLI, and OpenCode automatically.
+After adding or updating a custom skill, run `update-agent-infra` again. The sync step detects non-built-in skills, generates matching commands for Claude Code and OpenCode, and lets Antigravity CLI discover the shared skills directly.
 
 ### Shared skill sources
 
@@ -220,7 +220,7 @@ Ordinary `managed` files keep their overwrite semantics. A small set of platform
 
 ## Agent Client Configuration
 
-Use the top-level `.agents/.airc.json` `agentClients` array to configure all four built-in clients (`claude-code`, `codex`, `gemini-cli`, `opencode`). Each canonical entry has three fields:
+Use the top-level `.agents/.airc.json` `agentClients` array to configure all four built-in clients (`claude-code`, `codex`, `antigravity-cli`, `opencode`). Each canonical entry has three fields:
 
 | Field | Meaning |
 |-------|---------|
@@ -234,7 +234,7 @@ Manage these settings without hand-editing JSON:
 ai agent-client list
 ai agent-client status
 ai agent-client enable codex
-ai agent-client disable gemini-cli
+ai agent-client disable antigravity-cli
 ai agent-client configure
 ```
 

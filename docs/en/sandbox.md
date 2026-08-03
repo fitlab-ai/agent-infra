@@ -16,7 +16,7 @@ The built-in image also verifies that `cc-token-status`, `sandbox-dotfiles-link`
 
 ## Sandbox aliases and GitHub CLI
 
-`ai sandbox create` now bootstraps the host-side aliases file at `~/.agent-infra/aliases/sandbox.sh` on first run. The generated file includes ready-to-edit yolo shortcuts for Claude, Codex, Gemini CLI, and OpenCode, and every sandbox syncs that file into `/home/devuser/.bash_aliases`.
+`ai sandbox create` now bootstraps the host-side aliases file at `~/.agent-infra/aliases/sandbox.sh` on first run. The generated file includes ready-to-edit yolo shortcuts for Claude, Codex, Antigravity CLI, and OpenCode, and every sandbox syncs that file into `/home/devuser/.bash_aliases`.
 
 The default sandbox image also installs the agent-infra CLI npm package, exposing both `ai` and `agent-infra` on the container `PATH`. Inside a task-bound worktree, lifecycle skills and suitable task commands infer the unique active task whose `task.md` branch exactly matches the current symbolic branch; use `--task <ref>` / `-t <ref>` to override it. Commands with another positional operand use unambiguous forms such as `ai task cat analysis`, `ai task decisions --item 1`, and `ai decide --item PL-1 <decision>`. `ai task grep <pattern>` remains a global search unless `--current` or `--task` is supplied. Host-side `ai run <skill> <task-ref>` still requires the task ref because it selects the target branch and sandbox. Existing sandbox images and containers need a refreshed rebuild and recreation before they pick up this newly managed tool.
 
@@ -36,7 +36,7 @@ assets and integrations.
   "agentClients": [
     { "id": "claude-code", "enabled": true, "installInSandbox": false },
     { "id": "codex", "enabled": true, "installInSandbox": true },
-    { "id": "gemini-cli", "enabled": false, "installInSandbox": false },
+    { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
     { "id": "opencode", "enabled": false, "installInSandbox": false }
   ]
 }
@@ -49,6 +49,11 @@ independent of this selection. After changing `installInSandbox`, rebuild the
 image and recreate affected containers. Runtime capability labels let start,
 exec, and recovery reject containers whose selected mounts or hook policy no
 longer match the current configuration.
+
+The Antigravity adapter uses the [official installer](https://antigravity.google/docs/cli/install),
+runs the `agy` binary, and pre-seeds its settings, keybindings, and MCP configuration
+under the [official configuration directory](https://antigravity.google/docs/cli/settings).
+Run `agy` inside a newly created container once to complete authentication.
 
 Disabling a client never deletes its host credentials, configuration, or
 history. `sandbox show` lists only currently selected tools, even when disabled
@@ -104,11 +109,11 @@ If in-place recovery fails, the command stops before entering the container or s
 
 Tmpfs runtime data is deliberately ephemeral. Codex databases, logs, sessions, and other non-seeded files under `/home/devuser/.codex` cannot be recovered after tmpfs loss. Declared seed entries such as `config.toml` and `model-catalogs` are reconstructable from their read-only staging mounts; bind-mounted worktrees, credentials, shell configuration, and share directories remain host-persistent.
 
-`ai sandbox ls` keeps a compact view: it lists only the Containers table for the current project (the `#` row number, the `SHORT` task short id, plus names, status, and branch). It no longer prints the worktree list or each tool's state paths. To inspect those details for one sandbox, use `ai sandbox show <branch | TASK-id | N>`: it prints that branch's worktree path and the per-tool state paths (Claude Code, Codex, Gemini CLI, OpenCode). The argument follows the same contract as `ai sandbox exec` and `ai sandbox start`, so `ai sandbox show 11` resolves the active task short id via `.agents/workspace/active/.short-ids.json`.
+`ai sandbox ls` keeps a compact view: it lists only the Containers table for the current project (the `#` row number, the `SHORT` task short id, plus names, status, and branch). It no longer prints the worktree list or each tool's state paths. To inspect those details for one sandbox, use `ai sandbox show <branch | TASK-id | N>`: it prints that branch's worktree path and the per-tool state paths (Claude Code, Codex, Antigravity CLI, OpenCode). The argument follows the same contract as `ai sandbox exec` and `ai sandbox start`, so `ai sandbox show 11` resolves the active task short id via `.agents/workspace/active/.short-ids.json`.
 
 Breaking migration for the next major version: task short ids now use bare digits only. Replace `#NN` with `NN`; quoted `#NN` input is rejected.
 
-On macOS, interactive `ai sandbox exec <branch>` sessions can bridge image paste into the sandbox. When you press `Ctrl+V` and the host clipboard currently holds an image, agent-infra reads the image from the host clipboard, writes a PNG under `~/.agent-infra/clipboard/`, and injects the container path as bracketed paste so Claude Code, Codex, Gemini CLI, and OpenCode can attach it. The host clipboard is only read, never rewritten. The bridge is best-effort: existing sandboxes must be rebuilt to receive the `/clipboard` mount, and if the optional pty dependency or clipboard probe is unavailable the session falls back to the normal interactive path. Set `AI_SANDBOX_NO_CLIPBOARD_BRIDGE=1` to skip the bridge and enter the normal interactive path directly when diagnosing mouse, scrolling, or other input issues.
+On macOS, interactive `ai sandbox exec <branch>` sessions can bridge image paste into the sandbox. When you press `Ctrl+V` and the host clipboard currently holds an image, agent-infra reads the image from the host clipboard, writes a PNG under `~/.agent-infra/clipboard/`, and injects the container path as bracketed paste so Claude Code, Codex, Antigravity CLI, and OpenCode can attach it. The host clipboard is only read, never rewritten. The bridge is best-effort: existing sandboxes must be rebuilt to receive the `/clipboard` mount, and if the optional pty dependency or clipboard probe is unavailable the session falls back to the normal interactive path. Set `AI_SANDBOX_NO_CLIPBOARD_BRIDGE=1` to skip the bridge and enter the normal interactive path directly when diagnosing mouse, scrolling, or other input issues.
 
 When you run the sandbox over SSH, use `ai cp <ssh-alias>` on the Mac in front of you to push the local PNG clipboard image to a remote Mac or headless Linux host. Copy an image with Cmd+C, run `ai cp mini`, then return to the existing SSH session and press `Ctrl+V`. Darwin keeps the NSPasteboard path; Linux requires a compatible agent-infra receiver and stores the image under `~/.agent-infra/clipboard/` for the sandbox's read-only `/clipboard` mount. The command uses non-interactive ssh/scp with key-based authentication.
 

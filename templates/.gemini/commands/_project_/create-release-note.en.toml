@@ -1,8 +1,0 @@
-description = "Generate release notes from PRs and commits"
-prompt = """
-Generate release note: {{args}}
-
-Read and execute the create-release-note skill from `.agents/skills/create-release-note/SKILL.md`.
-
-Follow all steps defined in the skill exactly.
-"""

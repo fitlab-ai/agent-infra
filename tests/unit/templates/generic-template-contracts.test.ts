@@ -142,10 +142,10 @@ function milestoneActions(stdout: string): { created: string[]; skipped: string[
   };
 }
 
-test("Gemini invocation derives its namespace from the project placeholder", () => {
+test("Antigravity invocation uses its native workspace skill command", () => {
   assert.equal(
-    getAgentClientAdapter("gemini-cli").invocation,
-    "/${projectName}:${skillName}"
+    getAgentClientAdapter("antigravity-cli").invocation,
+    "/${skillName}"
   );
 });
 

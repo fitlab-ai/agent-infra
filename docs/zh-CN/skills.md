@@ -11,7 +11,7 @@ agent-infra 提供 **丰富的内置 AI skills**。它们按使用场景分组�
 - **结构化产物** — 每个步骤都输出模板化的文档（`analysis.md`、`review-analysis.md`、`plan.md`、`review-plan.md`、`code.md`、`review-code.md`），格式统一，而非自由发挥的散文
 - **多轮版本化** — 需求变了？再执行一次 `analyze-task` 会生成 `analysis-r2.md`，完整修订历史自动保留
 - **分级审查机制** — `review-code` 按 Blocker / Major / Minor 分类问题，附带文件路径和修复建议，而非含糊的"看着没问题"
-- **跨工具状态延续** — `task.md` 记录了谁在什么时间做了什么；Claude 分析、Codex 实现、Gemini 审查——上下文无缝衔接
+- **跨工具状态延续** — `task.md` 记录了谁在什么时间做了什么；Claude 分析、Codex 实现、Antigravity 审查——上下文无缝衔接
 - **审计轨迹与联合署名** — 每个步骤自动追加 Activity Log；最终提交包含所有参与 AI 的 `Co-Authored-By` 署名
 
 ## 任务生命周期

@@ -2,14 +2,14 @@ import { AGENT_CLIENT_IDS } from '../types.ts';
 import type { AgentClientAdapter } from '../adapter.ts';
 import { claudeCodeAdapter } from './claude-code.ts';
 import { codexAdapter } from './codex.ts';
-import { geminiCliAdapter } from './gemini-cli.ts';
+import { antigravityCliAdapter } from './antigravity-cli.ts';
 import { opencodeAdapter } from './opencode.ts';
 
 const adaptersById = new Map(
   [
     claudeCodeAdapter,
     codexAdapter,
-    geminiCliAdapter,
+    antigravityCliAdapter,
     opencodeAdapter
   ].map((adapter) => [adapter.id, adapter])
 );

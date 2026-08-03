@@ -13,7 +13,7 @@ steps:
     description: 复现缺陷，识别根本原因，确定修复范围。
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - 理解缺陷报告和预期行为
       - 复现缺陷（如果可能）
@@ -38,7 +38,7 @@ steps:
     description: 审查缺陷分析是否复现充分、根因明确且修复范围清晰。
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - 验证缺陷复现或不可复现说明
       - 检查根因推导和影响范围
@@ -92,7 +92,7 @@ steps:
     description: 审查修复方案是否覆盖根因、测试充分且副作用可控。
     recommended_agents:
       - claude
-      - gemini
+      - antigravity
     tasks:
       - 验证方案覆盖已批准的根因分析
       - 检查回归测试策略和潜在副作用

@@ -7,6 +7,7 @@ import test from 'node:test';
 import { serializeAgentClients } from '../../../lib/agent-clients/config.ts';
 import { planAgentClientReconciliation } from '../../../lib/agent-clients/reconcile.ts';
 import { AGENT_CLIENT_IDS } from '../../../lib/agent-clients/types.ts';
+import { getAgentClientAdapter } from '../../../lib/agent-clients/registry.ts';
 import type { AgentClientState } from '../../../lib/agent-clients/types.ts';
 import { filePath } from '../../helpers.ts';
 import { loadFreshEsm } from '../../helpers/esm.ts';
@@ -60,7 +61,7 @@ test('all 16 project integration combinations stay equivalent across core and st
         plan.seedOperations
           .filter((entry) => entry.kind === 'write')
           .map((entry) => entry.clientId),
-        enabled.filter((id) => id !== 'codex'),
+        enabled.filter((id) => getAgentClientAdapter(id).project.seedCommands.length > 0),
         `seed plan mask=${mask}`
       );
 

@@ -53,7 +53,6 @@ type SandboxCreateModule = {
   ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string): void;
   ensureCodexWorkspaceTrust(toolDir: string): void;
   ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: string): void;
-  ensureGeminiWorkspaceTrust(toolDir: string): void;
   buildImage(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): void;
   commandErrorMessage(error: unknown): string;
   hostHasGpgKeys(home: string, execFn?: ExecFn): boolean;

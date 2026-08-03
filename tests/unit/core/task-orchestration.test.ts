@@ -131,7 +131,7 @@ test('prepare fails closed for clients without orchestration capability', () => 
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   const result = prepareOrchestrationDelegation('TASK-20260101-000001', {
-    client: 'gemini-cli'
+    client: 'antigravity-cli'
   }, { repoRoot: f.root, captureWorkspace: snapshot });
   assert.equal(result.error?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
   assert.equal(result.changed, false);
