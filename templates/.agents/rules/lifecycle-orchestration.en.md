@@ -19,4 +19,3 @@ Prefer a reviewer model different from the preceding executor. Same-model fallba
 ## Stable Pause Conditions
 
 Human decisions, manual validation, handshake or step limits, permissions/network failures, worktree conflicts, unsupported client capability, and unknown hook schemas are persisted as pauses. The orchestrator must not ask mid-flow or degrade to same-context self-review.
-
