@@ -456,6 +456,21 @@ test("syncTemplates migrates Gemini client state and retires project command ass
         ejected: []
       }
     });
+    writeFile(
+      projectRoot,
+      ".gemini/commands/demo/test.toml",
+      [
+        'description = "Run the full project test workflow"',
+        'prompt = """',
+        'Read and execute the test skill from `.agents/skills/test/SKILL.md`.',
+        '',
+        'Follow all steps defined in the skill exactly.',
+        '"""',
+        ''
+      ].join("\n")
+    );
+    writeFile(projectRoot, ".gemini/commands/demo/custom.toml", "user content\n");
+    writeFile(projectRoot, ".gemini/settings.json", '{"theme":"custom"}\n');
 
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const report = syncTemplates(projectRoot, templateRoot);
@@ -466,6 +481,12 @@ test("syncTemplates migrates Gemini client state and retires project command ass
     assert.ok(!cfg.agentClients.some((entry: { id: string }) => entry.id === "gemini-cli"));
     assert.ok(!cfg.files.managed.includes(".gemini/commands/"));
     assert.ok(!cfg.files.merged.includes(".gemini/settings.json"));
+    assert.equal(fs.existsSync(path.join(projectRoot, ".gemini/commands/demo/test.toml")), false);
+    assert.equal(fs.existsSync(path.join(projectRoot, ".gemini/commands/demo/custom.toml")), true);
+    assert.equal(fs.existsSync(path.join(projectRoot, ".gemini/settings.json")), true);
+    assert.ok(report.managed.protected.some(
+      (entry: { target: string }) => entry.target === ".gemini/commands/demo/custom.toml"
+    ));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

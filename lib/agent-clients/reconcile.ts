@@ -7,6 +7,7 @@ import { normalizeAgentClients, serializeAgentClients } from './config.ts';
 import { normalizeCustomTUIs } from './custom-tuis.ts';
 import { renderNextStepCommands } from './next-steps.ts';
 import { planAgentClientProjectAssets } from './project-assets.ts';
+import { isRetiredGeminiCommand } from './retired-gemini.ts';
 import {
   listAgentClientAdapters,
   listEnabledAgentClientAdapters
@@ -29,6 +30,12 @@ type AgentClientSeedOperation = Readonly<{
   reason?: 'user-modified' | 'unknown-origin';
 }>;
 
+type RetiredAssetOperation = Readonly<{
+  kind: 'remove' | 'protect';
+  target: string;
+  reason?: 'user-modified' | 'unknown-origin';
+}>;
+
 type WorkflowDiagnostic = AgentClientDiagnostic | Readonly<{ code: string; path: string }>;
 
 type AgentClientWorkflowPlan = Readonly<{
@@ -38,6 +45,7 @@ type AgentClientWorkflowPlan = Readonly<{
   nextConfig: Record<string, unknown>;
   projectAssets: AgentClientProjectAssetPlan;
   seedOperations: readonly AgentClientSeedOperation[];
+  retiredOperations: readonly RetiredAssetOperation[];
   nextSteps: readonly NextStepCommand[];
   diagnostics: readonly WorkflowDiagnostic[];
   changed: boolean;
@@ -119,6 +127,22 @@ function renderSeed(content: string, config: Record<string, unknown>): string {
     .replaceAll('{{org}}', String(config.org ?? ''));
 }
 
+function filesForAsset(projectRoot: string, entry: string): string[] {
+  const root = path.join(projectRoot, entry);
+  if (!fs.existsSync(root)) return [];
+  if (!entry.endsWith('/')) return fs.statSync(root).isFile() ? [entry] : [];
+  const files: string[] = [];
+  const visit = (directory: string): void => {
+    for (const child of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.join(directory, child.name);
+      if (child.isDirectory()) visit(target);
+      else if (child.isFile()) files.push(path.relative(projectRoot, target).replaceAll('\\', '/'));
+    }
+  };
+  visit(root);
+  return files;
+}
+
 function planAgentClientReconciliation(input: Readonly<{
   config: Record<string, unknown>;
   mutation: AgentClientWorkflowMutation;
@@ -145,7 +169,8 @@ function planAgentClientReconciliation(input: Readonly<{
     sharedDefaults,
     enabledAdapters: listEnabledAgentClientAdapters(desired),
     allAdapters: adapters,
-    retiredAssets: ['.gemini/commands/', '.gemini/settings.json']
+    retiredManaged: ['.gemini/commands/'],
+    retiredMerged: ['.gemini/settings.json']
   });
 
   const nextConfig = structuredClone(input.config);
@@ -172,7 +197,32 @@ function planAgentClientReconciliation(input: Readonly<{
     managedBaselines: baselines
   };
 
+  const retiredOperations: RetiredAssetOperation[] = [];
   const projectName = String(input.config.project ?? '');
+  for (const entry of projectAssets.retiredManaged) {
+    const legacyManaged = current.managed.includes(entry);
+    const hasBaseline = Object.keys(baselines).some((target) => target.startsWith(entry));
+    if (!legacyManaged && !hasBaseline) continue;
+    for (const target of filesForAsset(input.projectRoot, entry)) {
+      const content = fs.readFileSync(path.join(input.projectRoot, target));
+      const localHash = hash(content);
+      const baseline = trustedBaseline(baselines[target]);
+      if (
+        (baseline !== null && localHash === baseline)
+        || (legacyManaged && isRetiredGeminiCommand(target, content, projectName))
+      ) {
+        retiredOperations.push({ kind: 'remove', target });
+      } else {
+        retiredOperations.push({
+          kind: 'protect',
+          target,
+          reason: baseline ? 'user-modified' : 'unknown-origin'
+        });
+      }
+      delete baselines[target];
+    }
+  }
+
   const language = input.language === 'zh-CN' ? 'zh-CN' : 'en';
   const seedOperations: AgentClientSeedOperation[] = [];
   for (const adapter of adapters) {
@@ -237,7 +287,9 @@ function planAgentClientReconciliation(input: Readonly<{
   const actionableSeed = seedOperations.some((operation) =>
     operation.kind === 'write' || operation.kind === 'remove'
   );
-  const changed = JSON.stringify(nextConfig) !== JSON.stringify(input.config) || actionableSeed;
+  const changed = JSON.stringify(nextConfig) !== JSON.stringify(input.config)
+    || actionableSeed
+    || retiredOperations.some((operation) => operation.kind === 'remove');
 
   return Object.freeze({
     source: normalized.source,
@@ -246,6 +298,7 @@ function planAgentClientReconciliation(input: Readonly<{
     nextConfig,
     projectAssets,
     seedOperations: Object.freeze(seedOperations),
+    retiredOperations: Object.freeze(retiredOperations),
     nextSteps,
     diagnostics: Object.freeze([...normalized.diagnostics, ...custom.diagnostics]),
     changed,
@@ -265,6 +318,16 @@ function applyAgentClientReconciliation(
   const applied: string[] = [];
   const protectedTargets: string[] = [];
   const unchanged: string[] = [];
+
+  for (const operation of plan.retiredOperations) {
+    const target = path.join(plan.projectRoot, operation.target);
+    if (operation.kind === 'remove') {
+      if (fs.existsSync(target)) unlinkSync(target);
+      applied.push(operation.target);
+    } else {
+      protectedTargets.push(operation.target);
+    }
+  }
 
   for (const operation of plan.seedOperations) {
     const target = path.join(plan.projectRoot, operation.target);

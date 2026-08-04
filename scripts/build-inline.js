@@ -29,6 +29,7 @@ const targetPaths = [
 const DEFAULTS_EXPR = /const DEFAULTS = JSON\.parse\(\s*fs\.readFileSync\(new URL\('..\/lib\/defaults\.json', import\.meta\.url\), 'utf8'\)\s*\);/m;
 const AGENT_CLIENT_MANIFEST_EXPR = /const AGENT_CLIENT_MANIFEST = JSON\.parse\('__AGENT_CLIENT_MANIFEST__'\);/m;
 const CUSTOM_TUI_CONTRACT_EXPR = /const CUSTOM_TUI_CONTRACT = JSON\.parse\('__CUSTOM_TUI_CONTRACT__'\);/m;
+const RETIRED_GEMINI_COMMAND_HASHES_EXPR = /const RETIRED_GEMINI_COMMAND_HASHES = JSON\.parse\('__RETIRED_GEMINI_COMMAND_HASHES__'\);/m;
 
 function requireSingleExpression(source, expression, name) {
   const matches = source.match(new RegExp(expression.source, 'gm')) ?? [];
@@ -99,6 +100,9 @@ function compileRegistry() {
 async function buildInlineContent() {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const defaults = JSON.parse(fs.readFileSync(path.join(rootDir, 'lib', 'defaults.json'), 'utf8'));
+  const retiredGeminiCommandHashes = JSON.parse(
+    fs.readFileSync(path.join(rootDir, 'lib', 'agent-clients', 'retired-gemini-command-hashes.json'), 'utf8')
+  );
   const registryModule = await import(
     pathToFileURL(path.join(rootDir, 'dist', 'lib', 'agent-clients', 'registry.js')).href
   );
@@ -111,6 +115,11 @@ async function buildInlineContent() {
   requireSingleExpression(source, DEFAULTS_EXPR, 'DEFAULTS');
   requireSingleExpression(source, AGENT_CLIENT_MANIFEST_EXPR, 'AGENT_CLIENT_MANIFEST');
   requireSingleExpression(source, CUSTOM_TUI_CONTRACT_EXPR, 'CUSTOM_TUI_CONTRACT');
+  requireSingleExpression(
+    source,
+    RETIRED_GEMINI_COMMAND_HASHES_EXPR,
+    'RETIRED_GEMINI_COMMAND_HASHES'
+  );
   validateManifest(manifest, registryModule.AGENT_CLIENT_REGISTRY);
   validateCustomTUIContract(customTUIContract);
 
@@ -126,6 +135,10 @@ async function buildInlineContent() {
     .replace(
       CUSTOM_TUI_CONTRACT_EXPR,
       () => `const CUSTOM_TUI_CONTRACT = ${JSON.stringify(customTUIContract, null, 2)};`
+    )
+    .replace(
+      RETIRED_GEMINI_COMMAND_HASHES_EXPR,
+      () => `const RETIRED_GEMINI_COMMAND_HASHES = ${JSON.stringify(retiredGeminiCommandHashes, null, 2)};`
     )
     .replace(
       "from '../.agents/scripts/lib/agent-infra-package.js'",

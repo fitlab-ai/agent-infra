@@ -98,6 +98,15 @@ test('TUI selection uses cli override, per-skill default, command default, then 
   assert.equal(selectTui('plan-task', { command: {} }), 'codex');
 });
 
+test('TUI selection migrates the legacy Gemini short ID on every input path', () => {
+  assert.equal(selectTui('code-task', { cliTui: 'gemini', command: {} }), 'antigravity');
+  assert.equal(
+    selectTui('review-code', { command: { skillTuiDefaults: { 'review-code': 'gemini' } } }),
+    'antigravity'
+  );
+  assert.equal(selectTui('plan-task', { command: { defaultTui: 'gemini' } }), 'antigravity');
+});
+
 test('renderPrompt uses each TUI prompt prefix', () => {
   assert.equal(renderPrompt({ tui: 'claude', skill: 'code-task', args: ['#7'] }), '/code-task #7');
   assert.equal(renderPrompt({ tui: 'opencode', skill: 'code-task', args: ['#7'] }), '/code-task #7');

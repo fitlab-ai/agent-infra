@@ -4,27 +4,33 @@ import { getAgentClientAdapter } from '../agent-clients/registry.ts';
 export type TuiName = 'claude' | 'codex' | 'antigravity' | 'opencode';
 
 const TUI_NAMES = new Set(['claude', 'codex', 'antigravity', 'opencode']);
+const LEGACY_TUI_NAMES: Readonly<Record<string, TuiName>> = { gemini: 'antigravity' };
 
 export type CommandConfig = {
   defaultTui?: unknown;
   skillTuiDefaults?: unknown;
 };
 
-function isTuiName(value: unknown): value is TuiName {
-  return typeof value === 'string' && TUI_NAMES.has(value);
+function normalizeTuiName(value: unknown): TuiName | undefined {
+  if (typeof value !== 'string') return undefined;
+  if (TUI_NAMES.has(value)) return value as TuiName;
+  return LEGACY_TUI_NAMES[value];
 }
 
 export function selectTui(
   skill: string,
   options: { cliTui?: string | null; command?: CommandConfig }
 ): TuiName {
-  if (isTuiName(options.cliTui)) return options.cliTui;
+  const cliTui = normalizeTuiName(options.cliTui);
+  if (cliTui) return cliTui;
   const defaults = options.command?.skillTuiDefaults;
   if (defaults && typeof defaults === 'object' && !Array.isArray(defaults)) {
     const value = (defaults as Record<string, unknown>)[skill];
-    if (isTuiName(value)) return value;
+    const skillTui = normalizeTuiName(value);
+    if (skillTui) return skillTui;
   }
-  if (isTuiName(options.command?.defaultTui)) return options.command.defaultTui;
+  const defaultTui = normalizeTuiName(options.command?.defaultTui);
+  if (defaultTui) return defaultTui;
   return 'codex';
 }
 

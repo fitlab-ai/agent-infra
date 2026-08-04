@@ -60,7 +60,8 @@ test('project asset planning drops explicitly retired Gemini assets', () => {
     sharedDefaults,
     enabledAdapters: adapters,
     allAdapters: adapters,
-    retiredAssets: ['.gemini/commands/', '.gemini/settings.json']
+    retiredManaged: ['.gemini/commands/'],
+    retiredMerged: ['.gemini/settings.json']
   });
 
   assert.equal(plan.registry.managed.includes('.gemini/commands/'), false);
@@ -111,7 +112,8 @@ test('project asset planning returns deeply frozen stable output', () => {
     plan.enabledManaged,
     plan.enabledMerged,
     plan.enabledEjected,
-    plan.disabledManaged
+    plan.disabledManaged,
+    plan.retiredManaged
   ]) {
     assert.ok(Object.isFrozen(values));
   }
