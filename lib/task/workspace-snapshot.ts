@@ -12,15 +12,18 @@ function git(repoRoot: string, indexFile: string | null, args: string[]): string
   return result.stdout;
 }
 
-function captureWorkspaceSnapshot(repoRoot: string): string {
+function captureWorkspaceSnapshot(repoRoot: string, taskId: string | null): string {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-orchestration-index-'));
   const indexFile = path.join(tempDir, 'index');
   try {
     git(repoRoot, indexFile, ['read-tree', 'HEAD']);
     git(repoRoot, indexFile, ['add', '-A', '--', ':/']);
-    const workspace = path.join(repoRoot, '.agents', 'workspace', 'active');
+    const workspaceRelative = taskId
+      ? `.agents/workspace/active/${taskId}`
+      : '.agents/workspace/active';
+    const workspace = path.join(repoRoot, workspaceRelative);
     if (fs.existsSync(workspace)) {
-      git(repoRoot, indexFile, ['add', '-f', '--', '.agents/workspace/active']);
+      git(repoRoot, indexFile, ['add', '-f', '--', workspaceRelative]);
     }
     return git(repoRoot, indexFile, ['write-tree']).trim();
   } finally {

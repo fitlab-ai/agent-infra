@@ -23,6 +23,7 @@ type DelegationReceipt = Readonly<{
   spawnMode: string | null;
   agent: string | null;
   status: DelegationStatus;
+  workspaceSnapshotScope?: 'task';
   beforeFingerprint: string;
   afterFingerprint: string | null;
   changedPaths: readonly string[];

@@ -131,6 +131,7 @@ test('commit authorization is issued at eligible prepare and the receipt reaches
     client: 'claude-code'
   }, { repoRoot: f.root, id: () => 'receipt-1', now, captureWorkspace: snapshot });
   assert.equal(prepared.next?.stage, 'commit');
+  assert.equal(prepared.run?.pendingDelegation?.workspaceSnapshotScope, 'task');
   assert.equal(prepared.run?.commitAuthorization.issuedAt, '2026-01-01T00:00:00.000Z');
 
   assert.equal(activateOrchestrationDelegation('TASK-20260101-000001', {
@@ -205,10 +206,15 @@ test('repository pending guard includes paused runs that retain a delegation', (
 
 test('native stop derives the workspace delta before sealing the unique delegation', () => {
   const f = fixture('requirement-analysis-review');
+  const capturedScopes: Array<string | null> = [];
+  const captureWorkspace = (_repoRoot: string, taskId: string | null) => {
+    capturedScopes.push(taskId);
+    return capturedScopes.length === 1 ? 'before-tree' : 'after-tree';
+  };
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', { client: 'claude-code' }, {
-    repoRoot: f.root, captureWorkspace: snapshot
+    repoRoot: f.root, captureWorkspace
   });
   activateMatchingOrchestrationDelegation('claude-code', {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-stop',
@@ -222,7 +228,7 @@ test('native stop derives the workspace delta before sealing the unique delegati
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-stop'
   }, {
     repoRoot: f.root,
-    captureWorkspace: () => 'after-tree',
+    captureWorkspace,
     diffWorkspace: () => [
       '.agents/workspace/active/TASK-20260101-000001/review-analysis.md',
       '.agents/workspace/active/TASK-20260101-000001/task.md',
@@ -233,4 +239,70 @@ test('native stop derives the workspace delta before sealing the unique delegati
   assert.equal(stopped.status, 'running');
   assert.equal(stopped.run?.pendingDelegation?.status, 'sealed');
   assert.equal(stopped.run?.pendingDelegation?.afterFingerprint, 'after-tree');
+  assert.deepEqual(capturedScopes, ['TASK-20260101-000001', 'TASK-20260101-000001']);
+});
+
+test('native stop preserves legacy snapshot scope for an old pending receipt', () => {
+  const f = fixture('requirement-analysis-review');
+  const capturedScopes: Array<string | null> = [];
+  const captureWorkspace = (_repoRoot: string, taskId: string | null) => {
+    capturedScopes.push(taskId);
+    return capturedScopes.length === 1 ? 'before-tree' : 'after-tree';
+  };
+  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  prepareOrchestrationDelegation('TASK-20260101-000001', { client: 'claude-code' }, {
+    repoRoot: f.root, captureWorkspace
+  });
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+  delete persisted.pendingDelegation.workspaceSnapshotScope;
+  fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);
+  activateMatchingOrchestrationDelegation('claude-code', {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-legacy',
+    parentId: 'parent-session', spawnMode: 'fresh'
+  }, { repoRoot: f.root });
+  completeOrchestrationStage('TASK-20260101-000001', {
+    stage: 'review-analysis', round: 1, artifact: 'review-analysis.md', agent: 'claude-code'
+  }, { repoRoot: f.root });
+
+  const stopped = sealMatchingOrchestrationDelegation('claude-code', {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-legacy'
+  }, {
+    repoRoot: f.root,
+    captureWorkspace,
+    diffWorkspace: () => ['.agents/workspace/active/TASK-20260101-000001/review-analysis.md']
+  });
+
+  assert.equal(stopped.status, 'running');
+  assert.equal(stopped.run?.pendingDelegation?.status, 'sealed');
+  assert.deepEqual(capturedScopes, ['TASK-20260101-000001', null]);
+});
+
+test('reviewer snapshot shape mismatch fails closed to a recoverable pause', () => {
+  const f = fixture('requirement-analysis-review');
+  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  prepareOrchestrationDelegation('TASK-20260101-000001', { client: 'claude-code' }, {
+    repoRoot: f.root, captureWorkspace: snapshot
+  });
+  activateMatchingOrchestrationDelegation('claude-code', {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-rollback',
+    parentId: 'parent-session', spawnMode: 'fresh'
+  }, { repoRoot: f.root });
+  completeOrchestrationStage('TASK-20260101-000001', {
+    stage: 'review-analysis', round: 1, artifact: 'review-analysis.md', agent: 'claude-code'
+  }, { repoRoot: f.root });
+
+  const stopped = sealMatchingOrchestrationDelegation('claude-code', {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-rollback'
+  }, {
+    repoRoot: f.root,
+    captureWorkspace: () => 'legacy-after-tree',
+    diffWorkspace: () => ['.agents/workspace/active/TASK-20260101-000002/analysis.md']
+  });
+
+  assert.equal(stopped.status, 'paused');
+  assert.equal(stopped.run?.pause?.code, 'DELEGATION_REVIEWER_WRITE_FORBIDDEN');
+  assert.equal(stopped.run?.pause?.recoverable, true);
 });

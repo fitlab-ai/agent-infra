@@ -62,5 +62,6 @@ test('task-orchestration prepare derives the workspace baseline without model-su
   assert.equal(prepared.status, 0, prepared.stderr);
   const result = JSON.parse(prepared.stdout);
   assert.equal(result.run.pendingDelegation.parentId, null);
+  assert.equal(result.run.pendingDelegation.workspaceSnapshotScope, 'task');
   assert.match(result.run.pendingDelegation.beforeFingerprint, /^[0-9a-f]{40,64}$/);
 });

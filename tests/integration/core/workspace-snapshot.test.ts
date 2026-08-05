@@ -12,7 +12,7 @@ function git(root: string, args: string[]): void {
   assert.equal(result.status, 0, result.stderr);
 }
 
-test('workspace snapshots include tracked files and ignored active task artifacts', () => {
+test('task-scoped snapshots isolate ignored active tasks while retaining Git-visible changes', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-snapshot-'));
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
@@ -21,17 +21,70 @@ test('workspace snapshots include tracked files and ignored active task artifact
   fs.writeFileSync(path.join(root, 'source.ts'), 'before\n');
   git(root, ['add', '.gitignore', 'source.ts']);
   git(root, ['commit', '-qm', 'baseline']);
-  const taskDir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
-  fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'review-code.md'), 'before\n');
+  const taskA = 'TASK-20260101-000001';
+  const taskB = 'TASK-20260101-000002';
+  const taskADir = path.join(root, '.agents', 'workspace', 'active', taskA);
+  const taskBDir = path.join(root, '.agents', 'workspace', 'active', taskB);
+  fs.mkdirSync(taskADir, { recursive: true });
+  fs.mkdirSync(taskBDir, { recursive: true });
+  fs.writeFileSync(path.join(taskADir, 'review-code.md'), 'before\n');
+  fs.writeFileSync(path.join(taskBDir, 'analysis.md'), 'before\n');
 
-  const before = captureWorkspaceSnapshot(root);
+  const before = captureWorkspaceSnapshot(root, taskA);
   fs.writeFileSync(path.join(root, 'source.ts'), 'after\n');
-  fs.writeFileSync(path.join(taskDir, 'review-code.md'), 'after\n');
-  const after = captureWorkspaceSnapshot(root);
+  fs.writeFileSync(path.join(taskADir, 'review-code.md'), 'after\n');
+  fs.writeFileSync(path.join(taskBDir, 'analysis.md'), 'after\n');
+  const after = captureWorkspaceSnapshot(root, taskA);
 
   assert.deepEqual(diffWorkspaceSnapshots(root, before, after), [
     '.agents/workspace/active/TASK-20260101-000001/review-code.md',
     'source.ts'
+  ]);
+});
+
+test('legacy snapshots retain repository-wide active task coverage', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-snapshot-'));
+  git(root, ['init', '-q']);
+  git(root, ['config', 'user.name', 'Test']);
+  git(root, ['config', 'user.email', 'test@example.com']);
+  fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
+  git(root, ['add', '.gitignore']);
+  git(root, ['commit', '-qm', 'baseline']);
+  const taskADir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
+  const taskBDir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000002');
+  fs.mkdirSync(taskADir, { recursive: true });
+  fs.mkdirSync(taskBDir, { recursive: true });
+  fs.writeFileSync(path.join(taskADir, 'analysis.md'), 'before\n');
+  fs.writeFileSync(path.join(taskBDir, 'analysis.md'), 'before\n');
+
+  const before = captureWorkspaceSnapshot(root, null);
+  fs.writeFileSync(path.join(taskBDir, 'analysis.md'), 'after\n');
+  const after = captureWorkspaceSnapshot(root, null);
+
+  assert.deepEqual(diffWorkspaceSnapshots(root, before, after), [
+    '.agents/workspace/active/TASK-20260101-000002/analysis.md'
+  ]);
+});
+
+test('mixing task-scoped before with legacy after exposes the incompatible tree shape', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-snapshot-'));
+  git(root, ['init', '-q']);
+  git(root, ['config', 'user.name', 'Test']);
+  git(root, ['config', 'user.email', 'test@example.com']);
+  fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
+  git(root, ['add', '.gitignore']);
+  git(root, ['commit', '-qm', 'baseline']);
+  const taskADir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
+  const taskBDir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000002');
+  fs.mkdirSync(taskADir, { recursive: true });
+  fs.mkdirSync(taskBDir, { recursive: true });
+  fs.writeFileSync(path.join(taskADir, 'analysis.md'), 'current task\n');
+  fs.writeFileSync(path.join(taskBDir, 'analysis.md'), 'other task\n');
+
+  const taskScopedBefore = captureWorkspaceSnapshot(root, 'TASK-20260101-000001');
+  const legacyAfter = captureWorkspaceSnapshot(root, null);
+
+  assert.deepEqual(diffWorkspaceSnapshots(root, taskScopedBefore, legacyAfter), [
+    '.agents/workspace/active/TASK-20260101-000002/analysis.md'
   ]);
 });

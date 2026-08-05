@@ -57,7 +57,7 @@ type OrchestrationOptions = {
   id?: () => string;
   now?: () => string;
   maxSteps?: number;
-  captureWorkspace?: (repoRoot: string) => string;
+  captureWorkspace?: (repoRoot: string, taskId: string | null) => string;
   diffWorkspace?: (repoRoot: string, before: string, after: string) => string[];
 };
 
@@ -269,7 +269,7 @@ function prepareOrchestrationDelegation(
   const next = routed.next;
   let beforeFingerprint: string;
   try {
-    beforeFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)(resolved.repoRoot);
+    beforeFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)(resolved.repoRoot, resolved.taskId);
   } catch (error) {
     return failed('ORCHESTRATION_SNAPSHOT_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
   }
@@ -282,6 +282,7 @@ function prepareOrchestrationDelegation(
     artifact: next.artifact,
     client: input.client,
     requestedModel: input.requestedModel ?? null,
+    workspaceSnapshotScope: 'task',
     beforeFingerprint
   }, { id: options.id, now: options.now });
   const updated = withUpdatedRun(run, {
@@ -364,7 +365,8 @@ function sealMatchingOrchestrationDelegation(
   }
   const repoRoot = options.repoRoot ?? process.cwd();
   try {
-    const afterFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)(repoRoot);
+    const snapshotTaskId = receipt.workspaceSnapshotScope === 'task' ? receipt.taskId : null;
+    const afterFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)(repoRoot, snapshotTaskId);
     const changedPaths = (options.diffWorkspace ?? diffWorkspaceSnapshots)(repoRoot, receipt.beforeFingerprint, afterFingerprint);
     return sealOrchestrationDelegation(matched.taskId, {
       childId: event.childId,
