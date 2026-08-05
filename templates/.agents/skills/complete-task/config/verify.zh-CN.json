@@ -25,6 +25,7 @@
       "require_all_checked": true
     },
     "review-ledger": {},
+    "manual-validation": {},
     "post-review-commit": {},
     "platform-sync-preflight": {
       "when": "issue_number_exists",

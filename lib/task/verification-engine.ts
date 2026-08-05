@@ -114,6 +114,8 @@ function runCheck(type: any, context: any, shared: any): any {
       return checkCompletionChecklist(context);
     case "review-ledger":
       return checkReviewLedger(context);
+    case "manual-validation":
+      return checkManualValidation(context);
     case "review-summary":
       return checkReviewSummary(context);
     case "review-fact":
@@ -738,6 +740,75 @@ function checkReviewLedger({ taskDir, config }: any): any {
 
   const scopeLabel = stageScope ? ` for stages [${stageScope.join(", ")}]` : "";
   return passResult("review-ledger", `Disagreement ledger clean (${inScopeCount} in-scope entries terminal${scopeLabel})`);
+}
+
+function checkManualValidation({ taskDir }: any): any {
+  // 1. Latest review-code artifact; none -> pass (no review, check not applicable).
+  const review = findAuthoritativeReviewCodeArtifact(taskDir);
+  if (!review.ok) {
+    return passResult("manual-validation", "No review-code artifact; manual validation not applicable");
+  }
+  // 2. Parse the numeric manual-validation count; unparseable/null -> fail closed
+  //    (review-code.completed already enforces a numeric count on the normal path).
+  const parsed = parseReviewSummary(fs.readFileSync(review.path!, "utf8"));
+  if (!parsed.ok || parsed.summary.manualValidation === null) {
+    return failResult("manual-validation", "Latest review-code has no numeric manual-validation count");
+  }
+  // 3. Count 0 -> pass (no pending items to cover).
+  if (parsed.summary.manualValidation === 0) {
+    return passResult("manual-validation", "No pending manual validation items");
+  }
+  // 4. Highest-round manual-validation artifact; none -> fail (items pending,
+  //    run complete-manual-validation first). A falsy artifactFile goes through
+  //    pattern parsing; resolveArtifactPath only returns { ok, path }.
+  const resolved = resolveArtifactPath(taskDir, "manual-validation.md|manual-validation-r{N}.md", "");
+  if (!resolved.ok) {
+    return failResult(
+      "manual-validation",
+      `${parsed.summary.manualValidation} manual validation item(s) pending: run /complete-manual-validation`
+    );
+  }
+  // 5. The Activity Log must record the matching completion entry; the file name
+  //    is derived with path.basename (resolveArtifactPath does not return fileName).
+  const artifactName = path.basename(resolved.path);
+  const task = loadTask(taskDir);
+  if (!task.ok) return failResult("manual-validation", task.message);
+  const log = getSectionContent(task.content, ["活动日志", "Activity Log"]);
+  const completed = new RegExp(
+    `\\*\\*Complete Manual Validation\\*\\*[\\s\\S]*?Manual validation passed → ${escapeRegExp(artifactName)};`
+  );
+  if (!completed.test(log)) {
+    return failResult(
+      "manual-validation",
+      `Manual validation artifact exists but completion is not recorded for ${artifactName}: re-run /complete-manual-validation`
+    );
+  }
+  // 6. Timing correlation (PL-3 fix, PL-4 corrected): the completion entry must
+  //    sit AFTER the latest review-code round's completion entry in the
+  //    append-only Activity Log. indexOf is a literal search, so the artifactName
+  //    must NOT be passed through escapeRegExp here (that escapes '.' to '\.',
+  //    which indexOf never matches). Not reusing completed.exec().index: exec
+  //    anchors to the first '**Complete Manual Validation**' heading, which can
+  //    belong to an earlier round's entry and misorder the standard path.
+  const reviewDoneIndex = log.indexOf(`**Review Code (Round ${review.round})** by `);
+  const completedIndex = log.indexOf(`Manual validation passed → ${artifactName};`);
+  if (reviewDoneIndex === -1) {
+    // The latest review-code round's completion entry is missing entirely (abnormal
+    // state, e.g. a restored/historical task without a review-code.completed record).
+    // Re-running complete-manual-validation cannot restore it, so the remediation
+    // targets the review record itself. Fail closed either way.
+    return failResult(
+      "manual-validation",
+      `Latest review-code (round ${review.round}) completion entry is missing from the Activity Log (abnormal state): re-run review-code or restore the completion record`
+    );
+  }
+  if (completedIndex < reviewDoneIndex) {
+    return failResult(
+      "manual-validation",
+      `Latest review-code (round ${review.round}) came after the manual validation completion recorded for ${artifactName}: re-run /complete-manual-validation to cover new pending items`
+    );
+  }
+  return passResult("manual-validation", `Manual validation completed → ${artifactName}`);
 }
 
 function checkPostReviewCommit({ taskDir, config }: any): any {

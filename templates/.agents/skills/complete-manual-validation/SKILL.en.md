@@ -106,7 +106,7 @@ Report:
 - Artifact path
 - PR summary sync result
 - Current verification output
-- Suggested next step: continue with `commit` / `create-pr`, or enter the final review flow
+- Suggested next step: enter the final closing flow and run /complete-task {task-ref}
 
 Before rendering the final output, read `.agents/rules/next-step-output.md` and append `Completed at: YYYY-MM-DD HH:mm:ss` as the absolute last line.
 

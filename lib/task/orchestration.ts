@@ -221,9 +221,6 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
     if (!review.ok || review.summary.manualValidation === null) {
       return failed('ORCHESTRATION_REVIEW_INVALID', 'latest code review has no numeric manual-validation count', resolved.taskId);
     }
-    if (review.summary.manualValidation > 0) {
-      return failed('ORCHESTRATION_MANUAL_VALIDATION_PENDING', 'manual validation must be completed before commit', resolved.taskId);
-    }
     const rows = parseLedger(content);
     const ledgerError = validateLedgerRows(rows);
     if (ledgerError) return failed('ORCHESTRATION_LEDGER_INVALID', ledgerError.message, resolved.taskId);
