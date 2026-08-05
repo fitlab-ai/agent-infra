@@ -1,6 +1,9 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const MAX_INPUT_BYTES = 64 * 1024;
+const localInternalCli = fileURLToPath(new URL('../../dist/bin/internal-cli.js', import.meta.url));
 const clientIndex = process.argv.indexOf('--client');
 const client = clientIndex >= 0 ? process.argv[clientIndex + 1] : '';
 if (client !== 'claude-code') {
@@ -50,9 +53,12 @@ process.stdin.on('end', () => {
     );
   }
   try {
-    const output = execFileSync('agent-infra-internal', args, {
+    const useLocal = existsSync(localInternalCli);
+    const command = useLocal ? process.execPath : 'agent-infra-internal';
+    const commandArgs = useLocal ? [localInternalCli, ...args] : args;
+    const output = execFileSync(command, commandArgs, {
       encoding: 'utf8',
-      shell: process.platform === 'win32',
+      shell: !useLocal && process.platform === 'win32',
       stdio: ['ignore', 'pipe', 'pipe']
     });
     process.stdout.write(output);

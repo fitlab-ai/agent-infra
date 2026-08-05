@@ -10,8 +10,49 @@ import { envWithPrependedPath, writeNodeCommandShim } from '../../helpers.ts';
 const HOOK = path.resolve('.agents/hooks/lifecycle-delegation.js');
 const FIXTURES = path.resolve('tests/fixtures/lifecycle-hooks');
 
-function run(input: string, client = 'claude-code', env = process.env) {
-  return spawnSync('node', [HOOK, '--client', client], { cwd: path.resolve('.'), input, encoding: 'utf8', env });
+interface RunOptions {
+  client?: string;
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  hook?: string;
+}
+
+type LocalCliState = 'missing' | 'working' | 'broken';
+
+function run(input: string, options: RunOptions = {}) {
+  const {
+    client = 'claude-code',
+    cwd = path.resolve('.'),
+    env = process.env,
+    hook = HOOK
+  } = options;
+  return spawnSync('node', [hook, '--client', client], { cwd, input, encoding: 'utf8', env });
+}
+
+function createHookFixture(localCliState: LocalCliState) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-hook-'));
+  const repoDir = path.join(root, 'repo');
+  const hook = path.join(repoDir, '.agents', 'hooks', 'lifecycle-delegation.js');
+  const cwd = path.join(repoDir, 'nested');
+  const binDir = path.join(root, 'bin');
+  const pathCli = path.join(root, 'path-internal-cli.mjs');
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.mkdirSync(cwd, { recursive: true });
+  fs.copyFileSync(HOOK, hook);
+  fs.writeFileSync(path.join(repoDir, 'package.json'), '{"type":"module"}\n');
+  fs.writeFileSync(pathCli, "process.stdout.write(JSON.stringify({ source: 'path', args: process.argv.slice(2) }))\n");
+  writeNodeCommandShim(path.join(binDir, 'agent-infra-internal'), pathCli);
+
+  if (localCliState !== 'missing') {
+    const localCli = path.join(repoDir, 'dist', 'bin', 'internal-cli.js');
+    fs.mkdirSync(path.dirname(localCli), { recursive: true });
+    const localCliSource = localCliState === 'broken'
+      ? "process.stderr.write('Local lifecycle CLI failed\\n'); process.exit(23)\n"
+      : "process.stdout.write(JSON.stringify({ source: 'local', args: process.argv.slice(2) }))\n";
+    fs.writeFileSync(localCli, localCliSource);
+  }
+
+  return { cwd, env: envWithPrependedPath(process.env, binDir), hook };
 }
 
 test('lifecycle hook ignores unrelated subagents without touching orchestration state', () => {
@@ -24,41 +65,79 @@ test('lifecycle hook ignores unrelated subagents without touching orchestration 
   assert.equal(result.stdout, '');
 });
 
-test('lifecycle hook maps a native Claude start payload to automatic core correlation', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-hook-'));
-  const binDir = path.join(root, 'bin');
-  const shim = path.join(root, 'internal-cli.mjs');
-  fs.writeFileSync(shim, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))\n');
-  writeNodeCommandShim(path.join(binDir, 'agent-infra-internal'), shim);
+test('lifecycle hook falls back to PATH and maps native Claude payloads', () => {
+  const fixture = createHookFixture('missing');
 
   const result = run(
     fs.readFileSync(path.join(FIXTURES, 'claude-subagent-start.json'), 'utf8'),
-    'claude-code',
-    envWithPrependedPath(process.env, binDir)
+    fixture
   );
 
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout), [
-    'task-orchestration', 'auto', 'hook-start',
-    '--client', 'claude-code',
-    '--native-agent', 'agent-infra-lifecycle-reviewer',
-    '--child-id', 'claude-child',
-    '--parent-id', 'claude-parent',
-    '--spawn-mode', 'fresh'
-  ]);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    source: 'path',
+    args: [
+      'task-orchestration', 'auto', 'hook-start',
+      '--client', 'claude-code',
+      '--native-agent', 'agent-infra-lifecycle-reviewer',
+      '--child-id', 'claude-child',
+      '--parent-id', 'claude-parent',
+      '--spawn-mode', 'fresh'
+    ]
+  });
 
   const stop = run(
     fs.readFileSync(path.join(FIXTURES, 'claude-subagent-stop.json'), 'utf8'),
-    'claude-code',
-    envWithPrependedPath(process.env, binDir)
+    fixture
   );
   assert.equal(stop.status, 0, stop.stderr);
-  assert.deepEqual(JSON.parse(stop.stdout), [
-    'task-orchestration', 'auto', 'hook-stop',
-    '--client', 'claude-code',
-    '--native-agent', 'agent-infra-lifecycle-reviewer',
-    '--child-id', 'claude-child'
-  ]);
+  assert.deepEqual(JSON.parse(stop.stdout), {
+    source: 'path',
+    args: [
+      'task-orchestration', 'auto', 'hook-stop',
+      '--client', 'claude-code',
+      '--native-agent', 'agent-infra-lifecycle-reviewer',
+      '--child-id', 'claude-child'
+    ]
+  });
+});
+
+test('lifecycle hook prefers the repository-local CLI independently of cwd', () => {
+  const fixture = createHookFixture('working');
+
+  const start = run(
+    fs.readFileSync(path.join(FIXTURES, 'claude-subagent-start.json'), 'utf8'),
+    fixture
+  );
+  assert.equal(start.status, 0, start.stderr);
+  assert.equal(JSON.parse(start.stdout).source, 'local');
+
+  const stop = run(
+    fs.readFileSync(path.join(FIXTURES, 'claude-subagent-stop.json'), 'utf8'),
+    fixture
+  );
+  assert.equal(stop.status, 0, stop.stderr);
+  assert.deepEqual(JSON.parse(stop.stdout), {
+    source: 'local',
+    args: [
+      'task-orchestration', 'auto', 'hook-stop',
+      '--client', 'claude-code',
+      '--native-agent', 'agent-infra-lifecycle-reviewer',
+      '--child-id', 'claude-child'
+    ]
+  });
+});
+
+test('lifecycle hook fails closed when the repository-local CLI fails', () => {
+  const fixture = createHookFixture('broken');
+
+  const result = run(
+    fs.readFileSync(path.join(FIXTURES, 'claude-subagent-start.json'), 'utf8'),
+    fixture
+  );
+  assert.equal(result.status, 23);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, 'Local lifecycle CLI failed\n');
 });
 
 test('lifecycle hook rejects malformed payloads before invoking core', () => {

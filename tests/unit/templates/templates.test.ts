@@ -290,6 +290,7 @@ test("update-agent-infra template copies stay in sync with working files", () =>
     [".git-hooks/check-version-format.sh", "templates/.git-hooks/check-version-format.sh"],
     [".agents/hooks/check-version-format.sh", "templates/.agents/hooks/check-version-format.sh"],
     [".agents/hooks/auto-resume.sh", "templates/.agents/hooks/auto-resume.sh"],
+    [".agents/hooks/lifecycle-delegation.js", "templates/.agents/hooks/lifecycle-delegation.js"],
     [".codex/hooks.json", "templates/.codex/hooks.json"],
     ...buildCommandSyncFiles(project),
     ...referenceSyncFiles

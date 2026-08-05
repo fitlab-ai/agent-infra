@@ -18,6 +18,23 @@ git config core.hooksPath .git-hooks
 
 这样 Git 才会调用项目仓库 `.git-hooks/` 目录下的 hook，包括 `pre-commit` 和 `check-version-format.sh`。
 
+## 开发检出中的 CLI 对齐
+
+从源码检出开发 agent-infra 时，请先安装依赖并重新构建本地 CLI，再运行生命周期编排：
+
+```bash
+npm install
+npm run build
+```
+
+本地 `dist/bin/internal-cli.js` 存在时，生命周期 hook 会优先使用它；不存在时则回退到 `PATH` 上的 `agent-infra-internal`。修改 CLI 源码后需要重新构建。如果 shell 命令也必须解析到当前检出，请建立链接并比较当前版本与包版本：
+
+```bash
+npm link
+ai version --raw
+node -p "'v' + require('./package.json').version"
+```
+
 ## 外部模板与 Skill
 
 如果团队维护私有平台模板或共享自定义 skill，可在 `.agents/.airc.json` 中配置本地源：

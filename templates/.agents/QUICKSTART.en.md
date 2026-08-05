@@ -18,6 +18,23 @@ git config core.hooksPath .git-hooks
 
 This makes Git invoke the hooks in the project repository's `.git-hooks/` directory, including `pre-commit` and `check-version-format.sh`.
 
+## Development Checkout CLI Alignment
+
+When developing agent-infra from a source checkout, install dependencies and rebuild the local CLI before running lifecycle orchestration:
+
+```bash
+npm install
+npm run build
+```
+
+Lifecycle hooks prefer the checkout's `dist/bin/internal-cli.js` when it exists and fall back to `agent-infra-internal` on `PATH` otherwise. Rebuild after CLI source changes. If shell commands must also resolve to this checkout, link it and compare the active version with the package version:
+
+```bash
+npm link
+ai version --raw
+node -p "'v' + require('./package.json').version"
+```
+
 ## External Templates And Skills
 
 If your team maintains private platform templates or shared custom skills, configure local sources in `.agents/.airc.json`:
