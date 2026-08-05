@@ -128,6 +128,22 @@ test('lifecycle hook prefers the repository-local CLI independently of cwd', () 
   });
 });
 
+test('lifecycle hook forwards the exact host-observed model and fallback reason', () => {
+  const fixture = createHookFixture('missing');
+  const payload = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'claude-subagent-start.json'), 'utf8'));
+  payload.model = 'host-model-v2';
+  payload.model_fallback_reason = 'requested model was temporarily unavailable';
+
+  const result = run(JSON.stringify(payload), fixture);
+
+  assert.equal(result.status, 0, result.stderr);
+  const args = JSON.parse(result.stdout).args as string[];
+  assert.deepEqual(args.slice(-4), [
+    '--actual-model', 'host-model-v2',
+    '--fallback-reason', 'requested model was temporarily unavailable'
+  ]);
+});
+
 test('lifecycle hook fails closed when the repository-local CLI fails', () => {
   const fixture = createHookFixture('broken');
 

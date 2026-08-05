@@ -7,14 +7,14 @@ description: >
 
 # Run Task Lifecycle
 
-The orchestrator delegates only and never executes a stage skill itself. First read `.agents/rules/no-mid-flow-questions.md` and `.agents/rules/lifecycle-orchestration.md`.
+The orchestrator delegates only and never executes a stage skill itself. First read `.agents/rules/no-mid-flow-questions.md`, `.agents/rules/lifecycle-orchestration.md`, and `reference/host-validation.md`.
 
-1. Resolve the task and run `agent-infra-internal task-snapshot {task-id} --format text`.
-2. Run `agent-infra-internal task-orchestration {task-id} begin-or-resume`; stop on structured paused/completed results.
-3. Run `route` and use its single action, role, round, and artifact. Never infer routing from review prose.
-4. Run `agent-infra-internal task-orchestration {task-id} prepare --client {client}` so core records the workspace baseline, then start the specified executor/reviewer with the current client's fresh native subagent mechanism. Pass only the short task reference, skill name, and minimal handoff; never pass receipt identity or inherit orchestrator history.
+1. Resolve the task plus `--executor-model <id>`, `--reviewer-model <id>`, and optional `--same-model-reason <text>`, then run `agent-infra-internal task-snapshot {task-id} --format text`. A new run requires both models; only same-model use requires a reason.
+2. Run `agent-infra-internal task-orchestration {task-id} begin-or-resume`, forwarding model arguments supplied on this entry. An existing run may omit them and reuse persisted policy; repeated values must match exactly. Stop on structured paused/completed results.
+3. Run `route` and use its single action, role, round, artifact, and `requestedModel`. Never infer routing or model identity from review prose or session defaults.
+4. Run `agent-infra-internal task-orchestration {task-id} prepare --client {client} --requested-model {requestedModel}` so core validates the model before recording the workspace baseline. Start the specified executor/reviewer with the current client's fresh native subagent mechanism and explicitly override it to the same `requestedModel`. Pass only the short task reference, skill name, and minimal handoff; never pass receipt identity or inherit orchestrator history.
 5. Native start/stop hooks correlate the unique pending delegation and let core compute workspace changes and seal the receipt. After the child returns, run `advance`. Repeat step 3 only for `running`; stop immediately for `paused` or `completed`.
-6. Create a new child every round and never follow up with an old reviewer. Capability, hook, identity, model fallback, ledger, or fingerprint failures must call `pause` and fail closed.
+6. Create a new child every round and never follow up with an old reviewer. Native start must report a non-empty actual model, and a requested/actual mismatch requires a host fallback reason. Capability, hook, identity, model-evidence, ledger, or fingerprint failures must call `pause` and fail closed.
 7. On pause or completion, run the matching typed verification and report the structured run summary, pause reason, or commit endpoint.
 
 ## Stop

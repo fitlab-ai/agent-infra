@@ -42,7 +42,7 @@ process.stdin.on('end', () => {
       '--native-agent', String(nativeAgent),
       '--child-id', String(event.child_id || event.agent_id || event.thread_id || ''),
       '--parent-id', String(event.parent_id || event.parent_session_id || event.session_id || ''),
-      '--spawn-mode', String(event.spawn_mode || 'fresh')
+      '--spawn-mode', String(event.spawn_mode || (client === 'claude-code' ? 'fresh' : ''))
     );
     if (event.model) args.push('--actual-model', String(event.model));
     if (event.model_fallback_reason) args.push('--fallback-reason', String(event.model_fallback_reason));

@@ -57,8 +57,8 @@ test('verification catalog is a closed mapping of all business events', () => {
     'import-dependabot.completed': ['import-dependabot', 'active', 'gate', undefined, undefined],
     'import-issue.completed': ['import-issue', 'active', 'gate', undefined, undefined],
     'watch-pr.completed': ['watch-pr', 'active', 'gate', undefined, undefined],
-    'run-task.paused': ['run-task', 'active', 'checks', undefined, ['orchestration-state']],
-    'run-task.completed': ['run-task', 'active', 'checks', undefined, ['orchestration-state']]
+    'run-task.paused': ['run-task', 'active', 'checks', undefined, ['orchestration-state', 'orchestration-evidence']],
+    'run-task.completed': ['run-task', 'active', 'checks', undefined, ['orchestration-state', 'orchestration-evidence']]
   } as const;
   for (const event of EXPECTED_EVENTS) {
     const spec = VERIFICATION_CATALOG[event];
@@ -95,4 +95,116 @@ test('unknown events fail with a stable orchestration error', () => {
   const f = fixture();
   const unknown = verifyTaskEvent({ taskRef: f.taskId, event: 'unknown.completed' }, { repoRoot: f.root });
   assert.equal(unknown.error?.code, 'VERIFY_EVENT_UNKNOWN');
+});
+
+test('run-task verification accepts complete model evidence and rejects missing host identity', () => {
+  const f = fixture();
+  const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
+    skill: 'run-task',
+    checks: { 'orchestration-state': {}, 'orchestration-evidence': {} }
+  }));
+  const receipt = {
+    id: 'receipt-1', taskId: f.taskId, runId: 'run-1', role: 'executor',
+    stage: 'commit', round: 1, artifact: 'commit', client: 'claude-code',
+    requestedModel: 'executor-model', actualModel: 'executor-model', modelFallbackReason: null,
+    parentId: 'parent-1', childId: 'child-1', spawnMode: 'fresh', agent: 'claude-code',
+    status: 'consumed', beforeFingerprint: 'before', afterFingerprint: 'after', changedPaths: [],
+    createdAt: '2026-01-01T00:00:00.000Z', activatedAt: '2026-01-01T00:00:01.000Z',
+    sealedAt: '2026-01-01T00:00:02.000Z', consumedAt: '2026-01-01T00:00:03.000Z'
+  };
+  const run = {
+    schemaVersion: 1, taskId: f.taskId, runId: 'run-1', status: 'completed', nextStage: null,
+    stepCount: 1, maxSteps: 24, baseline: '',
+    modelPolicy: { executor: 'executor-model', reviewer: 'reviewer-model', sameModelReason: null },
+    pendingDelegation: null, receipts: [receipt], pause: null,
+    commitAuthorization: { issuedAt: '2026-01-01T00:00:00.000Z', consumedAt: '2026-01-01T00:00:03.000Z' },
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:03.000Z'
+  };
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
+
+  const valid = verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root });
+  assert.equal(valid.status, 'pass');
+  assert.equal(valid.invocations.length, 2);
+
+  fs.writeFileSync(runPath, `${JSON.stringify({ ...run, receipts: [{ ...receipt, actualModel: null }] }, null, 2)}\n`);
+  const invalid = verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root });
+  assert.equal(invalid.status, 'fail');
+  assert.equal(invalid.invocations.length, 2);
+
+  fs.writeFileSync(runPath, `${JSON.stringify({ ...run, modelPolicy: undefined }, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    'fail'
+  );
+
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    ...run,
+    modelPolicy: { executor: 'shared-model', reviewer: 'shared-model', sameModelReason: null },
+    receipts: [{ ...receipt, requestedModel: 'shared-model', actualModel: 'shared-model' }]
+  }, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    'fail'
+  );
+
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    ...run,
+    modelPolicy: {
+      executor: 'executor-model', reviewer: 'reviewer-model', sameModelReason: 'not applicable'
+    }
+  }, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    'fail'
+  );
+});
+
+test('run-task verification accepts a clean unsupported pause and rejects unsafe pending evidence', () => {
+  const f = fixture();
+  const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
+    skill: 'run-task', checks: { 'orchestration-state': {}, 'orchestration-evidence': {} }
+  }));
+  const paused = {
+    schemaVersion: 1, taskId: f.taskId, runId: 'run-1', status: 'paused', nextStage: null,
+    stepCount: 0, maxSteps: 24, baseline: '',
+    modelPolicy: { executor: 'executor-model', reviewer: 'reviewer-model', sameModelReason: null },
+    pendingDelegation: null, receipts: [],
+    pause: { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'client unsupported', recoverable: false },
+    commitAuthorization: { issuedAt: null, consumedAt: null },
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+  };
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root }).status,
+    'pass'
+  );
+
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    ...paused,
+    pendingDelegation: {
+      id: 'receipt-1', taskId: f.taskId, runId: 'run-1', role: 'executor', stage: 'analysis',
+      round: 1, artifact: 'analysis.md', client: 'claude-code', requestedModel: 'executor-model',
+      actualModel: null, modelFallbackReason: null, parentId: 'parent', childId: 'child',
+      spawnMode: 'fresh', agent: null, status: 'activated', beforeFingerprint: 'before',
+      afterFingerprint: null, changedPaths: [], createdAt: '2026-01-01T00:00:00.000Z',
+      activatedAt: '2026-01-01T00:00:01.000Z', sealedAt: null, consumedAt: null
+    }
+  }, null, 2)}\n`);
+  const missingModel = verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root });
+  assert.equal(missingModel.status, 'fail');
+  assert.equal(missingModel.invocations.length, 2);
+
+  const sealed = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+  sealed.pendingDelegation.status = 'sealed';
+  sealed.pendingDelegation.actualModel = 'executor-model';
+  fs.writeFileSync(runPath, `${JSON.stringify(sealed, null, 2)}\n`);
+  const sealedResult = verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root });
+  assert.equal(sealedResult.status, 'fail');
+  assert.equal(sealedResult.invocations.length, 1);
 });

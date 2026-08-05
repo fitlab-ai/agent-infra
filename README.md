@@ -181,6 +181,8 @@ The most-used lifecycle commands, in delivery order. The command prefix varies b
 | `code-task` → `review-code` | Implement and test, then run a structured code review |
 | `commit` → `create-pr` → `complete-task` | Commit, open a PR, and archive the task |
 
+Start a new orchestration run with explicit role models, for example: `$run-task 42 --executor-model <model-id> --reviewer-model <model-id>`. If both roles must use one model, also provide `--same-model-reason "<reason>"`. Re-entry may omit these flags because the run policy is persisted and immutable.
+
 See the full catalog — task status, release, security, and project-maintenance skills — in [Built-in AI Skills](./docs/en/skills.md).
 
 ## What You Get

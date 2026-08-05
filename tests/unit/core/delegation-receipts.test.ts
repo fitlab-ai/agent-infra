@@ -67,10 +67,25 @@ test('managed identities fail closed while unrelated subagents are ignored', () 
   }).code, 'DELEGATION_ROLE_MISMATCH');
 });
 
+test('activation requires host-observed model identity and records justified fallback', () => {
+  const prepared = prepareDelegation(input, { id: () => 'delegation-model' });
+  const event = {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-model',
+    parentId: 'parent-model', spawnMode: 'fresh'
+  };
+
+  assert.equal(activateDelegation(prepared, event).code, 'DELEGATION_MODEL_IDENTITY_MISSING');
+  assert.equal(activateDelegation(prepared, { ...event, actualModel: 'fallback-model' }).code, 'DELEGATION_MODEL_FALLBACK_UNRECORDED');
+  assert.equal(activateDelegation(prepared, {
+    ...event, actualModel: 'fallback-model', modelFallbackReason: 'requested model unavailable'
+  }).ok, true);
+});
+
 test('reviewer write gate rejects shared, non-allowlisted task, and cross-task paths', () => {
   const prepared = prepareDelegation(input, { id: () => 'delegation-3' });
   const activated = activateDelegation(prepared, {
-    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-3', parentId: 'parent-1', spawnMode: 'fresh'
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-3', parentId: 'parent-1',
+    spawnMode: 'fresh', actualModel: 'review-model'
   });
   assert.equal(activated.ok, true);
   if (!activated.ok) return;

@@ -51,7 +51,7 @@ function fail(code: string, message: string): ReceiptFailure {
 }
 
 function prepareDelegation(
-  input: Omit<DelegationReceipt, 'id' | 'actualModel' | 'modelFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'activatedAt' | 'sealedAt' | 'consumedAt'>,
+  input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'actualModel' | 'modelFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string }>,
   options: { id?: () => string; now?: () => string } = {}
 ): DelegationReceipt {
   return Object.freeze({
@@ -93,8 +93,11 @@ function activateDelegation(
     return fail('DELEGATION_IDENTITY_INVALID', 'native parent/child identity does not match the prepared delegation');
   }
   if (event.spawnMode !== 'fresh') return fail('DELEGATION_FORK_FORBIDDEN', `spawn mode '${event.spawnMode}' is not fresh`);
-  const actualModel = event.actualModel ?? null;
-  if (actualModel && receipt.requestedModel && actualModel !== receipt.requestedModel && !event.modelFallbackReason) {
+  const actualModel = event.actualModel;
+  if (!actualModel || actualModel.trim() !== actualModel) {
+    return fail('DELEGATION_MODEL_IDENTITY_MISSING', 'native start event must provide a non-empty actual model identity');
+  }
+  if (actualModel !== receipt.requestedModel && (!event.modelFallbackReason || event.modelFallbackReason.trim() === '')) {
     return fail('DELEGATION_MODEL_FALLBACK_UNRECORDED', 'actual model differs from requested model without a fallback reason');
   }
   return { ok: true, receipt: Object.freeze({

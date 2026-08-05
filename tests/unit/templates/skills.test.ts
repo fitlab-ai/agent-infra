@@ -190,6 +190,19 @@ test("SKILL.md reference paths point to existing files", () => {
   });
 });
 
+test("run-task verification configs expose the same ordered local checks", () => {
+  const files = [
+    ".agents/skills/run-task/config/verify.json",
+    "templates/.agents/skills/run-task/config/verify.en.json",
+    "templates/.agents/skills/run-task/config/verify.zh-CN.json"
+  ];
+  const checks = files.map((relativePath) => Object.keys(JSON.parse(read(relativePath)).checks));
+  const baseline = checks[0]!;
+  assert.deepEqual(checks[1], baseline);
+  assert.deepEqual(checks[2], baseline);
+  assert.equal(new Set(baseline).size, baseline.length);
+});
+
 test("local entropy-check defines review checklist and report template sections", () => {
   const skill = read(".agents/skills/entropy-check/SKILL.md");
   const checklist = read(".agents/skills/entropy-check/reference/checklist.md");

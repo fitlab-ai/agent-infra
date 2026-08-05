@@ -27,12 +27,16 @@ function run(root: string, args: string[]) {
 
 test('task-orchestration begins idempotently and exposes a structured route', () => {
   const f = fixture();
-  const begin = run(f.root, [f.id, 'begin-or-resume', '--max-steps', '8']);
+  const begin = run(f.root, [f.id, 'begin-or-resume', '--max-steps', '8',
+    '--executor-model', 'executor-model', '--reviewer-model', 'reviewer-model']);
   assert.equal(begin.status, 0, begin.stderr);
   const begun = JSON.parse(begin.stdout);
   assert.equal(begun.status, 'running');
   assert.equal(begun.changed, true);
   assert.equal(begun.run.maxSteps, 8);
+  assert.deepEqual(begun.run.modelPolicy, {
+    executor: 'executor-model', reviewer: 'reviewer-model', sameModelReason: null
+  });
   assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), true);
 
   const second = run(f.root, [f.id, 'begin-or-resume']);
@@ -42,7 +46,8 @@ test('task-orchestration begins idempotently and exposes a structured route', ()
   const route = run(f.root, [f.id, 'route']);
   assert.equal(route.status, 0, route.stderr);
   assert.deepEqual(JSON.parse(route.stdout).next, {
-    action: 'analyze-task', role: 'executor', stage: 'analysis', round: 1, artifact: 'analysis.md'
+    action: 'analyze-task', role: 'executor', stage: 'analysis', round: 1,
+    artifact: 'analysis.md', requestedModel: 'executor-model'
   });
 });
 
@@ -54,14 +59,41 @@ test('task-orchestration rejects duplicate and unknown options without writing s
   assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), false);
 });
 
-test('task-orchestration prepare derives the workspace baseline without model-supplied identity', () => {
+test('task-orchestration rejects partial model policy options before core state changes', () => {
   const f = fixture();
-  assert.equal(run(f.root, [f.id, 'begin-or-resume']).status, 0);
+  const first = run(f.root, [f.id, 'begin-or-resume', '--executor-model', 'executor-model']);
+  assert.equal(first.status, 2);
+  assert.equal(JSON.parse(first.stdout).error.code, 'ORCHESTRATION_PAYLOAD_INVALID');
+  assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), false);
 
-  const prepared = run(f.root, [f.id, 'prepare', '--client', 'claude-code']);
+  assert.equal(run(f.root, [f.id, 'begin-or-resume', '--executor-model', 'executor-model',
+    '--reviewer-model', 'reviewer-model']).status, 0);
+  const runPath = path.join(f.dir, 'orchestration.json');
+  const before = fs.readFileSync(runPath);
+  const reentry = run(f.root, [f.id, 'begin-or-resume', '--reviewer-model', 'reviewer-model']);
+  assert.equal(reentry.status, 2);
+  assert.equal(JSON.parse(reentry.stdout).error.code, 'ORCHESTRATION_PAYLOAD_INVALID');
+  assert.deepEqual(fs.readFileSync(runPath), before);
+});
+
+test('task-orchestration prepare derives the workspace baseline with the persisted role model', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'begin-or-resume', '--executor-model', 'executor-model',
+    '--reviewer-model', 'reviewer-model']).status, 0);
+
+  const prepared = run(f.root, [f.id, 'prepare', '--client', 'claude-code',
+    '--requested-model', 'executor-model']);
   assert.equal(prepared.status, 0, prepared.stderr);
   const result = JSON.parse(prepared.stdout);
   assert.equal(result.run.pendingDelegation.parentId, null);
   assert.equal(result.run.pendingDelegation.workspaceSnapshotScope, 'task');
   assert.match(result.run.pendingDelegation.beforeFingerprint, /^[0-9a-f]{40,64}$/);
+});
+
+test('task-orchestration begin fails closed when model policy is omitted', () => {
+  const f = fixture();
+  const result = run(f.root, [f.id, 'begin-or-resume']);
+  assert.equal(result.status, 1);
+  assert.equal(JSON.parse(result.stdout).error.code, 'ORCHESTRATION_MODEL_POLICY_REQUIRED');
+  assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), false);
 });

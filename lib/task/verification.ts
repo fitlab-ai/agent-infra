@@ -72,8 +72,8 @@ const VERIFICATION_CATALOG: Readonly<Record<VerificationEvent, VerificationSpec>
   'import-dependabot.completed': gate('import-dependabot', 'active'),
   'import-issue.completed': gate('import-issue', 'active'),
   'watch-pr.completed': gate('watch-pr', 'active'),
-  'run-task.paused': { skill: 'run-task', expectedState: 'active', mode: 'checks', checks: ['orchestration-state'] },
-  'run-task.completed': { skill: 'run-task', expectedState: 'active', mode: 'checks', checks: ['orchestration-state'] }
+  'run-task.paused': { skill: 'run-task', expectedState: 'active', mode: 'checks', checks: ['orchestration-state', 'orchestration-evidence'] },
+  'run-task.completed': { skill: 'run-task', expectedState: 'active', mode: 'checks', checks: ['orchestration-state', 'orchestration-evidence'] }
 };
 
 function failure(request: { taskRef: string; event: string; artifact?: string }, code: string, message: string, extra: Partial<TaskVerificationResult> = {}): TaskVerificationResult {

@@ -70,3 +70,18 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/agent-infra-smoke"
           ./node_modules/.bin/agent-infra sandbox --help
+
+      - name: Smoke - init includes orchestration contracts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SMOKE_DIR="$RUNNER_TEMP/agent-infra-smoke"
+          PROJECT_DIR="$SMOKE_DIR/project"
+          mkdir -p "$PROJECT_DIR"
+          cd "$PROJECT_DIR"
+          printf 'smokeproj\nsmokeorg\n\n\n\n\n' | "$SMOKE_DIR/node_modules/.bin/agent-infra" init
+          AGENT_INFRA_PACKAGE_ROOT="$SMOKE_DIR/node_modules/@fitlab-ai/agent-infra" \
+            node .agents/skills/update-agent-infra/scripts/sync-templates.js >/dev/null
+          test -f .agents/skills/run-task/reference/host-validation.md
+          test -f .agents/skills/run-task/config/verify.json
+          "$SMOKE_DIR/node_modules/.bin/agent-infra-internal" task-orchestration --help

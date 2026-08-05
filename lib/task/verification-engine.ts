@@ -122,6 +122,8 @@ function runCheck(type: any, context: any, shared: any): any {
       return checkPostReviewCommit(context);
     case "orchestration-state":
       return checkOrchestrationState(context);
+    case "orchestration-evidence":
+      return checkOrchestrationEvidence(context);
     default: {
       const adapter = PLATFORM_ADAPTERS[type];
       if (!adapter) {
@@ -161,6 +163,69 @@ function checkOrchestrationState({ taskDir }: any): any {
     return failResult('orchestration-state', 'Paused run has a sealed delegation that could still advance');
   }
   return passResult('orchestration-state', `Orchestration run is safely ${run.status}`);
+}
+
+function exactText(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.trim() === value;
+}
+
+function checkOrchestrationEvidence({ taskDir }: any): any {
+  const file = path.join(taskDir, 'orchestration.json');
+  const stat = safeStat(file);
+  if (!stat?.isFile()) return failResult('orchestration-evidence', 'orchestration.json is missing');
+  let run: any;
+  try {
+    run = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    return failResult('orchestration-evidence', `Invalid orchestration.json: ${String(error)}`);
+  }
+  const policy = run.modelPolicy;
+  if (!policy || !exactText(policy.executor) || !exactText(policy.reviewer)) {
+    return failResult('orchestration-evidence', 'Run model policy requires exact executor and reviewer identities');
+  }
+  if (policy.executor === policy.reviewer) {
+    if (!exactText(policy.sameModelReason)) {
+      return failResult('orchestration-evidence', 'Shared executor/reviewer model requires a persisted reason');
+    }
+  } else if (policy.sameModelReason !== null) {
+    return failResult('orchestration-evidence', 'Distinct executor/reviewer models require a null same-model reason');
+  }
+  if (!Array.isArray(run.receipts)) {
+    return failResult('orchestration-evidence', 'Run receipts must be an array');
+  }
+  if (run.status === 'completed' && (
+    run.receipts.length === 0
+    || run.receipts.at(-1)?.stage !== 'commit'
+    || run.receipts.at(-1)?.status !== 'consumed'
+  )) {
+    return failResult('orchestration-evidence', 'Completed run requires a final consumed commit receipt');
+  }
+  if (run.pendingDelegation && !['prepared', 'activated', 'stage-completed'].includes(run.pendingDelegation.status)) {
+    return failResult('orchestration-evidence', `Pending receipt has unsafe status '${run.pendingDelegation.status}'`);
+  }
+  const receipts = [...run.receipts, ...(run.pendingDelegation ? [run.pendingDelegation] : [])];
+  for (const receipt of receipts) {
+    const expectedModel = policy[receipt.role];
+    if (!expectedModel || receipt.requestedModel !== expectedModel) {
+      return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' requested model does not match its role policy`);
+    }
+    const activated = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status);
+    if (activated) {
+      if (!exactText(receipt.actualModel)) {
+        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has no host-observed actual model`);
+      }
+      if (!exactText(receipt.parentId) || !exactText(receipt.childId) || receipt.parentId === receipt.childId || receipt.spawnMode !== 'fresh') {
+        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid fresh delegation identity`);
+      }
+      if (receipt.actualModel !== receipt.requestedModel && !exactText(receipt.modelFallbackReason)) {
+        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' model fallback is not justified`);
+      }
+    }
+  }
+  if (run.receipts.some((receipt: any) => receipt.status !== 'consumed')) {
+    return failResult('orchestration-evidence', 'Historical receipts must be consumed');
+  }
+  return passResult('orchestration-evidence', 'Persisted orchestration model and delegation evidence is internally consistent');
 }
 
 // === Check Functions ===

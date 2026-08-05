@@ -213,11 +213,15 @@ test('completed event validates orchestration provenance before writing task sta
     'node', [INTERNAL_CLI_PATH, 'task-orchestration', f.id, ...args],
     { cwd: f.root, encoding: 'utf8' }
   );
-  assert.equal(orchestrate(['begin-or-resume']).status, 0);
-  assert.equal(orchestrate(['prepare', '--client', 'claude-code']).status, 0);
+  assert.equal(orchestrate([
+    'begin-or-resume', '--executor-model', 'executor-model', '--reviewer-model', 'reviewer-model'
+  ]).status, 0);
+  assert.equal(orchestrate([
+    'prepare', '--client', 'claude-code', '--requested-model', 'reviewer-model'
+  ]).status, 0);
   assert.equal(orchestrate([
     'hook-start', '--native-agent', 'agent-infra-lifecycle-reviewer', '--child-id', 'child-1',
-    '--parent-id', 'parent-1', '--spawn-mode', 'fresh'
+    '--parent-id', 'parent-1', '--spawn-mode', 'fresh', '--actual-model', 'reviewer-model'
   ]).status, 0);
 
   const before = fs.readFileSync(f.file);

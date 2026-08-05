@@ -14,7 +14,10 @@
 
 ## 模型策略
 
-reviewer 优先选择与上一 executor 不同的模型。若客户端只能使用同模型，必须记录 requested model、actual model 和降级原因；缺少降级理由时失败关闭。
+- 新 run 必须固化 executor/reviewer 模型；不同模型时 `sameModelReason` 为 null，同模型时必须说明隔离受限原因。重入不得静默改写策略。
+- route 按 role 返回 requested model，prepare 必须在工作区快照前精确匹配它；原生 spawn 必须显式使用该模型，不能继承会话默认值。
+- 原生 start 必须记录宿主观察到的 actual model。actual 与 requested 不同时必须另行记录 `modelFallbackReason`；它不能用同模型策略理由替代。
+- 缺少模型策略、实际模型或降级理由时失败关闭；旧 run 缺模型策略时稳定暂停。
 
 ## 稳定暂停条件
 

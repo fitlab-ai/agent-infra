@@ -21,6 +21,11 @@ import type { AgentClientId } from '../agent-clients/types.ts';
 import { captureWorkspaceSnapshot, diffWorkspaceSnapshots } from './workspace-snapshot.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
+type OrchestrationModelPolicy = Readonly<{
+  executor: string;
+  reviewer: string;
+  sameModelReason: string | null;
+}>;
 type OrchestrationRun = Readonly<{
   schemaVersion: 1;
   taskId: string;
@@ -29,6 +34,7 @@ type OrchestrationRun = Readonly<{
   nextStage: DelegationStage | null;
   stepCount: number;
   maxSteps: number;
+  modelPolicy?: OrchestrationModelPolicy;
   baseline: string;
   pendingDelegation: DelegationReceipt | null;
   receipts: readonly DelegationReceipt[];
@@ -43,6 +49,7 @@ type OrchestrationNext = Readonly<{
   stage: DelegationStage;
   round: number;
   artifact: string;
+  requestedModel: string | null;
 }>;
 type OrchestrationResult = Readonly<{
   status: OrchestrationStatus | 'failed';
@@ -57,6 +64,7 @@ type OrchestrationOptions = {
   id?: () => string;
   now?: () => string;
   maxSteps?: number;
+  modelPolicy?: OrchestrationModelPolicy;
   captureWorkspace?: (repoRoot: string, taskId: string | null) => string;
   diffWorkspace?: (repoRoot: string, before: string, after: string) => string[];
 };
@@ -89,11 +97,57 @@ function failed(code: string, message: string, taskId: string | null = null): Or
   return { status: 'failed', changed: false, taskId, run: null, next: null, error: { code, message } };
 }
 
+function validModel(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.trim() === value;
+}
+
+function validateModelPolicy(policy: OrchestrationModelPolicy | undefined): Readonly<{ code: string; message: string }> | null {
+  if (!policy || !validModel(policy.executor) || !validModel(policy.reviewer)) {
+    return { code: 'ORCHESTRATION_MODEL_POLICY_REQUIRED', message: 'executor and reviewer model identities are required' };
+  }
+  if (policy.executor === policy.reviewer) {
+    if (!validModel(policy.sameModelReason)) {
+      return { code: 'ORCHESTRATION_MODEL_SEPARATION_REQUIRED', message: 'using the same executor and reviewer model requires a reason' };
+    }
+  } else if (policy.sameModelReason !== null) {
+    return { code: 'ORCHESTRATION_MODEL_POLICY_INVALID', message: 'same-model reason must be null when executor and reviewer models differ' };
+  }
+  return null;
+}
+
+function sameModelPolicy(left: OrchestrationModelPolicy, right: OrchestrationModelPolicy): boolean {
+  return left.executor === right.executor
+    && left.reviewer === right.reviewer
+    && left.sameModelReason === right.sameModelReason;
+}
+
 function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
   const existing = readRun(resolved.taskDir);
   if (existing) {
+    if (!existing.modelPolicy && existing.status !== 'completed') {
+      if (existing.status === 'paused' && existing.pause?.code === 'ORCHESTRATION_MODEL_EVIDENCE_MISSING') {
+        return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
+      }
+      const paused = withUpdatedRun(existing, {
+        status: 'paused',
+        pause: {
+          code: 'ORCHESTRATION_MODEL_EVIDENCE_MISSING',
+          message: 'existing orchestration run has no persisted model policy',
+          recoverable: false
+        }
+      });
+      saveRun(resolved.taskDir, paused);
+      return { status: 'paused', changed: true, taskId: resolved.taskId, run: paused, next: null, error: null };
+    }
+    if (options.modelPolicy) {
+      const policyError = validateModelPolicy(options.modelPolicy);
+      if (policyError) return failed(policyError.code, policyError.message, resolved.taskId);
+      if (!existing.modelPolicy || !sameModelPolicy(existing.modelPolicy, options.modelPolicy)) {
+        return failed('ORCHESTRATION_MODEL_POLICY_MISMATCH', 'provided model policy does not match the persisted run policy', resolved.taskId);
+      }
+    }
     if (existing.status === 'paused' && existing.pause?.recoverable && existing.pendingDelegation === null) {
       const resumed = withUpdatedRun(existing, { status: 'running', pause: null });
       saveRun(resolved.taskDir, resumed);
@@ -101,6 +155,8 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
     }
     return { status: existing.status, changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
   }
+  const policyError = validateModelPolicy(options.modelPolicy);
+  if (policyError) return failed(policyError.code, policyError.message, resolved.taskId);
   const now = (options.now ?? (() => new Date().toISOString()))();
   const run: OrchestrationRun = {
     schemaVersion: 1,
@@ -110,6 +166,7 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
     nextStage: null,
     stepCount: 0,
     maxSteps: options.maxSteps ?? 24,
+    modelPolicy: options.modelPolicy!,
     baseline: '',
     pendingDelegation: null,
     receipts: [],
@@ -150,7 +207,7 @@ function latestReviewApproved(taskDir: string, family: 'review-analysis' | 'revi
   return parsed.ok && parsed.summary.verdict === 'Approved' && parsed.summary.counts !== null;
 }
 
-function routeFromFacts(taskDir: string): OrchestrationNext | null {
+function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedModel'> | null {
   const analysisRound = highestRound(taskDir, 'analysis');
   const analysisReviewRound = highestRound(taskDir, 'review-analysis');
   const planRound = highestRound(taskDir, 'plan');
@@ -210,8 +267,13 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   } catch (error) {
     return failed('ORCHESTRATION_TASK_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
   }
-  const next = routeFromFacts(resolved.taskDir);
-  if (!next) return failed('ORCHESTRATION_ROUTE_UNKNOWN', 'cannot determine a unique lifecycle action', resolved.taskId);
+  const routed = routeFromFacts(resolved.taskDir);
+  if (!routed) return failed('ORCHESTRATION_ROUTE_UNKNOWN', 'cannot determine a unique lifecycle action', resolved.taskId);
+  const run = readRun(resolved.taskDir);
+  const next: OrchestrationNext = {
+    ...routed,
+    requestedModel: run?.modelPolicy?.[routed.role] ?? null
+  };
   if (next.stage === 'commit') {
     const reviewRound = highestRound(resolved.taskDir, 'review-code');
     const review = parseReviewSummary(fs.readFileSync(
@@ -231,7 +293,7 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
       return failed('ORCHESTRATION_LEDGER_BLOCKED', 'code review ledger has unresolved findings or human decisions', resolved.taskId);
     }
   }
-  return { status: 'running', changed: false, taskId: resolved.taskId, run: readRun(resolved.taskDir), next, error: null };
+  return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
 }
 
 function statusOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
@@ -257,6 +319,7 @@ function prepareOrchestrationDelegation(
   }
   const run = readRun(resolved.taskDir);
   if (!run || run.status !== 'running') return failed('ORCHESTRATION_RUN_NOT_RUNNING', 'a running orchestration is required', resolved.taskId);
+  if (!run.modelPolicy) return failed('ORCHESTRATION_MODEL_EVIDENCE_MISSING', 'running orchestration has no persisted model policy', resolved.taskId);
   if (run.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_BUSY', 'the run already has a pending delegation', resolved.taskId);
   const repositoryPending = (['claude-code', 'codex'] as AgentClientId[])
     .flatMap((client) => matchingDelegations(client, () => true, options));
@@ -267,6 +330,13 @@ function prepareOrchestrationDelegation(
   const routed = routeOrchestration(taskRef, options);
   if (!routed.next) return routed;
   const next = routed.next;
+  if (!validModel(input.requestedModel)) {
+    return failed('ORCHESTRATION_REQUESTED_MODEL_REQUIRED', 'prepare requires the exact requested model identity', resolved.taskId);
+  }
+  const expectedModel = run.modelPolicy[next.role];
+  if (input.requestedModel !== expectedModel) {
+    return failed('ORCHESTRATION_REQUESTED_MODEL_MISMATCH', `requested model does not match the persisted ${next.role} model`, resolved.taskId);
+  }
   let beforeFingerprint: string;
   try {
     beforeFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)(resolved.repoRoot, resolved.taskId);
@@ -281,7 +351,7 @@ function prepareOrchestrationDelegation(
     round: next.round,
     artifact: next.artifact,
     client: input.client,
-    requestedModel: input.requestedModel ?? null,
+    requestedModel: input.requestedModel,
     workspaceSnapshotScope: 'task',
     beforeFingerprint
   }, { id: options.id, now: options.now });
@@ -542,4 +612,4 @@ export {
   statusOrchestration,
   validateOrchestrationStage
 };
-export type { OrchestrationNext, OrchestrationResult, OrchestrationRun, OrchestrationStatus };
+export type { OrchestrationModelPolicy, OrchestrationNext, OrchestrationResult, OrchestrationRun, OrchestrationStatus };

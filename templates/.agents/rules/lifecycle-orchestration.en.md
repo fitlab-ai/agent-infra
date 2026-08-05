@@ -14,7 +14,10 @@
 
 ## Model Policy
 
-Prefer a reviewer model different from the preceding executor. Same-model fallback must record requested model, actual model, and reason; an unrecorded fallback fails closed.
+- A new run persists executor/reviewer models. Distinct models require a null `sameModelReason`; using one model for both roles requires an isolation-limit reason. Re-entry must not silently rewrite the policy.
+- Route resolves the requested model by role, prepare matches it before a workspace snapshot, and native spawn explicitly uses it instead of inheriting session defaults.
+- Native start records the host-observed actual model. A requested/actual mismatch separately requires `modelFallbackReason`; the same-model policy reason cannot substitute for it.
+- Missing model policy, actual model, or fallback reason fails closed. A legacy run without model policy pauses stably.
 
 ## Stable Pause Conditions
 

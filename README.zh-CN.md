@@ -180,6 +180,8 @@ ai agent-client configure
 | `code-task` → `review-code` | 实现并测试，再执行结构化代码审查 |
 | `commit` → `create-pr` → `complete-task` | 提交、创建 PR、归档任务 |
 
+首次启动总控时需显式指定角色模型，例如：`$run-task 42 --executor-model <model-id> --reviewer-model <model-id>`。若两个角色只能使用同一模型，还需提供 `--same-model-reason "<原因>"`。模型策略会持久化且不可静默改写，因此重入时可以省略这些参数。
+
 完整清单（任务状态、发布、安全、项目维护等 skill）见 [内置 AI Skills](./docs/zh-CN/skills.md)。
 
 ## 安装效果

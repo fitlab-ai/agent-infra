@@ -43,7 +43,8 @@ function taskOrchestration(args: string[] = []): void {
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
     if (![
-      '--max-steps', '--client', '--requested-model', '--parent-id', '--before-fingerprint',
+      '--max-steps', '--executor-model', '--reviewer-model', '--same-model-reason',
+      '--client', '--requested-model', '--parent-id', '--before-fingerprint',
       '--native-agent', '--child-id', '--spawn-mode', '--actual-model', '--fallback-reason',
       '--exit-code', '--after-fingerprint', '--changed-paths', '--code', '--message', '--recoverable', '--agent'
     ].includes(flag)) {
@@ -69,7 +70,21 @@ function taskOrchestration(args: string[] = []): void {
     if (maxSteps !== undefined && (!Number.isInteger(maxSteps) || maxSteps < 1)) {
       usageFailure('--max-steps must be a positive integer'); return;
     }
-    result = beginOrResumeOrchestration(taskRef!, { maxSteps });
+    const hasExecutorModel = values['--executor-model'] !== undefined;
+    const hasReviewerModel = values['--reviewer-model'] !== undefined;
+    const hasSameModelReason = values['--same-model-reason'] !== undefined;
+    if (hasExecutorModel !== hasReviewerModel || (hasSameModelReason && !hasExecutorModel)) {
+      usageFailure("model policy options require both '--executor-model' and '--reviewer-model'");
+      return;
+    }
+    result = beginOrResumeOrchestration(taskRef!, {
+      maxSteps,
+      modelPolicy: hasExecutorModel ? {
+        executor: values['--executor-model']!,
+        reviewer: values['--reviewer-model']!,
+        sameModelReason: values['--same-model-reason'] ?? null
+      } : undefined
+    });
   } else if (intent === 'route') {
     result = routeOrchestration(taskRef!);
   } else if (intent === 'status') {
