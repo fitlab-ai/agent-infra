@@ -1039,12 +1039,8 @@ function isLegacyManagedSandboxAliasFile(
     return false;
   }
 
-  const legacyAliasNames = ['gemini-yolo', 'gy'];
   const aliasPattern = new RegExp(
-    `^alias (${[
-      ...aliases.map((alias) => alias.name),
-      ...legacyAliasNames
-    ].map(escapeRegExp).join('|')})=`
+    `^alias (${aliases.map((alias) => escapeRegExp(alias.name)).join('|')})=`
   );
   return lines.every((line) => aliasPattern.test(line));
 }

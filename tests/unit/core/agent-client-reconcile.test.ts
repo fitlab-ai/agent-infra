@@ -159,68 +159,6 @@ test('executor writes planned seeds, commits config atomically, and converges on
   }
 });
 
-test('retired Gemini commands remove generated files and protect modified content', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-reconcile-retired-gemini-'));
-  try {
-    const templateRoot = path.join(root, 'templates');
-    writeTemplates(templateRoot);
-    fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
-    fs.mkdirSync(path.join(root, '.gemini/commands/demo'), { recursive: true });
-    const generated = [
-      'description = "Run the full project test workflow"',
-      'prompt = """',
-      'Read and execute the test skill from `.agents/skills/test/SKILL.md`.',
-      '',
-      'Follow all steps defined in the skill exactly.',
-      '"""',
-      ''
-    ].join('\n');
-    fs.writeFileSync(path.join(root, '.gemini/commands/demo/test.toml'), generated);
-    fs.writeFileSync(path.join(root, '.gemini/commands/demo/custom.toml'), 'user content\n');
-    fs.writeFileSync(path.join(root, '.gemini/settings.json'), '{"theme":"custom"}\n');
-    const config = {
-      ...projectConfig(),
-      files: {
-        managed: ['.gemini/commands/'],
-        merged: ['.gemini/settings.json'],
-        ejected: []
-      }
-    };
-    fs.writeFileSync(path.join(root, '.agents/.airc.json'), `${JSON.stringify(config, null, 2)}\n`);
-
-    const plan = planAgentClientReconciliation({
-      config,
-      mutation: { type: 'none' },
-      projectRoot: root,
-      templateRoot,
-      platformType: 'github',
-      language: 'en'
-    });
-    const result = applyAgentClientReconciliation(plan);
-
-    assert.equal(fs.existsSync(path.join(root, '.gemini/commands/demo/test.toml')), false);
-    assert.equal(fs.existsSync(path.join(root, '.gemini/commands/demo/custom.toml')), true);
-    assert.equal(fs.existsSync(path.join(root, '.gemini/settings.json')), true);
-    assert.deepEqual(result.protected, ['.gemini/commands/demo/custom.toml']);
-    const committed = JSON.parse(fs.readFileSync(path.join(root, '.agents/.airc.json'), 'utf8'));
-    assert.equal(committed.files.managed.includes('.gemini/commands/'), false);
-    assert.equal(committed.files.merged.includes('.gemini/settings.json'), false);
-
-    const rerun = planAgentClientReconciliation({
-      config: committed,
-      mutation: { type: 'none' },
-      projectRoot: root,
-      templateRoot,
-      platformType: 'github',
-      language: 'en'
-    });
-    assert.equal(rerun.changed, false);
-    assert.equal(applyAgentClientReconciliation(rerun).status, 'unchanged');
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test('disabled user-modified seed is protected and config rename failure preserves original config', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-client-reconcile-protect-'));
   try {

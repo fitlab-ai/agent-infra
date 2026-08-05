@@ -30,15 +30,11 @@ const DEFAULTS = JSON.parse(
 
 const AGENT_CLIENT_MANIFEST = JSON.parse('__AGENT_CLIENT_MANIFEST__');
 const CUSTOM_TUI_CONTRACT = JSON.parse('__CUSTOM_TUI_CONTRACT__');
-const RETIRED_GEMINI_COMMAND_HASHES = JSON.parse('__RETIRED_GEMINI_COMMAND_HASHES__');
 // Add a new identifier here only after shipping matching .{platform}. template variants.
 const KNOWN_PLATFORMS = new Set(['github', 'none']);
 const KNOWN_LANGUAGES = new Set(['en', 'zh-CN']);
 
 const BUILTIN_TUI_IDS = AGENT_CLIENT_MANIFEST.map((entry) => entry.id);
-const LEGACY_TUI_IDS = { 'gemini-cli': 'antigravity-cli' };
-const RETIRED_MANAGED_ASSETS = ['.gemini/commands/'];
-const RETIRED_MERGED_ASSETS = ['.gemini/settings.json'];
 
 function normalizeAgentClientConfig(cfg) {
   const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
@@ -55,19 +51,13 @@ function normalizeAgentClientConfig(cfg) {
     errorCode: code,
     errorPath: path
   });
-  const normalizeClientId = (value) => typeof value === 'string'
-    ? (own(LEGACY_TUI_IDS, value)
-        ? LEGACY_TUI_IDS[value]
-        : (BUILTIN_TUI_IDS.includes(value) ? value : null))
-    : null;
   const projectTuis = (value) => {
     if (!Array.isArray(value)) {
       return Object.fromEntries(BUILTIN_TUI_IDS.map((id) => [id, true]));
     }
     const enabled = new Set();
     for (const [index, candidate] of value.entries()) {
-      const id = normalizeClientId(candidate);
-      if (id) enabled.add(id);
+      if (BUILTIN_TUI_IDS.includes(candidate)) enabled.add(candidate);
       else diagnostics.push({ code: 'LEGACY_VALUE_IGNORED', path: `tuis[${index}]` });
     }
     return Object.fromEntries(BUILTIN_TUI_IDS.map((id) => [id, enabled.has(id)]));
@@ -83,8 +73,7 @@ function normalizeAgentClientConfig(cfg) {
     const installed = new Set();
     const remainingTools = [];
     for (const [index, candidate] of value.entries()) {
-      const id = normalizeClientId(candidate);
-      if (id) installed.add(id);
+      if (BUILTIN_TUI_IDS.includes(candidate)) installed.add(candidate);
       else if (typeof candidate === 'string') remainingTools.push(candidate);
       else diagnostics.push({ code: 'LEGACY_VALUE_IGNORED', path: `sandbox.tools[${index}]` });
     }
@@ -139,15 +128,14 @@ function normalizeAgentClientConfig(cfg) {
     ) {
       return failure('INVALID_AGENT_CLIENTS', entryPath);
     }
-    const id = normalizeClientId(candidate.id);
-    if (!id) {
+    if (!BUILTIN_TUI_IDS.includes(candidate.id)) {
       return failure('UNKNOWN_AGENT_CLIENT', `${entryPath}.id`);
     }
-    if (entries.has(id)) return failure('DUPLICATE_AGENT_CLIENT', `${entryPath}.id`);
+    if (entries.has(candidate.id)) return failure('DUPLICATE_AGENT_CLIENT', `${entryPath}.id`);
     if (typeof candidate.enabled !== 'boolean' || typeof candidate.installInSandbox !== 'boolean') {
       return failure('INVALID_AGENT_CLIENTS', entryPath);
     }
-    entries.set(id, {
+    entries.set(candidate.id, {
       enabled: candidate.enabled,
       installInSandbox: candidate.installInSandbox
     });
@@ -207,11 +195,11 @@ function planProjectRegistry(current, sharedDefaults, enabledSet) {
   const enabledAdapters = AGENT_CLIENT_MANIFEST.filter((adapter) => enabledSet.has(adapter.id));
   const disabledAdapters = AGENT_CLIENT_MANIFEST.filter((adapter) => !enabledSet.has(adapter.id));
   const allAdapterAssets = new Set(
-    [...AGENT_CLIENT_MANIFEST.flatMap((adapter) => [
+    AGENT_CLIENT_MANIFEST.flatMap((adapter) => [
       ...adapter.managed,
       ...adapter.merged,
       ...adapter.ejected
-    ]), ...RETIRED_MANAGED_ASSETS, ...RETIRED_MERGED_ASSETS]
+    ])
   );
   const enabled = {
     managed: adapterAssets(enabledAdapters, 'managed'),
@@ -246,8 +234,7 @@ function planProjectRegistry(current, sharedDefaults, enabledSet) {
     enabledManaged: enabled.managed,
     enabledMerged: enabled.merged,
     enabledEjected: enabled.ejected,
-    disabledManaged: adapterAssets(disabledAdapters, 'managed'),
-    retiredManaged: RETIRED_MANAGED_ASSETS
+    disabledManaged: adapterAssets(disabledAdapters, 'managed')
   };
 }
 
@@ -255,15 +242,6 @@ function norm(p) { return p.replace(/\\/g, '/'); }
 
 function sha256(content) {
   return `sha256:${crypto.createHash('sha256').update(content).digest('hex')}`;
-}
-
-function isRetiredGeminiCommand(target, content, project) {
-  const expected = RETIRED_GEMINI_COMMAND_HASHES[path.basename(target, '.toml')];
-  if (!expected) return false;
-  const normalized = project
-    ? content.toString().replaceAll('for ' + project + '.', 'for {' + '{project}}.')
-    : content.toString();
-  return expected.includes(sha256(normalized));
 }
 
 function trustedBaseline(value) {
@@ -1131,8 +1109,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   for (const target of Object.keys(managedBaselines)) {
     if (
       !guardedManaged.has(norm(target))
-      && ![...allClientManaged, ...assetPlan.retiredManaged]
-        .some((entry) => assetMatches(entry, target))
+      && !allClientManaged.some((entry) => assetMatches(entry, target))
     ) {
       delete managedBaselines[target];
       baselinesChanged = true;
@@ -1371,21 +1348,12 @@ function syncTemplates(projectRoot, templateRootOverride) {
   // Disabled clients are converged conservatively: only exact manifest
   // managed targets or previously baselined generated targets are candidates.
   // Merged/ejected and content without trustworthy origin evidence are kept.
-  for (const entry of [...assetPlan.disabledManaged, ...assetPlan.retiredManaged]) {
-    const retired = assetPlan.retiredManaged.includes(entry);
+  for (const entry of assetPlan.disabledManaged) {
     const selectedTargets = selectedTargetsForEntry(entry);
     const candidates = new Set(
       Object.keys(managedBaselines).filter((target) => assetMatches(entry, target))
     );
     for (const target of selectedTargets.keys()) candidates.add(target);
-    if (retired) {
-      const retiredRoot = path.join(projectRoot, entry);
-      if (fs.existsSync(retiredRoot) && fs.statSync(retiredRoot).isDirectory()) {
-        for (const filePath of walkDir(retiredRoot)) {
-          candidates.add(norm(path.relative(projectRoot, filePath)));
-        }
-      }
-    }
 
     for (const target of candidates) {
       const dstFull = path.join(projectRoot, target);
@@ -1431,8 +1399,6 @@ function syncTemplates(projectRoot, templateRootOverride) {
       if (
         (baseline !== null && localHash === baseline)
         || (baseline === null && legacyManaged && templateHash !== null && localHash === templateHash)
-        || (baseline === null && retired && legacyManaged
-          && isRetiredGeminiCommand(target, fs.readFileSync(dstFull), String(project || '')))
       ) {
         fs.unlinkSync(dstFull);
         report.managed.removed.push(target);

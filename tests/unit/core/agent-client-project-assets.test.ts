@@ -50,25 +50,6 @@ test('project asset planning preserves user entries and appends enabled assets c
   ]);
 });
 
-test('project asset planning drops explicitly retired Gemini assets', () => {
-  const plan = planAgentClientProjectAssets({
-    current: {
-      managed: ['.gemini/commands/', 'docs/user.md'],
-      merged: ['.gemini/settings.json'],
-      ejected: []
-    },
-    sharedDefaults,
-    enabledAdapters: adapters,
-    allAdapters: adapters,
-    retiredManaged: ['.gemini/commands/'],
-    retiredMerged: ['.gemini/settings.json']
-  });
-
-  assert.equal(plan.registry.managed.includes('.gemini/commands/'), false);
-  assert.equal(plan.registry.merged.includes('.gemini/settings.json'), false);
-  assert.ok(plan.registry.managed.includes('docs/user.md'));
-});
-
 test('project asset planning supports an empty enabled set and is idempotent', () => {
   const first = planAgentClientProjectAssets({
     current: {
@@ -112,8 +93,7 @@ test('project asset planning returns deeply frozen stable output', () => {
     plan.enabledManaged,
     plan.enabledMerged,
     plan.enabledEjected,
-    plan.disabledManaged,
-    plan.retiredManaged
+    plan.disabledManaged
   ]) {
     assert.ok(Object.isFrozen(values));
   }

@@ -26,7 +26,7 @@ function readGeneratedManifest(target: string) {
 function readGeneratedCustomTUIContract(target: string) {
   const generated = fs.readFileSync(filePath(target), "utf8");
   const match = generated.match(
-    /const CUSTOM_TUI_CONTRACT = (\{[\s\S]*?\n\});\nconst RETIRED_GEMINI_COMMAND_HASHES/
+    /const CUSTOM_TUI_CONTRACT = (\{[\s\S]*?\n\});\n\/\/ Add a new identifier/
   );
   assert.ok(match, `expected generated custom TUI contract in ${target}`);
   return JSON.parse(match[1]!);
@@ -40,10 +40,6 @@ test("src/sync-templates.js has one Agent Client manifest build placeholder", ()
   );
   assert.equal(
     src.match(/const CUSTOM_TUI_CONTRACT = JSON\.parse\('__CUSTOM_TUI_CONTRACT__'\);/g)?.length,
-    1
-  );
-  assert.equal(
-    src.match(/const RETIRED_GEMINI_COMMAND_HASHES = JSON\.parse\('__RETIRED_GEMINI_COMMAND_HASHES__'\);/g)?.length,
     1
   );
 });

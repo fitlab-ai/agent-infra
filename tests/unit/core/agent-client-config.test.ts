@@ -136,25 +136,6 @@ test('canonical input is normalized to stable ID order without mutation', () => 
   assert.notEqual(second.canonical, result.canonical);
 });
 
-test('Gemini client identifiers migrate to Antigravity in canonical and legacy config', () => {
-  const canonicalInput = canonical().map((entry) =>
-    entry.id === 'antigravity-cli' ? { ...entry, id: 'gemini-cli' } : entry
-  );
-  const canonicalResult = normalizeAgentClients({ agentClients: canonicalInput });
-  assert.deepEqual(canonicalResult.canonical, canonical());
-  assert.equal(canonicalResult.changed, true);
-
-  const legacyResult = normalizeAgentClients({
-    tuis: ['gemini-cli'],
-    sandbox: { tools: ['agent-infra', 'gemini-cli'] }
-  });
-  assert.deepEqual(
-    legacyResult.canonical,
-    canonical(['antigravity-cli'], ['antigravity-cli'])
-  );
-  assert.deepEqual(legacyResult.remainingSandboxTools, ['agent-infra']);
-});
-
 test('serializer returns a new stable array and does not mutate state', () => {
   const state = structuredClone(ALL_ENABLED);
   const before = structuredClone(state);

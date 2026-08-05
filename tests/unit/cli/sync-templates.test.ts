@@ -431,67 +431,6 @@ test("syncTemplates migrates customized legacy client selection into canonical s
   }
 });
 
-test("syncTemplates migrates Gemini client state and retires project command assets", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-gemini-migration-"));
-
-  try {
-    const projectRoot = path.join(tmpDir, "project");
-    const { templateRoot } = createTemplateInstall(tmpDir);
-
-    fs.mkdirSync(projectRoot, { recursive: true });
-    writeJson(projectRoot, ".agents/.airc.json", {
-      project: "demo",
-      org: "acme",
-      language: "en",
-      platform: { type: "github" },
-      agentClients: [
-        { id: "claude-code", enabled: true, installInSandbox: true },
-        { id: "codex", enabled: true, installInSandbox: true },
-        { id: "gemini-cli", enabled: true, installInSandbox: true },
-        { id: "opencode", enabled: true, installInSandbox: true }
-      ],
-      files: {
-        managed: [".agents/skills/", ".gemini/commands/"],
-        merged: [".gemini/settings.json"],
-        ejected: []
-      }
-    });
-    writeFile(
-      projectRoot,
-      ".gemini/commands/demo/test.toml",
-      [
-        'description = "Run the full project test workflow"',
-        'prompt = """',
-        'Read and execute the test skill from `.agents/skills/test/SKILL.md`.',
-        '',
-        'Follow all steps defined in the skill exactly.',
-        '"""',
-        ''
-      ].join("\n")
-    );
-    writeFile(projectRoot, ".gemini/commands/demo/custom.toml", "user content\n");
-    writeFile(projectRoot, ".gemini/settings.json", '{"theme":"custom"}\n');
-
-    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
-    const report = syncTemplates(projectRoot, templateRoot);
-    const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents", ".airc.json"), "utf8"));
-
-    assert.equal(report.configUpdated, true);
-    assert.ok(cfg.agentClients.some((entry: { id: string }) => entry.id === "antigravity-cli"));
-    assert.ok(!cfg.agentClients.some((entry: { id: string }) => entry.id === "gemini-cli"));
-    assert.ok(!cfg.files.managed.includes(".gemini/commands/"));
-    assert.ok(!cfg.files.merged.includes(".gemini/settings.json"));
-    assert.equal(fs.existsSync(path.join(projectRoot, ".gemini/commands/demo/test.toml")), false);
-    assert.equal(fs.existsSync(path.join(projectRoot, ".gemini/commands/demo/custom.toml")), true);
-    assert.equal(fs.existsSync(path.join(projectRoot, ".gemini/settings.json")), true);
-    assert.ok(report.managed.protected.some(
-      (entry: { target: string }) => entry.target === ".gemini/commands/demo/custom.toml"
-    ));
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
 test("syncTemplates prefers platform-specific variants and composes with zh-CN localization", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-sync-platform-"));
 

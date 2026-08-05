@@ -732,12 +732,10 @@ test("ensureSandboxAliasesFile upgrades legacy generated alias files", async () 
     "alias claude-yolo='claude --dangerously-skip-permissions'",
     "alias opencode-yolo='opencode --dangerously-skip-permissions'",
     "alias codex-yolo='codex --yolo'",
-    "alias gemini-yolo='gemini --yolo'",
     "",
     "alias cy='claude --dangerously-skip-permissions'",
     "alias oy='opencode --dangerously-skip-permissions'",
     "alias xy='codex --yolo'",
-    "alias gy='gemini --yolo'",
     ""
   ].join("\n");
 
