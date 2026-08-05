@@ -104,6 +104,45 @@ test("Git and release consumers keep write commands behind typed workflow intent
   }
 });
 
+test("release skills keep staging, publishing, and versioned follow-up commands ordered", () => {
+  for (const relativePath of skillDocPaths("release")) {
+    const content = read(relativePath);
+    const prepare = content.indexOf("release-workflow prepare {version}");
+    const publish = content.indexOf("release-workflow publish {version}");
+    const next = content.indexOf("--skill create-release-note");
+    assert.ok(prepare >= 0 && publish > prepare && next > publish, relativePath);
+    assert.match(content.slice(next), /--version \{version\}/, relativePath);
+  }
+
+  for (const relativePath of skillDocPaths("create-release-note")) {
+    const content = read(relativePath);
+    const firstStage = content.indexOf("platform-release-notes stage");
+    const publish = content.indexOf("platform-release-notes publish");
+    const next = content.indexOf("--skill post-release");
+    assert.ok(firstStage >= 0 && publish > firstStage && next > publish, relativePath);
+    assert.match(content.slice(publish), /--expected-sha256/, relativePath);
+    assert.match(content.slice(next), /--version <version>/, relativePath);
+  }
+});
+
+test("post-release command templates expose and forward one version argument", () => {
+  assert.equal(commandSpecs["post-release"]?.usage, "<version>");
+  for (const relativePath of [
+    "templates/.claude/commands/post-release.en.md",
+    "templates/.claude/commands/post-release.zh-CN.md"
+  ]) {
+    assert.match(read(relativePath), /^usage: "\/post-release <version>"$/m, relativePath);
+  }
+  for (const relativePath of [
+    "templates/.opencode/commands/post-release.en.md",
+    "templates/.opencode/commands/post-release.zh-CN.md"
+  ]) assert.match(read(relativePath), /\$ARGUMENTS/, relativePath);
+  for (const relativePath of [
+    "templates/.gemini/commands/_project_/post-release.en.toml",
+    "templates/.gemini/commands/_project_/post-release.zh-CN.toml"
+  ]) assert.match(read(relativePath), /\{\{args\}\}/, relativePath);
+});
+
 test("complete-manual-validation skill docs retain completion control structures", () => {
   skillDocPaths("complete-manual-validation").forEach((relativePath) => {
     const content = read(relativePath);

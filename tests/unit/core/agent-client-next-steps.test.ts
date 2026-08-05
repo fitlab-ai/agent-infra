@@ -149,6 +149,19 @@ test('next-step renderer uses Registry order, appends custom entries, and freeze
   }), []);
 });
 
+test('next-step renderer appends a canonical version after the task ref', () => {
+  const result = renderNextStepCommands({
+    projectName: 'demo',
+    state: stateFor(['codex']),
+    customTUIs: [],
+    skillName: 'post-release',
+    taskRef: '16',
+    version: '1.2.3-rc.1'
+  });
+
+  assert.equal(result[0]?.command, '$post-release 16 1.2.3-rc.1');
+});
+
 test('next-step renderer validates names and task refs without evaluating invocation text', () => {
   const base = {
     projectName: 'demo',
@@ -169,5 +182,9 @@ test('next-step renderer validates names and task refs without evaluating invoca
     { ...base, taskRef: 'bad' }
   ]) {
     assert.throws(() => renderNextStepCommands(input));
+  }
+
+  for (const version of ['v1.2.3', 'V1.2.3', '=1.2.3', '1.2.3 ', '1.2.3;echo']) {
+    assert.throws(() => renderNextStepCommands({ ...base, version }));
   }
 });

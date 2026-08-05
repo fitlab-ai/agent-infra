@@ -107,7 +107,11 @@ const commandSpecs: Record<string, CommandSpec> = {
     en: "Design plan for task $ARGUMENTS.",
     zh: "为任务 $ARGUMENTS 设计方案。"
   },
-  "post-release": {},
+  "post-release": {
+    usage: "<version>",
+    en: "Post-release version $ARGUMENTS.",
+    zh: "发布后处理版本：$ARGUMENTS。"
+  },
   "review-analysis": {
     usage: "[task-ref | --task <ref>]",
     en: "Review analysis for task $ARGUMENTS.",

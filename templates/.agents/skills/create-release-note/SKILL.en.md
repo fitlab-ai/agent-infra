@@ -126,35 +126,36 @@ If no historical release notes exist, use the following default Markdown format:
      - Sort reporters by reported Issue count descending, then lexicographically by login for ties
 5. Empty sections: Omit sections with no entries
 
-### 8. Present and Confirm
+### 8. Stage, Present, and Confirm
 
-Show the generated release notes to the user.
-
-Ask:
-1. Need any adjustments?
-2. Write these notes onto the Release for this version?
-
-### 9. Publish the Release Notes (If Confirmed)
-
-9.1 Write the generated notes to a temp file **outside the working tree** so no uncommitted artifact is left behind in the repo (do not write into `.agents/workspace/` or any version-controlled directory):
+Write the candidate notes to a temporary file outside the working tree, then call typed stage to normalize the file and retain its structured `sha256`:
 
 ```bash
 NOTES_FILE="$(mktemp "${TMPDIR:-/tmp}/agent-infra-release-notes.XXXXXX")"
+agent-infra-internal platform-release-notes stage \
+  --notes-file "$NOTES_FILE"
 ```
 
-Write the notes content to `$NOTES_FILE`.
+Present the exact staged file and delete it before asking. Adjustments invalidate the digest. Only an unambiguous affirmative reply for this preview in the current session authorizes publishing; denial, questions, ambiguity, or interruption stop without publish.
 
-9.2 Call the typed publish intent (use `$NOTES_FILE` for `{notes-file}`); it updates an existing Release or creates a missing one:
+### 9. Recheck and Publish Release Notes
+
+After confirmation, write the confirmed normalized text to a new external temporary file and stage it again. Delete and return to preview if its digest differs. On a match, call:
 
 ```bash
 agent-infra-internal platform-release-notes publish \
-  --tag "v<version>" --title "v<version>" --notes-file "$NOTES_FILE"
+  --tag "v<version>" \
+  --title "v<version>" \
+  --notes-file "$NOTES_FILE" \
+  --expected-sha256 "{preview-sha256}"
 ```
 
-9.3 Remove the temp file whether publishing succeeds or fails:
+Delete the temporary file on every exit path. After success, render:
 
 ```bash
-rm -f "$NOTES_FILE"
+agent-infra-internal agent-client next-steps \
+  --skill post-release \
+  --version <version>
 ```
 
 Output:
@@ -174,7 +175,7 @@ The notes have been written to the Release. Edit further at the URL above if nee
 2. **Tags must exist**: Run the release skill first to create tags
 3. **Release auto-published**: the `v{version}` Release is created and published by the release workflow (the upload target for Homebrew bottles); this skill writes/refreshes the notes on that Release
 4. **Classification accuracy**: Auto-classification is based on title/scope/files; complex PRs may need manual adjustment
-5. **No leftover artifacts**: Always write notes to a temp file outside the working tree (`mktemp`) and delete it after publishing; never write into the repo directory
+5. **No leftover artifacts**: Delete preview files before asking and publish files on every exit path; interruption invalidates session-only notes and authorization
 
 ## Error Handling
 

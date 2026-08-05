@@ -9,7 +9,7 @@ description: >
 
 ## 1. 检查事实
 
-从用户给出的版本或最新稳定 tag 得到 `{version}`，然后执行：
+要求用户显式提供唯一规范 SemVer `{version}`；不得回退到最新稳定 tag。然后执行：
 
 ```bash
 agent-infra-internal release-workflow inspect {version}

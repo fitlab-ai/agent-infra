@@ -65,6 +65,19 @@ test('agent-client next-steps renders enabled built-ins and custom TUIs in text 
   assert.equal(payload.commands[0].command, '$review-code TASK-20260718-232501');
   assert.deepEqual(payload.diagnostics, []);
   assert.equal(payload.error, null);
+
+  const versioned = run(root, [
+    '--skill', 'post-release',
+    '--task-ref', '16',
+    '--version', '1.2.3'
+  ]);
+  assert.equal(versioned.status, 0, versioned.stderr);
+  assert.equal(
+    versioned.stdout,
+    '  - Codex: $post-release 16 1.2.3\n'
+      + '  - Gemini CLI: /demo:post-release 16 1.2.3\n'
+      + '  - Acme: acme demo:post-release 16 1.2.3\n'
+  );
 });
 
 test('agent-client next-steps preserves legacy selection and empty output semantics', () => {
@@ -100,7 +113,10 @@ test('agent-client next-steps fails closed for invalid config and arguments', ()
     [fixture('{'), ['--skill', 'commit'], 'AGENT_CLIENT_CONFIG_INVALID'],
     [fixture({ project: 'demo', agentClients: [] }), ['--skill', 'commit'], 'MISSING_AGENT_CLIENT'],
     [fixture({ project: 'demo', agentClients: canonical([]) }), ['--unknown'], 'AGENT_CLIENT_PAYLOAD_INVALID'],
-    [fixture({ project: 'demo', agentClients: canonical([]) }), ['--skill', 'commit', '--skill', 'test'], 'AGENT_CLIENT_PAYLOAD_INVALID']
+    [fixture({ project: 'demo', agentClients: canonical([]) }), ['--skill', 'commit', '--skill', 'test'], 'AGENT_CLIENT_PAYLOAD_INVALID'],
+    [fixture({ project: 'demo', agentClients: canonical([]) }), ['--skill', 'commit', '--version', '1.2.3', '--version', '1.2.4'], 'AGENT_CLIENT_PAYLOAD_INVALID'],
+    [fixture({ project: 'demo', agentClients: canonical([]) }), ['--skill', 'commit', '--version'], 'AGENT_CLIENT_PAYLOAD_INVALID'],
+    [fixture({ project: 'demo', agentClients: canonical([]) }), ['--skill', 'commit', '--version', 'v1.2.3'], 'AGENT_CLIENT_RENDER_INVALID']
   ] as const) {
     const result = run(root, [...args]);
     assert.equal(result.status, 1);

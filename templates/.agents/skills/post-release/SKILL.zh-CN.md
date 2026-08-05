@@ -7,6 +7,8 @@ description: >
 
 # 发布后处理
 
+要求用户显式提供唯一规范 SemVer `{version}`，不得回退到最新 tag。
+
 ## 1. 检查渠道事实
 
 ```bash

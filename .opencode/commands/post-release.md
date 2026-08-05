@@ -6,4 +6,6 @@ subtask: false
 
 读取并执行 `.agents/skills/post-release/SKILL.md` 中的 post-release 技能。
 
+发布后处理版本：$ARGUMENTS。
+
 严格按照技能中定义的所有步骤执行。

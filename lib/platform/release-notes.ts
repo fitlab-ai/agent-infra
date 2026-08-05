@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 import { resolvePlatformContext } from './context.ts';
 import {
@@ -23,6 +24,86 @@ const unsupportedError = {
   message: 'Release notes are not supported for the configured platform',
   retryable: false
 };
+
+const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
+function releaseNoteFailure(code: string, message: string) {
+  return {
+    status: 'failed' as const,
+    changed: false,
+    operation: null,
+    url: null,
+    error: { code, message, retryable: false }
+  };
+}
+
+function normalizeReleaseNoteBytes(input: Uint8Array): Buffer {
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(input);
+  const normalized = text.replace(/\r\n?/g, '\n').replace(/\n*$/, '') + '\n';
+  return Buffer.from(normalized, 'utf8');
+}
+
+function releaseNoteSha256(bytes: Uint8Array): string {
+  return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+}
+
+function isWithin(parent: string, candidate: string): boolean {
+  const relative = path.relative(parent, candidate);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function stageReleaseNotes(
+  input: { notesFile: string },
+  options: Pick<ReleaseNoteOptions, 'cwd'> = {}
+) {
+  if (!input.notesFile || input.notesFile === '-') {
+    return { status: 'failed' as const, changed: false, notesFile: null, sha256: null, byteLength: null, error: { code: 'RELEASE_NOTES_INPUT_INVALID', message: 'notes-file must identify an existing external file', retryable: false } };
+  }
+  const requestedPath = path.resolve(input.notesFile);
+  let notesFile: string;
+  let sourceStat: fs.Stats;
+  try {
+    if (fs.lstatSync(requestedPath).isSymbolicLink()) throw new Error('symbolic links are not allowed');
+    notesFile = fs.realpathSync(requestedPath);
+    sourceStat = fs.statSync(notesFile);
+    const worktree = fs.realpathSync(path.resolve(options.cwd || process.cwd()));
+    if (!sourceStat.isFile() || isWithin(worktree, notesFile)) throw new Error('path is not an external regular file');
+  } catch {
+    return { status: 'failed' as const, changed: false, notesFile: null, sha256: null, byteLength: null, error: { code: 'RELEASE_NOTES_PATH_INVALID', message: 'notes-file must be a regular file outside the current worktree and must not be a symbolic link', retryable: false } };
+  }
+
+  let original: Buffer;
+  let normalized: Buffer;
+  try {
+    original = fs.readFileSync(notesFile);
+    normalized = normalizeReleaseNoteBytes(original);
+  } catch {
+    return { status: 'failed' as const, changed: false, notesFile, sha256: null, byteLength: null, error: { code: 'RELEASE_NOTES_CONTENT_INVALID', message: 'notes-file must contain valid UTF-8', retryable: false } };
+  }
+
+  const changed = !original.equals(normalized);
+  if (changed) {
+    const temporary = path.join(
+      path.dirname(notesFile),
+      `.${path.basename(notesFile)}.${process.pid}.${Date.now()}.tmp`
+    );
+    try {
+      fs.writeFileSync(temporary, normalized, { flag: 'wx', mode: sourceStat.mode });
+      fs.renameSync(temporary, notesFile);
+    } catch {
+      fs.rmSync(temporary, { force: true });
+      return { status: 'failed' as const, changed: false, notesFile, sha256: null, byteLength: null, error: { code: 'RELEASE_NOTES_STAGE_FAILED', message: 'notes-file could not be staged atomically', retryable: false } };
+    }
+  }
+  return {
+    status: changed ? 'applied' as const : 'no-op' as const,
+    changed,
+    notesFile,
+    sha256: releaseNoteSha256(normalized),
+    byteLength: normalized.byteLength,
+    error: null
+  };
+}
 
 function baseResult(status: 'no-op' | 'failed' | 'blocked') {
   return {
@@ -148,11 +229,20 @@ function releaseNoteContext(
 }
 
 function publishReleaseNotes(
-  input: { tag: string; title: string; notesFile: string; dryRun?: boolean },
+  input: { tag: string; title: string; notesFile: string; expectedSha256: string; dryRun?: boolean },
   options: ReleaseNoteOptions = {}
 ) {
-  if (!input.tag || !input.title || !input.notesFile) {
-    return { status: 'failed' as const, changed: false, operation: null, url: null, error: { code: 'RELEASE_NOTES_INPUT_INVALID', message: 'tag, title, and notes-file are required', retryable: false } };
+  if (!input.tag || !input.title || !input.notesFile || !SHA256_PATTERN.test(input.expectedSha256)) {
+    return releaseNoteFailure('RELEASE_NOTES_INPUT_INVALID', 'tag, title, notes-file, and expected-sha256 are required');
+  }
+  let actualSha256: string;
+  try {
+    actualSha256 = releaseNoteSha256(fs.readFileSync(input.notesFile));
+  } catch {
+    return releaseNoteFailure('RELEASE_NOTES_FILE_UNREADABLE', 'notes-file could not be read');
+  }
+  if (actualSha256 !== input.expectedSha256) {
+    return releaseNoteFailure('RELEASE_NOTES_DIGEST_MISMATCH', 'notes-file does not match the confirmed SHA-256 digest');
   }
   const cwd = path.resolve(options.cwd || process.cwd());
   const platformType = options.platformType ?? configuredPlatform(cwd);
@@ -164,4 +254,10 @@ function publishReleaseNotes(
   return publishGitHubReleaseNotes({ ...input, repository: context.platform.repository }, { cwd, client: options.client });
 }
 
-export { publishReleaseNotes, releaseNoteContext };
+export {
+  normalizeReleaseNoteBytes,
+  publishReleaseNotes,
+  releaseNoteContext,
+  releaseNoteSha256,
+  stageReleaseNotes
+};

@@ -6,4 +6,6 @@ subtask: false
 
 Read and execute the post-release skill from `.agents/skills/post-release/SKILL.md`.
 
+Post-release version $ARGUMENTS.
+
 Follow all steps defined in the skill exactly.

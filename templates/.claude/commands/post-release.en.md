@@ -1,5 +1,6 @@
 ---
 description: "Run post-release tasks"
+usage: "/post-release <version>"
 disable-model-invocation: true
 ---
 

@@ -7,6 +7,8 @@ description: >
 
 # Post-release
 
+Require one explicit canonical SemVer `{version}`. Do not fall back to the latest tag.
+
 ## 1. Inspect Channel Facts
 
 ```bash

@@ -1,5 +1,6 @@
 ---
 description: "执行版本发布后处理"
+usage: "/post-release <version>"
 disable-model-invocation: true
 ---
 

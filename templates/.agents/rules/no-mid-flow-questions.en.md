@@ -39,6 +39,15 @@ SKILLs currently covered by this exemption:
 
 - `analyze-task`: when the task description/requirements are insufficient for a reliable analysis, it may ask questions one at a time at the entry point to converge the requirements
 
+### Exemption 4: Remote-publish authorization for the current snapshot
+
+After preparation in the current session and presentation of the latest snapshot or exact content, one question may ask whether to perform that remote publish. Authorization never carries across sessions or snapshots. Denial, adjustment, a question, ambiguity, or interruption fails closed without a remote write.
+
+SKILLs currently covered by this exemption:
+
+- `release`: may confirm publish after presenting the latest release snapshot
+- `create-release-note`: may confirm publish after presenting exact staged notes and their digest
+
 ## No-Mid-Flow-Questions Clause (default behavior)
 
 For every SKILL execution context not covered by any exemption above, the default behavior is:

@@ -1,5 +1,6 @@
 import { listEnabledAgentClientAdapters } from './registry.ts';
 import { renderAgentClientInvocation } from './invocation.ts';
+import semver from 'semver';
 import type { CustomTUI } from './custom-tuis.ts';
 import type { AgentClientId, AgentClientState } from './types.ts';
 
@@ -16,6 +17,7 @@ type RenderNextStepsInput = Readonly<{
   customTUIs: readonly CustomTUI[];
   skillName: string;
   taskRef?: string;
+  version?: string;
 }>;
 
 const SAFE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
@@ -35,6 +37,17 @@ function renderNextStepCommands(
   if (input.taskRef !== undefined && !SAFE_TASK_REF.test(input.taskRef)) {
     throw new Error('Invalid task ref');
   }
+  if (
+    input.version !== undefined
+    && (!/^[0-9]/.test(input.version) || semver.valid(input.version) !== input.version)
+  ) {
+    throw new Error('Invalid version');
+  }
+
+  const args = [
+    ...(input.taskRef === undefined ? [] : [input.taskRef]),
+    ...(input.version === undefined ? [] : [input.version])
+  ];
 
   const builtins = listEnabledAgentClientAdapters(input.state).map(
     (adapter): NextStepCommand => Object.freeze({
@@ -46,7 +59,7 @@ function renderNextStepCommands(
         {
           projectName: input.projectName,
           skillName: input.skillName,
-          args: input.taskRef === undefined ? [] : [input.taskRef]
+          args
         }
       )
     })
@@ -60,7 +73,7 @@ function renderNextStepCommands(
         {
           projectName: input.projectName,
           skillName: input.skillName,
-          args: input.taskRef === undefined ? [] : [input.taskRef]
+          args
         }
       )
     })

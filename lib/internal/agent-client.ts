@@ -8,11 +8,12 @@ import {
 import { normalizeCustomTUIs } from '../agent-clients/custom-tuis.ts';
 import { renderNextStepCommands } from '../agent-clients/next-steps.ts';
 
-const USAGE = 'Usage: agent-infra-internal agent-client next-steps --skill <skill-name> [--task-ref <NN|TASK-id>] [--format text|json]\n';
+const USAGE = 'Usage: agent-infra-internal agent-client next-steps --skill <skill-name> [--task-ref <NN|TASK-id>] [--version <semver>] [--format text|json]\n';
 
 type ParsedArgs = Readonly<{
   skillName: string;
   taskRef?: string;
+  version?: string;
   format: 'text' | 'json';
 }>;
 
@@ -38,11 +39,12 @@ function parseArgs(args: string[]): ParsedArgs | null {
   }
   let skillName: string | undefined;
   let taskRef: string | undefined;
+  let version: string | undefined;
   let format: 'text' | 'json' = 'text';
   const seen = new Set<string>();
   for (let index = 1; index < args.length; index += 1) {
     const flag = args[index]!;
-    if (!['--skill', '--task-ref', '--format'].includes(flag)) {
+    if (!['--skill', '--task-ref', '--version', '--format'].includes(flag)) {
       failure('AGENT_CLIENT_PAYLOAD_INVALID', `unknown option '${flag}'`);
       return null;
     }
@@ -58,6 +60,7 @@ function parseArgs(args: string[]): ParsedArgs | null {
     seen.add(flag);
     if (flag === '--skill') skillName = value;
     if (flag === '--task-ref') taskRef = value;
+    if (flag === '--version') version = value;
     if (flag === '--format') {
       if (value !== 'text' && value !== 'json') {
         failure('AGENT_CLIENT_PAYLOAD_INVALID', "format must be 'text' or 'json'");
@@ -70,7 +73,12 @@ function parseArgs(args: string[]): ParsedArgs | null {
     failure('AGENT_CLIENT_PAYLOAD_INVALID', "option '--skill' is required");
     return null;
   }
-  return { skillName, ...(taskRef ? { taskRef } : {}), format };
+  return {
+    skillName,
+    ...(taskRef ? { taskRef } : {}),
+    ...(version ? { version } : {}),
+    format
+  };
 }
 
 function agentClient(args: string[] = []): void {
@@ -98,7 +106,8 @@ function agentClient(args: string[] = []): void {
       state: clients.state,
       customTUIs: custom.items,
       skillName: parsed.skillName,
-      ...(parsed.taskRef ? { taskRef: parsed.taskRef } : {})
+      ...(parsed.taskRef ? { taskRef: parsed.taskRef } : {}),
+      ...(parsed.version ? { version: parsed.version } : {})
     });
     if (parsed.format === 'json') {
       process.stdout.write(`${JSON.stringify({

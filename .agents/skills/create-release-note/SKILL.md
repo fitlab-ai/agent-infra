@@ -126,35 +126,45 @@ agent-infra-internal platform-release-notes context \
      - Reporter 之间按报告的 Issue 数量降序排列，数量相同时按 login 字典序
 5. 空部分：省略没有条目的部分
 
-### 8. 展示并确认
+### 8. Stage、展示并确认
 
-向用户展示生成的发布说明。
-
-询问：
-1. 需要调整吗？
-2. 是否把 notes 写入该版本的 Release？
-
-### 9. 发布 Release notes（如确认）
-
-9.1 把生成的 notes 写入**工作树之外**的临时文件，避免在仓库残留未提交产物（不要写入 `.agents/workspace/` 或任何受版本控制的目录）：
+8.1 把候选 notes 写入**工作树之外**的临时文件，不得写入 `.agents/workspace/` 或受版本控制目录：
 
 ```bash
 NOTES_FILE="$(mktemp "${TMPDIR:-/tmp}/agent-infra-release-notes.XXXXXX")"
 ```
 
-把 notes 内容写入 `$NOTES_FILE`。
+8.2 调用 typed stage 规范化同一文件，并从结构化输出保存 `sha256`：
 
-9.2 调用 typed publish intent（命令中的 `{notes-file}` 用 `$NOTES_FILE`）；它会更新已存在的 Release，不存在时创建：
+```bash
+agent-infra-internal platform-release-notes stage \
+  --notes-file "$NOTES_FILE"
+```
+
+只展示 stage 后同一文件的精确内容，并把规范化文本与 digest 保留在当前调用上下文；在询问用户前删除预览文件。调整请求使旧 digest 失效并回到 8.1。
+
+8.3 询问是否针对当前预览发布。只有当前会话中无歧义的明确肯定答复才进入步骤 9；否定、疑问、歧义或中断均停止，不得调用 publish。
+
+### 9. 复核并发布 Release notes
+
+9.1 确认后把已确认的规范化文本写入新的工作树外临时文件，再次调用 stage。若新 digest 与预览 digest 不同，删除文件并停止，必须重新预览确认。
+
+9.2 digest 一致时调用 typed publish；它在解析平台写入上下文前复算实际文件摘要：
 
 ```bash
 agent-infra-internal platform-release-notes publish \
-  --tag "v<version>" --title "v<version>" --notes-file "$NOTES_FILE"
+  --tag "v<version>" \
+  --title "v<version>" \
+  --notes-file "$NOTES_FILE" \
+  --expected-sha256 "{preview-sha256}"
 ```
 
-9.3 无论发布成功或失败，都删除临时文件：
+9.3 无论 stage 或 publish 成功、失败或异常，都删除临时文件。发布成功后渲染对应版本的 post-release：
 
 ```bash
-rm -f "$NOTES_FILE"
+agent-infra-internal agent-client next-steps \
+  --skill post-release \
+  --version <version>
 ```
 
 输出：
@@ -174,7 +184,7 @@ Release notes 已更新。
 2. **标签必须存在**：先执行 release 技能创建标签
 3. **Release 已自动发布**：`v{version}` 的 Release 由 release 工作流自动创建并发布（给 Homebrew bottle 提供上传落点）；本技能往该 Release 写入/刷新 notes
 4. **分类准确性**：自动分类基于标题/scope/文件；复杂的 PR 可能需要手动调整
-5. **不留残留产物**：notes 一律写入工作树之外的临时文件（`mktemp`）并在发布后删除，禁止写入仓库目录
+5. **不留残留产物**：预览文件在询问前删除，发布文件在所有退出路径删除；会话中断时授权和草稿自然失效
 
 ## 错误处理
 
