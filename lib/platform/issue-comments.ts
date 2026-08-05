@@ -38,7 +38,8 @@ const ARTIFACT_TITLES: Record<string, string> = {
   'review-plan': '技术方案审查',
   code: '实现报告',
   'review-code': '代码审查',
-  'manual-validation': '人工验证报告'
+  'manual-validation': '人工验证报告',
+  'pr-review': 'PR 审查报告'
 };
 
 function normalizeCommentContent(content: string): string {
@@ -74,7 +75,7 @@ function renderTaskComment(content: string, taskId: string, agent: string): stri
 
 function artifactIdentity(artifact: string): { stem: string; title: string } {
   const stem = path.basename(artifact, '.md');
-  const match = stem.match(/^(analysis|review-analysis|plan|review-plan|code|review-code|manual-validation)(?:-r(\d+))?$/);
+  const match = stem.match(/^(analysis|review-analysis|plan|review-plan|code|review-code|manual-validation|pr-review)(?:-r(\d+))?$/);
   if (!match) throw new Error(`unsupported artifact '${artifact}'`);
   const base = ARTIFACT_TITLES[match[1]!]!;
   const round = match[2] ? Number(match[2]) : 1;

@@ -16,6 +16,7 @@ const EXPECTED_EVENTS = [
   'commit.completed', 'complete-task.preflight', 'complete-task.completed',
   'create-pr.completed', 'create-task.completed', 'import-codescan.completed',
   'import-dependabot.completed', 'import-issue.completed', 'watch-pr.completed',
+  'review-pr.completed',
   'run-task.paused', 'run-task.completed'
 ] as const;
 
@@ -57,6 +58,7 @@ test('verification catalog is a closed mapping of all business events', () => {
     'import-dependabot.completed': ['import-dependabot', 'active', 'gate', undefined, undefined],
     'import-issue.completed': ['import-issue', 'active', 'gate', undefined, undefined],
     'watch-pr.completed': ['watch-pr', 'active', 'gate', undefined, undefined],
+    'review-pr.completed': ['review-pr', 'active', 'gate', 'pr-review', undefined],
     'run-task.paused': ['run-task', 'active', 'checks', undefined, ['orchestration-state', 'orchestration-evidence']],
     'run-task.completed': ['run-task', 'active', 'checks', undefined, ['orchestration-state', 'orchestration-evidence']]
   } as const;

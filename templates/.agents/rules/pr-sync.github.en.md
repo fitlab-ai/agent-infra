@@ -4,6 +4,14 @@
 
 The model writes the semantic reviewer summary. Typed core owns canonical artifact selection, marker/HEAD wrapping, paginated comment lookup, and reconciliation.
 
+## Three-Layer Isolation
+
+- `sync-pr:{task-id}:summary` (`platform-pr summary-sync`) is an updatable reviewer summary; it is neither a process copy nor a formal Review.
+- The full `pr-review*` process copy lives in the Issue artifact comment (`platform-comment sync --kind artifact`) and is restored by `restore-task` under its Issue-only contract.
+- A formal PR Review (`platform-pr-review publish`) is the only formal conclusion carrier published to the PR, bound to the reviewed head SHA, and includes conclusion, findings, receipt, and the Issue artifact link.
+
+The three never cross: a regular PR comment does not carry the full process copy; an Issue artifact comment is not treated as a formal Review; a summary is not presented as a formal Review.
+
 ```bash
 agent-infra-internal platform-pr summary-context {task-id}
 

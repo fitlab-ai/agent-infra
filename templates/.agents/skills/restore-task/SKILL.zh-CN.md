@@ -59,6 +59,7 @@ description: >
   - `review-plan` / `review-plan-r{N}` -> 对应 `.md`
   - `code` / `code-r{N}` -> 对应 `.md`
   - `review-code` / `review-code-r{N}` -> 对应 `.md`
+  - `pr-review` / `pr-review-r{N}` -> 对应 `.md`
 
 ### 4. 处理分片并检查本地目录
 

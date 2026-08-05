@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { filePath, INTERNAL_CLI_PATH } from '../../helpers.ts';
 
 function writeJson(filePath: string, value: unknown) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -40,6 +40,123 @@ test('internal task-verify resolves task identity and invokes the typed engine',
     const duplicate = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'commit.completed', '--format', 'json', '--format', 'text'], { cwd: root, encoding: 'utf8' });
     assert.equal(duplicate.status, 1);
     assert.equal(JSON.parse(duplicate.stdout).error.code, 'VERIFY_PAYLOAD_INVALID');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('review-pr task-verify gate requires re-sync after publication write-back (PL-8)', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-pr-verify-'));
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: root });
+    spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
+    const id = 'TASK-20260101-000001';
+    const dir = path.join(root, '.agents', 'workspace', 'active', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+    const head = 'a'.repeat(40);
+    fs.writeFileSync(path.join(dir, 'task.md'), [
+      `---`,
+      `id: ${id}`,
+      `type: feature`,
+      `status: active`,
+      `issue_number: 7`,
+      `pr_number: 42`,
+      `---`,
+      ``,
+      `# 任务`,
+      ``,
+      `## 活动日志`,
+      ``,
+      `- 2026-08-04 20:00:00+08:00 — **Review PR (Round 1)** by claude-code — receipt r1-abc`,
+      ``
+    ].join('\n'));
+    const artifactContent = [
+      `# PR 审查报告`,
+      ``,
+      `## 状态核对`,
+      ``,
+      `$ agent-infra-internal task-snapshot ${id} --format text`,
+      ``,
+      `## 身份信息`,
+      ``,
+      `- **PR 编号**：42`,
+      ``,
+      `## 证据清单`,
+      ``,
+      `- **被审 head SHA**：${head}`,
+      `- **审查模式**：verify`,
+      `- **证据场景**：S1`,
+      `- **receipt**：r1-abc`,
+      ``,
+      `## 覆盖矩阵`,
+      ``,
+      `| 检视面 | 证据 | 结论 | 未覆盖/缺口 |`,
+      `|--------|------|------|-------------|`,
+      `| 需求边界 | 证据 | 结论 | 缺口 |`,
+      ``,
+      `## 问题清单`,
+      ``,
+      `（无）`,
+      ``,
+      `## 发布结果`,
+      ``,
+      `- **正式 Review 状态**：applied`,
+      ``,
+      `## 证据原文`,
+      ``,
+      `$ echo verified`,
+      ``
+    ].join('\n');
+    fs.writeFileSync(path.join(dir, 'pr-review.md'), artifactContent);
+
+    writeJson(path.join(root, '.agents/skills/review-pr/config/verify.json'),
+      JSON.parse(fs.readFileSync('.agents/skills/review-pr/config/verify.json', 'utf8')));
+
+    const commentsPath = path.join(root, 'comments.json');
+    fs.writeFileSync(commentsPath, '[]');
+    const issuePath = path.join(root, 'issue.json');
+    fs.writeFileSync(issuePath, JSON.stringify({
+      number: 7, state: 'open', title: 'Test issue', body: 'Issue body',
+      labels: [], milestone: null, type: { name: 'Task' }
+    }));
+    const fakeGhPath = path.join(root, 'fake-gh.cjs');
+    fs.copyFileSync(filePath('tests/fixtures/validate-artifact/fake-gh.js'), fakeGhPath);
+    const env = {
+      ...process.env,
+      AGENT_INFRA_GH_BIN: process.execPath,
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([fakeGhPath]),
+      GH_FAKE_COMMENTS_PATH: commentsPath,
+      GH_FAKE_ISSUE_NUMBER: '7',
+      GH_FAKE_ISSUE_PATH: issuePath
+    };
+    const run = (args: string[]) => spawnSync(process.execPath, [INTERNAL_CLI_PATH, ...args], { cwd: root, env, encoding: 'utf8' });
+
+    // Step 4: first sync of task + artifact comments (snapshot of the original artifact).
+    const taskSync = run(['platform-comment', 'sync', id, '--kind', 'task', '--agent', 'claude-code']);
+    assert.equal(taskSync.status, 0, taskSync.stderr || taskSync.stdout);
+    const artifactSync = run(['platform-comment', 'sync', id, '--kind', 'artifact', '--artifact', 'pr-review.md', '--agent', 'claude-code']);
+    assert.equal(artifactSync.status, 0, artifactSync.stderr || artifactSync.stdout);
+    assert.equal(JSON.parse(artifactSync.stdout).status, 'applied');
+
+    // Step 6 write-back: rewrite the local artifact Publication Result section.
+    fs.writeFileSync(path.join(dir, 'pr-review.md'),
+      artifactContent.replace('- **正式 Review 状态**：applied', '- **正式 Review 状态**：applied\n- **Review URL**：https://github.com/fitlab-ai/agent-infra/pull/42'));
+
+    // Control: verifying WITHOUT re-sync must fail with a content mismatch.
+    const before = run(['task-verify', id, 'review-pr.completed', '--artifact', 'pr-review.md', '--format', 'text']);
+    assert.equal(before.status, 1, before.stdout);
+    assert.match(before.stdout, /Comment content mismatch/);
+
+    // Step 7: re-sync the artifact comment to align local and remote.
+    const reSync = run(['platform-comment', 'sync', id, '--kind', 'artifact', '--artifact', 'pr-review.md', '--agent', 'claude-code']);
+    assert.equal(reSync.status, 0, reSync.stderr || reSync.stdout);
+    assert.equal(JSON.parse(reSync.stdout).status, 'applied');
+
+    // Step 8: after re-sync the closed loop passes.
+    const after = run(['task-verify', id, 'review-pr.completed', '--artifact', 'pr-review.md', '--format', 'text']);
+    assert.equal(after.status, 0, after.stdout);
+    assert.match(after.stdout, /Verification: pass \| Skill: review-pr/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

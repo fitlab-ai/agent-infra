@@ -25,9 +25,9 @@ function fixture(files: Record<string, string> = {}) {
   return { repoRoot, taskDir };
 }
 
-test('catalog exposes exactly the seven approved artifact families', () => {
+test('catalog exposes exactly the approved artifact families', () => {
   assert.deepEqual(artifactFamilyCatalog.map((item) => item.family), [
-    'analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code', 'manual-validation'
+    'analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code', 'manual-validation', 'pr-review'
   ]);
 });
 

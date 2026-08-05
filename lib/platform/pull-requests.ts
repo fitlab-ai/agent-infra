@@ -297,6 +297,44 @@ function inspectPlatformPullRequest(taskRef: string, options: InspectionOptions 
   });
 }
 
+function inspectPlatformPullRequestByNumber(prNumber: number, options: InspectionOptions = {}): PullRequestResult {
+  const client = (options.client as GitHubClient | undefined) || createGitHubClient();
+  const context = resolvePlatformContext({ cwd: options.cwd || process.cwd(), client });
+  const usable = (context.status === 'no-op' || context.status === 'degraded') && context.platform.repository;
+  if (!usable) {
+    return result(context.status, null, null, null, {
+      platform: context.platform, capabilities: context.capabilities, operations: context.operations, error: context.error
+    });
+  }
+  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+    return result('failed', null, null, null, {
+      platform: context.platform, capabilities: context.capabilities,
+      error: { code: 'PR_NUMBER_INVALID', message: 'PR number must be positive', retryable: false }
+    });
+  }
+  const fetched = inspectPlatformChangeRequest(context.platform.type, {
+    cwd: options.cwd || process.cwd(),
+    repository: context.platform.repository!,
+    number: prNumber,
+    client
+  });
+  if (!fetched.ok || !fetched.value) {
+    const error = fetched.error || {
+      code: 'PR_INSPECTION_INVALID',
+      message: 'Platform adapter returned no change-request snapshot',
+      retryable: false
+    };
+    return result(error.retryable ? 'blocked' : 'failed', null, null, prNumber, {
+      platform: context.platform, capabilities: context.capabilities,
+      resource: { kind: 'pull-request', number: prNumber }, error
+    });
+  }
+  return result('no-op', null, null, prNumber, {
+    platform: context.platform, capabilities: context.capabilities,
+    resource: { kind: 'pull-request', number: prNumber }, pullRequest: fetched.value, error: null
+  });
+}
+
 function appendActivity(content: string, line: string): string {
   const body = extractSection(content, ['活动日志', 'Activity Log']);
   return `${body.replace(/\s+$/, '')}${body.trim() ? '\n' : ''}${line}`;
@@ -487,6 +525,7 @@ export {
   createPlatformPullRequest,
   inspectGitHubPullRequest,
   inspectPlatformPullRequest,
+  inspectPlatformPullRequestByNumber,
   normalizePullRequest,
   resolveGitHubChangeRequestGitEvidence,
   selectPullRequest,

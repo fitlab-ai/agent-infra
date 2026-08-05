@@ -51,3 +51,16 @@ test("restore-task Claude command exists", () => {
   assert.ok(exists(localClaudeCommandPath), `${localClaudeCommandPath} should exist`);
   assert.match(read(localClaudeCommandPath), /\/restore-task <issue-number> \[task-id\]/);
 });
+
+test("restore-task stem mapping includes pr-review artifacts and keeps the Issue-only contract", () => {
+  [localSkillPath, templateSkillPath, templateSkillZhPath].forEach((relativePath) => {
+    const content = read(relativePath);
+    assert.match(content, /`pr-review` \/ `pr-review-r\{N\}`/,
+      `${relativePath} should map pr-review artifacts back to .md files`);
+  });
+  [localVerifyPath, templateVerifyPath].forEach((relativePath) => {
+    const verify = JSON.parse(read(relativePath));
+    assert.equal(verify.checks["task-meta"].require_issue_number, true,
+      `${relativePath} should keep the Issue-only restore contract`);
+  });
+});

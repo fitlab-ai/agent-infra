@@ -51,6 +51,16 @@ switch (command) {
     platformPr(process.argv.slice(3));
     break;
   }
+  case 'platform-pr-review': {
+    const { platformPrReview } = await import('../lib/internal/platform-pr-review.ts');
+    platformPrReview(process.argv.slice(3));
+    break;
+  }
+  case 'pr-review-grade': {
+    const { prReviewGrade } = await import('../lib/internal/pr-review-grade.ts');
+    prReviewGrade(process.argv.slice(3));
+    break;
+  }
   case 'platform-checks': {
     const { platformChecks } = await import('../lib/internal/platform-checks.ts');
     await platformChecks(process.argv.slice(3));
@@ -69,6 +79,11 @@ switch (command) {
   case 'task-warning': {
     const { taskWarning } = await import('../lib/internal/task-warning.ts');
     taskWarning(process.argv.slice(3));
+    break;
+  }
+  case 'task-activity': {
+    const { taskActivity } = await import('../lib/internal/task-activity.ts');
+    taskActivity(process.argv.slice(3));
     break;
   }
   case 'task-artifact': {

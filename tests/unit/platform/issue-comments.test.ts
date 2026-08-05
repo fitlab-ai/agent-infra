@@ -36,6 +36,25 @@ test('artifact chunking is UTF-8 safe, bounded and lossless', () => {
   assert.equal(chunks[0]!.marker, MARKERS.artifactChunk('TASK-20260101-000001', 'code', 1, chunks.length));
 });
 
+test('pr-review artifacts chunk under the pr-review stem with round titles', () => {
+  const body = `${'# PR Review\n'.repeat(1)}${'内容 '.repeat(80)}`;
+  const chunks = chunkArtifactComment({
+    taskId: 'TASK-20260101-000001', artifact: 'pr-review-r2.md', agent: 'codex', body, byteLimit: 300
+  });
+  assert.ok(chunks.length > 1);
+  assert.equal(chunks.map((chunk) => chunk.content).join(''), body);
+  assert.equal(chunks[0]!.marker, MARKERS.artifactChunk('TASK-20260101-000001', 'pr-review-r2', 1, chunks.length));
+  assert.match(chunks[0]!.body, /## PR 审查报告（Round 2）/);
+});
+
+test('pr-review.md resolves to the round-1 PR review report title', () => {
+  const [chunk] = chunkArtifactComment({
+    taskId: 'TASK-20260101-000001', artifact: 'pr-review.md', agent: 'codex', body: '# PR Review\n'
+  });
+  assert.equal(chunk!.marker, MARKERS.artifact('TASK-20260101-000001', 'pr-review'));
+  assert.match(chunk!.body, /## PR 审查报告（Round 1）/);
+});
+
 test('artifact backfill adds a deterministic timeline hint without changing content', () => {
   const body = 'historical content\n';
   const [chunk] = chunkArtifactComment({

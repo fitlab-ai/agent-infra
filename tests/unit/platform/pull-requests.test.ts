@@ -6,10 +6,12 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import {
+  inspectPlatformPullRequestByNumber,
   normalizePullRequest,
   resolveGitHubChangeRequestGitEvidence,
   selectPullRequest
 } from '../../../lib/platform/pull-requests.ts';
+import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 
 const remote = (number: number, head = 'feature', base = 'main') => ({
   number,
@@ -44,6 +46,46 @@ test('PR identity normalization retains authoritative merge facts', () => {
   assert.equal(normalized?.base.sha, 'base-8');
   assert.equal(normalized?.mergedAt, '2026-07-25T00:00:00Z');
   assert.equal(normalized?.mergeCommitSha, 'merge-8');
+});
+
+function prByNumberFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-by-number-'));
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:o/r.git'], { cwd: root });
+  fs.mkdirSync(path.join(root, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+  return root;
+}
+
+function mockPrByNumberClient(pullRequest: unknown): GitHubClient {
+  return {
+    version() { return { ok: true, value: '2.16.0' }; },
+    json(args: string[]) {
+      const joined = args.join(' ');
+      if (/api repos\/o\/r\/pulls\/42/.test(joined)) return { ok: true, value: pullRequest };
+      if (args[1] === 'user') return { ok: true, value: { login: 'codex' } };
+      if (args[0] === 'api' && /^repos\/[^/]+\/[^/]+$/.test(args[1] || '')) {
+        return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: true, admin: false } } };
+      }
+      return { ok: false, error: { code: 'PLATFORM_REQUEST_FAILED', message: joined, retryable: false } };
+    },
+    text() { return { ok: true, value: '' }; }
+  } as unknown as GitHubClient;
+}
+
+test('inspectPlatformPullRequestByNumber reads a bare PR number without a task binding', () => {
+  const root = prByNumberFixture();
+  try {
+    const result = inspectPlatformPullRequestByNumber(42, { cwd: root, client: mockPrByNumberClient(remote(42)) });
+    assert.equal(result.status, 'no-op');
+    assert.equal(result.pullRequest?.number, 42);
+    assert.equal(result.pullRequest?.head.sha, 'sha-42');
+    assert.equal(result.pullRequest?.base.sha, 'base-42');
+    assert.equal(result.task.id, null, 'bare-PR inspection must not require a task binding');
+    assert.equal(result.task.prNumber, 42);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('PR selection fails closed for zero or multiple exact head/base matches', () => {

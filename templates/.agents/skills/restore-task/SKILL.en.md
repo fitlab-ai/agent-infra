@@ -60,6 +60,7 @@ Rules:
   - `review-plan` / `review-plan-r{N}` -> matching `.md`
   - `code` / `code-r{N}` -> matching `.md`
   - `review-code` / `review-code-r{N}` -> matching `.md`
+  - `pr-review` / `pr-review-r{N}` -> matching `.md`
 
 ### 4. Process Chunks and Check the Local Directory
 

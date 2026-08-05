@@ -1,0 +1,10 @@
+description = "按证据分级审查 PR 并发布正式 Review"
+prompt = """
+审查 PR {{args}}。
+
+PR 编号可通过 `--pr <number>` 指定，或使用 PR URL；省略时按当前分支反查。
+
+读取并执行 `.agents/skills/review-pr/SKILL.md` 中的 review-pr 技能。
+
+严格按照技能中定义的所有步骤执行。
+"""

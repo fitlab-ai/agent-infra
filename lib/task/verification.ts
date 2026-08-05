@@ -17,6 +17,7 @@ type VerificationEvent =
   | 'create-pr.completed' | 'create-task.completed'
   | 'import-codescan.completed' | 'import-dependabot.completed'
   | 'import-issue.completed' | 'watch-pr.completed'
+  | 'review-pr.completed'
   | 'run-task.paused' | 'run-task.completed';
 type VerificationSpec = {
   skill: string;
@@ -72,6 +73,7 @@ const VERIFICATION_CATALOG: Readonly<Record<VerificationEvent, VerificationSpec>
   'import-dependabot.completed': gate('import-dependabot', 'active'),
   'import-issue.completed': gate('import-issue', 'active'),
   'watch-pr.completed': gate('watch-pr', 'active'),
+  'review-pr.completed': gate('review-pr', 'active', 'pr-review'),
   'run-task.paused': { skill: 'run-task', expectedState: 'active', mode: 'checks', checks: ['orchestration-state', 'orchestration-evidence'] },
   'run-task.completed': { skill: 'run-task', expectedState: 'active', mode: 'checks', checks: ['orchestration-state', 'orchestration-evidence'] }
 };

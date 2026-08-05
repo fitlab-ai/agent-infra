@@ -137,6 +137,11 @@ const commandSpecs: Record<string, CommandSpec> = {
     en: "Review code for task $ARGUMENTS.",
     zh: "审查任务 $ARGUMENTS 的代码。"
   },
+  "review-pr": {
+    usage: "[--pr <number> | <pr-url>]",
+    en: "Review pull request $ARGUMENTS.",
+    zh: "审查 PR $ARGUMENTS。"
+  },
   "run-task": {
     usage: "[task-ref | --task <ref>]",
     en: "Run task lifecycle $ARGUMENTS.",

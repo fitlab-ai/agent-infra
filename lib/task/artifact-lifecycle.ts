@@ -15,7 +15,8 @@ const artifactFamilyCatalog = [
   { family: 'review-plan', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['技术方案审查', 'Plan Review'] },
   { family: 'code', sectionAliases: ['实现备注', 'Implementation Notes'], heading: '实现备注', labels: ['实现报告', 'Implementation Report'] },
   { family: 'review-code', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['代码审查', 'Code Review'] },
-  { family: 'manual-validation', sectionAliases: ['实现备注', 'Implementation Notes'], heading: '实现备注', labels: ['人工验证', 'Manual Validation'] }
+  { family: 'manual-validation', sectionAliases: ['实现备注', 'Implementation Notes'], heading: '实现备注', labels: ['人工验证', 'Manual Validation'] },
+  { family: 'pr-review', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['PR 审查报告', 'PR Review Report'] }
 ] as const;
 
 type ArtifactFamily = (typeof artifactFamilyCatalog)[number]['family'];

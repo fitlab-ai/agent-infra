@@ -434,7 +434,8 @@ test("workflow verification consumers declare their business verification events
     "import-codescan": ["import-codescan.completed"],
     "import-dependabot": ["import-dependabot.completed"],
     "import-issue": ["import-issue.completed"],
-    "watch-pr": ["watch-pr.completed"]
+    "watch-pr": ["watch-pr.completed"],
+    "review-pr": ["review-pr.completed"]
   };
 
   Object.entries(expectations).forEach(([skill, events]) => {
@@ -1344,6 +1345,36 @@ test("workflow skill docs update task comments before publishing artifact commen
         `${relativePath} should sync the task comment before publishing the artifact comment`
       );
     });
+  });
+});
+
+test("review-pr keeps the sync -> write-back -> re-sync -> verify closed-loop order (PL-8)", () => {
+  const variants = [
+    ".agents/skills/review-pr/SKILL.md",
+    "templates/.agents/skills/review-pr/SKILL.zh-CN.md",
+    "templates/.agents/skills/review-pr/SKILL.en.md"
+  ];
+  const artifactSync = "platform-comment sync {task-id} --kind artifact --artifact {pr-review-artifact} --agent {agent}";
+  const taskSync = "platform-comment sync {task-id} --kind task --agent {agent}";
+  const activity = "task-activity {task-id} append";
+  const verify = "agent-infra-internal task-verify {task-id} review-pr.completed";
+
+  variants.forEach((relativePath) => {
+    const content = read(relativePath);
+    const firstTaskSync = content.indexOf(taskSync);
+    const firstArtifactSync = content.indexOf(artifactSync);
+    const taskActivityIndex = content.indexOf(activity);
+    const lastTaskSync = content.lastIndexOf(taskSync);
+    const lastArtifactSync = content.lastIndexOf(artifactSync);
+    const verifyIndex = content.indexOf(verify);
+
+    assert.notEqual(firstTaskSync, -1, `${relativePath} should sync the task comment (step 4)`);
+    assert.notEqual(firstArtifactSync, -1, `${relativePath} should sync the artifact comment (step 4)`);
+    assert.ok(firstTaskSync < firstArtifactSync, `${relativePath} should sync task before artifact (step 4)`);
+    assert.ok(firstArtifactSync < taskActivityIndex, `${relativePath} should write back after the first sync (step 6)`);
+    assert.ok(taskActivityIndex < lastTaskSync, `${relativePath} should re-sync the task comment after write-back (step 7)`);
+    assert.ok(lastTaskSync < lastArtifactSync, `${relativePath} should re-sync the artifact comment after task (step 7)`);
+    assert.ok(lastArtifactSync < verifyIndex, `${relativePath} should verify after the re-sync (step 8)`);
   });
 });
 

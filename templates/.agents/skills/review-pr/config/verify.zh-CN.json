@@ -1,0 +1,37 @@
+{
+  "skill": "review-pr",
+  "checks": {
+    "artifact": {
+      "file_pattern": "pr-review.md|pr-review-r{N}.md",
+      "required_sections": [
+        "身份信息",
+        "证据清单",
+        "覆盖矩阵",
+        "问题清单",
+        "发布结果",
+        "状态核对",
+        "证据原文"
+      ],
+      "required_patterns": [
+        "^\\$ ",
+        "^- \\*\\*被审 head SHA\\*\\*[:：]\\s*[0-9a-f]{40}\\s*$",
+        "^- \\*\\*审查模式\\*\\*[:：]\\s*(?:verify|audit|reconstruct)\\s*$",
+        "^- \\*\\*证据场景\\*\\*[:：]\\s*S[123]\\s*$",
+        "^- \\*\\*receipt\\*\\*[:：]\\s*\\S"
+      ]
+    },
+    "activity-log": {
+      "expected_action_pattern": "Review PR \\(Round \\d+\\)"
+    },
+    "platform-sync": {
+      "when": "issue_number_exists",
+      "expected_comment_marker": "<!-- sync-issue:{task-id}:{artifact-stem} -->",
+      "verify_comment_content": true,
+      "verify_task_comment_content": true,
+      "verify_issue_type": false,
+      "verify_issue_fields": false,
+      "verify_milestone": false,
+      "expected_comment_marker_key": "artifact"
+    }
+  }
+}

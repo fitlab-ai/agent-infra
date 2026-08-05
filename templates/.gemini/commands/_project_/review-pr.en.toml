@@ -1,0 +1,10 @@
+description = "Review a pull request by evidence grade and publish a formal review"
+prompt = """
+Review pull request {{args}}.
+
+The PR number may be given with `--pr <number>`, via a PR URL, or by reverse lookup from the current branch when omitted.
+
+Read and execute the review-pr skill from `.agents/skills/review-pr/SKILL.md`.
+
+Follow all steps defined in the skill exactly.
+"""

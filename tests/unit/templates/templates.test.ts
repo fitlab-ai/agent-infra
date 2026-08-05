@@ -29,6 +29,7 @@ const highFrequencyCommands = [
   "review-analysis",
   "review-code",
   "review-plan",
+  "review-pr",
   "run-task",
   "test",
   "watch-pr"
