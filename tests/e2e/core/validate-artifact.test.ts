@@ -103,11 +103,11 @@ const gateCases = [
       assert.equal(payload.gate, "pass");
       assert.deepEqual(
         payload.checks.map((check) => check.type),
-        ["task-meta", "activity-log", "completion-checklist", "review-ledger", "post-review-commit", "platform-sync-preflight", "platform-sync", "artifact"]
+        ["task-meta", "activity-log", "completion-checklist", "review-ledger", "manual-validation", "post-review-commit", "platform-sync-preflight", "platform-sync", "artifact"]
       );
       assert.deepEqual(
         payload.checks.map((check) => check.status),
-        ["pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass"]
+        ["pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass"]
       );
     }
   }

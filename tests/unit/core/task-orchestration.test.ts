@@ -179,19 +179,50 @@ test('route requires the latest review to bind the latest artifact structurally'
   });
 });
 
-test('route fails closed before commit when manual validation or ledger work remains', () => {
+test('route allows commit when manual validation remains (complete-task gate owns the pending items)', () => {
   const manual = approvedCodeFixture(1);
-  assert.equal(
-    routeOrchestration('TASK-20260101-000001', { repoRoot: manual.root }).error?.code,
-    'ORCHESTRATION_MANUAL_VALIDATION_PENDING'
-  );
+  const routed = routeOrchestration('TASK-20260101-000001', { repoRoot: manual.root });
+  assert.equal(routed.error, null);
+  assert.deepEqual(routed.next, {
+    action: 'commit', role: 'executor', stage: 'commit', round: 1, artifact: 'commit', requestedModel: null
+  });
+});
 
+test('route fails closed before commit when code review ledger work remains', () => {
   const ledger = approvedCodeFixture();
   fs.appendFileSync(path.join(ledger.taskDir, 'task.md'), '\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n| CD-1 | code | 1 | blocker | open | review-code.md#CD-1 |\n');
   assert.equal(
     routeOrchestration('TASK-20260101-000001', { repoRoot: ledger.root }).error?.code,
     'ORCHESTRATION_LEDGER_BLOCKED'
   );
+});
+
+test('commit authorization is issued and the run completes even with pending manual validation', () => {
+  const f = approvedCodeFixture(1);
+  const now = () => '2026-01-01T00:00:00.000Z';
+  const begun = beginOrResumeOrchestration('TASK-20260101-000001', {
+    repoRoot: f.root, id: () => 'run-mv', now
+  });
+  assert.equal(begun.run?.commitAuthorization.issuedAt, null);
+
+  const prepared = prepareOrchestrationDelegation('TASK-20260101-000001', {
+    client: 'claude-code', requestedModel: 'executor-model'
+  }, { repoRoot: f.root, id: () => 'receipt-mv', now, captureWorkspace: snapshot });
+  assert.equal(prepared.next?.stage, 'commit');
+  assert.equal(prepared.run?.pendingDelegation?.workspaceSnapshotScope, 'task');
+  assert.equal(prepared.run?.commitAuthorization.issuedAt, '2026-01-01T00:00:00.000Z');
+
+  assert.equal(activateOrchestrationDelegation('TASK-20260101-000001', {
+    nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-mv', parentId: 'parent-mv',
+    spawnMode: 'fresh', actualModel: 'executor-model'
+  }, { repoRoot: f.root, now }).status, 'running');
+  assert.equal(completeCommitOrchestrationStage('TASK-20260101-000001', 'claude-code', { repoRoot: f.root }).status, 'running');
+  assert.equal(sealOrchestrationDelegation('TASK-20260101-000001', {
+    childId: 'child-mv', exitCode: 0, afterFingerprint: 'after', changedPaths: []
+  }, { repoRoot: f.root, now }).status, 'running');
+  assert.equal(advanceOrchestration('TASK-20260101-000001', { repoRoot: f.root, now }).status, 'completed');
+  assert.equal(readRun(f.taskDir)?.commitAuthorization.consumedAt, '2026-01-01T00:00:00.000Z');
+  assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
 });
 
 test('commit authorization is issued at eligible prepare and the receipt reaches completed', () => {

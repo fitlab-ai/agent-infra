@@ -129,7 +129,7 @@ test('lifecycle hook prefers the repository-local CLI independently of cwd', () 
 });
 
 test('lifecycle hook forwards the exact host-observed model and fallback reason', () => {
-  const fixture = createHookFixture('missing');
+  const fixture = createHookFixture('working');
   const payload = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'claude-subagent-start.json'), 'utf8'));
   payload.model = 'host-model-v2';
   payload.model_fallback_reason = 'requested model was temporarily unavailable';

@@ -87,6 +87,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 - [ ] 代码已提交（没有与此任务相关的未提交变更）
 - [ ] 测试通过
 - [ ] 审查分歧账本无未关闭分歧、无未复审的 post-review 提交；绑定 PR 路径中本地 HEAD、`last_reviewed_commit`、PR head 严格一致，或已合并 squash 的平台快照与远端 Git 等价证据完整且当前 Git 凭据可读取证据 refs；无有效 PR 路径中本地单父重写与 `last_reviewed_commit` 内容等价且之后无受保护提交
+- [ ] 人工校验项已完成（最新 review-code 的 Manual validation 计数 > 0 时，须存在通过校验的 manual-validation 产物及其完成记录，且该完成记录位于最新 review-code 之后；计数为 0 或无未决项时跳过）
 
 > **⚠️ 前置条件分支判断 — 你必须先判断“继续”还是“停止”：**
 >
@@ -145,7 +146,7 @@ agent-infra-internal task-warning {task-id} add --step complete-task --severity 
 agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 ```
 
-该事件依次执行 `review-ledger`、`post-review-commit`、`platform-sync-preflight`。任一退出码非 0（fail/blocked）时，任务必须继续留在 active；从 gate 结果取稳定 code/target，通过 `task-warning ... add --step complete-task ...` 落账后停止。若审查基线或 head 不一致，必须先重新 `commit` / `review-code`；不得回退审查基线。
+该事件依次执行 `review-ledger`、`manual-validation`、`post-review-commit`、`platform-sync-preflight`。任一退出码非 0（fail/blocked）时，任务必须继续留在 active；从 gate 结果取稳定 code/target，通过 `task-warning ... add --step complete-task ...` 落账后停止。若审查基线或 head 不一致，必须先重新 `commit` / `review-code`；不得回退审查基线。
 
 `--force` 不解除本硬门禁：未关闭分歧必须先在账本闭合，未复审提交必须重新审查、具备有效豁免，或由平台适配器为绑定的变更请求（PR/MR）提供权威合并快照与远端 refs，并在隔离临时仓库中证明单父 squash merge 等价，或在无有效变更请求时由本地 Git 对象证明唯一受保护提交是内容等价的单父重写且之后无受保护提交；平台 preflight 必须通过。适配器不支持所需能力，平台事实、Git 对象、拓扑、内容证据缺失，或当前 Git 凭据不能读取远端证据 refs 时 fail closed。required checks 由平台适配器提供规范化状态，并在合并前通过分支保护 / ruleset 以及 `review-code` / `watch-pr` 路由承担。
 
@@ -231,6 +232,7 @@ Completed at: {completion-time}
    - 代码已提交但未审查
    - 审查发现阻塞项但未修复
    - PR 已创建但未合并
+   - 人工校验项未完成
 
 2. **回滚**：如果任务被错误转移：
    ```bash
