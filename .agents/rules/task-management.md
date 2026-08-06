@@ -23,8 +23,9 @@
 
 `--agent` 取值必须收敛到标准 AI 合作者 token，禁止填入 OS 系统用户名（如 `devuser`）或 git 用户名（如 `季聿阶`）。标准集合（短名为活动日志唯一事实来源）：
 
-- AI 短名：`claude` / `codex` / `gemini` / `opencode` / `cursor`
-- 长名映射（写入前归一化为短名）：`claude-code` → `claude`、`gemini-cli` → `gemini`
+- AI 短名：`claude` / `codex` / `antigravity` / `opencode` / `cursor`
+- 长名映射（写入前归一化为短名）：`claude-code` → `claude`、`antigravity-cli` → `antigravity`
+- 历史 `gemini` / `gemini-cli` 仅保留 `ai task log` 渲染兼容，不接受写入
 - 人工步骤例外：无论使用哪个 Agent，只要是人做的决定，统一声明 `human`
 
 六个内部命令（`task-event` / `task-lifecycle` / `platform-issue` / `platform-comment` / `platform-pr` / `task-orchestration`）对 `--agent` 做白名单硬校验：接受短名、长名或 `human`，非标准值返回对应 `*_PAYLOAD_INVALID` 错误；长名在落库/透传前归一化为短名。渲染端 `ai task log` 对无法识别的 token 保留 `human` 归类并附加 `(unknown)` 标记。
