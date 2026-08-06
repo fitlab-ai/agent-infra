@@ -7,6 +7,8 @@ description: >
 ---
 
 # Cancel Task
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 ## Boundary / Critical Rules
 
@@ -53,7 +55,7 @@ When syncing to the Issue, replace any existing `status:` labels with the inferr
 ### 3. Apply the Local Lifecycle Intent
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} cancel --agent {agent} --reason "{one-line cancellation reason}"
+agent-infra-internal task-lifecycle {task-id} cancel --agent {standard-agent-token} --reason "{one-line cancellation reason}"
 ```
 
 Only `status=applied|no-op` means local cancellation completed. On `status=failed`, show the structured error and recovery steps and retry the same intent; do not manually edit task.md, move the directory, or release the short id.
@@ -75,9 +77,9 @@ Confirm the task directory was moved successfully.
 Check whether `task.md` contains a valid `issue_number`. If not, skip this step.
 
 If a valid `issue_number` exists:
-- Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status {reason} --in-labels none --assignees none --milestone none --state closed --close-reason not_planned`
-- Write the cancellation body to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {agent}`
-- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
+- Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status {reason} --in-labels none --assignees none --milestone none --state closed --close-reason not_planned`
+- Write the cancellation body to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {standard-agent-token}`
+- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 
 The cancellation comment must include at least:
 - the cancellation reason

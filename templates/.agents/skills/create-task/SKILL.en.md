@@ -6,6 +6,8 @@ description: >
 ---
 
 # Create Task
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 ## Boundary / Critical Rules
 
@@ -131,12 +133,12 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 After task.md is written, call the declarative intents; the internal core owns templates, body rendering, identity validation, capability degradation, idempotency, and task binding:
 
 ```bash
-agent-infra-internal platform-issue create {task-id} --agent {agent}
-agent-infra-internal platform-issue sync {task-id} --agent {agent} --status waiting-for-triage --assignees current --milestone initial --issue-type --fields
+agent-infra-internal platform-issue create {task-id} --agent {standard-agent-token}
+agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status waiting-for-triage --assignees current --milestone initial --issue-type --fields
 ```
 
 Handle the result:
-- Intent created the Issue: `issue_number` was written through the task writer; run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
+- Intent created the Issue: `issue_number` was written through the task writer; run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 - Rule failed (auth / network / template parse / etc.): do not roll back task.md or append an extra Activity Log entry; run `agent-infra-internal task-warning {task-id} add --step create-task --severity ACTION_REQUIRED --code ISSUE_CREATE_FAILED --target issue --message "{error_code}: {error_message}" --action "Fix auth/network/template issues and manually retry Issue creation, or create/find an Issue and write issue_number"` to submit a structured warning intent (callers do not allocate ids or edit rows), then follow Scenario C
 - Intent returned no-op/degraded: continue applicable operations without blocking the workflow
 - task.md already has a valid `issue_number`: create validates the binding and returns no-op without creating a duplicate

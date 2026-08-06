@@ -7,6 +7,8 @@ description: >
 ---
 
 # 完成人工验证
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 ## 行为边界 / 关键规则
 
@@ -35,7 +37,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## 步骤开始：声明 started 事件
 
-确认前置条件和产物上下文后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} manual-validation.started --agent {agent}`，并以返回的 `artifactContext` 记录本轮身份。
+确认前置条件和产物上下文后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} manual-validation.started --agent {standard-agent-token}`，并以返回的 `artifactContext` 记录本轮身份。
 
 ## 执行步骤
 
@@ -83,9 +85,9 @@ complete-manual-validation {task-ref} [{pr-ref}] {verification-summary}
 
 ### 6. 更新 task.md
 
-执行 `agent-infra-internal task-event {task-id} manual-validation.completed --agent {agent} --artifact {manual-validation-artifact} --summary-result "{summary-result}"`，由核心在保持 `current_step` 不变的同时原子登记实现备注链接、时间/版本和完成日志。
+执行 `agent-infra-internal task-event {task-id} manual-validation.completed --agent {standard-agent-token} --artifact {manual-validation-artifact} --summary-result "{summary-result}"`，由核心在保持 `current_step` 不变的同时原子登记实现备注链接、时间/版本和完成日志。
 
-如任务存在有效 `issue_number`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {agent}`。
+如任务存在有效 `issue_number`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`。
 
 ### 7. 完成校验
 

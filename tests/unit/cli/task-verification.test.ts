@@ -97,7 +97,7 @@ test('unknown events fail with a stable orchestration error', () => {
   assert.equal(unknown.error?.code, 'VERIFY_EVENT_UNKNOWN');
 });
 
-test('run-task verification accepts complete model evidence and rejects missing host identity', () => {
+test('run-task verification accepts complete model evidence and treats model evidence as optional', () => {
   const f = fixture();
   const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
   fs.mkdirSync(configDir, { recursive: true });
@@ -129,17 +129,23 @@ test('run-task verification accepts complete model evidence and rejects missing 
   assert.equal(valid.status, 'pass');
   assert.equal(valid.invocations.length, 2);
 
+  // 模型证据可选：宿主未回传 actual model 属合法状态，不再失败关闭。
   fs.writeFileSync(runPath, `${JSON.stringify({ ...run, receipts: [{ ...receipt, actualModel: null }] }, null, 2)}\n`);
-  const invalid = verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root });
-  assert.equal(invalid.status, 'fail');
-  assert.equal(invalid.invocations.length, 2);
+  const optional = verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root });
+  assert.equal(optional.status, 'pass');
 
-  fs.writeFileSync(runPath, `${JSON.stringify({ ...run, modelPolicy: undefined }, null, 2)}\n`);
+  // 无模型策略的 run 同样合法。
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    ...run,
+    modelPolicy: undefined,
+    receipts: [{ ...receipt, requestedModel: null, actualModel: null }]
+  }, null, 2)}\n`);
   assert.equal(
     verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
-    'fail'
+    'pass'
   );
 
+  // 已有模型策略时，仍校验策略与 receipt 的一致性。
   fs.writeFileSync(runPath, `${JSON.stringify({
     ...run,
     modelPolicy: { executor: 'shared-model', reviewer: 'shared-model', sameModelReason: null },
@@ -196,8 +202,9 @@ test('run-task verification accepts a clean unsupported pause and rejects unsafe
       activatedAt: '2026-01-01T00:00:01.000Z', sealedAt: null, consumedAt: null
     }
   }, null, 2)}\n`);
+  // 模型证据可选：即使有模型策略，宿主未回传 actual model 的 activated receipt 也属合法状态。
   const missingModel = verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root });
-  assert.equal(missingModel.status, 'fail');
+  assert.equal(missingModel.status, 'pass');
   assert.equal(missingModel.invocations.length, 2);
 
   const sealed = JSON.parse(fs.readFileSync(runPath, 'utf8'));

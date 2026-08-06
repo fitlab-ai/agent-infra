@@ -1,5 +1,7 @@
 # Issue Sync
 
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 ## Marker Registry
 
 | Key | Marker |
@@ -14,9 +16,9 @@ Comments use `platform-comment`; Issue resources use `platform-issue`:
 
 ```bash
 agent-infra-internal platform-issue inspect {task-id}
-agent-infra-internal platform-issue create {task-id} --agent {agent}
-agent-infra-internal platform-issue bind {task-id} --issue {number} --agent {agent}
-agent-infra-internal platform-issue sync {task-id} --agent {agent} {desired-state-flags}
+agent-infra-internal platform-issue create {task-id} --agent {standard-agent-token}
+agent-infra-internal platform-issue bind {task-id} --issue {number} --agent {standard-agent-token}
+agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} {desired-state-flags}
 ```
 
 The core owns status/in labels, assignees, milestones, Issue Type, pinned fields, requirements, state, capabilities, dry-run, retries, errors, and idempotency. Omitted flags preserve values; `none` explicitly clears them. Status labels converge to at most one, and ambiguous requirement identity fails closed.

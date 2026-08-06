@@ -1,5 +1,7 @@
 # PR Summary Synchronization
 
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 The model writes the semantic reviewer summary. Typed core owns canonical artifact selection, the marker, current HEAD, paginated comment lookup, and create/update/no-op reconciliation.
 
 ## Inputs
@@ -16,7 +18,7 @@ Write only the summary body to a file, without marker or SHA:
 
 ```bash
 agent-infra-internal platform-pr summary-sync {task-id} \
-  --agent {agent} --body-file {summary-body-file}
+  --agent {standard-agent-token} --body-file {summary-body-file}
 ```
 
 The core wraps `<!-- sync-pr:{task-id}:summary -->` and current `<!-- last-commit: ... -->`, then creates, updates in place, or returns no-op. Duplicate markers fail deterministically. Callers never assemble shell/heredoc comment commands.

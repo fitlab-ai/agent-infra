@@ -10,7 +10,7 @@
 
 ```bash
 agent-infra-internal platform-pr summary-sync {task-id} \
-  --agent {agent} --body-file {summary-body-file}
+  --agent {standard-agent-token} --body-file {summary-body-file}
 ```
 
 marker、当前 HEAD、分页查找和原地更新由 core 负责。若当前 context 表明无需人工校验，则停止并返回 `summary failed: no manual validation required`，不误标通过。

@@ -14,10 +14,10 @@
 
 ## Model Policy
 
-- A new run persists executor/reviewer models. Distinct models require a null `sameModelReason`; using one model for both roles requires an isolation-limit reason. Re-entry must not silently rewrite the policy.
-- Route resolves the requested model by role, prepare matches it before a workspace snapshot, and native spawn explicitly uses it instead of inheriting session defaults.
-- Native start records the host-observed actual model. A requested/actual mismatch separately requires `modelFallbackReason`; the same-model policy reason cannot substitute for it.
-- Missing model policy, actual model, or fallback reason fails closed. A legacy run without model policy pauses stably.
+- Model policy is optional. Hosts that can supply model evidence may persist executor/reviewer models (distinct models require a null `sameModelReason`; using one model for both roles requires an isolation-limit reason). Hosts that cannot report an actual model (e.g. Claude Code) may omit the policy and run without one. Re-entry must not silently rewrite a persisted policy.
+- With a model policy, route resolves the requested model by role, prepare matches it before a workspace snapshot, and native spawn explicitly uses it instead of inheriting session defaults.
+- When native start reports an actual model, core records it. A requested/actual mismatch separately requires `modelFallbackReason`; the same-model policy reason cannot substitute for it. A host that does not report an actual model is a valid state, not a fail-closed condition.
+- Missing model policy or actual model no longer fails closed. A legacy run without model policy may continue normally.
 
 ## Stable Pause Conditions
 

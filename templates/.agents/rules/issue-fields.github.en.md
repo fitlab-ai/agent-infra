@@ -1,9 +1,11 @@
 # Issue Fields
 
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 Synchronize Issue Type and pinned fields through one intent:
 
 ```bash
-agent-infra-internal platform-issue sync {task-id} --agent {agent} --issue-type --fields
+agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --issue-type --fields
 ```
 
 Supported task.md mappings are `priority` → `Priority`, `effort` → `Effort`, `start_date` → `Start date`, and `target_date` → `Target date`. The core normalizes localized priority/effort options and validates `YYYY-MM-DD` dates.

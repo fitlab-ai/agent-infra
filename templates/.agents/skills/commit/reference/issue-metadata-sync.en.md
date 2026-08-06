@@ -11,7 +11,7 @@ If either condition is missing, skip this step.
 Call one declarative intent. The internal core owns diff computation, repository-label filtering, capability degradation, body preservation, and idempotency:
 
 ```bash
-agent-infra-internal platform-issue sync {task-id} --agent {agent} --in-labels from-diff --base {base-branch} --requirements
+agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {base-branch} --requirements
 ```
 
 ## Error Handling

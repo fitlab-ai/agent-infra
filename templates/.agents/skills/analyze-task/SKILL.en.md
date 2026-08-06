@@ -7,6 +7,8 @@ description: >
 ---
 
 # Analyze Task
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 ## Boundary / Critical Rules
 
@@ -36,7 +38,7 @@ Before the state check is complete, do not make external-state assertions such a
 
 ## Step Start: Declare the started Event
 
-After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} analyze.started --agent {agent}` and verify the returned `artifactContext`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} analyze.started --agent {standard-agent-token}` and verify the returned `artifactContext`.
 
 ## Steps
 
@@ -103,8 +105,8 @@ Runs after Step 0 state check and Step 3 (questioning is an external-state actio
   1. Decide this round's question (consistent with 4.2):
      - if a `pending_question` already exists (the previous question is still unanswered) → restate that `pending_question`, do **not** modify it and do **not** increment `question_count`;
      - otherwise (no pending question) → pick the single highest-value question (acceptance criteria > scope > ambiguity) and write `## Brainstorming`: `status: asking`, `pending_question: <question>`, `question_count += 1`.
-  2. If `start_date` is empty, write today (`date +%F`), then run `agent-infra-internal task-event {task-id} analyze.awaiting-input --agent {agent} --question {question_count}` so the core updates base metadata and Activity Log.
-  3. Issue sync (when `issue_number` exists, skip on any failure): run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}` to update only the **task comment**; keep the `status` label at `pending-design-work`; do **not** publish an analysis artifact comment.
+  2. If `start_date` is empty, write today (`date +%F`), then run `agent-infra-internal task-event {task-id} analyze.awaiting-input --agent {standard-agent-token} --question {question_count}` so the core updates base metadata and Activity Log.
+  3. Issue sync (when `issue_number` exists, skip on any failure): run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` to update only the **task comment**; keep the `status` label at `pending-design-work`; do **not** publish an analysis artifact comment.
   4. Verification (replaces the step 8 artifact gate): `agent-infra-internal task-verify {task-id} analyze.awaiting-input --format text` (the early-exit set `current_step: requirement-analysis` and wrote `start_date`, so it should pass); also keep `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` and the task-comment sync evidence. Do **not** run the artifact gate, nor `check activity-log` / `check platform-sync` (both bind to the analysis artifact path).
   5. User output: show only the current **single question** plus how to answer/continue (re-trigger `analyze-task {task-ref}` with the answer), and append the `Completed at` line per `.agents/rules/next-step-output.md`.
   6. **STOP** and wait for the answer. The next trigger returns to this step.
@@ -198,14 +200,14 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   - Overwrite the `priority` field in frontmatter with the new value
   - Append a `## Priority Re-estimate` section to this round's analysis artifact `{analysis-artifact}`, recording: `priority {old} → {new} (rationale: {short basis grounded in this analysis})`
   If the re-estimated value matches the current value, skip it: do not write the `## Priority Re-estimate` section. The Flow A sync that follows reads the possibly updated frontmatter and propagates the new value to the Issue automatically.
-After the business fields are updated, run `agent-infra-internal task-event {task-id} analyze.completed --agent {agent} --artifact {analysis-artifact}` so the core atomically records the link, stage, agent, metadata, and Activity Log.
+After the business fields are updated, run `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --artifact {analysis-artifact}` so the core atomically records the link, stage, agent, metadata, and Activity Log.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Analyze Task (Round {N})** by {agent} — Analysis completed → {analysis-artifact}
   ```
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status pending-design-work --fields`
-- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
-- Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {analysis-artifact} --agent {agent}`
+- Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status pending-design-work --fields`
+- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
+- Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {analysis-artifact} --agent {standard-agent-token}`
 
 ### 8. Verification Gate
 

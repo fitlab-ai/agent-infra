@@ -7,14 +7,14 @@ Before publishing support for a client, prove the lifecycle evidence chain with 
 - Client version, enabled multi-agent capability, launch surface, and trust boundary.
 - Raw start/stop events stably provide event type, managed agent, parent/child identity, fresh spawn mode, and actual model.
 - The explicit requested model reaches each executor/reviewer. A host fallback reports both the actual model and a non-empty fallback reason.
-- Candidate-checkout and packed-install behavior match, with model policy, receipts, and verification results auditable in `orchestration.json`.
+- Candidate-checkout and packed-install behavior match, with model policy (when configured), receipts, and verification results auditable in `orchestration.json`.
 
 ## Validation Sequence
 
 1. Record client version, feature state, and launch command in a clean temporary repository.
 2. Start a fresh executor and reviewer, retaining redacted raw stdin and the structured run. Never synthesize a field the host did not emit.
-3. Validate requested/actual match and justified-fallback paths, plus fail-closed behavior for missing fields.
+3. Validate requested/actual match and justified-fallback paths. When a host cannot report an actual model (e.g. Claude Code, already verified to omit the model field), model evidence becomes optional: the run may proceed without a model policy and does not fail closed.
 4. Validate the same commit from a candidate checkout and an `npm pack` install; record the tarball hash and results.
 5. Commit only redacted summaries and non-sensitive fixtures. Remove or replace tokens, user-specific absolute paths, transcript content, and credentials.
 
-If any required field cannot be observed reliably from the real host, keep that client's orchestration capability `unsupported` and record the gap as manual validation.
+Model evidence is an optional contract: if any required field other than the actual model cannot be observed reliably from the real host, keep that client's orchestration capability `unsupported` and record the gap as manual validation.

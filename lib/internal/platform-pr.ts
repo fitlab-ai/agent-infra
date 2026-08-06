@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import {
   bindPlatformPullRequest,
   createPlatformPullRequest,
@@ -81,6 +82,9 @@ function platformPr(args: string[] = []): void {
   if (operation === 'inspect') { finish(inspectPlatformPullRequest(taskRef, { cwd })); return; }
   if (operation === 'summary-context') { finish(summaryContext(taskRef, { cwd })); return; }
   if (typeof values.agent !== 'string' || !values.agent) { fail(`${operation} requires --agent`); return; }
+  const agent = normalizeAgentToken(values.agent);
+  if (!agent) { fail(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
+  values.agent = agent;
   if (operation === 'bind') {
     const pr = Number(values.pr);
     if (!Number.isInteger(pr) || pr <= 0) { fail('bind requires a positive --pr'); return; }

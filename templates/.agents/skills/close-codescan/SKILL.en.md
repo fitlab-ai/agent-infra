@@ -6,6 +6,8 @@ description: >
 ---
 
 # Dismiss Code Scanning Alert
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 Dismiss the specified Code Scanning (CodeQL) alert and record a justified reason.
 
@@ -81,7 +83,7 @@ Dismiss the alert by following the Code Scanning dismiss command in `.agents/rul
 If a related task exists (search for `codescan_alert_number: <alert-number>`):
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} close-codescan --agent {agent} \
+agent-infra-internal task-lifecycle {task-id} close-codescan --agent {standard-agent-token} \
   --alert-number {alert-number} --reason "{reason}"
 ```
 

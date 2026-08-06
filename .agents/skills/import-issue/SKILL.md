@@ -6,6 +6,8 @@ description: >
 ---
 
 # 导入 Issue
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 导入指定的 Issue 并创建任务。参数：issue 编号。
 
@@ -145,9 +147,9 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ### 5. 绑定并同步 Issue
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
-- 调用 `agent-infra-internal platform-issue bind {task-id} --issue {issue-number} --agent {agent}` 校验并原子绑定
-- 调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --assignees current --milestone initial`
-- 所有场景结束后，必须调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
+- 调用 `agent-infra-internal platform-issue bind {task-id} --issue {issue-number} --agent {standard-agent-token}` 校验并原子绑定
+- 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --assignees current --milestone initial`
+- 所有场景结束后，必须调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 
 ### 6. 完成校验
 

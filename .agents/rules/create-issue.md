@@ -1,9 +1,11 @@
 # Issue 创建
 
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 当 `create-task` 完成本地 `task.md` 落盘后，通过声明式内部命令创建 Issue：
 
 ```bash
-agent-infra-internal platform-issue create {task-id} --agent {agent}
+agent-infra-internal platform-issue create {task-id} --agent {standard-agent-token}
 ```
 
 命令只从已落盘 task.md 读取身份、标题、类型、描述与需求，并复用 `ai task issue-body` 的确定性正文渲染。它负责模板选择、upstream/capability、已有绑定检查、非幂等 POST 边界、响应身份校验及通过任务写入内核回写 `issue_number`。
@@ -11,7 +13,7 @@ agent-infra-internal platform-issue create {task-id} --agent {agent}
 创建后的初始元数据使用同一适配层同步：
 
 ```bash
-agent-infra-internal platform-issue sync {task-id} --agent {agent} \
+agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} \
   --status waiting-for-triage --assignees current --milestone initial --issue-type --fields
 ```
 

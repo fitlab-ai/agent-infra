@@ -7,6 +7,8 @@ description: >
 ---
 
 # Design Technical Plan
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 ## Boundary / Critical Rules
 
@@ -36,7 +38,7 @@ Before the state check is complete, do not make external-state assertions such a
 
 ## Step Start: Write the started Marker
 
-After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} plan.started --agent {agent}` and verify the returned `artifactContext`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-token}` and verify the returned `artifactContext`.
 
 ## Steps
 
@@ -110,14 +112,14 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   - Overwrite the `effort` field in frontmatter with the new value
   - Append a `## Effort Re-estimate` section to this round's plan artifact `{plan-artifact}`, recording: `effort {old} → {new} (rationale: {short basis grounded in this plan})`
   If the re-estimated value matches the current value, skip it: do not write the `## Effort Re-estimate` section. The Flow A sync that follows reads the possibly updated frontmatter and propagates the new value to the Issue automatically.
-After the business fields are updated, run `agent-infra-internal task-event {task-id} plan.completed --agent {agent} --artifact {plan-artifact}` so the core atomically records the link, stage, agent, metadata, and Activity Log.
+After the business fields are updated, run `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --artifact {plan-artifact}` so the core atomically records the link, stage, agent, metadata, and Activity Log.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Task (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
   ```
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status pending-design-work --fields`
-- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
-- Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {plan-artifact} --agent {agent}`
+- Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status pending-design-work --fields`
+- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
+- Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {plan-artifact} --agent {standard-agent-token}`
 
 ### 8. Verification Gate
 

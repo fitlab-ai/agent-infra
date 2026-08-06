@@ -6,6 +6,8 @@ description: >
 ---
 
 # Dismiss Dependabot Alert
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 Dismiss the specified Dependabot security alert and record a justified reason.
 
@@ -89,7 +91,7 @@ Dismiss the alert by following the Dependabot dismiss command in `.agents/rules/
 If a related task exists (search for `security_alert_number: <alert-number>`):
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} close-dependabot --agent {agent} \
+agent-infra-internal task-lifecycle {task-id} close-dependabot --agent {standard-agent-token} \
   --alert-number {alert-number} --reason "{reason}"
 ```
 

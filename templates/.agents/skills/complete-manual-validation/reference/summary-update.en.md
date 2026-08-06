@@ -10,7 +10,7 @@ Follow `.agents/rules/pr-sync.md` for the shared summary structure and failure s
 
 ```bash
 agent-infra-internal platform-pr summary-sync {task-id} \
-  --agent {agent} --body-file {summary-body-file}
+  --agent {standard-agent-token} --body-file {summary-body-file}
 ```
 
 The core owns marker/HEAD wrapping, pagination, and in-place reconciliation. If context says no manual validation is required, stop without marking it passed.

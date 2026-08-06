@@ -7,6 +7,8 @@ description: >
 ---
 
 # 标记任务阻塞
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 ## 行为边界 / 关键规则
 
@@ -52,7 +54,7 @@ description: >
 ### 3. 执行本地生命周期意图
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} block --agent {agent} \
+agent-infra-internal task-lifecycle {task-id} block --agent {standard-agent-token} \
   --reason "{一行原因}" --unblock-condition "{解除阻塞条件}"
 ```
 
@@ -74,8 +76,8 @@ ls .agents/workspace/blocked/{task-id}/task.md
 
 检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过。
 
-如果存在有效的 `issue_number`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status blocked`。
-随后调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}` 更新 task 评论。
+如果存在有效的 `issue_number`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status blocked`。
+随后调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` 更新 task 评论。
 
 ### 7. 完成校验
 
@@ -116,7 +118,7 @@ agent-infra-internal task-verify {task-id} block-task.completed --format text
 ai sandbox rm {branch}
 
 解除阻塞时执行：
-  agent-infra-internal task-lifecycle {task-id} activate --agent {agent} --note "{恢复说明}"
+  agent-infra-internal task-lifecycle {task-id} activate --agent {standard-agent-token} --note "{恢复说明}"
 
 下一步 - 检查任务状态（解除阻塞后）：
 {next-step-commands}
@@ -137,7 +139,7 @@ ai sandbox rm {branch}
 当阻塞问题解决后：
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} activate --agent {agent} --note "{恢复说明}"
+agent-infra-internal task-lifecycle {task-id} activate --agent {standard-agent-token} --note "{恢复说明}"
 ```
 
 成功后从保留的 `current_step` 继续。失败时按结构化 recovery 字段以同一 intent 重试，不手工移动目录或编辑基础元数据。

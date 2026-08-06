@@ -6,6 +6,8 @@ description: >
 ---
 
 # 提交代码
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 在不覆盖用户本地工作的前提下创建 Git commit，并在需要时更新关联任务状态。
 
@@ -147,7 +149,7 @@ agent-infra-internal task-verify {task-id} commit.completed --format text
 校验通过后，声明编排中的 commit 阶段已完成；无 active orchestration run 时该命令为 no-op，不改变直接提交路径：
 
 ```bash
-agent-infra-internal task-orchestration {task-id} stage-completed --agent {agent}
+agent-infra-internal task-orchestration {task-id} stage-completed --agent {standard-agent-token}
 ```
 
 命令失败时停止，不得把缺少完整 receipt 生命周期的 run 标记为完成。

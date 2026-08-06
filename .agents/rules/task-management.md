@@ -19,6 +19,16 @@
 - 更新 `agent_infra_version` 前，先读取 `.agents/rules/version-stamp.md`
 - Activity Log 只能追加，不能覆盖历史记录
 
+## 合作者 token 规范
+
+`--agent` 取值必须收敛到标准 AI 合作者 token，禁止填入 OS 系统用户名（如 `devuser`）或 git 用户名（如 `季聿阶`）。标准集合（短名为活动日志唯一事实来源）：
+
+- AI 短名：`claude` / `codex` / `gemini` / `opencode` / `cursor`
+- 长名映射（写入前归一化为短名）：`claude-code` → `claude`、`gemini-cli` → `gemini`
+- 人工步骤例外：无论使用哪个 Agent，只要是人做的决定，统一声明 `human`
+
+六个内部命令（`task-event` / `task-lifecycle` / `platform-issue` / `platform-comment` / `platform-pr` / `task-orchestration`）对 `--agent` 做白名单硬校验：接受短名、长名或 `human`，非标准值返回对应 `*_PAYLOAD_INVALID` 错误；长名在落库/透传前归一化为短名。渲染端 `ai task log` 对无法识别的 token 保留 `human` 归类并附加 `(unknown)` 标记。
+
 ## 状态快照与完成验证入口
 
 - 运行时 SKILL 需要记录 git、任务目录和 task.md tail 证据时，统一调用 `agent-infra-internal task-snapshot {task-id} --format text`；不得自行解析短号、扫描 workspace 或重新拼接三段状态命令。

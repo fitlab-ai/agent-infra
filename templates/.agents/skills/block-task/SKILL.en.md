@@ -7,6 +7,8 @@ description: >
 ---
 
 # Block Task
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 ## Boundary / Critical Rules
 
@@ -53,7 +55,7 @@ Before blocking, thoroughly analyze:
 ### 3. Apply the Local Lifecycle Intent
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} block --agent {agent} \
+agent-infra-internal task-lifecycle {task-id} block --agent {standard-agent-token} \
   --reason "{one-line reason}" --unblock-condition "{unblock condition}"
 ```
 
@@ -73,8 +75,8 @@ ls .agents/workspace/blocked/{task-id}/task.md
 
 Check whether `task.md` includes a valid `issue_number`. If not, skip this step.
 
-If a valid `issue_number` exists, run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status blocked`.
-Then run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`.
+If a valid `issue_number` exists, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status blocked`.
+Then run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`.
 
 ### 7. Verification Gate
 
@@ -115,7 +117,7 @@ Optional: clean up this task's sandbox
 ai sandbox rm {branch}
 
 To unblock when the issue is resolved:
-  agent-infra-internal task-lifecycle {task-id} activate --agent {agent} --note "{activation note}"
+  agent-infra-internal task-lifecycle {task-id} activate --agent {standard-agent-token} --note "{activation note}"
 
 Next step - check task status after unblocking:
 {next-step-commands}
@@ -136,7 +138,7 @@ Next step - check task status after unblocking:
 When the blocking issue is resolved:
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} activate --agent {agent} --note "{activation note}"
+agent-infra-internal task-lifecycle {task-id} activate --agent {standard-agent-token} --note "{activation note}"
 ```
 
 Resume from the preserved `current_step`. On failure, retry the same intent from the structured recovery fields instead of hand-editing lifecycle state.

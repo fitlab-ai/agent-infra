@@ -7,6 +7,8 @@ description: >
 ---
 
 # Complete Task
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 ## Boundary / Critical Rules
 
@@ -126,8 +128,8 @@ Check whether task.md has a valid `issue_number`. If it does not, skip this step
 When an `issue_number` exists, execute in this exact order:
 
 1. In artifact-catalog order, run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {artifact-agent} --backfill` for every local artifact.
-2. Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --requirements --fields`.
-3. Write the business summary to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {agent}`.
+2. Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`.
+3. Write the business summary to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {standard-agent-token}`.
 
 Do not sync the task comment here; it requires the terminal task.md written by lifecycle. Do not set a `status:` label; platform automation clears status labels after the Issue closes.
 
@@ -154,7 +156,7 @@ This event runs `review-ledger`, `manual-validation`, `post-review-commit`, then
 ### 6. Apply the Local Lifecycle Intent and Verify the Move
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} complete --agent {agent}
+agent-infra-internal task-lifecycle {task-id} complete --agent {standard-agent-token}
 ```
 
 Only `status=applied|no-op` means local completion succeeded. On `status=failed`, show the structured error and recovery steps and retry the same intent; do not claim completion or hand-repair partial state.
@@ -170,7 +172,7 @@ Confirm the task directory was successfully moved.
 Both Scenario A and Scenario B `finalization-retry` execute this step from the completed directory. If a valid `issue_number` exists, first run:
 
 ```bash
-agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}
+agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}
 ```
 
 If this call fails, the task is already archived and `task-warning` cannot accept it. Keep the task completed and stop. After fixing the network or platform issue, rerun complete-task; Step 1 will enter `finalization-retry` and repeat only this step.

@@ -6,6 +6,8 @@ description: >
 ---
 
 # Restore Task
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 Restore local task workspace files from platform Issue comments that contain sync markers.
 
@@ -88,7 +90,7 @@ Write only files that were actually recovered from Issue comments. Do not invent
 ### 6. Apply the Restore Lifecycle Intent
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} restore --agent {agent} \
+agent-infra-internal task-lifecycle {task-id} restore --agent {standard-agent-token} \
   --staging-dir "{staging-dir}" --issue-number {issue-number}
 ```
 

@@ -4,6 +4,6 @@
 
 1. 调用 `agent-infra-internal platform-pr summary-context {task-id}` 获取 canonical 聚合输入。
 2. 按 `.agents/rules/pr-sync.md` 生成纯摘要正文并写入临时文件。
-3. 调用 `agent-infra-internal platform-pr summary-sync {task-id} --agent {agent} --body-file {summary-body-file}`。
+3. 调用 `agent-infra-internal platform-pr summary-sync {task-id} --agent {standard-agent-token} --body-file {summary-body-file}`。
 
 同步失败只记录 warning，不阻塞或回滚已经完成的 commit。`no-op` 回传 `summary skipped (no diff)`。

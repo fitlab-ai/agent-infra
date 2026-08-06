@@ -6,6 +6,8 @@ description: >
 ---
 
 # 还原任务
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 从带有 sync 标记的平台 Issue 评论中恢复本地任务工作区文件。
 
@@ -87,7 +89,7 @@ description: >
 ### 6. 执行 restore 生命周期意图
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} restore --agent {agent} \
+agent-infra-internal task-lifecycle {task-id} restore --agent {standard-agent-token} \
   --staging-dir "{staging-dir}" --issue-number {issue-number}
 ```
 

@@ -1,5 +1,7 @@
 # PR 平台意图命令
 
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 PR 资源的定位、创建、绑定和元数据同步统一通过 typed internal intent；SKILL 只负责决定分支、标题、正文和调用时机，不直接拼装平台命令。
 
 ## 定位
@@ -16,7 +18,7 @@ agent-infra-internal platform-pr inspect {task-id}
 
 ```bash
 agent-infra-internal platform-pr create {task-id} \
-  --agent {agent} --base {target-branch} --head {current-branch} \
+  --agent {standard-agent-token} --base {target-branch} --head {current-branch} \
   --title-file {title-file} --body-file {body-file}
 ```
 
@@ -25,7 +27,7 @@ core 会先按 upstream、head 和 base 精确定位；唯一既有 PR 会复用
 ## 显式绑定
 
 ```bash
-agent-infra-internal platform-pr bind {task-id} --pr {pr-number} --agent {agent}
+agent-infra-internal platform-pr bind {task-id} --pr {pr-number} --agent {standard-agent-token}
 ```
 
 冲突绑定稳定失败且不修改 `task.md`。
@@ -34,7 +36,7 @@ agent-infra-internal platform-pr bind {task-id} --pr {pr-number} --agent {agent}
 
 ```bash
 agent-infra-internal platform-pr sync {task-id} \
-  --agent {agent} --metadata --closing-issue
+  --agent {standard-agent-token} --metadata --closing-issue
 ```
 
 core 从关联 Issue 复制 type / `in:` labels、assignee、具体 milestone，并确保 closing association。权限不足返回逐项 `skipped` 和顶层 `degraded`；不得反向修改 Issue。

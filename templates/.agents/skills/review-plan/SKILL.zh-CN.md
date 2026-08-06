@@ -7,6 +7,8 @@ description: >
 ---
 
 # 技术方案审查
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 审查最新技术方案产物，并产出 `review-plan.md` 或 `review-plan-r{N}.md`。
 
@@ -37,7 +39,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## 步骤开始：声明 started 事件
 
-确认前置条件和产物上下文后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} review-plan.started --agent {agent}`。
+确认前置条件和产物上下文后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} review-plan.started --agent {standard-agent-token}`。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -79,11 +81,11 @@ agent-infra-internal task-snapshot {task-id} --format text
 {unresolved-minor} = stageStatus.unresolvedFindingCounts.minor
 ```
 
-该 intent 原子最终化报告摘要并返回同一次账本快照；不得再调用 `stage-status`、手工替换占位符或扫描问题清单。最终化失败或返回字段缺失时，停止在完成事件之前。以同一次返回的 `stageStatus.canAdvance` 决定 verdict 和下一步：仅 `canAdvance=true` 可用 `approved`，否则必须用 `changes-requested` 或 `rejected`。随后执行 `agent-infra-internal task-event {task-id} review-plan.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n}`。
+该 intent 原子最终化报告摘要并返回同一次账本快照；不得再调用 `stage-status`、手工替换占位符或扫描问题清单。最终化失败或返回字段缺失时，停止在完成事件之前。以同一次返回的 `stageStatus.canAdvance` 决定 verdict 和下一步：仅 `canAdvance=true` 可用 `approved`，否则必须用 `changes-requested` 或 `rejected`。随后执行 `agent-infra-internal task-event {task-id} review-plan.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n}`。
 
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
 
-如果 task.md 中存在有效的 `issue_number`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {agent}`；失败按 `.agents/rules/issue-sync.md` 记录 warning。
+如果 task.md 中存在有效的 `issue_number`，调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`，再调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {standard-agent-token}`；失败按 `.agents/rules/issue-sync.md` 记录 warning。
 
 ### 7. 完成校验
 

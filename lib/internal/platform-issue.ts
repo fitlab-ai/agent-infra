@@ -1,5 +1,6 @@
 import path from 'node:path';
 
+import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import {
   bindPlatformIssue,
   createPlatformIssue,
@@ -76,6 +77,9 @@ function platformIssue(args: string[] = []): void {
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
   if (operation === 'inspect') { finish(inspectPlatformIssue(taskRef, { cwd })); return; }
   if (typeof values.agent !== 'string' || !values.agent) { fail(`${operation} requires --agent`); return; }
+  const agent = normalizeAgentToken(values.agent);
+  if (!agent) { fail(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
+  values.agent = agent;
   if (operation === 'create') {
     finish(createPlatformIssue(taskRef, { cwd, agent: values.agent, dryRun: values.dryRun === true })); return;
   }

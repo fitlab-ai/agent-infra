@@ -1,3 +1,4 @@
+import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import { applyTaskLifecycle, lifecycleIntentCatalog } from '../task/lifecycle.ts';
 import type { TaskLifecycleRequest } from '../task/lifecycle.ts';
 
@@ -33,6 +34,9 @@ function taskLifecycle(args: string[] = []): void {
     seen.add(flag);
     values[key] = key === 'alertNumber' || key === 'issueNumber' ? Number(value) : value;
   }
+  const agent = normalizeAgentToken(String(values.agent ?? ''));
+  if (!agent) { usageFailure(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
+  values.agent = agent;
   const result = applyTaskLifecycle(values as TaskLifecycleRequest);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;

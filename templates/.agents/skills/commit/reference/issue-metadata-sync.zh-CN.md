@@ -11,7 +11,7 @@
 调用单一声明式 intent；diff、仓库 label 过滤、权限降级、正文保真与幂等写入由 internal core 处理：
 
 ```bash
-agent-infra-internal platform-issue sync {task-id} --agent {agent} --in-labels from-diff --base {base-branch} --requirements
+agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --in-labels from-diff --base {base-branch} --requirements
 ```
 
 ## 错误处理

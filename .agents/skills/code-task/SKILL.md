@@ -7,6 +7,8 @@ description: >
 ---
 
 # 编码任务
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 根据已批准的技术方案编码任务，并产出 `code.md` 或 `code-r{N}.md`。本技能支持初次实现、基于 `review-code` 反馈的修复，以及人工裁决驱动实现三种模式。
 
@@ -53,7 +55,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## 步骤开始：声明 started 事件
 
-确认前置条件与模式后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} code.started --agent {agent}`。修复模式追加 `--fix-for {review-artifact}`，裁决模式追加 `--implementation-input {input-id}`。核心根据 artifact context 推导并校验轮次与输入身份；以返回的 `artifactContext` 记录本轮身份。
+确认前置条件与模式后、本轮第一个产出动作之前执行 `agent-infra-internal task-event {task-id} code.started --agent {standard-agent-token}`。修复模式追加 `--fix-for {review-artifact}`，裁决模式追加 `--implementation-input {input-id}`。核心根据 artifact context 推导并校验轮次与输入身份；以返回的 `artifactContext` 记录本轮身份。
 
 ## 执行步骤
 ### 1. 验证前置条件
@@ -79,7 +81,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ### 3. 收窄里程碑
 
-**必须执行，不得跳过。** 如果 task.md 中存在有效的 `issue_number`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --milestone specific`；里程碑推断、权限降级与幂等写入由 internal core 处理。
+**必须执行，不得跳过。** 如果 task.md 中存在有效的 `issue_number`，调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --milestone specific`；里程碑推断、权限降级与幂等写入由 internal core 处理。
 
 > 若跳过或收窄后仍为 `X.Y.x`，步骤 11 的 `task-verify code.completed` 会通过 typed milestone check 截停本轮。
 
@@ -150,14 +152,14 @@ echo "$result"
 - 审查 `## 需求` 段落，仅把本轮已由代码实现且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
 - 产物链接、阶段与完成日志由 completed 事件统一登记
 - 完成业务内容更新后声明完成事件：
-  - 初次实现：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`
-  - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
-  - 裁决模式：`agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --implementation-input {input-id} --files-modified {n} --tests-passed {n}`
+  - 初次实现：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`
+  - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
+  - 裁决模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --implementation-input {input-id} --files-modified {n} --tests-passed {n}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则记录 warning 并继续；Issue 元数据边界仍见 `.agents/rules/issue-sync.md`）：
-- 调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status in-progress`
-- 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
-- 调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {code-artifact} --agent {agent}`
+- 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`
+- 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
+- 调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {code-artifact} --agent {standard-agent-token}`
 
 ### 11. 完成校验
 

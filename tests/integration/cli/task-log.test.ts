@@ -213,12 +213,13 @@ test('ai task log renders a human-executed review row as `human` with a `-` STAR
 
   const out = runCli(['task', 'log', taskId], repoRoot);
   assert.equal(out.status, 0, out.stderr);
-  // AGENT normalized to `human` (drops the CJK name -> columns stay aligned);
+  // AGENT keeps the `human` grouping but gains a visible `(unknown)` marker
+  // (HD-3): unknown tokens are no longer silently collapsed to bare `human`.
   // STARTED shows the `-` placeholder since the human step has no start marker.
   // `Human Review` is not a canonical review prefix, so NOTE carries no human counts.
   assert.match(
     out.stdout,
-    /^1\s+Human Review\s+human\s+-\s+2026-06-18 15:32:53\+08:00\s+Verdict: Changes Requested, blockers: 1, major: 0, minor: 0 → human-review\.md/m
+    /^1\s+Human Review\s+human \(unknown\)\s+-\s+2026-06-18 15:32:53\+08:00\s+Verdict: Changes Requested, blockers: 1, major: 0, minor: 0 → human-review\.md/m
   );
   assert.match(out.stdout, /^Total: 1 steps$/m);
 });
@@ -240,6 +241,26 @@ test('ai task log keeps an AI agent (cursor) as-is with an empty STARTED on a le
     /^1\s+Code Task \(Round 1\)\s+cursor\s+2026-06-18 14:00:00\+08:00\s+Code implemented → code\.md/m
   );
   assert.match(out.stdout, /^Total: 1 steps$/m);
+});
+
+test('ai task log renders legacy long-name agents as their short token', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000018';
+  // Pre-normalization legacy entries may carry `.airc.json` long names; the
+  // renderer maps them to the canonical short token (claude-code -> claude).
+  writeTask(activeDir, taskId, '## 活动日志', [
+    '- 2026-06-18 14:00:00+08:00 — **Code Task (Round 1)** by claude-code — Code implemented → code.md',
+    '- 2026-06-18 15:00:00+08:00 — **Review Plan (Round 1)** by gemini-cli — Plan reviewed → review-plan.md'
+  ]);
+
+  const out = runCli(['task', 'log', taskId], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  // Long names classify as AI and render as their short display token; they
+  // are NOT given the `(unknown)` marker and keep an empty STARTED on a
+  // done-only row.
+  assert.match(out.stdout, /^1\s+Code Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+Code implemented → code\.md/m);
+  assert.match(out.stdout, /^2\s+Review Plan \(Round 1\)\s+gemini\s+2026-06-18 15:00:00\+08:00\s+Plan reviewed, Manual-validation: 0, Human-decision: 0 → review-plan\.md/m);
+  assert.match(out.stdout, /^Total: 2 steps$/m);
 });
 
 test('ai task log fails when the task has no activity log section', () => {

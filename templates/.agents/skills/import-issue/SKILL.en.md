@@ -6,6 +6,8 @@ description: >
 ---
 
 # Import Issue
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 Import the specified Issue and create a task. Argument: issue number.
 
@@ -145,9 +147,9 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 ### 5. Bind and Sync the Issue
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Run `agent-infra-internal platform-issue bind {task-id} --issue {issue-number} --agent {agent}`
-- Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --assignees current --milestone initial`
-- After every scenario, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
+- Run `agent-infra-internal platform-issue bind {task-id} --issue {issue-number} --agent {standard-agent-token}`
+- Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --assignees current --milestone initial`
+- After every scenario, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 
 ### 6. Verification Gate
 

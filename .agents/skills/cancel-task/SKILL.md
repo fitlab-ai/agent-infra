@@ -7,6 +7,8 @@ description: >
 ---
 
 # 取消任务
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 ## 行为边界 / 关键规则
 
@@ -52,7 +54,7 @@ description: >
 ### 3. 执行本地生命周期意图
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} cancel --agent {agent} --reason "{一行取消原因}"
+agent-infra-internal task-lifecycle {task-id} cancel --agent {standard-agent-token} --reason "{一行取消原因}"
 ```
 
 仅 `status=applied|no-op` 视为本地取消完成。`status=failed` 时展示结构化 `error` 与 recovery steps，并以同一 intent 重试；不得手工编辑 task.md、移动目录或释放短号。
@@ -74,9 +76,9 @@ ls .agents/workspace/completed/{task-id}/task.md
 检查 `task.md` 中是否存在有效的 `issue_number`。如果没有，跳过此步骤。
 
 如果存在有效的 `issue_number`：
-- 调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status {reason} --in-labels none --assignees none --milestone none --state closed --close-reason not_planned`
-- 将取消正文写入临时文件，调用 `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {agent}`
-- 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
+- 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status {reason} --in-labels none --assignees none --milestone none --state closed --close-reason not_planned`
+- 将取消正文写入临时文件，调用 `agent-infra-internal platform-comment sync {task-id} --kind cancel --body-file {path} --agent {standard-agent-token}`
+- 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 
 取消评论至少包含：
 - 取消原因

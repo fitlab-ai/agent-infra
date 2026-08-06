@@ -126,21 +126,6 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
   const existing = readRun(resolved.taskDir);
   if (existing) {
-    if (!existing.modelPolicy && existing.status !== 'completed') {
-      if (existing.status === 'paused' && existing.pause?.code === 'ORCHESTRATION_MODEL_EVIDENCE_MISSING') {
-        return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
-      }
-      const paused = withUpdatedRun(existing, {
-        status: 'paused',
-        pause: {
-          code: 'ORCHESTRATION_MODEL_EVIDENCE_MISSING',
-          message: 'existing orchestration run has no persisted model policy',
-          recoverable: false
-        }
-      });
-      saveRun(resolved.taskDir, paused);
-      return { status: 'paused', changed: true, taskId: resolved.taskId, run: paused, next: null, error: null };
-    }
     if (options.modelPolicy) {
       const policyError = validateModelPolicy(options.modelPolicy);
       if (policyError) return failed(policyError.code, policyError.message, resolved.taskId);
@@ -155,7 +140,7 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
     }
     return { status: existing.status, changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
   }
-  const policyError = validateModelPolicy(options.modelPolicy);
+  const policyError = options.modelPolicy ? validateModelPolicy(options.modelPolicy) : null;
   if (policyError) return failed(policyError.code, policyError.message, resolved.taskId);
   const now = (options.now ?? (() => new Date().toISOString()))();
   const run: OrchestrationRun = {
@@ -166,7 +151,7 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
     nextStage: null,
     stepCount: 0,
     maxSteps: options.maxSteps ?? 24,
-    modelPolicy: options.modelPolicy!,
+    ...(options.modelPolicy ? { modelPolicy: options.modelPolicy } : {}),
     baseline: '',
     pendingDelegation: null,
     receipts: [],
@@ -316,7 +301,6 @@ function prepareOrchestrationDelegation(
   }
   const run = readRun(resolved.taskDir);
   if (!run || run.status !== 'running') return failed('ORCHESTRATION_RUN_NOT_RUNNING', 'a running orchestration is required', resolved.taskId);
-  if (!run.modelPolicy) return failed('ORCHESTRATION_MODEL_EVIDENCE_MISSING', 'running orchestration has no persisted model policy', resolved.taskId);
   if (run.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_BUSY', 'the run already has a pending delegation', resolved.taskId);
   const repositoryPending = (['claude-code', 'codex'] as AgentClientId[])
     .flatMap((client) => matchingDelegations(client, () => true, options));
@@ -327,12 +311,15 @@ function prepareOrchestrationDelegation(
   const routed = routeOrchestration(taskRef, options);
   if (!routed.next) return routed;
   const next = routed.next;
-  if (!validModel(input.requestedModel)) {
-    return failed('ORCHESTRATION_REQUESTED_MODEL_REQUIRED', 'prepare requires the exact requested model identity', resolved.taskId);
-  }
-  const expectedModel = run.modelPolicy[next.role];
-  if (input.requestedModel !== expectedModel) {
-    return failed('ORCHESTRATION_REQUESTED_MODEL_MISMATCH', `requested model does not match the persisted ${next.role} model`, resolved.taskId);
+  // 模型证据可选：无持久化策略时允许 prepare；有策略时 requestedModel 须与策略一致。
+  if (run.modelPolicy) {
+    const expectedModel = run.modelPolicy[next.role];
+    if (!validModel(input.requestedModel)) {
+      return failed('ORCHESTRATION_REQUESTED_MODEL_REQUIRED', 'prepare requires the exact requested model identity', resolved.taskId);
+    }
+    if (input.requestedModel !== expectedModel) {
+      return failed('ORCHESTRATION_REQUESTED_MODEL_MISMATCH', `requested model does not match the persisted ${next.role} model`, resolved.taskId);
+    }
   }
   let beforeFingerprint: string;
   try {
@@ -348,7 +335,7 @@ function prepareOrchestrationDelegation(
     round: next.round,
     artifact: next.artifact,
     client: input.client,
-    requestedModel: input.requestedModel,
+    requestedModel: input.requestedModel ?? null,
     workspaceSnapshotScope: 'task',
     beforeFingerprint
   }, { id: options.id, now: options.now });

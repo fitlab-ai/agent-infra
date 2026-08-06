@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import {
   checkPlatformCommentOwner,
   listPlatformComments,
@@ -77,6 +78,8 @@ function platformComment(args: string[] = []): void {
   const agent = parsed.values.agent;
   if (!['task', 'artifact', 'summary', 'cancel'].includes(String(kind))) { fail('sync requires a valid --kind'); return; }
   if (typeof agent !== 'string' || !agent) { fail('sync requires --agent'); return; }
+  const normalizedAgent = normalizeAgentToken(agent);
+  if (!normalizedAgent) { fail(`invalid --agent '${agent}': ${AGENT_USAGE_HINT}`); return; }
   if (kind === 'artifact' && typeof parsed.values.artifact !== 'string') { fail('artifact sync requires --artifact'); return; }
   if ((kind === 'summary' || kind === 'cancel') && typeof parsed.values.bodyFile !== 'string') { fail(`${kind} sync requires --body-file`); return; }
   let body: string | undefined;
@@ -88,7 +91,7 @@ function platformComment(args: string[] = []): void {
   }
   finish(syncPlatformComment(taskRef!, {
     kind: kind as CommentKind,
-    agent,
+    agent: normalizedAgent,
     artifact: typeof parsed.values.artifact === 'string' ? parsed.values.artifact : undefined,
     body,
     backfill: parsed.values.backfill === true,

@@ -7,6 +7,8 @@ description: >
 ---
 
 # 完成任务
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 ## 行为边界 / 关键规则
 
@@ -125,8 +127,8 @@ Please complete the missing steps first, or use --force to override.
 如果存在有效的 `issue_number`，严格按以下顺序执行：
 
 1. 按 artifact catalog 顺序，对本地已有产物逐项调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {artifact-agent} --backfill`。
-2. 调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --requirements --fields`。
-3. 把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {agent}`。
+2. 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`。
+3. 把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {standard-agent-token}`。
 
 不要在本步骤同步 task 评论；它依赖 lifecycle 写入后的完整终态 task.md。不要设置 `status:` label，平台自动化应在 Issue 关闭后清理状态标签。
 
@@ -153,7 +155,7 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 ### 6. 执行本地生命周期意图并验证转移
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} complete --agent {agent}
+agent-infra-internal task-lifecycle {task-id} complete --agent {standard-agent-token}
 ```
 
 仅 `status=applied|no-op` 视为本地完成。`status=failed` 时展示 `error` 与 completed/pending steps，以同一 intent 重试；不得宣称完成或手工补写局部状态。
@@ -169,7 +171,7 @@ ls .agents/workspace/completed/{task-id}/task.md
 场景 A 与场景 B `finalization-retry` 都从 completed 目录执行本步骤。若存在有效的 `issue_number`，先调用：
 
 ```bash
-agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}
+agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}
 ```
 
 该调用失败时任务已归档，不能调用只接受 active 任务的 `task-warning`；保留 completed 状态并停止。修复网络或平台问题后重跑 complete-task，会由步骤 1 进入 `finalization-retry`，只重复本步骤。

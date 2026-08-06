@@ -7,6 +7,8 @@ description: >
 ---
 
 # 分析任务
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 ## 行为边界 / 关键规则
 
@@ -39,7 +41,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 确认前置条件和轮次后、本轮第一个产出动作之前执行：
 
 ```bash
-agent-infra-internal task-event {task-id} analyze.started --agent {agent}
+agent-infra-internal task-event {task-id} analyze.started --agent {standard-agent-token}
 ```
 
 ## 执行步骤
@@ -106,8 +108,8 @@ agent-infra-internal task-event {task-id} analyze.started --agent {agent}
   1. 确定本轮要问的问题（与 4.2 保持一致）：
      - 若已存在 `pending_question`（上一问尚未得到答案）→ 复述该 `pending_question`，**不**修改它、**不**增加 `question_count`；
      - 否则（无待答问题）→ 选最高价值的一个问题（验收标准 > 范围 > 歧义），写入 `## Brainstorming`：`status: asking`、`pending_question: <问题>`、`question_count += 1`。
-  2. 若 `start_date` 为空，写入当日日期（`date +%F`）；随后执行 `agent-infra-internal task-event {task-id} analyze.awaiting-input --agent {agent} --question {question_count}`，由核心统一更新基础 frontmatter 和 Activity Log。
-  3. Issue 同步（存在 `issue_number` 时，任一失败跳过）：调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}` 更新 **task 评论**；`status` label 维持 `pending-design-work`；**不**发布分析产物评论。
+  2. 若 `start_date` 为空，写入当日日期（`date +%F`）；随后执行 `agent-infra-internal task-event {task-id} analyze.awaiting-input --agent {standard-agent-token} --question {question_count}`，由核心统一更新基础 frontmatter 和 Activity Log。
+  3. Issue 同步（存在 `issue_number` 时，任一失败跳过）：调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` 更新 **task 评论**；`status` label 维持 `pending-design-work`；**不**发布分析产物评论。
   4. 校验（替代步骤 8 的 artifact gate）：`agent-infra-internal task-verify {task-id} analyze.awaiting-input --format text`（早退已置 `current_step: requirement-analysis` 且已写入 `start_date`，预期通过）；并保留 `rg -n 'Analyze Task \(Brainstorming\)' .agents/workspace/active/{task-id}/task.md` 与 task 评论同步证据。**不**跑 artifact gate，也不跑 `check activity-log` / `check platform-sync`（二者绑定分析产物路径）。
   5. 用户输出：只展示当前**单个问题** + 如何回答/继续（再次触发 `analyze-task {task-ref}` 并附答案），并按 `.agents/rules/next-step-output.md` 在末行追加 `Completed at`。
   6. **STOP**，等待回答。下一次触发回到本步骤。
@@ -199,12 +201,12 @@ agent-infra-internal task-event {task-id} analyze.started --agent {agent}
   - 用新值覆盖 frontmatter 的 `priority` 字段
   - 在本轮分析产物 `{analysis-artifact}` 中追加 `## 优先级重估` 段，记录一条：`priority {old} → {new} (rationale: {基于本轮分析的简短依据})`
   若重估值与当前值一致，跳过：不写入 `## 优先级重估` 段。后续 Flow A 同步会读取可能更新过的 frontmatter，并自动把新值同步到 Issue。
-- 完成业务内容更新后执行 `agent-infra-internal task-event {task-id} analyze.completed --agent {agent} --artifact {analysis-artifact}`，由核心原子登记链接、阶段、代理、时间、版本和 Activity Log。
+- 完成业务内容更新后执行 `agent-infra-internal task-event {task-id} analyze.completed --agent {standard-agent-token} --artifact {analysis-artifact}`，由核心原子登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
-- 调用 `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status pending-design-work --fields`
-- 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
-- 调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {analysis-artifact} --agent {agent}`
+- 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status pending-design-work --fields`
+- 调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
+- 调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {analysis-artifact} --agent {standard-agent-token}`
 
 ### 8. 完成校验
 

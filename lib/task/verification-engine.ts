@@ -181,16 +181,19 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
   } catch (error) {
     return failResult('orchestration-evidence', `Invalid orchestration.json: ${String(error)}`);
   }
-  const policy = run.modelPolicy;
-  if (!policy || !exactText(policy.executor) || !exactText(policy.reviewer)) {
-    return failResult('orchestration-evidence', 'Run model policy requires exact executor and reviewer identities');
-  }
-  if (policy.executor === policy.reviewer) {
-    if (!exactText(policy.sameModelReason)) {
-      return failResult('orchestration-evidence', 'Shared executor/reviewer model requires a persisted reason');
+  const policy = run.modelPolicy ?? null;
+  // 模型证据可选：无持久化策略时跳过模型身份校验（宿主不提供模型属合法状态）。
+  if (policy) {
+    if (!exactText(policy.executor) || !exactText(policy.reviewer)) {
+      return failResult('orchestration-evidence', 'Run model policy requires exact executor and reviewer identities');
     }
-  } else if (policy.sameModelReason !== null) {
-    return failResult('orchestration-evidence', 'Distinct executor/reviewer models require a null same-model reason');
+    if (policy.executor === policy.reviewer) {
+      if (!exactText(policy.sameModelReason)) {
+        return failResult('orchestration-evidence', 'Shared executor/reviewer model requires a persisted reason');
+      }
+    } else if (policy.sameModelReason !== null) {
+      return failResult('orchestration-evidence', 'Distinct executor/reviewer models require a null same-model reason');
+    }
   }
   if (!Array.isArray(run.receipts)) {
     return failResult('orchestration-evidence', 'Run receipts must be an array');
@@ -207,19 +210,19 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
   }
   const receipts = [...run.receipts, ...(run.pendingDelegation ? [run.pendingDelegation] : [])];
   for (const receipt of receipts) {
-    const expectedModel = policy[receipt.role];
-    if (!expectedModel || receipt.requestedModel !== expectedModel) {
-      return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' requested model does not match its role policy`);
+    if (policy) {
+      const expectedModel = policy[receipt.role];
+      if (!expectedModel || receipt.requestedModel !== expectedModel) {
+        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' requested model does not match its role policy`);
+      }
     }
     const activated = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status);
     if (activated) {
-      if (!exactText(receipt.actualModel)) {
-        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has no host-observed actual model`);
-      }
       if (!exactText(receipt.parentId) || !exactText(receipt.childId) || receipt.parentId === receipt.childId || receipt.spawnMode !== 'fresh') {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid fresh delegation identity`);
       }
-      if (receipt.actualModel !== receipt.requestedModel && !exactText(receipt.modelFallbackReason)) {
+      // 模型证据可选：宿主未回传 actual model 属合法状态；仅在它存在且与 requested 不一致、又缺少降级理由时失败。
+      if (receipt.actualModel && receipt.actualModel !== receipt.requestedModel && !exactText(receipt.modelFallbackReason)) {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' model fallback is not justified`);
       }
     }

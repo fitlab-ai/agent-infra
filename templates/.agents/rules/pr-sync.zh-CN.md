@@ -1,5 +1,7 @@
 # PR 摘要同步
 
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 PR 摘要的语义聚合由模型完成；canonical 产物选择、marker、当前 HEAD、分页评论查找和 create/update/no-op 由 typed core 负责。
 
 ## 聚合输入
@@ -23,7 +25,7 @@ agent-infra-internal platform-pr summary-context {task-id}
 
 ```bash
 agent-infra-internal platform-pr summary-sync {task-id} \
-  --agent {agent} --body-file {summary-body-file}
+  --agent {standard-agent-token} --body-file {summary-body-file}
 ```
 
 core 会包装唯一 `<!-- sync-pr:{task-id}:summary -->` 和当前 `<!-- last-commit: ... -->`，分页查找 PR 普通评论：不存在则创建、正文变化则原地更新、无差异则 no-op、重复 marker 则稳定失败。正文通过文件输入，调用方不得拼 shell/heredoc。

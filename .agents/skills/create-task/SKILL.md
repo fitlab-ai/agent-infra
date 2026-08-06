@@ -6,6 +6,8 @@ description: >
 ---
 
 # 创建任务
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 ## 行为边界 / 关键规则
 
@@ -130,12 +132,12 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 在 task.md 落盘并记录 `Create Task` 后调用声明式 Issue intent；标题、正文、模板、身份校验、权限降级、幂等创建和 task.md 绑定均由 internal core 处理：
 
 ```bash
-agent-infra-internal platform-issue create {task-id} --agent {agent}
-agent-infra-internal platform-issue sync {task-id} --agent {agent} --status waiting-for-triage --assignees current --milestone initial --issue-type --fields
+agent-infra-internal platform-issue create {task-id} --agent {standard-agent-token}
+agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status waiting-for-triage --assignees current --milestone initial --issue-type --fields
 ```
 
 处理结果：
-- intent 成功创建 Issue：`issue_number` 已由任务写入内核回写；调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
+- intent 成功创建 Issue：`issue_number` 已由任务写入内核回写；调用 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
 - 规则失败（认证 / 网络 / 模板解析等）：不回滚 task.md；不追加额外 Activity Log；先调用 `agent-infra-internal task-warning {task-id} add --step create-task --severity ACTION_REQUIRED --code ISSUE_CREATE_FAILED --target issue --message "{error_code}: {error_message}" --action "修复认证/网络/模板问题后手动重试 Issue 创建，或手动创建/找到 Issue 后写入 issue_number"` 提交结构化 warning 意图（调用方不分配编号或写表格）；再按"场景 C：Issue 创建失败"输出
 - intent 为 no-op/degraded：按结构化 operations 继续可执行部分；自定义或空平台不创建评论且不阻塞工作流
 - task.md 已存在有效 `issue_number`：create intent 校验绑定后返回 no-op，不重复创建

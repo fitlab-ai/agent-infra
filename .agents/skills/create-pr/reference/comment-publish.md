@@ -6,7 +6,7 @@
 
 ```bash
 agent-infra-internal platform-pr summary-sync {task-id} \
-  --agent {agent} --body-file {summary-body-file}
+  --agent {standard-agent-token} --body-file {summary-body-file}
 ```
 
 调用方不添加 marker、HEAD 或评论 API 参数。摘要失败沿用 `create-pr` 错误处理并记录 warning，不回滚已创建 PR。结果映射沿用 `.agents/rules/pr-sync.md`。

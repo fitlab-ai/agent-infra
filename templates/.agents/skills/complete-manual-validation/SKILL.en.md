@@ -7,6 +7,8 @@ description: >
 ---
 
 # Complete Manual Validation
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 ## Boundary / Critical Rules
 
@@ -35,7 +37,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## Step Start: Write the started Marker
 
-After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} manual-validation.started --agent {agent}` and record the returned `artifactContext`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} manual-validation.started --agent {standard-agent-token}` and record the returned `artifactContext`.
 
 ## Steps
 
@@ -83,9 +85,9 @@ Before this step, read `reference/report-template.md`. Create `{manual-validatio
 
 ### 6. Update task.md
 
-Run `agent-infra-internal task-event {task-id} manual-validation.completed --agent {agent} --artifact {manual-validation-artifact} --summary-result "{summary-result}"`. The core keeps `current_step` unchanged while atomically recording the implementation-notes link, metadata, and done log.
+Run `agent-infra-internal task-event {task-id} manual-validation.completed --agent {standard-agent-token} --artifact {manual-validation-artifact} --summary-result "{summary-result}"`. The core keeps `current_step` unchanged while atomically recording the implementation-notes link, metadata, and done log.
 
-If the task has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {agent}`.
+If the task has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {manual-validation-artifact} --agent {standard-agent-token}`.
 
 ### 7. Verification Gate
 

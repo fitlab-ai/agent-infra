@@ -1,9 +1,11 @@
 # Issue 字段
 
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 Issue Type 与 pinned fields 统一由 `platform-issue` intent 动态读取组织 schema 并同步：
 
 ```bash
-agent-infra-internal platform-issue sync {task-id} --agent {agent} --issue-type --fields
+agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --issue-type --fields
 ```
 
 ## 支持字段

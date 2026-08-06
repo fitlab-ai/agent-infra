@@ -6,6 +6,8 @@ description: >
 ---
 
 # Create Pull Request
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 Create a Pull Request and, when task-related, sync the essential metadata and reviewer summary immediately.
 
@@ -72,7 +74,7 @@ If `{task-id}` is available and the related task provides `issue_number`, keep `
 
 ### 6. Sync PR Metadata
 
-Run `agent-infra-internal platform-pr sync {task-id} --agent {agent} --metadata --closing-issue`. The core copies type / `in:` labels, assignee, and a specific milestone from the Issue and maintains the closing association. Permission-bound items degrade independently, and the Issue is never updated in reverse.
+Run `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue`. The core copies type / `in:` labels, assignee, and a specific milestone from the Issue and maintains the closing association. Permission-bound items degrade independently, and the Issue is never updated in reverse.
 
 ### 7. Publish the Review Summary
 

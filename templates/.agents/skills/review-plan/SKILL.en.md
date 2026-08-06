@@ -7,6 +7,8 @@ description: >
 ---
 
 # Technical Plan Review
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 Review the latest plan artifact and produce `review-plan.md` or `review-plan-r{N}.md`.
 
@@ -35,7 +37,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## Step Start: Write the started Marker
 
-After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} review-plan.started --agent {agent}`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} review-plan.started --agent {standard-agent-token}`.
 
 ## Steps
 
@@ -76,11 +78,11 @@ Bind and reuse this structured mapping from that one response:
 {unresolved-minor} = stageStatus.unresolvedFindingCounts.minor
 ```
 
-The intent atomically finalizes the report summary and returns the same ledger snapshot. Do not call `stage-status`, replace placeholders manually, or rescan the finding list. If finalization fails or a response field is missing, stop before the completion event. Derive the verdict and next-step branch from the same response's `stageStatus.canAdvance`: only `canAdvance=true` permits `approved`; otherwise use `changes-requested` or `rejected`. Then run `agent-infra-internal task-event {task-id} review-plan.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n}`.
+The intent atomically finalizes the report summary and returns the same ledger snapshot. Do not call `stage-status`, replace placeholders manually, or rescan the finding list. If finalization fails or a response field is missing, stop before the completion event. Derive the verdict and next-step branch from the same response's `stageStatus.canAdvance`: only `canAdvance=true` permits `approved`; otherwise use `changes-requested` or `rejected`. Then run `agent-infra-internal task-event {task-id} review-plan.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n}`.
 
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 
-If task.md has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {agent}`.
+If task.md has a valid `issue_number`, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`, then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {standard-agent-token}`.
 
 ### 7. Run Completion Gate
 

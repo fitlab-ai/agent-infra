@@ -66,7 +66,9 @@ test('generic Agent Client core contains no client-specific ID literals', () => 
   const candidates = [
     ...listTypeScriptFiles(agentClientsRoot).filter((candidate) => {
       const relative = path.relative(agentClientsRoot, candidate).replace(/\\/g, '/');
-      return relative !== 'types.ts' && !relative.startsWith('adapters/');
+      // types.ts and tokens.ts are the canonical vocabulary definitions
+      // (client IDs / activity-log agent tokens); adapters are client-scoped.
+      return relative !== 'types.ts' && relative !== 'tokens.ts' && !relative.startsWith('adapters/');
     }),
     filePath('lib/builtin-tuis.ts'),
     filePath('lib/sandbox/agent-client-reconciler.ts')

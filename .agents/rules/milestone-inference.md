@@ -1,11 +1,13 @@
 # Milestone 推断规则
 
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 Milestone 继续按生命周期逐步收窄，但候选读取、分支判断、权限降级和写入统一由 `platform-issue` 处理。
 
 ## 阶段 1：创建或导入
 
 ```bash
-agent-infra-internal platform-issue sync {task-id} --agent {agent} --milestone initial
+agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --milestone initial
 ```
 
 优先使用 task.md 中存在且有效的显式 milestone；否则从 open milestones 选择最低 `X.Y.x` 版本线，最后回退 `General Backlog`。`triage=false` 或外部事实不足时保持远端值并返回 skipped/degraded。
@@ -13,7 +15,7 @@ agent-infra-internal platform-issue sync {task-id} --agent {agent} --milestone i
 ## 阶段 2：`code-task`
 
 ```bash
-agent-infra-internal platform-issue sync {task-id} --agent {agent} --milestone specific
+agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --milestone specific
 ```
 
 版本线收窄规则保持不变：主干模式在当前版本线取最高 patch；多版本分支模式依据 release-line/main 祖先关系选择版本线。无法可靠判断时保持原值。完成门禁仍拒绝 `X.Y.x`。

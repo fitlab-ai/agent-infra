@@ -61,11 +61,12 @@ test('begin is persistent and idempotent for a running task', () => {
   assert.deepEqual(second.run?.modelPolicy, modelPolicy);
 });
 
-test('begin requires a complete run-level model policy and justified same-model use', () => {
+test('begin accepts an omitted model policy and validates supplied policy', () => {
   const missing = fixture('requirement-analysis');
   const missingResult = beginOrResumeOrchestrationRaw('TASK-20260101-000001', { repoRoot: missing.root });
-  assert.equal(missingResult.error?.code, 'ORCHESTRATION_MODEL_POLICY_REQUIRED');
-  assert.equal(fs.existsSync(path.join(missing.taskDir, 'orchestration.json')), false);
+  assert.equal(missingResult.status, 'running');
+  assert.equal(missingResult.run?.modelPolicy, undefined);
+  assert.equal(fs.existsSync(path.join(missing.taskDir, 'orchestration.json')), true);
 
   const unjustified = fixture('requirement-analysis');
   const unjustifiedResult = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
@@ -89,7 +90,7 @@ test('begin requires a complete run-level model policy and justified same-model 
   assert.equal(justifiedResult.status, 'running');
 });
 
-test('resume rejects policy changes and pauses legacy runs without model evidence', () => {
+test('resume rejects policy changes and continues legacy runs without model evidence', () => {
   const mismatch = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: mismatch.root });
   const mismatchResult = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
@@ -105,10 +106,9 @@ test('resume rejects policy changes and pauses legacy runs without model evidenc
   delete persisted.modelPolicy;
   fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);
   const resumed = beginOrResumeOrchestrationRaw('TASK-20260101-000001', { repoRoot: legacy.root });
-  assert.equal(resumed.status, 'paused');
-  assert.equal(resumed.run?.pause?.code, 'ORCHESTRATION_MODEL_EVIDENCE_MISSING');
-  const repeated = beginOrResumeOrchestrationRaw('TASK-20260101-000001', { repoRoot: legacy.root });
-  assert.equal(repeated.changed, false);
+  assert.equal(resumed.status, 'running');
+  assert.equal(resumed.changed, false);
+  assert.equal(resumed.run?.pause, null);
 });
 
 test('prepare validates requested model before capturing workspace state', () => {

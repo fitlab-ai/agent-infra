@@ -6,6 +6,8 @@ description: >
 ---
 
 # 创建 Pull Request
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 创建 Pull Request，并在与任务关联时立即补齐核心元数据和 reviewer 摘要。
 
@@ -72,7 +74,7 @@ description: >
 
 ### 6. 同步 PR 元数据
 
-调用 `agent-infra-internal platform-pr sync {task-id} --agent {agent} --metadata --closing-issue`。core 从 Issue 复制 type / `in:` labels、assignee 和具体 milestone，并维护 Development 关联；逐项权限不足返回 degraded，不反向更新 Issue。
+调用 `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue`。core 从 Issue 复制 type / `in:` labels、assignee 和具体 milestone，并维护 Development 关联；逐项权限不足返回 degraded，不反向更新 Issue。
 
 ### 7. 发布审查摘要
 

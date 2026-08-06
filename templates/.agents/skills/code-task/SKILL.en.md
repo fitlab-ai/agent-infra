@@ -7,6 +7,8 @@ description: >
 ---
 
 # Code Task
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill supports initial implementation, fix mode based on `review-code` feedback, and human-decision-driven implementation.
 
@@ -39,7 +41,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## Step Start: Write the started Marker
 
-After prerequisites and mode are confirmed and before this round's first artifact action, run `agent-infra-internal task-event {task-id} code.started --agent {agent}`. Append `--fix-for {review-artifact}` in fix mode or `--implementation-input {input-id}` in decision mode. The core derives and validates the round and input identity; record the returned `artifactContext`.
+After prerequisites and mode are confirmed and before this round's first artifact action, run `agent-infra-internal task-event {task-id} code.started --agent {standard-agent-token}`. Append `--fix-for {review-artifact}` in fix mode or `--implementation-input {input-id}` in decision mode. The core derives and validates the round and input identity; record the returned `artifactContext`.
 
 ## Steps
 
@@ -53,7 +55,7 @@ Read `reference/branch-management.md`, ensure the current branch matches the tas
 
 ### 3. Narrow the Milestone
 
-**Mandatory; do not skip.** If task.md has a valid `issue_number`, run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --milestone specific`.
+**Mandatory; do not skip.** If task.md has a valid `issue_number`, run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --milestone specific`.
 
 > If the milestone remains `X.Y.x`, step 11 `task-verify code.completed` blocks through the typed milestone check.
 
@@ -107,12 +109,12 @@ Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 
 ### 10. Update Task Status
 
-After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {agent} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}` instead; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
+After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}` instead; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
 
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, then:
-- Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status in-progress`
-- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
-- Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {code-artifact} --agent {agent}`
+- Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`
+- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
+- Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {code-artifact} --agent {standard-agent-token}`
 
 ### 11. Run Completion Gate
 

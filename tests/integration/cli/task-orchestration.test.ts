@@ -90,10 +90,20 @@ test('task-orchestration prepare derives the workspace baseline with the persist
   assert.match(result.run.pendingDelegation.beforeFingerprint, /^[0-9a-f]{40,64}$/);
 });
 
-test('task-orchestration begin fails closed when model policy is omitted', () => {
+test('task-orchestration begin accepts an omitted model policy and runs without one', () => {
   const f = fixture();
   const result = run(f.root, [f.id, 'begin-or-resume']);
-  assert.equal(result.status, 1);
-  assert.equal(JSON.parse(result.stdout).error.code, 'ORCHESTRATION_MODEL_POLICY_REQUIRED');
-  assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), false);
+  assert.equal(result.status, 0, result.stderr);
+  const begun = JSON.parse(result.stdout);
+  assert.equal(begun.status, 'running');
+  assert.equal(begun.run.modelPolicy, undefined);
+  assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), true);
+
+  const route = run(f.root, [f.id, 'route']);
+  assert.equal(route.status, 0, route.stderr);
+  assert.equal(JSON.parse(route.stdout).next.requestedModel, null);
+
+  const prepared = run(f.root, [f.id, 'prepare', '--client', 'claude-code']);
+  assert.equal(prepared.status, 0, prepared.stderr);
+  assert.equal(JSON.parse(prepared.stdout).run.pendingDelegation.requestedModel, null);
 });

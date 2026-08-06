@@ -1,3 +1,4 @@
+import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import { applyTaskEvent, eventCatalog } from '../task/events.ts';
 import type { TaskEventRequest, Verdict } from '../task/events.ts';
 
@@ -43,6 +44,9 @@ function taskEvent(args: string[] = []): void {
     else if (key === 'verdict') request.verdict = value as Verdict;
     else (request as Record<string, unknown>)[key] = value;
   }
+  const agent = normalizeAgentToken(String(request.agent ?? ''));
+  if (!agent) { usageFailure(`invalid --agent '${request.agent}': ${AGENT_USAGE_HINT}`); return; }
+  request.agent = agent;
   const result = applyTaskEvent(request);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;

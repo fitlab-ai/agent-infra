@@ -132,6 +132,37 @@ last_reviewed_commit: abcdef1234567890
   return f;
 }
 
+test('internal task-event rejects a non-standard --agent token', () => {
+  const f = fixture();
+  const before = fs.readFileSync(f.file);
+  const out = run(f.root, [f.id, 'plan.started', '--agent', 'devuser']);
+  assert.equal(out.status, 1);
+  const result = JSON.parse(out.stdout);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error.code, 'EVENT_PAYLOAD_INVALID');
+  assert.match(result.error.message, /invalid --agent 'devuser'/);
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('internal task-event normalizes a long --agent to the short token on write', () => {
+  const f = fixture();
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'claude-code']);
+  assert.equal(started.status, 0, started.stderr);
+  assert.equal(JSON.parse(started.stdout).status, 'applied');
+  const content = fs.readFileSync(f.file, 'utf8');
+  assert.match(content, /Plan Task \(Round 1\) \[started\]/);
+  assert.match(content, /by claude — started/);
+  assert.match(content, /assigned_to: claude/);
+});
+
+test('internal task-event accepts the human manual-executor token', () => {
+  const f = fixture();
+  const started = run(f.root, [f.id, 'plan.started', '--agent', 'human']);
+  assert.equal(started.status, 0, started.stderr);
+  assert.equal(JSON.parse(started.stdout).status, 'applied');
+  assert.match(fs.readFileSync(f.file, 'utf8'), /by human — started/);
+});
+
 test('internal task-event applies a started/completed pair and replays as no-op', () => {
   const f = fixture();
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1']);

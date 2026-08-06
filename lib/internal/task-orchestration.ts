@@ -1,3 +1,4 @@
+import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import {
   activateMatchingOrchestrationDelegation,
   activateOrchestrationDelegation,
@@ -131,7 +132,9 @@ function taskOrchestration(args: string[] = []): void {
   } else if (intent === 'stage-completed') {
     const missing = requireValues(['--agent']);
     if (missing) { usageFailure(`intent 'stage-completed' requires '${missing}'`); return; }
-    result = completeCommitOrchestrationStage(taskRef!, values['--agent']!);
+    const agent = normalizeAgentToken(values['--agent']!);
+    if (!agent) { usageFailure(`invalid --agent '${values['--agent']}': ${AGENT_USAGE_HINT}`); return; }
+    result = completeCommitOrchestrationStage(taskRef!, agent);
   } else if (intent === 'advance') {
     result = advanceOrchestration(taskRef!);
   } else {

@@ -147,6 +147,12 @@ test('isHumanAgent treats human executors (incl. CJK names and annotations) as h
   }
 });
 
+test('isHumanAgent treats known long names (claude-code / gemini-cli) as non-human', () => {
+  for (const ai of ['claude-code', 'gemini-cli']) {
+    assert.equal(isHumanAgent(ai), false, ai);
+  }
+});
+
 // --- pairEntries: collapse started/done markers into per-step rows ---
 
 type Entry = { time: string; step: string; agent: string; note: string };

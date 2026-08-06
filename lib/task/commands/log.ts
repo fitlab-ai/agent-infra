@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { classifyAgent } from '../../agent-clients/tokens.ts';
 import { formatTable } from '../../table.ts';
 import { parseTaskScope } from '../command-options.ts';
 import { resolveTaskContext } from '../resolve-ref.ts';
@@ -34,11 +35,11 @@ const TABLE_HEADERS = ['#', 'STEP', 'AGENT', 'STARTED', 'DONE', 'NOTE'] as const
 // with ` [started]`; the matching done entry carries the identical base action
 // without the suffix. Pairing therefore keys on the base action (including any
 // `(Round N)`), so every round and every repeated execution pairs on its own.
-// Short agent tokens that actually appear in activity logs for AI executors
-// (workflow recommended_agents claude/codex/gemini/cursor + enabled TUI opencode;
-// note these differ from the `.airc.json` long names claude-code/gemini-cli).
-// Any other executor token (a human name, possibly CJK) is treated as human.
-const KNOWN_AI_AGENTS = new Set(['claude', 'codex', 'gemini', 'opencode', 'cursor']);
+// Known AI tokens, long-name mapping, and loose rendering classification live
+// in lib/agent-clients/tokens.ts (single source of truth shared with the
+// write-side internal commands). Any other executor token (a human name,
+// possibly CJK, or an unknown value) is rendered as human with a visible
+// `(unknown)` marker.
 const REVIEW_STAGE_PREFIXES: { prefix: string; stage: ReviewStage }[] = [
   { prefix: 'Review Analysis', stage: 'analysis' },
   { prefix: 'Review Plan', stage: 'plan' },
@@ -90,12 +91,11 @@ function isHumanCountField(field: string): boolean {
   return fieldNumber(field, 'manual-validation') !== undefined || fieldNumber(field, 'human-decision') !== undefined;
 }
 
-// A step is human-executed when its agent token is not a known AI token. Take
-// the first whitespace-delimited token and drop any trailing parenthetical
-// annotation (e.g. `张三 (executed on host)` -> `张三`) before the lookup.
-function isHumanAgent(agent: string): boolean {
-  const token = agent.trim().split(/\s+/)[0]?.replace(/\(.*$/, '') ?? '';
-  return token !== '' && !KNOWN_AI_AGENTS.has(token);
+// A step is human-executed when its agent token is not a known AI token.
+// Known long names (claude-code -> claude, gemini-cli -> gemini) classify as
+// AI; empty or unknown tokens classify as non-AI (human).
+export function isHumanAgent(agent: string): boolean {
+  return classifyAgent(agent).status !== 'ai';
 }
 
 // Fold the two human counts into a review row's verdict NOTE: comma-joined, right
@@ -152,8 +152,9 @@ function log(args: string[] = []): void {
     const note = stage
       ? foldHumanCounts(s.note, humanDecisionCounts.get(stage) ?? 0, humanValidationCount(s.note))
       : s.note;
-    const human = isHumanAgent(s.agent);
-    const agent = human ? 'human' : s.agent;
+    const { status, display } = classifyAgent(s.agent);
+    const human = status !== 'ai';
+    const agent = status === 'unknown' ? `${display} (unknown)` : display;
     const started = s.started || (human ? '-' : '');
     return [String(idx + 1), s.step, agent, started, s.done || (s.started ? '(in progress)' : ''), note];
   });
@@ -163,4 +164,5 @@ function log(args: string[] = []): void {
   process.stdout.write(`Total: ${steps.length} steps\n`);
 }
 
-export { log, isHumanAgent };
+export { log };
+

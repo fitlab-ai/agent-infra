@@ -7,6 +7,8 @@ description: >
 ---
 
 # Code Review
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 Review the latest code round and produce `review-code.md` or `review-code-r{N}.md`.
 
@@ -46,7 +48,7 @@ Before the state check is complete, do not make external-state assertions such a
 
 ## Step Start: Write the started Marker
 
-After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} review-code.started --agent {agent}`.
+After resolving the artifact context and before this round's first artifact action, run `agent-infra-internal task-event {task-id} review-code.started --agent {standard-agent-token}`.
 
 ## Steps
 
@@ -108,15 +110,15 @@ Update task.md:
   The intent atomically finalizes the report summary and returns the same ledger snapshot. Do not call `stage-status`, replace placeholders manually, or rescan the finding list. If finalization fails or a response field is missing, stop before the completion event. Derive the verdict and next-step branch from the same response's `stageStatus.canAdvance`; only `canAdvance=true` permits Approved
 - Only when `canAdvance=true`, the verdict is Approved, and `T == R^{tree}`, write `last_reviewed_commit: {R}`. Clear an old value for an Approved snapshot with uncommitted differences; otherwise preserve the existing value and do not advance it
 - For an Approved exit, collect PR and required-checks facts as defined in `reference/output-templates.md`: route uncommitted/unpushed code to `commit`, no PR to `create-pr` (except no-PR flow), non-terminal checks to `watch-pr`, and route to `complete-task` only when `HEAD == last_reviewed_commit == PR head` with checks `passed|no-required`; never route by review round alone
-- After handling `last_reviewed_commit`, run `agent-infra-internal task-event {task-id} review-code.completed --agent {agent} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n}`
+- After handling `last_reviewed_commit`, run `agent-infra-internal task-event {task-id} review-code.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n}`
 
 Always include the `Manual-validation: {n}` field in the done log, including when it is 0.
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 
 If task.md contains a valid `issue_number`, perform these sync actions (skip and continue on any failure):
-- Run `agent-infra-internal platform-issue sync {task-id} --agent {agent} --status in-progress`
-- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {agent}`
-- Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {agent}`
+- Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`
+- Run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
+- Run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {review-artifact} --agent {standard-agent-token}`
 
 ### 7. Verification Gate
 

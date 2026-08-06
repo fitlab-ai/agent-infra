@@ -6,6 +6,8 @@ description: >
 ---
 
 # Commit Changes
+> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`gemini`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `gemini-cli`->`gemini`), or the `human` manual exception.
+
 
 Create a Git commit without overwriting user work and update the related task state when needed.
 
@@ -147,7 +149,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 After the gate passes, declare the orchestrated commit stage complete. This command is a no-op when no active orchestration run exists, so the direct commit path remains unchanged:
 
 ```bash
-agent-infra-internal task-orchestration {task-id} stage-completed --agent {agent}
+agent-infra-internal task-orchestration {task-id} stage-completed --agent {standard-agent-token}
 ```
 
 Stop if the command fails; a run without the full receipt lifecycle must not be marked completed.

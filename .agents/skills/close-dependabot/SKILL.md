@@ -6,6 +6,8 @@ description: >
 ---
 
 # 关闭 Dependabot 告警
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`gemini`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`gemini-cli`→`gemini`）或人工例外 `human`。
+
 
 关闭指定的 Dependabot 安全告警并记录合理的关闭理由。
 
@@ -89,7 +91,7 @@ CVE：{cve-id}
 如果有关联任务（搜索 `security_alert_number: <alert-number>`）：
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} close-dependabot --agent {agent} \
+agent-infra-internal task-lifecycle {task-id} close-dependabot --agent {standard-agent-token} \
   --alert-number {alert-number} --reason "{reason}"
 ```
 
