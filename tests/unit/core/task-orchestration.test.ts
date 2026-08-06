@@ -12,7 +12,7 @@ import {
   completeCommitOrchestrationStage,
   completeOrchestrationStage,
   pauseOrchestration,
-  prepareOrchestrationDelegation,
+  prepareOrchestrationDelegation as prepareOrchestrationDelegationRaw,
   readRun,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
@@ -31,6 +31,17 @@ function beginOrResumeOrchestration(
   options: Parameters<typeof beginOrResumeOrchestrationRaw>[1] = {}
 ) {
   return beginOrResumeOrchestrationRaw(taskRef, { client: 'claude-code', modelPolicy, ...options });
+}
+
+function prepareOrchestrationDelegation(
+  taskRef: string,
+  input: Parameters<typeof prepareOrchestrationDelegationRaw>[1],
+  options: Parameters<typeof prepareOrchestrationDelegationRaw>[2] = {}
+) {
+  return prepareOrchestrationDelegationRaw(taskRef, input, {
+    supportsLifecycleDelegation: () => true,
+    ...options
+  });
 }
 
 function fixture(step: string) {
@@ -229,8 +240,18 @@ test('prepare validates requested model before capturing workspace state', () =>
 test('prepare fails closed for clients without orchestration capability', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-  const result = prepareOrchestrationDelegation('TASK-20260101-000001', {
+  const result = prepareOrchestrationDelegationRaw('TASK-20260101-000001', {
     client: 'antigravity-cli'
+  }, { repoRoot: f.root, captureWorkspace: snapshot });
+  assert.equal(result.error?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
+  assert.equal(result.changed, false);
+});
+
+test('prepare fails closed for Claude Code when native model evidence is not observable', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  const result = prepareOrchestrationDelegationRaw('TASK-20260101-000001', {
+    client: 'claude-code'
   }, { repoRoot: f.root, captureWorkspace: snapshot });
   assert.equal(result.error?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
   assert.equal(result.changed, false);
@@ -239,7 +260,7 @@ test('prepare fails closed for clients without orchestration capability', () => 
 test('prepare fails closed for Codex when native lifecycle events are not observable', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
-  const result = prepareOrchestrationDelegation('TASK-20260101-000001', {
+  const result = prepareOrchestrationDelegationRaw('TASK-20260101-000001', {
     client: 'codex'
   }, { repoRoot: f.root, captureWorkspace: snapshot });
   assert.equal(result.error?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');

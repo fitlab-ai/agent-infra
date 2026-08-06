@@ -103,7 +103,15 @@ type OrchestrationOptions = {
   modelPolicy?: OrchestrationModelPolicy;
   captureWorkspace?: (repoRoot: string, taskId: string | null) => string;
   diffWorkspace?: (repoRoot: string, before: string, after: string) => string[];
+  supportsLifecycleDelegation?: (client: AgentClientId) => boolean;
 };
+
+function supportsLifecycleDelegation(client: AgentClientId): boolean {
+  return getAgentClientCapability(client, 'subagents').level !== 'unsupported'
+    && getAgentClientCapability(client, 'orchestration').level !== 'unsupported'
+    && getAgentClientDelegationEvidence(client).actualModel !== 'unavailable'
+    && getAgentClientDelegationEvidence(client).actualReasoningEffort !== 'unavailable';
+}
 
 function orchestrationPath(taskDir: string): string {
   return path.join(taskDir, 'orchestration.json');
@@ -493,12 +501,7 @@ function prepareOrchestrationDelegation(
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  if (
-    getAgentClientCapability(input.client, 'subagents').level === 'unsupported'
-    || getAgentClientCapability(input.client, 'orchestration').level === 'unsupported'
-    || getAgentClientDelegationEvidence(input.client).actualModel === 'unavailable'
-    || getAgentClientDelegationEvidence(input.client).actualReasoningEffort === 'unavailable'
-  ) {
+  if (!(options.supportsLifecycleDelegation ?? supportsLifecycleDelegation)(input.client)) {
     return failed('ORCHESTRATION_CLIENT_UNSUPPORTED', `client '${input.client}' does not support lifecycle orchestration`, resolved.taskId);
   }
   const run = readRun(resolved.taskDir);

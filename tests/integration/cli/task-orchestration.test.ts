@@ -85,17 +85,18 @@ test('task-orchestration rejects partial model policy options before core state 
   assert.deepEqual(fs.readFileSync(runPath), before);
 });
 
-test('task-orchestration prepare derives the workspace baseline with the persisted role model', () => {
+test('task-orchestration prepare fails closed before delegation when host evidence is unavailable', () => {
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs]).status, 0);
+  const runPath = path.join(f.dir, 'orchestration.json');
+  const before = fs.readFileSync(runPath);
 
   const prepared = run(f.root, [f.id, 'prepare', '--client', 'claude-code',
     '--requested-model', 'executor-model', '--requested-reasoning-effort', 'xhigh']);
-  assert.equal(prepared.status, 0, prepared.stderr);
+  assert.equal(prepared.status, 1, prepared.stderr);
   const result = JSON.parse(prepared.stdout);
-  assert.equal(result.run.pendingDelegation.parentId, null);
-  assert.equal(result.run.pendingDelegation.workspaceSnapshotScope, 'task');
-  assert.match(result.run.pendingDelegation.beforeFingerprint, /^[0-9a-f]{40,64}$/);
+  assert.equal(result.error.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
+  assert.deepEqual(fs.readFileSync(runPath), before);
 });
 
 test('task-orchestration begin fails closed when model policy is omitted', () => {

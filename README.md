@@ -175,7 +175,7 @@ The most-used lifecycle commands, in delivery order. The command prefix varies b
 | Command | Purpose |
 |---------|---------|
 | `create-task` / `import-issue` | Start a task from a description or a GitHub Issue |
-| `run-task` | Resume and orchestrate the lifecycle in Claude Code with fresh isolated executors/reviewers until a safe commit or stable pause; Codex currently fails closed because its multi-agent runtime does not expose the required lifecycle events |
+| `run-task` | Resume the lifecycle with fresh isolated executors/reviewers when the selected client exposes verified actual model/effort evidence; current built-in clients, including Claude Code and Codex, fail closed before delegation because their native start events do not expose all required evidence |
 | `analyze-task` → `review-analysis` | Capture scope and risks, then review the analysis |
 | `plan-task` → `review-plan` | Design the approach, then review the plan |
 | `code-task` → `review-code` | Implement and test, then run a structured code review |
