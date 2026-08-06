@@ -16,7 +16,7 @@ const sharedDefaults = {
 test('project asset planning preserves user entries and appends enabled assets canonically', () => {
   const current = {
     managed: ['docs/user.md', '.opencode/commands/', '.claude/commands/'],
-    merged: ['settings/user.json', '.gemini/settings.json'],
+    merged: ['settings/user.json', 'settings/team.json'],
     ejected: ['.claude/commands/']
   };
   const before = structuredClone(current);
@@ -36,7 +36,7 @@ test('project asset planning preserves user entries and appends enabled assets c
       '.codex/agents/',
       '.agents/README.md'
     ],
-    merged: ['settings/user.json', '.gemini/settings.json', '.gitignore'],
+    merged: ['settings/user.json', 'settings/team.json', '.gitignore'],
     ejected: ['.claude/commands/']
   });
   assert.deepEqual(plan.enabledManaged, [

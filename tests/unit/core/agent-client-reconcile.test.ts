@@ -14,8 +14,8 @@ function writeTemplates(root: string): void {
   const files = [
     ['.claude/commands/update-agent-infra.en.md', 'claude {{project}}'],
     ['.claude/commands/update-agent-infra.zh-CN.md', 'claude zh {{project}}'],
-    ['.gemini/commands/_project_/update-agent-infra.en.toml', 'gemini {{project}}'],
-    ['.gemini/commands/_project_/update-agent-infra.zh-CN.toml', 'gemini zh {{project}}'],
+    ['docs/templates/update-agent-infra.en.md', 'docs {{project}}'],
+    ['docs/templates/update-agent-infra.zh-CN.md', 'docs zh {{project}}'],
     ['.opencode/commands/update-agent-infra.en.md', 'opencode {{project}}'],
     ['.opencode/commands/update-agent-infra.zh-CN.md', 'opencode zh {{project}}']
   ];
