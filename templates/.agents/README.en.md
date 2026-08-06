@@ -220,13 +220,16 @@ Ordinary `managed` files keep their overwrite semantics. A small set of platform
 
 ## Agent Client Configuration
 
-Use the top-level `.agents/.airc.json` `agentClients` array to configure all four built-in clients (`claude-code`, `codex`, `antigravity-cli`, `opencode`). Each canonical entry has three fields:
+Use the top-level `.agents/.airc.json` `agentClients` array to configure all four built-in clients (`claude-code`, `codex`, `antigravity-cli`, `opencode`). Each canonical entry has three required fields and one optional orchestration policy:
 
 | Field | Meaning |
 |-------|---------|
 | `id` | Built-in Agent Client id. The canonical array contains exactly one entry for each built-in client. |
 | `enabled` | Whether agent-infra writes and maintains that client's project integration and seed command. |
 | `installInSandbox` | Whether the sandbox image installs that client's CLI. This is independent from `enabled`. |
+| `orchestration` | Optional `run-task` default. It must include executor/reviewer `model` and host-native `reasoningEffort`; same-model use also needs a non-empty `sameModelReason`. |
+
+Explicit `run-task` model/effort flags are atomic: any one requires all four role fields and configuration never fills omissions. With no explicit policy, only the current client's `orchestration` is used. Query model-selection context with `agent-infra-internal agent-client model-selection --client <id>`; it labels results complete, partial, or interactive-only and never presents a local override list as a complete catalog.
 
 Manage these settings without hand-editing JSON:
 

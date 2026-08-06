@@ -128,19 +128,23 @@ test('lifecycle hook prefers the repository-local CLI independently of cwd', () 
   });
 });
 
-test('lifecycle hook forwards the exact host-observed model and fallback reason', () => {
+test('lifecycle hook forwards exact host-observed model and effort evidence', () => {
   const fixture = createHookFixture('working');
   const payload = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'claude-subagent-start.json'), 'utf8'));
   payload.model = 'host-model-v2';
+  payload.reasoning_effort = 'high';
   payload.model_fallback_reason = 'requested model was temporarily unavailable';
+  payload.reasoning_effort_fallback_reason = 'requested effort was unavailable';
 
   const result = run(JSON.stringify(payload), fixture);
 
   assert.equal(result.status, 0, result.stderr);
   const args = JSON.parse(result.stdout).args as string[];
-  assert.deepEqual(args.slice(-4), [
+  assert.deepEqual(args.slice(-8), [
     '--actual-model', 'host-model-v2',
-    '--fallback-reason', 'requested model was temporarily unavailable'
+    '--actual-reasoning-effort', 'high',
+    '--model-fallback-reason', 'requested model was temporarily unavailable',
+    '--reasoning-effort-fallback-reason', 'requested effort was unavailable'
   ]);
 });
 

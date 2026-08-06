@@ -45,7 +45,12 @@ process.stdin.on('end', () => {
       '--spawn-mode', String(event.spawn_mode || (client === 'claude-code' ? 'fresh' : ''))
     );
     if (event.model) args.push('--actual-model', String(event.model));
-    if (event.model_fallback_reason) args.push('--fallback-reason', String(event.model_fallback_reason));
+    const actualEffort = event.actual_reasoning_effort || event.reasoning_effort || event.model_reasoning_effort;
+    if (actualEffort) args.push('--actual-reasoning-effort', String(actualEffort));
+    if (event.model_fallback_reason) args.push('--model-fallback-reason', String(event.model_fallback_reason));
+    if (event.reasoning_effort_fallback_reason) {
+      args.push('--reasoning-effort-fallback-reason', String(event.reasoning_effort_fallback_reason));
+    }
   } else {
     args.push(
       '--native-agent', String(nativeAgent),

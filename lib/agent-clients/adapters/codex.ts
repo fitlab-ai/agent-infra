@@ -19,6 +19,15 @@ const codexAdapter = defineAgentClientAdapter({
     sandbox: { level: 'integrated' },
     verification: { level: 'compatible' }
   },
+  modelSelection: {
+    kind: 'interactive-only',
+    command: '/model',
+    guidance: 'Use the host model picker for the complete model and reasoning-effort catalog.'
+  },
+  delegationEvidence: {
+    actualModel: 'unavailable',
+    actualReasoningEffort: 'unavailable'
+  },
   project: {
     ownedPathPrefixes: ['.codex/'],
     managed: ['.codex/hooks.json', '.codex/agents/'],

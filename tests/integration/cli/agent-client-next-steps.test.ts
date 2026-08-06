@@ -123,3 +123,17 @@ test('agent-client next-steps fails closed for invalid config and arguments', ()
     assert.equal(JSON.parse(result.stdout).error.code, code);
   }
 });
+
+test('agent-client model-selection labels host-only guidance without inventing a catalog', () => {
+  const root = fixture({ project: 'demo', agentClients: canonical(['claude-code']) });
+  const result = spawnSync(
+    process.execPath,
+    [INTERNAL_CLI_PATH, 'agent-client', 'model-selection', '--client', 'claude-code', '--format', 'json'],
+    { cwd: root, encoding: 'utf8' }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.context.kind, 'interactive-only');
+  assert.equal(payload.context.command, '/model');
+  assert.equal('models' in payload.context, false);
+});

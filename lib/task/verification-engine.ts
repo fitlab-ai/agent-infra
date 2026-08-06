@@ -141,6 +141,25 @@ function runCheck(type: any, context: any, shared: any): any {
   }
 }
 
+function isFailClosedLegacyPause(run: any): boolean {
+  if (
+    run.schemaVersion !== 1
+    || run.status !== 'paused'
+    || run.pause?.recoverable !== false
+    || !exactText(run.pause?.message)
+    || !Array.isArray(run.receipts)
+  ) {
+    return false;
+  }
+  if (run.pause.code === 'ORCHESTRATION_HISTORICAL_EFFORT_UNVERIFIED') {
+    return run.receipts.length > 0 && run.pendingDelegation === null;
+  }
+  if (run.pause.code === 'ORCHESTRATION_DELEGATION_BUSY') {
+    return run.pendingDelegation != null && run.pendingDelegation.status !== 'sealed';
+  }
+  return false;
+}
+
 function checkOrchestrationState({ taskDir }: any): any {
   const file = path.join(taskDir, 'orchestration.json');
   const stat = safeStat(file);
@@ -151,7 +170,10 @@ function checkOrchestrationState({ taskDir }: any): any {
   } catch (error) {
     return failResult('orchestration-state', `Invalid orchestration.json: ${String(error)}`);
   }
-  if (run.schemaVersion !== 1 || !['paused', 'completed'].includes(run.status)) {
+  if (isFailClosedLegacyPause(run)) {
+    return passResult('orchestration-state', 'Legacy orchestration run is safely paused');
+  }
+  if (run.schemaVersion !== 2 || !['paused', 'completed'].includes(run.status)) {
     return failResult('orchestration-state', `Expected paused or completed run, received '${run.status}'`);
   }
   if (run.status === 'paused' && (!run.pause?.code || !run.pause?.message)) {
@@ -181,18 +203,45 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
   } catch (error) {
     return failResult('orchestration-evidence', `Invalid orchestration.json: ${String(error)}`);
   }
-  const policy = run.modelPolicy ?? null;
-  // 模型证据可选：无持久化策略时跳过模型身份校验（宿主不提供模型属合法状态）。
-  if (policy) {
-    if (!exactText(policy.executor) || !exactText(policy.reviewer)) {
-      return failResult('orchestration-evidence', 'Run model policy requires exact executor and reviewer identities');
+  if (isFailClosedLegacyPause(run)) {
+    return passResult('orchestration-evidence', 'Legacy orchestration evidence is preserved in a fail-closed pause');
+  }
+  const policy = run.modelPolicy;
+  if (
+    !policy
+    || !exactText(policy.executor?.model)
+    || !exactText(policy.executor?.reasoningEffort)
+    || !exactText(policy.reviewer?.model)
+    || !exactText(policy.reviewer?.reasoningEffort)
+  ) {
+    return failResult('orchestration-evidence', 'Run model policy requires exact executor and reviewer model and effort');
+  }
+  if (policy.executor.model === policy.reviewer.model) {
+    if (!exactText(policy.sameModelReason)) {
+      return failResult('orchestration-evidence', 'Shared executor/reviewer model requires a persisted reason');
     }
-    if (policy.executor === policy.reviewer) {
-      if (!exactText(policy.sameModelReason)) {
-        return failResult('orchestration-evidence', 'Shared executor/reviewer model requires a persisted reason');
-      }
-    } else if (policy.sameModelReason !== null) {
-      return failResult('orchestration-evidence', 'Distinct executor/reviewer models require a null same-model reason');
+  } else if (policy.sameModelReason !== null) {
+    return failResult('orchestration-evidence', 'Distinct executor/reviewer models require a null same-model reason');
+  }
+  if (
+    !run.modelPolicySource
+    || !['explicit', 'project-config'].includes(run.modelPolicySource.kind)
+    || !exactText(run.modelPolicySource.client)
+    || !exactText(run.modelPolicySource.resolvedAt)
+    || !Array.isArray(run.recoveryHistory)
+  ) {
+    return failResult('orchestration-evidence', 'Run model policy source or recovery history is invalid');
+  }
+  for (const recovery of run.recoveryHistory) {
+    if (
+      recovery.code !== 'MODEL_POLICY_SUPPLEMENTED'
+      || recovery.previousSchemaVersion !== 1
+      || recovery.receiptCount !== 0
+      || recovery.pendingDelegation !== false
+      || !exactText(recovery.recoveredAt)
+      || !recovery.policySource
+    ) {
+      return failResult('orchestration-evidence', 'Run recovery history contains invalid provenance');
     }
   }
   if (!Array.isArray(run.receipts)) {
@@ -210,20 +259,41 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
   }
   const receipts = [...run.receipts, ...(run.pendingDelegation ? [run.pendingDelegation] : [])];
   for (const receipt of receipts) {
-    if (policy) {
-      const expectedModel = policy[receipt.role];
-      if (!expectedModel || receipt.requestedModel !== expectedModel) {
-        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' requested model does not match its role policy`);
-      }
+    const expectedPolicy = policy[receipt.role];
+    if (!expectedPolicy || receipt.requestedModel !== expectedPolicy.model) {
+      return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' requested model does not match its role policy`);
+    }
+    if (receipt.requestedReasoningEffort !== expectedPolicy.reasoningEffort) {
+      return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' requested reasoning effort does not match its role policy`);
     }
     const activated = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status);
     if (activated) {
+      if (!exactText(receipt.actualModel)) {
+        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has no host-observed actual model`);
+      }
+      if (!exactText(receipt.actualReasoningEffort)) {
+        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has no host-observed actual reasoning effort`);
+      }
       if (!exactText(receipt.parentId) || !exactText(receipt.childId) || receipt.parentId === receipt.childId || receipt.spawnMode !== 'fresh') {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid fresh delegation identity`);
       }
-      // 模型证据可选：宿主未回传 actual model 属合法状态；仅在它存在且与 requested 不一致、又缺少降级理由时失败。
-      if (receipt.actualModel && receipt.actualModel !== receipt.requestedModel && !exactText(receipt.modelFallbackReason)) {
+      if (receipt.actualModel !== receipt.requestedModel && !exactText(receipt.modelFallbackReason)) {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' model fallback is not justified`);
+      }
+      if (receipt.actualModel === receipt.requestedModel && receipt.modelFallbackReason !== null) {
+        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has an unrelated model fallback reason`);
+      }
+      if (
+        receipt.actualReasoningEffort !== receipt.requestedReasoningEffort
+        && !exactText(receipt.reasoningEffortFallbackReason)
+      ) {
+        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' reasoning-effort fallback is not justified`);
+      }
+      if (
+        receipt.actualReasoningEffort === receipt.requestedReasoningEffort
+        && receipt.reasoningEffortFallbackReason !== null
+      ) {
+        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has an unrelated reasoning-effort fallback reason`);
       }
     }
   }

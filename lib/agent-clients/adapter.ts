@@ -20,6 +20,28 @@ import type {
 
 type AgentClientCapabilities = AgentClientCapabilityMap;
 
+type AgentClientModelSelectionContext =
+  | Readonly<{
+      kind: 'catalog';
+      completeness: 'complete' | 'partial';
+      source: string;
+      models: readonly Readonly<{
+        id: string;
+        reasoningEfforts?: readonly string[];
+      }>[];
+      guidance?: string;
+    }>
+  | Readonly<{
+      kind: 'interactive-only';
+      command: string;
+      guidance: string;
+    }>;
+
+type AgentClientDelegationEvidence = Readonly<{
+  actualModel: 'host-event' | 'unavailable';
+  actualReasoningEffort: 'host-event' | 'spawn-ack' | 'unavailable';
+}>;
+
 type AgentClientSeedCommand = Readonly<{
   templates: Readonly<{
     en: string;
@@ -41,6 +63,8 @@ type AgentClientAdapter = Readonly<{
   displayName: string;
   invocation: string;
   capabilities: AgentClientCapabilities;
+  modelSelection: AgentClientModelSelectionContext;
+  delegationEvidence: AgentClientDelegationEvidence;
   project: AgentClientProjectDescriptor;
   sandbox: AgentClientSandboxDescriptor;
 }>;
@@ -210,6 +234,51 @@ function defineAgentClientAdapter(
       return [capability, Object.freeze({ level: support.level })];
     })
   ) as AgentClientCapabilities;
+
+  const modelSelection = candidate.modelSelection;
+  if (!modelSelection || typeof modelSelection !== 'object') {
+    throw new Error(`Agent Client '${candidate.id}' has an invalid model-selection context`);
+  }
+  let frozenModelSelection: AgentClientModelSelectionContext;
+  if (modelSelection.kind === 'interactive-only') {
+    if (!modelSelection.command?.trim() || !modelSelection.guidance?.trim()) {
+      throw new Error(`Agent Client '${candidate.id}' has an invalid model-selection context`);
+    }
+    frozenModelSelection = Object.freeze({ ...modelSelection });
+  } else if (
+    modelSelection.kind === 'catalog'
+    && ['complete', 'partial'].includes(modelSelection.completeness)
+    && typeof modelSelection.source === 'string'
+    && modelSelection.source.trim() !== ''
+    && Array.isArray(modelSelection.models)
+  ) {
+    const models = modelSelection.models.map((model) => {
+      if (!model?.id?.trim() || (model.reasoningEfforts && !Array.isArray(model.reasoningEfforts))) {
+        throw new Error(`Agent Client '${candidate.id}' has an invalid model-selection context`);
+      }
+      return Object.freeze({
+        id: model.id,
+        ...(model.reasoningEfforts
+          ? { reasoningEfforts: Object.freeze([...model.reasoningEfforts]) }
+          : {})
+      });
+    });
+    frozenModelSelection = Object.freeze({
+      ...modelSelection,
+      models: Object.freeze(models)
+    });
+  } else {
+    throw new Error(`Agent Client '${candidate.id}' has an invalid model-selection context`);
+  }
+
+  const evidence = candidate.delegationEvidence;
+  if (
+    !evidence
+    || !['host-event', 'unavailable'].includes(evidence.actualModel)
+    || !['host-event', 'spawn-ack', 'unavailable'].includes(evidence.actualReasoningEffort)
+  ) {
+    throw new Error(`Agent Client '${candidate.id}' has invalid delegation evidence`);
+  }
 
   if (
     typeof candidate.project !== 'object'
@@ -441,6 +510,8 @@ function defineAgentClientAdapter(
     displayName: candidate.displayName,
     invocation: candidate.invocation,
     capabilities: Object.freeze(capabilities),
+    modelSelection: frozenModelSelection,
+    delegationEvidence: Object.freeze({ ...evidence }),
     project: Object.freeze({
       ownedPathPrefixes: Object.freeze(paths),
       ...projectAssets,
@@ -454,7 +525,9 @@ export { defineAgentClientAdapter };
 export type {
   AgentClientAdapter,
   AgentClientCapabilities,
+  AgentClientDelegationEvidence,
   AgentClientManifestEntry,
+  AgentClientModelSelectionContext,
   AgentClientProjectDescriptor,
   AgentClientSeedCommand,
   AgentClientRegistry

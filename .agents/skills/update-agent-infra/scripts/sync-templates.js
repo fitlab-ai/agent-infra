@@ -270,10 +270,11 @@ function normalizeAgentClientConfig(cfg) {
     }
     const keys = Object.keys(candidate);
     if (
-      keys.length !== 3
+      (keys.length !== 3 && keys.length !== 4)
       || !own(candidate, 'id')
       || !own(candidate, 'enabled')
       || !own(candidate, 'installInSandbox')
+      || (keys.length === 4 && !own(candidate, 'orchestration'))
     ) {
       return failure('INVALID_AGENT_CLIENTS', entryPath);
     }
@@ -284,9 +285,36 @@ function normalizeAgentClientConfig(cfg) {
     if (typeof candidate.enabled !== 'boolean' || typeof candidate.installInSandbox !== 'boolean') {
       return failure('INVALID_AGENT_CLIENTS', entryPath);
     }
+    let orchestration;
+    if (own(candidate, 'orchestration')) {
+      const policy = candidate.orchestration;
+      const exact = (value) => typeof value === 'string' && value.length > 0 && value.trim() === value;
+      const validRole = (role) => role
+        && typeof role === 'object'
+        && !Array.isArray(role)
+        && Object.keys(role).length === 2
+        && exact(role.model)
+        && exact(role.reasoningEffort);
+      if (
+        !policy
+        || typeof policy !== 'object'
+        || Array.isArray(policy)
+        || Object.keys(policy).length !== 3
+        || !validRole(policy.executor)
+        || !validRole(policy.reviewer)
+        || !own(policy, 'sameModelReason')
+        || (policy.executor.model === policy.reviewer.model
+          ? !exact(policy.sameModelReason)
+          : policy.sameModelReason !== null)
+      ) {
+        return failure('INVALID_AGENT_CLIENTS', `${entryPath}.orchestration`);
+      }
+      orchestration = structuredClone(policy);
+    }
     entries.set(candidate.id, {
       enabled: candidate.enabled,
-      installInSandbox: candidate.installInSandbox
+      installInSandbox: candidate.installInSandbox,
+      ...(orchestration ? { orchestration } : {})
     });
   }
   if (BUILTIN_TUI_IDS.some((id) => !entries.has(id))) {

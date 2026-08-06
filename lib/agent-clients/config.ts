@@ -6,7 +6,8 @@ import type {
   AgentClientConfig,
   AgentClientId,
   AgentClientsConfig,
-  AgentClientState
+  AgentClientState,
+  OrchestrationModelPolicy
 } from './types.ts';
 
 type AgentClientConfigInput = Readonly<{
@@ -65,12 +66,56 @@ function fail(code: AgentClientDiagnosticCode, path: string): never {
   throw new AgentClientConfigError({ code, path });
 }
 
+function parseExactText(value: unknown, path: string): string {
+  if (typeof value !== 'string' || value.length === 0 || value.trim() !== value) {
+    fail('INVALID_AGENT_CLIENTS', path);
+  }
+  return value;
+}
+
+function parseOrchestrationPolicy(value: unknown, path: string): OrchestrationModelPolicy {
+  if (!isRecord(value)) fail('INVALID_AGENT_CLIENTS', path);
+  const keys = Object.keys(value);
+  if (
+    keys.length !== 3
+    || !hasOwn(value, 'executor')
+    || !hasOwn(value, 'reviewer')
+    || !hasOwn(value, 'sameModelReason')
+  ) {
+    fail('INVALID_AGENT_CLIENTS', path);
+  }
+  const parseRole = (candidate: unknown, rolePath: string) => {
+    if (
+      !isRecord(candidate)
+      || Object.keys(candidate).length !== 2
+      || !hasOwn(candidate, 'model')
+      || !hasOwn(candidate, 'reasoningEffort')
+    ) {
+      fail('INVALID_AGENT_CLIENTS', rolePath);
+    }
+    return Object.freeze({
+      model: parseExactText(candidate.model, `${rolePath}.model`),
+      reasoningEffort: parseExactText(candidate.reasoningEffort, `${rolePath}.reasoningEffort`)
+    });
+  };
+  const executor = parseRole(value.executor, `${path}.executor`);
+  const reviewer = parseRole(value.reviewer, `${path}.reviewer`);
+  const sameModelReason = value.sameModelReason;
+  if (executor.model === reviewer.model) {
+    parseExactText(sameModelReason, `${path}.sameModelReason`);
+  } else if (sameModelReason !== null) {
+    fail('INVALID_AGENT_CLIENTS', `${path}.sameModelReason`);
+  }
+  return Object.freeze({ executor, reviewer, sameModelReason: sameModelReason as string | null });
+}
+
 function parseCanonical(value: unknown): AgentClientState {
   if (!Array.isArray(value)) fail('INVALID_AGENT_CLIENTS', 'agentClients');
 
   const entries = new Map<AgentClientId, Readonly<{
     enabled: boolean;
     installInSandbox: boolean;
+    orchestration?: OrchestrationModelPolicy;
   }>>();
 
   for (const [index, candidate] of value.entries()) {
@@ -79,10 +124,11 @@ function parseCanonical(value: unknown): AgentClientState {
 
     const keys = Object.keys(candidate);
     if (
-      keys.length !== 3
+      (keys.length !== 3 && keys.length !== 4)
       || !hasOwn(candidate, 'id')
       || !hasOwn(candidate, 'enabled')
       || !hasOwn(candidate, 'installInSandbox')
+      || (keys.length === 4 && !hasOwn(candidate, 'orchestration'))
     ) {
       fail('INVALID_AGENT_CLIENTS', path);
     }
@@ -100,7 +146,10 @@ function parseCanonical(value: unknown): AgentClientState {
     }
     entries.set(candidate.id, {
       enabled: candidate.enabled,
-      installInSandbox: candidate.installInSandbox
+      installInSandbox: candidate.installInSandbox,
+      ...(hasOwn(candidate, 'orchestration')
+        ? { orchestration: parseOrchestrationPolicy(candidate.orchestration, `${path}.orchestration`) }
+        : {})
     });
   }
 
@@ -117,7 +166,10 @@ function serializeAgentClients(state: AgentClientState): AgentClientsConfig {
   return AGENT_CLIENT_IDS.map((id): AgentClientConfig => ({
     id,
     enabled: state[id].enabled,
-    installInSandbox: state[id].installInSandbox
+    installInSandbox: state[id].installInSandbox,
+    ...(state[id].orchestration
+      ? { orchestration: structuredClone(state[id].orchestration) }
+      : {})
   }));
 }
 

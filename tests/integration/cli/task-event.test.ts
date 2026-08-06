@@ -245,14 +245,18 @@ test('completed event validates orchestration provenance before writing task sta
     { cwd: f.root, encoding: 'utf8' }
   );
   assert.equal(orchestrate([
-    'begin-or-resume', '--executor-model', 'executor-model', '--reviewer-model', 'reviewer-model'
+    'begin-or-resume', '--client', 'claude-code',
+    '--executor-model', 'executor-model', '--executor-reasoning-effort', 'xhigh',
+    '--reviewer-model', 'reviewer-model', '--reviewer-reasoning-effort', 'high'
   ]).status, 0);
   assert.equal(orchestrate([
-    'prepare', '--client', 'claude-code', '--requested-model', 'reviewer-model'
+    'prepare', '--client', 'claude-code', '--requested-model', 'reviewer-model',
+    '--requested-reasoning-effort', 'high'
   ]).status, 0);
   assert.equal(orchestrate([
     'hook-start', '--native-agent', 'agent-infra-lifecycle-reviewer', '--child-id', 'child-1',
-    '--parent-id', 'parent-1', '--spawn-mode', 'fresh', '--actual-model', 'reviewer-model'
+    '--parent-id', 'parent-1', '--spawn-mode', 'fresh', '--actual-model', 'reviewer-model',
+    '--actual-reasoning-effort', 'high'
   ]).status, 0);
 
   const before = fs.readFileSync(f.file);

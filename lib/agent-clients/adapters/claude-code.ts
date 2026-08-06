@@ -15,6 +15,15 @@ const claudeCodeAdapter = defineAgentClientAdapter({
     sandbox: { level: 'integrated' },
     verification: { level: 'compatible' }
   },
+  modelSelection: {
+    kind: 'interactive-only',
+    command: '/model',
+    guidance: 'Use the host model picker for the complete model and reasoning-effort catalog.'
+  },
+  delegationEvidence: {
+    actualModel: 'host-event',
+    actualReasoningEffort: 'host-event'
+  },
   project: {
     ownedPathPrefixes: ['.claude/'],
     managed: ['.claude/commands/', '.claude/agents/'],

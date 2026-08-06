@@ -10,7 +10,16 @@
     "name": "canonical non-client tools",
     "input": {
       "agentClients": [
-        { "id": "claude-code", "enabled": false, "installInSandbox": true },
+        {
+          "id": "claude-code",
+          "enabled": false,
+          "installInSandbox": true,
+          "orchestration": {
+            "executor": { "model": "executor-model", "reasoningEffort": "xhigh" },
+            "reviewer": { "model": "reviewer-model", "reasoningEffort": "high" },
+            "sameModelReason": null
+          }
+        },
         { "id": "codex", "enabled": true, "installInSandbox": false },
         { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
         { "id": "opencode", "enabled": true, "installInSandbox": false }

@@ -48,6 +48,14 @@
 - `release`：展示最新 release snapshot 后确认是否 publish
 - `create-release-note`：展示 stage 后的精确 notes 与摘要后确认是否 publish
 
+### 例外 5：生命周期启动缺少完整模型策略
+
+仅当 `run-task` 在创建任何 run、baseline、receipt 或 child 之前收到核心错误 `ORCHESTRATION_MODEL_POLICY_REQUIRED` 时，可展示带完整性标签的模型选择上下文，并一次询问 executor/reviewer 的完整 model + reasoning effort 及必要的同模型理由。部分显式策略、缺少 client、active delegation 或其他暂停原因不适用；用户未回答时不得创建 run。
+
+当前归入本例外的 SKILL：
+
+- `run-task`：仅补齐核心明确要求的原子模型策略
+
 ## 禁言条款（默认行为）
 
 不属于上述任一例外的所有 SKILL 执行场景，遵循以下默认行为：

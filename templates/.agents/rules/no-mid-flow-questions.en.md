@@ -48,6 +48,14 @@ SKILLs currently covered by this exemption:
 - `release`: may confirm publish after presenting the latest release snapshot
 - `create-release-note`: may confirm publish after presenting exact staged notes and their digest
 
+### Exemption 5: Complete model policy missing at lifecycle start
+
+Only when `run-task` receives `ORCHESTRATION_MODEL_POLICY_REQUIRED` before any run, baseline, receipt, or child is created may it show model-selection context with its completeness label and ask once for complete executor/reviewer model + reasoning effort and any required same-model reason. Partial explicit policy, a missing client, active delegation, and other pause causes do not qualify. No answer means no run is created.
+
+SKILLs currently covered by this exemption:
+
+- `run-task`: may collect only the atomic model policy explicitly required by core
+
 ## No-Mid-Flow-Questions Clause (default behavior)
 
 For every SKILL execution context not covered by any exemption above, the default behavior is:

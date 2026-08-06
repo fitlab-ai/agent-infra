@@ -16,25 +16,53 @@ import {
   sealDelegation
 } from './delegation-receipts.ts';
 import type { DelegationReceipt, DelegationRole, DelegationStage } from './delegation-receipts.ts';
-import { getAgentClientCapability } from '../agent-clients/registry.ts';
-import type { AgentClientId } from '../agent-clients/types.ts';
+import { normalizeAgentClients } from '../agent-clients/config.ts';
+import {
+  getAgentClientCapability,
+  getAgentClientDelegationEvidence,
+  getAgentClientModelSelection
+} from '../agent-clients/registry.ts';
+import { isAgentClientId } from '../agent-clients/types.ts';
+import type {
+  AgentClientId,
+  OrchestrationModelPolicy,
+  OrchestrationRolePolicy
+} from '../agent-clients/types.ts';
 import { captureWorkspaceSnapshot, diffWorkspaceSnapshots } from './workspace-snapshot.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
-type OrchestrationModelPolicy = Readonly<{
+type LegacyOrchestrationModelPolicy = Readonly<{
   executor: string;
   reviewer: string;
   sameModelReason: string | null;
 }>;
+type ModelPolicySource = Readonly<{
+  kind: 'explicit' | 'project-config';
+  client: AgentClientId;
+  resolvedAt: string;
+}>;
+type OrchestrationRecovery = Readonly<{
+  code: 'MODEL_POLICY_SUPPLEMENTED';
+  recoveredAt: string;
+  previousSchemaVersion: 1;
+  previousStatus: OrchestrationStatus;
+  previousPause: Readonly<{ code: string; message: string; recoverable: boolean }> | null;
+  policySource: ModelPolicySource;
+  receiptCount: 0;
+  pendingDelegation: false;
+  resultingStatus: OrchestrationStatus;
+}>;
 type OrchestrationRun = Readonly<{
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   taskId: string;
   runId: string;
   status: OrchestrationStatus;
   nextStage: DelegationStage | null;
   stepCount: number;
   maxSteps: number;
-  modelPolicy?: OrchestrationModelPolicy;
+  modelPolicy?: OrchestrationModelPolicy | LegacyOrchestrationModelPolicy;
+  modelPolicySource?: ModelPolicySource;
+  recoveryHistory?: readonly OrchestrationRecovery[];
   baseline: string;
   pendingDelegation: DelegationReceipt | null;
   receipts: readonly DelegationReceipt[];
@@ -50,6 +78,7 @@ type OrchestrationNext = Readonly<{
   round: number;
   artifact: string;
   requestedModel: string | null;
+  requestedReasoningEffort: string | null;
 }>;
 type OrchestrationResult = Readonly<{
   status: OrchestrationStatus | 'failed';
@@ -57,13 +86,20 @@ type OrchestrationResult = Readonly<{
   taskId: string | null;
   run: OrchestrationRun | null;
   next: OrchestrationNext | null;
-  error: Readonly<{ code: string; message: string }> | null;
+  error: Readonly<{
+    code: string;
+    message: string;
+    client?: AgentClientId;
+    missingFields?: readonly string[];
+    modelSelectionContext?: ReturnType<typeof getAgentClientModelSelection>;
+  }> | null;
 }>;
 type OrchestrationOptions = {
   repoRoot?: string;
   id?: () => string;
   now?: () => string;
   maxSteps?: number;
+  client?: AgentClientId;
   modelPolicy?: OrchestrationModelPolicy;
   captureWorkspace?: (repoRoot: string, taskId: string | null) => string;
   diffWorkspace?: (repoRoot: string, before: string, after: string) => string[];
@@ -93,8 +129,13 @@ function withUpdatedRun(run: OrchestrationRun, updates: Partial<OrchestrationRun
   return Object.freeze({ ...run, ...updates, updatedAt: new Date().toISOString() });
 }
 
-function failed(code: string, message: string, taskId: string | null = null): OrchestrationResult {
-  return { status: 'failed', changed: false, taskId, run: null, next: null, error: { code, message } };
+function failed(
+  code: string,
+  message: string,
+  taskId: string | null = null,
+  details: Omit<NonNullable<OrchestrationResult['error']>, 'code' | 'message'> = {}
+): OrchestrationResult {
+  return { status: 'failed', changed: false, taskId, run: null, next: null, error: { code, message, ...details } };
 }
 
 function validModel(value: unknown): value is string {
@@ -102,10 +143,16 @@ function validModel(value: unknown): value is string {
 }
 
 function validateModelPolicy(policy: OrchestrationModelPolicy | undefined): Readonly<{ code: string; message: string }> | null {
-  if (!policy || !validModel(policy.executor) || !validModel(policy.reviewer)) {
-    return { code: 'ORCHESTRATION_MODEL_POLICY_REQUIRED', message: 'executor and reviewer model identities are required' };
+  if (
+    !policy
+    || !validModel(policy.executor?.model)
+    || !validModel(policy.executor?.reasoningEffort)
+    || !validModel(policy.reviewer?.model)
+    || !validModel(policy.reviewer?.reasoningEffort)
+  ) {
+    return { code: 'ORCHESTRATION_MODEL_POLICY_REQUIRED', message: 'executor and reviewer model and reasoning effort are required' };
   }
-  if (policy.executor === policy.reviewer) {
+  if (policy.executor.model === policy.reviewer.model) {
     if (!validModel(policy.sameModelReason)) {
       return { code: 'ORCHESTRATION_MODEL_SEPARATION_REQUIRED', message: 'using the same executor and reviewer model requires a reason' };
     }
@@ -116,42 +163,193 @@ function validateModelPolicy(policy: OrchestrationModelPolicy | undefined): Read
 }
 
 function sameModelPolicy(left: OrchestrationModelPolicy, right: OrchestrationModelPolicy): boolean {
-  return left.executor === right.executor
-    && left.reviewer === right.reviewer
+  return left.executor.model === right.executor.model
+    && left.executor.reasoningEffort === right.executor.reasoningEffort
+    && left.reviewer.model === right.reviewer.model
+    && left.reviewer.reasoningEffort === right.reviewer.reasoningEffort
     && left.sameModelReason === right.sameModelReason;
+}
+
+function isV2Policy(policy: OrchestrationRun['modelPolicy']): policy is OrchestrationModelPolicy {
+  return typeof policy?.executor === 'object' && typeof policy?.reviewer === 'object';
+}
+
+function rolePolicy(run: OrchestrationRun, role: DelegationRole): OrchestrationRolePolicy | null {
+  return isV2Policy(run.modelPolicy) ? run.modelPolicy[role] : null;
+}
+
+function resolveProjectPolicy(repoRoot: string, client: AgentClientId): OrchestrationModelPolicy | undefined {
+  const configPath = path.join(repoRoot, '.agents', '.airc.json');
+  if (!fs.existsSync(configPath)) return undefined;
+  const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+  return normalizeAgentClients(raw).state[client].orchestration;
 }
 
 function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  const existing = readRun(resolved.taskDir);
+  if (!isAgentClientId(options.client)) {
+    return failed('ORCHESTRATION_PAYLOAD_INVALID', 'begin-or-resume requires a known client', resolved.taskId);
+  }
+  let existing: OrchestrationRun | null;
+  try {
+    existing = readRun(resolved.taskDir);
+  } catch (error) {
+    return failed('ORCHESTRATION_STATE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
+  }
   if (existing) {
-    if (options.modelPolicy) {
-      const policyError = validateModelPolicy(options.modelPolicy);
-      if (policyError) return failed(policyError.code, policyError.message, resolved.taskId);
-      if (!existing.modelPolicy || !sameModelPolicy(existing.modelPolicy, options.modelPolicy)) {
-        return failed('ORCHESTRATION_MODEL_POLICY_MISMATCH', 'provided model policy does not match the persisted run policy', resolved.taskId);
+    if (
+      ![1, 2].includes(existing.schemaVersion)
+      || !Array.isArray(existing.receipts)
+      || !Object.prototype.hasOwnProperty.call(existing, 'pendingDelegation')
+    ) {
+      return failed('ORCHESTRATION_STATE_INVALID', 'orchestration state has an invalid schema', resolved.taskId);
+    }
+    if (existing.status === 'completed' && existing.schemaVersion === 1) {
+      return { status: 'completed', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
+    }
+    if (existing.schemaVersion === 2) {
+      const policyError = validateModelPolicy(isV2Policy(existing.modelPolicy) ? existing.modelPolicy : undefined);
+      if (
+        policyError
+        || !existing.modelPolicySource
+        || !isAgentClientId(existing.modelPolicySource.client)
+        || !Array.isArray(existing.recoveryHistory)
+      ) {
+        return failed('ORCHESTRATION_STATE_INVALID', 'schemaVersion 2 orchestration state is incomplete', resolved.taskId);
+      }
+      if (existing.status === 'completed') {
+        return { status: 'completed', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
+      }
+      if (existing.modelPolicySource.client !== options.client) {
+        return failed('ORCHESTRATION_CLIENT_MISMATCH', 'provided client does not match the persisted run policy source', resolved.taskId);
+      }
+      if (options.modelPolicy) {
+        const suppliedError = validateModelPolicy(options.modelPolicy);
+        if (suppliedError) return failed(suppliedError.code, suppliedError.message, resolved.taskId);
+        if (!sameModelPolicy(existing.modelPolicy as OrchestrationModelPolicy, options.modelPolicy)) {
+          return failed('ORCHESTRATION_MODEL_POLICY_MISMATCH', 'provided model policy does not match the persisted run policy', resolved.taskId);
+        }
+      }
+      if (existing.status === 'paused' && existing.pause?.recoverable && existing.pendingDelegation === null) {
+        const resumed = withUpdatedRun(existing, { status: 'running', pause: null });
+        saveRun(resolved.taskDir, resumed);
+        return { status: 'running', changed: true, taskId: resolved.taskId, run: resumed, next: null, error: null };
+      }
+      return { status: existing.status, changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
+    }
+
+    let policy: OrchestrationModelPolicy | undefined = options.modelPolicy;
+    let sourceKind: ModelPolicySource['kind'] = 'explicit';
+    if (!policy) {
+      try {
+        policy = resolveProjectPolicy(resolved.repoRoot, options.client);
+        sourceKind = 'project-config';
+      } catch (error) {
+        return failed('ORCHESTRATION_CONFIG_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
       }
     }
-    if (existing.status === 'paused' && existing.pause?.recoverable && existing.pendingDelegation === null) {
-      const resumed = withUpdatedRun(existing, { status: 'running', pause: null });
-      saveRun(resolved.taskDir, resumed);
-      return { status: 'running', changed: true, taskId: resolved.taskId, run: resumed, next: null, error: null };
+    const policyError = validateModelPolicy(policy);
+    if (policyError) {
+      return failed(policyError.code, policyError.message, resolved.taskId, {
+        client: options.client,
+        missingFields: ['executor.model', 'executor.reasoningEffort', 'reviewer.model', 'reviewer.reasoningEffort'],
+        modelSelectionContext: getAgentClientModelSelection(options.client)
+      });
     }
-    return { status: existing.status, changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
+    if (existing.pendingDelegation !== null) {
+      const alreadyPaused = existing.status === 'paused' && existing.pause?.code === 'ORCHESTRATION_DELEGATION_BUSY';
+      if (alreadyPaused) return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
+      const paused = withUpdatedRun(existing, {
+        status: 'paused',
+        pause: { code: 'ORCHESTRATION_DELEGATION_BUSY', message: 'legacy run has a pending delegation', recoverable: false }
+      });
+      saveRun(resolved.taskDir, paused);
+      return { status: 'paused', changed: true, taskId: resolved.taskId, run: paused, next: null, error: null };
+    }
+    if (existing.receipts.length > 0) {
+      const alreadyPaused = existing.status === 'paused' && existing.pause?.code === 'ORCHESTRATION_HISTORICAL_EFFORT_UNVERIFIED';
+      if (alreadyPaused) return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
+      const paused = withUpdatedRun(existing, {
+        status: 'paused',
+        pause: {
+          code: 'ORCHESTRATION_HISTORICAL_EFFORT_UNVERIFIED',
+          message: 'legacy receipts do not contain actual reasoning-effort evidence',
+          recoverable: false
+        }
+      });
+      saveRun(resolved.taskDir, paused);
+      return { status: 'paused', changed: true, taskId: resolved.taskId, run: paused, next: null, error: null };
+    }
+    if (
+      existing.modelPolicy
+      && typeof existing.modelPolicy.executor === 'string'
+      && (
+        existing.modelPolicy.executor !== policy!.executor.model
+        || existing.modelPolicy.reviewer !== policy!.reviewer.model
+        || existing.modelPolicy.sameModelReason !== policy!.sameModelReason
+      )
+    ) {
+        return failed('ORCHESTRATION_MODEL_POLICY_MISMATCH', 'provided model policy does not match the persisted run policy', resolved.taskId);
+    }
+    const now = (options.now ?? (() => new Date().toISOString()))();
+    const source: ModelPolicySource = { kind: sourceKind, client: options.client, resolvedAt: now };
+    const clearsModelPause = existing.pause?.code === 'ORCHESTRATION_MODEL_EVIDENCE_MISSING';
+    const resultingStatus = clearsModelPause ? 'running' : existing.status;
+    const recovery: OrchestrationRecovery = {
+      code: 'MODEL_POLICY_SUPPLEMENTED',
+      recoveredAt: now,
+      previousSchemaVersion: 1,
+      previousStatus: existing.status,
+      previousPause: existing.pause,
+      policySource: source,
+      receiptCount: 0,
+      pendingDelegation: false,
+      resultingStatus
+    };
+    const recovered: OrchestrationRun = Object.freeze({
+      ...existing,
+      schemaVersion: 2,
+      status: resultingStatus,
+      modelPolicy: policy!,
+      modelPolicySource: source,
+      recoveryHistory: Object.freeze([recovery]),
+      pause: clearsModelPause ? null : existing.pause,
+      updatedAt: now
+    });
+    saveRun(resolved.taskDir, recovered);
+    return { status: resultingStatus, changed: true, taskId: resolved.taskId, run: recovered, next: null, error: null };
   }
-  const policyError = options.modelPolicy ? validateModelPolicy(options.modelPolicy) : null;
-  if (policyError) return failed(policyError.code, policyError.message, resolved.taskId);
+
+  let policy = options.modelPolicy;
+  let sourceKind: ModelPolicySource['kind'] = 'explicit';
+  if (!policy) {
+    try {
+      policy = resolveProjectPolicy(resolved.repoRoot, options.client);
+      sourceKind = 'project-config';
+    } catch (error) {
+      return failed('ORCHESTRATION_CONFIG_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
+    }
+  }
+  const policyError = validateModelPolicy(policy);
+  if (policyError) return failed(policyError.code, policyError.message, resolved.taskId, {
+    client: options.client,
+    missingFields: ['executor.model', 'executor.reasoningEffort', 'reviewer.model', 'reviewer.reasoningEffort'],
+    modelSelectionContext: getAgentClientModelSelection(options.client)
+  });
   const now = (options.now ?? (() => new Date().toISOString()))();
+  const source: ModelPolicySource = { kind: sourceKind, client: options.client, resolvedAt: now };
   const run: OrchestrationRun = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     taskId: resolved.taskId,
     runId: (options.id ?? randomUUID)(),
     status: 'running',
     nextStage: null,
     stepCount: 0,
     maxSteps: options.maxSteps ?? 24,
-    ...(options.modelPolicy ? { modelPolicy: options.modelPolicy } : {}),
+    modelPolicy: policy!,
+    modelPolicySource: source,
+    recoveryHistory: [],
     baseline: '',
     pendingDelegation: null,
     receipts: [],
@@ -192,7 +390,7 @@ function latestReviewApproved(taskDir: string, family: 'review-analysis' | 'revi
   return parsed.ok && parsed.summary.verdict === 'Approved' && parsed.summary.counts !== null;
 }
 
-function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedModel'> | null {
+function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedModel' | 'requestedReasoningEffort'> | null {
   const analysisRound = highestRound(taskDir, 'analysis');
   const analysisReviewRound = highestRound(taskDir, 'review-analysis');
   const planRound = highestRound(taskDir, 'plan');
@@ -255,9 +453,11 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   const routed = routeFromFacts(resolved.taskDir);
   if (!routed) return failed('ORCHESTRATION_ROUTE_UNKNOWN', 'cannot determine a unique lifecycle action', resolved.taskId);
   const run = readRun(resolved.taskDir);
+  const policy = run ? rolePolicy(run, routed.role) : null;
   const next: OrchestrationNext = {
     ...routed,
-    requestedModel: run?.modelPolicy?.[routed.role] ?? null
+    requestedModel: policy?.model ?? null,
+    requestedReasoningEffort: policy?.reasoningEffort ?? null
   };
   if (next.stage === 'commit') {
     const reviewRound = highestRound(resolved.taskDir, 'review-code');
@@ -288,7 +488,7 @@ function statusOrchestration(taskRef: string, options: OrchestrationOptions = {}
 
 function prepareOrchestrationDelegation(
   taskRef: string,
-  input: Readonly<{ client: AgentClientId; requestedModel?: string }>,
+  input: Readonly<{ client: AgentClientId; requestedModel?: string; requestedReasoningEffort?: string }>,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
@@ -296,11 +496,14 @@ function prepareOrchestrationDelegation(
   if (
     getAgentClientCapability(input.client, 'subagents').level === 'unsupported'
     || getAgentClientCapability(input.client, 'orchestration').level === 'unsupported'
+    || getAgentClientDelegationEvidence(input.client).actualModel === 'unavailable'
+    || getAgentClientDelegationEvidence(input.client).actualReasoningEffort === 'unavailable'
   ) {
     return failed('ORCHESTRATION_CLIENT_UNSUPPORTED', `client '${input.client}' does not support lifecycle orchestration`, resolved.taskId);
   }
   const run = readRun(resolved.taskDir);
   if (!run || run.status !== 'running') return failed('ORCHESTRATION_RUN_NOT_RUNNING', 'a running orchestration is required', resolved.taskId);
+  if (!isV2Policy(run.modelPolicy)) return failed('ORCHESTRATION_MODEL_EVIDENCE_MISSING', 'running orchestration has no persisted model policy', resolved.taskId);
   if (run.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_BUSY', 'the run already has a pending delegation', resolved.taskId);
   const repositoryPending = (['claude-code', 'codex'] as AgentClientId[])
     .flatMap((client) => matchingDelegations(client, () => true, options));
@@ -311,15 +514,18 @@ function prepareOrchestrationDelegation(
   const routed = routeOrchestration(taskRef, options);
   if (!routed.next) return routed;
   const next = routed.next;
-  // 模型证据可选：无持久化策略时允许 prepare；有策略时 requestedModel 须与策略一致。
-  if (run.modelPolicy) {
-    const expectedModel = run.modelPolicy[next.role];
-    if (!validModel(input.requestedModel)) {
-      return failed('ORCHESTRATION_REQUESTED_MODEL_REQUIRED', 'prepare requires the exact requested model identity', resolved.taskId);
-    }
-    if (input.requestedModel !== expectedModel) {
-      return failed('ORCHESTRATION_REQUESTED_MODEL_MISMATCH', `requested model does not match the persisted ${next.role} model`, resolved.taskId);
-    }
+  if (!validModel(input.requestedModel)) {
+    return failed('ORCHESTRATION_REQUESTED_MODEL_REQUIRED', 'prepare requires the exact requested model identity', resolved.taskId);
+  }
+  if (!validModel(input.requestedReasoningEffort)) {
+    return failed('ORCHESTRATION_REQUESTED_REASONING_EFFORT_REQUIRED', 'prepare requires the exact requested reasoning effort', resolved.taskId);
+  }
+  const expectedPolicy = run.modelPolicy[next.role];
+  if (input.requestedModel !== expectedPolicy.model) {
+    return failed('ORCHESTRATION_REQUESTED_MODEL_MISMATCH', `requested model does not match the persisted ${next.role} model`, resolved.taskId);
+  }
+  if (input.requestedReasoningEffort !== expectedPolicy.reasoningEffort) {
+    return failed('ORCHESTRATION_REQUESTED_REASONING_EFFORT_MISMATCH', `requested reasoning effort does not match the persisted ${next.role} policy`, resolved.taskId);
   }
   let beforeFingerprint: string;
   try {
@@ -335,7 +541,8 @@ function prepareOrchestrationDelegation(
     round: next.round,
     artifact: next.artifact,
     client: input.client,
-    requestedModel: input.requestedModel ?? null,
+    requestedModel: input.requestedModel,
+    requestedReasoningEffort: input.requestedReasoningEffort,
     workspaceSnapshotScope: 'task',
     beforeFingerprint
   }, { id: options.id, now: options.now });

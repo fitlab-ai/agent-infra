@@ -16,8 +16,11 @@ type DelegationReceipt = Readonly<{
   artifact: string;
   client: AgentClientId;
   requestedModel: string | null;
+  requestedReasoningEffort: string | null;
   actualModel: string | null;
+  actualReasoningEffort: string | null;
   modelFallbackReason: string | null;
+  reasoningEffortFallbackReason: string | null;
   parentId: string | null;
   childId: string | null;
   spawnMode: string | null;
@@ -51,14 +54,16 @@ function fail(code: string, message: string): ReceiptFailure {
 }
 
 function prepareDelegation(
-  input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'actualModel' | 'modelFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string | null }>,
+  input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'requestedReasoningEffort' | 'actualModel' | 'actualReasoningEffort' | 'modelFallbackReason' | 'reasoningEffortFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string; requestedReasoningEffort: string }>,
   options: { id?: () => string; now?: () => string } = {}
 ): DelegationReceipt {
   return Object.freeze({
     ...input,
     id: (options.id ?? randomUUID)(),
     actualModel: null,
+    actualReasoningEffort: null,
     modelFallbackReason: null,
+    reasoningEffortFallbackReason: null,
     parentId: null,
     childId: null,
     spawnMode: null,
@@ -81,7 +86,9 @@ function activateDelegation(
     parentId: string;
     spawnMode: string;
     actualModel?: string;
+    actualReasoningEffort?: string;
     modelFallbackReason?: string;
+    reasoningEffortFallbackReason?: string;
   }>,
   options: { now?: () => string } = {}
 ): ReceiptResult {
@@ -93,11 +100,28 @@ function activateDelegation(
     return fail('DELEGATION_IDENTITY_INVALID', 'native parent/child identity does not match the prepared delegation');
   }
   if (event.spawnMode !== 'fresh') return fail('DELEGATION_FORK_FORBIDDEN', `spawn mode '${event.spawnMode}' is not fresh`);
-  const actualModel = event.actualModel && event.actualModel.trim() === event.actualModel ? event.actualModel : null;
-  // 模型证据可选：宿主未回传 actual model（如 Claude Code 已验证无法回传）不再失败关闭；
-  // 仅当请求模型与实际模型都已知且不一致、且缺少降级理由时才失败。
-  if (actualModel && receipt.requestedModel && actualModel !== receipt.requestedModel && (!event.modelFallbackReason || event.modelFallbackReason.trim() === '')) {
+  const actualModel = event.actualModel;
+  if (!actualModel || actualModel.trim() !== actualModel) {
+    return fail('DELEGATION_MODEL_IDENTITY_MISSING', 'native start event must provide a non-empty actual model identity');
+  }
+  if (actualModel !== receipt.requestedModel && (!event.modelFallbackReason || event.modelFallbackReason.trim() === '')) {
     return fail('DELEGATION_MODEL_FALLBACK_UNRECORDED', 'actual model differs from requested model without a fallback reason');
+  }
+  const actualReasoningEffort = event.actualReasoningEffort;
+  if (!actualReasoningEffort || actualReasoningEffort.trim() !== actualReasoningEffort) {
+    return fail('DELEGATION_REASONING_EFFORT_MISSING', 'native start event must provide a non-empty actual reasoning effort');
+  }
+  if (
+    actualReasoningEffort !== receipt.requestedReasoningEffort
+    && (!event.reasoningEffortFallbackReason || event.reasoningEffortFallbackReason.trim() === '')
+  ) {
+    return fail('DELEGATION_REASONING_EFFORT_FALLBACK_UNRECORDED', 'actual reasoning effort differs from requested effort without a fallback reason');
+  }
+  if (actualModel === receipt.requestedModel && event.modelFallbackReason) {
+    return fail('DELEGATION_MODEL_FALLBACK_INVALID', 'model fallback reason is only valid when actual model differs');
+  }
+  if (actualReasoningEffort === receipt.requestedReasoningEffort && event.reasoningEffortFallbackReason) {
+    return fail('DELEGATION_REASONING_EFFORT_FALLBACK_INVALID', 'reasoning-effort fallback reason is only valid when actual effort differs');
   }
   return { ok: true, receipt: Object.freeze({
     ...receipt,
@@ -106,7 +130,9 @@ function activateDelegation(
     childId: event.childId,
     spawnMode: event.spawnMode,
     actualModel,
+    actualReasoningEffort,
     modelFallbackReason: event.modelFallbackReason ?? null,
+    reasoningEffortFallbackReason: event.reasoningEffortFallbackReason ?? null,
     activatedAt: (options.now ?? (() => new Date().toISOString()))()
   }) };
 }

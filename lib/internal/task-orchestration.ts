@@ -12,6 +12,7 @@ import {
   sealOrchestrationDelegation,
   statusOrchestration
 } from '../task/orchestration.ts';
+import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|hook-start|stage-completed|hook-stop|advance|pause|status> [options]\n';
@@ -44,9 +45,11 @@ function taskOrchestration(args: string[] = []): void {
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
     if (![
-      '--max-steps', '--executor-model', '--reviewer-model', '--same-model-reason',
-      '--client', '--requested-model', '--parent-id', '--before-fingerprint',
-      '--native-agent', '--child-id', '--spawn-mode', '--actual-model', '--fallback-reason',
+      '--max-steps', '--executor-model', '--executor-reasoning-effort',
+      '--reviewer-model', '--reviewer-reasoning-effort', '--same-model-reason',
+      '--client', '--requested-model', '--requested-reasoning-effort', '--parent-id', '--before-fingerprint',
+      '--native-agent', '--child-id', '--spawn-mode', '--actual-model', '--actual-reasoning-effort',
+      '--model-fallback-reason', '--reasoning-effort-fallback-reason',
       '--exit-code', '--after-fingerprint', '--changed-paths', '--code', '--message', '--recoverable', '--agent'
     ].includes(flag)) {
       usageFailure(`unknown option '${flag}'`);
@@ -65,24 +68,40 @@ function taskOrchestration(args: string[] = []): void {
     values[flag] = value;
   }
   const requireValues = (flags: string[]) => flags.find((flag) => values[flag] === undefined);
+  if (values['--client'] !== undefined && !isAgentClientId(values['--client'])) {
+    usageFailure(`unknown client '${values['--client']}'`);
+    return;
+  }
   let result;
   if (intent === 'begin-or-resume') {
+    const missing = requireValues(['--client']);
+    if (missing) { usageFailure(`intent 'begin-or-resume' requires '${missing}'`); return; }
     const maxSteps = values['--max-steps'] === undefined ? undefined : Number(values['--max-steps']);
     if (maxSteps !== undefined && (!Number.isInteger(maxSteps) || maxSteps < 1)) {
       usageFailure('--max-steps must be a positive integer'); return;
     }
-    const hasExecutorModel = values['--executor-model'] !== undefined;
-    const hasReviewerModel = values['--reviewer-model'] !== undefined;
-    const hasSameModelReason = values['--same-model-reason'] !== undefined;
-    if (hasExecutorModel !== hasReviewerModel || (hasSameModelReason && !hasExecutorModel)) {
-      usageFailure("model policy options require both '--executor-model' and '--reviewer-model'");
+    const policyFlags = [
+      '--executor-model', '--executor-reasoning-effort',
+      '--reviewer-model', '--reviewer-reasoning-effort', '--same-model-reason'
+    ];
+    const hasAnyPolicy = policyFlags.some((flag) => values[flag] !== undefined);
+    const requiredPolicy = policyFlags.slice(0, 4);
+    if (hasAnyPolicy && requiredPolicy.some((flag) => values[flag] === undefined)) {
+      usageFailure('explicit model policy requires executor/reviewer model and reasoning effort');
       return;
     }
     result = beginOrResumeOrchestration(taskRef!, {
       maxSteps,
-      modelPolicy: hasExecutorModel ? {
-        executor: values['--executor-model']!,
-        reviewer: values['--reviewer-model']!,
+      client: values['--client'] as AgentClientId,
+      modelPolicy: hasAnyPolicy ? {
+        executor: {
+          model: values['--executor-model']!,
+          reasoningEffort: values['--executor-reasoning-effort']!
+        },
+        reviewer: {
+          model: values['--reviewer-model']!,
+          reasoningEffort: values['--reviewer-reasoning-effort']!
+        },
         sameModelReason: values['--same-model-reason'] ?? null
       } : undefined
     });
@@ -95,7 +114,8 @@ function taskOrchestration(args: string[] = []): void {
     if (missing) { usageFailure(`intent 'prepare' requires '${missing}'`); return; }
     result = prepareOrchestrationDelegation(taskRef!, {
       client: values['--client'] as AgentClientId,
-      requestedModel: values['--requested-model']
+      requestedModel: values['--requested-model'],
+      requestedReasoningEffort: values['--requested-reasoning-effort']
     });
   } else if (intent === 'hook-start') {
     const missing = requireValues([
@@ -106,7 +126,10 @@ function taskOrchestration(args: string[] = []): void {
     const event = {
       nativeAgent: values['--native-agent']!, childId: values['--child-id']!,
       parentId: values['--parent-id']!, spawnMode: values['--spawn-mode']!,
-      actualModel: values['--actual-model'], modelFallbackReason: values['--fallback-reason']
+      actualModel: values['--actual-model'],
+      actualReasoningEffort: values['--actual-reasoning-effort'],
+      modelFallbackReason: values['--model-fallback-reason'],
+      reasoningEffortFallbackReason: values['--reasoning-effort-fallback-reason']
     };
     result = taskRef === 'auto'
       ? activateMatchingOrchestrationDelegation(values['--client'] as AgentClientId, event)

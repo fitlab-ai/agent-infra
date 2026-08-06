@@ -7,8 +7,10 @@ import {
 } from '../agent-clients/config.ts';
 import { normalizeCustomTUIs } from '../agent-clients/custom-tuis.ts';
 import { renderNextStepCommands } from '../agent-clients/next-steps.ts';
+import { getAgentClientModelSelection } from '../agent-clients/registry.ts';
+import { isAgentClientId } from '../agent-clients/types.ts';
 
-const USAGE = 'Usage: agent-infra-internal agent-client next-steps --skill <skill-name> [--task-ref <NN|TASK-id>] [--version <semver>] [--format text|json]\n';
+const USAGE = 'Usage: agent-infra-internal agent-client <next-steps|model-selection> [options]\n';
 
 type ParsedArgs = Readonly<{
   skillName: string;
@@ -82,6 +84,50 @@ function parseArgs(args: string[]): ParsedArgs | null {
 }
 
 function agentClient(args: string[] = []): void {
+  if (args[0] === 'model-selection') {
+    const values: Record<string, string> = {};
+    const seen = new Set<string>();
+    for (let index = 1; index < args.length; index += 1) {
+      const flag = args[index]!;
+      if (!['--client', '--format'].includes(flag) || seen.has(flag)) {
+        failure('AGENT_CLIENT_PAYLOAD_INVALID', `invalid or duplicate option '${flag}'`);
+        return;
+      }
+      const value = args[++index];
+      if (!value || value.startsWith('--')) {
+        failure('AGENT_CLIENT_PAYLOAD_INVALID', `option '${flag}' requires a value`);
+        return;
+      }
+      seen.add(flag);
+      values[flag] = value;
+    }
+    const client = values['--client'];
+    const format = values['--format'] ?? 'text';
+    if (!isAgentClientId(client) || !['text', 'json'].includes(format)) {
+      failure('AGENT_CLIENT_PAYLOAD_INVALID', 'model-selection requires a known --client and text|json format');
+      return;
+    }
+    const context = getAgentClientModelSelection(client);
+    if (format === 'json') {
+      process.stdout.write(`${JSON.stringify({
+        status: 'resolved', changed: false, client, context, error: null
+      })}\n`);
+      return;
+    }
+    if (context.kind === 'interactive-only') {
+      process.stdout.write(`Model selection: interactive-only\nCommand: ${context.command}\n${context.guidance}\n`);
+    } else {
+      process.stdout.write(`Model selection: ${context.completeness} catalog\nSource: ${context.source}\n`);
+      for (const model of context.models) {
+        const efforts = model.reasoningEfforts?.length
+          ? ` (${model.reasoningEfforts.join(', ')})`
+          : '';
+        process.stdout.write(`- ${model.id}${efforts}\n`);
+      }
+      if (context.guidance) process.stdout.write(`${context.guidance}\n`);
+    }
+    return;
+  }
   const parsed = parseArgs(args);
   if (!parsed || process.exitCode) return;
 

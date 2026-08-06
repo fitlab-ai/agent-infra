@@ -136,6 +136,27 @@ test('canonical input is normalized to stable ID order without mutation', () => 
   assert.notEqual(second.canonical, result.canonical);
 });
 
+test('canonical config preserves a complete per-client orchestration policy', () => {
+  const policy = {
+    executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
+    reviewer: { model: 'reviewer-model', reasoningEffort: 'high' },
+    sameModelReason: null
+  };
+  const input = canonical().map((entry) =>
+    entry.id === 'codex' ? { ...entry, orchestration: policy } : entry
+  );
+  const result = normalizeAgentClients({ agentClients: input });
+
+  assert.deepEqual(result.canonical, input);
+  assert.deepEqual(result.state.codex.orchestration, policy);
+  assert.equal(result.changed, false);
+  assert.equal(errorCode(() => normalizeAgentClients({
+    agentClients: canonical().map((entry) => entry.id === 'codex'
+      ? { ...entry, orchestration: { ...policy, reviewer: { model: '', reasoningEffort: 'high' } } }
+      : entry)
+  })), 'INVALID_AGENT_CLIENTS');
+});
+
 test('serializer returns a new stable array and does not mutate state', () => {
   const state = structuredClone(ALL_ENABLED);
   const before = structuredClone(state);

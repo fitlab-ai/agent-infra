@@ -10,14 +10,14 @@
 
 ## Recovery
 
-`orchestration.json` is the detailed state source. Re-entry reconciles first: completed runs return idempotently; recoverable pauses continue only after the blocker clears; unproven children, unsealed receipts, and baseline drift stay paused. Reviewer identities are never reused.
+`orchestration.json` is the detailed state source. A v2 run persists complete policy, source, and append-only recovery history. Only a v1 run with no pending delegation and zero receipts may be upgraded in place after supplying a complete policy; any historical receipt stays paused because effort is unverifiable. Migration is forward-only: old binaries must not advance active v2 runs.
 
 ## Model Policy
 
-- Model policy is optional. Hosts that can supply model evidence may persist executor/reviewer models (distinct models require a null `sameModelReason`; using one model for both roles requires an isolation-limit reason). Hosts that cannot report an actual model (e.g. Claude Code) may omit the policy and run without one. Re-entry must not silently rewrite a persisted policy.
-- With a model policy, route resolves the requested model by role, prepare matches it before a workspace snapshot, and native spawn explicitly uses it instead of inheriting session defaults.
-- When native start reports an actual model, core records it. A requested/actual mismatch separately requires `modelFallbackReason`; the same-model policy reason cannot substitute for it. A host that does not report an actual model is a valid state, not a fail-closed condition.
-- Missing model policy or actual model no longer fails closed. A legacy run without model policy may continue normally.
+- A new run persists model and reasoning effort for both roles. Explicit policy is atomic across all four role fields; only a fully absent explicit policy may fall back to the current client's `agentClients[].orchestration`.
+- Route resolves requested model/effort by role, and prepare matches both before snapshotting. Native spawn must not inherit session defaults.
+- Native start records host-observed actual model/effort. Each mismatch needs its own fallback reason, and requested values must never be fabricated as actual evidence.
+- Model selection is labeled as a complete catalog, partial catalog, or interactive-only guidance; a local override enum must not be presented as complete.
 
 ## Stable Pause Conditions
 

@@ -18,6 +18,7 @@ const input = {
   artifact: 'review-code.md',
   client: 'codex' as const,
   requestedModel: 'review-model',
+  requestedReasoningEffort: 'high',
   beforeFingerprint: 'before'
 };
 
@@ -28,7 +29,7 @@ test('delegation receipts follow the one-way lifecycle and reject replay', () =>
   assert.equal(prepared.workspaceSnapshotScope, 'task');
   const activated = activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-1', parentId: 'parent-1',
-    spawnMode: 'fresh', actualModel: 'review-model'
+    spawnMode: 'fresh', actualModel: 'review-model', actualReasoningEffort: 'high'
   }, { now: () => '2026-01-01T00:00:01.000Z' });
   assert.equal(activated.ok, true);
   if (!activated.ok) return;
@@ -67,35 +68,35 @@ test('managed identities fail closed while unrelated subagents are ignored', () 
   }).code, 'DELEGATION_ROLE_MISMATCH');
 });
 
-test('activation treats model evidence as optional and records justified fallback', () => {
+test('activation requires host-observed model identity and records justified fallback', () => {
   const prepared = prepareDelegation(input, { id: () => 'delegation-model' });
   const event = {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-model',
     parentId: 'parent-model', spawnMode: 'fresh'
   };
 
-  // 模型证据可选：宿主未回传 actual model（如 Claude Code 已验证不回传）不再失败关闭。
-  const missing = activateDelegation(prepared, event);
-  assert.equal(missing.ok, true);
-  if (missing.ok) assert.equal(missing.receipt.actualModel, null);
-
-  // 已回传 actual model 时，与 requested 不一致且无降级理由仍失败关闭。
-  assert.equal(activateDelegation(prepared, { ...event, actualModel: 'fallback-model' }).code, 'DELEGATION_MODEL_FALLBACK_UNRECORDED');
+  assert.equal(activateDelegation(prepared, event).code, 'DELEGATION_MODEL_IDENTITY_MISSING');
+  assert.equal(activateDelegation(prepared, { ...event, actualModel: 'review-model' }).code, 'DELEGATION_REASONING_EFFORT_MISSING');
   assert.equal(activateDelegation(prepared, {
-    ...event, actualModel: 'fallback-model', modelFallbackReason: 'requested model unavailable'
+    ...event, actualModel: 'fallback-model', actualReasoningEffort: 'high'
+  }).code, 'DELEGATION_MODEL_FALLBACK_UNRECORDED');
+  assert.equal(activateDelegation(prepared, {
+    ...event, actualModel: 'review-model', actualReasoningEffort: 'medium'
+  }).code, 'DELEGATION_REASONING_EFFORT_FALLBACK_UNRECORDED');
+  assert.equal(activateDelegation(prepared, {
+    ...event,
+    actualModel: 'fallback-model',
+    actualReasoningEffort: 'medium',
+    modelFallbackReason: 'requested model unavailable',
+    reasoningEffortFallbackReason: 'requested effort unavailable'
   }).ok, true);
-
-  // 一致路径仍正常记录。
-  const matched = activateDelegation(prepared, { ...event, actualModel: 'review-model' });
-  assert.equal(matched.ok, true);
-  if (matched.ok) assert.equal(matched.receipt.actualModel, 'review-model');
 });
 
 test('claude-code receipt accepts the normalized short agent claude', () => {
   const prepared = prepareDelegation({ ...input, client: 'claude-code' }, { id: () => 'delegation-cc' });
   const activated = activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-cc', parentId: 'parent-1',
-    spawnMode: 'fresh', actualModel: 'review-model'
+    spawnMode: 'fresh', actualModel: 'review-model', actualReasoningEffort: 'high'
   });
   assert.equal(activated.ok, true);
   if (!activated.ok) return;
@@ -113,7 +114,7 @@ test('reviewer write gate rejects shared, non-allowlisted task, and cross-task p
   const prepared = prepareDelegation(input, { id: () => 'delegation-3' });
   const activated = activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-3', parentId: 'parent-1',
-    spawnMode: 'fresh', actualModel: 'review-model'
+    spawnMode: 'fresh', actualModel: 'review-model', actualReasoningEffort: 'high'
   });
   assert.equal(activated.ok, true);
   if (!activated.ok) return;
