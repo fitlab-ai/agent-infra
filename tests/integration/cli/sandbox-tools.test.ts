@@ -920,7 +920,7 @@ test("opencode tool pins OPENCODE_CONFIG to the sandbox config file", async () =
   );
 });
 
-test("antigravity-cli tool preseeds host settings, keybindings, and MCP config", async () => {
+test("antigravity-cli tool preseeds keybindings and MCP config without host settings", async () => {
   const sandboxTools = await loadFreshEsm<typeof import("../../../lib/sandbox/tools.ts")>("lib/sandbox/tools.js");
   const [maybeTool] = sandboxTools.resolveTools({
     home: "/home/host-user",
@@ -930,10 +930,6 @@ test("antigravity-cli tool preseeds host settings, keybindings, and MCP config",
 
   const tool = required(maybeTool);
   assert.deepEqual(tool.hostPreSeedFiles, [
-    {
-      hostPath: "/home/host-user/.gemini/antigravity-cli/settings.json",
-      sandboxName: "antigravity-cli/settings.json"
-    },
     {
       hostPath: "/home/host-user/.gemini/antigravity-cli/keybindings.json",
       sandboxName: "antigravity-cli/keybindings.json"

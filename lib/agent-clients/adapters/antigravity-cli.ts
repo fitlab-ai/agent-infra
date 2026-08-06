@@ -36,10 +36,6 @@ const antigravityCliAdapter = defineAgentClientAdapter({
       setupHint: 'Run agy inside the container to finish authentication.',
       hostPreSeedFiles: [
         {
-          hostPath: hostJoin(home, '.gemini', 'antigravity-cli', 'settings.json'),
-          sandboxName: 'antigravity-cli/settings.json'
-        },
-        {
           hostPath: hostJoin(home, '.gemini', 'antigravity-cli', 'keybindings.json'),
           sandboxName: 'antigravity-cli/keybindings.json'
         },
