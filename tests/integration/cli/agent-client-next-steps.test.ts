@@ -75,7 +75,7 @@ test('agent-client next-steps renders enabled built-ins and custom TUIs in text 
   assert.equal(
     versioned.stdout,
     '  - Codex: $post-release 16 1.2.3\n'
-      + '  - Gemini CLI: /demo:post-release 16 1.2.3\n'
+      + '  - Antigravity CLI: /post-release 16 1.2.3\n'
       + '  - Acme: acme demo:post-release 16 1.2.3\n'
   );
 });

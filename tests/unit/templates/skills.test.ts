@@ -137,10 +137,6 @@ test("post-release command templates expose and forward one version argument", (
     "templates/.opencode/commands/post-release.en.md",
     "templates/.opencode/commands/post-release.zh-CN.md"
   ]) assert.match(read(relativePath), /\$ARGUMENTS/, relativePath);
-  for (const relativePath of [
-    "templates/.gemini/commands/_project_/post-release.en.toml",
-    "templates/.gemini/commands/_project_/post-release.zh-CN.toml"
-  ]) assert.match(read(relativePath), /\{\{args\}\}/, relativePath);
 });
 
 test("complete-manual-validation skill docs retain completion control structures", () => {
