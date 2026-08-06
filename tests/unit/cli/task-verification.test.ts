@@ -123,8 +123,7 @@ test('run-task verification accepts complete model evidence and rejects missing 
     stepCount: 1, maxSteps: 24, baseline: '',
     modelPolicy: {
       executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
-      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' },
-      sameModelReason: null
+      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
     },
     modelPolicySource: {
       kind: 'explicit', client: 'claude-code', resolvedAt: '2026-01-01T00:00:00.000Z'
@@ -155,28 +154,14 @@ test('run-task verification accepts complete model evidence and rejects missing 
   fs.writeFileSync(runPath, `${JSON.stringify({
     ...run,
     modelPolicy: {
-      executor: { model: 'shared-model', reasoningEffort: 'high' },
-      reviewer: { model: 'shared-model', reasoningEffort: 'high' },
-      sameModelReason: null
+      executor: { model: 'shared-model', reasoningEffort: 'xhigh' },
+      reviewer: { model: 'shared-model', reasoningEffort: 'high' }
     },
     receipts: [{ ...receipt, requestedModel: 'shared-model', actualModel: 'shared-model' }]
   }, null, 2)}\n`);
   assert.equal(
     verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
-    'fail'
-  );
-
-  fs.writeFileSync(runPath, `${JSON.stringify({
-    ...run,
-    modelPolicy: {
-      executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
-      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' },
-      sameModelReason: 'not applicable'
-    }
-  }, null, 2)}\n`);
-  assert.equal(
-    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
-    'fail'
+    'pass'
   );
 });
 
@@ -192,8 +177,7 @@ test('run-task verification accepts a clean unsupported pause and rejects unsafe
     stepCount: 0, maxSteps: 24, baseline: '',
     modelPolicy: {
       executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
-      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' },
-      sameModelReason: null
+      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
     },
     modelPolicySource: {
       kind: 'explicit', client: 'claude-code', resolvedAt: '2026-01-01T00:00:00.000Z'
@@ -248,7 +232,7 @@ test('run-task verification accepts fail-closed legacy pauses without v2 evidenc
   const base = {
     schemaVersion: 1, taskId: f.taskId, runId: 'legacy-run', status: 'paused',
     nextStage: null, stepCount: 1, maxSteps: 24, baseline: 'legacy',
-    modelPolicy: { executor: 'executor-model', reviewer: 'reviewer-model', sameModelReason: null },
+    modelPolicy: { executor: 'executor-model', reviewer: 'reviewer-model' },
     receipts: [], pendingDelegation: null,
     commitAuthorization: { issuedAt: null, consumedAt: null },
     createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:01.000Z'

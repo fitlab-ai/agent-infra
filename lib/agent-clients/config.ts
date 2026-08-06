@@ -77,10 +77,9 @@ function parseOrchestrationPolicy(value: unknown, path: string): OrchestrationMo
   if (!isRecord(value)) fail('INVALID_AGENT_CLIENTS', path);
   const keys = Object.keys(value);
   if (
-    keys.length !== 3
+    keys.length !== 2
     || !hasOwn(value, 'executor')
     || !hasOwn(value, 'reviewer')
-    || !hasOwn(value, 'sameModelReason')
   ) {
     fail('INVALID_AGENT_CLIENTS', path);
   }
@@ -100,13 +99,7 @@ function parseOrchestrationPolicy(value: unknown, path: string): OrchestrationMo
   };
   const executor = parseRole(value.executor, `${path}.executor`);
   const reviewer = parseRole(value.reviewer, `${path}.reviewer`);
-  const sameModelReason = value.sameModelReason;
-  if (executor.model === reviewer.model) {
-    parseExactText(sameModelReason, `${path}.sameModelReason`);
-  } else if (sameModelReason !== null) {
-    fail('INVALID_AGENT_CLIENTS', `${path}.sameModelReason`);
-  }
-  return Object.freeze({ executor, reviewer, sameModelReason: sameModelReason as string | null });
+  return Object.freeze({ executor, reviewer });
 }
 
 function parseCanonical(value: unknown): AgentClientState {

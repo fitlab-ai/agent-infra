@@ -227,7 +227,7 @@ Use the top-level `.agents/.airc.json` `agentClients` array to configure all fou
 | `id` | Built-in Agent Client id. The canonical array contains exactly one entry for each built-in client. |
 | `enabled` | Whether agent-infra writes and maintains that client's project integration and seed command. |
 | `installInSandbox` | Whether the sandbox image installs that client's CLI. This is independent from `enabled`. |
-| `orchestration` | Optional `run-task` default. It must include executor/reviewer `model` and host-native `reasoningEffort`; same-model use also needs a non-empty `sameModelReason`. |
+| `orchestration` | Optional `run-task` default. It must include executor/reviewer `model` and host-native `reasoningEffort`; both roles may use the same model. |
 
 Explicit `run-task` model/effort flags are atomic: any one requires all four role fields and configuration never fills omissions. With no explicit policy, only the current client's `orchestration` is used. Query model-selection context with `agent-infra-internal agent-client model-selection --client <id>`; it labels results complete, partial, or interactive-only and never presents a local override list as a complete catalog.
 

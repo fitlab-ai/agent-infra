@@ -46,7 +46,7 @@ function taskOrchestration(args: string[] = []): void {
     const flag = args[index]!;
     if (![
       '--max-steps', '--executor-model', '--executor-reasoning-effort',
-      '--reviewer-model', '--reviewer-reasoning-effort', '--same-model-reason',
+      '--reviewer-model', '--reviewer-reasoning-effort',
       '--client', '--requested-model', '--requested-reasoning-effort', '--parent-id', '--before-fingerprint',
       '--native-agent', '--child-id', '--spawn-mode', '--actual-model', '--actual-reasoning-effort',
       '--model-fallback-reason', '--reasoning-effort-fallback-reason',
@@ -82,11 +82,10 @@ function taskOrchestration(args: string[] = []): void {
     }
     const policyFlags = [
       '--executor-model', '--executor-reasoning-effort',
-      '--reviewer-model', '--reviewer-reasoning-effort', '--same-model-reason'
+      '--reviewer-model', '--reviewer-reasoning-effort'
     ];
     const hasAnyPolicy = policyFlags.some((flag) => values[flag] !== undefined);
-    const requiredPolicy = policyFlags.slice(0, 4);
-    if (hasAnyPolicy && requiredPolicy.some((flag) => values[flag] === undefined)) {
+    if (hasAnyPolicy && policyFlags.some((flag) => values[flag] === undefined)) {
       usageFailure('explicit model policy requires executor/reviewer model and reasoning effort');
       return;
     }
@@ -101,8 +100,7 @@ function taskOrchestration(args: string[] = []): void {
         reviewer: {
           model: values['--reviewer-model']!,
           reasoningEffort: values['--reviewer-reasoning-effort']!
-        },
-        sameModelReason: values['--same-model-reason'] ?? null
+        }
       } : undefined
     });
   } else if (intent === 'route') {

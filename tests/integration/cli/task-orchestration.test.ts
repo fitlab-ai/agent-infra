@@ -42,8 +42,7 @@ test('task-orchestration begins idempotently and exposes a structured route', ()
   assert.equal(begun.run.maxSteps, 8);
   assert.deepEqual(begun.run.modelPolicy, {
     executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
-    reviewer: { model: 'reviewer-model', reasoningEffort: 'high' },
-    sameModelReason: null
+    reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
   });
   assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), true);
 
@@ -85,6 +84,20 @@ test('task-orchestration rejects partial model policy options before core state 
   assert.deepEqual(fs.readFileSync(runPath), before);
 });
 
+test('task-orchestration accepts one model for both orchestration roles', () => {
+  const f = fixture();
+  const result = run(f.root, [f.id, 'begin-or-resume',
+    '--client', 'claude-code',
+    '--executor-model', 'shared-model', '--executor-reasoning-effort', 'high',
+    '--reviewer-model', 'shared-model', '--reviewer-reasoning-effort', 'high']);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).run.modelPolicy, {
+    executor: { model: 'shared-model', reasoningEffort: 'high' },
+    reviewer: { model: 'shared-model', reasoningEffort: 'high' }
+  });
+});
+
 test('task-orchestration prepare fails closed before delegation when host evidence is unavailable', () => {
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs]).status, 0);
@@ -121,8 +134,7 @@ test('task-orchestration falls back to the selected client project policy only',
       ...(id === 'claude-code' ? {
         orchestration: {
           executor: { model: 'configured-executor', reasoningEffort: 'high' },
-          reviewer: { model: 'configured-reviewer', reasoningEffort: 'medium' },
-          sameModelReason: null
+          reviewer: { model: 'configured-reviewer', reasoningEffort: 'medium' }
         }
       } : {})
     }))

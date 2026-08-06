@@ -50,7 +50,7 @@ SKILLs currently covered by this exemption:
 
 ### Exemption 5: Complete model policy missing at lifecycle start
 
-Only when `run-task` receives `ORCHESTRATION_MODEL_POLICY_REQUIRED` before any run, baseline, receipt, or child is created may it show model-selection context with its completeness label and ask once for complete executor/reviewer model + reasoning effort and any required same-model reason. Partial explicit policy, a missing client, active delegation, and other pause causes do not qualify. No answer means no run is created.
+Only when `run-task` receives `ORCHESTRATION_MODEL_POLICY_REQUIRED` before any run, baseline, receipt, or child is created may it show model-selection context with its completeness label and ask once for complete executor/reviewer model + reasoning effort. Partial explicit policy, a missing client, active delegation, and other pause causes do not qualify. No answer means no run is created.
 
 SKILLs currently covered by this exemption:
 

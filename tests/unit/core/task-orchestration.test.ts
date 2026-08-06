@@ -22,8 +22,7 @@ import {
 const snapshot = () => 'before-tree';
 const modelPolicy = {
   executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
-  reviewer: { model: 'reviewer-model', reasoningEffort: 'high' },
-  sameModelReason: null
+  reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
 } as const;
 
 function beginOrResumeOrchestration(
@@ -113,7 +112,7 @@ test('begin requires a client and does not write state when no policy source is 
   assert.equal(fs.existsSync(path.join(missingPolicy.taskDir, 'orchestration.json')), false);
 });
 
-test('begin requires a complete run-level model policy and justified same-model use', () => {
+test('begin accepts a complete run-level policy when both roles use the same model', () => {
   const missing = fixture('requirement-analysis');
   const missingResult = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
     repoRoot: missing.root, client: 'claude-code'
@@ -121,37 +120,20 @@ test('begin requires a complete run-level model policy and justified same-model 
   assert.equal(missingResult.error?.code, 'ORCHESTRATION_MODEL_POLICY_REQUIRED');
   assert.equal(fs.existsSync(path.join(missing.taskDir, 'orchestration.json')), false);
 
-  const unjustified = fixture('requirement-analysis');
-  const unjustifiedResult = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-    repoRoot: unjustified.root,
+  const shared = fixture('requirement-analysis');
+  const sharedResult = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+    repoRoot: shared.root,
     client: 'claude-code',
     modelPolicy: {
       executor: { model: 'shared-model', reasoningEffort: 'high' },
-      reviewer: { model: 'shared-model', reasoningEffort: 'high' },
-      sameModelReason: null
+      reviewer: { model: 'shared-model', reasoningEffort: 'high' }
     }
   });
-  assert.equal(unjustifiedResult.error?.code, 'ORCHESTRATION_MODEL_SEPARATION_REQUIRED');
-
-  const irrelevantReason = fixture('requirement-analysis');
-  const irrelevantReasonResult = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-    repoRoot: irrelevantReason.root,
-    client: 'claude-code',
-    modelPolicy: { ...modelPolicy, sameModelReason: 'not applicable' }
+  assert.equal(sharedResult.status, 'running');
+  assert.deepEqual(sharedResult.run?.modelPolicy, {
+    executor: { model: 'shared-model', reasoningEffort: 'high' },
+    reviewer: { model: 'shared-model', reasoningEffort: 'high' }
   });
-  assert.equal(irrelevantReasonResult.error?.code, 'ORCHESTRATION_MODEL_POLICY_INVALID');
-
-  const justified = fixture('requirement-analysis');
-  const justifiedResult = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-    repoRoot: justified.root,
-    client: 'claude-code',
-    modelPolicy: {
-      executor: { model: 'shared-model', reasoningEffort: 'high' },
-      reviewer: { model: 'shared-model', reasoningEffort: 'high' },
-      sameModelReason: 'host exposes one eligible model'
-    }
-  });
-  assert.equal(justifiedResult.status, 'running');
 });
 
 test('resume rejects policy changes and pauses legacy runs without model evidence', () => {
@@ -198,7 +180,7 @@ test('legacy recovery rejects historical receipts and malformed v2 state', () =>
   const v1 = JSON.parse(fs.readFileSync(historicalPath, 'utf8'));
   v1.schemaVersion = 1;
   v1.modelPolicy = {
-    executor: 'executor-model', reviewer: 'reviewer-model', sameModelReason: null
+    executor: 'executor-model', reviewer: 'reviewer-model'
   };
   delete v1.modelPolicySource;
   delete v1.recoveryHistory;

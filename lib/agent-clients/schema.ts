@@ -33,11 +33,10 @@ const AGENT_CLIENTS_SCHEMA = {
           orchestration: {
             type: 'object',
             additionalProperties: false,
-            required: ['executor', 'reviewer', 'sameModelReason'],
+            required: ['executor', 'reviewer'],
             properties: {
               executor: { $ref: '#/definitions/orchestrationRolePolicy' },
-              reviewer: { $ref: '#/definitions/orchestrationRolePolicy' },
-              sameModelReason: { type: ['string', 'null'] }
+              reviewer: { $ref: '#/definitions/orchestrationRolePolicy' }
             }
           }
         }

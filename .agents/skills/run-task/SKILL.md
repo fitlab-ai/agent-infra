@@ -9,7 +9,7 @@ description: >
 
 总控只编排，不直接执行任何阶段技能。执行前先读取 `.agents/rules/no-mid-flow-questions.md`、`.agents/rules/lifecycle-orchestration.md` 与 `reference/host-validation.md`。
 
-1. 解析任务引用、当前 Agent Client，以及可选的原子策略 `--executor-model`、`--executor-reasoning-effort`、`--reviewer-model`、`--reviewer-reasoning-effort`、`--same-model-reason`，并执行 `agent-infra-internal task-snapshot {task-id} --format text`。任一显式策略字段出现时四个 role 字段必须完整，不得与配置拼接。
+1. 解析任务引用、当前 Agent Client，以及可选的原子策略 `--executor-model`、`--executor-reasoning-effort`、`--reviewer-model`、`--reviewer-reasoning-effort`，并执行 `agent-infra-internal task-snapshot {task-id} --format text`。任一显式策略字段出现时四个 role 字段必须完整，不得与配置拼接；两个角色可以使用同一模型。
 2. 调用 `agent-infra-internal task-orchestration {task-id} begin-or-resume --client {client}` 并转发完整显式策略。完全没有显式策略时由核心读取当前 client 的 `agentClients[].orchestration`；已有 v2 run 使用持久化策略。仅当核心返回 `ORCHESTRATION_MODEL_POLICY_REQUIRED` 时，先用 `agent-client model-selection` 展示 complete/partial/interactive-only 来源，再一次收集完整策略；未回答则不创建 run。若为 paused/completed，按结构化结果停止。
 3. 调用 `route` 并读取唯一 action、role、round、artifact、`requestedModel` 和 `requestedReasoningEffort`；不得从审查文案、会话默认或局部 tool schema 自行推断。
 4. 调用 `prepare --client {client} --requested-model {requestedModel} --requested-reasoning-effort {requestedReasoningEffort}`；核心在记录工作区基线前校验两字段与宿主证据能力。当前 Claude Code 的原生 start 事件无法稳定提供 actual model/effort，因此与其他缺少该证据的客户端一样返回 `ORCHESTRATION_CLIENT_UNSUPPORTED` 并停止。只有校验成功时才用当前客户端的 fresh 原生子 Agent 启动指定角色，并显式覆盖同一 model/effort；只传短任务引用、skill 名和最小交接摘要，不传 receipt identity，不继承总控历史。

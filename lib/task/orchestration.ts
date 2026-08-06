@@ -34,7 +34,6 @@ type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type LegacyOrchestrationModelPolicy = Readonly<{
   executor: string;
   reviewer: string;
-  sameModelReason: string | null;
 }>;
 type ModelPolicySource = Readonly<{
   kind: 'explicit' | 'project-config';
@@ -120,7 +119,21 @@ function orchestrationPath(taskDir: string): string {
 function readRun(taskDir: string): OrchestrationRun | null {
   const file = orchestrationPath(taskDir);
   if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, 'utf8')) as OrchestrationRun;
+  const run = JSON.parse(fs.readFileSync(file, 'utf8')) as OrchestrationRun;
+  if (run.schemaVersion !== 2 || !isV2Policy(run.modelPolicy)) return run;
+  return {
+    ...run,
+    modelPolicy: {
+      executor: {
+        model: run.modelPolicy.executor.model,
+        reasoningEffort: run.modelPolicy.executor.reasoningEffort
+      },
+      reviewer: {
+        model: run.modelPolicy.reviewer.model,
+        reasoningEffort: run.modelPolicy.reviewer.reasoningEffort
+      }
+    }
+  };
 }
 
 function atomicWrite(file: string, value: unknown): void {
@@ -160,13 +173,6 @@ function validateModelPolicy(policy: OrchestrationModelPolicy | undefined): Read
   ) {
     return { code: 'ORCHESTRATION_MODEL_POLICY_REQUIRED', message: 'executor and reviewer model and reasoning effort are required' };
   }
-  if (policy.executor.model === policy.reviewer.model) {
-    if (!validModel(policy.sameModelReason)) {
-      return { code: 'ORCHESTRATION_MODEL_SEPARATION_REQUIRED', message: 'using the same executor and reviewer model requires a reason' };
-    }
-  } else if (policy.sameModelReason !== null) {
-    return { code: 'ORCHESTRATION_MODEL_POLICY_INVALID', message: 'same-model reason must be null when executor and reviewer models differ' };
-  }
   return null;
 }
 
@@ -174,8 +180,7 @@ function sameModelPolicy(left: OrchestrationModelPolicy, right: OrchestrationMod
   return left.executor.model === right.executor.model
     && left.executor.reasoningEffort === right.executor.reasoningEffort
     && left.reviewer.model === right.reviewer.model
-    && left.reviewer.reasoningEffort === right.reviewer.reasoningEffort
-    && left.sameModelReason === right.sameModelReason;
+    && left.reviewer.reasoningEffort === right.reviewer.reasoningEffort;
 }
 
 function isV2Policy(policy: OrchestrationRun['modelPolicy']): policy is OrchestrationModelPolicy {
@@ -295,7 +300,6 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
       && (
         existing.modelPolicy.executor !== policy!.executor.model
         || existing.modelPolicy.reviewer !== policy!.reviewer.model
-        || existing.modelPolicy.sameModelReason !== policy!.sameModelReason
       )
     ) {
         return failed('ORCHESTRATION_MODEL_POLICY_MISMATCH', 'provided model policy does not match the persisted run policy', resolved.taskId);

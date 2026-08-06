@@ -15,7 +15,6 @@ type OrchestrationRolePolicy = Readonly<{
 type OrchestrationModelPolicy = Readonly<{
   executor: OrchestrationRolePolicy;
   reviewer: OrchestrationRolePolicy;
-  sameModelReason: string | null;
 }>;
 
 type AgentClientConfig = Readonly<{

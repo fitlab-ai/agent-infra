@@ -139,8 +139,7 @@ test('canonical input is normalized to stable ID order without mutation', () => 
 test('canonical config preserves a complete per-client orchestration policy', () => {
   const policy = {
     executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
-    reviewer: { model: 'reviewer-model', reasoningEffort: 'high' },
-    sameModelReason: null
+    reviewer: { model: 'executor-model', reasoningEffort: 'high' }
   };
   const input = canonical().map((entry) =>
     entry.id === 'codex' ? { ...entry, orchestration: policy } : entry

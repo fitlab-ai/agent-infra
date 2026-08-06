@@ -16,8 +16,7 @@
           "installInSandbox": true,
           "orchestration": {
             "executor": { "model": "executor-model", "reasoningEffort": "xhigh" },
-            "reviewer": { "model": "reviewer-model", "reasoningEffort": "high" },
-            "sameModelReason": null
+            "reviewer": { "model": "reviewer-model", "reasoningEffort": "high" }
           }
         },
         { "id": "codex", "enabled": true, "installInSandbox": false },

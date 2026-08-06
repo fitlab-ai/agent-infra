@@ -299,13 +299,9 @@ function normalizeAgentClientConfig(cfg) {
         !policy
         || typeof policy !== 'object'
         || Array.isArray(policy)
-        || Object.keys(policy).length !== 3
+        || Object.keys(policy).length !== 2
         || !validRole(policy.executor)
         || !validRole(policy.reviewer)
-        || !own(policy, 'sameModelReason')
-        || (policy.executor.model === policy.reviewer.model
-          ? !exact(policy.sameModelReason)
-          : policy.sameModelReason !== null)
       ) {
         return failure('INVALID_AGENT_CLIENTS', `${entryPath}.orchestration`);
       }

@@ -227,7 +227,7 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 | `id` | 内建 Agent Client id。规范数组为每个内建客户端保留且仅保留一个条目。 |
 | `enabled` | agent-infra 是否写入并维护该客户端的项目集成与种子命令。 |
 | `installInSandbox` | 沙箱镜像是否安装该客户端 CLI；此字段与 `enabled` 相互独立。 |
-| `orchestration` | `run-task` 可选默认策略；必须同时提供 executor/reviewer 的 `model` 与宿主原生 `reasoningEffort`，同模型时还需非空 `sameModelReason`。 |
+| `orchestration` | `run-task` 可选默认策略；必须同时提供 executor/reviewer 的 `model` 与宿主原生 `reasoningEffort`，两个角色可以使用同一模型。 |
 
 `run-task` 的显式 model/effort 参数是原子输入：只要提供其中任一字段，就必须完整提供四个 role 字段，不能从配置补齐。完全没有显式策略时，只读取当前客户端的 `orchestration`。模型目录通过 `agent-infra-internal agent-client model-selection --client <id>` 查询，并明确标记 complete、partial 或 interactive-only；局部 override 列表不能当作完整目录。
 

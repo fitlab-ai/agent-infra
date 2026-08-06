@@ -19,8 +19,7 @@ The generated `.agents/.airc.json` file is the central contract between the boot
       "installInSandbox": true,
       "orchestration": {
         "executor": { "model": "<model-id>", "reasoningEffort": "<host-value>" },
-        "reviewer": { "model": "<model-id>", "reasoningEffort": "<host-value>" },
-        "sameModelReason": null
+        "reviewer": { "model": "<model-id>", "reasoningEffort": "<host-value>" }
       }
     },
     { "id": "codex", "enabled": true, "installInSandbox": true },
@@ -89,7 +88,7 @@ An **AI Coding Agent Client**, or **Agent Client** for short, is a supported cod
 | `id` | Closed built-in client identifier: `claude-code`, `codex`, `antigravity-cli`, or `opencode`. |
 | `enabled` | Whether the project enables client-specific files and integration. |
 | `installInSandbox` | Whether sandbox assembly should install this client. This is independent of `enabled`. |
-| `orchestration` | Optional complete default policy for this client. If present, both roles require non-empty `model` and host-native `reasoningEffort`; same-model use requires `sameModelReason`. |
+| `orchestration` | Optional complete default policy for this client. If present, both roles require non-empty `model` and host-native `reasoningEffort`; the role models may be equal. |
 
 `run-task` treats explicit policy as atomic: supplying any role model/effort flag requires all four role fields and never fills omissions from configuration. With no explicit policy, it reads only the selected client's `orchestration`. The selected policy is persisted in schema v2 together with its source; changing configuration does not hot-switch an active run. Model discovery is reported separately as a `complete` or `partial` catalog, or `interactive-only` guidance. A tool's local override enum is not a complete catalog.
 

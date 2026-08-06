@@ -216,13 +216,6 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
   ) {
     return failResult('orchestration-evidence', 'Run model policy requires exact executor and reviewer model and effort');
   }
-  if (policy.executor.model === policy.reviewer.model) {
-    if (!exactText(policy.sameModelReason)) {
-      return failResult('orchestration-evidence', 'Shared executor/reviewer model requires a persisted reason');
-    }
-  } else if (policy.sameModelReason !== null) {
-    return failResult('orchestration-evidence', 'Distinct executor/reviewer models require a null same-model reason');
-  }
   if (
     !run.modelPolicySource
     || !['explicit', 'project-config'].includes(run.modelPolicySource.kind)

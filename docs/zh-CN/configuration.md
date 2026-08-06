@@ -19,8 +19,7 @@
       "installInSandbox": true,
       "orchestration": {
         "executor": { "model": "<model-id>", "reasoningEffort": "<host-value>" },
-        "reviewer": { "model": "<model-id>", "reasoningEffort": "<host-value>" },
-        "sameModelReason": null
+        "reviewer": { "model": "<model-id>", "reasoningEffort": "<host-value>" }
       }
     },
     { "id": "codex", "enabled": true, "installInSandbox": true },
@@ -89,7 +88,7 @@
 | `id` | 封闭的内建客户端标识：`claude-code`、`codex`、`antigravity-cli` 或 `opencode`。 |
 | `enabled` | 项目是否启用该客户端专属文件与集成。 |
 | `installInSandbox` | 沙箱装配是否安装该客户端；此状态与 `enabled` 相互独立。 |
-| `orchestration` | 该客户端可选的完整默认策略。存在时两个角色都必须提供非空 `model` 与宿主原生 `reasoningEffort`；同模型还需 `sameModelReason`。 |
+| `orchestration` | 该客户端可选的完整默认策略。存在时两个角色都必须提供非空 `model` 与宿主原生 `reasoningEffort`；两个角色可以使用同一模型。 |
 
 `run-task` 把显式策略视为原子输入：提供任一角色 model/effort 参数时，四个角色字段必须全部提供，缺项不会从配置补齐。完全没有显式策略时，只读取所选客户端的 `orchestration`。选中策略及来源会写入 schema v2；配置变化不会热切换 active run。模型发现独立标记为 `complete`/`partial` catalog 或 `interactive-only` 指引，局部工具 override 枚举不等于完整目录。
 
