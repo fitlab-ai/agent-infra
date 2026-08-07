@@ -103,6 +103,20 @@ test('platform-sync-preflight is a distinct typed verification result', () => {
   }
 });
 
+test('preflight keeps review and manual-validation checks inactive when only pr-review evidence exists', () => {
+  const f = fixture();
+  try {
+    fs.writeFileSync(path.join(f.activeDir, 'pr-review.md'), '# External PR review\n');
+    const result = run(f.root, ['task-verify', TASK_ID, 'complete-task.preflight', '--format', 'json']);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const payload = JSON.parse(result.stdout);
+    assert.match(payload.invocations[1].payload.message, /No review-code artifact/);
+    assert.equal(payload.invocations[2].status, 'pass');
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('preflight success permits one archive and releases the short id', () => {
   const f = fixture();
   try {

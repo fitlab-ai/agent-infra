@@ -14,6 +14,7 @@ description: >
 
 - This command updates task metadata AND physically moves the task directory
 - Do not move a task that has incomplete workflow steps unless forced
+- The entry point accepts optional `--external-pr <N>` only to select among ambiguous external-delivery candidates; it never bypasses identity or platform gates
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
@@ -55,6 +56,16 @@ If not found in `active/`, check `blocked/` and `completed/`:
 Scenario A is the normal active-task path. Scenario B `finalization-retry` retries only the archived task comment and terminal gate.
 
 ### 2. Verify Completion Prerequisites (Failure Must Stop)
+
+Read `reference/external-delivery.md`, then run for the active task:
+
+```bash
+agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-agent-token} [--pr {external-pr}]
+```
+
+- `mode=external`: only this invocation's typed `authorization` and `selected` fields authorize and identify external delivery; continue through every existing hard gate below.
+- `mode=normal`: use the existing local lifecycle prerequisites; historical `pr_number` / `pr_status` values do not authorize external delivery.
+- `status=failed|blocked`: stop immediately and show the stable error; `--force` cannot bypass it.
 
 **Gate read (project-level PR flow policy)**: Before running this step, read `.agents/.airc.json`'s `prFlow` field (three states: field absent = recommend PR by default, skipping allowed; `"required"` = PR mandatory; `"disabled"` = no PR flow), and `pr_status` from `task.md` frontmatter (`pending` / `created` / `skipped`).
 
@@ -127,7 +138,7 @@ Check whether task.md has a valid `issue_number`. If it does not, skip this step
 
 When an `issue_number` exists, execute in this exact order:
 
-1. In artifact-catalog order, run `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {artifact-agent} --backfill` for every local artifact.
+1. Run `agent-infra-internal platform-comment backfill {task-id} --agent {standard-agent-token}` so core publishes only the completion canonical inventory in fixed order and resolves matching historical warnings only after full success.
 2. Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`.
 3. Write the business summary to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {standard-agent-token}`.
 

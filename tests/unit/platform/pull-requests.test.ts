@@ -7,8 +7,10 @@ import { spawnSync } from 'node:child_process';
 
 import {
   inspectPlatformPullRequestByNumber,
+  inspectGitHubIssueClosingChangeRequests,
   normalizePullRequest,
   resolveGitHubChangeRequestGitEvidence,
+  selectExternalPullRequest,
   selectPullRequest
 } from '../../../lib/platform/pull-requests.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
@@ -94,6 +96,73 @@ test('PR selection fails closed for zero or multiple exact head/base matches', (
   });
   assert.equal(selectPullRequest([], 'o/r', 'feature', 'main').status, 'missing');
   assert.equal(selectPullRequest([remote(1), remote(2)], 'o/r', 'feature', 'main').status, 'ambiguous');
+});
+
+test('external PR selection filters before uniqueness and accepts a merged fork PR', () => {
+  const merged = normalizePullRequest({
+    ...remote(7), state: 'closed', merged_at: '2026-07-25T00:00:00Z', merge_commit_sha: 'merge-7',
+    head: { ...remote(7).head, repo: { full_name: 'contributor/r' } }
+  }, 'o/r')!;
+  const unmerged = normalizePullRequest(remote(8), 'o/r')!;
+  const otherRepository = { ...merged, number: 9, nodeId: 'PR_9', base: { ...merged.base, repository: 'other/r' } };
+  const result = selectExternalPullRequest([unmerged, otherRepository, merged], 'O/R', null, null);
+  assert.equal(result.status, 'selected');
+  if (result.status !== 'selected') throw new Error('expected selected result');
+  assert.equal(result.source, 'unique');
+  assert.equal(result.selected?.number, 7);
+  assert.deepEqual(result.eligible.map((item) => item.number), [7]);
+});
+
+test('external PR selection fails closed for ambiguity, explicit mismatch, binding conflict, and identity conflict', () => {
+  const first = normalizePullRequest({
+    ...remote(7), state: 'closed', merged_at: '2026-07-25T00:00:00Z', merge_commit_sha: 'merge-7'
+  }, 'o/r')!;
+  const second = { ...first, number: 8, nodeId: 'PR_8', url: 'https://github.com/o/r/pull/8' };
+  const codes = [
+    selectExternalPullRequest([first, second], 'o/r', null, null),
+    selectExternalPullRequest([first], 'o/r', null, 8),
+    selectExternalPullRequest([first], 'o/r', 8, 7),
+    selectExternalPullRequest([first, { ...first, head: { ...first.head, sha: 'different' } }], 'o/r', null, null)
+  ].map((result) => result.status === 'failed' ? result.code : null);
+  assert.deepEqual(codes, ['PR_IDENTITY_AMBIGUOUS', 'PR_NOT_FOUND', 'PR_BIND_CONFLICT', 'PR_IDENTITY_INVALID']);
+});
+
+test('GitHub closing PR inspection exhausts cursor pagination and fails closed on incomplete identities', () => {
+  const nodes = [7, 8].map((number) => ({
+    number, id: `PR_${number}`, url: `https://github.com/o/r/pull/${number}`, state: 'MERGED',
+    title: 'Merged', body: '', isDraft: false,
+    headRefName: `feature-${number}`, headRefOid: `head-${number}`, headRepository: { nameWithOwner: 'fork/r' },
+    baseRefName: 'main', baseRefOid: `base-${number}`, baseRepository: { nameWithOwner: 'o/r' },
+    mergedAt: '2026-07-25T00:00:00Z', mergeCommit: { oid: `merge-${number}` },
+    labels: { nodes: [] }, assignees: { nodes: [] }, milestone: null
+  }));
+  let calls = 0;
+  const client = {
+    json(args: string[]) {
+      calls += 1;
+      const second = args.includes('cursor=next');
+      return { ok: true, value: { data: { repository: { issue: { closedByPullRequestsReferences: {
+        nodes: [second ? nodes[1] : nodes[0]],
+        pageInfo: second ? { hasNextPage: false, endCursor: null } : { hasNextPage: true, endCursor: 'next' }
+      } } } } } };
+    }
+  } as unknown as GitHubClient;
+  const inspected = inspectGitHubIssueClosingChangeRequests(client, 'o/r', 7, process.cwd());
+  assert.equal(inspected.ok, true);
+  assert.equal(calls, 2);
+  assert.deepEqual(inspected.ok ? inspected.value.map((item) => item.number) : [], [7, 8]);
+
+  const invalidClient = {
+    json() {
+      return { ok: true, value: { data: { repository: { issue: { closedByPullRequestsReferences: {
+        nodes: [{ ...nodes[0], headRefOid: undefined }], pageInfo: { hasNextPage: false, endCursor: null }
+      } } } } } };
+    }
+  } as unknown as GitHubClient;
+  const invalid = inspectGitHubIssueClosingChangeRequests(invalidClient, 'o/r', 7, process.cwd());
+  assert.equal(invalid.ok, false);
+  if (invalid.ok) throw new Error('expected invalid identity');
+  assert.equal(invalid.error.code, 'PR_IDENTITY_INVALID');
 });
 
 test('GitHub evidence prefers an exact upstream remote', () => {

@@ -206,6 +206,21 @@ if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(arg
 }
 
 if (args[0] === "api" && args[1] === "graphql") {
+  if (process.env.GH_FAKE_CLOSING_PRS_PATH && args.some((arg) => arg.includes("closedByPullRequestsReferences"))) {
+    const pages = readJson("GH_FAKE_CLOSING_PRS_PATH") || [];
+    const cursorArgument = args.find((arg) => arg.startsWith("cursor="));
+    const cursor = cursorArgument ? cursorArgument.slice("cursor=".length) : null;
+    const pageIndex = cursor === null
+      ? 0
+      : Math.max(0, pages.findIndex((page) => page.previousCursor === cursor));
+    const page = pages[pageIndex] || { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } };
+    process.stdout.write(JSON.stringify({
+      data: { repository: { issue: { closedByPullRequestsReferences: {
+        nodes: page.nodes || [], pageInfo: page.pageInfo || { hasNextPage: false, endCursor: null }
+      } } } }
+    }));
+    process.exit(0);
+  }
   if (process.env.GH_FAKE_ISSUE_FIELDS_FAIL) {
     console.error(process.env.GH_FAKE_ISSUE_FIELDS_FAIL);
     process.exit(1);

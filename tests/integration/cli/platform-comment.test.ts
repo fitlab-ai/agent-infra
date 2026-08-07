@@ -32,6 +32,12 @@ function fixture() {
   return { root, taskId, commentsPath, env };
 }
 
+function runComment(args: string[], f: ReturnType<typeof fixture>) {
+  return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'platform-comment', ...args], {
+    cwd: f.root, env: f.env, encoding: 'utf8'
+  });
+}
+
 test('platform internal commands expose stable JSON and idempotent task comment sync', () => {
   const f = fixture();
   const context = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'platform-context', 'resolve'], {
@@ -58,4 +64,77 @@ test('platform internal commands reject invalid payloads with exit code 1', () =
   });
   assert.equal(result.status, 1);
   assert.equal(JSON.parse(result.stdout).error.code, 'COMMENT_PAYLOAD_INVALID');
+});
+
+test('platform-comment backfill syncs only completion artifacts and resolves only matching excluded pr-review warnings', () => {
+  const f = fixture();
+  try {
+    const taskMd = path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md');
+    fs.writeFileSync(taskMd, [
+      '---', `id: ${f.taskId}`, 'type: feature', 'status: active', 'issue_number: 7', '---', '',
+      '# Task', '', '## Workflow Warnings', '',
+      '| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |',
+      '|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|',
+      "| WW-1 | 2026-08-07 09:00:00+08:00 | complete-task | ACTION_REQUIRED | COMMENT_SYNC_FAILED | open | artifact | COMMENT_PAYLOAD_INVALID: unsupported artifact 'pr-review.md' | retry |  |  |",
+      "| WW-2 | 2026-08-07 09:01:00+08:00 | issue-sync | ACTION_REQUIRED | COMMENT_SYNC_FAILED | open | artifact | unsupported artifact 'pr-review.md' | retry |  |  |",
+      '', '## Activity Log', ''
+    ].join('\n'));
+    const taskDir = path.dirname(taskMd);
+    for (const name of ['analysis.md', 'plan.md', 'code.md', 'pr-review.md']) {
+      fs.writeFileSync(path.join(taskDir, name), `# ${name}\n`);
+    }
+
+    const result = runComment(['backfill', f.taskId, '--agent', 'codex'], f);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const output = JSON.parse(result.stdout);
+    assert.deepEqual(output.artifacts.map((item: { artifact: string }) => item.artifact), ['analysis.md', 'plan.md', 'code.md']);
+    const comments = JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')) as Array<{ body: string }>;
+    assert.equal(comments.length, 3);
+    const updated = fs.readFileSync(taskMd, 'utf8');
+    assert.match(updated, /\| WW-1 \|[^\n]+\| resolved \|/);
+    assert.match(updated, /\| WW-2 \|[^\n]+\| open \|/);
+
+    const replay = runComment(['backfill', f.taskId, '--agent', 'codex'], f);
+    assert.equal(replay.status, 0, replay.stderr || replay.stdout);
+    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 3);
+
+    const direct = runComment(['sync', f.taskId, '--kind', 'artifact', '--artifact', 'pr-review.md', '--agent', 'codex'], f);
+    assert.equal(direct.status, 0, direct.stderr || direct.stdout);
+    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 4);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('platform-comment backfill leaves warnings open when an artifact comment fails', () => {
+  const f = fixture();
+  try {
+    const taskMd = path.join(f.root, '.agents', 'workspace', 'active', f.taskId, 'task.md');
+    fs.writeFileSync(taskMd, [
+      '---', `id: ${f.taskId}`, 'type: feature', 'status: active', 'issue_number: 7', '---', '',
+      '# Task', '', '## Workflow Warnings', '',
+      '| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |',
+      '|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|',
+      "| WW-1 | 2026-08-07 09:00:00+08:00 | complete-task | ACTION_REQUIRED | COMMENT_SYNC_FAILED | open | artifact | unsupported artifact 'pr-review.md' | retry |  |  |",
+      '', '## Activity Log', ''
+    ].join('\n'));
+    const taskDir = path.dirname(taskMd);
+    fs.writeFileSync(path.join(taskDir, 'analysis.md'), '# analysis\n');
+    fs.writeFileSync(path.join(taskDir, 'pr-review.md'), '# review\n');
+    const counter = path.join(f.root, 'failure-count.txt');
+    fs.writeFileSync(counter, '3');
+    const env = {
+      ...f.env,
+      GH_FAKE_TRANSIENT_FAIL_MATCHER: '/issues/7/comments',
+      GH_FAKE_TRANSIENT_FAIL_COUNTER_FILE: counter,
+      AGENT_INFRA_PLATFORM_RETRY_DELAYS_MS: '0'
+    };
+    const failed = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'platform-comment', 'backfill', f.taskId, '--agent', 'codex'], {
+      cwd: f.root, env, encoding: 'utf8'
+    });
+    assert.equal(failed.status, 2, failed.stderr || failed.stdout);
+    assert.match(fs.readFileSync(taskMd, 'utf8'), /\| WW-1 \|[^\n]+\| open \|/);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
 });

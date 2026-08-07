@@ -6,6 +6,7 @@ import {
   bindPlatformPullRequest,
   createPlatformPullRequest,
   inspectPlatformPullRequest,
+  resolveExternalPullRequest,
   syncPlatformPullRequest
 } from '../platform/pull-requests.ts';
 import type { PullRequestResult } from '../platform/pull-requests.ts';
@@ -13,6 +14,7 @@ import { summaryContext, syncPullRequestSummary } from '../platform/pr-summary.t
 import type { PlatformResult } from '../platform/types.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-pr inspect <task-ref> [--cwd <path>]
+       agent-infra-internal platform-pr resolve-external <task-ref> --agent <agent> [--pr <N>] [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr create <task-ref> --agent <agent> --base <branch> --head <branch> --title-file <path|-> --body-file <path|-> [--draft] [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr bind <task-ref> --pr <N> --agent <agent> [--dry-run] [--cwd <path>]
        agent-infra-internal platform-pr sync <task-ref> --agent <agent> [--metadata] [--closing-issue] [--dry-run] [--cwd <path>]
@@ -62,7 +64,7 @@ function readFile(value: string, cwd: string): string {
 function platformPr(args: string[] = []): void {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
-  if (!operation || !['inspect', 'create', 'bind', 'sync', 'summary-context', 'summary-sync'].includes(operation)) { fail('a valid operation is required'); return; }
+  if (!operation || !['inspect', 'resolve-external', 'create', 'bind', 'sync', 'summary-context', 'summary-sync'].includes(operation)) { fail('a valid operation is required'); return; }
   const taskRef = args[1];
   if (!taskRef || taskRef.startsWith('--')) { fail(`${operation} requires a task ref`); return; }
   const parsed = parse(args, 2);
@@ -71,6 +73,7 @@ function platformPr(args: string[] = []): void {
   const cwd = path.resolve(typeof values.cwd === 'string' ? values.cwd : process.cwd());
   const allowed: Record<string, string[]> = {
     inspect: ['cwd'],
+    'resolve-external': ['cwd', 'agent', 'pr', 'dryRun'],
     create: ['cwd', 'agent', 'base', 'head', 'titleFile', 'bodyFile', 'draft', 'dryRun'],
     bind: ['cwd', 'agent', 'pr', 'dryRun'],
     sync: ['cwd', 'agent', 'metadata', 'closingIssue', 'dryRun'],
@@ -85,6 +88,12 @@ function platformPr(args: string[] = []): void {
   const agent = normalizeAgentToken(values.agent);
   if (!agent) { fail(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
   values.agent = agent;
+  if (operation === 'resolve-external') {
+    const pr = values.pr === undefined ? undefined : Number(values.pr);
+    if (pr !== undefined && (!Number.isInteger(pr) || pr <= 0)) { fail('resolve-external requires a positive --pr'); return; }
+    finish(resolveExternalPullRequest(taskRef, { cwd, agent: values.agent, pr, dryRun: values.dryRun === true }));
+    return;
+  }
   if (operation === 'bind') {
     const pr = Number(values.pr);
     if (!Number.isInteger(pr) || pr <= 0) { fail('bind requires a positive --pr'); return; }

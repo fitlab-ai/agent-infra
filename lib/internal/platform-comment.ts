@@ -9,9 +9,11 @@ import {
 } from '../platform/issue-comments.ts';
 import type { CommentKind } from '../platform/issue-comments.ts';
 import type { PlatformResult } from '../platform/types.ts';
+import { backfillCompletionComments } from '../platform/completion-backfill.ts';
 
 const USAGE = `Usage: agent-infra-internal platform-comment list --issue <N> [--cwd <path>]
        agent-infra-internal platform-comment owner <task-ref> [--cwd <path>]
+       agent-infra-internal platform-comment backfill <task-ref> --agent <agent> [--cwd <path>]
        agent-infra-internal platform-comment sync <task-ref> --kind <kind> --agent <agent> [--artifact <file>] [--body-file <path|->] [--status-label <label>] [--backfill] [--cwd <path>]
 `;
 
@@ -53,7 +55,7 @@ function readBodyFile(value: string, cwd: string): string {
 function platformComment(args: string[] = []): void {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
   const operation = args[0];
-  if (!operation || !['list', 'owner', 'sync'].includes(operation)) { fail('a valid operation is required'); return; }
+  if (!operation || !['list', 'owner', 'backfill', 'sync'].includes(operation)) { fail('a valid operation is required'); return; }
   const hasTaskRef = operation !== 'list';
   const taskRef = hasTaskRef ? args[1] : undefined;
   if (hasTaskRef && (!taskRef || taskRef.startsWith('--'))) { fail(`${operation} requires a task ref`); return; }
@@ -72,6 +74,16 @@ function platformComment(args: string[] = []): void {
     const unexpected = Object.keys(parsed.values).find((key) => key !== 'cwd');
     if (unexpected) { fail(`owner does not accept '--${unexpected}'`); return; }
     finish(checkPlatformCommentOwner(taskRef!, { cwd }));
+    return;
+  }
+  if (operation === 'backfill') {
+    const unexpected = Object.keys(parsed.values).find((key) => !['cwd', 'agent'].includes(key));
+    if (unexpected) { fail(`backfill does not accept '--${unexpected}'`); return; }
+    const agent = parsed.values.agent;
+    if (typeof agent !== 'string' || !agent) { fail('backfill requires --agent'); return; }
+    const normalizedAgent = normalizeAgentToken(agent);
+    if (!normalizedAgent) { fail(`invalid --agent '${agent}': ${AGENT_USAGE_HINT}`); return; }
+    finish(backfillCompletionComments(taskRef!, { cwd, agent: normalizedAgent }));
     return;
   }
   const kind = parsed.values.kind;

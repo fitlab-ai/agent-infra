@@ -1426,18 +1426,28 @@ test("complete-task splits active preflight checks from completed-state checks",
 test("complete-task docs keep remote preflight before lifecycle and terminal sync after it", () => {
   skillDocPaths("complete-task").forEach((relativePath) => {
     const content = read(relativePath);
-    const artifactSync = content.indexOf("platform-comment sync {task-id} --kind artifact");
+    const externalResolve = content.indexOf("platform-pr resolve-external {task-id}");
+    const artifactSync = content.indexOf("platform-comment backfill {task-id}");
     const preflight = content.indexOf("task-verify {task-id} complete-task.preflight");
     const lifecycle = content.indexOf("task-lifecycle {task-id} complete");
     const taskSync = content.indexOf("platform-comment sync {task-id} --kind task");
     const completedGate = content.indexOf("task-verify {task-id} complete-task.completed");
 
-    assert.ok(artifactSync >= 0 && artifactSync < preflight, `${relativePath} should backfill artifacts before preflight`);
+    assert.ok(externalResolve >= 0 && externalResolve < artifactSync, `${relativePath} should resolve external delivery before platform backfill`);
+    assert.ok(artifactSync >= 0 && artifactSync < preflight, `${relativePath} should backfill completion artifacts before preflight`);
     assert.ok(preflight < lifecycle, `${relativePath} should run preflight before lifecycle completion`);
     assert.ok(lifecycle < taskSync, `${relativePath} should sync the terminal task comment after lifecycle completion`);
     assert.ok(taskSync < completedGate, `${relativePath} should run the completed gate after terminal task sync`);
     assert.ok(content.includes("finalization-retry"), `${relativePath} should define the retry branch identifier`);
   });
+});
+
+test("complete-task external delivery references are present in runtime and bilingual templates", () => {
+  for (const relativePath of [
+    ".agents/skills/complete-task/reference/external-delivery.md",
+    "templates/.agents/skills/complete-task/reference/external-delivery.zh-CN.md",
+    "templates/.agents/skills/complete-task/reference/external-delivery.en.md"
+  ]) assert.ok(read(relativePath).length > 0, `${relativePath} should exist`);
 });
 
 test("import-issue checklists include the task comment sync step", () => {

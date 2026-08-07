@@ -14,6 +14,7 @@ description: >
 
 - 本命令更新任务元数据并物理移动任务目录
 - 除非强制执行，不要转移有未完成工作流步骤的任务
+- 入口接受可选 `--external-pr <N>`；仅用于外部交付候选歧义时的显式选择，不绕过身份或平台门禁
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 
@@ -54,6 +55,16 @@ agent-infra-internal task-snapshot {task-id} --format text
 场景 A 为 active 任务的正常完成路径；场景 B `finalization-retry` 只重试归档后的 task 评论与终态门禁。
 
 ### 2. 验证完成前置条件（未满足则必须停止）
+
+先读取 `reference/external-delivery.md`，然后在 active 任务上调用：
+
+```bash
+agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-agent-token} [--pr {external-pr}]
+```
+
+- `mode=external`：只以本次 typed result 的 `authorization` 和 `selected` 作为外部交付授权与绑定身份，继续本步骤的既有硬门禁。
+- `mode=normal`：走现有本地生命周期前置条件；历史 `pr_number` / `pr_status` 不构成外部授权。
+- `status=failed|blocked`：立即停止并展示稳定错误；`--force` 不得绕过。
 
 **门控读取（项目级 PR 流程策略）**：在执行本步骤前，读取 `.agents/.airc.json` 的 `prFlow` 字段（三态：字段缺省 = 默认推荐 PR、允许跳过；`"required"` = 强制 PR；`"disabled"` = 强制无 PR），以及 `task.md` frontmatter 的 `pr_status`（`pending` / `created` / `skipped`）。
 
@@ -126,7 +137,7 @@ Please complete the missing steps first, or use --force to override.
 
 如果存在有效的 `issue_number`，严格按以下顺序执行：
 
-1. 按 artifact catalog 顺序，对本地已有产物逐项调用 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {artifact-agent} --backfill`。
+1. 调用 `agent-infra-internal platform-comment backfill {task-id} --agent {standard-agent-token}`，由 core 仅按 completion canonical inventory 固定顺序补发产物并在全部成功后精确恢复目标历史告警。
 2. 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`。
 3. 把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {standard-agent-token}`。
 

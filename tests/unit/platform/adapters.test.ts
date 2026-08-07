@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   hasPlatformCapability,
   inspectPlatformChangeRequest,
+  inspectPlatformIssueClosingChangeRequests,
   inspectPlatformRequiredChecks,
   registerPlatformAdapter,
   resolvePlatformChangeRequestGitEvidence
@@ -40,6 +41,9 @@ test('registered platform adapters provide normalized change-request and require
         }
       };
     },
+    inspectIssueClosingChangeRequests() {
+      return { ok: true, value: [] };
+    },
     inspectRequiredChecks() {
       return {
         ok: true,
@@ -67,6 +71,7 @@ test('registered platform adapters provide normalized change-request and require
   });
 
   assert.equal(hasPlatformCapability('custom-inspection-test', 'change-request'), true);
+  assert.equal(hasPlatformCapability('custom-inspection-test', 'issue-closing-change-requests'), true);
   assert.equal(hasPlatformCapability('custom-inspection-test', 'required-checks'), true);
   assert.equal(hasPlatformCapability('custom-inspection-test', 'change-request-git-evidence'), true);
   assert.equal(inspectPlatformChangeRequest('custom-inspection-test', {
@@ -98,6 +103,9 @@ test('registered platform adapters provide normalized change-request and require
       number: 42
     }).value!
   }).value?.reviewedHeadRef, 'refs/changes/42/head');
+  assert.deepEqual(inspectPlatformIssueClosingChangeRequests('custom-inspection-test', {
+    cwd: process.cwd(), repository: 'acme/widgets', issueNumber: 7
+  }).value, []);
 });
 
 test('missing inspection capabilities return an explicit unsupported result', () => {
@@ -111,6 +119,7 @@ test('missing inspection capabilities return an explicit unsupported result', ()
   });
 
   assert.equal(hasPlatformCapability('context-only-test', 'change-request'), false);
+  assert.equal(hasPlatformCapability('context-only-test', 'issue-closing-change-requests'), false);
   assert.equal(hasPlatformCapability('context-only-test', 'required-checks'), false);
   assert.equal(hasPlatformCapability('context-only-test', 'change-request-git-evidence'), false);
   assert.equal(inspectPlatformChangeRequest('context-only-test', {
@@ -145,5 +154,8 @@ test('missing inspection capabilities return an explicit unsupported result', ()
       assignees: [],
       milestone: null
     }
+  }).error?.code, 'PLATFORM_CAPABILITY_UNSUPPORTED');
+  assert.equal(inspectPlatformIssueClosingChangeRequests('context-only-test', {
+    cwd: process.cwd(), repository: 'acme/widgets', issueNumber: 7
   }).error?.code, 'PLATFORM_CAPABILITY_UNSUPPORTED');
 });

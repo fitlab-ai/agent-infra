@@ -45,6 +45,11 @@ type ChangeRequestInspectionContext = PlatformAdapterContext & {
   number: number;
 };
 
+type IssueClosingChangeRequestsContext = PlatformAdapterContext & {
+  repository: string;
+  issueNumber: number;
+};
+
 type RequiredChecksInspectionContext = ChangeRequestInspectionContext & {
   headSha: string;
 };
@@ -65,6 +70,9 @@ type PlatformAdapter = {
   inspectChangeRequest?(
     context: ChangeRequestInspectionContext
   ): PlatformInspectionResult<PlatformChangeRequestSnapshot>;
+  inspectIssueClosingChangeRequests?(
+    context: IssueClosingChangeRequestsContext
+  ): PlatformInspectionResult<PlatformChangeRequestSnapshot[]>;
   inspectRequiredChecks?(
     context: RequiredChecksInspectionContext
   ): PlatformInspectionResult<PlatformCheckSnapshot[]>;
@@ -88,7 +96,7 @@ function registerPlatformCapabilities(
   type: string,
   capabilities: Pick<
     PlatformAdapter,
-    'inspectChangeRequest' | 'inspectRequiredChecks' | 'resolveChangeRequestGitEvidence'
+    'inspectChangeRequest' | 'inspectIssueClosingChangeRequests' | 'inspectRequiredChecks' | 'resolveChangeRequestGitEvidence'
   >
 ): void {
   const adapter = adapters.get(type);
@@ -98,12 +106,22 @@ function registerPlatformCapabilities(
 
 function hasPlatformCapability(
   type: string | null,
-  capability: 'change-request' | 'required-checks' | 'change-request-git-evidence'
+  capability: 'change-request' | 'issue-closing-change-requests' | 'required-checks' | 'change-request-git-evidence'
 ): boolean {
   const adapter = getPlatformAdapter(type);
   if (capability === 'change-request') return typeof adapter?.inspectChangeRequest === 'function';
+  if (capability === 'issue-closing-change-requests') return typeof adapter?.inspectIssueClosingChangeRequests === 'function';
   if (capability === 'required-checks') return typeof adapter?.inspectRequiredChecks === 'function';
   return typeof adapter?.resolveChangeRequestGitEvidence === 'function';
+}
+
+function inspectPlatformIssueClosingChangeRequests(
+  type: string | null,
+  context: IssueClosingChangeRequestsContext
+): PlatformInspectionResult<PlatformChangeRequestSnapshot[]> {
+  const adapter = getPlatformAdapter(type);
+  return adapter?.inspectIssueClosingChangeRequests?.(context) ??
+    unsupported(type, 'issue closing change-request inspection');
 }
 
 function unsupported<T>(type: string | null, capability: string): PlatformInspectionResult<T> {
@@ -150,6 +168,7 @@ export {
   getPlatformAdapter,
   hasPlatformCapability,
   inspectPlatformChangeRequest,
+  inspectPlatformIssueClosingChangeRequests,
   inspectPlatformRequiredChecks,
   listPlatformAdapters,
   registerPlatformAdapter,
@@ -159,6 +178,7 @@ export {
 export type {
   ChangeRequestGitEvidenceContext,
   ChangeRequestInspectionContext,
+  IssueClosingChangeRequestsContext,
   PlatformAdapter,
   PlatformAdapterContext,
   PlatformChangeRequestGitEvidenceSpec,
