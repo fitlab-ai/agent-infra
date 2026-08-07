@@ -16,7 +16,7 @@
 
 `prSummary` 属于 `.agents/rules/pr-sync.md`，本规则不实现 PR 聚合。
 
-`pr-review` 原文只通过 `artifact` / `artifactChunk` marker 同步为 Issue artifact 评论，不作为 `restore-task` 恢复来源（HDR-1：恢复仍只接受 Issue 编号并只读注册的 Issue marker，不新增 PR 来源）。
+`pr-review` 原文只通过 `artifact` / `artifactChunk` marker 同步为 Issue artifact 评论，不作为 `restore-task` 恢复来源；恢复仍只接受 Issue 编号并只读注册的 Issue marker，不新增 PR 来源。
 
 ## 平台 intent
 

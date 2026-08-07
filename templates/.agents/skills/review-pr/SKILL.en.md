@@ -28,7 +28,7 @@ Based on the target PR's lifecycle-evidence completeness and change risk, select
 | Rationalization | Rebuttal |
 |-----------------|----------|
 | "Just read the diff; no reconstruction needed" | Reading only the diff misses requirement boundaries, architecture choices, and migration strategy; `reconstruct` must first produce the minimum-sufficient reconstruction record. |
-| "The PR has no linked task; just post a report" | HDR-2 Option A: block by default and require linking an Issue/task first; only an explicit "one-shot review" takes the non-recoverable fallback path. |
+| "The PR has no linked task; just post a report" | Block by default and require linking an Issue/task first; only an explicit "one-shot review" takes the non-recoverable fallback path. |
 | "Also post the full reconstruction to a regular PR comment for contributors" | The process copy is synced only to the Issue artifact comment; the PR keeps only the formal Review to avoid duplicate remote copies and restore-source confusion. |
 | "Commit while I'm at it" | This skill never runs `git add`/`git commit`; committing is a separate, explicitly user-triggered step. |
 
@@ -53,11 +53,11 @@ agent-infra-internal platform-pr-review inspect --pr {pr-number} [--cwd <path>]
 agent-infra-internal pr-review-grade resolve-host --pr {pr-number} [--cwd <path>]
 ```
 
-`resolve-host` returns a typed `HostResolution` (`unique` / `ambiguous` / `none`). Branch per HDR-2 Option A:
+`resolve-host` returns a typed `HostResolution` (`unique` / `ambiguous` / `none`). Branch as follows:
 
 - **Unique host**: bind `{task-id}` and enumerate `analysis*`/`plan*`/`code*`/`review-*`/`pr-review*` presence (go to step 2).
-- **Ambiguous hosts**: `resolve-host` returns `ambiguous` and `decide` refuses to classify (fail closed). Stop and ask a human to pin the unique host; do not enter evidence classification (AN-6).
-- **No host**: block by default and require linking an Issue/task first (show linking guidance); never auto-create/import an Issue (HDR-2 Option A). Only when the user explicitly chooses a "one-shot review" do process files land in `.agents/workspace/reviews/{pr-number}/` (`recoverable: false`).
+- **Ambiguous hosts**: `resolve-host` returns `ambiguous` and `decide` refuses to classify (fail closed). Stop and ask a human to pin the unique host; do not enter evidence classification.
+- **No host**: block by default and require linking an Issue/task first (show linking guidance); never auto-create/import an Issue. Only when the user explicitly chooses a "one-shot review" do process files land in `.agents/workspace/reviews/{pr-number}/` (`recoverable: false`).
 
 ### 2. Single decide: evidence enumeration + classification + risk + mode
 
@@ -114,7 +114,7 @@ agent-infra-internal platform-pr-review publish --pr {pr-number} --scope {taskId
 
 - **One-shot path (no task)**: write the Review ID/URL only into the `pr-review-rN.md` "Publication Result" section; do not call `task-activity`.
 
-### 7. Re-sync after write-back (task-anchored path, PL-8)
+### 7. Re-sync after write-back (task-anchored path)
 
 Step 6 rewrote the local `pr-review-rN.md` "Publication Result" section and task.md (Activity Log), while step 4 synced the older snapshot. `verify_comment_content` / `verify_task_comment_content` compare full content, so you must re-sync first to align local and remote. Run in order:
 

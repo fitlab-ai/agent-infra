@@ -28,7 +28,7 @@ description: >
 | 借口 | 反驳 |
 |------|------|
 | 「代码 diff 直接看就行了，不需要重建上下文」 | 仅看 diff 会遗漏需求边界、架构选择与迁移策略；`reconstruct` 必须先产出最低充分重建记录。 |
-| 「PR 没有关联任务，直接写个报告发出去」 | HDR-2 方案 A：默认阻塞要求先关联 Issue/task；只有显式「仅一次性检视」才走不可恢复降级路径。 |
+| 「PR 没有关联任务，直接写个报告发出去」 | 默认阻塞并要求先关联 Issue/task；只有显式「仅一次性检视」才走不可恢复降级路径。 |
 | 「把完整重建过程也发到 PR 普通评论，方便贡献者看」 | 过程原文只同步到 Issue artifact 评论；PR 只保留正式 Review，避免重复远端副本与恢复源混淆。 |
 | 「审查完了顺手提交一下」 | 本技能绝不执行 `git add`/`git commit`；提交是用户显式发起的独立步骤。 |
 
@@ -53,11 +53,11 @@ agent-infra-internal platform-pr-review inspect --pr {pr-number} [--cwd <path>]
 agent-infra-internal pr-review-grade resolve-host --pr {pr-number} [--cwd <path>]
 ```
 
-`resolve-host` 输出 `HostResolution`（`unique` / `ambiguous` / `none`），按 HDR-2 方案 A 分流：
+`resolve-host` 输出 `HostResolution`（`unique` / `ambiguous` / `none`），按以下策略分流：
 
 - **唯一宿主**：绑定 `{task-id}`，用 artifact 枚举确定 `analysis*`/`plan*`/`code*`/`review-*`/`pr-review*` 的存在性（进入步骤 2）。
-- **多宿主歧义**：`resolve-host` 返回 `ambiguous`，`decide` 会拒绝分类（fail closed）。立即停止并提示人工指定唯一宿主；不进入证据分类（AN-6）。
-- **无宿主**：默认阻塞，要求先建立 Issue/task 关联（给出关联指引），不自动创建/导入 Issue（HDR-2 方案 A）。仅当用户显式选择「仅一次性检视」时，过程文件写入 `.agents/workspace/reviews/{pr-number}/`（`recoverable: false`）。
+- **多宿主歧义**：`resolve-host` 返回 `ambiguous`，`decide` 会拒绝分类（fail closed）。立即停止并提示人工指定唯一宿主；不进入证据分类。
+- **无宿主**：默认阻塞，要求先建立 Issue/task 关联（给出关联指引），不自动创建/导入 Issue。仅当用户显式选择「仅一次性检视」时，过程文件写入 `.agents/workspace/reviews/{pr-number}/`（`recoverable: false`）。
 
 ### 2. 单次 decide：证据枚举 + 场景分类 + 风险分级 + 模式选择
 
@@ -114,7 +114,7 @@ agent-infra-internal platform-pr-review publish --pr {pr-number} --scope {taskId
 
 - **一次性路径（无任务）**：Review ID/URL 只写 `pr-review-rN.md`「发布结果」段，不调用 `task-activity`。
 
-### 7. 发布后回写再同步（任务锚定路径，PL-8）
+### 7. 发布后回写再同步（任务锚定路径）
 
 步骤 6 已改写本地 `pr-review-rN.md`「发布结果」段与 task.md（活动日志），而步骤 4 同步的是旧快照。`verify_comment_content` / `verify_task_comment_content` 会全文比对，必须先再同步使本地与远端一致。依次调用：
 

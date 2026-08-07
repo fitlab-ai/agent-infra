@@ -8,7 +8,7 @@
 解析 PR base/head 与关联 Issue/task（宿主解析）
    ├─ 唯一宿主 → 绑定任务，枚举 artifact 存在性 → 证据分类
    ├─ 多宿主歧义 → fail closed（decide 拒绝分类，要求人工指定）
-   └─ 无宿主 → HDR-2 方案 A：默认阻塞要求关联；显式一次性检视 → reviews/{pr-number}/
+   └─ 无宿主 → 默认阻塞要求关联；显式一次性检视 → reviews/{pr-number}/
         ↓
 证据场景分类（S1/S2/S3）→ 新鲜度/对齐 → 风险分级 → 模式选择
 ```
@@ -16,7 +16,7 @@
 ## 宿主解析
 
 - 唯一命中 → `unique`；多个且无法唯一 → `ambiguous`（候选列表）；零命中 → `none`。
-- 多宿主歧义即 fail closed：不进入证据分类（AN-6），由 `pr-review-grade resolve-host --pr <N>` 返回 typed `HostResolution`，`decide` 对 `ambiguous` 显式拒绝。
+- 多宿主歧义即 fail closed：不进入证据分类；由 `pr-review-grade resolve-host --pr <N>` 返回 typed `HostResolution`，`decide` 对 `ambiguous` 显式拒绝。
 - PR body 的 `Closes/Fixes #N`（大小写不敏感、逗号/空格分隔、支持列表）经 `extractClosingIssueNumbers` 解析；本地 `active/*/task.md` 的 `pr_number` 命中优先于 `issue_number` 反查，同一任务经两条路径命中按单候选去重。
 
 ## 证据场景分类（S1 → S2 → S3）
@@ -27,8 +27,8 @@
 | S2 部分/可疑 | 任务存在但 artifact 缺失关键产物，或 head 漂移，或来源不可信 / 无法证明与当前 head 对齐 |
 | S3 仅 PR | 无宿主；或任务唯一但无任何生命周期 artifact 且无先前 `pr-review*` |
 
-- S3(b) 判据（对称口径）：`!hasAnalysis && !hasPlan && !hasCode && !hasReviewAnalysis && !hasReviewPlan && !hasReviewCode && !hasPriorPrReview`。仅含任一 review 产物（review-analysis / review-plan / review-code）的畸形任务落 S2 → audit（PL-5/PL-9）。
-- 首次审查（无先前 `pr-review*`）时 S1(c) 不满足，完整生命周期任务落入 S2 → audit（AN-7）。
+- S3(b) 判据（对称口径）：`!hasAnalysis && !hasPlan && !hasCode && !hasReviewAnalysis && !hasReviewPlan && !hasReviewCode && !hasPriorPrReview`。仅含任一 review 产物（review-analysis / review-plan / review-code）的畸形任务落 S2 → audit。
+- 首次审查（无先前 `pr-review*`）时 S1(c) 不满足，完整生命周期任务落入 S2 → audit。
 
 ## 新鲜度与对齐
 

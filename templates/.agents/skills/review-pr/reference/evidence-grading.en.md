@@ -8,7 +8,7 @@ This file fixes the evidence-graded decision flow of `review-pr`. All determinat
 Resolve PR base/head and linked Issue/task (host resolution)
    ├─ Unique host → bind the task, enumerate artifact presence → evidence classification
    ├─ Ambiguous hosts → fail closed (decide refuses to classify; require a human-pinned host)
-   └─ No host → HDR-2 Option A: block by default and require linking; explicit one-shot → reviews/{pr-number}/
+   └─ No host → block by default and require linking; explicit one-shot → reviews/{pr-number}/
         ↓
 Evidence scenario classification (S1/S2/S3) → freshness/alignment → risk grading → mode selection
 ```
@@ -16,7 +16,7 @@ Evidence scenario classification (S1/S2/S3) → freshness/alignment → risk gra
 ## Host Resolution
 
 - Exactly one hit → `unique`; multiple without a unique winner → `ambiguous` (candidate list); zero hits → `none`.
-- Ambiguous hosts fail closed: they never enter evidence classification (AN-6). `pr-review-grade resolve-host --pr <N>` returns a typed `HostResolution`, and `decide` explicitly rejects `ambiguous`.
+- Ambiguous hosts fail closed and never enter evidence classification. `pr-review-grade resolve-host --pr <N>` returns a typed `HostResolution`, and `decide` explicitly rejects `ambiguous`.
 - `Closes/Fixes #N` in the PR body (case-insensitive, comma/space separated, lists supported) is parsed by `extractClosingIssueNumbers`; a local `active/*/task.md` `pr_number` hit takes priority over the `issue_number` reverse lookup, and a task hit via both paths deduplicates to a single candidate.
 
 ## Evidence Scenario Classification (S1 → S2 → S3)
@@ -27,8 +27,8 @@ Evidence scenario classification (S1/S2/S3) → freshness/alignment → risk gra
 | S2 partial / suspect | task exists but key artifacts are missing, or the head drifted, or the source is untrusted / cannot prove alignment with the current head |
 | S3 PR-only | no host; or unique task with no lifecycle artifacts at all and no prior `pr-review*` |
 
-- S3(b) symmetric criterion: `!hasAnalysis && !hasPlan && !hasCode && !hasReviewAnalysis && !hasReviewPlan && !hasReviewCode && !hasPriorPrReview`. A malformed task with only one review family (review-analysis / review-plan / review-code) falls to S2 → audit (PL-5/PL-9).
-- On first review (no prior `pr-review*`) S1(c) is unsatisfied, so a complete-lifecycle task falls to S2 → audit (AN-7).
+- S3(b) symmetric criterion: `!hasAnalysis && !hasPlan && !hasCode && !hasReviewAnalysis && !hasReviewPlan && !hasReviewCode && !hasPriorPrReview`. A malformed task with only one review family (review-analysis / review-plan / review-code) falls to S2 → audit.
+- On first review (no prior `pr-review*`) S1(c) is unsatisfied, so a complete-lifecycle task falls to S2 → audit.
 
 ## Freshness and Alignment
 
