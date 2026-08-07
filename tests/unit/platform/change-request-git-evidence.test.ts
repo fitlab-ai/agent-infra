@@ -38,7 +38,7 @@ function repositorySnapshot(root: string) {
   };
 }
 
-function fixture() {
+function fixture(advanceTarget = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "change-request-evidence-"));
   const remote = path.join(root, "remote.git");
   const seed = path.join(root, "seed");
@@ -59,6 +59,9 @@ function fixture() {
   const head = writeCommit(seed, "base\nreviewed\n", "reviewed");
   git(seed, ["push", "-q", "origin", `${head}:refs/pull/1/head`]);
   git(seed, ["switch", "-q", "main"]);
+  const snapshotBase = advanceTarget
+    ? writeCommit(seed, "advanced\nbase\n", "advance target")
+    : base;
   git(seed, ["merge", "--squash", "feature"]);
   git(seed, ["commit", "-qm", "squash"]);
   const merge = git(seed, ["rev-parse", "HEAD"]);
@@ -74,7 +77,7 @@ function fixture() {
     body: "",
     draft: false,
     head: { repository: "o/r", ref: "feature", sha: head },
-    base: { repository: "o/r", ref: "main", sha: base },
+    base: { repository: "o/r", ref: "main", sha: snapshotBase },
     mergedAt: "2026-07-25T00:00:00Z",
     mergeCommitSha: merge,
     labels: [],
@@ -132,6 +135,28 @@ test("materializes merged PR evidence without changing the caller repository", (
       comparisonHead: f.merge
     });
 
+    assert.deepEqual(repositorySnapshot(f.caller), before);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("materializes an equivalent squash after the target advances in the same file", () => {
+  const f = fixture(true);
+  try {
+    registerEvidenceAdapter("advanced-isolated-evidence-test", f.remote);
+    const before = repositorySnapshot(f.caller);
+    assert.deepEqual(resolveMaterializedReviewedHeadRelation({
+      cwd: f.caller,
+      platformType: "advanced-isolated-evidence-test",
+      lastReviewedCommit: f.head,
+      pullRequest: f.pullRequest
+    }), {
+      status: "merged-equivalent",
+      reviewedHead: f.head,
+      mergeCommit: f.merge,
+      comparisonHead: f.merge
+    });
     assert.deepEqual(repositorySnapshot(f.caller), before);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });

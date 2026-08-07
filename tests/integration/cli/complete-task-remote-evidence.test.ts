@@ -55,7 +55,7 @@ function writeTask(caller: string, taskId: string, prNumber: number, reviewedHea
   return taskDir;
 }
 
-test("complete-task gate verifies consecutive squash merges from isolated remote evidence", () => {
+test("complete-task gate verifies target advancement and consecutive squash merges from isolated remote evidence", () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "complete-task-remote-evidence-"));
   const remote = path.join(fixtureRoot, "remote.git");
   const seed = path.join(fixtureRoot, "seed");
@@ -67,7 +67,7 @@ test("complete-task gate verifies consecutive squash merges from isolated remote
     git(seed, ["config", "user.email", "test@example.com"]);
     git(fixtureRoot, ["init", "-q", "--bare", remote]);
 
-    const base = commit(seed, "base\n", "base");
+    commit(seed, "base\n", "base");
     git(seed, ["remote", "add", "origin", remote]);
     git(seed, ["push", "-q", "origin", "main"]);
     git(fixtureRoot, ["clone", "-q", "--branch", "main", remote, caller]);
@@ -76,6 +76,7 @@ test("complete-task gate verifies consecutive squash merges from isolated remote
     const reviewedHeadA = commit(seed, "base\nreviewed-a\n", "reviewed A");
     git(seed, ["push", "-q", "origin", `${reviewedHeadA}:refs/pull/1/head`]);
     git(seed, ["switch", "-q", "main"]);
+    const advancedBase = commit(seed, "advanced\nbase\n", "advance target");
     git(seed, ["merge", "--squash", "feature-a"]);
     git(seed, ["commit", "-qm", "squash A"]);
     const mergeCommitA = git(seed, ["rev-parse", "HEAD"]);
@@ -101,7 +102,7 @@ test("complete-task gate verifies consecutive squash merges from isolated remote
         body: "",
         draft: false,
         head: { repository: "o/r", ref: "feature-a", sha: reviewedHeadA },
-        base: { repository: "o/r", ref: "main", sha: base },
+        base: { repository: "o/r", ref: "main", sha: advancedBase },
         mergedAt: "2026-07-31T00:00:00Z",
         mergeCommitSha: mergeCommitA,
         labels: [],
