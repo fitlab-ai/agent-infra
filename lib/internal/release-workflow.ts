@@ -153,7 +153,7 @@ function runOptionalDemo(cwd: string, run: CommandRunner = command): DemoResult 
 function git(cwd: string, args: string[], run: CommandRunner = command, trim = true): string | null {
   const result = run(cwd, 'git', args);
   const stdout = String(result.stdout);
-  return result.status === 0 ? (trim ? stdout.trim() : stdout.replace(/\n$/, '')) : null;
+  return result.status === 0 ? (trim ? stdout.trim() : stdout) : null;
 }
 
 function inspectLocalReleaseFacts(cwd: string, version: string, run: CommandRunner = command) {
@@ -237,7 +237,7 @@ function parsePorcelainPath(record: string): string {
 
 function changedPaths(cwd: string, run: CommandRunner = command): string[] {
   const output = git(cwd, ['status', '--porcelain=v1'], run, false) || '';
-  return output.split('\n').filter(Boolean).map(parsePorcelainPath).filter((value, index, all) => all.indexOf(value) === index);
+  return output.split(/\r?\n/).filter(Boolean).map(parsePorcelainPath).filter((value, index, all) => all.indexOf(value) === index);
 }
 
 function updateReleaseMetadata(cwd: string, version: string): void {

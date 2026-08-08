@@ -71,7 +71,7 @@ function releaseFixture() {
 }
 
 test('changed paths parse porcelain v1 status combinations', () => {
-  const run: CommandRunner = () => result(0, ' M .agents/.airc.json\nM  package.json\nMM package-lock.json\n?? new-file.txt\n');
+  const run: CommandRunner = () => result(0, ' M .agents/.airc.json\r\nM  package.json\r\nMM package-lock.json\r\n?? new-file.txt\r\n');
 
   assert.deepEqual(changedPaths('/repo', run), [
     '.agents/.airc.json',
