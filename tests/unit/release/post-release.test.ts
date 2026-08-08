@@ -70,10 +70,21 @@ function releaseFixture() {
   return root;
 }
 
-test('changed paths preserve the first porcelain status column', () => {
-  const run: CommandRunner = () => result(0, ' M .agents/.airc.json\n M package.json\n');
+test('changed paths parse porcelain v1 status combinations', () => {
+  const run: CommandRunner = () => result(0, ' M .agents/.airc.json\nM  package.json\nMM package-lock.json\n?? new-file.txt\n');
 
-  assert.deepEqual(changedPaths('/repo', run), ['.agents/.airc.json', 'package.json']);
+  assert.deepEqual(changedPaths('/repo', run), [
+    '.agents/.airc.json',
+    'package.json',
+    'package-lock.json',
+    'new-file.txt'
+  ]);
+});
+
+test('changed paths reject malformed porcelain v1 records', () => {
+  const run: CommandRunner = () => result(0, ' M package.json\ninvalid-record\n');
+
+  assert.throws(() => changedPaths('/repo', run), /Invalid git status --porcelain=v1 record/);
 });
 
 test('local release facts distinguish exact, ancestor, and divergent tags with bounded post history', () => {

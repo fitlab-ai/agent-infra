@@ -229,9 +229,15 @@ async function inspectFacts(cwd: string, version: string): Promise<ReleaseFacts>
   };
 }
 
+function parsePorcelainPath(record: string): string {
+  const match = /^.. (.+)$/.exec(record);
+  if (!match) throw new Error('Invalid git status --porcelain=v1 record');
+  return match[1]!;
+}
+
 function changedPaths(cwd: string, run: CommandRunner = command): string[] {
   const output = git(cwd, ['status', '--porcelain=v1'], run, false) || '';
-  return output.split('\n').filter(Boolean).map((line) => line.slice(3)).filter((value, index, all) => all.indexOf(value) === index);
+  return output.split('\n').filter(Boolean).map(parsePorcelainPath).filter((value, index, all) => all.indexOf(value) === index);
 }
 
 function updateReleaseMetadata(cwd: string, version: string): void {
