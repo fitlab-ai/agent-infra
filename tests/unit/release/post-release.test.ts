@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  changedPaths,
   computeDemoInputDigest,
   inspectLocalReleaseFacts,
   inspectPostWorktree,
@@ -68,6 +69,12 @@ function releaseFixture() {
   spawnSync('git', ['tag', 'v1.2.3'], { cwd: root });
   return root;
 }
+
+test('changed paths preserve the first porcelain status column', () => {
+  const run: CommandRunner = () => result(0, ' M .agents/.airc.json\n M package.json\n');
+
+  assert.deepEqual(changedPaths('/repo', run), ['.agents/.airc.json', 'package.json']);
+});
 
 test('local release facts distinguish exact, ancestor, and divergent tags with bounded post history', () => {
   const root = releaseFixture();

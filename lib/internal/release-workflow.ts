@@ -150,9 +150,10 @@ function runOptionalDemo(cwd: string, run: CommandRunner = command): DemoResult 
   return { status: 'recorded', reasonCode: null, message: null, outputPath };
 }
 
-function git(cwd: string, args: string[], run: CommandRunner = command): string | null {
+function git(cwd: string, args: string[], run: CommandRunner = command, trim = true): string | null {
   const result = run(cwd, 'git', args);
-  return result.status === 0 ? String(result.stdout).trim() : null;
+  const stdout = String(result.stdout);
+  return result.status === 0 ? (trim ? stdout.trim() : stdout.replace(/\n$/, '')) : null;
 }
 
 function inspectLocalReleaseFacts(cwd: string, version: string, run: CommandRunner = command) {
@@ -228,8 +229,8 @@ async function inspectFacts(cwd: string, version: string): Promise<ReleaseFacts>
   };
 }
 
-function changedPaths(cwd: string): string[] {
-  const output = git(cwd, ['status', '--porcelain=v1']) || '';
+function changedPaths(cwd: string, run: CommandRunner = command): string[] {
+  const output = git(cwd, ['status', '--porcelain=v1'], run, false) || '';
   return output.split('\n').filter(Boolean).map((line) => line.slice(3)).filter((value, index, all) => all.indexOf(value) === index);
 }
 
@@ -336,5 +337,5 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
   process.stdout.write(`${JSON.stringify({ ...pushed, demo, snapshot: releaseSnapshot(version, await inspectFacts(cwd, version)) })}\n`); process.exitCode = pushed.status === 'failed' ? 1 : pushed.status === 'degraded' ? 2 : 0;
 }
 
-export { computeDemoInputDigest, inspectFacts, inspectLocalReleaseFacts, inspectPostWorktree, releaseSmokeStatus, releaseWorkflow, runOptionalDemo };
+export { changedPaths, computeDemoInputDigest, inspectFacts, inspectLocalReleaseFacts, inspectPostWorktree, releaseSmokeStatus, releaseWorkflow, runOptionalDemo };
 export type { CommandRunner, DemoResult };
