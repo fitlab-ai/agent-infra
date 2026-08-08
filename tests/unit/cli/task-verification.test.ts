@@ -165,6 +165,55 @@ test('run-task verification accepts complete model evidence and rejects missing 
   );
 });
 
+test('run-task verification accepts only internally consistent clean completion evidence', () => {
+  const f = fixture();
+  const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
+    skill: 'run-task', checks: { 'orchestration-state': {}, 'orchestration-evidence': {} }
+  }));
+  const head = 'a'.repeat(40);
+  const tree = 'b'.repeat(40);
+  const run = {
+    schemaVersion: 2, taskId: f.taskId, runId: 'run-clean', status: 'completed', nextStage: null,
+    stepCount: 0, maxSteps: 24, baseline: '',
+    modelPolicy: {
+      executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
+      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
+    },
+    modelPolicySource: {
+      kind: 'explicit', client: 'claude-code', resolvedAt: '2026-01-01T00:00:00.000Z'
+    },
+    recoveryHistory: [], pendingDelegation: null, receipts: [], pause: null,
+    commitAuthorization: { issuedAt: null, consumedAt: null },
+    completionEvidence: {
+      kind: 'reviewed-head-clean', observedAt: '2026-01-01T00:00:05.000Z',
+      head, headTree: tree, worktreeTree: tree, lastReviewedCommit: head,
+      prNumber: 42, prHead: head
+    },
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:05.000Z'
+  };
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    'pass'
+  );
+
+  for (const invalid of [
+    { ...run, completionEvidence: { ...run.completionEvidence, prHead: 'c'.repeat(40) } },
+    { ...run, commitAuthorization: { issuedAt: '2026-01-01T00:00:04.000Z', consumedAt: null } },
+    { ...run, status: 'paused' },
+    { ...run, completionEvidence: { ...run.completionEvidence, observedAt: 'invalid' } }
+  ]) {
+    fs.writeFileSync(runPath, `${JSON.stringify(invalid, null, 2)}\n`);
+    assert.equal(
+      verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+      'fail'
+    );
+  }
+});
+
 test('run-task verification accepts a clean unsupported pause and rejects unsafe pending evidence', () => {
   const f = fixture();
   const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');

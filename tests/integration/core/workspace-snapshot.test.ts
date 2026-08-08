@@ -5,7 +5,11 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
-import { captureWorkspaceSnapshot, diffWorkspaceSnapshots } from '../../../lib/task/workspace-snapshot.ts';
+import {
+  captureRepositorySnapshot,
+  captureWorkspaceSnapshot,
+  diffWorkspaceSnapshots
+} from '../../../lib/task/workspace-snapshot.ts';
 
 function git(root: string, args: string[]): void {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -87,4 +91,35 @@ test('mixing task-scoped before with legacy after exposes the incompatible tree 
   assert.deepEqual(diffWorkspaceSnapshots(root, taskScopedBefore, legacyAfter), [
     '.agents/workspace/active/TASK-20260101-000002/analysis.md'
   ]);
+});
+
+test('repository snapshots ignore lifecycle artifacts while detecting Git-visible changes', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-repository-snapshot-'));
+  git(root, ['init', '-q']);
+  git(root, ['config', 'user.name', 'Test']);
+  git(root, ['config', 'user.email', 'test@example.com']);
+  fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\n');
+  fs.writeFileSync(path.join(root, 'source.ts'), 'before\n');
+  git(root, ['add', '.gitignore', 'source.ts']);
+  git(root, ['commit', '-qm', 'baseline']);
+
+  const clean = captureRepositorySnapshot(root);
+  assert.equal(clean.headTree, clean.worktreeTree);
+
+  const ignoredDir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
+  fs.mkdirSync(ignoredDir, { recursive: true });
+  fs.writeFileSync(path.join(ignoredDir, 'task.md'), '# ignored\n');
+  assert.equal(captureRepositorySnapshot(root).worktreeTree, clean.headTree);
+
+  fs.writeFileSync(path.join(root, 'source.ts'), 'unstaged\n');
+  assert.notEqual(captureRepositorySnapshot(root).worktreeTree, clean.headTree);
+  git(root, ['checkout', '--', 'source.ts']);
+
+  fs.writeFileSync(path.join(root, 'source.ts'), 'staged\n');
+  git(root, ['add', 'source.ts']);
+  assert.notEqual(captureRepositorySnapshot(root).worktreeTree, clean.headTree);
+  git(root, ['reset', '--hard', 'HEAD']);
+
+  fs.writeFileSync(path.join(root, 'untracked.ts'), 'untracked\n');
+  assert.notEqual(captureRepositorySnapshot(root).worktreeTree, clean.headTree);
 });

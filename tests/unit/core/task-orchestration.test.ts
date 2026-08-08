@@ -53,6 +53,8 @@ function fixture(step: string) {
 
 function approvedCodeFixture(manualValidation = 0) {
   const f = fixture('code-review');
+  fs.mkdirSync(path.join(f.root, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), '{}\n');
   fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
   fs.writeFileSync(path.join(f.taskDir, 'review-analysis.md'), '# Analysis Review\n\n- **审查输入**：`analysis.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
   fs.writeFileSync(path.join(f.taskDir, 'plan.md'), '# Plan\n');
@@ -60,6 +62,20 @@ function approvedCodeFixture(manualValidation = 0) {
   fs.writeFileSync(path.join(f.taskDir, 'code.md'), '# Code\n');
   fs.writeFileSync(path.join(f.taskDir, 'review-code.md'), `# Code Review\n\n- **审查输入**：\`code.md\`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：${manualValidation}\n`);
   return f;
+}
+
+function cleanCommitCandidateFixture(prFlow: unknown = 'required') {
+  const f = approvedCodeFixture();
+  const head = 'a'.repeat(40);
+  fs.mkdirSync(path.join(f.root, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify({ prFlow })}\n`);
+  fs.writeFileSync(path.join(f.taskDir, 'task.md'), `---\nid: TASK-20260101-000001\ncurrent_step: code-review\npr_number: 42\nlast_reviewed_commit: ${head}\n---\n\n# Task\n`);
+  beginOrResumeOrchestration('TASK-20260101-000001', {
+    repoRoot: f.root,
+    id: () => 'run-clean',
+    now: () => '2026-01-01T00:00:00.000Z'
+  });
+  return { ...f, head };
 }
 
 test('begin is persistent and idempotent for a running task', () => {
@@ -302,6 +318,216 @@ test('route fails closed before commit when code review ledger work remains', ()
     routeOrchestration('TASK-20260101-000001', { repoRoot: ledger.root }).error?.code,
     'ORCHESTRATION_LEDGER_BLOCKED'
   );
+});
+
+test('route completes a reviewed clean head without preparing a commit', () => {
+  const f = cleanCommitCandidateFixture();
+  const tree = 'b'.repeat(40);
+  let captures = 0;
+  const routed = routeOrchestration('TASK-20260101-000001', {
+    repoRoot: f.root,
+    now: () => '2026-01-01T00:00:05.000Z',
+    captureRepository: () => {
+      captures += 1;
+      return { head: f.head, headTree: tree, worktreeTree: tree };
+    },
+    inspectPullRequest: () => ({
+      status: 'no-op',
+      task: { prNumber: 42 },
+      pullRequest: { head: { sha: f.head } },
+      error: null
+    })
+  });
+
+  assert.equal(routed.status, 'completed');
+  assert.equal(routed.changed, true);
+  assert.equal(routed.next, null);
+  assert.equal(captures, 2);
+  assert.deepEqual(routed.run?.completionEvidence, {
+    kind: 'reviewed-head-clean',
+    observedAt: '2026-01-01T00:00:05.000Z',
+    head: f.head,
+    headTree: tree,
+    worktreeTree: tree,
+    lastReviewedCommit: f.head,
+    prNumber: 42,
+    prHead: f.head
+  });
+  assert.deepEqual(routed.run?.commitAuthorization, { issuedAt: null, consumedAt: null });
+  assert.equal(routed.run?.receipts.some((receipt) => receipt.stage === 'commit'), false);
+});
+
+test('route preserves commit for dirty repositories without inspecting the PR', () => {
+  const f = cleanCommitCandidateFixture();
+  let inspections = 0;
+  const routed = routeOrchestration('TASK-20260101-000001', {
+    repoRoot: f.root,
+    captureRepository: () => ({
+      head: f.head,
+      headTree: 'b'.repeat(40),
+      worktreeTree: 'c'.repeat(40)
+    }),
+    inspectPullRequest: () => {
+      inspections += 1;
+      throw new Error('must not inspect');
+    }
+  });
+
+  assert.equal(routed.status, 'running');
+  assert.equal(routed.next?.stage, 'commit');
+  assert.equal(inspections, 0);
+});
+
+test('route gates clean completion on an explicit required PR flow', () => {
+  for (const config of [{ prFlow: 'disabled' }, {}]) {
+    const f = cleanCommitCandidateFixture(config.prFlow);
+    fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify(config)}\n`);
+    let captures = 0;
+    const routed = routeOrchestration('TASK-20260101-000001', {
+      repoRoot: f.root,
+      captureRepository: () => {
+        captures += 1;
+        throw new Error('must not capture');
+      }
+    });
+    assert.equal(routed.next?.stage, 'commit');
+    assert.equal(captures, 0);
+  }
+
+  const missingPr = cleanCommitCandidateFixture();
+  fs.writeFileSync(path.join(missingPr.taskDir, 'task.md'), `---\nid: TASK-20260101-000001\ncurrent_step: code-review\nlast_reviewed_commit: ${missingPr.head}\n---\n\n# Task\n`);
+  let missingPrCaptures = 0;
+  const routed = routeOrchestration('TASK-20260101-000001', {
+    repoRoot: missingPr.root,
+    captureRepository: () => {
+      missingPrCaptures += 1;
+      throw new Error('must not capture');
+    }
+  });
+  assert.equal(routed.next?.stage, 'commit');
+  assert.equal(missingPrCaptures, 0);
+});
+
+test('route fails closed for invalid orchestration configuration', () => {
+  const f = cleanCommitCandidateFixture();
+  fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), '{not-json\n');
+  assert.equal(
+    routeOrchestration('TASK-20260101-000001', { repoRoot: f.root }).error?.code,
+    'ORCHESTRATION_CONFIG_INVALID'
+  );
+
+  const invalidPrFlow = cleanCommitCandidateFixture('always');
+  assert.equal(
+    routeOrchestration('TASK-20260101-000001', { repoRoot: invalidPrFlow.root }).error?.code,
+    'ORCHESTRATION_CONFIG_INVALID'
+  );
+});
+
+test('route fails closed across clean completion evidence boundaries', () => {
+  const tree = 'b'.repeat(40);
+  const cleanSnapshot = (head: string) => ({ head, headTree: tree, worktreeTree: tree });
+  const inspection = (head: string) => ({
+    status: 'no-op', task: { prNumber: 42 }, pullRequest: { head: { sha: head } }, error: null
+  });
+
+  const snapshotFailure = cleanCommitCandidateFixture();
+  assert.equal(routeOrchestration('TASK-20260101-000001', {
+    repoRoot: snapshotFailure.root,
+    captureRepository: () => { throw new Error('git failed'); }
+  }).error?.code, 'ORCHESTRATION_SNAPSHOT_FAILED');
+
+  const secondSnapshotFailure = cleanCommitCandidateFixture();
+  let captures = 0;
+  assert.equal(routeOrchestration('TASK-20260101-000001', {
+    repoRoot: secondSnapshotFailure.root,
+    captureRepository: () => {
+      captures += 1;
+      if (captures === 2) throw new Error('git failed');
+      return cleanSnapshot(secondSnapshotFailure.head);
+    },
+    inspectPullRequest: () => inspection(secondSnapshotFailure.head)
+  }).error?.code, 'ORCHESTRATION_SNAPSHOT_FAILED');
+
+  const reviewedMismatch = cleanCommitCandidateFixture();
+  assert.equal(routeOrchestration('TASK-20260101-000001', {
+    repoRoot: reviewedMismatch.root,
+    captureRepository: () => cleanSnapshot('d'.repeat(40))
+  }).error?.code, 'ORCHESTRATION_REVIEWED_HEAD_MISMATCH');
+
+  for (const status of ['blocked', 'failed'] as const) {
+    const f = cleanCommitCandidateFixture();
+    const routed = routeOrchestration('TASK-20260101-000001', {
+      repoRoot: f.root,
+      captureRepository: () => cleanSnapshot(f.head),
+      inspectPullRequest: () => ({ status, error: { message: status } })
+    });
+    assert.equal(routed.error?.code, `ORCHESTRATION_PR_INSPECTION_${status.toUpperCase()}`);
+  }
+
+  const missingInspection = cleanCommitCandidateFixture();
+  assert.equal(routeOrchestration('TASK-20260101-000001', {
+    repoRoot: missingInspection.root,
+    captureRepository: () => cleanSnapshot(missingInspection.head),
+    inspectPullRequest: () => ({ status: 'no-op', task: { prNumber: 42 }, error: null })
+  }).error?.code, 'ORCHESTRATION_PR_INSPECTION_INVALID');
+
+  const prNumberMismatch = cleanCommitCandidateFixture();
+  assert.equal(routeOrchestration('TASK-20260101-000001', {
+    repoRoot: prNumberMismatch.root,
+    captureRepository: () => cleanSnapshot(prNumberMismatch.head),
+    inspectPullRequest: () => ({
+      status: 'no-op', task: { prNumber: 43 },
+      pullRequest: { head: { sha: prNumberMismatch.head } }, error: null
+    })
+  }).error?.code, 'ORCHESTRATION_PR_HEAD_MISMATCH');
+
+  const prMismatch = cleanCommitCandidateFixture();
+  assert.equal(routeOrchestration('TASK-20260101-000001', {
+    repoRoot: prMismatch.root,
+    captureRepository: () => cleanSnapshot(prMismatch.head),
+    inspectPullRequest: () => inspection('e'.repeat(40))
+  }).error?.code, 'ORCHESTRATION_PR_HEAD_MISMATCH');
+
+  const secondDirty = cleanCommitCandidateFixture();
+  const dirtySnapshots = [
+    cleanSnapshot(secondDirty.head),
+    { head: secondDirty.head, headTree: tree, worktreeTree: 'c'.repeat(40) }
+  ];
+  assert.equal(routeOrchestration('TASK-20260101-000001', {
+    repoRoot: secondDirty.root,
+    captureRepository: () => dirtySnapshots.shift()!,
+    inspectPullRequest: () => inspection(secondDirty.head)
+  }).next?.stage, 'commit');
+
+  const changed = cleanCommitCandidateFixture();
+  const changedSnapshots = [cleanSnapshot(changed.head), cleanSnapshot('f'.repeat(40))];
+  assert.equal(routeOrchestration('TASK-20260101-000001', {
+    repoRoot: changed.root,
+    captureRepository: () => changedSnapshots.shift()!,
+    inspectPullRequest: () => inspection(changed.head)
+  }).error?.code, 'ORCHESTRATION_REPOSITORY_CHANGED');
+});
+
+test('route clean completion is idempotent', () => {
+  const f = cleanCommitCandidateFixture();
+  const tree = 'b'.repeat(40);
+  const options = {
+    repoRoot: f.root,
+    now: () => '2026-01-01T00:00:05.000Z',
+    captureRepository: () => ({ head: f.head, headTree: tree, worktreeTree: tree }),
+    inspectPullRequest: () => ({
+      status: 'no-op', task: { prNumber: 42 }, pullRequest: { head: { sha: f.head } }, error: null
+    })
+  };
+  const first = routeOrchestration('TASK-20260101-000001', options);
+  const second = routeOrchestration('TASK-20260101-000001', {
+    repoRoot: f.root,
+    captureRepository: () => { throw new Error('must not recapture completed evidence'); }
+  });
+  assert.equal(first.changed, true);
+  assert.equal(second.status, 'completed');
+  assert.equal(second.changed, false);
+  assert.deepEqual(second.run?.completionEvidence, first.run?.completionEvidence);
 });
 
 test('commit authorization is issued and the run completes even with pending manual validation', () => {

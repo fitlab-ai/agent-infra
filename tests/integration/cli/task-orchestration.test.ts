@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
-import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-orchestration-cli-'));
@@ -21,8 +21,52 @@ function fixture() {
   return { root, id, dir };
 }
 
-function run(root: string, args: string[]) {
-  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-orchestration', ...args], { cwd: root, encoding: 'utf8' });
+function run(root: string, args: string[], env?: NodeJS.ProcessEnv) {
+  return spawnSync('node', [INTERNAL_CLI_PATH, 'task-orchestration', ...args], {
+    cwd: root,
+    encoding: 'utf8',
+    env: gitSafeEnv(env)
+  });
+}
+
+function approvedRouteFixture(prFlow: 'required' | 'disabled' | undefined) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-orchestration-route-cli-'));
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+  spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
+  const id = 'TASK-20260101-000001';
+  const dir = path.join(root, '.agents', 'workspace', 'active', id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(root, '.gitignore'), '.agents/workspace/\nfake-gh.cjs\npr.json\ncalls.jsonl\n');
+  fs.writeFileSync(path.join(root, 'source.ts'), 'baseline\n');
+  const config = { platform: { type: 'github' }, ...(prFlow === undefined ? {} : { prFlow }) };
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), `${JSON.stringify(config)}\n`);
+  spawnSync('git', ['add', '.'], { cwd: root });
+  spawnSync('git', ['commit', '-qm', 'baseline'], { cwd: root });
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\ncurrent_step: code-review\npr_number: 42\nlast_reviewed_commit: ${head}\n---\n\n# Task\n`);
+  fs.writeFileSync(path.join(dir, 'analysis.md'), '# Analysis\n');
+  fs.writeFileSync(path.join(dir, 'review-analysis.md'), '# Review\n\n- **审查输入**：`analysis.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
+  fs.writeFileSync(path.join(dir, 'plan.md'), '# Plan\n');
+  fs.writeFileSync(path.join(dir, 'review-plan.md'), '# Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
+  fs.writeFileSync(path.join(dir, 'code.md'), '# Code\n');
+  fs.writeFileSync(path.join(dir, 'review-code.md'), '# Review\n\n- **审查输入**：`code.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
+  const fake = path.join(root, 'fake-gh.cjs');
+  const pr = path.join(root, 'pr.json');
+  const calls = path.join(root, 'calls.jsonl');
+  fs.copyFileSync(filePath('tests/fixtures/validate-artifact/fake-gh.js'), fake);
+  fs.writeFileSync(pr, JSON.stringify({
+    head: { ref: 'fixture-head', sha: head, repo: { full_name: 'fitlab-ai/agent-infra' } },
+    base: { ref: 'main', sha: 'b'.repeat(40), repo: { full_name: 'fitlab-ai/agent-infra' } }
+  }));
+  const env = {
+    AGENT_INFRA_GH_BIN: process.execPath,
+    AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([fake]),
+    GH_FAKE_PR_PATH: pr,
+    GH_FAKE_ARGS_PATH: calls
+  };
+  return { root, id, dir, calls, env };
 }
 
 const explicitPolicyArgs = [
@@ -150,4 +194,34 @@ test('task-orchestration falls back to the selected client project policy only',
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.run.modelPolicySource.kind, 'project-config');
   assert.equal(payload.run.modelPolicy.executor.model, 'configured-executor');
+});
+
+test('task-orchestration CLI completes clean reviewed heads and preserves dirty commit routing', () => {
+  const clean = approvedRouteFixture('required');
+  assert.equal(run(clean.root, [clean.id, 'begin-or-resume', ...explicitPolicyArgs], clean.env).status, 0);
+  const completed = run(clean.root, [clean.id, 'route'], clean.env);
+  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+  const completedPayload = JSON.parse(completed.stdout);
+  assert.equal(completedPayload.status, 'completed');
+  assert.equal(completedPayload.next, null);
+  assert.equal(completedPayload.run.completionEvidence.kind, 'reviewed-head-clean');
+
+  const dirty = approvedRouteFixture('required');
+  assert.equal(run(dirty.root, [dirty.id, 'begin-or-resume', ...explicitPolicyArgs], dirty.env).status, 0);
+  fs.writeFileSync(path.join(dirty.root, 'source.ts'), 'dirty\n');
+  const commit = run(dirty.root, [dirty.id, 'route'], dirty.env);
+  assert.equal(commit.status, 0, commit.stderr || commit.stdout);
+  assert.equal(JSON.parse(commit.stdout).next.stage, 'commit');
+  assert.equal(fs.existsSync(dirty.calls), false);
+});
+
+test('task-orchestration CLI does not inspect PRs when clean completion is disabled or unspecified', () => {
+  for (const prFlow of ['disabled', undefined] as const) {
+    const f = approvedRouteFixture(prFlow);
+    assert.equal(run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs], f.env).status, 0);
+    const routed = run(f.root, [f.id, 'route'], f.env);
+    assert.equal(routed.status, 0, routed.stderr || routed.stdout);
+    assert.equal(JSON.parse(routed.stdout).next.stage, 'commit');
+    assert.equal(fs.existsSync(f.calls), false);
+  }
 });

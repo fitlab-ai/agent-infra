@@ -17,6 +17,7 @@ import {
 } from './delegation-receipts.ts';
 import type { DelegationReceipt, DelegationRole, DelegationStage } from './delegation-receipts.ts';
 import { normalizeAgentClients } from '../agent-clients/config.ts';
+import { inspectPlatformPullRequest } from '../platform/pull-requests.ts';
 import {
   getAgentClientCapability,
   getAgentClientDelegationEvidence,
@@ -28,7 +29,12 @@ import type {
   OrchestrationModelPolicy,
   OrchestrationRolePolicy
 } from '../agent-clients/types.ts';
-import { captureWorkspaceSnapshot, diffWorkspaceSnapshots } from './workspace-snapshot.ts';
+import {
+  captureRepositorySnapshot,
+  captureWorkspaceSnapshot,
+  diffWorkspaceSnapshots
+} from './workspace-snapshot.ts';
+import type { RepositorySnapshot } from './workspace-snapshot.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type LegacyOrchestrationModelPolicy = Readonly<{
@@ -51,6 +57,16 @@ type OrchestrationRecovery = Readonly<{
   pendingDelegation: false;
   resultingStatus: OrchestrationStatus;
 }>;
+type CleanCompletionEvidence = Readonly<{
+  kind: 'reviewed-head-clean';
+  observedAt: string;
+  head: string;
+  headTree: string;
+  worktreeTree: string;
+  lastReviewedCommit: string;
+  prNumber: number;
+  prHead: string;
+}>;
 type OrchestrationRun = Readonly<{
   schemaVersion: 1 | 2;
   taskId: string;
@@ -67,6 +83,7 @@ type OrchestrationRun = Readonly<{
   receipts: readonly DelegationReceipt[];
   pause: Readonly<{ code: string; message: string; recoverable: boolean }> | null;
   commitAuthorization: Readonly<{ issuedAt: string | null; consumedAt: string | null }>;
+  completionEvidence?: CleanCompletionEvidence | null;
   createdAt: string;
   updatedAt: string;
 }>;
@@ -101,6 +118,14 @@ type OrchestrationOptions = {
   client?: AgentClientId;
   modelPolicy?: OrchestrationModelPolicy;
   captureWorkspace?: (repoRoot: string, taskId: string | null) => string;
+  captureRepository?: (repoRoot: string) => RepositorySnapshot;
+  inspectPullRequest?: (taskId: string, options: { cwd: string }) => Readonly<{
+    status: string;
+    task?: Readonly<{ prNumber?: number | null }>;
+    prNumber?: number | null;
+    pullRequest?: Readonly<{ head?: Readonly<{ sha?: string }> }> | null;
+    error?: Readonly<{ message?: string }> | null;
+  }>;
   diffWorkspace?: (repoRoot: string, before: string, after: string) => string[];
   supportsLifecycleDelegation?: (client: AgentClientId) => boolean;
 };
@@ -367,6 +392,7 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
     receipts: [],
     pause: null,
     commitAuthorization: { issuedAt: null, consumedAt: null },
+    completionEvidence: null,
     createdAt: now,
     updatedAt: now
   };
@@ -457,8 +483,9 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   } catch (error) {
     return failed('ORCHESTRATION_TASK_READ_FAILED', String(error), resolved.taskId);
   }
+  let metadata: ReturnType<typeof parseTypedTaskFrontmatter>;
   try {
-    parseTypedTaskFrontmatter(content);
+    metadata = parseTypedTaskFrontmatter(content);
   } catch (error) {
     return failed('ORCHESTRATION_TASK_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
   }
@@ -486,6 +513,107 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
     if (!summarizeLedgerStage(rows, 'code').canAdvance) {
       return failed('ORCHESTRATION_LEDGER_BLOCKED', 'code review ledger has unresolved findings or human decisions', resolved.taskId);
     }
+    if (run?.status === 'completed') {
+      return { status: 'completed', changed: false, taskId: resolved.taskId, run, next: null, error: null };
+    }
+
+    let config: unknown;
+    try {
+      config = JSON.parse(fs.readFileSync(path.join(resolved.repoRoot, '.agents', '.airc.json'), 'utf8'));
+    } catch (error) {
+      return failed('ORCHESTRATION_CONFIG_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
+    }
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return failed('ORCHESTRATION_CONFIG_INVALID', 'project configuration must be an object', resolved.taskId);
+    }
+    const projectConfig = config as Record<string, unknown>;
+    if (!Object.hasOwn(projectConfig, 'prFlow') || projectConfig.prFlow === 'disabled') {
+      return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
+    }
+    if (projectConfig.prFlow !== 'required') {
+      return failed('ORCHESTRATION_CONFIG_INVALID', "project configuration 'prFlow' must be 'required' or 'disabled'", resolved.taskId);
+    }
+    const prNumber = Number(metadata.pr_number);
+    if (!Number.isInteger(prNumber) || prNumber <= 0) {
+      return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
+    }
+    if (!run) {
+      return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
+    }
+    if (run.status !== 'running' || run.pendingDelegation !== null) {
+      return failed('ORCHESTRATION_RUN_NOT_RUNNING', 'clean completion requires an idle running orchestration', resolved.taskId);
+    }
+
+    const capture = options.captureRepository ?? captureRepositorySnapshot;
+    let before: RepositorySnapshot;
+    try {
+      before = capture(resolved.repoRoot);
+    } catch (error) {
+      return failed('ORCHESTRATION_SNAPSHOT_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
+    }
+    if (before.headTree !== before.worktreeTree) {
+      return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
+    }
+    const lastReviewedCommit = String(metadata.last_reviewed_commit ?? '');
+    if (before.head !== lastReviewedCommit) {
+      return failed('ORCHESTRATION_REVIEWED_HEAD_MISMATCH', 'local HEAD does not match last_reviewed_commit', resolved.taskId);
+    }
+
+    const inspect: NonNullable<OrchestrationOptions['inspectPullRequest']> =
+      options.inspectPullRequest ?? inspectPlatformPullRequest;
+    let inspection: ReturnType<NonNullable<OrchestrationOptions['inspectPullRequest']>>;
+    try {
+      inspection = inspect(resolved.taskId, { cwd: resolved.repoRoot });
+    } catch (error) {
+      return failed('ORCHESTRATION_PR_INSPECTION_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
+    }
+    if (inspection.status === 'blocked') {
+      return failed('ORCHESTRATION_PR_INSPECTION_BLOCKED', inspection.error?.message ?? 'pull request inspection is blocked', resolved.taskId);
+    }
+    if (inspection.status === 'failed') {
+      return failed('ORCHESTRATION_PR_INSPECTION_FAILED', inspection.error?.message ?? 'pull request inspection failed', resolved.taskId);
+    }
+    const inspectedPrNumber = inspection.task?.prNumber ?? inspection.prNumber;
+    const prHead = inspection.pullRequest?.head?.sha;
+    if (typeof prHead !== 'string') {
+      return failed('ORCHESTRATION_PR_INSPECTION_INVALID', 'pull request inspection returned incomplete identity evidence', resolved.taskId);
+    }
+    if (inspectedPrNumber !== prNumber || prHead !== before.head) {
+      return failed('ORCHESTRATION_PR_HEAD_MISMATCH', 'pull request identity does not match the reviewed local HEAD', resolved.taskId);
+    }
+
+    let after: RepositorySnapshot;
+    try {
+      after = capture(resolved.repoRoot);
+    } catch (error) {
+      return failed('ORCHESTRATION_SNAPSHOT_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
+    }
+    if (after.headTree !== after.worktreeTree) {
+      return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
+    }
+    if (after.head !== before.head || after.headTree !== before.headTree) {
+      return failed('ORCHESTRATION_REPOSITORY_CHANGED', 'repository changed while clean completion evidence was collected', resolved.taskId);
+    }
+
+    const observedAt = (options.now ?? (() => new Date().toISOString()))();
+    const completionEvidence: CleanCompletionEvidence = {
+      kind: 'reviewed-head-clean',
+      observedAt,
+      head: after.head,
+      headTree: after.headTree,
+      worktreeTree: after.worktreeTree,
+      lastReviewedCommit,
+      prNumber,
+      prHead
+    };
+    const completed = withUpdatedRun(run, {
+      status: 'completed',
+      nextStage: null,
+      pause: null,
+      completionEvidence
+    });
+    saveRun(resolved.taskDir, completed);
+    return { status: 'completed', changed: true, taskId: resolved.taskId, run: completed, next: null, error: null };
   }
   return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
 }

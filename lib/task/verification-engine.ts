@@ -180,9 +180,14 @@ function checkOrchestrationState({ taskDir }: any): any {
     return failResult('orchestration-state', 'Paused run requires a stable pause code and message');
   }
   if (run.status === 'completed') {
-    if (run.pendingDelegation !== null || !run.commitAuthorization?.consumedAt) {
+    if (run.completionEvidence != null) {
+      const evidenceError = validateCleanCompletionEvidence(run);
+      if (evidenceError) return failResult('orchestration-state', evidenceError);
+    } else if (run.pendingDelegation !== null || !run.commitAuthorization?.consumedAt) {
       return failResult('orchestration-state', 'Completed run must consume commit authorization and clear pending delegation');
     }
+  } else if (run.completionEvidence != null) {
+    return failResult('orchestration-state', 'Clean completion evidence requires a completed run');
   } else if (run.pendingDelegation?.status === 'sealed') {
     return failResult('orchestration-state', 'Paused run has a sealed delegation that could still advance');
   }
@@ -191,6 +196,43 @@ function checkOrchestrationState({ taskDir }: any): any {
 
 function exactText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.trim() === value;
+}
+
+function validateCleanCompletionEvidence(run: any): string | null {
+  const evidence = run.completionEvidence;
+  const shaPattern = /^[0-9a-f]{40}$/i;
+  if (
+    evidence?.kind !== 'reviewed-head-clean'
+    || !exactText(evidence.observedAt)
+    || Number.isNaN(Date.parse(evidence.observedAt))
+    || !shaPattern.test(evidence.head)
+    || !shaPattern.test(evidence.headTree)
+    || !shaPattern.test(evidence.worktreeTree)
+    || !shaPattern.test(evidence.lastReviewedCommit)
+    || !Number.isInteger(evidence.prNumber)
+    || evidence.prNumber <= 0
+    || !shaPattern.test(evidence.prHead)
+  ) {
+    return 'Clean completion evidence has an invalid structure';
+  }
+  if (
+    evidence.head !== evidence.lastReviewedCommit
+    || evidence.head !== evidence.prHead
+    || evidence.headTree !== evidence.worktreeTree
+  ) {
+    return 'Clean completion evidence does not bind matching commit and tree identities';
+  }
+  if (
+    run.status !== 'completed'
+    || run.pendingDelegation !== null
+    || run.commitAuthorization?.issuedAt !== null
+    || run.commitAuthorization?.consumedAt !== null
+    || !Array.isArray(run.receipts)
+    || run.receipts.some((receipt: any) => receipt.stage === 'commit')
+  ) {
+    return 'Clean completion evidence conflicts with commit delegation state';
+  }
+  return null;
 }
 
 function checkOrchestrationEvidence({ taskDir }: any): any {
@@ -240,12 +282,15 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
   if (!Array.isArray(run.receipts)) {
     return failResult('orchestration-evidence', 'Run receipts must be an array');
   }
-  if (run.status === 'completed' && (
-    run.receipts.length === 0
-    || run.receipts.at(-1)?.stage !== 'commit'
-    || run.receipts.at(-1)?.status !== 'consumed'
-  )) {
-    return failResult('orchestration-evidence', 'Completed run requires a final consumed commit receipt');
+  if (run.completionEvidence != null) {
+    const evidenceError = validateCleanCompletionEvidence(run);
+    if (evidenceError) return failResult('orchestration-evidence', evidenceError);
+  } else if (run.status === 'completed' && (
+      run.receipts.length === 0
+      || run.receipts.at(-1)?.stage !== 'commit'
+      || run.receipts.at(-1)?.status !== 'consumed'
+    )) {
+      return failResult('orchestration-evidence', 'Completed run requires a final consumed commit receipt');
   }
   if (run.pendingDelegation && !['prepared', 'activated', 'stage-completed'].includes(run.pendingDelegation.status)) {
     return failResult('orchestration-evidence', `Pending receipt has unsafe status '${run.pendingDelegation.status}'`);

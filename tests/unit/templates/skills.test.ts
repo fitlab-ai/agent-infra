@@ -199,6 +199,16 @@ test("run-task verification configs expose the same ordered local checks", () =>
   assert.equal(new Set(baseline).size, baseline.length);
 });
 
+test("run-task skill variants verify route completion before preparing delegation", () => {
+  for (const relativePath of skillDocPaths("run-task")) {
+    const content = read(relativePath);
+    const route = content.indexOf("`route`");
+    const verify = content.indexOf("task-verify {task-id} run-task.completed --format text");
+    const prepare = content.indexOf("`prepare --client {client}");
+    assert.ok(route >= 0 && verify > route && prepare > verify, relativePath);
+  }
+});
+
 test("local entropy-check defines review checklist and report template sections", () => {
   const skill = read(".agents/skills/entropy-check/SKILL.md");
   const checklist = read(".agents/skills/entropy-check/reference/checklist.md");
