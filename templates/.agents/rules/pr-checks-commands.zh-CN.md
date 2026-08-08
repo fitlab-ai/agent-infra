@@ -1,6 +1,6 @@
-# PR required checks 平台意图
+# PR readiness 平台意图
 
-required checks 的筛选、轮询 deadline、失败 run/job 定位和日志获取统一由 typed internal intent 执行。SKILL/模型只负责失败分类、根因分析、最小修复和授权后的提交推送。
+required checks、PR mergeability、轮询 deadline、失败 run/job 定位和日志获取统一由 typed internal intent 执行。每次 inspect/poll 都在同一 PR head 快照上聚合，不跨 head 拼接事实。
 
 ## 快照与监控
 
@@ -11,7 +11,7 @@ agent-infra-internal platform-checks watch {task-id} \
   --interval-seconds 30 --deadline-seconds 1800
 ```
 
-结构化 `checks.state` 为 `passed|failed|pending|timed-out|cancelled|no-required`。`passed|no-required` 退出 0；确定失败/取消退出 1；pending、timeout 或网络阻塞退出 2。平台 adapter 必须在操作前验证自身依赖；依赖或确定性平台错误直接透传，不执行兼容降级。
+结构化 `readiness.state` 为 `ready|conflicting|checks-failed|pending|timed-out|cancelled`，并携带 `headSha`。仅 `ready` 退出 0；`conflicting|checks-failed` 退出 1；其余或网络阻塞退出 2。`checks.state` 仍保留 check-only 诊断；平台 adapter 的依赖和确定性错误不降级。
 
 ## 定位失败 run/job
 

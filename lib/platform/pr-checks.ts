@@ -19,10 +19,13 @@ type CheckBucket = 'pass' | 'fail' | 'pending' | 'cancel';
 type CheckState = 'passed' | 'failed' | 'pending' | 'timed-out' | 'cancelled' | 'no-required';
 type CheckSnapshot = PlatformCheckSnapshot;
 type ChecksSnapshot = { state: Exclude<CheckState, 'timed-out'>; required: CheckSnapshot[] };
+type ReadinessState = 'ready' | 'conflicting' | 'checks-failed' | 'pending' | 'timed-out' | 'cancelled';
+type ReadinessSnapshot = { state: ReadinessState; headSha: string };
 type RunCandidate = { id: number; name: string; headSha: string; jobId?: number | null };
 type ChecksResult = PlatformResult & {
   pullRequest: PullRequestSnapshot | null;
   checks: { state: CheckState; required: CheckSnapshot[] };
+  readiness?: ReadinessSnapshot;
   resolution?: { status: 'resolved' | 'missing' | 'ambiguous'; runId: number | null; jobId: number | null };
   logs?: { runId: number; jobId?: number; text: string };
 };
@@ -37,25 +40,15 @@ function classifyRequiredChecks(required: CheckSnapshot[]): ChecksSnapshot {
   return { state: 'passed', required };
 }
 
-async function watchRequiredChecks(options: {
-  inspect: () => Promise<ChecksSnapshot>;
-  intervalMs: number;
-  deadlineMs: number;
-  now?: () => number;
-  sleep?: (delayMs: number) => Promise<void>;
-  signal?: AbortSignal;
-}): Promise<{ state: CheckState; required: CheckSnapshot[] }> {
-  const now = options.now || (() => performance.now());
-  const sleep = options.sleep || ((delay) => new Promise<void>((resolve) => setTimeout(resolve, delay)));
-  const started = now();
-  while (true) {
-    if (options.signal?.aborted) return { state: 'cancelled', required: [] };
-    const snapshot = await options.inspect();
-    if (snapshot.state !== 'pending') return snapshot;
-    const elapsed = now() - started;
-    if (elapsed >= options.deadlineMs) return { state: 'timed-out', required: snapshot.required };
-    await sleep(Math.min(options.intervalMs, options.deadlineMs - elapsed));
-  }
+function classifyPullRequestReadiness(input: {
+  headSha: string;
+  mergeability: 'mergeable' | 'conflicting' | 'unknown';
+  checks: ChecksSnapshot;
+}): ReadinessSnapshot {
+  if (input.mergeability === 'conflicting') return { state: 'conflicting', headSha: input.headSha };
+  if (input.checks.state === 'failed' || input.checks.state === 'cancelled') return { state: 'checks-failed', headSha: input.headSha };
+  if (input.mergeability === 'unknown' || input.checks.state === 'pending') return { state: 'pending', headSha: input.headSha };
+  return { state: 'ready', headSha: input.headSha };
 }
 
 function parseRunJobIdentity(detailsUrl: string): { runId: number; jobId: number | null } | null {
@@ -143,6 +136,13 @@ function resolvedTask(taskRef: string, options: InspectionOptions) {
 function inspectRequiredChecks(taskRef: string, options: InspectionOptions = {}): ChecksResult {
   const base = resolvedTask(taskRef, options);
   if (!base.ok) return base.output;
+  return inspectChecksForResolvedTask(base, options);
+}
+
+function inspectChecksForResolvedTask(
+  base: Extract<ReturnType<typeof resolvedTask>, { ok: true }>,
+  options: InspectionOptions
+): ChecksResult {
   const repository = base.context.platform.repository!;
   const inspected = inspectPlatformRequiredChecks(base.context.platform.type, {
     cwd: base.resolved.repoRoot,
@@ -179,36 +179,62 @@ function inspectRequiredChecks(taskRef: string, options: InspectionOptions = {})
   });
 }
 
-async function watchPlatformChecks(taskRef: string, options: InspectionOptions & {
+function inspectPullRequestReadiness(taskRef: string, options: InspectionOptions = {}): ChecksResult {
+  const base = resolvedTask(taskRef, options);
+  if (!base.ok) return base.output;
+  const checked = inspectChecksForResolvedTask(base, options);
+  const classifiedCodes = new Set(['REQUIRED_CHECKS_PENDING', 'REQUIRED_CHECKS_FAILED', 'REQUIRED_CHECKS_CANCELLED']);
+  if (checked.error && !classifiedCodes.has(checked.error.code)) return checked;
+  const readiness = classifyPullRequestReadiness({
+    headSha: base.pullRequest.head.sha,
+    mergeability: base.pullRequest.mergeability?.state ?? 'unknown',
+    checks: checked.checks as ChecksSnapshot
+  });
+  const status = readiness.state === 'ready' ? 'no-op'
+    : readiness.state === 'conflicting' || readiness.state === 'checks-failed' ? 'failed' : 'blocked';
+  return checksResult(status, {
+    ...checked,
+    status,
+    changed: false,
+    readiness,
+    error: status === 'no-op' ? null : {
+      code: readiness.state === 'conflicting' ? 'PR_MERGE_CONFLICT'
+        : readiness.state === 'checks-failed' ? 'REQUIRED_CHECKS_FAILED' : 'PR_READINESS_PENDING',
+      message: `Pull request readiness is ${readiness.state}`,
+      retryable: readiness.state === 'pending'
+    }
+  });
+}
+
+async function watchPullRequestReadiness(taskRef: string, options: InspectionOptions & {
   intervalSeconds: number;
   deadlineSeconds: number;
   signal?: AbortSignal;
   now?: () => number;
   sleep?: (delayMs: number) => Promise<void>;
 }): Promise<ChecksResult> {
+  const now = options.now || (() => performance.now());
+  const sleep = options.sleep || ((delay: number) => new Promise<void>((resolve) => setTimeout(resolve, delay)));
+  const started = now();
   let last: ChecksResult | null = null;
-  const watched = await watchRequiredChecks({
-    intervalMs: options.intervalSeconds * 1000,
-    deadlineMs: options.deadlineSeconds * 1000,
-    signal: options.signal,
-    now: options.now,
-    sleep: options.sleep,
-    inspect: async () => {
-      last = inspectRequiredChecks(taskRef, options);
-      if (last.checks.state === 'pending' && last.error?.code === 'REQUIRED_CHECKS_PENDING') return last.checks as ChecksSnapshot;
-      return last.checks as ChecksSnapshot;
-    }
-  });
-  if (!last) return checksResult('blocked', { checks: watched, error: { code: 'REQUIRED_CHECKS_UNAVAILABLE', message: 'No checks snapshot was produced', retryable: true } });
-  const snapshot = last as ChecksResult;
-  if (watched.state === 'timed-out' || watched.state === 'cancelled') return checksResult('blocked', {
-    ...snapshot,
-    status: 'blocked',
-    changed: false,
-    checks: watched,
-    error: { code: watched.state === 'timed-out' ? 'REQUIRED_CHECKS_TIMEOUT' : 'REQUIRED_CHECKS_CANCELLED', message: `Required checks ${watched.state}`, retryable: watched.state === 'timed-out' }
-  });
-  return { ...snapshot, checks: watched };
+  while (true) {
+    if (options.signal?.aborted) return checksResult('blocked', {
+      ...last,
+      status: 'blocked', changed: false,
+      readiness: { state: 'cancelled', headSha: last?.pullRequest?.head.sha ?? '' },
+      error: { code: 'PR_READINESS_CANCELLED', message: 'Pull request readiness watch was cancelled', retryable: false }
+    });
+    last = inspectPullRequestReadiness(taskRef, options);
+    if (last.readiness?.state !== 'pending' || last.error?.code !== 'PR_READINESS_PENDING') return last;
+    const elapsed = now() - started;
+    if (elapsed >= options.deadlineSeconds * 1000) return checksResult('blocked', {
+      ...last,
+      status: 'blocked', changed: false,
+      readiness: { state: 'timed-out', headSha: last.pullRequest?.head.sha ?? '' },
+      error: { code: 'PR_READINESS_TIMEOUT', message: 'Pull request readiness watch timed out', retryable: true }
+    });
+    await sleep(Math.min(options.intervalSeconds * 1000, options.deadlineSeconds * 1000 - elapsed));
+  }
 }
 
 function resolvePlatformCheckRun(taskRef: string, options: SharedOptions & { checkName: string; detailsUrl?: string }): ChecksResult {
@@ -262,14 +288,15 @@ function fetchPlatformCheckLogs(taskRef: string, options: SharedOptions & { run:
 }
 
 export {
+  classifyPullRequestReadiness,
   classifyRequiredChecks,
   fetchCheckLogText,
   fetchPlatformCheckLogs,
   inspectRequiredChecks,
+  inspectPullRequestReadiness,
   parseRunJobIdentity,
   resolvePlatformCheckRun,
   resolveRunCandidate,
-  watchPlatformChecks,
-  watchRequiredChecks
+  watchPullRequestReadiness
 };
-export type { CheckBucket, CheckSnapshot, ChecksResult, ChecksSnapshot, CheckState, RunCandidate };
+export type { CheckBucket, CheckSnapshot, ChecksResult, ChecksSnapshot, CheckState, ReadinessSnapshot, ReadinessState, RunCandidate };

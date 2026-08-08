@@ -37,7 +37,8 @@ test('PR identity normalization retains canonical remote facts', () => {
     head: { repository: 'o/r', ref: 'feature', sha: 'sha-7' },
     base: { repository: 'o/r', ref: 'main', sha: 'base-7' },
     mergedAt: null, mergeCommitSha: null,
-    labels: ['type: feature'], assignees: ['codex'], milestone: '1.0.0'
+    labels: ['type: feature'], assignees: ['codex'], milestone: '1.0.0',
+    mergeability: { state: 'unknown', detail: null }
   });
 });
 
@@ -48,6 +49,24 @@ test('PR identity normalization retains authoritative merge facts', () => {
   assert.equal(normalized?.base.sha, 'base-8');
   assert.equal(normalized?.mergedAt, '2026-07-25T00:00:00Z');
   assert.equal(normalized?.mergeCommitSha, 'merge-8');
+});
+
+test('PR mergeability normalization fails closed on missing and contradictory facts', () => {
+  assert.deepEqual(normalizePullRequest({ ...remote(9), mergeable: false, mergeable_state: ' DIRTY ' }, 'o/r')?.mergeability, {
+    state: 'conflicting', detail: 'dirty'
+  });
+  assert.deepEqual(normalizePullRequest({ ...remote(9), mergeable: true, mergeable_state: 'dirty' }, 'o/r')?.mergeability, {
+    state: 'unknown', detail: 'dirty'
+  });
+  assert.deepEqual(normalizePullRequest({ ...remote(9), mergeable: true, mergeable_state: 'BLOCKED' }, 'o/r')?.mergeability, {
+    state: 'mergeable', detail: 'blocked'
+  });
+  assert.deepEqual(normalizePullRequest({ ...remote(9), mergeable: null }, 'o/r')?.mergeability, {
+    state: 'unknown', detail: null
+  });
+  assert.deepEqual(normalizePullRequest(remote(9), 'o/r')?.mergeability, {
+    state: 'unknown', detail: null
+  });
 });
 
 function prByNumberFixture() {

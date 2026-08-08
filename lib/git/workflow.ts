@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
 type CommandResult = { status: number | null; stdout: string; stderr: string };
 type GitRunner = (args: readonly string[], cwd: string) => CommandResult;
@@ -16,6 +18,10 @@ function run(runner: GitRunner, cwd: string, args: readonly string[]): CommandRe
 function value(runner: GitRunner, cwd: string, args: readonly string[], trim = true): string | null {
   const result = run(runner, cwd, args);
   return result.status === 0 ? (trim ? result.stdout.trim() : result.stdout.replace(/\n$/, '')) : null;
+}
+
+function cleanMessage(message: string): string {
+  return message.replace(/(https?:\/\/)[^\s/@:]+(?::[^\s/@]*)?@/gi, '$1***@').trim();
 }
 
 function inspectGitWorkflow(cwd: string, runner: GitRunner = defaultRunner, remoteInput?: { remote: string; refs: readonly string[] }) {
@@ -97,5 +103,63 @@ function pushGitRefs(input: { cwd: string; remote: string; refs: readonly string
   return { status: failures === 0 ? 'applied' as const : failures === operations.length ? 'failed' as const : 'degraded' as const, changed: failures < operations.length, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations, error: failures ? { code: 'GIT_PUSH_PARTIAL', message: `${failures} ref push operation(s) failed` } : null };
 }
 
-export { commitExplicitPaths, inspectGitWorkflow, pushGitRefs };
-export type { CommandResult, GitRunner };
+type PushRebasedInput = {
+  cwd: string;
+  remote: string;
+  branch: string;
+  expectedOldHead: string;
+  newHead: string;
+  baseBranch: string;
+  expectedBaseHead: string;
+};
+
+function pushRebasedBranch(input: PushRebasedInput, runner: GitRunner = defaultRunner) {
+  const sha = /^[0-9a-f]{40}$/i;
+  const refName = /^(?!-)(?!.*\.\.)(?!.*(?:^|\/)\.)(?!.*[~^:?*\[\\\s])(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/;
+  if (!input.remote || !refName.test(input.remote) || !refName.test(input.branch) || !refName.test(input.baseBranch) ||
+      !sha.test(input.expectedOldHead) || !sha.test(input.newHead) || !sha.test(input.expectedBaseHead)) {
+    return { status: 'failed' as const, changed: false, snapshot: null, operations: [], error: { code: 'GIT_REBASED_INPUT_INVALID', message: 'Remote, branches, and full 40-character SHAs are required' } };
+  }
+  const snapshot = inspectGitWorkflow(input.cwd, runner).snapshot;
+  if (!snapshot) return { status: 'failed' as const, changed: false, snapshot: null, operations: [], error: { code: 'GIT_INSPECT_FAILED', message: 'Unable to inspect Git repository' } };
+  if (snapshot.branch !== input.branch || snapshot.head !== input.newHead) {
+    return { status: 'failed' as const, changed: false, snapshot, operations: [], error: { code: 'GIT_LOCAL_IDENTITY_MISMATCH', message: 'Current branch or HEAD does not match the rebased intent' } };
+  }
+  const rebasePaths = ['rebase-merge', 'rebase-apply']
+    .map((name) => value(runner, input.cwd, ['rev-parse', '--git-path', name]))
+    .filter((candidate): candidate is string => Boolean(candidate));
+  if (snapshot.worktree.length > 0 || snapshot.staged.length > 0 ||
+      run(runner, input.cwd, ['rev-parse', '-q', '--verify', 'REBASE_HEAD']).status === 0 ||
+      rebasePaths.some((candidate) => fs.existsSync(path.isAbsolute(candidate) ? candidate : path.join(input.cwd, candidate)))) {
+    return { status: 'failed' as const, changed: false, snapshot, operations: [], error: { code: 'GIT_LOCAL_STATE_UNSAFE', message: 'Working tree must be clean with no rebase in progress' } };
+  }
+  const remoteRef = `refs/heads/${input.branch}`;
+  const baseRef = `refs/heads/${input.baseBranch}`;
+  const remoteHead = value(runner, input.cwd, ['ls-remote', '--exit-code', input.remote, remoteRef])?.split(/\s+/)[0] ?? null;
+  if (remoteHead !== input.expectedOldHead) {
+    return { status: 'failed' as const, changed: false, snapshot, operations: [], error: { code: 'GIT_REMOTE_HEAD_MISMATCH', message: `Expected remote head ${input.expectedOldHead}, received ${remoteHead ?? 'unavailable'}` } };
+  }
+  const baseHead = value(runner, input.cwd, ['ls-remote', '--exit-code', input.remote, baseRef])?.split(/\s+/)[0] ?? null;
+  if (baseHead !== input.expectedBaseHead) {
+    return { status: 'failed' as const, changed: false, snapshot, operations: [], error: { code: 'GIT_REMOTE_BASE_MISMATCH', message: `Expected base head ${input.expectedBaseHead}, received ${baseHead ?? 'unavailable'}` } };
+  }
+  if (run(runner, input.cwd, ['merge-base', '--is-ancestor', input.expectedBaseHead, input.newHead]).status !== 0) {
+    return { status: 'failed' as const, changed: false, snapshot, operations: [], error: { code: 'GIT_REBASED_ANCESTOR_MISMATCH', message: 'Rebased head does not contain the expected base head' } };
+  }
+  const pushed = run(runner, input.cwd, [
+    'push', `--force-with-lease=${remoteRef}:${input.expectedOldHead}`,
+    input.remote, `${input.newHead}:${remoteRef}`
+  ]);
+  if (pushed.status !== 0) {
+    const message = cleanMessage(pushed.stderr) || 'Rebased branch push was rejected';
+    return { status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'push-rebased', status: 'failed' as const, ref: input.branch, message }], error: { code: 'GIT_REBASED_PUSH_REJECTED', message } };
+  }
+  const verified = value(runner, input.cwd, ['ls-remote', '--exit-code', input.remote, remoteRef])?.split(/\s+/)[0] ?? null;
+  if (verified !== input.newHead) {
+    return { status: 'failed' as const, changed: true, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'push-rebased', status: 'failed' as const, ref: input.branch, message: 'Remote ref verification failed' }], error: { code: 'GIT_REBASED_VERIFY_FAILED', message: `Expected pushed head ${input.newHead}, received ${verified ?? 'unavailable'}` } };
+  }
+  return { status: 'applied' as const, changed: true, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'push-rebased', status: 'applied' as const, ref: input.branch }], error: null };
+}
+
+export { commitExplicitPaths, inspectGitWorkflow, pushGitRefs, pushRebasedBranch };
+export type { CommandResult, GitRunner, PushRebasedInput };

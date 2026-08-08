@@ -186,6 +186,20 @@ test("watch-pr templates declare a language-neutral self-heal test command contr
   assert.deepEqual(contracts, [expected, expected]);
 });
 
+test("watch-pr templates declare a language-neutral conflict-heal contract", () => {
+  const contracts = ["en", "zh-CN"].map((language) => contractEntries(
+    read(`templates/.agents/skills/watch-pr/reference/monitor-and-heal.${language}.md`),
+    "conflict-heal-contract"
+  ));
+
+  const expected = {
+    strategy: "rebase",
+    "remote-update": "exact-lease",
+    unsafe: "help"
+  };
+  assert.deepEqual(contracts, [expected, expected]);
+});
+
 test("milestone initialization follows SemVer precedence and preserves wide numeric fields", onPlatforms("linux", "darwin"), () => {
   const cases = [
     {

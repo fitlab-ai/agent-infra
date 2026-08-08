@@ -1,12 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 import {
+  classifyPullRequestReadiness,
   classifyRequiredChecks,
   fetchCheckLogText,
   parseRunJobIdentity,
   resolveRunCandidate,
-  watchRequiredChecks
+  watchPullRequestReadiness
 } from '../../../lib/platform/pr-checks.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 
@@ -18,17 +23,74 @@ test('required checks classify terminal and non-terminal states', () => {
   assert.equal(classifyRequiredChecks([{ name: 'build', bucket: 'cancel' }]).state, 'cancelled');
 });
 
-test('required checks watcher uses an injected monotonic deadline', async () => {
-  let now = 0;
-  const output = await watchRequiredChecks({
-    inspect: async () => ({ state: 'pending', required: [{ name: 'build', bucket: 'pending' }] }),
-    intervalMs: 10,
-    deadlineMs: 20,
-    now: () => now,
-    sleep: async (delay) => { now += delay; }
+test('PR readiness watcher reaches injected deadline and preserves the observed head', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-readiness-watch-'));
+  const taskId = 'TASK-20260101-000001';
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:o/r.git'], { cwd: root });
+    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+    fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', 'pr_number: 5', '---', ''].join('\n'));
+    const client = {
+      version() { return { ok: true as const, value: '2.16.0' }; },
+      json(args: string[]) {
+        const joined = args.join(' ');
+        if (args[1] === 'user') return { ok: true as const, value: { login: 'codex' } };
+        if (args[0] === 'api' && args[1] === 'repos/o/r') return { ok: true as const, value: { full_name: 'o/r', fork: false, permissions: { push: true } } };
+        if (args[0] === 'api' && args[1] === 'repos/o/r/pulls/5') return { ok: true as const, value: {
+          number: 5, node_id: 'PR_5', html_url: 'https://github.com/o/r/pull/5', state: 'open',
+          head: { ref: 'feature', sha: 'a'.repeat(40), repo: { full_name: 'o/r' } },
+          base: { ref: 'main', sha: 'b'.repeat(40), repo: { full_name: 'o/r' } },
+          mergeable: null
+        } };
+        if (args[0] === 'pr' && args[1] === 'checks') return { ok: true as const, value: [{ name: 'build', bucket: 'pass' }] };
+        return { ok: false as const, error: { code: 'PLATFORM_REQUEST_FAILED', message: joined, retryable: false } };
+      },
+      text() { return { ok: true as const, value: '' }; }
+    } as unknown as GitHubClient;
+    let now = 0;
+    const output = await watchPullRequestReadiness(taskId, {
+      cwd: root, client, intervalSeconds: 0.01, deadlineSeconds: 0.02,
+      now: () => now,
+      sleep: async (delay) => { now += delay; }
+    });
+    assert.equal(output.status, 'blocked');
+    assert.deepEqual(output.readiness, { state: 'timed-out', headSha: 'a'.repeat(40) });
+    assert.equal(output.error?.code, 'PR_READINESS_TIMEOUT');
+    assert.equal(now, 20);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('PR readiness watcher returns a cancelled terminal state for an aborted signal', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const output = await watchPullRequestReadiness('TASK-20260101-000001', {
+    intervalSeconds: 1, deadlineSeconds: 1, signal: controller.signal
   });
-  assert.equal(output.state, 'timed-out');
-  assert.equal(now, 20);
+  assert.equal(output.status, 'blocked');
+  assert.deepEqual(output.readiness, { state: 'cancelled', headSha: '' });
+  assert.equal(output.error?.code, 'PR_READINESS_CANCELLED');
+});
+
+test('PR readiness requires both terminal checks and explicit mergeability for one head', () => {
+  const checks = { state: 'passed' as const, required: [{ name: 'build', bucket: 'pass' as const }] };
+  assert.deepEqual(classifyPullRequestReadiness({ headSha: 'a'.repeat(40), mergeability: 'conflicting', checks }), {
+    state: 'conflicting', headSha: 'a'.repeat(40)
+  });
+  assert.deepEqual(classifyPullRequestReadiness({ headSha: 'b'.repeat(40), mergeability: 'unknown', checks }), {
+    state: 'pending', headSha: 'b'.repeat(40)
+  });
+  assert.deepEqual(classifyPullRequestReadiness({ headSha: 'c'.repeat(40), mergeability: 'mergeable', checks }), {
+    state: 'ready', headSha: 'c'.repeat(40)
+  });
+  assert.equal(classifyPullRequestReadiness({
+    headSha: 'd'.repeat(40), mergeability: 'mergeable',
+    checks: { state: 'failed', required: [{ name: 'build', bucket: 'fail' }] }
+  }).state, 'checks-failed');
 });
 
 test('run identity prefers validated details URLs and exact unique fallback', () => {

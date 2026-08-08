@@ -105,6 +105,8 @@ if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/pulls\/\d+$/.test(args
     title: "Fixture PR",
     body: "Fixture body",
     draft: false,
+    mergeable: true,
+    mergeable_state: "clean",
     head: { ref: "fixture-head", sha, repo: { full_name: repository } },
     base: { ref: "main", repo: { full_name: repository } },
     ...stored

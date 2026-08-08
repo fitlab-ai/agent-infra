@@ -2,9 +2,9 @@ import path from 'node:path';
 
 import {
   fetchPlatformCheckLogs,
-  inspectRequiredChecks,
+  inspectPullRequestReadiness,
   resolvePlatformCheckRun,
-  watchPlatformChecks
+  watchPullRequestReadiness
 } from '../platform/pr-checks.ts';
 import type { ChecksResult } from '../platform/pr-checks.ts';
 
@@ -70,7 +70,7 @@ async function platformChecks(args: string[] = []): Promise<void> {
   };
   const unexpected = Object.keys(values).find((name) => !allowed[operation]!.includes(name));
   if (unexpected) { fail(`${operation} does not accept --${unexpected}`); return; }
-  if (operation === 'inspect') { finish(inspectRequiredChecks(taskRef, { cwd })); return; }
+  if (operation === 'inspect') { finish(inspectPullRequestReadiness(taskRef, { cwd })); return; }
   if (operation === 'resolve-run') {
     if (!values.checkName) { fail('resolve-run requires --check-name'); return; }
     finish(resolvePlatformCheckRun(taskRef, { cwd, checkName: values.checkName, detailsUrl: values.detailsUrl }));
@@ -91,7 +91,7 @@ async function platformChecks(args: string[] = []): Promise<void> {
   process.once('SIGINT', abort);
   process.once('SIGTERM', abort);
   try {
-    finish(await watchPlatformChecks(taskRef, { cwd, intervalSeconds, deadlineSeconds, signal: controller.signal }));
+    finish(await watchPullRequestReadiness(taskRef, { cwd, intervalSeconds, deadlineSeconds, signal: controller.signal }));
   } finally {
     process.removeListener('SIGINT', abort);
     process.removeListener('SIGTERM', abort);

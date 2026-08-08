@@ -6,6 +6,11 @@ type PlatformAdapterContext = {
   client?: unknown;
 };
 
+type PlatformMergeability = {
+  state: 'mergeable' | 'conflicting' | 'unknown';
+  detail: string | null;
+};
+
 type PlatformChangeRequestSnapshot = {
   repository: string;
   number: number;
@@ -22,6 +27,7 @@ type PlatformChangeRequestSnapshot = {
   labels: string[];
   assignees: string[];
   milestone: string | null;
+  mergeability?: PlatformMergeability;
 };
 
 type PlatformCheckSnapshot = {
@@ -185,5 +191,6 @@ export type {
   PlatformChangeRequestSnapshot,
   PlatformCheckSnapshot,
   PlatformInspectionResult,
+  PlatformMergeability,
   RequiredChecksInspectionContext
 };

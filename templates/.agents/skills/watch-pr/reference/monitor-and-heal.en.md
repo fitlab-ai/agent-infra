@@ -2,13 +2,14 @@
 
 Platform-agnostic decision logic for `watch-pr` steps 2/3/4. The concrete platform commands (watch, resolve a failing run, pull logs, read the PR number) live in `.agents/rules/pr-checks-commands.md`; this file only describes platform-independent classification and decisions.
 
-## Outcome Classification
+## Readiness Classification
 
-After running the watch command from `.agents/rules/pr-checks-commands.md`, classify by its exit code into three buckets:
+After the watch command, route by structured `readiness.state`:
 
-- All required checks passed → "all green" (SKILL step 7 green exit).
-- At least one failed / errored → "failure" (SKILL step 3 self-heal).
-- Still pending or the overall time cap was reached → "pending" (SKILL step 4 help exit).
+- `ready`: required checks passed and the same head is explicitly mergeable → SKILL step 7.
+- `checks-failed`: a required check failed or was cancelled → CI healing in SKILL step 3.
+- `conflicting`: the platform explicitly reports a head/base conflict → rebase healing in SKILL step 3.
+- `pending|timed-out|cancelled`: no reliable success fact exists → SKILL step 4.
 
 ## Self-Heal Decision Tree
 
@@ -34,6 +35,23 @@ For each failing check, decide "self-heal" vs "ask for help" in this order:
    - Append the fix commit SHA to this run's `repairCommits`, increment the fix count, and return to SKILL step 2. When checks turn green, an empty list routes to `complete-task`; a non-empty list routes to `review-code`.
    - Never make unrelated "drive-by" optimizations; never loosen / skip the failing assertion to "make it green".
 
+## Merge-Conflict Healing
+
+```text
+# conflict-heal-contract
+strategy: rebase
+remote-update: exact-lease
+unsafe: help
+```
+
+1. Continue only when the PR, head, and base repositories match; the current branch equals the head ref; local HEAD equals the snapshot head SHA; and the worktree/index are clean.
+2. Select a remote that exactly matches the PR repository, fetch the base ref, record the full `expectedBaseHead`, and confirm the remote head still equals the full old SHA.
+3. Run `git rebase <expectedBaseHead>`. Handle only Git-reported text unmerged paths. If resolution is unsafe, run `git rebase --abort`, record paths and both SHAs, and use help.
+4. After rebase, run the project `test` skill's full validation. Never push a failing result.
+5. Write remote, branch, full `expectedOldHead`, `newHead`, baseBranch, and full `expectedBaseHead` to a temporary intent outside the repository; call `agent-infra-internal git-workflow push-rebased --input {intent.json}`.
+6. Core verifies clean state, branch/HEAD, remote head/base, ancestry, exact `--force-with-lease`, and the post-push SHA. Never fall back to generic force; refresh the PR snapshot or use help.
+7. On success, append the new SHA to `repairCommits`, increment `rebaseAttempts`, and watch the new head. Cap at two attempts; a final ready state with repairs routes only to `review-code`.
+
 ## Help Report Template
 
 When entering the help exit, output the following fixed structure to the user (not written to any artifact file):
@@ -41,7 +59,10 @@ When entering the help exit, output the following fixed structure to the user (n
 ```
 PR #{pr#} monitoring is blocked; manual intervention needed.
 
-Blocker: {non-code layer / fix cap reached / run unlocatable / poll timeout}
+Blocker: {non-code layer / cap reached / run unlocatable / readiness unknown / unsafe rebase or update}
+PR head/base: {repository/ref/SHA}
+Conflict and remote facts: {paths / expected and actual head/base / rebase abort state}
+Validation: {command and failure summary, or why it did not run}
 Failing check: {name} (workflow: {workflow})
 Failing run / logs: {run/job link}
 Fixes attempted ({k} total):

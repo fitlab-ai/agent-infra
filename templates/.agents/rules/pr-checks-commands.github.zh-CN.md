@@ -1,4 +1,4 @@
-# PR required checks 平台意图
+# GitHub PR readiness 平台意图
 
 required checks 的筛选、轮询 deadline、失败 run/job 定位和日志获取统一由 typed internal intent 执行。SKILL/模型只负责失败分类、根因分析、最小修复和授权后的提交推送。
 
@@ -13,7 +13,7 @@ agent-infra-internal platform-checks watch {task-id} \
   --interval-seconds 30 --deadline-seconds 1800
 ```
 
-结构化 `checks.state` 为 `passed|failed|pending|timed-out|cancelled|no-required`。`passed|no-required` 退出 0；确定失败/取消退出 1；pending、timeout 或网络阻塞退出 2。依赖缺失、版本过低和确定性平台错误直接返回其原始结构化错误，不执行兼容降级。
+adapter 把 REST `mergeable=false` 规范化为 `conflicting`，null/缺失为 `unknown`，true 为 `mergeable`；true 与诊断 `dirty` 矛盾时降为 `unknown`。`blocked` 等其他诊断不覆盖 REST true。core 在同一 `headSha` 上与 required checks 聚合：仅 `ready` 退出 0，`conflicting|checks-failed` 退出 1，pending/timeout/cancel/网络阻塞退出 2。依赖与确定性平台错误不降级。
 
 ## 定位失败 run/job
 

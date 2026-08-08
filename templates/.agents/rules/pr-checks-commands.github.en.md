@@ -1,4 +1,4 @@
-# Required-checks Platform Intents
+# GitHub PR Readiness Intents
 
 The GitHub adapter requires `gh >= 2.16.0`. Platform context checks this dependency before any GitHub API, PR, or checks operation. Projects that do not select GitHub neither probe nor depend on `gh`.
 
@@ -15,4 +15,4 @@ agent-infra-internal platform-checks logs {task-id} \
   --run {run-id} [--job {job-id}]
 ```
 
-The core owns required-only selection, deadlines, exact run/job resolution, and faithful logs. Green/no-required exits 0; definite failure exits 1; pending, timeout, or network blocking exits 2. Missing dependencies, unsupported versions, and deterministic platform failures preserve their structured errors without compatibility degradation. The skill/model still owns diagnosis, fixes, tests, and authorized commit/push actions.
+The adapter normalizes REST `mergeable=false` to `conflicting`, null/missing to `unknown`, and true to `mergeable`; `mergeable=true` plus diagnostic `dirty` is contradictory and becomes `unknown`. Other diagnostics such as `blocked` do not override REST true. Core combines that fact with required checks for one `headSha`: only `ready` exits 0, `conflicting|checks-failed` exit 1, and pending/timeout/cancel/network blocking exit 2. Dependency and deterministic platform errors are preserved without degradation.

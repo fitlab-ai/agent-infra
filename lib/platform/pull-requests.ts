@@ -68,6 +68,8 @@ type RemotePullRequest = {
   labels?: Array<string | { name?: string }>;
   assignees?: Array<{ login?: string }>;
   milestone?: { title?: string } | null;
+  mergeable?: boolean | null;
+  mergeable_state?: string | null;
 };
 
 type ClosingPullRequestNode = {
@@ -134,6 +136,12 @@ function normalizePullRequest(remote: RemotePullRequest, repository: string): Pu
   const baseRepository = remote.base?.repo?.full_name;
   if (!Number.isInteger(number) || number <= 0 || !remote.node_id || !remote.html_url ||
       !remote.head?.ref || !remote.head.sha || !headRepository || !remote.base?.ref || !baseRepository) return null;
+  const mergeabilityDetail = remote.mergeable_state?.trim().toLowerCase() || null;
+  const mergeability = remote.mergeable === false
+    ? { state: 'conflicting' as const, detail: mergeabilityDetail }
+    : remote.mergeable === true && mergeabilityDetail !== 'dirty'
+      ? { state: 'mergeable' as const, detail: mergeabilityDetail }
+      : { state: 'unknown' as const, detail: mergeabilityDetail };
   return {
     repository,
     number,
@@ -149,7 +157,8 @@ function normalizePullRequest(remote: RemotePullRequest, repository: string): Pu
     mergeCommitSha: remote.merge_commit_sha || null,
     labels: (remote.labels || []).map((label) => typeof label === 'string' ? label : label.name || '').filter(Boolean).sort(),
     assignees: (remote.assignees || []).map((assignee) => assignee.login || '').filter(Boolean).sort(),
-    milestone: remote.milestone?.title || null
+    milestone: remote.milestone?.title || null,
+    mergeability
   };
 }
 

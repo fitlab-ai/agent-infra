@@ -1,17 +1,17 @@
 ---
 name: watch-pr
 description: >
-  监控 PR 的 required checks 并在失败时自愈。
-  当需要监控 PR 的 required checks 并在失败时自愈时使用。
+  监控 PR readiness，并在 required checks 失败或合并冲突时自愈。
+  当需要持续监控 PR 直到门禁通过且明确可合入时使用。
 ---
 
 # 监控 Pull Request
 
-在 `create-pr` 之后持续监控 PR 的 required CI checks：全绿则引导合入，required check 失败则自动拉日志、本地修复并推送、重新轮询；达修复上限或属非代码层/不可定位失败则停止并向用户求助。平台专属命令集中在 `.agents/rules/pr-checks-commands.md`，本技能正文保持平台无关。
+在 `create-pr` 之后持续监控同一 PR head 的 required checks 与 mergeability。只有 checks 通过且平台明确可合入才进入成功出口；check 失败走既有修复，合并冲突走受限 rebase 自愈，未知或无法安全闭环时 fail-closed。
 
 ## 行为边界 / 关键规则
 
-- 仅监控 + 自愈当前 PR 的 required checks；不做与失败 check 无关的改动。
+- 仅监控 + 自愈当前 PR 的 required checks 与文本合并冲突；不扩展到审批或其他仓库规则。
 - 自愈通过 Git workflow intent 发布修复，但**发布前必须本地跑通相关测试**；修复上限与代码层分类授权不变。
 - 求助出口是「产出后停止」语义：停止本轮、输出阻塞说明、等待用户主动触发，**不**中途提问。
 - 裸数字 / `NN` / `TASK-id` 入参一律按任务短号解析（见 `.agents/rules/task-short-id.md`）；PR 号只走 `--pr <number>` / PR URL / 省略（当前分支），不复用裸数字语法。
@@ -44,21 +44,21 @@ description: >
 - 场景 C（`--pr <number>` 或 PR URL）：直接取该 PR 号为 `{pr#}`；随后按「反查任务」确定 `{task-id}`。
 - 反查任务（场景 A / C）：通过任务上下文/任务查询取得与 `{pr#}` 唯一绑定的 active task。未命中时停止并提示先绑定 PR；typed checks intent 不建立第二套无任务状态机。
 
-### 2. 监控 required checks
+### 2. 监控 PR readiness
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 与 `.agents/rules/pr-checks-commands.md`。
 
-进入本轮时初始化内存列表 `repairCommits=[]`。调用 `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`，按结构化 `checks.state` 分为「全绿」/「失败」/「挂起」，分别进入步骤 7、步骤 3 或步骤 4。
+进入本轮时初始化 `repairCommits=[]` 与 `rebaseAttempts=0`。调用 `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`，只按结构化 `readiness.state` 分流：`ready` 进入步骤 7，`conflicting` 或 `checks-failed` 进入步骤 3，`pending|timed-out|cancelled` 进入步骤 4。
 
-### 3. 失败自愈循环
+### 3. 自愈循环
 
 执行此步骤前，先读取 `reference/monitor-and-heal.md` 的「自愈决策树」与 `.agents/rules/pr-checks-commands.md` 的「解析失败 run id 并拉日志」。
 
-只对可定位代码层失败最小修复并测试；通过后依次调用 `git-workflow commit` 与 `git-workflow push`，仅记录远端复核成功的 SHA。达硬上限或 run 不可定位时转步骤 4。
+`checks-failed` 只对可定位代码层失败做最小修复和测试，再用既有 commit/push intent 发布。`conflicting` 严格执行 reference 的同仓库、干净工作树、head/base 身份、rebase、完整测试与 `git-workflow push-rebased` 精确 lease 流程；上限 2 次。仅记录远端复核成功的 SHA，随后重新监控新 head；任一安全检查失败转步骤 4。
 
 ### 4. 求助出口（产出后停止）
 
-当自愈达上限、失败属非代码层、run id 不可定位、或步骤 2 挂起超时时，停止本轮并向用户汇总：阻塞原因、已尝试的修复（含每次修复 commit）、相关失败 job 与 run/log 链接（报告结构见 `reference/monitor-and-heal.md` 的「求助报告模板」）。**不**渲染下一步命令，等待用户裁定。随后在任务锚定路径下执行步骤 5/6 记录本轮结果。
+当自愈达上限、失败属非代码层、run id 不可定位、readiness 未知/超时，或 rebase、测试、远端身份、精确 lease 任一无法闭环时，停止本轮并按 reference 汇总 PR head/base、冲突文件、远端事实、测试与尝试记录。**不**渲染下一步命令。随后在任务锚定路径下执行步骤 5/6。
 
 ### 5. 更新任务状态
 
@@ -77,7 +77,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 - **不改** `pr_status`（保持 `created`）与 `current_step`
 - **追加**到 `## 活动日志`（不要覆盖之前的记录；`{N}` = 本任务已有 Watch PR 条目数 + 1）：
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {全绿：all required checks green, repair commits: {k} [{sha 摘要}] / 阻塞：blocked: {简述}}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {成功：PR ready, repair commits: {k} [{sha 摘要}] / 阻塞：blocked: {简述}}
   ```
 
 ### 6. 完成校验
@@ -104,7 +104,7 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 > 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
 按场景输出：
-- 「全绿」+ 任务锚定：说明所有 required checks 已通过，并只按本轮是否产生修复 commit 渲染一个出口（`{task-ref}` 替换为短号）：
+- `ready` + 任务锚定：说明 required checks 已通过且当前 head 明确可合入，并只按本轮是否产生修复 commit 渲染一个出口（`{task-ref}` 替换为短号）：
 
   `repairCommits.length == 0`：
 
@@ -129,8 +129,8 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 ## 完成检查清单
 
 - [ ] 解析出目标 PR（及可能的任务上下文）
-- [ ] 完成 required checks 监控，得到全绿 / 阻塞结论
-- [ ] 自愈仅限可定位的代码层失败，且推送前本地测试通过、未超修复上限
+- [ ] 完成 readiness 监控，只有 checks 通过且明确可合入才得到成功结论
+- [ ] check / rebase 自愈均通过本地测试和对应安全 intent，且未超修复上限
 - [ ] 任务锚定路径：更新了 task.md 并追加 Watch PR 的 Activity Log
 - [ ] 任务锚定路径：完成校验通过
 - [ ] 已通过统一 helper 渲染已选场景的下一步命令

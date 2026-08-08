@@ -1,17 +1,17 @@
 ---
 name: watch-pr
 description: >
-  Watch a PR's required checks and self-heal on failure.
-  Use when you need to monitor a PR's required checks and auto-recover on failure.
+  Watch PR readiness and self-heal required-check failures or merge conflicts.
+  Use when a PR must be monitored until checks pass and it is explicitly mergeable.
 ---
 
 # Watch Pull Request
 
-After `create-pr`, continuously watch the PR's required CI checks: when everything is green, guide toward merge; when a required check fails, pull the logs, fix and push locally, then re-poll; when the fix attempt limit is reached or the failure is non-code / unlocatable, stop and ask the user for help. Platform-specific commands live in `.agents/rules/pr-checks-commands.md`; this skill body stays platform-agnostic.
+After `create-pr`, continuously watch required checks and mergeability for the same PR head. Only passed checks plus explicit mergeability may reach success; check failures use the existing repair path, conflicts use constrained rebase healing, and unknown or unsafe states fail closed.
 
 ## Behavior Boundaries / Key Rules
 
-- Only watch + self-heal the current PR's required checks; make no changes unrelated to the failing check.
+- Only self-heal the current PR's required checks and text merge conflicts; do not add approval or repository-rule readiness dimensions.
 - Self-heal publishes through Git workflow intents, but **affected tests must pass first**; the attempt cap and code-layer authorization remain unchanged.
 - The help exit is "produce-then-stop": end this round, output the blocker explanation, and wait for the user to trigger the next step — **never** ask mid-flow.
 - Bare numbers / `NN` / `TASK-id` arguments are always resolved as task short ids (see `.agents/rules/task-short-id.md`); a PR number is passed only via `--pr <number>` / a PR URL / omission (current branch), never reusing the bare-number syntax.
@@ -44,21 +44,21 @@ Resolve the target PR number `{pr#}` and an optional `{task-id}` via these deter
 - Scenario C (`--pr <number>` or a PR URL): use that PR number directly as `{pr#}`; then determine `{task-id}` via "Reverse-lookup task".
 - Reverse-lookup task (scenarios A / C): use task context/query capabilities to find the unique active task bound to `{pr#}`. If none exists, stop and request binding first; the typed checks intent does not create a second taskless state machine.
 
-### 2. Watch Required Checks
+### 2. Watch PR Readiness
 
 Before running this step, read `reference/monitor-and-heal.md` and `.agents/rules/pr-checks-commands.md`.
 
-Initialize the in-memory list `repairCommits=[]` for this run. Run `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`, then route its structured `checks.state` to the all-green, failure, or pending path.
+Initialize `repairCommits=[]` and `rebaseAttempts=0`. Run `agent-infra-internal platform-checks watch {task-id} --interval-seconds 30 --deadline-seconds 1800`, then route only by `readiness.state`: `ready` to step 7, `conflicting|checks-failed` to step 3, and `pending|timed-out|cancelled` to step 4.
 
-### 3. Failure Self-Heal Loop
+### 3. Self-Heal Loop
 
 Before running this step, read the "Self-Heal Decision Tree" of `reference/monitor-and-heal.md` and "Resolve a Failing Run id and Pull Logs" of `.agents/rules/pr-checks-commands.md`.
 
-For a locatable code-layer failure, make the minimum fix and run relevant tests. Then call `git-workflow commit` and `git-workflow push`; append only a remotely verified SHA to `repairCommits`.
+For `checks-failed`, minimally fix a locatable code-layer failure, test, and publish through the existing commit/push intents. For `conflicting`, follow the reference's same-repository, clean-tree, head/base identity, rebase, full-test, and `git-workflow push-rebased` exact-lease flow, capped at two attempts. Append only remotely verified SHAs, then watch the new head again; any failed safety check goes to step 4.
 
 ### 4. Help Exit (Produce-Then-Stop)
 
-When self-heal hits the cap, the failure is non-code, the run id is unlocatable, or step 2 times out while pending, stop this round and summarize for the user: the blocker, the fixes attempted (including each fix commit), and the relevant failing job and run/log links (report shape in the "Help report template" of `reference/monitor-and-heal.md`). Do **not** render a next-step command; wait for the user. Then, on the task-anchored path, run steps 5/6 to record this round's outcome.
+When healing hits a cap, a check failure is non-code/unlocatable, readiness stays unknown, or rebase, tests, remote identity, or exact lease cannot close safely, stop and report the PR head/base, conflict paths, remote facts, tests, and attempts using the reference template. Do **not** render a next-step command. Then run steps 5/6 on the task-anchored path.
 
 ### 5. Update Task State
 
@@ -77,7 +77,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
 - **Do not change** `pr_status` (keep `created`) or `current_step`
 - **Append** to `## Activity Log` (do not overwrite prior entries; `{N}` = number of existing Watch PR entries for this task + 1):
   ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {green: all required checks green, repair commits: {k} [{SHA summary}] / blocked: blocked: {summary}}
+  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Watch PR (Round {N})** by {agent} — {success: PR ready, repair commits: {k} [{SHA summary}] / blocked: blocked: {summary}}
   ```
 
 ### 6. Verification Gate
@@ -104,7 +104,7 @@ Keep the gate output in your reply as the verification evidence. Without current
 > Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
 Output per scenario:
-- "All green" + task-anchored: state that all required checks passed, then render exactly one exit based on whether this run created repair commits (`{task-ref}` becomes the short id):
+- `ready` + task-anchored: state that required checks passed and the current head is explicitly mergeable, then render exactly one exit based on whether this run created repair commits (`{task-ref}` becomes the short id):
 
   `repairCommits.length == 0`:
 
@@ -129,8 +129,8 @@ Populate `{next-step-commands}` for this scenario by running `agent-infra-intern
 ## Completion Checklist
 
 - [ ] Resolved the target PR (and any task context)
-- [ ] Completed required-checks watching with an all-green / blocked conclusion
-- [ ] Self-heal limited to locatable code-layer failures, with local tests passing before push and within the fix cap
+- [ ] Completed readiness watching; success requires passed checks and explicit mergeability
+- [ ] Check/rebase healing passed local tests and its safety intent within the attempt cap
 - [ ] Task-anchored path: updated task.md and appended the Watch PR Activity Log entry
 - [ ] Task-anchored path: verification gate passed
 - [ ] Rendered the selected next-step commands through the shared helper

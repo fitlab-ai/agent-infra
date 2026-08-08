@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { commitExplicitPaths, inspectGitWorkflow, pushGitRefs } from '../../../lib/git/workflow.ts';
+import { commitExplicitPaths, inspectGitWorkflow, pushGitRefs, pushRebasedBranch } from '../../../lib/git/workflow.ts';
 
 function fixture(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-'));
@@ -62,4 +62,87 @@ test('inspect and push expose recoverable per-ref outcomes', () => {
   assert.equal(result.operations.length, 2);
   assert.deepEqual(calls.filter((call) => call[0] === 'push'), [['push', 'origin', 'main']]);
   assert.deepEqual(calls.filter((call) => call[0] === 'ls-remote'), [['ls-remote', '--exit-code', 'origin', 'refs/heads/main']]);
+});
+
+test('pushRebasedBranch uses an exact lease after validating local and remote identities', () => {
+  const oldHead = 'a'.repeat(40);
+  const newHead = 'b'.repeat(40);
+  const baseHead = 'c'.repeat(40);
+  const calls: string[][] = [];
+  let remoteHead = oldHead;
+  const result = pushRebasedBranch({
+    cwd: '/repo', remote: 'origin', branch: 'feature', expectedOldHead: oldHead,
+    newHead, baseBranch: 'main', expectedBaseHead: baseHead
+  }, (args: readonly string[]) => {
+    calls.push([...args]);
+    if (args[0] === 'rev-parse' && args[1] === 'HEAD') return { status: 0, stdout: `${newHead}\n`, stderr: '' };
+    if (args[0] === 'branch') return { status: 0, stdout: 'feature\n', stderr: '' };
+    if (args[0] === 'status') return { status: 0, stdout: '', stderr: '' };
+    if (args[0] === 'rev-parse' && args[1] === '--git-path') return { status: 0, stdout: '/repo/.git/rebase-merge\n', stderr: '' };
+    if (args[0] === 'ls-remote') {
+      const sha = args.at(-1) === 'refs/heads/main' ? baseHead : remoteHead;
+      return { status: 0, stdout: `${sha}\t${args.at(-1)}\n`, stderr: '' };
+    }
+    if (args[0] === 'merge-base') return { status: 0, stdout: '', stderr: '' };
+    if (args[0] === 'push') { remoteHead = newHead; return { status: 0, stdout: '', stderr: '' }; }
+    return { status: 1, stdout: '', stderr: 'unexpected' };
+  });
+  assert.equal(result.status, 'applied');
+  assert.deepEqual(calls.find((call) => call[0] === 'push'), [
+    'push', `--force-with-lease=refs/heads/feature:${oldHead}`, 'origin', `${newHead}:refs/heads/feature`
+  ]);
+});
+
+test('pushRebasedBranch rejects stale remote facts without pushing', () => {
+  const oldHead = 'a'.repeat(40);
+  const newHead = 'b'.repeat(40);
+  const baseHead = 'c'.repeat(40);
+  const calls: string[][] = [];
+  const result = pushRebasedBranch({
+    cwd: '/repo', remote: 'origin', branch: 'feature', expectedOldHead: oldHead,
+    newHead, baseBranch: 'main', expectedBaseHead: baseHead
+  }, (args: readonly string[]) => {
+    calls.push([...args]);
+    if (args[0] === 'rev-parse' && args[1] === 'HEAD') return { status: 0, stdout: `${newHead}\n`, stderr: '' };
+    if (args[0] === 'branch') return { status: 0, stdout: 'feature\n', stderr: '' };
+    if (args[0] === 'status') return { status: 0, stdout: '', stderr: '' };
+    if (args[0] === 'rev-parse' && args[1] === '--git-path') return { status: 0, stdout: '/repo/.git/rebase-merge\n', stderr: '' };
+    if (args[0] === 'ls-remote') return { status: 0, stdout: `${'d'.repeat(40)}\t${args.at(-1)}\n`, stderr: '' };
+    return { status: 1, stdout: '', stderr: '' };
+  });
+  assert.equal(result.error?.code, 'GIT_REMOTE_HEAD_MISMATCH');
+  assert.equal(calls.some((call) => call[0] === 'push'), false);
+});
+
+test('pushRebasedBranch fails closed at every local, base, ancestry, push, and verification boundary', () => {
+  const oldHead = 'a'.repeat(40);
+  const newHead = 'b'.repeat(40);
+  const baseHead = 'c'.repeat(40);
+  const input = { cwd: '/repo', remote: 'origin', branch: 'feature', expectedOldHead: oldHead, newHead, baseBranch: 'main', expectedBaseHead: baseHead };
+  assert.equal(pushRebasedBranch({ ...input, newHead: 'short' }).error?.code, 'GIT_REBASED_INPUT_INVALID');
+
+  const runCase = (stage: 'dirty' | 'identity' | 'base' | 'ancestor' | 'push' | 'verify') => {
+    return pushRebasedBranch(input, (args: readonly string[]) => {
+    if (args[0] === 'rev-parse' && args[1] === 'HEAD') return { status: 0, stdout: `${stage === 'identity' ? oldHead : newHead}\n`, stderr: '' };
+    if (args[0] === 'branch') return { status: 0, stdout: 'feature\n', stderr: '' };
+    if (args[0] === 'status') return { status: 0, stdout: stage === 'dirty' ? '?? local.txt\n' : '', stderr: '' };
+    if (args[0] === 'rev-parse') return { status: 1, stdout: '', stderr: '' };
+    if (args[0] === 'ls-remote') {
+      const isBase = args.at(-1) === 'refs/heads/main';
+      const value = isBase ? stage === 'base' ? 'd'.repeat(40) : baseHead
+        : oldHead;
+      return { status: 0, stdout: `${value}\t${args.at(-1)}\n`, stderr: '' };
+    }
+    if (args[0] === 'merge-base') return { status: stage === 'ancestor' ? 1 : 0, stdout: '', stderr: '' };
+    if (args[0] === 'push') return { status: stage === 'push' ? 1 : 0, stdout: '', stderr: stage === 'push' ? 'rejected' : '' };
+    return { status: 1, stdout: '', stderr: '' };
+    });
+  };
+
+  assert.equal(runCase('dirty').error?.code, 'GIT_LOCAL_STATE_UNSAFE');
+  assert.equal(runCase('identity').error?.code, 'GIT_LOCAL_IDENTITY_MISMATCH');
+  assert.equal(runCase('base').error?.code, 'GIT_REMOTE_BASE_MISMATCH');
+  assert.equal(runCase('ancestor').error?.code, 'GIT_REBASED_ANCESTOR_MISMATCH');
+  assert.equal(runCase('push').error?.code, 'GIT_REBASED_PUSH_REJECTED');
+  assert.equal(runCase('verify').error?.code, 'GIT_REBASED_VERIFY_FAILED');
 });

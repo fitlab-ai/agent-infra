@@ -44,3 +44,37 @@ test('git-workflow CLI commits explicit paths and verifies remote refs', () => {
     fs.rmSync(remote, { recursive: true, force: true });
   }
 });
+
+test('git-workflow push-rebased updates a rewritten branch with an exact old-head lease', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-rebase-cli-'));
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-rebase-remote-'));
+  try {
+    execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Codex'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: root });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: root });
+    fs.writeFileSync(path.join(root, 'base.txt'), 'base\n');
+    execFileSync('git', ['add', 'base.txt'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: root });
+    const baseHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    execFileSync('git', ['switch', '-qc', 'feature'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'feature.txt'), 'one\n');
+    execFileSync('git', ['add', 'feature.txt'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'feature one'], { cwd: root });
+    execFileSync('git', ['push', '-q', 'origin', 'feature'], { cwd: root });
+    const oldHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    execFileSync('git', ['commit', '--amend', '-qm', 'feature rewritten'], { cwd: root });
+    const newHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    const input = path.join(remote, 'push-rebased.json');
+    fs.writeFileSync(input, JSON.stringify({ remote: 'origin', branch: 'feature', expectedOldHead: oldHead, newHead, baseBranch: 'main', expectedBaseHead: baseHead }));
+    const pushed = run(root, ['push-rebased', '--input', input]);
+    assert.equal(pushed.status, 0, `${pushed.stderr}\n${pushed.stdout}`);
+    assert.equal(JSON.parse(pushed.stdout).status, 'applied');
+    assert.equal(execFileSync('git', ['ls-remote', 'origin', 'refs/heads/feature'], { cwd: root, encoding: 'utf8' }).split(/\s/)[0], newHead);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  }
+});
