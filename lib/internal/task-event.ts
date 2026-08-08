@@ -2,7 +2,7 @@ import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.t
 import { applyTaskEvent, eventCatalog } from '../task/events.ts';
 import type { TaskEventRequest, Verdict } from '../task/events.ts';
 
-const USAGE = `Usage: agent-infra-internal task-event <N | TASK-id> <event> --agent <agent> [event options] [--dry-run]
+const USAGE = `Usage: agent-infra-internal task-event <N | TASK-id> <event> --agent <agent> [event options] [--orchestrated] [--dry-run]
 
 Apply one closed-set task lifecycle event and print a structured JSON result.
 Events: ${eventCatalog.join(', ')}
@@ -30,6 +30,10 @@ function taskEvent(args: string[] = []): void {
   const seen = new Set<string>();
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
+    if (flag === '--orchestrated') {
+      if (seen.has(flag)) { usageFailure(`duplicate option '${flag}'`); return; }
+      seen.add(flag); request.orchestrated = true; continue;
+    }
     if (flag === '--dry-run') {
       if (seen.has(flag)) { usageFailure(`duplicate option '${flag}'`); return; }
       seen.add(flag); request.dryRun = true; continue;

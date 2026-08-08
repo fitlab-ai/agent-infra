@@ -1,6 +1,6 @@
 import { finalizeReviewSummary } from '../task/review-finalization.ts';
 
-const USAGE = 'Usage: agent-infra-internal task-review <task-ref> finalize-summary --stage <analysis|plan|code> --artifact <review-*.md> [--dry-run]\n';
+const USAGE = 'Usage: agent-infra-internal task-review <task-ref> finalize-summary --stage <analysis|plan|code> --artifact <review-*.md> [--orchestrated] [--dry-run]\n';
 
 function failUsage(message: string): void {
   process.stdout.write(`${JSON.stringify({
@@ -29,10 +29,11 @@ function taskReview(args: string[] = []): void {
   let stage = '';
   let artifact = '';
   let dryRun = false;
+  let orchestrated = false;
   const seen = new Set<string>();
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
-    if (!['--stage', '--artifact', '--dry-run'].includes(flag)) {
+    if (!['--stage', '--artifact', '--orchestrated', '--dry-run'].includes(flag)) {
       failUsage(`unknown option '${flag}'`);
       return;
     }
@@ -43,6 +44,10 @@ function taskReview(args: string[] = []): void {
     seen.add(flag);
     if (flag === '--dry-run') {
       dryRun = true;
+      continue;
+    }
+    if (flag === '--orchestrated') {
+      orchestrated = true;
       continue;
     }
     const value = args[++index];
@@ -57,7 +62,7 @@ function taskReview(args: string[] = []): void {
     failUsage("options '--stage' and '--artifact' are required");
     return;
   }
-  const result = finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, dryRun });
+  const result = finalizeReviewSummary({ taskRef: args[0]!, stage, artifact, orchestrated, dryRun });
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
 }

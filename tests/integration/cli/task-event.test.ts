@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { applyTaskEvent } from '../../../lib/task/events.ts';
 import { prepareOrchestrationDelegation } from '../../../lib/task/orchestration.ts';
 
 function fixture(step = 'requirement-analysis-review') {
@@ -264,9 +265,123 @@ test('completed event validates orchestration provenance before writing task sta
   ]).status, 0);
 
   const before = fs.readFileSync(f.file);
-  const completed = run(f.root, [f.id, 'plan.completed', '--agent', 'claude-code', '--artifact', 'plan.md']);
+  const completed = run(f.root, [
+    f.id, 'plan.completed', '--agent', 'claude-code', '--artifact', 'plan.md', '--orchestrated'
+  ]);
   assert.equal(completed.status, 1);
   assert.equal(JSON.parse(completed.stdout).error.code, 'EVENT_TRANSITION_INVALID');
+  assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('standalone completion ignores a historical orchestration run without a pending delegation', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+  fs.writeFileSync(path.join(f.dir, 'orchestration.json'), `${JSON.stringify({
+    schemaVersion: 2,
+    status: 'paused',
+    pendingDelegation: null
+  }, null, 2)}\n`);
+  const runBefore = fs.readFileSync(path.join(f.dir, 'orchestration.json'));
+
+  const completed = run(f.root, [
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md'
+  ]);
+
+  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+  assert.equal(JSON.parse(completed.stdout).status, 'applied');
+  assert.deepEqual(fs.readFileSync(path.join(f.dir, 'orchestration.json')), runBefore);
+});
+
+test('standalone completion fails before writing when a delegation is pending', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+  const runPath = path.join(f.dir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    schemaVersion: 2,
+    status: 'running',
+    pendingDelegation: { status: 'prepared' }
+  }, null, 2)}\n`);
+  const taskBefore = fs.readFileSync(f.file);
+  const runBefore = fs.readFileSync(runPath);
+
+  const completed = run(f.root, [
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md'
+  ]);
+
+  assert.equal(completed.status, 1);
+  assert.match(JSON.parse(completed.stdout).error.message, /ORCHESTRATION_STANDALONE_BUSY/);
+  assert.deepEqual(fs.readFileSync(f.file), taskBefore);
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+});
+
+test('orchestrated completion advances one matching activated delegation', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+  const runPath = path.join(f.dir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    schemaVersion: 2,
+    taskId: f.id,
+    runId: 'run-1',
+    status: 'running',
+    pendingDelegation: {
+      id: 'receipt-1', taskId: f.id, runId: 'run-1', role: 'executor', stage: 'plan', round: 1,
+      artifact: 'plan.md', client: 'codex', status: 'activated'
+    }
+  }, null, 2)}\n`);
+
+  const completed = run(f.root, [
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', '--orchestrated'
+  ]);
+
+  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+  assert.equal(JSON.parse(completed.stdout).status, 'applied');
+  assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pendingDelegation.status, 'stage-completed');
+});
+
+test('orchestrated completion reports a distinct partial-write error when the run commit fails', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+  const runPath = path.join(f.dir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    schemaVersion: 2,
+    taskId: f.id,
+    runId: 'run-1',
+    status: 'running',
+    pendingDelegation: {
+      id: 'receipt-1', taskId: f.id, runId: 'run-1', role: 'executor', stage: 'plan', round: 1,
+      artifact: 'plan.md', client: 'codex', status: 'activated'
+    }
+  }, null, 2)}\n`);
+  const taskBefore = fs.readFileSync(f.file);
+
+  const result = applyTaskEvent({
+    taskRef: f.id,
+    event: 'plan.completed',
+    agent: 'codex',
+    artifact: 'plan.md',
+    orchestrated: true
+  }, {
+    repoRoot: f.root,
+    commitOrchestrationCompletion: () => { throw Object.assign(new Error('EIO'), { code: 'EIO' }); }
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'EVENT_ORCHESTRATION_COMMIT_FAILED');
+  assert.notDeepEqual(fs.readFileSync(f.file), taskBefore);
+  assert.equal(JSON.parse(fs.readFileSync(runPath, 'utf8')).pendingDelegation.status, 'activated');
+});
+
+test('task-event only accepts --orchestrated for lifecycle completion events', () => {
+  const f = fixture();
+  const before = fs.readFileSync(f.file);
+  const result = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--orchestrated']);
+
+  assert.equal(result.status, 1);
+  assert.equal(JSON.parse(result.stdout).error.code, 'EVENT_PAYLOAD_INVALID');
   assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
@@ -318,6 +433,29 @@ test('dry-run returns planned without changing task bytes for start and completi
   assert.equal(completedResult.status, 'planned');
   assert.equal(completedResult.operations.length, 4);
   assert.deepEqual(fs.readFileSync(f.file), beforeCompletion);
+});
+
+test('orchestrated completion dry-run reports a provenance mismatch without pausing the run', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
+  fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
+  const runPath = path.join(f.dir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    schemaVersion: 2,
+    status: 'running',
+    pendingDelegation: { status: 'prepared' }
+  }, null, 2)}\n`);
+  const taskBefore = fs.readFileSync(f.file);
+  const runBefore = fs.readFileSync(runPath);
+
+  const completed = run(f.root, [
+    f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', '--orchestrated', '--dry-run'
+  ]);
+
+  assert.equal(completed.status, 1);
+  assert.match(JSON.parse(completed.stdout).error.message, /ORCHESTRATION_PROVENANCE_MISMATCH/);
+  assert.deepEqual(fs.readFileSync(f.file), taskBefore);
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
 });
 
 test('task-event timestamps keep an ASCII offset in negative-offset timezones', () => {

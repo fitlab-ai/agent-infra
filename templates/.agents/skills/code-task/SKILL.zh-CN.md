@@ -9,6 +9,7 @@ description: >
 # 编码任务
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`antigravity`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`antigravity-cli`→`antigravity`）或人工例外 `human`。
 
+若入口业务操作数包含 `--orchestrated`，绑定 `{execution-flag}` = `--orchestrated` 并原样转发给 completed 事件；否则绑定为空。不得从 `orchestration.json`、环境变量或历史产物推断该标记。
 
 根据已批准的技术方案编码任务，并产出 `code.md` 或 `code-r{N}.md`。本技能支持初次实现、基于 `review-code` 反馈的修复，以及人工裁决驱动实现三种模式。
 
@@ -152,9 +153,9 @@ echo "$result"
 - 审查 `## 需求` 段落，仅把本轮已由代码实现且有测试通过支撑的条目从 `- [ ]` 勾为 `- [x]`
 - 产物链接、阶段与完成日志由 completed 事件统一登记
 - 完成业务内容更新后声明完成事件：
-  - 初次实现：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`
-  - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}`
-  - 裁决模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --implementation-input {input-id} --files-modified {n} --tests-passed {n}`
+  - 初次实现：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --files-modified {n} --tests-passed {n} {execution-flag}`
+  - 修复模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}`
+  - 裁决模式：`agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --implementation-input {input-id} --files-modified {n} --tests-passed {n} {execution-flag}`
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则记录 warning 并继续；Issue 元数据边界仍见 `.agents/rules/issue-sync.md`）：
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`

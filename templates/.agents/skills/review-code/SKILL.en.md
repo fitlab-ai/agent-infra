@@ -9,6 +9,7 @@ description: >
 # Code Review
 > `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`antigravity`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `antigravity-cli`->`antigravity`), or the `human` manual exception.
 
+If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to both the summary finalizer and completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts.
 
 Review the latest code round and produce `review-code.md` or `review-code-r{N}.md`.
 
@@ -97,7 +98,7 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
 Update task.md:
 - After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. Do not scan ids or edit ledger rows
-- After all ledger writes, call `agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact}` exactly once
+- After all ledger writes, call `agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact} {execution-flag}` exactly once
 
   Bind and reuse this structured mapping from that one response:
 
@@ -110,7 +111,7 @@ Update task.md:
   The intent atomically finalizes the report summary and returns the same ledger snapshot. Do not call `stage-status`, replace placeholders manually, or rescan the finding list. If finalization fails or a response field is missing, stop before the completion event. Derive the verdict and next-step branch from the same response's `stageStatus.canAdvance`; only `canAdvance=true` permits Approved
 - Only when `canAdvance=true`, the verdict is Approved, and `T == R^{tree}`, write `last_reviewed_commit: {R}`. Clear an old value for an Approved snapshot with uncommitted differences; otherwise preserve the existing value and do not advance it
 - For an Approved exit, collect PR and required-checks facts as defined in `reference/output-templates.md`: route uncommitted/unpushed code to `commit`, no PR to `create-pr` (except no-PR flow), non-terminal checks to `watch-pr`, and route to `complete-task` only when `HEAD == last_reviewed_commit == PR head` with checks `passed|no-required`; never route by review round alone
-- After handling `last_reviewed_commit`, run `agent-infra-internal task-event {task-id} review-code.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n}`
+- After handling `last_reviewed_commit`, run `agent-infra-internal task-event {task-id} review-code.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`
 
 Always include the `Manual-validation: {n}` field in the done log, including when it is 0.
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.

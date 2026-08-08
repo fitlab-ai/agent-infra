@@ -8,7 +8,8 @@ import { parseLedger, summarizeLedgerStage, validateLedgerRows } from './ledger.
 import type { LedgerStageStatus, ReviewStage } from './ledger.ts';
 import { finalizeReviewSummaryContent } from './review-artifacts.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
-import { validateOrchestrationStage } from './orchestration.ts';
+import { validateLifecycleExecution } from './lifecycle-execution.ts';
+import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import type { ResolveTaskRefErrorCode } from './resolve-ref.ts';
 
 type ReviewFinalizationErrorCode =
@@ -31,6 +32,7 @@ type ReviewFinalizationRequest = {
   taskRef: string;
   stage: string;
   artifact: string;
+  orchestrated?: boolean;
   dryRun?: boolean;
 };
 type ReviewFinalizationResult = {
@@ -113,7 +115,7 @@ function cleanupTemp(fileSystem: ReviewFileSystem, tempPath: string): void {
   }
 }
 
-function finalizeReviewSummary(
+function finalizeReviewSummaryUnlocked(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
 ): ReviewFinalizationResult {
@@ -167,17 +169,21 @@ function finalizeReviewSummary(
       resolved.taskId
     );
   }
-  const provenance = validateOrchestrationStage(request.taskRef, {
-    stage: spec.family,
-    round: parsedArtifact.round,
-    artifact: request.artifact,
-    role: 'reviewer'
+  const execution = validateLifecycleExecution(request.taskRef, {
+    mode: request.orchestrated ? 'orchestrated' : 'standalone',
+    identity: {
+      stage: spec.family,
+      round: parsedArtifact.round,
+      artifact: request.artifact,
+      role: 'reviewer'
+    },
+    dryRun: request.dryRun
   }, { repoRoot: options.repoRoot });
-  if (provenance.status === 'failed' || provenance.status === 'paused') {
+  if (!execution.ok) {
     return failed(
       request,
       'REVIEW_PROVENANCE_INVALID',
-      provenance.error?.message ?? provenance.run?.pause?.message ?? 'orchestration provenance validation failed',
+      `${execution.error?.code ?? 'ORCHESTRATION_PROVENANCE_MISMATCH'}: ${execution.error?.message ?? 'orchestration provenance validation failed'}`,
       resolved.taskId
     );
   }
@@ -263,6 +269,31 @@ function finalizeReviewSummary(
     operations,
     error: null
   };
+}
+
+function finalizeReviewSummary(
+  request: ReviewFinalizationRequest,
+  options: ReviewFinalizationOptions = {}
+): ReviewFinalizationResult {
+  if (request.dryRun) return finalizeReviewSummaryUnlocked(request, options);
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return finalizeReviewSummaryUnlocked(request, options);
+  try {
+    return withTaskExecutionLock(
+      resolved.repoRoot,
+      resolved.taskId,
+      'task-review.finalize-summary',
+      () => finalizeReviewSummaryUnlocked(request, options)
+    );
+  } catch (error) {
+    if (!(error instanceof TaskExecutionLockError)) throw error;
+    return failed(
+      request,
+      'REVIEW_PROVENANCE_INVALID',
+      `${error.code}: ${error.message}`,
+      resolved.taskId
+    );
+  }
 }
 
 export { finalizeReviewSummary };

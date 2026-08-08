@@ -21,7 +21,10 @@ import type { ReviewStage } from './ledger.ts';
 import { parseReviewSummary } from './review-artifacts.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { findSectionHeading } from './sections.ts';
-import { completeOrchestrationStage, validateOrchestrationStage } from './orchestration.ts';
+import { validateLifecycleExecution } from './lifecycle-execution.ts';
+import { commitOrchestrationStageCompletion } from './orchestration.ts';
+import type { OrchestrationStageCompletion } from './orchestration.ts';
+import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from './write.ts';
 
@@ -40,15 +43,19 @@ type TaskEventErrorCode =
   | 'EVENT_UNKNOWN' | 'EVENT_PAYLOAD_INVALID' | 'EVENT_TRANSITION_INVALID'
   | 'EVENT_LOG_MISSING' | 'EVENT_START_MISSING' | 'EVENT_ALREADY_COMPLETED'
   | 'EVENT_LOG_CONFLICT' | 'EVENT_ARTIFACT_CONFLICT' | 'EVENT_FINDING_COUNT_MISMATCH'
+  | 'EVENT_ORCHESTRATION_COMMIT_FAILED'
   | ArtifactErrorCode | TaskWriteErrorCode;
 type TaskEventRequest = {
-  taskRef: string; event: TaskEventName | string; agent: string; dryRun?: boolean;
+  taskRef: string; event: TaskEventName | string; agent: string; dryRun?: boolean; orchestrated?: boolean;
   round?: number; question?: number; artifact?: string; fixFor?: string; implementationInput?: string;
   verdict?: Verdict; blockers?: number; major?: number; minor?: number;
   manualValidation?: number; filesModified?: number; testsPassed?: number;
   summaryResult?: string;
 };
 type TaskEventError = { code: TaskEventErrorCode; message: string };
+type TaskEventOptions = TaskWriteOptions & {
+  commitOrchestrationCompletion?: (plan: OrchestrationStageCompletion) => void;
+};
 type TaskEventResult = {
   status: 'planned' | 'applied' | 'no-op' | 'failed'; changed: boolean;
   event: string; requestRef: string; taskId: string | null; taskMdPath: string | null;
@@ -64,17 +71,17 @@ const BASE_FIELDS = new Set(['taskRef', 'event', 'agent', 'dryRun']);
 const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] }> = {
   'analyze.started': { optional: ['round'] },
   'analyze.awaiting-input': { required: ['question'] },
-  'analyze.completed': { required: ['artifact'], optional: ['round'] },
+  'analyze.completed': { required: ['artifact'], optional: ['round', 'orchestrated'] },
   'review-analysis.started': { optional: ['round'] },
-  'review-analysis.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round'] },
+  'review-analysis.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
   'plan.started': { optional: ['round'] },
-  'plan.completed': { required: ['artifact'], optional: ['round'] },
+  'plan.completed': { required: ['artifact'], optional: ['round', 'orchestrated'] },
   'review-plan.started': { optional: ['round'] },
-  'review-plan.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round'] },
+  'review-plan.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
   'code.started': { optional: ['round', 'fixFor', 'implementationInput'] },
-  'code.completed': { required: ['artifact'], optional: ['round', 'fixFor', 'implementationInput', 'filesModified', 'testsPassed', 'blockers', 'major', 'minor', 'manualValidation'] },
+  'code.completed': { required: ['artifact'], optional: ['round', 'fixFor', 'implementationInput', 'filesModified', 'testsPassed', 'blockers', 'major', 'minor', 'manualValidation', 'orchestrated'] },
   'review-code.started': { optional: ['round'] },
-  'review-code.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round'] },
+  'review-code.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
   'manual-validation.started': { optional: ['round'] },
   'manual-validation.completed': { required: ['artifact', 'summaryResult'], optional: ['round'] }
 };
@@ -261,7 +268,7 @@ function openStartedIdentity(rows: ReturnType<typeof pairEntries>, family: Event
   return matches.length === 1 ? matches[0] : matches.length > 1 ? { conflict: true as const } : null;
 }
 
-function applyTaskEvent(request: TaskEventRequest, options: TaskWriteOptions = {}): TaskEventResult {
+function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
   const invalid = validateTaskEventRequest(request);
   if (invalid) return failed(request, invalid);
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
@@ -334,20 +341,27 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskWriteOptions = {
     completedArtifact?.path ?? null
   );
   if (findingCountError) return failed(normalized, findingCountError, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-  if (eventIdentity.phase === 'completed' && !normalized.dryRun && eventIdentity.family !== 'manual-validation') {
+  let orchestrationCompletion: OrchestrationStageCompletion | null = null;
+  if (eventIdentity.phase === 'completed' && eventIdentity.family !== 'manual-validation') {
     const orchestrationStage = eventIdentity.family === 'analyze' ? 'analysis' : eventIdentity.family;
-    const provenance = validateOrchestrationStage(normalized.taskRef, {
-      stage: orchestrationStage,
-      round: normalized.round!,
-      artifact: normalized.artifact!,
-      role: eventIdentity.family.startsWith('review-') ? 'reviewer' : 'executor'
+    const execution = validateLifecycleExecution(normalized.taskRef, {
+      mode: normalized.orchestrated ? 'orchestrated' : 'standalone',
+      identity: {
+        stage: orchestrationStage,
+        round: normalized.round!,
+        artifact: normalized.artifact!,
+        role: eventIdentity.family.startsWith('review-') ? 'reviewer' : 'executor'
+      },
+      agent: normalized.agent,
+      dryRun: normalized.dryRun
     }, { repoRoot: options.repoRoot });
-    if (provenance.status === 'failed' || provenance.status === 'paused') {
+    if (!execution.ok) {
       return failed(normalized, {
         code: 'EVENT_TRANSITION_INVALID',
-        message: provenance.error?.message ?? provenance.run?.pause?.message ?? 'orchestration provenance validation failed'
+        message: `${execution.error?.code ?? 'ORCHESTRATION_PROVENANCE_MISMATCH'}: ${execution.error?.message ?? 'orchestration provenance validation failed'}`
       }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
     }
+    orchestrationCompletion = execution.completionPlan;
   }
   let metadata;
   try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
@@ -384,19 +398,25 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskWriteOptions = {
   mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body });
   const result = writeTask({ taskRef: normalized.taskRef, expectedState: 'active', dryRun: normalized.dryRun, mutations }, { ...options, metadataProvider: () => metadata });
   if (result.status === 'failed') return failed(normalized, result.error, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
-  if (eventIdentity.phase === 'completed' && !normalized.dryRun && eventIdentity.family !== 'manual-validation') {
-    const orchestrationStage = eventIdentity.family === 'analyze' ? 'analysis' : eventIdentity.family;
-    const orchestration = completeOrchestrationStage(normalized.taskRef, {
-      stage: orchestrationStage,
-      round: normalized.round!,
-      artifact: normalized.artifact!,
-      agent: normalized.agent
-    }, { repoRoot: options.repoRoot });
-    if (orchestration.status === 'failed' || orchestration.status === 'paused') {
+  if (!normalized.dryRun && orchestrationCompletion) {
+    try {
+      (options.commitOrchestrationCompletion ?? commitOrchestrationStageCompletion)(orchestrationCompletion);
+    } catch (error) {
       return failed(normalized, {
-        code: 'EVENT_TRANSITION_INVALID',
-        message: orchestration.error?.message ?? orchestration.run?.pause?.message ?? 'orchestration provenance validation failed'
-      }, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
+        code: 'EVENT_ORCHESTRATION_COMMIT_FAILED',
+        message: `task.md was written but orchestration completion could not be persisted; manual recovery is required: ${error instanceof Error ? error.message : String(error)}`
+      }, {
+        taskId: result.taskId,
+        taskMdPath: result.taskMdPath,
+        fromStep: currentStep,
+        toStep: step,
+        action: eventIdentity.action,
+        phase: eventIdentity.phase,
+        timestamp: result.timestamp,
+        agentInfraVersion: result.agentInfraVersion,
+        operations: result.operations,
+        artifactContext
+      });
     }
   }
   return {
@@ -408,6 +428,31 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskWriteOptions = {
     artifactContext, timestamp: result.timestamp,
     agentInfraVersion: result.agentInfraVersion, operations: result.operations, error: null
   };
+}
+
+function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
+  const invalid = validateTaskEventRequest(request);
+  if (invalid) return failed(request, invalid);
+  const parts = eventParts(request.event);
+  if (request.dryRun || parts.phase !== 'completed' || parts.family === 'manual-validation') {
+    return applyTaskEventUnlocked(request, options);
+  }
+  const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return applyTaskEventUnlocked(request, options);
+  try {
+    return withTaskExecutionLock(
+      resolved.repoRoot,
+      resolved.taskId,
+      `task-event.${request.event}`,
+      () => applyTaskEventUnlocked(request, options)
+    );
+  } catch (error) {
+    if (!(error instanceof TaskExecutionLockError)) throw error;
+    return failed(request, {
+      code: 'EVENT_TRANSITION_INVALID',
+      message: `${error.code}: ${error.message}`
+    }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+  }
 }
 
 function successNoOp(
@@ -425,4 +470,4 @@ function successNoOp(
 }
 
 export { eventCatalog, validateTaskEventRequest, applyTaskEvent };
-export type { TaskEventName, TaskEventRequest, TaskEventResult, TaskEventError, TaskEventErrorCode, Verdict };
+export type { TaskEventName, TaskEventRequest, TaskEventResult, TaskEventError, TaskEventErrorCode, TaskEventOptions, Verdict };

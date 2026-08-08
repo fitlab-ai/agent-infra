@@ -9,6 +9,7 @@ description: >
 # 需求分析审查
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`antigravity`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`antigravity-cli`→`antigravity`）或人工例外 `human`。
 
+若入口业务操作数包含 `--orchestrated`，绑定 `{execution-flag}` = `--orchestrated` 并原样转发给 summary finalizer 与 completed 事件；否则绑定为空。不得从 `orchestration.json`、环境变量或历史产物推断该标记。
 
 审查最新需求分析产物，并产出 `review-analysis.md` 或 `review-analysis-r{N}.md`。
 
@@ -71,7 +72,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ### 6. 更新任务状态
 
-报告完成后，新 finding 逐条调用 `agent-infra-internal task-ledger {task-id} finding-upsert --stage analysis --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`；复核上一轮响应时调用 `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {相称证据}`。不得扫描编号或手写账本行。全部账本写入完成后只调用一次 `agent-infra-internal task-review {task-id} finalize-summary --stage analysis --artifact {review-artifact}`。
+报告完成后，新 finding 逐条调用 `agent-infra-internal task-ledger {task-id} finding-upsert --stage analysis --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`；复核上一轮响应时调用 `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {相称证据}`。不得扫描编号或手写账本行。全部账本写入完成后只调用一次 `agent-infra-internal task-review {task-id} finalize-summary --stage analysis --artifact {review-artifact} {execution-flag}`。
 
 从该次返回值绑定并复用以下结构化映射：
 
@@ -81,7 +82,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 {unresolved-minor} = stageStatus.unresolvedFindingCounts.minor
 ```
 
-该 intent 原子最终化报告摘要并返回同一次账本快照；不得再调用 `stage-status`、手工替换占位符或扫描问题清单。最终化失败或返回字段缺失时，停止在完成事件之前。以同一次返回的 `stageStatus.canAdvance` 决定 verdict 和下一步：仅 `canAdvance=true` 可用 `approved`，否则必须用 `changes-requested` 或 `rejected`。随后执行 `agent-infra-internal task-event {task-id} review-analysis.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n}`。
+该 intent 原子最终化报告摘要并返回同一次账本快照；不得再调用 `stage-status`、手工替换占位符或扫描问题清单。最终化失败或返回字段缺失时，停止在完成事件之前。以同一次返回的 `stageStatus.canAdvance` 决定 verdict 和下一步：仅 `canAdvance=true` 可用 `approved`，否则必须用 `changes-requested` 或 `rejected`。随后执行 `agent-infra-internal task-event {task-id} review-analysis.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`。
 
 `manual-validation` 是 `ai task log` 中 review 行「人工校验点」（EN `Manual-validation`）计数的数据源；不要新增并行人工验证字段。
 

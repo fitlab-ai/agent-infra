@@ -9,6 +9,7 @@ description: >
 # Requirement Analysis Review
 > `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`antigravity`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `antigravity-cli`->`antigravity`), or the `human` manual exception.
 
+If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to both the summary finalizer and completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts.
 
 Review the latest analysis artifact and produce `review-analysis.md` or `review-analysis-r{N}.md`.
 
@@ -68,7 +69,7 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 
 ### 6. Update Task Status
 
-After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage analysis --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. Do not scan ids or edit ledger rows. After all ledger writes, call `agent-infra-internal task-review {task-id} finalize-summary --stage analysis --artifact {review-artifact}` exactly once.
+After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage analysis --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. Do not scan ids or edit ledger rows. After all ledger writes, call `agent-infra-internal task-review {task-id} finalize-summary --stage analysis --artifact {review-artifact} {execution-flag}` exactly once.
 
 Bind and reuse this structured mapping from that one response:
 
@@ -78,7 +79,7 @@ Bind and reuse this structured mapping from that one response:
 {unresolved-minor} = stageStatus.unresolvedFindingCounts.minor
 ```
 
-The intent atomically finalizes the report summary and returns the same ledger snapshot. Do not call `stage-status`, replace placeholders manually, or rescan the finding list. If finalization fails or a response field is missing, stop before the completion event. Derive the verdict and next-step branch from the same response's `stageStatus.canAdvance`: only `canAdvance=true` permits `approved`; otherwise use `changes-requested` or `rejected`. Then run `agent-infra-internal task-event {task-id} review-analysis.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n}`.
+The intent atomically finalizes the report summary and returns the same ledger snapshot. Do not call `stage-status`, replace placeholders manually, or rescan the finding list. If finalization fails or a response field is missing, stop before the completion event. Derive the verdict and next-step branch from the same response's `stageStatus.canAdvance`: only `canAdvance=true` permits `approved`; otherwise use `changes-requested` or `rejected`. Then run `agent-infra-internal task-event {task-id} review-analysis.completed --agent {standard-agent-token} --artifact {review-artifact} --verdict {approved|changes-requested|rejected} --blockers {unresolved-blockers} --major {unresolved-major} --minor {unresolved-minor} --manual-validation {n} {execution-flag}`.
 
 `manual-validation` is the data source for the `Manual-validation` count folded into review rows in `ai task log`; do not add a parallel manual-verification field.
 

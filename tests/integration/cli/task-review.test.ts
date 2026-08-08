@@ -93,6 +93,110 @@ test('task-review dry-run reports a plan without changing artifact bytes', () =>
   assert.deepEqual(fs.readFileSync(path.join(f.dir, f.artifact)), before);
 });
 
+test('orchestrated finalization dry-run reports a mismatch without pausing the run', () => {
+  const scenario = scenarios[0];
+  const f = fixture(
+    scenario,
+    '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
+  );
+  const runPath = path.join(f.dir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    schemaVersion: 2,
+    status: 'running',
+    pendingDelegation: { status: 'prepared' }
+  }, null, 2)}\n`);
+  const artifactPath = path.join(f.dir, f.artifact);
+  const artifactBefore = fs.readFileSync(artifactPath);
+  const runBefore = fs.readFileSync(runPath);
+
+  const result = run(f.root, [
+    TASK_ID, 'finalize-summary', '--stage', scenario.stage, '--artifact', f.artifact,
+    '--orchestrated', '--dry-run'
+  ]);
+
+  assert.equal(result.status, 1);
+  assert.match(JSON.parse(result.stdout).error.message, /ORCHESTRATION_PROVENANCE_MISMATCH/);
+  assert.deepEqual(fs.readFileSync(artifactPath), artifactBefore);
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+});
+
+test('standalone finalization ignores a historical run without a pending delegation', () => {
+  const scenario = scenarios[0];
+  const f = fixture(
+    scenario,
+    '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
+  );
+  const runPath = path.join(f.dir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    schemaVersion: 2,
+    status: 'completed',
+    pendingDelegation: null
+  }, null, 2)}\n`);
+  const runBefore = fs.readFileSync(runPath);
+
+  const result = run(f.root, [
+    TASK_ID, 'finalize-summary', '--stage', scenario.stage, '--artifact', f.artifact
+  ]);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(JSON.parse(result.stdout).status, 'applied');
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+});
+
+test('standalone finalization fails before writing when a delegation is pending', () => {
+  const scenario = scenarios[0];
+  const f = fixture(
+    scenario,
+    '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
+  );
+  const runPath = path.join(f.dir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    schemaVersion: 2,
+    status: 'running',
+    pendingDelegation: { status: 'activated' }
+  }, null, 2)}\n`);
+  const artifactPath = path.join(f.dir, f.artifact);
+  const artifactBefore = fs.readFileSync(artifactPath);
+  const runBefore = fs.readFileSync(runPath);
+
+  const result = run(f.root, [
+    TASK_ID, 'finalize-summary', '--stage', scenario.stage, '--artifact', f.artifact
+  ]);
+
+  assert.equal(result.status, 1);
+  assert.match(JSON.parse(result.stdout).error.message, /ORCHESTRATION_STANDALONE_BUSY/);
+  assert.deepEqual(fs.readFileSync(artifactPath), artifactBefore);
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+});
+
+test('orchestrated finalization accepts one matching activated delegation without advancing it', () => {
+  const scenario = scenarios[0];
+  const f = fixture(
+    scenario,
+    '- **Findings (AI-actionable)**: {unresolved-blockers} blockers, {unresolved-major} majors, {unresolved-minor} minors'
+  );
+  const runPath = path.join(f.dir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    schemaVersion: 2,
+    taskId: TASK_ID,
+    runId: 'run-1',
+    status: 'running',
+    pendingDelegation: {
+      id: 'receipt-1', taskId: TASK_ID, runId: 'run-1', role: 'reviewer', stage: 'review-analysis',
+      round: 1, artifact: f.artifact, client: 'codex', status: 'activated'
+    }
+  }, null, 2)}\n`);
+  const runBefore = fs.readFileSync(runPath);
+
+  const result = run(f.root, [
+    TASK_ID, 'finalize-summary', '--stage', scenario.stage, '--artifact', f.artifact, '--orchestrated'
+  ]);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(JSON.parse(result.stdout).status, 'applied');
+  assert.deepEqual(fs.readFileSync(runPath), runBefore);
+});
+
 test('task-review rejects a numeric count mismatch without changing artifact bytes', () => {
   const scenario = scenarios[0];
   const f = fixture(

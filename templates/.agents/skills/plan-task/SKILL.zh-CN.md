@@ -9,6 +9,7 @@ description: >
 # 设计技术方案
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`antigravity`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`antigravity-cli`→`antigravity`）或人工例外 `human`。
 
+若入口业务操作数包含 `--orchestrated`，绑定 `{execution-flag}` = `--orchestrated` 并原样转发给 completed 事件；否则绑定为空。不得从 `orchestration.json`、环境变量或历史产物推断该标记。
 
 ## 行为边界 / 关键规则
 
@@ -111,7 +112,7 @@ agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-t
   - 用新值覆盖 frontmatter 的 `effort` 字段
   - 在本轮方案产物 `{plan-artifact}` 中追加 `## 工作量重估` 段，记录一条：`effort {old} → {new} (rationale: {基于本轮方案的简短依据})`
   若重估值与当前值一致，跳过：不写入 `## 工作量重估` 段。后续 Flow A 同步会读取可能更新过的 frontmatter，并自动把新值同步到 Issue。
-- 完成业务内容更新后执行 `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --artifact {plan-artifact}`，由核心原子登记链接、阶段、代理、时间、版本和 Activity Log。
+- 完成业务内容更新后执行 `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --artifact {plan-artifact} {execution-flag}`，由核心原子登记链接、阶段、代理、时间、版本和 Activity Log。
 
 如果 task.md 中存在有效的 `issue_number`，执行以下同步操作（任一失败则跳过并继续）：
 - 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status pending-design-work --fields`

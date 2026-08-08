@@ -35,6 +35,7 @@ import {
   diffWorkspaceSnapshots
 } from './workspace-snapshot.ts';
 import type { RepositorySnapshot } from './workspace-snapshot.ts';
+import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type LegacyOrchestrationModelPolicy = Readonly<{
@@ -109,6 +110,21 @@ type OrchestrationResult = Readonly<{
     missingFields?: readonly string[];
     modelSelectionContext?: ReturnType<typeof getAgentClientModelSelection>;
   }> | null;
+}>;
+type OrchestrationStageIdentity = Readonly<{
+  stage: DelegationStage;
+  round: number;
+  artifact: string;
+  role: DelegationRole;
+}>;
+type OrchestrationStageCompletion = Readonly<{
+  taskId: string;
+  taskDir: string;
+  updatedRun: OrchestrationRun;
+}>;
+type OrchestrationCompletionPlanResult = Readonly<{
+  result: OrchestrationResult;
+  plan: OrchestrationStageCompletion | null;
 }>;
 type OrchestrationOptions = {
   repoRoot?: string;
@@ -626,7 +642,7 @@ function statusOrchestration(taskRef: string, options: OrchestrationOptions = {}
   return { status: run.status, changed: false, taskId: resolved.taskId, run, next: null, error: null };
 }
 
-function prepareOrchestrationDelegation(
+function prepareOrchestrationDelegationUnlocked(
   taskRef: string,
   input: Readonly<{ client: AgentClientId; requestedModel?: string; requestedReasoningEffort?: string }>,
   options: OrchestrationOptions = {}
@@ -690,6 +706,26 @@ function prepareOrchestrationDelegation(
   });
   saveRun(resolved.taskDir, updated);
   return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next, error: null };
+}
+
+function prepareOrchestrationDelegation(
+  taskRef: string,
+  input: Readonly<{ client: AgentClientId; requestedModel?: string; requestedReasoningEffort?: string }>,
+  options: OrchestrationOptions = {}
+): OrchestrationResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+  try {
+    return withTaskExecutionLock(
+      resolved.repoRoot,
+      resolved.taskId,
+      'task-orchestration.prepare',
+      () => prepareOrchestrationDelegationUnlocked(taskRef, input, options)
+    );
+  } catch (error) {
+    if (error instanceof TaskExecutionLockError) return failed(error.code, error.message, resolved.taskId);
+    throw error;
+  }
 }
 
 function matchingDelegations(
@@ -817,6 +853,69 @@ function completeOrchestrationStage(
   return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
 }
 
+function inspectOrchestrationStage(
+  taskRef: string,
+  event: OrchestrationStageIdentity,
+  options: OrchestrationOptions = {}
+): OrchestrationResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+  let run: OrchestrationRun | null;
+  try {
+    run = readRun(resolved.taskDir);
+  } catch (error) {
+    return failed('ORCHESTRATION_STATE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
+  }
+  if (!run) return failed('ORCHESTRATION_RUN_MISSING', 'no orchestration run exists', resolved.taskId);
+  const receipt = run.pendingDelegation;
+  if (
+    !receipt
+    || receipt.status !== 'activated'
+    || receipt.stage !== event.stage
+    || receipt.round !== event.round
+    || receipt.artifact !== event.artifact
+    || receipt.role !== event.role
+  ) {
+    return failed(
+      'ORCHESTRATION_PROVENANCE_MISMATCH',
+      'active run does not have one matching activated delegation',
+      resolved.taskId
+    );
+  }
+  return { status: 'running', changed: false, taskId: resolved.taskId, run, next: null, error: null };
+}
+
+function planOrchestrationStageCompletion(
+  taskRef: string,
+  event: Readonly<{ stage: DelegationStage; round: number; artifact: string; role: DelegationRole; agent: string }>,
+  options: OrchestrationOptions = {}
+): OrchestrationCompletionPlanResult {
+  const inspected = inspectOrchestrationStage(taskRef, event, options);
+  if (inspected.status === 'failed' || !inspected.run?.pendingDelegation) {
+    return { result: inspected, plan: null };
+  }
+  const receipt = inspected.run.pendingDelegation;
+  const completed = completeDelegationStage(receipt, event);
+  if (!completed.ok) {
+    return { result: failed(completed.code, completed.message, inspected.taskId), plan: null };
+  }
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return { result: failed(resolved.code, resolved.message, resolved.taskId), plan: null };
+  const updatedRun = withUpdatedRun(inspected.run, { pendingDelegation: completed.receipt });
+  return {
+    result: { status: 'running', changed: true, taskId: resolved.taskId, run: updatedRun, next: null, error: null },
+    plan: {
+      taskId: resolved.taskId,
+      taskDir: resolved.taskDir,
+      updatedRun
+    }
+  };
+}
+
+function commitOrchestrationStageCompletion(plan: OrchestrationStageCompletion): void {
+  saveRun(plan.taskDir, plan.updatedRun);
+}
+
 function completeCommitOrchestrationStage(
   taskRef: string,
   agent: string,
@@ -836,35 +935,6 @@ function completeCommitOrchestrationStage(
     artifact: receipt.artifact,
     agent
   }, options);
-}
-
-function validateOrchestrationStage(
-  taskRef: string,
-  event: Readonly<{ stage: DelegationStage; round: number; artifact: string; role: DelegationRole }>,
-  options: OrchestrationOptions = {}
-): OrchestrationResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  const run = readRun(resolved.taskDir);
-  if (!run) return { status: 'running', changed: false, taskId: resolved.taskId, run: null, next: null, error: null };
-  const receipt = run.pendingDelegation;
-  if (
-    !receipt
-    || receipt.status !== 'activated'
-    || receipt.stage !== event.stage
-    || receipt.round !== event.round
-    || receipt.artifact !== event.artifact
-    || receipt.role !== event.role
-  ) {
-    return pauseOrchestration(
-      taskRef,
-      'ORCHESTRATION_PROVENANCE_MISMATCH',
-      'active run does not have one matching activated delegation',
-      true,
-      options
-    );
-  }
-  return { status: 'running', changed: false, taskId: resolved.taskId, run, next: null, error: null };
 }
 
 function sealOrchestrationDelegation(
@@ -926,16 +996,27 @@ export {
   activateOrchestrationDelegation,
   advanceOrchestration,
   beginOrResumeOrchestration,
+  commitOrchestrationStageCompletion,
   completeCommitOrchestrationStage,
   completeOrchestrationStage,
+  inspectOrchestrationStage,
   orchestrationPath,
   pauseOrchestration,
+  planOrchestrationStageCompletion,
   prepareOrchestrationDelegation,
   readRun,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation,
-  statusOrchestration,
-  validateOrchestrationStage
+  statusOrchestration
 };
-export type { OrchestrationModelPolicy, OrchestrationNext, OrchestrationResult, OrchestrationRun, OrchestrationStatus };
+export type {
+  OrchestrationCompletionPlanResult,
+  OrchestrationModelPolicy,
+  OrchestrationNext,
+  OrchestrationResult,
+  OrchestrationRun,
+  OrchestrationStageCompletion,
+  OrchestrationStageIdentity,
+  OrchestrationStatus
+};

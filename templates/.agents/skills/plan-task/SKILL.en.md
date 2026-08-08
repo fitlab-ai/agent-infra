@@ -9,6 +9,7 @@ description: >
 # Design Technical Plan
 > `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`antigravity`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `antigravity-cli`->`antigravity`), or the `human` manual exception.
 
+If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to the completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts.
 
 ## Boundary / Critical Rules
 
@@ -112,7 +113,7 @@ Update `.agents/workspace/active/{task-id}/task.md`:
   - Overwrite the `effort` field in frontmatter with the new value
   - Append a `## Effort Re-estimate` section to this round's plan artifact `{plan-artifact}`, recording: `effort {old} → {new} (rationale: {short basis grounded in this plan})`
   If the re-estimated value matches the current value, skip it: do not write the `## Effort Re-estimate` section. The Flow A sync that follows reads the possibly updated frontmatter and propagates the new value to the Issue automatically.
-After the business fields are updated, run `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --artifact {plan-artifact}` so the core atomically records the link, stage, agent, metadata, and Activity Log.
+After the business fields are updated, run `agent-infra-internal task-event {task-id} plan.completed --agent {standard-agent-token} --artifact {plan-artifact} {execution-flag}` so the core atomically records the link, stage, agent, metadata, and Activity Log.
   - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Plan Task (Round {N})** by {agent} — Plan completed, awaiting human review → {artifact-filename}
   ```
 

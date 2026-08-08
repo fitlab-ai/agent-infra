@@ -356,6 +356,37 @@ test("review skills finalize one summary snapshot before their completion event"
   }
 });
 
+test("orchestrated lifecycle handoffs forward the execution marker to sensitive commands", () => {
+  for (const relativePath of skillDocPaths("run-task")) {
+    assert.ok(read(relativePath).includes("--orchestrated"), `${relativePath} should mark orchestrated handoffs`);
+  }
+
+  for (const { skill, event } of [
+    { skill: "analyze-task", event: "analyze.completed" },
+    { skill: "plan-task", event: "plan.completed" },
+    { skill: "code-task", event: "code.completed" }
+  ]) {
+    for (const relativePath of skillDocPaths(skill)) {
+      const line = read(relativePath).split("\n").find((entry) => entry.includes(`task-event {task-id} ${event}`));
+      assert.ok(line?.includes("{execution-flag}"), `${relativePath} should forward the execution marker`);
+    }
+  }
+
+  for (const { skill, stage, event } of [
+    { skill: "review-analysis", stage: "analysis", event: "review-analysis.completed" },
+    { skill: "review-plan", stage: "plan", event: "review-plan.completed" },
+    { skill: "review-code", stage: "code", event: "review-code.completed" }
+  ]) {
+    for (const relativePath of skillDocPaths(skill)) {
+      const lines = read(relativePath).split("\n");
+      const finalizer = lines.find((entry) => entry.includes(`finalize-summary --stage ${stage}`));
+      const completion = lines.find((entry) => entry.includes(`task-event {task-id} ${event}`));
+      assert.ok(finalizer?.includes("{execution-flag}"), `${relativePath} should mark summary finalization`);
+      assert.ok(completion?.includes("{execution-flag}"), `${relativePath} should mark review completion`);
+    }
+  }
+});
+
 test("review skills reuse one finalized unresolved-count snapshot for completion events", () => {
   const reviewFamilies = [
     { name: "review-analysis", stage: "analysis", event: "review-analysis.completed" },

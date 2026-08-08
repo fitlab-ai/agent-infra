@@ -9,6 +9,7 @@ description: >
 # Code Task
 > `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`antigravity`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `antigravity-cli`->`antigravity`), or the `human` manual exception.
 
+If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to the completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts.
 
 Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill supports initial implementation, fix mode based on `review-code` feedback, and human-decision-driven implementation.
 
@@ -109,7 +110,7 @@ Create `.agents/workspace/active/{task-id}/{code-artifact}`.
 
 ### 10. Update Task Status
 
-After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --files-modified {n} --tests-passed {n}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n}` instead; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
+After requirement checkboxes are updated, run the initial event `agent-infra-internal task-event {task-id} code.completed --agent {standard-agent-token} --artifact {code-artifact} --files-modified {n} --tests-passed {n} {execution-flag}`; in fix mode use `--fix-for {review-artifact} --blockers {n} --major {n} --minor {n} --manual-validation {n} {execution-flag}` instead; in decision mode add `--implementation-input {input-id}` to the initial counts. The core atomically records the artifact link, stage, metadata, done log, and decision-input consumption.
 
 If task.md has a valid `issue_number`, read `.agents/rules/issue-sync.md`, then:
 - Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status in-progress`
