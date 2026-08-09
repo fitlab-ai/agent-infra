@@ -46,8 +46,16 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Run tests
+      # Linux is the canonical full-suite runner. macOS and Windows keep the
+      # platform-sensitive unit boundary; package installation is covered by
+      # pack-smoke on all three operating systems.
+      - name: Run full test suite
+        if: matrix.os == 'ubuntu-latest'
         run: npm test
+
+      - name: Run cross-platform unit smoke
+        if: matrix.os != 'ubuntu-latest'
+        run: npm run test:smoke
 
       - name: Verify canonical demo LFS object
         if: matrix.os == 'ubuntu-latest'
