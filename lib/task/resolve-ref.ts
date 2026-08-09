@@ -132,6 +132,43 @@ function enumerateTaskDirs(repoRoot: string): { taskId: string; taskDir: string 
   return out;
 }
 
+/**
+ * Enumerate every task directory, including the cold YYYY/MM/DD archive.
+ * Invalid directory names, symlinks and entries without task.md are ignored;
+ * duplicate task ids fail closed because their identity would be ambiguous.
+ */
+function enumerateAllTaskDirs(repoRoot: string): { taskId: string; taskDir: string; state: TaskWorkspaceState }[] {
+  const out: { taskId: string; taskDir: string; state: TaskWorkspaceState }[] = [];
+  const seen = new Set<string>();
+  const add = (taskId: string, taskDir: string, state: TaskWorkspaceState) => {
+    if (!TASK_ID_RE.test(taskId)) return;
+    const stat = fs.lstatSync(taskDir);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || !fs.existsSync(path.join(taskDir, 'task.md'))) return;
+    if (seen.has(taskId)) throw new Error(`duplicate task identity: ${taskId}`);
+    seen.add(taskId);
+    out.push({ taskId, taskDir, state });
+  };
+
+  for (const state of FLAT_WORKSPACE_DIRS) {
+    const base = path.join(repoRoot, '.agents', 'workspace', state);
+    if (!fs.existsSync(base)) continue;
+    for (const taskId of fs.readdirSync(base).sort()) add(taskId, path.join(base, taskId), state);
+  }
+
+  const archive = path.join(repoRoot, '.agents', 'workspace', 'archive');
+  for (const year of listSortedNumeric(archive, 4).reverse()) {
+    const yearDir = path.join(archive, year);
+    for (const month of listSortedNumeric(yearDir, 2).reverse()) {
+      const monthDir = path.join(yearDir, month);
+      for (const day of listSortedNumeric(monthDir, 2).reverse()) {
+        const dayDir = path.join(monthDir, day);
+        for (const taskId of fs.readdirSync(dayDir).sort()) add(taskId, path.join(dayDir, taskId), 'archive');
+      }
+    }
+  }
+  return out;
+}
+
 function locateHotTaskDirs(
   repoRoot: string,
   taskId: string
@@ -312,7 +349,15 @@ function resolveTaskContext(
   return { ok: true, repoRoot, ...match, state: 'active' };
 }
 
-export { resolveTaskRef, resolveTaskContext, detectRepoRoot, enumerateTaskDirs, locateHotTaskDirs, TASK_ID_RE };
+export {
+  resolveTaskRef,
+  resolveTaskContext,
+  detectRepoRoot,
+  enumerateTaskDirs,
+  enumerateAllTaskDirs,
+  locateHotTaskDirs,
+  TASK_ID_RE
+};
 export type {
   ResolveRefResult,
   ResolveTaskRefErrorCode,

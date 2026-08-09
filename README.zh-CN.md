@@ -90,6 +90,7 @@ agent-infra 的目标就是把这层共享基础设施标准化。它为所有�
 - **双语文档**：英文为主文档，配套同步的中文版本
 - **模板源架构**：`templates/` 目录镜像最终渲染出的项目结构
 - **AI 辅助升级**：模板升级时可合并变更，同时尽量保留项目侧定制
+- **可审计的过程数据归档**：把本地任务与 GitHub 证据保存为只追加、可校验的快照
 
 ## 快速开始
 
@@ -205,6 +206,7 @@ my-project/
 
 深度指南位于 [`docs/zh-CN/`](./docs/zh-CN/README.md)：
 
+- [过程数据归档](./docs/zh-CN/process-data.md) — 采集、校验、审计、修复、导出、隐私与备份指南
 - [架构概览](./docs/zh-CN/architecture.md) — 引导 CLI、端到端流程、分层架构
 - [平台支持](./docs/zh-CN/platform-support.md) — macOS、Linux、Windows；沙箱引擎与资源配置
 - [沙箱](./docs/zh-CN/sandbox.md) — 沙箱 aliases、宿主-沙箱文件交换、用户级 dotfiles 通道

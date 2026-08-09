@@ -4,6 +4,7 @@
 .agents/workspace/completed/
 .agents/workspace/archive/
 .agents/workspace/logs/
+.agents/workspace/process-data/
 .agents/workspace/.merge-backup/
 
 # agent-infra-server local secrets (in-repo). Runtime state (PID, logs) lives

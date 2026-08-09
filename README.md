@@ -91,6 +91,7 @@ Every command above works the same way in Claude Code, Codex, Antigravity CLI, a
 - **Bilingual project docs**: English-first docs with synchronized Chinese translations
 - **Template-source architecture**: `templates/` mirrors the rendered project structure
 - **AI-assisted updates**: template changes can be merged while preserving project-specific customization
+- **Auditable process-data archive**: preserve local tasks and GitHub evidence in append-only, verifiable snapshots
 
 ## Quick Start
 
@@ -206,6 +207,7 @@ my-project/
 
 In-depth guides live under [`docs/en/`](./docs/en/README.md):
 
+- [Process Data Archive](./docs/en/process-data.md) — capture, verify, audit, repair, export, privacy, and backup guidance
 - [Architecture Overview](./docs/en/architecture.md) — bootstrap CLI, end-to-end flow, layered architecture
 - [Platform Support](./docs/en/platform-support.md) — macOS, Linux, Windows; sandbox engines and resources
 - [Sandbox](./docs/en/sandbox.md) — sandbox aliases, host-sandbox file exchange, user-level dotfiles channel
