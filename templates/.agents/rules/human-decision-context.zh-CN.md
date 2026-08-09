@@ -33,6 +33,10 @@
 
 可增加方案 C 或补充证据，但不得省略上述信息或把多个方案压缩为无法分别比较的一行。标题 ID 必须与 task.md `## 审查分歧账本` 行一致；evidence（用于定位原始说明的引用）必须指向该标题的稳定锚点。
 
+## 实现意图声明
+
+code 阶段的提出者必须在详情块的方案说明后另写 `**是否需要实现**：是/否`，并在 `finding-review` 升级为 `needs-human-decision` 或 `decision-upsert` 时传入 `--needs-implementation true|false`。该值会作为待裁决实现输入保存；维护者执行 `ai decide` 时通常无需再传此参数。历史任务没有预先声明时，仍可在 `ai decide` 中显式传参；显式值与已有声明冲突时命令失败。
+
 ## 裁决闭环
 
 使用 `ai task decisions <task-ref> <序号|账本ID>` 查看完整详情，使用 `ai decide <task-ref> <序号|账本ID> <裁决内容>` 写入裁决。`ai decide` 负责把目标行更新为 `human-decided`、创建独立 `HDR-N` 记录、更新 evidence 与活动日志；不得手工模拟其中一部分写入。

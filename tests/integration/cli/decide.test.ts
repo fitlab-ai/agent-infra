@@ -9,7 +9,7 @@ import { CLI_PATH } from '../../helpers.ts';
 
 const SHORT_ID_SCRIPT = path.resolve(process.cwd(), '.agents/scripts/task-short-id.js');
 
-function fixture(rows: string[]): { repoRoot: string; taskId: string; taskMd: string } {
+function fixture(rows: string[], implementationRows: string[] = []): { repoRoot: string; taskId: string; taskMd: string } {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'decide-cli-'));
   spawnSync('git', ['init', '--quiet'], { cwd: repoRoot });
   const taskId = 'TASK-20260101-000001';
@@ -19,10 +19,24 @@ function fixture(rows: string[]): { repoRoot: string; taskId: string; taskMd: st
   fs.copyFileSync(SHORT_ID_SCRIPT, path.join(repoRoot, '.agents', 'scripts', 'task-short-id.js'));
   fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ project: 'demo' }));
   const taskMd = path.join(taskDir, 'task.md');
-  fs.writeFileSync(taskMd, `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.0.0\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n\n## Human Rulings\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n\n## Activity Log\n`);
+  fs.writeFileSync(taskMd, `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.0.0\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n\n## Human Rulings\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n${implementationRows.join('\n')}\n\n## Activity Log\n`);
   spawnSync('node', [SHORT_ID_SCRIPT, 'alloc', taskId], { cwd: repoRoot, encoding: 'utf8' });
   return { repoRoot, taskId, taskMd };
 }
+
+test('real CLI decides a declared code item without an implementation flag', () => {
+  const data = fixture(
+    ['| CD-1 | code | 1 | major | needs-human-decision | review-code.md#CD-1 |'],
+    ['| II-1 | CD-1 | review-code.md#CD-1 | code | true | | declared | |']
+  );
+  try {
+    const result = run(data.repoRoot, ['decide', data.taskId, 'CD-1', 'use declared choice']);
+    assert.equal(result.status, 0, result.stderr);
+    const content = fs.readFileSync(data.taskMd, 'utf8');
+    assert.match(content, /\| II-1 \| CD-1 \| task\.md#HDR-1 \| code \| true \| .+ \| pending \|/);
+    assert.equal((content.match(/\| II-1 \|/g) ?? []).length, 1);
+  } finally { fs.rmSync(data.repoRoot, { recursive: true, force: true }); }
+});
 
 function run(repoRoot: string, args: string[]) {
   return spawnSync('node', [CLI_PATH, ...args], {

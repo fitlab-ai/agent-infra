@@ -8,7 +8,7 @@ const COLUMNS = [
 const TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/;
 const ARTIFACT_RE = /^code(?:-r(?:[2-9]|[1-9]\d+))?\.md$/;
 
-type ImplementationInputStatus = 'pending' | 'not-required' | 'consumed';
+type ImplementationInputStatus = 'declared' | 'pending' | 'not-required' | 'consumed';
 type ImplementationInput = {
   id: string;
   ledgerId: string;
@@ -25,18 +25,18 @@ type ImplementationInputDraft = {
   needsImplementation: boolean;
   decidedAt: string;
 };
+type ImplementationInputDeclaration = Omit<ImplementationInputDraft, 'decidedAt'>;
 
 function validateInput(row: ImplementationInput): void {
   if (!/^II-[1-9]\d*$/.test(row.id)) throw new Error(`implementation input id '${row.id}' is invalid`);
   if (!row.ledgerId || !row.decisionEvidence || /[\r\n]/.test(row.ledgerId) || /[\r\n]/.test(row.decisionEvidence)) throw new Error(`implementation input ${row.id} has incomplete decision identity`);
   if (row.stage !== 'code') throw new Error(`implementation input ${row.id} has invalid stage`);
-  if (!TIMESTAMP_RE.test(row.decidedAt) || !Number.isFinite(Date.parse(row.decidedAt.replace(' ', 'T')))) {
-    throw new Error(`implementation input ${row.id} has invalid decided_at`);
-  }
+  const hasValidTimestamp = TIMESTAMP_RE.test(row.decidedAt) && Number.isFinite(Date.parse(row.decidedAt.replace(' ', 'T')));
   const valid =
-    (row.needsImplementation && row.status === 'pending' && row.consumedBy === '') ||
-    (!row.needsImplementation && row.status === 'not-required' && row.consumedBy === '') ||
-    (row.needsImplementation && row.status === 'consumed' && ARTIFACT_RE.test(row.consumedBy));
+    (row.status === 'declared' && row.decidedAt === '' && row.consumedBy === '') ||
+    (hasValidTimestamp && row.needsImplementation && row.status === 'pending' && row.consumedBy === '') ||
+    (hasValidTimestamp && !row.needsImplementation && row.status === 'not-required' && row.consumedBy === '') ||
+    (hasValidTimestamp && row.needsImplementation && row.status === 'consumed' && ARTIFACT_RE.test(row.consumedBy));
   if (!valid) throw new Error(`implementation input ${row.id} has an invalid state combination`);
 }
 
@@ -77,6 +77,57 @@ function createImplementationInput(rows: readonly ImplementationInput[], draft: 
   };
   validateInput(row);
   return row;
+}
+
+function declareImplementationInput(
+  rows: readonly ImplementationInput[], draft: ImplementationInputDeclaration
+): ImplementationInput {
+  const existing = rows.filter((row) => row.ledgerId === draft.ledgerId && row.status === 'declared');
+  if (existing.length > 1) throw new Error(`implementation input declaration for '${draft.ledgerId}' conflicts with existing rows`);
+  if (existing.length === 1) {
+    const row = existing[0]!;
+    if (row.decisionEvidence !== draft.decisionEvidence || row.needsImplementation !== draft.needsImplementation) {
+      throw new Error(`implementation input declaration for '${draft.ledgerId}' conflicts with the existing row`);
+    }
+    return row;
+  }
+  const row: ImplementationInput = {
+    id: nextId(rows), ledgerId: draft.ledgerId, decisionEvidence: draft.decisionEvidence,
+    stage: 'code', needsImplementation: draft.needsImplementation, decidedAt: '',
+    status: 'declared', consumedBy: ''
+  };
+  validateInput(row);
+  return row;
+}
+
+function selectDeclaredImplementationInput(
+  rows: readonly ImplementationInput[], ledgerId: string, decisionEvidence: string
+): ImplementationInput | null {
+  const forLedger = rows.filter((row) => row.ledgerId === ledgerId && row.status === 'declared');
+  if (forLedger.length > 1) throw new Error(`implementation input declaration for '${ledgerId}' is ambiguous`);
+  if (forLedger.length === 0) return null;
+  if (forLedger[0]!.decisionEvidence !== decisionEvidence) {
+    throw new Error(`implementation input declaration for '${ledgerId}' has conflicting evidence`);
+  }
+  return forLedger[0]!;
+}
+
+function finalizeImplementationInput(
+  rows: readonly ImplementationInput[], id: string, decisionEvidence: string, decidedAt: string
+): ImplementationInput[] {
+  let found = false;
+  const next = rows.map((row) => {
+    if (row.id !== id) return row;
+    found = true;
+    if (row.status !== 'declared') throw new Error(`implementation input ${id} is not declared`);
+    return {
+      ...row, decisionEvidence, decidedAt,
+      status: row.needsImplementation ? 'pending' as const : 'not-required' as const
+    };
+  });
+  if (!found) throw new Error(`implementation input ${id} was not found`);
+  next.forEach(validateInput);
+  return next;
 }
 
 function selectPendingImplementationInput(
@@ -130,8 +181,11 @@ export {
   SECTION_ALIASES as IMPLEMENTATION_INPUT_ALIASES,
   createImplementationInput,
   consumeImplementationInput,
+  declareImplementationInput,
+  finalizeImplementationInput,
   parseImplementationInputs,
   renderImplementationInputs,
+  selectDeclaredImplementationInput,
   selectPendingImplementationInput
 };
-export type { ImplementationInput, ImplementationInputDraft, ImplementationInputStatus };
+export type { ImplementationInput, ImplementationInputDeclaration, ImplementationInputDraft, ImplementationInputStatus };

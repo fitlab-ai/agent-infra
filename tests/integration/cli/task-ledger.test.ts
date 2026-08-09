@@ -16,7 +16,7 @@ function fixture() {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
   fs.writeFileSync(path.join(active, '.short-ids.json'), JSON.stringify({ version: 1, ids: { '07': id } }));
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nupdated_at: old\nagent_infra_version: old\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nupdated_at: old\nagent_infra_version: old\n---\n# Task\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   return { root, id, file: path.join(dir, 'task.md') };
 }
 
@@ -45,6 +45,24 @@ test('task-ledger rejects duplicate flags and preserves bytes for dry-run', () =
     const planned = run(f.root, [f.id, 'decision-upsert', '--id', 'HD-1', '--stage', 'plan', '--artifact', 'plan.md', '--dry-run']);
     assert.equal(JSON.parse(planned.stdout).status, 'planned');
     assert.deepEqual(fs.readFileSync(f.file), before);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('task-ledger parses implementation intent for code decisions', () => {
+  const f = fixture();
+  try {
+    const applied = run(f.root, [
+      f.id, 'decision-upsert', '--id', 'HD-1', '--stage', 'code', '--artifact', 'code.md',
+      '--needs-implementation', 'false'
+    ]);
+    assert.equal(applied.status, 0, applied.stderr);
+    assert.match(fs.readFileSync(f.file, 'utf8'), /\| II-1 \| HD-1 \| code\.md#HD-1 \| code \| false \|\s*\| declared \|/);
+    const invalid = run(f.root, [
+      f.id, 'decision-upsert', '--id', 'HD-2', '--stage', 'code', '--artifact', 'code.md',
+      '--needs-implementation', 'maybe'
+    ]);
+    assert.equal(invalid.status, 1);
+    assert.equal(JSON.parse(invalid.stdout).error.code, 'LEDGER_PAYLOAD_INVALID');
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 

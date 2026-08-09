@@ -80,7 +80,7 @@ pr_status: pending             # PR 状态：pending（默认）| created（已�
 
 ## 人工裁决
 
-<!-- 使用 ai decide <task-ref> <序号|账本ID> [--needs-implementation true|false] <裁决内容> 写入 needs-human-decision 裁定；code 阶段必须显式声明是否需要实现。 -->
+<!-- 使用 ai decide <task-ref> <序号|账本ID> [--needs-implementation true|false] <裁决内容> 写入 needs-human-decision 裁定；新建 code 裁决的实现意图由上游 AI 预先声明，显式参数仅用于历史任务兼容或一致性复核。 -->
 
 ## 实现输入
 

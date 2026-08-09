@@ -97,7 +97,7 @@ Create `.agents/workspace/active/{task-id}/{review-artifact}`.
 ### 6. Update Task Status
 
 Update task.md:
-- After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. Do not scan ids or edit ledger rows
+- After the report, submit each new finding with `agent-infra-internal task-ledger {task-id} finding-upsert --stage code --review-artifact {review-artifact} --ordinal {n} --severity {blocker|major|minor} --evidence {review-artifact}#{anchor}`; submit prior-response dispositions with `finding-review --id {ledger-id} --status {confirmed|closed|open|needs-human-decision} --evidence {evidence}`. When escalating to `needs-human-decision`, append `--needs-implementation true|false` using the judgment recorded in the detail block. Do not scan ids or edit ledger rows
 - After all ledger writes, call `agent-infra-internal task-review {task-id} finalize-summary --stage code --artifact {review-artifact} {execution-flag}` exactly once
 
   Bind and reuse this structured mapping from that one response:

@@ -33,6 +33,10 @@ Provide at least two options with short names, and state the benefits and trade-
 
 Option C and supporting evidence may be added, but none of the information above may be omitted or collapsed into an incomparable one-line option list. The heading ID must match the task.md Review Disagreement Ledger row. Its evidence (the reference used to find the original explanation) must point to this stable heading anchor.
 
+## Implementation Intent Declaration
+
+For the code stage, the author must add `**Implementation required**: yes/no` after the options, then pass `--needs-implementation true|false` when `finding-review` escalates to `needs-human-decision` or when calling `decision-upsert`. The value is stored as a predeclared implementation input, so maintainers normally omit this option from `ai decide`. Historical tasks without a declaration may still pass it explicitly to `ai decide`; a value that conflicts with an existing declaration is rejected.
+
 ## Decision Closure
 
 Use `ai task decisions <task-ref> <ordinal|ledger-id>` to inspect full context and `ai decide <task-ref> <ordinal|ledger-id> <decision>` to record the ruling. `ai decide` updates the row to `human-decided`, creates an independent `HDR-N` record, and updates evidence and the activity log; do not manually imitate only part of that transaction.

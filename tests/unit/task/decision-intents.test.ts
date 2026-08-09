@@ -6,14 +6,59 @@ import path from 'node:path';
 
 import { applyHumanDecision } from '../../../lib/task/decision-intents.ts';
 
-function fixture() {
+function fixture(declaration = '') {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'decision-intents-'));
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nupdated_at: old\nagent_infra_version: old\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n| CD-1 | code | 1 | major | needs-human-decision | review-code.md#CD-1 |\n\n## Human Decisions\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Create Task** by codex — created\n`);
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nupdated_at: old\nagent_infra_version: old\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n| CD-1 | code | 1 | major | needs-human-decision | review-code.md#CD-1 |\n\n## Human Decisions\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n${declaration}\n\n## Activity Log\n\n- 2026-01-01 00:00:00+00:00 — **Create Task** by codex — created\n`);
   return { repoRoot, taskId, taskMd: path.join(taskDir, 'task.md') };
 }
+
+test('code decision falls back to declared intent and finalizes the same input', () => {
+  for (const [needs, status] of [['true', 'pending'], ['false', 'not-required']] as const) {
+    const f = fixture(`| II-1 | CD-1 | review-code.md#CD-1 | code | ${needs} | | declared | |`);
+    try {
+      const options = {
+        repoRoot: f.repoRoot,
+        metadataProvider: () => ({ timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' })
+      };
+      const result = applyHumanDecision({ taskRef: f.taskId, selector: 'CD-1', decision: 'Use A' }, options);
+      assert.equal(result.status, 'applied');
+      assert.equal(result.implementationInputId, 'II-1');
+      assert.equal(applyHumanDecision({ taskRef: f.taskId, selector: 'CD-1', decision: 'Use A' }, options).status, 'no-op');
+      const content = fs.readFileSync(f.taskMd, 'utf8');
+      assert.match(content, new RegExp(`\\| II-1 \\| CD-1 \\| task\\.md#HDR-1 \\| code \\| ${needs} \\| 2026-07-19 12:00:00\\+00:00 \\| ${status} \\|`));
+    } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+  }
+});
+
+test('code decision rejects an explicit intent that conflicts with its declaration', () => {
+  const f = fixture('| II-1 | CD-1 | review-code.md#CD-1 | code | true | | declared | |');
+  try {
+    const before = fs.readFileSync(f.taskMd);
+    const result = applyHumanDecision({
+      taskRef: f.taskId, selector: 'CD-1', decision: 'Use A', needsImplementation: false
+    }, { repoRoot: f.repoRoot });
+    assert.equal(result.error?.code, 'DECISION_CONFLICT');
+    assert.deepEqual(fs.readFileSync(f.taskMd), before);
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
+test('code decision accepts an explicit intent that matches its declaration', () => {
+  const f = fixture('| II-1 | CD-1 | review-code.md#CD-1 | code | true | | declared | |');
+  try {
+    const result = applyHumanDecision({
+      taskRef: f.taskId, selector: 'CD-1', decision: 'Use A', needsImplementation: true
+    }, {
+      repoRoot: f.repoRoot,
+      metadataProvider: () => ({ timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' })
+    });
+    assert.equal(result.status, 'applied');
+    assert.equal(result.implementationInputId, 'II-1');
+    assert.match(fs.readFileSync(f.taskMd, 'utf8'), /\| II-1 \| CD-1 \| task\.md#HDR-1 \| code \| true \| .+ \| pending \|/);
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
 
 test('human decision atomically updates ledger, HDR, activity and implementation input', () => {
   const f = fixture();
@@ -55,10 +100,11 @@ test('a different ruling for an already decided row fails without writes', () =>
 });
 
 test('human decision leaves task bytes unchanged when the atomic rename fails', () => {
-  const f = fixture();
+  const declaration = '| II-1 | CD-1 | review-code.md#CD-1 | code | true | | declared | |';
+  const f = fixture(declaration);
   try {
     const before = fs.readFileSync(f.taskMd);
-    const result = applyHumanDecision({ taskRef: f.taskId, selector: 'CD-1', decision: 'A', needsImplementation: true }, {
+    const result = applyHumanDecision({ taskRef: f.taskId, selector: 'CD-1', decision: 'A' }, {
       repoRoot: f.repoRoot,
       metadataProvider: () => ({ timestamp: '2026-07-19 12:00:00+00:00', agentInfraVersion: 'v0.8.6-alpha.0' }),
       fileSystem: { renameSync: () => { throw new Error('rename denied'); } },

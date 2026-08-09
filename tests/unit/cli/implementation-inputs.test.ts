@@ -4,8 +4,11 @@ import assert from 'node:assert/strict';
 import {
   createImplementationInput,
   consumeImplementationInput,
+  declareImplementationInput,
+  finalizeImplementationInput,
   parseImplementationInputs,
   renderImplementationInputs,
+  selectDeclaredImplementationInput,
   selectPendingImplementationInput
 } from '../../../lib/task/implementation-inputs.ts';
 
@@ -33,20 +36,47 @@ test('implementation inputs allocate monotonic ids and encode explicit intent', 
   assert.equal(second.status, 'not-required');
 });
 
+test('declared inputs replay by identity and finalize in place', () => {
+  const declared = declareImplementationInput([], {
+    ledgerId: 'CD-1', decisionEvidence: 'review-code.md#CD-1', needsImplementation: true
+  });
+  assert.deepEqual(declared, {
+    id: 'II-1', ledgerId: 'CD-1', decisionEvidence: 'review-code.md#CD-1', stage: 'code',
+    needsImplementation: true, decidedAt: '', status: 'declared', consumedBy: ''
+  });
+  assert.equal(declareImplementationInput([declared], {
+    ledgerId: 'CD-1', decisionEvidence: 'review-code.md#CD-1', needsImplementation: true
+  }), declared);
+  assert.throws(() => declareImplementationInput([declared], {
+    ledgerId: 'CD-1', decisionEvidence: 'review-code.md#CD-1', needsImplementation: false
+  }), /conflict/i);
+  assert.equal(selectDeclaredImplementationInput([declared], 'CD-1', 'review-code.md#CD-1')?.id, 'II-1');
+  assert.equal(selectPendingImplementationInput([declared], '2026-07-18 10:00:00+08:00'), null);
+  const finalized = finalizeImplementationInput(
+    [declared], 'II-1', 'task.md#HDR-1', '2026-07-18 10:01:00+08:00'
+  );
+  assert.equal(finalized[0]?.id, 'II-1');
+  assert.equal(finalized[0]?.status, 'pending');
+  assert.equal(finalized[0]?.decisionEvidence, 'task.md#HDR-1');
+});
+
 test('parser validates schema, ids, stage, and state combinations', () => {
   const valid = parseImplementationInputs(taskWithRows([
+    '| II-4 | CD-4 | review-code.md#CD-4 | code | false | | declared | |',
     '| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 09:00:00+08:00 | pending | |',
     '| II-2 | HD-2 | task.md#HDR-2 | code | false | 2026-07-18 09:01:00+08:00 | not-required | |',
     '| II-3 | CD-3 | task.md#HDR-3 | code | true | 2026-07-18 09:02:00+08:00 | consumed | code-r2.md |'
   ]));
   assert.equal(valid.sectionFound, true);
-  assert.equal(valid.rows.length, 3);
-  assert.equal(valid.rows[2]?.consumedBy, 'code-r2.md');
+  assert.equal(valid.rows.length, 4);
+  assert.equal(valid.rows[3]?.consumedBy, 'code-r2.md');
 
   const invalidRows = [
     '| II-1 | CD-1 | task.md#HDR-1 | plan | true | 2026-07-18 09:00:00+08:00 | pending | |',
     '| II-1 | CD-1 | task.md#HDR-1 | code | false | 2026-07-18 09:00:00+08:00 | pending | |',
-    '| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 09:00:00+08:00 | consumed | |'
+    '| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 09:00:00+08:00 | consumed | |',
+    '| II-1 | CD-1 | review-code.md#CD-1 | code | true | 2026-07-18 09:00:00+08:00 | declared | |',
+    '| II-1 | CD-1 | review-code.md#CD-1 | code | true | | declared | code.md |'
   ];
   for (const row of invalidRows) {
     assert.throws(() => parseImplementationInputs(taskWithRows([row])), /implementation input/i);

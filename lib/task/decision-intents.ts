@@ -4,9 +4,11 @@ import { appendActivityEntry, locateActivityLog } from './activity-log.ts';
 import { isDecisionItem, listDecisionItems, selectDecisionItem } from './decision-items.ts';
 import {
   createImplementationInput,
+  finalizeImplementationInput,
   IMPLEMENTATION_INPUT_ALIASES,
   parseImplementationInputs,
-  renderImplementationInputs
+  renderImplementationInputs,
+  selectDeclaredImplementationInput
 } from './implementation-inputs.ts';
 import { LEDGER_COLUMNS, LEDGER_HEADINGS, parseLedger } from './ledger.ts';
 import type { LedgerRow } from './ledger.ts';
@@ -73,7 +75,7 @@ function existingDecision(
     ? { recordId, implementationInputId: null }
     : { conflict: '--needs-implementation is only valid for code-stage decisions' };
   const inputs = parseImplementationInputs(content).rows.filter((input) => input.ledgerId === row.id && input.decisionEvidence === row.evidence);
-  if (inputs.length !== 1 || inputs[0]!.needsImplementation !== needsImplementation) {
+  if (inputs.length !== 1 || (needsImplementation !== undefined && inputs[0]!.needsImplementation !== needsImplementation)) {
     return { conflict: `implementation intent for '${row.id}' conflicts with the existing decision` };
   }
   return { recordId, implementationInputId: inputs[0]!.id };
@@ -106,8 +108,27 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
     return failed('DECISION_TARGET_INVALID', message, resolved.taskId);
   }
   const row = selected.row;
-  if (row.stage === 'code' && request.needsImplementation === undefined) return failed('DECISION_PAYLOAD_INVALID', 'code-stage decisions require --needs-implementation true|false', resolved.taskId, row.id);
   if (row.stage !== 'code' && request.needsImplementation !== undefined) return failed('DECISION_PAYLOAD_INVALID', '--needs-implementation is only valid for code-stage decisions', resolved.taskId, row.id);
+
+  let parsedInputs: ReturnType<typeof parseImplementationInputs> | null = null;
+  let declaredInput: ReturnType<typeof selectDeclaredImplementationInput> = null;
+  let effectiveNeedsImplementation = request.needsImplementation;
+  if (row.stage === 'code') {
+    try {
+      parsedInputs = parseImplementationInputs(content);
+      declaredInput = selectDeclaredImplementationInput(parsedInputs.rows, row.id, row.evidence);
+    } catch (error) {
+      return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, row.id);
+    }
+    if (declaredInput) {
+      if (request.needsImplementation !== undefined && request.needsImplementation !== declaredInput.needsImplementation) {
+        return failed('DECISION_CONFLICT', `implementation intent for '${row.id}' conflicts with its declaration`, resolved.taskId, row.id);
+      }
+      effectiveNeedsImplementation = declaredInput.needsImplementation;
+    } else if (effectiveNeedsImplementation === undefined) {
+      return failed('DECISION_PAYLOAD_INVALID', 'code-stage decisions require --needs-implementation true|false when no implementation intent was declared', resolved.taskId, row.id);
+    }
+  }
 
   let metadata;
   try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
@@ -132,18 +153,17 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   ];
   let implementationInputId: string | null = null;
   if (row.stage === 'code') {
-    let parsed;
-    try { parsed = parseImplementationInputs(content); }
-    catch (error) { return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, row.id); }
-    const input = createImplementationInput(parsed.rows, {
-      ledgerId: row.id, decisionEvidence: evidence,
-      needsImplementation: request.needsImplementation!, decidedAt: metadata.timestamp
-    });
-    implementationInputId = input.id;
+    const nextInputs = declaredInput
+      ? finalizeImplementationInput(parsedInputs!.rows, declaredInput.id, evidence, metadata.timestamp)
+      : [...parsedInputs!.rows, createImplementationInput(parsedInputs!.rows, {
+          ledgerId: row.id, decisionEvidence: evidence,
+          needsImplementation: effectiveNeedsImplementation!, decidedAt: metadata.timestamp
+        })];
+    implementationInputId = declaredInput?.id ?? nextInputs[nextInputs.length - 1]!.id;
     mutations.push({
       kind: 'section', aliases: IMPLEMENTATION_INPUT_ALIASES,
       heading: findSectionHeading(content, [...IMPLEMENTATION_INPUT_ALIASES]),
-      body: renderImplementationInputs([...parsed.rows, input])
+      body: renderImplementationInputs(nextInputs)
     });
   }
   mutations.push({

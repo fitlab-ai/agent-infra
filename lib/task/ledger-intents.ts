@@ -1,6 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {
+  declareImplementationInput,
+  IMPLEMENTATION_INPUT_ALIASES,
+  parseImplementationInputs,
+  renderImplementationInputs
+} from './implementation-inputs.ts';
 import { LEDGER_COLUMNS, LEDGER_HEADINGS, nextHdId, parseLedger, validateLedgerRows } from './ledger.ts';
 import type { LedgerRow, ReviewStage } from './ledger.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
@@ -13,9 +19,9 @@ type ReviewDisposition = 'confirmed' | 'closed' | 'open' | 'needs-human-decision
 type LedgerIntent =
   | { kind: 'finding-upsert'; taskRef: string; stage: ReviewStage; reviewArtifact: string; ordinal: number; severity: ReviewSeverity; evidence: string; dryRun?: boolean }
   | { kind: 'finding-respond'; taskRef: string; id: string; round: number; status: ExecutorResponse; evidence: string; dryRun?: boolean }
-  | { kind: 'finding-review'; taskRef: string; id: string; status: ReviewDisposition; evidence: string; dryRun?: boolean }
+  | { kind: 'finding-review'; taskRef: string; id: string; status: ReviewDisposition; evidence: string; needsImplementation?: boolean; dryRun?: boolean }
   | { kind: 'decision-next-id'; taskRef: string }
-  | { kind: 'decision-upsert'; taskRef: string; id: string; stage: ReviewStage; artifact: string; dryRun?: boolean };
+  | { kind: 'decision-upsert'; taskRef: string; id: string; stage: ReviewStage; artifact: string; needsImplementation?: boolean; dryRun?: boolean };
 
 type LedgerIntentError = { code: string; message: string };
 type LedgerIntentResult = {
@@ -95,6 +101,15 @@ function ledgerSectionMutation(content: string): TaskMutation[] {
     kind: 'section', aliases: LEDGER_HEADINGS, heading: english ? 'Review Disagreement Ledger' : '审查分歧账本',
     body: `| ${LEDGER_COLUMNS.join(' | ')} |\n|----|-------|-------|----------|--------|----------|`
   }];
+}
+
+function implementationInputMutation(content: string, rows: Parameters<typeof renderImplementationInputs>[0]): TaskMutation {
+  const english = /^##\s+Activity Log\s*$/m.test(content);
+  return {
+    kind: 'section', aliases: IMPLEMENTATION_INPUT_ALIASES,
+    heading: english ? 'Implementation Inputs' : '实现输入',
+    body: renderImplementationInputs(rows)
+  };
 }
 
 function mapWrite(intent: LedgerIntent, entityId: string, before: LedgerRow | null, after: LedgerRow, result: ReturnType<typeof writeTask>): LedgerIntentResult {
@@ -189,9 +204,34 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
     }
   }
 
+  let implementationMutation: TaskMutation | null = null;
+  if (intent.kind === 'decision-upsert' || intent.kind === 'finding-review') {
+    const stage = intent.kind === 'decision-upsert' ? intent.stage : after.stage;
+    const escalates = intent.kind === 'decision-upsert' || intent.status === 'needs-human-decision';
+    if (stage === 'code' && escalates && intent.needsImplementation === undefined) {
+      return failed(intent, 'LEDGER_PAYLOAD_INVALID', 'code-stage decisions require --needs-implementation true|false', resolved.taskId, after.id);
+    }
+    if ((stage !== 'code' || !escalates) && intent.needsImplementation !== undefined) {
+      return failed(intent, 'LEDGER_PAYLOAD_INVALID', '--needs-implementation is only valid for code-stage escalation', resolved.taskId, after.id);
+    }
+    if (stage === 'code' && escalates) {
+      try {
+        const parsed = parseImplementationInputs(content);
+        const declaration = declareImplementationInput(parsed.rows, {
+          ledgerId: after.id, decisionEvidence: after.evidence,
+          needsImplementation: intent.needsImplementation!
+        });
+        const nextRows = parsed.rows.includes(declaration) ? parsed.rows : [...parsed.rows, declaration];
+        implementationMutation = implementationInputMutation(content, nextRows);
+      } catch (error) {
+        return failed(intent, 'LEDGER_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId, after.id);
+      }
+    }
+  }
+
   const result = writeTask({
     taskRef: intent.taskRef, expectedState: 'active',
-    mutations: [...ledgerSectionMutation(content), rowMutation(after)],
+    mutations: [...ledgerSectionMutation(content), rowMutation(after), ...(implementationMutation ? [implementationMutation] : [])],
     dryRun: 'dryRun' in intent ? intent.dryRun : false
   }, { ...options, taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state } });
   return mapWrite(intent, after.id, before, after, result);

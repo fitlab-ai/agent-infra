@@ -13,7 +13,7 @@ function fixture(rows: string[] = []) {
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: old\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n`);
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: old\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n`);
   return { repoRoot, taskId, taskMd: path.join(taskDir, 'task.md') };
 }
 
@@ -178,11 +178,48 @@ test('decision ids are global and decision upsert is dry-run safe', () => {
     assert.equal(inspected.entityId, 'HD-3');
     const before = fs.readFileSync(f.taskMd);
     const planned = applyLedgerIntent({
-      kind: 'decision-upsert', taskRef: f.taskId, id: 'HD-3', stage: 'code', artifact: 'code.md', dryRun: true
+      kind: 'decision-upsert', taskRef: f.taskId, id: 'HD-3', stage: 'code', artifact: 'code.md', needsImplementation: true, dryRun: true
     }, { repoRoot: f.repoRoot, metadataProvider: () => METADATA });
     assert.equal(planned.status, 'planned');
     assert.deepEqual(fs.readFileSync(f.taskMd), before);
   } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
+test('code escalation atomically declares implementation intent and replays without a new id', () => {
+  const f = fixture(['| CD-1 | code | 2 | major | adjusted | code-r2.md#CD-1 |']);
+  try {
+    const options = { repoRoot: f.repoRoot, metadataProvider: () => METADATA };
+    const request = {
+      kind: 'finding-review' as const, taskRef: f.taskId, id: 'CD-1',
+      status: 'needs-human-decision' as const, evidence: 'review-code-r2.md#CD-1', needsImplementation: false
+    };
+    assert.equal(applyLedgerIntent(request, options).status, 'applied');
+    assert.equal(applyLedgerIntent(request, options).status, 'no-op');
+    const content = fs.readFileSync(f.taskMd, 'utf8');
+    assert.equal((content.match(/\| II-1 \|/g) ?? []).length, 1);
+    assert.match(content, /\| II-1 \| CD-1 \| review-code-r2\.md#CD-1 \| code \| false \|\s*\| declared \|/);
+  } finally { fs.rmSync(f.repoRoot, { recursive: true, force: true }); }
+});
+
+test('implementation intent is required only for code escalation', () => {
+  const code = fixture(['| CD-1 | code | 2 | major | adjusted | code-r2.md#CD-1 |']);
+  try {
+    const before = fs.readFileSync(code.taskMd);
+    const result = applyLedgerIntent({
+      kind: 'finding-review', taskRef: code.taskId, id: 'CD-1',
+      status: 'needs-human-decision', evidence: 'review-code-r2.md#CD-1'
+    }, { repoRoot: code.repoRoot, metadataProvider: () => METADATA });
+    assert.equal(result.status, 'failed');
+    assert.deepEqual(fs.readFileSync(code.taskMd), before);
+  } finally { fs.rmSync(code.repoRoot, { recursive: true, force: true }); }
+
+  const plan = fixture();
+  try {
+    const result = applyLedgerIntent({
+      kind: 'decision-upsert', taskRef: plan.taskId, id: 'HD-1', stage: 'plan', artifact: 'plan.md', needsImplementation: true
+    }, { repoRoot: plan.repoRoot, metadataProvider: () => METADATA });
+    assert.equal(result.status, 'failed');
+  } finally { fs.rmSync(plan.repoRoot, { recursive: true, force: true }); }
 });
 
 test('ledger intents translate shared table parser failures into ledger domain errors', () => {
