@@ -24,6 +24,15 @@ type ClientOptions = {
 };
 
 const MINIMUM_GITHUB_CLI_VERSION = '2.16.0';
+const GITHUB_CLI_MAX_BUFFER = 64 * 1024 * 1024;
+const ERROR_DETAIL_LIMIT = 4096;
+
+function boundedFailureDetail(result: RunResult): string {
+  const diagnostic = `${result.stderr}\n${result.error?.message || ''}`.trim() || result.stdout.trim();
+  return diagnostic.length <= ERROR_DETAIL_LIMIT
+    ? diagnostic
+    : `${diagnostic.slice(0, ERROR_DETAIL_LIMIT)}… [truncated]`;
+}
 
 function defaultRunner(args: string[], options: RunOptions): RunResult {
   const command = process.env.AGENT_INFRA_GH_BIN || 'gh';
@@ -38,6 +47,7 @@ function defaultRunner(args: string[], options: RunOptions): RunResult {
     encoding: 'utf8',
     env: process.env,
     input: options.input,
+    maxBuffer: GITHUB_CLI_MAX_BUFFER,
     shell: false
   });
   return {
@@ -60,7 +70,15 @@ function defaultSleep(delayMs: number): void {
 }
 
 function classifyGitHubFailure(result: RunResult): PlatformError {
-  const detail = `${result.stderr}\n${result.stdout}\n${result.error?.message || ''}`.trim();
+  const errorCode = result.error && 'code' in result.error ? (result.error as NodeJS.ErrnoException).code : undefined;
+  if (errorCode === 'ENOBUFS') {
+    return {
+      code: 'PLATFORM_OUTPUT_TOO_LARGE',
+      message: 'GitHub CLI output exceeded the configured limit',
+      retryable: false
+    };
+  }
+  const detail = boundedFailureDetail(result);
   const lower = detail.toLowerCase();
   if (/\b401\b|bad credentials|authentication required|not logged into/.test(lower)) {
     return { code: 'AUTH_REQUIRED', message: detail || 'GitHub authentication is required', retryable: false };
@@ -77,7 +95,7 @@ function classifyGitHubFailure(result: RunResult): PlatformError {
   if (/\b422\b|validation failed/.test(lower)) {
     return { code: 'PLATFORM_REQUEST_INVALID', message: detail || 'GitHub rejected the request', retryable: false };
   }
-  if (result.error && 'code' in result.error && (result.error as NodeJS.ErrnoException).code === 'ENOENT') {
+  if (errorCode === 'ENOENT') {
     return { code: 'PLATFORM_DEPENDENCY_MISSING', message: detail || 'GitHub CLI is unavailable', retryable: false };
   }
   return { code: 'PLATFORM_REQUEST_FAILED', message: detail || 'GitHub request failed', retryable: false };

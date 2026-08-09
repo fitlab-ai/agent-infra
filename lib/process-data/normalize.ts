@@ -24,6 +24,12 @@ function canonicalActor(raw: string): string | null {
   return aliases[lowered] ?? null;
 }
 
+function nextOccurrence(occurrences: Map<string, number>, identity: string): string {
+  const occurrence = (occurrences.get(identity) ?? 0) + 1;
+  occurrences.set(identity, occurrence);
+  return occurrence === 1 ? '' : `occurrence=${occurrence}`;
+}
+
 function normalizePlatformPage(object: CapturedObject): NormalizedRecord[] {
   if (!object.content) return [];
   try {
@@ -105,6 +111,8 @@ function normalizeObjects(objects: CapturedObject[]): NormalizedRecord[] {
 
     const taskId = object.sourceIdentity.match(TASK_ID_RE)?.[0];
     if (/\/task\.md$/.test(object.sourceIdentity) && taskId) {
+      const activityOccurrences = new Map<string, number>();
+      const findingOccurrences = new Map<string, number>();
       const issueNumber = object.content?.match(/^issue_number:\s*(\d+)$/m)?.[1];
       const agentInfraVersion = object.content?.match(/^agent_infra_version:\s*(\S+)$/m)?.[1];
       records.push({
@@ -121,8 +129,10 @@ function normalizeObjects(objects: CapturedObject[]): NormalizedRecord[] {
       });
       for (const match of object.content?.matchAll(ACTIVITY_RE) ?? []) {
         const rawActor = match[3]!;
+        const identity = `${match[1]}:${match[2]}`;
+        const occurrence = nextOccurrence(activityOccurrences, identity);
         records.push({
-          recordId: recordId('lifecycle-event', taskId, `${match[1]}:${match[2]}`),
+          recordId: recordId('lifecycle-event', taskId, occurrence ? `${identity}\0${occurrence}` : identity),
           kind: 'lifecycle-event',
           sourceIdentity: `${taskId}#activity=${match[1]}`,
           sourceSha256: object.sha256,
@@ -143,9 +153,10 @@ function normalizeObjects(objects: CapturedObject[]): NormalizedRecord[] {
         const status = match[5]!.trim();
         const evidence = match[6]!.trim();
         const identity = `${taskId}#finding=${findingId}`;
+        const occurrence = nextOccurrence(findingOccurrences, identity);
         const data = { findingId, stage, round, severity, status, evidence };
         records.push({
-          recordId: recordId('review-finding', identity),
+          recordId: recordId('review-finding', identity, occurrence),
           kind: 'review-finding',
           sourceIdentity: identity,
           sourceSha256: object.sha256,
@@ -154,7 +165,7 @@ function normalizeObjects(objects: CapturedObject[]): NormalizedRecord[] {
         });
         if (status && CONFLICT_STATUSES.has(status)) {
           records.push({
-            recordId: recordId('conflict', identity),
+            recordId: recordId('conflict', identity, occurrence),
             kind: 'conflict',
             sourceIdentity: `${identity}#status=${status}`,
             sourceSha256: object.sha256,

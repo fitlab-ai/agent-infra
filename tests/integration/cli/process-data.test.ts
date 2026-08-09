@@ -62,6 +62,7 @@ test('full capture uses explicit GitHub pages through a fake gh boundary', () =>
   const root = fixture();
   const fake = path.join(root, 'fake-gh.mjs');
   fs.writeFileSync(fake, `
+import fs from 'node:fs';
 const args = process.argv.slice(2);
 if (args[0] === 'repo' && args[1] === 'view') {
   process.stdout.write(JSON.stringify({ nameWithOwner: 'acme/demo' }));
@@ -70,7 +71,7 @@ if (args[0] === 'repo' && args[1] === 'view') {
 if (args[0] === 'api') {
   const endpoint = args[1] || '';
   if (endpoint.includes('/issues?state=all')) {
-    process.stdout.write(JSON.stringify([{ id: 101, number: 1, body: 'TASK-20260101-000001' }]));
+    fs.writeFileSync(1, JSON.stringify([{ id: 101, number: 1, body: 'TASK-20260101-000001', title: 'x'.repeat(3 * 1024 * 1024) }]));
   } else {
     process.stdout.write('[]');
   }

@@ -44,6 +44,14 @@ test('GitHub failure classification distinguishes auth, permission and retryable
   assert.equal(classifyGitHubFailure({ status: 1, stdout: '', stderr: 'HTTP 422: validation failed' }).retryable, false);
 });
 
+test('GitHub failure classification rejects output overflow without replaying or echoing response bodies', () => {
+  const error = Object.assign(new Error('spawnSync gh ENOBUFS'), { code: 'ENOBUFS' });
+  const failure = classifyGitHubFailure({ status: null, stdout: 'private-response-body'.repeat(100_000), stderr: '', error });
+  assert.equal(failure.code, 'PLATFORM_OUTPUT_TOO_LARGE');
+  assert.equal(failure.retryable, false);
+  assert.equal(failure.message, 'GitHub CLI output exceeded the configured limit');
+});
+
 test('GitHub client retries reads but does not blindly replay posts', () => {
   let attempts = 0;
   const client = createGitHubClient({
