@@ -11,10 +11,12 @@ import {
   startSandboxContainer,
   type SandboxRow
 } from './commands/list-running.ts';
+import { resolveSandboxTarget, type SandboxWorkspaceIdentity } from './workspace-identity.ts';
 
 export type SandboxCaptureRequest = {
   taskRef: string;
   branch: string;
+  workspace?: SandboxWorkspaceIdentity;
   command: string[];
   timeoutMs?: number;
   recreate?: boolean;
@@ -44,6 +46,7 @@ export type SandboxCaptureOptions = {
   startContainer?: (name: string) => void;
   ensureReady?: (params: {
     branch: string;
+    workspace?: SandboxWorkspaceIdentity;
     row: SandboxRow;
     allowRecreate: boolean;
   }) => Promise<SandboxReadyResult>;
@@ -183,6 +186,8 @@ export async function runInSandbox(
 ): Promise<SandboxCaptureResult> {
   const config = options.engine ? null : loadConfig();
   const engine = options.engine ?? detectEngine(config!);
+  const workspace = request.workspace
+    ?? (config ? resolveSandboxTarget(request.taskRef, config.repoRoot).workspace : undefined);
   const rows =
     options.rows ??
     (() => {
@@ -200,6 +205,7 @@ export async function runInSandbox(
   if (options.ensureReady) {
     container = (await options.ensureReady({
       branch: request.branch,
+      workspace,
       row: found,
       allowRecreate: request.recreate ?? false
     })).container;
@@ -208,11 +214,12 @@ export async function runInSandbox(
       config,
       engine,
       branch: request.branch,
+      workspace,
       row: found,
       allowRecreate: request.recreate,
-      recreate: async (targetBranch) => {
+      recreate: async () => {
         const { create } = await import('./commands/create.ts');
-        await create([targetBranch, '--no-refresh']);
+        await create([request.taskRef, '--no-refresh']);
       }
     })).container;
   } else if (!found.running) {

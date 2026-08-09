@@ -10,7 +10,19 @@ if (major < 22 || (major === 22 && minor < 9)) {
 
 const command = process.argv[2] || '';
 
-switch (command) {
+if (
+  process.env.AGENT_INFRA_CONTROL_TOKEN
+  && (command === 'task-lifecycle' || command === 'task-orchestration')
+) {
+  const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
+  sandboxControl(['client', command, ...process.argv.slice(3)]);
+} else switch (command) {
+
+  case 'sandbox-control': {
+    const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
+    sandboxControl(process.argv.slice(3));
+    break;
+  }
   case 'agent-client': {
     const { agentClient } = await import('../lib/internal/agent-client.ts');
     agentClient(process.argv.slice(3));

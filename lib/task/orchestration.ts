@@ -718,9 +718,14 @@ function prepareOrchestrationDelegation(
   try {
     return withTaskExecutionLock(
       resolved.repoRoot,
-      resolved.taskId,
-      'task-orchestration.prepare',
-      () => prepareOrchestrationDelegationUnlocked(taskRef, input, options)
+      '__repository__',
+      'task-orchestration.prepare.repository',
+      () => withTaskExecutionLock(
+        resolved.repoRoot,
+        resolved.taskId,
+        'task-orchestration.prepare.task',
+        () => prepareOrchestrationDelegationUnlocked(taskRef, input, options)
+      )
     );
   } catch (error) {
     if (error instanceof TaskExecutionLockError) return failed(error.code, error.message, resolved.taskId);

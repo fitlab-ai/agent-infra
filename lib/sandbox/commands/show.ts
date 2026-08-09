@@ -3,9 +3,19 @@ import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import type { SandboxConfig } from '../config.ts';
 import { loadConfig } from '../config.ts';
-import { assertValidBranchName, worktreeDirCandidates } from '../constants.ts';
-import { resolveBranchArg } from './list-running.ts';
+import {
+  assertValidBranchName,
+  containerNameCandidates,
+  sandboxBranchLabel,
+  sandboxLabel,
+  sandboxTaskIdLabel,
+  sandboxWorkspaceModeLabel,
+  worktreeDirCandidates
+} from '../constants.ts';
+import { fetchSandboxRows, selectSandboxContainer } from './list-running.ts';
 import { resolveTools, toolConfigDirCandidates } from '../tools.ts';
+import { detectEngine } from '../engine.ts';
+import { resolveSandboxTarget } from '../workspace-identity.ts';
 
 const USAGE = `Usage: ai sandbox show <branch | TASK-id | N>
 
@@ -51,10 +61,22 @@ export function show(args: string[] = []): void {
   }
 
   const config = loadConfig();
-  const branch = resolveBranchArg(args[0]!, { repoRoot: config.repoRoot });
+  const target = resolveSandboxTarget(args[0]!, config.repoRoot);
+  const branch = target.branch;
   assertValidBranchName(branch);
 
   const detail = collectSandboxDetail(config, branch);
+  const engine = detectEngine(config);
+  const rows = fetchSandboxRows(
+    engine,
+    sandboxLabel(config),
+    sandboxBranchLabel(config),
+    { mode: sandboxWorkspaceModeLabel(config), taskId: sandboxTaskIdLabel(config) }
+  );
+  const container = selectSandboxContainer(
+    [...rows.running, ...rows.nonRunning],
+    containerNameCandidates(config, branch)
+  );
 
   p.intro(pc.cyan(`Sandbox detail for ${config.project} · ${branch}`));
 
@@ -66,6 +88,10 @@ export function show(args: string[] = []): void {
       process.stdout.write(`  ${worktree}\n`);
     }
   }
+
+  p.log.step('Workspace identity');
+  process.stdout.write(`  Mode: ${container?.workspaceMode ?? 'legacy-invalid'}\n`);
+  process.stdout.write(`  Task: ${container?.taskId ?? '-'}\n`);
 
   for (const tool of detail.toolStates) {
     p.log.step(`${tool.name} state`);

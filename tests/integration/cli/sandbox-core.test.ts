@@ -1037,9 +1037,9 @@ test("sandbox ls formatContainerTable aligns header and rows by column width", a
   const { formatContainerTable } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/ls.ts")>("lib/sandbox/commands/ls.js");
 
   const rows = [
-    { row: "1", shortId: "#01", name: "demo-dev-feature-x", status: "Up 2 hours", branch: "feature/short" },
-    { row: "2", shortId: "-", name: "worker", status: "Exited (0) 20 minutes ago", branch: "bugfix/align-table" },
-    { row: "3", shortId: "-", name: "agent-infra-sandbox-long", status: "Created", branch: "main" }
+    { row: "1", shortId: "#01", name: "demo-dev-feature-x", status: "Up 2 hours", workspace: "task-bound", taskId: "TASK-20260809-010203", branch: "feature/short" },
+    { row: "2", shortId: "-", name: "worker", status: "Exited (0) 20 minutes ago", workspace: "branch-only", taskId: "-", branch: "bugfix/align-table" },
+    { row: "3", shortId: "-", name: "agent-infra-sandbox-long", status: "Created", workspace: "legacy-invalid", taskId: "-", branch: "main" }
   ];
   const lines = formatContainerTable(rows);
   const hashColumn = lines[0]!.indexOf("#");
@@ -1498,7 +1498,11 @@ test("sandbox start resolves a task short id to its branch container", onPlatfor
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      dockerStdoutForPs: "demo-dev-registry-branch\tExited (137) 2 minutes ago\tdemo.sandbox.branch=registry-branch"
+      dockerStdoutForPs: [
+        "demo-dev-registry-branch",
+        "Exited (137) 2 minutes ago",
+        "demo.sandbox.branch=registry-branch,demo.sandbox.workspace-mode=task-bound,demo.sandbox.task-id=TASK-20260301-000001"
+      ].join("\t")
     });
     writeNodeCommandShim(path.join(fixture.binDir, "agent-infra-internal"), INTERNAL_CLI_PATH);
 

@@ -55,6 +55,8 @@ export type SandboxConfig = {
   worktreeBase: string;
   shareBase: string;
   shellConfigBase: string;
+  workspaceViewBase: string;
+  controlBase: string;
   dotfilesDir: string;
   engine: string | null;
   runtimes: string[];
@@ -188,6 +190,8 @@ export function loadConfig({
     worktreeBase: hostJoin(home, '.agent-infra', 'worktrees', project),
     shareBase: hostJoin(home, '.agent-infra', 'share', project),
     shellConfigBase: hostJoin(home, '.agent-infra', 'config', project),
+    workspaceViewBase: hostJoin(home, '.agent-infra', 'workspace-views'),
+    controlBase: hostJoin(home, '.agent-infra', 'sandbox-control'),
     dotfilesDir: hostJoin(home, '.agent-infra', 'dotfiles'),
     engine,
     runtimes,

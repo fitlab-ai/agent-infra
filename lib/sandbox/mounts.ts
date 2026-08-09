@@ -19,9 +19,16 @@ export function sandboxCoreBindMounts(
     'repoRoot' | 'worktreeBase' | 'shareBase' | 'shellConfigBase'
   >,
   branch: string,
-  overrides: { worktree?: string; shellConfigHostDir?: string } = {}
+  overrides: {
+    worktree?: string;
+    shellConfigHostDir?: string;
+    workspaceViewRoot: string;
+    controlDir: string;
+    taskSource?: string;
+    taskId?: string;
+  }
 ): SandboxBindMountDeclaration[] {
-  return [
+  const mounts: SandboxBindMountDeclaration[] = [
     {
       hostPaths: overrides.worktree
         ? [overrides.worktree]
@@ -30,9 +37,9 @@ export function sandboxCoreBindMounts(
       readOnly: false
     },
     {
-      hostPaths: [path.join(config.repoRoot, '.agents', 'workspace')],
+      hostPaths: [overrides.workspaceViewRoot],
       containerPath: '/workspace/.agents/workspace',
-      readOnly: false
+      readOnly: true
     },
     {
       hostPaths: [shareCommonDir(config)],
@@ -52,4 +59,17 @@ export function sandboxCoreBindMounts(
       readOnly: true
     }
   ];
+  if (overrides.taskSource && overrides.taskId) {
+    mounts.splice(2, 0, {
+      hostPaths: [overrides.taskSource],
+      containerPath: path.posix.join('/workspace/.agents/workspace/active', overrides.taskId),
+      readOnly: false
+    });
+  }
+  mounts.push({
+    hostPaths: [overrides.controlDir],
+    containerPath: '/run/agent-infra/control',
+    readOnly: false
+  });
+  return mounts;
 }

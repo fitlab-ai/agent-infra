@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadServerConfig } from '../server/config.ts';
-import { resolveTaskBranch } from '../sandbox/task-resolver.ts';
+import { resolveSandboxTarget, type SandboxWorkspaceIdentity } from '../sandbox/workspace-identity.ts';
 import { createRunId, runInSandbox, type SandboxRunMetadata } from '../sandbox/capture.ts';
 import { loadShortIdByTaskId, normalizeShortIdInput } from '../task/short-id.ts';
 import { buildTuiCommand, renderPrompt, selectTui } from './tui.ts';
@@ -19,6 +19,7 @@ export type ParsedRunArgs = {
 export type SandboxRunRequest = {
   taskRef: string;
   branch: string;
+  workspace?: SandboxWorkspaceIdentity;
   command: string[];
   runId?: string;
   recreate?: boolean;
@@ -136,7 +137,6 @@ function resolveActiveTaskIdentity(taskRef: string, repoRoot: string): ActiveTas
 
   if (TASK_ID_RE.test(taskRef)) {
     taskId = taskRef;
-    resolvedTaskRef = loadShortIdByTaskId(repoRoot).get(taskId) ?? taskRef;
   } else {
     const normalized = normalizeShortIdInput(taskRef, { shortIdLength: readShortIdLength(repoRoot) });
     if (normalized.kind !== 'shortId') return null;
@@ -211,7 +211,8 @@ export async function runSkill(args: string[], options: RunSkillOptions = {}): P
   }
 
   const repoRoot = options.repoRoot ?? config?.repoRoot ?? process.cwd();
-  const branch = resolveTaskBranch(parsed.taskRef, repoRoot);
+  const target = resolveSandboxTarget(parsed.taskRef, repoRoot);
+  const branch = target.branch;
   const identity = resolveActiveTaskIdentity(parsed.taskRef, repoRoot);
   const runId = identity ? createRunId() : undefined;
   const writeStdout = options.writeStdout ?? ((chunk: string) => process.stdout.write(chunk));
@@ -222,6 +223,7 @@ export async function runSkill(args: string[], options: RunSkillOptions = {}): P
   const result = await runSandbox({
     taskRef: parsed.taskRef,
     branch,
+    workspace: target.workspace,
     command,
     runId,
     recreate: parsed.recreate

@@ -9,9 +9,9 @@ import { detectEngine } from '../engine.ts';
 import { ensureSandboxReady } from '../recovery.ts';
 import {
   fetchSandboxRows,
-  resolveBranchArg,
   selectSandboxContainer,
 } from './list-running.ts';
+import { resolveSandboxTarget } from '../workspace-identity.ts';
 
 const USAGE = `Usage: ai sandbox start [--recreate] <branch | TASK-id | N>
 
@@ -56,7 +56,8 @@ export async function start(args: string[]): Promise<void> {
 
   const config = loadConfig();
   const engine = detectEngine(config);
-  const branch = resolveBranchArg(parsed.target, { repoRoot: config.repoRoot });
+  const target = resolveSandboxTarget(parsed.target, config.repoRoot);
+  const branch = target.branch;
   assertValidBranchName(branch);
 
   const { running, nonRunning } = fetchSandboxRows(
@@ -79,11 +80,12 @@ export async function start(args: string[]): Promise<void> {
     config,
     engine,
     branch,
+    workspace: target.workspace,
     row: found,
     allowRecreate: parsed.recreate,
-    recreate: async (targetBranch) => {
+    recreate: async () => {
       const { create } = await import('./create.ts');
-      await create([targetBranch, '--no-refresh']);
+      await create([target.requestedRef, '--no-refresh']);
     }
   });
   const message = ready.path === 'healthy'

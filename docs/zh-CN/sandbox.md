@@ -100,11 +100,17 @@ ai sandbox create feature/proxy --inherit-proxy
 
 `ai sandbox start`、`ai sandbox exec` 与使用沙箱的 `ai run` 现在会在执行用户工作前共享同一套 ready 检查。已停止的容器启动后，agent-infra 会修复 tmpfs owner/mode，重水合容器内仍有 staging mount 的全部 seed，重建内置 Codex prompts 链接，并验证 mount topology、shell aliases、Codex 可用性、状态目录可写性以及本次实际复制的条目。已在运行的容器只接受无损结构检查：只要现有 seed target 可写，即使内容、时间戳或 inode 与宿主 staging 副本不同也会原样保留。恢复不会重放 custom `postSetupCmds`，custom `versionCmd` 结果仍只是 advisory。
 
+## 按任务隔离的工作区身份
+
+每个沙箱都有显式 workspace identity。task-bound 沙箱挂载独立的只读 workspace 视图，并且只把 `.agents/workspace/active/<TASK-id>` 以可写子挂载覆盖；其他状态下的全部任务都不可见。branch-only 沙箱获得同样稳定的目录结构，但短号注册表为空且不挂载任何宿主任务目录。宿主 workspace 根目录绝不会被挂载。
+
+任务生命周期与编排命令通过每容器独立的控制通道执行，宿主 broker 会把每个请求重新绑定到容器标签中的完整 task ID。branch-only 容器、identity 不匹配、未知命令族和旧共享 workspace 容器都会 fail closed。`ai sandbox ls` 通过 `WORKSPACE` 与 `TASK` 列展示身份，`ai sandbox show` 展示同一份基于标签的事实。`legacy-invalid` 表示必须显式重建容器；同一分支切换身份时，需先执行 `ai sandbox rm <branch>`，再执行 `ai sandbox create <task-ref>`。
+
 原地恢复失败时，命令会在进入容器或调度 tmux 前停止，不会自动替换容器。只有显式传入 `--recreate` 才授权 container-only fallback：`ai sandbox start --recreate <target>`、`ai sandbox exec --recreate <target> [cmd...]` 或 `ai run <skill> <task-ref> --recreate`。对于 `sandbox exec`，只有 target 之前的 flag 由宿主解析；target 之后的 `--recreate` 会透传给容器命令。替换会保留 worktree、local branch、宿主管理的工具 seed、shell 配置与 `/share` 数据，但会丢弃旧 container ID、writable layer、普通 `/tmp`、进程、tmux session 与其他 RAM 状态；该路径绝不会执行完整的 `ai sandbox rm`。
 
 tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/.codex` 下的 Codex 数据库、日志、session 与其他未列入 seed 的文件无法恢复；`config.toml`、`model-catalogs` 等声明式 seed 可以从只读 staging mount 重建；bind mount 的 worktree、凭据、shell 配置与 share 目录继续由宿主持久化。
 
-`ai sandbox ls` 保持精简：只列出当前项目的 Containers 容器表（`#` 行号、`SHORT` 任务短号，以及名称、状态、分支），不再打印 worktree 列表和各工具的 state 路径。要查看某个沙箱的这些详情，使用 `ai sandbox show <branch | TASK-id | N>`：它会打印该分支的 worktree 路径和各工具（Claude Code、Codex、Antigravity CLI、OpenCode）的 state 路径。入参契约与 `ai sandbox exec`、`ai sandbox start` 一致，因此 `ai sandbox show 11` 会通过 `.agents/workspace/active/.short-ids.json` 解析当前任务短号。
+`ai sandbox ls` 保持精简：只列出当前项目的 Containers 容器表（`#` 行号、`SHORT` 任务短号，以及名称、状态、workspace identity、完整 task ID 和分支），不再打印 worktree 列表和各工具的 state 路径。要查看某个沙箱的这些详情，使用 `ai sandbox show <branch | TASK-id | N>`：它会打印基于标签的 workspace identity、该分支的 worktree 路径和各工具（Claude Code、Codex、Antigravity CLI、OpenCode）的 state 路径。入参契约与 `ai sandbox exec`、`ai sandbox start` 一致，因此 `ai sandbox show 11` 会通过 `.agents/workspace/active/.short-ids.json` 解析当前任务短号。
 
 下一个大版本的破坏性迁移：任务短号仅使用裸数字。请把 `#NN` 改为 `NN`；引用后的 `#NN` 输入也会被拒绝。
 

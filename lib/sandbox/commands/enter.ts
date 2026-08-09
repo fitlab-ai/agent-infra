@@ -26,9 +26,9 @@ import { runInteractiveWithClipboardBridge } from '../clipboard/bridge.ts';
 import { detectHostTimezone } from '../host-timezone.ts';
 import {
   fetchSandboxRows,
-  resolveBranchArg,
   selectSandboxContainer,
 } from './list-running.ts';
+import { resolveSandboxTarget } from '../workspace-identity.ts';
 
 const USAGE = `Usage: ai sandbox exec [--recreate] <branch | TASK-id | N> [cmd...]
 
@@ -160,7 +160,8 @@ export async function enter(args: string[]): Promise<number> {
   validateClaudeCredentialsEnvOverride();
   const engine = detectEngine(config);
   const parsed = parseEnterArgs(args);
-  const branch = resolveBranchArg(parsed.target, { repoRoot: config.repoRoot });
+  const target = resolveSandboxTarget(parsed.target, config.repoRoot);
+  const branch = target.branch;
   assertValidBranchName(branch);
 
   const { running, nonRunning } = fetchSandboxRows(
@@ -182,11 +183,12 @@ export async function enter(args: string[]): Promise<number> {
     config,
     engine,
     branch,
+    workspace: target.workspace,
     row: found,
     allowRecreate: parsed.recreate,
-    recreate: async (targetBranch) => {
+    recreate: async () => {
       const { create } = await import('./create.ts');
-      await create([targetBranch, '--no-refresh']);
+      await create([target.requestedRef, '--no-refresh']);
     }
   });
   const container = ready.container;

@@ -1,6 +1,8 @@
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import { applyTaskLifecycle, lifecycleIntentCatalog } from '../task/lifecycle.ts';
 import type { TaskLifecycleRequest } from '../task/lifecycle.ts';
+import { resolveTaskRef } from '../task/resolve-ref.ts';
+import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 
 const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.join(', ')}\n`;
 const FLAGS: Record<string, string> = {
@@ -37,7 +39,26 @@ function taskLifecycle(args: string[] = []): void {
   const agent = normalizeAgentToken(String(values.agent ?? ''));
   if (!agent) { usageFailure(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
   values.agent = agent;
-  const result = applyTaskLifecycle(values as TaskLifecycleRequest);
+  const resolved = resolveTaskRef(String(values.taskRef));
+  if (!resolved.ok) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: resolved.code, message: resolved.message } })}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  let result: ReturnType<typeof applyTaskLifecycle>;
+  try {
+    result = withTaskExecutionLock(
+      resolved.repoRoot,
+      resolved.taskId,
+      `task-lifecycle.${String(values.intent)}`,
+      () => applyTaskLifecycle(values as TaskLifecycleRequest)
+    );
+  } catch (error) {
+    if (!(error instanceof TaskExecutionLockError)) throw error;
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: error.code, message: error.message } })}\n`);
+    process.exitCode = 1;
+    return;
+  }
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
 }

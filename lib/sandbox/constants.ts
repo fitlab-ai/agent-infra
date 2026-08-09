@@ -103,6 +103,14 @@ export function sandboxBranchLabel(config: Pick<SandboxPathConfig, 'project'>): 
   return `${sandboxLabel(config)}.branch`;
 }
 
+export function sandboxWorkspaceModeLabel(config: Pick<SandboxPathConfig, 'project'>): string {
+  return `${sandboxLabel(config)}.workspace-mode`;
+}
+
+export function sandboxTaskIdLabel(config: Pick<SandboxPathConfig, 'project'>): string {
+  return `${sandboxLabel(config)}.task-id`;
+}
+
 export function sandboxImageConfigLabel(config: Pick<SandboxPathConfig, 'project'>): string {
   return `${sandboxLabel(config)}.image-config`;
 }

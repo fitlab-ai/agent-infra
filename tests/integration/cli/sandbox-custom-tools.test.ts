@@ -4,6 +4,10 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  materializeSandboxControl,
+  materializeSandboxWorkspaceView
+} from "../../../lib/sandbox/workspace-view.ts";
 
 import {
   gitSafeEnv,
@@ -39,6 +43,8 @@ test("sandbox recovery does not replay custom postSetupCmds or versionCmd", asyn
     worktreeBase: path.join(tmpDir, "worktrees", "demo"),
     shareBase: path.join(tmpDir, "share", "demo"),
     shellConfigBase: path.join(tmpDir, "config", "demo"),
+    workspaceViewBase: path.join(tmpDir, "home", ".agent-infra", "workspace-views"),
+    controlBase: path.join(tmpDir, "home", ".agent-infra", "sandbox-control"),
     tools: ["custom-tool"],
     customTools: [{
       id: "custom-tool",
@@ -51,9 +57,25 @@ test("sandbox recovery does not replay custom postSetupCmds or versionCmd", asyn
       postSetupCmds: ["custom-tool non-idempotent-setup"]
     }]
   } as unknown as SandboxConfig;
+  fs.mkdirSync(config.repoRoot, { recursive: true });
+  const view = materializeSandboxWorkspaceView({
+    base: config.workspaceViewBase,
+    project: config.project,
+    container: "demo-dev-feature..demo",
+    identity: { mode: "branch-only" }
+  });
+  const control = materializeSandboxControl({
+    base: config.controlBase,
+    repoRoot: config.repoRoot,
+    project: config.project,
+    container: "demo-dev-feature..demo",
+    branch: "feature/demo",
+    identity: { mode: "branch-only" }
+  });
   const mounts = [
     { Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
-    { Source: path.join(config.repoRoot, ".agents", "workspace"), Destination: "/workspace/.agents/workspace", RW: true },
+    { Source: view.root, Destination: "/workspace/.agents/workspace", RW: false },
+    { Source: control.channelDir, Destination: "/run/agent-infra/control", RW: true },
     { Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
     { Source: path.join(config.shareBase, "branches", branchDir), Destination: "/share/branch", RW: true },
     { Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false }
@@ -69,7 +91,10 @@ test("sandbox recovery does not replay custom postSetupCmds or versionCmd", asyn
       deps: {
         run: () => JSON.stringify([{
           Id: "fixture-container-id",
-          Config: { Labels: { "demo.sandbox.branch": "feature/demo" } },
+          Config: { Labels: {
+            "demo.sandbox.branch": "feature/demo",
+            "demo.sandbox.workspace-mode": "branch-only"
+          } },
           Mounts: mounts
         }]),
         runOk: (_engine, _cmd, args) => {

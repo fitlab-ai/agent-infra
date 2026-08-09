@@ -21,6 +21,15 @@ import {
 } from "../../../lib/sandbox/recovery.ts";
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
 import { tmpfsSeedTargetPath } from "../../../lib/sandbox/tools.ts";
+import {
+  materializeSandboxControl,
+  materializeSandboxWorkspaceView
+} from "../../../lib/sandbox/workspace-view.ts";
+
+const BRANCH_ONLY_LABELS = {
+  "demo.sandbox.branch": "feature/demo",
+  "demo.sandbox.workspace-mode": "branch-only"
+};
 
 function healthyRecoverySnapshot(): SandboxRecoverySnapshot {
   return {
@@ -86,6 +95,8 @@ function recoveryFixtureConfig(tmpDir: string): SandboxConfig {
     worktreeBase: path.join(tmpDir, "worktrees", project),
     shareBase: path.join(tmpDir, "share", project),
     shellConfigBase: path.join(tmpDir, "config", project),
+    workspaceViewBase: path.join(tmpDir, "home", ".agent-infra", "workspace-views"),
+    controlBase: path.join(tmpDir, "home", ".agent-infra", "sandbox-control"),
     tools: ["codex"],
     customTools: []
   } as unknown as SandboxConfig;
@@ -106,6 +117,20 @@ function recoveryFixtureConfig(tmpDir: string): SandboxConfig {
     "model = 'runtime-drift-must-survive'\n",
     "utf8"
   );
+  materializeSandboxWorkspaceView({
+    base: config.workspaceViewBase,
+    project,
+    container: "demo-dev-feature..demo",
+    identity: { mode: "branch-only" }
+  });
+  materializeSandboxControl({
+    base: config.controlBase,
+    repoRoot: config.repoRoot,
+    project,
+    container: "demo-dev-feature..demo",
+    branch: "feature/demo",
+    identity: { mode: "branch-only" }
+  });
   return config;
 }
 
@@ -119,9 +144,12 @@ function recoveryFixtureMounts(config: SandboxConfig): Array<Record<string, unkn
     config.project,
     branchDir
   );
+  const view = fs.readdirSync(path.join(config.workspaceViewBase, config.project, "demo-dev-feature..demo"))[0]!;
+  const control = fs.readdirSync(path.join(config.controlBase, config.project, "demo-dev-feature..demo"))[0]!;
   return [
     { Type: "bind", Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
-    { Type: "bind", Source: path.join(config.repoRoot, ".agents", "workspace"), Destination: "/workspace/.agents/workspace", RW: true },
+    { Type: "bind", Source: path.join(config.workspaceViewBase, config.project, "demo-dev-feature..demo", view), Destination: "/workspace/.agents/workspace", RW: false },
+    { Type: "bind", Source: path.join(config.controlBase, config.project, "demo-dev-feature..demo", control, "channel"), Destination: "/run/agent-infra/control", RW: true },
     { Type: "bind", Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
     { Type: "bind", Source: path.join(config.shareBase, "branches", branchDir), Destination: "/share/branch", RW: true },
     { Type: "bind", Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false },
@@ -207,7 +235,7 @@ test("recovery accepts bind sources that resolve to the same filesystem object",
       deps: {
         run: () => JSON.stringify([{
           Id: "fixture-container-id",
-          Config: { Labels: { "demo.sandbox.branch": "feature/demo" } },
+          Config: { Labels: BRANCH_ONLY_LABELS },
           Mounts: mounts
         }]),
         runOk: () => true
@@ -251,7 +279,7 @@ test("recovery recognizes tmpfs declared only through HostConfig on OrbStack", (
     deps: {
       run: () => JSON.stringify([{
         Id: "fixture-container-id",
-        Config: { Labels: { "demo.sandbox.branch": "feature/demo" } },
+        Config: { Labels: BRANCH_ONLY_LABELS },
         HostConfig: { Tmpfs: { "/home/devuser/.codex": options } },
         Mounts: mounts
       }]),
@@ -305,7 +333,7 @@ test("tmpfs permission probe compares numeric owner, primary group, and mode", (
       deps: {
         run: () => JSON.stringify([{
           Id: "fixture-container-id",
-          Config: { Labels: { "demo.sandbox.branch": "feature/demo" } },
+          Config: { Labels: BRANCH_ONLY_LABELS },
           Mounts: recoveryFixtureMounts(config)
         }]),
         runOk: (_engine, _cmd, args) => {
@@ -366,7 +394,7 @@ test("running permission repair re-assesses seed targets before hydration", asyn
       deps: {
         run: () => JSON.stringify([{
           Id: "fixture-container-id",
-          Config: { Labels: { "demo.sandbox.branch": "feature/demo" } },
+          Config: { Labels: BRANCH_ONLY_LABELS },
           Mounts: recoveryFixtureMounts(config)
         }]),
         runOk: (_engine, _cmd, args) => {
@@ -422,33 +450,33 @@ test("recovery rejects mount and identity hard failures before writes", async ()
   }> = [
     {
       name: "wrong worktree source",
-      labels: { "demo.sandbox.branch": "feature/demo" },
+      labels: BRANCH_ONLY_LABELS,
       mounts: baseMounts.map((mount) => mount.Destination === "/workspace"
         ? { ...mount, Source: wrongWorktreeSource }
         : mount)
     },
     {
       name: "read-only worktree",
-      labels: { "demo.sandbox.branch": "feature/demo" },
+      labels: BRANCH_ONLY_LABELS,
       mounts: baseMounts.map((mount) => mount.Destination === "/workspace"
         ? { ...mount, RW: false }
         : mount)
     },
     {
       name: "inaccessible worktree source",
-      labels: { "demo.sandbox.branch": "feature/demo" },
+      labels: BRANCH_ONLY_LABELS,
       mounts: baseMounts,
       unavailableSource: worktreeSource
     },
     {
       name: "inaccessible live mount source",
-      labels: { "demo.sandbox.branch": "feature/demo" },
+      labels: BRANCH_ONLY_LABELS,
       mounts: baseMounts,
       unavailableSource: liveSource
     },
     {
       name: "missing live mount",
-      labels: { "demo.sandbox.branch": "feature/demo" },
+      labels: BRANCH_ONLY_LABELS,
       mounts: baseMounts.filter((mount) => mount.Destination !== "/home/devuser/.codex/auth.json")
     },
     {
@@ -507,10 +535,11 @@ test("hard recovery failure requires explicit container replacement authorizatio
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-recreate-"));
   let recreated = false;
   let writes = 0;
+  const replacementCommands: string[][] = [];
   const config = recoveryFixtureConfig(tmpDir);
   const inspect = () => JSON.stringify([{
     Id: "fixture-container-id",
-    Config: { Labels: { "demo.sandbox.branch": "feature/demo" } },
+    Config: { Labels: BRANCH_ONLY_LABELS },
     Mounts: recoveryFixtureMounts(config).map((mount) =>
       mount.Destination === "/home/devuser/.codex"
         ? { ...mount, Type: recreated ? "tmpfs" : "bind" }
@@ -520,7 +549,10 @@ test("hard recovery failure requires explicit container replacement authorizatio
   const deps = {
     run: () => inspect(),
     runOk: () => true,
-    runVerbose: () => { writes += 1; },
+    runVerbose: (_engine: string, _cmd: string, args: string[]) => {
+      writes += 1;
+      replacementCommands.push(args);
+    },
     fetchRows: () => ({
       running: [{ name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 }],
       nonRunning: []
@@ -547,12 +579,19 @@ test("hard recovery failure requires explicit container replacement authorizatio
       branch: "feature/demo",
       row,
       allowRecreate: true,
-      recreate: async () => { recreated = true; },
+      recreate: async () => {
+        assert.deepEqual(replacementCommands, [
+          ["stop", "demo-dev-feature..demo"],
+          ["rm", "demo-dev-feature..demo"]
+        ]);
+        recreated = true;
+      },
       writeWarning: () => {},
       deps
     });
     assert.equal(result.path, "recreated");
     assert.equal(result.container, "demo-dev-feature..demo");
+    assert.equal(writes, 2);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

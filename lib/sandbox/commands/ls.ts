@@ -1,10 +1,15 @@
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { loadConfig } from '../config.ts';
-import { sandboxBranchLabel, sandboxLabel } from '../constants.ts';
+import {
+  sandboxBranchLabel,
+  sandboxLabel,
+  sandboxTaskIdLabel,
+  sandboxWorkspaceModeLabel
+} from '../constants.ts';
 import { detectEngine } from '../engine.ts';
 import { formatTable } from '../../table.ts';
-import { lookupShortIdByBranch } from '../../task/short-id.ts';
+import { loadShortIdByTaskId } from '../../task/short-id.ts';
 import { fetchSandboxRows } from './list-running.ts';
 
 export { containerListFormat, parseLabels } from './list-running.ts';
@@ -22,20 +27,22 @@ to remove with "ai sandbox rm <branch>".
 Use "ai sandbox show <ref>" for a single sandbox's worktree and per-tool
 state paths.`;
 
-const CONTAINER_TABLE_HEADERS = ['#', 'SHORT', 'NAMES', 'STATUS', 'BRANCH'] as const;
+const CONTAINER_TABLE_HEADERS = ['#', 'SHORT', 'NAMES', 'STATUS', 'WORKSPACE', 'TASK', 'BRANCH'] as const;
 
 type ContainerTableRow = {
   row: string;
   shortId: string;
   name: string;
   status: string;
+  workspace: string;
+  taskId: string;
   branch: string;
 };
 
 export function formatContainerTable(rows: ContainerTableRow[], zebra = false): string[] {
   return formatTable(
     CONTAINER_TABLE_HEADERS,
-    rows.map((r) => [r.row, r.shortId, r.name, r.status, r.branch]),
+    rows.map((r) => [r.row, r.shortId, r.name, r.status, r.workspace, r.taskId, r.branch]),
     { zebra }
   );
 }
@@ -49,7 +56,12 @@ export function ls(args: string[] = []): void {
   const config = loadConfig();
   const engine = detectEngine(config);
   const label = sandboxLabel(config);
-  const { running, nonRunning } = fetchSandboxRows(engine, label, sandboxBranchLabel(config));
+  const { running, nonRunning } = fetchSandboxRows(
+    engine,
+    label,
+    sandboxBranchLabel(config),
+    { mode: sandboxWorkspaceModeLabel(config), taskId: sandboxTaskIdLabel(config) }
+  );
 
   p.intro(pc.cyan(`Sandbox status for ${config.project}`));
 
@@ -59,12 +71,16 @@ export function ls(args: string[] = []): void {
     p.log.warn('  No sandbox containers');
   } else {
     const tableRows: ContainerTableRow[] = ordered.map((container, i) => {
-      const shortId = container.branch ? lookupShortIdByBranch(container.branch, config.repoRoot) : null;
+      const shortId = container.taskId
+        ? loadShortIdByTaskId(config.repoRoot).get(container.taskId) ?? null
+        : null;
       return {
         row: String(i + 1),
         shortId: shortId ?? '-',
         name: container.name,
         status: container.status,
+        workspace: container.workspaceMode ?? 'legacy-invalid',
+        taskId: container.taskId ?? '-',
         branch: container.branch
       };
     });

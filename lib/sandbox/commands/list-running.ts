@@ -4,6 +4,7 @@ import path from 'node:path';
 import { runSafeEngine, runVerboseEngine } from '../shell.ts';
 import { resolveTaskBranch } from '../task-resolver.ts';
 import { isRemovedHashShortIdInput } from '../../task/short-id.ts';
+import { parseSandboxWorkspaceIdentity } from '../workspace-identity.ts';
 
 export type SandboxRow = {
   name: string;
@@ -11,6 +12,8 @@ export type SandboxRow = {
   branch: string;
   running: boolean;
   index: number | null;
+  workspaceMode?: 'task-bound' | 'branch-only' | 'legacy-invalid';
+  taskId?: string | null;
 };
 
 export function containerListFormat(): string {
@@ -36,19 +39,32 @@ export function parseLabels(csv: string): Record<string, string> {
   return labels;
 }
 
-export function parseSandboxRows(rawOutput: string, branchKey: string): SandboxRow[] {
+export function parseSandboxRows(
+  rawOutput: string,
+  branchKey: string,
+  workspaceKeys?: Readonly<{ mode: string; taskId: string }>
+): SandboxRow[] {
   if (!rawOutput) {
     return [];
   }
   return rawOutput.split('\n').map((line) => {
     const [name = '', status = '', labelsCsv = ''] = line.split('\t');
-    const branch = parseLabels(labelsCsv)[branchKey] ?? '';
+    const labels = parseLabels(labelsCsv);
+    const workspace = workspaceKeys
+      ? parseSandboxWorkspaceIdentity(labels, workspaceKeys)
+      : null;
     return {
       name,
       status,
-      branch,
+      branch: labels[branchKey] ?? '',
       running: status.startsWith('Up '),
-      index: null
+      index: null,
+      ...(workspace
+        ? {
+          workspaceMode: workspace.mode,
+          taskId: workspace.mode === 'task-bound' ? workspace.taskId : null
+        }
+        : {})
     };
   });
 }
@@ -76,7 +92,8 @@ export function sortAndIndexSandboxRows(rows: SandboxRow[]): {
 export function fetchSandboxRows(
   engine: string,
   label: string,
-  branchKey: string
+  branchKey: string,
+  workspaceKeys?: Readonly<{ mode: string; taskId: string }>
 ): { running: SandboxRow[]; nonRunning: SandboxRow[] } {
   const raw = runSafeEngine(engine, 'docker', [
     'ps',
@@ -86,7 +103,7 @@ export function fetchSandboxRows(
     '--format',
     containerListFormat()
   ]);
-  return sortAndIndexSandboxRows(parseSandboxRows(raw, branchKey));
+  return sortAndIndexSandboxRows(parseSandboxRows(raw, branchKey, workspaceKeys));
 }
 
 /**

@@ -13,6 +13,11 @@ function writeTaskFixture(options: { withShortId?: boolean } = {}): string {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run-skill-repo-'));
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'),
+    JSON.stringify({ version: 1, ids: { '01': TASK_ID } }),
+    'utf8'
+  );
   if (options.withShortId) {
     fs.mkdirSync(path.join(repoRoot, '.agents'), { recursive: true });
     fs.mkdirSync(path.join(repoRoot, '.agents', 'scripts'), { recursive: true });

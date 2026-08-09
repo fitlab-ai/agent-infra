@@ -2,9 +2,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import type { ExecFileSyncOptions, StdioOptions } from 'node:child_process';
 import { parseArgs } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { listAgentClientAdapters } from '../../agent-clients/registry.ts';
@@ -20,6 +21,8 @@ import {
   sandboxImageRefreshLabel,
   sandboxLabel,
   sandboxRuntimeCapabilityLabel,
+  sandboxTaskIdLabel,
+  sandboxWorkspaceModeLabel,
   shareBranchDir,
   shareCommonDir,
   shellConfigDir,
@@ -44,7 +47,11 @@ import {
   runSafeEngine,
   runVerboseEngine
 } from '../shell.ts';
-import { resolveTaskBranch } from '../task-resolver.ts';
+import {
+  parseSandboxWorkspaceIdentity,
+  resolveSandboxTarget,
+  sameSandboxWorkspaceIdentity
+} from '../workspace-identity.ts';
 import {
   createSandboxCapabilityPlan,
   runSandboxHooks,
@@ -64,6 +71,11 @@ import {
 } from '../recovery.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from '../mounts.ts';
+import {
+  assertSandboxTaskSource,
+  materializeSandboxControl,
+  materializeSandboxWorkspaceView
+} from '../workspace-view.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
@@ -153,6 +165,12 @@ type HostShellConfig = {
   hostDir: string;
   mounts: Array<{ hostPath: string; containerPath: string }>;
 };
+
+function internalCliPath(): string {
+  const directory = path.dirname(fileURLToPath(import.meta.url));
+  const extension = path.extname(fileURLToPath(import.meta.url));
+  return path.resolve(directory, '..', '..', '..', 'bin', `internal-cli${extension}`);
+}
 
 function resolveToolDirs(config: Pick<SandboxCreateConfig, 'project'>, tools: SandboxTool[], branch: string): ResolvedTool[] {
   return tools.map((tool) => {
@@ -1199,7 +1217,8 @@ export async function create(args: string[]): Promise<void> {
 
   const config = loadConfig();
   const [branchOrTaskId = '', base] = positionals;
-  const branch = resolveTaskBranch(branchOrTaskId, config.repoRoot);
+  const target = resolveSandboxTarget(branchOrTaskId, config.repoRoot);
+  const branch = target.branch;
   assertValidBranchName(branch);
   const effectiveConfig = {
     ...config,
@@ -1431,6 +1450,33 @@ export async function create(args: string[]): Promise<void> {
             .filter((name) => existing.includes(name));
 
           if (matchedContainers.length > 0) {
+            for (const name of matchedContainers) {
+              const rawLabels = runSafeEngine(engine, 'docker', [
+                'inspect', '--format', '{{json .Config.Labels}}', name
+              ]).trim();
+              let labels: Record<string, string> = {};
+              try {
+                labels = JSON.parse(rawLabels) as Record<string, string>;
+              } catch {
+                labels = {};
+              }
+              const existingIdentity = parseSandboxWorkspaceIdentity(labels, {
+                mode: sandboxWorkspaceModeLabel(effectiveConfig),
+                taskId: sandboxTaskIdLabel(effectiveConfig)
+              });
+              if (!sameSandboxWorkspaceIdentity(existingIdentity, target.workspace)) {
+                const existingDescription = existingIdentity.mode === 'task-bound'
+                  ? `task-bound:${existingIdentity.taskId}`
+                  : existingIdentity.mode;
+                const requestedDescription = target.workspace.mode === 'task-bound'
+                  ? `task-bound:${target.workspace.taskId}`
+                  : target.workspace.mode;
+                throw new Error(
+                  `SANDBOX_WORKSPACE_IDENTITY_CONFLICT: container '${name}' is ${existingDescription}, `
+                  + `but this request is ${requestedDescription}. Run 'ai sandbox rm ${branch}' and retry.`
+                );
+              }
+            }
             message('Removing old container instance...');
             for (const name of matchedContainers) {
               runSafeEngine(engine, 'docker', ['stop', name]);
@@ -1518,7 +1564,20 @@ export async function create(args: string[]): Promise<void> {
             const tmpfsArgs = effectiveResolvedTools.flatMap(({ tool }) =>
               tool.tmpfs ? buildTmpfsRunArgs(tool.containerMount, tool.tmpfs) : []
             );
-            const workspaceDir = path.join(effectiveConfig.repoRoot, '.agents', 'workspace');
+            const workspaceView = materializeSandboxWorkspaceView({
+              base: effectiveConfig.workspaceViewBase,
+              project: effectiveConfig.project,
+              container,
+              identity: target.workspace
+            });
+            const control = materializeSandboxControl({
+              base: effectiveConfig.controlBase,
+              repoRoot: effectiveConfig.repoRoot,
+              project: effectiveConfig.project,
+              container,
+              branch,
+              identity: target.workspace
+            });
             hostShellConfig = prepareHostShellConfig({
               home: effectiveConfig.home,
               project: effectiveConfig.project,
@@ -1527,7 +1586,18 @@ export async function create(args: string[]): Promise<void> {
             });
             const coreVolumes = sandboxCoreBindMounts(effectiveConfig, branch, {
               worktree,
-              shellConfigHostDir: hostShellConfig.hostDir
+              shellConfigHostDir: hostShellConfig.hostDir,
+              workspaceViewRoot: workspaceView.root,
+              controlDir: control.channelDir,
+              ...(target.workspace.mode === 'task-bound'
+                ? {
+                  taskSource: assertSandboxTaskSource(
+                    effectiveConfig.repoRoot,
+                    target.workspace.taskId
+                  ),
+                  taskId: target.workspace.taskId
+                }
+                : {})
             }).flatMap(({ hostPaths, containerPath, readOnly }) => [
               '-v',
               volumeArg(engine, hostPaths[0]!, containerPath, readOnly ? ':ro' : '')
@@ -1564,7 +1634,6 @@ export async function create(args: string[]): Promise<void> {
                 ])
             );
 
-            fs.mkdirSync(workspaceDir, { recursive: true });
             fs.mkdirSync(shareCommon, { recursive: true });
             fs.mkdirSync(shareBranch, { recursive: true });
             fs.mkdirSync(clipboardHostDir(effectiveConfig.home), { recursive: true, mode: 0o700 });
@@ -1591,6 +1660,20 @@ export async function create(args: string[]): Promise<void> {
               '--label',
               `${sandboxBranchLabel(effectiveConfig)}=${branch}`,
               '--label',
+              `${sandboxWorkspaceModeLabel(effectiveConfig)}=${target.workspace.mode}`,
+              ...(target.workspace.mode === 'task-bound'
+                ? [
+                  '--label',
+                  `${sandboxTaskIdLabel(effectiveConfig)}=${target.workspace.taskId}`,
+                  '-e',
+                  `AGENT_INFRA_TASK_ID=${target.workspace.taskId}`
+                ]
+                : []),
+              '-e',
+              `AGENT_INFRA_CONTROL_TOKEN=${control.token}`,
+              '-e',
+              'AGENT_INFRA_CONTROL_DIR=/run/agent-infra/control',
+              '--label',
               `${sandboxRuntimeCapabilityLabel(effectiveConfig)}=${capabilityPlan.runtimeSignature}`,
               ...coreVolumes,
               ...buildClipboardVolumeArgs(engine, effectiveConfig.home),
@@ -1611,6 +1694,16 @@ export async function create(args: string[]): Promise<void> {
               '/workspace',
               effectiveConfig.imageName
             ]);
+            const broker = spawn(
+              process.execPath,
+              [internalCliPath(), 'sandbox-control', 'serve', '--manifest', control.manifestPath],
+              { cwd: effectiveConfig.repoRoot, detached: true, stdio: 'ignore' }
+            );
+            broker.once('error', () => {
+              // Fresh readiness verification below remains the source of truth;
+              // consume detached spawn errors so they cannot crash the command.
+            });
+            broker.unref();
             createdTmpfsSeedPlan = tmpfsSeedPlan;
           } finally {
             envFile.cleanup();
@@ -1717,6 +1810,7 @@ export async function create(args: string[]): Promise<void> {
     config: effectiveConfig,
     engine,
     branch,
+    workspace: target.workspace,
     container,
     copiedEntries: createdTmpfsSeedPlan
   });

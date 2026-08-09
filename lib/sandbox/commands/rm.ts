@@ -18,7 +18,7 @@ import { ENGINES, detectEngine, engineDisplayName, isManagedEngine, stopManagedV
 import { pruneSandboxDanglingImages } from '../image-prune.ts';
 import { removeManagedDir, removeWorktreeDir } from '../managed-fs.ts';
 import { runOk, runSafe, runSafeEngine } from '../shell.ts';
-import { resolveTaskBranch } from '../task-resolver.ts';
+import { resolveSandboxTarget } from '../workspace-identity.ts';
 import { toolConfigDirCandidates, toolProjectDirCandidates } from '../tools.ts';
 import { createSandboxCapabilityPlan } from '../agent-client-reconciler.ts';
 import type { SandboxTool } from '../tools.ts';
@@ -81,6 +81,16 @@ async function rmOne(
     for (const name of matchedContainers) {
       runSafeEngine(engine, 'docker', ['stop', name]);
       runSafeEngine(engine, 'docker', ['rm', name]);
+      for (const [base, label] of [
+        [path.join(config.workspaceViewBase, config.project), 'Workspace view'],
+        [path.join(config.controlBase, config.project), 'Control channel']
+      ] as const) {
+        const directory = path.join(base, name);
+        if (fs.existsSync(directory)) {
+          removeManagedDir(base, directory);
+          if (!options.quiet) p.log.success(`${label} removed: ${directory}`);
+        }
+      }
     }
     spinner.stop(pc.green(`Removed container(s): ${matchedContainers.join(', ')}`));
   } else {
@@ -221,6 +231,17 @@ async function rmPurge(config: SandboxConfig, tools: SandboxTool[]): Promise<voi
     if (!p.isCancel(shouldRemoveAllShares) && shouldRemoveAllShares) {
       removeManagedDir(path.dirname(config.shareBase), config.shareBase);
       p.log.success(`Project share dirs removed: ${config.shareBase}`);
+    }
+  }
+
+  for (const [base, label] of [
+    [config.workspaceViewBase, 'workspace views'],
+    [config.controlBase, 'control channels']
+  ] as const) {
+    const projectDir = path.join(base, config.project);
+    if (fs.existsSync(projectDir)) {
+      removeManagedDir(base, projectDir);
+      p.log.success(`Removed project ${label}: ${projectDir}`);
     }
   }
 
@@ -369,6 +390,6 @@ export async function rm(args: string[]): Promise<void> {
     return;
   }
 
-  const branch = resolveTaskBranch(positionals[0] ?? '', config.repoRoot);
-  await rmOne(config, tools, branch);
+  const target = resolveSandboxTarget(positionals[0] ?? '', config.repoRoot);
+  await rmOne(config, tools, target.branch);
 }

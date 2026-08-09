@@ -1,10 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   containerNameCandidates,
   sandboxBranchLabel,
   sandboxLabel,
-  sandboxRuntimeCapabilityLabel
+  sandboxRuntimeCapabilityLabel,
+  sandboxTaskIdLabel,
+  sandboxWorkspaceModeLabel
 } from './constants.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import {
@@ -17,6 +21,16 @@ import type {
 import type { SandboxConfig } from './config.ts';
 import { toEnginePath } from './engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from './mounts.ts';
+import {
+  assertSandboxTaskSource,
+  sandboxControlPaths,
+  sandboxWorkspaceViewPaths
+} from './workspace-view.ts';
+import {
+  parseSandboxWorkspaceIdentity,
+  sameSandboxWorkspaceIdentity,
+  type SandboxWorkspaceIdentity
+} from './workspace-identity.ts';
 import { runEngine, runOkEngine, runVerboseEngine } from './shell.ts';
 import {
   declaredTmpfsSeedEntries,
@@ -31,6 +45,7 @@ import {
   startSandboxContainer,
   type SandboxRow
 } from './commands/list-running.ts';
+import { processIdentityMatches } from '../server/process-state.ts';
 
 export type SandboxRecoveryFinding = {
   repairKind: 'permissions' | 'missing-seed' | 'builtin-link' | 'hard-failure';
@@ -109,6 +124,7 @@ type EnsureSandboxReadyParams = {
   config: SandboxConfig;
   engine: string;
   branch: string;
+  workspace?: SandboxWorkspaceIdentity;
   row: SandboxRow;
   allowRecreate?: boolean;
   recreate?: (branch: string) => Promise<void>;
@@ -122,6 +138,54 @@ type ExpectedMount = {
   hostPaths: string[];
   expectedRW: boolean;
 };
+
+function ensureSandboxControlBroker(params: {
+  config: SandboxConfig;
+  container: string;
+  workspace: SandboxWorkspaceIdentity;
+}): void {
+  const control = sandboxControlPaths({
+    base: params.config.controlBase ?? path.join(params.config.home, '.agent-infra', 'sandbox-control'),
+    project: params.config.project,
+    container: params.container,
+    identity: params.workspace
+  });
+  if (!fs.existsSync(control.manifestPath)) return;
+  const manifest = JSON.parse(fs.readFileSync(control.manifestPath, 'utf8')) as { token?: unknown };
+  const brokerPath = path.join(control.root, 'broker.json');
+  try {
+    const broker = JSON.parse(fs.readFileSync(brokerPath, 'utf8')) as {
+      version?: unknown;
+      pid?: unknown;
+      startTime?: unknown;
+      token?: unknown;
+    };
+    if (
+      broker.version === 1
+      && typeof broker.pid === 'number'
+      && typeof broker.startTime === 'string'
+      && broker.token === manifest.token
+      && processIdentityMatches({ version: 1, pid: broker.pid, startTime: broker.startTime })
+    ) return;
+  } catch {
+    // A missing, stale, or malformed broker record is replaced below.
+  }
+  fs.rmSync(brokerPath, { force: true });
+  const directory = path.dirname(fileURLToPath(import.meta.url));
+  const extension = path.extname(fileURLToPath(import.meta.url));
+  const internalCli = path.resolve(directory, '..', '..', 'bin', `internal-cli${extension}`);
+  const child = spawn(
+    process.execPath,
+    [internalCli, 'sandbox-control', 'serve', '--manifest', control.manifestPath],
+    { cwd: params.config.repoRoot, detached: true, stdio: 'ignore' }
+  );
+  child.once('error', () => {
+    // Readiness remains fail-closed; a later control request reports the
+    // unavailable broker without turning this detached spawn into an
+    // unhandled process error.
+  });
+  child.unref();
+}
 
 function findingKey(finding: SandboxRecoveryFinding): string {
   return `${finding.repairKind}:${finding.path ?? finding.seed?.targetPath ?? finding.message}`;
@@ -297,11 +361,34 @@ function hostSourceAccessible(hostPath: string, writable: boolean): boolean {
 function expectedMounts(params: {
   config: SandboxConfig;
   branch: string;
+  container: string;
+  workspace: SandboxWorkspaceIdentity;
   tools: readonly SandboxTool[];
   actualMounts: Map<string, DockerMount>;
 }): ExpectedMount[] {
   const { config, branch, tools, actualMounts } = params;
-  const core = sandboxCoreBindMounts(config, branch).map((mount) => ({
+  const view = sandboxWorkspaceViewPaths({
+    base: config.workspaceViewBase ?? path.join(config.home, '.agent-infra', 'workspace-views'),
+    project: config.project,
+    container: params.container,
+    identity: params.workspace
+  });
+  const control = sandboxControlPaths({
+    base: config.controlBase ?? path.join(config.home, '.agent-infra', 'sandbox-control'),
+    project: config.project,
+    container: params.container,
+    identity: params.workspace
+  });
+  const core = sandboxCoreBindMounts(config, branch, {
+    workspaceViewRoot: view.root,
+    controlDir: control.channelDir,
+    ...(params.workspace.mode === 'task-bound'
+      ? {
+        taskSource: assertSandboxTaskSource(config.repoRoot, params.workspace.taskId),
+        taskId: params.workspace.taskId
+      }
+      : {})
+  }).map((mount) => ({
     path: mount.containerPath,
     expectedType: 'bind' as const,
     hostPaths: mount.hostPaths,
@@ -399,6 +486,7 @@ export function collectSandboxRecoverySnapshot(params: {
   config: SandboxConfig;
   engine: string;
   branch: string;
+  workspace?: SandboxWorkspaceIdentity;
   container: string;
   deps?: RecoveryCommandDeps;
 }): SandboxRecoverySnapshot {
@@ -427,6 +515,7 @@ export function collectSandboxRecoverySnapshot(params: {
     }
   }
   const capabilityPlan = createSandboxCapabilityPlan(params.config);
+  const workspace = params.workspace ?? { mode: 'branch-only' as const };
   const tools = [...capabilityPlan.tools];
   const seeds = declaredTmpfsSeedEntries(tools).map((seed) => {
     const mounted = mountsByDestination.get(seed.stagingPath)?.Type === 'bind';
@@ -460,6 +549,10 @@ export function collectSandboxRecoverySnapshot(params: {
   }));
   const labels = inspection.Config?.Labels ?? {};
   const branchLabel = labels[sandboxBranchLabel(params.config)];
+  const containerWorkspace = parseSandboxWorkspaceIdentity(labels, {
+    mode: sandboxWorkspaceModeLabel(params.config),
+    taskId: sandboxTaskIdLabel(params.config)
+  });
   const selectedToolIds = new Set(tools.map((tool) => tool.id));
   const enforceCanonicalPlan = params.config.agentClientSource === 'canonical';
   const unexpectedCapabilityMounts = enforceCanonicalPlan
@@ -471,6 +564,8 @@ export function collectSandboxRecoverySnapshot(params: {
   const mountSnapshots = expectedMounts({
     config: params.config,
     branch: params.branch,
+    container: params.container,
+    workspace,
     tools,
     actualMounts: mountsByDestination
   }).map((expected) => {
@@ -510,7 +605,8 @@ export function collectSandboxRecoverySnapshot(params: {
   return {
     identityOk: typeof inspection.Id === 'string'
       && inspection.Id.length > 0
-      && branchLabel === params.branch,
+      && branchLabel === params.branch
+      && sameSandboxWorkspaceIdentity(containerWorkspace, workspace),
     runtimeCapabilityOk: enforceCanonicalPlan
       ? labels[sandboxRuntimeCapabilityLabel(params.config)] === capabilityPlan.runtimeSignature
       : undefined,
@@ -673,6 +769,7 @@ function assess(params: {
   config: SandboxConfig;
   engine: string;
   branch: string;
+  workspace?: SandboxWorkspaceIdentity;
   container: string;
   deps?: RecoveryCommandDeps;
 }): { snapshot: SandboxRecoverySnapshot; findings: SandboxRecoveryFinding[] } {
@@ -684,6 +781,7 @@ export function assertFreshSandboxReady(params: {
   config: SandboxConfig;
   engine: string;
   branch: string;
+  workspace?: SandboxWorkspaceIdentity;
   container: string;
   copiedEntries: TmpfsSeedEntry[];
   deps?: RecoveryCommandDeps;
@@ -705,6 +803,11 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
   const startFn = deps?.start ?? startSandboxContainer;
   const warnings: string[] = [];
   let failure: Error | null = null;
+  ensureSandboxControlBroker({
+    config: params.config,
+    container: params.row.name,
+    workspace: params.workspace ?? { mode: 'branch-only' }
+  });
 
   try {
     if (!params.row.running) {
@@ -713,6 +816,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
         config: params.config,
         engine: params.engine,
         branch: params.branch,
+        workspace: params.workspace,
         container: params.row.name,
         deps
       });
@@ -739,6 +843,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
         config: params.config,
         engine: params.engine,
         branch: params.branch,
+        workspace: params.workspace,
         container: params.row.name,
         deps
       });
@@ -753,6 +858,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
           config: params.config,
           engine: params.engine,
           branch: params.branch,
+          workspace: params.workspace,
           container: params.row.name,
           deps
         });
@@ -767,6 +873,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
       config: params.config,
       engine: params.engine,
       branch: params.branch,
+      workspace: params.workspace,
       container: params.row.name,
       deps
     });
@@ -791,6 +898,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
         config: params.config,
         engine: params.engine,
         branch: params.branch,
+        workspace: params.workspace,
         container: params.row.name,
         deps
       });
@@ -811,6 +919,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
       config: params.config,
       engine: params.engine,
       branch: params.branch,
+      workspace: params.workspace,
       container: params.row.name,
       deps
     });
@@ -831,6 +940,11 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
   const warning = `Sandbox recovery failed in place. Replacing only the container. ${dataBoundary}`;
   warnings.push(warning);
   (params.writeWarning ?? ((message) => process.stderr.write(`${message}\n`)))(warning);
+  const runVerboseFn = deps?.runVerbose ?? runVerboseEngine;
+  if (params.row.running) {
+    runVerboseFn(params.engine, 'docker', ['stop', params.row.name]);
+  }
+  runVerboseFn(params.engine, 'docker', ['rm', params.row.name]);
   await params.recreate(params.branch);
 
   const rows = (deps?.fetchRows ?? fetchSandboxRows)(
@@ -849,6 +963,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
     config: params.config,
     engine: params.engine,
     branch: params.branch,
+    workspace: params.workspace,
     container: replacement.name,
     deps
   });

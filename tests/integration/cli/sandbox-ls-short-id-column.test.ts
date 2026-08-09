@@ -48,8 +48,8 @@ test('formatContainerTable now uses short id / "-" instead of running-index', as
     'lib/sandbox/commands/ls.js'
   );
   const rows = [
-    { row: '1', shortId: '#11', name: 'sb-feature-eleven', status: 'Up 1 min', branch: 'feature-eleven' },
-    { row: '2', shortId: '-', name: 'sb-feature-orphan', status: 'Up 2 hours', branch: 'orphan-branch' }
+    { row: '1', shortId: '#11', name: 'sb-feature-eleven', status: 'Up 1 min', workspace: 'task-bound', taskId: 'TASK-20260809-010203', branch: 'feature-eleven' },
+    { row: '2', shortId: '-', name: 'sb-feature-orphan', status: 'Up 2 hours', workspace: 'branch-only', taskId: '-', branch: 'orphan-branch' }
   ];
   const lines = formatContainerTable(rows);
   const shortColumn = lines[0]!.indexOf('SHORT');
