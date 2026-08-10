@@ -13,7 +13,9 @@ description: >
 
 更新关联 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 
-直接调用仍要求用户显式授权。若存在 active orchestration run，只有未消费的一次性 `commitAuthorization` 可作为本轮等价授权；提交成功后必须由 orchestration core 消费，其他提交门禁保持不变。
+若入口业务操作数包含字面 `--orchestrated`，绑定 `{execution-flag}` = `--orchestrated`；否则绑定为空。不得从 run 文件或环境推断来源。
+
+直接调用仍要求用户显式授权。编排调用只有在副作用前通过 commit intent 对 activated receipt 与一次性 `commitAuthorization` 的联合校验后才可继续，其他提交门禁保持不变。
 
 ## 常见违规借口与反驳
 
@@ -64,7 +66,11 @@ git diff
 
 ## 4. 创建提交
 
+已解析出 `{task-id}` 时，执行本步骤前先读取 `reference/commit-orchestration.md`，并在任何 Git/平台成功副作用前完成 `commit-begin`；无任务上下文的纯 Git 提交完全跳过 intent 协议。
+
 先判断受限 push-only 场景；否则把 message、显式路径、expected HEAD/tree 写入临时 JSON，并调用 `agent-infra-internal git-workflow commit --input {file}`。core 负责范围、敏感文件、暂存树和幂等校验。
+
+普通 commit 成功后必须立即按该 reference 执行 committed checkpoint；checkpoint 失败时保留 intent 并停止，不得继续 push 或写成功状态。
 
 如果本次提交关联任务且存在 `review-code` 产物，在提交前读取最高轮 `review-code` 产物：
 - 若该产物 `总体结论` / `Overall Verdict` 为 Approved，解析 `R`、`F` 与 `审查快照树` / `Reviewed Snapshot Tree`（`T`）
@@ -85,6 +91,8 @@ a. 按 `.agents/rules/issue-pr-commands.md` 检测当前分支（head）是否�
 b. 命中开放 PR -> 推送当前分支：
 
 通过 `agent-infra-internal git-workflow push --input {file}` 逐 ref 普通推送并复核，禁止 force push。
+
+推送成功并完成远端复核后，必须立即按 `reference/commit-orchestration.md` 执行 pushed checkpoint。
 
 c. 安全降级（不阻塞已完成的 `git commit`，仅提示用户）：
    - 平台不可用 / 未认证 / 检测失败 / 未命中开放 PR -> 不推送，继续后续步骤。
@@ -146,13 +154,13 @@ agent-infra-internal task-verify {task-id} commit.completed --format text
 
 将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 
-校验通过后，声明编排中的 commit 阶段已完成；无 active orchestration run 时该命令为 no-op，不改变直接提交路径：
+校验通过后，按 `reference/commit-orchestration.md` 完成 commit intent。standalone 只释放 intent 且不改写历史 run；orchestrated 原子提交 begin 时已预检的 receipt 完成态：
 
 ```bash
-agent-infra-internal task-orchestration {task-id} stage-completed --agent {standard-agent-token}
+agent-infra-internal task-orchestration {task-id} commit-complete --token "$commit_intent_token" --agent {standard-agent-token}
 ```
 
-命令失败时停止，不得把缺少完整 receipt 生命周期的 run 标记为完成。
+命令失败时保留 intent、输出 `commit-status` 恢复证据并停止，不得重复副作用或把缺少完整 receipt 生命周期的 run 标记为完成。
 
 ## 注意事项
 

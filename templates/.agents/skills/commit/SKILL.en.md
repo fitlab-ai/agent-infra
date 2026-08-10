@@ -13,7 +13,9 @@ Create a Git commit without overwriting user work and update the related task st
 
 When updating related `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
-Direct invocation still requires explicit user authorization. For an active orchestration run, only its unconsumed one-use `commitAuthorization` is equivalent authorization for this round; orchestration core must consume it after success, and every other commit gate remains unchanged.
+When the entry business operands literally contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated`; otherwise bind it to empty. Never infer the source from a run file or environment.
+
+Direct invocation still requires explicit user authorization. An orchestrated invocation may continue only after the commit intent validates its activated receipt and one-use `commitAuthorization` before side effects; every other commit gate remains unchanged.
 
 ## Common Rationalizations and Rebuttals
 
@@ -64,7 +66,11 @@ Review status, diff, and recent history, then prepare a Conventional Commit with
 
 ## 4. Create the Commit
 
+When `{task-id}` was resolved, read `reference/commit-orchestration.md` before this step and complete `commit-begin` before any successful Git/platform side effect. A taskless Git-only commit skips the intent protocol entirely.
+
 Detect the restricted push-only scenario first. Otherwise write message, explicit paths, and expected HEAD/tree to JSON and call `agent-infra-internal git-workflow commit --input {file}`.
+
+Immediately after a normal commit succeeds, run the committed checkpoint from that reference. If the checkpoint fails, retain the intent and stop before push or success-state writes.
 
 If this commit is associated with a task and a `review-code` artifact exists, read the highest-round `review-code` artifact before committing:
 - If that artifact's `Overall Verdict` / `总体结论` is Approved, parse `R`, `F`, and `Reviewed Snapshot Tree` / `审查快照树` (`T`)
@@ -85,6 +91,8 @@ a. Detect whether the current branch (head) has an open PR per `.agents/rules/is
 b. On an open PR -> push the current branch:
 
 Use `agent-infra-internal git-workflow push --input {file}` for per-ref normal push and verification. Never force push.
+
+After push succeeds and remote verification completes, immediately run the pushed checkpoint from `reference/commit-orchestration.md`.
 
 c. Safe degradation (never block an already completed `git commit`; only warn the user):
    - Platform unavailable / unauthenticated / detection failed / no open PR -> do not push; continue.
@@ -146,13 +154,13 @@ Handle the result as follows:
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 
-After the gate passes, declare the orchestrated commit stage complete. This command is a no-op when no active orchestration run exists, so the direct commit path remains unchanged:
+After the gate passes, complete the commit intent as defined by `reference/commit-orchestration.md`. Standalone only releases the intent without changing a historical run; orchestrated atomically commits the receipt completion prevalidated at begin:
 
 ```bash
-agent-infra-internal task-orchestration {task-id} stage-completed --agent {standard-agent-token}
+agent-infra-internal task-orchestration {task-id} commit-complete --token "$commit_intent_token" --agent {standard-agent-token}
 ```
 
-Stop if the command fails; a run without the full receipt lifecycle must not be marked completed.
+On failure, retain the intent, show `commit-status` recovery evidence, and stop. Do not repeat side effects or mark a run complete without the full receipt lifecycle.
 
 ## Notes
 

@@ -110,6 +110,45 @@ test('task-orchestration rejects duplicate and unknown options without writing s
   assert.equal(fs.existsSync(path.join(f.dir, 'orchestration.json')), false);
 });
 
+test('task-orchestration exposes token-guarded standalone commit intents and rejects the legacy intent', () => {
+  const f = fixture();
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
+  const legacy = run(f.root, [f.id, 'stage-completed', '--agent', 'codex']);
+  assert.equal(legacy.status, 2);
+  assert.equal(JSON.parse(legacy.stdout).error.code, 'ORCHESTRATION_PAYLOAD_INVALID');
+
+  const begun = run(f.root, [f.id, 'commit-begin', '--agent', 'codex', '--baseline-head', head]);
+  assert.equal(begun.status, 0, begun.stderr || begun.stdout);
+  const payload = JSON.parse(begun.stdout);
+  assert.equal(payload.intent.mode, 'standalone');
+  assert.equal(typeof payload.token, 'string');
+
+  const blockedPrepare = run(f.root, [
+    f.id, 'prepare', '--client', 'claude-code',
+    '--requested-model', 'executor-model', '--requested-reasoning-effort', 'xhigh'
+  ]);
+  assert.equal(blockedPrepare.status, 1);
+  assert.equal(JSON.parse(blockedPrepare.stdout).error.code, 'ORCHESTRATION_COMMIT_INTENT_BUSY');
+
+  const status = run(f.root, [f.id, 'commit-status']);
+  assert.equal(status.status, 0, status.stderr || status.stdout);
+  assert.equal(status.stdout.includes(payload.token), false);
+  assert.equal(status.stdout.includes('tokenDigest'), false);
+
+  const aborted = run(f.root, [
+    f.id, 'commit-abort', '--token', payload.token, '--expected-head', head
+  ]);
+  assert.equal(aborted.status, 0, aborted.stderr || aborted.stdout);
+  assert.equal(fs.existsSync(path.join(f.dir, 'commit-intent.json')), false);
+
+  const emptyStatus = run(f.root, [f.id, 'commit-status']);
+  assert.equal(emptyStatus.status, 0, emptyStatus.stderr || emptyStatus.stdout);
+  assert.deepEqual(JSON.parse(emptyStatus.stdout), {
+    status: 'ready', changed: false, taskId: f.id, intent: null, error: null
+  });
+  assert.equal(emptyStatus.stdout.includes(f.dir), false);
+});
+
 test('task-orchestration rejects partial model policy options before core state changes', () => {
   const f = fixture();
   const first = run(f.root, [f.id, 'begin-or-resume', '--client', 'claude-code',

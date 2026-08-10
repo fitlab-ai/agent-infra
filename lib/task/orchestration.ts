@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseReviewSummary } from './review-artifacts.ts';
@@ -36,6 +37,17 @@ import {
 } from './workspace-snapshot.ts';
 import type { RepositorySnapshot } from './workspace-snapshot.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
+import {
+  CommitIntentError,
+  commitIntentPath,
+  createCommitIntent,
+  digest,
+  readCommitIntent,
+  removeCommitIntent,
+  serialize,
+  updateCommitIntent
+} from './commit-intent.ts';
+import type { CommitIntent, PushEvidence } from './commit-intent.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type LegacyOrchestrationModelPolicy = Readonly<{
@@ -144,7 +156,26 @@ type OrchestrationOptions = {
   }>;
   diffWorkspace?: (repoRoot: string, before: string, after: string) => string[];
   supportsLifecycleDelegation?: (client: AgentClientId) => boolean;
+  token?: () => string;
 };
+
+type CommitIntentResult = Readonly<{
+  status: 'ready' | 'failed';
+  changed: boolean;
+  taskId: string | null;
+  intent: Readonly<{
+    mode: CommitIntent['mode'];
+    phase: CommitIntent['phase'];
+    baselineHead: string;
+    currentHead: string;
+    committedHead: string | null;
+    pushEvidence: PushEvidence | null;
+    runId: string | null;
+    receiptId: string | null;
+  }> | null;
+  token?: string;
+  error: Readonly<{ code: string; message: string }> | null;
+}>;
 
 function supportsLifecycleDelegation(client: AgentClientId): boolean {
   return getAgentClientCapability(client, 'subagents').level !== 'unsupported'
@@ -187,8 +218,8 @@ function saveRun(taskDir: string, run: OrchestrationRun): void {
   atomicWrite(orchestrationPath(taskDir), run);
 }
 
-function withUpdatedRun(run: OrchestrationRun, updates: Partial<OrchestrationRun>): OrchestrationRun {
-  return Object.freeze({ ...run, ...updates, updatedAt: new Date().toISOString() });
+function withUpdatedRun(run: OrchestrationRun, updates: Partial<OrchestrationRun>, now?: () => string): OrchestrationRun {
+  return Object.freeze({ ...run, ...updates, updatedAt: (now ?? (() => new Date().toISOString()))() });
 }
 
 function failed(
@@ -198,6 +229,61 @@ function failed(
   details: Omit<NonNullable<OrchestrationResult['error']>, 'code' | 'message'> = {}
 ): OrchestrationResult {
   return { status: 'failed', changed: false, taskId, run: null, next: null, error: { code, message, ...details } };
+}
+
+function commitIntentFailed(code: string, message: string, taskId: string | null = null): CommitIntentResult {
+  return { status: 'failed', changed: false, taskId, intent: null, error: { code, message } };
+}
+
+function repositoryHead(repoRoot: string): string {
+  return execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe']
+  }).trim();
+}
+
+function isAncestor(repoRoot: string, ancestor: string, descendant: string): boolean {
+  return spawnSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
+    cwd: repoRoot,
+    stdio: 'ignore'
+  }).status === 0;
+}
+
+function commitIntentView(intent: CommitIntent, currentHead: string): NonNullable<CommitIntentResult['intent']> {
+  return {
+    mode: intent.mode,
+    phase: intent.phase,
+    baselineHead: intent.baselineHead,
+    currentHead,
+    committedHead: intent.committedHead,
+    pushEvidence: intent.pushEvidence,
+    runId: intent.orchestration?.runId ?? null,
+    receiptId: intent.orchestration?.receiptId ?? null
+  };
+}
+
+function validCommitRun(run: OrchestrationRun | null, taskId: string): run is OrchestrationRun {
+  return run !== null
+    && [1, 2].includes(run.schemaVersion)
+    && run.taskId === taskId
+    && ['running', 'paused', 'completed'].includes(run.status)
+    && Array.isArray(run.receipts)
+    && Object.prototype.hasOwnProperty.call(run, 'pendingDelegation')
+    && typeof run.commitAuthorization === 'object'
+    && run.commitAuthorization !== null
+    && Object.prototype.hasOwnProperty.call(run.commitAuthorization, 'issuedAt')
+    && Object.prototype.hasOwnProperty.call(run.commitAuthorization, 'consumedAt');
+}
+
+function mapCommitIntentError(error: unknown, taskId: string | null): CommitIntentResult {
+  if (error instanceof CommitIntentError) return commitIntentFailed(error.code, error.message, taskId);
+  if (error instanceof TaskExecutionLockError) return commitIntentFailed(error.code, error.message, taskId);
+  return commitIntentFailed(
+    'ORCHESTRATION_COMMIT_INTENT_INVALID',
+    error instanceof Error ? error.message : String(error),
+    taskId
+  );
 }
 
 function validModel(value: unknown): value is string {
@@ -634,6 +720,272 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
 }
 
+function beginCommitIntent(
+  taskRef: string,
+  input: Readonly<{ agent: string; orchestrated: boolean; baselineHead: string }>,
+  options: OrchestrationOptions = {}
+): CommitIntentResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
+  try {
+    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.begin', () => {
+      const currentHead = repositoryHead(resolved.repoRoot);
+      if (currentHead !== input.baselineHead) {
+        return commitIntentFailed('ORCHESTRATION_COMMIT_BASELINE_MISMATCH', 'baseline HEAD does not match the repository HEAD', resolved.taskId);
+      }
+      if (fs.existsSync(commitIntentPath(resolved.taskDir))) {
+        try {
+          readCommitIntent(resolved.taskDir, resolved.taskId);
+        } catch (error) {
+          return mapCommitIntentError(error, resolved.taskId);
+        }
+        return commitIntentFailed('ORCHESTRATION_COMMIT_INTENT_BUSY', 'an active commit intent already exists', resolved.taskId);
+      }
+
+      const runFile = orchestrationPath(resolved.taskDir);
+      let run: OrchestrationRun | null = null;
+      let sourceRunBytes: string | null = null;
+      if (fs.existsSync(runFile)) {
+        sourceRunBytes = fs.readFileSync(runFile, 'utf8');
+        try {
+          run = readRun(resolved.taskDir);
+        } catch (error) {
+          return commitIntentFailed('ORCHESTRATION_STATE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
+        }
+        if (!validCommitRun(run, resolved.taskId)) {
+          return commitIntentFailed('ORCHESTRATION_STATE_INVALID', 'orchestration state has an invalid schema', resolved.taskId);
+        }
+      }
+
+      const now = (options.now ?? (() => new Date().toISOString()))();
+      const failAndPause = (code: string, message: string): CommitIntentResult => {
+        if (run?.status === 'running') {
+          saveRun(resolved.taskDir, withUpdatedRun(run, {
+            status: 'paused', pause: { code, message, recoverable: true }
+          }, () => now));
+        }
+        return commitIntentFailed(code, message, resolved.taskId);
+      };
+      let orchestration: CommitIntent['orchestration'] = null;
+      if (!input.orchestrated) {
+        if (run?.pendingDelegation) {
+          return commitIntentFailed(
+            'ORCHESTRATION_STANDALONE_BUSY',
+            'standalone commit is blocked by a pending orchestration delegation',
+            resolved.taskId
+          );
+        }
+      } else {
+        if (!run || run.status !== 'running') {
+          return commitIntentFailed('ORCHESTRATION_RUN_NOT_RUNNING', 'orchestrated commit requires a running orchestration', resolved.taskId);
+        }
+        const receipt = run.pendingDelegation;
+        if (
+          !receipt
+          || receipt.status !== 'activated'
+          || receipt.stage !== 'commit'
+          || receipt.round !== 1
+          || receipt.artifact !== 'commit'
+          || receipt.role !== 'executor'
+        ) {
+          return failAndPause(
+            'ORCHESTRATION_PROVENANCE_MISMATCH',
+            'orchestrated commit requires one matching activated commit delegation'
+          );
+        }
+        if (!run.commitAuthorization.issuedAt || run.commitAuthorization.consumedAt) {
+          return failAndPause(
+            'ORCHESTRATION_COMMIT_AUTHORIZATION_INVALID',
+            'orchestrated commit requires an unconsumed one-use authorization'
+          );
+        }
+        const planned = planOrchestrationStageCompletion(taskRef, {
+          stage: 'commit', round: 1, artifact: 'commit', role: 'executor', agent: input.agent
+        }, { ...options, now: () => now });
+        if (planned.result.status === 'failed' || !planned.plan?.updatedRun.pendingDelegation) {
+          return failAndPause(
+            planned.result.error?.code ?? 'ORCHESTRATION_PROVENANCE_MISMATCH',
+            planned.result.error?.message ?? 'commit delegation could not be completed'
+          );
+        }
+        const plannedRunBytes = serialize(planned.plan.updatedRun);
+        orchestration = {
+          runId: run.runId,
+          receiptId: receipt.id,
+          authorizationIssuedAt: run.commitAuthorization.issuedAt,
+          sourceRunDigest: digest(sourceRunBytes!),
+          plannedRunDigest: digest(plannedRunBytes),
+          completionUpdatedAt: planned.plan.updatedRun.updatedAt,
+          plannedReceipt: planned.plan.updatedRun.pendingDelegation
+        };
+      }
+
+      const created = createCommitIntent(resolved.taskDir, {
+        taskId: resolved.taskId,
+        mode: input.orchestrated ? 'orchestrated' : 'standalone',
+        phase: 'prepared',
+        baselineHead: input.baselineHead,
+        committedHead: null,
+        pushEvidence: null,
+        orchestration,
+        createdAt: now,
+        updatedAt: now
+      }, { token: options.token });
+      return {
+        status: 'ready', changed: true, taskId: resolved.taskId,
+        intent: commitIntentView(created.intent, currentHead), token: created.token, error: null
+      };
+    });
+  } catch (error) {
+    return mapCommitIntentError(error, resolved.taskId);
+  }
+}
+
+function checkpointCommitIntent(
+  taskRef: string,
+  input: Readonly<{
+    token: string;
+    kind: 'committed' | 'pushed';
+    head: string;
+    remote?: string;
+    ref?: string;
+  }>,
+  options: OrchestrationOptions = {}
+): CommitIntentResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
+  try {
+    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.checkpoint', () => {
+      const intent = readCommitIntent(resolved.taskDir, resolved.taskId, input.token);
+      const currentHead = repositoryHead(resolved.repoRoot);
+      if (currentHead !== input.head) {
+        return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'checkpoint HEAD does not match the repository HEAD', resolved.taskId);
+      }
+      if (input.kind === 'committed' && !isAncestor(resolved.repoRoot, intent.baselineHead, input.head)) {
+        return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'committed HEAD does not descend from the baseline', resolved.taskId);
+      }
+      if (input.kind === 'pushed') {
+        const expectedHead = intent.committedHead ?? intent.baselineHead;
+        if (input.head !== expectedHead || !input.remote || !input.ref) {
+          return commitIntentFailed('ORCHESTRATION_COMMIT_INTENT_STATE_INVALID', 'pushed checkpoint requires matching remote, ref and HEAD', resolved.taskId);
+        }
+      }
+      const now = (options.now ?? (() => new Date().toISOString()))();
+      const updated = updateCommitIntent(resolved.taskDir, resolved.taskId, input.token, input.kind === 'committed'
+        ? { phase: 'committed', committedHead: input.head, updatedAt: now }
+        : {
+            phase: 'pushed', updatedAt: now,
+            pushEvidence: { remote: input.remote!, ref: input.ref!, head: input.head }
+          });
+      return {
+        status: 'ready', changed: true, taskId: resolved.taskId,
+        intent: commitIntentView(updated, currentHead), error: null
+      };
+    });
+  } catch (error) {
+    return mapCommitIntentError(error, resolved.taskId);
+  }
+}
+
+function completeCommitIntent(
+  taskRef: string,
+  input: Readonly<{ token: string; agent: string }>,
+  options: OrchestrationOptions = {}
+): CommitIntentResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
+  try {
+    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.complete', () => {
+      const intent = readCommitIntent(resolved.taskDir, resolved.taskId, input.token);
+      const currentHead = repositoryHead(resolved.repoRoot);
+      if (intent.orchestration === null) {
+        removeCommitIntent(resolved.taskDir, resolved.taskId, input.token);
+        return { status: 'ready', changed: true, taskId: resolved.taskId, intent: null, error: null };
+      }
+      if (intent.orchestration.plannedReceipt.agent !== input.agent) {
+        return commitIntentFailed('ORCHESTRATION_PROVENANCE_MISMATCH', 'completion agent does not match the planned receipt', resolved.taskId);
+      }
+      const runFile = orchestrationPath(resolved.taskDir);
+      const currentBytes = fs.readFileSync(runFile, 'utf8');
+      const currentDigest = digest(currentBytes);
+      if (currentDigest === intent.orchestration.sourceRunDigest) {
+        const run = readRun(resolved.taskDir);
+        if (!run) return commitIntentFailed('ORCHESTRATION_RUN_MISSING', 'orchestration run disappeared', resolved.taskId);
+        const plannedRun: OrchestrationRun = Object.freeze({
+          ...run,
+          pendingDelegation: intent.orchestration.plannedReceipt,
+          updatedAt: intent.orchestration.completionUpdatedAt
+        });
+        if (digest(serialize(plannedRun)) !== intent.orchestration.plannedRunDigest) {
+          return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'planned orchestration bytes no longer match the intent', resolved.taskId);
+        }
+        atomicWrite(runFile, plannedRun);
+        if (digest(fs.readFileSync(runFile)) !== intent.orchestration.plannedRunDigest) {
+          return commitIntentFailed('ORCHESTRATION_COMMIT_COMPLETE_PARTIAL', 'orchestration completion could not be verified', resolved.taskId);
+        }
+      } else if (currentDigest !== intent.orchestration.plannedRunDigest) {
+        return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'orchestration state changed after commit begin', resolved.taskId);
+      }
+      try {
+        removeCommitIntent(resolved.taskDir, resolved.taskId, input.token);
+      } catch (error) {
+        return commitIntentFailed(
+          'ORCHESTRATION_COMMIT_COMPLETE_PARTIAL',
+          error instanceof Error ? error.message : String(error),
+          resolved.taskId
+        );
+      }
+      return { status: 'ready', changed: true, taskId: resolved.taskId, intent: null, error: null };
+    });
+  } catch (error) {
+    return mapCommitIntentError(error, resolved.taskId);
+  }
+}
+
+function abortCommitIntent(
+  taskRef: string,
+  input: Readonly<{ token: string; expectedHead: string }>,
+  options: OrchestrationOptions = {}
+): CommitIntentResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
+  try {
+    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.abort', () => {
+      const intent = readCommitIntent(resolved.taskDir, resolved.taskId, input.token);
+      const currentHead = repositoryHead(resolved.repoRoot);
+      if (
+        intent.phase !== 'prepared'
+        || intent.pushEvidence !== null
+        || input.expectedHead !== intent.baselineHead
+        || currentHead !== intent.baselineHead
+      ) {
+        return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'commit intent has side effects or repository drift', resolved.taskId);
+      }
+      removeCommitIntent(resolved.taskDir, resolved.taskId, input.token);
+      return { status: 'ready', changed: true, taskId: resolved.taskId, intent: null, error: null };
+    });
+  } catch (error) {
+    return mapCommitIntentError(error, resolved.taskId);
+  }
+}
+
+function statusCommitIntent(taskRef: string, options: OrchestrationOptions = {}): CommitIntentResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
+  try {
+    const intent = readCommitIntent(resolved.taskDir, resolved.taskId);
+    return {
+      status: 'ready', changed: false, taskId: resolved.taskId,
+      intent: commitIntentView(intent, repositoryHead(resolved.repoRoot)), error: null
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { status: 'ready', changed: false, taskId: resolved.taskId, intent: null, error: null };
+    }
+    return mapCommitIntentError(error, resolved.taskId);
+  }
+}
+
 function statusOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
@@ -649,6 +1001,18 @@ function prepareOrchestrationDelegationUnlocked(
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+  if (fs.existsSync(commitIntentPath(resolved.taskDir))) {
+    try {
+      readCommitIntent(resolved.taskDir, resolved.taskId);
+    } catch (error) {
+      return failed(
+        'ORCHESTRATION_COMMIT_INTENT_INVALID',
+        error instanceof Error ? error.message : String(error),
+        resolved.taskId
+      );
+    }
+    return failed('ORCHESTRATION_COMMIT_INTENT_BUSY', 'an active commit intent blocks delegation preparation', resolved.taskId);
+  }
   if (!(options.supportsLifecycleDelegation ?? supportsLifecycleDelegation)(input.client)) {
     return failed('ORCHESTRATION_CLIENT_UNSUPPORTED', `client '${input.client}' does not support lifecycle orchestration`, resolved.taskId);
   }
@@ -906,7 +1270,7 @@ function planOrchestrationStageCompletion(
   }
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return { result: failed(resolved.code, resolved.message, resolved.taskId), plan: null };
-  const updatedRun = withUpdatedRun(inspected.run, { pendingDelegation: completed.receipt });
+  const updatedRun = withUpdatedRun(inspected.run, { pendingDelegation: completed.receipt }, options.now);
   return {
     result: { status: 'running', changed: true, taskId: resolved.taskId, run: updatedRun, next: null, error: null },
     plan: {
@@ -919,27 +1283,6 @@ function planOrchestrationStageCompletion(
 
 function commitOrchestrationStageCompletion(plan: OrchestrationStageCompletion): void {
   saveRun(plan.taskDir, plan.updatedRun);
-}
-
-function completeCommitOrchestrationStage(
-  taskRef: string,
-  agent: string,
-  options: OrchestrationOptions = {}
-): OrchestrationResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  const run = readRun(resolved.taskDir);
-  if (!run) return { status: 'running', changed: false, taskId: resolved.taskId, run: null, next: null, error: null };
-  const receipt = run.pendingDelegation;
-  if (!receipt || receipt.stage !== 'commit') {
-    return failed('ORCHESTRATION_DELEGATION_MISSING', 'active run has no pending commit delegation', resolved.taskId);
-  }
-  return completeOrchestrationStage(taskRef, {
-    stage: receipt.stage,
-    round: receipt.round,
-    artifact: receipt.artifact,
-    agent
-  }, options);
 }
 
 function sealOrchestrationDelegation(
@@ -1000,9 +1343,12 @@ export {
   activateMatchingOrchestrationDelegation,
   activateOrchestrationDelegation,
   advanceOrchestration,
+  abortCommitIntent,
+  beginCommitIntent,
   beginOrResumeOrchestration,
+  checkpointCommitIntent,
   commitOrchestrationStageCompletion,
-  completeCommitOrchestrationStage,
+  completeCommitIntent,
   completeOrchestrationStage,
   inspectOrchestrationStage,
   orchestrationPath,
@@ -1013,9 +1359,11 @@ export {
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation,
+  statusCommitIntent,
   statusOrchestration
 };
 export type {
+  CommitIntentResult,
   OrchestrationCompletionPlanResult,
   OrchestrationModelPolicy,
   OrchestrationNext,

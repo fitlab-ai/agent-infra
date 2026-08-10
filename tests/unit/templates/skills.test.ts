@@ -1705,6 +1705,30 @@ test("commit skill push-to-existing-PR step keeps level-2 steps numbered 1..9", 
   });
 });
 
+test("commit skill variants preserve the commit-intent protocol structure", () => {
+  const variants = [
+    [".agents/skills/commit/SKILL.md", ".agents/skills/commit/reference/commit-orchestration.md"],
+    ["templates/.agents/skills/commit/SKILL.zh-CN.md", "templates/.agents/skills/commit/reference/commit-orchestration.zh-CN.md"],
+    ["templates/.agents/skills/commit/SKILL.en.md", "templates/.agents/skills/commit/reference/commit-orchestration.en.md"]
+  ];
+
+  variants.forEach(([skillPath, referencePath]) => {
+    const skill = read(skillPath!);
+    const reference = read(referencePath!);
+    const navigation = skill.indexOf("reference/commit-orchestration.md");
+    const commit = skill.indexOf("agent-infra-internal git-workflow commit");
+    const gate = skill.indexOf("agent-infra-internal task-verify {task-id} commit.completed");
+    const complete = skill.indexOf("agent-infra-internal task-orchestration {task-id} commit-complete");
+    assert.ok(navigation >= 0 && navigation < commit, `${skillPath} should load the protocol before commit`);
+    assert.ok(gate >= 0 && gate < complete, `${skillPath} should complete the intent after the gate`);
+
+    const commands = ["commit-begin", "--kind committed", "--kind pushed", "commit-complete"]
+      .map((token) => reference.indexOf(token));
+    assert.ok(commands.every((position) => position >= 0), `${referencePath} should contain every protocol command`);
+    assert.deepEqual([...commands].sort((left, right) => left - right), commands, `${referencePath} command order should be stable`);
+  });
+});
+
 test("deployed create-issue rule stays byte-identical to its github zh-CN template", () => {
   // create-issue body construction delegates to `ai task issue-body`; the
   // deployed copy is the rendered github zh-CN variant. Guard against drift the

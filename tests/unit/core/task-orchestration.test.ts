@@ -9,7 +9,6 @@ import {
   activateOrchestrationDelegation,
   advanceOrchestration,
   beginOrResumeOrchestration as beginOrResumeOrchestrationRaw,
-  completeCommitOrchestrationStage,
   completeOrchestrationStage,
   pauseOrchestration,
   prepareOrchestrationDelegation as prepareOrchestrationDelegationRaw,
@@ -549,7 +548,9 @@ test('commit authorization is issued and the run completes even with pending man
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-mv', parentId: 'parent-mv',
     spawnMode: 'fresh', actualModel: 'executor-model', actualReasoningEffort: 'xhigh'
   }, { repoRoot: f.root, now }).status, 'running');
-  assert.equal(completeCommitOrchestrationStage('TASK-20260101-000001', 'claude-code', { repoRoot: f.root }).status, 'running');
+  assert.equal(completeOrchestrationStage('TASK-20260101-000001', {
+    stage: 'commit', round: 1, artifact: 'commit', agent: 'claude-code'
+  }, { repoRoot: f.root }).status, 'running');
   assert.equal(sealOrchestrationDelegation('TASK-20260101-000001', {
     childId: 'child-mv', exitCode: 0, afterFingerprint: 'after', changedPaths: []
   }, { repoRoot: f.root, now }).status, 'running');
@@ -577,7 +578,9 @@ test('commit authorization is issued at eligible prepare and the receipt reaches
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-1', parentId: 'parent-1',
     spawnMode: 'fresh', actualModel: 'executor-model', actualReasoningEffort: 'xhigh'
   }, { repoRoot: f.root, now }).status, 'running');
-  assert.equal(completeCommitOrchestrationStage('TASK-20260101-000001', 'claude-code', { repoRoot: f.root }).status, 'running');
+  assert.equal(completeOrchestrationStage('TASK-20260101-000001', {
+    stage: 'commit', round: 1, artifact: 'commit', agent: 'claude-code'
+  }, { repoRoot: f.root }).status, 'running');
   assert.equal(sealOrchestrationDelegation('TASK-20260101-000001', {
     childId: 'child-1', exitCode: 0, afterFingerprint: 'after', changedPaths: []
   }, { repoRoot: f.root, now }).status, 'running');
