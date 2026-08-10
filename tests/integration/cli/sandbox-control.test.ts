@@ -34,7 +34,7 @@ test('sandbox control client and broker exchange a task-bound response', async (
   })}\n`);
   const child = spawn(
     process.execPath,
-    [path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
+    ['--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
     { cwd: path.resolve('.'), stdio: 'ignore' }
   );
   try {

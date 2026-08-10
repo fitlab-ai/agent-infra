@@ -80,7 +80,7 @@ export function serveSandboxControl(manifestPath: string, signal: AbortSignal = 
         consumed.add(id);
         const result = spawnSync(
           process.execPath,
-          [process.argv[1]!, request.family, ...bindSandboxControlTask(request, manifest.taskId!)],
+          ['--experimental-strip-types', '--no-warnings', process.argv[1]!, request.family, ...bindSandboxControlTask(request, manifest.taskId!)],
           {
             cwd: manifest.repoRoot,
             encoding: 'utf8',
