@@ -12,16 +12,9 @@ import {
   runBoundedSandboxHookCommand,
   runSandboxHooks
 } from '../agent-client-reconciler.ts';
-import {
-  formatCredentialWarnings,
-  formatRemaining,
-  hasClaudeProviderAuth,
-  reconcileClaudeCredentials,
-  redactCommandError,
-  validateClaudeCredentialsEnvOverride
-} from '../credentials.ts';
 import { runInteractiveEngine } from '../shell.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
+import { redactCommandError } from '../redaction.ts';
 import { runInteractiveWithClipboardBridge } from '../clipboard/bridge.ts';
 import { detectHostTimezone } from '../host-timezone.ts';
 import {
@@ -98,37 +91,6 @@ export function runSandboxInteractive(params: {
   return runBridge({ engine, dockerArgs, container, home });
 }
 
-export function formatCredentialSyncStatus(
-  result: ReturnType<typeof reconcileClaudeCredentials>,
-  isTTY = process.stderr.isTTY,
-  providerAuthAvailable = false
-): string | null {
-  if (providerAuthAvailable && (result.status === 'STALE_ACCESS' || result.status === 'MISSING')) {
-    return null;
-  }
-  if (result.status === 'STALE_ACCESS') {
-    return 'Warning: Claude Code credentials on host appear stale. Run "ai sandbox refresh" or "claude /login" to renew.\n';
-  }
-  if (result.status === 'MISSING') {
-    return 'Warning: Claude Code credentials missing on host. Run "claude /login" to authenticate.\n';
-  }
-  if (result.status === 'KEYCHAIN_WRITE_FAILED') {
-    return `Warning: A sandbox refresh produced newer credentials but host Keychain write failed (${formatCredentialWarnings(result.warnings)}). Run "ai sandbox refresh" again or "claude /status" on the host to retry.\n`;
-  }
-  if (result.status === 'KEYCHAIN_LOCKED' || result.status === 'KEYCHAIN_ERROR') {
-    return 'Warning: Host keychain is unavailable; Claude credential sync skipped. Run "ai sandbox refresh" for details.\n';
-  }
-  if (result.status === 'OK' && result.authoritative !== 'host') {
-    const message = `Synced Claude Code credentials from sandbox refresh back to host (expires in ${formatRemaining(result.expiresAt)})`;
-    return isTTY ? `\x1b[2m${message}\x1b[0m\n` : `${message}\n`;
-  }
-  if (result.status === 'OK' && result.filesWritten.length > 0) {
-    const message = `Synced Claude Code credentials from host Keychain (expires in ${formatRemaining(result.expiresAt)})`;
-    return isTTY ? `\x1b[2m${message}\x1b[0m\n` : `${message}\n`;
-  }
-  return null;
-}
-
 export function parseEnterArgs(args: string[]): {
   target: string;
   command: string[];
@@ -157,7 +119,6 @@ export async function enter(args: string[]): Promise<number> {
   }
 
   const config = loadConfig();
-  validateClaudeCredentialsEnvOverride();
   const engine = detectEngine(config);
   const parsed = parseEnterArgs(args);
   const target = resolveSandboxTarget(parsed.target, config.repoRoot);
@@ -197,7 +158,11 @@ export async function enter(args: string[]): Promise<number> {
   const enterHookResults = await runSandboxHooks({
     hooks: capabilityPlan.hooksByPhase['before-enter'],
     phase: 'before-enter',
-    context: { config, plan: capabilityPlan },
+    context: {
+      config,
+      plan: capabilityPlan,
+      enter: { hostHome: config.home, hostEnv: { ...process.env } }
+    },
     runCommand: runBoundedSandboxHookCommand
   });
   for (const result of enterHookResults) {
@@ -209,20 +174,7 @@ export async function enter(args: string[]): Promise<number> {
         `Warning: ${result.message ?? `Sandbox hook '${result.hookId}' did not complete.`}\n`
       );
     }
-  }
-
-  if (capabilityPlan.selectedAgentClients.some((adapter) => adapter.id === 'claude-code')) {
-    try {
-      // Scan all projects so a refresh from a neighbouring sandbox can still flow back to the host.
-      const providerAuthAvailable = hasClaudeProviderAuth(config.home);
-      const result = reconcileClaudeCredentials(config.home);
-      const message = formatCredentialSyncStatus(result, process.stderr.isTTY, providerAuthAvailable);
-      if (message) {
-        process.stderr.write(message);
-      }
-    } catch (error) {
-      process.stderr.write(`Warning: Failed to sync Claude Code credentials: ${redactCommandError(error instanceof Error ? error.message : 'unknown error')}\n`);
-    }
+    if (result.message && result.status !== 'warning') process.stderr.write(result.message);
   }
 
   const envFlags = [...terminalEnvFlags(), ...hostTimezoneEnvFlags()];

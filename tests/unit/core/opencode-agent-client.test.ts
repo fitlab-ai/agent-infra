@@ -13,6 +13,7 @@ function hookContext(home: string, toolDir: string, hostEnv: NodeJS.ProcessEnv =
     create: {
       hostHome: home,
       hostEnv,
+      project: 'demo',
       resolvedTools: [{
         tool: getAgentClientAdapter('opencode').sandbox.createTool({ home, project: 'demo' }),
         dir: toolDir

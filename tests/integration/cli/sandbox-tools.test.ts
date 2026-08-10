@@ -68,11 +68,6 @@ type SandboxCreateModule = {
 };
 type EnterModule = {
   terminalEnvFlags(env?: NodeJS.ProcessEnv): string[];
-  formatCredentialSyncStatus(
-    result: { status: string; authoritative?: string | null; expiresAt?: unknown; filesWritten?: string[]; warnings?: unknown[] },
-    isTTY?: boolean,
-    providerAuthAvailable?: boolean
-  ): string | null;
   clipboardBridgeDisabled(env?: NodeJS.ProcessEnv): boolean;
   runSandboxInteractive(params: {
     engine: string;
@@ -88,6 +83,13 @@ type EnterModule = {
     }) => number | Promise<number>;
     runInteractive?: (engine: string, cmd: string, args: string[]) => number;
   }): number | Promise<number>;
+};
+type ClaudeSandboxModule = {
+  formatCredentialSyncStatus(
+    result: { status: string; authoritative?: string | null; expiresAt?: unknown; filesWritten?: string[]; warnings?: unknown[] },
+    isTTY?: boolean,
+    providerAuthAvailable?: boolean
+  ): string | null;
 };
 type ImageBuildModule = {
   buildImageSignature(preparedDockerfile: Record<string, unknown>, tools: Array<Record<string, unknown>>): string;
@@ -143,31 +145,31 @@ async function sandboxImageSignature(repoDir: string): Promise<string> {
 }
 
 test("sandbox exec formats host keychain unavailable credential sync warnings", async () => {
-  const sandboxEnter = await loadFreshEsm<EnterModule>("lib/sandbox/commands/enter.js");
+  const claudeSandbox = await loadFreshEsm<ClaudeSandboxModule>("lib/agent-clients/adapters/claude-code-sandbox.js");
 
   assert.equal(
-    sandboxEnter.formatCredentialSyncStatus({ status: "KEYCHAIN_LOCKED" }),
+    claudeSandbox.formatCredentialSyncStatus({ status: "KEYCHAIN_LOCKED" }),
     'Warning: Host keychain is unavailable; Claude credential sync skipped. Run "ai sandbox refresh" for details.\n'
   );
   assert.equal(
-    sandboxEnter.formatCredentialSyncStatus({ status: "KEYCHAIN_ERROR" }),
+    claudeSandbox.formatCredentialSyncStatus({ status: "KEYCHAIN_ERROR" }),
     'Warning: Host keychain is unavailable; Claude credential sync skipped. Run "ai sandbox refresh" for details.\n'
   );
 });
 
 test("sandbox exec suppresses missing OAuth warnings when Claude provider auth exists", async () => {
-  const sandboxEnter = await loadFreshEsm<EnterModule>("lib/sandbox/commands/enter.js");
+  const claudeSandbox = await loadFreshEsm<ClaudeSandboxModule>("lib/agent-clients/adapters/claude-code-sandbox.js");
 
   assert.equal(
-    sandboxEnter.formatCredentialSyncStatus({ status: "MISSING" }, false, true),
+    claudeSandbox.formatCredentialSyncStatus({ status: "MISSING" }, false, true),
     null
   );
   assert.equal(
-    sandboxEnter.formatCredentialSyncStatus({ status: "STALE_ACCESS" }, false, true),
+    claudeSandbox.formatCredentialSyncStatus({ status: "STALE_ACCESS" }, false, true),
     null
   );
   assert.match(
-    sandboxEnter.formatCredentialSyncStatus({ status: "KEYCHAIN_LOCKED" }, false, true) ?? "",
+    claudeSandbox.formatCredentialSyncStatus({ status: "KEYCHAIN_LOCKED" }, false, true) ?? "",
     /Host keychain is unavailable/
   );
 });
@@ -378,6 +380,82 @@ test("sandbox exec enters tmux automatically for interactive shells", onPlatform
       "bash",
       "/usr/local/bin/sandbox-tmux-entry"
     ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox exec redacts tokens from dotfiles snapshot rebuild errors", onPlatforms("linux", "darwin", "win32"), () => {
+  const token = "ghp_123456789012345678901234567890123456";
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-infra-${token}-`));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: "demo-dev-agent-infra-feature-cli-generic-sandbox\tUp 5 minutes\tdemo.sandbox.branch=agent-infra-feature-cli-generic-sandbox"
+    });
+    fs.mkdirSync(path.join(tmpDir, ".agent-infra", "dotfiles"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, ".agent-infra", ".cache"), "not a directory", "utf8");
+
+    const result = spawnSync(
+      process.execPath,
+      cliArgs("sandbox", "exec", "agent-infra-feature-cli-generic-sandbox"),
+      {
+        cwd: fixture.repoDir,
+        env: {
+          ...envWithPrependedPath(gitSafeEnv(), fixture.binDir),
+          HOME: tmpDir,
+          USERPROFILE: tmpDir,
+          DOCKER_LOG_PATH: fixture.logPath
+        },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /dotfiles snapshot rebuild failed/);
+    assert.match(result.stderr, /\[REDACTED github token\]/);
+    assert.doesNotMatch(result.stderr, new RegExp(token));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox exec rejects a relative Claude credentials override", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-enter-relative-credentials-"));
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      sandbox: { tools: ["claude-code"] },
+      dockerStdoutForPs: "demo-dev-agent-infra-feature-cli-generic-sandbox\tUp 5 minutes\tdemo.sandbox.branch=agent-infra-feature-cli-generic-sandbox"
+    });
+
+    const result = spawnSync(
+      process.execPath,
+      cliArgs("sandbox", "exec", "agent-infra-feature-cli-generic-sandbox", "true"),
+      {
+        cwd: fixture.repoDir,
+        env: {
+          ...envWithPrependedPath(gitSafeEnv(), fixture.binDir),
+          HOME: tmpDir,
+          USERPROFILE: tmpDir,
+          DOCKER_LOG_PATH: fixture.logPath,
+          AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: "relative/credentials.json"
+        },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Invalid AGENT_INFRA_CLAUDE_CREDENTIALS_FILE value/);
+    assert.match(result.stderr, /absolute file path/);
+    assert.equal(
+      fixture.readDockerCalls().some((call) => call[0] === "exec" && call.includes("-it")),
+      false
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

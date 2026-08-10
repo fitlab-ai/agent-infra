@@ -41,6 +41,7 @@ function makeTemplateRoot(tmpDir: string) {
   );
   // Built-in TUI template files so the sync loop finds something to write.
   writeFile(templateRoot, ".claude/commands/update-agent-infra.md", "claude command\n");
+  writeFile(templateRoot, ".claude/rules/tool-preferences.en.md", "managed rule\n");
   writeFile(templateRoot, ".opencode/commands/update-agent-infra.md", "opencode command\n");
   writeFile(templateRoot, ".codex/hooks.json", "{}\n");
   return templateRoot;
@@ -125,6 +126,39 @@ test("syncTemplates: tuis subset skips owned managed/merged entries", async () =
     assert.ok(skipped.includes(".codex/hooks.json"));
     assert.ok(fs.existsSync(path.join(projectRoot, ".claude/commands/update-agent-infra.md")));
     assert.ok(!fs.existsSync(path.join(projectRoot, ".codex/hooks.json")));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates: Claude rules use protected baselines while root CLAUDE.md stays user-owned", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-claude-owned-assets-"));
+  try {
+    const projectRoot = path.join(tmpDir, "project");
+    const templateRoot = makeTemplateRoot(tmpDir);
+    makeProject(projectRoot, { agentClients: canonicalAgentClients(["claude-code"]) });
+    writeFile(projectRoot, "CLAUDE.md", "shared project instructions\n");
+    const rootPath = path.join(projectRoot, "CLAUDE.md");
+    const rootMtime = fs.statSync(rootPath).mtimeMs;
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
+      ".agents/skills/update-agent-infra/scripts/sync-templates.js"
+    );
+    syncTemplates(projectRoot, templateRoot);
+    const rulePath = path.join(projectRoot, ".claude/rules/tool-preferences.md");
+    assert.equal(fs.readFileSync(rulePath, "utf8"), "managed rule\n");
+
+    fs.writeFileSync(rulePath, "user rule\n", "utf8");
+    const cfgPath = path.join(projectRoot, ".agents/.airc.json");
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    cfg.agentClients = canonicalAgentClients([]);
+    fs.writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
+    const disabled = syncTemplates(projectRoot, templateRoot);
+
+    assert.equal(fs.readFileSync(rulePath, "utf8"), "user rule\n");
+    assert.ok(disabled.managed.protected.some(({ target }) => target === ".claude/rules/tool-preferences.md"));
+    assert.equal(fs.readFileSync(rootPath, "utf8"), "shared project instructions\n");
+    assert.equal(fs.statSync(rootPath).mtimeMs, rootMtime);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

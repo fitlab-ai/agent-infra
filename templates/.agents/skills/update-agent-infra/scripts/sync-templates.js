@@ -124,12 +124,19 @@ const AGENT_CLIENT_MANIFEST = [
     ],
     "managed": [
       ".claude/commands/",
-      ".claude/agents/"
+      ".claude/agents/",
+      ".claude/rules/"
     ],
     "merged": [
       ".claude/settings.json"
     ],
-    "ejected": []
+    "ejected": [],
+    "customCommand": {
+      "target": ".claude/commands/${skillName}.md",
+      "frontmatter": {},
+      "includeUsage": true,
+      "inheritDisableModelInvocation": true
+    }
   },
   {
     "id": "codex",
@@ -788,30 +795,6 @@ function formatYamlMetadata(key, value) {
   return [`${key}: |-`, ...value.split('\n').map((line) => `  ${line}`)];
 }
 
-function generateClaudeCommand(skill, lang) {
-  const isZhCN = lang === 'zh-CN';
-  const lines = ['---', ...formatYamlMetadata('description', skill.description)];
-
-  if (skill.args) {
-    lines.push(`usage: ${JSON.stringify(`/${skill.dirName} ${skill.args}`)}`);
-  }
-
-  if (skill.disableModelInvocation) {
-    lines.push('disable-model-invocation: true');
-  }
-
-  lines.push('---', '');
-  lines.push(
-    isZhCN
-      ? `读取并执行 \`.agents/skills/${skill.dirName}/SKILL.md\` 中的 ${skill.dirName} 技能。`
-      : `Read and execute the ${skill.dirName} skill from \`.agents/skills/${skill.dirName}/SKILL.md\`.`
-  );
-  lines.push('');
-  lines.push(isZhCN ? '严格按照技能中定义的所有步骤执行。' : 'Follow all steps defined in the skill exactly.');
-
-  return `${lines.join('\n')}\n`;
-}
-
 function formatYamlScalarMetadata(key, value) {
   if (typeof value === 'boolean') return [`${key}: ${String(value)}`];
   if (/^[A-Za-z0-9_-]+$/.test(value)) return [`${key}: ${value}`];
@@ -825,10 +808,17 @@ function generateAgentClientCommand(skill, lang, descriptor) {
     ...formatYamlMetadata('description', skill.description),
     ...Object.entries(descriptor.frontmatter).flatMap(([key, value]) =>
       formatYamlScalarMetadata(key, value)
-    ),
-    '---',
-    ''
+    )
   ];
+
+  if (descriptor.includeUsage && skill.args) {
+    lines.push(`usage: ${JSON.stringify(`${descriptor.invocation} ${skill.args}`)}`);
+  }
+  if (descriptor.inheritDisableModelInvocation && skill.disableModelInvocation) {
+    lines.push('disable-model-invocation: true');
+  }
+
+  lines.push('---', '');
 
   if (skill.args && descriptor.argumentsToken) {
     lines.push(
@@ -1079,18 +1069,15 @@ function generateCustomCommands(
   managedWriter
 ) {
   for (const skill of customSkills) {
-    if (enabledTUIs.has('claude-code')) {
-      managedWriter(
-        `.claude/commands/${skill.dirName}.md`,
-        generateClaudeCommand(skill, lang),
-        report.custom.commands
-      );
-    }
     for (const adapter of AGENT_CLIENT_MANIFEST) {
       if (!enabledTUIs.has(adapter.id) || !adapter.customCommand) continue;
+      const descriptor = {
+        ...adapter.customCommand,
+        invocation: adapter.invocation.replaceAll('${skillName}', skill.dirName)
+      };
       managedWriter(
         adapter.customCommand.target.replaceAll('${skillName}', skill.dirName),
-        generateAgentClientCommand(skill, lang, adapter.customCommand),
+        generateAgentClientCommand(skill, lang, descriptor),
         report.custom.commands
       );
     }

@@ -65,7 +65,13 @@ type SandboxResolvedToolState = Readonly<{
 type SandboxHookCreateContext = Readonly<{
   hostHome: string;
   hostEnv?: Readonly<NodeJS.ProcessEnv>;
+  project: string;
   resolvedTools: readonly SandboxResolvedToolState[];
+}>;
+
+type SandboxHookEnterContext = Readonly<{
+  hostHome: string;
+  hostEnv?: Readonly<NodeJS.ProcessEnv>;
 }>;
 
 type AgentClientSandboxHookContext = Readonly<{
@@ -74,6 +80,7 @@ type AgentClientSandboxHookContext = Readonly<{
   config?: Readonly<Record<string, unknown>>;
   plan?: Readonly<Record<string, unknown>>;
   create?: SandboxHookCreateContext;
+  enter?: SandboxHookEnterContext;
 }>;
 
 type AgentClientSandboxHook = Readonly<{
@@ -134,6 +141,7 @@ export type {
   SandboxHookPhase,
   SandboxHookStatus,
   SandboxHookCreateContext,
+  SandboxHookEnterContext,
   SandboxRecoveryFindingDescriptor,
   SandboxRecoveryProbe,
   SandboxRecoveryRepair,

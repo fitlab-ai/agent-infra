@@ -46,7 +46,8 @@ test('project asset planning preserves user entries and appends enabled assets c
   ]);
   assert.deepEqual(plan.disabledManaged, [
     '.claude/commands/',
-    '.claude/agents/'
+    '.claude/agents/',
+    '.claude/rules/'
   ]);
 });
 

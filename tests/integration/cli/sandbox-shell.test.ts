@@ -66,7 +66,6 @@ type SandboxCreateModule = {
 };
 type EnterModule = {
   terminalEnvFlags(env?: NodeJS.ProcessEnv): string[];
-  formatCredentialSyncStatus(result: { status: string }): string;
 };
 
 function withTTY<T>(value: boolean, fn: () => T): T {

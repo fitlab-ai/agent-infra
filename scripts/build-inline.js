@@ -92,11 +92,23 @@ function validateManifest(manifest, registry) {
             customCommand.argumentsToken !== undefined
             && typeof customCommand.argumentsToken !== 'string'
           )
+          || (
+            customCommand.includeUsage !== undefined
+            && typeof customCommand.includeUsage !== 'boolean'
+          )
+          || (
+            customCommand.inheritDisableModelInvocation !== undefined
+            && typeof customCommand.inheritDisableModelInvocation !== 'boolean'
+          )
           || Object.keys(customCommand).sort().join(',')
             !== [
               'frontmatter',
               'target',
-              ...(customCommand.argumentsToken === undefined ? [] : ['argumentsToken'])
+              ...(customCommand.argumentsToken === undefined ? [] : ['argumentsToken']),
+              ...(customCommand.includeUsage === undefined ? [] : ['includeUsage']),
+              ...(customCommand.inheritDisableModelInvocation === undefined
+                ? []
+                : ['inheritDisableModelInvocation'])
             ].sort().join(',')
         )
       )

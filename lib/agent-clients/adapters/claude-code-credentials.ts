@@ -2,7 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { hostJoin } from './engines/wsl2-paths.ts';
+import { hostJoin } from '../../sandbox/engines/wsl2-paths.ts';
+import { redactCommandError } from '../../sandbox/redaction.ts';
 
 type ExecFn = (file: string, args: string[], options?: Record<string, unknown>) => string | Buffer | void;
 type ReadFn = (targetPath: string) => string;
@@ -112,12 +113,6 @@ type CredentialPayload = {
 
 const LOCKED_PATTERN = /errSecInteractionNotAllowed|User interaction is not allowed/i;
 const NOT_FOUND_PATTERN = /errSecItemNotFound|specified item could not be found/i;
-const REDACTION_PATTERNS = [
-  { pattern: /\{[^{}]*"claudeAiOauth"[\s\S]*?\}\s*\}/g, replacement: '[REDACTED credentials blob]' },
-  { pattern: /sk-ant-[A-Za-z0-9_-]{20,}/g, replacement: '[REDACTED claude token]' },
-  { pattern: /gh[psoru]_[A-Za-z0-9]{30,}/g, replacement: '[REDACTED github token]' },
-  { pattern: /Bearer\s+[A-Za-z0-9._~+/=-]{20,}/gi, replacement: 'Bearer [REDACTED]' }
-];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -131,18 +126,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown error';
 }
 
-export function redactCommandError(text: unknown): string {
-  if (!text || typeof text !== 'string') {
-    return '';
-  }
-
-  return REDACTION_PATTERNS.reduce(
-    (result, { pattern, replacement }) => result.replace(pattern, replacement),
-    text
-  );
-}
-
 export const redactSecurityOutput = redactCommandError;
+export { redactCommandError };
 
 function extractStderrSafely(error: unknown): string {
   const stderr = typeof error === 'object' && error !== null && 'stderr' in error

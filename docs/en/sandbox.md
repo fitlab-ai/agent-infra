@@ -50,6 +50,8 @@ image and recreate affected containers. Runtime capability labels let start,
 exec, and recovery reject containers whose selected mounts or hook policy no
 longer match the current configuration.
 
+For Claude Code, setting `installInSandbox` to `false` is the supported uninstall path. Rebuild and recreate the affected sandbox to converge the tool, credential mount, and hooks away. Host `~/.claude` data, Keychain credentials, plugins, history, and `~/.agent-infra/credentials/<project>/claude-code` remain intact; turning the setting back on reuses that host-owned state.
+
 The Antigravity adapter uses the [official installer](https://antigravity.google/docs/cli/install),
 runs the `agy` binary, and pre-seeds its settings, keybindings, and MCP configuration
 under the [official configuration directory](https://antigravity.google/docs/cli/settings).

@@ -44,8 +44,6 @@ type SandboxCreateModule = {
   buildContainerEnvFile(tools: ResolvedToolFixture[], engine: string, runSafe?: EngineRunSafeFn, options?: CommandOptions): EnvFileResult;
   buildDotfilesVolumeArgs(engine: string, snapshotDir: string | null | undefined, existsFn?: (targetPath: string) => boolean): string[];
   assertBranchAvailable(repoRoot: string, branch: string, options?: { allowedWorktrees?: string[]; runFn?: RunSafeFn }): void;
-  ensureClaudeOnboarding(toolDir: string, hostHomeDir?: string): void;
-  ensureClaudeSettings(toolDir: string, hostHomeDir?: string): void;
   ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string, containerCodexDir?: string): void;
   ensureCodexWorkspaceTrust(toolDir: string): void;
   buildImage(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): void;
@@ -68,12 +66,21 @@ type SandboxCreateModule = {
   writeGpgCache(home: string, project: string, pub: Buffer, sec: Buffer, fingerprint: string, signingKey?: string): boolean;
 };
 
+type ClaudeSandboxModule = {
+  ensureClaudeOnboarding(toolDir: string, hostHomeDir?: string): void;
+  ensureClaudeSettings(toolDir: string, hostHomeDir?: string): void;
+};
+
+async function loadClaudeSandbox(): Promise<ClaudeSandboxModule> {
+  return loadFreshEsm<ClaudeSandboxModule>('lib/agent-clients/adapters/claude-code-sandbox.js');
+}
+
 test("ensureClaudeOnboarding creates .claude.json with onboarding and workspace trust", async () => {
   const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-onboarding-"));
 
   try {
-    sandboxCreate.ensureClaudeOnboarding(tmpDir);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(data.hasCompletedOnboarding, true);
     assert.equal(data.projects["/workspace"].hasTrustDialogAccepted, true);
@@ -88,7 +95,7 @@ test("ensureClaudeOnboarding preserves existing fields", async () => {
 
   try {
     fs.writeFileSync(path.join(tmpDir, ".claude.json"), JSON.stringify({ theme: "dark", userID: "abc" }), "utf8");
-    sandboxCreate.ensureClaudeOnboarding(tmpDir);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(data.hasCompletedOnboarding, true);
     assert.equal(data.theme, "dark");
@@ -112,7 +119,7 @@ test("ensureClaudeOnboarding populates workspace trust when only hasCompletedOnb
       JSON.stringify({ hasCompletedOnboarding: true }),
       "utf8"
     );
-    sandboxCreate.ensureClaudeOnboarding(tmpDir);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(data.hasCompletedOnboarding, true);
     assert.equal(data.projects["/workspace"].hasTrustDialogAccepted, true);
@@ -132,7 +139,7 @@ test("ensureClaudeOnboarding skips write when flag already set", async () => {
       projects: { "/workspace": { hasTrustDialogAccepted: true } }
     }), "utf8");
     const mtimeBefore = fs.statSync(filePath).mtimeMs;
-    sandboxCreate.ensureClaudeOnboarding(tmpDir);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir);
     const mtimeAfter = fs.statSync(filePath).mtimeMs;
     assert.equal(mtimeBefore, mtimeAfter);
   } finally {
@@ -147,7 +154,7 @@ test("ensureClaudeOnboarding inherits host model when sandbox model is absent", 
 
   try {
     fs.writeFileSync(path.join(hostHome, ".claude.json"), JSON.stringify({ model: "claude-opus-4-7" }), "utf8");
-    sandboxCreate.ensureClaudeOnboarding(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(data.model, "claude-opus-4-7");
     assert.equal(data.hasCompletedOnboarding, true);
@@ -165,7 +172,7 @@ test("ensureClaudeOnboarding preserves existing sandbox model", async () => {
   try {
     fs.writeFileSync(path.join(hostHome, ".claude.json"), JSON.stringify({ model: "claude-opus-4-7" }), "utf8");
     fs.writeFileSync(path.join(tmpDir, ".claude.json"), JSON.stringify({ model: "claude-sonnet-4-5" }), "utf8");
-    sandboxCreate.ensureClaudeOnboarding(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(data.model, "claude-sonnet-4-5");
   } finally {
@@ -181,7 +188,7 @@ test("ensureClaudeOnboarding skips host model when it is missing", async () => {
 
   try {
     fs.writeFileSync(path.join(hostHome, ".claude.json"), JSON.stringify({ theme: "dark" }), "utf8");
-    sandboxCreate.ensureClaudeOnboarding(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(Object.hasOwn(data, "model"), false);
   } finally {
@@ -197,7 +204,7 @@ test("ensureClaudeOnboarding skips empty host model", async () => {
 
   try {
     fs.writeFileSync(path.join(hostHome, ".claude.json"), JSON.stringify({ model: "" }), "utf8");
-    sandboxCreate.ensureClaudeOnboarding(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(Object.hasOwn(data, "model"), false);
   } finally {
@@ -213,7 +220,8 @@ test("ensureClaudeOnboarding ignores malformed host json", async () => {
 
   try {
     fs.writeFileSync(path.join(hostHome, ".claude.json"), "{", "utf8");
-    assert.doesNotThrow(() => sandboxCreate.ensureClaudeOnboarding(tmpDir, hostHome));
+    const claudeSandbox = await loadClaudeSandbox();
+    assert.doesNotThrow(() => claudeSandbox.ensureClaudeOnboarding(tmpDir, hostHome));
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(Object.hasOwn(data, "model"), false);
   } finally {
@@ -233,7 +241,7 @@ test("ensureClaudeOnboarding inherits host launch-pin flag when sandbox is absen
       JSON.stringify({ unpinOpus47LaunchEffort: true }),
       "utf8"
     );
-    sandboxCreate.ensureClaudeOnboarding(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(data.unpinOpus47LaunchEffort, true);
   } finally {
@@ -258,7 +266,7 @@ test("ensureClaudeOnboarding preserves existing sandbox launch-pin flag value", 
       JSON.stringify({ unpinOpus47LaunchEffort: false }),
       "utf8"
     );
-    sandboxCreate.ensureClaudeOnboarding(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(data.unpinOpus47LaunchEffort, false);
   } finally {
@@ -274,7 +282,7 @@ test("ensureClaudeOnboarding skips launch-pin flag when host omits it", async ()
 
   try {
     fs.writeFileSync(path.join(hostHome, ".claude.json"), JSON.stringify({ theme: "dark" }), "utf8");
-    sandboxCreate.ensureClaudeOnboarding(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(Object.hasOwn(data, "unpinOpus47LaunchEffort"), false);
   } finally {
@@ -297,7 +305,7 @@ test("ensureClaudeOnboarding inherits all matching launch-pin flags for future m
       }),
       "utf8"
     );
-    sandboxCreate.ensureClaudeOnboarding(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(data.unpinOpus47LaunchEffort, true);
     assert.equal(data.unpinOpus48LaunchEffort, true);
@@ -322,7 +330,7 @@ test("ensureClaudeOnboarding skips launch-pin flag values that are not strictly 
       }),
       "utf8"
     );
-    sandboxCreate.ensureClaudeOnboarding(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeOnboarding(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".claude.json"), "utf8"));
     assert.equal(Object.hasOwn(data, "unpinOpus47LaunchEffort"), false);
     assert.equal(Object.hasOwn(data, "unpinOpus48LaunchEffort"), false);
@@ -338,7 +346,7 @@ test("ensureClaudeSettings creates settings.json with skipDangerousModePermissio
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-settings-"));
 
   try {
-    sandboxCreate.ensureClaudeSettings(tmpDir);
+    (await loadClaudeSandbox()).ensureClaudeSettings(tmpDir);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
     assert.equal(data.skipDangerousModePermissionPrompt, true);
   } finally {
@@ -356,7 +364,7 @@ test("ensureClaudeSettings skips write when skipDangerousModePermissionPrompt is
       skipDangerousModePermissionPrompt: true
     }), "utf8");
     const mtimeBefore = fs.statSync(settingsPath).mtimeMs;
-    sandboxCreate.ensureClaudeSettings(tmpDir);
+    (await loadClaudeSandbox()).ensureClaudeSettings(tmpDir);
     const mtimeAfter = fs.statSync(settingsPath).mtimeMs;
     assert.equal(mtimeBefore, mtimeAfter);
   } finally {
@@ -376,7 +384,7 @@ test("ensureClaudeSettings inherits host effort level when sandbox field is abse
       JSON.stringify({ effortLevel: "high" }),
       "utf8"
     );
-    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeSettings(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
     assert.equal(data.effortLevel, "high");
     assert.equal(data.skipDangerousModePermissionPrompt, true);
@@ -403,7 +411,7 @@ test("ensureClaudeSettings preserves existing sandbox effort level", async () =>
       JSON.stringify({ skipDangerousModePermissionPrompt: true, effortLevel: "low" }),
       "utf8"
     );
-    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeSettings(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
     assert.equal(data.effortLevel, "low");
   } finally {
@@ -420,7 +428,7 @@ test("ensureClaudeSettings skips missing host effort level", async () => {
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
     fs.writeFileSync(path.join(hostHome, ".claude", "settings.json"), JSON.stringify({ theme: "dark" }), "utf8");
-    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeSettings(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
     assert.equal(Object.hasOwn(data, "effortLevel"), false);
   } finally {
@@ -437,7 +445,7 @@ test("ensureClaudeSettings skips empty host effort level", async () => {
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
     fs.writeFileSync(path.join(hostHome, ".claude", "settings.json"), JSON.stringify({ effortLevel: "" }), "utf8");
-    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeSettings(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
     assert.equal(Object.hasOwn(data, "effortLevel"), false);
   } finally {
@@ -483,7 +491,7 @@ test("ensureClaudeSettings inherits host provider env and model settings", async
       "utf8"
     );
 
-    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeSettings(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
     assert.deepEqual(data.env, {
       ANTHROPIC_BASE_URL: "https://api.deepseek.example/anthropic",
@@ -546,7 +554,7 @@ test("ensureClaudeSettings preserves sandbox provider fields and fills missing e
       "utf8"
     );
 
-    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeSettings(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
     assert.deepEqual(data.env, {
       ANTHROPIC_MODEL: "sandbox-model",
@@ -588,7 +596,7 @@ test("ensureClaudeSettings skips invalid host env values and non-object sandbox 
       "utf8"
     );
 
-    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeSettings(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
     assert.equal(data.env, "keep-local-env-value");
   } finally {
@@ -605,7 +613,7 @@ test("ensureClaudeSettings skips non-object host env without defaulting effort e
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
     fs.writeFileSync(path.join(hostHome, ".claude", "settings.json"), JSON.stringify({ env: "invalid" }), "utf8");
-    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeSettings(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
     assert.equal(Object.hasOwn(data, "env"), false);
   } finally {
@@ -622,7 +630,7 @@ test("ensureClaudeSettings skips malformed host settings", async () => {
   try {
     fs.mkdirSync(path.join(hostHome, ".claude"), { recursive: true });
     fs.writeFileSync(path.join(hostHome, ".claude", "settings.json"), "{not-json:test-token-redacted", "utf8");
-    sandboxCreate.ensureClaudeSettings(tmpDir, hostHome);
+    (await loadClaudeSandbox()).ensureClaudeSettings(tmpDir, hostHome);
     const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "settings.json"), "utf8"));
     assert.deepEqual(data, { skipDangerousModePermissionPrompt: true });
   } finally {

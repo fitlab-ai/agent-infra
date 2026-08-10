@@ -220,7 +220,9 @@ test('adapter custom commands validate paths, placeholders, metadata, and immuta
       customCommand: {
         target: '.codex/commands/${skillName}.md',
         frontmatter: { agent: 'general', subtask: false },
-        argumentsToken: '$ARGUMENTS'
+        argumentsToken: '$ARGUMENTS',
+        includeUsage: true,
+        inheritDisableModelInvocation: true
       }
     }
   }));
@@ -228,7 +230,9 @@ test('adapter custom commands validate paths, placeholders, metadata, and immuta
   assert.deepEqual(adapter.project.customCommand, {
     target: '.codex/commands/${skillName}.md',
     frontmatter: { agent: 'general', subtask: false },
-    argumentsToken: '$ARGUMENTS'
+    argumentsToken: '$ARGUMENTS',
+    includeUsage: true,
+    inheritDisableModelInvocation: true
   });
   assert.ok(Object.isFrozen(adapter.project.customCommand));
   assert.ok(Object.isFrozen(adapter.project.customCommand?.frontmatter));
@@ -239,7 +243,9 @@ test('adapter custom commands validate paths, placeholders, metadata, and immuta
     { target: '.codex/${skillName}/${skillName}.md', frontmatter: {} },
     { target: '.codex/commands/${unknown}.md', frontmatter: {} },
     { target: '.codex/commands/${skillName}.md', frontmatter: { nested: {} } },
-    { target: '.codex/commands/${skillName}.md', frontmatter: {}, argumentsToken: '' }
+    { target: '.codex/commands/${skillName}.md', frontmatter: {}, argumentsToken: '' },
+    { target: '.codex/commands/${skillName}.md', frontmatter: {}, includeUsage: 'yes' },
+    { target: '.codex/commands/${skillName}.md', frontmatter: {}, inheritDisableModelInvocation: 1 }
   ];
   for (const customCommand of invalidDescriptors) {
     assert.throws(() => defineAgentClientAdapter(adapterInput({
@@ -249,6 +255,30 @@ test('adapter custom commands validate paths, placeholders, metadata, and immuta
       }
     })), /invalid custom command/);
   }
+});
+
+test('Claude adapter owns commands, agents, rules, custom rendering, and lifecycle hooks', () => {
+  const adapter = getAgentClientAdapter('claude-code');
+
+  assert.deepEqual(adapter.project.managed, [
+    '.claude/commands/',
+    '.claude/agents/',
+    '.claude/rules/'
+  ]);
+  assert.deepEqual(adapter.project.customCommand, {
+    target: '.claude/commands/${skillName}.md',
+    frontmatter: {},
+    includeUsage: true,
+    inheritDisableModelInvocation: true
+  });
+  assert.deepEqual(
+    adapter.sandbox.hooks.map(({ id, phase }) => ({ id, phase })),
+    [
+      { id: 'claude-code-credential-preflight', phase: 'prepare' },
+      { id: 'claude-code-before-container-create', phase: 'before-container-create' },
+      { id: 'claude-code-before-enter', phase: 'before-enter' }
+    ]
+  );
 });
 
 test('adapter project assets must be literal owned relative paths without overlaps', () => {
@@ -386,7 +416,7 @@ test('registry exposes the exact built-in project asset matrix', () => {
     {
       'claude-code': {
         ownedPathPrefixes: ['.claude/'],
-        managed: ['.claude/commands/', '.claude/agents/'],
+        managed: ['.claude/commands/', '.claude/agents/', '.claude/rules/'],
         merged: ['.claude/settings.json'],
         ejected: [],
         seedCommands: [{
@@ -395,7 +425,13 @@ test('registry exposes the exact built-in project asset matrix', () => {
             'zh-CN': '.claude/commands/update-agent-infra.zh-CN.md'
           },
           target: '.claude/commands/update-agent-infra.md'
-        }]
+        }],
+        customCommand: {
+          target: '.claude/commands/${skillName}.md',
+          frontmatter: {},
+          includeUsage: true,
+          inheritDisableModelInvocation: true
+        }
       },
       codex: {
         ownedPathPrefixes: ['.codex/'],

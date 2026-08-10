@@ -76,6 +76,21 @@ test('canonical all-false state does not fall back to legacy client tool ids', (
   assert.deepEqual(plan.tools.map((tool) => tool.id), ['agent-infra']);
 });
 
+test('Claude sandbox lifecycle is selected only by installInSandbox', () => {
+  const installed = createSandboxCapabilityPlan(config(['claude-code']));
+  const disabled = createSandboxCapabilityPlan(config([]));
+
+  assert.deepEqual(
+    Object.values(installed.hooksByPhase).flat().map(({ id, phase }) => ({ id, phase })),
+    [
+      { id: 'claude-code-credential-preflight', phase: 'prepare' },
+      { id: 'claude-code-before-container-create', phase: 'before-container-create' },
+      { id: 'claude-code-before-enter', phase: 'before-enter' }
+    ]
+  );
+  assert.deepEqual(Object.values(disabled.hooksByPhase).flat(), []);
+});
+
 test('runtime signature is host-path independent and changes with selected capabilities', () => {
   const first = createSandboxCapabilityPlan(config(['codex']));
   const movedHome = createSandboxCapabilityPlan({

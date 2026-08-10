@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { assertModeBits, loadFreshEsm } from "../../helpers.ts";
+import { getAgentClientAdapter } from "../../../lib/agent-clients/registry.ts";
 
 function withPlatform<T>(platform: NodeJS.Platform, fn: () => T): T {
   const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
@@ -38,8 +39,43 @@ function taintedSecurityError(stderr: string = "") {
   return error;
 }
 
+test("Claude credential preflight hook uses typed project context", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-hook-"));
+  const source = path.join(home, "credentials.json");
+  fs.writeFileSync(source, validBlob());
+  const adapter = getAgentClientAdapter("claude-code");
+  const tool = adapter.sandbox.createTool({ home, project: "alpha" });
+  const hook = adapter.sandbox.hooks.find(({ phase }) => phase === "prepare");
+  assert.ok(hook);
+
+  try {
+    const result = await hook.run({
+      signal: AbortSignal.timeout(5_000),
+      async runCommand() { return { stdout: "" }; },
+      create: {
+        hostHome: home,
+        hostEnv: { AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: source },
+        project: "alpha",
+        resolvedTools: [{ tool, dir: path.join(home, "sandbox") }]
+      }
+    });
+
+    assert.equal(result.status, "ready");
+    assert.ok(fs.existsSync(path.join(
+      home,
+      ".agent-infra",
+      "credentials",
+      "alpha",
+      "claude-code",
+      ".credentials.json"
+    )));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("redactCommandError strips credential-shaped tokens", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   const redacted = credentials.redactCommandError([
     'oauth={"claudeAiOauth":{"accessToken":"sk-ant-oat01-123456789012345678901234567890"}}',
@@ -58,7 +94,7 @@ test("redactCommandError strips credential-shaped tokens", async () => {
 });
 
 test("redactCommandError preserves benign short lookalikes", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   assert.equal(
     credentials.redactCommandError("image sha256:abc123 and token-ish ghp_short"),
@@ -67,7 +103,7 @@ test("redactCommandError preserves benign short lookalikes", async () => {
 });
 
 test("env override helpers validate absolute credential file paths", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   assert.equal(credentials.claudeCredentialsEnvOverride({}), null);
   assert.deepEqual(
@@ -87,7 +123,7 @@ test("env override helpers validate absolute credential file paths", async () =>
 });
 
 test("buildLockedGuidance includes macOS env override seed instructions", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const guidance = credentials.buildLockedGuidance();
 
   assert.match(guidance, /security unlock-keychain/);
@@ -98,7 +134,7 @@ test("buildLockedGuidance includes macOS env override seed instructions", async 
 });
 
 test("extractClaudeCredentialsBlob reads the full Claude Code credentials blob from macOS Keychain", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const rawBlob = validBlob();
 
   withPlatform("darwin", () => {
@@ -124,7 +160,7 @@ test("extractClaudeCredentialsBlob reads the full Claude Code credentials blob f
 });
 
 test("extractClaudeCredentialsBlob returns null when macOS Keychain lookup fails", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   withPlatform("darwin", () => {
     assert.equal(credentials.extractClaudeCredentialsBlob("/Users/demo", () => {
@@ -134,7 +170,7 @@ test("extractClaudeCredentialsBlob returns null when macOS Keychain lookup fails
 });
 
 test("extractClaudeCredentialsBlob returns null for empty macOS Keychain output", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   withPlatform("darwin", () => {
     assert.equal(credentials.extractClaudeCredentialsBlob("/Users/demo", () => ""), null);
@@ -142,7 +178,7 @@ test("extractClaudeCredentialsBlob returns null for empty macOS Keychain output"
 });
 
 test("extractClaudeCredentialsBlob returns null for invalid macOS Keychain JSON", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   withPlatform("darwin", () => {
     assert.equal(credentials.extractClaudeCredentialsBlob("/Users/demo", () => "not-json"), null);
@@ -150,7 +186,7 @@ test("extractClaudeCredentialsBlob returns null for invalid macOS Keychain JSON"
 });
 
 test("extractClaudeCredentialsBlob returns null when macOS credentials lack required scopes", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   withPlatform("darwin", () => {
     assert.equal(credentials.extractClaudeCredentialsBlob("/Users/demo", () => JSON.stringify({
@@ -164,7 +200,7 @@ test("extractClaudeCredentialsBlob returns null when macOS credentials lack requ
 });
 
 test("extractClaudeCredentialsBlob returns null when Linux credentials file is missing", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-token-missing-"));
 
   try {
@@ -177,7 +213,7 @@ test("extractClaudeCredentialsBlob returns null when Linux credentials file is m
 });
 
 test("extractClaudeCredentialsBlob returns null for invalid Linux credentials JSON", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-token-invalid-"));
   const claudeDir = path.join(tmpDir, ".claude");
 
@@ -193,7 +229,7 @@ test("extractClaudeCredentialsBlob returns null for invalid Linux credentials JS
 });
 
 test("extractClaudeCredentialsBlob returns null when Linux credentials lack required scopes", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-token-scopes-"));
   const claudeDir = path.join(tmpDir, ".claude");
 
@@ -215,7 +251,7 @@ test("extractClaudeCredentialsBlob returns null when Linux credentials lack requ
 });
 
 test("extractClaudeCredentialsBlob reads Linux credentials from the Claude config directory", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-token-"));
   const claudeDir = path.join(tmpDir, ".claude");
   const rawBlob = validBlob();
@@ -232,7 +268,7 @@ test("extractClaudeCredentialsBlob reads Linux credentials from the Claude confi
 });
 
 test("credential path helpers and writer manage the shared credential file", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-credentials-write-"));
   const credentialsDir = path.join(tmpDir, ".agent-infra", "credentials", "demo", "claude-code");
   const credentialsPath = path.join(credentialsDir, ".credentials.json");
@@ -258,7 +294,7 @@ test("credential path helpers and writer manage the shared credential file", asy
 });
 
 test("Claude provider auth detection accepts settings env tokens and apiKeyHelper", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   assert.equal(credentials.hasClaudeProviderAuthInSettings({
     env: { ANTHROPIC_AUTH_TOKEN: "  token-value  " }
@@ -281,7 +317,7 @@ test("Claude provider auth detection accepts settings env tokens and apiKeyHelpe
 });
 
 test("Claude provider auth detection reads settings.json conservatively", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-provider-auth-"));
   const settingsPath = path.join(tmpDir, ".claude", "settings.json");
 
@@ -300,7 +336,7 @@ test("Claude provider auth detection reads settings.json conservatively", async 
 });
 
 test("prepareClaudeCredentials writes credentials only when claude-code is enabled", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const writes: Array<[string, string, string]> = [];
 
   const outcome = credentials.prepareClaudeCredentials(
@@ -329,7 +365,7 @@ test("prepareClaudeCredentials writes credentials only when claude-code is enabl
 });
 
 test("prepareClaudeCredentials returns SKIPPED and writes nothing when credentials are missing", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   let writeCalled = false;
 
   const outcome = credentials.prepareClaudeCredentials(
@@ -348,7 +384,7 @@ test("prepareClaudeCredentials returns SKIPPED and writes nothing when credentia
 });
 
 test("prepareClaudeCredentials accepts provider auth when OAuth credentials are missing or stale", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   for (const inspection of [
     { status: "MISSING" as const },
@@ -373,7 +409,7 @@ test("prepareClaudeCredentials accepts provider auth when OAuth credentials are 
 });
 
 test("prepareClaudeCredentials accepts provider auth when keychain extraction is empty", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   let writeCalled = false;
 
   const outcome = credentials.prepareClaudeCredentials(
@@ -393,7 +429,7 @@ test("prepareClaudeCredentials accepts provider auth when keychain extraction is
 });
 
 test("prepareClaudeCredentials rejects stale and keychain error states", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   for (const inspection of [
     { status: "STALE_ACCESS" as const },
@@ -415,7 +451,7 @@ test("prepareClaudeCredentials rejects stale and keychain error states", async (
 });
 
 test("prepareClaudeCredentials reports keychain locked guidance", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   assert.throws(() => credentials.prepareClaudeCredentials(
     "/Users/demo",
@@ -434,7 +470,7 @@ test("prepareClaudeCredentials reports keychain locked guidance", async () => {
 });
 
 test("inspectClaudeKeychainStatus reports macOS credential states", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   withPlatform("darwin", () => {
     assert.equal(credentials.inspectClaudeKeychainStatus("/Users/demo", () => validBlob()).status, "OK");
@@ -457,7 +493,7 @@ test("inspectClaudeKeychainStatus reports macOS credential states", async () => 
 });
 
 test("inspectClaudeKeychainStatus reads env override without touching keychain", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-env-inspect-"));
   const overridePath = path.join(tmpDir, "credentials.json");
 
@@ -480,7 +516,7 @@ test("inspectClaudeKeychainStatus reads env override without touching keychain",
 });
 
 test("inspectClaudeKeychainStatus reports Linux credential states", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-inspect-"));
   const credentialsPath = path.join(tmpDir, ".claude", ".credentials.json");
   const rawBlob = validBlob({ expiresAt: 123456 });
@@ -508,7 +544,7 @@ test("inspectClaudeKeychainStatus reports Linux credential states", async () => 
 });
 
 test("inspectClaudeMountFile reports mounted credential states", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-mount-inspect-"));
   const targetPath = path.join(tmpDir, ".agent-infra", "credentials", "demo", "claude-code", ".credentials.json");
   const rawBlob = validBlob({ expiresAt: 987654 });
@@ -530,7 +566,7 @@ test("inspectClaudeMountFile reports mounted credential states", async () => {
 });
 
 test("discoverProjects lists project credential copies only", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-discover-"));
 
   try {
@@ -549,7 +585,7 @@ test("discoverProjects lists project credential copies only", async () => {
 });
 
 test("writeClaudeCredentialsToHost updates macOS Keychain credentials", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const rawBlob = validBlob();
 
   withPlatform("darwin", () => {
@@ -576,7 +612,7 @@ test("writeClaudeCredentialsToHost updates macOS Keychain credentials", async ()
 });
 
 test("writeClaudeCredentialsToHost returns a soft failure when macOS Keychain write fails", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   withPlatform("darwin", () => {
     const result = credentials.writeClaudeCredentialsToHost("/Users/demo", validBlob(), {
@@ -594,7 +630,7 @@ test("writeClaudeCredentialsToHost returns a soft failure when macOS Keychain wr
 });
 
 test("writeClaudeCredentialsToHost returns locked guidance without leaking OAuth data", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   withPlatform("darwin", () => {
     const result = credentials.writeClaudeCredentialsToHost("/Users/demo", validBlob(), {
@@ -614,7 +650,7 @@ test("writeClaudeCredentialsToHost returns locked guidance without leaking OAuth
 });
 
 test("writeClaudeCredentialsToHost writes env override file without touching keychain", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-env-write-"));
   const overridePath = path.join(tmpDir, "credentials.json");
   const rawBlob = validBlob();
@@ -637,7 +673,7 @@ test("writeClaudeCredentialsToHost writes env override file without touching key
 });
 
 test("writeClaudeCredentialsToHost atomically replaces Linux host credentials", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-write-"));
   const targetPath = path.join(tmpDir, ".claude", ".credentials.json");
   const rawBlob = validBlob();
@@ -658,7 +694,7 @@ test("writeClaudeCredentialsToHost atomically replaces Linux host credentials", 
 });
 
 test("writeClaudeCredentialsToHost preserves Linux host credentials when rename fails", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-claude-host-rename-fail-"));
   const targetDir = path.join(tmpDir, ".claude");
   const targetPath = path.join(targetDir, ".credentials.json");
@@ -686,7 +722,7 @@ test("writeClaudeCredentialsToHost preserves Linux host credentials when rename 
 });
 
 test("syncClaudeCredentialsFromKeychain writes only when destination bytes differ", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const rawBlob = validBlob({ expiresAt: 123456 });
   const writes: Array<[string, string, string]> = [];
 
@@ -716,7 +752,7 @@ test("syncClaudeCredentialsFromKeychain writes only when destination bytes diffe
 });
 
 test("syncClaudeCredentialsFromKeychain and formatRemaining handle unavailable or coarse states", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const now = 1_700_000_000_000;
   const originalNow = Date.now;
   let writeCalled = false;
@@ -747,7 +783,7 @@ test("syncClaudeCredentialsFromKeychain and formatRemaining handle unavailable o
 });
 
 test("reconcileClaudeCredentials writes project files when host credentials are newer", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-reconcile-host-newer-"));
   const hostBlob = validBlob({ accessToken: "host", expiresAt: 200 });
   const fileBlob = validBlob({ accessToken: "file", expiresAt: 100 });
@@ -774,7 +810,7 @@ test("reconcileClaudeCredentials writes project files when host credentials are 
 });
 
 test("reconcileClaudeCredentials writes host credentials when a project file is newer", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-reconcile-file-newer-"));
   const hostBlob = validBlob({ accessToken: "host", expiresAt: 100 });
   const fileBlob = validBlob({ accessToken: "file", expiresAt: 200 });
@@ -802,7 +838,7 @@ test("reconcileClaudeCredentials writes host credentials when a project file is 
 });
 
 test("reconcileClaudeCredentials picks the freshest credentials across multiple project files", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-reconcile-multi-"));
   const hostBlob = validBlob({ accessToken: "host", expiresAt: 100 });
   const alphaBlob = validBlob({ accessToken: "alpha", expiresAt: 200 });
@@ -840,7 +876,7 @@ test("reconcileClaudeCredentials keeps host authoritative but does not overwrite
   // numeric expiresAt, because the host blob may be leaner (missing fields like
   // subscriptionType). A real rotation will produce a strictly larger expiresAt
   // and let the right side win cleanly next time.
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-reconcile-host-unknown-expiry-"));
   const hostBlob = validBlob({ accessToken: "host", expiresAt: undefined });
   const fileBlob = validBlob({ accessToken: "file", expiresAt: 300 });
@@ -867,7 +903,7 @@ test("reconcileClaudeCredentials keeps host authoritative but does not overwrite
 });
 
 test("reconcileClaudeCredentials reports KEYCHAIN_WRITE_FAILED when host write fails", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const fileBlob = validBlob({ expiresAt: 200 });
 
   withPlatform("darwin", () => {
@@ -894,7 +930,7 @@ test("reconcileClaudeCredentials reports KEYCHAIN_WRITE_FAILED when host write f
 });
 
 test("reconcileClaudeCredentials reports KEYCHAIN_LOCKED when host is locked and no file is usable", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
 
   withPlatform("darwin", () => {
     const result = credentials.reconcileClaudeCredentials("/Users/demo", {
@@ -911,7 +947,7 @@ test("reconcileClaudeCredentials reports KEYCHAIN_LOCKED when host is locked and
 });
 
 test("reconcileClaudeCredentials skips writes when expiresAt values are equal", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-reconcile-equal-"));
   const hostBlob = validBlob({ accessToken: "host", expiresAt: 100 });
   const fileBlob = validBlob({ accessToken: "file", expiresAt: 100 });
@@ -938,7 +974,7 @@ test("reconcileClaudeCredentials skips writes when expiresAt values are equal", 
 });
 
 test("reconcileClaudeCredentials restores missing host credentials from a project file", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-reconcile-host-missing-"));
   const fileBlob = validBlob({ expiresAt: 200 });
   const hostPath = path.join(tmpDir, ".claude", ".credentials.json");
@@ -962,7 +998,7 @@ test("reconcileClaudeCredentials restores missing host credentials from a projec
 });
 
 test("reconcileClaudeCredentials falls back to host one-way sync when files are stale", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-reconcile-file-stale-"));
   const hostBlob = validBlob({ expiresAt: 200 });
   const hostPath = path.join(tmpDir, ".claude", ".credentials.json");
@@ -988,7 +1024,7 @@ test("reconcileClaudeCredentials falls back to host one-way sync when files are 
 });
 
 test("reconcileClaudeCredentials reports stale when no endpoint has valid credentials", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-reconcile-stale-"));
   const hostPath = path.join(tmpDir, ".claude", ".credentials.json");
   const filePath = path.join(tmpDir, ".agent-infra", "credentials", "demo", "claude-code", ".credentials.json");
@@ -1011,7 +1047,7 @@ test("reconcileClaudeCredentials reports stale when no endpoint has valid creden
 });
 
 test("reconcileClaudeCredentials reports missing when no endpoint exists", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-reconcile-missing-"));
 
   try {
@@ -1027,7 +1063,7 @@ test("reconcileClaudeCredentials reports missing when no endpoint exists", async
 });
 
 test("reconcileClaudeCredentials does not overwrite mount when host expiresAt is missing", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-reconcile-host-no-expires-"));
   const hostBlob = JSON.stringify({
     claudeAiOauth: {
@@ -1061,7 +1097,7 @@ test("reconcileClaudeCredentials does not overwrite mount when host expiresAt is
 });
 
 test("reconcileClaudeCredentials does not overwrite mount when host expiresAt is a non-numeric value", async () => {
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-reconcile-host-string-expires-"));
   const hostBlob = JSON.stringify({
     claudeAiOauth: {
@@ -1099,7 +1135,7 @@ test("reconcileClaudeCredentials preserves mount subscriptionType when host blob
   // missing subscriptionType, the mount file held the full blob with
   // subscriptionType=max, and reconcile was overwriting the mount with the
   // leaner host blob — silently downgrading the user from max tier.
-  const credentials = await loadFreshEsm<typeof import("../../../lib/sandbox/credentials.ts")>("lib/sandbox/credentials.js");
+  const credentials = await loadFreshEsm<typeof import("../../../lib/agent-clients/adapters/claude-code-credentials.ts")>("lib/agent-clients/adapters/claude-code-credentials.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-reconcile-prod-incident-"));
   const hostBlob = JSON.stringify({
     claudeAiOauth: {

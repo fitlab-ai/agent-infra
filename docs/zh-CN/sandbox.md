@@ -47,6 +47,8 @@ setup hint、alias 以及有执行时限的生命周期 hook。`agent-infra` 等
 需要重建镜像并重新创建受影响容器。运行时能力 label 会让 start、exec 和
 recovery 拒绝 mount 或 hook 策略已与当前配置不一致的旧容器。
 
+对 Claude Code 而言，将 `installInSandbox` 设为 `false` 就是受支持的卸载方式。重建并重新创建受影响沙箱后，工具、凭证 mount 与 hooks 会被收敛移除。宿主 `~/.claude` 数据、Keychain 凭证、插件、历史记录以及 `~/.agent-infra/credentials/<project>/claude-code` 会完整保留；重新设为 `true` 时可继续复用这些宿主资产。
+
 Antigravity adapter 使用[官方安装器](https://antigravity.google/docs/cli/install)，
 调用 `agy` 命令，并在[官方配置目录](https://antigravity.google/docs/cli/settings)
 下预置 settings、keybindings 与 MCP 配置。新建容器后需在容器内运行一次

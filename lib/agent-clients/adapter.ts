@@ -54,6 +54,8 @@ type AgentClientCustomCommandDescriptor = Readonly<{
   target: string;
   frontmatter: Readonly<Record<string, string | boolean>>;
   argumentsToken?: string;
+  includeUsage?: boolean;
+  inheritDisableModelInvocation?: boolean;
 }>;
 
 type AgentClientProjectDescriptor = Readonly<{
@@ -434,6 +436,14 @@ function defineAgentClientAdapter(
           || /[\r\n]/.test(descriptor.argumentsToken)
         )
       )
+      || (
+        descriptor.includeUsage !== undefined
+        && typeof descriptor.includeUsage !== 'boolean'
+      )
+      || (
+        descriptor.inheritDisableModelInvocation !== undefined
+        && typeof descriptor.inheritDisableModelInvocation !== 'boolean'
+      )
     ) {
       throw new Error(`Agent Client '${candidate.id}' has an invalid custom command`);
     }
@@ -442,7 +452,13 @@ function defineAgentClientAdapter(
       frontmatter: Object.freeze({ ...frontmatter }),
       ...(descriptor.argumentsToken === undefined
         ? {}
-        : { argumentsToken: descriptor.argumentsToken })
+        : { argumentsToken: descriptor.argumentsToken }),
+      ...(descriptor.includeUsage === undefined
+        ? {}
+        : { includeUsage: descriptor.includeUsage }),
+      ...(descriptor.inheritDisableModelInvocation === undefined
+        ? {}
+        : { inheritDisableModelInvocation: descriptor.inheritDisableModelInvocation })
     });
   }
 

@@ -81,11 +81,7 @@ import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
 import { dotfilesCacheDir, materializeDotfiles } from '../dotfiles.ts';
 import { ensureSandboxDiscoveryReadmes } from '../readme-scaffold.ts';
 import { removeDirRecursive } from '../../remove-dir.ts';
-import {
-  prepareClaudeCredentials,
-  redactCommandError,
-  validateClaudeCredentialsEnvOverride
-} from '../credentials.ts';
+import { redactCommandError } from '../redaction.ts';
 import { detectHostTimezone } from '../host-timezone.ts';
 import {
   buildImageSignature,
@@ -145,7 +141,6 @@ type TmpfsSeedPlanEntry = TmpfsSeedEntry & {
   volumeArgs: string[];
 };
 type RuntimeCheck = { name: string; cmd: string[] };
-type JsonObject = Record<string, unknown>;
 type GpgCache = { pub: Buffer; sec: Buffer } | null;
 type ExecSyncOptions = ExecFileSyncOptions & {
   input?: Buffer | string;
@@ -825,171 +820,6 @@ export function assertBranchAvailable(
   }
 }
 
-function readHostJsonSafe(filePath: string): JsonObject | null {
-  if (!filePath || !fs.existsSync(filePath)) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as JsonObject : null;
-  } catch {
-    return null;
-  }
-}
-
-const CLAUDE_SETTINGS_INHERIT_TOP_LEVEL_KEYS = [
-  'model',
-  'fallbackModel',
-  'availableModels',
-  'modelOverrides',
-  'enforceAvailableModels',
-  'advisorModel',
-  'apiKeyHelper',
-  'effortLevel'
-];
-
-function isJsonObjectRecord(value: unknown): value is JsonObject {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function mergeMissingStringEnvFields(target: JsonObject, source: JsonObject): boolean {
-  if (!isJsonObjectRecord(source.env)) {
-    return false;
-  }
-  if (Object.hasOwn(target, 'env') && !isJsonObjectRecord(target.env)) {
-    return false;
-  }
-
-  let targetEnv = target.env as JsonObject | undefined;
-  let changed = false;
-  for (const [key, value] of Object.entries(source.env)) {
-    if (typeof value !== 'string' || value === '') {
-      continue;
-    }
-    if (!targetEnv) {
-      targetEnv = {};
-      target.env = targetEnv;
-    }
-    if (!Object.hasOwn(targetEnv, key)) {
-      targetEnv[key] = value;
-      changed = true;
-    }
-  }
-  return changed;
-}
-
-function mergeMissingTopLevelSettings(target: JsonObject, source: JsonObject): boolean {
-  let changed = false;
-  for (const key of CLAUDE_SETTINGS_INHERIT_TOP_LEVEL_KEYS) {
-    if (!Object.hasOwn(source, key) || Object.hasOwn(target, key)) {
-      continue;
-    }
-    const value = source[key];
-    if (value === null || value === undefined || value === '') {
-      continue;
-    }
-    target[key] = value;
-    changed = true;
-  }
-  return changed;
-}
-
-export function ensureClaudeOnboarding(toolDir: string, hostHomeDir?: string): void {
-  const claudeJsonPath = path.join(toolDir, '.claude.json');
-  let data: JsonObject & {
-    hasCompletedOnboarding?: boolean;
-    projects?: Record<string, { hasTrustDialogAccepted?: boolean }>;
-    model?: string;
-  } = {};
-  if (fs.existsSync(claudeJsonPath)) {
-    try {
-      data = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf8')) as typeof data;
-    } catch {
-      // malformed JSON, start fresh
-    }
-  }
-  let changed = false;
-  if (!data.hasCompletedOnboarding) {
-    data.hasCompletedOnboarding = true;
-    changed = true;
-  }
-  if (!data.projects) {
-    data.projects = {};
-    changed = true;
-  }
-  if (!data.projects['/workspace']) {
-    data.projects['/workspace'] = {};
-    changed = true;
-  }
-  if (!data.projects['/workspace'].hasTrustDialogAccepted) {
-    data.projects['/workspace'].hasTrustDialogAccepted = true;
-    changed = true;
-  }
-  if (hostHomeDir) {
-    const hostClaudeJson = readHostJsonSafe(path.join(hostHomeDir, '.claude.json'));
-    if (
-      hostClaudeJson
-      && typeof hostClaudeJson.model === 'string'
-      && hostClaudeJson.model !== ''
-      && !Object.hasOwn(data, 'model')
-    ) {
-      data.model = hostClaudeJson.model;
-      changed = true;
-    }
-    // Claude Code launch-pins a default effort per model generation (for
-    // example xhigh for Opus 4.7). The saved effortLevel is honored only after
-    // a top-level boolean `unpin*LaunchEffort: true` flag unlocks it, so mirror
-    // those flags here with the existing first-write semantics.
-    //
-    // Pattern matching avoids one patch per future model generation. If
-    // Anthropic changes the naming convention, this block will no-op and should
-    // be revisited.
-    if (hostClaudeJson) {
-      for (const key of Object.keys(hostClaudeJson)) {
-        if (
-          /^unpin.*LaunchEffort$/.test(key)
-          && hostClaudeJson[key] === true
-          && !Object.hasOwn(data, key)
-        ) {
-          data[key] = true;
-          changed = true;
-        }
-      }
-    }
-  }
-  if (changed) {
-    fs.writeFileSync(claudeJsonPath, JSON.stringify(data, null, 4), 'utf8');
-  }
-}
-
-export function ensureClaudeSettings(toolDir: string, hostHomeDir?: string): void {
-  const settingsPath = path.join(toolDir, 'settings.json');
-  let data: JsonObject & { skipDangerousModePermissionPrompt?: boolean } = {};
-  if (fs.existsSync(settingsPath)) {
-    try {
-      data = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as typeof data;
-    } catch {
-      // malformed JSON, start fresh
-    }
-  }
-  let changed = false;
-  if (data.skipDangerousModePermissionPrompt !== true) {
-    data.skipDangerousModePermissionPrompt = true;
-    changed = true;
-  }
-  if (hostHomeDir) {
-    const hostSettings = readHostJsonSafe(path.join(hostHomeDir, '.claude', 'settings.json'));
-    if (hostSettings) {
-      changed = mergeMissingStringEnvFields(data, hostSettings) || changed;
-      changed = mergeMissingTopLevelSettings(data, hostSettings) || changed;
-    }
-  }
-  if (changed) {
-    fs.writeFileSync(settingsPath, JSON.stringify(data, null, 4), 'utf8');
-  }
-}
-
 export function sandboxAliasesPath(home: string): string {
   return hostJoin(home, '.agent-infra', 'aliases', 'sandbox.sh');
 }
@@ -1175,8 +1005,6 @@ export async function create(args: string[]): Promise<void> {
   }
 
   validateSelinuxDisableEnv();
-  validateClaudeCredentialsEnvOverride();
-
   const config = loadConfig();
   const [branchOrTaskId = '', base] = positionals;
   const target = resolveSandboxTarget(branchOrTaskId, config.repoRoot);
@@ -1195,14 +1023,25 @@ export async function create(args: string[]): Promise<void> {
   const capabilityPlan = createSandboxCapabilityPlan(effectiveConfig);
   const tools = [...capabilityPlan.tools];
   const resolvedTools = resolveToolDirs(effectiveConfig, tools, branch);
-  // Fatal credential states still fail before filesystem/docker side effects.
-  // Missing credentials leave the selected Claude Code capability installed
-  // and mounted; only the absent live credential file is omitted.
-  const credentialOutcome = prepareClaudeCredentials(
-    effectiveConfig.home,
-    effectiveConfig.project,
-    resolvedTools
-  );
+  const prepareHookResults = await runSandboxHooks({
+    hooks: capabilityPlan.hooksByPhase.prepare,
+    phase: 'prepare',
+    context: {
+      config: effectiveConfig,
+      plan: capabilityPlan,
+      create: {
+        hostHome: effectiveConfig.home,
+        hostEnv: { ...process.env },
+        project: effectiveConfig.project,
+        resolvedTools
+      }
+    },
+    runCommand: runBoundedSandboxHookCommand
+  });
+  const prepareFailure = prepareHookResults.find((result) => result.status === 'fatal');
+  if (prepareFailure) {
+    throw new Error(prepareFailure.message ?? `Sandbox hook '${prepareFailure.hookId}' failed.`);
+  }
   const effectiveResolvedTools = resolvedTools;
   const container = containerName(effectiveConfig, branch);
   const worktree = worktreeCandidates.find((candidate) => fs.existsSync(candidate)) ?? worktreeCandidates[0] ?? '';
@@ -1218,26 +1057,12 @@ export async function create(args: string[]): Promise<void> {
   p.log.info(
     `Project: ${pc.bold(effectiveConfig.project)} | Branch: ${pc.bold(branch)} | Base: ${pc.bold(baseBranch || 'HEAD')}`
   );
-  if (credentialOutcome.status === 'SKIPPED') {
-    p.log.warn(
-      'Claude Code credentials not found on host - creating this sandbox WITHOUT Claude Code credentials.\n'
-      + '  Claude Code is still installed in the image but will not be authenticated.\n'
-      + '  To enable it: run "claude" once on the host to complete login, then re-run "ai sandbox create".'
-    );
+  for (const result of prepareHookResults) {
+    if (result.status === 'warning' && result.message) p.log.warn(result.message);
   }
 
   try {
     p.log.step('Checking container engine...');
-    const prepareHookResults = await runSandboxHooks({
-      hooks: capabilityPlan.hooksByPhase.prepare,
-      phase: 'prepare',
-      context: { config: effectiveConfig, plan: capabilityPlan },
-      runCommand: runBoundedSandboxHookCommand
-    });
-    const prepareFailure = prepareHookResults.find((result) => result.status === 'fatal');
-    if (prepareFailure) {
-      throw new Error(prepareFailure.message ?? `Sandbox hook '${prepareFailure.hookId}' failed.`);
-    }
     await ensureDocker(effectiveConfig, (detail: string) => {
       p.log.info(`  ${detail}`);
     });
@@ -1494,6 +1319,7 @@ export async function create(args: string[]): Promise<void> {
                 create: {
                   hostHome: effectiveConfig.home,
                   hostEnv: { ...process.env },
+                  project: effectiveConfig.project,
                   resolvedTools: effectiveResolvedTools
                 }
               },
@@ -1507,14 +1333,6 @@ export async function create(args: string[]): Promise<void> {
                 beforeCreateFailure.message
                 ?? `Sandbox hook '${beforeCreateFailure.hookId}' failed.`
               );
-            }
-            const claudeCodeEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'claude-code');
-            if (claudeCodeEntry) {
-              ensureClaudeOnboarding(claudeCodeEntry.dir, effectiveConfig.home);
-              ensureClaudeSettings(claudeCodeEntry.dir, effectiveConfig.home);
-              // prepareClaudeCredentials wrote OAuth credentials or confirmed
-              // provider/API settings are enough for Claude Code. If no usable
-              // auth was present, the claude-code entry was removed above.
             }
             const toolVolumes = effectiveResolvedTools.flatMap(({ tool, dir }) =>
               tool.tmpfs ? [] : ['-v', volumeArg(engine, dir, tool.containerMount)]

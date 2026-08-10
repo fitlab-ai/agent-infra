@@ -90,6 +90,8 @@
 | `installInSandbox` | 沙箱装配是否安装该客户端；此状态与 `enabled` 相互独立。 |
 | `orchestration` | 该客户端可选的完整默认策略。存在时两个角色都必须提供非空 `model` 与宿主原生 `reasoningEffort`；两个角色可以使用同一模型。 |
 
+将 `installInSandbox` 设为 `false` 即可从托管沙箱卸载客户端。重建镜像或重新创建容器后，sandbox reconciler 会移除该客户端的工具、mount 和生命周期 hook；宿主拥有的 `~/.claude`、Keychain 条目、插件、历史记录及项目凭证副本不会被删除。
+
 `run-task` 把显式策略视为原子输入：提供任一角色 model/effort 参数时，四个角色字段必须全部提供，缺项不会从配置补齐。完全没有显式策略时，只读取所选客户端的 `orchestration`。选中策略及来源会写入 schema v2；配置变化不会热切换 active run。模型发现独立标记为 `complete`/`partial` catalog 或 `interactive-only` 指引，局部工具 override 枚举不等于完整目录。
 
 配置了模型策略并不代表生命周期委派已受支持。`run-task` 只会在所选客户端能提供已验证的 actual model 与 reasoning-effort 证据时创建委派。Claude Code 当前无法从原生 start 事件同时报告这两个值，因此内建 adapter 保持 orchestration unsupported，`prepare` 会在创建 delegation 前失败关闭。

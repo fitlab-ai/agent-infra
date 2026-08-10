@@ -1,5 +1,10 @@
 import { defineAgentClientAdapter } from '../adapter.ts';
 import { hostJoin } from '../../sandbox/engines/wsl2-paths.ts';
+import {
+  claudeCodeBeforeContainerCreateHook,
+  claudeCodeBeforeEnterHook,
+  claudeCodeCredentialPreflightHook
+} from './claude-code-sandbox.ts';
 
 const claudeCodeAdapter = defineAgentClientAdapter({
   id: 'claude-code',
@@ -26,7 +31,7 @@ const claudeCodeAdapter = defineAgentClientAdapter({
   },
   project: {
     ownedPathPrefixes: ['.claude/'],
-    managed: ['.claude/commands/', '.claude/agents/'],
+    managed: ['.claude/commands/', '.claude/agents/', '.claude/rules/'],
     merged: ['.claude/settings.json'],
     ejected: [],
     seedCommands: [{
@@ -35,7 +40,13 @@ const claudeCodeAdapter = defineAgentClientAdapter({
         'zh-CN': '.claude/commands/update-agent-infra.zh-CN.md'
       },
       target: '.claude/commands/update-agent-infra.md'
-    }]
+    }],
+    customCommand: {
+      target: '.claude/commands/${skillName}.md',
+      frontmatter: {},
+      includeUsage: true,
+      inheritDisableModelInvocation: true
+    }
   },
   sandbox: {
     createTool: ({ home, project }) => ({
@@ -72,7 +83,11 @@ const claudeCodeAdapter = defineAgentClientAdapter({
       { name: 'claude-yolo', command: 'claude --dangerously-skip-permissions; tput ed' },
       { name: 'cy', command: 'claude --dangerously-skip-permissions; tput ed' }
     ],
-    hooks: []
+    hooks: [
+      claudeCodeCredentialPreflightHook,
+      claudeCodeBeforeContainerCreateHook,
+      claudeCodeBeforeEnterHook
+    ]
   }
 });
 
