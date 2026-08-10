@@ -1806,7 +1806,7 @@ export async function create(args: string[]): Promise<void> {
   }
 
   p.log.step('Verifying setup...');
-  assertFreshSandboxReady({
+  await assertFreshSandboxReady({
     config: effectiveConfig,
     engine,
     branch,

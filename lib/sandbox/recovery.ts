@@ -777,7 +777,19 @@ function assess(params: {
   return { snapshot, findings: classifySandboxRecovery(snapshot) };
 }
 
-export function assertFreshSandboxReady(params: {
+function canRetryFreshReadiness(findings: SandboxRecoveryFinding[]): boolean {
+  return findings.length > 0 && findings.every((finding) =>
+    finding.repairKind === 'hard-failure'
+    && finding.path !== undefined
+    && (
+      finding.path.startsWith('/workspace/.agents/workspace')
+      || finding.path === '/home/devuser/.host-shell-config'
+      || finding.path === '/home/devuser/.bash_aliases'
+    )
+  );
+}
+
+export async function assertFreshSandboxReady(params: {
   config: SandboxConfig;
   engine: string;
   branch: string;
@@ -785,14 +797,44 @@ export function assertFreshSandboxReady(params: {
   container: string;
   copiedEntries: TmpfsSeedEntry[];
   deps?: RecoveryCommandDeps;
-}): void {
+}): Promise<void> {
   validateTmpfsSeedEntries({
     engine: params.engine,
     container: params.container,
     entries: params.copiedEntries,
     deps: params.deps
   });
-  const { findings } = assess(params);
+  let { findings } = assess(params);
+  if (canRetryFreshReadiness(findings)) {
+    const runVerboseFn = params.deps?.runVerbose ?? runVerboseEngine;
+    runVerboseFn(params.engine, 'docker', ['restart', params.container]);
+    prepareTmpfsMounts({
+      engine: params.engine,
+      container: params.container,
+      mountPaths: resolveTools(params.config)
+        .filter((tool) => tool.tmpfs)
+        .map((tool) => tool.containerMount),
+      deps: params.deps
+    });
+    hydrateTmpfsSeedEntries({
+      engine: params.engine,
+      container: params.container,
+      entries: params.copiedEntries,
+      replace: true,
+      deps: params.deps
+    });
+    let retried = assess(params);
+    if (!retried.findings.some((finding) => finding.repairKind === 'hard-failure')) {
+      repairFindings({
+        engine: params.engine,
+        container: params.container,
+        findings: retried.findings,
+        deps: params.deps
+      });
+      retried = assess(params);
+    }
+    findings = retried.findings;
+  }
   if (findings.length > 0) {
     throw new Error(`Fresh sandbox readiness check failed: ${describeFindings(findings)}`);
   }

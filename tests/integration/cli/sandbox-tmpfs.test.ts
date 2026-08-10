@@ -13,6 +13,7 @@ import {
   writeSandboxEngineFixture
 } from "../../helpers.ts";
 import {
+  assertFreshSandboxReady,
   classifySandboxRecovery,
   collectSandboxRecoverySnapshot,
   ensureSandboxReady,
@@ -592,6 +593,78 @@ test("hard recovery failure requires explicit container replacement authorizatio
     assert.equal(result.path, "recreated");
     assert.equal(result.container, "demo-dev-feature..demo");
     assert.equal(writes, 2);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("fresh readiness restarts once when OrbStack workspace mounts are still settling", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-readiness-orbstack-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const container = "demo-dev-feature..demo";
+  let restarted = false;
+  const writes: string[][] = [];
+
+  try {
+    await assert.doesNotReject(() => assertFreshSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      workspace: { mode: "branch-only" },
+      container,
+      copiedEntries: [],
+      deps: {
+        run: () => JSON.stringify([{
+          Id: "fixture-container-id",
+          Config: { Labels: BRANCH_ONLY_LABELS },
+          Mounts: recoveryFixtureMounts(config).filter((mount) =>
+            restarted || mount.Destination !== "/workspace/.agents/workspace"
+          )
+        }]),
+        runOk: () => true,
+        runVerbose: (_engine, _cmd, args) => {
+          writes.push(args);
+          if (args[0] === "restart") restarted = true;
+        }
+      }
+    }));
+
+    assert.equal(restarted, true);
+    assert.deepEqual(writes[0], ["restart", container]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("fresh readiness remains fail-closed after one workspace mount restart", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-readiness-failed-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  let restarts = 0;
+
+  try {
+    await assert.rejects(() => assertFreshSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      workspace: { mode: "branch-only" },
+      container: "demo-dev-feature..demo",
+      copiedEntries: [],
+      deps: {
+        run: () => JSON.stringify([{
+          Id: "fixture-container-id",
+          Config: { Labels: BRANCH_ONLY_LABELS },
+          Mounts: recoveryFixtureMounts(config).filter((mount) =>
+            mount.Destination !== "/workspace/.agents/workspace"
+          )
+        }]),
+        runOk: () => true,
+        runVerbose: (_engine, _cmd, args) => {
+          if (args[0] === "restart") restarts += 1;
+        }
+      }
+    }), /Fresh sandbox readiness check failed/);
+
+    assert.equal(restarts, 1);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
