@@ -56,7 +56,7 @@ function atomicWrite(file: string, value: CommitIntent): void {
   const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
     fs.writeFileSync(temp, serialize(value), { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-    const handle = fs.openSync(temp, 'r');
+    const handle = fs.openSync(temp, 'r+');
     try {
       fs.fsyncSync(handle);
     } finally {
