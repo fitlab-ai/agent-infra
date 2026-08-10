@@ -1,5 +1,5 @@
 ---
-description: "监控 PR 的 required checks 并在失败时自愈"
+description: "监控 PR 的全部 checks 并在失败时自愈"
 agent: general
 subtask: false
 ---

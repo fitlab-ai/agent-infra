@@ -72,7 +72,10 @@ if (args[0] === "pr" && args[1] === "checks") {
     console.error(process.env.GH_FAKE_CHECKS_FAIL);
     process.exit(1);
   }
-  process.stdout.write(JSON.stringify(readJson("GH_FAKE_CHECKS_PATH") || []));
+  const checks = args.includes("--required")
+    ? readJson("GH_FAKE_REQUIRED_CHECKS_PATH") ?? readJson("GH_FAKE_CHECKS_PATH")
+    : readJson("GH_FAKE_CHECKS_PATH");
+  process.stdout.write(JSON.stringify(checks || []));
   process.exit(0);
 }
 

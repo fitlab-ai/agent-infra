@@ -28,7 +28,7 @@ This field is the only baseline for the `complete-task` `post-review-commit` gat
 
 ### Scenario 5: Existing-PR push wrap-up
 
-After a new commit or the restricted push-only path is successfully pushed to an existing open PR, the only next step is to watch required checks for the new head:
+After a new commit or the restricted push-only path is successfully pushed to an existing open PR, the only next step is to watch all checks for the new head:
 
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}`.
 

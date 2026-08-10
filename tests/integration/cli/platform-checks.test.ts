@@ -21,7 +21,7 @@ test('platform-checks CLI advertises inspect, watch, run resolution and logs', (
   }
 });
 
-test('platform-checks inspect returns ready only when checks pass and the PR is mergeable', () => {
+test('platform-checks inspect fails when a non-required check fails', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-checks-cli-'));
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
@@ -33,18 +33,26 @@ test('platform-checks inspect returns ready only when checks pass and the PR is 
     fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', 'pr_number: 5', '---', ''].join('\n'));
     const fake = path.join(root, 'fake-gh.cjs');
     const checks = path.join(root, 'checks.json');
+    const requiredChecks = path.join(root, 'required-checks.json');
     fs.copyFileSync(filePath('tests/fixtures/validate-artifact/fake-gh.js'), fake);
-    fs.writeFileSync(checks, JSON.stringify([{ name: 'build', bucket: 'pass', workflow: 'CI', link: 'https://github.com/fitlab-ai/agent-infra/actions/runs/1' }]));
+    fs.writeFileSync(requiredChecks, JSON.stringify([{ name: 'build', bucket: 'pass', workflow: 'CI' }]));
+    fs.writeFileSync(checks, JSON.stringify([
+      { name: 'build', bucket: 'pass', workflow: 'CI' },
+      { name: 'minimum baseline', bucket: 'fail', workflow: 'CI' }
+    ]));
     const output = run(['inspect', taskId], { cwd: root, env: {
       AGENT_INFRA_GH_BIN: process.execPath,
       AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([fake]),
-      GH_FAKE_CHECKS_PATH: checks
+      GH_FAKE_CHECKS_PATH: checks,
+      GH_FAKE_REQUIRED_CHECKS_PATH: requiredChecks
     } });
-    assert.equal(output.status, 0, `${output.stderr}\n${output.stdout}`);
+    assert.equal(output.status, 1, `${output.stderr}\n${output.stdout}`);
     const parsed = JSON.parse(output.stdout);
-    assert.equal(parsed.checks.state, 'passed');
-    assert.equal(parsed.readiness.state, 'ready');
-    assert.deepEqual(parsed.checks.required.map((check: { name: string }) => check.name), ['build']);
+    assert.equal(parsed.checks.state, 'failed');
+    assert.equal(parsed.readiness.state, 'checks-failed');
+    assert.deepEqual(parsed.checks.required.map((check: { name: string }) => check.name), [
+      'build', 'minimum baseline'
+    ]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -108,7 +116,7 @@ test('platform-checks CLI validates numeric bounds and required arguments before
   }
 });
 
-test('platform-checks preserves deterministic required-check errors without degradation', () => {
+test('platform-checks preserves deterministic check errors without degradation', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-checks-cli-'));
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
@@ -123,7 +131,7 @@ test('platform-checks preserves deterministic required-check errors without degr
     const output = run(['inspect', taskId], { cwd: root, env: {
       AGENT_INFRA_GH_BIN: process.execPath,
       AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([fake]),
-      GH_FAKE_CHECKS_FAIL: 'unknown flag: --required'
+      GH_FAKE_CHECKS_FAIL: 'checks API unavailable'
     } });
     assert.equal(output.status, 1, `${output.stderr}\n${output.stdout}`);
     const parsed = JSON.parse(output.stdout);

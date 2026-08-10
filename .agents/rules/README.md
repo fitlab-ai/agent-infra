@@ -15,7 +15,7 @@
 ## Issue / PR
 
 - [`issue-pr-commands.md`](issue-pr-commands.md) — PR 命令集与 Issue intent 入口说明。
-- [`pr-checks-commands.md`](pr-checks-commands.md) — 监控 PR required checks、拉取失败日志的命令集（`watch-pr`）。
+- [`pr-checks-commands.md`](pr-checks-commands.md) — 监控 PR 全部 checks、拉取失败日志的命令集（`watch-pr`）。
 - [`create-issue.md`](create-issue.md) — `create-task` 落盘后的声明式 Issue 创建 intent。
 - [`issue-sync.md`](issue-sync.md) — Issue 评论 marker 与声明式元数据 intent 契约。
 - [`issue-fields.md`](issue-fields.md) — 动态 Issue Type pinned 字段映射边界。

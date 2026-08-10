@@ -114,11 +114,11 @@ Explain the created PR URL, summarize metadata sync and summary-comment results,
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}`.
 
 ```
-Next step - Watch PR checks (auto self-heal until required checks are green):
+Next step - Watch PR checks (auto self-heal until all checks are green):
 {next-step-commands}
 ```
 
-Alternatively, to skip active monitoring and attempt completion immediately, use `complete-task`; its required-checks hard gate still fails closed for pending/failed checks or head mismatch:
+Alternatively, to skip active monitoring and attempt completion immediately, use `complete-task`; its all-checks hard gate still fails closed for pending/failed checks or head mismatch:
 
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`.
 
@@ -127,7 +127,7 @@ Next step (alternative) - Skip active monitoring and attempt completion:
 {next-step-commands}
 ```
 
-`watch-pr` is the primary path. The alternative `complete-task` block skips active polling only; it never skips required checks and does not guarantee immediate archival.
+`watch-pr` is the primary path. The alternative `complete-task` block skips active polling only; it never skips the full check set and does not guarantee immediate archival.
 
 ## Notes
 

@@ -1,6 +1,6 @@
 # PR readiness 平台意图
 
-required checks、PR mergeability、轮询 deadline、失败 run/job 定位和日志获取统一由 typed internal intent 执行。每次 inspect/poll 都在同一 PR head 快照上聚合，不跨 head 拼接事实。
+PR 全部 checks、PR mergeability、轮询 deadline、失败 run/job 定位和日志获取统一由 typed internal intent 执行。每次 inspect/poll 都在同一 PR head 快照上聚合，不跨 head 拼接事实。
 
 ## 快照与监控
 

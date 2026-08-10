@@ -59,7 +59,7 @@
 {next-step-commands}
 ```
 
-#### 场景 A3：监控 required checks
+#### 场景 A3：监控全部 checks
 
 使用 `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
 

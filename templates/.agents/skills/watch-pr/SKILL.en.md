@@ -1,17 +1,17 @@
 ---
 name: watch-pr
 description: >
-  Watch PR readiness and self-heal required-check failures or merge conflicts.
+  Watch PR readiness and self-heal any check failure or merge conflict.
   Use when a PR must be monitored until checks pass and it is explicitly mergeable.
 ---
 
 # Watch Pull Request
 
-After `create-pr`, continuously watch required checks and mergeability for the same PR head. Only passed checks plus explicit mergeability may reach success; check failures use the existing repair path, conflicts use constrained rebase healing, and unknown or unsafe states fail closed.
+After `create-pr`, continuously watch all checks and mergeability for the same PR head. Only all passed checks plus explicit mergeability may reach success; check failures use the existing repair path, conflicts use constrained rebase healing, and unknown or unsafe states fail closed.
 
 ## Behavior Boundaries / Key Rules
 
-- Only self-heal the current PR's required checks and text merge conflicts; do not add approval or repository-rule readiness dimensions.
+- Only self-heal the current PR's full check set and text merge conflicts; do not add approval or repository-rule readiness dimensions.
 - Self-heal publishes through Git workflow intents, but **affected tests must pass first**; the attempt cap and code-layer authorization remain unchanged.
 - The help exit is "produce-then-stop": end this round, output the blocker explanation, and wait for the user to trigger the next step — **never** ask mid-flow.
 - Bare numbers / `NN` / `TASK-id` arguments are always resolved as task short ids (see `.agents/rules/task-short-id.md`); a PR number is passed only via `--pr <number>` / a PR URL / omission (current branch), never reusing the bare-number syntax.
@@ -104,7 +104,7 @@ Keep the gate output in your reply as the verification evidence. Without current
 > Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
 Output per scenario:
-- `ready` + task-anchored: state that required checks passed and the current head is explicitly mergeable, then render exactly one exit based on whether this run created repair commits (`{task-ref}` becomes the short id):
+- `ready` + task-anchored: state that all checks passed and the current head is explicitly mergeable, then render exactly one exit based on whether this run created repair commits (`{task-ref}` becomes the short id):
 
   `repairCommits.length == 0`:
 

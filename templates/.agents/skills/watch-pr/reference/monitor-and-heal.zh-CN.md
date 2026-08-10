@@ -6,8 +6,8 @@
 
 按 `.agents/rules/pr-checks-commands.md` 的监控命令执行后，依其退出码归为三类：
 
-- `ready`：同一 head 的 required checks 通过且平台明确可合入 → SKILL 步骤 7。
-- `checks-failed`：至少一个 required check 失败或取消 → SKILL 步骤 3 的 CI 自愈。
+- `ready`：同一 head 的全部 checks 通过且平台明确可合入 → SKILL 步骤 7。
+- `checks-failed`：至少一个 check 失败或取消 → SKILL 步骤 3 的 CI 自愈。
 - `conflicting`：平台明确当前 head 与 base 冲突 → SKILL 步骤 3 的 rebase 自愈。
 - `pending|timed-out|cancelled`：mergeability/checks 未形成可靠成功事实 → SKILL 步骤 4。
 

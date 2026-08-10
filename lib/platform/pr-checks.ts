@@ -109,7 +109,7 @@ registerPlatformCapabilities('github', {
   inspectRequiredChecks({ client, repository, number, cwd }) {
     const github = (client as GitHubClient | undefined) || createGitHubClient();
     const inspected = github.json<unknown>([
-      'pr', 'checks', String(number), '--repo', repository, '--required',
+      'pr', 'checks', String(number), '--repo', repository,
       '--json', 'name,state,bucket,link,workflow,startedAt,completedAt'
     ], { cwd });
     return inspected.ok

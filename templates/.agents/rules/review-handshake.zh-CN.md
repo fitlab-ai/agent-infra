@@ -93,7 +93,7 @@
 - 成功提交后令 `B=last_reviewed_commit=<new_head>`；`B` 只表示已经落到 Git commit 的审查锚点。
 - `complete-task` 的 `post-review-commit` gate 只使用 B；B 缺失、畸形或对象不存在时报告 `reviewed snapshot was not anchored`，不得回退 R。
 - 若 B 之后代码 / 规则路径出现新提交，gate 会拦截，要求重新 `review-code`。自动例外仅限两类：(1) 绑定的平台变更请求（PR/MR）已合并，且平台适配器提供权威快照与远端 Git 证据引用；gate 在隔离的临时仓库中抓取受审查 head 与目标分支，证明 B 是原变更请求 head、merge commit 位于权威目标分支历史中、受审查变更与单父 squash commit 的规范化补丁完全一致，并且 merge 后受保护路径没有新提交；(2) 无有效变更请求，B 后恰有一个受保护路径提交，该提交是本地 HEAD 历史中的单父重写，且它与 B 的完整 tree 相同或受保护内容相同，重写后也没有受保护路径提交。适配器不支持该能力，缺少所需平台 / Git 证据，或当前 Git 凭据不能读取这些远端 refs 时 fail closed。
-- required checks 由合并前的分支保护 / ruleset 与 `review-code` / `watch-pr` 路由负责。post-review-commit 仍独立执行适用的严格 / PR squash / 本地重写等价判定。
+- 全部 PR checks 由合并前的 `review-code` / `watch-pr` 路由负责，其中 required checks 仍受分支保护 / ruleset 强制。post-review-commit 仍独立执行适用的严格 / PR squash / 本地重写等价判定。
 - **豁免**：在账本追加一行 `| PRC-1 | post-review-commit | - | - | human-decided | <裁定说明> |`，记录人工明确允许该批提交免复审。
 
 ## gate 行为速查

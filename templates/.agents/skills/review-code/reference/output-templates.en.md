@@ -59,7 +59,7 @@ Next step - create a Pull Request:
 {next-step-commands}
 ```
 
-#### Branch A3: Watch Required Checks
+#### Branch A3: Watch All Checks
 
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}`.
 

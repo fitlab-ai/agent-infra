@@ -1,5 +1,5 @@
 ---
-description: "Watch a PR's required checks and self-heal on failure"
+description: "Watch all checks on a PR and self-heal on failure"
 usage: "/watch-pr [task-ref | --task <ref> | --pr <number>]"
 ---
 

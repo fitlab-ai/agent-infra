@@ -28,7 +28,7 @@ last_reviewed_commit: {new_head}
 
 ### 场景 5：已有 PR 推送收尾
 
-新 commit 或受限 push-only 场景成功推送到已有开放 PR 后，唯一下一步是监控新 head 的 required checks：
+新 commit 或受限 push-only 场景成功推送到已有开放 PR 后，唯一下一步是监控新 head 的全部 checks：
 
 使用 `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
 

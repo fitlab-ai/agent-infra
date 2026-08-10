@@ -6,8 +6,8 @@ Platform-agnostic decision logic for `watch-pr` steps 2/3/4. The concrete platfo
 
 After the watch command, route by structured `readiness.state`:
 
-- `ready`: required checks passed and the same head is explicitly mergeable → SKILL step 7.
-- `checks-failed`: a required check failed or was cancelled → CI healing in SKILL step 3.
+- `ready`: all checks passed and the same head is explicitly mergeable → SKILL step 7.
+- `checks-failed`: a check failed or was cancelled → CI healing in SKILL step 3.
 - `conflicting`: the platform explicitly reports a head/base conflict → rebase healing in SKILL step 3.
 - `pending|timed-out|cancelled`: no reliable success fact exists → SKILL step 4.
 

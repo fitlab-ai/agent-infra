@@ -114,11 +114,11 @@ agent-infra-internal task-verify {task-id} create-pr.completed --format text
 使用 `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
 
 ```
-下一步 - 监控 PR 检查（required checks 全绿前自动自愈）：
+下一步 - 监控 PR 检查（全部 checks 全绿前自动自愈）：
 {next-step-commands}
 ```
 
-或者，若想跳过主动监控并立即尝试完成，改用 `complete-task`；其 required-checks 硬门禁仍会对 pending/failed/head mismatch fail-closed：
+或者，若想跳过主动监控并立即尝试完成，改用 `complete-task`；其全部 checks 硬门禁仍会对 pending/failed/head mismatch fail-closed：
 
 使用 `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
 
@@ -127,7 +127,7 @@ agent-infra-internal task-verify {task-id} create-pr.completed --format text
 {next-step-commands}
 ```
 
-`watch-pr` 为主路径；上面的 `complete-task` 备选块只跳过主动轮询，不跳过 required checks，也不保证立即归档。
+`watch-pr` 为主路径；上面的 `complete-task` 备选块只跳过主动轮询，不跳过全部 checks，也不保证立即归档。
 
 ## 注意事项
 

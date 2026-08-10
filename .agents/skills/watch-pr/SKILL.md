@@ -1,17 +1,17 @@
 ---
 name: watch-pr
 description: >
-  监控 PR readiness，并在 required checks 失败或合并冲突时自愈。
+  监控 PR readiness，并在任一 check 失败或合并冲突时自愈。
   当需要持续监控 PR 直到门禁通过且明确可合入时使用。
 ---
 
 # 监控 Pull Request
 
-在 `create-pr` 之后持续监控同一 PR head 的 required checks 与 mergeability。只有 checks 通过且平台明确可合入才进入成功出口；check 失败走既有修复，合并冲突走受限 rebase 自愈，未知或无法安全闭环时 fail-closed。
+在 `create-pr` 之后持续监控同一 PR head 的全部 checks 与 mergeability。只有全部 checks 通过且平台明确可合入才进入成功出口；check 失败走既有修复，合并冲突走受限 rebase 自愈，未知或无法安全闭环时 fail-closed。
 
 ## 行为边界 / 关键规则
 
-- 仅监控 + 自愈当前 PR 的 required checks 与文本合并冲突；不扩展到审批或其他仓库规则。
+- 仅监控 + 自愈当前 PR 的全部 checks 与文本合并冲突；不扩展到审批或其他仓库规则。
 - 自愈通过 Git workflow intent 发布修复，但**发布前必须本地跑通相关测试**；修复上限与代码层分类授权不变。
 - 求助出口是「产出后停止」语义：停止本轮、输出阻塞说明、等待用户主动触发，**不**中途提问。
 - 裸数字 / `NN` / `TASK-id` 入参一律按任务短号解析（见 `.agents/rules/task-short-id.md`）；PR 号只走 `--pr <number>` / PR URL / 省略（当前分支），不复用裸数字语法。
@@ -104,7 +104,7 @@ agent-infra-internal task-verify {task-id} watch-pr.completed --format text
 > 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
 按场景输出：
-- `ready` + 任务锚定：说明 required checks 已通过且当前 head 明确可合入，并只按本轮是否产生修复 commit 渲染一个出口（`{task-ref}` 替换为短号）：
+- `ready` + 任务锚定：说明全部 checks 已通过且当前 head 明确可合入，并只按本轮是否产生修复 commit 渲染一个出口（`{task-ref}` 替换为短号）：
 
   `repairCommits.length == 0`：
 

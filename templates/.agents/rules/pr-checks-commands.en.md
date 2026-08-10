@@ -1,6 +1,6 @@
 # PR Readiness Platform Intents
 
-Typed intents own required-check selection, PR mergeability, polling deadlines, run/job resolution, and logs. Every inspect/poll aggregates facts from one PR head snapshot; facts are never mixed across heads.
+Typed intents own full check-set retrieval, PR mergeability, polling deadlines, run/job resolution, and logs. Every inspect/poll aggregates facts from one PR head snapshot; facts are never mixed across heads.
 
 ```bash
 agent-infra-internal platform-checks inspect {task-id}
