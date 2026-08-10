@@ -1,9 +1,16 @@
 import { renderAgentClientInvocation } from '../agent-clients/invocation.ts';
 import { getAgentClientAdapter } from '../agent-clients/registry.ts';
+import type { AgentClientId } from '../agent-clients/types.ts';
 
 export type TuiName = 'claude' | 'codex' | 'antigravity' | 'opencode';
 
 const TUI_NAMES = new Set(['claude', 'codex', 'antigravity', 'opencode']);
+const TUI_AGENT_CLIENT_IDS: Readonly<Record<TuiName, AgentClientId>> = Object.freeze({
+  claude: 'claude-code',
+  codex: 'codex',
+  antigravity: 'antigravity-cli',
+  opencode: 'opencode'
+});
 
 export type CommandConfig = {
   defaultTui?: unknown;
@@ -29,14 +36,10 @@ export function selectTui(
 }
 
 export function renderPrompt(params: { tui: TuiName; skill: string; args: string[] }): string {
-  const suffix = [params.skill, ...params.args].join(' ').trim();
-  if (params.tui === 'codex') {
-    return renderAgentClientInvocation(getAgentClientAdapter('codex').invocation, {
-      skillName: params.skill,
-      args: params.args
-    });
-  }
-  return `/${suffix}`;
+  return renderAgentClientInvocation(
+    getAgentClientAdapter(TUI_AGENT_CLIENT_IDS[params.tui]).invocation,
+    { skillName: params.skill, args: params.args }
+  );
 }
 
 export function buildTuiCommand(tui: TuiName, prompt: string): [string, string[]] {

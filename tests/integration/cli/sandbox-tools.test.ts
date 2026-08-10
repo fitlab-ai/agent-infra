@@ -47,7 +47,6 @@ type SandboxCreateModule = {
   ensureClaudeSettings(toolDir: string, hostHomeDir?: string): void;
   ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string): void;
   ensureCodexWorkspaceTrust(toolDir: string): void;
-  ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: string): void;
   buildImage(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): void;
   commandErrorMessage(error: unknown): string;
   hostHasGpgKeys(home: string, execFn?: ExecFn): boolean;
@@ -903,7 +902,7 @@ test("claude-code tool pins CLAUDE_CONFIG_DIR so $HOME/.claude.json preseed reac
   assert.equal(tool.envVars?.CLAUDE_CONFIG_DIR, "/home/devuser/.claude");
 });
 
-test("opencode tool pins OPENCODE_CONFIG to the sandbox config file", async () => {
+test("opencode tool pins XDG roots inside its sandbox volume", async () => {
   const sandboxTools = await loadFreshEsm<typeof import("../../../lib/sandbox/tools.ts")>("lib/sandbox/tools.js");
   const tools = sandboxTools.resolveTools({
     home: "/home/host-user",
@@ -914,10 +913,11 @@ test("opencode tool pins OPENCODE_CONFIG to the sandbox config file", async () =
   assert.equal(tools.length, 1);
   const tool = required(tools[0]);
   assert.equal(tool.containerMount, "/home/devuser/.local/share/opencode");
-  assert.equal(
-    tool.envVars?.OPENCODE_CONFIG,
-    "/home/devuser/.local/share/opencode/opencode.json"
-  );
+  assert.deepEqual(tool.envVars, {
+    XDG_DATA_HOME: "/home/devuser/.local/share",
+    XDG_CONFIG_HOME: "/home/devuser/.local/share/opencode/.xdg/config",
+    XDG_STATE_HOME: "/home/devuser/.local/share/opencode/.xdg/state"
+  });
 });
 
 test("antigravity-cli tool preseeds keybindings and MCP config without host settings", async () => {

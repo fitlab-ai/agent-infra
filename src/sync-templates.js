@@ -655,19 +655,30 @@ function generateClaudeCommand(skill, lang) {
   return `${lines.join('\n')}\n`;
 }
 
-function generateOpenCodeCommand(skill, lang) {
+function formatYamlScalarMetadata(key, value) {
+  if (typeof value === 'boolean') return [`${key}: ${String(value)}`];
+  if (/^[A-Za-z0-9_-]+$/.test(value)) return [`${key}: ${value}`];
+  return formatYamlMetadata(key, value);
+}
+
+function generateAgentClientCommand(skill, lang, descriptor) {
   const isZhCN = lang === 'zh-CN';
   const lines = [
     '---',
     ...formatYamlMetadata('description', skill.description),
-    'agent: general',
-    'subtask: false',
+    ...Object.entries(descriptor.frontmatter).flatMap(([key, value]) =>
+      formatYamlScalarMetadata(key, value)
+    ),
     '---',
     ''
   ];
 
-  if (skill.args) {
-    lines.push(isZhCN ? '参数：$ARGUMENTS' : 'Arguments: $ARGUMENTS');
+  if (skill.args && descriptor.argumentsToken) {
+    lines.push(
+      isZhCN
+        ? `参数：${descriptor.argumentsToken}`
+        : `Arguments: ${descriptor.argumentsToken}`
+    );
     lines.push('');
   }
 
@@ -918,10 +929,11 @@ function generateCustomCommands(
         report.custom.commands
       );
     }
-    if (enabledTUIs.has('opencode')) {
+    for (const adapter of AGENT_CLIENT_MANIFEST) {
+      if (!enabledTUIs.has(adapter.id) || !adapter.customCommand) continue;
       managedWriter(
-        `.opencode/commands/${skill.dirName}.md`,
-        generateOpenCodeCommand(skill, lang),
+        adapter.customCommand.target.replaceAll('${skillName}', skill.dirName),
+        generateAgentClientCommand(skill, lang, adapter.customCommand),
         report.custom.commands
       );
     }

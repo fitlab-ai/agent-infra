@@ -100,7 +100,8 @@ function adapterInput(
       managed: ['.codex/hooks.json'],
       merged: [],
       ejected: [],
-      seedCommands: []
+      seedCommands: [],
+      customCommand: undefined
     },
     sandbox: {
       createTool: () => ({
@@ -209,6 +210,44 @@ test('adapter definitions validate their closed contract without mutating input'
 
   for (const invalid of invalidInputs) {
     assert.throws(() => defineAgentClientAdapter(invalid as AgentClientAdapter));
+  }
+});
+
+test('adapter custom commands validate paths, placeholders, metadata, and immutability', () => {
+  const adapter = defineAgentClientAdapter(adapterInput({
+    project: {
+      ...adapterInput().project,
+      customCommand: {
+        target: '.codex/commands/${skillName}.md',
+        frontmatter: { agent: 'general', subtask: false },
+        argumentsToken: '$ARGUMENTS'
+      }
+    }
+  }));
+
+  assert.deepEqual(adapter.project.customCommand, {
+    target: '.codex/commands/${skillName}.md',
+    frontmatter: { agent: 'general', subtask: false },
+    argumentsToken: '$ARGUMENTS'
+  });
+  assert.ok(Object.isFrozen(adapter.project.customCommand));
+  assert.ok(Object.isFrozen(adapter.project.customCommand?.frontmatter));
+
+  const invalidDescriptors = [
+    { target: '../${skillName}.md', frontmatter: {} },
+    { target: '.codex/commands/static.md', frontmatter: {} },
+    { target: '.codex/${skillName}/${skillName}.md', frontmatter: {} },
+    { target: '.codex/commands/${unknown}.md', frontmatter: {} },
+    { target: '.codex/commands/${skillName}.md', frontmatter: { nested: {} } },
+    { target: '.codex/commands/${skillName}.md', frontmatter: {}, argumentsToken: '' }
+  ];
+  for (const customCommand of invalidDescriptors) {
+    assert.throws(() => defineAgentClientAdapter(adapterInput({
+      project: {
+        ...adapterInput().project,
+        customCommand: customCommand as never
+      }
+    })), /invalid custom command/);
   }
 });
 
@@ -383,7 +422,12 @@ test('registry exposes the exact built-in project asset matrix', () => {
             'zh-CN': '.opencode/commands/update-agent-infra.zh-CN.md'
           },
           target: '.opencode/commands/update-agent-infra.md'
-        }]
+        }],
+        customCommand: {
+          target: '.opencode/commands/${skillName}.md',
+          frontmatter: { agent: 'general', subtask: false },
+          argumentsToken: '$ARGUMENTS'
+        }
       }
     }
   );
@@ -504,6 +548,12 @@ test('manifest projects invocation and remains deeply frozen', () => {
   );
   assert.ok(Object.isFrozen(manifest));
   assert.ok(manifest.every((entry) => Object.isFrozen(entry)));
+  assert.deepEqual(manifest.find(({ id }) => id === 'opencode')?.customCommand, {
+    target: '.opencode/commands/${skillName}.md',
+    frontmatter: { agent: 'general', subtask: false },
+    argumentsToken: '$ARGUMENTS'
+  });
+  assert.ok(Object.isFrozen(manifest.find(({ id }) => id === 'opencode')?.customCommand));
 });
 
 test('registry queries preserve canonical order and keep enabled separate from sandbox install state', () => {
@@ -624,12 +674,25 @@ test('manifest is a fresh frozen JSON-safe projection of registry metadata', () 
   for (const entry of first) {
     assert.deepEqual(
       Object.keys(entry),
-      ['id', 'displayName', 'invocation', 'ownedPathPrefixes', 'managed', 'merged', 'ejected']
+      [
+        'id',
+        'displayName',
+        'invocation',
+        'ownedPathPrefixes',
+        'managed',
+        'merged',
+        'ejected',
+        ...(entry.customCommand === undefined ? [] : ['customCommand'])
+      ]
     );
     assert.ok(Object.isFrozen(entry));
     assert.ok(Object.isFrozen(entry.ownedPathPrefixes));
     assert.ok(Object.isFrozen(entry.managed));
     assert.ok(Object.isFrozen(entry.merged));
     assert.ok(Object.isFrozen(entry.ejected));
+    if (entry.customCommand) {
+      assert.ok(Object.isFrozen(entry.customCommand));
+      assert.ok(Object.isFrozen(entry.customCommand.frontmatter));
+    }
   }
 });

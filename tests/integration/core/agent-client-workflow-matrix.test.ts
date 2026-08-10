@@ -13,10 +13,10 @@ import { filePath } from '../../helpers.ts';
 import { loadFreshEsm } from '../../helpers/esm.ts';
 import type { SyncTemplatesModule } from '../../helpers/esm.ts';
 
-function stateFor(mask: number): AgentClientState {
+function stateFor(enabledMask: number, installMask: number): AgentClientState {
   return Object.fromEntries(AGENT_CLIENT_IDS.map((id, index) => [id, {
-    enabled: (mask & (1 << index)) !== 0,
-    installInSandbox: index % 2 === 0
+    enabled: (enabledMask & (1 << index)) !== 0,
+    installInSandbox: (installMask & (1 << index)) !== 0
   }])) as AgentClientState;
 }
 
@@ -29,7 +29,8 @@ test('all 16 project integration combinations stay equivalent across core and st
   for (let mask = 0; mask < 16; mask += 1) {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), `agent-client-mask-${mask}-`));
     try {
-      const state = stateFor(mask);
+      const installMask = ((mask << 1) | (mask >> 3)) & 0b1111;
+      const state = stateFor(mask, installMask);
       const config = {
         project: 'demo',
         org: 'acme',

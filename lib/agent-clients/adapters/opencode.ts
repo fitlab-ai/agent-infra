@@ -1,5 +1,9 @@
 import { defineAgentClientAdapter } from '../adapter.ts';
 import { hostJoin } from '../../sandbox/engines/wsl2-paths.ts';
+import {
+  opencodeBeforeContainerCreateHook,
+  opencodeRecoveryChecks
+} from './opencode-sandbox.ts';
 
 const YOLO_PERMISSION = '{"*":"allow","read":"allow","bash":"allow","edit":"allow","webfetch":"allow","external_directory":"allow","doom_loop":"allow"}';
 
@@ -37,7 +41,12 @@ const opencodeAdapter = defineAgentClientAdapter({
         'zh-CN': '.opencode/commands/update-agent-infra.zh-CN.md'
       },
       target: '.opencode/commands/update-agent-infra.md'
-    }]
+    }],
+    customCommand: {
+      target: '.opencode/commands/${skillName}.md',
+      frontmatter: { agent: 'general', subtask: false },
+      argumentsToken: '$ARGUMENTS'
+    }
   },
   sandbox: {
     createTool: ({ home }) => ({
@@ -49,7 +58,9 @@ const opencodeAdapter = defineAgentClientAdapter({
       versionCmd: 'opencode --version',
       setupHint: 'Configure OpenCode credentials inside the container before first use.',
       envVars: {
-        OPENCODE_CONFIG: '/home/devuser/.local/share/opencode/opencode.json'
+        XDG_DATA_HOME: '/home/devuser/.local/share',
+        XDG_CONFIG_HOME: '/home/devuser/.local/share/opencode/.xdg/config',
+        XDG_STATE_HOME: '/home/devuser/.local/share/opencode/.xdg/state'
       },
       hostLiveMounts: [
         {
@@ -68,7 +79,8 @@ const opencodeAdapter = defineAgentClientAdapter({
         command: `OPENCODE_PERMISSION='${YOLO_PERMISSION}' opencode; tput ed`
       }
     ],
-    hooks: []
+    hooks: [opencodeBeforeContainerCreateHook],
+    recoveryChecks: opencodeRecoveryChecks
   }
 });
 

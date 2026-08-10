@@ -55,6 +55,17 @@ function validateManifest(manifest, registry) {
   }
   for (const entry of manifest) {
     const arrayFields = ['ownedPathPrefixes', 'managed', 'merged', 'ejected'];
+    const customCommand = entry.customCommand;
+    const expectedKeys = [
+      'displayName',
+      'ejected',
+      'id',
+      'invocation',
+      'managed',
+      'merged',
+      'ownedPathPrefixes',
+      ...(customCommand === undefined ? [] : ['customCommand'])
+    ].sort().join(',');
     if (
       typeof entry.id !== 'string'
       || typeof entry.displayName !== 'string'
@@ -65,8 +76,31 @@ function validateManifest(manifest, registry) {
         !Array.isArray(entry[field])
         || entry[field].some((value) => typeof value !== 'string')
       )
-      || Object.keys(entry).sort().join(',')
-        !== 'displayName,ejected,id,invocation,managed,merged,ownedPathPrefixes'
+      || (
+        customCommand !== undefined
+        && (
+          typeof customCommand !== 'object'
+          || customCommand === null
+          || typeof customCommand.target !== 'string'
+          || typeof customCommand.frontmatter !== 'object'
+          || customCommand.frontmatter === null
+          || Array.isArray(customCommand.frontmatter)
+          || Object.values(customCommand.frontmatter).some((value) =>
+            typeof value !== 'string' && typeof value !== 'boolean'
+          )
+          || (
+            customCommand.argumentsToken !== undefined
+            && typeof customCommand.argumentsToken !== 'string'
+          )
+          || Object.keys(customCommand).sort().join(',')
+            !== [
+              'frontmatter',
+              'target',
+              ...(customCommand.argumentsToken === undefined ? [] : ['argumentsToken'])
+            ].sort().join(',')
+        )
+      )
+      || Object.keys(entry).sort().join(',') !== expectedKeys
     ) {
       throw new Error(`Invalid Agent Client manifest entry '${String(entry?.id)}'`);
     }

@@ -52,6 +52,19 @@ Antigravity adapter 使用[官方安装器](https://antigravity.google/docs/cli/
 下预置 settings、keybindings 与 MCP 配置。新建容器后需在容器内运行一次
 `agy` 完成认证。
 
+OpenCode adapter 通过共享的 Node/npm 镜像层安装 `opencode-ai`，并把每个分支的
+状态保存在 `/home/devuser/.local/share/opencode` 单一持久卷中。卷内的
+`XDG_CONFIG_HOME` 为 `.local/share/opencode/.xdg/config`，`XDG_STATE_HOME`
+为 `.local/share/opencode/.xdg/state`，常规数据根目录仍为
+`/home/devuser/.local/share`。首次创建时，只有 canonical XDG 配置不存在，
+才会把分支旧版 `opencode.json` 复制过去；宿主配置只补齐缺失的字符串
+`model` 与 `small_model`。唯一实时凭证 mount 是宿主
+`XDG_DATA_HOME/opencode/auth.json`，version/help 的无认证 smoke 不要求该文件存在。
+
+禁用或卸载 OpenCode 只会移除 adapter 管理的项目资产与选择状态，不会删除宿主
+XDG 目录、旧配置、分支运行时卷、用户自建 command 或其他非托管运行时数据；
+重新启用 adapter 后会继续复用这些保留状态。
+
 禁用客户端绝不会删除其宿主凭证、配置或历史。即使宿主仍保留已禁用客户端
 的状态，`sandbox show` 也只展示当前选中的工具。只有显式执行
 `sandbox rm`、`sandbox prune` 等清理命令时，才会考虑删除宿主状态。
@@ -186,7 +199,7 @@ dotfiles 树解引用到
 | `.ssh/*` | host SSH 材料受保护，不会通过默认沙箱导入。 |
 | `.gnupg/*` | GPG 私钥由 `gpg-agent` 管理。 |
 | `.claude/*`, `.codex/*`, `.gemini/*` | AI 工具凭证使用专用 bind mount。 |
-| `.config/opencode/*`, `.local/share/opencode/*` | OpenCode 凭证和数据使用专用 bind mount。 |
+| `.config/opencode/*`, `.local/share/opencode/*` | OpenCode 宿主数据不走 dotfiles；只有 `auth.json` 使用独立实时 mount。 |
 | `.host-shell-config/*` | agent-infra 管理的 shell 和 Git 配置。 |
 | `.gitconfig`, `.gitignore_global`, `.stCommitMsg`, `.bash_aliases` | agent-infra 将这些路径软链到 `.host-shell-config/`，包含 `safe.directory` 和 GPG 同步状态。 |
 | `README.md` | agent-infra 会在 dotfiles 根目录 scaffold 一份发现性 README；link hook 会忽略它，避免遮蔽 `$HOME/README.md`。 |

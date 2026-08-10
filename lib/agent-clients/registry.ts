@@ -135,7 +135,15 @@ function createAgentClientManifest(): readonly AgentClientManifestEntry[] {
       ownedPathPrefixes: Object.freeze([...adapter.project.ownedPathPrefixes]),
       managed: Object.freeze([...adapter.project.managed]),
       merged: Object.freeze([...adapter.project.merged]),
-      ejected: Object.freeze([...adapter.project.ejected])
+      ejected: Object.freeze([...adapter.project.ejected]),
+      ...(adapter.project.customCommand === undefined
+        ? {}
+        : {
+          customCommand: Object.freeze({
+            ...adapter.project.customCommand,
+            frontmatter: Object.freeze({ ...adapter.project.customCommand.frontmatter })
+          })
+        })
     }))
   );
 }

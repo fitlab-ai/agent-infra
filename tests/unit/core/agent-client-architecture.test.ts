@@ -102,7 +102,7 @@ test('generic Agent Client core contains no client-specific ID literals', () => 
   }
 });
 
-test('generic sandbox lifecycle contains no Codex-specific ID literals', () => {
+test('generic sandbox lifecycle contains no migrated client-specific ID literals', () => {
   const candidates = [
     filePath('lib/sandbox/commands/create.ts'),
     filePath('lib/sandbox/recovery.ts')
@@ -119,7 +119,7 @@ test('generic sandbox lifecycle contains no Codex-specific ID literals', () => {
       const displayPath = path.relative(filePath('.'), candidate).replace(/\\/g, '/');
       const sourceFile = project.program.getSourceFile(candidate);
       assert.ok(sourceFile, `expected ${displayPath} in the TypeScript program`);
-      return findClientIdLiterals(sourceFile, displayPath, ['codex']);
+      return findClientIdLiterals(sourceFile, displayPath, ['codex', 'opencode']);
     });
 
     assert.deepEqual(

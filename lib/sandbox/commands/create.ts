@@ -990,44 +990,6 @@ export function ensureClaudeSettings(toolDir: string, hostHomeDir?: string): voi
   }
 }
 
-export function ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: string): void {
-  if (!hostHomeDir) {
-    return;
-  }
-
-  const hostConfigPath = path.join(hostHomeDir, '.config', 'opencode', 'opencode.json');
-  const hostJson = readHostJsonSafe(hostConfigPath);
-  if (!hostJson) {
-    return;
-  }
-
-  const sandboxConfigPath = path.join(toolDir, 'opencode.json');
-  let sandboxJson: JsonObject = {};
-  if (fs.existsSync(sandboxConfigPath)) {
-    const existing = readHostJsonSafe(sandboxConfigPath);
-    if (!existing) {
-      return;
-    }
-    sandboxJson = existing;
-  }
-  let changed = false;
-  for (const key of ['model', 'small_model']) {
-    if (Object.hasOwn(sandboxJson, key)) {
-      continue;
-    }
-    const value = hostJson[key];
-    if (typeof value !== 'string' || value === '') {
-      continue;
-    }
-    sandboxJson[key] = value;
-    changed = true;
-  }
-
-  if (changed) {
-    fs.writeFileSync(sandboxConfigPath, JSON.stringify(sandboxJson, null, 2), 'utf8');
-  }
-}
-
 export function sandboxAliasesPath(home: string): string {
   return hostJoin(home, '.agent-infra', 'aliases', 'sandbox.sh');
 }
@@ -1531,6 +1493,7 @@ export async function create(args: string[]): Promise<void> {
                 plan: capabilityPlan,
                 create: {
                   hostHome: effectiveConfig.home,
+                  hostEnv: { ...process.env },
                   resolvedTools: effectiveResolvedTools
                 }
               },
@@ -1552,11 +1515,6 @@ export async function create(args: string[]): Promise<void> {
               // prepareClaudeCredentials wrote OAuth credentials or confirmed
               // provider/API settings are enough for Claude Code. If no usable
               // auth was present, the claude-code entry was removed above.
-            }
-            const opencodeEntry = effectiveResolvedTools.find(({ tool }) => tool.id === 'opencode');
-            if (opencodeEntry) {
-              // The TUI reads <toolDir>/opencode.json via OPENCODE_CONFIG pinned in tools.js.
-              ensureOpenCodeModelInheritance(opencodeEntry.dir, effectiveConfig.home);
             }
             const toolVolumes = effectiveResolvedTools.flatMap(({ tool, dir }) =>
               tool.tmpfs ? [] : ['-v', volumeArg(engine, dir, tool.containerMount)]

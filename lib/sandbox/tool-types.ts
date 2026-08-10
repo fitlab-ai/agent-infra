@@ -64,6 +64,7 @@ type SandboxResolvedToolState = Readonly<{
 
 type SandboxHookCreateContext = Readonly<{
   hostHome: string;
+  hostEnv?: Readonly<NodeJS.ProcessEnv>;
   resolvedTools: readonly SandboxResolvedToolState[];
 }>;
 

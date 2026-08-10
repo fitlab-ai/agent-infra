@@ -50,12 +50,19 @@ type AgentClientSeedCommand = Readonly<{
   target: string;
 }>;
 
+type AgentClientCustomCommandDescriptor = Readonly<{
+  target: string;
+  frontmatter: Readonly<Record<string, string | boolean>>;
+  argumentsToken?: string;
+}>;
+
 type AgentClientProjectDescriptor = Readonly<{
   ownedPathPrefixes: readonly string[];
   managed: readonly string[];
   merged: readonly string[];
   ejected: readonly string[];
   seedCommands: readonly AgentClientSeedCommand[];
+  customCommand?: AgentClientCustomCommandDescriptor;
 }>;
 
 type AgentClientAdapter = Readonly<{
@@ -81,6 +88,7 @@ type AgentClientManifestEntry = Readonly<{
   managed: readonly string[];
   merged: readonly string[];
   ejected: readonly string[];
+  customCommand?: AgentClientCustomCommandDescriptor;
 }>;
 
 const PROJECT_ASSET_CATEGORIES = ['managed', 'merged', 'ejected'] as const;
@@ -394,6 +402,50 @@ function defineAgentClientAdapter(
     });
   });
 
+  let customCommand: AgentClientCustomCommandDescriptor | undefined;
+  if (candidate.project.customCommand !== undefined) {
+    const descriptor = candidate.project.customCommand;
+    const placeholders = typeof descriptor?.target === 'string'
+      ? [...descriptor.target.matchAll(/\$\{([^}]+)\}/g)].map((match) => match[1])
+      : [];
+    const targetProbe = typeof descriptor?.target === 'string'
+      ? descriptor.target.replaceAll('${skillName}', 'skill')
+      : '';
+    const frontmatter = descriptor?.frontmatter;
+    if (
+      !descriptor
+      || typeof descriptor !== 'object'
+      || placeholders.length !== 1
+      || placeholders[0] !== 'skillName'
+      || targetProbe.includes('${')
+      || !isProjectRelativeLiteral(targetProbe)
+      || !paths.some((prefix) => targetProbe.startsWith(prefix))
+      || !frontmatter
+      || typeof frontmatter !== 'object'
+      || Array.isArray(frontmatter)
+      || Object.values(frontmatter).some((value) =>
+        typeof value !== 'string' && typeof value !== 'boolean'
+      )
+      || (
+        descriptor.argumentsToken !== undefined
+        && (
+          typeof descriptor.argumentsToken !== 'string'
+          || descriptor.argumentsToken === ''
+          || /[\r\n]/.test(descriptor.argumentsToken)
+        )
+      )
+    ) {
+      throw new Error(`Agent Client '${candidate.id}' has an invalid custom command`);
+    }
+    customCommand = Object.freeze({
+      target: descriptor.target,
+      frontmatter: Object.freeze({ ...frontmatter }),
+      ...(descriptor.argumentsToken === undefined
+        ? {}
+        : { argumentsToken: descriptor.argumentsToken })
+    });
+  }
+
   if (!candidate.sandbox || typeof candidate.sandbox.createTool !== 'function') {
     throw new Error(`Agent Client '${candidate.id}' requires a sandbox descriptor`);
   }
@@ -515,7 +567,8 @@ function defineAgentClientAdapter(
     project: Object.freeze({
       ownedPathPrefixes: Object.freeze(paths),
       ...projectAssets,
-      seedCommands: Object.freeze(seedCommands)
+      seedCommands: Object.freeze(seedCommands),
+      ...(customCommand === undefined ? {} : { customCommand })
     }),
     sandbox: Object.freeze({ createTool, aliases, hooks, recoveryChecks })
   });
@@ -525,6 +578,7 @@ export { defineAgentClientAdapter };
 export type {
   AgentClientAdapter,
   AgentClientCapabilities,
+  AgentClientCustomCommandDescriptor,
   AgentClientDelegationEvidence,
   AgentClientManifestEntry,
   AgentClientModelSelectionContext,

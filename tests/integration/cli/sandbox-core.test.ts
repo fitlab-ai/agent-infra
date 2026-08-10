@@ -50,7 +50,6 @@ type SandboxCreateModule = {
   ensureClaudeSettings(toolDir: string, hostHomeDir?: string): void;
   ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string): void;
   ensureCodexWorkspaceTrust(toolDir: string): void;
-  ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: string): void;
   buildImage(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): void;
   commandErrorMessage(error: unknown): string;
   hostHasGpgKeys(home: string, execFn?: ExecFn): boolean;

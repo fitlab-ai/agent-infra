@@ -36,6 +36,9 @@ type ExecFn = (cmd: string, args: string[], options?: CommandOptions) => string 
 type EngineExecFn = (engine: string, cmd: string, args: string[], options?: CommandOptions) => string | Buffer | void;
 type RunSafeFn = (cmd: string, args: string[]) => string;
 type EngineRunSafeFn = (engine: string, cmd: string, args: string[]) => string;
+type OpenCodeSandboxModule = {
+  ensureOpenCodeSandboxState(toolDir: string, hostHome: string, hostEnv?: Readonly<NodeJS.ProcessEnv>): void;
+};
 type SandboxCreateModule = {
   create(args: string[]): Promise<void>;
   buildContainerEnvFile(tools: ResolvedToolFixture[], engine: string, runSafe?: EngineRunSafeFn, options?: CommandOptions): EnvFileResult;
@@ -45,7 +48,6 @@ type SandboxCreateModule = {
   ensureClaudeSettings(toolDir: string, hostHomeDir?: string): void;
   ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string, containerCodexDir?: string): void;
   ensureCodexWorkspaceTrust(toolDir: string): void;
-  ensureOpenCodeModelInheritance(toolDir: string, hostHomeDir?: string): void;
   buildImage(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): void;
   commandErrorMessage(error: unknown): string;
   hostHasGpgKeys(home: string, execFn?: ExecFn): boolean;
@@ -1223,8 +1225,8 @@ test("ensureCodexModelInheritance skips an unreadable host catalog file", onPlat
   }
 });
 
-test("ensureOpenCodeModelInheritance creates config with host model fields", async () => {
-  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+test("ensureOpenCodeSandboxState creates config with host model fields", async () => {
+  const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-model-"));
 
@@ -1238,8 +1240,8 @@ test("ensureOpenCodeModelInheritance creates config with host model fields", asy
       }),
       "utf8"
     );
-    sandboxCreate.ensureOpenCodeModelInheritance(tmpDir, hostHome);
-    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "opencode.json"), "utf8"));
+    opencodeSandbox.ensureOpenCodeSandboxState(tmpDir, hostHome);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".xdg", "config", "opencode", "opencode.json"), "utf8"));
     assert.equal(data.model, "anthropic/claude-opus-4-7");
     assert.equal(data.small_model, "openai/gpt-5.5-mini");
   } finally {
@@ -1248,8 +1250,8 @@ test("ensureOpenCodeModelInheritance creates config with host model fields", asy
   }
 });
 
-test("ensureOpenCodeModelInheritance preserves existing sandbox model fields", async () => {
-  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+test("ensureOpenCodeSandboxState preserves existing sandbox model fields", async () => {
+  const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-keep-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-keep-"));
 
@@ -1271,8 +1273,8 @@ test("ensureOpenCodeModelInheritance preserves existing sandbox model fields", a
       }),
       "utf8"
     );
-    sandboxCreate.ensureOpenCodeModelInheritance(tmpDir, hostHome);
-    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "opencode.json"), "utf8"));
+    opencodeSandbox.ensureOpenCodeSandboxState(tmpDir, hostHome);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".xdg", "config", "opencode", "opencode.json"), "utf8"));
     assert.equal(data.model, "openai/gpt-5.5");
     assert.equal(data.small_model, "anthropic/claude-sonnet-4-5");
   } finally {
@@ -1281,8 +1283,8 @@ test("ensureOpenCodeModelInheritance preserves existing sandbox model fields", a
   }
 });
 
-test("ensureOpenCodeModelInheritance inherits small model when host model is missing", async () => {
-  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+test("ensureOpenCodeSandboxState inherits small model when host model is missing", async () => {
+  const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-small-model-only-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-small-model-only-"));
 
@@ -1293,8 +1295,8 @@ test("ensureOpenCodeModelInheritance inherits small model when host model is mis
       JSON.stringify({ small_model: "openai/gpt-5.5-mini" }),
       "utf8"
     );
-    sandboxCreate.ensureOpenCodeModelInheritance(tmpDir, hostHome);
-    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, "opencode.json"), "utf8"));
+    opencodeSandbox.ensureOpenCodeSandboxState(tmpDir, hostHome);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, ".xdg", "config", "opencode", "opencode.json"), "utf8"));
     assert.equal(Object.hasOwn(data, "model"), false);
     assert.equal(data.small_model, "openai/gpt-5.5-mini");
   } finally {
@@ -1303,24 +1305,24 @@ test("ensureOpenCodeModelInheritance inherits small model when host model is mis
   }
 });
 
-test("ensureOpenCodeModelInheritance skips missing host model fields", async () => {
-  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+test("ensureOpenCodeSandboxState skips missing host model fields", async () => {
+  const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-missing-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-missing-"));
 
   try {
     fs.mkdirSync(path.join(hostHome, ".config", "opencode"), { recursive: true });
     fs.writeFileSync(path.join(hostHome, ".config", "opencode", "opencode.json"), JSON.stringify({ theme: "dark" }), "utf8");
-    sandboxCreate.ensureOpenCodeModelInheritance(tmpDir, hostHome);
-    assert.equal(fs.existsSync(path.join(tmpDir, "opencode.json")), false);
+    opencodeSandbox.ensureOpenCodeSandboxState(tmpDir, hostHome);
+    assert.equal(fs.existsSync(path.join(tmpDir, ".xdg", "config", "opencode", "opencode.json")), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     fs.rmSync(hostHome, { recursive: true, force: true });
   }
 });
 
-test("ensureOpenCodeModelInheritance skips empty host model fields", async () => {
-  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+test("ensureOpenCodeSandboxState skips empty host model fields", async () => {
+  const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-empty-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-empty-"));
 
@@ -1331,32 +1333,32 @@ test("ensureOpenCodeModelInheritance skips empty host model fields", async () =>
       JSON.stringify({ model: "", small_model: "" }),
       "utf8"
     );
-    sandboxCreate.ensureOpenCodeModelInheritance(tmpDir, hostHome);
-    assert.equal(fs.existsSync(path.join(tmpDir, "opencode.json")), false);
+    opencodeSandbox.ensureOpenCodeSandboxState(tmpDir, hostHome);
+    assert.equal(fs.existsSync(path.join(tmpDir, ".xdg", "config", "opencode", "opencode.json")), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     fs.rmSync(hostHome, { recursive: true, force: true });
   }
 });
 
-test("ensureOpenCodeModelInheritance ignores malformed host json", async () => {
-  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+test("ensureOpenCodeSandboxState ignores malformed host json", async () => {
+  const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-malformed-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-malformed-"));
 
   try {
     fs.mkdirSync(path.join(hostHome, ".config", "opencode"), { recursive: true });
     fs.writeFileSync(path.join(hostHome, ".config", "opencode", "opencode.json"), "{", "utf8");
-    assert.doesNotThrow(() => sandboxCreate.ensureOpenCodeModelInheritance(tmpDir, hostHome));
-    assert.equal(fs.existsSync(path.join(tmpDir, "opencode.json")), false);
+    assert.doesNotThrow(() => opencodeSandbox.ensureOpenCodeSandboxState(tmpDir, hostHome));
+    assert.equal(fs.existsSync(path.join(tmpDir, ".xdg", "config", "opencode", "opencode.json")), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     fs.rmSync(hostHome, { recursive: true, force: true });
   }
 });
 
-test("ensureOpenCodeModelInheritance leaves malformed sandbox config alone", async () => {
-  const sandboxCreate = await loadFreshEsm<SandboxCreateModule>("lib/sandbox/commands/create.js");
+test("ensureOpenCodeSandboxState leaves malformed sandbox config alone", async () => {
+  const opencodeSandbox = await loadFreshEsm<OpenCodeSandboxModule>("lib/agent-clients/adapters/opencode-sandbox.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-model-malformed-sandbox-"));
   const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-opencode-host-valid-for-malformed-sandbox-"));
 
@@ -1367,9 +1369,10 @@ test("ensureOpenCodeModelInheritance leaves malformed sandbox config alone", asy
       JSON.stringify({ model: "anthropic/claude-opus-4-7" }),
       "utf8"
     );
-    const configPath = path.join(tmpDir, "opencode.json");
-    fs.writeFileSync(configPath, "{", "utf8");
-    assert.doesNotThrow(() => sandboxCreate.ensureOpenCodeModelInheritance(tmpDir, hostHome));
+    const legacyConfigPath = path.join(tmpDir, "opencode.json");
+    const configPath = path.join(tmpDir, ".xdg", "config", "opencode", "opencode.json");
+    fs.writeFileSync(legacyConfigPath, "{", "utf8");
+    assert.doesNotThrow(() => opencodeSandbox.ensureOpenCodeSandboxState(tmpDir, hostHome));
     assert.equal(fs.readFileSync(configPath, "utf8"), "{");
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
