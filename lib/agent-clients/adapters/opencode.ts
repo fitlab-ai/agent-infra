@@ -49,6 +49,9 @@ const opencodeAdapter = defineAgentClientAdapter({
     }
   },
   sandbox: {
+    image: {
+      dotfilesExclusions: ['.config/opencode']
+    },
     createTool: ({ home }) => ({
       id: 'opencode',
       name: 'OpenCode',

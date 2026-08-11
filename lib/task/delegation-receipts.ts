@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { AgentClientId } from '../agent-clients/types.ts';
+import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 
 type DelegationRole = 'executor' | 'reviewer';
 type DelegationStage = 'analysis' | 'review-analysis' | 'plan' | 'review-plan' | 'code' | 'review-code' | 'commit';
@@ -145,8 +146,7 @@ function completeDelegationStage(
   if (event.stage !== receipt.stage || event.round !== receipt.round || event.artifact !== receipt.artifact) {
     return fail('DELEGATION_STAGE_MISMATCH', 'stage completion identity does not match the active delegation');
   }
-  const acceptedAgents = receipt.client === 'claude-code' ? ['claude', 'claude-code'] : [receipt.client];
-  if (!acceptedAgents.includes(event.agent)) {
+  if (normalizeAgentToken(event.agent) !== normalizeAgentToken(receipt.client)) {
     return fail('DELEGATION_AGENT_MISMATCH', `stage agent '${event.agent}' does not match client '${receipt.client}'`);
   }
   return { ok: true, receipt: Object.freeze({ ...receipt, status: 'stage-completed', agent: event.agent }) };

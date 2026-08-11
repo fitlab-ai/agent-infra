@@ -98,10 +98,16 @@ type SandboxConfigModule = {
   loadConfig(): Record<string, unknown>;
 };
 type SandboxDockerfileModule = {
-  prepareDockerfile(config: Record<string, unknown>): Record<string, unknown> & { cleanup(): void };
+  prepareDockerfile(
+    config: Record<string, unknown>,
+    image?: Record<string, unknown>
+  ): Record<string, unknown> & { cleanup(): void };
 };
-type SandboxToolsModule = {
-  resolveTools(config: Record<string, unknown>): Array<Record<string, unknown>>;
+type SandboxCapabilityModule = {
+  createSandboxCapabilityPlan(config: Record<string, unknown>): {
+    tools: Array<Record<string, unknown>>;
+    image: Record<string, unknown>;
+  };
 };
 
 function required<T>(value: T | undefined, message = "expected value"): T {
@@ -126,16 +132,16 @@ async function sandboxImageSignature(repoDir: string): Promise<string> {
   const imageBuild = await loadFreshEsm<ImageBuildModule>("lib/sandbox/image-build.js");
   const sandboxConfig = await loadFreshEsm<SandboxConfigModule>("lib/sandbox/config.js");
   const sandboxDockerfile = await loadFreshEsm<SandboxDockerfileModule>("lib/sandbox/dockerfile.js");
-  const sandboxTools = await loadFreshEsm<SandboxToolsModule>("lib/sandbox/tools.js");
+  const reconciler = await loadFreshEsm<SandboxCapabilityModule>("lib/sandbox/agent-client-reconciler.js");
   const previousCwd = process.cwd();
 
   try {
     process.chdir(repoDir);
     const config = sandboxConfig.loadConfig();
-    const tools = sandboxTools.resolveTools(config);
-    const preparedDockerfile = sandboxDockerfile.prepareDockerfile(config);
+    const capabilityPlan = reconciler.createSandboxCapabilityPlan(config);
+    const preparedDockerfile = sandboxDockerfile.prepareDockerfile(config, capabilityPlan.image);
     try {
-      return imageBuild.buildImageSignature(preparedDockerfile, tools);
+      return imageBuild.buildImageSignature(preparedDockerfile, capabilityPlan.tools);
     } finally {
       preparedDockerfile.cleanup();
     }

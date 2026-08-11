@@ -12,6 +12,7 @@ import {
 } from '../sandbox/tool-types.ts';
 import type {
   AgentClientSandboxRecoveryCheck,
+  AgentClientSandboxImageDescriptor,
   AgentClientSandboxDescriptor,
   SandboxAlias,
   SandboxTool,
@@ -96,6 +97,52 @@ type AgentClientManifestEntry = Readonly<{
 const PROJECT_ASSET_CATEGORIES = ['managed', 'merged', 'ejected'] as const;
 const MAX_SANDBOX_HOOK_TIMEOUT_MS = 300_000;
 const TOOL_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+function freezeSandboxImageDescriptor(
+  id: AgentClientId,
+  value: AgentClientSandboxImageDescriptor | undefined
+): AgentClientSandboxImageDescriptor | undefined {
+  if (value === undefined) return undefined;
+  const keys = value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.keys(value)
+    : [];
+  const fragment = value?.dockerfileFragment;
+  const exclusions = value?.dotfilesExclusions;
+  const validExclusion = (entry: unknown): entry is string => {
+    if (
+      typeof entry !== 'string'
+      || entry === ''
+      || entry.startsWith('/')
+      || entry.endsWith('/')
+      || entry.includes('\\')
+      || /[*?[\]]/.test(entry)
+    ) {
+      return false;
+    }
+    return entry.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+  };
+  if (
+    !value
+    || typeof value !== 'object'
+    || Array.isArray(value)
+    || keys.length === 0
+    || keys.some((key) => !['dockerfileFragment', 'dotfilesExclusions'].includes(key))
+    || (fragment !== undefined && (typeof fragment !== 'string' || !TOOL_ID_PATTERN.test(fragment)))
+    || (exclusions !== undefined && (
+      !Array.isArray(exclusions)
+      || exclusions.some((entry) => !validExclusion(entry))
+      || new Set(exclusions).size !== exclusions.length
+    ))
+  ) {
+    throw new Error(`Agent Client '${id}' has an invalid sandbox image descriptor`);
+  }
+  return Object.freeze({
+    ...(fragment === undefined ? {} : { dockerfileFragment: fragment }),
+    ...(exclusions === undefined
+      ? {}
+      : { dotfilesExclusions: Object.freeze([...exclusions]) })
+  });
+}
 
 function freezeRecoveryProbe(
   id: AgentClientId,
@@ -465,6 +512,7 @@ function defineAgentClientAdapter(
   if (!candidate.sandbox || typeof candidate.sandbox.createTool !== 'function') {
     throw new Error(`Agent Client '${candidate.id}' requires a sandbox descriptor`);
   }
+  const image = freezeSandboxImageDescriptor(candidate.id, candidate.sandbox.image);
   const hookIds = new Set<string>();
   const hooks = Object.freeze(candidate.sandbox.hooks.map((hook) => {
     if (
@@ -586,7 +634,13 @@ function defineAgentClientAdapter(
       seedCommands: Object.freeze(seedCommands),
       ...(customCommand === undefined ? {} : { customCommand })
     }),
-    sandbox: Object.freeze({ createTool, aliases, hooks, recoveryChecks })
+    sandbox: Object.freeze({
+      createTool,
+      aliases,
+      hooks,
+      recoveryChecks,
+      ...(image === undefined ? {} : { image })
+    })
   });
 }
 

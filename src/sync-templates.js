@@ -416,15 +416,12 @@ function detectCustomSkills(projectRoot, templateSkillNames) {
     .sort((left, right) => left.dirName.localeCompare(right.dirName));
 }
 
-function isCustomProtected(targetPath, customSkills, customTUICommandTargets) {
+function isCustomProtected(targetPath, customSkills, customCommandTargets) {
   const normalized = norm(targetPath);
 
   return customSkills.some(({ dirName }) => (
-    normalized.startsWith(`.agents/skills/${dirName}/`) ||
-    normalized === `.claude/commands/${dirName}.md` ||
-    normalized === `.opencode/commands/${dirName}.md` ||
-    customTUICommandTargets.has(normalized)
-  ));
+    normalized.startsWith(`.agents/skills/${dirName}/`)
+  )) || customCommandTargets.has(normalized);
 }
 
 function recordCustomTUISkipped(report, entry) {
@@ -874,6 +871,15 @@ function buildCustomTUICommandTargets(projectRoot, customSkills, customTUIs, tem
   return targets;
 }
 
+function buildBuiltinCustomCommandTargets(customSkills, enabledTUIs) {
+  return new Set(AGENT_CLIENT_MANIFEST.flatMap((adapter) => {
+    if (!enabledTUIs.has(adapter.id) || !adapter.customCommand) return [];
+    return customSkills.map((skill) =>
+      adapter.customCommand.target.replaceAll('${skillName}', skill.dirName)
+    );
+  }));
+}
+
 function learnAndGenerateCommands(projectRoot, customSkills, tool, templateSkillNames, report) {
   const ref = findCustomTUIReference(projectRoot, tool, templateSkillNames, report, true);
   if (!ref) return;
@@ -1176,6 +1182,10 @@ function syncTemplates(projectRoot, templateRootOverride) {
     customTUIs,
     templateSkillNames
   );
+  const customCommandTargets = new Set([
+    ...buildBuiltinCustomCommandTargets(protectedCustomSkills, enabledTUIs),
+    ...customTUICommandTargets
+  ]);
 
   for (const category of ['managed', 'merged', 'ejected']) {
     const before = currentRegistry[category];
@@ -1388,7 +1398,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
       const protectedByEjection = ejected.some((pattern) =>
         assetMatches(pattern, target) || globMatch(pattern, target)
       );
-      const protectedByCustom = customTUICommandTargets.has(target);
+      const protectedByCustom = customCommandTargets.has(target);
 
       if (protectedByEjection || protectedByCustom || (sourceRoot && sourceRoot !== templateRoot)) {
         report.managed.protected.push({
@@ -1517,7 +1527,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
         for (const projFile of projFiles) {
           if (expectedTargets.has(projFile)) continue;
           if (projFile === configPathRel) continue;
-          if (isCustomProtected(projFile, protectedCustomSkills, customTUICommandTargets)) continue;
+          if (isCustomProtected(projFile, protectedCustomSkills, customCommandTargets)) continue;
           if (matchesAny(projFile, merged) || matchesAny(projFile, ejected)) continue;
           if (assetPlan.enabledManaged.includes(entry)) {
             const baseline = trustedBaseline(managedBaselines[projFile]);

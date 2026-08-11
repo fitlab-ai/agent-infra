@@ -25,6 +25,14 @@ for (const file of fs.readdirSync(runtimesSrc)) {
   }
 }
 
+const agentClientRuntimesSrc = path.join(rootDir, "lib", "agent-clients", "adapters", "runtimes");
+const agentClientRuntimesDst = path.join(distLib, "agent-clients", "adapters", "runtimes");
+for (const file of fs.readdirSync(agentClientRuntimesSrc)) {
+  if (file.endsWith(".dockerfile")) {
+    copyFile(path.join(agentClientRuntimesSrc, file), path.join(agentClientRuntimesDst, file));
+  }
+}
+
 for (const file of ["cli.js", "internal-cli.js"]) {
   try {
     fs.chmodSync(path.join(rootDir, "dist", "bin", file), 0o755);

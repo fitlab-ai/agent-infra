@@ -8,8 +8,8 @@ import { sandboxImageRefreshLabel } from '../constants.ts';
 import { detectEngine, ensureDocker } from '../engine.ts';
 import { runEngine, runOkEngine, runSafeEngine, runVerboseEngine } from '../shell.ts';
 import { pruneSandboxDanglingImages } from '../image-prune.ts';
-import { resolveTools } from '../tools.ts';
 import type { SandboxTool } from '../tools.ts';
+import { createSandboxCapabilityPlan } from '../agent-client-reconciler.ts';
 import {
   buildImageSignature,
   buildSandboxImageArgs,
@@ -97,8 +97,9 @@ export async function rebuild(args: string[]): Promise<void> {
   }
 
   const config = loadConfig();
-  const tools = resolveTools(config);
-  const preparedDockerfile = prepareDockerfile(config);
+  const capabilityPlan = createSandboxCapabilityPlan(config);
+  const tools = [...capabilityPlan.tools];
+  const preparedDockerfile = prepareDockerfile(config, capabilityPlan.image);
   const imageSignature = buildImageSignature(preparedDockerfile, tools);
   const quiet = values.quiet ?? false;
   const refresh = values.refresh ?? false;

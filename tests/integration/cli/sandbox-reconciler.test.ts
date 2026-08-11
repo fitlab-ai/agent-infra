@@ -2,13 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { AgentClientState } from '../../../lib/agent-clients/types.ts';
+import { getAgentClientAdapter } from '../../../lib/agent-clients/registry.ts';
 import type {
   AgentClientSandboxHook,
   SandboxTool
 } from '../../../lib/sandbox/tool-types.ts';
 import {
   createSandboxCapabilityPlan,
-  runSandboxHooks
+  runSandboxHooks,
+  sandboxImageContribution
 } from '../../../lib/sandbox/agent-client-reconciler.ts';
 import { classifySandboxRecovery } from '../../../lib/sandbox/recovery.ts';
 
@@ -89,6 +91,62 @@ test('Claude sandbox lifecycle is selected only by installInSandbox', () => {
     ]
   );
   assert.deepEqual(Object.values(disabled.hooksByPhase).flat(), []);
+});
+
+test('capability image contributions derive selected client mounts and adapter extras', () => {
+  const empty = createSandboxCapabilityPlan(config([]));
+  const claude = createSandboxCapabilityPlan(config(['claude-code']));
+  const all = createSandboxCapabilityPlan(config([
+    'claude-code',
+    'codex',
+    'antigravity-cli',
+    'opencode'
+  ]));
+  const imageOf = (plan: unknown) => (plan as {
+    image: Readonly<{
+      dockerfileFragments: readonly string[];
+      dotfilesExclusions: readonly string[];
+    }>;
+  }).image;
+
+  assert.deepEqual(imageOf(empty), {
+    dockerfileFragments: [],
+    dotfilesExclusions: []
+  });
+  assert.deepEqual(imageOf(claude), {
+    dockerfileFragments: ['claude-code'],
+    dotfilesExclusions: ['.claude']
+  });
+  assert.deepEqual(imageOf(all), {
+    dockerfileFragments: ['claude-code'],
+    dotfilesExclusions: [
+      '.claude',
+      '.codex',
+      '.gemini',
+      '.local/share/opencode',
+      '.config/opencode'
+    ]
+  });
+  assert.ok(Object.isFrozen(imageOf(all)));
+  assert.ok(Object.isFrozen(imageOf(all).dockerfileFragments));
+  assert.ok(Object.isFrozen(imageOf(all).dotfilesExclusions));
+  assert.deepEqual(
+    (all.runtimeProjection as typeof all.runtimeProjection & { image: unknown }).image,
+    imageOf(all)
+  );
+});
+
+test('capability image contributions reject client mounts outside the container home', () => {
+  const adapter = getAgentClientAdapter('codex');
+  const tool = {
+    ...adapter.sandbox.createTool({ home: '/host/alice', project: 'demo' }),
+    containerMount: '/var/lib/codex'
+  };
+
+  assert.throws(
+    () => sandboxImageContribution([adapter], [tool]),
+    /Agent Client 'codex' container mount must be below \/home\/devuser/
+  );
 });
 
 test('runtime signature is host-path independent and changes with selected capabilities', () => {

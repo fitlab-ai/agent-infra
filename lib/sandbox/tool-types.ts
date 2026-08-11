@@ -121,11 +121,17 @@ type AgentClientSandboxRecoveryCheck = Readonly<{
   repair?: SandboxRecoveryRepair;
 }>;
 
+type AgentClientSandboxImageDescriptor = Readonly<{
+  dockerfileFragment?: string;
+  dotfilesExclusions?: readonly string[];
+}>;
+
 type AgentClientSandboxDescriptor = Readonly<{
   createTool(context: SandboxToolContext): SandboxTool;
   aliases: readonly SandboxAlias[];
   hooks: readonly AgentClientSandboxHook[];
   recoveryChecks?: readonly AgentClientSandboxRecoveryCheck[];
+  image?: AgentClientSandboxImageDescriptor;
 }>;
 
 export { SANDBOX_HOOK_PHASES };
@@ -134,6 +140,7 @@ export type {
   AgentClientSandboxHook,
   AgentClientSandboxHookContext,
   AgentClientSandboxHookResult,
+  AgentClientSandboxImageDescriptor,
   AgentClientSandboxRecoveryCheck,
   SandboxAlias,
   SandboxHookCommand,

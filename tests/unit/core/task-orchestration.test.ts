@@ -630,7 +630,7 @@ test('repository pending guard includes paused runs that retain a delegation', (
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
-    client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+    client: 'opencode', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
   }, {
     repoRoot: f.root, captureWorkspace: snapshot
   });

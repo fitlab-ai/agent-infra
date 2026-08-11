@@ -125,6 +125,44 @@ test("composeDockerfile joins runtime fragments in order", async () => {
   }
 });
 
+test("composeDockerfile applies selected adapter image contributions after the generic base", async () => {
+  const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
+  const compose = sandboxDockerfile.composeDockerfile as unknown as (
+    config: Record<string, unknown>,
+    image: { dockerfileFragments: string[]; dotfilesExclusions: string[] }
+  ) => string;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-adapter-image-"));
+
+  try {
+    const dockerfilePath = compose({
+      repoRoot: tmpDir,
+      project: "demo",
+      runtimes: ["node20"],
+      dockerfile: null
+    }, {
+      dockerfileFragments: ["claude-code"],
+      dotfilesExclusions: [".claude", ".config/opencode"]
+    });
+    const content = fs.readFileSync(dockerfilePath, "utf8");
+
+    assert.match(content, /cat > \/etc\/agent-infra\/dotfiles-exclusions <<'EXCLUSIONS'/);
+    assert.match(content, /\.claude\n\.config\/opencode\nEXCLUSIONS/);
+    assert.match(content, /\/usr\/local\/bin\/cc-token-status/);
+    assert.match(content, /SETTINGS_FILE="\/home\/devuser\/\.claude\/settings\.json"/);
+    assert.match(content, /ANTHROPIC_AUTH_TOKEN/);
+    assert.match(content, /ANTHROPIC_API_KEY/);
+    assert.match(content, /apiKeyHelper/);
+    assert.ok(
+      content.indexOf('SETTINGS_FILE="/home/devuser/.claude/settings.json"')
+        < content.indexOf('CRED_FILE="/home/devuser/.claude/.credentials.json"')
+    );
+    assert.ok(content.indexOf("FROM ubuntu:24.04") < content.indexOf("/usr/local/bin/cc-token-status"));
+    assert.ok(content.indexOf("/usr/local/bin/cc-token-status") < content.indexOf("setup_20.x"));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("node runtime setup fails fast on NodeSource download errors", async () => {
   const sandboxDockerfile = await loadFreshEsm<typeof import("../../../lib/sandbox/dockerfile.ts")>("lib/sandbox/dockerfile.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-node-runtime-"));
@@ -320,7 +358,8 @@ test("composeDockerfile bakes sandbox-dotfiles-link script", async () => {
     assert.match(content, /find \. -type f -print/);
     assert.match(content, /\.ssh\|\.ssh\/\*/);
     assert.match(content, /\.gnupg\|\.gnupg\/\*/);
-    assert.match(content, /\.config\/opencode\|\.config\/opencode\/\*/);
+    assert.match(content, /\/etc\/agent-infra\/dotfiles-exclusions/);
+    assert.match(content, /"\$prefix"\|"\$prefix"\/\*/);
     assert.match(content, /\.gitconfig\|\.gitignore_global\|\.stCommitMsg\|\.bash_aliases\|README\.md/);
     assert.match(content, /mkdir -p "\$\(dirname "\$target"\)"/);
     assert.match(content, /\[ -d "\$target" \] && \[ ! -L "\$target" \]/);
@@ -351,14 +390,14 @@ test("composeDockerfile invokes sandbox-dotfiles-link from sandbox-tmux-entry", 
   }
 });
 
-test("base.dockerfile rejects empty or non-executable runtime scripts", () => {
+test("base.dockerfile rejects empty or non-executable generic runtime scripts", () => {
   const content = fs.readFileSync(filePath("lib/sandbox/runtimes/base.dockerfile"), "utf8");
   const assertionBlock = content
     .split(/^(?=FROM |USER |ENV |ARG |RUN |WORKDIR |CMD |COPY |ADD )/m)
-    .find((block) => block.startsWith("RUN ") && block.includes("test -s /usr/local/bin/cc-token-status"));
+    .find((block) => block.startsWith("RUN ") && block.includes("test -s /usr/local/bin/sandbox-dotfiles-link"));
 
   assert.ok(assertionBlock, "expected a RUN block validating baked runtime scripts");
-  for (const script of ["cc-token-status", "sandbox-dotfiles-link", "sandbox-tmux-entry"]) {
+  for (const script of ["sandbox-dotfiles-link", "sandbox-tmux-entry"]) {
     assert.match(assertionBlock, new RegExp(`test -s /usr/local/bin/${script}`));
     assert.match(assertionBlock, new RegExp(`test -x /usr/local/bin/${script}`));
   }
@@ -366,6 +405,19 @@ test("base.dockerfile rejects empty or non-executable runtime scripts", () => {
     content.indexOf(assertionBlock) < content.indexOf("ENV LANG=en_US.UTF-8"),
     "expected runtime script validation before the final environment declarations"
   );
+});
+
+test("Claude adapter Dockerfile validates its token status script", () => {
+  const content = fs.readFileSync(
+    filePath("lib/agent-clients/adapters/runtimes/claude-code.dockerfile"),
+    "utf8"
+  );
+  const assertionBlock = content
+    .split(/^(?=FROM |USER |ENV |ARG |RUN |WORKDIR |CMD |COPY |ADD )/m)
+    .find((block) => block.startsWith("RUN ") && block.includes("test -s /usr/local/bin/cc-token-status"));
+
+  assert.ok(assertionBlock, "expected Claude fragment to validate cc-token-status");
+  assert.match(assertionBlock, /test -x \/usr\/local\/bin\/cc-token-status/);
 });
 
 test("built-in Dockerfile signature covers the runtime script validation", async () => {
@@ -413,15 +465,7 @@ test("composeDockerfile configures tmux extended keys and terminal env forwardin
     assert.match(content, /set -g mouse on/);
     assert.match(content, /set -g status-interval 1/);
     assert.match(content, /set -g status-right-length 80/);
-    assert.match(content, /\/usr\/local\/bin\/cc-token-status/);
-    assert.match(content, /SETTINGS_FILE="\/home\/devuser\/\.claude\/settings\.json"/);
-    assert.match(content, /ANTHROPIC_AUTH_TOKEN/);
-    assert.match(content, /ANTHROPIC_API_KEY/);
-    assert.match(content, /apiKeyHelper/);
-    assert.ok(
-      content.indexOf('SETTINGS_FILE="/home/devuser/.claude/settings.json"')
-        < content.indexOf('CRED_FILE="/home/devuser/.claude/.credentials.json"')
-    );
+    assert.match(content, /set -g status-right '%H:%M'/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

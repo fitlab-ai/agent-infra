@@ -1020,8 +1020,7 @@ function prepareOrchestrationDelegationUnlocked(
   if (!run || run.status !== 'running') return failed('ORCHESTRATION_RUN_NOT_RUNNING', 'a running orchestration is required', resolved.taskId);
   if (!isV2Policy(run.modelPolicy)) return failed('ORCHESTRATION_MODEL_EVIDENCE_MISSING', 'running orchestration has no persisted model policy', resolved.taskId);
   if (run.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_BUSY', 'the run already has a pending delegation', resolved.taskId);
-  const repositoryPending = (['claude-code', 'codex'] as AgentClientId[])
-    .flatMap((client) => matchingDelegations(client, () => true, options));
+  const repositoryPending = matchingDelegations(() => true, options);
   if (repositoryPending.length > 0) {
     return failed('ORCHESTRATION_DELEGATION_BUSY', 'the repository already has a pending lifecycle delegation', resolved.taskId);
   }
@@ -1098,7 +1097,6 @@ function prepareOrchestrationDelegation(
 }
 
 function matchingDelegations(
-  client: AgentClientId,
   predicate: (receipt: DelegationReceipt) => boolean,
   options: OrchestrationOptions
 ): Array<{ taskId: string; run: OrchestrationRun }> {
@@ -1111,7 +1109,7 @@ function matchingDelegations(
       const run = readRun(path.join(activeRoot, entry.name));
       if (!run?.pendingDelegation) return [];
       const receipt = run.pendingDelegation;
-      return receipt.client === client && predicate(receipt)
+      return predicate(receipt)
         ? [{ taskId: entry.name, run }]
         : [];
     });
@@ -1122,7 +1120,10 @@ function uniqueMatchingDelegation(
   predicate: (receipt: DelegationReceipt) => boolean,
   options: OrchestrationOptions
 ): { taskId: string; run: OrchestrationRun } | OrchestrationResult {
-  const matches = matchingDelegations(client, predicate, options);
+  const matches = matchingDelegations(
+    (receipt) => receipt.client === client && predicate(receipt),
+    options
+  );
   if (matches.length === 0) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no matching lifecycle delegation exists');
   if (matches.length > 1) return failed('ORCHESTRATION_DELEGATION_AMBIGUOUS', 'multiple lifecycle delegations match the native hook event');
   return matches[0]!;

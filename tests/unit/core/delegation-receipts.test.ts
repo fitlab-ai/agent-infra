@@ -8,6 +8,8 @@ import {
   prepareDelegation,
   sealDelegation
 } from '../../../lib/task/delegation-receipts.ts';
+import { listAgentClientAdapters } from '../../../lib/agent-clients/registry.ts';
+import { normalizeAgentToken } from '../../../lib/agent-clients/tokens.ts';
 
 const input = {
   taskId: 'TASK-20260101-000001',
@@ -108,6 +110,62 @@ test('claude-code receipt accepts the normalized short agent claude', () => {
   });
   assert.equal(completed.ok, true);
   if (completed.ok) assert.equal(completed.code, undefined);
+});
+
+test('stage completion accepts the normalized activity token for every registered client', () => {
+  for (const adapter of listAgentClientAdapters()) {
+    const prepared = prepareDelegation(
+      { ...input, client: adapter.id },
+      { id: () => `delegation-${adapter.id}` }
+    );
+    const activated = activateDelegation(prepared, {
+      nativeAgent: 'agent-infra-lifecycle-reviewer',
+      childId: `child-${adapter.id}`,
+      parentId: 'parent-1',
+      spawnMode: 'fresh',
+      actualModel: 'review-model',
+      actualReasoningEffort: 'high'
+    });
+    assert.equal(activated.ok, true, adapter.id);
+    if (!activated.ok) continue;
+    const agent = normalizeAgentToken(adapter.id);
+    assert.ok(agent, adapter.id);
+    const completed = completeDelegationStage(activated.receipt, {
+      stage: 'review-code',
+      round: 1,
+      artifact: 'review-code.md',
+      agent
+    });
+    assert.equal(completed.ok, true, adapter.id);
+  }
+});
+
+test('stage completion rejects cross-client and unknown activity tokens', () => {
+  const prepared = prepareDelegation(
+    { ...input, client: 'claude-code' },
+    { id: () => 'delegation-agent-mismatch' }
+  );
+  const activated = activateDelegation(prepared, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer',
+    childId: 'child-agent-mismatch',
+    parentId: 'parent-1',
+    spawnMode: 'fresh',
+    actualModel: 'review-model',
+    actualReasoningEffort: 'high'
+  });
+  assert.equal(activated.ok, true);
+  if (!activated.ok) return;
+
+  for (const agent of ['codex', 'gemini']) {
+    const completed = completeDelegationStage(activated.receipt, {
+      stage: 'review-code',
+      round: 1,
+      artifact: 'review-code.md',
+      agent
+    });
+    assert.equal(completed.ok, false, agent);
+    assert.equal(completed.code, 'DELEGATION_AGENT_MISMATCH', agent);
+  }
 });
 
 test('reviewer write gate rejects shared, non-allowlisted task, and cross-task paths', () => {

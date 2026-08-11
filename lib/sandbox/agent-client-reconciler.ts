@@ -51,6 +51,12 @@ type SandboxRuntimeCapabilityProjection = Readonly<{
     }>;
     repair?: AgentClientSandboxRecoveryCheck['repair'];
   }>[];
+  image: SandboxImageContribution;
+}>;
+
+type SandboxImageContribution = Readonly<{
+  dockerfileFragments: readonly string[];
+  dotfilesExclusions: readonly string[];
 }>;
 
 type PlannedAgentClientRecoveryCheck = Readonly<{
@@ -64,6 +70,7 @@ type SandboxCapabilityPlan = Readonly<{
   hooksByPhase: Readonly<Record<SandboxHookPhase, readonly AgentClientSandboxHook[]>>;
   recoveryChecks: readonly PlannedAgentClientRecoveryCheck[];
   aliases: readonly SandboxAlias[];
+  image: SandboxImageContribution;
   imageSignature: string;
   runtimeSignature: string;
   runtimeProjection: SandboxRuntimeCapabilityProjection;
@@ -147,6 +154,36 @@ function assertUniqueTools(tools: readonly SandboxTool[]): void {
   }
 }
 
+function unique(values: readonly string[]): readonly string[] {
+  return Object.freeze([...new Set(values)]);
+}
+
+function sandboxImageContribution(
+  adapters: readonly AgentClientAdapter[],
+  tools: readonly SandboxTool[]
+): SandboxImageContribution {
+  const homePrefix = '/home/devuser/';
+  const derivedExclusions = tools.map((tool) => {
+    if (!tool.containerMount.startsWith(homePrefix)) {
+      throw new Error(
+        `Agent Client '${tool.id}' container mount must be below ${homePrefix.slice(0, -1)}`
+      );
+    }
+    return tool.containerMount.slice(homePrefix.length);
+  });
+  return Object.freeze({
+    dockerfileFragments: unique(adapters.flatMap((adapter) =>
+      adapter.sandbox.image?.dockerfileFragment
+        ? [adapter.sandbox.image.dockerfileFragment]
+        : []
+    )),
+    dotfilesExclusions: unique([
+      ...derivedExclusions,
+      ...adapters.flatMap((adapter) => adapter.sandbox.image?.dotfilesExclusions ?? [])
+    ])
+  });
+}
+
 function hooksByPhase(
   adapters: readonly AgentClientAdapter[]
 ): SandboxCapabilityPlan['hooksByPhase'] {
@@ -207,6 +244,7 @@ function createSandboxCapabilityPlan(
 
   const tools = Object.freeze([...nonClientTools, ...selectedTools, ...selectedCustomTools]);
   assertUniqueTools(tools);
+  const image = sandboxImageContribution(selectedAgentClients, selectedTools);
   const phaseHooks = hooksByPhase(selectedAgentClients);
   const hookProjection = selectedAgentClients.flatMap((adapter) =>
     adapter.sandbox.hooks.map((hook) => ({
@@ -239,7 +277,8 @@ function createSandboxCapabilityPlan(
     tools: Object.freeze(tools.map(runtimeToolProjection)),
     selectedAgentClients: Object.freeze(selectedAgentClients.map((adapter) => adapter.id)),
     hooks: Object.freeze(hookProjection),
-    recoveryChecks: recoveryCheckProjection
+    recoveryChecks: recoveryCheckProjection,
+    image
   });
   const cleanupInventory = Object.freeze([
     agentInfraTool(config.home),
@@ -256,6 +295,7 @@ function createSandboxCapabilityPlan(
     aliases: Object.freeze(
       listAgentClientAdapters().flatMap((adapter) => adapter.sandbox.aliases)
     ),
+    image,
     imageSignature: hash(tools.map(({ id, install }) => ({ id, install }))),
     runtimeSignature: hash(runtimeProjection),
     runtimeProjection,
@@ -367,12 +407,14 @@ export {
   DEFAULT_SANDBOX_HOOK_TIMEOUT_MS,
   createSandboxCapabilityPlan,
   runBoundedSandboxHookCommand,
-  runSandboxHooks
+  runSandboxHooks,
+  sandboxImageContribution
 };
 export type {
   HookExecutionResult,
   SandboxCapabilityConfig,
   SandboxCapabilityPlan,
+  SandboxImageContribution,
   PlannedAgentClientRecoveryCheck,
   SandboxRuntimeCapabilityProjection
 };

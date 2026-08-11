@@ -92,10 +92,6 @@ import {
   parseRefreshTimestamp
 } from '../image-build.ts';
 
-export {
-  ensureCodexModelInheritance,
-  ensureCodexWorkspaceTrust
-} from '../../agent-clients/adapters/codex-sandbox.ts';
 
 const SANDBOX_ALIAS_BLOCK_BEGIN = '# >>> agent-infra managed aliases >>>';
 const SANDBOX_ALIAS_BLOCK_END = '# <<< agent-infra managed aliases <<<';
@@ -1047,7 +1043,7 @@ export async function create(args: string[]): Promise<void> {
   const worktree = worktreeCandidates.find((candidate) => fs.existsSync(candidate)) ?? worktreeCandidates[0] ?? '';
   const shareCommon = shareCommonDir(effectiveConfig);
   const shareBranch = shareBranchDir(effectiveConfig, branch);
-  const preparedDockerfile = prepareDockerfile(effectiveConfig);
+  const preparedDockerfile = prepareDockerfile(effectiveConfig, capabilityPlan.image);
   const baseBranch = base ?? runSafe('git', ['-C', effectiveConfig.repoRoot, 'branch', '--show-current']);
   const expectedImageSignature = buildImageSignature(preparedDockerfile, tools);
   const engine = detectEngine(effectiveConfig);

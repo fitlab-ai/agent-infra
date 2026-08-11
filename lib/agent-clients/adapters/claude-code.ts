@@ -49,6 +49,9 @@ const claudeCodeAdapter = defineAgentClientAdapter({
     }
   },
   sandbox: {
+    image: {
+      dockerfileFragment: 'claude-code'
+    },
     createTool: ({ home, project }) => ({
       id: 'claude-code',
       name: 'Claude Code',

@@ -257,6 +257,49 @@ test('adapter custom commands validate paths, placeholders, metadata, and immuta
   }
 });
 
+test('adapter sandbox image descriptors validate controlled fragments and relative exclusions', () => {
+  const adapter = defineAgentClientAdapter(adapterInput({
+    sandbox: {
+      ...adapterInput().sandbox,
+      image: {
+        dockerfileFragment: 'codex-runtime',
+        dotfilesExclusions: ['.config/codex', '.cache/codex']
+      }
+    } as never
+  }));
+  const image = (adapter.sandbox as typeof adapter.sandbox & {
+    image: Readonly<{
+      dockerfileFragment: string;
+      dotfilesExclusions: readonly string[];
+    }>;
+  }).image;
+
+  assert.deepEqual(image, {
+    dockerfileFragment: 'codex-runtime',
+    dotfilesExclusions: ['.config/codex', '.cache/codex']
+  });
+  assert.ok(Object.isFrozen(image));
+  assert.ok(Object.isFrozen(image.dotfilesExclusions));
+
+  for (const invalid of [
+    { dockerfileFragment: '../codex' },
+    { dockerfileFragment: 'Codex' },
+    { dotfilesExclusions: ['/home/devuser/.codex'] },
+    { dotfilesExclusions: ['.config/../codex'] },
+    { dotfilesExclusions: ['.config/*'] },
+    { dotfilesExclusions: ['.config\\codex'] },
+    { dotfilesExclusions: ['.config/codex/'] },
+    { dotfilesExclusions: ['.config/codex', '.config/codex'] }
+  ]) {
+    assert.throws(() => defineAgentClientAdapter(adapterInput({
+      sandbox: {
+        ...adapterInput().sandbox,
+        image: invalid
+      } as never
+    })), /invalid sandbox image descriptor/);
+  }
+});
+
 test('Claude adapter owns commands, agents, rules, custom rendering, and lifecycle hooks', () => {
   const adapter = getAgentClientAdapter('claude-code');
 

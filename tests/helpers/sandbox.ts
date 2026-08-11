@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { initIsolatedGitRepo } from "./git.ts";
+import { listAgentClientAdapters } from "../../lib/agent-clients/registry.ts";
 
 type SandboxFixtureOptions = {
   project?: string;
@@ -61,6 +62,16 @@ function writeSandboxEngineFixture(
   const idJsPath = path.join(binDir, "id.js");
   const whichJsPath = path.join(binDir, "which.js");
   const ghJsPath = path.join(binDir, "gh.js");
+  const fixtureHome = "__AGENT_INFRA_FIXTURE_HOME__";
+  const agentClientFixtures = listAgentClientAdapters().map((adapter) => {
+    const tool = adapter.sandbox.createTool({ home: fixtureHome, project });
+    return {
+      id: adapter.id,
+      containerMount: tool.containerMount,
+      hostLiveMounts: tool.hostLiveMounts ?? [],
+      tmpfs: tool.tmpfs ?? null
+    };
+  });
 
   fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
   fs.mkdirSync(binDir, { recursive: true });
@@ -95,6 +106,8 @@ function writeSandboxEngineFixture(
       `const sandboxConfig = ${JSON.stringify(sandbox)};`,
       `const dockerStdoutForPs = ${JSON.stringify(dockerStdoutForPs)};`,
       `const dockerLabelsForInspect = ${JSON.stringify(dockerLabelsForInspect)};`,
+      `const fixtureHome = ${JSON.stringify(fixtureHome)};`,
+      `const agentClientFixtures = ${JSON.stringify(agentClientFixtures)};`,
       "const rawArgs = process.argv.slice(2);",
       "const args = rawArgs[0] === '--context' && rawArgs.length >= 2 ? rawArgs.slice(2) : rawArgs;",
       "function log() {",
@@ -172,20 +185,20 @@ function writeSandboxEngineFixture(
       "      { Type: 'bind', Source: control, Destination: '/run/agent-infra/control', RW: true },",
       "      { Type: 'bind', Source: path.join(home, '.agent-infra', 'share', project, 'common'), Destination: '/share/common', RW: true },",
       "      { Type: 'bind', Source: path.join(home, '.agent-infra', 'share', project, 'branches', branchDir), Destination: '/share/branch', RW: true },",
-      "      { Type: 'bind', Source: path.join(home, '.agent-infra', 'config', project, branchDir), Destination: '/home/devuser/.host-shell-config', RW: false },",
-      "      { Type: 'tmpfs', Source: '', Destination: '/home/devuser/.codex', RW: true }",
+      "      { Type: 'bind', Source: path.join(home, '.agent-infra', 'config', project, branchDir), Destination: '/home/devuser/.host-shell-config', RW: false }",
       "    ];",
       "    const selectedTools = Array.isArray(sandboxConfig.tools)",
       "      ? sandboxConfig.tools",
-      "      : ['agent-infra', 'claude-code', 'codex', 'antigravity-cli', 'opencode'];",
-      "    const builtinLiveMounts = {",
-      "      'claude-code': [path.join(home, '.agent-infra', 'credentials', project, 'claude-code', '.credentials.json'), '/home/devuser/.claude/.credentials.json'],",
-      "      codex: [path.join(home, '.codex', 'auth.json'), '/home/devuser/.codex/auth.json'],",
-      "      opencode: [path.join(home, '.local', 'share', 'opencode', 'auth.json'), '/home/devuser/.local/share/opencode/auth.json']",
-      "    };",
+      "      : ['agent-infra', ...agentClientFixtures.map(({ id }) => id)];",
       "    for (const toolId of selectedTools) {",
-      "      const live = builtinLiveMounts[toolId];",
-      "      if (live && fs.existsSync(live[0])) defaults.push({ Type: 'bind', Source: live[0], Destination: live[1], RW: true });",
+      "      const fixture = agentClientFixtures.find(({ id }) => id === toolId);",
+      "      if (!fixture) continue;",
+      "      if (fixture.tmpfs) defaults.push({ Type: 'tmpfs', Source: '', Destination: fixture.containerMount, RW: true });",
+      "      for (const live of fixture.hostLiveMounts) {",
+      "        const source = live.hostPath.replace(fixtureHome, home);",
+      "        const destination = path.posix.join(fixture.containerMount, live.containerSubpath);",
+      "        if (fs.existsSync(source)) defaults.push({ Type: 'bind', Source: source, Destination: destination, RW: true });",
+      "      }",
       "    }",
       "    for (const mount of defaults.filter((mount) => mount.Type === 'bind' && !fs.existsSync(mount.Source))) fs.mkdirSync(mount.Source, { recursive: true });",
       "    return defaults;",
