@@ -18,6 +18,40 @@
 
 缺失类别保持为空，不推导补齐。相同信息去重，但不得丢失来源或状态语义。
 
+## 可观察验收提取
+
+以下语言无关契约是可观察验收信息的稳定捕获边界：
+
+```text
+# observable-acceptance-contract
+sources: current-request,necessary-prior-discussion
+scan-entire-visible-context: true
+recognize-without-acceptance-label: true
+components: observable-input,action,expected-result
+combine-distributed-evidence: true
+preserve-source-state: true
+missing-components: preserve-as-gaps
+agent-inference-as-confirmed: false
+destination: task-input.acceptance-criteria
+scenario-explicit: capture-supported-components
+scenario-distributed: combine-supported-components
+scenario-insufficient: preserve-supported-components-and-gaps
+```
+
+执行顺序：
+
+1. 扫描当前请求及必要前序讨论的完整可见上下文；即使用户没有使用“验收标准”标签，也要识别其中的可观察信息。
+2. 找出可观察输入、用户或系统执行的动作以及预期结果。这些组成可以分散在不同轮次。
+3. 将描述同一行为且有上下文证据的组成合并为自足条目，并保留每项信息的来源和确认状态。
+4. 未表达的组成保持为缺口；不得补造阈值、场景、动作或结果，也不得把 Agent 推导标记为用户已确认。
+5. 将条目写入 `## 任务输入 / ### 验收标准`。如果上下文没有提供可观察标准，该分类保持为空，真实的待确认信息继续保留在既有分类中。
+
+边界样例：
+
+- **单轮显式信息**：当前请求同时给出输入、动作和结果时，捕获全部有证据的组成并注明来自当前请求。
+- **跨轮分散信息**：当前请求描述动作、必要前序讨论提供输入或结果时，只合并属于同一行为的组成，并分别保留来源状态。
+- **信息不足**：用户只说“应该更快”但没有可观察条件或阈值时，不得编造性能目标；保留已表达的关注点和缺口，无法形成标准则让验收分类为空。
+
 ## 安全与压缩
 
 - 排除密钥、Token、凭据和与任务无关的个人信息。

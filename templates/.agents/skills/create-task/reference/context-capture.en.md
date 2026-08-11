@@ -18,6 +18,40 @@ Faithfully condense existing information into task.md under `## Task Input`:
 
 Leave missing categories empty rather than inferring content. Deduplicate repeated information without losing its source or state.
 
+## Observable Acceptance Extraction
+
+The following language-neutral contract is the stable boundary for capturing observable acceptance information:
+
+```text
+# observable-acceptance-contract
+sources: current-request,necessary-prior-discussion
+scan-entire-visible-context: true
+recognize-without-acceptance-label: true
+components: observable-input,action,expected-result
+combine-distributed-evidence: true
+preserve-source-state: true
+missing-components: preserve-as-gaps
+agent-inference-as-confirmed: false
+destination: task-input.acceptance-criteria
+scenario-explicit: capture-supported-components
+scenario-distributed: combine-supported-components
+scenario-insufficient: preserve-supported-components-and-gaps
+```
+
+Execution order:
+
+1. Scan the complete visible context of the current request and necessary prior discussion. Recognize observable information even when the user did not label it as acceptance criteria.
+2. Identify observable inputs, user or system actions, and expected results. These components may be distributed across turns.
+3. Combine supported components that describe the same behavior into a self-contained item, preserving the source and confirmation state of each piece of information.
+4. Preserve unexpressed components as gaps. Do not invent thresholds, scenarios, actions, or results, and do not mark agent inference as user-confirmed information.
+5. Write the items under `## Task Input / ### Acceptance Criteria`. If the context provides no observable criterion, leave that category empty and retain genuine unknowns in the existing categories.
+
+Boundary examples:
+
+- **Single-turn explicit information**: when the current request provides an input, action, and result, capture every supported component and identify the current request as its source.
+- **Distributed information**: when the current request describes an action and necessary prior discussion provides an input or result, combine only components for the same behavior and preserve their source states separately.
+- **Insufficient information**: when the user only says that something "should be faster" without an observable condition or threshold, do not invent a performance target; preserve the stated concern and gaps, leaving the acceptance category empty when no criterion can be formed.
+
 ## Safety and Compression
 
 - Exclude secrets, tokens, credentials, and unrelated personal information.

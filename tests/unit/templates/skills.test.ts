@@ -1625,6 +1625,55 @@ test("task templates expose the same structured task-input contract", () => {
   );
 });
 
+test("create-task context capture exposes a structured observable-acceptance contract", () => {
+  const variants = [
+    ".agents/skills/create-task/reference/context-capture.md",
+    "templates/.agents/skills/create-task/reference/context-capture.zh-CN.md",
+    "templates/.agents/skills/create-task/reference/context-capture.en.md"
+  ];
+  const expectedEntries: Record<string, string> = {
+    sources: "current-request,necessary-prior-discussion",
+    "scan-entire-visible-context": "true",
+    "recognize-without-acceptance-label": "true",
+    components: "observable-input,action,expected-result",
+    "combine-distributed-evidence": "true",
+    "preserve-source-state": "true",
+    "missing-components": "preserve-as-gaps",
+    "agent-inference-as-confirmed": "false",
+    destination: "task-input.acceptance-criteria",
+    "scenario-explicit": "capture-supported-components",
+    "scenario-distributed": "combine-supported-components",
+    "scenario-insufficient": "preserve-supported-components-and-gaps"
+  };
+  const contracts: string[] = [];
+
+  variants.forEach((relativePath) => {
+    const content = read(relativePath);
+    const block = content.match(/```[a-z]*\n# observable-acceptance-contract\n([\s\S]*?)\n```/m)?.[1];
+    assert.ok(block, `${relativePath} should declare a fenced observable-acceptance contract`);
+
+    const entries: Record<string, string> = {};
+    block!.split("\n").forEach((line) => {
+      const match = line.match(/^([a-z][a-z-]*):[ \t]*(.*)$/);
+      if (match?.[1] !== undefined) entries[match[1]] = match[2] ?? "";
+    });
+
+    Object.entries(expectedEntries).forEach(([key, value]) => {
+      assert.equal(entries[key], value, `${relativePath} contract should declare ${key}: ${value}`);
+    });
+    contracts.push(block!.trim());
+  });
+
+  contracts.forEach((block) => {
+    assert.equal(block, contracts[0], "observable-acceptance contract should be byte-identical across variants");
+  });
+  assert.equal(
+    read(".agents/skills/create-task/reference/context-capture.md"),
+    read("templates/.agents/skills/create-task/reference/context-capture.zh-CN.md"),
+    "deployed context-capture reference should match its zh-CN template"
+  );
+});
+
 test("import-issue step 1 declares a structured title-derivation contract", () => {
   // Structural guard for the CC-prefix stripping rule (Issue #494). The assertable
   // object is a fenced, language-neutral contract block parsed by key (not prose
