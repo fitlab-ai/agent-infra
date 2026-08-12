@@ -69,7 +69,7 @@
 
 ## 发布结果
 
-- **正式 Review 状态**：{applied / no-op / blocked / failed}
+- **正式 Review 状态**：{pending / applied / no-op / aborted / superseded / blocked / failed}
 - **Review ID**：{review-id 或 N/A}
 - **Review URL**：{review-url 或 N/A}
 - **Issue artifact 评论 URL**：{comment-url 或 N/A}

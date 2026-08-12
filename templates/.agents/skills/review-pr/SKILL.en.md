@@ -55,13 +55,32 @@ agent-infra-internal pr-review-grade resolve-host --pr {pr-number} [--cwd <path>
 
 `resolve-host` returns a typed `HostResolution` (`unique` / `ambiguous` / `none`). Branch as follows:
 
-- **Unique host**: bind `{task-id}` and enumerate `analysis*`/`plan*`/`code*`/`review-*`/`pr-review*` presence (go to step 2).
+- **Unique host**: bind `{task-id}`, call `task-activity pr-review-inspect` to obtain the canonical round, prepared/open state, and latest successful review identity, then start this round using the recovery rules below (go to step 2).
 - **Ambiguous hosts**: `resolve-host` returns `ambiguous` and `decide` refuses to classify (fail closed). Stop and ask a human to pin the unique host; do not enter evidence classification.
 - **No host**: block by default and require linking an Issue/task first (show linking guidance); never auto-create/import an Issue. Only when the user explicitly chooses a "one-shot review" do process files land in `.agents/workspace/reviews/{pr-number}/` (`recoverable: false`).
 
+After the task-anchored path resolves the host and remote head, run:
+
+```bash
+agent-infra-internal task-activity {task-id} pr-review-inspect
+```
+
+- `prepared`: reuse that artifact; `open` with an unchanged head: replay start for the same artifact/head (a no-op) and resume the round.
+- `open` with a changed head: first set the old artifact Formal Review Status to `superseded`, then terminate it using the old artifact/head; continue with the next round returned by inspect.
+- No prepared/open round: create the next artifact skeleton from `reference/report-template.md`, initially recording the state check, identity, reviewed head, and `Formal Review Status: pending`.
+
+After this branch and before step 2 evidence grading, write started:
+
+```bash
+agent-infra-internal task-activity {task-id} pr-review-start --agent {agent} \
+  --artifact {pr-review-artifact} --head {head-sha}
+```
+
+The one-shot path never calls `task-activity`. For a controlled failure after started where the formal Review is known not to have been published, first set the artifact status to `aborted`, then call `pr-review-terminate --outcome aborted --reason <single-line>` with the same artifact/head. If publication outcome is uncertain, leave the round open rather than guessing aborted.
+
 ### 2. Single decide: evidence enumeration + classification + risk + mode
 
-Write the host, artifact presence, head state, and the six pure-evidence risk factors to an input JSON, then call once:
+Write the host, artifact presence, head state, and the six pure-evidence risk factors to an input JSON. Use only the highest `applied` / `no-op` artifact returned by inspect as the prior review; pending/aborted/superseded/failed artifacts count only toward round continuity. Then call once:
 
 ```bash
 agent-infra-internal pr-review-grade decide --input-file {decide-input.json} [--cwd <path>]
@@ -71,7 +90,7 @@ Returns the full `DecisionRecord` (`scenario` / `freshness` / `alignment` / `ris
 
 ### 3. Generate `pr-review-rN.md`
 
-Generate this round's artifact per `reference/report-template.md`. In `reconstruct` mode (or `audit` with insufficient evidence), write a "Reconstruction Context" section (requirement boundary / architecture choices / impact surface / validation coverage, see `reference/evidence-grading.md`) before the line-level findings. Record `recoverable: true|false` in the frontmatter or header (the one-shot path sets `false`).
+Complete this round's artifact per `reference/report-template.md`; the task-anchored path preserves the identity/head/pending status written in step 1 and does not reallocate the round. In `reconstruct` mode (or `audit` with insufficient evidence), write a "Reconstruction Context" section (requirement boundary / architecture choices / impact surface / validation coverage, see `reference/evidence-grading.md`) before the line-level findings. Record `recoverable: true|false` in the frontmatter or header (the one-shot path sets `false`). After finalizing the findings list, freeze `{verdict, blockers, major, minor}` once; the formal Review body and step 6 complete payload must consume that same object directly, never recounting report prose.
 
 ### 4. Sync the Issue artifact comments (task-anchored path)
 
@@ -99,18 +118,27 @@ agent-infra-internal platform-pr-review publish --pr {pr-number} --scope {taskId
   --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body.md} [--dry-run] [--cwd <path>]
 ```
 
-`publish` generates and validates the marker (first line) in core and is idempotent per marker + commit (replay is a no-op; marker hit on a different commit fails stably). On head drift, stop and start a new round (re-run step 1 with round `{round}+1`).
+`publish` generates and validates the marker (first line) in core and is idempotent per marker + commit (replay is a no-op; marker hit on a different commit fails stably). On head drift, first set the old artifact status to `superseded`, then close the old round:
+
+```bash
+agent-infra-internal task-activity {task-id} pr-review-terminate --agent {agent} \
+  --artifact {pr-review-artifact} --head {head-sha} \
+  --outcome superseded --reason "head changed before publish"
+```
+
+After closure, re-run step 1 for the next canonical round; never start the new round first. If the remote outcome of `publish` is uncertain, keep the round open and recover through marker + commit idempotency on retry.
 
 ### 6. Write back the publication result and task state
 
-- **Task-anchored path**: write the Review ID/URL into the `pr-review-rN.md` "Publication Result" section and append the Activity Log entry:
+- **Task-anchored path**: after publish returns `applied` / `no-op`, write the Review ID/URL and matching Formal Review Status into the `pr-review-rN.md` "Publication Result" section, then close the Activity Log with the exact verdict/counts frozen in step 3:
 
   ```bash
-  agent-infra-internal task-activity {task-id} append --step "Review PR (Round {round})" --agent {agent} \
-    --note "receipt {receipt} · Review URL {review-url}" --artifact {pr-review-artifact}
+  agent-infra-internal task-activity {task-id} pr-review-complete --agent {agent} \
+    --artifact {pr-review-artifact} --head {head-sha} --verdict {approved|changes-requested|commented} \
+    --blockers {blockers} --major {major} --minor {minor}
   ```
 
-  `task-activity` atomically completes the Activity Log append, the `## Review Feedback` link, and the version-stamp refresh via `writeTask`; it never changes `current_step`.
+  `task-activity` generates `Verdict: <result>, blockers: N, major: N, minor: N → {pr-review-artifact}` from the typed payload and atomically writes the Activity Log, `## Review Feedback` link, and version stamp through `writeTask`. It never changes `current_step` or puts receipt/head/Review URL into the NOTE.
 
 - **One-shot path (no task)**: write the Review ID/URL only into the `pr-review-rN.md` "Publication Result" section; do not call `task-activity`.
 

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { CLI_PATH } from '../../helpers.ts';
+import { CLI_PATH, INTERNAL_CLI_PATH } from '../../helpers.ts';
 
 const SCRIPT = path.resolve(process.cwd(), '.agents/scripts/task-short-id.js');
 
@@ -49,6 +49,10 @@ function runCli(args: string[], cwd: string) {
   return spawnSync('node', [CLI_PATH, ...args], { cwd, encoding: 'utf8' });
 }
 
+function runInternal(args: string[], cwd: string) {
+  return spawnSync('node', [INTERNAL_CLI_PATH, ...args], { cwd, encoding: 'utf8' });
+}
+
 test('ai task log <ref> renders legacy done-only entries as one row each, sorted ascending', () => {
   const { repoRoot, activeDir } = mkFixture();
   const taskId = 'TASK-20260101-000007';
@@ -85,6 +89,113 @@ test('ai task log folds a started+done pair onto one row', () => {
   // One row: STARTED and DONE both populated, step base has the suffix stripped.
   assert.match(out.stdout, /^1\s+Plan Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+2026-06-18 14:30:00\+08:00\s+Plan completed → plan\.md/m);
   assert.match(out.stdout, /^Total: 1 steps$/m);
+});
+
+test('typed task-activity intents produce a compact paired Review PR row', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000019';
+  const taskDir = path.join(activeDir, taskId);
+  const head = 'a'.repeat(40);
+  writeTask(activeDir, taskId, '## 活动日志', [
+    '- 2026-06-18 13:00:00+08:00 — **Plan Task (Round 1)** by claude — plan done'
+  ]);
+  const artifactPath = path.join(taskDir, 'pr-review.md');
+  fs.writeFileSync(artifactPath, `# PR 审查报告
+
+## 身份信息
+
+- **被审 head SHA**：${head}
+
+## 发布结果
+
+- **正式 Review 状态**：pending
+`);
+
+  const started = runInternal([
+    'task-activity', taskId, 'pr-review-start', '--agent', 'claude-code',
+    '--artifact', 'pr-review.md', '--head', head
+  ], repoRoot);
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+  assert.equal(JSON.parse(started.stdout).status, 'applied');
+
+  fs.writeFileSync(artifactPath, fs.readFileSync(artifactPath, 'utf8').replace('pending', 'applied'));
+  const completed = runInternal([
+    'task-activity', taskId, 'pr-review-complete', '--agent', 'claude-code',
+    '--artifact', 'pr-review.md', '--head', head, '--verdict', 'approved',
+    '--blockers', '0', '--major', '1', '--minor', '2'
+  ], repoRoot);
+  assert.equal(completed.status, 0, completed.stderr || completed.stdout);
+  assert.equal(JSON.parse(completed.stdout).status, 'applied');
+
+  const out = runCli(['task', 'log', taskId], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(
+    out.stdout,
+    /^2\s+Review PR \(Round 1\)\s+claude\s+\d{4}-\d{2}-\d{2} \S+\s+\d{4}-\d{2}-\d{2} \S+\s+Verdict: Approved, blockers: 0, major: 1, minor: 2 → pr-review\.md/m
+  );
+
+  const invalid = runInternal([
+    'task-activity', taskId, 'pr-review-complete', '--agent', 'codex',
+    '--artifact', 'pr-review.md', '--head', head, '--verdict', 'approved'
+  ], repoRoot);
+  assert.equal(invalid.status, 1);
+  assert.equal(JSON.parse(invalid.stdout).error.code, 'ACTIVITY_PAYLOAD_INVALID');
+});
+
+test('typed task-activity terminate intents render paired aborted and superseded Review PR rows', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000020';
+  const taskDir = path.join(activeDir, taskId);
+  const firstHead = 'a'.repeat(40);
+  const secondHead = 'b'.repeat(40);
+  writeTask(activeDir, taskId, '## 活动日志', [
+    '- 2026-06-18 13:00:00+08:00 — **Plan Task (Round 1)** by claude — plan done'
+  ]);
+
+  const runTermination = (
+    artifact: string,
+    head: string,
+    outcome: 'aborted' | 'superseded',
+    reason: string
+  ) => {
+    const artifactPath = path.join(taskDir, artifact);
+    fs.writeFileSync(artifactPath, `# PR 审查报告
+
+## 身份信息
+
+- **被审 head SHA**：${head}
+
+## 发布结果
+
+- **正式 Review 状态**：pending
+`);
+    const started = runInternal([
+      'task-activity', taskId, 'pr-review-start', '--agent', 'claude',
+      '--artifact', artifact, '--head', head
+    ], repoRoot);
+    assert.equal(started.status, 0, started.stderr || started.stdout);
+
+    fs.writeFileSync(artifactPath, fs.readFileSync(artifactPath, 'utf8').replace('pending', outcome));
+    const terminated = runInternal([
+      'task-activity', taskId, 'pr-review-terminate', '--agent', 'claude',
+      '--artifact', artifact, '--head', head, '--outcome', outcome, '--reason', reason
+    ], repoRoot);
+    assert.equal(terminated.status, 0, terminated.stderr || terminated.stdout);
+  };
+
+  runTermination('pr-review.md', firstHead, 'superseded', 'head changed before publish');
+  runTermination('pr-review-r2.md', secondHead, 'aborted', 'validation failed before publish');
+
+  const out = runCli(['task', 'log', taskId], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(
+    out.stdout,
+    /^2\s+Review PR \(Round 1\)\s+claude\s+\d{4}-\d{2}-\d{2} \S+\s+\d{4}-\d{2}-\d{2} \S+\s+Outcome: Superseded, reason: head changed before publish → pr-review\.md/m
+  );
+  assert.match(
+    out.stdout,
+    /^3\s+Review PR \(Round 2\)\s+claude\s+\d{4}-\d{2}-\d{2} \S+\s+\d{4}-\d{2}-\d{2} \S+\s+Outcome: Aborted, reason: validation failed before publish → pr-review-r2\.md/m
+  );
 });
 
 test('ai task log shows a started-only step as in progress', () => {

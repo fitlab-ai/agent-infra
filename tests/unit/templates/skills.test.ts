@@ -1360,23 +1360,32 @@ test("review-pr keeps the sync -> write-back -> re-sync -> verify closed-loop or
   ];
   const artifactSync = "platform-comment sync {task-id} --kind artifact --artifact {pr-review-artifact} --agent {agent}";
   const taskSync = "platform-comment sync {task-id} --kind task --agent {agent}";
-  const activity = "task-activity {task-id} append";
+  const activityStart = "task-activity {task-id} pr-review-start";
+  const activityComplete = "task-activity {task-id} pr-review-complete";
+  const activityTerminate = "task-activity {task-id} pr-review-terminate";
+  const decide = "pr-review-grade decide";
   const verify = "agent-infra-internal task-verify {task-id} review-pr.completed";
 
   variants.forEach((relativePath) => {
     const content = read(relativePath);
+    const startIndex = content.indexOf(activityStart);
+    const decideIndex = content.indexOf(decide);
     const firstTaskSync = content.indexOf(taskSync);
     const firstArtifactSync = content.indexOf(artifactSync);
-    const taskActivityIndex = content.indexOf(activity);
+    const completeIndex = content.indexOf(activityComplete);
+    const terminateIndex = content.indexOf(activityTerminate);
     const lastTaskSync = content.lastIndexOf(taskSync);
     const lastArtifactSync = content.lastIndexOf(artifactSync);
     const verifyIndex = content.indexOf(verify);
 
+    assert.notEqual(startIndex, -1, `${relativePath} should start task activity after host resolution`);
+    assert.notEqual(terminateIndex, -1, `${relativePath} should define non-success terminal activity`);
+    assert.ok(startIndex < decideIndex, `${relativePath} should write started before evidence grading`);
     assert.notEqual(firstTaskSync, -1, `${relativePath} should sync the task comment (step 4)`);
     assert.notEqual(firstArtifactSync, -1, `${relativePath} should sync the artifact comment (step 4)`);
     assert.ok(firstTaskSync < firstArtifactSync, `${relativePath} should sync task before artifact (step 4)`);
-    assert.ok(firstArtifactSync < taskActivityIndex, `${relativePath} should write back after the first sync (step 6)`);
-    assert.ok(taskActivityIndex < lastTaskSync, `${relativePath} should re-sync the task comment after write-back (step 7)`);
+    assert.ok(firstArtifactSync < completeIndex, `${relativePath} should complete after the first sync (step 6)`);
+    assert.ok(completeIndex < lastTaskSync, `${relativePath} should re-sync the task comment after write-back (step 7)`);
     assert.ok(lastTaskSync < lastArtifactSync, `${relativePath} should re-sync the artifact comment after task (step 7)`);
     assert.ok(lastArtifactSync < verifyIndex, `${relativePath} should verify after the re-sync (step 8)`);
   });

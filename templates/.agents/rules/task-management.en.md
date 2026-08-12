@@ -83,4 +83,6 @@ The six internal commands (`task-event` / `task-lifecycle` / `platform-issue` / 
 - **Deferred form (the skill creates task.md, so there is no file to write to at the start)** — capture `started_at` in memory before running, then when writing the Activity Log at the end, **append both lines at once** (started line uses `started_at`, done line uses the completion time):
   `create-task`, `import-issue`, `import-codescan`, `import-dependabot`.
 
+- **After host resolution** — `review-pr` writes started through `task-activity pr-review-start` only after resolving the unique task host, canonical round, and reviewed head. Success closes through `pr-review-complete`; a controlled pre-publication failure or head drift closes through `pr-review-terminate` with an `aborted` / `superseded` terminal. Replaying the same task/round/head/terminal payload is a no-op; one-shot review never writes a task Activity Log.
+
 **Exceptions**: read-only inspection skills that do not represent real progress (e.g. `check-task`) do not write started. A bare operation with no task.md context (e.g. a `commit` not tied to a task) likewise skips it.

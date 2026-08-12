@@ -86,4 +86,6 @@
 - **延迟补写（本技能创建 task.md，开始时无文件可写）**——开始执行前先在内存记录 `started_at`，最后写活动日志时**一次性补两条**（started 行用 `started_at`、done 行用完成时间）：
   `create-task`、`import-issue`、`import-codescan`、`import-dependabot`。
 
+- **宿主解析后写入**——`review-pr` 只有在唯一任务宿主、canonical round 与被审 head 确定后才通过 `task-activity pr-review-start` 写 started；成功以 `pr-review-complete` 闭合，已知未发布的受控失败或 head 漂移以 `pr-review-terminate` 写 `aborted` / `superseded` 终态。同一 task/round/head/terminal payload 重放为 no-op；一次性检视不写任务日志。
+
 **例外**：`check-task` 等只读巡检类、不代表实质工作推进的技能不写 started。无 task.md 上下文的纯操作（如无关联任务的 `commit`）同样跳过。

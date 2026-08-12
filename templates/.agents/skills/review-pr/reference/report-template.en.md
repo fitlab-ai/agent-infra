@@ -69,7 +69,7 @@ Land the following in order before the line-level findings, without impersonatin
 
 ## Publication Result
 
-- **Formal Review Status**: {applied / no-op / blocked / failed}
+- **Formal Review Status**: {pending / applied / no-op / aborted / superseded / blocked / failed}
 - **Review ID**: {review-id or N/A}
 - **Review URL**: {review-url or N/A}
 - **Issue Artifact Comment URL**: {comment-url or N/A}

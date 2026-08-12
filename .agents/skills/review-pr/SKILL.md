@@ -55,13 +55,32 @@ agent-infra-internal pr-review-grade resolve-host --pr {pr-number} [--cwd <path>
 
 `resolve-host` 输出 `HostResolution`（`unique` / `ambiguous` / `none`），按以下策略分流：
 
-- **唯一宿主**：绑定 `{task-id}`，用 artifact 枚举确定 `analysis*`/`plan*`/`code*`/`review-*`/`pr-review*` 的存在性（进入步骤 2）。
+- **唯一宿主**：绑定 `{task-id}`，调用 `task-activity pr-review-inspect` 取得 canonical round、prepared/open 状态和最近成功审查身份，再按下述恢复规则开始本轮（进入步骤 2）。
 - **多宿主歧义**：`resolve-host` 返回 `ambiguous`，`decide` 会拒绝分类（fail closed）。立即停止并提示人工指定唯一宿主；不进入证据分类。
 - **无宿主**：默认阻塞，要求先建立 Issue/task 关联（给出关联指引），不自动创建/导入 Issue。仅当用户显式选择「仅一次性检视」时，过程文件写入 `.agents/workspace/reviews/{pr-number}/`（`recoverable: false`）。
 
+任务锚定路径在宿主与远端 head 确定后执行：
+
+```bash
+agent-infra-internal task-activity {task-id} pr-review-inspect
+```
+
+- `prepared`：复用该 artifact；`open` 且 head 未变：对同一 artifact/head 重放 start（no-op）并恢复该轮。
+- `open` 且 head 已变：先把旧 artifact 的正式 Review 状态写为 `superseded`，再用旧 artifact/head 执行 terminate；随后使用 inspect 返回的 next round。
+- 无 prepared/open：按 `reference/report-template.md` 创建 next artifact 骨架，先写状态核对、身份信息、被审 head 与 `正式 Review 状态: pending`。
+
+在上述分流完成后、步骤 2 证据分级开始前写 started：
+
+```bash
+agent-infra-internal task-activity {task-id} pr-review-start --agent {agent} \
+  --artifact {pr-review-artifact} --head {head-sha}
+```
+
+一次性路径不调用 `task-activity`。任意 started 后、正式 Review 明确尚未发布的受控失败，都先把 artifact 状态写为 `aborted`，再以同一 artifact/head 调用 `pr-review-terminate --outcome aborted --reason <single-line>`；发布结果不确定时保持 open，不臆断 aborted。
+
 ### 2. 单次 decide：证据枚举 + 场景分类 + 风险分级 + 模式选择
 
-把宿主、artifact 存在性、head 状态与六个纯证据风险因素写入输入 JSON，调用一次：
+把宿主、artifact 存在性、head 状态与六个纯证据风险因素写入输入 JSON。prior review 只使用 inspect 返回的最高 `applied` / `no-op` artifact；pending/aborted/superseded/failed 只参与 round 连续性，不作为既有结论。调用一次：
 
 ```bash
 agent-infra-internal pr-review-grade decide --input-file {decide-input.json} [--cwd <path>]
@@ -71,7 +90,7 @@ agent-infra-internal pr-review-grade decide --input-file {decide-input.json} [--
 
 ### 3. 生成 `pr-review-rN.md`
 
-按 `reference/report-template.md` 生成本轮产物。`reconstruct`（或 `audit` 证据不足）时，在行级 finding 之前先写「重建上下文」段（需求边界 / 架构选择 / 影响面 / 验证覆盖，见 `reference/evidence-grading.md`）。frontmatter 或首部记录 `recoverable: true|false`（一次性路径为 `false`）。
+按 `reference/report-template.md` 完成本轮产物；任务锚定路径保留步骤 1 已写入的身份/head/pending 状态，不重新分配 round。`reconstruct`（或 `audit` 证据不足）时，在行级 finding 之前先写「重建上下文」段（需求边界 / 架构选择 / 影响面 / 验证覆盖，见 `reference/evidence-grading.md`）。frontmatter 或首部记录 `recoverable: true|false`（一次性路径为 `false`）。完成最终问题清单后，一次性冻结 `{verdict, blockers, major, minor}`；正式 Review 正文与步骤 6 的 complete payload 必须直接复用该对象，不从报告文案反向统计。
 
 ### 4. 同步 Issue artifact 评论（任务锚定路径）
 
@@ -99,18 +118,27 @@ agent-infra-internal platform-pr-review publish --pr {pr-number} --scope {taskId
   --commit {head-sha} --event {COMMENT|APPROVE|REQUEST_CHANGES} --body-file {review-body.md} [--dry-run] [--cwd <path>]
 ```
 
-`publish` 由 core 生成并校验 marker（首行），按 marker + commit 幂等（重放 no-op；marker 命中但 commit 不一致稳定失败）。head 漂移则停止并转入新轮次（重新执行步骤 1，轮次 `{round}+1`）。
+`publish` 由 core 生成并校验 marker（首行），按 marker + commit 幂等（重放 no-op；marker 命中但 commit 不一致稳定失败）。head 漂移时，先把旧 artifact 状态写为 `superseded`，再闭合旧轮：
+
+```bash
+agent-infra-internal task-activity {task-id} pr-review-terminate --agent {agent} \
+  --artifact {pr-review-artifact} --head {head-sha} \
+  --outcome superseded --reason "head changed before publish"
+```
+
+闭合成功后重新执行步骤 1，进入下一 canonical round；不得先写新轮 started。若 publish 调用的远端结果不确定，保留 open 并在重试时依赖 marker + commit 恢复。
 
 ### 6. 回写发布结果与任务状态
 
-- **任务锚定路径**：把 Review ID/URL 写入 `pr-review-rN.md`「发布结果」段，并追加活动日志：
+- **任务锚定路径**：publish 返回 `applied` / `no-op` 后，把 Review ID/URL 与同名正式 Review 状态写入 `pr-review-rN.md`「发布结果」段，再以步骤 3 冻结的同一组 verdict/counts 闭合活动日志：
 
   ```bash
-  agent-infra-internal task-activity {task-id} append --step "Review PR (Round {round})" --agent {agent} \
-    --note "receipt {receipt} · Review URL {review-url}" --artifact {pr-review-artifact}
+  agent-infra-internal task-activity {task-id} pr-review-complete --agent {agent} \
+    --artifact {pr-review-artifact} --head {head-sha} --verdict {approved|changes-requested|commented} \
+    --blockers {blockers} --major {major} --minor {minor}
   ```
 
-  `task-activity` 经 `writeTask` 原子完成 Activity Log 追加、`## 审查反馈` 链接与版本戳刷新；不改 `current_step`。
+  `task-activity` 由 typed payload 生成 `Verdict: <结论>, blockers: N, major: N, minor: N → {pr-review-artifact}`，并经 `writeTask` 原子完成 Activity Log、`## 审查反馈` 链接与版本戳刷新；不改 `current_step`，也不把 receipt/head/Review URL 写入 NOTE。
 
 - **一次性路径（无任务）**：Review ID/URL 只写 `pr-review-rN.md`「发布结果」段，不调用 `task-activity`。
 

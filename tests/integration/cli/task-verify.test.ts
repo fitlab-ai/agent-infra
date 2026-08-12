@@ -68,7 +68,8 @@ test('review-pr task-verify gate requires re-sync after publication write-back (
       ``,
       `## 活动日志`,
       ``,
-      `- 2026-08-04 20:00:00+08:00 — **Review PR (Round 1)** by claude-code — receipt r1-abc`,
+      `- 2026-08-04 19:30:00+08:00 — **Review PR (Round 1) [started]** by claude — started`,
+      `- 2026-08-04 20:00:00+08:00 — **Review PR (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0 → pr-review.md`,
       ``
     ].join('\n'));
     const artifactContent = [
