@@ -31,7 +31,13 @@ description: >
 
 未显式指定 task scope 时，只有 `TASK_CONTEXT_NOT_FOUND` 可继续既有纯提交路径；detached HEAD、损坏候选或多匹配属于歧义，必须失败。显式 task scope 解析失败时一律失败。
 
-## 步骤开始：写入 started 标记
+## 步骤开始：先恢复，再写 started 标记
+
+已解析出 `{task-id}` 时，先调用 `agent-infra-internal task-orchestration {task-id} commit-status`：
+
+- `recoverable` / `prepared`：调用 `commit-recover --agent {standard-agent-token}`；不得追加第二条 started、重复 commit 或重复 push。recoverable 完成后直接进入同步与完成校验；prepared 清理后复用既有 open started 并继续正常提交。
+- `invalid` / `conflict` / `orphaned-start`：输出结构化 code 与状态证据并停止。
+- `idle`：继续下方正常流程。
 
 开始检查本地修改之前，向 task.md `## 活动日志` 追加一条 started 标记（与本步骤 done 条目同基名 + ` [started]` 后缀，note 用 `started`）：
 
@@ -77,7 +83,7 @@ git diff
 - 暂存明确文件后记录 `pre_head=$(git rev-parse HEAD)`，并以 helper 的 JSON 模式生成当前完整工作区树 `W` 与规范化暂存树 `S`
 - 在 `git commit` 前要求 `pre_head == R && W == T && S == T`；分别运行 helper 的 `compare` 模式生成 worktree/staged 的 added、missing、different 路径诊断
 - 任一条件不满足时进入 `reference/task-status-update.md` 的“场景 4：提交前快照阻断”，不得执行 `git commit`、push、成功状态更新、PR 摘要同步或完成 gate
-- 全部相等并成功提交后，在 task.md frontmatter 写入 `last_reviewed_commit: <new_head>`
+- 全部相等并成功提交后，由步骤 6 的 `commit-complete` 核心收尾原子写入 `last_reviewed_commit` 与 Commit done；调用方不得手写
 - 不向后扫描更早的 Approved 产物；最高轮 `review-code` 产物是唯一权威来源
 
 ## 5. 推送到已有 PR（按需）
@@ -102,6 +108,14 @@ c. 安全降级（不阻塞已完成的 `git commit`，仅提示用户）：
 
 ## 6. 按需更新任务状态
 
+普通 commit/push checkpoint 完成后，先调用核心收尾；它在同一任务锁内写入审查锚点、Commit done 与 orchestration planned bytes，最后删除 intent：
+
+```bash
+agent-infra-internal task-orchestration {task-id} commit-complete --token "$commit_intent_token" --agent {standard-agent-token}
+```
+
+失败时保留 intent，输出 `commit-status` 后停止；重跑本技能由开头的 status/recover 路由恢复。调用方不得重复追加 Commit done 或修改 `last_reviewed_commit`。
+
 获取当前时间：
 
 ```bash
@@ -112,7 +126,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 
 > 渲染下一步前先读取 `.agents/rules/next-step-output.md`，并按 `reference/task-status-update.md` 的已选场景调用统一 helper。
 
-追加 Commit 的 Activity Log，并且只能选择一个下一步分支：
+核心收尾成功后只能选择一个下一步分支：
 - 已有开放 PR 且 push 成功 -> `watch-pr {task-ref}`；该分支优先于最终提交的 `prFlow` 路由
 - push 失败 -> 保持任务 active，只输出推送/同步诊断，不输出 `watch-pr` 或 `complete-task`
 - 最终提交 -> 按 `.agents/.airc.json` 的 `prFlow` 渲染下一步（`disabled` → 单选 `complete-task`；`required` → 单选 `create-pr`；缺省 → 二选一 `create-pr` / `complete-task`），详见 `reference/task-status-update.md` 场景 1
@@ -154,13 +168,7 @@ agent-infra-internal task-verify {task-id} commit.completed --format text
 
 将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 
-校验通过后，按 `reference/commit-orchestration.md` 完成 commit intent。standalone 只释放 intent 且不改写历史 run；orchestrated 原子提交 begin 时已预检的 receipt 完成态：
-
-```bash
-agent-infra-internal task-orchestration {task-id} commit-complete --token "$commit_intent_token" --agent {standard-agent-token}
-```
-
-命令失败时保留 intent、输出 `commit-status` 恢复证据并停止，不得重复副作用或把缺少完整 receipt 生命周期的 run 标记为完成。
+本 gate 只在步骤 6 核心收尾成功后运行；不得把完成校验放在 `commit-complete` 之前。
 
 ## 注意事项
 

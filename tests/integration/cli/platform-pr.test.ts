@@ -6,6 +6,8 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
 import { filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
+import { createCommitIntent } from '../../../lib/task/commit-intent.ts';
+import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 
 function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
   return spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'platform-pr', ...args], {
@@ -116,6 +118,11 @@ test('platform-pr create binds one remote PR and replay performs no duplicate PO
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-cli-'));
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');
+    execFileSync('git', ['add', 'source.txt'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
     const taskId = 'TASK-20260101-000001';
     const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
@@ -151,6 +158,73 @@ test('platform-pr create binds one remote PR and replay performs no duplicate PO
     assert.equal(JSON.parse(replay.stdout).status, 'no-op');
     const records = fs.readFileSync(calls, 'utf8').trim().split(/\r?\n/).map((line) => JSON.parse(line) as string[]);
     assert.equal(records.filter((call) => call.includes('POST') && call.some((item) => /\/pulls$/.test(item))).length, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('platform-pr create blocks active commit finalization before task or remote writes', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-gate-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');
+    execFileSync('git', ['add', 'source.txt'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    const taskId = 'TASK-20260101-000001';
+    const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
+    fs.writeFileSync(path.join(taskDir, 'task.md'), [
+      '---', `id: ${taskId}`, 'type: feature', 'status: active', 'issue_number: 7', '---', '',
+      '# Task', '', '## Activity Log', '',
+      '- 2026-01-01 00:00:00+00:00 — **Commit [started]** by codex — started', ''
+    ].join('\n'));
+    createCommitIntent(taskDir, {
+      taskId, mode: 'standalone', phase: 'prepared', baselineHead: head,
+      committedHead: null, pushEvidence: null, orchestration: null,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+    }, { token: () => 'token' });
+    const title = path.join(root, 'title.txt');
+    const body = path.join(root, 'body.md');
+    const pulls = path.join(root, 'pulls.json');
+    const calls = path.join(root, 'calls.jsonl');
+    const fake = path.join(root, 'fake-gh.cjs');
+    fs.writeFileSync(title, 'feat: blocked\n');
+    fs.writeFileSync(body, 'Body\n');
+    fs.writeFileSync(pulls, '[]');
+    fs.copyFileSync(filePath('tests/fixtures/validate-artifact/fake-gh.js'), fake);
+    const env = {
+      AGENT_INFRA_GH_BIN: process.execPath,
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([fake]),
+      GH_FAKE_PRS_PATH: pulls,
+      GH_FAKE_ARGS_PATH: calls
+    };
+
+    const created = run([
+      'create', taskId, '--agent', 'codex', '--base', 'main', '--head', 'feature',
+      '--title-file', title, '--body-file', body
+    ], { cwd: root, env });
+    assert.equal(created.status, 2, created.stderr || created.stdout);
+    const payload = JSON.parse(created.stdout);
+    assert.equal(payload.status, 'blocked');
+    assert.equal(payload.error.code, 'COMMIT_FINALIZATION_PENDING');
+    const records = fs.readFileSync(calls, 'utf8').trim().split(/\r?\n/).filter(Boolean)
+      .map((line) => JSON.parse(line) as string[]);
+    assert.equal(records.filter((call) => call.includes('POST') && call.some((item) => /\/pulls$/.test(item))).length, 0);
+    const task = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
+    assert.equal(task.includes('Create PR [started]'), false);
+    assert.equal(task.includes('pr_number:'), false);
+
+    const lockBusy = withTaskExecutionLock(root, taskId, 'test-holder', () => run([
+      'create', taskId, '--agent', 'codex', '--base', 'main', '--head', 'feature',
+      '--title-file', title, '--body-file', body
+    ], { cwd: root, env }));
+    assert.equal(lockBusy.status, 2, lockBusy.stderr || lockBusy.stdout);
+    assert.equal(JSON.parse(lockBusy.stdout).error.code, 'ORCHESTRATION_LOCK_BUSY');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

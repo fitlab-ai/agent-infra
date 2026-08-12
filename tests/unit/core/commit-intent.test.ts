@@ -6,7 +6,9 @@ import test from 'node:test';
 
 import {
   createCommitIntent,
+  digest,
   readCommitIntent,
+  removeCommitIntentByDigest,
   removeCommitIntent,
   updateCommitIntent
 } from '../../../lib/task/commit-intent.ts';
@@ -69,5 +71,18 @@ test('commit intent removal is token guarded', () => {
     (error: unknown) => (error as { code?: string }).code === 'ORCHESTRATION_COMMIT_INTENT_TOKEN_MISMATCH'
   );
   removeCommitIntent(f.taskDir, base.taskId, 'token');
+  assert.equal(fs.existsSync(f.file), false);
+});
+
+test('commit intent recovery removal compares the complete captured bytes', () => {
+  const f = fixture();
+  createCommitIntent(f.taskDir, base, { token: () => 'token' });
+  const captured = digest(fs.readFileSync(f.file));
+
+  assert.throws(
+    () => removeCommitIntentByDigest(f.taskDir, base.taskId, '0'.repeat(64)),
+    (error: unknown) => (error as { code?: string }).code === 'ORCHESTRATION_COMMIT_RECOVERY_REQUIRED'
+  );
+  removeCommitIntentByDigest(f.taskDir, base.taskId, captured);
   assert.equal(fs.existsSync(f.file), false);
 });

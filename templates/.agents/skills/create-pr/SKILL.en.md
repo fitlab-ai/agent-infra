@@ -68,7 +68,7 @@ Use `agent-infra-internal git-workflow inspect` for upstream/remote facts and `g
 
 ### 5. Create or Recover the PR
 
-Read `.agents/rules/issue-pr-commands.md`, write the title and body to temporary files, then invoke its `platform-pr create` intent. The core first performs exact head/base lookup: one existing PR is reused and bound, zero creates, and multiple matches fail deterministically. Replays must not create duplicate PRs.
+Read `.agents/rules/issue-pr-commands.md`, write the title and body to temporary files, then invoke its `platform-pr create` intent. Under the task lock and before any Create PR started entry, POST, or reuse-bind, core checks commit finalization. An active intent, open Commit, missing review anchor, or tree drift returns a stable code and directs the caller to rerun commit/review-code; create-pr never repairs Commit state. Only after the gate passes does core perform exact head/base lookup: one existing PR is reused and bound, zero creates, and multiple matches fail deterministically. Replays must not create duplicate PRs.
 
 If `{task-id}` is available and the related task provides `issue_number`, keep `Closes #{issue-number}` in the PR body.
 

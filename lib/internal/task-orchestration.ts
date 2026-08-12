@@ -10,6 +10,7 @@ import {
   completeCommitIntent,
   pauseOrchestration,
   prepareOrchestrationDelegation,
+  recoverCommitIntent,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation,
@@ -19,7 +20,7 @@ import {
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 
-const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|hook-start|hook-stop|advance|pause|status|commit-begin|commit-checkpoint|commit-complete|commit-abort|commit-status> [options]\n';
+const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|hook-start|hook-stop|advance|pause|status|commit-begin|commit-checkpoint|commit-complete|commit-recover|commit-abort|commit-status> [options]\n';
 
 function usageFailure(message: string): void {
   process.stdout.write(`${JSON.stringify({
@@ -42,7 +43,7 @@ function taskOrchestration(args: string[] = []): void {
   const [taskRef, intent] = args;
   if (![
     'begin-or-resume', 'route', 'prepare', 'hook-start', 'hook-stop', 'advance', 'pause', 'status',
-    'commit-begin', 'commit-checkpoint', 'commit-complete', 'commit-abort', 'commit-status'
+    'commit-begin', 'commit-checkpoint', 'commit-complete', 'commit-recover', 'commit-abort', 'commit-status'
   ].includes(intent!)) {
     usageFailure(`unknown intent '${intent}'`);
     return;
@@ -86,6 +87,7 @@ function taskOrchestration(args: string[] = []): void {
     'commit-begin': ['--agent', '--baseline-head', '--orchestrated'],
     'commit-checkpoint': ['--token', '--kind', '--head', '--remote', '--ref'],
     'commit-complete': ['--token', '--agent'],
+    'commit-recover': ['--agent'],
     'commit-abort': ['--token', '--expected-head'],
     'commit-status': []
   };
@@ -135,6 +137,12 @@ function taskOrchestration(args: string[] = []): void {
     const agent = normalizeAgentToken(values['--agent']!);
     if (!agent) { usageFailure(`invalid --agent '${values['--agent']}': ${AGENT_USAGE_HINT}`); return; }
     result = completeCommitIntent(taskRef!, { token: values['--token']!, agent });
+  } else if (intent === 'commit-recover') {
+    const missing = requireValues(['--agent']);
+    if (missing) { usageFailure(`intent 'commit-recover' requires '${missing}'`); return; }
+    const agent = normalizeAgentToken(values['--agent']!);
+    if (!agent) { usageFailure(`invalid --agent '${values['--agent']}': ${AGENT_USAGE_HINT}`); return; }
+    result = recoverCommitIntent(taskRef!, { agent });
   } else if (intent === 'commit-abort') {
     const missing = requireValues(['--token', '--expected-head']);
     if (missing) { usageFailure(`intent 'commit-abort' requires '${missing}'`); return; }

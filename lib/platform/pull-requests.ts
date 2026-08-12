@@ -19,6 +19,8 @@ import { planPullRequestMetadata } from './pull-request-metadata.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
 import { inspectCompletionArtifacts } from '../task/finalization-artifacts.ts';
+import { inspectCreatePrCommitGate } from '../task/commit-finalization.ts';
+import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 
 type PullRequestSnapshot = PlatformChangeRequestSnapshot;
 
@@ -747,13 +749,23 @@ function resolveExternalPullRequest(taskRef: string, options: ResolveExternalOpt
   }), { mode: 'external', authorization: selected.source, candidates: selected.candidates, eligible: selected.eligible, selected: selected.selected });
 }
 
-function createPlatformPullRequest(taskRef: string, options: CreateOptions): PullRequestResult {
+function createPlatformPullRequestUnlocked(taskRef: string, options: CreateOptions): PullRequestResult {
   const base = resolvedContext(taskRef, options);
   if (!base.ok) return base.output;
   if (!options.base || !options.head || !options.title.trim() || !options.body.trim()) return result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
     error: { code: 'PR_PAYLOAD_INVALID', message: 'base, head, title and body are required', retryable: false }
   });
   if (base.prNumber) return inspectPlatformPullRequest(taskRef, options);
+  const gate = inspectCreatePrCommitGate(base.resolved.taskDir, base.resolved.repoRoot, base.resolved.taskId);
+  if (!gate.allowed) return result('blocked', base.resolved.taskId, base.issueNumber, null, {
+    platform: base.context.platform,
+    capabilities: base.context.capabilities,
+    error: {
+      code: gate.code!,
+      message: `${gate.message}; action=${gate.action}`,
+      retryable: gate.action === 'rerun-commit' || gate.action === 'rerun-review-code'
+    }
+  });
   const located = locatePullRequest(base, options.head, options.base);
   if (!located.ok && located.error.code === 'PR_IDENTITY_AMBIGUOUS') return result('failed', base.resolved.taskId, base.issueNumber, null, {
     platform: base.context.platform, capabilities: base.context.capabilities, error: located.error
@@ -809,6 +821,42 @@ function createPlatformPullRequest(taskRef: string, options: CreateOptions): Pul
     resource: { kind: 'pull-request', number: pullRequest.number }, pullRequest,
     operations: [{ name: created ? 'pr:create' : 'pr:reuse', status: created ? 'applied' : 'no-op', reasonCode: null }, { name: 'task:bind-pr', status: 'applied', reasonCode: null }], error: null
   });
+}
+
+function createPlatformPullRequest(taskRef: string, options: CreateOptions): PullRequestResult {
+  const base = resolvedContext(taskRef, options);
+  if (!base.ok) return base.output;
+  if (!options.base || !options.head || !options.title.trim() || !options.body.trim()) {
+    return result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+      error: { code: 'PR_PAYLOAD_INVALID', message: 'base, head, title and body are required', retryable: false }
+    });
+  }
+  if (base.prNumber) return inspectPlatformPullRequest(taskRef, options);
+  try {
+    return withTaskExecutionLock(
+      base.resolved.repoRoot,
+      base.resolved.taskId,
+      'platform-pr.create',
+      () => createPlatformPullRequestUnlocked(taskRef, options)
+    );
+  } catch (error) {
+    if (error instanceof TaskExecutionLockError) {
+      return result('blocked', base.resolved.taskId, base.issueNumber, null, {
+        platform: base.context.platform,
+        capabilities: base.context.capabilities,
+        error: { code: error.code, message: error.message, retryable: true }
+      });
+    }
+    return result('failed', base.resolved.taskId, base.issueNumber, null, {
+      platform: base.context.platform,
+      capabilities: base.context.capabilities,
+      error: {
+        code: 'PR_CREATE_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+        retryable: false
+      }
+    });
+  }
 }
 
 function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullRequestResult {

@@ -143,10 +143,51 @@ test('task-orchestration exposes token-guarded standalone commit intents and rej
 
   const emptyStatus = run(f.root, [f.id, 'commit-status']);
   assert.equal(emptyStatus.status, 0, emptyStatus.stderr || emptyStatus.stdout);
-  assert.deepEqual(JSON.parse(emptyStatus.stdout), {
-    status: 'ready', changed: false, taskId: f.id, intent: null, error: null
-  });
+  const emptyPayload = JSON.parse(emptyStatus.stdout);
+  assert.equal(emptyPayload.status, 'ready');
+  assert.equal(emptyPayload.changed, false);
+  assert.equal(emptyPayload.taskId, f.id);
+  assert.equal(emptyPayload.intent, null);
+  assert.equal(emptyPayload.finalization.disposition, 'invalid');
+  assert.equal(emptyPayload.error, null);
   assert.equal(emptyStatus.stdout.includes(f.dir), false);
+});
+
+test('task-orchestration recovers committed finalization without the original token', () => {
+  const f = fixture();
+  fs.writeFileSync(path.join(f.dir, 'task.md'), [
+    '---', `id: ${f.id}`, 'status: active', 'current_step: code-review', '---', '',
+    '# Task', '', '## Activity Log', '',
+    '- 2026-01-01 00:00:00+00:00 — **Commit [started]** by codex — started', ''
+  ].join('\n'));
+  const baseline = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
+  const begun = run(f.root, [f.id, 'commit-begin', '--agent', 'codex', '--baseline-head', baseline]);
+  assert.equal(begun.status, 0, begun.stderr || begun.stdout);
+  const token = JSON.parse(begun.stdout).token;
+  fs.writeFileSync(path.join(f.root, 'source.txt'), 'change\n');
+  spawnSync('git', ['add', 'source.txt'], { cwd: f.root });
+  spawnSync('git', ['commit', '-qm', 'change'], { cwd: f.root });
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
+  const checkpoint = run(f.root, [f.id, 'commit-checkpoint', '--token', token, '--kind', 'committed', '--head', head]);
+  assert.equal(checkpoint.status, 0, checkpoint.stderr || checkpoint.stdout);
+  const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
+  fs.writeFileSync(path.join(f.dir, 'review-code.md'), [
+    '# Review', '', `- **Review Baseline Commit**: \`${baseline}\``,
+    `- **Reviewed Snapshot Tree**: \`${tree}\``, '', '## Review Summary', '',
+    '- **Overall Verdict**: Approved',
+    '- **Findings (AI-actionable)**: 0 blockers, 0 major, 0 minor / **Manual-validation**: 0', ''
+  ].join('\n'));
+
+  const recovered = run(f.root, [f.id, 'commit-recover', '--agent', 'codex']);
+  assert.equal(recovered.status, 0, recovered.stderr || recovered.stdout);
+  const task = fs.readFileSync(path.join(f.dir, 'task.md'), 'utf8');
+  assert.match(task, new RegExp(`^last_reviewed_commit: ${head}$`, 'm'));
+  assert.equal((task.match(/\*\*Commit\*\*/g) || []).length, 1);
+  assert.equal(fs.existsSync(path.join(f.dir, 'commit-intent.json')), false);
+
+  const invalid = run(f.root, [f.id, 'commit-recover', '--agent', 'codex', '--token', token]);
+  assert.equal(invalid.status, 2);
+  assert.equal(JSON.parse(invalid.stdout).error.code, 'ORCHESTRATION_PAYLOAD_INVALID');
 });
 
 test('task-orchestration rejects partial model policy options before core state changes', () => {

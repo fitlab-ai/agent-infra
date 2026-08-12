@@ -9,6 +9,14 @@
 
 ## 副作用前 begin
 
+每次进入 commit 技能先调用 `commit-status`。`recoverable` / `prepared` 调用以下无 token 恢复入口，其他非 `idle` 状态 fail closed：
+
+```bash
+agent-infra-internal task-orchestration {task-id} commit-recover --agent {standard-agent-token}
+```
+
+恢复入口只接受 `--agent`；不得传 token、head 或 `--orchestrated`。recoverable 会幂等补齐 task/run 并最后删除 intent；prepared 仅在 HEAD=baseline 且恰有一个 open Commit started 时安全清理，随后复用该 started 继续正常流程。
+
 完成状态、版权、提交信息、review snapshot 和 push 场景的只读准备后，记录 `baseline_head=$(git rev-parse HEAD)`，并在任何 commit、push、任务成功日志或平台成功同步之前调用：
 
 ```bash
@@ -36,12 +44,12 @@ push-only 路径跳过 committed checkpoint，pushed HEAD 必须等于 begin 时
 
 ## 完成与恢复
 
-`task-verify commit.completed` 通过后调用：
+committed/pushed checkpoint 完成后、任务同步与 `task-verify commit.completed` 之前调用：
 
 ```bash
 agent-infra-internal task-orchestration {task-id} commit-complete --token "$commit_intent_token" --agent {standard-agent-token}
 ```
 
 - 第一个副作用前失败时，仅可在 HEAD 仍等于 baseline 时调用 `commit-abort --token ... --expected-head ...`。
-- commit、push、任务或平台副作用发生后失败时不得 abort；保留 intent，并调用 `commit-status` 输出不含 token/digest 的恢复证据。
+- commit 或 push 发生后失败时不得 abort；保留 intent，并调用 `commit-status` 输出不含 token/digest 的恢复证据。跨会话重跑通过 `commit-recover` 收尾。
 - `commit-complete` 失败时停止。不得重复执行 commit/push，也不得把缺少完整 receipt 生命周期的 run 标记为完成。

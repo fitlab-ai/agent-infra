@@ -1778,9 +1778,9 @@ test("commit skill variants preserve the commit-intent protocol structure", () =
     const gate = skill.indexOf("agent-infra-internal task-verify {task-id} commit.completed");
     const complete = skill.indexOf("agent-infra-internal task-orchestration {task-id} commit-complete");
     assert.ok(navigation >= 0 && navigation < commit, `${skillPath} should load the protocol before commit`);
-    assert.ok(gate >= 0 && gate < complete, `${skillPath} should complete the intent after the gate`);
+    assert.ok(complete >= 0 && complete < gate, `${skillPath} should finalize task state before the gate`);
 
-    const commands = ["commit-begin", "--kind committed", "--kind pushed", "commit-complete"]
+    const commands = ["commit-status", "commit-recover", "commit-begin", "--kind committed", "--kind pushed", "commit-complete"]
       .map((token) => reference.indexOf(token));
     assert.ok(commands.every((position) => position >= 0), `${referencePath} should contain every protocol command`);
     assert.deepEqual([...commands].sort((left, right) => left - right), commands, `${referencePath} command order should be stable`);

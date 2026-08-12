@@ -9,6 +9,8 @@ This protocol applies only when `{task-id}` was resolved. A taskless Git-only co
 
 ## Begin before side effects
 
+Call `commit-status` whenever the commit skill starts. For `recoverable` / `prepared`, call `commit-recover --agent {standard-agent-token}`; fail closed for every other non-`idle` state. The recovery intent accepts no token, head, or `--orchestrated` flag.
+
 After read-only preparation of status, copyright, message, review snapshot, and push routing, record `baseline_head=$(git rev-parse HEAD)` and run this before any commit, push, success log, or platform success sync:
 
 ```bash
@@ -36,12 +38,12 @@ A push-only path skips the committed checkpoint; its pushed HEAD must equal the 
 
 ## Completion and recovery
 
-After `task-verify commit.completed` passes, run:
+After the committed/pushed checkpoint and before task synchronization or `task-verify commit.completed`, run:
 
 ```bash
 agent-infra-internal task-orchestration {task-id} commit-complete --token "$commit_intent_token" --agent {standard-agent-token}
 ```
 
 - Before the first side effect, abort only while HEAD still equals the baseline by using `commit-abort --token ... --expected-head ...`.
-- After any commit, push, task, or platform side effect, never abort. Retain the intent and use `commit-status` for recovery evidence that excludes token/digest data.
+- After a commit or push, never abort. Retain the intent and use `commit-status` / `commit-recover` for cross-session recovery.
 - Stop when `commit-complete` fails. Do not repeat commit/push or mark a run complete without its full receipt lifecycle.

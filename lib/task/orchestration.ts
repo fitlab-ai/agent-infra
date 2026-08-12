@@ -44,10 +44,17 @@ import {
   digest,
   readCommitIntent,
   removeCommitIntent,
+  removeCommitIntentByDigest,
   serialize,
   updateCommitIntent
 } from './commit-intent.ts';
 import type { CommitIntent, PushEvidence } from './commit-intent.ts';
+import {
+  inspectCommitFinalization,
+  planCommitTaskFinalization
+} from './commit-finalization.ts';
+import type { CommitFinalizationInspection } from './commit-finalization.ts';
+import { captureTaskWriteMetadata, writeTask } from './write.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type LegacyOrchestrationModelPolicy = Readonly<{
@@ -173,6 +180,15 @@ type CommitIntentResult = Readonly<{
     runId: string | null;
     receiptId: string | null;
   }> | null;
+  finalization?: Readonly<{
+    disposition: CommitFinalizationInspection['disposition'];
+    code: CommitFinalizationInspection['code'];
+    message: string;
+    currentHead: string;
+    committedHead: string | null;
+    needsAnchor: boolean;
+    needsLog: boolean;
+  }>;
   token?: string;
   error: Readonly<{ code: string; message: string }> | null;
 }>;
@@ -260,6 +276,18 @@ function commitIntentView(intent: CommitIntent, currentHead: string): NonNullabl
     pushEvidence: intent.pushEvidence,
     runId: intent.orchestration?.runId ?? null,
     receiptId: intent.orchestration?.receiptId ?? null
+  };
+}
+
+function commitFinalizationView(inspection: CommitFinalizationInspection): NonNullable<CommitIntentResult['finalization']> {
+  return {
+    disposition: inspection.disposition,
+    code: inspection.code,
+    message: inspection.message,
+    currentHead: inspection.currentHead,
+    committedHead: inspection.committedHead,
+    needsAnchor: inspection.needsAnchor,
+    needsLog: inspection.needsLog
   };
 }
 
@@ -874,7 +902,7 @@ function checkpointCommitIntent(
       const updated = updateCommitIntent(resolved.taskDir, resolved.taskId, input.token, input.kind === 'committed'
         ? { phase: 'committed', committedHead: input.head, updatedAt: now }
         : {
-            phase: 'pushed', updatedAt: now,
+            phase: 'pushed', committedHead: intent.committedHead ?? intent.baselineHead, updatedAt: now,
             pushEvidence: { remote: input.remote!, ref: input.ref!, head: input.head }
           });
       return {
@@ -887,6 +915,99 @@ function checkpointCommitIntent(
   }
 }
 
+function completeCommitOrchestration(
+  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
+  intent: CommitIntent,
+  agent: string
+): Readonly<{ code: string; message: string }> | null {
+  if (intent.orchestration === null) return null;
+  if (intent.orchestration.plannedReceipt.agent !== agent) {
+    return { code: 'ORCHESTRATION_PROVENANCE_MISMATCH', message: 'completion agent does not match the planned receipt' };
+  }
+  const runFile = orchestrationPath(resolved.taskDir);
+  if (!fs.existsSync(runFile)) {
+    return { code: 'ORCHESTRATION_RUN_MISSING', message: 'orchestration run disappeared' };
+  }
+  const currentBytes = fs.readFileSync(runFile, 'utf8');
+  const currentDigest = digest(currentBytes);
+  if (currentDigest === intent.orchestration.sourceRunDigest) {
+    const run = readRun(resolved.taskDir);
+    if (!run) return { code: 'ORCHESTRATION_RUN_MISSING', message: 'orchestration run disappeared' };
+    const plannedRun: OrchestrationRun = Object.freeze({
+      ...run,
+      pendingDelegation: intent.orchestration.plannedReceipt,
+      updatedAt: intent.orchestration.completionUpdatedAt
+    });
+    if (digest(serialize(plannedRun)) !== intent.orchestration.plannedRunDigest) {
+      return { code: 'ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', message: 'planned orchestration bytes no longer match the intent' };
+    }
+    atomicWrite(runFile, plannedRun);
+    if (digest(fs.readFileSync(runFile)) !== intent.orchestration.plannedRunDigest) {
+      return { code: 'ORCHESTRATION_COMMIT_COMPLETE_PARTIAL', message: 'orchestration completion could not be verified' };
+    }
+  } else if (currentDigest !== intent.orchestration.plannedRunDigest) {
+    return { code: 'ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', message: 'orchestration state changed after commit begin' };
+  }
+  return null;
+}
+
+function finalizeCommitIntentUnlocked(
+  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
+  inspection: CommitFinalizationInspection,
+  agent: string,
+  remove: () => void
+): CommitIntentResult {
+  if (inspection.disposition !== 'recoverable' || !inspection.intent) {
+    return commitIntentFailed(
+      inspection.code ?? 'COMMIT_FINALIZATION_PENDING',
+      inspection.message,
+      resolved.taskId
+    );
+  }
+  if (
+    inspection.intent.orchestration !== null
+    && inspection.intent.orchestration.plannedReceipt.agent !== agent
+  ) {
+    return commitIntentFailed(
+      'ORCHESTRATION_PROVENANCE_MISMATCH',
+      'completion agent does not match the planned receipt',
+      resolved.taskId
+    );
+  }
+  const metadata = captureTaskWriteMetadata();
+  const taskPlan = planCommitTaskFinalization(
+    resolved.taskDir,
+    inspection,
+    agent,
+    metadata.timestamp
+  );
+  const written = writeTask({
+    taskRef: resolved.taskId,
+    expectedState: 'active',
+    mutations: taskPlan.mutations
+  }, {
+    repoRoot: resolved.repoRoot,
+    metadataProvider: () => metadata
+  });
+  if (written.status === 'failed') {
+    return commitIntentFailed(written.error.code, written.error.message, resolved.taskId);
+  }
+  const orchestrationError = completeCommitOrchestration(resolved, inspection.intent, agent);
+  if (orchestrationError) {
+    return commitIntentFailed(orchestrationError.code, orchestrationError.message, resolved.taskId);
+  }
+  try {
+    remove();
+  } catch (error) {
+    return commitIntentFailed(
+      'ORCHESTRATION_COMMIT_COMPLETE_PARTIAL',
+      error instanceof Error ? error.message : String(error),
+      resolved.taskId
+    );
+  }
+  return { status: 'ready', changed: true, taskId: resolved.taskId, intent: null, error: null };
+}
+
 function completeCommitIntent(
   taskRef: string,
   input: Readonly<{ token: string; agent: string }>,
@@ -896,46 +1017,41 @@ function completeCommitIntent(
   if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
   try {
     return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.complete', () => {
-      const intent = readCommitIntent(resolved.taskDir, resolved.taskId, input.token);
-      const currentHead = repositoryHead(resolved.repoRoot);
-      if (intent.orchestration === null) {
+      readCommitIntent(resolved.taskDir, resolved.taskId, input.token);
+      const inspection = inspectCommitFinalization(resolved.taskDir, resolved.repoRoot, resolved.taskId);
+      return finalizeCommitIntentUnlocked(resolved, inspection, input.agent, () => {
         removeCommitIntent(resolved.taskDir, resolved.taskId, input.token);
+      });
+    });
+  } catch (error) {
+    return mapCommitIntentError(error, resolved.taskId);
+  }
+}
+
+function recoverCommitIntent(
+  taskRef: string,
+  input: Readonly<{ agent: string }>,
+  options: OrchestrationOptions = {}
+): CommitIntentResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
+  try {
+    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.recover', () => {
+      const inspection = inspectCommitFinalization(resolved.taskDir, resolved.repoRoot, resolved.taskId);
+      if (inspection.disposition === 'prepared' && inspection.intentDigest) {
+        removeCommitIntentByDigest(resolved.taskDir, resolved.taskId, inspection.intentDigest);
         return { status: 'ready', changed: true, taskId: resolved.taskId, intent: null, error: null };
       }
-      if (intent.orchestration.plannedReceipt.agent !== input.agent) {
-        return commitIntentFailed('ORCHESTRATION_PROVENANCE_MISMATCH', 'completion agent does not match the planned receipt', resolved.taskId);
-      }
-      const runFile = orchestrationPath(resolved.taskDir);
-      const currentBytes = fs.readFileSync(runFile, 'utf8');
-      const currentDigest = digest(currentBytes);
-      if (currentDigest === intent.orchestration.sourceRunDigest) {
-        const run = readRun(resolved.taskDir);
-        if (!run) return commitIntentFailed('ORCHESTRATION_RUN_MISSING', 'orchestration run disappeared', resolved.taskId);
-        const plannedRun: OrchestrationRun = Object.freeze({
-          ...run,
-          pendingDelegation: intent.orchestration.plannedReceipt,
-          updatedAt: intent.orchestration.completionUpdatedAt
-        });
-        if (digest(serialize(plannedRun)) !== intent.orchestration.plannedRunDigest) {
-          return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'planned orchestration bytes no longer match the intent', resolved.taskId);
-        }
-        atomicWrite(runFile, plannedRun);
-        if (digest(fs.readFileSync(runFile)) !== intent.orchestration.plannedRunDigest) {
-          return commitIntentFailed('ORCHESTRATION_COMMIT_COMPLETE_PARTIAL', 'orchestration completion could not be verified', resolved.taskId);
-        }
-      } else if (currentDigest !== intent.orchestration.plannedRunDigest) {
-        return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'orchestration state changed after commit begin', resolved.taskId);
-      }
-      try {
-        removeCommitIntent(resolved.taskDir, resolved.taskId, input.token);
-      } catch (error) {
+      if (!inspection.intentDigest) {
         return commitIntentFailed(
-          'ORCHESTRATION_COMMIT_COMPLETE_PARTIAL',
-          error instanceof Error ? error.message : String(error),
+          inspection.code ?? 'COMMIT_FINALIZATION_EVIDENCE_MISSING',
+          inspection.message,
           resolved.taskId
         );
       }
-      return { status: 'ready', changed: true, taskId: resolved.taskId, intent: null, error: null };
+      return finalizeCommitIntentUnlocked(resolved, inspection, input.agent, () => {
+        removeCommitIntentByDigest(resolved.taskDir, resolved.taskId, inspection.intentDigest!);
+      });
     });
   } catch (error) {
     return mapCommitIntentError(error, resolved.taskId);
@@ -972,18 +1088,15 @@ function abortCommitIntent(
 function statusCommitIntent(taskRef: string, options: OrchestrationOptions = {}): CommitIntentResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
-  try {
-    const intent = readCommitIntent(resolved.taskDir, resolved.taskId);
-    return {
-      status: 'ready', changed: false, taskId: resolved.taskId,
-      intent: commitIntentView(intent, repositoryHead(resolved.repoRoot)), error: null
-    };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { status: 'ready', changed: false, taskId: resolved.taskId, intent: null, error: null };
-    }
-    return mapCommitIntentError(error, resolved.taskId);
-  }
+  const inspection = inspectCommitFinalization(resolved.taskDir, resolved.repoRoot, resolved.taskId);
+  return {
+    status: 'ready',
+    changed: false,
+    taskId: resolved.taskId,
+    intent: inspection.intent ? commitIntentView(inspection.intent, inspection.currentHead) : null,
+    finalization: commitFinalizationView(inspection),
+    error: null
+  };
 }
 
 function statusOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
@@ -1357,6 +1470,7 @@ export {
   planOrchestrationStageCompletion,
   prepareOrchestrationDelegation,
   readRun,
+  recoverCommitIntent,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation,

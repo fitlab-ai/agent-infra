@@ -31,7 +31,9 @@ Direct invocation still requires explicit user authorization. An orchestrated in
 
 Without explicit task scope, only `TASK_CONTEXT_NOT_FOUND` may continue through the existing bare-commit path. Detached HEAD, damaged candidates, or multiple matches are ambiguity errors. Any explicit task-scope failure is fatal.
 
-## Step Start: Write the started Marker
+## Step Start: Recover First, Then Write the started Marker
+
+When `{task-id}` is resolved, call `commit-status` first. For `recoverable` / `prepared`, call `commit-recover --agent {standard-agent-token}` without adding a second started entry or repeating Git side effects. Fail closed for `invalid` / `conflict` / `orphaned-start`; only `idle` enters the normal flow.
 
 Before checking local modifications, append a started marker to task.md `## Activity Log` (same base action as this step's done entry plus a ` [started]` suffix, note `started`):
 
@@ -77,7 +79,7 @@ If this commit is associated with a task and a `review-code` artifact exists, re
 - After staging the explicit files, record `pre_head=$(git rev-parse HEAD)` and use the helper's JSON mode to generate the complete worktree tree `W` and normalized staged tree `S`
 - Before `git commit`, require `pre_head == R && W == T && S == T`; use the helper's `compare` mode to produce added, missing, and different diagnostics for both worktree and staged snapshots
 - If any condition fails, enter Scenario 4 in `reference/task-status-update.md`; do not run `git commit`, push, successful state updates, PR summary sync, or the completion gate
-- After all comparisons match and the commit succeeds, write `last_reviewed_commit: <new_head>` to task.md frontmatter
+- After all comparisons match and the commit succeeds, the Step 6 `commit-complete` core finalizer atomically writes `last_reviewed_commit` and Commit done; the caller must not write them
 - Do not scan backward to earlier Approved artifacts; the highest-round `review-code` artifact is the only authoritative source
 
 ## 5. Push to the Existing PR When Applicable
@@ -102,6 +104,12 @@ Fold the push outcome (pushed / skipped(no PR) / failed) into the next step's "U
 
 ## 6. Update Task Status When Applicable
 
+After checkpoints and before synchronization or the completion gate, call `commit-complete`. Under the task lock, core writes the review anchor, Commit done, and planned orchestration bytes, then deletes the intent last. On failure retain the intent and let the next skill run use status/recover.
+
+```bash
+agent-infra-internal task-orchestration {task-id} commit-complete --token "$commit_intent_token" --agent {standard-agent-token}
+```
+
 Get the current time:
 
 ```bash
@@ -112,7 +120,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 
 > Before rendering next steps, read `.agents/rules/next-step-output.md` and invoke the shared helper for the scenario selected from `reference/task-status-update.md`.
 
-Append the Commit Activity Log entry and choose exactly one next-step case:
+After core finalization succeeds, choose exactly one next-step case:
 - open PR and successful push -> `watch-pr {task-ref}`; this takes precedence over the final-commit `prFlow` route
 - failed push -> keep the task active and show only push/synchronization diagnostics; do not show `watch-pr` or `complete-task`
 - final commit -> render the next step by `.agents/.airc.json`'s `prFlow` (`disabled` -> single option `complete-task`; `required` -> single option `create-pr`; absent -> two options `create-pr` / `complete-task`); see Case 1 in `reference/task-status-update.md`
@@ -154,13 +162,7 @@ Handle the result as follows:
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 
-After the gate passes, complete the commit intent as defined by `reference/commit-orchestration.md`. Standalone only releases the intent without changing a historical run; orchestrated atomically commits the receipt completion prevalidated at begin:
-
-```bash
-agent-infra-internal task-orchestration {task-id} commit-complete --token "$commit_intent_token" --agent {standard-agent-token}
-```
-
-On failure, retain the intent, show `commit-status` recovery evidence, and stop. Do not repeat side effects or mark a run complete without the full receipt lifecycle.
+Run this gate only after core finalization succeeds; never place it before `commit-complete`.
 
 ## Notes
 

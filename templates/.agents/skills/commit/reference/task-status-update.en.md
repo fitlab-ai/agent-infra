@@ -12,19 +12,19 @@ Get the current time first:
 date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
-For every task-related commit, append this Activity Log entry in `task.md`:
+The `commit-complete` / `commit-recover` core has already atomically written this Activity Log entry:
 
 ```text
 - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Commit** by {agent} — {commit hash short} {commit subject}
 ```
 
-If the commit stage confirmed that the highest-round `review-code` artifact is Approved, `pre_head == R`, complete worktree tree `W == T`, and normalized staged tree `S == T`, also write or refresh after a successful commit:
+When the evidence is satisfied, core also writes or refreshes:
 
 ```yaml
 last_reviewed_commit: {new_head}
 ```
 
-This field is the only baseline for the `complete-task` `post-review-commit` gate. When any condition is not met, do not write or advance it.
+This field is the only baseline for the `complete-task` `post-review-commit` gate. The caller must not append Commit done again or write this field directly.
 
 ### Scenario 5: Existing-PR push wrap-up
 

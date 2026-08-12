@@ -12,19 +12,19 @@
 date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
-对于每一次与任务相关的提交，都要在 `task.md` 中追加以下 Activity Log：
+`commit-complete` / `commit-recover` 核心已原子写入以下 Activity Log：
 
 ```text
 - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Commit** by {agent} — {commit hash short} {commit subject}
 ```
 
-如果提交阶段已确认最高轮 `review-code` 产物 Approved、`pre_head == R`、完整工作区树 `W == T` 且规范化暂存树 `S == T`，成功提交后同时写入或刷新：
+证据满足时核心同时写入或刷新：
 
 ```yaml
 last_reviewed_commit: {new_head}
 ```
 
-该字段是 `complete-task` 的 `post-review-commit` gate 唯一 baseline。条件不满足时不要写入或推进该字段。
+该字段是 `complete-task` 的 `post-review-commit` gate 唯一 baseline。调用方只读取核心结果选择后续路由，不得再次追加 Commit done 或手写/推进该字段。
 
 ### 场景 5：已有 PR 推送收尾
 

@@ -196,6 +196,26 @@ function removeCommitIntent(taskDir: string, taskId: string, token: string): voi
   fs.unlinkSync(commitIntentPath(taskDir));
 }
 
+function removeCommitIntentByDigest(taskDir: string, taskId: string, expectedDigest: string): void {
+  const file = commitIntentPath(taskDir);
+  const raw = fs.readFileSync(file);
+  parseIntent(raw.toString('utf8'), taskId);
+  const actual = digest(raw);
+  const expected = Buffer.from(expectedDigest, 'hex');
+  const observed = Buffer.from(actual, 'hex');
+  if (
+    !/^[a-f0-9]{64}$/.test(expectedDigest)
+    || expected.length !== observed.length
+    || !timingSafeEqual(expected, observed)
+  ) {
+    throw new CommitIntentError(
+      'ORCHESTRATION_COMMIT_RECOVERY_REQUIRED',
+      'commit intent changed after recovery inspection'
+    );
+  }
+  fs.unlinkSync(file);
+}
+
 export {
   CommitIntentError,
   commitIntentPath,
@@ -203,6 +223,7 @@ export {
   digest,
   readCommitIntent,
   removeCommitIntent,
+  removeCommitIntentByDigest,
   serialize,
   updateCommitIntent
 };
