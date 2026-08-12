@@ -48,18 +48,30 @@ function reconcileReleaseMilestones(version: string, options: ReleaseOptions = {
   if (!listed.ok) return { ...platformResult(listed.error.retryable ? 'blocked' : 'failed'), changed: false, operations: [], error: listed.error };
   const milestones = flattenPages(listed.value).map((item) => ({ title: String(item.title || ''), number: Number(item.number), state: String(item.state || '') }));
   const major = Number(match[1]); const minor = Number(match[2]); const patch = Number(match[3]);
-  const ensure = [`${major}.${minor}.${patch + 1}`, `${major}.${minor}.x`];
-  if (patch === 0) ensure.push(`${major}.${minor + 1}.0`, `${major}.${minor + 1}.x`);
+  const nextPatch = `${major}.${minor}.${patch + 1}`;
+  const currentLine = `${major}.${minor}.x`;
+  const ensure = [
+    { title: nextPatch, description: `Issues that we want to release in v${nextPatch}.` },
+    { title: currentLine, description: `Issues that we want to resolve in ${major}.${minor} line.` }
+  ];
+  if (patch === 0) {
+    const nextMinor = `${major}.${minor + 1}.0`;
+    const nextLine = `${major}.${minor + 1}.x`;
+    ensure.push(
+      { title: nextMinor, description: `Issues that we want to release in v${nextMinor}.` },
+      { title: nextLine, description: `Issues that we want to resolve in ${major}.${minor + 1} line.` }
+    );
+  }
   const operations: Array<{ name: string; title: string; status: 'applied' | 'no-op' | 'failed' }> = [];
   const current = milestones.find((item) => item.title === version);
   if (current && current.state !== 'closed') {
     const closed = client.json(['api', '--method', 'PATCH', `repos/${context.platform.repository}/milestones/${current.number}`, '-f', 'state=closed'], { cwd: options.cwd });
     operations.push({ name: 'close-milestone', title: version, status: closed.ok ? 'applied' : 'failed' });
   } else operations.push({ name: 'close-milestone', title: version, status: 'no-op' });
-  for (const title of ensure) {
+  for (const { title, description } of ensure) {
     if (milestones.some((item) => item.title === title)) operations.push({ name: 'ensure-milestone', title, status: 'no-op' });
     else {
-      const created = client.json(['api', '--method', 'POST', `repos/${context.platform.repository}/milestones`, '-f', `title=${title}`], { cwd: options.cwd });
+      const created = client.json(['api', '--method', 'POST', `repos/${context.platform.repository}/milestones`, '-f', `title=${title}`, '-f', `description=${description}`], { cwd: options.cwd });
       operations.push({ name: 'ensure-milestone', title, status: created.ok ? 'applied' : 'failed' });
     }
   }

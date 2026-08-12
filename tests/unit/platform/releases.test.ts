@@ -104,7 +104,9 @@ test('platform-free release operations are no-op without probing GitHub', () => 
 
 test('release milestone reconciliation closes current and ensures planning milestones idempotently', () => {
   const root = fixture();
-  const milestones = [{ title: '0.8.6', number: 1, state: 'open' }];
+  const milestones = [{ title: '0.8.0', number: 1, state: 'open' }];
+  const patchCalls: string[][] = [];
+  const postFields: Array<Record<string, string>> = [];
   const mutable: GitHubClient = {
     version: () => ({ ok: true, value: '2.16.0' }),
     json(args) {
@@ -112,10 +114,20 @@ test('release milestone reconciliation closes current and ensures planning miles
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { admin: true } } } as never;
       if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } } as never;
       if (endpoint.includes('/milestones?')) return { ok: true, value: milestones } as never;
-      if (args.includes('PATCH')) { milestones[0]!.state = 'closed'; return { ok: true, value: {} } as never; }
+      if (args.includes('PATCH')) {
+        patchCalls.push(args);
+        milestones[0]!.state = 'closed';
+        return { ok: true, value: {} } as never;
+      }
       if (args.includes('POST')) {
-        const title = args.find((arg) => arg.startsWith('title='))!.slice(6);
-        milestones.push({ title, number: milestones.length + 1, state: 'open' });
+        const fields = args.reduce<Record<string, string>>((result, arg, index) => {
+          if (args[index - 1] !== '-f') return result;
+          const separator = arg.indexOf('=');
+          result[arg.slice(0, separator)] = arg.slice(separator + 1);
+          return result;
+        }, {});
+        postFields.push(fields);
+        milestones.push({ title: fields.title!, number: milestones.length + 1, state: 'open' });
         return { ok: true, value: {} } as never;
       }
       return { ok: true, value: {} } as never;
@@ -123,8 +135,23 @@ test('release milestone reconciliation closes current and ensures planning miles
     text: () => ({ ok: true, value: '' })
   };
   try {
-    assert.equal(reconcileReleaseMilestones('0.8.6', { cwd: root, client: mutable }).status, 'applied');
-    assert.equal(reconcileReleaseMilestones('0.8.6', { cwd: root, client: mutable }).status, 'no-op');
+    assert.equal(reconcileReleaseMilestones('0.8.0', { cwd: root, client: mutable }).status, 'applied');
+    assert.deepEqual(patchCalls, [[
+      'api', '--method', 'PATCH', 'repos/acme/widgets/milestones/1', '-f', 'state=closed'
+    ]]);
+    assert.equal(milestones[0]!.state, 'closed');
+    assert.deepEqual(postFields, [
+      { title: '0.8.1', description: 'Issues that we want to release in v0.8.1.' },
+      { title: '0.8.x', description: 'Issues that we want to resolve in 0.8 line.' },
+      { title: '0.9.0', description: 'Issues that we want to release in v0.9.0.' },
+      { title: '0.9.x', description: 'Issues that we want to resolve in 0.9 line.' }
+    ]);
+
+    const patchCount = patchCalls.length;
+    const postCount = postFields.length;
+    assert.equal(reconcileReleaseMilestones('0.8.0', { cwd: root, client: mutable }).status, 'no-op');
+    assert.equal(patchCalls.length, patchCount);
+    assert.equal(postFields.length, postCount);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
