@@ -138,17 +138,17 @@ test("human-decision context rules define complete comparable option blocks", ()
     const summary = canonical.slice(0, optionHeadings[0]?.index);
     assert.match(summary, /^###\s+\{AN-N\|PL-N\|CD-N\|HD-N\}[:：].+\[needs-human-decision\]$/m);
     const summaryFields = [...summary.matchAll(/^- \*\*([^*]+)\*\*[:：]\s*.+$/gm)];
-    assert.equal(summaryFields.length, 6, `${relativePath} should define six summary fields`);
-    assert.equal(new Set(summaryFields.map((match) => match[1])).size, 6, `${relativePath} summary labels should be unique`);
+    assert.equal(summaryFields.length, 7, `${relativePath} should define seven summary fields`);
+    assert.equal(new Set(summaryFields.map((match) => match[1])).size, 7, `${relativePath} summary labels should be unique`);
 
     let optionLabels: string[] | undefined;
     optionHeadings.forEach((option, index) => {
       const start = option.index ?? 0;
       const end = optionHeadings[index + 1]?.index ?? canonical.length;
       const fields = [...canonical.slice(start, end).matchAll(/^- \*\*([^*]+)\*\*[:：]\s*.+$/gm)];
-      assert.equal(fields.length, 2, `${relativePath} option ${index + 1} should define two comparison fields`);
+      assert.equal(fields.length, 4, `${relativePath} option ${index + 1} should define four comparison fields`);
       const labels = fields.map((match) => match[1]!);
-      assert.equal(new Set(labels).size, 2, `${relativePath} option ${index + 1} labels should be unique`);
+      assert.equal(new Set(labels).size, 4, `${relativePath} option ${index + 1} labels should be unique`);
       optionLabels ??= labels;
       assert.deepEqual(labels, optionLabels, `${relativePath} options should use the same comparison fields`);
     });

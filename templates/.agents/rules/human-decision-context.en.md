@@ -6,7 +6,7 @@ This rule governs every new `[needs-human-decision]` detail block produced by an
 
 A maintainer must be able to understand the issue and choose without knowing the internal workflow or asking a model to reconstruct context. Start in plain language: explain why a decision is needed now, what must be chosen, which choice is recommended, and why. Then explain what the choice affects and what could go wrong if the wrong choice is made or no action is taken.
 
-Provide at least two options with short names, and state the benefits and trade-offs of each one. Explain internal terms such as stage, severity, and evidence the first time they appear. IDs and evidence are for lookup and troubleshooting; they do not replace the plain-language explanation.
+Provide at least two options with short names. For each option, explain what would actually be done, what would happen after choosing it, its benefits, and its trade-offs. Each decision must also include at least one everyday example or analogy that stays true to the real effects and helps the maintainer compare the options. Explain internal terms such as stage, severity, and evidence the first time they appear. IDs and evidence are for lookup and troubleshooting; they do not replace the plain-language explanation.
 
 ## Canonical Structure
 
@@ -19,19 +19,24 @@ Provide at least two options with short names, and state the benefits and trade-
 - **Why this choice**: {reason based on benefits, trade-offs, and current constraints}
 - **What this affects**: {affected behavior, files, users, or future practice}
 - **What could go wrong**: {problems caused by the wrong choice or no action}
+- **Everyday example or analogy**: {a familiar comparison that accurately reflects the real effects and helps compare the options}
 
 #### Option A: {Name}
 
+- **What would actually be done**: {how the system or follow-up work would handle this option}
+- **What happens after choosing it**: {specific changes for users, behavior, or follow-up work}
 - **Benefits**: {what this option provides}
 - **Trade-offs**: {what this option costs and where it falls short}
 
 #### Option B: {Name}
 
+- **What would actually be done**: {how the system or follow-up work would handle this option}
+- **What happens after choosing it**: {specific changes for users, behavior, or follow-up work}
 - **Benefits**: {what this option provides}
 - **Trade-offs**: {what this option costs and where it falls short}
 ```
 
-Option C and supporting evidence may be added, but none of the information above may be omitted or collapsed into an incomparable one-line option list. The heading ID must match the task.md Review Disagreement Ledger row. Its evidence (the reference used to find the original explanation) must point to this stable heading anchor.
+Option C and supporting evidence may be added, but none of the information above may be omitted or collapsed into an incomparable one-line option list. An example or analogy helps understanding; it does not replace facts, concrete effects, or risks. One example that clearly compares the overall choice is enough, so do not mechanically repeat the same analogy under every option. The heading ID must match the task.md Review Disagreement Ledger row. Its evidence (the reference used to find the original explanation) must point to this stable heading anchor.
 
 ## Implementation Intent Declaration
 
