@@ -132,13 +132,13 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
       const matches = recordFiles(root).filter((file) => {
         const state = readRecord(file).state;
         return state.spawn?.sessionId === event.sessionId
-          && state.spawn.turnId === event.turnId
+          && state.spawn.nativeAgent === event.nativeAgent
           && (!state.child || state.child.childThreadId === event.childThreadId);
       });
       if (matches.length !== 1) {
         throw new Error(matches.length === 0
-          ? 'Codex lifecycle parent/turn correlation was not found'
-          : 'Codex lifecycle parent/turn correlation is ambiguous');
+          ? 'Codex lifecycle parent session and agent correlation was not found'
+          : 'Codex lifecycle parent session and agent correlation is ambiguous');
       }
       return matches[0]!;
     }

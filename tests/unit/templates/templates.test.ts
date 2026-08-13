@@ -517,8 +517,8 @@ test("version format validation hooks are wired into templates and local config"
       `${relativePath} should configure the Codex PreToolUse version format validation hook`
     );
     const lifecycle = [
-      ["PreToolUse", "^Agent$", "pre-tool"],
-      ["PostToolUse", "^Agent$", "post-tool"],
+      ["PreToolUse", "^collaborationspawn_agent$", "pre-tool"],
+      ["PostToolUse", "^collaborationspawn_agent$", "post-tool"],
       ["SubagentStart", "^agent-infra-lifecycle-(executor|reviewer)$", "subagent-start"],
       ["SubagentStop", "^agent-infra-lifecycle-(executor|reviewer)$", "subagent-stop"]
     ] as const;

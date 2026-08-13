@@ -3,7 +3,7 @@
   "session_id": "codex-parent",
   "turn_id": "codex-parent-turn",
   "tool_use_id": "codex-spawn-tool",
-  "tool_name": "Agent",
+  "tool_name": "collaborationspawn_agent",
   "tool_input": {
     "agent_type": "agent-infra-lifecycle-executor",
     "model": "gpt-5.6-sol",

@@ -16,7 +16,7 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
     requestedReasoningEffort: 'high', hookDefinitionHash: 'hash'
   });
   store.apply({
-    type: 'hook-child', sessionId: 'parent', turnId: 'turn', childThreadId: 'child',
+    type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
     nativeAgent: 'agent-infra-lifecycle-reviewer'
   });
   store.apply({
@@ -37,7 +37,7 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
     type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed'
   });
   store.apply({
-    type: 'hook-stop', sessionId: 'parent', turnId: 'turn', childThreadId: 'child',
+    type: 'hook-stop', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
     nativeAgent: 'agent-infra-lifecycle-reviewer'
   });
   assert.throws(() => store.consume('child', 'receipt-1', 'stale-hash'), /hash is stale/);
@@ -46,7 +46,7 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
   assert.throws(() => store.consume('child', 'receipt-2'), /already consumed/);
 });
 
-test('Codex lifecycle store rejects ambiguous parent/turn correlation', () => {
+test('Codex lifecycle store rejects ambiguous parent session and agent correlation', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-store-'));
   const store = createCodexLifecycleStore({ root, cliVersion: '0.147.0' });
   for (const toolUseId of ['tool-a', 'tool-b']) {
@@ -57,7 +57,7 @@ test('Codex lifecycle store rejects ambiguous parent/turn correlation', () => {
     });
   }
   assert.throws(() => store.apply({
-    type: 'hook-child', sessionId: 'parent', turnId: 'turn', childThreadId: 'child',
+    type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
     nativeAgent: 'agent-infra-lifecycle-executor'
   }), /ambiguous/);
 });

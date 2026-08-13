@@ -57,8 +57,8 @@ test('App Server hook discovery requires every enabled lifecycle hook', () => {
   const command = (phase: string) =>
     `node "$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js" --client codex --event ${phase}`;
   const hooks = ([
-    ['preToolUse', '^Agent$', 'pre-tool'],
-    ['postToolUse', '^Agent$', 'post-tool'],
+    ['preToolUse', '^collaborationspawn_agent$', 'pre-tool'],
+    ['postToolUse', '^collaborationspawn_agent$', 'post-tool'],
     ['subagentStart', '^agent-infra-lifecycle-(executor|reviewer)$', 'subagent-start'],
     ['subagentStop', '^agent-infra-lifecycle-(executor|reviewer)$', 'subagent-stop']
   ] as const).map(([eventName, matcher, phase]) => ({ eventName, matcher, command: command(phase), enabled: true }));

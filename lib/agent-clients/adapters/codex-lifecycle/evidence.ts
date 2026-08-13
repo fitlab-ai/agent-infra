@@ -154,7 +154,6 @@ function derive(state: CodexLifecycleState): CodexLifecycleState {
   const { spawn, child, thread, settings, reroute, terminal, stop } = state;
   if (spawn && child && (
     spawn.sessionId !== child.sessionId
-    || spawn.turnId !== child.turnId
     || spawn.nativeAgent !== child.nativeAgent
   )) {
     return invalid(state, 'CODEX_EVIDENCE_IDENTITY_MISMATCH', 'hook spawn and child identity do not match');
