@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   assertSandboxTaskSource,
+  materializeSandboxControl,
   materializeSandboxWorkspaceView
 } from '../../../lib/sandbox/workspace-view.ts';
 
@@ -48,4 +49,21 @@ test('task sources reject symlinks before they become writable mounts', () => {
   fs.mkdirSync(outside);
   fs.symlinkSync(outside, path.join(active, 'TASK-20260809-010203'));
   assert.throws(() => assertSandboxTaskSource(root, 'TASK-20260809-010203'), /SOURCE_INVALID/);
+});
+
+test('control materialization rotates the token and clears host-only replay markers', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-control-view-'));
+  const repoRoot = path.join(root, 'repo');
+  fs.mkdirSync(repoRoot);
+  const params = {
+    base: path.join(root, 'controls'), repoRoot, project: 'p', container: 'p-dev-feature', branch: 'feature',
+    identity: { mode: 'branch-only' as const }
+  };
+  const first = materializeSandboxControl(params);
+  const controlRoot = path.dirname(first.manifestPath);
+  fs.writeFileSync(path.join(controlRoot, 'consumed', 'request-id'), '');
+  const second = materializeSandboxControl(params);
+  assert.notEqual(second.token, first.token);
+  assert.deepEqual(fs.readdirSync(path.join(controlRoot, 'consumed')), []);
+  assert.equal(path.dirname(path.join(controlRoot, 'consumed')), controlRoot);
 });

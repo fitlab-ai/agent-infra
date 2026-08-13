@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { getProcessStartTime } from '../../server/process-state.ts';
+import { createTask } from '../../task/create-service.ts';
 import {
   bindSandboxControlTask,
   validateSandboxControlRequest,
@@ -47,6 +48,17 @@ export function sandboxControlSafeEnv(env: NodeJS.ProcessEnv = process.env): Nod
   );
 }
 
+function consumeRequest(directory: string, id: string): void {
+  try {
+    fs.writeFileSync(path.join(directory, id), '', { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error('SANDBOX_CONTROL_REQUEST_REPLAYED');
+    }
+    throw error;
+  }
+}
+
 export function serveSandboxControl(manifestPath: string, signal: AbortSignal = new AbortController().signal): void {
   const manifest = readManifest(manifestPath);
   const brokerPath = path.join(path.dirname(manifestPath), 'broker.json');
@@ -60,12 +72,14 @@ export function serveSandboxControl(manifestPath: string, signal: AbortSignal = 
   })}\n`, { mode: 0o600, flag: 'wx' });
   const requestsDir = path.join(manifest.channelDir, 'requests');
   const responsesDir = path.join(manifest.channelDir, 'responses');
+  const consumedDir = path.join(path.dirname(manifestPath), 'consumed');
   assertRealDirectory(manifest.channelDir);
   fs.mkdirSync(requestsDir, { recursive: true, mode: 0o700 });
   fs.mkdirSync(responsesDir, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(consumedDir, { recursive: true, mode: 0o700 });
   assertRealDirectory(requestsDir, manifest.channelDir);
   assertRealDirectory(responsesDir, manifest.channelDir);
-  const consumed = new Set<string>();
+  assertRealDirectory(consumedDir, path.dirname(manifestPath));
   while (!signal.aborted) {
     const current = readManifest(manifestPath);
     if (current.token !== manifest.token) return;
@@ -84,24 +98,32 @@ export function serveSandboxControl(manifestPath: string, signal: AbortSignal = 
           manifest
         );
         id = request.id;
-        if (consumed.has(id)) throw new Error('SANDBOX_CONTROL_REQUEST_REPLAYED');
-        consumed.add(id);
-        const result = spawnSync(
-          process.execPath,
-          ['--experimental-strip-types', '--no-warnings', process.argv[1]!, request.family, ...bindSandboxControlTask(request, manifest.taskId!)],
-          {
-            cwd: manifest.repoRoot,
-            encoding: 'utf8',
-            env: sandboxControlSafeEnv()
-          }
-        );
-        response = {
-          version: 1,
-          id,
-          exitCode: result.status ?? 1,
-          stdout: result.stdout ?? '',
-          stderr: result.stderr ?? ''
-        };
+        consumeRequest(consumedDir, id);
+        if (request.family === 'task-create') {
+          const result = createTask(request.candidate, { repoRoot: manifest.repoRoot });
+          response = {
+            version: 1, id,
+            exitCode: result.status === 'blocked' ? 2 : result.status === 'failed' ? 1 : 0,
+            stdout: `${JSON.stringify(result)}\n`, stderr: ''
+          };
+        } else {
+          const result = spawnSync(
+            process.execPath,
+            ['--experimental-strip-types', '--no-warnings', process.argv[1]!, request.family, ...bindSandboxControlTask(request, manifest.taskId!)],
+            {
+              cwd: manifest.repoRoot,
+              encoding: 'utf8',
+              env: sandboxControlSafeEnv()
+            }
+          );
+          response = {
+            version: 1,
+            id,
+            exitCode: result.status ?? 1,
+            stdout: result.stdout ?? '',
+            stderr: result.stderr ?? ''
+          };
+        }
       } catch (error) {
         response = {
           version: 1,

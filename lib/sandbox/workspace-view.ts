@@ -120,6 +120,10 @@ export function materializeSandboxControl(params: Readonly<{
 }>): SandboxControlSetup {
   const { root, channelDir, manifestPath } = sandboxControlPaths(params);
   assertSafeDirectory(root, path.resolve(params.base));
+  const consumedDir = path.join(root, 'consumed');
+  assertSafeDirectory(consumedDir, root);
+  fs.rmSync(consumedDir, { recursive: true, force: true });
+  fs.mkdirSync(consumedDir, { recursive: true, mode: 0o700 });
   for (const queue of ['requests', 'responses']) {
     const directory = path.join(channelDir, queue);
     assertSafeDirectory(directory, root);

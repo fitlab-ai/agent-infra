@@ -68,7 +68,7 @@ test("agent quickstart and readme avoid hard-coded setup wording", () => {
 
 test("Issue metadata workflow documents reference the internal Issue intent", () => {
   const runtime = [
-    "create-task", "import-issue", "analyze-task", "plan-task", "code-task",
+    "import-issue", "analyze-task", "plan-task", "code-task",
     "review-code", "block-task", "cancel-task", "complete-task"
   ].map((skill) => `.agents/skills/${skill}/SKILL.md`);
   const templates = runtime.flatMap((relativePath) => {
@@ -84,6 +84,14 @@ test("Issue metadata workflow documents reference the internal Issue intent", ()
   ].forEach((relativePath) => {
     assert.match(read(relativePath), /agent-infra-internal platform-issue (?:create|bind|sync)/, relativePath);
   });
+
+  for (const relativePath of [
+    ".agents/skills/create-task/SKILL.md",
+    "templates/.agents/skills/create-task/SKILL.en.md",
+    "templates/.agents/skills/create-task/SKILL.zh-CN.md"
+  ]) {
+    assert.match(read(relativePath), /agent-infra-internal task-create --input/, relativePath);
+  }
 });
 
 test("PR workflow documents reference typed PR and required-check intents", () => {

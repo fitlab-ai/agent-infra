@@ -7,8 +7,8 @@ import path from "node:path";
 
 const TEMPLATES_SKILLS = path.resolve(process.cwd(), "templates/.agents/skills");
 
-test("all 4 alloc-class SKILLs invoke task-short-id.js alloc inside execution steps", () => {
-  const skills = ["create-task", "import-issue", "import-codescan", "import-dependabot"];
+test("all direct alloc-class SKILLs invoke task-short-id.js alloc inside execution steps", () => {
+  const skills = ["import-issue", "import-codescan", "import-dependabot"];
   for (const skill of skills) {
     for (const lang of ["en", "zh-CN"]) {
       const file = path.join(TEMPLATES_SKILLS, skill, `SKILL.${lang}.md`);

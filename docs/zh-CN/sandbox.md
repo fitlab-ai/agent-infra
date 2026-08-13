@@ -119,6 +119,10 @@ ai sandbox create feature/proxy --inherit-proxy
 
 每个沙箱都有显式 workspace identity。task-bound 沙箱挂载独立的只读 workspace 视图，并且只把 `.agents/workspace/active/<TASK-id>` 以可写子挂载覆盖；其他状态下的全部任务都不可见。branch-only 沙箱获得同样稳定的目录结构，但短号注册表为空且不挂载任何宿主任务目录。宿主 workspace 根目录绝不会被挂载。
 
+两种 identity 都可以通过专用 typed `task-create` 控制请求创建新任务。沙箱 AI 只写一次版本化 candidate JSON；宿主负责严格验证、派生宿主字段、原子持久化、分配短号并尝试平台同步。该例外只授予“创建”能力：不会暴露宿主 workspace，不会让 branch-only 执行 lifecycle/orchestration，不会挂载新任务，也不会改变当前沙箱 identity。
+
+创建重试包含两层身份：重复 outer request ID 即使在 broker 重启后也会被拒绝；超时后调用方使用新的 outer ID，但必须复用原不可变 candidate 文件和业务幂等 key。语义相同的 JSON 返回原任务 `no-op`，任一字段值变化均 fail closed。平台失败时保留本地任务和短号，并返回结构化 warning。
+
 任务生命周期与编排命令通过每容器独立的控制通道执行，宿主 broker 会把每个请求重新绑定到容器标签中的完整 task ID。branch-only 容器、identity 不匹配、未知命令族和旧共享 workspace 容器都会 fail closed。`ai sandbox ls` 通过 `WORKSPACE` 与 `TASK` 列展示身份，`ai sandbox show` 展示同一份基于标签的事实。`legacy-invalid` 表示必须显式重建容器；同一分支切换身份时，需先执行 `ai sandbox rm <branch>`，再执行 `ai sandbox create <task-ref>`。
 
 原地恢复失败时，命令会在进入容器或调度 tmux 前停止，不会自动替换容器。只有显式传入 `--recreate` 才授权 container-only fallback：`ai sandbox start --recreate <target>`、`ai sandbox exec --recreate <target> [cmd...]` 或 `ai run <skill> <task-ref> --recreate`。对于 `sandbox exec`，只有 target 之前的 flag 由宿主解析；target 之后的 `--recreate` 会透传给容器命令。替换会保留 worktree、local branch、宿主管理的工具 seed、shell 配置与 `/share` 数据，但会丢弃旧 container ID、writable layer、普通 `/tmp`、进程、tmux session 与其他 RAM 状态；该路径绝不会执行完整的 `ai sandbox rm`。

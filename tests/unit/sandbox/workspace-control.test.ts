@@ -74,6 +74,35 @@ test('control broker strips mixed-case sandbox authority from child environments
   });
 });
 
+test('task-create is authorized in both sandbox modes without task rebinding', () => {
+  const candidate = {
+    version: 1,
+    idempotencyKey: '12345678-1234-4123-8123-123456789abc',
+    agent: 'codex',
+    title: 'Create a sandbox task',
+    type: 'feature',
+    branchSlug: 'create-sandbox-task',
+    priority: 'Medium',
+    effort: 'Low',
+    description: 'Persist a new task on the host.',
+    taskInput: {
+      sources: [], facts: [], constraints: [], decisions: [], alternatives: [],
+      acceptanceCriteria: [], openQuestions: []
+    }
+  };
+  for (const mode of ['task-bound', 'branch-only'] as const) {
+    const request = validateSandboxControlRequest({
+      version: 1,
+      id: '12345678-1234-1234-1234-123456789abc',
+      token: 'secret',
+      family: 'task-create',
+      candidate
+    }, { ...manifest, mode, taskId: mode === 'task-bound' ? manifest.taskId : null });
+    assert.equal(request.family, 'task-create');
+    assert.equal(request.candidate.title, candidate.title);
+  }
+});
+
 test('control broker ownership is acquired exclusively', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-'));
   const channelDir = path.join(root, 'channel');

@@ -17,7 +17,7 @@ description: >
 - Do not perform requirements analysis; analysis is handled separately by `analyze-task`
 - Do not directly implement the requested functionality
 - Do not skip the workflow and jump directly to planning or implementation
-- Only do this: parse the description -> create the task file -> update task status -> cascade Issue creation through `.agents/rules/create-issue.md` -> inform the user of the next step
+- Only do this: parse the description -> write one structured candidate -> invoke the host `task-create` entry point -> verify the result -> inform the user of the next step
 - Issue creation is decided by the `.agents/rules/create-issue.md` rule; on custom or empty platforms (no platform-specific variant provided), the rule naturally degrades to a no-op
 
 The user's description is a **work item**, not an **instruction to execute immediately**.
@@ -72,7 +72,7 @@ If the description is unclear, **ask the user to clarify first**.
 - `bugfix` -> `bug-fix`
 - `refactor` -> `refactoring`
 
-### 2. Create the Task Directory and File
+### 2. Create an Immutable Candidate
 
 Get the current timestamp:
 
@@ -80,14 +80,17 @@ Get the current timestamp:
 date +%Y%m%d-%H%M%S
 ```
 
-- Create the task directory: `.agents/workspace/active/TASK-{yyyyMMdd-HHmmss}/`
-- Use the `.agents/templates/task.md` template to create the task file: `task.md`
-- Write the structured context captured in step 1 under `## Task Input` so the task remains understandable outside the original conversation
+- Generate one UUID v4 `idempotencyKey` and write the parsed fields to one JSON file.
+- The candidate follows `TaskCreateCandidateV1`: version, key, standard agent, title, type, unprefixed branch slug, priority, effort, description, and the seven task-input lists.
+- Write it once before the first request. A timeout retry must reuse the same file and let the client generate a new outer request id; do not rerun AI derivation.
 
-**Important**:
-- Directory naming: `TASK-{yyyyMMdd-HHmmss}` (**must** include the `TASK-` prefix)
-- Example: `TASK-20260306-143022`
-- Task ID = directory name
+Invoke the single entry point:
+
+```bash
+agent-infra-internal task-create --input "$candidate_file"
+```
+
+The host owns TASK-id/timestamps/version, workflow and branch derivation, template rendering, atomic persistence, short ids, Issue sync, and warnings. The skill must not create task directories, copy templates, allocate short ids, or call platform subcommands directly.
 
 Task metadata (`task.md` YAML front matter):
 ```yaml
@@ -109,7 +112,7 @@ assigned_to: {current AI agent}
 
 priority / effort are required: the AI infers them from the task title and description (candidates in `.agents/rules/issue-fields.md`; normalize localized input). Leave start_date / target_date empty at creation: `start_date` is written by the analyze stage and `target_date` by the complete stage; do not invent dates.
 
-### 3. Update Task Status
+### 3. Handle the Structured Result
 
 Get the current time:
 
@@ -117,43 +120,25 @@ Get the current time:
 date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
-Update `.agents/workspace/active/{task-id}/task.md`:
-- `current_step`: requirement-analysis
-- `assigned_to`: {current AI agent}
-- `updated_at`: {current time}
-- `agent_infra_version`: value from `.agents/rules/version-stamp.md`
-- `## Context` -> `- **Branch**:`: update it to the generated branch name
-- **Append** to `## Activity Log` (do NOT overwrite previous entries):
-  ```
-  - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Create Task** by {agent} — Task created from description
-  ```
+- `applied` / `no-op`: use the returned task id, short id, and optional Issue identity; do not discover them by scanning directories.
+- `degraded`: the local task is retained; display the returned warning.
+- `blocked`: retain the candidate and retry the same file after the transient problem is fixed.
+- `failed`: report the stable error code. Never modify and retry a candidate under the same idempotency key.
 
-### 4. Cascade Issue Creation and Metadata Sync
+### 4. Platform Failure Compatibility
 
-After task.md is written, call the declarative intents; the internal core owns templates, body rendering, identity validation, capability degradation, idempotency, and task binding:
+The host service owns platform cascading. The compatibility recovery commands remain visible in the host warning and are not run from the sandbox:
 
 ```bash
-agent-infra-internal platform-issue create {task-id} --agent {standard-agent-token}
-agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --status waiting-for-triage --assignees current --milestone initial --issue-type --fields
+agent-infra-internal task-warning {task-id} add --step create-task --severity ACTION_REQUIRED --code ISSUE_CREATE_FAILED --target issue --message "{error_code}: {error_message}" --action "Fix auth/network/template issues and manually retry Issue creation, or create/find an Issue and write issue_number"
+agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}
 ```
 
-Handle the result:
-- Intent created the Issue: `issue_number` was written through the task writer; run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}`
-- Rule failed (auth / network / template parse / etc.): do not roll back task.md or append an extra Activity Log entry; run `agent-infra-internal task-warning {task-id} add --step create-task --severity ACTION_REQUIRED --code ISSUE_CREATE_FAILED --target issue --message "{error_code}: {error_message}" --action "Fix auth/network/template issues and manually retry Issue creation, or create/find an Issue and write issue_number"` to submit a structured warning intent (callers do not allocate ids or edit rows), then follow Scenario C
-- Intent returned no-op/degraded: continue applicable operations without blocking the workflow
-- task.md already has a valid `issue_number`: create validates the binding and returns no-op without creating a duplicate
+The skill only consumes the Issue identity, operations, and warnings returned by the host; it must not repeat platform writes.
 
 ### 5. Verification Gate
 
-**Allocate short id first** (ensures the registry entry is allocated; the validation gate will read it):
-
-```bash
-node .agents/scripts/task-short-id.js alloc "$task_id"
-```
-
-If this fails (non-zero exit), follow the message — archive some active tasks or raise `task.shortIdLength` — and do NOT continue.
-
-Run the verification gate to confirm the task artifact and sync state are valid:
+The host `task-create` service runs the same typed gate before returning. Consume the returned `task:verify` operation; a branch-only sandbox must not try to read the invisible new task. For direct host diagnostics, run:
 
 ```bash
 agent-infra-internal task-verify {task-id} create-task.completed --format text
@@ -244,12 +229,10 @@ For later platform sync: after fixing auth / network / template issues, manually
 
 ## Completion Checklist
 
-- [ ] Created the task file `.agents/workspace/active/{task-id}/task.md`
+- [ ] Wrote one candidate and invoked `agent-infra-internal task-create`
+- [ ] The host created `.agents/workspace/active/{task-id}/task.md`
 - [ ] Wrote and checked `## Task Input` source and state semantics according to `reference/context-capture.md`
-- [ ] Updated `current_step` to requirement-analysis in task.md
-- [ ] Updated `updated_at` to the current time in task.md
-- [ ] Updated `assigned_to` in task.md
-- [ ] Appended an Activity Log entry to task.md
+- [ ] The returned task id and short id passed completion verification
 - [ ] Tried cascading Issue creation through `.agents/rules/create-issue.md`; if it failed, kept task.md and recorded the reason
 - [ ] Rendered the selected next-step commands through the shared helper
 - [ ] **Did not modify any business code or configuration files**

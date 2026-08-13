@@ -18,6 +18,12 @@ if (
   sandboxControl(['client', command, ...process.argv.slice(3)]);
 } else switch (command) {
 
+  case 'task-create': {
+    const { taskCreate } = await import('../lib/internal/task-create.ts');
+    taskCreate(process.argv.slice(3));
+    break;
+  }
+
   case 'sandbox-control': {
     const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
     sandboxControl(process.argv.slice(3));

@@ -1,5 +1,7 @@
+import { validateTaskCreateCandidate, type TaskCreateCandidateV1 } from '../../task/create.ts';
+
 export const SANDBOX_CONTROL_MAX_BYTES = 64 * 1024;
-export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration'] as const;
+export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration', 'task-create'] as const;
 
 export type SandboxControlFamily = typeof SANDBOX_CONTROL_FAMILIES[number];
 
@@ -15,13 +17,23 @@ export type SandboxControlManifest = Readonly<{
   channelDir: string;
 }>;
 
-export type SandboxControlRequest = Readonly<{
+export type SandboxTaskCommandRequest = Readonly<{
   version: 1;
   id: string;
   token: string;
-  family: SandboxControlFamily;
+  family: 'task-lifecycle' | 'task-orchestration';
   args: string[];
 }>;
+
+export type SandboxTaskCreateRequest = Readonly<{
+  version: 1;
+  id: string;
+  token: string;
+  family: 'task-create';
+  candidate: TaskCreateCandidateV1;
+}>;
+
+export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskCreateRequest;
 
 export type SandboxControlResponse = Readonly<{
   version: 1;
@@ -42,7 +54,7 @@ export function validateSandboxControlRequest(
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('SANDBOX_CONTROL_REQUEST_INVALID: request must be an object');
   }
-  const request = value as Partial<SandboxControlRequest>;
+  const request = value as Record<string, unknown>;
   if (
     request.version !== 1
     || typeof request.id !== 'string'
@@ -50,6 +62,22 @@ export function validateSandboxControlRequest(
     || request.token !== manifest.token
     || typeof request.family !== 'string'
     || !isSandboxControlFamily(request.family)
+  ) {
+    throw new Error('SANDBOX_CONTROL_REQUEST_INVALID: request schema or authorization is invalid');
+  }
+  if (Buffer.byteLength(JSON.stringify(request), 'utf8') > SANDBOX_CONTROL_MAX_BYTES) {
+    throw new Error('SANDBOX_CONTROL_REQUEST_TOO_LARGE: request exceeds the control limit');
+  }
+  if (request.family === 'task-create') {
+    const keys = Object.keys(request).sort().join(',');
+    if (keys !== ['candidate', 'family', 'id', 'token', 'version'].sort().join(',')) {
+      throw new Error('SANDBOX_CONTROL_REQUEST_INVALID: request schema or authorization is invalid');
+    }
+    return { ...request, candidate: validateTaskCreateCandidate(request.candidate) } as SandboxTaskCreateRequest;
+  }
+  const keys = Object.keys(request).sort().join(',');
+  if (
+    keys !== ['args', 'family', 'id', 'token', 'version'].sort().join(',')
     || !Array.isArray(request.args)
     || !request.args.every((arg) => typeof arg === 'string')
   ) {
@@ -58,16 +86,16 @@ export function validateSandboxControlRequest(
   if (manifest.mode !== 'task-bound' || !manifest.taskId) {
     throw new Error('SANDBOX_CONTROL_BRANCH_ONLY: branch-only sandboxes cannot coordinate tasks');
   }
-  if (Buffer.byteLength(JSON.stringify(request), 'utf8') > SANDBOX_CONTROL_MAX_BYTES) {
-    throw new Error('SANDBOX_CONTROL_REQUEST_TOO_LARGE: request exceeds the control limit');
-  }
-  return request as SandboxControlRequest;
+  return request as SandboxTaskCommandRequest;
 }
 
 export function bindSandboxControlTask(
   request: SandboxControlRequest,
   taskId: string
 ): string[] {
+  if (request.family === 'task-create') {
+    throw new Error('SANDBOX_CONTROL_REQUEST_INVALID: task-create requests do not bind a current task');
+  }
   if (request.args.length === 0) {
     throw new Error('SANDBOX_CONTROL_REQUEST_INVALID: command arguments are required');
   }
