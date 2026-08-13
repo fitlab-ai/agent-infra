@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createCodexLifecycleStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
+import { assertModeBits } from '../../helpers/platform.ts';
 
 test('Codex lifecycle store persists only normalized evidence and consumes once', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-store-'));
@@ -30,7 +31,7 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
   const raw = fs.readFileSync(record.path, 'utf8');
   assert.equal(raw.includes('prompt'), false);
   assert.equal(raw.includes('transcript'), false);
-  assert.equal(fs.statSync(record.path).mode & 0o777, 0o600);
+  assertModeBits(record.path, 0o600);
 
   store.apply({
     type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed'
