@@ -31,9 +31,10 @@ function fixture() {
             id: 'child', parentThreadId: 'parent', forkedFromId: null,
             source: { subAgent: { thread_spawn: { parent_thread_id: 'parent' } } },
             turns: message.params.includeTurns ? [{ id: 'child-turn', status: 'completed' }] : []
-          },
-          model: 'model', reasoningEffort: 'high'
-        } : {};
+          }
+        } : message.method === 'thread/resume' ? {
+          thread: { id: 'child' }, model: 'model', reasoningEffort: 'high'
+        } : message.method === 'thread/unsubscribe' ? { status: 'unsubscribed' } : {};
         process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
       });
     } else {
@@ -105,7 +106,7 @@ test('codex-lifecycle resolve-stop fails until the stop hook makes evidence read
     assert.equal(result.status, 0, result.stderr);
   }
   const start = run(root, env, ['resolve-start', '--child-id', 'child']);
-  assert.equal(start.status, 0, start.stderr);
+  assert.equal(start.status, 0, `${start.stderr}\n${start.stdout}`);
 
   const premature = run(root, env, ['resolve-stop', '--child-id', 'child']);
   assert.equal(premature.status, 1);

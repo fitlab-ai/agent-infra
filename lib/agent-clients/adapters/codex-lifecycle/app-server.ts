@@ -14,6 +14,13 @@ type ThreadResolution = Readonly<{
   settings: Extract<CodexLifecycleEvent, { type: 'app-settings' }>;
 }>;
 
+type DiscoveredHook = Readonly<{
+  eventName: string;
+  matcher: string | null;
+  command: string;
+  enabled: boolean;
+}>;
+
 type AppServerTransportOptions = Readonly<{
   command?: string;
   args?: readonly string[];
@@ -64,6 +71,31 @@ function validateCodexLifecycleHookConfig(value: unknown): void {
   if (!valid) throw new Error('CODEX_PREFLIGHT_HOOKS_INVALID: lifecycle hooks are invalid');
 }
 
+function parseCodexHooksList(value: unknown, repoRoot: string): readonly DiscoveredHook[] {
+  const root = object(value);
+  const entries = Array.isArray(root?.data) ? root.data : [];
+  const entry = entries.map(object).find((candidate) => candidate?.cwd === repoRoot);
+  const errors = Array.isArray(entry?.errors) ? entry.errors : [];
+  if (errors.length) throw new Error(`CODEX_PREFLIGHT_HOOK_DISCOVERY_FAILED: ${errors.map(String).join('; ')}`);
+  const hooks = (Array.isArray(entry?.hooks) ? entry.hooks : [])
+    .map(object)
+    .filter((hook): hook is JsonObject => hook !== null)
+    .map((hook) => Object.freeze({
+      eventName: String(hook.eventName ?? ''),
+      matcher: typeof hook.matcher === 'string' ? hook.matcher : null,
+      command: String(hook.command ?? ''),
+      enabled: hook.enabled === true
+    }));
+  const valid = LIFECYCLE_HOOKS.every(({ event, matcher, phase }) => hooks.some((hook) =>
+    hook.eventName === event.replace(/^./, (character) => character.toLowerCase())
+    && hook.matcher === matcher
+    && hook.command === `node "$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js" --client codex --event ${phase}`
+    && hook.enabled
+  ));
+  if (!valid) throw new Error('CODEX_PREFLIGHT_HOOKS_NOT_LOADED: lifecycle hooks are not loaded for this workspace');
+  return Object.freeze(hooks);
+}
+
 function hasCodexRuntimeLiveness(
   runtimeRoot: string,
   hookDefinitionHash: string,
@@ -88,20 +120,24 @@ function hasCodexRuntimeLiveness(
     });
 }
 
-function parseCodexThreadResolution(value: unknown): ThreadResolution {
-  const root = object(value);
-  const thread = object(root?.thread);
+function parseCodexThreadResolution(readValue: unknown, resumeValue: unknown): ThreadResolution {
+  const readRoot = object(readValue);
+  const resumeRoot = object(resumeValue);
+  const thread = object(readRoot?.thread);
+  const resumedThread = object(resumeRoot?.thread);
   const source = object(thread?.source);
   const subAgent = object(source?.subAgent);
   const threadSpawn = object(subAgent?.thread_spawn);
   const childThreadId = nonEmpty(thread?.id);
   const parentThreadId = nonEmpty(thread?.parentThreadId);
   const sourceParentThreadId = nonEmpty(threadSpawn?.parent_thread_id);
-  const model = nonEmpty(root?.model);
-  const reasoningEffort = nonEmpty(root?.reasoningEffort ?? object(root?.settings)?.effort);
+  const resumedChildThreadId = nonEmpty(resumedThread?.id);
+  const model = nonEmpty(resumeRoot?.model);
+  const reasoningEffort = nonEmpty(resumeRoot?.reasoningEffort ?? object(resumeRoot?.settings)?.effort);
   const forkedFromId = thread?.forkedFromId;
   if (
     !childThreadId
+    || resumedChildThreadId !== childThreadId
     || !parentThreadId
     || !sourceParentThreadId
     || !model
@@ -297,11 +333,12 @@ async function resolveCodexThread(
     const readResult = object(await transport.request('thread/read', { threadId: childThreadId, includeTurns: false }));
     const readThread = object(readResult?.thread);
     if (nonEmpty(readThread?.id) !== childThreadId) throw new Error('Codex App Server returned the wrong child thread');
+    const resumeResult = await transport.request('thread/resume', { threadId: childThreadId });
     let resolution: ThreadResolution;
     try {
-      resolution = parseCodexThreadResolution(readResult);
+      resolution = parseCodexThreadResolution(readResult, resumeResult);
     } catch {
-      throw new Error('Codex App Server settings are unavailable without thread/resume; refusing an unverified state-changing fallback');
+      throw new Error('Codex App Server resumed settings are unavailable');
     }
     const reroutes = transport.notifications
       .filter((entry) => entry.method === 'model/rerouted')
@@ -309,6 +346,11 @@ async function resolveCodexThread(
       .filter((event) => event.childThreadId === childThreadId);
     return Object.freeze({ resolution, reroutes: Object.freeze(reroutes), diagnostics: transport.diagnostics });
   } finally {
+    try {
+      await transport.request('thread/unsubscribe', { threadId: childThreadId });
+    } catch {
+      // Closing the short-lived transport still removes the subscription.
+    }
     transport.close();
   }
 }
@@ -370,11 +412,16 @@ async function preflightCodexLifecycleEvidence(
 
   const transport = new CodexAppServerTransport();
   transport.start();
-  try { await transport.initialize(); } finally { transport.close(); }
+  let discoveredHooks: readonly DiscoveredHook[];
+  try {
+    await transport.initialize();
+    discoveredHooks = parseCodexHooksList(await transport.request('hooks/list', { cwds: [repoRoot] }), repoRoot);
+  } finally { transport.close(); }
   return Object.freeze({
     cliVersion: match[1],
     hookDefinitionHash,
     staticReady: true,
+    discoveredHooks,
     runtimeLiveness,
     diagnostics: transport.diagnostics
   });
@@ -384,6 +431,7 @@ export {
   CodexAppServerTransport,
   hasCodexRuntimeLiveness,
   parseCodexModelReroute,
+  parseCodexHooksList,
   parseCodexThreadResolution,
   parseCodexTurnCompleted,
   preflightCodexLifecycleEvidence,
