@@ -14,6 +14,7 @@ interface RunOptions {
   client?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  event?: string;
   hook?: string;
 }
 
@@ -24,9 +25,11 @@ function run(input: string, options: RunOptions = {}) {
     client = 'claude-code',
     cwd = path.resolve('.'),
     env = process.env,
+    event,
     hook = HOOK
   } = options;
-  return spawnSync('node', [hook, '--client', client], { cwd, input, encoding: 'utf8', env });
+  const args = [hook, '--client', client, ...(event ? ['--event', event] : [])];
+  return spawnSync('node', args, { cwd, input, encoding: 'utf8', env });
 }
 
 function createHookFixture(localCliState: LocalCliState) {
@@ -40,7 +43,7 @@ function createHookFixture(localCliState: LocalCliState) {
   fs.mkdirSync(cwd, { recursive: true });
   fs.copyFileSync(HOOK, hook);
   fs.writeFileSync(path.join(repoDir, 'package.json'), '{"type":"module"}\n');
-  fs.writeFileSync(pathCli, "process.stdout.write(JSON.stringify({ source: 'path', args: process.argv.slice(2) }))\n");
+  fs.writeFileSync(pathCli, "let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',c=>input+=c); process.stdin.on('end',()=>process.stdout.write(JSON.stringify({ source: 'path', args: process.argv.slice(2), ...(input ? { input: JSON.parse(input) } : {}) })))\n");
   writeNodeCommandShim(path.join(binDir, 'agent-infra-internal'), pathCli);
 
   if (localCliState !== 'missing') {
@@ -48,9 +51,12 @@ function createHookFixture(localCliState: LocalCliState) {
     fs.mkdirSync(path.dirname(localCli), { recursive: true });
     const localCliSource = localCliState === 'broken'
       ? "process.stderr.write('Local lifecycle CLI failed\\n'); process.exit(23)\n"
-      : "process.stdout.write(JSON.stringify({ source: 'local', args: process.argv.slice(2) }))\n";
+      : "let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',c=>input+=c); process.stdin.on('end',()=>process.stdout.write(JSON.stringify({ source: 'local', args: process.argv.slice(2), ...(input ? { input: JSON.parse(input) } : {}) })))\n";
     fs.writeFileSync(localCli, localCliSource);
   }
+
+  fs.mkdirSync(path.join(repoDir, '.codex'), { recursive: true });
+  fs.copyFileSync(path.resolve('.codex/hooks.json'), path.join(repoDir, '.codex', 'hooks.json'));
 
   return { cwd, env: envWithPrependedPath(process.env, binDir), hook };
 }
@@ -164,4 +170,40 @@ test('lifecycle hook rejects malformed payloads before invoking core', () => {
   const result = run('{');
   assert.equal(result.status, 1);
   assert.equal(result.stderr, 'Lifecycle delegation hook received invalid JSON\n');
+});
+
+test('lifecycle hook normalizes Codex spawn and child events through stdin', () => {
+  const fixture = createHookFixture('working');
+  const pre = run(
+    fs.readFileSync(path.join(FIXTURES, 'codex-lifecycle-start.json'), 'utf8'),
+    { ...fixture, client: 'codex', event: 'pre-tool', hook: fixture.hook }
+  );
+  assert.equal(pre.status, 0, pre.stderr);
+  const parsed = JSON.parse(pre.stdout);
+  assert.deepEqual(parsed.args, ['codex-lifecycle', 'hook-event', '--event', 'pre-tool']);
+  assert.deepEqual({
+    sessionId: parsed.input.sessionId,
+    turnId: parsed.input.turnId,
+    toolUseId: parsed.input.toolUseId,
+    nativeAgent: parsed.input.nativeAgent,
+    requestedModel: parsed.input.requestedModel,
+    requestedReasoningEffort: parsed.input.requestedReasoningEffort
+  }, {
+    sessionId: 'codex-parent',
+    turnId: 'codex-parent-turn',
+    toolUseId: 'codex-spawn-tool',
+    nativeAgent: 'agent-infra-lifecycle-executor',
+    requestedModel: 'gpt-5.6-sol',
+    requestedReasoningEffort: 'high'
+  });
+  assert.match(parsed.input.hookDefinitionHash, /^[a-f0-9]{64}$/);
+
+  const startPayload = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'codex-lifecycle-stop.json'), 'utf8'));
+  const child = run(JSON.stringify({ ...startPayload, hook_event_name: 'SubagentStart' }), {
+    ...fixture, client: 'codex', event: 'subagent-start', hook: fixture.hook
+  });
+  assert.equal(child.status, 0, child.stderr);
+  const childParsed = JSON.parse(child.stdout);
+  assert.deepEqual(childParsed.args, ['codex-lifecycle', 'hook-event', '--event', 'subagent-start']);
+  assert.equal(childParsed.input.childThreadId, 'codex-child');
 });

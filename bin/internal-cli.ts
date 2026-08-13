@@ -34,6 +34,11 @@ if (
     agentClient(process.argv.slice(3));
     break;
   }
+  case 'codex-lifecycle': {
+    const { codexLifecycle } = await import('../lib/internal/codex-lifecycle.ts');
+    await codexLifecycle(process.argv.slice(3));
+    break;
+  }
   case 'git-workflow': {
     const { gitWorkflow } = await import('../lib/internal/git-workflow.ts');
     gitWorkflow(process.argv.slice(3));

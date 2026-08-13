@@ -1,12 +1,15 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const MAX_INPUT_BYTES = 64 * 1024;
 const localInternalCli = fileURLToPath(new URL('../../dist/bin/internal-cli.js', import.meta.url));
+const codexHooks = fileURLToPath(new URL('../../.codex/hooks.json', import.meta.url));
 const clientIndex = process.argv.indexOf('--client');
 const client = clientIndex >= 0 ? process.argv[clientIndex + 1] : '';
-if (client !== 'claude-code') {
+if (client !== 'claude-code' && client !== 'codex') {
   process.stderr.write('Lifecycle delegation hook requires a supported --client value\n');
   process.exit(1);
 }
@@ -27,9 +30,50 @@ process.stdin.on('end', () => {
     process.stderr.write('Lifecycle delegation hook received invalid JSON\n');
     process.exit(1);
   }
-  const hook = String(event.hook_event_name || event.event || '').toLowerCase();
-  const nativeAgent = event.agent_name || event.agent_type || event.agent?.name;
+  const phaseIndex = process.argv.indexOf('--event');
+  const explicitPhase = phaseIndex >= 0 ? process.argv[phaseIndex + 1] : '';
+  const hook = String(explicitPhase || event.hook_event_name || event.event || '').toLowerCase();
+  const toolInput = event.tool_input && typeof event.tool_input === 'object' ? event.tool_input : {};
+  const nativeAgent = event.agent_name || event.agent_type || event.agent?.name
+    || toolInput.agent_type || toolInput.agent || toolInput.name;
   if (!String(nativeAgent || '').startsWith('agent-infra-lifecycle-')) process.exit(0);
+  if (client === 'codex') {
+    const phases = new Set(['pre-tool', 'subagent-start', 'post-tool', 'subagent-stop']);
+    if (!phases.has(hook)) {
+      process.stderr.write('Managed Codex lifecycle hook event has an unknown type\n');
+      process.exit(1);
+    }
+    const hookDefinitionHash = createHash('sha256').update(readFileSync(codexHooks)).digest('hex');
+    const normalized = {
+      sessionId: String(event.session_id || ''),
+      turnId: String(event.turn_id || ''),
+      toolUseId: String(event.tool_use_id || ''),
+      childThreadId: String(event.agent_id || event.child_id || event.thread_id || event.tool_response?.agent_id || ''),
+      nativeAgent: String(nativeAgent),
+      requestedModel: String(toolInput.model || ''),
+      requestedReasoningEffort: String(toolInput.reasoning_effort || toolInput.reasoningEffort || ''),
+      hookDefinitionHash
+    };
+    const args = ['codex-lifecycle', 'hook-event', '--event', hook];
+    try {
+      const useLocal = existsSync(localInternalCli);
+      const command = useLocal ? process.execPath : 'agent-infra-internal';
+      const commandArgs = useLocal ? [localInternalCli, ...args] : args;
+      const output = execFileSync(command, commandArgs, {
+        encoding: 'utf8',
+        input: JSON.stringify(normalized),
+        shell: !useLocal && process.platform === 'win32',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5_000
+      });
+      process.stdout.write(output);
+    } catch (error) {
+      if (error.stdout) process.stdout.write(String(error.stdout));
+      if (error.stderr) process.stderr.write(String(error.stderr));
+      process.exit(typeof error.status === 'number' ? error.status : 1);
+    }
+    return;
+  }
   const start = hook.includes('start');
   const stop = hook.includes('stop');
   if (!start && !stop) {

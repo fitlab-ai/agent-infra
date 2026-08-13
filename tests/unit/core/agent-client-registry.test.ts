@@ -213,6 +213,15 @@ test('adapter definitions validate their closed contract without mutating input'
   }
 });
 
+test('Codex advertises App Server evidence without enabling orchestration', () => {
+  const codex = getAgentClientAdapter('codex');
+  assert.deepEqual(codex.delegationEvidence, {
+    actualModel: 'app-server',
+    actualReasoningEffort: 'app-server'
+  });
+  assert.equal(codex.capabilities.orchestration.level, 'unsupported');
+});
+
 test('adapter custom commands validate paths, placeholders, metadata, and immutability', () => {
   const adapter = defineAgentClientAdapter(adapterInput({
     project: {

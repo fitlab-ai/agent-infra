@@ -25,8 +25,8 @@ const codexAdapter = defineAgentClientAdapter({
     guidance: 'Use the host model picker for the complete model and reasoning-effort catalog.'
   },
   delegationEvidence: {
-    actualModel: 'unavailable',
-    actualReasoningEffort: 'unavailable'
+    actualModel: 'app-server',
+    actualReasoningEffort: 'app-server'
   },
   project: {
     ownedPathPrefixes: ['.codex/'],

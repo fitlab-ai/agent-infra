@@ -176,7 +176,7 @@ The most-used lifecycle commands, in delivery order. The command prefix varies b
 | Command | Purpose |
 |---------|---------|
 | `create-task` / `import-issue` | Start a task from a description or a GitHub Issue |
-| `run-task` | Resume the lifecycle with fresh isolated executors/reviewers when the selected client exposes verified actual model/effort evidence; current built-in clients, including Claude Code and Codex, fail closed before delegation because their native start events do not expose all required evidence |
+| `run-task` | Resume the lifecycle with fresh isolated executors/reviewers when the selected client exposes verified actual model/effort evidence; Codex now has an experimental Hooks + App Server evidence channel, but orchestration remains disabled until that channel is connected to delegation receipts |
 | `analyze-task` → `review-analysis` | Capture scope and risks, then review the analysis |
 | `plan-task` → `review-plan` | Design the approach, then review the plan |
 | `code-task` → `review-code` | Implement and test, then run a structured code review |

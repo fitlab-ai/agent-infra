@@ -175,7 +175,7 @@ ai agent-client configure
 | 命令 | 用途 |
 |------|------|
 | `create-task` / `import-issue` | 从描述或 GitHub Issue 创建任务 |
-| `run-task` | 当所选客户端能提供已验证的 actual model/effort 证据时，用 fresh 隔离 executor/reviewer 续跑生命周期；当前内建客户端（含 Claude Code 与 Codex）因原生 start 事件未暴露全部必需证据，会在委派前失败关闭 |
+| `run-task` | 当所选客户端能提供已验证的 actual model/effort 证据时，用 fresh 隔离 executor/reviewer 续跑生命周期；Codex 现已具备实验性的 Hooks + App Server 证据通道，但在该通道接入 delegation receipt 前仍不会启用 orchestration |
 | `analyze-task` → `review-analysis` | 明确范围与风险，再审查分析 |
 | `plan-task` → `review-plan` | 设计实现路径，再审查方案 |
 | `code-task` → `review-code` | 实现并测试，再执行结构化代码审查 |

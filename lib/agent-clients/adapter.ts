@@ -39,8 +39,8 @@ type AgentClientModelSelectionContext =
     }>;
 
 type AgentClientDelegationEvidence = Readonly<{
-  actualModel: 'host-event' | 'unavailable';
-  actualReasoningEffort: 'host-event' | 'spawn-ack' | 'unavailable';
+  actualModel: 'host-event' | 'app-server' | 'unavailable';
+  actualReasoningEffort: 'host-event' | 'app-server' | 'spawn-ack' | 'unavailable';
 }>;
 
 type AgentClientSeedCommand = Readonly<{
@@ -331,8 +331,8 @@ function defineAgentClientAdapter(
   const evidence = candidate.delegationEvidence;
   if (
     !evidence
-    || !['host-event', 'unavailable'].includes(evidence.actualModel)
-    || !['host-event', 'spawn-ack', 'unavailable'].includes(evidence.actualReasoningEffort)
+    || !['host-event', 'app-server', 'unavailable'].includes(evidence.actualModel)
+    || !['host-event', 'app-server', 'spawn-ack', 'unavailable'].includes(evidence.actualReasoningEffort)
   ) {
     throw new Error(`Agent Client '${candidate.id}' has invalid delegation evidence`);
   }

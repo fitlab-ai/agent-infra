@@ -499,25 +499,35 @@ test("version format validation hooks are wired into templates and local config"
   ([
     [".codex/hooks.json", rootCodexHooks],
     ["templates/.codex/hooks.json", templateCodexHooks]
-  ] as Array<[string, { hooks?: { PreToolUse?: unknown; PostToolUse?: unknown } }]>).forEach(([relativePath, settings]) => {
+  ] as Array<[string, { hooks?: Record<string, Array<{ matcher: string; hooks: Array<{ command: string }> }>> }]>).forEach(([relativePath, settings]) => {
+    const preToolUse = settings.hooks?.PreToolUse ?? [];
     assert.deepEqual(
-      settings.hooks?.PreToolUse,
-      [
-        {
-          matcher: "^Bash$",
-          hooks: [
-            {
-              type: "command",
-              command: "sh \"$(git rev-parse --show-toplevel)/.agents/hooks/check-version-format.sh\"",
-              timeout: 5,
-              statusMessage: "Checking template version before git commit"
-            }
-          ]
-        }
-      ],
+      preToolUse.find((entry) => entry.matcher === "^Bash$"),
+      {
+        matcher: "^Bash$",
+        hooks: [
+          {
+            type: "command",
+            command: "sh \"$(git rev-parse --show-toplevel)/.agents/hooks/check-version-format.sh\"",
+            timeout: 5,
+            statusMessage: "Checking template version before git commit"
+          }
+        ]
+      },
       `${relativePath} should configure the Codex PreToolUse version format validation hook`
     );
-    assert.equal(settings.hooks?.PostToolUse, undefined, `${relativePath} should not configure a PostToolUse reminder hook`);
+    const lifecycle = [
+      ["PreToolUse", "^Agent$", "pre-tool"],
+      ["PostToolUse", "^Agent$", "post-tool"],
+      ["SubagentStart", "^agent-infra-lifecycle-(executor|reviewer)$", "subagent-start"],
+      ["SubagentStop", "^agent-infra-lifecycle-(executor|reviewer)$", "subagent-stop"]
+    ] as const;
+    for (const [event, matcher, phase] of lifecycle) {
+      const entry = settings.hooks?.[event]?.find((candidate) => candidate.matcher === matcher);
+      assert.equal(entry?.matcher, matcher, `${relativePath} should configure ${event} lifecycle matching`);
+      assert.equal(entry?.hooks.length, 1, `${relativePath} should configure one ${event} lifecycle command`);
+      assert.match(entry?.hooks[0]?.command ?? '', new RegExp(`--client codex --event ${phase}$`));
+    }
   });
 });
 
