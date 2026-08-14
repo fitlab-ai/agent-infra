@@ -1,5 +1,6 @@
 import {
   preflightCodexLifecycleEvidence,
+  resolveCodexSpawnedChild,
   resolveCodexTerminal,
   resolveCodexThread
 } from '../agent-clients/adapters/codex-lifecycle/app-server.ts';
@@ -22,6 +23,17 @@ type CodexBridgeOptions = Readonly<{
   resolveThread?: typeof resolveCodexThread;
   resolveTerminal?: typeof resolveCodexTerminal;
   orchestrationOptions?: OrchestrationOptions;
+}>;
+
+type CodexSpawnIdentity = Readonly<{
+  sessionId: string;
+  turnId: string;
+  toolUseId: string;
+  transcriptPath: string;
+  nativeAgent: string;
+  taskName: string;
+  requestedModel?: string;
+  requestedReasoningEffort?: string;
 }>;
 
 function coreOptions(options: CodexBridgeOptions): OrchestrationOptions {
@@ -105,6 +117,33 @@ async function activateCodexOrchestrationDelegation(
   }
 }
 
+async function activateCodexSpawnDelegation(
+  spawn: CodexSpawnIdentity,
+  options: CodexBridgeOptions = {}
+): Promise<OrchestrationResult> {
+  try {
+    const store = requiredStore(options);
+    const childThreadId = resolveCodexSpawnedChild(spawn.transcriptPath, spawn);
+    const resolved = await (options.resolveThread ?? resolveCodexThread)(childThreadId);
+    store.applyToSpawn(spawn, {
+      type: 'hook-child',
+      sessionId: spawn.sessionId,
+      turnId: spawn.turnId,
+      childThreadId,
+      parentThreadId: resolved.resolution.thread.parentThreadId,
+      nativeAgent: spawn.nativeAgent,
+      source: 'parent-rollout'
+    });
+    return activateCodexOrchestrationDelegation(childThreadId, {
+      ...options,
+      store,
+      resolveThread: async () => resolved
+    });
+  } catch (error) {
+    return pauseBridge('ORCHESTRATION_CODEX_START_FAILED', error instanceof Error ? error.message : String(error), options);
+  }
+}
+
 async function sealCodexOrchestrationDelegation(
   childThreadId: string,
   options: CodexBridgeOptions = {}
@@ -138,6 +177,44 @@ async function sealCodexOrchestrationDelegation(
   }
 }
 
+async function sealCodexParentDelegation(
+  parentThreadId: string,
+  options: CodexBridgeOptions = {}
+): Promise<OrchestrationResult> {
+  try {
+    const store = requiredStore(options);
+    const candidates = store.findByParent(parentThreadId);
+    if (!candidates.length) return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
+    for (const consumed of candidates.filter((record) => record.consumer)) {
+      const replayed = await sealCodexOrchestrationDelegation(consumed.state.startEvidence!.childThreadId, options);
+      if (replayed.error?.code !== 'ORCHESTRATION_DELEGATION_MISSING') return replayed;
+    }
+    const active = candidates.find((record) => !record.consumer);
+    if (!active) return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
+    const start = active.state.startEvidence!;
+    const child = active.state.child!;
+    if (!active.state.terminal) {
+      store.apply(await (options.resolveTerminal ?? resolveCodexTerminal)(start.childThreadId));
+    }
+    if (!store.read(start.childThreadId).state.stop) {
+      store.apply({
+        type: 'hook-stop',
+        sessionId: parentThreadId,
+        turnId: child.turnId,
+        childThreadId: start.childThreadId,
+        nativeAgent: start.nativeAgent,
+        source: 'parent-rollout'
+      });
+    }
+    return sealCodexOrchestrationDelegation(start.childThreadId, options);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'CODEX_TURN_NOT_TERMINAL') {
+      return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'The matching Codex child has not completed');
+    }
+    return pauseBridge('ORCHESTRATION_CODEX_STOP_FAILED', error instanceof Error ? error.message : String(error), options);
+  }
+}
+
 function reconcileCodexOrchestrationDelegation(
   childThreadId: string,
   options: CodexBridgeOptions = {}
@@ -147,8 +224,10 @@ function reconcileCodexOrchestrationDelegation(
 
 export {
   activateCodexOrchestrationDelegation,
+  activateCodexSpawnDelegation,
   prepareCodexOrchestrationDelegation,
   reconcileCodexOrchestrationDelegation,
+  sealCodexParentDelegation,
   sealCodexOrchestrationDelegation
 };
 export type { CodexBridgeOptions };

@@ -39,7 +39,7 @@ type CodexRuntimeIdentity = Readonly<{
 
 const LIFECYCLE_HOOKS = Object.freeze([
   Object.freeze({ event: 'PreToolUse', matcher: '^collaborationspawn_agent$', phase: 'pre-tool' }),
-  Object.freeze({ event: 'PostToolUse', matcher: '^collaborationspawn_agent$', phase: 'post-tool' }),
+  Object.freeze({ event: 'PostToolUse', matcher: '', phase: 'post-tool' }),
   Object.freeze({ event: 'SubagentStart', matcher: '', phase: 'subagent-start' }),
   Object.freeze({ event: 'SubagentStop', matcher: '', phase: 'subagent-stop' })
 ]);
@@ -52,6 +52,65 @@ function object(value: unknown): JsonObject | null {
 
 function nonEmpty(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function resolveCodexSpawnedChild(
+  transcriptPath: string,
+  expected: Readonly<{
+    sessionId: string;
+    toolUseId: string;
+    nativeAgent: string;
+    taskName: string;
+    requestedModel?: string;
+    requestedReasoningEffort?: string;
+  }>
+): string {
+  const name = path.basename(transcriptPath);
+  if (!transcriptPath || (!name.endsWith(`-${expected.sessionId}.jsonl`) && name !== `${expected.sessionId}.jsonl`)) {
+    throw new Error('Codex parent rollout path is invalid');
+  }
+  const stat = fs.lstatSync(transcriptPath);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Codex parent rollout is not a regular file');
+  const maxBytes = 8 * 1024 * 1024;
+  const offset = Math.max(0, stat.size - maxBytes);
+  const buffer = Buffer.alloc(stat.size - offset);
+  const descriptor = fs.openSync(transcriptPath, 'r');
+  try {
+    fs.readSync(descriptor, buffer, 0, buffer.length, offset);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  let text = buffer.toString('utf8');
+  if (offset) text = text.slice(text.indexOf('\n') + 1);
+  const records = text.split(/\r?\n/).filter(Boolean).map((line) => object(JSON.parse(line))).filter(Boolean);
+  const calls = records.filter((record) => {
+    const payload = object(record?.payload);
+    return record?.type === 'response_item'
+      && payload?.type === 'function_call'
+      && payload.call_id === expected.toolUseId
+      && payload.namespace === 'collaboration'
+      && payload.name === 'spawn_agent';
+  });
+  if (calls.length !== 1) throw new Error('Codex parent rollout spawn call was not found uniquely');
+  const call = object(calls[0]?.payload);
+  const args = object(JSON.parse(nonEmpty(call?.arguments) ?? '{}'));
+  if (
+    args?.agent_type !== expected.nativeAgent
+    || args.task_name !== expected.taskName
+    || (expected.requestedModel && args.model !== expected.requestedModel)
+    || (expected.requestedReasoningEffort && args.reasoning_effort !== expected.requestedReasoningEffort)
+  ) throw new Error('Codex parent rollout spawn identity does not match the hook event');
+  const activities = records.filter((record) => {
+    const payload = object(record?.payload);
+    return record?.type === 'event_msg'
+      && payload?.type === 'sub_agent_activity'
+      && payload.event_id === expected.toolUseId
+      && payload.kind === 'started'
+      && payload.agent_path === `/root/${expected.taskName}`
+      && nonEmpty(payload.agent_thread_id);
+  });
+  if (activities.length !== 1) throw new Error('Codex parent rollout child activity was not found uniquely');
+  return nonEmpty(object(activities[0]?.payload)?.agent_thread_id)!;
 }
 
 function validateCodexLifecycleHookConfig(value: unknown): void {
@@ -431,6 +490,8 @@ async function resolveCodexTerminal(
     if (nonEmpty(thread?.id) !== childThreadId) throw new Error('Codex App Server returned the wrong child thread');
     const turns = Array.isArray(thread?.turns) ? thread.turns : [];
     const turn = turns.at(-1);
+    const turnValue = object(turn);
+    if (!turnValue || turnValue.status === 'inProgress') throw new Error('CODEX_TURN_NOT_TERMINAL');
     return parseCodexTurnCompleted({ threadId: childThreadId, turn });
   } finally {
     transport.close();
@@ -497,6 +558,7 @@ export {
   parseCodexHooksList,
   parseCodexThreadResolution,
   parseCodexTurnCompleted,
+  resolveCodexSpawnedChild,
   preflightCodexLifecycleEvidence,
   resolveCodexTerminal,
   resolveCodexThread,

@@ -75,13 +75,13 @@ test('codex-lifecycle CLI records normalized hook identity across invocations', 
   assert.equal(JSON.parse(spawn.stdout).status, 'observed-spawn');
 
   const child = run(root, env, ['hook-event', '--event', 'subagent-start'], JSON.stringify({
-    sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
+    sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
     nativeAgent: 'agent-infra-lifecycle-executor'
   }));
   assert.equal(child.status, 0, `${child.stderr}\n${child.stdout}`);
   const childState = JSON.parse(child.stdout);
   assert.equal(childState.status, 'observed-child');
-  assert.equal(childState.evidence.child.sessionId, 'child');
+  assert.equal(childState.evidence.child.sessionId, 'parent');
   assert.equal(childState.evidence.child.parentThreadId, 'parent');
 });
 
@@ -97,7 +97,7 @@ test('codex-lifecycle bridge ignores managed hooks without a running delegation'
 
   const events = [
     ['subagent-start', {
-      sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
+      sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
       nativeAgent: 'agent-infra-lifecycle-executor'
     }],
     ['post-tool', {
@@ -105,7 +105,7 @@ test('codex-lifecycle bridge ignores managed hooks without a running delegation'
       nativeAgent: 'agent-infra-lifecycle-executor'
     }],
     ['subagent-stop', {
-      sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
+      sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
       nativeAgent: 'agent-infra-lifecycle-executor'
     }]
   ] as const;
@@ -141,7 +141,7 @@ test('codex-lifecycle resolve-stop fails until the stop hook makes evidence read
       requestedReasoningEffort: 'high', hookDefinitionHash
     }],
     ['subagent-start', {
-      sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
+      sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
       nativeAgent: 'agent-infra-lifecycle-executor'
     }]
   ] as const) {
@@ -156,7 +156,7 @@ test('codex-lifecycle resolve-stop fails until the stop hook makes evidence read
   assert.equal(JSON.parse(premature.stdout).status, 'failed');
 
   const stopHook = run(root, env, ['hook-event', '--event', 'subagent-stop'], JSON.stringify({
-    sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
+    sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
     nativeAgent: 'agent-infra-lifecycle-executor'
   }));
   assert.equal(stopHook.status, 0, stopHook.stderr);

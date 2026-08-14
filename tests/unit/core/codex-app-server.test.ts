@@ -9,6 +9,7 @@ import {
   parseCodexHooksList,
   parseCodexThreadResolution,
   parseCodexTurnCompleted,
+  resolveCodexSpawnedChild,
   resolveCodexTerminal,
   resolveCodexThread,
   validateCodexLifecycleHookConfig
@@ -66,7 +67,7 @@ test('App Server hook discovery requires every enabled lifecycle hook', () => {
     `node "$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js" --client codex --event ${phase}`;
   const hooks = ([
     ['preToolUse', '^collaborationspawn_agent$', 'pre-tool'],
-    ['postToolUse', '^collaborationspawn_agent$', 'post-tool'],
+    ['postToolUse', '', 'post-tool'],
     ['subagentStart', '', 'subagent-start'],
     ['subagentStop', '', 'subagent-stop']
   ] as const).map(([eventName, matcher, phase]) => ({ eventName, matcher, command: command(phase), enabled: true }));
@@ -75,6 +76,32 @@ test('App Server hook discovery requires every enabled lifecycle hook', () => {
     () => parseCodexHooksList({ data: [{ cwd: '/workspace', hooks: hooks.slice(1), warnings: [], errors: [] }] }, '/workspace'),
     /not loaded/
   );
+});
+
+test('parent rollout resolves exactly one trusted lifecycle child for a spawn tool call', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-parent-rollout-'));
+  const rollout = path.join(root, 'rollout-parent.jsonl');
+  fs.writeFileSync(rollout, [
+    JSON.stringify({ type: 'response_item', payload: {
+      type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: 'tool',
+      arguments: JSON.stringify({
+        agent_type: 'agent-infra-lifecycle-executor', task_name: 'analysis_executor_r1',
+        model: 'executor-model', reasoning_effort: 'xhigh'
+      })
+    } }),
+    JSON.stringify({ type: 'event_msg', payload: {
+      type: 'sub_agent_activity', event_id: 'tool', kind: 'started',
+      agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
+    } })
+  ].join('\n'));
+  assert.equal(resolveCodexSpawnedChild(rollout, {
+    sessionId: 'parent', toolUseId: 'tool', nativeAgent: 'agent-infra-lifecycle-executor',
+    taskName: 'analysis_executor_r1', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }), 'child');
+  assert.throws(() => resolveCodexSpawnedChild(rollout, {
+    sessionId: 'parent', toolUseId: 'tool', nativeAgent: 'agent-infra-lifecycle-reviewer',
+    taskName: 'analysis_executor_r1'
+  }), /does not match/);
 });
 
 test('App Server terminal parser preserves completed and failed host states', () => {
@@ -147,6 +174,31 @@ test('App Server terminal resolver rejects a response for the wrong child thread
     resolveCodexTerminal('child', { command: process.execPath, args: [server], timeoutMs: 2_000 }),
     /wrong child thread/
   );
+});
+
+test('App Server terminal resolver distinguishes active turns from malformed terminal evidence', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-'));
+  const server = path.join(root, 'server.mjs');
+  fs.writeFileSync(server, `
+    import readline from 'node:readline';
+    const rl = readline.createInterface({ input: process.stdin });
+    rl.on('line', line => {
+      const message = JSON.parse(line);
+      if (!message.id) return;
+      const status = process.env.TURN_STATUS;
+      const turns = status === 'none' ? [] : [{ id: status === 'missing-id' ? '' : 'turn', status }];
+      const result = message.method === 'thread/read' ? { thread: { id: 'child', turns } } : {};
+      process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
+    });
+  `);
+  const options = (status: string) => ({
+    command: process.execPath, args: [server], timeoutMs: 2_000,
+    env: { ...process.env, TURN_STATUS: status }
+  });
+  await assert.rejects(resolveCodexTerminal('child', options('none')), /CODEX_TURN_NOT_TERMINAL/);
+  await assert.rejects(resolveCodexTerminal('child', options('inProgress')), /CODEX_TURN_NOT_TERMINAL/);
+  await assert.rejects(resolveCodexTerminal('child', options('missing-id')), /completion is invalid/);
+  await assert.rejects(resolveCodexTerminal('child', options('mystery')), /completion is invalid/);
 });
 
 test('App Server resolver fails closed when rollout settings are unavailable', async () => {

@@ -125,7 +125,7 @@ last_reviewed_commit: abcdef1234567890
 
 | id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |
 |----|-----------|-------------------|-------|----------------------|------------|--------|-------------|
-| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 10:01:00+08:00 | pending | |
+| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 09:59:00+08:00 | pending | |
 
 ## Activity Log
 
@@ -778,7 +778,7 @@ test('decision code event clears the review baseline and consumes its input on c
   const started = run(f.root, [
     f.id, 'code.started', '--agent', 'codex', '--implementation-input', 'II-1'
   ]);
-  assert.equal(started.status, 0, started.stderr);
+  assert.equal(started.status, 0, started.stdout || started.stderr);
   const startedResult = JSON.parse(started.stdout);
   assert.equal(startedResult.status, 'applied');
   assert.equal(startedResult.implementationInput, 'II-1');

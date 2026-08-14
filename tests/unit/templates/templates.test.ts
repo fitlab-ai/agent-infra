@@ -520,7 +520,7 @@ test("version format validation hooks are wired into templates and local config"
     );
     const lifecycle = [
       ["PreToolUse", "^collaborationspawn_agent$", "pre-tool"],
-      ["PostToolUse", "^collaborationspawn_agent$", "post-tool"],
+      ["PostToolUse", "", "post-tool"],
       ["SubagentStart", "", "subagent-start"],
       ["SubagentStop", "", "subagent-stop"]
     ] as const;

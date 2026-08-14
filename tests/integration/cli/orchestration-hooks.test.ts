@@ -229,7 +229,28 @@ test('lifecycle hook normalizes Codex spawn and child events through stdin', () 
   assert.equal(child.status, 0, child.stderr);
   const childParsed = JSON.parse(child.stdout);
   assert.deepEqual(childParsed.args, ['codex-lifecycle', 'hook-event', '--event', 'subagent-start', '--bridge', 'true']);
-  assert.equal(childParsed.input.sessionId, 'codex-child');
+  assert.equal(childParsed.input.sessionId, 'codex-parent');
   assert.equal(childParsed.input.turnId, 'codex-child-turn');
   assert.equal(childParsed.input.childThreadId, 'codex-child');
+});
+
+test('lifecycle hook forwards completed Codex waits and ignores timed out waits', () => {
+  const fixture = createHookFixture('working');
+  const base = {
+    hook_event_name: 'PostToolUse', session_id: 'codex-parent', turn_id: 'parent-turn',
+    tool_use_id: 'wait-tool', tool_name: 'collaborationwait_agent', tool_input: {}
+  };
+  const completed = run(JSON.stringify({
+    ...base, tool_response: JSON.stringify({ message: 'Wait completed.', timed_out: false })
+  }), { ...fixture, client: 'codex', event: 'post-tool', hook: fixture.hook });
+  assert.equal(completed.status, 0, completed.stderr);
+  const parsed = JSON.parse(completed.stdout);
+  assert.equal(parsed.input.toolName, 'collaborationwait_agent');
+  assert.equal(parsed.input.sessionId, 'codex-parent');
+
+  const timedOut = run(JSON.stringify({
+    ...base, tool_response: JSON.stringify({ message: 'Wait timed out.', timed_out: true })
+  }), { ...fixture, client: 'codex', event: 'post-tool', hook: fixture.hook });
+  assert.equal(timedOut.status, 0, timedOut.stderr);
+  assert.equal(timedOut.stdout, '');
 });

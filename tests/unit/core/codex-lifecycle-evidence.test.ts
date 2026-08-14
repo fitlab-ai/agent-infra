@@ -20,7 +20,7 @@ function happyEvents() {
     },
     {
       type: 'hook-child' as const,
-      sessionId: 'child-thread',
+      sessionId: 'parent-thread',
       turnId: 'child-turn',
       childThreadId: 'child-thread',
       parentThreadId: 'parent-thread',
@@ -69,7 +69,7 @@ test('Codex lifecycle evidence becomes ready only after host-resolved identity a
   });
   assert.equal(state.status, 'observed-terminal');
   state = reduceCodexLifecycleEvent(state, {
-    type: 'hook-stop', sessionId: 'child-thread', turnId: 'child-turn',
+    type: 'hook-stop', sessionId: 'parent-thread', turnId: 'child-turn',
     childThreadId: 'child-thread', nativeAgent: 'agent-infra-lifecycle-executor'
   });
   assert.equal(state.status, 'stop-ready');
@@ -82,13 +82,13 @@ test('Codex lifecycle evidence becomes ready only after host-resolved identity a
   });
 });
 
-test('Codex lifecycle evidence keeps child hook identity distinct from its host-resolved parent', () => {
+test('Codex lifecycle evidence binds the hook session to its host-resolved parent', () => {
   let state = createCodexLifecycleState('0.147.0');
   for (const event of [
     happyEvents()[0]!,
     {
       type: 'hook-child' as const,
-      sessionId: 'child-thread',
+      sessionId: 'parent-thread',
       turnId: 'child-turn',
       childThreadId: 'child-thread',
       parentThreadId: 'parent-thread',

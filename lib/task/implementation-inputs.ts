@@ -131,13 +131,9 @@ function finalizeImplementationInput(
 }
 
 function selectPendingImplementationInput(
-  rows: readonly ImplementationInput[], reviewCompletedAt: string
+  rows: readonly ImplementationInput[]
 ): ImplementationInput | null {
-  const reviewEpoch = Date.parse(reviewCompletedAt.replace(' ', 'T'));
-  if (!Number.isFinite(reviewEpoch)) throw new Error('latest review completion time is invalid');
   const pending = rows.filter((row) => row.needsImplementation && row.status === 'pending');
-  const stale = pending.find((row) => Date.parse(row.decidedAt.replace(' ', 'T')) <= reviewEpoch);
-  if (stale) throw new Error(`implementation input ${stale.id} is not later than the latest approved review`);
   return [...pending].sort((left, right) => {
     const time = Date.parse(left.decidedAt.replace(' ', 'T')) - Date.parse(right.decidedAt.replace(' ', 'T'));
     return time || Number.parseInt(left.id.slice(3), 10) - Number.parseInt(right.id.slice(3), 10);

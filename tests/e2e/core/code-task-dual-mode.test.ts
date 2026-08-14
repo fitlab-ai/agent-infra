@@ -45,7 +45,10 @@ function enReview(verdict: string, findings = "0 blockers, 0 majors, 0 minors / 
 `;
 }
 
-function decisionTask(rows: string[], reviewTime = "2026-07-18 10:00:00+08:00") {
+function decisionTask(rows: string[], reviewTime = "2026-07-18 10:00:00+08:00", reviewCompleted = true) {
+  const reviewEntry = reviewCompleted
+    ? `- ${reviewTime} — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-code.md`
+    : `- ${reviewTime} — **Review Code (Round 1) [started]** by claude — started`;
   return `---
 id: ${TASK_ID}
 current_step: code-review
@@ -61,7 +64,7 @@ ${rows.join("\n")}
 
 ## Activity Log
 
-- ${reviewTime} — **Review Code (Round 1)** by claude — Verdict: Approved, blockers: 0, major: 0, minor: 0, Manual-validation: 0 → review-code.md
+${reviewEntry}
 `;
 }
 
@@ -181,7 +184,7 @@ test("code-task dual-mode: branch 4 - Approved with no findings refuses rerun", 
   assert.equal(result.output.verdict, "Approved");
 });
 
-test("code-task decision mode selects the earliest post-review pending input", () => {
+test("code-task decision mode selects the earliest pending input", () => {
   const result = runDetect({
     "task.md": decisionTask([
       "| II-2 | HD-2 | task.md#HDR-2 | code | true | 2026-07-18 10:02:00+08:00 | pending | |",
@@ -211,7 +214,7 @@ test("code-task decision mode ignores not-required and consumed inputs", () => {
   assert.equal(result.output.mode, "refused");
 });
 
-test("code-task decision mode rejects stale unconsumed input", () => {
+test("code-task decision mode recovers stale unconsumed input", () => {
   const result = runDetect({
     "task.md": decisionTask([
       "| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 09:59:00+08:00 | pending | |"
@@ -219,9 +222,22 @@ test("code-task decision mode rejects stale unconsumed input", () => {
     "code.md": "# code",
     "review-code.md": zhReview("通过")
   });
+  assert.equal(result.status, 0, JSON.stringify(result.output));
+  assert.equal(result.output.mode, "decision");
+  assert.equal(result.output.implementation_input, "II-1");
+});
+
+test("code-task decision mode requires a completed approved review identity", () => {
+  const result = runDetect({
+    "task.md": decisionTask([
+      "| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 09:59:00+08:00 | pending | |"
+    ], "2026-07-18 10:00:00+08:00", false),
+    "code.md": "# code",
+    "review-code.md": zhReview("通过")
+  });
   assert.equal(result.status, 2);
   assert.equal(result.output.mode, "error");
-  assert.match(result.output.message, /not later than/i);
+  assert.match(result.output.message, /completed Activity Log identity/i);
 });
 
 test("code-task dual-mode: branch 5 - Approved with findings enters optional fix mode (zh-CN review fixture)", () => {

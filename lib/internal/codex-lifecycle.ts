@@ -12,8 +12,10 @@ import { createCodexLifecycleStore } from '../agent-clients/adapters/codex-lifec
 import type { CodexLifecycleEvent } from '../agent-clients/adapters/codex-lifecycle/evidence.ts';
 import {
   activateCodexOrchestrationDelegation,
+  activateCodexSpawnDelegation,
   reconcileCodexOrchestrationDelegation,
-  sealCodexOrchestrationDelegation
+  sealCodexOrchestrationDelegation,
+  sealCodexParentDelegation
 } from '../task/codex-orchestration.ts';
 
 const USAGE = 'Usage: agent-infra-internal codex-lifecycle <hook-event|resolve-start|resolve-stop|preflight|consume> [options]\n';
@@ -135,6 +137,13 @@ function recordFromPayload(phase: string, payload: unknown): CodexLifecycleEvent
   throw new Error(`unknown Codex lifecycle hook phase '${phase}'`);
 }
 
+function payloadText(payload: unknown, key: string): string {
+  return payload && typeof payload === 'object' && !Array.isArray(payload)
+    && typeof (payload as Record<string, unknown>)[key] === 'string'
+    ? (payload as Record<string, string>)[key]!
+    : '';
+}
+
 async function codexLifecycle(args: string[] = []): Promise<void> {
   const parsed = parse(args);
   if (!parsed || process.exitCode) return;
@@ -172,6 +181,36 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
         throw new Error("hook-event --bridge must be 'true'");
       }
       const payload = await readStdin();
+      if (phase === 'post-tool' && parsed.values['--bridge'] === 'true') {
+        const toolName = payloadText(payload, 'toolName');
+        if (toolName === 'collaborationspawn_agent') {
+          const nativeAgent = payloadText(payload, 'nativeAgent');
+          if (!MANAGED_AGENT.test(nativeAgent)) {
+            output({ status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null });
+            return;
+          }
+          const requestedModel = payloadText(payload, 'requestedModel');
+          const requestedReasoningEffort = payloadText(payload, 'requestedReasoningEffort');
+          const bridged = await activateCodexSpawnDelegation({
+            sessionId: payloadText(payload, 'sessionId'),
+            turnId: payloadText(payload, 'turnId'),
+            toolUseId: payloadText(payload, 'toolUseId'),
+            transcriptPath: payloadText(payload, 'transcriptPath'),
+            nativeAgent,
+            taskName: payloadText(payload, 'taskName'),
+            ...(requestedModel ? { requestedModel } : {}),
+            ...(requestedReasoningEffort ? { requestedReasoningEffort } : {})
+          }, { store });
+          outputBridgeResult(bridged);
+          return;
+        }
+        if (toolName === 'collaborationwait_agent') {
+          outputBridgeResult(await sealCodexParentDelegation(payloadText(payload, 'sessionId'), { store }));
+          return;
+        }
+        output({ status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null });
+        return;
+      }
       const event = recordFromPayload(phase, payload);
       if (!event) {
         if (phase === 'post-tool' && parsed.values['--bridge'] === 'true') {

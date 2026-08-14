@@ -376,12 +376,11 @@ function resolveDecisionImplementationInput(
   if (pending.length === 0) return { input: null };
   const activity = locateActivityLog(content);
   if (!activity) return { error: 'task has no unique Activity Log section' };
-  const reviewEntries = activity.entries.filter((entry) =>
+  const completed = activity.entries.some((entry) =>
     /^Review Code \(Round \d+\)$/.test(entry.step) && entry.note.includes(`→ ${review.name}`)
   );
-  const completed = reviewEntries.at(-1);
   if (!completed) return { error: `cannot find completed Activity Log identity for ${review.name}` };
-  try { return { input: selectPendingImplementationInput(rows, completed.time) }; }
+  try { return { input: selectPendingImplementationInput(rows) }; }
   catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
 }
 

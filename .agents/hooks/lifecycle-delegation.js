@@ -57,15 +57,28 @@ process.stdin.on('end', () => {
   const explicitPhase = phaseIndex >= 0 ? process.argv[phaseIndex + 1] : '';
   const hook = String(explicitPhase || event.hook_event_name || event.event || '').toLowerCase();
   const toolInput = event.tool_input && typeof event.tool_input === 'object' ? event.tool_input : {};
+  const toolName = String(event.tool_name || event.tool || '').toLowerCase();
+  let toolResponse = {};
+  try {
+    toolResponse = typeof event.tool_response === 'string'
+      ? JSON.parse(event.tool_response)
+      : (event.tool_response || {});
+  } catch {
+    // Core ignores opaque tool responses; only the host timeout bit is forwarded.
+  }
   const nativeAgent = event.agent_name || event.agent_type || event.agent?.name
     || toolInput.agent_type || toolInput.agent || toolInput.name;
-  if (!/^agent-infra-lifecycle-(executor|reviewer)$/.test(String(nativeAgent || ''))) process.exit(0);
   if (client === 'codex') {
     const phases = new Set(['pre-tool', 'subagent-start', 'post-tool', 'subagent-stop']);
     if (!phases.has(hook)) {
       process.stderr.write('Managed Codex lifecycle hook event has an unknown type\n');
       process.exit(1);
     }
+    const managedAgent = /^agent-infra-lifecycle-(executor|reviewer)$/.test(String(nativeAgent || ''));
+    const parentReconcile = hook === 'post-tool'
+      && toolName === 'collaborationwait_agent'
+      && toolResponse.timed_out !== true;
+    if (!managedAgent && !parentReconcile) process.exit(0);
     const hookDefinitionHash = createHash('sha256').update(readFileSync(codexHooks)).digest('hex');
     const normalized = {
       sessionId: String(event.session_id || ''),
@@ -75,7 +88,10 @@ process.stdin.on('end', () => {
       nativeAgent: String(nativeAgent),
       requestedModel: String(toolInput.model || ''),
       requestedReasoningEffort: String(toolInput.reasoning_effort || toolInput.reasoningEffort || ''),
-      hookDefinitionHash
+      hookDefinitionHash,
+      toolName,
+      taskName: String(toolInput.task_name || ''),
+      transcriptPath: String(event.transcript_path || '')
     };
     const args = ['codex-lifecycle', 'hook-event', '--event', hook, '--bridge', 'true'];
     try {
@@ -95,6 +111,7 @@ process.stdin.on('end', () => {
     }
     return;
   }
+  if (!/^agent-infra-lifecycle-(executor|reviewer)$/.test(String(nativeAgent || ''))) process.exit(0);
   const start = hook.includes('start');
   const stop = hook.includes('stop');
   if (!start && !stop) {

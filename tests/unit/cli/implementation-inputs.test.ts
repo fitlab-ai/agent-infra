@@ -51,7 +51,7 @@ test('declared inputs replay by identity and finalize in place', () => {
     ledgerId: 'CD-1', decisionEvidence: 'review-code.md#CD-1', needsImplementation: false
   }), /conflict/i);
   assert.equal(selectDeclaredImplementationInput([declared], 'CD-1', 'review-code.md#CD-1')?.id, 'II-1');
-  assert.equal(selectPendingImplementationInput([declared], '2026-07-18 10:00:00+08:00'), null);
+  assert.equal(selectPendingImplementationInput([declared]), null);
   const finalized = finalizeImplementationInput(
     [declared], 'II-1', 'task.md#HDR-1', '2026-07-18 10:01:00+08:00'
   );
@@ -87,17 +87,15 @@ test('parser validates schema, ids, stage, and state combinations', () => {
   ])), /duplicate/i);
 });
 
-test('pending selection is stable and rejects stale unconsumed inputs', () => {
+test('pending selection is stable regardless of the latest review time', () => {
   const rows = parseImplementationInputs(taskWithRows([
     '| II-2 | CD-2 | task.md#HDR-2 | code | true | 2026-07-18 10:02:00+08:00 | pending | |',
     '| II-1 | CD-1 | task.md#HDR-1 | code | true | 2026-07-18 10:02:00+08:00 | pending | |',
     '| II-3 | CD-3 | task.md#HDR-3 | code | false | 2026-07-18 10:03:00+08:00 | not-required | |'
   ])).rows;
-  assert.equal(selectPendingImplementationInput(rows, '2026-07-18 10:00:00+08:00')?.id, 'II-1');
-  assert.throws(
-    () => selectPendingImplementationInput(rows, '2026-07-18 10:02:00+08:00'),
-    /not later than/i
-  );
+  assert.equal(selectPendingImplementationInput(rows)?.id, 'II-1');
+  const afterFirst = consumeImplementationInput(rows, 'II-1', 'code-r2.md');
+  assert.equal(selectPendingImplementationInput(afterFirst)?.id, 'II-2');
 });
 
 test('consumption returns a validated immutable replacement and renderer round-trips', () => {

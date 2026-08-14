@@ -1,6 +1,6 @@
 {
   "hook_event_name": "SubagentStop",
-  "session_id": "codex-child",
+  "session_id": "codex-parent",
   "turn_id": "codex-child-turn",
   "agent_id": "codex-child",
   "agent_type": "agent-infra-lifecycle-executor"
