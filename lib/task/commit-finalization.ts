@@ -261,12 +261,12 @@ function inspectCommitFinalization(
     const matchingCurrentReview = reviewBaseline === intent.baselineHead && reviewTree === committedTree;
     if (
       !matchingCurrentReview
-      && !(pushOnlyRetry && hasMatchingApprovedReview(
+      && !hasMatchingApprovedReview(
         taskDir,
         review.round,
         intent.baselineHead,
         committedTree
-      ))
+      )
     ) {
       return outcome('conflict', {
         ...shared,
@@ -276,14 +276,14 @@ function inspectCommitFinalization(
     }
 
     const anchor = String(metadata.last_reviewed_commit ?? '').trim();
-    if (anchor && anchor !== intent.committedHead) {
+    if (anchor && anchor !== intent.committedHead && anchor !== intent.baselineHead) {
       return outcome('conflict', {
         ...shared,
         code: 'COMMIT_FINALIZATION_CONFLICT',
         message: 'task review anchor conflicts with the committed intent'
       });
     }
-    needsAnchor = anchor === '';
+    needsAnchor = anchor !== intent.committedHead;
   }
   const needsLog = (matchingDone.length === 0 && openRows.length === 1) || pushOnlyRetry;
   if (!(needsLog || (matchingDone.length === 1 && openRows.length === 0))) {

@@ -216,6 +216,31 @@ test('token-less recovery finalizes a committed intent exactly once', () => {
   assert.equal(statusCommitIntent(taskId, { repoRoot: f.root }).finalization?.disposition, 'idle');
 });
 
+test('commit recovery advances an existing baseline review anchor', () => {
+  const f = fixture();
+  const taskPath = path.join(f.taskDir, 'task.md');
+  fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(
+    'current_step: code-review',
+    `current_step: code-review\nlast_reviewed_commit: ${f.head}`
+  ));
+  const begun = beginCommitIntent(taskId, {
+    agent: 'codex', orchestrated: false, baselineHead: f.head, attempt: f.attempt
+  }, { repoRoot: f.root, token: () => 'anchor-token' });
+  assert.equal(begun.status, 'ready');
+  const committedHead = checkpointReviewed(f, 'anchor-token');
+  fs.writeFileSync(path.join(f.taskDir, 'review-code-r2.md'), [
+    '# Review', '', `- **Review Baseline Commit**: \`${committedHead}\``,
+    `- **Reviewed Snapshot Tree**: \`${git(f.root, ['rev-parse', `${f.head}^{tree}`])}\``, '',
+    '## Review Summary', '', '- **Overall Verdict**: Approved',
+    '- **Findings (AI-actionable)**: 0 blockers, 0 major, 0 minor / **Manual-validation**: 0', ''
+  ].join('\n'));
+
+  const recovered = recoverCommitIntent(taskId, { agent: 'codex' }, { repoRoot: f.root });
+  assert.equal(recovered.status, 'ready');
+  assert.equal(recovered.error, null);
+  assert.match(fs.readFileSync(taskPath, 'utf8'), new RegExp(`^last_reviewed_commit: ${committedHead}$`, 'm'));
+});
+
 test('push-only recovery closes a new attempt after the commit was already finalized', () => {
   const f = fixture();
   const first = beginCommitIntent(taskId, {
