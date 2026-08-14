@@ -131,7 +131,7 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
     if (event.type === 'hook-child') {
       const matches = recordFiles(root).filter((file) => {
         const state = readRecord(file).state;
-        return state.spawn?.sessionId === event.sessionId
+        return state.spawn?.sessionId === event.parentThreadId
           && state.spawn.nativeAgent === event.nativeAgent
           && (!state.child || state.child.childThreadId === event.childThreadId);
       });

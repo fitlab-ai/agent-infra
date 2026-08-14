@@ -16,7 +16,8 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
     requestedReasoningEffort: 'high', hookDefinitionHash: 'hash'
   });
   store.apply({
-    type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    type: 'hook-child', sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
+    parentThreadId: 'parent',
     nativeAgent: 'agent-infra-lifecycle-reviewer'
   });
   store.apply({
@@ -37,7 +38,7 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
     type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed'
   });
   store.apply({
-    type: 'hook-stop', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    type: 'hook-stop', sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
     nativeAgent: 'agent-infra-lifecycle-reviewer'
   });
   assert.throws(() => store.consume('child', 'receipt-1', 'stale-hash'), /hash is stale/);
@@ -58,9 +59,28 @@ test('Codex lifecycle store rejects ambiguous parent session and agent correlati
     });
   }
   assert.throws(() => store.apply({
-    type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    type: 'hook-child', sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
+    parentThreadId: 'parent',
     nativeAgent: 'agent-infra-lifecycle-executor'
   }), /ambiguous/);
+});
+
+test('Codex lifecycle store correlates a real child session through its host-resolved parent', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-store-'));
+  const store = createCodexLifecycleStore({ root, cliVersion: '0.147.0' });
+  store.apply({
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'model',
+    requestedReasoningEffort: 'high', hookDefinitionHash: 'hash'
+  });
+
+  const result = store.apply({
+    type: 'hook-child', sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+  });
+
+  assert.equal(result.state.status, 'observed-child');
+  assert.equal(result.state.child?.sessionId, 'child');
 });
 
 test('Codex lifecycle store recovers a stale writer lock', () => {
@@ -90,7 +110,8 @@ test('Codex lifecycle store marks stale active evidence expired before cleanup',
     nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash: 'hash'
   });
   store.apply({
-    type: 'hook-child', sessionId: 'parent', turnId: 'turn', childThreadId: 'child',
+    type: 'hook-child', sessionId: 'child', turnId: 'turn', childThreadId: 'child',
+    parentThreadId: 'parent',
     nativeAgent: 'agent-infra-lifecycle-executor'
   });
 

@@ -74,7 +74,8 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
     requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'hook-hash'
   });
   store.apply({
-    type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    type: 'hook-child', sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
+    parentThreadId: 'parent',
     nativeAgent: 'agent-infra-lifecycle-executor'
   });
   const started = await activateCodexOrchestrationDelegation('child', {
@@ -106,7 +107,7 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
   }, { repoRoot: f.root });
   assert.equal(completed.run?.pendingDelegation?.status, 'stage-completed');
   store.apply({
-    type: 'hook-stop', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    type: 'hook-stop', sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
     nativeAgent: 'agent-infra-lifecycle-executor'
   });
   store.apply({ type: 'app-terminal', childThreadId: 'child', turnId: 'child-turn', status: 'completed' });

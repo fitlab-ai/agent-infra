@@ -20,6 +20,7 @@ const USAGE = 'Usage: agent-infra-internal codex-lifecycle <hook-event|resolve-s
 const MANAGED_AGENT = /^agent-infra-lifecycle-(executor|reviewer)$/;
 
 type Parsed = Readonly<{ operation: string; values: Readonly<Record<string, string>> }>;
+type UnresolvedHookChild = Omit<Extract<CodexLifecycleEvent, { type: 'hook-child' }>, 'parentThreadId'>;
 
 function output(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -90,7 +91,7 @@ async function readStdin(): Promise<unknown> {
   return JSON.parse(input || '{}') as unknown;
 }
 
-function recordFromPayload(phase: string, payload: unknown): CodexLifecycleEvent | null {
+function recordFromPayload(phase: string, payload: unknown): CodexLifecycleEvent | UnresolvedHookChild | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Codex lifecycle hook payload must be an object');
   }
@@ -187,13 +188,31 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
           // The normal apply path below owns missing or invalid evidence errors.
         }
       }
-      const result = store.apply(event);
       if (parsed.values['--bridge'] === 'true' && event.type === 'hook-child') {
-        const bridged = await activateCodexOrchestrationDelegation(event.childThreadId, { store });
+        const resolved = await resolveCodexThread(event.childThreadId);
+        store.apply({
+          ...event,
+          parentThreadId: resolved.resolution.thread.parentThreadId
+        });
+        const bridged = await activateCodexOrchestrationDelegation(event.childThreadId, {
+          store,
+          resolveThread: async () => resolved
+        });
         output(bridged);
         if (bridged.status !== 'running') process.exitCode = 1;
         return;
       }
+      if (event.type === 'hook-child') {
+        const resolved = await resolveCodexThread(event.childThreadId);
+        const result = store.apply({
+          ...event,
+          parentThreadId: resolved.resolution.thread.parentThreadId
+        });
+        output({ status: result.state.status, changed: true, evidence: result.state, diagnostics: resolved.diagnostics, error: result.state.error });
+        if (result.state.status === 'invalid') process.exitCode = 1;
+        return;
+      }
+      const result = store.apply(event);
       if (parsed.values['--bridge'] === 'true' && event.type === 'hook-stop') {
         const bridged = await sealCodexOrchestrationDelegation(event.childThreadId, { store });
         output(bridged);

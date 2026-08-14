@@ -21,6 +21,7 @@ type CodexLifecycleEvent =
       sessionId: string;
       turnId: string;
       childThreadId: string;
+      parentThreadId: string;
       nativeAgent: string;
     }>
   | Readonly<{
@@ -153,13 +154,19 @@ function requiredStrings(event: CodexLifecycleEvent): boolean {
 function derive(state: CodexLifecycleState): CodexLifecycleState {
   const { spawn, child, thread, settings, reroute, terminal, stop } = state;
   if (spawn && child && (
-    spawn.sessionId !== child.sessionId
+    spawn.sessionId !== child.parentThreadId
     || spawn.nativeAgent !== child.nativeAgent
   )) {
     return invalid(state, 'CODEX_EVIDENCE_IDENTITY_MISMATCH', 'hook spawn and child identity do not match');
   }
+  if (child && child.sessionId !== child.childThreadId) {
+    return invalid(state, 'CODEX_EVIDENCE_IDENTITY_MISMATCH', 'hook child session does not match the child thread');
+  }
   if (child && thread && child.childThreadId !== thread.childThreadId) {
     return invalid(state, 'CODEX_EVIDENCE_IDENTITY_MISMATCH', 'hook and App Server child identity do not match');
+  }
+  if (child && thread && child.parentThreadId !== thread.parentThreadId) {
+    return invalid(state, 'CODEX_EVIDENCE_PARENT_MISMATCH', 'hook and App Server parent identity do not match');
   }
   if (spawn && thread && (
     thread.parentThreadId !== spawn.sessionId

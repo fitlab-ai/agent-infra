@@ -229,5 +229,7 @@ test('lifecycle hook normalizes Codex spawn and child events through stdin', () 
   assert.equal(child.status, 0, child.stderr);
   const childParsed = JSON.parse(child.stdout);
   assert.deepEqual(childParsed.args, ['codex-lifecycle', 'hook-event', '--event', 'subagent-start', '--bridge', 'true']);
+  assert.equal(childParsed.input.sessionId, 'codex-child');
+  assert.equal(childParsed.input.turnId, 'codex-child-turn');
   assert.equal(childParsed.input.childThreadId, 'codex-child');
 });

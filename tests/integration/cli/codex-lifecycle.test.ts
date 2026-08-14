@@ -69,11 +69,14 @@ test('codex-lifecycle CLI records normalized hook identity across invocations', 
   assert.equal(JSON.parse(spawn.stdout).status, 'observed-spawn');
 
   const child = run(root, env, ['hook-event', '--event', 'subagent-start'], JSON.stringify({
-    sessionId: 'parent', turnId: 'turn', childThreadId: 'child',
+    sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
     nativeAgent: 'agent-infra-lifecycle-executor'
   }));
-  assert.equal(child.status, 0, child.stderr);
-  assert.equal(JSON.parse(child.stdout).status, 'observed-child');
+  assert.equal(child.status, 0, `${child.stderr}\n${child.stdout}`);
+  const childState = JSON.parse(child.stdout);
+  assert.equal(childState.status, 'observed-child');
+  assert.equal(childState.evidence.child.sessionId, 'child');
+  assert.equal(childState.evidence.child.parentThreadId, 'parent');
 });
 
 test('codex-lifecycle CLI rejects unknown and duplicate options', () => {
@@ -98,12 +101,12 @@ test('codex-lifecycle resolve-stop fails until the stop hook makes evidence read
       requestedReasoningEffort: 'high', hookDefinitionHash
     }],
     ['subagent-start', {
-      sessionId: 'parent', turnId: 'turn', childThreadId: 'child',
+      sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
       nativeAgent: 'agent-infra-lifecycle-executor'
     }]
   ] as const) {
     const result = run(root, env, ['hook-event', '--event', event], JSON.stringify(payload));
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
   }
   const start = run(root, env, ['resolve-start', '--child-id', 'child']);
   assert.equal(start.status, 0, `${start.stderr}\n${start.stdout}`);
@@ -113,7 +116,7 @@ test('codex-lifecycle resolve-stop fails until the stop hook makes evidence read
   assert.equal(JSON.parse(premature.stdout).status, 'failed');
 
   const stopHook = run(root, env, ['hook-event', '--event', 'subagent-stop'], JSON.stringify({
-    sessionId: 'parent', turnId: 'turn', childThreadId: 'child',
+    sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
     nativeAgent: 'agent-infra-lifecycle-executor'
   }));
   assert.equal(stopHook.status, 0, stopHook.stderr);
