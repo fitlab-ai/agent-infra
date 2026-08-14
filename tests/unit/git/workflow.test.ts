@@ -114,6 +114,25 @@ test('pushRebasedBranch rejects stale remote facts without pushing', () => {
   assert.equal(calls.some((call) => call[0] === 'push'), false);
 });
 
+test('pushRebasedBranch rejects an active rebase directory', () => {
+  const root = fixture();
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  const branch = execFileSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8' }).trim();
+  fs.mkdirSync(path.join(root, '.git', 'rebase-merge'));
+
+  const result = pushRebasedBranch({
+    cwd: root,
+    remote: 'origin',
+    branch,
+    expectedOldHead: 'a'.repeat(40),
+    newHead: head,
+    baseBranch: 'main',
+    expectedBaseHead: 'b'.repeat(40)
+  });
+
+  assert.equal(result.error?.code, 'GIT_LOCAL_STATE_UNSAFE');
+});
+
 test('pushRebasedBranch fails closed at every local, base, ancestry, push, and verification boundary', () => {
   const oldHead = 'a'.repeat(40);
   const newHead = 'b'.repeat(40);

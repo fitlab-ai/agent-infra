@@ -45,7 +45,7 @@ test('git-workflow CLI commits explicit paths and verifies remote refs', () => {
   }
 });
 
-test('git-workflow push-rebased updates a rewritten branch with an exact old-head lease', () => {
+test('git-workflow push-rebased ignores a retained REBASE_HEAD after a completed rewrite', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-rebase-cli-'));
   const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-rebase-remote-'));
   try {
@@ -67,6 +67,7 @@ test('git-workflow push-rebased updates a rewritten branch with an exact old-hea
     const oldHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
     execFileSync('git', ['commit', '--amend', '-qm', 'feature rewritten'], { cwd: root });
     const newHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    fs.writeFileSync(path.join(root, '.git', 'REBASE_HEAD'), `${oldHead}\n`);
     const input = path.join(remote, 'push-rebased.json');
     fs.writeFileSync(input, JSON.stringify({ remote: 'origin', branch: 'feature', expectedOldHead: oldHead, newHead, baseBranch: 'main', expectedBaseHead: baseHead }));
     const pushed = run(root, ['push-rebased', '--input', input]);

@@ -129,7 +129,6 @@ function pushRebasedBranch(input: PushRebasedInput, runner: GitRunner = defaultR
     .map((name) => value(runner, input.cwd, ['rev-parse', '--git-path', name]))
     .filter((candidate): candidate is string => Boolean(candidate));
   if (snapshot.worktree.length > 0 || snapshot.staged.length > 0 ||
-      run(runner, input.cwd, ['rev-parse', '-q', '--verify', 'REBASE_HEAD']).status === 0 ||
       rebasePaths.some((candidate) => fs.existsSync(path.isAbsolute(candidate) ? candidate : path.join(input.cwd, candidate)))) {
     return { status: 'failed' as const, changed: false, snapshot, operations: [], error: { code: 'GIT_LOCAL_STATE_UNSAFE', message: 'Working tree must be clean with no rebase in progress' } };
   }
