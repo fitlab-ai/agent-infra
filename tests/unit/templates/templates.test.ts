@@ -193,12 +193,14 @@ test("templates do not contain legacy single-brace project or org placeholders",
   });
 });
 
-test("root and template gitignore both ignore node_modules", () => {
+test("root and template gitignore cover local dependency and lifecycle runtime paths", () => {
   const rootGitignore = read(".gitignore");
   const templateGitignore = read("templates/.gitignore");
 
-  assert.match(rootGitignore, /^node_modules\/$/m);
-  assert.match(templateGitignore, /^node_modules\/$/m);
+  for (const content of [rootGitignore, templateGitignore]) {
+    assert.match(content, /^node_modules\/$/m);
+    assert.match(content, /^\.agents\/workspace\/\.runtime\/$/m);
+  }
 });
 
 test("task templates include agent-infra version metadata", () => {

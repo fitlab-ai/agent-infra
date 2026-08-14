@@ -1447,7 +1447,7 @@ function matchingDelegations(
     .filter((entry) => entry.isDirectory())
     .flatMap((entry) => {
       const run = readRun(path.join(activeRoot, entry.name));
-      if (!run?.pendingDelegation) return [];
+      if (run?.status !== 'running' || !run.pendingDelegation) return [];
       const receipt = run.pendingDelegation;
       return predicate(receipt)
         ? [{ taskId: entry.name, run }]

@@ -4,6 +4,7 @@
 .agents/workspace/completed/
 .agents/workspace/archive/
 .agents/workspace/logs/
+.agents/workspace/.runtime/
 .agents/workspace/process-data/
 .agents/workspace/.task-create/
 .agents/workspace/.merge-backup/

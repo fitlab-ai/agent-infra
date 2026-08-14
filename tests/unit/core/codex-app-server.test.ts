@@ -14,19 +14,22 @@ import {
   validateCodexLifecycleHookConfig
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/app-server.ts';
 
-test('App Server thread resolution combines read-only identity with resumed settings', () => {
+test('App Server thread resolution combines read-only identity with rollout settings', () => {
   assert.deepEqual(parseCodexThreadResolution({
     thread: {
       id: 'child', parentThreadId: 'parent', forkedFromId: null,
       source: { subAgent: { thread_spawn: { parent_thread_id: 'parent', depth: 1 } } }
     }
-  }, {
-    thread: { id: 'child' },
-    model: 'actual-model', reasoningEffort: 'high'
-  }), {
+  }, [
+    { type: 'session_meta', payload: {
+      id: 'child', parent_thread_id: 'parent', agent_role: 'agent-infra-lifecycle-executor'
+    } },
+    { type: 'turn_context', payload: { model: 'actual-model', effort: 'high' } }
+  ]), {
     thread: {
       type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent',
-      forkedFromId: null, sourceParentThreadId: 'parent'
+      forkedFromId: null, sourceParentThreadId: 'parent',
+      nativeAgent: 'agent-infra-lifecycle-executor'
     },
     settings: {
       type: 'app-settings', childThreadId: 'child', model: 'actual-model', reasoningEffort: 'high'
@@ -35,21 +38,26 @@ test('App Server thread resolution combines read-only identity with resumed sett
 });
 
 test('App Server parsers fail closed for malformed identity, settings, and terminal payloads', () => {
-  assert.throws(() => parseCodexThreadResolution({ thread: { id: 'child' } }, {}), /invalid/);
+  assert.throws(() => parseCodexThreadResolution({ thread: { id: 'child' } }, []), /invalid/);
   assert.throws(() => parseCodexThreadResolution({
     thread: { id: 'child', parentThreadId: 'parent', forkedFromId: null, source: 'cli' }
-  }, {
-    thread: { id: 'child' },
-    model: 'model', reasoningEffort: null
-  }), /invalid/);
+  }, [
+    { type: 'session_meta', payload: {
+      id: 'child', parent_thread_id: 'parent', agent_role: 'agent-infra-lifecycle-executor'
+    } },
+    { type: 'turn_context', payload: { model: 'model', effort: null } }
+  ]), /invalid/);
   assert.throws(() => parseCodexThreadResolution({
     thread: {
       id: 'child', parentThreadId: 'parent', forkedFromId: null,
       source: { subAgent: { thread_spawn: { parent_thread_id: 'parent' } } }
     }
-  }, {
-    thread: { id: 'wrong-child' }, model: 'model', reasoningEffort: 'high'
-  }), /invalid/);
+  }, [
+    { type: 'session_meta', payload: {
+      id: 'wrong-child', parent_thread_id: 'parent', agent_role: 'agent-infra-lifecycle-executor'
+    } },
+    { type: 'turn_context', payload: { model: 'model', effort: 'high' } }
+  ]), /invalid/);
   assert.throws(() => parseCodexTurnCompleted({ threadId: 'child', turn: { id: 'turn', status: 'mystery' } }), /invalid/);
 });
 
@@ -81,6 +89,13 @@ test('App Server terminal parser preserves completed and failed host states', ()
 test('App Server resolver correlates request ids against a JSONL server', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-'));
   const server = path.join(root, 'server.mjs');
+  const rollout = path.join(root, 'rollout-child.jsonl');
+  fs.writeFileSync(rollout, [
+    JSON.stringify({ type: 'session_meta', payload: {
+      id: 'child', parent_thread_id: 'parent', agent_role: 'agent-infra-lifecycle-executor'
+    } }),
+    JSON.stringify({ type: 'turn_context', payload: { model: 'model', effort: 'high' } })
+  ].join('\n'));
   fs.writeFileSync(server, `
     import readline from 'node:readline';
     const rl = readline.createInterface({ input: process.stdin });
@@ -90,12 +105,16 @@ test('App Server resolver correlates request ids against a JSONL server', async 
       let result = {};
       if (message.method === 'thread/read') result = { thread: {
         id: 'child', parentThreadId: 'parent', forkedFromId: null,
+        path: ${JSON.stringify(rollout)},
         source: { subAgent: { thread_spawn: { parent_thread_id: 'parent', depth: 1 } } },
         turns: message.params.includeTurns ? [{ id: 'turn', status: 'completed', items: [] }] : []
       } };
-      if (message.method === 'thread/resume') result = {
-        thread: { id: 'child' }, model: 'model', reasoningEffort: 'high'
-      };
+      if (message.method === 'thread/resume') {
+        process.stdout.write(JSON.stringify({ id: message.id, error: {
+          code: -32600, message: 'thread already has an active writer'
+        } }) + '\\n');
+        return;
+      }
       if (message.method === 'thread/unsubscribe') result = { status: 'unsubscribed' };
       process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
     });
@@ -130,7 +149,7 @@ test('App Server terminal resolver rejects a response for the wrong child thread
   );
 });
 
-test('App Server resolver fails closed when resumed settings are unavailable', async () => {
+test('App Server resolver fails closed when rollout settings are unavailable', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-'));
   const server = path.join(root, 'server.mjs');
   fs.writeFileSync(server, `
@@ -141,14 +160,15 @@ test('App Server resolver fails closed when resumed settings are unavailable', a
       if (!message.id) return;
       const result = message.method === 'thread/read' ? { thread: {
         id: 'child', parentThreadId: 'parent', forkedFromId: null,
+        path: ${JSON.stringify(path.join(root, 'rollout-child.jsonl'))},
         source: { subAgent: { thread_spawn: { parent_thread_id: 'parent', depth: 1 } } }, turns: []
-      } } : message.method === 'thread/resume' ? { thread: { id: 'child' } } : {};
+      } } : {};
       process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
     });
   `);
   await assert.rejects(
     resolveCodexThread('child', { command: process.execPath, args: [server], timeoutMs: 2_000 }),
-    /resumed settings are unavailable/
+    /rollout metadata is unavailable/
   );
 });
 

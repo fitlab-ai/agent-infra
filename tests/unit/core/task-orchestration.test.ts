@@ -702,7 +702,7 @@ test('managed native hook mismatches persist a recoverable pause', () => {
   assert.equal(started.run?.pause?.code, 'DELEGATION_ROLE_MISMATCH');
 });
 
-test('repository pending guard includes paused runs that retain a delegation', () => {
+test('repository pending guard ignores paused runs that retain audit evidence', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   prepareOrchestrationDelegation('TASK-20260101-000001', {
@@ -711,6 +711,35 @@ test('repository pending guard includes paused runs that retain a delegation', (
     repoRoot: f.root, captureWorkspace: snapshot
   });
   pauseOrchestration('TASK-20260101-000001', 'HOOK_FAILED', 'hook failed', true, { repoRoot: f.root });
+
+  const secondTaskDir = path.join(f.root, '.agents', 'workspace', 'active', 'TASK-20260101-000002');
+  fs.mkdirSync(secondTaskDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(secondTaskDir, 'task.md'),
+    '---\nid: TASK-20260101-000002\ncurrent_step: requirement-analysis\n---\n\n# Task\n'
+  );
+  beginOrResumeOrchestration('TASK-20260101-000002', { repoRoot: f.root });
+
+  const prepared = prepareOrchestrationDelegation('TASK-20260101-000002', {
+    client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, {
+    repoRoot: f.root, captureWorkspace: snapshot
+  });
+
+  assert.equal(prepared.status, 'running');
+  assert.equal(prepared.run?.pendingDelegation?.taskId, 'TASK-20260101-000002');
+  assert.equal(readRun(f.taskDir)?.status, 'paused');
+  assert.equal(readRun(f.taskDir)?.pendingDelegation?.status, 'prepared');
+});
+
+test('repository pending guard still blocks a second running delegation', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  prepareOrchestrationDelegation('TASK-20260101-000001', {
+    client: 'opencode', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, {
+    repoRoot: f.root, captureWorkspace: snapshot
+  });
 
   const secondTaskDir = path.join(f.root, '.agents', 'workspace', 'active', 'TASK-20260101-000002');
   fs.mkdirSync(secondTaskDir, { recursive: true });

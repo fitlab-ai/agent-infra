@@ -5,6 +5,7 @@
 .agents/workspace/archive/
 .agents/workspace/logs/
 .agents/workspace/.task-create/
+.agents/workspace/.runtime/
 
 # Claude Code local settings
 .claude/settings.local.json

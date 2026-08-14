@@ -30,6 +30,7 @@ type CodexLifecycleEvent =
       parentThreadId: string;
       forkedFromId: string | null;
       sourceParentThreadId: string;
+      nativeAgent: string;
     }>
   | Readonly<{
       type: 'app-settings';
@@ -165,6 +166,9 @@ function derive(state: CodexLifecycleState): CodexLifecycleState {
   if (child && thread && child.childThreadId !== thread.childThreadId) {
     return invalid(state, 'CODEX_EVIDENCE_IDENTITY_MISMATCH', 'hook and App Server child identity do not match');
   }
+  if (child && thread && child.nativeAgent !== thread.nativeAgent) {
+    return invalid(state, 'CODEX_EVIDENCE_IDENTITY_MISMATCH', 'hook and App Server agent roles do not match');
+  }
   if (child && thread && child.parentThreadId !== thread.parentThreadId) {
     return invalid(state, 'CODEX_EVIDENCE_PARENT_MISMATCH', 'hook and App Server parent identity do not match');
   }
@@ -173,6 +177,9 @@ function derive(state: CodexLifecycleState): CodexLifecycleState {
     || thread.sourceParentThreadId !== spawn.sessionId
   )) {
     return invalid(state, 'CODEX_EVIDENCE_PARENT_MISMATCH', 'App Server parent identity does not match the spawning session');
+  }
+  if (spawn && thread && spawn.nativeAgent !== thread.nativeAgent) {
+    return invalid(state, 'CODEX_EVIDENCE_IDENTITY_MISMATCH', 'spawn and App Server agent roles do not match');
   }
   if (thread?.forkedFromId !== null && thread?.forkedFromId !== undefined) {
     return invalid(state, 'CODEX_EVIDENCE_FORK_FORBIDDEN', 'forked child threads are not fresh lifecycle evidence');

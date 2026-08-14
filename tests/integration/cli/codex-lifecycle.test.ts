@@ -16,7 +16,14 @@ function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-cli-'));
   const bin = path.join(root, 'bin');
   const codex = path.join(root, 'codex.mjs');
+  const rollout = path.join(root, 'rollout-child.jsonl');
   fs.mkdirSync(path.join(root, '.agents', 'workspace'), { recursive: true });
+  fs.writeFileSync(rollout, [
+    JSON.stringify({ type: 'session_meta', payload: {
+      id: 'child', parent_thread_id: 'parent', agent_role: 'agent-infra-lifecycle-executor'
+    } }),
+    JSON.stringify({ type: 'turn_context', payload: { model: 'model', effort: 'high' } })
+  ].join('\n'));
   fs.writeFileSync(codex, `
     import readline from 'node:readline';
     if (process.argv[2] === '--version') {
@@ -29,11 +36,10 @@ function fixture() {
         const result = message.method === 'thread/read' ? {
           thread: {
             id: 'child', parentThreadId: 'parent', forkedFromId: null,
+            path: ${JSON.stringify(rollout)},
             source: { subAgent: { thread_spawn: { parent_thread_id: 'parent' } } },
             turns: message.params.includeTurns ? [{ id: 'child-turn', status: 'completed' }] : []
           }
-        } : message.method === 'thread/resume' ? {
-          thread: { id: 'child' }, model: 'model', reasoningEffort: 'high'
         } : message.method === 'thread/unsubscribe' ? { status: 'unsubscribed' } : {};
         process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
       });

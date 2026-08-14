@@ -31,7 +31,8 @@ function happyEvents() {
       childThreadId: 'child-thread',
       parentThreadId: 'parent-thread',
       forkedFromId: null,
-      sourceParentThreadId: 'parent-thread'
+      sourceParentThreadId: 'parent-thread',
+      nativeAgent: 'agent-infra-lifecycle-executor'
     },
     {
       type: 'app-settings' as const,
@@ -103,8 +104,8 @@ test('Codex lifecycle evidence keeps child hook identity distinct from its host-
 
 test('Codex lifecycle evidence fails closed on fork, identity conflict, and unexplained resolution', () => {
   for (const event of [
-    { type: 'app-thread' as const, childThreadId: 'child-thread', parentThreadId: 'parent-thread', forkedFromId: 'source', sourceParentThreadId: 'parent-thread' },
-    { type: 'app-thread' as const, childThreadId: 'child-thread', parentThreadId: 'other-parent', forkedFromId: null, sourceParentThreadId: 'other-parent' },
+    { type: 'app-thread' as const, childThreadId: 'child-thread', parentThreadId: 'parent-thread', forkedFromId: 'source', sourceParentThreadId: 'parent-thread', nativeAgent: 'agent-infra-lifecycle-executor' },
+    { type: 'app-thread' as const, childThreadId: 'child-thread', parentThreadId: 'other-parent', forkedFromId: null, sourceParentThreadId: 'other-parent', nativeAgent: 'agent-infra-lifecycle-executor' },
     { type: 'app-settings' as const, childThreadId: 'child-thread', model: 'other-model', reasoningEffort: 'high' },
     { type: 'app-settings' as const, childThreadId: 'child-thread', model: 'gpt-5.6-sol', reasoningEffort: 'low' }
   ]) {
@@ -113,6 +114,22 @@ test('Codex lifecycle evidence fails closed on fork, identity conflict, and unex
     state = reduceCodexLifecycleEvent(state, event);
     assert.equal(state.status, 'invalid');
     assert.ok(state.error?.code.startsWith('CODEX_EVIDENCE_'));
+  }
+});
+
+test('Codex lifecycle evidence rejects rollout and hook role conflicts', () => {
+  for (const [hookRole, rolloutRole] of [
+    ['agent-infra-lifecycle-executor', 'agent-infra-lifecycle-reviewer'],
+    ['agent-infra-lifecycle-reviewer', 'agent-infra-lifecycle-executor']
+  ] as const) {
+    let state = createCodexLifecycleState('0.147.0');
+    for (const event of [
+      { ...happyEvents()[0]!, nativeAgent: hookRole },
+      { ...happyEvents()[1]!, nativeAgent: hookRole },
+      { ...happyEvents()[2]!, nativeAgent: rolloutRole }
+    ]) state = reduceCodexLifecycleEvent(state, event);
+    assert.equal(state.status, 'invalid');
+    assert.equal(state.error?.code, 'CODEX_EVIDENCE_IDENTITY_MISMATCH');
   }
 });
 

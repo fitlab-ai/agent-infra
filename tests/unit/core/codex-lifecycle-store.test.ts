@@ -22,7 +22,8 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
   });
   store.apply({
     type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent',
-    forkedFromId: null, sourceParentThreadId: 'parent'
+    forkedFromId: null, sourceParentThreadId: 'parent',
+    nativeAgent: 'agent-infra-lifecycle-reviewer'
   });
   const record = store.apply({
     type: 'app-settings', childThreadId: 'child', model: 'model', reasoningEffort: 'high'

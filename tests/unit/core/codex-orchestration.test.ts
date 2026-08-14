@@ -83,7 +83,7 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
     store,
     resolveThread: async () => ({
       resolution: {
-        thread: { type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent' },
+        thread: { type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor' },
         settings: { type: 'app-settings', childThreadId: 'child', model: 'executor-model', reasoningEffort: 'xhigh' }
       },
       reroutes: [], diagnostics: []
@@ -95,7 +95,7 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
     repoRoot: f.root, store,
     resolveThread: async () => ({
       resolution: {
-        thread: { type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent' },
+        thread: { type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor' },
         settings: { type: 'app-settings', childThreadId: 'child', model: 'executor-model', reasoningEffort: 'xhigh' }
       },
       reroutes: [], diagnostics: []

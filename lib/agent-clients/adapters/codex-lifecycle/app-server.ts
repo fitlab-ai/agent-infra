@@ -27,6 +27,8 @@ type AppServerTransportOptions = Readonly<{
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  rolloutReadAttempts?: number;
+  rolloutRetryMs?: number;
 }>;
 
 type CodexRuntimeIdentity = Readonly<{
@@ -120,26 +122,38 @@ function hasCodexRuntimeLiveness(
     });
 }
 
-function parseCodexThreadResolution(readValue: unknown, resumeValue: unknown): ThreadResolution {
+function parseCodexThreadResolution(readValue: unknown, rolloutRecords: readonly unknown[]): ThreadResolution {
   const readRoot = object(readValue);
-  const resumeRoot = object(resumeValue);
   const thread = object(readRoot?.thread);
-  const resumedThread = object(resumeRoot?.thread);
   const source = object(thread?.source);
   const subAgent = object(source?.subAgent);
   const threadSpawn = object(subAgent?.thread_spawn);
+  const sessionMeta = rolloutRecords
+    .map(object)
+    .find((record) => record?.type === 'session_meta');
+  const sessionPayload = object(sessionMeta?.payload);
+  const turnContext = rolloutRecords
+    .map(object)
+    .filter((record) => record?.type === 'turn_context')
+    .at(-1);
+  const turnPayload = object(turnContext?.payload);
   const childThreadId = nonEmpty(thread?.id);
   const parentThreadId = nonEmpty(thread?.parentThreadId);
   const sourceParentThreadId = nonEmpty(threadSpawn?.parent_thread_id);
-  const resumedChildThreadId = nonEmpty(resumedThread?.id);
-  const model = nonEmpty(resumeRoot?.model);
-  const reasoningEffort = nonEmpty(resumeRoot?.reasoningEffort ?? object(resumeRoot?.settings)?.effort);
+  const rolloutChildThreadId = nonEmpty(sessionPayload?.id);
+  const rolloutParentThreadId = nonEmpty(sessionPayload?.parent_thread_id);
+  const agentRole = nonEmpty(sessionPayload?.agent_role);
+  const model = nonEmpty(turnPayload?.model);
+  const reasoningEffort = nonEmpty(turnPayload?.effort);
   const forkedFromId = thread?.forkedFromId;
   if (
     !childThreadId
-    || resumedChildThreadId !== childThreadId
+    || rolloutChildThreadId !== childThreadId
     || !parentThreadId
     || !sourceParentThreadId
+    || rolloutParentThreadId !== parentThreadId
+    || rolloutParentThreadId !== sourceParentThreadId
+    || !/^agent-infra-lifecycle-(executor|reviewer)$/.test(agentRole ?? '')
     || !model
     || !reasoningEffort
     || (forkedFromId !== null && typeof forkedFromId !== 'string')
@@ -152,7 +166,8 @@ function parseCodexThreadResolution(readValue: unknown, resumeValue: unknown): T
       childThreadId,
       parentThreadId,
       forkedFromId,
-      sourceParentThreadId
+      sourceParentThreadId,
+      nativeAgent: agentRole!
     }),
     settings: Object.freeze({
       type: 'app-settings',
@@ -161,6 +176,49 @@ function parseCodexThreadResolution(readValue: unknown, resumeValue: unknown): T
       reasoningEffort
     })
   });
+}
+
+function readCodexRolloutRecords(readValue: unknown, childThreadId: string): readonly unknown[] {
+  const thread = object(object(readValue)?.thread);
+  const rolloutPath = nonEmpty(thread?.path);
+  const rolloutName = rolloutPath ? path.basename(rolloutPath) : '';
+  if (!rolloutPath || (rolloutName !== `${childThreadId}.jsonl` && !rolloutName.endsWith(`-${childThreadId}.jsonl`))) {
+    throw new Error('Codex App Server rollout path is invalid');
+  }
+  const stat = fs.statSync(rolloutPath);
+  if (!stat.isFile()) throw new Error('Codex App Server rollout path is not a regular file');
+  const maxBytes = 1024 * 1024;
+  const bytes = Math.min(stat.size, maxBytes);
+  const descriptor = fs.openSync(rolloutPath, 'r');
+  try {
+    const buffer = Buffer.alloc(bytes);
+    fs.readSync(descriptor, buffer, 0, bytes, 0);
+    const text = buffer.toString('utf8');
+    const completeText = stat.size <= maxBytes ? text : text.slice(0, text.lastIndexOf('\n'));
+    return Object.freeze(completeText.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line)));
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+async function resolveCodexRolloutRecords(
+  readValue: unknown,
+  childThreadId: string,
+  attempts: number,
+  retryMs: number
+): Promise<readonly unknown[]> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const records = readCodexRolloutRecords(readValue, childThreadId);
+      parseCodexThreadResolution(readValue, records);
+      return records;
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, retryMs));
+    }
+  }
+  throw lastError;
 }
 
 function parseCodexTurnCompleted(value: unknown): Extract<CodexLifecycleEvent, { type: 'app-terminal' }> {
@@ -333,12 +391,17 @@ async function resolveCodexThread(
     const readResult = object(await transport.request('thread/read', { threadId: childThreadId, includeTurns: false }));
     const readThread = object(readResult?.thread);
     if (nonEmpty(readThread?.id) !== childThreadId) throw new Error('Codex App Server returned the wrong child thread');
-    const resumeResult = await transport.request('thread/resume', { threadId: childThreadId });
     let resolution: ThreadResolution;
     try {
-      resolution = parseCodexThreadResolution(readResult, resumeResult);
+      const rolloutRecords = await resolveCodexRolloutRecords(
+        readResult,
+        childThreadId,
+        options.rolloutReadAttempts ?? 10,
+        options.rolloutRetryMs ?? 50
+      );
+      resolution = parseCodexThreadResolution(readResult, rolloutRecords);
     } catch {
-      throw new Error('Codex App Server resumed settings are unavailable');
+      throw new Error('Codex App Server rollout metadata is unavailable');
     }
     const reroutes = transport.notifications
       .filter((entry) => entry.method === 'model/rerouted')
