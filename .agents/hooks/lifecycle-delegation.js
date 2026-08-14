@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const MAX_INPUT_BYTES = 64 * 1024;
+const repoPackageJson = fileURLToPath(new URL('../../package.json', import.meta.url));
+const sourceInternalCli = fileURLToPath(new URL('../../bin/internal-cli.ts', import.meta.url));
 const localInternalCli = fileURLToPath(new URL('../../dist/bin/internal-cli.js', import.meta.url));
 const codexHooks = fileURLToPath(new URL('../../.codex/hooks.json', import.meta.url));
 const clientIndex = process.argv.indexOf('--client');
@@ -13,6 +15,27 @@ if (client !== 'claude-code' && client !== 'codex') {
   process.stderr.write('Lifecycle delegation hook requires a supported --client value\n');
   process.exit(1);
 }
+
+function internalCliInvocation(args) {
+  let isAgentInfraSourceCheckout = false;
+  try {
+    isAgentInfraSourceCheckout = JSON.parse(readFileSync(repoPackageJson, 'utf8')).name === '@fitlab-ai/agent-infra';
+  } catch {
+    // Installed project hooks do not require a repository package.json.
+  }
+  if (isAgentInfraSourceCheckout && existsSync(sourceInternalCli)) {
+    return {
+      command: process.execPath,
+      commandArgs: ['--experimental-strip-types', sourceInternalCli, ...args],
+      shell: false
+    };
+  }
+  if (existsSync(localInternalCli)) {
+    return { command: process.execPath, commandArgs: [localInternalCli, ...args], shell: false };
+  }
+  return { command: 'agent-infra-internal', commandArgs: args, shell: process.platform === 'win32' };
+}
+
 let input = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => {
@@ -56,13 +79,11 @@ process.stdin.on('end', () => {
     };
     const args = ['codex-lifecycle', 'hook-event', '--event', hook, '--bridge', 'true'];
     try {
-      const useLocal = existsSync(localInternalCli);
-      const command = useLocal ? process.execPath : 'agent-infra-internal';
-      const commandArgs = useLocal ? [localInternalCli, ...args] : args;
+      const { command, commandArgs, shell } = internalCliInvocation(args);
       const output = execFileSync(command, commandArgs, {
         encoding: 'utf8',
         input: JSON.stringify(normalized),
-        shell: !useLocal && process.platform === 'win32',
+        shell,
         stdio: ['pipe', 'pipe', 'pipe'],
         timeout: 15_000
       });
@@ -102,12 +123,10 @@ process.stdin.on('end', () => {
     );
   }
   try {
-    const useLocal = existsSync(localInternalCli);
-    const command = useLocal ? process.execPath : 'agent-infra-internal';
-    const commandArgs = useLocal ? [localInternalCli, ...args] : args;
+    const { command, commandArgs, shell } = internalCliInvocation(args);
     const output = execFileSync(command, commandArgs, {
       encoding: 'utf8',
-      shell: !useLocal && process.platform === 'win32',
+      shell,
       stdio: ['ignore', 'pipe', 'pipe']
     });
     process.stdout.write(output);

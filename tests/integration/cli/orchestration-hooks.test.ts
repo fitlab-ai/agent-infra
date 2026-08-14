@@ -18,7 +18,7 @@ interface RunOptions {
   hook?: string;
 }
 
-type LocalCliState = 'missing' | 'working' | 'broken';
+type LocalCliState = 'missing' | 'working' | 'broken' | 'source-with-stale-dist';
 
 function run(input: string, options: RunOptions = {}) {
   const {
@@ -42,17 +42,29 @@ function createHookFixture(localCliState: LocalCliState) {
   fs.mkdirSync(path.dirname(hook), { recursive: true });
   fs.mkdirSync(cwd, { recursive: true });
   fs.copyFileSync(HOOK, hook);
-  fs.writeFileSync(path.join(repoDir, 'package.json'), '{"type":"module"}\n');
+  fs.writeFileSync(
+    path.join(repoDir, 'package.json'),
+    JSON.stringify({
+      type: 'module',
+      ...(localCliState === 'source-with-stale-dist' ? { name: '@fitlab-ai/agent-infra' } : {})
+    })
+  );
   fs.writeFileSync(pathCli, "let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',c=>input+=c); process.stdin.on('end',()=>process.stdout.write(JSON.stringify({ source: 'path', args: process.argv.slice(2), ...(input ? { input: JSON.parse(input) } : {}) })))\n");
   writeNodeCommandShim(path.join(binDir, 'agent-infra-internal'), pathCli);
 
   if (localCliState !== 'missing') {
     const localCli = path.join(repoDir, 'dist', 'bin', 'internal-cli.js');
     fs.mkdirSync(path.dirname(localCli), { recursive: true });
-    const localCliSource = localCliState === 'broken'
+    const localCliSource = localCliState === 'broken' || localCliState === 'source-with-stale-dist'
       ? "process.stderr.write('Local lifecycle CLI failed\\n'); process.exit(23)\n"
       : "let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',c=>input+=c); process.stdin.on('end',()=>process.stdout.write(JSON.stringify({ source: 'local', args: process.argv.slice(2), ...(input ? { input: JSON.parse(input) } : {}) })))\n";
     fs.writeFileSync(localCli, localCliSource);
+  }
+
+  if (localCliState === 'source-with-stale-dist') {
+    const sourceCli = path.join(repoDir, 'bin', 'internal-cli.ts');
+    fs.mkdirSync(path.dirname(sourceCli), { recursive: true });
+    fs.writeFileSync(sourceCli, "process.stdout.write(JSON.stringify({ source: 'source', args: process.argv.slice(2) }))\n");
   }
 
   fs.mkdirSync(path.join(repoDir, '.codex'), { recursive: true });
@@ -164,6 +176,18 @@ test('lifecycle hook fails closed when the repository-local CLI fails', () => {
   assert.equal(result.status, 23);
   assert.equal(result.stdout, '');
   assert.equal(result.stderr, 'Local lifecycle CLI failed\n');
+});
+
+test('lifecycle hook prefers checkout source over a stale dist CLI', () => {
+  const fixture = createHookFixture('source-with-stale-dist');
+
+  const result = run(
+    fs.readFileSync(path.join(FIXTURES, 'claude-subagent-stop.json'), 'utf8'),
+    fixture
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).source, 'source');
 });
 
 test('lifecycle hook rejects malformed payloads before invoking core', () => {
