@@ -216,6 +216,50 @@ test('token-less recovery finalizes a committed intent exactly once', () => {
   assert.equal(statusCommitIntent(taskId, { repoRoot: f.root }).finalization?.disposition, 'idle');
 });
 
+test('push-only recovery closes a new attempt after the commit was already finalized', () => {
+  const f = fixture();
+  const first = beginCommitIntent(taskId, {
+    agent: 'codex', orchestrated: false, baselineHead: f.head, attempt: f.attempt
+  }, { repoRoot: f.root, token: () => 'commit-token' });
+  assert.equal(first.status, 'ready');
+  const committedHead = checkpointReviewed(f, 'commit-token');
+  assert.equal(completeCommitIntent(taskId, {
+    token: 'commit-token', agent: 'codex'
+  }, { repoRoot: f.root }).status, 'ready');
+
+  fs.writeFileSync(path.join(f.taskDir, 'review-code.md'), [
+    '# Review', '', `- **Review Baseline Commit**: \`${committedHead}\``,
+    `- **Reviewed Snapshot Tree**: \`${git(f.root, ['rev-parse', 'HEAD^{tree}'])}\``, '',
+    '## Review Summary', '', '- **Overall Verdict**: Approved',
+    '- **Findings (AI-actionable)**: 0 blockers, 0 major, 0 minor / **Manual-validation**: 0', ''
+  ].join('\n'));
+  const started = startCommitAttempt(taskId, { agent: 'codex' }, {
+    repoRoot: f.root, id: () => 'attempt-push-only'
+  });
+  const attempt = started.finalization?.attempt;
+  assert.equal(attempt?.attempt, 'attempt-push-only');
+  const push = beginCommitIntent(taskId, {
+    agent: 'codex', orchestrated: false, baselineHead: committedHead, attempt: attempt!.attempt
+  }, { repoRoot: f.root, token: () => 'push-token' });
+  assert.equal(push.status, 'ready');
+  assert.equal(checkpointCommitIntent(taskId, {
+    token: 'push-token', kind: 'pushed', head: committedHead,
+    remote: 'origin', ref: 'refs/heads/feature'
+  }, { repoRoot: f.root }).status, 'ready');
+  fs.writeFileSync(path.join(f.taskDir, 'review-code-r2.md'), [
+    '# Review', '', `- **Review Baseline Commit**: \`${committedHead}\``,
+    `- **Reviewed Snapshot Tree**: \`${git(f.root, ['rev-parse', `${f.head}^{tree}`])}\``, '',
+    '## Review Summary', '', '- **Overall Verdict**: Approved',
+    '- **Findings (AI-actionable)**: 0 blockers, 0 major, 0 minor / **Manual-validation**: 0', ''
+  ].join('\n'));
+
+  const recovered = recoverCommitIntent(taskId, { agent: 'codex' }, { repoRoot: f.root });
+  assert.equal(recovered.status, 'ready');
+  assert.equal(recovered.error, null);
+  assert.equal(statusCommitIntent(taskId, { repoRoot: f.root }).finalization?.disposition, 'idle');
+  assert.match(fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8'), /\*\*Commit\*\* by codex — Pushed [a-f0-9]+ change/);
+});
+
 test('commit intent status is ready when no intent exists', () => {
   const f = fixture();
   const status = statusCommitIntent(taskId, { repoRoot: f.root });

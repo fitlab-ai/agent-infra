@@ -12,7 +12,7 @@ import type { CommitAttempt } from './activity-log.ts';
 import { commitIntentPath, digest, readCommitIntent } from './commit-intent.ts';
 import type { CommitIntent } from './commit-intent.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
-import { parseReviewSummary } from './review-artifacts.ts';
+import { artifactName, maxRound, parseReviewSummary } from './review-artifacts.ts';
 import {
   extractReviewBaseline,
   extractReviewedSnapshotTree,
@@ -43,6 +43,7 @@ type CommitFinalizationInspection = Readonly<{
   currentHead: string;
   committedHead: string | null;
   commitNote: string | null;
+  activityNote: string | null;
   needsAnchor: boolean;
   needsLog: boolean;
   intent: CommitIntent | null;
@@ -87,6 +88,28 @@ function isAncestor(repoRoot: string, ancestor: string, descendant: string): boo
   }).status === 0;
 }
 
+function hasMatchingApprovedReview(
+  taskDir: string,
+  beforeRound: number,
+  baseline: string,
+  tree: string
+): boolean {
+  const entries = fs.readdirSync(taskDir);
+  for (let round = Math.min(beforeRound - 1, maxRound(entries, 'review-code')); round >= 1; round -= 1) {
+    const file = path.join(taskDir, artifactName('review-code', round));
+    if (!fs.existsSync(file)) continue;
+    const content = fs.readFileSync(file, 'utf8');
+    const summary = parseReviewSummary(content);
+    if (
+      summary.ok
+      && summary.summary.verdict === 'Approved'
+      && extractReviewBaseline(content) === baseline
+      && extractReviewedSnapshotTree(content) === tree
+    ) return true;
+  }
+  return false;
+}
+
 function outcome(
   disposition: CommitFinalizationDisposition,
   overrides: Partial<CommitFinalizationInspection> = {}
@@ -98,6 +121,7 @@ function outcome(
     currentHead: '',
     committedHead: null,
     commitNote: null,
+    activityNote: null,
     needsAnchor: false,
     needsLog: false,
     intent: null,
@@ -212,6 +236,12 @@ function inspectCommitFinalization(
     });
   }
 
+  const commitNote = git(repoRoot, ['show', '-s', '--format=%h%x20%s', intent.committedHead]);
+  const matchingDone = commitRows.filter((row) => row.done !== '' && row.note === commitNote);
+  const pushOnlyRetry = intent.phase === 'pushed'
+    && intent.baselineHead === intent.committedHead
+    && matchingDone.length === 1
+    && openRows.length === 1;
   const review = findAuthoritativeReviewCodeArtifact(taskDir);
   let needsAnchor = false;
   if (review.ok && review.path) {
@@ -228,7 +258,16 @@ function inspectCommitFinalization(
       return invalid('authoritative review-code evidence is not a valid approved snapshot', currentHead, 'COMMIT_FINALIZATION_EVIDENCE_INVALID', shared);
     }
     const committedTree = git(repoRoot, ['rev-parse', `${intent.committedHead}^{tree}`]);
-    if (reviewBaseline !== intent.baselineHead || reviewTree !== committedTree) {
+    const matchingCurrentReview = reviewBaseline === intent.baselineHead && reviewTree === committedTree;
+    if (
+      !matchingCurrentReview
+      && !(pushOnlyRetry && hasMatchingApprovedReview(
+        taskDir,
+        review.round,
+        intent.baselineHead,
+        committedTree
+      ))
+    ) {
       return outcome('conflict', {
         ...shared,
         code: 'COMMIT_FINALIZATION_CONFLICT',
@@ -246,9 +285,7 @@ function inspectCommitFinalization(
     }
     needsAnchor = anchor === '';
   }
-  const commitNote = git(repoRoot, ['show', '-s', '--format=%h%x20%s', intent.committedHead]);
-  const matchingDone = commitRows.filter((row) => row.done !== '' && row.note === commitNote);
-  const needsLog = matchingDone.length === 0 && openRows.length === 1;
+  const needsLog = (matchingDone.length === 0 && openRows.length === 1) || pushOnlyRetry;
   if (!(needsLog || (matchingDone.length === 1 && openRows.length === 0))) {
     return outcome('conflict', {
       ...shared,
@@ -261,6 +298,7 @@ function inspectCommitFinalization(
     ...shared,
     message: 'commit finalization can be recovered',
     commitNote,
+    activityNote: pushOnlyRetry ? `Pushed ${commitNote}` : commitNote,
     needsAnchor,
     needsLog
   });
@@ -272,7 +310,12 @@ function planCommitTaskFinalization(
   agent: string,
   timestamp: string
 ): CommitTaskFinalizationPlan {
-  if (inspection.disposition !== 'recoverable' || !inspection.committedHead || !inspection.commitNote) {
+  if (
+    inspection.disposition !== 'recoverable'
+    || !inspection.committedHead
+    || !inspection.commitNote
+    || !inspection.activityNote
+  ) {
     throw new Error('commit finalization task mutations require a recoverable inspection');
   }
   const taskContent = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
@@ -293,7 +336,7 @@ function planCommitTaskFinalization(
         time: timestamp,
         step: 'Commit',
         agent,
-        note: inspection.commitNote
+        note: inspection.activityNote
       })
     });
   }
