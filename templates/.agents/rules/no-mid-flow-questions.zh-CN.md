@@ -47,6 +47,7 @@
 
 - `release`：展示最新 release snapshot 后确认是否 publish
 - `create-release-note`：展示 stage 后的精确 notes 与摘要后确认是否 publish
+- `post-release`：完成本地 post commit 并展示完整 `postConfirmation` 与摘要后确认是否普通 push
 
 ### 例外 5：生命周期启动缺少完整模型策略
 

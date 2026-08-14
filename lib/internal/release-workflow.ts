@@ -8,7 +8,7 @@ import { commitExplicitPaths, inspectGitWorkflow, pushGitRefs } from '../git/wor
 import { inspectPlatformRelease, reconcileReleaseMilestones } from '../platform/releases.ts';
 import { inspectHomebrewChannel, inspectNpmChannel } from '../release/channels.ts';
 import { releaseSnapshot } from '../release/workflow.ts';
-import type { ReleaseFacts } from '../release/workflow.ts';
+import type { PostReleaseFacts, ReleaseFacts } from '../release/workflow.ts';
 
 function command(cwd: string, executable: string, args: string[]) {
   return spawnSync(executable, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -168,10 +168,50 @@ function inspectLocalReleaseFacts(cwd: string, version: string, run: CommandRunn
   const localTagConflict = Boolean(tagCommit && !localTag && !localTagAncestor);
   const postSubject = `chore: prepare next dev iteration after v${version}`;
   const postLog = localTag || localTagAncestor
-    ? git(cwd, ['log', '--format=%s', `${tag}..HEAD`], run) ?? ''
+    ? git(cwd, ['log', '--format=%H%x00%s', `${tag}..HEAD`], run) ?? ''
     : '';
-  const postCommit = postLog.split('\n').some((subject) => subject === postSubject);
+  const postCommit = postLog.split('\n').map((line) => line.split('\0'))
+    .find(([, subject]) => subject === postSubject)?.[0] ?? null;
   return { localTag, localTagAncestor, localTagConflict, postCommit };
+}
+
+function inspectPostReleaseFacts(
+  cwd: string,
+  commit: string | null,
+  run: CommandRunner = command
+): PostReleaseFacts {
+  const inspected = inspectGitWorkflow(cwd);
+  const snapshot = inspected.snapshot;
+  const branch = snapshot?.branch ?? '';
+  const remoteLine = branch ? git(cwd, ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], run) : null;
+  const remoteHead = remoteLine?.split(/\s+/)[0] ?? null;
+  const packageJson = commit ? git(cwd, ['show', `${commit}:package.json`], run, false) : null;
+  let newVersion: string | null = null;
+  if (packageJson) {
+    try {
+      const version = (JSON.parse(packageJson) as { version?: unknown }).version;
+      newVersion = typeof version === 'string' ? version : null;
+    } catch {
+      newVersion = null;
+    }
+  }
+  const paths = commit ? git(cwd, ['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', '-z', commit], run, false) : null;
+  const changedPaths = paths ? paths.split('\0').filter(Boolean)
+    .sort((left, right) => Buffer.from(left).compare(Buffer.from(right))) : [];
+  const digest = commit ? git(cwd, ['show', `${commit}:${DEMO_DIGEST_PATH}`], run) : null;
+  return {
+    commit,
+    isHead: Boolean(commit && snapshot?.head === commit),
+    published: Boolean(commit && remoteHead === commit),
+    branch,
+    upstream: snapshot?.upstream ?? null,
+    remoteHead,
+    newVersion,
+    changedPaths,
+    demoInputSha256: digest && /^[0-9a-f]{64}$/.test(digest) ? digest : null,
+    worktree: snapshot?.worktree ?? [],
+    staged: snapshot?.staged ?? []
+  };
 }
 
 function releaseSmokeStatus(workflows: Array<Record<string, unknown>>, version: string, tagCommit: string | null): ReleaseFacts['smoke'] {
@@ -220,12 +260,15 @@ async function inspectFacts(cwd: string, version: string): Promise<ReleaseFacts>
   const workflows = platform.workflows as Array<Record<string, unknown>>;
   const smoke = releaseSmokeStatus(workflows, version, localTagTarget);
   return {
-    ...local,
+    localTag: local.localTag,
+    localTagAncestor: local.localTagAncestor,
+    localTagConflict: local.localTagConflict,
     remoteBranch: Boolean(remoteBranch && remoteBranch.split(/\s+/)[0] === head), remoteTag: Boolean(remoteTag),
     githubRelease: platform.platform.type !== 'github'
       ? true
       : platform.status === 'blocked' ? null : Boolean(platform.release?.published),
-    npm: npm.published, homebrew: homebrew.published, smoke
+    npm: npm.published, homebrew: homebrew.published, smoke,
+    post: inspectPostReleaseFacts(cwd, local.postCommit)
   };
 }
 
@@ -258,13 +301,21 @@ function updateReleaseMetadata(cwd: string, version: string): void {
   }
 }
 
+function optionValues(args: string[], name: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === name) values.push(args[index + 1] ?? '');
+  }
+  return values;
+}
+
 async function releaseWorkflow(args: string[] = []): Promise<void> {
   const [action, rawVersion, ...rest] = args;
   const version = String(rawVersion || '').replace(/^v/, '');
   const cwdIndex = rest.indexOf('--cwd');
   const cwd = path.resolve(cwdIndex >= 0 && rest[cwdIndex + 1] ? rest[cwdIndex + 1]! : process.cwd());
-  if (!['inspect', 'prepare', 'publish', 'post'].includes(action || '') || !semver.valid(version)) {
-    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'RELEASE_INPUT_INVALID', message: 'Usage: release-workflow inspect|prepare|publish|post <version>' } })}\n`);
+  if (!['inspect', 'prepare', 'publish', 'post-prepare', 'post-publish'].includes(action || '') || !semver.valid(version)) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: 'RELEASE_INPUT_INVALID', message: 'Usage: release-workflow inspect|prepare|publish|post-prepare|post-publish <version>' } })}\n`);
     process.exitCode = 1; return;
   }
   const before = releaseSnapshot(version, await inspectFacts(cwd, version));
@@ -310,9 +361,50 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
     const result = pushGitRefs({ cwd, remote: 'origin', refs });
     process.stdout.write(`${JSON.stringify({ ...result, snapshot: releaseSnapshot(version, await inspectFacts(cwd, version)) })}\n`); process.exitCode = result.status === 'failed' ? 1 : result.status === 'degraded' ? 2 : 0; return;
   }
+  if (action === 'post-publish') {
+    const expectedValues = optionValues(rest, '--expected-sha256');
+    if (expectedValues.length !== 1 || !/^sha256:[0-9a-f]{64}$/.test(expectedValues[0]!)) {
+      process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_INPUT_INVALID', message: 'post-publish requires one --expected-sha256 sha256:<64 hex>' } })}\n`);
+      process.exitCode = 1; return;
+    }
+    if (before.phase === 'complete') {
+      process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`);
+      return;
+    }
+    const confirmation = 'postConfirmation' in before ? before.postConfirmation : null;
+    if (before.phase !== 'post-prepared' || !confirmation) {
+      process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: confirmation ? 'RELEASE_PHASE_INVALID' : 'RELEASE_POST_CONFIRMATION_UNAVAILABLE', message: 'Post-release facts cannot authorize publish' } })}\n`);
+      process.exitCode = 1; return;
+    }
+    if (confirmation.sha256 !== expectedValues[0]) {
+      process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, snapshot: before, error: { code: 'RELEASE_POST_SNAPSHOT_MISMATCH', message: 'Post-release confirmation snapshot changed' } })}\n`);
+      process.exitCode = 1; return;
+    }
+    const channelsComplete = before.facts.githubRelease === true && before.facts.npm === true && before.facts.homebrew === true;
+    if (!channelsComplete || before.facts.smoke !== 'success') {
+      process.stdout.write(`${JSON.stringify({ status: before.facts.smoke === 'failed' ? 'failed' : 'blocked', changed: false, snapshot: before, error: { code: 'RELEASE_CHANNELS_PENDING', message: 'Release channels or smoke workflow are not complete' } })}\n`);
+      process.exitCode = before.facts.smoke === 'failed' ? 1 : 2; return;
+    }
+    const pushed = pushGitRefs({ cwd, remote: 'origin', refs: [before.facts.post.branch] });
+    const snapshot = releaseSnapshot(version, await inspectFacts(cwd, version));
+    if (snapshot.phase === 'complete') {
+      process.stdout.write(`${JSON.stringify({ ...pushed, status: 'applied', changed: true, snapshot, error: null })}\n`);
+      return;
+    }
+    const blocked = pushed.status !== 'failed';
+    process.stdout.write(`${JSON.stringify({ ...pushed, status: blocked ? 'blocked' : 'failed', snapshot, error: pushed.error ?? { code: 'RELEASE_PROGRESS_PENDING', message: 'Post-release push is not visible at the expected remote head' } })}\n`);
+    process.exitCode = blocked ? 2 : 1; return;
+  }
+
   if (before.phase === 'complete') {
     process.stdout.write(`${JSON.stringify({ status: 'no-op', changed: false, snapshot: before, error: null })}\n`);
     return;
+  }
+  if (before.phase === 'post-prepared') {
+    const confirmation = 'postConfirmation' in before ? before.postConfirmation : null;
+    const status = confirmation ? 'no-op' : 'blocked';
+    process.stdout.write(`${JSON.stringify({ status, changed: false, snapshot: before, error: confirmation ? null : { code: 'RELEASE_POST_CONFIRMATION_UNAVAILABLE', message: 'Post commit is not the clean current HEAD' } })}\n`);
+    process.exitCode = confirmation ? 0 : 2; return;
   }
   const channelsComplete = before.facts.githubRelease === true && before.facts.npm === true && before.facts.homebrew === true;
   if (!['published', 'post-pending'].includes(before.phase) || !channelsComplete || before.facts.smoke !== 'success') {
@@ -338,10 +430,14 @@ async function releaseWorkflow(args: string[] = []): Promise<void> {
   }
   const committed = commitExplicitPaths({ cwd, paths: changedPaths(cwd), message: `chore: prepare next dev iteration after v${version}` });
   if (committed.status === 'failed') { process.stdout.write(`${JSON.stringify(committed)}\n`); process.exitCode = 1; return; }
-  const branch = git(cwd, ['branch', '--show-current']) || '';
-  const pushed = pushGitRefs({ cwd, remote: 'origin', refs: [branch] });
-  process.stdout.write(`${JSON.stringify({ ...pushed, demo, snapshot: releaseSnapshot(version, await inspectFacts(cwd, version)) })}\n`); process.exitCode = pushed.status === 'failed' ? 1 : pushed.status === 'degraded' ? 2 : 0;
+  const snapshot = releaseSnapshot(version, await inspectFacts(cwd, version));
+  const confirmation = 'postConfirmation' in snapshot ? snapshot.postConfirmation : null;
+  if (snapshot.phase !== 'post-prepared' || !confirmation) {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: true, demo, snapshot, error: { code: 'RELEASE_POST_CONFIRMATION_UNAVAILABLE', message: 'Prepared post commit did not produce a confirmation snapshot' } })}\n`);
+    process.exitCode = 1; return;
+  }
+  process.stdout.write(`${JSON.stringify({ status: 'applied', changed: true, demo, snapshot, error: null })}\n`);
 }
 
-export { changedPaths, computeDemoInputDigest, inspectFacts, inspectLocalReleaseFacts, inspectPostWorktree, releaseSmokeStatus, releaseWorkflow, runOptionalDemo };
+export { changedPaths, computeDemoInputDigest, inspectFacts, inspectLocalReleaseFacts, inspectPostReleaseFacts, inspectPostWorktree, releaseSmokeStatus, releaseWorkflow, runOptionalDemo };
 export type { CommandRunner, DemoResult };

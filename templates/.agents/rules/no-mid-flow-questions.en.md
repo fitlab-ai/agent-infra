@@ -47,6 +47,7 @@ SKILLs currently covered by this exemption:
 
 - `release`: may confirm publish after presenting the latest release snapshot
 - `create-release-note`: may confirm publish after presenting exact staged notes and their digest
+- `post-release`: may confirm a normal push after preparing the local post commit and presenting the complete `postConfirmation` and digest
 
 ### Exemption 5: Complete model policy missing at lifecycle start
 

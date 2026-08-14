@@ -9,6 +9,7 @@ import {
   changedPaths,
   computeDemoInputDigest,
   inspectLocalReleaseFacts,
+  inspectPostReleaseFacts,
   inspectPostWorktree,
   releaseSmokeStatus,
   runOptionalDemo
@@ -91,14 +92,15 @@ test('local release facts distinguish exact, ancestor, and divergent tags with b
   const root = releaseFixture();
   try {
     assert.deepEqual(inspectLocalReleaseFacts(root, '1.2.3'), {
-      localTag: true, localTagAncestor: false, localTagConflict: false, postCommit: false
+      localTag: true, localTagAncestor: false, localTagConflict: false, postCommit: null
     });
     fs.appendFileSync(path.join(root, 'tracked.txt'), 'post\n');
     commit(root, 'chore: prepare next dev iteration after v1.2.3');
     fs.appendFileSync(path.join(root, 'tracked.txt'), 'ordinary\n');
     commit(root, 'fix: ordinary follow-up');
+    const postCommit = spawnSync('git', ['rev-parse', 'HEAD~1'], { cwd: root, encoding: 'utf8' }).stdout.trim();
     assert.deepEqual(inspectLocalReleaseFacts(root, '1.2.3'), {
-      localTag: false, localTagAncestor: true, localTagConflict: false, postCommit: true
+      localTag: false, localTagAncestor: true, localTagConflict: false, postCommit
     });
 
     spawnSync('git', ['switch', '-q', '--orphan', 'divergent'], { cwd: root });
@@ -106,8 +108,36 @@ test('local release facts distinguish exact, ancestor, and divergent tags with b
     fs.writeFileSync(path.join(root, 'other.txt'), 'other\n');
     commit(root, 'divergent');
     assert.deepEqual(inspectLocalReleaseFacts(root, '1.2.3'), {
-      localTag: false, localTagAncestor: false, localTagConflict: true, postCommit: false
+      localTag: false, localTagAncestor: false, localTagConflict: true, postCommit: null
     });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('post release facts are rebuilt from the commit tree and current Git state', () => {
+  const root = releaseFixture();
+  try {
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '1.2.4-alpha.0' }));
+    fs.mkdirSync(path.join(root, 'assets'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'assets', 'demo-init.inputs.sha256'), `${'a'.repeat(64)}\n`);
+    commit(root, 'chore: prepare next dev iteration after v1.2.3');
+    const postCommit = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+
+    const post = inspectPostReleaseFacts(root, postCommit);
+    assert.equal(post.commit, postCommit);
+    assert.equal(post.isHead, true);
+    assert.equal(post.published, false);
+    assert.equal(post.branch, 'main');
+    assert.equal(post.newVersion, '1.2.4-alpha.0');
+    assert.equal(post.demoInputSha256, 'a'.repeat(64));
+    assert.deepEqual(post.changedPaths, ['assets/demo-init.inputs.sha256', 'package.json']);
+    assert.deepEqual(post.worktree, []);
+    assert.deepEqual(post.staged, []);
+
+    fs.appendFileSync(path.join(root, 'tracked.txt'), 'later\n');
+    commit(root, 'fix: later change');
+    assert.equal(inspectPostReleaseFacts(root, postCommit).isHead, false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

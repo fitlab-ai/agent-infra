@@ -123,6 +123,14 @@ test("release skills keep staging, publishing, and versioned follow-up commands 
     assert.match(content.slice(publish), /--expected-sha256/, relativePath);
     assert.match(content.slice(next), /--version <version>/, relativePath);
   }
+
+  for (const relativePath of skillDocPaths("post-release")) {
+    const content = read(relativePath);
+    const prepare = content.indexOf("release-workflow post-prepare {version}");
+    const publish = content.indexOf("release-workflow post-publish {version}");
+    assert.ok(prepare >= 0 && publish > prepare, relativePath);
+    assert.match(content.slice(publish), /--expected-sha256/, relativePath);
+  }
 });
 
 test("post-release command templates expose and forward one version argument", () => {
