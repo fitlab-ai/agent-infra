@@ -40,8 +40,8 @@ type CodexRuntimeIdentity = Readonly<{
 const LIFECYCLE_HOOKS = Object.freeze([
   Object.freeze({ event: 'PreToolUse', matcher: '^collaborationspawn_agent$', phase: 'pre-tool' }),
   Object.freeze({ event: 'PostToolUse', matcher: '^collaborationspawn_agent$', phase: 'post-tool' }),
-  Object.freeze({ event: 'SubagentStart', matcher: '^agent-infra-lifecycle-(executor|reviewer)$', phase: 'subagent-start' }),
-  Object.freeze({ event: 'SubagentStop', matcher: '^agent-infra-lifecycle-(executor|reviewer)$', phase: 'subagent-stop' })
+  Object.freeze({ event: 'SubagentStart', matcher: '', phase: 'subagent-start' }),
+  Object.freeze({ event: 'SubagentStop', matcher: '', phase: 'subagent-stop' })
 ]);
 
 function object(value: unknown): JsonObject | null {

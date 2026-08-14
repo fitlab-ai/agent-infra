@@ -85,6 +85,40 @@ test('codex-lifecycle CLI records normalized hook identity across invocations', 
   assert.equal(childState.evidence.child.parentThreadId, 'parent');
 });
 
+test('codex-lifecycle bridge ignores managed hooks without a running delegation', () => {
+  const { root, env, hookDefinitionHash } = fixture();
+  const spawn = run(root, env, ['hook-event', '--event', 'pre-tool', '--bridge', 'true'], JSON.stringify({
+    sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'model',
+    requestedReasoningEffort: 'high', hookDefinitionHash
+  }));
+  assert.equal(spawn.status, 0, `${spawn.stderr}\n${spawn.stdout}`);
+  assert.equal(JSON.parse(spawn.stdout).status, 'observed-spawn');
+
+  const events = [
+    ['subagent-start', {
+      sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
+      nativeAgent: 'agent-infra-lifecycle-executor'
+    }],
+    ['post-tool', {
+      sessionId: 'parent', turnId: 'turn', childThreadId: 'child',
+      nativeAgent: 'agent-infra-lifecycle-executor'
+    }],
+    ['subagent-stop', {
+      sessionId: 'child', turnId: 'child-turn', childThreadId: 'child',
+      nativeAgent: 'agent-infra-lifecycle-executor'
+    }]
+  ] as const;
+
+  for (const [event, payload] of events) {
+    const result = run(root, env, ['hook-event', '--event', event, '--bridge', 'true'], JSON.stringify(payload));
+    assert.equal(result.status, 0, `${event}: ${result.stderr}\n${result.stdout}`);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null
+    });
+  }
+});
+
 test('codex-lifecycle CLI rejects unknown and duplicate options', () => {
   const { root, env } = fixture();
   for (const args of [

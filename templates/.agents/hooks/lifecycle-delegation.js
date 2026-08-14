@@ -59,7 +59,7 @@ process.stdin.on('end', () => {
   const toolInput = event.tool_input && typeof event.tool_input === 'object' ? event.tool_input : {};
   const nativeAgent = event.agent_name || event.agent_type || event.agent?.name
     || toolInput.agent_type || toolInput.agent || toolInput.name;
-  if (!String(nativeAgent || '').startsWith('agent-infra-lifecycle-')) process.exit(0);
+  if (!/^agent-infra-lifecycle-(executor|reviewer)$/.test(String(nativeAgent || ''))) process.exit(0);
   if (client === 'codex') {
     const phases = new Set(['pre-tool', 'subagent-start', 'post-tool', 'subagent-stop']);
     if (!phases.has(hook)) {

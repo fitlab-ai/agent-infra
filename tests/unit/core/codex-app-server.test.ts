@@ -67,8 +67,8 @@ test('App Server hook discovery requires every enabled lifecycle hook', () => {
   const hooks = ([
     ['preToolUse', '^collaborationspawn_agent$', 'pre-tool'],
     ['postToolUse', '^collaborationspawn_agent$', 'post-tool'],
-    ['subagentStart', '^agent-infra-lifecycle-(executor|reviewer)$', 'subagent-start'],
-    ['subagentStop', '^agent-infra-lifecycle-(executor|reviewer)$', 'subagent-stop']
+    ['subagentStart', '', 'subagent-start'],
+    ['subagentStop', '', 'subagent-stop']
   ] as const).map(([eventName, matcher, phase]) => ({ eventName, matcher, command: command(phase), enabled: true }));
   assert.equal(parseCodexHooksList({ data: [{ cwd: '/workspace', hooks, warnings: [], errors: [] }] }, '/workspace').length, 4);
   assert.throws(

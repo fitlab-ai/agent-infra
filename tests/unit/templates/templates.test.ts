@@ -521,8 +521,8 @@ test("version format validation hooks are wired into templates and local config"
     const lifecycle = [
       ["PreToolUse", "^collaborationspawn_agent$", "pre-tool"],
       ["PostToolUse", "^collaborationspawn_agent$", "post-tool"],
-      ["SubagentStart", "^agent-infra-lifecycle-(executor|reviewer)$", "subagent-start"],
-      ["SubagentStop", "^agent-infra-lifecycle-(executor|reviewer)$", "subagent-stop"]
+      ["SubagentStart", "", "subagent-start"],
+      ["SubagentStop", "", "subagent-stop"]
     ] as const;
     for (const [event, matcher, phase] of lifecycle) {
       const entry = settings.hooks?.[event]?.find((candidate) => candidate.matcher === matcher);

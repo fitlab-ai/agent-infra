@@ -31,6 +31,15 @@ function failure(code: string, message: string): void {
   process.exitCode = 1;
 }
 
+function outputBridgeResult(result: Awaited<ReturnType<typeof activateCodexOrchestrationDelegation>>): void {
+  if (result.error?.code === 'ORCHESTRATION_DELEGATION_MISSING') {
+    output({ status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null });
+    return;
+  }
+  output(result);
+  if (result.status !== 'running') process.exitCode = 1;
+}
+
 function parse(args: string[]): Parsed | null {
   if (args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(USAGE);
@@ -169,8 +178,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
           const value = payload as Record<string, unknown>;
           const childThreadId = String(value.childThreadId ?? '');
           const reconciled = reconcileCodexOrchestrationDelegation(childThreadId);
-          output(reconciled);
-          if (reconciled.status !== 'running') process.exitCode = 1;
+          outputBridgeResult(reconciled);
           return;
         }
         output({ status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null });
@@ -180,8 +188,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
         try {
           if (store.read(event.childThreadId).consumer) {
             const bridged = await sealCodexOrchestrationDelegation(event.childThreadId, { store });
-            output(bridged);
-            if (bridged.status !== 'running') process.exitCode = 1;
+            outputBridgeResult(bridged);
             return;
           }
         } catch {
@@ -198,8 +205,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
           store,
           resolveThread: async () => resolved
         });
-        output(bridged);
-        if (bridged.status !== 'running') process.exitCode = 1;
+        outputBridgeResult(bridged);
         return;
       }
       if (event.type === 'hook-child') {
@@ -215,8 +221,7 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       const result = store.apply(event);
       if (parsed.values['--bridge'] === 'true' && event.type === 'hook-stop') {
         const bridged = await sealCodexOrchestrationDelegation(event.childThreadId, { store });
-        output(bridged);
-        if (bridged.status !== 'running') process.exitCode = 1;
+        outputBridgeResult(bridged);
         return;
       }
       output({ status: result.state.status, changed: true, evidence: result.state, diagnostics: [], error: result.state.error });

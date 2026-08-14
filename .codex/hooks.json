@@ -39,7 +39,7 @@
     ],
     "SubagentStart": [
       {
-        "matcher": "^agent-infra-lifecycle-(executor|reviewer)$",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
@@ -52,7 +52,7 @@
     ],
     "SubagentStop": [
       {
-        "matcher": "^agent-infra-lifecycle-(executor|reviewer)$",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
