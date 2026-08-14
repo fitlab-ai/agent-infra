@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getProcessStartTime } from '../../server/process-state.ts';
 import { createTask } from '../../task/create-service.ts';
+import { assertGitWorktreeBinding } from '../../git/worktree-identity.ts';
 import {
   bindSandboxControlTask,
   validateSandboxControlRequest,
@@ -14,9 +15,12 @@ function readManifest(manifestPath: string): SandboxControlManifest {
   const stat = fs.lstatSync(manifestPath);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as SandboxControlManifest;
+  if (manifest.version !== 2) {
+    throw new Error('SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 2; recreate the sandbox');
+  }
   if (
-    manifest.version !== 1
-    || typeof manifest.repoRoot !== 'string'
+    typeof manifest.repoRoot !== 'string'
+    || typeof manifest.worktreeRoot !== 'string'
     || typeof manifest.channelDir !== 'string'
     || typeof manifest.token !== 'string'
   ) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
@@ -61,6 +65,7 @@ function consumeRequest(directory: string, id: string): void {
 
 export function serveSandboxControl(manifestPath: string, signal: AbortSignal = new AbortController().signal): void {
   const manifest = readManifest(manifestPath);
+  assertGitWorktreeBinding(manifest.repoRoot, manifest.worktreeRoot, manifest.branch);
   const brokerPath = path.join(path.dirname(manifestPath), 'broker.json');
   const startTime = getProcessStartTime(process.pid);
   if (!startTime) throw new Error('SANDBOX_CONTROL_BROKER_IDENTITY_UNAVAILABLE');
@@ -83,6 +88,7 @@ export function serveSandboxControl(manifestPath: string, signal: AbortSignal = 
   while (!signal.aborted) {
     const current = readManifest(manifestPath);
     if (current.token !== manifest.token) return;
+    assertGitWorktreeBinding(current.repoRoot, current.worktreeRoot, current.branch);
     assertRealDirectory(requestsDir, manifest.channelDir);
     assertRealDirectory(responsesDir, manifest.channelDir);
     for (const name of fs.readdirSync(requestsDir).sort()) {
@@ -107,9 +113,13 @@ export function serveSandboxControl(manifestPath: string, signal: AbortSignal = 
             stdout: `${JSON.stringify(result)}\n`, stderr: ''
           };
         } else {
+          const boundArgs = bindSandboxControlTask(request, manifest.taskId!);
+          if (request.family === 'task-orchestration') {
+            boundArgs.push('--git-worktree-root', manifest.worktreeRoot);
+          }
           const result = spawnSync(
             process.execPath,
-            ['--experimental-strip-types', '--no-warnings', process.argv[1]!, request.family, ...bindSandboxControlTask(request, manifest.taskId!)],
+            ['--experimental-strip-types', '--no-warnings', process.argv[1]!, request.family, ...boundArgs],
             {
               cwd: manifest.repoRoot,
               encoding: 'utf8',

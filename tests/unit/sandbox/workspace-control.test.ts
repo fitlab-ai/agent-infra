@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,8 +15,9 @@ import {
 } from '../../../lib/sandbox/control/protocol.ts';
 
 const manifest: SandboxControlManifest = {
-  version: 1,
+  version: 2,
   repoRoot: '/repo',
+  worktreeRoot: '/worktree',
   project: 'p',
   container: 'p-dev-feature',
   branch: 'feature',
@@ -63,6 +65,16 @@ test('branch-only sandboxes and incorrect tokens fail closed', () => {
   );
 });
 
+test('task-orchestration requests cannot override the manifest worktree binding', () => {
+  assert.throws(() => validateSandboxControlRequest({
+    version: 1,
+    id: '12345678-1234-1234-1234-123456789abc',
+    token: 'secret',
+    family: 'task-orchestration',
+    args: ['08', 'commit-status', '--git-worktree-root', '/other']
+  }, manifest), /REQUEST_INVALID/);
+});
+
 test('control broker strips mixed-case sandbox authority from child environments', () => {
   assert.deepEqual(sandboxControlSafeEnv({
     agent_infra_control_token: 'live-token',
@@ -105,10 +117,20 @@ test('task-create is authorized in both sandbox modes without task rebinding', (
 
 test('control broker ownership is acquired exclusively', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-'));
+  fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');
+  const git = (args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  git(['init', '-q']);
+  git(['config', 'user.name', 'Test']);
+  git(['config', 'user.email', 'test@example.com']);
+  git(['add', 'source.txt']);
+  git(['commit', '-qm', 'base']);
+  const branch = git(['branch', '--show-current']);
   const channelDir = path.join(root, 'channel');
   const manifestPath = path.join(root, 'manifest.json');
   fs.mkdirSync(channelDir, { recursive: true });
-  fs.writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, repoRoot: root, channelDir })}\n`);
+  fs.writeFileSync(manifestPath, `${JSON.stringify({
+    ...manifest, repoRoot: root, worktreeRoot: root, branch, channelDir
+  })}\n`);
   fs.writeFileSync(path.join(root, 'broker.json'), '{}\n');
   const controller = new AbortController();
   controller.abort();
@@ -116,6 +138,20 @@ test('control broker ownership is acquired exclusively', () => {
     assert.throws(
       () => serveSandboxControl(manifestPath, controller.signal),
       (error: unknown) => error instanceof Error && 'code' in error && error.code === 'EEXIST'
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('control broker rejects legacy manifests with sandbox refresh guidance', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-legacy-manifest-'));
+  const manifestPath = path.join(root, 'manifest.json');
+  fs.writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, version: 1, worktreeRoot: undefined })}\n`);
+  try {
+    assert.throws(
+      () => serveSandboxControl(manifestPath),
+      /SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 2; recreate the sandbox/
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

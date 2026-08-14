@@ -657,7 +657,7 @@ test('repository pending guard includes paused runs that retain a delegation', (
 test('native stop derives the workspace delta before sealing the unique delegation', () => {
   const f = fixture('requirement-analysis-review');
   const capturedScopes: Array<string | null> = [];
-  const captureWorkspace = (_repoRoot: string, taskId: string | null) => {
+  const captureWorkspace = ({ taskId }: { taskId: string | null }) => {
     capturedScopes.push(taskId);
     return capturedScopes.length === 1 ? 'before-tree' : 'after-tree';
   };
@@ -697,7 +697,7 @@ test('native stop derives the workspace delta before sealing the unique delegati
 test('native stop preserves legacy snapshot scope for an old pending receipt', () => {
   const f = fixture('requirement-analysis-review');
   const capturedScopes: Array<string | null> = [];
-  const captureWorkspace = (_repoRoot: string, taskId: string | null) => {
+  const captureWorkspace = ({ taskId }: { taskId: string | null }) => {
     capturedScopes.push(taskId);
     return capturedScopes.length === 1 ? 'before-tree' : 'after-tree';
   };

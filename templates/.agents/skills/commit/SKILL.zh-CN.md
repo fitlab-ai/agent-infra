@@ -31,21 +31,17 @@ description: >
 
 未显式指定 task scope 时，只有 `TASK_CONTEXT_NOT_FOUND` 可继续既有纯提交路径；detached HEAD、损坏候选或多匹配属于歧义，必须失败。显式 task scope 解析失败时一律失败。
 
-## 步骤开始：先恢复，再写 started 标记
+## 步骤开始：恢复或创建受控 attempt
 
 已解析出 `{task-id}` 时，先调用 `agent-infra-internal task-orchestration {task-id} commit-status`：
 
-- `recoverable` / `prepared`：调用 `commit-recover --agent {standard-agent-token}`；不得追加第二条 started、重复 commit 或重复 push。recoverable 完成后直接进入同步与完成校验；prepared 清理后复用既有 open started 并继续正常提交。
+- `recoverable`：调用 `commit-recover --agent {standard-agent-token}` 完成收尾，不得重复 commit 或 push。
+- `prepared`：调用 `commit-recover --agent {standard-agent-token}` 安全清理 intent，再次查询 status 并复用返回的 `retryable-start` attempt。
+- `retryable-start`：调用 `commit-recover --agent {standard-agent-token}` 取得原 attempt，不追加第二条 started。
 - `invalid` / `conflict` / `orphaned-start`：输出结构化 code 与状态证据并停止。
-- `idle`：继续下方正常流程。
+- `idle`：调用 `commit-start --agent {standard-agent-token}`，由核心在任务锁内原子写入结构化 started 并返回 attempt/baseline。
 
-开始检查本地修改之前，向 task.md `## 活动日志` 追加一条 started 标记（与本步骤 done 条目同基名 + ` [started]` 后缀，note 用 `started`）：
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Commit [started]** by {agent} — started
-```
-
-`ai task log` 会把它与提交完成时写入的 done 条目配对成一行（进行中 → 已完成）。格式与配对规则见 `.agents/rules/task-management.md` 的「Activity Log started / done 双标记约定」。仅当本任务存在 task.md 时写入（无任务上下文的纯提交可跳过）。
+只从 `commit-start` / `commit-recover` 的结构化输出读取 `{commit-attempt}`；不得手写、复制或猜测 attempt。无任务上下文的纯提交跳过本协议。
 
 ## 1. 检查本地修改（关键）
 

@@ -1345,6 +1345,7 @@ export async function create(args: string[]): Promise<void> {
             const control = materializeSandboxControl({
               base: effectiveConfig.controlBase,
               repoRoot: effectiveConfig.repoRoot,
+              worktreeRoot: worktree,
               project: effectiveConfig.project,
               container,
               branch,

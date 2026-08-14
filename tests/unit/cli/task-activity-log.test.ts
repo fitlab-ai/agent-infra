@@ -204,6 +204,28 @@ test('pairEntries folds a started+done pair onto one row', () => {
   });
 });
 
+test('pairEntries closes a structured Commit attempt with its aborted terminal row', () => {
+  const rows = pairEntries([
+    entry(
+      '2026-06-16 09:00:00+08:00',
+      'Commit [started]',
+      'codex',
+      `started; attempt=attempt-0001; baseline=${'a'.repeat(40)}; agent=codex`
+    ),
+    entry(
+      '2026-06-16 09:01:00+08:00',
+      'Commit [aborted]',
+      'codex',
+      'aborted; attempt=attempt-0001; code=BEGIN_FAILED'
+    )
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.step, 'Commit');
+  assert.equal(rows[0]!.attempt, 'attempt-0001');
+  assert.equal(rows[0]!.done, '2026-06-16 09:01:00+08:00');
+  assert.equal(rows[0]!.note, 'aborted; attempt=attempt-0001; code=BEGIN_FAILED');
+});
+
 test('pairEntries pairs each Round independently', () => {
   const rows = pairEntries([
     entry('2026-06-16 09:00:00+08:00', 'Analyze Task (Round 1) [started]'),

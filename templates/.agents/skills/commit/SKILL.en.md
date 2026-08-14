@@ -31,17 +31,11 @@ Direct invocation still requires explicit user authorization. An orchestrated in
 
 Without explicit task scope, only `TASK_CONTEXT_NOT_FOUND` may continue through the existing bare-commit path. Detached HEAD, damaged candidates, or multiple matches are ambiguity errors. Any explicit task-scope failure is fatal.
 
-## Step Start: Recover First, Then Write the started Marker
+## Step Start: Recover or Create a Controlled Attempt
 
-When `{task-id}` is resolved, call `commit-status` first. For `recoverable` / `prepared`, call `commit-recover --agent {standard-agent-token}` without adding a second started entry or repeating Git side effects. Fail closed for `invalid` / `conflict` / `orphaned-start`; only `idle` enters the normal flow.
+When `{task-id}` is resolved, call `commit-status` first. Finalize `recoverable`; safely clear `prepared` and query status again; reuse `retryable-start` through `commit-recover --agent {standard-agent-token}`. Fail closed for `invalid` / `conflict` / `orphaned-start`. For `idle`, call `commit-start --agent {standard-agent-token}` so the core atomically writes the structured started entry and returns its attempt/baseline.
 
-Before checking local modifications, append a started marker to task.md `## Activity Log` (same base action as this step's done entry plus a ` [started]` suffix, note `started`):
-
-```
-- {YYYY-MM-DD HH:mm:ss±HH:MM} — **Commit [started]** by {agent} — started
-```
-
-`ai task log` pairs it with the done entry written when the commit completes onto one row (in progress → done). Format and pairing rules: see the "Activity Log started / done dual-marker convention" in `.agents/rules/task-management.md`. Only write it when this task has a task.md (a bare commit with no task context may skip it).
+Read `{commit-attempt}` only from structured `commit-start` / `commit-recover` output. Never hand-write, copy, or guess an attempt. A bare commit without task context skips this protocol.
 
 ## 1. Check Local Modifications (CRITICAL)
 

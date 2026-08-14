@@ -15,7 +15,9 @@ import {
   readRun,
   recoverCommitIntent,
   sealOrchestrationDelegation,
-  statusCommitIntent
+  startCommitAttempt,
+  statusCommitIntent,
+  terminateCommitAttempt
 } from '../../../lib/task/orchestration.ts';
 import { readCommitIntent } from '../../../lib/task/commit-intent.ts';
 
@@ -25,7 +27,7 @@ function git(root: string, args: string[]): string {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
 }
 
-function fixture() {
+function fixture(agent = 'codex') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-orchestration-'));
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
@@ -33,14 +35,16 @@ function fixture() {
   fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');
   git(root, ['add', 'source.txt']);
   git(root, ['commit', '-qm', 'base']);
+  const head = git(root, ['rev-parse', 'HEAD']);
+  const attempt = 'attempt-0001';
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), [
     '---', `id: ${taskId}`, 'status: active', 'current_step: code-review', '---', '',
     '# Task', '', '## Activity Log', '',
-    '- 2026-01-01 00:00:00+00:00 — **Commit [started]** by codex — started', ''
+    `- 2026-01-01 00:00:00+00:00 — **Commit [started]** by ${agent} — started; attempt=${attempt}; baseline=${head}; agent=${agent}`, ''
   ].join('\n'));
-  return { root, taskDir, head: git(root, ['rev-parse', 'HEAD']) };
+  return { root, taskDir, head, attempt };
 }
 
 function checkpointReviewed(f: ReturnType<typeof fixture>, token: string) {
@@ -87,7 +91,7 @@ test('standalone begin and complete preserve historical orchestration bytes', ()
     const before = fs.readFileSync(runPath);
 
     const begun = beginCommitIntent(taskId, {
-      agent: 'codex', orchestrated: false, baselineHead: f.head
+      agent: 'codex', orchestrated: false, baselineHead: f.head, attempt: f.attempt
     }, { repoRoot: f.root, token: () => `token-${status}` });
     assert.equal(begun.status, 'ready');
     assert.equal(begun.intent?.mode, 'standalone');
@@ -102,7 +106,7 @@ test('standalone begin and complete preserve historical orchestration bytes', ()
 test('standalone commit without review finalizes without creating a review anchor', () => {
   const f = fixture();
   const begun = beginCommitIntent(taskId, {
-    agent: 'codex', orchestrated: false, baselineHead: f.head
+    agent: 'codex', orchestrated: false, baselineHead: f.head, attempt: f.attempt
   }, { repoRoot: f.root, token: () => 'token' });
   assert.equal(begun.status, 'ready');
   fs.writeFileSync(path.join(f.root, 'source.txt'), 'changed\n');
@@ -125,21 +129,33 @@ test('standalone commit without review finalizes without creating a review ancho
   assert.equal(task.includes('last_reviewed_commit:'), false);
 });
 
+test('repeated commit begin reports the active intent as busy', () => {
+  const f = fixture();
+  const input = {
+    agent: 'codex', orchestrated: false, baselineHead: f.head, attempt: f.attempt
+  } as const;
+  assert.equal(beginCommitIntent(taskId, input, { repoRoot: f.root, token: () => 'token' }).status, 'ready');
+
+  const repeated = beginCommitIntent(taskId, input, { repoRoot: f.root });
+
+  assert.equal(repeated.error?.code, 'ORCHESTRATION_COMMIT_INTENT_BUSY');
+});
+
 test('standalone fails before intent creation when any delegation is pending', () => {
   const f = fixture();
   fs.writeFileSync(path.join(f.taskDir, 'orchestration.json'), `${JSON.stringify(activatedRun(), null, 2)}\n`);
   const result = beginCommitIntent(taskId, {
-    agent: 'codex', orchestrated: false, baselineHead: f.head
+    agent: 'codex', orchestrated: false, baselineHead: f.head, attempt: f.attempt
   }, { repoRoot: f.root });
   assert.equal(result.error?.code, 'ORCHESTRATION_STANDALONE_BUSY');
   assert.equal(fs.existsSync(path.join(f.taskDir, 'commit-intent.json')), false);
 });
 
 test('orchestrated complete commits the preplanned receipt without consuming authorization', () => {
-  const f = fixture();
+  const f = fixture('claude');
   fs.writeFileSync(path.join(f.taskDir, 'orchestration.json'), `${JSON.stringify(activatedRun(), null, 2)}\n`);
   const begun = beginCommitIntent(taskId, {
-    agent: 'claude', orchestrated: true, baselineHead: f.head
+    agent: 'claude', orchestrated: true, baselineHead: f.head, attempt: f.attempt
   }, {
     repoRoot: f.root, token: () => 'token', now: () => '2026-01-01T00:00:01.000Z'
   });
@@ -158,11 +174,11 @@ test('orchestrated complete commits the preplanned receipt without consuming aut
 });
 
 test('orchestrated complete recovers after the planned run was written but the intent remains', () => {
-  const f = fixture();
+  const f = fixture('claude');
   const runPath = path.join(f.taskDir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(activatedRun(), null, 2)}\n`);
   beginCommitIntent(taskId, {
-    agent: 'claude', orchestrated: true, baselineHead: f.head
+    agent: 'claude', orchestrated: true, baselineHead: f.head, attempt: f.attempt
   }, {
     repoRoot: f.root, token: () => 'token', now: () => '2026-01-01T00:00:01.000Z'
   });
@@ -187,7 +203,7 @@ test('orchestrated complete recovers after the planned run was written but the i
 test('token-less recovery finalizes a committed intent exactly once', () => {
   const f = fixture();
   beginCommitIntent(taskId, {
-    agent: 'codex', orchestrated: false, baselineHead: f.head
+    agent: 'codex', orchestrated: false, baselineHead: f.head, attempt: f.attempt
   }, { repoRoot: f.root, token: () => 'lost-token' });
   const committedHead = checkpointReviewed(f, 'lost-token');
 
@@ -207,16 +223,91 @@ test('commit intent status is ready when no intent exists', () => {
   assert.equal(status.changed, false);
   assert.equal(status.taskId, taskId);
   assert.equal(status.intent, null);
-  assert.equal(status.finalization?.disposition, 'orphaned-start');
+  assert.equal(status.finalization?.disposition, 'retryable-start');
+  assert.equal(status.finalization?.attempt?.attempt, f.attempt);
   assert.equal(status.error, null);
 });
 
-test('orchestrated complete fails closed on run drift and retains recovery evidence', () => {
+test('commit attempts can be reused and safely terminated before an intent exists', () => {
   const f = fixture();
+  const taskPath = path.join(f.taskDir, 'task.md');
+  fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(/^.*Commit \[started\].*\n/m, ''));
+
+  const started = startCommitAttempt(taskId, { agent: 'codex' }, {
+    repoRoot: f.root, id: () => 'attempt-0002'
+  });
+  assert.equal(started.status, 'ready');
+  assert.equal(started.finalization?.disposition, 'retryable-start');
+  assert.equal(started.finalization?.attempt?.attempt, 'attempt-0002');
+  const recovered = recoverCommitIntent(taskId, { agent: 'codex' }, { repoRoot: f.root });
+  assert.equal(recovered.changed, false);
+  assert.equal(recovered.finalization?.attempt?.attempt, 'attempt-0002');
+
+  const terminated = terminateCommitAttempt(taskId, {
+    attempt: 'attempt-0002', agent: 'codex', code: 'BEGIN_FAILED'
+  }, { repoRoot: f.root });
+  assert.equal(terminated.finalization?.disposition, 'idle');
+  assert.match(fs.readFileSync(taskPath, 'utf8'), /\*\*Commit \[aborted\]\*\*/);
+});
+
+test('commit start refuses to stack on a legacy plain open started row', () => {
+  const f = fixture();
+  const taskPath = path.join(f.taskDir, 'task.md');
+  fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(
+    /started; attempt=.*; baseline=.*; agent=codex/,
+    'started'
+  ));
+  const result = startCommitAttempt(taskId, { agent: 'codex' }, { repoRoot: f.root });
+  assert.equal(result.error?.code, 'ORCHESTRATION_COMMIT_ATTEMPT_BUSY');
+  assert.equal((fs.readFileSync(taskPath, 'utf8').match(/Commit \[started\]/g) ?? []).length, 1);
+});
+
+test('commit status and begin use a bound linked worktree while keeping intent state in the main repository', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-linked-worktree-'));
+  const main = path.join(root, 'main');
+  const linked = path.join(root, 'linked');
+  fs.mkdirSync(main);
+  git(main, ['init', '-q']);
+  git(main, ['config', 'user.name', 'Test']);
+  git(main, ['config', 'user.email', 'test@example.com']);
+  fs.writeFileSync(path.join(main, 'source.txt'), 'main\n');
+  git(main, ['add', 'source.txt']);
+  git(main, ['commit', '-qm', 'main']);
+  const mainHead = git(main, ['rev-parse', 'HEAD']);
+  git(main, ['worktree', 'add', '-qb', 'feature', linked]);
+  fs.writeFileSync(path.join(linked, 'source.txt'), 'feature\n');
+  git(linked, ['add', 'source.txt']);
+  git(linked, ['commit', '-qm', 'feature']);
+  const linkedHead = git(linked, ['rev-parse', 'HEAD']);
+  assert.notEqual(linkedHead, mainHead);
+
+  const taskDir = path.join(main, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), [
+    '---', `id: ${taskId}`, 'status: active', 'current_step: code-review', '---', '',
+    '# Task', '', '## Activity Log', '',
+    `- 2026-01-01 00:00:00+00:00 — **Commit [started]** by codex — started; attempt=attempt-linked; baseline=${linkedHead}; agent=codex`, ''
+  ].join('\n'));
+
+  const options = { repoRoot: main, gitWorktreeRoot: linked, token: () => 'linked-token' };
+  const status = statusCommitIntent(taskId, options);
+  assert.equal(status.finalization?.currentHead, linkedHead);
+  assert.equal(status.finalization?.disposition, 'retryable-start');
+  const begun = beginCommitIntent(taskId, {
+    agent: 'codex', orchestrated: false, baselineHead: linkedHead, attempt: 'attempt-linked'
+  }, options);
+  assert.equal(begun.status, 'ready');
+  assert.equal(begun.intent?.currentHead, linkedHead);
+  assert.equal(fs.existsSync(path.join(taskDir, 'commit-intent.json')), true);
+  assert.equal(fs.existsSync(path.join(linked, '.agents', 'workspace', 'active', taskId, 'commit-intent.json')), false);
+});
+
+test('orchestrated complete fails closed on run drift and retains recovery evidence', () => {
+  const f = fixture('claude');
   const runPath = path.join(f.taskDir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify(activatedRun(), null, 2)}\n`);
   beginCommitIntent(taskId, {
-    agent: 'claude', orchestrated: true, baselineHead: f.head
+    agent: 'claude', orchestrated: true, baselineHead: f.head, attempt: f.attempt
   }, { repoRoot: f.root, token: () => 'token' });
   checkpointReviewed(f, 'token');
   const drifted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
@@ -229,11 +320,11 @@ test('orchestrated complete fails closed on run drift and retains recovery evide
 });
 
 test('orchestrated begin pauses invalid authorization before creating an intent', () => {
-  const f = fixture();
+  const f = fixture('claude');
   const invalid = { ...activatedRun(), commitAuthorization: { issuedAt: null, consumedAt: null } };
   fs.writeFileSync(path.join(f.taskDir, 'orchestration.json'), `${JSON.stringify(invalid, null, 2)}\n`);
   const result = beginCommitIntent(taskId, {
-    agent: 'claude', orchestrated: true, baselineHead: f.head
+    agent: 'claude', orchestrated: true, baselineHead: f.head, attempt: f.attempt
   }, { repoRoot: f.root, now: () => '2026-01-01T00:00:01.000Z' });
   assert.equal(result.error?.code, 'ORCHESTRATION_COMMIT_AUTHORIZATION_INVALID');
   assert.equal(readRun(f.taskDir)?.status, 'paused');
@@ -243,7 +334,7 @@ test('orchestrated begin pauses invalid authorization before creating an intent'
 test('commit checkpoints follow repository HEAD and active intent blocks prepare', () => {
   const f = fixture();
   const begun = beginCommitIntent(taskId, {
-    agent: 'codex', orchestrated: false, baselineHead: f.head
+    agent: 'codex', orchestrated: false, baselineHead: f.head, attempt: f.attempt
   }, { repoRoot: f.root, token: () => 'token' });
   assert.equal(begun.status, 'ready');
   const blocked = prepareOrchestrationDelegation(taskId, {
@@ -294,7 +385,7 @@ test('commit begin and delegation prepare serialize across independent processes
   const beginSource = `
     import { beginCommitIntent } from ${JSON.stringify(moduleUrl)};
     console.log(JSON.stringify(beginCommitIntent(${JSON.stringify(taskId)}, {
-      agent: 'codex', orchestrated: false, baselineHead: ${JSON.stringify(f.head)}
+      agent: 'codex', orchestrated: false, baselineHead: ${JSON.stringify(f.head)}, attempt: ${JSON.stringify(f.attempt)}
     }, { repoRoot: ${JSON.stringify(f.root)} })));
   `;
   const prepareSource = `

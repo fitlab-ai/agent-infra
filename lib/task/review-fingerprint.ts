@@ -3,6 +3,13 @@ import path from "node:path";
 
 import { artifactName, maxRound } from "./review-artifacts.ts";
 
+type ReviewedGitTree = string & { readonly __reviewedGitTree: unique symbol };
+const REVIEWED_TREE_RE = /^[a-f0-9]{40,64}$/;
+
+export function parseReviewedGitTree(value: string): ReviewedGitTree | null {
+  return REVIEWED_TREE_RE.test(value) ? value as ReviewedGitTree : null;
+}
+
 // Paths excluded from the post-review coverage gate. Fail-closed: the gate
 // covers ALL tracked changes by default. This default denylist is EMPTY —
 // projects opt into exclusions explicitly via review.post_review_exclude_globs.
@@ -70,6 +77,8 @@ export function extractReviewedSnapshotTree(content: string): string {
   const match = String(content).match(/^[-*]?\s*\*\*(?:审查快照树|Reviewed Snapshot Tree)\*\*[:：]\s*(.*?)\s*$/m);
   return match ? match[1]!.trim().replace(/`/g, "") : "";
 }
+
+export type { ReviewedGitTree };
 
 export function parseReviewVerdict(content: string): string {
   const match = String(content).match(/^[-*]?\s*\*\*(?:总体结论|Overall Verdict)\*\*[:：]\s*(.*?)\s*$/m);

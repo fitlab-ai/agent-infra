@@ -113,6 +113,7 @@ export function materializeSandboxWorkspaceView(params: Readonly<{
 export function materializeSandboxControl(params: Readonly<{
   base: string;
   repoRoot: string;
+  worktreeRoot: string;
   project: string;
   container: string;
   branch: string;
@@ -131,9 +132,11 @@ export function materializeSandboxControl(params: Readonly<{
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   }
   const token = randomBytes(32).toString('hex');
+  const repoRoot = fs.realpathSync.native(params.repoRoot);
   const manifest: SandboxControlManifest = {
-    version: 1,
-    repoRoot: fs.realpathSync.native(params.repoRoot),
+    version: 2,
+    repoRoot,
+    worktreeRoot: fs.realpathSync.native(params.worktreeRoot),
     project: params.project,
     container: params.container,
     branch: params.branch,

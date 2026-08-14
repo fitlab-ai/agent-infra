@@ -2,7 +2,13 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { locateActivityLog, appendActivityEntry, pairEntries } from './activity-log.ts';
+import {
+  locateActivityLog,
+  appendActivityEntry,
+  pairEntries,
+  parseCommitAttemptStarted
+} from './activity-log.ts';
+import type { CommitAttempt } from './activity-log.ts';
 import { commitIntentPath, digest, readCommitIntent } from './commit-intent.ts';
 import type { CommitIntent } from './commit-intent.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
@@ -10,7 +16,8 @@ import { parseReviewSummary } from './review-artifacts.ts';
 import {
   extractReviewBaseline,
   extractReviewedSnapshotTree,
-  findAuthoritativeReviewCodeArtifact
+  findAuthoritativeReviewCodeArtifact,
+  parseReviewedGitTree
 } from './review-fingerprint.ts';
 import type { TaskMutation } from './write.ts';
 
@@ -20,6 +27,7 @@ type CommitFinalizationDisposition =
   | 'recoverable'
   | 'invalid'
   | 'conflict'
+  | 'retryable-start'
   | 'orphaned-start';
 
 type CommitFinalizationCode =
@@ -39,6 +47,7 @@ type CommitFinalizationInspection = Readonly<{
   needsLog: boolean;
   intent: CommitIntent | null;
   intentDigest: string | null;
+  attempt: CommitAttempt | null;
 }>;
 
 type CreatePrCommitGate = Readonly<{
@@ -93,6 +102,7 @@ function outcome(
     needsLog: false,
     intent: null,
     intentDigest: null,
+    attempt: null,
     ...overrides
   };
 }
@@ -128,6 +138,16 @@ function inspectCommitFinalization(
   const openRows = commitRows.filter((row) => row.started !== '' && row.done === '');
   const file = commitIntentPath(taskDir);
   if (!fs.existsSync(file)) {
+    if (openRows.length === 1) {
+      const attempt = parseCommitAttemptStarted(openRows[0]!.note);
+      if (attempt && attempt.baseline === currentHead) {
+        return outcome('retryable-start', {
+          message: 'a structured Commit attempt can be safely reused',
+          currentHead,
+          attempt
+        });
+      }
+    }
     if (openRows.length > 0) {
       return outcome('orphaned-start', {
         code: 'COMMIT_FINALIZATION_EVIDENCE_MISSING',
@@ -204,7 +224,7 @@ function inspectCommitFinalization(
     const summary = parseReviewSummary(reviewContent);
     const reviewBaseline = extractReviewBaseline(reviewContent);
     const reviewTree = extractReviewedSnapshotTree(reviewContent);
-    if (!summary.ok || summary.summary.verdict !== 'Approved' || !commitExists(repoRoot, reviewBaseline) || !SHA_RE.test(reviewTree)) {
+    if (!summary.ok || summary.summary.verdict !== 'Approved' || !commitExists(repoRoot, reviewBaseline) || !parseReviewedGitTree(reviewTree)) {
       return invalid('authoritative review-code evidence is not a valid approved snapshot', currentHead, 'COMMIT_FINALIZATION_EVIDENCE_INVALID', shared);
     }
     const committedTree = git(repoRoot, ['rev-parse', `${intent.committedHead}^{tree}`]);

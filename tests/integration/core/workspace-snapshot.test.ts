@@ -123,3 +123,35 @@ test('repository snapshots ignore lifecycle artifacts while detecting Git-visibl
   fs.writeFileSync(path.join(root, 'untracked.ts'), 'untracked\n');
   assert.notEqual(captureRepositorySnapshot(root).worktreeTree, clean.headTree);
 });
+
+test('versioned orchestration snapshots combine a linked worktree with task state from another root', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-split-snapshot-'));
+  const stateRoot = path.join(root, 'state');
+  const gitRoot = path.join(root, 'worktree');
+  fs.mkdirSync(stateRoot);
+  fs.mkdirSync(gitRoot);
+  git(gitRoot, ['init', '-q']);
+  git(gitRoot, ['config', 'user.name', 'Test']);
+  git(gitRoot, ['config', 'user.email', 'test@example.com']);
+  fs.writeFileSync(path.join(gitRoot, 'source.ts'), 'before\n');
+  git(gitRoot, ['add', 'source.ts']);
+  git(gitRoot, ['commit', '-qm', 'baseline']);
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(stateRoot, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), 'before\n');
+
+  const before = captureWorkspaceSnapshot({ gitRoot, stateRoot, taskId });
+  fs.writeFileSync(path.join(gitRoot, 'source.ts'), 'after\n');
+  fs.writeFileSync(path.join(taskDir, 'task.md'), 'after\n');
+  const after = captureWorkspaceSnapshot({ gitRoot, stateRoot, taskId });
+
+  assert.deepEqual(diffWorkspaceSnapshots(gitRoot, before, after), [
+    '.agents/workspace/active/TASK-20260101-000001/task.md',
+    'source.ts'
+  ]);
+  assert.throws(
+    () => diffWorkspaceSnapshots(gitRoot, captureWorkspaceSnapshot(gitRoot, taskId), after),
+    /versions cannot be mixed/
+  );
+});

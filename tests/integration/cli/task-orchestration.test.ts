@@ -13,7 +13,7 @@ function fixture() {
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\ncurrent_step: requirement-analysis\n---\n\n# Task\n\n## Activity Log\n`);
   spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root });
   spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
   spawnSync('git', ['add', '.'], { cwd: root });
@@ -117,7 +117,12 @@ test('task-orchestration exposes token-guarded standalone commit intents and rej
   assert.equal(legacy.status, 2);
   assert.equal(JSON.parse(legacy.stdout).error.code, 'ORCHESTRATION_PAYLOAD_INVALID');
 
-  const begun = run(f.root, [f.id, 'commit-begin', '--agent', 'codex', '--baseline-head', head]);
+  const started = run(f.root, [f.id, 'commit-start', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+  const attempt = JSON.parse(started.stdout).finalization.attempt.attempt;
+  const begun = run(f.root, [
+    f.id, 'commit-begin', '--agent', 'codex', '--baseline-head', head, '--attempt', attempt
+  ]);
   assert.equal(begun.status, 0, begun.stderr || begun.stdout);
   const payload = JSON.parse(begun.stdout);
   assert.equal(payload.intent.mode, 'standalone');
@@ -148,20 +153,31 @@ test('task-orchestration exposes token-guarded standalone commit intents and rej
   assert.equal(emptyPayload.changed, false);
   assert.equal(emptyPayload.taskId, f.id);
   assert.equal(emptyPayload.intent, null);
-  assert.equal(emptyPayload.finalization.disposition, 'invalid');
+  assert.equal(emptyPayload.finalization.disposition, 'retryable-start');
+  assert.equal(emptyPayload.finalization.attempt.attempt, attempt);
   assert.equal(emptyPayload.error, null);
   assert.equal(emptyStatus.stdout.includes(f.dir), false);
+
+  const terminated = run(f.root, [
+    f.id, 'commit-terminate', '--attempt', attempt, '--agent', 'codex', '--code', 'ABORTED_BEFORE_SIDE_EFFECT'
+  ]);
+  assert.equal(terminated.status, 0, terminated.stderr || terminated.stdout);
+  assert.equal(JSON.parse(terminated.stdout).finalization.disposition, 'idle');
 });
 
 test('task-orchestration recovers committed finalization without the original token', () => {
   const f = fixture();
   fs.writeFileSync(path.join(f.dir, 'task.md'), [
     '---', `id: ${f.id}`, 'status: active', 'current_step: code-review', '---', '',
-    '# Task', '', '## Activity Log', '',
-    '- 2026-01-01 00:00:00+00:00 — **Commit [started]** by codex — started', ''
+    '# Task', '', '## Activity Log', ''
   ].join('\n'));
   const baseline = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: f.root, encoding: 'utf8' }).stdout.trim();
-  const begun = run(f.root, [f.id, 'commit-begin', '--agent', 'codex', '--baseline-head', baseline]);
+  const started = run(f.root, [f.id, 'commit-start', '--agent', 'codex']);
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+  const attempt = JSON.parse(started.stdout).finalization.attempt.attempt;
+  const begun = run(f.root, [
+    f.id, 'commit-begin', '--agent', 'codex', '--baseline-head', baseline, '--attempt', attempt
+  ]);
   assert.equal(begun.status, 0, begun.stderr || begun.stdout);
   const token = JSON.parse(begun.stdout).token;
   fs.writeFileSync(path.join(f.root, 'source.txt'), 'change\n');

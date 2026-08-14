@@ -58,6 +58,7 @@ test("sandbox recovery does not replay custom postSetupCmds or versionCmd", asyn
     }]
   } as unknown as SandboxConfig;
   fs.mkdirSync(config.repoRoot, { recursive: true });
+  fs.mkdirSync(path.join(config.worktreeBase, branchDir), { recursive: true });
   const view = materializeSandboxWorkspaceView({
     base: config.workspaceViewBase,
     project: config.project,
@@ -67,6 +68,7 @@ test("sandbox recovery does not replay custom postSetupCmds or versionCmd", asyn
   const control = materializeSandboxControl({
     base: config.controlBase,
     repoRoot: config.repoRoot,
+    worktreeRoot: path.join(config.worktreeBase, branchDir),
     project: config.project,
     container: "demo-dev-feature..demo",
     branch: "feature/demo",

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,18 +15,30 @@ function waitForFile(filePath: string, timeoutMs: number): void {
   throw new Error(`Timed out waiting for ${filePath}`);
 }
 
+function initializeRepository(root: string): string {
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+  fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');
+  execFileSync('git', ['add', 'source.txt'], { cwd: root });
+  execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+  return execFileSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8' }).trim();
+}
+
 test('sandbox control client and broker exchange a task-bound response', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-roundtrip-'));
   const channelDir = path.join(root, 'channel');
   const manifestPath = path.join(root, 'manifest.json');
   const token = 'roundtrip-secret';
   fs.mkdirSync(channelDir, { recursive: true });
+  const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 1,
+    version: 2,
     repoRoot: root,
+    worktreeRoot: root,
     project: 'demo',
     container: 'demo-dev-feature',
-    branch: 'feature',
+    branch,
     mode: 'task-bound',
     taskId: 'TASK-20260809-010203',
     token,
@@ -64,6 +76,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
   const manifestPath = path.join(root, 'control', 'manifest.json');
   const token = 'roundtrip-secret';
   fs.mkdirSync(channelDir, { recursive: true });
+  const branch = initializeRepository(root);
   fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'templates'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'create-task', 'config'), { recursive: true });
@@ -71,7 +84,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
   fs.copyFileSync(path.resolve('.agents/templates/task.md'), path.join(root, '.agents', 'templates', 'task.md'));
   fs.copyFileSync(path.resolve('.agents/skills/create-task/config/verify.json'), path.join(root, '.agents', 'skills', 'create-task', 'config', 'verify.json'));
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 1, repoRoot: root, project: 'demo', container: 'demo-dev-feature', branch: 'feature',
+    version: 2, repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature', branch,
     mode: 'branch-only', taskId: null, token, channelDir
   })}\n`);
   const child = spawn(

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -55,8 +56,16 @@ test('control materialization rotates the token and clears host-only replay mark
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-control-view-'));
   const repoRoot = path.join(root, 'repo');
   fs.mkdirSync(repoRoot);
+  fs.writeFileSync(path.join(repoRoot, 'source.txt'), 'base\n');
+  const git = (args: string[]) => execFileSync('git', args, { cwd: repoRoot });
+  git(['init', '-q']);
+  git(['config', 'user.name', 'Test']);
+  git(['config', 'user.email', 'test@example.com']);
+  git(['add', 'source.txt']);
+  git(['commit', '-qm', 'base']);
+  const branch = execFileSync('git', ['branch', '--show-current'], { cwd: repoRoot, encoding: 'utf8' }).trim();
   const params = {
-    base: path.join(root, 'controls'), repoRoot, project: 'p', container: 'p-dev-feature', branch: 'feature',
+    base: path.join(root, 'controls'), repoRoot, worktreeRoot: repoRoot, project: 'p', container: 'p-dev-feature', branch,
     identity: { mode: 'branch-only' as const }
   };
   const first = materializeSandboxControl(params);
@@ -66,4 +75,7 @@ test('control materialization rotates the token and clears host-only replay mark
   assert.notEqual(second.token, first.token);
   assert.deepEqual(fs.readdirSync(path.join(controlRoot, 'consumed')), []);
   assert.equal(path.dirname(path.join(controlRoot, 'consumed')), controlRoot);
+  const manifest = JSON.parse(fs.readFileSync(second.manifestPath, 'utf8'));
+  assert.equal(manifest.version, 2);
+  assert.equal(manifest.worktreeRoot, fs.realpathSync.native(repoRoot));
 });

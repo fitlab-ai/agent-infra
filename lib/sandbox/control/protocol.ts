@@ -6,8 +6,9 @@ export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration',
 export type SandboxControlFamily = typeof SANDBOX_CONTROL_FAMILIES[number];
 
 export type SandboxControlManifest = Readonly<{
-  version: 1;
+  version: 2;
   repoRoot: string;
+  worktreeRoot: string;
   project: string;
   container: string;
   branch: string;
@@ -85,6 +86,12 @@ export function validateSandboxControlRequest(
   }
   if (manifest.mode !== 'task-bound' || !manifest.taskId) {
     throw new Error('SANDBOX_CONTROL_BRANCH_ONLY: branch-only sandboxes cannot coordinate tasks');
+  }
+  if (
+    request.family === 'task-orchestration'
+    && request.args.some((arg) => arg === '--git-worktree-root' || arg.startsWith('--git-worktree-root='))
+  ) {
+    throw new Error('SANDBOX_CONTROL_REQUEST_INVALID: worktree binding is reserved for the control broker');
   }
   return request as SandboxTaskCommandRequest;
 }

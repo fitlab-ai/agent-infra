@@ -36,6 +36,8 @@ import {
   diffWorkspaceSnapshots
 } from './workspace-snapshot.ts';
 import type { RepositorySnapshot } from './workspace-snapshot.ts';
+import type { WorkspaceSnapshotContext } from './workspace-snapshot.ts';
+import { assertGitRepositoryBinding } from '../git/worktree-identity.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import {
   CommitIntentError,
@@ -55,6 +57,12 @@ import {
 } from './commit-finalization.ts';
 import type { CommitFinalizationInspection } from './commit-finalization.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
+import {
+  appendActivityEntry,
+  commitAttemptStartedNote,
+  locateActivityLog,
+  pairEntries
+} from './activity-log.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type LegacyOrchestrationModelPolicy = Readonly<{
@@ -147,12 +155,13 @@ type OrchestrationCompletionPlanResult = Readonly<{
 }>;
 type OrchestrationOptions = {
   repoRoot?: string;
+  gitWorktreeRoot?: string;
   id?: () => string;
   now?: () => string;
   maxSteps?: number;
   client?: AgentClientId;
   modelPolicy?: OrchestrationModelPolicy;
-  captureWorkspace?: (repoRoot: string, taskId: string | null) => string;
+  captureWorkspace?: (context: WorkspaceSnapshotContext) => string;
   captureRepository?: (repoRoot: string) => RepositorySnapshot;
   inspectPullRequest?: (taskId: string, options: { cwd: string }) => Readonly<{
     status: string;
@@ -188,6 +197,7 @@ type CommitIntentResult = Readonly<{
     committedHead: string | null;
     needsAnchor: boolean;
     needsLog: boolean;
+    attempt: Readonly<{ attempt: string; baseline: string; agent: string }> | null;
   }>;
   token?: string;
   error: Readonly<{ code: string; message: string }> | null;
@@ -259,6 +269,11 @@ function repositoryHead(repoRoot: string): string {
   }).trim();
 }
 
+function gitRootFor(stateRoot: string, options: OrchestrationOptions): string {
+  if (!options.gitWorktreeRoot) return stateRoot;
+  return assertGitRepositoryBinding(stateRoot, options.gitWorktreeRoot).worktreeRoot;
+}
+
 function isAncestor(repoRoot: string, ancestor: string, descendant: string): boolean {
   return spawnSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
     cwd: repoRoot,
@@ -287,7 +302,8 @@ function commitFinalizationView(inspection: CommitFinalizationInspection): NonNu
     currentHead: inspection.currentHead,
     committedHead: inspection.committedHead,
     needsAnchor: inspection.needsAnchor,
-    needsLog: inspection.needsLog
+    needsLog: inspection.needsLog,
+    attempt: inspection.attempt
   };
 }
 
@@ -607,6 +623,12 @@ function routeFromFacts(taskDir: string): Omit<OrchestrationNext, 'requestedMode
 function routeOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+  let gitRoot: string;
+  try {
+    gitRoot = gitRootFor(resolved.repoRoot, options);
+  } catch (error) {
+    return failed('ORCHESTRATION_WORKTREE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
+  }
   let content: string;
   try {
     content = fs.readFileSync(resolved.taskMdPath, 'utf8');
@@ -677,7 +699,7 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
     const capture = options.captureRepository ?? captureRepositorySnapshot;
     let before: RepositorySnapshot;
     try {
-      before = capture(resolved.repoRoot);
+      before = capture(gitRoot);
     } catch (error) {
       return failed('ORCHESTRATION_SNAPSHOT_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
     }
@@ -693,7 +715,7 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
       options.inspectPullRequest ?? inspectPlatformPullRequest;
     let inspection: ReturnType<NonNullable<OrchestrationOptions['inspectPullRequest']>>;
     try {
-      inspection = inspect(resolved.taskId, { cwd: resolved.repoRoot });
+      inspection = inspect(resolved.taskId, { cwd: gitRoot });
     } catch (error) {
       return failed('ORCHESTRATION_PR_INSPECTION_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
     }
@@ -714,7 +736,7 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
 
     let after: RepositorySnapshot;
     try {
-      after = capture(resolved.repoRoot);
+      after = capture(gitRoot);
     } catch (error) {
       return failed('ORCHESTRATION_SNAPSHOT_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
     }
@@ -748,16 +770,119 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
 }
 
-function beginCommitIntent(
+function appendCommitActivity(
+  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
+  step: string,
+  agent: string,
+  note: string
+): Readonly<{ code: string; message: string }> | null {
+  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+  const activity = locateActivityLog(taskContent);
+  if (!activity) return { code: 'ORCHESTRATION_TASK_INVALID', message: 'task activity log is missing or ambiguous' };
+  const metadata = captureTaskWriteMetadata();
+  const written = writeTask({
+    taskRef: resolved.taskId,
+    expectedState: 'active',
+    mutations: [{
+      kind: 'section',
+      aliases: ['活动日志', 'Activity Log'],
+      heading: activity.heading,
+      body: appendActivityEntry(activity, { time: metadata.timestamp, step, agent, note })
+    }]
+  }, { repoRoot: resolved.repoRoot, metadataProvider: () => metadata });
+  return written.status === 'failed' ? written.error : null;
+}
+
+function startCommitAttempt(
   taskRef: string,
-  input: Readonly<{ agent: string; orchestrated: boolean; baselineHead: string }>,
+  input: Readonly<{ agent: string }>,
   options: OrchestrationOptions = {}
 ): CommitIntentResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
   try {
+    const gitRoot = gitRootFor(resolved.repoRoot, options);
+    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-attempt.start', () => {
+      if (fs.existsSync(commitIntentPath(resolved.taskDir))) {
+        return commitIntentFailed('ORCHESTRATION_COMMIT_INTENT_BUSY', 'an active commit intent already exists', resolved.taskId);
+      }
+      const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
+      const activity = locateActivityLog(taskContent);
+      if (!activity) return commitIntentFailed('ORCHESTRATION_TASK_INVALID', 'task activity log is missing or ambiguous', resolved.taskId);
+      const open = pairEntries(activity.entries).filter((row) => row.step === 'Commit' && row.started !== '' && row.done === '');
+      if (open.length > 0) {
+        return commitIntentFailed('ORCHESTRATION_COMMIT_ATTEMPT_BUSY', 'an open Commit activity entry already exists', resolved.taskId);
+      }
+      const currentHead = repositoryHead(gitRoot);
+      const attempt = (options.id ?? randomUUID)();
+      const error = appendCommitActivity(resolved, 'Commit [started]', input.agent, commitAttemptStartedNote({
+        attempt,
+        baseline: currentHead,
+        agent: input.agent
+      }));
+      if (error) return commitIntentFailed(error.code, error.message, resolved.taskId);
+      const inspection = inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId);
+      return {
+        status: 'ready', changed: true, taskId: resolved.taskId, intent: null,
+        finalization: commitFinalizationView(inspection), error: null
+      };
+    });
+  } catch (error) {
+    return mapCommitIntentError(error, resolved.taskId);
+  }
+}
+
+function terminateCommitAttempt(
+  taskRef: string,
+  input: Readonly<{ attempt: string; agent: string; code: string }>,
+  options: OrchestrationOptions = {}
+): CommitIntentResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
+  try {
+    const gitRoot = gitRootFor(resolved.repoRoot, options);
+    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-attempt.terminate', () => {
+      if (fs.existsSync(commitIntentPath(resolved.taskDir))) {
+        return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'an active commit intent must be aborted or recovered first', resolved.taskId);
+      }
+      const inspection = inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId);
+      if (
+        inspection.disposition !== 'retryable-start'
+        || inspection.attempt?.attempt !== input.attempt
+        || inspection.attempt.agent !== input.agent
+        || inspection.attempt.baseline !== inspection.currentHead
+      ) {
+        return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'commit attempt identity or repository HEAD has drifted', resolved.taskId);
+      }
+      const error = appendCommitActivity(
+        resolved,
+        'Commit [aborted]',
+        input.agent,
+        `aborted; attempt=${input.attempt}; code=${input.code}`
+      );
+      if (error) return commitIntentFailed(error.code, error.message, resolved.taskId);
+      return {
+        status: 'ready', changed: true, taskId: resolved.taskId, intent: null,
+        finalization: commitFinalizationView(inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId)),
+        error: null
+      };
+    });
+  } catch (error) {
+    return mapCommitIntentError(error, resolved.taskId);
+  }
+}
+
+function beginCommitIntent(
+  taskRef: string,
+  input: Readonly<{ agent: string; orchestrated: boolean; baselineHead: string; attempt: string }>,
+  options: OrchestrationOptions = {}
+): CommitIntentResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
+  try {
+    const gitRoot = gitRootFor(resolved.repoRoot, options);
     return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.begin', () => {
-      const currentHead = repositoryHead(resolved.repoRoot);
+      const currentHead = repositoryHead(gitRoot);
       if (currentHead !== input.baselineHead) {
         return commitIntentFailed('ORCHESTRATION_COMMIT_BASELINE_MISMATCH', 'baseline HEAD does not match the repository HEAD', resolved.taskId);
       }
@@ -769,7 +894,19 @@ function beginCommitIntent(
         }
         return commitIntentFailed('ORCHESTRATION_COMMIT_INTENT_BUSY', 'an active commit intent already exists', resolved.taskId);
       }
-
+      const attemptInspection = inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId);
+      if (
+        attemptInspection.disposition !== 'retryable-start'
+        || attemptInspection.attempt?.attempt !== input.attempt
+        || attemptInspection.attempt.agent !== input.agent
+        || attemptInspection.attempt.baseline !== input.baselineHead
+      ) {
+        return commitIntentFailed(
+          'ORCHESTRATION_COMMIT_ATTEMPT_MISMATCH',
+          'commit begin requires one matching retryable Commit attempt',
+          resolved.taskId
+        );
+      }
       const runFile = orchestrationPath(resolved.taskDir);
       let run: OrchestrationRun | null = null;
       let sourceRunBytes: string | null = null;
@@ -883,13 +1020,14 @@ function checkpointCommitIntent(
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
   try {
+    const gitRoot = gitRootFor(resolved.repoRoot, options);
     return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.checkpoint', () => {
       const intent = readCommitIntent(resolved.taskDir, resolved.taskId, input.token);
-      const currentHead = repositoryHead(resolved.repoRoot);
+      const currentHead = repositoryHead(gitRoot);
       if (currentHead !== input.head) {
         return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'checkpoint HEAD does not match the repository HEAD', resolved.taskId);
       }
-      if (input.kind === 'committed' && !isAncestor(resolved.repoRoot, intent.baselineHead, input.head)) {
+      if (input.kind === 'committed' && !isAncestor(gitRoot, intent.baselineHead, input.head)) {
         return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'committed HEAD does not descend from the baseline', resolved.taskId);
       }
       if (input.kind === 'pushed') {
@@ -1016,9 +1154,10 @@ function completeCommitIntent(
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
   try {
+    const gitRoot = gitRootFor(resolved.repoRoot, options);
     return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.complete', () => {
       readCommitIntent(resolved.taskDir, resolved.taskId, input.token);
-      const inspection = inspectCommitFinalization(resolved.taskDir, resolved.repoRoot, resolved.taskId);
+      const inspection = inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId);
       return finalizeCommitIntentUnlocked(resolved, inspection, input.agent, () => {
         removeCommitIntent(resolved.taskDir, resolved.taskId, input.token);
       });
@@ -1036,8 +1175,15 @@ function recoverCommitIntent(
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
   try {
+    const gitRoot = gitRootFor(resolved.repoRoot, options);
     return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.recover', () => {
-      const inspection = inspectCommitFinalization(resolved.taskDir, resolved.repoRoot, resolved.taskId);
+      const inspection = inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId);
+      if (inspection.disposition === 'retryable-start') {
+        return {
+          status: 'ready', changed: false, taskId: resolved.taskId, intent: null,
+          finalization: commitFinalizationView(inspection), error: null
+        };
+      }
       if (inspection.disposition === 'prepared' && inspection.intentDigest) {
         removeCommitIntentByDigest(resolved.taskDir, resolved.taskId, inspection.intentDigest);
         return { status: 'ready', changed: true, taskId: resolved.taskId, intent: null, error: null };
@@ -1066,9 +1212,10 @@ function abortCommitIntent(
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
   try {
+    const gitRoot = gitRootFor(resolved.repoRoot, options);
     return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.abort', () => {
       const intent = readCommitIntent(resolved.taskDir, resolved.taskId, input.token);
-      const currentHead = repositoryHead(resolved.repoRoot);
+      const currentHead = repositoryHead(gitRoot);
       if (
         intent.phase !== 'prepared'
         || intent.pushEvidence !== null
@@ -1088,7 +1235,13 @@ function abortCommitIntent(
 function statusCommitIntent(taskRef: string, options: OrchestrationOptions = {}): CommitIntentResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
-  const inspection = inspectCommitFinalization(resolved.taskDir, resolved.repoRoot, resolved.taskId);
+  let gitRoot: string;
+  try {
+    gitRoot = gitRootFor(resolved.repoRoot, options);
+  } catch (error) {
+    return commitIntentFailed('ORCHESTRATION_WORKTREE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
+  }
+  const inspection = inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId);
   return {
     status: 'ready',
     changed: false,
@@ -1156,7 +1309,11 @@ function prepareOrchestrationDelegationUnlocked(
   }
   let beforeFingerprint: string;
   try {
-    beforeFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)(resolved.repoRoot, resolved.taskId);
+    beforeFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)({
+      gitRoot: gitRootFor(resolved.repoRoot, options),
+      stateRoot: resolved.repoRoot,
+      taskId: resolved.taskId
+    });
   } catch (error) {
     return failed('ORCHESTRATION_SNAPSHOT_FAILED', error instanceof Error ? error.message : String(error), resolved.taskId);
   }
@@ -1280,9 +1437,14 @@ function sealMatchingOrchestrationDelegation(
   }
   const repoRoot = options.repoRoot ?? process.cwd();
   try {
+    const gitRoot = gitRootFor(repoRoot, options);
     const snapshotTaskId = receipt.workspaceSnapshotScope === 'task' ? receipt.taskId : null;
-    const afterFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)(repoRoot, snapshotTaskId);
-    const changedPaths = (options.diffWorkspace ?? diffWorkspaceSnapshots)(repoRoot, receipt.beforeFingerprint, afterFingerprint);
+    const afterFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)({
+      gitRoot,
+      stateRoot: repoRoot,
+      taskId: snapshotTaskId
+    });
+    const changedPaths = (options.diffWorkspace ?? diffWorkspaceSnapshots)(gitRoot, receipt.beforeFingerprint, afterFingerprint);
     return sealOrchestrationDelegation(matched.taskId, {
       childId: event.childId,
       exitCode: 0,
@@ -1474,8 +1636,10 @@ export {
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation,
+  startCommitAttempt,
   statusCommitIntent,
-  statusOrchestration
+  statusOrchestration,
+  terminateCommitAttempt
 };
 export type {
   CommitIntentResult,

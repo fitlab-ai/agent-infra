@@ -127,6 +127,7 @@ function recoveryFixtureConfig(tmpDir: string): SandboxConfig {
   materializeSandboxControl({
     base: config.controlBase,
     repoRoot: config.repoRoot,
+    worktreeRoot: path.join(config.worktreeBase, branchDir),
     project,
     container: "demo-dev-feature..demo",
     branch: "feature/demo",

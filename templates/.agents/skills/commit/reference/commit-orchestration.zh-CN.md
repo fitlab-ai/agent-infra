@@ -9,18 +9,18 @@
 
 ## 副作用前 begin
 
-每次进入 commit 技能先调用 `commit-status`。`recoverable` / `prepared` 调用以下无 token 恢复入口，其他非 `idle` 状态 fail closed：
+每次进入 commit 技能先调用 `commit-status`。`recoverable` / `prepared` / `retryable-start` 调用以下无 token 恢复入口，`idle` 调用 `commit-start --agent {standard-agent-token}`；其他状态 fail closed：
 
 ```bash
 agent-infra-internal task-orchestration {task-id} commit-recover --agent {standard-agent-token}
 ```
 
-恢复入口只接受 `--agent`；不得传 token、head 或 `--orchestrated`。recoverable 会幂等补齐 task/run 并最后删除 intent；prepared 仅在 HEAD=baseline 且恰有一个 open Commit started 时安全清理，随后复用该 started 继续正常流程。
+恢复入口只接受 `--agent`；不得传 token、head 或 `--orchestrated`。从 start/recover 结构化输出读取 `finalization.attempt.attempt` 为 `commit_attempt`，不得手写 attempt。
 
 完成状态、版权、提交信息、review snapshot 和 push 场景的只读准备后，记录 `baseline_head=$(git rev-parse HEAD)`，并在任何 commit、push、任务成功日志或平台成功同步之前调用：
 
 ```bash
-commit_intent_result=$(agent-infra-internal task-orchestration {task-id} commit-begin --agent {standard-agent-token} {execution-flag} --baseline-head "$baseline_head")
+commit_intent_result=$(agent-infra-internal task-orchestration {task-id} commit-begin --agent {standard-agent-token} {execution-flag} --baseline-head "$baseline_head" --attempt "$commit_attempt")
 commit_intent_token=$(printf '%s' "$commit_intent_result" | node -e 'let input = ""; process.stdin.on("data", chunk => input += chunk).on("end", () => process.stdout.write(JSON.parse(input).token))')
 ```
 
@@ -50,6 +50,7 @@ committed/pushed checkpoint 完成后、任务同步与 `task-verify commit.comp
 agent-infra-internal task-orchestration {task-id} commit-complete --token "$commit_intent_token" --agent {standard-agent-token}
 ```
 
-- 第一个副作用前失败时，仅可在 HEAD 仍等于 baseline 时调用 `commit-abort --token ... --expected-head ...`。
+- begin 已创建 intent、但第一个副作用前失败时，先在 HEAD 仍等于 baseline 时调用 `commit-abort --token ... --expected-head ...`；若本轮明确放弃，再调用 `commit-terminate --attempt "$commit_attempt" --agent {standard-agent-token} --code <STABLE_CODE>` 闭合 started。
+- begin 在 intent 创建前失败时可保留 attempt 供下次复用；明确放弃时仅可在 HEAD 未漂移时调用 `commit-terminate`。
 - commit 或 push 发生后失败时不得 abort；保留 intent，并调用 `commit-status` 输出不含 token/digest 的恢复证据。跨会话重跑通过 `commit-recover` 收尾。
 - `commit-complete` 失败时停止。不得重复执行 commit/push，也不得把缺少完整 receipt 生命周期的 run 标记为完成。
