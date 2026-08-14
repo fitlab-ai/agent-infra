@@ -43,7 +43,7 @@ const CAPABILITY_MATRIX = {
     commands: 'integrated',
     hooks: 'integrated',
     subagents: 'experimental',
-    orchestration: 'unsupported',
+    orchestration: 'experimental',
     sandbox: 'integrated',
     verification: 'compatible'
   },
@@ -213,13 +213,13 @@ test('adapter definitions validate their closed contract without mutating input'
   }
 });
 
-test('Codex advertises App Server evidence without enabling orchestration', () => {
+test('Codex exposes experimental orchestration backed by App Server evidence', () => {
   const codex = getAgentClientAdapter('codex');
   assert.deepEqual(codex.delegationEvidence, {
     actualModel: 'app-server',
     actualReasoningEffort: 'app-server'
   });
-  assert.equal(codex.capabilities.orchestration.level, 'unsupported');
+  assert.equal(codex.capabilities.orchestration.level, 'experimental');
 });
 
 test('adapter custom commands validate paths, placeholders, metadata, and immutability', () => {

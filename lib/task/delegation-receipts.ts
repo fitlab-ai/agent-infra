@@ -6,6 +6,14 @@ import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 type DelegationRole = 'executor' | 'reviewer';
 type DelegationStage = 'analysis' | 'review-analysis' | 'plan' | 'review-plan' | 'code' | 'review-code' | 'commit';
 type DelegationStatus = 'prepared' | 'activated' | 'stage-completed' | 'sealed' | 'consumed' | 'aborted' | 'expired';
+type DelegationHostEvidence = Readonly<{
+  kind: 'codex-lifecycle-v1';
+  hookDefinitionHash: string;
+  startRevision: number;
+  stopRevision: number | null;
+  consumer: string | null;
+  consumedAt: string | null;
+}>;
 
 type DelegationReceipt = Readonly<{
   id: string;
@@ -28,6 +36,7 @@ type DelegationReceipt = Readonly<{
   agent: string | null;
   status: DelegationStatus;
   workspaceSnapshotScope?: 'task';
+  hostEvidence?: DelegationHostEvidence | null;
   beforeFingerprint: string;
   afterFingerprint: string | null;
   changedPaths: readonly string[];
@@ -55,7 +64,7 @@ function fail(code: string, message: string): ReceiptFailure {
 }
 
 function prepareDelegation(
-  input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'requestedReasoningEffort' | 'actualModel' | 'actualReasoningEffort' | 'modelFallbackReason' | 'reasoningEffortFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string; requestedReasoningEffort: string }>,
+  input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'requestedReasoningEffort' | 'actualModel' | 'actualReasoningEffort' | 'modelFallbackReason' | 'reasoningEffortFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'hostEvidence' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string; requestedReasoningEffort: string }>,
   options: { id?: () => string; now?: () => string } = {}
 ): DelegationReceipt {
   return Object.freeze({
@@ -70,6 +79,7 @@ function prepareDelegation(
     spawnMode: null,
     agent: null,
     status: 'prepared' as const,
+    hostEvidence: null,
     afterFingerprint: null,
     changedPaths: Object.freeze([]),
     createdAt: (options.now ?? (() => new Date().toISOString()))(),
@@ -90,6 +100,11 @@ function activateDelegation(
     actualReasoningEffort?: string;
     modelFallbackReason?: string;
     reasoningEffortFallbackReason?: string;
+    hostEvidence?: Readonly<{
+      kind: 'codex-lifecycle-v1';
+      hookDefinitionHash: string;
+      startRevision: number;
+    }>;
   }>,
   options: { now?: () => string } = {}
 ): ReceiptResult {
@@ -124,6 +139,15 @@ function activateDelegation(
   if (actualReasoningEffort === receipt.requestedReasoningEffort && event.reasoningEffortFallbackReason) {
     return fail('DELEGATION_REASONING_EFFORT_FALLBACK_INVALID', 'reasoning-effort fallback reason is only valid when actual effort differs');
   }
+  if (
+    event.hostEvidence
+    && (
+      receipt.client !== 'codex'
+      || !event.hostEvidence.hookDefinitionHash.trim()
+      || !Number.isSafeInteger(event.hostEvidence.startRevision)
+      || event.hostEvidence.startRevision < 1
+    )
+  ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex start evidence reference is invalid');
   return { ok: true, receipt: Object.freeze({
     ...receipt,
     status: 'activated',
@@ -134,6 +158,12 @@ function activateDelegation(
     actualReasoningEffort,
     modelFallbackReason: event.modelFallbackReason ?? null,
     reasoningEffortFallbackReason: event.reasoningEffortFallbackReason ?? null,
+    hostEvidence: event.hostEvidence ? Object.freeze({
+      ...event.hostEvidence,
+      stopRevision: null,
+      consumer: null,
+      consumedAt: null
+    }) : receipt.hostEvidence ?? null,
     activatedAt: (options.now ?? (() => new Date().toISOString()))()
   }) };
 }
@@ -154,7 +184,13 @@ function completeDelegationStage(
 
 function sealDelegation(
   receipt: DelegationReceipt,
-  event: Readonly<{ childId: string; exitCode: number; afterFingerprint: string; changedPaths: readonly string[] }>,
+  event: Readonly<{
+    childId: string;
+    exitCode: number;
+    afterFingerprint: string;
+    changedPaths: readonly string[];
+    hostEvidence?: Readonly<{ stopRevision: number; consumer: string; consumedAt: string }>;
+  }>,
   options: { now?: () => string } = {}
 ): ReceiptResult {
   if (receipt.status !== 'stage-completed') return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected stage-completed`);
@@ -169,11 +205,24 @@ function sealDelegation(
     const disallowed = event.changedPaths.find((entry) => !allowed.has(entry));
     if (disallowed) return fail('DELEGATION_REVIEWER_WRITE_FORBIDDEN', `reviewer changed forbidden path '${disallowed}'`);
   }
+  if (event.hostEvidence) {
+    if (
+      !receipt.hostEvidence
+      || !Number.isSafeInteger(event.hostEvidence.stopRevision)
+      || event.hostEvidence.stopRevision <= receipt.hostEvidence.startRevision
+      || event.hostEvidence.consumer !== receipt.id
+      || !event.hostEvidence.consumedAt.trim()
+    ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex stop evidence reference is invalid');
+  }
   return { ok: true, receipt: Object.freeze({
     ...receipt,
     status: 'sealed',
     afterFingerprint: event.afterFingerprint,
     changedPaths: Object.freeze([...event.changedPaths]),
+    hostEvidence: event.hostEvidence && receipt.hostEvidence ? Object.freeze({
+      ...receipt.hostEvidence,
+      ...event.hostEvidence
+    }) : receipt.hostEvidence ?? null,
     sealedAt: (options.now ?? (() => new Date().toISOString()))()
   }) };
 }
@@ -196,4 +245,4 @@ export {
   prepareDelegation,
   sealDelegation
 };
-export type { DelegationReceipt, DelegationRole, DelegationStage, DelegationStatus, ReceiptResult };
+export type { DelegationHostEvidence, DelegationReceipt, DelegationRole, DelegationStage, DelegationStatus, ReceiptResult };

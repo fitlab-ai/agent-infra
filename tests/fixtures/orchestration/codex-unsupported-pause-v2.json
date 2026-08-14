@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 2,
+  "taskId": "TASK-20260101-000001",
+  "runId": "run-codex-unsupported",
+  "status": "paused",
+  "nextStage": null,
+  "stepCount": 0,
+  "maxSteps": 24,
+  "modelPolicy": {
+    "executor": { "model": "executor-model", "reasoningEffort": "xhigh" },
+    "reviewer": { "model": "reviewer-model", "reasoningEffort": "high" }
+  },
+  "modelPolicySource": {
+    "kind": "explicit",
+    "client": "codex",
+    "resolvedAt": "2026-08-14T00:00:00.000Z"
+  },
+  "recoveryHistory": [],
+  "baseline": "",
+  "pendingDelegation": null,
+  "receipts": [],
+  "pause": {
+    "code": "ORCHESTRATION_CLIENT_UNSUPPORTED",
+    "message": "client 'codex' does not support lifecycle orchestration",
+    "recoverable": false
+  },
+  "commitAuthorization": { "issuedAt": null, "consumedAt": null },
+  "completionEvidence": null,
+  "createdAt": "2026-08-14T00:00:00.000Z",
+  "updatedAt": "2026-08-14T00:00:00.000Z"
+}

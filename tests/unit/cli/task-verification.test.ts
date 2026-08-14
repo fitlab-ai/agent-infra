@@ -140,6 +140,46 @@ test('run-task verification accepts complete model evidence and rejects missing 
   assert.equal(valid.status, 'pass');
   assert.equal(valid.invocations.length, 2);
 
+  const codexReceipt = {
+    ...receipt,
+    client: 'codex',
+    agent: 'codex',
+    hostEvidence: {
+      kind: 'codex-lifecycle-v1', hookDefinitionHash: 'hook-hash', startRevision: 4,
+      stopRevision: 7, consumer: 'receipt-1', consumedAt: '2026-01-01T00:00:02.000Z'
+    }
+  };
+  const codexRun = {
+    ...run,
+    modelPolicySource: { ...run.modelPolicySource, client: 'codex' },
+    receipts: [codexReceipt],
+    recoveryHistory: [{
+      code: 'CLIENT_CAPABILITY_ENABLED', recoveredAt: '2026-01-01T00:00:00.000Z',
+      previousSchemaVersion: 2, previousStatus: 'paused',
+      previousPause: { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'unsupported', recoverable: false },
+      client: 'codex',
+      guards: {
+        stepCount: 0, nextStage: null, baselineEmpty: true, receiptCount: 0,
+        pendingDelegation: false, commitAuthorizationUnused: true,
+        completionEvidenceAbsent: true, commitIntentAbsent: true
+      },
+      resultingStatus: 'running'
+    }]
+  };
+  fs.writeFileSync(runPath, `${JSON.stringify(codexRun, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    'pass'
+  );
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    ...codexRun,
+    receipts: [{ ...codexReceipt, hostEvidence: { ...codexReceipt.hostEvidence, consumer: 'other' } }]
+  }, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    'fail'
+  );
+
   fs.writeFileSync(runPath, `${JSON.stringify({ ...run, receipts: [{ ...receipt, actualModel: null }] }, null, 2)}\n`);
   const invalid = verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root });
   assert.equal(invalid.status, 'fail');

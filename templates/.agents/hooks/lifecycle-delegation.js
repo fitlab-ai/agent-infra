@@ -54,7 +54,7 @@ process.stdin.on('end', () => {
       requestedReasoningEffort: String(toolInput.reasoning_effort || toolInput.reasoningEffort || ''),
       hookDefinitionHash
     };
-    const args = ['codex-lifecycle', 'hook-event', '--event', hook];
+    const args = ['codex-lifecycle', 'hook-event', '--event', hook, '--bridge', 'true'];
     try {
       const useLocal = existsSync(localInternalCli);
       const command = useLocal ? process.execPath : 'agent-infra-internal';
@@ -64,7 +64,7 @@ process.stdin.on('end', () => {
         input: JSON.stringify(normalized),
         shell: !useLocal && process.platform === 'win32',
         stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 5_000
+        timeout: 15_000
       });
       process.stdout.write(output);
     } catch (error) {

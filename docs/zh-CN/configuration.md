@@ -94,11 +94,11 @@
 
 `run-task` 把显式策略视为原子输入：提供任一角色 model/effort 参数时，四个角色字段必须全部提供，缺项不会从配置补齐。完全没有显式策略时，只读取所选客户端的 `orchestration`。选中策略及来源会写入 schema v2；配置变化不会热切换 active run。模型发现独立标记为 `complete`/`partial` catalog 或 `interactive-only` 指引，局部工具 override 枚举不等于完整目录。
 
-配置了模型策略并不代表生命周期委派已受支持。`run-task` 只会在所选客户端能提供已验证的 actual model 与 reasoning-effort 证据时创建委派。Codex adapter 现声明实验性的 `app-server` 证据来源，但仍保持 orchestration unsupported，因此 `prepare` 仍会在创建 Codex delegation 前失败关闭。后续集成必须先把证据通道接入 delegation receipt，才能启用 orchestration。
+配置了模型策略并不代表生命周期委派已受支持。`run-task` 只会在所选客户端能提供已验证的 actual model 与 reasoning-effort 证据时创建委派。Codex orchestration 现为 experimental：`prepare` 在工作区快照前执行生命周期 preflight，SubagentStart 用 App Server 证据激活 receipt，SubagentStop 以 receipt id 消费证据后封存，PostToolUse 再核对 sealed receipt。任一 preflight 失败、证据错配、异常终态或对账不完整都会稳定暂停。
 
 Codex 生命周期证据结合项目 hooks 与短生命周期 App Server 连接。Hooks 证明 spawn/stop liveness 与原生身份；App Server 先在不加载 thread 的情况下读取 child 身份，再短暂 resume 同一个 thread 取得宿主解析后的 model 与 reasoning effort，随后 unsubscribe。该通道要求 Codex CLI 0.147.0 或更高版本，并启用 `hooks` 与 `multi_agent`。运行 `agent-infra-internal codex-lifecycle preflight --format text` 可检查已安装版本、feature flags、生成的 App Server schema、精确 hook 配置、App Server 初始化，以及 Codex 为当前仓库实际发现的 hooks。即使 `.codex/hooks.json` 结构合法，只要 Codex 未加载全部四类生命周期 hooks，preflight 也会失败关闭。只有调用方同时提供待验证 spawn 的精确 `--session-id`、`--turn-id` 与 `--tool-use-id` 时才会报告运行时活性；省略这组原子身份时，活性保持为尚未观察。
 
-项目 hook 变更需要重新完成 Codex hook trust 审查。证据通道记录 `.codex/hooks.json` 的 SHA-256，并在身份缺失、child 为 fork、model/effort 变化无结构化原因、异常终态或运行态证据陈旧/缺失时失败关闭。运行态记录经过字段白名单过滤，保存于 `.agents/workspace/.runtime/codex-lifecycle/`；不会持久化原始 prompt、消息、transcript、凭据或用户绝对路径。
+项目 hook 变更需要重新完成 Codex hook trust 审查。证据通道记录 `.codex/hooks.json` 的 SHA-256，并在身份缺失、child 为 fork、model/effort 变化无结构化原因、异常终态或运行态证据陈旧/缺失时失败关闭。四类托管 lifecycle hook 使用 15 秒外层超时，单次 App Server 请求仍保持 5 秒。运行态记录经过字段白名单过滤，保存于 `.agents/workspace/.runtime/codex-lifecycle/`；不会持久化原始 prompt、消息、transcript、凭据或用户绝对路径。
 
 以下三类配置概念相互独立：
 

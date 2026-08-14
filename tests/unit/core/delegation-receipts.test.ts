@@ -29,6 +29,7 @@ test('delegation receipts follow the one-way lifecycle and reject replay', () =>
     id: () => 'delegation-1', now: () => '2026-01-01T00:00:00.000Z'
   });
   assert.equal(prepared.workspaceSnapshotScope, 'task');
+  assert.equal(prepared.hostEvidence, null);
   const activated = activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-1', parentId: 'parent-1',
     spawnMode: 'fresh', actualModel: 'review-model', actualReasoningEffort: 'high'
@@ -51,6 +52,39 @@ test('delegation receipts follow the one-way lifecycle and reject replay', () =>
   assert.equal(consumed.receipt.status, 'consumed');
   assert.deepEqual(consumeDelegation(consumed.receipt), {
     ok: false, code: 'DELEGATION_REPLAY', message: 'delegation delegation-1 was already consumed'
+  });
+});
+
+test('Codex receipts bind lifecycle evidence revisions through activation and seal', () => {
+  const prepared = prepareDelegation({ ...input, role: 'executor', stage: 'analysis', artifact: 'analysis.md' }, {
+    id: () => 'delegation-codex', now: () => '2026-08-14T00:00:00.000Z'
+  });
+  const activated = activateDelegation(prepared, {
+    nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-codex', parentId: 'parent-codex',
+    spawnMode: 'fresh', actualModel: 'review-model', actualReasoningEffort: 'high',
+    hostEvidence: { kind: 'codex-lifecycle-v1', hookDefinitionHash: 'hook-hash', startRevision: 4 }
+  }, { now: () => '2026-08-14T00:00:01.000Z' });
+  assert.equal(activated.ok, true);
+  if (!activated.ok) return;
+  assert.deepEqual(activated.receipt.hostEvidence, {
+    kind: 'codex-lifecycle-v1', hookDefinitionHash: 'hook-hash', startRevision: 4,
+    stopRevision: null, consumer: null, consumedAt: null
+  });
+
+  const completed = completeDelegationStage(activated.receipt, {
+    stage: 'analysis', round: 1, artifact: 'analysis.md', agent: 'codex'
+  });
+  assert.equal(completed.ok, true);
+  if (!completed.ok) return;
+  const sealed = sealDelegation(completed.receipt, {
+    childId: 'child-codex', exitCode: 0, afterFingerprint: 'after', changedPaths: [],
+    hostEvidence: { stopRevision: 7, consumer: 'delegation-codex', consumedAt: '2026-08-14T00:00:02.000Z' }
+  }, { now: () => '2026-08-14T00:00:03.000Z' });
+  assert.equal(sealed.ok, true);
+  if (!sealed.ok) return;
+  assert.deepEqual(sealed.receipt.hostEvidence, {
+    kind: 'codex-lifecycle-v1', hookDefinitionHash: 'hook-hash', startRevision: 4,
+    stopRevision: 7, consumer: 'delegation-codex', consumedAt: '2026-08-14T00:00:02.000Z'
   });
 });
 

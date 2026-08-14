@@ -17,4 +17,4 @@
 4. 对同一 commit 执行 candidate checkout 与 `npm pack` 安装验证，记录 tarball 哈希和结果。
 5. 仅把去敏摘要与非敏感 fixture 纳入版本库；token、绝对用户路径、transcript 内容和凭证必须删除或替换。
 
-任一字段无法从真实宿主稳定观察时，该客户端的 orchestration capability 保持 `unsupported`，并把缺口记录为人工验证项。
+任一字段无法从真实宿主稳定观察时，该客户端的 orchestration capability 保持 `unsupported`，并把缺口记录为人工验证项。Codex 可声明为 `experimental`，但每次 `prepare` 仍必须通过静态 preflight，且 start/stop/PostToolUse bridge 必须形成可验证的 consumed host evidence；任一条件失败都稳定暂停。

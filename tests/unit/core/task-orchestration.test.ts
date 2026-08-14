@@ -218,6 +218,82 @@ test('legacy recovery rejects historical receipts and malformed v2 state', () =>
   }).error?.code, 'ORCHESTRATION_STATE_INVALID');
 });
 
+test('Codex resumes only a pristine v2 unsupported-client pause and records recovery provenance', () => {
+  const f = fixture('requirement-analysis');
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const paused = JSON.parse(fs.readFileSync(
+    path.resolve('tests/fixtures/orchestration/codex-unsupported-pause-v2.json'),
+    'utf8'
+  ));
+  fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
+
+  const resumed = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+    repoRoot: f.root, client: 'codex', modelPolicy,
+    now: () => '2026-08-14T00:01:00.000Z'
+  });
+  assert.equal(resumed.status, 'running');
+  assert.equal(resumed.run?.pause, null);
+  assert.deepEqual(resumed.run?.recoveryHistory?.at(-1), {
+    code: 'CLIENT_CAPABILITY_ENABLED',
+    recoveredAt: '2026-08-14T00:01:00.000Z',
+    previousSchemaVersion: 2,
+    previousStatus: 'paused',
+    previousPause: paused.pause,
+    client: 'codex',
+    guards: {
+      stepCount: 0, nextStage: null, baselineEmpty: true, receiptCount: 0,
+      pendingDelegation: false, commitAuthorizationUnused: true,
+      completionEvidenceAbsent: true, commitIntentAbsent: true
+    },
+    resultingStatus: 'running'
+  });
+});
+
+test('Codex unsupported-client recovery fails closed when historical execution evidence exists', () => {
+  const mutations = [
+    (run: any) => { run.baseline = 'historical-tree'; },
+    (run: any) => { run.stepCount = 1; },
+    (run: any) => { run.nextStage = 'analysis'; },
+    (run: any) => { run.receipts = [{ id: 'historical-receipt' }]; },
+    (run: any) => { run.pendingDelegation = { id: 'pending-receipt' }; },
+    (run: any) => { run.commitAuthorization.issuedAt = '2026-08-14T00:00:00.000Z'; },
+    (run: any) => { run.completionEvidence = { kind: 'reviewed-head-clean' }; },
+    (run: any) => { run.recoveryHistory = [{ code: 'UNKNOWN_RECOVERY' }]; }
+  ];
+  for (const mutate of mutations) {
+    const f = fixture('requirement-analysis');
+    beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+      repoRoot: f.root, client: 'codex', modelPolicy
+    });
+    const runPath = path.join(f.taskDir, 'orchestration.json');
+    const paused = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+    paused.status = 'paused';
+    paused.pause = { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'unsupported', recoverable: true };
+    mutate(paused);
+    fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
+
+    const result = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+      repoRoot: f.root, client: 'codex', modelPolicy
+    });
+    assert.equal(result.status, 'paused');
+    assert.equal(result.changed, false);
+    assert.equal(result.run?.pause?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
+  }
+
+  const intent = fixture('requirement-analysis');
+  const intentRun = JSON.parse(fs.readFileSync(
+    path.resolve('tests/fixtures/orchestration/codex-unsupported-pause-v2.json'),
+    'utf8'
+  ));
+  fs.writeFileSync(path.join(intent.taskDir, 'orchestration.json'), `${JSON.stringify(intentRun, null, 2)}\n`);
+  fs.writeFileSync(path.join(intent.taskDir, 'commit-intent.json'), '{}\n');
+  const blocked = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+    repoRoot: intent.root, client: 'codex', modelPolicy
+  });
+  assert.equal(blocked.status, 'paused');
+  assert.equal(blocked.changed, false);
+});
+
 test('prepare validates requested model before capturing workspace state', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
@@ -254,13 +330,13 @@ test('prepare fails closed for Claude Code when native model evidence is not obs
   assert.equal(result.changed, false);
 });
 
-test('prepare fails closed for Codex when native lifecycle events are not observable', () => {
+test('Codex core preparation requires exact policy after capability enablement', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   const result = prepareOrchestrationDelegationRaw('TASK-20260101-000001', {
     client: 'codex'
   }, { repoRoot: f.root, captureWorkspace: snapshot });
-  assert.equal(result.error?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
+  assert.equal(result.error?.code, 'ORCHESTRATION_REQUESTED_MODEL_REQUIRED');
   assert.equal(result.changed, false);
 });
 

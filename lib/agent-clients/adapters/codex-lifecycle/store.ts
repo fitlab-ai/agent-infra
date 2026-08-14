@@ -196,7 +196,16 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
       if (matches.length !== 1) throw new Error(`Codex lifecycle child '${childThreadId}' was not found uniquely`);
       const file = matches[0]!;
       const current = readRecord(file);
-      if (current.consumer) throw new Error(`Codex lifecycle evidence was already consumed by '${current.consumer}'`);
+      if (current.consumer) {
+        if (current.consumer !== consumer) {
+          throw new Error(`Codex lifecycle evidence was already consumed by '${current.consumer}'`);
+        }
+        if (
+          expectedHookDefinitionHash
+          && current.state.startEvidence?.hookDefinitionHash !== expectedHookDefinitionHash
+        ) throw new Error('Codex lifecycle hook definition hash is stale');
+        return current;
+      }
       if (current.state.status !== 'stop-ready') throw new Error('Codex lifecycle evidence is not stop-ready');
       if (
         expectedHookDefinitionHash

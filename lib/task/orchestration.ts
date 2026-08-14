@@ -74,7 +74,7 @@ type ModelPolicySource = Readonly<{
   client: AgentClientId;
   resolvedAt: string;
 }>;
-type OrchestrationRecovery = Readonly<{
+type ModelPolicyRecovery = Readonly<{
   code: 'MODEL_POLICY_SUPPLEMENTED';
   recoveredAt: string;
   previousSchemaVersion: 1;
@@ -85,6 +85,26 @@ type OrchestrationRecovery = Readonly<{
   pendingDelegation: false;
   resultingStatus: OrchestrationStatus;
 }>;
+type ClientCapabilityRecovery = Readonly<{
+  code: 'CLIENT_CAPABILITY_ENABLED';
+  recoveredAt: string;
+  previousSchemaVersion: 2;
+  previousStatus: 'paused';
+  previousPause: Readonly<{ code: 'ORCHESTRATION_CLIENT_UNSUPPORTED'; message: string; recoverable: boolean }>;
+  client: 'codex';
+  guards: Readonly<{
+    stepCount: 0;
+    nextStage: null;
+    baselineEmpty: true;
+    receiptCount: 0;
+    pendingDelegation: false;
+    commitAuthorizationUnused: true;
+    completionEvidenceAbsent: true;
+    commitIntentAbsent: true;
+  }>;
+  resultingStatus: 'running';
+}>;
+type OrchestrationRecovery = ModelPolicyRecovery | ClientCapabilityRecovery;
 type CleanCompletionEvidence = Readonly<{
   kind: 'reviewed-head-clean';
   observedAt: string;
@@ -369,6 +389,23 @@ function resolveProjectPolicy(repoRoot: string, client: AgentClientId): Orchestr
   return normalizeAgentClients(raw).state[client].orchestration;
 }
 
+function canRecoverCodexUnsupportedPause(run: OrchestrationRun, taskDir: string): boolean {
+  return run.schemaVersion === 2
+    && run.status === 'paused'
+    && run.pause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
+    && run.modelPolicySource?.client === 'codex'
+    && run.stepCount === 0
+    && run.nextStage === null
+    && run.baseline === ''
+    && run.pendingDelegation === null
+    && run.receipts.length === 0
+    && run.commitAuthorization?.issuedAt === null
+    && run.commitAuthorization?.consumedAt === null
+    && run.completionEvidence == null
+    && !fs.existsSync(commitIntentPath(taskDir))
+    && (run.recoveryHistory ?? []).every((entry) => entry.code === 'MODEL_POLICY_SUPPLEMENTED');
+}
+
 function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
@@ -414,6 +451,39 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
         if (!sameModelPolicy(existing.modelPolicy as OrchestrationModelPolicy, options.modelPolicy)) {
           return failed('ORCHESTRATION_MODEL_POLICY_MISMATCH', 'provided model policy does not match the persisted run policy', resolved.taskId);
         }
+      }
+      if (existing.status === 'paused' && existing.pause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED') {
+        if (!canRecoverCodexUnsupportedPause(existing, resolved.taskDir)) {
+          return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
+        }
+        const now = (options.now ?? (() => new Date().toISOString()))();
+        const previousPause = existing.pause as ClientCapabilityRecovery['previousPause'];
+        const recovery: ClientCapabilityRecovery = {
+          code: 'CLIENT_CAPABILITY_ENABLED',
+          recoveredAt: now,
+          previousSchemaVersion: 2,
+          previousStatus: 'paused',
+          previousPause,
+          client: 'codex',
+          guards: {
+            stepCount: 0,
+            nextStage: null,
+            baselineEmpty: true,
+            receiptCount: 0,
+            pendingDelegation: false,
+            commitAuthorizationUnused: true,
+            completionEvidenceAbsent: true,
+            commitIntentAbsent: true
+          },
+          resultingStatus: 'running'
+        };
+        const resumed = withUpdatedRun(existing, {
+          status: 'running',
+          pause: null,
+          recoveryHistory: Object.freeze([...(existing.recoveryHistory ?? []), recovery])
+        }, () => now);
+        saveRun(resolved.taskDir, resumed);
+        return { status: 'running', changed: true, taskId: resolved.taskId, run: resumed, next: null, error: null };
       }
       if (existing.status === 'paused' && existing.pause?.recoverable && existing.pendingDelegation === null) {
         const resumed = withUpdatedRun(existing, { status: 'running', pause: null });
@@ -1411,11 +1481,42 @@ function activateMatchingOrchestrationDelegation(
     (receipt) => receipt.status === 'prepared',
     options
   );
-  if ('status' in matched) return matched;
+  if ('status' in matched) {
+    if (matched.error?.code !== 'ORCHESTRATION_DELEGATION_MISSING') return matched;
+    const replay = uniqueMatchingDelegation(
+      client,
+      (receipt) => receipt.childId === event.childId && ['activated', 'stage-completed'].includes(receipt.status),
+      options
+    );
+    if ('status' in replay) return matched;
+    const receipt = replay.run.pendingDelegation!;
+    const sameEvidence = receipt.parentId === event.parentId
+      && receipt.spawnMode === event.spawnMode
+      && receipt.actualModel === event.actualModel
+      && receipt.actualReasoningEffort === event.actualReasoningEffort
+      && receipt.modelFallbackReason === (event.modelFallbackReason ?? null)
+      && receipt.reasoningEffortFallbackReason === (event.reasoningEffortFallbackReason ?? null)
+      && receipt.hostEvidence?.hookDefinitionHash === event.hostEvidence?.hookDefinitionHash;
+    if (!sameEvidence) {
+      return pauseOrchestration(replay.taskId, 'DELEGATION_REPLAY_CONFLICT', 'replayed native start evidence conflicts with the active receipt', true, options);
+    }
+    return { status: replay.run.status, changed: false, taskId: replay.taskId, run: replay.run, next: null, error: null };
+  }
   if (matched.run.receipts.some((receipt) => receipt.childId === event.childId)) {
     return pauseOrchestration(matched.taskId, 'DELEGATION_IDENTITY_REUSED', 'native child identity was already used by this run', true, options);
   }
   return activateOrchestrationDelegation(matched.taskId, event, options);
+}
+
+function pauseMatchingOrchestrationDelegation(
+  client: AgentClientId,
+  code: string,
+  message: string,
+  options: OrchestrationOptions = {}
+): OrchestrationResult {
+  const matched = uniqueMatchingDelegation(client, () => true, options);
+  if ('status' in matched) return matched;
+  return pauseOrchestration(matched.taskId, code, message, true, options);
 }
 
 function sealMatchingOrchestrationDelegation(
@@ -1460,6 +1561,96 @@ function sealMatchingOrchestrationDelegation(
       options
     );
   }
+}
+
+function sealMatchingOrchestrationDelegationWithHostEvidence(
+  client: AgentClientId,
+  event: Readonly<{ nativeAgent: string; childId: string }>,
+  consumeEvidence: (receipt: DelegationReceipt) => Readonly<{
+    stopRevision: number;
+    consumer: string;
+    consumedAt: string;
+  }>,
+  options: OrchestrationOptions = {}
+): OrchestrationResult {
+  const role = managedDelegationRole(event.nativeAgent);
+  if (!role) return failed('DELEGATION_IGNORED', `subagent '${event.nativeAgent}' is not lifecycle-managed`);
+  const matched = uniqueMatchingDelegation(
+    client,
+    (receipt) => (
+      (receipt.status === 'stage-completed' || receipt.status === 'sealed')
+      && receipt.childId === event.childId
+    ),
+    options
+  );
+  if ('status' in matched) return matched;
+  const receipt = matched.run.pendingDelegation!;
+  if (receipt.status === 'sealed') {
+    return reconcileMatchingOrchestrationDelegation(client, event.childId, options);
+  }
+  if (receipt.role !== role) {
+    return pauseOrchestration(matched.taskId, 'DELEGATION_ROLE_MISMATCH', `managed role ${role} does not match ${receipt.role}`, true, options);
+  }
+  const repoRoot = options.repoRoot ?? process.cwd();
+  try {
+    const gitRoot = gitRootFor(repoRoot, options);
+    const snapshotTaskId = receipt.workspaceSnapshotScope === 'task' ? receipt.taskId : null;
+    const afterFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)({
+      gitRoot,
+      stateRoot: repoRoot,
+      taskId: snapshotTaskId
+    });
+    const changedPaths = (options.diffWorkspace ?? diffWorkspaceSnapshots)(gitRoot, receipt.beforeFingerprint, afterFingerprint);
+    const baseEvent = { childId: event.childId, exitCode: 0, afterFingerprint, changedPaths };
+    const validated = sealDelegation(receipt, baseEvent, { now: options.now });
+    if (!validated.ok) {
+      return pauseOrchestration(matched.taskId, validated.code, validated.message, true, options);
+    }
+    const hostEvidence = consumeEvidence(receipt);
+    const sealed = sealDelegation(receipt, { ...baseEvent, hostEvidence }, { now: options.now });
+    if (!sealed.ok) return pauseOrchestration(matched.taskId, sealed.code, sealed.message, true, options);
+    const resolved = resolveTaskRef(matched.taskId, { repoRoot });
+    if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+    const updated = withUpdatedRun(matched.run, { pendingDelegation: sealed.receipt }, options.now);
+    saveRun(resolved.taskDir, updated);
+    return { status: 'running', changed: true, taskId: matched.taskId, run: updated, next: null, error: null };
+  } catch (error) {
+    return pauseOrchestration(
+      matched.taskId,
+      'ORCHESTRATION_CODEX_EVIDENCE_FAILED',
+      error instanceof Error ? error.message : String(error),
+      true,
+      options
+    );
+  }
+}
+
+function reconcileMatchingOrchestrationDelegation(
+  client: AgentClientId,
+  childId: string,
+  options: OrchestrationOptions = {}
+): OrchestrationResult {
+  const matched = uniqueMatchingDelegation(
+    client,
+    (receipt) => receipt.childId === childId,
+    options
+  );
+  if ('status' in matched) return matched;
+  const receipt = matched.run.pendingDelegation!;
+  if (
+    receipt.status !== 'sealed'
+    || receipt.hostEvidence?.consumer !== receipt.id
+    || receipt.hostEvidence.consumedAt === null
+  ) {
+    return pauseOrchestration(
+      matched.taskId,
+      'ORCHESTRATION_CODEX_RECONCILIATION_FAILED',
+      'Codex native spawn did not produce one sealed receipt with consumed host evidence',
+      true,
+      options
+    );
+  }
+  return { status: matched.run.status, changed: false, taskId: matched.taskId, run: matched.run, next: null, error: null };
 }
 
 function activateOrchestrationDelegation(
@@ -1628,13 +1819,16 @@ export {
   completeOrchestrationStage,
   inspectOrchestrationStage,
   orchestrationPath,
+  pauseMatchingOrchestrationDelegation,
   pauseOrchestration,
   planOrchestrationStageCompletion,
   prepareOrchestrationDelegation,
   readRun,
+  reconcileMatchingOrchestrationDelegation,
   recoverCommitIntent,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
+  sealMatchingOrchestrationDelegationWithHostEvidence,
   sealOrchestrationDelegation,
   startCommitAttempt,
   statusCommitIntent,
@@ -1650,5 +1844,6 @@ export type {
   OrchestrationRun,
   OrchestrationStageCompletion,
   OrchestrationStageIdentity,
-  OrchestrationStatus
+  OrchestrationStatus,
+  OrchestrationOptions
 };

@@ -180,7 +180,7 @@ test('lifecycle hook normalizes Codex spawn and child events through stdin', () 
   );
   assert.equal(pre.status, 0, pre.stderr);
   const parsed = JSON.parse(pre.stdout);
-  assert.deepEqual(parsed.args, ['codex-lifecycle', 'hook-event', '--event', 'pre-tool']);
+  assert.deepEqual(parsed.args, ['codex-lifecycle', 'hook-event', '--event', 'pre-tool', '--bridge', 'true']);
   assert.deepEqual({
     sessionId: parsed.input.sessionId,
     turnId: parsed.input.turnId,
@@ -204,6 +204,6 @@ test('lifecycle hook normalizes Codex spawn and child events through stdin', () 
   });
   assert.equal(child.status, 0, child.stderr);
   const childParsed = JSON.parse(child.stdout);
-  assert.deepEqual(childParsed.args, ['codex-lifecycle', 'hook-event', '--event', 'subagent-start']);
+  assert.deepEqual(childParsed.args, ['codex-lifecycle', 'hook-event', '--event', 'subagent-start', '--bridge', 'true']);
   assert.equal(childParsed.input.childThreadId, 'codex-child');
 });

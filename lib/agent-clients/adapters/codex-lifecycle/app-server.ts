@@ -63,7 +63,7 @@ function validateCodexLifecycleHookConfig(value: unknown): void {
       return entry.hooks.some((hookValue) => {
         const hook = object(hookValue);
         return hook?.type === 'command'
-          && hook.timeout === 5
+          && hook.timeout === 15
           && hook.command === `node "$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js" --client codex --event ${phase}`;
       });
     });

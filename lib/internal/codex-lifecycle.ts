@@ -10,6 +10,11 @@ import {
 } from '../agent-clients/adapters/codex-lifecycle/app-server.ts';
 import { createCodexLifecycleStore } from '../agent-clients/adapters/codex-lifecycle/store.ts';
 import type { CodexLifecycleEvent } from '../agent-clients/adapters/codex-lifecycle/evidence.ts';
+import {
+  activateCodexOrchestrationDelegation,
+  reconcileCodexOrchestrationDelegation,
+  sealCodexOrchestrationDelegation
+} from '../task/codex-orchestration.ts';
 
 const USAGE = 'Usage: agent-infra-internal codex-lifecycle <hook-event|resolve-start|resolve-stop|preflight|consume> [options]\n';
 const MANAGED_AGENT = /^agent-infra-lifecycle-(executor|reviewer)$/;
@@ -36,7 +41,7 @@ function parse(args: string[]): Parsed | null {
     return null;
   }
   const allowed = {
-    'hook-event': ['--event'],
+    'hook-event': ['--event', '--bridge'],
     'resolve-start': ['--child-id'],
     'resolve-stop': ['--child-id'],
     preflight: ['--format', '--session-id', '--turn-id', '--tool-use-id'],
@@ -153,12 +158,48 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       if (!phase || !['pre-tool', 'subagent-start', 'post-tool', 'subagent-stop'].includes(phase)) {
         throw new Error('hook-event requires a known --event');
       }
-      const event = recordFromPayload(phase, await readStdin());
+      if (parsed.values['--bridge'] !== undefined && parsed.values['--bridge'] !== 'true') {
+        throw new Error("hook-event --bridge must be 'true'");
+      }
+      const payload = await readStdin();
+      const event = recordFromPayload(phase, payload);
       if (!event) {
+        if (phase === 'post-tool' && parsed.values['--bridge'] === 'true') {
+          const value = payload as Record<string, unknown>;
+          const childThreadId = String(value.childThreadId ?? '');
+          const reconciled = reconcileCodexOrchestrationDelegation(childThreadId);
+          output(reconciled);
+          if (reconciled.status !== 'running') process.exitCode = 1;
+          return;
+        }
         output({ status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null });
         return;
       }
+      if (parsed.values['--bridge'] === 'true' && event.type === 'hook-stop') {
+        try {
+          if (store.read(event.childThreadId).consumer) {
+            const bridged = await sealCodexOrchestrationDelegation(event.childThreadId, { store });
+            output(bridged);
+            if (bridged.status !== 'running') process.exitCode = 1;
+            return;
+          }
+        } catch {
+          // The normal apply path below owns missing or invalid evidence errors.
+        }
+      }
       const result = store.apply(event);
+      if (parsed.values['--bridge'] === 'true' && event.type === 'hook-child') {
+        const bridged = await activateCodexOrchestrationDelegation(event.childThreadId, { store });
+        output(bridged);
+        if (bridged.status !== 'running') process.exitCode = 1;
+        return;
+      }
+      if (parsed.values['--bridge'] === 'true' && event.type === 'hook-stop') {
+        const bridged = await sealCodexOrchestrationDelegation(event.childThreadId, { store });
+        output(bridged);
+        if (bridged.status !== 'running') process.exitCode = 1;
+        return;
+      }
       output({ status: result.state.status, changed: true, evidence: result.state, diagnostics: [], error: result.state.error });
       if (result.state.status === 'invalid') process.exitCode = 1;
       return;

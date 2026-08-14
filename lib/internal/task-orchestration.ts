@@ -9,7 +9,6 @@ import {
   checkpointCommitIntent,
   completeCommitIntent,
   pauseOrchestration,
-  prepareOrchestrationDelegation,
   recoverCommitIntent,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
@@ -19,6 +18,7 @@ import {
   statusOrchestration,
   terminateCommitAttempt
 } from '../task/orchestration.ts';
+import { prepareCodexOrchestrationDelegation } from '../task/codex-orchestration.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 
@@ -33,7 +33,7 @@ function usageFailure(message: string): void {
   process.exitCode = 2;
 }
 
-function taskOrchestration(args: string[] = []): void {
+async function taskOrchestration(args: string[] = []): Promise<void> {
   if (args[0] === '--help' || args[0] === '-h') {
     process.stdout.write(USAGE);
     return;
@@ -212,11 +212,11 @@ function taskOrchestration(args: string[] = []): void {
   } else if (intent === 'prepare') {
     const missing = requireValues(['--client']);
     if (missing) { usageFailure(`intent 'prepare' requires '${missing}'`); return; }
-    result = prepareOrchestrationDelegation(taskRef!, {
+    result = await prepareCodexOrchestrationDelegation(taskRef!, {
       client: values['--client'] as AgentClientId,
       requestedModel: values['--requested-model'],
       requestedReasoningEffort: values['--requested-reasoning-effort']
-    }, coreOptions);
+    }, { orchestrationOptions: coreOptions });
   } else if (intent === 'hook-start') {
     const missing = requireValues([
       ...(taskRef === 'auto' ? ['--client'] : []),

@@ -17,4 +17,4 @@ Before publishing support for a client, prove the lifecycle evidence chain with 
 4. Validate the same commit from a candidate checkout and an `npm pack` install; record the tarball hash and results.
 5. Commit only redacted summaries and non-sensitive fixtures. Remove or replace tokens, user-specific absolute paths, transcript content, and credentials.
 
-If any required field cannot be observed reliably from the real host, keep that client's orchestration capability `unsupported` and record the gap as manual validation.
+If any required field cannot be observed reliably from the real host, keep that client's orchestration capability `unsupported` and record the gap as manual validation. Codex may advertise `experimental`, but every `prepare` must still pass static preflight and its start/stop/PostToolUse bridge must produce verifiable consumed host evidence; any failure pauses the run.

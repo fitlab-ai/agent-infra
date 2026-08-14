@@ -43,6 +43,7 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
   assert.throws(() => store.consume('child', 'receipt-1', 'stale-hash'), /hash is stale/);
   const consumed = store.consume('child', 'receipt-1', 'hash');
   assert.equal(consumed.consumer, 'receipt-1');
+  assert.deepEqual(store.consume('child', 'receipt-1', 'hash'), consumed);
   assert.throws(() => store.consume('child', 'receipt-2'), /already consumed/);
 });
 

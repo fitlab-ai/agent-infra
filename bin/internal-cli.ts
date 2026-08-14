@@ -116,7 +116,7 @@ if (
   }
   case 'task-orchestration': {
     const { taskOrchestration } = await import('../lib/internal/task-orchestration.ts');
-    taskOrchestration(process.argv.slice(3));
+    await taskOrchestration(process.argv.slice(3));
     break;
   }
   case 'task-review': {

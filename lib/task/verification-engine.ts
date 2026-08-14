@@ -268,14 +268,29 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
     return failResult('orchestration-evidence', 'Run model policy source or recovery history is invalid');
   }
   for (const recovery of run.recoveryHistory) {
-    if (
-      recovery.code !== 'MODEL_POLICY_SUPPLEMENTED'
-      || recovery.previousSchemaVersion !== 1
-      || recovery.receiptCount !== 0
-      || recovery.pendingDelegation !== false
-      || !exactText(recovery.recoveredAt)
-      || !recovery.policySource
-    ) {
+    const validModelRecovery = recovery.code === 'MODEL_POLICY_SUPPLEMENTED'
+      && recovery.previousSchemaVersion === 1
+      && recovery.receiptCount === 0
+      && recovery.pendingDelegation === false
+      && exactText(recovery.recoveredAt)
+      && recovery.policySource;
+    const guards = recovery.guards;
+    const validCapabilityRecovery = recovery.code === 'CLIENT_CAPABILITY_ENABLED'
+      && recovery.previousSchemaVersion === 2
+      && recovery.previousStatus === 'paused'
+      && recovery.previousPause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
+      && recovery.client === 'codex'
+      && recovery.resultingStatus === 'running'
+      && exactText(recovery.recoveredAt)
+      && guards?.stepCount === 0
+      && guards?.nextStage === null
+      && guards?.baselineEmpty === true
+      && guards?.receiptCount === 0
+      && guards?.pendingDelegation === false
+      && guards?.commitAuthorizationUnused === true
+      && guards?.completionEvidenceAbsent === true
+      && guards?.commitIntentAbsent === true;
+    if (!validModelRecovery && !validCapabilityRecovery) {
       return failResult('orchestration-evidence', 'Run recovery history contains invalid provenance');
     }
   }
@@ -332,6 +347,25 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
         && receipt.reasoningEffortFallbackReason !== null
       ) {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has an unrelated reasoning-effort fallback reason`);
+      }
+      if (receipt.client === 'codex') {
+        const host = receipt.hostEvidence;
+        if (
+          host?.kind !== 'codex-lifecycle-v1'
+          || !exactText(host.hookDefinitionHash)
+          || !Number.isSafeInteger(host.startRevision)
+          || host.startRevision < 1
+        ) {
+          return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid Codex start evidence`);
+        }
+        if (['sealed', 'consumed'].includes(receipt.status) && (
+          !Number.isSafeInteger(host.stopRevision)
+          || host.stopRevision <= host.startRevision
+          || host.consumer !== receipt.id
+          || !exactText(host.consumedAt)
+        )) {
+          return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid Codex consumed stop evidence`);
+        }
       }
     }
   }

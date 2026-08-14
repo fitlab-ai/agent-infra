@@ -15,7 +15,7 @@ const codexAdapter = defineAgentClientAdapter({
     commands: { level: 'integrated' },
     hooks: { level: 'integrated' },
     subagents: { level: 'experimental' },
-    orchestration: { level: 'unsupported' },
+    orchestration: { level: 'experimental' },
     sandbox: { level: 'integrated' },
     verification: { level: 'compatible' }
   },

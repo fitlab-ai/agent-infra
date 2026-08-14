@@ -10,7 +10,7 @@
 
 ## Recovery
 
-`orchestration.json` is the detailed state source. A v2 run persists complete policy, source, and append-only recovery history. Only a v1 run with no pending delegation and zero receipts may be upgraded in place after supplying a complete policy; any historical receipt stays paused because effort is unverifiable. Migration is forward-only: old binaries must not advance active v2 runs.
+`orchestration.json` is the detailed state source. A v2 run persists complete policy, source, and append-only recovery history. Only a v1 run with no pending delegation and zero receipts may be upgraded in place after supplying a complete policy; any historical receipt stays paused because effort is unverifiable. A historical Codex `ORCHESTRATION_CLIENT_UNSUPPORTED` v2 pause appends `CLIENT_CAPABILITY_ENABLED` and resumes only when step count, next stage, baseline, receipts, pending delegation, commit authorization, completion evidence, and commit intent all prove that execution never advanced; unknown or non-empty evidence preserves the pause. Migration is forward-only: old binaries must not advance active v2 runs.
 
 ## Model Policy
 

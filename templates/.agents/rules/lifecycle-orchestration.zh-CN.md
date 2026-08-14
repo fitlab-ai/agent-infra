@@ -10,7 +10,7 @@
 
 ## 恢复语义
 
-`orchestration.json` 是详细状态源。v2 run 保存完整策略、来源与 append-only 恢复历史。只有无 pending delegation 且零历史 receipt 的 v1 run 可在补齐完整策略后原地升级；任一历史 receipt 因缺 effort 证据保持暂停。其他阻塞、未封存 receipt 或基线漂移继续保持暂停。迁移是 forward-only，旧二进制不得推进 v2 active run。
+`orchestration.json` 是详细状态源。v2 run 保存完整策略、来源与 append-only 恢复历史。只有无 pending delegation 且零历史 receipt 的 v1 run 可在补齐完整策略后原地升级；任一历史 receipt 因缺 effort 证据保持暂停。Codex 的历史 `ORCHESTRATION_CLIENT_UNSUPPORTED` v2 pause 仅在 stepCount、nextStage、baseline、receipts、pending delegation、commit authorization、completion evidence 与 commit intent 全部证明从未推进时追加 `CLIENT_CAPABILITY_ENABLED` 并恢复；任一未知或非空证据保持原暂停。迁移是 forward-only，旧二进制不得推进 v2 active run。
 
 ## 模型策略
 
