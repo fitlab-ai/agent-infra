@@ -24,10 +24,18 @@ import { createSandboxCapabilityPlan } from '../agent-client-reconciler.ts';
 import type { SandboxTool } from '../tools.ts';
 import { fetchSandboxRows } from './list-running.ts';
 import { lookupShortIdByBranch } from '../../task/short-id.ts';
+import {
+  createCleanPermit,
+  createDiscardPermit,
+  formatWorktreeSnapshot,
+  inspectWorktrees,
+  verifyWorktreePermit
+} from '../worktree-safety.ts';
+import type { WorktreeInspection, WorktreeRemovalPermit } from '../worktree-safety.ts';
 
 const USAGE = `Usage:
   ai sandbox rm <branch>                    Remove one sandbox (branch | TASK-id | short id)
-  ai sandbox rm --all [--dry-run] [--yes]   Remove every sandbox not bound to an active task
+  ai sandbox rm --unbound [--dry-run] [--yes] Remove every sandbox not bound to an active task
   ai sandbox rm --purge                     Tear down ALL sandboxes for the project (containers, worktrees, image, VM)`;
 export { assertManagedPath } from '../managed-fs.ts';
 
@@ -35,14 +43,30 @@ function projectToolDirs(config: SandboxConfig, tools: SandboxTool[]): string[] 
   return tools.flatMap((tool) => toolProjectDirCandidates(tool, config.project));
 }
 
-type RmOneOptions = { assumeYes?: boolean; quiet?: boolean };
+type RmTarget = {
+  branch: string;
+  effectiveBranch: string;
+  engine: string;
+  matchedContainers: string[];
+  existingWorktrees: string[];
+  toolCandidates: Array<{ tool: SandboxTool; candidates: string[] }>;
+};
 
-async function rmOne(
-  config: SandboxConfig,
-  tools: SandboxTool[],
-  branch: string,
-  options: RmOneOptions = {}
-): Promise<void> {
+type RmOneOptions = {
+  assumeYes?: boolean;
+  quiet?: boolean;
+  target?: RmTarget;
+  permits?: ReadonlyMap<string, WorktreeRemovalPermit>;
+  allowDirtyDiscard?: boolean;
+  prompt?: PromptDependencies;
+};
+
+type PromptDependencies = {
+  confirm?: typeof p.confirm;
+  isCancel?: typeof p.isCancel;
+};
+
+function resolveRmTarget(config: SandboxConfig, tools: SandboxTool[], branch: string): RmTarget {
   assertValidBranchName(branch);
   const engine = detectEngine(config);
   let effectiveBranch = branch;
@@ -51,14 +75,8 @@ async function rmOne(
     tool,
     candidates: toolConfigDirCandidates(tool, config.project, branch)
   }));
-
-  if (!options.quiet) {
-    p.intro(pc.cyan(`Removing sandbox for ${branch}`));
-  }
-
   const existing = runSafeEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
-  const matchedContainers = containerNameCandidates(config, branch)
-    .filter((name) => existing.includes(name));
+  const matchedContainers = containerNameCandidates(config, branch).filter((name) => existing.includes(name));
 
   if (matchedContainers.length > 0) {
     const resolvedBranch = runSafeEngine(engine, 'docker', [
@@ -75,7 +93,107 @@ async function rmOne(
         candidates: toolConfigDirCandidates(tool, config.project, effectiveBranch)
       }));
     }
+  }
 
+  return {
+    branch,
+    effectiveBranch,
+    engine,
+    matchedContainers,
+    existingWorktrees: worktreeCandidates.filter((candidate) => fs.existsSync(candidate)),
+    toolCandidates
+  };
+}
+
+function inspectionBlockers(inspections: readonly WorktreeInspection[]): WorktreeInspection[] {
+  return inspections.filter((inspection) => inspection.status !== 'clean');
+}
+
+function blockerMessage(blockers: readonly WorktreeInspection[]): string {
+  return blockers.map((blocker) => {
+    if (blocker.status === 'failed') return `${JSON.stringify(blocker.worktree)}: ${blocker.message}`;
+    return `${formatWorktreeSnapshot(blocker.snapshot)}\n  Action: commit, stash, clean, or remove this sandbox interactively.`;
+  }).join('\n');
+}
+
+function cleanPermits(inspections: readonly WorktreeInspection[]): Map<string, WorktreeRemovalPermit> {
+  const permits = new Map<string, WorktreeRemovalPermit>();
+  for (const inspection of inspections) {
+    if (inspection.status === 'clean') permits.set(inspection.snapshot.worktree, createCleanPermit(inspection.snapshot));
+  }
+  return permits;
+}
+
+async function authorizeWorktrees(
+  worktrees: readonly string[],
+  { allowDirtyDiscard, assumeYes }: { allowDirtyDiscard: boolean; assumeYes: boolean },
+  {
+    interactive = Boolean(process.stdin.isTTY),
+    confirm = p.confirm,
+    isCancel = p.isCancel
+  }: PromptDependencies & { interactive?: boolean } = {}
+): Promise<Map<string, WorktreeRemovalPermit>> {
+  const inspections = inspectWorktrees(worktrees);
+  const failures = inspections.filter((inspection) => inspection.status === 'failed');
+  if (failures.length > 0) throw new Error(`Unable to inspect worktree(s):\n${blockerMessage(failures)}`);
+  const permits = cleanPermits(inspections);
+  for (const inspection of inspections) {
+    if (inspection.status !== 'dirty') continue;
+    if (!allowDirtyDiscard || assumeYes || !interactive) {
+      throw new Error(`Refusing to remove dirty worktree(s):\n${blockerMessage([inspection])}`);
+    }
+    p.log.warn(formatWorktreeSnapshot(inspection.snapshot));
+    const confirmed = await confirm({
+      message: 'Discard these exact uncommitted changes?',
+      initialValue: false
+    });
+    if (isCancel(confirmed) || !confirmed) throw new Error('Dirty worktree removal cancelled; nothing was deleted');
+    permits.set(inspection.snapshot.worktree, createDiscardPermit(inspection.snapshot));
+  }
+  return permits;
+}
+
+async function rmOne(
+  config: SandboxConfig,
+  tools: SandboxTool[],
+  branch: string,
+  options: RmOneOptions = {}
+): Promise<void> {
+  const target = options.target ?? resolveRmTarget(config, tools, branch);
+  const { effectiveBranch, engine, matchedContainers, existingWorktrees, toolCandidates } = target;
+  const confirm = options.prompt?.confirm ?? p.confirm;
+  const isCancel = options.prompt?.isCancel ?? p.isCancel;
+
+  if (!options.quiet) {
+    p.intro(pc.cyan(`Removing sandbox for ${branch}`));
+  }
+
+  const permits = options.permits
+    ? new Map(options.permits)
+    : await authorizeWorktrees(existingWorktrees, {
+        allowDirtyDiscard: options.allowDirtyDiscard ?? true,
+        assumeYes: Boolean(options.assumeYes)
+      }, options.prompt);
+  for (const worktree of existingWorktrees) {
+    const permit = permits.get(path.resolve(worktree));
+    if (!permit) throw new Error(`Missing worktree removal permit: ${worktree}`);
+    verifyWorktreePermit(permit);
+  }
+
+  const shouldRemoveWorktree = existingWorktrees.length === 0
+    ? false
+    : options.assumeYes
+      ? true
+      : await confirm({
+          message: `Remove worktree(s): ${existingWorktrees.join(', ')}?`,
+          initialValue: true
+        });
+  if (isCancel(shouldRemoveWorktree)) {
+    p.outro('Cancelled');
+    return;
+  }
+
+  if (matchedContainers.length > 0) {
     const spinner = p.spinner();
     spinner.start(`Stopping container(s): ${matchedContainers.join(', ')}`);
     for (const name of matchedContainers) {
@@ -97,36 +215,25 @@ async function rmOne(
     p.log.warn(`No sandbox container found for '${branch}'`);
   }
 
-  const existingWorktrees = worktreeCandidates.filter((candidate) => fs.existsSync(candidate));
-  if (existingWorktrees.length > 0) {
-    const shouldRemoveWorktree = options.assumeYes
+  if (shouldRemoveWorktree) {
+    for (const worktree of existingWorktrees) {
+      const permit = permits.get(path.resolve(worktree));
+      if (!permit) throw new Error(`Missing worktree removal permit: ${worktree}`);
+      removeWorktreeDir(config.repoRoot, config.worktreeBase, worktree, permit, {
+        allowRegisteredPathFallback: engine === ENGINES.WSL2
+      });
+    }
+
+    const shouldDeleteBranch = options.assumeYes
       ? true
-      : await p.confirm({
-          message: `Remove worktree(s): ${existingWorktrees.join(', ')}?`,
+      : await confirm({
+          message: `Also delete local branch '${effectiveBranch}'?`,
           initialValue: true
         });
 
-    if (p.isCancel(shouldRemoveWorktree)) {
-      p.outro('Cancelled');
-      return;
-    }
-
-    if (shouldRemoveWorktree) {
-      for (const worktree of existingWorktrees) {
-        removeWorktreeDir(config.repoRoot, config.worktreeBase, worktree);
-      }
-
-      const shouldDeleteBranch = options.assumeYes
-        ? true
-        : await p.confirm({
-            message: `Also delete local branch '${effectiveBranch}'?`,
-            initialValue: true
-          });
-
-      if (!p.isCancel(shouldDeleteBranch) && shouldDeleteBranch) {
-        if (!runOk('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch])) {
-          p.log.warn(`Local branch '${effectiveBranch}' was not deleted`);
-        }
+    if (!isCancel(shouldDeleteBranch) && shouldDeleteBranch) {
+      if (!runOk('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch])) {
+        p.log.warn(`Local branch '${effectiveBranch}' was not deleted`);
       }
     }
   }
@@ -147,11 +254,11 @@ async function rmOne(
   if (fs.existsSync(shareBranch)) {
     const shouldRemoveShare = options.assumeYes
       ? true
-      : await p.confirm({
+      : await confirm({
           message: `Remove share dir for branch '${effectiveBranch}' (${shareBranch})?`,
           initialValue: true
         });
-    if (!p.isCancel(shouldRemoveShare) && shouldRemoveShare) {
+    if (!isCancel(shouldRemoveShare) && shouldRemoveShare) {
       removeManagedDir(config.shareBase, shareBranch);
       p.log.success(`Share dir removed: ${shareBranch}`);
     }
@@ -162,9 +269,29 @@ async function rmOne(
   }
 }
 
-async function rmPurge(config: SandboxConfig, tools: SandboxTool[]): Promise<void> {
+async function rmPurge(
+  config: SandboxConfig,
+  tools: SandboxTool[],
+  prompt: PromptDependencies = {}
+): Promise<void> {
   const engine = detectEngine(config);
+  const confirm = prompt.confirm ?? p.confirm;
+  const isCancel = prompt.isCancel ?? p.isCancel;
   p.intro(pc.cyan(`Removing all sandboxes for ${config.project}`));
+
+  const worktrees = fs.existsSync(config.worktreeBase)
+    ? fs.readdirSync(config.worktreeBase)
+        .map((entry) => path.join(config.worktreeBase, entry))
+        .filter((entry) => {
+          try { return fs.statSync(entry).isDirectory(); } catch { return false; }
+        })
+    : [];
+  const inspections = inspectWorktrees(worktrees);
+  const blockers = inspectionBlockers(inspections);
+  if (blockers.length > 0) {
+    throw new Error(`Refusing to purge because worktree preflight found blocker(s):\n${blockerMessage(blockers)}`);
+  }
+  const permits = cleanPermits(inspections);
 
   const containers = runSafeEngine(engine, 'docker', [
     'ps',
@@ -186,16 +313,19 @@ async function rmPurge(config: SandboxConfig, tools: SandboxTool[]): Promise<voi
     p.log.warn('No project sandbox containers found');
   }
 
-  if (fs.existsSync(config.worktreeBase) && fs.readdirSync(config.worktreeBase).length > 0) {
-    const shouldRemoveWorktrees = await p.confirm({
+  if (worktrees.length > 0) {
+    const shouldRemoveWorktrees = await confirm({
       message: `Remove all worktrees in ${config.worktreeBase}?`,
       initialValue: true
     });
 
-    if (!p.isCancel(shouldRemoveWorktrees) && shouldRemoveWorktrees) {
-      for (const entry of fs.readdirSync(config.worktreeBase)) {
-        const dir = path.join(config.worktreeBase, entry);
-        removeWorktreeDir(config.repoRoot, config.worktreeBase, dir);
+    if (!isCancel(shouldRemoveWorktrees) && shouldRemoveWorktrees) {
+      for (const dir of worktrees) {
+        const permit = permits.get(path.resolve(dir));
+        if (!permit) throw new Error(`Missing worktree removal permit: ${dir}`);
+        removeWorktreeDir(config.repoRoot, config.worktreeBase, dir, permit, {
+          allowRegisteredPathFallback: engine === ENGINES.WSL2
+        });
       }
       runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
     }
@@ -209,12 +339,12 @@ async function rmPurge(config: SandboxConfig, tools: SandboxTool[]): Promise<voi
   }
 
   if (fs.existsSync(config.shellConfigBase) && fs.readdirSync(config.shellConfigBase).length > 0) {
-    const shouldRemoveShellConfigs = await p.confirm({
+    const shouldRemoveShellConfigs = await confirm({
       message: `Remove all shell config dirs in ${config.shellConfigBase}?`,
       initialValue: true
     });
 
-    if (!p.isCancel(shouldRemoveShellConfigs) && shouldRemoveShellConfigs) {
+    if (!isCancel(shouldRemoveShellConfigs) && shouldRemoveShellConfigs) {
       for (const entry of fs.readdirSync(config.shellConfigBase)) {
         const dir = path.join(config.shellConfigBase, entry);
         removeManagedDir(config.shellConfigBase, dir);
@@ -224,11 +354,11 @@ async function rmPurge(config: SandboxConfig, tools: SandboxTool[]): Promise<voi
   }
 
   if (fs.existsSync(config.shareBase) && fs.readdirSync(config.shareBase).length > 0) {
-    const shouldRemoveAllShares = await p.confirm({
+    const shouldRemoveAllShares = await confirm({
       message: `Remove all share dirs for project (${config.shareBase})?`,
       initialValue: true
     });
-    if (!p.isCancel(shouldRemoveAllShares) && shouldRemoveAllShares) {
+    if (!isCancel(shouldRemoveAllShares) && shouldRemoveAllShares) {
       removeManagedDir(path.dirname(config.shareBase), config.shareBase);
       p.log.success(`Project share dirs removed: ${config.shareBase}`);
     }
@@ -245,11 +375,11 @@ async function rmPurge(config: SandboxConfig, tools: SandboxTool[]): Promise<voi
     }
   }
 
-  const shouldRemoveImage = await p.confirm({
+  const shouldRemoveImage = await confirm({
     message: `Remove image ${config.imageName}?`,
     initialValue: false
   });
-  if (!p.isCancel(shouldRemoveImage) && shouldRemoveImage) {
+  if (!isCancel(shouldRemoveImage) && shouldRemoveImage) {
     runSafeEngine(engine, 'docker', ['rmi', config.imageName]);
   }
 
@@ -263,11 +393,11 @@ async function rmPurge(config: SandboxConfig, tools: SandboxTool[]): Promise<voi
     }
 
     const name = engineDisplayName(engine);
-    const shouldStopVm = await p.confirm({
+    const shouldStopVm = await confirm({
       message: `Stop ${name} VM?`,
       initialValue: false
     });
-    if (!p.isCancel(shouldStopVm) && shouldStopVm) {
+    if (!isCancel(shouldStopVm) && shouldStopVm) {
       stopManagedVm(config);
     }
   }
@@ -293,35 +423,41 @@ async function rmUnbound(
     return;
   }
 
+  const targets = removable.map((row) => resolveRmTarget(config, tools, row.branch));
+  const inspections = inspectWorktrees(targets.flatMap((target) => target.existingWorktrees));
+  const blockers = inspectionBlockers(inspections);
+  const permits = cleanPermits(inspections);
+
   for (const row of removable) {
     p.log.message(`${row.name}  ${row.branch}`);
   }
+  if (blockers.length > 0) p.log.error(blockerMessage(blockers));
 
   if (options.dryRun) {
-    p.outro(`Dry run: ${removable.length} sandbox(es) would be removed, nothing deleted`);
+    p.outro(`Dry run: ${removable.length} sandbox(es) inspected, nothing deleted`);
     return;
   }
 
-  if (!options.assumeYes) {
-    if (!process.stdin.isTTY) {
-      throw new Error(
-        'Refusing to remove sandboxes without confirmation in a non-interactive shell; pass --yes to proceed.'
-      );
-    }
-    const confirmed = await p.confirm({
-      message: `Remove these ${removable.length} sandbox(es)?`,
-      initialValue: false
-    });
-    if (p.isCancel(confirmed) || !confirmed) {
-      p.outro('Cancelled');
-      return;
-    }
+  if (blockers.length > 0) {
+    throw new Error(`Refusing batch removal because worktree preflight found blocker(s):\n${blockerMessage(blockers)}`);
+  }
+
+  if (!options.assumeYes && !process.stdin.isTTY) {
+    throw new Error(
+      'Refusing to remove sandboxes without confirmation in a non-interactive shell; pass --yes to proceed.'
+    );
   }
 
   const failures: { branch: string; message: string }[] = [];
-  for (const row of removable) {
+  for (const [index, row] of removable.entries()) {
     try {
-      await rmOne(config, tools, row.branch, { assumeYes: true, quiet: true });
+      await rmOne(config, tools, row.branch, {
+        assumeYes: options.assumeYes,
+        quiet: true,
+        target: targets[index],
+        permits,
+        allowDirtyDiscard: false
+      });
     } catch (error) {
       failures.push({ branch: row.branch, message: error instanceof Error ? error.message : String(error) });
     }
@@ -346,6 +482,7 @@ export async function rm(args: string[]): Promise<void> {
     strict: true,
     options: {
       all: { type: 'boolean' },
+      unbound: { type: 'boolean' },
       purge: { type: 'boolean' },
       'dry-run': { type: 'boolean' },
       yes: { type: 'boolean', short: 'y' },
@@ -353,24 +490,28 @@ export async function rm(args: string[]): Promise<void> {
     }
   });
 
+  if (values.all) {
+    throw new Error('CLI_FLAG_REMOVED: --all was removed; use --unbound');
+  }
+
   if (values.help) {
     process.stdout.write(`${USAGE}\n`);
     return;
   }
 
-  if (values.all && values.purge) {
-    throw new Error('--all and --purge are mutually exclusive');
+  if (values.unbound && values.purge) {
+    throw new Error('--unbound and --purge are mutually exclusive');
   }
 
-  if ((values['dry-run'] || values.yes) && !values.all) {
-    throw new Error('--dry-run and --yes only apply to --all');
+  if ((values['dry-run'] || values.yes) && !values.unbound) {
+    throw new Error('--dry-run and --yes only apply to --unbound');
   }
 
-  if ((values.all || values.purge) && positionals.length > 0) {
-    throw new Error(`${values.all ? '--all' : '--purge'} does not take a branch argument`);
+  if ((values.unbound || values.purge) && positionals.length > 0) {
+    throw new Error(`${values.unbound ? '--unbound' : '--purge'} does not take a branch argument`);
   }
 
-  if (!values.all && !values.purge && positionals.length !== 1) {
+  if (!values.unbound && !values.purge && positionals.length !== 1) {
     throw new Error(USAGE);
   }
 
@@ -382,7 +523,7 @@ export async function rm(args: string[]): Promise<void> {
     return;
   }
 
-  if (values.all) {
+  if (values.unbound) {
     await rmUnbound(config, tools, {
       dryRun: Boolean(values['dry-run']),
       assumeYes: Boolean(values.yes)
@@ -393,3 +534,5 @@ export async function rm(args: string[]): Promise<void> {
   const target = resolveSandboxTarget(positionals[0] ?? '', config.repoRoot);
   await rmOne(config, tools, target.branch);
 }
+
+export { authorizeWorktrees, rmOne, rmPurge };

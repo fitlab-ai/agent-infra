@@ -6,15 +6,26 @@ import pc from 'picocolors';
 import { loadConfig } from '../config.ts';
 import type { SandboxConfig } from '../config.ts';
 import { safeNameCandidates, sandboxBranchLabel, sandboxLabel } from '../constants.ts';
-import { detectEngine } from '../engine.ts';
+import { detectEngine, ENGINES } from '../engine.ts';
 import { hostJoin } from '../engines/wsl2-paths.ts';
 import { removeManagedDir, removeWorktreeDir } from '../managed-fs.ts';
 import { parseLabels } from './ls.ts';
 import { runEngine, runSafe } from '../shell.ts';
 import { createSandboxCapabilityPlan } from '../agent-client-reconciler.ts';
 import type { SandboxTool } from '../tools.ts';
+import { createCleanPermit, formatWorktreeSnapshot, inspectWorktrees } from '../worktree-safety.ts';
+import type { WorktreeRemovalPermit } from '../worktree-safety.ts';
 
 const USAGE = `Usage: ai sandbox prune [--dry-run]`;
+
+type PruneDependencies = {
+  config?: SandboxConfig;
+  tools?: SandboxTool[];
+  engine?: string;
+  labelsOutput?: string;
+  confirm?: typeof p.confirm;
+  isCancel?: typeof p.isCancel;
+};
 
 type OrphanKind = 'shell' | 'worktree' | 'share' | 'tool';
 
@@ -107,12 +118,19 @@ export function collectOrphanGroups(
   return groups;
 }
 
-export function removeOrphanGroups(config: SandboxConfig, groups: OrphanGroup[]): boolean {
+export function removeOrphanGroups(
+  config: SandboxConfig,
+  groups: OrphanGroup[],
+  permits: ReadonlyMap<string, WorktreeRemovalPermit>,
+  allowRegisteredPathFallback = false
+): boolean {
   let removedWorktrees = false;
   for (const group of groups) {
     for (const dir of group.dirs) {
       if (group.kind === 'worktree') {
-        removeWorktreeDir(config.repoRoot, group.base, dir);
+        const permit = permits.get(path.resolve(dir));
+        if (!permit) throw new Error(`Missing worktree removal permit: ${dir}`);
+        removeWorktreeDir(config.repoRoot, group.base, dir, permit, { allowRegisteredPathFallback });
         removedWorktrees = true;
       } else {
         removeManagedDir(group.base, dir);
@@ -142,7 +160,7 @@ function writeGroups(groups: OrphanGroup[]): void {
   }
 }
 
-export async function prune(args: string[]): Promise<void> {
+export async function prune(args: string[], dependencies: PruneDependencies = {}): Promise<void> {
   const { values } = parseArgs({
     args,
     strict: true,
@@ -157,9 +175,9 @@ export async function prune(args: string[]): Promise<void> {
     return;
   }
 
-  const config = loadConfig();
-  const tools = [...createSandboxCapabilityPlan(config).cleanupInventory];
-  const engine = detectEngine(config);
+  const config = dependencies.config ?? loadConfig();
+  const tools = dependencies.tools ?? [...createSandboxCapabilityPlan(config).cleanupInventory];
+  const engine = dependencies.engine ?? detectEngine(config);
   const psArgs = [
     'ps',
     '-a',
@@ -168,14 +186,25 @@ export async function prune(args: string[]): Promise<void> {
     '--format',
     '{{.Labels}}'
   ];
-  let labelsOutput: string;
-  try {
-    labelsOutput = runEngine(engine, 'docker', psArgs);
-  } catch {
-    throw new Error('Unable to determine active sandbox branches: docker ps failed');
+  let labelsOutput = dependencies.labelsOutput;
+  if (labelsOutput === undefined) {
+    try {
+      labelsOutput = runEngine(engine, 'docker', psArgs);
+    } catch {
+      throw new Error('Unable to determine active sandbox branches: docker ps failed');
+    }
   }
+  const confirm = dependencies.confirm ?? p.confirm;
+  const isCancel = dependencies.isCancel ?? p.isCancel;
   const groups = collectOrphanGroups(config, tools, activeBranchesFromLabels(config, labelsOutput));
   const count = orphanCount(groups);
+  const worktrees = groups.filter((group) => group.kind === 'worktree').flatMap((group) => group.dirs);
+  const inspections = inspectWorktrees(worktrees);
+  const blockers = inspections.filter((inspection) => inspection.status !== 'clean');
+  const permits = new Map<string, WorktreeRemovalPermit>();
+  for (const inspection of inspections) {
+    if (inspection.status === 'clean') permits.set(inspection.snapshot.worktree, createCleanPermit(inspection.snapshot));
+  }
 
   p.intro(pc.cyan(`Pruning orphaned sandbox state for ${config.project}`));
 
@@ -186,23 +215,32 @@ export async function prune(args: string[]): Promise<void> {
   }
 
   writeGroups(groups);
+  for (const blocker of blockers) {
+    p.log.error(blocker.status === 'failed'
+      ? `${JSON.stringify(blocker.worktree)}: ${blocker.message}`
+      : formatWorktreeSnapshot(blocker.snapshot));
+  }
 
   if (values['dry-run']) {
     p.outro(pc.green('Dry run complete'));
     return;
   }
 
-  const shouldRemove = await p.confirm({
+  if (blockers.length > 0) {
+    throw new Error('Refusing to prune because worktree preflight found blocker(s); no orphan state was deleted');
+  }
+
+  const shouldRemove = await confirm({
     message: `Remove ${count} orphaned sandbox state dirs?`,
     initialValue: true
   });
 
-  if (p.isCancel(shouldRemove) || !shouldRemove) {
+  if (isCancel(shouldRemove) || !shouldRemove) {
     p.outro('Cancelled');
     return;
   }
 
-  const removedWorktrees = removeOrphanGroups(config, groups);
+  const removedWorktrees = removeOrphanGroups(config, groups, permits, engine === ENGINES.WSL2);
   if (removedWorktrees) {
     runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
   }

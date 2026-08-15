@@ -149,7 +149,9 @@ tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/
 - `/share/branch` <- `~/.agent-infra/share/<project>/branches/<branch>/`：分支独占。
 - `/clipboard` <- `~/.agent-infra/clipboard/`：macOS 图片粘贴桥接使用的只读存储。
 
-这两条路径硬编码，不暴露 `.airc.json` 配置项。首次 `create` 时会自动创建宿主目录；执行 `ai sandbox rm <branch>` 删除时会附带询问是否清理（默认 yes）。`ai sandbox rm --all` 批量删除所有**未绑定 active 任务**的沙箱（即 `ai sandbox ls` 中短号为 `-` 的行）；可加 `--dry-run` 预览，或 `--yes` 跳过确认（非交互 shell 中必须显式传 `--yes`）。`ai sandbox rm --purge` 则拆除项目的**全部**沙箱（容器、worktree、镜像、VM）。**破坏性变更**：此前 `--all` 的语义即现在 `--purge` 的全量拆除。
+这两条路径硬编码，不暴露 `.airc.json` 配置项。首次 `create` 时会自动创建宿主目录；执行 `ai sandbox rm <branch>` 删除时会附带询问是否清理（默认 yes）。`ai sandbox rm --unbound` 批量删除所有**未绑定 active 任务**的沙箱（即 `ai sandbox ls` 中短号为 `-` 的行）；可加 `--dry-run` 预览，或 `--yes` 跳过普通确认（非交互 shell 中必须显式传 `--yes`）。`ai sandbox rm --purge` 则拆除项目的**全部**沙箱（容器、worktree、镜像、VM）。**破坏性变更**：`--all` 已移除；旧调用会返回迁移错误，必须改用 `--unbound`。
+
+所有删除路径都会在破坏性清理前检查全部目标 worktree。存在 staged、unstaged、冲突或非 ignored untracked 修改时，批量删除、purge、prune、`--yes` 和其他非交互删除都会 fail closed。只有交互式 `ai sandbox rm <branch>` 可以在展示精确 dirty snapshot 后，通过一次默认否定的独立确认放弃修改；删除前 snapshot 一旦变化，授权立即失效。
 可先用 `ai sandbox prune --dry-run` 查看旧版本或异常中断遗留的孤儿 per-branch 状态目录，再用 `ai sandbox prune` 只删除没有活跃 sandbox 容器对应的目录。
 已有沙箱需要执行 `ai sandbox rm <branch>` 后再执行 `ai sandbox create <branch>`，才能加载挂载点变更，包括已移除的挂载。
 

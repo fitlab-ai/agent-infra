@@ -15,9 +15,9 @@ Commands:
   rebuild [--quiet] [--refresh]
                                Rebuild the sandbox image (--refresh pulls base + tools)
   refresh                      Sync host Claude Code credentials to all sandbox copies
-  rm <branch> | --all | --purge
+  rm <branch> | --unbound | --purge
                                Remove one sandbox, all sandboxes not bound to an
-                               active task (--all), or tear down everything (--purge)
+                               active task (--unbound), or tear down everything (--purge)
   start [--recreate] <branch | TASK-id | N>
                                Verify or recover an existing sandbox container;
                                optionally replace only the container on failure

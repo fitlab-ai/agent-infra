@@ -94,7 +94,7 @@ type PruneModule = {
     label: string;
     base: string;
     dirs: string[];
-  }>): boolean;
+  }>, permits: ReadonlyMap<string, unknown>): boolean;
 };
 
 function spawnSandboxCli(
@@ -173,17 +173,6 @@ test("sandbox create rejects invalid selinux disable environment before loading 
   }
 });
 
-test("sandbox rm defaults local branch deletion confirmation to yes", () => {
-  const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/rm.js"), "utf8");
-
-  // The interactive confirm is gated by options.assumeYes (batch --all passes
-  // assumeYes:true); when prompting it still defaults to yes.
-  assert.match(
-    commandSource,
-    /const shouldDeleteBranch = options\.assumeYes[\s\S]*?await p\.confirm\(\{[\s\S]*?message: `Also delete local branch '\$\{effectiveBranch\}'\?`,[\s\S]*?initialValue: true[\s\S]*?\}\);/
-  );
-});
-
 test("sandbox rm cleans per-branch shell config dir", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-rm-shell-config-"));
   const project = "demo";
@@ -208,15 +197,6 @@ test("sandbox rm cleans per-branch shell config dir", () => {
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
-});
-
-test("sandbox rm --purge cleans shell config dirs through a single confirm", () => {
-  const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/rm.js"), "utf8");
-
-  assert.match(
-    commandSource,
-    /config\.shellConfigBase[\s\S]*?p\.confirm\(\{[\s\S]*?config\.shellConfigBase[\s\S]*?\}\);[\s\S]*?readdirSync\(config\.shellConfigBase\)[\s\S]*?removeManagedDir\(config\.shellConfigBase, dir\);/
-  );
 });
 
 test("sandbox rm --purge prunes project-scoped dangling images before managed-engine branch", () => {
@@ -279,7 +259,7 @@ function hasDockerVerb(calls: string[][], verb: string): boolean {
   return calls.some((call) => call[0] === verb);
 }
 
-test("sandbox rm --all --dry-run lists unbound sandboxes and removes nothing", () => {
+test("sandbox rm --unbound --dry-run lists unbound sandboxes and removes nothing", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-dry-"));
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -287,7 +267,7 @@ test("sandbox rm --all --dry-run lists unbound sandboxes and removes nothing", (
       dockerStdoutForPs: sandboxRow("sb-orphan", "orphan-branch")
     });
 
-    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--all", "--dry-run"]);
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--dry-run"]);
 
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /orphan-branch/);
@@ -299,7 +279,7 @@ test("sandbox rm --all --dry-run lists unbound sandboxes and removes nothing", (
   }
 });
 
-test("sandbox rm --all skips containers bound to an active task", () => {
+test("sandbox rm --unbound skips containers bound to an active task", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-skip-"));
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -312,7 +292,7 @@ test("sandbox rm --all skips containers bound to an active task", () => {
     writeShortIdRegistry(fixture.repoDir, { "07": "TASK-20260101-000001" });
     writeActiveTaskBranch(fixture.repoDir, "TASK-20260101-000001", "bound-branch");
 
-    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--all", "--dry-run"]);
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--dry-run"]);
 
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /free-branch/);
@@ -322,7 +302,7 @@ test("sandbox rm --all skips containers bound to an active task", () => {
   }
 });
 
-test("sandbox rm --all exits 0 with a notice when nothing is removable", () => {
+test("sandbox rm --unbound exits 0 with a notice when nothing is removable", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-empty-"));
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -332,7 +312,7 @@ test("sandbox rm --all exits 0 with a notice when nothing is removable", () => {
     writeShortIdRegistry(fixture.repoDir, { "07": "TASK-20260101-000001" });
     writeActiveTaskBranch(fixture.repoDir, "TASK-20260101-000001", "bound-branch");
 
-    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--all"]);
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound"]);
 
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /No removable sandboxes/);
@@ -344,21 +324,21 @@ test("sandbox rm --all exits 0 with a notice when nothing is removable", () => {
   }
 });
 
-test("sandbox rm --all rejects a positional branch argument", () => {
+test("sandbox rm --unbound rejects a positional branch argument", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-mutex-"));
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
 
-    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--all", "feature/x"]);
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "feature/x"]);
 
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /--all does not take a branch argument/);
+    assert.match(result.stderr, /--unbound does not take a branch argument/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("sandbox rm --all without --yes fails safe in a non-interactive shell", () => {
+test("sandbox rm --unbound without --yes fails safe in a non-interactive shell", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-tty-"));
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
@@ -366,7 +346,7 @@ test("sandbox rm --all without --yes fails safe in a non-interactive shell", () 
       dockerStdoutForPs: sandboxRow("sb-orphan", "orphan-branch")
     });
 
-    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--all"]);
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound"]);
 
     assert.equal(result.status, 1);
     assert.match(result.stderr, /--yes/);
@@ -378,7 +358,7 @@ test("sandbox rm --all without --yes fails safe in a non-interactive shell", () 
   }
 });
 
-test("sandbox rm --dry-run without --all is rejected", () => {
+test("sandbox rm --dry-run without --unbound is rejected", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-dry-misuse-"));
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -386,13 +366,13 @@ test("sandbox rm --dry-run without --all is rejected", () => {
     const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--dry-run"]);
 
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /only apply to --all/);
+    assert.match(result.stderr, /only apply to --unbound/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-test("sandbox rm --all --yes routes each unbound branch through rmOne cleanup", () => {
+test("sandbox rm --unbound --yes routes each unbound branch through rmOne cleanup", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-yes-"));
   const project = "demo";
   try {
@@ -407,7 +387,7 @@ test("sandbox rm --all --yes routes each unbound branch through rmOne cleanup", 
     fs.mkdirSync(keptBranchDir, { recursive: true });
     fs.writeFileSync(path.join(removedBranchDir, ".bash_aliases"), "alias demo=true\n", "utf8");
 
-    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--all", "--yes"]);
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
 
     assert.equal(result.status, 0, result.stderr);
     // The unbound branch was passed into rmOne, whose unconditional per-branch
@@ -420,21 +400,20 @@ test("sandbox rm --all --yes routes each unbound branch through rmOne cleanup", 
   }
 });
 
-test("sandbox rm --all delegates to rmOne with assumeYes/quiet and aggregates failures", () => {
-  const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/rm.js"), "utf8");
+test("sandbox rm --all returns a migration error before loading project config", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-removed-"));
+  try {
+    const result = spawnSync(process.execPath, cliArgs("sandbox", "rm", "--all"), {
+      cwd: tmpDir,
+      env: gitSafeEnv({ HOME: tmpDir, USERPROFILE: tmpDir }),
+      encoding: "utf8"
+    });
 
-  const rmUnboundMatch = commandSource.match(
-    /async function rmUnbound\b[\s\S]*?(?=\n(?:async function|export async function|export function)\b|$)/
-  );
-  assert.ok(rmUnboundMatch, "expected to locate rmUnbound function body in rm.js");
-  const rmUnboundBody = rmUnboundMatch[0];
-
-  // T7b: batch path forwards the removable branch into the single-container path,
-  // suppressing per-item confirms and framing.
-  assert.match(rmUnboundBody, /rmOne\([\s\S]*?assumeYes:\s*true[\s\S]*?quiet:\s*true[\s\S]*?\)/);
-  // T8: partial-failure contract — keep going, collect failures, then throw a summary.
-  assert.match(rmUnboundBody, /try\s*\{[\s\S]*?rmOne\([\s\S]*?\}\s*catch[\s\S]*?failures\.push/);
-  assert.match(rmUnboundBody, /failures\.length[\s\S]*?throw new Error\(/);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /CLI_FLAG_REMOVED: --all was removed; use --unbound/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test("managed sandbox fs helpers remove only paths under the managed root", async () => {
@@ -453,57 +432,6 @@ test("managed sandbox fs helpers remove only paths under the managed root", asyn
       () => managedFs.removeManagedDir(root, path.join(tmpDir, "outside")),
       /outside managed sandbox root/
     );
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("managed sandbox fs worktree removal falls back to managed rm", async () => {
-  const managedFs = await loadFreshEsm<ManagedFsModule>("lib/sandbox/managed-fs.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-managed-worktree-"));
-  const worktreeBase = path.join(tmpDir, "worktrees");
-  const worktree = path.join(worktreeBase, "feature..stale");
-
-  try {
-    fs.mkdirSync(worktree, { recursive: true });
-
-    managedFs.removeWorktreeDir(tmpDir, worktreeBase, worktree);
-
-    assert.equal(fs.existsSync(worktree), false);
-    assert.equal(fs.existsSync(worktreeBase), true);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("managed sandbox fs worktree removal prunes stale metadata after a fallback delete", async () => {
-  const managedFs = await loadFreshEsm<ManagedFsModule>("lib/sandbox/managed-fs.js");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-managed-worktree-prune-"));
-  const worktreeBase = path.join(tmpDir, "worktrees");
-  const worktree = path.join(worktreeBase, "feature..wsl2");
-  const calls: string[][] = [];
-
-  try {
-    fs.mkdirSync(worktree, { recursive: true });
-
-    managedFs.removeWorktreeDir(tmpDir, worktreeBase, worktree, {
-      // Simulate WSL2: `git worktree remove <windows-path>` cannot match the
-      // `/mnt/c/...` registration, so it throws and the directory is deleted
-      // through the managed fallback instead.
-      runFn: (cmd, args) => {
-        calls.push([cmd, ...args]);
-        throw new Error("fatal: is not a working tree");
-      },
-      runSafeFn: (cmd, args) => {
-        calls.push([cmd, ...args]);
-        return "";
-      }
-    });
-
-    assert.equal(fs.existsSync(worktree), false);
-    // The stale `/mnt/c/...` worktree record must be pruned so the branch is
-    // no longer reported as checked out and can be deleted.
-    assert.deepEqual(calls.at(-1), ["git", "-C", tmpDir, "worktree", "prune"]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1279,11 +1207,12 @@ test("sandbox prune collects orphaned per-branch dirs while preserving active an
       orphanWorktreeDir
     ].sort());
 
-    const removedWorktrees = sandboxPrune.removeOrphanGroups(config, groups);
+    const nonWorktreeGroups = groups.filter((group) => group.kind !== "worktree");
+    const removedWorktrees = sandboxPrune.removeOrphanGroups(config, nonWorktreeGroups, new Map<string, unknown>());
 
-    assert.equal(removedWorktrees, true);
+    assert.equal(removedWorktrees, false);
     assert.equal(fs.existsSync(orphanShellDir), false);
-    assert.equal(fs.existsSync(orphanWorktreeDir), false);
+    assert.equal(fs.existsSync(orphanWorktreeDir), true);
     assert.equal(fs.existsSync(orphanShareDir), false);
     assert.equal(fs.existsSync(orphanToolDir), false);
     assert.equal(fs.existsSync(config.shellConfigBase), true);
@@ -1356,15 +1285,6 @@ test("sandbox prune --dry-run lists orphans without deleting them", onPlatforms(
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
-});
-
-test("sandbox prune uses a single confirmation gate for deletion", () => {
-  const commandSource = fs.readFileSync(filePath("lib/sandbox/commands/prune.js"), "utf8");
-
-  assert.match(
-    commandSource,
-    /const shouldRemove = await p\.confirm\(\{[\s\S]*?Remove \$\{count\} orphaned sandbox state[\s\S]*?initialValue: true[\s\S]*?\}\);/
-  );
 });
 
 test("sandbox list-running selectSandboxContainer matches by candidate name (covers legacy '-')", async () => {
