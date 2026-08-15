@@ -265,7 +265,12 @@ test("worktree safety snapshot parses rename, delete, and conflict records", onP
     fs.writeFileSync(path.join(fixture.repo, "tracked.txt"), "main version\n", "utf8");
     git(fixture.repo, "add", "tracked.txt");
     git(fixture.repo, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox@example.com", "commit", "-q", "-m", "main");
-    assert.throws(() => git(fixture.worktree, "merge", "main"));
+    assert.throws(() => git(
+      fixture.worktree,
+      "-c", "user.name=Sandbox Test",
+      "-c", "user.email=sandbox@example.com",
+      "merge", "main"
+    ));
 
     const conflicted = safety.inspectWorktree(fixture.worktree);
     assert.equal(conflicted.status, "dirty");
