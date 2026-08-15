@@ -74,7 +74,8 @@ import { sandboxCoreBindMounts } from '../mounts.ts';
 import {
   assertSandboxTaskSource,
   materializeSandboxControl,
-  materializeSandboxWorkspaceView
+  materializeSandboxWorkspaceView,
+  prepareSandboxWorkspaceMountTargets
 } from '../workspace-view.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
@@ -1342,6 +1343,7 @@ export async function create(args: string[]): Promise<void> {
               container,
               identity: target.workspace
             });
+            prepareSandboxWorkspaceMountTargets(worktree);
             const control = materializeSandboxControl({
               base: effectiveConfig.controlBase,
               repoRoot: effectiveConfig.repoRoot,

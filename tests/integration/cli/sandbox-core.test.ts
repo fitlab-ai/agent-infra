@@ -41,6 +41,15 @@ type ExecFn = (cmd: string, args: string[], options?: CommandOptions) => string 
 type EngineExecFn = (engine: string, cmd: string, args: string[], options?: CommandOptions) => string | Buffer | void;
 type RunSafeFn = (cmd: string, args: string[]) => string;
 type EngineRunSafeFn = (engine: string, cmd: string, args: string[]) => string;
+
+function isReadOnlyMountFor(arg: string, containerPath: string): boolean {
+  const separator = arg.lastIndexOf(":");
+  const options = separator >= 0 ? arg.slice(separator + 1).split(",") : [];
+  const hasReadOnlyOption = options.includes("ro");
+  const target = hasReadOnlyOption ? arg.slice(0, separator) : arg;
+  return hasReadOnlyOption && target.endsWith(`:${containerPath}`);
+}
+
 type SandboxCreateModule = {
   create(args: string[]): Promise<void>;
   buildContainerEnvFile(tools: ResolvedToolFixture[], engine: string, runSafe?: EngineRunSafeFn, options?: CommandOptions): EnvFileResult;
@@ -480,13 +489,24 @@ test("sandbox create warns and continues past missing Claude credentials", () =>
   }
 });
 
-test("sandbox create does not mount the host ssh directory", () => {
+test("sandbox create preserves tracked workspace files and does not mount the host ssh directory", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-no-ssh-"));
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
     fs.writeFileSync(path.join(fixture.repoDir, "README.md"), "# demo\n", "utf8");
-    const addResult = spawnSync("git", ["add", "README.md"], {
+    fs.mkdirSync(path.join(fixture.repoDir, ".agents", "workspace"), { recursive: true });
+    fs.writeFileSync(
+      path.join(fixture.repoDir, ".agents", "workspace", "README.md"),
+      "# tracked workspace\n",
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(fixture.repoDir, ".gitignore"),
+      ".agents/workspace/active/\n.agents/workspace/completed/\n.agents/workspace/blocked/\n.agents/workspace/archive/\n",
+      "utf8"
+    );
+    const addResult = spawnSync("git", ["add", "README.md", ".gitignore", ".agents/workspace/README.md"], {
       cwd: fixture.repoDir,
       env: gitSafeEnv()
     });
@@ -529,6 +549,24 @@ test("sandbox create does not mount the host ssh directory", () => {
     assert.ok(runCall.some((arg) => arg.includes(":/workspace")));
     assert.ok(runCall.some((arg) => arg.includes(":/share/common")));
     assert.ok(runCall.some((arg) => arg.includes(":/share/branch")));
+    for (const state of ["active", "completed", "blocked", "archive"]) {
+      assert.ok(
+        runCall.some((arg) => isReadOnlyMountFor(arg, `/workspace/.agents/workspace/${state}`)),
+        `expected a read-only ${state} workspace mount`
+      );
+    }
+    const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", "feature..no-ssh-mount");
+    assert.equal(
+      fs.readFileSync(path.join(worktree, ".agents", "workspace", "README.md"), "utf8"),
+      "# tracked workspace\n"
+    );
+    assert.equal(
+      execFileSync("git", ["-C", worktree, "status", "--short"], {
+        encoding: "utf8",
+        env: gitSafeEnv()
+      }),
+      ""
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

@@ -408,8 +408,13 @@ test("volumeArg converts host mount paths for WSL2", async () => {
   const wsl2Paths = await loadFreshEsm<Wsl2PathsModule>("lib/sandbox/engines/wsl2-paths.js");
 
   assert.equal(
-    wsl2Paths.volumeArg("wsl2", "F:\\repo\\.agents\\workspace", "/workspace/.agents/workspace"),
-    "/mnt/f/repo/.agents/workspace:/workspace/.agents/workspace"
+    wsl2Paths.volumeArg(
+      "wsl2",
+      "F:\\repo\\.agents\\workspace\\active",
+      "/workspace/.agents/workspace/active",
+      ":ro"
+    ),
+    "/mnt/f/repo/.agents/workspace/active:/workspace/.agents/workspace/active:ro"
   );
   assert.equal(
     wsl2Paths.volumeArg("native", "/repo/.cache", "/home/devuser/.cache-demo", ":ro"),

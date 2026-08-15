@@ -9,7 +9,7 @@ const config = {
   shellConfigBase: '/shell'
 };
 
-test('task-bound mount topology uses a read-only view followed by one writable task child', () => {
+test('task-bound mount topology preserves the workspace root and exposes only one writable task child', () => {
   const mounts = sandboxCoreBindMounts(config, 'feature', {
     worktree: '/worktree',
     shellConfigHostDir: '/shell/feature',
@@ -20,23 +20,36 @@ test('task-bound mount topology uses a read-only view followed by one writable t
   });
   const workspace = mounts.filter((mount) => mount.containerPath.startsWith('/workspace/.agents/workspace'));
   assert.deepEqual(workspace, [
-    { hostPaths: ['/views/current'], containerPath: '/workspace/.agents/workspace', readOnly: true },
+    {
+      hostPaths: ['/views/current/active/.short-ids.json'],
+      containerPath: '/workspace/.agents/workspace/active/.short-ids.json',
+      readOnly: true
+    },
+    { hostPaths: ['/views/current/completed'], containerPath: '/workspace/.agents/workspace/completed', readOnly: true },
+    { hostPaths: ['/views/current/blocked'], containerPath: '/workspace/.agents/workspace/blocked', readOnly: true },
+    { hostPaths: ['/views/current/archive'], containerPath: '/workspace/.agents/workspace/archive', readOnly: true },
     {
       hostPaths: ['/repo/.agents/workspace/active/TASK-20260809-010203'],
       containerPath: '/workspace/.agents/workspace/active/TASK-20260809-010203',
       readOnly: false
     }
   ]);
+  assert.equal(workspace.some((mount) => mount.containerPath === '/workspace/.agents/workspace/active'), false);
   assert.equal(mounts.some((mount) => mount.hostPaths.includes('/repo/.agents/workspace')), false);
 });
 
-test('branch-only topology has no host task mount', () => {
+test('branch-only topology mounts each isolated state read-only without covering the workspace root', () => {
   const mounts = sandboxCoreBindMounts(config, 'feature', {
     workspaceViewRoot: '/views/empty',
     controlDir: '/control/empty'
   });
-  assert.equal(
-    mounts.filter((mount) => mount.containerPath.startsWith('/workspace/.agents/workspace')).length,
-    1
+  assert.deepEqual(
+    mounts.filter((mount) => mount.containerPath.startsWith('/workspace/.agents/workspace')),
+    [
+      { hostPaths: ['/views/empty/active'], containerPath: '/workspace/.agents/workspace/active', readOnly: true },
+      { hostPaths: ['/views/empty/completed'], containerPath: '/workspace/.agents/workspace/completed', readOnly: true },
+      { hostPaths: ['/views/empty/blocked'], containerPath: '/workspace/.agents/workspace/blocked', readOnly: true },
+      { hostPaths: ['/views/empty/archive'], containerPath: '/workspace/.agents/workspace/archive', readOnly: true }
+    ]
   );
 });

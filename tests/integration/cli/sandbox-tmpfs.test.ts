@@ -24,7 +24,8 @@ import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
 import { tmpfsSeedTargetPath } from "../../../lib/sandbox/tools.ts";
 import {
   materializeSandboxControl,
-  materializeSandboxWorkspaceView
+  materializeSandboxWorkspaceView,
+  sandboxWorkspaceViewStatePaths
 } from "../../../lib/sandbox/workspace-view.ts";
 
 const BRANCH_ONLY_LABELS = {
@@ -147,10 +148,13 @@ function recoveryFixtureMounts(config: SandboxConfig): Array<Record<string, unkn
     branchDir
   );
   const view = fs.readdirSync(path.join(config.workspaceViewBase, config.project, "demo-dev-feature..demo"))[0]!;
+  const viewRoot = path.join(config.workspaceViewBase, config.project, "demo-dev-feature..demo", view);
   const control = fs.readdirSync(path.join(config.controlBase, config.project, "demo-dev-feature..demo"))[0]!;
   return [
     { Type: "bind", Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
-    { Type: "bind", Source: path.join(config.workspaceViewBase, config.project, "demo-dev-feature..demo", view), Destination: "/workspace/.agents/workspace", RW: false },
+    ...sandboxWorkspaceViewStatePaths(viewRoot).map(({ state, hostPath }) => ({
+      Type: "bind", Source: hostPath, Destination: path.posix.join("/workspace/.agents/workspace", state), RW: false
+    })),
     { Type: "bind", Source: path.join(config.controlBase, config.project, "demo-dev-feature..demo", control, "channel"), Destination: "/run/agent-infra/control", RW: true },
     { Type: "bind", Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
     { Type: "bind", Source: path.join(config.shareBase, "branches", branchDir), Destination: "/share/branch", RW: true },
@@ -619,7 +623,7 @@ test("fresh readiness restarts once when OrbStack workspace mounts are still set
           Id: "fixture-container-id",
           Config: { Labels: BRANCH_ONLY_LABELS },
           Mounts: recoveryFixtureMounts(config).filter((mount) =>
-            restarted || mount.Destination !== "/workspace/.agents/workspace"
+            restarted || mount.Destination !== "/workspace/.agents/workspace/active"
           )
         }]),
         runOk: () => true,
@@ -655,7 +659,7 @@ test("fresh readiness remains fail-closed after one workspace mount restart", as
           Id: "fixture-container-id",
           Config: { Labels: BRANCH_ONLY_LABELS },
           Mounts: recoveryFixtureMounts(config).filter((mount) =>
-            mount.Destination !== "/workspace/.agents/workspace"
+            mount.Destination !== "/workspace/.agents/workspace/active"
           )
         }]),
         runOk: () => true,

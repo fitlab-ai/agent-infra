@@ -6,6 +6,7 @@ import {
   worktreeDirCandidates
 } from './constants.ts';
 import type { SandboxConfig } from './config.ts';
+import { sandboxWorkspaceViewStatePaths } from './workspace-view.ts';
 
 export type SandboxBindMountDeclaration = {
   hostPaths: string[];
@@ -28,6 +29,20 @@ export function sandboxCoreBindMounts(
     taskId?: string;
   }
 ): SandboxBindMountDeclaration[] {
+  const taskBound = Boolean(overrides.taskSource && overrides.taskId);
+  const workspaceMounts = sandboxWorkspaceViewStatePaths(overrides.workspaceViewRoot).map(
+    ({ state, hostPath }) => taskBound && state === 'active'
+      ? {
+          hostPaths: [path.join(hostPath, '.short-ids.json')],
+          containerPath: '/workspace/.agents/workspace/active/.short-ids.json',
+          readOnly: true
+        }
+      : {
+          hostPaths: [hostPath],
+          containerPath: path.posix.join('/workspace/.agents/workspace', state),
+          readOnly: true
+        }
+  );
   const mounts: SandboxBindMountDeclaration[] = [
     {
       hostPaths: overrides.worktree
@@ -36,11 +51,16 @@ export function sandboxCoreBindMounts(
       containerPath: '/workspace',
       readOnly: false
     },
-    {
-      hostPaths: [overrides.workspaceViewRoot],
-      containerPath: '/workspace/.agents/workspace',
-      readOnly: true
-    },
+    ...workspaceMounts,
+  ];
+  if (taskBound) {
+    mounts.push({
+      hostPaths: [overrides.taskSource!],
+      containerPath: path.posix.join('/workspace/.agents/workspace/active', overrides.taskId!),
+      readOnly: false
+    });
+  }
+  mounts.push(
     {
       hostPaths: [shareCommonDir(config)],
       containerPath: '/share/common',
@@ -58,14 +78,7 @@ export function sandboxCoreBindMounts(
       containerPath: '/home/devuser/.host-shell-config',
       readOnly: true
     }
-  ];
-  if (overrides.taskSource && overrides.taskId) {
-    mounts.splice(2, 0, {
-      hostPaths: [overrides.taskSource],
-      containerPath: path.posix.join('/workspace/.agents/workspace/active', overrides.taskId),
-      readOnly: false
-    });
-  }
+  );
   mounts.push({
     hostPaths: [overrides.controlDir],
     containerPath: '/run/agent-infra/control',
