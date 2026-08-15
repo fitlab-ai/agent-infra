@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 import { sandboxCoreBindMounts } from '../../../lib/sandbox/mounts.ts';
 
@@ -21,13 +22,13 @@ test('task-bound mount topology preserves the workspace root and exposes only on
   const workspace = mounts.filter((mount) => mount.containerPath.startsWith('/workspace/.agents/workspace'));
   assert.deepEqual(workspace, [
     {
-      hostPaths: ['/views/current/active/.short-ids.json'],
+      hostPaths: [path.join('/views/current/active', '.short-ids.json')],
       containerPath: '/workspace/.agents/workspace/active/.short-ids.json',
       readOnly: true
     },
-    { hostPaths: ['/views/current/completed'], containerPath: '/workspace/.agents/workspace/completed', readOnly: true },
-    { hostPaths: ['/views/current/blocked'], containerPath: '/workspace/.agents/workspace/blocked', readOnly: true },
-    { hostPaths: ['/views/current/archive'], containerPath: '/workspace/.agents/workspace/archive', readOnly: true },
+    { hostPaths: [path.join('/views/current', 'completed')], containerPath: '/workspace/.agents/workspace/completed', readOnly: true },
+    { hostPaths: [path.join('/views/current', 'blocked')], containerPath: '/workspace/.agents/workspace/blocked', readOnly: true },
+    { hostPaths: [path.join('/views/current', 'archive')], containerPath: '/workspace/.agents/workspace/archive', readOnly: true },
     {
       hostPaths: ['/repo/.agents/workspace/active/TASK-20260809-010203'],
       containerPath: '/workspace/.agents/workspace/active/TASK-20260809-010203',
@@ -46,10 +47,10 @@ test('branch-only topology mounts each isolated state read-only without covering
   assert.deepEqual(
     mounts.filter((mount) => mount.containerPath.startsWith('/workspace/.agents/workspace')),
     [
-      { hostPaths: ['/views/empty/active'], containerPath: '/workspace/.agents/workspace/active', readOnly: true },
-      { hostPaths: ['/views/empty/completed'], containerPath: '/workspace/.agents/workspace/completed', readOnly: true },
-      { hostPaths: ['/views/empty/blocked'], containerPath: '/workspace/.agents/workspace/blocked', readOnly: true },
-      { hostPaths: ['/views/empty/archive'], containerPath: '/workspace/.agents/workspace/archive', readOnly: true }
+      { hostPaths: [path.join('/views/empty', 'active')], containerPath: '/workspace/.agents/workspace/active', readOnly: true },
+      { hostPaths: [path.join('/views/empty', 'completed')], containerPath: '/workspace/.agents/workspace/completed', readOnly: true },
+      { hostPaths: [path.join('/views/empty', 'blocked')], containerPath: '/workspace/.agents/workspace/blocked', readOnly: true },
+      { hostPaths: [path.join('/views/empty', 'archive')], containerPath: '/workspace/.agents/workspace/archive', readOnly: true }
     ]
   );
 });
