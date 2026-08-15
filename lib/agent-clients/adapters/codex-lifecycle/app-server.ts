@@ -43,6 +43,8 @@ const LIFECYCLE_HOOKS = Object.freeze([
   Object.freeze({ event: 'SubagentStart', matcher: '', phase: 'subagent-start' }),
   Object.freeze({ event: 'SubagentStop', matcher: '', phase: 'subagent-stop' })
 ]);
+const DEFAULT_ROLLOUT_READ_ATTEMPTS = 81;
+const DEFAULT_ROLLOUT_RETRY_MS = 100;
 
 function object(value: unknown): JsonObject | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -455,8 +457,8 @@ async function resolveCodexThread(
       const rolloutRecords = await resolveCodexRolloutRecords(
         readResult,
         childThreadId,
-        options.rolloutReadAttempts ?? 10,
-        options.rolloutRetryMs ?? 50
+        options.rolloutReadAttempts ?? DEFAULT_ROLLOUT_READ_ATTEMPTS,
+        options.rolloutRetryMs ?? DEFAULT_ROLLOUT_RETRY_MS
       );
       resolution = parseCodexThreadResolution(readResult, rolloutRecords);
     } catch {

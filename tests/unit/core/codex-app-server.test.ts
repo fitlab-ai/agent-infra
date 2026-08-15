@@ -154,6 +154,47 @@ test('App Server resolver correlates request ids against a JSONL server', async 
   assert.equal(stop.status, 'completed');
 });
 
+test('App Server resolver waits for delayed rollout settings', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-'));
+  const server = path.join(root, 'server.mjs');
+  const rollout = path.join(root, 'rollout-child.jsonl');
+  fs.writeFileSync(rollout, JSON.stringify({ type: 'session_meta', payload: {
+    id: 'child', parent_thread_id: 'parent', agent_role: 'agent-infra-lifecycle-executor'
+  } }));
+  fs.writeFileSync(server, `
+    import fs from 'node:fs';
+    import readline from 'node:readline';
+    const rl = readline.createInterface({ input: process.stdin });
+    let scheduled = false;
+    rl.on('line', line => {
+      const message = JSON.parse(line);
+      if (!message.id) return;
+      let result = {};
+      if (message.method === 'thread/read') {
+        if (!scheduled) {
+          scheduled = true;
+          setTimeout(() => fs.appendFileSync(${JSON.stringify(rollout)},
+            '\\n' + JSON.stringify({ type: 'turn_context', payload: { model: 'model', effort: 'high' } })), 700);
+        }
+        result = { thread: {
+          id: 'child', parentThreadId: 'parent', forkedFromId: null,
+          path: ${JSON.stringify(rollout)},
+          source: { subAgent: { thread_spawn: { parent_thread_id: 'parent', depth: 1 } } },
+          turns: []
+        } };
+      }
+      if (message.method === 'thread/unsubscribe') result = { status: 'unsubscribed' };
+      process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
+    });
+  `);
+  const resolved = await resolveCodexThread('child', {
+    command: process.execPath, args: [server], timeoutMs: 2_000
+  });
+  assert.deepEqual(resolved.resolution.settings, {
+    type: 'app-settings', childThreadId: 'child', model: 'model', reasoningEffort: 'high'
+  });
+});
+
 test('App Server terminal resolver rejects a response for the wrong child thread', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-'));
   const server = path.join(root, 'server.mjs');
@@ -219,7 +260,10 @@ test('App Server resolver fails closed when rollout settings are unavailable', a
     });
   `);
   await assert.rejects(
-    resolveCodexThread('child', { command: process.execPath, args: [server], timeoutMs: 2_000 }),
+    resolveCodexThread('child', {
+      command: process.execPath, args: [server], timeoutMs: 2_000,
+      rolloutReadAttempts: 2, rolloutRetryMs: 1
+    }),
     /rollout metadata is unavailable/
   );
 });
