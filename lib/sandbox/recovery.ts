@@ -1162,8 +1162,12 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
 
   const existingWorktrees = worktreeDirCandidates(params.config, params.branch).filter((candidate) => fs.existsSync(candidate));
   if (existingWorktrees.length !== 1) {
+    const remediation = existingWorktrees.length === 0
+      ? `Restore the worktree for '${params.branch}' before recovering the container.`
+      : `Found ${existingWorktrees.map((candidate) => JSON.stringify(candidate)).join(', ')}; `
+        + 'keep the worktree in use, remove the stale directory, then retry.';
     throw new Error(
-      `SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID: expected exactly one existing worktree for '${params.branch}', found ${existingWorktrees.length}`
+      `SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID: expected exactly one existing worktree for '${params.branch}', found ${existingWorktrees.length}. ${remediation}`
     );
   }
   const beforeInspection = inspectWorktree(existingWorktrees[0]!);
@@ -1173,7 +1177,8 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
   const before: WorktreeSnapshot = beforeInspection.snapshot;
   if (before.branch !== params.branch) {
     throw new Error(
-      `SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID: expected branch '${params.branch}', found '${before.branch}'`
+      `SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID: expected branch '${params.branch}', found '${before.branch}'. `
+      + `Run 'git -C ${JSON.stringify(before.worktree)} checkout ${params.branch}' to restore the expected branch, then retry.`
     );
   }
 

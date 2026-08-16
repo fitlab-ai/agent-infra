@@ -808,6 +808,75 @@ test("container replacement fails before Docker writes when the worktree snapsho
   }
 });
 
+test("container replacement reports how to restore a detached worktree branch", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-detached-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const worktree = path.join(config.worktreeBase, "feature..demo");
+  const replacementCommands: string[][] = [];
+  const row = { name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 };
+  git(worktree, "checkout", "-q", "--detach");
+
+  try {
+    await assert.rejects(
+      () => ensureSandboxReady({
+        config,
+        engine: "native",
+        branch: "feature/demo",
+        row,
+        allowRecreate: true,
+        recreate: async () => {},
+        writeWarning: () => {},
+        deps: {
+          ensureControlBroker: async () => { throw new Error("SANDBOX_CONTROL_MANIFEST_VERSION_INVALID"); },
+          runVerbose: (_engine, _cmd, args) => { replacementCommands.push(args); }
+        }
+      }),
+      (error: unknown) => error instanceof Error
+        && error.message.includes("SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID")
+        && error.message.includes("checkout feature/demo")
+        && error.message.includes(JSON.stringify(worktree))
+    );
+    assert.deepEqual(replacementCommands, []);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("container replacement names both candidate dirs when the worktree is ambiguous", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-ambiguous-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const worktree = path.join(config.worktreeBase, "feature..demo");
+  const legacyWorktree = path.join(config.worktreeBase, "feature-demo");
+  const replacementCommands: string[][] = [];
+  const row = { name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 };
+  fs.mkdirSync(legacyWorktree, { recursive: true });
+
+  try {
+    await assert.rejects(
+      () => ensureSandboxReady({
+        config,
+        engine: "native",
+        branch: "feature/demo",
+        row,
+        allowRecreate: true,
+        recreate: async () => {},
+        writeWarning: () => {},
+        deps: {
+          ensureControlBroker: async () => { throw new Error("SANDBOX_CONTROL_MANIFEST_VERSION_INVALID"); },
+          runVerbose: (_engine, _cmd, args) => { replacementCommands.push(args); }
+        }
+      }),
+      (error: unknown) => error instanceof Error
+        && error.message.includes("SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID")
+        && error.message.includes(JSON.stringify(worktree))
+        && error.message.includes(JSON.stringify(legacyWorktree))
+    );
+    assert.deepEqual(replacementCommands, []);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("control broker readiness failure enters the explicit container replacement boundary", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-broker-recreate-"));
   let recreated = false;
