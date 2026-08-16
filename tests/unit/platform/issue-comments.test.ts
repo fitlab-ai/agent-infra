@@ -55,6 +55,14 @@ test('pr-review.md resolves to the round-1 PR review report title', () => {
   assert.match(chunk!.body, /## PR 审查报告（Round 1）/);
 });
 
+test('validation-run artifacts use their registered marker and round title', () => {
+  const [chunk] = chunkArtifactComment({
+    taskId: 'TASK-20260101-000001', artifact: 'validation-run-r2.md', agent: 'codex', body: '# Validation Evidence\n'
+  });
+  assert.equal(chunk!.marker, MARKERS.artifact('TASK-20260101-000001', 'validation-run-r2'));
+  assert.match(chunk!.body, /## 验证运行证据（Round 2）/);
+});
+
 test('artifact backfill adds a deterministic timeline hint without changing content', () => {
   const body = 'historical content\n';
   const [chunk] = chunkArtifactComment({

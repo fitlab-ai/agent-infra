@@ -46,7 +46,7 @@ import {
   startSandboxContainer,
   type SandboxRow
 } from './commands/list-running.ts';
-import { processIdentityMatches } from '../server/process-state.ts';
+import { processIdentityMatches, removePidFileIfMatches } from '../server/process-state.ts';
 import {
   appendSandboxControlAudit,
   cleanupStaleSandboxControlLease,
@@ -178,6 +178,78 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
   const extension = path.extname(fileURLToPath(import.meta.url));
   const internalCli = path.resolve(directory, '..', '..', 'bin', `internal-cli${extension}`);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as SandboxControlManifest;
+  const brokerPath = path.join(path.dirname(manifestPath), 'broker.json');
+  let brokerSnapshot: string | null = null;
+  let replacedBrokerRecord = false;
+  try {
+    brokerSnapshot = fs.readFileSync(brokerPath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  if (brokerSnapshot !== null) {
+    type ExistingBrokerRecord = {
+      version?: unknown;
+      pid?: unknown;
+      startTime?: unknown;
+      token?: unknown;
+      generation?: unknown;
+    };
+    let broker: ExistingBrokerRecord | null = null;
+    try {
+      broker = JSON.parse(brokerSnapshot) as ExistingBrokerRecord;
+    } catch {
+      // Malformed owner records are stale and replaced below.
+    }
+    const owner = broker !== null && typeof broker.pid === 'number' && typeof broker.startTime === 'string'
+      ? { version: 1 as const, pid: broker.pid, startTime: broker.startTime }
+      : null;
+    const live = owner !== null && processIdentityMatches(owner);
+    if (
+      live
+      && owner !== null
+      && broker !== null
+      && broker.version === 2
+      && broker.token === manifest.token
+      && broker.generation === manifest.generation
+    ) {
+      await waitForSandboxControlBrokerStatus({
+        statusDir: manifest.publicStatusDir,
+        generation: manifest.generation,
+        pid: owner.pid,
+        startTime: owner.startTime
+      });
+      return;
+    }
+    if (live && owner) {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        try {
+          if (fs.readFileSync(brokerPath, 'utf8') !== brokerSnapshot) {
+            return startSandboxControlBroker(repoRoot, manifestPath);
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            return startSandboxControlBroker(repoRoot, manifestPath);
+          }
+          throw error;
+        }
+        if (!processIdentityMatches(owner)) {
+          removePidFileIfMatches(brokerPath, brokerSnapshot);
+          return startSandboxControlBroker(repoRoot, manifestPath);
+        }
+      }
+      throw new Error('SANDBOX_CONTROL_BROKER_OWNER_ACTIVE');
+    }
+    replacedBrokerRecord = removePidFileIfMatches(brokerPath, brokerSnapshot);
+    if (!replacedBrokerRecord && fs.existsSync(brokerPath)) {
+      throw new Error('SANDBOX_CONTROL_BROKER_OWNER_TRANSITION');
+    }
+  }
+  if (replacedBrokerRecord) {
+    appendSandboxControlAudit(manifest, 'broker-observed-crash');
+    appendSandboxControlAudit(manifest, 'broker-restart');
+  }
   const child = spawn(
     process.execPath,
     nodeEntryArgs(internalCli, ['sandbox-control', 'serve', '--manifest', manifestPath]),
@@ -213,6 +285,9 @@ async function ensureSandboxControlBroker(params: {
   });
   if (!fs.existsSync(control.manifestPath)) return;
   const manifest = JSON.parse(fs.readFileSync(control.manifestPath, 'utf8')) as SandboxControlManifest;
+  if (manifest.version !== 3) {
+    throw new Error('SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; recreate the sandbox');
+  }
   if (cleanupStaleSandboxControlLease(manifest)) {
     appendSandboxControlAudit(manifest, 'lease-stale-cleanup');
   }
@@ -919,17 +994,16 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
   const startFn = deps?.start ?? startSandboxContainer;
   const warnings: string[] = [];
   let failure: Error | null = null;
-  if (deps?.ensureControlBroker) {
-    await deps.ensureControlBroker();
-  } else {
-    await ensureSandboxControlBroker({
-      config: params.config,
-      container: params.row.name,
-      workspace: params.workspace ?? { mode: 'branch-only' }
-    });
-  }
-
   try {
+    if (deps?.ensureControlBroker) {
+      await deps.ensureControlBroker();
+    } else {
+      await ensureSandboxControlBroker({
+        config: params.config,
+        container: params.row.name,
+        workspace: params.workspace ?? { mode: 'branch-only' }
+      });
+    }
     if (!params.row.running) {
       startFn(params.engine, params.row.name);
       const initial = assess({

@@ -71,6 +71,146 @@ test('sandbox broker startup resolves only after matching status is published', 
   }
 });
 
+test('sandbox broker startup replaces a stale owner without creating a concurrent live owner', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-'));
+  const channelDir = path.join(root, 'channel');
+  const statusDir = path.join(root, 'public');
+  const processingDir = path.join(root, 'processing');
+  const manifestPath = path.join(root, 'manifest.json');
+  fs.mkdirSync(channelDir);
+  fs.mkdirSync(statusDir);
+  fs.mkdirSync(processingDir);
+  const branch = initializeRepository(root);
+  fs.writeFileSync(manifestPath, `${JSON.stringify({
+    version: 3, repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature', branch,
+    mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'owner-secret', generation: 'owner-generation',
+    channelDir, publicStatusDir: statusDir, processingDir
+  })}\n`);
+  fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
+    version: 1, pid: 999_999_999, startTime: 'stale-owner'
+  })}\n`);
+  let brokerPid: number | null = null;
+  try {
+    await startSandboxControlBroker(root, manifestPath);
+    const first = JSON.parse(fs.readFileSync(path.join(root, 'broker.json'), 'utf8'));
+    brokerPid = first.pid;
+    const recoveryEvents = fs.readFileSync(path.join(root, 'audit.ndjson'), 'utf8')
+      .trim().split('\n').map((line) => JSON.parse(line).event);
+    assert.deepEqual(recoveryEvents.slice(0, 2), ['broker-observed-crash', 'broker-restart']);
+    await startSandboxControlBroker(root, manifestPath);
+    const second = JSON.parse(fs.readFileSync(path.join(root, 'broker.json'), 'utf8'));
+    assert.equal(second.pid, first.pid);
+    assert.equal(second.startTime, first.startTime);
+    fs.writeFileSync(manifestPath, `${JSON.stringify({
+      version: 3, repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature', branch,
+      mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'rotated-owner-secret', generation: 'rotated-generation',
+      channelDir, publicStatusDir: statusDir, processingDir
+    })}\n`);
+    await startSandboxControlBroker(root, manifestPath);
+    const rotated = JSON.parse(fs.readFileSync(path.join(root, 'broker.json'), 'utf8'));
+    brokerPid = rotated.pid;
+    assert.notEqual(rotated.pid, first.pid);
+    const status = JSON.parse(fs.readFileSync(path.join(statusDir, 'status.json'), 'utf8'));
+    assert.equal(status.generation, 'rotated-generation');
+    assert.equal(status.broker.pid, rotated.pid);
+  } finally {
+    if (brokerPid) {
+      try { process.kill(brokerPid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
+  }
+});
+
+test('sandbox control client tolerates a transient torn response but rejects stable malformed data', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-response-'));
+  const channelDir = path.join(root, 'channel');
+  const requestsDir = path.join(channelDir, 'requests');
+  const responsesDir = path.join(channelDir, 'responses');
+  const statusDir = path.join(root, 'public');
+  fs.mkdirSync(requestsDir, { recursive: true });
+  fs.mkdirSync(responsesDir);
+  fs.mkdirSync(statusDir);
+  fs.writeFileSync(path.join(statusDir, 'status.json'), `${JSON.stringify({
+    version: 1,
+    generation: 'response-generation',
+    broker: { pid: process.pid, startTime: 'test-broker' },
+    state: 'healthy',
+    reasonCode: null,
+    activeRequestId: null,
+    updatedAt: Date.now()
+  })}\n`);
+  const clientModule = path.resolve('lib/sandbox/control/client.ts');
+  const runClient = () => {
+    const script = `
+      import { requestSandboxControl } from ${JSON.stringify(clientModule)};
+      try {
+        const response = requestSandboxControl({
+          family: 'task-orchestration', args: ['01', 'commit-status'],
+          channelDir: ${JSON.stringify(channelDir)}, statusDir: ${JSON.stringify(statusDir)},
+          token: 'response-secret', generation: 'response-generation', timeoutMs: 2_000
+        });
+        process.stdout.write(JSON.stringify({ response }));
+      } catch (error) {
+        process.stdout.write(JSON.stringify({
+          error: error instanceof Error ? error.message : String(error),
+          code: error && typeof error === 'object' && 'detail' in error ? error.detail.code : null
+        }));
+        process.exitCode = 1;
+      }
+    `;
+    return spawn(process.execPath, ['--experimental-strip-types', '--input-type=module', '--eval', script], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+  };
+  const collect = async (child: ReturnType<typeof runClient>) => {
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+    const exitCode = await new Promise<number>((resolve) => child.once('close', (code) => resolve(code ?? 1)));
+    return { exitCode, stdout, stderr };
+  };
+  const responseFor = (id: string) => ({
+    version: 2, id, phase: 'rejected', exitCode: null, stdout: '',
+    stderr: 'SANDBOX_CONTROL_RESULT_UNKNOWN\n',
+    error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
+  });
+  try {
+    const transientClient = runClient();
+    const requestDeadline = Date.now() + 2_000;
+    while (!fs.readdirSync(requestsDir).some((name) => name.endsWith('.json')) && Date.now() < requestDeadline) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+    const transientId = fs.readdirSync(requestsDir).find((name) => name.endsWith('.json'))!.slice(0, -5);
+    const transientPath = path.join(responsesDir, `${transientId}.json`);
+    fs.writeFileSync(transientPath, `${JSON.stringify({
+      version: 2, id: transientId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
+    })}\n`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 75);
+    fs.writeFileSync(transientPath, '{"version":2,"id":"');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 75);
+    fs.writeFileSync(transientPath, `${JSON.stringify(responseFor(transientId))}\n`);
+    const transient = await collect(transientClient);
+    assert.equal(transient.exitCode, 0, transient.stderr || transient.stdout);
+    assert.equal(JSON.parse(transient.stdout).response.error.code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
+
+    const stableClient = runClient();
+    while (fs.readdirSync(requestsDir).filter((name) => name.endsWith('.json')).length < 2) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+    const stableName = fs.readdirSync(requestsDir).filter((name) => name.endsWith('.json'))
+      .find((name) => !name.startsWith(transientId))!;
+    fs.writeFileSync(path.join(responsesDir, stableName), '{"version":2');
+    const stable = await collect(stableClient);
+    assert.equal(stable.exitCode, 1);
+    assert.equal(JSON.parse(stable.stdout).code, 'SANDBOX_CONTROL_RESPONSE_INVALID');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('sandbox control client and broker exchange a task-bound response', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-roundtrip-'));
   const channelDir = path.join(root, 'channel');

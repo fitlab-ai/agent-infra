@@ -14,6 +14,8 @@ import {
 import { readSandboxControlStatus } from './state.ts';
 import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 
+const SANDBOX_CONTROL_RESPONSE_SETTLE_MS = 250;
+
 export class SandboxControlClientError extends Error {
   readonly detail: SandboxControlError;
   readonly accepted: boolean;
@@ -95,9 +97,33 @@ function exchangeSandboxControl(request: SandboxControlRequest, params: Readonly
   fs.renameSync(temporary, requestPath);
   const deadline = Date.now() + (params.timeoutMs ?? 30_000);
   let accepted = false;
+  let malformedResponseRaw: string | null = null;
+  let malformedResponseObservedAt = 0;
   while (Date.now() < deadline) {
     if (fs.existsSync(responsePath)) {
-      const response = parseResponse(fs.readFileSync(responsePath, 'utf8'), request.id);
+      let raw: string;
+      try {
+        raw = fs.readFileSync(responsePath, 'utf8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      let response: SandboxControlResponse;
+      try {
+        response = parseResponse(raw, request.id);
+        malformedResponseRaw = null;
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        const now = Date.now();
+        if (malformedResponseRaw !== raw) {
+          malformedResponseRaw = raw;
+          malformedResponseObservedAt = now;
+        } else if (now - malformedResponseObservedAt >= SANDBOX_CONTROL_RESPONSE_SETTLE_MS) {
+          clientError('SANDBOX_CONTROL_RESPONSE_INVALID', 'broker response remained malformed', false, accepted);
+        }
+        sleep(25);
+        continue;
+      }
       if (response.phase === 'accepted') {
         accepted = true;
       } else {

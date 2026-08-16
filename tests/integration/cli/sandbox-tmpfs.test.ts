@@ -609,6 +609,66 @@ test("hard recovery failure requires explicit container replacement authorizatio
   }
 });
 
+test("control broker readiness failure enters the explicit container replacement boundary", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-broker-recreate-"));
+  let recreated = false;
+  const replacementCommands: string[][] = [];
+  const config = recoveryFixtureConfig(tmpDir);
+  const inspect = () => JSON.stringify([{
+    Id: "fixture-container-id",
+    Config: { Labels: BRANCH_ONLY_LABELS },
+    Mounts: recoveryFixtureMounts(config)
+  }]);
+  const deps = {
+    ensureControlBroker: async () => {
+      throw new Error("SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; recreate the sandbox");
+    },
+    run: () => inspect(),
+    runOk: () => true,
+    runVerbose: (_engine: string, _cmd: string, args: string[]) => {
+      replacementCommands.push(args);
+    },
+    fetchRows: () => ({
+      running: [{ name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 }],
+      nonRunning: []
+    })
+  };
+  const row = {
+    name: "demo-dev-feature..demo",
+    status: "Up",
+    branch: "feature/demo",
+    running: true,
+    index: 1
+  };
+
+  try {
+    await assert.rejects(
+      () => ensureSandboxReady({ config, engine: "native", branch: "feature/demo", row, deps }),
+      /Re-run with --recreate/
+    );
+    assert.deepEqual(replacementCommands, []);
+
+    const result = await ensureSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      row,
+      allowRecreate: true,
+      recreate: async () => { recreated = true; },
+      writeWarning: () => {},
+      deps
+    });
+    assert.equal(recreated, true);
+    assert.deepEqual(replacementCommands, [
+      ["stop", "demo-dev-feature..demo"],
+      ["rm", "demo-dev-feature..demo"]
+    ]);
+    assert.equal(result.path, "recreated");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("fresh readiness restarts once when OrbStack workspace mounts are still settling", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-readiness-orbstack-"));
   const config = recoveryFixtureConfig(tmpDir);
