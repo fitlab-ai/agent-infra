@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { requestSandboxControl, requestSandboxTaskCreate } from '../../../lib/sandbox/control/client.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
+import { isProcessAlive } from '../../../lib/server/process-state.ts';
 
 function waitForFile(filePath: string, timeoutMs: number): void {
   const deadline = Date.now() + timeoutMs;
@@ -28,6 +29,20 @@ function waitForHealthyStatus(statusDir: string, timeoutMs: number): void {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
   }
   throw new Error(`Timed out waiting for healthy status in ${statusDir}`);
+}
+
+async function stopBroker(pid: number): Promise<void> {
+  try { process.kill(pid, 'SIGTERM'); } catch { return; }
+  let deadline = Date.now() + 2_000;
+  while (isProcessAlive(pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  if (!isProcessAlive(pid)) return;
+  try { process.kill(pid, 'SIGKILL'); } catch { return; }
+  deadline = Date.now() + 2_000;
+  while (isProcessAlive(pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }
 
 function initializeRepository(root: string): string {
@@ -65,7 +80,7 @@ test('sandbox broker startup resolves only after matching status is published', 
     assert.equal(status.broker.pid, broker.pid);
   } finally {
     if (brokerPid) {
-      try { process.kill(brokerPid, 'SIGTERM'); } catch { /* already gone */ }
+      await stopBroker(brokerPid);
     }
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   }
@@ -115,7 +130,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
     assert.equal(status.broker.pid, rotated.pid);
   } finally {
     if (brokerPid) {
-      try { process.kill(brokerPid, 'SIGTERM'); } catch { /* already gone */ }
+      await stopBroker(brokerPid);
     }
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   }
