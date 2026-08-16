@@ -295,6 +295,11 @@ test('custom tools remain independent from Agent Client selection', () => {
 test('recovery treats a stale runtime signature and disabled client mount as hard failures', () => {
   const findings = classifySandboxRecovery({
     identityOk: true,
+    containerIdValid: true,
+    expectedBranch: 'feature/demo',
+    actualBranch: 'feature/demo',
+    expectedWorkspace: { mode: 'branch-only' },
+    actualWorkspace: { mode: 'branch-only' },
     runtimeCapabilityOk: false,
     unexpectedCapabilityMounts: ['/home/devuser/.claude'],
     mounts: [],

@@ -163,6 +163,7 @@ test("worktree safety snapshot binds staged, unstaged, and unusual untracked con
   try {
     const clean = safety.inspectWorktree(fixture.worktree);
     assert.equal(clean.status, "clean");
+    assert.equal(clean.snapshot.branch, "feature/safe-delete");
 
     fs.writeFileSync(path.join(fixture.worktree, "tracked.txt"), "first change\n", "utf8");
     const first = safety.inspectWorktree(fixture.worktree);

@@ -9,7 +9,8 @@ import {
   sandboxLabel,
   sandboxRuntimeCapabilityLabel,
   sandboxTaskIdLabel,
-  sandboxWorkspaceModeLabel
+  sandboxWorkspaceModeLabel,
+  worktreeDirCandidates
 } from './constants.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import {
@@ -30,8 +31,10 @@ import {
 import {
   parseSandboxWorkspaceIdentity,
   sameSandboxWorkspaceIdentity,
+  type SandboxContainerWorkspaceIdentity,
   type SandboxWorkspaceIdentity
 } from './workspace-identity.ts';
+import { inspectWorktree, type WorktreeSnapshot } from './worktree-safety.ts';
 import { runEngine, runOkEngine, runVerboseEngine } from './shell.ts';
 import {
   declaredTmpfsSeedEntries,
@@ -60,6 +63,7 @@ import {
 
 export type SandboxRecoveryFinding = {
   repairKind: 'permissions' | 'missing-seed' | 'builtin-link' | 'hard-failure';
+  code?: string;
   message: string;
   path?: string;
   seed?: TmpfsSeedEntry;
@@ -77,6 +81,11 @@ type SandboxAgentClientCheckSnapshot = {
 
 export type SandboxRecoverySnapshot = {
   identityOk: boolean;
+  containerIdValid: boolean;
+  expectedBranch: string;
+  actualBranch: string | null;
+  expectedWorkspace: SandboxWorkspaceIdentity;
+  actualWorkspace: SandboxContainerWorkspaceIdentity;
   runtimeCapabilityOk?: boolean;
   unexpectedCapabilityMounts?: string[];
   mounts: Array<{
@@ -286,7 +295,7 @@ async function ensureSandboxControlBroker(params: {
   if (!fs.existsSync(control.manifestPath)) return;
   const manifest = JSON.parse(fs.readFileSync(control.manifestPath, 'utf8')) as SandboxControlManifest;
   if (manifest.version !== 3) {
-    throw new Error('SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; recreate the sandbox');
+    throw new Error('SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; container-only recreation is required');
   }
   if (cleanupStaleSandboxControlLease(manifest)) {
     appendSandboxControlAudit(manifest, 'lease-stale-cleanup');
@@ -342,9 +351,22 @@ function findingKey(finding: SandboxRecoveryFinding): string {
 export function classifySandboxRecovery(snapshot: SandboxRecoverySnapshot): SandboxRecoveryFinding[] {
   const findings: SandboxRecoveryFinding[] = [];
   if (!snapshot.identityOk) {
+    const branchOnly = snapshot.containerIdValid
+      && snapshot.actualBranch === snapshot.expectedBranch
+      && snapshot.expectedWorkspace.mode === 'task-bound'
+      && snapshot.actualWorkspace.mode === 'branch-only';
+    const expectedIdentity = snapshot.expectedWorkspace.mode === 'task-bound'
+      ? `task-bound:${snapshot.expectedWorkspace.taskId}`
+      : snapshot.expectedWorkspace.mode;
+    const actualIdentity = snapshot.actualWorkspace.mode === 'task-bound'
+      ? `task-bound:${snapshot.actualWorkspace.taskId}`
+      : snapshot.actualWorkspace.mode;
     findings.push({
       repairKind: 'hard-failure',
-      message: 'Container identity does not match the requested sandbox branch.'
+      code: branchOnly ? 'SANDBOX_CONTROL_BRANCH_ONLY' : 'SANDBOX_WORKSPACE_IDENTITY_CONFLICT',
+      message: branchOnly
+        ? `Container is branch-only but the requested sandbox is ${expectedIdentity}.`
+        : `Container identity ${actualIdentity} on branch ${snapshot.actualBranch ?? 'unknown'} does not match requested ${expectedIdentity} on branch ${snapshot.expectedBranch}.`
     });
   }
   if (snapshot.runtimeCapabilityOk === false) {
@@ -752,8 +774,12 @@ export function collectSandboxRecoverySnapshot(params: {
   });
 
   return {
-    identityOk: typeof inspection.Id === 'string'
-      && inspection.Id.length > 0
+    containerIdValid: typeof inspection.Id === 'string' && inspection.Id.length > 0,
+    expectedBranch: params.branch,
+    actualBranch: typeof branchLabel === 'string' ? branchLabel : null,
+    expectedWorkspace: workspace,
+    actualWorkspace: containerWorkspace,
+    identityOk: typeof inspection.Id === 'string' && inspection.Id.length > 0
       && branchLabel === params.branch
       && sameSandboxWorkspaceIdentity(containerWorkspace, workspace),
     runtimeCapabilityOk: enforceCanonicalPlan
@@ -911,7 +937,7 @@ function repairFindings(params: {
 }
 
 function describeFindings(findings: SandboxRecoveryFinding[]): string {
-  return findings.map((finding) => finding.message).join(' ');
+  return findings.map((finding) => finding.code ? `${finding.code}: ${finding.message}` : finding.message).join(' ');
 }
 
 function assess(params: {
@@ -1127,42 +1153,78 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
 
   const dataBoundary =
     'The existing container writable layer, ordinary /tmp data, processes, tmux sessions, and RAM state may be lost by replacement; worktree and host-managed sandbox data are preserved.';
+  const recoveryTarget = params.workspace?.mode === 'task-bound'
+    ? params.workspace.taskId
+    : params.branch;
   if (!params.allowRecreate || !params.recreate) {
-    throw new Error(`Sandbox recovery failed: ${failure.message} ${dataBoundary} Re-run with --recreate to authorize container-only replacement.`);
+    throw new Error(`Sandbox recovery failed: ${failure.message} ${dataBoundary} Run 'ai sandbox start --recreate ${recoveryTarget}' on the host to authorize container-only replacement.`);
+  }
+
+  const existingWorktrees = worktreeDirCandidates(params.config, params.branch).filter((candidate) => fs.existsSync(candidate));
+  if (existingWorktrees.length !== 1) {
+    throw new Error(
+      `SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID: expected exactly one existing worktree for '${params.branch}', found ${existingWorktrees.length}`
+    );
+  }
+  const beforeInspection = inspectWorktree(existingWorktrees[0]!);
+  if (beforeInspection.status === 'failed') {
+    throw new Error(`SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID: ${beforeInspection.message}`);
+  }
+  const before: WorktreeSnapshot = beforeInspection.snapshot;
+  if (before.branch !== params.branch) {
+    throw new Error(
+      `SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID: expected branch '${params.branch}', found '${before.branch}'`
+    );
   }
 
   const warning = `Sandbox recovery failed in place. Replacing only the container. ${dataBoundary}`;
   warnings.push(warning);
   (params.writeWarning ?? ((message) => process.stderr.write(`${message}\n`)))(warning);
   const runVerboseFn = deps?.runVerbose ?? runVerboseEngine;
-  if (params.row.running) {
-    runVerboseFn(params.engine, 'docker', ['stop', params.row.name]);
-  }
-  runVerboseFn(params.engine, 'docker', ['rm', params.row.name]);
-  await params.recreate(params.branch);
+  let replacementResult: SandboxReadyResult | null = null;
+  let replacementFailure: unknown = null;
+  try {
+    if (params.row.running) {
+      runVerboseFn(params.engine, 'docker', ['stop', params.row.name]);
+    }
+    runVerboseFn(params.engine, 'docker', ['rm', params.row.name]);
+    await params.recreate(params.branch);
 
-  const rows = (deps?.fetchRows ?? fetchSandboxRows)(
-    params.engine,
-    sandboxLabel(params.config),
-    sandboxBranchLabel(params.config)
-  );
-  const replacement = selectSandboxContainer(
-    [...rows.running, ...rows.nonRunning],
-    containerNameCandidates(params.config, params.branch)
-  );
-  if (!replacement?.running) {
-    throw new Error('Replacement sandbox container was not found in a running state.');
+    const rows = (deps?.fetchRows ?? fetchSandboxRows)(
+      params.engine,
+      sandboxLabel(params.config),
+      sandboxBranchLabel(params.config)
+    );
+    const replacement = selectSandboxContainer(
+      [...rows.running, ...rows.nonRunning],
+      containerNameCandidates(params.config, params.branch)
+    );
+    if (!replacement?.running) {
+      throw new Error('Replacement sandbox container was not found in a running state.');
+    }
+    const final = assess({
+      config: params.config,
+      engine: params.engine,
+      branch: params.branch,
+      workspace: params.workspace,
+      container: replacement.name,
+      deps
+    });
+    if (final.findings.length > 0) {
+      throw new Error(`Replacement sandbox readiness check failed: ${describeFindings(final.findings)}`);
+    }
+    replacementResult = { container: replacement.name, path: 'recreated', warnings };
+  } catch (error) {
+    replacementFailure = error;
   }
-  const final = assess({
-    config: params.config,
-    engine: params.engine,
-    branch: params.branch,
-    workspace: params.workspace,
-    container: replacement.name,
-    deps
-  });
-  if (final.findings.length > 0) {
-    throw new Error(`Replacement sandbox readiness check failed: ${describeFindings(final.findings)}`);
+
+  const afterInspection = inspectWorktree(before.worktree);
+  if (afterInspection.status === 'failed' || afterInspection.snapshot.identity !== before.identity) {
+    const detail = afterInspection.status === 'failed'
+      ? afterInspection.message
+      : `snapshot changed from ${before.identity} to ${afterInspection.snapshot.identity}`;
+    throw new Error(`SANDBOX_RECOVERY_WORKTREE_CHANGED: ${detail}`, replacementFailure === null ? undefined : { cause: replacementFailure });
   }
-  return { container: replacement.name, path: 'recreated', warnings };
+  if (replacementFailure !== null) throw replacementFailure;
+  return replacementResult!;
 }

@@ -83,7 +83,7 @@ test('branch-only sandboxes and incorrect tokens fail closed', () => {
   };
   assert.throws(
     () => validateSandboxControlRequest(request, { ...manifest, mode: 'branch-only', taskId: null }, { now: 2_000 }),
-    /BRANCH_ONLY/
+    /SANDBOX_CONTROL_BRANCH_ONLY: .*ai sandbox start --recreate <task-ref-or-correct-branch>/
   );
   assert.throws(
     () => validateSandboxControlRequest({ ...request, token: 'wrong' }, manifest, { now: 2_000 }),
@@ -180,14 +180,14 @@ test('control broker ownership is acquired exclusively', async () => {
   }
 });
 
-test('control broker rejects legacy manifests with sandbox refresh guidance', async () => {
+test('control broker rejects legacy manifests with container-only recreation guidance', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-legacy-manifest-'));
   const manifestPath = path.join(root, 'manifest.json');
   fs.writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, version: 1, worktreeRoot: undefined })}\n`);
   try {
     await assert.rejects(
       serveSandboxControl(manifestPath),
-      /SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; recreate the sandbox/
+      /SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; container-only recreation is required/
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

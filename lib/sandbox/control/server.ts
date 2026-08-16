@@ -35,7 +35,7 @@ function readManifest(manifestPath: string): SandboxControlManifest {
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Partial<SandboxControlManifest>;
   if (manifest.version !== 3) {
-    throw new Error('SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; recreate the sandbox');
+    throw new Error('SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; container-only recreation is required');
   }
   if (typeof manifest.repoRoot !== 'string' || typeof manifest.worktreeRoot !== 'string'
     || typeof manifest.channelDir !== 'string' || typeof manifest.publicStatusDir !== 'string'

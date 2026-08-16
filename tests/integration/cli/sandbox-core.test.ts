@@ -1502,3 +1502,34 @@ test("sandbox start resolves a task short id to its branch container", onPlatfor
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("sandbox create identity conflict recommends container-only task recovery", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-identity-conflict-"));
+  const taskId = "TASK-20260301-000001";
+  const branch = "registry-branch";
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: "demo-dev-registry-branch"
+    });
+    fs.writeFileSync(path.join(fixture.repoDir, "README.md"), "fixture\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: fixture.repoDir, env: gitSafeEnv(), stdio: "ignore" });
+    execFileSync(
+      "git",
+      ["-c", "user.name=Sandbox Test", "-c", "user.email=sandbox@example.com", "commit", "-q", "-m", "fixture"],
+      { cwd: fixture.repoDir, env: gitSafeEnv(), stdio: "ignore" }
+    );
+    writeShortIdRegistry(fixture.repoDir, { "1": taskId });
+    writeActiveTaskBranch(fixture.repoDir, taskId, branch);
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["create", taskId, "--no-refresh"]);
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.notEqual(result.status, 0);
+    assert.match(output, new RegExp(`SANDBOX_WORKSPACE_IDENTITY_CONFLICT[\\s\\S]*ai sandbox start --recreate ${taskId}`));
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

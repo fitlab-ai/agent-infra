@@ -1249,9 +1249,13 @@ export async function create(args: string[]): Promise<void> {
                 const requestedDescription = target.workspace.mode === 'task-bound'
                   ? `task-bound:${target.workspace.taskId}`
                   : target.workspace.mode;
+                const recoveryTarget = target.workspace.mode === 'task-bound'
+                  ? target.workspace.taskId
+                  : branch;
                 throw new Error(
                   `SANDBOX_WORKSPACE_IDENTITY_CONFLICT: container '${name}' is ${existingDescription}, `
-                  + `but this request is ${requestedDescription}. Run 'ai sandbox rm ${branch}' and retry.`
+                  + `but this request is ${requestedDescription}. `
+                  + `Run 'ai sandbox start --recreate ${recoveryTarget}' on the host, then retry.`
                 );
               }
             }

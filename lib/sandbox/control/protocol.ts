@@ -103,7 +103,10 @@ export function validateSandboxControlRequest(
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
   }
   if (manifest.mode !== 'task-bound' || !manifest.taskId) {
-    fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot coordinate tasks');
+    fail(
+      'SANDBOX_CONTROL_BRANCH_ONLY',
+      "branch-only sandboxes cannot coordinate tasks; return to the host and run 'ai sandbox start --recreate <task-ref-or-correct-branch>'"
+    );
   }
   if (request.family === 'task-orchestration'
     && request.args.some((arg) => arg === '--git-worktree-root' || arg.startsWith('--git-worktree-root='))) {

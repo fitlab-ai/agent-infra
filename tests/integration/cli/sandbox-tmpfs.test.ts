@@ -33,9 +33,23 @@ const BRANCH_ONLY_LABELS = {
   "demo.sandbox.workspace-mode": "branch-only"
 };
 
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, {
+    cwd,
+    env: gitSafeEnv(),
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  }).trim();
+}
+
 function healthyRecoverySnapshot(): SandboxRecoverySnapshot {
   return {
     identityOk: true,
+    containerIdValid: true,
+    expectedBranch: "feature/demo",
+    actualBranch: "feature/demo",
+    expectedWorkspace: { mode: "branch-only" },
+    actualWorkspace: { mode: "branch-only" },
     mounts: [
       {
         path: "/home/devuser/.codex",
@@ -106,7 +120,6 @@ function recoveryFixtureConfig(tmpDir: string): SandboxConfig {
   for (const directory of [
     config.repoRoot,
     path.join(config.repoRoot, ".agents", "workspace"),
-    path.join(config.worktreeBase, branchDir),
     path.join(config.shareBase, "common"),
     path.join(config.shareBase, "branches", branchDir),
     path.join(config.shellConfigBase, branchDir),
@@ -114,6 +127,12 @@ function recoveryFixtureConfig(tmpDir: string): SandboxConfig {
   ]) {
     fs.mkdirSync(directory, { recursive: true });
   }
+  git(config.repoRoot, "init", "-q", "-b", "main");
+  fs.writeFileSync(path.join(config.repoRoot, "tracked.txt"), "initial\n", "utf8");
+  git(config.repoRoot, "add", "tracked.txt");
+  git(config.repoRoot, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox@example.com", "commit", "-q", "-m", "initial");
+  fs.mkdirSync(config.worktreeBase, { recursive: true });
+  git(config.repoRoot, "worktree", "add", "-q", "-b", "feature/demo", path.join(config.worktreeBase, branchDir), "HEAD");
   fs.writeFileSync(
     path.join(config.home, ".agent-infra", "sandboxes", "codex", project, branchDir, "config.toml"),
     "model = 'runtime-drift-must-survive'\n",
@@ -170,6 +189,24 @@ test("recovery classification preserves healthy running seed content drift", () 
   const snapshot = healthyRecoverySnapshot();
 
   assert.deepEqual(classifySandboxRecovery(snapshot), []);
+});
+
+test("recovery classification exposes stable workspace identity error codes", () => {
+  const branchOnly = healthyRecoverySnapshot();
+  branchOnly.identityOk = false;
+  branchOnly.expectedWorkspace = { mode: "task-bound", taskId: "TASK-20260814-223553", shortId: "7" };
+  assert.equal(classifySandboxRecovery(branchOnly)[0]?.code, "SANDBOX_CONTROL_BRANCH_ONLY");
+
+  const taskMismatch = healthyRecoverySnapshot();
+  taskMismatch.identityOk = false;
+  taskMismatch.expectedWorkspace = { mode: "task-bound", taskId: "TASK-20260814-223553", shortId: "7" };
+  taskMismatch.actualWorkspace = { mode: "task-bound", taskId: "TASK-20260814-000000" };
+  assert.equal(classifySandboxRecovery(taskMismatch)[0]?.code, "SANDBOX_WORKSPACE_IDENTITY_CONFLICT");
+
+  const legacy = healthyRecoverySnapshot();
+  legacy.identityOk = false;
+  legacy.actualWorkspace = { mode: "legacy-invalid" };
+  assert.equal(classifySandboxRecovery(legacy)[0]?.code, "SANDBOX_WORKSPACE_IDENTITY_CONFLICT");
 });
 
 test("tmpfs seed targets cannot escape the configured tool mount", () => {
@@ -528,7 +565,7 @@ test("recovery rejects mount and identity hard failures before writes", async ()
               runVerbose: () => { writes += 1; }
             }
           }),
-          /Re-run with --recreate/,
+          /ai sandbox start --recreate feature\/demo/,
           `${state}: ${scenario.name}`
         );
         assert.equal(writes, 0, `${state}: ${scenario.name} must fail before runtime repair writes`);
@@ -581,7 +618,7 @@ test("hard recovery failure requires explicit container replacement authorizatio
   try {
     await assert.rejects(
       () => ensureSandboxReady({ config, engine: "native", branch: "feature/demo", row, deps }),
-      /Re-run with --recreate/
+      /ai sandbox start --recreate feature\/demo/
     );
     assert.equal(writes, 0, "hard mount failures must not mutate the running container");
 
@@ -609,6 +646,168 @@ test("hard recovery failure requires explicit container replacement authorizatio
   }
 });
 
+test("task-bound recovery keeps the branch-only code and recommends the full task id", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-task-bound-hint-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  let writes = 0;
+  const taskId = "TASK-20260814-223553";
+  const activeDir = path.join(config.repoRoot, ".agents", "workspace", "active");
+  fs.mkdirSync(path.join(activeDir, taskId), { recursive: true });
+  fs.writeFileSync(path.join(activeDir, ".short-ids.json"), `${JSON.stringify({ version: 1, ids: { "7": taskId } })}\n`, "utf8");
+  fs.writeFileSync(path.join(activeDir, taskId, "task.md"), `---\nid: ${taskId}\nbranch: feature/demo\n---\n`, "utf8");
+
+  try {
+    await assert.rejects(
+      () => ensureSandboxReady({
+        config,
+        engine: "native",
+        branch: "feature/demo",
+        workspace: { mode: "task-bound", taskId, shortId: "7" },
+        row: { name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 },
+        deps: {
+          ensureControlBroker: async () => {},
+          run: () => JSON.stringify([{
+            Id: "fixture-container-id",
+            Config: { Labels: BRANCH_ONLY_LABELS },
+            Mounts: recoveryFixtureMounts(config)
+          }]),
+          runOk: () => true,
+          runVerbose: () => { writes += 1; }
+        }
+      }),
+      new RegExp(`SANDBOX_CONTROL_BRANCH_ONLY[\\s\\S]*ai sandbox start --recreate ${taskId}`)
+    );
+    assert.equal(writes, 0);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("container replacement snapshots the worktree before Docker writes and rejects drift", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-worktree-drift-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const worktree = path.join(config.worktreeBase, "feature..demo");
+  const replacementCommands: string[][] = [];
+  let recreated = false;
+  const inspect = () => JSON.stringify([{
+    Id: "fixture-container-id",
+    Config: { Labels: BRANCH_ONLY_LABELS },
+    Mounts: recoveryFixtureMounts(config).map((mount) =>
+      mount.Destination === "/home/devuser/.codex"
+        ? { ...mount, Type: recreated ? "tmpfs" : "bind" }
+        : mount
+    )
+  }]);
+  const row = { name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 };
+
+  try {
+    fs.writeFileSync(path.join(worktree, "dirty.txt"), "before\n", "utf8");
+    await assert.rejects(
+      () => ensureSandboxReady({
+        config,
+        engine: "native",
+        branch: "feature/demo",
+        row,
+        allowRecreate: true,
+        recreate: async () => {
+          recreated = true;
+          fs.writeFileSync(path.join(worktree, "dirty.txt"), "after\n", "utf8");
+        },
+        writeWarning: () => {},
+        deps: {
+          ensureControlBroker: async () => {},
+          run: () => inspect(),
+          runOk: () => true,
+          runVerbose: (_engine, _cmd, args) => { replacementCommands.push(args); },
+          fetchRows: () => ({ running: [row], nonRunning: [] })
+        }
+      }),
+      /SANDBOX_RECOVERY_WORKTREE_CHANGED/
+    );
+    assert.deepEqual(replacementCommands, [
+      ["stop", "demo-dev-feature..demo"],
+      ["rm", "demo-dev-feature..demo"]
+    ]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("container replacement preserves the original failure when the worktree is unchanged", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-original-failure-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const worktree = path.join(config.worktreeBase, "feature..demo");
+  const before = git(worktree, "status", "--short", "--branch");
+  const replacementCommands: string[][] = [];
+  const originalFailure = new Error("fixture replacement failed");
+  const row = { name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 };
+
+  try {
+    await assert.rejects(
+      () => ensureSandboxReady({
+        config,
+        engine: "native",
+        branch: "feature/demo",
+        row,
+        allowRecreate: true,
+        recreate: async () => { throw originalFailure; },
+        writeWarning: () => {},
+        deps: {
+          ensureControlBroker: async () => {},
+          run: () => JSON.stringify([{
+            Id: "fixture-container-id",
+            Config: { Labels: BRANCH_ONLY_LABELS },
+            Mounts: recoveryFixtureMounts(config).map((mount) =>
+              mount.Destination === "/home/devuser/.codex" ? { ...mount, Type: "bind" } : mount
+            )
+          }]),
+          runOk: () => true,
+          runVerbose: (_engine, _cmd, args) => { replacementCommands.push(args); }
+        }
+      }),
+      (error: unknown) => error === originalFailure
+    );
+    assert.deepEqual(replacementCommands, [
+      ["stop", "demo-dev-feature..demo"],
+      ["rm", "demo-dev-feature..demo"]
+    ]);
+    assert.equal(git(worktree, "status", "--short", "--branch"), before);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("container replacement fails before Docker writes when the worktree snapshot is invalid", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-worktree-invalid-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const worktree = path.join(config.worktreeBase, "feature..demo");
+  const replacementCommands: string[][] = [];
+  const row = { name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 };
+  fs.rmSync(worktree, { recursive: true, force: true });
+
+  try {
+    await assert.rejects(
+      () => ensureSandboxReady({
+        config,
+        engine: "native",
+        branch: "feature/demo",
+        row,
+        allowRecreate: true,
+        recreate: async () => {},
+        writeWarning: () => {},
+        deps: {
+          ensureControlBroker: async () => { throw new Error("SANDBOX_CONTROL_MANIFEST_VERSION_INVALID"); },
+          runVerbose: (_engine, _cmd, args) => { replacementCommands.push(args); }
+        }
+      }),
+      /SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID/
+    );
+    assert.deepEqual(replacementCommands, []);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("control broker readiness failure enters the explicit container replacement boundary", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-broker-recreate-"));
   let recreated = false;
@@ -621,7 +820,7 @@ test("control broker readiness failure enters the explicit container replacement
   }]);
   const deps = {
     ensureControlBroker: async () => {
-      throw new Error("SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; recreate the sandbox");
+      throw new Error("SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; container-only recreation is required");
     },
     run: () => inspect(),
     runOk: () => true,
@@ -644,7 +843,7 @@ test("control broker readiness failure enters the explicit container replacement
   try {
     await assert.rejects(
       () => ensureSandboxReady({ config, engine: "native", branch: "feature/demo", row, deps }),
-      /Re-run with --recreate/
+      /ai sandbox start --recreate feature\/demo/
     );
     assert.deepEqual(replacementCommands, []);
 

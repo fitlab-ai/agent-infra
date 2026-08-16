@@ -123,7 +123,7 @@ ai sandbox create feature/proxy --inherit-proxy
 
 创建重试包含两层身份：重复 outer request ID 即使在 broker 重启后也会被拒绝；超时后调用方使用新的 outer ID，但必须复用原不可变 candidate 文件和业务幂等 key。语义相同的 JSON 返回原任务 `no-op`，任一字段值变化均 fail closed。平台失败时保留本地任务和短号，并返回结构化 warning。
 
-任务生命周期与编排命令通过每容器独立的控制通道执行，宿主 broker 会把每个请求重新绑定到容器标签中的完整 task ID。branch-only 容器、identity 不匹配、未知命令族和旧共享 workspace 容器都会 fail closed。`ai sandbox ls` 通过 `WORKSPACE` 与 `TASK` 列展示身份，`ai sandbox show` 展示同一份基于标签的事实。`legacy-invalid` 表示必须显式重建容器；同一分支切换身份时，需先执行 `ai sandbox rm <branch>`，再执行 `ai sandbox create <task-ref>`。
+任务生命周期与编排命令通过每容器独立的控制通道执行，宿主 broker 会把每个请求重新绑定到容器标签中的完整 task ID。branch-only 容器、identity 不匹配、未知命令族和旧共享 workspace 容器都会 fail closed。`ai sandbox ls` 通过 `WORKSPACE` 与 `TASK` 列展示身份，`ai sandbox show` 展示同一份基于标签的事实。遇到 `legacy-invalid` 或同一分支的 identity transition 时，在宿主执行 `ai sandbox start --recreate <task-ref-or-branch>`，然后重试原命令。该操作只替换容器并保留现有 worktree。
 
 控制 broker 会向容器发布只读健康状态，并在一个授权请求由独立、可追踪的进程组执行期间持续存活。请求携带每沙箱 generation 和两秒绝对受理截止时间；broker 发布 `healthy`、`busy` 或 `parked`，在 acceptance 前拒绝过期或 generation 不匹配的请求，并在恢复时先终止遗留进程树再接收新工作。调用方可以用新 request ID 重试 acceptance 前的 `BUSY` 或超时拒绝；一旦请求已被接受而最终结果未知，则不得自动重试。
 
@@ -157,7 +157,7 @@ tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/
 
 所有删除路径都会在破坏性清理前检查全部目标 worktree。存在 staged、unstaged、冲突或非 ignored untracked 修改时，批量删除、purge、prune、`--yes` 和其他非交互删除都会 fail closed。只有交互式 `ai sandbox rm <branch>` 可以在展示精确 dirty snapshot 后，通过一次默认否定的独立确认放弃修改；删除前 snapshot 一旦变化，授权立即失效。
 可先用 `ai sandbox prune --dry-run` 查看旧版本或异常中断遗留的孤儿 per-branch 状态目录，再用 `ai sandbox prune` 只删除没有活跃 sandbox 容器对应的目录。
-已有沙箱需要执行 `ai sandbox rm <branch>` 后再执行 `ai sandbox create <branch>`，才能加载挂载点变更，包括已移除的挂载。
+已有沙箱可通过 `ai sandbox start --recreate <task-ref-or-branch>` 加载托管挂载点变更，包括已移除的挂载。readiness 会先识别过期的 mount plan，再授权 container-only replacement，并保留 worktree。
 
 首次执行 `ai sandbox create` 时，agent-infra 会在
 `~/.agent-infra/share/<project>/common/` 以及每个 `branches/<branch>/`

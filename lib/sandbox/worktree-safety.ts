@@ -12,6 +12,7 @@ type WorktreeChange = {
 
 type WorktreeSnapshot = {
   worktree: string;
+  branch: string;
   head: string;
   changes: readonly WorktreeChange[];
   identity: string;
@@ -141,15 +142,18 @@ function hashPath(hash: ReturnType<typeof createHash>, worktree: string, relativ
 
 function captureOnce(worktree: string, probe: Probe): WorktreeSnapshot {
   const resolvedWorktree = path.resolve(worktree);
+  const branch = probeText(probe, resolvedWorktree, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
   const head = probeText(probe, resolvedWorktree, ['rev-parse', '--verify', 'HEAD']).trim();
   const status = probeText(probe, resolvedWorktree, [
     'status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all', '--ignore-submodules=none'
   ]);
   const index = probeText(probe, resolvedWorktree, ['ls-files', '--stage', '-z']);
+  if (!branch) throw new Error('Unable to determine worktree branch');
   if (!head) throw new Error('Unable to determine worktree HEAD');
   const changes = parseStatus(status);
   const hash = createHash('sha256');
   updatePart(hash, 'worktree', resolvedWorktree);
+  updatePart(hash, 'branch', branch);
   updatePart(hash, 'head', head);
   updatePart(hash, 'status', status);
   updatePart(hash, 'index', index);
@@ -157,7 +161,7 @@ function captureOnce(worktree: string, probe: Probe): WorktreeSnapshot {
     hashPath(hash, resolvedWorktree, change.path, probe);
     if (change.originalPath) hashPath(hash, resolvedWorktree, change.originalPath, probe);
   }
-  return { worktree: resolvedWorktree, head, changes, identity: hash.digest('hex') };
+  return { worktree: resolvedWorktree, branch, head, changes, identity: hash.digest('hex') };
 }
 
 function inspectWorktree(worktree: string, { probe = runProbe }: { probe?: Probe } = {}): WorktreeInspection {
@@ -212,6 +216,7 @@ function formatWorktreeSnapshot(snapshot: WorktreeSnapshot): string {
   });
   return [
     `Worktree: ${JSON.stringify(snapshot.worktree)}`,
+    `Branch: ${snapshot.branch}`,
     `HEAD: ${snapshot.head}`,
     ...lines,
     `Snapshot identity: ${snapshot.identity}`

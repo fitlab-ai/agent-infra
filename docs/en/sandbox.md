@@ -131,7 +131,7 @@ Both identities may create a new task through the dedicated typed `task-create` 
 
 Creation retries have two identities. Reusing an outer request id is rejected even after a broker restart. After a timeout, the caller uses a new outer id but reuses the original immutable candidate file and business idempotency key; semantically identical JSON returns the original task as `no-op`, while changed field values fail closed. Platform failures retain the local task and short id and return a structured warning.
 
-Task lifecycle and orchestration commands use a per-container control channel whose host broker binds every request back to the container label's full task ID. Branch-only containers, mismatched IDs, unknown command families, and stale shared-workspace containers fail closed. `ai sandbox ls` exposes `WORKSPACE` and `TASK` columns, while `ai sandbox show` reports the same label-derived identity. `legacy-invalid` means the container must be explicitly recreated; identity transitions on the same branch require `ai sandbox rm <branch>` followed by `ai sandbox create <task-ref>`.
+Task lifecycle and orchestration commands use a per-container control channel whose host broker binds every request back to the container label's full task ID. Branch-only containers, mismatched IDs, unknown command families, and stale shared-workspace containers fail closed. `ai sandbox ls` exposes `WORKSPACE` and `TASK` columns, while `ai sandbox show` reports the same label-derived identity. For `legacy-invalid` or an identity transition on the same branch, run `ai sandbox start --recreate <task-ref-or-branch>` on the host, then retry the original command. This replaces only the container and preserves the existing worktree.
 
 The control broker publishes a read-only health view inside the container and remains alive while one authorized request runs in a separately tracked process group. Requests carry a per-sandbox generation and a two-second absolute admission deadline. The broker reports `healthy`, `busy`, or `parked`, rejects expired or stale-generation work before acceptance, and terminates a recovered orphan process tree before serving new work. A caller may retry a pre-acceptance `BUSY` or deadline rejection with a new request ID, but must not automatically retry after acceptance when the final result is unknown.
 
@@ -185,8 +185,8 @@ to no. If the snapshot changes before deletion, authorization expires.
 Use `ai sandbox prune --dry-run` to inspect orphaned per-branch state dirs left
 behind by older versions or interrupted cleanup, then `ai sandbox prune` to
 remove only dirs without an active sandbox container.
-Existing sandboxes pick up mount changes, including removed mounts, after
-`ai sandbox rm <branch>` and `ai sandbox create <branch>`.
+Existing sandboxes pick up managed mount changes, including removed mounts, with
+`ai sandbox start --recreate <task-ref-or-branch>`. The readiness check detects the stale mount plan before authorizing container-only replacement, and the worktree is preserved.
 
 On first `ai sandbox create`, agent-infra writes a bilingual `README.md` into
 `~/.agent-infra/share/<project>/common/` and each `branches/<branch>/`
