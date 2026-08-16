@@ -16,9 +16,11 @@ import {
 } from '../constants.ts';
 import { ENGINES, detectEngine, engineDisplayName, isManagedEngine, stopManagedVm } from '../engine.ts';
 import { pruneSandboxDanglingImages } from '../image-prune.ts';
-import { removeManagedDir, removeWorktreeDir } from '../managed-fs.ts';
-import { runOk, runSafe, runSafeEngine } from '../shell.ts';
-import { resolveSandboxTarget } from '../workspace-identity.ts';
+import { assertManagedPath, removeManagedDir, removeWorktreeDir } from '../managed-fs.ts';
+import { runEngine, runOk, runOkEngine, runSafe, runSafeEngine } from '../shell.ts';
+import { resolveSandboxTarget, type SandboxWorkspaceIdentity } from '../workspace-identity.ts';
+import { sandboxControlPaths, sandboxWorkspaceViewPaths } from '../workspace-view.ts';
+import { quiesceSandboxControlRoot, readSandboxControlManifest } from '../control/lifecycle.ts';
 import { toolConfigDirCandidates, toolProjectDirCandidates } from '../tools.ts';
 import { createSandboxCapabilityPlan } from '../agent-client-reconciler.ts';
 import type { SandboxTool } from '../tools.ts';
@@ -50,6 +52,9 @@ type RmTarget = {
   matchedContainers: string[];
   existingWorktrees: string[];
   toolCandidates: Array<{ tool: SandboxTool; candidates: string[] }>;
+  workspace: SandboxWorkspaceIdentity;
+  controlRoots: string[];
+  workspaceViewRoots: string[];
 };
 
 type RmOneOptions = {
@@ -75,11 +80,11 @@ function resolveRmTarget(config: SandboxConfig, tools: SandboxTool[], branch: st
     tool,
     candidates: toolConfigDirCandidates(tool, config.project, branch)
   }));
-  const existing = runSafeEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
+  const existing = runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
   const matchedContainers = containerNameCandidates(config, branch).filter((name) => existing.includes(name));
 
   if (matchedContainers.length > 0) {
-    const resolvedBranch = runSafeEngine(engine, 'docker', [
+    const resolvedBranch = runEngine(engine, 'docker', [
       'inspect',
       '-f',
       `{{ index .Config.Labels "${sandboxBranchLabel(config)}" }}`,
@@ -95,14 +100,92 @@ function resolveRmTarget(config: SandboxConfig, tools: SandboxTool[], branch: st
     }
   }
 
+  const workspace = resolveSandboxTarget(effectiveBranch, config.repoRoot).workspace;
+  const identities: SandboxWorkspaceIdentity[] = workspace.mode === 'task-bound'
+    ? [workspace, { mode: 'branch-only' }]
+    : [workspace];
+  const containers = [...new Set([...containerNameCandidates(config, effectiveBranch), ...matchedContainers])];
+  const controlRoots = containers.flatMap((container) => identities.map((identity) => sandboxControlPaths({
+    base: config.controlBase, project: config.project, container, identity
+  }).root));
+  const workspaceViewRoots = containers.flatMap((container) => identities.map((identity) => sandboxWorkspaceViewPaths({
+    base: config.workspaceViewBase, project: config.project, container, identity
+  }).root));
+
   return {
     branch,
     effectiveBranch,
     engine,
     matchedContainers,
     existingWorktrees: worktreeCandidates.filter((candidate) => fs.existsSync(candidate)),
-    toolCandidates
+    toolCandidates,
+    workspace,
+    controlRoots: [...new Set(controlRoots)],
+    workspaceViewRoots: [...new Set(workspaceViewRoots)]
   };
+}
+
+function assertControlRootMatchesTarget(root: string, effectiveBranch: string, workspace: SandboxWorkspaceIdentity): void {
+  const manifestPath = path.join(root, 'manifest.json');
+  if (!fs.existsSync(manifestPath)) return;
+  const manifest = readSandboxControlManifest(manifestPath);
+  const identityMatches = workspace.mode === 'task-bound'
+    ? manifest.mode === 'task-bound' && manifest.taskId === workspace.taskId
+    : manifest.mode === 'branch-only';
+  const branchOnlyFallback = workspace.mode === 'task-bound' && manifest.mode === 'branch-only';
+  if (manifest.branch !== effectiveBranch || (!identityMatches && !branchOnlyFallback)) {
+    throw new Error(`SANDBOX_CONTROL_TARGET_MISMATCH: ${root}`);
+  }
+}
+
+function assertLegacyCandidateEvidence(
+  candidate: string,
+  base: string,
+  config: SandboxConfig,
+  effectiveBranch: string,
+  matchedContainers: readonly string[]
+): void {
+  const relative = path.relative(path.join(base, config.project), candidate);
+  const [container, identity] = relative.split(path.sep);
+  const [canonical, legacy] = containerNameCandidates(config, effectiveBranch);
+  if (!container || !identity || legacy === canonical || container !== legacy || matchedContainers.includes(container)) return;
+  const manifestPath = path.join(config.controlBase, config.project, container, identity, 'manifest.json');
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error(`SANDBOX_CONTROL_TARGET_EVIDENCE_MISSING: ${candidate}`);
+  }
+}
+
+function assertRemoved(target: string, label: string): void {
+  if (fs.existsSync(target)) throw new Error(`${label} still exists after removal: ${target}`);
+}
+
+function removeEmptyManagedParent(base: string, directory: string): void {
+  const parent = path.dirname(directory);
+  if (path.resolve(parent) === path.resolve(base)) return;
+  assertManagedPath(base, parent);
+  try {
+    fs.rmdirSync(parent);
+  } catch (error) {
+    if (['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes((error as NodeJS.ErrnoException).code ?? '')) return;
+    throw error;
+  }
+  assertRemoved(parent, 'Empty sandbox container directory');
+}
+
+async function quiesceProjectControlRoots(config: SandboxConfig): Promise<void> {
+  const projectRoot = path.join(config.controlBase, config.project);
+  if (!fs.existsSync(projectRoot)) return;
+  assertManagedPath(config.controlBase, projectRoot);
+  const projectStat = fs.lstatSync(projectRoot);
+  if (!projectStat.isDirectory() || projectStat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
+  for (const container of fs.readdirSync(projectRoot, { withFileTypes: true })) {
+    if (!container.isDirectory() || container.isSymbolicLink()) continue;
+    const containerRoot = path.join(projectRoot, container.name);
+    for (const identity of fs.readdirSync(containerRoot, { withFileTypes: true })) {
+      if (!identity.isDirectory() || identity.isSymbolicLink()) continue;
+      await quiesceSandboxControlRoot(path.join(containerRoot, identity.name));
+    }
+  }
 }
 
 function inspectionBlockers(inspections: readonly WorktreeInspection[]): WorktreeInspection[] {
@@ -161,6 +244,7 @@ async function rmOne(
 ): Promise<void> {
   const target = options.target ?? resolveRmTarget(config, tools, branch);
   const { effectiveBranch, engine, matchedContainers, existingWorktrees, toolCandidates } = target;
+  const { workspace, controlRoots, workspaceViewRoots } = target;
   const confirm = options.prompt?.confirm ?? p.confirm;
   const isCancel = options.prompt?.isCancel ?? p.isCancel;
 
@@ -193,26 +277,39 @@ async function rmOne(
     return;
   }
 
+  for (const root of controlRoots.filter((candidate) => fs.existsSync(candidate))) {
+    assertLegacyCandidateEvidence(root, config.controlBase, config, effectiveBranch, matchedContainers);
+    assertControlRootMatchesTarget(root, effectiveBranch, workspace);
+    await quiesceSandboxControlRoot(root);
+  }
+
   if (matchedContainers.length > 0) {
     const spinner = p.spinner();
     spinner.start(`Stopping container(s): ${matchedContainers.join(', ')}`);
     for (const name of matchedContainers) {
-      runSafeEngine(engine, 'docker', ['stop', name]);
-      runSafeEngine(engine, 'docker', ['rm', name]);
-      for (const [base, label] of [
-        [path.join(config.workspaceViewBase, config.project), 'Workspace view'],
-        [path.join(config.controlBase, config.project), 'Control channel']
-      ] as const) {
-        const directory = path.join(base, name);
-        if (fs.existsSync(directory)) {
-          removeManagedDir(base, directory);
-          if (!options.quiet) p.log.success(`${label} removed: ${directory}`);
-        }
-      }
+      if (!runOkEngine(engine, 'docker', ['stop', name])) throw new Error(`Failed to stop sandbox container: ${name}`);
+      if (!runOkEngine(engine, 'docker', ['rm', name])) throw new Error(`Failed to remove sandbox container: ${name}`);
     }
+    const remaining = runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
+    const leftovers = matchedContainers.filter((name) => remaining.includes(name));
+    if (leftovers.length > 0) throw new Error(`Sandbox container(s) still exist after removal: ${leftovers.join(', ')}`);
     spinner.stop(pc.green(`Removed container(s): ${matchedContainers.join(', ')}`));
   } else {
     p.log.warn(`No sandbox container found for '${branch}'`);
+  }
+
+  for (const [roots, base, label] of [
+    [workspaceViewRoots, path.join(config.workspaceViewBase, config.project), 'Workspace view'],
+    [controlRoots, path.join(config.controlBase, config.project), 'Control channel']
+  ] as const) {
+    for (const directory of roots.filter((candidate) => fs.existsSync(candidate))) {
+      assertLegacyCandidateEvidence(directory, base === path.join(config.controlBase, config.project)
+        ? config.controlBase : config.workspaceViewBase, config, effectiveBranch, matchedContainers);
+      removeManagedDir(base, directory);
+      assertRemoved(directory, label);
+      removeEmptyManagedParent(base, directory);
+      if (!options.quiet) p.log.success(`${label} removed: ${directory}`);
+    }
   }
 
   if (shouldRemoveWorktree) {
@@ -222,6 +319,10 @@ async function rmOne(
       removeWorktreeDir(config.repoRoot, config.worktreeBase, worktree, permit, {
         allowRegisteredPathFallback: engine === ENGINES.WSL2
       });
+      assertRemoved(worktree, 'Worktree');
+      const registered = runSafe('git', ['-C', config.repoRoot, 'worktree', 'list', '--porcelain'])
+        .split('\n').filter((line) => line.startsWith('worktree ')).map((line) => path.resolve(line.slice(9)));
+      if (registered.includes(path.resolve(worktree))) throw new Error(`Worktree is still registered after removal: ${worktree}`);
     }
 
     const shouldDeleteBranch = options.assumeYes
@@ -233,7 +334,10 @@ async function rmOne(
 
     if (!isCancel(shouldDeleteBranch) && shouldDeleteBranch) {
       if (!runOk('git', ['-C', config.repoRoot, 'branch', '-D', effectiveBranch])) {
-        p.log.warn(`Local branch '${effectiveBranch}' was not deleted`);
+        throw new Error(`Local branch '${effectiveBranch}' was not deleted`);
+      }
+      if (runOk('git', ['-C', config.repoRoot, 'show-ref', '--verify', `refs/heads/${effectiveBranch}`])) {
+        throw new Error(`Local branch '${effectiveBranch}' still exists after removal`);
       }
     }
   }
@@ -241,12 +345,14 @@ async function rmOne(
   for (const { tool, candidates } of toolCandidates) {
     for (const dir of candidates.filter((candidate) => fs.existsSync(candidate))) {
       removeManagedDir(tool.sandboxBase, dir);
+      assertRemoved(dir, `${tool.name} state`);
       p.log.success(`${tool.name} state removed: ${dir}`);
     }
   }
 
   for (const dir of shellConfigDirCandidates(config, effectiveBranch).filter((candidate) => fs.existsSync(candidate))) {
     removeManagedDir(config.shellConfigBase, dir);
+    assertRemoved(dir, 'Shell config');
     p.log.success(`Shell config removed: ${dir}`);
   }
 
@@ -260,6 +366,7 @@ async function rmOne(
         });
     if (!isCancel(shouldRemoveShare) && shouldRemoveShare) {
       removeManagedDir(config.shareBase, shareBranch);
+      assertRemoved(shareBranch, 'Share dir');
       p.log.success(`Share dir removed: ${shareBranch}`);
     }
   }
@@ -293,7 +400,9 @@ async function rmPurge(
   }
   const permits = cleanPermits(inspections);
 
-  const containers = runSafeEngine(engine, 'docker', [
+  await quiesceProjectControlRoots(config);
+
+  const containers = runEngine(engine, 'docker', [
     'ps',
     '-a',
     '--filter',
@@ -305,9 +414,13 @@ async function rmPurge(
     const spinner = p.spinner();
     spinner.start('Stopping project sandbox containers...');
     for (const name of containers.split('\n').filter(Boolean)) {
-      runSafeEngine(engine, 'docker', ['stop', name]);
-      runSafeEngine(engine, 'docker', ['rm', name]);
+      if (!runOkEngine(engine, 'docker', ['stop', name])) throw new Error(`Failed to stop sandbox container: ${name}`);
+      if (!runOkEngine(engine, 'docker', ['rm', name])) throw new Error(`Failed to remove sandbox container: ${name}`);
     }
+    const remaining = runEngine(engine, 'docker', [
+      'ps', '-a', '--filter', `label=${sandboxLabel(config)}`, '--format', '{{.Names}}'
+    ]);
+    if (remaining) throw new Error(`Project sandbox container(s) still exist after removal: ${remaining.replaceAll('\n', ', ')}`);
     spinner.stop(pc.green('Project sandbox containers removed'));
   } else {
     p.log.warn('No project sandbox containers found');
@@ -326,14 +439,20 @@ async function rmPurge(
         removeWorktreeDir(config.repoRoot, config.worktreeBase, dir, permit, {
           allowRegisteredPathFallback: engine === ENGINES.WSL2
         });
+        assertRemoved(dir, 'Worktree');
       }
       runSafe('git', ['-C', config.repoRoot, 'worktree', 'prune']);
+      const registered = new Set(runSafe('git', ['-C', config.repoRoot, 'worktree', 'list', '--porcelain'])
+        .split('\n').filter((line) => line.startsWith('worktree ')).map((line) => path.resolve(line.slice(9))));
+      const leftovers = worktrees.filter((dir) => registered.has(path.resolve(dir)));
+      if (leftovers.length > 0) throw new Error(`Worktree(s) still registered after removal: ${leftovers.join(', ')}`);
     }
   }
 
   for (const dir of projectToolDirs(config, tools)) {
     if (fs.existsSync(dir)) {
       removeManagedDir(path.dirname(dir), dir);
+      assertRemoved(dir, 'Tool state');
       p.log.success(`Removed tool state: ${dir}`);
     }
   }
@@ -348,6 +467,7 @@ async function rmPurge(
       for (const entry of fs.readdirSync(config.shellConfigBase)) {
         const dir = path.join(config.shellConfigBase, entry);
         removeManagedDir(config.shellConfigBase, dir);
+        assertRemoved(dir, 'Shell config');
       }
       p.log.success(`Project shell config dirs removed: ${config.shellConfigBase}`);
     }
@@ -360,6 +480,7 @@ async function rmPurge(
     });
     if (!isCancel(shouldRemoveAllShares) && shouldRemoveAllShares) {
       removeManagedDir(path.dirname(config.shareBase), config.shareBase);
+      assertRemoved(config.shareBase, 'Project share dir');
       p.log.success(`Project share dirs removed: ${config.shareBase}`);
     }
   }
@@ -371,6 +492,7 @@ async function rmPurge(
     const projectDir = path.join(base, config.project);
     if (fs.existsSync(projectDir)) {
       removeManagedDir(base, projectDir);
+      assertRemoved(projectDir, `Project ${label}`);
       p.log.success(`Removed project ${label}: ${projectDir}`);
     }
   }

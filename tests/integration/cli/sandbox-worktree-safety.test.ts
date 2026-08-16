@@ -149,13 +149,67 @@ async function cleanRmOneFixture(
       engine: "docker-desktop",
       matchedContainers: [],
       existingWorktrees: [worktree],
-      toolCandidates: []
+      toolCandidates: [],
+      workspace: { mode: "branch-only" },
+      controlRoots: [],
+      workspaceViewRoots: []
     },
     permits: new Map([[path.resolve(worktree), permit]]),
     prompt
   });
   return { worktree, share };
 }
+
+test("sandbox rm retries control and workspace cleanup after the container is already gone", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-partial-retry-"));
+  const branch = "feature/partial-retry";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const container = "demo-dev-feature..partial-retry";
+    const controlRoot = path.join(config.controlBase, config.project, container, "branch-only");
+    const siblingControlRoot = path.join(path.dirname(controlRoot), "another-task");
+    const workspaceViewRoot = path.join(config.workspaceViewBase, config.project, container, "branch-only");
+    fs.mkdirSync(path.join(controlRoot, "public"), { recursive: true });
+    fs.mkdirSync(siblingControlRoot, { recursive: true });
+    fs.writeFileSync(path.join(siblingControlRoot, "keep"), "sibling\n");
+    fs.mkdirSync(workspaceViewRoot, { recursive: true });
+    fs.writeFileSync(path.join(controlRoot, "public", "status.json"), `${JSON.stringify({
+      version: 1,
+      generation: "partial-generation",
+      broker: { pid: 999_999_999, startTime: "gone" },
+      state: "healthy",
+      reasonCode: null,
+      activeRequestId: null,
+      updatedAt: Date.now()
+    })}\n`);
+    const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+
+    await rm.rmOne(config, [], branch, {
+      assumeYes: true,
+      target: {
+        branch,
+        effectiveBranch: branch,
+        engine: "docker-desktop",
+        matchedContainers: [],
+        existingWorktrees: [],
+        toolCandidates: [],
+        workspace: { mode: "branch-only" },
+        controlRoots: [controlRoot],
+        workspaceViewRoots: [workspaceViewRoot]
+      }
+    });
+
+    assert.equal(fs.existsSync(controlRoot), false);
+    assert.equal(fs.existsSync(workspaceViewRoot), false);
+    assert.equal(fs.existsSync(siblingControlRoot), true);
+    assert.equal(fs.existsSync(path.dirname(controlRoot)), true);
+    assert.equal(fs.existsSync(path.dirname(workspaceViewRoot)), false);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
 
 test("worktree safety snapshot binds staged, unstaged, and unusual untracked content", onPlatforms("linux", "darwin", "win32"), async () => {
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
@@ -443,13 +497,24 @@ test("sandbox purge removes real clean linked worktrees after confirmation", onP
     const shellConfig = path.join(config.shellConfigBase, branch.replaceAll("/", ".."));
     fs.mkdirSync(shellConfig, { recursive: true });
     const confirmations: boolean[] = [];
+    const originalPath = process.env.PATH;
+    const originalDockerLogPath = process.env.DOCKER_LOG_PATH;
+    process.env.PATH = envWithPrependedPath(process.env, fixture.binDir).PATH;
+    process.env.DOCKER_LOG_PATH = fixture.logPath;
 
-    await rm.rmPurge(config, [], {
-      confirm: async (options) => {
-        confirmations.push(Boolean(options.initialValue));
-        return Boolean(options.initialValue);
-      }
-    });
+    try {
+      await rm.rmPurge(config, [], {
+        confirm: async (options) => {
+          confirmations.push(Boolean(options.initialValue));
+          return Boolean(options.initialValue);
+        }
+      });
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      if (originalDockerLogPath === undefined) delete process.env.DOCKER_LOG_PATH;
+      else process.env.DOCKER_LOG_PATH = originalDockerLogPath;
+    }
 
     assert.deepEqual(confirmations, [true, true, false]);
     assert.equal(fs.existsSync(worktree), false);

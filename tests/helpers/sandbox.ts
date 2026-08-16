@@ -58,6 +58,7 @@ function writeSandboxEngineFixture(
   const binDir = path.join(tmpDir, "bin");
   const logPath = path.join(tmpDir, "docker-log.jsonl");
   const envFileLogPath = path.join(tmpDir, "docker-env-files.jsonl");
+  const dockerStatePath = path.join(tmpDir, "docker-state.txt");
   const dockerJsPath = path.join(binDir, "docker.js");
   const idJsPath = path.join(binDir, "id.js");
   const whichJsPath = path.join(binDir, "which.js");
@@ -75,6 +76,7 @@ function writeSandboxEngineFixture(
 
   fs.mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
   fs.mkdirSync(binDir, { recursive: true });
+  fs.writeFileSync(dockerStatePath, dockerStdoutForPs, "utf8");
   initIsolatedGitRepo(repoDir);
   // Pick an engine that is (a) valid on every platform via validateSandboxEngine
   // and (b) different from PLATFORM_DEFAULTS[os], so the fixture actually proves
@@ -105,6 +107,7 @@ function writeSandboxEngineFixture(
       `const project = ${JSON.stringify(project)};`,
       `const sandboxConfig = ${JSON.stringify(sandbox)};`,
       `const dockerStdoutForPs = ${JSON.stringify(dockerStdoutForPs)};`,
+      `const dockerStatePath = ${JSON.stringify(dockerStatePath)};`,
       `const dockerLabelsForInspect = ${JSON.stringify(dockerLabelsForInspect)};`,
       `const fixtureHome = ${JSON.stringify(fixtureHome)};`,
       `const agentClientFixtures = ${JSON.stringify(agentClientFixtures)};`,
@@ -137,7 +140,10 @@ function writeSandboxEngineFixture(
       "    ? fs.readFileSync(process.env.DOCKER_LOG_PATH, 'utf8').trim().split('\\n').filter(Boolean).map((line) => JSON.parse(line))",
       "    : [];",
       "}",
-      "function inspectLabels() {",
+      "function dockerRows() {",
+      "  try { return fs.readFileSync(dockerStatePath, 'utf8').trim().split('\\n').filter(Boolean); } catch { return []; }",
+      "}",
+      "function inspectLabels(containerName = '') {",
       "  const runCall = loggedCalls().map((call) => call[0] === '--context' ? call.slice(2) : call).reverse().find((call) => call[0] === 'run');",
       "  const labels = {};",
       "  if (runCall) {",
@@ -149,7 +155,7 @@ function writeSandboxEngineFixture(
       "    }",
       "  }",
       "  if (Object.keys(labels).length > 0) return labels;",
-      "  const row = dockerStdoutForPs.trim().split('\\n')[0] || '';",
+      "  const row = dockerRows().find((candidate) => candidate.split('\\t')[0] === containerName) || dockerRows()[0] || '';",
       "  const columns = row.split('\\t');",
       "  const branchKey = `${project}.sandbox.branch`;",
       "  const labelColumn = columns[2] || '';",
@@ -221,13 +227,27 @@ function writeSandboxEngineFixture(
       "log();",
       "captureEnvFile();",
       "if (args[0] === 'ps') {",
-      "  if (dockerStdoutForPs) {",
-      "    process.stdout.write(dockerStdoutForPs.endsWith('\\n') ? dockerStdoutForPs : `${dockerStdoutForPs}\\n`);",
+      "  const rows = dockerRows();",
+      "  const formatIndex = args.indexOf('--format');",
+      "  const outputRows = formatIndex >= 0 && args[formatIndex + 1] === '{{.Names}}'",
+      "    ? rows.map((row) => row.split('\\t')[0])",
+      "    : rows;",
+      "  if (outputRows.length > 0) {",
+      "    process.stdout.write(`${outputRows.join('\\n')}\\n`);",
       "  }",
       "  if (process.env.DOCKER_EXIT_FOR_PS) {",
       "    process.exit(Number(process.env.DOCKER_EXIT_FOR_PS));",
       "  }",
       "  process.exit(0);",
+      "}",
+      "if (args[0] === 'rm' && args[1]) {",
+      "  const remaining = dockerRows().filter((row) => row.split('\\t')[0] !== args[1]);",
+      "  fs.writeFileSync(dockerStatePath, remaining.join('\\n'), 'utf8');",
+      "  if (process.env.DOCKER_EXIT_FOR_RM) process.exit(Number(process.env.DOCKER_EXIT_FOR_RM));",
+      "  process.exit(0);",
+      "}",
+      "if (args[0] === 'stop' && process.env.DOCKER_EXIT_FOR_STOP) {",
+      "  process.exit(Number(process.env.DOCKER_EXIT_FOR_STOP));",
       "}",
       "if (args[0] === 'image' && args[1] === 'inspect') {",
       "  if (process.env.DOCKER_EXIT_FOR_IMAGE_INSPECT && Number(process.env.DOCKER_EXIT_FOR_IMAGE_INSPECT) !== 0) {",
@@ -247,6 +267,10 @@ function writeSandboxEngineFixture(
       "  process.exit(1);",
       "}",
       "if (args[0] === 'inspect') {",
+      "  if (args[1] === '-f' && args[2] && String(args[2]).includes(`${project}.sandbox.branch`)) {",
+      "    process.stdout.write(`${inspectLabels(args.at(-1))[`${project}.sandbox.branch`] || ''}\\n`);",
+      "    process.exit(0);",
+      "  }",
       "  const formatIndex = args.indexOf('--format');",
       "  if (formatIndex >= 0 && args[formatIndex + 1] === '{{json .Config.Labels}}') {",
       "    process.stdout.write(`${JSON.stringify(inspectLabels())}\\n`);",

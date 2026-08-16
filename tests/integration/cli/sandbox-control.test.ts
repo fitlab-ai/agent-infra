@@ -5,8 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { requestSandboxControl, requestSandboxTaskCreate } from '../../../lib/sandbox/control/client.ts';
+import {
+  quiesceSandboxControlRoot,
+  readSandboxControlManifest
+} from '../../../lib/sandbox/control/lifecycle.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
-import { isProcessAlive } from '../../../lib/server/process-state.ts';
+import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
+import { onPlatforms } from '../../helpers.ts';
 
 function waitForFile(filePath: string, timeoutMs: number): void {
   const deadline = Date.now() + timeoutMs;
@@ -54,6 +59,117 @@ function initializeRepository(root: string): string {
   execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
   return execFileSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8' }).trim();
 }
+
+function writeControlManifest(root: string, branch: string, generation = 'lifecycle-generation'): string {
+  const manifestPath = path.join(root, 'manifest.json');
+  const channelDir = path.join(root, 'channel');
+  const publicStatusDir = path.join(root, 'public');
+  const processingDir = path.join(root, 'processing');
+  for (const directory of [channelDir, publicStatusDir, processingDir]) fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(manifestPath, `${JSON.stringify({
+    version: 3, repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature', branch,
+    mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'lifecycle-secret', generation,
+    channelDir, publicStatusDir, processingDir
+  })}\n`);
+  return manifestPath;
+}
+
+test('sandbox control lifecycle fails closed when a manifest has no owner evidence', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-evidence-'));
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch);
+    assert.equal(readSandboxControlManifest(manifestPath).generation, 'lifecycle-generation');
+    await assert.rejects(
+      () => quiesceSandboxControlRoot(root, { timeoutMs: 100 }),
+      /SANDBOX_CONTROL_OWNER_EVIDENCE_MISSING/
+    );
+    assert.equal(fs.existsSync(root), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox control lifecycle accepts a stale broker when the manifest is missing', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-stale-broker-'));
+  try {
+    fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
+      version: 2,
+      pid: 999_999_999,
+      startTime: 'gone',
+      token: 'stale-token',
+      generation: 'stale-generation'
+    })}\n`);
+
+    assert.equal(await quiesceSandboxControlRoot(root, { timeoutMs: 100 }), 'stale');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox control lifecycle waits for a live broker to finish its final writes', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-quiesce-'));
+  let brokerPid: number | null = null;
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch);
+    await startSandboxControlBroker(root, manifestPath);
+    const broker = JSON.parse(fs.readFileSync(path.join(root, 'broker.json'), 'utf8'));
+    brokerPid = broker.pid;
+
+    assert.equal(await quiesceSandboxControlRoot(root), 'stopped');
+    assert.equal(isProcessAlive(broker.pid), false);
+    assert.equal(fs.existsSync(path.join(root, 'broker.json')), false);
+    const events = fs.readFileSync(path.join(root, 'audit.ndjson'), 'utf8')
+      .trim().split('\n').map((line) => JSON.parse(line).event);
+    assert.equal(events.at(-1), 'broker-stop');
+  } finally {
+    if (brokerPid && isProcessAlive(brokerPid)) await stopBroker(brokerPid);
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
+  }
+});
+
+test('sandbox control lifecycle terminates execution trees before forcing an unresponsive broker', onPlatforms('linux', 'darwin'), async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-forced-quiesce-'));
+  const stubbornScript = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
+  const broker = spawn(process.execPath, ['--eval', stubbornScript], { stdio: 'ignore' });
+  const execution = spawn(process.execPath, ['--eval', stubbornScript], { detached: true, stdio: 'ignore' });
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, 'forced-generation');
+    const brokerStartTime = getProcessStartTime(broker.pid!);
+    const executionStartTime = getProcessStartTime(execution.pid!);
+    assert.ok(brokerStartTime);
+    assert.ok(executionStartTime);
+    fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
+      version: 2, pid: broker.pid, startTime: brokerStartTime,
+      token: 'lifecycle-secret', generation: 'forced-generation'
+    })}\n`);
+    fs.writeFileSync(path.join(root, 'public', 'status.json'), `${JSON.stringify({
+      version: 1, generation: 'forced-generation', broker: { pid: broker.pid, startTime: brokerStartTime },
+      state: 'healthy', reasonCode: null, activeRequestId: 'forced-request', updatedAt: Date.now()
+    })}\n`);
+    const executionDir = path.join(root, 'processing', 'forced-request');
+    fs.mkdirSync(executionDir);
+    fs.writeFileSync(path.join(executionDir, 'execution.json'), `${JSON.stringify({
+      version: 1, generation: 'forced-generation', requestId: 'forced-request', nonce: 'forced-nonce',
+      child: { pid: execution.pid, startTime: executionStartTime, processGroupId: execution.pid },
+      phase: 'running', updatedAt: Date.now()
+    })}\n`);
+
+    assert.equal(await quiesceSandboxControlRoot(root, { timeoutMs: 100 }), 'stopped');
+    assert.equal(isProcessAlive(execution.pid!), false);
+    assert.equal(isProcessAlive(broker.pid!), false);
+    assert.equal(fs.existsSync(manifestPath), true);
+  } finally {
+    for (const child of [execution, broker]) {
+      if (child.pid && isProcessAlive(child.pid)) {
+        try { process.kill(child.pid, 'SIGKILL'); } catch { /* already exited */ }
+      }
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('sandbox broker startup resolves only after matching status is published', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-readiness-'));
