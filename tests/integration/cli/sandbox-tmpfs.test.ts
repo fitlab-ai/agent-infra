@@ -675,7 +675,46 @@ test("task-bound recovery keeps the branch-only code and recommends the full tas
           runVerbose: () => { writes += 1; }
         }
       }),
-      new RegExp(`SANDBOX_CONTROL_BRANCH_ONLY[\\s\\S]*ai sandbox start --recreate ${taskId}`)
+      (error: unknown) => error instanceof Error
+        && error.message.includes("SANDBOX_CONTROL_BRANCH_ONLY")
+        && error.message.includes(`ai sandbox start --recreate ${taskId}`)
+    );
+    assert.equal(writes, 0);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("unauthorized recovery leads with the recreate command and demotes the finding detail", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-lead-command-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  let writes = 0;
+
+  try {
+    await assert.rejects(
+      () => ensureSandboxReady({
+        config,
+        engine: "native",
+        branch: "feature/demo",
+        row: { name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 },
+        deps: {
+          ensureControlBroker: async () => {},
+          run: () => JSON.stringify([{
+            Id: "fixture-container-id",
+            Config: { Labels: BRANCH_ONLY_LABELS },
+            Mounts: []
+          }]),
+          runOk: () => true,
+          runVerbose: () => { writes += 1; }
+        }
+      }),
+      (error: unknown) => {
+        if (!(error instanceof Error)) return false;
+        const [lead, ...rest] = error.message.split("\n");
+        return lead!.includes("ai sandbox start --recreate feature/demo")
+          && !lead!.includes("Expected bind mount")
+          && rest.some((line) => line.startsWith("Details: "));
+      }
     );
     assert.equal(writes, 0);
   } finally {

@@ -1157,7 +1157,11 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
     ? params.workspace.taskId
     : params.branch;
   if (!params.allowRecreate || !params.recreate) {
-    throw new Error(`Sandbox recovery failed: ${failure.message} ${dataBoundary} Run 'ai sandbox start --recreate ${recoveryTarget}' on the host to authorize container-only replacement.`);
+    throw new Error([
+      `Sandbox recovery failed. Run 'ai sandbox start --recreate ${recoveryTarget}' on the host to authorize container-only replacement.`,
+      dataBoundary,
+      `Details: ${failure.message}`
+    ].join('\n'));
   }
 
   const existingWorktrees = worktreeDirCandidates(params.config, params.branch).filter((candidate) => fs.existsSync(candidate));
