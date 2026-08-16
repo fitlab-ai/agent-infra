@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { nodeEntryArgs } from './control/executor.ts';
 import {
   containerNameCandidates,
   sandboxBranchLabel,
@@ -179,7 +180,7 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as SandboxControlManifest;
   const child = spawn(
     process.execPath,
-    [internalCli, 'sandbox-control', 'serve', '--manifest', manifestPath],
+    nodeEntryArgs(internalCli, ['sandbox-control', 'serve', '--manifest', manifestPath]),
     { cwd: repoRoot, detached: true, stdio: 'ignore' }
   );
   let spawnError: Error | null = null;

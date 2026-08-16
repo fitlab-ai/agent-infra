@@ -6,11 +6,6 @@
     "type": "github"
   },
   "prFlow": "required",
-  "review": {
-    "post_review_exclude_globs": [
-      ".agents/workspace/README.md"
-    ]
-  },
   "templateVersion": "v0.9.6-alpha.0",
   "sandbox": {
     "engine": "orbstack",

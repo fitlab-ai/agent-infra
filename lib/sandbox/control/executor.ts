@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getProcessStartTime } from '../../server/process-state.ts';
 import { createTask } from '../../task/create-service.ts';
@@ -23,6 +24,12 @@ function safeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(env).filter(([key]) => !key.toUpperCase().startsWith('AGENT_INFRA_CONTROL_')));
 }
 
+export function nodeEntryArgs(entry: string, args: string[]): string[] {
+  return path.extname(entry) === '.ts'
+    ? ['--experimental-strip-types', '--no-warnings', entry, ...args]
+    : [entry, ...args];
+}
+
 async function waitForStartTime(pid: number, timeoutMs = 2_000): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -43,7 +50,9 @@ export async function prepareSandboxControlExecution(params: {
   const nonce = randomUUID();
   const child = spawn(
     process.execPath,
-    [params.internalCliPath, 'sandbox-control', 'execute', '--request', params.requestPath, '--nonce', nonce],
+    nodeEntryArgs(params.internalCliPath, [
+      'sandbox-control', 'execute', '--request', params.requestPath, '--nonce', nonce
+    ]),
     {
       cwd: params.manifest.repoRoot,
       detached: process.platform !== 'win32',
@@ -128,7 +137,7 @@ function executeRequest(manifest: SandboxControlManifest, request: SandboxContro
   if (request.family === 'task-orchestration') boundArgs.push('--git-worktree-root', manifest.worktreeRoot);
   const result = spawnSync(
     process.execPath,
-    ['--experimental-strip-types', '--no-warnings', process.argv[1]!, request.family, ...boundArgs],
+    nodeEntryArgs(process.argv[1]!, [request.family, ...boundArgs]),
     { cwd: manifest.repoRoot, encoding: 'utf8', env: safeEnv(process.env) }
   );
   return { exitCode: result.status ?? 1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };

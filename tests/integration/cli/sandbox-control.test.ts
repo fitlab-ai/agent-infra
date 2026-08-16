@@ -67,7 +67,7 @@ test('sandbox broker startup resolves only after matching status is published', 
     if (brokerPid) {
       try { process.kill(brokerPid, 'SIGTERM'); } catch { /* already gone */ }
     }
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   }
 });
 

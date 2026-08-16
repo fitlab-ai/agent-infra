@@ -20,6 +20,7 @@ import {
   readActiveLease,
   SANDBOX_CONTROL_AUDIT_MAX_BYTES
 } from '../../../lib/sandbox/control/state.ts';
+import { nodeEntryArgs } from '../../../lib/sandbox/control/executor.ts';
 
 const manifest: SandboxControlManifest = {
   version: 3,
@@ -36,6 +37,15 @@ const manifest: SandboxControlManifest = {
   publicStatusDir: '/public',
   processingDir: '/processing'
 };
+
+test('TypeScript control entries retain explicit strip-types startup', () => {
+  assert.deepEqual(nodeEntryArgs('/repo/bin/internal-cli.ts', ['sandbox-control', 'serve']), [
+    '--experimental-strip-types', '--no-warnings', '/repo/bin/internal-cli.ts', 'sandbox-control', 'serve'
+  ]);
+  assert.deepEqual(nodeEntryArgs('/repo/dist/bin/internal-cli.js', ['sandbox-control', 'serve']), [
+    '/repo/dist/bin/internal-cli.js', 'sandbox-control', 'serve'
+  ]);
+});
 
 test('control requests are restricted to allowed families and rebound to the manifest task', () => {
   const request = validateSandboxControlRequest({

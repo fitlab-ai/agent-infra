@@ -13,6 +13,8 @@ const SHORT_ID_SCRIPT = path.resolve(process.cwd(), '.agents/scripts/task-short-
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-validate-'));
   initIsolatedGitRepo(root);
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root, env: gitSafeEnv() });
+  spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root, env: gitSafeEnv() });
   const id = 'TASK-20260101-000001';
   const branch = 'agent-infra-feature-validation-fixture';
   spawnSync('git', ['switch', '-c', branch], { cwd: root, env: gitSafeEnv() });
