@@ -43,6 +43,7 @@ const lowFrequencyCommands = [
   "close-codescan",
   "close-dependabot",
   "complete-manual-validation",
+  "run-manual-validation",
   "create-release-note",
   "import-codescan",
   "import-dependabot",

@@ -25,6 +25,7 @@ These are not thin command aliases. Each skill encapsulates standardized process
 | `plan-task` | Write the technical plan with a review checkpoint. | `task-id` | Define the approach after analysis approval. |
 | `review-plan` | Review the technical plan and classify findings by severity. | `task-id` | Confirm the design is actionable before coding. |
 | `code-task` | Implement the approved plan or fix code review findings, producing a code report. | `task-id` | Write code, tests, and docs after plan approval, or handle review feedback. |
+| `run-manual-validation` | Run host-side validation through snapshot or in-place isolation and record sanitized evidence. | `task-id`, validation command | Validate real container, credential, or worktree behavior without marking the PR check complete. |
 | `review-code` | Review the code and classify findings by severity. | `task-id` | Run a structured code review before merging. |
 | `complete-task` | Mark the task complete and archive it after all gates pass. | `task-id` | Close out a task after review, tests, and commit are done. |
 

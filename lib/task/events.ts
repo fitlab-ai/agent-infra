@@ -35,7 +35,8 @@ const eventCatalog = [
   'review-plan.started', 'review-plan.completed',
   'code.started', 'code.completed',
   'review-code.started', 'review-code.completed',
-  'manual-validation.started', 'manual-validation.completed'
+  'manual-validation.started', 'manual-validation.completed',
+  'validation-run.started', 'validation-run.completed'
 ] as const;
 type TaskEventName = (typeof eventCatalog)[number];
 type Verdict = 'approved' | 'changes-requested' | 'rejected';
@@ -83,7 +84,9 @@ const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] 
   'review-code.started': { optional: ['round'] },
   'review-code.completed': { required: ['artifact', 'verdict', 'blockers', 'major', 'minor', 'manualValidation'], optional: ['round', 'orchestrated'] },
   'manual-validation.started': { optional: ['round'] },
-  'manual-validation.completed': { required: ['artifact', 'summaryResult'], optional: ['round'] }
+  'manual-validation.completed': { required: ['artifact', 'summaryResult'], optional: ['round'] },
+  'validation-run.started': { optional: ['round'] },
+  'validation-run.completed': { required: ['artifact'], optional: ['round'] }
 };
 
 function validateTaskEventRequest(request: TaskEventRequest): TaskEventError | null {
@@ -121,7 +124,8 @@ const FAMILY = {
   'review-plan': { artifact: 'review-plan', started: ['technical-design', 'technical-design-review'], completed: ['technical-design', 'technical-design-review'], target: 'technical-design-review', label: 'Review Plan' },
   code: { artifact: 'code', started: ['technical-design-review', 'code-review'], completed: ['technical-design-review', 'code-review'], target: 'code', label: 'Code Task' },
   'review-code': { artifact: 'review-code', started: ['code', 'code-review', 'commit'], completed: ['code', 'code-review', 'commit'], target: 'code-review', label: 'Review Code' },
-  'manual-validation': { artifact: 'manual-validation', started: ['code-review', 'commit'], completed: ['code-review', 'commit'], target: null, label: 'Complete Manual Validation' }
+  'manual-validation': { artifact: 'manual-validation', started: ['code-review', 'commit'], completed: ['code-review', 'commit'], target: null, label: 'Complete Manual Validation' },
+  'validation-run': { artifact: 'validation-run', started: ['code-review', 'commit'], completed: ['code-review', 'commit'], target: null, label: 'Run Manual Validation' }
 } as const;
 type EventFamily = keyof typeof FAMILY;
 
@@ -217,6 +221,7 @@ function identity(request: TaskEventRequest) {
   else if (family === 'plan') note = `Plan completed, awaiting human review → ${request.artifact}`;
   else if (family === 'code' && request.fixFor) note = `Fixed ${request.blockers} blockers, ${request.major} major, ${request.minor} minor issues${request.manualValidation ? `, skipped ${request.manualValidation} manual-validation` : ''} → ${request.artifact}`;
   else if (family === 'code') note = `Code implemented, ${request.filesModified} files modified, ${request.testsPassed} tests passed → ${request.artifact}`;
+  else if (family === 'validation-run') note = `Validation evidence recorded → ${request.artifact}`;
   else {
     const verdict = request.verdict === 'approved' ? 'Approved' : request.verdict === 'changes-requested' ? 'Changes Requested' : 'Rejected';
     note = `Verdict: ${verdict}, blockers: ${request.blockers}, major: ${request.major}, minor: ${request.minor}, Manual-validation: ${request.manualValidation} → ${request.artifact}`;
@@ -342,7 +347,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   );
   if (findingCountError) return failed(normalized, findingCountError, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
   let orchestrationCompletion: OrchestrationStageCompletion | null = null;
-  if (eventIdentity.phase === 'completed' && eventIdentity.family !== 'manual-validation') {
+  if (eventIdentity.phase === 'completed' && eventIdentity.family !== 'manual-validation' && eventIdentity.family !== 'validation-run') {
     const orchestrationStage = eventIdentity.family === 'analyze' ? 'analysis' : eventIdentity.family;
     const execution = validateLifecycleExecution(normalized.taskRef, {
       mode: normalized.orchestrated ? 'orchestrated' : 'standalone',

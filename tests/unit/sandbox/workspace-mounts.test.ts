@@ -16,6 +16,7 @@ test('task-bound mount topology preserves the workspace root and exposes only on
     shellConfigHostDir: '/shell/feature',
     workspaceViewRoot: '/views/current',
     controlDir: '/control/current',
+    controlStatusDir: '/control/status',
     taskSource: '/repo/.agents/workspace/active/TASK-20260809-010203',
     taskId: 'TASK-20260809-010203'
   });
@@ -37,12 +38,23 @@ test('task-bound mount topology preserves the workspace root and exposes only on
   ]);
   assert.equal(workspace.some((mount) => mount.containerPath === '/workspace/.agents/workspace/active'), false);
   assert.equal(mounts.some((mount) => mount.hostPaths.includes('/repo/.agents/workspace')), false);
+  assert.deepEqual(mounts.at(-2), {
+    hostPaths: ['/control/status'],
+    containerPath: '/run/agent-infra/control-status',
+    readOnly: true
+  });
+  assert.deepEqual(mounts.at(-1), {
+    hostPaths: ['/control/current'],
+    containerPath: '/run/agent-infra/control',
+    readOnly: false
+  });
 });
 
 test('branch-only topology mounts each isolated state read-only without covering the workspace root', () => {
   const mounts = sandboxCoreBindMounts(config, 'feature', {
     workspaceViewRoot: '/views/empty',
-    controlDir: '/control/empty'
+    controlDir: '/control/empty',
+    controlStatusDir: '/control/status-empty'
   });
   assert.deepEqual(
     mounts.filter((mount) => mount.containerPath.startsWith('/workspace/.agents/workspace')),

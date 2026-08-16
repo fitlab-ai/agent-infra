@@ -48,8 +48,10 @@ export function sandboxWorkspaceViewPaths(params: Readonly<{
 
 export type SandboxControlSetup = Readonly<{
   channelDir: string;
+  statusDir: string;
   manifestPath: string;
   token: string;
+  generation: string;
 }>;
 
 export function sandboxControlPaths(params: Readonly<{
@@ -57,13 +59,19 @@ export function sandboxControlPaths(params: Readonly<{
   project: string;
   container: string;
   identity: SandboxWorkspaceIdentity;
-}>): Readonly<{ root: string; channelDir: string; manifestPath: string }> {
+}>): Readonly<{ root: string; channelDir: string; statusDir: string; processingDir: string; manifestPath: string }> {
   const identityKey = params.identity.mode === 'task-bound'
     ? `task-bound:${params.identity.taskId}`
     : 'branch-only';
   const digest = createHash('sha256').update(identityKey).digest('hex').slice(0, 16);
   const root = path.resolve(params.base, params.project, params.container, digest);
-  return { root, channelDir: path.join(root, 'channel'), manifestPath: path.join(root, 'manifest.json') };
+  return {
+    root,
+    channelDir: path.join(root, 'channel'),
+    statusDir: path.join(root, 'public'),
+    processingDir: path.join(root, 'processing'),
+    manifestPath: path.join(root, 'manifest.json')
+  };
 }
 
 function assertSafeDirectory(directory: string, expectedBase: string): void {
@@ -173,12 +181,16 @@ export function materializeSandboxControl(params: Readonly<{
   branch: string;
   identity: SandboxWorkspaceIdentity;
 }>): SandboxControlSetup {
-  const { root, channelDir, manifestPath } = sandboxControlPaths(params);
+  const { root, channelDir, statusDir, processingDir, manifestPath } = sandboxControlPaths(params);
   assertSafeDirectory(root, path.resolve(params.base));
   const consumedDir = path.join(root, 'consumed');
   assertSafeDirectory(consumedDir, root);
   fs.rmSync(consumedDir, { recursive: true, force: true });
   fs.mkdirSync(consumedDir, { recursive: true, mode: 0o700 });
+  for (const directory of [statusDir, processingDir]) {
+    assertSafeDirectory(directory, root);
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  }
   for (const queue of ['requests', 'responses']) {
     const directory = path.join(channelDir, queue);
     assertSafeDirectory(directory, root);
@@ -186,9 +198,10 @@ export function materializeSandboxControl(params: Readonly<{
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   }
   const token = randomBytes(32).toString('hex');
+  const generation = randomBytes(16).toString('hex');
   const repoRoot = fs.realpathSync.native(params.repoRoot);
   const manifest: SandboxControlManifest = {
-    version: 2,
+    version: 3,
     repoRoot,
     worktreeRoot: fs.realpathSync.native(params.worktreeRoot),
     project: params.project,
@@ -197,8 +210,11 @@ export function materializeSandboxControl(params: Readonly<{
     mode: params.identity.mode,
     taskId: params.identity.mode === 'task-bound' ? params.identity.taskId : null,
     token,
-    channelDir
+    generation,
+    channelDir,
+    publicStatusDir: statusDir,
+    processingDir
   };
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
-  return { channelDir, manifestPath, token };
+  return { channelDir, statusDir, manifestPath, token, generation };
 }

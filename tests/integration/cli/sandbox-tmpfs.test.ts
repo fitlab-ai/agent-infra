@@ -156,6 +156,7 @@ function recoveryFixtureMounts(config: SandboxConfig): Array<Record<string, unkn
       Type: "bind", Source: hostPath, Destination: path.posix.join("/workspace/.agents/workspace", state), RW: false
     })),
     { Type: "bind", Source: path.join(config.controlBase, config.project, "demo-dev-feature..demo", control, "channel"), Destination: "/run/agent-infra/control", RW: true },
+    { Type: "bind", Source: path.join(config.controlBase, config.project, "demo-dev-feature..demo", control, "public"), Destination: "/run/agent-infra/control-status", RW: false },
     { Type: "bind", Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
     { Type: "bind", Source: path.join(config.shareBase, "branches", branchDir), Destination: "/share/branch", RW: true },
     { Type: "bind", Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false },
@@ -383,6 +384,7 @@ test("running permission repair re-assesses seed targets before hydration", asyn
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-permissions-"));
   const config = recoveryFixtureConfig(tmpDir);
   let permissionsRepaired = false;
+  let brokerChecks = 0;
   const writes: string[][] = [];
 
   try {
@@ -398,6 +400,7 @@ test("running permission repair re-assesses seed targets before hydration", asyn
         index: 1
       },
       deps: {
+        ensureControlBroker: async () => { brokerChecks += 1; },
         run: () => JSON.stringify([{
           Id: "fixture-container-id",
           Config: { Labels: BRANCH_ONLY_LABELS },
@@ -421,6 +424,7 @@ test("running permission repair re-assesses seed targets before hydration", asyn
     });
 
     assert.equal(result.path, "recovered");
+    assert.equal(brokerChecks, 1);
     assert.equal(
       writes.some((args) => args.includes("rm") || args.includes("cp")),
       false,
@@ -513,6 +517,7 @@ test("recovery rejects mount and identity hard failures before writes", async ()
               index: 1
             },
             deps: {
+              ensureControlBroker: async () => {},
               start: () => {},
               run: () => JSON.stringify([{
                 Id: "fixture-container-id",
@@ -553,6 +558,7 @@ test("hard recovery failure requires explicit container replacement authorizatio
     )
   }]);
   const deps = {
+    ensureControlBroker: async () => {},
     run: () => inspect(),
     runOk: () => true,
     runVerbose: (_engine: string, _cmd: string, args: string[]) => {

@@ -27,7 +27,7 @@ function fixture(files: Record<string, string> = {}) {
 
 test('catalog exposes exactly the approved artifact families', () => {
   assert.deepEqual(artifactFamilyCatalog.map((item) => item.family), [
-    'analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code', 'manual-validation', 'pr-review'
+    'analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code', 'manual-validation', 'validation-run', 'pr-review'
   ]);
 });
 

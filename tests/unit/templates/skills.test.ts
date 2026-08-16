@@ -296,6 +296,7 @@ test("workflow skills document state check gates", () => {
     "code-task",
     "review-code",
     "complete-manual-validation",
+    "run-manual-validation",
     "complete-task"
   ].forEach((skill) => {
     skillDocPaths(skill).forEach((relativePath) => {
@@ -322,6 +323,7 @@ test("workflow state-check consumers use the typed task snapshot entrypoint", ()
     "code-task",
     "review-code",
     "complete-manual-validation",
+    "run-manual-validation",
     "complete-task"
   ].forEach((skill) => {
     skillDocPaths(skill).forEach((relativePath) => {
@@ -470,6 +472,7 @@ test("workflow verification consumers declare their business verification events
     "code-task": ["code.completed"],
     "review-code": ["review-code.completed"],
     "complete-manual-validation": ["manual-validation.completed"],
+    "run-manual-validation": ["validation-run.completed"],
     "block-task": ["block-task.completed"],
     "cancel-task": ["cancel-task.completed"],
     "commit": ["commit.completed"],
@@ -558,7 +561,8 @@ test("workflow verify config language variants keep only artifact language field
     "review-plan",
     "code-task",
     "review-code",
-    "complete-task"
+    "complete-task",
+    "run-manual-validation"
   ];
 
   skills.forEach((skill) => {
@@ -1225,7 +1229,7 @@ test("skills that write timestamps require date command guidance", () => {
 });
 
 test("artifact lifecycle skills use core context and events in every language variant", () => {
-  for (const skill of ["analyze-task", "review-analysis", "plan-task", "review-plan", "code-task", "review-code", "complete-manual-validation"]) {
+  for (const skill of ["analyze-task", "review-analysis", "plan-task", "review-plan", "code-task", "review-code", "complete-manual-validation", "run-manual-validation"]) {
     for (const relativePath of skillDocPaths(skill)) {
       const content = read(relativePath);
       assert.match(content, /agent-infra-internal task-artifact \{task-id\} inspect --family /, `${relativePath} should resolve artifact context through the core`);
@@ -1406,6 +1410,7 @@ test("platform workflow docs delegate comment mechanics to internal intents", ()
     "cancel-task": "platform-comment sync {task-id}",
     "code-task": "platform-comment sync {task-id}",
     "complete-manual-validation": "platform-comment sync {task-id}",
+    "run-manual-validation": "platform-comment sync {task-id}",
     "complete-task": "platform-comment sync {task-id}",
     "create-task": "platform-comment sync {task-id}",
     "import-issue": "platform-comment list --issue {issue-number}",
@@ -1611,6 +1616,11 @@ test("analyze-task brainstorming gate adds step 4 and whitelists analyze-task in
     read(".agents/rules/no-mid-flow-questions.md"),
     read("templates/.agents/rules/no-mid-flow-questions.zh-CN.md"),
     "deployed no-mid-flow-questions rule should stay byte-identical to its zh-CN template variant"
+  );
+  assert.equal(
+    read(".agents/skills/run-manual-validation/SKILL.md"),
+    read("templates/.agents/skills/run-manual-validation/SKILL.zh-CN.md"),
+    "deployed run-manual-validation SKILL should stay byte-identical to its zh-CN template variant"
   );
 });
 

@@ -12,7 +12,7 @@ import {
 const EXPECTED_EVENTS = [
   'analyze.awaiting-input', 'analyze.completed', 'review-analysis.completed',
   'plan.completed', 'review-plan.completed', 'code.completed', 'review-code.completed',
-  'manual-validation.completed', 'block-task.completed', 'cancel-task.completed',
+  'manual-validation.completed', 'validation-run.completed', 'block-task.completed', 'cancel-task.completed',
   'commit.completed', 'complete-task.preflight', 'complete-task.completed',
   'create-pr.completed', 'create-task.completed', 'import-codescan.completed',
   'import-dependabot.completed', 'import-issue.completed', 'watch-pr.completed',
@@ -47,6 +47,7 @@ test('verification catalog is a closed mapping of all business events', () => {
     'code.completed': ['code-task', 'active', 'gate', 'code', undefined],
     'review-code.completed': ['review-code', 'active', 'gate', 'review-code', undefined],
     'manual-validation.completed': ['complete-manual-validation', 'active', 'gate', 'manual-validation', undefined],
+    'validation-run.completed': ['run-manual-validation', 'active', 'gate', 'validation-run', undefined],
     'block-task.completed': ['block-task', 'blocked', 'gate', undefined, undefined],
     'cancel-task.completed': ['cancel-task', 'completed', 'gate', undefined, undefined],
     'commit.completed': ['commit', 'active', 'gate', undefined, undefined],

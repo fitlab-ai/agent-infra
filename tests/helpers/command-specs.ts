@@ -70,6 +70,11 @@ const commandSpecs: Record<string, CommandSpec> = {
     en: "Complete manual validation: $ARGUMENTS",
     zh: "完成人工验证：$ARGUMENTS"
   },
+  "run-manual-validation": {
+    usage: "<task-ref> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command...>",
+    en: "Run manual validation: $ARGUMENTS",
+    zh: "运行人工校验：$ARGUMENTS"
+  },
   "create-pr": {
     usage: "[task-ref | --task <ref>] [target-branch]",
     en: "Create PR: $ARGUMENTS",

@@ -71,6 +71,7 @@ const STAGE_ORDER = [
   'review-plan',
   'code',
   'review-code',
+  'validation-run',
   'task',
   'other'
 ] as const;
@@ -81,6 +82,7 @@ function stageOf(name: string): string {
   if (stem.startsWith('review-analysis')) return 'review-analysis';
   if (stem.startsWith('review-plan')) return 'review-plan';
   if (stem.startsWith('review-code')) return 'review-code';
+  if (stem.startsWith('validation-run')) return 'validation-run';
   if (stem.startsWith('analysis')) return 'analysis';
   if (stem.startsWith('plan')) return 'plan';
   if (stem.startsWith('code')) return 'code';

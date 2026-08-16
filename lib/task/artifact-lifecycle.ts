@@ -16,6 +16,7 @@ const artifactFamilyCatalog = [
   { family: 'code', sectionAliases: ['实现备注', 'Implementation Notes'], heading: '实现备注', labels: ['实现报告', 'Implementation Report'] },
   { family: 'review-code', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['代码审查', 'Code Review'] },
   { family: 'manual-validation', sectionAliases: ['实现备注', 'Implementation Notes'], heading: '实现备注', labels: ['人工验证', 'Manual Validation'] },
+  { family: 'validation-run', sectionAliases: ['实现备注', 'Implementation Notes'], heading: '实现备注', labels: ['验证运行证据', 'Validation Run Evidence'] },
   { family: 'pr-review', sectionAliases: ['审查反馈', 'Review Feedback'], heading: '审查反馈', labels: ['PR 审查报告', 'PR Review Report'] }
 ] as const;
 
@@ -257,7 +258,8 @@ const OPTIONAL_CONTEXT: Partial<Record<ArtifactFamily, { family: ArtifactFamily;
   analysis: { family: 'review-analysis', requireReference: true },
   plan: { family: 'review-plan', requireReference: true },
   'review-code': { family: 'review-plan' },
-  'manual-validation': { family: 'review-code' }
+  'manual-validation': { family: 'review-code' },
+  'validation-run': { family: 'review-code' }
 };
 
 function resolveArtifactContext(taskRef: string, family: string, options: InspectOptions = {}): ArtifactContextResult {

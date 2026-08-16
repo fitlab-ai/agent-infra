@@ -6,8 +6,10 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
 import { CLI_PATH, onPlatforms, gitSafeEnv, initIsolatedGitRepo, escapeRegExp } from '../../helpers.ts';
-import { buildStopCommand, isProcessAlive } from '../../../lib/server/process-control.ts';
+import { buildProcessTreeStopCommand, buildStopCommand, isProcessAlive } from '../../../lib/server/process-control.ts';
 import { getProcessStartTime } from '../../../lib/server/process-state.ts';
+import { terminateSandboxControlExecution } from '../../../lib/sandbox/control/state.ts';
+import type { SandboxControlExecution } from '../../../lib/sandbox/control/protocol.ts';
 
 // buildStopCommand is pure, so both platform branches are asserted on every OS.
 // This is the win32 `taskkill` coverage that the platform-guarded lifecycle
@@ -20,6 +22,59 @@ test('buildStopCommand uses taskkill on win32 and SIGTERM elsewhere', () => {
   });
   assert.deepEqual(buildStopCommand(4321, 'linux'), { kind: 'signal', signal: 'SIGTERM' });
   assert.deepEqual(buildStopCommand(4321, 'darwin'), { kind: 'signal', signal: 'SIGTERM' });
+});
+
+test('buildProcessTreeStopCommand targets the whole execution tree', () => {
+  assert.deepEqual(buildProcessTreeStopCommand(42, 'win32'), {
+    kind: 'exec', command: 'taskkill', args: ['/PID', '42', '/T', '/F']
+  });
+  assert.deepEqual(buildProcessTreeStopCommand(42, 'linux'), {
+    kind: 'group-signal', pid: -42, signal: 'SIGTERM'
+  });
+  assert.deepEqual(buildProcessTreeStopCommand(42, 'darwin'), {
+    kind: 'group-signal', pid: -42, signal: 'SIGTERM'
+  });
+});
+
+test('sandbox execution termination waits for the entire POSIX process group', onPlatforms('linux', 'darwin'), () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-process-group-'));
+  const childPidPath = path.join(root, 'child.pid');
+  const leader = spawn(process.execPath, ['-e', [
+    "const {spawn}=require('node:child_process')",
+    "const fs=require('node:fs')",
+    "const child=spawn(process.execPath,['-e',\"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)\"],{stdio:'ignore'})",
+    `fs.writeFileSync(${JSON.stringify(childPidPath)},String(child.pid))`,
+    "process.on('SIGTERM',()=>process.exit(0))",
+    "setInterval(()=>{},1000)"
+  ].join(';')], { detached: true, stdio: 'ignore' });
+  leader.unref();
+  assert.ok(leader.pid);
+  let startTime: string | null = null;
+  const readyDeadline = Date.now() + 2_000;
+  while (Date.now() < readyDeadline) {
+    startTime = getProcessStartTime(leader.pid!);
+    if (startTime && fs.existsSync(childPidPath)) break;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  }
+  assert.ok(startTime);
+  assert.equal(fs.existsSync(childPidPath), true);
+  const childPid = Number(fs.readFileSync(childPidPath, 'utf8'));
+  const execution: SandboxControlExecution = {
+    version: 1,
+    generation: 'test',
+    requestId: '12345678-1234-1234-1234-123456789abc',
+    nonce: 'nonce',
+    child: { pid: leader.pid!, startTime: startTime!, processGroupId: leader.pid! },
+    phase: 'running',
+    updatedAt: Date.now()
+  };
+  try {
+    assert.equal(terminateSandboxControlExecution(execution, { timeoutMs: 500 }), true);
+    assert.equal(isProcessAlive(childPid), false);
+  } finally {
+    try { process.kill(-leader.pid!, 'SIGKILL'); } catch { /* already gone */ }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 const PROJECT = 'lifecycle';

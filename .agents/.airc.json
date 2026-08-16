@@ -6,6 +6,11 @@
     "type": "github"
   },
   "prFlow": "required",
+  "review": {
+    "post_review_exclude_globs": [
+      ".agents/workspace/README.md"
+    ]
+  },
   "templateVersion": "v0.9.6-alpha.0",
   "sandbox": {
     "engine": "orbstack",
@@ -151,6 +156,7 @@
       ".claude/commands/review-code.md": "sha256:43099d3ae6391d907e97b5827544e0afd70c5178946a04e501af616ce30c4410",
       ".claude/commands/review-plan.md": "sha256:430b8db4b381e5e9f5df183944108e0ba9aa2a823637ad7008f8ccaf738048bc",
       ".claude/commands/review-pr.md": "sha256:8c2c6100b2e3ef783a276757ed4f44d23d7734f27ce9952ede00c5ba58bef8ea",
+      ".claude/commands/run-manual-validation.md": "sha256:a83e2fb7663879c92c9d5d97bc4b45a5fa86773ea6f872f353dfdce845bdc000",
       ".claude/commands/run-task.md": "sha256:c2794d951f2272f288952e4dd5d1987eed3477385f495782cd989e8d93be33d2",
       ".claude/commands/watch-pr.md": "sha256:b0e4b0122a82d82dc4da79994372c6b4d828e0cdc54dad6ab6bce0de786572a5",
       ".codex/hooks.json": "sha256:21c72232a3e01e4488a9cf23b6c6f7752820c7153fbfa3d8ef15e305492caf44",
@@ -180,6 +186,7 @@
       ".opencode/commands/review-code.md": "sha256:78b4c3a75a383b514df660b6bd365fd58dee281124e6d4b5160745856ed1f762",
       ".opencode/commands/review-plan.md": "sha256:b5fc5a10d229174158f21db61537771a859c3cc4b213624df7c33818e12be803",
       ".opencode/commands/review-pr.md": "sha256:fc9855c9548a5407b8eb307e975cba7f95adc61b0b41737bb42ae3868bd6845d",
+      ".opencode/commands/run-manual-validation.md": "sha256:24874d258f5a047b9f567846275580a91a72de76ff96dd8352f1fc7ba977dd19",
       ".opencode/commands/run-task.md": "sha256:01a83a668fcc4a095949e97606bf2fe4f0c1546aa1adbd95777b6befb68780e1",
       ".opencode/commands/watch-pr.md": "sha256:2e9a5f250b07a0cd870db335651df5c0940c8225013eb0579b9a2aa7f6177ced",
       ".claude/commands/entropy-check.md": "sha256:3cdf6f4a18330c60f2a0e2e5b4831bb7ec13cbcbeb550f0c7a75f998b8ec7f08",

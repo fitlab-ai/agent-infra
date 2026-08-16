@@ -81,6 +81,7 @@ test("sandbox recovery does not replay custom postSetupCmds or versionCmd", asyn
       Source: hostPath, Destination: path.posix.join("/workspace/.agents/workspace", state), RW: false
     })),
     { Source: control.channelDir, Destination: "/run/agent-infra/control", RW: true },
+    { Source: control.statusDir, Destination: "/run/agent-infra/control-status", RW: false },
     { Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
     { Source: path.join(config.shareBase, "branches", branchDir), Destination: "/share/branch", RW: true },
     { Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false }

@@ -11,7 +11,7 @@ import type { TaskWorkspaceState } from './resolve-ref.ts';
 type VerificationEvent =
   | 'analyze.awaiting-input' | 'analyze.completed'
   | 'review-analysis.completed' | 'plan.completed' | 'review-plan.completed'
-  | 'code.completed' | 'review-code.completed' | 'manual-validation.completed'
+  | 'code.completed' | 'review-code.completed' | 'manual-validation.completed' | 'validation-run.completed'
   | 'block-task.completed' | 'cancel-task.completed' | 'commit.completed'
   | 'complete-task.preflight' | 'complete-task.completed'
   | 'create-pr.completed' | 'create-task.completed'
@@ -62,6 +62,7 @@ const VERIFICATION_CATALOG: Readonly<Record<VerificationEvent, VerificationSpec>
   'code.completed': gate('code-task', 'active', 'code'),
   'review-code.completed': gate('review-code', 'active', 'review-code'),
   'manual-validation.completed': gate('complete-manual-validation', 'active', 'manual-validation'),
+  'validation-run.completed': gate('run-manual-validation', 'active', 'validation-run'),
   'block-task.completed': gate('block-task', 'blocked'),
   'cancel-task.completed': gate('cancel-task', 'completed'),
   'commit.completed': gate('commit', 'active'),

@@ -25,6 +25,7 @@ export function sandboxCoreBindMounts(
     shellConfigHostDir?: string;
     workspaceViewRoot: string;
     controlDir: string;
+    controlStatusDir: string;
     taskSource?: string;
     taskId?: string;
   }
@@ -80,6 +81,10 @@ export function sandboxCoreBindMounts(
     }
   );
   mounts.push({
+    hostPaths: [overrides.controlStatusDir],
+    containerPath: '/run/agent-infra/control-status',
+    readOnly: true
+  }, {
     hostPaths: [overrides.controlDir],
     containerPath: '/run/agent-infra/control',
     readOnly: false

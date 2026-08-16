@@ -15,7 +15,7 @@ if (
   && (command === 'task-lifecycle' || command === 'task-orchestration')
 ) {
   const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
-  sandboxControl(['client', command, ...process.argv.slice(3)]);
+  await sandboxControl(['client', command, ...process.argv.slice(3)]);
 } else switch (command) {
 
   case 'task-create': {
@@ -26,7 +26,7 @@ if (
 
   case 'sandbox-control': {
     const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
-    sandboxControl(process.argv.slice(3));
+    await sandboxControl(process.argv.slice(3));
     break;
   }
   case 'agent-client': {

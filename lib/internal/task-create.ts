@@ -1,15 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { requestSandboxTaskCreate } from '../sandbox/control/client.ts';
+import { requestSandboxTaskCreate, SandboxControlClientError } from '../sandbox/control/client.ts';
 import { SANDBOX_CONTROL_MAX_BYTES } from '../sandbox/control/protocol.ts';
 import { validateTaskCreateCandidate } from '../task/create.ts';
 import { createTask, type TaskCreateResult } from '../task/create-service.ts';
 
-function failed(code: string, message: string): TaskCreateResult {
+function failed(code: string, message: string, retryable = false): TaskCreateResult {
   return {
-    status: 'failed', changed: false, task: { id: null, shortId: null }, issue: null,
-    operations: [], warnings: [], error: { code, message, retryable: false }
+    status: retryable ? 'blocked' : 'failed', changed: false, task: { id: null, shortId: null }, issue: null,
+    operations: [], warnings: [], error: { code, message, retryable }
   };
 }
 
@@ -33,6 +33,14 @@ function taskCreate(args: string[]): void {
     const candidate = validateTaskCreateCandidate(JSON.parse(fs.readFileSync(inputPath, 'utf8')));
     if (process.env.AGENT_INFRA_CONTROL_TOKEN) {
       const response = requestSandboxTaskCreate({ candidate });
+      if (response.phase === 'rejected') {
+        output(failed(
+          response.error?.code ?? 'SANDBOX_CONTROL_REJECTED',
+          response.error?.message ?? response.stderr,
+          response.error?.retryable ?? false
+        ));
+        return;
+      }
       process.stdout.write(response.stdout);
       process.stderr.write(response.stderr);
       process.exitCode = response.exitCode;
@@ -40,6 +48,10 @@ function taskCreate(args: string[]): void {
     }
     output(createTask(candidate, { repoRoot: process.cwd() }));
   } catch (error) {
+    if (error instanceof SandboxControlClientError) {
+      output(failed(error.detail.code, error.detail.message, error.detail.retryable));
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     const code = /^([A-Z][A-Z0-9_]+)/.exec(message)?.[1] ?? 'TASK_CREATE_INPUT_INVALID';
     output(failed(code, message));

@@ -2,10 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import type { ExecFileSyncOptions, StdioOptions } from 'node:child_process';
 import { parseArgs } from 'node:util';
-import { fileURLToPath } from 'node:url';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { listAgentClientAdapters } from '../../agent-clients/registry.ts';
@@ -67,7 +66,8 @@ import type { SandboxTool, TmpfsSeedEntry } from '../tools.ts';
 import {
   assertFreshSandboxReady,
   hydrateTmpfsSeedEntries,
-  prepareTmpfsMounts
+  prepareTmpfsMounts,
+  startSandboxControlBroker
 } from '../recovery.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from '../mounts.ts';
@@ -157,12 +157,6 @@ type HostShellConfig = {
   hostDir: string;
   mounts: Array<{ hostPath: string; containerPath: string }>;
 };
-
-function internalCliPath(): string {
-  const directory = path.dirname(fileURLToPath(import.meta.url));
-  const extension = path.extname(fileURLToPath(import.meta.url));
-  return path.resolve(directory, '..', '..', '..', 'bin', `internal-cli${extension}`);
-}
 
 function resolveToolDirs(config: Pick<SandboxCreateConfig, 'project'>, tools: SandboxTool[], branch: string): ResolvedTool[] {
   return tools.map((tool) => {
@@ -1364,6 +1358,7 @@ export async function create(args: string[]): Promise<void> {
               shellConfigHostDir: hostShellConfig.hostDir,
               workspaceViewRoot: workspaceView.root,
               controlDir: control.channelDir,
+              controlStatusDir: control.statusDir,
               ...(target.workspace.mode === 'task-bound'
                 ? {
                   taskSource: assertSandboxTaskSource(
@@ -1447,7 +1442,11 @@ export async function create(args: string[]): Promise<void> {
               '-e',
               `AGENT_INFRA_CONTROL_TOKEN=${control.token}`,
               '-e',
+              `AGENT_INFRA_CONTROL_GENERATION=${control.generation}`,
+              '-e',
               'AGENT_INFRA_CONTROL_DIR=/run/agent-infra/control',
+              '-e',
+              'AGENT_INFRA_CONTROL_STATUS_DIR=/run/agent-infra/control-status',
               '--label',
               `${sandboxRuntimeCapabilityLabel(effectiveConfig)}=${capabilityPlan.runtimeSignature}`,
               ...coreVolumes,
@@ -1469,16 +1468,7 @@ export async function create(args: string[]): Promise<void> {
               '/workspace',
               effectiveConfig.imageName
             ]);
-            const broker = spawn(
-              process.execPath,
-              [internalCliPath(), 'sandbox-control', 'serve', '--manifest', control.manifestPath],
-              { cwd: effectiveConfig.repoRoot, detached: true, stdio: 'ignore' }
-            );
-            broker.once('error', () => {
-              // Fresh readiness verification below remains the source of truth;
-              // consume detached spawn errors so they cannot crash the command.
-            });
-            broker.unref();
+            await startSandboxControlBroker(effectiveConfig.repoRoot, control.manifestPath);
             createdTmpfsSeedPlan = tmpfsSeedPlan;
           } finally {
             envFile.cleanup();

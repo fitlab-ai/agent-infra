@@ -24,6 +24,17 @@ export type StopCommand =
   | { kind: 'signal'; signal: NodeJS.Signals }
   | { kind: 'exec'; command: string; args: string[] };
 
+export type ProcessTreeStopCommand =
+  | { kind: 'group-signal'; pid: number; signal: NodeJS.Signals }
+  | { kind: 'exec'; command: string; args: string[] };
+
+export function buildProcessTreeStopCommand(pid: number, platform: NodeJS.Platform): ProcessTreeStopCommand {
+  if (platform === 'win32') {
+    return { kind: 'exec', command: 'taskkill', args: ['/PID', String(pid), '/T', '/F'] };
+  }
+  return { kind: 'group-signal', pid: -pid, signal: 'SIGTERM' };
+}
+
 export function buildStopCommand(pid: number, platform: NodeJS.Platform): StopCommand {
   if (platform === 'win32') {
     return { kind: 'exec', command: 'taskkill', args: ['/PID', String(pid), '/T', '/F'] };

@@ -10,6 +10,7 @@ Commands:
   ls [--all | --blocked | --completed]   List tasks (default: active)
   show [--task <ref>]                    Print a task.md
   status [--task <ref>]                  Aggregated status view (metadata / artifacts / git / platform)
+  validate <ref> [options] -- <command>  Run host validation in snapshot or inplace scope
 
 Examples:
   ai task cat 11 analysis
@@ -29,6 +30,7 @@ Examples:
   ai task show 11
   ai task show TASK-20260612-162737
   ai task status 11
+  ai task validate 11 -- npm test
 
 Run 'ai task <command> --help' for details.`;
 
@@ -91,6 +93,12 @@ export async function runTask(args: string[]): Promise<void> {
     case 'status': {
       const { status } = await import('./commands/status.ts');
       status(rest);
+      break;
+    }
+    case 'validate': {
+      const { validate } = await import('./commands/validate.ts');
+      const exitCode = await validate(rest);
+      if (exitCode !== 0) process.exitCode = exitCode;
       break;
     }
     default:
