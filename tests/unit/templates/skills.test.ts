@@ -1364,6 +1364,24 @@ test("workflow skill docs update task comments before publishing artifact commen
   });
 });
 
+test("run-manual-validation uses complete typed comment sync intents in order", () => {
+  const taskSync = "platform-comment sync {task-id} --kind task --agent {standard-agent-token}";
+  const artifactSync = "platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {standard-agent-token}";
+
+  skillDocPaths("run-manual-validation").forEach((relativePath) => {
+    const content = read(relativePath);
+    const taskSyncIndex = content.indexOf(taskSync);
+    const artifactSyncIndex = content.indexOf(artifactSync);
+
+    assert.notEqual(taskSyncIndex, -1, `${relativePath} should invoke the complete task comment sync intent`);
+    assert.notEqual(artifactSyncIndex, -1, `${relativePath} should invoke the complete artifact comment sync intent`);
+    assert.ok(
+      taskSyncIndex < artifactSyncIndex,
+      `${relativePath} should sync the task comment before publishing the artifact comment`
+    );
+  });
+});
+
 test("review-pr keeps the sync -> write-back -> re-sync -> verify closed-loop order (PL-8)", () => {
   const variants = [
     ".agents/skills/review-pr/SKILL.md",

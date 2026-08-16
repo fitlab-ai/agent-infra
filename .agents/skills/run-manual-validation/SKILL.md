@@ -30,7 +30,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 3. 选择模式：固定提交只查用 snapshot；依赖未提交内容、原挂载或原位权限用 inplace；不确定时先 snapshot，只有证据表明必须原位时才升级。
 4. 调用 `ai task validate {task-ref} --scope {scope} --format json -- {command...}`。运行时升级必须作为第二次显式 inplace 调用，并记录理由。
 5. 读取 `reference/report-template.md`，创建 `validation-run.md|validation-run-r{N}.md`；只写 CLI JSON allowlist 与去敏摘要。
-6. 运行 `agent-infra-internal task-event {task-id} validation-run.completed --agent {standard-agent-token} --artifact {artifact}`。存在 Issue 时依次运行 `agent-infra-internal platform-comment sync {task-id}` 和 `agent-infra-internal platform-comment sync-artifact {task-id} --artifact {artifact}`。
+6. 运行 `agent-infra-internal task-event {task-id} validation-run.completed --agent {standard-agent-token} --artifact {artifact}`。存在 Issue 时依次运行 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` 和 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {standard-agent-token}`。
 7. 运行 `agent-infra-internal task-verify {task-id} validation-run.completed --artifact {artifact} --format text`；未通过则修复后重跑。
 8. 告知用户证据路径、覆盖缺口和验证结果；明确仍需维护者判断是否执行 `complete-manual-validation`。读取 `.agents/rules/next-step-output.md`，最后一行输出 `Completed at`。
 

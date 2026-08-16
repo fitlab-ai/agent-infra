@@ -30,7 +30,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 3. Use snapshot for fixed-commit checks and inplace for uncommitted content, original mounts, or original permissions; when uncertain, start with snapshot and upgrade only with evidence.
 4. Call `ai task validate {task-ref} --scope {scope} --format json -- {command...}`. A runtime upgrade must be a second explicit inplace call with its reason recorded.
 5. Read `reference/report-template.md`, create `validation-run.md|validation-run-r{N}.md`, and record only the CLI JSON allowlist and a sanitized summary.
-6. Run `agent-infra-internal task-event {task-id} validation-run.completed --agent {standard-agent-token} --artifact {artifact}`. When an Issue exists, run `agent-infra-internal platform-comment sync {task-id}` and then `agent-infra-internal platform-comment sync-artifact {task-id} --artifact {artifact}`.
+6. Run `agent-infra-internal task-event {task-id} validation-run.completed --agent {standard-agent-token} --artifact {artifact}`. When an Issue exists, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` and then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {standard-agent-token}`.
 7. Run `agent-infra-internal task-verify {task-id} validation-run.completed --artifact {artifact} --format text`; fix failures and rerun it.
 8. Report the evidence path, coverage gaps, and verification result; explicitly leave the decision to run `complete-manual-validation` to the maintainer. Read `.agents/rules/next-step-output.md` and end with `Completed at`.
 
