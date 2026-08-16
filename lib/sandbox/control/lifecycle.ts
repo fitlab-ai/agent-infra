@@ -18,6 +18,8 @@ type OwnerIdentity = Readonly<{ pid: number; startTime: string }>;
 type BrokerOwner = OwnerIdentity & Readonly<{ version: 2; token: string; generation: string }>;
 
 const DEFAULT_QUIESCE_TIMEOUT_MS = 7_000;
+const QUIESCING_FILE = 'quiescing.json';
+const BROKER_STARTING_FILE = 'broker-starting.json';
 
 function regularFile(filePath: string): boolean {
   try {
@@ -27,6 +29,101 @@ function regularFile(filePath: string): boolean {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
     throw error;
   }
+}
+
+export function isSandboxControlRootQuiescing(root: string): boolean {
+  return fs.existsSync(path.join(path.resolve(root), QUIESCING_FILE));
+}
+
+function markSandboxControlRootQuiescing(root: string): void {
+  const markerPath = path.join(root, QUIESCING_FILE);
+  try {
+    fs.writeFileSync(markerPath, `${JSON.stringify({ version: 1, startedAt: Date.now() })}\n`, {
+      mode: 0o600,
+      flag: 'wx'
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    if (!regularFile(markerPath)) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
+  }
+}
+
+function readStartupOwner(filePath: string): { raw: string; owner: OwnerIdentity } | null {
+  if (!fs.existsSync(filePath)) return null;
+  if (!regularFile(filePath)) throw new Error('SANDBOX_CONTROL_BROKER_START_TRANSITION');
+  const raw = fs.readFileSync(filePath, 'utf8');
+  try {
+    const record = JSON.parse(raw) as Partial<OwnerIdentity> & { version?: unknown };
+    if (record.version !== 1 || !Number.isSafeInteger(record.pid) || (record.pid ?? 0) <= 0
+      || typeof record.startTime !== 'string') return null;
+    return { raw, owner: { pid: record.pid!, startTime: record.startTime } };
+  } catch {
+    return null;
+  }
+}
+
+async function waitForStartupTransition(root: string, timeoutMs: number): Promise<void> {
+  const transitionPath = path.join(root, BROKER_STARTING_FILE);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const transition = readStartupOwner(transitionPath);
+    if (!fs.existsSync(transitionPath)) return;
+    if (transition && !ownerLive(transition.owner)) {
+      try {
+        if (fs.readFileSync(transitionPath, 'utf8') === transition.raw) fs.unlinkSync(transitionPath);
+      } catch {
+        // A concurrent startup transition changed or removed the record.
+      }
+      continue;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('SANDBOX_CONTROL_BROKER_START_TRANSITION');
+}
+
+export async function acquireSandboxControlBrokerStartup(
+  root: string,
+  owner: OwnerIdentity,
+  timeoutMs = 5_000
+): Promise<() => void> {
+  const resolvedRoot = path.resolve(root);
+  const transitionPath = path.join(resolvedRoot, BROKER_STARTING_FILE);
+  const record = `${JSON.stringify({ version: 1, ...owner })}\n`;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (isSandboxControlRootQuiescing(resolvedRoot)) throw new Error('SANDBOX_CONTROL_QUIESCING');
+    try {
+      fs.writeFileSync(transitionPath, record, { mode: 0o600, flag: 'wx' });
+      if (isSandboxControlRootQuiescing(resolvedRoot)) {
+        try {
+          if (fs.readFileSync(transitionPath, 'utf8') === record) fs.unlinkSync(transitionPath);
+        } catch {
+          // The deletion side owns the transition now.
+        }
+        throw new Error('SANDBOX_CONTROL_QUIESCING');
+      }
+      return () => {
+        try {
+          if (fs.readFileSync(transitionPath, 'utf8') === record) fs.unlinkSync(transitionPath);
+        } catch {
+          // A newer transition or deletion owns the path.
+        }
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const transition = readStartupOwner(transitionPath);
+      if (transition && !ownerLive(transition.owner)) {
+        try {
+          if (fs.readFileSync(transitionPath, 'utf8') === transition.raw) fs.unlinkSync(transitionPath);
+        } catch {
+          // A concurrent transition changed the record.
+        }
+        continue;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  throw new Error('SANDBOX_CONTROL_BROKER_START_TRANSITION');
 }
 
 export function readSandboxControlManifest(manifestPath: string): SandboxControlManifest {
@@ -183,6 +280,9 @@ export async function quiesceSandboxControlRoot(
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
   }
 
+  markSandboxControlRootQuiescing(resolvedRoot);
+  await waitForStartupTransition(resolvedRoot, options.timeoutMs ?? DEFAULT_QUIESCE_TIMEOUT_MS);
+
   const manifestPath = path.join(resolvedRoot, 'manifest.json');
   const manifest = fs.existsSync(manifestPath) ? readSandboxControlManifest(manifestPath) : null;
   const broker = readBrokerOwner(path.join(resolvedRoot, 'broker.json'));
@@ -202,15 +302,23 @@ export async function quiesceSandboxControlRoot(
   }
   if (!manifest && brokerLive) throw new Error('SANDBOX_CONTROL_OWNER_MISMATCH');
 
-  const owner: OwnerIdentity | null = brokerLive ? broker : statusLive ? statusOwner : null;
-  if (!owner) {
-    if (manifest && !broker && !status) throw new Error('SANDBOX_CONTROL_OWNER_EVIDENCE_MISSING');
-    return broker || status ? 'stale' : 'missing';
-  }
-
   const platform = options.platform ?? process.platform;
   const timeoutMs = options.timeoutMs ?? DEFAULT_QUIESCE_TIMEOUT_MS;
   let executions = manifest ? readExecutions(manifest) : [];
+  const owner: OwnerIdentity | null = brokerLive ? broker : statusLive ? statusOwner : null;
+  if (!owner) {
+    if (manifest && !broker && !status) throw new Error('SANDBOX_CONTROL_OWNER_EVIDENCE_MISSING');
+    for (const execution of executions) {
+      if (!terminateSandboxControlExecution(execution, { platform, timeoutMs })) {
+        throw new Error(`SANDBOX_CONTROL_EXECUTION_STILL_RUNNING: ${execution.requestId}`);
+      }
+    }
+    if (executions.some((execution) => executionAlive(execution, platform))) {
+      throw new Error('SANDBOX_CONTROL_EXECUTION_STILL_RUNNING');
+    }
+    return broker || status ? 'stale' : 'missing';
+  }
+
   signalOwner(owner, platform, false);
   if (await waitForExit(owner, timeoutMs)) {
     if (executions.some((execution) => executionAlive(execution, platform))) {

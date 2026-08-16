@@ -107,6 +107,83 @@ test('sandbox control lifecycle accepts a stale broker when the manifest is miss
   }
 });
 
+test('sandbox control lifecycle terminates a live execution before accepting a stale broker', onPlatforms('linux', 'darwin'), async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-stale-execution-'));
+  const execution = spawn(process.execPath, ['--eval', 'setInterval(() => {}, 1000);'], {
+    detached: true,
+    stdio: 'ignore'
+  });
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, 'stale-execution-generation');
+    const executionStartTime = getProcessStartTime(execution.pid!);
+    assert.ok(executionStartTime);
+    fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
+      version: 2, pid: 999_999_999, startTime: 'gone',
+      token: 'lifecycle-secret', generation: 'stale-execution-generation'
+    })}\n`);
+    const executionDir = path.join(root, 'processing', 'stale-execution-request');
+    fs.mkdirSync(executionDir);
+    fs.writeFileSync(path.join(executionDir, 'execution.json'), `${JSON.stringify({
+      version: 1, generation: 'stale-execution-generation', requestId: 'stale-execution-request',
+      nonce: 'stale-execution-nonce',
+      child: { pid: execution.pid, startTime: executionStartTime, processGroupId: execution.pid },
+      phase: 'running', updatedAt: Date.now()
+    })}\n`);
+
+    assert.equal(await quiesceSandboxControlRoot(root, { timeoutMs: 100 }), 'stale');
+    const exitDeadline = Date.now() + 2_000;
+    while (isProcessAlive(execution.pid!) && Date.now() < exitDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(isProcessAlive(execution.pid!), false);
+    assert.equal(fs.existsSync(manifestPath), true);
+  } finally {
+    if (execution.pid && isProcessAlive(execution.pid)) {
+      try { process.kill(-execution.pid, 'SIGKILL'); } catch { /* already exited */ }
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox control lifecycle excludes a concurrent broker recovery after quiescing begins', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recovery-quiesce-'));
+  let brokerPid: number | null = null;
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, 'recovery-quiesce-generation');
+    fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
+      version: 2, pid: 999_999_999, startTime: 'gone',
+      token: 'lifecycle-secret', generation: 'recovery-quiesce-generation'
+    })}\n`);
+    fs.writeFileSync(path.join(root, 'public', 'status.json'), `${JSON.stringify({
+      version: 1, generation: 'recovery-quiesce-generation',
+      broker: { pid: 999_999_999, startTime: 'gone' }, state: 'healthy',
+      reasonCode: null, activeRequestId: null, updatedAt: Date.now()
+    })}\n`);
+
+    const startup = startSandboxControlBroker(root, manifestPath).then(
+      () => ({ status: 'fulfilled' as const }),
+      (error: unknown) => ({ status: 'rejected' as const, error })
+    );
+    const result = await quiesceSandboxControlRoot(root, { timeoutMs: 1_000 });
+    const startupResult = await startup;
+    if (fs.existsSync(path.join(root, 'broker.json'))) {
+      brokerPid = JSON.parse(fs.readFileSync(path.join(root, 'broker.json'), 'utf8')).pid;
+    }
+
+    assert.equal(result, 'stale');
+    assert.equal(startupResult.status, 'rejected');
+    if (startupResult.status === 'rejected') assert.match(String(startupResult.error), /SANDBOX_CONTROL_QUIESCING/);
+    assert.equal(brokerPid === null || !isProcessAlive(brokerPid), true);
+    await assert.rejects(() => startSandboxControlBroker(root, manifestPath), /SANDBOX_CONTROL_QUIESCING/);
+    assert.equal(fs.existsSync(manifestPath), true);
+  } finally {
+    if (brokerPid && isProcessAlive(brokerPid)) await stopBroker(brokerPid);
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
+  }
+});
+
 test('sandbox control lifecycle waits for a live broker to finish its final writes', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-quiesce-'));
   let brokerPid: number | null = null;

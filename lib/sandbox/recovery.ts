@@ -49,10 +49,13 @@ import {
   startSandboxContainer,
   type SandboxRow
 } from './commands/list-running.ts';
-import { processIdentityMatches, removePidFileIfMatches } from '../server/process-state.ts';
+import { getProcessStartTime, processIdentityMatches, removePidFileIfMatches } from '../server/process-state.ts';
+import {
+  acquireSandboxControlBrokerStartup,
+  isSandboxControlRootQuiescing
+} from './control/lifecycle.ts';
 import {
   appendSandboxControlAudit,
-  cleanupStaleSandboxControlLease,
   readSandboxControlStatus
 } from './control/state.ts';
 import {
@@ -161,6 +164,7 @@ type ExpectedMount = {
 };
 
 async function waitForSandboxControlBrokerStatus(params: {
+  root: string;
   statusDir: string;
   generation: string;
   pid: number;
@@ -168,6 +172,7 @@ async function waitForSandboxControlBrokerStatus(params: {
 }, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (isSandboxControlRootQuiescing(params.root)) throw new Error('SANDBOX_CONTROL_QUIESCING');
     try {
       const status = readSandboxControlStatus(params.statusDir);
       if (status.generation === params.generation && status.broker.pid === params.pid
@@ -187,7 +192,9 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
   const extension = path.extname(fileURLToPath(import.meta.url));
   const internalCli = path.resolve(directory, '..', '..', 'bin', `internal-cli${extension}`);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as SandboxControlManifest;
-  const brokerPath = path.join(path.dirname(manifestPath), 'broker.json');
+  const root = path.dirname(manifestPath);
+  if (isSandboxControlRootQuiescing(root)) throw new Error('SANDBOX_CONTROL_QUIESCING');
+  const brokerPath = path.join(root, 'broker.json');
   let brokerSnapshot: string | null = null;
   let replacedBrokerRecord = false;
   try {
@@ -222,6 +229,7 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
       && broker.generation === manifest.generation
     ) {
       await waitForSandboxControlBrokerStatus({
+        root,
         statusDir: manifest.publicStatusDir,
         generation: manifest.generation,
         pid: owner.pid,
@@ -250,26 +258,42 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
       }
       throw new Error('SANDBOX_CONTROL_BROKER_OWNER_ACTIVE');
     }
-    replacedBrokerRecord = removePidFileIfMatches(brokerPath, brokerSnapshot);
-    if (!replacedBrokerRecord && fs.existsSync(brokerPath)) {
-      throw new Error('SANDBOX_CONTROL_BROKER_OWNER_TRANSITION');
+  }
+  const startupStartTime = getProcessStartTime(process.pid);
+  if (!startupStartTime) throw new Error('SANDBOX_CONTROL_BROKER_IDENTITY_UNAVAILABLE');
+  const releaseStartup = await acquireSandboxControlBrokerStartup(root, {
+    pid: process.pid,
+    startTime: startupStartTime
+  });
+  let child: ReturnType<typeof spawn>;
+  try {
+    const currentBroker = fs.existsSync(brokerPath) ? fs.readFileSync(brokerPath, 'utf8') : null;
+    if (currentBroker !== brokerSnapshot) return startSandboxControlBroker(repoRoot, manifestPath);
+    if (brokerSnapshot !== null) {
+      replacedBrokerRecord = removePidFileIfMatches(brokerPath, brokerSnapshot);
+      if (!replacedBrokerRecord && fs.existsSync(brokerPath)) {
+        throw new Error('SANDBOX_CONTROL_BROKER_OWNER_TRANSITION');
+      }
     }
+    if (replacedBrokerRecord) {
+      appendSandboxControlAudit(manifest, 'broker-observed-crash');
+      appendSandboxControlAudit(manifest, 'broker-restart');
+    }
+    child = spawn(
+      process.execPath,
+      nodeEntryArgs(internalCli, ['sandbox-control', 'serve', '--manifest', manifestPath]),
+      { cwd: repoRoot, detached: true, stdio: 'ignore' }
+    );
+  } finally {
+    releaseStartup();
   }
-  if (replacedBrokerRecord) {
-    appendSandboxControlAudit(manifest, 'broker-observed-crash');
-    appendSandboxControlAudit(manifest, 'broker-restart');
-  }
-  const child = spawn(
-    process.execPath,
-    nodeEntryArgs(internalCli, ['sandbox-control', 'serve', '--manifest', manifestPath]),
-    { cwd: repoRoot, detached: true, stdio: 'ignore' }
-  );
   let spawnError: Error | null = null;
   child.once('error', (error) => { spawnError = error; });
   child.unref();
   if (!child.pid) throw new Error('SANDBOX_CONTROL_BROKER_START_FAILED');
   try {
     await waitForSandboxControlBrokerStatus({
+      root,
       statusDir: manifest.publicStatusDir,
       generation: manifest.generation,
       pid: child.pid
@@ -297,11 +321,7 @@ async function ensureSandboxControlBroker(params: {
   if (manifest.version !== 3) {
     throw new Error('SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; container-only recreation is required');
   }
-  if (cleanupStaleSandboxControlLease(manifest)) {
-    appendSandboxControlAudit(manifest, 'lease-stale-cleanup');
-  }
   const brokerPath = path.join(control.root, 'broker.json');
-  const hadBrokerRecord = fs.existsSync(brokerPath);
   try {
     const broker = JSON.parse(fs.readFileSync(brokerPath, 'utf8')) as {
       version?: unknown;
@@ -328,6 +348,7 @@ async function ensureSandboxControlBroker(params: {
         // A verified live owner may still be publishing its initial status.
       }
       await waitForSandboxControlBrokerStatus({
+        root: control.root,
         statusDir: control.statusDir,
         generation: manifest.generation,
         pid: broker.pid,
@@ -338,9 +359,6 @@ async function ensureSandboxControlBroker(params: {
   } catch {
     // A missing, stale, or malformed broker record is replaced below.
   }
-  if (hadBrokerRecord) appendSandboxControlAudit(manifest, 'broker-observed-crash');
-  fs.rmSync(brokerPath, { force: true });
-  if (hadBrokerRecord) appendSandboxControlAudit(manifest, 'broker-restart');
   await startSandboxControlBroker(params.config.repoRoot, control.manifestPath);
 }
 
