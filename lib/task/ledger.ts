@@ -61,7 +61,22 @@ function validateLedgerRows(rows: readonly LedgerRow[]): LedgerValidationError |
   for (const row of rows) {
     if (seen.has(row.id)) return { code: 'LEDGER_DUPLICATE_ID', message: `duplicate ledger id '${row.id}'` };
     seen.add(row.id);
-    if (/^PRC-[1-9]\d*$/.test(row.id)) continue;
+    if (/^PRC-[1-9]\d*$/.test(row.id)) {
+      if (
+        row.stage !== 'post-review-commit' ||
+        row.round !== '-' ||
+        row.severity !== '-' ||
+        row.status !== 'human-decided' ||
+        row.evidence === '' ||
+        /[\r\n]/.test(row.evidence)
+      ) {
+        return { code: 'LEDGER_DOCUMENT_INVALID', message: `post-review exemption row '${row.id}' is invalid` };
+      }
+      continue;
+    }
+    if (row.stage === 'post-review-commit') {
+      return { code: 'LEDGER_DOCUMENT_INVALID', message: `post-review exemption row '${row.id}' must use a PRC id` };
+    }
     if (!/^(AN|PL|CD|HD)-[1-9]\d*$/.test(row.id)) return { code: 'LEDGER_ID_INVALID', message: `ledger id '${row.id}' is invalid` };
     if (!['analysis', 'plan', 'code', 'post-review-commit'].includes(row.stage)) return { code: 'LEDGER_STAGE_INVALID', message: `ledger stage '${row.stage}' is invalid` };
     if (!FINDING_STATUSES.has(row.status)) return { code: 'LEDGER_STATUS_INVALID', message: `ledger status '${row.status}' is invalid` };

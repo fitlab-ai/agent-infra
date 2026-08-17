@@ -66,6 +66,37 @@ test('platform internal commands reject invalid payloads with exit code 1', () =
   assert.equal(JSON.parse(result.stdout).error.code, 'COMMENT_PAYLOAD_INVALID');
 });
 
+test('summary sync creates, updates and converges on one marker while preserving supplied audit content', () => {
+  const f = fixture();
+  try {
+    const bodyPath = path.join(f.root, 'summary.md');
+    fs.writeFileSync(bodyPath, 'Decision recorded; verification pending.\n');
+    const args = ['sync', f.taskId, '--kind', 'summary', '--body-file', bodyPath, '--agent', 'codex'];
+
+    const created = runComment(args, f);
+    assert.equal(created.status, 0, created.stderr || created.stdout);
+    assert.equal(JSON.parse(created.stdout).status, 'applied');
+    let comments = JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')) as Array<{ body: string }>;
+    assert.equal(comments.length, 1);
+    assert.match(comments[0]!.body, /Decision recorded; verification pending\./);
+
+    fs.writeFileSync(bodyPath, 'Original failure: FAILURE_CODE. Decision: PRC-1. Result: human override.\n');
+    const updated = runComment(args, f);
+    assert.equal(updated.status, 0, updated.stderr || updated.stdout);
+    assert.equal(JSON.parse(updated.stdout).status, 'applied');
+    comments = JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')) as Array<{ body: string }>;
+    assert.equal(comments.length, 1);
+    assert.match(comments[0]!.body, /Original failure: FAILURE_CODE\. Decision: PRC-1\. Result: human override\./);
+
+    const replayed = runComment(args, f);
+    assert.equal(replayed.status, 0, replayed.stderr || replayed.stdout);
+    assert.equal(JSON.parse(replayed.stdout).status, 'no-op');
+    assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('platform-comment backfill syncs only completion artifacts and resolves only matching excluded pr-review warnings', () => {
   const f = fixture();
   try {

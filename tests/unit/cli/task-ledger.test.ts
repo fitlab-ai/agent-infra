@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isReviewStage, parseLedger, nextHdId } from '../../../lib/task/ledger.ts';
+import { isReviewStage, parseLedger, nextHdId, validateLedgerRows } from '../../../lib/task/ledger.ts';
 
 const HEADER = '| id | stage | round | severity | status | evidence |';
 const SEP = '|----|-------|-------|----------|--------|----------|';
@@ -83,4 +83,26 @@ test('nextHdId ignores non-HD ids and out-of-order numbers', () => {
     ])
   );
   assert.equal(nextHdId(rows), 'HD-6');
+});
+
+test('validateLedgerRows accepts the canonical post-review exemption shape', () => {
+  const rows = parseLedger(ledger([
+    '| PRC-1 | post-review-commit | - | - | human-decided | maintainer allowed commits abc123 and def456 |'
+  ]));
+  assert.equal(validateLedgerRows(rows), null);
+});
+
+test('validateLedgerRows rejects malformed post-review exemption rows', () => {
+  const cases = [
+    ['| PRC-1 | code | - | - | human-decided | decision |', 'LEDGER_DOCUMENT_INVALID'],
+    ['| PRC-1 | post-review-commit | 1 | - | human-decided | decision |', 'LEDGER_DOCUMENT_INVALID'],
+    ['| PRC-1 | post-review-commit | - | minor | human-decided | decision |', 'LEDGER_DOCUMENT_INVALID'],
+    ['| PRC-1 | post-review-commit | - | - | open | decision |', 'LEDGER_DOCUMENT_INVALID'],
+    ['| PRC-1 | post-review-commit | - | - | human-decided |  |', 'LEDGER_DOCUMENT_INVALID'],
+    ['| HD-1 | post-review-commit | - | decision | human-decided | decision |', 'LEDGER_DOCUMENT_INVALID']
+  ] as const;
+
+  for (const [row, code] of cases) {
+    assert.equal(validateLedgerRows(parseLedger(ledger([row])))?.code, code, row);
+  }
 });

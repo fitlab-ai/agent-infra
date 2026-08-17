@@ -275,6 +275,27 @@ test("post-review-commit passes when a human-decided exemption covers the commit
     const { payload } = runCheck(taskDir);
     assert.equal(payload.status, "pass");
     assert.match(payload.message, /exemption/);
+    assert.match(payload.message, /PRC-1/);
+    assert.match(payload.message, /maintainer allowed the follow-up commit/);
+  });
+});
+
+test("post-review-commit fails closed when an exemption row is malformed", onPlatforms("linux", "darwin", "win32"), async () => {
+  await withTempRoot("agent-infra-prc-malformed-", (tempRoot) => {
+    const { taskDir } = setupRepo(tempRoot);
+    const baseline = commitCodePath(tempRoot, ".agents/skills/x.md", "base\n", "base");
+    write(path.join(taskDir, "task.md"), buildTask([
+      "| PRC-1 | post-review-commit | - | - | open | maintainer has not decided |"
+    ], { last_reviewed_commit: baseline }));
+    write(path.join(taskDir, "review-code.md"), buildReviewCode(baseline));
+    commitCodePath(tempRoot, ".agents/skills/x.md", "base\nmore\n", "post-review change");
+
+    const { payload } = runCheck(taskDir);
+    assert.equal(payload.status, "fail");
+    assert.equal(
+      (payload as typeof payload & { fail_type?: string }).fail_type,
+      "POST_REVIEW_EXEMPTION_INVALID"
+    );
   });
 });
 

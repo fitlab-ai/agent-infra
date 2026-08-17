@@ -94,7 +94,9 @@
 - `complete-task` 的 `post-review-commit` gate 只使用 B；B 缺失、畸形或对象不存在时报告 `reviewed snapshot was not anchored`，不得回退 R。
 - 若 B 之后代码 / 规则路径出现新提交，gate 会拦截，要求重新 `review-code`。自动例外仅限两类：(1) 绑定的平台变更请求（PR/MR）已合并，且平台适配器提供权威快照与远端 Git 证据引用；gate 在隔离的临时仓库中抓取受审查 head 与目标分支，证明 B 是原变更请求 head、merge commit 位于权威目标分支历史中、受审查变更与单父 squash commit 的规范化补丁完全一致，并且 merge 后受保护路径没有新提交；(2) 无有效变更请求，B 后恰有一个受保护路径提交，该提交是本地 HEAD 历史中的单父重写，且它与 B 的完整 tree 相同或受保护内容相同，重写后也没有受保护路径提交。适配器不支持该能力，缺少所需平台 / Git 证据，或当前 Git 凭据不能读取这些远端 refs 时 fail closed。
 - 全部 PR checks 由合并前的 `review-code` / `watch-pr` 路由负责，其中 required checks 仍受分支保护 / ruleset 强制。post-review-commit 仍独立执行适用的严格 / PR squash / 本地重写等价判定。
-- **豁免**：在账本追加一行 `| PRC-1 | post-review-commit | - | - | human-decided | <裁定说明> |`，记录人工明确允许该批提交免复审。
+- **豁免**：canonical 行形状为 `| PRC-1 | post-review-commit | - | - | human-decided | <裁定说明> |`。id 必须为 `PRC-N`，round/severity 必须为 `-`，status 必须为 `human-decided`，evidence 必须为非空单行文本并记录裁定理由与适用提交范围；任何不符合形状的 post-review 行均 fail closed。
+- merged-PR 人工豁免只可覆盖稳定的 `PR_MERGE_IDENTITY_INVALID`；blocked、证据缺失、内容/拓扑/目标历史不一致及其他 failed code 不得消费 PRC。通过消息必须保留原 failure code/message 与所消费的 PRC id/evidence，且不得表述为自动等价成功。
+- task.md 是持久化事实源。平台摘要在 preflight 前镜像既有 warning，或在无 warning 时只声明裁决待验证；人工豁免 gate 通过后，再以 gate 输出补齐原始失败并原地更新同一 summary marker。摘要同时镜像 task.md 中的裁决理由、提交范围、人工身份与时间。
 
 ## gate 行为速查
 

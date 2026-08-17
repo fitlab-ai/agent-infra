@@ -23,6 +23,7 @@ import { resolveReviewedHeadRelation } from "../platform/merged-pr-equivalence.t
 import { resolveLocalReviewedCommitRelation } from "../git/reviewed-commit-equivalence.ts";
 import { parseTypedTaskFrontmatter } from "./frontmatter.ts";
 import { parseLedger, summarizeLedgerStage, validateLedgerRows } from "./ledger.ts";
+import type { LedgerRow } from "./ledger.ts";
 import { equalCounts, parseReviewSummary } from "./review-artifacts.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
 import { snapshotReview } from "../git/review-snapshot.ts";
@@ -1070,11 +1071,13 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
         return blockedResult("post-review-commit", relation.message, relation.code);
       }
       if (relation.status === "strict") {
-        return failResult(
-          "post-review-commit",
-          "Merged PR evidence did not establish squash merge equivalence",
-          "PR_MERGE_IDENTITY_INVALID"
-        );
+        return resolvePostReviewIdentityFailure(task.content, {
+          code: "PR_MERGE_IDENTITY_INVALID",
+          message: "Merged PR evidence did not establish squash merge equivalence"
+        });
+      }
+      if (relation.code === "PR_MERGE_IDENTITY_INVALID") {
+        return resolvePostReviewIdentityFailure(task.content, relation);
       }
       return failResult("post-review-commit", relation.message, relation.code);
     }
@@ -1144,11 +1147,11 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
   }
 
   const exemption = resolvePostReviewExemption(task.content);
-  if (!exemption.ok) return failResult("post-review-commit", exemption.message);
-  if (exemption.exempt) {
+  if (!exemption.ok) return failResult("post-review-commit", exemption.message, exemption.code);
+  if (exemption.exemptions.length > 0) {
     return passResult(
       "post-review-commit",
-      `${commits.length} post-review commit(s) covered by a human-decided exemption`
+      `${commits.length} post-review commit(s) covered by a human-decided exemption: ${formatPostReviewExemptions(exemption.exemptions)}`
     );
   }
 
@@ -1158,18 +1161,50 @@ function checkPostReviewCommit({ taskDir, config }: any): any {
   );
 }
 
+function resolvePostReviewIdentityFailure(
+  content: string,
+  failure: { code: string; message: string }
+): any {
+  const exemption = resolvePostReviewExemption(content);
+  if (!exemption.ok) {
+    return failResult("post-review-commit", exemption.message, exemption.code);
+  }
+  if (exemption.exemptions.length === 0) {
+    return failResult("post-review-commit", failure.message, failure.code);
+  }
+  return passResult(
+    "post-review-commit",
+    `Human-decided post-review exemption overrode ${failure.code}: ${failure.message}; ${formatPostReviewExemptions(exemption.exemptions)}`
+  );
+}
+
+function formatPostReviewExemptions(exemptions: readonly LedgerRow[]): string {
+  return exemptions.map((row) => `${row.id}: ${row.evidence}`).join("; ");
+}
+
 function resolvePostReviewExemption(content: string):
-  | { ok: true; exempt: boolean }
-  | { ok: false; message: string } {
+  | { ok: true; exemptions: readonly LedgerRow[] }
+  | { ok: false; code: "POST_REVIEW_EXEMPTION_INVALID"; message: string } {
   try {
+    const rows = parseLedger(content);
+    const invalid = validateLedgerRows(rows);
+    if (invalid) {
+      return {
+        ok: false,
+        code: "POST_REVIEW_EXEMPTION_INVALID",
+        message: `${invalid.code}: ${invalid.message}`
+      };
+    }
     return {
       ok: true,
-      exempt: parseLedger(content).some(
-        (row) => row.stage === POST_REVIEW_COMMIT_STAGE && row.status === "human-decided"
-      )
+      exemptions: rows.filter((row) => row.stage === POST_REVIEW_COMMIT_STAGE)
     };
-  } catch {
-    return { ok: false, message: "Invalid disagreement ledger" };
+  } catch (error) {
+    return {
+      ok: false,
+      code: "POST_REVIEW_EXEMPTION_INVALID",
+      message: `Invalid disagreement ledger: ${error instanceof Error ? error.message : String(error)}`
+    };
   }
 }
 

@@ -141,6 +141,8 @@ Please complete the missing steps first, or use --force to override.
 2. 调用 `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`。
 3. 把业务摘要写入临时文件，并调用 `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {standard-agent-token}`。
 
+若账本含合法的 `PRC-N` post-review 豁免，摘要正文必须镜像 task.md 中的裁决理由、提交范围、人工身份与时间，并明确这是人工覆盖而非自动校验成功。已有匹配 workflow warning 时，同时镜像其原始 failure code/message；尚无 warning 时只写“裁决已记录、最终门禁待验证”，不得提前宣称豁免已通过。summary marker 仍由同一 `--kind summary` intent 唯一维护。
+
 不要在本步骤同步 task 评论；它依赖 lifecycle 写入后的完整终态 task.md。不要设置 `status:` label，平台自动化应在 Issue 关闭后清理状态标签。
 
 任一操作失败时，任务仍必须位于 active 且短号仍有效；先按失败类型调用以下结构化 warning intent，再立即停止，不进入步骤 5：
@@ -160,6 +162,8 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 ```
 
 该事件依次执行 `review-ledger`、`manual-validation`、`post-review-commit`、`platform-sync-preflight`。任一退出码非 0（fail/blocked）时，任务必须继续留在 active；从 gate 结果取稳定 code/target，通过 `task-warning ... add --step complete-task ...` 落账后停止。若审查基线或 head 不一致，必须先重新 `commit` / `review-code`；不得回退审查基线。
+
+若 preflight 的 `post-review-commit` 以 human-decided exemption 通过，在进入步骤 6 前必须把该 check 输出中的原始 failure code/message 与 PRC id/evidence，连同 task.md 中的裁决理由、提交范围、人工身份与时间，原地补入步骤 4 的同一 summary marker。已有 warning 时以其历史记录为 canonical 证据并与本次 check 输出核对；无 warning 时以本次 check 输出补齐原始失败。再次调用同一 `platform-comment sync ... --kind summary`；失败时记录 `SUMMARY_SYNC_FAILED`、保持任务 active 并停止，不进入 lifecycle。
 
 `--force` 不解除本硬门禁：未关闭分歧必须先在账本闭合，未复审提交必须重新审查、具备有效豁免，或由平台适配器为绑定的变更请求（PR/MR）提供权威合并快照与远端 refs，并在隔离临时仓库中证明单父 squash merge 等价，或在无有效变更请求时由本地 Git 对象证明唯一受保护提交是内容等价的单父重写且之后无受保护提交；平台 preflight 必须通过。适配器不支持所需能力，平台事实、Git 对象、拓扑、内容证据缺失，或当前 Git 凭据不能读取远端证据 refs 时 fail closed。全部 checks 由平台适配器提供规范化状态，并在合并前通过 `review-code` / `watch-pr` 路由承担；其中 required checks 仍受分支保护 / ruleset 强制。
 

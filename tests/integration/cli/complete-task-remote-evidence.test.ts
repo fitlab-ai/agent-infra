@@ -37,7 +37,13 @@ function repositorySnapshot(root: string) {
   };
 }
 
-function writeTask(caller: string, taskId: string, prNumber: number, reviewedHead: string): string {
+function writeTask(
+  caller: string,
+  taskId: string,
+  prNumber: number,
+  reviewedHead: string,
+  ledgerRows: string[] = []
+): string {
   const taskDir = path.join(caller, ".agents", "workspace", "active", taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "task.md"), [
@@ -49,7 +55,13 @@ function writeTask(caller: string, taskId: string, prNumber: number, reviewedHea
     `last_reviewed_commit: ${reviewedHead}`,
     "---",
     "",
-    "# Task"
+    "# Task",
+    "",
+    "## Review Disagreement Ledger",
+    "",
+    "| id | stage | round | severity | status | evidence |",
+    "|----|-------|-------|----------|--------|----------|",
+    ...ledgerRows
   ].join("\n"));
   fs.writeFileSync(path.join(taskDir, "review-code.md"), "# Review\n");
   return taskDir;
@@ -180,6 +192,157 @@ test("complete-task gate verifies target advancement and consecutive squash merg
       assert.match(result.checks[0].message, /content-equivalent to squash merge/);
     }
     assert.deepEqual(repositorySnapshot(caller), before);
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("complete-task consumes a human exemption for merged identity failures before and after archival", () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "complete-task-identity-exemption-"));
+  const taskId = "TASK-20260731-000003";
+  try {
+    git(fixtureRoot, ["init", "-q", "-b", "main"]);
+    git(fixtureRoot, ["config", "user.name", "Test"]);
+    git(fixtureRoot, ["config", "user.email", "test@example.com"]);
+    commit(fixtureRoot, "base\n", "base");
+
+    const platformType = "complete-task-identity-exemption-test";
+    const reviewedHead = "a".repeat(40);
+    const pullRequest: PlatformChangeRequestSnapshot = {
+      repository: "o/r",
+      number: 3,
+      nodeId: "PR_3",
+      url: "https://example.test/o/r/pull/3",
+      state: "closed",
+      title: "",
+      body: "",
+      draft: false,
+      head: { repository: "o/r", ref: "feature", sha: "b".repeat(40) },
+      base: { repository: "o/r", ref: "main", sha: "c".repeat(40) },
+      mergedAt: "2026-07-31T00:00:00Z",
+      mergeCommitSha: "d".repeat(40),
+      labels: [],
+      assignees: [],
+      milestone: null
+    };
+    registerPlatformAdapter({
+      type: platformType,
+      resolveContext() {
+        return platformResult("no-op", {
+          platform: { type: platformType, repository: "o/r", currentUser: "reviewer" }
+        });
+      },
+      inspectChangeRequest() {
+        return { ok: true, value: pullRequest };
+      }
+    });
+    fs.mkdirSync(path.join(fixtureRoot, ".agents", "skills", "complete-task", "config"), { recursive: true });
+    fs.writeFileSync(path.join(fixtureRoot, ".agents", ".airc.json"), JSON.stringify({
+      platform: { type: platformType }
+    }));
+    fs.writeFileSync(
+      path.join(fixtureRoot, ".agents", "skills", "complete-task", "config", "verify.json"),
+      JSON.stringify({ skill: "complete-task", checks: { "post-review-commit": {} } })
+    );
+    const activeTask = writeTask(fixtureRoot, taskId, 3, reviewedHead, [
+      "| PRC-1 | post-review-commit | - | - | human-decided | maintainer allowed reviewed and merged identities |"
+    ]);
+
+    const active = verifyInProcess({
+      mode: "gate",
+      skillName: "complete-task",
+      taskDir: activeTask,
+      checks: [],
+      repositoryRoot: fixtureRoot
+    });
+    assert.equal(active.gate, "pass");
+    assert.equal(active.checks[0].status, "pass");
+    assert.match(active.checks[0].message, /Human-decided post-review exemption/);
+    assert.match(active.checks[0].message, /PR_MERGE_IDENTITY_INVALID/);
+    assert.match(active.checks[0].message, /PR merge identity does not match the reviewed head/);
+    assert.match(active.checks[0].message, /PRC-1/);
+    assert.match(active.checks[0].message, /maintainer allowed reviewed and merged identities/);
+
+    const completedTask = path.join(fixtureRoot, ".agents", "workspace", "completed", taskId);
+    fs.mkdirSync(path.dirname(completedTask), { recursive: true });
+    fs.renameSync(activeTask, completedTask);
+    const completed = verifyInProcess({
+      mode: "gate",
+      skillName: "complete-task",
+      taskDir: completedTask,
+      checks: [],
+      repositoryRoot: fixtureRoot
+    });
+    assert.equal(completed.gate, "pass");
+    assert.equal(completed.checks[0].message, active.checks[0].message);
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("complete-task keeps merged identity failures closed without a valid exemption", () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "complete-task-invalid-identity-exemption-"));
+  const reviewedHead = "a".repeat(40);
+  try {
+    git(fixtureRoot, ["init", "-q", "-b", "main"]);
+    git(fixtureRoot, ["config", "user.name", "Test"]);
+    git(fixtureRoot, ["config", "user.email", "test@example.com"]);
+    commit(fixtureRoot, "base\n", "base");
+
+    const platformType = "complete-task-invalid-identity-exemption-test";
+    registerPlatformAdapter({
+      type: platformType,
+      resolveContext() {
+        return platformResult("no-op", {
+          platform: { type: platformType, repository: "o/r", currentUser: "reviewer" }
+        });
+      },
+      inspectChangeRequest({ number }) {
+        return {
+          ok: true,
+          value: {
+            repository: "o/r", number, nodeId: `PR_${number}`, url: `https://example.test/o/r/pull/${number}`,
+            state: "closed", title: "", body: "", draft: false,
+            head: { repository: "o/r", ref: "feature", sha: "b".repeat(40) },
+            base: { repository: "o/r", ref: "main", sha: "c".repeat(40) },
+            mergedAt: "2026-07-31T00:00:00Z", mergeCommitSha: "d".repeat(40),
+            labels: [], assignees: [], milestone: null
+          }
+        };
+      }
+    });
+    fs.mkdirSync(path.join(fixtureRoot, ".agents", "skills", "complete-task", "config"), { recursive: true });
+    fs.writeFileSync(path.join(fixtureRoot, ".agents", ".airc.json"), JSON.stringify({ platform: { type: platformType } }));
+    fs.writeFileSync(
+      path.join(fixtureRoot, ".agents", "skills", "complete-task", "config", "verify.json"),
+      JSON.stringify({ skill: "complete-task", checks: { "post-review-commit": {} } })
+    );
+
+    const noExemption = writeTask(fixtureRoot, "TASK-20260731-000004", 4, reviewedHead);
+    const missing = verifyInProcess({
+      mode: "gate", skillName: "complete-task", taskDir: noExemption, checks: [], repositoryRoot: fixtureRoot
+    });
+    assert.equal(missing.gate, "fail");
+    assert.equal(missing.checks[0].fail_type, "PR_MERGE_IDENTITY_INVALID");
+
+    const malformed = writeTask(fixtureRoot, "TASK-20260731-000005", 5, reviewedHead, [
+      "| PRC-1 | post-review-commit | - | - | open | decision is pending |"
+    ]);
+    const invalid = verifyInProcess({
+      mode: "gate", skillName: "complete-task", taskDir: malformed, checks: [], repositoryRoot: fixtureRoot
+    });
+    assert.equal(invalid.gate, "fail");
+    assert.equal(invalid.checks[0].fail_type, "POST_REVIEW_EXEMPTION_INVALID");
+
+    const blockedTask = writeTask(fixtureRoot, "TASK-20260731-000006", 6, "b".repeat(40), [
+      "| PRC-1 | post-review-commit | - | - | human-decided | maintainer allowed the identity change |"
+    ]);
+    const blocked = verifyInProcess({
+      mode: "gate", skillName: "complete-task", taskDir: blockedTask, checks: [], repositoryRoot: fixtureRoot
+    });
+    assert.equal(blocked.gate, "blocked");
+    assert.equal(blocked.checks[0].status, "blocked");
+    assert.equal(blocked.checks[0].fail_type, "PLATFORM_CAPABILITY_UNSUPPORTED");
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }

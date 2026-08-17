@@ -142,6 +142,8 @@ When an `issue_number` exists, execute in this exact order:
 2. Run `agent-infra-internal platform-issue sync {task-id} --agent {standard-agent-token} --requirements --fields`.
 3. Write the business summary to a temporary file and run `agent-infra-internal platform-comment sync {task-id} --kind summary --body-file {path} --agent {standard-agent-token}`.
 
+When the ledger contains a valid `PRC-N` post-review exemption, the summary body must mirror the ruling reason, commit scope, human identity, and time from task.md, and state that this is a human override rather than an automatic verification success. If a matching workflow warning exists, also mirror its original failure code/message. If no warning exists yet, state only that the ruling is recorded and final gate verification is pending; do not claim that the exemption has passed. The same `--kind summary` intent remains the sole owner of the summary marker.
+
 Do not sync the task comment here; it requires the terminal task.md written by lifecycle. Do not set a `status:` label; platform automation clears status labels after the Issue closes.
 
 If any operation fails, the task must remain active and its short id must remain valid. Record the failure with the matching structured warning intent, then stop without entering Step 5:
@@ -161,6 +163,8 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 ```
 
 This event runs `review-ledger`, `manual-validation`, `post-review-commit`, then `platform-sync-preflight`. On any non-zero exit (fail/blocked), keep the task active, derive the stable code/target from the gate result, record it through `task-warning ... add --step complete-task ...`, and stop. For a review/head mismatch, rerun `commit` or `review-code`; never fall back to the review baseline.
+
+When preflight's `post-review-commit` check passes through a human-decided exemption, update the same summary marker from Step 4 before entering Step 6. Add the original failure code/message and PRC id/evidence from the check output together with the ruling reason, commit scope, human identity, and time from task.md. When a warning exists, treat its historical record as canonical and reconcile it with the current check output; otherwise use the current check output as the original-failure source. Run the same `platform-comment sync ... --kind summary` intent again. If it fails, record `SUMMARY_SYNC_FAILED`, keep the task active, and stop before lifecycle.
 
 `--force` does not lift this hard gate: close ledger disagreements; re-review or exempt post-review commits, use the platform adapter's authoritative snapshot and remote refs for the bound change request (PR/MR) to prove a content-equivalent single-parent squash merge in an isolated temporary repository, or, without a valid change request, prove from local Git objects that the only protected commit is a content-equivalent single-parent rewrite with no later protected commits; then pass platform preflight. An unsupported adapter capability, missing required platform facts, Git objects, topology, or content evidence, or current Git credentials that cannot read the remote evidence refs fails closed. The platform adapter supplies normalized state for all checks, enforced before merge by the `review-code` / `watch-pr` routes; required checks remain additionally enforced by branch protection / rulesets.
 
