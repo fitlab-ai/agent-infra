@@ -1382,6 +1382,60 @@ test("run-manual-validation uses complete typed comment sync intents in order", 
   });
 });
 
+test("run-manual-validation keeps discovery, reporting, and verification structures aligned", () => {
+  const skillVariants = skillDocPaths("run-manual-validation");
+  const referenceVariants = [
+    ".agents/skills/run-manual-validation/reference/discovery-and-execution.md",
+    "templates/.agents/skills/run-manual-validation/reference/discovery-and-execution.zh-CN.md",
+    "templates/.agents/skills/run-manual-validation/reference/discovery-and-execution.en.md"
+  ];
+  const reportAndConfigVariants = [
+    [
+      ".agents/skills/run-manual-validation/reference/report-template.md",
+      ".agents/skills/run-manual-validation/config/verify.json"
+    ],
+    [
+      "templates/.agents/skills/run-manual-validation/reference/report-template.zh-CN.md",
+      "templates/.agents/skills/run-manual-validation/config/verify.zh-CN.json"
+    ],
+    [
+      "templates/.agents/skills/run-manual-validation/reference/report-template.en.md",
+      "templates/.agents/skills/run-manual-validation/config/verify.en.json"
+    ]
+  ] as const;
+
+  skillVariants.forEach((relativePath) => {
+    const content = read(relativePath);
+    assert.ok(content.includes("reference/discovery-and-execution.md"));
+    assert.ok(content.includes("platform-pr inspect"));
+    assert.ok(content.includes("ai task validate"));
+  });
+
+  referenceVariants.forEach((relativePath) => {
+    assert.ok(exists(relativePath), `${relativePath} should exist`);
+    const workGates = [...read(relativePath).matchAll(
+      /^\| `(explicit|automatic)` \| `(any|items|empty|unreadable-only)` \| `(continue|stop)` \|$/gm
+    )].map((match) => match.slice(1));
+    assert.deepEqual(workGates, [
+      ["explicit", "any", "continue"],
+      ["automatic", "items", "continue"],
+      ["automatic", "empty", "stop"],
+      ["automatic", "unreadable-only", "stop"]
+    ]);
+  });
+  assert.equal(read(referenceVariants[0]!), read(referenceVariants[1]!));
+
+  reportAndConfigVariants.forEach(([reportPath, configPath]) => {
+    const report = read(reportPath);
+    const config = JSON.parse(read(configPath));
+
+    config.checks.artifact.required_sections.forEach((heading: string) => {
+      assert.ok(report.includes(`## ${heading}\n`), `${reportPath} should define the configured ${heading} section`);
+    });
+    assert.equal(config.checks.artifact.required_sections.length, 11);
+  });
+});
+
 test("review-pr keeps the sync -> write-back -> re-sync -> verify closed-loop order (PL-8)", () => {
   const variants = [
     ".agents/skills/review-pr/SKILL.md",

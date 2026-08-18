@@ -6,7 +6,7 @@
     },
     "artifact": {
       "file_pattern": "validation-run.md|validation-run-r{N}.md",
-      "required_sections": ["状态核对", "验证目标", "模式判定", "命令摘要", "结构化证据", "清理与恢复", "尚未覆盖", "证据原文"],
+      "required_sections": ["输入模式", "状态核对", "验证目标", "发现清单", "模式判定", "命令摘要", "结构化证据", "逐项结果", "清理与恢复", "尚未覆盖", "证据原文"],
       "required_patterns": ["^\\$ "]
     },
     "activity-log": { "expected_action_pattern": "Run Manual Validation \\(Round \\d+\\)" },

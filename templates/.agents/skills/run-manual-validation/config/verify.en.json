@@ -6,7 +6,7 @@
     },
     "artifact": {
       "file_pattern": "validation-run.md|validation-run-r{N}.md",
-      "required_sections": ["State Check", "Validation Target", "Mode Decision", "Command Summary", "Structured Evidence", "Cleanup and Recovery", "Remaining Coverage", "Raw Evidence"],
+      "required_sections": ["Input Mode", "State Check", "Validation Target", "Discovered Items", "Mode Decision", "Command Summary", "Structured Evidence", "Per-item Results", "Cleanup and Recovery", "Remaining Coverage", "Raw Evidence"],
       "required_patterns": ["^\\$ "]
     },
     "activity-log": { "expected_action_pattern": "Run Manual Validation \\(Round \\d+\\)" },

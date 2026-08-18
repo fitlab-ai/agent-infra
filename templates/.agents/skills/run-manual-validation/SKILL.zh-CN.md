@@ -25,18 +25,18 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## 执行步骤
 
-1. 解析 `{task-ref}`、验证目标和 `--` 后的命令；缺失时停止，不写产物。
-2. 运行 `agent-infra-internal task-artifact {task-id} inspect --family validation-run`，从核心结果取得轮次和产物名；随后运行 `agent-infra-internal task-event {task-id} validation-run.started --agent {standard-agent-token}`。
-3. 选择模式：固定提交只查用 snapshot；依赖未提交内容、原挂载或原位权限用 inplace；不确定时先 snapshot，只有证据表明必须原位时才升级。
-4. 调用 `ai task validate {task-ref} --scope {scope} --format json -- {command...}`。运行时升级必须作为第二次显式 inplace 调用，并记录理由。
-5. 读取 `reference/report-template.md`，创建 `validation-run.md|validation-run-r{N}.md`；只写 CLI JSON allowlist 与去敏摘要。
+1. 读取 `reference/discovery-and-execution.md`，解析输入模式；非法或半截输入在 started 前停止，不写产物。
+2. 运行 `agent-infra-internal task-artifact {task-id} inspect --family validation-run`，读取最新 review-code 人工校验项；再运行 `agent-infra-internal platform-pr inspect {task-id}`，按 reference 的状态矩阵发现、归并并编号。仅在自动模式下，可靠来源无项或唯一可能来源不可读时才在 started 前停止；合法显式模式始终以用户命令作为有效工作继续。
+3. 从核心结果取得轮次和产物名；确认存在有效显式工作或非空发现清单后，运行 `agent-infra-internal task-event {task-id} validation-run.started --agent {standard-agent-token}`，并逐项分类为 `executable|unavailable|unknown|unsafe|unresolved`。
+4. 每个可执行项分别调用 `ai task validate {task-ref} --scope snapshot --format json -- {command...}`；只有证据表明必须原位时才对该项进行第二次显式 inplace 调用。零项可执行时不运行伪造命令，但仍继续产出覆盖缺口证据。
+5. 读取 `reference/report-template.md`，创建 `validation-run.md|validation-run-r{N}.md`；记录输入模式、发现清单、逐项结果、CLI JSON allowlist 与去敏摘要。
 6. 运行 `agent-infra-internal task-event {task-id} validation-run.completed --agent {standard-agent-token} --artifact {artifact}`。存在 Issue 时依次运行 `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` 和 `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {standard-agent-token}`。
 7. 运行 `agent-infra-internal task-verify {task-id} validation-run.completed --artifact {artifact} --format text`；未通过则修复后重跑。
 8. 告知用户证据路径、覆盖缺口和验证结果；明确仍需维护者判断是否执行 `complete-manual-validation`。读取 `.agents/rules/next-step-output.md`，最后一行输出 `Completed at`。
 
 ## 完成检查清单
 
-- [ ] 已使用 `ai task validate`
+- [ ] 每个可执行项均已使用 `ai task validate`，或已记录零项可执行
 - [ ] 已记录去敏 validation-run 证据
 - [ ] 未修改 PR 人工验证完成状态
 - [ ] 已更新 task.md 并通过完成校验

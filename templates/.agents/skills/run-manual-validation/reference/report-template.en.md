@@ -1,5 +1,11 @@
 # Validation Run Evidence
 
+## Input Mode
+
+- Mode: `{explicit|automatic}`
+- Input decision: {sanitized-input-decision}
+- PR source status: `{success|no-op|failed|blocked}` / `{stable-code-or-none}`
+
 ## State Check
 
 ```text
@@ -10,6 +16,12 @@ $ agent-infra-internal task-snapshot {task-id} --format text
 ## Validation Target
 
 {target-and-coverage}
+
+## Discovered Items
+
+| ID | Source | Target | Required Capability | Expected Assertion | Classification |
+|----|--------|--------|---------------------|--------------------|----------------|
+| `MV-{N}` | `{review-code|pr|merged|explicit}` | {target} | {capability} | {expected-assertion} | `{executable|unavailable|unknown|unsafe|unresolved}` |
 
 ## Mode Decision
 
@@ -27,6 +39,19 @@ $ agent-infra-internal task-snapshot {task-id} --format text
 ```json
 {sanitized-ai-task-validate-json}
 ```
+
+## Per-item Results
+
+### MV-{N}
+
+- Source: `{source}`
+- Classification: `{classification}`
+- Scope: `{snapshot|inplace|not-run}`
+- Command name: `{basename-only|not-run}`
+- Exit status: `{exit-status|not-run}`
+- Runtime upgrade: {none-or-reason}
+- Result: {sanitized-result-or-coverage-gap}
+- Cleanup: {cleanup-result}
 
 ## Cleanup and Recovery
 
