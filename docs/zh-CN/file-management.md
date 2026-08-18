@@ -16,8 +16,7 @@
 {
   "files": {
     "managed": [
-      ".agents/skills/",
-      ".agents/workspace/README.md"
+      ".agents/skills/"
     ],
     "merged": [
       ".gitignore",

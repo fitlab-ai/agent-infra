@@ -45,7 +45,6 @@
   ],
   "files": {
     "managed": [
-      ".agents/workspace/README.md",
       ".agents/skills/",
       ".agents/templates/",
       ".agents/workflows/",

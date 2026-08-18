@@ -14,6 +14,8 @@ ai data export <snapshot-id> [--root <dir>] [--repairs none|applied] [--output <
 
 默认根目录为 `.agents/workspace/process-data/`。自定义根目录必须位于仓库内，且不能与任务目录重叠。退出码 `0` 表示成功或幂等 no-op，`1` 表示输入非法或完整性校验失败，`2` 表示必需来源不完整或被阻塞。
 
+该默认目录属于宿主运行时状态。沙箱不会以可写方式挂载它，因此在沙箱内尝试写入默认路径会失败关闭。
+
 `capture` 默认使用 `--source all`。只采集 local 或 GitHub 时，快照会明确标记为 partial，不得作为完整基线对外宣称。
 
 ## 存储与完整性

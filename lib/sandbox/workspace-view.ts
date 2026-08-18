@@ -84,44 +84,6 @@ function assertSafeDirectory(directory: string, expectedBase: string): void {
   }
 }
 
-function assertSafeMountTargetPath(target: string, worktreeRoot: string, canonicalWorktreeRoot: string): void {
-  const relative = path.relative(worktreeRoot, target);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(`Sandbox workspace mount target escapes its worktree: ${target}`);
-  }
-  let current = worktreeRoot;
-  for (const segment of ['', ...relative.split(path.sep).filter(Boolean)]) {
-    current = segment ? path.join(current, segment) : current;
-    try {
-      if (fs.lstatSync(current).isSymbolicLink()) {
-        throw new Error(`Sandbox workspace mount target must not contain a symbolic link: ${current}`);
-      }
-      const canonicalRelative = path.relative(canonicalWorktreeRoot, fs.realpathSync.native(current));
-      if (canonicalRelative.startsWith('..') || path.isAbsolute(canonicalRelative)) {
-        throw new Error(`Sandbox workspace mount target escapes its real worktree: ${current}`);
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-  }
-}
-
-export function prepareSandboxWorkspaceMountTargets(worktreeRoot: string): void {
-  const resolvedWorktreeRoot = path.resolve(worktreeRoot);
-  const canonicalWorktreeRoot = fs.realpathSync.native(resolvedWorktreeRoot);
-  const workspaceRoot = path.resolve(resolvedWorktreeRoot, '.agents', 'workspace');
-  const statePaths = sandboxWorkspaceViewStatePaths(workspaceRoot);
-  const registryTarget = path.join(workspaceRoot, 'active', '.short-ids.json');
-  for (const target of [workspaceRoot, ...statePaths.map(({ hostPath }) => hostPath), registryTarget]) {
-    assertSafeMountTargetPath(target, resolvedWorktreeRoot, canonicalWorktreeRoot);
-  }
-  fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
-  for (const { hostPath } of statePaths) {
-    fs.mkdirSync(hostPath, { recursive: true, mode: 0o700 });
-  }
-  fs.closeSync(fs.openSync(registryTarget, 'a', 0o600));
-}
-
 export function assertSandboxTaskSource(repoRoot: string, taskId: string): string {
   if (!/^TASK-\d{8}-\d{6}$/.test(taskId)) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
   const activeRoot = fs.realpathSync.native(path.join(repoRoot, '.agents', 'workspace', 'active'));

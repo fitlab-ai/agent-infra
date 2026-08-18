@@ -6,7 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 
-import { loadFreshEsm, read, supportsPosixModeBits } from "../../helpers.ts";
+import { loadFreshEsm, onPlatforms, read, supportsPosixModeBits } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 
 function writeFile(root: string, relativePath: string, content: string) {
@@ -34,6 +34,56 @@ function createTemplateInstall(tmpDir: string, version: string = "0.0.0-test") {
   });
   return { installRoot, templateRoot };
 }
+
+test("syncTemplates creates runtime workspace states and retires only registry-owned files", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-runtime-workspace-"));
+  try {
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const ownedRoot = path.join(tmpDir, "owned");
+    const unownedRoot = path.join(tmpDir, "unowned");
+    for (const [root, managed] of [[ownedRoot, [".agents/workspace/README.md"]], [unownedRoot, []]] as const) {
+      writeJson(root, ".agents/.airc.json", {
+        project: "demo", org: "acme", language: "en", platform: { type: "none" },
+        files: { managed, merged: [], ejected: [] }
+      });
+      writeFile(root, ".agents/workspace/README.md", "local workspace notes\n");
+    }
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const owned = syncTemplates(ownedRoot, templateRoot);
+    const unowned = syncTemplates(unownedRoot, templateRoot);
+
+    for (const state of ["active", "blocked", "completed", "archive"]) {
+      assert.equal(fs.statSync(path.join(ownedRoot, ".agents", "workspace", state)).isDirectory(), true);
+    }
+    assert.equal(fs.existsSync(path.join(ownedRoot, ".agents/workspace/README.md")), false);
+    assert.ok(owned.registryRemoved.some((entry) => entry.entry === ".agents/workspace/README.md" && entry.list === "managed"));
+    assert.ok(owned.managed.removed.includes(".agents/workspace/README.md"));
+    assert.equal(fs.readFileSync(path.join(unownedRoot, ".agents/workspace/README.md"), "utf8"), "local workspace notes\n");
+    assert.ok(unowned.managed.protected.some((entry) => entry.target === ".agents/workspace/README.md" && entry.reason === "unknown-origin"));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates rejects a symbolic-link runtime workspace before template writes", onPlatforms("linux", "darwin"), async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-runtime-workspace-link-"));
+  try {
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const projectRoot = path.join(tmpDir, "project");
+    const outside = path.join(tmpDir, "outside");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", platform: { type: "none" },
+      files: { managed: [], merged: [], ejected: [] }
+    });
+    fs.mkdirSync(outside);
+    fs.symlinkSync(outside, path.join(projectRoot, ".agents", "workspace"));
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    assert.throws(() => syncTemplates(projectRoot, templateRoot), /real directory/);
+    assert.deepEqual(fs.readdirSync(outside), []);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
 
 test("syncTemplates resolves template roots via PATH lookup and removes legacy templateSource", async () => {
   const originalExecSync = childProcess.execSync;

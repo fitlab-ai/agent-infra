@@ -74,7 +74,6 @@
       ".agents/skills/",
       ".agents/templates/",
       ".agents/workflows/",
-      ".agents/workspace/README.md",
       ".claude/commands/",
       ".claude/agents/",
       ".codex/agents/",

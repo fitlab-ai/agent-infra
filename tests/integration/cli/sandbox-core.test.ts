@@ -50,6 +50,11 @@ function isReadOnlyMountFor(arg: string, containerPath: string): boolean {
   return hasReadOnlyOption && target.endsWith(`:${containerPath}`);
 }
 
+function isWritableMountFor(arg: string, containerPath: string): boolean {
+  return !isReadOnlyMountFor(arg, containerPath)
+    && (arg.endsWith(`:${containerPath}`) || arg.includes(`:${containerPath}:`));
+}
+
 type SandboxCreateModule = {
   create(args: string[]): Promise<void>;
   buildContainerEnvFile(tools: ResolvedToolFixture[], engine: string, runSafe?: EngineRunSafeFn, options?: CommandOptions): EnvFileResult;
@@ -489,24 +494,23 @@ test("sandbox create warns and continues past missing Claude credentials", () =>
   }
 });
 
-test("sandbox create preserves tracked workspace files and does not mount the host ssh directory", () => {
+test("sandbox create keeps a clean runtime-only workspace and does not mount the host ssh directory", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-no-ssh-"));
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
     fs.writeFileSync(path.join(fixture.repoDir, "README.md"), "# demo\n", "utf8");
-    fs.mkdirSync(path.join(fixture.repoDir, ".agents", "workspace"), { recursive: true });
     fs.writeFileSync(
-      path.join(fixture.repoDir, ".agents", "workspace", "README.md"),
-      "# tracked workspace\n",
+      path.join(fixture.repoDir, ".agents", "README.md"),
+      "# collaboration guide\n",
       "utf8"
     );
     fs.writeFileSync(
       path.join(fixture.repoDir, ".gitignore"),
-      ".agents/workspace/active/\n.agents/workspace/completed/\n.agents/workspace/blocked/\n.agents/workspace/archive/\n",
+      ".agents/workspace/\n",
       "utf8"
     );
-    const addResult = spawnSync("git", ["add", "README.md", ".gitignore", ".agents/workspace/README.md"], {
+    const addResult = spawnSync("git", ["add", "README.md", ".gitignore", ".agents/README.md"], {
       cwd: fixture.repoDir,
       env: gitSafeEnv()
     });
@@ -549,23 +553,76 @@ test("sandbox create preserves tracked workspace files and does not mount the ho
     assert.ok(runCall.some((arg) => arg.includes(":/workspace")));
     assert.ok(runCall.some((arg) => arg.includes(":/share/common")));
     assert.ok(runCall.some((arg) => arg.includes(":/share/branch")));
-    for (const state of ["active", "completed", "blocked", "archive"]) {
-      assert.ok(
-        runCall.some((arg) => isReadOnlyMountFor(arg, `/workspace/.agents/workspace/${state}`)),
-        `expected a read-only ${state} workspace mount`
-      );
-    }
-    const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", "feature..no-ssh-mount");
-    assert.equal(
-      fs.readFileSync(path.join(worktree, ".agents", "workspace", "README.md"), "utf8"),
-      "# tracked workspace\n"
+    assert.ok(
+      runCall.some((arg) => isReadOnlyMountFor(arg, "/workspace/.agents/workspace")),
+      "expected one read-only workspace view mount"
     );
+    const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", "feature..no-ssh-mount");
+    assert.equal(fs.readFileSync(path.join(worktree, ".agents", "README.md"), "utf8"), "# collaboration guide\n");
     assert.equal(
       execFileSync("git", ["-C", worktree, "status", "--short"], {
         encoding: "utf8",
         env: gitSafeEnv()
       }),
       ""
+    );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+test("task-bound sandbox create keeps Git clean and exposes only the scoped writable task", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-task-bound-"));
+  const taskId = "TASK-20260301-000001";
+  const siblingTaskId = "TASK-20260301-000002";
+  const branch = "registry-branch";
+
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    fs.writeFileSync(path.join(fixture.repoDir, "README.md"), "# demo\n", "utf8");
+    fs.writeFileSync(path.join(fixture.repoDir, ".agents", "README.md"), "# collaboration guide\n", "utf8");
+    fs.writeFileSync(path.join(fixture.repoDir, ".gitignore"), ".agents/workspace/\n", "utf8");
+    execFileSync("git", ["add", "README.md", ".gitignore", ".agents/README.md"], {
+      cwd: fixture.repoDir,
+      env: gitSafeEnv(),
+      stdio: "ignore"
+    });
+    execFileSync(
+      "git",
+      ["-c", "user.name=Sandbox Test", "-c", "user.email=sandbox@example.com", "commit", "-q", "-m", "fixture"],
+      { cwd: fixture.repoDir, env: gitSafeEnv(), stdio: "ignore" }
+    );
+    writeShortIdRegistry(fixture.repoDir, { "1": taskId, "2": siblingTaskId });
+    writeActiveTaskBranch(fixture.repoDir, taskId, branch);
+    writeActiveTaskBranch(fixture.repoDir, siblingTaskId, "sibling-branch");
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["create", taskId, "--no-refresh"], {
+      AGENT_INFRA_CLAUDE_CREDENTIALS_FILE: path.join(tmpDir, "missing-claude-credentials.json")
+    });
+
+    assert.equal(result.signal, null);
+    assert.equal(result.status, 0, result.stderr);
+    const runCall = fixture.readDockerCalls().find((call) => call[0] === "run");
+    assert.ok(runCall, "expected task-bound sandbox create to invoke docker run");
+    assert.ok(runCall.some((arg) => isReadOnlyMountFor(arg, "/workspace/.agents/workspace")));
+    assert.ok(runCall.some((arg) => isWritableMountFor(
+      arg,
+      `/workspace/.agents/workspace/active/${taskId}`
+    )));
+    assert.equal(runCall.some((arg) => arg.includes(siblingTaskId)), false);
+
+    const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", branch);
+    assert.equal(fs.readFileSync(path.join(worktree, ".agents", "README.md"), "utf8"), "# collaboration guide\n");
+    assert.equal(execFileSync("git", ["-C", worktree, "status", "--short"], {
+      encoding: "utf8",
+      env: gitSafeEnv()
+    }), "");
+
+    const viewContainerRoot = path.join(tmpDir, ".agent-infra", "workspace-views", "demo", `demo-dev-${branch}`);
+    const viewRoot = path.join(viewContainerRoot, fs.readdirSync(viewContainerRoot)[0]!);
+    assert.deepEqual(fs.readdirSync(path.join(viewRoot, "active")).sort(), [".short-ids.json", taskId]);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(viewRoot, "active", ".short-ids.json"), "utf8")),
+      { version: 1, ids: { "1": taskId } }
     );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

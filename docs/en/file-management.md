@@ -16,8 +16,7 @@ Each generated path is assigned an update strategy. That strategy determines how
 {
   "files": {
     "managed": [
-      ".agents/skills/",
-      ".agents/workspace/README.md"
+      ".agents/skills/"
     ],
     "merged": [
       ".gitignore",

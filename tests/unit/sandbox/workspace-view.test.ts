@@ -8,7 +8,6 @@ import {
   assertSandboxTaskSource,
   materializeSandboxControl,
   materializeSandboxWorkspaceView,
-  prepareSandboxWorkspaceMountTargets,
   sandboxWorkspaceViewStatePaths
 } from '../../../lib/sandbox/workspace-view.ts';
 
@@ -19,57 +18,6 @@ test('workspace view state paths use the isolated runtime state allowlist', () =
     { state: 'blocked', hostPath: path.join('/views/current', 'blocked') },
     { state: 'archive', hostPath: path.join('/views/current', 'archive') }
   ]);
-});
-
-test('workspace mount target preparation preserves tracked top-level files', () => {
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-worktree-'));
-  const workspace = path.join(worktree, '.agents', 'workspace');
-  fs.mkdirSync(workspace, { recursive: true });
-  fs.writeFileSync(path.join(workspace, 'README.md'), 'tracked\n');
-
-  prepareSandboxWorkspaceMountTargets(worktree);
-
-  assert.equal(fs.readFileSync(path.join(workspace, 'README.md'), 'utf8'), 'tracked\n');
-  assert.deepEqual(
-    fs.readdirSync(workspace).sort(),
-    ['README.md', 'active', 'archive', 'blocked', 'completed']
-  );
-  assert.deepEqual(fs.readdirSync(path.join(workspace, 'active')), ['.short-ids.json']);
-  assert.equal(fs.readFileSync(path.join(workspace, 'active', '.short-ids.json'), 'utf8'), '');
-});
-
-test('workspace mount target preparation rejects symbolic-link state directories', () => {
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-worktree-'));
-  const workspace = path.join(worktree, '.agents', 'workspace');
-  const outside = path.join(worktree, 'outside');
-  fs.mkdirSync(workspace, { recursive: true });
-  fs.mkdirSync(outside);
-  fs.symlinkSync(outside, path.join(workspace, 'active'));
-
-  assert.throws(
-    () => prepareSandboxWorkspaceMountTargets(worktree),
-    /symbolic link/
-  );
-});
-
-test('workspace mount target preparation rejects symbolic-link ancestors before writing', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-worktree-ancestor-'));
-  const worktree = path.join(root, 'worktree');
-  const outside = path.join(root, 'outside');
-  fs.mkdirSync(worktree);
-  fs.mkdirSync(outside);
-  try {
-    fs.symlinkSync(outside, path.join(worktree, '.agents'), process.platform === 'win32' ? 'junction' : 'dir');
-  } catch (error) {
-    if (process.platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM') return;
-    throw error;
-  }
-
-  assert.throws(
-    () => prepareSandboxWorkspaceMountTargets(worktree),
-    /symbolic link/
-  );
-  assert.equal(fs.existsSync(path.join(outside, 'workspace')), false);
 });
 
 test('task-bound view contains only the scoped registry and task placeholder', () => {

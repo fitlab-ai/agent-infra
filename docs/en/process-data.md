@@ -14,6 +14,8 @@ ai data export <snapshot-id> [--root <dir>] [--repairs none|applied] [--output <
 
 The default root is `.agents/workspace/process-data/`. A custom root must stay inside the repository and cannot overlap a task directory. Exit code `0` means success or an idempotent no-op, `1` means invalid input or failed integrity verification, and `2` means a required source was incomplete or blocked.
 
+This default is host runtime state. Sandboxes do not mount it writable; a default-path capture attempted inside a sandbox therefore fails closed.
+
 `capture` defaults to `--source all`. A local-only or GitHub-only capture is explicitly marked as partial and must not be presented as a complete baseline.
 
 ## Storage and Integrity

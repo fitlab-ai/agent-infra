@@ -45,7 +45,6 @@ The generated `.agents/.airc.json` file is the central contract between the boot
   ],
   "files": {
     "managed": [
-      ".agents/workspace/README.md",
       ".agents/skills/",
       ".agents/templates/",
       ".agents/workflows/",
