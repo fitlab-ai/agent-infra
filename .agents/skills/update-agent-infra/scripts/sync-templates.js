@@ -1334,6 +1334,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   for (const target of Object.keys(managedBaselines)) {
     if (
       !guardedManaged.has(norm(target))
+      && !retiredManaged.has(norm(target))
       && !allClientManaged.some((entry) => assetMatches(entry, target))
     ) {
       delete managedBaselines[target];
@@ -1430,9 +1431,9 @@ function syncTemplates(projectRoot, templateRootOverride) {
     } else {
       report.managed.protected.push({
         target: entry,
-        reason: owned
-          ? (localHash === null ? 'invalid-type' : 'user-modified')
-          : 'unknown-origin',
+        reason: owned && localHash !== null && baseline !== null
+          ? 'user-modified'
+          : (owned && localHash === null ? 'invalid-type' : 'unknown-origin'),
         baseline,
         local: localHash,
         template: null

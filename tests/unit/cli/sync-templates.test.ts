@@ -4,6 +4,7 @@ import childProcess from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 import { loadFreshEsm, onPlatforms, read, supportsPosixModeBits } from "../../helpers.ts";
@@ -91,11 +92,46 @@ test("syncTemplates creates runtime workspace states and retires only provably o
     }
     assert.equal(fs.readFileSync(path.join(ownedRoot, ".agents/workspace/README.md"), "utf8"), "local workspace notes\n");
     assert.ok(owned.registryRemoved.some((entry) => entry.entry === ".agents/workspace/README.md" && entry.list === "managed"));
-    assert.ok(owned.managed.protected.some((entry) => entry.target === ".agents/workspace/README.md" && entry.reason === "user-modified"));
+    assert.ok(owned.managed.protected.some((entry) => entry.target === ".agents/workspace/README.md" && entry.reason === "unknown-origin"));
     assert.equal(fs.existsSync(path.join(officialRoot, ".agents/workspace/README.md")), false);
     assert.ok(official.managed.removed.includes(".agents/workspace/README.md"));
     assert.equal(fs.readFileSync(path.join(unownedRoot, ".agents/workspace/README.md"), "utf8"), "local workspace notes\n");
     assert.ok(unowned.managed.protected.some((entry) => entry.target === ".agents/workspace/README.md" && entry.reason === "unknown-origin"));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates retires a recorded-baseline file and protects one that drifted from it", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-retired-baseline-"));
+  try {
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const pristine = "# project workspace\n";
+    const matchedRoot = path.join(tmpDir, "matched");
+    const driftedRoot = path.join(tmpDir, "drifted");
+    for (const [root, content] of [[matchedRoot, pristine], [driftedRoot, "# edited by hand\n"]] as const) {
+      writeJson(root, ".agents/.airc.json", {
+        project: "demo", org: "acme", language: "en", platform: { type: "none" },
+        files: {
+          managed: [".agents/workspace/README.md"],
+          merged: [],
+          ejected: [],
+          managedBaselines: {
+            ".agents/workspace/README.md": `sha256:${createHash("sha256").update(pristine).digest("hex")}`
+          }
+        }
+      });
+      writeFile(root, ".agents/workspace/README.md", content);
+    }
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const matched = syncTemplates(matchedRoot, templateRoot);
+    const drifted = syncTemplates(driftedRoot, templateRoot);
+
+    assert.equal(fs.existsSync(path.join(matchedRoot, ".agents/workspace/README.md")), false);
+    assert.ok(matched.managed.removed.includes(".agents/workspace/README.md"));
+    assert.equal(fs.readFileSync(path.join(driftedRoot, ".agents/workspace/README.md"), "utf8"), "# edited by hand\n");
+    assert.ok(drifted.managed.protected.some((entry) =>
+      entry.target === ".agents/workspace/README.md" && entry.reason === "user-modified"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
