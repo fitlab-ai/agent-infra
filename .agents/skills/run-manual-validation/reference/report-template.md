@@ -1,5 +1,11 @@
 # 验证运行证据
 
+## 输入模式
+
+- 模式：`{explicit|automatic}`
+- 输入判定：{sanitized-input-decision}
+- PR 来源状态：`{success|no-op|failed|blocked}` / `{stable-code-or-none}`
+
 ## 状态核对
 
 ```text
@@ -10,6 +16,12 @@ $ agent-infra-internal task-snapshot {task-id} --format text
 ## 验证目标
 
 {target-and-coverage}
+
+## 发现清单
+
+| ID | 来源 | 目标 | 所需能力 | 预期断言 | 分类 |
+|----|------|------|----------|----------|------|
+| `MV-{N}` | `{review-code|pr|merged|explicit}` | {target} | {capability} | {expected-assertion} | `{executable|unavailable|unknown|unsafe|unresolved}` |
 
 ## 模式判定
 
@@ -27,6 +39,19 @@ $ agent-infra-internal task-snapshot {task-id} --format text
 ```json
 {sanitized-ai-task-validate-json}
 ```
+
+## 逐项结果
+
+### MV-{N}
+
+- 来源：`{source}`
+- 分类：`{classification}`
+- Scope：`{snapshot|inplace|not-run}`
+- 命令名称：`{basename-only|not-run}`
+- 退出状态：`{exit-status|not-run}`
+- 运行时升级：{none-or-reason}
+- 结果：{sanitized-result-or-coverage-gap}
+- Cleanup：{cleanup-result}
 
 ## 清理与恢复
 

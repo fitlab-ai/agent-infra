@@ -25,18 +25,18 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## Steps
 
-1. Resolve `{task-ref}`, the validation target, and the command after the literal `--`; stop without writing an artifact if any is missing.
-2. Run `agent-infra-internal task-artifact {task-id} inspect --family validation-run`, take the round and artifact name from the core result, then run `agent-infra-internal task-event {task-id} validation-run.started --agent {standard-agent-token}`.
-3. Use snapshot for fixed-commit checks and inplace for uncommitted content, original mounts, or original permissions; when uncertain, start with snapshot and upgrade only with evidence.
-4. Call `ai task validate {task-ref} --scope {scope} --format json -- {command...}`. A runtime upgrade must be a second explicit inplace call with its reason recorded.
-5. Read `reference/report-template.md`, create `validation-run.md|validation-run-r{N}.md`, and record only the CLI JSON allowlist and a sanitized summary.
+1. Read `reference/discovery-and-execution.md` and parse the input mode. Stop before started without an artifact for invalid or partial input.
+2. Run `agent-infra-internal task-artifact {task-id} inspect --family validation-run` and read the latest review-code manual-validation items. Then run `agent-infra-internal platform-pr inspect {task-id}` and use the reference status matrix to discover, merge, and number items. Only automatic mode stops before started when reliable sources are empty or the sole possible source is unreadable; valid explicit mode always continues with the user command as effective work.
+3. Take the round and artifact name from the core result. After confirming valid explicit work or a non-empty discovered list, run `agent-infra-internal task-event {task-id} validation-run.started --agent {standard-agent-token}` and classify each item as `executable|unavailable|unknown|unsafe|unresolved`.
+4. Invoke every executable item separately with `ai task validate {task-ref} --scope snapshot --format json -- {command...}`. Only make a second explicit inplace invocation for that item when evidence proves it is required. If no item is executable, run no fabricated command but still produce coverage-gap evidence.
+5. Read `reference/report-template.md`, create `validation-run.md|validation-run-r{N}.md`, and record the input mode, discovered list, per-item results, CLI JSON allowlist, and sanitized summaries.
 6. Run `agent-infra-internal task-event {task-id} validation-run.completed --agent {standard-agent-token} --artifact {artifact}`. When an Issue exists, run `agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}` and then `agent-infra-internal platform-comment sync {task-id} --kind artifact --artifact {artifact} --agent {standard-agent-token}`.
 7. Run `agent-infra-internal task-verify {task-id} validation-run.completed --artifact {artifact} --format text`; fix failures and rerun it.
 8. Report the evidence path, coverage gaps, and verification result; explicitly leave the decision to run `complete-manual-validation` to the maintainer. Read `.agents/rules/next-step-output.md` and end with `Completed at`.
 
 ## Completion Checklist
 
-- [ ] Used `ai task validate`
+- [ ] Used `ai task validate` for every executable item, or recorded that none were executable
 - [ ] Recorded sanitized validation-run evidence
 - [ ] Did not change PR manual validation completion state
 - [ ] Updated task.md and passed completion verification
