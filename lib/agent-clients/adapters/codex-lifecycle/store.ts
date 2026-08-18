@@ -33,6 +33,11 @@ type CodexLifecycleStoreResult = Readonly<{
   state: CodexLifecycleState;
 }>;
 
+type ActiveCodexLifecycleEvidenceQuery = Readonly<{
+  nativeAgent: string;
+  hookDefinitionHash: string;
+}>;
+
 const LOCK_RETRY_MS = 10;
 const LOCK_TIMEOUT_MS = 1_000;
 const LOCK_STALE_MS = 30_000;
@@ -60,6 +65,19 @@ function recordFiles(root: string): string[] {
   return fs.readdirSync(root)
     .filter((name) => /^[a-f0-9]{64}\.json$/.test(name))
     .map((name) => path.join(root, name));
+}
+
+function hasActiveCodexLifecycleEvidence(
+  root: string,
+  query: ActiveCodexLifecycleEvidenceQuery
+): boolean {
+  return recordFiles(root).map(readRecord).some((record) => {
+    const evidence = record.state.startEvidence;
+    return record.consumer === null
+      && ['start-ready', 'observed-terminal', 'stop-ready'].includes(record.state.status)
+      && evidence?.nativeAgent === query.nativeAgent
+      && evidence.hookDefinitionHash === query.hookDefinitionHash;
+  });
 }
 
 function writeRecord(file: string, record: StoredCodexLifecycle, expectedRevision: number): void {
@@ -290,8 +308,9 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
   return Object.freeze({ root, apply, applyToSpawn, consume, expireBefore, findByParent, read });
 }
 
-export { createCodexLifecycleStore };
+export { createCodexLifecycleStore, hasActiveCodexLifecycleEvidence };
 export type {
+  ActiveCodexLifecycleEvidenceQuery,
   CodexLifecycleStoreOptions,
   CodexLifecycleStoreResult,
   StoredCodexLifecycle

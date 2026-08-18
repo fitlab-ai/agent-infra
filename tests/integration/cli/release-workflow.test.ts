@@ -64,7 +64,7 @@ function enableGitHubChannels(input: Fixture, version: string, tagSha: string) {
   fs.writeFileSync(gh, `#!/usr/bin/env node
 const args = process.argv.slice(2);
 if (args[0] === '--version') console.log('gh version 2.80.0');
-else if (args[0] === 'api' && args[1] === 'user') console.log(JSON.stringify({ login: 'codex' }));
+else if (args[0] === 'api' && args[1] === 'graphql') console.log(JSON.stringify({ data: { viewer: { login: 'codex' } } }));
 else if (args[0] === 'api') console.log(JSON.stringify({ full_name: 'acme/widgets', permissions: { triage: true, push: true, admin: true } }));
 else if (args[0] === 'release') console.log(JSON.stringify({ tagName: 'v${version}', isDraft: false, url: 'https://example.test/release' }));
 else if (args[0] === 'run') console.log(JSON.stringify([{ workflowName: 'Post-Release Smoke', event: 'workflow_run', headSha: '${tagSha}', status: 'completed', conclusion: 'success', createdAt: '2026-08-14T00:00:00Z', databaseId: 1, attempt: 1 }]));

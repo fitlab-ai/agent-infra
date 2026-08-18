@@ -52,8 +52,8 @@ function mockClient(options: {
       reviews.push(created);
       return { ok: true as const, value: created };
     }
-    if (args[1] === 'user') {
-      return { ok: true as const, value: { login: 'codex' } };
+    if (args[1] === 'graphql') {
+      return { ok: true as const, value: { data: { viewer: { login: 'codex' } } } };
     }
     if (args[0] === 'api' && /^repos\/[^/]+\/[^/]+$/.test(args[1] || '')) {
       return { ok: true as const, value: { full_name: 'acme/widgets', fork: false, permissions: { triage: true, push: true, admin: false } } };
@@ -167,7 +167,7 @@ test('publishPrReview blocks when a retryable POST cannot be reconciled', () => 
         if (args.includes('-X') && args.includes('POST') && joined.includes('/pulls/42/reviews')) {
           return { ok: false as const, error: { code: 'NETWORK_TRANSIENT', message: 'timeout', retryable: true } };
         }
-        if (args[1] === 'user') return { ok: true as const, value: { login: 'codex' } };
+        if (args[1] === 'graphql') return { ok: true as const, value: { data: { viewer: { login: 'codex' } } } };
         if (args[0] === 'api' && /^repos\/[^/]+\/[^/]+$/.test(args[1] || '')) {
           return { ok: true as const, value: { full_name: 'acme/widgets', fork: false, permissions: { triage: true, push: true, admin: false } } };
         }

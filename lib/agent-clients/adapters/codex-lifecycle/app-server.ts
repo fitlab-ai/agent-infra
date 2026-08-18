@@ -19,6 +19,12 @@ type DiscoveredHook = Readonly<{
   matcher: string | null;
   command: string;
   enabled: boolean;
+  source: string;
+  sourcePathDigest: string;
+  trustStatus: string;
+  currentHash: string;
+  isManaged: boolean;
+  pluginId: string | null;
 }>;
 
 type AppServerTransportOptions = Readonly<{
@@ -134,7 +140,11 @@ function validateCodexLifecycleHookConfig(value: unknown): void {
   if (!valid) throw new Error('CODEX_PREFLIGHT_HOOKS_INVALID: lifecycle hooks are invalid');
 }
 
-function parseCodexHooksList(value: unknown, repoRoot: string): readonly DiscoveredHook[] {
+function parseCodexHooksList(
+  value: unknown,
+  repoRoot: string,
+  expectedSource: 'direct-host' | 'isolated-user' = 'direct-host'
+): readonly DiscoveredHook[] {
   const root = object(value);
   const entries = Array.isArray(root?.data) ? root.data : [];
   const entry = entries.map(object).find((candidate) => candidate?.cwd === repoRoot);
@@ -147,13 +157,28 @@ function parseCodexHooksList(value: unknown, repoRoot: string): readonly Discove
       eventName: String(hook.eventName ?? ''),
       matcher: typeof hook.matcher === 'string' ? hook.matcher : null,
       command: String(hook.command ?? ''),
-      enabled: hook.enabled === true
+      enabled: hook.enabled === true,
+      source: String(hook.source ?? ''),
+      sourcePathDigest: typeof hook.sourcePath === 'string' && path.isAbsolute(hook.sourcePath)
+        ? crypto.createHash('sha256').update(hook.sourcePath).digest('hex')
+        : '',
+      trustStatus: String(hook.trustStatus ?? ''),
+      currentHash: String(hook.currentHash ?? ''),
+      isManaged: hook.isManaged === true,
+      pluginId: typeof hook.pluginId === 'string' ? hook.pluginId : null
     }));
   const valid = LIFECYCLE_HOOKS.every(({ event, matcher, phase }) => hooks.some((hook) =>
     hook.eventName === event.replace(/^./, (character) => character.toLowerCase())
     && hook.matcher === matcher
     && hook.command === `node "$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js" --client codex --event ${phase}`
     && hook.enabled
+    && hook.currentHash.length > 0
+    && hook.sourcePathDigest.length === 64
+    && hook.pluginId === null
+    && (expectedSource === 'isolated-user'
+      ? hook.source === 'user' && hook.trustStatus !== 'modified'
+      : (hook.source === 'project' && hook.trustStatus === 'trusted')
+        || hook.isManaged && hook.trustStatus === 'managed')
   ));
   if (!valid) throw new Error('CODEX_PREFLIGHT_HOOKS_NOT_LOADED: lifecycle hooks are not loaded for this workspace');
   return Object.freeze(hooks);
@@ -541,7 +566,11 @@ async function preflightCodexLifecycleEvidence(
   let discoveredHooks: readonly DiscoveredHook[];
   try {
     await transport.initialize();
-    discoveredHooks = parseCodexHooksList(await transport.request('hooks/list', { cwds: [repoRoot] }), repoRoot);
+    discoveredHooks = parseCodexHooksList(
+      await transport.request('hooks/list', { cwds: [repoRoot] }),
+      repoRoot,
+      process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT ? 'isolated-user' : 'direct-host'
+    );
   } finally { transport.close(); }
   return Object.freeze({
     cliVersion: match[1],

@@ -9,7 +9,11 @@ import {
   resolveCodexThread
 } from '../agent-clients/adapters/codex-lifecycle/app-server.ts';
 import { createCodexLifecycleStore } from '../agent-clients/adapters/codex-lifecycle/store.ts';
+import { createCodexCapabilityStore } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import { computeLifecycleBuildIdentity } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import { verifyCodexSandboxControllerContext } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import type { CodexLifecycleEvent } from '../agent-clients/adapters/codex-lifecycle/evidence.ts';
+import { resolveTaskRef } from '../task/resolve-ref.ts';
 import {
   activateCodexOrchestrationDelegation,
   activateCodexSpawnDelegation,
@@ -18,7 +22,7 @@ import {
   sealCodexParentDelegation
 } from '../task/codex-orchestration.ts';
 
-const USAGE = 'Usage: agent-infra-internal codex-lifecycle <hook-event|resolve-start|resolve-stop|preflight|consume> [options]\n';
+const USAGE = 'Usage: agent-infra-internal codex-lifecycle <capability-arm|hook-event|resolve-start|resolve-stop|preflight|consume> [options]\n';
 const MANAGED_AGENT = /^agent-infra-lifecycle-(executor|reviewer)$/;
 
 type Parsed = Readonly<{ operation: string; values: Readonly<Record<string, string>> }>;
@@ -53,6 +57,7 @@ function parse(args: string[]): Parsed | null {
     return null;
   }
   const allowed = {
+    'capability-arm': ['--task-id'],
     'hook-event': ['--event', '--bridge'],
     'resolve-start': ['--child-id'],
     'resolve-stop': ['--child-id'],
@@ -90,6 +95,16 @@ function cliVersion(): string {
 function hookDefinitionHash(): string {
   const file = path.join(process.cwd(), '.codex', 'hooks.json');
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+function controllerBinding(taskId: string) {
+  const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+  if (!contextPath) return undefined;
+  const context = verifyCodexSandboxControllerContext(contextPath, taskId, { repoRoot: process.cwd() });
+  return {
+    instanceDigest: context.controllerInstanceDigest,
+    controlGeneration: context.controlGeneration
+  };
 }
 
 async function readStdin(): Promise<unknown> {
@@ -171,6 +186,28 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       return;
     }
 
+    if (parsed.operation === 'capability-arm') {
+      const taskId = parsed.values['--task-id'];
+      if (!taskId) throw new Error('capability-arm requires --task-id');
+      const resolved = resolveTaskRef(taskId, { repoRoot: process.cwd() });
+      if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+      const armed = createCodexCapabilityStore().arm({
+        taskId: resolved.taskId,
+        buildIdentity: computeLifecycleBuildIdentity(process.cwd()),
+        controller: controllerBinding(resolved.taskId)
+      });
+      output({
+        status: 'armed',
+        changed: true,
+        capabilityToken: armed.token,
+        marker: armed.marker,
+        expiresAt: armed.expiresAt,
+        buildIdentity: armed.buildIdentity,
+        error: null
+      });
+      return;
+    }
+
     const store = createCodexLifecycleStore({ cliVersion: cliVersion() });
     if (parsed.operation === 'hook-event') {
       const phase = parsed.values['--event'];
@@ -181,6 +218,36 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
         throw new Error("hook-event --bridge must be 'true'");
       }
       const payload = await readStdin();
+      if (phase === 'post-tool') {
+        const capabilityToken = payloadText(payload, 'capabilityToken');
+        if (capabilityToken) {
+          const capabilityStore = createCodexCapabilityStore();
+          const armed = capabilityStore.inspect(capabilityToken);
+          const capability = createCodexCapabilityStore().attest({
+            token: capabilityToken,
+            sessionId: payloadText(payload, 'sessionId'),
+            turnId: payloadText(payload, 'turnId'),
+            toolUseId: payloadText(payload, 'toolUseId'),
+            hookDefinitionHash: payloadText(payload, 'hookDefinitionHash'),
+            buildIdentity: computeLifecycleBuildIdentity(process.cwd()),
+            controller: controllerBinding(armed.taskId)
+          });
+          output({
+            status: capability.status,
+            changed: true,
+            evidence: {
+              revision: capability.revision,
+              sessionId: capability.sessionId,
+              turnId: capability.turnId,
+              toolUseId: capability.toolUseId,
+              expiresAt: capability.expiresAt
+            },
+            diagnostics: [],
+            error: null
+          });
+          return;
+        }
+      }
       if (phase === 'post-tool' && parsed.values['--bridge'] === 'true') {
         const toolName = payloadText(payload, 'toolName');
         if (toolName === 'collaborationspawn_agent') {

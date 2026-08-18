@@ -70,7 +70,18 @@ test('App Server hook discovery requires every enabled lifecycle hook', () => {
     ['postToolUse', '', 'post-tool'],
     ['subagentStart', '', 'subagent-start'],
     ['subagentStop', '', 'subagent-stop']
-  ] as const).map(([eventName, matcher, phase]) => ({ eventName, matcher, command: command(phase), enabled: true }));
+  ] as const).map(([eventName, matcher, phase]) => ({
+    eventName,
+    matcher,
+    command: command(phase),
+    enabled: true,
+    source: 'project',
+    sourcePath: '/workspace/.codex/hooks.json',
+    trustStatus: 'trusted',
+    currentHash: `hash-${phase}`,
+    isManaged: false,
+    pluginId: null
+  }));
   assert.equal(parseCodexHooksList({ data: [{ cwd: '/workspace', hooks, warnings: [], errors: [] }] }, '/workspace').length, 4);
   assert.throws(
     () => parseCodexHooksList({ data: [{ cwd: '/workspace', hooks: hooks.slice(1), warnings: [], errors: [] }] }, '/workspace'),

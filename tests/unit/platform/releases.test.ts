@@ -112,7 +112,9 @@ test('release milestone reconciliation closes current and ensures planning miles
     json(args) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) ?? '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { admin: true } } } as never;
-      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } } as never;
+      if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
+        return { ok: true, value: { data: { viewer: { login: 'codex' } } } } as never;
+      }
       if (endpoint.includes('/milestones?')) return { ok: true, value: milestones } as never;
       if (args.includes('PATCH')) {
         patchCalls.push(args);

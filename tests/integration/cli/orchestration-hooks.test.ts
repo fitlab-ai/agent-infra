@@ -254,3 +254,22 @@ test('lifecycle hook forwards completed Codex waits and ignores timed out waits'
   assert.equal(timedOut.status, 0, timedOut.stderr);
   assert.equal(timedOut.stdout, '');
 });
+
+test('Codex PostToolUse forwards a current-loop capability marker from an ordinary tool response', () => {
+  const fixture = createHookFixture('working');
+  const token = 'abcdefghijklmnopqrstuvwxyz0123456789_TOKEN';
+  const result = run(JSON.stringify({
+    hook_event_name: 'PostToolUse',
+    session_id: 'codex-parent',
+    turn_id: 'capability-turn',
+    tool_use_id: 'capability-tool',
+    tool_name: 'functions.exec',
+    tool_input: {},
+    tool_response: { content: [{ text: `agent-infra-codex-capability:${token}` }] }
+  }), { ...fixture, client: 'codex', event: 'post-tool', hook: fixture.hook });
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.input.capabilityToken, token);
+  assert.equal(parsed.input.sessionId, 'codex-parent');
+  assert.equal(parsed.input.toolUseId, 'capability-tool');
+});

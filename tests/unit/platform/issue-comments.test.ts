@@ -130,7 +130,7 @@ test('comment sync creates once and becomes a no-op on replay', () => {
     json(args: string[], options?: { input?: string }) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
-      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
       if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
       if (args.includes('POST')) {
         const body = JSON.parse(options?.input || '{}').body;
@@ -160,7 +160,7 @@ test('comment sync refuses duplicate registered markers without writing', () => 
     json(args: string[]) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: {} } };
-      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
       if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [[
         { id: 1, body: `${marker}\na`, user: { login: 'codex' } },
         { id: 2, body: `${marker}\nb`, user: { login: 'codex' } }
@@ -183,7 +183,7 @@ test('artifact sync isolates sibling stems and becomes a no-op on replay', () =>
     json(args: string[], options?: { input?: string }) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
-      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
       if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
       if (args.includes('POST')) {
         const body = JSON.parse(options?.input || '{}').body;
@@ -215,7 +215,7 @@ test('artifact backfill creates a missing comment with a timeline hint', () => {
     json(args: string[], options?: { input?: string }) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
-      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
       if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
       if (args.includes('POST')) {
         const body = JSON.parse(options?.input || '{}').body;
@@ -246,7 +246,7 @@ test('artifact backfill preserves an existing normal comment without remote writ
     json(args: string[]) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
-      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
       if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
       throw new Error('write must not be attempted');
     },
@@ -273,7 +273,7 @@ test('artifact backfill preserves an existing valid chunk set without remote wri
     json(args: string[]) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
-      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
       if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
       throw new Error('write must not be attempted');
     },
@@ -299,7 +299,7 @@ test('normal artifact sync still updates an existing comment when content change
     json(args: string[], options?: { input?: string }) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
-      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
       if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [comments] };
       if (args.includes('PATCH')) {
         patchCount += 1;
@@ -328,7 +328,7 @@ test('artifact sync refuses duplicate base markers without writing', () => {
     json(args: string[]) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: {} } };
-      if (args.at(-1) === 'user') return { ok: true, value: { login: 'codex' } };
+      if (args[1] === 'graphql') return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
       if (endpoint.endsWith('/comments?per_page=100')) return { ok: true, value: [[
         { id: 1, body: `${marker}\na`, user: { login: 'codex' } },
         { id: 2, body: `${marker}\nb`, user: { login: 'codex' } }

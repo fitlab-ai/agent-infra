@@ -174,7 +174,7 @@ function checkOrchestrationState({ taskDir }: any): any {
   if (isFailClosedLegacyPause(run)) {
     return passResult('orchestration-state', 'Legacy orchestration run is safely paused');
   }
-  if (run.schemaVersion !== 2 || !['paused', 'completed'].includes(run.status)) {
+  if (![2, 3].includes(run.schemaVersion) || !['paused', 'completed'].includes(run.status)) {
     return failResult('orchestration-state', `Expected paused or completed run, received '${run.status}'`);
   }
   if (run.status === 'paused' && (!run.pause?.code || !run.pause?.message)) {

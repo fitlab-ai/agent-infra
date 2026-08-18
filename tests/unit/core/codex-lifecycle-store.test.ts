@@ -4,7 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createCodexLifecycleStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
+import {
+  createCodexLifecycleStore,
+  hasActiveCodexLifecycleEvidence
+} from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
 import { assertModeBits } from '../../helpers/platform.ts';
 
 test('Codex lifecycle store persists only normalized evidence and consumes once', () => {
@@ -29,6 +32,10 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
     type: 'app-settings', childThreadId: 'child', model: 'model', reasoningEffort: 'high'
   });
   assert.equal(record.state.status, 'start-ready');
+  assert.equal(hasActiveCodexLifecycleEvidence(root, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer',
+    hookDefinitionHash: 'hash'
+  }), true);
 
   const raw = fs.readFileSync(record.path, 'utf8');
   assert.equal(raw.includes('prompt'), false);
@@ -45,6 +52,10 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
   assert.throws(() => store.consume('child', 'receipt-1', 'stale-hash'), /hash is stale/);
   const consumed = store.consume('child', 'receipt-1', 'hash');
   assert.equal(consumed.consumer, 'receipt-1');
+  assert.equal(hasActiveCodexLifecycleEvidence(root, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer',
+    hookDefinitionHash: 'hash'
+  }), false);
   assert.equal(store.findByParent('parent')[0]?.consumer, 'receipt-1');
   assert.deepEqual(store.consume('child', 'receipt-1', 'hash'), consumed);
   assert.throws(() => store.consume('child', 'receipt-2'), /already consumed/);

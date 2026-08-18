@@ -88,11 +88,11 @@ test('begin is persistent and idempotent for a running task', () => {
   assert.equal(second.changed, false);
   assert.equal(second.run?.runId, 'run-1');
   assert.deepEqual(second.run?.modelPolicy, modelPolicy);
-  assert.equal(second.run?.schemaVersion, 2);
+  assert.equal(second.run?.schemaVersion, 3);
   assert.equal(second.run?.modelPolicySource?.kind, 'explicit');
 });
 
-test('completed v2 runs are idempotent across client changes', () => {
+test('completed current-schema runs are idempotent across client changes', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   const runPath = path.join(f.taskDir, 'orchestration.json');
@@ -180,7 +180,7 @@ test('resume rejects policy changes and pauses legacy runs without model evidenc
     repoRoot: legacy.root, client: 'claude-code', modelPolicy
   });
   assert.equal(resumed.status, 'running');
-  assert.equal(resumed.run?.schemaVersion, 2);
+  assert.equal(resumed.run?.schemaVersion, 3);
   assert.equal(resumed.run?.recoveryHistory?.length, 1);
   const repeated = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
     repoRoot: legacy.root, client: 'claude-code'
@@ -292,6 +292,41 @@ test('Codex unsupported-client recovery fails closed when historical execution e
   });
   assert.equal(blocked.status, 'paused');
   assert.equal(blocked.changed, false);
+});
+
+test('recoverable v2 pauses migrate only when their idle baseline is unchanged', () => {
+  const safe = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: safe.root });
+  const safePath = path.join(safe.taskDir, 'orchestration.json');
+  const paused = JSON.parse(fs.readFileSync(safePath, 'utf8'));
+  paused.schemaVersion = 2;
+  paused.status = 'paused';
+  paused.pause = { code: 'ORCHESTRATION_RETRYABLE', message: 'retry', recoverable: true };
+  paused.baseline = '';
+  fs.writeFileSync(safePath, `${JSON.stringify(paused, null, 2)}\n`);
+
+  const migrated = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+    repoRoot: safe.root,
+    client: 'claude-code',
+    modelPolicy
+  });
+  assert.equal(migrated.status, 'running');
+  assert.equal(migrated.run?.schemaVersion, 3);
+  assert.equal(migrated.run?.pause, null);
+
+  const drifted = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: drifted.root });
+  const driftedPath = path.join(drifted.taskDir, 'orchestration.json');
+  fs.writeFileSync(driftedPath, `${JSON.stringify({ ...paused, baseline: 'historical-tree' }, null, 2)}\n`);
+  const blocked = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+    repoRoot: drifted.root,
+    client: 'claude-code',
+    modelPolicy
+  });
+  assert.equal(blocked.status, 'paused');
+  assert.equal(blocked.run?.schemaVersion, 2);
+  assert.equal(blocked.run?.pause?.code, 'ORCHESTRATION_SCHEMA_MIGRATION_REQUIRED');
+  assert.equal(blocked.run?.pause?.recoverable, false);
 });
 
 test('prepare validates requested model before capturing workspace state', () => {

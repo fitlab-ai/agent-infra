@@ -7,12 +7,29 @@ type DelegationRole = 'executor' | 'reviewer';
 type DelegationStage = 'analysis' | 'review-analysis' | 'plan' | 'review-plan' | 'code' | 'review-code' | 'commit';
 type DelegationStatus = 'prepared' | 'activated' | 'stage-completed' | 'sealed' | 'consumed' | 'aborted' | 'expired';
 type DelegationHostEvidence = Readonly<{
-  kind: 'codex-lifecycle-v1';
+  kind: 'codex-lifecycle-v1' | 'codex-lifecycle-v2';
   hookDefinitionHash: string;
   startRevision: number;
   stopRevision: number | null;
   consumer: string | null;
   consumedAt: string | null;
+  protocolVersion?: number;
+  packageVersion?: string;
+  internalExecutableBuildHash?: string;
+  lifecycleContractHash?: string;
+  hookSource?: 'project' | 'managed' | 'isolated-user';
+  controllerInstanceDigest?: string | null;
+  controlGeneration?: string | null;
+}>;
+type DelegationLifecycleProvenance = Readonly<{
+  protocolVersion: number;
+  packageVersion: string;
+  internalExecutableBuildHash: string;
+  lifecycleContractHash: string;
+  hookDefinitionHash: string;
+  hookSource: 'project' | 'managed' | 'isolated-user';
+  controllerInstanceDigest: string | null;
+  controlGeneration: string | null;
 }>;
 
 type DelegationReceipt = Readonly<{
@@ -36,11 +53,17 @@ type DelegationReceipt = Readonly<{
   agent: string | null;
   status: DelegationStatus;
   workspaceSnapshotScope?: 'task';
+  lifecycleProvenance?: DelegationLifecycleProvenance | null;
   hostEvidence?: DelegationHostEvidence | null;
   beforeFingerprint: string;
   afterFingerprint: string | null;
   changedPaths: readonly string[];
   createdAt: string;
+  preparedMonotonicMs: number;
+  spawnDispatchMonotonicMs: number;
+  activationDeadlineMonotonicMs: number;
+  startEvidenceMonotonicMs: number | null;
+  activatedMonotonicMs: number | null;
   activatedAt: string | null;
   sealedAt: string | null;
   consumedAt: string | null;
@@ -64,9 +87,10 @@ function fail(code: string, message: string): ReceiptFailure {
 }
 
 function prepareDelegation(
-  input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'requestedReasoningEffort' | 'actualModel' | 'actualReasoningEffort' | 'modelFallbackReason' | 'reasoningEffortFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'hostEvidence' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string; requestedReasoningEffort: string }>,
-  options: { id?: () => string; now?: () => string } = {}
+  input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'requestedReasoningEffort' | 'actualModel' | 'actualReasoningEffort' | 'modelFallbackReason' | 'reasoningEffortFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'hostEvidence' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'preparedMonotonicMs' | 'spawnDispatchMonotonicMs' | 'activationDeadlineMonotonicMs' | 'startEvidenceMonotonicMs' | 'activatedMonotonicMs' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string; requestedReasoningEffort: string }>,
+  options: { id?: () => string; now?: () => string; monotonicNow?: () => number; activationWindowMs?: number } = {}
 ): DelegationReceipt {
+  const monotonic = (options.monotonicNow ?? (() => Number(process.hrtime.bigint() / 1_000_000n)))();
   return Object.freeze({
     ...input,
     id: (options.id ?? randomUUID)(),
@@ -83,6 +107,11 @@ function prepareDelegation(
     afterFingerprint: null,
     changedPaths: Object.freeze([]),
     createdAt: (options.now ?? (() => new Date().toISOString()))(),
+    preparedMonotonicMs: monotonic,
+    spawnDispatchMonotonicMs: monotonic,
+    activationDeadlineMonotonicMs: monotonic + (options.activationWindowMs ?? 15_000),
+    startEvidenceMonotonicMs: null,
+    activatedMonotonicMs: null,
     activatedAt: null,
     sealedAt: null,
     consumedAt: null
@@ -101,16 +130,27 @@ function activateDelegation(
     modelFallbackReason?: string;
     reasoningEffortFallbackReason?: string;
     hostEvidence?: Readonly<{
-      kind: 'codex-lifecycle-v1';
+      kind: 'codex-lifecycle-v1' | 'codex-lifecycle-v2';
       hookDefinitionHash: string;
       startRevision: number;
+      protocolVersion?: number;
+      packageVersion?: string;
+      internalExecutableBuildHash?: string;
+      lifecycleContractHash?: string;
+      hookSource?: 'project' | 'managed' | 'isolated-user';
+      controllerInstanceDigest?: string | null;
+      controlGeneration?: string | null;
     }>;
   }>,
-  options: { now?: () => string } = {}
+  options: { now?: () => string; monotonicNow?: () => number } = {}
 ): ReceiptResult {
   const managedRole = managedDelegationRole(event.nativeAgent);
   if (!managedRole) return fail('DELEGATION_IGNORED', `subagent '${event.nativeAgent}' is not lifecycle-managed`);
   if (receipt.status !== 'prepared') return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected prepared`);
+  const monotonic = (options.monotonicNow ?? (() => Number(process.hrtime.bigint() / 1_000_000n)))();
+  if (monotonic > receipt.activationDeadlineMonotonicMs) {
+    return fail('DELEGATION_ACTIVATION_TIMEOUT', `delegation ${receipt.id} activation evidence arrived after its deadline`);
+  }
   if (managedRole !== receipt.role) return fail('DELEGATION_ROLE_MISMATCH', `managed role ${managedRole} does not match ${receipt.role}`);
   if (!event.parentId || (receipt.parentId !== null && event.parentId !== receipt.parentId) || !event.childId || event.childId === event.parentId) {
     return fail('DELEGATION_IDENTITY_INVALID', 'native parent/child identity does not match the prepared delegation');
@@ -148,6 +188,20 @@ function activateDelegation(
       || event.hostEvidence.startRevision < 1
     )
   ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex start evidence reference is invalid');
+  if (event.hostEvidence?.kind === 'codex-lifecycle-v2') {
+    const expected = receipt.lifecycleProvenance;
+    if (
+      !expected
+      || event.hostEvidence.protocolVersion !== expected.protocolVersion
+      || event.hostEvidence.packageVersion !== expected.packageVersion
+      || event.hostEvidence.internalExecutableBuildHash !== expected.internalExecutableBuildHash
+      || event.hostEvidence.lifecycleContractHash !== expected.lifecycleContractHash
+      || event.hostEvidence.hookDefinitionHash !== expected.hookDefinitionHash
+      || event.hostEvidence.hookSource !== expected.hookSource
+      || (event.hostEvidence.controllerInstanceDigest ?? null) !== expected.controllerInstanceDigest
+      || (event.hostEvidence.controlGeneration ?? null) !== expected.controlGeneration
+    ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex lifecycle provenance does not match the prepared receipt');
+  }
   return { ok: true, receipt: Object.freeze({
     ...receipt,
     status: 'activated',
@@ -164,8 +218,20 @@ function activateDelegation(
       consumer: null,
       consumedAt: null
     }) : receipt.hostEvidence ?? null,
+    startEvidenceMonotonicMs: monotonic,
+    activatedMonotonicMs: monotonic,
     activatedAt: (options.now ?? (() => new Date().toISOString()))()
   }) };
+}
+
+function abortPreparedDelegation(receipt: DelegationReceipt): ReceiptResult {
+  if (receipt.status !== 'prepared') {
+    return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected prepared`);
+  }
+  return {
+    ok: true,
+    receipt: Object.freeze({ ...receipt, status: 'aborted' as const })
+  };
 }
 
 function completeDelegationStage(
@@ -239,10 +305,19 @@ function consumeDelegation(receipt: DelegationReceipt, options: { now?: () => st
 
 export {
   activateDelegation,
+  abortPreparedDelegation,
   completeDelegationStage,
   consumeDelegation,
   managedDelegationRole,
   prepareDelegation,
   sealDelegation
 };
-export type { DelegationHostEvidence, DelegationReceipt, DelegationRole, DelegationStage, DelegationStatus, ReceiptResult };
+export type {
+  DelegationHostEvidence,
+  DelegationLifecycleProvenance,
+  DelegationReceipt,
+  DelegationRole,
+  DelegationStage,
+  DelegationStatus,
+  ReceiptResult
+};

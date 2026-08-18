@@ -1,10 +1,38 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const distLib = path.join(rootDir, "dist", "lib");
+
+function hashFiles(files) {
+  const hash = crypto.createHash("sha256");
+  for (const relative of [...new Set(files)].sort()) {
+    hash.update(relative);
+    hash.update("\0");
+    hash.update(fs.readFileSync(path.join(rootDir, relative)));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+const lifecycleFiles = JSON.parse(fs.readFileSync(
+  path.join(rootDir, "lib", "agent-clients", "adapters", "codex-lifecycle", "manifest-files.json"),
+  "utf8"
+));
+const packageVersion = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf8")).version;
+const compiledExecutableFiles = lifecycleFiles.executableFiles.map((file) =>
+  file.endsWith(".ts") ? path.join("dist", file.replace(/\.ts$/u, ".js")) : file
+);
+fs.writeFileSync(path.join(rootDir, "dist", "lifecycle-build-manifest.json"), `${JSON.stringify({
+  protocolVersion: 3,
+  packageVersion,
+  sourceInputHash: hashFiles(lifecycleFiles.executableFiles),
+  internalExecutableBuildHash: hashFiles(compiledExecutableFiles)
+}, null, 2)}\n`);
+process.stdout.write("Generated dist/lifecycle-build-manifest.json\n");
 
 function copyFile(src, dst) {
   fs.mkdirSync(path.dirname(dst), { recursive: true });

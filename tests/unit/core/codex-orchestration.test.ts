@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createCodexLifecycleStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
+import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import {
   activateCodexOrchestrationDelegation,
   activateCodexSpawnDelegation,
@@ -25,6 +26,12 @@ const policy = {
   executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
   reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
 } as const;
+const buildIdentity = {
+  protocolVersion: 3,
+  packageVersion: '0.9.7-alpha.0',
+  internalExecutableBuildHash: 'a'.repeat(64),
+  lifecycleContractHash: 'b'.repeat(64)
+} as const;
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-orchestration-'));
@@ -33,6 +40,23 @@ function fixture() {
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
   beginOrResumeOrchestration(taskId, { repoRoot: root, client: 'codex', modelPolicy: policy, id: () => 'run-1' });
   return { root, taskDir };
+}
+
+function capability(root: string, token: string) {
+  const store = createCodexCapabilityStore({
+    root: path.join(root, '.agents', 'workspace', '.runtime', 'codex-capabilities'),
+    token: () => token
+  });
+  const armed = store.arm({ taskId, buildIdentity });
+  store.attest({
+    token: armed.token,
+    sessionId: 'parent',
+    turnId: 'capability-turn',
+    toolUseId: 'capability-tool',
+    hookDefinitionHash: 'hook-hash',
+    buildIdentity
+  });
+  return { store, token: armed.token };
 }
 
 test('Codex prepare preflight fails before workspace capture or receipt creation', async () => {
@@ -64,10 +88,14 @@ test('Codex parent reconciliation ignores unrelated completed waits', async () =
 
 test('Codex bridge completes sealing after evidence consumption survives a crash window', async () => {
   const f = fixture();
+  const currentCapability = capability(f.root, 'capability-token-one');
   const prepared = await prepareCodexOrchestrationDelegation(taskId, {
-    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
+    capabilityToken: currentCapability.token
   }, {
     repoRoot: f.root,
+    capabilityStore: currentCapability.store,
+    buildIdentity,
     preflight: async () => ({
       cliVersion: '0.147.0', hookDefinitionHash: 'hook-hash', staticReady: true,
       discoveredHooks: [], runtimeLiveness: false, diagnostics: []
@@ -93,6 +121,7 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
   });
   const started = await activateCodexOrchestrationDelegation('child', {
     repoRoot: f.root,
+    buildIdentity,
     store,
     resolveThread: async () => ({
       resolution: {
@@ -103,9 +132,17 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
     })
   });
   assert.equal(started.run?.pendingDelegation?.status, 'activated');
+  assert.equal(started.run?.pendingDelegation?.hostEvidence?.kind, 'codex-lifecycle-v2');
+  assert.deepEqual(started.run?.pendingDelegation?.lifecycleProvenance, {
+    ...buildIdentity,
+    hookDefinitionHash: 'hook-hash',
+    hookSource: 'project',
+    controllerInstanceDigest: null,
+    controlGeneration: null
+  });
   assert.equal(started.run?.pendingDelegation?.hostEvidence?.startRevision, 4);
   assert.equal((await activateCodexOrchestrationDelegation('child', {
-    repoRoot: f.root, store,
+    repoRoot: f.root, store, buildIdentity,
     resolveThread: async () => ({
       resolution: {
         thread: { type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor' },
@@ -149,10 +186,14 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
 
 test('Codex bridge activates and seals from trusted parent spawn and wait evidence', async () => {
   const f = fixture();
+  const currentCapability = capability(f.root, 'capability-token-two');
   await prepareCodexOrchestrationDelegation(taskId, {
-    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
+    capabilityToken: currentCapability.token
   }, {
     repoRoot: f.root,
+    buildIdentity,
+    capabilityStore: currentCapability.store,
     preflight: async () => ({
       cliVersion: '0.147.0', hookDefinitionHash: 'hook-hash', staticReady: true,
       discoveredHooks: [], runtimeLiveness: false, diagnostics: []
@@ -185,6 +226,7 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
     requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
   }, {
     repoRoot: f.root,
+    buildIdentity,
     store,
     resolveThread: async () => ({
       resolution: {
