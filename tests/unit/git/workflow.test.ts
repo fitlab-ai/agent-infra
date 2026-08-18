@@ -18,6 +18,31 @@ function fixture(): string {
   return root;
 }
 
+function ignoredTrackedFixture(): string {
+  const root = fixture();
+  fs.mkdirSync(path.join(root, 'ignored'));
+  fs.writeFileSync(path.join(root, 'ignored', 'file.txt'), 'one\n');
+  execFileSync('git', ['add', 'ignored/file.txt'], { cwd: root });
+  execFileSync('git', ['commit', '-qm', 'track ignored file'], { cwd: root });
+  fs.writeFileSync(path.join(root, '.gitignore'), 'ignored/\n');
+  return root;
+}
+
+function gitOutput(root: string, args: readonly string[]): string {
+  return execFileSync('git', [...args], { cwd: root, encoding: 'utf8' }).trim();
+}
+
+function stageIgnoredSnapshot(root: string): { head: string; tree: string } {
+  const head = gitOutput(root, ['rev-parse', 'HEAD']);
+  execFileSync('git', ['add', '-u', '--', 'ignored/file.txt'], { cwd: root });
+  execFileSync('git', ['add', '--', '.gitignore'], { cwd: root });
+  return { head, tree: gitOutput(root, ['write-tree']) };
+}
+
+function resetIgnoredSnapshot(root: string): void {
+  execFileSync('git', ['reset', '-q', 'HEAD', '--', 'ignored/file.txt', '.gitignore'], { cwd: root });
+}
+
 test('commitExplicitPaths commits only explicitly selected paths', () => {
   const root = fixture();
   fs.writeFileSync(path.join(root, 'tracked.txt'), 'two\n');
@@ -26,6 +51,102 @@ test('commitExplicitPaths commits only explicitly selected paths', () => {
   assert.equal(result.status, 'applied');
   assert.deepEqual(execFileSync('git', ['show', '--pretty=', '--name-only', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), 'tracked.txt');
   assert.match(execFileSync('git', ['status', '--short'], { cwd: root, encoding: 'utf8' }), /unrelated\.txt/);
+});
+
+test('commitExplicitPaths handles clean and modified tracked files under a newly ignored parent', () => {
+  for (const state of ['clean', 'modified'] as const) {
+    const root = ignoredTrackedFixture();
+    if (state === 'modified') fs.writeFileSync(path.join(root, 'ignored', 'file.txt'), 'two\n');
+    const { head, tree } = stageIgnoredSnapshot(root);
+    resetIgnoredSnapshot(root);
+
+    const result = commitExplicitPaths({
+      cwd: root,
+      paths: ['ignored/file.txt', '.gitignore'],
+      message: `fix: commit ${state} ignored tracked path`,
+      expectedHead: head,
+      expectedTree: tree
+    });
+
+    assert.equal(result.status, 'applied', `${state}: ${result.error?.code} ${result.error?.message}`);
+    assert.equal(gitOutput(root, ['rev-parse', 'HEAD^{tree}']), tree);
+    assert.equal(fs.readFileSync(path.join(root, 'ignored', 'file.txt'), 'utf8'), state === 'modified' ? 'two\n' : 'one\n');
+  }
+});
+
+test('commitExplicitPaths stages a tracked deletion under a newly ignored parent', () => {
+  const root = ignoredTrackedFixture();
+  fs.rmSync(path.join(root, 'ignored', 'file.txt'));
+  const { head, tree } = stageIgnoredSnapshot(root);
+  resetIgnoredSnapshot(root);
+
+  const result = commitExplicitPaths({
+    cwd: root,
+    paths: ['ignored/file.txt', '.gitignore'],
+    message: 'fix: delete ignored tracked path',
+    expectedHead: head,
+    expectedTree: tree
+  });
+
+  assert.equal(result.status, 'applied', `${result.error?.code} ${result.error?.message}`);
+  assert.equal(gitOutput(root, ['rev-parse', 'HEAD^{tree}']), tree);
+  assert.equal(gitOutput(root, ['show', '--pretty=', '--name-status', 'HEAD']), 'A\t.gitignore\nD\tignored/file.txt');
+});
+
+test('commitExplicitPaths accepts an already staged deletion under an ignored parent', () => {
+  const root = ignoredTrackedFixture();
+  fs.rmSync(path.join(root, 'ignored', 'file.txt'));
+  const { head, tree } = stageIgnoredSnapshot(root);
+
+  const result = commitExplicitPaths({
+    cwd: root,
+    paths: ['ignored/file.txt', '.gitignore'],
+    message: 'fix: commit staged ignored deletion',
+    expectedHead: head,
+    expectedTree: tree
+  });
+
+  assert.equal(result.status, 'applied', `${result.error?.code} ${result.error?.message}`);
+  assert.equal(gitOutput(root, ['rev-parse', 'HEAD^{tree}']), tree);
+});
+
+test('commitExplicitPaths rejects a recreated ignored file after its deletion was staged', () => {
+  const root = ignoredTrackedFixture();
+  fs.rmSync(path.join(root, 'ignored', 'file.txt'));
+  const { head } = stageIgnoredSnapshot(root);
+  fs.writeFileSync(path.join(root, 'ignored', 'file.txt'), 'recreated\n');
+
+  const result = commitExplicitPaths({
+    cwd: root,
+    paths: ['ignored/file.txt', '.gitignore'],
+    message: 'fix: reject recreated ignored file',
+    expectedHead: head
+  });
+
+  assert.equal(result.error?.code, 'GIT_STAGE_FAILED');
+  assert.equal(gitOutput(root, ['rev-parse', 'HEAD']), head);
+});
+
+test('commitExplicitPaths keeps invalid paths and expected tree mismatches fail closed', () => {
+  const invalidRoot = fixture();
+  const invalidHead = gitOutput(invalidRoot, ['rev-parse', 'HEAD']);
+  const invalid = commitExplicitPaths({ cwd: invalidRoot, paths: ['missing.txt'], message: 'fix: missing path' });
+  assert.equal(invalid.error?.code, 'GIT_STAGE_FAILED');
+  assert.equal(gitOutput(invalidRoot, ['rev-parse', 'HEAD']), invalidHead);
+
+  const mismatchRoot = fixture();
+  const mismatchHead = gitOutput(mismatchRoot, ['rev-parse', 'HEAD']);
+  const originalTree = gitOutput(mismatchRoot, ['rev-parse', 'HEAD^{tree}']);
+  fs.writeFileSync(path.join(mismatchRoot, 'tracked.txt'), 'two\n');
+  const mismatch = commitExplicitPaths({
+    cwd: mismatchRoot,
+    paths: ['tracked.txt'],
+    message: 'fix: mismatched tree',
+    expectedHead: mismatchHead,
+    expectedTree: originalTree
+  });
+  assert.equal(mismatch.error?.code, 'GIT_TREE_MISMATCH');
+  assert.equal(gitOutput(mismatchRoot, ['rev-parse', 'HEAD']), mismatchHead);
 });
 
 test('commitExplicitPaths rejects escaping and sensitive paths', () => {

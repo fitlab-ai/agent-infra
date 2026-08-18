@@ -20,6 +20,10 @@ function value(runner: GitRunner, cwd: string, args: readonly string[], trim = t
   return result.status === 0 ? (trim ? result.stdout.trim() : result.stdout.replace(/\n$/, '')) : null;
 }
 
+function nulPaths(output: string): string[] {
+  return output.split('\0').filter(Boolean);
+}
+
 function cleanMessage(message: string): string {
   return message.replace(/(https?:\/\/)[^\s/@:]+(?::[^\s/@]*)?@/gi, '$1***@').trim();
 }
@@ -68,8 +72,27 @@ function commitExplicitPaths(input: { cwd: string; paths: readonly string[]; mes
   const selected = new Set(input.paths);
   const unrelatedStaged = before.snapshot.staged.filter((candidate) => !selected.has(candidate));
   if (unrelatedStaged.length > 0) return { status: 'failed' as const, changed: false, snapshot: before.snapshot, operations: [], error: { code: 'GIT_STAGED_SCOPE_MISMATCH', message: `Unrelated staged paths: ${unrelatedStaged.join(', ')}` } };
-  const add = run(runner, input.cwd, ['add', '--', ...input.paths]);
-  if (add.status !== 0) return { status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'stage', status: 'failed' as const, message: add.stderr.trim() }], error: { code: 'GIT_STAGE_FAILED', message: add.stderr.trim() } };
+  const stageFailure = (message: string) => ({ status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'stage', status: 'failed' as const, message }], error: { code: 'GIT_STAGE_FAILED', message } });
+  const indexed = run(runner, input.cwd, ['ls-files', '-z', '--', ...input.paths]);
+  if (indexed.status !== 0) return stageFailure(indexed.stderr.trim());
+  const headed = run(runner, input.cwd, ['ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', ...input.paths]);
+  if (headed.status !== 0) return stageFailure(headed.stderr.trim());
+  const indexedPaths = new Set(nulPaths(indexed.stdout));
+  const headPaths = new Set(nulPaths(headed.stdout));
+  const trackedPaths: string[] = [];
+  const addPaths: string[] = [];
+  for (const candidate of input.paths) {
+    if (indexedPaths.has(candidate)) trackedPaths.push(candidate);
+    else if (!headPaths.has(candidate) || fs.existsSync(path.join(input.cwd, candidate))) addPaths.push(candidate);
+  }
+  if (trackedPaths.length > 0) {
+    const update = run(runner, input.cwd, ['add', '-u', '--', ...trackedPaths]);
+    if (update.status !== 0) return stageFailure(update.stderr.trim());
+  }
+  if (addPaths.length > 0) {
+    const add = run(runner, input.cwd, ['add', '--', ...addPaths]);
+    if (add.status !== 0) return stageFailure(add.stderr.trim());
+  }
   const staged = run(runner, input.cwd, ['diff', '--cached', '--quiet', '--']);
   if (staged.status === 0) return { status: 'no-op' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [{ name: 'stage', status: 'no-op' as const }], error: null };
   if (input.expectedTree) {
