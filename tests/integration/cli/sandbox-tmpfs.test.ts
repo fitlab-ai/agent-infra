@@ -18,6 +18,7 @@ import {
   collectSandboxRecoverySnapshot,
   ensureSandboxReady,
   prepareTmpfsMounts,
+  worktreeProbeForEngine,
   type SandboxRecoverySnapshot
 } from "../../../lib/sandbox/recovery.ts";
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
@@ -653,6 +654,21 @@ test("hard recovery failure requires explicit container replacement authorizatio
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test("WSL2 worktree probes run Git inside WSL with an engine path", () => {
+  const calls: Array<{ cmd: string; args: string[] }> = [];
+  const probe = worktreeProbeForEngine("wsl2", (cmd, args, opts) => {
+    calls.push({ cmd, args });
+    return spawnSync(process.execPath, ["--version"], opts);
+  });
+
+  probe("git", ["-C", "C:\\repo\\feature", "status"], { encoding: "utf8" });
+
+  assert.deepEqual(calls, [{
+    cmd: "wsl.exe",
+    args: ["--exec", "git", "-C", "/mnt/c/repo/feature", "status"]
+  }]);
 });
 
 test("task-bound recovery keeps the branch-only code and recommends the full task id", async () => {

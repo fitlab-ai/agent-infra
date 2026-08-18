@@ -99,6 +99,43 @@ export function assertSandboxTaskSource(repoRoot: string, taskId: string): strin
   return canonical;
 }
 
+export function prepareSandboxWorkspaceMountTarget(worktreeRoot: string): string {
+  const worktree = path.resolve(worktreeRoot);
+  const canonicalWorktree = fs.realpathSync.native(worktree);
+  const agentsRoot = path.join(worktree, '.agents');
+  if (fs.existsSync(agentsRoot)) {
+    const agentsStat = fs.lstatSync(agentsRoot);
+    if (!agentsStat.isDirectory() || agentsStat.isSymbolicLink()) {
+      throw new Error(`Sandbox workspace mount ancestor must be a real directory: ${agentsRoot}`);
+    }
+  } else {
+    fs.mkdirSync(agentsRoot, { mode: 0o700 });
+  }
+  const canonicalAgents = fs.realpathSync.native(agentsRoot);
+  if (path.dirname(canonicalAgents) !== canonicalWorktree) {
+    throw new Error(`Sandbox workspace mount ancestor escapes the worktree: ${agentsRoot}`);
+  }
+
+  const target = path.join(agentsRoot, 'workspace');
+  if (fs.existsSync(target)) {
+    const stat = fs.lstatSync(target);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`Sandbox workspace mount target must not be a symbolic link: ${target}`);
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(`Sandbox workspace mount target must be a directory: ${target}`);
+    }
+    if (path.dirname(fs.realpathSync.native(target)) !== canonicalAgents) {
+      throw new Error(`Sandbox workspace mount target escapes the worktree: ${target}`);
+    }
+  } else {
+    fs.mkdirSync(target, { mode: 0o700 });
+  }
+  fs.chmodSync(target, 0o700);
+  fs.accessSync(target, fs.constants.W_OK);
+  return target;
+}
+
 export function materializeSandboxWorkspaceView(params: Readonly<{
   base: string;
   project: string;

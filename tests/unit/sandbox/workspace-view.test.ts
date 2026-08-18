@@ -8,8 +8,10 @@ import {
   assertSandboxTaskSource,
   materializeSandboxControl,
   materializeSandboxWorkspaceView,
+  prepareSandboxWorkspaceMountTarget,
   sandboxWorkspaceViewStatePaths
 } from '../../../lib/sandbox/workspace-view.ts';
+import { assertModeBits } from '../../helpers.ts';
 
 test('workspace view state paths use the isolated runtime state allowlist', () => {
   assert.deepEqual(sandboxWorkspaceViewStatePaths('/views/current'), [
@@ -50,6 +52,33 @@ test('branch-only view is stable and exposes an empty registry', () => {
   });
   assert.deepEqual(fs.readdirSync(path.join(view.root, 'active')), ['.short-ids.json']);
   assert.equal(fs.readFileSync(path.join(view.root, 'active', '.short-ids.json'), 'utf8'), '{"version":1,"ids":{}}\n');
+});
+
+test('workspace mount target is created by the host with private permissions', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-target-'));
+
+  const target = prepareSandboxWorkspaceMountTarget(root);
+
+  assert.equal(target, path.join(root, '.agents', 'workspace'));
+  assert.equal(fs.statSync(target).isDirectory(), true);
+  assertModeBits(target, 0o700);
+});
+
+test('workspace mount target rejects symbolic-link destinations', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-target-link-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-target-outside-'));
+  fs.mkdirSync(path.join(root, '.agents'));
+  fs.symlinkSync(outside, path.join(root, '.agents', 'workspace'), process.platform === 'win32' ? 'junction' : 'dir');
+
+  assert.throws(() => prepareSandboxWorkspaceMountTarget(root), /must not be a symbolic link/);
+});
+
+test('workspace mount target rejects symbolic-link ancestors', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-ancestor-link-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-ancestor-outside-'));
+  fs.symlinkSync(outside, path.join(root, '.agents'), process.platform === 'win32' ? 'junction' : 'dir');
+
+  assert.throws(() => prepareSandboxWorkspaceMountTarget(root), /ancestor must be a real directory/);
 });
 
 test('task sources reject symlinks before they become writable mounts', () => {

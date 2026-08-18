@@ -1128,7 +1128,12 @@ function syncTemplates(projectRoot, templateRootOverride) {
     merged: [...(cfg.files.merged || [])],
     ejected: [...(cfg.files.ejected || [])]
   };
-  const retiredManaged = new Set((DEFAULTS.files.retiredManaged || []).map(norm));
+  const retiredManaged = new Map((DEFAULTS.files.retiredManaged || []).map((retired) => {
+    const descriptor = typeof retired === 'string' ? { path: retired } : retired;
+    return [norm(descriptor.path), new Set(
+      (descriptor.templateHashes || []).map(trustedBaseline).filter(Boolean)
+    )];
+  }));
   const planningRegistry = {
     ...currentRegistry,
     managed: currentRegistry.managed.filter((entry) => !retiredManaged.has(norm(entry)))
@@ -1231,12 +1236,19 @@ function syncTemplates(projectRoot, templateRootOverride) {
     )
   );
 
-  for (const entry of retiredManaged) {
+  for (const [entry, historicalTemplateHashes] of retiredManaged) {
     const target = path.join(projectRoot, entry);
     const owned = currentRegistry.managed.some((candidate) => norm(candidate) === entry);
     if (!fs.existsSync(target)) continue;
     const stat = fs.lstatSync(target);
-    if (owned && stat.isFile() && !stat.isSymbolicLink()) {
+    const baseline = trustedBaseline(managedBaselines[entry]);
+    const localHash = stat.isFile() && !stat.isSymbolicLink()
+      ? sha256(fs.readFileSync(target))
+      : null;
+    const safeToRemove = owned
+      && localHash !== null
+      && (localHash === baseline || historicalTemplateHashes.has(localHash));
+    if (safeToRemove) {
       fs.unlinkSync(target);
       report.managed.removed.push(entry);
       if (Object.prototype.hasOwnProperty.call(managedBaselines, entry)) {
@@ -1246,9 +1258,11 @@ function syncTemplates(projectRoot, templateRootOverride) {
     } else {
       report.managed.protected.push({
         target: entry,
-        reason: owned ? 'invalid-type' : 'unknown-origin',
-        baseline: trustedBaseline(managedBaselines[entry]),
-        local: stat.isFile() && !stat.isSymbolicLink() ? sha256(fs.readFileSync(target)) : null,
+        reason: owned
+          ? (localHash === null ? 'invalid-type' : 'user-modified')
+          : 'unknown-origin',
+        baseline,
+        local: localHash,
         template: null
       });
     }

@@ -35,29 +35,65 @@ function createTemplateInstall(tmpDir: string, version: string = "0.0.0-test") {
   return { installRoot, templateRoot };
 }
 
-test("syncTemplates creates runtime workspace states and retires only registry-owned files", async () => {
+const HISTORICAL_WORKSPACE_README = `# AI Workspace
+
+This directory is the runtime workspace for multi-AI collaboration. All contents are **git-ignored** except for this README and \`.gitkeep\` files.
+
+## Directory Structure
+
+\`\`\`
+.agents/workspace/
+  active/           # Currently active tasks and handoff documents
+  blocked/          # Tasks that are blocked and waiting for resolution
+  completed/        # Completed tasks (kept for reference)
+  logs/             # Collaboration logs and session records
+\`\`\`
+
+## Usage
+
+- **active/**: Place task files here when work begins. Move them to \`completed/\` or \`blocked/\` as appropriate.
+- **blocked/**: Move tasks here when they cannot proceed. Document the blocker in the task file.
+- **completed/**: Move tasks here when they are done. These serve as a historical record.
+- **logs/**: Store session logs, AI conversation exports, or collaboration notes.
+
+## Important
+
+- Contents of this directory are **not version-controlled** (git-ignored).
+- Do not store anything here that needs to be shared via git.
+- Templates and workflow definitions belong in \`.agents/\`, not here.
+`;
+
+test("syncTemplates creates runtime workspace states and retires only provably official files", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-runtime-workspace-"));
   try {
     const { templateRoot } = createTemplateInstall(tmpDir);
     const ownedRoot = path.join(tmpDir, "owned");
+    const officialRoot = path.join(tmpDir, "official");
     const unownedRoot = path.join(tmpDir, "unowned");
-    for (const [root, managed] of [[ownedRoot, [".agents/workspace/README.md"]], [unownedRoot, []]] as const) {
+    for (const [root, managed, content] of [
+      [ownedRoot, [".agents/workspace/README.md"], "local workspace notes\n"],
+      [officialRoot, [".agents/workspace/README.md"], HISTORICAL_WORKSPACE_README],
+      [unownedRoot, [], "local workspace notes\n"]
+    ] as const) {
       writeJson(root, ".agents/.airc.json", {
         project: "demo", org: "acme", language: "en", platform: { type: "none" },
         files: { managed, merged: [], ejected: [] }
       });
-      writeFile(root, ".agents/workspace/README.md", "local workspace notes\n");
+      writeFile(root, ".agents/workspace/README.md", content);
     }
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
     const owned = syncTemplates(ownedRoot, templateRoot);
+    const official = syncTemplates(officialRoot, templateRoot);
     const unowned = syncTemplates(unownedRoot, templateRoot);
 
     for (const state of ["active", "blocked", "completed", "archive"]) {
       assert.equal(fs.statSync(path.join(ownedRoot, ".agents", "workspace", state)).isDirectory(), true);
     }
-    assert.equal(fs.existsSync(path.join(ownedRoot, ".agents/workspace/README.md")), false);
+    assert.equal(fs.readFileSync(path.join(ownedRoot, ".agents/workspace/README.md"), "utf8"), "local workspace notes\n");
     assert.ok(owned.registryRemoved.some((entry) => entry.entry === ".agents/workspace/README.md" && entry.list === "managed"));
-    assert.ok(owned.managed.removed.includes(".agents/workspace/README.md"));
+    assert.ok(owned.managed.protected.some((entry) => entry.target === ".agents/workspace/README.md" && entry.reason === "user-modified"));
+    assert.equal(fs.existsSync(path.join(officialRoot, ".agents/workspace/README.md")), false);
+    assert.ok(official.managed.removed.includes(".agents/workspace/README.md"));
     assert.equal(fs.readFileSync(path.join(unownedRoot, ".agents/workspace/README.md"), "utf8"), "local workspace notes\n");
     assert.ok(unowned.managed.protected.some((entry) => entry.target === ".agents/workspace/README.md" && entry.reason === "unknown-origin"));
   } finally {

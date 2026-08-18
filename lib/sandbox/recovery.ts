@@ -35,7 +35,7 @@ import {
   type SandboxWorkspaceIdentity
 } from './workspace-identity.ts';
 import { inspectWorktree, type WorktreeSnapshot } from './worktree-safety.ts';
-import { runEngine, runOkEngine, runVerboseEngine } from './shell.ts';
+import { commandForEngine, runEngine, runOkEngine, runProbe, runVerboseEngine } from './shell.ts';
 import {
   declaredTmpfsSeedEntries,
   resolveTools,
@@ -142,7 +142,26 @@ type RecoveryCommandDeps = {
   start?: typeof startSandboxContainer;
   fetchRows?: typeof fetchSandboxRows;
   ensureControlBroker?: () => void | Promise<void>;
+  probe?: typeof runProbe;
 };
+
+export function worktreeProbeForEngine(
+  engine: string,
+  probe: typeof runProbe = runProbe
+): typeof runProbe {
+  return (cmd, args, opts = {}) => {
+    const engineArgs = [...args];
+    if (engine === 'wsl2' && cmd === 'git') {
+      for (let index = 0; index < engineArgs.length - 1; index += 1) {
+        if (engineArgs[index] === '-C') {
+          engineArgs[index + 1] = toEnginePath(engine, engineArgs[index + 1]!);
+        }
+      }
+    }
+    const command = commandForEngine(engine, cmd, engineArgs);
+    return probe(command.cmd, command.args, opts);
+  };
+}
 
 type EnsureSandboxReadyParams = {
   config: SandboxConfig;
@@ -1192,7 +1211,8 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
       `SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID: expected exactly one existing worktree for '${params.branch}', found ${existingWorktrees.length}. ${remediation}`
     );
   }
-  const beforeInspection = inspectWorktree(existingWorktrees[0]!);
+  const worktreeProbe = worktreeProbeForEngine(params.engine, deps?.probe);
+  const beforeInspection = inspectWorktree(existingWorktrees[0]!, { probe: worktreeProbe });
   if (beforeInspection.status === 'failed') {
     throw new Error(`SANDBOX_RECOVERY_WORKTREE_SNAPSHOT_INVALID: ${beforeInspection.message}`);
   }
@@ -1245,7 +1265,7 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
     replacementFailure = error;
   }
 
-  const afterInspection = inspectWorktree(before.worktree);
+  const afterInspection = inspectWorktree(before.worktree, { probe: worktreeProbe });
   if (afterInspection.status === 'failed' || afterInspection.snapshot.identity !== before.identity) {
     const detail = afterInspection.status === 'failed'
       ? afterInspection.message
