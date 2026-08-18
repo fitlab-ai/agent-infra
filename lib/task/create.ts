@@ -231,6 +231,14 @@ function assertRealDirectory(directory: string, code: string): void {
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(code);
 }
 
+function ensureRealDirectory(directory: string, code: string): void {
+  if (fs.existsSync(directory)) {
+    assertRealDirectory(directory, code);
+    return;
+  }
+  fs.mkdirSync(directory, { mode: 0o700 });
+}
+
 function withCreateLock<T>(repoRoot: string, workspaceRoot: string, operation: () => T): T {
   const lockRoot = path.join(workspaceRoot, '.task-create.lock');
   fs.mkdirSync(lockRoot, { recursive: true, mode: 0o700 });
@@ -289,8 +297,9 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
   const repoRoot = fs.realpathSync.native(options.repoRoot);
   const workspaceRoot = path.join(repoRoot, '.agents', 'workspace');
   const activeRoot = path.join(workspaceRoot, 'active');
-  assertRealDirectory(workspaceRoot, 'TASK_CREATE_WORKSPACE_INVALID');
-  assertRealDirectory(activeRoot, 'TASK_CREATE_WORKSPACE_INVALID');
+  ensureRealDirectory(path.join(repoRoot, '.agents'), 'TASK_CREATE_WORKSPACE_INVALID');
+  ensureRealDirectory(workspaceRoot, 'TASK_CREATE_WORKSPACE_INVALID');
+  ensureRealDirectory(activeRoot, 'TASK_CREATE_WORKSPACE_INVALID');
   const project = readProject(repoRoot);
   const canonical = canonicalTaskCreateCandidate(candidate);
   const candidateDigest = sha256(canonical);

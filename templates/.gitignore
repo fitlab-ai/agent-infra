@@ -1,11 +1,5 @@
-# Agent workspace (temporary task data)
-.agents/workspace/active/
-.agents/workspace/blocked/
-.agents/workspace/completed/
-.agents/workspace/archive/
-.agents/workspace/logs/
-.agents/workspace/.task-create/
-.agents/workspace/.runtime/
+# Agent workspace (runtime data)
+.agents/workspace/
 
 # Claude Code local settings
 .claude/settings.local.json

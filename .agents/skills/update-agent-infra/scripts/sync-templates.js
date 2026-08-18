@@ -82,7 +82,6 @@ const DEFAULTS = {
       ".agents/skills/",
       ".agents/templates/",
       ".agents/workflows/",
-      ".agents/workspace/README.md",
       ".git-hooks/check-large-files.cjs",
       ".git-hooks/check-version-format.sh",
       ".github/scripts/",
@@ -110,7 +109,16 @@ const DEFAULTS = {
       ".git-hooks/pre-commit",
       ".gitignore"
     ],
-    "ejected": []
+    "ejected": [],
+    "retiredManaged": [
+      {
+        "path": ".agents/workspace/README.md",
+        "templateHashes": [
+          "sha256:967b27ca4008154c5abf99a1df728242f80ed3ace9bd98eb2828bc1c76af826c",
+          "sha256:15aa21942cf2a1396d27834f1d3d723b61a46f8d14600b706f39f3bebc21aea3"
+        ]
+      }
+    ]
   }
 };
 
@@ -1224,6 +1232,26 @@ function entryVariantRels(entry, allSet, platform) {
   return rels;
 }
 
+function ensureRuntimeWorkspace(projectRoot) {
+  const directories = [
+    path.join(projectRoot, '.agents'),
+    path.join(projectRoot, '.agents', 'workspace'),
+    ...['active', 'blocked', 'completed', 'archive'].map((state) =>
+      path.join(projectRoot, '.agents', 'workspace', state)
+    )
+  ];
+  for (const directory of directories) {
+    if (fs.existsSync(directory)) {
+      const stat = fs.lstatSync(directory);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        throw new Error(`Runtime workspace path must be a real directory: ${directory}`);
+      }
+      continue;
+    }
+    fs.mkdirSync(directory, { mode: 0o700 });
+  }
+}
+
 function syncTemplates(projectRoot, templateRootOverride) {
   const configDir = path.join(projectRoot, '.agents');
   const cfgPath = path.join(configDir, '.airc.json');
@@ -1234,6 +1262,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
 
   const originalConfigText = fs.readFileSync(cfgPath, 'utf8');
   const cfg = JSON.parse(originalConfigText);
+  ensureRuntimeWorkspace(projectRoot);
   const configPathRel = norm(path.relative(projectRoot, cfgPath));
   let templateRoot = templateRootOverride;
   if (!templateRoot) {
@@ -1271,6 +1300,16 @@ function syncTemplates(projectRoot, templateRootOverride) {
     merged: [...(cfg.files.merged || [])],
     ejected: [...(cfg.files.ejected || [])]
   };
+  const retiredManaged = new Map((DEFAULTS.files.retiredManaged || []).map((retired) => {
+    const descriptor = typeof retired === 'string' ? { path: retired } : retired;
+    return [norm(descriptor.path), new Set(
+      (descriptor.templateHashes || []).map(trustedBaseline).filter(Boolean)
+    )];
+  }));
+  const planningRegistry = {
+    ...currentRegistry,
+    managed: currentRegistry.managed.filter((entry) => !retiredManaged.has(norm(entry)))
+  };
   const sharedDefaults = {
     managed: (DEFAULTS.files.managed || []).filter(
       (entry) => !isPathOwnedByOtherPlatform(entry, platformType)
@@ -1280,7 +1319,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
     ),
     ejected: [...(DEFAULTS.files.ejected || [])]
   };
-  const assetPlan = planProjectRegistry(currentRegistry, sharedDefaults, enabledTUIs);
+  const assetPlan = planProjectRegistry(planningRegistry, sharedDefaults, enabledTUIs);
   const managed = [...assetPlan.registry.managed];
   const merged = [...assetPlan.registry.merged];
   const ejected = [...assetPlan.registry.ejected];
@@ -1295,6 +1334,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   for (const target of Object.keys(managedBaselines)) {
     if (
       !guardedManaged.has(norm(target))
+      && !retiredManaged.has(norm(target))
       && !allClientManaged.some((entry) => assetMatches(entry, target))
     ) {
       delete managedBaselines[target];
@@ -1368,6 +1408,38 @@ function syncTemplates(projectRoot, templateRootOverride) {
       'merged'
     )
   );
+
+  for (const [entry, historicalTemplateHashes] of retiredManaged) {
+    const target = path.join(projectRoot, entry);
+    const owned = currentRegistry.managed.some((candidate) => norm(candidate) === entry);
+    if (!fs.existsSync(target)) continue;
+    const stat = fs.lstatSync(target);
+    const baseline = trustedBaseline(managedBaselines[entry]);
+    const localHash = stat.isFile() && !stat.isSymbolicLink()
+      ? sha256(fs.readFileSync(target))
+      : null;
+    const safeToRemove = owned
+      && localHash !== null
+      && (localHash === baseline || historicalTemplateHashes.has(localHash));
+    if (safeToRemove) {
+      fs.unlinkSync(target);
+      report.managed.removed.push(entry);
+      if (Object.prototype.hasOwnProperty.call(managedBaselines, entry)) {
+        delete managedBaselines[entry];
+        baselinesChanged = true;
+      }
+    } else {
+      report.managed.protected.push({
+        target: entry,
+        reason: owned && localHash !== null && baseline !== null
+          ? 'user-modified'
+          : (owned && localHash === null ? 'invalid-type' : 'unknown-origin'),
+        baseline,
+        local: localHash,
+        template: null
+      });
+    }
+  }
 
   const templateSources = Array.isArray(cfg.templates?.sources) ? cfg.templates.sources : [];
   report.templateSources.configured = templateSources.length;

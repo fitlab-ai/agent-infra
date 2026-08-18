@@ -18,14 +18,14 @@ import {
   collectSandboxRecoverySnapshot,
   ensureSandboxReady,
   prepareTmpfsMounts,
+  worktreeProbeForEngine,
   type SandboxRecoverySnapshot
 } from "../../../lib/sandbox/recovery.ts";
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
 import { tmpfsSeedTargetPath } from "../../../lib/sandbox/tools.ts";
 import {
   materializeSandboxControl,
-  materializeSandboxWorkspaceView,
-  sandboxWorkspaceViewStatePaths
+  materializeSandboxWorkspaceView
 } from "../../../lib/sandbox/workspace-view.ts";
 
 const BRANCH_ONLY_LABELS = {
@@ -171,9 +171,7 @@ function recoveryFixtureMounts(config: SandboxConfig): Array<Record<string, unkn
   const control = fs.readdirSync(path.join(config.controlBase, config.project, "demo-dev-feature..demo"))[0]!;
   return [
     { Type: "bind", Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
-    ...sandboxWorkspaceViewStatePaths(viewRoot).map(({ state, hostPath }) => ({
-      Type: "bind", Source: hostPath, Destination: path.posix.join("/workspace/.agents/workspace", state), RW: false
-    })),
+    { Type: "bind", Source: viewRoot, Destination: "/workspace/.agents/workspace", RW: false },
     { Type: "bind", Source: path.join(config.controlBase, config.project, "demo-dev-feature..demo", control, "channel"), Destination: "/run/agent-infra/control", RW: true },
     { Type: "bind", Source: path.join(config.controlBase, config.project, "demo-dev-feature..demo", control, "public"), Destination: "/run/agent-infra/control-status", RW: false },
     { Type: "bind", Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
@@ -585,14 +583,21 @@ test("hard recovery failure requires explicit container replacement authorizatio
   let writes = 0;
   const replacementCommands: string[][] = [];
   const config = recoveryFixtureConfig(tmpDir);
+  const currentMounts = recoveryFixtureMounts(config);
+  const workspaceMount = currentMounts.find((mount) => mount.Destination === "/workspace/.agents/workspace")!;
+  const legacyMounts = currentMounts.flatMap((mount) => mount === workspaceMount
+    ? ["active", "completed", "blocked", "archive"].map((state) => ({
+        Type: "bind",
+        Source: path.join(String(workspaceMount.Source), state),
+        Destination: path.posix.join("/workspace/.agents/workspace", state),
+        RW: false
+      }))
+    : [mount]
+  );
   const inspect = () => JSON.stringify([{
     Id: "fixture-container-id",
     Config: { Labels: BRANCH_ONLY_LABELS },
-    Mounts: recoveryFixtureMounts(config).map((mount) =>
-      mount.Destination === "/home/devuser/.codex"
-        ? { ...mount, Type: recreated ? "tmpfs" : "bind" }
-        : mount
-    )
+    Mounts: recreated ? currentMounts : legacyMounts
   }]);
   const deps = {
     ensureControlBroker: async () => {},
@@ -616,6 +621,9 @@ test("hard recovery failure requires explicit container replacement authorizatio
   };
 
   try {
+    const worktree = path.join(config.worktreeBase, "feature..demo");
+    const beforeHead = git(worktree, "rev-parse", "HEAD");
+    const beforeStatus = git(worktree, "status", "--porcelain=v2", "--untracked-files=all");
     await assert.rejects(
       () => ensureSandboxReady({ config, engine: "native", branch: "feature/demo", row, deps }),
       /ai sandbox start --recreate feature\/demo/
@@ -641,9 +649,26 @@ test("hard recovery failure requires explicit container replacement authorizatio
     assert.equal(result.path, "recreated");
     assert.equal(result.container, "demo-dev-feature..demo");
     assert.equal(writes, 2);
+    assert.equal(git(worktree, "rev-parse", "HEAD"), beforeHead);
+    assert.equal(git(worktree, "status", "--porcelain=v2", "--untracked-files=all"), beforeStatus);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test("WSL2 worktree probes run Git inside WSL with an engine path", () => {
+  const calls: Array<{ cmd: string; args: string[] }> = [];
+  const probe = worktreeProbeForEngine("wsl2", (cmd, args, opts) => {
+    calls.push({ cmd, args });
+    return spawnSync(process.execPath, ["--version"], opts);
+  });
+
+  probe("git", ["-C", "C:\\repo\\feature", "status"], { encoding: "utf8" });
+
+  assert.deepEqual(calls, [{
+    cmd: "wsl.exe",
+    args: ["--exec", "git", "-C", "/mnt/c/repo/feature", "status"]
+  }]);
 });
 
 test("task-bound recovery keeps the branch-only code and recommends the full task id", async () => {
@@ -996,7 +1021,7 @@ test("fresh readiness restarts once when OrbStack workspace mounts are still set
           Id: "fixture-container-id",
           Config: { Labels: BRANCH_ONLY_LABELS },
           Mounts: recoveryFixtureMounts(config).filter((mount) =>
-            restarted || mount.Destination !== "/workspace/.agents/workspace/active"
+            restarted || mount.Destination !== "/workspace/.agents/workspace"
           )
         }]),
         runOk: () => true,
@@ -1032,7 +1057,7 @@ test("fresh readiness remains fail-closed after one workspace mount restart", as
           Id: "fixture-container-id",
           Config: { Labels: BRANCH_ONLY_LABELS },
           Mounts: recoveryFixtureMounts(config).filter((mount) =>
-            mount.Destination !== "/workspace/.agents/workspace/active"
+            mount.Destination !== "/workspace/.agents/workspace"
           )
         }]),
         runOk: () => true,

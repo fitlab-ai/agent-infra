@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import path from 'node:path';
 import test from 'node:test';
 import { sandboxCoreBindMounts } from '../../../lib/sandbox/mounts.ts';
 
@@ -23,20 +22,16 @@ test('task-bound mount topology preserves the workspace root and exposes only on
   const workspace = mounts.filter((mount) => mount.containerPath.startsWith('/workspace/.agents/workspace'));
   assert.deepEqual(workspace, [
     {
-      hostPaths: [path.join('/views/current/active', '.short-ids.json')],
-      containerPath: '/workspace/.agents/workspace/active/.short-ids.json',
+      hostPaths: ['/views/current'],
+      containerPath: '/workspace/.agents/workspace',
       readOnly: true
     },
-    { hostPaths: [path.join('/views/current', 'completed')], containerPath: '/workspace/.agents/workspace/completed', readOnly: true },
-    { hostPaths: [path.join('/views/current', 'blocked')], containerPath: '/workspace/.agents/workspace/blocked', readOnly: true },
-    { hostPaths: [path.join('/views/current', 'archive')], containerPath: '/workspace/.agents/workspace/archive', readOnly: true },
     {
       hostPaths: ['/repo/.agents/workspace/active/TASK-20260809-010203'],
       containerPath: '/workspace/.agents/workspace/active/TASK-20260809-010203',
       readOnly: false
     }
   ]);
-  assert.equal(workspace.some((mount) => mount.containerPath === '/workspace/.agents/workspace/active'), false);
   assert.equal(mounts.some((mount) => mount.hostPaths.includes('/repo/.agents/workspace')), false);
   assert.deepEqual(mounts.at(-2), {
     hostPaths: ['/control/status'],
@@ -50,7 +45,7 @@ test('task-bound mount topology preserves the workspace root and exposes only on
   });
 });
 
-test('branch-only topology mounts each isolated state read-only without covering the workspace root', () => {
+test('branch-only topology mounts the isolated workspace view root read-only', () => {
   const mounts = sandboxCoreBindMounts(config, 'feature', {
     workspaceViewRoot: '/views/empty',
     controlDir: '/control/empty',
@@ -59,10 +54,7 @@ test('branch-only topology mounts each isolated state read-only without covering
   assert.deepEqual(
     mounts.filter((mount) => mount.containerPath.startsWith('/workspace/.agents/workspace')),
     [
-      { hostPaths: [path.join('/views/empty', 'active')], containerPath: '/workspace/.agents/workspace/active', readOnly: true },
-      { hostPaths: [path.join('/views/empty', 'completed')], containerPath: '/workspace/.agents/workspace/completed', readOnly: true },
-      { hostPaths: [path.join('/views/empty', 'blocked')], containerPath: '/workspace/.agents/workspace/blocked', readOnly: true },
-      { hostPaths: [path.join('/views/empty', 'archive')], containerPath: '/workspace/.agents/workspace/archive', readOnly: true }
+      { hostPaths: ['/views/empty'], containerPath: '/workspace/.agents/workspace', readOnly: true }
     ]
   );
 });

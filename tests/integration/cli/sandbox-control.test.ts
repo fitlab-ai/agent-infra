@@ -208,10 +208,17 @@ test('sandbox control lifecycle waits for a live broker to finish its final writ
 
 test('sandbox control lifecycle terminates execution trees before forcing an unresponsive broker', onPlatforms('linux', 'darwin'), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-forced-quiesce-'));
-  const stubbornScript = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
-  const broker = spawn(process.execPath, ['--eval', stubbornScript], { stdio: 'ignore' });
-  const execution = spawn(process.execPath, ['--eval', stubbornScript], { detached: true, stdio: 'ignore' });
+  const brokerReadyPath = path.join(root, 'broker-ready');
+  const executionReadyPath = path.join(root, 'execution-ready');
+  const stubbornScript = "const fs = require('node:fs'); process.on('SIGTERM', () => {}); fs.writeFileSync(process.argv[1], 'ready'); setInterval(() => {}, 1000);";
+  const broker = spawn(process.execPath, ['--eval', stubbornScript, brokerReadyPath], { stdio: 'ignore' });
+  const execution = spawn(process.execPath, ['--eval', stubbornScript, executionReadyPath], {
+    detached: true,
+    stdio: 'ignore'
+  });
   try {
+    waitForFile(brokerReadyPath, 5_000);
+    waitForFile(executionReadyPath, 5_000);
     const branch = initializeRepository(root);
     const manifestPath = writeControlManifest(root, branch, 'forced-generation');
     const brokerStartTime = getProcessStartTime(broker.pid!);

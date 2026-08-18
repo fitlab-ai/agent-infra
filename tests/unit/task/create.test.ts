@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { onPlatforms } from '../../helpers.ts';
 
 import { getProcessStartTime } from '../../../lib/server/process-state.ts';
 import {
@@ -132,6 +133,36 @@ test('local task creation is idempotent and rejects key reuse with changed conte
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('local task creation safely restores missing runtime workspace directories', () => {
+  const root = fixture();
+  try {
+    fs.rmSync(path.join(root, '.agents', 'workspace'), { recursive: true });
+    const result = createLocalTask(candidate, {
+      repoRoot: root,
+      now: () => new Date(2026, 7, 13, 1, 2, 3),
+      agentInfraVersion: 'v0.9.5'
+    });
+    assert.equal(result.status, 'applied');
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'active', result.task.id, 'task.md')), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('local task creation rejects a symbolic-link workspace without writing outside the repository', onPlatforms('linux', 'darwin'), () => {
+  const root = fixture();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-task-create-outside-'));
+  try {
+    fs.rmSync(path.join(root, '.agents', 'workspace'), { recursive: true });
+    fs.symlinkSync(outside, path.join(root, '.agents', 'workspace'));
+    assert.throws(() => createLocalTask(candidate, { repoRoot: root }), /TASK_CREATE_WORKSPACE_INVALID/);
+    assert.deepEqual(fs.readdirSync(outside), []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
   }
 });
 

@@ -47,6 +47,11 @@
   settings.json                 # Claude 设置
 ```
 
+整个 `.agents/workspace/` 目录树都只保存运行时数据，并被 git ignore。`active/`
+保存当前任务，`blocked/` 保存暂停任务，`completed/` 保存已完成任务，`archive/`
+保存归档历史；运行时日志和过程证据也可能出现在该根目录下。不要在这里存放必须
+通过 Git 共享的内容；协作规则、模板和工作流应放在受版本控制的 `.agents/` 目录中。
+
 ## 协作模型
 
 多 AI 协作遵循结构化工作流：

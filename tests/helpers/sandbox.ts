@@ -187,7 +187,7 @@ function writeSandboxEngineFixture(
       "    const control = path.join(controlRoot, 'channel');",
       "    const defaults = [",
       "      { Type: 'bind', Source: path.join(home, '.agent-infra', 'worktrees', project, branchDir), Destination: '/workspace', RW: true },",
-      "      ...['active', 'completed', 'blocked', 'archive'].map((state) => mode === 'task-bound' && state === 'active' ? ({ Type: 'bind', Source: path.join(view, state, '.short-ids.json'), Destination: '/workspace/.agents/workspace/active/.short-ids.json', RW: false }) : ({ Type: 'bind', Source: path.join(view, state), Destination: path.posix.join('/workspace/.agents/workspace', state), RW: false })),",
+      "      { Type: 'bind', Source: view, Destination: '/workspace/.agents/workspace', RW: false },",
       "      ...(mode === 'task-bound' ? [{ Type: 'bind', Source: path.join(process.cwd(), '.agents', 'workspace', 'active', taskId), Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true }] : []),",
       "      { Type: 'bind', Source: control, Destination: '/run/agent-infra/control', RW: true },",
       "      { Type: 'bind', Source: path.join(controlRoot, 'public'), Destination: '/run/agent-infra/control-status', RW: false },",

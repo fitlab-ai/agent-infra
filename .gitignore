@@ -1,13 +1,5 @@
-# Agent workspace (temporary task data)
-.agents/workspace/active/
-.agents/workspace/blocked/
-.agents/workspace/completed/
-.agents/workspace/archive/
-.agents/workspace/logs/
-.agents/workspace/.runtime/
-.agents/workspace/process-data/
-.agents/workspace/.task-create/
-.agents/workspace/.merge-backup/
+# Agent workspace (runtime data)
+.agents/workspace/
 
 # agent-infra-server local secrets (in-repo). Runtime state (PID, logs) lives
 # under ~/.agent-infra/, outside the repo, so it needs no ignore rule here.

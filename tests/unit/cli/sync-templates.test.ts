@@ -4,9 +4,10 @@ import childProcess from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
-import { loadFreshEsm, read, supportsPosixModeBits } from "../../helpers.ts";
+import { loadFreshEsm, onPlatforms, read, supportsPosixModeBits } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 
 function writeFile(root: string, relativePath: string, content: string) {
@@ -34,6 +35,127 @@ function createTemplateInstall(tmpDir: string, version: string = "0.0.0-test") {
   });
   return { installRoot, templateRoot };
 }
+
+const HISTORICAL_WORKSPACE_README = `# AI Workspace
+
+This directory is the runtime workspace for multi-AI collaboration. All contents are **git-ignored** except for this README and \`.gitkeep\` files.
+
+## Directory Structure
+
+\`\`\`
+.agents/workspace/
+  active/           # Currently active tasks and handoff documents
+  blocked/          # Tasks that are blocked and waiting for resolution
+  completed/        # Completed tasks (kept for reference)
+  logs/             # Collaboration logs and session records
+\`\`\`
+
+## Usage
+
+- **active/**: Place task files here when work begins. Move them to \`completed/\` or \`blocked/\` as appropriate.
+- **blocked/**: Move tasks here when they cannot proceed. Document the blocker in the task file.
+- **completed/**: Move tasks here when they are done. These serve as a historical record.
+- **logs/**: Store session logs, AI conversation exports, or collaboration notes.
+
+## Important
+
+- Contents of this directory are **not version-controlled** (git-ignored).
+- Do not store anything here that needs to be shared via git.
+- Templates and workflow definitions belong in \`.agents/\`, not here.
+`;
+
+test("syncTemplates creates runtime workspace states and retires only provably official files", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-runtime-workspace-"));
+  try {
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const ownedRoot = path.join(tmpDir, "owned");
+    const officialRoot = path.join(tmpDir, "official");
+    const unownedRoot = path.join(tmpDir, "unowned");
+    for (const [root, managed, content] of [
+      [ownedRoot, [".agents/workspace/README.md"], "local workspace notes\n"],
+      [officialRoot, [".agents/workspace/README.md"], HISTORICAL_WORKSPACE_README],
+      [unownedRoot, [], "local workspace notes\n"]
+    ] as const) {
+      writeJson(root, ".agents/.airc.json", {
+        project: "demo", org: "acme", language: "en", platform: { type: "none" },
+        files: { managed, merged: [], ejected: [] }
+      });
+      writeFile(root, ".agents/workspace/README.md", content);
+    }
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const owned = syncTemplates(ownedRoot, templateRoot);
+    const official = syncTemplates(officialRoot, templateRoot);
+    const unowned = syncTemplates(unownedRoot, templateRoot);
+
+    for (const state of ["active", "blocked", "completed", "archive"]) {
+      assert.equal(fs.statSync(path.join(ownedRoot, ".agents", "workspace", state)).isDirectory(), true);
+    }
+    assert.equal(fs.readFileSync(path.join(ownedRoot, ".agents/workspace/README.md"), "utf8"), "local workspace notes\n");
+    assert.ok(owned.registryRemoved.some((entry) => entry.entry === ".agents/workspace/README.md" && entry.list === "managed"));
+    assert.ok(owned.managed.protected.some((entry) => entry.target === ".agents/workspace/README.md" && entry.reason === "unknown-origin"));
+    assert.equal(fs.existsSync(path.join(officialRoot, ".agents/workspace/README.md")), false);
+    assert.ok(official.managed.removed.includes(".agents/workspace/README.md"));
+    assert.equal(fs.readFileSync(path.join(unownedRoot, ".agents/workspace/README.md"), "utf8"), "local workspace notes\n");
+    assert.ok(unowned.managed.protected.some((entry) => entry.target === ".agents/workspace/README.md" && entry.reason === "unknown-origin"));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates retires a recorded-baseline file and protects one that drifted from it", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-retired-baseline-"));
+  try {
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const pristine = "# project workspace\n";
+    const matchedRoot = path.join(tmpDir, "matched");
+    const driftedRoot = path.join(tmpDir, "drifted");
+    for (const [root, content] of [[matchedRoot, pristine], [driftedRoot, "# edited by hand\n"]] as const) {
+      writeJson(root, ".agents/.airc.json", {
+        project: "demo", org: "acme", language: "en", platform: { type: "none" },
+        files: {
+          managed: [".agents/workspace/README.md"],
+          merged: [],
+          ejected: [],
+          managedBaselines: {
+            ".agents/workspace/README.md": `sha256:${createHash("sha256").update(pristine).digest("hex")}`
+          }
+        }
+      });
+      writeFile(root, ".agents/workspace/README.md", content);
+    }
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const matched = syncTemplates(matchedRoot, templateRoot);
+    const drifted = syncTemplates(driftedRoot, templateRoot);
+
+    assert.equal(fs.existsSync(path.join(matchedRoot, ".agents/workspace/README.md")), false);
+    assert.ok(matched.managed.removed.includes(".agents/workspace/README.md"));
+    assert.equal(fs.readFileSync(path.join(driftedRoot, ".agents/workspace/README.md"), "utf8"), "# edited by hand\n");
+    assert.ok(drifted.managed.protected.some((entry) =>
+      entry.target === ".agents/workspace/README.md" && entry.reason === "user-modified"));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates rejects a symbolic-link runtime workspace before template writes", onPlatforms("linux", "darwin"), async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-runtime-workspace-link-"));
+  try {
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const projectRoot = path.join(tmpDir, "project");
+    const outside = path.join(tmpDir, "outside");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", platform: { type: "none" },
+      files: { managed: [], merged: [], ejected: [] }
+    });
+    fs.mkdirSync(outside);
+    fs.symlinkSync(outside, path.join(projectRoot, ".agents", "workspace"));
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    assert.throws(() => syncTemplates(projectRoot, templateRoot), /real directory/);
+    assert.deepEqual(fs.readdirSync(outside), []);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
 
 test("syncTemplates resolves template roots via PATH lookup and removes legacy templateSource", async () => {
   const originalExecSync = childProcess.execSync;

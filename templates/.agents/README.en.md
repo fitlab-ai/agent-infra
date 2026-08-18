@@ -47,6 +47,13 @@ This dual-config approach ensures every AI tool receives appropriate project con
   settings.json                 # Claude settings
 ```
 
+The whole `.agents/workspace/` tree is runtime-only and git-ignored. `active/`
+contains current tasks, `blocked/` contains paused tasks, `completed/` contains
+finished tasks, and `archive/` stores archived history. Runtime logs and process
+evidence may also be created below this root. Do not place content here that must
+be shared through Git; collaboration rules, templates, and workflows belong in
+the version-controlled `.agents/` tree.
+
 ## Collaboration Model
 
 The multi-AI collaboration follows a structured workflow:

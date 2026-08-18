@@ -56,7 +56,6 @@
       ".agents/skills/",
       ".agents/templates/",
       ".agents/workflows/",
-      ".agents/workspace/README.md",
       ".git-hooks/check-large-files.cjs",
       ".git-hooks/check-version-format.sh",
       ".github/scripts/",
@@ -84,6 +83,15 @@
       ".git-hooks/pre-commit",
       ".gitignore"
     ],
-    "ejected": []
+    "ejected": [],
+    "retiredManaged": [
+      {
+        "path": ".agents/workspace/README.md",
+        "templateHashes": [
+          "sha256:967b27ca4008154c5abf99a1df728242f80ed3ace9bd98eb2828bc1c76af826c",
+          "sha256:15aa21942cf2a1396d27834f1d3d723b61a46f8d14600b706f39f3bebc21aea3"
+        ]
+      }
+    ]
   }
 }

@@ -12,6 +12,7 @@ import {
   exists,
   langTemplate,
   listFilesRecursive,
+  listTrackedFiles,
   read,
   renderPlaceholders
 } from "../../helpers.ts";
@@ -92,8 +93,6 @@ test("required template files were migrated into templates/", () => {
     "templates/.agents/skills/update-agent-infra/SKILL.en.md",
     "templates/.agents/skills/update-agent-infra/scripts/package.json",
     "templates/.agents/skills/update-agent-infra/scripts/sync-templates.js",
-    "templates/.agents/workspace/README.en.md",
-    "templates/.agents/workspace/README.zh-CN.md",
     "templates/.git-hooks/check-large-files.cjs",
     "templates/.git-hooks/check-version-format.sh",
     "templates/.git-hooks/pre-commit",
@@ -121,6 +120,13 @@ test("required template files were migrated into templates/", () => {
   requiredFiles.forEach((relativePath) => {
     assert.ok(exists(relativePath), `Missing migrated template file: ${relativePath}`);
   });
+});
+
+test("runtime workspace contains no tracked repository files", () => {
+  assert.deepEqual(
+    listTrackedFiles(".agents/workspace").filter((relativePath) => exists(relativePath)),
+    []
+  );
 });
 
 test("human-decision context rules define complete comparable option blocks", () => {
@@ -200,7 +206,7 @@ test("root and template gitignore cover local dependency and lifecycle runtime p
 
   for (const content of [rootGitignore, templateGitignore]) {
     assert.match(content, /^node_modules\/$/m);
-    assert.match(content, /^\.agents\/workspace\/\.runtime\/$/m);
+    assert.match(content, /^\.agents\/workspace\/$/m);
   }
 });
 

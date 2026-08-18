@@ -16,8 +16,7 @@ Each generated path is assigned an update strategy. That strategy determines how
 {
   "files": {
     "managed": [
-      ".agents/skills/",
-      ".agents/workspace/README.md"
+      ".agents/skills/"
     ],
     "merged": [
       ".gitignore",
@@ -37,3 +36,7 @@ Each generated path is assigned an update strategy. That strategy determines how
 3. Run `update-agent-infra` again so future updates stop managing that file.
 
 Use this when a file starts as template-owned but later becomes project-specific enough that automatic updates would create more noise than value.
+
+## Retired managed files
+
+When an agent-infra release retires a managed file, the updater removes it only when its content matches a trusted baseline or a known historical template. Locally modified or unknown-origin content is preserved and reported as protected. Move any retained content to its replacement location, then remove the obsolete file manually after review.

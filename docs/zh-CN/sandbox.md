@@ -125,6 +125,8 @@ ai sandbox create feature/proxy --inherit-proxy
 
 任务生命周期与编排命令通过每容器独立的控制通道执行，宿主 broker 会把每个请求重新绑定到容器标签中的完整 task ID。branch-only 容器、identity 不匹配、未知命令族和旧共享 workspace 容器都会 fail closed。`ai sandbox ls` 通过 `WORKSPACE` 与 `TASK` 列展示身份，`ai sandbox show` 展示同一份基于标签的事实。遇到 `legacy-invalid` 或同一分支的 identity transition 时，在宿主执行 `ai sandbox start --recreate <task-ref-or-branch>`，然后重试原命令。该操作只替换容器并保留现有 worktree。
 
+从按状态分别挂载 workspace 的旧版本升级后，旧容器拓扑会被有意判定为不兼容。请使用同一条显式 `--recreate` 命令完成一次性重建；容器内进程和 writable layer 数据可能丢失，但 worktree 与宿主管理的任务数据会保留。
+
 控制 broker 会向容器发布只读健康状态，并在一个授权请求由独立、可追踪的进程组执行期间持续存活。请求携带每沙箱 generation 和两秒绝对受理截止时间；broker 发布 `healthy`、`busy` 或 `parked`，在 acceptance 前拒绝过期或 generation 不匹配的请求，并在恢复时先终止遗留进程树再接收新工作。调用方可以用新 request ID 重试 acceptance 前的 `BUSY` 或超时拒绝；一旦请求已被接受而最终结果未知，则不得自动重试。
 
 依赖宿主环境的校验统一使用 `ai task validate <branch | task-ref> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command>`。默认 `snapshot` 在任务分支 commit 对应的临时 detached worktree 中运行命令，并保证清理。`inplace` 获取宿主 lease、等待 broker 进入 parked、停止沙箱容器、对原 worktree 运行命令，随后恢复分支、容器、lease 与 broker 健康状态。`run-manual-validation` 技能只记录去敏的 `validation-run` 证据；`complete-manual-validation` 仍是独立的维护者确认步骤。

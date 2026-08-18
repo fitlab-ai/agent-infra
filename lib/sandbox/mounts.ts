@@ -6,7 +6,6 @@ import {
   worktreeDirCandidates
 } from './constants.ts';
 import type { SandboxConfig } from './config.ts';
-import { sandboxWorkspaceViewStatePaths } from './workspace-view.ts';
 
 export type SandboxBindMountDeclaration = {
   hostPaths: string[];
@@ -31,19 +30,6 @@ export function sandboxCoreBindMounts(
   }
 ): SandboxBindMountDeclaration[] {
   const taskBound = Boolean(overrides.taskSource && overrides.taskId);
-  const workspaceMounts = sandboxWorkspaceViewStatePaths(overrides.workspaceViewRoot).map(
-    ({ state, hostPath }) => taskBound && state === 'active'
-      ? {
-          hostPaths: [path.join(hostPath, '.short-ids.json')],
-          containerPath: '/workspace/.agents/workspace/active/.short-ids.json',
-          readOnly: true
-        }
-      : {
-          hostPaths: [hostPath],
-          containerPath: path.posix.join('/workspace/.agents/workspace', state),
-          readOnly: true
-        }
-  );
   const mounts: SandboxBindMountDeclaration[] = [
     {
       hostPaths: overrides.worktree
@@ -52,7 +38,11 @@ export function sandboxCoreBindMounts(
       containerPath: '/workspace',
       readOnly: false
     },
-    ...workspaceMounts,
+    {
+      hostPaths: [overrides.workspaceViewRoot],
+      containerPath: '/workspace/.agents/workspace',
+      readOnly: true
+    },
   ];
   if (taskBound) {
     mounts.push({
