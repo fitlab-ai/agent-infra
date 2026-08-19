@@ -18,6 +18,13 @@ type DelegationHostEvidence = Readonly<{
   internalExecutableBuildHash?: string;
   lifecycleContractHash?: string;
   hookSource?: 'project' | 'managed' | 'isolated-user';
+  hookSourcePathDigest?: string;
+  hookSourceHash?: string;
+  capabilitySessionId?: string;
+  capabilityTurnId?: string;
+  capabilityToolUseId?: string;
+  spawnToolUseId?: string;
+  spawnObservedAt?: string;
   controllerInstanceDigest?: string | null;
   controlGeneration?: string | null;
 }>;
@@ -28,6 +35,11 @@ type DelegationLifecycleProvenance = Readonly<{
   lifecycleContractHash: string;
   hookDefinitionHash: string;
   hookSource: 'project' | 'managed' | 'isolated-user';
+  hookSourcePathDigest: string;
+  hookSourceHash: string;
+  capabilitySessionId: string;
+  capabilityTurnId: string;
+  capabilityToolUseId: string;
   controllerInstanceDigest: string | null;
   controlGeneration: string | null;
 }>;
@@ -60,8 +72,10 @@ type DelegationReceipt = Readonly<{
   changedPaths: readonly string[];
   createdAt: string;
   preparedMonotonicMs: number;
-  spawnDispatchMonotonicMs: number;
-  activationDeadlineMonotonicMs: number;
+  spawnDispatchMonotonicMs: number | null;
+  activationDeadlineMonotonicMs: number | null;
+  spawnDispatchedAt: string | null;
+  activationDeadlineAt: string | null;
   startEvidenceMonotonicMs: number | null;
   activatedMonotonicMs: number | null;
   activatedAt: string | null;
@@ -87,8 +101,8 @@ function fail(code: string, message: string): ReceiptFailure {
 }
 
 function prepareDelegation(
-  input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'requestedReasoningEffort' | 'actualModel' | 'actualReasoningEffort' | 'modelFallbackReason' | 'reasoningEffortFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'hostEvidence' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'preparedMonotonicMs' | 'spawnDispatchMonotonicMs' | 'activationDeadlineMonotonicMs' | 'startEvidenceMonotonicMs' | 'activatedMonotonicMs' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string; requestedReasoningEffort: string }>,
-  options: { id?: () => string; now?: () => string; monotonicNow?: () => number; activationWindowMs?: number } = {}
+  input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'requestedReasoningEffort' | 'actualModel' | 'actualReasoningEffort' | 'modelFallbackReason' | 'reasoningEffortFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'hostEvidence' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'preparedMonotonicMs' | 'spawnDispatchMonotonicMs' | 'activationDeadlineMonotonicMs' | 'spawnDispatchedAt' | 'activationDeadlineAt' | 'startEvidenceMonotonicMs' | 'activatedMonotonicMs' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string; requestedReasoningEffort: string }>,
+  options: { id?: () => string; now?: () => string; monotonicNow?: () => number } = {}
 ): DelegationReceipt {
   const monotonic = (options.monotonicNow ?? (() => Number(process.hrtime.bigint() / 1_000_000n)))();
   return Object.freeze({
@@ -108,14 +122,38 @@ function prepareDelegation(
     changedPaths: Object.freeze([]),
     createdAt: (options.now ?? (() => new Date().toISOString()))(),
     preparedMonotonicMs: monotonic,
-    spawnDispatchMonotonicMs: monotonic,
-    activationDeadlineMonotonicMs: monotonic + (options.activationWindowMs ?? 15_000),
+    spawnDispatchMonotonicMs: null,
+    activationDeadlineMonotonicMs: null,
+    spawnDispatchedAt: null,
+    activationDeadlineAt: null,
     startEvidenceMonotonicMs: null,
     activatedMonotonicMs: null,
     activatedAt: null,
     sealedAt: null,
     consumedAt: null
   });
+}
+
+function dispatchDelegation(
+  receipt: DelegationReceipt,
+  options: { now?: () => string; monotonicNow?: () => number; activationWindowMs?: number } = {}
+): ReceiptResult {
+  if (receipt.status !== 'prepared') {
+    return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected prepared`);
+  }
+  if (receipt.spawnDispatchMonotonicMs != null || receipt.spawnDispatchedAt != null) {
+    return fail('DELEGATION_DISPATCH_REPLAY', `delegation ${receipt.id} was already dispatched`);
+  }
+  const monotonic = (options.monotonicNow ?? (() => Number(process.hrtime.bigint() / 1_000_000n)))();
+  const dispatchedAt = (options.now ?? (() => new Date().toISOString()))();
+  const window = options.activationWindowMs ?? 15_000;
+  return { ok: true, receipt: Object.freeze({
+    ...receipt,
+    spawnDispatchMonotonicMs: monotonic,
+    activationDeadlineMonotonicMs: monotonic + window,
+    spawnDispatchedAt: dispatchedAt,
+    activationDeadlineAt: new Date(Date.parse(dispatchedAt) + window).toISOString()
+  }) };
 }
 
 function activateDelegation(
@@ -138,6 +176,13 @@ function activateDelegation(
       internalExecutableBuildHash?: string;
       lifecycleContractHash?: string;
       hookSource?: 'project' | 'managed' | 'isolated-user';
+      hookSourcePathDigest?: string;
+      hookSourceHash?: string;
+      capabilitySessionId?: string;
+      capabilityTurnId?: string;
+      capabilityToolUseId?: string;
+      spawnToolUseId?: string;
+      spawnObservedAt?: string;
       controllerInstanceDigest?: string | null;
       controlGeneration?: string | null;
     }>;
@@ -147,8 +192,19 @@ function activateDelegation(
   const managedRole = managedDelegationRole(event.nativeAgent);
   if (!managedRole) return fail('DELEGATION_IGNORED', `subagent '${event.nativeAgent}' is not lifecycle-managed`);
   if (receipt.status !== 'prepared') return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected prepared`);
+  if (
+    receipt.spawnDispatchMonotonicMs == null
+    || receipt.spawnDispatchedAt == null
+    || receipt.activationDeadlineAt == null
+    || receipt.activationDeadlineMonotonicMs == null
+    || !Number.isFinite(Date.parse(receipt.spawnDispatchedAt))
+    || !Number.isFinite(Date.parse(receipt.activationDeadlineAt))
+  ) {
+    return fail('DELEGATION_NOT_DISPATCHED', `delegation ${receipt.id} has not reached the native spawn dispatch boundary`);
+  }
   const monotonic = (options.monotonicNow ?? (() => Number(process.hrtime.bigint() / 1_000_000n)))();
-  if (monotonic > receipt.activationDeadlineMonotonicMs) {
+  const wallNow = Date.parse((options.now ?? (() => new Date().toISOString()))());
+  if (wallNow > Date.parse(receipt.activationDeadlineAt)) {
     return fail('DELEGATION_ACTIVATION_TIMEOUT', `delegation ${receipt.id} activation evidence arrived after its deadline`);
   }
   if (managedRole !== receipt.role) return fail('DELEGATION_ROLE_MISMATCH', `managed role ${managedRole} does not match ${receipt.role}`);
@@ -167,6 +223,10 @@ function activateDelegation(
   if (!actualReasoningEffort || actualReasoningEffort.trim() !== actualReasoningEffort) {
     return fail('DELEGATION_REASONING_EFFORT_MISSING', 'native start event must provide a non-empty actual reasoning effort');
   }
+  if (
+    receipt.client === 'codex'
+    && event.hostEvidence?.kind !== 'codex-lifecycle-v2'
+  ) return fail('DELEGATION_HOST_EVIDENCE_REQUIRED', 'Codex activation requires trusted lifecycle-v2 host evidence');
   if (
     actualReasoningEffort !== receipt.requestedReasoningEffort
     && (!event.reasoningEffortFallbackReason || event.reasoningEffortFallbackReason.trim() === '')
@@ -190,6 +250,9 @@ function activateDelegation(
   ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex start evidence reference is invalid');
   if (event.hostEvidence?.kind === 'codex-lifecycle-v2') {
     const expected = receipt.lifecycleProvenance;
+    const spawnObservedAt = Date.parse(event.hostEvidence.spawnObservedAt ?? '');
+    const spawnDispatchedAt = Date.parse(receipt.spawnDispatchedAt);
+    const activationDeadlineAt = Date.parse(receipt.activationDeadlineAt);
     if (
       !expected
       || event.hostEvidence.protocolVersion !== expected.protocolVersion
@@ -198,6 +261,16 @@ function activateDelegation(
       || event.hostEvidence.lifecycleContractHash !== expected.lifecycleContractHash
       || event.hostEvidence.hookDefinitionHash !== expected.hookDefinitionHash
       || event.hostEvidence.hookSource !== expected.hookSource
+      || event.hostEvidence.hookSourcePathDigest !== expected.hookSourcePathDigest
+      || event.hostEvidence.hookSourceHash !== expected.hookSourceHash
+      || event.hostEvidence.capabilitySessionId !== expected.capabilitySessionId
+      || event.hostEvidence.capabilityTurnId !== expected.capabilityTurnId
+      || !event.hostEvidence.spawnToolUseId?.trim()
+      || event.hostEvidence.spawnToolUseId === expected.capabilityToolUseId
+      || !Number.isFinite(spawnObservedAt)
+      || spawnObservedAt < spawnDispatchedAt
+      || spawnObservedAt > activationDeadlineAt
+      || event.parentId !== expected.capabilitySessionId
       || (event.hostEvidence.controllerInstanceDigest ?? null) !== expected.controllerInstanceDigest
       || (event.hostEvidence.controlGeneration ?? null) !== expected.controlGeneration
     ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex lifecycle provenance does not match the prepared receipt');
@@ -219,8 +292,8 @@ function activateDelegation(
       consumedAt: null
     }) : receipt.hostEvidence ?? null,
     startEvidenceMonotonicMs: monotonic,
-    activatedMonotonicMs: monotonic,
-    activatedAt: (options.now ?? (() => new Date().toISOString()))()
+    activatedMonotonicMs: (options.monotonicNow ?? (() => Number(process.hrtime.bigint() / 1_000_000n)))(),
+    activatedAt: new Date(wallNow).toISOString()
   }) };
 }
 
@@ -257,9 +330,12 @@ function sealDelegation(
     changedPaths: readonly string[];
     hostEvidence?: Readonly<{ stopRevision: number; consumer: string; consumedAt: string }>;
   }>,
-  options: { now?: () => string } = {}
+  options: { now?: () => string; requireHostEvidence?: boolean } = {}
 ): ReceiptResult {
   if (receipt.status !== 'stage-completed') return fail('DELEGATION_STATE_INVALID', `delegation ${receipt.id} is ${receipt.status}, expected stage-completed`);
+  if (receipt.client === 'codex' && options.requireHostEvidence !== false && !event.hostEvidence) {
+    return fail('DELEGATION_HOST_EVIDENCE_REQUIRED', 'Codex sealing requires consumed lifecycle-v2 host evidence');
+  }
   if (event.childId !== receipt.childId || event.exitCode !== 0) return fail('DELEGATION_STOP_INVALID', 'native stop identity or exit status is invalid');
   if (receipt.role === 'reviewer') {
     const taskRoot = `.agents/workspace/active/${receipt.taskId}/`;
@@ -308,6 +384,7 @@ export {
   abortPreparedDelegation,
   completeDelegationStage,
   consumeDelegation,
+  dispatchDelegation,
   managedDelegationRole,
   prepareDelegation,
   sealDelegation

@@ -2,10 +2,20 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 import { Worker } from 'node:worker_threads';
 
 import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
+
+const fixtureRoots = new Set<string>();
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
+const mkdtempSync = (prefix: string) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fixtureRoots.add(root);
+  return root;
+};
 
 const build = {
   protocolVersion: 3,
@@ -16,7 +26,7 @@ const build = {
 
 test('Codex capability is attested by one tool use and consumed once', () => {
   let now = 1_000;
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-capability-'));
+  const root = mkdtempSync('codex-capability-');
   const store = createCodexCapabilityStore({
     root,
     now: () => now,
@@ -58,7 +68,7 @@ test('Codex capability is attested by one tool use and consumed once', () => {
 test('Codex capability expiry and provenance mismatch fail closed', () => {
   let now = 2_000;
   let tokenIndex = 0;
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-capability-expiry-'));
+  const root = mkdtempSync('codex-capability-expiry-');
   const store = createCodexCapabilityStore({
     root,
     now: () => now,
@@ -88,7 +98,7 @@ test('Codex capability expiry and provenance mismatch fail closed', () => {
 });
 
 test('Codex capability compare-and-swap preserves a competing attestation', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-capability-cas-'));
+  const root = mkdtempSync('codex-capability-cas-');
   let armedPath = '';
   let injectConflict = false;
   const store = createCodexCapabilityStore({
@@ -119,7 +129,7 @@ test('Codex capability compare-and-swap preserves a competing attestation', () =
 });
 
 test('Codex capability serializes concurrent attestation writers', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-capability-concurrent-'));
+  const root = mkdtempSync('codex-capability-concurrent-');
   const store = createCodexCapabilityStore({ root, token: () => 'concurrent-token' });
   const armed = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
   const state = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 3));
@@ -184,7 +194,7 @@ test('Codex capability serializes concurrent attestation writers', async () => {
 test('Codex capability consume lazily removes old terminal records', () => {
   let now = 1_000;
   let tokenIndex = 0;
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-capability-consume-sweep-'));
+  const root = mkdtempSync('codex-capability-consume-sweep-');
   const store = createCodexCapabilityStore({
     root,
     now: () => now,

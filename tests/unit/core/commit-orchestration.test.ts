@@ -3,7 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import {
   advanceOrchestration,
@@ -22,6 +22,10 @@ import {
 import { readCommitIntent } from '../../../lib/task/commit-intent.ts';
 
 const taskId = 'TASK-20260101-000001';
+const fixtureRoots = new Set<string>();
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
 
 function git(root: string, args: string[]): string {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
@@ -29,6 +33,7 @@ function git(root: string, args: string[]): string {
 
 function fixture(agent = 'codex') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-orchestration-'));
+  fixtureRoots.add(root);
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
   git(root, ['config', 'user.email', 'test@example.com']);
@@ -333,6 +338,7 @@ test('commit start refuses to stack on a legacy plain open started row', () => {
 
 test('commit status and begin use a bound linked worktree while keeping intent state in the main repository', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-linked-worktree-'));
+  fixtureRoots.add(root);
   const main = path.join(root, 'main');
   const linked = path.join(root, 'linked');
   fs.mkdirSync(main);

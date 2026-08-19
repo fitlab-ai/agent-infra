@@ -117,7 +117,10 @@ async function prepareCodexOrchestrationDelegation(
       lifecycleProvenance: {
         ...consumed.buildIdentity,
         hookDefinitionHash: preflight.hookDefinitionHash,
-        hookSource: controller ? 'isolated-user' : 'project',
+        ...preflight.hookProvenance,
+        capabilitySessionId: consumed.sessionId!,
+        capabilityTurnId: consumed.turnId!,
+        capabilityToolUseId: consumed.toolUseId!,
         controllerInstanceDigest: controller?.controllerInstanceDigest ?? null,
         controlGeneration: controller?.controlGeneration ?? null
       }
@@ -151,6 +154,11 @@ async function activateCodexOrchestrationDelegation(
       return pauseBridge('ORCHESTRATION_CODEX_START_EVIDENCE_INVALID', 'Codex lifecycle start evidence is not ready', options);
     }
     const repoRoot = options.repoRoot ?? process.cwd();
+    const preflight = await (options.preflight ?? preflightCodexLifecycleEvidence)(repoRoot, {
+      sessionId: evidence.parentThreadId,
+      turnId: evidence.parentTurnId,
+      toolUseId: evidence.spawnToolUseId
+    });
     const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
     const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
     const contextTaskId = contextPath
@@ -178,7 +186,11 @@ async function activateCodexOrchestrationDelegation(
         hookDefinitionHash: evidence.hookDefinitionHash,
         startRevision: record.revision,
         ...buildIdentity,
-        hookSource: controller ? 'isolated-user' : 'project',
+        ...preflight.hookProvenance,
+        capabilitySessionId: evidence.parentThreadId,
+        capabilityTurnId: evidence.parentTurnId,
+        spawnToolUseId: evidence.spawnToolUseId,
+        spawnObservedAt: record.spawnObservedAt ?? undefined,
         controllerInstanceDigest: controller?.controllerInstanceDigest ?? null,
         controlGeneration: controller?.controlGeneration ?? null
       }

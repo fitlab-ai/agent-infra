@@ -3,12 +3,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import { envWithPrependedPath, writeNodeCommandShim } from '../../helpers.ts';
 
 const HOOK = path.resolve('.agents/hooks/lifecycle-delegation.js');
 const FIXTURES = path.resolve('tests/fixtures/lifecycle-hooks');
+const fixtureRoots = new Set<string>();
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
 
 interface RunOptions {
   client?: string;
@@ -34,6 +38,7 @@ function run(input: string, options: RunOptions = {}) {
 
 function createHookFixture(localCliState: LocalCliState) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-hook-'));
+  fixtureRoots.add(root);
   const repoDir = path.join(root, 'repo');
   const hook = path.join(repoDir, '.agents', 'hooks', 'lifecycle-delegation.js');
   const cwd = path.join(repoDir, 'nested');

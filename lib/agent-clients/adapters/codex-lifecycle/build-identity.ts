@@ -92,6 +92,37 @@ function hashFiles(root: string, files: readonly string[]): string {
   return hash.digest('hex');
 }
 
+function resolveLifecycleExecutableFiles(root: string, entries: readonly string[]): string[] {
+  const pending = [...entries];
+  const resolved = new Set<string>();
+  while (pending.length > 0) {
+    const relative = pending.pop()!;
+    if (resolved.has(relative)) continue;
+    resolved.add(relative);
+    if (!/\.[cm]?[jt]s$/u.test(relative)) continue;
+    const file = path.join(root, relative);
+    const source = fs.readFileSync(file, 'utf8');
+    const imports = source.matchAll(/(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)["'](\.[^"']+)["']/gu);
+    for (const match of imports) {
+      const requested = match[1]!;
+      const base = path.resolve(path.dirname(file), requested);
+      const candidates = [
+        base,
+        `${base}.ts`, `${base}.js`,
+        path.join(base, 'index.ts'), path.join(base, 'index.js')
+      ];
+      const dependency = candidates.find((candidate) => fs.existsSync(candidate) && fs.lstatSync(candidate).isFile());
+      if (!dependency) throw new Error(`Lifecycle executable dependency '${requested}' from '${relative}' is unavailable`);
+      const dependencyRelative = path.relative(root, dependency);
+      if (dependencyRelative.startsWith('..') || path.isAbsolute(dependencyRelative)) {
+        throw new Error(`Lifecycle executable dependency '${requested}' escapes the package root`);
+      }
+      pending.push(dependencyRelative);
+    }
+  }
+  return [...resolved].sort();
+}
+
 function computeLifecycleBuildIdentity(
   repoRoot: string,
   options: LifecycleBuildIdentityOptions = {}
@@ -125,14 +156,17 @@ function computeLifecycleBuildIdentity(
         const compiledFiles = defaults.executableFiles.map((file) =>
           file.endsWith('.ts') ? path.join('dist', file.replace(/\.ts$/u, '.js')) : file
         );
-        if (hashFiles(executableRoot, compiledFiles) !== manifest.internalExecutableBuildHash) {
+        if (hashFiles(executableRoot, resolveLifecycleExecutableFiles(executableRoot, compiledFiles)) !== manifest.internalExecutableBuildHash) {
           throw new Error('Lifecycle compiled executable build does not match its manifest');
         }
-      } else if (hashFiles(executableRoot, defaults.executableFiles) !== manifest.sourceInputHash) {
+      } else if (hashFiles(executableRoot, resolveLifecycleExecutableFiles(executableRoot, defaults.executableFiles)) !== manifest.sourceInputHash) {
         throw new Error('Lifecycle executable build manifest is stale or invalid');
       }
       internalExecutableBuildHash = manifest.internalExecutableBuildHash;
-    } else internalExecutableBuildHash = hashFiles(executableRoot, defaults.executableFiles);
+    } else internalExecutableBuildHash = hashFiles(
+      executableRoot,
+      resolveLifecycleExecutableFiles(executableRoot, defaults.executableFiles)
+    );
   }
   return Object.freeze({
     protocolVersion: LIFECYCLE_PROTOCOL_VERSION,
@@ -178,6 +212,7 @@ export {
   LIFECYCLE_PROTOCOL_VERSION,
   computeLifecycleBuildIdentity,
   readLifecycleManifestFiles,
+  resolveLifecycleExecutableFiles,
   verifyLifecycleBuildIdentity
 };
 export type {

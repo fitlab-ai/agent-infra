@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import {
   createCodexLifecycleStore,
@@ -10,14 +10,26 @@ import {
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
 import { assertModeBits } from '../../helpers/platform.ts';
 
-test('Codex lifecycle store persists only normalized evidence and consumes once', () => {
+const fixtureRoots = new Set<string>();
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
+function temporaryRoot(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-store-'));
-  const store = createCodexLifecycleStore({ root, cliVersion: '0.147.0' });
+  fixtureRoots.add(root);
+  return root;
+}
+
+test('Codex lifecycle store persists only normalized evidence and consumes once', () => {
+  const root = temporaryRoot();
+  let now = '2026-08-14T00:00:00.500Z';
+  const store = createCodexLifecycleStore({ root, cliVersion: '0.147.0', now: () => now });
   store.apply({
     type: 'hook-spawn', sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
     nativeAgent: 'agent-infra-lifecycle-reviewer', requestedModel: 'model',
     requestedReasoningEffort: 'high', hookDefinitionHash: 'hash'
   });
+  now = '2026-08-14T00:00:01.000Z';
   store.apply({
     type: 'hook-child', sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
     parentThreadId: 'parent',
@@ -32,6 +44,10 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
     type: 'app-settings', childThreadId: 'child', model: 'model', reasoningEffort: 'high'
   });
   assert.equal(record.state.status, 'start-ready');
+  assert.equal(
+    (store.read('child') as ReturnType<typeof store.read> & { spawnObservedAt?: string }).spawnObservedAt,
+    '2026-08-14T00:00:00.500Z'
+  );
   assert.equal(hasActiveCodexLifecycleEvidence(root, {
     nativeAgent: 'agent-infra-lifecycle-reviewer',
     hookDefinitionHash: 'hash'
@@ -62,7 +78,7 @@ test('Codex lifecycle store persists only normalized evidence and consumes once'
 });
 
 test('Codex lifecycle store rejects ambiguous parent session and agent correlation', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-store-'));
+  const root = temporaryRoot();
   const store = createCodexLifecycleStore({ root, cliVersion: '0.147.0' });
   for (const toolUseId of ['tool-a', 'tool-b']) {
     store.apply({
@@ -78,8 +94,30 @@ test('Codex lifecycle store rejects ambiguous parent session and agent correlati
   }), /ambiguous/);
 });
 
+test('Codex lifecycle store keeps the first spawn observation across replay and leaves legacy records fail-closed', () => {
+  const root = temporaryRoot();
+  let now = '2026-08-14T00:00:00.500Z';
+  const store = createCodexLifecycleStore({ root, cliVersion: '0.147.0', now: () => now });
+  const event = {
+    type: 'hook-spawn' as const, sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', hookDefinitionHash: 'hash'
+  };
+  const first = store.apply(event);
+
+  now = '2026-08-14T00:00:01.000Z';
+  store.apply(event);
+  assert.equal(JSON.parse(fs.readFileSync(first.path, 'utf8')).spawnObservedAt, '2026-08-14T00:00:00.500Z');
+
+  const legacy = JSON.parse(fs.readFileSync(first.path, 'utf8'));
+  delete legacy.spawnObservedAt;
+  fs.writeFileSync(first.path, `${JSON.stringify(legacy, null, 2)}\n`);
+  now = '2026-08-14T00:00:02.000Z';
+  store.apply(event);
+  assert.equal(JSON.parse(fs.readFileSync(first.path, 'utf8')).spawnObservedAt, null);
+});
+
 test('Codex lifecycle store correlates a real child session through its host-resolved parent', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-store-'));
+  const root = temporaryRoot();
   const store = createCodexLifecycleStore({ root, cliVersion: '0.147.0' });
   store.apply({
     type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'tool',
@@ -97,7 +135,7 @@ test('Codex lifecycle store correlates a real child session through its host-res
 });
 
 test('Codex lifecycle store recovers a stale writer lock', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-store-'));
+  const root = temporaryRoot();
   const lock = path.join(root, '.write.lock');
   fs.writeFileSync(lock, 'stale');
   const stale = new Date(Date.now() - 60_000);
@@ -115,7 +153,7 @@ test('Codex lifecycle store recovers a stale writer lock', () => {
 });
 
 test('Codex lifecycle store marks stale active evidence expired before cleanup', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-store-'));
+  const root = temporaryRoot();
   let now = '2026-08-13T00:00:00.000Z';
   const store = createCodexLifecycleStore({ root, cliVersion: '0.147.0', now: () => now });
   store.apply({

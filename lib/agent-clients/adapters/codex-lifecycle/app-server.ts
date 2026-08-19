@@ -572,11 +572,39 @@ async function preflightCodexLifecycleEvidence(
       process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT ? 'isolated-user' : 'direct-host'
     );
   } finally { transport.close(); }
+  const lifecycleHooks = LIFECYCLE_HOOKS.map(({ event, matcher, phase }) => discoveredHooks.filter((hook) =>
+    hook.eventName === event.replace(/^./, (character) => character.toLowerCase())
+    && hook.matcher === matcher
+    && hook.command === `node "$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js" --client codex --event ${phase}`
+  ));
+  if (lifecycleHooks.some((matches) => matches.length !== 1)) {
+    throw new Error('CODEX_PREFLIGHT_HOOK_SOURCE_AMBIGUOUS: lifecycle hook source is not unique');
+  }
+  const matchedHooks = lifecycleHooks.flat();
+  const sources = new Set(matchedHooks.map((hook) => hook.isManaged ? 'managed' : hook.source));
+  const sourcePathDigests = new Set(matchedHooks.map((hook) => hook.sourcePathDigest));
+  if (sources.size !== 1 || sourcePathDigests.size !== 1) {
+    throw new Error('CODEX_PREFLIGHT_HOOK_SOURCE_AMBIGUOUS: lifecycle hooks do not share one exact source');
+  }
+  const source = [...sources][0];
+  const hookSource = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT
+    ? 'isolated-user'
+    : source === 'managed' ? 'managed' : 'project';
   return Object.freeze({
     cliVersion: match[1],
     hookDefinitionHash,
     staticReady: true,
     discoveredHooks,
+    hookProvenance: Object.freeze({
+      hookSource,
+      hookSourcePathDigest: [...sourcePathDigests][0]!,
+      hookSourceHash: crypto.createHash('sha256').update(JSON.stringify(matchedHooks.map((hook) => ({
+        eventName: hook.eventName,
+        matcher: hook.matcher,
+        command: hook.command,
+        currentHash: hook.currentHash
+      })))).digest('hex')
+    }),
     runtimeLiveness,
     diagnostics: transport.diagnostics
   });

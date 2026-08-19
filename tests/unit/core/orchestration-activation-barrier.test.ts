@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import {
   activateOrchestrationDelegation,
   awaitOrchestrationDelegationActivation,
   beginOrResumeOrchestration,
+  dispatchOrchestrationDelegation,
   prepareOrchestrationDelegation,
   readRun,
   recoverPreparedOrchestrationDelegation
@@ -18,9 +19,14 @@ const policy = {
   executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
   reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
 } as const;
+const fixtureRoots = new Set<string>();
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
 
-function fixture(monotonicNow: () => number) {
+function fixture(monotonicNow: () => number, now: () => string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-barrier-'));
+  fixtureRoots.add(root);
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---
@@ -49,12 +55,14 @@ current_step: requirement-analysis
     monotonicNow
   });
   assert.equal(prepared.run?.pendingDelegation?.status, 'prepared');
+  dispatchOrchestrationDelegation(taskId, { repoRoot: root, monotonicNow, now });
   return { root, taskDir };
 }
 
 test('activation barrier allows matching activated receipt', async () => {
   let monotonic = 1_000;
-  const f = fixture(() => monotonic);
+  let now = '2026-01-01T00:00:00.000Z';
+  const f = fixture(() => monotonic, () => now);
   monotonic = 1_100;
   activateOrchestrationDelegation(taskId, {
     nativeAgent: 'agent-infra-lifecycle-executor',
@@ -63,21 +71,23 @@ test('activation barrier allows matching activated receipt', async () => {
     spawnMode: 'fresh',
     actualModel: 'executor-model',
     actualReasoningEffort: 'xhigh'
-  }, { repoRoot: f.root, monotonicNow: () => monotonic });
+  }, { repoRoot: f.root, monotonicNow: () => monotonic, now: () => now });
   const result = await awaitOrchestrationDelegationActivation(taskId, {
     stage: 'analysis',
     round: 1,
     artifact: 'analysis.md',
     role: 'executor'
-  }, { repoRoot: f.root, monotonicNow: () => monotonic });
+  }, { repoRoot: f.root, monotonicNow: () => monotonic, now: () => now });
   assert.equal(result.status, 'running');
   assert.equal(result.run?.pendingDelegation?.status, 'activated');
 });
 
 test('activation timeout pauses and cannot be revived by late evidence', async () => {
   let monotonic = 1_000;
-  const f = fixture(() => monotonic);
+  let now = '2026-01-01T00:00:00.000Z';
+  const f = fixture(() => monotonic, () => now);
   monotonic = 16_001;
+  now = '2026-01-01T00:00:15.001Z';
   const result = await awaitOrchestrationDelegationActivation(taskId, {
     stage: 'analysis',
     round: 1,
@@ -86,6 +96,7 @@ test('activation timeout pauses and cannot be revived by late evidence', async (
   }, {
     repoRoot: f.root,
     monotonicNow: () => monotonic,
+    now: () => now,
     sleep: async () => {}
   });
   assert.equal(result.run?.pause?.code, 'ORCHESTRATION_ACTIVATION_TIMEOUT');
@@ -96,18 +107,21 @@ test('activation timeout pauses and cannot be revived by late evidence', async (
     spawnMode: 'fresh',
     actualModel: 'executor-model',
     actualReasoningEffort: 'xhigh'
-  }, { repoRoot: f.root, monotonicNow: () => monotonic });
+  }, { repoRoot: f.root, monotonicNow: () => monotonic, now: () => now });
   assert.equal(late.status, 'paused');
   assert.equal(readRun(f.taskDir)?.pause?.code, 'ORCHESTRATION_ACTIVATION_TIMEOUT');
 });
 
 test('expired prepared receipt recovers only when workspace is unchanged', () => {
   let monotonic = 1_000;
-  const f = fixture(() => monotonic);
+  let now = '2026-01-01T00:00:00.000Z';
+  const f = fixture(() => monotonic, () => now);
   monotonic = 16_001;
+  now = '2026-01-01T00:00:15.001Z';
   const recovered = recoverPreparedOrchestrationDelegation(taskId, {
     repoRoot: f.root,
     monotonicNow: () => monotonic,
+    now: () => now,
     captureWorkspace: () => 'before'
   });
   assert.equal(recovered.status, 'running');
@@ -117,11 +131,14 @@ test('expired prepared receipt recovers only when workspace is unchanged', () =>
 
 test('expired prepared receipt does not recover over active lifecycle evidence', () => {
   let monotonic = 1_000;
-  const f = fixture(() => monotonic);
+  let now = '2026-01-01T00:00:00.000Z';
+  const f = fixture(() => monotonic, () => now);
   monotonic = 16_001;
+  now = '2026-01-01T00:00:15.001Z';
   const blocked = recoverPreparedOrchestrationDelegation(taskId, {
     repoRoot: f.root,
     monotonicNow: () => monotonic,
+    now: () => now,
     captureWorkspace: () => 'before',
     hasActiveLifecycleEvidence: () => true
   });

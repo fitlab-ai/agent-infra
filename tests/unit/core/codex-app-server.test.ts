@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import {
   hasCodexRuntimeLiveness,
@@ -14,6 +14,16 @@ import {
   resolveCodexThread,
   validateCodexLifecycleHookConfig
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/app-server.ts';
+
+const fixtureRoots = new Set<string>();
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
+function temporaryRoot(prefix: string): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fixtureRoots.add(root);
+  return root;
+}
 
 test('App Server thread resolution combines read-only identity with rollout settings', () => {
   assert.deepEqual(parseCodexThreadResolution({
@@ -90,7 +100,7 @@ test('App Server hook discovery requires every enabled lifecycle hook', () => {
 });
 
 test('parent rollout resolves exactly one trusted lifecycle child for a spawn tool call', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-parent-rollout-'));
+  const root = temporaryRoot('codex-parent-rollout-');
   const rollout = path.join(root, 'rollout-parent.jsonl');
   fs.writeFileSync(rollout, [
     JSON.stringify({ type: 'response_item', payload: {
@@ -125,7 +135,7 @@ test('App Server terminal parser preserves completed and failed host states', ()
 });
 
 test('App Server resolver correlates request ids against a JSONL server', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-'));
+  const root = temporaryRoot('codex-app-server-');
   const server = path.join(root, 'server.mjs');
   const rollout = path.join(root, 'rollout-child.jsonl');
   fs.writeFileSync(rollout, [
@@ -166,7 +176,7 @@ test('App Server resolver correlates request ids against a JSONL server', async 
 });
 
 test('App Server resolver waits for delayed rollout settings', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-'));
+  const root = temporaryRoot('codex-app-server-');
   const server = path.join(root, 'server.mjs');
   const rollout = path.join(root, 'rollout-child.jsonl');
   fs.writeFileSync(rollout, JSON.stringify({ type: 'session_meta', payload: {
@@ -207,7 +217,7 @@ test('App Server resolver waits for delayed rollout settings', async () => {
 });
 
 test('App Server terminal resolver rejects a response for the wrong child thread', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-'));
+  const root = temporaryRoot('codex-app-server-');
   const server = path.join(root, 'server.mjs');
   fs.writeFileSync(server, `
     import readline from 'node:readline';
@@ -229,7 +239,7 @@ test('App Server terminal resolver rejects a response for the wrong child thread
 });
 
 test('App Server terminal resolver distinguishes active turns from malformed terminal evidence', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-'));
+  const root = temporaryRoot('codex-app-server-');
   const server = path.join(root, 'server.mjs');
   fs.writeFileSync(server, `
     import readline from 'node:readline';
@@ -254,7 +264,7 @@ test('App Server terminal resolver distinguishes active turns from malformed ter
 });
 
 test('App Server resolver fails closed when rollout settings are unavailable', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-'));
+  const root = temporaryRoot('codex-app-server-');
   const server = path.join(root, 'server.mjs');
   fs.writeFileSync(server, `
     import readline from 'node:readline';
@@ -286,7 +296,7 @@ test('Codex preflight validates exact lifecycle hooks and current spawn identity
     hooks: { PreToolUse: [], PostToolUse: [], SubagentStart: [], SubagentStop: [] }
   }), /hooks are invalid/);
 
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-liveness-'));
+  const root = temporaryRoot('codex-lifecycle-liveness-');
   fs.writeFileSync(path.join(root, `${'a'.repeat(64)}.json`), JSON.stringify({
     state: {
       status: 'observed-spawn',

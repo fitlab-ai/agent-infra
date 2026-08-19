@@ -13,6 +13,7 @@ import {
   abortPreparedDelegation,
   completeDelegationStage,
   consumeDelegation,
+  dispatchDelegation,
   managedDelegationRole,
   prepareDelegation,
   sealDelegation
@@ -1539,6 +1540,51 @@ function prepareOrchestrationDelegation(
   }
 }
 
+function dispatchOrchestrationDelegationUnlocked(
+  taskRef: string,
+  options: OrchestrationOptions = {}
+): OrchestrationResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+  const run = readRun(resolved.taskDir);
+  if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
+  if (run.schemaVersion !== 3 || run.status !== 'running') {
+    return failed('ORCHESTRATION_STATE_INVALID', 'spawn dispatch requires a running schemaVersion 3 orchestration', resolved.taskId);
+  }
+  const result = dispatchDelegation(run.pendingDelegation, {
+    now: options.now,
+    monotonicNow: options.monotonicNow
+  });
+  if (!result.ok) return pauseOrchestration(taskRef, result.code, result.message, true, options);
+  const updated = withUpdatedRun(run, { pendingDelegation: result.receipt });
+  saveRun(resolved.taskDir, updated);
+  return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
+}
+
+function dispatchOrchestrationDelegation(
+  taskRef: string,
+  options: OrchestrationOptions = {}
+): OrchestrationResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
+  try {
+    return withTaskExecutionLock(
+      resolved.repoRoot,
+      '__repository__',
+      'task-orchestration.dispatch.repository',
+      () => withTaskExecutionLock(
+        resolved.repoRoot,
+        resolved.taskId,
+        'task-orchestration.dispatch.task',
+        () => dispatchOrchestrationDelegationUnlocked(taskRef, options)
+      )
+    );
+  } catch (error) {
+    if (error instanceof TaskExecutionLockError) return failed(error.code, error.message, resolved.taskId);
+    throw error;
+  }
+}
+
 function matchingDelegations(
   predicate: (receipt: DelegationReceipt) => boolean,
   options: OrchestrationOptions
@@ -1732,7 +1778,7 @@ function sealMatchingOrchestrationDelegationWithHostEvidence(
     });
     const changedPaths = (options.diffWorkspace ?? diffWorkspaceSnapshots)(gitRoot, receipt.beforeFingerprint, afterFingerprint);
     const baseEvent = { childId: event.childId, exitCode: 0, afterFingerprint, changedPaths };
-    const validated = sealDelegation(receipt, baseEvent, { now: options.now });
+    const validated = sealDelegation(receipt, baseEvent, { now: options.now, requireHostEvidence: false });
     if (!validated.ok) {
       return pauseOrchestration(matched.taskId, validated.code, validated.message, true, options);
     }
@@ -1814,8 +1860,6 @@ async function awaitOrchestrationDelegationActivation(
   event: OrchestrationStageIdentity,
   options: OrchestrationOptions = {}
 ): Promise<OrchestrationResult> {
-  const monotonicNow = options.monotonicNow
-    ?? (() => Number(process.hrtime.bigint() / 1_000_000n));
   const sleep = options.sleep
     ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   while (true) {
@@ -1857,7 +1901,19 @@ async function awaitOrchestrationDelegationActivation(
         options
       );
     }
-    if (monotonicNow() >= receipt.activationDeadlineMonotonicMs) {
+    if (
+      receipt.activationDeadlineAt == null
+      || !Number.isFinite(Date.parse(receipt.activationDeadlineAt))
+    ) {
+      return pauseOrchestration(
+        taskRef,
+        'ORCHESTRATION_DELEGATION_NOT_DISPATCHED',
+        'activation barrier was entered before the native spawn dispatch boundary',
+        true,
+        options
+      );
+    }
+    if (Date.parse((options.now ?? (() => new Date().toISOString()))()) >= Date.parse(receipt.activationDeadlineAt)) {
       return pauseOrchestration(
         taskRef,
         'ORCHESTRATION_ACTIVATION_TIMEOUT',
@@ -1886,9 +1942,12 @@ function recoverPreparedOrchestrationDelegation(
       if (receipt.status !== 'prepared') {
         return failed('ORCHESTRATION_PREPARED_RECOVERY_UNSAFE', 'only a never-activated prepared receipt can recover', resolved.taskId);
       }
-      const monotonic = (options.monotonicNow
-        ?? (() => Number(process.hrtime.bigint() / 1_000_000n)))();
-      if (monotonic <= receipt.activationDeadlineMonotonicMs) {
+      const wallNow = Date.parse((options.now ?? (() => new Date().toISOString()))());
+      if (
+        receipt.activationDeadlineAt != null
+        && Number.isFinite(Date.parse(receipt.activationDeadlineAt))
+        && wallNow <= Date.parse(receipt.activationDeadlineAt)
+      ) {
         return failed('ORCHESTRATION_PREPARED_RECOVERY_EARLY', 'prepared receipt activation deadline has not elapsed', resolved.taskId);
       }
       const activeLifecycleEvidence = options.hasActiveLifecycleEvidence?.(receipt)
@@ -2093,6 +2152,7 @@ export {
   commitOrchestrationStageCompletion,
   completeCommitIntent,
   completeOrchestrationStage,
+  dispatchOrchestrationDelegation,
   inspectOrchestrationStage,
   hasActivatableOrchestrationDelegation,
   hasSealableOrchestrationDelegation,

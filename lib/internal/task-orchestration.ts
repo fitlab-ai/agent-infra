@@ -9,6 +9,7 @@ import {
   beginOrResumeOrchestration,
   checkpointCommitIntent,
   completeCommitIntent,
+  dispatchOrchestrationDelegation,
   pauseOrchestration,
   recoverCommitIntent,
   recoverPreparedOrchestrationDelegation,
@@ -24,7 +25,7 @@ import { prepareCodexOrchestrationDelegation } from '../task/codex-orchestration
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 
-const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|await-activation|recover-prepared|hook-start|hook-stop|advance|pause|status|commit-start|commit-begin|commit-checkpoint|commit-complete|commit-recover|commit-abort|commit-terminate|commit-status> [options]\n';
+const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|dispatch|await-activation|recover-prepared|hook-start|hook-stop|advance|pause|status|commit-start|commit-begin|commit-checkpoint|commit-complete|commit-recover|commit-abort|commit-terminate|commit-status> [options]\n';
 
 function usageFailure(message: string): void {
   process.stdout.write(`${JSON.stringify({
@@ -46,7 +47,7 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
   }
   const [taskRef, intent] = args;
   if (![
-    'begin-or-resume', 'route', 'prepare', 'await-activation', 'recover-prepared',
+    'begin-or-resume', 'route', 'prepare', 'dispatch', 'await-activation', 'recover-prepared',
     'hook-start', 'hook-stop', 'advance', 'pause', 'status',
     'commit-start', 'commit-begin', 'commit-checkpoint', 'commit-complete', 'commit-recover', 'commit-abort', 'commit-terminate', 'commit-status'
   ].includes(intent!)) {
@@ -223,6 +224,8 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
       requestedReasoningEffort: values['--requested-reasoning-effort'],
       capabilityToken: values['--capability-token']
     }, { orchestrationOptions: coreOptions });
+  } else if (intent === 'dispatch') {
+    result = dispatchOrchestrationDelegation(taskRef!, coreOptions);
   } else if (intent === 'await-activation') {
     const missing = requireValues(['--stage', '--round', '--artifact', '--role']);
     if (missing) { usageFailure(`intent 'await-activation' requires '${missing}'`); return; }

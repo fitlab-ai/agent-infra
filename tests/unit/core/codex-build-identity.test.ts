@@ -2,16 +2,23 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import {
   computeLifecycleBuildIdentity,
   readLifecycleManifestFiles,
+  resolveLifecycleExecutableFiles,
   verifyLifecycleBuildIdentity
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/build-identity.ts';
 
+const fixtureRoots = new Set<string>();
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
+
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-build-identity-'));
+  fixtureRoots.add(root);
   fs.mkdirSync(path.join(root, 'lib'), { recursive: true });
   fs.mkdirSync(path.join(root, '.codex', 'agents'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'run-task'), { recursive: true });
@@ -53,6 +60,16 @@ test('lifecycle build identity separates executable and contract hashes', () => 
     verifyLifecycleBuildIdentity(first, executableChanged).code,
     'CODEX_LIFECYCLE_BUILD_MISMATCH'
   );
+});
+
+test('lifecycle executable identity expands the complete relative import closure', () => {
+  const root = fixture();
+  fs.writeFileSync(path.join(root, 'lib', 'protocol.ts'), "import { helper } from './helper.ts';\nexport const protocol = helper;\n");
+  fs.writeFileSync(path.join(root, 'lib', 'helper.ts'), 'export const helper = 3;\n');
+  assert.deepEqual(resolveLifecycleExecutableFiles(root, ['lib/protocol.ts']), [
+    'lib/helper.ts',
+    'lib/protocol.ts'
+  ]);
 });
 
 test('lifecycle build identity reads one validated manifest file list', () => {

@@ -2,16 +2,26 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import {
   prepareCodexSandboxController,
   verifyCodexSandboxControllerContext
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 
+const fixtureRoots = new Set<string>();
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
+function trackedTemporaryRoot(prefix: string): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fixtureRoots.add(root);
+  return root;
+}
+
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-controller-project-'));
-  const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-controller-home-'));
+  const root = trackedTemporaryRoot('codex-controller-project-');
+  const codexHome = trackedTemporaryRoot('codex-controller-home-');
   fs.mkdirSync(path.join(root, '.codex', 'agents'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'hooks'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'run-task'), { recursive: true });
@@ -54,7 +64,7 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
   }, {
     repoRoot: f.root,
     codexHome: f.codexHome,
-    temporaryRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'codex-controller-runtime-')),
+    temporaryRoot: trackedTemporaryRoot('codex-controller-runtime-'),
     control: {
       token: 'control-token',
       generation: 'generation',
@@ -106,7 +116,7 @@ test('sandbox controller rejects symlinked credentials before launch', () => {
   }, {
     repoRoot: f.root,
     codexHome: f.codexHome,
-    temporaryRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'codex-controller-runtime-')),
+    temporaryRoot: trackedTemporaryRoot('codex-controller-runtime-'),
     control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status' },
     verifyTaskBinding: () => {},
     codexVersion: () => '0.147.0'
@@ -115,7 +125,7 @@ test('sandbox controller rejects symlinked credentials before launch', () => {
 
 test('sandbox controller enforces a task lease and controller context binding', () => {
   const f = fixture();
-  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-controller-runtime-'));
+  const temporaryRoot = trackedTemporaryRoot('codex-controller-runtime-');
   const options = {
     repoRoot: f.root,
     codexHome: f.codexHome,
