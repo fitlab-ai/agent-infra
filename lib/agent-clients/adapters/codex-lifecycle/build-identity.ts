@@ -117,7 +117,7 @@ function resolveLifecycleExecutableFiles(root: string, entries: readonly string[
       if (dependencyRelative.startsWith('..') || path.isAbsolute(dependencyRelative)) {
         throw new Error(`Lifecycle executable dependency '${requested}' escapes the package root`);
       }
-      pending.push(dependencyRelative);
+      pending.push(dependencyRelative.split(path.sep).join('/'));
     }
   }
   return [...resolved].sort();
