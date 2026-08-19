@@ -32,6 +32,10 @@ function exactText(value: unknown): value is string {
   return typeof value === 'string' && value.trim() === value && value.length > 0;
 }
 
+function normalizeRelativePath(value: string): string {
+  return value.replaceAll('\\', '/');
+}
+
 function readLifecycleManifestFiles(packageRoot: string): LifecycleManifestFiles {
   const file = path.join(
     packageRoot,
@@ -75,7 +79,7 @@ function executablePackageRoot(): string {
 
 function hashFiles(root: string, files: readonly string[]): string {
   const hash = crypto.createHash('sha256');
-  for (const relative of [...new Set(files)].sort()) {
+  for (const relative of [...new Set(files.map(normalizeRelativePath))].sort()) {
     if (path.isAbsolute(relative) || relative.split(/[\\/]/u).includes('..')) {
       throw new Error(`Lifecycle manifest path '${relative}' is unsafe`);
     }
@@ -84,7 +88,7 @@ function hashFiles(root: string, files: readonly string[]): string {
     if (!stat.isFile() || stat.isSymbolicLink()) {
       throw new Error(`Lifecycle manifest entry '${relative}' must be a regular file`);
     }
-    hash.update(relative.replaceAll(path.sep, '/'));
+    hash.update(relative);
     hash.update('\0');
     hash.update(fs.readFileSync(file));
     hash.update('\0');
@@ -96,7 +100,7 @@ function resolveLifecycleExecutableFiles(root: string, entries: readonly string[
   const pending = [...entries];
   const resolved = new Set<string>();
   while (pending.length > 0) {
-    const relative = pending.pop()!;
+    const relative = normalizeRelativePath(pending.pop()!);
     if (resolved.has(relative)) continue;
     resolved.add(relative);
     if (!/\.[cm]?[jt]s$/u.test(relative)) continue;
@@ -117,7 +121,7 @@ function resolveLifecycleExecutableFiles(root: string, entries: readonly string[
       if (dependencyRelative.startsWith('..') || path.isAbsolute(dependencyRelative)) {
         throw new Error(`Lifecycle executable dependency '${requested}' escapes the package root`);
       }
-      pending.push(dependencyRelative.split(path.sep).join('/'));
+      pending.push(normalizeRelativePath(dependencyRelative));
     }
   }
   return [...resolved].sort();

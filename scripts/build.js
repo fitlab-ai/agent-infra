@@ -7,9 +7,13 @@ import { fileURLToPath } from "node:url";
 const rootDir = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const distLib = path.join(rootDir, "dist", "lib");
 
+function normalizeRelativePath(value) {
+  return value.replaceAll("\\", "/");
+}
+
 function hashFiles(files) {
   const hash = crypto.createHash("sha256");
-  for (const relative of [...new Set(files)].sort()) {
+  for (const relative of [...new Set(files.map(normalizeRelativePath))].sort()) {
     hash.update(relative);
     hash.update("\0");
     hash.update(fs.readFileSync(path.join(rootDir, relative)));
@@ -22,7 +26,7 @@ function resolveExecutableFiles(entries) {
   const pending = [...entries];
   const resolved = new Set();
   while (pending.length > 0) {
-    const relative = pending.pop();
+    const relative = normalizeRelativePath(pending.pop());
     if (resolved.has(relative)) continue;
     resolved.add(relative);
     if (!/\.[cm]?[jt]s$/u.test(relative)) continue;
@@ -37,7 +41,7 @@ function resolveExecutableFiles(entries) {
       if (dependencyRelative.startsWith("..") || path.isAbsolute(dependencyRelative)) {
         throw new Error(`Lifecycle executable dependency '${match[1]}' escapes the package root`);
       }
-      pending.push(dependencyRelative);
+      pending.push(normalizeRelativePath(dependencyRelative));
     }
   }
   return [...resolved].sort();
