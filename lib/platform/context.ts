@@ -20,6 +20,8 @@ type ContextOptions = {
   platformType?: string;
 };
 
+const CURRENT_USER_QUERY = 'query { viewer { login } }';
+
 function findRepoRoot(cwd: string): string {
   try {
     return execFileSync('git', ['rev-parse', '--show-toplevel'], {
@@ -105,16 +107,17 @@ function resolveGitHubContext(options: ContextOptions & { cwd: string }): Platfo
       error: { code: 'UPSTREAM_UNRESOLVED', message: 'Unable to resolve the upstream repository', retryable: false }
     });
   }
-  const user = client.json(['api', 'user'], { cwd });
+  const user = client.json(['api', 'graphql', '-f', `query=${CURRENT_USER_QUERY}`], { cwd });
   if (!user.ok) return failure(user.error, upstream);
-  const userValue = user.value as { login?: string } | null;
+  const userValue = user.value as { data?: { viewer?: { login?: string } } } | null;
+  const currentUser = userValue?.data?.viewer?.login || null;
   const permissions = client.json(['api', `repos/${upstream}`], { cwd });
   if (!permissions.ok) return failure(permissions.error, upstream);
   const permissionValue = permissions.value as { permissions?: Record<string, boolean> } | null;
   const values = permissionValue?.permissions || {};
   const capabilities = {
-    authenticated: Boolean(userValue?.login),
-    comment: Boolean(userValue?.login),
+    authenticated: Boolean(currentUser),
+    comment: Boolean(currentUser),
     triage: Boolean(values.triage || values.push || values.admin),
     push: Boolean(values.push || values.admin),
     admin: Boolean(values.admin)
@@ -122,7 +125,7 @@ function resolveGitHubContext(options: ContextOptions & { cwd: string }): Platfo
   const status = Object.values(capabilities).every(Boolean) ? 'no-op' : 'degraded';
   return platformResult(status, {
     changed: false,
-    platform: { type: platform, repository: upstream, currentUser: userValue?.login || null },
+    platform: { type: platform, repository: upstream, currentUser },
     resource: { kind: 'repository', number: null },
     capabilities,
     operations: [{ name: 'resolve', status: 'no-op', reasonCode: null }]

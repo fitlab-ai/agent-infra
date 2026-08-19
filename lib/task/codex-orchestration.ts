@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+
 import {
   preflightCodexLifecycleEvidence,
   resolveCodexSpawnedChild,
@@ -5,9 +7,16 @@ import {
   resolveCodexThread
 } from '../agent-clients/adapters/codex-lifecycle/app-server.ts';
 import { createCodexLifecycleStore } from '../agent-clients/adapters/codex-lifecycle/store.ts';
+import { createCodexCapabilityStore } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import { computeLifecycleBuildIdentity } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import type { LifecycleBuildIdentity } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import { verifyCodexSandboxControllerContext } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
+import { resolveTaskRef } from './resolve-ref.ts';
 import {
   activateMatchingOrchestrationDelegation,
+  hasActivatableOrchestrationDelegation,
+  hasSealableOrchestrationDelegation,
   pauseMatchingOrchestrationDelegation,
   prepareOrchestrationDelegation,
   reconcileMatchingOrchestrationDelegation,
@@ -16,12 +25,15 @@ import {
 import type { OrchestrationOptions, OrchestrationResult } from './orchestration.ts';
 
 type LifecycleStore = ReturnType<typeof createCodexLifecycleStore>;
+type CapabilityStore = ReturnType<typeof createCodexCapabilityStore>;
 type CodexBridgeOptions = Readonly<{
   repoRoot?: string;
   store?: LifecycleStore;
   preflight?: typeof preflightCodexLifecycleEvidence;
   resolveThread?: typeof resolveCodexThread;
   resolveTerminal?: typeof resolveCodexTerminal;
+  capabilityStore?: CapabilityStore;
+  buildIdentity?: LifecycleBuildIdentity;
   orchestrationOptions?: OrchestrationOptions;
 }>;
 
@@ -59,25 +71,68 @@ function requiredStore(options: CodexBridgeOptions): LifecycleStore {
   return options.store;
 }
 
+function controllerContext(taskId: string, repoRoot: string) {
+  const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+  return contextPath
+    ? verifyCodexSandboxControllerContext(contextPath, taskId, { repoRoot })
+    : null;
+}
+
 async function prepareCodexOrchestrationDelegation(
   taskRef: string,
   input: Readonly<{
     client: AgentClientId;
     requestedModel?: string;
     requestedReasoningEffort?: string;
+    capabilityToken?: string;
   }>,
   options: CodexBridgeOptions = {}
 ): Promise<OrchestrationResult> {
   if (input.client !== 'codex') return prepareOrchestrationDelegation(taskRef, input, coreOptions(options));
   try {
-    await (options.preflight ?? preflightCodexLifecycleEvidence)(options.repoRoot ?? process.cwd());
+    const repoRoot = options.repoRoot ?? process.cwd();
+    const resolved = resolveTaskRef(taskRef, { repoRoot });
+    if (!resolved.ok) return bridgeFailure(resolved.code, resolved.message);
+    const preflight = await (options.preflight ?? preflightCodexLifecycleEvidence)(repoRoot);
+    if (!input.capabilityToken) {
+      return bridgeFailure(
+        'ORCHESTRATION_CODEX_CAPABILITY_REQUIRED',
+        'Codex prepare requires a current-session capability token'
+      );
+    }
+    const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
+    const controller = controllerContext(resolved.taskId, repoRoot);
+    const capabilityStore = options.capabilityStore ?? createCodexCapabilityStore();
+    const consumed = capabilityStore.consume(input.capabilityToken, {
+      taskId: resolved.taskId,
+      hookDefinitionHash: preflight.hookDefinitionHash,
+      buildIdentity,
+      ...(controller ? { controller: {
+        instanceDigest: controller.controllerInstanceDigest,
+        controlGeneration: controller.controlGeneration
+      } } : {})
+    });
+    return prepareOrchestrationDelegation(taskRef, {
+      ...input,
+      lifecycleProvenance: {
+        ...consumed.buildIdentity,
+        hookDefinitionHash: preflight.hookDefinitionHash,
+        ...preflight.hookProvenance,
+        capabilitySessionId: consumed.sessionId!,
+        capabilityTurnId: consumed.turnId!,
+        capabilityToolUseId: consumed.toolUseId!,
+        controllerInstanceDigest: controller?.controllerInstanceDigest ?? null,
+        controlGeneration: controller?.controlGeneration ?? null
+      }
+    }, coreOptions(options));
   } catch (error) {
     return bridgeFailure(
-      'ORCHESTRATION_CLIENT_PREFLIGHT_FAILED',
+      error instanceof Error && error.name.startsWith('CODEX_CAPABILITY_')
+        ? error.name
+        : 'ORCHESTRATION_CLIENT_PREFLIGHT_FAILED',
       error instanceof Error ? error.message : String(error)
     );
   }
-  return prepareOrchestrationDelegation(taskRef, input, coreOptions(options));
 }
 
 async function activateCodexOrchestrationDelegation(
@@ -85,6 +140,9 @@ async function activateCodexOrchestrationDelegation(
   options: CodexBridgeOptions = {}
 ): Promise<OrchestrationResult> {
   try {
+    if (!hasActivatableOrchestrationDelegation('codex', childThreadId, coreOptions(options))) {
+      return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
+    }
     const store = requiredStore(options);
     const resolved = await (options.resolveThread ?? resolveCodexThread)(childThreadId);
     store.apply(resolved.resolution.thread);
@@ -95,6 +153,23 @@ async function activateCodexOrchestrationDelegation(
     if (record.state.status !== 'start-ready' || !evidence) {
       return pauseBridge('ORCHESTRATION_CODEX_START_EVIDENCE_INVALID', 'Codex lifecycle start evidence is not ready', options);
     }
+    const repoRoot = options.repoRoot ?? process.cwd();
+    const preflight = await (options.preflight ?? preflightCodexLifecycleEvidence)(repoRoot, {
+      sessionId: evidence.parentThreadId,
+      turnId: evidence.parentTurnId,
+      toolUseId: evidence.spawnToolUseId
+    });
+    const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
+    const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+    const contextTaskId = contextPath
+      ? (JSON.parse(fs.readFileSync(contextPath, 'utf8')) as { taskId?: unknown }).taskId
+      : null;
+    if (contextPath && typeof contextTaskId !== 'string') {
+      throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
+    }
+    const controller = contextPath
+      ? verifyCodexSandboxControllerContext(contextPath, contextTaskId as string, { repoRoot })
+      : null;
     return activateMatchingOrchestrationDelegation('codex', {
       nativeAgent: evidence.nativeAgent,
       childId: evidence.childThreadId,
@@ -107,9 +182,17 @@ async function activateCodexOrchestrationDelegation(
         ? { reasoningEffortFallbackReason: evidence.reasoningEffortFallbackReason }
         : {}),
       hostEvidence: {
-        kind: 'codex-lifecycle-v1',
+        kind: 'codex-lifecycle-v2',
         hookDefinitionHash: evidence.hookDefinitionHash,
-        startRevision: record.revision
+        startRevision: record.revision,
+        ...buildIdentity,
+        ...preflight.hookProvenance,
+        capabilitySessionId: evidence.parentThreadId,
+        capabilityTurnId: evidence.parentTurnId,
+        spawnToolUseId: evidence.spawnToolUseId,
+        spawnObservedAt: record.spawnObservedAt ?? undefined,
+        controllerInstanceDigest: controller?.controllerInstanceDigest ?? null,
+        controlGeneration: controller?.controlGeneration ?? null
       }
     }, coreOptions(options));
   } catch (error) {
@@ -149,6 +232,9 @@ async function sealCodexOrchestrationDelegation(
   options: CodexBridgeOptions = {}
 ): Promise<OrchestrationResult> {
   try {
+    if (!hasSealableOrchestrationDelegation('codex', childThreadId, coreOptions(options))) {
+      return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'No matching Codex delegation is active');
+    }
     const store = requiredStore(options);
     const existing = store.read(childThreadId);
     if (!existing.consumer) {

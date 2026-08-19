@@ -37,7 +37,9 @@ test('PR readiness watcher reaches injected deadline and preserves the observed 
       version() { return { ok: true as const, value: '2.16.0' }; },
       json(args: string[]) {
         const joined = args.join(' ');
-        if (args[1] === 'user') return { ok: true as const, value: { login: 'codex' } };
+        if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
+          return { ok: true as const, value: { data: { viewer: { login: 'codex' } } } };
+        }
         if (args[0] === 'api' && args[1] === 'repos/o/r') return { ok: true as const, value: { full_name: 'o/r', fork: false, permissions: { push: true } } };
         if (args[0] === 'api' && args[1] === 'repos/o/r/pulls/5') return { ok: true as const, value: {
           number: 5, node_id: 'PR_5', html_url: 'https://github.com/o/r/pull/5', state: 'open',

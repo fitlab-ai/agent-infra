@@ -8,6 +8,7 @@
 - 原始 start/stop 事件，或 custom role 缺少它们时的 parent PostTool spawn/completed-wait fallback，能稳定关联 managed agent、parent/child identity、fresh spawn mode、actual model 和 actual reasoning effort。
 - 显式 requested model/effort 能传给 executor/reviewer；宿主对任一字段回退时，事件能给出对应 actual 值与独立的非空 fallback reason。
 - candidate checkout 与打包安装后的行为一致，且模型策略、receipt 与验证结果可从 `orchestration.json` 复核。
+- direct-host 的 project/managed source 与 sandbox controller 的 isolated-user source、build/contract/profile/controller digest 必须在 prepare/start/stop/consume 全链路一致。
 
 ## 验证顺序
 
@@ -16,5 +17,6 @@
 3. 分别验证 model/effort 的 requested/actual 一致路径、单项与双项有理由 fallback 路径，并确认缺 actual 字段会失败关闭。
 4. 对同一 commit 执行 candidate checkout 与 `npm pack` 安装验证，记录 tarball 哈希和结果。
 5. 仅把去敏摘要与非敏感 fixture 纳入版本库；token、绝对用户路径、transcript 内容和凭证必须删除或替换。
+6. sandbox backend 另做至少 10 次 executor 与 10 次 reviewer 冷启动，记录 prepared、spawn dispatch、SubagentStart、activation completed 的单调时钟及 p50/p95/max；仅当 max 加 20% 余量不超过 deadline，并通过 symlink/config/plugin/lease/context/build 失败注入和终态清理审计时启用。
 
 任一字段无法从真实宿主稳定观察时，该客户端的 orchestration capability 保持 `unsupported`，并把缺口记录为人工验证项。Codex 可声明为 `experimental`，但每次 `prepare` 仍必须通过静态 preflight，且原生 start/stop 或 parent spawn/completed-wait fallback 必须形成可验证的 consumed host evidence。fallback 只允许 empty turns/协议 `inProgress` 等待；malformed、身份/传输错误或异常 terminal 都稳定暂停。

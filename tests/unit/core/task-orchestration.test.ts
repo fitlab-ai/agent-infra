@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import {
   activateMatchingOrchestrationDelegation,
@@ -10,6 +10,7 @@ import {
   advanceOrchestration,
   beginOrResumeOrchestration as beginOrResumeOrchestrationRaw,
   completeOrchestrationStage,
+  dispatchOrchestrationDelegation,
   pauseOrchestration,
   prepareOrchestrationDelegation as prepareOrchestrationDelegationRaw,
   readRun,
@@ -17,12 +18,17 @@ import {
   sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation
 } from '../../../lib/task/orchestration.ts';
+import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 
 const snapshot = () => 'before-tree';
 const modelPolicy = {
   executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
   reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
 } as const;
+const fixtureRoots = new Set<string>();
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
 
 function beginOrResumeOrchestration(
   taskRef: string,
@@ -44,11 +50,30 @@ function prepareOrchestrationDelegation(
 
 function fixture(step: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-'));
+  fixtureRoots.add(root);
   const taskDir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: TASK-20260101-000001\ncurrent_step: ${step}\n---\n\n# Task\n`);
   return { root, taskDir };
 }
+
+test('dispatch respects the repository execution lock', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  prepareOrchestrationDelegation('TASK-20260101-000001', {
+    client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+  }, { repoRoot: f.root, captureWorkspace: snapshot });
+
+  const result = withTaskExecutionLock(
+    f.root,
+    '__repository__',
+    'test.dispatch.repository',
+    () => dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root })
+  );
+
+  assert.equal(result.error?.code, 'ORCHESTRATION_LOCK_BUSY');
+  assert.equal(readRun(f.taskDir)?.pendingDelegation?.spawnDispatchedAt, null);
+});
 
 function approvedCodeFixture(manualValidation = 0) {
   const f = fixture('code-review');
@@ -88,11 +113,11 @@ test('begin is persistent and idempotent for a running task', () => {
   assert.equal(second.changed, false);
   assert.equal(second.run?.runId, 'run-1');
   assert.deepEqual(second.run?.modelPolicy, modelPolicy);
-  assert.equal(second.run?.schemaVersion, 2);
+  assert.equal(second.run?.schemaVersion, 3);
   assert.equal(second.run?.modelPolicySource?.kind, 'explicit');
 });
 
-test('completed v2 runs are idempotent across client changes', () => {
+test('completed current-schema runs are idempotent across client changes', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   const runPath = path.join(f.taskDir, 'orchestration.json');
@@ -180,7 +205,7 @@ test('resume rejects policy changes and pauses legacy runs without model evidenc
     repoRoot: legacy.root, client: 'claude-code', modelPolicy
   });
   assert.equal(resumed.status, 'running');
-  assert.equal(resumed.run?.schemaVersion, 2);
+  assert.equal(resumed.run?.schemaVersion, 3);
   assert.equal(resumed.run?.recoveryHistory?.length, 1);
   const repeated = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
     repoRoot: legacy.root, client: 'claude-code'
@@ -292,6 +317,41 @@ test('Codex unsupported-client recovery fails closed when historical execution e
   });
   assert.equal(blocked.status, 'paused');
   assert.equal(blocked.changed, false);
+});
+
+test('recoverable v2 pauses migrate only when their idle baseline is unchanged', () => {
+  const safe = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: safe.root });
+  const safePath = path.join(safe.taskDir, 'orchestration.json');
+  const paused = JSON.parse(fs.readFileSync(safePath, 'utf8'));
+  paused.schemaVersion = 2;
+  paused.status = 'paused';
+  paused.pause = { code: 'ORCHESTRATION_RETRYABLE', message: 'retry', recoverable: true };
+  paused.baseline = '';
+  fs.writeFileSync(safePath, `${JSON.stringify(paused, null, 2)}\n`);
+
+  const migrated = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+    repoRoot: safe.root,
+    client: 'claude-code',
+    modelPolicy
+  });
+  assert.equal(migrated.status, 'running');
+  assert.equal(migrated.run?.schemaVersion, 3);
+  assert.equal(migrated.run?.pause, null);
+
+  const drifted = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: drifted.root });
+  const driftedPath = path.join(drifted.taskDir, 'orchestration.json');
+  fs.writeFileSync(driftedPath, `${JSON.stringify({ ...paused, baseline: 'historical-tree' }, null, 2)}\n`);
+  const blocked = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+    repoRoot: drifted.root,
+    client: 'claude-code',
+    modelPolicy
+  });
+  assert.equal(blocked.status, 'paused');
+  assert.equal(blocked.run?.schemaVersion, 2);
+  assert.equal(blocked.run?.pause?.code, 'ORCHESTRATION_SCHEMA_MIGRATION_REQUIRED');
+  assert.equal(blocked.run?.pause?.recoverable, false);
 });
 
 test('prepare validates requested model before capturing workspace state', () => {
@@ -619,6 +679,7 @@ test('commit authorization is issued and the run completes even with pending man
   assert.equal(prepared.next?.stage, 'commit');
   assert.equal(prepared.run?.pendingDelegation?.workspaceSnapshotScope, 'task');
   assert.equal(prepared.run?.commitAuthorization.issuedAt, '2026-01-01T00:00:00.000Z');
+  dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root, now });
 
   assert.equal(activateOrchestrationDelegation('TASK-20260101-000001', {
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-mv', parentId: 'parent-mv',
@@ -649,6 +710,7 @@ test('commit authorization is issued at eligible prepare and the receipt reaches
   assert.equal(prepared.next?.stage, 'commit');
   assert.equal(prepared.run?.pendingDelegation?.workspaceSnapshotScope, 'task');
   assert.equal(prepared.run?.commitAuthorization.issuedAt, '2026-01-01T00:00:00.000Z');
+  dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root, now });
 
   assert.equal(activateOrchestrationDelegation('TASK-20260101-000001', {
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-1', parentId: 'parent-1',
@@ -672,6 +734,7 @@ test('native start binds the unique prepared delegation without task identity', 
   }, {
     repoRoot: f.root, captureWorkspace: snapshot
   });
+  dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root });
 
   const started = activateMatchingOrchestrationDelegation('claude-code', {
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-native',
@@ -692,6 +755,7 @@ test('managed native hook mismatches persist a recoverable pause', () => {
   }, {
     repoRoot: f.root, captureWorkspace: snapshot
   });
+  dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root });
 
   const started = activateMatchingOrchestrationDelegation('claude-code', {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'wrong-role',
@@ -773,6 +837,7 @@ test('native stop derives the workspace delta before sealing the unique delegati
   }, {
     repoRoot: f.root, captureWorkspace
   });
+  dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root });
   activateMatchingOrchestrationDelegation('claude-code', {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-stop',
     parentId: 'parent-session', spawnMode: 'fresh', actualModel: 'reviewer-model', actualReasoningEffort: 'high'
@@ -813,6 +878,7 @@ test('native stop preserves legacy snapshot scope for an old pending receipt', (
   }, {
     repoRoot: f.root, captureWorkspace
   });
+  dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root });
   const runPath = path.join(f.taskDir, 'orchestration.json');
   const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
   delete persisted.pendingDelegation.workspaceSnapshotScope;
@@ -847,6 +913,7 @@ test('reviewer snapshot shape mismatch fails closed to a recoverable pause', () 
   }, {
     repoRoot: f.root, captureWorkspace: snapshot
   });
+  dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root });
   activateMatchingOrchestrationDelegation('claude-code', {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-rollback',
     parentId: 'parent-session', spawnMode: 'fresh', actualModel: 'reviewer-model', actualReasoningEffort: 'high'

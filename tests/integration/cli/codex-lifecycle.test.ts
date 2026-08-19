@@ -4,16 +4,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import {
   envWithPrependedPath,
   INTERNAL_CLI_PATH,
   writeNodeCommandShim
 } from '../../helpers.ts';
+const fixtureRoots = new Set<string>();
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lifecycle-cli-'));
+  fixtureRoots.add(root);
   const bin = path.join(root, 'bin');
   const codex = path.join(root, 'codex.mjs');
   const rollout = path.join(root, 'rollout-child.jsonl');

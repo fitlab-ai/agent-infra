@@ -1,10 +1,67 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const distLib = path.join(rootDir, "dist", "lib");
+
+function normalizeRelativePath(value) {
+  return value.replaceAll("\\", "/");
+}
+
+function hashFiles(files) {
+  const hash = crypto.createHash("sha256");
+  for (const relative of [...new Set(files.map(normalizeRelativePath))].sort()) {
+    hash.update(relative);
+    hash.update("\0");
+    hash.update(fs.readFileSync(path.join(rootDir, relative)));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function resolveExecutableFiles(entries) {
+  const pending = [...entries];
+  const resolved = new Set();
+  while (pending.length > 0) {
+    const relative = normalizeRelativePath(pending.pop());
+    if (resolved.has(relative)) continue;
+    resolved.add(relative);
+    if (!/\.[cm]?[jt]s$/u.test(relative)) continue;
+    const file = path.join(rootDir, relative);
+    const source = fs.readFileSync(file, "utf8");
+    for (const match of source.matchAll(/(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)["'](\.[^"']+)["']/gu)) {
+      const base = path.resolve(path.dirname(file), match[1]);
+      const dependency = [base, `${base}.ts`, `${base}.js`, path.join(base, "index.ts"), path.join(base, "index.js")]
+        .find((candidate) => fs.existsSync(candidate) && fs.lstatSync(candidate).isFile());
+      if (!dependency) throw new Error(`Lifecycle executable dependency '${match[1]}' from '${relative}' is unavailable`);
+      const dependencyRelative = path.relative(rootDir, dependency);
+      if (dependencyRelative.startsWith("..") || path.isAbsolute(dependencyRelative)) {
+        throw new Error(`Lifecycle executable dependency '${match[1]}' escapes the package root`);
+      }
+      pending.push(normalizeRelativePath(dependencyRelative));
+    }
+  }
+  return [...resolved].sort();
+}
+
+const lifecycleFiles = JSON.parse(fs.readFileSync(
+  path.join(rootDir, "lib", "agent-clients", "adapters", "codex-lifecycle", "manifest-files.json"),
+  "utf8"
+));
+const packageVersion = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf8")).version;
+const compiledExecutableFiles = lifecycleFiles.executableFiles.map((file) =>
+  file.endsWith(".ts") ? path.join("dist", file.replace(/\.ts$/u, ".js")) : file
+);
+fs.writeFileSync(path.join(rootDir, "dist", "lifecycle-build-manifest.json"), `${JSON.stringify({
+  protocolVersion: 3,
+  packageVersion,
+  sourceInputHash: hashFiles(resolveExecutableFiles(lifecycleFiles.executableFiles)),
+  internalExecutableBuildHash: hashFiles(resolveExecutableFiles(compiledExecutableFiles))
+}, null, 2)}\n`);
+process.stdout.write("Generated dist/lifecycle-build-manifest.json\n");
 
 function copyFile(src, dst) {
   fs.mkdirSync(path.dirname(dst), { recursive: true });

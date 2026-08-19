@@ -39,6 +39,11 @@ if (
     await codexLifecycle(process.argv.slice(3));
     break;
   }
+  case 'codex-sandbox-controller': {
+    const { codexSandboxController } = await import('../lib/internal/codex-sandbox-controller.ts');
+    await codexSandboxController(process.argv.slice(3));
+    break;
+  }
   case 'git-workflow': {
     const { gitWorkflow } = await import('../lib/internal/git-workflow.ts');
     gitWorkflow(process.argv.slice(3));

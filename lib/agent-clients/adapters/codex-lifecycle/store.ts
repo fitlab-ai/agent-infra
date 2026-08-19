@@ -18,6 +18,7 @@ type StoredCodexLifecycle = Readonly<{
   state: CodexLifecycleState;
   consumer: string | null;
   consumedAt: string | null;
+  spawnObservedAt: string | null;
   updatedAt: string;
 }>;
 
@@ -31,6 +32,11 @@ type CodexLifecycleStoreResult = Readonly<{
   path: string;
   revision: number;
   state: CodexLifecycleState;
+}>;
+
+type ActiveCodexLifecycleEvidenceQuery = Readonly<{
+  nativeAgent: string;
+  hookDefinitionHash: string;
 }>;
 
 const LOCK_RETRY_MS = 10;
@@ -49,10 +55,14 @@ function readRecord(file: string): StoredCodexLifecycle {
     || value.revision < 1
     || !value.state
     || value.state.schemaVersion !== 1
+    || (value.spawnObservedAt != null && (
+      typeof value.spawnObservedAt !== 'string'
+      || !Number.isFinite(Date.parse(value.spawnObservedAt))
+    ))
   ) {
     throw new Error(`Codex lifecycle record '${path.basename(file)}' is invalid`);
   }
-  return value;
+  return Object.freeze({ ...value, spawnObservedAt: value.spawnObservedAt ?? null });
 }
 
 function recordFiles(root: string): string[] {
@@ -60,6 +70,19 @@ function recordFiles(root: string): string[] {
   return fs.readdirSync(root)
     .filter((name) => /^[a-f0-9]{64}\.json$/.test(name))
     .map((name) => path.join(root, name));
+}
+
+function hasActiveCodexLifecycleEvidence(
+  root: string,
+  query: ActiveCodexLifecycleEvidenceQuery
+): boolean {
+  return recordFiles(root).map(readRecord).some((record) => {
+    const evidence = record.state.startEvidence;
+    return record.consumer === null
+      && ['start-ready', 'observed-terminal', 'stop-ready'].includes(record.state.status)
+      && evidence?.nativeAgent === query.nativeAgent
+      && evidence.hookDefinitionHash === query.hookDefinitionHash;
+  });
 }
 
 function writeRecord(file: string, record: StoredCodexLifecycle, expectedRevision: number): void {
@@ -154,6 +177,7 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
   function apply(event: CodexLifecycleEvent): CodexLifecycleStoreResult {
     return withWriteLock(() => {
       const file = locate(event);
+      const observedAt = now();
       const current = fs.existsSync(file)
         ? readRecord(file)
         : Object.freeze({
@@ -162,7 +186,8 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
             state: createCodexLifecycleState(options.cliVersion),
             consumer: null,
             consumedAt: null,
-            updatedAt: now()
+            spawnObservedAt: null,
+            updatedAt: observedAt
           });
       if (current.consumer) throw new Error(`Codex lifecycle evidence was already consumed by '${current.consumer}'`);
       const nextState = reduceCodexLifecycleEvent(current.state, event);
@@ -172,7 +197,10 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
         state: nextState,
         consumer: null,
         consumedAt: null,
-        updatedAt: now()
+        spawnObservedAt: event.type === 'hook-spawn' && current.revision === 0
+          ? observedAt
+          : current.spawnObservedAt,
+        updatedAt: observedAt
       });
       writeRecord(file, next, current.revision);
       return Object.freeze({ path: file, revision: next.revision, state: next.state });
@@ -290,8 +318,9 @@ function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
   return Object.freeze({ root, apply, applyToSpawn, consume, expireBefore, findByParent, read });
 }
 
-export { createCodexLifecycleStore };
+export { createCodexLifecycleStore, hasActiveCodexLifecycleEvidence };
 export type {
+  ActiveCodexLifecycleEvidenceQuery,
   CodexLifecycleStoreOptions,
   CodexLifecycleStoreResult,
   StoredCodexLifecycle

@@ -5,12 +5,18 @@
 - 总控只路由和委派；阶段技能仍是业务规则与产物格式的单一事实源。
 - 每个阶段和每轮返工都创建 fresh executor；每轮审查创建 fresh reviewer，禁止 follow-up 复用。
 - reviewer 只能写当前审查产物和核心生成的任务元数据。业务代码、HEAD 或暂存区变化会使 receipt 失效。
-- active run 中只有一个 pending delegation。缺失、错配、fork、重放、hook 不可用或工作区漂移一律暂停。
+- active run 中只有一个 pending delegation。child 必须在任何阶段副作用前通过 activation barrier；缺失、超时、错配、fork、重放、hook 不可用或工作区漂移一律暂停。
 - 首版成功终点是一次通过既有安全门禁的 `commit`；不创建 PR、不监控 checks、不执行 `complete-task`。
 
 ## 恢复语义
 
-`orchestration.json` 是详细状态源。v2 run 保存完整策略、来源与 append-only 恢复历史。只有无 pending delegation 且零历史 receipt 的 v1 run 可在补齐完整策略后原地升级；任一历史 receipt 因缺 effort 证据保持暂停。Codex 的历史 `ORCHESTRATION_CLIENT_UNSUPPORTED` v2 pause 仅在 stepCount、nextStage、baseline、receipts、pending delegation、commit authorization、completion evidence 与 commit intent 全部证明从未推进时追加 `CLIENT_CAPABILITY_ENABLED` 并恢复；任一未知或非空证据保持原暂停。迁移是 forward-only，旧二进制不得推进 v2 active run。
+`orchestration.json` 是详细状态源。v3 run 保存完整策略、append-only 恢复历史、build/contract/hook source/controller provenance 与 activation 单调时钟。只有无 pending delegation 且零历史 receipt 的 v1 run 可在补齐完整策略后升级；历史 v2 状态仅兼容读取，新的 Codex delegation 必须写 v3。prepared orphan 只允许在 deadline 已过、task fingerprint 精确不变、无 commit intent/authorization 消耗且无匹配的未消费 active lifecycle evidence 时显式恢复。迁移是 forward-only，未知 schema 或缺 provenance 的 active v3 一律失败关闭。
+
+## Codex 宿主与 capability
+
+- direct-host 只接受 trusted project 或 managed lifecycle hooks。task-bound sandbox 必须由受控 nested controller 建立隔离 `CODEX_HOME`，仅接受绑定 controller context 的 user hooks；普通 user/plugin hook 不得成为证据源。
+- controller 只有在 control generation、task binding、Codex 版本、closed bundle、build/contract manifest、profile 与 hook discovery 全部通过后才能启动 nested loop。两个 bypass 参数只允许出现在该 task-bound 启动路径。
+- 每次 prepare 前必须 arm 一次性 capability，并由同一当前 loop 的真实 PostToolUse attestation；token 原子消费后保留去敏 tombstone，不能重放或跨 task/session/build/controller 使用。
 
 ## 模型策略
 

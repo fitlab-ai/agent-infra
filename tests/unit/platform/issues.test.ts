@@ -38,7 +38,9 @@ function clientFor(handler: (args: string[], input?: string, method?: string) =>
 function contextResponse(args: string[]) {
   const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
   if (endpoint === 'repos/acme/widgets') return { full_name: 'acme/widgets', permissions: { admin: true } };
-  if (args.at(-1) === 'user') return { login: 'codex' };
+  if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
+    return { data: { viewer: { login: 'codex' } } };
+  }
   return null;
 }
 

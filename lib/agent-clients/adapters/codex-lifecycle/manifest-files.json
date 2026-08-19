@@ -1,0 +1,26 @@
+{
+  "executableFiles": [
+    "bin/internal-cli.ts",
+    "lib/internal/codex-lifecycle.ts",
+    "lib/internal/codex-sandbox-controller.ts",
+    "lib/internal/task-orchestration.ts",
+    "lib/task/codex-orchestration.ts",
+    "lib/task/delegation-receipts.ts",
+    "lib/task/orchestration.ts",
+    "lib/agent-clients/adapters/codex-lifecycle/build-identity.ts",
+    "lib/agent-clients/adapters/codex-lifecycle/capability-store.ts",
+    "lib/agent-clients/adapters/codex-lifecycle/sandbox-controller.ts",
+    "lib/agent-clients/adapters/codex-lifecycle/app-server.ts",
+    "lib/agent-clients/adapters/codex-lifecycle/evidence.ts",
+    "lib/agent-clients/adapters/codex-lifecycle/store.ts",
+    "lib/agent-clients/adapters/codex-lifecycle/manifest-files.json"
+  ],
+  "contractFiles": [
+    ".codex/hooks.json",
+    ".codex/agents/agent-infra-lifecycle-executor.toml",
+    ".codex/agents/agent-infra-lifecycle-reviewer.toml",
+    ".agents/hooks/lifecycle-delegation.js",
+    ".agents/skills/run-task/SKILL.md",
+    ".agents/rules/lifecycle-orchestration.md"
+  ]
+}

@@ -278,7 +278,7 @@ test('standalone completion ignores a historical orchestration run without a pen
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
   fs.writeFileSync(path.join(f.dir, 'orchestration.json'), `${JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: 'paused',
     pendingDelegation: null
   }, null, 2)}\n`);
@@ -299,7 +299,7 @@ test('standalone completion fails before writing when a delegation is pending', 
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
   const runPath = path.join(f.dir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: 'running',
     pendingDelegation: { status: 'prepared' }
   }, null, 2)}\n`);
@@ -322,7 +322,7 @@ test('orchestrated completion advances one matching activated delegation', () =>
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
   const runPath = path.join(f.dir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     taskId: f.id,
     runId: 'run-1',
     status: 'running',
@@ -347,7 +347,7 @@ test('orchestrated completion reports a distinct partial-write error when the ru
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
   const runPath = path.join(f.dir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     taskId: f.id,
     runId: 'run-1',
     status: 'running',
@@ -441,7 +441,7 @@ test('orchestrated completion dry-run reports a provenance mismatch without paus
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
   const runPath = path.join(f.dir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: 'running',
     pendingDelegation: { status: 'prepared' }
   }, null, 2)}\n`);

@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import { createCodexLifecycleStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
+import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import {
   activateCodexOrchestrationDelegation,
   activateCodexSpawnDelegation,
@@ -17,6 +18,7 @@ import {
   advanceOrchestration,
   beginOrResumeOrchestration,
   completeOrchestrationStage,
+  dispatchOrchestrationDelegation,
   readRun
 } from '../../../lib/task/orchestration.ts';
 
@@ -25,14 +27,51 @@ const policy = {
   executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
   reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
 } as const;
+const buildIdentity = {
+  protocolVersion: 3,
+  packageVersion: '0.9.7-alpha.0',
+  internalExecutableBuildHash: 'a'.repeat(64),
+  lifecycleContractHash: 'b'.repeat(64)
+} as const;
+const fixtureRoots = new Set<string>();
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
+const hookProvenance = {
+  hookSource: 'project' as const,
+  hookSourcePathDigest: 'c'.repeat(64),
+  hookSourceHash: 'd'.repeat(64)
+};
+const preflight = async () => ({
+  cliVersion: '0.147.0', hookDefinitionHash: 'hook-hash', staticReady: true,
+  discoveredHooks: [], hookProvenance, runtimeLiveness: false, diagnostics: []
+} as const);
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-orchestration-'));
+  fixtureRoots.add(root);
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
   beginOrResumeOrchestration(taskId, { repoRoot: root, client: 'codex', modelPolicy: policy, id: () => 'run-1' });
   return { root, taskDir };
+}
+
+function capability(root: string, token: string) {
+  const store = createCodexCapabilityStore({
+    root: path.join(root, '.agents', 'workspace', '.runtime', 'codex-capabilities'),
+    token: () => token
+  });
+  const armed = store.arm({ taskId, buildIdentity });
+  store.attest({
+    token: armed.token,
+    sessionId: 'parent',
+    turnId: 'parent-turn',
+    toolUseId: 'capability-tool',
+    hookDefinitionHash: 'hook-hash',
+    buildIdentity
+  });
+  return { store, token: armed.token };
 }
 
 test('Codex prepare preflight fails before workspace capture or receipt creation', async () => {
@@ -64,17 +103,21 @@ test('Codex parent reconciliation ignores unrelated completed waits', async () =
 
 test('Codex bridge completes sealing after evidence consumption survives a crash window', async () => {
   const f = fixture();
+  const currentCapability = capability(f.root, 'capability-token-one');
   const prepared = await prepareCodexOrchestrationDelegation(taskId, {
-    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
+    capabilityToken: currentCapability.token
   }, {
     repoRoot: f.root,
-    preflight: async () => ({
-      cliVersion: '0.147.0', hookDefinitionHash: 'hook-hash', staticReady: true,
-      discoveredHooks: [], runtimeLiveness: false, diagnostics: []
-    }),
+    capabilityStore: currentCapability.store,
+    buildIdentity,
+    preflight,
     orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
   });
   assert.equal(prepared.run?.pendingDelegation?.status, 'prepared');
+  assert.equal(dispatchOrchestrationDelegation(taskId, {
+    repoRoot: f.root, now: () => '2026-08-14T00:00:00.500Z'
+  }).run?.pendingDelegation?.spawnDispatchedAt !== null, true);
 
   const store = createCodexLifecycleStore({
     root: path.join(f.root, '.agents', 'workspace', '.runtime', 'codex-lifecycle'),
@@ -82,7 +125,7 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
     now: () => '2026-08-14T00:00:02.000Z'
   });
   store.apply({
-    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'tool',
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
     nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
     requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'hook-hash'
   });
@@ -93,7 +136,10 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
   });
   const started = await activateCodexOrchestrationDelegation('child', {
     repoRoot: f.root,
+    buildIdentity,
+    preflight,
     store,
+    orchestrationOptions: { now: () => '2026-08-14T00:00:03.000Z' },
     resolveThread: async () => ({
       resolution: {
         thread: { type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor' },
@@ -103,9 +149,21 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
     })
   });
   assert.equal(started.run?.pendingDelegation?.status, 'activated');
+  assert.equal(started.run?.pendingDelegation?.hostEvidence?.kind, 'codex-lifecycle-v2');
+  assert.deepEqual(started.run?.pendingDelegation?.lifecycleProvenance, {
+    ...buildIdentity,
+    hookDefinitionHash: 'hook-hash',
+    ...hookProvenance,
+    capabilitySessionId: 'parent',
+    capabilityTurnId: 'parent-turn',
+    capabilityToolUseId: 'capability-tool',
+    controllerInstanceDigest: null,
+    controlGeneration: null
+  });
   assert.equal(started.run?.pendingDelegation?.hostEvidence?.startRevision, 4);
   assert.equal((await activateCodexOrchestrationDelegation('child', {
-    repoRoot: f.root, store,
+    repoRoot: f.root, store, buildIdentity,
+    preflight,
     resolveThread: async () => ({
       resolution: {
         thread: { type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor' },
@@ -149,42 +207,46 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
 
 test('Codex bridge activates and seals from trusted parent spawn and wait evidence', async () => {
   const f = fixture();
+  const currentCapability = capability(f.root, 'capability-token-two');
   await prepareCodexOrchestrationDelegation(taskId, {
-    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
+    capabilityToken: currentCapability.token
   }, {
     repoRoot: f.root,
-    preflight: async () => ({
-      cliVersion: '0.147.0', hookDefinitionHash: 'hook-hash', staticReady: true,
-      discoveredHooks: [], runtimeLiveness: false, diagnostics: []
-    }),
+    buildIdentity,
+    capabilityStore: currentCapability.store,
+    preflight,
     orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
   });
+  dispatchOrchestrationDelegation(taskId, { repoRoot: f.root });
   const store = createCodexLifecycleStore({
     root: path.join(f.root, '.agents', 'workspace', '.runtime', 'codex-lifecycle'),
     cliVersion: '0.147.0'
   });
   store.apply({
-    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'tool',
+    type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
     nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
     requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'hook-hash'
   });
   const rollout = path.join(f.root, 'rollout-parent.jsonl');
   fs.writeFileSync(rollout, [
     JSON.stringify({ type: 'response_item', payload: {
-      type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: 'tool',
+      type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: 'spawn-tool',
       arguments: JSON.stringify({ agent_type: 'agent-infra-lifecycle-executor', task_name: 'analysis_executor_r1', model: 'executor-model', reasoning_effort: 'xhigh' })
     } }),
     JSON.stringify({ type: 'event_msg', payload: {
-      type: 'sub_agent_activity', event_id: 'tool', kind: 'started',
+      type: 'sub_agent_activity', event_id: 'spawn-tool', kind: 'started',
       agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
     } })
   ].join('\n'));
   const started = await activateCodexSpawnDelegation({
-    sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'tool', transcriptPath: rollout,
+    sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool', transcriptPath: rollout,
     nativeAgent: 'agent-infra-lifecycle-executor', taskName: 'analysis_executor_r1',
     requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
   }, {
     repoRoot: f.root,
+    buildIdentity,
+    preflight,
     store,
     resolveThread: async () => ({
       resolution: {

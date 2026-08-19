@@ -5,12 +5,18 @@
 - The orchestrator only routes and delegates. Stage skills remain the single source of truth for behavior and artifacts.
 - Every stage and rework round uses a fresh executor. Every review uses a fresh reviewer; follow-up reuse is forbidden.
 - A reviewer may only write its review artifact and core-generated task metadata. Business-code, HEAD, or index changes invalidate the receipt.
-- An active run has one pending delegation. Missing, mismatched, forked, replayed, hook-less, or drifted evidence pauses the run.
+- An active run has one pending delegation. The child must pass the activation barrier before any stage side effect. Missing, late, mismatched, forked, replayed, hook-less, or drifted evidence pauses the run.
 - The first release ends after one existing safely gated `commit`; it does not create a PR, monitor checks, or complete the task.
 
 ## Recovery
 
-`orchestration.json` is the detailed state source. A v2 run persists complete policy, source, and append-only recovery history. Only a v1 run with no pending delegation and zero receipts may be upgraded in place after supplying a complete policy; any historical receipt stays paused because effort is unverifiable. A historical Codex `ORCHESTRATION_CLIENT_UNSUPPORTED` v2 pause appends `CLIENT_CAPABILITY_ENABLED` and resumes only when step count, next stage, baseline, receipts, pending delegation, commit authorization, completion evidence, and commit intent all prove that execution never advanced; unknown or non-empty evidence preserves the pause. Migration is forward-only: old binaries must not advance active v2 runs.
+`orchestration.json` is the detailed state source. A v3 run persists complete policy, append-only recovery, build/contract/hook-source/controller provenance, and activation monotonic timestamps. Historical v2 state is read-compatible, but new Codex delegations require v3. An expired prepared orphan may be explicitly recovered only with the exact task fingerprint, no commit intent or consumed authorization, and no matching unconsumed active lifecycle evidence. Unknown schemas and incomplete active v3 state fail closed.
+
+## Codex Host and Capability
+
+- Direct-host accepts only trusted project or managed lifecycle hooks. A task-bound sandbox requires a controlled nested controller and isolated `CODEX_HOME`; only user hooks bound to that controller context are accepted. Ordinary user/plugin hooks are not evidence.
+- The controller starts a nested loop only after control generation, task binding, Codex version, closed bundle, build/contract manifest, profiles, and hook discovery pass. Both bypass flags are restricted to this task-bound launch path.
+- Every prepare arms a one-use capability attested by the current loop's real PostToolUse. Atomic consumption binds task/session/build/controller and retains only a redacted tombstone.
 
 ## Model Policy
 

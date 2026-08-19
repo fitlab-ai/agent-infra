@@ -84,7 +84,9 @@ function mockPrByNumberClient(pullRequest: unknown): GitHubClient {
     json(args: string[]) {
       const joined = args.join(' ');
       if (/api repos\/o\/r\/pulls\/42/.test(joined)) return { ok: true, value: pullRequest };
-      if (args[1] === 'user') return { ok: true, value: { login: 'codex' } };
+      if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {
+        return { ok: true, value: { data: { viewer: { login: 'codex' } } } };
+      }
       if (args[0] === 'api' && /^repos\/[^/]+\/[^/]+$/.test(args[1] || '')) {
         return { ok: true, value: { full_name: 'o/r', fork: false, permissions: { triage: true, push: true, admin: false } } };
       }

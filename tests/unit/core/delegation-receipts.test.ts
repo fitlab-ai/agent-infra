@@ -5,6 +5,7 @@ import {
   activateDelegation,
   completeDelegationStage,
   consumeDelegation,
+  dispatchDelegation,
   prepareDelegation,
   sealDelegation
 } from '../../../lib/task/delegation-receipts.ts';
@@ -18,16 +19,33 @@ const input = {
   stage: 'review-code' as const,
   round: 1,
   artifact: 'review-code.md',
-  client: 'codex' as const,
+  client: 'claude-code' as const,
   requestedModel: 'review-model',
   requestedReasoningEffort: 'high',
   beforeFingerprint: 'before'
 };
 
-test('delegation receipts follow the one-way lifecycle and reject replay', () => {
-  const prepared = prepareDelegation({ ...input, workspaceSnapshotScope: 'task' }, {
-    id: () => 'delegation-1', now: () => '2026-01-01T00:00:00.000Z'
+function dispatched(receipt: ReturnType<typeof prepareDelegation>) {
+  const result = dispatchDelegation(receipt, {
+    now: () => '2099-01-01T00:00:00.500Z', monotonicNow: () => 10
   });
+  if (!result.ok) throw new Error(result.message);
+  return result.receipt;
+}
+
+const codexProvenance = {
+  protocolVersion: 3, packageVersion: '0.9.7-alpha.0',
+  internalExecutableBuildHash: 'a'.repeat(64), lifecycleContractHash: 'b'.repeat(64),
+  hookDefinitionHash: 'hook-hash', hookSource: 'project' as const,
+  hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64),
+  capabilitySessionId: 'parent-codex', capabilityTurnId: 'parent-turn', capabilityToolUseId: 'capability-tool',
+  controllerInstanceDigest: null, controlGeneration: null
+};
+
+test('delegation receipts follow the one-way lifecycle and reject replay', () => {
+  const prepared = dispatched(prepareDelegation({ ...input, workspaceSnapshotScope: 'task' }, {
+    id: () => 'delegation-1', now: () => '2026-01-01T00:00:00.000Z'
+  }));
   assert.equal(prepared.workspaceSnapshotScope, 'task');
   assert.equal(prepared.hostEvidence, null);
   const activated = activateDelegation(prepared, {
@@ -37,7 +55,7 @@ test('delegation receipts follow the one-way lifecycle and reject replay', () =>
   assert.equal(activated.ok, true);
   if (!activated.ok) return;
   const completed = completeDelegationStage(activated.receipt, {
-    stage: 'review-code', round: 1, artifact: 'review-code.md', agent: 'codex'
+    stage: 'review-code', round: 1, artifact: 'review-code.md', agent: 'claude'
   });
   assert.equal(completed.ok, true);
   if (!completed.ok) return;
@@ -56,18 +74,25 @@ test('delegation receipts follow the one-way lifecycle and reject replay', () =>
 });
 
 test('Codex receipts bind lifecycle evidence revisions through activation and seal', () => {
-  const prepared = prepareDelegation({ ...input, role: 'executor', stage: 'analysis', artifact: 'analysis.md' }, {
+  const prepared = dispatched(prepareDelegation({
+    ...input, client: 'codex', role: 'executor', stage: 'analysis', artifact: 'analysis.md',
+    lifecycleProvenance: codexProvenance
+  }, {
     id: () => 'delegation-codex', now: () => '2026-08-14T00:00:00.000Z'
-  });
+  }));
   const activated = activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-codex', parentId: 'parent-codex',
     spawnMode: 'fresh', actualModel: 'review-model', actualReasoningEffort: 'high',
-    hostEvidence: { kind: 'codex-lifecycle-v1', hookDefinitionHash: 'hook-hash', startRevision: 4 }
-  }, { now: () => '2026-08-14T00:00:01.000Z' });
+    hostEvidence: {
+      kind: 'codex-lifecycle-v2', startRevision: 4, ...codexProvenance,
+      spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:00.500Z'
+    }
+  }, { now: () => '2099-01-01T00:00:01.000Z' });
   assert.equal(activated.ok, true);
   if (!activated.ok) return;
   assert.deepEqual(activated.receipt.hostEvidence, {
-    kind: 'codex-lifecycle-v1', hookDefinitionHash: 'hook-hash', startRevision: 4,
+    kind: 'codex-lifecycle-v2', startRevision: 4, ...codexProvenance,
+    spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:00.500Z',
     stopRevision: null, consumer: null, consumedAt: null
   });
 
@@ -83,13 +108,74 @@ test('Codex receipts bind lifecycle evidence revisions through activation and se
   assert.equal(sealed.ok, true);
   if (!sealed.ok) return;
   assert.deepEqual(sealed.receipt.hostEvidence, {
-    kind: 'codex-lifecycle-v1', hookDefinitionHash: 'hook-hash', startRevision: 4,
+    kind: 'codex-lifecycle-v2', startRevision: 4, ...codexProvenance,
+    spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:00.500Z',
     stopRevision: 7, consumer: 'delegation-codex', consumedAt: '2026-08-14T00:00:02.000Z'
   });
 });
 
+test('Codex receipts reject generic hook evidence and cross-session capability reuse', () => {
+  const prepared = dispatched(prepareDelegation({
+    ...input,
+    client: 'codex',
+    lifecycleProvenance: codexProvenance
+  }, { id: () => 'delegation-codex-negative' }));
+  const base = {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-codex-negative',
+    parentId: 'parent-codex', spawnMode: 'fresh', actualModel: 'review-model',
+    actualReasoningEffort: 'high'
+  };
+  assert.equal(activateDelegation(prepared, base).code, 'DELEGATION_HOST_EVIDENCE_REQUIRED');
+  assert.equal(activateDelegation(prepared, {
+    ...base,
+    hostEvidence: { kind: 'codex-lifecycle-v1', hookDefinitionHash: 'hook-hash', startRevision: 1 }
+  }).code, 'DELEGATION_HOST_EVIDENCE_REQUIRED');
+  assert.equal(activateDelegation(prepared, {
+    ...base,
+    parentId: 'stolen-session',
+    hostEvidence: { kind: 'codex-lifecycle-v2', startRevision: 1, ...codexProvenance }
+  }).code, 'DELEGATION_HOST_EVIDENCE_INVALID');
+  assert.equal(activateDelegation(prepared, {
+    ...base,
+    hostEvidence: {
+      kind: 'codex-lifecycle-v2', startRevision: 1, ...codexProvenance,
+      spawnToolUseId: codexProvenance.capabilityToolUseId,
+      spawnObservedAt: '2099-01-01T00:00:00.500Z'
+    }
+  }).code, 'DELEGATION_HOST_EVIDENCE_INVALID');
+  assert.equal(activateDelegation(prepared, {
+    ...base,
+    hostEvidence: {
+      kind: 'codex-lifecycle-v2', startRevision: 1, ...codexProvenance,
+      spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:00.499Z'
+    }
+  }, { now: () => '2099-01-01T00:00:01.000Z' }).code, 'DELEGATION_HOST_EVIDENCE_INVALID');
+  assert.equal(activateDelegation(prepared, {
+    ...base,
+    hostEvidence: {
+      kind: 'codex-lifecycle-v2', startRevision: 1, ...codexProvenance,
+      spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:15.501Z'
+    }
+  }, { now: () => '2099-01-01T00:00:01.000Z' }).code, 'DELEGATION_HOST_EVIDENCE_INVALID');
+});
+
+test('legacy prepared receipts fail closed before activation and can be dispatched safely', () => {
+  const current = prepareDelegation(input, { id: () => 'delegation-legacy' });
+  const legacy = { ...current } as Record<string, unknown>;
+  delete legacy.spawnDispatchMonotonicMs;
+  delete legacy.activationDeadlineMonotonicMs;
+  delete legacy.spawnDispatchedAt;
+  delete legacy.activationDeadlineAt;
+
+  assert.equal(activateDelegation(legacy as typeof current, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'legacy-child', parentId: 'legacy-parent',
+    spawnMode: 'fresh', actualModel: 'review-model', actualReasoningEffort: 'high'
+  }).code, 'DELEGATION_NOT_DISPATCHED');
+  assert.equal(dispatchDelegation(legacy as typeof current).ok, true);
+});
+
 test('managed identities fail closed while unrelated subagents are ignored', () => {
-  const prepared = prepareDelegation(input, { id: () => 'delegation-2' });
+  const prepared = dispatched(prepareDelegation(input, { id: () => 'delegation-2' }));
   assert.deepEqual(activateDelegation(prepared, {
     nativeAgent: 'general-purpose', childId: 'child-2', parentId: 'parent-1', spawnMode: 'fresh'
   }), { ok: false, code: 'DELEGATION_IGNORED', message: "subagent 'general-purpose' is not lifecycle-managed" });
@@ -105,7 +191,7 @@ test('managed identities fail closed while unrelated subagents are ignored', () 
 });
 
 test('activation requires host-observed model identity and records justified fallback', () => {
-  const prepared = prepareDelegation(input, { id: () => 'delegation-model' });
+  const prepared = dispatched(prepareDelegation(input, { id: () => 'delegation-model' }));
   const event = {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-model',
     parentId: 'parent-model', spawnMode: 'fresh'
@@ -129,7 +215,7 @@ test('activation requires host-observed model identity and records justified fal
 });
 
 test('claude-code receipt accepts the normalized short agent claude', () => {
-  const prepared = prepareDelegation({ ...input, client: 'claude-code' }, { id: () => 'delegation-cc' });
+  const prepared = dispatched(prepareDelegation({ ...input, client: 'claude-code' }, { id: () => 'delegation-cc' }));
   const activated = activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-cc', parentId: 'parent-1',
     spawnMode: 'fresh', actualModel: 'review-model', actualReasoningEffort: 'high'
@@ -148,17 +234,24 @@ test('claude-code receipt accepts the normalized short agent claude', () => {
 
 test('stage completion accepts the normalized activity token for every registered client', () => {
   for (const adapter of listAgentClientAdapters()) {
-    const prepared = prepareDelegation(
-      { ...input, client: adapter.id },
+    const prepared = dispatched(prepareDelegation(
+      { ...input, client: adapter.id, ...(adapter.id === 'codex' ? { lifecycleProvenance: {
+        ...codexProvenance, capabilitySessionId: 'parent-1'
+      } } : {}) },
       { id: () => `delegation-${adapter.id}` }
-    );
+    ));
     const activated = activateDelegation(prepared, {
       nativeAgent: 'agent-infra-lifecycle-reviewer',
       childId: `child-${adapter.id}`,
       parentId: 'parent-1',
       spawnMode: 'fresh',
       actualModel: 'review-model',
-      actualReasoningEffort: 'high'
+      actualReasoningEffort: 'high',
+      ...(adapter.id === 'codex' ? { hostEvidence: {
+        kind: 'codex-lifecycle-v2' as const, startRevision: 1,
+        ...codexProvenance, capabilitySessionId: 'parent-1', spawnToolUseId: 'spawn-tool',
+        spawnObservedAt: '2099-01-01T00:00:00.500Z'
+      } } : {})
     });
     assert.equal(activated.ok, true, adapter.id);
     if (!activated.ok) continue;
@@ -175,10 +268,10 @@ test('stage completion accepts the normalized activity token for every registere
 });
 
 test('stage completion rejects cross-client and unknown activity tokens', () => {
-  const prepared = prepareDelegation(
+  const prepared = dispatched(prepareDelegation(
     { ...input, client: 'claude-code' },
     { id: () => 'delegation-agent-mismatch' }
-  );
+  ));
   const activated = activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-reviewer',
     childId: 'child-agent-mismatch',
@@ -203,7 +296,7 @@ test('stage completion rejects cross-client and unknown activity tokens', () => 
 });
 
 test('reviewer write gate rejects shared, non-allowlisted task, and cross-task paths', () => {
-  const prepared = prepareDelegation(input, { id: () => 'delegation-3' });
+  const prepared = dispatched(prepareDelegation(input, { id: () => 'delegation-3' }));
   const activated = activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-3', parentId: 'parent-1',
     spawnMode: 'fresh', actualModel: 'review-model', actualReasoningEffort: 'high'
@@ -211,7 +304,7 @@ test('reviewer write gate rejects shared, non-allowlisted task, and cross-task p
   assert.equal(activated.ok, true);
   if (!activated.ok) return;
   const completed = completeDelegationStage(activated.receipt, {
-    stage: 'review-code', round: 1, artifact: 'review-code.md', agent: 'codex'
+    stage: 'review-code', round: 1, artifact: 'review-code.md', agent: 'claude'
   });
   assert.equal(completed.ok, true);
   if (!completed.ok) return;

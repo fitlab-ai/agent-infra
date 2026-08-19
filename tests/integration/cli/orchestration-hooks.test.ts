@@ -3,12 +3,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import { envWithPrependedPath, writeNodeCommandShim } from '../../helpers.ts';
 
 const HOOK = path.resolve('.agents/hooks/lifecycle-delegation.js');
 const FIXTURES = path.resolve('tests/fixtures/lifecycle-hooks');
+const fixtureRoots = new Set<string>();
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
 
 interface RunOptions {
   client?: string;
@@ -34,6 +38,7 @@ function run(input: string, options: RunOptions = {}) {
 
 function createHookFixture(localCliState: LocalCliState) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-hook-'));
+  fixtureRoots.add(root);
   const repoDir = path.join(root, 'repo');
   const hook = path.join(repoDir, '.agents', 'hooks', 'lifecycle-delegation.js');
   const cwd = path.join(repoDir, 'nested');
@@ -253,4 +258,23 @@ test('lifecycle hook forwards completed Codex waits and ignores timed out waits'
   }), { ...fixture, client: 'codex', event: 'post-tool', hook: fixture.hook });
   assert.equal(timedOut.status, 0, timedOut.stderr);
   assert.equal(timedOut.stdout, '');
+});
+
+test('Codex PostToolUse forwards a current-loop capability marker from an ordinary tool response', () => {
+  const fixture = createHookFixture('working');
+  const token = 'abcdefghijklmnopqrstuvwxyz0123456789_TOKEN';
+  const result = run(JSON.stringify({
+    hook_event_name: 'PostToolUse',
+    session_id: 'codex-parent',
+    turn_id: 'capability-turn',
+    tool_use_id: 'capability-tool',
+    tool_name: 'functions.exec',
+    tool_input: {},
+    tool_response: { content: [{ text: `agent-infra-codex-capability:${token}` }] }
+  }), { ...fixture, client: 'codex', event: 'post-tool', hook: fixture.hook });
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.input.capabilityToken, token);
+  assert.equal(parsed.input.sessionId, 'codex-parent');
+  assert.equal(parsed.input.toolUseId, 'capability-tool');
 });

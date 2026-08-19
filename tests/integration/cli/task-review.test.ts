@@ -101,7 +101,7 @@ test('orchestrated finalization dry-run reports a mismatch without pausing the r
   );
   const runPath = path.join(f.dir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: 'running',
     pendingDelegation: { status: 'prepared' }
   }, null, 2)}\n`);
@@ -128,7 +128,7 @@ test('standalone finalization ignores a historical run without a pending delegat
   );
   const runPath = path.join(f.dir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: 'completed',
     pendingDelegation: null
   }, null, 2)}\n`);
@@ -151,7 +151,7 @@ test('standalone finalization fails before writing when a delegation is pending'
   );
   const runPath = path.join(f.dir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: 'running',
     pendingDelegation: { status: 'activated' }
   }, null, 2)}\n`);
@@ -177,7 +177,7 @@ test('orchestrated finalization accepts one matching activated delegation withou
   );
   const runPath = path.join(f.dir, 'orchestration.json');
   fs.writeFileSync(runPath, `${JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     taskId: TASK_ID,
     runId: 'run-1',
     status: 'running',

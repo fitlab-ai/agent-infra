@@ -141,8 +141,8 @@ test('publish accepts a matching digest and rejects unreadable files before plat
   const client: GitHubClient = {
     version: () => ({ ok: true, value: '2.16.0' }),
     json(args) {
-      if (args[0] === 'api' && args[1] === 'user') {
-        return { ok: true, value: { login: 'tester' } } as never;
+      if (args[0] === 'api' && args[1] === 'graphql') {
+        return { ok: true, value: { data: { viewer: { login: 'tester' } } } } as never;
       }
       if (args[0] === 'api') {
         return {

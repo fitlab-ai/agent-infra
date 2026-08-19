@@ -4,12 +4,15 @@ import {
   activateMatchingOrchestrationDelegation,
   activateOrchestrationDelegation,
   advanceOrchestration,
+  awaitOrchestrationDelegationActivation,
   beginCommitIntent,
   beginOrResumeOrchestration,
   checkpointCommitIntent,
   completeCommitIntent,
+  dispatchOrchestrationDelegation,
   pauseOrchestration,
   recoverCommitIntent,
+  recoverPreparedOrchestrationDelegation,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation,
@@ -22,7 +25,7 @@ import { prepareCodexOrchestrationDelegation } from '../task/codex-orchestration
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 
-const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|hook-start|hook-stop|advance|pause|status|commit-start|commit-begin|commit-checkpoint|commit-complete|commit-recover|commit-abort|commit-terminate|commit-status> [options]\n';
+const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|dispatch|await-activation|recover-prepared|hook-start|hook-stop|advance|pause|status|commit-start|commit-begin|commit-checkpoint|commit-complete|commit-recover|commit-abort|commit-terminate|commit-status> [options]\n';
 
 function usageFailure(message: string): void {
   process.stdout.write(`${JSON.stringify({
@@ -44,7 +47,8 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
   }
   const [taskRef, intent] = args;
   if (![
-    'begin-or-resume', 'route', 'prepare', 'hook-start', 'hook-stop', 'advance', 'pause', 'status',
+    'begin-or-resume', 'route', 'prepare', 'dispatch', 'await-activation', 'recover-prepared',
+    'hook-start', 'hook-stop', 'advance', 'pause', 'status',
     'commit-start', 'commit-begin', 'commit-checkpoint', 'commit-complete', 'commit-recover', 'commit-abort', 'commit-terminate', 'commit-status'
   ].includes(intent!)) {
     usageFailure(`unknown intent '${intent}'`);
@@ -64,7 +68,9 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
     if (![
       '--max-steps', '--executor-model', '--executor-reasoning-effort',
       '--reviewer-model', '--reviewer-reasoning-effort',
-      '--client', '--requested-model', '--requested-reasoning-effort', '--parent-id', '--before-fingerprint',
+      '--client', '--requested-model', '--requested-reasoning-effort', '--capability-token',
+      '--parent-id', '--before-fingerprint',
+      '--stage', '--round', '--artifact', '--role',
       '--native-agent', '--child-id', '--spawn-mode', '--actual-model', '--actual-reasoning-effort',
       '--model-fallback-reason', '--reasoning-effort-fallback-reason',
       '--exit-code', '--after-fingerprint', '--changed-paths', '--code', '--message', '--recoverable', '--agent',
@@ -215,8 +221,29 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
     result = await prepareCodexOrchestrationDelegation(taskRef!, {
       client: values['--client'] as AgentClientId,
       requestedModel: values['--requested-model'],
-      requestedReasoningEffort: values['--requested-reasoning-effort']
+      requestedReasoningEffort: values['--requested-reasoning-effort'],
+      capabilityToken: values['--capability-token']
     }, { orchestrationOptions: coreOptions });
+  } else if (intent === 'dispatch') {
+    result = dispatchOrchestrationDelegation(taskRef!, coreOptions);
+  } else if (intent === 'await-activation') {
+    const missing = requireValues(['--stage', '--round', '--artifact', '--role']);
+    if (missing) { usageFailure(`intent 'await-activation' requires '${missing}'`); return; }
+    const round = Number(values['--round']);
+    if (!Number.isSafeInteger(round) || round < 1) {
+      usageFailure('--round must be a positive integer'); return;
+    }
+    if (!['executor', 'reviewer'].includes(values['--role']!)) {
+      usageFailure('--role must be executor or reviewer'); return;
+    }
+    result = await awaitOrchestrationDelegationActivation(taskRef!, {
+      stage: values['--stage'] as Parameters<typeof awaitOrchestrationDelegationActivation>[1]['stage'],
+      round,
+      artifact: values['--artifact']!,
+      role: values['--role'] as 'executor' | 'reviewer'
+    }, coreOptions);
+  } else if (intent === 'recover-prepared') {
+    result = recoverPreparedOrchestrationDelegation(taskRef!, coreOptions);
   } else if (intent === 'hook-start') {
     const missing = requireValues([
       ...(taskRef === 'auto' ? ['--client'] : []),

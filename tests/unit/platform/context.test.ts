@@ -27,10 +27,12 @@ test('platform context resolves fork parent and separated capabilities', () => {
       version() { return { ok: true, value: '2.16.0' }; },
       json(args) {
         requested.push(args.join(' '));
+        if (args[1] === 'graphql') {
+          return { ok: true, value: { data: { viewer: { login: 'contributor' } } } };
+        }
         if (args.at(-1) === 'repos/contributor/widgets') {
           return { ok: true, value: { fork: true, parent: { full_name: 'acme/widgets' } } };
         }
-        if (args.at(-1) === 'user') return { ok: true, value: { login: 'contributor' } };
         return { ok: true, value: { permissions: { pull: true, triage: true, push: false, admin: false } } };
       }
     }
@@ -43,6 +45,7 @@ test('platform context resolves fork parent and separated capabilities', () => {
     authenticated: true, comment: true, triage: true, push: false, admin: false
   });
   assert.ok(requested.some((entry) => entry.endsWith('repos/acme/widgets')));
+  assert.ok(requested.some((entry) => entry.startsWith('api graphql ')));
 });
 
 test('platform context reports a fully resolved read-only probe as no-op', () => {
@@ -53,7 +56,9 @@ test('platform context reports a fully resolved read-only probe as no-op', () =>
     client: {
       version() { return { ok: true, value: '2.16.0' }; },
       json(args) {
-        if (args.at(-1) === 'user') return { ok: true, value: { login: 'maintainer' } };
+        if (args[1] === 'graphql') {
+          return { ok: true, value: { data: { viewer: { login: 'maintainer' } } } };
+        }
         if (args.at(-1) === 'repos/acme/widgets') {
           return { ok: true, value: {
             full_name: 'acme/widgets', permissions: { triage: true, push: true, admin: true }

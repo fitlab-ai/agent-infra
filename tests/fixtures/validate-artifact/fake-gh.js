@@ -84,11 +84,6 @@ if (args[0] === "label" && args[1] === "list") {
   process.exit(0);
 }
 
-if (args[0] === "api" && args[1] === "user") {
-  process.stdout.write(JSON.stringify({ login: process.env.GH_FAKE_USER || "fixture-user" }));
-  process.exit(0);
-}
-
 if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/pulls\/\d+$/.test(args[1])) {
   const stored = readJson("GH_FAKE_PR_PATH") || {};
   const match = args[1].match(/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/);
@@ -211,6 +206,10 @@ if (args[0] === "api" && args[1] && /repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(arg
 }
 
 if (args[0] === "api" && args[1] === "graphql") {
+  if (args.some((arg) => arg.includes("viewer { login }"))) {
+    process.stdout.write(JSON.stringify({ data: { viewer: { login: process.env.GH_FAKE_USER || "fixture-user" } } }));
+    process.exit(0);
+  }
   if (process.env.GH_FAKE_CLOSING_PRS_PATH && args.some((arg) => arg.includes("closedByPullRequestsReferences"))) {
     const pages = readJson("GH_FAKE_CLOSING_PRS_PATH") || [];
     const cursorArgument = args.find((arg) => arg.startsWith("cursor="));
