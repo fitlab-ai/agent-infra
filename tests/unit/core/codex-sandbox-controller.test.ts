@@ -81,8 +81,16 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
   assert.equal(prepared.env.AGENT_INFRA_CONTROL_TOKEN, 'control-token');
   assert.match(fs.readFileSync(path.join(prepared.home, 'bin', 'agent-infra-internal'), 'utf8'), /"\$@"/u);
   assert.doesNotMatch(fs.readFileSync(path.join(prepared.home, 'bin', 'agent-infra-internal'), 'utf8'), /"\\\$@"/u);
-  assert.equal(fs.statSync(prepared.home).mode & 0o777, 0o700);
-  assert.equal(fs.statSync(path.join(prepared.home, 'auth.json')).mode & 0o777, 0o600);
+  const homeStat = fs.lstatSync(prepared.home);
+  const authStat = fs.lstatSync(path.join(prepared.home, 'auth.json'));
+  assert.equal(homeStat.isDirectory(), true);
+  assert.equal(homeStat.isSymbolicLink(), false);
+  assert.equal(authStat.isFile(), true);
+  assert.equal(authStat.isSymbolicLink(), false);
+  if (process.platform !== 'win32') {
+    assert.equal(homeStat.mode & 0o777, 0o700);
+    assert.equal(authStat.mode & 0o777, 0o600);
+  }
   assert.equal(fs.existsSync(path.join(prepared.home, 'history.jsonl')), false);
   assert.equal(prepared.context.taskId, 'TASK-20260101-000001');
   prepared.cleanup();
