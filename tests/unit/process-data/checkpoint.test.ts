@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { onPlatforms } from '../../helpers.ts';
 import {
   acquireGitHubCheckpoint,
   commitGitHubCheckpoint,
@@ -70,7 +71,7 @@ test('checkpoint is single-writer, owner-specific, and committed atomically', ()
   if (second.ok) releaseGitHubCheckpoint(second.value);
 });
 
-test('checkpoint recovery promotes a verified candidate over an existing expected-old head', () => {
+test('checkpoint recovery promotes a verified candidate over an existing expected-old head', onPlatforms('linux'), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-recovery-'));
   const paths = checkpointPaths(root, 'acme/demo');
   const published = publishEmptyBase(root);
@@ -105,7 +106,7 @@ test('checkpoint recovery promotes a verified candidate over an existing expecte
   releaseGitHubCheckpoint(acquired.value);
 });
 
-test('checkpoint recovery rejects a candidate whose derived snapshot is corrupt', () => {
+test('checkpoint recovery rejects a candidate whose derived snapshot is corrupt', onPlatforms('linux'), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-corrupt-recovery-'));
   const paths = checkpointPaths(root, 'acme/demo');
   const published = publishEmptyBase(root);
@@ -130,7 +131,7 @@ test('checkpoint recovery rejects a candidate whose derived snapshot is corrupt'
   assert.equal(fs.existsSync(candidatePath), false);
 });
 
-test('checkpoint recovery rejects a verified snapshot with a mismatched watermark', () => {
+test('checkpoint recovery rejects a verified snapshot with a mismatched watermark', onPlatforms('linux'), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-watermark-recovery-'));
   const paths = checkpointPaths(root, 'acme/demo');
   const published = publishEmptyBase(root);
@@ -154,7 +155,7 @@ test('checkpoint recovery rejects a verified snapshot with a mismatched watermar
   assert.equal(fs.existsSync(candidatePath), false);
 });
 
-test('checkpoint recovery rejects a candidate owned by a different stale lock', () => {
+test('checkpoint recovery rejects a candidate owned by a different stale lock', onPlatforms('linux'), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-owner-recovery-'));
   const paths = checkpointPaths(root, 'acme/demo');
   const published = publishEmptyBase(root);
@@ -186,7 +187,7 @@ test('checkpoint recovery rejects a candidate owned by a different stale lock', 
   assert.equal(fs.existsSync(candidatePath), false);
 });
 
-test('checkpoint recovery rejects an ownerless legacy candidate without a canonical head', () => {
+test('checkpoint recovery rejects an ownerless legacy candidate without a canonical head', onPlatforms('linux'), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'process-data-checkpoint-ownerless-recovery-'));
   const paths = checkpointPaths(root, 'acme/demo');
   const published = publishEmptyBase(root);
