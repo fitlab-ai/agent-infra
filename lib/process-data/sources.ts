@@ -9,6 +9,7 @@ import { canonicalJsonBytes, sha256 } from './store.ts';
 import type { GitHubClient } from '../platform/github-client.ts';
 import type {
   CapturedObject,
+  EndpointQueryMode,
   ProcessResult,
   RestCollectionEvidence,
   RestPageEvidence
@@ -29,6 +30,33 @@ type GitHubCapture = {
   repository: string;
   objects: CapturedObject[];
   endpoints: RestCollectionEvidence[];
+};
+
+type GitHubBoundaryCapture = {
+  repository: string;
+  preflightDate: string;
+  watermark: string;
+  objects: CapturedObject[];
+  endpoints: RestCollectionEvidence[];
+  responseDates: string[];
+  deferred: string[];
+  unavailable: string[];
+};
+
+type BoundaryCaptureOptions = {
+  client?: GitHubClient;
+  fromInclusive?: string | null;
+  reconciliation?: 'incremental' | 'full';
+};
+
+type EndpointDescriptor = {
+  path: string;
+  queryMode: EndpointQueryMode;
+  eventTime: (item: unknown) => string | undefined;
+  identity: (item: unknown) => string;
+  parentIdentity?: string;
+  maxItems?: number;
+  includeResource?: (item: unknown) => boolean;
 };
 
 function endpointForPage(endpoint: string, page: number, perPage: number): string {
@@ -294,6 +322,38 @@ function projectGitHubItem(item: unknown): unknown {
   return output;
 }
 
+function projectGitHubTimelineItem(item: unknown): unknown {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('GitHub timeline item must be an object');
+  const source = item as Record<string, unknown>;
+  if (typeof source.event !== 'string' || source.event.length === 0) throw new Error('GitHub timeline event type is missing');
+  const output: Record<string, unknown> = {};
+  for (const field of [
+    'id', 'node_id', 'event', 'created_at', 'updated_at', 'submitted_at', 'commit_id', 'sha', 'state',
+    'lock_reason', 'ref', 'ref_type'
+  ]) {
+    if (source[field] !== undefined) output[field] = jsonClone(source[field]);
+  }
+  for (const field of ['actor', 'user', 'assignee', 'assigner', 'reviewer', 'requested_reviewer']) {
+    const projected = projectFields(source[field], ['id', 'login', 'name']);
+    if (projected) output[field] = projected;
+  }
+  const nestedFields: Record<string, string[]> = {
+    label: ['id', 'name', 'color'],
+    milestone: ['id', 'number', 'title', 'state'],
+    rename: ['from', 'to'],
+    source: ['id', 'node_id', 'number', 'title', 'ref', 'sha'],
+    dismissed_review: ['state', 'review_id', 'dismissal_commit_id'],
+    project_card: ['id', 'project_id', 'column_name']
+  };
+  for (const [field, fields] of Object.entries(nestedFields)) {
+    const projected = projectFields(source[field], fields);
+    if (projected) output[field] = projected;
+  }
+  const body = projectSensitiveText(source.body);
+  if (body !== undefined) output.body = body;
+  return output;
+}
+
 function collectGitHubObjects(repoRoot: string, client: GitHubClient = createGitHubClient()): ProcessResult<GitHubCapture> {
   const repoResult = client.json<{ nameWithOwner?: string }>(['repo', 'view', '--json', 'nameWithOwner'], { cwd: repoRoot });
   if (!repoResult.ok) return { ok: false, error: repoResult.error };
@@ -350,5 +410,392 @@ function collectGitHubObjects(repoRoot: string, client: GitHubClient = createGit
   return { ok: true, value: { repository, objects, endpoints: evidence } };
 }
 
-export { collectGitHubObjects, collectLocalObjects, fetchRestCollection, projectGitHubItem };
-export type { FetchRestCollectionOptions, GitHubCapture, RestCollection };
+function resolveGitHubRepository(repoRoot: string, client: GitHubClient = createGitHubClient()): ProcessResult<string> {
+  const result = client.json<{ nameWithOwner?: string }>(['repo', 'view', '--json', 'nameWithOwner'], { cwd: repoRoot });
+  if (!result.ok) return { ok: false, error: result.error };
+  if (!result.value.nameWithOwner || !/^[^/]+\/[^/]+$/.test(result.value.nameWithOwner)) {
+    return { ok: false, error: { code: 'INVALID_PLATFORM_RESPONSE', message: 'GitHub repository identity is missing' } };
+  }
+  return { ok: true, value: result.value.nameWithOwner };
+}
+
+function truncateSecond(date: Date): string {
+  return new Date(Math.floor(date.getTime() / 1000) * 1000).toISOString();
+}
+
+function validDate(value: string | undefined): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function queryEndpoint(endpoint: string, page: number, perPage: number, queryMode: EndpointQueryMode, queryAfter: string | null): string {
+  const parsed = new URL(endpoint, 'https://api.github.invalid/');
+  parsed.searchParams.set('per_page', String(perPage));
+  parsed.searchParams.set('page', String(page));
+  if (queryMode === 'strict-since' && queryAfter) parsed.searchParams.set('since', queryAfter);
+  return `${parsed.pathname.replace(/^\//, '')}${parsed.search}`;
+}
+
+function resourceIdentity(prefix: string, item: unknown): string {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return '';
+  const value = item as Record<string, unknown>;
+  if (typeof value.id === 'number' || typeof value.id === 'string') return `${prefix}:${String(value.id)}`;
+  if (typeof value.node_id === 'string') return `${prefix}:${value.node_id}`;
+  if (typeof value.sha === 'string') return `${prefix}:${value.sha}`;
+  if (typeof value.number === 'number') return `${prefix}:${value.number}`;
+  return '';
+}
+
+function issueOrPullIdentity(item: unknown): string {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return '';
+  const value = item as Record<string, unknown>;
+  const prefix = value.pull_request ? 'pr' : 'issue';
+  return resourceIdentity(prefix, item);
+}
+
+function isPullRequestIssue(item: unknown): boolean {
+  return Boolean(item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).pull_request);
+}
+
+function itemEventTime(item: unknown): string | undefined {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+  const value = item as Record<string, unknown>;
+  for (const key of ['updated_at', 'created_at', 'submitted_at']) {
+    if (typeof value[key] === 'string') return value[key];
+  }
+  const commit = value.commit as Record<string, unknown> | undefined;
+  const author = commit?.author as Record<string, unknown> | undefined;
+  const committer = commit?.committer as Record<string, unknown> | undefined;
+  if (typeof author?.date === 'string') return author.date;
+  if (typeof committer?.date === 'string') return committer.date;
+  return undefined;
+}
+
+function timelineIdentity(item: unknown, parentNumber?: string): string {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return '';
+  const value = item as Record<string, unknown>;
+  if (typeof value.id === 'number' || typeof value.id === 'string') return `timeline:${String(value.id)}`;
+  const actor = value.actor as Record<string, unknown> | undefined;
+  const target = value.issue as Record<string, unknown> | undefined;
+  const tuple = [parentNumber, value.event, value.created_at ?? value.updated_at, actor?.id ?? actor?.login, target?.id ?? value.commit_id];
+  return tuple.every((part) => part !== undefined && part !== null && String(part) !== '') ? `timeline:${tuple.join(':')}` : '';
+}
+
+function descriptor(
+  pathname: string,
+  queryMode: EndpointQueryMode,
+  prefix: string,
+  identity?: (item: unknown) => string,
+  options: Pick<EndpointDescriptor, 'parentIdentity' | 'maxItems' | 'includeResource'> = {}
+): EndpointDescriptor {
+  return {
+    path: pathname,
+    queryMode,
+    eventTime: itemEventTime,
+    identity: identity ?? ((item) => resourceIdentity(prefix, item)),
+    ...options
+  };
+}
+
+function responseDateOrError(value: string | undefined): ProcessResult<{ date: Date; iso: string }> {
+  const date = validDate(value);
+  if (!date) return { ok: false, error: { code: 'OBSERVATION_BOUNDARY_INVALID', message: 'GitHub response Date is missing or invalid' } };
+  return { ok: true, value: { date, iso: date.toISOString() } };
+}
+
+function collectBoundaryCollection(
+  client: GitHubClient,
+  endpoint: EndpointDescriptor,
+  preflight: Date,
+  fromInclusive: Date | null,
+  watermark: Date,
+  reconciliation: 'incremental' | 'full',
+  addResource: (object: CapturedObject, identity: string, eventTime: string) => ProcessResult<void>,
+  deferred: Set<string>,
+  responseDates: string[]
+): ProcessResult<RestCollectionEvidence> {
+  const perPage = 100;
+  const queryMode = reconciliation === 'full' ? 'full-enumeration' : (fromInclusive ? endpoint.queryMode : 'full-enumeration');
+  const queryAfter = queryMode === 'strict-since' && fromInclusive
+    ? new Date(fromInclusive.getTime() - 1000).toISOString()
+    : null;
+  const pages: RestPageEvidence[] = [];
+  const objects: CapturedObject[] = [];
+  const identities = new Set<string>();
+  let previousHash: string | null = null;
+
+  for (let page = 1; ; page += 1) {
+    const url = queryEndpoint(endpoint.path, page, perPage, queryMode, queryAfter);
+    if (!client.jsonWithMetadata) {
+      return { ok: false, error: { code: 'PLATFORM_METADATA_UNAVAILABLE', message: 'GitHub response metadata boundary is unavailable' } };
+    }
+    const response = client.jsonWithMetadata<unknown>(['api', url]);
+    if (!response.ok) return { ok: false, error: response.error };
+    const dateResult = responseDateOrError(response.value.metadata.date);
+    if (!dateResult.ok) return dateResult;
+    if (dateResult.value.date.getTime() < preflight.getTime()) {
+      return { ok: false, error: { code: 'OBSERVATION_BOUNDARY_INVALID', message: `Response Date precedes preflight for ${endpoint.path}` } };
+    }
+    responseDates.push(dateResult.value.iso);
+    const actualUrl = response.value.metadata.requestUrl;
+    if (queryAfter && (!actualUrl.includes(`since=${encodeURIComponent(queryAfter)}`) && !actualUrl.includes(`since=${queryAfter}`))) {
+      return { ok: false, error: { code: 'QUERY_BOUNDARY_INVALID', message: `GitHub request did not include since=${queryAfter}` } };
+    }
+    if (!Array.isArray(response.value.value) || response.value.value.length > perPage) {
+      return { ok: false, error: { code: 'INVALID_PLATFORM_RESPONSE', message: `GitHub page ${page} is not a valid array page` } };
+    }
+    const selected = (response.value.value as unknown[]).map((item) => endpoint.path.includes('/timeline')
+      ? projectGitHubTimelineItem(item)
+      : projectGitHubItem(item));
+    const bytes = canonicalJsonBytes(selected);
+    const pageHash = sha256(bytes);
+    if (previousHash === pageHash && selected.length > 0) {
+      return { ok: false, error: { code: 'PAGINATION_UNSTABLE', message: `GitHub page ${page} repeats the previous page` } };
+    }
+    let overlapItemCount = 0;
+    let acceptedItemCount = 0;
+    let deferredItemCount = 0;
+    for (let index = 0; index < response.value.value.length; index += 1) {
+      const raw = response.value.value[index];
+      const projected = selected[index];
+      const identity = endpoint.identity(raw);
+      const eventTime = endpoint.eventTime(raw);
+      if (!identity) return { ok: false, error: { code: endpoint.path.includes('/timeline') ? 'TIMELINE_IDENTITY_UNAVAILABLE' : 'RESOURCE_IDENTITY_UNAVAILABLE', message: `Stable identity is missing for ${endpoint.path}` } };
+      if (!eventTime || !validDate(eventTime)) return { ok: false, error: { code: 'RESOURCE_TIME_UNAVAILABLE', message: `Event time is missing for ${identity}` } };
+      if (identities.has(identity)) return { ok: false, error: { code: 'PAGINATION_UNSTABLE', message: `duplicate identity on ${endpoint.path}` } };
+      identities.add(identity);
+      const observed = validDate(eventTime)!;
+      if (fromInclusive && observed.getTime() < fromInclusive.getTime()) {
+        overlapItemCount += 1;
+      } else if (observed.getTime() >= watermark.getTime()) {
+        deferredItemCount += 1;
+        if (endpoint.includeResource?.(raw) !== false) deferred.add(identity);
+      } else {
+        acceptedItemCount += 1;
+        if (endpoint.includeResource?.(raw) === false) continue;
+        const resourceBytes = canonicalJsonBytes(projected);
+        const rawRecord = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+        const routeNumber = typeof rawRecord.number === 'number' ? rawRecord.number : undefined;
+        const added = addResource({
+          sourceKind: 'github-rest',
+          sourceIdentity: identity,
+          resourceIdentity: identity,
+          sha256: sha256(resourceBytes),
+          bytes: resourceBytes.length,
+          content: resourceBytes.toString('utf8'),
+          disposition: { state: 'included' },
+          role: 'resource',
+          eventTime,
+          ...(routeNumber !== undefined ? { routeNumber } : {}),
+          ...(endpoint.parentIdentity ? { parentIdentity: endpoint.parentIdentity } : {}),
+          pageSha256: pageHash
+        }, identity, eventTime);
+        if (!added.ok) return added;
+      }
+    }
+    const pageEvidence: RestPageEvidence = {
+      index: page,
+      itemCount: response.value.value.length,
+      canonicalSha256: pageHash,
+      queryMode,
+      ...(queryAfter ? { requestedSince: queryAfter } : {}),
+      responseDate: dateResult.value.iso,
+      overlapItemCount,
+      acceptedItemCount,
+      deferredItemCount
+    };
+    pages.push(pageEvidence);
+    objects.push({
+      sourceKind: 'github-rest',
+      sourceIdentity: `${endpoint.path}#page=${page}`,
+      sha256: pageHash,
+      bytes: bytes.length,
+      content: bytes.toString('utf8'),
+      disposition: { state: 'included' },
+      role: 'page-evidence',
+      endpoint: endpoint.path,
+      page,
+      queryMode,
+      ...(queryAfter ? { requestedSince: queryAfter } : {}),
+      responseDate: dateResult.value.iso
+    });
+    previousHash = pageHash;
+    const links = response.value.metadata.links.join(' ');
+    if (response.value.value.length < perPage) {
+      if (/rel=["']next["']/.test(links)) return { ok: false, error: { code: 'PAGINATION_UNSTABLE', message: `short page ${page} has a next link` } };
+      break;
+    }
+  }
+  const accepted = pages.reduce((sum, page) => sum + (page.acceptedItemCount ?? 0), 0);
+  const observed = pages.reduce((sum, page) => sum + page.itemCount, 0);
+  if (endpoint.maxItems !== undefined && observed >= endpoint.maxItems) {
+    return { ok: false, error: { code: 'PLATFORM_LIMIT_REACHED', message: `GitHub endpoint ${endpoint.path} reached its documented ${endpoint.maxItems}-item limit` } };
+  }
+  const evidence: RestCollectionEvidence = {
+    endpoint: endpoint.path,
+    requestCount: pages.length,
+    dataPageCount: pages.filter((page) => page.itemCount > 0).length,
+    itemCount: accepted,
+    termination: 'short-page',
+    pages,
+    queryMode,
+    ...(queryAfter ? { requestedSince: queryAfter } : {})
+  };
+  // The caller adds these after all resources are known so page evidence stays separate from resource hashes.
+  for (const object of objects) {
+    const added = addResource(object, object.sourceIdentity, object.eventTime ?? watermark.toISOString());
+    if (!added.ok) return added;
+  }
+  return { ok: true, value: evidence };
+}
+
+function collectGitHubBoundary(repoRoot: string, options: BoundaryCaptureOptions = {}): ProcessResult<GitHubBoundaryCapture> {
+  const client = options.client ?? createGitHubClient();
+  const repoResult = client.json<{ nameWithOwner?: string }>(['repo', 'view', '--json', 'nameWithOwner'], { cwd: repoRoot });
+  if (!repoResult.ok) return { ok: false, error: repoResult.error };
+  const repository = repoResult.value.nameWithOwner;
+  if (!repository || !/^[^/]+\/[^/]+$/.test(repository) || !client.jsonWithMetadata) {
+    return { ok: false, error: { code: 'INVALID_PLATFORM_RESPONSE', message: 'GitHub repository identity or response metadata is missing' } };
+  }
+  const preflightResult = client.jsonWithMetadata<unknown>(['api', `repos/${repository}`]);
+  if (!preflightResult.ok) return { ok: false, error: preflightResult.error };
+  const preflightDate = responseDateOrError(preflightResult.value.metadata.date);
+  if (!preflightDate.ok) return preflightDate;
+  const watermark = new Date(truncateSecond(preflightDate.value.date));
+  const fromInclusive = options.fromInclusive ? validDate(options.fromInclusive) : null;
+  if (options.fromInclusive && !fromInclusive) return { ok: false, error: { code: 'CHECKPOINT_INVALID', message: 'Checkpoint watermark is invalid' } };
+  if (fromInclusive && watermark.getTime() <= fromInclusive.getTime()) {
+    return { ok: false, error: { code: 'OBSERVATION_BOUNDARY_INVALID', message: 'Observation cutoff is not after checkpoint watermark' } };
+  }
+  const reconciliation = options.reconciliation ?? 'incremental';
+  const allObjects: CapturedObject[] = [];
+  const resources = new Map<string, CapturedObject>();
+  const pageObjects: CapturedObject[] = [];
+  const endpoints: RestCollectionEvidence[] = [];
+  const deferred = new Set<string>();
+  const unavailable = new Set<string>();
+  const responseDates = [preflightDate.value.iso];
+  const addResource = (object: CapturedObject, identity: string): ProcessResult<void> => {
+    if (object.role === 'page-evidence') {
+      pageObjects.push(object);
+      return { ok: true, value: undefined };
+    }
+    if (identity) {
+      const existing = resources.get(identity);
+      if (existing && (existing.sha256 !== object.sha256 || existing.parentIdentity !== object.parentIdentity)) {
+        return { ok: false, error: { code: 'RESOURCE_IDENTITY_COLLISION', message: `Conflicting GitHub resources share identity ${identity}` } };
+      }
+      if (!existing) resources.set(identity, object);
+    }
+    return { ok: true, value: undefined };
+  };
+  const collect = (endpoint: EndpointDescriptor): ProcessResult<void> => {
+    const result = collectBoundaryCollection(client, endpoint, preflightDate.value.date, fromInclusive, watermark, reconciliation, addResource, deferred, responseDates);
+    if (!result.ok) return result;
+    endpoints.push(result.value);
+    return { ok: true, value: undefined };
+  };
+  const issueEndpoint = `repos/${repository}/issues?state=all&sort=created&direction=asc`;
+  const pullEndpoint = `repos/${repository}/pulls?state=all&sort=created&direction=asc`;
+  for (const endpoint of [
+    descriptor(issueEndpoint, 'strict-since', 'issue', issueOrPullIdentity, { includeResource: (item) => !isPullRequestIssue(item) }),
+    descriptor(pullEndpoint, 'full-enumeration', 'pr')
+  ]) {
+    const result = collect(endpoint);
+    if (!result.ok) return result;
+  }
+  const issueNumbers = new Set<string>();
+  const pullNumbers = new Set<string>();
+  const issueRoots = new Map<string, CapturedObject>();
+  const pullRoots = new Map<string, CapturedObject>();
+  for (const resource of resources.values()) {
+    if (resource.routeNumber === undefined || !resource.resourceIdentity) continue;
+    if (resource.resourceIdentity.startsWith('pr:')) {
+      const number = String(resource.routeNumber);
+      pullNumbers.add(number);
+      pullRoots.set(number, resource);
+    } else if (resource.resourceIdentity.startsWith('issue:')) {
+      const number = String(resource.routeNumber);
+      issueNumbers.add(number);
+      issueRoots.set(number, resource);
+    }
+  }
+  for (const number of issueNumbers) {
+    const parentIdentity = issueRoots.get(number)?.resourceIdentity;
+    const result = collect(descriptor(`repos/${repository}/issues/${number}/comments`, 'strict-since', 'comment', undefined, { parentIdentity }));
+    if (!result.ok) return result;
+    const timeline = collect(descriptor(
+      `repos/${repository}/issues/${number}/timeline`,
+      'full-enumeration',
+      'timeline',
+      (item) => timelineIdentity(item, number),
+      { parentIdentity }
+    ));
+    if (!timeline.ok) return timeline;
+  }
+  for (const number of pullNumbers) {
+    const expected = pullRoots.get(number);
+    let expectedHead: string | undefined;
+    if (expected?.content) {
+      try {
+        expectedHead = ((JSON.parse(expected.content) as Record<string, unknown>).head as Record<string, unknown> | undefined)?.sha as string | undefined;
+      } catch {
+        expectedHead = undefined;
+      }
+    }
+    const current = client.jsonWithMetadata<unknown>(['api', `repos/${repository}/pulls/${number}`]);
+    if (!current.ok) return { ok: false, error: current.error };
+    const currentDate = responseDateOrError(current.value.metadata.date);
+    if (!currentDate.ok) return currentDate;
+    if (currentDate.value.date.getTime() < preflightDate.value.date.getTime()) {
+      return { ok: false, error: { code: 'OBSERVATION_BOUNDARY_INVALID', message: `Response Date precedes preflight for pull request ${number}` } };
+    }
+    responseDates.push(currentDate.value.iso);
+    const currentProjected = projectGitHubItem(current.value.value) as Record<string, unknown>;
+    const currentHead = (currentProjected.head as Record<string, unknown> | undefined)?.sha;
+    if (expectedHead && currentHead !== expectedHead) {
+      return { ok: false, error: { code: 'SOURCE_DRIFT', message: `Pull request ${number} head changed during capture` } };
+    }
+    const parentIdentity = expected?.resourceIdentity;
+    const conversationComments = collect(descriptor(`repos/${repository}/issues/${number}/comments`, 'strict-since', 'comment', undefined, { parentIdentity }));
+    if (!conversationComments.ok) return conversationComments;
+    for (const suffix of ['comments', 'reviews', 'commits']) {
+      const mode: EndpointQueryMode = suffix === 'reviews' || suffix === 'commits' ? 'full-enumeration' : 'strict-since';
+      const prefix = suffix === 'comments' ? 'review-comment' : suffix === 'reviews' ? 'review' : 'commit';
+      const result = collect(descriptor(
+        `repos/${repository}/pulls/${number}/${suffix}`,
+        mode,
+        prefix,
+        undefined,
+        { parentIdentity, ...(suffix === 'commits' ? { maxItems: 250 } : {}) }
+      ));
+      if (!result.ok) return result;
+    }
+    const timeline = collect(descriptor(
+      `repos/${repository}/issues/${number}/timeline`,
+      'full-enumeration',
+      'timeline',
+      (item) => timelineIdentity(item, number),
+      { parentIdentity }
+    ));
+    if (!timeline.ok) return timeline;
+  }
+  allObjects.push(...pageObjects, ...resources.values());
+  return {
+    ok: true,
+    value: {
+      repository,
+      preflightDate: preflightDate.value.iso,
+      watermark: watermark.toISOString(),
+      objects: allObjects,
+      endpoints,
+      responseDates: [...new Set(responseDates)].sort(),
+      deferred: [...deferred].sort(),
+      unavailable: [...unavailable].sort()
+    }
+  };
+}
+
+export { collectGitHubBoundary, collectGitHubObjects, collectLocalObjects, fetchRestCollection, projectGitHubItem, projectGitHubTimelineItem, resolveGitHubRepository };
+export type { BoundaryCaptureOptions, FetchRestCollectionOptions, GitHubBoundaryCapture, GitHubCapture, RestCollection };

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { reconcileRecords } from '../../../lib/process-data/reconcile.ts';
+import { reconcileRecords, reconcileResourceRecords } from '../../../lib/process-data/reconcile.ts';
 
 test('reconciliation proposes only unique deterministic links and keeps conflicts manual', () => {
   const result = reconcileRecords([
@@ -99,4 +99,29 @@ test('reconciliation does not report cross-source gaps for partial snapshots', (
     { recordId: 'issue', kind: 'platform-resource', sourceIdentity: 'issue:800', sourceSha256: 'b'.repeat(64), binding: 'TASK-1' }
   ], 'github');
   assert.equal(github.findings.some((finding) => finding.category === 'missing-local'), false);
+});
+
+test('resource reconciliation defers unknown visibility and tombstones only during complete full reconciliation', () => {
+  const parent = [{
+    recordId: 'old', kind: 'platform-resource' as const, sourceIdentity: 'issue:1', resourceIdentity: 'issue:1', sourceSha256: 'a'.repeat(64)
+  }];
+  const changed = { recordId: 'new', kind: 'platform-resource' as const, sourceIdentity: 'issue:2', resourceIdentity: 'issue:2', sourceSha256: 'b'.repeat(64) };
+  const incremental = reconcileResourceRecords([changed], { parent, full: false, deferred: ['issue:1'] });
+  assert.equal(incremental.records.some((record) => record.operation === 'tombstone'), false);
+  assert.equal(incremental.operations.upsert, 1);
+  const full = reconcileResourceRecords([], { parent, full: true, deferred: ['issue:1'] });
+  assert.equal(full.operations.tombstone, 0);
+  const reconciled = reconcileResourceRecords([], { parent, full: true });
+  assert.equal(reconciled.operations.tombstone, 1);
+  assert.equal(reconciled.records[0]!.operation, 'tombstone');
+});
+
+test('resource reconciliation suppresses child tombstones when a parent scope is deferred', () => {
+  const parent = [
+    { recordId: 'root', kind: 'platform-resource' as const, sourceIdentity: 'issue:1', resourceIdentity: 'issue:1', sourceSha256: 'a'.repeat(64) },
+    { recordId: 'child', kind: 'platform-resource' as const, sourceIdentity: 'issue-comment:9', resourceIdentity: 'issue-comment:9', sourceSha256: 'b'.repeat(64), parentIdentity: 'issue:1' }
+  ];
+  const result = reconcileResourceRecords([], { parent, full: true, deferred: ['issue:1'] });
+  assert.equal(result.operations.tombstone, 0);
+  assert.deepEqual(result.records, []);
 });

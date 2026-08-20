@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { redactExcerpt } from '../../../lib/process-data/privacy.ts';
-import { collectLocalObjects, fetchRestCollection, projectGitHubItem } from '../../../lib/process-data/sources.ts';
+import { collectGitHubBoundary, collectLocalObjects, fetchRestCollection, projectGitHubItem, projectGitHubTimelineItem } from '../../../lib/process-data/sources.ts';
 import { enumerateAllTaskDirs } from '../../../lib/task/resolve-ref.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 
@@ -73,6 +73,24 @@ test('GitHub commit projection retains the approved nested commit metadata', () 
   });
 });
 
+test('GitHub timeline projection preserves event semantics and stable actor identity', () => {
+  assert.deepEqual(projectGitHubTimelineItem({
+    id: 7,
+    event: 'renamed',
+    actor: { id: 4, login: 'octocat', avatar_url: 'ignored' },
+    rename: { from: 'old', to: 'new', issue: 'ignored' },
+    created_at: '2026-08-20T00:00:00Z',
+    body: 'public context'
+  }), {
+    id: 7,
+    event: 'renamed',
+    actor: { id: 4, login: 'octocat' },
+    rename: { from: 'old', to: 'new' },
+    created_at: '2026-08-20T00:00:00Z',
+    body: 'public context'
+  });
+});
+
 test('excerpt privacy rejects common cloud and messaging credentials', () => {
   assert.equal(redactExcerpt('AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE'), null);
   const slackWebhook = `https://hooks.slack.com/services/${'T00000000'}/${'B00000000'}/${'X'.repeat(24)}`;
@@ -113,4 +131,172 @@ test('all-state enumeration includes the dated archive while local capture exclu
   if (!optedIn.ok) return;
   const excerpt = optedIn.value.find((object) => object.sourceIdentity.endsWith('logs/sessions/session.md#excerpt'));
   assert.equal(excerpt?.content, 'user-visible transcript');
+});
+
+test('GitHub boundary rereads W minus one second and accepts the inclusive W item', () => {
+  const calls: string[] = [];
+  const client: GitHubClient = {
+    version: () => ({ ok: true, value: '2.80.0' }),
+    text: () => ({ ok: true, value: '' }),
+    json: <T>(args: string[]) => ({ ok: true, value: (args[0] === 'repo' ? { nameWithOwner: 'acme/demo' } : {}) as T }),
+    jsonWithMetadata: <T>(args: string[]) => {
+      const url = args.find((value) => value.startsWith('repos/'))!;
+      calls.push(url);
+      const page = new URL(url, 'https://api.github.test');
+      const value = url === 'repos/acme/demo'
+        ? { id: 1 }
+        : url.includes('/issues?')
+          ? [{ id: 1, number: 1, updated_at: '2026-08-19T00:00:00.000Z' }]
+          : [];
+      return {
+        ok: true,
+        value: {
+          value: value as T,
+          metadata: {
+            status: 200,
+            requestUrl: `https://api.github.com/${url}`,
+            date: page.pathname === '/repos/acme/demo' ? 'Thu, 20 Aug 2026 00:00:00 GMT' : 'Thu, 20 Aug 2026 00:00:01 GMT',
+            links: []
+          }
+        }
+      };
+    }
+  };
+  const result = collectGitHubBoundary('/tmp', { client, fromInclusive: '2026-08-19T00:00:00.000Z' });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const issueEndpoint = result.value.endpoints.find((endpoint) => endpoint.endpoint.includes('/issues?'))!;
+  assert.equal(issueEndpoint.queryMode, 'strict-since');
+  assert.equal(issueEndpoint.requestedSince, '2026-08-18T23:59:59.000Z');
+  assert.equal(issueEndpoint.pages[0]!.acceptedItemCount, 1);
+  assert.ok(calls.some((url) => url.includes('since=2026-08-18T23%3A59%3A59.000Z')));
+  assert.equal(result.value.objects.some((object) => object.role === 'resource' && object.resourceIdentity === 'issue:1'), true);
+});
+
+test('GitHub boundary uses issue and pull numbers for all child routes', () => {
+  const calls: string[] = [];
+  const metadata = (value: unknown, url: string) => ({
+    ok: true as const,
+    value: {
+      value,
+      metadata: {
+        status: 200,
+        requestUrl: `https://api.github.com/${url}`,
+        date: 'Thu, 20 Aug 2026 00:00:01 GMT',
+        links: []
+      }
+    }
+  });
+  const client: GitHubClient = {
+    version: () => ({ ok: true, value: '2.80.0' }),
+    text: () => ({ ok: true, value: '' }),
+    json: <T>(args: string[]) => ({ ok: true, value: (args[0] === 'repo' ? { nameWithOwner: 'acme/demo' } : {}) as T }),
+    jsonWithMetadata: <T>(args: string[]) => {
+      const url = args.find((value) => value.startsWith('repos/'))!;
+      calls.push(url);
+      if (url === 'repos/acme/demo') return metadata({ id: 1 }, url) as never;
+      if (url.includes('/issues?')) return metadata([{ id: 101, number: 1, updated_at: '2026-08-19T00:00:00Z' }], url) as never;
+      if (url.includes('/pulls?')) return metadata([{ id: 202, number: 2, head: { sha: 'head-2' }, updated_at: '2026-08-19T00:00:00Z' }], url) as never;
+      if (url === 'repos/acme/demo/pulls/2') return metadata({ id: 202, number: 2, head: { sha: 'head-2' }, updated_at: '2026-08-20T00:00:01Z' }, url) as never;
+      return metadata([], url) as never;
+    }
+  };
+  const result = collectGitHubBoundary('/tmp', { client, fromInclusive: '2026-08-19T00:00:00Z' });
+  assert.equal(result.ok, true);
+  assert.equal(calls.some((url) => url.includes('/issues/1/comments')), true);
+  assert.equal(calls.some((url) => url.includes('/issues/1/timeline')), true);
+  assert.equal(calls.some((url) => url.includes('/issues/2/comments')), true);
+  assert.equal(calls.some((url) => url.includes('/pulls/2/comments')), true);
+  assert.equal(calls.some((url) => url.includes('/issues/101/')), false);
+  assert.equal(calls.some((url) => url.includes('/pulls/202/')), false);
+});
+
+test('GitHub boundary keeps an issue-view PR as page evidence and uses the pull view as canonical', () => {
+  const metadata = (value: unknown, url: string) => ({
+    ok: true as const,
+    value: { value, metadata: { status: 200, requestUrl: `https://api.github.com/${url}`, date: 'Thu, 20 Aug 2026 00:00:01 GMT', links: [] } }
+  });
+  const client: GitHubClient = {
+    version: () => ({ ok: true, value: '2.80.0' }),
+    text: () => ({ ok: true, value: '' }),
+    json: <T>(args: string[]) => ({ ok: true, value: (args[0] === 'repo' ? { nameWithOwner: 'acme/demo' } : {}) as T }),
+    jsonWithMetadata: <T>(args: string[]) => {
+      const url = args.find((value) => value.startsWith('repos/'))!;
+      if (url === 'repos/acme/demo') return metadata({ id: 1 }, url) as never;
+      if (url.includes('/issues?')) return metadata([{
+        id: 202, number: 2, pull_request: { url: 'https://api.github.com/repos/acme/demo/pulls/2' }, updated_at: '2026-08-19T00:00:00Z'
+      }], url) as never;
+      if (url.includes('/pulls?')) return metadata([{
+        id: 202, number: 2, head: { sha: 'head-2' }, base: { sha: 'base-2' }, updated_at: '2026-08-19T00:00:00Z'
+      }], url) as never;
+      if (url === 'repos/acme/demo/pulls/2') return metadata({
+        id: 202, number: 2, head: { sha: 'head-2' }, base: { sha: 'base-2' }, updated_at: '2026-08-19T00:00:01Z'
+      }, url) as never;
+      return metadata([], url) as never;
+    }
+  };
+  const result = collectGitHubBoundary('/tmp', { client });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const resources = result.value.objects.filter((object) => object.role === 'resource');
+  assert.equal(resources.filter((object) => object.resourceIdentity === 'pr:202').length, 1);
+  assert.equal(resources.some((object) => object.resourceIdentity === 'issue:202'), false);
+  assert.equal(result.value.objects.some((object) => object.role === 'page-evidence' && object.endpoint?.includes('/issues?')), true);
+});
+
+test('GitHub timeline fallback identities include their parent issue number', () => {
+  const metadata = (value: unknown, url: string) => ({
+    ok: true as const,
+    value: { value, metadata: { status: 200, requestUrl: `https://api.github.com/${url}`, date: 'Thu, 20 Aug 2026 00:00:01 GMT', links: [] } }
+  });
+  const client: GitHubClient = {
+    version: () => ({ ok: true, value: '2.80.0' }),
+    text: () => ({ ok: true, value: '' }),
+    json: <T>(args: string[]) => ({ ok: true, value: (args[0] === 'repo' ? { nameWithOwner: 'acme/demo' } : {}) as T }),
+    jsonWithMetadata: <T>(args: string[]) => {
+      const url = args.find((value) => value.startsWith('repos/'))!;
+      if (url === 'repos/acme/demo') return metadata({ id: 1 }, url) as never;
+      if (url.includes('/issues?')) return metadata([
+        { id: 1, number: 1, updated_at: '2026-08-19T00:00:00Z' },
+        { id: 2, number: 2, updated_at: '2026-08-19T00:00:00Z' }
+      ], url) as never;
+      if (url.includes('/timeline')) return metadata([{ event: 'closed', created_at: '2026-08-19T01:00:00Z', actor: { id: 9 }, issue: { id: 77 } }], url) as never;
+      return metadata([], url) as never;
+    }
+  };
+  const result = collectGitHubBoundary('/tmp', { client });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const timelines = result.value.objects.filter((object) => object.role === 'resource' && object.resourceIdentity?.startsWith('timeline:'));
+  assert.equal(timelines.length, 2);
+  assert.deepEqual(new Set(timelines.map((object) => object.parentIdentity)), new Set(['issue:1', 'issue:2']));
+});
+
+test('GitHub pull commit collection fails closed at the documented endpoint limit', () => {
+  const metadata = (value: unknown, url: string) => ({
+    ok: true as const,
+    value: { value, metadata: { status: 200, requestUrl: `https://api.github.com/${url}`, date: 'Thu, 20 Aug 2026 00:00:01 GMT', links: [] } }
+  });
+  const client: GitHubClient = {
+    version: () => ({ ok: true, value: '2.80.0' }),
+    text: () => ({ ok: true, value: '' }),
+    json: <T>(args: string[]) => ({ ok: true, value: (args[0] === 'repo' ? { nameWithOwner: 'acme/demo' } : {}) as T }),
+    jsonWithMetadata: <T>(args: string[]) => {
+      const url = args.find((value) => value.startsWith('repos/'))!;
+      if (url === 'repos/acme/demo') return metadata({ id: 1 }, url) as never;
+      if (url.includes('/issues?')) return metadata([], url) as never;
+      if (url.includes('/pulls?')) return metadata([{ id: 202, number: 2, head: { sha: 'head-2' }, updated_at: '2026-08-19T00:00:00Z' }], url) as never;
+      if (url === 'repos/acme/demo/pulls/2') return metadata({ id: 202, number: 2, head: { sha: 'head-2' }, updated_at: '2026-08-20T00:00:01Z' }, url) as never;
+      if (url.includes('/pulls/2/commits')) {
+        const page = Number(new URL(url, 'https://api.github.test').searchParams.get('page'));
+        const start = (page - 1) * 100;
+        const count = page < 3 ? 100 : 50;
+        return metadata(Array.from({ length: count }, (_, index) => ({ sha: `commit-${start + index}`, commit: { committer: { date: '2026-08-19T00:00:00Z' } } })), url) as never;
+      }
+      return metadata([], url) as never;
+    }
+  };
+  const result = collectGitHubBoundary('/tmp', { client });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.error.code, 'PLATFORM_LIMIT_REACHED');
 });

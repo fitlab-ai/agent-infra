@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { classifyGitHubFailure, createGitHubClient } from '../../../lib/platform/github-client.ts';
+import { classifyGitHubFailure, createGitHubClient, parseIncludedResponse } from '../../../lib/platform/github-client.ts';
 
 test('GitHub client reads the CLI version without shell parsing', () => {
   const calls: string[][] = [];
@@ -84,4 +84,30 @@ test('GitHub client retries reads but does not blindly replay posts', () => {
   const post = client.json(['api', 'repos/o/r/issues/1/comments', '-X', 'POST'], { method: 'POST' });
   assert.equal(post.ok, false);
   assert.equal(attempts, 1);
+});
+
+test('metadata JSON boundary returns the final successful attempt and parses the final response block', () => {
+  let attempts = 0;
+  const client = createGitHubClient({
+    runner(args) {
+      attempts += 1;
+      if (attempts === 1) return { status: 1, stdout: '', stderr: 'HTTP 503: unavailable' };
+      return {
+        status: 0,
+        stdout: 'HTTP/2 302 Found\r\nDate: Thu, 20 Aug 2026 00:00:00 GMT\r\n\r\nHTTP/2 200 OK\r\nDate: Thu, 20 Aug 2026 00:00:01 GMT\r\nLink: <https://api.github.com/repos/o/r?page=2>; rel="next"\r\n\r\n[]',
+        stderr: ''
+      };
+    },
+    retryDelaysMs: [0],
+    sleep() {}
+  });
+  const result = client.jsonWithMetadata?.(['api', 'repos/o/r']);
+  assert.equal(result?.ok, true);
+  if (result?.ok) {
+    assert.equal(result.value.metadata.status, 200);
+    assert.equal(result.value.metadata.date, 'Thu, 20 Aug 2026 00:00:01 GMT');
+    assert.equal(result.value.metadata.links.length, 1);
+  }
+  assert.equal(attempts, 2);
+  assert.deepEqual(parseIncludedResponse('HTTP/2 200 OK\r\n\r\n{}', ['api', 'repos/o/r'])?.value, {});
 });
