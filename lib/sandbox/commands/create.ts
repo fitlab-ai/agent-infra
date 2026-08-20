@@ -1425,6 +1425,7 @@ export async function create(args: string[]): Promise<void> {
             runEngineTaskCommand(engine, 'docker', [
               'run',
               '-d',
+              '--init',
               '--name',
               container,
               '--hostname',

@@ -142,6 +142,45 @@ jobs:
           container="$(docker ps --filter "label=linux-e2e.sandbox.branch=test-branch" --format '{{.Names}}' | head -n 1)"
           test -n "$container"
           docker exec "$container" sh -lc 'echo hello && node --version'
+          test "$(docker inspect --format '{{.HostConfig.Init}}' "$container")" = true
+          zombie_count() {
+            docker exec "$container" sh -lc 'count=0; for stat in /proc/[0-9]*/stat; do if [ -r "$stat" ]; then state="$(awk '\''{print $3}'\'' "$stat" 2>/dev/null || true)"; [ "$state" = Z ] && count=$((count + 1)); fi; done; printf "%s\n" "$count"'
+          }
+          run_orphan_probe() {
+            docker exec -i "$container" node - "$1" <<'NODE'
+          const { spawn } = require("node:child_process");
+          const mode = process.argv[2];
+          const child = spawn(process.execPath, ["-e", `
+          const mode = process.argv[1];
+          if (mode === "term" || mode === "kill") {
+            setTimeout(() => process.kill(process.pid, mode === "term" ? "SIGTERM" : "SIGKILL"), 100);
+          } else {
+            process.exit(mode === "nonzero" ? 23 : 0);
+          }
+          setTimeout(() => {}, 1000);
+          `, mode], { detached: true, stdio: "ignore" });
+          child.unref();
+          process.stdout.write(String(child.pid) + "\n");
+          NODE
+          }
+          probe_pending() {
+            docker exec "$container" sh -lc 'pending=0; for pid in "$@"; do stat="/proc/$pid/stat"; if [ -r "$stat" ]; then state="$(awk '\''{print $3}'\'' "$stat" 2>/dev/null || true)"; [ "$state" = Z ] || pending=1; fi; done; printf "%s\n" "$pending"' sh "$@"
+          }
+          baseline="$(zombie_count)"
+          for mode in normal nonzero term kill; do
+            probe_pids=""
+            for _ in $(seq 1 10); do probe_pids="$probe_pids $(run_orphan_probe "$mode")"; done
+            pending=1
+            for _ in $(seq 1 20); do
+              pending="$(probe_pending $probe_pids)"
+              final="$(zombie_count)"
+              [ "$pending" -eq 0 ] && [ "$final" -le "$baseline" ] && break
+              sleep 0.1
+            done
+            test "$pending" -eq 0
+            test "$final" -le "$baseline"
+            echo "zombie probe mode=$mode baseline=$baseline final=$final"
+          done
 
       - name: Cleanup sandbox artifacts
         if: always()
@@ -257,6 +296,45 @@ jobs:
           container="$(docker ps --filter "label=linux-e2e.sandbox.branch=test-branch" --format '{{.Names}}' | head -n 1)"
           test -n "$container"
           docker exec "$container" sh -lc 'echo hello && node --version'
+          test "$(docker inspect --format '{{.HostConfig.Init}}' "$container")" = true
+          zombie_count() {
+            docker exec "$container" sh -lc 'count=0; for stat in /proc/[0-9]*/stat; do if [ -r "$stat" ]; then state="$(awk '\''{print $3}'\'' "$stat" 2>/dev/null || true)"; [ "$state" = Z ] && count=$((count + 1)); fi; done; printf "%s\n" "$count"'
+          }
+          run_orphan_probe() {
+            docker exec -i "$container" node - "$1" <<'NODE'
+          const { spawn } = require("node:child_process");
+          const mode = process.argv[2];
+          const child = spawn(process.execPath, ["-e", `
+          const mode = process.argv[1];
+          if (mode === "term" || mode === "kill") {
+            setTimeout(() => process.kill(process.pid, mode === "term" ? "SIGTERM" : "SIGKILL"), 100);
+          } else {
+            process.exit(mode === "nonzero" ? 23 : 0);
+          }
+          setTimeout(() => {}, 1000);
+          `, mode], { detached: true, stdio: "ignore" });
+          child.unref();
+          process.stdout.write(String(child.pid) + "\n");
+          NODE
+          }
+          probe_pending() {
+            docker exec "$container" sh -lc 'pending=0; for pid in "$@"; do stat="/proc/$pid/stat"; if [ -r "$stat" ]; then state="$(awk '\''{print $3}'\'' "$stat" 2>/dev/null || true)"; [ "$state" = Z ] || pending=1; fi; done; printf "%s\n" "$pending"' sh "$@"
+          }
+          baseline="$(zombie_count)"
+          for mode in normal nonzero term kill; do
+            probe_pids=""
+            for _ in $(seq 1 10); do probe_pids="$probe_pids $(run_orphan_probe "$mode")"; done
+            pending=1
+            for _ in $(seq 1 20); do
+              pending="$(probe_pending $probe_pids)"
+              final="$(zombie_count)"
+              [ "$pending" -eq 0 ] && [ "$final" -le "$baseline" ] && break
+              sleep 0.1
+            done
+            test "$pending" -eq 0
+            test "$final" -le "$baseline"
+            echo "zombie probe mode=$mode baseline=$baseline final=$final"
+          done
 
       - name: Cleanup sandbox artifacts
         if: always()

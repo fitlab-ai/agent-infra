@@ -545,6 +545,7 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     const calls = fixture.readDockerCalls();
     const runCall = calls.find((call) => call[0] === "run");
     assert.ok(runCall, "expected sandbox create to invoke docker run");
+    assert.equal(runCall.filter((arg) => arg === "--init").length, 1);
     assert.equal(
       runCall.some((arg) => arg.includes("/home/devuser/.ssh")),
       false,
@@ -603,6 +604,7 @@ test("task-bound sandbox create keeps Git clean and exposes only the scoped writ
     assert.equal(result.status, 0, result.stderr);
     const runCall = fixture.readDockerCalls().find((call) => call[0] === "run");
     assert.ok(runCall, "expected task-bound sandbox create to invoke docker run");
+    assert.equal(runCall.filter((arg) => arg === "--init").length, 1);
     assert.ok(runCall.some((arg) => isReadOnlyMountFor(arg, "/workspace/.agents/workspace")));
     assert.ok(runCall.some((arg) => isWritableMountFor(
       arg,
