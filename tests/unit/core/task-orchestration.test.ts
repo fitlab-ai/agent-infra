@@ -18,6 +18,8 @@ import {
   sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation
 } from '../../../lib/task/orchestration.ts';
+import { sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
+import { upsertSection } from '../../../lib/task/sections.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 
 const snapshot = () => 'before-tree';
@@ -57,6 +59,33 @@ function fixture(step: string) {
   return { root, taskDir };
 }
 
+function addReceipt(taskDir: string, receipt: Parameters<typeof upsertArtifactReceipt>[1]) {
+  const taskPath = path.join(taskDir, 'task.md');
+  const content = fs.readFileSync(taskPath, 'utf8');
+  const mutation = upsertArtifactReceipt(content, receipt);
+  fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
+}
+
+function seedLifecycleReceipts(f: ReturnType<typeof fixture>) {
+  const completedAt = '2026-01-01 00:00:00+00:00';
+  addReceipt(f.taskDir, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'analysis.md')), completedAt
+  });
+  addReceipt(f.taskDir, {
+    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt
+  });
+  addReceipt(f.taskDir, {
+    event: 'code.completed', output: 'code.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt
+  });
+  addReceipt(f.taskDir, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'code.md')), completedAt
+  });
+}
+
 test('dispatch respects the repository execution lock', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
@@ -85,6 +114,7 @@ function approvedCodeFixture(manualValidation = 0) {
   fs.writeFileSync(path.join(f.taskDir, 'review-plan.md'), '# Plan Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
   fs.writeFileSync(path.join(f.taskDir, 'code.md'), '# Code\n');
   fs.writeFileSync(path.join(f.taskDir, 'review-code.md'), `# Code Review\n\n- **审查输入**：\`code.md\`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：${manualValidation}\n`);
+  seedLifecycleReceipts(f);
   return f;
 }
 
@@ -94,6 +124,7 @@ function cleanCommitCandidateFixture(prFlow: unknown = 'required') {
   fs.mkdirSync(path.join(f.root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify({ prFlow })}\n`);
   fs.writeFileSync(path.join(f.taskDir, 'task.md'), `---\nid: TASK-20260101-000001\ncurrent_step: code-review\npr_number: 42\nlast_reviewed_commit: ${head}\n---\n\n# Task\n`);
+  seedLifecycleReceipts(f);
   beginOrResumeOrchestration('TASK-20260101-000001', {
     repoRoot: f.root,
     id: () => 'run-clean',
@@ -419,6 +450,14 @@ test('route selects one fresh role from existing lifecycle facts', () => {
   fs.writeFileSync(path.join(code.taskDir, 'review-analysis.md'), '# Analysis Review\n\n- **审查输入**：`analysis.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
   fs.writeFileSync(path.join(code.taskDir, 'plan.md'), '# Plan\n');
   fs.writeFileSync(path.join(code.taskDir, 'review-plan.md'), '# Plan Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
+  addReceipt(code.taskDir, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(code.taskDir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(code.taskDir, {
+    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(code.taskDir, 'plan.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
   assert.deepEqual(routeOrchestration('TASK-20260101-000001', { repoRoot: code.root }).next, {
     action: 'code-task', role: 'executor', stage: 'code', round: 1, artifact: 'code.md',
     requestedModel: null, requestedReasoningEffort: null
@@ -531,6 +570,7 @@ test('route gates clean completion on an explicit required PR flow', () => {
 
   const missingPr = cleanCommitCandidateFixture();
   fs.writeFileSync(path.join(missingPr.taskDir, 'task.md'), `---\nid: TASK-20260101-000001\ncurrent_step: code-review\nlast_reviewed_commit: ${missingPr.head}\n---\n\n# Task\n`);
+  seedLifecycleReceipts(missingPr);
   let missingPrCaptures = 0;
   const routed = routeOrchestration('TASK-20260101-000001', {
     repoRoot: missingPr.root,

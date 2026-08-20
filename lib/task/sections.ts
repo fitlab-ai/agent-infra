@@ -73,7 +73,7 @@ class DocumentMutationError extends Error {
 
 function parseTable(
   content: string,
-  input: { sectionAliases: readonly string[]; columns: readonly string[] }
+  input: { sectionAliases: readonly string[]; columns: readonly string[]; keyColumn?: string }
 ): ParsedTable | null {
   validateAliases(input.sectionAliases, 'table section aliases');
   if (
@@ -82,6 +82,10 @@ function parseTable(
     new Set(input.columns).size !== input.columns.length
   ) {
     throw new DocumentMutationError('MUTATION_INVALID', 'table columns are invalid');
+  }
+  const keyColumn = input.keyColumn ?? input.columns[0]!;
+  if (!input.columns.includes(keyColumn)) {
+    throw new DocumentMutationError('MUTATION_INVALID', 'table key column is invalid');
   }
   const sections = matchingSections(content, input.sectionAliases);
   if (sections.length === 0) return null;
@@ -125,7 +129,7 @@ function parseTable(
       column,
       decodeCell(parsed.cells[columnIndex]!).trim()
     ]));
-    const key = values[input.columns[0]!]!;
+    const key = values[keyColumn]!;
     if (seen.has(key)) {
       throw new DocumentMutationError('TABLE_DUPLICATE_KEY', `duplicate table key '${key}'`);
     }

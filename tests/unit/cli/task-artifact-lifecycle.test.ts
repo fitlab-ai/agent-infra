@@ -12,6 +12,8 @@ import {
   parseArtifactName,
   resolveArtifactContext
 } from '../../../lib/task/artifact-lifecycle.ts';
+import { sha256Bytes, sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
+import { upsertSection } from '../../../lib/task/sections.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 
@@ -23,6 +25,13 @@ function fixture(files: Record<string, string> = {}) {
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
   for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(taskDir, name), content);
   return { repoRoot, taskDir };
+}
+
+function addReceipt(f: ReturnType<typeof fixture>, receipt: Parameters<typeof upsertArtifactReceipt>[1]) {
+  const taskPath = path.join(f.taskDir, 'task.md');
+  const content = fs.readFileSync(taskPath, 'utf8');
+  const mutation = upsertArtifactReceipt(content, receipt);
+  fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
 }
 
 test('catalog exposes exactly the approved artifact families', () => {
@@ -97,6 +106,10 @@ test('context resolves required latest inputs and actual review references indep
     'plan-r2.md': '# plan 2',
     'review-plan.md': '**审查输入**：`plan-r2.md`\n'
   });
+  addReceipt(f, {
+    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan-r2.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'plan-r2.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
   const plan = resolveArtifactContext(TASK_ID, 'plan', { repoRoot: f.repoRoot });
   const review = resolveArtifactContext(TASK_ID, 'review-plan', { repoRoot: f.repoRoot });
   assert.equal(plan.status, 'ready');
@@ -104,6 +117,48 @@ test('context resolves required latest inputs and actual review references indep
   assert.equal(review.status, 'ready');
   assert.deepEqual(review.inputs.map((item) => item.name), ['plan-r2.md']);
   assert.equal(inspectTaskArtifacts(TASK_ID, 'review-plan', { repoRoot: f.repoRoot }).reviewedInput?.name, 'plan-r2.md');
+});
+
+test('review references ignore mtime order and fail closed on content changes', () => {
+  const f = fixture({
+    'analysis.md': '# analysis\n',
+    'review-analysis.md': '**审查输入**：`analysis.md`\n'
+  });
+  addReceipt(f, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'analysis.md')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  const old = new Date(Date.now() - 10_000);
+  const future = new Date(Date.now());
+  fs.utimesSync(path.join(f.taskDir, 'review-analysis.md'), old, old);
+  fs.utimesSync(path.join(f.taskDir, 'analysis.md'), future, future);
+
+  assert.equal(resolveArtifactContext(TASK_ID, 'analysis', { repoRoot: f.repoRoot }).status, 'ready');
+  fs.appendFileSync(path.join(f.taskDir, 'analysis.md'), 'changed\n');
+  const changed = resolveArtifactContext(TASK_ID, 'analysis', { repoRoot: f.repoRoot });
+  assert.equal(changed.status, 'failed');
+  assert.equal(changed.error?.code, 'ARTIFACT_REFERENCE_INVALID');
+});
+
+test('code replan routing compares plan content with the code input receipt', () => {
+  const f = fixture({
+    'plan.md': '# new plan\n',
+    'code.md': '# code\n',
+    'review-plan.md': '**审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n'
+  });
+  addReceipt(f, {
+    event: 'code.completed', output: 'code.md', input: 'plan.md',
+    inputSha256: sha256Bytes(Buffer.from('# old plan\n')), completedAt: '2026-01-01 00:00:00+00:00'
+  });
+  addReceipt(f, {
+    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(f.taskDir, 'plan.md')), completedAt: '2026-01-01 00:01:00+00:00'
+  });
+
+  const result = resolveArtifactContext(TASK_ID, 'code', { repoRoot: f.repoRoot });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.codeMode?.mode, 'init');
+  assert.equal(result.codeMode?.reviewArtifact, 'review-plan.md');
 });
 
 test('revision context fails closed when a review points to a future input', () => {

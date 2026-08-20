@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 
 import { INTERNAL_CLI_PATH } from "../../helpers.ts";
+import { sha256File, upsertArtifactReceipt } from "../../../lib/task/artifact-receipts.ts";
+import { upsertSection } from "../../../lib/task/sections.ts";
 
 const TASK_ID = "TASK-20260101-000001";
 
@@ -17,7 +19,37 @@ function makeFixture(files: Record<string, string>) {
   fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${TASK_ID}\ncurrent_step: technical-design-review\n---\n\n# Task\n`);
   const withPlan = files["plan.md"] ? files : { "plan.md": "# plan", ...files };
   for (const [name, content] of Object.entries(withPlan)) fs.writeFileSync(path.join(taskDir, name), content);
+  seedLifecycleReceipts(taskDir);
   return { root, taskDir };
+}
+
+function addReceipt(taskDir: string, receipt: Parameters<typeof upsertArtifactReceipt>[1]) {
+  const taskPath = path.join(taskDir, "task.md");
+  const content = fs.readFileSync(taskPath, "utf8");
+  const mutation = upsertArtifactReceipt(content, receipt);
+  fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
+}
+
+function seedLifecycleReceipts(taskDir: string) {
+  const completedAt = "2026-01-01 00:00:00+00:00";
+  const entries = fs.readdirSync(taskDir).filter((name) => /^review-plan(?:-r[2-9]\d*)?\.md$/.test(name));
+  for (const output of entries) {
+    const content = fs.readFileSync(path.join(taskDir, output), "utf8");
+    const input = content.match(/`((?:plan|plan-r[2-9]\d*)\.md)`/)?.[1];
+    if (!input || !fs.existsSync(path.join(taskDir, input))) continue;
+    addReceipt(taskDir, {
+      event: "review-plan.completed", output, input,
+      inputSha256: sha256File(path.join(taskDir, input)), completedAt
+    });
+  }
+  const codeOutputs = fs.readdirSync(taskDir).filter((name) => /^code(?:-r[2-9]\d*)?\.md$/.test(name));
+  for (const output of codeOutputs) {
+    if (!fs.existsSync(path.join(taskDir, "plan.md"))) continue;
+    addReceipt(taskDir, {
+      event: "code.completed", output, input: "plan.md",
+      inputSha256: sha256File(path.join(taskDir, "plan.md")), completedAt
+    });
+  }
 }
 
 function runDetect(files: Record<string, string>) {
@@ -312,7 +344,8 @@ test("code-task dual-mode: parsing failure returns error", () => {
 // branch 4 (Approved 0/0/0 with no plan iteration → `refused`) remains the regression baseline for
 // the new replan branch; we don't duplicate it here.
 
-function runDetectWithMtimes(
+// File times model transport noise only; receipt-backed identity and SHA-256 drive routing.
+function runDetectWithTransportTimes(
   files: Record<string, string>,
   mtimes: Record<string, number> = {}
 ) {
@@ -330,7 +363,7 @@ function runDetectWithMtimes(
 
 test("code-task dual-mode: branch 2 (replan) - new plan-r2 after code triggers init", () => {
   const nowSec = Math.floor(Date.now() / 1000);
-  const result = runDetectWithMtimes(
+  const result = runDetectWithTransportTimes(
     {
       "code.md": "# code",
       "review-code.md": zhReview("通过"),
@@ -356,12 +389,39 @@ test("code-task dual-mode: branch 2 (replan) - new plan-r2 after code triggers i
   assert.equal(result.output.review_artifact, "review-plan-r2.md");
 });
 
+test("code-task dual-mode: transport time reordering does not change receipt-backed routing", () => {
+  const files = {
+    "code.md": "# code",
+    "review-code.md": zhReview("通过"),
+    "plan.md": "# plan",
+    "review-plan.md": zhReviewPlan("plan.md", "通过"),
+    "plan-r2.md": "# plan-r2",
+    "review-plan-r2.md": zhReviewPlan("plan-r2.md", "通过")
+  };
+  const first = runDetectWithTransportTimes(files, {
+    "plan-r2.md": 2000,
+    "review-plan-r2.md": 2030
+  });
+  const reordered = runDetectWithTransportTimes(files, {
+    "plan-r2.md": 2030,
+    "review-plan-r2.md": 2000
+  });
+  const routing = (result: ReturnType<typeof runDetectWithTransportTimes>) => ({
+    status: result.status,
+    mode: result.output.mode,
+    next_round: result.output.next_round,
+    next_artifact: result.output.next_artifact,
+    review_artifact: result.output.review_artifact
+  });
+  assert.deepEqual(routing(reordered), routing(first));
+});
+
 test("code-task dual-mode: branch 2 (replan) - unreviewed latest plan does not fire", () => {
   const nowSec = Math.floor(Date.now() / 1000);
   // plan iterated to r2 but the only review-plan (review-plan.md) still references plan.md;
   // checkPlanAheadOfCode sees the latest plan (plan-r2.md) is unreviewed and skips replan,
   // falling through to the existing Approved 0/0/0 → refused branch.
-  const result = runDetectWithMtimes(
+  const result = runDetectWithTransportTimes(
     {
       "code.md": "# code",
       "review-code.md": zhReview("通过"),
@@ -385,8 +445,8 @@ test("code-task dual-mode: branch 2 (replan) - unreviewed latest plan does not f
 test("code-task dual-mode: branch 2 (replan) - precedes unreviewed-code error", () => {
   const nowSec = Math.floor(Date.now() / 1000);
   // code-r2 has no matching review-code-r2 (would normally hit branch 3: error).
-  // But review-plan-r2 (mtime > code-r2) should win and force a new init round.
-  const result = runDetectWithMtimes(
+  // The approved review-plan-r2 receipt and plan identity should win and force a new init round.
+  const result = runDetectWithTransportTimes(
     {
       "code.md": "# code",
       "review-code.md": zhReview("通过"),
@@ -417,7 +477,7 @@ test("code-task dual-mode: branch 2 (replan) - precedes unreviewed-code error", 
 test("code-task dual-mode: branch 2 (replan) - review-plan Approved-with-issues does not trigger init", () => {
   const nowSec = Math.floor(Date.now() / 1000);
   // review-plan-r2 has Approved + 1 major → normalizes to Approved-with-issues.
-  const result = runDetectWithMtimes(
+  const result = runDetectWithTransportTimes(
     {
       "code.md": "# code",
       "review-code.md": zhReview("通过"),
@@ -447,7 +507,7 @@ test("code-task dual-mode: branch 2 (replan) - off-number plan/review-plan linke
   // Real workflow shape from TASK-20260608-230434: plan-r5 was approved by review-plan-r4.
   // Round numbers are independent counters; checkPlanAheadOfCode must read the
   // "审查输入" of the latest review-plan to verify it actually reviewed the latest plan.
-  const result = runDetectWithMtimes(
+  const result = runDetectWithTransportTimes(
     {
       "code.md": "# code",
       "review-code.md": zhReview("通过"),
@@ -480,7 +540,7 @@ test("code-task dual-mode: branch 2 (replan) - latest plan unreviewed (review-pl
   const nowSec = Math.floor(Date.now() / 1000);
   // review-plan-r2 explicitly references plan-r2.md, but plan-r3.md exists (unreviewed).
   // checkPlanAheadOfCode must NOT replan because the maintainer hasn't approved plan-r3 yet.
-  const result = runDetectWithMtimes(
+  const result = runDetectWithTransportTimes(
     {
       "code.md": "# code",
       "review-code.md": zhReview("通过"),

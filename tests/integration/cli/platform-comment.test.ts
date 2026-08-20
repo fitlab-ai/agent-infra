@@ -6,6 +6,8 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
 import { INTERNAL_CLI_PATH, filePath } from '../../helpers.ts';
+import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
+import { upsertSection } from '../../../lib/task/sections.ts';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-comment-cli-'));
@@ -56,6 +58,32 @@ test('platform internal commands expose stable JSON and idempotent task comment 
   assert.equal(second.status, 0, second.stderr);
   assert.equal(JSON.parse(second.stdout).status, 'no-op');
   assert.equal(JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')).length, 1);
+});
+
+test('platform task comment sync transports receipt evidence with the task document', () => {
+  const f = fixture();
+  try {
+    const taskDir = path.join(f.root, '.agents', 'workspace', 'active', f.taskId);
+    fs.writeFileSync(path.join(taskDir, 'plan.md'), '# Plan\n');
+    fs.writeFileSync(path.join(taskDir, 'review-plan.md'), '# Review\n\n- **审查输入**：`plan.md`\n');
+    const taskPath = path.join(taskDir, 'task.md');
+    const content = fs.readFileSync(taskPath, 'utf8');
+    const mutation = upsertArtifactReceipt(content, {
+      event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+      inputSha256: sha256File(path.join(taskDir, 'plan.md')),
+      completedAt: '2026-08-19 20:00:00+00:00'
+    });
+    fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
+
+    const synced = runComment(['sync', f.taskId, '--kind', 'task', '--agent', 'codex'], f);
+    assert.equal(synced.status, 0, synced.stderr || synced.stdout);
+    const comments = JSON.parse(fs.readFileSync(f.commentsPath, 'utf8')) as Array<{ body: string }>;
+    assert.equal(comments.length, 1);
+    assert.equal(receiptForOutput(comments[0]!.body, 'review-plan.md')?.input, 'plan.md');
+    assert.equal(receiptForOutput(comments[0]!.body, 'review-plan.md')?.inputSha256, sha256File(path.join(taskDir, 'plan.md')));
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
 });
 
 test('platform internal commands reject invalid payloads with exit code 1', () => {

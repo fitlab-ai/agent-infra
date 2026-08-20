@@ -7,6 +7,7 @@ import { locateActivityLog } from './activity-log.ts';
 import { parseImplementationInputs, selectPendingImplementationInput } from './implementation-inputs.ts';
 import { parseVerdict } from './review-artifacts.ts';
 import { extractSection, findSectionHeading } from './sections.ts';
+import { receiptForOutput, sha256File } from './artifact-receipts.ts';
 
 const artifactFamilyCatalog = [
   { family: 'analysis', sectionAliases: ['分析', 'Analysis'], heading: '分析', labels: ['需求分析报告', 'Requirements Analysis'] },
@@ -218,11 +219,7 @@ function resolveReviewedInput(
     diagnostics.push(diagnostic('BROKEN_REFERENCE', review.family, review.name, String(error)));
     return null;
   }
-  const lines = content.split(/\r?\n/);
-  const header = lines.findIndex((line) => /\*\*(?:审查输入|Review Input)\*\*[:：]/.test(line));
-  const referenceBlock = header >= 0 ? lines.slice(header, header + 12).join('\n') : '';
-  const candidates = [...referenceBlock.matchAll(/`([^`]+\.md)`/g)].map((match) => match[1]!);
-  const parsed = candidates.map((name) => parseArtifactName(name)).find((item) => item?.family === expectedFamily);
+  const parsed = parseReviewedInputReference(content, expectedFamily);
   if (!parsed) {
     diagnostics.push(diagnostic('BROKEN_REFERENCE', review.family, review.name, `${review.name} does not reference a canonical ${expectedFamily} artifact`));
     return null;
@@ -231,15 +228,70 @@ function resolveReviewedInput(
   try {
     const stat = fs.lstatSync(abs);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('referenced input is not a regular file');
-    if (stat.mtimeMs > review.mtimeMs) {
-      diagnostics.push(diagnostic('BROKEN_REFERENCE', review.family, review.name, `${parsed.name} is newer than ${review.name}`));
-      return null;
+    const taskContent = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8');
+    const receipt = receiptForOutput(taskContent, review.name);
+    if (!receipt) throw new Error(`receipt for ${review.name} is missing`);
+    const expectedEvent = reviewEventName(review.family);
+    if (receipt.event !== expectedEvent || receipt.input !== parsed.name) {
+      throw new Error(`receipt for ${review.name} does not match ${parsed.name}`);
+    }
+    const actualSha256 = sha256File(abs);
+    if (actualSha256 !== receipt.inputSha256) {
+      throw new Error(`${parsed.name} content digest does not match receipt`);
     }
     return { ...parsed, path: abs, size: stat.size, mtimeMs: stat.mtimeMs };
   } catch (error) {
     diagnostics.push(diagnostic('BROKEN_REFERENCE', review.family, review.name, `${parsed.name}: ${String(error)}`));
     return null;
   }
+}
+
+function parseReviewedInputReference(content: string, expectedFamily: ArtifactFamily): { family: ArtifactFamily; round: number; name: string } | null {
+  const lines = content.split(/\r?\n/);
+  const header = lines.findIndex((line) => /\*\*(?:审查输入|Review Input)\*\*[:：]/.test(line));
+  const referenceBlock = header >= 0 ? lines.slice(header, header + 12).join('\n') : '';
+  const candidates = [...referenceBlock.matchAll(/`([^`]+\.md)`/g)].map((match) => match[1]!);
+  return candidates
+    .map((name) => parseArtifactName(name))
+    .find((item) => item?.family === expectedFamily) ?? null;
+}
+
+function parseCodePlanInputReference(content: string): { family: 'plan'; round: number; name: string } | null {
+  const lines = content.split(/\r?\n/);
+  const sectionStart = lines.findIndex((line) => /^##\s+(?:实现输入|Implementation Input)\s*$/.test(line.trim()));
+  if (sectionStart < 0) return null;
+  const bodyLines = lines.slice(sectionStart + 1);
+  const nextSection = bodyLines.findIndex((line) => /^##\s+/.test(line.trim()));
+  const body = (nextSection < 0 ? bodyLines : bodyLines.slice(0, nextSection)).join('\n');
+  const match = body.match(/\*\*(?:方案输入|Plan Input)\*\*[:：]\s*`([^`]+\.md)`/);
+  if (!match) return null;
+  const parsed = parseArtifactName(match[1]!);
+  return parsed?.family === 'plan' ? { ...parsed, family: 'plan' } : null;
+}
+
+function reviewEventName(family: ArtifactFamily): 'review-analysis.completed' | 'review-plan.completed' | 'review-code.completed' {
+  if (family === 'review-analysis') return 'review-analysis.completed';
+  if (family === 'review-plan') return 'review-plan.completed';
+  if (family === 'review-code') return 'review-code.completed';
+  throw new Error(`unsupported review family '${family}'`);
+}
+
+function resolveCodeInputReceipt(taskDir: string, code: ArtifactIdentity): { input: ArtifactIdentity; inputSha256: string } | null {
+  let taskContent: string;
+  try { taskContent = fs.readFileSync(path.join(taskDir, 'task.md'), 'utf8'); }
+  catch { return null; }
+  let receipt;
+  try { receipt = receiptForOutput(taskContent, code.name); }
+  catch { return null; }
+  if (!receipt || receipt.event !== 'code.completed') return null;
+  const plan = inspectArtifactDirectory(taskDir, 'plan');
+  if (plan.status !== 'ready') return null;
+  const input = plan.artifacts.find((artifact) => artifact.name === receipt.input);
+  return input ? { input, inputSha256: receipt.inputSha256 } : null;
+}
+
+function resolveCodePlanInput(taskDir: string, code: ArtifactIdentity): { input: ArtifactIdentity; inputSha256: string } | null {
+  return resolveCodeInputReceipt(taskDir, code);
 }
 
 function assertWritableInventory(inventory: ArtifactInventoryResult): ArtifactError | null {
@@ -312,11 +364,21 @@ function resolveCodeContext(inventory: ArtifactInventoryResult, options: Inspect
     return withCodeMode(inventory, inputs, 'ready', 'init', codeMax, reviewMax, null, null,
       'No prior code artifact. Starting initial implementation (round 1 -> code.md).');
   }
+  const codePlanInput = resolveCodePlanInput(inventory.taskDir!, latestCode);
+  if (!codePlanInput) {
+    return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', `code completion receipt for ${latestCode.name} is missing or does not match the current plan`, latestCode.name);
+  }
+  if (reviewPlan.latest && !reviewPlan.reviewedInput) {
+    return contextFailure(inventory, 'ARTIFACT_REFERENCE_INVALID', `${reviewPlan.latest.name} has no valid reviewed input`, reviewPlan.latest.name);
+  }
   if (reviewPlan.latest && reviewPlan.reviewedInput?.name === plan.latest.name) {
     const verdict = parseVerdict(reviewPlan.latest.path);
-    if (verdict.ok && verdict.verdict === 'Approved' && reviewPlan.latest.mtimeMs > latestCode.mtimeMs) {
+    const reviewedPlanSha256 = sha256File(reviewPlan.reviewedInput.path);
+    if (verdict.ok && verdict.verdict === 'Approved' && (
+      codePlanInput.input.name !== plan.latest.name || codePlanInput.inputSha256 !== reviewedPlanSha256
+    )) {
       return withCodeMode(inventory, inputs, 'ready', 'init', codeMax, reviewMax, verdict.verdict, reviewPlan.latest.name,
-        `Latest ${reviewPlan.latest.name} is approved and newer than the latest code artifact. Entering replan-driven init.`);
+        `Latest ${reviewPlan.latest.name} approves plan content not captured by the latest code input receipt. Entering replan-driven init.`);
     }
   }
   if (reviewMax < codeMax) {
@@ -440,6 +502,7 @@ function buildArtifactLinkSection(content: string, artifact: ArtifactIdentity): 
 export {
   artifactFamilyCatalog, artifactName, parseArtifactName, familySpec,
   inspectTaskArtifacts, inspectArtifactDirectory, resolveArtifactContext,
+  parseReviewedInputReference, parseCodePlanInputReference, resolveCodePlanInput, reviewEventName,
   assertWritableInventory, validateCompletedArtifact, buildArtifactLinkSection
 };
 export type {
