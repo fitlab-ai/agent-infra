@@ -1,6 +1,6 @@
 import { sha256 } from './store.ts';
 
-import type { NormalizedRecord, QualityFinding, RepairAction, SnapshotManifest } from './types.ts';
+import type { NormalizedRecord, QualityFinding, RepairAction, SnapshotManifest, SnapshotOperations } from './types.ts';
 
 function reconcileRecords(
   records: NormalizedRecord[],
@@ -107,4 +107,66 @@ function reconcileRecords(
   };
 }
 
-export { reconcileRecords };
+type ResourceReconcileOptions = {
+  parent?: NormalizedRecord[];
+  full: boolean;
+  deferred?: Iterable<string>;
+  unavailable?: Iterable<string>;
+};
+
+function reconcileResourceRecords(
+  current: NormalizedRecord[],
+  options: ResourceReconcileOptions
+): { records: NormalizedRecord[]; operations: SnapshotOperations } {
+  const parent = new Map((options.parent ?? []).filter((record) => record.resourceIdentity).map((record) => [record.resourceIdentity!, record]));
+  const currentMap = new Map(current.filter((record) => record.resourceIdentity).map((record) => [record.resourceIdentity!, record]));
+  const deferred = new Set(options.deferred ?? []);
+  const unavailable = new Set(options.unavailable ?? []);
+  const records: NormalizedRecord[] = [];
+  const operations: SnapshotOperations = { upsert: 0, supersede: 0, tombstone: 0, unavailable: 0 };
+  for (const record of currentMap.values()) {
+    const identity = record.resourceIdentity!;
+    const previous = parent.get(identity);
+    if (!previous) {
+      records.push({ ...record, operation: 'upsert' });
+      operations.upsert += 1;
+    } else if (previous.sourceSha256 !== record.sourceSha256) {
+      records.push({ ...record, operation: 'supersede' });
+      operations.supersede += 1;
+    }
+  }
+  if (options.full) {
+    for (const [identity, previous] of parent) {
+      if (currentMap.has(identity) || deferred.has(identity) || unavailable.has(identity)
+        || (previous.parentIdentity && deferred.has(previous.parentIdentity))
+        || (previous.parentIdentity && unavailable.has(previous.parentIdentity))) continue;
+      records.push({
+        recordId: previous.recordId,
+        kind: 'platform-resource',
+        sourceIdentity: identity,
+        resourceIdentity: identity,
+        sourceSha256: previous.sourceSha256,
+        operation: 'tombstone',
+        data: { availability: 'tombstone', previousSha256: previous.sourceSha256 }
+      });
+      operations.tombstone += 1;
+    }
+  }
+  for (const identity of unavailable) {
+    if (!parent.has(identity) && !currentMap.has(identity)) continue;
+    const previous = parent.get(identity) ?? currentMap.get(identity)!;
+    records.push({
+      recordId: previous.recordId,
+      kind: 'platform-resource',
+      sourceIdentity: identity,
+      resourceIdentity: identity,
+      sourceSha256: previous.sourceSha256,
+      operation: 'unavailable',
+      data: { availability: 'unavailable', reason: 'source-unavailable' }
+    });
+    operations.unavailable += 1;
+  }
+  return { records: records.sort((left, right) => left.recordId.localeCompare(right.recordId)), operations };
+}
+
+export { reconcileRecords, reconcileResourceRecords };

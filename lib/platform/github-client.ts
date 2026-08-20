@@ -10,10 +10,18 @@ type RunOptions = { cwd?: string; input?: string };
 type Runner = (args: string[], options: RunOptions) => RunResult;
 type RequestOptions = RunOptions & { method?: 'GET' | 'PATCH' | 'POST' | 'DELETE' };
 type ClientResult<T> = { ok: true; value: T } | { ok: false; error: PlatformError };
+type ResponseMetadata = {
+  status: number;
+  requestUrl: string;
+  date?: string;
+  links: string[];
+};
+type JsonResponse<T> = { value: T; metadata: ResponseMetadata };
 
 type GitHubClient = {
   version(options?: RunOptions): ClientResult<string>;
   json<T = unknown>(args: string[], options?: RequestOptions): ClientResult<T>;
+  jsonWithMetadata?<T = unknown>(args: string[], options?: RequestOptions): ClientResult<JsonResponse<T>>;
   text(args: string[], options?: RequestOptions): ClientResult<string>;
 };
 
@@ -101,6 +109,39 @@ function classifyGitHubFailure(result: RunResult): PlatformError {
   return { code: 'PLATFORM_REQUEST_FAILED', message: detail || 'GitHub request failed', retryable: false };
 }
 
+function responseUrl(args: string[]): string {
+  const endpoint = args.find((arg, index) => index > 0 && !arg.startsWith('-')) || '';
+  return endpoint.startsWith('http') ? endpoint : `https://api.github.com/${endpoint.replace(/^\//, '')}`;
+}
+
+function parseIncludedResponse<T>(stdout: string, args: string[]): JsonResponse<T> | null {
+  const statusBlocks = [...stdout.matchAll(/^HTTP\/[^\r\n]+/gim)];
+  const headerStart = statusBlocks.at(-1)?.index;
+  if (headerStart === undefined) return null;
+  const response = stdout.slice(headerStart);
+  const separator = response.match(/\r?\n\r?\n/);
+  if (!separator || separator.index === undefined) return null;
+  const header = response.slice(0, separator.index);
+  const body = response.slice(separator.index + separator[0].length);
+  const status = header.match(/^HTTP\/[^ ]+\s+(\d{3})/mi)?.[1];
+  if (!status) return null;
+  const date = header.match(/^Date:\s*(.+)$/mi)?.[1]?.trim();
+  const links = [...header.matchAll(/^Link:\s*(.+)$/gim)].flatMap((match) => match[1]!.split(',').map((value) => value.trim()));
+  try {
+    return {
+      value: JSON.parse(body || 'null') as T,
+      metadata: {
+        status: Number(status),
+        requestUrl: responseUrl(args),
+        ...(date ? { date } : {}),
+        links
+      }
+    };
+  } catch {
+    return null;
+  }
+}
+
 function createGitHubClient(options: ClientOptions = {}): GitHubClient {
   const runner = options.runner || defaultRunner;
   const delays = options.retryDelaysMs || retryDelaysFromEnvironment();
@@ -156,9 +197,24 @@ function createGitHubClient(options: ClientOptions = {}): GitHubClient {
           error: { code: 'INVALID_PLATFORM_RESPONSE', message: 'GitHub returned invalid JSON', retryable: true }
         };
       }
+    },
+    jsonWithMetadata<T>(args: string[], request: RequestOptions = {}): ClientResult<JsonResponse<T>> {
+      const includeArgs = args[0] === 'api' && args[1] !== '--include'
+        ? [args[0], '--include', ...args.slice(1)]
+        : args;
+      const result = run(includeArgs, request);
+      if (!result.ok) return result;
+      const parsed = parseIncludedResponse<T>(result.value, args);
+      if (!parsed) {
+        return {
+          ok: false,
+          error: { code: 'INVALID_PLATFORM_RESPONSE', message: 'GitHub response metadata or JSON is invalid', retryable: true }
+        };
+      }
+      return { ok: true, value: parsed };
     }
   };
 }
 
-export { classifyGitHubFailure, createGitHubClient, MINIMUM_GITHUB_CLI_VERSION };
-export type { ClientResult, GitHubClient, RequestOptions, RunOptions, RunResult, Runner };
+export { classifyGitHubFailure, createGitHubClient, MINIMUM_GITHUB_CLI_VERSION, parseIncludedResponse };
+export type { ClientResult, GitHubClient, JsonResponse, RequestOptions, ResponseMetadata, RunOptions, RunResult, Runner };
