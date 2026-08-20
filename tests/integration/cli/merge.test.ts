@@ -15,6 +15,9 @@ import {
   rebuildManifests,
   scanSourceTasks
 } from '../../../lib/merge.ts';
+import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
+import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
+import { upsertSection } from '../../../lib/task/sections.ts';
 
 function makeTempRepo() {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-merge-'));
@@ -454,6 +457,41 @@ test('merge workspace copies new mutable tasks and preserves archive behavior', 
     assert.match(output, /Archive\s+\(.agents\/workspace\/archive\/\):/);
     assert.match(output, /TASK-20260409-111111\s+active\s+copied/);
     assert.match(output, /TASK-20260409-121212\s+archive\s+copied/);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test('merge workspace transports receipt-backed review context across mtime changes', () => {
+  const repoDir = makeTempRepo();
+  const sourceWorkspace = makeTempWorkspace(repoDir);
+  const taskId = 'TASK-20260409-121313';
+
+  try {
+    const review = '# Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n';
+    const sourceTaskDir = writeFlatTask(sourceWorkspace, 'active', taskId, {
+      title: 'receipt-backed task',
+      updatedAt: '2026-04-09 12:13:13',
+      extraFiles: { 'plan.md': '# Plan\n', 'review-plan.md': review }
+    });
+    const taskPath = path.join(sourceTaskDir, 'task.md');
+    const content = fs.readFileSync(taskPath, 'utf8');
+    const mutation = upsertArtifactReceipt(content, {
+      event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+      inputSha256: sha256File(path.join(sourceTaskDir, 'plan.md')),
+      completedAt: '2026-04-09 12:13:13+00:00'
+    });
+    fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
+
+    execFileSync(process.execPath, cliArgs('merge', sourceWorkspace), { cwd: repoDir, encoding: 'utf8' });
+    const localTaskDir = path.join(repoDir, '.agents', 'workspace', 'active', taskId);
+    // Reproduce the original sync failure: the reviewed input is newer than its review.
+    fs.utimesSync(path.join(localTaskDir, 'plan.md'), new Date('2030-01-01T00:00:00Z'), new Date('2030-01-01T00:00:00Z'));
+    fs.utimesSync(path.join(localTaskDir, 'review-plan.md'), new Date('2000-01-01T00:00:00Z'), new Date('2000-01-01T00:00:00Z'));
+
+    const restored = fs.readFileSync(path.join(localTaskDir, 'task.md'), 'utf8');
+    assert.equal(receiptForOutput(restored, 'review-plan.md')?.input, 'plan.md');
+    assert.equal(resolveArtifactContext(taskId, 'review-plan', { repoRoot: repoDir }).status, 'ready');
   } finally {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }

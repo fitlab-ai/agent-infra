@@ -6,6 +6,8 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import { filePath, gitSafeEnv, INTERNAL_CLI_PATH, sandboxControlSafeEnv } from '../../helpers.ts';
+import { sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
+import { upsertSection } from '../../../lib/task/sections.ts';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-orchestration-cli-'));
@@ -27,6 +29,13 @@ function run(root: string, args: string[], env?: NodeJS.ProcessEnv) {
     encoding: 'utf8',
     env: sandboxControlSafeEnv(gitSafeEnv(env))
   });
+}
+
+function addReceipt(taskDir: string, receipt: Parameters<typeof upsertArtifactReceipt>[1]) {
+  const taskPath = path.join(taskDir, 'task.md');
+  const content = fs.readFileSync(taskPath, 'utf8');
+  const mutation = upsertArtifactReceipt(content, receipt);
+  fs.writeFileSync(taskPath, upsertSection(content, mutation).content);
 }
 
 function approvedRouteFixture(prFlow: 'required' | 'disabled' | undefined) {
@@ -52,6 +61,23 @@ function approvedRouteFixture(prFlow: 'required' | 'disabled' | undefined) {
   fs.writeFileSync(path.join(dir, 'review-plan.md'), '# Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
   fs.writeFileSync(path.join(dir, 'code.md'), '# Code\n');
   fs.writeFileSync(path.join(dir, 'review-code.md'), '# Review\n\n- **审查输入**：`code.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n');
+  const completedAt = '2026-01-01 00:00:00+00:00';
+  addReceipt(dir, {
+    event: 'review-analysis.completed', output: 'review-analysis.md', input: 'analysis.md',
+    inputSha256: sha256File(path.join(dir, 'analysis.md')), completedAt
+  });
+  addReceipt(dir, {
+    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(dir, 'plan.md')), completedAt
+  });
+  addReceipt(dir, {
+    event: 'code.completed', output: 'code.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(dir, 'plan.md')), completedAt
+  });
+  addReceipt(dir, {
+    event: 'review-code.completed', output: 'review-code.md', input: 'code.md',
+    inputSha256: sha256File(path.join(dir, 'code.md')), completedAt
+  });
   const fake = path.join(root, 'fake-gh.cjs');
   const pr = path.join(root, 'pr.json');
   const calls = path.join(root, 'calls.jsonl');

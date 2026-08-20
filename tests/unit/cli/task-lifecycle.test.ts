@@ -5,6 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { applyTaskLifecycle, lifecycleIntentCatalog } from '../../../lib/task/lifecycle.ts';
+import { sha256File, receiptForOutput, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
+import { upsertSection } from '../../../lib/task/sections.ts';
+import { resolveArtifactContext } from '../../../lib/task/artifact-lifecycle.ts';
 
 const TASK_ID = 'TASK-20260101-000001';
 const METADATA = {
@@ -140,6 +143,38 @@ test('restore validates staging before exposing active and allocates a short id'
   const target = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'task.md');
   assert.match(fs.readFileSync(target, 'utf8'), /status: active/);
   assert.equal(result.shortId.shortId, '01');
+});
+
+test('restore transports task receipts with artifacts without using mtime', () => {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-restore-receipt-'));
+  const staging = path.join(repoRoot, '.agents', 'workspace', '.restore-staging-1');
+  fs.mkdirSync(staging, { recursive: true });
+  fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+  const taskPath = path.join(staging, 'task.md');
+  fs.writeFileSync(taskPath, `---\nid: ${TASK_ID}\nissue_number: 42\nstatus: completed\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: old\n---\n\n# Task\n\n## Activity Log\n\n`);
+  fs.writeFileSync(path.join(staging, 'plan.md'), '# Plan\n');
+  fs.writeFileSync(path.join(staging, 'review-plan.md'), '# Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n');
+  let content = fs.readFileSync(taskPath, 'utf8');
+  const mutation = upsertArtifactReceipt(content, {
+    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(staging, 'plan.md')), completedAt: '2026-07-18 12:00:00+00:00'
+  });
+  content = upsertSection(content, mutation).content;
+  fs.writeFileSync(taskPath, content);
+
+  const result = applyTaskLifecycle(
+    { taskRef: TASK_ID, intent: 'restore', agent: 'codex', stagingDir: staging, issueNumber: 42 },
+    { repoRoot, metadataProvider: () => METADATA }
+  );
+  assert.equal(result.status, 'applied');
+  const targetTask = path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'task.md');
+  const restored = fs.readFileSync(targetTask, 'utf8');
+  assert.deepEqual(receiptForOutput(restored, 'review-plan.md'), {
+    event: 'review-plan.completed', output: 'review-plan.md', input: 'plan.md',
+    inputSha256: sha256File(path.join(repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'plan.md')),
+    completedAt: '2026-07-18 12:00:00+00:00'
+  });
+  assert.equal(resolveArtifactContext(TASK_ID, 'review-plan', { repoRoot }).status, 'ready');
 });
 
 test('registry failure leaves a recoverable journal and the same request converges after repair', () => {

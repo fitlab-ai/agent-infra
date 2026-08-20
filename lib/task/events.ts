@@ -4,11 +4,16 @@ import { appendActivityEntry, locateActivityLog, pairEntries } from './activity-
 import {
   buildArtifactLinkSection,
   artifactName,
+  inspectArtifactDirectory,
+  parseReviewedInputReference,
+  parseCodePlanInputReference,
   parseArtifactName,
   resolveArtifactContext,
   validateCompletedArtifact
 } from './artifact-lifecycle.ts';
 import type { ArtifactContextResult, ArtifactErrorCode, ArtifactFamily, ArtifactIdentity } from './artifact-lifecycle.ts';
+import { ArtifactReceiptError, sha256File, upsertArtifactReceipt } from './artifact-receipts.ts';
+import type { ArtifactReceipt } from './artifact-receipts.ts';
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import {
   consumeImplementationInput,
@@ -273,6 +278,80 @@ function openStartedIdentity(rows: ReturnType<typeof pairEntries>, family: Event
   return matches.length === 1 ? matches[0] : matches.length > 1 ? { conflict: true as const } : null;
 }
 
+function reviewInputFamily(family: EventFamily): ArtifactFamily {
+  return family === 'review-analysis' ? 'analysis' : family === 'review-plan' ? 'plan' : 'code';
+}
+
+function buildCompletionReceipt(
+  taskDir: string,
+  family: EventFamily,
+  artifact: ArtifactIdentity,
+  completedAt: string,
+  frontmatter: Record<string, unknown>
+): { ok: true; receipt: ArtifactReceipt } | { ok: false; message: string } | null {
+  if (family === 'code') {
+    let content: string;
+    try { content = fs.readFileSync(artifact.path, 'utf8'); }
+    catch (error) { return { ok: false, message: `cannot read ${artifact.name}: ${String(error)}` }; }
+    const input = parseCodePlanInputReference(content);
+    if (!input) return { ok: false, message: `${artifact.name} does not reference a canonical plan artifact` };
+    const startedInput = typeof frontmatter.code_input_artifact === 'string' ? frontmatter.code_input_artifact : '';
+    const startedSha256 = typeof frontmatter.code_input_sha256 === 'string' ? frontmatter.code_input_sha256 : '';
+    if (!startedInput || !startedSha256) return { ok: false, message: 'code.started plan input context is missing' };
+    if (input.name !== startedInput) return { ok: false, message: `${artifact.name} plan input '${input.name}' does not match code.started input '${startedInput}'` };
+    const plan = inspectArtifactDirectory(taskDir, 'plan');
+    if (plan.status !== 'ready' || !plan.latest || plan.latest.name !== input.name) {
+      return { ok: false, message: `code input '${input.name}' is not the latest plan artifact` };
+    }
+    try {
+      const inputSha256 = sha256File(plan.latest.path);
+      if (inputSha256 !== startedSha256) return { ok: false, message: `code input ${input.name} changed after code.started` };
+      return {
+        ok: true,
+        receipt: {
+          event: 'code.completed', output: artifact.name, input: input.name,
+          inputSha256, completedAt
+        }
+      };
+    } catch (error) {
+      return { ok: false, message: `cannot hash code input plan: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+  if (!family.startsWith('review-')) return null;
+  const expectedFamily = reviewInputFamily(family);
+  let content: string;
+  try { content = fs.readFileSync(artifact.path, 'utf8'); }
+  catch (error) { return { ok: false, message: `cannot read ${artifact.name}: ${String(error)}` }; }
+  const input = parseReviewedInputReference(content, expectedFamily);
+  if (!input) return { ok: false, message: `${artifact.name} does not reference a canonical ${expectedFamily} artifact` };
+  const startedInput = typeof frontmatter.review_input_artifact === 'string' ? frontmatter.review_input_artifact : '';
+  const startedSha256 = typeof frontmatter.review_input_sha256 === 'string' ? frontmatter.review_input_sha256 : '';
+  if (!startedInput || !startedSha256) return { ok: false, message: 'review started input context is missing' };
+  if (input.name !== startedInput) return { ok: false, message: `${artifact.name} input '${input.name}' does not match review.started input '${startedInput}'` };
+  const current = inspectArtifactDirectory(taskDir, expectedFamily);
+  if (current.status !== 'ready' || !current.latest || current.latest.name !== input.name) {
+    return { ok: false, message: `review input '${input.name}' is not the latest ${expectedFamily} artifact` };
+  }
+  const event = family === 'review-analysis'
+    ? 'review-analysis.completed' as const
+    : family === 'review-plan' ? 'review-plan.completed' as const : 'review-code.completed' as const;
+  try {
+    const stat = fs.lstatSync(current.latest.path);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('review input is not a regular file');
+    const inputSha256 = sha256File(current.latest.path);
+    if (inputSha256 !== startedSha256) return { ok: false, message: `review input ${input.name} changed after review.started` };
+    return {
+      ok: true,
+      receipt: {
+        event, output: artifact.name, input: input.name,
+        inputSha256, completedAt
+      }
+    };
+  } catch (error) {
+    return { ok: false, message: `cannot hash review input ${input.name}: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
 function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOptions = {}): TaskEventResult {
   const invalid = validateTaskEventRequest(request);
   if (invalid) return failed(request, invalid);
@@ -371,17 +450,59 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   let metadata;
   try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
   catch (error) { return failed(normalized, { code: 'METADATA_CAPTURE_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
+  let completionReceipt: ArtifactReceipt | null = null;
+  if (eventIdentity.phase === 'completed' && completedArtifact) {
+    const receipt = buildCompletionReceipt(resolved.taskDir, eventIdentity.family, completedArtifact, metadata.timestamp, frontmatter);
+    if (receipt && !receipt.ok) {
+      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: receipt.message }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+    }
+    completionReceipt = receipt?.receipt ?? null;
+  }
   const step = eventIdentity.phase === 'started' || eventIdentity.target === null ? currentStep : eventIdentity.target;
   const logStep = eventIdentity.phase === 'started' ? `${eventIdentity.action} [started]` : eventIdentity.action;
   const body = appendActivityEntry(section, { time: metadata.timestamp, step: logStep, agent: normalized.agent, note: eventIdentity.note });
   const frontmatterSet: Record<string, string> = { current_step: step, assigned_to: normalized.agent };
+  let frontmatterRemove: string[] | undefined;
+  if (eventIdentity.phase === 'started' && eventIdentity.family === 'code') {
+    const planInput = artifactContext?.inputs.find((input) => input.family === 'plan');
+    if (!planInput) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: 'code.started plan input context is unavailable' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+    try {
+      frontmatterSet.code_input_artifact = planInput.name;
+      frontmatterSet.code_input_sha256 = sha256File(planInput.path);
+    } catch (error) {
+      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot hash code.started plan input: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+    }
+  } else if (eventIdentity.phase === 'completed' && eventIdentity.family === 'code') {
+    frontmatterRemove = ['code_input_artifact', 'code_input_sha256'];
+  } else if (eventIdentity.phase === 'started' && eventIdentity.family.startsWith('review-')) {
+    const expectedFamily = reviewInputFamily(eventIdentity.family);
+    const input = artifactContext?.inputs.find((candidate) => candidate.family === expectedFamily);
+    if (!input) return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `review.started ${expectedFamily} input context is unavailable` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+    try {
+      frontmatterSet.review_input_artifact = input.name;
+      frontmatterSet.review_input_sha256 = sha256File(input.path);
+    } catch (error) {
+      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message: `cannot hash review.started input: ${error instanceof Error ? error.message : String(error)}` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, artifactContext });
+    }
+  } else if (eventIdentity.phase === 'completed' && eventIdentity.family.startsWith('review-')) {
+    frontmatterRemove = ['review_input_artifact', 'review_input_sha256'];
+  }
   if (eventIdentity.phase === 'started' && normalized.implementationInput) frontmatterSet.last_reviewed_commit = '';
   const mutations: Parameters<typeof writeTask>[0]['mutations'][number][] = [
-    { kind: 'frontmatter', set: frontmatterSet }
+    { kind: 'frontmatter', set: frontmatterSet, remove: frontmatterRemove }
   ];
   if (completedArtifact) {
     const link = buildArtifactLinkSection(content, completedArtifact);
     mutations.push({ kind: 'section', aliases: link.aliases, heading: link.heading, body: link.body });
+  }
+  if (completionReceipt) {
+    try {
+      const receiptSection = upsertArtifactReceipt(content, completionReceipt);
+      mutations.push({ kind: 'section', aliases: receiptSection.aliases, heading: receiptSection.heading, body: receiptSection.body });
+    } catch (error) {
+      const message = error instanceof ArtifactReceiptError ? error.message : String(error);
+      return failed(normalized, { code: 'EVENT_ARTIFACT_CONFLICT', message }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+    }
   }
   if (eventIdentity.phase === 'completed' && normalized.implementationInput) {
     let implementationRows;
