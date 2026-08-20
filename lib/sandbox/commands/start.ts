@@ -17,9 +17,9 @@ const USAGE = `Usage: ai sandbox start [--recreate] <branch | TASK-id | N>
 
 Start an existing sandbox container that has stopped (for example after the
 Docker daemon was restarted or replaced). The container must already exist:
-if none is found, run 'ai sandbox create <branch>' first. A container that is
-already running is checked without modifying healthy runtime state. --recreate
-allows container-only replacement after in-place recovery fails.`;
+if none is found, run 'ai sandbox create <branch>' first. Without --recreate, a
+container that is already running is checked without modifying healthy runtime
+state. --recreate replaces the existing container even when it is healthy.`;
 
 export function parseStartArgs(args: string[]): { target: string; recreate: boolean; help: boolean } {
   let recreate = false;
@@ -83,6 +83,7 @@ export async function start(args: string[]): Promise<void> {
     workspace: target.workspace,
     row: found,
     allowRecreate: parsed.recreate,
+    forceRecreate: parsed.recreate,
     recreate: async () => {
       const { create } = await import('./create.ts');
       await create([target.requestedRef, '--no-refresh']);

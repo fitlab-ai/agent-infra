@@ -14,6 +14,16 @@ If this check fails, `ai sandbox create` and `ai sandbox rebuild` stop before `d
 
 The built-in image also verifies that `cc-token-status`, `sandbox-dotfiles-link`, and `sandbox-tmux-entry` are non-empty and executable during the Docker build. A build cannot succeed with the empty scripts produced by a legacy builder. Custom Dockerfiles still require BuildKit, but they are not required to contain these built-in scripts.
 
+## PID 1 and orphan process reaping
+
+Every newly created sandbox enables Docker's managed init with `docker run --init`. The init process becomes PID 1, forwards signals, and reaps orphaned child processes so repeated builds, tests, and detached work do not accumulate zombies. This setting applies when a container is created or explicitly recreated; existing containers retain their previous PID 1 until you run:
+
+```bash
+ai sandbox start --recreate <task-ref-or-branch>
+```
+
+Recreation preserves the worktree, task binding, mounts, and `/share` data while replacing the container-local process state.
+
 ## Sandbox aliases and GitHub CLI
 
 `ai sandbox create` now bootstraps the host-side aliases file at `~/.agent-infra/aliases/sandbox.sh` on first run. The generated file includes ready-to-edit yolo shortcuts for Claude, Codex, Antigravity CLI, and OpenCode, and every sandbox syncs that file into `/home/devuser/.bash_aliases`.
