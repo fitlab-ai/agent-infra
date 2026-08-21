@@ -49,7 +49,7 @@ test('sandbox execution termination waits for the entire POSIX process group', o
   ].join(';')], { detached: true, stdio: 'ignore' });
   leader.unref();
   assert.ok(leader.pid);
-  let startTime: string | null = null;
+  let startTime: number | null = null;
   const readyDeadline = Date.now() + 2_000;
   while (Date.now() < readyDeadline) {
     startTime = getProcessStartTime(leader.pid!);
@@ -60,7 +60,7 @@ test('sandbox execution termination waits for the entire POSIX process group', o
   assert.equal(fs.existsSync(childPidPath), true);
   const childPid = Number(fs.readFileSync(childPidPath, 'utf8'));
   const execution: SandboxControlExecution = {
-    version: 1,
+    version: 2,
     generation: 'test',
     requestId: '12345678-1234-1234-1234-123456789abc',
     nonce: 'nonce',
@@ -241,7 +241,7 @@ test(
 );
 
 test(
-  'server status and stop reclaim invalid, legacy, and reused pid records without signaling unrelated processes',
+    'server status and stop fail closed for invalid, legacy, and reused pid records without signaling unrelated processes',
   onPlatforms('linux', 'darwin'),
   async () => {
     const dir = makeRepo();
@@ -255,17 +255,19 @@ test(
       assert.equal(runServer(dir, 'stop').status, 0);
 
       fs.writeFileSync(pidPath, 'invalid pid record\n');
-      assert.match(runServer(dir, 'status').stdout, /server: stopped/);
-      assert.equal(fs.existsSync(pidPath), false, 'status should reclaim an invalid record');
+      assert.match(runServer(dir, 'status').stdout, /legacy pid record/);
+      assert.equal(fs.existsSync(pidPath), true, 'status must preserve an invalid record for the previous version');
+      fs.unlinkSync(pidPath);
 
       assert.ok(typeof unrelated.pid === 'number');
       const unrelatedPid = unrelated.pid;
       assert.ok(await waitFor(() => isProcessAlive(unrelatedPid)), 'unrelated child should be alive');
 
       fs.writeFileSync(pidPath, `${unrelatedPid}\n`);
-      assert.match(runServer(dir, 'stop').stdout, /server is not running/);
+      assert.match(runServer(dir, 'stop').stderr, /legacy pid record/);
       assert.ok(isProcessAlive(unrelatedPid), 'stop must not trust or signal a legacy pid record');
-      assert.equal(fs.existsSync(pidPath), false, 'stop should reclaim the legacy record');
+      assert.equal(fs.existsSync(pidPath), true, 'stop must preserve the legacy record');
+      fs.unlinkSync(pidPath);
 
       const startTime = getProcessStartTime(unrelatedPid);
       assert.ok(startTime !== null, 'unrelated child identity should be queryable');
@@ -276,14 +278,13 @@ test(
       })}\n`;
 
       fs.writeFileSync(pidPath, mismatchedRecord);
-      assert.match(runServer(dir, 'status').stdout, /server: stopped/);
+      assert.match(runServer(dir, 'status').stdout, /legacy pid record/);
       assert.ok(isProcessAlive(unrelatedPid), 'status must not signal an unrelated process');
-      assert.equal(fs.existsSync(pidPath), false, 'status should reclaim the mismatched record');
+      assert.equal(fs.existsSync(pidPath), true, 'status must preserve the mismatched record');
 
-      fs.writeFileSync(pidPath, mismatchedRecord);
-      assert.match(runServer(dir, 'stop').stdout, /server is not running/);
+      assert.match(runServer(dir, 'stop').stderr, /legacy pid record/);
       assert.ok(isProcessAlive(unrelatedPid), 'stop must not signal an unrelated process');
-      assert.equal(fs.existsSync(pidPath), false, 'stop should reclaim the mismatched record');
+      assert.equal(fs.existsSync(pidPath), true, 'stop must preserve the mismatched record');
     } finally {
       if (typeof unrelated.pid === 'number' && isProcessAlive(unrelated.pid)) {
         process.kill(unrelated.pid, 'SIGKILL');

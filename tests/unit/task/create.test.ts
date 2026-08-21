@@ -47,13 +47,13 @@ function fixture(): string {
   return root;
 }
 
-function writeCreateLockOwner(root: string, owner: Readonly<{ pid: number; startTime: string }>): string {
+function writeCreateLockOwner(root: string, owner: Readonly<{ pid: number; startTime: number }>): string {
   const lockRoot = path.join(root, '.agents', 'workspace', '.task-create.lock');
   fs.mkdirSync(lockRoot, { recursive: true });
   const { canonicalRepoRoot, key } = lockKey(root, 'task-create');
   const fixed = path.join(lockRoot, `${key}.lock`);
   fs.writeFileSync(fixed, `${JSON.stringify({
-    version: 1,
+    version: 2,
     pid: owner.pid,
     startTime: owner.startTime,
     token: 'test-owner',
@@ -190,7 +190,7 @@ test('same-second task creation advances to the next free TASK-id', () => {
 test('local task creation reclaims a lock whose process identity is stale', () => {
   const root = fixture();
   try {
-    const fixed = writeCreateLockOwner(root, { pid: 999_999_999, startTime: 'stale' });
+    const fixed = writeCreateLockOwner(root, { pid: 999_999_999, startTime: 0 });
     const result = createLocalTask(candidate, {
       repoRoot: root,
       now: () => new Date(2026, 7, 13, 1, 2, 3),

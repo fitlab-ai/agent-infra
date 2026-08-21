@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { getProcessStartTime, processIdentityMatches } from '../server/process-state.ts';
+import type { ProcessIdentity } from '../server/process-state.ts';
 
 type TaskExecutionLockErrorCode =
   | 'ORCHESTRATION_LOCK_BUSY'
@@ -11,9 +12,9 @@ type TaskExecutionLockErrorCode =
   | 'ORCHESTRATION_LOCK_FAILED';
 
 type TaskExecutionLockOwner = Readonly<{
-  version: 1;
+  version: 2;
   pid: number;
-  startTime: string;
+  startTime: number;
   token: string;
   owner: string;
   canonicalRepoRoot: string;
@@ -28,8 +29,8 @@ type TaskExecutionLockOptions = Readonly<{
   lockRoot?: string;
   token?: () => string;
   now?: () => string;
-  getStartTime?: (pid: number) => string | null;
-  identityMatches?: (record: { version: 1; pid: number; startTime: string }) => boolean;
+  getStartTime?: (pid: number) => number | null;
+  identityMatches?: (identity: ProcessIdentity) => boolean;
   linkSync?: (existingPath: string, newPath: string) => void;
 }>;
 
@@ -84,11 +85,12 @@ function parseOwner(raw: string, key: string): TaskExecutionLockOwner {
     const value = JSON.parse(raw) as Partial<TaskExecutionLockOwner> | null;
     if (
       value !== null
-      && value.version === 1
+      && value.version === 2
       && Number.isSafeInteger(value.pid)
       && (value.pid ?? 0) > 0
-      && typeof value.startTime === 'string'
-      && value.startTime.length > 0
+      && typeof value.startTime === 'number'
+      && Number.isSafeInteger(value.startTime)
+      && value.startTime >= 0
       && typeof value.token === 'string'
       && value.token.length > 0
       && typeof value.owner === 'string'
@@ -164,7 +166,7 @@ function reclaimStaleLock(
 function cleanStaleCandidates(
   lockRoot: string,
   key: string,
-  identityMatches: (record: { version: 1; pid: number; startTime: string }) => boolean
+  identityMatches: (identity: ProcessIdentity) => boolean
 ): void {
   const prefix = `${key}.candidate.`;
   for (const name of fs.readdirSync(lockRoot)) {
@@ -211,7 +213,7 @@ function withTaskExecutionLock<T>(
     );
   }
   const owner: TaskExecutionLockOwner = {
-    version: 1,
+    version: 2,
     pid: process.pid,
     startTime,
     token,

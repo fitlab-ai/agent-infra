@@ -11,7 +11,7 @@ import {
   removePidFileIfMatches,
   writePidRecord
 } from './process-state.ts';
-import type { PidRecord } from './process-state.ts';
+import type { PidRecord, ProcessIdentity, ProcessState } from './process-state.ts';
 
 export { isProcessAlive } from './process-state.ts';
 
@@ -51,13 +51,13 @@ async function waitForProcessIdentity(pid: number, timeoutMs = 2000): Promise<Pi
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const startTime = getProcessStartTime(pid);
-    if (startTime !== null) return { version: 1, pid, startTime };
+    if (startTime !== null) return { version: 2, pid, startTime };
     await delay(25);
   }
   return null;
 }
 
-function terminateIfMatching(record: PidRecord): void {
+function terminateIfMatching(record: ProcessIdentity): void {
   if (!processIdentityMatches(record)) return;
   const command = buildStopCommand(record.pid, process.platform);
   try {
@@ -82,6 +82,9 @@ export async function start({ foreground = false }: StartOptions = {}): Promise<
   if (existing.kind === 'running') {
     process.stdout.write(`server already running (pid ${existing.record.pid})\n`);
     return;
+  }
+  if (existing.kind === 'legacy-json' || existing.kind === 'legacy-pid-only' || existing.kind === 'legacy-unknown') {
+    throw new Error('server: legacy pid record requires the matching previous version to stop it before starting');
   }
   if (existing.kind !== 'missing') {
     removePidFileIfMatches(pidPath, existing.snapshot);
@@ -135,6 +138,9 @@ export async function stop(): Promise<void> {
     return;
   }
   if (state.kind !== 'running') {
+    if (state.kind === 'legacy-json' || state.kind === 'legacy-pid-only' || state.kind === 'legacy-unknown') {
+      throw new Error('server: legacy pid record requires the matching previous version to stop it');
+    }
     removePidFileIfMatches(config.pidFile, state.snapshot);
     process.stdout.write('server is not running (removed stale pid file)\n');
     return;
@@ -170,6 +176,10 @@ export function status(): void {
   const state = readProcessState(config.pidFile);
 
   if (state.kind !== 'running') {
+    if (state.kind === 'legacy-json' || state.kind === 'legacy-pid-only' || state.kind === 'legacy-unknown') {
+      process.stdout.write('server: legacy pid record requires the matching previous version to stop it\n');
+      return;
+    }
     if (state.kind !== 'missing') removePidFileIfMatches(config.pidFile, state.snapshot);
     process.stdout.write('server: stopped\n');
     return;

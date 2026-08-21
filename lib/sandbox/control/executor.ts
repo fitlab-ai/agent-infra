@@ -15,9 +15,9 @@ export type SandboxControlExecutionResult = {
 
 export type PreparedSandboxControlExecution = {
   execution: SandboxControlExecution;
-  start(): void;
+  start(canWrite?: () => boolean): void;
   completion: Promise<SandboxControlExecutionResult>;
-  terminate(): boolean;
+  terminate(updateState?: boolean): boolean;
 };
 
 function safeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -30,11 +30,11 @@ export function nodeEntryArgs(entry: string, args: string[]): string[] {
     : [entry, ...args];
 }
 
-async function waitForStartTime(pid: number, timeoutMs = 2_000): Promise<string> {
+async function waitForStartTime(pid: number, timeoutMs = 2_000): Promise<number> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const startTime = getProcessStartTime(pid);
-    if (startTime) return startTime;
+    if (startTime !== null) return startTime;
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   throw new Error('SANDBOX_CONTROL_EXECUTOR_IDENTITY_UNAVAILABLE');
@@ -73,7 +73,7 @@ export async function prepareSandboxControlExecution(params: {
   });
   const startTime = await waitForStartTime(child.pid);
   const execution: SandboxControlExecution = {
-    version: 1,
+    version: 2,
     generation: params.manifest.generation,
     requestId: params.request.id,
     nonce,
@@ -88,16 +88,20 @@ export async function prepareSandboxControlExecution(params: {
   atomicWriteJson(executionPath(params.manifest, params.request.id), execution);
   return {
     execution,
-    start() {
+    start(canWrite = () => true) {
       if (!child.connected) throw new Error('SANDBOX_CONTROL_EXECUTOR_GATE_CLOSED');
+      if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
       atomicWriteJson(executionPath(params.manifest, params.request.id), { ...execution, phase: 'running', updatedAt: Date.now() });
+      if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
       child.send({ version: 1, nonce });
     },
     completion,
-    terminate() {
-      atomicWriteJson(executionPath(params.manifest, params.request.id), {
-        ...execution, phase: 'terminating', updatedAt: Date.now()
-      });
+    terminate(updateState = true) {
+      if (updateState) {
+        atomicWriteJson(executionPath(params.manifest, params.request.id), {
+          ...execution, phase: 'terminating', updatedAt: Date.now()
+        });
+      }
       return terminateSandboxControlExecution(execution);
     }
   };

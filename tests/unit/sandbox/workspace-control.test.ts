@@ -23,11 +23,13 @@ import {
 import { nodeEntryArgs } from '../../../lib/sandbox/control/executor.ts';
 
 const manifest: SandboxControlManifest = {
-  version: 3,
+  version: 4,
+  engine: 'docker',
   repoRoot: '/repo',
   worktreeRoot: '/worktree',
   project: 'p',
   container: 'p-dev-feature',
+  containerIdentity: { id: 'container-id', labels: {} },
   branch: 'feature',
   mode: 'task-bound',
   taskId: 'TASK-20260809-010203',
@@ -187,7 +189,7 @@ test('control broker rejects legacy manifests with container-only recreation gui
   try {
     await assert.rejects(
       serveSandboxControl(manifestPath),
-      /SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; container-only recreation is required/
+      /SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 4; container-only recreation is required/
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -265,10 +267,10 @@ test('stale lease cleanup removes only a matching expired lease', () => {
   fs.mkdirSync(leaseManifest.publicStatusDir, { recursive: true });
   const leasePath = path.join(root, 'lease.json');
   fs.writeFileSync(leasePath, `${JSON.stringify({
-    version: 1,
+    version: 2,
     generation: leaseManifest.generation,
     nonce: 'lease-nonce',
-    owner: { pid: process.pid, startTime: 'deliberately-not-current' },
+    owner: { pid: process.pid, startTime: 0 },
     issuedAt: 1,
     expiresAt: 2,
     taskId: leaseManifest.taskId,
@@ -279,10 +281,10 @@ test('stale lease cleanup removes only a matching expired lease', () => {
     assert.equal(cleanupStaleSandboxControlLease(leaseManifest, 3), true);
     assert.equal(fs.existsSync(leasePath), false);
     fs.writeFileSync(leasePath, `${JSON.stringify({
-      version: 1,
+      version: 2,
       generation: 'previous-generation',
       nonce: 'stale-generation',
-      owner: { pid: process.pid, startTime: 'previous-owner' },
+      owner: { pid: process.pid, startTime: 0 },
       issuedAt: 3,
       expiresAt: 30,
       taskId: leaseManifest.taskId,

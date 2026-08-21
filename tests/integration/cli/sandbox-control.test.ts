@@ -6,9 +6,13 @@ import path from 'node:path';
 import test from 'node:test';
 import { requestSandboxControl, requestSandboxTaskCreate } from '../../../lib/sandbox/control/client.ts';
 import {
+  garbageCollectSandboxControlRoot,
   quiesceSandboxControlRoot,
-  readSandboxControlManifest
+  readSandboxControlManifest,
+  removeSandboxControlRoot
 } from '../../../lib/sandbox/control/lifecycle.ts';
+import { DEFAULT_SANDBOX_CONTROL_TIMING } from '../../../lib/sandbox/control/protocol.ts';
+import { serveSandboxControl } from '../../../lib/sandbox/control/server.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
 import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
 import { onPlatforms } from '../../helpers.ts';
@@ -34,6 +38,32 @@ function waitForHealthyStatus(statusDir: string, timeoutMs: number): void {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
   }
   throw new Error(`Timed out waiting for healthy status in ${statusDir}`);
+}
+
+async function waitForStatusStateAsync(statusDir: string, state: string, timeoutMs: number): Promise<void> {
+  const statusPath = path.join(statusDir, 'status.json');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (JSON.parse(fs.readFileSync(statusPath, 'utf8')).state === state) return;
+    } catch {
+      // Atomic publication may not have completed yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for ${state} status in ${statusDir}`);
+}
+
+function monotonicNowMs(): number {
+  return Number(process.hrtime.bigint() / 1_000_000n);
+}
+
+function assertMinimumIntervals(timestamps: number[], expectedMs: number[], label: string): void {
+  assert.equal(timestamps.length, expectedMs.length + 1, `${label} sample count`);
+  for (let index = 0; index < expectedMs.length; index += 1) {
+    const actualMs = timestamps[index + 1]! - timestamps[index]!;
+    assert.ok(actualMs >= expectedMs[index]! - 2, `${label} interval ${index}: ${actualMs}ms`);
+  }
 }
 
 async function stopBroker(pid: number): Promise<void> {
@@ -67,7 +97,8 @@ function writeControlManifest(root: string, branch: string, generation = 'lifecy
   const processingDir = path.join(root, 'processing');
   for (const directory of [channelDir, publicStatusDir, processingDir]) fs.mkdirSync(directory, { recursive: true });
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 3, repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature', branch,
+    version: 4, engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    containerIdentity: { id: 'container-id', labels: {} }, branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'lifecycle-secret', generation,
     channelDir, publicStatusDir, processingDir
   })}\n`);
@@ -94,15 +125,148 @@ test('sandbox control lifecycle accepts a stale broker when the manifest is miss
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-stale-broker-'));
   try {
     fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
-      version: 2,
+      version: 3,
       pid: 999_999_999,
-      startTime: 'gone',
+      startTime: 0,
+      brokerId: 'stale-broker',
       token: 'stale-token',
       generation: 'stale-generation'
     })}\n`);
 
     assert.equal(await quiesceSandboxControlRoot(root, { timeoutMs: 100 }), 'stale');
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ordinary sandbox control GC removes only a verified absent-container root', async () => {
+  const absentRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-gc-absent-'));
+  const foundRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-gc-found-'));
+  const unknownRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-gc-unknown-'));
+  try {
+    writeControlManifest(absentRoot, initializeRepository(absentRoot), 'gc-absent-generation');
+    await garbageCollectSandboxControlRoot(absentRoot, {
+      timeoutMs: 200,
+      inspectContainer: async () => ({ state: 'absent', id: 'container-id' })
+    });
+    assert.equal(fs.existsSync(absentRoot), false);
+
+    writeControlManifest(foundRoot, initializeRepository(foundRoot), 'gc-found-generation');
+    await assert.rejects(
+      () => garbageCollectSandboxControlRoot(foundRoot, {
+        timeoutMs: 200,
+        inspectContainer: async () => ({ state: 'found', id: 'container-id', running: false, labels: {} })
+      }),
+      /SANDBOX_CONTROL_CONTAINER_REAPPEARED/
+    );
+    assert.equal(fs.existsSync(foundRoot), true);
+
+    writeControlManifest(unknownRoot, initializeRepository(unknownRoot), 'gc-unknown-generation');
+    await assert.rejects(
+      () => garbageCollectSandboxControlRoot(unknownRoot, {
+        timeoutMs: 200,
+        inspectContainer: async () => ({ state: 'unknown', reason: 'probe failed' })
+      }),
+      /SANDBOX_CONTROL_CONTAINER_UNKNOWN/
+    );
+    assert.equal(fs.existsSync(unknownRoot), true);
+  } finally {
+    for (const root of [absentRoot, foundRoot, unknownRoot]) fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox control removal gives container operations a bounded pre-force budget', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-deadline-'));
+  let callbackTimeout = 0;
+  let callbackFinished!: () => void;
+  const callbackDone = new Promise<void>((resolve) => { callbackFinished = resolve; });
+  try {
+    writeControlManifest(root, initializeRepository(root), 'remove-deadline-generation');
+    await assert.rejects(
+      () => removeSandboxControlRoot(root, {
+        timeoutMs: 200,
+        inspectContainer: async () => ({ state: 'found', id: 'container-id', running: false, labels: {} }),
+        removeContainer: async (timeoutMs) => {
+          callbackTimeout = timeoutMs;
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          callbackFinished();
+        }
+      }),
+      /SANDBOX_CONTROL_CONTAINER_STILL_EXISTS/
+    );
+    await callbackDone;
+    assert.equal(callbackTimeout > 0, true);
+    assert.equal(callbackTimeout <= 200, true);
+    assert.equal(fs.existsSync(root), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox control removal completes all stages for stubborn broker and execution', onPlatforms('linux', 'darwin'), async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-stages-'));
+  const brokerReadyPath = path.join(root, 'broker-ready');
+  const executionReadyPath = path.join(root, 'execution-ready');
+  const stubbornScript = "const fs = require('node:fs'); process.on('SIGTERM', () => {}); fs.writeFileSync(process.argv[1], 'ready'); setInterval(() => {}, 1000);";
+  const brokerProcess = spawn(process.execPath, ['--eval', stubbornScript, brokerReadyPath], { stdio: 'ignore' });
+  const executionProcess = spawn(process.execPath, ['--eval', stubbornScript, executionReadyPath], {
+    detached: true,
+    stdio: 'ignore'
+  });
+  const stages: string[] = [];
+  let inspectCalls = 0;
+  try {
+    waitForFile(brokerReadyPath, 5_000);
+    waitForFile(executionReadyPath, 5_000);
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, 'remove-stages-generation');
+    const brokerStartTime = getProcessStartTime(brokerProcess.pid!);
+    const executionStartTime = getProcessStartTime(executionProcess.pid!);
+    assert.ok(brokerStartTime);
+    assert.ok(executionStartTime);
+    fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
+      version: 3, pid: brokerProcess.pid, startTime: brokerStartTime, brokerId: 'stubborn-broker',
+      token: 'lifecycle-secret', generation: 'remove-stages-generation'
+    })}\n`);
+    fs.writeFileSync(path.join(root, 'public', 'status.json'), `${JSON.stringify({
+      version: 2, generation: 'remove-stages-generation',
+      broker: { pid: brokerProcess.pid, startTime: brokerStartTime, brokerId: 'stubborn-broker' },
+      state: 'busy', reasonCode: null, activeRequestId: 'stubborn-request', updatedAt: Date.now()
+    })}\n`);
+    const executionDir = path.join(root, 'processing', 'stubborn-request');
+    fs.mkdirSync(executionDir);
+    fs.writeFileSync(path.join(executionDir, 'execution.json'), `${JSON.stringify({
+      version: 2, generation: 'remove-stages-generation', requestId: 'stubborn-request', nonce: 'stubborn-nonce',
+      child: { pid: executionProcess.pid, startTime: executionStartTime, processGroupId: executionProcess.pid },
+      phase: 'running', updatedAt: Date.now()
+    })}\n`);
+
+    await removeSandboxControlRoot(root, {
+      timeoutMs: 1_000,
+      inspectContainer: async () => {
+        inspectCalls += 1;
+        return inspectCalls === 1
+          ? { state: 'found', id: 'container-id', running: true, labels: {} }
+          : { state: 'absent', id: 'container-id' };
+      },
+      removeContainer: async () => {
+        stages.push('container-remove');
+        assert.equal(isProcessAlive(brokerProcess.pid!), true);
+        assert.equal(isProcessAlive(executionProcess.pid!), true);
+      }
+    });
+
+    assert.deepEqual(stages, ['container-remove']);
+    assert.equal(inspectCalls, 2);
+    assert.equal(isProcessAlive(brokerProcess.pid!), false);
+    assert.equal(isProcessAlive(executionProcess.pid!), false);
+    assert.equal(fs.existsSync(root), false);
+  } finally {
+    for (const child of [executionProcess, brokerProcess]) {
+      if (child.pid && isProcessAlive(child.pid)) {
+        try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already exited */ }
+      }
+    }
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -119,13 +283,13 @@ test('sandbox control lifecycle terminates a live execution before accepting a s
     const executionStartTime = getProcessStartTime(execution.pid!);
     assert.ok(executionStartTime);
     fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
-      version: 2, pid: 999_999_999, startTime: 'gone',
+      version: 3, pid: 999_999_999, startTime: 0, brokerId: 'stale-broker',
       token: 'lifecycle-secret', generation: 'stale-execution-generation'
     })}\n`);
     const executionDir = path.join(root, 'processing', 'stale-execution-request');
     fs.mkdirSync(executionDir);
     fs.writeFileSync(path.join(executionDir, 'execution.json'), `${JSON.stringify({
-      version: 1, generation: 'stale-execution-generation', requestId: 'stale-execution-request',
+      version: 2, generation: 'stale-execution-generation', requestId: 'stale-execution-request',
       nonce: 'stale-execution-nonce',
       child: { pid: execution.pid, startTime: executionStartTime, processGroupId: execution.pid },
       phase: 'running', updatedAt: Date.now()
@@ -153,12 +317,12 @@ test('sandbox control lifecycle excludes a concurrent broker recovery after quie
     const branch = initializeRepository(root);
     const manifestPath = writeControlManifest(root, branch, 'recovery-quiesce-generation');
     fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
-      version: 2, pid: 999_999_999, startTime: 'gone',
+      version: 3, pid: 999_999_999, startTime: 0, brokerId: 'stale-broker',
       token: 'lifecycle-secret', generation: 'recovery-quiesce-generation'
     })}\n`);
     fs.writeFileSync(path.join(root, 'public', 'status.json'), `${JSON.stringify({
-      version: 1, generation: 'recovery-quiesce-generation',
-      broker: { pid: 999_999_999, startTime: 'gone' }, state: 'healthy',
+      version: 2, generation: 'recovery-quiesce-generation',
+      broker: { pid: 999_999_999, startTime: 0, brokerId: 'stale-broker' }, state: 'healthy',
       reasonCode: null, activeRequestId: null, updatedAt: Date.now()
     })}\n`);
 
@@ -226,22 +390,22 @@ test('sandbox control lifecycle terminates execution trees before forcing an unr
     assert.ok(brokerStartTime);
     assert.ok(executionStartTime);
     fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
-      version: 2, pid: broker.pid, startTime: brokerStartTime,
+      version: 3, pid: broker.pid, startTime: brokerStartTime, brokerId: 'test-broker',
       token: 'lifecycle-secret', generation: 'forced-generation'
     })}\n`);
     fs.writeFileSync(path.join(root, 'public', 'status.json'), `${JSON.stringify({
-      version: 1, generation: 'forced-generation', broker: { pid: broker.pid, startTime: brokerStartTime },
+      version: 2, generation: 'forced-generation', broker: { pid: broker.pid, startTime: brokerStartTime, brokerId: 'test-broker' },
       state: 'healthy', reasonCode: null, activeRequestId: 'forced-request', updatedAt: Date.now()
     })}\n`);
     const executionDir = path.join(root, 'processing', 'forced-request');
     fs.mkdirSync(executionDir);
     fs.writeFileSync(path.join(executionDir, 'execution.json'), `${JSON.stringify({
-      version: 1, generation: 'forced-generation', requestId: 'forced-request', nonce: 'forced-nonce',
+      version: 2, generation: 'forced-generation', requestId: 'forced-request', nonce: 'forced-nonce',
       child: { pid: execution.pid, startTime: executionStartTime, processGroupId: execution.pid },
       phase: 'running', updatedAt: Date.now()
     })}\n`);
 
-    assert.equal(await quiesceSandboxControlRoot(root, { timeoutMs: 100 }), 'stopped');
+    assert.equal(await quiesceSandboxControlRoot(root, { timeoutMs: 1_000 }), 'stopped');
     assert.equal(isProcessAlive(execution.pid!), false);
     assert.equal(isProcessAlive(broker.pid!), false);
     assert.equal(fs.existsSync(manifestPath), true);
@@ -251,6 +415,170 @@ test('sandbox control lifecycle terminates execution trees before forcing an unr
         try { process.kill(child.pid, 'SIGKILL'); } catch { /* already exited */ }
       }
     }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox broker uses configured idle heartbeat and parked binding backoff intervals', async () => {
+  assert.deepEqual(DEFAULT_SANDBOX_CONTROL_TIMING, {
+    controlTickMs: 250,
+    parkedBindingInitialMs: 1_000,
+    slowCheckMs: 5_000,
+    containerHeartbeatMs: 5_000,
+    quiesceDeadlineMs: 7_000
+  });
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-timing-'));
+  try {
+    const manifestPath = writeControlManifest(root, initializeRepository(root), 'timing-generation');
+    const statusDir = path.join(root, 'public');
+    const timing = {
+      controlTickMs: 5,
+      parkedBindingInitialMs: 10,
+      slowCheckMs: 30,
+      containerHeartbeatMs: 20,
+      quiesceDeadlineMs: 200
+    };
+    const controller = new AbortController();
+    let heartbeatQueries = 0;
+    const heartbeatTimes: number[] = [];
+    const serving = serveSandboxControl(manifestPath, controller.signal, {
+      timing,
+      inspectContainer: async () => {
+        heartbeatQueries += 1;
+        heartbeatTimes.push(monotonicNowMs());
+        if (heartbeatQueries >= 2) controller.abort();
+        return { state: 'found', id: 'container-id', running: false, labels: {} };
+      }
+    });
+    let heartbeatWatchdogFired = false;
+    const heartbeatWatchdog = setTimeout(() => {
+      heartbeatWatchdogFired = true;
+      controller.abort();
+    }, 1_000);
+    try {
+      await waitForStatusStateAsync(statusDir, 'healthy', 2_000);
+      await serving;
+    } finally {
+      clearTimeout(heartbeatWatchdog);
+      if (!controller.signal.aborted) controller.abort();
+      await serving;
+    }
+    assert.equal(heartbeatWatchdogFired, false);
+    assert.equal(heartbeatQueries, 2);
+    assertMinimumIntervals(heartbeatTimes, [timing.containerHeartbeatMs], 'container heartbeat');
+    assert.equal(fs.readdirSync(path.join(root, 'processing')).length, 0);
+
+    const parkedController = new AbortController();
+    let bindingChecks = 0;
+    const parkedTiming = { ...timing, containerHeartbeatMs: 1_000 };
+    const bindingTimes: number[] = [];
+    const parkedServing = serveSandboxControl(manifestPath, parkedController.signal, {
+      timing: parkedTiming,
+      inspectContainer: async () => ({ state: 'found', id: 'container-id', running: false, labels: {} }),
+      bindingCheck: () => {
+        bindingChecks += 1;
+        bindingTimes.push(monotonicNowMs());
+        if (bindingChecks >= 5) parkedController.abort();
+        return 'SANDBOX_WORKTREE_BINDING_LOST';
+      }
+    });
+    let parkedWatchdogFired = false;
+    const parkedWatchdog = setTimeout(() => {
+      parkedWatchdogFired = true;
+      parkedController.abort();
+    }, 1_000);
+    try {
+      await waitForStatusStateAsync(statusDir, 'parked', 2_000);
+      await parkedServing;
+    } finally {
+      clearTimeout(parkedWatchdog);
+      if (!parkedController.signal.aborted) parkedController.abort();
+      await parkedServing;
+    }
+    assert.equal(parkedWatchdogFired, false);
+    assert.equal(bindingChecks, 5);
+    assertMinimumIntervals(bindingTimes, [
+      parkedTiming.parkedBindingInitialMs,
+      parkedTiming.parkedBindingInitialMs * 2,
+      parkedTiming.slowCheckMs,
+      parkedTiming.slowCheckMs
+    ], 'parked binding');
+    assert.equal(fs.readdirSync(path.join(root, 'processing')).length, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox broker self-GCs its control root after an authoritative absent heartbeat', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-heartbeat-absent-'));
+  const controller = new AbortController();
+  let heartbeatQueries = 0;
+  try {
+    const manifestPath = writeControlManifest(root, initializeRepository(root), 'heartbeat-absent-generation');
+    const serving = serveSandboxControl(manifestPath, controller.signal, {
+      timing: {
+        controlTickMs: 5,
+        parkedBindingInitialMs: 10,
+        slowCheckMs: 30,
+        containerHeartbeatMs: 5,
+        quiesceDeadlineMs: 200
+      },
+      inspectContainer: async () => {
+        heartbeatQueries += 1;
+        return { state: 'absent', id: 'container-id' };
+      }
+    });
+    const deadline = Date.now() + 2_000;
+    while (fs.existsSync(root) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await serving;
+    assert.equal(fs.existsSync(root), false);
+    assert.equal(heartbeatQueries >= 2, true);
+  } finally {
+    controller.abort();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox broker retains ownership and backs off after an unknown heartbeat', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-heartbeat-unknown-'));
+  const controller = new AbortController();
+  let heartbeatQueries = 0;
+  try {
+    const manifestPath = writeControlManifest(root, initializeRepository(root), 'heartbeat-unknown-generation');
+    const statusDir = path.join(root, 'public');
+    const serving = serveSandboxControl(manifestPath, controller.signal, {
+      timing: {
+        controlTickMs: 5,
+        parkedBindingInitialMs: 10,
+        slowCheckMs: 30,
+        containerHeartbeatMs: 5,
+        quiesceDeadlineMs: 200
+      },
+      inspectContainer: async () => {
+        heartbeatQueries += 1;
+        return heartbeatQueries < 3
+          ? { state: 'unknown', reason: 'probe unavailable' }
+          : { state: 'found', id: 'container-id', running: false, labels: {} };
+      }
+    });
+    await waitForStatusStateAsync(statusDir, 'parked', 2_000);
+    const parkedStatus = JSON.parse(fs.readFileSync(path.join(statusDir, 'status.json'), 'utf8'));
+    assert.equal(parkedStatus.reasonCode, 'SANDBOX_CONTROL_CONTAINER_UNKNOWN');
+    const heartbeatDeadline = Date.now() + 2_000;
+    while (heartbeatQueries < 3 && Date.now() < heartbeatDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(heartbeatQueries >= 3, true);
+    assert.equal(fs.existsSync(root), true);
+    assert.equal(fs.existsSync(path.join(root, 'channel')), true);
+    assert.equal(fs.existsSync(path.join(root, 'broker.json')), true);
+    controller.abort();
+    await serving;
+  } finally {
+    controller.abort();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -266,7 +594,8 @@ test('sandbox broker startup resolves only after matching status is published', 
   fs.mkdirSync(processingDir);
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 3, repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature', branch,
+    version: 4, engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    containerIdentity: { id: 'container-id', labels: {} }, branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'readiness-secret', generation: 'readiness-generation',
     channelDir, publicStatusDir: statusDir, processingDir
   })}\n`);
@@ -297,12 +626,13 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
   fs.mkdirSync(processingDir);
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 3, repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature', branch,
+    version: 4, engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    containerIdentity: { id: 'container-id', labels: {} }, branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'owner-secret', generation: 'owner-generation',
     channelDir, publicStatusDir: statusDir, processingDir
   })}\n`);
   fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
-    version: 1, pid: 999_999_999, startTime: 'stale-owner'
+    version: 3, pid: 999_999_999, startTime: 0, brokerId: 'stale-owner', token: 'owner-secret', generation: 'owner-generation'
   })}\n`);
   let brokerPid: number | null = null;
   try {
@@ -317,7 +647,8 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
     assert.equal(second.pid, first.pid);
     assert.equal(second.startTime, first.startTime);
     fs.writeFileSync(manifestPath, `${JSON.stringify({
-      version: 3, repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature', branch,
+      version: 4, engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+      containerIdentity: { id: 'container-id', labels: {} }, branch,
       mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'rotated-owner-secret', generation: 'rotated-generation',
       channelDir, publicStatusDir: statusDir, processingDir
     })}\n`);
@@ -325,9 +656,21 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
     const rotated = JSON.parse(fs.readFileSync(path.join(root, 'broker.json'), 'utf8'));
     brokerPid = rotated.pid;
     assert.notEqual(rotated.pid, first.pid);
+    waitForHealthyStatus(statusDir, 2_000);
     const status = JSON.parse(fs.readFileSync(path.join(statusDir, 'status.json'), 'utf8'));
     assert.equal(status.generation, 'rotated-generation');
     assert.equal(status.broker.pid, rotated.pid);
+    const oldOwnerDeadline = Date.now() + 2_000;
+    while (isProcessAlive(first.pid) && Date.now() < oldOwnerDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(isProcessAlive(first.pid), false);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'broker.json'), 'utf8')).brokerId, rotated.brokerId);
+    const statusAfterReplacement = fs.readFileSync(path.join(statusDir, 'status.json'), 'utf8');
+    const auditAfterReplacement = fs.readFileSync(path.join(root, 'audit.ndjson'), 'utf8');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(fs.readFileSync(path.join(statusDir, 'status.json'), 'utf8'), statusAfterReplacement);
+    assert.equal(fs.readFileSync(path.join(root, 'audit.ndjson'), 'utf8'), auditAfterReplacement);
   } finally {
     if (brokerPid) {
       await stopBroker(brokerPid);
@@ -345,10 +688,12 @@ test('sandbox control client tolerates a transient torn response but rejects sta
   fs.mkdirSync(requestsDir, { recursive: true });
   fs.mkdirSync(responsesDir);
   fs.mkdirSync(statusDir);
+  const responseBrokerStartTime = getProcessStartTime(process.pid);
+  assert.ok(responseBrokerStartTime);
   fs.writeFileSync(path.join(statusDir, 'status.json'), `${JSON.stringify({
-    version: 1,
+    version: 2,
     generation: 'response-generation',
-    broker: { pid: process.pid, startTime: 'test-broker' },
+    broker: { pid: process.pid, startTime: responseBrokerStartTime, brokerId: 'test-broker' },
     state: 'healthy',
     reasonCode: null,
     activeRequestId: null,
@@ -439,11 +784,13 @@ test('sandbox control client and broker exchange a task-bound response', async (
   fs.mkdirSync(processingDir);
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 3,
+    version: 4,
+    engine: 'docker',
     repoRoot: root,
     worktreeRoot: root,
     project: 'demo',
     container: 'demo-dev-feature',
+    containerIdentity: { id: 'container-id', labels: {} },
     branch,
     mode: 'task-bound',
     taskId: 'TASK-20260809-010203',
@@ -501,7 +848,8 @@ test('branch-only broker persists a typed task-create request on the host', asyn
   fs.copyFileSync(path.resolve('.agents/templates/task.md'), path.join(root, '.agents', 'templates', 'task.md'));
   fs.copyFileSync(path.resolve('.agents/skills/create-task/config/verify.json'), path.join(root, '.agents', 'skills', 'create-task', 'config', 'verify.json'));
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 3, repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature', branch,
+    version: 4, engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    containerIdentity: { id: 'container-id', labels: {} }, branch,
     mode: 'branch-only', taskId: null, token, generation, channelDir,
     publicStatusDir: statusDir, processingDir
   })}\n`);
@@ -583,7 +931,8 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   fs.mkdirSync(path.join(processingDir, unacceptedId), { recursive: true });
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 3, repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature', branch,
+    version: 4, engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    containerIdentity: { id: 'container-id', labels: {} }, branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'recovery-secret', generation,
     channelDir, publicStatusDir: statusDir, processingDir
   })}\n`);
@@ -592,8 +941,8 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   };
   fs.writeFileSync(path.join(responsesDir, `${terminalId}.json`), `${JSON.stringify(terminalResponse)}\n`);
   fs.writeFileSync(path.join(processingDir, terminalId, 'execution.json'), `${JSON.stringify({
-    version: 1, generation, requestId: terminalId, nonce: 'recovery-nonce',
-    child: { pid: 999_999_999, startTime: 'gone', processGroupId: null },
+    version: 2, generation, requestId: terminalId, nonce: 'recovery-nonce',
+    child: { pid: 999_999_999, startTime: 0, processGroupId: null },
     phase: 'running', updatedAt: Date.now()
   })}\n`);
   const child = spawn(

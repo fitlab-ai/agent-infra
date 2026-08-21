@@ -116,7 +116,7 @@ test('control materialization rotates token and generation and creates isolated 
   assert.deepEqual(fs.readdirSync(path.join(controlRoot, 'consumed')), []);
   assert.equal(path.dirname(path.join(controlRoot, 'consumed')), controlRoot);
   const manifest = JSON.parse(fs.readFileSync(second.manifestPath, 'utf8'));
-  assert.equal(manifest.version, 3);
+  assert.equal(manifest.version, 4);
   assert.equal(manifest.generation, second.generation);
   assert.equal(manifest.publicStatusDir, path.join(controlRoot, 'public'));
   assert.equal(manifest.processingDir, path.join(controlRoot, 'processing'));

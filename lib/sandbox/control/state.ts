@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { buildProcessTreeStopCommand } from '../../server/process-control.ts';
 import { processIdentityMatches } from '../../server/process-state.ts';
+import type { ProcessIdentity } from '../../server/process-state.ts';
 import type {
   SandboxControlExecution,
   SandboxControlLease,
@@ -41,14 +42,14 @@ export function statusPath(manifest: SandboxControlManifest): string {
 
 export function writeSandboxControlStatus(
   manifest: SandboxControlManifest,
-  broker: { pid: number; startTime: string },
+  broker: ProcessIdentity & { brokerId: string },
   state: SandboxControlStatus['state'],
   reasonCode: string | null,
   activeRequestId: string | null,
   now = Date.now()
 ): SandboxControlStatus {
   const status: SandboxControlStatus = {
-    version: 1, generation: manifest.generation, broker, state, reasonCode, activeRequestId, updatedAt: now
+    version: 2, generation: manifest.generation, broker, state, reasonCode, activeRequestId, updatedAt: now
   };
   atomicWriteJson(statusPath(manifest), status, 0o600, false);
   return status;
@@ -56,8 +57,10 @@ export function writeSandboxControlStatus(
 
 export function parseSandboxControlStatus(value: unknown): SandboxControlStatus {
   const status = value as Partial<SandboxControlStatus> | null;
-  if (!status || status.version !== 1 || typeof status.generation !== 'string'
-    || !status.broker || !Number.isSafeInteger(status.broker.pid) || typeof status.broker.startTime !== 'string'
+  if (!status || status.version !== 2 || typeof status.generation !== 'string'
+    || !status.broker || !Number.isSafeInteger(status.broker.pid) || typeof status.broker.startTime !== 'number'
+    || !Number.isSafeInteger(status.broker.startTime) || typeof status.broker.brokerId !== 'string'
+    || status.broker.brokerId.length === 0
     || !['starting', 'healthy', 'busy', 'parked'].includes(status.state ?? '')
     || (status.reasonCode !== null && typeof status.reasonCode !== 'string')
     || (status.activeRequestId !== null && typeof status.activeRequestId !== 'string')
@@ -73,9 +76,10 @@ export function readActiveLease(manifest: SandboxControlManifest, now = Date.now
   const filePath = path.join(path.dirname(manifest.publicStatusDir), 'lease.json');
   if (!fs.existsSync(filePath)) return null;
   const lease = readJsonFile(filePath) as Partial<SandboxControlLease> | null;
-  if (!lease || lease.version !== 1
+  if (!lease || lease.version !== 2
     || typeof lease.nonce !== 'string' || !lease.owner || !Number.isSafeInteger(lease.owner.pid)
-    || typeof lease.owner.startTime !== 'string' || !Number.isSafeInteger(lease.issuedAt)
+    || typeof lease.owner.startTime !== 'number' || !Number.isSafeInteger(lease.owner.startTime)
+    || !Number.isSafeInteger(lease.issuedAt)
     || !Number.isSafeInteger(lease.expiresAt) || typeof lease.generation !== 'string'
     || (lease.taskId !== null && typeof lease.taskId !== 'string')
     || typeof lease.branch !== 'string' || typeof lease.reason !== 'string') {
@@ -91,9 +95,10 @@ export function cleanupStaleSandboxControlLease(manifest: SandboxControlManifest
   if (!fs.existsSync(filePath)) return false;
   const raw = fs.readFileSync(filePath, 'utf8');
   const lease = JSON.parse(raw) as Partial<SandboxControlLease> | null;
-  if (!lease || lease.version !== 1
+  if (!lease || lease.version !== 2
     || typeof lease.nonce !== 'string' || !lease.owner || !Number.isSafeInteger(lease.owner.pid)
-    || typeof lease.owner.startTime !== 'string' || !Number.isSafeInteger(lease.issuedAt)
+    || typeof lease.owner.startTime !== 'number' || !Number.isSafeInteger(lease.owner.startTime)
+    || !Number.isSafeInteger(lease.issuedAt)
     || !Number.isSafeInteger(lease.expiresAt) || typeof lease.generation !== 'string'
     || (lease.taskId !== null && typeof lease.taskId !== 'string')
     || typeof lease.branch !== 'string' || typeof lease.reason !== 'string') {
@@ -101,7 +106,7 @@ export function cleanupStaleSandboxControlLease(manifest: SandboxControlManifest
   }
   const stale = lease.generation !== manifest.generation || lease.taskId !== manifest.taskId
     || lease.branch !== manifest.branch || lease.expiresAt! <= now || !processIdentityMatches({
-    version: 1, pid: lease.owner.pid!, startTime: lease.owner.startTime!
+    pid: lease.owner.pid!, startTime: lease.owner.startTime!
   });
   if (!stale) return false;
   if (fs.readFileSync(filePath, 'utf8') !== raw) throw new Error('SANDBOX_CONTROL_LEASE_OWNERSHIP_LOST');
@@ -131,9 +136,10 @@ export function executionPath(manifest: SandboxControlManifest, requestId: strin
 
 export function readExecution(filePath: string): SandboxControlExecution {
   const execution = readJsonFile(filePath) as Partial<SandboxControlExecution> | null;
-  if (!execution || execution.version !== 1 || typeof execution.generation !== 'string'
+  if (!execution || execution.version !== 2 || typeof execution.generation !== 'string'
     || typeof execution.requestId !== 'string' || typeof execution.nonce !== 'string'
-    || !execution.child || !Number.isSafeInteger(execution.child.pid) || typeof execution.child.startTime !== 'string'
+    || !execution.child || !Number.isSafeInteger(execution.child.pid) || typeof execution.child.startTime !== 'number'
+    || !Number.isSafeInteger(execution.child.startTime)
     || !['prepared', 'running', 'terminating'].includes(execution.phase ?? '')
     || !Number.isSafeInteger(execution.updatedAt)) throw new Error('SANDBOX_CONTROL_EXECUTION_INVALID');
   return execution as SandboxControlExecution;
@@ -141,7 +147,13 @@ export function readExecution(filePath: string): SandboxControlExecution {
 
 export function terminateSandboxControlExecution(
   execution: SandboxControlExecution,
-  options: { platform?: NodeJS.Platform; timeoutMs?: number } = {}
+  options: {
+    platform?: NodeJS.Platform;
+    timeoutMs?: number;
+    deadlineAt?: number;
+    forceAt?: number;
+    allowForce?: boolean;
+  } = {}
 ): boolean {
   const platform = options.platform ?? process.platform;
   const processGroupId = execution.child.processGroupId;
@@ -163,7 +175,7 @@ export function terminateSandboxControlExecution(
   };
   const treeAlive = (): boolean => {
     if (platform === 'win32' || !processGroupId) {
-      return processIdentityMatches({ version: 1, pid: execution.child.pid, startTime: execution.child.startTime });
+      return processIdentityMatches({ pid: execution.child.pid, startTime: execution.child.startTime });
     }
     return processGroupAlive(processGroupId);
   };
@@ -175,18 +187,23 @@ export function terminateSandboxControlExecution(
   } catch {
     // The identity check below distinguishes an already-exited tree from a failed termination.
   }
-  const deadline = Date.now() + (options.timeoutMs ?? SANDBOX_CONTROL_EXECUTION_STOP_MS);
-  while (Date.now() < deadline) {
+  const deadline = options.deadlineAt ?? (Date.now() + (options.timeoutMs ?? SANDBOX_CONTROL_EXECUTION_STOP_MS));
+  const forceAt = options.forceAt ?? (options.deadlineAt === undefined
+    ? deadline
+    : Math.min(deadline, Date.now() + Math.floor(Math.max(0, deadline - Date.now()) / 2)));
+  while (Date.now() < forceAt) {
     if (!treeAlive()) return true;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
   }
-  if (platform !== 'win32') {
+  if (platform !== 'win32' && options.allowForce !== false
+    && (options.deadlineAt === undefined || Date.now() < deadline)) {
     try {
       process.kill(processGroupId ? -processGroupId : execution.child.pid, 'SIGKILL');
     } catch {
       // The final identity check handles an already-exited tree.
     }
-    const killDeadline = Date.now() + (options.timeoutMs ?? SANDBOX_CONTROL_EXECUTION_STOP_MS);
+    const killDeadline = options.deadlineAt
+      ?? (Date.now() + (options.timeoutMs ?? SANDBOX_CONTROL_EXECUTION_STOP_MS));
     while (Date.now() < killDeadline) {
       if (!treeAlive()) return true;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);

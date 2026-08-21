@@ -170,14 +170,24 @@ test("sandbox rm retries control and workspace cleanup after the container is al
     const controlRoot = path.join(config.controlBase, config.project, container, "branch-only");
     const siblingControlRoot = path.join(path.dirname(controlRoot), "another-task");
     const workspaceViewRoot = path.join(config.workspaceViewBase, config.project, container, "branch-only");
+    const channelDir = path.join(controlRoot, "channel");
+    const processingDir = path.join(controlRoot, "processing");
+    fs.mkdirSync(channelDir, { recursive: true });
     fs.mkdirSync(path.join(controlRoot, "public"), { recursive: true });
+    fs.mkdirSync(processingDir, { recursive: true });
     fs.mkdirSync(siblingControlRoot, { recursive: true });
     fs.writeFileSync(path.join(siblingControlRoot, "keep"), "sibling\n");
     fs.mkdirSync(workspaceViewRoot, { recursive: true });
+    fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+      version: 4, engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
+      project: "demo", container, containerIdentity: { id: "fixture-container-id", labels: {} }, branch,
+      mode: "branch-only", taskId: null, token: "partial-secret", generation: "partial-generation",
+      channelDir, publicStatusDir: path.join(controlRoot, "public"), processingDir
+    })}\n`);
     fs.writeFileSync(path.join(controlRoot, "public", "status.json"), `${JSON.stringify({
-      version: 1,
+      version: 2,
       generation: "partial-generation",
-      broker: { pid: 999_999_999, startTime: "gone" },
+      broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
       state: "healthy",
       reasonCode: null,
       activeRequestId: null,
@@ -185,7 +195,14 @@ test("sandbox rm retries control and workspace cleanup after the container is al
     })}\n`);
     const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
 
-    await rm.rmOne(config, [], branch, {
+    const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+    const previousPath = process.env.PATH;
+    const previousDockerLog = process.env.DOCKER_LOG_PATH;
+    process.env.PATH = `${fixture.binDir}${path.delimiter}${previousPath ?? ""}`;
+    process.env.DOCKER_LOG_PATH = fixture.logPath;
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+    try {
+      await rm.rmOne(config, [], branch, {
       assumeYes: true,
       target: {
         branch,
@@ -198,7 +215,15 @@ test("sandbox rm retries control and workspace cleanup after the container is al
         controlRoots: [controlRoot],
         workspaceViewRoots: [workspaceViewRoot]
       }
-    });
+      });
+    } finally {
+      if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+      else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousDockerLog === undefined) delete process.env.DOCKER_LOG_PATH;
+      else process.env.DOCKER_LOG_PATH = previousDockerLog;
+    }
 
     assert.equal(fs.existsSync(controlRoot), false);
     assert.equal(fs.existsSync(workspaceViewRoot), false);

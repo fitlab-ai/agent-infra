@@ -1,13 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { getProcessStartTime } from '../../server/process-state.ts';
 import { assertGitWorktreeBinding } from '../../git/worktree-identity.ts';
 import {
   controlError,
-  SANDBOX_CONTROL_STATUS_INTERVAL_MS,
+  DEFAULT_SANDBOX_CONTROL_TIMING,
   type SandboxControlManifest,
   type SandboxControlRequest,
-  type SandboxControlResponse
+  type SandboxControlResponse,
+  type SandboxControlTimingPolicy
 } from './protocol.ts';
 import { prepareSandboxControlExecution, type PreparedSandboxControlExecution, type SandboxControlExecutionResult } from './executor.ts';
 import {
@@ -21,11 +23,15 @@ import {
   writeSandboxControlStatus
 } from './state.ts';
 import { validateSandboxControlRequest } from './protocol.ts';
+import { inspectSandboxControlContainer, type ContainerObservation } from './container-identity.ts';
 import {
   acquireSandboxControlBrokerStartup,
+  garbageCollectSandboxControlRoot,
   isSandboxControlRootQuiescing,
   readSandboxControlManifest
 } from './lifecycle.ts';
+import type { BrokerOwner } from './lifecycle.ts';
+import { nextSandboxControlBackoff } from './timing.ts';
 
 type ActiveExecution = {
   request: SandboxControlRequest;
@@ -105,9 +111,10 @@ function bindingReason(manifest: SandboxControlManifest): string | null {
   }
 }
 
-function recoverProcessing(manifest: SandboxControlManifest): void {
+function recoverProcessing(manifest: SandboxControlManifest, brokerOwns: () => boolean): boolean {
   for (const entry of fs.readdirSync(manifest.processingDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || !/^[a-f0-9-]{16,64}$/.test(entry.name)) continue;
+    if (!brokerOwns()) return false;
     const descriptor = executionPath(manifest, entry.name);
     const existingResponse = responsePath(manifest, entry.name);
     if (fs.existsSync(descriptor)) {
@@ -115,6 +122,7 @@ function recoverProcessing(manifest: SandboxControlManifest): void {
       if (!terminateSandboxControlExecution(execution)) {
         throw new Error(`SANDBOX_CONTROL_EXECUTION_STILL_RUNNING: ${entry.name}`);
       }
+      if (!brokerOwns()) return false;
       appendSandboxControlAudit(manifest, 'orphan-tree-terminated', { requestId: entry.name });
       let terminal = false;
       if (fs.existsSync(existingResponse)) {
@@ -126,12 +134,18 @@ function recoverProcessing(manifest: SandboxControlManifest): void {
           terminal = false;
         }
       }
-      if (!terminal) writeResponse(manifest, unknown(entry.name));
+      if (!terminal) {
+        if (!brokerOwns()) return false;
+        writeResponse(manifest, unknown(entry.name));
+      }
     } else {
+      if (!brokerOwns()) return false;
       writeResponse(manifest, notExecuted(entry.name));
     }
+    if (!brokerOwns()) return false;
     fs.rmSync(path.join(manifest.processingDir, entry.name), { recursive: true, force: true });
   }
+  return true;
 }
 
 function delay(ms: number): Promise<void> {
@@ -144,19 +158,42 @@ export function sandboxControlSafeEnv(env: NodeJS.ProcessEnv = process.env): Nod
 
 export async function serveSandboxControl(
   manifestPath: string,
-  signal: AbortSignal = new AbortController().signal
+  signal: AbortSignal = new AbortController().signal,
+  options: {
+    timing?: SandboxControlTimingPolicy;
+    inspectContainer?: (manifest: SandboxControlManifest) => Promise<ContainerObservation>;
+    bindingCheck?: (manifest: SandboxControlManifest) => string | null;
+  } = {}
 ): Promise<void> {
+  const timing = options.timing ?? DEFAULT_SANDBOX_CONTROL_TIMING;
+  const inspectContainer = options.inspectContainer ?? ((value: SandboxControlManifest) => inspectSandboxControlContainer(value));
+  const bindingCheck = options.bindingCheck ?? bindingReason;
   const manifest = readSandboxControlManifest(manifestPath);
   const root = path.dirname(manifestPath);
   const startTime = getProcessStartTime(process.pid);
   if (!startTime) throw new Error('SANDBOX_CONTROL_BROKER_IDENTITY_UNAVAILABLE');
-  const releaseStartup = await acquireSandboxControlBrokerStartup(root, { pid: process.pid, startTime });
+  const brokerId = randomUUID();
+  const releaseStartup = await acquireSandboxControlBrokerStartup(root, { pid: process.pid, startTime, brokerId });
   const requestsDir = path.join(manifest.channelDir, 'requests');
   const responsesDir = path.join(manifest.channelDir, 'responses');
   const consumedDir = path.join(root, 'consumed');
-  const broker = { pid: process.pid, startTime };
+  const broker: BrokerOwner = {
+    version: 3,
+    pid: process.pid,
+    startTime,
+    brokerId,
+    token: manifest.token,
+    generation: manifest.generation
+  };
   const brokerPath = path.join(root, 'broker.json');
-  const brokerRecord = `${JSON.stringify({ version: 2, ...broker, token: manifest.token, generation: manifest.generation })}\n`;
+  const brokerRecord = `${JSON.stringify(broker)}\n`;
+  const brokerOwns = (): boolean => {
+    try {
+      return fs.readFileSync(brokerPath, 'utf8') === brokerRecord;
+    } catch {
+      return false;
+    }
+  };
   try {
     for (const directory of [manifest.channelDir, requestsDir, responsesDir, consumedDir, manifest.publicStatusDir, manifest.processingDir]) {
       fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -178,11 +215,20 @@ export async function serveSandboxControl(
   let active: ActiveExecution | null = null;
   let lastState = '';
   let lastStatusAt = 0;
+  let nextBindingCheckAt = 0;
+  let nextContainerHeartbeatAt = Date.now() + timing.containerHeartbeatMs;
+  let containerReasonCode: string | null = null;
+  let containerBackoffMs = timing.parkedBindingInitialMs;
+  let bindingReasonCode: string | null = null;
+  let bindingBackoffMs: number = timing.parkedBindingInitialMs;
   try {
+    if (!brokerOwns()) return;
     writeSandboxControlStatus(manifest, broker, 'starting', null, null);
+    if (!brokerOwns()) return;
     appendSandboxControlAudit(manifest, 'broker-start', { pid: broker.pid });
-    recoverProcessing(manifest);
+    if (!recoverProcessing(manifest, brokerOwns)) return;
     while (!signal.aborted) {
+      if (!brokerOwns()) break;
       let current: SandboxControlManifest;
       try {
         current = readSandboxControlManifest(manifestPath);
@@ -190,54 +236,123 @@ export async function serveSandboxControl(
         break;
       }
       if (current.token !== manifest.token || current.generation !== manifest.generation) break;
+      const heartbeatNow = Date.now();
+      if (heartbeatNow >= nextContainerHeartbeatAt) {
+        let observation: ContainerObservation;
+        try {
+          observation = await inspectContainer(manifest);
+        } catch (error) {
+          observation = { state: 'unknown', reason: controlError(error).code };
+        }
+        if (!brokerOwns()) break;
+        if (observation.state === 'found') {
+          containerReasonCode = null;
+          containerBackoffMs = timing.parkedBindingInitialMs;
+          nextContainerHeartbeatAt = Date.now() + timing.containerHeartbeatMs;
+        } else if (observation.state === 'unknown') {
+          containerReasonCode = 'SANDBOX_CONTROL_CONTAINER_UNKNOWN';
+          appendSandboxControlAudit(manifest, 'container-heartbeat-unknown', { reason: observation.reason });
+          const backoff = nextSandboxControlBackoff(containerBackoffMs, timing.slowCheckMs);
+          nextContainerHeartbeatAt = Date.now() + backoff.delayMs;
+          containerBackoffMs = backoff.nextDelayMs;
+        } else {
+          try {
+            await garbageCollectSandboxControlRoot(root, {
+              timeoutMs: timing.quiesceDeadlineMs,
+              inspectContainer: (timeoutMs) => inspectContainer(manifest),
+              selfOwner: broker
+            });
+            active = null;
+            return;
+          } catch (error) {
+            if (!brokerOwns()) break;
+            containerReasonCode = 'SANDBOX_CONTROL_CONTAINER_ABSENT_GC_FAILED';
+            appendSandboxControlAudit(manifest, 'container-gc-failed', { reason: controlError(error).code });
+            const backoff = nextSandboxControlBackoff(containerBackoffMs, timing.slowCheckMs);
+            nextContainerHeartbeatAt = Date.now() + backoff.delayMs;
+            containerBackoffMs = backoff.nextDelayMs;
+          }
+        }
+      }
 
       if (active?.settled) {
+        if (!brokerOwns()) break;
         if (active.result) {
+          if (!brokerOwns()) break;
           writeResponse(manifest, {
             version: 2, id: active.request.id, phase: 'completed', exitCode: active.result.exitCode,
             stdout: active.result.stdout, stderr: active.result.stderr, error: null
           });
         } else {
+          if (!brokerOwns()) break;
           writeResponse(manifest, unknown(active.request.id));
         }
+        if (!brokerOwns()) break;
         fs.rmSync(path.join(manifest.processingDir, active.request.id), { recursive: true, force: true });
         active = null;
       }
 
       let reasonCode: string | null = null;
       try {
+        if (!brokerOwns()) break;
         if (cleanupStaleSandboxControlLease(manifest)) {
+          if (!brokerOwns()) break;
           appendSandboxControlAudit(manifest, 'lease-stale-cleanup');
         }
         if (readActiveLease(manifest)) reasonCode = 'SANDBOX_CONTROL_HANDOFF_ACTIVE';
       } catch {
         reasonCode = 'SANDBOX_CONTROL_HANDOFF_ACTIVE';
       }
-      reasonCode ??= bindingReason(manifest);
+      const now = Date.now();
+      if (now >= nextBindingCheckAt) {
+        bindingReasonCode = bindingCheck(manifest);
+        if (bindingReasonCode) {
+          const backoff = nextSandboxControlBackoff(bindingBackoffMs, timing.slowCheckMs);
+          nextBindingCheckAt = now + backoff.delayMs;
+          bindingBackoffMs = backoff.nextDelayMs;
+        } else {
+          nextBindingCheckAt = now + timing.slowCheckMs;
+          bindingBackoffMs = timing.parkedBindingInitialMs;
+        }
+      }
+      reasonCode ??= containerReasonCode;
+      reasonCode ??= bindingReasonCode;
       const state = reasonCode ? 'parked' : active ? 'busy' : 'healthy';
       const stateKey = `${state}:${reasonCode ?? ''}:${active?.request.id ?? ''}`;
-      const now = Date.now();
-      if (stateKey !== lastState || now - lastStatusAt >= SANDBOX_CONTROL_STATUS_INTERVAL_MS) {
+      if (brokerOwns() && (stateKey !== lastState || now - lastStatusAt >= timing.controlTickMs)) {
         writeSandboxControlStatus(manifest, broker, state, reasonCode, active?.request.id ?? null, now);
         lastStatusAt = now;
       }
-      if (stateKey !== lastState) {
+      if (brokerOwns() && stateKey !== lastState) {
         appendSandboxControlAudit(manifest, 'broker-state', { state, reasonCode, requestId: active?.request.id ?? null });
         lastState = stateKey;
       }
 
+      let retiring = false;
       for (const name of fs.readdirSync(requestsDir).sort()) {
         if (!/^[a-f0-9-]{16,64}\.json$/.test(name)) continue;
         const id = name.slice(0, -5);
         const source = path.join(requestsDir, name);
         let claimed: string | null = null;
         try {
+          if (!brokerOwns()) {
+            retiring = true;
+            break;
+          }
           claimed = claimRequest(manifest, source, id);
+          if (!brokerOwns()) {
+            retiring = true;
+            break;
+          }
           consumeRequest(consumedDir, id);
+          if (!brokerOwns()) {
+            retiring = true;
+            break;
+          }
           if (reasonCode) throw new Error(reasonCode);
           if (active) throw new Error('SANDBOX_CONTROL_BUSY');
           const request = validateSandboxControlRequest(JSON.parse(fs.readFileSync(claimed, 'utf8')), manifest);
-          if (bindingReason(manifest)) throw new Error('SANDBOX_WORKTREE_BINDING_LOST');
+          if (bindingCheck(manifest)) throw new Error('SANDBOX_WORKTREE_BINDING_LOST');
           if (readActiveLease(manifest)) throw new Error('SANDBOX_CONTROL_HANDOFF_ACTIVE');
           const prepared = await prepareSandboxControlExecution({
             manifest, manifestPath, request, requestPath: claimed, internalCliPath: process.argv[1]!
@@ -248,37 +363,82 @@ export async function serveSandboxControl(
             (result) => { execution.result = result; execution.settled = true; },
             (error) => { execution.failure = error; execution.settled = true; }
           );
+          if (!brokerOwns()) {
+            prepared.terminate(false);
+            active = null;
+            retiring = true;
+            continue;
+          }
+          if (!brokerOwns()) {
+            prepared.terminate(false);
+            active = null;
+            retiring = true;
+            continue;
+          }
           writeResponse(manifest, {
             version: 2, id, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
           });
+          if (!brokerOwns()) {
+            prepared.terminate(false);
+            active = null;
+            retiring = true;
+            break;
+          }
           try {
-            prepared.start();
+            prepared.start(brokerOwns);
           } catch (error) {
-            prepared.terminate();
+            const owned = brokerOwns();
+            prepared.terminate(owned);
+            if (!owned || !brokerOwns()) {
+              active = null;
+              retiring = true;
+              break;
+            }
             writeResponse(manifest, unknown(id));
+            if (!brokerOwns()) {
+              active = null;
+              retiring = true;
+              break;
+            }
             fs.rmSync(path.join(manifest.processingDir, id), { recursive: true, force: true });
             active = null;
             claimed = null;
+            if (!brokerOwns()) {
+              retiring = true;
+              break;
+            }
             appendSandboxControlAudit(manifest, 'executor-gate-failed', { requestId: id });
             continue;
           }
         } catch (error) {
+          if (!brokerOwns()) {
+            retiring = true;
+            break;
+          }
           writeResponse(manifest, rejected(id, error));
+          if (!brokerOwns()) {
+            retiring = true;
+            break;
+          }
           if (claimed) fs.rmSync(path.dirname(claimed), { recursive: true, force: true });
         }
       }
-      await delay(25);
+      if (retiring || !brokerOwns()) break;
+      await delay(timing.controlTickMs);
     }
   } finally {
     if (active) {
-      active.prepared.terminate();
-      writeResponse(manifest, unknown(active.request.id));
+      const owned = brokerOwns();
+      active.prepared.terminate(owned);
+      if (owned && brokerOwns()) writeResponse(manifest, unknown(active.request.id));
     }
-    appendSandboxControlAudit(manifest, 'broker-stop', { pid: broker.pid });
-    try {
-      if (fs.readFileSync(brokerPath, 'utf8') === brokerRecord) fs.unlinkSync(brokerPath);
-    } catch {
-      // A newer owner or recovery path owns the record.
+    if (brokerOwns()) {
+      appendSandboxControlAudit(manifest, 'broker-stop', { pid: broker.pid, brokerId: broker.brokerId });
+      try {
+        if (fs.readFileSync(brokerPath, 'utf8') === brokerRecord) fs.unlinkSync(brokerPath);
+      } catch {
+        // A newer owner or recovery path owns the record.
+      }
     }
   }
 }

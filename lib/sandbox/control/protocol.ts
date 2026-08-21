@@ -1,4 +1,5 @@
 import { validateTaskCreateCandidate, type TaskCreateCandidateV1 } from '../../task/create.ts';
+import type { ProcessIdentity } from '../../server/process-state.ts';
 
 export const SANDBOX_CONTROL_MAX_BYTES = 64 * 1024;
 export const SANDBOX_CONTROL_ADMISSION_WINDOW_MS = 2_000;
@@ -6,12 +7,37 @@ export const SANDBOX_CONTROL_STATUS_INTERVAL_MS = 250;
 export const SANDBOX_CONTROL_STATUS_STALE_MS = 1_500;
 export const SANDBOX_CONTROL_FUTURE_SKEW_MS = 1_000;
 export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration', 'task-create'] as const;
+export type SandboxControlTimingPolicy = Readonly<{
+  controlTickMs: number;
+  parkedBindingInitialMs: number;
+  slowCheckMs: number;
+  containerHeartbeatMs: number;
+  quiesceDeadlineMs: number;
+}>;
+export const DEFAULT_SANDBOX_CONTROL_TIMING: SandboxControlTimingPolicy = Object.freeze({
+  controlTickMs: 250,
+  parkedBindingInitialMs: 1_000,
+  slowCheckMs: 5_000,
+  containerHeartbeatMs: 5_000,
+  quiesceDeadlineMs: 7_000
+} as const);
 
 export type SandboxControlFamily = typeof SANDBOX_CONTROL_FAMILIES[number];
+export type SandboxControlContainerIdentity = Readonly<{
+  id: string;
+  labels: Readonly<Record<string, string>>;
+}>;
 export type SandboxControlManifest = Readonly<{
-  version: 3; repoRoot: string; worktreeRoot: string; project: string; container: string;
+  version: 4; engine: string; repoRoot: string; worktreeRoot: string; project: string; container: string;
+  containerIdentity: SandboxControlContainerIdentity;
   branch: string; mode: 'task-bound' | 'branch-only'; taskId: string | null; token: string;
   generation: string; channelDir: string; publicStatusDir: string; processingDir: string;
+}>;
+export type SandboxControlBrokerOwner = ProcessIdentity & Readonly<{
+  version: 3;
+  brokerId: string;
+  token: string;
+  generation: string;
 }>;
 type RequestBase = Readonly<{
   version: 2; id: string; token: string; generation: string; issuedAt: number; expiresAt: number;
@@ -29,17 +55,17 @@ export type SandboxControlResponse = Readonly<{
   stdout: string; stderr: string; error: SandboxControlError | null;
 }>;
 export type SandboxControlStatus = Readonly<{
-  version: 1; generation: string; broker: { pid: number; startTime: string };
+  version: 2; generation: string; broker: ProcessIdentity & { brokerId: string };
   state: 'starting' | 'healthy' | 'busy' | 'parked'; reasonCode: string | null;
   activeRequestId: string | null; updatedAt: number;
 }>;
 export type SandboxControlLease = Readonly<{
-  version: 1; generation: string; nonce: string; owner: { pid: number; startTime: string };
+  version: 2; generation: string; nonce: string; owner: ProcessIdentity;
   issuedAt: number; expiresAt: number; taskId: string | null; branch: string; reason: string;
 }>;
 export type SandboxControlExecution = Readonly<{
-  version: 1; generation: string; requestId: string; nonce: string;
-  child: { pid: number; startTime: string; processGroupId: number | null };
+  version: 2; generation: string; requestId: string; nonce: string;
+  child: ProcessIdentity & { processGroupId: number | null };
   phase: 'prepared' | 'running' | 'terminating'; updatedAt: number;
 }>;
 

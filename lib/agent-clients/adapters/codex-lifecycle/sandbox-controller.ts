@@ -25,7 +25,7 @@ type CodexSandboxControllerContext = Readonly<{
   controlGeneration: string;
   controllerInstanceDigest: string;
   parentPid: number;
-  parentStartTime: string;
+  parentStartTime: number;
   issuedAt: number;
   expiresAt: number;
   buildIdentity: LifecycleBuildIdentity;
@@ -242,8 +242,8 @@ function prepareCodexSandboxController(
     .digest('hex');
   const leasePath = path.join(runtimeRoot, `${key}.lease.json`);
   if (fs.existsSync(leasePath)) {
-    const lease = JSON.parse(fs.readFileSync(leasePath, 'utf8')) as { pid?: number; startTime?: string };
-    if (Number.isSafeInteger(lease.pid) && typeof lease.startTime === 'string'
+    const lease = JSON.parse(fs.readFileSync(leasePath, 'utf8')) as { pid?: number; startTime?: number };
+    if (Number.isSafeInteger(lease.pid) && typeof lease.startTime === 'number'
       && getProcessStartTime(lease.pid!) === lease.startTime) {
       throw new Error('CODEX_SANDBOX_CONTROLLER_BUSY');
     }

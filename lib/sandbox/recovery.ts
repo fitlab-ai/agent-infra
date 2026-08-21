@@ -52,12 +52,16 @@ import {
 import { getProcessStartTime, processIdentityMatches, removePidFileIfMatches } from '../server/process-state.ts';
 import {
   acquireSandboxControlBrokerStartup,
-  isSandboxControlRootQuiescing
+  garbageCollectSandboxControlRoot,
+  isSandboxControlRootQuiescing,
+  readSandboxControlManifest,
+  type BrokerOwner
 } from './control/lifecycle.ts';
 import {
   appendSandboxControlAudit,
   readSandboxControlStatus
 } from './control/state.ts';
+import { inspectSandboxControlContainer } from './control/container-identity.ts';
 import {
   SANDBOX_CONTROL_FUTURE_SKEW_MS,
   SANDBOX_CONTROL_STATUS_STALE_MS,
@@ -188,7 +192,7 @@ async function waitForSandboxControlBrokerStatus(params: {
   statusDir: string;
   generation: string;
   pid: number;
-  startTime?: string;
+  startTime?: number;
 }, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -211,7 +215,7 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
   const directory = path.dirname(fileURLToPath(import.meta.url));
   const extension = path.extname(fileURLToPath(import.meta.url));
   const internalCli = path.resolve(directory, '..', '..', 'bin', `internal-cli${extension}`);
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as SandboxControlManifest;
+  const manifest = readSandboxControlManifest(manifestPath);
   const root = path.dirname(manifestPath);
   if (isSandboxControlRootQuiescing(root)) throw new Error('SANDBOX_CONTROL_QUIESCING');
   const brokerPath = path.join(root, 'broker.json');
@@ -227,6 +231,7 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
       version?: unknown;
       pid?: unknown;
       startTime?: unknown;
+      brokerId?: unknown;
       token?: unknown;
       generation?: unknown;
     };
@@ -236,15 +241,22 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
     } catch {
       // Malformed owner records are stale and replaced below.
     }
-    const owner = broker !== null && typeof broker.pid === 'number' && typeof broker.startTime === 'string'
-      ? { version: 1 as const, pid: broker.pid, startTime: broker.startTime }
+    const owner = broker !== null && broker.version === 3 && typeof broker.pid === 'number'
+      && Number.isSafeInteger(broker.pid) && broker.pid > 0 && typeof broker.startTime === 'number'
+      && Number.isSafeInteger(broker.startTime) && typeof broker.brokerId === 'string'
+      && broker.brokerId.length > 0 && typeof broker.token === 'string'
+      && typeof broker.generation === 'string'
+      ? broker as BrokerOwner
       : null;
-    const live = owner !== null && processIdentityMatches(owner);
+    if (broker === null || broker.version !== 3 || owner === null) {
+      throw new Error('SANDBOX_CONTROL_BROKER_VERSION_INVALID: rebuild the sandbox container before starting a new broker');
+    }
+    const live = owner !== null && processIdentityMatches({ pid: owner.pid, startTime: owner.startTime });
     if (
       live
       && owner !== null
       && broker !== null
-      && broker.version === 2
+      && broker.version === 3
       && broker.token === manifest.token
       && broker.generation === manifest.generation
     ) {
@@ -256,27 +268,6 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
         startTime: owner.startTime
       });
       return;
-    }
-    if (live && owner) {
-      const deadline = Date.now() + 5_000;
-      while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-        try {
-          if (fs.readFileSync(brokerPath, 'utf8') !== brokerSnapshot) {
-            return startSandboxControlBroker(repoRoot, manifestPath);
-          }
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-            return startSandboxControlBroker(repoRoot, manifestPath);
-          }
-          throw error;
-        }
-        if (!processIdentityMatches(owner)) {
-          removePidFileIfMatches(brokerPath, brokerSnapshot);
-          return startSandboxControlBroker(repoRoot, manifestPath);
-        }
-      }
-      throw new Error('SANDBOX_CONTROL_BROKER_OWNER_ACTIVE');
     }
   }
   const startupStartTime = getProcessStartTime(process.pid);
@@ -337,9 +328,16 @@ async function ensureSandboxControlBroker(params: {
     identity: params.workspace
   });
   if (!fs.existsSync(control.manifestPath)) return;
-  const manifest = JSON.parse(fs.readFileSync(control.manifestPath, 'utf8')) as SandboxControlManifest;
-  if (manifest.version !== 3) {
-    throw new Error('SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 3; container-only recreation is required');
+  const validatedManifest = readSandboxControlManifest(control.manifestPath);
+  const containerObservation = await inspectSandboxControlContainer(validatedManifest);
+  if (containerObservation.state === 'unknown') {
+    throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${containerObservation.reason}`);
+  }
+  if (containerObservation.state === 'absent') {
+    await garbageCollectSandboxControlRoot(control.root, {
+      inspectContainer: (timeoutMs) => inspectSandboxControlContainer(validatedManifest, { timeoutMs })
+    });
+    throw new Error('SANDBOX_CONTROL_CONTAINER_ABSENT: recreate the sandbox container before broker recovery');
   }
   const brokerPath = path.join(control.root, 'broker.json');
   try {
@@ -347,20 +345,25 @@ async function ensureSandboxControlBroker(params: {
       version?: unknown;
       pid?: unknown;
       startTime?: unknown;
+      brokerId?: unknown;
       token?: unknown;
       generation?: unknown;
     };
     if (
-      broker.version === 2
+      broker.version === 3
       && typeof broker.pid === 'number'
-      && typeof broker.startTime === 'string'
-      && broker.token === manifest.token
-      && broker.generation === manifest.generation
-      && processIdentityMatches({ version: 1, pid: broker.pid, startTime: broker.startTime })
+      && Number.isSafeInteger(broker.pid)
+      && typeof broker.startTime === 'number'
+      && Number.isSafeInteger(broker.startTime)
+      && typeof broker.brokerId === 'string'
+      && broker.brokerId.length > 0
+      && broker.token === validatedManifest.token
+      && broker.generation === validatedManifest.generation
+      && processIdentityMatches({ pid: broker.pid, startTime: broker.startTime })
     ) {
       try {
         const status = readSandboxControlStatus(control.statusDir);
-        if (status.generation === manifest.generation && status.broker.pid === broker.pid
+        if (status.generation === validatedManifest.generation && status.broker.pid === broker.pid
           && status.broker.startTime === broker.startTime
           && Date.now() - status.updatedAt <= SANDBOX_CONTROL_STATUS_STALE_MS
           && status.updatedAt <= Date.now() + SANDBOX_CONTROL_FUTURE_SKEW_MS) return;
@@ -370,7 +373,7 @@ async function ensureSandboxControlBroker(params: {
       await waitForSandboxControlBrokerStatus({
         root: control.root,
         statusDir: control.statusDir,
-        generation: manifest.generation,
+        generation: validatedManifest.generation,
         pid: broker.pid,
         startTime: broker.startTime
       });

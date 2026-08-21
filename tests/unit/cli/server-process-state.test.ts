@@ -17,7 +17,7 @@ test('parseLinuxProcessStat handles spaces and closing parentheses in comm', () 
   const fields = ['S', ...Array.from({ length: 18 }, (_, index) => String(index + 1)), '987654', '0'];
   assert.deepEqual(parseLinuxProcessStat(`42 (worker ) name) ${fields.join(' ')}`), {
     state: 'S',
-    startTime: '987654'
+    startTime: 987654
   });
   assert.equal(parseLinuxProcessStat(`42 (worker) ${['Z', ...fields.slice(1)].join(' ')}`)?.state, 'Z');
   assert.equal(parseLinuxProcessStat('not a proc stat line'), null);
@@ -44,21 +44,21 @@ test('readProcessState classifies missing, invalid, legacy, mismatch, and matchi
 
     fs.writeFileSync(pidFile, 'not-a-pid\n');
     const invalid = readProcessState(pidFile);
-    assert.equal(invalid.kind, 'invalid');
+    assert.equal(invalid.kind, 'legacy-unknown');
     assert.equal(removePidFileIfMatches(pidFile, invalid.snapshot), true);
     assert.equal(fs.existsSync(pidFile), false);
 
     fs.writeFileSync(pidFile, `${process.pid}\n`);
     const legacy = readProcessState(pidFile);
-    assert.equal(legacy.kind, 'legacy');
-    assert.equal(legacy.pid, process.pid);
+    assert.equal(legacy.kind, 'legacy-pid-only');
+    assert.equal(legacy.legacy.pid, process.pid);
 
     const startTime = getProcessStartTime(process.pid);
     assert.ok(startTime !== null, 'the current process start time should be queryable');
-    writePidRecord(pidFile, { version: 1, pid: process.pid, startTime: `${startTime}-mismatch` });
-    assert.equal(readProcessState(pidFile).kind, 'stale');
+    fs.writeFileSync(pidFile, `${JSON.stringify({ version: 1, pid: process.pid, startTime: `${startTime}-mismatch` })}\n`);
+    assert.equal(readProcessState(pidFile).kind, 'legacy-json');
 
-    writePidRecord(pidFile, { version: 1, pid: process.pid, startTime });
+    writePidRecord(pidFile, { version: 2, pid: process.pid, startTime });
     const running = readProcessState(pidFile);
     assert.equal(running.kind, 'running');
     assert.equal(running.record.pid, process.pid);
