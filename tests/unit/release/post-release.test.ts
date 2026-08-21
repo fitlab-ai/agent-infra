@@ -20,16 +20,19 @@ function result(status: number, stdout = '', stderr = '') {
   return { status, stdout, stderr, pid: 1, signal: null, output: [], error: undefined };
 }
 
-const inputs = [
+const recordingInputs = [
   'assets/demo-init.tape', 'scripts/demo-regen.sh', 'scripts/normalize-gif-duration.py',
   'bin/cli.ts', 'lib/init.ts', 'lib/log.ts', 'lib/prompt.ts', 'lib/paths.ts',
-  'lib/render.ts', 'lib/builtin-tuis.ts', 'lib/sandbox/engines/index.ts',
+  'lib/render.ts', 'lib/builtin-tuis.ts', 'lib/sandbox/engines/index.ts'
+];
+
+const unrelatedInputs = [
   'src/sync-templates.js', 'templates/AGENTS.md'
 ];
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-demo-'));
-  for (const file of inputs) {
+  for (const file of [...recordingInputs, ...unrelatedInputs]) {
     fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     fs.writeFileSync(path.join(root, file), file);
   }
@@ -197,6 +200,17 @@ test('demo input digest is stable and changes for canonical UX inputs', () => {
     assert.equal(computeDemoInputDigest(root), initial);
     fs.appendFileSync(path.join(root, 'lib/prompt.ts'), 'changed');
     assert.notEqual(computeDemoInputDigest(root), initial);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('template and sync implementation changes do not invalidate the demo recording', () => {
+  const root = fixture();
+  try {
+    const initial = computeDemoInputDigest(root);
+    for (const file of unrelatedInputs) fs.appendFileSync(path.join(root, file), 'changed');
+    assert.equal(computeDemoInputDigest(root), initial);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
