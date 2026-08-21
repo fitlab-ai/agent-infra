@@ -80,7 +80,7 @@ function prByNumberFixture() {
 
 function mockPrByNumberClient(pullRequest: unknown): GitHubClient {
   return {
-    version() { return { ok: true, value: '2.16.0' }; },
+    version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[]) {
       const joined = args.join(' ');
       if (/api repos\/o\/r\/pulls\/42/.test(joined)) return { ok: true, value: pullRequest };

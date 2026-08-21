@@ -24,7 +24,7 @@ test('platform context resolves fork parent and separated capabilities', () => {
     cwd: root,
     gitRemote: () => 'git@github.com:contributor/widgets.git',
     client: {
-      version() { return { ok: true, value: '2.16.0' }; },
+      version() { return { ok: true, value: '2.72.0' }; },
       json(args) {
         requested.push(args.join(' '));
         if (args[1] === 'graphql') {
@@ -54,7 +54,7 @@ test('platform context reports a fully resolved read-only probe as no-op', () =>
     platformType: 'github',
     gitRemote: () => 'https://github.com/acme/widgets.git',
     client: {
-      version() { return { ok: true, value: '2.16.0' }; },
+      version() { return { ok: true, value: '2.72.0' }; },
       json(args) {
         if (args[1] === 'graphql') {
           return { ok: true, value: { data: { viewer: { login: 'maintainer' } } } };
@@ -100,7 +100,7 @@ test('non-GitHub platform does not probe gh', () => {
     client: {
       version() {
         versionCalls += 1;
-        return { ok: true, value: '2.16.0' };
+        return { ok: true, value: '2.72.0' };
       },
       json() { throw new Error('GitHub API must not be called'); }
     }

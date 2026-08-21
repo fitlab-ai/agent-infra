@@ -1,6 +1,6 @@
 # GitHub PR Readiness Intents
 
-The GitHub adapter requires `gh >= 2.16.0`. Platform context checks this dependency before any GitHub API, PR, or checks operation. Projects that do not select GitHub neither probe nor depend on `gh`.
+The GitHub adapter requires `gh >= 2.72.0`. Platform context checks this dependency before any GitHub API, PR, or checks operation. Projects that do not select GitHub neither probe nor depend on `gh`.
 
 ```bash
 agent-infra-internal platform-checks inspect {task-id}

@@ -18,7 +18,7 @@ function fixture() {
 
 function client(release: Record<string, unknown> | null, options: { blocked?: boolean; calls?: string[][] } = {}): GitHubClient {
   return {
-    version: () => ({ ok: true, value: '2.16.0' }),
+    version: () => ({ ok: true, value: '2.72.0' }),
     json(args) {
       options.calls?.push(args);
       if (args.some((arg) => arg === 'repos/acme/widgets')) {
@@ -108,7 +108,7 @@ test('release milestone reconciliation closes current and ensures planning miles
   const patchCalls: string[][] = [];
   const postFields: Array<Record<string, string>> = [];
   const mutable: GitHubClient = {
-    version: () => ({ ok: true, value: '2.16.0' }),
+    version: () => ({ ok: true, value: '2.72.0' }),
     json(args) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) ?? '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { admin: true } } } as never;

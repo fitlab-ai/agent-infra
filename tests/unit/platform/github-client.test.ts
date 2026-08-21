@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { classifyGitHubFailure, createGitHubClient, parseIncludedResponse } from '../../../lib/platform/github-client.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+
+import semver from 'semver';
+
+import { classifyGitHubFailure, createGitHubClient, MINIMUM_GITHUB_CLI_VERSION, parseIncludedResponse } from '../../../lib/platform/github-client.ts';
 
 test('GitHub client reads the CLI version without shell parsing', () => {
   const calls: string[][] = [];
@@ -84,6 +89,31 @@ test('GitHub client retries reads but does not blindly replay posts', () => {
   const post = client.json(['api', 'repos/o/r/issues/1/comments', '-X', 'POST'], { method: 'POST' });
   assert.equal(post.ok, false);
   assert.equal(attempts, 1);
+});
+
+test('the declared gh floor covers every gh flag the platform layer uses', () => {
+  // Registry of gh features the platform layer depends on, mapped to the gh release
+  // that introduced them. Only register unconditional, must-pass dependencies here —
+  // self-gated fallback paths (e.g. --allow-escape-sequences) must not be added, or
+  // the floor will be tightened unnecessarily.
+  const flagFloors: Record<string, string> = {
+    '--slurp': '2.48.0',
+    closingIssuesReferences: '2.72.0'
+  };
+  const dir = path.join(import.meta.dirname, '..', '..', '..', 'lib', 'platform');
+  // github-client.ts declares the floor itself; scanning it would match its own annotation.
+  const callers = fs.readdirSync(dir).filter((entry) => entry.endsWith('.ts') && entry !== 'github-client.ts');
+  assert.ok(callers.length > 0);
+  for (const name of callers) {
+    const source = fs.readFileSync(path.join(dir, name), 'utf8');
+    for (const [flag, floor] of Object.entries(flagFloors)) {
+      if (!source.includes(flag)) continue;
+      assert.ok(
+        semver.gte(MINIMUM_GITHUB_CLI_VERSION, floor),
+        `lib/platform/${name} uses '${flag}' (gh >= ${floor}) but the declared floor is ${MINIMUM_GITHUB_CLI_VERSION}`
+      );
+    }
+  }
 });
 
 test('metadata JSON boundary returns the final successful attempt and parses the final response block', () => {
