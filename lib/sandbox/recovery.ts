@@ -170,6 +170,7 @@ type EnsureSandboxReadyParams = {
   workspace?: SandboxWorkspaceIdentity;
   row: SandboxRow;
   allowRecreate?: boolean;
+  forceRecreate?: boolean;
   recreate?: (branch: string) => Promise<void>;
   writeWarning?: (message: string) => void;
   deps?: RecoveryCommandDeps;
@@ -1067,6 +1068,9 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
         workspace: params.workspace ?? { mode: 'branch-only' }
       });
     }
+    if (params.forceRecreate) {
+      throw new Error('Explicit container recreation requested.');
+    }
     if (!params.row.running) {
       startFn(params.engine, params.row.name);
       const initial = assess({
@@ -1224,7 +1228,9 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
     );
   }
 
-  const warning = `Sandbox recovery failed in place. Replacing only the container. ${dataBoundary}`;
+  const warning = params.forceRecreate
+    ? `Explicit sandbox recreation requested. Replacing only the container. ${dataBoundary}`
+    : `Sandbox recovery failed in place. Replacing only the container. ${dataBoundary}`;
   warnings.push(warning);
   (params.writeWarning ?? ((message) => process.stderr.write(`${message}\n`)))(warning);
   const runVerboseFn = deps?.runVerbose ?? runVerboseEngine;

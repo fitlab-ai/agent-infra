@@ -797,6 +797,47 @@ test("container replacement snapshots the worktree before Docker writes and reje
   }
 });
 
+test("explicit recreation replaces a healthy running container", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-explicit-recreate-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const replacementCommands: string[][] = [];
+  let recreated = false;
+  const row = { name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 };
+
+  try {
+    const result = await ensureSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      row,
+      allowRecreate: true,
+      forceRecreate: true,
+      recreate: async () => { recreated = true; },
+      writeWarning: () => {},
+      deps: {
+        ensureControlBroker: async () => {},
+        run: () => JSON.stringify([{
+          Id: "fixture-container-id",
+          Config: { Labels: BRANCH_ONLY_LABELS },
+          Mounts: recoveryFixtureMounts(config)
+        }]),
+        runOk: () => true,
+        runVerbose: (_engine, _cmd, args) => { replacementCommands.push(args); },
+        fetchRows: () => ({ running: [row], nonRunning: [] })
+      }
+    });
+
+    assert.equal(recreated, true);
+    assert.deepEqual(replacementCommands, [
+      ["stop", "demo-dev-feature..demo"],
+      ["rm", "demo-dev-feature..demo"]
+    ]);
+    assert.equal(result.path, "recreated");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("container replacement preserves the original failure when the worktree is unchanged", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-original-failure-"));
   const config = recoveryFixtureConfig(tmpDir);

@@ -14,6 +14,16 @@ docker buildx inspect --bootstrap
 
 内置镜像还会在 Docker 构建期间验证 `cc-token-status`、`sandbox-dotfiles-link` 与 `sandbox-tmux-entry` 均非空且可执行，因此 legacy builder 生成空脚本时构建不会成功。自定义 Dockerfile 仍需满足 BuildKit 前置条件，但不要求包含这三个内置脚本。
 
+## PID 1 与孤儿进程回收
+
+每个新建沙箱都会启用 Docker 托管的 init（`docker run --init`）。该 init 进程作为 PID 1 负责转发信号并回收孤儿子进程，避免反复运行构建、测试和 detached 工作时持续累积僵尸进程。此设置只在创建或显式重建容器时生效；存量容器会继续使用原来的 PID 1，需执行以下命令重建：
+
+```bash
+ai sandbox start --recreate <task-ref-or-branch>
+```
+
+重建会保留工作树、任务绑定、挂载和 `/share` 数据，但会替换容器内的进程状态。
+
 ## 沙箱 aliases 与 GitHub CLI
 
 `ai sandbox create` 在首次运行时会自动生成宿主机侧的 `~/.agent-infra/aliases/sandbox.sh`。该文件内置了 Claude、Codex、Antigravity CLI 和 OpenCode 的 yolo 快捷命令模板，你可以直接修改；每次创建沙箱时，这个文件都会同步到容器内的 `/home/devuser/.bash_aliases`。
