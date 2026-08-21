@@ -2,7 +2,7 @@
 
 PR 全部 checks 的获取、轮询 deadline、失败 run/job 定位和日志获取统一由 typed internal intent 执行。SKILL/模型只负责失败分类、根因分析、最小修复和授权后的提交推送。
 
-GitHub adapter 要求 `gh >= 2.16.0`。平台上下文会在任何 GitHub API、PR 或 checks 操作前检查该依赖；未选择 GitHub 平台时不探测也不依赖 `gh`。
+GitHub adapter 要求 `gh >= 2.72.0`。平台上下文会在任何 GitHub API、PR 或 checks 操作前检查该依赖；未选择 GitHub 平台时不探测也不依赖 `gh`。
 
 ## 快照与监控
 

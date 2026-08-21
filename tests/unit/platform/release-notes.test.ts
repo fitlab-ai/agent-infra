@@ -139,7 +139,7 @@ test('publish accepts a matching digest and rejects unreadable files before plat
   const digest = `sha256:${createHash('sha256').update('Notes\n').digest('hex')}`;
   const writes: string[][] = [];
   const client: GitHubClient = {
-    version: () => ({ ok: true, value: '2.16.0' }),
+    version: () => ({ ok: true, value: '2.72.0' }),
     json(args) {
       if (args[0] === 'api' && args[1] === 'graphql') {
         return { ok: true, value: { data: { viewer: { login: 'tester' } } } } as never;

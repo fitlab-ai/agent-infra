@@ -126,7 +126,7 @@ test('comment sync creates once and becomes a no-op on replay', () => {
   const root = syncFixture();
   const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
   const client = {
-    version() { return { ok: true, value: '2.16.0' }; },
+    version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[], options?: { input?: string }) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
@@ -156,7 +156,7 @@ test('comment sync refuses duplicate registered markers without writing', () => 
   const root = syncFixture();
   const marker = MARKERS.task('TASK-20260101-000001');
   const client = {
-    version() { return { ok: true, value: '2.16.0' }; },
+    version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[]) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: {} } };
@@ -179,7 +179,7 @@ test('artifact sync isolates sibling stems and becomes a no-op on replay', () =>
   const siblingBody = `${MARKERS.artifact('TASK-20260101-000001', 'analysis-r2')}\nexisting sibling`;
   const comments = [{ id: 20, body: siblingBody, user: { login: 'codex' } }];
   const client = {
-    version() { return { ok: true, value: '2.16.0' }; },
+    version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[], options?: { input?: string }) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
@@ -211,7 +211,7 @@ test('artifact backfill creates a missing comment with a timeline hint', () => {
   const root = syncFixture();
   const comments: Array<{ id: number; body: string; user: { login: string } }> = [];
   const client = {
-    version() { return { ok: true, value: '2.16.0' }; },
+    version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[], options?: { input?: string }) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
@@ -242,7 +242,7 @@ test('artifact backfill preserves an existing normal comment without remote writ
   const marker = MARKERS.artifact('TASK-20260101-000001', 'analysis');
   const comments = [{ id: 31, body: `${marker}\nexisting normal-stage body`, user: { login: 'codex' } }];
   const client = {
-    version() { return { ok: true, value: '2.16.0' }; },
+    version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[]) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
@@ -269,7 +269,7 @@ test('artifact backfill preserves an existing valid chunk set without remote wri
     { id: 33, body: `${MARKERS.artifactChunk('TASK-20260101-000001', 'analysis', 2, 2)}\nold part 2`, user: { login: 'codex' } }
   ];
   const client = {
-    version() { return { ok: true, value: '2.16.0' }; },
+    version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[]) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
@@ -295,7 +295,7 @@ test('normal artifact sync still updates an existing comment when content change
   const comments = [{ id: 34, body: `${marker}\nstale body`, user: { login: 'codex' } }];
   let patchCount = 0;
   const client = {
-    version() { return { ok: true, value: '2.16.0' }; },
+    version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[], options?: { input?: string }) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: { triage: true } } };
@@ -324,7 +324,7 @@ test('artifact sync refuses duplicate base markers without writing', () => {
   const root = syncFixture();
   const marker = MARKERS.artifact('TASK-20260101-000001', 'analysis');
   const client = {
-    version() { return { ok: true, value: '2.16.0' }; },
+    version() { return { ok: true, value: '2.72.0' }; },
     json(args: string[]) {
       const endpoint = args.find((arg) => arg.startsWith('repos/')) || '';
       if (endpoint === 'repos/acme/widgets') return { ok: true, value: { full_name: 'acme/widgets', permissions: {} } };

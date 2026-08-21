@@ -62,7 +62,7 @@ function mockClient(options: {
   };
 
   const client = {
-    version() { return { ok: true as const, value: '2.16.0' }; },
+    version() { return { ok: true as const, value: '2.72.0' }; },
     json,
     text() { return { ok: true as const, value: '' }; }
   };
@@ -158,7 +158,7 @@ test('publishPrReview blocks when a retryable POST cannot be reconciled', () => 
     const mock = mockClient(); // POST succeeds, so simulate unknown by never writing: use a failing version below
     // Force the POST to fail transiently without recording the review.
     const client = {
-      version() { return { ok: true as const, value: '2.16.0' }; },
+      version() { return { ok: true as const, value: '2.72.0' }; },
       json: (args: string[], request: { method?: string; input?: string } = {}) => {
         const joined = args.join(' ');
         if (joined.includes('api --paginate --slurp repos/acme/widgets/pulls/') && joined.includes('/reviews')) {

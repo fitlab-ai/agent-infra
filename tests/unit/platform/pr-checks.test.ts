@@ -34,7 +34,7 @@ test('PR readiness watcher reaches injected deadline and preserves the observed 
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
     fs.writeFileSync(path.join(taskDir, 'task.md'), ['---', `id: ${taskId}`, 'status: active', 'pr_number: 5', '---', ''].join('\n'));
     const client = {
-      version() { return { ok: true as const, value: '2.16.0' }; },
+      version() { return { ok: true as const, value: '2.72.0' }; },
       json(args: string[]) {
         const joined = args.join(' ');
         if (args[1] === 'graphql' && args.some((arg) => arg.includes('viewer { login }'))) {

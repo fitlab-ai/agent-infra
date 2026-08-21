@@ -23,7 +23,9 @@ type ClientOptions = {
   sleep?: (delayMs: number) => void;
 };
 
-const MINIMUM_GITHUB_CLI_VERSION = '2.16.0';
+// closingIssuesReferences (introduced in gh 2.72.0) is the highest-versioned gh feature
+// the platform layer depends on; see github-release-notes.ts:102.
+const MINIMUM_GITHUB_CLI_VERSION = '2.72.0';
 const GITHUB_CLI_MAX_BUFFER = 64 * 1024 * 1024;
 const ERROR_DETAIL_LIMIT = 4096;
 

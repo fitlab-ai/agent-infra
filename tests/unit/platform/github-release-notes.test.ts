@@ -25,7 +25,7 @@ test('GitHub actors prefer platform users, then no-reply identities, without gue
 test('publishing edits an existing published release and creates a missing release', () => {
   const calls: string[][] = [];
   const existing: GitHubClient = {
-    version: () => ({ ok: true, value: '2.16.0' }),
+    version: () => ({ ok: true, value: '2.72.0' }),
     json: () => ({ ok: true, value: { tagName: 'v1.0.0', url: 'https://example/release' } }) as never,
     text(args) {
       calls.push(args);
@@ -52,7 +52,7 @@ test('publishing edits an existing published release and creates a missing relea
 
 test('dry-run plans publishing without invoking a write', () => {
   const client: GitHubClient = {
-    version: () => ({ ok: true, value: '2.16.0' }),
+    version: () => ({ ok: true, value: '2.72.0' }),
     json: () => ({ ok: true, value: { tagName: 'v1.0.0', url: 'https://example/release' } }) as never,
     text() {
       throw new Error('write must not be called');

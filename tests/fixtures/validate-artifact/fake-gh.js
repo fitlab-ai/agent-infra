@@ -53,7 +53,7 @@ if (process.env.GH_FAKE_FAIL) {
 }
 
 if (args.length === 1 && args[0] === "--version") {
-  process.stdout.write(`gh version ${process.env.GH_FAKE_VERSION || "2.16.0"}\n`);
+  process.stdout.write(`gh version ${process.env.GH_FAKE_VERSION || "2.72.0"}\n`);
   process.exit(0);
 }
 
