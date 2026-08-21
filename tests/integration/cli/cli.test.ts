@@ -211,7 +211,7 @@ test("agent-infra init generates seed files in a temp directory", () => {
     assert.match(output, /npm install -g @fitlab-ai\/agent-infra/);
     assert.ok(fs.existsSync(path.join(tmpDir, ".agents/scripts/lib/agent-infra-package.js")));
     assert.deepEqual(config.sandbox, {
-      engine: DEFAULT_SANDBOX_ENGINE,
+      engine: DEFAULT_SANDBOX_ENGINE ? { [CURRENT_PLATFORM]: DEFAULT_SANDBOX_ENGINE } : null,
       runtimes: ["node22"],
       tools: ["agent-infra"],
       refreshIntervalDays: 7,

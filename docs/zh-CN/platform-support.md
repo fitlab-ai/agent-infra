@@ -20,6 +20,11 @@ agent-infra 支持 macOS、Linux 和 Windows。CLI 本身只需要 Node.js (>=22
 - macOS：`colima`、`orbstack`、`docker-desktop`
 - Windows：`wsl2`、`native`、`docker-desktop`
 
+`sandbox.engine` 支持两种写法：
+
+- 字符串：`"engine": "orbstack"`，对所有平台生效（在非法平台上运行会直接报错——`.agents/.airc.json` 通常被多个不同操作系统的开发者共用，字符串写法只适合单一操作系统的团队）。
+- 按平台 key 的对象：`"engine": { "darwin": "orbstack" }`，仅在对应平台生效；当前平台未在对象中列出时，回退到该平台的默认引擎。跨平台团队应使用这种写法，避免一个人的引擎选择挤掉其他操作系统的默认值。`ai init` 交互式选择引擎时就是写入这种格式。
+
 ## macOS
 
 - `ai init`、`ai sync` 等：执行 `npm install -g @fitlab-ai/agent-infra`（或 Homebrew 安装）后开箱即用。

@@ -8,7 +8,9 @@
   "prFlow": "required",
   "templateVersion": "v0.9.8-alpha.0",
   "sandbox": {
-    "engine": "orbstack",
+    "engine": {
+      "darwin": "orbstack"
+    },
     "runtimes": [
       "node22"
     ],

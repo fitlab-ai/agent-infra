@@ -249,7 +249,7 @@ async function cmdInit(): Promise<void> {
     agentClients: serializeAgentClients(defaultState)
   };
 
-  if (sandboxEngine) config.sandbox.engine = sandboxEngine;
+  if (sandboxEngine) config.sandbox.engine = { [currentPlatform]: sandboxEngine };
   if (templateSources.length > 0) config.templates = { sources: templateSources };
   if (skillSources.length > 0) config.skills = { sources: skillSources };
 

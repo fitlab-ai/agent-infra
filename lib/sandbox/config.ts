@@ -7,6 +7,7 @@ import { normalizeAgentClients } from '../agent-clients/config.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientState } from '../agent-clients/types.ts';
 import { validateSandboxEngine } from './engine.ts';
+import type { SandboxEngineInput } from './engine.ts';
 import { hostJoin } from './engines/wsl2-paths.ts';
 import { findRuntimeEngineMismatches } from './runtime-engines.ts';
 import { parseCustomTools } from './tools.ts';
@@ -29,7 +30,7 @@ type PlatformFn = typeof platform;
 type WriteStderr = (chunk: string) => unknown;
 
 type SandboxConfigInput = {
-  engine?: string | null;
+  engine?: SandboxEngineInput;
   runtimes?: string[];
   tools?: string[];
   customTools?: unknown;

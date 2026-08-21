@@ -45,7 +45,7 @@ test(".agents/.airc.json declares labels.in mapping for module labels", () => {
 
 test(".agents/.airc.json declares default sandbox configuration", () => {
   assert.deepEqual(collaborator.sandbox, {
-    engine: "orbstack",
+    engine: { darwin: "orbstack" },
     runtimes: ["node22"],
     tools: ["agent-infra", "git-lfs"],
     customTools: [

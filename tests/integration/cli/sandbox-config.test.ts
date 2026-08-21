@@ -208,6 +208,36 @@ test("loadConfig preserves configured darwin-only sandbox engine with platform c
   }
 });
 
+test("loadConfig resolves per-platform sandbox engine object for the matching platform", async () => {
+  const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-per-platform-"));
+  const previousCwd = process.cwd();
+
+  try {
+    execSync("git init", { cwd: tmpDir, env: gitSafeEnv(), stdio: "pipe" });
+    fs.mkdirSync(path.join(tmpDir, ".agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, ".agents", ".airc.json"),
+      JSON.stringify({
+        project: "demo",
+        org: "fitlab-ai",
+        sandbox: { engine: { darwin: "orbstack" } }
+      }, null, 2) + "\n",
+      "utf8"
+    );
+
+    process.chdir(tmpDir);
+    const darwinConfig = withGitSafeProcessEnv(() => sandboxConfig.loadConfig({ platformFn: () => "darwin" }));
+    assert.equal(darwinConfig.engine, "orbstack");
+
+    const linuxConfig = withGitSafeProcessEnv(() => sandboxConfig.loadConfig({ platformFn: () => "linux" }));
+    assert.equal(linuxConfig.engine, null);
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("loadConfig rejects unsupported sandbox engine values", async () => {
   const sandboxConfig = await loadFreshEsm<typeof import("../../../lib/sandbox/config.ts")>("lib/sandbox/config.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-engine-invalid-"));

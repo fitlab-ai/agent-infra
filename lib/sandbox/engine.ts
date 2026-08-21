@@ -18,9 +18,19 @@ const PLATFORM_DEFAULTS = Object.freeze({
   win32: ENGINES.WSL2
 });
 
+export type SandboxEngineInput = string | Record<string, string | null | undefined> | null | undefined;
+
 type EngineConfig = EffectiveSandboxConfig & {
-  engine?: string | null;
+  engine?: SandboxEngineInput;
 };
+
+function isPerPlatformEngine(engine: SandboxEngineInput): engine is Record<string, string | null | undefined> {
+  return typeof engine === 'object' && engine !== null;
+}
+
+function resolveEngineForPlatform(engine: SandboxEngineInput, os: string): string | null | undefined {
+  return isPerPlatformEngine(engine) ? engine[os] : engine;
+}
 
 type EngineDependencies = {
   platformFn?: typeof platform;
@@ -83,33 +93,34 @@ function ensureBuildKit(engine: string, runOkEngineFn: typeof runOkEngine): void
 }
 
 export function validateSandboxEngine(
-  engine: string | null | undefined,
+  engine: SandboxEngineInput,
   { platformFn = platform }: Pick<EngineDependencies, 'platformFn'> = {}
 ): string | null {
-  if (engine === null || engine === undefined) {
+  const os = platformFn();
+  const resolved = resolveEngineForPlatform(engine, os);
+  if (resolved === null || resolved === undefined) {
     return null;
   }
 
-  const os = platformFn();
-  if (!(engine in ADAPTERS)) {
+  if (!(resolved in ADAPTERS)) {
     const known = Object.keys(ADAPTERS).join(', ');
     throw new Error(
-      `sandbox: invalid "sandbox.engine" value "${engine}" (unknown sandbox engine). `
+      `sandbox: invalid "sandbox.engine" value "${resolved}" (unknown sandbox engine). `
       + `Valid engines: ${known}.`
     );
   }
 
-  const adapter = ADAPTERS[engine as keyof typeof ADAPTERS];
+  const adapter = ADAPTERS[resolved as keyof typeof ADAPTERS];
   if (!adapter.supportedPlatforms.includes(os)) {
     const supported = enginesForPlatform(os);
     const supportedList = supported.length > 0 ? supported.join(', ') : 'none';
     throw new Error(
-      `sandbox: "sandbox.engine" value "${engine}" is not supported on ${os}. `
+      `sandbox: "sandbox.engine" value "${resolved}" is not supported on ${os}. `
       + `Supported engines on ${os}: ${supportedList}.`
     );
   }
 
-  return engine;
+  return resolved;
 }
 
 export function detectEngine(

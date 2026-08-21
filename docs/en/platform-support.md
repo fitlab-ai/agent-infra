@@ -20,6 +20,11 @@ You can override the engine in `.agents/.airc.json`. Valid engines are platform-
 - macOS: `colima`, `orbstack`, `docker-desktop`
 - Windows: `wsl2`, `native`, `docker-desktop`
 
+`sandbox.engine` accepts two shapes:
+
+- A string: `"engine": "orbstack"`, applied on every platform (and rejected on any platform where it's invalid — since `.agents/.airc.json` is typically shared across contributors on different operating systems, the plain-string form only suits single-OS teams).
+- A per-platform object: `"engine": { "darwin": "orbstack" }`, applied only on the matching platform; a platform missing from the object falls back to that platform's default engine. Cross-platform teams should use this form so one contributor's engine choice doesn't override the default for other operating systems. `ai init`'s interactive engine prompt writes this shape.
+
 ## macOS
 
 - `ai init`, `ai sync`, etc.: works out of the box after `npm install -g @fitlab-ai/agent-infra` (or Homebrew).
