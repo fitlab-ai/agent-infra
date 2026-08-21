@@ -79,9 +79,9 @@ test('a stale fixed owner and stale candidates are reclaimed without leaving loc
   const taskId = 'TASK-20260101-000001';
   const identity = lockKey(root, taskId);
   const staleOwner = {
-    version: 1,
+    version: 2,
     pid: 999_999,
-    startTime: 'stale',
+    startTime: 0,
     token: 'stale-token',
     owner: 'stale-owner',
     canonicalRepoRoot: identity.canonicalRepoRoot,
@@ -109,9 +109,9 @@ test('a stale quarantine left by a crashed reclaimer does not permanently block 
   const fixed = path.join(lockRoot, `${identity.key}.lock`);
   const quarantine = `${fixed}.quarantine.stale-token`;
   const staleOwner = {
-    version: 1,
+    version: 2,
     pid: 999_999,
-    startTime: 'stale',
+    startTime: 0,
     token: 'stale-token',
     owner: 'stale-owner',
     canonicalRepoRoot: identity.canonicalRepoRoot,

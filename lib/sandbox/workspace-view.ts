@@ -47,6 +47,7 @@ export function sandboxWorkspaceViewPaths(params: Readonly<{
 }
 
 export type SandboxControlSetup = Readonly<{
+  root: string;
   channelDir: string;
   statusDir: string;
   manifestPath: string;
@@ -179,6 +180,7 @@ export function materializeSandboxControl(params: Readonly<{
   container: string;
   branch: string;
   identity: SandboxWorkspaceIdentity;
+  engine?: string;
 }>): SandboxControlSetup {
   const { root, channelDir, statusDir, processingDir, manifestPath } = sandboxControlPaths(params);
   assertSafeDirectory(root, path.resolve(params.base));
@@ -200,11 +202,13 @@ export function materializeSandboxControl(params: Readonly<{
   const generation = randomBytes(16).toString('hex');
   const repoRoot = fs.realpathSync.native(params.repoRoot);
   const manifest: SandboxControlManifest = {
-    version: 3,
+    version: 4,
+    engine: params.engine ?? 'docker',
     repoRoot,
     worktreeRoot: fs.realpathSync.native(params.worktreeRoot),
     project: params.project,
     container: params.container,
+    containerIdentity: { id: '', labels: {} },
     branch: params.branch,
     mode: params.identity.mode,
     taskId: params.identity.mode === 'task-bound' ? params.identity.taskId : null,
@@ -215,5 +219,23 @@ export function materializeSandboxControl(params: Readonly<{
     processingDir
   };
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
-  return { channelDir, statusDir, manifestPath, token, generation };
+  return { root, channelDir, statusDir, manifestPath, token, generation };
+}
+
+export function finalizeSandboxControlManifest(
+  setup: SandboxControlSetup,
+  identity: Readonly<{ engine: string; id: string; labels: Readonly<Record<string, string>> }>
+): void {
+  if (!identity.engine || !identity.id) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
+  const manifest = JSON.parse(fs.readFileSync(setup.manifestPath, 'utf8')) as Record<string, unknown>;
+  manifest.version = 4;
+  manifest.engine = identity.engine;
+  manifest.containerIdentity = { id: identity.id, labels: { ...identity.labels } };
+  const temporary = `${setup.manifestPath}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
+  try {
+    fs.writeFileSync(temporary, `${JSON.stringify(manifest)}\n`, { mode: 0o600, flag: 'wx' });
+    fs.renameSync(temporary, setup.manifestPath);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
 }

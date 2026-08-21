@@ -139,6 +139,10 @@ ai sandbox create feature/proxy --inherit-proxy
 
 控制 broker 会向容器发布只读健康状态，并在一个授权请求由独立、可追踪的进程组执行期间持续存活。请求携带每沙箱 generation 和两秒绝对受理截止时间；broker 发布 `healthy`、`busy` 或 `parked`，在 acceptance 前拒绝过期或 generation 不匹配的请求，并在恢复时先终止遗留进程树再接收新工作。调用方可以用新 request ID 重试 acceptance 前的 `BUSY` 或超时拒绝；一旦请求已被接受而最终结果未知，则不得自动重试。
 
+控制时序集中在可注入的 policy 中：生产默认 control tick 为 250ms，慢速检查和容器 heartbeat 为 5s，parked 退避从 1s 增长到 5s，quiesce deadline 为 7s。测试可以注入更短的值，不需要改变安全状态机。新的 control root 使用 v4 manifest，保存精确容器 ID 与受控 labels；创建时会先 inspect 并原子 finalize 这份身份，再启动 broker。v4 之前的 control root 或旧 PID 记录不会由新版猜测、迁移、杀死或删除：必须用 `--recreate` 重建旧沙箱/容器，旧 PID 记录则交给匹配的旧版本处理。
+
+显式 `ai sandbox rm` 和 `--purge` 使用 manifest 记录的精确容器 ID：先 quiesce broker 与 execution，等待软停止阶段，再删除精确容器，确认 exact-ID 得到权威 absent，重新核对 manifest、owner 与 generation，最后才使用剩余 deadline 做 force cleanup。精确 ID 的 not-found 不会被同名新容器混淆。inspect 未知、删除失败、owner 被替换或 deadline 耗尽时，会保留 control root 与证据，等待下一次受控重试。
+
 依赖宿主环境的校验统一使用 `ai task validate <branch | task-ref> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command>`。默认 `snapshot` 在任务分支 commit 对应的临时 detached worktree 中运行命令，并保证清理。`inplace` 获取宿主 lease、等待 broker 进入 parked、停止沙箱容器、对原 worktree 运行命令，随后恢复分支、容器、lease 与 broker 健康状态。`run-manual-validation` 技能只记录去敏的 `validation-run` 证据；`complete-manual-validation` 仍是独立的维护者确认步骤。
 
 原地恢复失败时，命令会在进入容器或调度 tmux 前停止，不会自动替换容器。只有显式传入 `--recreate` 才授权 container-only fallback：`ai sandbox start --recreate <target>`、`ai sandbox exec --recreate <target> [cmd...]` 或 `ai run <skill> <task-ref> --recreate`。对于 `sandbox exec`，只有 target 之前的 flag 由宿主解析；target 之后的 `--recreate` 会透传给容器命令。替换会保留 worktree、local branch、宿主管理的工具 seed、shell 配置与 `/share` 数据，但会丢弃旧 container ID、writable layer、普通 `/tmp`、进程、tmux session 与其他 RAM 状态；该路径绝不会执行完整的 `ai sandbox rm`。

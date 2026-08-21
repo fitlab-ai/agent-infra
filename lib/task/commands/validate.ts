@@ -169,7 +169,7 @@ function inplaceValidation(config: ReturnType<typeof loadConfig>, target: Return
   const nonce = randomUUID();
   const issuedAt = Date.now();
   const lease: SandboxControlLease = {
-    version: 1, generation: manifest.generation, nonce,
+    version: 2, generation: manifest.generation, nonce,
     owner: { pid: process.pid, startTime }, issuedAt,
     expiresAt: issuedAt + Math.min(options.timeoutMs + RECOVERY_GRACE_MS, MAX_TIMEOUT_MS + RECOVERY_GRACE_MS),
     taskId: target.workspace.mode === 'task-bound' ? target.workspace.taskId : null,

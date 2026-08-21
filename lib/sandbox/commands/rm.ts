@@ -20,7 +20,8 @@ import { assertManagedPath, removeManagedDir, removeWorktreeDir } from '../manag
 import { runEngine, runOk, runOkEngine, runSafe, runSafeEngine } from '../shell.ts';
 import { resolveSandboxTarget, type SandboxWorkspaceIdentity } from '../workspace-identity.ts';
 import { sandboxControlPaths, sandboxWorkspaceViewPaths } from '../workspace-view.ts';
-import { quiesceSandboxControlRoot, readSandboxControlManifest } from '../control/lifecycle.ts';
+import { removeSandboxControlRoot, readSandboxControlManifest } from '../control/lifecycle.ts';
+import { inspectSandboxControlContainer } from '../control/container-identity.ts';
 import { toolConfigDirCandidates, toolProjectDirCandidates } from '../tools.ts';
 import { createSandboxCapabilityPlan } from '../agent-client-reconciler.ts';
 import type { SandboxTool } from '../tools.ts';
@@ -172,9 +173,40 @@ function removeEmptyManagedParent(base: string, directory: string): void {
   assertRemoved(parent, 'Empty sandbox container directory');
 }
 
-async function quiesceProjectControlRoots(config: SandboxConfig): Promise<void> {
+async function removeExactSandboxContainer(
+  engine: string,
+  manifest: ReturnType<typeof readSandboxControlManifest>,
+  timeoutMs: number
+): Promise<void> {
+  const deadlineAt = Date.now() + timeoutMs;
+  const remaining = (): number => Math.max(1, deadlineAt - Date.now());
+  const inspect = () => inspectSandboxControlContainer(manifest, { timeoutMs: remaining() });
+  const before = await inspect();
+  if (before.state === 'unknown') throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${before.reason}`);
+  if (before.state === 'absent') return;
+  if (before.running && !runOkEngine(engine, 'docker', ['stop', manifest.containerIdentity.id], { timeout: remaining() })) {
+    const afterStop = await inspect();
+    if (afterStop.state !== 'absent' && afterStop.state !== 'found') {
+      throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${afterStop.reason}`);
+    }
+    if (afterStop.state === 'found' && afterStop.running) {
+      throw new Error(`Failed to stop sandbox container: ${manifest.containerIdentity.id}`);
+    }
+  }
+  const afterStop = await inspect();
+  if (afterStop.state === 'unknown') throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${afterStop.reason}`);
+  if (afterStop.state === 'found' && !runOkEngine(engine, 'docker', ['rm', manifest.containerIdentity.id], { timeout: remaining() })) {
+    const afterRemove = await inspect();
+    if (afterRemove.state !== 'absent') {
+      throw new Error(`Failed to remove sandbox container: ${manifest.containerIdentity.id}`);
+    }
+  }
+}
+
+async function removeProjectControlRoots(config: SandboxConfig, engine: string): Promise<Set<string>> {
+  const containers = new Set<string>();
   const projectRoot = path.join(config.controlBase, config.project);
-  if (!fs.existsSync(projectRoot)) return;
+  if (!fs.existsSync(projectRoot)) return containers;
   assertManagedPath(config.controlBase, projectRoot);
   const projectStat = fs.lstatSync(projectRoot);
   if (!projectStat.isDirectory() || projectStat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
@@ -183,9 +215,18 @@ async function quiesceProjectControlRoots(config: SandboxConfig): Promise<void> 
     const containerRoot = path.join(projectRoot, container.name);
     for (const identity of fs.readdirSync(containerRoot, { withFileTypes: true })) {
       if (!identity.isDirectory() || identity.isSymbolicLink()) continue;
-      await quiesceSandboxControlRoot(path.join(containerRoot, identity.name));
+      const root = path.join(containerRoot, identity.name);
+      const manifestPath = path.join(root, 'manifest.json');
+      if (!fs.existsSync(manifestPath)) throw new Error(`SANDBOX_CONTROL_TARGET_EVIDENCE_MISSING: ${root}`);
+      const manifest = readSandboxControlManifest(manifestPath);
+      containers.add(manifest.container);
+      await removeSandboxControlRoot(root, {
+        inspectContainer: (timeoutMs) => inspectSandboxControlContainer(manifest, { timeoutMs }),
+        removeContainer: (timeoutMs) => removeExactSandboxContainer(engine, manifest, timeoutMs)
+      });
     }
   }
+  return containers;
 }
 
 function inspectionBlockers(inspections: readonly WorktreeInspection[]): WorktreeInspection[] {
@@ -277,23 +318,30 @@ async function rmOne(
     return;
   }
 
+  const coordinatedContainers = new Set<string>();
   for (const root of controlRoots.filter((candidate) => fs.existsSync(candidate))) {
     assertLegacyCandidateEvidence(root, config.controlBase, config, effectiveBranch, matchedContainers);
     assertControlRootMatchesTarget(root, effectiveBranch, workspace);
-    await quiesceSandboxControlRoot(root);
+    const manifest = readSandboxControlManifest(path.join(root, 'manifest.json'));
+    coordinatedContainers.add(manifest.container);
+    await removeSandboxControlRoot(root, {
+      inspectContainer: (timeoutMs) => inspectSandboxControlContainer(manifest, { timeoutMs }),
+      removeContainer: (timeoutMs) => removeExactSandboxContainer(engine, manifest, timeoutMs)
+    });
   }
 
-  if (matchedContainers.length > 0) {
+  const uncoordinatedContainers = matchedContainers.filter((name) => !coordinatedContainers.has(name));
+  if (uncoordinatedContainers.length > 0) {
     const spinner = p.spinner();
-    spinner.start(`Stopping container(s): ${matchedContainers.join(', ')}`);
-    for (const name of matchedContainers) {
+    spinner.start(`Stopping container(s): ${uncoordinatedContainers.join(', ')}`);
+    for (const name of uncoordinatedContainers) {
       if (!runOkEngine(engine, 'docker', ['stop', name])) throw new Error(`Failed to stop sandbox container: ${name}`);
       if (!runOkEngine(engine, 'docker', ['rm', name])) throw new Error(`Failed to remove sandbox container: ${name}`);
     }
     const remaining = runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
-    const leftovers = matchedContainers.filter((name) => remaining.includes(name));
+    const leftovers = uncoordinatedContainers.filter((name) => remaining.includes(name));
     if (leftovers.length > 0) throw new Error(`Sandbox container(s) still exist after removal: ${leftovers.join(', ')}`);
-    spinner.stop(pc.green(`Removed container(s): ${matchedContainers.join(', ')}`));
+    spinner.stop(pc.green(`Removed container(s): ${uncoordinatedContainers.join(', ')}`));
   } else {
     p.log.warn(`No sandbox container found for '${branch}'`);
   }
@@ -400,7 +448,7 @@ async function rmPurge(
   }
   const permits = cleanPermits(inspections);
 
-  await quiesceProjectControlRoots(config);
+  const coordinatedContainers = await removeProjectControlRoots(config, engine);
 
   const containers = runEngine(engine, 'docker', [
     'ps',
@@ -410,17 +458,19 @@ async function rmPurge(
     '--format',
     '{{.Names}}'
   ]);
-  if (containers) {
+  const uncoordinatedContainers = containers.split('\n').filter((name) => name && !coordinatedContainers.has(name));
+  if (uncoordinatedContainers.length > 0) {
     const spinner = p.spinner();
     spinner.start('Stopping project sandbox containers...');
-    for (const name of containers.split('\n').filter(Boolean)) {
+    for (const name of uncoordinatedContainers) {
       if (!runOkEngine(engine, 'docker', ['stop', name])) throw new Error(`Failed to stop sandbox container: ${name}`);
       if (!runOkEngine(engine, 'docker', ['rm', name])) throw new Error(`Failed to remove sandbox container: ${name}`);
     }
     const remaining = runEngine(engine, 'docker', [
       'ps', '-a', '--filter', `label=${sandboxLabel(config)}`, '--format', '{{.Names}}'
     ]);
-    if (remaining) throw new Error(`Project sandbox container(s) still exist after removal: ${remaining.replaceAll('\n', ', ')}`);
+    const leftovers = remaining.split('\n').filter((name) => name && !coordinatedContainers.has(name));
+    if (leftovers.length > 0) throw new Error(`Project sandbox container(s) still exist after removal: ${leftovers.join(', ')}`);
     spinner.stop(pc.green('Project sandbox containers removed'));
   } else {
     p.log.warn('No project sandbox containers found');

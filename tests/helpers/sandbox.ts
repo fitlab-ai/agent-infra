@@ -267,6 +267,7 @@ function writeSandboxEngineFixture(
       "  process.exit(1);",
       "}",
       "if (args[0] === 'inspect') {",
+      "  if (process.env.DOCKER_INSPECT_NOT_FOUND === '1') { process.stderr.write('No such container\\n'); process.exit(1); }",
       "  if (args[1] === '-f' && args[2] && String(args[2]).includes(`${project}.sandbox.branch`)) {",
       "    process.stdout.write(`${inspectLabels(args.at(-1))[`${project}.sandbox.branch`] || ''}\\n`);",
       "    process.exit(0);",

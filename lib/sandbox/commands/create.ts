@@ -73,6 +73,7 @@ import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from '../mounts.ts';
 import {
   assertSandboxTaskSource,
+  finalizeSandboxControlManifest,
   materializeSandboxControl,
   materializeSandboxWorkspaceView,
   prepareSandboxWorkspaceMountTarget,
@@ -1349,7 +1350,8 @@ export async function create(args: string[]): Promise<void> {
               project: effectiveConfig.project,
               container,
               branch,
-              identity: target.workspace
+              identity: target.workspace,
+              engine
             });
             hostShellConfig = prepareHostShellConfig({
               home: effectiveConfig.home,
@@ -1422,7 +1424,9 @@ export async function create(args: string[]): Promise<void> {
             const hostTz = detectHostTimezone();
             const tzFlags = hostTz ? ['-e', `TZ=${hostTz}`] : [];
 
-            runEngineTaskCommand(engine, 'docker', [
+            let createdContainerRef: string | null = null;
+            try {
+              const dockerRunId = runEngineTaskCommand(engine, 'docker', [
               'run',
               '-d',
               '--init',
@@ -1472,9 +1476,53 @@ export async function create(args: string[]): Promise<void> {
               '-w',
               '/workspace',
               effectiveConfig.imageName
-            ]);
-            await startSandboxControlBroker(effectiveConfig.repoRoot, control.manifestPath);
-            createdTmpfsSeedPlan = tmpfsSeedPlan;
+              ]);
+              createdContainerRef = dockerRunId.trim();
+              const containerId = runEngineTaskCommand(engine, 'docker', [
+                'inspect', '--format', '{{.Id}}', dockerRunId.trim()
+              ]).trim();
+              if (!containerId) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
+              const rawContainerLabels = runEngineTaskCommand(engine, 'docker', [
+                'inspect', '--format', '{{json .Config.Labels}}', containerId
+              ]).trim();
+              let inspectedLabels: unknown;
+              try {
+                inspectedLabels = JSON.parse(rawContainerLabels);
+              } catch {
+                throw new Error('SANDBOX_CONTROL_CONTAINER_LABELS_INVALID');
+              }
+              if (!inspectedLabels || typeof inspectedLabels !== 'object' || Array.isArray(inspectedLabels)) {
+                throw new Error('SANDBOX_CONTROL_CONTAINER_LABELS_INVALID');
+              }
+              const expectedLabels: Record<string, string> = {
+                [sandboxLabel(effectiveConfig)]: '',
+                [sandboxBranchLabel(effectiveConfig)]: branch,
+                [sandboxWorkspaceModeLabel(effectiveConfig)]: target.workspace.mode,
+                [sandboxRuntimeCapabilityLabel(effectiveConfig)]: capabilityPlan.runtimeSignature,
+                ...(target.workspace.mode === 'task-bound'
+                  ? { [sandboxTaskIdLabel(effectiveConfig)]: target.workspace.taskId }
+                  : {})
+              };
+              const labels = inspectedLabels as Record<string, unknown>;
+              for (const [key, expected] of Object.entries(expectedLabels)) {
+                if (labels[key] !== expected) throw new Error('SANDBOX_CONTROL_CONTAINER_IDENTITY_MISMATCH');
+              }
+              finalizeSandboxControlManifest(control, {
+                engine,
+                id: containerId,
+                labels: expectedLabels
+              });
+              await startSandboxControlBroker(effectiveConfig.repoRoot, control.manifestPath);
+              createdTmpfsSeedPlan = tmpfsSeedPlan;
+            } catch (error) {
+              if (createdContainerRef) {
+                runSafeEngine(engine, 'docker', ['stop', createdContainerRef]);
+                runSafeEngine(engine, 'docker', ['rm', createdContainerRef]);
+              }
+              removeDirRecursive(control.root);
+              removeDirRecursive(workspaceView.root);
+              throw error;
+            }
           } finally {
             envFile.cleanup();
           }

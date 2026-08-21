@@ -139,7 +139,7 @@ export async function runDaemon(): Promise<void> {
       logger.close();
       if (ownStartTime !== null) {
         removePidRecordIfMatches(config.pidFile, {
-          version: 1,
+          version: 2,
           pid: process.pid,
           startTime: ownStartTime
         });
