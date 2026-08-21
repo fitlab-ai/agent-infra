@@ -43,7 +43,7 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
       readOnly: true
     },
     {
-      hostPaths: [path.join('/repo/.agents/workspace/active', 'TASK-20260809-010203')],
+      hostPaths: ['/repo/.agents/workspace/active/TASK-20260809-010203'],
       containerPath: '/workspace/.agents/workspace/active/TASK-20260809-010203',
       readOnly: false
     }
