@@ -67,3 +67,42 @@ test('task-lifecycle CLI rejects unknown and duplicate options as one JSON failu
     assert.equal(JSON.parse(result.stdout).error.code, 'LIFECYCLE_PAYLOAD_INVALID');
   }
 });
+
+const RESTORE_TASK_ID = 'TASK-20260202-000002';
+
+function stagingFixture({ initGit = true } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-lifecycle-restore-cli-'));
+  if (initGit) spawnSync('git', ['init', '-q'], { cwd: root });
+  const staging = path.join(root, '.agents', 'workspace', '.restore-staging-1');
+  fs.mkdirSync(staging, { recursive: true });
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(staging, 'task.md'), `---\nid: ${RESTORE_TASK_ID}\nissue_number: 42\nstatus: active\ncurrent_step: requirement-analysis\nupdated_at: old\nagent_infra_version: old\n---\n\n# Task\n\n## Activity Log\n\n`);
+  return { root, staging };
+}
+
+test('task-lifecycle CLI restore applies staging for a task that does not exist locally', () => {
+  const f = stagingFixture();
+  const result = run(f.root, [RESTORE_TASK_ID, 'restore', '--agent', 'codex', '--staging-dir', f.staging, '--issue-number', '42']);
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.status, 'applied');
+  assert.equal(parsed.shortId.shortId, '01');
+  assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'active', RESTORE_TASK_ID, 'task.md')), true);
+  assert.equal(fs.existsSync(f.staging), false);
+});
+
+test('task-lifecycle CLI restore rejects short ids and malformed TASK-ids with LIFECYCLE_IDENTITY_INVALID', () => {
+  const f = stagingFixture();
+  for (const ref of ['1', 'not-a-task-id']) {
+    const result = run(f.root, [ref, 'restore', '--agent', 'codex', '--staging-dir', f.staging, '--issue-number', '42']);
+    assert.equal(result.status, 1);
+    assert.equal(JSON.parse(result.stdout).error.code, 'LIFECYCLE_IDENTITY_INVALID');
+  }
+});
+
+test('task-lifecycle CLI restore fails closed with REPO_ROOT_NOT_FOUND outside a git repository', () => {
+  const f = stagingFixture({ initGit: false });
+  const result = run(f.root, [RESTORE_TASK_ID, 'restore', '--agent', 'codex', '--staging-dir', f.staging, '--issue-number', '42']);
+  assert.equal(result.status, 1);
+  assert.equal(JSON.parse(result.stdout).error.code, 'REPO_ROOT_NOT_FOUND');
+});
