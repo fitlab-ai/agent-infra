@@ -127,7 +127,7 @@ ai sandbox create feature/proxy --inherit-proxy
 
 ## 按任务隔离的工作区身份
 
-每个沙箱都有显式 workspace identity。task-bound 沙箱挂载独立的只读 workspace 视图，并且只把 `.agents/workspace/active/<TASK-id>` 以可写子挂载覆盖；其他状态下的全部任务都不可见。branch-only 沙箱获得同样稳定的目录结构，但短号注册表为空且不挂载任何宿主任务目录。宿主 workspace 根目录绝不会被挂载。
+每个沙箱都有显式 workspace identity。branch-only 沙箱对 `active`、`completed`、`blocked`、`archive` 使用互不重叠的只读目录挂载。task-bound 沙箱把 `active` 目录挂载替换为只读的 `.agents/workspace/active/.short-ids.json` 文件，继续只读挂载 `completed`、`blocked`、`archive`，并且只把 `.agents/workspace/active/<TASK-id>` 覆盖为可写。active 祖先目录由可写的 `/workspace` worktree 提供；宿主 workspace 根目录绝不会被挂载，其他状态下的全部任务都不可见。
 
 两种 identity 都可以通过专用 typed `task-create` 控制请求创建新任务。沙箱 AI 只写一次版本化 candidate JSON；宿主负责严格验证、派生宿主字段、原子持久化、分配短号并尝试平台同步。该例外只授予“创建”能力：不会暴露宿主 workspace，不会让 branch-only 执行 lifecycle/orchestration，不会挂载新任务，也不会改变当前沙箱 identity。
 
@@ -135,7 +135,7 @@ ai sandbox create feature/proxy --inherit-proxy
 
 任务生命周期与编排命令通过每容器独立的控制通道执行，宿主 broker 会把每个请求重新绑定到容器标签中的完整 task ID。branch-only 容器、identity 不匹配、未知命令族和旧共享 workspace 容器都会 fail closed。`ai sandbox ls` 通过 `WORKSPACE` 与 `TASK` 列展示身份，`ai sandbox show` 展示同一份基于标签的事实。遇到 `legacy-invalid` 或同一分支的 identity transition 时，在宿主执行 `ai sandbox start --recreate <task-ref-or-branch>`，然后重试原命令。该操作只替换容器并保留现有 worktree。
 
-从按状态分别挂载 workspace 的旧版本升级后，旧容器拓扑会被有意判定为不兼容。请使用同一条显式 `--recreate` 命令完成一次性重建；容器内进程和 writable layer 数据可能丢失，但 worktree 与宿主管理的任务数据会保留。
+v0.9.7 的父挂载加子挂载拓扑属于 legacy，与当前 per-state 拓扑有意不兼容。升级时，或回滚时旧代码访问较新的 per-state 容器，检查都会 fail closed；请执行一次 `ai sandbox start --recreate <task-ref-or-branch>`。容器内进程、tmux 会话、writable layer、普通 `/tmp` 和 RAM 状态可能丢失，但 worktree、本地分支以及宿主管理的任务/工具数据会保留。
 
 控制 broker 会向容器发布只读健康状态，并在一个授权请求由独立、可追踪的进程组执行期间持续存活。请求携带每沙箱 generation 和两秒绝对受理截止时间；broker 发布 `healthy`、`busy` 或 `parked`，在 acceptance 前拒绝过期或 generation 不匹配的请求，并在恢复时先终止遗留进程树再接收新工作。调用方可以用新 request ID 重试 acceptance 前的 `BUSY` 或超时拒绝；一旦请求已被接受而最终结果未知，则不得自动重试。
 

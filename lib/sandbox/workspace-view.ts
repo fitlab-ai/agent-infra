@@ -85,6 +85,32 @@ function assertSafeDirectory(directory: string, expectedBase: string): void {
   }
 }
 
+function assertSafeMountTargetPath(
+  target: string,
+  worktreeRoot: string,
+  canonicalWorktreeRoot: string
+): void {
+  const relative = path.relative(worktreeRoot, target);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`Sandbox workspace mount target escapes its worktree: ${target}`);
+  }
+  let current = worktreeRoot;
+  for (const segment of ['', ...relative.split(path.sep).filter(Boolean)]) {
+    current = segment ? path.join(current, segment) : current;
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) {
+        throw new Error(`Sandbox workspace mount target must not contain a symbolic link: ${current}`);
+      }
+      const canonicalRelative = path.relative(canonicalWorktreeRoot, fs.realpathSync.native(current));
+      if (canonicalRelative.startsWith('..') || path.isAbsolute(canonicalRelative)) {
+        throw new Error(`Sandbox workspace mount target escapes its real worktree: ${current}`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+}
+
 export function assertSandboxTaskSource(repoRoot: string, taskId: string): string {
   if (!/^TASK-\d{8}-\d{6}$/.test(taskId)) throw new Error('SANDBOX_TASK_SOURCE_INVALID');
   const activeRoot = fs.realpathSync.native(path.join(repoRoot, '.agents', 'workspace', 'active'));
@@ -100,41 +126,22 @@ export function assertSandboxTaskSource(repoRoot: string, taskId: string): strin
   return canonical;
 }
 
-export function prepareSandboxWorkspaceMountTarget(worktreeRoot: string): string {
-  const worktree = path.resolve(worktreeRoot);
-  const canonicalWorktree = fs.realpathSync.native(worktree);
-  const agentsRoot = path.join(worktree, '.agents');
-  if (fs.existsSync(agentsRoot)) {
-    const agentsStat = fs.lstatSync(agentsRoot);
-    if (!agentsStat.isDirectory() || agentsStat.isSymbolicLink()) {
-      throw new Error(`Sandbox workspace mount ancestor must be a real directory: ${agentsRoot}`);
-    }
-  } else {
-    fs.mkdirSync(agentsRoot, { mode: 0o700 });
+export function prepareSandboxWorkspaceMountTargets(worktreeRoot: string): void {
+  const resolvedWorktreeRoot = path.resolve(worktreeRoot);
+  const canonicalWorktreeRoot = fs.realpathSync.native(resolvedWorktreeRoot);
+  const workspaceRoot = path.resolve(resolvedWorktreeRoot, '.agents', 'workspace');
+  const statePaths = sandboxWorkspaceViewStatePaths(workspaceRoot);
+  const registryTarget = path.join(workspaceRoot, 'active', '.short-ids.json');
+  for (const target of [workspaceRoot, ...statePaths.map(({ hostPath }) => hostPath), registryTarget]) {
+    assertSafeMountTargetPath(target, resolvedWorktreeRoot, canonicalWorktreeRoot);
   }
-  const canonicalAgents = fs.realpathSync.native(agentsRoot);
-  if (path.dirname(canonicalAgents) !== canonicalWorktree) {
-    throw new Error(`Sandbox workspace mount ancestor escapes the worktree: ${agentsRoot}`);
+  fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
+  for (const { hostPath } of statePaths) {
+    fs.mkdirSync(hostPath, { recursive: true, mode: 0o700 });
+    fs.chmodSync(hostPath, 0o700);
   }
-
-  const target = path.join(agentsRoot, 'workspace');
-  if (fs.existsSync(target)) {
-    const stat = fs.lstatSync(target);
-    if (stat.isSymbolicLink()) {
-      throw new Error(`Sandbox workspace mount target must not be a symbolic link: ${target}`);
-    }
-    if (!stat.isDirectory()) {
-      throw new Error(`Sandbox workspace mount target must be a directory: ${target}`);
-    }
-    if (path.dirname(fs.realpathSync.native(target)) !== canonicalAgents) {
-      throw new Error(`Sandbox workspace mount target escapes the worktree: ${target}`);
-    }
-  } else {
-    fs.mkdirSync(target, { mode: 0o700 });
-  }
-  fs.chmodSync(target, 0o700);
-  fs.accessSync(target, fs.constants.W_OK);
-  return target;
+  fs.chmodSync(workspaceRoot, 0o700);
+  fs.closeSync(fs.openSync(registryTarget, 'a', 0o600));
 }
 
 export function materializeSandboxWorkspaceView(params: Readonly<{

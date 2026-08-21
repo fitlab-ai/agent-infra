@@ -93,6 +93,8 @@ export type SandboxRecoverySnapshot = {
   actualBranch: string | null;
   expectedWorkspace: SandboxWorkspaceIdentity;
   actualWorkspace: SandboxContainerWorkspaceIdentity;
+  workspaceTopology?: 'legacy-parent' | 'per-state' | 'unknown';
+  taskView?: { path: string; readable: boolean };
   runtimeCapabilityOk?: boolean;
   unexpectedCapabilityMounts?: string[];
   mounts: Array<{
@@ -416,6 +418,22 @@ export function classifySandboxRecovery(snapshot: SandboxRecoverySnapshot): Sand
       message: 'Container runtime capability signature does not match the current sandbox plan.'
     });
   }
+  if (snapshot.workspaceTopology === 'legacy-parent') {
+    findings.push({
+      repairKind: 'hard-failure',
+      code: 'SANDBOX_WORKSPACE_TOPOLOGY_MISMATCH',
+      message: 'Sandbox uses the legacy workspace parent-mount topology; recreate the container explicitly to migrate it.',
+      path: '/workspace/.agents/workspace'
+    });
+  }
+  if (snapshot.taskView && !snapshot.taskView.readable) {
+    findings.push({
+      repairKind: 'hard-failure',
+      code: 'SANDBOX_TASK_VIEW_UNREADABLE',
+      message: `Bound task view is not readable at ${snapshot.taskView.path}.`,
+      path: snapshot.taskView.path
+    });
+  }
   for (const mountPath of snapshot.unexpectedCapabilityMounts ?? []) {
     findings.push({
       repairKind: 'hard-failure',
@@ -425,6 +443,10 @@ export function classifySandboxRecovery(snapshot: SandboxRecoverySnapshot): Sand
   }
 
   for (const mount of snapshot.mounts) {
+    if (
+      snapshot.workspaceTopology === 'legacy-parent'
+      && mount.path.startsWith('/workspace/.agents/workspace')
+    ) continue;
     if (
       mount.actualType !== mount.expectedType
       || !mount.sourceMatches
@@ -515,6 +537,20 @@ function inspectContainer(
     throw new Error(`Unable to inspect sandbox container '${container}'.`);
   }
   return parsed[0] as DockerInspection;
+}
+
+function workspaceTopology(mountsByDestination: ReadonlyMap<string, DockerMount>): SandboxRecoverySnapshot['workspaceTopology'] {
+  if (mountsByDestination.has('/workspace/.agents/workspace')) return 'legacy-parent';
+  const perState = [
+    '/workspace/.agents/workspace/active',
+    '/workspace/.agents/workspace/active/.short-ids.json',
+    '/workspace/.agents/workspace/completed',
+    '/workspace/.agents/workspace/blocked',
+    '/workspace/.agents/workspace/archive'
+  ];
+  return perState.some((destination) => mountsByDestination.has(destination))
+    ? 'per-state'
+    : 'unknown';
 }
 
 function probe(
@@ -729,6 +765,10 @@ export function collectSandboxRecoverySnapshot(params: {
   const capabilityPlan = createSandboxCapabilityPlan(params.config);
   const workspace = params.workspace ?? { mode: 'branch-only' as const };
   const tools = [...capabilityPlan.tools];
+  const topology = workspaceTopology(mountsByDestination);
+  const taskViewPath = workspace.mode === 'task-bound'
+    ? `/workspace/.agents/workspace/active/${workspace.taskId}/task.md`
+    : null;
   const seeds = declaredTmpfsSeedEntries(tools).map((seed) => {
     const mounted = mountsByDestination.get(seed.stagingPath)?.Type === 'bind';
     return {
@@ -820,6 +860,19 @@ export function collectSandboxRecoverySnapshot(params: {
     actualBranch: typeof branchLabel === 'string' ? branchLabel : null,
     expectedWorkspace: workspace,
     actualWorkspace: containerWorkspace,
+    workspaceTopology: topology,
+    ...(taskViewPath === null ? {} : {
+      taskView: {
+        path: taskViewPath,
+        readable: probe(
+          params.engine,
+          params.container,
+          'test -r "$1"',
+          [taskViewPath],
+          runOkFn
+        )
+      }
+    }),
     identityOk: typeof inspection.Id === 'string' && inspection.Id.length > 0
       && branchLabel === params.branch
       && sameSandboxWorkspaceIdentity(containerWorkspace, workspace),
@@ -996,6 +1049,7 @@ function assess(params: {
 function canRetryFreshReadiness(findings: SandboxRecoveryFinding[]): boolean {
   return findings.length > 0 && findings.every((finding) =>
     finding.repairKind === 'hard-failure'
+    && finding.code !== 'SANDBOX_WORKSPACE_TOPOLOGY_MISMATCH'
     && finding.path !== undefined
     && (
       finding.path.startsWith('/workspace/.agents/workspace')
