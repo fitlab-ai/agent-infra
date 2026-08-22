@@ -26,6 +26,7 @@ export function sandboxCoreBindMounts(
     workspaceViewRoot: string;
     controlDir: string;
     controlStatusDir: string;
+    runtimeDir?: string;
     taskSource?: string;
     taskId?: string;
   }
@@ -89,5 +90,12 @@ export function sandboxCoreBindMounts(
     containerPath: '/run/agent-infra/control',
     readOnly: false
   });
+  if (taskBound && overrides.runtimeDir) {
+    mounts.push({
+      hostPaths: [overrides.runtimeDir],
+      containerPath: '/run/agent-infra/runtime',
+      readOnly: false
+    });
+  }
   return mounts;
 }

@@ -50,6 +50,7 @@ export type SandboxControlSetup = Readonly<{
   root: string;
   channelDir: string;
   statusDir: string;
+  runtimeDir: string;
   manifestPath: string;
   token: string;
   generation: string;
@@ -60,7 +61,7 @@ export function sandboxControlPaths(params: Readonly<{
   project: string;
   container: string;
   identity: SandboxWorkspaceIdentity;
-}>): Readonly<{ root: string; channelDir: string; statusDir: string; processingDir: string; manifestPath: string }> {
+}>): Readonly<{ root: string; channelDir: string; statusDir: string; processingDir: string; runtimeDir: string; manifestPath: string }> {
   const identityKey = params.identity.mode === 'task-bound'
     ? `task-bound:${params.identity.taskId}`
     : 'branch-only';
@@ -71,6 +72,7 @@ export function sandboxControlPaths(params: Readonly<{
     channelDir: path.join(root, 'channel'),
     statusDir: path.join(root, 'public'),
     processingDir: path.join(root, 'processing'),
+    runtimeDir: path.join(root, 'runtime'),
     manifestPath: path.join(root, 'manifest.json')
   };
 }
@@ -188,16 +190,36 @@ export function materializeSandboxControl(params: Readonly<{
   branch: string;
   identity: SandboxWorkspaceIdentity;
   engine?: string;
+  replacementLease?: Readonly<{
+    root: string;
+    assertOwned(): void;
+  }>;
 }>): SandboxControlSetup {
-  const { root, channelDir, statusDir, processingDir, manifestPath } = sandboxControlPaths(params);
+  const { root, channelDir, statusDir, processingDir, runtimeDir, manifestPath } = sandboxControlPaths(params);
   assertSafeDirectory(root, path.resolve(params.base));
+  if (fs.existsSync(root)) {
+    if (!params.replacementLease || path.resolve(params.replacementLease.root) !== root) {
+      throw new Error('SANDBOX_CONTROL_REPLACEMENT_REQUIRED');
+    }
+    params.replacementLease.assertOwned();
+  }
   const consumedDir = path.join(root, 'consumed');
   assertSafeDirectory(consumedDir, root);
   fs.rmSync(consumedDir, { recursive: true, force: true });
   fs.mkdirSync(consumedDir, { recursive: true, mode: 0o700 });
-  for (const directory of [statusDir, processingDir]) {
+  for (const directory of [statusDir, processingDir, runtimeDir]) {
     assertSafeDirectory(directory, root);
+    if (directory === runtimeDir) fs.rmSync(directory, { recursive: true, force: true });
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  }
+  for (const directory of [
+    path.join(runtimeDir, 'clients'),
+    path.join(runtimeDir, 'clients', 'codex', 'capabilities'),
+    path.join(runtimeDir, 'clients', 'codex', 'lifecycle')
+  ]) {
+    assertSafeDirectory(directory, runtimeDir);
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    fs.chmodSync(directory, 0o700);
   }
   for (const queue of ['requests', 'responses']) {
     const directory = path.join(channelDir, queue);
@@ -209,7 +231,7 @@ export function materializeSandboxControl(params: Readonly<{
   const generation = randomBytes(16).toString('hex');
   const repoRoot = fs.realpathSync.native(params.repoRoot);
   const manifest: SandboxControlManifest = {
-    version: 4,
+    version: 5,
     engine: params.engine ?? 'docker',
     repoRoot,
     worktreeRoot: fs.realpathSync.native(params.worktreeRoot),
@@ -223,10 +245,11 @@ export function materializeSandboxControl(params: Readonly<{
     generation,
     channelDir,
     publicStatusDir: statusDir,
-    processingDir
+    processingDir,
+    runtimeDir
   };
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
-  return { root, channelDir, statusDir, manifestPath, token, generation };
+  return { root, channelDir, statusDir, runtimeDir, manifestPath, token, generation };
 }
 
 export function finalizeSandboxControlManifest(
@@ -235,7 +258,7 @@ export function finalizeSandboxControlManifest(
 ): void {
   if (!identity.engine || !identity.id) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
   const manifest = JSON.parse(fs.readFileSync(setup.manifestPath, 'utf8')) as Record<string, unknown>;
-  manifest.version = 4;
+  manifest.version = 5;
   manifest.engine = identity.engine;
   manifest.containerIdentity = { id: identity.id, labels: { ...identity.labels } };
   const temporary = `${setup.manifestPath}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;

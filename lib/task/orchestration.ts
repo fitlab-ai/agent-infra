@@ -25,6 +25,7 @@ import type {
   DelegationStage
 } from './delegation-receipts.ts';
 import { normalizeAgentClients } from '../agent-clients/config.ts';
+import { resolveAgentRuntimeStoreRoot } from '../runtime/agent-runtime.ts';
 import { inspectPlatformPullRequest } from '../platform/pull-requests.ts';
 import {
   getAgentClientCapability,
@@ -1955,7 +1956,7 @@ function recoverPreparedOrchestrationDelegation(
           receipt.client === 'codex'
           && receipt.lifecycleProvenance
           && hasActiveCodexLifecycleEvidence(
-            path.join(resolved.repoRoot, '.agents', 'workspace', '.runtime', 'codex-lifecycle'),
+          resolveAgentRuntimeStoreRoot({ repoRoot: resolved.repoRoot, store: 'lifecycle' }),
             {
               nativeAgent: `agent-infra-lifecycle-${receipt.role}`,
               hookDefinitionHash: receipt.lifecycleProvenance.hookDefinitionHash

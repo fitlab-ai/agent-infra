@@ -236,6 +236,7 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
     { Type: "bind", Source: taskSource, Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true },
     { Type: "bind", Source: control.channelDir, Destination: "/run/agent-infra/control", RW: true },
     { Type: "bind", Source: control.statusDir, Destination: "/run/agent-infra/control-status", RW: false },
+    { Type: "bind", Source: control.runtimeDir, Destination: "/run/agent-infra/runtime", RW: true },
     { Type: "bind", Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
     { Type: "bind", Source: path.join(config.shareBase, "branches", branchDir), Destination: "/share/branch", RW: true },
     { Type: "bind", Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false },
@@ -425,6 +426,11 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
     Type: "bind",
     Source: taskSource,
     Destination: `/workspace/.agents/workspace/active/${taskId}`,
+    RW: true
+  }, {
+    Type: "bind",
+    Source: path.join(config.controlBase, config.project, "demo-dev-feature..demo", fs.readdirSync(path.join(config.controlBase, config.project, "demo-dev-feature..demo"))[0]!, "runtime"),
+    Destination: "/run/agent-infra/runtime",
     RW: true
   });
   let taskReadable = false;
@@ -957,10 +963,7 @@ test("hard recovery failure requires explicit container replacement authorizatio
       row,
       allowRecreate: true,
       recreate: async () => {
-        assert.deepEqual(replacementCommands, [
-          ["stop", "demo-dev-feature..demo"],
-          ["rm", "demo-dev-feature..demo"]
-        ]);
+        assert.deepEqual(replacementCommands, []);
         recreated = true;
       },
       writeWarning: () => {},
@@ -968,7 +971,7 @@ test("hard recovery failure requires explicit container replacement authorizatio
     });
     assert.equal(result.path, "recreated");
     assert.equal(result.container, "demo-dev-feature..demo");
-    assert.equal(writes, 2);
+    assert.equal(writes, 0);
     assert.equal(git(worktree, "rev-parse", "HEAD"), beforeHead);
     assert.equal(git(worktree, "status", "--porcelain=v2", "--untracked-files=all"), beforeStatus);
   } finally {
@@ -1067,7 +1070,7 @@ test("unauthorized recovery leads with the recreate command and demotes the find
   }
 });
 
-test("container replacement snapshots the worktree before Docker writes and rejects drift", async () => {
+test("container replacement snapshots the worktree before the callback and rejects drift", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-worktree-drift-"));
   const config = recoveryFixtureConfig(tmpDir);
   const worktree = path.join(config.worktreeBase, "feature..demo");
@@ -1108,10 +1111,7 @@ test("container replacement snapshots the worktree before Docker writes and reje
       }),
       /SANDBOX_RECOVERY_WORKTREE_CHANGED/
     );
-    assert.deepEqual(replacementCommands, [
-      ["stop", "demo-dev-feature..demo"],
-      ["rm", "demo-dev-feature..demo"]
-    ]);
+    assert.deepEqual(replacementCommands, []);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1148,11 +1148,39 @@ test("explicit recreation replaces a healthy running container", async () => {
     });
 
     assert.equal(recreated, true);
-    assert.deepEqual(replacementCommands, [
-      ["stop", "demo-dev-feature..demo"],
-      ["rm", "demo-dev-feature..demo"]
-    ]);
+    assert.deepEqual(replacementCommands, []);
     assert.equal(result.path, "recreated");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("recreation rejected by a live replacement lease preserves the running container", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-replacement-busy-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const replacementCommands: string[][] = [];
+  const replacementBusy = new Error("SANDBOX_CONTROL_REPLACEMENT_BUSY: fixture lease is active");
+  const row = { name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 };
+
+  try {
+    await assert.rejects(
+      () => ensureSandboxReady({
+        config,
+        engine: "native",
+        branch: "feature/demo",
+        row,
+        allowRecreate: true,
+        forceRecreate: true,
+        recreate: async () => { throw replacementBusy; },
+        writeWarning: () => {},
+        deps: {
+          ensureControlBroker: async () => {},
+          runVerbose: (_engine, _cmd, args) => { replacementCommands.push(args); }
+        }
+      }),
+      (error: unknown) => error === replacementBusy
+    );
+    assert.deepEqual(replacementCommands, []);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -1192,10 +1220,7 @@ test("container replacement preserves the original failure when the worktree is 
       }),
       (error: unknown) => error === originalFailure
     );
-    assert.deepEqual(replacementCommands, [
-      ["stop", "demo-dev-feature..demo"],
-      ["rm", "demo-dev-feature..demo"]
-    ]);
+    assert.deepEqual(replacementCommands, []);
     assert.equal(git(worktree, "status", "--short", "--branch"), before);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1352,10 +1377,7 @@ test("control broker readiness failure enters the explicit container replacement
       deps
     });
     assert.equal(recreated, true);
-    assert.deepEqual(replacementCommands, [
-      ["stop", "demo-dev-feature..demo"],
-      ["rm", "demo-dev-feature..demo"]
-    ]);
+    assert.deepEqual(replacementCommands, []);
     assert.equal(result.path, "recreated");
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

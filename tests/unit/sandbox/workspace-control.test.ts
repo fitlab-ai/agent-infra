@@ -18,12 +18,23 @@ import {
   appendSandboxControlAudit,
   cleanupStaleSandboxControlLease,
   readActiveLease,
+  terminateSandboxControlExecution,
   SANDBOX_CONTROL_AUDIT_MAX_BYTES
 } from '../../../lib/sandbox/control/state.ts';
+import {
+  acquireSandboxControlReplacement,
+  assertSandboxControlCutoverSnapshot,
+  beginSandboxControlReplacement,
+  captureSandboxControlCutoverSnapshot,
+  recoverSandboxControlReplacement,
+  quiesceSandboxControlRoot,
+  readSandboxControlManifest,
+  readSandboxControlManifestForTransition
+} from '../../../lib/sandbox/control/lifecycle.ts';
 import { nodeEntryArgs } from '../../../lib/sandbox/control/executor.ts';
 
 const manifest: SandboxControlManifest = {
-  version: 4,
+  version: 5,
   engine: 'docker',
   repoRoot: '/repo',
   worktreeRoot: '/worktree',
@@ -37,7 +48,8 @@ const manifest: SandboxControlManifest = {
   generation: 'generation-1',
   channelDir: '/channel',
   publicStatusDir: '/public',
-  processingDir: '/processing'
+  processingDir: '/processing',
+  runtimeDir: '/runtime'
 };
 
 test('TypeScript control entries retain explicit strip-types startup', () => {
@@ -167,7 +179,8 @@ test('control broker ownership is acquired exclusively', async () => {
   fs.mkdirSync(publicStatusDir);
   fs.mkdirSync(processingDir);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    ...manifest, repoRoot: root, worktreeRoot: root, branch, channelDir, publicStatusDir, processingDir
+    ...manifest, repoRoot: root, worktreeRoot: root, branch, channelDir, publicStatusDir, processingDir,
+    runtimeDir: path.join(root, 'runtime')
   })}\n`);
   fs.writeFileSync(path.join(root, 'broker.json'), '{}\n');
   const controller = new AbortController();
@@ -189,8 +202,155 @@ test('control broker rejects legacy manifests with container-only recreation gui
   try {
     await assert.rejects(
       serveSandboxControl(manifestPath),
-      /SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 4; container-only recreation is required/
+      /SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 5; container-only recreation is required/
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('replacement lease serializes generation cutover and transition reader isolates v4 compatibility', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-replacement-'));
+  const manifestPath = path.join(root, 'manifest.json');
+  const legacy = {
+    ...manifest,
+    version: 4,
+    repoRoot: root,
+    worktreeRoot: root,
+    channelDir: path.join(root, 'channel'),
+    publicStatusDir: path.join(root, 'public'),
+    processingDir: path.join(root, 'processing')
+  };
+  fs.mkdirSync(legacy.channelDir, { recursive: true });
+  fs.mkdirSync(legacy.publicStatusDir);
+  fs.mkdirSync(legacy.processingDir);
+  fs.writeFileSync(manifestPath, `${JSON.stringify(legacy)}\n`);
+  const lease = acquireSandboxControlReplacement(root);
+  try {
+    assert.throws(() => acquireSandboxControlReplacement(root), /SANDBOX_CONTROL_REPLACEMENT_BUSY/);
+    assert.equal(readSandboxControlManifestForTransition(manifestPath).version, 4);
+    assert.throws(() => readSandboxControlManifest(manifestPath), /SANDBOX_CONTROL_MANIFEST_VERSION_INVALID/);
+    lease.assertOwned();
+  } finally {
+    lease.release();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('replacement owner lookup failures fail closed instead of reclaiming the lease', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-owner-unknown-'));
+  const lease = acquireSandboxControlReplacement(root);
+  try {
+    assert.throws(
+      () => acquireSandboxControlReplacement(root, { probeOwner: () => 'unknown' }),
+      /SANDBOX_CONTROL_REPLACEMENT_OWNER_UNAVAILABLE/
+    );
+  } finally {
+    lease.release();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('replacement cutover restores the previous root after materialization failure', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recovery-'));
+  const manifestPath = path.join(root, 'manifest.json');
+  const oldManifest = {
+    ...manifest,
+    repoRoot: root,
+    worktreeRoot: root,
+    channelDir: path.join(root, 'channel'),
+    publicStatusDir: path.join(root, 'public'),
+    processingDir: path.join(root, 'processing'),
+    runtimeDir: path.join(root, 'runtime')
+  };
+  for (const directory of [oldManifest.channelDir, oldManifest.publicStatusDir, oldManifest.processingDir, oldManifest.runtimeDir]) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
+  fs.writeFileSync(manifestPath, `${JSON.stringify(oldManifest)}\n`);
+  const lease = acquireSandboxControlReplacement(root);
+  try {
+    beginSandboxControlReplacement(root, lease);
+    fs.writeFileSync(manifestPath, '{"version":5}\n');
+    await recoverSandboxControlReplacement(root, lease);
+    assert.deepEqual(JSON.parse(fs.readFileSync(manifestPath, 'utf8')), oldManifest);
+    const snapshot = captureSandboxControlCutoverSnapshot(root);
+    assert.doesNotThrow(() => assertSandboxControlCutoverSnapshot(snapshot));
+  } finally {
+    lease.release();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('replacement recovery restores a root that disappeared after the snapshot was prepared', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-recovery-window-'));
+  const manifestPath = path.join(root, 'manifest.json');
+  const oldManifest = {
+    ...manifest,
+    repoRoot: root,
+    worktreeRoot: root,
+    channelDir: path.join(root, 'channel'),
+    publicStatusDir: path.join(root, 'public'),
+    processingDir: path.join(root, 'processing'),
+    runtimeDir: path.join(root, 'runtime')
+  };
+  for (const directory of [oldManifest.channelDir, oldManifest.publicStatusDir, oldManifest.processingDir, oldManifest.runtimeDir]) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
+  fs.writeFileSync(manifestPath, `${JSON.stringify(oldManifest)}\n`);
+  const firstLease = acquireSandboxControlReplacement(root);
+  let replacementLease: ReturnType<typeof acquireSandboxControlReplacement> | null = null;
+  try {
+    beginSandboxControlReplacement(root, firstLease);
+    fs.rmSync(root, { recursive: true, force: true });
+    replacementLease = acquireSandboxControlReplacement(root);
+    assert.equal(await recoverSandboxControlReplacement(root, replacementLease), 'restored');
+    assert.deepEqual(JSON.parse(fs.readFileSync(manifestPath, 'utf8')), oldManifest);
+  } finally {
+    replacementLease?.release();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('control quiesce fails closed when broker identity is unknown', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-quiesce-unknown-'));
+  const controlManifest = {
+    ...manifest,
+    repoRoot: root,
+    worktreeRoot: root,
+    channelDir: path.join(root, 'channel'),
+    publicStatusDir: path.join(root, 'public'),
+    processingDir: path.join(root, 'processing'),
+    runtimeDir: path.join(root, 'runtime')
+  };
+  for (const directory of [controlManifest.channelDir, controlManifest.publicStatusDir, controlManifest.processingDir, controlManifest.runtimeDir]) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
+  fs.writeFileSync(path.join(root, 'manifest.json'), `${JSON.stringify(controlManifest)}\n`);
+  fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
+    version: 3,
+    pid: process.pid,
+    startTime: 1,
+    brokerId: 'unknown-broker',
+    token: controlManifest.token,
+    generation: controlManifest.generation
+  })}\n`);
+  try {
+    await assert.rejects(
+      () => quiesceSandboxControlRoot(root, { identityProbe: () => 'unknown', timeoutMs: 100 }),
+      /SANDBOX_CONTROL_OWNER_UNAVAILABLE/
+    );
+    assert.equal(fs.existsSync(path.join(root, 'broker.json')), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('cutover snapshot detects replaced generation evidence before materialization', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-snapshot-'));
+  try {
+    const snapshot = captureSandboxControlCutoverSnapshot(root);
+    fs.writeFileSync(path.join(root, 'broker.json'), 'changed\n');
+    assert.throws(() => assertSandboxControlCutoverSnapshot(snapshot), /SANDBOX_CONTROL_OWNER_TRANSITION/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -300,4 +460,51 @@ test('stale lease cleanup removes only a matching expired lease', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('stale lease cleanup retains evidence when owner identity is unknown', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-lease-unknown-'));
+  const leaseManifest = {
+    ...manifest,
+    publicStatusDir: path.join(root, 'public'),
+    processingDir: path.join(root, 'processing'),
+    channelDir: path.join(root, 'channel')
+  };
+  fs.mkdirSync(leaseManifest.publicStatusDir, { recursive: true });
+  const leasePath = path.join(root, 'lease.json');
+  fs.writeFileSync(leasePath, `${JSON.stringify({
+    version: 2,
+    generation: leaseManifest.generation,
+    nonce: 'unknown-owner',
+    owner: { pid: process.pid, startTime: 1 },
+    issuedAt: 1,
+    expiresAt: 2,
+    taskId: leaseManifest.taskId,
+    branch: leaseManifest.branch,
+    reason: 'manual-validation'
+  })}\n`);
+  try {
+    assert.throws(
+      () => cleanupStaleSandboxControlLease(leaseManifest, 3, { identityProbe: () => 'unknown' }),
+      /SANDBOX_CONTROL_LEASE_OWNER_UNAVAILABLE/
+    );
+    assert.equal(fs.existsSync(leasePath), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('execution termination fails closed when child identity is unknown', () => {
+  assert.throws(
+    () => terminateSandboxControlExecution({
+      version: 2,
+      generation: 'generation-1',
+      requestId: 'unknown-execution',
+      nonce: 'unknown-execution-nonce',
+      child: { pid: process.pid, startTime: 1, processGroupId: null },
+      phase: 'running',
+      updatedAt: Date.now()
+    }, { identityProbe: () => 'unknown' }),
+    /SANDBOX_CONTROL_EXECUTION_OWNER_UNAVAILABLE/
+  );
 });

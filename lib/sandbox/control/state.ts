@@ -3,12 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { buildProcessTreeStopCommand } from '../../server/process-control.ts';
-import { processIdentityMatches } from '../../server/process-state.ts';
-import type { ProcessIdentity } from '../../server/process-state.ts';
+import { getProcessIdentityState } from '../../server/process-state.ts';
+import type { ProcessIdentity, ProcessIdentityProbe } from '../../server/process-state.ts';
 import type {
   SandboxControlExecution,
   SandboxControlLease,
-  SandboxControlManifest,
+  SandboxControlManifestLike,
   SandboxControlStatus
 } from './protocol.ts';
 
@@ -36,12 +36,12 @@ export function readJsonFile(filePath: string): unknown {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
-export function statusPath(manifest: SandboxControlManifest): string {
+export function statusPath(manifest: SandboxControlManifestLike): string {
   return path.join(manifest.publicStatusDir, 'status.json');
 }
 
 export function writeSandboxControlStatus(
-  manifest: SandboxControlManifest,
+  manifest: SandboxControlManifestLike,
   broker: ProcessIdentity & { brokerId: string },
   state: SandboxControlStatus['state'],
   reasonCode: string | null,
@@ -72,7 +72,7 @@ export function readSandboxControlStatus(directory: string): SandboxControlStatu
   return parseSandboxControlStatus(readJsonFile(path.join(directory, 'status.json')));
 }
 
-export function readActiveLease(manifest: SandboxControlManifest, now = Date.now()): SandboxControlLease | null {
+export function readActiveLease(manifest: SandboxControlManifestLike, now = Date.now()): SandboxControlLease | null {
   const filePath = path.join(path.dirname(manifest.publicStatusDir), 'lease.json');
   if (!fs.existsSync(filePath)) return null;
   const lease = readJsonFile(filePath) as Partial<SandboxControlLease> | null;
@@ -90,7 +90,11 @@ export function readActiveLease(manifest: SandboxControlManifest, now = Date.now
   return lease as SandboxControlLease;
 }
 
-export function cleanupStaleSandboxControlLease(manifest: SandboxControlManifest, now = Date.now()): boolean {
+export function cleanupStaleSandboxControlLease(
+  manifest: SandboxControlManifestLike,
+  now = Date.now(),
+  options: Readonly<{ identityProbe?: ProcessIdentityProbe }> = {}
+): boolean {
   const filePath = path.join(path.dirname(manifest.publicStatusDir), 'lease.json');
   if (!fs.existsSync(filePath)) return false;
   const raw = fs.readFileSync(filePath, 'utf8');
@@ -104,10 +108,12 @@ export function cleanupStaleSandboxControlLease(manifest: SandboxControlManifest
     || typeof lease.branch !== 'string' || typeof lease.reason !== 'string') {
     throw new Error('SANDBOX_CONTROL_LEASE_INVALID');
   }
-  const stale = lease.generation !== manifest.generation || lease.taskId !== manifest.taskId
-    || lease.branch !== manifest.branch || lease.expiresAt! <= now || !processIdentityMatches({
+  const ownerState = (options.identityProbe ?? getProcessIdentityState)({
     pid: lease.owner.pid!, startTime: lease.owner.startTime!
   });
+  if (ownerState === 'unknown') throw new Error('SANDBOX_CONTROL_LEASE_OWNER_UNAVAILABLE');
+  const stale = lease.generation !== manifest.generation || lease.taskId !== manifest.taskId
+    || lease.branch !== manifest.branch || lease.expiresAt! <= now || ownerState === 'dead';
   if (!stale) return false;
   if (fs.readFileSync(filePath, 'utf8') !== raw) throw new Error('SANDBOX_CONTROL_LEASE_OWNERSHIP_LOST');
   fs.unlinkSync(filePath);
@@ -115,7 +121,7 @@ export function cleanupStaleSandboxControlLease(manifest: SandboxControlManifest
 }
 
 export function appendSandboxControlAudit(
-  manifest: SandboxControlManifest,
+  manifest: SandboxControlManifestLike,
   event: string,
   fields: Record<string, string | number | boolean | null> = {},
   now = Date.now()
@@ -130,7 +136,7 @@ export function appendSandboxControlAudit(
   });
 }
 
-export function executionPath(manifest: SandboxControlManifest, requestId: string): string {
+export function executionPath(manifest: SandboxControlManifestLike, requestId: string): string {
   return path.join(manifest.processingDir, requestId, 'execution.json');
 }
 
@@ -153,31 +159,42 @@ export function terminateSandboxControlExecution(
     deadlineAt?: number;
     forceAt?: number;
     allowForce?: boolean;
+    identityProbe?: ProcessIdentityProbe;
   } = {}
 ): boolean {
   const platform = options.platform ?? process.platform;
   const processGroupId = execution.child.processGroupId;
-  const processGroupAlive = (groupId: number): boolean => {
+  const processGroupState = (groupId: number): 'alive' | 'dead' | 'unknown' => {
     try {
       const rows = execFileSync('ps', ['-axo', 'pgid=,stat='], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
       return rows.split('\n').some((row) => {
         const match = row.trim().match(/^(\d+)\s+(\S+)/);
         return Number(match?.[1]) === groupId && !match?.[2]?.startsWith('Z');
-      });
+      }) ? 'alive' : 'dead';
     } catch {
       try {
         process.kill(-groupId, 0);
-        return true;
+        return 'alive';
       } catch (error) {
-        return (error as NodeJS.ErrnoException).code === 'EPERM';
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ESRCH') return 'dead';
+        if (code === 'EPERM') return 'alive';
+        return 'unknown';
       }
     }
   };
-  const treeAlive = (): boolean => {
+  const treeState = (): 'alive' | 'dead' | 'unknown' => {
     if (platform === 'win32' || !processGroupId) {
-      return processIdentityMatches({ pid: execution.child.pid, startTime: execution.child.startTime });
+      return (options.identityProbe ?? getProcessIdentityState)({
+        pid: execution.child.pid, startTime: execution.child.startTime
+      });
     }
-    return processGroupAlive(processGroupId);
+    return processGroupState(processGroupId);
+  };
+  const treeAlive = (): boolean => {
+    const state = treeState();
+    if (state === 'unknown') throw new Error('SANDBOX_CONTROL_EXECUTION_OWNER_UNAVAILABLE');
+    return state === 'alive';
   };
   if (!treeAlive()) return true;
   const command = buildProcessTreeStopCommand(processGroupId ?? execution.child.pid, platform);

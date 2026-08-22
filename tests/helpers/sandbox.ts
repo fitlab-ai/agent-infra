@@ -207,6 +207,7 @@ function writeSandboxEngineFixture(
       "      ...(mode === 'task-bound' ? [{ Type: 'bind', Source: path.join(process.cwd(), '.agents', 'workspace', 'active', taskId), Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true }] : []),",
       "      { Type: 'bind', Source: control, Destination: '/run/agent-infra/control', RW: true },",
       "      { Type: 'bind', Source: path.join(controlRoot, 'public'), Destination: '/run/agent-infra/control-status', RW: false },",
+      "      ...(mode === 'task-bound' ? [{ Type: 'bind', Source: path.join(controlRoot, 'runtime'), Destination: '/run/agent-infra/runtime', RW: true }] : []),",
       "      { Type: 'bind', Source: path.join(home, '.agent-infra', 'share', project, 'common'), Destination: '/share/common', RW: true },",
       "      { Type: 'bind', Source: path.join(home, '.agent-infra', 'share', project, 'branches', branchDir), Destination: '/share/branch', RW: true },",
       "      { Type: 'bind', Source: path.join(home, '.agent-infra', 'config', project, branchDir), Destination: '/home/devuser/.host-shell-config', RW: false }",

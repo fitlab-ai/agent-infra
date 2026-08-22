@@ -1,4 +1,4 @@
-import type { SandboxControlManifest } from './protocol.ts';
+import type { SandboxControlManifest, SandboxControlManifestLike } from './protocol.ts';
 import { commandForEngine, runEngine, runProbe } from '../shell.ts';
 
 export type ContainerObservation =
@@ -14,7 +14,7 @@ export type ContainerInspection = Readonly<{
 
 function isAuthoritativeNotFound(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /(?:no such container|container .* not found|cannot find container)/i.test(message);
+  return /(?:no such (?:container|object)|container .* not found|cannot find container)/i.test(message);
 }
 
 export function classifySandboxContainerInspection(
@@ -48,7 +48,7 @@ export function classifySandboxContainerInspection(
 }
 
 export async function inspectSandboxControlContainer(
-  manifest: SandboxControlManifest,
+  manifest: SandboxControlManifestLike,
   options: { run?: typeof runEngine; probe?: typeof runProbe; timeoutMs?: number } = {}
 ): Promise<ContainerObservation> {
   try {

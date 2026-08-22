@@ -7,6 +7,7 @@ import semver from 'semver';
 
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { CodexLifecycleEvent } from './evidence.ts';
+import { resolveAgentRuntimeStoreRoot } from '../../../runtime/agent-runtime.ts';
 
 type JsonObject = Record<string, unknown>;
 type ThreadResolution = Readonly<{
@@ -558,7 +559,7 @@ async function preflightCodexLifecycleEvidence(
   }
 
   const hookDefinitionHash = crypto.createHash('sha256').update(hooksRaw).digest('hex');
-  const runtimeRoot = path.join(repoRoot, '.agents', 'workspace', '.runtime', 'codex-lifecycle');
+  const runtimeRoot = resolveAgentRuntimeStoreRoot({ repoRoot, store: 'lifecycle' });
   const runtimeLiveness = hasCodexRuntimeLiveness(runtimeRoot, hookDefinitionHash, runtimeIdentity);
 
   const transport = new CodexAppServerTransport();

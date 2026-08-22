@@ -27,12 +27,15 @@ export type SandboxControlContainerIdentity = Readonly<{
   id: string;
   labels: Readonly<Record<string, string>>;
 }>;
-export type SandboxControlManifest = Readonly<{
-  version: 4; engine: string; repoRoot: string; worktreeRoot: string; project: string; container: string;
+export type SandboxControlManifestBase = Readonly<{
+  engine: string; repoRoot: string; worktreeRoot: string; project: string; container: string;
   containerIdentity: SandboxControlContainerIdentity;
   branch: string; mode: 'task-bound' | 'branch-only'; taskId: string | null; token: string;
   generation: string; channelDir: string; publicStatusDir: string; processingDir: string;
 }>;
+export type SandboxControlLegacyManifest = SandboxControlManifestBase & Readonly<{ version: 4 }>;
+export type SandboxControlManifest = SandboxControlManifestBase & Readonly<{ version: 5; runtimeDir: string }>;
+export type SandboxControlManifestLike = SandboxControlLegacyManifest | SandboxControlManifest;
 export type SandboxControlBrokerOwner = ProcessIdentity & Readonly<{
   version: 3;
   brokerId: string;

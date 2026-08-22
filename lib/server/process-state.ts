@@ -9,6 +9,9 @@ export type ProcessIdentity = Readonly<{
   startTime: ProcessStartTime;
 }>;
 
+export type ProcessIdentityState = 'alive' | 'dead' | 'unknown';
+export type ProcessIdentityProbe = (identity: ProcessIdentity) => ProcessIdentityState;
+
 export type PidRecord = ProcessIdentity & {
   version: 2;
 };
@@ -127,6 +130,50 @@ export function getProcessStartTime(
   }
 }
 
+export function getProcessIdentityState(
+  identity: ProcessIdentity,
+  platform: NodeJS.Platform = process.platform
+): ProcessIdentityState {
+  if (!Number.isInteger(identity.pid) || identity.pid <= 0 || !Number.isSafeInteger(identity.startTime)) {
+    return 'dead';
+  }
+  if (platform === 'linux') {
+    try {
+      const stat = parseLinuxProcessStat(fs.readFileSync(`/proc/${identity.pid}/stat`, 'utf8'));
+      if (stat === null) return 'unknown';
+      if (stat.state === 'Z') return 'dead';
+      return stat.startTime === identity.startTime ? 'alive' : 'dead';
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'dead' : 'unknown';
+    }
+  }
+  try {
+    process.kill(identity.pid, 0);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') return 'dead';
+    if (code !== 'EPERM') return 'unknown';
+  }
+  const query = buildProcessStartTimeQuery(identity.pid, platform);
+  if (query === null) return 'unknown';
+  try {
+    const output = execFileSync(query.command, query.args, {
+      encoding: 'utf8',
+      env: platform === 'darwin' ? { ...process.env, LC_ALL: 'C', LANG: 'C', TZ: 'UTC' } : process.env
+    }).trim();
+    if (output.length === 0) return 'unknown';
+    const startTime = platform === 'win32'
+      ? new Date(output).getTime()
+      : platform === 'darwin'
+        ? parseDarwinStartTime(output)
+        : null;
+    if (startTime === null || Number.isNaN(startTime)) return 'unknown';
+    return startTime === identity.startTime ? 'alive' : 'dead';
+  } catch {
+    return 'unknown';
+  }
+}
+
 function parsePidRecord(
   raw: string
 ):
@@ -234,5 +281,5 @@ export function removePidRecordIfMatches(pidFile: string, expected: PidRecord): 
 }
 
 export function processIdentityMatches(identity: ProcessIdentity): boolean {
-  return getProcessStartTime(identity.pid) === identity.startTime;
+  return getProcessIdentityState(identity) === 'alive';
 }

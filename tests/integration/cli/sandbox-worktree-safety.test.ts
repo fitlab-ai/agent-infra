@@ -179,10 +179,11 @@ test("sandbox rm retries control and workspace cleanup after the container is al
     fs.writeFileSync(path.join(siblingControlRoot, "keep"), "sibling\n");
     fs.mkdirSync(workspaceViewRoot, { recursive: true });
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
-      version: 4, engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
+      version: 5, engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
       project: "demo", container, containerIdentity: { id: "fixture-container-id", labels: {} }, branch,
       mode: "branch-only", taskId: null, token: "partial-secret", generation: "partial-generation",
-      channelDir, publicStatusDir: path.join(controlRoot, "public"), processingDir
+      channelDir, publicStatusDir: path.join(controlRoot, "public"), processingDir,
+      runtimeDir: path.join(controlRoot, "runtime")
     })}\n`);
     fs.writeFileSync(path.join(controlRoot, "public", "status.json"), `${JSON.stringify({
       version: 2,
