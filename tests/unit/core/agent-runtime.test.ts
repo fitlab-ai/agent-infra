@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
@@ -11,9 +12,10 @@ test('task-bound runtime resolves client namespaces from the generic runtime dir
     AGENT_INFRA_RUNTIME_DIR: '/run/agent-infra/runtime',
     AGENT_INFRA_CONTROL_TOKEN: 'token'
   };
-  assert.equal(resolveAgentRuntimeRoot({ env }), '/run/agent-infra/runtime');
-  assert.equal(resolveAgentRuntimeStoreRoot({ env, client: 'codex', store: 'capabilities' }), '/run/agent-infra/runtime/clients/codex/capabilities');
-  assert.equal(resolveAgentRuntimeStoreRoot({ env, client: 'claude', store: 'lifecycle' }), '/run/agent-infra/runtime/clients/claude/lifecycle');
+  const runtimeRoot = path.resolve('/run/agent-infra/runtime');
+  assert.equal(resolveAgentRuntimeRoot({ env }), runtimeRoot);
+  assert.equal(resolveAgentRuntimeStoreRoot({ env, client: 'codex', store: 'capabilities' }), path.join(runtimeRoot, 'clients', 'codex', 'capabilities'));
+  assert.equal(resolveAgentRuntimeStoreRoot({ env, client: 'claude', store: 'lifecycle' }), path.join(runtimeRoot, 'clients', 'claude', 'lifecycle'));
 });
 
 test('bound control context cannot fall back to workspace runtime without an explicit runtime directory', () => {
@@ -25,8 +27,9 @@ test('bound control context cannot fall back to workspace runtime without an exp
 
 test('direct-host Codex keeps the legacy store layout', () => {
   const env = {};
-  assert.equal(resolveAgentRuntimeStoreRoot({ repoRoot: '/repo', env, client: 'codex', store: 'capabilities' }), '/repo/.agents/workspace/.runtime/codex-capabilities');
-  assert.equal(resolveAgentRuntimeStoreRoot({ repoRoot: '/repo', env, client: 'codex', store: 'lifecycle' }), '/repo/.agents/workspace/.runtime/codex-lifecycle');
+  const runtimeRoot = path.join(path.resolve('/repo'), '.agents', 'workspace', '.runtime');
+  assert.equal(resolveAgentRuntimeStoreRoot({ repoRoot: '/repo', env, client: 'codex', store: 'capabilities' }), path.join(runtimeRoot, 'codex-capabilities'));
+  assert.equal(resolveAgentRuntimeStoreRoot({ repoRoot: '/repo', env, client: 'codex', store: 'lifecycle' }), path.join(runtimeRoot, 'codex-lifecycle'));
 });
 
 test('runtime directory and client namespace validation fail closed', () => {
