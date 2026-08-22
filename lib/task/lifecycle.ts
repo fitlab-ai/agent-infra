@@ -172,10 +172,16 @@ function matchingCompletion(content: string, request: TaskLifecycleRequest, rest
 }
 
 function validateRestoreStaging(request: Extract<TaskLifecycleRequest, { intent: 'restore' }>, repoRoot: string, taskId: string): LifecycleError | { stagingDir: string; fileCount: number } {
-  const workspace = path.resolve(repoRoot, '.agents', 'workspace');
-  const stagingDir = path.resolve(request.stagingDir);
+  let workspace: string;
+  let stagingDir: string;
+  try {
+    workspace = fs.realpathSync.native(path.resolve(repoRoot, '.agents', 'workspace'));
+    stagingDir = fs.realpathSync.native(path.resolve(request.stagingDir));
+  } catch (error) {
+    return { code: 'LIFECYCLE_STAGING_INVALID', message: String(error) };
+  }
   const relative = path.relative(workspace, stagingDir);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || path.basename(stagingDir) === taskId) {
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) || path.basename(stagingDir) === taskId) {
     return { code: 'LIFECYCLE_STAGING_INVALID', message: 'restore staging must be a non-final directory inside .agents/workspace' };
   }
   let entries: fs.Dirent[];
