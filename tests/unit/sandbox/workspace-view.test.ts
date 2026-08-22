@@ -8,7 +8,7 @@ import {
   assertSandboxTaskSource,
   materializeSandboxControl,
   materializeSandboxWorkspaceView,
-  prepareSandboxWorkspaceMountTarget,
+  prepareSandboxWorkspaceMountTargets,
   sandboxWorkspaceViewStatePaths
 } from '../../../lib/sandbox/workspace-view.ts';
 import { assertModeBits } from '../../helpers.ts';
@@ -54,23 +54,43 @@ test('branch-only view is stable and exposes an empty registry', () => {
   assert.equal(fs.readFileSync(path.join(view.root, 'active', '.short-ids.json'), 'utf8'), '{"version":1,"ids":{}}\n');
 });
 
-test('workspace mount target is created by the host with private permissions', () => {
+test('workspace mount targets are created by the host with private permissions', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-target-'));
 
-  const target = prepareSandboxWorkspaceMountTarget(root);
+  prepareSandboxWorkspaceMountTargets(root);
 
-  assert.equal(target, path.join(root, '.agents', 'workspace'));
-  assert.equal(fs.statSync(target).isDirectory(), true);
-  assertModeBits(target, 0o700);
+  const workspace = path.join(root, '.agents', 'workspace');
+  assert.equal(fs.statSync(workspace).isDirectory(), true);
+  assertModeBits(workspace, 0o700);
+  for (const { hostPath } of sandboxWorkspaceViewStatePaths(workspace)) {
+    assert.equal(fs.statSync(hostPath).isDirectory(), true);
+    assertModeBits(hostPath, 0o700);
+  }
+  assert.equal(fs.statSync(path.join(workspace, 'active', '.short-ids.json')).isFile(), true);
 });
 
-test('workspace mount target rejects symbolic-link destinations', () => {
+test('workspace mount targets preserve existing runtime content on repeat', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-target-repeat-'));
+  const workspace = path.join(root, '.agents', 'workspace');
+  prepareSandboxWorkspaceMountTargets(root);
+  const registry = path.join(workspace, 'active', '.short-ids.json');
+  const sentinel = path.join(workspace, 'active', 'sentinel');
+  fs.writeFileSync(registry, '{"keep":true}\n');
+  fs.writeFileSync(sentinel, 'preserve\n');
+
+  prepareSandboxWorkspaceMountTargets(root);
+
+  assert.equal(fs.readFileSync(registry, 'utf8'), '{"keep":true}\n');
+  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'preserve\n');
+});
+
+test('workspace mount targets reject symbolic-link destinations', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-target-link-'));
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-target-outside-'));
   fs.mkdirSync(path.join(root, '.agents'));
   fs.symlinkSync(outside, path.join(root, '.agents', 'workspace'), process.platform === 'win32' ? 'junction' : 'dir');
 
-  assert.throws(() => prepareSandboxWorkspaceMountTarget(root), /must not be a symbolic link/);
+  assert.throws(() => prepareSandboxWorkspaceMountTargets(root), /must not contain a symbolic link/);
 });
 
 test('workspace mount target rejects symbolic-link ancestors', () => {
@@ -78,7 +98,7 @@ test('workspace mount target rejects symbolic-link ancestors', () => {
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-workspace-ancestor-outside-'));
   fs.symlinkSync(outside, path.join(root, '.agents'), process.platform === 'win32' ? 'junction' : 'dir');
 
-  assert.throws(() => prepareSandboxWorkspaceMountTarget(root), /ancestor must be a real directory/);
+  assert.throws(() => prepareSandboxWorkspaceMountTargets(root), /must not contain a symbolic link/);
 });
 
 test('task sources reject symlinks before they become writable mounts', () => {

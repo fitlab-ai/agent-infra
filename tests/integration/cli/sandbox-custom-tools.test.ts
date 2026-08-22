@@ -76,7 +76,11 @@ test("sandbox recovery does not replay custom postSetupCmds or versionCmd", asyn
   });
   const mounts = [
     { Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
-    { Source: view.root, Destination: "/workspace/.agents/workspace", RW: false },
+    ...["active", "completed", "blocked", "archive"].map((state) => ({
+      Source: path.join(view.root, state),
+      Destination: path.posix.join("/workspace/.agents/workspace", state),
+      RW: false
+    })),
     { Source: control.channelDir, Destination: "/run/agent-infra/control", RW: true },
     { Source: control.statusDir, Destination: "/run/agent-infra/control-status", RW: false },
     { Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },

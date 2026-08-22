@@ -171,7 +171,12 @@ function recoveryFixtureMounts(config: SandboxConfig): Array<Record<string, unkn
   const control = fs.readdirSync(path.join(config.controlBase, config.project, "demo-dev-feature..demo"))[0]!;
   return [
     { Type: "bind", Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
-    { Type: "bind", Source: viewRoot, Destination: "/workspace/.agents/workspace", RW: false },
+    ...["active", "completed", "blocked", "archive"].map((state) => ({
+      Type: "bind",
+      Source: path.join(viewRoot, state),
+      Destination: path.posix.join("/workspace/.agents/workspace", state),
+      RW: false
+    })),
     { Type: "bind", Source: path.join(config.controlBase, config.project, "demo-dev-feature..demo", control, "channel"), Destination: "/run/agent-infra/control", RW: true },
     { Type: "bind", Source: path.join(config.controlBase, config.project, "demo-dev-feature..demo", control, "public"), Destination: "/run/agent-infra/control-status", RW: false },
     { Type: "bind", Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
@@ -181,6 +186,90 @@ function recoveryFixtureMounts(config: SandboxConfig): Array<Record<string, unkn
     { Type: "bind", Source: path.join(seedDir, "config.toml"), Destination: "/run/agent-infra/tmpfs-seeds/codex/0", RW: false },
     { Type: "bind", Source: path.join(seedDir, "model-catalogs"), Destination: "/run/agent-infra/tmpfs-seeds/codex/1", RW: false }
   ];
+}
+
+function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
+  labels: Record<string, string>;
+  mounts: Array<Record<string, unknown>>;
+} {
+  const branchDir = "feature..demo";
+  const taskSource = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
+  fs.mkdirSync(taskSource, { recursive: true });
+  fs.writeFileSync(
+    path.join(taskSource, "task.md"),
+    `---\nid: ${taskId}\nbranch: feature/demo\n---\n`,
+    "utf8"
+  );
+  const identity = { mode: "task-bound" as const, taskId, shortId: "7" };
+  const view = materializeSandboxWorkspaceView({
+    base: config.workspaceViewBase,
+    project: config.project,
+    container: "demo-dev-feature..demo",
+    identity
+  });
+  const control = materializeSandboxControl({
+    base: config.controlBase,
+    repoRoot: config.repoRoot,
+    worktreeRoot: path.join(config.worktreeBase, branchDir),
+    project: config.project,
+    container: "demo-dev-feature..demo",
+    branch: "feature/demo",
+    identity
+  });
+  const seedDir = path.join(
+    config.home,
+    ".agent-infra",
+    "sandboxes",
+    "codex",
+    config.project,
+    branchDir
+  );
+  const mounts = [
+    { Type: "bind", Source: path.join(config.worktreeBase, branchDir), Destination: "/workspace", RW: true },
+    { Type: "bind", Source: path.join(view.root, "active", ".short-ids.json"), Destination: "/workspace/.agents/workspace/active/.short-ids.json", RW: false },
+    ...["completed", "blocked", "archive"].map((state) => ({
+      Type: "bind",
+      Source: path.join(view.root, state),
+      Destination: path.posix.join("/workspace/.agents/workspace", state),
+      RW: false
+    })),
+    { Type: "bind", Source: taskSource, Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true },
+    { Type: "bind", Source: control.channelDir, Destination: "/run/agent-infra/control", RW: true },
+    { Type: "bind", Source: control.statusDir, Destination: "/run/agent-infra/control-status", RW: false },
+    { Type: "bind", Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
+    { Type: "bind", Source: path.join(config.shareBase, "branches", branchDir), Destination: "/share/branch", RW: true },
+    { Type: "bind", Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false },
+    { Type: "tmpfs", Source: "", Destination: "/home/devuser/.codex", RW: true },
+    { Type: "bind", Source: path.join(seedDir, "config.toml"), Destination: "/run/agent-infra/tmpfs-seeds/codex/0", RW: false },
+    { Type: "bind", Source: path.join(seedDir, "model-catalogs"), Destination: "/run/agent-infra/tmpfs-seeds/codex/1", RW: false }
+  ];
+  return {
+    labels: {
+      "demo.sandbox.branch": "feature/demo",
+      "demo.sandbox.workspace-mode": "task-bound",
+      "demo.sandbox.task-id": taskId
+    },
+    mounts
+  };
+}
+
+function legacyTaskBoundMounts(fixture: { mounts: Array<Record<string, unknown>> }): Array<Record<string, unknown>> {
+  const stateDestinations = new Set([
+    "/workspace/.agents/workspace/active/.short-ids.json",
+    "/workspace/.agents/workspace/completed",
+    "/workspace/.agents/workspace/blocked",
+    "/workspace/.agents/workspace/archive"
+  ]);
+  const stateMounts = fixture.mounts.filter((mount) => stateDestinations.has(String(mount.Destination)));
+  const registry = stateMounts.find((mount) => mount.Destination === "/workspace/.agents/workspace/active/.short-ids.json");
+  return fixture.mounts
+    .filter((mount) => !stateMounts.includes(mount))
+    .concat({
+      Type: "bind",
+      Source: path.dirname(String(registry?.Source)),
+      Destination: "/workspace/.agents/workspace",
+      RW: false
+    });
 }
 
 test("recovery classification preserves healthy running seed content drift", () => {
@@ -205,6 +294,19 @@ test("recovery classification exposes stable workspace identity error codes", ()
   legacy.identityOk = false;
   legacy.actualWorkspace = { mode: "legacy-invalid" };
   assert.equal(classifySandboxRecovery(legacy)[0]?.code, "SANDBOX_WORKSPACE_IDENTITY_CONFLICT");
+});
+
+test("recovery classification exposes stable workspace topology and task view error codes", () => {
+  const legacy = healthyRecoverySnapshot();
+  legacy.workspaceTopology = "legacy-parent";
+  assert.equal(classifySandboxRecovery(legacy)[0]?.code, "SANDBOX_WORKSPACE_TOPOLOGY_MISMATCH");
+
+  const taskView = healthyRecoverySnapshot();
+  taskView.taskView = {
+    path: "/workspace/.agents/workspace/active/TASK-20260814-223553/task.md",
+    readable: false
+  };
+  assert.equal(classifySandboxRecovery(taskView)[0]?.code, "SANDBOX_TASK_VIEW_UNREADABLE");
 });
 
 test("tmpfs seed targets cannot escape the configured tool mount", () => {
@@ -302,6 +404,221 @@ test("recovery accepts bind sources that resolve to the same filesystem object",
         { adapterId: 'codex', checkId: 'prompts-link', applicable: true, healthy: true }
       ]
     );
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("task-bound recovery probes the real task.md view instead of mount declarations", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-recovery-task-view-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const taskId = "TASK-20260814-223553";
+  const taskSource = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
+  fs.mkdirSync(taskSource, { recursive: true });
+  fs.writeFileSync(path.join(taskSource, "task.md"), `---\nid: ${taskId}\n---\n`, "utf8");
+  const labels = {
+    ...BRANCH_ONLY_LABELS,
+    "demo.sandbox.workspace-mode": "task-bound",
+    "demo.sandbox.task-id": taskId
+  };
+  const mounts = recoveryFixtureMounts(config).concat({
+    Type: "bind",
+    Source: taskSource,
+    Destination: `/workspace/.agents/workspace/active/${taskId}`,
+    RW: true
+  });
+  let taskReadable = false;
+  const snapshot = () => collectSandboxRecoverySnapshot({
+    config,
+    engine: "native",
+    branch: "feature/demo",
+    workspace: { mode: "task-bound", taskId, shortId: "7" },
+    container: "demo-dev-feature..demo",
+    deps: {
+      run: () => JSON.stringify([{
+        Id: "fixture-container-id",
+        Config: { Labels: labels },
+        Mounts: mounts
+      }]),
+      runOk: (_engine, _cmd, args) => {
+        const script = args[6] ?? "";
+        const target = args.at(-1);
+        return !(script === 'test -r "$1"' && target?.endsWith("/task.md")) || taskReadable;
+      }
+    }
+  });
+
+  try {
+    const missing = snapshot();
+    assert.equal(missing.taskView?.readable, false);
+    assert.equal(classifySandboxRecovery(missing).find(
+      (finding) => finding.code === "SANDBOX_TASK_VIEW_UNREADABLE"
+    )?.path, `/workspace/.agents/workspace/active/${taskId}/task.md`);
+
+    taskReadable = true;
+    const recovered = snapshot();
+    assert.equal(recovered.taskView?.readable, true);
+    assert.equal(classifySandboxRecovery(recovered).some(
+      (finding) => finding.code === "SANDBOX_TASK_VIEW_UNREADABLE"
+    ), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("fresh task-bound readiness succeeds without restart when task.md is readable", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-task-bound-healthy-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const taskId = "TASK-20260814-223553";
+  const fixture = taskBoundRecoveryFixture(config, taskId);
+  const writes: string[][] = [];
+
+  try {
+    await assert.doesNotReject(() => assertFreshSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      workspace: { mode: "task-bound", taskId, shortId: "7" },
+      container: "demo-dev-feature..demo",
+      copiedEntries: [],
+      deps: {
+        run: () => JSON.stringify([{ Id: "fixture-container-id", Config: { Labels: fixture.labels }, Mounts: fixture.mounts }]),
+        runOk: () => true,
+        runVerbose: (_engine, _cmd, args) => { writes.push(args); }
+      }
+    }));
+
+    assert.equal(writes.some((args) => args[0] === "restart"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("fresh task-bound readiness restarts once when task.md becomes readable", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-task-bound-retry-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const taskId = "TASK-20260814-223553";
+  const fixture = taskBoundRecoveryFixture(config, taskId);
+  let restarted = false;
+  const writes: string[][] = [];
+
+  try {
+    await assert.doesNotReject(() => assertFreshSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      workspace: { mode: "task-bound", taskId, shortId: "7" },
+      container: "demo-dev-feature..demo",
+      copiedEntries: [],
+      deps: {
+        run: () => JSON.stringify([{ Id: "fixture-container-id", Config: { Labels: fixture.labels }, Mounts: fixture.mounts }]),
+        runOk: (_engine, _cmd, args) => {
+          const script = args[6];
+          const target = args.at(-1);
+          return !(script === 'test -r "$1"' && target?.endsWith("/task.md")) || restarted;
+        },
+        runVerbose: (_engine, _cmd, args) => {
+          writes.push(args);
+          if (args[0] === "restart") restarted = true;
+        }
+      }
+    }));
+
+    assert.equal(writes.filter((args) => args[0] === "restart").length, 1);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("fresh task-bound readiness remains fail-closed after one unreadable task.md retry", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-task-bound-failed-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const taskId = "TASK-20260814-223553";
+  const fixture = taskBoundRecoveryFixture(config, taskId);
+  let restarts = 0;
+
+  try {
+    await assert.rejects(() => assertFreshSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      workspace: { mode: "task-bound", taskId, shortId: "7" },
+      container: "demo-dev-feature..demo",
+      copiedEntries: [],
+      deps: {
+        run: () => JSON.stringify([{ Id: "fixture-container-id", Config: { Labels: fixture.labels }, Mounts: fixture.mounts }]),
+        runOk: (_engine, _cmd, args) => {
+          const script = args[6];
+          const target = args.at(-1);
+          return !(script === 'test -r "$1"' && target?.endsWith("/task.md"));
+        },
+        runVerbose: (_engine, _cmd, args) => {
+          if (args[0] === "restart") restarts += 1;
+        }
+      }
+    }), /Fresh sandbox readiness check failed:.*SANDBOX_TASK_VIEW_UNREADABLE/);
+
+    assert.equal(restarts, 1);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("fresh task-bound readiness does not restart a legacy parent topology", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-task-bound-legacy-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const taskId = "TASK-20260814-223553";
+  const fixture = taskBoundRecoveryFixture(config, taskId);
+  const writes: string[][] = [];
+
+  try {
+    await assert.rejects(() => assertFreshSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      workspace: { mode: "task-bound", taskId, shortId: "7" },
+      container: "demo-dev-feature..demo",
+      copiedEntries: [],
+      deps: {
+        run: () => JSON.stringify([{ Id: "fixture-container-id", Config: { Labels: fixture.labels }, Mounts: legacyTaskBoundMounts(fixture) }]),
+        runOk: () => true,
+        runVerbose: (_engine, _cmd, args) => { writes.push(args); }
+      }
+    }), /Fresh sandbox readiness check failed:.*SANDBOX_WORKSPACE_TOPOLOGY_MISMATCH/);
+
+    assert.equal(writes.some((args) => args[0] === "restart"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("running task-bound readiness fails closed without restart when task.md is unreadable", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-running-task-bound-unreadable-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const taskId = "TASK-20260814-223553";
+  const fixture = taskBoundRecoveryFixture(config, taskId);
+  const writes: string[][] = [];
+
+  try {
+    await assert.rejects(() => ensureSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      workspace: { mode: "task-bound", taskId, shortId: "7" },
+      row: { name: "demo-dev-feature..demo", status: "Up", branch: "feature/demo", running: true, index: 1 },
+      deps: {
+        ensureControlBroker: async () => {},
+        run: () => JSON.stringify([{ Id: "fixture-container-id", Config: { Labels: fixture.labels }, Mounts: fixture.mounts }]),
+        runOk: (_engine, _cmd, args) => {
+          const script = args[6];
+          const target = args.at(-1);
+          return !(script === 'test -r "$1"' && target?.endsWith("/task.md"));
+        },
+        runVerbose: (_engine, _cmd, args) => { writes.push(args); }
+      }
+    }), /SANDBOX_TASK_VIEW_UNREADABLE/);
+
+    assert.deepEqual(writes, []);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -584,16 +901,19 @@ test("hard recovery failure requires explicit container replacement authorizatio
   const replacementCommands: string[][] = [];
   const config = recoveryFixtureConfig(tmpDir);
   const currentMounts = recoveryFixtureMounts(config);
-  const workspaceMount = currentMounts.find((mount) => mount.Destination === "/workspace/.agents/workspace")!;
-  const legacyMounts = currentMounts.flatMap((mount) => mount === workspaceMount
-    ? ["active", "completed", "blocked", "archive"].map((state) => ({
-        Type: "bind",
-        Source: path.join(String(workspaceMount.Source), state),
-        Destination: path.posix.join("/workspace/.agents/workspace", state),
-        RW: false
-      }))
-    : [mount]
+  const workspaceMounts = currentMounts.filter((mount) =>
+    typeof mount.Destination === "string"
+      && mount.Destination.startsWith("/workspace/.agents/workspace/")
   );
+  const viewRoot = path.dirname(String(workspaceMounts[0]!.Source));
+  const legacyMounts = currentMounts
+    .filter((mount) => !workspaceMounts.includes(mount))
+    .concat({
+      Type: "bind",
+      Source: viewRoot,
+      Destination: "/workspace/.agents/workspace",
+      RW: false
+    });
   const inspect = () => JSON.stringify([{
     Id: "fixture-container-id",
     Config: { Labels: BRANCH_ONLY_LABELS },
@@ -1048,6 +1368,7 @@ test("fresh readiness restarts once when OrbStack workspace mounts are still set
   const container = "demo-dev-feature..demo";
   let restarted = false;
   const writes: string[][] = [];
+  const settlingDestination = "/workspace/.agents/workspace/completed";
 
   try {
     await assert.doesNotReject(() => assertFreshSandboxReady({
@@ -1062,7 +1383,7 @@ test("fresh readiness restarts once when OrbStack workspace mounts are still set
           Id: "fixture-container-id",
           Config: { Labels: BRANCH_ONLY_LABELS },
           Mounts: recoveryFixtureMounts(config).filter((mount) =>
-            restarted || mount.Destination !== "/workspace/.agents/workspace"
+            restarted || mount.Destination !== settlingDestination
           )
         }]),
         runOk: () => true,
@@ -1084,6 +1405,7 @@ test("fresh readiness remains fail-closed after one workspace mount restart", as
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-readiness-failed-"));
   const config = recoveryFixtureConfig(tmpDir);
   let restarts = 0;
+  const settlingDestination = "/workspace/.agents/workspace/completed";
 
   try {
     await assert.rejects(() => assertFreshSandboxReady({
@@ -1098,7 +1420,7 @@ test("fresh readiness remains fail-closed after one workspace mount restart", as
           Id: "fixture-container-id",
           Config: { Labels: BRANCH_ONLY_LABELS },
           Mounts: recoveryFixtureMounts(config).filter((mount) =>
-            mount.Destination !== "/workspace/.agents/workspace"
+            mount.Destination !== settlingDestination
           )
         }]),
         runOk: () => true,

@@ -554,10 +554,12 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     assert.ok(runCall.some((arg) => arg.includes(":/workspace")));
     assert.ok(runCall.some((arg) => arg.includes(":/share/common")));
     assert.ok(runCall.some((arg) => arg.includes(":/share/branch")));
-    assert.ok(
-      runCall.some((arg) => isReadOnlyMountFor(arg, "/workspace/.agents/workspace")),
-      "expected one read-only workspace view mount"
-    );
+    for (const state of ["active", "completed", "blocked", "archive"]) {
+      assert.ok(
+        runCall.some((arg) => isReadOnlyMountFor(arg, `/workspace/.agents/workspace/${state}`)),
+        `expected read-only ${state} workspace mount`
+      );
+    }
     const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", "feature..no-ssh-mount");
     assert.equal(fs.readFileSync(path.join(worktree, ".agents", "README.md"), "utf8"), "# collaboration guide\n");
     assert.equal(
@@ -605,7 +607,16 @@ test("task-bound sandbox create keeps Git clean and exposes only the scoped writ
     const runCall = fixture.readDockerCalls().find((call) => call[0] === "run");
     assert.ok(runCall, "expected task-bound sandbox create to invoke docker run");
     assert.equal(runCall.filter((arg) => arg === "--init").length, 1);
-    assert.ok(runCall.some((arg) => isReadOnlyMountFor(arg, "/workspace/.agents/workspace")));
+    assert.ok(runCall.some((arg) => isReadOnlyMountFor(
+      arg,
+      "/workspace/.agents/workspace/active/.short-ids.json"
+    )));
+    for (const state of ["completed", "blocked", "archive"]) {
+      assert.ok(runCall.some((arg) => isReadOnlyMountFor(
+        arg,
+        `/workspace/.agents/workspace/${state}`
+      )));
+    }
     assert.ok(runCall.some((arg) => isWritableMountFor(
       arg,
       `/workspace/.agents/workspace/active/${taskId}`
