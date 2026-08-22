@@ -12,6 +12,8 @@ import type {
   ResolveTaskRefErrorCode,
   TaskWorkspaceState
 } from './resolve-ref.ts';
+import { allowsManualOverride } from './guard-override.ts';
+import type { ManualOverrideCapability } from './guard-override.ts';
 import { mutateTableRow, upsertSection } from './sections.ts';
 import type {
   TableRowDeleteMutation,
@@ -156,6 +158,7 @@ type TaskWriteOptions = {
   metadataProvider?: () => TaskWriteMetadata;
   randomSuffix?: () => string;
   fileSystem?: Partial<TaskFileSystem>;
+  manualOverride?: ManualOverrideCapability;
 };
 
 const DEFAULT_FILE_SYSTEM: TaskFileSystem = {
@@ -241,7 +244,7 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
     taskMdPath: resolved.taskMdPath,
     actualState: resolved.state
   };
-  if (resolved.state !== request.expectedState) {
+  if (resolved.state !== request.expectedState && !allowsManualOverride(options.manualOverride, 'task.write', 'TASK_STATE_MISMATCH')) {
     return failure(
       request,
       identity,

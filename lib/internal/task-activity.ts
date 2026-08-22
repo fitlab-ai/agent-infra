@@ -6,6 +6,9 @@ import type {
   PrReviewActivityIntent,
   PrReviewInspectIntent
 } from '../task/activity-intent.ts';
+import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task/human-override.ts';
+import { resolveTaskRef } from '../task/resolve-ref.ts';
+import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 
 const USAGE = `Usage: agent-infra-internal task-activity <task-ref> pr-review-inspect
        agent-infra-internal task-activity <task-ref> pr-review-start --agent <agent> --artifact <canonical.md> --head <40hex> [--dry-run]
@@ -24,13 +27,14 @@ const FLAGS: Record<string, string> = {
   '--minor': 'minor',
   '--outcome': 'outcome',
   '--reason': 'reason'
+  , '--override-ticket': 'overrideTicket', '--override-target': 'overrideTarget', '--override-scope': 'overrideScope'
 };
 const COMMON = ['agent', 'artifact', 'head'] as const;
 const ALLOWED: Record<string, ReadonlySet<string>> = {
   'pr-review-inspect': new Set(['kind', 'taskRef']),
-  'pr-review-start': new Set(['kind', 'taskRef', 'agent', 'artifact', 'head', 'dryRun']),
-  'pr-review-complete': new Set(['kind', 'taskRef', 'agent', 'artifact', 'head', 'verdict', 'blockers', 'major', 'minor', 'dryRun']),
-  'pr-review-terminate': new Set(['kind', 'taskRef', 'agent', 'artifact', 'head', 'outcome', 'reason', 'dryRun'])
+  'pr-review-start': new Set(['kind', 'taskRef', 'agent', 'artifact', 'head', 'dryRun', 'overrideTicket', 'overrideTarget', 'overrideScope']),
+  'pr-review-complete': new Set(['kind', 'taskRef', 'agent', 'artifact', 'head', 'verdict', 'blockers', 'major', 'minor', 'dryRun', 'overrideTicket', 'overrideTarget', 'overrideScope']),
+  'pr-review-terminate': new Set(['kind', 'taskRef', 'agent', 'artifact', 'head', 'outcome', 'reason', 'dryRun', 'overrideTicket', 'overrideTarget', 'overrideScope'])
 };
 
 function usageFailure(message: string): void {
@@ -83,9 +87,45 @@ function taskActivity(args: string[] = []): void {
   for (const key of operationRequired) {
     if (values[key] === undefined) { usageFailure(`${kind} requires '${key}'`); return; }
   }
-  const result = applyPrReviewActivityIntent(values as PrReviewActivityIntent);
-  process.stdout.write(`${JSON.stringify(result)}\n`);
-  if (result.status === 'failed') process.exitCode = 1;
+  const dryRunConflict = overrideDryRunConflict(values);
+  if (dryRunConflict) { usageFailure(dryRunConflict.message); return; }
+  const resolved = resolveTaskRef(taskRef);
+  if (!resolved.ok) { usageFailure(resolved.message); return; }
+  let result;
+  let humanOverride: unknown = null;
+  try {
+    result = withTaskExecutionLock(resolved.repoRoot, resolved.taskId, `task-activity.${kind}`, () => {
+      let current = applyPrReviewActivityIntent(values as PrReviewActivityIntent, { lockAlreadyHeld: true });
+      if (current.status !== 'failed' || !values.overrideTicket) return current;
+      if (!values.overrideTarget || !values.overrideScope) { usageFailure('override ticket requires target and scope'); return current; }
+      const consumed = consumeHumanOverride({
+        taskRef, ticketId: String(values.overrideTicket),
+        failureId: failureId('activity-intent', current.error?.code ?? 'TASK_STATE_MISMATCH'),
+        target: String(values.overrideTarget), scope: String(values.overrideScope)
+      }, {
+        effectExecutor: (capability) => {
+          const retried = applyPrReviewActivityIntent(values as PrReviewActivityIntent, { lockAlreadyHeld: true, manualOverride: capability });
+          current = retried;
+          return retried.status === 'failed' || retried.status === 'planned'
+            ? { code: 'OVERRIDE_EFFECT_FAILED', message: retried.status === 'planned' ? 'producer returned planned; no activity effect was committed' : `${retried.error?.code ?? 'ACTIVITY_FAILED'}: ${retried.error?.message ?? 'manual activity effect failed'}` }
+            : null;
+        }
+      });
+      humanOverride = consumed;
+      return current;
+    });
+  } catch (error) {
+    if (!(error instanceof TaskExecutionLockError)) throw error;
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: error.code, message: error.message } })}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(`${JSON.stringify(humanOverride ? { ...result, humanOverride } : result)}\n`);
+  const overrideFailed = Boolean(
+    humanOverride && typeof humanOverride === 'object' &&
+    (humanOverride as { status?: unknown }).status === 'failed'
+  );
+  if (result.status === 'failed' || overrideFailed) process.exitCode = 1;
 }
 
 export { taskActivity };

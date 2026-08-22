@@ -188,6 +188,64 @@ test('internal task-event accepts the human manual-executor token', () => {
   assert.match(fs.readFileSync(f.file, 'utf8'), /by human — started/);
 });
 
+test('internal task-event consumes a producer-qualified override under one task lock', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-event-override-'));
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  const id = 'TASK-20260101-000002';
+  const dir = path.join(root, '.agents', 'workspace', 'blocked', id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: blocked\ncurrent_step: requirement-analysis-review\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.0.0\n---\n\n# Task\n\n## Activity Log\n\n`);
+  try {
+    const issued = spawnSync('node', [INTERNAL_CLI_PATH, 'task-override', id, 'issue',
+      '--failure-id', 'task-event:TASK_STATE_MISMATCH', '--target', 'continue-local',
+      '--operator', 'codex', '--reason', 'operator approved local event recovery',
+      '--scope', 'task-event', '--expires-at', '2099-01-01 00:00:00+00:00'
+    ], { cwd: root, encoding: 'utf8' });
+    assert.equal(issued.status, 0, issued.stderr || issued.stdout);
+    const ticket = (JSON.parse(issued.stdout) as { ticketId: string }).ticketId;
+    const applied = spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', id, 'analyze.started',
+      '--agent', 'codex', '--override-ticket', ticket, '--override-target', 'continue-local', '--override-scope', 'task-event'
+    ], { cwd: root, encoding: 'utf8' });
+    assert.equal(applied.status, 0, applied.stderr || applied.stdout);
+    const result = JSON.parse(applied.stdout) as { status: string; humanOverride: { status: string } };
+    assert.equal(result.status, 'applied');
+    assert.equal(result.humanOverride.status, 'applied');
+    assert.match(fs.readFileSync(path.join(dir, 'task.md'), 'utf8'), new RegExp(`\\| ${ticket} \\|.*\\| consumed \\|`));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-event rejects combining dry-run with an override before any task mutation', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-event-override-dry-run-'));
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  const id = 'TASK-20260101-000003';
+  const dir = path.join(root, '.agents', 'workspace', 'blocked', id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: blocked\ncurrent_step: requirement-analysis-review\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.0.0\n---\n\n# Task\n\n## Activity Log\n\n`);
+  try {
+    const issued = spawnSync('node', [INTERNAL_CLI_PATH, 'task-override', id, 'issue',
+      '--failure-id', 'task-event:TASK_STATE_MISMATCH', '--target', 'continue-local',
+      '--operator', 'codex', '--reason', 'verify dry-run does not consume',
+      '--scope', 'task-event', '--expires-at', '2099-01-01 00:00:00+00:00'
+    ], { cwd: root, encoding: 'utf8' });
+    assert.equal(issued.status, 0, issued.stderr || issued.stdout);
+    const ticket = (JSON.parse(issued.stdout) as { ticketId: string }).ticketId;
+    const beforeRetry = fs.readFileSync(path.join(dir, 'task.md'));
+    const retried = spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', id, 'analyze.started',
+      '--agent', 'codex', '--dry-run', '--override-ticket', ticket,
+      '--override-target', 'continue-local', '--override-scope', 'task-event'
+    ], { cwd: root, encoding: 'utf8' });
+    assert.equal(retried.status, 1, retried.stderr || retried.stdout);
+    const result = JSON.parse(retried.stdout) as { status: string; error: { code: string } };
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error.code, 'EVENT_PAYLOAD_INVALID');
+    assert.deepEqual(fs.readFileSync(path.join(dir, 'task.md')), beforeRetry);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('internal task-event applies a started/completed pair and replays as no-op', () => {
   const f = fixture();
   const started = run(f.root, [f.id, 'plan.started', '--agent', 'codex', '--round', '1']);

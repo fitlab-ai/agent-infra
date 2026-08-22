@@ -7,6 +7,8 @@ import { parseArtifactName } from './artifact-lifecycle.ts';
 import type { ArtifactFamily } from './artifact-lifecycle.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import type { TaskWorkspaceState } from './resolve-ref.ts';
+import { allowsManualOverride } from './guard-override.ts';
+import type { ManualOverrideCapability } from './guard-override.ts';
 
 type VerificationEvent =
   | 'analyze.awaiting-input' | 'analyze.completed'
@@ -48,6 +50,7 @@ type TaskVerificationResult = {
 type VerificationOptions = {
   repoRoot?: string;
   engine?: typeof verifyInProcess;
+  manualOverride?: ManualOverrideCapability;
 };
 
 const gate = (skill: string, expectedState: VerificationSpec['expectedState'], artifactFamily?: ArtifactFamily): VerificationSpec => ({
@@ -93,7 +96,7 @@ function verifyTaskEvent(request: { taskRef: string; event: string; artifact?: s
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failure(request, resolved.code, resolved.message, { taskId: resolved.taskId, skill: spec.skill, mode: spec.mode });
   const identity = { taskId: resolved.taskId, taskDir: resolved.taskDir, taskState: resolved.state, skill: spec.skill, mode: spec.mode } as const;
-  if (resolved.state !== spec.expectedState) {
+  if (resolved.state !== spec.expectedState && !allowsManualOverride(options.manualOverride, 'task-verify', 'VERIFY_TASK_STATE_MISMATCH')) {
     return failure(request, 'VERIFY_TASK_STATE_MISMATCH', `event '${request.event}' requires workspace '${spec.expectedState}', received '${resolved.state}'`, identity);
   }
   if (spec.artifactFamily) {
@@ -111,11 +114,22 @@ function verifyTaskEvent(request: { taskRef: string; event: string; artifact?: s
   if (spec.mode === 'gate') {
     const payload = engine({ mode: 'gate', skillName: spec.skill, taskDir: resolved.taskDir, artifactFile: request.artifact, checks: [], repositoryRoot: resolved.repoRoot }) as Record<string, unknown>;
     const status = payload.gate as 'pass' | 'fail' | 'blocked';
+    if (status !== 'pass' && allowsManualOverride(options.manualOverride, 'verification-engine', status === 'blocked' ? 'CHECK_BLOCKED' : 'CHECK_FAILED')) {
+      invocations.push({ status: 'pass', exitCode: 0, payload: { ...payload, gate: 'pass', humanOverride: 'human-approved', originalGate: status } });
+      return {
+        status: 'pass', changed: false, event: request.event, requestRef: request.taskRef,
+        ...identity, artifact: request.artifact ?? null, invocations, error: null
+      };
+    }
     invocations.push({ status, exitCode: ({ pass: 0, fail: 1, blocked: 2 } as const)[status], payload });
   } else {
     for (const check of spec.checks ?? []) {
       const payload = engine({ mode: 'checks', skillName: spec.skill, taskDir: resolved.taskDir, artifactFile: request.artifact, checks: [check], repositoryRoot: resolved.repoRoot }) as Record<string, unknown>;
       const status = payload.status as 'pass' | 'fail' | 'blocked';
+      if (status !== 'pass' && allowsManualOverride(options.manualOverride, 'verification-engine', status === 'blocked' ? 'CHECK_BLOCKED' : 'CHECK_FAILED')) {
+        invocations.push({ status: 'pass', exitCode: 0, payload: { ...payload, status: 'pass', humanOverride: 'human-approved', originalStatus: status } });
+        break;
+      }
       invocations.push({ status, exitCode: ({ pass: 0, fail: 1, blocked: 2 } as const)[status], payload });
       if (status !== 'pass') break;
     }

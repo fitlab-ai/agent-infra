@@ -2,6 +2,9 @@ import { VERSION } from './version.ts';
 import { parseTaskScope } from './task/command-options.ts';
 import { applyHumanDecision } from './task/decision-intents.ts';
 import { canonicalTimestamp } from './task/write.ts';
+import { consumeHumanOverride, failureId } from './task/human-override.ts';
+import { resolveTaskRef } from './task/resolve-ref.ts';
+import { TaskExecutionLockError, withTaskExecutionLock } from './task/task-execution-lock.ts';
 
 type DecideOptions = {
   repoRoot?: string;
@@ -9,23 +12,33 @@ type DecideOptions = {
   version?: string;
 };
 
-function parseDecisionParts(parts: string[]): { decision: string; needsImplementation: boolean | undefined } {
+function parseDecisionParts(parts: string[]): { decision: string; needsImplementation: boolean | undefined; overrideTicket?: string; overrideTarget?: string; overrideScope?: string } {
   const decision: string[] = [];
   let needsImplementation: boolean | undefined;
+  let overrideTicket: string | undefined;
+  let overrideTarget: string | undefined;
+  let overrideScope: string | undefined;
   for (let index = 0; index < parts.length; index += 1) {
-    if (parts[index] !== '--needs-implementation') {
+    const part = parts[index];
+    if (part === '--needs-implementation') {
+      if (needsImplementation !== undefined) throw new Error("duplicate option '--needs-implementation'");
+      const value = parts[++index];
+      if (value !== 'true' && value !== 'false') {
+        throw new Error("--needs-implementation must be 'true' or 'false'");
+      }
+      needsImplementation = value === 'true';
+    } else if (part === '--override-ticket' || part === '--override-target' || part === '--override-scope') {
+      const value = parts[++index];
+      if (!value) throw new Error(`${part} requires a value`);
+      if (part === '--override-ticket') overrideTicket = value;
+      else if (part === '--override-target') overrideTarget = value;
+      else overrideScope = value;
+    } else {
       decision.push(parts[index]!);
-      continue;
     }
-    if (needsImplementation !== undefined) throw new Error("duplicate option '--needs-implementation'");
-    const value = parts[++index];
-    if (value !== 'true' && value !== 'false') {
-      throw new Error("--needs-implementation must be 'true' or 'false'");
-    }
-    needsImplementation = value === 'true';
   }
   if (decision.length === 0) throw new Error('decision content is required');
-  return { decision: decision.join(' '), needsImplementation };
+  return { decision: decision.join(' '), needsImplementation, overrideTicket, overrideTarget, overrideScope };
 }
 
 export async function decide(args: string[], options: DecideOptions = {}): Promise<number> {
@@ -64,17 +77,49 @@ export async function decide(args: string[], options: DecideOptions = {}): Promi
   try {
     const parsedDecision = parseDecisionParts(decisionParts);
     const now = (options.now ?? canonicalTimestamp)();
-    const result = applyHumanDecision({
+    const request = {
       taskRef, selector, decision: parsedDecision.decision,
       needsImplementation: parsedDecision.needsImplementation
-    }, {
+    };
+    const writeOptions = {
       repoRoot: options.repoRoot,
       metadataProvider: () => ({ timestamp: now, agentInfraVersion: options.version ?? VERSION })
-    });
+    };
+    const resolved = taskRef ? resolveTaskRef(taskRef, { repoRoot: options.repoRoot }) : null;
+    let result;
+    const execute = () => {
+      let current = applyHumanDecision(request, writeOptions);
+      if (current.status !== 'failed' || !parsedDecision.overrideTicket) return current;
+      if (!parsedDecision.overrideTarget || !parsedDecision.overrideScope) throw new Error('override ticket requires --override-target and --override-scope');
+      const consumed = consumeHumanOverride({
+        taskRef: resolved?.ok ? resolved.taskId : String(taskRef ?? ''),
+        ticketId: parsedDecision.overrideTicket,
+        failureId: failureId('decision-intent', current.error?.code ?? 'TASK_STATE_MISMATCH'),
+        target: parsedDecision.overrideTarget,
+        scope: parsedDecision.overrideScope
+      }, {
+        ...writeOptions,
+        effectExecutor: (capability) => {
+          const retried = applyHumanDecision(request, { ...writeOptions, manualOverride: capability });
+          current = retried;
+          return retried.status === 'failed' || retried.status === 'planned'
+            ? { code: 'OVERRIDE_EFFECT_FAILED', message: retried.status === 'planned' ? 'producer returned planned; no decision effect was committed' : `${retried.error?.code ?? 'DECISION_FAILED'}: ${retried.error?.message ?? 'manual decision effect failed'}` }
+            : null;
+        }
+      });
+      if (consumed.status === 'failed') throw new Error(consumed.error.message);
+      return current;
+    };
+    result = resolved?.ok
+      ? withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'task-decision', execute)
+      : execute();
     if (result.error) throw new Error(result.error.message);
     return 0;
   } catch (error) {
-    process.stderr.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+    const message = error instanceof TaskExecutionLockError
+      ? `${error.code}: ${error.message}`
+      : error instanceof Error ? error.message : String(error);
+    process.stderr.write(`Error: ${message}\n`);
     return 1;
   }
 }

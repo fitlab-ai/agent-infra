@@ -11,6 +11,7 @@ import {
 import type { WorkflowWarning } from './workflow-warnings.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskMutation, TaskOperationSummary, TaskWriteOptions } from './write.ts';
+import { allowsManualOverride } from './guard-override.ts';
 
 type WarningSeverity = 'IMPORTANT' | 'ACTION_REQUIRED';
 type WarningStatus = 'open' | 'resolved' | 'ignored';
@@ -79,7 +80,8 @@ function rowMutation(row: WorkflowWarning): TaskMutation {
 function applyWorkflowWarningIntent(intent: WorkflowWarningIntent, options: TaskWriteOptions = {}): WorkflowWarningIntentResult {
   const resolved = resolveTaskRef(intent.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(intent, resolved.code, resolved.message, resolved.taskId);
-  if (resolved.state !== 'active') return failed(intent, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
+  const stateOverride = allowsManualOverride(options.manualOverride, 'workflow-warning', 'TASK_STATE_MISMATCH');
+  if (resolved.state !== 'active' && !stateOverride) return failed(intent, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
   let content: string;
   let rows: WorkflowWarning[];
   try {
@@ -125,7 +127,7 @@ function applyWorkflowWarningIntent(intent: WorkflowWarningIntent, options: Task
   }
 
   const writeResult = writeTask({
-    taskRef: intent.taskRef, expectedState: 'active', mutations: [...sectionMutation(content), rowMutation(after)], dryRun: intent.dryRun
+    taskRef: intent.taskRef, expectedState: stateOverride ? resolved.state : 'active', mutations: [...sectionMutation(content), rowMutation(after)], dryRun: intent.dryRun
   }, {
     ...options,
     taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: resolved.state },

@@ -1,14 +1,16 @@
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
+import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task/human-override.ts';
 import { applyTaskLifecycle, lifecycleIntentCatalog } from '../task/lifecycle.ts';
 import type { TaskLifecycleRequest } from '../task/lifecycle.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
 
-const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.join(', ')}\n`;
+const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.join(', ')}\nOverride: --override-ticket <ticket> --override-target <target> --override-scope <scope>\n`;
 const FLAGS: Record<string, string> = {
   '--agent': 'agent', '--reason': 'reason', '--unblock-condition': 'unblockCondition',
   '--note': 'note', '--alert-number': 'alertNumber', '--staging-dir': 'stagingDir',
-  '--issue-number': 'issueNumber'
+  '--issue-number': 'issueNumber', '--override-ticket': 'overrideTicket',
+  '--override-target': 'overrideTarget', '--override-scope': 'overrideScope'
 };
 
 function usageFailure(message: string): void {
@@ -39,6 +41,8 @@ function taskLifecycle(args: string[] = []): void {
   const agent = normalizeAgentToken(String(values.agent ?? ''));
   if (!agent) { usageFailure(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
   values.agent = agent;
+  const dryRunConflict = overrideDryRunConflict(values);
+  if (dryRunConflict) { usageFailure(dryRunConflict.message); return; }
   let repoRoot: string;
   let taskId: string;
   if (values.intent === 'restore') {
@@ -63,13 +67,35 @@ function taskLifecycle(args: string[] = []): void {
     repoRoot = resolved.repoRoot;
     taskId = resolved.taskId;
   }
-  let result: ReturnType<typeof applyTaskLifecycle>;
+  let result: ReturnType<typeof applyTaskLifecycle> & { humanOverride?: unknown };
   try {
     result = withTaskExecutionLock(
       repoRoot,
       taskId,
       `task-lifecycle.${String(values.intent)}`,
-      () => applyTaskLifecycle(values as TaskLifecycleRequest)
+      () => {
+        const lifecycleResult = applyTaskLifecycle(values as TaskLifecycleRequest);
+        if (lifecycleResult.status !== 'failed' || !values.overrideTicket) return lifecycleResult;
+        if (!values.overrideTarget || !values.overrideScope) {
+          return {
+            ...lifecycleResult,
+            error: { code: 'OVERRIDE_PAYLOAD_INVALID', message: 'override ticket requires --override-target and --override-scope' }
+          };
+        }
+        const override = consumeHumanOverride({
+          taskRef: String(values.taskRef),
+          ticketId: String(values.overrideTicket),
+          failureId: failureId('lifecycle.apply', lifecycleResult.error?.code ?? 'LIFECYCLE_FAILED'),
+          target: String(values.overrideTarget),
+          scope: String(values.overrideScope),
+          intent: String(values.intent) as TaskLifecycleRequest['intent'],
+          ...(values.alertNumber ? { alertNumber: Number(values.alertNumber) } : {}),
+          ...(values.issueNumber ? { issueNumber: Number(values.issueNumber) } : {}),
+          ...(values.stagingDir ? { stagingDir: String(values.stagingDir) } : {})
+        });
+        if (override.status === 'failed') return { ...lifecycleResult, humanOverride: override };
+        return { ...lifecycleResult, ...override, humanOverride: override, error: null };
+      }
     );
   } catch (error) {
     if (!(error instanceof TaskExecutionLockError)) throw error;

@@ -16,6 +16,33 @@ import type { TaskFileSystem, TaskMutation, TaskOperationSummary, TaskWriteMetad
 const lifecycleIntentCatalog = [
   'block', 'activate', 'cancel', 'complete', 'close-codescan', 'close-dependabot', 'restore'
 ] as const;
+const lifecycleFailureCatalog = [
+  'LIFECYCLE_DIRECTORY_RENAME_FAILED',
+  'LIFECYCLE_DOCUMENT_INVALID',
+  'LIFECYCLE_FINAL_STATE_INVALID',
+  'LIFECYCLE_IDENTITY_CONFLICT',
+  'LIFECYCLE_IDENTITY_INVALID',
+  'LIFECYCLE_INTENT_CONFLICT',
+  'LIFECYCLE_JOURNAL_CLEANUP_FAILED',
+  'LIFECYCLE_JOURNAL_INVALID',
+  'LIFECYCLE_JOURNAL_WRITE_FAILED',
+  'LIFECYCLE_LOG_MISSING',
+  'LIFECYCLE_METADATA_FAILED',
+  'LIFECYCLE_PAYLOAD_INVALID',
+  'LIFECYCLE_SHORT_ID_FAILED',
+  'LIFECYCLE_SHORT_ID_PRECONDITION',
+  'LIFECYCLE_SOURCE_INVALID',
+  'LIFECYCLE_STAGING_IDENTITY_INVALID',
+  'LIFECYCLE_STAGING_INVALID',
+  'LIFECYCLE_TARGET_CONFLICT',
+  'LIFECYCLE_TASK_NOT_FOUND',
+  'SHORT_ID_CAPACITY_EXCEEDED'
+] as const;
+const lifecycleProducerCatalog = lifecycleFailureCatalog.map((code) => ({
+  producerId: 'lifecycle.apply' as const,
+  guardId: 'G-03' as const,
+  code
+}));
 type TaskLifecycleIntent = (typeof lifecycleIntentCatalog)[number];
 type TaskLifecycleRequest =
   | { taskRef: string; intent: 'block'; agent: string; reason: string; unblockCondition: string; dryRun?: boolean }
@@ -39,6 +66,7 @@ type LifecycleJournal = {
   targetState: HotState;
   metadata: TaskWriteMetadata;
   completedSteps: LifecycleStep[];
+  failure?: LifecycleError;
 };
 type TaskLifecycleResult = {
   status: 'planned' | 'applied' | 'no-op' | 'failed';
@@ -72,7 +100,12 @@ type TaskLifecycleOptions = {
   fileSystem?: Partial<LifecycleFileSystem>;
   taskFileSystem?: Partial<TaskFileSystem>;
   directoryRenameSync?: (source: string, target: string) => void;
+  manualOverride?: Readonly<{ failureId: string; operator: string; reason: string }>;
 };
+
+function allowsManualOverride(options: TaskLifecycleOptions, code: string): boolean {
+  return options.manualOverride?.failureId === `lifecycle.apply:${code}`;
+}
 
 const STEPS: readonly LifecycleStep[] = ['task-written', 'directory-moved', 'registry-committed'];
 const DEFAULT_IO: LifecycleFileSystem = {
@@ -219,8 +252,8 @@ function validateRestoreStaging(request: Extract<TaskLifecycleRequest, { intent:
   return { stagingDir, fileCount: entries.filter((entry) => !entry.name.startsWith('.')).length };
 }
 
-function mutationsFor(request: TaskLifecycleRequest, content: string, metadata: TaskWriteMetadata, restoredFiles: number): TaskMutation[] | LifecycleError {
-  const section = locateActivityLog(content);
+function mutationsFor(request: TaskLifecycleRequest, content: string, metadata: TaskWriteMetadata, restoredFiles: number, allowMissingActivityLog = false): TaskMutation[] | LifecycleError {
+  const section = locateActivityLog(content) ?? (allowMissingActivityLog ? { heading: 'Activity Log', body: '', entries: [] } : null);
   if (!section) return { code: 'LIFECYCLE_LOG_MISSING', message: 'task has no unique Activity Log section' };
   const identity = actionAndNote(request, restoredFiles);
   let body = appendActivityEntry(section, { time: metadata.timestamp, step: `${identity.action} [started]`, agent: request.agent, note: 'started' });
@@ -264,6 +297,14 @@ function writeJournal(file: string, journal: LifecycleJournal, io: LifecycleFile
   } catch (error) {
     try { io.unlinkSync(temporary); } catch { /* preserve primary error */ }
     throw error;
+  }
+}
+
+function rememberJournalFailure(file: string, journal: LifecycleJournal, io: LifecycleFileSystem, failure: LifecycleError): void {
+  try {
+    writeJournal(file, { ...journal, failure }, io);
+  } catch {
+    // Preserve the original lifecycle failure when the diagnostic receipt cannot be updated.
   }
 }
 
@@ -332,7 +373,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
     }
     return failed(request, { code: 'LIFECYCLE_INTENT_CONFLICT', message: `task ${taskId} is already ${spec.target} with a different lifecycle intent` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   }
-  if (!spec.sources.includes(sourceState) && !existingJournal) {
+  if (!spec.sources.includes(sourceState) && !existingJournal && !allowsManualOverride(options, 'LIFECYCLE_SOURCE_INVALID')) {
     return failed(request, { code: 'LIFECYCLE_SOURCE_INVALID', message: `${request.intent} is not allowed from ${sourceState}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   }
   if (sourcePath !== targetPath && fs.existsSync(targetPath)) {
@@ -343,7 +384,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   try { frontmatter = parseTypedTaskFrontmatter(content); }
   catch (error) { return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath }); }
   if (frontmatter.id !== taskId) return failed(request, { code: 'LIFECYCLE_IDENTITY_INVALID', message: 'task.md id does not match its lifecycle task id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
-  if (!locateActivityLog(content)) return failed(request, { code: 'LIFECYCLE_LOG_MISSING', message: 'task has no unique Activity Log section' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+  if (!locateActivityLog(content) && !allowsManualOverride(options, 'LIFECYCLE_LOG_MISSING')) return failed(request, { code: 'LIFECYCLE_LOG_MISSING', message: 'task has no unique Activity Log section' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   const registryRequest = executeShortIdCommand({
     operation: 'list', activeDir: path.join(repoRoot, '.agents', 'workspace', 'active'),
     shortIdLength: configuredShortIdLength(repoRoot)
@@ -353,10 +394,10 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   }
   const registry = JSON.parse(registryRequest.output || '{"version":1,"ids":{}}') as { ids: Record<string, string> };
   const registeredKey = Object.entries(registry.ids).find(([, candidate]) => candidate === taskId)?.[0];
-  if (spec.registry === 'release' && sourceState === 'active' && !registeredKey) {
+  if (spec.registry === 'release' && sourceState === 'active' && !registeredKey && !allowsManualOverride(options, 'LIFECYCLE_SHORT_ID_PRECONDITION')) {
     return failed(request, { code: 'LIFECYCLE_SHORT_ID_PRECONDITION', message: 'active source has no short-id registry entry' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   }
-  if (spec.registry === 'alloc' && !registeredKey && Object.keys(registry.ids).length >= 10 ** configuredShortIdLength(repoRoot) - 1) {
+  if (spec.registry === 'alloc' && !registeredKey && Object.keys(registry.ids).length >= 10 ** configuredShortIdLength(repoRoot) - 1 && !allowsManualOverride(options, 'SHORT_ID_CAPACITY_EXCEEDED')) {
     return failed(request, { code: 'SHORT_ID_CAPACITY_EXCEEDED', message: 'short-id registry has no free slot' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   }
   const digest = intentIdentity(request, taskId);
@@ -366,14 +407,20 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   if (fs.existsSync(initialJournalPath)) {
     try { journal = parseJournal(io.readFileSync(initialJournalPath)); }
     catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_INVALID', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath }); }
-    if (journal.intentDigest !== digest || journal.taskId !== taskId) return failed(request, { code: 'LIFECYCLE_INTENT_CONFLICT', message: 'an in-progress lifecycle journal belongs to a different request' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
+    if (journal.taskId !== taskId || journal.intent !== request.intent) return failed(request, { code: 'LIFECYCLE_INTENT_CONFLICT', message: 'an in-progress lifecycle journal belongs to a different request' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
+    if (request.dryRun) {
+      if (!journal.failure) return failed(request, { code: 'LIFECYCLE_JOURNAL_INVALID', message: 'existing lifecycle journal has no durable failure evidence for a read-only probe' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
+      return failed(request, journal.failure, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath, completedSteps: journal.completedSteps, pendingSteps: STEPS.filter((step) => !journal.completedSteps.includes(step)) });
+    }
+    const overrideResumesRecordedFailure = journal.failure && allowsManualOverride(options, journal.failure.code);
+    if (journal.intentDigest !== digest && !overrideResumesRecordedFailure) return failed(request, { code: 'LIFECYCLE_INTENT_CONFLICT', message: 'an in-progress lifecycle journal belongs to a different request' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath: initialJournalPath });
   } else {
     let metadata: TaskWriteMetadata;
     try { metadata = (options.metadataProvider ?? captureTaskWriteMetadata)(); }
     catch (error) { return failed(request, { code: 'LIFECYCLE_METADATA_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath }); }
     journal = { version: 1, taskId, intent: request.intent, intentDigest: digest, sourceState, targetState: spec.target, metadata, completedSteps: [] };
     if (request.dryRun) {
-      const plannedMutations = mutationsFor(request, content, metadata, restoredFiles);
+      const plannedMutations = mutationsFor(request, content, metadata, restoredFiles, allowsManualOverride(options, 'LIFECYCLE_LOG_MISSING'));
       if ('code' in plannedMutations) return failed(request, plannedMutations, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
       const taskPlan = writeTask(
         { taskRef: taskId, expectedState: sourceState === 'blocked' ? 'blocked' : 'active', mutations: plannedMutations, dryRun: true },
@@ -409,7 +456,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   if (matchingCompletion(io.readFileSync(path.join(sourcePath, 'task.md')), request, restoredFiles)) completed.add('task-written');
   if (!completed.has('task-written')) {
     const current = io.readFileSync(path.join(sourcePath, 'task.md'));
-    const mutations = mutationsFor(request, current, journal.metadata, restoredFiles);
+    const mutations = mutationsFor(request, current, journal.metadata, restoredFiles, allowsManualOverride(options, 'LIFECYCLE_LOG_MISSING'));
     if ('code' in mutations) return failed(request, mutations, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, completedSteps: [...completed], changed: completed.size > 0 });
     const writeResult = writeTask(
       { taskRef: taskId, expectedState: sourceState === 'blocked' ? 'blocked' : 'active', mutations },
@@ -430,7 +477,11 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     if (fs.existsSync(targetPath)) return failed(request, { code: 'LIFECYCLE_TARGET_CONFLICT', message: `target directory already exists: ${targetPath}` }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
     try { (options.directoryRenameSync ?? io.renameSync)(sourcePath, targetPath); }
-    catch (error) { return failed(request, { code: 'LIFECYCLE_DIRECTORY_RENAME_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
+    catch (error) {
+      const failure = { code: 'LIFECYCLE_DIRECTORY_RENAME_FAILED', message: String(error) } as const;
+      rememberJournalFailure(journalPath, journal, io, failure);
+      return failed(request, failure, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion });
+    }
     completed.add('directory-moved'); journal.completedSteps = [...completed]; journalPath = path.join(targetPath, '.task-lifecycle.json');
     try { writeJournal(journalPath, journal, io); }
     catch (error) { return failed(request, { code: 'LIFECYCLE_JOURNAL_WRITE_FAILED', message: String(error) }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath, journalPath, task: { operations: taskOperations }, directory: { effect: 'move', changed: true }, changed: true, completedSteps: [...completed], timestamp: journal.metadata.timestamp, agentInfraVersion: journal.metadata.agentInfraVersion }); }
@@ -457,7 +508,7 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   };
 }
 
-export { lifecycleIntentCatalog, applyTaskLifecycle };
+export { lifecycleIntentCatalog, lifecycleFailureCatalog, lifecycleProducerCatalog, applyTaskLifecycle };
 export type {
   TaskLifecycleIntent, TaskLifecycleRequest, TaskLifecycleResult, TaskLifecycleOptions,
   LifecycleError, LifecycleJournal, LifecycleStep
