@@ -902,7 +902,7 @@ function checkReviewLedger({ taskDir, config }: any): any {
   }
 
   const stageScope = Array.isArray(config.stage_scope) ? config.stage_scope : null;
-  const maxRounds = Number(resolveReviewSetting(config, "max_handshake_rounds", DEFAULT_MAX_HANDSHAKE_ROUNDS));
+  const maxRounds = Number(resolveReviewSetting(config, "maxHandshakeRounds", DEFAULT_MAX_HANDSHAKE_ROUNDS));
   const problems = [];
   let inScopeCount = 0;
 

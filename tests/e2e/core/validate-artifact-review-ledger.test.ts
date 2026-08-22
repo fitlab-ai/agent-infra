@@ -37,8 +37,8 @@ function buildLedgerTask(rows: string[], { withSection = true } = {}) {
   ].join("\n");
 }
 
-function runLedger(skill: string, taskDir: string) {
-  const result = runValidator(["check", "review-ledger", taskDir, "--skill", skill]);
+function runLedger(skill: string, taskDir: string, repositoryRoot?: string) {
+  const result = runValidator(["check", "review-ledger", taskDir, "--skill", skill], { repositoryRoot });
   return { result, payload: parseValidatorPayload(result.stdout) };
 }
 
@@ -116,6 +116,26 @@ test("review-ledger forces escalation once a finding reaches the round limit", a
     const { payload } = runLedger("complete-task", taskDir);
     assert.equal(payload.status, "fail");
     assert.match(payload.message, /without convergence|needs-human-decision/);
+  });
+});
+
+test("review-ledger honors the project maxHandshakeRounds override", async () => {
+  await withTempRoot("agent-infra-ledger-configured-limit-", (tempRoot) => {
+    write(path.join(tempRoot, ".agents", ".airc.json"), JSON.stringify({
+      review: { maxHandshakeRounds: 2 }
+    }));
+    write(
+      path.join(tempRoot, ".agents", "skills", "complete-task", "config", "verify.json"),
+      JSON.stringify({ skill: "complete-task", checks: { "review-ledger": {} } })
+    );
+    const taskDir = path.join(tempRoot, TASK_ID);
+    write(path.join(taskDir, "task.md"), buildLedgerTask([
+      "| CD-1 | code | 2 | blocker | refuted | still disputed |"
+    ]));
+
+    const { payload } = runLedger("complete-task", taskDir, tempRoot);
+    assert.equal(payload.status, "fail");
+    assert.match(payload.message, /reached limit 2/);
   });
 });
 
