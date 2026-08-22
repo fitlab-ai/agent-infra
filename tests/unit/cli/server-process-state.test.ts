@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import {
   buildProcessStartTimeQuery,
+  getProcessIdentityState,
   getProcessStartTime,
   parseLinuxProcessStat,
   readProcessState,
@@ -34,6 +35,11 @@ test('buildProcessStartTimeQuery uses argv without a shell on macOS and Windows'
   assert.deepEqual(windows?.args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-Command']);
   assert.match(windows?.args[3] ?? '', /ProcessId = 4321/);
   assert.equal(buildProcessStartTimeQuery(4321, 'linux'), null);
+});
+
+test('process identity state distinguishes a missing process from an uninspectable owner', () => {
+  assert.equal(getProcessIdentityState({ pid: 999_999_999, startTime: 1 }, 'linux'), 'dead');
+  assert.equal(getProcessIdentityState({ pid: process.pid, startTime: -1 }, process.platform), 'dead');
 });
 
 test('readProcessState classifies missing, invalid, legacy, mismatch, and matching records', () => {

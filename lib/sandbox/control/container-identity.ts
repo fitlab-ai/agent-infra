@@ -1,4 +1,4 @@
-import type { SandboxControlManifest } from './protocol.ts';
+import type { SandboxControlManifest, SandboxControlManifestLike } from './protocol.ts';
 import { commandForEngine, runEngine, runProbe } from '../shell.ts';
 
 export type ContainerObservation =
@@ -48,7 +48,7 @@ export function classifySandboxContainerInspection(
 }
 
 export async function inspectSandboxControlContainer(
-  manifest: SandboxControlManifest,
+  manifest: SandboxControlManifestLike,
   options: { run?: typeof runEngine; probe?: typeof runProbe; timeoutMs?: number } = {}
 ): Promise<ContainerObservation> {
   try {

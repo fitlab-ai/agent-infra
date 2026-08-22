@@ -11,6 +11,7 @@ import {
   prepareSandboxWorkspaceMountTargets,
   sandboxWorkspaceViewStatePaths
 } from '../../../lib/sandbox/workspace-view.ts';
+import { acquireSandboxControlReplacement } from '../../../lib/sandbox/control/lifecycle.ts';
 import { assertModeBits } from '../../helpers.ts';
 
 test('workspace view state paths use the isolated runtime state allowlist', () => {
@@ -130,16 +131,20 @@ test('control materialization rotates token and generation and creates isolated 
   const first = materializeSandboxControl(params);
   const controlRoot = path.dirname(first.manifestPath);
   fs.writeFileSync(path.join(controlRoot, 'consumed', 'request-id'), '');
-  const second = materializeSandboxControl(params);
+  const replacementLease = acquireSandboxControlReplacement(controlRoot);
+  const second = materializeSandboxControl({ ...params, replacementLease });
+  replacementLease.release();
   assert.notEqual(second.token, first.token);
   assert.notEqual(second.generation, first.generation);
   assert.deepEqual(fs.readdirSync(path.join(controlRoot, 'consumed')), []);
   assert.equal(path.dirname(path.join(controlRoot, 'consumed')), controlRoot);
   const manifest = JSON.parse(fs.readFileSync(second.manifestPath, 'utf8'));
-  assert.equal(manifest.version, 4);
+  assert.equal(manifest.version, 5);
   assert.equal(manifest.generation, second.generation);
   assert.equal(manifest.publicStatusDir, path.join(controlRoot, 'public'));
   assert.equal(manifest.processingDir, path.join(controlRoot, 'processing'));
+  assert.equal(manifest.runtimeDir, path.join(controlRoot, 'runtime'));
+  assert.deepEqual(fs.readdirSync(path.join(controlRoot, 'runtime', 'clients', 'codex')).sort(), ['capabilities', 'lifecycle']);
   assert.equal(second.statusDir, path.join(controlRoot, 'public'));
   assert.equal(manifest.worktreeRoot, fs.realpathSync.native(repoRoot));
 });

@@ -69,6 +69,17 @@ import {
   prepareTmpfsMounts,
   startSandboxControlBroker
 } from '../recovery.ts';
+import {
+  acquireSandboxControlReplacement,
+  assertSandboxControlCutoverSnapshot,
+  beginSandboxControlReplacement,
+  captureSandboxControlCutoverSnapshot,
+  commitSandboxControlReplacement,
+  quiesceSandboxControlRoot,
+  recoverSandboxControlReplacement,
+  readSandboxControlManifestForTransition
+} from '../control/lifecycle.ts';
+import { inspectSandboxControlContainer } from '../control/container-identity.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
 import { sandboxCoreBindMounts } from '../mounts.ts';
 import {
@@ -77,6 +88,7 @@ import {
   materializeSandboxControl,
   materializeSandboxWorkspaceView,
   prepareSandboxWorkspaceMountTargets,
+  sandboxControlPaths,
 } from '../workspace-view.ts';
 import { clipboardHostDir, CONTAINER_CLIPBOARD_MOUNT } from '../clipboard/paths.ts';
 import { validateSelinuxDisableEnv } from '../engines/selinux.ts';
@@ -1036,6 +1048,12 @@ export async function create(args: string[]): Promise<void> {
   }
   const effectiveResolvedTools = resolvedTools;
   const container = containerName(effectiveConfig, branch);
+  const controlPaths = sandboxControlPaths({
+    base: effectiveConfig.controlBase,
+    project: effectiveConfig.project,
+    container,
+    identity: target.workspace
+  });
   const worktree = worktreeCandidates.find((candidate) => fs.existsSync(candidate)) ?? worktreeCandidates[0] ?? '';
   const shareCommon = shareCommonDir(effectiveConfig);
   const shareBranch = shareBranchDir(effectiveConfig, branch);
@@ -1224,6 +1242,22 @@ export async function create(args: string[]): Promise<void> {
       {
         title: `Starting container '${container}'`,
         task: async (message: (text: string) => void) => {
+          const hadControlRootBeforeAcquire = fs.existsSync(controlPaths.root);
+          const replacementLease = acquireSandboxControlReplacement(controlPaths.root);
+          let replacementLeaseHeld = true;
+          let replacementCutover: ReturnType<typeof beginSandboxControlReplacement> | null = null;
+          try {
+            const recoveryResult = await recoverSandboxControlReplacement(controlPaths.root, replacementLease);
+            const hadExistingControlRoot = hadControlRootBeforeAcquire || recoveryResult === 'restored';
+            const previousManifest = fs.existsSync(controlPaths.manifestPath)
+              ? readSandboxControlManifestForTransition(controlPaths.manifestPath)
+              : null;
+            if (hadExistingControlRoot) {
+              await quiesceSandboxControlRoot(controlPaths.root);
+            }
+            const previousCutoverSnapshot = hadExistingControlRoot
+              ? captureSandboxControlCutoverSnapshot(controlPaths.root)
+              : null;
           const existing = runSafeEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
           const matchedContainers = containerNameCandidates(effectiveConfig, branch)
             .filter((name) => existing.includes(name));
@@ -1264,6 +1298,14 @@ export async function create(args: string[]): Promise<void> {
             for (const name of matchedContainers) {
               runSafeEngine(engine, 'docker', ['stop', name]);
               runSafeEngine(engine, 'docker', ['rm', name]);
+            }
+          }
+          if (previousManifest) {
+            const oldContainer = await inspectSandboxControlContainer(previousManifest);
+            if (oldContainer.state !== 'absent') {
+              throw new Error(oldContainer.state === 'unknown'
+                ? `SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${oldContainer.reason}`
+                : 'SANDBOX_CONTROL_CONTAINER_STILL_EXISTS');
             }
           }
 
@@ -1343,6 +1385,18 @@ export async function create(args: string[]): Promise<void> {
               identity: target.workspace
             });
             prepareSandboxWorkspaceMountTargets(worktree);
+            if (previousCutoverSnapshot) {
+              assertSandboxControlCutoverSnapshot(previousCutoverSnapshot);
+              if (previousManifest) {
+                const finalOldContainer = await inspectSandboxControlContainer(previousManifest);
+                if (finalOldContainer.state !== 'absent') {
+                  throw new Error(finalOldContainer.state === 'unknown'
+                    ? `SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${finalOldContainer.reason}`
+                    : 'SANDBOX_CONTROL_CONTAINER_REAPPEARED');
+                }
+              }
+              replacementCutover = beginSandboxControlReplacement(controlPaths.root, replacementLease);
+            }
             const control = materializeSandboxControl({
               base: effectiveConfig.controlBase,
               repoRoot: effectiveConfig.repoRoot,
@@ -1351,7 +1405,8 @@ export async function create(args: string[]): Promise<void> {
               container,
               branch,
               identity: target.workspace,
-              engine
+              engine,
+              replacementLease
             });
             hostShellConfig = prepareHostShellConfig({
               home: effectiveConfig.home,
@@ -1365,6 +1420,7 @@ export async function create(args: string[]): Promise<void> {
               workspaceViewRoot: workspaceView.root,
               controlDir: control.channelDir,
               controlStatusDir: control.statusDir,
+              ...(target.workspace.mode === 'task-bound' ? { runtimeDir: control.runtimeDir } : {}),
               ...(target.workspace.mode === 'task-bound'
                 ? {
                   taskSource: assertSandboxTaskSource(
@@ -1456,6 +1512,9 @@ export async function create(args: string[]): Promise<void> {
               'AGENT_INFRA_CONTROL_DIR=/run/agent-infra/control',
               '-e',
               'AGENT_INFRA_CONTROL_STATUS_DIR=/run/agent-infra/control-status',
+              ...(target.workspace.mode === 'task-bound'
+                ? ['-e', 'AGENT_INFRA_RUNTIME_DIR=/run/agent-infra/runtime']
+                : []),
               '--label',
               `${sandboxRuntimeCapabilityLabel(effectiveConfig)}=${capabilityPlan.runtimeSignature}`,
               ...coreVolumes,
@@ -1512,14 +1571,27 @@ export async function create(args: string[]): Promise<void> {
                 id: containerId,
                 labels: expectedLabels
               });
+              replacementLease.clearQuiescing();
               await startSandboxControlBroker(effectiveConfig.repoRoot, control.manifestPath);
+              if (replacementCutover) {
+                commitSandboxControlReplacement(control.root, replacementLease);
+                replacementCutover = null;
+              }
               createdTmpfsSeedPlan = tmpfsSeedPlan;
             } catch (error) {
               if (createdContainerRef) {
                 runSafeEngine(engine, 'docker', ['stop', createdContainerRef]);
                 runSafeEngine(engine, 'docker', ['rm', createdContainerRef]);
               }
-              removeDirRecursive(control.root);
+              if (!hadExistingControlRoot) removeDirRecursive(control.root);
+              if (replacementCutover) {
+                try {
+                  await recoverSandboxControlReplacement(control.root, replacementLease);
+                  replacementCutover = null;
+                } catch {
+                  // Preserve the cutover state for the next explicit recreate to recover.
+                }
+              }
               removeDirRecursive(workspaceView.root);
               throw error;
             }
@@ -1615,7 +1687,19 @@ export async function create(args: string[]): Promise<void> {
             );
           }
 
+          replacementLease.release();
+          replacementLeaseHeld = false;
           return 'Container started';
+          } catch (error) {
+            if (replacementLeaseHeld) {
+              try {
+                replacementLease.release();
+              } catch {
+                // Preserve the original cutover failure and its evidence.
+              }
+            }
+            throw error;
+          }
         }
       }
     ]);

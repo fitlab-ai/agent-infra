@@ -17,6 +17,7 @@ type ControllerControl = Readonly<{
   generation: string;
   channelDir: string;
   statusDir: string;
+  runtimeDir: string;
 }>;
 
 type CodexSandboxControllerContext = Readonly<{
@@ -95,13 +96,38 @@ function controlFromEnvironment(): ControllerControl {
   const generation = process.env.AGENT_INFRA_CONTROL_GENERATION;
   const channelDir = process.env.AGENT_INFRA_CONTROL_DIR;
   const statusDir = process.env.AGENT_INFRA_CONTROL_STATUS_DIR;
-  if (!token || !generation || !channelDir || !statusDir) {
+  const runtimeDir = process.env.AGENT_INFRA_RUNTIME_DIR;
+  if (!token || !generation || !channelDir || !statusDir || !runtimeDir) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTROL_MISSING');
   }
-  return { token, generation, channelDir, statusDir };
+  return { token, generation, channelDir, statusDir, runtimeDir };
+}
+
+function verifyRuntime(runtimeDir: string): void {
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(runtimeDir);
+  } catch {
+    throw new Error('CODEX_SANDBOX_CONTROLLER_RUNTIME_UNAVAILABLE');
+  }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error('CODEX_SANDBOX_CONTROLLER_RUNTIME_UNAVAILABLE');
+  }
+  const probe = path.join(runtimeDir, `.controller-${process.pid}-${crypto.randomUUID()}.probe`);
+  try {
+    fs.writeFileSync(probe, 'runtime-probe\n', { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    if (fs.readFileSync(probe, 'utf8') !== 'runtime-probe\n') {
+      throw new Error('probe mismatch');
+    }
+  } catch {
+    throw new Error('CODEX_SANDBOX_CONTROLLER_RUNTIME_UNAVAILABLE');
+  } finally {
+    fs.rmSync(probe, { force: true });
+  }
 }
 
 function verifyControl(taskId: string, control: ControllerControl): void {
+  verifyRuntime(control.runtimeDir);
   let status: ReturnType<typeof readSandboxControlStatus> | null = null;
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -214,6 +240,7 @@ function isolatedEnvironment(
     AGENT_INFRA_CONTROL_GENERATION: control.generation,
     AGENT_INFRA_CONTROL_DIR: control.channelDir,
     AGENT_INFRA_CONTROL_STATUS_DIR: control.statusDir,
+    AGENT_INFRA_RUNTIME_DIR: control.runtimeDir,
     AGENT_INFRA_CODEX_CONTROLLER_CONTEXT: contextPath
   };
 }

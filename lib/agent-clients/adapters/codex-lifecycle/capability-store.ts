@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { verifyLifecycleBuildIdentity } from './build-identity.ts';
 import type { LifecycleBuildIdentity } from './build-identity.ts';
+import { resolveAgentRuntimeStoreRoot } from '../../../runtime/agent-runtime.ts';
 
 type CapabilityStatus = 'armed' | 'attested' | 'consumed' | 'expired';
 type CodexControllerBinding = Readonly<{
@@ -65,7 +66,7 @@ function sameController(
 
 function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
   const root = options.root
-    ?? path.join(process.cwd(), '.agents', 'workspace', '.runtime', 'codex-capabilities');
+    ?? resolveAgentRuntimeStoreRoot({ store: 'capabilities' });
   const now = options.now ?? Date.now;
   const createToken = options.token ?? (() => crypto.randomBytes(32).toString('base64url'));
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;

@@ -49,7 +49,7 @@ import {
   startSandboxContainer,
   type SandboxRow
 } from './commands/list-running.ts';
-import { getProcessStartTime, processIdentityMatches, removePidFileIfMatches } from '../server/process-state.ts';
+import { getProcessIdentityState, getProcessStartTime, removePidFileIfMatches } from '../server/process-state.ts';
 import {
   acquireSandboxControlBrokerStartup,
   garbageCollectSandboxControlRoot,
@@ -95,6 +95,7 @@ export type SandboxRecoverySnapshot = {
   actualWorkspace: SandboxContainerWorkspaceIdentity;
   workspaceTopology?: 'legacy-parent' | 'per-state' | 'unknown';
   taskView?: { path: string; readable: boolean };
+  runtimeStoreOk?: boolean;
   runtimeCapabilityOk?: boolean;
   unexpectedCapabilityMounts?: string[];
   mounts: Array<{
@@ -253,7 +254,9 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
     if (broker === null || broker.version !== 3 || owner === null) {
       throw new Error('SANDBOX_CONTROL_BROKER_VERSION_INVALID: rebuild the sandbox container before starting a new broker');
     }
-    const live = owner !== null && processIdentityMatches({ pid: owner.pid, startTime: owner.startTime });
+    const ownerState = getProcessIdentityState({ pid: owner.pid, startTime: owner.startTime });
+    if (ownerState === 'unknown') throw new Error('SANDBOX_CONTROL_BROKER_OWNER_UNAVAILABLE');
+    const live = ownerState === 'alive';
     if (
       live
       && owner !== null
@@ -351,6 +354,14 @@ async function ensureSandboxControlBroker(params: {
       token?: unknown;
       generation?: unknown;
     };
+    const validIdentity = typeof broker.pid === 'number'
+      && Number.isSafeInteger(broker.pid)
+      && typeof broker.startTime === 'number'
+      && Number.isSafeInteger(broker.startTime);
+    const ownerState = validIdentity
+      ? getProcessIdentityState({ pid: broker.pid as number, startTime: broker.startTime as number })
+      : 'dead';
+    if (ownerState === 'unknown') throw new Error('SANDBOX_CONTROL_BROKER_OWNER_UNAVAILABLE');
     if (
       broker.version === 3
       && typeof broker.pid === 'number'
@@ -361,7 +372,7 @@ async function ensureSandboxControlBroker(params: {
       && broker.brokerId.length > 0
       && broker.token === validatedManifest.token
       && broker.generation === validatedManifest.generation
-      && processIdentityMatches({ pid: broker.pid, startTime: broker.startTime })
+      && ownerState === 'alive'
     ) {
       try {
         const status = readSandboxControlStatus(control.statusDir);
@@ -381,7 +392,8 @@ async function ensureSandboxControlBroker(params: {
       });
       return;
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === 'SANDBOX_CONTROL_BROKER_OWNER_UNAVAILABLE') throw error;
     // A missing, stale, or malformed broker record is replaced below.
   }
   await startSandboxControlBroker(params.config.repoRoot, control.manifestPath);
@@ -432,6 +444,14 @@ export function classifySandboxRecovery(snapshot: SandboxRecoverySnapshot): Sand
       code: 'SANDBOX_TASK_VIEW_UNREADABLE',
       message: `Bound task view is not readable at ${snapshot.taskView.path}.`,
       path: snapshot.taskView.path
+    });
+  }
+  if (snapshot.runtimeStoreOk === false) {
+    findings.push({
+      repairKind: 'hard-failure',
+      code: 'SANDBOX_RUNTIME_STORE_UNAVAILABLE',
+      message: 'Task-bound runtime store is not writable and readable by devuser.',
+      path: '/run/agent-infra/runtime'
     });
   }
   for (const mountPath of snapshot.unexpectedCapabilityMounts ?? []) {
@@ -632,6 +652,7 @@ function expectedMounts(params: {
     controlStatusDir: control.statusDir,
     ...(params.workspace.mode === 'task-bound'
       ? {
+        runtimeDir: control.runtimeDir,
         taskSource: assertSandboxTaskSource(config.repoRoot, params.workspace.taskId),
         taskId: params.workspace.taskId
       }
@@ -799,6 +820,15 @@ export function collectSandboxRecoverySnapshot(params: {
       runOkFn
     )
   }));
+  const runtimeStoreOk = workspace.mode === 'task-bound'
+    ? probe(
+      params.engine,
+      params.container,
+      'probe="$1/.agent-infra-runtime-$$"; trap \'rm -f -- "$probe"\' EXIT; printf runtime-probe > "$probe" && test "$(cat -- "$probe")" = runtime-probe',
+      ['/run/agent-infra/runtime'],
+      runOkFn
+    )
+    : undefined;
   const labels = inspection.Config?.Labels ?? {};
   const branchLabel = labels[sandboxBranchLabel(params.config)];
   const containerWorkspace = parseSandboxWorkspaceIdentity(labels, {
@@ -873,6 +903,7 @@ export function collectSandboxRecoverySnapshot(params: {
         )
       }
     }),
+    ...(runtimeStoreOk === undefined ? {} : { runtimeStoreOk }),
     identityOk: typeof inspection.Id === 'string' && inspection.Id.length > 0
       && branchLabel === params.branch
       && sameSandboxWorkspaceIdentity(containerWorkspace, workspace),
@@ -1055,6 +1086,7 @@ function canRetryFreshReadiness(findings: SandboxRecoveryFinding[]): boolean {
       finding.path.startsWith('/workspace/.agents/workspace')
       || finding.path === '/home/devuser/.host-shell-config'
       || finding.path === '/home/devuser/.bash_aliases'
+      || finding.path === '/run/agent-infra/runtime'
     )
   );
 }

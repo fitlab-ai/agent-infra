@@ -22,6 +22,7 @@ function trackedTemporaryRoot(prefix: string): string {
 function fixture() {
   const root = trackedTemporaryRoot('codex-controller-project-');
   const codexHome = trackedTemporaryRoot('codex-controller-home-');
+  const runtimeDir = trackedTemporaryRoot('codex-controller-runtime-store-');
   fs.mkdirSync(path.join(root, '.codex', 'agents'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'hooks'), { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'run-task'), { recursive: true });
@@ -53,7 +54,7 @@ function fixture() {
   fs.writeFileSync(path.join(root, '.agents', 'skills', 'run-task', 'SKILL.md'), '# run\n');
   fs.writeFileSync(path.join(root, '.agents', 'rules', 'lifecycle-orchestration.md'), '# lifecycle\n');
   fs.writeFileSync(path.join(codexHome, 'auth.json'), '{"token":"secret"}\n', { mode: 0o600 });
-  return { root, codexHome };
+  return { root, codexHome, runtimeDir };
 }
 
 test('sandbox controller prepares an isolated allowlisted home and fixed launch flags', () => {
@@ -69,7 +70,8 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
       token: 'control-token',
       generation: 'generation',
       channelDir: '/control',
-      statusDir: '/status'
+      statusDir: '/status',
+      runtimeDir: f.runtimeDir
     },
     verifyTaskBinding: () => {},
     codexVersion: () => '0.147.0',
@@ -117,7 +119,7 @@ test('sandbox controller rejects symlinked credentials before launch', () => {
     repoRoot: f.root,
     codexHome: f.codexHome,
     temporaryRoot: trackedTemporaryRoot('codex-controller-runtime-'),
-    control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status' },
+    control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
     verifyTaskBinding: () => {},
     codexVersion: () => '0.147.0'
   }), /INPUT_INVALID/);
@@ -130,7 +132,7 @@ test('sandbox controller enforces a task lease and controller context binding', 
     repoRoot: f.root,
     codexHome: f.codexHome,
     temporaryRoot,
-    control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status' },
+    control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
     verifyTaskBinding: () => {},
     codexVersion: () => '0.147.0'
   } as const;

@@ -11,6 +11,7 @@ import type {
   CodexLifecycleEvent,
   CodexLifecycleState
 } from './evidence.ts';
+import { resolveAgentRuntimeStoreRoot } from '../../../runtime/agent-runtime.ts';
 
 type StoredCodexLifecycle = Readonly<{
   schemaVersion: 1;
@@ -105,7 +106,7 @@ function writeRecord(file: string, record: StoredCodexLifecycle, expectedRevisio
 }
 
 function createCodexLifecycleStore(options: CodexLifecycleStoreOptions) {
-  const root = options.root ?? path.join(process.cwd(), '.agents', 'workspace', '.runtime', 'codex-lifecycle');
+  const root = options.root ?? resolveAgentRuntimeStoreRoot({ store: 'lifecycle' });
   const now = options.now ?? (() => new Date().toISOString());
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   fs.chmodSync(root, 0o700);

@@ -236,6 +236,7 @@ function taskBoundRecoveryFixture(config: SandboxConfig, taskId: string): {
     { Type: "bind", Source: taskSource, Destination: `/workspace/.agents/workspace/active/${taskId}`, RW: true },
     { Type: "bind", Source: control.channelDir, Destination: "/run/agent-infra/control", RW: true },
     { Type: "bind", Source: control.statusDir, Destination: "/run/agent-infra/control-status", RW: false },
+    { Type: "bind", Source: control.runtimeDir, Destination: "/run/agent-infra/runtime", RW: true },
     { Type: "bind", Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
     { Type: "bind", Source: path.join(config.shareBase, "branches", branchDir), Destination: "/share/branch", RW: true },
     { Type: "bind", Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false },
@@ -425,6 +426,11 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
     Type: "bind",
     Source: taskSource,
     Destination: `/workspace/.agents/workspace/active/${taskId}`,
+    RW: true
+  }, {
+    Type: "bind",
+    Source: path.join(config.controlBase, config.project, "demo-dev-feature..demo", fs.readdirSync(path.join(config.controlBase, config.project, "demo-dev-feature..demo"))[0]!, "runtime"),
+    Destination: "/run/agent-infra/runtime",
     RW: true
   });
   let taskReadable = false;

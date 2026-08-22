@@ -57,7 +57,11 @@ export async function prepareSandboxControlExecution(params: {
       cwd: params.manifest.repoRoot,
       detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      env: { ...safeEnv(process.env), AGENT_INFRA_EXECUTOR_MANIFEST: params.manifestPath }
+      env: {
+        ...safeEnv(process.env),
+        AGENT_INFRA_EXECUTOR_MANIFEST: params.manifestPath,
+        AGENT_INFRA_RUNTIME_DIR: params.manifest.runtimeDir
+      }
     }
   );
   if (typeof child.pid !== 'number') throw new Error('SANDBOX_CONTROL_EXECUTOR_SPAWN_FAILED');
@@ -142,7 +146,11 @@ function executeRequest(manifest: SandboxControlManifest, request: SandboxContro
   const result = spawnSync(
     process.execPath,
     nodeEntryArgs(process.argv[1]!, [request.family, ...boundArgs]),
-    { cwd: manifest.repoRoot, encoding: 'utf8', env: safeEnv(process.env) }
+    {
+      cwd: manifest.repoRoot,
+      encoding: 'utf8',
+      env: { ...safeEnv(process.env), AGENT_INFRA_RUNTIME_DIR: manifest.runtimeDir }
+    }
   );
   return { exitCode: result.status ?? 1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
