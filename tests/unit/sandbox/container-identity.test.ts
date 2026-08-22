@@ -32,6 +32,10 @@ test('container identity treats authoritative not-found as absent', () => {
     state: 'absent',
     id: 'container-id'
   });
+  assert.deepEqual(classifySandboxContainerInspection(identity, { error: new Error('error: no such object: container-id') }), {
+    state: 'absent',
+    id: 'container-id'
+  });
 });
 
 test('container identity fails closed for same-name replacement and label drift', () => {

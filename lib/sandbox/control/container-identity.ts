@@ -14,7 +14,7 @@ export type ContainerInspection = Readonly<{
 
 function isAuthoritativeNotFound(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /(?:no such container|container .* not found|cannot find container)/i.test(message);
+  return /(?:no such (?:container|object)|container .* not found|cannot find container)/i.test(message);
 }
 
 export function classifySandboxContainerInspection(

@@ -1322,14 +1322,9 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
     : `Sandbox recovery failed in place. Replacing only the container. ${dataBoundary}`;
   warnings.push(warning);
   (params.writeWarning ?? ((message) => process.stderr.write(`${message}\n`)))(warning);
-  const runVerboseFn = deps?.runVerbose ?? runVerboseEngine;
   let replacementResult: SandboxReadyResult | null = null;
   let replacementFailure: unknown = null;
   try {
-    if (params.row.running) {
-      runVerboseFn(params.engine, 'docker', ['stop', params.row.name]);
-    }
-    runVerboseFn(params.engine, 'docker', ['rm', params.row.name]);
     await params.recreate(params.branch);
 
     const rows = (deps?.fetchRows ?? fetchSandboxRows)(
