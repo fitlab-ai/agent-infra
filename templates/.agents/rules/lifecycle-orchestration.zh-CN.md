@@ -5,7 +5,7 @@
 - 总控只路由和委派；阶段技能仍是业务规则与产物格式的单一事实源。
 - 每个阶段和每轮返工都创建 fresh executor；每轮审查创建 fresh reviewer，禁止 follow-up 复用。
 - reviewer 只能写当前审查产物和核心生成的任务元数据。业务代码、HEAD 或暂存区变化会使 receipt 失效。
-- active run 中只有一个 pending delegation。child 必须在任何阶段副作用前通过 activation barrier；缺失、超时、错配、fork、重放、hook 不可用或工作区漂移一律暂停（claude-code 路径下 model/effort 证据的缺失或错配、以及该宿主结构上不提供的 fork/spawn-mode 证据，按 HDR-2/HDR-11 的记录规则处理，不在此列；`parentId`/`childId` 的缺失或错配仍然暂停）。
+- active run 中只有一个 pending delegation。child 必须在任何阶段副作用前通过 activation barrier；缺失、超时、错配、fork、重放、hook 不可用或工作区漂移一律暂停（claude-code 路径下 model/effort 证据的缺失或错配、以及该宿主结构上不提供的 fork/spawn-mode 证据，按 `.agents/skills/run-task/reference/host-validation.md` 的记录规则处理，不在此列；`parentId`/`childId` 的缺失或错配仍然暂停）。
 - 首版成功终点是一次通过既有安全门禁的 `commit`；不创建 PR、不监控 checks、不执行 `complete-task`。
 
 ## 恢复语义
@@ -24,7 +24,7 @@
 - route 按 role 返回 requested model/effort，prepare 必须在工作区快照前精确匹配两者；原生 spawn 不能继承会话默认值。
 - 原生 start 必须记录宿主观察到的 actual model/effort。任一字段与 requested 不同时必须记录独立 fallback reason（claude-code 路径下允许留空，按记录规则处理）；requested 值不得补造 actual 证据。
 - 模型选择能力必须标记 complete catalog、partial catalog 或 interactive-only guidance；局部 override 枚举不得冒充完整目录。
-- claude-code 的 requested reasoning effort 暂不支持按角色下发（跨任务共享文件存在写入竞态，见 HDR-8）；`delegationEvidence.actualReasoningEffort` 声明为 `spawn-ack`，语义为"仅能在宿主原生 spawn 生命周期事件（Start/Stop）里如实观察到时记录，不构成按角色下发的承诺，也不构成放行门禁"。
+- claude-code 的 requested reasoning effort 暂不支持按角色下发（跨任务共享文件存在写入竞态）；`delegationEvidence.actualReasoningEffort` 声明为 `spawn-ack`，语义为"仅能在宿主原生 spawn 生命周期事件（Start/Stop）里如实观察到时记录，不构成按角色下发的承诺，也不构成放行门禁"。
 
 ## 稳定暂停条件
 
