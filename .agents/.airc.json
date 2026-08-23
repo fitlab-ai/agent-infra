@@ -6,7 +6,7 @@
     "type": "github"
   },
   "prFlow": "required",
-  "templateVersion": "v0.9.8-alpha.0",
+  "templateVersion": "v0.9.8",
   "sandbox": {
     "engine": {
       "darwin": "orbstack"
