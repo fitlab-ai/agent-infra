@@ -64,8 +64,24 @@ test(".agents/.airc.json declares default sandbox configuration", () => {
 
 test(".agents/.airc.json declares canonical Agent Client configuration", () => {
   assert.deepEqual(collaborator.agentClients, [
-    { id: "claude-code", enabled: true, installInSandbox: true },
-    { id: "codex", enabled: true, installInSandbox: true },
+    {
+      id: "claude-code",
+      enabled: true,
+      installInSandbox: true,
+      orchestration: {
+        executor: { model: "claude-sonnet-5", reasoningEffort: "high" },
+        reviewer: { model: "claude-opus-5", reasoningEffort: "medium" }
+      }
+    },
+    {
+      id: "codex",
+      enabled: true,
+      installInSandbox: true,
+      orchestration: {
+        executor: { model: "gpt-5.6-luna", reasoningEffort: "xhigh" },
+        reviewer: { model: "gpt-5.6-sol", reasoningEffort: "high" }
+      }
+    },
     { id: "antigravity-cli", enabled: true, installInSandbox: false },
     { id: "opencode", enabled: true, installInSandbox: true }
   ]);
