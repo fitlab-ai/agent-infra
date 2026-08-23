@@ -5,6 +5,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { quiesceSandboxControlRoot } from "../../../lib/sandbox/control/lifecycle.ts";
+import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
+
 import {
   cliArgs,
   envWithPrependedPath,
@@ -131,6 +134,21 @@ function spawnSandboxCli(
     stdio: ["ignore", "pipe", "pipe"],
     timeout: options.timeout ?? 15_000
   });
+}
+
+async function quiesceSandboxControlRootForCleanup(root: string): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await quiesceSandboxControlRoot(root);
+      return;
+    } catch (error) {
+      const retryable = error instanceof Error
+        && error.message === "SANDBOX_CONTROL_OWNER_UNAVAILABLE"
+        && attempt < 2;
+      if (!retryable) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
 }
 
 function withInternalCliOnPath<T>(binDir: string, action: () => T): T {
@@ -573,11 +591,17 @@ test("sandbox create keeps a clean runtime-only workspace and does not mount the
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
-test("task-bound sandbox create keeps Git clean and exposes only the scoped writable task", onPlatforms("linux", "darwin", "win32"), () => {
+test("task-bound sandbox create keeps Git clean and exposes only the scoped writable task", onPlatforms("linux", "darwin", "win32"), async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-sandbox-create-task-bound-"));
   const taskId = "TASK-20260301-000001";
   const siblingTaskId = "TASK-20260301-000002";
   const branch = "registry-branch";
+  const controlRoot = sandboxControlPaths({
+    base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+    project: "demo",
+    container: `demo-dev-${branch}`,
+    identity: { mode: "task-bound", taskId, shortId: "1" }
+  }).root;
 
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
@@ -638,7 +662,8 @@ test("task-bound sandbox create keeps Git clean and exposes only the scoped writ
       { version: 1, ids: { "1": taskId } }
     );
   } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    await quiesceSandboxControlRootForCleanup(controlRoot);
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
 });
 
