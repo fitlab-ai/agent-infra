@@ -22,12 +22,12 @@ function result(status: number, stdout = '', stderr = '') {
 
 const recordingInputs = [
   'assets/demo-init.tape', 'scripts/demo-regen.sh', 'scripts/normalize-gif-duration.py',
-  'bin/cli.ts', 'lib/init.ts', 'lib/log.ts', 'lib/prompt.ts', 'lib/paths.ts',
+  'bin/cli.ts', 'lib/log.ts', 'lib/prompt.ts', 'lib/paths.ts',
   'lib/render.ts', 'lib/builtin-tuis.ts', 'lib/sandbox/engines/index.ts'
 ];
 
 const unrelatedInputs = [
-  'src/sync-templates.js', 'templates/AGENTS.md'
+  'lib/init.ts', 'src/sync-templates.js', 'templates/AGENTS.md'
 ];
 
 function fixture() {
@@ -205,7 +205,7 @@ test('demo input digest is stable and changes for canonical UX inputs', () => {
   }
 });
 
-test('template and sync implementation changes do not invalidate the demo recording', () => {
+test('non-visual init, template, and sync changes do not invalidate the demo recording', () => {
   const root = fixture();
   try {
     const initial = computeDemoInputDigest(root);

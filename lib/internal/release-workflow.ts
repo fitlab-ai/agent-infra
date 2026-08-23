@@ -25,12 +25,13 @@ type DemoResult = {
   outputPath: string | null;
 };
 
+// The tape is the canonical init interaction contract. Do not hash all of
+// lib/init.ts: non-visual config serialization changes must not re-record it.
 const DEMO_INPUT_PATHS = [
   'assets/demo-init.tape',
   'scripts/demo-regen.sh',
   'scripts/normalize-gif-duration.py',
   'bin/cli.ts',
-  'lib/init.ts',
   'lib/log.ts',
   'lib/prompt.ts',
   'lib/paths.ts',
