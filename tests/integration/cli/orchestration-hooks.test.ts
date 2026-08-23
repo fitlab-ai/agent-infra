@@ -22,6 +22,11 @@ interface RunOptions {
   hook?: string;
 }
 
+interface HookFixtureOptions {
+  pathCli?: boolean;
+  pathSource?: 'path' | 'controller-path';
+}
+
 type LocalCliState = 'missing' | 'working' | 'broken' | 'source-with-stale-dist';
 
 function run(input: string, options: RunOptions = {}) {
@@ -33,19 +38,22 @@ function run(input: string, options: RunOptions = {}) {
     hook = HOOK
   } = options;
   const args = [hook, '--client', client, ...(event ? ['--event', event] : [])];
-  return spawnSync('node', args, { cwd, input, encoding: 'utf8', env });
+  return spawnSync(process.execPath, args, { cwd, input, encoding: 'utf8', env });
 }
 
-function createHookFixture(localCliState: LocalCliState) {
+function createHookFixture(localCliState: LocalCliState, options: HookFixtureOptions = {}) {
+  const { pathCli: pathCliEnabled = true, pathSource = 'path' } = options;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lifecycle-hook-'));
   fixtureRoots.add(root);
   const repoDir = path.join(root, 'repo');
   const hook = path.join(repoDir, '.agents', 'hooks', 'lifecycle-delegation.js');
   const cwd = path.join(repoDir, 'nested');
   const binDir = path.join(root, 'bin');
-  const pathCli = path.join(root, 'path-internal-cli.mjs');
+  const emptyBinDir = path.join(root, 'empty-bin');
+  const pathCliScript = path.join(root, 'path-internal-cli.mjs');
   fs.mkdirSync(path.dirname(hook), { recursive: true });
   fs.mkdirSync(cwd, { recursive: true });
+  fs.mkdirSync(emptyBinDir, { recursive: true });
   fs.copyFileSync(HOOK, hook);
   fs.writeFileSync(
     path.join(repoDir, 'package.json'),
@@ -54,8 +62,10 @@ function createHookFixture(localCliState: LocalCliState) {
       ...(localCliState === 'source-with-stale-dist' ? { name: '@fitlab-ai/agent-infra' } : {})
     })
   );
-  fs.writeFileSync(pathCli, "let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',c=>input+=c); process.stdin.on('end',()=>process.stdout.write(JSON.stringify({ source: 'path', args: process.argv.slice(2), ...(input ? { input: JSON.parse(input) } : {}) })))\n");
-  writeNodeCommandShim(path.join(binDir, 'agent-infra-internal'), pathCli);
+  if (pathCliEnabled) {
+    fs.writeFileSync(pathCliScript, `let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',c=>input+=c); process.stdin.on('end',()=>process.stdout.write(JSON.stringify({ source: '${pathSource}', args: process.argv.slice(2), ...(input ? { input: JSON.parse(input) } : {}) })))\n`);
+    writeNodeCommandShim(path.join(binDir, 'agent-infra-internal'), pathCliScript);
+  }
 
   if (localCliState !== 'missing') {
     const localCli = path.join(repoDir, 'dist', 'bin', 'internal-cli.js');
@@ -75,7 +85,13 @@ function createHookFixture(localCliState: LocalCliState) {
   fs.mkdirSync(path.join(repoDir, '.codex'), { recursive: true });
   fs.copyFileSync(path.resolve('.codex/hooks.json'), path.join(repoDir, '.codex', 'hooks.json'));
 
-  return { cwd, env: envWithPrependedPath(process.env, binDir), hook };
+  return {
+    cwd,
+    env: pathCliEnabled
+      ? envWithPrependedPath(process.env, binDir)
+      : { ...process.env, PATH: emptyBinDir },
+    hook
+  };
 }
 
 test('lifecycle hook ignores unrelated subagents without touching orchestration state', () => {
@@ -124,7 +140,7 @@ test('lifecycle hook falls back to PATH and maps native Claude payloads', () => 
   });
 });
 
-test('lifecycle hook prefers the repository-local CLI independently of cwd', () => {
+test('lifecycle hook uses the PATH CLI independently of cwd', () => {
   const fixture = createHookFixture('working');
 
   const start = run(
@@ -132,7 +148,7 @@ test('lifecycle hook prefers the repository-local CLI independently of cwd', () 
     fixture
   );
   assert.equal(start.status, 0, start.stderr);
-  assert.equal(JSON.parse(start.stdout).source, 'local');
+  assert.equal(JSON.parse(start.stdout).source, 'path');
 
   const stop = run(
     fs.readFileSync(path.join(FIXTURES, 'claude-subagent-stop.json'), 'utf8'),
@@ -140,7 +156,7 @@ test('lifecycle hook prefers the repository-local CLI independently of cwd', () 
   );
   assert.equal(stop.status, 0, stop.stderr);
   assert.deepEqual(JSON.parse(stop.stdout), {
-    source: 'local',
+    source: 'path',
     args: [
       'task-orchestration', 'auto', 'hook-stop',
       '--client', 'claude-code',
@@ -180,7 +196,7 @@ test('lifecycle hook forwards real-shaped stop-side model and effort evidence (n
 
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
-    source: 'local',
+    source: 'path',
     args: [
       'task-orchestration', 'auto', 'hook-stop',
       '--client', 'claude-code',
@@ -192,19 +208,18 @@ test('lifecycle hook forwards real-shaped stop-side model and effort evidence (n
   });
 });
 
-test('lifecycle hook fails closed when the repository-local CLI fails', () => {
+test('lifecycle hook uses PATH when the repository-local CLI fails', () => {
   const fixture = createHookFixture('broken');
 
   const result = run(
     fs.readFileSync(path.join(FIXTURES, 'claude-subagent-start.json'), 'utf8'),
     fixture
   );
-  assert.equal(result.status, 23);
-  assert.equal(result.stdout, '');
-  assert.equal(result.stderr, 'Local lifecycle CLI failed\n');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).source, 'path');
 });
 
-test('lifecycle hook prefers checkout source over a stale dist CLI', () => {
+test('lifecycle hook uses PATH when checkout source and stale dist coexist', () => {
   const fixture = createHookFixture('source-with-stale-dist');
 
   const result = run(
@@ -213,7 +228,7 @@ test('lifecycle hook prefers checkout source over a stale dist CLI', () => {
   );
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(JSON.parse(result.stdout).source, 'source');
+  assert.equal(JSON.parse(result.stdout).source, 'path');
 });
 
 test('lifecycle hook rejects malformed payloads before invoking core', () => {
@@ -258,6 +273,28 @@ test('lifecycle hook normalizes Codex spawn and child events through stdin', () 
   assert.equal(childParsed.input.sessionId, 'codex-parent');
   assert.equal(childParsed.input.turnId, 'codex-child-turn');
   assert.equal(childParsed.input.childThreadId, 'codex-child');
+});
+
+test('Codex lifecycle hook uses the controller PATH shim when local source and dist coexist', () => {
+  const fixture = createHookFixture('source-with-stale-dist', { pathSource: 'controller-path' });
+  const result = run(
+    fs.readFileSync(path.join(FIXTURES, 'codex-lifecycle-start.json'), 'utf8'),
+    { ...fixture, client: 'codex', event: 'pre-tool', hook: fixture.hook }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.source, 'controller-path');
+  assert.deepEqual(parsed.args, ['codex-lifecycle', 'hook-event', '--event', 'pre-tool', '--bridge', 'true']);
+});
+
+test('lifecycle hook fails closed when PATH has no internal CLI', () => {
+  const fixture = createHookFixture('source-with-stale-dist', { pathCli: false });
+  const result = run(
+    fs.readFileSync(path.join(FIXTURES, 'claude-subagent-start.json'), 'utf8'),
+    fixture
+  );
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
 });
 
 test('lifecycle hook forwards completed Codex waits and ignores timed out waits', () => {

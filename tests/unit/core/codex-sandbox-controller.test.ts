@@ -91,8 +91,13 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
   assert.equal(prepared.env.HOME, prepared.home);
   assert.equal(prepared.env.UNRELATED_CONTROLLER_SECRET, undefined);
   assert.equal(prepared.env.AGENT_INFRA_CONTROL_TOKEN, 'control-token');
-  assert.match(fs.readFileSync(path.join(prepared.home, 'bin', 'agent-infra-internal'), 'utf8'), /"\$@"/u);
-  assert.doesNotMatch(fs.readFileSync(path.join(prepared.home, 'bin', 'agent-infra-internal'), 'utf8'), /"\\\$@"/u);
+  assert.equal(prepared.env.PATH?.split(path.delimiter)[0], path.join(prepared.home, 'bin'));
+  const shim = fs.readFileSync(path.join(prepared.home, 'bin', 'agent-infra-internal'), 'utf8');
+  const expectedExecutable = path.resolve(process.argv[1] ?? path.join(f.root, 'bin', 'internal-cli.ts'));
+  assert.equal(shim.includes(expectedExecutable), true);
+  if (expectedExecutable.endsWith('.ts')) assert.match(shim, /--experimental-strip-types/u);
+  assert.match(shim, /"\$@"/u);
+  assert.doesNotMatch(shim, /"\\\$@"/u);
   const homeStat = fs.lstatSync(prepared.home);
   const authStat = fs.lstatSync(path.join(prepared.home, 'auth.json'));
   assert.equal(homeStat.isDirectory(), true);
