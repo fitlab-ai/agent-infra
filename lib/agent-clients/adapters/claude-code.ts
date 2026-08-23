@@ -16,7 +16,7 @@ const claudeCodeAdapter = defineAgentClientAdapter({
     commands: { level: 'integrated' },
     hooks: { level: 'integrated' },
     subagents: { level: 'experimental' },
-    orchestration: { level: 'unsupported' },
+    orchestration: { level: 'experimental' },
     sandbox: { level: 'integrated' },
     verification: { level: 'compatible' }
   },
@@ -26,8 +26,8 @@ const claudeCodeAdapter = defineAgentClientAdapter({
     guidance: 'Use the host model picker for the complete model and reasoning-effort catalog.'
   },
   delegationEvidence: {
-    actualModel: 'unavailable',
-    actualReasoningEffort: 'unavailable'
+    actualModel: 'host-event',
+    actualReasoningEffort: 'spawn-ack'
   },
   project: {
     ownedPathPrefixes: ['.claude/'],

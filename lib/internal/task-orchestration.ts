@@ -247,12 +247,12 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
   } else if (intent === 'hook-start') {
     const missing = requireValues([
       ...(taskRef === 'auto' ? ['--client'] : []),
-      '--native-agent', '--child-id', '--parent-id', '--spawn-mode'
+      '--native-agent', '--child-id', '--parent-id'
     ]);
     if (missing) { usageFailure(`intent 'hook-start' requires '${missing}'`); return; }
     const event = {
       nativeAgent: values['--native-agent']!, childId: values['--child-id']!,
-      parentId: values['--parent-id']!, spawnMode: values['--spawn-mode']!,
+      parentId: values['--parent-id']!, spawnMode: values['--spawn-mode'],
       actualModel: values['--actual-model'],
       actualReasoningEffort: values['--actual-reasoning-effort'],
       modelFallbackReason: values['--model-fallback-reason'],
@@ -266,7 +266,11 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
       const missing = requireValues(['--client', '--native-agent', '--child-id']);
       if (missing) { usageFailure(`intent 'hook-stop' requires '${missing}'`); return; }
       result = sealMatchingOrchestrationDelegation(values['--client'] as AgentClientId, {
-        nativeAgent: values['--native-agent']!, childId: values['--child-id']!
+        nativeAgent: values['--native-agent']!, childId: values['--child-id']!,
+        actualModel: values['--actual-model'],
+        actualReasoningEffort: values['--actual-reasoning-effort'],
+        modelFallbackReason: values['--model-fallback-reason'],
+        reasoningEffortFallbackReason: values['--reasoning-effort-fallback-reason']
       }, coreOptions);
     } else {
       const missing = requireValues(['--child-id', '--exit-code', '--after-fingerprint']);
@@ -276,7 +280,11 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
       result = sealOrchestrationDelegation(taskRef!, {
         childId: values['--child-id']!, exitCode,
         afterFingerprint: values['--after-fingerprint']!,
-        changedPaths: values['--changed-paths'] ? values['--changed-paths']!.split(',').filter(Boolean) : []
+        changedPaths: values['--changed-paths'] ? values['--changed-paths']!.split(',').filter(Boolean) : [],
+        actualModel: values['--actual-model'],
+        actualReasoningEffort: values['--actual-reasoning-effort'],
+        modelFallbackReason: values['--model-fallback-reason'],
+        reasoningEffortFallbackReason: values['--reasoning-effort-fallback-reason']
       }, coreOptions);
     }
   } else if (intent === 'advance') {

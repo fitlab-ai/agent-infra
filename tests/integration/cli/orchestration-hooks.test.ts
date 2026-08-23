@@ -104,8 +104,7 @@ test('lifecycle hook falls back to PATH and maps native Claude payloads', () => 
       '--client', 'claude-code',
       '--native-agent', 'agent-infra-lifecycle-reviewer',
       '--child-id', 'claude-child',
-      '--parent-id', 'claude-parent',
-      '--spawn-mode', 'fresh'
+      '--parent-id', 'claude-parent'
     ]
   });
 
@@ -155,7 +154,7 @@ test('lifecycle hook forwards exact host-observed model and effort evidence', ()
   const fixture = createHookFixture('working');
   const payload = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'claude-subagent-start.json'), 'utf8'));
   payload.model = 'host-model-v2';
-  payload.reasoning_effort = 'high';
+  payload.effort = { level: 'high' };
   payload.model_fallback_reason = 'requested model was temporarily unavailable';
   payload.reasoning_effort_fallback_reason = 'requested effort was unavailable';
 
@@ -169,6 +168,28 @@ test('lifecycle hook forwards exact host-observed model and effort evidence', ()
     '--model-fallback-reason', 'requested model was temporarily unavailable',
     '--reasoning-effort-fallback-reason', 'requested effort was unavailable'
   ]);
+});
+
+test('lifecycle hook forwards real-shaped stop-side model and effort evidence (no spawn-mode required)', () => {
+  const fixture = createHookFixture('working');
+  const payload = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'claude-subagent-stop.json'), 'utf8'));
+  payload.model = 'host-model-v2';
+  payload.effort = { level: 'high' };
+
+  const result = run(JSON.stringify(payload), fixture);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    source: 'local',
+    args: [
+      'task-orchestration', 'auto', 'hook-stop',
+      '--client', 'claude-code',
+      '--native-agent', 'agent-infra-lifecycle-reviewer',
+      '--child-id', 'claude-child',
+      '--actual-model', 'host-model-v2',
+      '--actual-reasoning-effort', 'high'
+    ]
+  });
 });
 
 test('lifecycle hook fails closed when the repository-local CLI fails', () => {

@@ -100,6 +100,11 @@ function fail(code: string, message: string): ReceiptFailure {
   return { ok: false, code, message };
 }
 
+// 空白串折叠为 null，保持"缺失即 null"的单一表示（Start/Stop 两处共用，避免任一入口把 "   " 当成已观察到的值入账）
+function foldBlankToNull(value: string | undefined): string | null {
+  return value?.trim() ? value : null;
+}
+
 function prepareDelegation(
   input: Omit<DelegationReceipt, 'id' | 'requestedModel' | 'requestedReasoningEffort' | 'actualModel' | 'actualReasoningEffort' | 'modelFallbackReason' | 'reasoningEffortFallbackReason' | 'parentId' | 'childId' | 'spawnMode' | 'agent' | 'status' | 'hostEvidence' | 'afterFingerprint' | 'changedPaths' | 'createdAt' | 'preparedMonotonicMs' | 'spawnDispatchMonotonicMs' | 'activationDeadlineMonotonicMs' | 'spawnDispatchedAt' | 'activationDeadlineAt' | 'startEvidenceMonotonicMs' | 'activatedMonotonicMs' | 'activatedAt' | 'sealedAt' | 'consumedAt'> & Readonly<{ requestedModel: string; requestedReasoningEffort: string }>,
   options: { id?: () => string; now?: () => string; monotonicNow?: () => number } = {}
@@ -162,7 +167,7 @@ function activateDelegation(
     nativeAgent: string;
     childId: string;
     parentId: string;
-    spawnMode: string;
+    spawnMode?: string;
     actualModel?: string;
     actualReasoningEffort?: string;
     modelFallbackReason?: string;
@@ -211,32 +216,46 @@ function activateDelegation(
   if (!event.parentId || (receipt.parentId !== null && event.parentId !== receipt.parentId) || !event.childId || event.childId === event.parentId) {
     return fail('DELEGATION_IDENTITY_INVALID', 'native parent/child identity does not match the prepared delegation');
   }
-  if (event.spawnMode !== 'fresh') return fail('DELEGATION_FORK_FORBIDDEN', `spawn mode '${event.spawnMode}' is not fresh`);
-  const actualModel = event.actualModel;
-  if (!actualModel || actualModel.trim() !== actualModel) {
-    return fail('DELEGATION_MODEL_IDENTITY_MISSING', 'native start event must provide a non-empty actual model identity');
+  // spawnMode 的必需性按 client 判断：claude-code 宿主结构上不提供该字段，跳过；其余 client 维持硬校验
+  if (receipt.client !== 'claude-code' && event.spawnMode !== 'fresh') {
+    return fail('DELEGATION_FORK_FORBIDDEN', `spawn mode '${event.spawnMode}' is not fresh`);
   }
-  if (actualModel !== receipt.requestedModel && (!event.modelFallbackReason || event.modelFallbackReason.trim() === '')) {
-    return fail('DELEGATION_MODEL_FALLBACK_UNRECORDED', 'actual model differs from requested model without a fallback reason');
+  // model/effort 维度：claude-code 如实记录、不做门禁；其余 client 维持现状硬校验（HDR-2）
+  const actualModel = foldBlankToNull(event.actualModel);
+  const actualReasoningEffort = foldBlankToNull(event.actualReasoningEffort);
+  if (receipt.client !== 'claude-code') {
+    if (!actualModel || actualModel.trim() !== actualModel) {
+      return fail('DELEGATION_MODEL_IDENTITY_MISSING', 'native start event must provide a non-empty actual model identity');
+    }
   }
-  const actualReasoningEffort = event.actualReasoningEffort;
-  if (!actualReasoningEffort || actualReasoningEffort.trim() !== actualReasoningEffort) {
-    return fail('DELEGATION_REASONING_EFFORT_MISSING', 'native start event must provide a non-empty actual reasoning effort');
+  if (actualModel !== null && actualModel !== receipt.requestedModel) {
+    if (receipt.client !== 'claude-code' && (!event.modelFallbackReason || event.modelFallbackReason.trim() === '')) {
+      return fail('DELEGATION_MODEL_FALLBACK_UNRECORDED', 'actual model differs from requested model without a fallback reason');
+    }
+  }
+  if (receipt.client !== 'claude-code') {
+    if (!actualReasoningEffort || actualReasoningEffort.trim() !== actualReasoningEffort) {
+      return fail('DELEGATION_REASONING_EFFORT_MISSING', 'native start event must provide a non-empty actual reasoning effort');
+    }
   }
   if (
     receipt.client === 'codex'
     && event.hostEvidence?.kind !== 'codex-lifecycle-v2'
   ) return fail('DELEGATION_HOST_EVIDENCE_REQUIRED', 'Codex activation requires trusted lifecycle-v2 host evidence');
-  if (
-    actualReasoningEffort !== receipt.requestedReasoningEffort
-    && (!event.reasoningEffortFallbackReason || event.reasoningEffortFallbackReason.trim() === '')
-  ) {
-    return fail('DELEGATION_REASONING_EFFORT_FALLBACK_UNRECORDED', 'actual reasoning effort differs from requested effort without a fallback reason');
+  if (actualReasoningEffort !== null && actualReasoningEffort !== receipt.requestedReasoningEffort) {
+    if (receipt.client !== 'claude-code' && (!event.reasoningEffortFallbackReason || event.reasoningEffortFallbackReason.trim() === '')) {
+      return fail('DELEGATION_REASONING_EFFORT_FALLBACK_UNRECORDED', 'actual reasoning effort differs from requested effort without a fallback reason');
+    }
   }
-  if (actualModel === receipt.requestedModel && event.modelFallbackReason) {
+  // "无关 fallback 理由"检查对所有 client 保持不变——防止编造理由的红线，不属于 HDR-2 放宽范围
+  // actualModel/actualReasoningEffort 为 null（未观察到）时同样没有"实际不同"这回事，理由一样是无关的
+  if ((actualModel === null || actualModel === receipt.requestedModel) && event.modelFallbackReason) {
     return fail('DELEGATION_MODEL_FALLBACK_INVALID', 'model fallback reason is only valid when actual model differs');
   }
-  if (actualReasoningEffort === receipt.requestedReasoningEffort && event.reasoningEffortFallbackReason) {
+  if (
+    (actualReasoningEffort === null || actualReasoningEffort === receipt.requestedReasoningEffort)
+    && event.reasoningEffortFallbackReason
+  ) {
     return fail('DELEGATION_REASONING_EFFORT_FALLBACK_INVALID', 'reasoning-effort fallback reason is only valid when actual effort differs');
   }
   if (
@@ -280,7 +299,7 @@ function activateDelegation(
     status: 'activated',
     parentId: event.parentId,
     childId: event.childId,
-    spawnMode: event.spawnMode,
+    spawnMode: event.spawnMode ?? null,
     actualModel,
     actualReasoningEffort,
     modelFallbackReason: event.modelFallbackReason ?? null,
@@ -328,6 +347,10 @@ function sealDelegation(
     exitCode: number;
     afterFingerprint: string;
     changedPaths: readonly string[];
+    actualModel?: string;
+    actualReasoningEffort?: string;
+    modelFallbackReason?: string;
+    reasoningEffortFallbackReason?: string;
     hostEvidence?: Readonly<{ stopRevision: number; consumer: string; consumedAt: string }>;
   }>,
   options: { now?: () => string; requireHostEvidence?: boolean } = {}
@@ -361,6 +384,10 @@ function sealDelegation(
     status: 'sealed',
     afterFingerprint: event.afterFingerprint,
     changedPaths: Object.freeze([...event.changedPaths]),
+    actualModel: receipt.actualModel ?? foldBlankToNull(event.actualModel),
+    actualReasoningEffort: receipt.actualReasoningEffort ?? foldBlankToNull(event.actualReasoningEffort),
+    modelFallbackReason: receipt.modelFallbackReason ?? event.modelFallbackReason ?? null,
+    reasoningEffortFallbackReason: receipt.reasoningEffortFallbackReason ?? event.reasoningEffortFallbackReason ?? null,
     hostEvidence: event.hostEvidence && receipt.hostEvidence ? Object.freeze({
       ...receipt.hostEvidence,
       ...event.hostEvidence
@@ -385,6 +412,7 @@ export {
   completeDelegationStage,
   consumeDelegation,
   dispatchDelegation,
+  foldBlankToNull,
   managedDelegationRole,
   prepareDelegation,
   sealDelegation

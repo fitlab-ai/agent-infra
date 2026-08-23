@@ -147,11 +147,11 @@ process.stdin.on('end', () => {
     args.push(
       '--native-agent', String(nativeAgent),
       '--child-id', String(event.child_id || event.agent_id || event.thread_id || ''),
-      '--parent-id', String(event.parent_id || event.parent_session_id || event.session_id || ''),
-      '--spawn-mode', String(event.spawn_mode || (client === 'claude-code' ? 'fresh' : ''))
+      '--parent-id', String(event.parent_id || event.parent_session_id || event.session_id || '')
     );
+    if (event.spawn_mode) args.push('--spawn-mode', String(event.spawn_mode));
     if (event.model) args.push('--actual-model', String(event.model));
-    const actualEffort = event.actual_reasoning_effort || event.reasoning_effort || event.model_reasoning_effort;
+    const actualEffort = event.effort?.level || event.actual_reasoning_effort || event.reasoning_effort || event.model_reasoning_effort;
     if (actualEffort) args.push('--actual-reasoning-effort', String(actualEffort));
     if (event.model_fallback_reason) args.push('--model-fallback-reason', String(event.model_fallback_reason));
     if (event.reasoning_effort_fallback_reason) {
@@ -162,6 +162,11 @@ process.stdin.on('end', () => {
       '--native-agent', String(nativeAgent),
       '--child-id', String(event.child_id || event.agent_id || event.thread_id || '')
     );
+    if (client === 'claude-code') {
+      if (event.model) args.push('--actual-model', String(event.model));
+      const actualEffort = event.effort?.level || event.actual_reasoning_effort || event.reasoning_effort;
+      if (actualEffort) args.push('--actual-reasoning-effort', String(actualEffort));
+    }
   }
   try {
     const { command, commandArgs, shell } = internalCliInvocation(args);
