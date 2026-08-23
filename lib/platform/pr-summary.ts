@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 
 import { enumerateArtifacts } from '../task/artifacts.ts';
 import { parseTaskFrontmatter } from '../task/frontmatter.ts';
+import { renderHumanOverrideAudit } from '../task/human-override.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { resolvePlatformContext } from './context.ts';
 import { createGitHubClient } from './github-client.ts';
@@ -21,8 +22,9 @@ function summaryMarker(taskId: string): string {
   return `<!-- sync-pr:${taskId}:summary -->`;
 }
 
-function buildPullRequestSummary(taskId: string, body: string, headSha: string): string {
-  return normalizeCommentContent(`${summaryMarker(taskId)}\n<!-- last-commit: ${headSha} -->\n\n${body.replace(/\s+$/, '')}\n`);
+function buildPullRequestSummary(taskId: string, body: string, headSha: string, humanOverrideAudit = ''): string {
+  const sections = [body.replace(/\s+$/, ''), humanOverrideAudit.trim()].filter(Boolean).join('\n\n');
+  return normalizeCommentContent(`${summaryMarker(taskId)}\n<!-- last-commit: ${headSha} -->\n\n${sections}\n`);
 }
 
 function reconcileSummaryComment(comments: SummaryComment[], taskId: string, desired: string):
@@ -74,7 +76,12 @@ function syncPullRequestSummary(taskRef: string, options: { agent: string; body:
   } catch (error) {
     return platformResult('failed', { platform: context.platform, capabilities: context.capabilities, error: { code: 'GIT_HEAD_UNRESOLVED', message: error instanceof Error ? error.message : String(error), retryable: false } });
   }
-  const desired = buildPullRequestSummary(resolved.taskId, options.body, headSha);
+  const desired = buildPullRequestSummary(
+    resolved.taskId,
+    options.body,
+    headSha,
+    renderHumanOverrideAudit(fs.readFileSync(resolved.taskMdPath, 'utf8'))
+  );
   const listed = listRemoteComments(client, context.platform.repository, prNumber, resolved.repoRoot);
   if (!listed.ok) return platformResult(listed.error.retryable ? 'blocked' : 'failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: listed.error });
   const reconciliation = reconcileSummaryComment(listed.value, resolved.taskId, desired);

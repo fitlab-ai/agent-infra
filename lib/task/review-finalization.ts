@@ -11,6 +11,8 @@ import { resolveTaskRef } from './resolve-ref.ts';
 import { validateLifecycleExecution } from './lifecycle-execution.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import type { ResolveTaskRefErrorCode } from './resolve-ref.ts';
+import { allowsManualOverride } from './guard-override.ts';
+import type { ManualOverrideCapability } from './guard-override.ts';
 
 type ReviewFinalizationErrorCode =
   | ResolveTaskRefErrorCode
@@ -62,6 +64,8 @@ type ReviewFinalizationOptions = {
   repoRoot?: string;
   randomSuffix?: () => string;
   fileSystem?: Partial<ReviewFileSystem>;
+  manualOverride?: ManualOverrideCapability;
+  lockAlreadyHeld?: boolean;
 };
 
 const STAGES: Record<ReviewStage, { family: 'review-analysis' | 'review-plan' | 'review-code'; action: string }> = {
@@ -127,7 +131,7 @@ function finalizeReviewSummaryUnlocked(
   }
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(request, resolved.code, resolved.message, resolved.taskId);
-  if (resolved.state !== 'active') {
+  if (resolved.state !== 'active' && !allowsManualOverride(options.manualOverride, 'review-finalization', 'TASK_STATE_MISMATCH')) {
     return failed(request, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
   }
   const parsedArtifact = parseArtifactName(request.artifact);
@@ -275,7 +279,7 @@ function finalizeReviewSummary(
   request: ReviewFinalizationRequest,
   options: ReviewFinalizationOptions = {}
 ): ReviewFinalizationResult {
-  if (request.dryRun) return finalizeReviewSummaryUnlocked(request, options);
+  if (request.dryRun || options.lockAlreadyHeld) return finalizeReviewSummaryUnlocked(request, options);
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return finalizeReviewSummaryUnlocked(request, options);
   try {

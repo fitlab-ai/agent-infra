@@ -139,6 +139,11 @@ if (
     taskLifecycle(process.argv.slice(3));
     break;
   }
+  case 'task-override': {
+    const { taskOverride } = await import('../lib/internal/task-override.ts');
+    taskOverride(process.argv.slice(3));
+    break;
+  }
   case 'task-short-id': {
     const { taskShortId } = await import('../lib/internal/task-short-id.ts');
     taskShortId(process.argv.slice(3));

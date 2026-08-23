@@ -14,6 +14,7 @@ import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-
 import type { TaskExecutionLockOptions } from './task-execution-lock.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskMutation, TaskOperationSummary, TaskWriteOptions } from './write.ts';
+import { allowsManualOverride } from './guard-override.ts';
 
 type PrReviewVerdict = 'approved' | 'changes-requested' | 'commented';
 type PrReviewOutcome = 'aborted' | 'superseded';
@@ -95,7 +96,7 @@ export type PrReviewInspectionResult = {
   error: { code: string; message: string } | null;
 };
 
-type ActivityIntentOptions = TaskWriteOptions & { lockOptions?: TaskExecutionLockOptions };
+type ActivityIntentOptions = TaskWriteOptions & { lockOptions?: TaskExecutionLockOptions; lockAlreadyHeld?: boolean };
 type ArtifactRecord = { identity: ArtifactIdentity; head: string; status: PrReviewArtifactStatus };
 type RoundState = ArtifactRecord & {
   startedAgent: string | null;
@@ -397,9 +398,10 @@ export function applyPrReviewActivityIntent(intent: PrReviewActivityIntent, opti
   if ('code' in validated) return failed(intent, validated.code, validated.message);
   const resolved = resolveTaskRef(intent.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(intent, resolved.code, resolved.message, resolved.taskId);
-  if (resolved.state !== 'active') {
+  if (resolved.state !== 'active' && !allowsManualOverride(options.manualOverride, 'activity-intent', 'TASK_STATE_MISMATCH')) {
     return failed(intent, 'TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
   }
+  if (options.lockAlreadyHeld) return applyLocked(intent, validated.agent, { ...options, repoRoot: resolved.repoRoot });
   try {
     return withTaskExecutionLock(
       resolved.repoRoot,

@@ -32,6 +32,7 @@ import type { OrchestrationStageCompletion } from './orchestration.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskOperationSummary, TaskWriteErrorCode, TaskWriteOptions } from './write.ts';
+import { allowsManualOverride } from './guard-override.ts';
 
 const eventCatalog = [
   'analyze.started', 'analyze.awaiting-input', 'analyze.completed',
@@ -53,6 +54,7 @@ type TaskEventErrorCode =
   | ArtifactErrorCode | TaskWriteErrorCode;
 type TaskEventRequest = {
   taskRef: string; event: TaskEventName | string; agent: string; dryRun?: boolean; orchestrated?: boolean;
+  overrideTicket?: string; overrideTarget?: string; overrideScope?: string;
   round?: number; question?: number; artifact?: string; fixFor?: string; implementationInput?: string;
   verdict?: Verdict; blockers?: number; major?: number; minor?: number;
   manualValidation?: number; filesModified?: number; testsPassed?: number;
@@ -61,6 +63,7 @@ type TaskEventRequest = {
 type TaskEventError = { code: TaskEventErrorCode; message: string };
 type TaskEventOptions = TaskWriteOptions & {
   commitOrchestrationCompletion?: (plan: OrchestrationStageCompletion) => void;
+  lockAlreadyHeld?: boolean;
 };
 type TaskEventResult = {
   status: 'planned' | 'applied' | 'no-op' | 'failed'; changed: boolean;
@@ -73,7 +76,7 @@ type TaskEventResult = {
   operations: readonly TaskOperationSummary[]; error: TaskEventError | null;
 };
 
-const BASE_FIELDS = new Set(['taskRef', 'event', 'agent', 'dryRun']);
+const BASE_FIELDS = new Set(['taskRef', 'event', 'agent', 'dryRun', 'overrideTicket', 'overrideTarget', 'overrideScope']);
 const SCHEMAS: Record<TaskEventName, { required?: string[]; optional?: string[] }> = {
   'analyze.started': { optional: ['round'] },
   'analyze.awaiting-input': { required: ['question'] },
@@ -357,7 +360,8 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   if (invalid) return failed(request, invalid);
   const resolved = resolveTaskRef(request.taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(request, { code: resolved.code, message: resolved.message }, { taskId: resolved.taskId });
-  if (resolved.state !== 'active') return failed(request, { code: 'TASK_STATE_MISMATCH', message: `task ${resolved.taskId} is ${resolved.state}, expected active` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
+  const stateOverride = allowsManualOverride(options.manualOverride, 'task-event', 'TASK_STATE_MISMATCH');
+  if (resolved.state !== 'active' && !stateOverride) return failed(request, { code: 'TASK_STATE_MISMATCH', message: `task ${resolved.taskId} is ${resolved.state}, expected active` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath });
   let content: string;
   try { content = fs.readFileSync(resolved.taskMdPath, 'utf8'); }
   catch (error) { return failed(request, { code: 'TASK_READ_FAILED', message: String(error) }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath }); }
@@ -406,7 +410,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
   const done = completedRows.find((item) => item.note === eventIdentity.note);
   if (eventIdentity.phase === 'completed' && done) return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, done.done, frontmatter, artifactContext);
   if (eventIdentity.phase === 'completed' && completedRows.length > 0 && openRows.length === 0) return failed(normalized, { code: 'EVENT_LOG_CONFLICT', message: 'event identity is already completed with a different payload' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
-  if (eventIdentity.phase === 'completed' && !row?.started) return failed(normalized, { code: 'EVENT_START_MISSING', message: 'completion requires one open matching started event' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+  if (eventIdentity.phase === 'completed' && !row?.started && !allowsManualOverride(options.manualOverride, 'task-event', 'EVENT_START_MISSING')) return failed(normalized, { code: 'EVENT_START_MISSING', message: 'completion requires one open matching started event' }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
   if (eventIdentity.phase === 'completed') {
     const validated = validateCompletedArtifact(resolved.taskDir, FAMILY[eventIdentity.family].artifact, normalized.artifact!, normalized.round);
     if (!validated.ok) return failed(normalized, validated.error, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
@@ -417,7 +421,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     return successNoOp(normalized, resolved.taskId, resolved.taskMdPath, currentStep, eventIdentity, existing.time, frontmatter, artifactContext);
   }
   const allowed = FAMILY[eventIdentity.family][eventIdentity.phase === 'started' ? 'started' : 'completed'];
-  if (!(allowed as readonly string[]).includes(currentStep)) return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${normalized.event} is not allowed from '${currentStep}'` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
+  if (!(allowed as readonly string[]).includes(currentStep) && !allowsManualOverride(options.manualOverride, 'task-event', 'EVENT_TRANSITION_INVALID')) return failed(normalized, { code: 'EVENT_TRANSITION_INVALID', message: `${normalized.event} is not allowed from '${currentStep}'` }, { taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, fromStep: currentStep, toStep: currentStep, action: eventIdentity.action, phase: eventIdentity.phase });
   const findingCountError = validateReviewFindingCounts(
     normalized,
     content,
@@ -522,7 +526,7 @@ function applyTaskEventUnlocked(request: TaskEventRequest, options: TaskEventOpt
     });
   }
   mutations.push({ kind: 'section', aliases: ['活动日志', 'Activity Log'], heading: section.heading, body });
-  const result = writeTask({ taskRef: normalized.taskRef, expectedState: 'active', dryRun: normalized.dryRun, mutations }, { ...options, metadataProvider: () => metadata });
+  const result = writeTask({ taskRef: normalized.taskRef, expectedState: stateOverride ? resolved.state : 'active', dryRun: normalized.dryRun, mutations }, { ...options, metadataProvider: () => metadata });
   if (result.status === 'failed') return failed(normalized, result.error, { taskId: result.taskId, taskMdPath: result.taskMdPath, fromStep: currentStep, toStep: step, action: eventIdentity.action, phase: eventIdentity.phase, timestamp: result.timestamp, agentInfraVersion: result.agentInfraVersion, operations: result.operations, artifactContext });
   if (!normalized.dryRun && orchestrationCompletion) {
     try {
@@ -560,6 +564,7 @@ function applyTaskEvent(request: TaskEventRequest, options: TaskEventOptions = {
   const invalid = validateTaskEventRequest(request);
   if (invalid) return failed(request, invalid);
   const parts = eventParts(request.event);
+  if (options.lockAlreadyHeld) return applyTaskEventUnlocked(request, options);
   if (request.dryRun || parts.phase !== 'completed' || parts.family === 'manual-validation') {
     return applyTaskEventUnlocked(request, options);
   }

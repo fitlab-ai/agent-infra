@@ -48,6 +48,20 @@ test('task-ledger rejects duplicate flags and preserves bytes for dry-run', () =
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test('task-ledger rejects dry-run with an override before reading or writing the task', () => {
+  const f = fixture();
+  try {
+    const before = fs.readFileSync(f.file);
+    const result = run(f.root, [
+      f.id, 'decision-upsert', '--id', 'HD-1', '--stage', 'plan', '--artifact', 'plan.md', '--dry-run',
+      '--override-ticket', 'ticket', '--override-target', 'continue-local', '--override-scope', 'task-ledger'
+    ]);
+    assert.equal(result.status, 1);
+    assert.equal(JSON.parse(result.stdout).error.code, 'LEDGER_PAYLOAD_INVALID');
+    assert.deepEqual(fs.readFileSync(f.file), before);
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('task-ledger parses implementation intent for code decisions', () => {
   const f = fixture();
   try {
@@ -64,6 +78,36 @@ test('task-ledger parses implementation intent for code decisions', () => {
     assert.equal(invalid.status, 1);
     assert.equal(JSON.parse(invalid.stdout).error.code, 'LEDGER_PAYLOAD_INVALID');
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('task-ledger accepts an override ticket on a blocked finding operation', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-ledger-override-'));
+  const id = 'TASK-20260101-000002';
+  const dir = path.join(root, '.agents', 'workspace', 'blocked', id);
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: root });
+    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+    fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), JSON.stringify({ version: 1, ids: {} }));
+    fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: blocked\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.0.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n| CD-1 | code | 1 | blocker | open | review-code.md#CD-1 |\n`);
+    const issued = spawnSync('node', [INTERNAL_CLI_PATH, 'task-override', id, 'issue',
+      '--failure-id', 'ledger-intent:TASK_STATE_MISMATCH', '--target', 'continue-local',
+      '--operator', 'codex', '--reason', 'recover blocked ledger transition', '--scope', 'task-ledger',
+      '--expires-at', '2099-01-01 00:00:00+00:00'
+    ], { cwd: root, encoding: 'utf8' });
+    assert.equal(issued.status, 0, issued.stderr || issued.stdout);
+    const ticket = (JSON.parse(issued.stdout) as { ticketId: string }).ticketId;
+    const applied = run(root, [id, 'finding-respond', '--id', 'CD-1', '--round', '2', '--status', 'accepted', '--evidence', 'review-code.md#CD-1',
+      '--override-ticket', ticket, '--override-target', 'continue-local', '--override-scope', 'task-ledger']);
+    assert.equal(applied.status, 0, applied.stderr || applied.stdout);
+    const result = JSON.parse(applied.stdout) as { status: string; humanOverride: { status: string } };
+    assert.equal(result.status, 'applied');
+    assert.equal(result.humanOverride.status, 'applied');
+    assert.match(fs.readFileSync(path.join(dir, 'task.md'), 'utf8'), new RegExp(`\\| ${ticket} \\|.*\\| consumed \\|`));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('task-ledger stage-status is read-only and reports unresolved minor findings', () => {
