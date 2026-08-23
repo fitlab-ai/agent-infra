@@ -1,13 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const MAX_INPUT_BYTES = 64 * 1024;
-const repoPackageJson = fileURLToPath(new URL('../../package.json', import.meta.url));
-const sourceInternalCli = fileURLToPath(new URL('../../bin/internal-cli.ts', import.meta.url));
-const localInternalCli = fileURLToPath(new URL('../../dist/bin/internal-cli.js', import.meta.url));
 const codexHooks = fileURLToPath(new URL('../../.codex/hooks.json', import.meta.url));
 const clientIndex = process.argv.indexOf('--client');
 const client = clientIndex >= 0 ? process.argv[clientIndex + 1] : '';
@@ -17,22 +13,6 @@ if (client !== 'claude-code' && client !== 'codex') {
 }
 
 function internalCliInvocation(args) {
-  let isAgentInfraSourceCheckout = false;
-  try {
-    isAgentInfraSourceCheckout = JSON.parse(readFileSync(repoPackageJson, 'utf8')).name === '@fitlab-ai/agent-infra';
-  } catch {
-    // Installed project hooks do not require a repository package.json.
-  }
-  if (isAgentInfraSourceCheckout && existsSync(sourceInternalCli)) {
-    return {
-      command: process.execPath,
-      commandArgs: ['--experimental-strip-types', sourceInternalCli, ...args],
-      shell: false
-    };
-  }
-  if (existsSync(localInternalCli)) {
-    return { command: process.execPath, commandArgs: [localInternalCli, ...args], shell: false };
-  }
   return { command: 'agent-infra-internal', commandArgs: args, shell: process.platform === 'win32' };
 }
 

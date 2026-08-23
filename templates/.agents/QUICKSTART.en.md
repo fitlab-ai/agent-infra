@@ -20,14 +20,14 @@ This makes Git invoke the hooks in the project repository's `.git-hooks/` direct
 
 ## Development Checkout CLI Alignment
 
-When developing agent-infra from a source checkout, install dependencies and rebuild the local CLI before running lifecycle orchestration:
+When developing the agent-infra CLI from a source checkout, install dependencies and rebuild it as needed:
 
 ```bash
 npm install
 npm run build
 ```
 
-Lifecycle hooks prefer the checkout's `dist/bin/internal-cli.js` when it exists and fall back to `agent-infra-internal` on `PATH` otherwise. Rebuild after CLI source changes. If shell commands must also resolve to this checkout, link it and compare the active version with the package version:
+Lifecycle hooks always invoke `agent-infra-internal` through `PATH`; they do not implicitly switch to checkout source or `dist`. In a Codex sandbox, the controller's `PATH`-first shim is authoritative and binds the controller's selected executable. Skills, rules, hooks, and task data continue to come from the current checkout. The commands above develop the CLI itself and do not change hook executable selection. If shell commands must also resolve to this checkout, link it and compare the active version with the package version:
 
 ```bash
 npm link
