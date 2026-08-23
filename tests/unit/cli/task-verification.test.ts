@@ -181,7 +181,7 @@ test('run-task verification accepts complete model evidence and rejects missing 
     'fail'
   );
 
-  fs.writeFileSync(runPath, `${JSON.stringify({ ...run, receipts: [{ ...receipt, actualModel: null }] }, null, 2)}\n`);
+  fs.writeFileSync(runPath, `${JSON.stringify({ ...run, receipts: [{ ...receipt, client: 'antigravity-cli', actualModel: null }] }, null, 2)}\n`);
   const invalid = verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root });
   assert.equal(invalid.status, 'fail');
   assert.equal(invalid.invocations.length, 2);
@@ -289,7 +289,7 @@ test('run-task verification accepts a clean unsupported pause and rejects unsafe
     ...paused,
     pendingDelegation: {
       id: 'receipt-1', taskId: f.taskId, runId: 'run-1', role: 'executor', stage: 'analysis',
-      round: 1, artifact: 'analysis.md', client: 'claude-code', requestedModel: 'executor-model',
+      round: 1, artifact: 'analysis.md', client: 'antigravity-cli', requestedModel: 'executor-model',
       requestedReasoningEffort: 'xhigh', actualModel: null, actualReasoningEffort: null,
       modelFallbackReason: null, reasoningEffortFallbackReason: null, parentId: 'parent', childId: 'child',
       spawnMode: 'fresh', agent: null, status: 'activated', beforeFingerprint: 'before',
@@ -309,6 +309,130 @@ test('run-task verification accepts a clean unsupported pause and rejects unsafe
   const sealedResult = verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root });
   assert.equal(sealedResult.status, 'fail');
   assert.equal(sealedResult.invocations.length, 1);
+});
+
+test('run-task verification accepts claude-code evidence with missing model/effort but keeps identity fail-closed (HDR-2/HDR-9)', () => {
+  const f = fixture();
+  const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
+    skill: 'run-task', checks: { 'orchestration-state': {}, 'orchestration-evidence': {} }
+  }));
+  const paused = {
+    schemaVersion: 2, taskId: f.taskId, runId: 'run-cc', status: 'paused', nextStage: null,
+    stepCount: 0, maxSteps: 24, baseline: '',
+    modelPolicy: {
+      executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
+      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
+    },
+    modelPolicySource: {
+      kind: 'explicit', client: 'claude-code', resolvedAt: '2026-01-01T00:00:00.000Z'
+    },
+    recoveryHistory: [],
+    pendingDelegation: {
+      id: 'receipt-cc', taskId: f.taskId, runId: 'run-cc', role: 'executor', stage: 'analysis',
+      round: 1, artifact: 'analysis.md', client: 'claude-code', requestedModel: 'executor-model',
+      requestedReasoningEffort: 'xhigh', actualModel: null, actualReasoningEffort: null,
+      modelFallbackReason: null, reasoningEffortFallbackReason: null, parentId: 'parent', childId: 'child',
+      spawnMode: null, agent: null, status: 'activated', beforeFingerprint: 'before',
+      afterFingerprint: null, changedPaths: [], createdAt: '2026-01-01T00:00:00.000Z',
+      activatedAt: '2026-01-01T00:00:01.000Z', sealedAt: null, consumedAt: null
+    },
+    receipts: [],
+    pause: { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'client unsupported', recoverable: false },
+    commitAuthorization: { issuedAt: null, consumedAt: null },
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+  };
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root }).status,
+    'pass'
+  );
+
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    ...paused,
+    pendingDelegation: { ...paused.pendingDelegation, parentId: null }
+  }, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root }).status,
+    'fail'
+  );
+
+  // review-code blocker: a fabricated fallback reason with no actual value observed must still fail.
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    ...paused,
+    pendingDelegation: { ...paused.pendingDelegation, modelFallbackReason: 'fabricated reason' }
+  }, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root }).status,
+    'fail'
+  );
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    ...paused,
+    pendingDelegation: { ...paused.pendingDelegation, reasoningEffortFallbackReason: 'fabricated reason' }
+  }, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.paused' }, { repoRoot: f.root }).status,
+    'fail'
+  );
+});
+
+test('run-task verification accepts the no-migration claude-code recovery shape', () => {
+  const f = fixture();
+  const configDir = path.join(f.root, '.agents', 'skills', 'run-task', 'config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'verify.json'), JSON.stringify({
+    skill: 'run-task', checks: { 'orchestration-state': {}, 'orchestration-evidence': {} }
+  }));
+  const head = 'a'.repeat(40);
+  const tree = 'b'.repeat(40);
+  const run = {
+    schemaVersion: 3, taskId: f.taskId, runId: 'run-cc-recovered', status: 'completed', nextStage: null,
+    stepCount: 0, maxSteps: 24, baseline: '',
+    modelPolicy: {
+      executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
+      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
+    },
+    modelPolicySource: {
+      kind: 'explicit', client: 'claude-code', resolvedAt: '2026-01-01T00:00:00.000Z'
+    },
+    recoveryHistory: [{
+      code: 'CLIENT_CAPABILITY_ENABLED_NO_MIGRATION', recoveredAt: '2026-01-01T00:00:00.000Z',
+      previousSchemaVersion: 3, previousStatus: 'paused',
+      previousPause: { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'unsupported', recoverable: false },
+      client: 'claude-code',
+      guards: {
+        stepCount: 0, nextStage: null, baselineEmpty: true, receiptCount: 0,
+        pendingDelegation: false, commitAuthorizationUnused: true,
+        completionEvidenceAbsent: true, commitIntentAbsent: true
+      },
+      resultingStatus: 'running'
+    }],
+    pendingDelegation: null, receipts: [], pause: null,
+    commitAuthorization: { issuedAt: null, consumedAt: null },
+    completionEvidence: {
+      kind: 'reviewed-head-clean', observedAt: '2026-01-01T00:00:05.000Z',
+      head, headTree: tree, worktreeTree: tree, lastReviewedCommit: head,
+      prNumber: 42, prHead: head
+    },
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:05.000Z'
+  };
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  fs.writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    'pass'
+  );
+
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    ...run,
+    recoveryHistory: [{ ...run.recoveryHistory[0], previousSchemaVersion: 2 }]
+  }, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    'fail'
+  );
 });
 
 test('run-task verification accepts fail-closed legacy pauses without v2 evidence', () => {

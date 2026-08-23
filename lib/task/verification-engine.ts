@@ -291,7 +291,22 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
       && guards?.commitAuthorizationUnused === true
       && guards?.completionEvidenceAbsent === true
       && guards?.commitIntentAbsent === true;
-    if (!validModelRecovery && !validCapabilityRecovery) {
+    const validClaudeCodeRecovery = recovery.code === 'CLIENT_CAPABILITY_ENABLED_NO_MIGRATION'
+      && recovery.previousSchemaVersion === 3
+      && recovery.previousStatus === 'paused'
+      && recovery.previousPause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
+      && recovery.client === 'claude-code'
+      && recovery.resultingStatus === 'running'
+      && exactText(recovery.recoveredAt)
+      && guards?.stepCount === 0
+      && guards?.nextStage === null
+      && guards?.baselineEmpty === true
+      && guards?.receiptCount === 0
+      && guards?.pendingDelegation === false
+      && guards?.commitAuthorizationUnused === true
+      && guards?.completionEvidenceAbsent === true
+      && guards?.commitIntentAbsent === true;
+    if (!validModelRecovery && !validCapabilityRecovery && !validClaudeCodeRecovery) {
       return failResult('orchestration-evidence', 'Run recovery history contains invalid provenance');
     }
   }
@@ -322,29 +337,40 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
     }
     const activated = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status);
     if (activated) {
-      if (!exactText(receipt.actualModel)) {
-        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has no host-observed actual model`);
+      const isClaudeCode = receipt.client === 'claude-code';
+      if (!isClaudeCode) {
+        if (!exactText(receipt.actualModel)) {
+          return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has no host-observed actual model`);
+        }
+        if (!exactText(receipt.actualReasoningEffort)) {
+          return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has no host-observed actual reasoning effort`);
+        }
       }
-      if (!exactText(receipt.actualReasoningEffort)) {
-        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has no host-observed actual reasoning effort`);
+      // parentId/childId 校验对所有 client 保持统一（不新增分支）；spawnMode 检查按 client 判断
+      if (!exactText(receipt.parentId) || !exactText(receipt.childId) || receipt.parentId === receipt.childId) {
+        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid delegation identity`);
       }
-      if (!exactText(receipt.parentId) || !exactText(receipt.childId) || receipt.parentId === receipt.childId || receipt.spawnMode !== 'fresh') {
+      if (!isClaudeCode && receipt.spawnMode !== 'fresh') {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid fresh delegation identity`);
       }
-      if (receipt.actualModel !== receipt.requestedModel && !exactText(receipt.modelFallbackReason)) {
-        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' model fallback is not justified`);
+      if (receipt.actualModel != null && receipt.actualModel !== receipt.requestedModel) {
+        if (!isClaudeCode && !exactText(receipt.modelFallbackReason)) {
+          return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' model fallback is not justified`);
+        }
       }
-      if (receipt.actualModel === receipt.requestedModel && receipt.modelFallbackReason !== null) {
+      if (
+        (receipt.actualModel == null || receipt.actualModel === receipt.requestedModel)
+        && receipt.modelFallbackReason !== null
+      ) {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has an unrelated model fallback reason`);
       }
-      if (
-        receipt.actualReasoningEffort !== receipt.requestedReasoningEffort
-        && !exactText(receipt.reasoningEffortFallbackReason)
-      ) {
-        return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' reasoning-effort fallback is not justified`);
+      if (receipt.actualReasoningEffort != null && receipt.actualReasoningEffort !== receipt.requestedReasoningEffort) {
+        if (!isClaudeCode && !exactText(receipt.reasoningEffortFallbackReason)) {
+          return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' reasoning-effort fallback is not justified`);
+        }
       }
       if (
-        receipt.actualReasoningEffort === receipt.requestedReasoningEffort
+        (receipt.actualReasoningEffort == null || receipt.actualReasoningEffort === receipt.requestedReasoningEffort)
         && receipt.reasoningEffortFallbackReason !== null
       ) {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has an unrelated reasoning-effort fallback reason`);

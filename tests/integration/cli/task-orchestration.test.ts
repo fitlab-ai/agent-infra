@@ -264,18 +264,70 @@ test('task-orchestration accepts one model for both orchestration roles', () => 
   });
 });
 
-test('task-orchestration prepare fails closed before delegation when host evidence is unavailable', () => {
+test('task-orchestration prepare fails closed before delegation for clients without orchestration capability', () => {
   const f = fixture();
-  assert.equal(run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs]).status, 0);
+  const explicitAntigravityPolicyArgs = [
+    '--client', 'antigravity-cli',
+    '--executor-model', 'executor-model', '--executor-reasoning-effort', 'xhigh',
+    '--reviewer-model', 'reviewer-model', '--reviewer-reasoning-effort', 'high'
+  ];
+  assert.equal(run(f.root, [f.id, 'begin-or-resume', ...explicitAntigravityPolicyArgs]).status, 0);
   const runPath = path.join(f.dir, 'orchestration.json');
   const before = fs.readFileSync(runPath);
 
-  const prepared = run(f.root, [f.id, 'prepare', '--client', 'claude-code',
+  const prepared = run(f.root, [f.id, 'prepare', '--client', 'antigravity-cli',
     '--requested-model', 'executor-model', '--requested-reasoning-effort', 'xhigh']);
   assert.equal(prepared.status, 1, prepared.stderr);
   const result = JSON.parse(prepared.stdout);
   assert.equal(result.error.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
   assert.deepEqual(fs.readFileSync(runPath), before);
+});
+
+test('task-orchestration prepares a real Claude Code delegation now that lifecycle orchestration is supported (AC-1)', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs]).status, 0);
+
+  const prepared = run(f.root, [f.id, 'prepare', '--client', 'claude-code',
+    '--requested-model', 'executor-model', '--requested-reasoning-effort', 'xhigh']);
+  assert.equal(prepared.status, 0, prepared.stderr);
+  const result = JSON.parse(prepared.stdout);
+  assert.equal(result.error, null);
+  assert.ok(result.run.pendingDelegation);
+});
+
+test('task-orchestration hook-stop explicit taskRef branch forwards model/effort evidence like the auto branch (PL-3)', () => {
+  const f = fixture();
+  assert.equal(run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs]).status, 0);
+  const runPath = path.join(f.dir, 'orchestration.json');
+  const before = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+  const stageCompleted = {
+    ...before,
+    pendingDelegation: {
+      id: 'receipt-explicit-seal', taskId: f.id, runId: before.runId, role: 'executor',
+      stage: 'analysis', round: 1, artifact: 'analysis.md', client: 'claude-code',
+      requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
+      actualModel: null, actualReasoningEffort: null,
+      modelFallbackReason: null, reasoningEffortFallbackReason: null,
+      parentId: 'parent-1', childId: 'child-1', spawnMode: null, agent: 'claude',
+      status: 'stage-completed', beforeFingerprint: 'before', afterFingerprint: null,
+      changedPaths: [], createdAt: '2026-01-01T00:00:00.000Z',
+      preparedMonotonicMs: 0, spawnDispatchMonotonicMs: 0, activationDeadlineMonotonicMs: 15000,
+      spawnDispatchedAt: '2026-01-01T00:00:00.000Z', activationDeadlineAt: '2026-01-01T00:00:15.000Z',
+      startEvidenceMonotonicMs: 1, activatedMonotonicMs: 1, activatedAt: '2026-01-01T00:00:01.000Z',
+      sealedAt: null, consumedAt: null
+    }
+  };
+  fs.writeFileSync(runPath, `${JSON.stringify(stageCompleted, null, 2)}\n`);
+
+  const sealed = run(f.root, [f.id, 'hook-stop',
+    '--child-id', 'child-1', '--exit-code', '0', '--after-fingerprint', 'after',
+    '--actual-model', 'host-model-v2', '--actual-reasoning-effort', 'high']);
+  assert.equal(sealed.status, 0, sealed.stderr);
+  const result = JSON.parse(sealed.stdout);
+  assert.equal(result.error, null);
+  assert.equal(result.run.pendingDelegation.status, 'sealed');
+  assert.equal(result.run.pendingDelegation.actualModel, 'host-model-v2');
+  assert.equal(result.run.pendingDelegation.actualReasoningEffort, 'high');
 });
 
 test('task-orchestration begin fails closed when model policy is omitted', () => {

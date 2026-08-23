@@ -14,6 +14,7 @@ import {
   completeDelegationStage,
   consumeDelegation,
   dispatchDelegation,
+  foldBlankToNull,
   managedDelegationRole,
   prepareDelegation,
   sealDelegation
@@ -113,6 +114,25 @@ type ClientCapabilityRecovery = Readonly<{
   }>;
   resultingStatus: 'running';
 }>;
+type ClaudeCodeCapabilityRecovery = Readonly<{
+  code: 'CLIENT_CAPABILITY_ENABLED_NO_MIGRATION';
+  recoveredAt: string;
+  previousSchemaVersion: 3;
+  previousStatus: 'paused';
+  previousPause: Readonly<{ code: 'ORCHESTRATION_CLIENT_UNSUPPORTED'; message: string; recoverable: boolean }>;
+  client: 'claude-code';
+  guards: Readonly<{
+    stepCount: 0;
+    nextStage: null;
+    baselineEmpty: true;
+    receiptCount: 0;
+    pendingDelegation: false;
+    commitAuthorizationUnused: true;
+    completionEvidenceAbsent: true;
+    commitIntentAbsent: true;
+  }>;
+  resultingStatus: 'running';
+}>;
 type SchemaMigrationRecovery = Readonly<{
   code: 'SCHEMA_V3_MIGRATED';
   recoveredAt: string;
@@ -131,7 +151,7 @@ type SchemaMigrationRecovery = Readonly<{
   }>;
   resultingStatus: 'running';
 }>;
-type OrchestrationRecovery = ModelPolicyRecovery | ClientCapabilityRecovery | SchemaMigrationRecovery;
+type OrchestrationRecovery = ModelPolicyRecovery | ClientCapabilityRecovery | ClaudeCodeCapabilityRecovery | SchemaMigrationRecovery;
 type CleanCompletionEvidence = Readonly<{
   kind: 'reviewed-head-clean';
   observedAt: string;
@@ -436,6 +456,23 @@ function canRecoverCodexUnsupportedPause(run: OrchestrationRun, taskDir: string)
     && (run.recoveryHistory ?? []).every((entry) => entry.code === 'MODEL_POLICY_SUPPLEMENTED');
 }
 
+function canRecoverClaudeCodeUnsupportedPause(run: OrchestrationRun, taskDir: string): boolean {
+  return run.schemaVersion === 3
+    && run.status === 'paused'
+    && run.pause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
+    && run.modelPolicySource?.client === 'claude-code'
+    && run.stepCount === 0
+    && run.nextStage === null
+    && run.baseline === ''
+    && run.pendingDelegation === null
+    && run.receipts.length === 0
+    && run.commitAuthorization?.issuedAt === null
+    && run.commitAuthorization?.consumedAt === null
+    && run.completionEvidence == null
+    && !fs.existsSync(commitIntentPath(taskDir))
+    && (run.recoveryHistory ?? []).length === 0;
+}
+
 function canMigrateRecoverableV2Pause(run: OrchestrationRun, taskDir: string): boolean {
   return run.schemaVersion === 2
     && run.status === 'paused'
@@ -505,6 +542,39 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
         }
       }
       if (existing.status === 'paused' && existing.pause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED') {
+        if (existing.modelPolicySource.client === 'claude-code') {
+          if (!canRecoverClaudeCodeUnsupportedPause(existing, resolved.taskDir)) {
+            return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
+          }
+          const now = (options.now ?? (() => new Date().toISOString()))();
+          const previousPause = existing.pause as ClaudeCodeCapabilityRecovery['previousPause'];
+          const recovery: ClaudeCodeCapabilityRecovery = {
+            code: 'CLIENT_CAPABILITY_ENABLED_NO_MIGRATION',
+            recoveredAt: now,
+            previousSchemaVersion: 3,
+            previousStatus: 'paused',
+            previousPause,
+            client: 'claude-code',
+            guards: {
+              stepCount: 0,
+              nextStage: null,
+              baselineEmpty: true,
+              receiptCount: 0,
+              pendingDelegation: false,
+              commitAuthorizationUnused: true,
+              completionEvidenceAbsent: true,
+              commitIntentAbsent: true
+            },
+            resultingStatus: 'running'
+          };
+          const resumed = withUpdatedRun(existing, {
+            status: 'running',
+            pause: null,
+            recoveryHistory: Object.freeze([...(existing.recoveryHistory ?? []), recovery])
+          }, () => now);
+          saveRun(resolved.taskDir, resumed);
+          return { status: 'running', changed: true, taskId: resolved.taskId, run: resumed, next: null, error: null };
+        }
         if (!canRecoverCodexUnsupportedPause(existing, resolved.taskDir)) {
           return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
         }
@@ -1668,9 +1738,9 @@ function activateMatchingOrchestrationDelegation(
     if ('status' in replay) return matched;
     const receipt = replay.run.pendingDelegation!;
     const sameEvidence = receipt.parentId === event.parentId
-      && receipt.spawnMode === event.spawnMode
-      && receipt.actualModel === event.actualModel
-      && receipt.actualReasoningEffort === event.actualReasoningEffort
+      && (receipt.spawnMode ?? null) === (event.spawnMode ?? null)
+      && (receipt.actualModel ?? null) === foldBlankToNull(event.actualModel)
+      && (receipt.actualReasoningEffort ?? null) === foldBlankToNull(event.actualReasoningEffort)
       && receipt.modelFallbackReason === (event.modelFallbackReason ?? null)
       && receipt.reasoningEffortFallbackReason === (event.reasoningEffortFallbackReason ?? null)
       && receipt.hostEvidence?.hookDefinitionHash === event.hostEvidence?.hookDefinitionHash;
@@ -1698,7 +1768,14 @@ function pauseMatchingOrchestrationDelegation(
 
 function sealMatchingOrchestrationDelegation(
   client: AgentClientId,
-  event: Readonly<{ nativeAgent: string; childId: string }>,
+  event: Readonly<{
+    nativeAgent: string;
+    childId: string;
+    actualModel?: string;
+    actualReasoningEffort?: string;
+    modelFallbackReason?: string;
+    reasoningEffortFallbackReason?: string;
+  }>,
   options: OrchestrationOptions = {}
 ): OrchestrationResult {
   const role = managedDelegationRole(event.nativeAgent);
@@ -1727,7 +1804,11 @@ function sealMatchingOrchestrationDelegation(
       childId: event.childId,
       exitCode: 0,
       afterFingerprint,
-      changedPaths
+      changedPaths,
+      actualModel: event.actualModel,
+      actualReasoningEffort: event.actualReasoningEffort,
+      modelFallbackReason: event.modelFallbackReason,
+      reasoningEffortFallbackReason: event.reasoningEffortFallbackReason
     }, options);
   } catch (error) {
     return pauseOrchestration(

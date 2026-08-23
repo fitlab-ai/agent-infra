@@ -411,14 +411,15 @@ test('prepare fails closed for clients without orchestration capability', () => 
   assert.equal(result.changed, false);
 });
 
-test('prepare fails closed for Claude Code when native model evidence is not observable', () => {
+test('prepare succeeds for Claude Code without an explicit capability override (AC-1)', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   const result = prepareOrchestrationDelegationRaw('TASK-20260101-000001', {
-    client: 'claude-code'
+    client: 'claude-code', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
   }, { repoRoot: f.root, captureWorkspace: snapshot });
-  assert.equal(result.error?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
-  assert.equal(result.changed, false);
+  assert.equal(result.error, null);
+  assert.equal(result.changed, true);
+  assert.ok(result.run?.pendingDelegation);
 });
 
 test('Codex core preparation requires exact policy after capability enablement', () => {
@@ -942,6 +943,30 @@ test('native stop preserves legacy snapshot scope for an old pending receipt', (
   assert.equal(stopped.status, 'running');
   assert.equal(stopped.run?.pendingDelegation?.status, 'sealed');
   assert.deepEqual(capturedScopes, ['TASK-20260101-000001', null]);
+});
+
+test('replaying a start event with blank actual model/effort is idempotent, not a replay conflict', () => {
+  const f = fixture('requirement-analysis-review');
+  fs.writeFileSync(path.join(f.taskDir, 'analysis.md'), '# Analysis\n');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  prepareOrchestrationDelegation('TASK-20260101-000001', {
+    client: 'claude-code', requestedModel: 'reviewer-model', requestedReasoningEffort: 'high'
+  }, {
+    repoRoot: f.root, captureWorkspace: snapshot
+  });
+  dispatchOrchestrationDelegation('TASK-20260101-000001', { repoRoot: f.root });
+  const startEvent = {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-replay',
+    parentId: 'parent-session', spawnMode: 'fresh', actualModel: '   ', actualReasoningEffort: '  '
+  };
+  const activated = activateMatchingOrchestrationDelegation('claude-code', startEvent, { repoRoot: f.root });
+  assert.equal(activated.status, 'running');
+  assert.equal(activated.changed, true);
+
+  const replayed = activateMatchingOrchestrationDelegation('claude-code', startEvent, { repoRoot: f.root });
+  assert.equal(replayed.status, 'running');
+  assert.equal(replayed.changed, false);
+  assert.equal(replayed.error, null);
 });
 
 test('reviewer snapshot shape mismatch fails closed to a recoverable pause', () => {

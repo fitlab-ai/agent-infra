@@ -183,15 +183,19 @@ test('managed identities fail closed while unrelated subagents are ignored', () 
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'parent-1', parentId: 'parent-1', spawnMode: 'fresh'
   }).code, 'DELEGATION_IDENTITY_INVALID');
   assert.equal(activateDelegation(prepared, {
-    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-2', parentId: 'parent-1', spawnMode: 'fork'
-  }).code, 'DELEGATION_FORK_FORBIDDEN');
-  assert.equal(activateDelegation(prepared, {
     nativeAgent: 'agent-infra-lifecycle-executor', childId: 'child-2', parentId: 'parent-1', spawnMode: 'fresh'
   }).code, 'DELEGATION_ROLE_MISMATCH');
+
+  // spawnMode enforcement (fork protection) is a non-claude-code concern (HDR-9 议题 B):
+  // claude-code has no host-provided spawn_mode field, so it does not gate on this dimension.
+  const strictPrepared = dispatched(prepareDelegation({ ...input, client: 'antigravity-cli' }, { id: () => 'delegation-2-strict' }));
+  assert.equal(activateDelegation(strictPrepared, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-2-strict', parentId: 'parent-1', spawnMode: 'fork'
+  }).code, 'DELEGATION_FORK_FORBIDDEN');
 });
 
 test('activation requires host-observed model identity and records justified fallback', () => {
-  const prepared = dispatched(prepareDelegation(input, { id: () => 'delegation-model' }));
+  const prepared = dispatched(prepareDelegation({ ...input, client: 'antigravity-cli' }, { id: () => 'delegation-model' }));
   const event = {
     nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-model',
     parentId: 'parent-model', spawnMode: 'fresh'
@@ -212,6 +216,121 @@ test('activation requires host-observed model identity and records justified fal
     modelFallbackReason: 'requested model unavailable',
     reasoningEffortFallbackReason: 'requested effort unavailable'
   }).ok, true);
+});
+
+test('claude-code activation records model/effort without gating on their presence (HDR-2)', () => {
+  const prepared = dispatched(prepareDelegation({ ...input, client: 'claude-code' }, { id: () => 'delegation-cc-relaxed' }));
+  const event = {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-cc-relaxed', parentId: 'parent-1'
+  };
+
+  // model/effort both absent: activation still succeeds, receipt records null (not an error).
+  const missing = activateDelegation(prepared, event);
+  assert.equal(missing.ok, true);
+  if (missing.ok) {
+    assert.equal(missing.receipt.actualModel, null);
+    assert.equal(missing.receipt.actualReasoningEffort, null);
+  }
+});
+
+test('claude-code activation records mismatched model/effort without a fallback reason (HDR-2)', () => {
+  const prepared = dispatched(prepareDelegation({ ...input, client: 'claude-code' }, { id: () => 'delegation-cc-fallback' }));
+  const activated = activateDelegation(prepared, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-cc-fallback', parentId: 'parent-1',
+    actualModel: 'fallback-model', actualReasoningEffort: 'medium'
+  });
+  assert.equal(activated.ok, true);
+  if (activated.ok) {
+    assert.equal(activated.receipt.actualModel, 'fallback-model');
+    assert.equal(activated.receipt.actualReasoningEffort, 'medium');
+    assert.equal(activated.receipt.modelFallbackReason, null);
+    assert.equal(activated.receipt.reasoningEffortFallbackReason, null);
+  }
+});
+
+test('claude-code activation still rejects an unrelated fallback reason (HDR-2 does not relax this red line)', () => {
+  const prepared = dispatched(prepareDelegation({ ...input, client: 'claude-code' }, { id: () => 'delegation-cc-invalid-fallback' }));
+  const event = {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-cc-invalid-fallback', parentId: 'parent-1'
+  };
+  assert.equal(activateDelegation(prepared, {
+    ...event, actualModel: 'review-model', modelFallbackReason: 'unrelated reason'
+  }).code, 'DELEGATION_MODEL_FALLBACK_INVALID');
+  assert.equal(activateDelegation(prepared, {
+    ...event, actualReasoningEffort: 'high', reasoningEffortFallbackReason: 'unrelated reason'
+  }).code, 'DELEGATION_REASONING_EFFORT_FALLBACK_INVALID');
+});
+
+test('claude-code activation rejects a fabricated fallback reason when the actual value was never observed (review-code blocker)', () => {
+  const prepared = dispatched(prepareDelegation({ ...input, client: 'claude-code' }, { id: () => 'delegation-cc-fabricated-fallback' }));
+  const event = {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-cc-fabricated-fallback', parentId: 'parent-1'
+  };
+  // no actualModel/actualReasoningEffort at all, yet a fallback reason is supplied: still a red-line violation.
+  assert.equal(activateDelegation(prepared, {
+    ...event, modelFallbackReason: 'fabricated reason'
+  }).code, 'DELEGATION_MODEL_FALLBACK_INVALID');
+  assert.equal(activateDelegation(prepared, {
+    ...event, reasoningEffortFallbackReason: 'fabricated reason'
+  }).code, 'DELEGATION_REASONING_EFFORT_FALLBACK_INVALID');
+});
+
+test('claude-code activation folds blank actual model/effort into null instead of recording them as observed', () => {
+  const prepared = dispatched(prepareDelegation({ ...input, client: 'claude-code' }, { id: () => 'delegation-cc-blank' }));
+  const activated = activateDelegation(prepared, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-cc-blank', parentId: 'parent-1',
+    actualModel: '   ', actualReasoningEffort: '  '
+  });
+  assert.equal(activated.ok, true);
+  if (activated.ok) {
+    assert.equal(activated.receipt.actualModel, null);
+    assert.equal(activated.receipt.actualReasoningEffort, null);
+  }
+});
+
+test('claude-code seal folds blank actual model/effort into null instead of recording them as observed (review-code CD-3)', () => {
+  const prepared = dispatched(prepareDelegation({ ...input, client: 'claude-code' }, { id: () => 'delegation-cc-seal-blank' }));
+  // activation observes nothing (Start payload carries no model/effort), matching the Stop-side
+  // fixture from review-code-r2.md#CD-3: the whitespace must be folded at seal too, not just at activation.
+  const activated = activateDelegation(prepared, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-cc-seal-blank', parentId: 'parent-1'
+  });
+  assert.equal(activated.ok, true);
+  if (!activated.ok) return;
+  const completed = completeDelegationStage(activated.receipt, {
+    stage: 'review-code', round: 1, artifact: 'review-code.md', agent: 'claude'
+  });
+  assert.equal(completed.ok, true);
+  if (!completed.ok) return;
+  const sealed = sealDelegation(completed.receipt, {
+    childId: 'child-cc-seal-blank', exitCode: 0, afterFingerprint: 'after',
+    changedPaths: ['.agents/workspace/active/TASK-20260101-000001/review-code.md'],
+    actualModel: '   ', actualReasoningEffort: '  '
+  });
+  assert.equal(sealed.ok, true);
+  if (sealed.ok) {
+    assert.equal(sealed.receipt.actualModel, null);
+    assert.equal(sealed.receipt.actualReasoningEffort, null);
+  }
+});
+
+test('claude-code activation skips the fork-mode check but keeps parent/child identity fail-closed (HDR-9)', () => {
+  const prepared = dispatched(prepareDelegation({ ...input, client: 'claude-code' }, { id: () => 'delegation-cc-identity' }));
+  // no spawnMode provided at all, and even an explicit 'fork' value: claude-code has no host-provided
+  // spawn_mode field to gate on (HDR-9 议题 B), so activation still succeeds.
+  const noSpawnMode = activateDelegation(prepared, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-cc-identity', parentId: 'parent-1'
+  });
+  assert.equal(noSpawnMode.ok, true);
+  if (noSpawnMode.ok) assert.equal(noSpawnMode.receipt.spawnMode, null);
+
+  // parentId/childId identity is unconditional for every client, including claude-code.
+  assert.equal(activateDelegation(prepared, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-cc-identity-2', parentId: ''
+  }).code, 'DELEGATION_IDENTITY_INVALID');
+  assert.equal(activateDelegation(prepared, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'same-id', parentId: 'same-id'
+  }).code, 'DELEGATION_IDENTITY_INVALID');
 });
 
 test('claude-code receipt accepts the normalized short agent claude', () => {
