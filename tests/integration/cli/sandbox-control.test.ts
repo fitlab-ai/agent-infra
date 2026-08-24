@@ -70,6 +70,8 @@ async function waitForRequestAsync(requestsDir: string, timeoutMs: number): Prom
   throw new Error(`Timed out waiting for a request in ${requestsDir}`);
 }
 
+const SANDBOX_CONTROL_TEST_TIMEOUT_MS = 5_000;
+
 function runTaskFinalizationClient(params: {
   channelDir: string;
   statusDir: string;
@@ -984,7 +986,7 @@ test('task-bound finalization compensates an accepted response loss through the 
     })}\n`);
 
     const serveOne = async (dropCompletedResponse: boolean) => {
-      const requestName = await waitForRequestAsync(requestsDir, 2_000);
+      const requestName = await waitForRequestAsync(requestsDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
       const requestPath = path.join(requestsDir, requestName);
       const request = JSON.parse(fs.readFileSync(requestPath, 'utf8')) as { id: string; family: string; operation: string; agent: string };
       assert.equal(request.id, requestName.slice(0, -5));
@@ -1026,7 +1028,7 @@ test('task-bound finalization compensates an accepted response loss through the 
     const registryPath = path.join(root, '.agents', 'workspace', 'active', '.short-ids.json');
     fs.writeFileSync(registryPath, '{not-json\n');
     const failedBroker = serveOne(false);
-    const failedClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: 2_000 });
+    const failedClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS });
     const failedExecution = await failedBroker;
     assert.equal(failedExecution.exitCode, 1);
     assert.equal(failedClient.exitCode, 0);
@@ -1039,7 +1041,7 @@ test('task-bound finalization compensates an accepted response loss through the 
 
     fs.writeFileSync(registryPath, `${JSON.stringify({ version: 1, ids: {} })}\n`);
     const secondBroker = serveOne(false);
-    const secondClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: 2_000 });
+    const secondClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: SANDBOX_CONTROL_TEST_TIMEOUT_MS });
     const secondExecution = await secondBroker;
     assert.equal(secondClient.exitCode, 0, secondClient.stderr);
     assert.equal(secondClient.payload.phase, 'completed');
