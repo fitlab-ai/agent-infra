@@ -861,7 +861,7 @@ test('sandbox broker opens and closes a host-only Codex controller registration 
   fs.writeFileSync(docker, '#!/bin/sh\n[ "$1" = exec ] && [ "$3" = cat ] && exec cat "$4"\nexit 1\n', { mode: 0o700 });
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     version: 5,
-    engine: 'docker',
+    engine: 'native',
     repoRoot: root,
     worktreeRoot: root,
     project: 'demo',

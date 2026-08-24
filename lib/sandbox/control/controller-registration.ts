@@ -137,7 +137,8 @@ function registrationPath(manifestPath: string): string {
 function readRaw(file: string): { raw: string; stat: fs.Stats } | null {
   try {
     const stat = fs.lstatSync(file);
-    if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o777) !== 0o600) {
+    if (!stat.isFile() || stat.isSymbolicLink()
+      || (process.platform !== 'win32' && (stat.mode & 0o777) !== 0o600)) {
       fail('CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID', 'controller registration file is unsafe');
     }
     return { raw: fs.readFileSync(file, 'utf8'), stat };

@@ -145,7 +145,8 @@ export function verifyCodexSandboxControllerContext(
   } catch {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
-  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
+  if (!stat.isFile() || stat.isSymbolicLink()
+    || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
   let context: CodexSandboxControllerContextV2;
