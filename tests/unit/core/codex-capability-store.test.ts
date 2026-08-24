@@ -97,6 +97,216 @@ test('Codex capability expiry and provenance mismatch fail closed', () => {
   }), /CODEX_CAPABILITY_PROVENANCE_MISMATCH/);
 });
 
+test('Codex capability mismatch exposes fixed safe field detail without consuming', () => {
+  const root = mkdtempSync('codex-capability-detail-');
+  const controller = { instanceDigest: 'i'.repeat(64), controlGeneration: 'generation-1' };
+  const store = createCodexCapabilityStore({ root, token: () => 'detail-token' });
+  const armed = store.arm({
+    taskId: 'TASK-20260101-000001',
+    buildIdentity: build,
+    controller
+  });
+  store.attest({
+    token: armed.token,
+    sessionId: 'session-secret',
+    turnId: 'turn-secret',
+    toolUseId: 'tool-secret',
+    hookDefinitionHash: 'c'.repeat(64),
+    buildIdentity: build,
+    controller
+  });
+
+  assert.throws(() => store.consume(armed.token, {
+    taskId: 'TASK-20260101-000002',
+    hookDefinitionHash: 'd'.repeat(64),
+    buildIdentity: {
+      protocolVersion: 3,
+      packageVersion: '1.2.4',
+      internalExecutableBuildHash: 'f'.repeat(64),
+      lifecycleContractHash: 'e'.repeat(64)
+    },
+    controller: { instanceDigest: 'j'.repeat(64), controlGeneration: 'generation-2' }
+  }), (error: unknown) => {
+    assert.equal(error instanceof Error && error.name, 'CODEX_CAPABILITY_PROVENANCE_MISMATCH');
+    const detail = (error as { detail?: unknown }).detail;
+    assert.deepEqual(detail, {
+      kind: 'codex-capability-provenance-mismatch',
+      version: 1,
+      fields: {
+        taskId: {
+          matches: false,
+          expected: { kind: 'digest-prefix', value: 'sha256:e0669166e5733c3a' },
+          actual: { kind: 'digest-prefix', value: 'sha256:e8dbe4a4d8fdd5f1' }
+        },
+        hookDefinitionHash: {
+          matches: false,
+          expected: { kind: 'digest-prefix', value: 'sha256:0c365521729ffa91' },
+          actual: { kind: 'digest-prefix', value: 'sha256:caf64839e259fbb3' }
+        },
+        buildIdentity: {
+          protocolVersion: {
+            matches: true,
+            expected: { kind: 'protocol-version', value: 3 },
+            actual: { kind: 'protocol-version', value: 3 }
+          },
+          packageVersion: {
+            matches: false,
+            expected: { kind: 'semver', value: '1.2.4' },
+            actual: { kind: 'semver', value: '1.2.3' }
+          },
+          internalExecutableBuildHash: {
+            matches: false,
+            expected: { kind: 'digest-prefix', value: 'sha256:15eb94f73038f786' },
+            actual: { kind: 'digest-prefix', value: 'sha256:9746b6aeb2193daa' }
+          },
+          lifecycleContractHash: {
+            matches: false,
+            expected: { kind: 'digest-prefix', value: 'sha256:5896d13b1a9fe473' },
+            actual: { kind: 'digest-prefix', value: 'sha256:c37350387c5d73db' }
+          }
+        },
+        controller: {
+          instanceDigest: {
+            matches: false,
+            expected: { kind: 'presence', present: true },
+            actual: { kind: 'presence', present: true }
+          },
+          controlGeneration: {
+            matches: false,
+            expected: { kind: 'presence', present: true },
+            actual: { kind: 'presence', present: true }
+          }
+        }
+      }
+    });
+    assert.equal(JSON.stringify(detail).includes('detail-token'), false);
+    assert.equal(JSON.stringify(detail).includes('session-secret'), false);
+    return true;
+  });
+
+  assert.deepEqual(store.inspect(armed.token), {
+    ...store.inspect(armed.token),
+    status: 'attested',
+    revision: 2
+  });
+});
+
+test('Codex capability detail maps malformed persisted identity to absent', () => {
+  const root = mkdtempSync('codex-capability-detail-invalid-');
+  const store = createCodexCapabilityStore({ root, token: () => 'invalid-detail-token' });
+  const armed = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
+  store.attest({
+    token: armed.token,
+    sessionId: 'session',
+    turnId: 'turn',
+    toolUseId: 'tool',
+    hookDefinitionHash: 'c'.repeat(64),
+    buildIdentity: build
+  });
+  const record = JSON.parse(fs.readFileSync(armed.path, 'utf8'));
+  record.buildIdentity.packageVersion = 'arbitrary raw identity';
+  fs.writeFileSync(armed.path, `${JSON.stringify(record)}\n`);
+
+  assert.throws(() => store.consume(armed.token, {
+    taskId: 'TASK-20260101-000002',
+    hookDefinitionHash: 'c'.repeat(64),
+    buildIdentity: build
+  }), (error: unknown) => {
+    const detail = (error as { detail?: { fields?: { buildIdentity?: { packageVersion?: { actual?: unknown } } } } }).detail;
+    assert.deepEqual(detail?.fields?.buildIdentity?.packageVersion?.actual, { kind: 'absent' });
+    assert.equal(JSON.stringify(detail).includes('arbitrary raw identity'), false);
+    return true;
+  });
+});
+
+test('Codex capability rejects malformed persisted controller without consuming', () => {
+  const root = mkdtempSync('codex-capability-controller-invalid-');
+  const controller = { instanceDigest: 'i'.repeat(64), controlGeneration: 'generation-1' };
+  const store = createCodexCapabilityStore({ root, token: () => 'invalid-controller-token' });
+  const armed = store.arm({
+    taskId: 'TASK-20260101-000001',
+    buildIdentity: build,
+    controller
+  });
+  store.attest({
+    token: armed.token,
+    sessionId: 'session',
+    turnId: 'turn',
+    toolUseId: 'tool',
+    hookDefinitionHash: 'c'.repeat(64),
+    buildIdentity: build,
+    controller
+  });
+  const record = JSON.parse(fs.readFileSync(armed.path, 'utf8'));
+  record.controller = {};
+  fs.writeFileSync(armed.path, `${JSON.stringify(record)}\n`);
+
+  assert.throws(() => store.consume(armed.token, {
+    taskId: 'TASK-20260101-000001',
+    hookDefinitionHash: 'c'.repeat(64),
+    buildIdentity: build
+  }), (error: unknown) => {
+    assert.equal(error instanceof Error && error.name, 'CODEX_CAPABILITY_PROVENANCE_MISMATCH');
+    const detail = (error as { detail?: { fields?: { controller?: { instanceDigest?: { matches?: boolean } } } } }).detail;
+    assert.equal(detail?.fields?.controller?.instanceDigest?.matches, false);
+    return true;
+  });
+  assert.equal(store.inspect(armed.token).status, 'attested');
+  assert.equal(store.inspect(armed.token).revision, 2);
+});
+
+test('Codex capability detail localizes one controller field mismatch', () => {
+  const scenarios = [
+    {
+      name: 'instance digest',
+      expected: { instanceDigest: 'j'.repeat(64), controlGeneration: 'generation-1' },
+      matches: { instanceDigest: false, controlGeneration: true }
+    },
+    {
+      name: 'control generation',
+      expected: { instanceDigest: 'i'.repeat(64), controlGeneration: 'generation-2' },
+      matches: { instanceDigest: true, controlGeneration: false }
+    }
+  ] as const;
+
+  for (const scenario of scenarios) {
+    const root = mkdtempSync(`codex-capability-controller-${scenario.name.replaceAll(' ', '-')}-`);
+    const controller = { instanceDigest: 'i'.repeat(64), controlGeneration: 'generation-1' };
+    const store = createCodexCapabilityStore({ root, token: () => `controller-${scenario.name}` });
+    const armed = store.arm({
+      taskId: 'TASK-20260101-000001',
+      buildIdentity: build,
+      controller
+    });
+    store.attest({
+      token: armed.token,
+      sessionId: 'session',
+      turnId: 'turn',
+      toolUseId: 'tool',
+      hookDefinitionHash: 'c'.repeat(64),
+      buildIdentity: build,
+      controller
+    });
+
+    assert.throws(() => store.consume(armed.token, {
+      taskId: 'TASK-20260101-000001',
+      hookDefinitionHash: 'c'.repeat(64),
+      buildIdentity: build,
+      controller: scenario.expected
+    }), (error: unknown) => {
+      const detail = (error as { detail?: { fields?: { controller?: {
+        instanceDigest?: { matches?: boolean };
+        controlGeneration?: { matches?: boolean };
+      } } } }).detail;
+      assert.equal(detail?.fields?.controller?.instanceDigest?.matches, scenario.matches.instanceDigest);
+      assert.equal(detail?.fields?.controller?.controlGeneration?.matches, scenario.matches.controlGeneration);
+      return true;
+    });
+    assert.equal(store.inspect(armed.token).status, 'attested');
+    assert.equal(store.inspect(armed.token).revision, 2);
+  }
+});
+
 test('Codex capability compare-and-swap preserves a competing attestation', () => {
   const root = mkdtempSync('codex-capability-cas-');
   let armedPath = '';

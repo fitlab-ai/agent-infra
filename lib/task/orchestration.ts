@@ -49,6 +49,7 @@ import type { WorkspaceSnapshotContext } from './workspace-snapshot.ts';
 import { assertGitRepositoryBinding } from '../git/worktree-identity.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { hasActiveCodexLifecycleEvidence } from '../agent-clients/adapters/codex-lifecycle/store.ts';
+import type { CodexCapabilityProvenanceDetail } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import {
   CommitIntentError,
   commitIntentPath,
@@ -203,6 +204,7 @@ type OrchestrationResult = Readonly<{
     client?: AgentClientId;
     missingFields?: readonly string[];
     modelSelectionContext?: ReturnType<typeof getAgentClientModelSelection>;
+    detail?: CodexCapabilityProvenanceDetail;
   }> | null;
 }>;
 type OrchestrationStageIdentity = Readonly<{

@@ -90,6 +90,36 @@ test('Codex prepare preflight fails before workspace capture or receipt creation
   assert.equal(readRun(f.taskDir)?.baseline, '');
 });
 
+test('Codex prepare preserves safe provenance detail from capability consume', async () => {
+  const f = fixture();
+  const currentCapability = capability(f.root, 'capability-detail-token');
+  let captures = 0;
+  const result = await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
+    capabilityToken: currentCapability.token
+  }, {
+    repoRoot: f.root,
+    capabilityStore: currentCapability.store,
+    buildIdentity: { ...buildIdentity, packageVersion: '0.9.8-alpha.0' },
+    preflight: async () => ({
+      ...(await preflight()),
+      hookDefinitionHash: 'd'.repeat(64)
+    }),
+    orchestrationOptions: { captureWorkspace: () => { captures += 1; return 'before'; } }
+  });
+
+  assert.equal(result.error?.code, 'CODEX_CAPABILITY_PROVENANCE_MISMATCH');
+  assert.equal(result.error?.message, 'CODEX_CAPABILITY_PROVENANCE_MISMATCH: capability consumption identity does not match');
+  assert.equal(JSON.stringify(result.error?.detail).includes('capability-detail-token'), false);
+  assert.equal(result.error?.detail?.kind, 'codex-capability-provenance-mismatch');
+  assert.equal(result.error?.detail?.version, 1);
+  assert.equal(result.error?.detail?.fields.buildIdentity.packageVersion.matches, false);
+  assert.equal(result.error?.detail?.fields.hookDefinitionHash.matches, false);
+  assert.equal(captures, 0);
+  assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
+  assert.equal(readRun(f.taskDir)?.baseline, '');
+});
+
 test('Codex parent reconciliation ignores unrelated completed waits', async () => {
   const f = fixture();
   const store = createCodexLifecycleStore({

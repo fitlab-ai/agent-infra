@@ -6,6 +6,8 @@ import test, { after } from 'node:test';
 
 import {
   computeLifecycleBuildIdentity,
+  isCanonicalLifecyclePackageVersion,
+  isLifecycleProtocolVersion,
   readLifecycleManifestFiles,
   resolveLifecycleExecutableFiles,
   verifyLifecycleBuildIdentity
@@ -62,6 +64,16 @@ test('lifecycle build identity separates executable and contract hashes', () => 
   );
 });
 
+test('lifecycle build identity preserves exact package version text', () => {
+  const root = fixture();
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '1.2.3+build.5' }));
+  const identity = computeLifecycleBuildIdentity(root, {
+    executableFiles: ['lib/protocol.ts'],
+    contractFiles: ['lib/protocol.ts']
+  });
+  assert.equal(identity.packageVersion, '1.2.3+build.5');
+});
+
 test('lifecycle executable identity expands the complete relative import closure', () => {
   const root = fixture();
   fs.writeFileSync(path.join(root, 'lib', 'protocol.ts'), "import { helper } from './helper.ts';\nexport const protocol = helper;\n");
@@ -78,4 +90,17 @@ test('lifecycle build identity reads one validated manifest file list', () => {
     'lib/agent-clients/adapters/codex-lifecycle/manifest-files.json'
   ));
   assert.ok(manifest.contractFiles.includes('.agents/skills/run-task/SKILL.md'));
+});
+
+test('lifecycle package version validator accepts only canonical semver', () => {
+  assert.equal(isLifecycleProtocolVersion(3), true);
+  assert.equal(isLifecycleProtocolVersion(2), false);
+  assert.equal(isLifecycleProtocolVersion('3'), false);
+  assert.equal(isCanonicalLifecyclePackageVersion('1.2.3'), true);
+  assert.equal(isCanonicalLifecyclePackageVersion('0.9.9-alpha.0'), true);
+  assert.equal(isCanonicalLifecyclePackageVersion('v1.2.3'), false);
+  assert.equal(isCanonicalLifecyclePackageVersion('1.2'), false);
+  assert.equal(isCanonicalLifecyclePackageVersion('>=1.2.3'), false);
+  assert.equal(isCanonicalLifecyclePackageVersion(' invalid '), false);
+  assert.equal(isCanonicalLifecyclePackageVersion(null), false);
 });

@@ -7,7 +7,11 @@ import {
   resolveCodexThread
 } from '../agent-clients/adapters/codex-lifecycle/app-server.ts';
 import { createCodexLifecycleStore } from '../agent-clients/adapters/codex-lifecycle/store.ts';
-import { createCodexCapabilityStore } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import {
+  createCodexCapabilityStore,
+  isCodexCapabilityProvenanceDetail
+} from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import type { CodexCapabilityProvenanceDetail } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import { computeLifecycleBuildIdentity } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import type { LifecycleBuildIdentity } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import { verifyCodexSandboxControllerContext } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
@@ -52,10 +56,10 @@ function coreOptions(options: CodexBridgeOptions): OrchestrationOptions {
   return { ...options.orchestrationOptions, repoRoot: options.repoRoot ?? options.orchestrationOptions?.repoRoot };
 }
 
-function bridgeFailure(code: string, message: string): OrchestrationResult {
+function bridgeFailure(code: string, message: string, detail?: CodexCapabilityProvenanceDetail): OrchestrationResult {
   return {
     status: 'failed', changed: false, taskId: null, run: null, next: null,
-    error: { code, message }
+    error: { code, message, ...(detail ? { detail } : {}) }
   };
 }
 
@@ -126,11 +130,20 @@ async function prepareCodexOrchestrationDelegation(
       }
     }, coreOptions(options));
   } catch (error) {
+    const detailValue = error instanceof Error
+      ? (error as Error & { detail?: unknown }).detail
+      : undefined;
+    const detail = error instanceof Error
+      && error.name === 'CODEX_CAPABILITY_PROVENANCE_MISMATCH'
+      && isCodexCapabilityProvenanceDetail(detailValue)
+      ? detailValue
+      : undefined;
     return bridgeFailure(
       error instanceof Error && error.name.startsWith('CODEX_CAPABILITY_')
         ? error.name
         : 'ORCHESTRATION_CLIENT_PREFLIGHT_FAILED',
-      error instanceof Error ? error.message : String(error)
+      error instanceof Error ? error.message : String(error),
+      detail
     );
   }
 }
