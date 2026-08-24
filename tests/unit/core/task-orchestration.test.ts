@@ -16,7 +16,8 @@ import {
   readRun,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
-  sealOrchestrationDelegation
+  sealOrchestrationDelegation,
+  statusOrchestration
 } from '../../../lib/task/orchestration.ts';
 import { sha256File, upsertArtifactReceipt } from '../../../lib/task/artifact-receipts.ts';
 import { upsertSection } from '../../../lib/task/sections.ts';
@@ -140,15 +141,71 @@ test('begin is persistent and idempotent for a running task', () => {
   });
   assert.equal(first.status, 'running');
   assert.equal(first.changed, true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.taskDir, 'orchestration.json'), 'utf8')), {
+    taskId: 'TASK-20260101-000001',
+    runId: 'run-1',
+    status: 'running',
+    nextStage: null,
+    stepCount: 0,
+    maxSteps: 24,
+    modelPolicy,
+    modelPolicySource: {
+      kind: 'explicit', client: 'claude-code', resolvedAt: '2026-01-01T00:00:00.000Z'
+    },
+    recoveryHistory: [],
+    baseline: '',
+    pendingDelegation: null,
+    receipts: [],
+    pause: null,
+    commitAuthorization: { issuedAt: null, consumedAt: null },
+    completionEvidence: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z'
+  });
   const second = beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   assert.equal(second.changed, false);
   assert.equal(second.run?.runId, 'run-1');
   assert.deepEqual(second.run?.modelPolicy, modelPolicy);
-  assert.equal(second.run?.schemaVersion, 3);
   assert.equal(second.run?.modelPolicySource?.kind, 'explicit');
 });
 
-test('completed current-schema runs are idempotent across client changes', () => {
+test('readRun rejects persisted state outside the current complete structure', () => {
+  for (const mutate of [
+    (run: Record<string, unknown>) => { run.schemaVersion = 3; },
+    (run: Record<string, unknown>) => { run.unknownField = true; },
+    (run: Record<string, unknown>) => { delete run.modelPolicySource; },
+    (run: Record<string, any>) => { run.commitAuthorization = { issuedAt: null }; }
+  ]) {
+    const f = fixture('requirement-analysis');
+    beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+    const runPath = path.join(f.taskDir, 'orchestration.json');
+    const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+    mutate(persisted);
+    fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);
+    assert.throws(() => readRun(f.taskDir), { name: 'OrchestrationStateError' });
+  }
+});
+
+test('persisted run identity is bound to its task directory', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+  persisted.taskId = 'TASK-20990101-999999';
+  fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);
+
+  assert.throws(() => readRun(f.taskDir), { name: 'OrchestrationStateError' });
+  assert.throws(
+    () => statusOrchestration('TASK-20260101-000001', { repoRoot: f.root }),
+    { name: 'OrchestrationStateError' }
+  );
+  assert.equal(
+    beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root }).error?.code,
+    'ORCHESTRATION_STATE_INVALID'
+  );
+});
+
+test('completed current runs are idempotent across client changes', () => {
   const f = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   const runPath = path.join(f.taskDir, 'orchestration.json');
@@ -207,7 +264,7 @@ test('begin accepts a complete run-level policy when both roles use the same mod
   });
 });
 
-test('resume rejects policy changes and pauses legacy runs without model evidence', () => {
+test('resume rejects policy changes and fails closed for unsupported persisted structures', () => {
   const mismatch = fixture('requirement-analysis');
   beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: mismatch.root });
   const mismatchResult = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
@@ -217,85 +274,47 @@ test('resume rejects policy changes and pauses legacy runs without model evidenc
   });
   assert.equal(mismatchResult.error?.code, 'ORCHESTRATION_MODEL_POLICY_MISMATCH');
 
-  const legacy = fixture('requirement-analysis');
-  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: legacy.root });
-  const runPath = path.join(legacy.taskDir, 'orchestration.json');
-  const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
-  persisted.schemaVersion = 1;
-  delete persisted.modelPolicy;
-  delete persisted.modelPolicySource;
-  delete persisted.recoveryHistory;
-  persisted.status = 'paused';
-  persisted.pause = {
-    code: 'ORCHESTRATION_MODEL_EVIDENCE_MISSING',
-    message: 'legacy policy missing',
-    recoverable: false
-  };
-  fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);
-  const resumed = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-    repoRoot: legacy.root, client: 'claude-code', modelPolicy
-  });
-  assert.equal(resumed.status, 'running');
-  assert.equal(resumed.run?.schemaVersion, 3);
-  assert.equal(resumed.run?.recoveryHistory?.length, 1);
-  const repeated = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-    repoRoot: legacy.root, client: 'claude-code'
-  });
-  assert.equal(repeated.changed, false);
+  for (const mutate of [
+    (run: Record<string, unknown>) => { run.schemaVersion = 1; },
+    (run: Record<string, unknown>) => { delete run.modelPolicy; },
+    (run: Record<string, unknown>) => { run.recoveryHistory = [{ code: 'MODEL_POLICY_SUPPLEMENTED' }]; }
+  ]) {
+    const invalid = fixture('requirement-analysis');
+    beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: invalid.root });
+    const runPath = path.join(invalid.taskDir, 'orchestration.json');
+    const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+    mutate(persisted);
+    const serialized = `${JSON.stringify(persisted, null, 2)}\n`;
+    fs.writeFileSync(runPath, serialized);
+    const result = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+      repoRoot: invalid.root, client: 'claude-code', modelPolicy
+    });
+    assert.equal(result.error?.code, 'ORCHESTRATION_STATE_INVALID');
+    assert.equal(fs.readFileSync(runPath, 'utf8'), serialized);
+  }
 });
 
-test('legacy recovery rejects historical receipts and malformed v2 state', () => {
-  const historical = fixture('requirement-analysis');
-  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: historical.root });
-  const historicalPath = path.join(historical.taskDir, 'orchestration.json');
-  const v1 = JSON.parse(fs.readFileSync(historicalPath, 'utf8'));
-  v1.schemaVersion = 1;
-  v1.modelPolicy = {
-    executor: 'executor-model', reviewer: 'reviewer-model'
-  };
-  delete v1.modelPolicySource;
-  delete v1.recoveryHistory;
-  v1.receipts = [{ id: 'legacy-receipt' }];
-  fs.writeFileSync(historicalPath, `${JSON.stringify(v1, null, 2)}\n`);
-  const blocked = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-    repoRoot: historical.root, client: 'claude-code', modelPolicy
-  });
-  assert.equal(blocked.status, 'paused');
-  assert.equal(blocked.run?.pause?.code, 'ORCHESTRATION_HISTORICAL_EFFORT_UNVERIFIED');
-
-  const malformed = fixture('requirement-analysis');
-  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: malformed.root });
-  const malformedPath = path.join(malformed.taskDir, 'orchestration.json');
-  const v2 = JSON.parse(fs.readFileSync(malformedPath, 'utf8'));
-  delete v2.modelPolicySource;
-  fs.writeFileSync(malformedPath, `${JSON.stringify(v2, null, 2)}\n`);
-  assert.equal(beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-    repoRoot: malformed.root, client: 'claude-code'
-  }).error?.code, 'ORCHESTRATION_STATE_INVALID');
-});
-
-test('Codex resumes only a pristine v2 unsupported-client pause and records recovery provenance', () => {
+test('Claude Code resumes only a pristine unsupported-client pause with current provenance', () => {
   const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
   const runPath = path.join(f.taskDir, 'orchestration.json');
-  const paused = JSON.parse(fs.readFileSync(
-    path.resolve('tests/fixtures/orchestration/codex-unsupported-pause-v2.json'),
-    'utf8'
-  ));
+  const paused = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+  paused.status = 'paused';
+  paused.pause = { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'unsupported', recoverable: true };
   fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
 
   const resumed = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-    repoRoot: f.root, client: 'codex', modelPolicy,
+    repoRoot: f.root, client: 'claude-code', modelPolicy,
     now: () => '2026-08-14T00:01:00.000Z'
   });
   assert.equal(resumed.status, 'running');
   assert.equal(resumed.run?.pause, null);
-  assert.deepEqual(resumed.run?.recoveryHistory?.at(-1), {
+  assert.deepEqual(resumed.run?.recoveryHistory.at(-1), {
     code: 'CLIENT_CAPABILITY_ENABLED',
     recoveredAt: '2026-08-14T00:01:00.000Z',
-    previousSchemaVersion: 2,
     previousStatus: 'paused',
     previousPause: paused.pause,
-    client: 'codex',
+    client: 'claude-code',
     guards: {
       stepCount: 0, nextStage: null, baselineEmpty: true, receiptCount: 0,
       pendingDelegation: false, commitAuthorizationUnused: true,
@@ -305,84 +324,60 @@ test('Codex resumes only a pristine v2 unsupported-client pause and records reco
   });
 });
 
-test('Codex unsupported-client recovery fails closed when historical execution evidence exists', () => {
-  const mutations = [
-    (run: any) => { run.baseline = 'historical-tree'; },
-    (run: any) => { run.stepCount = 1; },
-    (run: any) => { run.nextStage = 'analysis'; },
-    (run: any) => { run.receipts = [{ id: 'historical-receipt' }]; },
-    (run: any) => { run.pendingDelegation = { id: 'pending-receipt' }; },
-    (run: any) => { run.commitAuthorization.issuedAt = '2026-08-14T00:00:00.000Z'; },
-    (run: any) => { run.completionEvidence = { kind: 'reviewed-head-clean' }; },
-    (run: any) => { run.recoveryHistory = [{ code: 'UNKNOWN_RECOVERY' }]; }
-  ];
-  for (const mutate of mutations) {
-    const f = fixture('requirement-analysis');
-    beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-      repoRoot: f.root, client: 'codex', modelPolicy
-    });
-    const runPath = path.join(f.taskDir, 'orchestration.json');
-    const paused = JSON.parse(fs.readFileSync(runPath, 'utf8'));
-    paused.status = 'paused';
-    paused.pause = { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'unsupported', recoverable: true };
-    mutate(paused);
-    fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
+test('unsupported-client recovery remains paused when current guards do not hold', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const paused = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+  paused.status = 'paused';
+  paused.pause = { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'unsupported', recoverable: true };
+  paused.baseline = 'historical-tree';
+  fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
 
-    const result = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-      repoRoot: f.root, client: 'codex', modelPolicy
-    });
-    assert.equal(result.status, 'paused');
-    assert.equal(result.changed, false);
-    assert.equal(result.run?.pause?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
-  }
-
-  const intent = fixture('requirement-analysis');
-  const intentRun = JSON.parse(fs.readFileSync(
-    path.resolve('tests/fixtures/orchestration/codex-unsupported-pause-v2.json'),
-    'utf8'
-  ));
-  fs.writeFileSync(path.join(intent.taskDir, 'orchestration.json'), `${JSON.stringify(intentRun, null, 2)}\n`);
-  fs.writeFileSync(path.join(intent.taskDir, 'commit-intent.json'), '{}\n');
-  const blocked = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-    repoRoot: intent.root, client: 'codex', modelPolicy
+  const result = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+    repoRoot: f.root, client: 'claude-code', modelPolicy
   });
-  assert.equal(blocked.status, 'paused');
-  assert.equal(blocked.changed, false);
+  assert.equal(result.status, 'paused');
+  assert.equal(result.changed, false);
+  assert.equal(result.run?.pause?.code, 'ORCHESTRATION_CLIENT_UNSUPPORTED');
 });
 
-test('recoverable v2 pauses migrate only when their idle baseline is unchanged', () => {
-  const safe = fixture('requirement-analysis');
-  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: safe.root });
-  const safePath = path.join(safe.taskDir, 'orchestration.json');
-  const paused = JSON.parse(fs.readFileSync(safePath, 'utf8'));
-  paused.schemaVersion = 2;
+test('Codex unsupported-client pauses remain paused', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+    repoRoot: f.root, client: 'codex', modelPolicy
+  });
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const paused = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+  paused.status = 'paused';
+  paused.pause = { code: 'ORCHESTRATION_CLIENT_UNSUPPORTED', message: 'unsupported', recoverable: true };
+  fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
+
+  const result = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+    repoRoot: f.root, client: 'codex', modelPolicy
+  });
+  assert.equal(result.status, 'paused');
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.run?.recoveryHistory, []);
+});
+
+test('current recoverable pauses resume directly without recovery provenance', () => {
+  const f = fixture('requirement-analysis');
+  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: f.root });
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const paused = JSON.parse(fs.readFileSync(runPath, 'utf8'));
   paused.status = 'paused';
   paused.pause = { code: 'ORCHESTRATION_RETRYABLE', message: 'retry', recoverable: true };
-  paused.baseline = '';
-  fs.writeFileSync(safePath, `${JSON.stringify(paused, null, 2)}\n`);
+  paused.baseline = 'historical-tree';
+  fs.writeFileSync(runPath, `${JSON.stringify(paused, null, 2)}\n`);
 
-  const migrated = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-    repoRoot: safe.root,
-    client: 'claude-code',
-    modelPolicy
+  const resumed = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
+    repoRoot: f.root, client: 'claude-code', modelPolicy,
+    now: () => '2026-08-14T00:01:00.000Z'
   });
-  assert.equal(migrated.status, 'running');
-  assert.equal(migrated.run?.schemaVersion, 3);
-  assert.equal(migrated.run?.pause, null);
-
-  const drifted = fixture('requirement-analysis');
-  beginOrResumeOrchestration('TASK-20260101-000001', { repoRoot: drifted.root });
-  const driftedPath = path.join(drifted.taskDir, 'orchestration.json');
-  fs.writeFileSync(driftedPath, `${JSON.stringify({ ...paused, baseline: 'historical-tree' }, null, 2)}\n`);
-  const blocked = beginOrResumeOrchestrationRaw('TASK-20260101-000001', {
-    repoRoot: drifted.root,
-    client: 'claude-code',
-    modelPolicy
-  });
-  assert.equal(blocked.status, 'paused');
-  assert.equal(blocked.run?.schemaVersion, 2);
-  assert.equal(blocked.run?.pause?.code, 'ORCHESTRATION_SCHEMA_MIGRATION_REQUIRED');
-  assert.equal(blocked.run?.pause?.recoverable, false);
+  assert.equal(resumed.status, 'running');
+  assert.equal(resumed.run?.pause, null);
+  assert.deepEqual(resumed.run?.recoveryHistory, []);
 });
 
 test('prepare validates requested model before capturing workspace state', () => {
@@ -905,7 +900,7 @@ test('native stop derives the workspace delta before sealing the unique delegati
   assert.deepEqual(capturedScopes, ['TASK-20260101-000001', 'TASK-20260101-000001']);
 });
 
-test('native stop preserves legacy snapshot scope for an old pending receipt', () => {
+test('native hooks reject pending receipts missing the current snapshot scope', () => {
   const f = fixture('requirement-analysis-review');
   const capturedScopes: Array<string | null> = [];
   const captureWorkspace = ({ taskId }: { taskId: string | null }) => {
@@ -924,25 +919,11 @@ test('native stop preserves legacy snapshot scope for an old pending receipt', (
   const persisted = JSON.parse(fs.readFileSync(runPath, 'utf8'));
   delete persisted.pendingDelegation.workspaceSnapshotScope;
   fs.writeFileSync(runPath, `${JSON.stringify(persisted, null, 2)}\n`);
-  activateMatchingOrchestrationDelegation('claude-code', {
-    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-legacy',
+  assert.throws(() => activateMatchingOrchestrationDelegation('claude-code', {
+    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-invalid',
     parentId: 'parent-session', spawnMode: 'fresh', actualModel: 'reviewer-model', actualReasoningEffort: 'high'
-  }, { repoRoot: f.root });
-  completeOrchestrationStage('TASK-20260101-000001', {
-    stage: 'review-analysis', round: 1, artifact: 'review-analysis.md', agent: 'claude-code'
-  }, { repoRoot: f.root });
-
-  const stopped = sealMatchingOrchestrationDelegation('claude-code', {
-    nativeAgent: 'agent-infra-lifecycle-reviewer', childId: 'child-legacy'
-  }, {
-    repoRoot: f.root,
-    captureWorkspace,
-    diffWorkspace: () => ['.agents/workspace/active/TASK-20260101-000001/review-analysis.md']
-  });
-
-  assert.equal(stopped.status, 'running');
-  assert.equal(stopped.run?.pendingDelegation?.status, 'sealed');
-  assert.deepEqual(capturedScopes, ['TASK-20260101-000001', null]);
+  }, { repoRoot: f.root }), { name: 'OrchestrationStateError' });
+  assert.deepEqual(capturedScopes, ['TASK-20260101-000001']);
 });
 
 test('replaying a start event with blank actual model/effort is idempotent, not a replay conflict', () => {

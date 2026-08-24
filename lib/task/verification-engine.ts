@@ -27,6 +27,7 @@ import type { LedgerRow } from "./ledger.ts";
 import { equalCounts, parseReviewSummary } from "./review-artifacts.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
 import { snapshotReview } from "../git/review-snapshot.ts";
+import { OrchestrationStateError, readRun } from "./orchestration.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -142,40 +143,19 @@ function runCheck(type: any, context: any, shared: any): any {
   }
 }
 
-function isFailClosedLegacyPause(run: any): boolean {
-  if (
-    run.schemaVersion !== 1
-    || run.status !== 'paused'
-    || run.pause?.recoverable !== false
-    || !exactText(run.pause?.message)
-    || !Array.isArray(run.receipts)
-  ) {
-    return false;
-  }
-  if (run.pause.code === 'ORCHESTRATION_HISTORICAL_EFFORT_UNVERIFIED') {
-    return run.receipts.length > 0 && run.pendingDelegation === null;
-  }
-  if (run.pause.code === 'ORCHESTRATION_DELEGATION_BUSY') {
-    return run.pendingDelegation != null && run.pendingDelegation.status !== 'sealed';
-  }
-  return false;
-}
-
 function checkOrchestrationState({ taskDir }: any): any {
   const file = path.join(taskDir, 'orchestration.json');
   const stat = safeStat(file);
   if (!stat?.isFile()) return failResult('orchestration-state', 'orchestration.json is missing');
   let run: any;
   try {
-    run = JSON.parse(fs.readFileSync(file, 'utf8'));
+    run = readRun(taskDir);
   } catch (error) {
-    return failResult('orchestration-state', `Invalid orchestration.json: ${String(error)}`);
+    const message = error instanceof OrchestrationStateError ? error.message : String(error);
+    return failResult('orchestration-state', `Invalid orchestration.json: ${message}`);
   }
-  if (isFailClosedLegacyPause(run)) {
-    return passResult('orchestration-state', 'Legacy orchestration run is safely paused');
-  }
-  if (![2, 3].includes(run.schemaVersion) || !['paused', 'completed'].includes(run.status)) {
-    return failResult('orchestration-state', `Expected paused or completed run, received '${run.status}'`);
+  if (!run || !['paused', 'completed'].includes(run.status)) {
+    return failResult('orchestration-state', `Expected paused or completed run, received '${run?.status ?? 'missing'}'`);
   }
   if (run.status === 'paused' && (!run.pause?.code || !run.pause?.message)) {
     return failResult('orchestration-state', 'Paused run requires a stable pause code and message');
@@ -242,12 +222,10 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
   if (!stat?.isFile()) return failResult('orchestration-evidence', 'orchestration.json is missing');
   let run: any;
   try {
-    run = JSON.parse(fs.readFileSync(file, 'utf8'));
+    run = readRun(taskDir);
   } catch (error) {
-    return failResult('orchestration-evidence', `Invalid orchestration.json: ${String(error)}`);
-  }
-  if (isFailClosedLegacyPause(run)) {
-    return passResult('orchestration-evidence', 'Legacy orchestration evidence is preserved in a fail-closed pause');
+    const message = error instanceof OrchestrationStateError ? error.message : String(error);
+    return failResult('orchestration-evidence', `Invalid orchestration.json: ${message}`);
   }
   const policy = run.modelPolicy;
   if (
@@ -269,30 +247,8 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
     return failResult('orchestration-evidence', 'Run model policy source or recovery history is invalid');
   }
   for (const recovery of run.recoveryHistory) {
-    const validModelRecovery = recovery.code === 'MODEL_POLICY_SUPPLEMENTED'
-      && recovery.previousSchemaVersion === 1
-      && recovery.receiptCount === 0
-      && recovery.pendingDelegation === false
-      && exactText(recovery.recoveredAt)
-      && recovery.policySource;
     const guards = recovery.guards;
-    const validCapabilityRecovery = recovery.code === 'CLIENT_CAPABILITY_ENABLED'
-      && recovery.previousSchemaVersion === 2
-      && recovery.previousStatus === 'paused'
-      && recovery.previousPause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
-      && recovery.client === 'codex'
-      && recovery.resultingStatus === 'running'
-      && exactText(recovery.recoveredAt)
-      && guards?.stepCount === 0
-      && guards?.nextStage === null
-      && guards?.baselineEmpty === true
-      && guards?.receiptCount === 0
-      && guards?.pendingDelegation === false
-      && guards?.commitAuthorizationUnused === true
-      && guards?.completionEvidenceAbsent === true
-      && guards?.commitIntentAbsent === true;
-    const validClaudeCodeRecovery = recovery.code === 'CLIENT_CAPABILITY_ENABLED_NO_MIGRATION'
-      && recovery.previousSchemaVersion === 3
+    const validClaudeCodeRecovery = recovery.code === 'CLIENT_CAPABILITY_ENABLED'
       && recovery.previousStatus === 'paused'
       && recovery.previousPause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
       && recovery.client === 'claude-code'
@@ -306,7 +262,7 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
       && guards?.commitAuthorizationUnused === true
       && guards?.completionEvidenceAbsent === true
       && guards?.commitIntentAbsent === true;
-    if (!validModelRecovery && !validCapabilityRecovery && !validClaudeCodeRecovery) {
+    if (!validClaudeCodeRecovery) {
       return failResult('orchestration-evidence', 'Run recovery history contains invalid provenance');
     }
   }
@@ -376,13 +332,28 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
         return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has an unrelated reasoning-effort fallback reason`);
       }
       if (receipt.client === 'codex') {
+        const activatedCodex = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status);
         const host = receipt.hostEvidence;
-        if (
-          host?.kind !== 'codex-lifecycle-v1'
+        const provenance = receipt.lifecycleProvenance;
+        if (!provenance || (activatedCodex && (
+          host?.kind !== 'codex-lifecycle-v2'
+          || host.protocolVersion !== provenance.protocolVersion
+          || host.packageVersion !== provenance.packageVersion
+          || host.internalExecutableBuildHash !== provenance.internalExecutableBuildHash
+          || host.lifecycleContractHash !== provenance.lifecycleContractHash
+          || host.hookDefinitionHash !== provenance.hookDefinitionHash
+          || host.hookSource !== provenance.hookSource
+          || host.hookSourcePathDigest !== provenance.hookSourcePathDigest
+          || host.hookSourceHash !== provenance.hookSourceHash
+          || host.capabilitySessionId !== provenance.capabilitySessionId
+          || host.capabilityTurnId !== provenance.capabilityTurnId
+          || host.controllerInstanceDigest !== provenance.controllerInstanceDigest
+          || host.controlGeneration !== provenance.controlGeneration
+          || receipt.parentId !== provenance.capabilitySessionId
           || !exactText(host.hookDefinitionHash)
           || !Number.isSafeInteger(host.startRevision)
           || host.startRevision < 1
-        ) {
+        ))) {
           return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid Codex start evidence`);
         }
         if (['sealed', 'consumed'].includes(receipt.status) && (

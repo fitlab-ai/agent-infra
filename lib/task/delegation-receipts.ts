@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 
@@ -86,6 +87,261 @@ type DelegationReceipt = Readonly<{
 type ReceiptFailure = Readonly<{ ok: false; code: string; message: string; receipt?: never }>;
 type ReceiptSuccess = Readonly<{ ok: true; receipt: DelegationReceipt; code?: never; message?: never }>;
 type ReceiptResult = ReceiptSuccess | ReceiptFailure;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(
+  value: unknown,
+  required: readonly string[],
+  optional: readonly string[] = []
+): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  const allowed = new Set([...required, ...optional]);
+  return required.every((key) => Object.prototype.hasOwnProperty.call(value, key))
+    && keys.every((key) => allowed.has(key));
+}
+
+function exactText(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.trim() === value;
+}
+
+function nullableText(value: unknown): value is string | null {
+  return value === null || exactText(value);
+}
+
+function nullableSafeInteger(value: unknown): value is number | null {
+  return value === null || (Number.isSafeInteger(value) && (value as number) >= 0);
+}
+
+const LIFECYCLE_PROVENANCE_KEYS = [
+  'protocolVersion', 'packageVersion', 'internalExecutableBuildHash', 'lifecycleContractHash',
+  'hookDefinitionHash', 'hookSource', 'hookSourcePathDigest', 'hookSourceHash',
+  'capabilitySessionId', 'capabilityTurnId', 'capabilityToolUseId',
+  'controllerInstanceDigest', 'controlGeneration'
+] as const;
+
+function isDelegationLifecycleProvenance(value: unknown): value is DelegationLifecycleProvenance {
+  if (!hasExactKeys(value, LIFECYCLE_PROVENANCE_KEYS)) return false;
+  return Number.isSafeInteger(value.protocolVersion)
+    && (value.protocolVersion as number) > 0
+    && exactText(value.packageVersion)
+    && exactText(value.internalExecutableBuildHash)
+    && exactText(value.lifecycleContractHash)
+    && exactText(value.hookDefinitionHash)
+    && ['project', 'managed', 'isolated-user'].includes(value.hookSource as string)
+    && exactText(value.hookSourcePathDigest)
+    && exactText(value.hookSourceHash)
+    && exactText(value.capabilitySessionId)
+    && exactText(value.capabilityTurnId)
+    && exactText(value.capabilityToolUseId)
+    && nullableText(value.controllerInstanceDigest)
+    && nullableText(value.controlGeneration);
+}
+
+const HOST_EVIDENCE_REQUIRED_KEYS = [
+  'kind', 'hookDefinitionHash', 'startRevision', 'stopRevision', 'consumer', 'consumedAt'
+] as const;
+const HOST_EVIDENCE_OPTIONAL_KEYS = [
+  'protocolVersion', 'packageVersion', 'internalExecutableBuildHash', 'lifecycleContractHash',
+  'hookSource', 'hookSourcePathDigest', 'hookSourceHash', 'capabilitySessionId',
+  'capabilityTurnId', 'capabilityToolUseId', 'spawnToolUseId', 'spawnObservedAt',
+  'controllerInstanceDigest', 'controlGeneration'
+] as const;
+
+function isDelegationHostEvidence(value: unknown): value is DelegationHostEvidence {
+  if (!hasExactKeys(value, HOST_EVIDENCE_REQUIRED_KEYS, HOST_EVIDENCE_OPTIONAL_KEYS)) return false;
+  if (!['codex-lifecycle-v1', 'codex-lifecycle-v2'].includes(value.kind as string)) return false;
+  if (!exactText(value.hookDefinitionHash)
+    || !Number.isSafeInteger(value.startRevision) || (value.startRevision as number) < 1
+    || !nullableSafeInteger(value.stopRevision)
+    || !nullableText(value.consumer)
+    || !nullableText(value.consumedAt)) return false;
+  if (value.kind === 'codex-lifecycle-v1') return true;
+  return Number.isSafeInteger(value.protocolVersion)
+    && (value.protocolVersion as number) > 0
+    && exactText(value.packageVersion)
+    && exactText(value.internalExecutableBuildHash)
+    && exactText(value.lifecycleContractHash)
+    && ['project', 'managed', 'isolated-user'].includes(value.hookSource as string)
+    && exactText(value.hookSourcePathDigest)
+    && exactText(value.hookSourceHash)
+    && exactText(value.capabilitySessionId)
+    && exactText(value.capabilityTurnId)
+    && exactText(value.spawnToolUseId)
+    && exactText(value.spawnObservedAt)
+    && nullableText(value.controllerInstanceDigest)
+    && nullableText(value.controlGeneration);
+}
+
+function hasCurrentCodexEvidence(receipt: DelegationReceipt): boolean {
+  const provenance = receipt.lifecycleProvenance;
+  if (!provenance) return false;
+  const activated = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status);
+  if (!activated) return receipt.hostEvidence === null;
+  const host = receipt.hostEvidence;
+  if (
+    host?.kind !== 'codex-lifecycle-v2'
+    || host.protocolVersion !== provenance.protocolVersion
+    || host.packageVersion !== provenance.packageVersion
+    || host.internalExecutableBuildHash !== provenance.internalExecutableBuildHash
+    || host.lifecycleContractHash !== provenance.lifecycleContractHash
+    || host.hookDefinitionHash !== provenance.hookDefinitionHash
+    || host.hookSource !== provenance.hookSource
+    || host.hookSourcePathDigest !== provenance.hookSourcePathDigest
+    || host.hookSourceHash !== provenance.hookSourceHash
+    || host.capabilitySessionId !== provenance.capabilitySessionId
+    || host.capabilityTurnId !== provenance.capabilityTurnId
+    || host.controllerInstanceDigest !== provenance.controllerInstanceDigest
+    || host.controlGeneration !== provenance.controlGeneration
+    || receipt.parentId !== provenance.capabilitySessionId
+    || host.spawnToolUseId === provenance.capabilityToolUseId
+  ) return false;
+  const spawnObservedAt = Date.parse(host.spawnObservedAt ?? '');
+  const spawnDispatchedAt = Date.parse(receipt.spawnDispatchedAt ?? '');
+  const activationDeadlineAt = Date.parse(receipt.activationDeadlineAt ?? '');
+  if (
+    !Number.isFinite(spawnObservedAt)
+    || !Number.isFinite(spawnDispatchedAt)
+    || !Number.isFinite(activationDeadlineAt)
+    || spawnObservedAt < spawnDispatchedAt
+    || spawnObservedAt > activationDeadlineAt
+  ) return false;
+  if (['sealed', 'consumed'].includes(receipt.status)) {
+    return Number.isSafeInteger(host.stopRevision)
+      && (host.stopRevision as number) > host.startRevision
+      && host.consumer === receipt.id
+      && exactText(host.consumedAt);
+  }
+  return host.stopRevision === null && host.consumer === null && host.consumedAt === null;
+}
+
+const RECEIPT_KEYS = [
+  'id', 'taskId', 'runId', 'role', 'stage', 'round', 'artifact', 'client',
+  'requestedModel', 'requestedReasoningEffort', 'actualModel', 'actualReasoningEffort',
+  'modelFallbackReason', 'reasoningEffortFallbackReason', 'parentId', 'childId',
+  'spawnMode', 'agent', 'status', 'workspaceSnapshotScope', 'lifecycleProvenance',
+  'hostEvidence', 'beforeFingerprint', 'afterFingerprint', 'changedPaths', 'createdAt',
+  'preparedMonotonicMs', 'spawnDispatchMonotonicMs', 'activationDeadlineMonotonicMs',
+  'spawnDispatchedAt', 'activationDeadlineAt', 'startEvidenceMonotonicMs',
+  'activatedMonotonicMs', 'activatedAt', 'sealedAt', 'consumedAt'
+] as const;
+
+function hasStatusBoundEvidence(receipt: DelegationReceipt): boolean {
+  const dispatchFields = [
+    receipt.spawnDispatchMonotonicMs,
+    receipt.activationDeadlineMonotonicMs,
+    receipt.spawnDispatchedAt,
+    receipt.activationDeadlineAt
+  ];
+  const dispatchEmpty = dispatchFields.every((field) => field === null);
+  const dispatchComplete = dispatchFields.every((field) => field !== null);
+  if (!dispatchEmpty && !dispatchComplete) return false;
+
+  const beforeActivation = ['prepared', 'aborted', 'expired'].includes(receipt.status);
+  if (beforeActivation) {
+    return receipt.parentId === null
+      && receipt.childId === null
+      && receipt.spawnMode === null
+      && receipt.actualModel === null
+      && receipt.actualReasoningEffort === null
+      && receipt.modelFallbackReason === null
+      && receipt.reasoningEffortFallbackReason === null
+      && receipt.agent === null
+      && receipt.hostEvidence === null
+      && receipt.startEvidenceMonotonicMs === null
+      && receipt.activatedMonotonicMs === null
+      && receipt.activatedAt === null
+      && receipt.afterFingerprint === null
+      && receipt.changedPaths.length === 0
+      && receipt.sealedAt === null
+      && receipt.consumedAt === null;
+  }
+
+  if (
+    !dispatchComplete
+    || !exactText(receipt.parentId)
+    || !exactText(receipt.childId)
+    || receipt.parentId === receipt.childId
+    || receipt.startEvidenceMonotonicMs === null
+    || receipt.activatedMonotonicMs === null
+    || !exactText(receipt.activatedAt)
+  ) return false;
+
+  if (receipt.status === 'activated') {
+    return receipt.agent === null
+      && receipt.afterFingerprint === null
+      && receipt.changedPaths.length === 0
+      && receipt.sealedAt === null
+      && receipt.consumedAt === null;
+  }
+
+  if (
+    !exactText(receipt.agent)
+    || normalizeAgentToken(receipt.agent) !== normalizeAgentToken(receipt.client)
+  ) return false;
+
+  if (receipt.status === 'stage-completed') {
+    return receipt.afterFingerprint === null
+      && receipt.changedPaths.length === 0
+      && receipt.sealedAt === null
+      && receipt.consumedAt === null;
+  }
+
+  if (!exactText(receipt.afterFingerprint) || !exactText(receipt.sealedAt)) return false;
+  return receipt.status === 'sealed'
+    ? receipt.consumedAt === null
+    : receipt.status === 'consumed' && exactText(receipt.consumedAt);
+}
+
+function isDelegationReceipt(value: unknown): value is DelegationReceipt {
+  if (!hasExactKeys(value, RECEIPT_KEYS)) return false;
+  const structurallyValid = exactText(value.id)
+    && exactText(value.taskId)
+    && exactText(value.runId)
+    && ['executor', 'reviewer'].includes(value.role as string)
+    && ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code', 'commit'].includes(value.stage as string)
+    && Number.isSafeInteger(value.round)
+    && (value.round as number) > 0
+    && exactText(value.artifact)
+    && isAgentClientId(value.client)
+    && exactText(value.requestedModel)
+    && exactText(value.requestedReasoningEffort)
+    && nullableText(value.actualModel)
+    && nullableText(value.actualReasoningEffort)
+    && nullableText(value.modelFallbackReason)
+    && nullableText(value.reasoningEffortFallbackReason)
+    && nullableText(value.parentId)
+    && nullableText(value.childId)
+    && nullableText(value.spawnMode)
+    && nullableText(value.agent)
+    && ['prepared', 'activated', 'stage-completed', 'sealed', 'consumed', 'aborted', 'expired'].includes(value.status as string)
+    && value.workspaceSnapshotScope === 'task'
+    && (value.lifecycleProvenance === null || isDelegationLifecycleProvenance(value.lifecycleProvenance))
+    && (value.hostEvidence === null || isDelegationHostEvidence(value.hostEvidence))
+    && exactText(value.beforeFingerprint)
+    && nullableText(value.afterFingerprint)
+    && Array.isArray(value.changedPaths)
+    && value.changedPaths.every(exactText)
+    && exactText(value.createdAt)
+    && nullableSafeInteger(value.preparedMonotonicMs)
+    && value.preparedMonotonicMs !== null
+    && nullableSafeInteger(value.spawnDispatchMonotonicMs)
+    && nullableSafeInteger(value.activationDeadlineMonotonicMs)
+    && nullableText(value.spawnDispatchedAt)
+    && nullableText(value.activationDeadlineAt)
+    && nullableSafeInteger(value.startEvidenceMonotonicMs)
+    && nullableSafeInteger(value.activatedMonotonicMs)
+    && nullableText(value.activatedAt)
+    && nullableText(value.sealedAt)
+    && nullableText(value.consumedAt);
+  if (!structurallyValid) return false;
+  const receipt = value as unknown as DelegationReceipt;
+  return hasStatusBoundEvidence(receipt)
+    && (receipt.client !== 'codex' || hasCurrentCodexEvidence(receipt));
+}
 
 const MANAGED_AGENTS = {
   'agent-infra-lifecycle-executor': 'executor',
@@ -413,6 +669,7 @@ export {
   consumeDelegation,
   dispatchDelegation,
   foldBlankToNull,
+  isDelegationReceipt,
   managedDelegationRole,
   prepareDelegation,
   sealDelegation

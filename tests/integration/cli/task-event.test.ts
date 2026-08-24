@@ -23,6 +23,64 @@ function fixture(step = 'requirement-analysis-review') {
   return { root, id, dir, file: path.join(dir, 'task.md') };
 }
 
+function orchestrationReceipt(taskId: string, overrides: Record<string, unknown> = {}) {
+  const status = typeof overrides.status === 'string' ? overrides.status : 'activated';
+  const lifecycleProvenance = {
+    protocolVersion: 3, packageVersion: '0.9.9-alpha.0',
+    internalExecutableBuildHash: 'a'.repeat(64), lifecycleContractHash: 'b'.repeat(64),
+    hookDefinitionHash: 'hook-hash', hookSource: 'project',
+    hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64),
+    capabilitySessionId: 'parent-1', capabilityTurnId: 'parent-turn',
+    capabilityToolUseId: 'capability-tool', controllerInstanceDigest: null,
+    controlGeneration: null
+  } as const;
+  const hostEvidence = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(status)
+    ? {
+        kind: 'codex-lifecycle-v2', hookDefinitionHash: 'hook-hash', startRevision: 4,
+        stopRevision: null, consumer: null, consumedAt: null, protocolVersion: 3,
+        packageVersion: '0.9.9-alpha.0', internalExecutableBuildHash: 'a'.repeat(64),
+        lifecycleContractHash: 'b'.repeat(64), hookSource: 'project',
+        hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64),
+        capabilitySessionId: 'parent-1', capabilityTurnId: 'parent-turn',
+        spawnToolUseId: 'spawn-tool', spawnObservedAt: '2026-01-01T00:00:01.000Z',
+        controllerInstanceDigest: null, controlGeneration: null
+      }
+    : null;
+  return {
+    id: 'receipt-1', taskId, runId: 'run-1', role: 'executor', stage: 'plan', round: 1,
+    artifact: 'plan.md', client: 'codex', requestedModel: 'executor-model',
+    requestedReasoningEffort: 'xhigh', actualModel: 'executor-model', actualReasoningEffort: 'xhigh',
+    modelFallbackReason: null, reasoningEffortFallbackReason: null,
+    parentId: 'parent-1', childId: 'child-1', spawnMode: 'fresh', agent: null,
+    status, workspaceSnapshotScope: 'task', lifecycleProvenance,
+    hostEvidence, beforeFingerprint: 'before', afterFingerprint: null, changedPaths: [],
+    createdAt: '2026-01-01T00:00:00.000Z', preparedMonotonicMs: 1,
+    spawnDispatchMonotonicMs: 2, activationDeadlineMonotonicMs: 3,
+    spawnDispatchedAt: '2026-01-01T00:00:00.000Z',
+    activationDeadlineAt: '2026-01-01T00:00:15.000Z', startEvidenceMonotonicMs: 2,
+    activatedMonotonicMs: 2, activatedAt: '2026-01-01T00:00:01.000Z',
+    sealedAt: null, consumedAt: null,
+    ...overrides
+  };
+}
+
+function currentRun(taskId: string, overrides: Record<string, unknown> = {}) {
+  return {
+    taskId, runId: 'run-1', status: 'running', nextStage: 'plan', stepCount: 0, maxSteps: 24,
+    modelPolicy: {
+      executor: { model: 'executor-model', reasoningEffort: 'xhigh' },
+      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
+    },
+    modelPolicySource: {
+      kind: 'explicit', client: 'codex', resolvedAt: '2026-01-01T00:00:00.000Z'
+    },
+    recoveryHistory: [], baseline: '', pendingDelegation: null, receipts: [], pause: null,
+    commitAuthorization: { issuedAt: null, consumedAt: null }, completionEvidence: null,
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    ...overrides
+  };
+}
+
 function run(root: string, args: string[], env: NodeJS.ProcessEnv = process.env) {
   return spawnSync('node', [INTERNAL_CLI_PATH, 'task-event', ...args], { cwd: root, encoding: 'utf8', env });
 }
@@ -354,15 +412,14 @@ test('completed event validates orchestration provenance before writing task sta
   assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
-test('standalone completion ignores a historical orchestration run without a pending delegation', () => {
+test('standalone completion ignores a current orchestration run without a pending delegation', () => {
   const f = fixture();
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
-  fs.writeFileSync(path.join(f.dir, 'orchestration.json'), `${JSON.stringify({
-    schemaVersion: 3,
-    status: 'paused',
-    pendingDelegation: null
-  }, null, 2)}\n`);
+  fs.writeFileSync(path.join(f.dir, 'orchestration.json'), `${JSON.stringify(currentRun(f.id, {
+    status: 'paused', nextStage: null,
+    pause: { code: 'ORCHESTRATION_RETRYABLE', message: 'retry later', recoverable: true }
+  }), null, 2)}\n`);
   const runBefore = fs.readFileSync(path.join(f.dir, 'orchestration.json'));
 
   const completed = run(f.root, [
@@ -379,11 +436,14 @@ test('standalone completion fails before writing when a delegation is pending', 
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
   const runPath = path.join(f.dir, 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify({
-    schemaVersion: 3,
-    status: 'running',
-    pendingDelegation: { status: 'prepared' }
-  }, null, 2)}\n`);
+  fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
+    pendingDelegation: orchestrationReceipt(f.id, {
+      status: 'prepared', parentId: null, childId: null, spawnMode: null,
+      actualModel: null, actualReasoningEffort: null, spawnDispatchMonotonicMs: null,
+      activationDeadlineMonotonicMs: null, spawnDispatchedAt: null, activationDeadlineAt: null,
+      startEvidenceMonotonicMs: null, activatedMonotonicMs: null, activatedAt: null
+    })
+  }), null, 2)}\n`);
   const taskBefore = fs.readFileSync(f.file);
   const runBefore = fs.readFileSync(runPath);
 
@@ -402,16 +462,9 @@ test('orchestrated completion advances one matching activated delegation', () =>
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
   const runPath = path.join(f.dir, 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify({
-    schemaVersion: 3,
-    taskId: f.id,
-    runId: 'run-1',
-    status: 'running',
-    pendingDelegation: {
-      id: 'receipt-1', taskId: f.id, runId: 'run-1', role: 'executor', stage: 'plan', round: 1,
-      artifact: 'plan.md', client: 'codex', status: 'activated'
-    }
-  }, null, 2)}\n`);
+  fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
+    pendingDelegation: orchestrationReceipt(f.id)
+  }), null, 2)}\n`);
 
   const completed = run(f.root, [
     f.id, 'plan.completed', '--agent', 'codex', '--artifact', 'plan.md', '--orchestrated'
@@ -427,16 +480,9 @@ test('orchestrated completion reports a distinct partial-write error when the ru
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
   const runPath = path.join(f.dir, 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify({
-    schemaVersion: 3,
-    taskId: f.id,
-    runId: 'run-1',
-    status: 'running',
-    pendingDelegation: {
-      id: 'receipt-1', taskId: f.id, runId: 'run-1', role: 'executor', stage: 'plan', round: 1,
-      artifact: 'plan.md', client: 'codex', status: 'activated'
-    }
-  }, null, 2)}\n`);
+  fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
+    pendingDelegation: orchestrationReceipt(f.id)
+  }), null, 2)}\n`);
   const taskBefore = fs.readFileSync(f.file);
 
   const result = applyTaskEvent({
@@ -521,11 +567,14 @@ test('orchestrated completion dry-run reports a provenance mismatch without paus
   assert.equal(run(f.root, [f.id, 'plan.started', '--agent', 'codex']).status, 0);
   fs.writeFileSync(path.join(f.dir, 'plan.md'), '# Plan\n');
   const runPath = path.join(f.dir, 'orchestration.json');
-  fs.writeFileSync(runPath, `${JSON.stringify({
-    schemaVersion: 3,
-    status: 'running',
-    pendingDelegation: { status: 'prepared' }
-  }, null, 2)}\n`);
+  fs.writeFileSync(runPath, `${JSON.stringify(currentRun(f.id, {
+    pendingDelegation: orchestrationReceipt(f.id, {
+      status: 'prepared', parentId: null, childId: null, spawnMode: null,
+      actualModel: null, actualReasoningEffort: null, spawnDispatchMonotonicMs: null,
+      activationDeadlineMonotonicMs: null, spawnDispatchedAt: null, activationDeadlineAt: null,
+      startEvidenceMonotonicMs: null, activatedMonotonicMs: null, activatedAt: null
+    })
+  }), null, 2)}\n`);
   const taskBefore = fs.readFileSync(f.file);
   const runBefore = fs.readFileSync(runPath);
 

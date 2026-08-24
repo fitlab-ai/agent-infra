@@ -805,10 +805,17 @@ test('sandbox control client and broker exchange a task-bound response', async (
   const generation = 'roundtrip-generation';
   const statusDir = path.join(root, 'public');
   const processingDir = path.join(root, 'processing');
+  const taskId = 'TASK-20260809-010203';
   fs.mkdirSync(channelDir, { recursive: true });
   fs.mkdirSync(statusDir);
   fs.mkdirSync(processingDir);
   const branch = initializeRepository(root);
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  const runPath = path.join(taskDir, 'orchestration.json');
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
+  fs.writeFileSync(runPath, '{"schemaVersion":3}\n');
+  const invalidRunBytes = fs.readFileSync(runPath, 'utf8');
   fs.writeFileSync(manifestPath, `${JSON.stringify({
     version: 5,
     engine: 'docker',
@@ -819,7 +826,7 @@ test('sandbox control client and broker exchange a task-bound response', async (
     containerIdentity: { id: 'container-id', labels: {} },
     branch,
     mode: 'task-bound',
-    taskId: 'TASK-20260809-010203',
+    taskId,
     token,
     generation,
     channelDir,
@@ -835,6 +842,20 @@ test('sandbox control client and broker exchange a task-bound response', async (
   try {
     waitForFile(path.join(root, 'broker.json'), 5_000);
     waitForHealthyStatus(statusDir, 5_000);
+    const orchestrationResponse = requestSandboxControl({
+      family: 'task-orchestration',
+      args: [taskId, 'status'],
+      channelDir,
+      statusDir,
+      token,
+      generation,
+      timeoutMs: 5_000
+    });
+    assert.equal(orchestrationResponse.exitCode, 1);
+    assert.equal(JSON.parse(orchestrationResponse.stdout).error.code, 'ORCHESTRATION_STATE_INVALID');
+    assert.equal(fs.readFileSync(runPath, 'utf8'), invalidRunBytes);
+    assert.equal(readSandboxControlManifest(manifestPath).taskId, taskId);
+
     const response = requestSandboxControl({
       family: 'task-lifecycle',
       args: ['08', 'complete'],

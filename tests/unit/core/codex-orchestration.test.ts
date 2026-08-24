@@ -205,6 +205,35 @@ test('Codex prepare preflight fails before workspace capture or receipt creation
   assert.equal(readRun(f.taskDir)?.baseline, '');
 });
 
+test('Codex prepare preserves the typed orchestration state error', async () => {
+  const f = fixture();
+  const runPath = path.join(f.taskDir, 'orchestration.json');
+  const invalidRun = { ...JSON.parse(fs.readFileSync(runPath, 'utf8')), schemaVersion: 3 };
+  fs.writeFileSync(runPath, `${JSON.stringify(invalidRun, null, 2)}\n`);
+  const currentCapability = capability(f.root, 'invalid-state-token');
+  let captures = 0;
+
+  const result = await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex',
+    requestedModel: 'executor-model',
+    requestedReasoningEffort: 'xhigh',
+    capabilityToken: currentCapability.token
+  }, {
+    repoRoot: f.root,
+    capabilityStore: currentCapability.store,
+    buildIdentity,
+    preflight,
+    orchestrationOptions: { captureWorkspace: () => { captures += 1; return 'before'; } }
+  });
+
+  assert.equal(result.error?.code, 'ORCHESTRATION_STATE_INVALID');
+  assert.equal(
+    result.error?.message,
+    'orchestration.json does not match the current runtime structure; finish or clear active runs before upgrading'
+  );
+  assert.equal(captures, 0);
+});
+
 test('Codex prepare preserves safe provenance detail from capability consume', async () => {
   const f = fixture();
   const currentCapability = capability(f.root, 'capability-detail-token');
