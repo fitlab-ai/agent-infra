@@ -1,6 +1,24 @@
-import { requestSandboxControl, SandboxControlClientError } from '../sandbox/control/client.ts';
+import {
+  requestSandboxControl,
+  requestSandboxTaskControl,
+  SandboxControlClientError
+} from '../sandbox/control/client.ts';
 import { serveSandboxControl } from '../sandbox/control/server.ts';
 import { runSandboxControlExecutor } from '../sandbox/control/executor.ts';
+import {
+  controllerProofFromContext,
+  verifyCodexSandboxControllerContext
+} from '../agent-clients/adapters/codex-lifecycle/controller-context.ts';
+
+function isCanonicalCodexPrepare(args: readonly string[]): boolean {
+  if (args[1] !== 'prepare') return false;
+  const clients: string[] = [];
+  for (let index = 2; index < args.length; index += 1) {
+    if (args[index] === '--client') clients.push(args[index + 1] ?? '');
+    else if (args[index]?.startsWith('--client=')) clients.push(args[index]!.slice('--client='.length));
+  }
+  return clients.length === 1 && clients[0] === 'codex';
+}
 
 async function sandboxControl(args: string[]): Promise<void> {
   const [operation, ...rest] = args;
@@ -33,7 +51,16 @@ async function sandboxControl(args: string[]): Promise<void> {
     const [family = '', ...commandArgs] = rest;
     let response;
     try {
-      response = requestSandboxControl({ family, args: commandArgs });
+      if (family === 'task-orchestration' && isCanonicalCodexPrepare(commandArgs)) {
+        const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+        const taskId = process.env.AGENT_INFRA_TASK_ID;
+        const proof = contextPath && taskId
+          ? controllerProofFromContext(verifyCodexSandboxControllerContext(contextPath, taskId))
+          : null;
+        response = requestSandboxTaskControl({ family, args: commandArgs, controllerProof: proof });
+      } else {
+        response = requestSandboxControl({ family, args: commandArgs });
+      }
     } catch (error) {
       if (!(error instanceof SandboxControlClientError)) throw error;
       process.stderr.write(`${error.detail.message}\n`);

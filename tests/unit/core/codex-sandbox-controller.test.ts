@@ -8,6 +8,7 @@ import {
   prepareCodexSandboxController,
   verifyCodexSandboxControllerContext
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
+import { computeLifecycleBuildIdentity } from '../../../lib/agent-clients/adapters/codex-lifecycle/build-identity.ts';
 
 const fixtureRoots = new Set<string>();
 after(() => {
@@ -57,8 +58,44 @@ function fixture() {
   return { root, codexHome, runtimeDir };
 }
 
+function controllerBroker(root: string, taskId = 'TASK-20260101-000001', generation = 'generation') {
+  let active = false;
+  const leaseId = 'c'.repeat(64);
+  const leaseSecret = 'd'.repeat(64);
+  return {
+    openController: ((params: { controllerProcess: { pid: number; startTime: number } }) => {
+      if (active) throw new Error('CODEX_SANDBOX_CONTROLLER_BUSY');
+      active = true;
+      return {
+        version: 1 as const,
+        status: 'opened' as const,
+        changed: true as const,
+        lease: {
+          version: 1 as const,
+          leaseId,
+          leaseSecret,
+          taskId,
+          controlGeneration: generation,
+          controllerInstanceDigest: 'e'.repeat(64),
+          controllerProcess: params.controllerProcess,
+          buildIdentity: computeLifecycleBuildIdentity(root),
+          issuedAt: Date.now(),
+          expiresAt: Date.now() + 60_000
+        },
+        error: null
+      };
+    }) as never,
+    closeController: (() => {
+      const changed = active;
+      active = false;
+      return { version: 1 as const, status: 'closed' as const, changed, lease: null, error: null };
+    }) as never
+  };
+}
+
 test('sandbox controller prepares an isolated allowlisted home and fixed launch flags', () => {
   const f = fixture();
+  const broker = controllerBroker(f.root);
   const prepared = prepareCodexSandboxController({
     taskId: 'TASK-20260101-000001',
     taskRef: '01'
@@ -74,6 +111,7 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
       runtimeDir: f.runtimeDir
     },
     verifyTaskBinding: () => {},
+    ...broker,
     codexVersion: () => '0.147.0',
     environment: { ...process.env, UNRELATED_CONTROLLER_SECRET: 'must-not-leak' }
   });
@@ -116,6 +154,7 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
 
 test('sandbox controller rejects symlinked credentials before launch', () => {
   const f = fixture();
+  const broker = controllerBroker(f.root);
   fs.unlinkSync(path.join(f.codexHome, 'auth.json'));
   fs.symlinkSync(path.join(f.root, 'package.json'), path.join(f.codexHome, 'auth.json'));
   assert.throws(() => prepareCodexSandboxController({
@@ -126,6 +165,7 @@ test('sandbox controller rejects symlinked credentials before launch', () => {
     temporaryRoot: trackedTemporaryRoot('codex-controller-runtime-'),
     control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
     verifyTaskBinding: () => {},
+    ...broker,
     codexVersion: () => '0.147.0'
   }), /INPUT_INVALID/);
 });
@@ -133,17 +173,35 @@ test('sandbox controller rejects symlinked credentials before launch', () => {
 test('sandbox controller enforces a task lease and controller context binding', () => {
   const f = fixture();
   const temporaryRoot = trackedTemporaryRoot('codex-controller-runtime-');
+  const broker = controllerBroker(f.root);
   const options = {
     repoRoot: f.root,
     codexHome: f.codexHome,
     temporaryRoot,
     control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
     verifyTaskBinding: () => {},
+    ...broker,
     codexVersion: () => '0.147.0'
   } as const;
   const prepared = prepareCodexSandboxController({
     taskId: 'TASK-20260101-000001', taskRef: '01'
   }, options);
+  const contextRaw = fs.readFileSync(prepared.contextPath, 'utf8');
+  const contextValue = JSON.parse(contextRaw) as Record<string, unknown>;
+  assert.equal(contextValue.version, 2);
+  fs.writeFileSync(prepared.contextPath, `${JSON.stringify({ ...contextValue, extra: true })}\n`, { mode: 0o600 });
+  assert.throws(() => verifyCodexSandboxControllerContext(
+    prepared.contextPath,
+    'TASK-20260101-000001',
+    { repoRoot: f.root, generation: 'generation' }
+  ), /CONTEXT_INVALID/);
+  fs.writeFileSync(prepared.contextPath, `${JSON.stringify({ ...contextValue, version: 1 })}\n`, { mode: 0o600 });
+  assert.throws(() => verifyCodexSandboxControllerContext(
+    prepared.contextPath,
+    'TASK-20260101-000001',
+    { repoRoot: f.root, generation: 'generation' }
+  ), /CONTEXT_INVALID/);
+  fs.writeFileSync(prepared.contextPath, contextRaw, { mode: 0o600 });
   assert.throws(() => prepareCodexSandboxController({
     taskId: 'TASK-20260101-000001', taskRef: '01'
   }, options), /CONTROLLER_BUSY/);
@@ -158,4 +216,23 @@ test('sandbox controller enforces a task lease and controller context binding', 
     { repoRoot: f.root, generation: 'other' }
   ), /CONTEXT_INVALID/);
   prepared.cleanup();
+});
+
+test('sandbox controller closes a broker lease when the opened binding is invalid', () => {
+  const f = fixture();
+  const options = {
+    repoRoot: f.root,
+    codexHome: f.codexHome,
+    temporaryRoot: trackedTemporaryRoot('codex-controller-invalid-binding-'),
+    control: { token: 'token', generation: 'generation', channelDir: '/control', statusDir: '/status', runtimeDir: f.runtimeDir },
+    verifyTaskBinding: () => {},
+    ...controllerBroker(f.root, 'TASK-20260101-999999'),
+    codexVersion: () => '0.147.0'
+  } as const;
+  const prepare = () => prepareCodexSandboxController({
+    taskId: 'TASK-20260101-000001', taskRef: '01'
+  }, options);
+
+  assert.throws(prepare, /SANDBOX_CONTROL_RESULT_INVALID/);
+  assert.throws(prepare, /SANDBOX_CONTROL_RESULT_INVALID/);
 });

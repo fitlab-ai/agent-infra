@@ -6,6 +6,13 @@ import { getProcessStartTime } from '../../server/process-state.ts';
 import { createTask } from '../../task/create-service.ts';
 import { bindSandboxControlTask, type SandboxControlExecution, type SandboxControlManifest, type SandboxControlRequest } from './protocol.ts';
 import { atomicWriteJson, executionPath, terminateSandboxControlExecution } from './state.ts';
+import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import {
+  closeCodexControllerRegistration,
+  CodexControllerRegistrationError,
+  openCodexControllerRegistration,
+  resolveCodexControllerBinding
+} from './controller-registration.ts';
 
 export type SandboxControlExecutionResult = {
   exitCode: number;
@@ -132,7 +139,54 @@ function waitForGate(nonce: string, timeoutMs = 2_000): Promise<void> {
   });
 }
 
-function executeRequest(manifest: SandboxControlManifest, request: SandboxControlRequest): SandboxControlExecutionResult {
+function controllerFailure(error: unknown): SandboxControlExecutionResult {
+  const code = error instanceof CodexControllerRegistrationError
+    ? error.code
+    : /^([A-Z][A-Z0-9_]+)/u.exec(error instanceof Error ? error.message : String(error))?.[1]
+      ?? 'CODEX_SANDBOX_CONTROLLER_FAILED';
+  const payload = {
+    version: 1,
+    status: 'failed',
+    changed: false,
+    lease: null,
+    error: { code, message: `${code}: controller request failed`, retryable: false }
+  };
+  return { exitCode: 1, stdout: `${JSON.stringify(payload)}\n`, stderr: '' };
+}
+
+function orchestrationFailure(code: string, message: string): SandboxControlExecutionResult {
+  return {
+    exitCode: 1,
+    stdout: `${JSON.stringify({
+      status: 'failed', changed: false, taskId: null, run: null, next: null,
+      error: { code, message }
+    })}\n`,
+    stderr: ''
+  };
+}
+
+function isCodexPrepare(args: readonly string[]): boolean {
+  if (args[1] !== 'prepare') return false;
+  const values: string[] = [];
+  for (let index = 2; index < args.length; index += 1) {
+    if (args[index] === '--client') values.push(args[index + 1] ?? '');
+    else if (args[index]?.startsWith('--client=')) values.push(args[index]!.slice('--client='.length));
+  }
+  return values.length === 1 && values[0] === 'codex';
+}
+
+type ExecuteRequestOptions = Readonly<{
+  buildIdentity?: typeof computeLifecycleBuildIdentity;
+  resolveControllerBinding?: typeof resolveCodexControllerBinding;
+  spawnDomain?: typeof spawnSync;
+}>;
+
+export function executeRequest(
+  manifest: SandboxControlManifest,
+  manifestPath: string,
+  request: SandboxControlRequest,
+  options: ExecuteRequestOptions = {}
+): SandboxControlExecutionResult {
   if (request.family === 'task-create') {
     const result = createTask(request.candidate, { repoRoot: manifest.repoRoot });
     return {
@@ -141,15 +195,69 @@ function executeRequest(manifest: SandboxControlManifest, request: SandboxContro
       stderr: ''
     };
   }
+  if (request.family === 'codex-controller') {
+    try {
+      const result = request.command === 'open'
+        ? openCodexControllerRegistration({
+            manifest,
+            manifestPath,
+            controllerProcess: request.controllerProcess!,
+            buildIdentity: (options.buildIdentity ?? computeLifecycleBuildIdentity)(manifest.repoRoot)
+          })
+        : closeCodexControllerRegistration({
+            manifest,
+            manifestPath,
+            proof: request.controllerProof!
+          });
+      return { exitCode: 0, stdout: `${JSON.stringify(result)}\n`, stderr: '' };
+    } catch (error) {
+      return controllerFailure(error);
+    }
+  }
   const boundArgs = bindSandboxControlTask(request, manifest.taskId!);
-  if (request.family === 'task-orchestration') boundArgs.push('--git-worktree-root', manifest.worktreeRoot);
-  const result = spawnSync(
+  let controllerBinding: Readonly<{ instanceDigest: string; controlGeneration: string }> | null = null;
+  if (request.family === 'task-orchestration') {
+    if (isCodexPrepare(request.args)) {
+      if (!request.controllerProof) {
+        return orchestrationFailure(
+          'CODEX_SANDBOX_CONTROLLER_PROOF_REQUIRED',
+          'Codex prepare requires a current controller lease proof'
+        );
+      }
+      try {
+        controllerBinding = (options.resolveControllerBinding ?? resolveCodexControllerBinding)({
+          manifest,
+          manifestPath,
+          proof: request.controllerProof,
+          buildIdentity: (options.buildIdentity ?? computeLifecycleBuildIdentity)(manifest.repoRoot)
+        });
+      } catch (error) {
+        const code = error instanceof CodexControllerRegistrationError
+          ? error.code
+          : 'CODEX_SANDBOX_CONTROLLER_PROOF_INVALID';
+        return orchestrationFailure(code, `${code}: Codex controller proof was rejected`);
+      }
+    } else if (request.controllerProof !== null) {
+      return orchestrationFailure(
+        'CODEX_SANDBOX_CONTROLLER_PROOF_INVALID',
+        'Controller proof is only accepted for canonical Codex prepare'
+      );
+    }
+    boundArgs.push('--git-worktree-root', manifest.worktreeRoot);
+  }
+  const result = (options.spawnDomain ?? spawnSync)(
     process.execPath,
     nodeEntryArgs(process.argv[1]!, [request.family, ...boundArgs]),
     {
       cwd: manifest.repoRoot,
       encoding: 'utf8',
-      env: { ...safeEnv(process.env), AGENT_INFRA_RUNTIME_DIR: manifest.runtimeDir }
+      env: {
+        ...safeEnv(process.env),
+        AGENT_INFRA_RUNTIME_DIR: manifest.runtimeDir,
+        ...(controllerBinding
+          ? { AGENT_INFRA_CONTROL_CONTROLLER_BINDING: JSON.stringify(controllerBinding) }
+          : {})
+      }
     }
   );
   return { exitCode: result.status ?? 1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
@@ -164,7 +272,7 @@ export async function runSandboxControlExecutor(requestPath: string, nonce: stri
   if (!manifestPath) throw new Error('SANDBOX_CONTROL_EXECUTOR_MANIFEST_MISSING');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as SandboxControlManifest;
   if (fs.realpathSync.native(manifest.repoRoot) !== root) throw new Error('SANDBOX_CONTROL_EXECUTOR_ROOT_INVALID');
-  const result = executeRequest(manifest, request);
+  const result = executeRequest(manifest, manifestPath, request);
   process.stdout.write(result.stdout);
   process.stderr.write(result.stderr);
   process.exitCode = result.exitCode;

@@ -82,6 +82,27 @@ function controllerContext(taskId: string, repoRoot: string) {
     : null;
 }
 
+function brokerControllerBinding(): Readonly<{ instanceDigest: string; controlGeneration: string }> | null {
+  const raw = process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
+  if (!raw) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error('CODEX_SANDBOX_CONTROLLER_BINDING_INVALID');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('CODEX_SANDBOX_CONTROLLER_BINDING_INVALID');
+  }
+  const binding = value as Record<string, unknown>;
+  if (Object.keys(binding).sort().join(',') !== 'controlGeneration,instanceDigest'
+    || typeof binding.instanceDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(binding.instanceDigest)
+    || typeof binding.controlGeneration !== 'string' || binding.controlGeneration.length === 0) {
+    throw new Error('CODEX_SANDBOX_CONTROLLER_BINDING_INVALID');
+  }
+  return binding as { instanceDigest: string; controlGeneration: string };
+}
+
 async function prepareCodexOrchestrationDelegation(
   taskRef: string,
   input: Readonly<{
@@ -105,14 +126,27 @@ async function prepareCodexOrchestrationDelegation(
       );
     }
     const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
-    const controller = controllerContext(resolved.taskId, repoRoot);
+    const localController = controllerContext(resolved.taskId, repoRoot);
+    const brokerController = brokerControllerBinding();
+    if (localController && brokerController
+      && (localController.controllerInstanceDigest !== brokerController.instanceDigest
+        || localController.controlGeneration !== brokerController.controlGeneration)) {
+      return bridgeFailure(
+        'CODEX_SANDBOX_CONTROLLER_BINDING_MISMATCH',
+        'broker and local controller bindings do not match'
+      );
+    }
+    const controller = brokerController ?? (localController ? {
+      instanceDigest: localController.controllerInstanceDigest,
+      controlGeneration: localController.controlGeneration
+    } : null);
     const capabilityStore = options.capabilityStore ?? createCodexCapabilityStore();
     const consumed = capabilityStore.consume(input.capabilityToken, {
       taskId: resolved.taskId,
       hookDefinitionHash: preflight.hookDefinitionHash,
       buildIdentity,
       ...(controller ? { controller: {
-        instanceDigest: controller.controllerInstanceDigest,
+        instanceDigest: controller.instanceDigest,
         controlGeneration: controller.controlGeneration
       } } : {})
     });
@@ -125,7 +159,7 @@ async function prepareCodexOrchestrationDelegation(
         capabilitySessionId: consumed.sessionId!,
         capabilityTurnId: consumed.turnId!,
         capabilityToolUseId: consumed.toolUseId!,
-        controllerInstanceDigest: controller?.controllerInstanceDigest ?? null,
+        controllerInstanceDigest: controller?.instanceDigest ?? null,
         controlGeneration: controller?.controlGeneration ?? null
       }
     }, coreOptions(options));

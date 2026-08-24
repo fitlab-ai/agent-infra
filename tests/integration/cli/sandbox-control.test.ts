@@ -4,7 +4,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { requestSandboxControl, requestSandboxTaskCreate } from '../../../lib/sandbox/control/client.ts';
+import {
+  requestCodexControllerClose,
+  requestCodexControllerOpen,
+  requestSandboxControl,
+  requestSandboxTaskCreate
+} from '../../../lib/sandbox/control/client.ts';
 import {
   garbageCollectSandboxControlRoot,
   quiesceSandboxControlRoot,
@@ -820,6 +825,95 @@ test('sandbox control client and broker exchange a task-bound response', async (
     });
     assert.equal(response.exitCode, 1);
     assert.match(response.stdout, /LIFECYCLE_PAYLOAD_INVALID/);
+  } finally {
+    child.kill();
+    await new Promise<void>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) resolve();
+      else child.once('exit', () => resolve());
+    });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sandbox broker opens and closes a host-only Codex controller registration across processes', onPlatforms('linux'), async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-controller-roundtrip-'));
+  const channelDir = path.join(root, 'channel');
+  const manifestPath = path.join(root, 'manifest.json');
+  const statusDir = path.join(root, 'public');
+  const processingDir = path.join(root, 'processing');
+  const fakeBin = path.join(root, 'bin-fixture');
+  for (const directory of [channelDir, statusDir, processingDir, fakeBin]) fs.mkdirSync(directory, { recursive: true });
+  const branch = initializeRepository(root);
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '0.9.9-alpha.0' }));
+  for (const relative of [
+    '.codex/hooks.json',
+    '.codex/agents/agent-infra-lifecycle-executor.toml',
+    '.codex/agents/agent-infra-lifecycle-reviewer.toml',
+    '.agents/hooks/lifecycle-delegation.js',
+    '.agents/skills/run-task/SKILL.md',
+    '.agents/rules/lifecycle-orchestration.md'
+  ]) {
+    const target = path.join(root, relative);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.resolve(relative), target);
+  }
+  const docker = path.join(fakeBin, 'docker');
+  fs.writeFileSync(docker, '#!/bin/sh\n[ "$1" = exec ] && [ "$3" = cat ] && exec cat "$4"\nexit 1\n', { mode: 0o700 });
+  fs.writeFileSync(manifestPath, `${JSON.stringify({
+    version: 5,
+    engine: 'docker',
+    repoRoot: root,
+    worktreeRoot: root,
+    project: 'demo',
+    container: 'demo-dev-feature',
+    containerIdentity: { id: 'container-id', labels: {} },
+    branch,
+    mode: 'task-bound',
+    taskId: 'TASK-20260809-010203',
+    token: 'controller-secret',
+    generation: 'controller-generation',
+    channelDir,
+    publicStatusDir: statusDir,
+    processingDir,
+    runtimeDir: path.join(root, 'runtime')
+  })}\n`);
+  const child = spawn(
+    process.execPath,
+    ['--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'), 'sandbox-control', 'serve', '--manifest', manifestPath],
+    { cwd: path.resolve('.'), stdio: 'ignore', env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ''}` } }
+  );
+  try {
+    waitForFile(path.join(root, 'broker.json'), 5_000);
+    waitForHealthyStatus(statusDir, 5_000);
+    const startTime = getProcessStartTime(process.pid);
+    assert.ok(startTime);
+    const opened = requestCodexControllerOpen({
+      controllerProcess: { pid: process.pid, startTime },
+      channelDir,
+      statusDir,
+      token: 'controller-secret',
+      generation: 'controller-generation',
+      timeoutMs: 5_000
+    });
+    const registration = fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8');
+    assert.equal(registration.includes(opened.lease.leaseSecret), false);
+    assert.equal(fs.lstatSync(path.join(root, 'codex-controller.json')).mode & 0o777, 0o600);
+    const closed = requestCodexControllerClose({
+      controllerProcess: opened.lease.controllerProcess,
+      controllerProof: {
+        version: 1,
+        leaseId: opened.lease.leaseId,
+        leaseSecret: opened.lease.leaseSecret,
+        controllerProcess: opened.lease.controllerProcess
+      },
+      channelDir,
+      statusDir,
+      token: 'controller-secret',
+      generation: 'controller-generation',
+      timeoutMs: 5_000
+    });
+    assert.equal(closed.changed, true);
+    assert.equal(fs.existsSync(path.join(root, 'codex-controller.json')), false);
   } finally {
     child.kill();
     await new Promise<void>((resolve) => {
