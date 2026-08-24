@@ -21,6 +21,7 @@ import {
   activateMatchingOrchestrationDelegation,
   hasActivatableOrchestrationDelegation,
   hasSealableOrchestrationDelegation,
+  OrchestrationStateError,
   pauseMatchingOrchestrationDelegation,
   prepareOrchestrationDelegation,
   reconcileMatchingOrchestrationDelegation,
@@ -164,6 +165,7 @@ async function prepareCodexOrchestrationDelegation(
       }
     }, coreOptions(options));
   } catch (error) {
+    if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
     const detailValue = error instanceof Error
       ? (error as Error & { detail?: unknown }).detail
       : undefined;
@@ -243,6 +245,7 @@ async function activateCodexOrchestrationDelegation(
       }
     }, coreOptions(options));
   } catch (error) {
+    if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
     return pauseBridge('ORCHESTRATION_CODEX_START_FAILED', error instanceof Error ? error.message : String(error), options);
   }
 }
@@ -270,6 +273,7 @@ async function activateCodexSpawnDelegation(
       resolveThread: async () => resolved
     });
   } catch (error) {
+    if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
     return pauseBridge('ORCHESTRATION_CODEX_START_FAILED', error instanceof Error ? error.message : String(error), options);
   }
 }
@@ -306,6 +310,7 @@ async function sealCodexOrchestrationDelegation(
       coreOptions(options)
     );
   } catch (error) {
+    if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
     return pauseBridge('ORCHESTRATION_CODEX_STOP_FAILED', error instanceof Error ? error.message : String(error), options);
   }
 }
@@ -341,6 +346,7 @@ async function sealCodexParentDelegation(
     }
     return sealCodexOrchestrationDelegation(start.childThreadId, options);
   } catch (error) {
+    if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
     if (error instanceof Error && error.message === 'CODEX_TURN_NOT_TERMINAL') {
       return bridgeFailure('ORCHESTRATION_DELEGATION_MISSING', 'The matching Codex child has not completed');
     }

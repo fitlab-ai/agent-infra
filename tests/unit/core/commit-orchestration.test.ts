@@ -75,19 +75,31 @@ function activatedRun() {
     artifact: 'commit', client: 'claude-code', requestedModel: 'model', requestedReasoningEffort: 'high',
     actualModel: 'model', actualReasoningEffort: 'high', modelFallbackReason: null,
     reasoningEffortFallbackReason: null, parentId: 'parent', childId: 'child', spawnMode: 'fresh',
-    agent: null, status: 'activated', workspaceSnapshotScope: 'task', beforeFingerprint: 'before',
+    agent: null, status: 'activated', workspaceSnapshotScope: 'task', lifecycleProvenance: null,
+    hostEvidence: null, beforeFingerprint: 'before',
     afterFingerprint: null, changedPaths: [], createdAt: '2026-01-01T00:00:00.000Z',
+    preparedMonotonicMs: 1, spawnDispatchMonotonicMs: 2, activationDeadlineMonotonicMs: 3,
+    spawnDispatchedAt: '2026-01-01T00:00:00.000Z', activationDeadlineAt: '2026-01-01T00:00:15.000Z',
+    startEvidenceMonotonicMs: 2, activatedMonotonicMs: 2,
     activatedAt: '2026-01-01T00:00:00.000Z', sealedAt: null, consumedAt: null
   };
   return {
-    schemaVersion: 3, taskId, runId: 'run-1', status: 'running', nextStage: 'commit', stepCount: 6,
-    maxSteps: 10, baseline: 'snapshot', pendingDelegation: receipt, receipts: [], pause: null,
+    taskId, runId: 'run-1', status: 'running', nextStage: 'commit', stepCount: 6, maxSteps: 10,
+    modelPolicy: {
+      executor: { model: 'model', reasoningEffort: 'high' },
+      reviewer: { model: 'model', reasoningEffort: 'high' }
+    },
+    modelPolicySource: {
+      kind: 'explicit', client: 'claude-code', resolvedAt: '2026-01-01T00:00:00.000Z'
+    },
+    recoveryHistory: [], baseline: 'snapshot', pendingDelegation: receipt, receipts: [], pause: null,
     commitAuthorization: { issuedAt: '2026-01-01T00:00:00.000Z', consumedAt: null },
+    completionEvidence: null,
     createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
   };
 }
 
-test('standalone begin and complete preserve historical orchestration bytes', () => {
+test('standalone begin and complete preserve existing current orchestration bytes', () => {
   for (const status of ['paused', 'completed'] as const) {
     const f = fixture();
     const runPath = path.join(f.taskDir, 'orchestration.json');

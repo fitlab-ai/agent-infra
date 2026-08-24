@@ -10,7 +10,7 @@
 
 ## Recovery
 
-`orchestration.json` is the detailed state source. A v3 run persists complete policy, append-only recovery, build/contract/hook-source/controller provenance, and activation monotonic timestamps. Historical v2 state is read-compatible, but new Codex delegations require v3. An expired prepared orphan may be explicitly recovered only with the exact task fingerprint, no commit intent or consumed authorization, and no matching unconsumed active lifecycle evidence. Unknown schemas and incomplete active v3 state fail closed.
+`orchestration.json` is the detailed state source. A current run persists complete policy, append-only recovery, build/contract/hook-source/controller provenance, and activation monotonic timestamps. Readers accept only the complete structure emitted by the current writer; unknown fields, missing fields, invalid provenance, and old runs fail closed without rewriting. Finish or clear every active run before upgrading agent-infra. An expired prepared orphan may be explicitly recovered only with the exact task fingerprint, no commit intent or consumed authorization, and no matching unconsumed active lifecycle evidence.
 
 ## Codex Host and Capability
 

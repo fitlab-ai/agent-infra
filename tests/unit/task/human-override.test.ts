@@ -276,7 +276,7 @@ test('task-event state guard is a real producer failure for a blocked task', () 
   }
 });
 
-test('lifecycle-execution guard can be recorded without producing a manual capability', () => {
+test('invalid orchestration state can be recorded without producing a manual capability', () => {
   const f = fixture('active');
   const orchestrationPath = path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID, 'orchestration.json');
   fs.writeFileSync(orchestrationPath, `${JSON.stringify({
@@ -284,7 +284,7 @@ test('lifecycle-execution guard can be recorded without producing a manual capab
     status: 'running',
     pendingDelegation: { status: 'prepared' }
   }, null, 2)}\n`);
-  const failure = failureId('lifecycle-execution', 'ORCHESTRATION_STANDALONE_BUSY');
+  const failure = failureId('lifecycle-execution', 'ORCHESTRATION_STATE_INVALID');
   try {
     const issued = issueHumanOverride({
       taskRef: TASK_ID,
@@ -308,7 +308,7 @@ test('lifecycle-execution guard can be recorded without producing a manual capab
     assert.equal(consumed.outcome.result, 'preserve-failure');
     assert.equal('manualOverride' in consumed, false);
     assert.match(fs.readFileSync(f.taskMd, 'utf8'), new RegExp(`\\| ${issued.ticketId} \\|.*\\| consumed \\|`));
-    assert.match(fs.readFileSync(f.taskMd, 'utf8'), /ORCHESTRATION_STANDALONE_BUSY/);
+    assert.match(fs.readFileSync(f.taskMd, 'utf8'), /ORCHESTRATION_STATE_INVALID/);
     assert.ok(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID)));
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });

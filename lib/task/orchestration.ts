@@ -15,6 +15,7 @@ import {
   consumeDelegation,
   dispatchDelegation,
   foldBlankToNull,
+  isDelegationReceipt,
   managedDelegationRole,
   prepareDelegation,
   sealDelegation
@@ -76,49 +77,14 @@ import {
 } from './activity-log.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
-type LegacyOrchestrationModelPolicy = Readonly<{
-  executor: string;
-  reviewer: string;
-}>;
 type ModelPolicySource = Readonly<{
   kind: 'explicit' | 'project-config';
   client: AgentClientId;
   resolvedAt: string;
 }>;
-type ModelPolicyRecovery = Readonly<{
-  code: 'MODEL_POLICY_SUPPLEMENTED';
-  recoveredAt: string;
-  previousSchemaVersion: 1;
-  previousStatus: OrchestrationStatus;
-  previousPause: Readonly<{ code: string; message: string; recoverable: boolean }> | null;
-  policySource: ModelPolicySource;
-  receiptCount: 0;
-  pendingDelegation: false;
-  resultingStatus: OrchestrationStatus;
-}>;
-type ClientCapabilityRecovery = Readonly<{
+type ClaudeCodeCapabilityRecovery = Readonly<{
   code: 'CLIENT_CAPABILITY_ENABLED';
   recoveredAt: string;
-  previousSchemaVersion: 2;
-  previousStatus: 'paused';
-  previousPause: Readonly<{ code: 'ORCHESTRATION_CLIENT_UNSUPPORTED'; message: string; recoverable: boolean }>;
-  client: 'codex';
-  guards: Readonly<{
-    stepCount: 0;
-    nextStage: null;
-    baselineEmpty: true;
-    receiptCount: 0;
-    pendingDelegation: false;
-    commitAuthorizationUnused: true;
-    completionEvidenceAbsent: true;
-    commitIntentAbsent: true;
-  }>;
-  resultingStatus: 'running';
-}>;
-type ClaudeCodeCapabilityRecovery = Readonly<{
-  code: 'CLIENT_CAPABILITY_ENABLED_NO_MIGRATION';
-  recoveredAt: string;
-  previousSchemaVersion: 3;
   previousStatus: 'paused';
   previousPause: Readonly<{ code: 'ORCHESTRATION_CLIENT_UNSUPPORTED'; message: string; recoverable: boolean }>;
   client: 'claude-code';
@@ -134,25 +100,7 @@ type ClaudeCodeCapabilityRecovery = Readonly<{
   }>;
   resultingStatus: 'running';
 }>;
-type SchemaMigrationRecovery = Readonly<{
-  code: 'SCHEMA_V3_MIGRATED';
-  recoveredAt: string;
-  previousSchemaVersion: 2;
-  previousStatus: 'paused';
-  previousPause: Readonly<{ code: string; message: string; recoverable: boolean }>;
-  guards: Readonly<{
-    stepCount: 0;
-    nextStage: null;
-    baselineEmpty: true;
-    receiptCount: 0;
-    pendingDelegation: false;
-    commitAuthorizationUnused: true;
-    completionEvidenceAbsent: true;
-    commitIntentAbsent: true;
-  }>;
-  resultingStatus: 'running';
-}>;
-type OrchestrationRecovery = ModelPolicyRecovery | ClientCapabilityRecovery | ClaudeCodeCapabilityRecovery | SchemaMigrationRecovery;
+type OrchestrationRecovery = ClaudeCodeCapabilityRecovery;
 type CleanCompletionEvidence = Readonly<{
   kind: 'reviewed-head-clean';
   observedAt: string;
@@ -164,22 +112,21 @@ type CleanCompletionEvidence = Readonly<{
   prHead: string;
 }>;
 type OrchestrationRun = Readonly<{
-  schemaVersion: 1 | 2 | 3;
   taskId: string;
   runId: string;
   status: OrchestrationStatus;
   nextStage: DelegationStage | null;
   stepCount: number;
   maxSteps: number;
-  modelPolicy?: OrchestrationModelPolicy | LegacyOrchestrationModelPolicy;
-  modelPolicySource?: ModelPolicySource;
-  recoveryHistory?: readonly OrchestrationRecovery[];
+  modelPolicy: OrchestrationModelPolicy;
+  modelPolicySource: ModelPolicySource;
+  recoveryHistory: readonly OrchestrationRecovery[];
   baseline: string;
   pendingDelegation: DelegationReceipt | null;
   receipts: readonly DelegationReceipt[];
   pause: Readonly<{ code: string; message: string; recoverable: boolean }> | null;
   commitAuthorization: Readonly<{ issuedAt: string | null; consumedAt: string | null }>;
-  completionEvidence?: CleanCompletionEvidence | null;
+  completionEvidence: CleanCompletionEvidence | null;
   createdAt: string;
   updatedAt: string;
 }>;
@@ -286,24 +233,148 @@ function orchestrationPath(taskDir: string): string {
   return path.join(taskDir, 'orchestration.json');
 }
 
+const ORCHESTRATION_STATE_INVALID_MESSAGE = 'orchestration.json does not match the current runtime structure; finish or clear active runs before upgrading';
+
+class OrchestrationStateError extends Error {
+  readonly code = 'ORCHESTRATION_STATE_INVALID';
+  readonly taskId: string | null;
+
+  constructor(taskId: string | null = null) {
+    super(ORCHESTRATION_STATE_INVALID_MESSAGE);
+    this.name = 'OrchestrationStateError';
+    this.taskId = taskId;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const actual = Object.keys(value);
+  return actual.length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function exactText(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.trim() === value;
+}
+
+function nullableText(value: unknown): value is string | null {
+  return value === null || exactText(value);
+}
+
+function isPause(value: unknown): value is NonNullable<OrchestrationRun['pause']> {
+  return hasExactKeys(value, ['code', 'message', 'recoverable'])
+    && exactText(value.code)
+    && exactText(value.message)
+    && typeof value.recoverable === 'boolean';
+}
+
+function isModelPolicySource(value: unknown): value is ModelPolicySource {
+  return hasExactKeys(value, ['kind', 'client', 'resolvedAt'])
+    && ['explicit', 'project-config'].includes(value.kind as string)
+    && isAgentClientId(value.client)
+    && exactText(value.resolvedAt);
+}
+
+function isModelPolicy(value: unknown): value is OrchestrationModelPolicy {
+  if (!hasExactKeys(value, ['executor', 'reviewer'])) return false;
+  return [value.executor, value.reviewer].every((role) => hasExactKeys(role, ['model', 'reasoningEffort'])
+    && exactText(role.model)
+    && exactText(role.reasoningEffort));
+}
+
+const RECOVERY_GUARD_KEYS = [
+  'stepCount', 'nextStage', 'baselineEmpty', 'receiptCount', 'pendingDelegation',
+  'commitAuthorizationUnused', 'completionEvidenceAbsent', 'commitIntentAbsent'
+] as const;
+
+function isRecovery(value: unknown): value is OrchestrationRecovery {
+  if (!hasExactKeys(value, [
+    'code', 'recoveredAt', 'previousStatus', 'previousPause', 'client', 'guards', 'resultingStatus'
+  ])) return false;
+  const guards = value.guards;
+  return value.code === 'CLIENT_CAPABILITY_ENABLED'
+    && exactText(value.recoveredAt)
+    && value.previousStatus === 'paused'
+    && isPause(value.previousPause)
+    && value.previousPause.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
+    && value.client === 'claude-code'
+    && hasExactKeys(guards, RECOVERY_GUARD_KEYS)
+    && guards.stepCount === 0
+    && guards.nextStage === null
+    && guards.baselineEmpty === true
+    && guards.receiptCount === 0
+    && guards.pendingDelegation === false
+    && guards.commitAuthorizationUnused === true
+    && guards.completionEvidenceAbsent === true
+    && guards.commitIntentAbsent === true
+    && value.resultingStatus === 'running';
+}
+
+function isCompletionEvidence(value: unknown): value is CleanCompletionEvidence {
+  return hasExactKeys(value, [
+    'kind', 'observedAt', 'head', 'headTree', 'worktreeTree', 'lastReviewedCommit', 'prNumber', 'prHead'
+  ])
+    && value.kind === 'reviewed-head-clean'
+    && exactText(value.observedAt)
+    && exactText(value.head)
+    && exactText(value.headTree)
+    && exactText(value.worktreeTree)
+    && exactText(value.lastReviewedCommit)
+    && Number.isSafeInteger(value.prNumber)
+    && (value.prNumber as number) > 0
+    && exactText(value.prHead);
+}
+
+const ORCHESTRATION_RUN_KEYS = [
+  'taskId', 'runId', 'status', 'nextStage', 'stepCount', 'maxSteps', 'modelPolicy',
+  'modelPolicySource', 'recoveryHistory', 'baseline', 'pendingDelegation', 'receipts',
+  'pause', 'commitAuthorization', 'completionEvidence', 'createdAt', 'updatedAt'
+] as const;
+
+function parseOrchestrationRun(value: unknown, expectedTaskId?: string): OrchestrationRun {
+  if (!hasExactKeys(value, ORCHESTRATION_RUN_KEYS)
+    || !exactText(value.taskId)
+    || (expectedTaskId !== undefined && value.taskId !== expectedTaskId)
+    || !exactText(value.runId)
+    || !['running', 'paused', 'completed'].includes(value.status as string)
+    || !(value.nextStage === null || ['analysis', 'review-analysis', 'plan', 'review-plan', 'code', 'review-code', 'commit'].includes(value.nextStage as string))
+    || !Number.isSafeInteger(value.stepCount) || (value.stepCount as number) < 0
+    || !Number.isSafeInteger(value.maxSteps) || (value.maxSteps as number) < 1
+    || !isModelPolicy(value.modelPolicy)
+    || !isModelPolicySource(value.modelPolicySource)
+    || !Array.isArray(value.recoveryHistory) || !value.recoveryHistory.every(isRecovery)
+    || typeof value.baseline !== 'string'
+    || !(value.pendingDelegation === null || isDelegationReceipt(value.pendingDelegation))
+    || !Array.isArray(value.receipts) || !value.receipts.every(isDelegationReceipt)
+    || !(value.pause === null || isPause(value.pause))
+    || !hasExactKeys(value.commitAuthorization, ['issuedAt', 'consumedAt'])
+    || !nullableText(value.commitAuthorization.issuedAt)
+    || !nullableText(value.commitAuthorization.consumedAt)
+    || !(value.completionEvidence === null || isCompletionEvidence(value.completionEvidence))
+    || !exactText(value.createdAt)
+    || !exactText(value.updatedAt)) {
+    throw new OrchestrationStateError();
+  }
+  const receipts = [...value.receipts, ...(value.pendingDelegation ? [value.pendingDelegation] : [])];
+  if (receipts.some((receipt) => receipt.taskId !== value.taskId || receipt.runId !== value.runId)) {
+    throw new OrchestrationStateError();
+  }
+  return value as OrchestrationRun;
+}
+
 function readRun(taskDir: string): OrchestrationRun | null {
   const file = orchestrationPath(taskDir);
   if (!fs.existsSync(file)) return null;
-  const run = JSON.parse(fs.readFileSync(file, 'utf8')) as OrchestrationRun;
-  if (![2, 3].includes(run.schemaVersion) || !isV2Policy(run.modelPolicy)) return run;
-  return {
-    ...run,
-    modelPolicy: {
-      executor: {
-        model: run.modelPolicy.executor.model,
-        reasoningEffort: run.modelPolicy.executor.reasoningEffort
-      },
-      reviewer: {
-        model: run.modelPolicy.reviewer.model,
-        reasoningEffort: run.modelPolicy.reviewer.reasoningEffort
-      }
-    }
-  };
+  const taskId = path.basename(taskDir);
+  try {
+    return parseOrchestrationRun(JSON.parse(fs.readFileSync(file, 'utf8')), taskId);
+  } catch (error) {
+    if (error instanceof OrchestrationStateError) throw new OrchestrationStateError(taskId);
+    throw new OrchestrationStateError(taskId);
+  }
 }
 
 function atomicWrite(file: string, value: unknown): void {
@@ -381,7 +452,6 @@ function commitFinalizationView(inspection: CommitFinalizationInspection): NonNu
 
 function validCommitRun(run: OrchestrationRun | null, taskId: string): run is OrchestrationRun {
   return run !== null
-    && [1, 2, 3].includes(run.schemaVersion)
     && run.taskId === taskId
     && ['running', 'paused', 'completed'].includes(run.status)
     && Array.isArray(run.receipts)
@@ -426,12 +496,8 @@ function sameModelPolicy(left: OrchestrationModelPolicy, right: OrchestrationMod
     && left.reviewer.reasoningEffort === right.reviewer.reasoningEffort;
 }
 
-function isV2Policy(policy: OrchestrationRun['modelPolicy']): policy is OrchestrationModelPolicy {
-  return typeof policy?.executor === 'object' && typeof policy?.reviewer === 'object';
-}
-
 function rolePolicy(run: OrchestrationRun, role: DelegationRole): OrchestrationRolePolicy | null {
-  return isV2Policy(run.modelPolicy) ? run.modelPolicy[role] : null;
+  return run.modelPolicy[role];
 }
 
 function resolveProjectPolicy(repoRoot: string, client: AgentClientId): OrchestrationModelPolicy | undefined {
@@ -441,26 +507,8 @@ function resolveProjectPolicy(repoRoot: string, client: AgentClientId): Orchestr
   return normalizeAgentClients(raw).state[client].orchestration;
 }
 
-function canRecoverCodexUnsupportedPause(run: OrchestrationRun, taskDir: string): boolean {
-  return run.schemaVersion === 2
-    && run.status === 'paused'
-    && run.pause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
-    && run.modelPolicySource?.client === 'codex'
-    && run.stepCount === 0
-    && run.nextStage === null
-    && run.baseline === ''
-    && run.pendingDelegation === null
-    && run.receipts.length === 0
-    && run.commitAuthorization?.issuedAt === null
-    && run.commitAuthorization?.consumedAt === null
-    && run.completionEvidence == null
-    && !fs.existsSync(commitIntentPath(taskDir))
-    && (run.recoveryHistory ?? []).every((entry) => entry.code === 'MODEL_POLICY_SUPPLEMENTED');
-}
-
 function canRecoverClaudeCodeUnsupportedPause(run: OrchestrationRun, taskDir: string): boolean {
-  return run.schemaVersion === 3
-    && run.status === 'paused'
+  return run.status === 'paused'
     && run.pause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED'
     && run.modelPolicySource?.client === 'claude-code'
     && run.stepCount === 0
@@ -472,22 +520,7 @@ function canRecoverClaudeCodeUnsupportedPause(run: OrchestrationRun, taskDir: st
     && run.commitAuthorization?.consumedAt === null
     && run.completionEvidence == null
     && !fs.existsSync(commitIntentPath(taskDir))
-    && (run.recoveryHistory ?? []).length === 0;
-}
-
-function canMigrateRecoverableV2Pause(run: OrchestrationRun, taskDir: string): boolean {
-  return run.schemaVersion === 2
-    && run.status === 'paused'
-    && run.pause?.recoverable === true
-    && run.stepCount === 0
-    && run.nextStage === null
-    && run.baseline === ''
-    && run.pendingDelegation === null
-    && run.receipts.length === 0
-    && run.commitAuthorization?.issuedAt === null
-    && run.commitAuthorization?.consumedAt === null
-    && run.completionEvidence == null
-    && !fs.existsSync(commitIntentPath(taskDir));
+    && run.recoveryHistory.length === 0;
 }
 
 function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
@@ -503,235 +536,57 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
     return failed('ORCHESTRATION_STATE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
   }
   if (existing) {
-    if (
-      ![1, 2, 3].includes(existing.schemaVersion)
-      || !Array.isArray(existing.receipts)
-      || !Object.prototype.hasOwnProperty.call(existing, 'pendingDelegation')
-    ) {
-      return failed('ORCHESTRATION_STATE_INVALID', 'orchestration state has an invalid schema', resolved.taskId);
-    }
-    if (existing.status === 'completed' && existing.schemaVersion === 1) {
+    if (existing.status === 'completed') {
       return { status: 'completed', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
     }
-    if (existing.schemaVersion === 2 || existing.schemaVersion === 3) {
-      const policyError = validateModelPolicy(isV2Policy(existing.modelPolicy) ? existing.modelPolicy : undefined);
-      if (
-        policyError
-        || !existing.modelPolicySource
-        || !isAgentClientId(existing.modelPolicySource.client)
-        || !Array.isArray(existing.recoveryHistory)
-      ) {
-        return failed('ORCHESTRATION_STATE_INVALID', `schemaVersion ${existing.schemaVersion} orchestration state is incomplete`, resolved.taskId);
-      }
-      if (existing.status === 'completed') {
-        return { status: 'completed', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
-      }
-      if (existing.schemaVersion === 2 && existing.status === 'running') {
-        return failed(
-          'ORCHESTRATION_STATE_INVALID',
-          'active schemaVersion 2 runs cannot be advanced by lifecycle protocol v3',
-          resolved.taskId
-        );
-      }
-      if (existing.modelPolicySource.client !== options.client) {
-        return failed('ORCHESTRATION_CLIENT_MISMATCH', 'provided client does not match the persisted run policy source', resolved.taskId);
-      }
-      if (options.modelPolicy) {
-        const suppliedError = validateModelPolicy(options.modelPolicy);
-        if (suppliedError) return failed(suppliedError.code, suppliedError.message, resolved.taskId);
-        if (!sameModelPolicy(existing.modelPolicy as OrchestrationModelPolicy, options.modelPolicy)) {
-          return failed('ORCHESTRATION_MODEL_POLICY_MISMATCH', 'provided model policy does not match the persisted run policy', resolved.taskId);
-        }
-      }
-      if (existing.status === 'paused' && existing.pause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED') {
-        if (existing.modelPolicySource.client === 'claude-code') {
-          if (!canRecoverClaudeCodeUnsupportedPause(existing, resolved.taskDir)) {
-            return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
-          }
-          const now = (options.now ?? (() => new Date().toISOString()))();
-          const previousPause = existing.pause as ClaudeCodeCapabilityRecovery['previousPause'];
-          const recovery: ClaudeCodeCapabilityRecovery = {
-            code: 'CLIENT_CAPABILITY_ENABLED_NO_MIGRATION',
-            recoveredAt: now,
-            previousSchemaVersion: 3,
-            previousStatus: 'paused',
-            previousPause,
-            client: 'claude-code',
-            guards: {
-              stepCount: 0,
-              nextStage: null,
-              baselineEmpty: true,
-              receiptCount: 0,
-              pendingDelegation: false,
-              commitAuthorizationUnused: true,
-              completionEvidenceAbsent: true,
-              commitIntentAbsent: true
-            },
-            resultingStatus: 'running'
-          };
-          const resumed = withUpdatedRun(existing, {
-            status: 'running',
-            pause: null,
-            recoveryHistory: Object.freeze([...(existing.recoveryHistory ?? []), recovery])
-          }, () => now);
-          saveRun(resolved.taskDir, resumed);
-          return { status: 'running', changed: true, taskId: resolved.taskId, run: resumed, next: null, error: null };
-        }
-        if (!canRecoverCodexUnsupportedPause(existing, resolved.taskDir)) {
-          return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
-        }
-        const now = (options.now ?? (() => new Date().toISOString()))();
-        const previousPause = existing.pause as ClientCapabilityRecovery['previousPause'];
-        const recovery: ClientCapabilityRecovery = {
-          code: 'CLIENT_CAPABILITY_ENABLED',
-          recoveredAt: now,
-          previousSchemaVersion: 2,
-          previousStatus: 'paused',
-          previousPause,
-          client: 'codex',
-          guards: {
-            stepCount: 0,
-            nextStage: null,
-            baselineEmpty: true,
-            receiptCount: 0,
-            pendingDelegation: false,
-            commitAuthorizationUnused: true,
-            completionEvidenceAbsent: true,
-            commitIntentAbsent: true
-          },
-          resultingStatus: 'running'
-        };
-        const resumed = withUpdatedRun(existing, {
-          schemaVersion: 3,
-          status: 'running',
-          pause: null,
-          recoveryHistory: Object.freeze([...(existing.recoveryHistory ?? []), recovery])
-        }, () => now);
-        saveRun(resolved.taskDir, resumed);
-        return { status: 'running', changed: true, taskId: resolved.taskId, run: resumed, next: null, error: null };
-      }
-      if (existing.status === 'paused' && existing.pause?.recoverable && existing.pendingDelegation === null) {
-        if (existing.schemaVersion === 2 && !canMigrateRecoverableV2Pause(existing, resolved.taskDir)) {
-          const paused = withUpdatedRun(existing, {
-            pause: {
-              code: 'ORCHESTRATION_SCHEMA_MIGRATION_REQUIRED',
-              message: 'schemaVersion 2 recoverable pause contains execution evidence and cannot migrate automatically',
-              recoverable: false
-            }
-          });
-          saveRun(resolved.taskDir, paused);
-          return { status: 'paused', changed: true, taskId: resolved.taskId, run: paused, next: null, error: null };
-        }
-        const now = (options.now ?? (() => new Date().toISOString()))();
-        const recovery: SchemaMigrationRecovery | null = existing.schemaVersion === 2 ? {
-          code: 'SCHEMA_V3_MIGRATED',
-          recoveredAt: now,
-          previousSchemaVersion: 2,
-          previousStatus: 'paused',
-          previousPause: existing.pause,
-          guards: {
-            stepCount: 0,
-            nextStage: null,
-            baselineEmpty: true,
-            receiptCount: 0,
-            pendingDelegation: false,
-            commitAuthorizationUnused: true,
-            completionEvidenceAbsent: true,
-            commitIntentAbsent: true
-          },
-          resultingStatus: 'running'
-        } : null;
-        const resumed = withUpdatedRun(existing, {
-          schemaVersion: 3,
-          status: 'running',
-          pause: null,
-          ...(recovery ? { recoveryHistory: Object.freeze([...(existing.recoveryHistory ?? []), recovery]) } : {})
-        }, () => now);
-        saveRun(resolved.taskDir, resumed);
-        return { status: 'running', changed: true, taskId: resolved.taskId, run: resumed, next: null, error: null };
-      }
-      return { status: existing.status, changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
+    if (existing.modelPolicySource.client !== options.client) {
+      return failed('ORCHESTRATION_CLIENT_MISMATCH', 'provided client does not match the persisted run policy source', resolved.taskId);
     }
-
-    let policy: OrchestrationModelPolicy | undefined = options.modelPolicy;
-    let sourceKind: ModelPolicySource['kind'] = 'explicit';
-    if (!policy) {
-      try {
-        policy = resolveProjectPolicy(resolved.repoRoot, options.client);
-        sourceKind = 'project-config';
-      } catch (error) {
-        return failed('ORCHESTRATION_CONFIG_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
-      }
-    }
-    const policyError = validateModelPolicy(policy);
-    if (policyError) {
-      return failed(policyError.code, policyError.message, resolved.taskId, {
-        client: options.client,
-        missingFields: ['executor.model', 'executor.reasoningEffort', 'reviewer.model', 'reviewer.reasoningEffort'],
-        modelSelectionContext: getAgentClientModelSelection(options.client)
-      });
-    }
-    if (existing.pendingDelegation !== null) {
-      const alreadyPaused = existing.status === 'paused' && existing.pause?.code === 'ORCHESTRATION_DELEGATION_BUSY';
-      if (alreadyPaused) return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
-      const paused = withUpdatedRun(existing, {
-        status: 'paused',
-        pause: { code: 'ORCHESTRATION_DELEGATION_BUSY', message: 'legacy run has a pending delegation', recoverable: false }
-      });
-      saveRun(resolved.taskDir, paused);
-      return { status: 'paused', changed: true, taskId: resolved.taskId, run: paused, next: null, error: null };
-    }
-    if (existing.receipts.length > 0) {
-      const alreadyPaused = existing.status === 'paused' && existing.pause?.code === 'ORCHESTRATION_HISTORICAL_EFFORT_UNVERIFIED';
-      if (alreadyPaused) return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
-      const paused = withUpdatedRun(existing, {
-        status: 'paused',
-        pause: {
-          code: 'ORCHESTRATION_HISTORICAL_EFFORT_UNVERIFIED',
-          message: 'legacy receipts do not contain actual reasoning-effort evidence',
-          recoverable: false
-        }
-      });
-      saveRun(resolved.taskDir, paused);
-      return { status: 'paused', changed: true, taskId: resolved.taskId, run: paused, next: null, error: null };
-    }
-    if (
-      existing.modelPolicy
-      && typeof existing.modelPolicy.executor === 'string'
-      && (
-        existing.modelPolicy.executor !== policy!.executor.model
-        || existing.modelPolicy.reviewer !== policy!.reviewer.model
-      )
-    ) {
+    if (options.modelPolicy) {
+      const suppliedError = validateModelPolicy(options.modelPolicy);
+      if (suppliedError) return failed(suppliedError.code, suppliedError.message, resolved.taskId);
+      if (!sameModelPolicy(existing.modelPolicy, options.modelPolicy)) {
         return failed('ORCHESTRATION_MODEL_POLICY_MISMATCH', 'provided model policy does not match the persisted run policy', resolved.taskId);
+      }
     }
-    const now = (options.now ?? (() => new Date().toISOString()))();
-    const source: ModelPolicySource = { kind: sourceKind, client: options.client, resolvedAt: now };
-    const clearsModelPause = existing.pause?.code === 'ORCHESTRATION_MODEL_EVIDENCE_MISSING';
-    const resultingStatus = clearsModelPause ? 'running' : existing.status;
-    const recovery: OrchestrationRecovery = {
-      code: 'MODEL_POLICY_SUPPLEMENTED',
-      recoveredAt: now,
-      previousSchemaVersion: 1,
-      previousStatus: existing.status,
-      previousPause: existing.pause,
-      policySource: source,
-      receiptCount: 0,
-      pendingDelegation: false,
-      resultingStatus
-    };
-    const recovered: OrchestrationRun = Object.freeze({
-      ...existing,
-      schemaVersion: 3,
-      status: resultingStatus,
-      modelPolicy: policy!,
-      modelPolicySource: source,
-      recoveryHistory: Object.freeze([recovery]),
-      pause: clearsModelPause ? null : existing.pause,
-      updatedAt: now
-    });
-    saveRun(resolved.taskDir, recovered);
-    return { status: resultingStatus, changed: true, taskId: resolved.taskId, run: recovered, next: null, error: null };
+    if (existing.status === 'paused' && existing.pause?.code === 'ORCHESTRATION_CLIENT_UNSUPPORTED') {
+      if (existing.modelPolicySource.client !== 'claude-code'
+        || !canRecoverClaudeCodeUnsupportedPause(existing, resolved.taskDir)) {
+        return { status: 'paused', changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
+      }
+      const now = (options.now ?? (() => new Date().toISOString()))();
+      const recovery: ClaudeCodeCapabilityRecovery = {
+        code: 'CLIENT_CAPABILITY_ENABLED',
+        recoveredAt: now,
+        previousStatus: 'paused',
+        previousPause: existing.pause as ClaudeCodeCapabilityRecovery['previousPause'],
+        client: 'claude-code',
+        guards: {
+          stepCount: 0,
+          nextStage: null,
+          baselineEmpty: true,
+          receiptCount: 0,
+          pendingDelegation: false,
+          commitAuthorizationUnused: true,
+          completionEvidenceAbsent: true,
+          commitIntentAbsent: true
+        },
+        resultingStatus: 'running'
+      };
+      const resumed = withUpdatedRun(existing, {
+        status: 'running',
+        pause: null,
+        recoveryHistory: Object.freeze([...existing.recoveryHistory, recovery])
+      }, () => now);
+      saveRun(resolved.taskDir, resumed);
+      return { status: 'running', changed: true, taskId: resolved.taskId, run: resumed, next: null, error: null };
+    }
+    if (existing.status === 'paused' && existing.pause?.recoverable && existing.pendingDelegation === null) {
+      const resumed = withUpdatedRun(existing, { status: 'running', pause: null }, options.now);
+      saveRun(resolved.taskDir, resumed);
+      return { status: 'running', changed: true, taskId: resolved.taskId, run: resumed, next: null, error: null };
+    }
+    return { status: existing.status, changed: false, taskId: resolved.taskId, run: existing, next: null, error: null };
   }
 
   let policy = options.modelPolicy;
@@ -753,7 +608,6 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
   const now = (options.now ?? (() => new Date().toISOString()))();
   const source: ModelPolicySource = { kind: sourceKind, client: options.client, resolvedAt: now };
   const run: OrchestrationRun = {
-    schemaVersion: 3,
     taskId: resolved.taskId,
     runId: (options.id ?? randomUUID)(),
     status: 'running',
@@ -1519,10 +1373,6 @@ function prepareOrchestrationDelegationUnlocked(
   }
   const run = readRun(resolved.taskDir);
   if (!run || run.status !== 'running') return failed('ORCHESTRATION_RUN_NOT_RUNNING', 'a running orchestration is required', resolved.taskId);
-  if (run.schemaVersion !== 3) {
-    return failed('ORCHESTRATION_STATE_INVALID', 'delegation preparation requires orchestration schemaVersion 3', resolved.taskId);
-  }
-  if (!isV2Policy(run.modelPolicy)) return failed('ORCHESTRATION_MODEL_EVIDENCE_MISSING', 'running orchestration has no persisted model policy', resolved.taskId);
   if (run.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_BUSY', 'the run already has a pending delegation', resolved.taskId);
   const repositoryPending = matchingDelegations(() => true, options);
   if (repositoryPending.length > 0) {
@@ -1621,8 +1471,8 @@ function dispatchOrchestrationDelegationUnlocked(
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
   const run = readRun(resolved.taskDir);
   if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
-  if (run.schemaVersion !== 3 || run.status !== 'running') {
-    return failed('ORCHESTRATION_STATE_INVALID', 'spawn dispatch requires a running schemaVersion 3 orchestration', resolved.taskId);
+  if (run.status !== 'running') {
+    return failed('ORCHESTRATION_STATE_INVALID', 'spawn dispatch requires a running orchestration', resolved.taskId);
   }
   const result = dispatchDelegation(run.pendingDelegation, {
     now: options.now,
@@ -1669,7 +1519,7 @@ function matchingDelegations(
     .filter((entry) => entry.isDirectory())
     .flatMap((entry) => {
       const run = readRun(path.join(activeRoot, entry.name));
-      if (run?.schemaVersion !== 3 || run.status !== 'running' || !run.pendingDelegation) return [];
+      if (!run || run.status !== 'running' || !run.pendingDelegation) return [];
       const receipt = run.pendingDelegation;
       return predicate(receipt)
         ? [{ taskId: entry.name, run }]
@@ -1922,7 +1772,6 @@ function activateOrchestrationDelegation(
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
   const run = readRun(resolved.taskDir);
   if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
-  if (run.schemaVersion !== 3) return failed('ORCHESTRATION_STATE_INVALID', 'active delegation requires schemaVersion 3', resolved.taskId);
   if (run.status !== 'running') {
     return { status: run.status, changed: false, taskId: resolved.taskId, run, next: null, error: null };
   }
@@ -1952,9 +1801,6 @@ async function awaitOrchestrationDelegationActivation(
     const run = readRun(resolved.taskDir);
     if (!run?.pendingDelegation) {
       return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
-    }
-    if (run.schemaVersion !== 3) {
-      return failed('ORCHESTRATION_STATE_INVALID', 'activation barrier requires schemaVersion 3', resolved.taskId);
     }
     const receipt = run.pendingDelegation;
     const matches = receipt.stage === event.stage
@@ -2095,7 +1941,6 @@ function completeOrchestrationStage(
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
   const run = readRun(resolved.taskDir);
   if (!run) return { status: 'running', changed: false, taskId: resolved.taskId, run: null, next: null, error: null };
-  if (run.schemaVersion !== 3) return failed('ORCHESTRATION_STATE_INVALID', 'stage completion requires schemaVersion 3', resolved.taskId);
   if (!run.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'active run has no pending delegation', resolved.taskId);
   const result = completeDelegationStage(run.pendingDelegation, event);
   if (!result.ok) return pauseOrchestration(taskRef, result.code, result.message, true, options);
@@ -2118,7 +1963,6 @@ function inspectOrchestrationStage(
     return failed('ORCHESTRATION_STATE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
   }
   if (!run) return failed('ORCHESTRATION_RUN_MISSING', 'no orchestration run exists', resolved.taskId);
-  if (run.schemaVersion !== 3) return failed('ORCHESTRATION_STATE_INVALID', 'stage inspection requires schemaVersion 3', resolved.taskId);
   const receipt = run.pendingDelegation;
   if (
     !receipt
@@ -2177,7 +2021,6 @@ function sealOrchestrationDelegation(
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
   const run = readRun(resolved.taskDir);
   if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
-  if (run.schemaVersion !== 3) return failed('ORCHESTRATION_STATE_INVALID', 'delegation sealing requires schemaVersion 3', resolved.taskId);
   const result = sealDelegation(run.pendingDelegation, event, { now: options.now });
   if (!result.ok) return pauseOrchestration(taskRef, result.code, result.message, true, options);
   const updated = withUpdatedRun(run, { pendingDelegation: result.receipt });
@@ -2190,7 +2033,6 @@ function advanceOrchestration(taskRef: string, options: OrchestrationOptions = {
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
   const run = readRun(resolved.taskDir);
   if (!run?.pendingDelegation) return failed('ORCHESTRATION_DELEGATION_MISSING', 'no pending delegation exists', resolved.taskId);
-  if (run.schemaVersion !== 3) return failed('ORCHESTRATION_STATE_INVALID', 'orchestration advance requires schemaVersion 3', resolved.taskId);
   const result = consumeDelegation(run.pendingDelegation, { now: options.now });
   if (!result.ok) return pauseOrchestration(taskRef, result.code, result.message, true, options);
   const completed = result.receipt.stage === 'commit';
@@ -2240,6 +2082,7 @@ export {
   inspectOrchestrationStage,
   hasActivatableOrchestrationDelegation,
   hasSealableOrchestrationDelegation,
+  OrchestrationStateError,
   orchestrationPath,
   pauseMatchingOrchestrationDelegation,
   pauseOrchestration,

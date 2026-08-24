@@ -10,6 +10,7 @@ import {
   checkpointCommitIntent,
   completeCommitIntent,
   dispatchOrchestrationDelegation,
+  OrchestrationStateError,
   pauseOrchestration,
   recoverCommitIntent,
   recoverPreparedOrchestrationDelegation,
@@ -121,6 +122,7 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
     return;
   }
   let result;
+  try {
   if (intent === 'commit-start') {
     const missing = requireValues(['--agent']);
     if (missing) { usageFailure(`intent 'commit-start' requires '${missing}'`); return; }
@@ -294,6 +296,17 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
     if (missing) { usageFailure(`intent 'pause' requires '${missing}'`); return; }
     if (!['true', 'false'].includes(values['--recoverable']!)) { usageFailure('--recoverable must be true or false'); return; }
     result = pauseOrchestration(taskRef!, values['--code']!, values['--message']!, values['--recoverable'] === 'true', coreOptions);
+  }
+  } catch (error) {
+    if (!(error instanceof OrchestrationStateError)) throw error;
+    result = {
+      status: 'failed' as const,
+      changed: false,
+      taskId: error.taskId,
+      run: null,
+      next: null,
+      error: { code: error.code, message: error.message }
+    };
   }
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;

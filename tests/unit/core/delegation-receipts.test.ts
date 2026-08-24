@@ -6,6 +6,7 @@ import {
   completeDelegationStage,
   consumeDelegation,
   dispatchDelegation,
+  isDelegationReceipt,
   prepareDelegation,
   sealDelegation
 } from '../../../lib/task/delegation-receipts.ts';
@@ -41,6 +42,149 @@ const codexProvenance = {
   capabilitySessionId: 'parent-codex', capabilityTurnId: 'parent-turn', capabilityToolUseId: 'capability-tool',
   controllerInstanceDigest: null, controlGeneration: null
 };
+
+test('persisted delegation receipts require the complete current structure', () => {
+  const current = prepareDelegation({
+    ...input,
+    workspaceSnapshotScope: 'task',
+    lifecycleProvenance: null
+  }, {
+    id: () => 'delegation-current',
+    now: () => '2026-01-01T00:00:00.000Z',
+    monotonicNow: () => 1
+  });
+  assert.equal(isDelegationReceipt(current), true);
+  assert.equal(isDelegationReceipt({ ...current, unknownField: true }), false);
+  const missing = { ...current } as Record<string, unknown>;
+  delete missing.workspaceSnapshotScope;
+  assert.equal(isDelegationReceipt(missing), false);
+  assert.equal(isDelegationReceipt({ ...current, round: 0 }), false);
+});
+
+test('persisted delegation receipts bind lifecycle fields to their status', () => {
+  const prepared = prepareDelegation({
+    ...input,
+    workspaceSnapshotScope: 'task',
+    lifecycleProvenance: null
+  }, {
+    id: () => 'delegation-status-current',
+    now: () => '2026-01-01T00:00:00.000Z',
+    monotonicNow: () => 1
+  });
+  const dispatchedResult = dispatchDelegation(prepared, {
+    now: () => '2026-01-01T00:00:00.500Z',
+    monotonicNow: () => 2
+  });
+  assert.equal(dispatchedResult.ok, true);
+  if (!dispatchedResult.ok) return;
+  const dispatchedReceipt = dispatchedResult.receipt;
+  const activatedResult = activateDelegation(dispatchedReceipt, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer',
+    childId: 'child-status-current',
+    parentId: 'parent-status-current',
+    actualModel: 'review-model',
+    actualReasoningEffort: 'high'
+  }, {
+    now: () => '2026-01-01T00:00:01.000Z',
+    monotonicNow: () => 3
+  });
+  assert.equal(activatedResult.ok, true);
+  if (!activatedResult.ok) return;
+  const activated = activatedResult.receipt;
+  const completedResult = completeDelegationStage(activated, {
+    stage: 'review-code', round: 1, artifact: 'review-code.md', agent: 'claude'
+  });
+  assert.equal(completedResult.ok, true);
+  if (!completedResult.ok) return;
+  const stageCompleted = completedResult.receipt;
+  const sealedResult = sealDelegation(stageCompleted, {
+    childId: 'child-status-current', exitCode: 0, afterFingerprint: 'after',
+    changedPaths: ['.agents/workspace/active/TASK-20260101-000001/review-code.md']
+  }, { now: () => '2026-01-01T00:00:02.000Z' });
+  assert.equal(sealedResult.ok, true);
+  if (!sealedResult.ok) return;
+  const sealed = sealedResult.receipt;
+  const consumedResult = consumeDelegation(sealed, {
+    now: () => '2026-01-01T00:00:03.000Z'
+  });
+  assert.equal(consumedResult.ok, true);
+  if (!consumedResult.ok) return;
+  const consumed = consumedResult.receipt;
+
+  for (const receipt of [prepared, dispatchedReceipt, activated, stageCompleted, sealed, consumed]) {
+    assert.equal(isDelegationReceipt(receipt), true, receipt.status);
+  }
+  for (const [label, receipt] of [
+    ['prepared activation identity', { ...prepared, parentId: 'parent-status-current' }],
+    ['activated child identity', { ...activated, childId: null }],
+    ['activated timestamp', { ...activated, activatedAt: null }],
+    ['activated future agent', { ...activated, agent: 'claude' }],
+    ['stage-completed agent', { ...stageCompleted, agent: null }],
+    ['stage-completed future seal', { ...stageCompleted, sealedAt: '2026-01-01T00:00:02.000Z' }],
+    ['sealed fingerprint', { ...sealed, afterFingerprint: null }],
+    ['sealed timestamp', { ...sealed, sealedAt: null }],
+    ['sealed future consumption', { ...sealed, consumedAt: '2026-01-01T00:00:03.000Z' }],
+    ['consumed timestamp', { ...consumed, consumedAt: null }]
+  ] as const) {
+    assert.equal(isDelegationReceipt(receipt), false, label);
+  }
+});
+
+test('persisted Codex receipts require lifecycle provenance and status-bound host evidence', () => {
+  const prepared = dispatched(prepareDelegation({
+    ...input,
+    client: 'codex',
+    workspaceSnapshotScope: 'task',
+    lifecycleProvenance: codexProvenance
+  }, {
+    id: () => 'delegation-codex-current',
+    now: () => '2099-01-01T00:00:00.000Z',
+    monotonicNow: () => 1
+  }));
+  assert.equal(isDelegationReceipt(prepared), true);
+  assert.equal(isDelegationReceipt({ ...prepared, lifecycleProvenance: null }), false);
+
+  const activated = activateDelegation(prepared, {
+    nativeAgent: 'agent-infra-lifecycle-reviewer',
+    childId: 'child-codex-current',
+    parentId: 'parent-codex',
+    spawnMode: 'fresh',
+    actualModel: 'review-model',
+    actualReasoningEffort: 'high',
+    hostEvidence: {
+      kind: 'codex-lifecycle-v2',
+      startRevision: 4,
+      ...codexProvenance,
+      spawnToolUseId: 'spawn-tool',
+      spawnObservedAt: '2099-01-01T00:00:00.500Z'
+    }
+  }, { now: () => '2099-01-01T00:00:01.000Z', monotonicNow: () => 2 });
+  assert.equal(activated.ok, true);
+  if (!activated.ok) return;
+  assert.equal(isDelegationReceipt(activated.receipt), true);
+  assert.equal(isDelegationReceipt({ ...activated.receipt, hostEvidence: null }), false);
+
+  const completed = completeDelegationStage(activated.receipt, {
+    stage: 'review-code', round: 1, artifact: 'review-code.md', agent: 'codex'
+  });
+  assert.equal(completed.ok, true);
+  if (!completed.ok) return;
+  const sealed = sealDelegation(completed.receipt, {
+    childId: 'child-codex-current', exitCode: 0, afterFingerprint: 'after', changedPaths: [],
+    hostEvidence: {
+      stopRevision: 7,
+      consumer: 'delegation-codex-current',
+      consumedAt: '2099-01-01T00:00:02.000Z'
+    }
+  });
+  assert.equal(sealed.ok, true);
+  if (!sealed.ok) return;
+  assert.equal(isDelegationReceipt(sealed.receipt), true);
+  assert.equal(isDelegationReceipt({
+    ...sealed.receipt,
+    hostEvidence: { ...sealed.receipt.hostEvidence, consumer: 'other' }
+  }), false);
+});
 
 test('delegation receipts follow the one-way lifecycle and reject replay', () => {
   const prepared = dispatched(prepareDelegation({ ...input, workspaceSnapshotScope: 'task' }, {

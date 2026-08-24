@@ -182,7 +182,7 @@ The most-used lifecycle commands, in delivery order. The command prefix varies b
 | `code-task` → `review-code` | Implement and test, then run a structured code review |
 | `commit` → `create-pr` → `complete-task` | Commit, open a PR, and archive the task |
 
-Start with one atomic role policy, for example: `$run-task 42 --executor-model <id> --executor-reasoning-effort <value> --reviewer-model <id> --reviewer-reasoning-effort <value>`. Both roles may use the same model. With no explicit policy, `run-task` reads the current Agent Client's optional `agentClients[].orchestration`; if neither source is complete, it shows the host model-selection guidance before creating any run. Re-entry uses the persisted v2 policy.
+Start with one atomic role policy, for example: `$run-task 42 --executor-model <id> --executor-reasoning-effort <value> --reviewer-model <id> --reviewer-reasoning-effort <value>`. Both roles may use the same model. With no explicit policy, `run-task` reads the current Agent Client's optional `agentClients[].orchestration`; if neither source is complete, it shows the host model-selection guidance before creating any run. Re-entry uses the persisted run policy. Finish or clear active runs before upgrading agent-infra; unsupported disk state fails closed without rewriting.
 
 See the full catalog — task status, release, security, and project-maintenance skills — in [Built-in AI Skills](./docs/en/skills.md).
 

@@ -128,6 +128,31 @@ test('task-orchestration begins idempotently and exposes a structured route', ()
   });
 });
 
+test('task-orchestration reports current-structure state errors without rewriting persisted input', () => {
+  const f = fixture();
+  const begun = run(f.root, [f.id, 'begin-or-resume', ...explicitPolicyArgs]);
+  assert.equal(begun.status, 0, begun.stderr);
+  const runPath = path.join(f.dir, 'orchestration.json');
+  const invalid = { ...JSON.parse(fs.readFileSync(runPath, 'utf8')), schemaVersion: 3 };
+  const serialized = `${JSON.stringify(invalid, null, 2)}\n`;
+  fs.writeFileSync(runPath, serialized);
+
+  const result = run(f.root, [f.id, 'status']);
+  assert.equal(result.status, 1, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    status: 'failed',
+    changed: false,
+    taskId: f.id,
+    run: null,
+    next: null,
+    error: {
+      code: 'ORCHESTRATION_STATE_INVALID',
+      message: 'orchestration.json does not match the current runtime structure; finish or clear active runs before upgrading'
+    }
+  });
+  assert.equal(fs.readFileSync(runPath, 'utf8'), serialized);
+});
+
 test('task-orchestration rejects duplicate and unknown options without writing state', () => {
   const f = fixture();
   const result = run(f.root, [f.id, 'begin-or-resume', '--max-steps', '8', '--max-steps', '9']);
@@ -309,7 +334,9 @@ test('task-orchestration hook-stop explicit taskRef branch forwards model/effort
       actualModel: null, actualReasoningEffort: null,
       modelFallbackReason: null, reasoningEffortFallbackReason: null,
       parentId: 'parent-1', childId: 'child-1', spawnMode: null, agent: 'claude',
-      status: 'stage-completed', beforeFingerprint: 'before', afterFingerprint: null,
+      status: 'stage-completed', workspaceSnapshotScope: 'task',
+      lifecycleProvenance: null, hostEvidence: null,
+      beforeFingerprint: 'before', afterFingerprint: null,
       changedPaths: [], createdAt: '2026-01-01T00:00:00.000Z',
       preparedMonotonicMs: 0, spawnDispatchMonotonicMs: 0, activationDeadlineMonotonicMs: 15000,
       spawnDispatchedAt: '2026-01-01T00:00:00.000Z', activationDeadlineAt: '2026-01-01T00:00:15.000Z',
