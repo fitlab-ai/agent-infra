@@ -385,20 +385,23 @@ test('Codex capability serializes concurrent attestation writers', async () => {
     worker.once('error', reject);
   });
 
-  await Promise.all(workers.map(nextMessage));
-  workers[0]!.postMessage('go');
-  assert.equal(Atomics.wait(state, 0, 0, 1_000), 'ok');
-  workers[1]!.postMessage('go');
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  const secondWriterEntered = Atomics.load(state, 1);
-  Atomics.store(state, 2, 1);
-  Atomics.notify(state, 2, 2);
+  try {
+    await Promise.all(workers.map(nextMessage));
+    workers[0]!.postMessage('go');
+    assert.notEqual(Atomics.wait(state, 0, 0, 1_000), 'timed-out');
+    workers[1]!.postMessage('go');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const secondWriterEntered = Atomics.load(state, 1);
+    Atomics.store(state, 2, 1);
+    Atomics.notify(state, 2, 2);
 
-  const results = await Promise.all(workers.map(nextMessage));
-  assert.equal(secondWriterEntered, 0);
-  assert.deepEqual(results.map(({ status }) => status).sort(), ['error', 'ok']);
-  assert.equal(results.find(({ status }) => status === 'error')?.name, 'CODEX_CAPABILITY_REVISION_CONFLICT');
-  await Promise.all(workers.map((worker) => worker.terminate()));
+    const results = await Promise.all(workers.map(nextMessage));
+    assert.equal(secondWriterEntered, 0);
+    assert.deepEqual(results.map(({ status }) => status).sort(), ['error', 'ok']);
+    assert.equal(results.find(({ status }) => status === 'error')?.name, 'CODEX_CAPABILITY_REVISION_CONFLICT');
+  } finally {
+    await Promise.all(workers.map((worker) => worker.terminate()));
+  }
 });
 
 test('Codex capability consume lazily removes old terminal records', () => {
