@@ -105,7 +105,7 @@ async function waitForStartupTransition(
 ): Promise<void> {
   const transitionPath = path.join(root, BROKER_STARTING_FILE);
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  while (true) {
     const transition = readStartupOwner(transitionPath);
     if (!fs.existsSync(transitionPath)) return;
     if (transition && !ownerLive(transition.owner, identityProbe)) {
@@ -116,6 +116,7 @@ async function waitForStartupTransition(
       }
       continue;
     }
+    if (Date.now() >= deadline) break;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error('SANDBOX_CONTROL_BROKER_START_TRANSITION');

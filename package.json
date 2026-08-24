@@ -54,7 +54,7 @@
     "yaml": "^2.9.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/build.js && node scripts/build-inline.js",
+    "build": "node scripts/run-build.js",
     "demo:regen": "sh scripts/demo-regen.sh",
     "prepare": "git config core.hooksPath .git-hooks || true",
     "typecheck": "tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.jschecks.json --noEmit",

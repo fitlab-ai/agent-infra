@@ -208,6 +208,27 @@ test('sandbox control removal gives container operations a bounded pre-force bud
   }
 });
 
+test('sandbox control removal checks an absent startup transition after the pre-force budget expires', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-startup-budget-'));
+  let removeCalled = false;
+  try {
+    writeControlManifest(root, initializeRepository(root), 'remove-startup-budget-generation');
+    await removeSandboxControlRoot(root, {
+      timeoutMs: 1_000,
+      inspectContainer: async () => {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600);
+        return { state: 'absent', id: 'container-id' };
+      },
+      removeContainer: async () => { removeCalled = true; }
+    });
+
+    assert.equal(removeCalled, false);
+    assert.equal(fs.existsSync(root), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('sandbox control removal completes all stages for stubborn broker and execution', onPlatforms('linux', 'darwin'), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-remove-stages-'));
   const brokerReadyPath = path.join(root, 'broker-ready');

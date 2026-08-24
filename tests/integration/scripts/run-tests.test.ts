@@ -8,6 +8,12 @@ import { EventEmitter } from 'node:events';
 
 import { filePath, onPlatforms, sandboxControlSafeEnv } from '../../helpers.ts';
 import { terminateProcessTree } from '../../../scripts/process-tree.js';
+import {
+  acquireTestRunLock,
+  releaseTestRunLock,
+  testRunLockEnv,
+  testRunLockPath
+} from '../../../scripts/test-run-lock.js';
 
 const RUNNER = filePath('scripts/run-tests.js');
 
@@ -34,6 +40,60 @@ test('project test scripts use the sandbox-control-safe runner', () => {
   ]) {
     const script = pkg.scripts[name] ?? '';
     assert.equal(script.startsWith('node scripts/run-tests.js'), true);
+  }
+});
+
+test('test runner lock serializes independent runs and permits inherited reentry', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-lock-'));
+  let first: Awaited<ReturnType<typeof acquireTestRunLock>> | undefined;
+  let second: Awaited<ReturnType<typeof acquireTestRunLock>> | undefined;
+  try {
+    first = await acquireTestRunLock(root, { env: {} });
+    assert.equal(first.owned, true);
+    assert.equal(fs.existsSync(testRunLockPath(root)), true);
+
+    const reentered = await acquireTestRunLock(root, { env: testRunLockEnv(first) });
+    assert.equal(reentered.owned, false);
+
+    let secondResolved = false;
+    const secondPromise = acquireTestRunLock(root, { env: {}, retryMs: 10 }).then((lock) => {
+      secondResolved = true;
+      return lock;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(secondResolved, false);
+
+    releaseTestRunLock(first);
+    second = await secondPromise;
+    assert.equal(second.owned, true);
+    releaseTestRunLock(second);
+    assert.equal(fs.existsSync(testRunLockPath(root)), false);
+  } finally {
+    releaseTestRunLock(second);
+    releaseTestRunLock(first);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('test runner lock recovers ownership left by a dead process', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-test-runner-stale-lock-'));
+  const lockPath = testRunLockPath(root);
+  let recovered: Awaited<ReturnType<typeof acquireTestRunLock>> | undefined;
+  try {
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, 'owner.json'), `${JSON.stringify({
+      version: 1,
+      pid: 999_999_999,
+      token: 'stale-owner',
+      createdAt: Date.now()
+    })}\n`);
+
+    recovered = await acquireTestRunLock(root, { env: {}, retryMs: 10 });
+    assert.equal(recovered.owned, true);
+  } finally {
+    releaseTestRunLock(recovered);
+    fs.rmSync(lockPath, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

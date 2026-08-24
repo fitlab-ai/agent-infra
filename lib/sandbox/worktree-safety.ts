@@ -249,11 +249,14 @@ function assertRecoverableMetadata(worktree: string, repoRoot: string, probe: Pr
 
   const adminGitdir = fs.readFileSync(path.join(adminPath, 'gitdir'), 'utf8').trim();
   const adminCommonDir = fs.readFileSync(path.join(adminPath, 'commondir'), 'utf8').trim();
-  const adminGitdirPath = adminGitdir ? path.resolve(adminPath, adminGitdir) : '';
+  const adminGitdirPath = adminGitdir
+    ? fs.realpathSync.native(path.resolve(adminPath, adminGitdir))
+    : '';
+  const canonicalDotGit = fs.realpathSync.native(dotGit);
   const adminCommonDirPath = adminCommonDir
     ? fs.realpathSync.native(path.resolve(adminPath, adminCommonDir))
     : '';
-  if (!adminGitdir || adminGitdirPath !== path.resolve(dotGit)
+  if (!adminGitdir || adminGitdirPath !== canonicalDotGit
     || !adminCommonDir || adminCommonDirPath !== commonDir) {
     throw new Error('WORKTREE_RECOVERY_METADATA_INVALID');
   }
@@ -311,8 +314,12 @@ function captureRecoveredOnce(
   }
   const stat = fs.lstatSync(resolvedWorktree);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('WORKTREE_RECOVERY_PATH_INVALID');
-  const canonical = fs.realpathSync.native(resolvedWorktree);
-  if (canonical !== resolvedWorktree) throw new Error('WORKTREE_RECOVERY_PATH_INVALID');
+  const canonicalBase = fs.realpathSync.native(resolvedBase);
+  const canonicalWorktree = fs.realpathSync.native(resolvedWorktree);
+  const canonicalRelative = path.relative(canonicalBase, canonicalWorktree);
+  if (!canonicalRelative || canonicalRelative.startsWith('..') || path.isAbsolute(canonicalRelative)) {
+    throw new Error('WORKTREE_RECOVERY_PATH_INVALID');
+  }
   const resolvedWorkspace = resolveSandboxTarget(recovery.branch, recovery.repoRoot).workspace;
   if (recovery.identitySource === 'branch-only' && resolvedWorkspace.mode !== 'branch-only') {
     throw new Error('WORKTREE_RECOVERY_IDENTITY_CHANGED');

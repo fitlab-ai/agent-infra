@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import spawn from 'cross-spawn';
+import { fileURLToPath } from 'node:url';
 import { terminateProcessTree } from './process-tree.js';
+import { acquireTestRunLock, releaseTestRunLock, testRunLockEnv } from './test-run-lock.js';
 
 const env = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => {
@@ -19,6 +21,7 @@ const signals = process.platform === 'win32'
 let activeChild;
 let receivedSignal;
 let terminationPromise;
+let testRunLock;
 
 function forwardSignal(signal) {
   receivedSignal ??= signal;
@@ -70,6 +73,9 @@ function finish(result) {
 }
 
 try {
+  const projectRoot = fileURLToPath(new URL('..', import.meta.url));
+  testRunLock = await acquireTestRunLock(projectRoot);
+  Object.assign(env, testRunLockEnv(testRunLock));
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const buildSucceeded = skipBuild || finish(await run(npm, ['run', 'build']));
   if (buildSucceeded) {
@@ -88,6 +94,7 @@ try {
     process.exitCode = 1;
   }
 } finally {
+  releaseTestRunLock(testRunLock);
   for (const signal of signals) {
     process.off(signal, forwardSignal);
   }
