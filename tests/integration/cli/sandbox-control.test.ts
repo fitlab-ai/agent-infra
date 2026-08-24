@@ -18,6 +18,7 @@ import {
 } from '../../../lib/sandbox/control/lifecycle.ts';
 import { DEFAULT_SANDBOX_CONTROL_TIMING } from '../../../lib/sandbox/control/protocol.ts';
 import { prepareSandboxControlExecution } from '../../../lib/sandbox/control/executor.ts';
+import { atomicWriteJson } from '../../../lib/sandbox/control/state.ts';
 import { serveSandboxControl } from '../../../lib/sandbox/control/server.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
 import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
@@ -951,6 +952,7 @@ test('task-bound finalization compensates an accepted response loss through the 
   const taskId = 'TASK-20260809-010203';
   const token = 'lifecycle-secret';
   const generation = 'finalization-compensation-generation';
+  let heartbeat: NodeJS.Timeout | undefined;
   try {
     const branch = initializeRepository(root);
     const manifestPath = writeControlManifest(root, branch, generation);
@@ -984,6 +986,15 @@ test('task-bound finalization compensates an accepted response loss through the 
       activeRequestId: null,
       updatedAt: Date.now()
     })}\n`);
+    const statusPath = path.join(statusDir, 'status.json');
+    heartbeat = setInterval(() => {
+      try {
+        const status = JSON.parse(fs.readFileSync(statusPath, 'utf8')) as Record<string, unknown>;
+        atomicWriteJson(statusPath, { ...status, updatedAt: Date.now() });
+      } catch {
+        // The fixture is being removed.
+      }
+    }, 250);
 
     const serveOne = async (dropCompletedResponse: boolean) => {
       const requestName = await waitForRequestAsync(requestsDir, SANDBOX_CONTROL_TEST_TIMEOUT_MS);
@@ -1060,6 +1071,7 @@ test('task-bound finalization compensates an accepted response loss through the 
     assert.equal(JSON.parse(secondExecution.stdout).status, 'completed');
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, {});
   } finally {
+    if (heartbeat) clearInterval(heartbeat);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
