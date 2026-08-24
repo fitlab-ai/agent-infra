@@ -12,7 +12,7 @@ const command = process.argv[2] || '';
 
 if (
   process.env.AGENT_INFRA_CONTROL_TOKEN
-  && (command === 'task-lifecycle' || command === 'task-orchestration')
+  && (command === 'task-lifecycle' || command === 'task-orchestration' || command === 'task-finalization')
 ) {
   const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
   await sandboxControl(['client', command, ...process.argv.slice(3)]);
@@ -137,6 +137,11 @@ if (
   case 'task-lifecycle': {
     const { taskLifecycle } = await import('../lib/internal/task-lifecycle.ts');
     taskLifecycle(process.argv.slice(3));
+    break;
+  }
+  case 'task-finalization': {
+    const { taskFinalization } = await import('../lib/internal/task-finalization.ts');
+    taskFinalization(process.argv.slice(3));
     break;
   }
   case 'task-override': {

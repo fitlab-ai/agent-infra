@@ -38,7 +38,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 
 ## 步骤开始：本地生命周期边界
 
-正常完成路径在 active 阶段完成业务更新、平台同步和预完成门禁后，才由步骤 6 的单次 lifecycle intent 原子完成基础终态字段、started/done 日志、目录转移和短号释放；不得提前手工写入这些机械状态。已归档任务只允许进入 `finalization-retry` 场景，不回迁目录或重新执行 lifecycle。
+正常完成路径在 active 阶段完成业务更新、平台同步和预完成门禁后，才由步骤 6 的单次 finalization intent 按固定顺序原子推进生命周期、终态 task 评论和完成校验；不得提前手工写入这些机械状态。已归档任务只允许进入 `finalization-retry` 场景，不回迁目录或重新执行 lifecycle。
 
 ## 执行步骤
 ### 1. 验证任务存在
@@ -167,40 +167,34 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 
 `--force` 不解除本硬门禁：未关闭分歧必须先在账本闭合，未复审提交必须重新审查、具备有效豁免，或由平台适配器为绑定的变更请求（PR/MR）提供权威合并快照与远端 refs，并在隔离临时仓库中证明单父 squash merge 等价，或在无有效变更请求时由本地 Git 对象证明唯一受保护提交是内容等价的单父重写且之后无受保护提交；平台 preflight 必须通过。适配器不支持所需能力，平台事实、Git 对象、拓扑、内容证据缺失，或当前 Git 凭据不能读取远端证据 refs 时 fail closed。全部 checks 由平台适配器提供规范化状态，并在合并前通过 `review-code` / `watch-pr` 路由承担；其中 required checks 仍受分支保护 / ruleset 强制。
 
-### 6. 执行本地生命周期意图并验证转移
+### 6. 执行宿主 finalization 入口并验证终态
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} complete --agent {standard-agent-token}
+agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-仅 `status=applied|no-op` 视为本地完成。`status=failed` 时展示 `error` 与 completed/pending steps，以同一 intent 重试；不得宣称完成或手工补写局部状态。
+finalization 按 lifecycle → task 评论 → `complete-task.completed` 校验的固定顺序执行，并将每一步的状态写入宿主 receipt。只有结构化结果 `status=completed` 才视为完成；`failed` 或 `blocked` 时展示 `error` 与 completed/pending steps，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。
 
 ```bash
 ls .agents/workspace/completed/{task-id}/task.md
 ```
 
-确认任务目录已成功移动。
+仅在 finalization 返回 `status=completed` 后确认任务目录已成功移动。
 
-### 7. 同步终态 task 评论并完成校验
+### 7. 处理 finalization 重试与结果
 
-场景 A 与场景 B `finalization-retry` 都从 completed 目录执行本步骤。若存在有效的 `issue_number`，先调用：
+场景 A 与场景 B `finalization-retry` 都从宿主执行同一个 `task-finalization` 入口。receipt 只是重入提示，不是 canonical truth：每次重入都要重新验证终态 task 评论和完成校验；只有任务已处于 `completed` 且短号 registry 已释放时，才可跳过不可逆的 lifecycle。不得拆开调用旧的 lifecycle、评论同步或完成校验命令。若 task 评论或校验因网络问题返回 `blocked`，保留 receipt 和已完成状态，修复网络后重跑 complete-task；若生命周期仍未完成，任务保持 active 并从 receipt 的待处理步骤继续。
 
-```bash
-agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}
-```
-
-该调用失败时任务已归档，不能调用只接受 active 任务的 `task-warning`；保留 completed 状态并停止。修复网络或平台问题后重跑 complete-task，会由步骤 1 进入 `finalization-retry`，只重复本步骤。
-
-运行完成校验，确认任务产物和同步状态符合规范：
+完成结果必须包含本次 finalization 的结构化输出，确认任务产物和同步状态符合规范：
 
 ```bash
 agent-infra-internal task-verify {task-id} complete-task.completed --format text
 ```
 
 处理结果：
-- 退出码 0（全部通过）-> 继续到「告知用户」步骤
-- 退出码 1（校验失败）-> 根据输出修复问题后重新运行校验
-- 退出码 2（网络中断或状态标签清理尚未收敛）-> 保留 completed 状态并停止；稍后重跑 complete-task 进入 `finalization-retry`
+- `status=completed` / 退出码 0（全部通过）-> 继续到「告知用户」步骤
+- `status=failed` / 退出码 1 -> 根据输出修复问题后重新运行 finalization
+- `status=blocked` / 退出码 2 -> 保留 receipt 与已完成的步骤并停止；稍后重跑 complete-task 进入 `finalization-retry`
 
 将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 

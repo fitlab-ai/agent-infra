@@ -17,6 +17,7 @@ import {
   removeSandboxControlRoot
 } from '../../../lib/sandbox/control/lifecycle.ts';
 import { DEFAULT_SANDBOX_CONTROL_TIMING } from '../../../lib/sandbox/control/protocol.ts';
+import { prepareSandboxControlExecution } from '../../../lib/sandbox/control/executor.ts';
 import { serveSandboxControl } from '../../../lib/sandbox/control/server.ts';
 import { startSandboxControlBroker } from '../../../lib/sandbox/recovery.ts';
 import { getProcessStartTime, isProcessAlive } from '../../../lib/server/process-state.ts';
@@ -57,6 +58,71 @@ async function waitForStatusStateAsync(statusDir: string, state: string, timeout
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`Timed out waiting for ${state} status in ${statusDir}`);
+}
+
+async function waitForRequestAsync(requestsDir: string, timeoutMs: number): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const request = fs.readdirSync(requestsDir).find((name) => name.endsWith('.json'));
+    if (request) return request;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for a request in ${requestsDir}`);
+}
+
+function runTaskFinalizationClient(params: {
+  channelDir: string;
+  statusDir: string;
+  token: string;
+  generation: string;
+  timeoutMs: number;
+}): Promise<{ exitCode: number; payload: Record<string, unknown>; stderr: string }> {
+  const script = [
+    "import { requestSandboxTaskFinalization } from './lib/sandbox/control/client.ts';",
+    'try {',
+    '  const response = requestSandboxTaskFinalization({',
+    "    agent: 'codex',",
+    '    channelDir: process.env.TEST_CHANNEL_DIR,',
+    '    statusDir: process.env.TEST_STATUS_DIR,',
+    '    token: process.env.TEST_TOKEN,',
+    '    generation: process.env.TEST_GENERATION,',
+    '    timeoutMs: Number(process.env.TEST_TIMEOUT_MS)',
+    '  });',
+    "  process.stdout.write(JSON.stringify({ phase: response.phase, exitCode: response.exitCode, stdout: response.stdout, stderr: response.stderr, error: response.error }) + '\\n');",
+    '} catch (error) {',
+    '  const value = error;',
+    "  process.stdout.write(JSON.stringify({ error: value.detail ?? { code: 'CLIENT_FAILED', message: String(value), retryable: false }, accepted: value.accepted ?? false }) + '\\n');",
+    '  process.exitCode = 1;',
+    '}'
+  ].join('\n');
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--experimental-strip-types', '--no-warnings', '--input-type=module', '--eval', script], {
+      cwd: path.resolve('.'),
+      env: {
+        ...process.env,
+        TEST_CHANNEL_DIR: params.channelDir,
+        TEST_STATUS_DIR: params.statusDir,
+        TEST_TOKEN: params.token,
+        TEST_GENERATION: params.generation,
+        TEST_TIMEOUT_MS: String(params.timeoutMs)
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+    child.once('error', reject);
+    child.once('close', (code) => {
+      try {
+        resolve({ exitCode: code ?? 1, payload: JSON.parse(stdout) as Record<string, unknown>, stderr });
+      } catch (error) {
+        reject(new Error(`client output was invalid: ${String(error)}\n${stdout}${stderr}`));
+      }
+    });
+  });
 }
 
 function monotonicNowMs(): number {
@@ -792,6 +858,205 @@ test('sandbox control client tolerates a transient torn response but rejects sta
     const stable = await collect(stableClient);
     assert.equal(stable.exitCode, 1);
     assert.equal(JSON.parse(stable.stdout).code, 'SANDBOX_CONTROL_RESPONSE_INVALID');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-finalization client exposes accepted result loss as a structured unknown result', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-unknown-'));
+  const channelDir = path.join(root, 'channel');
+  const requestsDir = path.join(channelDir, 'requests');
+  const responsesDir = path.join(channelDir, 'responses');
+  const statusDir = path.join(root, 'public');
+  fs.mkdirSync(requestsDir, { recursive: true });
+  fs.mkdirSync(responsesDir);
+  fs.mkdirSync(statusDir);
+  const startTime = getProcessStartTime(process.pid);
+  assert.ok(startTime);
+  const generation = 'finalization-generation';
+  fs.writeFileSync(path.join(statusDir, 'status.json'), `${JSON.stringify({
+    version: 2,
+    generation,
+    broker: { pid: process.pid, startTime, brokerId: 'finalization-broker' },
+    state: 'healthy',
+    reasonCode: null,
+    activeRequestId: null,
+    updatedAt: Date.now()
+  })}\n`);
+  const child = spawn(process.execPath, [
+    '--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'),
+    'sandbox-control', 'client', 'task-finalization', '08', 'complete', '--agent', 'codex'
+  ], {
+    cwd: path.resolve('.'),
+    env: {
+      ...process.env,
+      AGENT_INFRA_CONTROL_TOKEN: 'finalization-secret',
+      AGENT_INFRA_CONTROL_GENERATION: generation,
+      AGENT_INFRA_CONTROL_DIR: channelDir,
+      AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
+  child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+  try {
+    const deadline = Date.now() + 2_000;
+    let requestName: string | undefined;
+    while (!(requestName = fs.readdirSync(requestsDir).find((name) => name.endsWith('.json'))) && Date.now() < deadline) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+    assert.ok(requestName);
+    const request = JSON.parse(fs.readFileSync(path.join(requestsDir, requestName), 'utf8')) as Record<string, unknown>;
+    assert.equal(request.family, 'task-finalization');
+    assert.equal(request.operation, 'complete');
+    assert.equal(request.agent, 'codex');
+    assert.deepEqual(request.args, []);
+    assert.equal('taskRef' in request, false);
+    assert.equal('repoRoot' in request, false);
+    fs.writeFileSync(path.join(responsesDir, requestName), `${JSON.stringify({
+      version: 2,
+      id: requestName.slice(0, -5),
+      phase: 'rejected',
+      exitCode: null,
+      stdout: '',
+      stderr: 'SANDBOX_CONTROL_RESULT_UNKNOWN\n',
+      error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
+    })}\n`);
+    const exitCode = await new Promise<number>((resolve) => child.once('close', (code) => resolve(code ?? 1)));
+    assert.equal(exitCode, 1, stderr);
+    assert.deepEqual(JSON.parse(stdout), {
+      version: 1,
+      status: 'unknown',
+      changed: false,
+      accepted: true,
+      result: null,
+      error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
+    });
+    assert.match(stderr, /result unknown/);
+  } finally {
+    if (child.exitCode === null) child.kill('SIGTERM');
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-bound finalization compensates an accepted response loss through the same host executor entry', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-finalization-compensation-'));
+  const taskId = 'TASK-20260809-010203';
+  const token = 'lifecycle-secret';
+  const generation = 'finalization-compensation-generation';
+  try {
+    const branch = initializeRepository(root);
+    const manifestPath = writeControlManifest(root, branch, generation);
+    const activeTaskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+    fs.mkdirSync(path.join(root, '.agents', 'skills', 'complete-task', 'config'), { recursive: true });
+    fs.mkdirSync(activeTaskDir, { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+    fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '08': taskId } })}\n`);
+    fs.writeFileSync(path.join(root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({ skill: 'complete-task', checks: {} }));
+    fs.writeFileSync(path.join(activeTaskDir, 'task.md'), [
+      '---', `id: ${taskId}`, 'type: bugfix', 'workflow: bug-fix', 'status: active',
+      'created_at: 2026-08-09 01:02:03+00:00', 'updated_at: 2026-08-09 01:02:03+00:00',
+      'agent_infra_version: v0.9.9', 'current_step: code-review', 'assigned_to: codex',
+      'target_date:', '---', '', '# Task', '', '## Activity Log', ''
+    ].join('\n'));
+
+    const statusDir = path.join(root, 'public');
+    const channelDir = path.join(root, 'channel');
+    const requestsDir = path.join(channelDir, 'requests');
+    const responsesDir = path.join(channelDir, 'responses');
+    fs.mkdirSync(requestsDir, { recursive: true });
+    fs.mkdirSync(responsesDir, { recursive: true });
+    const startTime = getProcessStartTime(process.pid);
+    assert.ok(startTime);
+    fs.writeFileSync(path.join(statusDir, 'status.json'), `${JSON.stringify({
+      version: 2,
+      generation,
+      broker: { pid: process.pid, startTime, brokerId: 'finalization-compensation-broker' },
+      state: 'healthy',
+      reasonCode: null,
+      activeRequestId: null,
+      updatedAt: Date.now()
+    })}\n`);
+
+    const serveOne = async (dropCompletedResponse: boolean) => {
+      const requestName = await waitForRequestAsync(requestsDir, 2_000);
+      const requestPath = path.join(requestsDir, requestName);
+      const request = JSON.parse(fs.readFileSync(requestPath, 'utf8')) as { id: string; family: string; operation: string; agent: string };
+      assert.equal(request.id, requestName.slice(0, -5));
+      assert.equal(request.family, 'task-finalization');
+      assert.equal(request.operation, 'complete');
+      assert.equal(request.agent, 'codex');
+      const prepared = await prepareSandboxControlExecution({
+        manifest: JSON.parse(fs.readFileSync(manifestPath, 'utf8')),
+        manifestPath,
+        request: JSON.parse(fs.readFileSync(requestPath, 'utf8')),
+        requestPath,
+        internalCliPath: path.resolve('bin/internal-cli.ts')
+      });
+      fs.writeFileSync(path.join(responsesDir, requestName), `${JSON.stringify({
+        version: 2, id: request.id, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
+      })}\n`);
+      prepared.start();
+      const executionResult = await prepared.completion;
+      if (!dropCompletedResponse) {
+        fs.writeFileSync(path.join(responsesDir, requestName), `${JSON.stringify({
+          version: 2, id: request.id, phase: 'completed', exitCode: executionResult.exitCode,
+          stdout: executionResult.stdout, stderr: executionResult.stderr, error: null
+        })}\n`);
+      }
+      fs.rmSync(path.join(root, 'processing', request.id), { recursive: true, force: true });
+      fs.rmSync(requestPath, { force: true });
+      return executionResult;
+    };
+
+    const firstBroker = serveOne(true);
+    const firstClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: 500 });
+    const firstExecution = await firstBroker;
+    assert.equal(firstClient.exitCode, 1);
+    assert.equal((firstClient.payload.error as { code?: string }).code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
+    assert.equal(firstClient.payload.accepted, true);
+    assert.equal(JSON.parse(firstExecution.stdout).status, 'completed');
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'completed', taskId, 'task.md')), true);
+
+    const registryPath = path.join(root, '.agents', 'workspace', 'active', '.short-ids.json');
+    fs.writeFileSync(registryPath, '{not-json\n');
+    const failedBroker = serveOne(false);
+    const failedClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: 2_000 });
+    const failedExecution = await failedBroker;
+    assert.equal(failedExecution.exitCode, 1);
+    assert.equal(failedClient.exitCode, 0);
+    assert.equal(failedClient.payload.phase, 'completed');
+    const failedOutput = String(failedClient.payload.stdout);
+    assert.equal(failedOutput.includes(root), false);
+    assert.equal(failedExecution.stdout.includes(root), false);
+    assert.equal(fs.readFileSync(path.join(root, '.agents', 'workspace', '.task-finalization', `${taskId}.json`), 'utf8').includes(root), false);
+    assert.equal((JSON.parse(failedOutput) as { error: { code: string } }).error.code, 'TASK_FINALIZATION_SHORT_ID_REGISTRY_UNAVAILABLE');
+
+    fs.writeFileSync(registryPath, `${JSON.stringify({ version: 1, ids: {} })}\n`);
+    const secondBroker = serveOne(false);
+    const secondClient = await runTaskFinalizationClient({ channelDir, statusDir, token, generation, timeoutMs: 2_000 });
+    const secondExecution = await secondBroker;
+    assert.equal(secondClient.exitCode, 0, secondClient.stderr);
+    assert.equal(secondClient.payload.phase, 'completed');
+    const compensated = JSON.parse(String(secondClient.payload.stdout)) as {
+      status: string;
+      changed: boolean;
+      result: { status: string; changed: boolean; lifecycle: { status: string }; taskComment: { status: string }; verification: { status: string } };
+    };
+    assert.equal(compensated.status, 'completed');
+    assert.equal(compensated.changed, false);
+    assert.equal(compensated.result.status, 'completed');
+    assert.equal(compensated.result.changed, false);
+    assert.equal(compensated.result.lifecycle.status, 'no-op');
+    assert.equal(compensated.result.taskComment.status, 'skipped');
+    assert.equal(compensated.result.verification.status, 'pass');
+    assert.equal(JSON.parse(secondExecution.stdout).status, 'completed');
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, {});
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

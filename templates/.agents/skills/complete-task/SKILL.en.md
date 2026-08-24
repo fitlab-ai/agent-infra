@@ -38,7 +38,7 @@ Before the state check is complete, do not make external-state assertions such a
 
 ## Step Start: Local Lifecycle Boundary
 
-On the normal path, complete business updates, platform sync, and the pre-completion gate while the task is active. Only then may the lifecycle intent in Step 6 atomically commit base terminal fields, the started/done pair, the directory move, and short-id release. Do not write those mechanical fields first. An archived task may only enter `finalization-retry`; do not move it back or rerun lifecycle.
+On the normal path, complete business updates, platform sync, and the pre-completion gate while the task is active. Only then may the single finalization intent in Step 6 advance lifecycle, the terminal task comment, and the completion gate in a fixed order. Do not write those mechanical fields first. An archived task may only enter `finalization-retry`; do not move it back or rerun lifecycle.
 
 ## Steps
 
@@ -168,40 +168,34 @@ When preflight's `post-review-commit` check passes through a human-decided exemp
 
 `--force` does not lift this hard gate: close ledger disagreements; re-review or exempt post-review commits, use the platform adapter's authoritative snapshot and remote refs for the bound change request (PR/MR) to prove a content-equivalent single-parent squash merge in an isolated temporary repository, or, without a valid change request, prove from local Git objects that the only protected commit is a content-equivalent single-parent rewrite with no later protected commits; then pass platform preflight. An unsupported adapter capability, missing required platform facts, Git objects, topology, or content evidence, or current Git credentials that cannot read the remote evidence refs fails closed. The platform adapter supplies normalized state for all checks, enforced before merge by the `review-code` / `watch-pr` routes; required checks remain additionally enforced by branch protection / rulesets.
 
-### 6. Apply the Local Lifecycle Intent and Verify the Move
+### 6. Run the Host Finalization Entry Point and Verify the Terminal State
 
 ```bash
-agent-infra-internal task-lifecycle {task-id} complete --agent {standard-agent-token}
+agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-Only `status=applied|no-op` means local completion succeeded. On `status=failed`, show the structured error and recovery steps and retry the same intent; do not claim completion or hand-repair partial state.
+Finalization runs lifecycle -> the terminal task comment -> the `complete-task.completed` gate in a fixed order and records each step in the host receipt. Only structured `status=completed` means completion succeeded. On `failed` or `blocked`, show the error and completed/pending steps, fix the cause, and retry through the same entry point; do not claim completion or hand-repair partial state.
 
 ```bash
 ls .agents/workspace/completed/{task-id}/task.md
 ```
 
-Confirm the task directory was successfully moved.
+Check the task directory only after finalization returns `status=completed`.
 
-### 7. Sync the Terminal Task Comment and Run the Gate
+### 7. Handle Finalization Retries and Results
 
-Both Scenario A and Scenario B `finalization-retry` execute this step from the completed directory. If a valid `issue_number` exists, first run:
+Both Scenario A and Scenario B `finalization-retry` run the same `task-finalization` entry point from the host. The receipt is only a re-entry hint, not canonical truth: every re-entry revalidates the terminal task comment and completion gate; only an already `completed` task with its short-id registry entry released may skip the irreversible lifecycle. Do not split the operation into the former lifecycle, comment-sync, or completion-gate commands. If the task comment or gate is blocked by the network, preserve the receipt and completed steps, fix the network, and rerun complete-task. If lifecycle has not completed, keep the task active and resume the pending steps from the receipt.
 
-```bash
-agent-infra-internal platform-comment sync {task-id} --kind task --agent {standard-agent-token}
-```
-
-If this call fails, the task is already archived and `task-warning` cannot accept it. Keep the task completed and stop. After fixing the network or platform issue, rerun complete-task; Step 1 will enter `finalization-retry` and repeat only this step.
-
-Run the verification gate to confirm the task artifact and sync state are valid:
+The result must include the structured output from this finalization run, confirming that the task artifact and sync state are valid:
 
 ```bash
 agent-infra-internal task-verify {task-id} complete-task.completed --format text
 ```
 
 Handle the result as follows:
-- exit code 0 (all checks passed) -> continue to the "Inform User" step
-- exit code 1 (validation failed) -> fix the reported issues and run the gate again
-- exit code 2 (network blocked or status-label cleanup is still pending) -> keep the task completed and stop; rerun complete-task later to enter `finalization-retry`
+- `status=completed` / exit code 0 (all checks passed) -> continue to the "Inform User" step
+- `status=failed` / exit code 1 -> fix the reported issues and run finalization again
+- `status=blocked` / exit code 2 -> preserve the receipt and completed steps and stop; rerun complete-task later to enter `finalization-retry`
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 

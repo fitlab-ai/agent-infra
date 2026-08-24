@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getProcessStartTime } from '../../server/process-state.ts';
 import { createTask } from '../../task/create-service.ts';
+import { applyTaskFinalization } from '../../task/finalization.ts';
 import { bindSandboxControlTask, type SandboxControlExecution, type SandboxControlManifest, type SandboxControlRequest } from './protocol.ts';
 import { atomicWriteJson, executionPath, terminateSandboxControlExecution } from './state.ts';
 import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
@@ -165,6 +166,22 @@ function orchestrationFailure(code: string, message: string): SandboxControlExec
   };
 }
 
+function finalizationResult(result: ReturnType<typeof applyTaskFinalization>): SandboxControlExecutionResult {
+  const payload = {
+    version: 1,
+    status: result.status,
+    changed: result.changed,
+    accepted: true,
+    result,
+    error: result.error
+  };
+  return {
+    exitCode: result.status === 'completed' ? 0 : result.status === 'blocked' ? 2 : 1,
+    stdout: `${JSON.stringify(payload)}\n`,
+    stderr: ''
+  };
+}
+
 function isCodexPrepare(args: readonly string[]): boolean {
   if (args[1] !== 'prepare') return false;
   const values: string[] = [];
@@ -213,6 +230,12 @@ export function executeRequest(
     } catch (error) {
       return controllerFailure(error);
     }
+  }
+  if (request.family === 'task-finalization') {
+    return finalizationResult(applyTaskFinalization(
+      { taskRef: manifest.taskId!, intent: 'complete', agent: request.agent },
+      { repoRoot: manifest.repoRoot }
+    ));
   }
   const boundArgs = bindSandboxControlTask(request, manifest.taskId!);
   let controllerBinding: Readonly<{ instanceDigest: string; controlGeneration: string }> | null = null;

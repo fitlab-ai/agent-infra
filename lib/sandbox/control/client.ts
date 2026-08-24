@@ -11,6 +11,7 @@ import {
   type SandboxControlResponse,
   type SandboxTaskCreateRequest,
   type SandboxTaskCommandRequest,
+  type SandboxTaskFinalizationRequest,
   type SandboxCodexControllerRequest
 } from './protocol.ts';
 import type {
@@ -18,6 +19,7 @@ import type {
   CodexControllerOpened
 } from './controller-registration.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
+import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
 import { readSandboxControlStatus } from './state.ts';
 import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 
@@ -184,7 +186,7 @@ export function requestSandboxControl(params: Readonly<{
   token?: string; generation?: string; timeoutMs?: number;
 }>): SandboxControlResponse {
   if (!isSandboxControlFamily(params.family)) clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' is not allowed`, false);
-  if (params.family === 'task-create' || params.family === 'codex-controller') {
+  if (params.family === 'task-create' || params.family === 'codex-controller' || params.family === 'task-finalization') {
     clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' requires a typed request`, false);
   }
   const auth = authority(params);
@@ -221,6 +223,34 @@ export function requestSandboxTaskControl(params: Readonly<{
     args: params.args,
     controllerProcess: null,
     controllerProof: params.controllerProof
+  };
+  return exchangeSandboxControl(request, params);
+}
+
+export function requestSandboxTaskFinalization(params: Readonly<{
+  agent: string;
+  channelDir?: string;
+  statusDir?: string;
+  token?: string;
+  generation?: string;
+  timeoutMs?: number;
+}>): SandboxControlResponse {
+  const agent = normalizeAgentToken(params.agent);
+  if (!agent) clientError('SANDBOX_CONTROL_REQUEST_INVALID', 'task-finalization agent is invalid', false);
+  const auth = authority(params);
+  const issuedAt = Date.now();
+  const request: SandboxTaskFinalizationRequest = {
+    version: 3,
+    id: randomUUID(),
+    ...auth,
+    issuedAt,
+    expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
+    family: 'task-finalization',
+    operation: 'complete',
+    agent,
+    args: [],
+    controllerProcess: null,
+    controllerProof: null
   };
   return exchangeSandboxControl(request, params);
 }
