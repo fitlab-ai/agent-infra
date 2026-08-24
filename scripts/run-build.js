@@ -6,10 +6,10 @@ import path from 'node:path';
 import { acquireTestRunLock, releaseTestRunLock } from './test-run-lock.js';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
-const tsc = process.platform === 'win32' ? 'tsc.cmd' : 'tsc';
+const tsc = path.join(projectRoot, 'node_modules', 'typescript', 'bin', 'tsc');
 /** @type {Array<[string, string[]]>} */
 const commands = [
-  [tsc, ['-p', 'tsconfig.json']],
+  [process.execPath, [tsc, '-p', 'tsconfig.json']],
   [process.execPath, [path.join(projectRoot, 'scripts', 'build.js')]],
   [process.execPath, [path.join(projectRoot, 'scripts', 'build-inline.js')]]
 ];
