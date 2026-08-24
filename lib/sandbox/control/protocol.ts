@@ -1,12 +1,13 @@
 import { validateTaskCreateCandidate, type TaskCreateCandidateV1 } from '../../task/create.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
+import type { CodexControllerLeaseProofV1 } from './controller-registration.ts';
 
 export const SANDBOX_CONTROL_MAX_BYTES = 64 * 1024;
 export const SANDBOX_CONTROL_ADMISSION_WINDOW_MS = 2_000;
 export const SANDBOX_CONTROL_STATUS_INTERVAL_MS = 250;
 export const SANDBOX_CONTROL_STATUS_STALE_MS = 1_500;
 export const SANDBOX_CONTROL_FUTURE_SKEW_MS = 1_000;
-export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration', 'task-create'] as const;
+export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration', 'task-create', 'codex-controller'] as const;
 export type SandboxControlTimingPolicy = Readonly<{
   controlTickMs: number;
   parkedBindingInitialMs: number;
@@ -43,7 +44,9 @@ export type SandboxControlBrokerOwner = ProcessIdentity & Readonly<{
   generation: string;
 }>;
 type RequestBase = Readonly<{
-  version: 2; id: string; token: string; generation: string; issuedAt: number; expiresAt: number;
+  version: 3; id: string; token: string; generation: string; issuedAt: number; expiresAt: number;
+  controllerProcess: ProcessIdentity | null;
+  controllerProof: CodexControllerLeaseProofV1 | null;
 }>;
 export type SandboxTaskCommandRequest = RequestBase & Readonly<{
   family: 'task-lifecycle' | 'task-orchestration'; args: string[];
@@ -51,7 +54,12 @@ export type SandboxTaskCommandRequest = RequestBase & Readonly<{
 export type SandboxTaskCreateRequest = RequestBase & Readonly<{
   family: 'task-create'; candidate: TaskCreateCandidateV1;
 }>;
-export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskCreateRequest;
+export type SandboxCodexControllerRequest = RequestBase & Readonly<{
+  family: 'codex-controller';
+  command: 'open' | 'close';
+  args: [];
+}>;
+export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest;
 export type SandboxControlError = Readonly<{ code: string; message: string; retryable: boolean }>;
 export type SandboxControlResponse = Readonly<{
   version: 2; id: string; phase: 'accepted' | 'completed' | 'rejected'; exitCode: number | null;
@@ -101,7 +109,7 @@ export function validateSandboxControlRequest(
   }
   const request = value as Record<string, unknown>;
   if (
-    request.version !== 2 || typeof request.id !== 'string'
+    request.version !== 3 || typeof request.id !== 'string'
     || !/^[a-f0-9-]{16,64}$/.test(request.id) || request.token !== manifest.token
     || typeof request.family !== 'string' || !isSandboxControlFamily(request.family)
     || !Number.isSafeInteger(request.issuedAt) || !Number.isSafeInteger(request.expiresAt)
@@ -120,13 +128,31 @@ export function validateSandboxControlRequest(
     fail('SANDBOX_CONTROL_REQUEST_TOO_LARGE', 'request exceeds the control limit');
   }
   if (request.family === 'task-create') {
-    const expected = ['candidate', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
+    const expected = ['candidate', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
     if (Object.keys(request).sort().join(',') !== expected.sort().join(',')) {
       fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
     }
+    if (request.controllerProcess !== null || request.controllerProof !== null) {
+      fail('SANDBOX_CONTROL_REQUEST_INVALID', 'task-create cannot carry controller authority');
+    }
     return { ...request, candidate: validateTaskCreateCandidate(request.candidate) } as SandboxTaskCreateRequest;
   }
-  const expected = ['args', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
+  if (request.family === 'codex-controller') {
+    const expected = ['args', 'command', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
+    if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
+      || !Array.isArray(request.args) || request.args.length !== 0
+      || !['open', 'close'].includes(request.command as string)
+      || !validControllerProcess(request.controllerProcess)
+      || (request.command === 'open' && request.controllerProof !== null)
+      || (request.command === 'close' && !validControllerProof(request.controllerProof))) {
+      fail('SANDBOX_CONTROL_REQUEST_INVALID', 'controller request schema is invalid');
+    }
+    if (manifest.mode !== 'task-bound' || !manifest.taskId) {
+      fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot register a Codex controller');
+    }
+    return request as SandboxCodexControllerRequest;
+  }
+  const expected = ['args', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
   if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
     || !Array.isArray(request.args) || !request.args.every((arg) => typeof arg === 'string')) {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'request schema or authorization is invalid');
@@ -141,13 +167,40 @@ export function validateSandboxControlRequest(
     && request.args.some((arg) => arg === '--git-worktree-root' || arg.startsWith('--git-worktree-root='))) {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', 'worktree binding is reserved for the control broker');
   }
+  if (request.controllerProcess !== null
+    || (request.controllerProof !== null && !validControllerProof(request.controllerProof))) {
+    fail('SANDBOX_CONTROL_REQUEST_INVALID', 'controller authority is invalid');
+  }
+  if (request.family !== 'task-orchestration' && request.controllerProof !== null) {
+    fail('SANDBOX_CONTROL_REQUEST_INVALID', 'controller proof is not allowed for this family');
+  }
   return request as SandboxTaskCommandRequest;
 }
 
 export function bindSandboxControlTask(request: SandboxControlRequest, taskId: string): string[] {
-  if (request.family === 'task-create') fail('SANDBOX_CONTROL_REQUEST_INVALID', 'task-create requests do not bind a current task');
+  if (request.family === 'task-create' || request.family === 'codex-controller') {
+    fail('SANDBOX_CONTROL_REQUEST_INVALID', `${request.family} requests do not bind a current task`);
+  }
   if (request.args.length === 0) fail('SANDBOX_CONTROL_REQUEST_INVALID', 'command arguments are required');
   return [taskId, ...request.args.slice(1)];
+}
+
+function validControllerProcess(value: unknown): value is ProcessIdentity {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const processValue = value as Record<string, unknown>;
+  return Object.keys(processValue).sort().join(',') === 'pid,startTime'
+    && Number.isSafeInteger(processValue.pid) && (processValue.pid as number) > 0
+    && Number.isSafeInteger(processValue.startTime) && (processValue.startTime as number) >= 0;
+}
+
+function validControllerProof(value: unknown): value is CodexControllerLeaseProofV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proof = value as Record<string, unknown>;
+  return Object.keys(proof).sort().join(',') === 'controllerProcess,leaseId,leaseSecret,version'
+    && proof.version === 1
+    && typeof proof.leaseId === 'string' && /^[a-f0-9]{64}$/u.test(proof.leaseId)
+    && typeof proof.leaseSecret === 'string' && /^[a-f0-9]{64}$/u.test(proof.leaseSecret)
+    && validControllerProcess(proof.controllerProcess);
 }
 
 export function controlError(error: unknown): SandboxControlError {

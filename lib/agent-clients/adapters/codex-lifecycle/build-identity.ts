@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import semver from 'semver';
+
 const LIFECYCLE_PROTOCOL_VERSION = 3;
 
 type LifecycleBuildIdentity = Readonly<{
@@ -30,6 +32,14 @@ type IdentityVerification = Readonly<{
 
 function exactText(value: unknown): value is string {
   return typeof value === 'string' && value.trim() === value && value.length > 0;
+}
+
+function isCanonicalLifecyclePackageVersion(value: unknown): value is string {
+  return typeof value === 'string' && semver.valid(value) === value;
+}
+
+function isLifecycleProtocolVersion(value: unknown): value is typeof LIFECYCLE_PROTOCOL_VERSION {
+  return value === LIFECYCLE_PROTOCOL_VERSION;
 }
 
 function normalizeRelativePath(value: string): string {
@@ -215,6 +225,8 @@ function verifyLifecycleBuildIdentity(
 export {
   LIFECYCLE_PROTOCOL_VERSION,
   computeLifecycleBuildIdentity,
+  isCanonicalLifecyclePackageVersion,
+  isLifecycleProtocolVersion,
   readLifecycleManifestFiles,
   resolveLifecycleExecutableFiles,
   verifyLifecycleBuildIdentity

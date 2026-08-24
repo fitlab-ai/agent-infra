@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,6 +7,12 @@ import test, { after } from 'node:test';
 
 import { createCodexLifecycleStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
 import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import { computeLifecycleBuildIdentity } from '../../../lib/agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import {
+  contextFromControllerLease,
+  writeCodexSandboxControllerContext
+} from '../../../lib/agent-clients/adapters/codex-lifecycle/controller-context.ts';
+import { getProcessStartTime } from '../../../lib/server/process-state.ts';
 import {
   activateCodexOrchestrationDelegation,
   activateCodexSpawnDelegation,
@@ -57,22 +64,130 @@ function fixture() {
   return { root, taskDir };
 }
 
-function capability(root: string, token: string) {
+function capability(
+  root: string,
+  token: string,
+  controller?: Readonly<{ instanceDigest: string; controlGeneration: string }>
+) {
   const store = createCodexCapabilityStore({
     root: path.join(root, '.agents', 'workspace', '.runtime', 'codex-capabilities'),
     token: () => token
   });
-  const armed = store.arm({ taskId, buildIdentity });
+  const armed = store.arm({ taskId, buildIdentity, ...(controller ? { controller } : {}) });
   store.attest({
     token: armed.token,
     sessionId: 'parent',
     turnId: 'parent-turn',
     toolUseId: 'capability-tool',
     hookDefinitionHash: 'hook-hash',
-    buildIdentity
+    buildIdentity,
+    ...(controller ? { controller } : {})
   });
   return { store, token: armed.token };
 }
+
+test('Codex prepare consumes a controller-bound capability from the trusted broker binding', async () => {
+  const f = fixture();
+  const controller = { instanceDigest: 'e'.repeat(64), controlGeneration: 'generation-1' };
+  const currentCapability = capability(f.root, 'broker-controller-token', controller);
+  const previous = process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
+  process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING = JSON.stringify(controller);
+  try {
+    const result = await prepareCodexOrchestrationDelegation(taskId, {
+      client: 'codex',
+      requestedModel: 'executor-model',
+      requestedReasoningEffort: 'xhigh',
+      capabilityToken: currentCapability.token
+    }, {
+      repoRoot: f.root,
+      capabilityStore: currentCapability.store,
+      buildIdentity,
+      preflight,
+      orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-controller' }
+    });
+    assert.equal(result.status, 'running');
+    assert.equal(result.run?.pendingDelegation?.lifecycleProvenance?.controllerInstanceDigest, controller.instanceDigest);
+    assert.equal(result.run?.pendingDelegation?.lifecycleProvenance?.controlGeneration, controller.controlGeneration);
+  } finally {
+    if (previous === undefined) delete process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
+    else process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING = previous;
+  }
+});
+
+test('Codex prepare rejects mismatched broker and verified local controller bindings before consume', async () => {
+  const f = fixture();
+  const contractFiles = [
+    '.codex/hooks.json',
+    '.codex/agents/agent-infra-lifecycle-executor.toml',
+    '.codex/agents/agent-infra-lifecycle-reviewer.toml',
+    '.agents/hooks/lifecycle-delegation.js',
+    '.agents/skills/run-task/SKILL.md',
+    '.agents/rules/lifecycle-orchestration.md'
+  ];
+  for (const relative of contractFiles) {
+    const file = path.join(f.root, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${relative}\n`);
+  }
+  const realBuild = computeLifecycleBuildIdentity(f.root);
+  const processStartTime = getProcessStartTime(process.pid);
+  assert.ok(processStartTime);
+  const profileFiles = contractFiles.slice(1, 3).map((relative) => path.join(f.root, relative)).sort();
+  const profileHash = crypto.createHash('sha256');
+  for (const file of profileFiles) {
+    profileHash.update(path.basename(file));
+    profileHash.update('\0');
+    profileHash.update(fs.readFileSync(file));
+    profileHash.update('\0');
+  }
+  const contextPath = path.join(f.root, 'controller-context.json');
+  writeCodexSandboxControllerContext(contextPath, contextFromControllerLease({
+    version: 1,
+    leaseId: '7'.repeat(64),
+    leaseSecret: '8'.repeat(64),
+    taskId,
+    controlGeneration: 'local-generation',
+    controllerInstanceDigest: 'e'.repeat(64),
+    controllerProcess: { pid: process.pid, startTime: processStartTime },
+    buildIdentity: realBuild,
+    issuedAt: Date.now() - 1_000,
+    expiresAt: Date.now() + 60_000
+  }, {
+    hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(path.join(f.root, '.codex', 'hooks.json'))).digest('hex'),
+    lifecycleProfilesHash: profileHash.digest('hex')
+  }));
+  const currentCapability = capability(f.root, 'dual-controller-token');
+  const previousContext = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+  const previousBinding = process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
+  const previousGeneration = process.env.AGENT_INFRA_CONTROL_GENERATION;
+  process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT = contextPath;
+  process.env.AGENT_INFRA_CONTROL_GENERATION = 'local-generation';
+  process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING = JSON.stringify({
+    instanceDigest: 'f'.repeat(64),
+    controlGeneration: 'broker-generation'
+  });
+  try {
+    const result = await prepareCodexOrchestrationDelegation(taskId, {
+      client: 'codex', capabilityToken: currentCapability.token
+    }, {
+      repoRoot: f.root,
+      capabilityStore: currentCapability.store,
+      buildIdentity,
+      preflight,
+      orchestrationOptions: { captureWorkspace: () => { throw new Error('workspace must not be captured'); } }
+    });
+    assert.equal(result.error?.code, 'CODEX_SANDBOX_CONTROLLER_BINDING_MISMATCH');
+    assert.equal(currentCapability.store.inspect(currentCapability.token).status, 'attested');
+    assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
+  } finally {
+    if (previousContext === undefined) delete process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+    else process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT = previousContext;
+    if (previousBinding === undefined) delete process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
+    else process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING = previousBinding;
+    if (previousGeneration === undefined) delete process.env.AGENT_INFRA_CONTROL_GENERATION;
+    else process.env.AGENT_INFRA_CONTROL_GENERATION = previousGeneration;
+  }
+});
 
 test('Codex prepare preflight fails before workspace capture or receipt creation', async () => {
   const f = fixture();
@@ -85,6 +200,36 @@ test('Codex prepare preflight fails before workspace capture or receipt creation
     orchestrationOptions: { captureWorkspace: () => { captures += 1; return 'before'; } }
   });
   assert.equal(result.error?.code, 'ORCHESTRATION_CLIENT_PREFLIGHT_FAILED');
+  assert.equal(captures, 0);
+  assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
+  assert.equal(readRun(f.taskDir)?.baseline, '');
+});
+
+test('Codex prepare preserves safe provenance detail from capability consume', async () => {
+  const f = fixture();
+  const currentCapability = capability(f.root, 'capability-detail-token');
+  let captures = 0;
+  const result = await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
+    capabilityToken: currentCapability.token
+  }, {
+    repoRoot: f.root,
+    capabilityStore: currentCapability.store,
+    buildIdentity: { ...buildIdentity, packageVersion: '0.9.8-alpha.0' },
+    preflight: async () => ({
+      ...(await preflight()),
+      hookDefinitionHash: 'd'.repeat(64)
+    }),
+    orchestrationOptions: { captureWorkspace: () => { captures += 1; return 'before'; } }
+  });
+
+  assert.equal(result.error?.code, 'CODEX_CAPABILITY_PROVENANCE_MISMATCH');
+  assert.equal(result.error?.message, 'CODEX_CAPABILITY_PROVENANCE_MISMATCH: capability consumption identity does not match');
+  assert.equal(JSON.stringify(result.error?.detail).includes('capability-detail-token'), false);
+  assert.equal(result.error?.detail?.kind, 'codex-capability-provenance-mismatch');
+  assert.equal(result.error?.detail?.version, 1);
+  assert.equal(result.error?.detail?.fields.buildIdentity.packageVersion.matches, false);
+  assert.equal(result.error?.detail?.fields.hookDefinitionHash.matches, false);
   assert.equal(captures, 0);
   assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
   assert.equal(readRun(f.taskDir)?.baseline, '');

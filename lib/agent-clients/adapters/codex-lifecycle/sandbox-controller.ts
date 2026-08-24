@@ -6,11 +6,21 @@ import path from 'node:path';
 import semver from 'semver';
 import * as toml from 'smol-toml';
 
-import { requestSandboxControl } from '../../../sandbox/control/client.ts';
+import {
+  requestCodexControllerClose,
+  requestCodexControllerOpen,
+  requestSandboxControl
+} from '../../../sandbox/control/client.ts';
 import { readSandboxControlStatus } from '../../../sandbox/control/state.ts';
-import { getProcessStartTime, isProcessAlive } from '../../../server/process-state.ts';
+import { getProcessStartTime } from '../../../server/process-state.ts';
 import { computeLifecycleBuildIdentity } from './build-identity.ts';
-import type { LifecycleBuildIdentity } from './build-identity.ts';
+import {
+  contextFromControllerLease,
+  controllerProofFromContext,
+  verifyCodexSandboxControllerContext,
+  writeCodexSandboxControllerContext,
+  type CodexSandboxControllerContextV2
+} from './controller-context.ts';
 
 type ControllerControl = Readonly<{
   token: string;
@@ -18,20 +28,6 @@ type ControllerControl = Readonly<{
   channelDir: string;
   statusDir: string;
   runtimeDir: string;
-}>;
-
-type CodexSandboxControllerContext = Readonly<{
-  version: 1;
-  taskId: string;
-  controlGeneration: string;
-  controllerInstanceDigest: string;
-  parentPid: number;
-  parentStartTime: number;
-  issuedAt: number;
-  expiresAt: number;
-  buildIdentity: LifecycleBuildIdentity;
-  hookDefinitionHash: string;
-  lifecycleProfilesHash: string;
 }>;
 
 type ControllerInput = Readonly<{
@@ -51,6 +47,8 @@ type ControllerOptions = Readonly<{
   now?: () => number;
   codexVersion?: () => string;
   verifyTaskBinding?: (taskId: string, control: ControllerControl) => void;
+  openController?: typeof requestCodexControllerOpen;
+  closeController?: typeof requestCodexControllerClose;
   environment?: NodeJS.ProcessEnv;
 }>;
 
@@ -60,11 +58,9 @@ type PreparedCodexSandboxController = Readonly<{
   env: NodeJS.ProcessEnv;
   home: string;
   contextPath: string;
-  context: CodexSandboxControllerContext;
+  context: CodexSandboxControllerContextV2;
   cleanup: () => void;
 }>;
-
-const CONTEXT_TTL_MS = 4 * 60 * 60 * 1_000;
 
 function digestFiles(files: readonly string[]): string {
   const hash = crypto.createHash('sha256');
@@ -267,43 +263,30 @@ function prepareCodexSandboxController(
   const key = crypto.createHash('sha256')
     .update(`${input.taskId}\0${control.generation}`)
     .digest('hex');
-  const leasePath = path.join(runtimeRoot, `${key}.lease.json`);
-  if (fs.existsSync(leasePath)) {
-    const lease = JSON.parse(fs.readFileSync(leasePath, 'utf8')) as { pid?: number; startTime?: number };
-    if (Number.isSafeInteger(lease.pid) && typeof lease.startTime === 'number'
-      && getProcessStartTime(lease.pid!) === lease.startTime) {
-      throw new Error('CODEX_SANDBOX_CONTROLLER_BUSY');
-    }
-    fs.unlinkSync(leasePath);
-  }
-
   const parentStartTime = getProcessStartTime(process.pid);
   if (!parentStartTime) throw new Error('CODEX_SANDBOX_CONTROLLER_PROCESS_IDENTITY_INVALID');
-  const instanceDigest = crypto.randomBytes(32).toString('hex');
-  fs.writeFileSync(leasePath, `${JSON.stringify({
-    version: 1,
-    pid: process.pid,
-    startTime: parentStartTime,
-    taskId: input.taskId,
-    generation: control.generation,
-    instanceDigest
-  })}\n`, { mode: 0o600, flag: 'wx' });
-
   const home = fs.mkdtempSync(path.join(runtimeRoot, `${key}-`));
   fs.chmodSync(home, 0o700);
   let cleaned = false;
+  let context: CodexSandboxControllerContextV2 | null = null;
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
+    if (context) {
+      try {
+        (options.closeController ?? requestCodexControllerClose)({
+          controllerProcess: context.controllerProcess,
+          controllerProof: controllerProofFromContext(context),
+          ...control,
+          timeoutMs: 30_000
+        });
+      } catch {
+        // The wrapper is exiting; dead-process recovery safely handles an unknown close result.
+      }
+    }
     const relative = path.relative(runtimeRoot, home);
     if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
       fs.rmSync(home, { recursive: true, force: true });
-    }
-    try {
-      const lease = JSON.parse(fs.readFileSync(leasePath, 'utf8')) as { instanceDigest?: string };
-      if (lease.instanceDigest === instanceDigest) fs.unlinkSync(leasePath);
-    } catch {
-      // A missing or replaced lease is owned by another cleanup path.
     }
   };
 
@@ -333,22 +316,24 @@ function prepareCodexSandboxController(
     }
 
     const buildIdentity = computeLifecycleBuildIdentity(repoRoot);
-    const now = (options.now ?? Date.now)();
-    const context: CodexSandboxControllerContext = Object.freeze({
-      version: 1,
-      taskId: input.taskId,
-      controlGeneration: control.generation,
-      controllerInstanceDigest: instanceDigest,
-      parentPid: process.pid,
-      parentStartTime,
-      issuedAt: now,
-      expiresAt: now + CONTEXT_TTL_MS,
-      buildIdentity,
+    const opened = (options.openController ?? requestCodexControllerOpen)({
+      controllerProcess: { pid: process.pid, startTime: parentStartTime },
+      ...control,
+      timeoutMs: 30_000
+    });
+    context = contextFromControllerLease(opened.lease, {
       hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex'),
       lifecycleProfilesHash: digestFiles([executor, reviewer])
     });
+    if (opened.lease.taskId !== input.taskId
+      || opened.lease.controlGeneration !== control.generation
+      || opened.lease.controllerProcess.pid !== process.pid
+      || opened.lease.controllerProcess.startTime !== parentStartTime
+      || JSON.stringify(opened.lease.buildIdentity) !== JSON.stringify(buildIdentity)) {
+      throw new Error('SANDBOX_CONTROL_RESULT_INVALID');
+    }
     const contextPath = path.join(home, 'controller-context.json');
-    fs.writeFileSync(contextPath, `${JSON.stringify(context, null, 2)}\n`, { mode: 0o600 });
+    writeCodexSandboxControllerContext(contextPath, context);
 
     const shimDir = path.join(home, 'bin');
     fs.mkdirSync(shimDir, { mode: 0o700 });
@@ -399,32 +384,6 @@ function prepareCodexSandboxController(
   }
 }
 
-function verifyCodexSandboxControllerContext(
-  contextPath: string,
-  taskId: string,
-  options: Readonly<{ repoRoot?: string; now?: number; generation?: string }> = {}
-): CodexSandboxControllerContext {
-  const stat = fs.lstatSync(contextPath);
-  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
-    throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
-  }
-  const context = JSON.parse(fs.readFileSync(contextPath, 'utf8')) as CodexSandboxControllerContext;
-  const generation = options.generation ?? process.env.AGENT_INFRA_CONTROL_GENERATION;
-  if (context.version !== 1
-    || context.taskId !== taskId
-    || context.controlGeneration !== generation
-    || context.expiresAt < (options.now ?? Date.now())
-    || getProcessStartTime(context.parentPid) !== context.parentStartTime
-    || !isProcessAlive(context.parentPid)) {
-    throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
-  }
-  const current = computeLifecycleBuildIdentity(options.repoRoot ?? process.cwd());
-  if (JSON.stringify(current) !== JSON.stringify(context.buildIdentity)) {
-    throw new Error('CODEX_SANDBOX_CONTROLLER_BUNDLE_MISMATCH');
-  }
-  return Object.freeze(context);
-}
-
 async function runCodexSandboxController(
   input: ControllerInput,
   options: ControllerOptions = {}
@@ -472,7 +431,7 @@ export {
   verifyCodexSandboxControllerContext
 };
 export type {
-  CodexSandboxControllerContext,
+  CodexSandboxControllerContextV2 as CodexSandboxControllerContext,
   ControllerControl,
   ControllerInput,
   ControllerOptions,

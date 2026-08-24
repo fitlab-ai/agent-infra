@@ -3,6 +3,7 @@
     "bin/internal-cli.ts",
     "lib/internal/codex-lifecycle.ts",
     "lib/internal/codex-sandbox-controller.ts",
+    "lib/internal/sandbox-control.ts",
     "lib/internal/task-orchestration.ts",
     "lib/task/codex-orchestration.ts",
     "lib/task/delegation-receipts.ts",
@@ -10,10 +11,17 @@
     "lib/agent-clients/adapters/codex-lifecycle/build-identity.ts",
     "lib/agent-clients/adapters/codex-lifecycle/capability-store.ts",
     "lib/agent-clients/adapters/codex-lifecycle/sandbox-controller.ts",
+    "lib/agent-clients/adapters/codex-lifecycle/controller-context.ts",
     "lib/agent-clients/adapters/codex-lifecycle/app-server.ts",
     "lib/agent-clients/adapters/codex-lifecycle/evidence.ts",
     "lib/agent-clients/adapters/codex-lifecycle/store.ts",
-    "lib/agent-clients/adapters/codex-lifecycle/manifest-files.json"
+    "lib/agent-clients/adapters/codex-lifecycle/manifest-files.json",
+    "lib/sandbox/control/protocol.ts",
+    "lib/sandbox/control/client.ts",
+    "lib/sandbox/control/executor.ts",
+    "lib/sandbox/control/controller-registration.ts",
+    "lib/server/process-state.ts",
+    "lib/sandbox/shell.ts"
   ],
   "contractFiles": [
     ".codex/hooks.json",

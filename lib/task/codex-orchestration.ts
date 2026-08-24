@@ -7,7 +7,11 @@ import {
   resolveCodexThread
 } from '../agent-clients/adapters/codex-lifecycle/app-server.ts';
 import { createCodexLifecycleStore } from '../agent-clients/adapters/codex-lifecycle/store.ts';
-import { createCodexCapabilityStore } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import {
+  createCodexCapabilityStore,
+  isCodexCapabilityProvenanceDetail
+} from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import type { CodexCapabilityProvenanceDetail } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import { computeLifecycleBuildIdentity } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import type { LifecycleBuildIdentity } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import { verifyCodexSandboxControllerContext } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
@@ -52,10 +56,10 @@ function coreOptions(options: CodexBridgeOptions): OrchestrationOptions {
   return { ...options.orchestrationOptions, repoRoot: options.repoRoot ?? options.orchestrationOptions?.repoRoot };
 }
 
-function bridgeFailure(code: string, message: string): OrchestrationResult {
+function bridgeFailure(code: string, message: string, detail?: CodexCapabilityProvenanceDetail): OrchestrationResult {
   return {
     status: 'failed', changed: false, taskId: null, run: null, next: null,
-    error: { code, message }
+    error: { code, message, ...(detail ? { detail } : {}) }
   };
 }
 
@@ -76,6 +80,27 @@ function controllerContext(taskId: string, repoRoot: string) {
   return contextPath
     ? verifyCodexSandboxControllerContext(contextPath, taskId, { repoRoot })
     : null;
+}
+
+function brokerControllerBinding(): Readonly<{ instanceDigest: string; controlGeneration: string }> | null {
+  const raw = process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
+  if (!raw) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error('CODEX_SANDBOX_CONTROLLER_BINDING_INVALID');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('CODEX_SANDBOX_CONTROLLER_BINDING_INVALID');
+  }
+  const binding = value as Record<string, unknown>;
+  if (Object.keys(binding).sort().join(',') !== 'controlGeneration,instanceDigest'
+    || typeof binding.instanceDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(binding.instanceDigest)
+    || typeof binding.controlGeneration !== 'string' || binding.controlGeneration.length === 0) {
+    throw new Error('CODEX_SANDBOX_CONTROLLER_BINDING_INVALID');
+  }
+  return binding as { instanceDigest: string; controlGeneration: string };
 }
 
 async function prepareCodexOrchestrationDelegation(
@@ -101,14 +126,27 @@ async function prepareCodexOrchestrationDelegation(
       );
     }
     const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
-    const controller = controllerContext(resolved.taskId, repoRoot);
+    const localController = controllerContext(resolved.taskId, repoRoot);
+    const brokerController = brokerControllerBinding();
+    if (localController && brokerController
+      && (localController.controllerInstanceDigest !== brokerController.instanceDigest
+        || localController.controlGeneration !== brokerController.controlGeneration)) {
+      return bridgeFailure(
+        'CODEX_SANDBOX_CONTROLLER_BINDING_MISMATCH',
+        'broker and local controller bindings do not match'
+      );
+    }
+    const controller = brokerController ?? (localController ? {
+      instanceDigest: localController.controllerInstanceDigest,
+      controlGeneration: localController.controlGeneration
+    } : null);
     const capabilityStore = options.capabilityStore ?? createCodexCapabilityStore();
     const consumed = capabilityStore.consume(input.capabilityToken, {
       taskId: resolved.taskId,
       hookDefinitionHash: preflight.hookDefinitionHash,
       buildIdentity,
       ...(controller ? { controller: {
-        instanceDigest: controller.controllerInstanceDigest,
+        instanceDigest: controller.instanceDigest,
         controlGeneration: controller.controlGeneration
       } } : {})
     });
@@ -121,16 +159,25 @@ async function prepareCodexOrchestrationDelegation(
         capabilitySessionId: consumed.sessionId!,
         capabilityTurnId: consumed.turnId!,
         capabilityToolUseId: consumed.toolUseId!,
-        controllerInstanceDigest: controller?.controllerInstanceDigest ?? null,
+        controllerInstanceDigest: controller?.instanceDigest ?? null,
         controlGeneration: controller?.controlGeneration ?? null
       }
     }, coreOptions(options));
   } catch (error) {
+    const detailValue = error instanceof Error
+      ? (error as Error & { detail?: unknown }).detail
+      : undefined;
+    const detail = error instanceof Error
+      && error.name === 'CODEX_CAPABILITY_PROVENANCE_MISMATCH'
+      && isCodexCapabilityProvenanceDetail(detailValue)
+      ? detailValue
+      : undefined;
     return bridgeFailure(
       error instanceof Error && error.name.startsWith('CODEX_CAPABILITY_')
         ? error.name
         : 'ORCHESTRATION_CLIENT_PREFLIGHT_FAILED',
-      error instanceof Error ? error.message : String(error)
+      error instanceof Error ? error.message : String(error),
+      detail
     );
   }
 }

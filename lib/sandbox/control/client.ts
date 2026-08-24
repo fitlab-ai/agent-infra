@@ -9,8 +9,15 @@ import {
   type SandboxControlError,
   type SandboxControlRequest,
   type SandboxControlResponse,
-  type SandboxTaskCreateRequest
+  type SandboxTaskCreateRequest,
+  type SandboxTaskCommandRequest,
+  type SandboxCodexControllerRequest
 } from './protocol.ts';
+import type {
+  CodexControllerLeaseProofV1,
+  CodexControllerOpened
+} from './controller-registration.ts';
+import type { ProcessIdentity } from '../../server/process-state.ts';
 import { readSandboxControlStatus } from './state.ts';
 import type { TaskCreateCandidateV1 } from '../../task/create.ts';
 
@@ -177,15 +184,179 @@ export function requestSandboxControl(params: Readonly<{
   token?: string; generation?: string; timeoutMs?: number;
 }>): SandboxControlResponse {
   if (!isSandboxControlFamily(params.family)) clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' is not allowed`, false);
-  if (params.family === 'task-create') clientError('SANDBOX_CONTROL_COMMAND_DENIED', "'task-create' requires a typed candidate", false);
+  if (params.family === 'task-create' || params.family === 'codex-controller') {
+    clientError('SANDBOX_CONTROL_COMMAND_DENIED', `'${params.family}' requires a typed request`, false);
+  }
   const auth = authority(params);
   const issuedAt = Date.now();
   const request: SandboxControlRequest = {
-    version: 2, id: randomUUID(), ...auth, issuedAt,
+    version: 3, id: randomUUID(), ...auth, issuedAt,
     expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
-    family: params.family, args: params.args
+    family: params.family as 'task-lifecycle' | 'task-orchestration', args: params.args,
+    controllerProcess: null,
+    controllerProof: null
   };
   return exchangeSandboxControl(request, params);
+}
+
+export function requestSandboxTaskControl(params: Readonly<{
+  family: 'task-lifecycle' | 'task-orchestration';
+  args: string[];
+  controllerProof: CodexControllerLeaseProofV1 | null;
+  channelDir?: string;
+  statusDir?: string;
+  token?: string;
+  generation?: string;
+  timeoutMs?: number;
+}>): SandboxControlResponse {
+  const auth = authority(params);
+  const issuedAt = Date.now();
+  const request: SandboxTaskCommandRequest = {
+    version: 3,
+    id: randomUUID(),
+    ...auth,
+    issuedAt,
+    expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
+    family: params.family,
+    args: params.args,
+    controllerProcess: null,
+    controllerProof: params.controllerProof
+  };
+  return exchangeSandboxControl(request, params);
+}
+
+type CodexControllerClosed = Readonly<{
+  version: 1;
+  status: 'closed';
+  changed: boolean;
+  lease: null;
+  error: null;
+}>;
+
+function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).sort().join(',') === [...keys].sort().join(',');
+}
+
+function validProcess(value: unknown): value is ProcessIdentity {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const identity = value as Record<string, unknown>;
+  return exactKeys(identity, ['pid', 'startTime'])
+    && Number.isSafeInteger(identity.pid) && (identity.pid as number) > 0
+    && Number.isSafeInteger(identity.startTime) && (identity.startTime as number) >= 0;
+}
+
+function validBuild(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const build = value as Record<string, unknown>;
+  return exactKeys(build, ['internalExecutableBuildHash', 'lifecycleContractHash', 'packageVersion', 'protocolVersion'])
+    && build.protocolVersion === 3
+    && typeof build.packageVersion === 'string' && build.packageVersion.length > 0
+    && typeof build.internalExecutableBuildHash === 'string' && /^[a-f0-9]{64}$/u.test(build.internalExecutableBuildHash)
+    && typeof build.lifecycleContractHash === 'string' && /^[a-f0-9]{64}$/u.test(build.lifecycleContractHash);
+}
+
+export function parseCodexControllerResult(response: SandboxControlResponse): CodexControllerOpened | CodexControllerClosed {
+  if (response.phase !== 'completed' || response.error !== null || response.stderr !== '') {
+    clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller result outer response is invalid', false, true);
+  }
+  let value: unknown;
+  try {
+    if (!response.stdout.endsWith('\n') || response.stdout.slice(0, -1).includes('\n')) throw new Error('not canonical');
+    value = JSON.parse(response.stdout);
+  } catch {
+    clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller result payload is invalid', false, true);
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller result payload is invalid', false, true);
+  }
+  const result = value as Record<string, unknown>;
+  if (!exactKeys(result, ['changed', 'error', 'lease', 'status', 'version'])
+    || result.version !== 1 || !['opened', 'closed', 'failed'].includes(result.status as string)) {
+    clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller result schema is invalid', false, true);
+  }
+  if (result.status === 'failed') {
+    const error = result.error as { code?: unknown; message?: unknown; retryable?: unknown } | null;
+    if (response.exitCode !== 1 || result.changed !== false || result.lease !== null
+      || !error || !exactKeys(error as Record<string, unknown>, ['code', 'message', 'retryable'])
+      || typeof error.code !== 'string' || !/^[A-Z][A-Z0-9_]+$/u.test(error.code)
+      || typeof error.message !== 'string' || error.retryable !== false) {
+      clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller failure result is invalid', false, true);
+    }
+    clientError(error.code, error.message, false, true);
+  }
+  if (response.exitCode !== 0 || result.error !== null) {
+    clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller success result is invalid', false, true);
+  }
+  if (result.status === 'closed') {
+    if (typeof result.changed !== 'boolean' || result.lease !== null) {
+      clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller close result is invalid', false, true);
+    }
+    return result as unknown as CodexControllerClosed;
+  }
+  const lease = result.lease as Record<string, unknown> | null;
+  if (result.changed !== true || !lease
+    || !exactKeys(lease, [
+      'buildIdentity', 'controlGeneration', 'controllerInstanceDigest', 'controllerProcess',
+      'expiresAt', 'issuedAt', 'leaseId', 'leaseSecret', 'taskId', 'version'
+    ])
+    || lease.version !== 1
+    || typeof lease.leaseId !== 'string' || !/^[a-f0-9]{64}$/u.test(lease.leaseId)
+    || typeof lease.leaseSecret !== 'string' || !/^[a-f0-9]{64}$/u.test(lease.leaseSecret)
+    || typeof lease.taskId !== 'string' || lease.taskId.length === 0
+    || typeof lease.controlGeneration !== 'string' || lease.controlGeneration.length === 0
+    || typeof lease.controllerInstanceDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(lease.controllerInstanceDigest)
+    || !validProcess(lease.controllerProcess) || !validBuild(lease.buildIdentity)
+    || !Number.isSafeInteger(lease.issuedAt) || !Number.isSafeInteger(lease.expiresAt)
+    || (lease.expiresAt as number) <= (lease.issuedAt as number)) {
+    clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller open result is invalid', false, true);
+  }
+  return result as unknown as CodexControllerOpened | CodexControllerClosed;
+}
+
+function requestCodexController(params: Readonly<{
+  command: 'open' | 'close';
+  controllerProcess: ProcessIdentity;
+  controllerProof: CodexControllerLeaseProofV1 | null;
+  channelDir?: string;
+  statusDir?: string;
+  token?: string;
+  generation?: string;
+  timeoutMs?: number;
+}>): CodexControllerOpened | CodexControllerClosed {
+  const auth = authority(params);
+  const issuedAt = Date.now();
+  const request: SandboxCodexControllerRequest = {
+    version: 3,
+    id: randomUUID(),
+    ...auth,
+    issuedAt,
+    expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
+    family: 'codex-controller',
+    command: params.command,
+    args: [],
+    controllerProcess: params.controllerProcess,
+    controllerProof: params.controllerProof
+  };
+  const result = parseCodexControllerResult(exchangeSandboxControl(request, params));
+  if (result.status === 'opened'
+    && (result.lease.controlGeneration !== auth.generation
+      || result.lease.controllerProcess.pid !== params.controllerProcess.pid
+      || result.lease.controllerProcess.startTime !== params.controllerProcess.startTime)) {
+    clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller result does not match the request', false, true);
+  }
+  return result;
+}
+
+export function requestCodexControllerOpen(params: Omit<Parameters<typeof requestCodexController>[0], 'command' | 'controllerProof'>): CodexControllerOpened {
+  const result = requestCodexController({ ...params, command: 'open', controllerProof: null });
+  if (result.status !== 'opened') clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller open returned the wrong result', false, true);
+  return result;
+}
+
+export function requestCodexControllerClose(params: Omit<Parameters<typeof requestCodexController>[0], 'command'>): CodexControllerClosed {
+  const result = requestCodexController({ ...params, command: 'close' });
+  if (result.status !== 'closed') clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller close returned the wrong result', false, true);
+  return result;
 }
 
 export function requestSandboxTaskCreate(params: Readonly<{
@@ -195,9 +366,11 @@ export function requestSandboxTaskCreate(params: Readonly<{
   const auth = authority(params);
   const issuedAt = Date.now();
   const request: SandboxTaskCreateRequest = {
-    version: 2, id: randomUUID(), ...auth, issuedAt,
+    version: 3, id: randomUUID(), ...auth, issuedAt,
     expiresAt: issuedAt + SANDBOX_CONTROL_ADMISSION_WINDOW_MS,
-    family: 'task-create', candidate: params.candidate
+    family: 'task-create', candidate: params.candidate,
+    controllerProcess: null,
+    controllerProof: null
   };
   return exchangeSandboxControl(request, { ...params, timeoutMs: params.timeoutMs ?? 120_000 });
 }
