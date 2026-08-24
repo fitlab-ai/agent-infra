@@ -10,6 +10,8 @@ import {
   containerNameCandidates,
   sandboxBranchLabel,
   sandboxLabel,
+  sandboxTaskIdLabel,
+  sandboxWorkspaceModeLabel,
   shareBranchDir,
   shellConfigDirCandidates,
   worktreeDirCandidates
@@ -18,7 +20,12 @@ import { ENGINES, detectEngine, engineDisplayName, isManagedEngine, stopManagedV
 import { pruneSandboxDanglingImages } from '../image-prune.ts';
 import { assertManagedPath, removeManagedDir, removeWorktreeDir } from '../managed-fs.ts';
 import { runEngine, runOk, runOkEngine, runSafe, runSafeEngine } from '../shell.ts';
-import { resolveSandboxTarget, type SandboxWorkspaceIdentity } from '../workspace-identity.ts';
+import {
+  parseSandboxWorkspaceIdentity,
+  resolveSandboxTarget,
+  sameSandboxWorkspaceIdentity,
+  type SandboxWorkspaceIdentity
+} from '../workspace-identity.ts';
 import { sandboxControlPaths, sandboxWorkspaceViewPaths } from '../workspace-view.ts';
 import { removeSandboxControlRoot, readSandboxControlManifest } from '../control/lifecycle.ts';
 import { inspectSandboxControlContainer } from '../control/container-identity.ts';
@@ -31,10 +38,15 @@ import {
   createCleanPermit,
   createDiscardPermit,
   formatWorktreeSnapshot,
+  inspectRecoveredWorktree,
   inspectWorktrees,
   verifyWorktreePermit
 } from '../worktree-safety.ts';
-import type { WorktreeInspection, WorktreeRemovalPermit } from '../worktree-safety.ts';
+import type {
+  WorktreeInspection,
+  WorktreeRecoveryContext,
+  WorktreeRemovalPermit
+} from '../worktree-safety.ts';
 
 const USAGE = `Usage:
   ai sandbox rm <branch>                    Remove one sandbox (branch | TASK-id | short id)
@@ -60,6 +72,7 @@ type RmTarget = {
 
 type RmOneOptions = {
   assumeYes?: boolean;
+  interactive?: boolean;
   quiet?: boolean;
   target?: RmTarget;
   permits?: ReadonlyMap<string, WorktreeRemovalPermit>;
@@ -72,34 +85,51 @@ type PromptDependencies = {
   isCancel?: typeof p.isCancel;
 };
 
+function recoveryContexts(
+  config: SandboxConfig,
+  target: RmTarget,
+  worktrees: readonly string[]
+): Map<string, WorktreeRecoveryContext> {
+  const candidates = worktreeDirCandidates(config, target.effectiveBranch).map((candidate) => path.resolve(candidate));
+  const existingCandidates = candidates.filter((candidate) => fs.existsSync(candidate));
+  if (existingCandidates.length !== 1) return new Map();
+
+  const resolvedWorkspace = resolveSandboxTarget(target.effectiveBranch, config.repoRoot).workspace;
+  const sameWorkspace = resolvedWorkspace.mode === target.workspace.mode
+    && (resolvedWorkspace.mode !== 'task-bound'
+      || (target.workspace.mode === 'task-bound' && resolvedWorkspace.taskId === target.workspace.taskId));
+  if (!sameWorkspace) return new Map();
+
+  const contexts = new Map<string, WorktreeRecoveryContext>();
+  for (const worktree of worktrees) {
+    const resolvedWorktree = path.resolve(worktree);
+    if (resolvedWorktree !== existingCandidates[0]) continue;
+    for (const root of target.controlRoots.filter((candidate) => fs.existsSync(candidate))) {
+      assertLegacyCandidateEvidence(root, config.controlBase, config, target.effectiveBranch, target.matchedContainers);
+      assertControlRootMatchesTarget(root, target.effectiveBranch, target.workspace);
+    }
+    contexts.set(resolvedWorktree, {
+      repoRoot: config.repoRoot,
+      worktreeBase: config.worktreeBase,
+      branch: target.effectiveBranch,
+      identitySource: target.workspace.mode,
+      taskId: target.workspace.mode === 'task-bound' ? target.workspace.taskId : null
+    });
+  }
+  return contexts;
+}
+
 function resolveRmTarget(config: SandboxConfig, tools: SandboxTool[], branch: string): RmTarget {
   assertValidBranchName(branch);
   const engine = detectEngine(config);
-  let effectiveBranch = branch;
-  let worktreeCandidates = worktreeDirCandidates(config, branch);
-  let toolCandidates = tools.map((tool) => ({
+  const effectiveBranch = branch;
+  const worktreeCandidates = worktreeDirCandidates(config, branch);
+  const toolCandidates = tools.map((tool) => ({
     tool,
     candidates: toolConfigDirCandidates(tool, config.project, branch)
   }));
   const existing = runEngine(engine, 'docker', ['ps', '-a', '--format', '{{.Names}}']).split('\n').filter(Boolean);
   const matchedContainers = containerNameCandidates(config, branch).filter((name) => existing.includes(name));
-
-  if (matchedContainers.length > 0) {
-    const resolvedBranch = runEngine(engine, 'docker', [
-      'inspect',
-      '-f',
-      `{{ index .Config.Labels "${sandboxBranchLabel(config)}" }}`,
-      matchedContainers[0] ?? ''
-    ]);
-    if (resolvedBranch) {
-      effectiveBranch = resolvedBranch;
-      worktreeCandidates = worktreeDirCandidates(config, effectiveBranch);
-      toolCandidates = tools.map((tool) => ({
-        tool,
-        candidates: toolConfigDirCandidates(tool, config.project, effectiveBranch)
-      }));
-    }
-  }
 
   const workspace = resolveSandboxTarget(effectiveBranch, config.repoRoot).workspace;
   const identities: SandboxWorkspaceIdentity[] = workspace.mode === 'task-bound'
@@ -124,6 +154,51 @@ function resolveRmTarget(config: SandboxConfig, tools: SandboxTool[], branch: st
     controlRoots: [...new Set(controlRoots)],
     workspaceViewRoots: [...new Set(workspaceViewRoots)]
   };
+}
+
+function assertMatchedContainerIdentities(config: SandboxConfig, target: RmTarget): void {
+  for (const container of target.matchedContainers) {
+    const rawLabels = runSafeEngine(target.engine, 'docker', [
+      'inspect', '--format', '{{json .Config.Labels}}', container
+    ]).trim();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawLabels);
+    } catch {
+      throw new Error(`SANDBOX_WORKSPACE_IDENTITY_UNKNOWN: container '${container}' labels are invalid`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`SANDBOX_WORKSPACE_IDENTITY_UNKNOWN: container '${container}' labels are incomplete`);
+    }
+    const labels = parsed as Record<string, unknown>;
+    if (Object.values(labels).some((value) => typeof value !== 'string')) {
+      throw new Error(`SANDBOX_WORKSPACE_IDENTITY_UNKNOWN: container '${container}' labels are incomplete`);
+    }
+    const stringLabels = labels as Record<string, string>;
+    const branch = stringLabels[sandboxBranchLabel(config)];
+    if (branch !== target.branch) {
+      throw new Error(
+        `SANDBOX_WORKSPACE_IDENTITY_CONFLICT: container '${container}' branch is ${JSON.stringify(branch ?? null)}, `
+        + `but this request is ${JSON.stringify(target.branch)}`
+      );
+    }
+    const identity = parseSandboxWorkspaceIdentity(stringLabels, {
+      mode: sandboxWorkspaceModeLabel(config),
+      taskId: sandboxTaskIdLabel(config)
+    });
+    if (identity.mode === 'legacy-invalid' || !sameSandboxWorkspaceIdentity(identity, target.workspace)) {
+      const existingDescription = identity.mode === 'task-bound'
+        ? `task-bound:${identity.taskId}`
+        : identity.mode;
+      const requestedDescription = target.workspace.mode === 'task-bound'
+        ? `task-bound:${target.workspace.taskId}`
+        : target.workspace.mode;
+      throw new Error(
+        `SANDBOX_WORKSPACE_IDENTITY_CONFLICT: container '${container}' is ${existingDescription}, `
+        + `but this request is ${requestedDescription}`
+      );
+    }
+  }
 }
 
 function assertControlRootMatchesTarget(root: string, effectiveBranch: string, workspace: SandboxWorkspaceIdentity): void {
@@ -254,10 +329,17 @@ async function authorizeWorktrees(
   {
     interactive = Boolean(process.stdin.isTTY),
     confirm = p.confirm,
-    isCancel = p.isCancel
-  }: PromptDependencies & { interactive?: boolean } = {}
+    isCancel = p.isCancel,
+    recovery = new Map<string, WorktreeRecoveryContext>()
+  }: PromptDependencies & { interactive?: boolean; recovery?: ReadonlyMap<string, WorktreeRecoveryContext> } = {}
 ): Promise<Map<string, WorktreeRemovalPermit>> {
-  const inspections = inspectWorktrees(worktrees);
+  const inspections = worktrees.map((worktree) => {
+    const inspection = inspectWorktrees([worktree])[0]!;
+    const context = recovery.get(path.resolve(worktree));
+    return inspection.status === 'failed' && context
+      ? inspectRecoveredWorktree(worktree, context)
+      : inspection;
+  });
   const failures = inspections.filter((inspection) => inspection.status === 'failed');
   if (failures.length > 0) throw new Error(`Unable to inspect worktree(s):\n${blockerMessage(failures)}`);
   const permits = cleanPermits(inspections);
@@ -286,6 +368,7 @@ async function rmOne(
   const target = options.target ?? resolveRmTarget(config, tools, branch);
   const { effectiveBranch, engine, matchedContainers, existingWorktrees, toolCandidates } = target;
   const { workspace, controlRoots, workspaceViewRoots } = target;
+  assertMatchedContainerIdentities(config, target);
   const confirm = options.prompt?.confirm ?? p.confirm;
   const isCancel = options.prompt?.isCancel ?? p.isCancel;
 
@@ -293,12 +376,19 @@ async function rmOne(
     p.intro(pc.cyan(`Removing sandbox for ${branch}`));
   }
 
+  const recovery = options.permits
+    ? new Map<string, WorktreeRecoveryContext>()
+    : recoveryContexts(config, target, existingWorktrees);
   const permits = options.permits
     ? new Map(options.permits)
     : await authorizeWorktrees(existingWorktrees, {
         allowDirtyDiscard: options.allowDirtyDiscard ?? true,
         assumeYes: Boolean(options.assumeYes)
-      }, options.prompt);
+      }, {
+        ...options.prompt,
+        interactive: options.interactive ?? Boolean(process.stdin.isTTY),
+        recovery
+      });
   for (const worktree of existingWorktrees) {
     const permit = permits.get(path.resolve(worktree));
     if (!permit) throw new Error(`Missing worktree removal permit: ${worktree}`);
@@ -328,6 +418,7 @@ async function rmOne(
       inspectContainer: (timeoutMs) => inspectSandboxControlContainer(manifest, { timeoutMs }),
       removeContainer: (timeoutMs) => removeExactSandboxContainer(engine, manifest, timeoutMs)
     });
+    removeEmptyManagedParent(path.join(config.controlBase, config.project), root);
   }
 
   const uncoordinatedContainers = matchedContainers.filter((name) => !coordinatedContainers.has(name));

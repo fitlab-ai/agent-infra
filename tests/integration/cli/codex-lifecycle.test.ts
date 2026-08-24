@@ -9,6 +9,7 @@ import test, { after } from 'node:test';
 import {
   envWithPrependedPath,
   INTERNAL_CLI_PATH,
+  sandboxControlSafeEnv,
   writeNodeCommandShim
 } from '../../helpers.ts';
 const fixtureRoots = new Set<string>();
@@ -58,7 +59,13 @@ function fixture() {
   fs.writeFileSync(path.join(root, '.codex', 'hooks.json'), hooks);
   return {
     root,
-    env: envWithPrependedPath(process.env, bin),
+    env: envWithPrependedPath(sandboxControlSafeEnv({
+      ...process.env,
+      AGENT_INFRA_RUNTIME_DIR: undefined,
+      AGENT_INFRA_TASK_ID: undefined,
+      AGENT_INFRA_EXECUTOR_MANIFEST: undefined,
+      AGENT_INFRA_CODEX_CONTROLLER_CONTEXT: undefined
+    }), bin),
     hookDefinitionHash: crypto.createHash('sha256').update(hooks).digest('hex')
   };
 }
