@@ -36,6 +36,11 @@ export function removeWorktreeDir(
     throw new Error(`Worktree permit target mismatch: ${dir}`);
   }
   verifyWorktreePermit(permit);
+  if (permit.snapshot.source === 'recovered') {
+    removeManagedDir(worktreeBase, dir);
+    runSafeFn('git', ['-C', repoRoot, 'worktree', 'prune']);
+    return;
+  }
   try {
     runFn('git', ['-C', repoRoot, 'worktree', 'remove', dir, '--force']);
   } catch (error) {

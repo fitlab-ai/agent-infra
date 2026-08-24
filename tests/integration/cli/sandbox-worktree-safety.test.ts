@@ -77,6 +77,51 @@ function addFixtureWorktree(
   return worktree;
 }
 
+function removeWorktreeMetadata(worktree: string): void {
+  const dotGit = fs.readFileSync(path.join(worktree, ".git"), "utf8").trim();
+  const match = /^gitdir:\s*(.+)$/i.exec(dotGit);
+  assert.ok(match?.[1]);
+  fs.rmSync(path.resolve(path.dirname(path.join(worktree, ".git")), match[1]), { recursive: true, force: true });
+}
+
+function addActiveTask(
+  repoDir: string,
+  taskId: string,
+  branch: string,
+  shortId = "7"
+): void {
+  const activeRoot = path.join(repoDir, ".agents", "workspace", "active");
+  fs.mkdirSync(path.join(activeRoot, taskId), { recursive: true });
+  fs.writeFileSync(
+    path.join(activeRoot, taskId, "task.md"),
+    `---\nid: ${taskId}\nbranch: ${branch}\n---\n`,
+    "utf8"
+  );
+  fs.writeFileSync(
+    path.join(activeRoot, ".short-ids.json"),
+    `${JSON.stringify({ version: 1, ids: { [shortId]: taskId } })}\n`,
+    "utf8"
+  );
+}
+
+async function withFixtureDocker<T>(
+  fixture: ReturnType<typeof writeSandboxEngineFixture>,
+  callback: () => Promise<T>
+): Promise<T> {
+  const originalPath = process.env.PATH;
+  const originalDockerLogPath = process.env.DOCKER_LOG_PATH;
+  process.env.PATH = envWithPrependedPath(process.env, fixture.binDir).PATH;
+  process.env.DOCKER_LOG_PATH = fixture.logPath;
+  try {
+    return await callback();
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+    if (originalDockerLogPath === undefined) delete process.env.DOCKER_LOG_PATH;
+    else process.env.DOCKER_LOG_PATH = originalDockerLogPath;
+  }
+}
+
 function spawnSandboxCli(
   fixture: ReturnType<typeof writeSandboxEngineFixture>,
   tmpDir: string,
@@ -237,6 +282,73 @@ test("sandbox rm retries control and workspace cleanup after the container is al
   }
 });
 
+test("sandbox rm removes an empty control container parent after control cleanup", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-empty-control-parent-"));
+  const branch = "feature/empty-control-parent";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+    const config = rmOneConfig(fixture, tmpDir);
+    const container = "demo-dev-feature..empty-control-parent";
+    const controlRoot = path.join(config.controlBase, config.project, container, "branch-only");
+    const channelDir = path.join(controlRoot, "channel");
+    const processingDir = path.join(controlRoot, "processing");
+    fs.mkdirSync(channelDir, { recursive: true });
+    fs.mkdirSync(path.join(controlRoot, "public"), { recursive: true });
+    fs.mkdirSync(processingDir, { recursive: true });
+    fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+      version: 5, engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
+      project: "demo", container, containerIdentity: { id: "empty-parent-container", labels: {} }, branch,
+      mode: "branch-only", taskId: null, token: "empty-parent-secret", generation: "empty-parent-generation",
+      channelDir, publicStatusDir: path.join(controlRoot, "public"), processingDir,
+      runtimeDir: path.join(controlRoot, "runtime")
+    })}\n`);
+    fs.writeFileSync(path.join(controlRoot, "public", "status.json"), `${JSON.stringify({
+      version: 2,
+      generation: "empty-parent-generation",
+      broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
+      state: "healthy",
+      reasonCode: null,
+      activeRequestId: null,
+      updatedAt: Date.now()
+    })}\n`);
+    const previousPath = process.env.PATH;
+    const previousDockerLog = process.env.DOCKER_LOG_PATH;
+    const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+    process.env.PATH = envWithPrependedPath(process.env, fixture.binDir).PATH;
+    process.env.DOCKER_LOG_PATH = fixture.logPath;
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+    try {
+      const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+      await rm.rmOne(config, [], branch, {
+        assumeYes: true,
+        target: {
+          branch,
+          effectiveBranch: branch,
+          engine: "docker-desktop",
+          matchedContainers: [],
+          existingWorktrees: [],
+          toolCandidates: [],
+          workspace: { mode: "branch-only" },
+          controlRoots: [controlRoot],
+          workspaceViewRoots: []
+        }
+      });
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousDockerLog === undefined) delete process.env.DOCKER_LOG_PATH;
+      else process.env.DOCKER_LOG_PATH = previousDockerLog;
+      if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+      else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    }
+
+    assert.equal(fs.existsSync(controlRoot), false);
+    assert.equal(fs.existsSync(path.dirname(controlRoot)), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("worktree safety snapshot binds staged, unstaged, and unusual untracked content", onPlatforms("linux", "darwin", "win32"), async () => {
   const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
   const fixture = createLinkedWorktree();
@@ -270,6 +382,160 @@ test("worktree safety snapshot binds staged, unstaged, and unusual untracked con
     assert.equal(untracked.snapshot.changes.some((change) => change.path === "ignored.txt"), false);
   } finally {
     fixture.cleanup();
+  }
+});
+
+test("recovered worktree safety uses an isolated branch snapshot after metadata loss", onPlatforms("linux", "darwin", "win32"), async () => {
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  const fixture = createLinkedWorktree();
+  try {
+    removeWorktreeMetadata(fixture.worktree);
+    const recovery = {
+      repoRoot: fixture.repo,
+      worktreeBase: fixture.base,
+      branch: "feature/safe-delete",
+      identitySource: "branch-only" as const,
+      taskId: null
+    };
+
+    assert.equal(safety.inspectWorktree(fixture.worktree).status, "failed");
+    const clean = safety.inspectRecoveredWorktree(fixture.worktree, recovery);
+    assert.equal(clean.status, "clean");
+    assert.equal(clean.snapshot.source, "recovered");
+
+    fs.writeFileSync(path.join(fixture.worktree, "tracked.txt"), "recovered dirty\n", "utf8");
+    const dirty = safety.inspectRecoveredWorktree(fixture.worktree, recovery);
+    assert.equal(dirty.status, "dirty");
+    assert.ok(dirty.snapshot.changes.some((change) => change.path === "tracked.txt"));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("recovered worktree safety accepts clearly partial admin metadata", onPlatforms("linux", "darwin", "win32"), async () => {
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  const fixture = createLinkedWorktree();
+  try {
+    const dotGit = fs.readFileSync(path.join(fixture.worktree, ".git"), "utf8").trim();
+    const match = /^gitdir:\s*(.+)$/i.exec(dotGit);
+    assert.ok(match?.[1]);
+    const adminPath = path.resolve(path.dirname(path.join(fixture.worktree, ".git")), match[1]);
+    fs.rmSync(path.join(adminPath, "commondir"), { force: true });
+
+    const recovered = safety.inspectRecoveredWorktree(fixture.worktree, {
+      repoRoot: fixture.repo,
+      worktreeBase: fixture.base,
+      branch: "feature/safe-delete",
+      identitySource: "branch-only",
+      taskId: null
+    });
+
+    assert.equal(recovered.status, "clean", JSON.stringify(recovered));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("recovered worktree safety resolves the common Git directory from a linked repo root", onPlatforms("linux", "darwin", "win32"), async () => {
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-worktree-linked-root-"));
+  const mainRepo = path.join(root, "main");
+  const repoRoot = path.join(root, "management");
+  const worktreeBase = path.join(root, "sandboxes");
+  const worktree = path.join(worktreeBase, "feature..safe-delete");
+  try {
+    fs.mkdirSync(mainRepo, { recursive: true });
+    fs.mkdirSync(worktreeBase, { recursive: true });
+    git(mainRepo, "init", "-q", "-b", "main");
+    fs.writeFileSync(path.join(mainRepo, "tracked.txt"), "initial\n", "utf8");
+    git(mainRepo, "add", "tracked.txt");
+    git(mainRepo, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox@example.com", "commit", "-q", "-m", "initial");
+    git(mainRepo, "worktree", "add", "-q", "-b", "management", repoRoot, "HEAD");
+    git(mainRepo, "worktree", "add", "-q", "-b", "feature/safe-delete", worktree, "HEAD");
+    removeWorktreeMetadata(worktree);
+
+    const recovered = safety.inspectRecoveredWorktree(worktree, {
+      repoRoot,
+      worktreeBase,
+      branch: "feature/safe-delete",
+      identitySource: "branch-only",
+      taskId: null
+    });
+
+    assert.equal(recovered.status, "clean", JSON.stringify(recovered));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("recovered worktree safety accepts clearly damaged HEAD or index metadata", onPlatforms("linux", "darwin", "win32"), async () => {
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  for (const damagedFile of ["HEAD", "index"]) {
+    const fixture = createLinkedWorktree();
+    try {
+      const dotGit = fs.readFileSync(path.join(fixture.worktree, ".git"), "utf8").trim();
+      const match = /^gitdir:\s*(.+)$/i.exec(dotGit);
+      assert.ok(match?.[1]);
+      const adminPath = path.resolve(path.dirname(path.join(fixture.worktree, ".git")), match[1]);
+      fs.writeFileSync(
+        path.join(adminPath, damagedFile),
+        damagedFile === "HEAD"
+          ? "not a valid HEAD\n"
+          : Buffer.from([0x44, 0x49, 0x52, 0x43, 0, 0, 0, 2, 0, 0, 0, 0])
+      );
+
+      const recovered = safety.inspectRecoveredWorktree(fixture.worktree, {
+        repoRoot: fixture.repo,
+        worktreeBase: fixture.base,
+        branch: "feature/safe-delete",
+        identitySource: "branch-only",
+        taskId: null
+      });
+
+      assert.equal(recovered.status, "clean", `${damagedFile}: ${JSON.stringify(recovered)}`);
+    } finally {
+      fixture.cleanup();
+    }
+  }
+});
+
+test("recovered worktree safety rejects damaged content with inconsistent admin pointers", onPlatforms("linux", "darwin", "win32"), async () => {
+  const safety = await loadFreshEsm<SafetyModule>("lib/sandbox/worktree-safety.js");
+  const cases = [
+    { damagedFile: "HEAD", pointerFile: "gitdir" },
+    { damagedFile: "index", pointerFile: "commondir" }
+  ] as const;
+
+  for (const { damagedFile, pointerFile } of cases) {
+    const fixture = createLinkedWorktree();
+    try {
+      const dotGit = fs.readFileSync(path.join(fixture.worktree, ".git"), "utf8").trim();
+      const match = /^gitdir:\s*(.+)$/i.exec(dotGit);
+      assert.ok(match?.[1]);
+      const adminPath = path.resolve(path.dirname(path.join(fixture.worktree, ".git")), match[1]);
+      fs.writeFileSync(
+        path.join(adminPath, damagedFile),
+        damagedFile === "HEAD"
+          ? "not a valid HEAD\n"
+          : Buffer.from([0x44, 0x49, 0x52, 0x43, 0, 0, 0, 2, 0, 0, 0, 0])
+      );
+      const wrongPointer = path.join(path.dirname(adminPath), `wrong-${pointerFile}`);
+      fs.mkdirSync(wrongPointer, { recursive: true });
+      fs.writeFileSync(path.join(adminPath, pointerFile), `${wrongPointer}\n`, "utf8");
+
+      const recovered = safety.inspectRecoveredWorktree(fixture.worktree, {
+        repoRoot: fixture.repo,
+        worktreeBase: fixture.base,
+        branch: "feature/safe-delete",
+        identitySource: "branch-only",
+        taskId: null
+      });
+
+      assert.equal(recovered.status, "failed", `${damagedFile}/${pointerFile}: ${JSON.stringify(recovered)}`);
+      assert.match(recovered.message ?? "", /WORKTREE_RECOVERY_METADATA_INVALID/);
+    } finally {
+      fixture.cleanup();
+    }
   }
 });
 
@@ -448,6 +714,154 @@ test("sandbox rm clean path uses injectable default-yes confirmations and remove
     assert.equal(fs.existsSync(worktree), false);
     assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
     assert.equal(fs.existsSync(share), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm recovers and removes a clean worktree with missing metadata", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const fixture = writeSandboxEngineFixture(fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-clean-")), { project: "demo" });
+  const tmpDir = path.dirname(fixture.repoDir);
+  const branch = "feature/recovered-clean";
+  try {
+    const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+    removeWorktreeMetadata(worktree);
+    const prompts: string[] = [];
+    await withFixtureDocker(fixture, () => rm.rmOne(rmOneConfig(fixture, tmpDir), [], branch, {
+      interactive: true,
+      prompt: {
+        confirm: async (options) => {
+          prompts.push(options.message);
+          return true;
+        },
+        isCancel: (value): value is symbol => false
+      }
+    }));
+
+    assert.equal(fs.existsSync(worktree), false);
+    assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
+    assert.equal(prompts.filter((message) => message.startsWith("Remove worktree")).length, 1);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm refuses a container with conflicting workspace identity before destructive calls", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-container-conflict-"));
+  const branch = "feature/container-conflict";
+  const container = `demo-dev-${branch.replaceAll("/", "..")}`;
+  const row = `${container}\tUp 1 minute\tdemo.sandbox.branch=${branch},demo.sandbox.workspace-mode=task-bound,demo.sandbox.task-id=TASK-20260824-999999`;
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: row });
+    const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+    removeWorktreeMetadata(worktree);
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", branch]);
+
+    assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+    assert.match(`${result.stdout}\n${result.stderr}`, /SANDBOX_WORKSPACE_IDENTITY_CONFLICT/);
+    assert.equal(fs.existsSync(worktree), true);
+    assert.match(git(fixture.repoDir, "branch", "--list", branch), new RegExp(branch));
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm refuses a container whose branch label conflicts with the requested branch", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-container-branch-conflict-"));
+  const requestedBranch = "feature/container-requested";
+  const labelledBranch = "feature/container-labelled";
+  const container = `demo-dev-${requestedBranch.replaceAll("/", "..")}`;
+  const row = `${container}\tUp 1 minute\tdemo.sandbox.branch=${labelledBranch},demo.sandbox=true`;
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: row });
+    const labelledWorktree = addFixtureWorktree(fixture, tmpDir, labelledBranch);
+    removeWorktreeMetadata(labelledWorktree);
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", requestedBranch]);
+
+    assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+    assert.match(`${result.stdout}\n${result.stderr}`, /SANDBOX_WORKSPACE_IDENTITY_CONFLICT/);
+    assert.equal(fs.existsSync(labelledWorktree), true);
+    assert.match(git(fixture.repoDir, "branch", "--list", labelledBranch), new RegExp(labelledBranch));
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm allows explicit discard of a stable recovered dirty snapshot", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-dirty-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const branch = "feature/recovered-dirty";
+  try {
+    const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+    removeWorktreeMetadata(worktree);
+    fs.writeFileSync(path.join(worktree, "tracked.txt"), "discard recovered change\n", "utf8");
+    const prompts: Array<{ message: string; initialValue: boolean }> = [];
+    await withFixtureDocker(fixture, () => rm.rmOne(rmOneConfig(fixture, tmpDir), [], branch, {
+      interactive: true,
+      prompt: {
+        confirm: async (options) => {
+          prompts.push({ message: options.message, initialValue: Boolean(options.initialValue) });
+          return true;
+        },
+        isCancel: (value): value is symbol => false
+      }
+    }));
+
+    assert.equal(fs.existsSync(worktree), false);
+    assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
+    assert.equal(prompts.some(({ message, initialValue }) => (
+      message === "Discard these exact uncommitted changes?" && initialValue === false
+    )), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm accepts a task-bound resolver identity when container and control roots are gone", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-task-bound-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const branch = "agent-infra-feature-recovered-task";
+  try {
+    addActiveTask(fixture.repoDir, "TASK-20260824-000001", branch);
+    const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+    removeWorktreeMetadata(worktree);
+    await withFixtureDocker(fixture, () => rm.rmOne(rmOneConfig(fixture, tmpDir), [], branch, {
+      interactive: true,
+      prompt: { confirm: async () => true, isCancel: (value): value is symbol => false }
+    }));
+
+    assert.equal(fs.existsSync(worktree), false);
+    assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm keeps malformed recovery metadata fail-closed", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-invalid-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const branch = "feature/recovered-invalid";
+  try {
+    const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+    fs.writeFileSync(path.join(worktree, ".git"), "gitdir: /outside/recovery\n", "utf8");
+
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(rmOneConfig(fixture, tmpDir), [], branch, {
+        interactive: true,
+        prompt: { confirm: async () => true, isCancel: (value): value is symbol => false }
+      })),
+      /WORKTREE_RECOVERY_METADATA_INVALID/
+    );
+    assert.equal(fs.existsSync(worktree), true);
+    assert.match(git(fixture.repoDir, "branch", "--list", branch), new RegExp(branch));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -645,6 +1059,64 @@ test("sandbox rm --unbound preflights all worktrees before deleting any sandbox"
     assert.equal(fs.existsSync(cleanWorktree), true);
     assert.equal(fs.existsSync(path.join(dirtyWorktree, "untracked.txt")), true);
     assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound does not use recovered worktree deletion", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-recovered-"));
+  const branch = "feature/recovered-batch";
+  const row = `demo-dev-${branch.replaceAll("/", "..")}	Up 1 minute	demo.sandbox.branch=${branch},demo.sandbox=true`;
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: row });
+    const worktree = addFixtureWorktree(fixture, tmpDir, branch);
+    removeWorktreeMetadata(worktree);
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /worktree preflight found blocker/);
+    assert.equal(fs.existsSync(worktree), true);
+    assert.match(git(fixture.repoDir, "branch", "--list", branch), new RegExp(branch));
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm refuses a recovered worktree whose path does not match the requested branch", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-path-conflict-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const actualBranch = "feature/recovered-actual";
+  const requestedBranch = "feature/recovered-requested";
+  try {
+    const worktree = addFixtureWorktree(fixture, tmpDir, actualBranch);
+    removeWorktreeMetadata(worktree);
+    await assert.rejects(
+      () => withFixtureDocker(fixture, () => rm.rmOne(rmOneConfig(fixture, tmpDir), [], requestedBranch, {
+        target: {
+          branch: requestedBranch,
+          effectiveBranch: requestedBranch,
+          engine: "docker-desktop",
+          matchedContainers: [],
+          existingWorktrees: [worktree],
+          toolCandidates: [],
+          workspace: { mode: "branch-only" },
+          controlRoots: [],
+          workspaceViewRoots: []
+        },
+        interactive: true,
+        prompt: {
+          confirm: async () => true,
+          isCancel: (value): value is symbol => false
+        }
+      })),
+      /Unable to inspect worktree/
+    );
+    assert.equal(fs.existsSync(worktree), true);
+    assert.match(git(fixture.repoDir, "branch", "--list", actualBranch), new RegExp(actualBranch));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
