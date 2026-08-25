@@ -9,22 +9,11 @@ script_dir=$(
 "$script_dir/check-version-format.sh"
 node "$script_dir/check-large-files.cjs"
 
-# Fail fast on TypeScript errors before paying for the test suite (~1s warm).
+# Fail fast on TypeScript errors.
 # typecheck covers tests/ + scripts/ which the production `build` step skips.
 npm run typecheck
 
 # Guard against drift between the authoritative src/sync-templates.js
-# (+ lib/defaults.json) and its two build-inline-generated copies. Run BEFORE any
-# step that rebuilds them (test:core -> npm run build), so a committed-but-stale
-# derived copy is caught here instead of being silently regenerated. Mirrors the
-# CI pre-Build check.
+# (+ lib/defaults.json) and its two build-inline-generated copies. Mirrors the CI
+# pre-Build check.
 node scripts/build-inline.js --check
-
-# Run the project's core test layer before allowing the commit.
-# package.json#scripts.test:core covers the core unit and structural checks
-# while skipping the slowest platform-sync contract suites (those run in CI).
-#
-# Clear GIT_* variables exported by the outer `git commit`; tests spawn nested
-# git repositories and must not inherit the parent repository's git context.
-unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_AUTHOR_DATE GIT_COMMITTER_DATE
-npm run test:core
