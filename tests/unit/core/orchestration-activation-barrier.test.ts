@@ -86,8 +86,8 @@ test('activation timeout pauses and cannot be revived by late evidence', async (
   let monotonic = 1_000;
   let now = '2026-01-01T00:00:00.000Z';
   const f = fixture(() => monotonic, () => now);
-  monotonic = 16_001;
-  now = '2026-01-01T00:00:15.001Z';
+  monotonic = 61_001;
+  now = '2026-01-01T00:01:00.001Z';
   const result = await awaitOrchestrationDelegationActivation(taskId, {
     stage: 'analysis',
     round: 1,
@@ -116,8 +116,8 @@ test('expired prepared receipt recovers only when workspace is unchanged', () =>
   let monotonic = 1_000;
   let now = '2026-01-01T00:00:00.000Z';
   const f = fixture(() => monotonic, () => now);
-  monotonic = 16_001;
-  now = '2026-01-01T00:00:15.001Z';
+  monotonic = 61_001;
+  now = '2026-01-01T00:01:00.001Z';
   const recovered = recoverPreparedOrchestrationDelegation(taskId, {
     repoRoot: f.root,
     monotonicNow: () => monotonic,
@@ -133,8 +133,8 @@ test('expired prepared receipt does not recover over active lifecycle evidence',
   let monotonic = 1_000;
   let now = '2026-01-01T00:00:00.000Z';
   const f = fixture(() => monotonic, () => now);
-  monotonic = 16_001;
-  now = '2026-01-01T00:00:15.001Z';
+  monotonic = 61_001;
+  now = '2026-01-01T00:01:00.001Z';
   const blocked = recoverPreparedOrchestrationDelegation(taskId, {
     repoRoot: f.root,
     monotonicNow: () => monotonic,

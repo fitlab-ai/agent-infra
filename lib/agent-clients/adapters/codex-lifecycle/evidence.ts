@@ -147,6 +147,16 @@ function same(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function sameChildCorrelation(
+  left: Extract<CodexLifecycleEvent, { type: 'hook-child' }>,
+  right: Extract<CodexLifecycleEvent, { type: 'hook-child' }>
+): boolean {
+  return left.sessionId === right.sessionId
+    && left.childThreadId === right.childThreadId
+    && left.parentThreadId === right.parentThreadId
+    && left.nativeAgent === right.nativeAgent;
+}
+
 function requiredStrings(event: CodexLifecycleEvent): boolean {
   return Object.entries(event).every(([key, value]) =>
     key === 'forkedFromId'
@@ -286,6 +296,15 @@ function reduceCodexLifecycleEvent(
   const existing = state[key];
   if (existing) {
     if (same(existing, event)) return state;
+    if (
+      existing.type === 'hook-child'
+      && event.type === 'hook-child'
+      && sameChildCorrelation(existing, event)
+      && (existing.source === 'parent-rollout') !== (event.source === 'parent-rollout')
+    ) {
+      if (existing.source !== 'parent-rollout') return state;
+      return derive(Object.freeze({ ...state, child: Object.freeze({ ...event }) }));
+    }
     return invalid(state, 'CODEX_EVIDENCE_REPLAY_CONFLICT', `conflicting '${event.type}' event`);
   }
   return derive(Object.freeze({ ...state, [key]: Object.freeze({ ...event }) }));

@@ -14,6 +14,7 @@ import { computeLifecycleBuildIdentity } from '../agent-clients/adapters/codex-l
 import { verifyCodexSandboxControllerContext } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import type { CodexLifecycleEvent } from '../agent-clients/adapters/codex-lifecycle/evidence.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
+import { hasSealableOrchestrationDelegation } from '../task/orchestration.ts';
 import {
   activateCodexOrchestrationDelegation,
   activateCodexSpawnDelegation,
@@ -139,7 +140,8 @@ function recordFromPayload(phase: string, payload: unknown): CodexLifecycleEvent
     sessionId: text('sessionId'),
     turnId: text('turnId'),
     childThreadId: text('childThreadId'),
-    nativeAgent: text('nativeAgent')
+    nativeAgent: text('nativeAgent'),
+    source: 'hook'
   };
   if (phase === 'subagent-stop') return {
     type: 'hook-stop',
@@ -326,8 +328,17 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       }
       const result = store.apply(event);
       if (parsed.values['--bridge'] === 'true' && event.type === 'hook-stop') {
-        const bridged = await sealCodexOrchestrationDelegation(event.childThreadId, { store });
-        outputBridgeResult(bridged);
+        if (!hasSealableOrchestrationDelegation('codex', event.childThreadId, { repoRoot: process.cwd() })) {
+          output({ status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null });
+          return;
+        }
+        output({
+          status: result.state.status,
+          changed: true,
+          evidence: result.state,
+          diagnostics: [],
+          error: result.state.error
+        });
         return;
       }
       output({ status: result.state.status, changed: true, evidence: result.state, diagnostics: [], error: result.state.error });
@@ -350,7 +361,9 @@ async function codexLifecycle(args: string[] = []): Promise<void> {
       return;
     }
     if (parsed.operation === 'resolve-stop') {
-      const terminal = await resolveCodexTerminal(childThreadId);
+      const stopTurnId = store.read(childThreadId).state.stop?.turnId;
+      if (!stopTurnId) throw new Error('Codex lifecycle stop hook is not available');
+      const terminal = await resolveCodexTerminal(childThreadId, stopTurnId);
       const latest = store.apply(terminal);
       if (latest.state.status !== 'stop-ready') {
         throw new Error(`Codex lifecycle stop evidence is not ready (status=${latest.state.status})`);

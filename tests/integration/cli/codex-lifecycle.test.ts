@@ -12,6 +12,17 @@ import {
   sandboxControlSafeEnv,
   writeNodeCommandShim
 } from '../../helpers.ts';
+import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/capability-store.ts';
+import { createCodexLifecycleStore } from '../../../lib/agent-clients/adapters/codex-lifecycle/store.ts';
+import {
+  activateCodexOrchestrationDelegation,
+  prepareCodexOrchestrationDelegation
+} from '../../../lib/task/codex-orchestration.ts';
+import {
+  beginOrResumeOrchestration,
+  completeOrchestrationStage,
+  dispatchOrchestrationDelegation
+} from '../../../lib/task/orchestration.ts';
 const fixtureRoots = new Set<string>();
 after(() => {
   for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
@@ -44,7 +55,7 @@ function fixture() {
             id: 'child', parentThreadId: 'parent', forkedFromId: null,
             path: ${JSON.stringify(rollout)},
             source: { subAgent: { thread_spawn: { parent_thread_id: 'parent' } } },
-            turns: message.params.includeTurns ? [{ id: 'child-turn', status: 'completed' }] : []
+            turns: message.params.includeTurns ? [{ id: 'child-turn', status: process.env.TURN_STATUS || 'completed' }] : []
           }
         } : message.method === 'thread/unsubscribe' ? { status: 'unsubscribed' } : {};
         process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
@@ -129,6 +140,112 @@ test('codex-lifecycle bridge ignores managed hooks without a running delegation'
       status: 'ignored', changed: false, evidence: null, diagnostics: [], error: null
     });
   }
+});
+
+test('Codex SubagentStop bridge records stop before parent reconciliation seals terminal evidence', async () => {
+  const { root, env, hookDefinitionHash } = fixture();
+  assert.equal(spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' }).status, 0);
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
+  beginOrResumeOrchestration(taskId, {
+    repoRoot: root,
+    client: 'codex',
+    modelPolicy: {
+      executor: { model: 'model', reasoningEffort: 'high' },
+      reviewer: { model: 'review-model', reasoningEffort: 'high' }
+    },
+    id: () => 'run-1'
+  });
+  const buildIdentity = {
+    protocolVersion: 3,
+    packageVersion: '0.9.9-alpha.0',
+    internalExecutableBuildHash: 'a'.repeat(64),
+    lifecycleContractHash: 'b'.repeat(64)
+  } as const;
+  const capabilityStore = createCodexCapabilityStore({
+    root: path.join(root, '.agents', 'workspace', '.runtime', 'codex-capabilities'),
+    token: () => 'capability-token'
+  });
+  const armed = capabilityStore.arm({ taskId, buildIdentity });
+  capabilityStore.attest({
+    token: armed.token,
+    sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'capability-tool',
+    hookDefinitionHash, buildIdentity
+  });
+  const preflight = async () => ({
+    cliVersion: '0.147.0', hookDefinitionHash, staticReady: true as const,
+    discoveredHooks: [], runtimeLiveness: false, diagnostics: [],
+    hookProvenance: {
+      hookSource: 'project' as const,
+      hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64)
+    }
+  });
+  await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex', requestedModel: 'model', requestedReasoningEffort: 'high',
+    capabilityToken: armed.token
+  }, {
+    repoRoot: root,
+    buildIdentity,
+    capabilityStore,
+    preflight,
+    orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-1' }
+  });
+  dispatchOrchestrationDelegation(taskId, { repoRoot: root });
+  const store = createCodexLifecycleStore({
+    root: path.join(root, '.agents', 'workspace', '.runtime', 'codex-lifecycle'),
+    cliVersion: '0.147.0'
+  });
+  for (const event of [
+    {
+      type: 'hook-spawn' as const, sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
+      nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'model',
+      requestedReasoningEffort: 'high', hookDefinitionHash
+    },
+    {
+      type: 'hook-child' as const, sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+      parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor', source: 'hook' as const
+    },
+    {
+      type: 'app-thread' as const, childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null,
+      sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+    },
+    { type: 'app-settings' as const, childThreadId: 'child', model: 'model', reasoningEffort: 'high' }
+  ]) store.apply(event);
+  const activated = await activateCodexOrchestrationDelegation('child', {
+    repoRoot: root,
+    store,
+    buildIdentity,
+    preflight,
+    resolveThread: async () => ({
+      resolution: {
+        thread: {
+          type: 'app-thread', childThreadId: 'child', parentThreadId: 'parent', forkedFromId: null,
+          sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
+        },
+        settings: { type: 'app-settings', childThreadId: 'child', model: 'model', reasoningEffort: 'high' }
+      },
+      reroutes: [], diagnostics: []
+    })
+  });
+  assert.equal(activated.run?.pendingDelegation?.status, 'activated');
+  completeOrchestrationStage(taskId, {
+    stage: 'analysis', round: 1, artifact: 'analysis.md', agent: 'codex'
+  }, { repoRoot: root });
+
+  const stopped = run(root, { ...env, TURN_STATUS: 'failed' }, [
+    'hook-event', '--event', 'subagent-stop', '--bridge', 'true'
+  ], JSON.stringify({
+    sessionId: 'parent', turnId: 'child-turn', childThreadId: 'child',
+    nativeAgent: 'agent-infra-lifecycle-executor'
+  }));
+  assert.equal(stopped.status, 0, `${stopped.stderr}\n${stopped.stdout}`);
+  const payload = JSON.parse(stopped.stdout);
+  assert.equal(payload.status, 'start-ready');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(taskDir, 'orchestration.json'), 'utf8')).pendingDelegation.status, 'stage-completed');
+  assert.equal(store.read('child').state.terminal, null);
+  assert.equal(store.read('child').state.stop?.turnId, 'child-turn');
 });
 
 test('codex-lifecycle CLI rejects unknown and duplicate options', () => {

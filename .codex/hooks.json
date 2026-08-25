@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\" --client codex --event pre-tool",
-            "timeout": 15,
+            "timeout": 30,
             "statusMessage": "Recording Codex lifecycle spawn evidence"
           }
         ]
@@ -31,7 +31,7 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\" --client codex --event post-tool",
-            "timeout": 15,
+            "timeout": 30,
             "statusMessage": "Recording Codex lifecycle tool completion"
           }
         ]
@@ -44,7 +44,7 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\" --client codex --event subagent-start",
-            "timeout": 15,
+            "timeout": 30,
             "statusMessage": "Recording Codex child identity"
           }
         ]
@@ -57,7 +57,7 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js\" --client codex --event subagent-stop",
-            "timeout": 15,
+            "timeout": 30,
             "statusMessage": "Recording Codex child stop evidence"
           }
         ]

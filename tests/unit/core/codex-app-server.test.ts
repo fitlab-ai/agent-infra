@@ -111,18 +111,58 @@ test('parent rollout resolves exactly one trusted lifecycle child for a spawn to
       })
     } }),
     JSON.stringify({ type: 'event_msg', payload: {
-      type: 'sub_agent_activity', event_id: 'tool', kind: 'started',
-      agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
+      type: 'item_completed', thread_id: 'parent', turn_id: 'turn',
+      item: {
+        type: 'SubAgentActivity', id: 'tool', kind: 'started',
+        agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
+      }
     } })
   ].join('\n'));
   assert.equal(resolveCodexSpawnedChild(rollout, {
-    sessionId: 'parent', toolUseId: 'tool', nativeAgent: 'agent-infra-lifecycle-executor',
+    sessionId: 'parent', turnId: 'turn', toolUseId: 'tool', nativeAgent: 'agent-infra-lifecycle-executor',
     taskName: 'analysis_executor_r1', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
   }), 'child');
   assert.throws(() => resolveCodexSpawnedChild(rollout, {
-    sessionId: 'parent', toolUseId: 'tool', nativeAgent: 'agent-infra-lifecycle-reviewer',
+    sessionId: 'parent', turnId: 'turn', toolUseId: 'tool', nativeAgent: 'agent-infra-lifecycle-reviewer',
     taskName: 'analysis_executor_r1'
   }), /does not match/);
+});
+
+test('parent rollout child correlation fails closed for missing, duplicate, or mismatched activities', () => {
+  const root = temporaryRoot('codex-parent-rollout-');
+  const rollout = path.join(root, 'rollout-parent.jsonl');
+  const call = { type: 'response_item', payload: {
+    type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: 'tool',
+    arguments: JSON.stringify({
+      agent_type: 'agent-infra-lifecycle-executor', task_name: 'analysis_executor_r1'
+    })
+  } };
+  const activity = { type: 'event_msg', payload: {
+    type: 'item_completed', thread_id: 'parent', turn_id: 'turn',
+    item: {
+      type: 'SubAgentActivity', id: 'tool', kind: 'started',
+      agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
+    }
+  } };
+  const expected = {
+    sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', taskName: 'analysis_executor_r1'
+  };
+  const invalidActivities = [
+    [],
+    [activity, activity],
+    [{ ...activity, payload: { ...activity.payload, item: { ...activity.payload.item, id: 'other-tool' } } }],
+    [{ ...activity, payload: { ...activity.payload, thread_id: 'other-parent' } }],
+    [{ ...activity, payload: { ...activity.payload, turn_id: 'other-turn' } }],
+    [{ ...activity, payload: { ...activity.payload, item: null } }]
+  ];
+  for (const activities of invalidActivities) {
+    fs.writeFileSync(rollout, [call, ...activities].map((record) => JSON.stringify(record)).join('\n'));
+    assert.throws(
+      () => resolveCodexSpawnedChild(rollout, expected),
+      { message: 'Codex parent rollout child activity was not found uniquely' }
+    );
+  }
 });
 
 test('App Server terminal parser preserves completed and failed host states', () => {
@@ -216,6 +256,56 @@ test('App Server resolver waits for delayed rollout settings', async () => {
   });
 });
 
+test('App Server thread resolver default budget waits for fresh metadata and rejects a stable fork', async () => {
+  const root = temporaryRoot('codex-app-server-');
+  const server = path.join(root, 'server.mjs');
+  const rollout = path.join(root, 'rollout-child.jsonl');
+  fs.writeFileSync(rollout, [
+    JSON.stringify({ type: 'session_meta', payload: {
+      id: 'child', parent_thread_id: 'parent', agent_role: 'agent-infra-lifecycle-executor'
+    } }),
+    JSON.stringify({ type: 'turn_context', payload: { model: 'model', effort: 'high' } })
+  ].join('\n'));
+  fs.writeFileSync(server, `
+    import readline from 'node:readline';
+    const rl = readline.createInterface({ input: process.stdin });
+    let reads = 0;
+    rl.on('line', line => {
+      const message = JSON.parse(line);
+      if (!message.id) return;
+      let result = {};
+      if (message.method === 'thread/read') {
+        reads += 1;
+        result = { thread: {
+          id: 'child', parentThreadId: 'parent',
+          forkedFromId: process.env.STABLE_FORK === 'true' || reads <= Number(process.env.FRESH_AFTER ?? 1)
+            ? 'transient-source'
+            : null,
+          path: ${JSON.stringify(rollout)},
+          source: { subAgent: { thread_spawn: { parent_thread_id: 'parent', depth: 1 } } },
+          turns: []
+        } };
+      }
+      if (message.method === 'thread/unsubscribe') result = { status: 'unsubscribed' };
+      process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
+    });
+  `);
+  const options = {
+    command: process.execPath, args: [server], timeoutMs: 2_000,
+    threadRetryMs: 1,
+    env: { ...process.env, FRESH_AFTER: '5' }
+  };
+  const resolved = await resolveCodexThread('child', options);
+  assert.equal(resolved.resolution.thread.forkedFromId, null);
+  await assert.rejects(
+    resolveCodexThread('child', {
+      ...options,
+      env: { ...process.env, STABLE_FORK: 'true' }
+    }),
+    /fresh thread metadata is unavailable/
+  );
+});
+
 test('App Server terminal resolver rejects a response for the wrong child thread', async () => {
   const root = temporaryRoot('codex-app-server-');
   const server = path.join(root, 'server.mjs');
@@ -261,6 +351,43 @@ test('App Server terminal resolver distinguishes active turns from malformed ter
   await assert.rejects(resolveCodexTerminal('child', options('inProgress')), /CODEX_TURN_NOT_TERMINAL/);
   await assert.rejects(resolveCodexTerminal('child', options('missing-id')), /completion is invalid/);
   await assert.rejects(resolveCodexTerminal('child', options('mystery')), /completion is invalid/);
+});
+
+test('App Server terminal resolver binds the hook turn and waits through a transient failure', async () => {
+  const root = temporaryRoot('codex-app-server-');
+  const server = path.join(root, 'server.mjs');
+  fs.writeFileSync(server, `
+    import readline from 'node:readline';
+    const rl = readline.createInterface({ input: process.stdin });
+    let reads = 0;
+    rl.on('line', line => {
+      const message = JSON.parse(line);
+      if (!message.id) return;
+      let result = {};
+      if (message.method === 'thread/read') {
+        reads += 1;
+        const targetStatus = process.env.STABLE_FAILURE === 'true' || reads === 1 ? 'failed' : 'completed';
+        result = { thread: { id: 'child', turns: [
+          { id: 'target-turn', status: targetStatus },
+          { id: 'unrelated-latest-turn', status: 'completed' }
+        ] } };
+      }
+      process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
+    });
+  `);
+  const options = {
+    command: process.execPath, args: [server], timeoutMs: 2_000,
+    terminalReadAttempts: 2, terminalRetryMs: 1
+  };
+  assert.deepEqual(await resolveCodexTerminal('child', 'target-turn', options), {
+    type: 'app-terminal', childThreadId: 'child', turnId: 'target-turn', status: 'completed'
+  });
+  assert.deepEqual(await resolveCodexTerminal('child', 'target-turn', {
+    ...options,
+    env: { ...process.env, STABLE_FAILURE: 'true' }
+  }), {
+    type: 'app-terminal', childThreadId: 'child', turnId: 'target-turn', status: 'failed'
+  });
 });
 
 test('App Server resolver fails closed when rollout settings are unavailable', async () => {

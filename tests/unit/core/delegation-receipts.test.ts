@@ -186,6 +186,16 @@ test('persisted Codex receipts require lifecycle provenance and status-bound hos
   }), false);
 });
 
+test('delegation dispatch allows a sixty-second default activation window', () => {
+  const result = dispatchDelegation(prepareDelegation(input), {
+    now: () => '2099-01-01T00:00:00.000Z', monotonicNow: () => 10
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.receipt.activationDeadlineAt, '2099-01-01T00:01:00.000Z');
+  assert.equal(result.receipt.activationDeadlineMonotonicMs, 60_010);
+});
+
 test('delegation receipts follow the one-way lifecycle and reject replay', () => {
   const prepared = dispatched(prepareDelegation({ ...input, workspaceSnapshotScope: 'task' }, {
     id: () => 'delegation-1', now: () => '2026-01-01T00:00:00.000Z'
@@ -298,7 +308,7 @@ test('Codex receipts reject generic hook evidence and cross-session capability r
     ...base,
     hostEvidence: {
       kind: 'codex-lifecycle-v2', startRevision: 1, ...codexProvenance,
-      spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:15.501Z'
+      spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:01:00.501Z'
     }
   }, { now: () => '2099-01-01T00:00:01.000Z' }).code, 'DELEGATION_HOST_EVIDENCE_INVALID');
 });

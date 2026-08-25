@@ -64,6 +64,23 @@ function bridgeFailure(code: string, message: string, detail?: CodexCapabilityPr
   };
 }
 
+function capabilityFailure(error: unknown): NonNullable<OrchestrationResult['error']> {
+  const detailValue = error instanceof Error
+    ? (error as Error & { detail?: unknown }).detail
+    : undefined;
+  return {
+    code: error instanceof Error && error.name.startsWith('CODEX_CAPABILITY_')
+      ? error.name
+      : 'ORCHESTRATION_CLIENT_PREFLIGHT_FAILED',
+    message: error instanceof Error ? error.message : String(error),
+    ...(error instanceof Error
+      && error.name === 'CODEX_CAPABILITY_PROVENANCE_MISMATCH'
+      && isCodexCapabilityProvenanceDetail(detailValue)
+      ? { detail: detailValue }
+      : {})
+  };
+}
+
 function pauseBridge(code: string, message: string, options: CodexBridgeOptions): OrchestrationResult {
   const paused = pauseMatchingOrchestrationDelegation('codex', code, message, coreOptions(options));
   return paused.error?.code === 'ORCHESTRATION_DELEGATION_MISSING'
@@ -142,7 +159,18 @@ async function prepareCodexOrchestrationDelegation(
       controlGeneration: localController.controlGeneration
     } : null);
     const capabilityStore = options.capabilityStore ?? createCodexCapabilityStore();
-    const consumed = capabilityStore.consume(input.capabilityToken, {
+    const attested = capabilityStore.inspect(input.capabilityToken);
+    const lifecycleProvenance = {
+      ...attested.buildIdentity,
+      hookDefinitionHash: preflight.hookDefinitionHash,
+      ...preflight.hookProvenance,
+      capabilitySessionId: attested.sessionId!,
+      capabilityTurnId: attested.turnId!,
+      capabilityToolUseId: attested.toolUseId!,
+      controllerInstanceDigest: controller?.instanceDigest ?? null,
+      controlGeneration: controller?.controlGeneration ?? null
+    };
+    const capabilityExpected = {
       taskId: resolved.taskId,
       hookDefinitionHash: preflight.hookDefinitionHash,
       buildIdentity,
@@ -150,20 +178,45 @@ async function prepareCodexOrchestrationDelegation(
         instanceDigest: controller.instanceDigest,
         controlGeneration: controller.controlGeneration
       } } : {})
-    });
+    };
     return prepareOrchestrationDelegation(taskRef, {
       ...input,
-      lifecycleProvenance: {
-        ...consumed.buildIdentity,
-        hookDefinitionHash: preflight.hookDefinitionHash,
-        ...preflight.hookProvenance,
-        capabilitySessionId: consumed.sessionId!,
-        capabilityTurnId: consumed.turnId!,
-        capabilityToolUseId: consumed.toolUseId!,
-        controllerInstanceDigest: controller?.instanceDigest ?? null,
-        controlGeneration: controller?.controlGeneration ?? null
+      lifecycleProvenance
+    }, {
+      ...coreOptions(options),
+      validateLifecycleCapability: () => {
+        try {
+          const validated = capabilityStore.validate(input.capabilityToken!, capabilityExpected);
+          if (validated.sessionId !== attested.sessionId
+            || validated.turnId !== attested.turnId
+            || validated.toolUseId !== attested.toolUseId) {
+            return {
+              code: 'CODEX_CAPABILITY_IDENTITY_CHANGED',
+              message: 'capability identity changed during validation'
+            };
+          }
+          return null;
+        } catch (error) {
+          return capabilityFailure(error);
+        }
+      },
+      consumeLifecycleCapability: () => {
+        try {
+          const consumed = capabilityStore.consume(input.capabilityToken!, capabilityExpected);
+          if (consumed.sessionId !== attested.sessionId
+            || consumed.turnId !== attested.turnId
+            || consumed.toolUseId !== attested.toolUseId) {
+            return {
+              code: 'CODEX_CAPABILITY_IDENTITY_CHANGED',
+              message: 'capability identity changed during consumption'
+            };
+          }
+          return null;
+        } catch (error) {
+          return capabilityFailure(error);
+        }
       }
-    }, coreOptions(options));
+    });
   } catch (error) {
     if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
     const detailValue = error instanceof Error
@@ -289,7 +342,11 @@ async function sealCodexOrchestrationDelegation(
     const store = requiredStore(options);
     const existing = store.read(childThreadId);
     if (!existing.consumer) {
-      store.apply(await (options.resolveTerminal ?? resolveCodexTerminal)(childThreadId));
+      const stopTurnId = existing.state.stop?.turnId;
+      if (!stopTurnId) {
+        return pauseBridge('ORCHESTRATION_CODEX_STOP_EVIDENCE_INVALID', 'Codex lifecycle stop hook is not available', options);
+      }
+      store.apply(await (options.resolveTerminal ?? resolveCodexTerminal)(childThreadId, stopTurnId));
     }
     const record = store.read(childThreadId);
     const evidence = record.state.stopEvidence;
@@ -332,7 +389,10 @@ async function sealCodexParentDelegation(
     const start = active.state.startEvidence!;
     const child = active.state.child!;
     if (!active.state.terminal) {
-      store.apply(await (options.resolveTerminal ?? resolveCodexTerminal)(start.childThreadId));
+      const resolveTerminal = options.resolveTerminal ?? resolveCodexTerminal;
+      store.apply(active.state.stop
+        ? await resolveTerminal(start.childThreadId, active.state.stop.turnId)
+        : await resolveTerminal(start.childThreadId));
     }
     if (!store.read(start.childThreadId).state.stop) {
       store.apply({

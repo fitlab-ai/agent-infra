@@ -188,6 +188,8 @@ type OrchestrationOptions = {
   }>;
   diffWorkspace?: (repoRoot: string, before: string, after: string) => string[];
   supportsLifecycleDelegation?: (client: AgentClientId) => boolean;
+  validateLifecycleCapability?: () => Exclude<OrchestrationResult['error'], null> | null;
+  consumeLifecycleCapability?: () => Exclude<OrchestrationResult['error'], null> | null;
   token?: () => string;
   monotonicNow?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
@@ -1398,6 +1400,15 @@ function prepareOrchestrationDelegationUnlocked(
   if (input.requestedReasoningEffort !== expectedPolicy.reasoningEffort) {
     return failed('ORCHESTRATION_REQUESTED_REASONING_EFFORT_MISMATCH', `requested reasoning effort does not match the persisted ${next.role} policy`, resolved.taskId);
   }
+  const capabilityValidationError = options.validateLifecycleCapability?.();
+  if (capabilityValidationError) {
+    return failed(
+      capabilityValidationError.code,
+      capabilityValidationError.message,
+      resolved.taskId,
+      capabilityValidationError.detail ? { detail: capabilityValidationError.detail } : {}
+    );
+  }
   let beforeFingerprint: string;
   try {
     beforeFingerprint = (options.captureWorkspace ?? captureWorkspaceSnapshot)({
@@ -1422,6 +1433,15 @@ function prepareOrchestrationDelegationUnlocked(
     lifecycleProvenance: input.lifecycleProvenance ?? null,
     beforeFingerprint
   }, { id: options.id, now: options.now, monotonicNow: options.monotonicNow });
+  const capabilityError = options.consumeLifecycleCapability?.();
+  if (capabilityError) {
+    return failed(
+      capabilityError.code,
+      capabilityError.message,
+      resolved.taskId,
+      capabilityError.detail ? { detail: capabilityError.detail } : {}
+    );
+  }
   const updated = withUpdatedRun(run, {
     nextStage: next.stage,
     pendingDelegation: receipt,

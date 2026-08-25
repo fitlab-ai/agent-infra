@@ -36,6 +36,10 @@ type AppServerTransportOptions = Readonly<{
   timeoutMs?: number;
   rolloutReadAttempts?: number;
   rolloutRetryMs?: number;
+  threadReadAttempts?: number;
+  threadRetryMs?: number;
+  terminalReadAttempts?: number;
+  terminalRetryMs?: number;
 }>;
 
 type CodexRuntimeIdentity = Readonly<{
@@ -52,6 +56,10 @@ const LIFECYCLE_HOOKS = Object.freeze([
 ]);
 const DEFAULT_ROLLOUT_READ_ATTEMPTS = 81;
 const DEFAULT_ROLLOUT_RETRY_MS = 100;
+const DEFAULT_THREAD_READ_ATTEMPTS = 21;
+const DEFAULT_THREAD_RETRY_MS = 100;
+const DEFAULT_TERMINAL_READ_ATTEMPTS = 21;
+const DEFAULT_TERMINAL_RETRY_MS = 100;
 
 function object(value: unknown): JsonObject | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -67,6 +75,7 @@ function resolveCodexSpawnedChild(
   transcriptPath: string,
   expected: Readonly<{
     sessionId: string;
+    turnId: string;
     toolUseId: string;
     nativeAgent: string;
     taskName: string;
@@ -111,15 +120,19 @@ function resolveCodexSpawnedChild(
   ) throw new Error('Codex parent rollout spawn identity does not match the hook event');
   const activities = records.filter((record) => {
     const payload = object(record?.payload);
+    const item = object(payload?.item);
     return record?.type === 'event_msg'
-      && payload?.type === 'sub_agent_activity'
-      && payload.event_id === expected.toolUseId
-      && payload.kind === 'started'
-      && payload.agent_path === `/root/${expected.taskName}`
-      && nonEmpty(payload.agent_thread_id);
+      && payload?.type === 'item_completed'
+      && payload.thread_id === expected.sessionId
+      && payload.turn_id === expected.turnId
+      && item?.type === 'SubAgentActivity'
+      && item.id === expected.toolUseId
+      && item.kind === 'started'
+      && item.agent_path === `/root/${expected.taskName}`
+      && nonEmpty(item.agent_thread_id);
   });
   if (activities.length !== 1) throw new Error('Codex parent rollout child activity was not found uniquely');
-  return nonEmpty(object(activities[0]?.payload)?.agent_thread_id)!;
+  return nonEmpty(object(object(activities[0]?.payload)?.item)?.agent_thread_id)!;
 }
 
 function validateCodexLifecycleHookConfig(value: unknown): void {
@@ -133,7 +146,7 @@ function validateCodexLifecycleHookConfig(value: unknown): void {
       return entry.hooks.some((hookValue) => {
         const hook = object(hookValue);
         return hook?.type === 'command'
-          && hook.timeout === 15
+          && hook.timeout === 30
           && hook.command === `node "$(git rev-parse --show-toplevel)/.agents/hooks/lifecycle-delegation.js" --client codex --event ${phase}`;
       });
     });
@@ -478,17 +491,29 @@ async function resolveCodexThread(
     const readResult = object(await transport.request('thread/read', { threadId: childThreadId, includeTurns: false }));
     const readThread = object(readResult?.thread);
     if (nonEmpty(readThread?.id) !== childThreadId) throw new Error('Codex App Server returned the wrong child thread');
-    let resolution: ThreadResolution;
+    let rolloutRecords: readonly unknown[];
     try {
-      const rolloutRecords = await resolveCodexRolloutRecords(
+      rolloutRecords = await resolveCodexRolloutRecords(
         readResult,
         childThreadId,
         options.rolloutReadAttempts ?? DEFAULT_ROLLOUT_READ_ATTEMPTS,
         options.rolloutRetryMs ?? DEFAULT_ROLLOUT_RETRY_MS
       );
-      resolution = parseCodexThreadResolution(readResult, rolloutRecords);
     } catch {
       throw new Error('Codex App Server rollout metadata is unavailable');
+    }
+    let resolution = parseCodexThreadResolution(readResult, rolloutRecords);
+    const threadReadAttempts = options.threadReadAttempts ?? DEFAULT_THREAD_READ_ATTEMPTS;
+    for (let attempt = 1; resolution.thread.forkedFromId !== null && attempt < threadReadAttempts; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, options.threadRetryMs ?? DEFAULT_THREAD_RETRY_MS));
+      const refreshed = object(await transport.request('thread/read', { threadId: childThreadId, includeTurns: false }));
+      if (nonEmpty(object(refreshed?.thread)?.id) !== childThreadId) {
+        throw new Error('Codex App Server returned the wrong child thread');
+      }
+      resolution = parseCodexThreadResolution(refreshed, rolloutRecords);
+    }
+    if (resolution.thread.forkedFromId !== null) {
+      throw new Error('Codex App Server fresh thread metadata is unavailable');
     }
     const reroutes = transport.notifications
       .filter((entry) => entry.method === 'model/rerouted')
@@ -507,20 +532,37 @@ async function resolveCodexThread(
 
 async function resolveCodexTerminal(
   childThreadId: string,
-  options: AppServerTransportOptions = {}
+  expectedTurnIdOrOptions: string | AppServerTransportOptions = {},
+  terminalOptions: AppServerTransportOptions = {}
 ): Promise<Extract<CodexLifecycleEvent, { type: 'app-terminal' }>> {
+  const expectedTurnId = typeof expectedTurnIdOrOptions === 'string' ? expectedTurnIdOrOptions : null;
+  const options = typeof expectedTurnIdOrOptions === 'string' ? terminalOptions : expectedTurnIdOrOptions;
   const transport = new CodexAppServerTransport(options);
   transport.start();
   try {
     await transport.initialize();
-    const result = object(await transport.request('thread/read', { threadId: childThreadId, includeTurns: true }));
-    const thread = object(result?.thread);
-    if (nonEmpty(thread?.id) !== childThreadId) throw new Error('Codex App Server returned the wrong child thread');
-    const turns = Array.isArray(thread?.turns) ? thread.turns : [];
-    const turn = turns.at(-1);
-    const turnValue = object(turn);
-    if (!turnValue || turnValue.status === 'inProgress') throw new Error('CODEX_TURN_NOT_TERMINAL');
-    return parseCodexTurnCompleted({ threadId: childThreadId, turn });
+    const attempts = expectedTurnId ? options.terminalReadAttempts ?? DEFAULT_TERMINAL_READ_ATTEMPTS : 1;
+    let abnormal: Extract<CodexLifecycleEvent, { type: 'app-terminal' }> | null = null;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const result = object(await transport.request('thread/read', { threadId: childThreadId, includeTurns: true }));
+      const thread = object(result?.thread);
+      if (nonEmpty(thread?.id) !== childThreadId) throw new Error('Codex App Server returned the wrong child thread');
+      const turns = Array.isArray(thread?.turns) ? thread.turns : [];
+      const turn = expectedTurnId
+        ? turns.find((candidate) => object(candidate)?.id === expectedTurnId)
+        : turns.at(-1);
+      const turnValue = object(turn);
+      if (turnValue && turnValue.status !== 'inProgress') {
+        const terminal = parseCodexTurnCompleted({ threadId: childThreadId, turn });
+        if (terminal.status === 'completed') return terminal;
+        abnormal = terminal;
+      }
+      if (attempt + 1 < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, options.terminalRetryMs ?? DEFAULT_TERMINAL_RETRY_MS));
+      }
+    }
+    if (abnormal) return abnormal;
+    throw new Error('CODEX_TURN_NOT_TERMINAL');
   } finally {
     transport.close();
   }

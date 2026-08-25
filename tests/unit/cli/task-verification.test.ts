@@ -275,6 +275,30 @@ test('run-task verification accepts complete current evidence and rejects invali
 
   fs.writeFileSync(runPath, `${JSON.stringify({
     ...codexRun,
+    receipts: [{ ...codexReceipt, parentId: 'different-parent' }]
+  }, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    'fail'
+  );
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    ...codexRun,
+    receipts: [{ ...codexReceipt, hostEvidence: { ...codexReceipt.hostEvidence, kind: 'codex-lifecycle-v1' } }]
+  }, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    'fail'
+  );
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    ...codexRun,
+    receipts: [{ ...codexReceipt, hostEvidence: { ...codexReceipt.hostEvidence, spawnToolUseId: undefined } }]
+  }, null, 2)}\n`);
+  assert.equal(
+    verifyTaskEvent({ taskRef: f.taskId, event: 'run-task.completed' }, { repoRoot: f.root }).status,
+    'fail'
+  );
+  fs.writeFileSync(runPath, `${JSON.stringify({
+    ...codexRun,
     receipts: [{
       ...codexReceipt,
       hostEvidence: {
