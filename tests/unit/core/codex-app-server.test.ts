@@ -256,6 +256,56 @@ test('App Server resolver waits for delayed rollout settings', async () => {
   });
 });
 
+test('App Server thread resolver default budget waits for fresh metadata and rejects a stable fork', async () => {
+  const root = temporaryRoot('codex-app-server-');
+  const server = path.join(root, 'server.mjs');
+  const rollout = path.join(root, 'rollout-child.jsonl');
+  fs.writeFileSync(rollout, [
+    JSON.stringify({ type: 'session_meta', payload: {
+      id: 'child', parent_thread_id: 'parent', agent_role: 'agent-infra-lifecycle-executor'
+    } }),
+    JSON.stringify({ type: 'turn_context', payload: { model: 'model', effort: 'high' } })
+  ].join('\n'));
+  fs.writeFileSync(server, `
+    import readline from 'node:readline';
+    const rl = readline.createInterface({ input: process.stdin });
+    let reads = 0;
+    rl.on('line', line => {
+      const message = JSON.parse(line);
+      if (!message.id) return;
+      let result = {};
+      if (message.method === 'thread/read') {
+        reads += 1;
+        result = { thread: {
+          id: 'child', parentThreadId: 'parent',
+          forkedFromId: process.env.STABLE_FORK === 'true' || reads <= Number(process.env.FRESH_AFTER ?? 1)
+            ? 'transient-source'
+            : null,
+          path: ${JSON.stringify(rollout)},
+          source: { subAgent: { thread_spawn: { parent_thread_id: 'parent', depth: 1 } } },
+          turns: []
+        } };
+      }
+      if (message.method === 'thread/unsubscribe') result = { status: 'unsubscribed' };
+      process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
+    });
+  `);
+  const options = {
+    command: process.execPath, args: [server], timeoutMs: 2_000,
+    threadRetryMs: 1,
+    env: { ...process.env, FRESH_AFTER: '5' }
+  };
+  const resolved = await resolveCodexThread('child', options);
+  assert.equal(resolved.resolution.thread.forkedFromId, null);
+  await assert.rejects(
+    resolveCodexThread('child', {
+      ...options,
+      env: { ...process.env, STABLE_FORK: 'true' }
+    }),
+    /fresh thread metadata is unavailable/
+  );
+});
+
 test('App Server terminal resolver rejects a response for the wrong child thread', async () => {
   const root = temporaryRoot('codex-app-server-');
   const server = path.join(root, 'server.mjs');
@@ -301,6 +351,43 @@ test('App Server terminal resolver distinguishes active turns from malformed ter
   await assert.rejects(resolveCodexTerminal('child', options('inProgress')), /CODEX_TURN_NOT_TERMINAL/);
   await assert.rejects(resolveCodexTerminal('child', options('missing-id')), /completion is invalid/);
   await assert.rejects(resolveCodexTerminal('child', options('mystery')), /completion is invalid/);
+});
+
+test('App Server terminal resolver binds the hook turn and waits through a transient failure', async () => {
+  const root = temporaryRoot('codex-app-server-');
+  const server = path.join(root, 'server.mjs');
+  fs.writeFileSync(server, `
+    import readline from 'node:readline';
+    const rl = readline.createInterface({ input: process.stdin });
+    let reads = 0;
+    rl.on('line', line => {
+      const message = JSON.parse(line);
+      if (!message.id) return;
+      let result = {};
+      if (message.method === 'thread/read') {
+        reads += 1;
+        const targetStatus = process.env.STABLE_FAILURE === 'true' || reads === 1 ? 'failed' : 'completed';
+        result = { thread: { id: 'child', turns: [
+          { id: 'target-turn', status: targetStatus },
+          { id: 'unrelated-latest-turn', status: 'completed' }
+        ] } };
+      }
+      process.stdout.write(JSON.stringify({ id: message.id, result }) + '\\n');
+    });
+  `);
+  const options = {
+    command: process.execPath, args: [server], timeoutMs: 2_000,
+    terminalReadAttempts: 2, terminalRetryMs: 1
+  };
+  assert.deepEqual(await resolveCodexTerminal('child', 'target-turn', options), {
+    type: 'app-terminal', childThreadId: 'child', turnId: 'target-turn', status: 'completed'
+  });
+  assert.deepEqual(await resolveCodexTerminal('child', 'target-turn', {
+    ...options,
+    env: { ...process.env, STABLE_FAILURE: 'true' }
+  }), {
+    type: 'app-terminal', childThreadId: 'child', turnId: 'target-turn', status: 'failed'
+  });
 });
 
 test('App Server resolver fails closed when rollout settings are unavailable', async () => {

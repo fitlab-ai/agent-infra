@@ -477,6 +477,10 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
     nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
     requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'hook-hash'
   });
+  store.apply({
+    type: 'hook-child', sessionId: 'parent', turnId: 'parent-turn', childThreadId: 'child',
+    parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor', source: 'hook'
+  });
   const rollout = path.join(f.root, 'rollout-parent.jsonl');
   fs.writeFileSync(rollout, [
     JSON.stringify({ type: 'response_item', payload: {
@@ -509,6 +513,7 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
     })
   });
   assert.equal(started.run?.pendingDelegation?.status, 'activated');
+  assert.equal(store.read('child').state.child?.source, 'hook');
   const unrelated = await sealCodexParentDelegation('parent', {
     repoRoot: f.root,
     store,

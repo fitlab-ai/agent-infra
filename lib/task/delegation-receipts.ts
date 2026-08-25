@@ -407,7 +407,7 @@ function dispatchDelegation(
   }
   const monotonic = (options.monotonicNow ?? (() => Number(process.hrtime.bigint() / 1_000_000n)))();
   const dispatchedAt = (options.now ?? (() => new Date().toISOString()))();
-  const window = options.activationWindowMs ?? 15_000;
+  const window = options.activationWindowMs ?? 60_000;
   return { ok: true, receipt: Object.freeze({
     ...receipt,
     spawnDispatchMonotonicMs: monotonic,

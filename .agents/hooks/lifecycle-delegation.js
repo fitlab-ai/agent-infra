@@ -105,7 +105,7 @@ process.stdin.on('end', () => {
         input: JSON.stringify(normalized),
         shell,
         stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 15_000
+        timeout: 30_000
       });
       process.stdout.write(output);
     } catch (error) {

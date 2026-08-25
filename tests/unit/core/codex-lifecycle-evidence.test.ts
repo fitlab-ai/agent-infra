@@ -102,6 +102,45 @@ test('Codex lifecycle evidence binds the hook session to its host-resolved paren
   assert.equal(state.startEvidence?.childThreadId, 'child-thread');
 });
 
+test('Codex lifecycle evidence reconciles hook and rollout child provenance in either order', () => {
+  const childIdentity = {
+    type: 'hook-child' as const,
+    sessionId: 'parent-thread',
+    turnId: 'child-turn',
+    childThreadId: 'child-thread',
+    parentThreadId: 'parent-thread',
+    nativeAgent: 'agent-infra-lifecycle-executor'
+  };
+  const hookChild = { ...childIdentity, turnId: 'child-turn', source: 'hook' as const };
+  const rolloutChild = { ...childIdentity, turnId: 'parent-turn', source: 'parent-rollout' as const };
+  for (const [first, second] of [
+    [hookChild, rolloutChild] as const,
+    [rolloutChild, hookChild] as const
+  ]) {
+    let state = createCodexLifecycleState('0.147.0');
+    state = reduceCodexLifecycleEvent(state, happyEvents()[0]!);
+    state = reduceCodexLifecycleEvent(state, first);
+    state = reduceCodexLifecycleEvent(state, second);
+    assert.equal(state.status, 'observed-child');
+    assert.equal(state.child?.source, 'hook');
+    assert.equal(state.child?.turnId, 'child-turn');
+  }
+
+  let mismatched = createCodexLifecycleState('0.147.0');
+  mismatched = reduceCodexLifecycleEvent(mismatched, happyEvents()[0]!);
+  mismatched = reduceCodexLifecycleEvent(mismatched, rolloutChild);
+  mismatched = reduceCodexLifecycleEvent(mismatched, { ...hookChild, childThreadId: 'other-child' });
+  assert.equal(mismatched.status, 'invalid');
+  assert.equal(mismatched.error?.code, 'CODEX_EVIDENCE_REPLAY_CONFLICT');
+
+  let sameSourceConflict = createCodexLifecycleState('0.147.0');
+  sameSourceConflict = reduceCodexLifecycleEvent(sameSourceConflict, happyEvents()[0]!);
+  sameSourceConflict = reduceCodexLifecycleEvent(sameSourceConflict, hookChild);
+  sameSourceConflict = reduceCodexLifecycleEvent(sameSourceConflict, { ...hookChild, turnId: 'other-child-turn' });
+  assert.equal(sameSourceConflict.status, 'invalid');
+  assert.equal(sameSourceConflict.error?.code, 'CODEX_EVIDENCE_REPLAY_CONFLICT');
+});
+
 test('Codex lifecycle evidence fails closed on fork, identity conflict, and unexplained resolution', () => {
   for (const event of [
     { type: 'app-thread' as const, childThreadId: 'child-thread', parentThreadId: 'parent-thread', forkedFromId: 'source', sourceParentThreadId: 'parent-thread', nativeAgent: 'agent-infra-lifecycle-executor' },

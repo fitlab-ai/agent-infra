@@ -342,7 +342,11 @@ async function sealCodexOrchestrationDelegation(
     const store = requiredStore(options);
     const existing = store.read(childThreadId);
     if (!existing.consumer) {
-      store.apply(await (options.resolveTerminal ?? resolveCodexTerminal)(childThreadId));
+      const stopTurnId = existing.state.stop?.turnId;
+      if (!stopTurnId) {
+        return pauseBridge('ORCHESTRATION_CODEX_STOP_EVIDENCE_INVALID', 'Codex lifecycle stop hook is not available', options);
+      }
+      store.apply(await (options.resolveTerminal ?? resolveCodexTerminal)(childThreadId, stopTurnId));
     }
     const record = store.read(childThreadId);
     const evidence = record.state.stopEvidence;
@@ -385,7 +389,10 @@ async function sealCodexParentDelegation(
     const start = active.state.startEvidence!;
     const child = active.state.child!;
     if (!active.state.terminal) {
-      store.apply(await (options.resolveTerminal ?? resolveCodexTerminal)(start.childThreadId));
+      const resolveTerminal = options.resolveTerminal ?? resolveCodexTerminal;
+      store.apply(active.state.stop
+        ? await resolveTerminal(start.childThreadId, active.state.stop.turnId)
+        : await resolveTerminal(start.childThreadId));
     }
     if (!store.read(start.childThreadId).state.stop) {
       store.apply({

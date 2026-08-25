@@ -386,6 +386,8 @@ test("version format validation hooks are wired into templates and local config"
   const templateClaudeSettings = JSON.parse(read("templates/.claude/settings.json"));
   const rootCodexHooks = JSON.parse(read(".codex/hooks.json"));
   const templateCodexHooks = JSON.parse(read("templates/.codex/hooks.json"));
+  const rootLifecycleHook = read(".agents/hooks/lifecycle-delegation.js");
+  const templateLifecycleHook = read("templates/.agents/hooks/lifecycle-delegation.js");
   const localCheckScript = read(".git-hooks/check-version-format.sh");
   const templateCheckScript = read("templates/.git-hooks/check-version-format.sh");
   const localLargeFileCheck = read(".git-hooks/check-large-files.cjs");
@@ -535,9 +537,12 @@ test("version format validation hooks are wired into templates and local config"
       assert.equal(entry?.matcher, matcher, `${relativePath} should configure ${event} lifecycle matching`);
       assert.equal(entry?.hooks.length, 1, `${relativePath} should configure one ${event} lifecycle command`);
       assert.match(entry?.hooks[0]?.command ?? '', new RegExp(`--client codex --event ${phase}$`));
-      assert.equal(entry?.hooks[0]?.timeout, 15, `${relativePath} should allow the managed lifecycle bridge to complete`);
+      assert.equal(entry?.hooks[0]?.timeout, 30, `${relativePath} should allow the managed lifecycle bridge to complete`);
     }
   });
+  for (const source of [rootLifecycleHook, templateLifecycleHook]) {
+    assert.match(source, /timeout: 30_000/u);
+  }
 });
 
 test("version format validation hooks enforce exact v-prefixed semver", () => {
