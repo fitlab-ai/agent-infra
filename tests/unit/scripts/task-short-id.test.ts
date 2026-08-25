@@ -22,7 +22,7 @@ test("all direct alloc-class SKILLs invoke task-short-id.js alloc inside executi
   }
 });
 
-test("migrated lifecycle SKILL templates invoke the typed lifecycle command", () => {
+test("migrated lifecycle SKILL templates invoke their typed completion command", () => {
   const intents = {
     "complete-task": "complete",
     "cancel-task": "cancel",
@@ -35,19 +35,21 @@ test("migrated lifecycle SKILL templates invoke the typed lifecycle command", ()
     for (const lang of ["en", "zh-CN"]) {
       const file = path.join(TEMPLATES_SKILLS, skill, `SKILL.${lang}.md`);
       const content = fs.readFileSync(file, "utf8");
-      assert.match(content, new RegExp(`agent-infra-internal task-lifecycle \\{task-id\\} ${intent}`));
+      const command = skill === "complete-task" ? "task-finalization" : "task-lifecycle";
+      assert.match(content, new RegExp(`agent-infra-internal ${command} \\{task-id\\} ${intent}`));
     }
   }
 });
 
-test("migrated runtime SKILLs invoke the same lifecycle intents as templates", () => {
+test("migrated runtime SKILLs invoke the same typed completion intents as templates", () => {
   const intents = {
     "complete-task": "complete", "cancel-task": "cancel", "block-task": "block",
     "close-codescan": "close-codescan", "close-dependabot": "close-dependabot", "restore-task": "restore"
   } as const;
   for (const [skill, intent] of Object.entries(intents)) {
     const content = fs.readFileSync(path.resolve(process.cwd(), ".agents", "skills", skill, "SKILL.md"), "utf8");
-    assert.match(content, new RegExp(`agent-infra-internal task-lifecycle \\{task-id\\} ${intent}`));
+    const command = skill === "complete-task" ? "task-finalization" : "task-lifecycle";
+    assert.match(content, new RegExp(`agent-infra-internal ${command} \\{task-id\\} ${intent}`));
   }
 });
 

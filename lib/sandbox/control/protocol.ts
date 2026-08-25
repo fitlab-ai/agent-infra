@@ -1,4 +1,5 @@
 import { validateTaskCreateCandidate, type TaskCreateCandidateV1 } from '../../task/create.ts';
+import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
 import type { CodexControllerLeaseProofV1 } from './controller-registration.ts';
 
@@ -7,7 +8,7 @@ export const SANDBOX_CONTROL_ADMISSION_WINDOW_MS = 2_000;
 export const SANDBOX_CONTROL_STATUS_INTERVAL_MS = 250;
 export const SANDBOX_CONTROL_STATUS_STALE_MS = 1_500;
 export const SANDBOX_CONTROL_FUTURE_SKEW_MS = 1_000;
-export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration', 'task-create', 'codex-controller'] as const;
+export const SANDBOX_CONTROL_FAMILIES = ['task-lifecycle', 'task-orchestration', 'task-finalization', 'task-create', 'codex-controller'] as const;
 export type SandboxControlTimingPolicy = Readonly<{
   controlTickMs: number;
   parkedBindingInitialMs: number;
@@ -51,6 +52,9 @@ type RequestBase = Readonly<{
 export type SandboxTaskCommandRequest = RequestBase & Readonly<{
   family: 'task-lifecycle' | 'task-orchestration'; args: string[];
 }>;
+export type SandboxTaskFinalizationRequest = RequestBase & Readonly<{
+  family: 'task-finalization'; operation: 'complete'; agent: string; args: [];
+}>;
 export type SandboxTaskCreateRequest = RequestBase & Readonly<{
   family: 'task-create'; candidate: TaskCreateCandidateV1;
 }>;
@@ -59,7 +63,7 @@ export type SandboxCodexControllerRequest = RequestBase & Readonly<{
   command: 'open' | 'close';
   args: [];
 }>;
-export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest;
+export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest;
 export type SandboxControlError = Readonly<{ code: string; message: string; retryable: boolean }>;
 export type SandboxControlResponse = Readonly<{
   version: 2; id: string; phase: 'accepted' | 'completed' | 'rejected'; exitCode: number | null;
@@ -152,6 +156,20 @@ export function validateSandboxControlRequest(
     }
     return request as SandboxCodexControllerRequest;
   }
+  if (request.family === 'task-finalization') {
+    const expected = ['agent', 'args', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'operation', 'token', 'version'];
+    if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
+      || request.operation !== 'complete'
+      || !Array.isArray(request.args) || request.args.length !== 0
+      || typeof request.agent !== 'string' || normalizeAgentToken(request.agent) !== request.agent
+      || request.controllerProcess !== null || request.controllerProof !== null) {
+      fail('SANDBOX_CONTROL_REQUEST_INVALID', 'task-finalization request schema or authorization is invalid');
+    }
+    if (manifest.mode !== 'task-bound' || !manifest.taskId) {
+      fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot finalize tasks');
+    }
+    return request as SandboxTaskFinalizationRequest;
+  }
   const expected = ['args', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
   if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
     || !Array.isArray(request.args) || !request.args.every((arg) => typeof arg === 'string')) {
@@ -178,7 +196,7 @@ export function validateSandboxControlRequest(
 }
 
 export function bindSandboxControlTask(request: SandboxControlRequest, taskId: string): string[] {
-  if (request.family === 'task-create' || request.family === 'codex-controller') {
+  if (request.family === 'task-create' || request.family === 'codex-controller' || request.family === 'task-finalization') {
     fail('SANDBOX_CONTROL_REQUEST_INVALID', `${request.family} requests do not bind a current task`);
   }
   if (request.args.length === 0) fail('SANDBOX_CONTROL_REQUEST_INVALID', 'command arguments are required');

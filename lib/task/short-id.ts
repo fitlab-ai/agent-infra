@@ -201,6 +201,10 @@ type RegistrySchema = {
   ids: Record<string, string>;
 };
 
+type ShortIdRegistryInspection =
+  | { status: 'valid'; shortIds: Map<string, string> }
+  | { status: 'missing' | 'invalid'; error: { code: string; message: string } };
+
 type ShortIdMutationEffect = 'alloc' | 'release' | 'none';
 type ShortIdMutationResult = {
   effect: 'allocated' | 'released' | 'unchanged';
@@ -446,6 +450,64 @@ function loadShortIdByTaskId(repoRoot: string): Map<string, string> {
   return map;
 }
 
+function inspectShortIdRegistry(repoRoot: string): ShortIdRegistryInspection {
+  const registryPath = path.join(repoRoot, '.agents', 'workspace', 'active', REGISTRY_NAME);
+  if (!fs.existsSync(registryPath)) {
+    return {
+      status: 'missing',
+      error: {
+        code: 'SHORT_ID_REGISTRY_NOT_FOUND',
+        message: 'canonical short-id registry is missing'
+      }
+    };
+  }
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(registryPath, 'utf8');
+  } catch {
+    return {
+      status: 'invalid',
+      error: {
+        code: 'SHORT_ID_REGISTRY_READ_FAILED',
+        message: 'canonical short-id registry is unreadable'
+      }
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {
+      status: 'invalid',
+      error: {
+        code: 'SHORT_ID_REGISTRY_INVALID_JSON',
+        message: 'canonical short-id registry contains invalid JSON'
+      }
+    };
+  }
+
+  try {
+    const registry = validateRegistry(parsed, registryPath, configuredShortIdLength(repoRoot));
+    const shortIds = new Map<string, string>();
+    for (const [key, taskId] of Object.entries(registry.ids)) shortIds.set(taskId, key);
+    return { status: 'valid', shortIds };
+  } catch (error) {
+    return {
+      status: 'invalid',
+      error: {
+        code: typeof (error as { code?: unknown }).code === 'string'
+          ? (error as { code: string }).code
+          : 'SHORT_ID_REGISTRY_INVALID_SCHEMA',
+        message: (error as { code?: unknown }).code === 'SHORT_ID_REGISTRY_DUPLICATE_TASK'
+          ? 'canonical short-id registry contains duplicate task entries'
+          : 'canonical short-id registry has invalid schema'
+      }
+    };
+  }
+}
+
 /**
  * Resolve a branch to its active-task short id (`NN`), or `null` when no
  * active task is bound to that branch.
@@ -485,6 +547,7 @@ export {
   resolveShortIdReadOnly,
   lookupShortIdByBranch,
   loadShortIdByTaskId,
+  inspectShortIdRegistry,
   configuredShortIdLength,
   mutateShortIdRegistry,
   executeShortIdCommand
@@ -497,5 +560,6 @@ export type {
   ShortIdMutationEffect,
   ShortIdMutationResult,
   ShortIdCommandRequest,
-  ShortIdCommandResult
+  ShortIdCommandResult,
+  ShortIdRegistryInspection
 };

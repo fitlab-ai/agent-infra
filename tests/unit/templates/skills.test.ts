@@ -1558,21 +1558,17 @@ test("complete-task splits active preflight checks from completed-state checks",
   });
 });
 
-test("complete-task docs keep remote preflight before lifecycle and terminal sync after it", () => {
+test("complete-task docs keep remote preflight before host finalization", () => {
   skillDocPaths("complete-task").forEach((relativePath) => {
     const content = read(relativePath);
     const externalResolve = content.indexOf("platform-pr resolve-external {task-id}");
     const artifactSync = content.indexOf("platform-comment backfill {task-id}");
     const preflight = content.indexOf("task-verify {task-id} complete-task.preflight");
-    const lifecycle = content.indexOf("task-lifecycle {task-id} complete");
-    const taskSync = content.indexOf("platform-comment sync {task-id} --kind task");
-    const completedGate = content.indexOf("task-verify {task-id} complete-task.completed");
+    const finalization = content.indexOf("task-finalization {task-id} complete");
 
     assert.ok(externalResolve >= 0 && externalResolve < artifactSync, `${relativePath} should resolve external delivery before platform backfill`);
     assert.ok(artifactSync >= 0 && artifactSync < preflight, `${relativePath} should backfill completion artifacts before preflight`);
-    assert.ok(preflight < lifecycle, `${relativePath} should run preflight before lifecycle completion`);
-    assert.ok(lifecycle < taskSync, `${relativePath} should sync the terminal task comment after lifecycle completion`);
-    assert.ok(taskSync < completedGate, `${relativePath} should run the completed gate after terminal task sync`);
+    assert.ok(preflight >= 0 && preflight < finalization, `${relativePath} should run preflight before host finalization`);
     assert.ok(content.includes("finalization-retry"), `${relativePath} should define the retry branch identifier`);
   });
 });

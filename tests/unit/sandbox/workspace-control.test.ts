@@ -332,6 +332,80 @@ test('control requests are restricted to allowed families and rebound to the man
   );
 });
 
+test('task finalization uses a typed task-bound request with manifest authority', () => {
+  const request = validateSandboxControlRequest({
+    version: 3,
+    id: '12345678-1234-1234-1234-123456789abc',
+    token: manifest.token,
+    generation: manifest.generation,
+    issuedAt: 1_000,
+    expiresAt: 3_000,
+    family: 'task-finalization',
+    operation: 'complete',
+    agent: 'codex',
+    args: [],
+    controllerProcess: null,
+    controllerProof: null
+  }, manifest, { now: 2_000 });
+  assert.equal(request.family, 'task-finalization');
+  assert.equal(request.operation, 'complete');
+  assert.equal(request.agent, 'codex');
+  assert.deepEqual(request.args, []);
+  assert.throws(() => bindSandboxControlTask(request, manifest.taskId!), /REQUEST_INVALID/);
+  assert.throws(() => validateSandboxControlRequest({ ...request, args: ['TASK-20260809-999999'] }, manifest, { now: 2_000 }), /REQUEST_INVALID/);
+  assert.throws(() => validateSandboxControlRequest({ ...request, operation: 'status' }, manifest, { now: 2_000 }), /REQUEST_INVALID/);
+  assert.throws(() => validateSandboxControlRequest({ ...request, repoRoot: '/untrusted' }, manifest, { now: 2_000 }), /REQUEST_INVALID/);
+  assert.throws(() => validateSandboxControlRequest(request, { ...manifest, mode: 'branch-only', taskId: null }, { now: 2_000 }), /SANDBOX_CONTROL_BRANCH_ONLY/);
+});
+
+test('sandbox executor finalizes only the manifest task and returns no control authority', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'finalization-executor-'));
+  const taskId = 'TASK-20260101-000001';
+  const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
+  try {
+    fs.mkdirSync(path.join(taskDir), { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', 'skills', 'complete-task', 'config'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+    fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': taskId } })}\n`);
+    fs.writeFileSync(path.join(root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({
+      skill: 'complete-task', checks: { 'review-ledger': null, 'manual-validation': {}, 'post-review-commit': null, 'platform-sync-preflight': null }
+    }));
+    fs.writeFileSync(path.join(taskDir, 'task.md'), [
+      '---', `id: ${taskId}`, 'status: active', 'current_step: code-review', 'updated_at: old', 'agent_infra_version: old', 'target_date:', '---',
+      '', '# Task', '', '## Activity Log', ''
+    ].join('\n'));
+    const result = executeRequest({
+      ...manifest,
+      repoRoot: root,
+      worktreeRoot: root,
+      taskId,
+      runtimeDir: path.join(root, 'runtime')
+    }, path.join(root, 'manifest.json'), {
+      version: 3,
+      id: '12345678-1234-1234-1234-123456789abc',
+      token: manifest.token,
+      generation: manifest.generation,
+      issuedAt: 1_000,
+      expiresAt: 3_000,
+      family: 'task-finalization',
+      operation: 'complete',
+      agent: 'codex',
+      args: [],
+      controllerProcess: null,
+      controllerProof: null
+    });
+    assert.equal(result.exitCode, 0);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 'completed');
+    assert.equal(payload.accepted, true);
+    assert.equal(result.stdout.includes(manifest.token), false);
+    assert.equal(result.stdout.includes(root), false);
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', 'completed', taskId, 'task.md')), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('control protocol rejects request v2 and controller result parser enforces exact wire phases', () => {
   const request = {
     version: 3,

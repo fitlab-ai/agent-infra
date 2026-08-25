@@ -137,6 +137,28 @@ test('preflight success permits one archive and releases the short id', () => {
   }
 });
 
+test('host finalization CLI completes the terminal sequence and makes replay idempotent', () => {
+  const f = fixture();
+  try {
+    const first = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
+    assert.equal(first.status, 0, first.stderr || first.stdout);
+    const firstPayload = JSON.parse(first.stdout);
+    assert.equal(firstPayload.status, 'completed');
+    assert.equal(firstPayload.accepted, true);
+    assert.equal(firstPayload.result.status, 'completed');
+    assert.equal(fs.existsSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
+
+    const second = run(f.root, ['task-finalization', TASK_ID, 'complete', '--agent', 'codex']);
+    assert.equal(second.status, 0, second.stderr || second.stdout);
+    const secondPayload = JSON.parse(second.stdout);
+    assert.equal(secondPayload.status, 'completed');
+    assert.equal(secondPayload.changed, false);
+    assert.equal((fs.readFileSync(path.join(f.root, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('completed verification resolves the archived task without moving it back to active', () => {
   const f = fixture();
   try {

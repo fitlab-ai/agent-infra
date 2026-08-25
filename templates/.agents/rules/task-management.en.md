@@ -28,7 +28,7 @@ Map user intent to the corresponding workflow command:
 - Historical `gemini` / `gemini-cli` remain read-only for `ai task log` rendering and are not writable
 - Manual-step exception: no matter which agent is used, a human-made decision is always declared as `human`
 
-The six internal commands (`task-event` / `task-lifecycle` / `platform-issue` / `platform-comment` / `platform-pr` / `task-orchestration`) hard-validate `--agent` against a whitelist: they accept a short token, a long name, or `human`, and reject non-standard values with the matching `*_PAYLOAD_INVALID` error; long names are normalized to the short token before being persisted or forwarded. The `ai task log` renderer keeps unknown tokens grouped as `human` but appends a visible `(unknown)` marker.
+The seven internal commands (`task-event` / `task-lifecycle` / `task-finalization` / `platform-issue` / `platform-comment` / `platform-pr` / `task-orchestration`) hard-validate `--agent` against a whitelist: they accept a short token, a long name, or `human`, and reject non-standard values with the matching `*_PAYLOAD_INVALID` error; long names are normalized to the short token before being persisted or forwarded. The `ai task log` renderer keeps unknown tokens grouped as `human` but appends a visible `(unknown)` marker.
 
 ## State Snapshot and Completion Verification Entrypoints
 

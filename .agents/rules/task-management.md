@@ -28,7 +28,7 @@
 - 历史 `gemini` / `gemini-cli` 仅保留 `ai task log` 渲染兼容，不接受写入
 - 人工步骤例外：无论使用哪个 Agent，只要是人做的决定，统一声明 `human`
 
-六个内部命令（`task-event` / `task-lifecycle` / `platform-issue` / `platform-comment` / `platform-pr` / `task-orchestration`）对 `--agent` 做白名单硬校验：接受短名、长名或 `human`，非标准值返回对应 `*_PAYLOAD_INVALID` 错误；长名在落库/透传前归一化为短名。渲染端 `ai task log` 对无法识别的 token 保留 `human` 归类并附加 `(unknown)` 标记。
+七个内部命令（`task-event` / `task-lifecycle` / `task-finalization` / `platform-issue` / `platform-comment` / `platform-pr` / `task-orchestration`）对 `--agent` 做白名单硬校验：接受短名、长名或 `human`，非标准值返回对应 `*_PAYLOAD_INVALID` 错误；长名在落库/透传前归一化为短名。渲染端 `ai task log` 对无法识别的 token 保留 `human` 归类并附加 `(unknown)` 标记。
 
 ## 状态快照与完成验证入口
 
