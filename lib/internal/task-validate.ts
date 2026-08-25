@@ -3,28 +3,28 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { loadConfig } from '../../sandbox/config.ts';
-import { detectEngine } from '../../sandbox/engine.ts';
-import { runEngine } from '../../sandbox/shell.ts';
-import { sandboxBranchLabel, sandboxLabel } from '../../sandbox/constants.ts';
-import { fetchSandboxRows, selectSandboxContainer } from '../../sandbox/commands/list-running.ts';
-import { containerNameCandidates } from '../../sandbox/constants.ts';
-import { resolveSandboxTarget } from '../../sandbox/workspace-identity.ts';
-import { sandboxControlPaths } from '../../sandbox/workspace-view.ts';
+import { loadConfig } from '../sandbox/config.ts';
+import { detectEngine } from '../sandbox/engine.ts';
+import { runEngine } from '../sandbox/shell.ts';
+import { sandboxBranchLabel, sandboxLabel } from '../sandbox/constants.ts';
+import { fetchSandboxRows, selectSandboxContainer } from '../sandbox/commands/list-running.ts';
+import { containerNameCandidates } from '../sandbox/constants.ts';
+import { resolveSandboxTarget } from '../sandbox/workspace-identity.ts';
+import { sandboxControlPaths } from '../sandbox/workspace-view.ts';
 import {
   appendSandboxControlAudit,
   readActiveLease,
   readSandboxControlStatus
-} from '../../sandbox/control/state.ts';
-import type { SandboxControlLease, SandboxControlManifest } from '../../sandbox/control/protocol.ts';
+} from '../sandbox/control/state.ts';
+import type { SandboxControlLease, SandboxControlManifest } from '../sandbox/control/protocol.ts';
 import {
   SANDBOX_CONTROL_FUTURE_SKEW_MS,
   SANDBOX_CONTROL_STATUS_STALE_MS
-} from '../../sandbox/control/protocol.ts';
-import { getProcessStartTime } from '../../server/process-state.ts';
-import { assertGitWorktreeBinding } from '../../git/worktree-identity.ts';
+} from '../sandbox/control/protocol.ts';
+import { getProcessStartTime } from '../server/process-state.ts';
+import { assertGitWorktreeBinding } from '../git/worktree-identity.ts';
 
-const USAGE = `Usage: ai task validate <branch | TASK-id | N> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command> [args...]`;
+const USAGE = `Usage: agent-infra-internal task-validate <branch | TASK-id | N> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command> [args...]`;
 const MAX_TIMEOUT_MS = 60 * 60 * 1000;
 const RECOVERY_GRACE_MS = 30_000;
 
@@ -250,33 +250,68 @@ function inplaceValidation(config: ReturnType<typeof loadConfig>, target: Return
   }
 }
 
-export async function validate(args: string[]): Promise<number> {
-  const options = parseValidateArgs(args);
+function errorCode(message: string): string {
+  const match = message.match(/^([A-Z][A-Z0-9_]*)/);
+  return match && match[1]!.length >= 3 ? match[1]! : 'TASK_VALIDATE_FAILED';
+}
+
+function fail(format: 'text' | 'json', code: string, message: string): void {
+  if (format === 'json') {
+    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code, message } })}\n`);
+  } else {
+    process.stderr.write(`${message}\n`);
+  }
+  process.exitCode = 1;
+}
+
+function sniffFormat(args: string[]): 'text' | 'json' {
+  const index = args.indexOf('--format');
+  return index >= 0 && args[index + 1] === 'json' ? 'json' : 'text';
+}
+
+function taskValidate(args: string[]): void {
+  let options: ValidateOptions;
+  try {
+    options = parseValidateArgs(args);
+  } catch (error) {
+    fail(sniffFormat(args), 'TASK_VALIDATE_ARGS_INVALID', error instanceof Error ? error.message : String(error));
+    return;
+  }
   if (options.help) {
     process.stdout.write(`${USAGE}\n`);
-    return 0;
+    return;
   }
-  const config = loadConfig();
-  const target = resolveSandboxTarget(options.target, config.repoRoot);
-  const commit = git(config.repoRoot, ['rev-parse', target.branch]);
-  const startedAt = new Date().toISOString();
-  const result = options.scope === 'snapshot'
-    ? snapshotValidation(config.repoRoot, commit, options)
-    : inplaceValidation(config, target, options);
-  const evidence = {
-    version: 1,
-    taskId: target.workspace.mode === 'task-bound' ? target.workspace.taskId : null,
-    branch: target.branch,
-    scope: options.scope,
-    commit,
-    command: path.basename(options.command[0]!),
-    startedAt,
-    completedAt: new Date().toISOString(),
-    exitCode: result.exitCode,
-    signal: result.signal,
-    cleanup: result.cleanup()
-  };
-  if (options.format === 'json') process.stdout.write(`${JSON.stringify(evidence)}\n`);
-  else process.stdout.write(`Validation ${result.exitCode === 0 ? 'passed' : 'failed'} (${options.scope}, ${evidence.command}, cleanup=${evidence.cleanup}).\n`);
-  return result.exitCode;
+  try {
+    const config = loadConfig();
+    const target = resolveSandboxTarget(options.target, config.repoRoot);
+    const commit = git(config.repoRoot, ['rev-parse', target.branch]);
+    const startedAt = new Date().toISOString();
+    const result = options.scope === 'snapshot'
+      ? snapshotValidation(config.repoRoot, commit, options)
+      : inplaceValidation(config, target, options);
+    const evidence = {
+      version: 1,
+      taskId: target.workspace.mode === 'task-bound' ? target.workspace.taskId : null,
+      branch: target.branch,
+      scope: options.scope,
+      commit,
+      command: path.basename(options.command[0]!),
+      startedAt,
+      completedAt: new Date().toISOString(),
+      exitCode: result.exitCode,
+      signal: result.signal,
+      cleanup: result.cleanup()
+    };
+    if (options.format === 'json') {
+      process.stdout.write(`${JSON.stringify({ status: 'applied', changed: false, evidence, error: null })}\n`);
+    } else {
+      process.stdout.write(`Validation ${result.exitCode === 0 ? 'passed' : 'failed'} (${options.scope}, ${evidence.command}, cleanup=${evidence.cleanup}).\n`);
+    }
+    process.exitCode = result.exitCode;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fail(options.format, errorCode(message), message);
+  }
 }
+
+export { taskValidate };

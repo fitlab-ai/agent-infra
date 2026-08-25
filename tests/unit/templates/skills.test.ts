@@ -1408,7 +1408,7 @@ test("run-manual-validation keeps discovery, reporting, and verification structu
     const content = read(relativePath);
     assert.ok(content.includes("reference/discovery-and-execution.md"));
     assert.ok(content.includes("platform-pr inspect"));
-    assert.ok(content.includes("ai task validate"));
+    assert.ok(content.includes("agent-infra-internal task-validate"));
   });
 
   referenceVariants.forEach((relativePath) => {

@@ -58,7 +58,7 @@
 1. 每个可执行项分别调用：
 
    ```bash
-   ai task validate {task-ref} --scope snapshot --format json -- {command...}
+   agent-infra-internal task-validate {task-ref} --scope snapshot --format json -- {command...}
    ```
 
 2. 仅当项目要求或首次证据证明依赖未提交内容、原挂载或原位权限时，再为该项显式调用一次 `--scope inplace`，并记录升级理由。

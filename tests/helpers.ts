@@ -2,7 +2,7 @@ export { filePath, exists, read, listFilesRecursive, listSkillNames } from "./he
 export { CLI_PATH, INTERNAL_CLI_PATH, cliArgs, internalCliArgs, pathWithPrependedBin, envWithPrependedPath, sandboxControlSafeEnv } from "./helpers/cli.ts";
 export { gitSafeEnv, withGitSafeProcessEnv, initIsolatedGitRepo, listTrackedFiles } from "./helpers/git.ts";
 export { onPlatforms, supportsPosixModeBits, assertModeBits } from "./helpers/platform.ts";
-export { writeSandboxEngineFixture, writeNodeCommandShim } from "./helpers/sandbox.ts";
+export { writeSandboxEngineFixture, writeNodeCommandShim, sandboxRow } from "./helpers/sandbox.ts";
 export { langTemplate, renderPlaceholders, buildCommandSyncFiles, escapeRegExp, parseFrontmatter, skillDocPaths } from "./helpers/templates.ts";
 export { commandSpecs } from "./helpers/command-specs.ts";
 export { loadFreshEsm } from "./helpers/esm.ts";

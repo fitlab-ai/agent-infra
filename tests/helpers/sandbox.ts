@@ -20,6 +20,10 @@ type SandboxFixture = {
   readCapturedEnvFiles(): string[];
 };
 
+function sandboxRow(name: string, branch: string, project = "demo"): string {
+  return `${name}\tUp 1 minute\t${project}.sandbox.branch=${branch},${project}.sandbox=true`;
+}
+
 function dockerCommandArgs(args: string[]): string[] {
   return args[0] === "--context" && args.length >= 2 ? args.slice(2) : args;
 }
@@ -150,6 +154,13 @@ function writeSandboxEngineFixture(
       "function rememberRemoved(container) {",
       "  if (container) fs.appendFileSync(removedContainersPath, `${container}\\n`);",
       "}",
+      "function setContainerStatus(name, status) {",
+      "  const rows = dockerRows().map((row) => {",
+      "    const columns = row.split('\\t');",
+      "    return columns[0] === name ? [columns[0], status, ...columns.slice(2)].join('\\t') : row;",
+      "  });",
+      "  fs.writeFileSync(dockerStatePath, rows.join('\\n'), 'utf8');",
+      "}",
       "function inspectLabels(containerName = '') {",
       "  const runCall = loggedCalls().map((call) => call[0] === '--context' ? call.slice(2) : call).reverse().find((call) => call[0] === 'run');",
       "  const labels = {};",
@@ -278,8 +289,12 @@ function writeSandboxEngineFixture(
       "if (args[0] === 'stop' && process.env.DOCKER_STOP_REQUIRES_BOUNDED_GRACE === '1' && !args.includes('--timeout')) {",
       "  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 8_000);",
       "}",
-      "if (args[0] === 'stop' && process.env.DOCKER_EXIT_FOR_STOP) {",
-      "  process.exit(Number(process.env.DOCKER_EXIT_FOR_STOP));",
+      "if (args[0] === 'stop' && args[1]) {",
+      "  if (process.env.DOCKER_EXIT_FOR_STOP) {",
+      "    process.exit(Number(process.env.DOCKER_EXIT_FOR_STOP));",
+      "  }",
+      "  setContainerStatus(args[1], 'Exited (0) 1 second ago');",
+      "  process.exit(0);",
       "}",
       "if (args[0] === 'image' && args[1] === 'inspect') {",
       "  if (process.env.DOCKER_EXIT_FOR_IMAGE_INSPECT && Number(process.env.DOCKER_EXIT_FOR_IMAGE_INSPECT) !== 0) {",
@@ -337,8 +352,12 @@ function writeSandboxEngineFixture(
       "if (args[0] === 'info' && process.env.DOCKER_EXIT_FOR_INFO) {",
       "  process.exit(Number(process.env.DOCKER_EXIT_FOR_INFO));",
       "}",
-      "if (args[0] === 'start' && process.env.DOCKER_EXIT_FOR_START) {",
-      "  process.exit(Number(process.env.DOCKER_EXIT_FOR_START));",
+      "if (args[0] === 'start' && args[1]) {",
+      "  if (process.env.DOCKER_EXIT_FOR_START) {",
+      "    process.exit(Number(process.env.DOCKER_EXIT_FOR_START));",
+      "  }",
+      "  setContainerStatus(args[1], 'Up 1 second');",
+      "  process.exit(0);",
       "}",
       "process.exit(0);"
     ].join("\n"),
@@ -417,6 +436,7 @@ function writeSandboxEngineFixture(
 }
 
 export {
+  sandboxRow,
   writeNodeCommandShim,
   writeSandboxEngineFixture
 };

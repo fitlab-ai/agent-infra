@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseValidateArgs } from '../../../lib/task/commands/validate.ts';
+import { parseValidateArgs } from '../../../lib/internal/task-validate.ts';
 
 test('validate parser requires an explicit command boundary and bounded options', () => {
   assert.deepEqual(parseValidateArgs([
