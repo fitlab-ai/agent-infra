@@ -189,6 +189,81 @@ test('Codex prepare rejects mismatched broker and verified local controller bind
   }
 });
 
+test('Codex prepare rejects missing model or effort without consuming the capability', async () => {
+  for (const { input, expectedCode } of [
+    { input: { requestedReasoningEffort: 'xhigh' }, expectedCode: 'ORCHESTRATION_REQUESTED_MODEL_REQUIRED' },
+    { input: { requestedModel: 'executor-model' }, expectedCode: 'ORCHESTRATION_REQUESTED_REASONING_EFFORT_REQUIRED' }
+  ]) {
+    const f = fixture();
+    const currentCapability = capability(f.root, `missing-policy-${Object.keys(input)[0]}`);
+    const result = await prepareCodexOrchestrationDelegation(taskId, {
+      client: 'codex',
+      ...input,
+      capabilityToken: currentCapability.token
+    }, {
+      repoRoot: f.root,
+      capabilityStore: currentCapability.store,
+      buildIdentity,
+      preflight,
+      orchestrationOptions: { captureWorkspace: () => 'before' }
+    });
+    assert.equal(result.error?.code, expectedCode);
+    assert.equal(currentCapability.store.inspect(currentCapability.token).status, 'attested');
+    assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
+  }
+});
+
+test('Codex prepare rejects route policy mismatches before consuming the capability', async () => {
+  for (const { input, expectedCode } of [
+    { input: { requestedModel: 'wrong-model', requestedReasoningEffort: 'xhigh' }, expectedCode: 'ORCHESTRATION_REQUESTED_MODEL_MISMATCH' },
+    { input: { requestedModel: 'executor-model', requestedReasoningEffort: 'wrong-effort' }, expectedCode: 'ORCHESTRATION_REQUESTED_REASONING_EFFORT_MISMATCH' }
+  ]) {
+    const f = fixture();
+    const currentCapability = capability(f.root, `mismatch-policy-${Object.keys(input)[0]}`);
+    let captures = 0;
+    const result = await prepareCodexOrchestrationDelegation(taskId, {
+      client: 'codex', ...input, capabilityToken: currentCapability.token
+    }, {
+      repoRoot: f.root,
+      capabilityStore: currentCapability.store,
+      buildIdentity,
+      preflight,
+      orchestrationOptions: { captureWorkspace: () => { captures += 1; return 'before'; } }
+    });
+    assert.equal(result.error?.code, expectedCode);
+    assert.equal(currentCapability.store.inspect(currentCapability.token).status, 'attested');
+    assert.equal(captures, 0);
+    assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
+    assert.equal(readRun(f.taskDir)?.baseline, '');
+  }
+});
+
+test('Codex prepare keeps the capability attested when workspace snapshot fails', async () => {
+  const f = fixture();
+  const currentCapability = capability(f.root, 'snapshot-failure-token');
+  let captures = 0;
+  const result = await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
+    capabilityToken: currentCapability.token
+  }, {
+    repoRoot: f.root,
+    capabilityStore: currentCapability.store,
+    buildIdentity,
+    preflight,
+    orchestrationOptions: {
+      captureWorkspace: () => {
+        captures += 1;
+        throw new Error('snapshot unavailable');
+      }
+    }
+  });
+  assert.equal(result.error?.code, 'ORCHESTRATION_SNAPSHOT_FAILED');
+  assert.equal(currentCapability.store.inspect(currentCapability.token).status, 'attested');
+  assert.equal(captures, 1);
+  assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
+  assert.equal(readRun(f.taskDir)?.baseline, '');
+});
+
 test('Codex prepare preflight fails before workspace capture or receipt creation', async () => {
   const f = fixture();
   let captures = 0;
@@ -409,8 +484,11 @@ test('Codex bridge activates and seals from trusted parent spawn and wait eviden
       arguments: JSON.stringify({ agent_type: 'agent-infra-lifecycle-executor', task_name: 'analysis_executor_r1', model: 'executor-model', reasoning_effort: 'xhigh' })
     } }),
     JSON.stringify({ type: 'event_msg', payload: {
-      type: 'sub_agent_activity', event_id: 'spawn-tool', kind: 'started',
-      agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
+      type: 'item_completed', thread_id: 'parent', turn_id: 'parent-turn',
+      item: {
+        type: 'SubAgentActivity', id: 'spawn-tool', kind: 'started',
+        agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
+      }
     } })
   ].join('\n'));
   const started = await activateCodexSpawnDelegation({

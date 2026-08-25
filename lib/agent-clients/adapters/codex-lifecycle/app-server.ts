@@ -67,6 +67,7 @@ function resolveCodexSpawnedChild(
   transcriptPath: string,
   expected: Readonly<{
     sessionId: string;
+    turnId: string;
     toolUseId: string;
     nativeAgent: string;
     taskName: string;
@@ -111,15 +112,19 @@ function resolveCodexSpawnedChild(
   ) throw new Error('Codex parent rollout spawn identity does not match the hook event');
   const activities = records.filter((record) => {
     const payload = object(record?.payload);
+    const item = object(payload?.item);
     return record?.type === 'event_msg'
-      && payload?.type === 'sub_agent_activity'
-      && payload.event_id === expected.toolUseId
-      && payload.kind === 'started'
-      && payload.agent_path === `/root/${expected.taskName}`
-      && nonEmpty(payload.agent_thread_id);
+      && payload?.type === 'item_completed'
+      && payload.thread_id === expected.sessionId
+      && payload.turn_id === expected.turnId
+      && item?.type === 'SubAgentActivity'
+      && item.id === expected.toolUseId
+      && item.kind === 'started'
+      && item.agent_path === `/root/${expected.taskName}`
+      && nonEmpty(item.agent_thread_id);
   });
   if (activities.length !== 1) throw new Error('Codex parent rollout child activity was not found uniquely');
-  return nonEmpty(object(activities[0]?.payload)?.agent_thread_id)!;
+  return nonEmpty(object(object(activities[0]?.payload)?.item)?.agent_thread_id)!;
 }
 
 function validateCodexLifecycleHookConfig(value: unknown): void {

@@ -335,25 +335,35 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
         const activatedCodex = ['activated', 'stage-completed', 'sealed', 'consumed'].includes(receipt.status);
         const host = receipt.hostEvidence;
         const provenance = receipt.lifecycleProvenance;
-        if (!provenance || (activatedCodex && (
-          host?.kind !== 'codex-lifecycle-v2'
-          || host.protocolVersion !== provenance.protocolVersion
-          || host.packageVersion !== provenance.packageVersion
-          || host.internalExecutableBuildHash !== provenance.internalExecutableBuildHash
-          || host.lifecycleContractHash !== provenance.lifecycleContractHash
-          || host.hookDefinitionHash !== provenance.hookDefinitionHash
-          || host.hookSource !== provenance.hookSource
-          || host.hookSourcePathDigest !== provenance.hookSourcePathDigest
-          || host.hookSourceHash !== provenance.hookSourceHash
-          || host.capabilitySessionId !== provenance.capabilitySessionId
-          || host.capabilityTurnId !== provenance.capabilityTurnId
-          || host.controllerInstanceDigest !== provenance.controllerInstanceDigest
-          || host.controlGeneration !== provenance.controlGeneration
-          || receipt.parentId !== provenance.capabilitySessionId
-          || !exactText(host.hookDefinitionHash)
-          || !Number.isSafeInteger(host.startRevision)
-          || host.startRevision < 1
-        ))) {
+        if (
+          !provenance
+          || (activatedCodex && (
+            host?.kind !== 'codex-lifecycle-v2'
+            || host.protocolVersion !== provenance.protocolVersion
+            || host.packageVersion !== provenance.packageVersion
+            || host.internalExecutableBuildHash !== provenance.internalExecutableBuildHash
+            || host.lifecycleContractHash !== provenance.lifecycleContractHash
+            || host.hookDefinitionHash !== provenance.hookDefinitionHash
+            || host.hookSource !== provenance.hookSource
+            || host.hookSourcePathDigest !== provenance.hookSourcePathDigest
+            || host.hookSourceHash !== provenance.hookSourceHash
+            || host.capabilitySessionId !== provenance.capabilitySessionId
+            || receipt.parentId !== provenance.capabilitySessionId
+            || host.capabilityTurnId !== provenance.capabilityTurnId
+            || host.controllerInstanceDigest !== provenance.controllerInstanceDigest
+            || host.controlGeneration !== provenance.controlGeneration
+            || host.spawnToolUseId === provenance.capabilityToolUseId
+            || !exactText(host.spawnToolUseId)
+            || !Number.isFinite(Date.parse(host.spawnObservedAt ?? ''))
+            || !Number.isFinite(Date.parse(receipt.spawnDispatchedAt ?? ''))
+            || !Number.isFinite(Date.parse(receipt.activationDeadlineAt ?? ''))
+            || Date.parse(host.spawnObservedAt ?? '') < Date.parse(receipt.spawnDispatchedAt ?? '')
+            || Date.parse(host.spawnObservedAt ?? '') > Date.parse(receipt.activationDeadlineAt ?? '')
+            || !exactText(host.hookDefinitionHash)
+            || !Number.isSafeInteger(host.startRevision)
+            || host.startRevision < 1
+          ))
+        ) {
           return failResult('orchestration-evidence', `Receipt '${receipt.id ?? '(unknown)'}' has invalid Codex start evidence`);
         }
         if (['sealed', 'consumed'].includes(receipt.status) && (

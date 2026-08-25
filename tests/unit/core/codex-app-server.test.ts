@@ -111,18 +111,58 @@ test('parent rollout resolves exactly one trusted lifecycle child for a spawn to
       })
     } }),
     JSON.stringify({ type: 'event_msg', payload: {
-      type: 'sub_agent_activity', event_id: 'tool', kind: 'started',
-      agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
+      type: 'item_completed', thread_id: 'parent', turn_id: 'turn',
+      item: {
+        type: 'SubAgentActivity', id: 'tool', kind: 'started',
+        agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
+      }
     } })
   ].join('\n'));
   assert.equal(resolveCodexSpawnedChild(rollout, {
-    sessionId: 'parent', toolUseId: 'tool', nativeAgent: 'agent-infra-lifecycle-executor',
+    sessionId: 'parent', turnId: 'turn', toolUseId: 'tool', nativeAgent: 'agent-infra-lifecycle-executor',
     taskName: 'analysis_executor_r1', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh'
   }), 'child');
   assert.throws(() => resolveCodexSpawnedChild(rollout, {
-    sessionId: 'parent', toolUseId: 'tool', nativeAgent: 'agent-infra-lifecycle-reviewer',
+    sessionId: 'parent', turnId: 'turn', toolUseId: 'tool', nativeAgent: 'agent-infra-lifecycle-reviewer',
     taskName: 'analysis_executor_r1'
   }), /does not match/);
+});
+
+test('parent rollout child correlation fails closed for missing, duplicate, or mismatched activities', () => {
+  const root = temporaryRoot('codex-parent-rollout-');
+  const rollout = path.join(root, 'rollout-parent.jsonl');
+  const call = { type: 'response_item', payload: {
+    type: 'function_call', namespace: 'collaboration', name: 'spawn_agent', call_id: 'tool',
+    arguments: JSON.stringify({
+      agent_type: 'agent-infra-lifecycle-executor', task_name: 'analysis_executor_r1'
+    })
+  } };
+  const activity = { type: 'event_msg', payload: {
+    type: 'item_completed', thread_id: 'parent', turn_id: 'turn',
+    item: {
+      type: 'SubAgentActivity', id: 'tool', kind: 'started',
+      agent_thread_id: 'child', agent_path: '/root/analysis_executor_r1'
+    }
+  } };
+  const expected = {
+    sessionId: 'parent', turnId: 'turn', toolUseId: 'tool',
+    nativeAgent: 'agent-infra-lifecycle-executor', taskName: 'analysis_executor_r1'
+  };
+  const invalidActivities = [
+    [],
+    [activity, activity],
+    [{ ...activity, payload: { ...activity.payload, item: { ...activity.payload.item, id: 'other-tool' } } }],
+    [{ ...activity, payload: { ...activity.payload, thread_id: 'other-parent' } }],
+    [{ ...activity, payload: { ...activity.payload, turn_id: 'other-turn' } }],
+    [{ ...activity, payload: { ...activity.payload, item: null } }]
+  ];
+  for (const activities of invalidActivities) {
+    fs.writeFileSync(rollout, [call, ...activities].map((record) => JSON.stringify(record)).join('\n'));
+    assert.throws(
+      () => resolveCodexSpawnedChild(rollout, expected),
+      { message: 'Codex parent rollout child activity was not found uniquely' }
+    );
+  }
 });
 
 test('App Server terminal parser preserves completed and failed host states', () => {

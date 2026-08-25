@@ -509,14 +509,12 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     return next;
   }
 
-  function consume(token: string, expected: Readonly<{
+  function validateRecord(record: CodexCapabilityRecord, expected: Readonly<{
     taskId: string;
     hookDefinitionHash: string;
     buildIdentity: LifecycleBuildIdentity;
     controller?: CodexControllerBinding;
   }>): CodexCapabilityRecord {
-    sweep();
-    const { file, record } = loadActive(token);
     if (record.status === 'consumed') {
       throw capabilityError('CODEX_CAPABILITY_REPLAY', 'capability token was already consumed');
     }
@@ -536,6 +534,29 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
         provenanceDetail(record, expected)
       );
     }
+    return record;
+  }
+
+  function validate(token: string, expected: Readonly<{
+    taskId: string;
+    hookDefinitionHash: string;
+    buildIdentity: LifecycleBuildIdentity;
+    controller?: CodexControllerBinding;
+  }>): CodexCapabilityRecord {
+    sweep();
+    const { record } = loadActive(token);
+    return validateRecord(record, expected);
+  }
+
+  function consume(token: string, expected: Readonly<{
+    taskId: string;
+    hookDefinitionHash: string;
+    buildIdentity: LifecycleBuildIdentity;
+    controller?: CodexControllerBinding;
+  }>): CodexCapabilityRecord {
+    sweep();
+    const { file, record } = loadActive(token);
+    validateRecord(record, expected);
     const next: CodexCapabilityRecord = Object.freeze({
       ...record,
       revision: record.revision + 1,
@@ -550,7 +571,7 @@ function createCodexCapabilityStore(options: CodexCapabilityStoreOptions = {}) {
     return loadActive(token).record;
   }
 
-  return Object.freeze({ arm, attest, consume, inspect, sweep });
+  return Object.freeze({ arm, attest, consume, inspect, validate, sweep });
 }
 
 export { createCodexCapabilityStore };
