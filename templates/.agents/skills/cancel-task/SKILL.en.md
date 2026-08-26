@@ -106,7 +106,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
-> **Optional sandbox-cleanup hint (gated)**: Render the "Optional: clean up this task's sandbox" block — placed after "Target path" and before "Next step" in the output below — only when BOTH (1) `.agents/.airc.json` has a `sandbox` field and (2) task.md's `branch` field exists and is not `main` / `master`; otherwise omit the whole block. `{branch}` is the `branch` value from the task.md you already loaded (the task has moved to completed/, so read it from `.agents/workspace/completed/{task-id}/task.md`). This block is independent of "Next steps" semantics.
+> **Optional sandbox-cleanup hint (gated)**: Render the "Optional: clean up this task's sandbox" block — placed after "Target path" and before "Next step" in the output below — only when BOTH (1) `.agents/.airc.json` has a `sandbox` field and (2) task.md's `branch` field exists and is not `main` / `master`; otherwise omit the whole block. Use the full `{task-id}` for cleanup; do not substitute the branch name. This block is independent of "Next steps" semantics.
 
 Output format:
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill check-task --task-ref {task-ref}`.
@@ -119,9 +119,9 @@ Status label: {status-label or skipped}
 Target path: .agents/workspace/completed/{task-id}/
 
 Optional: clean up this task's sandbox
-(The task is archived; the sandbox container and per-branch config directory are not reclaimed automatically. Run this if you no longer need them:)
+(The task is completed and archived; the sandbox container and per-branch config directory are not reclaimed automatically. Run this if you no longer need them:)
 
-ai sandbox rm {branch}
+ai sandbox rm {task-id}
 
 Next step - inspect the moved task:
 {next-step-commands}

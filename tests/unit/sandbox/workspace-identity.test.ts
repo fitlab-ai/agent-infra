@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   parseSandboxWorkspaceIdentity,
+  resolveSandboxCleanupTarget,
   resolveSandboxTarget,
   sameSandboxWorkspaceIdentity
 } from '../../../lib/sandbox/workspace-identity.ts';
@@ -26,6 +27,12 @@ function addTask(root: string, taskId: string, branch: string, shortId: string):
     : { version: 1, ids: {} };
   registry.ids[shortId] = taskId;
   fs.writeFileSync(registryPath, `${JSON.stringify(registry)}\n`);
+}
+
+function addTaskInState(root: string, state: string, taskId: string, branch: string): void {
+  const taskDir = path.join(root, '.agents', 'workspace', state, taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: ${branch}\n---\n`);
 }
 
 test('resolveSandboxTarget preserves task identity for TASK-id and short id', () => {
@@ -50,6 +57,51 @@ test('resolveSandboxTarget distinguishes branch-only and rejects ambiguous branc
     () => resolveSandboxTarget('agent-infra-feature-shared', root),
     /SANDBOX_TASK_IDENTITY_AMBIGUOUS/
   );
+});
+
+test('resolveSandboxCleanupTarget keeps completed task identity after short-id release', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260809-010205';
+  addTaskInState(root, 'completed', taskId, 'agent-infra-fix-completed');
+
+  assert.deepEqual(resolveSandboxCleanupTarget(taskId, root), {
+    requestedRef: taskId,
+    branch: 'agent-infra-fix-completed',
+    workspace: { mode: 'task-bound', taskId },
+    taskState: 'completed'
+  });
+});
+
+test('resolveSandboxCleanupTarget rejects protected task states unless explicitly inspecting them', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260809-010206';
+  addTaskInState(root, 'blocked', taskId, 'agent-infra-fix-blocked');
+
+  assert.throws(() => resolveSandboxCleanupTarget(taskId, root), /SANDBOX_CLEANUP_STATE_UNSUPPORTED/);
+  assert.deepEqual(resolveSandboxCleanupTarget(taskId, root, { allowProtected: true }).taskState, 'blocked');
+});
+
+test('resolveSandboxCleanupTarget rejects a task id present in multiple workspace states', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260809-010207';
+  addTaskInState(root, 'completed', taskId, 'agent-infra-fix-duplicate');
+  addTaskInState(root, 'blocked', taskId, 'agent-infra-fix-duplicate');
+
+  assert.throws(
+    () => resolveSandboxCleanupTarget(taskId, root, { allowProtected: true }),
+    /SANDBOX_TASK_STATE_AMBIGUOUS/
+  );
+});
+
+test('resolveSandboxCleanupTarget preserves branch-only test sandboxes', () => {
+  const root = fixture();
+
+  assert.deepEqual(resolveSandboxCleanupTarget('test1', root), {
+    requestedRef: 'test1',
+    branch: 'test1',
+    workspace: { mode: 'branch-only' },
+    taskState: 'branch-only'
+  });
 });
 
 test('container labels are parsed without inferring missing identity', () => {

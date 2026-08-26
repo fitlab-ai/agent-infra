@@ -105,7 +105,7 @@ agent-infra-internal task-verify {task-id} cancel-task.completed --format text
 
 > 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
-> **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) task.md 的 `branch` 字段存在且不是 `main` / `master` 时，才渲染下方输出中「目标路径」之后、「下一步」之前的「可选：清理本任务的沙箱」块；任一不满足则整段省略。`{branch}` 取已读入的 task.md 的 `branch` 值（任务此时已移动到 completed/，从 `.agents/workspace/completed/{task-id}/task.md` 读取）。该块独立于「下一步」语义。
+> **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) task.md 的 `branch` 字段存在且不是 `main` / `master` 时，才渲染下方输出中「目标路径」之后、「下一步」之前的「可选：清理本任务的沙箱」块；任一不满足则整段省略。清理时使用完整 `{task-id}`，不要改用 branch 名。该块独立于「下一步」语义。
 
 输出格式：
 使用 `agent-infra-internal agent-client next-steps --skill check-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
@@ -118,9 +118,9 @@ agent-infra-internal task-verify {task-id} cancel-task.completed --format text
 目标路径：.agents/workspace/completed/{task-id}/
 
 可选：清理本任务的沙箱
-（任务已归档，沙箱容器和 per-branch 配置目录不会自动回收。如果不再需要可执行：）
+（任务已完成并归档，沙箱容器和 per-branch 配置目录不会自动回收。如果不再需要可执行：）
 
-ai sandbox rm {branch}
+ai sandbox rm {task-id}
 
 下一步 - 查看已转移任务：
 {next-step-commands}

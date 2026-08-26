@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { SandboxConfig } from "../../../lib/sandbox/config.ts";
+import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 import {
   cliArgs,
   envWithPrependedPath,
@@ -792,6 +793,182 @@ test("sandbox rm refuses a container whose branch label conflicts with the reque
   }
 });
 
+test("sandbox rm rejects a control manifest whose container does not match its control-root path", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-control-manifest-mismatch-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const branch = "feature/control-manifest-mismatch";
+  const taskId = "TASK-20260824-000002";
+  const container = `demo-dev-${branch.replaceAll("/", "..")}`;
+  const config = rmOneConfig(fixture, tmpDir);
+  const controlRoot = sandboxControlPaths({
+    base: config.controlBase,
+    project: config.project,
+    container,
+    identity: { mode: "task-bound", taskId }
+  }).root;
+  try {
+    const channelDir = path.join(controlRoot, "channel");
+    const publicStatusDir = path.join(controlRoot, "public");
+    const processingDir = path.join(controlRoot, "processing");
+    fs.mkdirSync(channelDir, { recursive: true });
+    fs.mkdirSync(publicStatusDir, { recursive: true });
+    fs.mkdirSync(processingDir, { recursive: true });
+    fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+      version: 5,
+      engine: "docker-desktop",
+      repoRoot: fixture.repoDir,
+      worktreeRoot: fixture.repoDir,
+      project: "demo",
+      container: "different-container",
+      containerIdentity: { id: "fixture-container-id", labels: {} },
+      branch,
+      mode: "task-bound",
+      taskId,
+      token: "manifest-mismatch-token",
+      generation: "manifest-mismatch-generation",
+      channelDir,
+      publicStatusDir,
+      processingDir,
+      runtimeDir: path.join(controlRoot, "runtime")
+    })}\n`);
+    fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
+      version: 2,
+      generation: "manifest-mismatch-generation",
+      broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
+      state: "healthy",
+      reasonCode: null,
+      activeRequestId: null,
+      updatedAt: Date.now()
+    })}\n`);
+
+    const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+    try {
+      await assert.rejects(
+        () => withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+          assumeYes: true,
+          cleanupTarget: {
+            requestedRef: taskId,
+            branch,
+            workspace: { mode: "task-bound", taskId },
+            taskState: "completed"
+          },
+          target: {
+            branch,
+            effectiveBranch: branch,
+            engine: "docker-desktop",
+            matchedContainers: [],
+            existingWorktrees: [],
+            toolCandidates: [],
+            workspace: { mode: "task-bound", taskId },
+            controlRoots: [controlRoot],
+            workspaceViewRoots: []
+          }
+        })),
+        /SANDBOX_CONTROL_TARGET_MISMATCH/
+      );
+    } finally {
+      if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+      else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    }
+    assert.equal(fs.existsSync(controlRoot), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm cleans a completed task-bound sandbox only with matching control evidence", onPlatforms("linux", "darwin", "win32"), async () => {
+  const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-completed-task-control-"));
+  const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo" });
+  const branch = "feature/completed-task-control";
+  const taskId = "TASK-20260824-000003";
+  const container = `demo-dev-${branch.replaceAll("/", "..")}`;
+  const config = rmOneConfig(fixture, tmpDir);
+  const controlRoot = sandboxControlPaths({
+    base: config.controlBase,
+    project: config.project,
+    container,
+    identity: { mode: "task-bound", taskId }
+  }).root;
+  try {
+    const taskDir = path.join(fixture.repoDir, ".agents", "workspace", "completed", taskId);
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\nbranch: ${branch}\n---\n`, "utf8");
+    const channelDir = path.join(controlRoot, "channel");
+    const publicStatusDir = path.join(controlRoot, "public");
+    const processingDir = path.join(controlRoot, "processing");
+    fs.mkdirSync(channelDir, { recursive: true });
+    fs.mkdirSync(publicStatusDir, { recursive: true });
+    fs.mkdirSync(processingDir, { recursive: true });
+    fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+      version: 5,
+      engine: "docker-desktop",
+      repoRoot: fixture.repoDir,
+      worktreeRoot: fixture.repoDir,
+      project: "demo",
+      container,
+      containerIdentity: { id: "fixture-container-id", labels: {} },
+      branch,
+      mode: "task-bound",
+      taskId,
+      token: "completed-task-token",
+      generation: "completed-task-generation",
+      channelDir,
+      publicStatusDir,
+      processingDir,
+      runtimeDir: path.join(controlRoot, "runtime")
+    })}\n`);
+    fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
+      version: 2,
+      generation: "completed-task-generation",
+      broker: { pid: 999_999_999, startTime: 0, brokerId: "stale-broker" },
+      state: "healthy",
+      reasonCode: null,
+      activeRequestId: null,
+      updatedAt: Date.now()
+    })}\n`);
+    const shellConfig = path.join(config.shellConfigBase, branch.replaceAll("/", ".."));
+    fs.mkdirSync(shellConfig, { recursive: true });
+
+    const previousNotFound = process.env.DOCKER_INSPECT_NOT_FOUND;
+    process.env.DOCKER_INSPECT_NOT_FOUND = "1";
+    try {
+      await withFixtureDocker(fixture, () => rm.rmOne(config, [], branch, {
+        assumeYes: true,
+        cleanupTarget: {
+          requestedRef: taskId,
+          branch,
+          workspace: { mode: "task-bound", taskId },
+          taskState: "completed"
+        },
+        target: {
+          branch,
+          effectiveBranch: branch,
+          engine: "docker-desktop",
+          matchedContainers: [],
+          existingWorktrees: [],
+          toolCandidates: [],
+          workspace: { mode: "task-bound", taskId },
+          controlRoots: [controlRoot],
+          workspaceViewRoots: []
+        }
+      }));
+    } finally {
+      if (previousNotFound === undefined) delete process.env.DOCKER_INSPECT_NOT_FOUND;
+      else process.env.DOCKER_INSPECT_NOT_FOUND = previousNotFound;
+    }
+
+    assert.equal(fs.existsSync(controlRoot), false);
+    assert.equal(fs.existsSync(shellConfig), false);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm allows explicit discard of a stable recovered dirty snapshot", onPlatforms("linux", "darwin", "win32"), async () => {
   const rm = await loadFreshEsm<RmModule>("lib/sandbox/commands/rm.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-recovered-dirty-"));
@@ -911,14 +1088,14 @@ test("sandbox rm cancellation at the worktree confirmation stops before every cl
 test("sandbox rm --unbound --yes removes a real clean linked worktree and branch", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-clean-"));
   const branch = "feature/clean-unbound";
-  const row = `demo-dev-${branch.replaceAll("/", "..")}\tUp 1 minute\tdemo.sandbox.branch=${branch},demo.sandbox=true`;
+  const row = `demo-dev-${branch.replaceAll("/", "..")}\tUp 1 minute\tdemo.sandbox.branch=${branch},demo.sandbox=true,demo.sandbox.workspace-mode=branch-only`;
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: row });
     const worktree = addFixtureWorktree(fixture, tmpDir, branch);
 
     const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
 
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.equal(fs.existsSync(worktree), false);
     assert.equal(git(fixture.repoDir, "branch", "--list", branch), "");
   } finally {
@@ -1044,7 +1221,7 @@ test("sandbox rm --unbound preflights all worktrees before deleting any sandbox"
   const cleanBranch = "feature/clean-batch";
   const dirtyBranch = "feature/dirty-batch";
   const rows = [cleanBranch, dirtyBranch].map((branch) => (
-    `demo-dev-${branch.replaceAll("/", "..")}\tUp 1 minute\tdemo.sandbox.branch=${branch},demo.sandbox=true`
+    `demo-dev-${branch.replaceAll("/", "..")}\tUp 1 minute\tdemo.sandbox.branch=${branch},demo.sandbox=true,demo.sandbox.workspace-mode=branch-only`
   )).join("\n");
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: rows });
@@ -1067,7 +1244,7 @@ test("sandbox rm --unbound preflights all worktrees before deleting any sandbox"
 test("sandbox rm --unbound does not use recovered worktree deletion", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-unbound-recovered-"));
   const branch = "feature/recovered-batch";
-  const row = `demo-dev-${branch.replaceAll("/", "..")}	Up 1 minute	demo.sandbox.branch=${branch},demo.sandbox=true`;
+  const row = `demo-dev-${branch.replaceAll("/", "..")}	Up 1 minute	demo.sandbox.branch=${branch},demo.sandbox=true,demo.sandbox.workspace-mode=branch-only`;
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, { project: "demo", dockerStdoutForPs: row });
     const worktree = addFixtureWorktree(fixture, tmpDir, branch);

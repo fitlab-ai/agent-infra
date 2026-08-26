@@ -101,7 +101,7 @@ Only `status=applied|no-op` means local archival completed. If the API dismissal
 
 > Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
-> **Optional sandbox-cleanup hint (gated)**: Render the "Optional: clean up this task's sandbox" block — placed after the "Note:" line and before "Next step" in the output below — only when ALL of (1) `.agents/.airc.json` has a `sandbox` field, (2) step 7 located a related task by the alert number, and (3) that related task's task.md `branch` field exists and is not `main` / `master`; otherwise omit the whole block. `{branch}` is the `branch` value from the related task.md located in step 7. This block is independent of "Next step" semantics.
+> **Optional sandbox-cleanup hint (gated)**: Render the cleanup hint only when ALL of (1) `.agents/.airc.json` has a `sandbox` field, (2) step 7 located a related task by the alert number, (3) that task's task.md `branch` exists and is not `main` / `master`, and (4) task state and sandbox workspace identity were cross-validated without conflict. The state and identity select the command: use the full `{task-id}` only for `completed` + `task-bound`; use `{branch}` only when `branch-only` identity was explicitly verified; omit an automatic cleanup command for `active`; for `blocked` / `archive`, render a manual-verification note without a command. If state or identity is missing or conflicting, omit the whole block. Dismissing the alert never implies that the task is completed. This block is independent of "Next step" semantics.
 
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}`.
 
@@ -118,7 +118,11 @@ View: {alert-url}
 Note: it can be reopened on the platform if necessary.
 
 Optional: clean up this task's sandbox
-(The related task's sandbox container and per-branch config directory are not reclaimed automatically. Run this if you no longer need them:)
+(Only for a `completed` related task with `task-bound` identity, use the full task ID:)
+
+ai sandbox rm {task-id}
+
+(Only when `branch-only` identity was explicitly verified, use the branch name:)
 
 ai sandbox rm {branch}
 

@@ -93,7 +93,7 @@ agent-infra-internal task-lifecycle {task-id} close-codescan --agent {standard-a
 
 > 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
-> **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) 第 7 步按告警号定位到了关联任务、(3) 该关联任务 task.md 的 `branch` 字段存在且不是 `main` / `master` 时，才渲染下方输出中「注意：…」之后、「下一步」之前的「可选：清理本任务的沙箱」块；任一不满足则整段省略。`{branch}` 取第 7 步定位到的关联任务 task.md 的 `branch` 值。该块独立于「下一步」语义。
+> **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) 第 7 步按告警号定位到了关联任务、(3) 该任务 task.md 的 `branch` 存在且不是 `main` / `master`、(4) 任务状态与沙箱 workspace identity 已交叉校验且无冲突时，才渲染清理提示。状态和 identity 决定命令：仅 `completed` + `task-bound` 使用完整 `{task-id}`；仅在明确核对为 `branch-only` 时使用 `{branch}`；`active` 不渲染自动清理命令；`blocked` / `archive` 只渲染人工核对提示，不渲染命令。状态或 identity 缺失、冲突时整段省略；关闭告警本身不能推断任务已完成。该块独立于「下一步」语义。
 
 使用 `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
 
@@ -110,7 +110,11 @@ Code Scanning 告警 #{alert-number} 已关闭。
 注意：如有需要，可在 平台上重新打开。
 
 可选：清理本任务的沙箱
-（关联任务的沙箱容器和 per-branch 配置目录不会自动回收。如果不再需要可执行：）
+（仅在关联任务为 `completed` 且 identity 为 `task-bound` 时，使用完整任务 ID：）
+
+ai sandbox rm {task-id}
+
+（仅在明确核对 identity 为 `branch-only` 时，使用分支名：）
 
 ai sandbox rm {branch}
 
