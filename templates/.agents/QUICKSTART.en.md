@@ -27,11 +27,10 @@ npm install
 npm run build
 ```
 
-Lifecycle hooks always invoke `agent-infra-internal` through `PATH`; they do not implicitly switch to checkout source or `dist`. In a Codex sandbox, the controller's `PATH`-first shim is authoritative and binds the controller's selected executable. Skills, rules, hooks, and task data continue to come from the current checkout. The commands above develop the CLI itself and do not change hook executable selection. If shell commands must also resolve to this checkout, link it and compare the active version with the package version:
+Lifecycle hooks always invoke `agent-infra-internal` through `PATH`; they do not implicitly switch to checkout source or `dist`. In a Codex sandbox, the controller's `PATH`-first shim is authoritative and binds the controller's selected executable. Skills, rules, hooks, and task data continue to come from the current checkout. The commands above develop the CLI itself and do not change hook executable selection. To run the CLI from the current checkout, invoke the build output directly and compare its version with the package version. Do not run `npm link` on the host: it writes to npm's global prefix and can shadow a stable installation managed by Homebrew or npm.
 
 ```bash
-npm link
-ai version --raw
+node ./dist/bin/cli.js version --raw
 node -p "'v' + require('./package.json').version"
 ```
 

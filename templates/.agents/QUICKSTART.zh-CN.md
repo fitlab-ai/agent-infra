@@ -27,11 +27,10 @@ npm install
 npm run build
 ```
 
-生命周期 hook 始终通过 `PATH` 调用 `agent-infra-internal`，不会隐式切换到当前检出的 source 或 `dist`。在 Codex sandbox 中，controller 放在 `PATH` 首位的 shim 是权威入口，并绑定 controller 选定的 executable。skills、rules、hooks 和任务数据仍从当前检出读取。上面的命令只用于开发 CLI 本身，不会改变 hook 的 executable 选择。如果 shell 命令也必须解析到当前检出，请建立链接并比较当前版本与包版本：
+生命周期 hook 始终通过 `PATH` 调用 `agent-infra-internal`，不会隐式切换到当前检出的 source 或 `dist`。在 Codex sandbox 中，controller 放在 `PATH` 首位的 shim 是权威入口，并绑定 controller 选定的 executable。skills、rules、hooks 和任务数据仍从当前检出读取。上面的命令只用于开发 CLI 本身，不会改变 hook 的 executable 选择。如需运行当前检出的 CLI，请直接执行构建产物并比较当前版本与包版本。不要在宿主机上执行 `npm link`：它会写入 npm 全局前缀，并可能遮蔽由 Homebrew 或 npm 安装的稳定版。
 
 ```bash
-npm link
-ai version --raw
+node ./dist/bin/cli.js version --raw
 node -p "'v' + require('./package.json').version"
 ```
 
