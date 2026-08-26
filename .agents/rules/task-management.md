@@ -70,7 +70,7 @@
   `- {time} — **{基名} [started]** by {agent} — started`
 - **done 行**（步骤完成时写，与现状一致）：action 即基名本身：
   `- {time} — **{基名}** by {agent} — {完成说明}`
-- **Commit 专用 attempt**：commit 技能不得手写 started。`commit-start` 在任务锁内写入带 `attempt`、`baseline`、`agent` 的结构化 `Commit [started]`；无副作用放弃时由 `commit-terminate` 写匹配的 `Commit [aborted]`。aborted 只闭合活动日志，不构成提交成功证据。
+- **Commit 执行边界**：commit 技能不得手写 task Activity Log、review anchor、receipt 或 checkpoint。task-bound direct 与 orchestrated 都调用唯一 `commit-operation.execute`；taskless direct 只在 `TASK_CONTEXT_NOT_FOUND` 时允许，且不产生任务状态副作用。
 - `{基名}` 指该 SKILL 既有 done 条目的 action 文本，含 `(Round {N})`（如 `Plan Task (Round 1)`）。
   started 与 done 共用同一 `{基名}` 才能配对。
 

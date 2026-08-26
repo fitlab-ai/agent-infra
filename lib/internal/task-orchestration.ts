@@ -1,33 +1,23 @@
-import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import {
-  abortCommitIntent,
   activateMatchingOrchestrationDelegation,
   activateOrchestrationDelegation,
   advanceOrchestration,
   awaitOrchestrationDelegationActivation,
-  beginCommitIntent,
   beginOrResumeOrchestration,
-  checkpointCommitIntent,
-  completeCommitIntent,
   dispatchOrchestrationDelegation,
   OrchestrationStateError,
   pauseOrchestration,
-  recoverCommitIntent,
   recoverPreparedOrchestrationDelegation,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
   sealOrchestrationDelegation,
-  startCommitAttempt,
-  statusCommitIntent,
-  statusOrchestration,
-  terminateCommitAttempt
+  statusOrchestration
 } from '../task/orchestration.ts';
 import { prepareCodexOrchestrationDelegation } from '../task/codex-orchestration.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
-import { mergeOperationWarnings } from '../task/operation-outcome.ts';
 
-const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|dispatch|await-activation|recover-prepared|hook-start|hook-stop|advance|pause|status|commit-start|commit-begin|commit-checkpoint|commit-complete|commit-recover|commit-abort|commit-terminate|commit-status> [options]\n';
+const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|dispatch|await-activation|recover-prepared|hook-start|hook-stop|advance|pause|status> [options]\n';
 
 function usageFailure(message: string): void {
   process.stdout.write(`${JSON.stringify({
@@ -50,23 +40,15 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
   const [taskRef, intent] = args;
   if (![
     'begin-or-resume', 'route', 'prepare', 'dispatch', 'await-activation', 'recover-prepared',
-    'hook-start', 'hook-stop', 'advance', 'pause', 'status',
-    'commit-start', 'commit-begin', 'commit-checkpoint', 'commit-complete', 'commit-recover', 'commit-abort', 'commit-terminate', 'commit-status'
+    'hook-start', 'hook-stop', 'advance', 'pause', 'status'
   ].includes(intent!)) {
     usageFailure(`unknown intent '${intent}'`);
     return;
   }
   const values: Record<string, string> = {};
   const seen = new Set<string>();
-  let orchestrated = false;
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]!;
-    if (flag === '--orchestrated') {
-      if (seen.has(flag)) { usageFailure(`duplicate option '${flag}'`); return; }
-      seen.add(flag);
-      orchestrated = true;
-      continue;
-    }
     if (![
       '--max-steps', '--executor-model', '--executor-reasoning-effort',
       '--reviewer-model', '--reviewer-reasoning-effort',
@@ -76,8 +58,7 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
       '--native-agent', '--child-id', '--spawn-mode', '--actual-model', '--actual-reasoning-effort',
       '--model-fallback-reason', '--reasoning-effort-fallback-reason',
       '--exit-code', '--after-fingerprint', '--changed-paths', '--code', '--message', '--recoverable', '--agent',
-      '--baseline-head', '--token', '--kind', '--head', '--remote', '--ref', '--expected-head'
-      , '--attempt', '--git-worktree-root'
+      '--git-worktree-root'
     ].includes(flag)) {
       usageFailure(`unknown option '${flag}'`);
       return;
@@ -94,26 +75,6 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
     }
     values[flag] = value;
   }
-  const commitIntentFlags: Record<string, readonly string[]> = {
-    'commit-start': ['--agent', '--git-worktree-root'],
-    'commit-begin': ['--agent', '--baseline-head', '--attempt', '--orchestrated', '--git-worktree-root'],
-    'commit-checkpoint': ['--token', '--kind', '--head', '--remote', '--ref', '--git-worktree-root'],
-    'commit-complete': ['--token', '--agent', '--git-worktree-root'],
-    'commit-recover': ['--agent', '--git-worktree-root'],
-    'commit-abort': ['--token', '--expected-head', '--git-worktree-root'],
-    'commit-terminate': ['--attempt', '--agent', '--code', '--git-worktree-root'],
-    'commit-status': ['--git-worktree-root']
-  };
-  if (intent! in commitIntentFlags) {
-    const allowed = commitIntentFlags[intent!]!;
-    const invalid = [...seen].find((flag) => !allowed.includes(flag));
-    if (invalid) { usageFailure(`intent '${intent}' does not accept '${invalid}'`); return; }
-  } else {
-    const commitOnly = [...seen].find((flag) => [
-      '--orchestrated', '--baseline-head', '--attempt', '--token', '--kind', '--head', '--remote', '--ref', '--expected-head'
-    ].includes(flag));
-    if (commitOnly) { usageFailure(`intent '${intent}' does not accept '${commitOnly}'`); return; }
-  }
   const requireValues = (flags: string[]) => flags.find((flag) => values[flag] === undefined);
   const coreOptions = values['--git-worktree-root'] === undefined
     ? {}
@@ -124,66 +85,7 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
   }
   let result;
   try {
-  if (intent === 'commit-start') {
-    const missing = requireValues(['--agent']);
-    if (missing) { usageFailure(`intent 'commit-start' requires '${missing}'`); return; }
-    const agent = normalizeAgentToken(values['--agent']!);
-    if (!agent) { usageFailure(`invalid --agent '${values['--agent']}': ${AGENT_USAGE_HINT}`); return; }
-    result = startCommitAttempt(taskRef!, { agent }, coreOptions);
-  } else if (intent === 'commit-begin') {
-    const missing = requireValues(['--agent', '--baseline-head', '--attempt']);
-    if (missing) { usageFailure(`intent 'commit-begin' requires '${missing}'`); return; }
-    const agent = normalizeAgentToken(values['--agent']!);
-    if (!agent) { usageFailure(`invalid --agent '${values['--agent']}': ${AGENT_USAGE_HINT}`); return; }
-    result = beginCommitIntent(taskRef!, {
-      agent, orchestrated, baselineHead: values['--baseline-head']!, attempt: values['--attempt']!
-    }, coreOptions);
-  } else if (intent === 'commit-checkpoint') {
-    const missing = requireValues(['--token', '--kind', '--head']);
-    if (missing) { usageFailure(`intent 'commit-checkpoint' requires '${missing}'`); return; }
-    if (!['committed', 'pushed'].includes(values['--kind']!)) {
-      usageFailure('--kind must be committed or pushed'); return;
-    }
-    if (values['--kind'] === 'pushed') {
-      const pushedMissing = requireValues(['--remote', '--ref']);
-      if (pushedMissing) { usageFailure(`pushed checkpoint requires '${pushedMissing}'`); return; }
-    } else if (values['--remote'] !== undefined || values['--ref'] !== undefined) {
-      usageFailure('committed checkpoint does not accept --remote or --ref'); return;
-    }
-    result = checkpointCommitIntent(taskRef!, {
-      token: values['--token']!, kind: values['--kind'] as 'committed' | 'pushed',
-      head: values['--head']!, remote: values['--remote'], ref: values['--ref']
-    }, coreOptions);
-  } else if (intent === 'commit-complete') {
-    const missing = requireValues(['--token', '--agent']);
-    if (missing) { usageFailure(`intent 'commit-complete' requires '${missing}'`); return; }
-    const agent = normalizeAgentToken(values['--agent']!);
-    if (!agent) { usageFailure(`invalid --agent '${values['--agent']}': ${AGENT_USAGE_HINT}`); return; }
-    result = completeCommitIntent(taskRef!, { token: values['--token']!, agent }, coreOptions);
-  } else if (intent === 'commit-recover') {
-    const missing = requireValues(['--agent']);
-    if (missing) { usageFailure(`intent 'commit-recover' requires '${missing}'`); return; }
-    const agent = normalizeAgentToken(values['--agent']!);
-    if (!agent) { usageFailure(`invalid --agent '${values['--agent']}': ${AGENT_USAGE_HINT}`); return; }
-    result = recoverCommitIntent(taskRef!, { agent }, coreOptions);
-  } else if (intent === 'commit-abort') {
-    const missing = requireValues(['--token', '--expected-head']);
-    if (missing) { usageFailure(`intent 'commit-abort' requires '${missing}'`); return; }
-    result = abortCommitIntent(taskRef!, { token: values['--token']!, expectedHead: values['--expected-head']! }, coreOptions);
-  } else if (intent === 'commit-terminate') {
-    const missing = requireValues(['--attempt', '--agent', '--code']);
-    if (missing) { usageFailure(`intent 'commit-terminate' requires '${missing}'`); return; }
-    const agent = normalizeAgentToken(values['--agent']!);
-    if (!agent) { usageFailure(`invalid --agent '${values['--agent']}': ${AGENT_USAGE_HINT}`); return; }
-    if (!/^[A-Z][A-Z0-9_]{2,63}$/.test(values['--code']!)) {
-      usageFailure('--code must be a stable uppercase identifier'); return;
-    }
-    result = terminateCommitAttempt(taskRef!, {
-      attempt: values['--attempt']!, agent, code: values['--code']!
-    }, coreOptions);
-  } else if (intent === 'commit-status') {
-    result = statusCommitIntent(taskRef!, coreOptions);
-  } else if (intent === 'begin-or-resume') {
+  if (intent === 'begin-or-resume') {
     const missing = requireValues(['--client']);
     if (missing) { usageFailure(`intent 'begin-or-resume' requires '${missing}'`); return; }
     const maxSteps = values['--max-steps'] === undefined ? undefined : Number(values['--max-steps']);
@@ -309,9 +211,7 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
       error: { code: error.code, message: error.message }
     };
   }
-  const output = (intent ?? '').startsWith('commit-') && result && typeof result === 'object'
-    ? { ...result, outcome: (result as { outcome?: unknown }).outcome ?? null, warnings: mergeOperationWarnings((result as { warnings?: never[] }).warnings ?? []) }
-    : result;
+  const output = result;
   process.stdout.write(`${JSON.stringify(output)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
 }

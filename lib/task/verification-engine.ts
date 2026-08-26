@@ -262,8 +262,7 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
       && guards?.receiptCount === 0
       && guards?.pendingDelegation === false
       && guards?.commitAuthorizationUnused === true
-      && guards?.completionEvidenceAbsent === true
-      && guards?.commitIntentAbsent === true;
+      && guards?.completionEvidenceAbsent === true;
     if (!validClaudeCodeRecovery) {
       return failResult('orchestration-evidence', 'Run recovery history contains invalid provenance');
     }

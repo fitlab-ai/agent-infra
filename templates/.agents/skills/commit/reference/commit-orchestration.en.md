@@ -1,60 +1,21 @@
-# Commit Orchestration Coordination
+# Commit core boundary
 
-This protocol applies only when `{task-id}` was resolved. A taskless Git-only commit must not read, create, or complete a commit intent.
+Commit, push, result mapping, and task finalization use one `commit-operation.execute`. The entry point only resolves task scope, explicit agent, and the literal `--orchestrated`; it never infers the source from state files.
 
-## Execution source
+## Entry modes
 
-- Bind `{execution-flag}` to `--orchestrated` only when that literal flag appears in the entry business operands.
-- Every other invocation is standalone. Never infer the source from `orchestration.json`, environment variables, or activity history.
+- `mode=direct`: explicit user invocation is the authorization. Task-bound direct may read task facts but does not require a delegation receipt; taskless direct is allowed only for `TASK_CONTEXT_NOT_FOUND` and skips task facts, review, task lock, checkpoint, and task.md finalization.
+- `mode=orchestrated`: an explicit task is required. Before the first Git write, the core validates the matching activated commit receipt, agent, stage, round, artifact, role, and unconsumed capability. Missing evidence returns `blocked` without writing Git.
 
-## Begin before side effects
+## Shared order
 
-Call `commit-status` whenever the commit skill starts. Use `commit-recover --agent {standard-agent-token}` for `recoverable` / `prepared` / `retryable-start`; use `commit-start --agent {standard-agent-token}` for `idle`; fail closed for every other state. Read `commit_attempt` only from `finalization.attempt.attempt` in start/recover output.
+1. Acquire the repository/worktree mutation lock; task-bound execution also acquires the task lock.
+2. Validate the repository, current branch, explicit paths, sensitive paths, staged scope, expected HEAD/tree, remote, and full heads ref.
+3. Validate the authorization for the selected mode.
+4. Create at most one local commit; with no changes, allow push-only and never create an empty commit.
+5. Return `COMMIT_AUTOPUSH_PROTECTED_BRANCH` on protected automatic push, or `COMMIT_PUSH_FAILED` on ordinary push failure, while retaining local facts.
+6. Return one primary result: `committed`, `no_op`, `committed_with_warnings`, `failed`, or `blocked`.
 
-After read-only preparation of status, copyright, message, review snapshot, and push routing, record `baseline_head=$(git rev-parse HEAD)` and run this before any commit, push, success log, or platform success sync:
+## Retry boundary
 
-```bash
-commit_intent_result=$(agent-infra-internal task-orchestration {task-id} commit-begin --agent {standard-agent-token} {execution-flag} --baseline-head "$baseline_head" --attempt "$commit_attempt")
-commit_intent_token=$(printf '%s' "$commit_intent_result" | node -e 'let input = ""; process.stdin.on("data", chunk => input += chunk).on("end", () => process.stdout.write(JSON.parse(input).token))')
-```
-
-Set `commit_intent_token` from the one-use `token` in structured output and keep it only in the current process. A failed begin forbids all later side effects.
-
-## Side-effect checkpoints
-
-Immediately after a normal commit succeeds, record its new HEAD:
-
-```bash
-agent-infra-internal task-orchestration {task-id} commit-checkpoint --token "$commit_intent_token" --kind committed --head "$new_head"
-```
-
-Immediately after a push succeeds and remote verification completes, record the verified remote/ref/HEAD:
-
-```bash
-agent-infra-internal task-orchestration {task-id} commit-checkpoint --token "$commit_intent_token" --kind pushed --head "$pushed_head" --remote "$remote" --ref "$ref"
-```
-
-If a normal-branch push fails, retain the `committed` intent; a push-only retry validates current HEAD/baseline/remote/ref and pushes without creating another commit. The commit caller must pass `{ branch, automatic }` policy to `git-workflow push`: ordinary branches attempt one HEAD push, while `main` / `master` skip automatic push and return `committed_with_warnings`; the local committed checkpoint still completes. create-pr only verifies remote delivery and never performs the first push. The generic `git-workflow push` and release caller do not carry this policy.
-
-Example policy push input:
-
-```json
-{
-  "remote": "origin",
-  "refs": ["refs/heads/{branch}"],
-  "policy": { "branch": "{branch}", "automatic": true }
-}
-```
-
-## Completion and recovery
-
-After the committed/pushed checkpoint and before task synchronization or `task-verify commit.completed`, run:
-
-```bash
-agent-infra-internal task-orchestration {task-id} commit-complete --token "$commit_intent_token" --agent {standard-agent-token}
-```
-
-- If an intent exists but no side effect occurred, use `commit-abort --token ... --expected-head ...` while HEAD still equals baseline; when abandoning the attempt, then close it with `commit-terminate --attempt "$commit_attempt" --agent {standard-agent-token} --code <STABLE_CODE>`.
-- If begin failed before intent creation, retain the attempt for retry or terminate it only while HEAD is unchanged.
-- After a commit or push, never abort. Retain the intent and use `commit-status` / `commit-recover` for cross-session recovery.
-- Stop when `commit-complete` fails. Do not repeat commit/push or mark a run complete without its full receipt lifecycle.
+Retries reread current HEAD, worktree, branch, and remote facts. A local commit that already exists is push-only and cannot produce a second commit. Taskless retries create no task record. Orchestration owns stage completion, sealing, and consumption of receipts; direct mode never fabricates them.

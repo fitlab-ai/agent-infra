@@ -18,13 +18,11 @@ import type { TaskVerificationResult } from './verification.ts';
 import { projectFinalizationWarning } from './workflow-warning-intents.ts';
 import {
   mergeOperationWarnings,
-  type OperationOutcome,
   type OperationWarning,
   type OperationWarningSeverity
 } from './operation-outcome.ts';
 
 const RECEIPT_VERSION = 2 as const;
-const LEGACY_RECEIPT_VERSION = 1 as const;
 const FINALIZATION_STEPS = ['lifecycle', 'task-comment', 'verification'] as const;
 type FinalizationStep = typeof FINALIZATION_STEPS[number];
 type FinalizationStepState = 'pending' | 'done' | 'skipped';
@@ -96,7 +94,7 @@ type TaskFinalizationResult = Readonly<{
   verification: TaskFinalizationStep | null;
   completedSteps: readonly FinalizationStep[];
   pendingSteps: readonly FinalizationStep[];
-  outcome: OperationOutcome;
+  result: 'completed' | 'completed_with_warnings' | 'failed' | 'blocked';
   warnings: readonly OperationWarning[];
   error: FinalizationError | null;
 }>;
@@ -134,7 +132,7 @@ function failed(
     verification: null,
     completedSteps: [],
     pendingSteps: [...FINALIZATION_STEPS],
-    outcome: null,
+    result: error.retryable ? 'blocked' : 'failed',
     warnings: [],
     error,
     ...overrides
@@ -185,53 +183,18 @@ function validateReceipt(value: unknown, taskId: string): TaskFinalizationReceip
     || !states.includes(String(receipt.lifecycle))
     || !states.includes(String(receipt.taskComment))
     || !states.includes(String(receipt.verification))
-    || !['pending', 'done'].includes(String(receipt.warningProjection ?? 'done'))
+    || !['pending', 'done'].includes(String(receipt.warningProjection))
     || !Array.isArray(receipt.warnings) || receipt.warnings.some((warning) => !validWarning(warning))
     || typeof receipt.updatedAt !== 'string'
     || (receipt.lastError !== null && (typeof receipt.lastError !== 'object' || Array.isArray(receipt.lastError)))
   ) throw new Error('receipt schema is invalid');
-  return {
-    ...receipt,
-    warningProjection: receipt.warningProjection ?? (receipt.warnings.length > 0 ? 'pending' : 'done')
-  } as TaskFinalizationReceipt;
-}
-
-function validateLegacyReceipt(value: unknown, taskId: string): Omit<TaskFinalizationReceipt, 'version' | 'receiptId' | 'revision' | 'warnings'> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('receipt must be an object');
-  const receipt = value as Record<string, unknown>;
-  const states = ['pending', 'done', 'skipped'];
-  if (
-    receipt.version !== LEGACY_RECEIPT_VERSION || receipt.taskId !== taskId || receipt.intent !== 'complete'
-    || !states.includes(String(receipt.lifecycle))
-    || !states.includes(String(receipt.taskComment))
-    || !states.includes(String(receipt.verification))
-    || typeof receipt.updatedAt !== 'string'
-    || (receipt.lastError !== null && (typeof receipt.lastError !== 'object' || Array.isArray(receipt.lastError)))
-  ) throw new Error('receipt schema is invalid');
-  return receipt as Omit<TaskFinalizationReceipt, 'version' | 'receiptId' | 'revision' | 'warnings'>;
+  return receipt as TaskFinalizationReceipt;
 }
 
 function readReceipt(repoRoot: string, taskId: string): TaskFinalizationReceipt | null {
   const file = receiptPath(repoRoot, taskId);
   if (!fs.existsSync(file)) return null;
   const value = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
-  if (value && typeof value === 'object' && !Array.isArray(value) && (value as Record<string, unknown>).version === LEGACY_RECEIPT_VERSION) {
-    const legacy = validateLegacyReceipt(value, taskId);
-    return {
-      version: RECEIPT_VERSION,
-      taskId,
-      intent: 'complete',
-      receiptId: randomUUID(),
-      revision: 0,
-      lifecycle: legacy.lifecycle,
-      taskComment: legacy.taskComment,
-      verification: legacy.verification,
-      warningProjection: 'done',
-      warnings: [],
-      updatedAt: now(),
-      lastError: legacy.lastError
-    };
-  }
   return validateReceipt(value, taskId);
 }
 
@@ -528,7 +491,15 @@ function terminalResult(
     ...steps,
     completedSteps: completedSteps(receipt),
     pendingSteps: pending,
-    outcome: postLifecyclePending && (warnings.length > 0 || receipt.warningProjection === 'pending') ? 'completed_with_warnings' : null,
+    result: postLifecyclePending && (warnings.length > 0 || receipt.warningProjection === 'pending')
+      ? 'completed_with_warnings'
+      : hardError
+        ? (error?.retryable ? 'blocked' : 'failed')
+        : pending.length === 0 || postLifecyclePending
+          ? 'completed'
+          : blocked
+            ? 'blocked'
+            : 'failed',
     warnings,
     error: hardError ? error : postLifecyclePending ? null : error
   };
@@ -548,11 +519,8 @@ function applyUnderLock(
   try {
     const file = receiptPath(repoRoot, taskId);
     const existed = fs.existsSync(file);
-    const rawVersion = existed
-      ? (JSON.parse(fs.readFileSync(file, 'utf8')) as { version?: unknown }).version
-      : null;
     receipt = readReceipt(repoRoot, taskId) ?? emptyReceipt(taskId);
-    if (!existed || rawVersion === LEGACY_RECEIPT_VERSION) writeReceipt(repoRoot, receipt);
+    if (!existed) writeReceipt(repoRoot, receipt);
   } catch (error) {
     return failed(taskId, errorOf(error, 'TASK_FINALIZATION_RECEIPT_INVALID'));
   }

@@ -1828,12 +1828,9 @@ test("import-issue step 1 declares a structured title-derivation contract", () =
   });
 });
 
-test("commit skill push-to-existing-PR step keeps level-2 steps numbered 1..9", () => {
+test("commit skill single-core steps stay consecutively numbered", () => {
   // commit SKILL uses level-2 (`## N.`) step headings, which the generic
-  // consecutive-numbering test (level-3 `### N.`) does not cover. After
-  // inserting "Push to the Existing PR" as step 5, guard that all three
-  // variants stay consecutively numbered 1..9. Structural check only — no
-  // step-title/prose matching (see .agents/rules/testing-discipline.md).
+  // consecutive-numbering test (level-3 `### N.`) does not cover.
   const commitVariants = [
     ".agents/skills/commit/SKILL.md",
     "templates/.agents/skills/commit/SKILL.zh-CN.md",
@@ -1844,13 +1841,13 @@ test("commit skill push-to-existing-PR step keeps level-2 steps numbered 1..9", 
     const stepNumbers = [...read(relativePath).matchAll(/^## (\d+)\. /gm)].map((match) => Number(match[1]));
     assert.deepEqual(
       stepNumbers,
-      [1, 2, 3, 4, 5, 6, 7, 8, 9],
-      `${relativePath} should keep level-2 steps consecutively numbered 1..9 after adding the push step`
+      [1, 2, 3, 4, 5, 6],
+      `${relativePath} should keep level-2 steps consecutively numbered`
     );
   });
 });
 
-test("commit skill variants preserve the commit-intent protocol structure", () => {
+test("commit skill variants preserve the single commit-core structure", () => {
   const variants = [
     [".agents/skills/commit/SKILL.md", ".agents/skills/commit/reference/commit-orchestration.md"],
     ["templates/.agents/skills/commit/SKILL.zh-CN.md", "templates/.agents/skills/commit/reference/commit-orchestration.zh-CN.md"],
@@ -1863,14 +1860,14 @@ test("commit skill variants preserve the commit-intent protocol structure", () =
     const navigation = skill.indexOf("reference/commit-orchestration.md");
     const commit = skill.indexOf("agent-infra-internal git-workflow commit");
     const gate = skill.indexOf("agent-infra-internal task-verify {task-id} commit.completed");
-    const complete = skill.indexOf("agent-infra-internal task-orchestration {task-id} commit-complete");
     assert.ok(navigation >= 0 && navigation < commit, `${skillPath} should load the protocol before commit`);
-    assert.ok(complete >= 0 && complete < gate, `${skillPath} should finalize task state before the gate`);
-
-    const commands = ["commit-status", "commit-recover", "commit-begin", "--kind committed", "--kind pushed", "commit-complete"]
-      .map((token) => reference.indexOf(token));
-    assert.ok(commands.every((position) => position >= 0), `${referencePath} should contain every protocol command`);
-    assert.deepEqual([...commands].sort((left, right) => left - right), commands, `${referencePath} command order should be stable`);
+    assert.ok(gate > commit, `${skillPath} should verify after the core call`);
+    assert.match(skill, /mode=orchestrated/);
+    assert.match(skill, /commit-operation\.json/);
+    assert.match(reference, /commit-operation\.execute/);
+    assert.match(reference, /COMMIT_AUTOPUSH_PROTECTED_BRANCH/);
+    assert.match(reference, /COMMIT_PUSH_FAILED/);
+    assert.match(reference, /TASK_CONTEXT_NOT_FOUND/);
   });
 });
 

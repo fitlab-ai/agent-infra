@@ -11,7 +11,8 @@ import {
   normalizePullRequest,
   resolveGitHubChangeRequestGitEvidence,
   selectExternalPullRequest,
-  selectPullRequest
+  selectPullRequest,
+  warningResultForPrimary
 } from '../../../lib/platform/pull-requests.ts';
 import type { GitHubClient } from '../../../lib/platform/github-client.ts';
 
@@ -40,6 +41,12 @@ test('PR identity normalization retains canonical remote facts', () => {
     labels: ['type: feature'], assignees: ['codex'], milestone: '1.0.0',
     mergeability: { state: 'unknown', detail: null }
   });
+});
+
+test('PR warning result preserves the primary lifecycle outcome', () => {
+  assert.equal(warningResultForPrimary('pr_created'), 'pr_created_with_warnings');
+  assert.equal(warningResultForPrimary('pr_reused'), 'pr_reused_with_warnings');
+  assert.equal(warningResultForPrimary('no_op'), 'no_op_with_warnings');
 });
 
 test('PR identity normalization retains authoritative merge facts', () => {

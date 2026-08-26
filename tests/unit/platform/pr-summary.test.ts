@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildPullRequestSummary, reconcileSummaryComment } from '../../../lib/platform/pr-summary.ts';
+import { buildPullRequestSummary, reconcileSummaryComment, warningResultForPrimary } from '../../../lib/platform/pr-summary.ts';
 
 test('PR summary envelope owns marker and current HEAD', () => {
   assert.equal(buildPullRequestSummary('TASK-1', 'Summary\n', 'abc123'), [
@@ -11,6 +11,12 @@ test('PR summary envelope owns marker and current HEAD', () => {
     'Summary',
     ''
   ].join('\n'));
+});
+
+test('PR summary warning result preserves the primary lifecycle outcome', () => {
+  assert.equal(warningResultForPrimary('pr_created'), 'pr_created_with_warnings');
+  assert.equal(warningResultForPrimary('pr_reused'), 'pr_reused_with_warnings');
+  assert.equal(warningResultForPrimary('no_op'), 'no_op_with_warnings');
 });
 
 test('PR summary reconciliation creates, updates, converges and rejects duplicate markers', () => {

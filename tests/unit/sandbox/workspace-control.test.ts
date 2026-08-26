@@ -522,7 +522,7 @@ test('task-orchestration requests cannot override the manifest worktree binding'
     issuedAt: 1_000,
     expiresAt: 3_000,
     family: 'task-orchestration',
-    args: ['08', 'commit-status', '--git-worktree-root', '/other'],
+    args: ['08', 'status', '--git-worktree-root', '/other'],
     controllerProcess: null,
     controllerProof: null
   }, manifest, { now: 2_000 }), /REQUEST_INVALID/);

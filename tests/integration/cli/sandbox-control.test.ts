@@ -800,7 +800,7 @@ test('sandbox control client tolerates a transient torn response but rejects sta
       import { requestSandboxControl } from ${JSON.stringify(clientModule)};
       try {
         const response = requestSandboxControl({
-          family: 'task-orchestration', args: ['01', 'commit-status'],
+          family: 'task-orchestration', args: ['01', 'status'],
           channelDir: ${JSON.stringify(channelDir)}, statusDir: ${JSON.stringify(statusDir)},
           token: 'response-secret', generation: 'response-generation', timeoutMs: 2_000
         });

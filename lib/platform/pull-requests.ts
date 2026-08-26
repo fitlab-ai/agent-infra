@@ -19,16 +19,15 @@ import { planPullRequestMetadata } from './pull-request-metadata.ts';
 import { platformResult } from './types.ts';
 import type { PlatformOperation, PlatformResult } from './types.ts';
 import { inspectCompletionArtifacts } from '../task/finalization-artifacts.ts';
-import { inspectCreatePrCommitGate } from '../task/commit-finalization.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
-import { mergeOperationWarnings, type OperationOutcome, type OperationWarning } from '../task/operation-outcome.ts';
+import { mergeOperationWarnings, type OperationWarning } from '../task/operation-outcome.ts';
 
 type PullRequestSnapshot = PlatformChangeRequestSnapshot;
 
 type PullRequestResult = PlatformResult & {
   task: { id: string | null; issueNumber: number | null; prNumber: number | null };
   pullRequest: PullRequestSnapshot | null;
-  outcome: OperationOutcome;
+  result: 'pr_created' | 'pr_reused' | 'no_op' | 'pr_created_with_warnings' | 'pr_reused_with_warnings' | 'no_op_with_warnings' | 'failed' | 'blocked' | null;
   warnings: readonly OperationWarning[];
 };
 type InspectionOptions = { cwd?: string; client?: unknown };
@@ -43,7 +42,8 @@ type CreateOptions = SharedOptions & {
   dryRun?: boolean;
 };
 type BindOptions = SharedOptions & { agent: string; pr: number; dryRun?: boolean };
-type SyncOptions = SharedOptions & { agent: string; metadata?: boolean; closingIssue?: boolean; dryRun?: boolean };
+type PullRequestPrimaryResult = 'pr_created' | 'pr_reused' | 'no_op';
+type SyncOptions = SharedOptions & { agent: string; metadata?: boolean; closingIssue?: boolean; dryRun?: boolean; primaryResult: PullRequestPrimaryResult };
 type ResolveExternalOptions = SharedOptions & { agent: string; pr?: number; dryRun?: boolean };
 type ExternalPullRequestSelection =
   | { status: 'normal'; candidates: PullRequestSnapshot[]; eligible: [] }
@@ -105,6 +105,12 @@ type ClosingPullRequestPage = {
   } } } };
 };
 
+function warningResultForPrimary(primaryResult: PullRequestPrimaryResult): NonNullable<PullRequestResult['result']> {
+  if (primaryResult === 'pr_created') return 'pr_created_with_warnings';
+  if (primaryResult === 'pr_reused') return 'pr_reused_with_warnings';
+  return 'no_op_with_warnings';
+}
+
 function result(
   status: PlatformResult['status'],
   taskId: string | null,
@@ -116,7 +122,7 @@ function result(
     ...platformResult(status),
     task: { id: taskId, issueNumber, prNumber },
     pullRequest: null,
-    outcome: null,
+    result: null,
     warnings: [],
     ...overrides
   };
@@ -863,18 +869,8 @@ function createPlatformPullRequestUnlocked(taskRef: string, options: CreateOptio
       pullRequest: inspected.pullRequest,
       error: identity.error
     });
-    return inspected;
+    return { ...inspected, result: 'no_op' };
   }
-  const gate = inspectCreatePrCommitGate(base.resolved.taskDir, base.resolved.repoRoot, base.resolved.taskId);
-  if (!gate.allowed) return result('blocked', base.resolved.taskId, base.issueNumber, null, {
-    platform: base.context.platform,
-    capabilities: base.context.capabilities,
-    error: {
-      code: gate.code!,
-      message: `${gate.message}; action=${gate.action}`,
-      retryable: gate.action === 'rerun-commit' || gate.action === 'rerun-review-code'
-    }
-  });
   const headCheck = verifyCreateHead(base, options.head);
   if (!headCheck.ok) return result(headCheck.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, null, {
     platform: base.context.platform,
@@ -891,7 +887,8 @@ function createPlatformPullRequestUnlocked(taskRef: string, options: CreateOptio
   });
   if (options.dryRun) return result('planned', base.resolved.taskId, base.issueNumber, null, {
     platform: base.context.platform, capabilities: base.context.capabilities,
-    operations: [{ name: located.ok ? 'pr:reuse' : 'pr:create', status: 'planned', reasonCode: null }], error: null
+    operations: [{ name: located.ok ? 'pr:reuse' : 'pr:create', status: 'planned', reasonCode: null }],
+    result: located.ok ? 'pr_reused' : 'pr_created', error: null
   });
   const started = writeCreateStarted(base, options.agent);
   if (started.status === 'failed') return result('failed', base.resolved.taskId, base.issueNumber, null, {
@@ -974,7 +971,8 @@ function createPlatformPullRequestUnlocked(taskRef: string, options: CreateOptio
   return result('applied', base.resolved.taskId, base.issueNumber, pullRequest.number, {
     changed: true, platform: base.context.platform, capabilities: base.context.capabilities,
     resource: { kind: 'pull-request', number: pullRequest.number }, pullRequest,
-    operations: [{ name: created ? 'pr:create' : 'pr:reuse', status: created ? 'applied' : 'no-op', reasonCode: null }, { name: 'task:bind-pr', status: 'applied', reasonCode: null }], error: null
+    operations: [{ name: created ? 'pr:create' : 'pr:reuse', status: created ? 'applied' : 'no-op', reasonCode: null }, { name: 'task:bind-pr', status: 'applied', reasonCode: null }],
+    result: created ? 'pr_created' : 'pr_reused', error: null
   });
 }
 
@@ -1013,24 +1011,41 @@ function createPlatformPullRequest(taskRef: string, options: CreateOptions): Pul
   }
 }
 
-function syncPlatformPullRequestBase(taskRef: string, options: SyncOptions): PullRequestResult {
+function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullRequestResult {
+  const warningResult = warningResultForPrimary(options.primaryResult);
+  const softenFailure = (output: PullRequestResult): PullRequestResult => {
+    const warning = output.error && output.task.prNumber !== null
+      && !['PR_NOT_LINKED', 'PR_BIND_CONFLICT'].includes(output.error.code)
+      ? {
+        code: output.error.code,
+        message: output.error.message,
+        retryable: output.error.retryable,
+        step: 'pr-metadata',
+        target: `pull-request:${output.task.prNumber}`,
+        severity: 'ACTION_REQUIRED' as const
+      }
+      : null;
+    return warning
+      ? { ...output, status: 'applied', changed: false, error: null, result: warningResult, warnings: mergeOperationWarnings([warning]) }
+      : output;
+  };
   const base = resolvedContext(taskRef, options);
-  if (!base.ok) return base.output;
-  if (!base.prNumber) return result('failed', base.resolved.taskId, base.issueNumber, null, {
+  if (!base.ok) return softenFailure(base.output);
+  if (!base.prNumber) return softenFailure(result('failed', base.resolved.taskId, base.issueNumber, null, {
     error: { code: 'PR_NOT_LINKED', message: 'Task has no valid pr_number', retryable: false }
-  });
+  }));
   const fetched = inspectGitHubPullRequest(base.client, base.context.platform.repository!, base.prNumber, base.resolved.repoRoot);
-  if (!fetched.ok) return result(fetched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, { error: fetched.error });
-  if (!options.metadata && !options.closingIssue) return result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
+  if (!fetched.ok) return softenFailure(result(fetched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, { error: fetched.error }));
+  if (!options.metadata && !options.closingIssue) return softenFailure(result('failed', base.resolved.taskId, base.issueNumber, base.prNumber, {
     error: { code: 'PR_PAYLOAD_INVALID', message: 'sync requires a desired-state option', retryable: false }
-  });
-  if (!base.issueNumber) return result('degraded', base.resolved.taskId, null, base.prNumber, {
+  }));
+  if (!base.issueNumber) return softenFailure(result('degraded', base.resolved.taskId, null, base.prNumber, {
     pullRequest: fetched.value, error: { code: 'ISSUE_NOT_LINKED', message: 'Task has no linked Issue to copy metadata from', retryable: false }
-  });
+  }));
   const issue = inspectPlatformIssue(taskRef, { cwd: base.resolved.repoRoot, client: base.client });
-  if (!issue.issue) return result(issue.status, base.resolved.taskId, base.issueNumber, base.prNumber, {
+  if (!issue.issue) return softenFailure(result(issue.status, base.resolved.taskId, base.issueNumber, base.prNumber, {
     platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value, error: issue.error
-  });
+  }));
   const planned = planPullRequestMetadata({
     pullRequest: fetched.value,
     issue: issue.issue,
@@ -1040,9 +1055,9 @@ function syncPlatformPullRequestBase(taskRef: string, options: SyncOptions): Pul
   }).operations.filter((operation) => options.metadata || operation.name === 'closing-issue')
     .filter((operation) => options.closingIssue || operation.name !== 'closing-issue');
   const operations: PlatformOperation[] = planned.map(({ name, status, reasonCode }) => ({ name, status, reasonCode }));
-  if (options.dryRun) return result(planned.some((operation) => operation.status === 'planned') ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
+  if (options.dryRun) return softenFailure(result(planned.some((operation) => operation.status === 'planned') ? 'planned' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
     platform: base.context.platform, capabilities: base.context.capabilities, pullRequest: fetched.value, operations, error: null
-  });
+  }));
   const payload: Record<string, unknown> = {};
   for (const operation of planned) {
     if (operation.status !== 'planned') continue;
@@ -1051,44 +1066,26 @@ function syncPlatformPullRequestBase(taskRef: string, options: SyncOptions): Pul
     if (operation.name === 'closing-issue') payload.body = operation.value;
     if (operation.name === 'milestone') {
       const milestones = base.client.json<unknown[]>(['api', '--paginate', '--slurp', `repos/${base.context.platform.repository}/milestones?state=open&per_page=100`], { cwd: base.resolved.repoRoot });
-      if (!milestones.ok) return result(milestones.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, { pullRequest: fetched.value, operations, error: milestones.error });
+      if (!milestones.ok) return softenFailure(result(milestones.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, { pullRequest: fetched.value, operations, error: milestones.error }));
       const flat = milestones.value.flatMap((entry) => Array.isArray(entry) ? entry : [entry]) as Array<{ title?: string; number?: number }>;
       payload.milestone = flat.find((entry) => entry.title === operation.value)?.number ?? null;
     }
   }
   if (Object.keys(payload).length === 0) {
     const degraded = planned.some((operation) => operation.status === 'skipped');
-    return result(degraded ? 'degraded' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
+    return softenFailure(result(degraded ? 'degraded' : 'no-op', base.resolved.taskId, base.issueNumber, base.prNumber, {
       platform: base.context.platform, capabilities: base.context.capabilities, resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: fetched.value, operations, error: null
-    });
+    }));
   }
   const patched = base.client.json<RemotePullRequest>(['api', `repos/${base.context.platform.repository}/issues/${base.prNumber}`, '-X', 'PATCH', '--input', '-'], {
     cwd: base.resolved.repoRoot, method: 'PATCH', input: JSON.stringify(payload)
   });
-  if (!patched.ok) return result(patched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, { pullRequest: fetched.value, operations, error: patched.error });
-  return result(planned.some((operation) => operation.status === 'skipped') ? 'degraded' : 'applied', base.resolved.taskId, base.issueNumber, base.prNumber, {
+  if (!patched.ok) return softenFailure(result(patched.error.retryable ? 'blocked' : 'failed', base.resolved.taskId, base.issueNumber, base.prNumber, { pullRequest: fetched.value, operations, error: patched.error }));
+  return softenFailure(result(planned.some((operation) => operation.status === 'skipped') ? 'degraded' : 'applied', base.resolved.taskId, base.issueNumber, base.prNumber, {
     changed: true, platform: base.context.platform, capabilities: base.context.capabilities,
     resource: { kind: 'pull-request', number: base.prNumber }, pullRequest: fetched.value,
     operations: operations.map((operation) => operation.status === 'planned' ? { ...operation, status: 'applied' } : operation), error: null
-  });
-}
-
-function syncPlatformPullRequest(taskRef: string, options: SyncOptions): PullRequestResult {
-  const output = syncPlatformPullRequestBase(taskRef, options);
-  const warning = output.error && output.task.prNumber !== null
-    && !['PR_NOT_LINKED', 'PR_BIND_CONFLICT'].includes(output.error.code)
-    ? {
-      code: output.error.code,
-      message: output.error.message,
-      retryable: output.error.retryable,
-      step: 'pr-metadata',
-      target: `pull-request:${output.task.prNumber}`,
-      severity: 'ACTION_REQUIRED' as const
-    }
-    : null;
-  return warning
-    ? { ...output, status: 'applied', changed: false, error: null, outcome: 'pr_created_with_warnings', warnings: mergeOperationWarnings([warning]) }
-    : output;
+  }));
 }
 
 export {
@@ -1105,4 +1102,5 @@ export {
   selectPullRequest,
   syncPlatformPullRequest
 };
-export type { BindOptions, CreateOptions, ExternalPullRequestResult, ExternalPullRequestSelection, PullRequestResult, PullRequestSnapshot, ResolveExternalOptions, SyncOptions };
+export type { BindOptions, CreateOptions, ExternalPullRequestResult, ExternalPullRequestSelection, PullRequestPrimaryResult, PullRequestResult, PullRequestSnapshot, ResolveExternalOptions, SyncOptions };
+export { warningResultForPrimary };

@@ -184,7 +184,7 @@ test('verification catalog is a closed mapping of all business events', () => {
     'block-task.completed': ['block-task', 'blocked', 'gate', undefined, undefined],
     'cancel-task.completed': ['cancel-task', 'completed', 'gate', undefined, undefined],
     'commit.completed': ['commit', 'active', 'gate', undefined, undefined],
-    'complete-task.preflight': ['complete-task', 'active', 'checks', undefined, ['review-ledger', 'manual-validation', 'post-review-commit', 'platform-sync-preflight']],
+    'complete-task.preflight': ['complete-task', 'active', 'checks', undefined, ['required-pr-delivery']],
     'complete-task.hard-preflight': ['complete-task', 'active', 'checks', undefined, ['required-pr-delivery']],
     'complete-task.completed': ['complete-task', 'completed', 'gate', undefined, undefined],
     'create-pr.completed': ['create-pr', 'active', 'gate', undefined, undefined],
@@ -424,7 +424,7 @@ test('run-task verification accepts only current recovery provenance and rejects
     guards: {
       stepCount: 0, nextStage: null, baselineEmpty: true, receiptCount: 0,
       pendingDelegation: false, commitAuthorizationUnused: true,
-      completionEvidenceAbsent: true, commitIntentAbsent: true
+      completionEvidenceAbsent: true
     },
     resultingStatus: 'running'
   };

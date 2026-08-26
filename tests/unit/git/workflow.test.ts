@@ -185,6 +185,21 @@ test('inspect and push expose recoverable per-ref outcomes', () => {
   assert.deepEqual(calls.filter((call) => call[0] === 'ls-remote'), [['ls-remote', '--exit-code', 'origin', 'refs/heads/main']]);
 });
 
+test('pushGitRefs warns when the verified remote SHA differs from the expected head', () => {
+  const expected = 'a'.repeat(40);
+  const actual = 'b'.repeat(40);
+  const result = pushGitRefs({ cwd: '/repo', remote: 'origin', refs: ['refs/heads/feature'], expectedSha: expected }, (args) => {
+    if (args[0] === 'push') return { status: 0, stdout: '', stderr: '' };
+    if (args[0] === 'ls-remote') return { status: 0, stdout: `${actual}\trefs/heads/feature\n`, stderr: '' };
+    if (args[0] === 'rev-parse' && args[1] === 'HEAD') return { status: 0, stdout: `${expected}\n`, stderr: '' };
+    if (args[0] === 'branch') return { status: 0, stdout: 'feature\n', stderr: '' };
+    if (args[0] === 'status') return { status: 0, stdout: '', stderr: '' };
+    return { status: 1, stdout: '', stderr: '' };
+  });
+  assert.equal(result.status, 'failed');
+  assert.match(result.operations[0]?.message ?? '', new RegExp(`expected ${expected}`));
+});
+
 test('pushRebasedBranch uses an exact lease after validating local and remote identities', () => {
   const oldHead = 'a'.repeat(40);
   const newHead = 'b'.repeat(40);

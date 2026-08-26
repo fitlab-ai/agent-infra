@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFileSync, spawnSync } from 'node:child_process';
 
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
 import { parseReviewSummary } from './review-artifacts.ts';
@@ -51,30 +50,6 @@ import { assertGitRepositoryBinding } from '../git/worktree-identity.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { hasActiveCodexLifecycleEvidence } from '../agent-clients/adapters/codex-lifecycle/store.ts';
 import type { CodexCapabilityProvenanceDetail } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
-import {
-  CommitIntentError,
-  commitIntentPath,
-  createCommitIntent,
-  digest,
-  readCommitIntent,
-  removeCommitIntent,
-  removeCommitIntentByDigest,
-  serialize,
-  updateCommitIntent
-} from './commit-intent.ts';
-import type { CommitIntent, PushEvidence } from './commit-intent.ts';
-import {
-  inspectCommitFinalization,
-  planCommitTaskFinalization
-} from './commit-finalization.ts';
-import type { CommitFinalizationInspection } from './commit-finalization.ts';
-import { captureTaskWriteMetadata, writeTask } from './write.ts';
-import {
-  appendActivityEntry,
-  commitAttemptStartedNote,
-  locateActivityLog,
-  pairEntries
-} from './activity-log.ts';
 
 type OrchestrationStatus = 'running' | 'paused' | 'completed';
 type ModelPolicySource = Readonly<{
@@ -96,7 +71,6 @@ type ClaudeCodeCapabilityRecovery = Readonly<{
     pendingDelegation: false;
     commitAuthorizationUnused: true;
     completionEvidenceAbsent: true;
-    commitIntentAbsent: true;
   }>;
   resultingStatus: 'running';
 }>;
@@ -196,34 +170,6 @@ type OrchestrationOptions = {
   hasActiveLifecycleEvidence?: (receipt: DelegationReceipt) => boolean;
 };
 
-type CommitIntentResult = Readonly<{
-  status: 'ready' | 'failed';
-  changed: boolean;
-  taskId: string | null;
-  intent: Readonly<{
-    mode: CommitIntent['mode'];
-    phase: CommitIntent['phase'];
-    baselineHead: string;
-    currentHead: string;
-    committedHead: string | null;
-    pushEvidence: PushEvidence | null;
-    runId: string | null;
-    receiptId: string | null;
-  }> | null;
-  finalization?: Readonly<{
-    disposition: CommitFinalizationInspection['disposition'];
-    code: CommitFinalizationInspection['code'];
-    message: string;
-    currentHead: string;
-    committedHead: string | null;
-    needsAnchor: boolean;
-    needsLog: boolean;
-    attempt: Readonly<{ attempt: string; baseline: string; agent: string }> | null;
-  }>;
-  token?: string;
-  error: Readonly<{ code: string; message: string }> | null;
-}>;
-
 function supportsLifecycleDelegation(client: AgentClientId): boolean {
   return getAgentClientCapability(client, 'subagents').level !== 'unsupported'
     && getAgentClientCapability(client, 'orchestration').level !== 'unsupported'
@@ -289,7 +235,7 @@ function isModelPolicy(value: unknown): value is OrchestrationModelPolicy {
 
 const RECOVERY_GUARD_KEYS = [
   'stepCount', 'nextStage', 'baselineEmpty', 'receiptCount', 'pendingDelegation',
-  'commitAuthorizationUnused', 'completionEvidenceAbsent', 'commitIntentAbsent'
+  'commitAuthorizationUnused', 'completionEvidenceAbsent'
 ] as const;
 
 function isRecovery(value: unknown): value is OrchestrationRecovery {
@@ -311,7 +257,6 @@ function isRecovery(value: unknown): value is OrchestrationRecovery {
     && guards.pendingDelegation === false
     && guards.commitAuthorizationUnused === true
     && guards.completionEvidenceAbsent === true
-    && guards.commitIntentAbsent === true
     && value.resultingStatus === 'running';
 }
 
@@ -402,76 +347,9 @@ function failed(
   return { status: 'failed', changed: false, taskId, run: null, next: null, error: { code, message, ...details } };
 }
 
-function commitIntentFailed(code: string, message: string, taskId: string | null = null): CommitIntentResult {
-  return { status: 'failed', changed: false, taskId, intent: null, error: { code, message } };
-}
-
-function repositoryHead(repoRoot: string): string {
-  return execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe']
-  }).trim();
-}
-
 function gitRootFor(stateRoot: string, options: OrchestrationOptions): string {
   if (!options.gitWorktreeRoot) return stateRoot;
   return assertGitRepositoryBinding(stateRoot, options.gitWorktreeRoot).worktreeRoot;
-}
-
-function isAncestor(repoRoot: string, ancestor: string, descendant: string): boolean {
-  return spawnSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
-    cwd: repoRoot,
-    stdio: 'ignore'
-  }).status === 0;
-}
-
-function commitIntentView(intent: CommitIntent, currentHead: string): NonNullable<CommitIntentResult['intent']> {
-  return {
-    mode: intent.mode,
-    phase: intent.phase,
-    baselineHead: intent.baselineHead,
-    currentHead,
-    committedHead: intent.committedHead,
-    pushEvidence: intent.pushEvidence,
-    runId: intent.orchestration?.runId ?? null,
-    receiptId: intent.orchestration?.receiptId ?? null
-  };
-}
-
-function commitFinalizationView(inspection: CommitFinalizationInspection): NonNullable<CommitIntentResult['finalization']> {
-  return {
-    disposition: inspection.disposition,
-    code: inspection.code,
-    message: inspection.message,
-    currentHead: inspection.currentHead,
-    committedHead: inspection.committedHead,
-    needsAnchor: inspection.needsAnchor,
-    needsLog: inspection.needsLog,
-    attempt: inspection.attempt
-  };
-}
-
-function validCommitRun(run: OrchestrationRun | null, taskId: string): run is OrchestrationRun {
-  return run !== null
-    && run.taskId === taskId
-    && ['running', 'paused', 'completed'].includes(run.status)
-    && Array.isArray(run.receipts)
-    && Object.prototype.hasOwnProperty.call(run, 'pendingDelegation')
-    && typeof run.commitAuthorization === 'object'
-    && run.commitAuthorization !== null
-    && Object.prototype.hasOwnProperty.call(run.commitAuthorization, 'issuedAt')
-    && Object.prototype.hasOwnProperty.call(run.commitAuthorization, 'consumedAt');
-}
-
-function mapCommitIntentError(error: unknown, taskId: string | null): CommitIntentResult {
-  if (error instanceof CommitIntentError) return commitIntentFailed(error.code, error.message, taskId);
-  if (error instanceof TaskExecutionLockError) return commitIntentFailed(error.code, error.message, taskId);
-  return commitIntentFailed(
-    'ORCHESTRATION_COMMIT_INTENT_INVALID',
-    error instanceof Error ? error.message : String(error),
-    taskId
-  );
 }
 
 function validModel(value: unknown): value is string {
@@ -521,7 +399,6 @@ function canRecoverClaudeCodeUnsupportedPause(run: OrchestrationRun, taskDir: st
     && run.commitAuthorization?.issuedAt === null
     && run.commitAuthorization?.consumedAt === null
     && run.completionEvidence == null
-    && !fs.existsSync(commitIntentPath(taskDir))
     && run.recoveryHistory.length === 0;
 }
 
@@ -570,8 +447,7 @@ function beginOrResumeOrchestration(taskRef: string, options: OrchestrationOptio
           receiptCount: 0,
           pendingDelegation: false,
           commitAuthorizationUnused: true,
-          completionEvidenceAbsent: true,
-          commitIntentAbsent: true
+          completionEvidenceAbsent: true
         },
         resultingStatus: 'running'
       };
@@ -856,488 +732,6 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
   return { status: 'running', changed: false, taskId: resolved.taskId, run, next, error: null };
 }
 
-function appendCommitActivity(
-  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
-  step: string,
-  agent: string,
-  note: string
-): Readonly<{ code: string; message: string }> | null {
-  const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-  const activity = locateActivityLog(taskContent);
-  if (!activity) return { code: 'ORCHESTRATION_TASK_INVALID', message: 'task activity log is missing or ambiguous' };
-  const metadata = captureTaskWriteMetadata();
-  const written = writeTask({
-    taskRef: resolved.taskId,
-    expectedState: 'active',
-    mutations: [{
-      kind: 'section',
-      aliases: ['活动日志', 'Activity Log'],
-      heading: activity.heading,
-      body: appendActivityEntry(activity, { time: metadata.timestamp, step, agent, note })
-    }]
-  }, { repoRoot: resolved.repoRoot, metadataProvider: () => metadata });
-  return written.status === 'failed' ? written.error : null;
-}
-
-function startCommitAttempt(
-  taskRef: string,
-  input: Readonly<{ agent: string }>,
-  options: OrchestrationOptions = {}
-): CommitIntentResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
-  try {
-    const gitRoot = gitRootFor(resolved.repoRoot, options);
-    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-attempt.start', () => {
-      if (fs.existsSync(commitIntentPath(resolved.taskDir))) {
-        return commitIntentFailed('ORCHESTRATION_COMMIT_INTENT_BUSY', 'an active commit intent already exists', resolved.taskId);
-      }
-      const taskContent = fs.readFileSync(resolved.taskMdPath, 'utf8');
-      const activity = locateActivityLog(taskContent);
-      if (!activity) return commitIntentFailed('ORCHESTRATION_TASK_INVALID', 'task activity log is missing or ambiguous', resolved.taskId);
-      const open = pairEntries(activity.entries).filter((row) => row.step === 'Commit' && row.started !== '' && row.done === '');
-      if (open.length > 0) {
-        return commitIntentFailed('ORCHESTRATION_COMMIT_ATTEMPT_BUSY', 'an open Commit activity entry already exists', resolved.taskId);
-      }
-      const currentHead = repositoryHead(gitRoot);
-      const attempt = (options.id ?? randomUUID)();
-      const error = appendCommitActivity(resolved, 'Commit [started]', input.agent, commitAttemptStartedNote({
-        attempt,
-        baseline: currentHead,
-        agent: input.agent
-      }));
-      if (error) return commitIntentFailed(error.code, error.message, resolved.taskId);
-      const inspection = inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId);
-      return {
-        status: 'ready', changed: true, taskId: resolved.taskId, intent: null,
-        finalization: commitFinalizationView(inspection), error: null
-      };
-    });
-  } catch (error) {
-    return mapCommitIntentError(error, resolved.taskId);
-  }
-}
-
-function terminateCommitAttempt(
-  taskRef: string,
-  input: Readonly<{ attempt: string; agent: string; code: string }>,
-  options: OrchestrationOptions = {}
-): CommitIntentResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
-  try {
-    const gitRoot = gitRootFor(resolved.repoRoot, options);
-    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-attempt.terminate', () => {
-      if (fs.existsSync(commitIntentPath(resolved.taskDir))) {
-        return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'an active commit intent must be aborted or recovered first', resolved.taskId);
-      }
-      const inspection = inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId);
-      if (
-        inspection.disposition !== 'retryable-start'
-        || inspection.attempt?.attempt !== input.attempt
-        || inspection.attempt.agent !== input.agent
-        || inspection.attempt.baseline !== inspection.currentHead
-      ) {
-        return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'commit attempt identity or repository HEAD has drifted', resolved.taskId);
-      }
-      const error = appendCommitActivity(
-        resolved,
-        'Commit [aborted]',
-        input.agent,
-        `aborted; attempt=${input.attempt}; code=${input.code}`
-      );
-      if (error) return commitIntentFailed(error.code, error.message, resolved.taskId);
-      return {
-        status: 'ready', changed: true, taskId: resolved.taskId, intent: null,
-        finalization: commitFinalizationView(inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId)),
-        error: null
-      };
-    });
-  } catch (error) {
-    return mapCommitIntentError(error, resolved.taskId);
-  }
-}
-
-function beginCommitIntent(
-  taskRef: string,
-  input: Readonly<{ agent: string; orchestrated: boolean; baselineHead: string; attempt: string }>,
-  options: OrchestrationOptions = {}
-): CommitIntentResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
-  try {
-    const gitRoot = gitRootFor(resolved.repoRoot, options);
-    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.begin', () => {
-      const currentHead = repositoryHead(gitRoot);
-      if (currentHead !== input.baselineHead) {
-        return commitIntentFailed('ORCHESTRATION_COMMIT_BASELINE_MISMATCH', 'baseline HEAD does not match the repository HEAD', resolved.taskId);
-      }
-      if (fs.existsSync(commitIntentPath(resolved.taskDir))) {
-        try {
-          readCommitIntent(resolved.taskDir, resolved.taskId);
-        } catch (error) {
-          return mapCommitIntentError(error, resolved.taskId);
-        }
-        return commitIntentFailed('ORCHESTRATION_COMMIT_INTENT_BUSY', 'an active commit intent already exists', resolved.taskId);
-      }
-      const attemptInspection = inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId);
-      if (
-        attemptInspection.disposition !== 'retryable-start'
-        || attemptInspection.attempt?.attempt !== input.attempt
-        || attemptInspection.attempt.agent !== input.agent
-        || attemptInspection.attempt.baseline !== input.baselineHead
-      ) {
-        return commitIntentFailed(
-          'ORCHESTRATION_COMMIT_ATTEMPT_MISMATCH',
-          'commit begin requires one matching retryable Commit attempt',
-          resolved.taskId
-        );
-      }
-      const runFile = orchestrationPath(resolved.taskDir);
-      let run: OrchestrationRun | null = null;
-      let sourceRunBytes: string | null = null;
-      if (fs.existsSync(runFile)) {
-        sourceRunBytes = fs.readFileSync(runFile, 'utf8');
-        try {
-          run = readRun(resolved.taskDir);
-        } catch (error) {
-          return commitIntentFailed('ORCHESTRATION_STATE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
-        }
-        if (!validCommitRun(run, resolved.taskId)) {
-          return commitIntentFailed('ORCHESTRATION_STATE_INVALID', 'orchestration state has an invalid schema', resolved.taskId);
-        }
-      }
-
-      const now = (options.now ?? (() => new Date().toISOString()))();
-      const failAndPause = (code: string, message: string): CommitIntentResult => {
-        if (run?.status === 'running') {
-          saveRun(resolved.taskDir, withUpdatedRun(run, {
-            status: 'paused', pause: { code, message, recoverable: true }
-          }, () => now));
-        }
-        return commitIntentFailed(code, message, resolved.taskId);
-      };
-      let orchestration: CommitIntent['orchestration'] = null;
-      if (!input.orchestrated) {
-        if (run?.pendingDelegation) {
-          return commitIntentFailed(
-            'ORCHESTRATION_STANDALONE_BUSY',
-            'standalone commit is blocked by a pending orchestration delegation',
-            resolved.taskId
-          );
-        }
-      } else {
-        if (!run || run.status !== 'running') {
-          return commitIntentFailed('ORCHESTRATION_RUN_NOT_RUNNING', 'orchestrated commit requires a running orchestration', resolved.taskId);
-        }
-        const receipt = run.pendingDelegation;
-        if (
-          !receipt
-          || receipt.status !== 'activated'
-          || receipt.stage !== 'commit'
-          || receipt.round !== 1
-          || receipt.artifact !== 'commit'
-          || receipt.role !== 'executor'
-        ) {
-          return failAndPause(
-            'ORCHESTRATION_PROVENANCE_MISMATCH',
-            'orchestrated commit requires one matching activated commit delegation'
-          );
-        }
-        if (!run.commitAuthorization.issuedAt || run.commitAuthorization.consumedAt) {
-          return failAndPause(
-            'ORCHESTRATION_COMMIT_AUTHORIZATION_INVALID',
-            'orchestrated commit requires an unconsumed one-use authorization'
-          );
-        }
-        const planned = planOrchestrationStageCompletion(taskRef, {
-          stage: 'commit', round: 1, artifact: 'commit', role: 'executor', agent: input.agent
-        }, { ...options, now: () => now });
-        if (planned.result.status === 'failed' || !planned.plan?.updatedRun.pendingDelegation) {
-          return failAndPause(
-            planned.result.error?.code ?? 'ORCHESTRATION_PROVENANCE_MISMATCH',
-            planned.result.error?.message ?? 'commit delegation could not be completed'
-          );
-        }
-        const plannedRunBytes = serialize(planned.plan.updatedRun);
-        orchestration = {
-          runId: run.runId,
-          receiptId: receipt.id,
-          authorizationIssuedAt: run.commitAuthorization.issuedAt,
-          sourceRunDigest: digest(sourceRunBytes!),
-          plannedRunDigest: digest(plannedRunBytes),
-          completionUpdatedAt: planned.plan.updatedRun.updatedAt,
-          plannedReceipt: planned.plan.updatedRun.pendingDelegation
-        };
-      }
-
-      const created = createCommitIntent(resolved.taskDir, {
-        taskId: resolved.taskId,
-        mode: input.orchestrated ? 'orchestrated' : 'standalone',
-        phase: 'prepared',
-        baselineHead: input.baselineHead,
-        committedHead: null,
-        pushEvidence: null,
-        orchestration,
-        createdAt: now,
-        updatedAt: now
-      }, { token: options.token });
-      return {
-        status: 'ready', changed: true, taskId: resolved.taskId,
-        intent: commitIntentView(created.intent, currentHead), token: created.token, error: null
-      };
-    });
-  } catch (error) {
-    return mapCommitIntentError(error, resolved.taskId);
-  }
-}
-
-function checkpointCommitIntent(
-  taskRef: string,
-  input: Readonly<{
-    token: string;
-    kind: 'committed' | 'pushed';
-    head: string;
-    remote?: string;
-    ref?: string;
-  }>,
-  options: OrchestrationOptions = {}
-): CommitIntentResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
-  try {
-    const gitRoot = gitRootFor(resolved.repoRoot, options);
-    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.checkpoint', () => {
-      const intent = readCommitIntent(resolved.taskDir, resolved.taskId, input.token);
-      const currentHead = repositoryHead(gitRoot);
-      if (currentHead !== input.head) {
-        return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'checkpoint HEAD does not match the repository HEAD', resolved.taskId);
-      }
-      if (input.kind === 'committed' && !isAncestor(gitRoot, intent.baselineHead, input.head)) {
-        return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'committed HEAD does not descend from the baseline', resolved.taskId);
-      }
-      if (input.kind === 'pushed') {
-        const expectedHead = intent.committedHead ?? intent.baselineHead;
-        if (input.head !== expectedHead || !input.remote || !input.ref) {
-          return commitIntentFailed('ORCHESTRATION_COMMIT_INTENT_STATE_INVALID', 'pushed checkpoint requires matching remote, ref and HEAD', resolved.taskId);
-        }
-      }
-      const now = (options.now ?? (() => new Date().toISOString()))();
-      const updated = updateCommitIntent(resolved.taskDir, resolved.taskId, input.token, input.kind === 'committed'
-        ? { phase: 'committed', committedHead: input.head, updatedAt: now }
-        : {
-            phase: 'pushed', committedHead: intent.committedHead ?? intent.baselineHead, updatedAt: now,
-            pushEvidence: { remote: input.remote!, ref: input.ref!, head: input.head }
-          });
-      return {
-        status: 'ready', changed: true, taskId: resolved.taskId,
-        intent: commitIntentView(updated, currentHead), error: null
-      };
-    });
-  } catch (error) {
-    return mapCommitIntentError(error, resolved.taskId);
-  }
-}
-
-function completeCommitOrchestration(
-  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
-  intent: CommitIntent,
-  agent: string
-): Readonly<{ code: string; message: string }> | null {
-  if (intent.orchestration === null) return null;
-  if (intent.orchestration.plannedReceipt.agent !== agent) {
-    return { code: 'ORCHESTRATION_PROVENANCE_MISMATCH', message: 'completion agent does not match the planned receipt' };
-  }
-  const runFile = orchestrationPath(resolved.taskDir);
-  if (!fs.existsSync(runFile)) {
-    return { code: 'ORCHESTRATION_RUN_MISSING', message: 'orchestration run disappeared' };
-  }
-  const currentBytes = fs.readFileSync(runFile, 'utf8');
-  const currentDigest = digest(currentBytes);
-  if (currentDigest === intent.orchestration.sourceRunDigest) {
-    const run = readRun(resolved.taskDir);
-    if (!run) return { code: 'ORCHESTRATION_RUN_MISSING', message: 'orchestration run disappeared' };
-    const plannedRun: OrchestrationRun = Object.freeze({
-      ...run,
-      pendingDelegation: intent.orchestration.plannedReceipt,
-      updatedAt: intent.orchestration.completionUpdatedAt
-    });
-    if (digest(serialize(plannedRun)) !== intent.orchestration.plannedRunDigest) {
-      return { code: 'ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', message: 'planned orchestration bytes no longer match the intent' };
-    }
-    atomicWrite(runFile, plannedRun);
-    if (digest(fs.readFileSync(runFile)) !== intent.orchestration.plannedRunDigest) {
-      return { code: 'ORCHESTRATION_COMMIT_COMPLETE_PARTIAL', message: 'orchestration completion could not be verified' };
-    }
-  } else if (currentDigest !== intent.orchestration.plannedRunDigest) {
-    return { code: 'ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', message: 'orchestration state changed after commit begin' };
-  }
-  return null;
-}
-
-function finalizeCommitIntentUnlocked(
-  resolved: Extract<ReturnType<typeof resolveTaskRef>, { ok: true }>,
-  inspection: CommitFinalizationInspection,
-  agent: string,
-  remove: () => void
-): CommitIntentResult {
-  if (inspection.disposition !== 'recoverable' || !inspection.intent) {
-    return commitIntentFailed(
-      inspection.code ?? 'COMMIT_FINALIZATION_PENDING',
-      inspection.message,
-      resolved.taskId
-    );
-  }
-  if (
-    inspection.intent.orchestration !== null
-    && inspection.intent.orchestration.plannedReceipt.agent !== agent
-  ) {
-    return commitIntentFailed(
-      'ORCHESTRATION_PROVENANCE_MISMATCH',
-      'completion agent does not match the planned receipt',
-      resolved.taskId
-    );
-  }
-  const metadata = captureTaskWriteMetadata();
-  const taskPlan = planCommitTaskFinalization(
-    resolved.taskDir,
-    inspection,
-    agent,
-    metadata.timestamp
-  );
-  const written = writeTask({
-    taskRef: resolved.taskId,
-    expectedState: 'active',
-    mutations: taskPlan.mutations
-  }, {
-    repoRoot: resolved.repoRoot,
-    metadataProvider: () => metadata
-  });
-  if (written.status === 'failed') {
-    return commitIntentFailed(written.error.code, written.error.message, resolved.taskId);
-  }
-  const orchestrationError = completeCommitOrchestration(resolved, inspection.intent, agent);
-  if (orchestrationError) {
-    return commitIntentFailed(orchestrationError.code, orchestrationError.message, resolved.taskId);
-  }
-  try {
-    remove();
-  } catch (error) {
-    return commitIntentFailed(
-      'ORCHESTRATION_COMMIT_COMPLETE_PARTIAL',
-      error instanceof Error ? error.message : String(error),
-      resolved.taskId
-    );
-  }
-  return { status: 'ready', changed: true, taskId: resolved.taskId, intent: null, error: null };
-}
-
-function completeCommitIntent(
-  taskRef: string,
-  input: Readonly<{ token: string; agent: string }>,
-  options: OrchestrationOptions = {}
-): CommitIntentResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
-  try {
-    const gitRoot = gitRootFor(resolved.repoRoot, options);
-    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.complete', () => {
-      readCommitIntent(resolved.taskDir, resolved.taskId, input.token);
-      const inspection = inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId);
-      return finalizeCommitIntentUnlocked(resolved, inspection, input.agent, () => {
-        removeCommitIntent(resolved.taskDir, resolved.taskId, input.token);
-      });
-    });
-  } catch (error) {
-    return mapCommitIntentError(error, resolved.taskId);
-  }
-}
-
-function recoverCommitIntent(
-  taskRef: string,
-  input: Readonly<{ agent: string }>,
-  options: OrchestrationOptions = {}
-): CommitIntentResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
-  try {
-    const gitRoot = gitRootFor(resolved.repoRoot, options);
-    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.recover', () => {
-      const inspection = inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId);
-      if (inspection.disposition === 'retryable-start') {
-        return {
-          status: 'ready', changed: false, taskId: resolved.taskId, intent: null,
-          finalization: commitFinalizationView(inspection), error: null
-        };
-      }
-      if (inspection.disposition === 'prepared' && inspection.intentDigest) {
-        removeCommitIntentByDigest(resolved.taskDir, resolved.taskId, inspection.intentDigest);
-        return { status: 'ready', changed: true, taskId: resolved.taskId, intent: null, error: null };
-      }
-      if (!inspection.intentDigest) {
-        return commitIntentFailed(
-          inspection.code ?? 'COMMIT_FINALIZATION_EVIDENCE_MISSING',
-          inspection.message,
-          resolved.taskId
-        );
-      }
-      return finalizeCommitIntentUnlocked(resolved, inspection, input.agent, () => {
-        removeCommitIntentByDigest(resolved.taskDir, resolved.taskId, inspection.intentDigest!);
-      });
-    });
-  } catch (error) {
-    return mapCommitIntentError(error, resolved.taskId);
-  }
-}
-
-function abortCommitIntent(
-  taskRef: string,
-  input: Readonly<{ token: string; expectedHead: string }>,
-  options: OrchestrationOptions = {}
-): CommitIntentResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
-  try {
-    const gitRoot = gitRootFor(resolved.repoRoot, options);
-    return withTaskExecutionLock(resolved.repoRoot, resolved.taskId, 'commit-intent.abort', () => {
-      const intent = readCommitIntent(resolved.taskDir, resolved.taskId, input.token);
-      const currentHead = repositoryHead(gitRoot);
-      if (
-        intent.phase !== 'prepared'
-        || intent.pushEvidence !== null
-        || input.expectedHead !== intent.baselineHead
-        || currentHead !== intent.baselineHead
-      ) {
-        return commitIntentFailed('ORCHESTRATION_COMMIT_RECOVERY_REQUIRED', 'commit intent has side effects or repository drift', resolved.taskId);
-      }
-      removeCommitIntent(resolved.taskDir, resolved.taskId, input.token);
-      return { status: 'ready', changed: true, taskId: resolved.taskId, intent: null, error: null };
-    });
-  } catch (error) {
-    return mapCommitIntentError(error, resolved.taskId);
-  }
-}
-
-function statusCommitIntent(taskRef: string, options: OrchestrationOptions = {}): CommitIntentResult {
-  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
-  if (!resolved.ok) return commitIntentFailed(resolved.code, resolved.message, resolved.taskId);
-  let gitRoot: string;
-  try {
-    gitRoot = gitRootFor(resolved.repoRoot, options);
-  } catch (error) {
-    return commitIntentFailed('ORCHESTRATION_WORKTREE_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
-  }
-  const inspection = inspectCommitFinalization(resolved.taskDir, gitRoot, resolved.taskId);
-  return {
-    status: 'ready',
-    changed: false,
-    taskId: resolved.taskId,
-    intent: inspection.intent ? commitIntentView(inspection.intent, inspection.currentHead) : null,
-    finalization: commitFinalizationView(inspection),
-    error: null
-  };
-}
-
 function statusOrchestration(taskRef: string, options: OrchestrationOptions = {}): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
@@ -1358,18 +752,6 @@ function prepareOrchestrationDelegationUnlocked(
 ): OrchestrationResult {
   const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
   if (!resolved.ok) return failed(resolved.code, resolved.message, resolved.taskId);
-  if (fs.existsSync(commitIntentPath(resolved.taskDir))) {
-    try {
-      readCommitIntent(resolved.taskDir, resolved.taskId);
-    } catch (error) {
-      return failed(
-        'ORCHESTRATION_COMMIT_INTENT_INVALID',
-        error instanceof Error ? error.message : String(error),
-        resolved.taskId
-      );
-    }
-    return failed('ORCHESTRATION_COMMIT_INTENT_BUSY', 'an active commit intent blocks delegation preparation', resolved.taskId);
-  }
   if (!(options.supportsLifecycleDelegation ?? supportsLifecycleDelegation)(input.client)) {
     return failed('ORCHESTRATION_CLIENT_UNSUPPORTED', `client '${input.client}' does not support lifecycle orchestration`, resolved.taskId);
   }
@@ -1919,9 +1301,6 @@ function recoverPreparedOrchestrationDelegation(
           resolved.taskId
         );
       }
-      if (fs.existsSync(commitIntentPath(resolved.taskDir))) {
-        return failed('ORCHESTRATION_PREPARED_RECOVERY_UNSAFE', 'active commit intent blocks prepared recovery', resolved.taskId);
-      }
       const current = (options.captureWorkspace ?? captureWorkspaceSnapshot)({
         gitRoot: gitRootFor(resolved.repoRoot, options),
         stateRoot: resolved.repoRoot,
@@ -2091,12 +1470,8 @@ export {
   activateOrchestrationDelegation,
   awaitOrchestrationDelegationActivation,
   advanceOrchestration,
-  abortCommitIntent,
-  beginCommitIntent,
   beginOrResumeOrchestration,
-  checkpointCommitIntent,
   commitOrchestrationStageCompletion,
-  completeCommitIntent,
   completeOrchestrationStage,
   dispatchOrchestrationDelegation,
   inspectOrchestrationStage,
@@ -2110,19 +1485,14 @@ export {
   prepareOrchestrationDelegation,
   readRun,
   reconcileMatchingOrchestrationDelegation,
-  recoverCommitIntent,
   recoverPreparedOrchestrationDelegation,
   routeOrchestration,
   sealMatchingOrchestrationDelegation,
   sealMatchingOrchestrationDelegationWithHostEvidence,
   sealOrchestrationDelegation,
-  startCommitAttempt,
-  statusCommitIntent,
   statusOrchestration,
-  terminateCommitAttempt
 };
 export type {
-  CommitIntentResult,
   OrchestrationCompletionPlanResult,
   OrchestrationModelPolicy,
   OrchestrationNext,

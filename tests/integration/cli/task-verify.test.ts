@@ -19,14 +19,12 @@ test('internal task-verify resolves task identity and invokes the typed engine',
     const id = 'TASK-20260101-000001';
     const dir = path.join(root, '.agents', 'workspace', 'active', id);
     fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ prFlow: 'disabled' }));
     fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\n---\n`);
     fs.writeFileSync(path.join(dir, 'code.md'), '# Code\n');
     writeJson(path.join(root, '.agents/skills/code-task/config/verify.json'), { skill: 'code-task', checks: {} });
     writeJson(path.join(root, '.agents/skills/complete-task/config/verify.json'), {
-      skill: 'complete-task', checks: {
-        'review-ledger': null, 'manual-validation': {}, 'post-review-commit': null,
-        'platform-sync-preflight': null
-      }
+      skill: 'complete-task', checks: { 'required-pr-delivery': {} }
     });
 
     const pass = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'code.completed', '--artifact', 'code.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
@@ -35,7 +33,7 @@ test('internal task-verify resolves task identity and invokes the typed engine',
 
     const preflight = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'complete-task.preflight', '--format', 'text'], { cwd: root, encoding: 'utf8' });
     assert.equal(preflight.status, 0, preflight.stderr);
-    assert.equal((preflight.stdout.match(/^Check: pass/gm) ?? []).length, 4);
+    assert.equal((preflight.stdout.match(/^Check: pass/gm) ?? []).length, 1);
 
     const duplicate = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'commit.completed', '--format', 'json', '--format', 'text'], { cwd: root, encoding: 'utf8' });
     assert.equal(duplicate.status, 1);

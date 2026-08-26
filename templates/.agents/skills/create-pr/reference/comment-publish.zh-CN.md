@@ -6,7 +6,7 @@
 
 ```bash
 agent-infra-internal platform-pr summary-sync {task-id} \
-  --agent {standard-agent-token} --body-file {summary-body-file}
+  --agent {standard-agent-token} --body-file {summary-body-file} --result {primary-result}
 ```
 
-调用方不添加 marker、HEAD 或评论 API 参数。摘要失败沿用 `create-pr` 错误处理并记录 warning，不回滚已创建 PR。结果映射沿用 `.agents/rules/pr-sync.md`。
+调用方不添加 marker、HEAD 或评论 API 参数。`--result` 是必填的，必须把 `platform-pr create` 的 `result` 原样传入；摘要失败沿用该 primary result 映射 warning（`no_op` 对应 `no_op_with_warnings`），不回滚已创建或复用的 PR。结果映射沿用 `.agents/rules/pr-sync.md`。

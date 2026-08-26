@@ -1,9 +1,3 @@
-type OperationOutcome =
-  | null
-  | 'committed_with_warnings'
-  | 'pr_created_with_warnings'
-  | 'completed_with_warnings';
-
 type OperationWarningSeverity = 'IMPORTANT' | 'ACTION_REQUIRED';
 
 type OperationWarning = Readonly<{
@@ -13,11 +7,6 @@ type OperationWarning = Readonly<{
   step: string;
   target: string;
   severity: OperationWarningSeverity;
-}>;
-
-type OperationResultFields = Readonly<{
-  outcome: OperationOutcome;
-  warnings: readonly OperationWarning[];
 }>;
 
 function warningKey(warning: Pick<OperationWarning, 'step' | 'code' | 'target'>): string {
@@ -55,12 +44,5 @@ function retryHintForWarning(warning: Pick<OperationWarning, 'code' | 'step'>): 
     ?? `Retry the ${warning.step} operation after resolving ${warning.code}.`;
 }
 
-function operationResultFields(
-  outcome: OperationOutcome = null,
-  warnings: readonly OperationWarning[] = []
-): OperationResultFields {
-  return { outcome, warnings: mergeOperationWarnings(warnings) };
-}
-
-export { mergeOperationWarnings, operationResultFields, retryHintForWarning, warningKey };
-export type { OperationOutcome, OperationResultFields, OperationWarning, OperationWarningSeverity };
+export { mergeOperationWarnings, retryHintForWarning, warningKey };
+export type { OperationWarning, OperationWarningSeverity };

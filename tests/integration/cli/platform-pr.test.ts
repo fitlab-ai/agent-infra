@@ -6,7 +6,6 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
 import { filePath, gitSafeEnv, INTERNAL_CLI_PATH } from '../../helpers.ts';
-import { createCommitIntent } from '../../../lib/task/commit-intent.ts';
 import { withTaskExecutionLock } from '../../../lib/task/task-execution-lock.ts';
 
 function run(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
@@ -20,6 +19,21 @@ test('platform-pr CLI advertises all PR and summary intents', () => {
   assert.equal(output.status, 0);
   for (const operation of ['inspect', 'resolve-external', 'create', 'bind', 'sync', 'summary-context', 'summary-sync']) {
     assert.match(output.stdout, new RegExp(`platform-pr ${operation}`));
+  }
+});
+
+test('platform-pr summary-sync accepts the commit path no-op result before task resolution', () => {
+  const bodyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-summary-'));
+  const bodyFile = path.join(bodyRoot, 'body.md');
+  fs.writeFileSync(bodyFile, '');
+  try {
+    const output = run([
+      'summary-sync', 'TASK-1', '--agent', 'codex', '--body-file', bodyFile, '--result', 'no_op'
+    ]);
+    assert.equal(output.status, 1);
+    assert.equal(JSON.parse(output.stdout).error.code, 'INVALID_TASK_REF');
+  } finally {
+    fs.rmSync(bodyRoot, { recursive: true, force: true });
   }
 });
 
@@ -217,7 +231,7 @@ test('platform-pr create rechecks a bound PR before replaying it', () => {
   }
 });
 
-test('platform-pr create blocks active commit finalization before task or remote writes', () => {
+test('platform-pr create does not require commit finalization evidence before remote validation', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-pr-gate-'));
   try {
     execFileSync('git', ['init', '-q'], { cwd: root });
@@ -237,11 +251,11 @@ test('platform-pr create blocks active commit finalization before task or remote
       '# Task', '', '## Activity Log', '',
       '- 2026-01-01 00:00:00+00:00 — **Commit [started]** by codex — started', ''
     ].join('\n'));
-    createCommitIntent(taskDir, {
-      taskId, mode: 'standalone', phase: 'prepared', baselineHead: head,
-      committedHead: null, pushEvidence: null, orchestration: null,
-      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
-    }, { token: () => 'token' });
+    fs.writeFileSync(path.join(taskDir, 'review-code.md'), [
+      '# Review', '', '## Review Summary', '',
+      '- **Overall Verdict**: Approved',
+      '- **Findings (AI-actionable)**: 0 blockers, 0 major, 0 minor / **Manual-validation**: 0', ''
+    ].join('\n'));
     const title = path.join(root, 'title.txt');
     const body = path.join(root, 'body.md');
     const pulls = path.join(root, 'pulls.json');
@@ -262,10 +276,10 @@ test('platform-pr create blocks active commit finalization before task or remote
       'create', taskId, '--agent', 'codex', '--base', 'main', '--head', 'feature',
       '--title-file', title, '--body-file', body
     ], { cwd: root, env });
-    assert.equal(created.status, 2, created.stderr || created.stdout);
+    assert.equal(created.status, 1, created.stderr || created.stdout);
     const payload = JSON.parse(created.stdout);
-    assert.equal(payload.status, 'blocked');
-    assert.equal(payload.error.code, 'COMMIT_FINALIZATION_PENDING');
+    assert.equal(payload.status, 'failed');
+    assert.equal(payload.error.code, 'PR_REMOTE_BRANCH_MISSING');
     const records = fs.readFileSync(calls, 'utf8').trim().split(/\r?\n/).filter(Boolean)
       .map((line) => JSON.parse(line) as string[]);
     assert.equal(records.filter((call) => call.includes('POST') && call.some((item) => /\/pulls$/.test(item))).length, 0);

@@ -40,7 +40,7 @@ Build the co-author block with these rules:
 ## Create the Commit
 
 ```bash
-agent-infra-internal git-workflow commit --input {commit-intent.json}
+agent-infra-internal git-workflow commit --input {commit-operation.json}
 ```
 
 Important:

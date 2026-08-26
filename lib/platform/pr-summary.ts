@@ -19,9 +19,16 @@ type SummaryContextResult = PlatformResult & {
   artifacts: Array<{ family: string; name: string; path: string }>;
 };
 type PullRequestSummaryResult = PlatformResult & {
-  outcome: 'pr_created_with_warnings' | null;
+  result: 'pr_created_with_warnings' | 'pr_reused_with_warnings' | 'no_op_with_warnings' | null;
   warnings: readonly OperationWarning[];
 };
+type PullRequestPrimaryResult = 'pr_created' | 'pr_reused' | 'no_op';
+
+function warningResultForPrimary(primaryResult: PullRequestPrimaryResult): NonNullable<PullRequestSummaryResult['result']> {
+  if (primaryResult === 'pr_created') return 'pr_created_with_warnings';
+  if (primaryResult === 'pr_reused') return 'pr_reused_with_warnings';
+  return 'no_op_with_warnings';
+}
 
 function summaryMarker(taskId: string): string {
   return `<!-- sync-pr:${taskId}:summary -->`;
@@ -66,20 +73,37 @@ function summaryContext(taskRef: string, options: { cwd?: string; client?: GitHu
   return { ...platformResult('no-op'), task: { id: resolved.taskId, prNumber }, artifacts: canonicalArtifacts(resolved.taskDir) };
 }
 
-function syncPullRequestSummaryBase(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: GitHubClient; dryRun?: boolean }): PlatformResult {
+function syncPullRequestSummary(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: GitHubClient; dryRun?: boolean; primaryResult: PullRequestPrimaryResult }): PullRequestSummaryResult {
+  const warningResult = warningResultForPrimary(options.primaryResult);
+  const softenFailure = (output: PlatformResult): PullRequestSummaryResult => {
+    const warning = output.error && output.resource.kind === 'pull-request' && output.resource.number
+      && !['PR_NOT_LINKED', 'PR_SUMMARY_MARKER_AMBIGUOUS'].includes(output.error.code)
+      ? {
+        code: output.error.code,
+        message: output.error.message,
+        retryable: output.error.retryable,
+        step: 'pr-summary',
+        target: `pull-request:${output.resource.number}`,
+        severity: 'ACTION_REQUIRED' as const
+      }
+      : null;
+    return warning
+      ? { ...output, status: 'applied', changed: false, error: null, result: warningResult, warnings: [warning] }
+      : { ...output, result: null, warnings: [] };
+  };
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
-  if (!resolved.ok) return platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } });
+  if (!resolved.ok) return softenFailure(platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } }));
   const frontmatter = parseTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
   const prNumber = Number(frontmatter.pr_number);
-  if (!Number.isInteger(prNumber) || prNumber <= 0) return platformResult('failed', { error: { code: 'PR_NOT_LINKED', message: 'Task has no valid pr_number', retryable: false } });
+  if (!Number.isInteger(prNumber) || prNumber <= 0) return softenFailure(platformResult('failed', { error: { code: 'PR_NOT_LINKED', message: 'Task has no valid pr_number', retryable: false } }));
   const client = options.client || createGitHubClient();
   const context = resolvePlatformContext({ cwd: resolved.repoRoot, client });
-  if (!context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return context;
+  if (!context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return softenFailure(context);
   let headSha: string;
   try {
     headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: resolved.repoRoot, encoding: 'utf8' }).trim();
   } catch (error) {
-    return platformResult('failed', { platform: context.platform, capabilities: context.capabilities, error: { code: 'GIT_HEAD_UNRESOLVED', message: error instanceof Error ? error.message : String(error), retryable: false } });
+    return softenFailure(platformResult('failed', { platform: context.platform, capabilities: context.capabilities, error: { code: 'GIT_HEAD_UNRESOLVED', message: error instanceof Error ? error.message : String(error), retryable: false } }));
   }
   const desired = buildPullRequestSummary(
     resolved.taskId,
@@ -88,37 +112,17 @@ function syncPullRequestSummaryBase(taskRef: string, options: { agent: string; b
     renderHumanOverrideAudit(fs.readFileSync(resolved.taskMdPath, 'utf8'))
   );
   const listed = listRemoteComments(client, context.platform.repository, prNumber, resolved.repoRoot);
-  if (!listed.ok) return platformResult(listed.error.retryable ? 'blocked' : 'failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: listed.error });
+  if (!listed.ok) return softenFailure(platformResult(listed.error.retryable ? 'blocked' : 'failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: listed.error }));
   const reconciliation = reconcileSummaryComment(listed.value, resolved.taskId, desired);
-  if (reconciliation.action === 'conflict') return platformResult('failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: { code: 'PR_SUMMARY_MARKER_AMBIGUOUS', message: 'Multiple PR comments contain the summary marker', retryable: false } });
-  if (reconciliation.action === 'no-op') return platformResult('no-op', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: [reconciliation.commentId!], parts: 1 }, error: null });
-  if (options.dryRun) return platformResult('planned', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, operations: [{ name: `summary:${reconciliation.action}`, status: 'planned', reasonCode: null }], error: null });
+  if (reconciliation.action === 'conflict') return softenFailure(platformResult('failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: { code: 'PR_SUMMARY_MARKER_AMBIGUOUS', message: 'Multiple PR comments contain the summary marker', retryable: false } }));
+  if (reconciliation.action === 'no-op') return softenFailure(platformResult('no-op', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: [reconciliation.commentId!], parts: 1 }, error: null }));
+  if (options.dryRun) return softenFailure(platformResult('planned', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, operations: [{ name: `summary:${reconciliation.action}`, status: 'planned', reasonCode: null }], error: null }));
   const written = writeComment(client, context.platform.repository, prNumber, resolved.repoRoot, desired, reconciliation.commentId || undefined);
-  if (!written.ok) return platformResult(written.error.retryable ? 'blocked' : 'failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: written.error });
+  if (!written.ok) return softenFailure(platformResult(written.error.retryable ? 'blocked' : 'failed', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, error: written.error }));
   const id = Number(written.value.id || reconciliation.commentId);
-  return platformResult('applied', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: Number.isInteger(id) ? [id] : [], parts: 1 }, operations: [{ name: `summary:${reconciliation.action}`, status: 'applied', reasonCode: null }], error: null });
-}
-
-function syncPullRequestSummary(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: GitHubClient; dryRun?: boolean }): PullRequestSummaryResult {
-  const output = syncPullRequestSummaryBase(taskRef, options);
-  const warning = output.error && output.resource.kind === 'pull-request' && output.resource.number
-    && !['PR_NOT_LINKED', 'PR_SUMMARY_MARKER_AMBIGUOUS'].includes(output.error.code)
-    ? {
-      code: output.error.code,
-      message: output.error.message,
-      retryable: output.error.retryable,
-      step: 'pr-summary',
-      target: `pull-request:${output.resource.number}`,
-      severity: 'ACTION_REQUIRED' as const
-    }
-    : null;
-  return {
-    ...output,
-    ...(warning
-      ? { status: 'applied' as const, changed: false, error: null, outcome: 'pr_created_with_warnings' as const, warnings: [warning] }
-      : { outcome: null, warnings: [] })
-  };
+  return softenFailure(platformResult('applied', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: Number.isInteger(id) ? [id] : [], parts: 1 }, operations: [{ name: `summary:${reconciliation.action}`, status: 'applied', reasonCode: null }], error: null }));
 }
 
 export { buildPullRequestSummary, reconcileSummaryComment, summaryContext, summaryMarker, syncPullRequestSummary };
 export type { PullRequestSummaryResult, SummaryContextResult };
+export { warningResultForPrimary };

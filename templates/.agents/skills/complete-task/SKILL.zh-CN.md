@@ -9,7 +9,7 @@ description: >
 # 完成任务
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`antigravity`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`antigravity-cli`→`antigravity`）或人工例外 `human`。
 
-宿主 finalization 使用 receipt v2（不可变 `receiptId`、单调 `revision` 和 canonical warnings）。生命周期/身份/required PR 等硬失败保持既有 `failed|blocked`；生命周期完成后，评论、外围验证和其他同步失败返回 `status: completed`、`outcome: completed_with_warnings` 及六字段 warning，并仅重试 receipt 中的 pending step。
+宿主 finalization 使用 receipt v2（不可变 `receiptId`、单调 `revision` 和 canonical warnings）。生命周期/身份/required PR 等硬失败返回 `result: failed|blocked`；生命周期完成后，评论、外围验证和其他同步失败返回 `result: completed_with_warnings` 及六字段 warning，并仅重试 receipt 中的 pending step。
 
 
 ## 行为边界 / 关键规则
@@ -64,7 +64,7 @@ agent-infra-internal task-snapshot {task-id} --format text
 agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-agent-token} [--pr {external-pr}]
 ```
 
-- `mode=external`：只以本次 typed result 的 `authorization` 和 `selected` 作为外部交付授权与绑定身份，继续本步骤的既有硬门禁。
+- `mode=external`：只以本次 typed result 的 `authorization` 和 `selected` 作为外部交付授权与绑定身份，继续 required-PR、本地生命周期和终态校验；外围证据失败在 lifecycle 后记录为 warning。
 - `mode=normal`：走现有本地生命周期前置条件；历史 `pr_number` / `pr_status` 不构成外部授权。
 - `status=failed|blocked`：立即停止并展示稳定错误；`--force` 不得绕过。
 
@@ -96,31 +96,28 @@ agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-ag
 请先运行 /create-pr {task-ref} 创建 PR 后再完成；--skip-pr 在强制 PR 下不被接受。
 ```
 
-标记完成之前，验证以下所有条件：
-- [ ] 所有工作流步骤已完成（检查 task.md 中的工作流进度；**对 yaml 中 commit 步骤的 `pr_tasks` 列表，按「走 PR 路径」判定是否计入未完成判定：`prFlow=required` 始终计入；`prFlow=disabled` 不计入；缺省下仅当 `pr_status=skipped` 时不计入，否则计入**）
-- [ ] 代码已审查（`review-code.md` 或 `review-code-r{N}.md` 存在，且最新审查结论为 Approved；或已在外部完成审查）
-- [ ] 代码已提交（没有与此任务相关的未提交变更）
-- [ ] 测试通过
-- [ ] 审查分歧账本无未关闭分歧、无未复审的 post-review 提交；绑定 PR 路径中本地 HEAD、`last_reviewed_commit`、PR head 严格一致，或已合并 squash 的平台快照与远端 Git 等价证据完整且当前 Git 凭据可读取证据 refs；无有效 PR 路径中本地单父重写与 `last_reviewed_commit` 内容等价且之后无受保护提交
-- [ ] 人工校验项已完成（最新 review-code 的 Manual validation 计数 > 0 时，须存在通过校验的 manual-validation 产物及其完成记录，且该完成记录位于最新 review-code 之后；计数为 0 或无未决项时跳过）
+生命周期前只验证硬门禁：
+- [ ] task 身份、active 状态、并发锁和本地原子生命周期操作可用
+- [ ] `prFlow=required` 时已满足 required-PR delivery
+- [ ] 其余业务证据（工作流、审查、提交、测试、分歧账本、人工校验和平台同步）已记录或可在生命周期后校验
 
 > **⚠️ 前置条件分支判断 — 你必须先判断“继续”还是“停止”：**
 >
-> - 如果以上所有条件都满足 → 继续步骤 3
-> - 如果任意一个条件不满足 → **默认停止**，输出前置条件未满足的警告
-> - 只有用户明确要求 `--force` 时，才可以在前置条件未满足时继续
+> - 如果硬门禁满足 → 继续步骤 3
+> - 如果硬门禁不满足 → 停止并输出前置条件未满足的警告
+> - 外围业务证据不满足不阻止生命周期；在生命周期后以 warning/pending steps 表示
 >
 > **禁止在前置条件未满足时继续执行步骤 3-8，也不要输出「任务 {task-id} 已完成，任务目录已转移到 completed/。」**
 
-如果任何前置条件未满足，警告用户：
+如果硬门禁未满足，警告用户：
 ```
 Cannot complete task {task-id} - prerequisites not met:
 - [ ] {缺失的前置条件}
 
-Please complete the missing steps first, or use --force to override.
+Please satisfy the hard prerequisite first, then retry complete-task.
 ```
 
-如果前置条件未满足且用户未明确提供 `--force`，立即停止，不执行步骤 3-8。
+如果硬门禁未满足，立即停止，不执行步骤 3-8。
 
 ### 3. 完成业务内容更新
 
@@ -147,7 +144,7 @@ Please complete the missing steps first, or use --force to override.
 
 不要在本步骤同步 task 评论；它依赖 lifecycle 写入后的完整终态 task.md。不要设置 `status:` label，平台自动化应在 Issue 关闭后清理状态标签。
 
-任一操作失败时，任务仍必须位于 active 且短号仍有效；先按失败类型调用以下结构化 warning intent，再立即停止，不进入步骤 5：
+任一操作失败时，任务仍必须位于 active 且短号仍有效；按失败类型调用以下结构化 warning intent，随后继续步骤 5。平台失败不会阻止本地生命周期。
 
 ```bash
 agent-infra-internal task-warning {task-id} add --step complete-task --severity ACTION_REQUIRED --code {COMMENT_SYNC_FAILED|REQUIREMENTS_SYNC_FAILED|SUMMARY_SYNC_FAILED|NETWORK_RETRY_EXHAUSTED} --target {artifact|issue|summary|platform} --message "{error_code}: {error_message}" --action "修复平台同步问题后重跑 complete-task"
@@ -163,11 +160,11 @@ agent-infra-internal task-warning {task-id} add --step complete-task --severity 
 agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 ```
 
-该事件依次执行 `review-ledger`、`manual-validation`、`post-review-commit`、`platform-sync-preflight`。另由宿主 finalization 在 lifecycle 前执行 required-PR delivery hard preflight。active 硬门禁任一退出码非 0（fail/blocked）时，任务必须继续留在 active；从 gate 结果取稳定 code/target，通过 `task-warning ... add --step complete-task ...` 落账后停止。若审查基线或 head 不一致，必须先重新 `commit` / `review-code`；不得回退审查基线。
+该事件只执行 required-PR delivery hard preflight；身份、并发和本地原子性仍由宿主 finalization 强制执行。外围 review/manual/platform 检查在 lifecycle 后由 `complete-task.completed` 处理，并投影为 warning/pending steps。硬门禁退出码非 0（fail/blocked）时，任务继续留在 active，记录稳定 code/target 后停止。
 
-若 preflight 的 `post-review-commit` 以 human-decided exemption 通过，在进入步骤 6 前必须把该 check 输出中的原始 failure code/message 与 PRC id/evidence，连同 task.md 中的裁决理由、提交范围、人工身份与时间，原地补入步骤 4 的同一 summary marker。已有 warning 时以其历史记录为 canonical 证据并与本次 check 输出核对；无 warning 时以本次 check 输出补齐原始失败。再次调用同一 `platform-comment sync ... --kind summary`；失败时记录 `SUMMARY_SYNC_FAILED`、保持任务 active 并停止，不进入 lifecycle。
+若需要在摘要中镜像 `post-review-commit` 的 human-decided exemption，在步骤 4 尽力同步原始 failure code/message、PRC id/evidence 和裁决信息；同步失败只记录 `SUMMARY_SYNC_FAILED` warning，仍继续生命周期。最终是否完成由生命周期后的 terminal verification 决定。
 
-`--force` 不解除本硬门禁：未关闭分歧必须先在账本闭合，未复审提交必须重新审查、具备有效豁免，或由平台适配器为绑定的变更请求（PR/MR）提供权威合并快照与远端 refs，并在隔离临时仓库中证明单父 squash merge 等价，或在无有效变更请求时由本地 Git 对象证明唯一受保护提交是内容等价的单父重写且之后无受保护提交；平台 preflight 必须通过。适配器不支持所需能力，平台事实、Git 对象、拓扑、内容证据缺失，或当前 Git 凭据不能读取远端证据 refs 时 fail closed。全部 checks 由平台适配器提供规范化状态，并在合并前通过 `review-code` / `watch-pr` 路由承担；其中 required checks 仍受分支保护 / ruleset 强制。
+`--force` 不能解除身份、并发、本地原子性或 required-PR hard gate；这些能力失败时必须停止。其余审查、人工校验和平台证据由 terminal verification 记录为 warning/pending，并通过后续重试恢复。
 
 ### 6. 执行宿主 finalization 入口并验证终态
 
@@ -175,7 +172,7 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-finalization 按 lifecycle → task 评论 → `complete-task.completed` 校验的固定顺序执行，并将每一步的状态写入宿主 receipt。`status=completed` 即表示 lifecycle 已安全完成；若还有外围 warning，必须同时展示 `outcome=completed_with_warnings`、warnings 和 pending steps。`failed` 或 `blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。
+finalization 按 lifecycle → task 评论 → `complete-task.completed` 校验的固定顺序执行，并将每一步的状态写入宿主 receipt。`result=completed` 即表示 lifecycle 已安全完成；若还有外围 warning，返回 `result=completed_with_warnings`、warnings 和 pending steps。`result=failed` 或 `result=blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。
 
 ```bash
 ls .agents/workspace/completed/{task-id}/task.md
