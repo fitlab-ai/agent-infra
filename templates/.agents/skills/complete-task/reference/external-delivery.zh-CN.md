@@ -14,4 +14,4 @@ core 通过平台 adapter 读取 Issue 的权威 closing change requests，穷�
 
 成功绑定会原子写入 PR 字段并追加 `Bind External PR` Activity Log，记录授权来源、Issue、PR URL/编号、base/head repository/ref/SHA、合并时间和 merge commit。相同完整证据重试为 no-op；已有同号但缺审计签名时补写一次；编号或身份变化失败。不得调用 PR create 路径。
 
-外部模式仍须通过 review ledger、manual validation、post-review commit、平台同步、preflight 与终态校验。无 canonical review-code 时仅沿用 verifier 已定义的 N/A 规则；`--force` 不解除任何硬门禁。
+外部模式仍须通过身份、required-PR、本地生命周期与终态校验；review ledger、manual validation、post-review commit 和平台同步等外围证据在 lifecycle 后作为 warning/pending steps 投影。无 canonical review-code 时仅沿用 verifier 已定义的 N/A 规则；`--force` 不解除身份、本地原子性或 required-PR 硬门禁。

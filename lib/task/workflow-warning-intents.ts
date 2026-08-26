@@ -12,6 +12,7 @@ import type { WorkflowWarning } from './workflow-warnings.ts';
 import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskMutation, TaskOperationSummary, TaskWriteOptions } from './write.ts';
 import { allowsManualOverride } from './guard-override.ts';
+import { retryHintForWarning, type OperationWarning } from './operation-outcome.ts';
 
 type WarningSeverity = 'IMPORTANT' | 'ACTION_REQUIRED';
 type WarningStatus = 'open' | 'resolved' | 'ignored';
@@ -27,6 +28,12 @@ type WorkflowWarningIntentResult = {
   warnings: readonly WorkflowWarning[]; operations: readonly TaskOperationSummary[];
   error: { code: string; message: string } | null;
 };
+
+type FinalizationWarningProjectionResult = Readonly<{
+  status: 'applied' | 'no-op' | 'failed';
+  changed: boolean;
+  error: { code: string; message: string } | null;
+}>;
 
 function failed(intent: WorkflowWarningIntent, code: string, message: string, taskId: string | null = null, entityId: string | null = null): WorkflowWarningIntentResult {
   return { status: 'failed', changed: false, intent: intent.kind, taskId, entityId, before: null, after: null, warnings: [], operations: [], error: { code, message } };
@@ -140,5 +147,53 @@ function applyWorkflowWarningIntent(intent: WorkflowWarningIntent, options: Task
   };
 }
 
-export { applyWorkflowWarningIntent };
-export type { WarningSeverity, WarningStatus, WorkflowWarningIntent, WorkflowWarningIntentResult };
+function projectFinalizationWarning(
+  taskRef: string,
+  warning: OperationWarning & { status: 'open' | 'resolved'; resolvedAt: string | null },
+  options: TaskWriteOptions = {}
+): FinalizationWarningProjectionResult {
+  const resolved = resolveTaskRef(taskRef, { repoRoot: options.repoRoot });
+  if (!resolved.ok) return { status: 'failed', changed: false, error: { code: resolved.code, message: resolved.message } };
+  if (resolved.state !== 'completed') return { status: 'failed', changed: false, error: { code: 'TASK_STATE_MISMATCH', message: `task ${resolved.taskId} is ${resolved.state}, expected completed` } };
+  let content: string;
+  let rows: WorkflowWarning[];
+  try {
+    content = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    rows = parseWorkflowWarnings(content);
+  } catch (error) {
+    return { status: 'failed', changed: false, error: { code: 'WARNING_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) } };
+  }
+  const metadata = (options.metadataProvider ?? captureTaskWriteMetadata)();
+  const existing = rows.find((row) => row.step === warning.step && row.code === warning.code && row.target === warning.target);
+  const after: WorkflowWarning = existing
+    ? {
+      ...existing,
+      severity: warning.severity,
+      status: warning.status,
+      message: warning.message,
+      action: retryHintForWarning(warning),
+      resolvedAt: warning.resolvedAt || (warning.status === 'resolved' ? metadata.timestamp : ''),
+      resolution: warning.status === 'resolved' ? 'Resolved by a successful finalization retry' : ''
+    }
+    : {
+      id: nextWarningId(rows), time: metadata.timestamp, step: warning.step,
+      severity: warning.severity, code: warning.code, status: warning.status,
+      target: warning.target, message: warning.message, action: retryHintForWarning(warning),
+      resolvedAt: warning.resolvedAt || '', resolution: warning.status === 'resolved' ? 'Resolved by a successful finalization retry' : ''
+    };
+  if (existing && JSON.stringify(existing) === JSON.stringify(after)) return { status: 'no-op', changed: false, error: null };
+  const written = writeTask({
+    taskRef: resolved.taskId,
+    expectedState: 'completed',
+    mutations: [...sectionMutation(content), rowMutation(after)]
+  }, {
+    ...options,
+    taskLocation: { repoRoot: resolved.repoRoot, taskId: resolved.taskId, taskMdPath: resolved.taskMdPath, state: 'completed' },
+    metadataProvider: () => metadata
+  });
+  if (written.status === 'failed') return { status: 'failed', changed: false, error: { code: written.error.code, message: written.error.message } };
+  return { status: written.status === 'applied' ? 'applied' : 'no-op', changed: written.changed, error: null };
+}
+
+export { applyWorkflowWarningIntent, projectFinalizationWarning };
+export type { FinalizationWarningProjectionResult, WarningSeverity, WarningStatus, WorkflowWarningIntent, WorkflowWarningIntentResult };

@@ -11,6 +11,8 @@ description: >
 
 创建 Pull Request，并在与任务关联时立即补齐核心元数据和 reviewer 摘要。
 
+`platform-pr create` 返回唯一的 `result` / `warnings` 字段；成功结果为 `pr_created`、`pr_reused` 或 `no_op`，同步降级时为对应的 `_with_warnings` 结果（包括 `no_op_with_warnings`）。创建前必须证明任务分支已推送，远端 branch SHA 与本地预期 `HEAD` 一致；缺失、漂移、PR head SHA 不一致或 bind 前竞态都属于 hard failure，不得用 warning 继续绑定。
+
 ## 行为边界 / 关键规则
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
@@ -64,23 +66,23 @@ description: >
 
 ### 4. 检查远程分支状态
 
-调用 `agent-infra-internal git-workflow inspect` 检查 upstream/remote branch；必要时通过 `git-workflow push` 推送并复核。
+调用 `agent-infra-internal git-workflow inspect` 检查已交付的 upstream/remote branch；`create-pr` 不执行首次 push，远端 branch 缺失或 SHA 与本地 HEAD 不一致时直接失败并指向 `commit`/push-only。随后在 locate/create/bind 前后再次读取远端 branch SHA，并要求 PR 的精确 repository/ref、base 和 `head.sha` 全部匹配；POST 后的竞态不自动删除已创建 PR 或远端 branch，下一次只按资源身份恢复。
 
 ### 5. 创建或恢复 PR
 
-执行前先读取 `.agents/rules/issue-pr-commands.md`，把标题和正文写入临时文件，并调用其中的 `platform-pr create` intent。core 在任务锁内、任何 Create PR started / POST / reuse-bind 之前检查 commit finalization；active intent、open Commit、审查锚点缺失或 tree 漂移时返回稳定 code 并指向重跑 commit/review-code，不自动恢复。门禁通过后才按 head/base 精确定位：唯一既有 PR 会复用并绑定，零个才创建，多个稳定失败；重放不得产生重复 PR。
+执行前先读取 `.agents/rules/issue-pr-commands.md`，把标题和正文写入临时文件，并调用其中的 `platform-pr create` intent。core 在任务锁内按 remote branch、head/base 和 PR 身份事实执行：唯一既有 PR 会复用并绑定，零个才创建，多个稳定失败；review 或 task sync 记录不作为创建 PR 的前置门禁，重放不得产生重复 PR。
 
 如果获取到 `{task-id}` 且对应任务提供了 `issue_number`，必须在 PR 正文中保留 `Closes #{issue-number}`。
 
 ### 6. 同步 PR 元数据
 
-调用 `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue`。core 从 Issue 复制 type / `in:` labels、assignee 和具体 milestone，并维护 Development 关联；逐项权限不足返回 degraded，不反向更新 Issue。
+记录 `platform-pr create` 结构化结果中的 `result`（`pr_created`、`pr_reused` 或 `no_op`），并调用 `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue --result {primary-result}`。core 从 Issue 复制 type / `in:` labels、assignee 和具体 milestone，并维护 Development 关联；逐项权限不足返回 degraded，不反向更新 Issue。PR 已成功绑定后，metadata/summary 同步失败只产生与 primary result 对应的 `pr_created_with_warnings`、`pr_reused_with_warnings` 或 `no_op_with_warnings`，保留主动作事实，重试只执行未完成的同步步骤。
 
 ### 7. 发布审查摘要
 
 读取最新的上下文产物：`plan.md` / `plan-r{N}.md`、`review-plan.md` / `review-plan-r{N}.md`、`code.md` / `code-r{N}.md`、`review-code.md` / `review-code-r{N}.md`（存在时）。
 
-基于这些产物聚合 reviewer 摘要，并使用隐藏标记维护唯一且幂等的摘要评论。
+基于这些产物聚合 reviewer 摘要，并使用隐藏标记维护唯一且幂等的摘要评论。调用 `summary-sync` 时继续传递同一个 `--result {primary-result}`，不得根据同步子步骤猜测 PR 是创建还是复用。
 
 > canonical context、摘要聚合和 `summary-sync` 调用见 `reference/comment-publish.md`（其引用 `.agents/rules/pr-sync.md`）。发布摘要前先读取该 reference。
 

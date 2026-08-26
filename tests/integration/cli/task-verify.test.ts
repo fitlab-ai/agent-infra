@@ -19,14 +19,12 @@ test('internal task-verify resolves task identity and invokes the typed engine',
     const id = 'TASK-20260101-000001';
     const dir = path.join(root, '.agents', 'workspace', 'active', id);
     fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ prFlow: 'disabled' }));
     fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\n---\n`);
     fs.writeFileSync(path.join(dir, 'code.md'), '# Code\n');
     writeJson(path.join(root, '.agents/skills/code-task/config/verify.json'), { skill: 'code-task', checks: {} });
     writeJson(path.join(root, '.agents/skills/complete-task/config/verify.json'), {
-      skill: 'complete-task', checks: {
-        'review-ledger': null, 'manual-validation': {}, 'post-review-commit': null,
-        'platform-sync-preflight': null
-      }
+      skill: 'complete-task', checks: { 'required-pr-delivery': {} }
     });
 
     const pass = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'code.completed', '--artifact', 'code.md', '--format', 'text'], { cwd: root, encoding: 'utf8' });
@@ -35,11 +33,71 @@ test('internal task-verify resolves task identity and invokes the typed engine',
 
     const preflight = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'complete-task.preflight', '--format', 'text'], { cwd: root, encoding: 'utf8' });
     assert.equal(preflight.status, 0, preflight.stderr);
-    assert.equal((preflight.stdout.match(/^Check: pass/gm) ?? []).length, 4);
+    assert.equal((preflight.stdout.match(/^Check: pass/gm) ?? []).length, 1);
 
     const duplicate = spawnSync(process.execPath, [INTERNAL_CLI_PATH, 'task-verify', id, 'commit.completed', '--format', 'json', '--format', 'text'], { cwd: root, encoding: 'utf8' });
     assert.equal(duplicate.status, 1);
     assert.equal(JSON.parse(duplicate.stdout).error.code, 'VERIFY_PAYLOAD_INVALID');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('required PR delivery gates on normalized merged state and platform availability', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'required-pr-delivery-'));
+  const id = 'TASK-20260101-000001';
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: root });
+    spawnSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
+    const dir = path.join(root, '.agents', 'workspace', 'active', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ platform: { type: 'github' }, prFlow: 'required' }));
+    writeJson(path.join(root, '.agents/skills/complete-task/config/verify.json'), {
+      skill: 'complete-task', checks: { 'required-pr-delivery': {} }
+    });
+    fs.writeFileSync(path.join(dir, 'task.md'), [
+      '---', `id: ${id}`, 'status: active', 'pr_status: created', 'pr_number: 42', 'branch: feature', '---', ''
+    ].join('\n'));
+    const prPath = path.join(root, 'pr.json');
+    fs.writeFileSync(prPath, JSON.stringify({
+      number: 42, node_id: 'PR_42', html_url: 'https://github.com/fitlab-ai/agent-infra/pull/42',
+      state: 'open', title: 'Fixture', body: '', draft: false,
+      head: { ref: 'feature', sha: 'a'.repeat(40), repo: { full_name: 'fitlab-ai/agent-infra' } },
+      base: { ref: 'main', sha: 'b'.repeat(40), repo: { full_name: 'fitlab-ai/agent-infra' } },
+      merged_at: null, merge_commit_sha: null
+    }));
+    const fake = path.join(root, 'fake-gh.cjs');
+    fs.copyFileSync(filePath('tests/fixtures/validate-artifact/fake-gh.js'), fake);
+    const env = {
+      ...process.env,
+      AGENT_INFRA_GH_BIN: process.execPath,
+      AGENT_INFRA_GH_ARGS_JSON: JSON.stringify([fake]),
+      GH_FAKE_PR_PATH: prPath
+    };
+    const run = (extra: NodeJS.ProcessEnv = {}) => spawnSync(
+      process.execPath,
+      [INTERNAL_CLI_PATH, 'task-verify', id, 'complete-task.hard-preflight', '--format', 'json'],
+      { cwd: root, env: { ...env, ...extra }, encoding: 'utf8' }
+    );
+
+    const open = run();
+    assert.equal(open.status, 1, `${open.stderr}\n${open.stdout}`);
+    assert.equal(JSON.parse(open.stdout).invocations[0].status, 'fail');
+
+    fs.writeFileSync(prPath, JSON.stringify({
+      number: 42, node_id: 'PR_42', html_url: 'https://github.com/fitlab-ai/agent-infra/pull/42',
+      state: 'closed', title: 'Fixture', body: '', draft: false,
+      head: { ref: 'feature', sha: 'a'.repeat(40), repo: { full_name: 'fitlab-ai/agent-infra' } },
+      base: { ref: 'main', sha: 'b'.repeat(40), repo: { full_name: 'fitlab-ai/agent-infra' } },
+      merged_at: '2026-08-01T00:00:00Z', merge_commit_sha: 'c'.repeat(40)
+    }));
+    const merged = run();
+    assert.equal(merged.status, 0, merged.stderr || merged.stdout);
+    assert.equal(JSON.parse(merged.stdout).invocations[0].status, 'pass');
+
+    const unavailable = run({ GH_FAKE_FAIL: 'network unavailable' });
+    assert.equal(unavailable.status, 2);
+    assert.equal(JSON.parse(unavailable.stdout).invocations[0].status, 'blocked');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -11,6 +11,8 @@ description: >
 
 Create a Pull Request and, when task-related, sync the essential metadata and reviewer summary immediately.
 
+`platform-pr create` returns the single `result` / `warnings` fields; successful results are `pr_created`, `pr_reused`, or `no_op`, with the corresponding `_with_warnings` result (including `no_op_with_warnings`) for degraded synchronization. Before locate/create/bind, the task branch must be proven pushed and its remote branch SHA must equal the expected local `HEAD`. Missing or drifting remote refs, a mismatched PR head SHA, and bind-time races are hard failures, never success warnings.
+
 ## Boundary / Critical Rules
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
@@ -64,23 +66,23 @@ Read the PR template through `.agents/rules/issue-pr-commands.md`, review recent
 
 ### 4. Check Remote Branch State
 
-Use `agent-infra-internal git-workflow inspect` for upstream/remote facts and `git-workflow push` for a verified push.
+Use `agent-infra-internal git-workflow inspect` for already-delivered upstream/remote facts. `create-pr` never performs the first push; a missing remote branch or a remote SHA that differs from local HEAD fails and points back to `commit`/push-only. Core rechecks the remote branch SHA before and immediately before bind, and requires exact repository/ref, base, and `head.sha` identity. A post-POST race never deletes the created PR or remote branch; the next retry recovers only by resource identity.
 
 ### 5. Create or Recover the PR
 
-Read `.agents/rules/issue-pr-commands.md`, write the title and body to temporary files, then invoke its `platform-pr create` intent. Under the task lock and before any Create PR started entry, POST, or reuse-bind, core checks commit finalization. An active intent, open Commit, missing review anchor, or tree drift returns a stable code and directs the caller to rerun commit/review-code; create-pr never repairs Commit state. Only after the gate passes does core perform exact head/base lookup: one existing PR is reused and bound, zero creates, and multiple matches fail deterministically. Replays must not create duplicate PRs.
+Read `.agents/rules/issue-pr-commands.md`, write the title and body to temporary files, then invoke its `platform-pr create` intent. Under the task lock, core uses remote branch and exact head/base/PR identity facts: one existing PR is reused and bound, zero creates, and multiple matches fail deterministically. Review artifacts and task sync records are not create-pr prerequisites, and replays must not create duplicate PRs.
 
 If `{task-id}` is available and the related task provides `issue_number`, keep `Closes #{issue-number}` in the PR body.
 
 ### 6. Sync PR Metadata
 
-Run `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue`. The core copies type / `in:` labels, assignee, and a specific milestone from the Issue and maintains the closing association. Permission-bound items degrade independently, and the Issue is never updated in reverse.
+Capture the `result` field from `platform-pr create` (`pr_created`, `pr_reused`, or `no_op`), then run `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue --result {primary-result}`. The core copies type / `in:` labels, assignee, and a specific milestone from the Issue and maintains the closing association. Permission-bound items degrade independently, and the Issue is never updated in reverse. After the PR identity is bound, metadata or summary sync failures produce `pr_created_with_warnings`, `pr_reused_with_warnings`, or `no_op_with_warnings` from that primary result, preserve the primary-action fact, and retry only unfinished sync steps.
 
 ### 7. Publish the Review Summary
 
 Read the latest context artifacts when they exist: `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.md`, `code.md` / `code-r{N}.md`, and `review-code.md` / `review-code-r{N}.md`.
 
-Aggregate a reviewer-facing summary from those artifacts and maintain a single idempotent summary comment via the hidden marker.
+Aggregate a reviewer-facing summary from those artifacts and maintain a single idempotent summary comment via the hidden marker. Pass the same `--result {primary-result}` to `summary-sync`; a sync substep must not infer whether the PR was created or reused.
 
 > Canonical context, aggregation, and the `summary-sync` call live in `reference/comment-publish.md`, which points to `.agents/rules/pr-sync.md`. Read that reference before publishing.
 

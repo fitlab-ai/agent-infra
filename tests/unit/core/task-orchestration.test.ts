@@ -318,7 +318,7 @@ test('Claude Code resumes only a pristine unsupported-client pause with current 
     guards: {
       stepCount: 0, nextStage: null, baselineEmpty: true, receiptCount: 0,
       pendingDelegation: false, commitAuthorizationUnused: true,
-      completionEvidenceAbsent: true, commitIntentAbsent: true
+      completionEvidenceAbsent: true
     },
     resultingStatus: 'running'
   });

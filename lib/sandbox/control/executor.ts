@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { getProcessStartTime } from '../../server/process-state.ts';
 import { createTask } from '../../task/create-service.ts';
 import { applyTaskFinalization } from '../../task/finalization.ts';
+import { verifyTaskEvent } from '../../task/verification.ts';
 import { bindSandboxControlTask, type SandboxControlExecution, type SandboxControlManifest, type SandboxControlRequest } from './protocol.ts';
 import { atomicWriteJson, executionPath, terminateSandboxControlExecution } from './state.ts';
 import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
@@ -234,7 +235,9 @@ export function executeRequest(
   if (request.family === 'task-finalization') {
     return finalizationResult(applyTaskFinalization(
       { taskRef: manifest.taskId!, intent: 'complete', agent: request.agent },
-      { repoRoot: manifest.repoRoot }
+      { repoRoot: manifest.repoRoot, preflight: (input, options) => verifyTaskEvent(
+        { ...input, event: 'complete-task.hard-preflight' }, options
+      ) }
     ));
   }
   const boundArgs = bindSandboxControlTask(request, manifest.taskId!);

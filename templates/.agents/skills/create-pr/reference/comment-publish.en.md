@@ -6,7 +6,7 @@ Write the plain summary body to a temporary file, then run:
 
 ```bash
 agent-infra-internal platform-pr summary-sync {task-id} \
-  --agent {standard-agent-token} --body-file {summary-body-file}
+  --agent {standard-agent-token} --body-file {summary-body-file} --result {primary-result}
 ```
 
-The caller does not add markers, HEAD metadata, or comment API parameters. A summary failure records the existing `create-pr` warning and does not roll back the PR.
+The caller does not add markers, HEAD metadata, or comment API parameters. `--result` is required and must be passed unchanged from `platform-pr create`; `no_op` maps to `no_op_with_warnings` if summary synchronization degrades. Summary failures do not roll back a created or reused PR.

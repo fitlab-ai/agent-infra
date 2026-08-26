@@ -14,4 +14,4 @@ Only the current typed result's `mode=external`, `authorization`, and `selected`
 
 A successful bind atomically writes PR fields and appends a `Bind External PR` Activity Log entry containing the authorization source, Issue, PR URL/number, base/head repository/ref/SHA, merge time, and merge commit. Replaying identical complete evidence is a no-op; an existing same-number binding without the signature adds it once; number or identity changes fail. The PR create path must never run.
 
-External mode still passes review-ledger, manual-validation, post-review-commit, platform-sync, preflight, and terminal gates. Without a canonical review-code artifact, only existing verifier N/A rules apply. `--force` does not disable any hard gate.
+External mode still passes identity, required-PR, local lifecycle, and terminal checks; review-ledger, manual-validation, post-review-commit, and platform-sync evidence is projected as warning/pending steps after lifecycle. Without a canonical review-code artifact, only existing verifier N/A rules apply. `--force` does not disable identity, local atomicity, or required-PR hard gates.

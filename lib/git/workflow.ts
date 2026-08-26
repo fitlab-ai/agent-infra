@@ -105,7 +105,7 @@ function commitExplicitPaths(input: { cwd: string; paths: readonly string[]; mes
   return { status: 'applied' as const, changed: true, snapshot: after.snapshot, operations: [{ name: 'stage', status: 'applied' as const }, { name: 'commit', status: 'applied' as const }], error: null };
 }
 
-function pushGitRefs(input: { cwd: string; remote: string; refs: readonly string[] }, runner: GitRunner = defaultRunner) {
+function pushGitRefs(input: { cwd: string; remote: string; refs: readonly string[]; expectedSha?: string }, runner: GitRunner = defaultRunner) {
   if (!input.remote || input.refs.length === 0) return { status: 'failed' as const, changed: false, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations: [], error: { code: 'GIT_PUSH_INPUT_INVALID', message: 'Remote and refs are required' } };
   const operations: GitOperation[] = [];
   for (const ref of input.refs) {
@@ -120,7 +120,16 @@ function pushGitRefs(input: { cwd: string; remote: string; refs: readonly string
     }
     const canonical = ref.startsWith('refs/') ? ref : `refs/heads/${ref}`;
     const remoteFact = run(runner, input.cwd, ['ls-remote', '--exit-code', input.remote, canonical]);
-    operations.push({ name: 'push', ref, status: remoteFact.status === 0 ? 'applied' : 'failed', message: remoteFact.status === 0 ? undefined : 'Remote ref verification failed' });
+    const remoteSha = remoteFact.status === 0 ? remoteFact.stdout.trim().split(/\s+/)[0] ?? null : null;
+    const verified = remoteFact.status === 0 && (!input.expectedSha || remoteSha === input.expectedSha);
+    operations.push({
+      name: 'push',
+      ref,
+      status: verified ? 'applied' : 'failed',
+      message: verified ? undefined : input.expectedSha
+        ? `Remote ref verification failed: expected ${input.expectedSha}, received ${remoteSha ?? 'unavailable'}`
+        : 'Remote ref verification failed'
+    });
   }
   const failures = operations.filter((item) => item.status === 'failed').length;
   return { status: failures === 0 ? 'applied' as const : failures === operations.length ? 'failed' as const : 'degraded' as const, changed: failures < operations.length, snapshot: inspectGitWorkflow(input.cwd, runner).snapshot, operations, error: failures ? { code: 'GIT_PUSH_PARTIAL', message: `${failures} ref push operation(s) failed` } : null };

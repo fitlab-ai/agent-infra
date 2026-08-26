@@ -124,6 +124,8 @@ function runCheck(type: any, context: any, shared: any): any {
       return checkReviewFact(context);
     case "post-review-commit":
       return checkPostReviewCommit(context);
+    case "required-pr-delivery":
+      return checkRequiredPrDelivery(context);
     case "orchestration-state":
       return checkOrchestrationState(context);
     case "orchestration-evidence":
@@ -260,8 +262,7 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
       && guards?.receiptCount === 0
       && guards?.pendingDelegation === false
       && guards?.commitAuthorizationUnused === true
-      && guards?.completionEvidenceAbsent === true
-      && guards?.commitIntentAbsent === true;
+      && guards?.completionEvidenceAbsent === true;
     if (!validClaudeCodeRecovery) {
       return failResult('orchestration-evidence', 'Run recovery history contains invalid provenance');
     }
@@ -489,6 +490,63 @@ function checkTaskMeta({ taskDir, config }: any): any {
     `Task metadata valid (${requiredFields.length} required fields checked${warningSuffix})`,
     warnings as string[]
   );
+}
+
+function checkRequiredPrDelivery({ taskDir, repositoryRoot, mode }: any): any {
+  const task = loadTask(taskDir);
+  if (!task.ok) return failResult('required-pr-delivery', task.message);
+  let projectConfig: any = {};
+  try {
+    const file = path.join(repositoryRoot, '.agents', '.airc.json');
+    if (safeStat(file)?.isFile()) projectConfig = JSON.parse(fs.readFileSync(file, 'utf8')) as any;
+  } catch {
+    return failResult('required-pr-delivery', 'Project configuration is invalid');
+  }
+  const flow = projectConfig.prFlow;
+  const status = String(task.metadata.pr_status || 'pending');
+  const prNumber = parsePrNumber(task.metadata.pr_number);
+  if (flow === 'disabled') return passResult('required-pr-delivery', 'Pull request delivery is disabled by project policy');
+  if (flow === 'required' && (status !== 'created' || prNumber === null)) {
+    return failResult('required-pr-delivery', 'Project policy requires a bound pull request before completion');
+  }
+  if (flow !== 'required' && status === 'pending') {
+    return failResult('required-pr-delivery', 'Pull request delivery is pending; create a PR or explicitly skip it');
+  }
+  if (status === 'created' && prNumber === null) {
+    return failResult('required-pr-delivery', 'Task claims a created pull request without a valid pr_number');
+  }
+  if (flow === 'required') {
+    if (mode === 'gate') {
+      return passResult('required-pr-delivery', 'Bound pull request shape is valid; merged-state inspection is reserved for hard preflight');
+    }
+    const inspected = inspectPlatformPullRequest(task.metadata.id, { cwd: repositoryRoot });
+    if (inspected.status === 'blocked') {
+      return blockedResult(
+        'required-pr-delivery',
+        inspected.error?.message || 'Unable to inspect the required pull request',
+        inspected.error?.code || 'PR_INSPECTION_BLOCKED'
+      );
+    }
+    const pullRequest = inspected.pullRequest;
+    const repository = inspected.platform.repository?.toLowerCase() || '';
+    const taskBranch = String(task.metadata.branch || '').trim();
+    if (inspected.status !== 'no-op' || !pullRequest || pullRequest.number !== prNumber) {
+      return failResult('required-pr-delivery', 'Bound pull request identity could not be verified');
+    }
+    if (
+      !repository
+      || pullRequest.repository.toLowerCase() !== repository
+      || pullRequest.base.repository.toLowerCase() !== repository
+      || (taskBranch && pullRequest.head.ref !== taskBranch)
+    ) {
+      return failResult('required-pr-delivery', 'Bound pull request identity does not match the task');
+    }
+    if (pullRequest.state !== 'closed' || !pullRequest.mergedAt || !pullRequest.mergeCommitSha) {
+      return failResult('required-pr-delivery', 'Project policy requires the bound pull request to be merged');
+    }
+    return passResult('required-pr-delivery', `Pull request delivery policy satisfied (merged PR #${prNumber})`);
+  }
+  return passResult('required-pr-delivery', `Pull request delivery policy satisfied (${status})`);
 }
 
 function validateTaskBranch(metadata: any): any {
@@ -1581,7 +1639,14 @@ function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: reque
     const checks = [];
     for (const [type, checkConfig] of Object.entries(verifyConfig.checks || {})) {
       if (checkConfig === null) continue;
-      const result = runCheck(type, { skillName, taskDir: path.resolve(taskDir), artifactFile, config: checkConfig }, shared);
+      const result = runCheck(type, {
+        mode,
+        skillName,
+        taskDir: path.resolve(taskDir),
+        artifactFile,
+        repositoryRoot: repoRoot,
+        config: checkConfig
+      }, shared);
       checks.push(result);
       if (result.status === "blocked") break;
     }
@@ -1592,7 +1657,16 @@ function verifyInProcess({ mode, skillName, taskDir, artifactFile, checks: reque
   const config = (verifyConfig.checks || {})[type];
   if (config === undefined) return { skill: skillName, ...failResult(type, `Unknown check type '${type}' for skill '${skillName}'.`) };
   if (config === null) return { skill: skillName, ...passResult(type, `Check '${type}' is disabled for skill '${skillName}'.`) };
-  return { skill: skillName, ...runCheck(type, { skillName, taskDir: path.resolve(taskDir), artifactFile, config }, shared) };
+  return {
+    skill: skillName,
+    ...runCheck(type, {
+      skillName,
+      taskDir: path.resolve(taskDir),
+      artifactFile,
+      repositoryRoot: repoRoot,
+      config
+    }, shared)
+  };
 }
 
 export { verifyInProcess };

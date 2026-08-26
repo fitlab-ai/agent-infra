@@ -40,7 +40,7 @@ git log --oneline -5
 ## 创建提交
 
 ```bash
-agent-infra-internal git-workflow commit --input {commit-intent.json}
+agent-infra-internal git-workflow commit --input {commit-operation.json}
 ```
 
 重要约束：

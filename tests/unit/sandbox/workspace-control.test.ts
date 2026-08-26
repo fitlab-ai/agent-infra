@@ -365,10 +365,10 @@ test('sandbox executor finalizes only the manifest task and returns no control a
   try {
     fs.mkdirSync(path.join(taskDir), { recursive: true });
     fs.mkdirSync(path.join(root, '.agents', 'skills', 'complete-task', 'config'), { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+    fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ prFlow: 'disabled', task: { shortIdLength: 2 } }));
     fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': taskId } })}\n`);
     fs.writeFileSync(path.join(root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({
-      skill: 'complete-task', checks: { 'review-ledger': null, 'manual-validation': {}, 'post-review-commit': null, 'platform-sync-preflight': null }
+      skill: 'complete-task', checks: { 'review-ledger': null, 'manual-validation': {}, 'post-review-commit': null, 'platform-sync-preflight': null, 'required-pr-delivery': null }
     }));
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
       '---', `id: ${taskId}`, 'status: active', 'current_step: code-review', 'updated_at: old', 'agent_infra_version: old', 'target_date:', '---',
@@ -522,7 +522,7 @@ test('task-orchestration requests cannot override the manifest worktree binding'
     issuedAt: 1_000,
     expiresAt: 3_000,
     family: 'task-orchestration',
-    args: ['08', 'commit-status', '--git-worktree-root', '/other'],
+    args: ['08', 'status', '--git-worktree-root', '/other'],
     controllerProcess: null,
     controllerProof: null
   }, manifest, { now: 2_000 }), /REQUEST_INVALID/);

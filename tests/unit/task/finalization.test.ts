@@ -6,9 +6,12 @@ import test from 'node:test';
 
 import { platformResult } from '../../../lib/platform/types.ts';
 import {
+  applyFinalizationReceiptMutation,
   applyTaskFinalization,
+  createFinalizationCapability,
   type TaskFinalizationOptions,
-  type TaskFinalizationRequest
+  type TaskFinalizationRequest,
+  type TaskFinalizationReceipt
 } from '../../../lib/task/finalization.ts';
 import type { TaskVerificationResult } from '../../../lib/task/verification.ts';
 
@@ -84,8 +87,8 @@ test('host finalization uses the canonical root and makes a successful replay a 
     const second = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     assert.equal(first.status, 'completed');
     assert.equal(second.status, 'completed');
-    assert.equal(commentCalls, 2);
-    assert.equal(verifyCalls, 2);
+    assert.equal(commentCalls, 1);
+    assert.equal(verifyCalls, 1);
     assert.equal(second.taskComment?.status, 'no-op');
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md')), true);
     assert.equal((fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8').match(/Complete Task/g) ?? []).length, 2);
@@ -120,25 +123,45 @@ test('host finalization revalidates canonical steps when the receipt is absent',
   }
 });
 
+test('host finalization rejects a current receipt that omits warningProjection', () => {
+  const f = fixture();
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => platformResult('no-op');
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = () => verification('pass');
+  const receiptPath = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`);
+  try {
+    const first = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    assert.equal(first.status, 'completed');
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as Record<string, unknown>;
+    delete receipt.warningProjection;
+    fs.writeFileSync(receiptPath, `${JSON.stringify(receipt)}\n`);
+    const replay = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    assert.equal(replay.status, 'failed');
+    assert.equal(replay.error?.code, 'TASK_FINALIZATION_RECEIPT_INVALID');
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
 test('host finalization returns actionable verification gate failures and retries them', () => {
   const f = fixture();
   let verifyCalls = 0;
   const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => platformResult('no-op');
   const verify: NonNullable<TaskFinalizationOptions['verify']> = () => {
     verifyCalls += 1;
-    return verification(verifyCalls === 2 ? 'fail' : 'pass');
+    return verification(verifyCalls === 1 ? 'fail' : 'pass');
   };
   try {
-    const first = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const failed = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const recovered = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    assert.equal(first.status, 'completed');
-    assert.equal(failed.status, 'failed');
-    assert.equal(failed.error?.code, 'CHECK_FAILED');
-    assert.match(failed.error?.message ?? '', /Fix complete-task issues/);
+    const replay = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    assert.equal(failed.status, 'completed');
+    assert.equal(failed.result, 'completed_with_warnings');
+    assert.equal(failed.warnings[0]?.code, 'CHECK_FAILED');
+    assert.match(failed.warnings[0]?.message ?? '', /Fix complete-task issues/);
     assert.deepEqual(failed.pendingSteps, ['verification']);
     assert.equal(recovered.status, 'completed');
-    assert.equal(verifyCalls, 3);
+    assert.equal(replay.status, 'completed');
+    assert.equal(verifyCalls, 2);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }
@@ -161,13 +184,101 @@ test('host finalization retries only the pending terminal steps after a comment 
   try {
     const first = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
     const second = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
-    assert.equal(first.status, 'blocked');
+    assert.equal(first.status, 'completed');
+    assert.equal(first.result, 'completed_with_warnings');
+    assert.equal(first.warnings[0]?.code, 'NETWORK_RETRY');
     assert.equal(first.lifecycle?.status, 'applied');
     assert.equal(first.pendingSteps.includes('task-comment'), true);
     assert.equal(second.status, 'completed');
     assert.equal(commentCalls, 2);
     assert.equal(verifyCalls, 1);
     assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID)), true);
+    const completed = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
+    assert.match(completed, /\| NETWORK_RETRY \| resolved \|/);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('host finalization projects every stable warning key for a step before resolving projection', () => {
+  const f = fixture();
+  let commentCalls = 0;
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => {
+    commentCalls += 1;
+    if (commentCalls === 1) return platformResult('blocked', { error: { code: 'ERROR_A', message: 'first', retryable: true } });
+    if (commentCalls === 2) return platformResult('blocked', { error: { code: 'ERROR_B', message: 'second', retryable: true } });
+    return platformResult('no-op');
+  };
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = () => verification('pass');
+  try {
+    applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const recovered = applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const completed = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
+    assert.equal(recovered.result, 'completed');
+    assert.match(completed, /\| ERROR_A \| resolved \|/);
+    assert.match(completed, /\| ERROR_B \| resolved \|/);
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('host finalization receipt mutations are lock-bound and scope-safe', () => {
+  const f = fixture();
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => platformResult('blocked', {
+    error: { code: 'NETWORK_RETRY', message: 'temporary', retryable: true }
+  });
+  const verify: NonNullable<TaskFinalizationOptions['verify']> = () => verification('pass');
+  const receiptPath = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`);
+  try {
+    applyTaskFinalization(request, options(f.repoRoot, commentSync, verify));
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as TaskFinalizationReceipt;
+    const wrongScope = createFinalizationCapability(receipt, 'task-comment');
+    assert.throws(
+      () => applyFinalizationReceiptMutation(f.repoRoot, receipt, wrongScope, { scope: 'verification', operation: 'succeeded' }),
+      (error: any) => error?.code === 'FINALIZATION_SCOPE_INVALID'
+    );
+
+    const capability = createFinalizationCapability(receipt, 'task-comment');
+    assert.throws(
+      () => applyFinalizationReceiptMutation(f.repoRoot, receipt, capability, { scope: 'task-comment', operation: 'succeeded', state: 'pending' } as never),
+      (error: any) => error?.code === 'FINALIZATION_SCOPE_INVALID'
+    );
+    assert.throws(
+      () => applyFinalizationReceiptMutation(f.repoRoot, receipt, capability, { scope: 'task-comment', operation: 'succeeded', state: 'done', warnings: [] } as never),
+      (error: any) => error?.code === 'FINALIZATION_SCOPE_INVALID'
+    );
+    const updated = applyFinalizationReceiptMutation(f.repoRoot, receipt, capability, { scope: 'task-comment', operation: 'succeeded', state: 'done' });
+    assert.equal(updated.taskComment, 'done');
+    const pendingProjection = { ...updated, warningProjection: 'pending' as const };
+    fs.writeFileSync(receiptPath, `${JSON.stringify(pendingProjection)}\n`);
+    const projectionCapability = createFinalizationCapability(pendingProjection, 'warning-projection');
+    const projected = applyFinalizationReceiptMutation(f.repoRoot, pendingProjection, projectionCapability, { scope: 'warning-projection', operation: 'succeeded' });
+    assert.equal(projected.warningProjection, 'done');
+    assert.throws(
+      () => applyFinalizationReceiptMutation(f.repoRoot, receipt, capability, { scope: 'task-comment', operation: 'succeeded', state: 'done' }),
+      (error: any) => error?.code === 'FINALIZATION_CAPABILITY_STALE'
+    );
+  } finally {
+    fs.rmSync(f.repoRoot, { recursive: true, force: true });
+  }
+});
+
+test('host finalization rejects capability mutations for active tasks', () => {
+  const f = fixture();
+  const preflight: NonNullable<TaskFinalizationOptions['preflight']> = () => verification('fail');
+  const receiptPath = path.join(f.repoRoot, '.agents', 'workspace', '.task-finalization', `${TASK_ID}.json`);
+  try {
+    applyTaskFinalization(request, {
+      ...options(f.repoRoot, () => platformResult('no-op'), () => verification('pass')),
+      preflight
+    });
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8')) as TaskFinalizationReceipt;
+    const capability = createFinalizationCapability(receipt, 'task-comment');
+    assert.throws(
+      () => applyFinalizationReceiptMutation(f.repoRoot, receipt, capability, { scope: 'task-comment', operation: 'succeeded', state: 'done' }),
+      (error: any) => error?.code === 'FINALIZATION_SCOPE_INVALID'
+    );
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

@@ -21,7 +21,7 @@ const EXPECTED_EVENTS = [
   'analyze.awaiting-input', 'analyze.completed', 'review-analysis.completed',
   'plan.completed', 'review-plan.completed', 'code.completed', 'review-code.completed',
   'manual-validation.completed', 'validation-run.completed', 'block-task.completed', 'cancel-task.completed',
-  'commit.completed', 'complete-task.preflight', 'complete-task.completed',
+  'commit.completed', 'complete-task.preflight', 'complete-task.hard-preflight', 'complete-task.completed',
   'create-pr.completed', 'create-task.completed', 'import-codescan.completed',
   'import-dependabot.completed', 'import-issue.completed', 'watch-pr.completed',
   'review-pr.completed',
@@ -184,7 +184,8 @@ test('verification catalog is a closed mapping of all business events', () => {
     'block-task.completed': ['block-task', 'blocked', 'gate', undefined, undefined],
     'cancel-task.completed': ['cancel-task', 'completed', 'gate', undefined, undefined],
     'commit.completed': ['commit', 'active', 'gate', undefined, undefined],
-    'complete-task.preflight': ['complete-task', 'active', 'checks', undefined, ['review-ledger', 'manual-validation', 'post-review-commit', 'platform-sync-preflight']],
+    'complete-task.preflight': ['complete-task', 'active', 'checks', undefined, ['required-pr-delivery']],
+    'complete-task.hard-preflight': ['complete-task', 'active', 'checks', undefined, ['required-pr-delivery']],
     'complete-task.completed': ['complete-task', 'completed', 'gate', undefined, undefined],
     'create-pr.completed': ['create-pr', 'active', 'gate', undefined, undefined],
     'create-task.completed': ['create-task', 'active', 'gate', undefined, undefined],
@@ -423,7 +424,7 @@ test('run-task verification accepts only current recovery provenance and rejects
     guards: {
       stepCount: 0, nextStage: null, baselineEmpty: true, receiptCount: 0,
       pendingDelegation: false, commitAuthorizationUnused: true,
-      completionEvidenceAbsent: true, commitIntentAbsent: true
+      completionEvidenceAbsent: true
     },
     resultingStatus: 'running'
   };

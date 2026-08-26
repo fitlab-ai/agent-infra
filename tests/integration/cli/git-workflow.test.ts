@@ -25,20 +25,98 @@ test('git-workflow CLI commits explicit paths and verifies remote refs', () => {
     execFileSync('git', ['commit', '-qm', 'initial'], { cwd: root });
     fs.writeFileSync(path.join(root, 'tracked.txt'), 'two\n');
     const input = path.join(root, 'commit.json');
-    fs.writeFileSync(input, JSON.stringify({ paths: ['tracked.txt'], message: 'fix: update tracked file' }));
+    const expectedHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    execFileSync('git', ['add', '--', 'tracked.txt'], { cwd: root });
+    const expectedTree = execFileSync('git', ['write-tree'], { cwd: root, encoding: 'utf8' }).trim();
+    execFileSync('git', ['reset', '-q', '--', 'tracked.txt'], { cwd: root });
+    fs.writeFileSync(input, JSON.stringify({
+      paths: ['tracked.txt'], message: 'fix: update tracked file', expectedHead, expectedTree,
+      push: { remote: 'origin', refs: ['refs/heads/main'], automatic: false }
+    }));
     const committed = run(root, ['commit', '--input', input]);
     assert.equal(committed.status, 0, committed.stderr);
     assert.equal(JSON.parse(committed.stdout).status, 'applied');
 
-    const pushInput = path.join(root, 'push.json');
-    fs.writeFileSync(pushInput, JSON.stringify({ remote: 'origin', refs: ['main'] }));
-    const pushed = run(root, ['push', '--input', pushInput]);
-    assert.equal(pushed.status, 0, pushed.stderr);
     const inspectInput = path.join(root, 'inspect.json');
     fs.writeFileSync(inspectInput, JSON.stringify({ remote: 'origin', refs: ['main'] }));
     const inspected = run(root, ['inspect', '--input', inspectInput]);
     assert.equal(inspected.status, 0, inspected.stderr);
     assert.equal(JSON.parse(inspected.stdout).snapshot.remoteRefs.main, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim());
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  }
+});
+
+test('git-workflow commit reports push failure and recovers through push-only commit retry', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-policy-'));
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-policy-remote-'));
+  const missingRemote = path.join(remote, 'missing.git');
+  try {
+    execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
+    execFileSync('git', ['init', '-q', '-b', 'feature'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Codex'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: root });
+    execFileSync('git', ['remote', 'add', 'origin', missingRemote], { cwd: root });
+    fs.writeFileSync(path.join(root, 'feature.txt'), 'feature\n');
+    execFileSync('git', ['add', 'feature.txt'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'feature'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'feature.txt'), 'updated\n');
+    const expectedHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    execFileSync('git', ['add', '--', 'feature.txt'], { cwd: root });
+    const expectedTree = execFileSync('git', ['write-tree'], { cwd: root, encoding: 'utf8' }).trim();
+    execFileSync('git', ['reset', '-q', '--', 'feature.txt'], { cwd: root });
+    const input = path.join(remote, 'commit.json');
+    fs.writeFileSync(input, JSON.stringify({
+      paths: ['feature.txt'], message: 'fix: update feature', expectedHead, expectedTree,
+      push: { remote: 'origin', refs: ['refs/heads/feature'], automatic: true }
+    }));
+    const failed = run(root, ['commit', '--input', input]);
+    assert.equal(failed.status, 0, failed.stderr);
+    const failedPayload = JSON.parse(failed.stdout);
+    assert.equal(failedPayload.result, 'committed_with_warnings');
+    assert.equal(failedPayload.warnings[0].code, 'COMMIT_PUSH_FAILED');
+
+    execFileSync('git', ['init', '-q', '--bare', missingRemote]);
+    const retryHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    const retryTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: root, encoding: 'utf8' }).trim();
+    fs.writeFileSync(input, JSON.stringify({
+      paths: [], message: 'fix: update feature', expectedHead: retryHead, expectedTree: retryTree,
+      push: { remote: 'origin', refs: ['refs/heads/feature'], automatic: true }
+    }));
+    const pushOnly = run(root, ['commit', '--input', input]);
+    assert.equal(pushOnly.status, 0, pushOnly.stderr);
+    assert.equal(JSON.parse(pushOnly.stdout).result, 'no_op');
+    assert.equal(execFileSync('git', ['ls-remote', 'origin', 'refs/heads/feature'], { cwd: root, encoding: 'utf8' }).split(/\s/)[0], retryHead);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  }
+});
+
+test('git-workflow commit rejects a branch/ref mismatch before pushing', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-policy-mismatch-'));
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-policy-mismatch-remote-'));
+  try {
+    execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Codex'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: root });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: root });
+    fs.writeFileSync(path.join(root, 'main.txt'), 'main\n');
+    execFileSync('git', ['add', 'main.txt'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'main'], { cwd: root });
+    const input = path.join(root, 'mismatch.json');
+    const expectedHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    const expectedTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: root, encoding: 'utf8' }).trim();
+    fs.writeFileSync(input, JSON.stringify({
+      paths: [], message: 'retry push', expectedHead, expectedTree,
+      push: { remote: 'origin', refs: ['refs/heads/feature'], automatic: true }
+    }));
+    const rejected = run(root, ['commit', '--input', input]);
+    assert.equal(rejected.status, 2, rejected.stderr);
+    assert.equal(JSON.parse(rejected.stdout).error.code, 'GIT_PUSH_INPUT_INVALID');
+    assert.throws(() => execFileSync('git', ['ls-remote', '--exit-code', 'origin', 'refs/heads/main'], { cwd: root }));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(remote, { recursive: true, force: true });

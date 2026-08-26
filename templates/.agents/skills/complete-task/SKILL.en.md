@@ -9,6 +9,8 @@ description: >
 # Complete Task
 > `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`antigravity`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `antigravity-cli`->`antigravity`), or the `human` manual exception.
 
+Host finalization uses receipt v2 with an immutable `receiptId`, monotonic `revision`, and canonical warnings. Lifecycle/identity/required-PR hard failures return `result: failed|blocked`; after lifecycle succeeds, comment, peripheral verification, and other sync failures return `result: completed_with_warnings` and six-field warnings, retrying only receipt-pending steps.
+
 
 ## Boundary / Critical Rules
 
@@ -63,7 +65,7 @@ Read `reference/external-delivery.md`, then run for the active task:
 agent-infra-internal platform-pr resolve-external {task-id} --agent {standard-agent-token} [--pr {external-pr}]
 ```
 
-- `mode=external`: only this invocation's typed `authorization` and `selected` fields authorize and identify external delivery; continue through every existing hard gate below.
+- `mode=external`: only this invocation's typed `authorization` and `selected` fields authorize and identify external delivery; continue through the required-PR, local lifecycle, and terminal checks, while peripheral evidence failures become warnings after lifecycle.
 - `mode=normal`: use the existing local lifecycle prerequisites; historical `pr_number` / `pr_status` values do not authorize external delivery.
 - `status=failed|blocked`: stop immediately and show the stable error; `--force` cannot bypass it.
 
@@ -95,31 +97,28 @@ This project enforces the PR flow (prFlow: "required") and the task has no PR ye
 Run /create-pr {task-ref} first, then complete; --skip-pr is not accepted under a mandatory PR flow.
 ```
 
-Before marking complete, verify ALL of these:
-- [ ] All workflow steps are complete (check workflow progress in task.md; **for the `pr_tasks` list under each yaml `commit` step, decide whether to count them by the "PR path" rule: `prFlow=required` always counts; `prFlow=disabled` never counts; when absent, exclude only if `pr_status=skipped`, otherwise count**)
-- [ ] Code has been reviewed (`review-code.md` or `review-code-r{N}.md` exists, and the latest review verdict is Approved; or review was done externally)
-- [ ] Code has been committed (no uncommitted changes related to this task)
-- [ ] Tests are passing
-- [ ] The disagreement ledger has no unclosed disagreements or un-re-reviewed post-review commits; on a bound-PR path local HEAD, `last_reviewed_commit`, and PR head either match strictly, or a merged squash has complete platform snapshot and remote Git equivalence evidence and current Git credentials can read the evidence refs; without a valid PR, a single-parent local rewrite is content-equivalent to `last_reviewed_commit` and has no later protected commits
-- [ ] Manual validation items are complete (when the latest review-code's Manual validation count is > 0, a passed manual-validation artifact and its completion record must exist, and that completion record must sit after the latest review-code; skipped when the count is 0 or there are no pending items)
+Before lifecycle, verify only the hard gates:
+- [ ] Task identity, active state, concurrency locks, and local atomic lifecycle operations are available
+- [ ] Required-PR delivery is satisfied when `prFlow=required`
+- [ ] Other business evidence (workflow, review, commit, tests, disagreement ledger, manual validation, and platform sync) is recorded or can be checked after lifecycle
 
 > **⚠️ Prerequisite Branch Check — you must decide whether to continue or stop before proceeding:**
 >
-> - If all conditions above are satisfied -> continue to Step 3
-> - If any condition is missing -> **stop by default** and output the prerequisite warning
-> - Only continue with unmet prerequisites when the user explicitly requested `--force`
+> - If the hard gates pass -> continue to Step 3
+> - If a hard gate is missing -> stop and output the prerequisite warning
+> - Missing peripheral evidence does not block lifecycle; represent it as warning/pending steps after lifecycle
 >
 > **Do not continue to Steps 3-8 when prerequisites are not met, and do not output "Task {task-id} completed; task directory moved to completed/."**
 
-If any prerequisite is not met, warn the user:
+If a hard prerequisite is not met, warn the user:
 ```
 Cannot complete task {task-id} - prerequisites not met:
 - [ ] {Missing prerequisite}
 
-Please complete the missing steps first, or use --force to override.
+Please satisfy the hard prerequisite first, then retry complete-task.
 ```
 
-If prerequisites are not met and the user did not explicitly provide `--force`, stop immediately and do not execute Steps 3-8.
+If a hard gate is not met, stop immediately and do not execute Steps 3-8.
 
 ### 3. Complete Business-Only Content
 
@@ -146,7 +145,7 @@ When the ledger contains a valid `PRC-N` post-review exemption, the summary body
 
 Do not sync the task comment here; it requires the terminal task.md written by lifecycle. Do not set a `status:` label; platform automation clears status labels after the Issue closes.
 
-If any operation fails, the task must remain active and its short id must remain valid. Record the failure with the matching structured warning intent, then stop without entering Step 5:
+If any operation fails, the task must remain active and its short id must remain valid. Record the failure with the matching structured warning intent, then continue to Step 5. Platform failures do not block the local lifecycle:
 
 ```bash
 agent-infra-internal task-warning {task-id} add --step complete-task --severity ACTION_REQUIRED --code {COMMENT_SYNC_FAILED|REQUIREMENTS_SYNC_FAILED|SUMMARY_SYNC_FAILED|NETWORK_RETRY_EXHAUSTED} --target {artifact|issue|summary|platform} --message "{error_code}: {error_message}" --action "Fix the platform sync problem and rerun complete-task"
@@ -162,11 +161,11 @@ After platform writes succeed and before moving the directory or releasing the s
 agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 ```
 
-This event runs `review-ledger`, `manual-validation`, `post-review-commit`, then `platform-sync-preflight`. On any non-zero exit (fail/blocked), keep the task active, derive the stable code/target from the gate result, record it through `task-warning ... add --step complete-task ...`, and stop. For a review/head mismatch, rerun `commit` or `review-code`; never fall back to the review baseline.
+This event runs only the required-PR delivery hard preflight; host finalization still enforces identity, concurrency, and local atomicity before lifecycle. Peripheral review/manual/platform checks run through `complete-task.completed` after lifecycle and are projected as warning/pending steps. On a hard-gate non-zero exit (fail/blocked), keep the task active, record the stable code/target, and stop.
 
-When preflight's `post-review-commit` check passes through a human-decided exemption, update the same summary marker from Step 4 before entering Step 6. Add the original failure code/message and PRC id/evidence from the check output together with the ruling reason, commit scope, human identity, and time from task.md. When a warning exists, treat its historical record as canonical and reconcile it with the current check output; otherwise use the current check output as the original-failure source. Run the same `platform-comment sync ... --kind summary` intent again. If it fails, record `SUMMARY_SYNC_FAILED`, keep the task active, and stop before lifecycle.
+If a summary must mirror a human-decided `post-review-commit` exemption, make a best-effort sync in Step 4 with the original failure code/message, PRC id/evidence, and ruling details. A sync failure records `SUMMARY_SYNC_FAILED` and still allows lifecycle; terminal verification decides the final state.
 
-`--force` does not lift this hard gate: close ledger disagreements; re-review or exempt post-review commits, use the platform adapter's authoritative snapshot and remote refs for the bound change request (PR/MR) to prove a content-equivalent single-parent squash merge in an isolated temporary repository, or, without a valid change request, prove from local Git objects that the only protected commit is a content-equivalent single-parent rewrite with no later protected commits; then pass platform preflight. An unsupported adapter capability, missing required platform facts, Git objects, topology, or content evidence, or current Git credentials that cannot read the remote evidence refs fails closed. The platform adapter supplies normalized state for all checks, enforced before merge by the `review-code` / `watch-pr` routes; required checks remain additionally enforced by branch protection / rulesets.
+`--force` cannot lift identity, concurrency, local atomicity, or required-PR hard gates; failures there must stop. Other review, manual-validation, and platform evidence is recorded by terminal verification as warning/pending and can be repaired by retrying.
 
 ### 6. Run the Host Finalization Entry Point and Verify the Terminal State
 
@@ -174,7 +173,7 @@ When preflight's `post-review-commit` check passes through a human-decided exemp
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-Finalization runs lifecycle -> the terminal task comment -> the `complete-task.completed` gate in a fixed order and records each step in the host receipt. Only structured `status=completed` means completion succeeded. On `failed` or `blocked`, show the error and completed/pending steps, fix the cause, and retry through the same entry point; do not claim completion or hand-repair partial state.
+Finalization runs lifecycle -> the terminal task comment -> the `complete-task.completed` gate in a fixed order and records each step in the host receipt. `result=completed` means lifecycle completed safely; if peripheral warnings remain, return `result=completed_with_warnings`, warnings, and pending steps. Use `result=failed` or `result=blocked` only for hard or receipt/capability failures, then fix the cause and retry through the same entry point; do not claim completion or hand-repair partial state.
 
 ```bash
 ls .agents/workspace/completed/{task-id}/task.md

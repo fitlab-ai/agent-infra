@@ -31,7 +31,7 @@ For each failing check, decide "self-heal" vs "ask for help" in this order:
    - Before fixing, run `git status -s` to record the working tree and ensure only changes related to this failure are included.
    - Locate and make a minimal fix per the logs (touch only code / tests / config related to that failure).
    - Run the relevant tests: prefer the local command for the failing job; otherwise read the project `test` skill and select its declared core or full validation command. If neither command is known, ask for help. **Do not commit or push before tests pass.**
-   - After tests pass, call `git-workflow commit` and `git-workflow push`, then verify the remote SHA.
+   - After tests pass, put the paths, message, expected HEAD, expected tree, and push policy (remote, full refs, automatic) into one intent JSON; call `git-workflow commit` once and verify the remote SHA. If the remote push fails, retry the same commit intent with empty `paths` through the push-only path.
    - Append the fix commit SHA to this run's `repairCommits`, increment the fix count, and return to SKILL step 2. When checks turn green, an empty list routes to `complete-task`; a non-empty list routes to `review-code`.
    - Never make unrelated "drive-by" optimizations; never loosen / skip the failing assertion to "make it green".
 

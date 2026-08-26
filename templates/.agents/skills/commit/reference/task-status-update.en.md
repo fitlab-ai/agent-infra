@@ -12,19 +12,13 @@ Get the current time first:
 date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
-The `commit-complete` / `commit-recover` core has already atomically written this Activity Log entry:
+The `commit-operation.execute` core writes this Activity Log entry for task-bound operations:
 
 ```text
 - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Commit** by {agent} — {commit hash short} {commit subject}
 ```
 
-When the evidence is satisfied, core also writes or refreshes:
-
-```yaml
-last_reviewed_commit: {new_head}
-```
-
-This field is the only baseline for the `complete-task` `post-review-commit` gate. The caller must not append Commit done again or write this field directly.
+Task metadata is best-effort synchronization after the Git primary action: an Activity Log or frontmatter write failure returns a `TASK_STATUS_SYNC_FAILED` warning without undoing the commit or push, and a later no-change retry may repair the record. `review-code`, review anchors, and `last_reviewed_commit` are not commit/push prerequisites. The caller must not append Activity Log entries directly.
 
 ### Scenario 5: Existing-PR push wrap-up
 
@@ -38,33 +32,6 @@ Next step - watch PR checks:
 ```
 
 If push fails, keep the task active and preserve local HEAD; show diagnostics and manual push guidance only, never `watch-pr` or `complete-task`. This scenario takes precedence over the final `prFlow` route below.
-
-### Scenario 4: pre-commit snapshot block
-
-This scenario ends the run before `git commit` and does not enter the successful post-commit scenario selection below. When any of `pre_head != R`, `W != T`, or `S != T` applies:
-
-- Do not run `git commit`, push, successful state updates, Issue/PR success sync, or the commit completion gate; preserve the current worktree and index.
-- Refresh task `updated_at`, `assigned_to`, and `agent_infra_version`, then append a done log with action `Commit`: `Blocked before git commit: reviewed snapshot mismatch (worktree added={a}, missing={m}, different={d}; staged added={a}, missing={m}, different={d})`.
-- User output must include `No commit was created.` and show Added/Missing/Different under both `Current worktree vs reviewed snapshot` and `Staged snapshot vs reviewed snapshot`; render an empty set as `- (none)` and list paths only in user output.
-- When `pre_head != R` or `W != T`, the only next step is a fresh `review-code`; when only `W == T && S != T`, tell the user to fix staging and rerun `commit` without re-review.
-
-Full re-review commands:
-
-Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}`.
-
-```text
-Next step - re-run code review:
-{next-step-commands}
-```
-
-Full staging-only retry commands:
-
-Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}`.
-
-```text
-Next step - fix staging and retry commit:
-{next-step-commands}
-```
 
 Before selecting the next step, verify:
 - `current_step` and the latest workflow progress in `task.md`

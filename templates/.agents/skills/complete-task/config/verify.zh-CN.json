@@ -38,6 +38,7 @@
       "verify_closed_issue_has_no_status_labels": false,
       "expected_comment_marker_key": "summary"
     },
+    "required-pr-delivery": {},
     "platform-sync": {
       "when": "issue_number_exists",
       "verify_task_comment_content": true,

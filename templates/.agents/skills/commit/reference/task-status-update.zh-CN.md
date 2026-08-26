@@ -12,19 +12,13 @@
 date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 ```
 
-`commit-complete` / `commit-recover` 核心已原子写入以下 Activity Log：
+`commit-operation.execute` 在 task-bound 模式下负责写入以下 Activity Log：
 
 ```text
 - {YYYY-MM-DD HH:mm:ss±HH:MM} — **Commit** by {agent} — {commit hash short} {commit subject}
 ```
 
-证据满足时核心同时写入或刷新：
-
-```yaml
-last_reviewed_commit: {new_head}
-```
-
-该字段是 `complete-task` 的 `post-review-commit` gate 唯一 baseline。调用方只读取核心结果选择后续路由，不得再次追加 Commit done 或手写/推进该字段。
+任务记录是 Git 主动作之后的尽力同步：Activity Log 或 frontmatter 写入失败只返回 `TASK_STATUS_SYNC_FAILED` warning，不撤销 commit 或 push；后续无改动重跑可以再次尝试补齐记录。`review-code`、review anchor 和 `last_reviewed_commit` 不再是 commit/push 的前置条件，调用方只读取核心结果选择后续路由，不得手写 Activity Log。
 
 ### 场景 5：已有 PR 推送收尾
 
@@ -38,33 +32,6 @@ last_reviewed_commit: {new_head}
 ```
 
 push 失败时保留任务 active 与本地 HEAD，只展示诊断和人工推送提示；不得渲染 `watch-pr` 或 `complete-task`。该场景优先于下方 `prFlow` 终态路由。
-
-### 场景 4：提交前快照阻断
-
-此场景在 `git commit` 前终止本轮，不进入下方提交成功后的场景选择。任一 `pre_head != R`、`W != T` 或 `S != T` 命中时：
-
-- 不执行 `git commit`、push、成功状态更新、Issue/PR 成功同步或 commit 完成 gate；保留当前工作区与暂存区。
-- 刷新任务的 `updated_at`、`assigned_to`、`agent_infra_version`，并以 action `Commit` 追加 done 日志：`Blocked before git commit: reviewed snapshot mismatch (worktree added={a}, missing={m}, different={d}; staged added={a}, missing={m}, different={d})`。
-- 用户输出必须包含 `No commit was created.`，并分别按 `Current worktree vs reviewed snapshot`、`Staged snapshot vs reviewed snapshot` 展示 Added/Missing/Different；空集合显示 `- (none)`，路径只在用户输出中逐行展示。
-- `pre_head != R` 或 `W != T` 时，下一步只指向重新 `review-code`；仅 `W == T && S != T` 时，提示修正暂存后重跑 `commit`，无需重审。
-
-重新审查的完整命令：
-
-使用 `agent-infra-internal agent-client next-steps --skill review-code --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
-
-```text
-下一步 - 重新代码审查：
-{next-step-commands}
-```
-
-仅修正暂存的完整命令：
-
-使用 `agent-infra-internal agent-client next-steps --skill commit --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
-
-```text
-下一步 - 修正暂存后重新提交：
-{next-step-commands}
-```
 
 在决定下一步之前，先确认：
 - `task.md` 中的 `current_step` 和最新工作流进度

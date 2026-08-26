@@ -1,7 +1,8 @@
 import fs from 'node:fs';
-import { commitExplicitPaths, inspectGitWorkflow, pushGitRefs, pushRebasedBranch } from '../git/workflow.ts';
+import { inspectGitWorkflow, pushRebasedBranch } from '../git/workflow.ts';
 import { compareReviewTrees, snapshotReview } from '../git/review-snapshot.ts';
 import { resolvePostReviewGlobs } from '../task/review-fingerprint.ts';
+import { executeCommitOperation } from '../task/commit-operation.ts';
 
 function output(value: unknown): void { process.stdout.write(`${JSON.stringify(value)}\n`); }
 
@@ -18,11 +19,9 @@ function gitWorkflow(args: string[] = []): void {
   else if (action === 'commit') {
     const inputIndex = rest.indexOf('--input');
     const input = inputIndex >= 0 && rest[inputIndex + 1] ? JSON.parse(fs.readFileSync(rest[inputIndex + 1]!, 'utf8')) : null;
-    result = input ? commitExplicitPaths({ cwd: cwd ?? process.cwd(), ...input }) : { status: 'failed', changed: false, error: { code: 'GIT_INPUT_REQUIRED', message: '--input JSON file is required' } };
-  } else if (action === 'push') {
-    const inputIndex = rest.indexOf('--input');
-    const input = inputIndex >= 0 && rest[inputIndex + 1] ? JSON.parse(fs.readFileSync(rest[inputIndex + 1]!, 'utf8')) : null;
-    result = input ? pushGitRefs({ cwd: cwd ?? process.cwd(), ...input }) : { status: 'failed', changed: false, error: { code: 'GIT_INPUT_REQUIRED', message: '--input JSON file is required' } };
+    result = input
+      ? executeCommitOperation({ cwd: cwd ?? process.cwd(), ...input })
+      : { status: 'failed', changed: false, error: { code: 'GIT_INPUT_REQUIRED', message: '--input JSON file is required' } };
   } else if (action === 'push-rebased') {
     const inputIndex = rest.indexOf('--input');
     const input = inputIndex >= 0 && rest[inputIndex + 1] ? JSON.parse(fs.readFileSync(rest[inputIndex + 1]!, 'utf8')) : null;

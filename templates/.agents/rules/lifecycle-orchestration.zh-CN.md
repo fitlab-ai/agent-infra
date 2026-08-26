@@ -10,7 +10,7 @@
 
 ## 恢复语义
 
-`orchestration.json` 是详细状态源。current run 保存完整策略、append-only 恢复历史、build/contract/hook source/controller provenance 与 activation 单调时钟。读取时只接受当前 writer 的完整结构；未知字段、缺失字段、非法 provenance 或旧 run 一律失败关闭且不改写。升级 agent-infra 前必须完成或清空所有 active run。prepared orphan 只允许在 deadline 已过、task fingerprint 精确不变、无 commit intent/authorization 消耗且无匹配的未消费 active lifecycle evidence 时显式恢复。
+`orchestration.json` 是详细状态源。current run 保存完整策略、append-only 恢复历史、build/contract/hook source/controller provenance 与 activation 单调时钟。读取时只接受当前 writer 的完整结构；未知字段、缺失字段、非法 provenance 或旧 run 一律失败关闭且不改写。升级 agent-infra 前必须完成或清空所有 active run。prepared orphan 只允许在 deadline 已过、task fingerprint 精确不变、无 authorization 消耗且无匹配的未消费 active lifecycle evidence 时显式恢复。
 
 ## Codex 宿主与 capability
 

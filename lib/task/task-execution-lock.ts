@@ -295,5 +295,13 @@ function withTaskExecutionLock<T>(
   }
 }
 
-export { TaskExecutionLockError, lockKey, mapLinkError, withTaskExecutionLock };
+function withRepositoryMutationLock<T>(
+  repoRoot: string,
+  callback: () => T,
+  options: TaskExecutionLockOptions = {}
+): T {
+  return withTaskExecutionLock(repoRoot, '__repository_mutation__', 'repository-mutation', callback, options);
+}
+
+export { TaskExecutionLockError, lockKey, mapLinkError, withRepositoryMutationLock, withTaskExecutionLock };
 export type { LinkDisposition, LinkOperation, TaskExecutionLockErrorCode, TaskExecutionLockOptions, TaskExecutionLockOwner };
