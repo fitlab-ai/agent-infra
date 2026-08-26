@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { quiesceSandboxControlRoot } from "../../../lib/sandbox/control/lifecycle.ts";
+import { sandboxManagedPathKey } from "../../../lib/sandbox/commands/rm.ts";
 import { sandboxControlPaths } from "../../../lib/sandbox/workspace-view.ts";
 
 import {
@@ -174,6 +175,19 @@ test("agent-infra sandbox help is wired into the main CLI", () => {
   assert.match(output, /^\s+refresh\s+Sync host Claude Code credentials/m);
   assert.match(output, /^\s+rebuild \[--quiet\] \[--refresh\]\s+Rebuild the sandbox image/m);
   assert.match(output, /prune \[--dry-run\]/);
+  assert.match(output, /completed task-bound and branch-only sandboxes/);
+  assert.match(output, /active, blocked, and archive tasks are protected/);
+});
+
+test("sandbox rm help documents task-state and identity boundaries", () => {
+  const output = execFileSync(process.execPath, cliArgs("sandbox", "rm", "--help"), {
+    encoding: "utf8"
+  });
+
+  assert.match(output, /full TASK-id for a task-bound sandbox/);
+  assert.match(output, /branch for branch-only sandboxes/);
+  assert.match(output, /completed task-bound and branch-only sandboxes/);
+  assert.match(output, /active, blocked, and archive tasks are protected/);
 });
 
 test("sandbox create help documents the host aliases file", () => {
@@ -283,8 +297,98 @@ function writeActiveTaskBranch(repoDir: string, taskId: string, branch: string):
   fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\nbranch: ${branch}\n---\n# body\n`);
 }
 
-function sandboxRow(name: string, branch: string, project = "demo"): string {
-  return `${name}\tUp 1 minute\t${project}.sandbox.branch=${branch},${project}.sandbox=true`;
+function writeTaskBranch(repoDir: string, state: "active" | "completed" | "blocked" | "archive", taskId: string, branch: string): void {
+  const taskDir = path.join(repoDir, ".agents", "workspace", state, taskId);
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, "task.md"), `---\nid: ${taskId}\nbranch: ${branch}\n---\n# body\n`);
+}
+
+function sandboxRow(
+  name: string,
+  branch: string,
+  project = "demo",
+  workspaceMode: "task-bound" | "branch-only" = "branch-only",
+  taskId?: string
+): string {
+  const taskLabel = taskId ? `,${project}.sandbox.task-id=${taskId}` : "";
+  return `${name}\tUp 1 minute\t${project}.sandbox.branch=${branch},${project}.sandbox=true,${project}.sandbox.workspace-mode=${workspaceMode}${taskLabel}`;
+}
+
+function writeTaskBoundControlEvidence(
+  tmpDir: string,
+  repoDir: string,
+  project: string,
+  container: string,
+  taskId: string,
+  branch: string
+): string {
+  const controlRoot = sandboxControlPaths({
+    base: path.join(tmpDir, ".agent-infra", "sandbox-control"),
+    project,
+    container,
+    identity: { mode: "task-bound", taskId }
+  }).root;
+  const channelDir = path.join(controlRoot, "channel");
+  const publicStatusDir = path.join(controlRoot, "public");
+  const processingDir = path.join(controlRoot, "processing");
+  fs.mkdirSync(channelDir, { recursive: true });
+  fs.mkdirSync(publicStatusDir, { recursive: true });
+  fs.mkdirSync(processingDir, { recursive: true });
+  fs.mkdirSync(path.join(controlRoot, "runtime"), { recursive: true });
+  fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
+    version: 5,
+    engine: "docker-desktop",
+    repoRoot: repoDir,
+    worktreeRoot: repoDir,
+    project,
+    container,
+    containerIdentity: { id: "fixture-container-id", labels: {} },
+    branch,
+    mode: "task-bound",
+    taskId,
+    token: `${taskId}-token`,
+    generation: `${taskId}-generation`,
+    channelDir,
+    publicStatusDir,
+    processingDir,
+    runtimeDir: path.join(controlRoot, "runtime")
+  })}\n`, "utf8");
+  fs.writeFileSync(path.join(publicStatusDir, "status.json"), `${JSON.stringify({
+    version: 2,
+    generation: `${taskId}-generation`,
+    broker: { pid: 999_999_999, startTime: 0, brokerId: `${taskId}-broker` },
+    state: "healthy",
+    reasonCode: null,
+    activeRequestId: null,
+    updatedAt: Date.now()
+  })}\n`, "utf8");
+  return controlRoot;
+}
+
+function addSandboxWorktree(
+  fixture: ReturnType<typeof writeSandboxEngineFixture>,
+  tmpDir: string,
+  branch: string
+): string {
+  try {
+    execFileSync("git", ["-C", fixture.repoDir, "rev-parse", "--verify", "HEAD"], {
+      env: gitSafeEnv(),
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+  } catch {
+    fs.writeFileSync(path.join(fixture.repoDir, "tracked.txt"), "initial\n", "utf8");
+    execFileSync("git", ["-C", fixture.repoDir, "add", "tracked.txt"], { env: gitSafeEnv() });
+    execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox@example.com", "commit", "-q", "-m", "initial"], {
+      env: gitSafeEnv()
+    });
+  }
+  const worktree = path.join(tmpDir, ".agent-infra", "worktrees", "demo", branch.replaceAll("/", ".."));
+  fs.mkdirSync(path.dirname(worktree), { recursive: true });
+  execFileSync("git", ["-C", fixture.repoDir, "worktree", "add", "-q", "-b", branch, worktree, "HEAD"], {
+    env: gitSafeEnv(),
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  return worktree;
 }
 
 function hasDockerVerb(calls: string[][], verb: string): boolean {
@@ -311,18 +415,51 @@ test("sandbox rm --unbound --dry-run lists unbound sandboxes and removes nothing
   }
 });
 
+test("sandbox rm --unbound fails closed when a discovered task-bound container has a noncanonical name", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-noncanonical-task-container-"));
+  const taskId = "TASK-20260101-000002";
+  const branch = "completed-noncanonical";
+  const container = "unexpected-container-name";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow(container, branch, "demo", "task-bound", taskId)
+    });
+    writeTaskBranch(fixture.repoDir, "completed", taskId, branch);
+    const shellConfig = path.join(tmpDir, ".agent-infra", "config", "demo", branch);
+    fs.mkdirSync(shellConfig, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED|SANDBOX_CONTROL_TARGET_EVIDENCE_MISSING/);
+    assert.equal(fs.existsSync(shellConfig), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm --unbound skips containers bound to an active task", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-skip-"));
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
       dockerStdoutForPs: [
-        sandboxRow("sb-bound", "bound-branch"),
+        sandboxRow("sb-bound", "bound-branch", "demo", "task-bound", "TASK-20260101-000001"),
         sandboxRow("sb-free", "free-branch")
       ].join("\n")
     });
     writeShortIdRegistry(fixture.repoDir, { "07": "TASK-20260101-000001" });
     writeActiveTaskBranch(fixture.repoDir, "TASK-20260101-000001", "bound-branch");
+    writeTaskBoundControlEvidence(
+      tmpDir,
+      fixture.repoDir,
+      "demo",
+      "sb-bound",
+      "TASK-20260101-000001",
+      "bound-branch"
+    );
 
     const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--dry-run"]);
 
@@ -334,15 +471,71 @@ test("sandbox rm --unbound skips containers bound to an active task", () => {
   }
 });
 
+test("sandbox rm --unbound removes branch-only sandboxes and protects every task state", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-state-boundaries-"));
+  const activeTaskId = "TASK-20260101-000003";
+  const blockedTaskId = "TASK-20260101-000004";
+  const archiveTaskId = "TASK-20260101-000005";
+  const branches = {
+    active: "active-protected",
+    blocked: "blocked-protected",
+    archive: "archive-protected",
+    branchOnly: "branch-only-removable"
+  };
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-active", branches.active, "demo", "task-bound", activeTaskId),
+        sandboxRow("sb-blocked", branches.blocked, "demo", "task-bound", blockedTaskId),
+        sandboxRow("sb-archive", branches.archive, "demo", "task-bound", archiveTaskId),
+        sandboxRow("sb-branch-only", branches.branchOnly)
+      ].join("\n")
+    });
+    writeTaskBranch(fixture.repoDir, "active", activeTaskId, branches.active);
+    writeTaskBranch(fixture.repoDir, "blocked", blockedTaskId, branches.blocked);
+    writeTaskBranch(fixture.repoDir, "archive", archiveTaskId, branches.archive);
+    writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", "sb-active", activeTaskId, branches.active);
+    writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", "sb-blocked", blockedTaskId, branches.blocked);
+    writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", "sb-archive", archiveTaskId, branches.archive);
+    for (const branch of Object.values(branches)) {
+      fs.mkdirSync(path.join(tmpDir, ".agent-infra", "config", "demo", branch), { recursive: true });
+    }
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"], {
+      DOCKER_INSPECT_NO_MOUNTS: "1"
+    });
+
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.equal(fs.existsSync(path.join(tmpDir, ".agent-infra", "config", "demo", branches.branchOnly)), false);
+    assert.equal(fs.existsSync(path.join(tmpDir, ".agent-infra", "config", "demo", branches.active)), true);
+    assert.equal(fs.existsSync(path.join(tmpDir, ".agent-infra", "config", "demo", branches.blocked)), true);
+    assert.equal(fs.existsSync(path.join(tmpDir, ".agent-infra", "config", "demo", branches.archive)), true);
+    const calls = fixture.readDockerCalls();
+    assert.equal(calls.some((call) => call[0] === "rm" && call[1] === "sb-branch-only"), true);
+    assert.equal(calls.some((call) => call[0] === "rm" && ["sb-active", "sb-blocked", "sb-archive"].includes(call[1] ?? "")), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm --unbound exits 0 with a notice when nothing is removable", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-empty-"));
   try {
     const fixture = writeSandboxEngineFixture(tmpDir, {
       project: "demo",
-      dockerStdoutForPs: sandboxRow("sb-bound", "bound-branch")
+      dockerStdoutForPs: sandboxRow("sb-bound", "bound-branch", "demo", "task-bound", "TASK-20260101-000001")
     });
     writeShortIdRegistry(fixture.repoDir, { "07": "TASK-20260101-000001" });
     writeActiveTaskBranch(fixture.repoDir, "TASK-20260101-000001", "bound-branch");
+    writeTaskBoundControlEvidence(
+      tmpDir,
+      fixture.repoDir,
+      "demo",
+      "sb-bound",
+      "TASK-20260101-000001",
+      "bound-branch"
+    );
 
     const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound"]);
 
@@ -351,6 +544,292 @@ test("sandbox rm --unbound exits 0 with a notice when nothing is removable", () 
     const calls = fixture.readDockerCalls();
     assert.equal(hasDockerVerb(calls, "stop"), false);
     assert.equal(hasDockerVerb(calls, "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound removes completed rows while preserving evidenced protected rows", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-mixed-protected-"));
+  const completedTaskId = "TASK-20260101-000006";
+  const blockedTaskId = "TASK-20260101-000007";
+  const completedBranch = "completed-mixed";
+  const blockedBranch = "blocked-mixed";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-completed", completedBranch, "demo", "task-bound", completedTaskId),
+        sandboxRow("sb-blocked", blockedBranch, "demo", "task-bound", blockedTaskId)
+      ].join("\n")
+    });
+    writeTaskBranch(fixture.repoDir, "completed", completedTaskId, completedBranch);
+    writeTaskBranch(fixture.repoDir, "blocked", blockedTaskId, blockedBranch);
+    writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", "sb-completed", completedTaskId, completedBranch);
+    writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", "sb-blocked", blockedTaskId, blockedBranch);
+    const completedShell = path.join(tmpDir, ".agent-infra", "config", "demo", completedBranch);
+    const blockedShell = path.join(tmpDir, ".agent-infra", "config", "demo", blockedBranch);
+    fs.mkdirSync(completedShell, { recursive: true });
+    fs.mkdirSync(blockedShell, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"], {
+      DOCKER_INSPECT_NO_MOUNTS: "1",
+      DOCKER_REMOVAL_UPDATES_INSPECT: "1"
+    });
+
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.equal(fs.existsSync(completedShell), false);
+    assert.equal(fs.existsSync(blockedShell), true);
+    assert.match(result.stdout, /Skipped protected sandbox sb-blocked/);
+    assert.equal(fixture.readDockerCalls().filter((call) => call[0] === "rm").length, 1);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm bounds Docker stop grace for completed task cleanup", onPlatforms("darwin"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-completed-stop-grace-"));
+  const taskId = "TASK-20260101-000010";
+  const branch = "completed-stop-grace";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow("sb-completed", branch, "demo", "task-bound", taskId)
+    });
+    writeTaskBranch(fixture.repoDir, "completed", taskId, branch);
+    writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", "sb-completed", taskId, branch);
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"], {
+      DOCKER_INSPECT_NO_MOUNTS: "1",
+      DOCKER_REMOVAL_UPDATES_INSPECT: "1",
+      DOCKER_STOP_REQUIRES_BOUNDED_GRACE: "1"
+    });
+
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.equal(fixture.readDockerCalls().some((call) => (
+      call[0] === "stop" && call[1] === "--timeout" && call[2] === "1"
+    )), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound fails before deletion when a protected row lacks control evidence", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-missing-protected-evidence-"));
+  const completedTaskId = "TASK-20260101-000008";
+  const blockedTaskId = "TASK-20260101-000009";
+  const completedBranch = "completed-missing-protected";
+  const blockedBranch = "blocked-missing-protected";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-completed", completedBranch, "demo", "task-bound", completedTaskId),
+        sandboxRow("sb-blocked", blockedBranch, "demo", "task-bound", blockedTaskId)
+      ].join("\n")
+    });
+    writeTaskBranch(fixture.repoDir, "completed", completedTaskId, completedBranch);
+    writeTaskBranch(fixture.repoDir, "blocked", blockedTaskId, blockedBranch);
+    writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", "sb-completed", completedTaskId, completedBranch);
+    const completedShell = path.join(tmpDir, ".agent-infra", "config", "demo", completedBranch);
+    fs.mkdirSync(completedShell, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /SANDBOX_CONTROL_TARGET_EVIDENCE_MISSING/);
+    assert.equal(fs.existsSync(completedShell), true);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound groups canonical and legacy containers before shared cleanup", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-compatible-containers-"));
+  const branch = "feature/dual-container";
+  const canonical = "demo-dev-feature..dual-container";
+  const legacy = "demo-dev-feature-dual-container";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow(canonical, branch),
+        sandboxRow(legacy, branch)
+      ].join("\n")
+    });
+    const worktree = addSandboxWorktree(fixture, tmpDir, branch);
+    const shellConfig = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..dual-container");
+    fs.mkdirSync(shellConfig, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"], {
+      DOCKER_REMOVAL_UPDATES_INSPECT: "1"
+    });
+
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.equal(fs.existsSync(worktree), false);
+    assert.equal(fs.existsSync(shellConfig), false);
+    const rmCalls = fixture.readDockerCalls().filter((call) => call[0] === "rm");
+    assert.equal(rmCalls.length, 2);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound rejects cross-branch canonical/legacy path collisions before deletion", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-cross-branch-collision-"));
+  const legacyBranch = "feature/foo";
+  const canonicalBranch = "feature-foo";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-canonical", canonicalBranch),
+        sandboxRow("sb-legacy", legacyBranch)
+      ].join("\n")
+    });
+    const worktree = addSandboxWorktree(fixture, tmpDir, canonicalBranch);
+    execFileSync("git", ["-C", fixture.repoDir, "branch", legacyBranch, "HEAD"], { env: gitSafeEnv() });
+    const shellConfig = path.join(tmpDir, ".agent-infra", "config", "demo", "feature-foo");
+    fs.mkdirSync(shellConfig, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED/);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+    assert.equal(fs.existsSync(worktree), true);
+    assert.equal(fs.existsSync(shellConfig), true);
+    assert.equal(execFileSync("git", ["-C", fixture.repoDir, "show-ref", "--verify", `refs/heads/${canonicalBranch}`], {
+      env: gitSafeEnv(),
+      encoding: "utf8"
+    }).trim().length > 0, true);
+    assert.equal(execFileSync("git", ["-C", fixture.repoDir, "show-ref", "--verify", `refs/heads/${legacyBranch}`], {
+      env: gitSafeEnv(),
+      encoding: "utf8"
+    }).trim().length > 0, true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound rejects a worktree registered to another branch before deletion", onPlatforms("linux", "darwin", "win32"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-worktree-branch-mismatch-"));
+  const requestedBranch = "feature/foo";
+  const registeredBranch = "feature-foo";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow("sb-legacy", requestedBranch)
+    });
+    const worktree = addSandboxWorktree(fixture, tmpDir, registeredBranch);
+    execFileSync("git", ["-C", fixture.repoDir, "branch", requestedBranch, "HEAD"], { env: gitSafeEnv() });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /registered to branch/);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+    assert.equal(fs.existsSync(worktree), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox managed path ownership keys use filesystem identity", () => {
+  const upper = path.join(os.tmpdir(), "feature-Foo");
+  const lower = path.join(os.tmpdir(), "feature-foo");
+  const canonical = path.join(os.tmpdir(), "feature-Foo");
+  const resolveExistingPath = (candidate: string) =>
+    candidate === upper || candidate === lower ? canonical : candidate;
+
+  assert.notEqual(sandboxManagedPathKey(upper, "linux"), sandboxManagedPathKey(lower, "linux"));
+  assert.equal(sandboxManagedPathKey(upper, "win32"), sandboxManagedPathKey(lower, "win32"));
+  assert.equal(sandboxManagedPathKey(upper, "darwin", resolveExistingPath),
+    sandboxManagedPathKey(lower, "darwin", resolveExistingPath));
+});
+
+test("sandbox managed path identity fails closed for non-missing resolver errors", () => {
+  const candidate = path.join(os.tmpdir(), "feature-Foo");
+  const missing = () => {
+    const error = new Error("missing");
+    Object.assign(error, { code: "ENOENT" });
+    throw error;
+  };
+  const denied = () => {
+    const error = new Error("denied");
+    Object.assign(error, { code: "EACCES" });
+    throw error;
+  };
+
+  assert.equal(sandboxManagedPathKey(candidate, "linux", missing), path.resolve(candidate));
+  assert.throws(
+    () => sandboxManagedPathKey(candidate, "darwin", denied),
+    /SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED/
+  );
+});
+
+test("sandbox rm --unbound fails before deletion when managed path identity cannot be resolved", onPlatforms("linux", "darwin"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-unresolvable-path-"));
+  const branch = "feature/unresolvable-path";
+  const inaccessibleRoot = path.join(tmpDir, ".agent-infra", "sandboxes");
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow("sb-unresolvable", branch)
+    });
+    const worktree = addSandboxWorktree(fixture, tmpDir, branch);
+    const shellConfig = path.join(tmpDir, ".agent-infra", "config", "demo", "feature..unresolvable-path");
+    fs.mkdirSync(shellConfig, { recursive: true });
+    fs.mkdirSync(inaccessibleRoot, { recursive: true });
+    fs.chmodSync(inaccessibleRoot, 0o000);
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"], {
+      DOCKER_INSPECT_NO_MOUNTS: "1"
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED/);
+    const calls = fixture.readDockerCalls();
+    assert.equal(hasDockerVerb(calls, "stop"), false);
+    assert.equal(hasDockerVerb(calls, "rm"), false);
+    assert.equal(fs.existsSync(worktree), true);
+    assert.equal(fs.existsSync(shellConfig), true);
+    assert.equal(execFileSync("git", ["-C", fixture.repoDir, "show-ref", "--verify", `refs/heads/${branch}`], {
+      env: gitSafeEnv(),
+      encoding: "utf8"
+    }).trim().length > 0, true);
+  } finally {
+    if (fs.existsSync(inaccessibleRoot)) fs.chmodSync(inaccessibleRoot, 0o755);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound rejects case-insensitive managed path collisions before deletion", onPlatforms("win32", "darwin"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-windows-case-collision-"));
+  const protectedTaskId = "TASK-20260101-000009";
+  const protectedBranch = "feature/Foo";
+  const removableBranch = "feature-foo";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-protected", protectedBranch, "demo", "task-bound", protectedTaskId),
+        sandboxRow("sb-removable", removableBranch)
+      ].join("\n")
+    });
+    writeShortIdRegistry(fixture.repoDir, { "09": protectedTaskId });
+    writeTaskBranch(fixture.repoDir, "active", protectedTaskId, protectedBranch);
+    writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", "sb-protected", protectedTaskId, protectedBranch);
+    const shellConfig = path.join(tmpDir, ".agent-infra", "config", "demo", removableBranch);
+    fs.mkdirSync(shellConfig, { recursive: true });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED/);
+    assert.equal(fixture.readDockerCalls().some((call) => call[0] === "stop" || call[0] === "rm"), false);
+    assert.equal(fs.existsSync(shellConfig), true);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -382,6 +861,29 @@ test("sandbox rm --unbound without --yes fails safe in a non-interactive shell",
 
     assert.equal(result.status, 1);
     assert.match(result.stderr, /--yes/);
+    const calls = fixture.readDockerCalls();
+    assert.equal(hasDockerVerb(calls, "stop"), false);
+    assert.equal(hasDockerVerb(calls, "rm"), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("sandbox rm --unbound rejects a batch with incomplete workspace identity before deletion", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-identity-preflight-"));
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: [
+        sandboxRow("sb-legacy", "legacy-branch").replace(",demo.sandbox.workspace-mode=branch-only", ""),
+        sandboxRow("sb-branch-only", "branch-only")
+      ].join("\n")
+    });
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"]);
+
+    assert.equal(result.status, 1);
+    assert.match(`${result.stdout}\n${result.stderr}`, /SANDBOX_CLEANUP_BATCH_PREFLIGHT_FAILED/);
     const calls = fixture.readDockerCalls();
     assert.equal(hasDockerVerb(calls, "stop"), false);
     assert.equal(hasDockerVerb(calls, "rm"), false);

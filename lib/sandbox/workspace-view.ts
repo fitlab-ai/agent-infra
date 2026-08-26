@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { SandboxWorkspaceIdentity } from './workspace-identity.ts';
+import type { SandboxWorkspaceIdentity, SandboxWorkspaceKey } from './workspace-identity.ts';
 import type { SandboxControlManifest } from './control/protocol.ts';
 
 export type SandboxWorkspaceView = Readonly<{
@@ -30,7 +30,7 @@ export function sandboxWorkspaceViewPaths(params: Readonly<{
   base: string;
   project: string;
   container: string;
-  identity: SandboxWorkspaceIdentity;
+  identity: SandboxWorkspaceIdentity | SandboxWorkspaceKey;
 }>): SandboxWorkspaceView {
   const identityKey = params.identity.mode === 'task-bound'
     ? `task-bound:${params.identity.taskId}`
@@ -60,7 +60,7 @@ export function sandboxControlPaths(params: Readonly<{
   base: string;
   project: string;
   container: string;
-  identity: SandboxWorkspaceIdentity;
+  identity: SandboxWorkspaceIdentity | SandboxWorkspaceKey;
 }>): Readonly<{ root: string; channelDir: string; statusDir: string; processingDir: string; runtimeDir: string; manifestPath: string }> {
   const identityKey = params.identity.mode === 'task-bound'
     ? `task-bound:${params.identity.taskId}`

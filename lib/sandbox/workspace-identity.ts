@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isRemovedHashShortIdInput } from '../task/short-id.ts';
+import {
+  resolveTaskWorkspace,
+  type TaskWorkspaceState
+} from './task-resolver.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const SHORT_ID_RE = /^\d+$/;
@@ -8,6 +12,17 @@ const SHORT_ID_RE = /^\d+$/;
 export type SandboxWorkspaceIdentity =
   | Readonly<{ mode: 'task-bound'; taskId: string; shortId: string }>
   | Readonly<{ mode: 'branch-only' }>;
+
+export type SandboxWorkspaceKey =
+  | Readonly<{ mode: 'task-bound'; taskId: string }>
+  | Readonly<{ mode: 'branch-only' }>;
+
+export type SandboxCleanupTarget = Readonly<{
+  requestedRef: string;
+  branch: string;
+  workspace: SandboxWorkspaceKey;
+  taskState: TaskWorkspaceState | 'branch-only';
+}>;
 
 export type SandboxContainerWorkspaceIdentity =
   | Readonly<{ mode: 'task-bound'; taskId: string }>
@@ -101,6 +116,39 @@ export function resolveSandboxTarget(requestedRef: string, repoRoot: string): Sa
   return { requestedRef, branch: requestedRef, workspace: { mode: 'branch-only' } };
 }
 
+export function resolveSandboxCleanupTarget(
+  requestedRef: string,
+  repoRoot: string,
+  options: Readonly<{ allowProtected?: boolean }> = {}
+): SandboxCleanupTarget {
+  if (isRemovedHashShortIdInput(requestedRef)) {
+    throw new Error(`Invalid task short id '${requestedRef}': task short ids must use bare digits`);
+  }
+
+  if (TASK_ID_RE.test(requestedRef)) {
+    const task = resolveTaskWorkspace(requestedRef, repoRoot);
+    if (!options.allowProtected && (task.state === 'blocked' || task.state === 'archive')) {
+      throw new Error(`SANDBOX_CLEANUP_STATE_UNSUPPORTED: task ${requestedRef} is ${task.state}`);
+    }
+    return {
+      requestedRef,
+      branch: task.branch,
+      workspace: { mode: 'task-bound', taskId: task.taskId },
+      taskState: task.state
+    };
+  }
+
+  const target = resolveSandboxTarget(requestedRef, repoRoot);
+  return {
+    requestedRef,
+    branch: target.branch,
+    workspace: target.workspace.mode === 'task-bound'
+      ? { mode: 'task-bound', taskId: target.workspace.taskId }
+      : { mode: 'branch-only' },
+    taskState: target.workspace.mode === 'task-bound' ? 'active' : 'branch-only'
+  };
+}
+
 export function parseSandboxWorkspaceIdentity(
   labels: Readonly<Record<string, string>>,
   keys: Readonly<{ mode: string; taskId: string }>
@@ -115,8 +163,8 @@ export function parseSandboxWorkspaceIdentity(
 }
 
 export function sameSandboxWorkspaceIdentity(
-  left: SandboxWorkspaceIdentity | SandboxContainerWorkspaceIdentity,
-  right: SandboxWorkspaceIdentity | SandboxContainerWorkspaceIdentity
+  left: SandboxWorkspaceIdentity | SandboxWorkspaceKey | SandboxContainerWorkspaceIdentity,
+  right: SandboxWorkspaceIdentity | SandboxWorkspaceKey | SandboxContainerWorkspaceIdentity
 ): boolean {
   return left.mode === right.mode
     && (left.mode !== 'task-bound' || (right.mode === 'task-bound' && left.taskId === right.taskId));

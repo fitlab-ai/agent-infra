@@ -100,7 +100,7 @@ agent-infra-internal task-verify {task-id} block-task.completed --format text
 
 > 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
-> **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) task.md 的 `branch` 字段存在且不是 `main` / `master` 时，才渲染下方输出中「归档路径」之后、「解除阻塞时执行」之前的「可选：清理本任务的沙箱」块；任一不满足则整段省略。`{branch}` 取已读入的 task.md 的 `branch` 值（任务此时已移动到 blocked/，从 `.agents/workspace/blocked/{task-id}/task.md` 读取）。该块独立于「下一步」语义。
+> **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) task.md 的 `branch` 字段存在且不是 `main` / `master` 时，才渲染下方输出中「归档路径」之后、「解除阻塞时执行」之前的「可选：清理本任务的沙箱」块；任一不满足则整段省略。blocked task-bound 沙箱受保护，不通过自动批量清理；如确需清理，请人工核对身份。该块独立于「下一步」语义。
 
 输出格式：
 使用 `agent-infra-internal agent-client next-steps --skill check-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
@@ -113,9 +113,7 @@ agent-infra-internal task-verify {task-id} block-task.completed --format text
 归档路径：.agents/workspace/blocked/{task-id}/
 
 可选：清理本任务的沙箱
-（任务已阻塞并移到 blocked/，沙箱容器和 per-branch 配置目录不会自动回收。如果不再需要可执行：）
-
-ai sandbox rm {branch}
+（任务已阻塞并移到 blocked/，task-bound 沙箱受保护，不会被 `ai sandbox rm --unbound` 自动删除；如确需清理，请先人工核对容器、控制清单和工作树身份。）
 
 解除阻塞时执行：
   agent-infra-internal task-lifecycle {task-id} activate --agent {standard-agent-token} --note "{恢复说明}"

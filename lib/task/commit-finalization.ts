@@ -242,6 +242,11 @@ function inspectCommitFinalization(
     && intent.baselineHead === intent.committedHead
     && matchingDone.length === 1
     && openRows.length === 1;
+  const noOpCommitRetry = intent.phase === 'committed'
+    && intent.baselineHead === intent.committedHead
+    && matchingDone.length === 1
+    && openRows.length === 1
+    && openRows[0]?.attempt !== undefined;
   const review = findAuthoritativeReviewCodeArtifact(taskDir);
   let needsAnchor = false;
   if (review.ok && review.path) {
@@ -285,7 +290,7 @@ function inspectCommitFinalization(
     }
     needsAnchor = anchor !== intent.committedHead;
   }
-  const needsLog = (matchingDone.length === 0 && openRows.length === 1) || pushOnlyRetry;
+  const needsLog = (matchingDone.length === 0 && openRows.length === 1) || pushOnlyRetry || noOpCommitRetry;
   if (!(needsLog || (matchingDone.length === 1 && openRows.length === 0))) {
     return outcome('conflict', {
       ...shared,

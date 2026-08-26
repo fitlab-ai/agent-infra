@@ -5,7 +5,14 @@ import { isRemovedHashShortIdInput } from '../task/short-id.ts';
 
 const TASK_ID_RE = /^TASK-\d{8}-\d{6}$/;
 const SHORT_ID_RE = /^\d+$/;
-const WORKSPACE_DIRS = ['active', 'completed', 'blocked', 'archive'];
+export const TASK_WORKSPACE_STATES = ['active', 'completed', 'blocked', 'archive'] as const;
+export type TaskWorkspaceState = typeof TASK_WORKSPACE_STATES[number];
+export type TaskWorkspace = Readonly<{
+  taskId: string;
+  branch: string;
+  state: TaskWorkspaceState;
+  taskMd: string;
+}>;
 
 function resolveShortIdStrict(arg: string, repoRoot: string): string {
   const scriptPath = path.join(repoRoot, '.agents', 'scripts', 'task-short-id.js');
@@ -27,14 +34,28 @@ function stripQuotes(value: string): string {
   return value.replace(/^(["'])(.*)\1$/, '$2');
 }
 
-function readTaskContent(repoRoot: string, taskId: string): string {
-  for (const dir of WORKSPACE_DIRS) {
-    const taskPath = path.join(repoRoot, '.agents', 'workspace', dir, taskId, 'task.md');
+function readTaskContent(repoRoot: string, taskId: string): { content: string; state: TaskWorkspaceState; taskMd: string } {
+  for (const state of TASK_WORKSPACE_STATES) {
+    const taskPath = path.join(repoRoot, '.agents', 'workspace', state, taskId, 'task.md');
     if (fs.existsSync(taskPath)) {
-      return fs.readFileSync(taskPath, 'utf8');
+      return { content: fs.readFileSync(taskPath, 'utf8'), state, taskMd: taskPath };
     }
   }
   throw new Error(`Task not found: ${taskId}`);
+}
+
+function taskWorkspaceCandidates(repoRoot: string, taskId: string): TaskWorkspace[] {
+  return TASK_WORKSPACE_STATES.flatMap((state) => {
+    const taskMd = path.join(repoRoot, '.agents', 'workspace', state, taskId, 'task.md');
+    if (!fs.existsSync(taskMd)) return [];
+    const content = fs.readFileSync(taskMd, 'utf8');
+    return [{
+      taskId,
+      branch: resolveBranchFromTaskContent(content, taskId),
+      state,
+      taskMd
+    }];
+  });
 }
 
 function resolveBranchFromTaskContent(content: string, taskId: string): string {
@@ -57,12 +78,42 @@ export function resolveTaskBranch(arg: string, repoRoot: string): string {
   }
   if (SHORT_ID_RE.test(arg)) {
     const taskId = resolveShortIdStrict(arg, repoRoot);
-    const content = readTaskContent(repoRoot, taskId);
+    const { content } = readTaskContent(repoRoot, taskId);
     return resolveBranchFromTaskContent(content, taskId);
   }
   if (!TASK_ID_RE.test(arg)) {
     return arg;
   }
-  const content = readTaskContent(repoRoot, arg);
+  const { content } = readTaskContent(repoRoot, arg);
   return resolveBranchFromTaskContent(content, arg);
+}
+
+export function resolveTaskWorkspace(taskId: string, repoRoot: string): TaskWorkspace {
+  if (!TASK_ID_RE.test(taskId)) throw new Error(`Invalid task id: ${taskId}`);
+  const matches = taskWorkspaceCandidates(repoRoot, taskId);
+  if (matches.length === 0) throw new Error(`Task not found: ${taskId}`);
+  if (matches.length !== 1) {
+    throw new Error(
+      `SANDBOX_TASK_STATE_AMBIGUOUS: task ${taskId} exists in ${matches.map((match) => match.state).join(', ')}`
+    );
+  }
+  return matches[0]!;
+}
+
+export function listTaskWorkspaces(repoRoot: string, state: TaskWorkspaceState): TaskWorkspace[] {
+  const stateRoot = path.join(repoRoot, '.agents', 'workspace', state);
+  if (!fs.existsSync(stateRoot)) return [];
+  return fs.readdirSync(stateRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && TASK_ID_RE.test(entry.name))
+    .flatMap((entry) => {
+      const taskMd = path.join(stateRoot, entry.name, 'task.md');
+      if (!fs.existsSync(taskMd)) return [];
+      const content = fs.readFileSync(taskMd, 'utf8');
+      return [{
+        taskId: entry.name,
+        branch: resolveBranchFromTaskContent(content, entry.name),
+        state,
+        taskMd
+      }];
+    });
 }

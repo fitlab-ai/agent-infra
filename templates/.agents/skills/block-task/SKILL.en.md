@@ -99,7 +99,7 @@ Keep the gate output in your reply as fresh evidence. Do not claim completion wi
 
 > Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
-> **Optional sandbox-cleanup hint (gated)**: Render the "Optional: clean up this task's sandbox" block — placed after "Archived to" and before "To unblock" in the output below — only when BOTH (1) `.agents/.airc.json` has a `sandbox` field and (2) task.md's `branch` field exists and is not `main` / `master`; otherwise omit the whole block. `{branch}` is the `branch` value from the task.md you already loaded (the task has moved to blocked/, so read it from `.agents/workspace/blocked/{task-id}/task.md`). This block is independent of "Next step" semantics.
+> **Optional sandbox-cleanup hint (gated)**: Render the "Optional: clean up this task's sandbox" block — placed after "Archived to" and before "To unblock" in the output below — only when BOTH (1) `.agents/.airc.json` has a `sandbox` field and (2) task.md's `branch` field exists and is not `main` / `master`; otherwise omit the whole block. Blocked task-bound sandboxes are protected from automatic batch cleanup; if cleanup is necessary, manually verify their identity first. This block is independent of "Next step" semantics.
 
 Output format:
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill check-task --task-ref {task-ref}`.
@@ -112,9 +112,7 @@ Required to unblock: {what's needed}
 Archived to: .agents/workspace/blocked/{task-id}/
 
 Optional: clean up this task's sandbox
-(The task is blocked and moved to blocked/; the sandbox container and per-branch config directory are not reclaimed automatically. Run this if you no longer need them:)
-
-ai sandbox rm {branch}
+(The task is blocked and moved to blocked/; task-bound sandboxes are protected from automatic `ai sandbox rm --unbound` cleanup. If cleanup is necessary, manually verify the container, control manifest, and worktree identity first.)
 
 To unblock when the issue is resolved:
   agent-infra-internal task-lifecycle {task-id} activate --agent {standard-agent-token} --note "{activation note}"
