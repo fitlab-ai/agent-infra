@@ -587,6 +587,33 @@ test("sandbox rm --unbound removes completed rows while preserving evidenced pro
   }
 });
 
+test("sandbox rm bounds Docker stop grace for completed task cleanup", onPlatforms("darwin"), () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-completed-stop-grace-"));
+  const taskId = "TASK-20260101-000010";
+  const branch = "completed-stop-grace";
+  try {
+    const fixture = writeSandboxEngineFixture(tmpDir, {
+      project: "demo",
+      dockerStdoutForPs: sandboxRow("sb-completed", branch, "demo", "task-bound", taskId)
+    });
+    writeTaskBranch(fixture.repoDir, "completed", taskId, branch);
+    writeTaskBoundControlEvidence(tmpDir, fixture.repoDir, "demo", "sb-completed", taskId, branch);
+
+    const result = spawnSandboxCli(fixture, tmpDir, ["rm", "--unbound", "--yes"], {
+      DOCKER_INSPECT_NO_MOUNTS: "1",
+      DOCKER_REMOVAL_UPDATES_INSPECT: "1",
+      DOCKER_STOP_REQUIRES_BOUNDED_GRACE: "1"
+    });
+
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.equal(fixture.readDockerCalls().some((call) => (
+      call[0] === "stop" && call[1] === "--timeout" && call[2] === "1"
+    )), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sandbox rm --unbound fails before deletion when a protected row lacks control evidence", onPlatforms("linux", "darwin", "win32"), () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-rm-all-missing-protected-evidence-"));
   const completedTaskId = "TASK-20260101-000008";

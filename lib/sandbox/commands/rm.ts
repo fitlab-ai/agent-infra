@@ -428,7 +428,12 @@ async function removeExactSandboxContainer(
   const before = await inspect();
   if (before.state === 'unknown') throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${before.reason}`);
   if (before.state === 'absent') return;
-  if (before.running && !runOkEngine(engine, 'docker', ['stop', manifest.containerIdentity.id], { timeout: remaining() })) {
+  if (before.running && !runOkEngine(
+    engine,
+    'docker',
+    ['stop', '--timeout', '1', manifest.containerIdentity.id],
+    { timeout: remaining() }
+  )) {
     const afterStop = await inspect();
     if (afterStop.state !== 'absent' && afterStop.state !== 'found') {
       throw new Error(`SANDBOX_CONTROL_CONTAINER_UNKNOWN: ${afterStop.reason}`);
