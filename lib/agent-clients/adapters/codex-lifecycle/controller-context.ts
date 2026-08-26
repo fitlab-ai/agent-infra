@@ -131,7 +131,6 @@ export function writeCodexSandboxControllerContext(
 
 export function verifyCodexSandboxControllerContext(
   contextPath: string,
-  taskId: string,
   options: Readonly<{
     repoRoot?: string;
     now?: number;
@@ -158,8 +157,7 @@ export function verifyCodexSandboxControllerContext(
   const repoRoot = options.repoRoot ?? process.cwd();
   const generation = options.generation ?? process.env.AGENT_INFRA_CONTROL_GENERATION;
   const state = (options.probeProcess ?? getProcessIdentityState)(context.controllerProcess);
-  if (context.taskId !== taskId
-    || context.controlGeneration !== generation
+  if (context.controlGeneration !== generation
     || context.expiresAt <= (options.now ?? Date.now())
     || state !== 'alive') {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');

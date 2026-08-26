@@ -298,6 +298,87 @@ test('controller proof rejection occurs before the domain child and workspace mu
   assert.equal(fs.readFileSync(sentinel, 'utf8'), 'unchanged\n');
 });
 
+test('typed controller verify returns only the live task binding without spawning or mutating state', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-verify-executor-'));
+  const manifestPath = path.join(root, 'manifest.json');
+  fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
+  const opened = openCodexControllerRegistration({
+    manifest,
+    manifestPath,
+    controllerProcess: { pid: 100, startTime: 10 },
+    buildIdentity: controllerBuild
+  }, { probeProcess: () => 'alive', randomHex: (() => {
+    const values = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)];
+    return () => values.shift()!;
+  })() });
+  const proof = {
+    version: 1 as const,
+    leaseId: opened.lease.leaseId,
+    leaseSecret: opened.lease.leaseSecret,
+    controllerProcess: opened.lease.controllerProcess
+  };
+  const request = {
+    version: 3 as const,
+    id: '12345678-1234-1234-1234-123456789abc',
+    token: manifest.token,
+    generation: manifest.generation,
+    issuedAt: 1_000,
+    expiresAt: 3_000,
+    family: 'codex-controller' as const,
+    command: 'verify' as const,
+    args: [] as [],
+    controllerProcess: proof.controllerProcess,
+    controllerProof: proof
+  };
+  const validated = validateSandboxControlRequest(request, manifest, { now: 2_000 });
+  assert.equal(request.command, 'verify');
+  const before = fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8');
+  let spawns = 0;
+  const result = executeRequest(manifest, manifestPath, validated, {
+    buildIdentity: () => controllerBuild,
+    resolveControllerBinding: () => ({ instanceDigest: opened.lease.controllerInstanceDigest, controlGeneration: manifest.generation }),
+    spawnDomain: (() => { spawns += 1; throw new Error('verify must not spawn'); }) as never
+  });
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    version: 1,
+    status: 'verified',
+    changed: false,
+    lease: null,
+    binding: {
+      taskId: manifest.taskId,
+      controlGeneration: manifest.generation,
+      controllerInstanceDigest: opened.lease.controllerInstanceDigest
+    },
+    error: null
+  });
+  assert.equal(result.stdout.includes(opened.lease.leaseSecret), false);
+  assert.equal(spawns, 0);
+  assert.equal(fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8'), before);
+});
+
+test('typed controller verify requires matching process proof', () => {
+  const proof = {
+    version: 1 as const,
+    leaseId: 'a'.repeat(64),
+    leaseSecret: 'b'.repeat(64),
+    controllerProcess: { pid: 100, startTime: 10 }
+  };
+  assert.throws(() => validateSandboxControlRequest({
+    version: 3,
+    id: '12345678-1234-1234-1234-123456789abc',
+    token: manifest.token,
+    generation: manifest.generation,
+    issuedAt: 1_000,
+    expiresAt: 3_000,
+    family: 'codex-controller',
+    command: 'verify',
+    args: [],
+    controllerProcess: { pid: 101, startTime: 10 },
+    controllerProof: proof
+  }, manifest, { now: 2_000 }), /REQUEST_INVALID/);
+});
+
 test('TypeScript control entries retain explicit strip-types startup', () => {
   assert.deepEqual(nodeEntryArgs('/repo/bin/internal-cli.ts', ['sandbox-control', 'serve']), [
     '--experimental-strip-types', '--no-warnings', '/repo/bin/internal-cli.ts', 'sandbox-control', 'serve'
@@ -448,6 +529,27 @@ test('control protocol rejects request v2 and controller result parser enforces 
     error: null
   };
   assert.equal(parseCodexControllerResult(response).status, 'opened');
+  const verified = {
+    version: 1,
+    status: 'verified',
+    changed: false,
+    lease: null,
+    binding: {
+      taskId: manifest.taskId!,
+      controlGeneration: manifest.generation,
+      controllerInstanceDigest: 'e'.repeat(64)
+    },
+    error: null
+  };
+  const verifiedResult = parseCodexControllerResult({
+    ...response,
+    stdout: `${JSON.stringify(verified)}\n`
+  });
+  assert.equal(verifiedResult.status, 'verified');
+  assert.throws(
+    () => parseCodexControllerResult({ ...response, stdout: `${JSON.stringify({ ...verified, leaseSecret: 'd'.repeat(64) })}\n` }),
+    (error: unknown) => error instanceof SandboxControlClientError && error.detail.code === 'SANDBOX_CONTROL_RESULT_INVALID'
+  );
   assert.throws(
     () => parseCodexControllerResult({ ...response, stdout: `${JSON.stringify({ ...opened, extra: true })}\n` }),
     (error: unknown) => error instanceof SandboxControlClientError && error.detail.code === 'SANDBOX_CONTROL_RESULT_INVALID'

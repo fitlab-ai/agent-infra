@@ -88,6 +88,42 @@ test('ai task status resolves an active task by its short id', () => {
   assert.match(out.stdout, new RegExp(`^Task ${taskId}  \\(01\\)$`, 'm'));
 });
 
+test('ai task status uses persisted paused orchestration state and does not require activity-log inference', () => {
+  const { repoRoot } = mkFixture();
+  const taskId = 'TASK-20260101-000043';
+  const taskDir = writeTask(repoRoot, 'active', taskId);
+  fs.writeFileSync(path.join(taskDir, 'orchestration.json'), `${JSON.stringify({
+    taskId,
+    runId: 'run-paused',
+    status: 'paused',
+    nextStage: 'review-plan',
+    stepCount: 2,
+    maxSteps: 24,
+    modelPolicy: {
+      executor: { model: 'executor-model', reasoningEffort: 'high' },
+      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
+    },
+    modelPolicySource: { kind: 'explicit', client: 'claude-code', resolvedAt: '2026-01-01T00:00:00.000Z' },
+    recoveryHistory: [],
+    baseline: '',
+    pendingDelegation: null,
+    receipts: [],
+    pause: { code: 'ORCHESTRATION_PAUSED', message: 'waiting for review', recoverable: true },
+    commitAuthorization: { issuedAt: null, consumedAt: null },
+    completionEvidence: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z'
+  })}\n`);
+
+  const out = runCli(['task', 'status', taskId], repoRoot);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /^Orchestration$/m);
+  assert.match(out.stdout, /^  status +paused$/m);
+  assert.match(out.stdout, /^  run_id +run-paused$/m);
+  assert.match(out.stdout, /^  pause_code +ORCHESTRATION_PAUSED$/m);
+  assert.match(out.stdout, /^  next_stage +review-plan$/m);
+});
+
 test('ai task status without a ref requires a matching current context', () => {
   const { repoRoot } = mkFixture();
   const out = runCli(['task', 'status'], repoRoot);

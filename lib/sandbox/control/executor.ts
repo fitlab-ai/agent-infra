@@ -215,6 +215,30 @@ export function executeRequest(
   }
   if (request.family === 'codex-controller') {
     try {
+      if (request.command === 'verify') {
+        const binding = (options.resolveControllerBinding ?? resolveCodexControllerBinding)({
+          manifest,
+          manifestPath,
+          proof: request.controllerProof!,
+          buildIdentity: (options.buildIdentity ?? computeLifecycleBuildIdentity)(manifest.repoRoot)
+        });
+        return {
+          exitCode: 0,
+          stdout: `${JSON.stringify({
+            version: 1,
+            status: 'verified',
+            changed: false,
+            lease: null,
+            binding: {
+              taskId: manifest.taskId,
+              controlGeneration: binding.controlGeneration,
+              controllerInstanceDigest: binding.instanceDigest
+            },
+            error: null
+          })}\n`,
+          stderr: ''
+        };
+      }
       const result = request.command === 'open'
         ? openCodexControllerRegistration({
             manifest,

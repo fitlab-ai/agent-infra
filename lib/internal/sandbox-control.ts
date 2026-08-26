@@ -10,7 +10,7 @@ import { runSandboxControlExecutor } from '../sandbox/control/executor.ts';
 import {
   controllerProofFromContext,
   verifyCodexSandboxControllerContext
-} from '../agent-clients/adapters/codex-lifecycle/controller-context.ts';
+} from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 
 function isCanonicalCodexPrepare(args: readonly string[]): boolean {
   if (args[1] !== 'prepare') return false;
@@ -117,9 +117,8 @@ async function sandboxControl(args: string[]): Promise<void> {
     try {
       if (family === 'task-orchestration' && isCanonicalCodexPrepare(commandArgs)) {
         const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-        const taskId = process.env.AGENT_INFRA_TASK_ID;
-        const proof = contextPath && taskId
-          ? controllerProofFromContext(verifyCodexSandboxControllerContext(contextPath, taskId))
+        const proof = contextPath
+          ? controllerProofFromContext(verifyCodexSandboxControllerContext(contextPath))
           : null;
         response = requestSandboxTaskControl({ family, args: commandArgs, controllerProof: proof });
       } else {
