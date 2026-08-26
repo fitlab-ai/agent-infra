@@ -961,7 +961,10 @@ test('task-bound finalization compensates an accepted response loss through the 
     fs.mkdirSync(activeTaskDir, { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
     fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '08': taskId } })}\n`);
-    fs.writeFileSync(path.join(root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({ skill: 'complete-task', checks: {} }));
+    fs.writeFileSync(path.join(root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({
+      skill: 'complete-task',
+      checks: { 'required-pr-delivery': null }
+    }));
     fs.writeFileSync(path.join(activeTaskDir, 'task.md'), [
       '---', `id: ${taskId}`, 'type: bugfix', 'workflow: bug-fix', 'status: active',
       'created_at: 2026-08-09 01:02:03+00:00', 'updated_at: 2026-08-09 01:02:03+00:00',
@@ -1067,7 +1070,7 @@ test('task-bound finalization compensates an accepted response loss through the 
     assert.equal(compensated.result.changed, false);
     assert.equal(compensated.result.lifecycle.status, 'no-op');
     assert.equal(compensated.result.taskComment.status, 'skipped');
-    assert.equal(compensated.result.verification.status, 'pass');
+    assert.equal(compensated.result.verification.status, 'no-op');
     assert.equal(JSON.parse(secondExecution.stdout).status, 'completed');
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), 'utf8')).ids, {});
   } finally {

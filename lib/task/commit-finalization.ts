@@ -238,7 +238,7 @@ function inspectCommitFinalization(
 
   const commitNote = git(repoRoot, ['show', '-s', '--format=%h%x20%s', intent.committedHead]);
   const matchingDone = commitRows.filter((row) => row.done !== '' && row.note === commitNote);
-  const pushOnlyRetry = intent.phase === 'pushed'
+  const pushOnlyRetry = (intent.phase === 'committed' || intent.phase === 'pushed')
     && intent.baselineHead === intent.committedHead
     && matchingDone.length === 1
     && openRows.length === 1;

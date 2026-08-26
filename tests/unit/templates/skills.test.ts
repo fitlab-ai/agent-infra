@@ -1555,6 +1555,7 @@ test("complete-task splits active preflight checks from completed-state checks",
       verify_task_comment_content: true,
       verify_closed_issue_has_no_status_labels: true
     });
+    assert.deepEqual(checks["required-pr-delivery"], {});
   });
 });
 

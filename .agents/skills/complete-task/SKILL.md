@@ -9,6 +9,8 @@ description: >
 # 完成任务
 > `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`antigravity`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`antigravity-cli`→`antigravity`）或人工例外 `human`。
 
+宿主 finalization 使用 receipt v2（不可变 `receiptId`、单调 `revision` 和 canonical warnings）。生命周期/身份/required PR 等硬失败保持既有 `failed|blocked`；生命周期完成后，评论、外围验证和其他同步失败返回 `status: completed`、`outcome: completed_with_warnings` 及六字段 warning，并仅重试 receipt 中的 pending step。
+
 
 ## 行为边界 / 关键规则
 
@@ -161,7 +163,7 @@ agent-infra-internal task-warning {task-id} add --step complete-task --severity 
 agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 ```
 
-该事件依次执行 `review-ledger`、`manual-validation`、`post-review-commit`、`platform-sync-preflight`。任一退出码非 0（fail/blocked）时，任务必须继续留在 active；从 gate 结果取稳定 code/target，通过 `task-warning ... add --step complete-task ...` 落账后停止。若审查基线或 head 不一致，必须先重新 `commit` / `review-code`；不得回退审查基线。
+该事件依次执行 `review-ledger`、`manual-validation`、`post-review-commit`、`platform-sync-preflight`。另由宿主 finalization 在 lifecycle 前执行 required-PR delivery hard preflight。active 硬门禁任一退出码非 0（fail/blocked）时，任务必须继续留在 active；从 gate 结果取稳定 code/target，通过 `task-warning ... add --step complete-task ...` 落账后停止。若审查基线或 head 不一致，必须先重新 `commit` / `review-code`；不得回退审查基线。
 
 若 preflight 的 `post-review-commit` 以 human-decided exemption 通过，在进入步骤 6 前必须把该 check 输出中的原始 failure code/message 与 PRC id/evidence，连同 task.md 中的裁决理由、提交范围、人工身份与时间，原地补入步骤 4 的同一 summary marker。已有 warning 时以其历史记录为 canonical 证据并与本次 check 输出核对；无 warning 时以本次 check 输出补齐原始失败。再次调用同一 `platform-comment sync ... --kind summary`；失败时记录 `SUMMARY_SYNC_FAILED`、保持任务 active 并停止，不进入 lifecycle。
 
@@ -173,7 +175,7 @@ agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-finalization 按 lifecycle → task 评论 → `complete-task.completed` 校验的固定顺序执行，并将每一步的状态写入宿主 receipt。只有结构化结果 `status=completed` 才视为完成；`failed` 或 `blocked` 时展示 `error` 与 completed/pending steps，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。
+finalization 按 lifecycle → task 评论 → `complete-task.completed` 校验的固定顺序执行，并将每一步的状态写入宿主 receipt。`status=completed` 即表示 lifecycle 已安全完成；若还有外围 warning，必须同时展示 `outcome=completed_with_warnings`、warnings 和 pending steps。`failed` 或 `blocked` 仅用于硬失败或 receipt/capability 失败，修复原因后以同一入口重试，不得宣称完成或手工补写局部状态。
 
 ```bash
 ls .agents/workspace/completed/{task-id}/task.md

@@ -170,6 +170,7 @@ function buildCompletedTaskContent(checklistLines: string[], overrides: Frontmat
       completed_at: now,
       updated_at: now,
       target_date: now.slice(0, 10),
+      pr_status: "skipped",
       ...overrides
     }),
     "",

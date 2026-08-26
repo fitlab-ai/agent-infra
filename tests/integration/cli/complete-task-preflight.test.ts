@@ -15,12 +15,12 @@ function fixture() {
   const activeDir = path.join(root, '.agents', 'workspace', 'active', TASK_ID);
   fs.mkdirSync(activeDir, { recursive: true });
   fs.mkdirSync(path.join(root, '.agents', 'skills', 'complete-task', 'config'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ prFlow: 'disabled', task: { shortIdLength: 2 } }));
   fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
   fs.writeFileSync(path.join(root, '.agents', 'skills', 'complete-task', 'config', 'verify.json'), JSON.stringify({
     skill: 'complete-task', checks: {
       'review-ledger': null, 'manual-validation': {}, 'post-review-commit': null,
-      'platform-sync-preflight': null
+      'platform-sync-preflight': null, 'required-pr-delivery': null
     }
   }));
   fs.writeFileSync(path.join(activeDir, 'task.md'), [
@@ -65,7 +65,7 @@ test('compiled preflight does not require a checks snapshot for a bound historic
         'review-ledger': null,
         'manual-validation': {},
         'post-review-commit': null,
-        'platform-sync-preflight': null
+        'platform-sync-preflight': null, 'required-pr-delivery': null
       }
     }));
     fs.writeFileSync(path.join(f.activeDir, 'task.md'), [

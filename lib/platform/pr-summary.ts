@@ -11,11 +11,16 @@ import type { GitHubClient } from './github-client.ts';
 import { listRemoteComments, normalizeCommentContent, writeComment } from './issue-comments.ts';
 import { platformResult } from './types.ts';
 import type { PlatformResult } from './types.ts';
+import type { OperationWarning } from '../task/operation-outcome.ts';
 
 type SummaryComment = { id: number; body: string };
 type SummaryContextResult = PlatformResult & {
   task: { id: string | null; prNumber: number | null };
   artifacts: Array<{ family: string; name: string; path: string }>;
+};
+type PullRequestSummaryResult = PlatformResult & {
+  outcome: 'pr_created_with_warnings' | null;
+  warnings: readonly OperationWarning[];
 };
 
 function summaryMarker(taskId: string): string {
@@ -61,7 +66,7 @@ function summaryContext(taskRef: string, options: { cwd?: string; client?: GitHu
   return { ...platformResult('no-op'), task: { id: resolved.taskId, prNumber }, artifacts: canonicalArtifacts(resolved.taskDir) };
 }
 
-function syncPullRequestSummary(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: GitHubClient; dryRun?: boolean }): PlatformResult {
+function syncPullRequestSummaryBase(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: GitHubClient; dryRun?: boolean }): PlatformResult {
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
   if (!resolved.ok) return platformResult('failed', { error: { code: resolved.code, message: resolved.message, retryable: false } });
   const frontmatter = parseTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
@@ -94,4 +99,26 @@ function syncPullRequestSummary(taskRef: string, options: { agent: string; body:
   return platformResult('applied', { platform: context.platform, capabilities: context.capabilities, resource: { kind: 'pull-request', number: prNumber }, comment: { kind: 'summary', marker: summaryMarker(resolved.taskId), ids: Number.isInteger(id) ? [id] : [], parts: 1 }, operations: [{ name: `summary:${reconciliation.action}`, status: 'applied', reasonCode: null }], error: null });
 }
 
+function syncPullRequestSummary(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: GitHubClient; dryRun?: boolean }): PullRequestSummaryResult {
+  const output = syncPullRequestSummaryBase(taskRef, options);
+  const warning = output.error && output.resource.kind === 'pull-request' && output.resource.number
+    && !['PR_NOT_LINKED', 'PR_SUMMARY_MARKER_AMBIGUOUS'].includes(output.error.code)
+    ? {
+      code: output.error.code,
+      message: output.error.message,
+      retryable: output.error.retryable,
+      step: 'pr-summary',
+      target: `pull-request:${output.resource.number}`,
+      severity: 'ACTION_REQUIRED' as const
+    }
+    : null;
+  return {
+    ...output,
+    ...(warning
+      ? { status: 'applied' as const, changed: false, error: null, outcome: 'pr_created_with_warnings' as const, warnings: [warning] }
+      : { outcome: null, warnings: [] })
+  };
+}
+
 export { buildPullRequestSummary, reconcileSummaryComment, summaryContext, summaryMarker, syncPullRequestSummary };
+export type { PullRequestSummaryResult, SummaryContextResult };

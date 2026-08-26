@@ -95,7 +95,7 @@ const gateCases = [
         "- [x] 代码已审查",
         "- [x] 文档已更新（如适用）",
         "- [x] PR 已创建"
-      ]));
+      ], { pr_status: "created", pr_number: 1 }));
     },
     assertResult(result: ReturnType<typeof runValidator>) {
       assert.equal(result.status, 0, result.stderr);
@@ -103,11 +103,11 @@ const gateCases = [
       assert.equal(payload.gate, "pass");
       assert.deepEqual(
         payload.checks.map((check) => check.type),
-        ["task-meta", "activity-log", "completion-checklist", "review-ledger", "manual-validation", "post-review-commit", "platform-sync-preflight", "platform-sync", "artifact"]
+        ["task-meta", "activity-log", "completion-checklist", "review-ledger", "manual-validation", "post-review-commit", "platform-sync-preflight", "required-pr-delivery", "platform-sync", "artifact"]
       );
       assert.deepEqual(
         payload.checks.map((check) => check.status),
-        ["pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass"]
+        ["pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass", "pass"]
       );
     }
   }

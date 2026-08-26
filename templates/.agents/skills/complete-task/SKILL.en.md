@@ -9,6 +9,8 @@ description: >
 # Complete Task
 > `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`antigravity`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `antigravity-cli`->`antigravity`), or the `human` manual exception.
 
+Host finalization uses receipt v2 with an immutable `receiptId`, monotonic `revision`, and canonical warnings. Lifecycle/identity/required-PR hard failures retain `failed|blocked`; after lifecycle succeeds, comment, peripheral verification, and other sync failures return `status: completed` with `outcome: completed_with_warnings` and six-field warnings, retrying only receipt-pending steps.
+
 
 ## Boundary / Critical Rules
 
@@ -162,7 +164,7 @@ After platform writes succeed and before moving the directory or releasing the s
 agent-infra-internal task-verify {task-id} complete-task.preflight --format text
 ```
 
-This event runs `review-ledger`, `manual-validation`, `post-review-commit`, then `platform-sync-preflight`. On any non-zero exit (fail/blocked), keep the task active, derive the stable code/target from the gate result, record it through `task-warning ... add --step complete-task ...`, and stop. For a review/head mismatch, rerun `commit` or `review-code`; never fall back to the review baseline.
+This event runs `review-ledger`, `manual-validation`, `post-review-commit`, then `platform-sync-preflight`. Host finalization also runs a required-PR delivery hard preflight before lifecycle. On any active hard-gate non-zero exit (fail/blocked), keep the task active, derive the stable code/target from the gate result, record it through `task-warning ... add --step complete-task ...`, and stop. For a review/head mismatch, rerun `commit` or `review-code`; never fall back to the review baseline.
 
 When preflight's `post-review-commit` check passes through a human-decided exemption, update the same summary marker from Step 4 before entering Step 6. Add the original failure code/message and PRC id/evidence from the check output together with the ruling reason, commit scope, human identity, and time from task.md. When a warning exists, treat its historical record as canonical and reconcile it with the current check output; otherwise use the current check output as the original-failure source. Run the same `platform-comment sync ... --kind summary` intent again. If it fails, record `SUMMARY_SYNC_FAILED`, keep the task active, and stop before lifecycle.
 
@@ -174,7 +176,7 @@ When preflight's `post-review-commit` check passes through a human-decided exemp
 agent-infra-internal task-finalization {task-id} complete --agent {standard-agent-token}
 ```
 
-Finalization runs lifecycle -> the terminal task comment -> the `complete-task.completed` gate in a fixed order and records each step in the host receipt. Only structured `status=completed` means completion succeeded. On `failed` or `blocked`, show the error and completed/pending steps, fix the cause, and retry through the same entry point; do not claim completion or hand-repair partial state.
+Finalization runs lifecycle -> the terminal task comment -> the `complete-task.completed` gate in a fixed order and records each step in the host receipt. `status=completed` means lifecycle completed safely; if peripheral warnings remain, also show `outcome=completed_with_warnings`, warnings, and pending steps. Use `failed` or `blocked` only for hard or receipt/capability failures, then fix the cause and retry through the same entry point; do not claim completion or hand-repair partial state.
 
 ```bash
 ls .agents/workspace/completed/{task-id}/task.md

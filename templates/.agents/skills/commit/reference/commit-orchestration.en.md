@@ -34,7 +34,17 @@ Immediately after a push succeeds and remote verification completes, record the 
 agent-infra-internal task-orchestration {task-id} commit-checkpoint --token "$commit_intent_token" --kind pushed --head "$pushed_head" --remote "$remote" --ref "$ref"
 ```
 
-A push-only path skips the committed checkpoint; its pushed HEAD must equal the begin baseline.
+If a normal-branch push fails, retain the `committed` intent; a push-only retry validates current HEAD/baseline/remote/ref and pushes without creating another commit. The commit caller must pass `{ branch, automatic }` policy to `git-workflow push`: ordinary branches attempt one HEAD push, while `main` / `master` skip automatic push and return `committed_with_warnings`; the local committed checkpoint still completes. create-pr only verifies remote delivery and never performs the first push. The generic `git-workflow push` and release caller do not carry this policy.
+
+Example policy push input:
+
+```json
+{
+  "remote": "origin",
+  "refs": ["refs/heads/{branch}"],
+  "policy": { "branch": "{branch}", "automatic": true }
+}
+```
 
 ## Completion and recovery
 

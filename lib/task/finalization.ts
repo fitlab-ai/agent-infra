@@ -15,12 +15,39 @@ import { inspectShortIdRegistry } from './short-id.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 import { verifyTaskEvent } from './verification.ts';
 import type { TaskVerificationResult } from './verification.ts';
+import { projectFinalizationWarning } from './workflow-warning-intents.ts';
+import {
+  mergeOperationWarnings,
+  type OperationOutcome,
+  type OperationWarning,
+  type OperationWarningSeverity
+} from './operation-outcome.ts';
 
-const RECEIPT_VERSION = 1 as const;
+const RECEIPT_VERSION = 2 as const;
+const LEGACY_RECEIPT_VERSION = 1 as const;
 const FINALIZATION_STEPS = ['lifecycle', 'task-comment', 'verification'] as const;
 type FinalizationStep = typeof FINALIZATION_STEPS[number];
 type FinalizationStepState = 'pending' | 'done' | 'skipped';
 type FinalizationError = { code: string; message: string; retryable: boolean };
+type WarningProjectionState = 'pending' | 'done';
+type FinalizationWarning = OperationWarning & Readonly<{
+  status: 'open' | 'resolved';
+  resolvedAt: string | null;
+}>;
+type FinalizationCapability = Readonly<{
+  receiptId: string;
+  baseRevision: number;
+  scope: Exclude<FinalizationStep, 'lifecycle'> | 'warning-projection';
+  nonce: string;
+  issuedAt: string;
+}>;
+type FinalizationMutation =
+  | Readonly<{ scope: 'task-comment'; operation: 'succeeded'; state: 'done' | 'skipped' }>
+  | Readonly<{ scope: 'task-comment'; operation: 'failed'; error: FinalizationError }>
+  | Readonly<{ scope: 'verification'; operation: 'succeeded' }>
+  | Readonly<{ scope: 'verification'; operation: 'failed'; error: FinalizationError }>
+  | Readonly<{ scope: 'warning-projection'; operation: 'succeeded' }>
+  | Readonly<{ scope: 'warning-projection'; operation: 'failed'; error: FinalizationError }>;
 
 type TaskFinalizationRequest = Readonly<{
   taskRef: string;
@@ -34,15 +61,20 @@ type TaskFinalizationOptions = Readonly<{
   lifecycle?: typeof applyTaskLifecycle;
   commentSync?: typeof syncPlatformComment;
   verify?: typeof verifyTaskEvent;
+  preflight?: typeof verifyTaskEvent;
 }>;
 
 type TaskFinalizationReceipt = Readonly<{
   version: typeof RECEIPT_VERSION;
   taskId: string;
   intent: 'complete';
+  receiptId: string;
+  revision: number;
   lifecycle: FinalizationStepState;
   taskComment: FinalizationStepState;
   verification: FinalizationStepState;
+  warningProjection: WarningProjectionState;
+  warnings: readonly FinalizationWarning[];
   updatedAt: string;
   lastError: FinalizationError | null;
 }>;
@@ -64,6 +96,8 @@ type TaskFinalizationResult = Readonly<{
   verification: TaskFinalizationStep | null;
   completedSteps: readonly FinalizationStep[];
   pendingSteps: readonly FinalizationStep[];
+  outcome: OperationOutcome;
+  warnings: readonly OperationWarning[];
   error: FinalizationError | null;
 }>;
 
@@ -100,6 +134,8 @@ function failed(
     verification: null,
     completedSteps: [],
     pendingSteps: [...FINALIZATION_STEPS],
+    outcome: null,
+    warnings: [],
     error,
     ...overrides
   };
@@ -110,12 +146,32 @@ function emptyReceipt(taskId: string): TaskFinalizationReceipt {
     version: RECEIPT_VERSION,
     taskId,
     intent: 'complete',
+    receiptId: randomUUID(),
+    revision: 0,
     lifecycle: 'pending',
     taskComment: 'pending',
     verification: 'pending',
+    warningProjection: 'done',
+    warnings: [],
     updatedAt: now(),
     lastError: null
   };
+}
+
+function validWarning(value: unknown): value is FinalizationWarning {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const warning = value as Record<string, unknown>;
+  if (Object.keys(warning).sort().join('\0') !== [
+    'code', 'message', 'retryable', 'step', 'target', 'severity', 'status', 'resolvedAt'
+  ].sort().join('\0')) return false;
+  return typeof warning.code === 'string' && warning.code.length > 0
+    && typeof warning.message === 'string' && warning.message.length > 0
+    && typeof warning.retryable === 'boolean'
+    && typeof warning.step === 'string' && warning.step.length > 0
+    && typeof warning.target === 'string' && warning.target.length > 0
+    && (warning.severity === 'IMPORTANT' || warning.severity === 'ACTION_REQUIRED')
+    && (warning.status === 'open' || warning.status === 'resolved')
+    && (warning.resolvedAt === null || typeof warning.resolvedAt === 'string');
 }
 
 function validateReceipt(value: unknown, taskId: string): TaskFinalizationReceipt {
@@ -124,19 +180,59 @@ function validateReceipt(value: unknown, taskId: string): TaskFinalizationReceip
   const states = ['pending', 'done', 'skipped'];
   if (
     receipt.version !== RECEIPT_VERSION || receipt.taskId !== taskId || receipt.intent !== 'complete'
+    || typeof receipt.receiptId !== 'string' || receipt.receiptId.length === 0
+    || !Number.isSafeInteger(receipt.revision) || Number(receipt.revision) < 0
+    || !states.includes(String(receipt.lifecycle))
+    || !states.includes(String(receipt.taskComment))
+    || !states.includes(String(receipt.verification))
+    || !['pending', 'done'].includes(String(receipt.warningProjection ?? 'done'))
+    || !Array.isArray(receipt.warnings) || receipt.warnings.some((warning) => !validWarning(warning))
+    || typeof receipt.updatedAt !== 'string'
+    || (receipt.lastError !== null && (typeof receipt.lastError !== 'object' || Array.isArray(receipt.lastError)))
+  ) throw new Error('receipt schema is invalid');
+  return {
+    ...receipt,
+    warningProjection: receipt.warningProjection ?? (receipt.warnings.length > 0 ? 'pending' : 'done')
+  } as TaskFinalizationReceipt;
+}
+
+function validateLegacyReceipt(value: unknown, taskId: string): Omit<TaskFinalizationReceipt, 'version' | 'receiptId' | 'revision' | 'warnings'> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('receipt must be an object');
+  const receipt = value as Record<string, unknown>;
+  const states = ['pending', 'done', 'skipped'];
+  if (
+    receipt.version !== LEGACY_RECEIPT_VERSION || receipt.taskId !== taskId || receipt.intent !== 'complete'
     || !states.includes(String(receipt.lifecycle))
     || !states.includes(String(receipt.taskComment))
     || !states.includes(String(receipt.verification))
     || typeof receipt.updatedAt !== 'string'
     || (receipt.lastError !== null && (typeof receipt.lastError !== 'object' || Array.isArray(receipt.lastError)))
   ) throw new Error('receipt schema is invalid');
-  return receipt as TaskFinalizationReceipt;
+  return receipt as Omit<TaskFinalizationReceipt, 'version' | 'receiptId' | 'revision' | 'warnings'>;
 }
 
 function readReceipt(repoRoot: string, taskId: string): TaskFinalizationReceipt | null {
   const file = receiptPath(repoRoot, taskId);
   if (!fs.existsSync(file)) return null;
-  return validateReceipt(JSON.parse(fs.readFileSync(file, 'utf8')) as unknown, taskId);
+  const value = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+  if (value && typeof value === 'object' && !Array.isArray(value) && (value as Record<string, unknown>).version === LEGACY_RECEIPT_VERSION) {
+    const legacy = validateLegacyReceipt(value, taskId);
+    return {
+      version: RECEIPT_VERSION,
+      taskId,
+      intent: 'complete',
+      receiptId: randomUUID(),
+      revision: 0,
+      lifecycle: legacy.lifecycle,
+      taskComment: legacy.taskComment,
+      verification: legacy.verification,
+      warningProjection: 'done',
+      warnings: [],
+      updatedAt: now(),
+      lastError: legacy.lastError
+    };
+  }
+  return validateReceipt(value, taskId);
 }
 
 function writeReceipt(repoRoot: string, receipt: TaskFinalizationReceipt): void {
@@ -156,9 +252,15 @@ function writeReceipt(repoRoot: string, receipt: TaskFinalizationReceipt): void 
 function updateReceipt(
   repoRoot: string,
   receipt: TaskFinalizationReceipt,
-  patch: Partial<Pick<TaskFinalizationReceipt, 'lifecycle' | 'taskComment' | 'verification' | 'lastError'>>
+  patch: Partial<Pick<TaskFinalizationReceipt, 'lifecycle' | 'taskComment' | 'verification' | 'warningProjection' | 'warnings' | 'lastError'>>
 ): TaskFinalizationReceipt {
-  const next = { ...receipt, ...patch, updatedAt: now() };
+  const current = readReceipt(repoRoot, receipt.taskId);
+  if (!current || current.receiptId !== receipt.receiptId || current.revision !== receipt.revision) {
+    const error = new Error('finalization receipt revision is stale');
+    Object.assign(error, { code: 'FINALIZATION_CAPABILITY_STALE' });
+    throw error;
+  }
+  const next = { ...current, ...patch, revision: current.revision + 1, updatedAt: now() };
   writeReceipt(repoRoot, next);
   return next;
 }
@@ -213,6 +315,200 @@ function verificationFailure(result: TaskVerificationResult): FinalizationError 
   };
 }
 
+function warningFromError(
+  step: FinalizationStep,
+  error: FinalizationError,
+  severity: OperationWarningSeverity = 'ACTION_REQUIRED'
+): OperationWarning {
+  return {
+    code: error.code,
+    message: error.message,
+    retryable: error.retryable,
+    step,
+    target: step,
+    severity
+  };
+}
+
+function openWarnings(receipt: TaskFinalizationReceipt): readonly OperationWarning[] {
+  return mergeOperationWarnings(
+    receipt.warnings.filter((warning) => warning.status === 'open').map(({ status: _status, resolvedAt: _resolvedAt, ...warning }) => warning)
+  );
+}
+
+function warningRecord(warning: OperationWarning, status: FinalizationWarning['status']): FinalizationWarning {
+  return { ...warning, status, resolvedAt: status === 'resolved' ? now() : null };
+}
+
+function replaceWarning(
+  receipt: TaskFinalizationReceipt,
+  warning: OperationWarning,
+  status: FinalizationWarning['status']
+): readonly FinalizationWarning[] {
+  const next = warningRecord(warning, status);
+  const key = `${warning.step}\0${warning.code}\0${warning.target}`;
+  return [
+    ...receipt.warnings.filter((item) => `${item.step}\0${item.code}\0${item.target}` !== key),
+    next
+  ];
+}
+
+function resolveStepWarnings(receipt: TaskFinalizationReceipt, step: FinalizationStep): readonly FinalizationWarning[] {
+  return receipt.warnings.map((warning) => warning.step === step && warning.status === 'open'
+    ? { ...warning, status: 'resolved', resolvedAt: now() }
+    : warning);
+}
+
+function issueCapability(receipt: TaskFinalizationReceipt, scope: Exclude<FinalizationStep, 'lifecycle'> | 'warning-projection'): FinalizationCapability {
+  return {
+    receiptId: receipt.receiptId,
+    baseRevision: receipt.revision,
+    scope,
+    nonce: randomUUID(),
+    issuedAt: now()
+  };
+}
+
+function capabilityError(code: 'FINALIZATION_CAPABILITY_STALE' | 'FINALIZATION_SCOPE_INVALID', message: string): Error {
+  const error = new Error(message);
+  error.name = 'OrchestrationStateError';
+  Object.assign(error, { code });
+  return error;
+}
+
+function mutationKeys(value: FinalizationMutation): string[] {
+  return Object.keys(value).sort();
+}
+
+function validateCapabilityMutation(
+  current: TaskFinalizationReceipt,
+  capability: FinalizationCapability,
+  mutation: FinalizationMutation,
+  consumed: Set<string>
+): void {
+  if (capability.receiptId !== current.receiptId || capability.baseRevision !== current.revision || consumed.has(capability.nonce)) {
+    throw capabilityError('FINALIZATION_CAPABILITY_STALE', 'finalization capability is stale or outside its scope');
+  }
+  if (capability.scope !== mutation.scope) {
+    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability mutation scope does not match its capability');
+  }
+  if (mutation.operation !== 'succeeded' && mutation.operation !== 'failed') {
+    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability operation is invalid');
+  }
+  if (mutation.scope === 'task-comment') {
+    if (current.taskComment !== 'pending') throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability scope task-comment is not pending');
+    const expected = mutation.operation === 'succeeded' ? ['operation', 'scope', 'state'] : ['error', 'operation', 'scope'];
+    if (mutationKeys(mutation).join('\0') !== expected.join('\0')) throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability mutation shape is invalid');
+    if (mutation.operation === 'succeeded' && mutation.state !== 'done' && mutation.state !== 'skipped') {
+      throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability transition is invalid');
+    }
+  } else if (mutation.scope === 'verification') {
+    if (current.verification !== 'pending') throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability scope verification is not pending');
+    const expected = mutation.operation === 'succeeded' ? ['operation', 'scope'] : ['error', 'operation', 'scope'];
+    if (mutationKeys(mutation).join('\0') !== expected.join('\0')) throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability mutation shape is invalid');
+  } else {
+    if (current.warningProjection !== 'pending') throw capabilityError('FINALIZATION_SCOPE_INVALID', 'warning projection capability is not pending');
+    const expected = mutation.operation === 'succeeded' ? ['operation', 'scope'] : ['error', 'operation', 'scope'];
+    if (mutationKeys(mutation).join('\0') !== expected.join('\0')) throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability mutation shape is invalid');
+  }
+  if (mutation.operation === 'failed' && (!mutation.error.code || !mutation.error.message || typeof mutation.error.retryable !== 'boolean')) {
+    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability failure detail is invalid');
+  }
+}
+
+function mutationPatch(current: TaskFinalizationReceipt, mutation: FinalizationMutation): Partial<Pick<TaskFinalizationReceipt, 'taskComment' | 'verification' | 'warningProjection' | 'warnings' | 'lastError'>> {
+  if (mutation.scope === 'task-comment') {
+    if (mutation.operation === 'succeeded') {
+      const warnings = resolveStepWarnings(current, 'task-comment');
+      return { taskComment: mutation.state, warningProjection: warnings.length > 0 ? 'pending' : 'done', warnings, lastError: null };
+    }
+    const warnings = replaceWarning(current, warningFromError('task-comment', mutation.error), 'open');
+    return { taskComment: 'pending', warningProjection: 'pending', warnings, lastError: mutation.error };
+  }
+  if (mutation.scope === 'verification') {
+    if (mutation.operation === 'succeeded') {
+      const warnings = resolveStepWarnings(current, 'verification');
+      return { verification: 'done', warningProjection: warnings.length > 0 ? 'pending' : 'done', warnings, lastError: null };
+    }
+    const warnings = replaceWarning(current, warningFromError('verification', mutation.error), 'open');
+    return { verification: 'pending', warningProjection: 'pending', warnings, lastError: mutation.error };
+  }
+  return mutation.operation === 'succeeded'
+    ? { warningProjection: 'done', lastError: null }
+    : { warningProjection: 'pending', lastError: mutation.error };
+}
+
+function applyFinalizationReceiptMutationUnderLock(
+  repoRoot: string,
+  receipt: TaskFinalizationReceipt,
+  capability: FinalizationCapability,
+  mutation: FinalizationMutation,
+  consumed: Set<string>
+): TaskFinalizationReceipt {
+  const resolved = resolveTaskRef(receipt.taskId, { repoRoot });
+  if (!resolved.ok || resolved.state !== 'completed') {
+    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires a completed task');
+  }
+  const current = readReceipt(repoRoot, receipt.taskId);
+  if (!current || current.receiptId !== receipt.receiptId || current.revision !== receipt.revision) {
+    throw capabilityError('FINALIZATION_CAPABILITY_STALE', 'finalization receipt revision is stale');
+  }
+  validateCapabilityMutation(current, capability, mutation, consumed);
+  const next = updateReceipt(repoRoot, current, mutationPatch(current, mutation));
+  consumed.add(capability.nonce);
+  return next;
+}
+
+function applyFinalizationReceiptMutation(
+  repoRoot: string,
+  receipt: TaskFinalizationReceipt,
+  capability: FinalizationCapability,
+  mutation: FinalizationMutation
+): TaskFinalizationReceipt {
+  const resolved = resolveTaskRef(receipt.taskId, { repoRoot });
+  if (!resolved.ok || resolved.state !== 'completed') {
+    throw capabilityError('FINALIZATION_SCOPE_INVALID', 'finalization capability requires a completed task');
+  }
+  return withTaskExecutionLock(repoRoot, resolved.taskId, 'task-finalization.receipt-mutation', () =>
+    applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, mutation, new Set<string>())
+  );
+}
+
+function warningKey(warning: Pick<FinalizationWarning, 'step' | 'code' | 'target'>): string {
+  return `${warning.step}\0${warning.code}\0${warning.target}`;
+}
+
+function reconcileWarningProjection(repoRoot: string, taskId: string, receipt: TaskFinalizationReceipt, consumed: Set<string>): TaskFinalizationReceipt {
+  if (receipt.warningProjection === 'done') return receipt;
+  const warnings = [...new Map(receipt.warnings.map((warning) => [warningKey(warning), warning])).values()];
+  for (const warning of warnings) {
+    try {
+      const projected = projectFinalizationWarning(taskId, warning, { repoRoot });
+      if (projected.status === 'failed') {
+        const detail: FinalizationError = {
+          code: projected.error?.code || 'FINALIZATION_WARNING_PROJECTION_FAILED',
+          message: projected.error?.message || 'workflow warning projection failed',
+          retryable: true
+        };
+        const capability = issueCapability(receipt, 'warning-projection');
+        return applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'failed', error: detail }, consumed);
+      }
+    } catch (error) {
+      const detail = errorOf(error, 'FINALIZATION_WARNING_PROJECTION_FAILED', true);
+      try {
+        const capability = issueCapability(receipt, 'warning-projection');
+        return applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'failed', error: detail }, consumed);
+      }
+      catch { return receipt; }
+    }
+  }
+  try {
+    const capability = issueCapability(receipt, 'warning-projection');
+    return applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'succeeded' }, consumed);
+  }
+  catch { return receipt; }
+}
+
 function terminalResult(
   taskId: string,
   receipt: TaskFinalizationReceipt,
@@ -222,14 +518,19 @@ function terminalResult(
 ): TaskFinalizationResult {
   const pending = pendingSteps(receipt);
   const blocked = [steps.lifecycle, steps.taskComment, steps.verification].some((step) => step?.status === 'blocked');
+  const warnings = openWarnings(receipt);
+  const postLifecyclePending = receipt.lifecycle === 'done' && (pending.some((step) => step !== 'lifecycle') || receipt.warningProjection === 'pending');
+  const hardError = error?.code.startsWith('FINALIZATION_') || error?.code === 'TASK_FINALIZATION_RECEIPT_INVALID';
   return {
-    status: pending.length === 0 ? 'completed' : blocked ? 'blocked' : 'failed',
+    status: hardError ? (error?.retryable ? 'blocked' : 'failed') : pending.length === 0 ? 'completed' : postLifecyclePending ? 'completed' : blocked ? 'blocked' : 'failed',
     changed,
     taskId,
     ...steps,
     completedSteps: completedSteps(receipt),
     pendingSteps: pending,
-    error
+    outcome: postLifecyclePending && (warnings.length > 0 || receipt.warningProjection === 'pending') ? 'completed_with_warnings' : null,
+    warnings,
+    error: hardError ? error : postLifecyclePending ? null : error
   };
 }
 
@@ -242,12 +543,40 @@ function applyUnderLock(
   const lifecycle = options.lifecycle ?? applyTaskLifecycle;
   const commentSync = options.commentSync ?? syncPlatformComment;
   const verify = options.verify ?? verifyTaskEvent;
+  const consumedCapabilities = new Set<string>();
   let receipt: TaskFinalizationReceipt;
   try {
+    const file = receiptPath(repoRoot, taskId);
+    const existed = fs.existsSync(file);
+    const rawVersion = existed
+      ? (JSON.parse(fs.readFileSync(file, 'utf8')) as { version?: unknown }).version
+      : null;
     receipt = readReceipt(repoRoot, taskId) ?? emptyReceipt(taskId);
-    if (!fs.existsSync(receiptPath(repoRoot, taskId))) writeReceipt(repoRoot, receipt);
+    if (!existed || rawVersion === LEGACY_RECEIPT_VERSION) writeReceipt(repoRoot, receipt);
   } catch (error) {
     return failed(taskId, errorOf(error, 'TASK_FINALIZATION_RECEIPT_INVALID'));
+  }
+
+  const preflightState = resolveTaskRef(taskId, { repoRoot });
+  if (options.preflight && preflightState.ok && preflightState.state === 'active') {
+    try {
+      const preflight = options.preflight(
+        { taskRef: taskId, event: 'complete-task.preflight' },
+        { repoRoot }
+      );
+      if (preflight.status !== 'pass') {
+        const detail = verificationFailure(preflight);
+        return failed(taskId, detail, {
+          lifecycle: null,
+          taskComment: null,
+          verification: null,
+          completedSteps: completedSteps(receipt),
+          pendingSteps: pendingSteps(receipt)
+        });
+      }
+    } catch (error) {
+      return failed(taskId, errorOf(error, 'TASK_FINALIZATION_PREFLIGHT_FAILED', true));
+    }
   }
 
   let lifecycleResult: TaskFinalizationStep | null = null;
@@ -307,41 +636,86 @@ function applyUnderLock(
 
   let taskComment: TaskFinalizationStep | null = null;
   try {
-    const result = commentSync(taskId, { kind: 'task', agent: request.agent, cwd: repoRoot });
-    taskComment = commentStep(result);
-    if (result.status === 'applied' || result.status === 'no-op') {
-      const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
-      receipt = updateReceipt(repoRoot, receipt, { taskComment: skipped ? 'skipped' : 'done', lastError: null });
-      taskComment = skipped ? { ...taskComment, status: 'skipped' } : taskComment;
-      changed = changed || result.changed;
+    receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+    if (receipt.taskComment !== 'pending') {
+      taskComment = {
+        status: receipt.taskComment === 'skipped' ? 'skipped' : 'no-op',
+        changed: false,
+        error: null
+      };
     } else {
-      receipt = updateReceipt(repoRoot, receipt, { taskComment: 'pending', lastError: taskComment.error });
-      return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification: null }, changed, taskComment.error);
+      const result = commentSync(taskId, { kind: 'task', agent: request.agent, cwd: repoRoot });
+      taskComment = commentStep(result);
+      if (result.status === 'applied' || result.status === 'no-op') {
+        const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
+        const capability = issueCapability(receipt, 'task-comment');
+        receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+          scope: 'task-comment', operation: 'succeeded', state: skipped ? 'skipped' : 'done'
+        }, consumedCapabilities);
+        receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+        taskComment = skipped ? { ...taskComment, status: 'skipped' } : taskComment;
+        changed = changed || result.changed;
+      } else {
+        const detail = taskComment.error ?? { code: 'COMMENT_SYNC_FAILED', message: 'task comment synchronization failed', retryable: true };
+        const capability = issueCapability(receipt, 'task-comment');
+        receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+          scope: 'task-comment', operation: 'failed', error: detail
+        }, consumedCapabilities);
+        receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+        return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification: null }, changed, taskComment.error);
+      }
     }
   } catch (error) {
     const detail = errorOf(error, 'COMMENT_SYNC_FAILED', true);
-    try { receipt = updateReceipt(repoRoot, receipt, { taskComment: 'pending', lastError: detail }); } catch { /* preserve the primary error */ }
+    try {
+      const capability = issueCapability(receipt, 'task-comment');
+      receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+        scope: 'task-comment', operation: 'failed', error: detail
+      }, consumedCapabilities);
+      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+    } catch { /* preserve the primary error */ }
     return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment: { status: 'blocked', changed: false, error: detail }, verification: null }, changed, detail);
   }
 
   let verification: TaskFinalizationStep | null = null;
   try {
-    const result = verify(
-      { taskRef: taskId, event: 'complete-task.completed' },
-      { repoRoot }
-    );
-    verification = verificationStep(result);
-    if (result.status === 'pass') {
-      receipt = updateReceipt(repoRoot, receipt, { verification: 'done', lastError: null });
+    receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+    if (receipt.verification !== 'pending') {
+      verification = { status: 'no-op', changed: false, error: null };
     } else {
-      receipt = updateReceipt(repoRoot, receipt, { verification: 'pending', lastError: verification.error });
-      return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification }, changed, verification.error);
+      const result = verify(
+        { taskRef: taskId, event: 'complete-task.completed' },
+        { repoRoot }
+      );
+      verification = verificationStep(result);
+      if (result.status === 'pass') {
+        const capability = issueCapability(receipt, 'verification');
+        receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+          scope: 'verification', operation: 'succeeded'
+        }, consumedCapabilities);
+        receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+      } else {
+        const detail = verification.error ?? { code: 'VERIFY_FAILED', message: 'verification failed', retryable: true };
+        const capability = issueCapability(receipt, 'verification');
+        receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+          scope: 'verification', operation: 'failed', error: detail
+        }, consumedCapabilities);
+        receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+        return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification }, changed, verification.error);
+      }
     }
   } catch (error) {
     const detail = errorOf(error, 'VERIFY_FAILED', true);
-    try { receipt = updateReceipt(repoRoot, receipt, { verification: 'pending', lastError: detail }); } catch { /* preserve the primary error */ }
+    try {
+      const capability = issueCapability(receipt, 'verification');
+      receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+        scope: 'verification', operation: 'failed', error: detail
+      }, consumedCapabilities);
+      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+    } catch { /* preserve the primary error */ }
     return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification: { status: 'blocked', changed: false, error: detail } }, changed, detail);
   }
+  receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
   return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification }, changed);
 }
 
@@ -362,9 +736,12 @@ function applyTaskFinalization(request: TaskFinalizationRequest, options: TaskFi
   }
 }
 
-export { applyTaskFinalization };
+export { applyFinalizationReceiptMutation, applyTaskFinalization, issueCapability as createFinalizationCapability };
 export type {
   FinalizationError,
+  FinalizationCapability,
+  FinalizationMutation,
+  FinalizationWarning,
   FinalizationStep,
   TaskFinalizationOptions,
   TaskFinalizationReceipt,

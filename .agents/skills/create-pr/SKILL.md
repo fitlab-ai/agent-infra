@@ -11,6 +11,8 @@ description: >
 
 创建 Pull Request，并在与任务关联时立即补齐核心元数据和 reviewer 摘要。
 
+`platform-pr create` 返回共享的 `outcome` / `warnings` 字段；正常绑定为 `outcome: null, warnings: []`。创建前必须证明任务分支已推送，远端 branch SHA 与本地预期 `HEAD` 一致；缺失、漂移、PR head SHA 不一致或 bind 前竞态都属于 hard failure，不得用 warning 继续绑定。
+
 ## 行为边界 / 关键规则
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
@@ -64,7 +66,7 @@ description: >
 
 ### 4. 检查远程分支状态
 
-调用 `agent-infra-internal git-workflow inspect` 检查 upstream/remote branch；必要时通过 `git-workflow push` 推送并复核。
+调用 `agent-infra-internal git-workflow inspect` 检查已交付的 upstream/remote branch；`create-pr` 不执行首次 push，远端 branch 缺失或 SHA 与本地 HEAD 不一致时直接失败并指向 `commit`/push-only。随后在 locate/create/bind 前后再次读取远端 branch SHA，并要求 PR 的精确 repository/ref、base 和 `head.sha` 全部匹配；POST 后的竞态不自动删除已创建 PR 或远端 branch，下一次只按资源身份恢复。
 
 ### 5. 创建或恢复 PR
 
@@ -74,7 +76,7 @@ description: >
 
 ### 6. 同步 PR 元数据
 
-调用 `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue`。core 从 Issue 复制 type / `in:` labels、assignee 和具体 milestone，并维护 Development 关联；逐项权限不足返回 degraded，不反向更新 Issue。
+调用 `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue`。core 从 Issue 复制 type / `in:` labels、assignee 和具体 milestone，并维护 Development 关联；逐项权限不足返回 degraded，不反向更新 Issue。PR 已成功绑定后，metadata/summary 同步失败只产生 `pr_created_with_warnings`，保留 PR 身份，重试只执行未完成的同步步骤。
 
 ### 7. 发布审查摘要
 

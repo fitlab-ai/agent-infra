@@ -11,6 +11,8 @@ description: >
 
 Create a Git commit without overwriting user work and update the related task state when needed.
 
+Composite results always expose `outcome` and `warnings`: normal completion uses `outcome: null, warnings: []`; peripheral push failures and protected-branch policy produce `committed_with_warnings` without undoing the local commit. Warnings contain only `code`, `message`, `retryable`, `step`, `target`, and `severity`; presentation derives retry hints from code and step.
+
 When updating related `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
 
 When the entry business operands literally contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated`; otherwise bind it to empty. Never infer the source from a run file or environment.
@@ -76,25 +78,31 @@ If this commit is associated with a task and a `review-code` artifact exists, re
 - After all comparisons match and the commit succeeds, the Step 6 `commit-complete` core finalizer atomically writes `last_reviewed_commit` and Commit done; the caller must not write them
 - Do not scan backward to earlier Approved artifacts; the highest-round `review-code` artifact is the only authoritative source
 
-## 5. Push to the Existing PR When Applicable
+## 5. Push the Current Branch
 
-After a new commit is created, or when Step 4 selects push-only, push HEAD normally if the current branch already has an open Pull Request. Otherwise keep the current behavior (the first push is still handled by `create-pr`). This adds no extra/empty commit and never pushes when there is no PR.
+After a new commit is created, checkpoint `committed` before any push. The commit caller must include its policy and target ref in the push input, then attempt one normal HEAD push without first checking for an open Pull Request. The policy skips automatic push on `main` / `master` while still allowing the local commit; `create-pr` only consumes and verifies an already-delivered remote branch and never performs the first push. A normal-branch push failure preserves the `committed` intent and local commit; retry is push-only and never creates a duplicate commit. The generic `git-workflow push` and release caller do not carry this policy.
 
-> Detect whether the current branch has an open PR — and authenticate to the platform — per `.agents/rules/issue-pr-commands.md`; if that rule is unavailable or detection fails, follow the degradation below.
+The push input includes:
 
-a. Detect whether the current branch (head) has an open PR per `.agents/rules/issue-pr-commands.md`.
+```json
+{
+  "remote": "origin",
+  "refs": ["refs/heads/{branch}"],
+  "policy": { "branch": "{branch}", "automatic": true }
+}
+```
 
-b. On an open PR -> push the current branch:
+a. Push the current branch:
 
 Use `agent-infra-internal git-workflow push --input {file}` for per-ref normal push and verification. Never force push.
 
 After push succeeds and remote verification completes, immediately run the pushed checkpoint from `reference/commit-orchestration.md`.
 
-c. Safe degradation (never block an already completed `git commit`; only warn the user):
-   - Platform unavailable / unauthenticated / detection failed / no open PR -> do not push; continue.
+d. Safe degradation (never block an already completed `git commit`; only warn the user):
+   - Protected-branch policy -> skip automatic push and return `committed_with_warnings` without changing the remote ref.
    - `git push` fails (needs `git pull --rebase`, no upstream, network error) -> keep the local commit and tell the user to push manually.
 
-Fold the push outcome (pushed / skipped(no PR) / failed) into the next step's "Update Task Status" Activity Log note or user output.
+Fold the push outcome (pushed / skipped(protected branch) / failed) into the next step's "Update Task Status" Activity Log note or user output.
 
 ## 6. Update Task Status When Applicable
 

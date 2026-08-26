@@ -40,7 +40,17 @@ push 成功并完成远端复核后立即记录已验证的 remote/ref/HEAD：
 agent-infra-internal task-orchestration {task-id} commit-checkpoint --token "$commit_intent_token" --kind pushed --head "$pushed_head" --remote "$remote" --ref "$ref"
 ```
 
-push-only 路径跳过 committed checkpoint，pushed HEAD 必须等于 begin 时的 baseline HEAD。
+普通分支 push 失败时保留 `committed` intent；push-only 重试只校验当前 HEAD/baseline/remote/ref 后推送，不重复创建 commit。commit caller 必须把 `{ branch, automatic }` policy 传给 `git-workflow push`：普通分支尝试一次 HEAD push，`main` / `master` 跳过自动 push 并返回 `committed_with_warnings`，但本地 committed checkpoint 仍必须完成。create-pr 只复核远端交付，不负责首次 push；通用 `git-workflow push` 和 release caller 不携带该 policy。
+
+policy push input 示例：
+
+```json
+{
+  "remote": "origin",
+  "refs": ["refs/heads/{branch}"],
+  "policy": { "branch": "{branch}", "automatic": true }
+}
+```
 
 ## 完成与恢复
 

@@ -11,6 +11,8 @@ description: >
 
 在不覆盖用户本地工作的前提下创建 Git commit，并在需要时更新关联任务状态。
 
+复合结果统一包含 `outcome` 和 `warnings`：正常完成为 `outcome: null, warnings: []`；外围推送失败或保护分支策略只产生 `committed_with_warnings`，不撤销已经创建的本地提交。warning 只使用 `code`、`message`、`retryable`、`step`、`target`、`severity` 六个字段，重试提示由展示层根据 code/step 推导。
+
 更新关联 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
 
 若入口业务操作数包含字面 `--orchestrated`，绑定 `{execution-flag}` = `--orchestrated`；否则绑定为空。不得从 run 文件或环境推断来源。
@@ -72,7 +74,7 @@ git diff
 
 先判断受限 push-only 场景；否则把 message、显式路径、expected HEAD/tree 写入临时 JSON，并调用 `agent-infra-internal git-workflow commit --input {file}`。core 负责范围、敏感文件、暂存树和幂等校验。
 
-普通 commit 成功后必须立即按该 reference 执行 committed checkpoint；checkpoint 失败时保留 intent 并停止，不得继续 push 或写成功状态。
+普通 commit 成功后必须立即按该 reference 执行 committed checkpoint；checkpoint 失败时保留 intent 并停止，不得继续 push 或写成功状态。普通分支的 push 失败保留 `committed` intent 和本地提交，重试只走 push-only，不重复创建 commit；`main` / `master` 的自动 push 由 commit caller policy 跳过，但本地 commit 仍允许创建，远端 ref 不应被修改。通用 `git-workflow push` 和 release caller 不携带该 policy。
 
 如果本次提交关联任务且存在 `review-code` 产物，在提交前读取最高轮 `review-code` 产物：
 - 若该产物 `总体结论` / `Overall Verdict` 为 Approved，解析 `R`、`F` 与 `审查快照树` / `Reviewed Snapshot Tree`（`T`）
@@ -82,25 +84,30 @@ git diff
 - 全部相等并成功提交后，由步骤 6 的 `commit-complete` 核心收尾原子写入 `last_reviewed_commit` 与 Commit done；调用方不得手写
 - 不向后扫描更早的 Approved 产物；最高轮 `review-code` 产物是唯一权威来源
 
-## 5. 推送到已有 PR（按需）
+## 5. 推送当前分支
 
-新提交完成或步骤 4 命中 push-only 后，如果当前分支已存在开放的 Pull Request，则把 HEAD 普通推送上去让 PR 自动更新；否则保持现状（首次推送仍由 `create-pr` 负责）。本步骤不创建额外/空 commit，也不在无 PR 时推送；与是否关联任务无关。
+新提交完成或步骤 4 命中 push-only 后，commit caller 必须把 caller policy 和目标 ref 一起写入 push input，并尝试一次 HEAD 普通推送；不先查询是否存在开放 PR。policy 仅在当前分支不是 `main` / `master` 时允许自动推送。`create-pr` 只消费并复核已交付的远端分支，不负责首次推送。本步骤不创建额外/空 commit，也不 force push。
 
-> 检测当前分支是否有开放 PR、以及平台认证，统一按 `.agents/rules/issue-pr-commands.md` 执行；该规则不可用或检测失败时，按下方降级处理。
+push input 至少包含以下结构：
 
-a. 按 `.agents/rules/issue-pr-commands.md` 检测当前分支（head）是否存在开放 PR。
+```json
+{
+  "remote": "origin",
+  "refs": ["refs/heads/{branch}"],
+  "policy": { "branch": "{branch}", "automatic": true }
+}
+```
 
-b. 命中开放 PR -> 推送当前分支：
+a. 通过 `agent-infra-internal git-workflow push --input {file}` 逐 ref 普通推送并复核。
 
-通过 `agent-infra-internal git-workflow push --input {file}` 逐 ref 普通推送并复核，禁止 force push。
+b. policy 判定为受保护分支 -> 跳过自动 push，保留 `committed_with_warnings`；不得修改远端 ref。
 
 推送成功并完成远端复核后，必须立即按 `reference/commit-orchestration.md` 执行 pushed checkpoint。
 
 c. 安全降级（不阻塞已完成的 `git commit`，仅提示用户）：
-   - 平台不可用 / 未认证 / 检测失败 / 未命中开放 PR -> 不推送，继续后续步骤。
    - `git push` 失败（如需 `git pull --rebase`、无 upstream、网络异常）-> 保留本地提交，提示用户手动推送。
 
-把推送结果（pushed / skipped(no PR) / failed）并入下一步「更新任务状态」的 Activity Log 说明或用户输出。
+把推送结果（pushed / skipped(protected branch) / failed）并入下一步「更新任务状态」的 Activity Log 说明或用户输出。
 
 ## 6. 按需更新任务状态
 

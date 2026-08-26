@@ -45,6 +45,67 @@ test('git-workflow CLI commits explicit paths and verifies remote refs', () => {
   }
 });
 
+test('git-workflow commit policy pushes ordinary branches, reports failure, and recovers push-only', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-policy-'));
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-policy-remote-'));
+  const missingRemote = path.join(remote, 'missing.git');
+  try {
+    execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
+    execFileSync('git', ['init', '-q', '-b', 'feature'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Codex'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: root });
+    execFileSync('git', ['remote', 'add', 'origin', missingRemote], { cwd: root });
+    fs.writeFileSync(path.join(root, 'feature.txt'), 'feature\n');
+    execFileSync('git', ['add', 'feature.txt'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'feature'], { cwd: root });
+    const input = path.join(root, 'push.json');
+    fs.writeFileSync(input, JSON.stringify({
+      remote: 'origin', refs: ['refs/heads/feature'], policy: { branch: 'feature', automatic: true }
+    }));
+    const failed = run(root, ['push', '--input', input]);
+    assert.equal(failed.status, 0, failed.stderr);
+    const failedPayload = JSON.parse(failed.stdout);
+    assert.equal(failedPayload.outcome, 'committed_with_warnings');
+    assert.equal(failedPayload.warnings[0].code, 'COMMIT_PUSH_FAILED');
+
+    execFileSync('git', ['init', '-q', '--bare', missingRemote]);
+    const pushOnlyInput = path.join(root, 'push-only.json');
+    fs.writeFileSync(pushOnlyInput, JSON.stringify({ remote: 'origin', refs: ['refs/heads/feature'] }));
+    const pushOnly = run(root, ['push', '--input', pushOnlyInput]);
+    assert.equal(pushOnly.status, 0, pushOnly.stderr);
+    assert.equal(JSON.parse(pushOnly.stdout).status, 'applied');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  }
+});
+
+test('git-workflow commit policy rejects a branch/ref mismatch before pushing', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-policy-mismatch-'));
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-policy-mismatch-remote-'));
+  try {
+    execFileSync('git', ['init', '-q', '--bare'], { cwd: remote });
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Codex'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: root });
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: root });
+    fs.writeFileSync(path.join(root, 'main.txt'), 'main\n');
+    execFileSync('git', ['add', 'main.txt'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'main'], { cwd: root });
+    const input = path.join(root, 'mismatch.json');
+    fs.writeFileSync(input, JSON.stringify({
+      remote: 'origin', refs: ['refs/heads/main'], policy: { branch: 'feature', automatic: true }
+    }));
+    const rejected = run(root, ['push', '--input', input]);
+    assert.equal(rejected.status, 1, rejected.stderr);
+    assert.equal(JSON.parse(rejected.stdout).error.code, 'COMMIT_PUSH_POLICY_INVALID');
+    assert.throws(() => execFileSync('git', ['ls-remote', '--exit-code', 'origin', 'refs/heads/main'], { cwd: root }));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  }
+});
+
 test('git-workflow push-rebased ignores a retained REBASE_HEAD after a completed rewrite', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-rebase-cli-'));
   const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'git-workflow-rebase-remote-'));

@@ -25,6 +25,7 @@ import {
 import { prepareCodexOrchestrationDelegation } from '../task/codex-orchestration.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
+import { mergeOperationWarnings } from '../task/operation-outcome.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|dispatch|await-activation|recover-prepared|hook-start|hook-stop|advance|pause|status|commit-start|commit-begin|commit-checkpoint|commit-complete|commit-recover|commit-abort|commit-terminate|commit-status> [options]\n';
 
@@ -308,7 +309,10 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
       error: { code: error.code, message: error.message }
     };
   }
-  process.stdout.write(`${JSON.stringify(result)}\n`);
+  const output = (intent ?? '').startsWith('commit-') && result && typeof result === 'object'
+    ? { ...result, outcome: (result as { outcome?: unknown }).outcome ?? null, warnings: mergeOperationWarnings((result as { warnings?: never[] }).warnings ?? []) }
+    : result;
+  process.stdout.write(`${JSON.stringify(output)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
 }
 

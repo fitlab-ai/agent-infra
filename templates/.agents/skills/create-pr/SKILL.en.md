@@ -11,6 +11,8 @@ description: >
 
 Create a Pull Request and, when task-related, sync the essential metadata and reviewer summary immediately.
 
+`platform-pr create` returns the shared `outcome` / `warnings` fields; a normal bind uses `outcome: null, warnings: []`. Before locate/create/bind, the task branch must be proven pushed and its remote branch SHA must equal the expected local `HEAD`. Missing or drifting remote refs, a mismatched PR head SHA, and bind-time races are hard failures, never success warnings.
+
 ## Boundary / Critical Rules
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
@@ -64,7 +66,7 @@ Read the PR template through `.agents/rules/issue-pr-commands.md`, review recent
 
 ### 4. Check Remote Branch State
 
-Use `agent-infra-internal git-workflow inspect` for upstream/remote facts and `git-workflow push` for a verified push.
+Use `agent-infra-internal git-workflow inspect` for already-delivered upstream/remote facts. `create-pr` never performs the first push; a missing remote branch or a remote SHA that differs from local HEAD fails and points back to `commit`/push-only. Core rechecks the remote branch SHA before and immediately before bind, and requires exact repository/ref, base, and `head.sha` identity. A post-POST race never deletes the created PR or remote branch; the next retry recovers only by resource identity.
 
 ### 5. Create or Recover the PR
 
@@ -74,7 +76,7 @@ If `{task-id}` is available and the related task provides `issue_number`, keep `
 
 ### 6. Sync PR Metadata
 
-Run `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue`. The core copies type / `in:` labels, assignee, and a specific milestone from the Issue and maintains the closing association. Permission-bound items degrade independently, and the Issue is never updated in reverse.
+Run `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue`. The core copies type / `in:` labels, assignee, and a specific milestone from the Issue and maintains the closing association. Permission-bound items degrade independently, and the Issue is never updated in reverse. After the PR identity is bound, metadata or summary sync failures produce `pr_created_with_warnings`, preserve the PR identity, and retry only unfinished sync steps.
 
 ### 7. Publish the Review Summary
 
