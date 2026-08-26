@@ -123,7 +123,11 @@ test('platform-pr create refuses to locate or create a PR before remote branch d
     fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');
     execFileSync('git', ['add', 'source.txt'], { cwd: root });
     execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    const remote = path.join(root, 'remote.git');
+    execFileSync('git', ['init', '-q', '--bare', remote]);
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
+    execFileSync('git', ['remote', 'add', 'aaa', 'https://github.com/fitlab-ai/agent-infra.git'], { cwd: root });
+    execFileSync('git', ['config', `url.${remote}.insteadOf`, 'https://github.com/fitlab-ai/agent-infra.git'], { cwd: root });
     const taskId = 'TASK-20260101-000001';
     const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
     fs.mkdirSync(taskDir, { recursive: true });
@@ -168,7 +172,11 @@ test('platform-pr create rechecks a bound PR before replaying it', () => {
     fs.writeFileSync(path.join(root, 'source.txt'), 'base\n');
     execFileSync('git', ['add', 'source.txt'], { cwd: root });
     execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    const remote = path.join(root, 'remote.git');
+    execFileSync('git', ['init', '-q', '--bare', remote]);
     execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:fitlab-ai/agent-infra.git'], { cwd: root });
+    execFileSync('git', ['remote', 'add', 'aaa', 'https://github.com/fitlab-ai/agent-infra.git'], { cwd: root });
+    execFileSync('git', ['config', `url.${remote}.insteadOf`, 'https://github.com/fitlab-ai/agent-infra.git'], { cwd: root });
     const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
     const taskId = 'TASK-20260101-000001';
     const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
