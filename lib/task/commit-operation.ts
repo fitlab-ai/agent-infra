@@ -57,6 +57,10 @@ type BoundTask = Readonly<{
 
 const HEAD_REF = /^refs\/heads\/(.+)$/;
 
+function isCommitExecutionMode(value: unknown): value is CommitExecutionMode {
+  return value === 'direct' || value === 'orchestrated';
+}
+
 function gitText(repoRoot: string, args: readonly string[]): string {
   return execFileSync('git', [...args], {
     cwd: repoRoot,
@@ -390,7 +394,18 @@ function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mo
 }
 
 function executeCommitOperation(input: CommitOperationInput): CommitOperationResult {
-  const mode = input.mode ?? 'direct';
+  if (input.mode !== undefined && !isCommitExecutionMode(input.mode)) return {
+    status: 'blocked',
+    changed: false,
+    result: 'blocked',
+    taskId: null,
+    mode: 'direct',
+    warnings: [],
+    snapshot: null,
+    operations: [],
+    error: { code: 'COMMIT_MODE_INVALID', message: 'commit mode must be direct or orchestrated' }
+  };
+  const mode: CommitExecutionMode = input.mode ?? 'direct';
   let normalizedInput: CommitOperationInput;
   try {
     normalizedInput = { ...input, cwd: canonicalRepositoryRoot(input.cwd) };

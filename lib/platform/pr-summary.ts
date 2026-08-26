@@ -75,20 +75,32 @@ function summaryContext(taskRef: string, options: { cwd?: string; client?: GitHu
 
 function syncPullRequestSummary(taskRef: string, options: { agent: string; body: string; cwd?: string; client?: GitHubClient; dryRun?: boolean; primaryResult: PullRequestPrimaryResult }): PullRequestSummaryResult {
   const warningResult = warningResultForPrimary(options.primaryResult);
+  let knownPrNumber: number | null = null;
   const softenFailure = (output: PlatformResult): PullRequestSummaryResult => {
-    const warning = output.error && output.resource.kind === 'pull-request' && output.resource.number
-      && !['PR_NOT_LINKED', 'PR_SUMMARY_MARKER_AMBIGUOUS'].includes(output.error.code)
+    const prNumber = output.resource.kind === 'pull-request' && output.resource.number
+      ? output.resource.number
+      : knownPrNumber;
+    const warning = output.error && prNumber
+      && output.error.code !== 'PR_NOT_LINKED'
       ? {
         code: output.error.code,
         message: output.error.message,
         retryable: output.error.retryable,
         step: 'pr-summary',
-        target: `pull-request:${output.resource.number}`,
+        target: `pull-request:${prNumber}`,
         severity: 'ACTION_REQUIRED' as const
       }
       : null;
     return warning
-      ? { ...output, status: 'applied', changed: false, error: null, result: warningResult, warnings: [warning] }
+      ? {
+        ...output,
+        status: 'applied',
+        changed: false,
+        resource: { kind: 'pull-request', number: prNumber },
+        error: null,
+        result: warningResult,
+        warnings: [warning]
+      }
       : { ...output, result: null, warnings: [] };
   };
   const resolved = resolveTaskRef(taskRef, options.cwd ? { repoRoot: options.cwd } : {});
@@ -96,6 +108,7 @@ function syncPullRequestSummary(taskRef: string, options: { agent: string; body:
   const frontmatter = parseTaskFrontmatter(fs.readFileSync(resolved.taskMdPath, 'utf8'));
   const prNumber = Number(frontmatter.pr_number);
   if (!Number.isInteger(prNumber) || prNumber <= 0) return softenFailure(platformResult('failed', { error: { code: 'PR_NOT_LINKED', message: 'Task has no valid pr_number', retryable: false } }));
+  knownPrNumber = prNumber;
   const client = options.client || createGitHubClient();
   const context = resolvePlatformContext({ cwd: resolved.repoRoot, client });
   if (!context.platform.repository || !['no-op', 'degraded'].includes(context.status)) return softenFailure(context);

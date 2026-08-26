@@ -197,6 +197,23 @@ test('orchestrated mode fails closed without a task context', () => {
   }
 });
 
+test('commit core rejects an unknown runtime mode before writing Git state', () => {
+  const root = fixture();
+  try {
+    fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
+    const result = executeCommitOperation(input(root, {
+      mode: 'orchestrated-typo',
+      agent: 'codex'
+    }));
+
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'COMMIT_MODE_INVALID');
+    assert.equal(git(root, ['rev-list', '--count', 'HEAD']), '1');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('task-bound direct commit validates the task branch through the same core', () => {
   const root = fixture();
   const taskId = 'TASK-20260101-000001';
