@@ -26,8 +26,6 @@ function parse(args: string[]): Readonly<{ operation: string; values: Readonly<R
     return null;
   }
   const allowed = new Set([
-    '--task-id',
-    '--task-ref',
     '--context',
     '--executor-model',
     '--executor-reasoning-effort',
@@ -37,6 +35,11 @@ function parse(args: string[]): Readonly<{ operation: string; values: Readonly<R
   const values: Record<string, string> = {};
   for (let index = 1; index < args.length; index += 1) {
     const flag = args[index]!;
+    if (flag === '--task-id' || flag.startsWith('--task-id=')
+      || flag === '--task-ref' || flag.startsWith('--task-ref=')) {
+      fail('CODEX_SANDBOX_CONTROLLER_IDENTITY_OPTION_UNSUPPORTED', 'controller task identity options are not supported', 2);
+      return null;
+    }
     const value = args[++index];
     if (!allowed.has(flag) || Object.hasOwn(values, flag) || !value || value.startsWith('--')) {
       fail('CODEX_SANDBOX_CONTROLLER_PAYLOAD_INVALID', `invalid option '${flag}'`, 2);
@@ -50,17 +53,12 @@ function parse(args: string[]): Readonly<{ operation: string; values: Readonly<R
 async function codexSandboxController(args: string[] = []): Promise<void> {
   const parsed = parse(args);
   if (!parsed || process.exitCode) return;
-  const taskId = parsed.values['--task-id'];
-  if (!taskId) {
-    fail('CODEX_SANDBOX_CONTROLLER_PAYLOAD_INVALID', '--task-id is required', 2);
-    return;
-  }
   try {
     if (parsed.operation === 'verify-context') {
       const contextPath = parsed.values['--context']
         ?? process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
       if (!contextPath) throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_MISSING');
-      const context = verifyCodexSandboxControllerContext(contextPath, taskId);
+      const context = verifyCodexSandboxControllerContext(contextPath);
       process.stdout.write(`${JSON.stringify({
         status: 'ready',
         changed: false,
@@ -77,8 +75,6 @@ async function codexSandboxController(args: string[] = []): Promise<void> {
       })}\n`);
       return;
     }
-    const taskRef = parsed.values['--task-ref'];
-    if (!taskRef) throw new Error('CODEX_SANDBOX_CONTROLLER_TASK_REF_REQUIRED');
     const policy = [
       '--executor-model',
       '--executor-reasoning-effort',
@@ -90,8 +86,6 @@ async function codexSandboxController(args: string[] = []): Promise<void> {
       throw new Error('CODEX_SANDBOX_CONTROLLER_MODEL_POLICY_INVALID');
     }
     const exitCode = await runCodexSandboxController({
-      taskId,
-      taskRef,
       executorModel: parsed.values['--executor-model'],
       executorReasoningEffort: parsed.values['--executor-reasoning-effort'],
       reviewerModel: parsed.values['--reviewer-model'],

@@ -86,6 +86,53 @@ function capability(
   return { store, token: armed.token };
 }
 
+function writeControllerContext(
+  root: string,
+  controller: Readonly<{ instanceDigest: string; controlGeneration: string }>
+): string {
+  const contractFiles = [
+    '.codex/hooks.json',
+    '.codex/agents/agent-infra-lifecycle-executor.toml',
+    '.codex/agents/agent-infra-lifecycle-reviewer.toml',
+    '.agents/hooks/lifecycle-delegation.js',
+    '.agents/skills/run-task/SKILL.md',
+    '.agents/rules/lifecycle-orchestration.md'
+  ];
+  for (const relative of contractFiles) {
+    const file = path.join(root, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${relative}\n`);
+  }
+  const realBuild = computeLifecycleBuildIdentity(root);
+  const processStartTime = getProcessStartTime(process.pid);
+  assert.ok(processStartTime);
+  const profileFiles = contractFiles.slice(1, 3).map((relative) => path.join(root, relative)).sort();
+  const profileHash = crypto.createHash('sha256');
+  for (const file of profileFiles) {
+    profileHash.update(path.basename(file));
+    profileHash.update('\0');
+    profileHash.update(fs.readFileSync(file));
+    profileHash.update('\0');
+  }
+  const contextPath = path.join(root, 'controller-context.json');
+  writeCodexSandboxControllerContext(contextPath, contextFromControllerLease({
+    version: 1,
+    leaseId: '7'.repeat(64),
+    leaseSecret: '8'.repeat(64),
+    taskId,
+    controlGeneration: controller.controlGeneration,
+    controllerInstanceDigest: controller.instanceDigest,
+    controllerProcess: { pid: process.pid, startTime: processStartTime },
+    buildIdentity: realBuild,
+    issuedAt: Date.now() - 1_000,
+    expiresAt: Date.now() + 60_000
+  }, {
+    hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(path.join(root, '.codex', 'hooks.json'))).digest('hex'),
+    lifecycleProfilesHash: profileHash.digest('hex')
+  }));
+  return contextPath;
+}
+
 test('Codex prepare consumes a controller-bound capability from the trusted broker binding', async () => {
   const f = fixture();
   const controller = { instanceDigest: 'e'.repeat(64), controlGeneration: 'generation-1' };
@@ -116,46 +163,8 @@ test('Codex prepare consumes a controller-bound capability from the trusted brok
 
 test('Codex prepare rejects mismatched broker and verified local controller bindings before consume', async () => {
   const f = fixture();
-  const contractFiles = [
-    '.codex/hooks.json',
-    '.codex/agents/agent-infra-lifecycle-executor.toml',
-    '.codex/agents/agent-infra-lifecycle-reviewer.toml',
-    '.agents/hooks/lifecycle-delegation.js',
-    '.agents/skills/run-task/SKILL.md',
-    '.agents/rules/lifecycle-orchestration.md'
-  ];
-  for (const relative of contractFiles) {
-    const file = path.join(f.root, relative);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, `${relative}\n`);
-  }
-  const realBuild = computeLifecycleBuildIdentity(f.root);
-  const processStartTime = getProcessStartTime(process.pid);
-  assert.ok(processStartTime);
-  const profileFiles = contractFiles.slice(1, 3).map((relative) => path.join(f.root, relative)).sort();
-  const profileHash = crypto.createHash('sha256');
-  for (const file of profileFiles) {
-    profileHash.update(path.basename(file));
-    profileHash.update('\0');
-    profileHash.update(fs.readFileSync(file));
-    profileHash.update('\0');
-  }
-  const contextPath = path.join(f.root, 'controller-context.json');
-  writeCodexSandboxControllerContext(contextPath, contextFromControllerLease({
-    version: 1,
-    leaseId: '7'.repeat(64),
-    leaseSecret: '8'.repeat(64),
-    taskId,
-    controlGeneration: 'local-generation',
-    controllerInstanceDigest: 'e'.repeat(64),
-    controllerProcess: { pid: process.pid, startTime: processStartTime },
-    buildIdentity: realBuild,
-    issuedAt: Date.now() - 1_000,
-    expiresAt: Date.now() + 60_000
-  }, {
-    hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(path.join(f.root, '.codex', 'hooks.json'))).digest('hex'),
-    lifecycleProfilesHash: profileHash.digest('hex')
-  }));
+  const localController = { instanceDigest: 'e'.repeat(64), controlGeneration: 'local-generation' };
+  const contextPath = writeControllerContext(f.root, localController);
   const currentCapability = capability(f.root, 'dual-controller-token');
   const previousContext = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
   const previousBinding = process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
@@ -186,6 +195,52 @@ test('Codex prepare rejects mismatched broker and verified local controller bind
     else process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING = previousBinding;
     if (previousGeneration === undefined) delete process.env.AGENT_INFRA_CONTROL_GENERATION;
     else process.env.AGENT_INFRA_CONTROL_GENERATION = previousGeneration;
+  }
+});
+
+test('Codex prepare accepts matching broker and context without child control authority', async () => {
+  const f = fixture();
+  const controller = { instanceDigest: 'e'.repeat(64), controlGeneration: 'generation-1' };
+  const contextPath = writeControllerContext(f.root, controller);
+  const currentCapability = capability(f.root, 'matching-broker-context-token', controller);
+  const controlKeys = [
+    'AGENT_INFRA_CONTROL_TOKEN',
+    'AGENT_INFRA_CONTROL_GENERATION',
+    'AGENT_INFRA_CONTROL_DIR',
+    'AGENT_INFRA_CONTROL_STATUS_DIR',
+    'AGENT_INFRA_RUNTIME_DIR'
+  ] as const;
+  const previous = new Map(controlKeys.map((key) => [key, process.env[key]]));
+  const previousContext = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+  const previousBinding = process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
+  process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT = contextPath;
+  process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING = JSON.stringify(controller);
+  for (const key of controlKeys) delete process.env[key];
+  try {
+    const result = await prepareCodexOrchestrationDelegation(taskId, {
+      client: 'codex',
+      requestedModel: 'executor-model',
+      requestedReasoningEffort: 'xhigh',
+      capabilityToken: currentCapability.token
+    }, {
+      repoRoot: f.root,
+      capabilityStore: currentCapability.store,
+      buildIdentity,
+      preflight,
+      orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-matching-controller' }
+    });
+    assert.equal(result.status, 'running');
+    assert.equal(result.run?.pendingDelegation?.lifecycleProvenance?.controllerInstanceDigest, controller.instanceDigest);
+    assert.equal(result.run?.pendingDelegation?.lifecycleProvenance?.controlGeneration, controller.controlGeneration);
+  } finally {
+    if (previousContext === undefined) delete process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+    else process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT = previousContext;
+    if (previousBinding === undefined) delete process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
+    else process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING = previousBinding;
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
 

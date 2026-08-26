@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-
 import {
   preflightCodexLifecycleEvidence,
   resolveCodexSpawnedChild,
@@ -15,6 +13,7 @@ import type { CodexCapabilityProvenanceDetail } from '../agent-clients/adapters/
 import { computeLifecycleBuildIdentity } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import type { LifecycleBuildIdentity } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import { verifyCodexSandboxControllerContext } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
+import { verifyCodexSandboxControllerContext as verifyControllerContextFile } from '../agent-clients/adapters/codex-lifecycle/controller-context.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import {
@@ -93,11 +92,33 @@ function requiredStore(options: CodexBridgeOptions): LifecycleStore {
   return options.store;
 }
 
-function controllerContext(taskId: string, repoRoot: string) {
+function controllerContext(
+  repoRoot: string,
+  brokerController: Readonly<{ instanceDigest: string; controlGeneration: string }> | null
+) {
   const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-  return contextPath
-    ? verifyCodexSandboxControllerContext(contextPath, taskId, { repoRoot })
-    : null;
+  if (!contextPath) return null;
+  if (brokerController) {
+    return verifyControllerContextFile(contextPath, {
+      repoRoot,
+      generation: process.env.AGENT_INFRA_CONTROL_GENERATION ?? brokerController.controlGeneration
+    });
+  }
+  return verifyCodexSandboxControllerContext(contextPath, { repoRoot });
+}
+
+function brokerBindingConflictsWithContext(
+  repoRoot: string,
+  brokerController: Readonly<{ instanceDigest: string; controlGeneration: string }> | null
+): boolean {
+  const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+  if (!contextPath || !brokerController) return false;
+  const context = verifyControllerContextFile(contextPath, {
+    repoRoot,
+    generation: process.env.AGENT_INFRA_CONTROL_GENERATION ?? brokerController.controlGeneration
+  });
+  return context.controllerInstanceDigest !== brokerController.instanceDigest
+    || context.controlGeneration !== brokerController.controlGeneration;
 }
 
 function brokerControllerBinding(): Readonly<{ instanceDigest: string; controlGeneration: string }> | null {
@@ -144,8 +165,14 @@ async function prepareCodexOrchestrationDelegation(
       );
     }
     const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
-    const localController = controllerContext(resolved.taskId, repoRoot);
     const brokerController = brokerControllerBinding();
+    if (brokerBindingConflictsWithContext(repoRoot, brokerController)) {
+      return bridgeFailure(
+        'CODEX_SANDBOX_CONTROLLER_BINDING_MISMATCH',
+        'broker and local controller bindings do not match'
+      );
+    }
+    const localController = controllerContext(repoRoot, brokerController);
     if (localController && brokerController
       && (localController.controllerInstanceDigest !== brokerController.instanceDigest
         || localController.controlGeneration !== brokerController.controlGeneration)) {
@@ -263,14 +290,8 @@ async function activateCodexOrchestrationDelegation(
     });
     const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
     const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-    const contextTaskId = contextPath
-      ? (JSON.parse(fs.readFileSync(contextPath, 'utf8')) as { taskId?: unknown }).taskId
-      : null;
-    if (contextPath && typeof contextTaskId !== 'string') {
-      throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
-    }
     const controller = contextPath
-      ? verifyCodexSandboxControllerContext(contextPath, contextTaskId as string, { repoRoot })
+      ? verifyCodexSandboxControllerContext(contextPath, { repoRoot })
       : null;
     return activateMatchingOrchestrationDelegation('codex', {
       nativeAgent: evidence.nativeAgent,

@@ -9,15 +9,16 @@ import * as toml from 'smol-toml';
 import {
   requestCodexControllerClose,
   requestCodexControllerOpen,
+  requestCodexControllerVerify,
   requestSandboxControl
 } from '../../../sandbox/control/client.ts';
 import { readSandboxControlStatus } from '../../../sandbox/control/state.ts';
-import { getProcessStartTime } from '../../../server/process-state.ts';
+import { getProcessStartTime, type ProcessIdentity } from '../../../server/process-state.ts';
 import { computeLifecycleBuildIdentity } from './build-identity.ts';
 import {
   contextFromControllerLease,
   controllerProofFromContext,
-  verifyCodexSandboxControllerContext,
+  verifyCodexSandboxControllerContext as verifyContextFile,
   writeCodexSandboxControllerContext,
   type CodexSandboxControllerContextV2
 } from './controller-context.ts';
@@ -31,8 +32,6 @@ type ControllerControl = Readonly<{
 }>;
 
 type ControllerInput = Readonly<{
-  taskId: string;
-  taskRef: string;
   executorModel?: string;
   executorReasoningEffort?: string;
   reviewerModel?: string;
@@ -60,6 +59,15 @@ type PreparedCodexSandboxController = Readonly<{
   contextPath: string;
   context: CodexSandboxControllerContextV2;
   cleanup: () => void;
+}>;
+
+type VerifyContextOptions = Readonly<{
+  repoRoot?: string;
+  now?: number;
+  generation?: string;
+  probeProcess?: (identity: ProcessIdentity) => 'alive' | 'dead' | 'unknown';
+  control?: ControllerControl;
+  requestControllerVerify?: typeof requestCodexControllerVerify;
 }>;
 
 function digestFiles(files: readonly string[]): string {
@@ -158,6 +166,30 @@ function verifyControl(taskId: string, control: ControllerControl): void {
   if (payload.taskId !== taskId) throw new Error('CODEX_SANDBOX_CONTROLLER_TASK_BINDING_INVALID');
 }
 
+function verifyCodexSandboxControllerContext(
+  contextPath: string,
+  options: VerifyContextOptions = {}
+): CodexSandboxControllerContextV2 {
+  const control = options.control ?? controlFromEnvironment();
+  const context = verifyContextFile(contextPath, {
+    repoRoot: options.repoRoot,
+    now: options.now,
+    generation: control.generation,
+    probeProcess: options.probeProcess
+  });
+  const verified = (options.requestControllerVerify ?? requestCodexControllerVerify)({
+    controllerProof: controllerProofFromContext(context),
+    ...control,
+    timeoutMs: 30_000
+  });
+  if (verified.binding.taskId !== context.taskId
+    || verified.binding.controlGeneration !== context.controlGeneration
+    || verified.binding.controllerInstanceDigest !== context.controllerInstanceDigest) {
+    throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
+  }
+  return context;
+}
+
 function detectedCodexVersion(): string {
   const result = spawnSync('codex', ['--version'], { encoding: 'utf8' });
   const version = /codex-cli\s+(\d+\.\d+\.\d+)/u.exec(result.stdout ?? '')?.[1];
@@ -252,7 +284,6 @@ function prepareCodexSandboxController(
   const repoRoot = path.resolve(options.repoRoot ?? process.cwd());
   const sourceHome = path.resolve(options.codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'));
   const control = options.control ?? controlFromEnvironment();
-  (options.verifyTaskBinding ?? verifyControl)(input.taskId, control);
   const version = (options.codexVersion ?? detectedCodexVersion)();
   if (!semver.gte(version, '0.147.0')) throw new Error('CODEX_SANDBOX_CONTROLLER_CODEX_UNSUPPORTED');
 
@@ -261,7 +292,7 @@ function prepareCodexSandboxController(
   fs.mkdirSync(runtimeRoot, { recursive: true, mode: 0o700 });
   fs.chmodSync(runtimeRoot, 0o700);
   const key = crypto.createHash('sha256')
-    .update(`${input.taskId}\0${control.generation}`)
+    .update(`${process.pid}\0${control.generation}`)
     .digest('hex');
   const parentStartTime = getProcessStartTime(process.pid);
   if (!parentStartTime) throw new Error('CODEX_SANDBOX_CONTROLLER_PROCESS_IDENTITY_INVALID');
@@ -321,17 +352,18 @@ function prepareCodexSandboxController(
       ...control,
       timeoutMs: 30_000
     });
+    const taskId = opened.lease.taskId;
     context = contextFromControllerLease(opened.lease, {
       hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex'),
       lifecycleProfilesHash: digestFiles([executor, reviewer])
     });
-    if (opened.lease.taskId !== input.taskId
-      || opened.lease.controlGeneration !== control.generation
+    if (opened.lease.controlGeneration !== control.generation
       || opened.lease.controllerProcess.pid !== process.pid
       || opened.lease.controllerProcess.startTime !== parentStartTime
       || JSON.stringify(opened.lease.buildIdentity) !== JSON.stringify(buildIdentity)) {
       throw new Error('SANDBOX_CONTROL_RESULT_INVALID');
     }
+    (options.verifyTaskBinding ?? verifyControl)(taskId, control);
     const contextPath = path.join(home, 'controller-context.json');
     writeCodexSandboxControllerContext(contextPath, context);
 
@@ -349,7 +381,7 @@ function prepareCodexSandboxController(
       input.reviewerModel ? `--reviewer-model ${input.reviewerModel}` : '',
       input.reviewerReasoningEffort ? `--reviewer-reasoning-effort ${input.reviewerReasoningEffort}` : ''
     ].filter(Boolean).join(' ');
-    const prompt = `$run-task ${input.taskRef}${policy ? ` ${policy}` : ''}`;
+    const prompt = `$run-task ${taskId}${policy ? ` ${policy}` : ''}`;
     const args = Object.freeze([
       'exec',
       '--enable', 'hooks',
@@ -364,7 +396,7 @@ function prepareCodexSandboxController(
       home,
       shimDir,
       contextPath,
-      input.taskId,
+      taskId,
       control,
       providerEnvironment,
       options.environment ?? process.env
@@ -428,7 +460,8 @@ async function runCodexSandboxController(
 export {
   prepareCodexSandboxController,
   runCodexSandboxController,
-  verifyCodexSandboxControllerContext
+  verifyCodexSandboxControllerContext,
+  controllerProofFromContext
 };
 export type {
   CodexSandboxControllerContextV2 as CodexSandboxControllerContext,

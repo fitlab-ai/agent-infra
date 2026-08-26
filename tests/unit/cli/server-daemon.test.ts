@@ -71,6 +71,13 @@ const statusModel: StatusModel = {
     exitCode: '-',
     log: '-'
   },
+  orchestration: {
+    status: 'absent',
+    runId: '-',
+    nextStage: '-',
+    pause: null,
+    pendingDelegation: null
+  },
   git: {
     current: 'feat',
     frontmatter: 'feat',

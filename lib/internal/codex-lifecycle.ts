@@ -101,7 +101,7 @@ function hookDefinitionHash(): string {
 function controllerBinding(taskId: string) {
   const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
   if (!contextPath) return undefined;
-  const context = verifyCodexSandboxControllerContext(contextPath, taskId, { repoRoot: process.cwd() });
+  const context = verifyCodexSandboxControllerContext(contextPath, { repoRoot: process.cwd() });
   return {
     instanceDigest: context.controllerInstanceDigest,
     controlGeneration: context.controlGeneration

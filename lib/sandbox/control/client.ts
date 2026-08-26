@@ -263,6 +263,19 @@ type CodexControllerClosed = Readonly<{
   error: null;
 }>;
 
+type CodexControllerVerified = Readonly<{
+  version: 1;
+  status: 'verified';
+  changed: false;
+  lease: null;
+  binding: Readonly<{
+    taskId: string;
+    controlGeneration: string;
+    controllerInstanceDigest: string;
+  }>;
+  error: null;
+}>;
+
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(value).sort().join(',') === [...keys].sort().join(',');
 }
@@ -285,7 +298,7 @@ function validBuild(value: unknown): boolean {
     && typeof build.lifecycleContractHash === 'string' && /^[a-f0-9]{64}$/u.test(build.lifecycleContractHash);
 }
 
-export function parseCodexControllerResult(response: SandboxControlResponse): CodexControllerOpened | CodexControllerClosed {
+export function parseCodexControllerResult(response: SandboxControlResponse): CodexControllerOpened | CodexControllerClosed | CodexControllerVerified {
   if (response.phase !== 'completed' || response.error !== null || response.stderr !== '') {
     clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller result outer response is invalid', false, true);
   }
@@ -300,8 +313,11 @@ export function parseCodexControllerResult(response: SandboxControlResponse): Co
     clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller result payload is invalid', false, true);
   }
   const result = value as Record<string, unknown>;
-  if (!exactKeys(result, ['changed', 'error', 'lease', 'status', 'version'])
-    || result.version !== 1 || !['opened', 'closed', 'failed'].includes(result.status as string)) {
+  const resultKeys = result.status === 'verified'
+    ? ['binding', 'changed', 'error', 'lease', 'status', 'version']
+    : ['changed', 'error', 'lease', 'status', 'version'];
+  if (!exactKeys(result, resultKeys)
+    || result.version !== 1 || !['opened', 'closed', 'failed', 'verified'].includes(result.status as string)) {
     clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller result schema is invalid', false, true);
   }
   if (result.status === 'failed') {
@@ -322,6 +338,17 @@ export function parseCodexControllerResult(response: SandboxControlResponse): Co
       clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller close result is invalid', false, true);
     }
     return result as unknown as CodexControllerClosed;
+  }
+  if (result.status === 'verified') {
+    const binding = result.binding as Record<string, unknown> | null;
+    if (result.changed !== false || result.lease !== null || !binding
+      || !exactKeys(binding, ['controllerInstanceDigest', 'controlGeneration', 'taskId'])
+      || typeof binding.taskId !== 'string' || binding.taskId.length === 0
+      || typeof binding.controlGeneration !== 'string' || binding.controlGeneration.length === 0
+      || typeof binding.controllerInstanceDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(binding.controllerInstanceDigest)) {
+      clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller verify result is invalid', false, true);
+    }
+    return result as unknown as CodexControllerVerified;
   }
   const lease = result.lease as Record<string, unknown> | null;
   if (result.changed !== true || !lease
@@ -344,7 +371,7 @@ export function parseCodexControllerResult(response: SandboxControlResponse): Co
 }
 
 function requestCodexController(params: Readonly<{
-  command: 'open' | 'close';
+  command: 'open' | 'close' | 'verify';
   controllerProcess: ProcessIdentity;
   controllerProof: CodexControllerLeaseProofV1 | null;
   channelDir?: string;
@@ -352,7 +379,7 @@ function requestCodexController(params: Readonly<{
   token?: string;
   generation?: string;
   timeoutMs?: number;
-}>): CodexControllerOpened | CodexControllerClosed {
+}>): CodexControllerOpened | CodexControllerClosed | CodexControllerVerified {
   const auth = authority(params);
   const issuedAt = Date.now();
   const request: SandboxCodexControllerRequest = {
@@ -386,6 +413,25 @@ export function requestCodexControllerOpen(params: Omit<Parameters<typeof reques
 export function requestCodexControllerClose(params: Omit<Parameters<typeof requestCodexController>[0], 'command'>): CodexControllerClosed {
   const result = requestCodexController({ ...params, command: 'close' });
   if (result.status !== 'closed') clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller close returned the wrong result', false, true);
+  return result;
+}
+
+export function requestCodexControllerVerify(params: Readonly<{
+  controllerProof: CodexControllerLeaseProofV1;
+  channelDir?: string;
+  statusDir?: string;
+  token?: string;
+  generation?: string;
+  timeoutMs?: number;
+}>): CodexControllerVerified {
+  const result = requestCodexController({
+    ...params,
+    controllerProcess: params.controllerProof.controllerProcess,
+    command: 'verify'
+  });
+  if (result.status !== 'verified') {
+    clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller verify returned the wrong result', false, true);
+  }
   return result;
 }
 

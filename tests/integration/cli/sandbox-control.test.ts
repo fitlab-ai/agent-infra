@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   requestCodexControllerClose,
   requestCodexControllerOpen,
+  requestCodexControllerVerify,
   requestSandboxControl,
   requestSandboxTaskCreate
 } from '../../../lib/sandbox/control/client.ts';
@@ -1222,6 +1223,24 @@ test('sandbox broker opens and closes a host-only Codex controller registration 
     const registration = fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8');
     assert.equal(registration.includes(opened.lease.leaseSecret), false);
     assert.equal(fs.lstatSync(path.join(root, 'codex-controller.json')).mode & 0o777, 0o600);
+    const verified = requestCodexControllerVerify({
+      controllerProof: {
+        version: 1,
+        leaseId: opened.lease.leaseId,
+        leaseSecret: opened.lease.leaseSecret,
+        controllerProcess: opened.lease.controllerProcess
+      },
+      channelDir,
+      statusDir,
+      token: 'controller-secret',
+      generation: 'controller-generation',
+      timeoutMs: 5_000
+    });
+    assert.deepEqual(verified.binding, {
+      taskId: 'TASK-20260809-010203',
+      controlGeneration: 'controller-generation',
+      controllerInstanceDigest: opened.lease.controllerInstanceDigest
+    });
     const closed = requestCodexControllerClose({
       controllerProcess: opened.lease.controllerProcess,
       controllerProof: {

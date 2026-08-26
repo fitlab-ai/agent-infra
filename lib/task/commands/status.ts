@@ -9,6 +9,8 @@ import { parseTaskFrontmatter, extractTitle, type Frontmatter } from '../frontma
 import { loadShortIdByTaskId } from '../short-id.ts';
 import { getOpenWorkflowWarnings, formatWorkflowWarningSummary, type WorkflowWarning } from '../workflow-warnings.ts';
 import { parseActivityLog, pairEntries } from '../activity-log.ts';
+import { readRun, type OrchestrationRun } from '../orchestration.ts';
+import type { DelegationReceipt } from '../delegation-receipts.ts';
 import { statusCard, type DisplayMessage } from '../../server/display.ts';
 
 const USAGE = `Usage: ai task status [<N | TASK-id> | --task <ref> | -t <ref>]
@@ -219,6 +221,19 @@ type RuntimeInfo = {
   log: string;
 };
 
+type PendingDelegationInfo = Readonly<Pick<
+  DelegationReceipt,
+  'id' | 'role' | 'stage' | 'round' | 'artifact' | 'client' | 'status'
+>>;
+
+type OrchestrationInfo = Readonly<{
+  status: 'absent' | OrchestrationRun['status'];
+  runId: string;
+  nextStage: string;
+  pause: Readonly<{ code: string; message: string; recoverable: boolean }> | null;
+  pendingDelegation: PendingDelegationInfo | null;
+}>;
+
 type ManagedRunRecord = {
   run_id: string;
   engine: string;
@@ -323,6 +338,39 @@ function collectRuntime(taskDir: string, workflow: WorkflowInfo, run: Runner): R
   };
 }
 
+function pendingDelegationInfo(receipt: DelegationReceipt | null): PendingDelegationInfo | null {
+  if (!receipt) return null;
+  return {
+    id: receipt.id,
+    role: receipt.role,
+    stage: receipt.stage,
+    round: receipt.round,
+    artifact: receipt.artifact,
+    client: receipt.client,
+    status: receipt.status
+  };
+}
+
+function collectOrchestration(taskDir: string): OrchestrationInfo {
+  const run = readRun(taskDir);
+  if (!run) {
+    return {
+      status: 'absent',
+      runId: DASH,
+      nextStage: DASH,
+      pause: null,
+      pendingDelegation: null
+    };
+  }
+  return {
+    status: run.status,
+    runId: run.runId,
+    nextStage: run.nextStage ?? DASH,
+    pause: run.pause,
+    pendingDelegation: pendingDelegationInfo(run.pendingDelegation)
+  };
+}
+
 type StatusModel = {
   taskId: string;
   shortId: string;
@@ -332,6 +380,7 @@ type StatusModel = {
   artifacts: { count: number; groups: { stage: string; files: string[] }[] };
   workflow: WorkflowInfo;
   runtime: RuntimeInfo;
+  orchestration: OrchestrationInfo;
   git: GitInfo;
 };
 
@@ -382,6 +431,26 @@ function renderStatus(model: StatusModel): string[] {
 
   lines.push(
     '',
+    'Orchestration',
+    ...renderPairs([
+      ['status', model.orchestration.status],
+      ['run_id', model.orchestration.runId],
+      ['next_stage', model.orchestration.nextStage],
+      ['pause_code', model.orchestration.pause?.code ?? DASH],
+      ['pause_message', model.orchestration.pause?.message ?? DASH],
+      ['recoverable', model.orchestration.pause ? String(model.orchestration.pause.recoverable) : DASH],
+      ['pending_id', model.orchestration.pendingDelegation?.id ?? DASH],
+      ['pending_role', model.orchestration.pendingDelegation?.role ?? DASH],
+      ['pending_stage', model.orchestration.pendingDelegation?.stage ?? DASH],
+      ['pending_round', model.orchestration.pendingDelegation ? String(model.orchestration.pendingDelegation.round) : DASH],
+      ['pending_artifact', model.orchestration.pendingDelegation?.artifact ?? DASH],
+      ['pending_client', model.orchestration.pendingDelegation?.client ?? DASH],
+      ['pending_status', model.orchestration.pendingDelegation?.status ?? DASH]
+    ])
+  );
+
+  lines.push(
+    '',
     'Workflow',
     ...renderPairs([
       ['state', model.workflow.state],
@@ -425,6 +494,9 @@ function renderStatus(model: StatusModel): string[] {
 }
 
 function modelTone(model: StatusModel): 'info' | 'success' | 'warning' | 'danger' | 'running' {
+  if (model.orchestration.status === 'paused') return 'warning';
+  if (model.orchestration.status === 'running') return 'running';
+  if (model.orchestration.status === 'completed') return 'success';
   if (model.workflow.state === 'in-progress') return model.workflow.stale === 'yes' ? 'warning' : 'running';
   if (model.metadata.some(([key, value]) => key === 'status' && value === 'completed')) return 'success';
   if (model.metadata.some(([key, value]) => key === 'status' && (value === 'blocked' || value === 'cancelled'))) {
@@ -449,6 +521,7 @@ function buildFromResolved(input: BuildStatusModelInput): StatusModel {
     artifacts: { count: artifacts.length, groups: groupArtifacts(artifacts) },
     workflow,
     runtime: collectRuntime(input.taskDir, workflow, run),
+    orchestration: collectOrchestration(input.taskDir),
     git: collectGit(fm.branch ?? '', run)
   };
 }
@@ -483,6 +556,9 @@ function statusModelToDisplay(model: StatusModel): DisplayMessage {
     `Task ${model.taskId} (${model.shortId})`,
     modelTone(model),
     [
+      ['orchestration', model.orchestration.status],
+      ['run', model.orchestration.runId],
+      ['next', model.orchestration.nextStage],
       ['workflow', model.workflow.state],
       ['step', model.workflow.step],
       ['runtime', model.runtime.status],
@@ -530,8 +606,9 @@ export {
   collectGit,
   collectWorkflow,
   collectRuntime,
+  collectOrchestration,
   renderStatus,
   statusModelToDisplay,
   METADATA_KEYS
 };
-export type { Runner, GitInfo, WorkflowInfo, RuntimeInfo, StatusModel, BuildStatusModelInput };
+export type { Runner, GitInfo, WorkflowInfo, RuntimeInfo, OrchestrationInfo, PendingDelegationInfo, StatusModel, BuildStatusModelInput };

@@ -11,12 +11,14 @@ import {
   collectGit,
   collectWorkflow,
   collectRuntime,
+  collectOrchestration,
   renderStatus,
   statusModelToDisplay,
   type Runner,
   type StatusModel
 } from '../../../lib/task/commands/status.ts';
 import type { Artifact } from '../../../lib/task/artifacts.ts';
+import { prepareDelegation } from '../../../lib/task/delegation-receipts.ts';
 
 function artifact(name: string, mtimeMs: number): Artifact {
   return { index: mtimeMs, name, path: `/tmp/${name}`, size: 1, mtimeMs };
@@ -253,6 +255,129 @@ test('collectRuntime reads the latest managed tmux run through docker exec', () 
   assert.equal(runtime.log, '/tmp/agent-infra-runs/run-test/output.log');
 });
 
+test('collectOrchestration projects persisted pause and pending delegation state', () => {
+  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-orchestration-'));
+  const taskId = path.basename(taskDir);
+  const pending = prepareDelegation({
+    taskId,
+    runId: 'run-1',
+    role: 'executor',
+    stage: 'code',
+    round: 2,
+    artifact: 'code.md',
+    client: 'claude-code',
+    workspaceSnapshotScope: 'task',
+    lifecycleProvenance: null,
+    beforeFingerprint: 'before',
+    requestedModel: 'executor-model',
+    requestedReasoningEffort: 'high'
+  }, { id: () => 'receipt-1', now: () => '2026-07-02T20:00:00.000Z', monotonicNow: () => 1 });
+  fs.writeFileSync(path.join(taskDir, 'orchestration.json'), `${JSON.stringify({
+    taskId,
+    runId: 'run-1',
+    status: 'paused',
+    nextStage: 'code',
+    stepCount: 1,
+    maxSteps: 24,
+    modelPolicy: {
+      executor: { model: 'executor-model', reasoningEffort: 'high' },
+      reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
+    },
+    modelPolicySource: { kind: 'explicit', client: 'claude-code', resolvedAt: '2026-07-02T20:00:00.000Z' },
+    recoveryHistory: [],
+    baseline: '',
+    pendingDelegation: pending,
+    receipts: [],
+    pause: { code: 'ORCHESTRATION_TEST_PAUSED', message: 'waiting for review', recoverable: true },
+    commitAuthorization: { issuedAt: null, consumedAt: null },
+    completionEvidence: null,
+    createdAt: '2026-07-02T20:00:00.000Z',
+    updatedAt: '2026-07-02T20:00:00.000Z'
+  })}\n`);
+
+  assert.deepEqual(collectOrchestration(taskDir), {
+    status: 'paused',
+    runId: 'run-1',
+    nextStage: 'code',
+    pause: { code: 'ORCHESTRATION_TEST_PAUSED', message: 'waiting for review', recoverable: true },
+    pendingDelegation: {
+      id: 'receipt-1', role: 'executor', stage: 'code', round: 2,
+      artifact: 'code.md', client: 'claude-code', status: 'prepared'
+    }
+  });
+});
+
+test('collectOrchestration distinguishes absent state from invalid persisted state', () => {
+  const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-orchestration-'));
+  assert.equal(collectOrchestration(taskDir).status, 'absent');
+  fs.writeFileSync(path.join(taskDir, 'orchestration.json'), '{"status":"paused"}\n');
+  assert.throws(() => collectOrchestration(taskDir), { name: 'OrchestrationStateError' });
+});
+
+test('persisted running and completed orchestration states override stale workflow and runtime tone', () => {
+  for (const status of ['running', 'completed'] as const) {
+    const taskDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-status-authority-'));
+    const taskId = path.basename(taskDir);
+    const taskMdPath = path.join(taskDir, 'task.md');
+    fs.writeFileSync(taskMdPath, [
+      '---',
+      `id: ${taskId}`,
+      'status: active',
+      'current_step: requirement-analysis',
+      '---',
+      '',
+      '# Task',
+      '',
+      '## 活动日志',
+      '',
+      '- 2026-07-02 20:00:00+08:00 — **Plan Task (Round 1)** by codex — Plan completed → plan.md',
+      '',
+      '## 完成检查清单'
+    ].join('\n'));
+    fs.writeFileSync(path.join(taskDir, 'orchestration.json'), `${JSON.stringify({
+      taskId,
+      runId: `run-${status}`,
+      status,
+      nextStage: status === 'completed' ? null : 'code',
+      stepCount: 2,
+      maxSteps: 24,
+      modelPolicy: {
+        executor: { model: 'executor-model', reasoningEffort: 'high' },
+        reviewer: { model: 'reviewer-model', reasoningEffort: 'high' }
+      },
+      modelPolicySource: { kind: 'explicit', client: 'claude-code', resolvedAt: '2026-07-02T20:00:00.000Z' },
+      recoveryHistory: [],
+      baseline: '',
+      pendingDelegation: null,
+      receipts: [],
+      pause: null,
+      commitAuthorization: { issuedAt: null, consumedAt: null },
+      completionEvidence: null,
+      createdAt: '2026-07-02T20:00:00.000Z',
+      updatedAt: '2026-07-02T20:00:00.000Z'
+    })}\n`);
+
+    const model = buildStatusModel({
+      taskId,
+      taskDir,
+      taskMdPath,
+      repoRoot: taskDir,
+      shortId: '-',
+      run: throwingRun,
+      now: new Date('2026-07-02T20:30:00Z')
+    });
+    const display = statusModelToDisplay(model);
+    assert.equal(model.orchestration.status, status);
+    if (display.kind !== 'status-card') throw new Error('expected a status card');
+    assert.equal(display.tone, status === 'running' ? 'running' : 'success');
+    assert.deepEqual(display.fields?.slice(0, 3), [
+      ['orchestration', status],
+      ['run', `run-${status}`],
+      ['next', status === 'completed' ? '-' : 'code']
+    ]);
+  }
+});
+
 // --- renderStatus ----------------------------------------------------------
 
 const baseModel: StatusModel = {
@@ -288,6 +413,13 @@ const baseModel: StatusModel = {
     finishedAt: '-',
     exitCode: '-',
     log: '/tmp/agent-infra-runs/run-test/output.log'
+  },
+  orchestration: {
+    status: 'absent',
+    runId: '-',
+    nextStage: '-',
+    pause: null,
+    pendingDelegation: null
   },
   git: {
     current: 'feat',
@@ -346,10 +478,10 @@ test('statusModelToDisplay maps status model to a structured status card', () =>
   assert.equal(display.title, 'Task TASK-20260101-000001 (01)');
   assert.equal(display.tone, 'running');
   assert.deepEqual(display.fields?.slice(0, 4), [
-    ['workflow', 'in-progress'],
-    ['step', 'Code Task (Round 2)'],
-    ['runtime', 'running'],
-    ['git', 'clean']
+    ['orchestration', 'absent'],
+    ['run', '-'],
+    ['next', '-'],
+    ['workflow', 'in-progress']
   ]);
   assert.match(display.body ?? '', /Artifacts \(2\)/);
 });

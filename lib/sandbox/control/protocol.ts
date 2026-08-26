@@ -60,7 +60,7 @@ export type SandboxTaskCreateRequest = RequestBase & Readonly<{
 }>;
 export type SandboxCodexControllerRequest = RequestBase & Readonly<{
   family: 'codex-controller';
-  command: 'open' | 'close';
+  command: 'open' | 'close' | 'verify';
   args: [];
 }>;
 export type SandboxControlRequest = SandboxTaskCommandRequest | SandboxTaskFinalizationRequest | SandboxTaskCreateRequest | SandboxCodexControllerRequest;
@@ -145,10 +145,12 @@ export function validateSandboxControlRequest(
     const expected = ['args', 'command', 'controllerProcess', 'controllerProof', 'expiresAt', 'family', 'generation', 'id', 'issuedAt', 'token', 'version'];
     if (Object.keys(request).sort().join(',') !== expected.sort().join(',')
       || !Array.isArray(request.args) || request.args.length !== 0
-      || !['open', 'close'].includes(request.command as string)
+      || !['open', 'close', 'verify'].includes(request.command as string)
       || !validControllerProcess(request.controllerProcess)
       || (request.command === 'open' && request.controllerProof !== null)
-      || (request.command === 'close' && !validControllerProof(request.controllerProof))) {
+      || (request.command !== 'open' && !validControllerProof(request.controllerProof))
+      || (request.command === 'verify'
+        && JSON.stringify(request.controllerProcess) !== JSON.stringify((request.controllerProof as CodexControllerLeaseProofV1).controllerProcess))) {
       fail('SANDBOX_CONTROL_REQUEST_INVALID', 'controller request schema is invalid');
     }
     if (manifest.mode !== 'task-bound' || !manifest.taskId) {
