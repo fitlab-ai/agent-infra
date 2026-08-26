@@ -87,6 +87,28 @@ test('committed intent with matching review and Git tree is recoverable and plan
   assert.match(String(plan.commitNote), /^[a-f0-9]{7,} base$/);
 });
 
+test('committed no-op retry with the same commit note closes its new open activity row', () => {
+  const f = fixture({ activity: [
+    '- 2026-01-01 00:00:00+00:00 — **Commit [started]** by codex — started; attempt=original-attempt; baseline=0000000000000000000000000000000000000000; agent=codex',
+    '- 2026-01-01 00:00:01+00:00 — **Commit** by codex — 0000000 base',
+    '- 2026-01-01 00:00:02+00:00 — **Commit [started]** by codex — started; attempt=retry-attempt; baseline=0000000000000000000000000000000000000000; agent=codex'
+  ].join('\n') });
+  const actualNote = git(f.root, ['show', '-s', '--format=%h%x20%s', f.head]);
+  const taskContent = fs.readFileSync(path.join(f.taskDir, 'task.md'), 'utf8').replace('0000000 base', actualNote);
+  fs.writeFileSync(path.join(f.taskDir, 'task.md'), taskContent.replaceAll('0000000000000000000000000000000000000000', f.head));
+  approve(f.taskDir, f.head, git(f.root, ['rev-parse', 'HEAD^{tree}']));
+  createCommitIntent(f.taskDir, {
+    taskId, mode: 'standalone', phase: 'committed', baselineHead: f.head,
+    committedHead: f.head, pushEvidence: null, orchestration: null,
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+  }, { token: () => 'token' });
+
+  const inspection = inspectCommitFinalization(f.taskDir, f.root, taskId);
+  assert.equal(inspection.disposition, 'recoverable');
+  assert.equal(inspection.needsLog, true);
+  assert.equal(planCommitTaskFinalization(f.taskDir, inspection, 'codex', '2026-01-01 00:00:03+00:00').mutations.length, 2);
+});
+
 test('malformed intent is invalid and never treated as recoverable', () => {
   const f = fixture();
   fs.writeFileSync(path.join(f.taskDir, 'commit-intent.json'), '{');
