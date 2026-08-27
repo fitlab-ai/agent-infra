@@ -44,7 +44,12 @@ type SandboxCreateModule = {
   buildContainerEnvFile(tools: ResolvedToolFixture[], engine: string, runSafe?: EngineRunSafeFn, options?: CommandOptions): EnvFileResult;
   buildDotfilesVolumeArgs(engine: string, snapshotDir: string | null | undefined, existsFn?: (targetPath: string) => boolean): string[];
   assertBranchAvailable(repoRoot: string, branch: string, options?: { allowedWorktrees?: string[]; runFn?: RunSafeFn }): void;
-  ensureCodexModelInheritance(toolDir: string, hostHomeDir?: string, containerCodexDir?: string): void;
+  ensureCodexModelInheritance(
+    toolDir: string,
+    hostHomeDir?: string,
+    containerCodexDir?: string,
+    hostProjectDir?: string
+  ): void;
   ensureCodexWorkspaceTrust(toolDir: string): void;
   buildImage(config: Record<string, unknown>, tools: Array<Record<string, unknown>>, dockerfilePath: string, imageSignature: string, deps?: Record<string, unknown>): void;
   commandErrorMessage(error: unknown): string;
@@ -673,6 +678,188 @@ test("ensureCodexModelInheritance creates config with host model fields", async 
     fs.rmSync(hostHome, { recursive: true, force: true });
   }
 });
+
+test("ensureCodexModelInheritance projects current project hook trust into the sandbox path", async () => {
+  const sandboxCreate = await loadSandboxCreate();
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-hook-trust-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-hook-trust-"));
+  const hostProject = path.join(hostHome, "projects", "demo");
+  const currentKey = `${path.join(hostProject, ".codex", "hooks.json")}:pre_tool_use:0:0`;
+  const otherKey = `${path.join(hostHome, "projects", "other", ".codex", "hooks.json")}:pre_tool_use:0:0`;
+  const trustedHash = `sha256:${"a".repeat(64)}`;
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      `${toml.stringify({
+        hooks: {
+          state: {
+            [currentKey]: { trusted_hash: trustedHash, enabled: true },
+            [otherKey]: { trusted_hash: `sha256:${"b".repeat(64)}` }
+          }
+        }
+      })}\n`,
+      "utf8"
+    );
+
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome, undefined, hostProject);
+
+    const data = toml.parse(fs.readFileSync(path.join(tmpDir, "config.toml"), "utf8")) as {
+      hooks?: { state?: Record<string, { trusted_hash?: string; enabled?: boolean }> };
+    };
+    assert.deepEqual(data.hooks?.state, {
+      "/workspace/.codex/hooks.json:pre_tool_use:0:0": {
+        trusted_hash: trustedHash,
+        enabled: true
+      }
+    });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance replaces stale sandbox hook trust and preserves unrelated state", async () => {
+  const sandboxCreate = await loadSandboxCreate();
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-hook-trust-refresh-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-hook-trust-refresh-"));
+  const hostProject = path.join(hostHome, "projects", "demo");
+  const hostKey = `${path.join(hostProject, ".codex", "hooks.json")}:post_tool_use:0:0`;
+  const trustedHash = `sha256:${"c".repeat(64)}`;
+  const configPath = path.join(tmpDir, "config.toml");
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
+    fs.writeFileSync(
+      path.join(hostHome, ".codex", "config.toml"),
+      `${toml.stringify({ hooks: { state: { [hostKey]: { trusted_hash: trustedHash } } } })}\n`,
+      "utf8"
+    );
+    fs.writeFileSync(
+      configPath,
+      `${toml.stringify({
+        hooks: {
+          state: {
+            "/workspace/.codex/hooks.json:pre_tool_use:9:9": {
+              trusted_hash: `sha256:${"d".repeat(64)}`
+            },
+            "/home/devuser/.codex/hooks.json:session_start:0:0": {
+              trusted_hash: `sha256:${"e".repeat(64)}`
+            }
+          }
+        }
+      })}\n`,
+      "utf8"
+    );
+
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome, undefined, hostProject);
+
+    const data = toml.parse(fs.readFileSync(configPath, "utf8")) as {
+      hooks?: { state?: Record<string, { trusted_hash?: string }> };
+    };
+    assert.deepEqual(data.hooks?.state, {
+      "/home/devuser/.codex/hooks.json:session_start:0:0": {
+        trusted_hash: `sha256:${"e".repeat(64)}`
+      },
+      "/workspace/.codex/hooks.json:post_tool_use:0:0": {
+        trusted_hash: trustedHash
+      }
+    });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureCodexModelInheritance removes sandbox hook trust revoked on the host", async () => {
+  const sandboxCreate = await loadSandboxCreate();
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-hook-trust-revoke-"));
+  const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-hook-trust-revoke-"));
+  const hostProject = path.join(hostHome, "projects", "demo");
+  const configPath = path.join(tmpDir, "config.toml");
+
+  try {
+    fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
+    fs.writeFileSync(path.join(hostHome, ".codex", "config.toml"), 'model = "gpt-5.5"\n', "utf8");
+    fs.writeFileSync(
+      configPath,
+      `${toml.stringify({
+        hooks: {
+          state: {
+            "/workspace/.codex/hooks.json:pre_tool_use:0:0": {
+              trusted_hash: `sha256:${"f".repeat(64)}`
+            }
+          }
+        }
+      })}\n`,
+      "utf8"
+    );
+
+    sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome, undefined, hostProject);
+
+    const data = toml.parse(fs.readFileSync(configPath, "utf8")) as {
+      hooks?: { state?: Record<string, unknown> };
+    };
+    assert.equal(data.hooks, undefined);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(hostHome, { recursive: true, force: true });
+  }
+});
+
+for (const hostConfig of [
+  { name: "missing", content: null },
+  { name: "malformed", content: "=" }
+] as const) {
+  test(`ensureCodexModelInheritance removes stale sandbox hook trust when host config is ${hostConfig.name}`, async () => {
+    const sandboxCreate = await loadSandboxCreate();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-hook-trust-fail-closed-"));
+    const hostHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-codex-host-hook-trust-fail-closed-"));
+    const hostProject = path.join(hostHome, "projects", "demo");
+    const configPath = path.join(tmpDir, "config.toml");
+
+    try {
+      fs.mkdirSync(path.join(hostHome, ".codex"), { recursive: true });
+      if (hostConfig.content !== null) {
+        fs.writeFileSync(path.join(hostHome, ".codex", "config.toml"), hostConfig.content, "utf8");
+      }
+      fs.writeFileSync(
+        configPath,
+        `${toml.stringify({
+          model: "gpt-5.4",
+          hooks: {
+            state: {
+              "/workspace/.codex/hooks.json:pre_tool_use:0:0": {
+                trusted_hash: `sha256:${"a".repeat(64)}`
+              },
+              "/home/devuser/.codex/hooks.json:session_start:0:0": {
+                trusted_hash: `sha256:${"b".repeat(64)}`
+              }
+            }
+          }
+        })}\n`,
+        "utf8"
+      );
+
+      sandboxCreate.ensureCodexModelInheritance(tmpDir, hostHome, undefined, hostProject);
+
+      const data = toml.parse(fs.readFileSync(configPath, "utf8")) as {
+        model?: string;
+        hooks?: { state?: Record<string, { trusted_hash?: string }> };
+      };
+      assert.equal(data.model, "gpt-5.4");
+      assert.deepEqual(data.hooks?.state, {
+        "/home/devuser/.codex/hooks.json:session_start:0:0": {
+          trusted_hash: `sha256:${"b".repeat(64)}`
+        }
+      });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      fs.rmSync(hostHome, { recursive: true, force: true });
+    }
+  });
+}
 
 test("ensureCodexModelInheritance removes MCP servers and inherits only disabled Codex features", async () => {
   const sandboxCreate = await loadSandboxCreate();

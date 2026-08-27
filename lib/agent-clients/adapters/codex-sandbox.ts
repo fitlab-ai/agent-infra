@@ -37,6 +37,8 @@ function resolveHostCatalogPath(value: unknown, hostHomeDir: string): string | n
 }
 
 const CODEX_DISABLED_FEATURE_FLAGS = ['apps', 'enable_mcp_apps'] as const;
+const SANDBOX_CODEX_HOOKS_PATH = '/workspace/.codex/hooks.json';
+const CODEX_HOOK_TRUST_HASH = /^sha256:[a-f0-9]{64}$/;
 
 function removeCodexMcpServers(sandboxParsed: JsonObject): boolean {
   if (!Object.hasOwn(sandboxParsed, 'mcp_servers')) {
@@ -75,24 +77,72 @@ function inheritDisabledCodexFeatureFlags(
   return changed;
 }
 
+function inheritCodexHookTrustState(
+  sandboxParsed: JsonObject,
+  hostParsed: JsonObject,
+  hostProjectDir?: string
+): boolean {
+  if (!hostProjectDir) {
+    return false;
+  }
+
+  if (Object.hasOwn(sandboxParsed, 'hooks') && !isJsonObjectRecord(sandboxParsed.hooks)) {
+    return false;
+  }
+  const sandboxHooks = (sandboxParsed.hooks as JsonObject | undefined) ?? {};
+  if (Object.hasOwn(sandboxHooks, 'state') && !isJsonObjectRecord(sandboxHooks.state)) {
+    return false;
+  }
+
+  const sandboxState = (sandboxHooks.state as JsonObject | undefined) ?? {};
+  const sandboxPrefix = `${SANDBOX_CODEX_HOOKS_PATH}:`;
+  const nextState = Object.fromEntries(
+    Object.entries(sandboxState).filter(([key]) => !key.startsWith(sandboxPrefix))
+  );
+
+  const hostState = isJsonObjectRecord(hostParsed.hooks)
+    && isJsonObjectRecord(hostParsed.hooks.state)
+    ? hostParsed.hooks.state
+    : {};
+  const hostPrefix = `${path.join(hostProjectDir, '.codex', 'hooks.json')}:`;
+  for (const [key, value] of Object.entries(hostState)) {
+    if (!key.startsWith(hostPrefix) || !isJsonObjectRecord(value)) {
+      continue;
+    }
+    const trustedHash = value.trusted_hash;
+    if (typeof trustedHash !== 'string' || !CODEX_HOOK_TRUST_HASH.test(trustedHash)) {
+      continue;
+    }
+    nextState[`${sandboxPrefix}${key.slice(hostPrefix.length)}`] = {
+      trusted_hash: trustedHash,
+      ...(typeof value.enabled === 'boolean' ? { enabled: value.enabled } : {})
+    };
+  }
+
+  if (JSON.stringify(sandboxState) === JSON.stringify(nextState)) {
+    return false;
+  }
+  if (Object.keys(nextState).length > 0) {
+    sandboxHooks.state = nextState;
+    sandboxParsed.hooks = sandboxHooks;
+  } else {
+    delete sandboxHooks.state;
+    if (Object.keys(sandboxHooks).length > 0) {
+      sandboxParsed.hooks = sandboxHooks;
+    } else {
+      delete sandboxParsed.hooks;
+    }
+  }
+  return true;
+}
+
 function ensureCodexModelInheritance(
   toolDir: string,
   hostHomeDir?: string,
-  containerCodexDir: string = '/home/devuser/.codex'
+  containerCodexDir: string = '/home/devuser/.codex',
+  hostProjectDir?: string
 ): void {
   if (!hostHomeDir) {
-    return;
-  }
-
-  const hostConfigPath = path.join(hostHomeDir, '.codex', 'config.toml');
-  if (!fs.existsSync(hostConfigPath)) {
-    return;
-  }
-
-  let hostParsed: JsonObject;
-  try {
-    hostParsed = toml.parse(fs.readFileSync(hostConfigPath, 'utf8')) as JsonObject;
-  } catch {
     return;
   }
 
@@ -107,8 +157,25 @@ function ensureCodexModelInheritance(
     }
   }
 
+  const hostConfigPath = path.join(hostHomeDir, '.codex', 'config.toml');
+  let hostParsed: JsonObject | null = null;
+  if (fs.existsSync(hostConfigPath)) {
+    try {
+      hostParsed = toml.parse(fs.readFileSync(hostConfigPath, 'utf8')) as JsonObject;
+    } catch {
+      // An unavailable host trust source must not leave previously projected trust active.
+    }
+  }
+  if (!hostParsed) {
+    if (inheritCodexHookTrustState(sandboxParsed, {}, hostProjectDir)) {
+      fs.writeFileSync(sandboxConfigPath, `${toml.stringify(sandboxParsed)}\n`, 'utf8');
+    }
+    return;
+  }
+
   let changed = removeCodexMcpServers(sandboxParsed);
   changed = inheritDisabledCodexFeatureFlags(sandboxParsed, hostParsed) || changed;
+  changed = inheritCodexHookTrustState(sandboxParsed, hostParsed, hostProjectDir) || changed;
 
   const inheritSpecs: Array<readonly [string, 'string' | 'number']> = [
     ['model', 'string'],
@@ -180,7 +247,15 @@ const codexBeforeContainerCreateHook: AgentClientSandboxHook = {
         message: 'Codex sandbox hook requires its resolved tool state.'
       };
     }
-    ensureCodexModelInheritance(entry.dir, create.hostHome, entry.tool.containerMount);
+    const hostProjectDir = typeof context.config?.repoRoot === 'string'
+      ? context.config.repoRoot
+      : undefined;
+    ensureCodexModelInheritance(
+      entry.dir,
+      create.hostHome,
+      entry.tool.containerMount,
+      hostProjectDir
+    );
     ensureCodexWorkspaceTrust(entry.dir);
     return { status: 'ready' };
   }
