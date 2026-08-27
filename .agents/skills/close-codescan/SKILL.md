@@ -93,7 +93,7 @@ agent-infra-internal task-lifecycle {task-id} close-codescan --agent {standard-a
 
 > 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
-> **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) 第 7 步按告警号定位到了关联任务、(3) 该关联任务 task.md 的 `branch` 字段存在且不是 `main` / `master`、(4) 任务状态与沙箱 workspace identity 已交叉校验且无冲突时，才渲染清理提示。状态和 identity 决定命令：`completed` + `task-bound` 才使用完整 `{task-id}`；明确核对为 `branch-only` 时才使用 `{branch}`；`active` 不渲染自动清理命令；`blocked` / `archive` 只渲染人工核对提示，不渲染命令。任一状态或 identity 缺失、冲突时整段省略；关闭告警本身不能推断任务已完成。该块独立于「下一步」语义。
+> **可选沙箱清理提示（门控渲染）**：仅当同时满足 (1) `.agents/.airc.json` 存在 `sandbox` 字段、(2) 第 7 步按告警号定位到了关联任务、(3) 该任务 task.md 的 `branch` 存在且不是 `main` / `master`、(4) 任务状态与沙箱 workspace identity 已交叉校验且无冲突时，才渲染清理提示。状态和 identity 决定命令：仅 `completed` + `task-bound` 使用完整 `{task-id}`；仅在明确核对为 `branch-only` 时使用 `{branch}`；`active` 不渲染自动清理命令；`blocked` / `archive` 只渲染人工核对提示，不渲染命令。状态或 identity 缺失、冲突时整段省略；关闭告警本身不能推断任务已完成。该块独立于「下一步」语义。
 
 使用 `agent-infra-internal agent-client next-steps --skill complete-task --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
 
