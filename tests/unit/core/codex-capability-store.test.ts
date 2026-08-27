@@ -65,7 +65,7 @@ test('Codex capability is attested by one tool use and consumed once', () => {
   assert.equal(fs.existsSync(armed.path), false);
 });
 
-test('Codex capability expiry and provenance mismatch fail closed', () => {
+test('Codex capability expiry and protocol mismatch fail closed while build drift is diagnostic', () => {
   let now = 2_000;
   let tokenIndex = 0;
   const root = mkdtempSync('codex-capability-expiry-');
@@ -93,7 +93,7 @@ test('Codex capability expiry and provenance mismatch fail closed', () => {
     turnId: 'turn',
     toolUseId: 'tool',
     hookDefinitionHash: 'c'.repeat(64),
-    buildIdentity: { ...build, lifecycleContractHash: 'd'.repeat(64) }
+    buildIdentity: { ...build, protocolVersion: 2 as never }
   }), /CODEX_CAPABILITY_PROVENANCE_MISMATCH/);
 });
 

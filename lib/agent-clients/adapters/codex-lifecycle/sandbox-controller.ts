@@ -14,13 +14,15 @@ import {
 } from '../../../sandbox/control/client.ts';
 import { readSandboxControlStatus } from '../../../sandbox/control/state.ts';
 import { getProcessStartTime, type ProcessIdentity } from '../../../server/process-state.ts';
-import { computeLifecycleBuildIdentity } from './build-identity.ts';
+import { computeLifecycleBuildIdentity, verifyLifecycleBuildIdentity, type LifecycleIdentityWarning } from './build-identity.ts';
 import {
   contextFromControllerLease,
   controllerProofFromContext,
-  verifyCodexSandboxControllerContext as verifyContextFile,
+  verifyCodexSandboxControllerContextWithWarnings as verifyContextFileWithWarnings,
   writeCodexSandboxControllerContext,
-  type CodexSandboxControllerContextV2
+  computeLifecycleProfileProvenanceFromFiles,
+  type CodexSandboxControllerContextV2,
+  type LifecycleContextWarning
 } from './controller-context.ts';
 
 type ControllerControl = Readonly<{
@@ -58,6 +60,7 @@ type PreparedCodexSandboxController = Readonly<{
   home: string;
   contextPath: string;
   context: CodexSandboxControllerContextV2;
+  warnings: readonly LifecycleIdentityWarning[];
   cleanup: () => void;
 }>;
 
@@ -166,17 +169,18 @@ function verifyControl(taskId: string, control: ControllerControl): void {
   if (payload.taskId !== taskId) throw new Error('CODEX_SANDBOX_CONTROLLER_TASK_BINDING_INVALID');
 }
 
-function verifyCodexSandboxControllerContext(
+function verifyCodexSandboxControllerContextWithWarnings(
   contextPath: string,
   options: VerifyContextOptions = {}
-): CodexSandboxControllerContextV2 {
+): Readonly<{ context: CodexSandboxControllerContextV2; warnings: readonly (LifecycleIdentityWarning | LifecycleContextWarning)[] }> {
   const control = options.control ?? controlFromEnvironment();
-  const context = verifyContextFile(contextPath, {
+  const fileVerification = verifyContextFileWithWarnings(contextPath, {
     repoRoot: options.repoRoot,
     now: options.now,
     generation: control.generation,
     probeProcess: options.probeProcess
   });
+  const context = fileVerification.context;
   const verified = (options.requestControllerVerify ?? requestCodexControllerVerify)({
     controllerProof: controllerProofFromContext(context),
     ...control,
@@ -187,7 +191,19 @@ function verifyCodexSandboxControllerContext(
     || verified.binding.controllerInstanceDigest !== context.controllerInstanceDigest) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
-  return context;
+  return Object.freeze({
+    context,
+    warnings: Object.freeze([...new Map(
+      [...fileVerification.warnings, ...(verified.warnings ?? [])].map((warning) => [warning.code, warning])
+    ).values()])
+  });
+}
+
+function verifyCodexSandboxControllerContext(
+  contextPath: string,
+  options: VerifyContextOptions = {}
+): CodexSandboxControllerContextV2 {
+  return verifyCodexSandboxControllerContextWithWarnings(contextPath, options).context;
 }
 
 function detectedCodexVersion(): string {
@@ -347,20 +363,27 @@ function prepareCodexSandboxController(
     }
 
     const buildIdentity = computeLifecycleBuildIdentity(repoRoot);
+    const profileProvenance = computeLifecycleProfileProvenanceFromFiles({
+      executor: path.join(home, 'agents', path.basename(executor)),
+      reviewer: path.join(home, 'agents', path.basename(reviewer))
+    }, buildIdentity.packageVersion, 'isolated-user');
     const opened = (options.openController ?? requestCodexControllerOpen)({
       controllerProcess: { pid: process.pid, startTime: parentStartTime },
       ...control,
       timeoutMs: 30_000
     });
     const taskId = opened.lease.taskId;
+    const identity = verifyLifecycleBuildIdentity(opened.lease.buildIdentity, buildIdentity);
+    if (!identity.ok) throw new Error(`${identity.code}: ${identity.message}`);
+    const warnings = Object.freeze([...(opened.warnings ?? []), ...identity.warnings]);
     context = contextFromControllerLease(opened.lease, {
       hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex'),
-      lifecycleProfilesHash: digestFiles([executor, reviewer])
+      lifecycleProfilesHash: digestFiles([executor, reviewer]),
+      profileProvenance
     });
     if (opened.lease.controlGeneration !== control.generation
       || opened.lease.controllerProcess.pid !== process.pid
-      || opened.lease.controllerProcess.startTime !== parentStartTime
-      || JSON.stringify(opened.lease.buildIdentity) !== JSON.stringify(buildIdentity)) {
+      || opened.lease.controllerProcess.startTime !== parentStartTime) {
       throw new Error('SANDBOX_CONTROL_RESULT_INVALID');
     }
     (options.verifyTaskBinding ?? verifyControl)(taskId, control);
@@ -408,6 +431,7 @@ function prepareCodexSandboxController(
       home,
       contextPath,
       context,
+      warnings,
       cleanup
     });
   } catch (error) {
@@ -461,6 +485,7 @@ export {
   prepareCodexSandboxController,
   runCodexSandboxController,
   verifyCodexSandboxControllerContext,
+  verifyCodexSandboxControllerContextWithWarnings,
   controllerProofFromContext
 };
 export type {

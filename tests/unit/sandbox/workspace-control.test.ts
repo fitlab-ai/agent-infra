@@ -193,7 +193,7 @@ test('controller proof failures preserve the host registration', () => {
     ['cross-task', 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID'],
     ['cross-generation', 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID'],
     ['cross-container', 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID'],
-    ['cross-build', 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID'],
+    ['cross-protocol', 'CODEX_LIFECYCLE_PROTOCOL_MISMATCH'],
     ['cross-process', 'CODEX_SANDBOX_CONTROLLER_PROOF_INVALID'],
     ['dead-process', 'CODEX_SANDBOX_CONTROLLER_PROCESS_INACTIVE'],
     ['unknown-process', 'CODEX_SANDBOX_CONTROLLER_PROCESS_UNKNOWN']
@@ -230,8 +230,8 @@ test('controller proof failures preserve the host registration', () => {
       manifest: candidateManifest,
       manifestPath,
       proof,
-      buildIdentity: scenario === 'cross-build'
-        ? { ...controllerBuild, lifecycleContractHash: '0'.repeat(64) }
+      buildIdentity: scenario === 'cross-protocol'
+        ? { ...controllerBuild, protocolVersion: 2 as never }
         : controllerBuild,
       now: scenario === 'expired' ? 14_402_000 : 2_000,
       probeProcess: () => scenario === 'dead-process' ? 'dead' : scenario === 'unknown-process' ? 'unknown' : 'alive'
@@ -298,6 +298,50 @@ test('controller proof rejection occurs before the domain child and workspace mu
   assert.equal(fs.readFileSync(sentinel, 'utf8'), 'unchanged\n');
 });
 
+test('canonical prepare separates strict controller binding from resolver warnings', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-prepare-warnings-'));
+  const warning = {
+    code: 'CODEX_LIFECYCLE_BUILD_MISMATCH',
+    message: 'rebuild the sandbox',
+    action: 'rebuild-sandbox'
+  } as const;
+  let childEnv: NodeJS.ProcessEnv | undefined;
+  const result = executeRequest(manifest, path.join(root, 'manifest.json'), {
+    version: 3,
+    id: '12345678-1234-1234-1234-123456789abc',
+    token: manifest.token,
+    generation: manifest.generation,
+    issuedAt: 1_000,
+    expiresAt: 3_000,
+    family: 'task-orchestration',
+    args: [manifest.taskId!, 'prepare', '--client', 'codex'],
+    controllerProcess: null,
+    controllerProof: {
+      version: 1,
+      leaseId: 'a'.repeat(64),
+      leaseSecret: 'b'.repeat(64),
+      controllerProcess: { pid: 100, startTime: 10 }
+    }
+  }, {
+    buildIdentity: () => controllerBuild,
+    resolveControllerBinding: () => ({
+      instanceDigest: 'c'.repeat(64),
+      controlGeneration: manifest.generation,
+      warnings: [warning]
+    }),
+    spawnDomain: ((_file: string, _args: readonly string[], options: { env?: NodeJS.ProcessEnv }) => {
+      childEnv = options.env;
+      return { status: 0, stdout: '', stderr: '' };
+    }) as never
+  });
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(JSON.parse(childEnv?.AGENT_INFRA_CONTROL_CONTROLLER_BINDING ?? ''), {
+    instanceDigest: 'c'.repeat(64),
+    controlGeneration: manifest.generation
+  });
+  assert.deepEqual(JSON.parse(childEnv?.AGENT_INFRA_CONTROL_CONTROLLER_WARNINGS ?? ''), [warning]);
+});
+
 test('typed controller verify returns only the live task binding without spawning or mutating state', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-verify-executor-'));
   const manifestPath = path.join(root, 'manifest.json');
@@ -355,6 +399,58 @@ test('typed controller verify returns only the live task binding without spawnin
   assert.equal(result.stdout.includes(opened.lease.leaseSecret), false);
   assert.equal(spawns, 0);
   assert.equal(fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8'), before);
+});
+
+test('typed controller verify returns build drift warnings from registration binding', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-verify-warnings-'));
+  const manifestPath = path.join(root, 'manifest.json');
+  fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
+  const opened = openCodexControllerRegistration({
+    manifest,
+    manifestPath,
+    controllerProcess: { pid: 100, startTime: 10 },
+    buildIdentity: controllerBuild
+  }, { probeProcess: () => 'alive', randomHex: (() => {
+    const values = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)];
+    return () => values.shift()!;
+  })() });
+  const proof = {
+    version: 1 as const,
+    leaseId: opened.lease.leaseId,
+    leaseSecret: opened.lease.leaseSecret,
+    controllerProcess: opened.lease.controllerProcess
+  };
+  const request = validateSandboxControlRequest({
+    version: 3 as const,
+    id: '12345678-1234-1234-1234-123456789abc',
+    token: manifest.token,
+    generation: manifest.generation,
+    issuedAt: 1_000,
+    expiresAt: 3_000,
+    family: 'codex-controller' as const,
+    command: 'verify' as const,
+    args: [] as [],
+    controllerProcess: proof.controllerProcess,
+    controllerProof: proof
+  }, manifest, { now: 2_000 });
+  const result = executeRequest(manifest, manifestPath, request, {
+    buildIdentity: () => ({
+      ...controllerBuild,
+      packageVersion: '0.9.10-alpha.0',
+      internalExecutableBuildHash: 'c'.repeat(64),
+      lifecycleContractHash: 'd'.repeat(64)
+    }),
+    resolveControllerBinding: (params) => resolveCodexControllerBinding({
+      ...params,
+      probeProcess: () => 'alive'
+    })
+  });
+  assert.equal(result.exitCode, 0);
+  const payload = JSON.parse(result.stdout);
+  assert.deepEqual(payload.warnings?.map((warning: { code: string }) => warning.code), [
+    'CODEX_LIFECYCLE_BUILD_MISMATCH',
+    'CODEX_LIFECYCLE_CONTRACT_MISMATCH'
+  ]);
 });
 
 test('typed controller verify requires matching process proof', () => {
@@ -529,6 +625,18 @@ test('control protocol rejects request v2 and controller result parser enforces 
     error: null
   };
   assert.equal(parseCodexControllerResult(response).status, 'opened');
+  const warned = parseCodexControllerResult({
+    ...response,
+    stdout: `${JSON.stringify({
+      ...opened,
+      warnings: [{
+        code: 'CODEX_LIFECYCLE_BUILD_MISMATCH',
+        message: 'rebuild the sandbox',
+        action: 'rebuild-sandbox'
+      }]
+    })}\n`
+  });
+  assert.equal(warned.warnings?.[0]?.code, 'CODEX_LIFECYCLE_BUILD_MISMATCH');
   const verified = {
     version: 1,
     status: 'verified',
@@ -552,6 +660,16 @@ test('control protocol rejects request v2 and controller result parser enforces 
   );
   assert.throws(
     () => parseCodexControllerResult({ ...response, stdout: `${JSON.stringify({ ...opened, extra: true })}\n` }),
+    (error: unknown) => error instanceof SandboxControlClientError && error.detail.code === 'SANDBOX_CONTROL_RESULT_INVALID'
+  );
+  assert.throws(
+    () => parseCodexControllerResult({
+      ...response,
+      stdout: `${JSON.stringify({
+        ...opened,
+        warnings: [{ code: 'CODEX_LIFECYCLE_BUILD_MISMATCH', message: '', action: 'rebuild-sandbox' }]
+      })}\n`
+    }),
     (error: unknown) => error instanceof SandboxControlClientError && error.detail.code === 'SANDBOX_CONTROL_RESULT_INVALID'
   );
   assert.throws(() => parseCodexControllerResult({ ...response, exitCode: 1 }), /controller success result is invalid/);

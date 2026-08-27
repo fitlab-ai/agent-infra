@@ -8,7 +8,7 @@ import { applyTaskFinalization } from '../../task/finalization.ts';
 import { verifyTaskEvent } from '../../task/verification.ts';
 import { bindSandboxControlTask, type SandboxControlExecution, type SandboxControlManifest, type SandboxControlRequest } from './protocol.ts';
 import { atomicWriteJson, executionPath, terminateSandboxControlExecution } from './state.ts';
-import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import { computeLifecycleBuildIdentity, type LifecycleIdentityWarning } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import {
   closeCodexControllerRegistration,
   CodexControllerRegistrationError,
@@ -146,12 +146,15 @@ function controllerFailure(error: unknown): SandboxControlExecutionResult {
     ? error.code
     : /^([A-Z][A-Z0-9_]+)/u.exec(error instanceof Error ? error.message : String(error))?.[1]
       ?? 'CODEX_SANDBOX_CONTROLLER_FAILED';
+  const message = error instanceof CodexControllerRegistrationError
+    ? error.message
+    : `${code}: controller operation failed; inspect the sandbox controller and rebuild the sandbox if needed`;
   const payload = {
     version: 1,
     status: 'failed',
     changed: false,
     lease: null,
-    error: { code, message: `${code}: controller request failed`, retryable: false }
+    error: { code, message, retryable: false }
   };
   return { exitCode: 1, stdout: `${JSON.stringify(payload)}\n`, stderr: '' };
 }
@@ -234,6 +237,7 @@ export function executeRequest(
               controlGeneration: binding.controlGeneration,
               controllerInstanceDigest: binding.instanceDigest
             },
+            ...(binding.warnings && binding.warnings.length > 0 ? { warnings: binding.warnings } : {}),
             error: null
           })}\n`,
           stderr: ''
@@ -265,7 +269,11 @@ export function executeRequest(
     ));
   }
   const boundArgs = bindSandboxControlTask(request, manifest.taskId!);
-  let controllerBinding: Readonly<{ instanceDigest: string; controlGeneration: string }> | null = null;
+  let controllerBinding: Readonly<{
+    instanceDigest: string;
+    controlGeneration: string;
+    warnings?: readonly LifecycleIdentityWarning[];
+  }> | null = null;
   if (request.family === 'task-orchestration') {
     if (isCodexPrepare(request.args)) {
       if (!request.controllerProof) {
@@ -305,7 +313,15 @@ export function executeRequest(
         ...safeEnv(process.env),
         AGENT_INFRA_RUNTIME_DIR: manifest.runtimeDir,
         ...(controllerBinding
-          ? { AGENT_INFRA_CONTROL_CONTROLLER_BINDING: JSON.stringify(controllerBinding) }
+          ? {
+              AGENT_INFRA_CONTROL_CONTROLLER_BINDING: JSON.stringify({
+                instanceDigest: controllerBinding.instanceDigest,
+                controlGeneration: controllerBinding.controlGeneration
+              }),
+              ...(controllerBinding.warnings && controllerBinding.warnings.length > 0
+                ? { AGENT_INFRA_CONTROL_CONTROLLER_WARNINGS: JSON.stringify(controllerBinding.warnings) }
+                : {})
+            }
           : {})
       }
     }

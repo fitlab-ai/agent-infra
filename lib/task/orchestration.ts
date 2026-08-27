@@ -119,6 +119,7 @@ type OrchestrationResult = Readonly<{
   taskId: string | null;
   run: OrchestrationRun | null;
   next: OrchestrationNext | null;
+  warnings?: readonly Readonly<{ code: string; message: string; action: string }>[];
   error: Readonly<{
     code: string;
     message: string;
@@ -181,7 +182,7 @@ function orchestrationPath(taskDir: string): string {
   return path.join(taskDir, 'orchestration.json');
 }
 
-const ORCHESTRATION_STATE_INVALID_MESSAGE = 'orchestration.json does not match the current runtime structure; finish or clear active runs before upgrading';
+const ORCHESTRATION_STATE_INVALID_MESSAGE = 'orchestration.json does not match the current runtime structure; the file was left unchanged; rebuild the sandbox or manually repair the state before retrying';
 
 class OrchestrationStateError extends Error {
   readonly code = 'ORCHESTRATION_STATE_INVALID';
@@ -1187,7 +1188,15 @@ function activateOrchestrationDelegation(
   }
   const updated = withUpdatedRun(run, { pendingDelegation: result.receipt });
   saveRun(resolved.taskDir, updated);
-  return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
+  return {
+    status: 'running',
+    changed: true,
+    taskId: resolved.taskId,
+    run: updated,
+    next: null,
+    ...(result.warnings ? { warnings: result.warnings } : {}),
+    error: null
+  };
 }
 
 async function awaitOrchestrationDelegationActivation(

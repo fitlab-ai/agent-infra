@@ -28,6 +28,7 @@ import { equalCounts, parseReviewSummary } from "./review-artifacts.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
 import { snapshotReview } from "../git/review-snapshot.ts";
 import { OrchestrationStateError, readRun } from "./orchestration.ts";
+import { profileProvenanceEqual } from "../agent-clients/adapters/codex-lifecycle/controller-context.ts";
 
 const TASK_ENUMS = {
   type: ["feature", "bugfix", "refactor", "docs", "chore"],
@@ -341,9 +342,6 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
           || (activatedCodex && (
             host?.kind !== 'codex-lifecycle-v2'
             || host.protocolVersion !== provenance.protocolVersion
-            || host.packageVersion !== provenance.packageVersion
-            || host.internalExecutableBuildHash !== provenance.internalExecutableBuildHash
-            || host.lifecycleContractHash !== provenance.lifecycleContractHash
             || host.hookDefinitionHash !== provenance.hookDefinitionHash
             || host.hookSource !== provenance.hookSource
             || host.hookSourcePathDigest !== provenance.hookSourcePathDigest
@@ -353,6 +351,8 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
             || host.capabilityTurnId !== provenance.capabilityTurnId
             || host.controllerInstanceDigest !== provenance.controllerInstanceDigest
             || host.controlGeneration !== provenance.controlGeneration
+            || (provenance.profileProvenance !== undefined
+              && !profileProvenanceEqual(provenance.profileProvenance, host.profileProvenance))
             || host.spawnToolUseId === provenance.capabilityToolUseId
             || !exactText(host.spawnToolUseId)
             || !Number.isFinite(Date.parse(host.spawnObservedAt ?? ''))

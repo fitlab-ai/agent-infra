@@ -6,7 +6,8 @@ import test, { after } from 'node:test';
 
 import {
   prepareCodexSandboxController,
-  verifyCodexSandboxControllerContext
+  verifyCodexSandboxControllerContext,
+  verifyCodexSandboxControllerContextWithWarnings
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import { computeLifecycleBuildIdentity } from '../../../lib/agent-clients/adapters/codex-lifecycle/build-identity.ts';
 
@@ -157,6 +158,9 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
   }
   assert.equal(fs.existsSync(path.join(prepared.home, 'history.jsonl')), false);
   assert.equal(prepared.context.taskId, 'TASK-20260101-000001');
+  assert.equal(prepared.context.profileProvenance?.executor.source, 'isolated-user');
+  assert.equal(prepared.context.profileProvenance?.reviewer.source, 'isolated-user');
+  assert.deepEqual(prepared.warnings, []);
   prepared.cleanup();
   assert.equal(fs.existsSync(prepared.home), false);
 });
@@ -205,6 +209,33 @@ test('sandbox controller enforces a task lease and controller context binding', 
     { repoRoot: f.root, control: options.control, requestControllerVerify: options.requestControllerVerify }
   ), /CONTEXT_INVALID/);
   fs.writeFileSync(prepared.contextPath, contextRaw, { mode: 0o600 });
+  fs.appendFileSync(path.join(f.root, '.codex', 'hooks.json'), 'changed\n');
+  const verified = verifyCodexSandboxControllerContextWithWarnings(
+    prepared.contextPath,
+    {
+      repoRoot: f.root,
+      control: options.control,
+      requestControllerVerify: (() => ({
+        version: 1 as const,
+        status: 'verified' as const,
+        changed: false as const,
+        lease: null,
+        binding: {
+          taskId: 'TASK-20260101-000001',
+          controlGeneration: 'generation',
+          controllerInstanceDigest: 'e'.repeat(64)
+        },
+        warnings: [{
+          code: 'CODEX_LIFECYCLE_BUILD_MISMATCH' as const,
+          message: 'rebuild the sandbox',
+          action: 'rebuild-sandbox' as const
+        }],
+        error: null
+      })) as never
+    }
+  );
+  assert.ok(verified.warnings.some((warning) => warning.code === 'CODEX_LIFECYCLE_HOOK_DRIFT'));
+  assert.ok(verified.warnings.some((warning) => warning.code === 'CODEX_LIFECYCLE_BUILD_MISMATCH'));
   assert.throws(() => prepareCodexSandboxController({}, options), /CONTROLLER_BUSY/);
   fs.writeFileSync(prepared.contextPath, `${JSON.stringify({ ...contextValue, taskId: 'TASK-20260101-000002' })}\n`, { mode: 0o600 });
   assert.throws(() => verifyCodexSandboxControllerContext(

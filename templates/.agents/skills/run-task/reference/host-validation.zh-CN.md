@@ -10,13 +10,13 @@
 - 显式 requested model/effort 能传给 executor/reviewer；宿主对任一字段回退时，事件能给出对应 actual 值与独立的非空 fallback reason。
   > claude-code 例外：requested reasoning effort 暂不支持按角色下发给 executor/reviewer——`.claude/agents/{executor,reviewer}.md` 是仓库级共享单例，动态写入存在跨任务竞态，解决该竞态超出本任务范围。该客户端只要求如实记录宿主原生 Start/Stop 事件中能观察到的 actual model/actual reasoning effort（`delegationEvidence.actualReasoningEffort` 声明为 `spawn-ack`）；观察不到时记录为缺失，不视为需要独立 fallback reason 的回退场景，也不构成 fail-closed 阻断。此例外不适用于其他客户端。
 - candidate checkout 与打包安装后的行为一致，且模型策略、receipt 与验证结果可从 `orchestration.json` 复核。
-- direct-host 的 project/managed source 与 sandbox controller 的 isolated-user source、build/contract/profile/controller digest 必须在 prepare/start/stop/consume 全链路一致。
+- direct-host 的 project/managed source 与 sandbox controller 的 isolated-user source 必须如实记录；每条 profile 都记录 source、path digest、content hash 和 agent-infra package version。build/contract/profile 内容在跨根比较中允许漂移并输出 warning，但 controller/task/process/lease 与 receipt 内 hook/profile binding 仍须在 prepare/start/stop/consume 全链路一致。
 
 ## 验证顺序
 
 1. 在干净临时仓库记录客户端版本、feature 状态和启动命令。
 2. 分别启动 fresh executor 与 fresh reviewer，保存去敏后的原始 stdin 和结构化 run；同时验证原生 start/stop 与 parent PostTool fallback。timed-out wait 必须无动作；不得补写宿主未产生的字段。
-3. 分别验证 model/effort 的 requested/actual 一致路径、单项与双项有理由 fallback 路径，并确认缺 actual 字段会失败关闭。
+3. 分别验证 model/effort 的 requested/actual 一致路径、单项与双项有理由 fallback 路径，并确认缺 actual 字段会失败关闭；对 package/build/contract 或 hook/profile 漂移确认只产生可操作 warning，并提示重建 sandbox。
 4. 对同一 commit 执行 candidate checkout 与 `npm pack` 安装验证，记录 tarball 哈希和结果。
 5. 仅把去敏摘要与非敏感 fixture 纳入版本库；token、绝对用户路径、transcript 内容和凭证必须删除或替换。
 6. sandbox backend 另做至少 10 次 executor 与 10 次 reviewer 冷启动，记录 prepared、spawn dispatch、SubagentStart、activation completed 的单调时钟及 p50/p95/max；仅当 max 加 20% 余量不超过 deadline，并通过 symlink/config/plugin/lease/context/build 失败注入和终态清理审计时启用。

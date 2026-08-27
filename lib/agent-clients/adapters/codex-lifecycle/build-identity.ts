@@ -28,6 +28,13 @@ type IdentityVerification = Readonly<{
   ok: boolean;
   code: string | null;
   message: string | null;
+  warnings: readonly LifecycleIdentityWarning[];
+}>;
+
+type LifecycleIdentityWarning = Readonly<{
+  code: 'CODEX_LIFECYCLE_BUILD_MISMATCH' | 'CODEX_LIFECYCLE_CONTRACT_MISMATCH';
+  message: string;
+  action: 'rebuild-sandbox';
 }>;
 
 function exactText(value: unknown): value is string {
@@ -201,25 +208,32 @@ function verifyLifecycleBuildIdentity(
     return {
       ok: false,
       code: 'CODEX_LIFECYCLE_PROTOCOL_MISMATCH',
-      message: 'Codex lifecycle protocol version does not match'
+      message: 'Codex lifecycle protocol version does not match',
+      warnings: []
     };
   }
+  const warnings: LifecycleIdentityWarning[] = [];
   if (actual.packageVersion !== expected.packageVersion
     || actual.internalExecutableBuildHash !== expected.internalExecutableBuildHash) {
-    return {
-      ok: false,
+    warnings.push({
       code: 'CODEX_LIFECYCLE_BUILD_MISMATCH',
-      message: 'Codex lifecycle executable build identity does not match'
-    };
+      message: 'Codex lifecycle executable build identity differs; rebuild the sandbox if the runtime is stale',
+      action: 'rebuild-sandbox'
+    });
   }
   if (actual.lifecycleContractHash !== expected.lifecycleContractHash) {
-    return {
-      ok: false,
+    warnings.push({
       code: 'CODEX_LIFECYCLE_CONTRACT_MISMATCH',
-      message: 'Codex lifecycle contract identity does not match'
-    };
+      message: 'Codex lifecycle contract identity differs; rebuild the sandbox if the runtime is stale',
+      action: 'rebuild-sandbox'
+    });
   }
-  return { ok: true, code: null, message: null };
+  return {
+    ok: true,
+    code: warnings[0]?.code ?? null,
+    message: warnings[0]?.message ?? null,
+    warnings: Object.freeze(warnings)
+  };
 }
 
 export {
@@ -233,6 +247,7 @@ export {
 };
 export type {
   IdentityVerification,
+  LifecycleIdentityWarning,
   LifecycleBuildIdentity,
   LifecycleManifestFiles,
   LifecycleBuildIdentityOptions

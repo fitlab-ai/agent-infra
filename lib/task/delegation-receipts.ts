@@ -3,6 +3,17 @@ import { randomUUID } from 'node:crypto';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
+import {
+  verifyLifecycleBuildIdentity,
+  type LifecycleBuildIdentity,
+  type LifecycleIdentityWarning
+} from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import {
+  isLifecycleProfileProvenance,
+  profileProvenanceEqual,
+  type LifecycleContextWarning,
+  type LifecycleProfileProvenance
+} from '../agent-clients/adapters/codex-lifecycle/controller-context.ts';
 
 type DelegationRole = 'executor' | 'reviewer';
 type DelegationStage = 'analysis' | 'review-analysis' | 'plan' | 'review-plan' | 'code' | 'review-code' | 'commit';
@@ -28,6 +39,7 @@ type DelegationHostEvidence = Readonly<{
   spawnObservedAt?: string;
   controllerInstanceDigest?: string | null;
   controlGeneration?: string | null;
+  profileProvenance?: LifecycleProfileProvenance;
 }>;
 type DelegationLifecycleProvenance = Readonly<{
   protocolVersion: number;
@@ -43,6 +55,7 @@ type DelegationLifecycleProvenance = Readonly<{
   capabilityToolUseId: string;
   controllerInstanceDigest: string | null;
   controlGeneration: string | null;
+  profileProvenance?: LifecycleProfileProvenance;
 }>;
 
 type DelegationReceipt = Readonly<{
@@ -85,7 +98,14 @@ type DelegationReceipt = Readonly<{
 }>;
 
 type ReceiptFailure = Readonly<{ ok: false; code: string; message: string; receipt?: never }>;
-type ReceiptSuccess = Readonly<{ ok: true; receipt: DelegationReceipt; code?: never; message?: never }>;
+type DelegationWarning = LifecycleIdentityWarning | LifecycleContextWarning;
+type ReceiptSuccess = Readonly<{
+  ok: true;
+  receipt: DelegationReceipt;
+  warnings?: readonly DelegationWarning[];
+  code?: never;
+  message?: never;
+}>;
 type ReceiptResult = ReceiptSuccess | ReceiptFailure;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -122,9 +142,10 @@ const LIFECYCLE_PROVENANCE_KEYS = [
   'capabilitySessionId', 'capabilityTurnId', 'capabilityToolUseId',
   'controllerInstanceDigest', 'controlGeneration'
 ] as const;
+const LIFECYCLE_PROVENANCE_OPTIONAL_KEYS = ['profileProvenance'] as const;
 
 function isDelegationLifecycleProvenance(value: unknown): value is DelegationLifecycleProvenance {
-  if (!hasExactKeys(value, LIFECYCLE_PROVENANCE_KEYS)) return false;
+  if (!hasExactKeys(value, LIFECYCLE_PROVENANCE_KEYS, LIFECYCLE_PROVENANCE_OPTIONAL_KEYS)) return false;
   return Number.isSafeInteger(value.protocolVersion)
     && (value.protocolVersion as number) > 0
     && exactText(value.packageVersion)
@@ -138,7 +159,8 @@ function isDelegationLifecycleProvenance(value: unknown): value is DelegationLif
     && exactText(value.capabilityTurnId)
     && exactText(value.capabilityToolUseId)
     && nullableText(value.controllerInstanceDigest)
-    && nullableText(value.controlGeneration);
+    && nullableText(value.controlGeneration)
+    && (value.profileProvenance === undefined || isLifecycleProfileProvenance(value.profileProvenance));
 }
 
 const HOST_EVIDENCE_REQUIRED_KEYS = [
@@ -150,9 +172,10 @@ const HOST_EVIDENCE_OPTIONAL_KEYS = [
   'capabilityTurnId', 'capabilityToolUseId', 'spawnToolUseId', 'spawnObservedAt',
   'controllerInstanceDigest', 'controlGeneration'
 ] as const;
+const HOST_EVIDENCE_OPTIONAL_KEYS_WITH_PROFILE = [...HOST_EVIDENCE_OPTIONAL_KEYS, 'profileProvenance'] as const;
 
 function isDelegationHostEvidence(value: unknown): value is DelegationHostEvidence {
-  if (!hasExactKeys(value, HOST_EVIDENCE_REQUIRED_KEYS, HOST_EVIDENCE_OPTIONAL_KEYS)) return false;
+  if (!hasExactKeys(value, HOST_EVIDENCE_REQUIRED_KEYS, HOST_EVIDENCE_OPTIONAL_KEYS_WITH_PROFILE)) return false;
   if (!['codex-lifecycle-v1', 'codex-lifecycle-v2'].includes(value.kind as string)) return false;
   if (!exactText(value.hookDefinitionHash)
     || !Number.isSafeInteger(value.startRevision) || (value.startRevision as number) < 1
@@ -173,7 +196,18 @@ function isDelegationHostEvidence(value: unknown): value is DelegationHostEviden
     && exactText(value.spawnToolUseId)
     && exactText(value.spawnObservedAt)
     && nullableText(value.controllerInstanceDigest)
-    && nullableText(value.controlGeneration);
+    && nullableText(value.controlGeneration)
+    && (value.profileProvenance === undefined || isLifecycleProfileProvenance(value.profileProvenance));
+}
+
+function profileBindingMatches(
+  expected: LifecycleProfileProvenance | undefined,
+  actual: LifecycleProfileProvenance | undefined
+): boolean {
+  // Legacy receipts did not persist profile provenance. Keep their existing
+  // hook/evidence binding checks while allowing a newer host to add the
+  // optional audit field; activation emits an explicit legacy warning below.
+  return expected ? profileProvenanceEqual(expected, actual) : true;
 }
 
 function hasCurrentCodexEvidence(receipt: DelegationReceipt): boolean {
@@ -185,9 +219,6 @@ function hasCurrentCodexEvidence(receipt: DelegationReceipt): boolean {
   if (
     host?.kind !== 'codex-lifecycle-v2'
     || host.protocolVersion !== provenance.protocolVersion
-    || host.packageVersion !== provenance.packageVersion
-    || host.internalExecutableBuildHash !== provenance.internalExecutableBuildHash
-    || host.lifecycleContractHash !== provenance.lifecycleContractHash
     || host.hookDefinitionHash !== provenance.hookDefinitionHash
     || host.hookSource !== provenance.hookSource
     || host.hookSourcePathDigest !== provenance.hookSourcePathDigest
@@ -196,6 +227,7 @@ function hasCurrentCodexEvidence(receipt: DelegationReceipt): boolean {
     || host.capabilityTurnId !== provenance.capabilityTurnId
     || host.controllerInstanceDigest !== provenance.controllerInstanceDigest
     || host.controlGeneration !== provenance.controlGeneration
+    || !profileBindingMatches(provenance.profileProvenance, host.profileProvenance)
     || receipt.parentId !== provenance.capabilitySessionId
     || host.spawnToolUseId === provenance.capabilityToolUseId
   ) return false;
@@ -439,6 +471,7 @@ function activateDelegation(
       hookSource?: 'project' | 'managed' | 'isolated-user';
       hookSourcePathDigest?: string;
       hookSourceHash?: string;
+      profileProvenance?: LifecycleProfileProvenance;
       capabilitySessionId?: string;
       capabilityTurnId?: string;
       capabilityToolUseId?: string;
@@ -531,9 +564,6 @@ function activateDelegation(
     if (
       !expected
       || event.hostEvidence.protocolVersion !== expected.protocolVersion
-      || event.hostEvidence.packageVersion !== expected.packageVersion
-      || event.hostEvidence.internalExecutableBuildHash !== expected.internalExecutableBuildHash
-      || event.hostEvidence.lifecycleContractHash !== expected.lifecycleContractHash
       || event.hostEvidence.hookDefinitionHash !== expected.hookDefinitionHash
       || event.hostEvidence.hookSource !== expected.hookSource
       || event.hostEvidence.hookSourcePathDigest !== expected.hookSourcePathDigest
@@ -548,7 +578,39 @@ function activateDelegation(
       || event.parentId !== expected.capabilitySessionId
       || (event.hostEvidence.controllerInstanceDigest ?? null) !== expected.controllerInstanceDigest
       || (event.hostEvidence.controlGeneration ?? null) !== expected.controlGeneration
+      || !profileBindingMatches(expected.profileProvenance, event.hostEvidence.profileProvenance)
+      || !Number.isSafeInteger(event.hostEvidence.protocolVersion)
+      || typeof event.hostEvidence.packageVersion !== 'string'
+      || event.hostEvidence.packageVersion.trim() !== event.hostEvidence.packageVersion
+      || event.hostEvidence.packageVersion.length === 0
+      || typeof event.hostEvidence.internalExecutableBuildHash !== 'string'
+      || event.hostEvidence.internalExecutableBuildHash.trim() !== event.hostEvidence.internalExecutableBuildHash
+      || event.hostEvidence.internalExecutableBuildHash.length === 0
+      || typeof event.hostEvidence.lifecycleContractHash !== 'string'
+      || event.hostEvidence.lifecycleContractHash.trim() !== event.hostEvidence.lifecycleContractHash
+      || event.hostEvidence.lifecycleContractHash.length === 0
     ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex lifecycle provenance does not match the prepared receipt');
+  }
+  const warnings: DelegationWarning[] = [];
+  if (event.hostEvidence?.kind === 'codex-lifecycle-v2' && receipt.lifecycleProvenance) {
+    const identity = verifyLifecycleBuildIdentity(
+      receipt.lifecycleProvenance as LifecycleBuildIdentity,
+      {
+        protocolVersion: event.hostEvidence.protocolVersion as LifecycleBuildIdentity['protocolVersion'],
+        packageVersion: event.hostEvidence.packageVersion!,
+        internalExecutableBuildHash: event.hostEvidence.internalExecutableBuildHash!,
+        lifecycleContractHash: event.hostEvidence.lifecycleContractHash!
+      } as LifecycleBuildIdentity
+    );
+    if (!identity.ok) return fail(identity.code!, identity.message!);
+    warnings.push(...identity.warnings);
+    if (!receipt.lifecycleProvenance.profileProvenance) {
+      warnings.push({
+        code: 'CODEX_LIFECYCLE_PROFILE_PROVENANCE_LEGACY',
+        message: 'Delegation receipt has no per-profile provenance; rebuild the sandbox to capture a complete audit record',
+        action: 'rebuild-sandbox'
+      });
+    }
   }
   return { ok: true, receipt: Object.freeze({
     ...receipt,
@@ -569,7 +631,7 @@ function activateDelegation(
     startEvidenceMonotonicMs: monotonic,
     activatedMonotonicMs: (options.monotonicNow ?? (() => Number(process.hrtime.bigint() / 1_000_000n)))(),
     activatedAt: new Date(wallNow).toISOString()
-  }) };
+  }), ...(warnings.length > 0 ? { warnings: Object.freeze(warnings) } : {}) };
 }
 
 function abortPreparedDelegation(receipt: DelegationReceipt): ReceiptResult {
@@ -681,5 +743,6 @@ export type {
   DelegationRole,
   DelegationStage,
   DelegationStatus,
+  DelegationWarning,
   ReceiptResult
 };

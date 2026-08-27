@@ -62,6 +62,13 @@ test('lifecycle build identity separates executable and contract hashes', () => 
     verifyLifecycleBuildIdentity(first, executableChanged).code,
     'CODEX_LIFECYCLE_BUILD_MISMATCH'
   );
+  assert.equal(verifyLifecycleBuildIdentity(first, contractChanged).ok, true);
+  assert.deepEqual(verifyLifecycleBuildIdentity(first, contractChanged).warnings, [{
+    code: 'CODEX_LIFECYCLE_CONTRACT_MISMATCH',
+    message: 'Codex lifecycle contract identity differs; rebuild the sandbox if the runtime is stale',
+    action: 'rebuild-sandbox'
+  }]);
+  assert.equal(verifyLifecycleBuildIdentity(first, { ...first, protocolVersion: 2 as never }).ok, false);
 });
 
 test('lifecycle build identity preserves exact package version text', () => {

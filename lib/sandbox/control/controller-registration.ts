@@ -2,7 +2,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { LifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import {
+  verifyLifecycleBuildIdentity,
+  type LifecycleBuildIdentity,
+  type LifecycleIdentityWarning
+} from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import { parseLinuxProcessStat, type ProcessIdentity, type ProcessIdentityState } from '../../server/process-state.ts';
 import { commandForEngine, runProbe } from '../shell.ts';
 import type { SandboxControlManifest } from './protocol.ts';
@@ -55,6 +59,7 @@ export type CodexControllerOpened = Readonly<{
   changed: true;
   lease: CodexControllerLeaseV1;
   error: null;
+  warnings?: readonly LifecycleIdentityWarning[];
 }>;
 
 type RegistrationOptions = Readonly<{
@@ -185,13 +190,15 @@ function assertRegistrationBinding(
   registration: CodexControllerRegistrationV1,
   manifest: SandboxControlManifest,
   buildIdentity: LifecycleBuildIdentity
-): void {
+): readonly LifecycleIdentityWarning[] {
   if (registration.taskId !== manifest.taskId
     || registration.controlGeneration !== manifest.generation
-    || registration.containerId !== manifest.containerIdentity.id
-    || JSON.stringify(registration.buildIdentity) !== JSON.stringify(buildIdentity)) {
+    || registration.containerId !== manifest.containerIdentity.id) {
     fail('CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID', 'controller registration binding is invalid');
   }
+  const identity = verifyLifecycleBuildIdentity(registration.buildIdentity, buildIdentity);
+  if (!identity.ok) fail(identity.code!, identity.message!);
+  return identity.warnings;
 }
 
 function atomicWrite(file: string, value: CodexControllerRegistrationV1): void {
@@ -226,9 +233,10 @@ export function openCodexControllerRegistration(params: Readonly<{
   const file = registrationPath(params.manifestPath);
   const now = (options.now ?? Date.now)();
   const initial = readRaw(file);
+  let warnings: readonly LifecycleIdentityWarning[] = [];
   if (initial) {
     const existing = parseRegistration(initial.raw);
-    assertRegistrationBinding(existing, params.manifest, params.buildIdentity);
+    warnings = assertRegistrationBinding(existing, params.manifest, params.buildIdentity);
     if (existing.expiresAt > now) {
       const oldState = (options.probeProcess ?? ((identity) => defaultProbe(params.manifest, identity)))(existing.controllerProcess);
       if (oldState === 'alive') fail('CODEX_SANDBOX_CONTROLLER_BUSY', 'an active controller registration already exists');
@@ -282,7 +290,8 @@ export function openCodexControllerRegistration(params: Readonly<{
       issuedAt: registration.issuedAt,
       expiresAt: registration.expiresAt
     }),
-    error: null
+    error: null,
+    ...(warnings.length > 0 ? { warnings } : {})
   });
 }
 
@@ -322,12 +331,16 @@ export function resolveCodexControllerBinding(params: Readonly<{
   buildIdentity: LifecycleBuildIdentity;
   now?: number;
   probeProcess?: (identity: ProcessIdentity) => ProcessIdentityState;
-}>): Readonly<{ instanceDigest: string; controlGeneration: string }> {
+}>): Readonly<{
+  instanceDigest: string;
+  controlGeneration: string;
+  warnings?: readonly LifecycleIdentityWarning[];
+}> {
   if (params.manifest.mode !== 'task-bound' || !params.manifest.taskId) {
     fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot resolve a Codex controller registration');
   }
   const registration = readCodexControllerRegistration(params.manifestPath);
-  assertRegistrationBinding(registration, params.manifest, params.buildIdentity);
+  const warnings = assertRegistrationBinding(registration, params.manifest, params.buildIdentity);
   if (registration.expiresAt <= (params.now ?? Date.now())) {
     fail('CODEX_SANDBOX_CONTROLLER_LEASE_EXPIRED', 'controller lease is expired');
   }
@@ -342,6 +355,7 @@ export function resolveCodexControllerBinding(params: Readonly<{
   if (state === 'unknown') fail('CODEX_SANDBOX_CONTROLLER_PROCESS_UNKNOWN', 'controller process state is unknown');
   return Object.freeze({
     instanceDigest: registration.controllerInstanceDigest,
-    controlGeneration: registration.controlGeneration
+    controlGeneration: registration.controlGeneration,
+    ...(warnings.length > 0 ? { warnings: Object.freeze([...warnings]) } : {})
   });
 }
