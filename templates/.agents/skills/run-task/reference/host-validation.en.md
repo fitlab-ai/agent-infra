@@ -10,13 +10,13 @@ Before publishing support for a client, prove the lifecycle evidence chain with 
 - Explicit requested model/effort reaches each executor/reviewer. A fallback of either field reports the corresponding actual value and its own non-empty reason.
   > claude-code exception: requested reasoning effort does not yet support per-role dispatch to executor/reviewer — `.claude/agents/{executor,reviewer}.md` is a repository-level shared singleton, and writing it per role would race across concurrent tasks. This client only needs to honestly record the actual model/actual reasoning effort observed in native Start/Stop host events (`delegationEvidence.actualReasoningEffort` is declared `spawn-ack`); when not observed it is recorded as missing, which is not treated as a fallback requiring its own reason and does not fail closed. This exception does not apply to any other client.
 - Candidate-checkout and packed-install behavior match, with model policy, receipts, and verification results auditable in `orchestration.json`.
-- Direct-host project/managed source and sandbox isolated-user source are recorded as observed. Each profile records its source, path digest, content hash, and agent-infra package version. Cross-root build/contract/profile content drift emits a warning, while controller/task/process/lease and the receipt's hook/profile binding remain identical through prepare/start/stop/consume.
+- Direct-host and sandbox controller hooks/profiles must come from trusted sources. Cross-root build/contract/profile content drift emits an actionable warning, while controller/task/process/lease and the receipt's hook/evidence binding remain identical through prepare/start/stop/consume.
 
 ## Validation Sequence
 
 1. Record client version, feature state, and launch command in a clean temporary repository.
 2. Start a fresh executor and reviewer, retaining redacted raw stdin and the structured run. Validate both native start/stop and the parent PostTool fallback; timed-out waits must do nothing. Never synthesize a field the host did not emit.
-3. Validate model/effort match paths, single and dual justified fallbacks, and fail-closed behavior for missing actual fields. Confirm package/build/contract or hook/profile drift produces only actionable rebuild warnings.
+3. Validate model/effort match paths, single and dual justified fallbacks, and fail-closed behavior for missing actual fields. Confirm package/build/contract or hook/profile content drift produces only an actionable warning telling the user to rebuild the sandbox.
 4. Validate the same commit from a candidate checkout and an `npm pack` install; record the tarball hash and results.
 5. Commit only redacted summaries and non-sensitive fixtures. Remove or replace tokens, user-specific absolute paths, transcript content, and credentials.
 6. For sandbox, run at least ten cold executor starts and ten cold reviewer starts. Record monotonic prepared, spawn-dispatch, SubagentStart, and activation-completed timestamps plus p50/p95/max. Enable only when max plus 20% fits the deadline and symlink/config/plugin/lease/context/build failure injection and terminal cleanup audits pass.

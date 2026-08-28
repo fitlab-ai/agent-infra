@@ -20,7 +20,6 @@ import {
   controllerProofFromContext,
   verifyCodexSandboxControllerContextWithWarnings as verifyContextFileWithWarnings,
   writeCodexSandboxControllerContext,
-  computeLifecycleProfileProvenanceFromFiles,
   type CodexSandboxControllerContextV2,
   type LifecycleContextWarning
 } from './controller-context.ts';
@@ -363,10 +362,6 @@ function prepareCodexSandboxController(
     }
 
     const buildIdentity = computeLifecycleBuildIdentity(repoRoot);
-    const profileProvenance = computeLifecycleProfileProvenanceFromFiles({
-      executor: path.join(home, 'agents', path.basename(executor)),
-      reviewer: path.join(home, 'agents', path.basename(reviewer))
-    }, buildIdentity.packageVersion, 'isolated-user');
     const opened = (options.openController ?? requestCodexControllerOpen)({
       controllerProcess: { pid: process.pid, startTime: parentStartTime },
       ...control,
@@ -378,8 +373,7 @@ function prepareCodexSandboxController(
     const warnings = Object.freeze([...(opened.warnings ?? []), ...identity.warnings]);
     context = contextFromControllerLease(opened.lease, {
       hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex'),
-      lifecycleProfilesHash: digestFiles([executor, reviewer]),
-      profileProvenance
+      lifecycleProfilesHash: digestFiles([executor, reviewer])
     });
     if (opened.lease.controlGeneration !== control.generation
       || opened.lease.controllerProcess.pid !== process.pid

@@ -12,22 +12,6 @@ import {
 } from './build-identity.ts';
 
 const HEX_256 = /^[a-f0-9]{64}$/u;
-const PROFILE_FILES = Object.freeze({
-  executor: '.codex/agents/agent-infra-lifecycle-executor.toml',
-  reviewer: '.codex/agents/agent-infra-lifecycle-reviewer.toml'
-} as const);
-
-export type LifecycleProfileSource = 'project' | 'managed' | 'isolated-user';
-export type LifecycleProfileEntry = Readonly<{
-  source: LifecycleProfileSource;
-  sourcePathDigest: string;
-  sourceHash: string;
-  version: string;
-}>;
-export type LifecycleProfileProvenance = Readonly<{
-  executor: LifecycleProfileEntry;
-  reviewer: LifecycleProfileEntry;
-}>;
 export type LifecycleContextWarning = Readonly<{
   code: string;
   message: string;
@@ -46,29 +30,17 @@ export type CodexSandboxControllerContextV2 = Readonly<{
   buildIdentity: LifecycleBuildIdentity;
   hookDefinitionHash: string;
   lifecycleProfilesHash: string;
-  profileProvenance?: LifecycleProfileProvenance;
 }>;
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(value).sort().join(',') === [...keys].sort().join(',');
 }
 
-function hasExactKeys(value: unknown, required: readonly string[], optional: readonly string[] = []): value is Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const keys = Object.keys(value as Record<string, unknown>);
-  const allowed = new Set([...required, ...optional]);
-  return required.every((key) => keys.includes(key)) && keys.every((key) => allowed.has(key));
-}
-
-function profileFiles(repoRoot: string): Readonly<{ executor: string; reviewer: string }> {
-  return {
-    executor: path.join(repoRoot, PROFILE_FILES.executor),
-    reviewer: path.join(repoRoot, PROFILE_FILES.reviewer)
-  };
-}
-
 function digestProfiles(repoRoot: string): string {
-  const files = Object.values(profileFiles(repoRoot));
+  const files = [
+    path.join(repoRoot, '.codex', 'agents', 'agent-infra-lifecycle-executor.toml'),
+    path.join(repoRoot, '.codex', 'agents', 'agent-infra-lifecycle-reviewer.toml')
+  ];
   const hash = crypto.createHash('sha256');
   for (const file of files.sort()) {
     const stat = fs.lstatSync(file);
@@ -79,73 +51,6 @@ function digestProfiles(repoRoot: string): string {
     hash.update('\0');
   }
   return hash.digest('hex');
-}
-
-function digestPath(value: string): string {
-  return crypto.createHash('sha256').update(path.resolve(value)).digest('hex');
-}
-
-function profileEntry(file: string, version: string, source: LifecycleProfileSource): LifecycleProfileEntry {
-  const stat = fs.lstatSync(file);
-  if (!stat.isFile() || stat.isSymbolicLink()) {
-    throw new Error('CODEX_LIFECYCLE_PROFILE_PROVENANCE_INVALID');
-  }
-  const content = fs.readFileSync(file);
-  if (content.length === 0 || version.trim() !== version || version.length === 0) {
-    throw new Error('CODEX_LIFECYCLE_PROFILE_PROVENANCE_INVALID');
-  }
-  return Object.freeze({
-    source,
-    sourcePathDigest: digestPath(file),
-    sourceHash: crypto.createHash('sha256').update(content).digest('hex'),
-    version
-  });
-}
-
-export function computeLifecycleProfileProvenance(
-  repoRoot: string,
-  version: string,
-  source: LifecycleProfileSource = 'project'
-): LifecycleProfileProvenance {
-  const files = profileFiles(repoRoot);
-  return computeLifecycleProfileProvenanceFromFiles(files, version, source);
-}
-
-export function computeLifecycleProfileProvenanceFromFiles(
-  files: Readonly<{ executor: string; reviewer: string }>,
-  version: string,
-  source: LifecycleProfileSource
-): LifecycleProfileProvenance {
-  return Object.freeze({
-    executor: profileEntry(files.executor, version, source),
-    reviewer: profileEntry(files.reviewer, version, source)
-  });
-}
-
-function validProfileEntry(value: unknown): value is LifecycleProfileEntry {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const entry = value as Record<string, unknown>;
-  return exactKeys(entry, ['source', 'sourceHash', 'sourcePathDigest', 'version'])
-    && ['project', 'managed', 'isolated-user'].includes(entry.source as string)
-    && typeof entry.sourcePathDigest === 'string' && HEX_256.test(entry.sourcePathDigest)
-    && typeof entry.sourceHash === 'string' && HEX_256.test(entry.sourceHash)
-    && typeof entry.version === 'string' && entry.version.length > 0 && entry.version.trim() === entry.version;
-}
-
-export function isLifecycleProfileProvenance(value: unknown): value is LifecycleProfileProvenance {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const provenance = value as Record<string, unknown>;
-  return exactKeys(provenance, ['executor', 'reviewer'])
-    && validProfileEntry(provenance.executor)
-    && validProfileEntry(provenance.reviewer);
-}
-
-export function profileProvenanceEqual(
-  left: LifecycleProfileProvenance | null | undefined,
-  right: LifecycleProfileProvenance | null | undefined
-): boolean {
-  if (!left || !right) return left === right;
-  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function validProcess(value: unknown): value is ProcessIdentity {
@@ -174,11 +79,11 @@ function validateContext(value: unknown): CodexSandboxControllerContextV2 {
   }
   const context = value as Record<string, unknown>;
   const lease = context.controllerLease as Record<string, unknown> | null;
-  if (!hasExactKeys(context, [
+  if (!exactKeys(context, [
     'buildIdentity', 'controlGeneration', 'controllerInstanceDigest', 'controllerLease',
     'controllerProcess', 'expiresAt', 'hookDefinitionHash', 'issuedAt',
     'lifecycleProfilesHash', 'taskId', 'version'
-  ], ['profileProvenance'])
+  ])
     || context.version !== 2
     || typeof context.taskId !== 'string' || context.taskId.length === 0
     || typeof context.controlGeneration !== 'string' || context.controlGeneration.length === 0
@@ -193,8 +98,7 @@ function validateContext(value: unknown): CodexSandboxControllerContextV2 {
     || (context.expiresAt as number) <= (context.issuedAt as number)
     || !validBuildIdentity(context.buildIdentity)
     || typeof context.hookDefinitionHash !== 'string' || !HEX_256.test(context.hookDefinitionHash)
-    || typeof context.lifecycleProfilesHash !== 'string' || !HEX_256.test(context.lifecycleProfilesHash)
-    || (context.profileProvenance !== undefined && !isLifecycleProfileProvenance(context.profileProvenance))) {
+    || typeof context.lifecycleProfilesHash !== 'string' || !HEX_256.test(context.lifecycleProfilesHash)) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
   return context as unknown as CodexSandboxControllerContextV2;
@@ -202,11 +106,7 @@ function validateContext(value: unknown): CodexSandboxControllerContextV2 {
 
 export function contextFromControllerLease(
   lease: CodexControllerLeaseV1,
-  hashes: Readonly<{
-    hookDefinitionHash: string;
-    lifecycleProfilesHash: string;
-    profileProvenance?: LifecycleProfileProvenance;
-  }>
+  hashes: Readonly<{ hookDefinitionHash: string; lifecycleProfilesHash: string }>
 ): CodexSandboxControllerContextV2 {
   return Object.freeze({
     version: 2,
@@ -219,8 +119,7 @@ export function contextFromControllerLease(
     expiresAt: lease.expiresAt,
     buildIdentity: lease.buildIdentity,
     hookDefinitionHash: hashes.hookDefinitionHash,
-    lifecycleProfilesHash: hashes.lifecycleProfilesHash,
-    ...(hashes.profileProvenance ? { profileProvenance: hashes.profileProvenance } : {})
+    lifecycleProfilesHash: hashes.lifecycleProfilesHash
   });
 }
 
@@ -278,13 +177,6 @@ export function verifyCodexSandboxControllerContextWithWarnings(
   const identity = verifyLifecycleBuildIdentity(context.buildIdentity, currentBuildIdentity);
   if (!identity.ok) throw new Error(`${identity.code}: ${identity.message}`);
   warnings.push(...identity.warnings);
-  if (!context.profileProvenance) {
-    warnings.push({
-      code: 'CODEX_LIFECYCLE_PROFILE_PROVENANCE_LEGACY',
-      message: 'Controller context has no per-profile provenance; rebuild the sandbox to capture a complete audit record',
-      action: 'rebuild-sandbox'
-    });
-  }
   try {
     const hookHash = crypto.createHash('sha256')
       .update(fs.readFileSync(path.join(repoRoot, '.codex', 'hooks.json')))
@@ -304,23 +196,11 @@ export function verifyCodexSandboxControllerContextWithWarnings(
         action: 'rebuild-sandbox'
       });
     }
-    if (context.profileProvenance
-      && (context.profileProvenance.executor.source !== 'isolated-user'
-        || context.profileProvenance.reviewer.source !== 'isolated-user')) {
-      const actual = computeLifecycleProfileProvenance(repoRoot, currentBuildIdentity.packageVersion);
-      if (!profileProvenanceEqual(context.profileProvenance, actual)) {
-        warnings.push({
-          code: 'CODEX_LIFECYCLE_PROFILE_PROVENANCE_DRIFT',
-          message: 'Codex lifecycle profile provenance differs from the current root; rebuild the sandbox if the runtime is stale',
-          action: 'rebuild-sandbox'
-        });
-      }
-    }
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('CODEX_SANDBOX_CONTROLLER_')) throw error;
     warnings.push({
       code: 'CODEX_LIFECYCLE_PROFILE_DRIFT',
-      message: 'Codex lifecycle profile provenance is unavailable; rebuild the sandbox if the runtime is stale',
+      message: 'Codex lifecycle profile content is unavailable; rebuild the sandbox if the runtime is stale',
       action: 'rebuild-sandbox'
     });
   }

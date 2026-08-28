@@ -5,7 +5,7 @@
 - The orchestrator only routes and delegates. Stage skills remain the single source of truth for behavior and artifacts.
 - Every stage and rework round uses a fresh executor. Every review uses a fresh reviewer; follow-up reuse is forbidden.
 - A reviewer may only write its review artifact and core-generated task metadata. Business-code, HEAD, or index changes invalidate the receipt.
-- An active run has one pending delegation. The child must pass the activation barrier before any stage side effect. Missing, late, mismatched, forked, replayed, hook-less, or drifted evidence pauses the run (on the claude-code path, missing or mismatched model/effort evidence, and fork/spawn-mode evidence this host structurally does not provide, follow the recording rules in `.agents/skills/run-task/reference/host-validation.md` instead and are exempt from this; missing or mismatched `parentId`/`childId` still pauses). Cross-root package/build/contract or hook/profile drift is a deliverable warning and never replaces the receipt's hard per-run hook/profile binding.
+- An active run has one pending delegation. The child must pass the activation barrier before any stage side effect. Missing, late, mismatched, forked, replayed, hook-less, or drifted evidence pauses the run (on the claude-code path, missing or mismatched model/effort evidence, and fork/spawn-mode evidence this host structurally does not provide, follow the recording rules in `.agents/skills/run-task/reference/host-validation.md` instead and are exempt from this; missing or mismatched `parentId`/`childId` still pauses). Cross-root package/build/contract or hook/profile content drift is a deliverable warning; the current receipt's hook/evidence binding remains hard.
 - The first release ends after one existing safely gated `commit`; it does not create a PR, monitor checks, or complete the task.
 
 ## Recovery
@@ -14,7 +14,7 @@
 
 ## Codex Host and Capability
 
-- Direct-host accepts only trusted project or managed lifecycle hooks. A task-bound sandbox requires a controlled nested controller and isolated `CODEX_HOME`; only user hooks bound to that controller context are accepted. Ordinary user/plugin hooks are not evidence. Each run records the actual hook/profile source, path digest, content hash, and agent-infra package version.
+- Direct-host accepts only trusted project or managed lifecycle hooks. A task-bound sandbox requires a controlled nested controller and isolated `CODEX_HOME`; only user hooks bound to that controller context are accepted. Ordinary user/plugin hooks are not evidence. The actual hook/profile used by the run is the source of record; content drift is reported as a warning with rebuild guidance.
 - The controller starts a nested loop only after control generation, task binding, protocol version, profiles, and hook discovery pass. Build/contract and content drift is reported as a structured warning with rebuild guidance instead of blocking natural evolution. Both bypass flags are restricted to this task-bound launch path.
 - Every prepare arms a one-use capability attested by the current loop's real PostToolUse. Atomic consumption binds task/session/build/controller and retains only a redacted tombstone.
 

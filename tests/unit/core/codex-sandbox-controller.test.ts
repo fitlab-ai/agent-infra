@@ -158,8 +158,6 @@ test('sandbox controller prepares an isolated allowlisted home and fixed launch 
   }
   assert.equal(fs.existsSync(path.join(prepared.home, 'history.jsonl')), false);
   assert.equal(prepared.context.taskId, 'TASK-20260101-000001');
-  assert.equal(prepared.context.profileProvenance?.executor.source, 'isolated-user');
-  assert.equal(prepared.context.profileProvenance?.reviewer.source, 'isolated-user');
   assert.deepEqual(prepared.warnings, []);
   prepared.cleanup();
   assert.equal(fs.existsSync(prepared.home), false);

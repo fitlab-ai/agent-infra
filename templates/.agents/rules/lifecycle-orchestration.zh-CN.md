@@ -5,7 +5,7 @@
 - 总控只路由和委派；阶段技能仍是业务规则与产物格式的单一事实源。
 - 每个阶段和每轮返工都创建 fresh executor；每轮审查创建 fresh reviewer，禁止 follow-up 复用。
 - reviewer 只能写当前审查产物和核心生成的任务元数据。业务代码、HEAD 或暂存区变化会使 receipt 失效。
-- active run 中只有一个 pending delegation。child 必须在任何阶段副作用前通过 activation barrier；缺失、超时、错配、fork、重放、hook 不可用或工作区漂移一律暂停（claude-code 路径下 model/effort 证据的缺失或错配、以及该宿主结构上不提供的 fork/spawn-mode 证据，按 `.agents/skills/run-task/reference/host-validation.md` 的记录规则处理，不在此列；`parentId`/`childId` 的缺失或错配仍然暂停）。跨根 package/build/contract 或 hook/profile 漂移属于可交付 warning，不能替代 receipt 内本轮 hook/profile binding 的硬校验。
+- active run 中只有一个 pending delegation。child 必须在任何阶段副作用前通过 activation barrier；缺失、超时、错配、fork、重放、hook 不可用或工作区漂移一律暂停（claude-code 路径下 model/effort 证据的缺失或错配、以及该宿主结构上不提供的 fork/spawn-mode 证据，按 `.agents/skills/run-task/reference/host-validation.md` 的记录规则处理，不在此列；`parentId`/`childId` 的缺失或错配仍然暂停）。跨根 package/build/contract 或 hook/profile 内容漂移只输出可交付 warning；本轮 receipt 的 hook/evidence 绑定仍硬校验。
 - 首版成功终点是一次通过既有安全门禁的 `commit`；不创建 PR、不监控 checks、不执行 `complete-task`。
 
 ## 恢复语义
@@ -14,7 +14,7 @@
 
 ## Codex 宿主与 capability
 
-- direct-host 只接受 trusted project 或 managed lifecycle hooks。task-bound sandbox 必须由受控 nested controller 建立隔离 `CODEX_HOME`，仅接受绑定 controller context 的 user hooks；普通 user/plugin hook 不得成为证据源。每轮记录实际 hook/profile 的 source、path digest、content hash 与 agent-infra package version。
+- direct-host 只接受 trusted project 或 managed lifecycle hooks。task-bound sandbox 必须由受控 nested controller 建立隔离 `CODEX_HOME`，仅接受绑定 controller context 的 user hooks；普通 user/plugin hook 不得成为证据源。使用本轮实际加载的 hook/profile，内容漂移只记录 warning 并提示重建 sandbox。
 - controller 只有在 control generation、task binding、协议版本、profile 与 hook discovery 全部通过后才能启动 nested loop；build/contract 及内容漂移通过结构化 warning 告知并建议重建 sandbox，不阻塞自然演进。两个 bypass 参数只允许出现在该 task-bound 启动路径。
 - 每次 prepare 前必须 arm 一次性 capability，并由同一当前 loop 的真实 PostToolUse attestation；token 原子消费后保留去敏 tombstone，不能重放或跨 task/session/build/controller 使用。
 

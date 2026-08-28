@@ -71,7 +71,6 @@ async function codexSandboxController(args: string[] = []): Promise<void> {
           buildIdentity: context.buildIdentity,
           hookDefinitionHash: context.hookDefinitionHash,
           lifecycleProfilesHash: context.lifecycleProfilesHash,
-          ...(context.profileProvenance ? { profileProvenance: context.profileProvenance } : {})
         },
         ...(verified.warnings.length > 0 ? { warnings: verified.warnings } : {}),
         error: null

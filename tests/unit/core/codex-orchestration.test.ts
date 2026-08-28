@@ -10,7 +10,6 @@ import { createCodexCapabilityStore } from '../../../lib/agent-clients/adapters/
 import { computeLifecycleBuildIdentity } from '../../../lib/agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import {
   contextFromControllerLease,
-  computeLifecycleProfileProvenance,
   writeCodexSandboxControllerContext
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/controller-context.ts';
 import { getProcessStartTime } from '../../../lib/server/process-state.ts';
@@ -60,9 +59,6 @@ function fixture() {
   fixtureRoots.add(root);
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.mkdirSync(path.join(root, '.codex', 'agents'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.codex', 'agents', 'agent-infra-lifecycle-executor.toml'), 'name = "executor"\n');
-  fs.writeFileSync(path.join(root, '.codex', 'agents', 'agent-infra-lifecycle-reviewer.toml'), 'name = "reviewer"\n');
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\ncurrent_step: requirement-analysis\n---\n\n# Task\n`);
   beginOrResumeOrchestration(taskId, { repoRoot: root, client: 'codex', modelPolicy: policy, id: () => 'run-1' });
   return { root, taskDir };
@@ -288,77 +284,6 @@ test('Codex prepare accepts matching broker and context without child control au
   }
 });
 
-test('Codex activation rechecks the trusted controller proof before activating a receipt', async () => {
-  const f = fixture();
-  const controller = { instanceDigest: 'e'.repeat(64), controlGeneration: 'generation-activation-proof' };
-  const contextPath = writeControllerContext(f.root, controller);
-  const currentCapability = capability(f.root, 'activation-proof-token', controller);
-  const previousContext = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-  const previousBinding = process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
-  const previousGeneration = process.env.AGENT_INFRA_CONTROL_GENERATION;
-  process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT = contextPath;
-  process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING = JSON.stringify(controller);
-  process.env.AGENT_INFRA_CONTROL_GENERATION = controller.controlGeneration;
-  let verifierCalls = 0;
-  try {
-    const prepared = await prepareCodexOrchestrationDelegation(taskId, {
-      client: 'codex',
-      requestedModel: 'executor-model',
-      requestedReasoningEffort: 'xhigh',
-      capabilityToken: currentCapability.token
-    }, {
-      repoRoot: f.root,
-      capabilityStore: currentCapability.store,
-      buildIdentity,
-      preflight,
-      orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'activation-proof-receipt' }
-    });
-    assert.equal(prepared.run?.pendingDelegation?.status, 'prepared');
-    dispatchOrchestrationDelegation(taskId, { repoRoot: f.root });
-
-    const store = createCodexLifecycleStore({
-      root: path.join(f.root, '.agents', 'workspace', '.runtime', 'codex-lifecycle'),
-      cliVersion: '0.147.0'
-    });
-    store.apply({
-      type: 'hook-spawn', sessionId: 'parent', turnId: 'parent-turn', toolUseId: 'spawn-tool',
-      nativeAgent: 'agent-infra-lifecycle-executor', requestedModel: 'executor-model',
-      requestedReasoningEffort: 'xhigh', hookDefinitionHash: 'hook-hash'
-    });
-    store.apply({
-      type: 'hook-child', sessionId: 'parent', turnId: 'parent-turn', childThreadId: 'child-proof',
-      parentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor'
-    });
-    const result = await activateCodexOrchestrationDelegation('child-proof', {
-      repoRoot: f.root,
-      buildIdentity,
-      preflight,
-      store,
-      verifyControllerContextWithWarnings: () => {
-        verifierCalls += 1;
-        throw new Error('CODEX_SANDBOX_CONTROLLER_CONTROL_UNAVAILABLE');
-      },
-      resolveThread: async () => ({
-        resolution: {
-          thread: { type: 'app-thread', childThreadId: 'child-proof', parentThreadId: 'parent', forkedFromId: null, sourceParentThreadId: 'parent', nativeAgent: 'agent-infra-lifecycle-executor' },
-          settings: { type: 'app-settings', childThreadId: 'child-proof', model: 'executor-model', reasoningEffort: 'xhigh' }
-        },
-        reroutes: [], diagnostics: []
-      })
-    });
-    assert.equal(verifierCalls, 1);
-    assert.equal(result.status, 'paused');
-    assert.equal(result.run?.pendingDelegation?.status, 'prepared');
-  } finally {
-    if (previousContext === undefined) delete process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-    else process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT = previousContext;
-    if (previousBinding === undefined) delete process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
-    else process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING = previousBinding;
-    if (previousGeneration === undefined) delete process.env.AGENT_INFRA_CONTROL_GENERATION;
-    else process.env.AGENT_INFRA_CONTROL_GENERATION = previousGeneration;
-  }
-});
-
 test('Codex prepare rejects missing model or effort without consuming the capability', async () => {
   for (const { input, expectedCode } of [
     { input: { requestedReasoningEffort: 'xhigh' }, expectedCode: 'ORCHESTRATION_REQUESTED_MODEL_REQUIRED' },
@@ -577,8 +502,7 @@ test('Codex bridge completes sealing after evidence consumption survives a crash
     capabilityTurnId: 'parent-turn',
     capabilityToolUseId: 'capability-tool',
     controllerInstanceDigest: null,
-    controlGeneration: null,
-    profileProvenance: computeLifecycleProfileProvenance(f.root, buildIdentity.packageVersion)
+    controlGeneration: null
   });
   assert.equal(started.run?.pendingDelegation?.hostEvidence?.startRevision, 4);
   assert.equal((await activateCodexOrchestrationDelegation('child', {

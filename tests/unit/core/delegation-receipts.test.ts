@@ -39,20 +39,6 @@ const codexProvenance = {
   internalExecutableBuildHash: 'a'.repeat(64), lifecycleContractHash: 'b'.repeat(64),
   hookDefinitionHash: 'hook-hash', hookSource: 'project' as const,
   hookSourcePathDigest: 'c'.repeat(64), hookSourceHash: 'd'.repeat(64),
-  profileProvenance: {
-    executor: {
-      source: 'project' as const,
-      sourcePathDigest: 'e'.repeat(64),
-      sourceHash: 'f'.repeat(64),
-      version: '0.9.7-alpha.0'
-    },
-    reviewer: {
-      source: 'project' as const,
-      sourcePathDigest: '1'.repeat(64),
-      sourceHash: '2'.repeat(64),
-      version: '0.9.7-alpha.0'
-    }
-  },
   capabilitySessionId: 'parent-codex', capabilityTurnId: 'parent-turn', capabilityToolUseId: 'capability-tool',
   controllerInstanceDigest: null, controlGeneration: null
 };
@@ -200,66 +186,6 @@ test('persisted Codex receipts require lifecycle provenance and status-bound hos
   }), false);
 });
 
-test('Codex activation reports build drift and legacy profile provenance as warnings', () => {
-  const prepared = dispatched(prepareDelegation({
-    ...input,
-    client: 'codex',
-    lifecycleProvenance: codexProvenance
-  }, { id: () => 'delegation-codex-warning' }));
-  const drifted = activateDelegation(prepared, {
-    nativeAgent: 'agent-infra-lifecycle-reviewer',
-    childId: 'child-codex-warning',
-    parentId: 'parent-codex',
-    spawnMode: 'fresh',
-    actualModel: 'review-model',
-    actualReasoningEffort: 'high',
-    hostEvidence: {
-      kind: 'codex-lifecycle-v2',
-      startRevision: 4,
-      ...codexProvenance,
-      packageVersion: '0.9.8-alpha.0',
-      internalExecutableBuildHash: '9'.repeat(64),
-      lifecycleContractHash: '8'.repeat(64),
-      spawnToolUseId: 'spawn-tool',
-      spawnObservedAt: '2099-01-01T00:00:00.500Z'
-    }
-  }, { now: () => '2099-01-01T00:00:01.000Z' });
-  assert.equal(drifted.ok, true);
-  if (!drifted.ok) return;
-  assert.deepEqual(drifted.warnings?.map((warning) => warning.code), [
-    'CODEX_LIFECYCLE_BUILD_MISMATCH',
-    'CODEX_LIFECYCLE_CONTRACT_MISMATCH'
-  ]);
-
-  const { profileProvenance: _profileProvenance, ...legacyProvenance } = codexProvenance;
-  const legacyPrepared = dispatched(prepareDelegation({
-    ...input,
-    client: 'codex',
-    lifecycleProvenance: legacyProvenance
-  }, { id: () => 'delegation-codex-legacy-warning' }));
-  const legacy = activateDelegation(legacyPrepared, {
-    nativeAgent: 'agent-infra-lifecycle-reviewer',
-    childId: 'child-codex-legacy-warning',
-    parentId: 'parent-codex',
-    spawnMode: 'fresh',
-    actualModel: 'review-model',
-    actualReasoningEffort: 'high',
-    hostEvidence: {
-      kind: 'codex-lifecycle-v2',
-      startRevision: 4,
-      ...legacyProvenance,
-      spawnToolUseId: 'spawn-tool-legacy',
-      spawnObservedAt: '2099-01-01T00:00:00.500Z'
-    }
-  }, { now: () => '2099-01-01T00:00:01.000Z' });
-  assert.equal(legacy.ok, true);
-  if (legacy.ok) {
-    assert.deepEqual(legacy.warnings?.map((warning) => warning.code), [
-      'CODEX_LIFECYCLE_PROFILE_PROVENANCE_LEGACY'
-    ]);
-  }
-});
-
 test('delegation dispatch allows a sixty-second default activation window', () => {
   const result = dispatchDelegation(prepareDelegation(input), {
     now: () => '2099-01-01T00:00:00.000Z', monotonicNow: () => 10
@@ -342,6 +268,41 @@ test('Codex receipts bind lifecycle evidence revisions through activation and se
   });
 });
 
+test('Codex activation reports build drift without blocking receipt activation', () => {
+  const prepared = dispatched(prepareDelegation({
+    ...input, client: 'codex', role: 'executor', stage: 'analysis', artifact: 'analysis.md',
+    lifecycleProvenance: codexProvenance
+  }, {
+    id: () => 'delegation-codex-build-drift', now: () => '2099-01-01T00:00:00.000Z'
+  }));
+  const result = activateDelegation(prepared, {
+    nativeAgent: 'agent-infra-lifecycle-executor',
+    childId: 'child-codex-build-drift',
+    parentId: 'parent-codex',
+    spawnMode: 'fresh',
+    actualModel: 'review-model',
+    actualReasoningEffort: 'high',
+    hostEvidence: {
+      kind: 'codex-lifecycle-v2',
+      startRevision: 4,
+      ...codexProvenance,
+      packageVersion: '0.9.8-alpha.0',
+      internalExecutableBuildHash: 'e'.repeat(64),
+      lifecycleContractHash: 'f'.repeat(64),
+      spawnToolUseId: 'spawn-tool',
+      spawnObservedAt: '2099-01-01T00:00:00.500Z'
+    }
+  }, { now: () => '2099-01-01T00:00:01.000Z', monotonicNow: () => 2 });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.receipt.status, 'activated');
+  assert.deepEqual(result.warnings?.map((warning) => warning.code), [
+    'CODEX_LIFECYCLE_BUILD_MISMATCH',
+    'CODEX_LIFECYCLE_CONTRACT_MISMATCH'
+  ]);
+});
+
 test('Codex receipts reject generic hook evidence and cross-session capability reuse', () => {
   const prepared = dispatched(prepareDelegation({
     ...input,
@@ -362,17 +323,6 @@ test('Codex receipts reject generic hook evidence and cross-session capability r
     ...base,
     parentId: 'stolen-session',
     hostEvidence: { kind: 'codex-lifecycle-v2', startRevision: 1, ...codexProvenance }
-  }).code, 'DELEGATION_HOST_EVIDENCE_INVALID');
-  assert.equal(activateDelegation(prepared, {
-    ...base,
-    hostEvidence: {
-      kind: 'codex-lifecycle-v2', startRevision: 1, ...codexProvenance,
-      profileProvenance: {
-        ...codexProvenance.profileProvenance,
-        executor: { ...codexProvenance.profileProvenance.executor, sourceHash: '3'.repeat(64) }
-      },
-      spawnToolUseId: 'spawn-tool', spawnObservedAt: '2099-01-01T00:00:00.500Z'
-    }
   }).code, 'DELEGATION_HOST_EVIDENCE_INVALID');
   assert.equal(activateDelegation(prepared, {
     ...base,

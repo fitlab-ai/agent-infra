@@ -1,6 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
-
 import {
   preflightCodexLifecycleEvidence,
   resolveCodexSpawnedChild,
@@ -20,11 +17,8 @@ import {
   verifyCodexSandboxControllerContextWithWarnings as verifySandboxControllerWithWarnings
 } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import {
-  computeLifecycleProfileProvenance,
-  verifyCodexSandboxControllerContextWithWarnings as verifyControllerContextFileWithWarnings,
   verifyCodexSandboxControllerContext as verifyControllerContextFile,
-  type LifecycleContextWarning,
-  type LifecycleProfileProvenance
+  verifyCodexSandboxControllerContextWithWarnings as verifyControllerContextFileWithWarnings
 } from '../agent-clients/adapters/codex-lifecycle/controller-context.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
@@ -51,7 +45,6 @@ type CodexBridgeOptions = Readonly<{
   resolveTerminal?: typeof resolveCodexTerminal;
   capabilityStore?: CapabilityStore;
   buildIdentity?: LifecycleBuildIdentity;
-  verifyControllerContextWithWarnings?: typeof verifySandboxControllerWithWarnings;
   orchestrationOptions?: OrchestrationOptions;
 }>;
 
@@ -119,45 +112,6 @@ function controllerContext(
     });
   }
   return verifyCodexSandboxControllerContext(contextPath, { repoRoot });
-}
-
-function controllerContextWithWarnings(
-  repoRoot: string,
-  brokerController: Readonly<{ instanceDigest: string; controlGeneration: string }> | null
-): Readonly<{ context: ReturnType<typeof verifyControllerContextFile>; warnings: readonly LifecycleContextWarning[] }> | null {
-  const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-  if (!contextPath) return null;
-  if (!brokerController) {
-    return verifySandboxControllerWithWarnings(contextPath, { repoRoot });
-  }
-  const result = verifyControllerContextFileWithWarnings(contextPath, {
-    repoRoot,
-    generation: process.env.AGENT_INFRA_CONTROL_GENERATION ?? brokerController.controlGeneration
-  });
-  return result as Readonly<{ context: ReturnType<typeof verifyControllerContextFile>; warnings: readonly LifecycleContextWarning[] }>;
-}
-
-function profileProvenanceForRoot(repoRoot: string, packageVersion: string): LifecycleProfileProvenance | undefined {
-  const executor = path.join(repoRoot, '.codex', 'agents', 'agent-infra-lifecycle-executor.toml');
-  const reviewer = path.join(repoRoot, '.codex', 'agents', 'agent-infra-lifecycle-reviewer.toml');
-  if (!fs.existsSync(executor) || !fs.existsSync(reviewer)) {
-    throw new Error('CODEX_LIFECYCLE_PROFILE_PROVENANCE_INVALID');
-  }
-  return computeLifecycleProfileProvenance(repoRoot, packageVersion);
-}
-
-function brokerBindingConflictsWithContext(
-  repoRoot: string,
-  brokerController: Readonly<{ instanceDigest: string; controlGeneration: string }> | null
-): boolean {
-  const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
-  if (!contextPath || !brokerController) return false;
-  const context = verifyControllerContextFile(contextPath, {
-    repoRoot,
-    generation: process.env.AGENT_INFRA_CONTROL_GENERATION ?? brokerController.controlGeneration
-  });
-  return context.controllerInstanceDigest !== brokerController.instanceDigest
-    || context.controlGeneration !== brokerController.controlGeneration;
 }
 
 function brokerControllerBinding(): Readonly<{ instanceDigest: string; controlGeneration: string }> | null {
@@ -237,17 +191,19 @@ async function prepareCodexOrchestrationDelegation(
     }
     const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
     const brokerController = brokerControllerBinding();
-    const contextVerification = controllerContextWithWarnings(repoRoot, brokerController);
-    const identityWarnings: Array<LifecycleIdentityWarning | LifecycleContextWarning> = [
+    const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
+    const contextVerification = contextPath
+      ? (brokerController
+        ? verifyControllerContextFileWithWarnings(contextPath, {
+            repoRoot,
+            generation: process.env.AGENT_INFRA_CONTROL_GENERATION ?? brokerController.controlGeneration
+          })
+        : verifySandboxControllerWithWarnings(contextPath, { repoRoot }))
+      : null;
+    const identityWarnings: Array<{ code: string; message: string; action: string }> = [
       ...controllerWarningsFromEnvironment(),
       ...(contextVerification?.warnings ?? [])
     ];
-    if (brokerBindingConflictsWithContext(repoRoot, brokerController)) {
-      return bridgeFailure(
-        'CODEX_SANDBOX_CONTROLLER_BINDING_MISMATCH',
-        'broker and local controller bindings do not match'
-      );
-    }
     const localController = contextVerification?.context ?? controllerContext(repoRoot, brokerController);
     if (localController && brokerController
       && (localController.controllerInstanceDigest !== brokerController.instanceDigest
@@ -268,8 +224,6 @@ async function prepareCodexOrchestrationDelegation(
       return bridgeFailure(capabilityIdentity.code!, capabilityIdentity.message!);
     }
     identityWarnings.push(...capabilityIdentity.warnings);
-    const profileProvenance = localController?.profileProvenance
-      ?? profileProvenanceForRoot(repoRoot, buildIdentity.packageVersion);
     const lifecycleProvenance = {
       ...attested.buildIdentity,
       hookDefinitionHash: preflight.hookDefinitionHash,
@@ -278,8 +232,7 @@ async function prepareCodexOrchestrationDelegation(
       capabilityTurnId: attested.turnId!,
       capabilityToolUseId: attested.toolUseId!,
       controllerInstanceDigest: controller?.instanceDigest ?? null,
-      controlGeneration: controller?.controlGeneration ?? null,
-      ...(profileProvenance ? { profileProvenance } : {})
+      controlGeneration: controller?.controlGeneration ?? null
     };
     const capabilityExpected = {
       taskId: resolved.taskId,
@@ -378,11 +331,9 @@ async function activateCodexOrchestrationDelegation(
     const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
     const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
     const contextVerification = contextPath
-      ? (options.verifyControllerContextWithWarnings ?? verifySandboxControllerWithWarnings)(contextPath, { repoRoot })
+      ? verifySandboxControllerWithWarnings(contextPath, { repoRoot })
       : null;
     const controller = contextVerification?.context ?? null;
-    const profileProvenance = controller?.profileProvenance
-      ?? profileProvenanceForRoot(repoRoot, buildIdentity.packageVersion);
     const activated = activateMatchingOrchestrationDelegation('codex', {
       nativeAgent: evidence.nativeAgent,
       childId: evidence.childThreadId,
@@ -405,14 +356,12 @@ async function activateCodexOrchestrationDelegation(
         spawnToolUseId: evidence.spawnToolUseId,
         spawnObservedAt: record.spawnObservedAt ?? undefined,
         controllerInstanceDigest: controller?.controllerInstanceDigest ?? null,
-        controlGeneration: controller?.controlGeneration ?? null,
-        ...(profileProvenance ? { profileProvenance } : {})
+        controlGeneration: controller?.controlGeneration ?? null
       }
     }, coreOptions(options));
-    const warnings = [...(activated.warnings ?? []), ...(contextVerification?.warnings ?? [])];
-    const dedupedWarnings = [...new Map(warnings.map((warning) => [warning.code, warning])).values()];
-    return dedupedWarnings.length > 0 && activated.status !== 'failed'
-      ? { ...activated, warnings: Object.freeze(dedupedWarnings) }
+    const warnings = [...(contextVerification?.warnings ?? []), ...(activated.warnings ?? [])];
+    return warnings.length > 0 && activated.status !== 'failed'
+      ? { ...activated, warnings: Object.freeze(warnings) }
       : activated;
   } catch (error) {
     if (error instanceof OrchestrationStateError) return bridgeFailure(error.code, error.message);
