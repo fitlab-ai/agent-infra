@@ -35,6 +35,7 @@
 
 | lens_id | stages | observable_trigger | required_reference | report_evidence |
 |---------|--------|--------------------|--------------------|-----------------|
+| compatibility-budget | analysis, plan, code | 需求、方案或实现新增、延长、迁移或删除旧行为、旧 schema、旧入口、alias、adapter、wrapper、shim、双写或兼容读取 | `.agents/rules/compatibility-policy.md` | 记录兼容对象、必要性、期限、退出条件，或确认 current-only |
 | documentation-antipatterns | code | 完整变更上下文触及描述当前行为的 Markdown、规则、skill、CLI 帮助或用户文档 | `.agents/skills/review-code/reference/documentation-antipatterns.md` | 记录触发文件、`loaded=yes` 与检视结果 |
 | testing-discipline | code | 完整变更上下文触及测试、fixture、snapshot 或测试 helper | `.agents/rules/testing-discipline.md` | 记录触发文件、`loaded=yes` 与测试纪律结论 |
 | security-risks | code | 认证授权、非可信输入、敏感数据、凭据、加密、依赖或系统边界发生变化 | `.agents/skills/review-code/reference/security-risks.md` | 记录安全边界变化、`loaded=yes` 与检视结果 |

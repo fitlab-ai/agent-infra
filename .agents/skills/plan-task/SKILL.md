@@ -15,6 +15,7 @@ description: >
 
 - 本技能仅产出技术方案文档（`plan.md` 或 `plan-r{N}.md`）—— 不修改任何业务代码
 - 这是一个**强制性的人工审查检查点** —— 不要自动进入实现阶段
+- 方案涉及兼容、迁移、旧格式或旧入口时，先读取 `.agents/rules/compatibility-policy.md`；未通过准入门槛时不得设计 adapter、shim、双写或并行状态机
 - 执行本技能后，你**必须**立即更新 task.md 中的任务状态
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。
@@ -76,7 +77,7 @@ agent-infra-internal task-event {task-id} plan.started --agent {standard-agent-t
 
 - 阅读分析中识别的相关源码文件
 - 理解当前架构和模式
-- 识别约束条件（向后兼容性、性能等）
+- 识别明确约束（包括有证据且已获准的兼容性、性能等），不自行推导兼容承诺
 - 考虑边界情况和错误场景
 
 ### 5. 设计技术方案

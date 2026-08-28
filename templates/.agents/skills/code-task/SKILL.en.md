@@ -16,6 +16,7 @@ Implement the approved plan and produce `code.md` or `code-r{N}.md`. This skill 
 ## Boundary / Critical Rules
 
 - Follow the latest plan artifact: `plan.md` or `plan-r{N}.md`
+- Read `.agents/rules/compatibility-policy.md` before implementation. Implement only the compatibility budget explicitly approved by the plan; never retain old branches, result contracts, or migration shims merely to be “safe”
 - Fix mode verifies each finding of the latest `review-code` one by one: fix it if it holds, or rebut it and record it under unresolved if it is unfounded/hallucinated; do not expand to issues the review did not list; manual-validation items are out of scope
 - If implementation encounters a key design decision not covered by the plan, run `agent-infra-internal task-ledger {task-id} decision-next-id`, write the returned `HD-N` detail block per `.agents/rules/human-decision-context.md` and determine whether implementation is required, then run `decision-upsert --id {HD-N} --stage code --artifact {code-artifact} --needs-implementation {true|false}`. Do not scan ids, assemble ledger rows, ask mid-flow, or silently expand scope
 - Never auto-run `git add` or `git commit`

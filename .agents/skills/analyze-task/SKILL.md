@@ -15,6 +15,7 @@ description: >
 
 - 本技能仅产出需求分析文档（`analysis.md` 或 `analysis-r{N}.md`）—— 不修改任何业务代码
 - 严格基于 `task.md` 中已有的任务输入、需求、上下文和来源信息展开分析
+- 涉及旧行为、旧数据、旧 schema 或旧调用方时，先读取 `.agents/rules/compatibility-policy.md`；没有兼容准入证据时明确采用 current-only，不把推测写成需求
 - 执行本技能后，你**必须**立即更新 task.md 中的任务状态
 
 版本戳规则：创建或更新 `task.md` frontmatter 时，先读取 `.agents/rules/version-stamp.md`，并写入或刷新 `agent_infra_version`。

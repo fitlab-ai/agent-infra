@@ -16,6 +16,7 @@ description: >
 ## 行为边界 / 关键规则
 
 - 严格遵循最新方案产物：`plan.md` 或 `plan-r{N}.md`
+- 实现前读取 `.agents/rules/compatibility-policy.md`；只实现方案明确批准的兼容预算，不以“稳妥”为由保留旧分支、旧结果契约或迁移 shim
 - 修复模式逐条核实最新 `review-code` 的发现：成立则修复，判定为不成立/幻觉则在报告中反驳并记入 unresolved；不擅自扩大到审查未列出的问题；manual-validation 项不在修复范围
 - 实现中遇到方案未覆盖的关键设计决策时，先调用 `agent-infra-internal task-ledger {task-id} decision-next-id` 取得 `HD-N`，按 `.agents/rules/human-decision-context.md` 写入实现报告的 `## 人工裁决待办` 详情块并判断是否需要实现，再调用 `decision-upsert --id {HD-N} --stage code --artifact {code-artifact} --needs-implementation {true|false}`；不得扫描编号、手写账本行、中途提问或擅自扩范围
 - 绝不自动执行 `git add` 或 `git commit`
@@ -35,6 +36,7 @@ description: >
 | 「方案这里不合理，顺手改更好」 | 偏离 `{plan-artifact}` 必须在报告中记录原因；有异议先停下确认，不擅自改方向。 |
 | 「测试过了，顺便提交一下」 | 本技能绝不执行 `git add`/`git commit`，提交是用户显式发起的独立步骤。 |
 | 「审查既然写了，照着改就行」 | 审查可能基于错误 `file:line` 或幻觉；动手前先 Read/Grep 核实，成立才修，不成立就反驳并记入 unresolved，不盲从。 |
+| 「保留旧入口更稳妥，反正只多一个分支」 | 未获批准的兼容是范围扩张和长期债务；没有对象、必要性、期限和退出条件就只实现当前契约。 |
 
 ## 第 0 步：状态核对（执行前硬约束）
 

@@ -15,6 +15,7 @@ If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--or
 
 - This skill only outputs a technical plan document (`plan.md` or `plan-r{N}.md`) and does not modify any business code
 - This is a **mandatory human review checkpoint**; do not automatically proceed to implementation
+- When the plan touches compatibility, migration, old formats, or old entry points, read `.agents/rules/compatibility-policy.md` first. Do not design adapters, shims, dual writes, or parallel state machines without passing its admission gate
 - After executing this skill, you **must** immediately update task status in task.md
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
@@ -75,7 +76,7 @@ Use it to understand:
 
 - Read the relevant source files identified in the analysis
 - Understand the current architecture and patterns
-- Identify constraints (backward compatibility, performance, etc.)
+- Identify explicit constraints, including evidenced and approved compatibility or performance requirements; do not infer a compatibility promise
 - Consider edge cases and failure scenarios
 
 ### 5. Design the Technical Plan

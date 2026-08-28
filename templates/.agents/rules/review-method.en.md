@@ -43,6 +43,7 @@ mandatory when matched, and `report_evidence` defines the audit trail.
 
 | lens_id | stages | observable_trigger | required_reference | report_evidence |
 |---------|--------|--------------------|--------------------|-----------------|
+| compatibility-budget | analysis, plan, code | Requirements, plans, or implementation add, extend, migrate, or remove old behavior, schemas, entry points, aliases, adapters, wrappers, shims, dual writes, or compatibility reads | `.agents/rules/compatibility-policy.md` | Record the subject, necessity, window, and exit condition, or confirm current-only |
 | documentation-antipatterns | code | The complete change context touches Markdown, rules, skills, CLI help, or user documentation that describes current behavior | `.agents/skills/review-code/reference/documentation-antipatterns.md` | Record triggering files, `loaded=yes`, and the lens result |
 | testing-discipline | code | The complete change context touches tests, fixtures, snapshots, or test helpers | `.agents/rules/testing-discipline.md` | Record triggering files, `loaded=yes`, and the test-discipline result |
 | security-risks | code | Authentication, authorization, untrusted input, sensitive data, credentials, cryptography, dependencies, or system boundaries change | `.agents/skills/review-code/reference/security-risks.md` | Record the changed security boundary, `loaded=yes`, and the lens result |

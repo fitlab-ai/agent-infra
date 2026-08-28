@@ -11,6 +11,7 @@
 - [`next-step-output.md`](next-step-output.md) — 「下一步」输出规则：任务短号渲染与 `Completed at` 收尾行。
 - [`version-stamp.md`](version-stamp.md) — `agent_infra_version` 版本戳的取值命令与写入时机。
 - [`debugging-guide.md`](debugging-guide.md) — 结构化调试流程：收集证据→形成假设→验证假设→修复根因，禁止盲目改代码重试。
+- [`compatibility-policy.md`](compatibility-policy.md) — 兼容性默认关闭：准入证据、实现边界、退出条件与生命周期审查要求。
 
 ## Issue / PR
 

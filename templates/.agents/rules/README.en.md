@@ -12,6 +12,7 @@ so you can quickly find "which ones to read" without opening each file.
 - [`next-step-output.md`](next-step-output.md) — "Next step" output rules: task short-id rendering and the `Completed at` trailer.
 - [`version-stamp.md`](version-stamp.md) — How and when to stamp `agent_infra_version`.
 - [`debugging-guide.md`](debugging-guide.md) — Structured debugging flow: gather evidence → form hypothesis → verify hypothesis → fix the root cause; no blind patch-and-retry.
+- [`compatibility-policy.md`](compatibility-policy.md) — Compatibility by exception: admission evidence, implementation boundaries, exit conditions, and lifecycle review requirements.
 
 ## Issue / PR
 

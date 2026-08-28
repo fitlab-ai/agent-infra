@@ -15,6 +15,7 @@ If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--or
 
 - This skill only outputs a requirements analysis document (`analysis.md` or `analysis-r{N}.md`) and does not modify any business code
 - Base the analysis strictly on the existing task input, requirements, context, and source information in `task.md`
+- When old behavior, data, schemas, or callers are involved, read `.agents/rules/compatibility-policy.md` first. State current-only when admission evidence is absent; do not turn speculation into a requirement
 - After executing this skill, you **must** immediately update task status in task.md
 
 Version stamp rule: when creating or updating `task.md` frontmatter, read `.agents/rules/version-stamp.md` first and write or refresh `agent_infra_version`.
