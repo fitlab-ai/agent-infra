@@ -1,6 +1,6 @@
 import {
   runCodexSandboxController,
-  verifyCodexSandboxControllerContext
+  verifyCodexSandboxControllerContextWithWarnings
 } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 
 const USAGE = 'Usage: agent-infra-internal codex-sandbox-controller <run|verify-context> [options]\n';
@@ -58,7 +58,8 @@ async function codexSandboxController(args: string[] = []): Promise<void> {
       const contextPath = parsed.values['--context']
         ?? process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
       if (!contextPath) throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_MISSING');
-      const context = verifyCodexSandboxControllerContext(contextPath);
+      const verified = verifyCodexSandboxControllerContextWithWarnings(contextPath);
+      const context = verified.context;
       process.stdout.write(`${JSON.stringify({
         status: 'ready',
         changed: false,
@@ -69,8 +70,8 @@ async function codexSandboxController(args: string[] = []): Promise<void> {
           expiresAt: context.expiresAt,
           buildIdentity: context.buildIdentity,
           hookDefinitionHash: context.hookDefinitionHash,
-          lifecycleProfilesHash: context.lifecycleProfilesHash
         },
+        ...(verified.warnings.length > 0 ? { warnings: verified.warnings } : {}),
         error: null
       })}\n`);
       return;

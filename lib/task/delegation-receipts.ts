@@ -108,6 +108,13 @@ function exactText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.trim() === value;
 }
 
+function validCodexBuildMetadata(value: Readonly<Record<string, unknown>>): boolean {
+  return Number.isSafeInteger(value.protocolVersion) && (value.protocolVersion as number) > 0
+    && exactText(value.packageVersion)
+    && exactText(value.internalExecutableBuildHash)
+    && exactText(value.lifecycleContractHash);
+}
+
 function nullableText(value: unknown): value is string | null {
   return value === null || exactText(value);
 }
@@ -185,9 +192,6 @@ function hasCurrentCodexEvidence(receipt: DelegationReceipt): boolean {
   if (
     host?.kind !== 'codex-lifecycle-v2'
     || host.protocolVersion !== provenance.protocolVersion
-    || host.packageVersion !== provenance.packageVersion
-    || host.internalExecutableBuildHash !== provenance.internalExecutableBuildHash
-    || host.lifecycleContractHash !== provenance.lifecycleContractHash
     || host.hookDefinitionHash !== provenance.hookDefinitionHash
     || host.hookSource !== provenance.hookSource
     || host.hookSourcePathDigest !== provenance.hookSourcePathDigest
@@ -531,9 +535,6 @@ function activateDelegation(
     if (
       !expected
       || event.hostEvidence.protocolVersion !== expected.protocolVersion
-      || event.hostEvidence.packageVersion !== expected.packageVersion
-      || event.hostEvidence.internalExecutableBuildHash !== expected.internalExecutableBuildHash
-      || event.hostEvidence.lifecycleContractHash !== expected.lifecycleContractHash
       || event.hostEvidence.hookDefinitionHash !== expected.hookDefinitionHash
       || event.hostEvidence.hookSource !== expected.hookSource
       || event.hostEvidence.hookSourcePathDigest !== expected.hookSourcePathDigest
@@ -548,6 +549,7 @@ function activateDelegation(
       || event.parentId !== expected.capabilitySessionId
       || (event.hostEvidence.controllerInstanceDigest ?? null) !== expected.controllerInstanceDigest
       || (event.hostEvidence.controlGeneration ?? null) !== expected.controlGeneration
+      || !validCodexBuildMetadata(event.hostEvidence)
     ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex lifecycle provenance does not match the prepared receipt');
   }
   return { ok: true, receipt: Object.freeze({

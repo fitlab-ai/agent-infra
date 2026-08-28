@@ -147,7 +147,7 @@ test('task-orchestration reports current-structure state errors without rewritin
     next: null,
     error: {
       code: 'ORCHESTRATION_STATE_INVALID',
-      message: 'orchestration.json does not match the current runtime structure; finish or clear active runs before upgrading'
+      message: 'orchestration.json does not match the current runtime structure; the file was left unchanged; rebuild the sandbox or manually repair the state before retrying'
     }
   });
   assert.equal(fs.readFileSync(runPath, 'utf8'), serialized);

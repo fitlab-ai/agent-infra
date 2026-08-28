@@ -341,9 +341,6 @@ function checkOrchestrationEvidence({ taskDir }: any): any {
           || (activatedCodex && (
             host?.kind !== 'codex-lifecycle-v2'
             || host.protocolVersion !== provenance.protocolVersion
-            || host.packageVersion !== provenance.packageVersion
-            || host.internalExecutableBuildHash !== provenance.internalExecutableBuildHash
-            || host.lifecycleContractHash !== provenance.lifecycleContractHash
             || host.hookDefinitionHash !== provenance.hookDefinitionHash
             || host.hookSource !== provenance.hookSource
             || host.hookSourcePathDigest !== provenance.hookSourcePathDigest

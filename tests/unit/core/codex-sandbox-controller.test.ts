@@ -6,7 +6,7 @@ import test, { after } from 'node:test';
 
 import {
   prepareCodexSandboxController,
-  verifyCodexSandboxControllerContext
+  verifyCodexSandboxControllerContextWithWarnings
 } from '../../../lib/agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import { computeLifecycleBuildIdentity } from '../../../lib/agent-clients/adapters/codex-lifecycle/build-identity.ts';
 
@@ -195,23 +195,23 @@ test('sandbox controller enforces a task lease and controller context binding', 
   const contextValue = JSON.parse(contextRaw) as Record<string, unknown>;
   assert.equal(contextValue.version, 2);
   fs.writeFileSync(prepared.contextPath, `${JSON.stringify({ ...contextValue, extra: true })}\n`, { mode: 0o600 });
-  assert.throws(() => verifyCodexSandboxControllerContext(
+  assert.throws(() => verifyCodexSandboxControllerContextWithWarnings(
     prepared.contextPath,
     { repoRoot: f.root, control: options.control, requestControllerVerify: options.requestControllerVerify }
   ), /CONTEXT_INVALID/);
   fs.writeFileSync(prepared.contextPath, `${JSON.stringify({ ...contextValue, version: 1 })}\n`, { mode: 0o600 });
-  assert.throws(() => verifyCodexSandboxControllerContext(
+  assert.throws(() => verifyCodexSandboxControllerContextWithWarnings(
     prepared.contextPath,
     { repoRoot: f.root, control: options.control, requestControllerVerify: options.requestControllerVerify }
   ), /CONTEXT_INVALID/);
   fs.writeFileSync(prepared.contextPath, contextRaw, { mode: 0o600 });
   assert.throws(() => prepareCodexSandboxController({}, options), /CONTROLLER_BUSY/);
   fs.writeFileSync(prepared.contextPath, `${JSON.stringify({ ...contextValue, taskId: 'TASK-20260101-000002' })}\n`, { mode: 0o600 });
-  assert.throws(() => verifyCodexSandboxControllerContext(
+  assert.throws(() => verifyCodexSandboxControllerContextWithWarnings(
     prepared.contextPath,
     { repoRoot: f.root, control: options.control, requestControllerVerify: options.requestControllerVerify }
   ), /CONTEXT_INVALID/);
-  assert.throws(() => verifyCodexSandboxControllerContext(
+  assert.throws(() => verifyCodexSandboxControllerContextWithWarnings(
     prepared.contextPath,
     { repoRoot: f.root, control: { ...options.control, generation: 'other' }, requestControllerVerify: options.requestControllerVerify }
   ), /CONTEXT_INVALID/);

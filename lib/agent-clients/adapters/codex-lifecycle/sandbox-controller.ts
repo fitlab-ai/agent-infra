@@ -14,11 +14,11 @@ import {
 } from '../../../sandbox/control/client.ts';
 import { readSandboxControlStatus } from '../../../sandbox/control/state.ts';
 import { getProcessStartTime, type ProcessIdentity } from '../../../server/process-state.ts';
-import { computeLifecycleBuildIdentity } from './build-identity.ts';
+import { LIFECYCLE_PROTOCOL_VERSION, type LifecycleIdentityWarning } from './build-identity.ts';
 import {
   contextFromControllerLease,
   controllerProofFromContext,
-  verifyCodexSandboxControllerContext as verifyContextFile,
+  verifyCodexSandboxControllerContextWithWarnings as verifyContextFileWithWarnings,
   writeCodexSandboxControllerContext,
   type CodexSandboxControllerContextV2
 } from './controller-context.ts';
@@ -69,21 +69,6 @@ type VerifyContextOptions = Readonly<{
   control?: ControllerControl;
   requestControllerVerify?: typeof requestCodexControllerVerify;
 }>;
-
-function digestFiles(files: readonly string[]): string {
-  const hash = crypto.createHash('sha256');
-  for (const file of [...files].sort()) {
-    const stat = fs.lstatSync(file);
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      throw new Error('CODEX_SANDBOX_CONTROLLER_BUNDLE_MISMATCH');
-    }
-    hash.update(path.basename(file));
-    hash.update('\0');
-    hash.update(fs.readFileSync(file));
-    hash.update('\0');
-  }
-  return hash.digest('hex');
-}
 
 function copyRegular(source: string, destination: string, mode: number): void {
   const stat = fs.lstatSync(source);
@@ -166,17 +151,18 @@ function verifyControl(taskId: string, control: ControllerControl): void {
   if (payload.taskId !== taskId) throw new Error('CODEX_SANDBOX_CONTROLLER_TASK_BINDING_INVALID');
 }
 
-function verifyCodexSandboxControllerContext(
+function verifyCodexSandboxControllerContextWithWarnings(
   contextPath: string,
   options: VerifyContextOptions = {}
-): CodexSandboxControllerContextV2 {
+): Readonly<{ context: CodexSandboxControllerContextV2; warnings: readonly LifecycleIdentityWarning[] }> {
   const control = options.control ?? controlFromEnvironment();
-  const context = verifyContextFile(contextPath, {
+  const fileVerification = verifyContextFileWithWarnings(contextPath, {
     repoRoot: options.repoRoot,
     now: options.now,
     generation: control.generation,
     probeProcess: options.probeProcess
   });
+  const context = fileVerification.context;
   const verified = (options.requestControllerVerify ?? requestCodexControllerVerify)({
     controllerProof: controllerProofFromContext(context),
     ...control,
@@ -187,7 +173,10 @@ function verifyCodexSandboxControllerContext(
     || verified.binding.controllerInstanceDigest !== context.controllerInstanceDigest) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
-  return context;
+  return Object.freeze({
+    context,
+    warnings: fileVerification.warnings
+  });
 }
 
 function detectedCodexVersion(): string {
@@ -337,30 +326,22 @@ function prepareCodexSandboxController(
     copyRegular(hooks, path.join(home, 'hooks.json'), 0o600);
     copyRegular(executor, path.join(home, 'agents', path.basename(executor)), 0o600);
     copyRegular(reviewer, path.join(home, 'agents', path.basename(reviewer)), 0o600);
-    if (crypto.createHash('sha256').update(fs.readFileSync(path.join(home, 'hooks.json'))).digest('hex')
-      !== crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex')
-      || digestFiles([
-        path.join(home, 'agents', path.basename(executor)),
-        path.join(home, 'agents', path.basename(reviewer))
-      ]) !== digestFiles([executor, reviewer])) {
-      throw new Error('CODEX_SANDBOX_CONTROLLER_BUNDLE_MISMATCH');
-    }
 
-    const buildIdentity = computeLifecycleBuildIdentity(repoRoot);
     const opened = (options.openController ?? requestCodexControllerOpen)({
       controllerProcess: { pid: process.pid, startTime: parentStartTime },
       ...control,
       timeoutMs: 30_000
     });
     const taskId = opened.lease.taskId;
+    if (opened.lease.buildIdentity.protocolVersion !== LIFECYCLE_PROTOCOL_VERSION) {
+      throw new Error('CODEX_LIFECYCLE_PROTOCOL_MISMATCH: Codex lifecycle protocol version does not match');
+    }
     context = contextFromControllerLease(opened.lease, {
-      hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex'),
-      lifecycleProfilesHash: digestFiles([executor, reviewer])
+      hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex')
     });
     if (opened.lease.controlGeneration !== control.generation
       || opened.lease.controllerProcess.pid !== process.pid
-      || opened.lease.controllerProcess.startTime !== parentStartTime
-      || JSON.stringify(opened.lease.buildIdentity) !== JSON.stringify(buildIdentity)) {
+      || opened.lease.controllerProcess.startTime !== parentStartTime) {
       throw new Error('SANDBOX_CONTROL_RESULT_INVALID');
     }
     (options.verifyTaskBinding ?? verifyControl)(taskId, control);
@@ -460,7 +441,7 @@ async function runCodexSandboxController(
 export {
   prepareCodexSandboxController,
   runCodexSandboxController,
-  verifyCodexSandboxControllerContext,
+  verifyCodexSandboxControllerContextWithWarnings,
   controllerProofFromContext
 };
 export type {

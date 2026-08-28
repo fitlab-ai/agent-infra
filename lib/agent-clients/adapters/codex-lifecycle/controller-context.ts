@@ -4,7 +4,12 @@ import path from 'node:path';
 
 import { getProcessIdentityState, type ProcessIdentity } from '../../../server/process-state.ts';
 import type { CodexControllerLeaseProofV1, CodexControllerLeaseV1 } from '../../../sandbox/control/controller-registration.ts';
-import { computeLifecycleBuildIdentity, type LifecycleBuildIdentity } from './build-identity.ts';
+import {
+  computeLifecycleBuildIdentity,
+  verifyLifecycleBuildIdentity,
+  type LifecycleBuildIdentity,
+  type LifecycleIdentityWarning
+} from './build-identity.ts';
 
 const HEX_256 = /^[a-f0-9]{64}$/u;
 
@@ -19,28 +24,10 @@ export type CodexSandboxControllerContextV2 = Readonly<{
   expiresAt: number;
   buildIdentity: LifecycleBuildIdentity;
   hookDefinitionHash: string;
-  lifecycleProfilesHash: string;
 }>;
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(value).sort().join(',') === [...keys].sort().join(',');
-}
-
-function digestProfiles(repoRoot: string): string {
-  const files = [
-    path.join(repoRoot, '.codex', 'agents', 'agent-infra-lifecycle-executor.toml'),
-    path.join(repoRoot, '.codex', 'agents', 'agent-infra-lifecycle-reviewer.toml')
-  ];
-  const hash = crypto.createHash('sha256');
-  for (const file of files.sort()) {
-    const stat = fs.lstatSync(file);
-    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('CODEX_SANDBOX_CONTROLLER_BUNDLE_MISMATCH');
-    hash.update(path.basename(file));
-    hash.update('\0');
-    hash.update(fs.readFileSync(file));
-    hash.update('\0');
-  }
-  return hash.digest('hex');
 }
 
 function validProcess(value: unknown): value is ProcessIdentity {
@@ -72,7 +59,7 @@ function validateContext(value: unknown): CodexSandboxControllerContextV2 {
   if (!exactKeys(context, [
     'buildIdentity', 'controlGeneration', 'controllerInstanceDigest', 'controllerLease',
     'controllerProcess', 'expiresAt', 'hookDefinitionHash', 'issuedAt',
-    'lifecycleProfilesHash', 'taskId', 'version'
+    'taskId', 'version'
   ])
     || context.version !== 2
     || typeof context.taskId !== 'string' || context.taskId.length === 0
@@ -87,8 +74,7 @@ function validateContext(value: unknown): CodexSandboxControllerContextV2 {
     || !Number.isSafeInteger(context.expiresAt)
     || (context.expiresAt as number) <= (context.issuedAt as number)
     || !validBuildIdentity(context.buildIdentity)
-    || typeof context.hookDefinitionHash !== 'string' || !HEX_256.test(context.hookDefinitionHash)
-    || typeof context.lifecycleProfilesHash !== 'string' || !HEX_256.test(context.lifecycleProfilesHash)) {
+    || typeof context.hookDefinitionHash !== 'string' || !HEX_256.test(context.hookDefinitionHash)) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
   return context as unknown as CodexSandboxControllerContextV2;
@@ -96,7 +82,7 @@ function validateContext(value: unknown): CodexSandboxControllerContextV2 {
 
 export function contextFromControllerLease(
   lease: CodexControllerLeaseV1,
-  hashes: Readonly<{ hookDefinitionHash: string; lifecycleProfilesHash: string }>
+  input: Readonly<{ hookDefinitionHash: string }>
 ): CodexSandboxControllerContextV2 {
   return Object.freeze({
     version: 2,
@@ -108,8 +94,7 @@ export function contextFromControllerLease(
     issuedAt: lease.issuedAt,
     expiresAt: lease.expiresAt,
     buildIdentity: lease.buildIdentity,
-    hookDefinitionHash: hashes.hookDefinitionHash,
-    lifecycleProfilesHash: hashes.lifecycleProfilesHash
+    hookDefinitionHash: input.hookDefinitionHash
   });
 }
 
@@ -129,7 +114,7 @@ export function writeCodexSandboxControllerContext(
   }
 }
 
-export function verifyCodexSandboxControllerContext(
+export function verifyCodexSandboxControllerContextWithWarnings(
   contextPath: string,
   options: Readonly<{
     repoRoot?: string;
@@ -137,7 +122,7 @@ export function verifyCodexSandboxControllerContext(
     generation?: string;
     probeProcess?: (identity: ProcessIdentity) => 'alive' | 'dead' | 'unknown';
   }> = {}
-): CodexSandboxControllerContextV2 {
+): Readonly<{ context: CodexSandboxControllerContextV2; warnings: readonly LifecycleIdentityWarning[] }> {
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(contextPath);
@@ -162,12 +147,10 @@ export function verifyCodexSandboxControllerContext(
     || state !== 'alive') {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
-  if (JSON.stringify(computeLifecycleBuildIdentity(repoRoot)) !== JSON.stringify(context.buildIdentity)
-    || crypto.createHash('sha256').update(fs.readFileSync(path.join(repoRoot, '.codex', 'hooks.json'))).digest('hex') !== context.hookDefinitionHash
-    || digestProfiles(repoRoot) !== context.lifecycleProfilesHash) {
-    throw new Error('CODEX_SANDBOX_CONTROLLER_BUNDLE_MISMATCH');
-  }
-  return Object.freeze(context);
+  const currentBuildIdentity = computeLifecycleBuildIdentity(repoRoot);
+  const identity = verifyLifecycleBuildIdentity(context.buildIdentity, currentBuildIdentity);
+  if (!identity.ok) throw new Error(`${identity.code}: ${identity.message}`);
+  return Object.freeze({ context: Object.freeze(context), warnings: identity.warnings });
 }
 
 export function controllerProofFromContext(context: CodexSandboxControllerContextV2): CodexControllerLeaseProofV1 {

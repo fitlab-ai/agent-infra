@@ -11,7 +11,7 @@ import {
 import { createCodexLifecycleStore } from '../agent-clients/adapters/codex-lifecycle/store.ts';
 import { createCodexCapabilityStore } from '../agent-clients/adapters/codex-lifecycle/capability-store.ts';
 import { computeLifecycleBuildIdentity } from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
-import { verifyCodexSandboxControllerContext } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
+import { verifyCodexSandboxControllerContextWithWarnings } from '../agent-clients/adapters/codex-lifecycle/sandbox-controller.ts';
 import type { CodexLifecycleEvent } from '../agent-clients/adapters/codex-lifecycle/evidence.ts';
 import { resolveTaskRef } from '../task/resolve-ref.ts';
 import { hasSealableOrchestrationDelegation } from '../task/orchestration.ts';
@@ -101,7 +101,7 @@ function hookDefinitionHash(): string {
 function controllerBinding(taskId: string) {
   const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
   if (!contextPath) return undefined;
-  const context = verifyCodexSandboxControllerContext(contextPath, { repoRoot: process.cwd() });
+  const context = verifyCodexSandboxControllerContextWithWarnings(contextPath, { repoRoot: process.cwd() }).context;
   return {
     instanceDigest: context.controllerInstanceDigest,
     controlGeneration: context.controlGeneration

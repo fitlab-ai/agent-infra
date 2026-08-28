@@ -55,11 +55,11 @@ test('lifecycle build identity separates executable and contract hashes', () => 
   const executableChanged = computeLifecycleBuildIdentity(root, options);
   assert.notEqual(executableChanged.internalExecutableBuildHash, first.internalExecutableBuildHash);
   assert.equal(
-    verifyLifecycleBuildIdentity(first, contractChanged).code,
+    verifyLifecycleBuildIdentity(first, contractChanged).warnings[0]?.code,
     'CODEX_LIFECYCLE_CONTRACT_MISMATCH'
   );
   assert.equal(
-    verifyLifecycleBuildIdentity(first, executableChanged).code,
+    verifyLifecycleBuildIdentity(first, executableChanged).warnings[0]?.code,
     'CODEX_LIFECYCLE_BUILD_MISMATCH'
   );
 });

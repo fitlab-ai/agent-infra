@@ -193,7 +193,7 @@ test('controller proof failures preserve the host registration', () => {
     ['cross-task', 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID'],
     ['cross-generation', 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID'],
     ['cross-container', 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID'],
-    ['cross-build', 'CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID'],
+    ['cross-protocol', 'CODEX_LIFECYCLE_PROTOCOL_MISMATCH'],
     ['cross-process', 'CODEX_SANDBOX_CONTROLLER_PROOF_INVALID'],
     ['dead-process', 'CODEX_SANDBOX_CONTROLLER_PROCESS_INACTIVE'],
     ['unknown-process', 'CODEX_SANDBOX_CONTROLLER_PROCESS_UNKNOWN']
@@ -230,8 +230,8 @@ test('controller proof failures preserve the host registration', () => {
       manifest: candidateManifest,
       manifestPath,
       proof,
-      buildIdentity: scenario === 'cross-build'
-        ? { ...controllerBuild, lifecycleContractHash: '0'.repeat(64) }
+      buildIdentity: scenario === 'cross-protocol'
+        ? { ...controllerBuild, protocolVersion: 2 as never }
         : controllerBuild,
       now: scenario === 'expired' ? 14_402_000 : 2_000,
       probeProcess: () => scenario === 'dead-process' ? 'dead' : scenario === 'unknown-process' ? 'unknown' : 'alive'

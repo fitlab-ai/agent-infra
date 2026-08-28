@@ -188,9 +188,11 @@ function assertRegistrationBinding(
 ): void {
   if (registration.taskId !== manifest.taskId
     || registration.controlGeneration !== manifest.generation
-    || registration.containerId !== manifest.containerIdentity.id
-    || JSON.stringify(registration.buildIdentity) !== JSON.stringify(buildIdentity)) {
+    || registration.containerId !== manifest.containerIdentity.id) {
     fail('CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID', 'controller registration binding is invalid');
+  }
+  if (registration.buildIdentity.protocolVersion !== buildIdentity.protocolVersion) {
+    fail('CODEX_LIFECYCLE_PROTOCOL_MISMATCH', 'Codex lifecycle protocol version does not match');
   }
 }
 
@@ -322,7 +324,10 @@ export function resolveCodexControllerBinding(params: Readonly<{
   buildIdentity: LifecycleBuildIdentity;
   now?: number;
   probeProcess?: (identity: ProcessIdentity) => ProcessIdentityState;
-}>): Readonly<{ instanceDigest: string; controlGeneration: string }> {
+}>): Readonly<{
+  instanceDigest: string;
+  controlGeneration: string;
+}> {
   if (params.manifest.mode !== 'task-bound' || !params.manifest.taskId) {
     fail('SANDBOX_CONTROL_BRANCH_ONLY', 'branch-only sandboxes cannot resolve a Codex controller registration');
   }

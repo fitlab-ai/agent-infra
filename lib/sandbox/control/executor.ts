@@ -146,12 +146,15 @@ function controllerFailure(error: unknown): SandboxControlExecutionResult {
     ? error.code
     : /^([A-Z][A-Z0-9_]+)/u.exec(error instanceof Error ? error.message : String(error))?.[1]
       ?? 'CODEX_SANDBOX_CONTROLLER_FAILED';
+  const message = error instanceof CodexControllerRegistrationError
+    ? error.message
+    : `${code}: controller operation failed; inspect the sandbox controller and rebuild the sandbox if needed`;
   const payload = {
     version: 1,
     status: 'failed',
     changed: false,
     lease: null,
-    error: { code, message: `${code}: controller request failed`, retryable: false }
+    error: { code, message, retryable: false }
   };
   return { exitCode: 1, stdout: `${JSON.stringify(payload)}\n`, stderr: '' };
 }
@@ -265,7 +268,10 @@ export function executeRequest(
     ));
   }
   const boundArgs = bindSandboxControlTask(request, manifest.taskId!);
-  let controllerBinding: Readonly<{ instanceDigest: string; controlGeneration: string }> | null = null;
+  let controllerBinding: Readonly<{
+    instanceDigest: string;
+    controlGeneration: string;
+  }> | null = null;
   if (request.family === 'task-orchestration') {
     if (isCodexPrepare(request.args)) {
       if (!request.controllerProof) {
