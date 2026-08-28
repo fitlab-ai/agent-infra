@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { verifyLifecycleBuildIdentity, type LifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import type { LifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import { parseLinuxProcessStat, type ProcessIdentity, type ProcessIdentityState } from '../../server/process-state.ts';
 import { commandForEngine, runProbe } from '../shell.ts';
 import type { SandboxControlManifest } from './protocol.ts';
@@ -191,8 +191,9 @@ function assertRegistrationBinding(
     || registration.containerId !== manifest.containerIdentity.id) {
     fail('CODEX_SANDBOX_CONTROLLER_REGISTRATION_INVALID', 'controller registration binding is invalid');
   }
-  const identity = verifyLifecycleBuildIdentity(registration.buildIdentity, buildIdentity);
-  if (!identity.ok) fail(identity.code!, identity.message!);
+  if (registration.buildIdentity.protocolVersion !== buildIdentity.protocolVersion) {
+    fail('CODEX_LIFECYCLE_PROTOCOL_MISMATCH', 'Codex lifecycle protocol version does not match');
+  }
 }
 
 function atomicWrite(file: string, value: CodexControllerRegistrationV1): void {

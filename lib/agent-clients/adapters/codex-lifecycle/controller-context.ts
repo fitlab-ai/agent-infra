@@ -147,12 +147,10 @@ export function verifyCodexSandboxControllerContextWithWarnings(
     || state !== 'alive') {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
-  const warnings: LifecycleIdentityWarning[] = [];
   const currentBuildIdentity = computeLifecycleBuildIdentity(repoRoot);
   const identity = verifyLifecycleBuildIdentity(context.buildIdentity, currentBuildIdentity);
   if (!identity.ok) throw new Error(`${identity.code}: ${identity.message}`);
-  warnings.push(...identity.warnings);
-  return Object.freeze({ context: Object.freeze(context), warnings: Object.freeze(warnings) });
+  return Object.freeze({ context: Object.freeze(context), warnings: identity.warnings });
 }
 
 export function controllerProofFromContext(context: CodexSandboxControllerContextV2): CodexControllerLeaseProofV1 {

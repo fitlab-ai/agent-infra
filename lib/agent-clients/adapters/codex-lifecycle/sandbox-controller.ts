@@ -14,7 +14,7 @@ import {
 } from '../../../sandbox/control/client.ts';
 import { readSandboxControlStatus } from '../../../sandbox/control/state.ts';
 import { getProcessStartTime, type ProcessIdentity } from '../../../server/process-state.ts';
-import { computeLifecycleBuildIdentity, verifyLifecycleBuildIdentity, type LifecycleIdentityWarning } from './build-identity.ts';
+import { LIFECYCLE_PROTOCOL_VERSION, type LifecycleIdentityWarning } from './build-identity.ts';
 import {
   contextFromControllerLease,
   controllerProofFromContext,
@@ -327,15 +327,15 @@ function prepareCodexSandboxController(
     copyRegular(executor, path.join(home, 'agents', path.basename(executor)), 0o600);
     copyRegular(reviewer, path.join(home, 'agents', path.basename(reviewer)), 0o600);
 
-    const buildIdentity = computeLifecycleBuildIdentity(repoRoot);
     const opened = (options.openController ?? requestCodexControllerOpen)({
       controllerProcess: { pid: process.pid, startTime: parentStartTime },
       ...control,
       timeoutMs: 30_000
     });
     const taskId = opened.lease.taskId;
-    const identity = verifyLifecycleBuildIdentity(opened.lease.buildIdentity, buildIdentity);
-    if (!identity.ok) throw new Error(`${identity.code}: ${identity.message}`);
+    if (opened.lease.buildIdentity.protocolVersion !== LIFECYCLE_PROTOCOL_VERSION) {
+      throw new Error('CODEX_LIFECYCLE_PROTOCOL_MISMATCH: Codex lifecycle protocol version does not match');
+    }
     context = contextFromControllerLease(opened.lease, {
       hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex')
     });
