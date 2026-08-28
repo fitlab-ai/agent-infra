@@ -31,6 +31,10 @@ function stateWithInstalled(installed: readonly string[]): AgentClientState {
     opencode: {
       enabled: false,
       installInSandbox: installed.includes('opencode')
+    },
+    traecli: {
+      enabled: false,
+      installInSandbox: installed.includes('traecli')
     }
   };
 }
@@ -197,7 +201,7 @@ test('cleanup inventory includes every registered client independent of selectio
   );
   assert.deepEqual(
     empty.cleanupInventory.map((tool) => tool.id),
-    ['agent-infra', 'claude-code', 'codex', 'antigravity-cli', 'opencode']
+    ['agent-infra', 'claude-code', 'codex', 'antigravity-cli', 'opencode', 'traecli']
   );
 });
 

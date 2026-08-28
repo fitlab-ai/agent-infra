@@ -237,6 +237,11 @@
       "id": "opencode",
       "enabled": true,
       "installInSandbox": true
+    },
+    {
+      "id": "traecli",
+      "enabled": true,
+      "installInSandbox": true
     }
   ]
 }

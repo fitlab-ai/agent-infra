@@ -3,7 +3,7 @@
 // internal commands and the rendering side share one definition. Historical
 // Gemini tokens remain read-only and are handled by classifyAgent below.
 export const KNOWN_AI_AGENTS: ReadonlySet<string> =
-  new Set(['claude', 'codex', 'antigravity', 'opencode', 'cursor']);
+  new Set(['claude', 'codex', 'antigravity', 'opencode', 'cursor', 'traecli']);
 
 // Long name -> short name mapping (HD-4, decision A): `claude-code` reuses the
 // existing orchestration precedent, and `antigravity-cli` is the active
@@ -14,7 +14,7 @@ export const AGENT_LONG_NAMES: Readonly<Record<string, string>> = {
 };
 
 export const AGENT_USAGE_HINT =
-  "agent must be a short token (claude/codex/antigravity/opencode/cursor), " +
+  "agent must be a short token (claude/codex/antigravity/opencode/cursor/traecli), " +
   "a long name (claude-code -> claude, antigravity-cli -> antigravity), or 'human'";
 
 // Read-side historical compatibility for activity-log rendering: `gemini` and

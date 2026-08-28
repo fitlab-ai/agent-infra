@@ -789,9 +789,15 @@ test("agent-infra update migrates legacy sandbox client tools to canonical state
 
     assert.match(output, /Updated \.agents[\\/]\.airc\.json/);
     assert.deepEqual(updated.sandbox.tools, ["agent-infra"]);
-    assert.ok(updated.agentClients.every(
-      (entry: { installInSandbox: boolean }) => entry.installInSandbox
-    ));
+    const legacyClients = ["claude-code", "codex", "antigravity-cli", "opencode"];
+    assert.ok(updated.agentClients
+      .filter((entry: { id: string }) => legacyClients.includes(entry.id))
+      .every((entry: { installInSandbox: boolean }) => entry.installInSandbox)
+    );
+    assert.equal(
+      updated.agentClients.find((entry: { id: string }) => entry.id === "traecli").installInSandbox,
+      false
+    );
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

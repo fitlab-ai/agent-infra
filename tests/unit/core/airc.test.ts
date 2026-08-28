@@ -83,7 +83,8 @@ test(".agents/.airc.json declares canonical Agent Client configuration", () => {
       }
     },
     { id: "antigravity-cli", enabled: true, installInSandbox: false },
-    { id: "opencode", enabled: true, installInSandbox: true }
+    { id: "opencode", enabled: true, installInSandbox: true },
+    { id: "traecli", enabled: true, installInSandbox: true }
   ]);
 });
 
@@ -100,7 +101,7 @@ test(".agents/.airc.json resolves every selected sandbox tool", () => {
 
   assert.deepEqual(
     tools.map((tool) => tool.id),
-    ["agent-infra", "claude-code", "codex", "opencode", "git-lfs"]
+    ["agent-infra", "claude-code", "codex", "opencode", "traecli", "git-lfs"]
   );
   const gitLfs = tools.find((tool) => tool.id === "git-lfs");
   assert.deepEqual(gitLfs?.install, { type: "shell", cmd: GIT_LFS_INSTALL_COMMAND });

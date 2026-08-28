@@ -20,7 +20,7 @@ import type { SandboxConfig } from '../../../lib/sandbox/config.ts';
 
 type ShowModule = typeof import('../../../lib/sandbox/commands/show.ts');
 
-const BUILTIN_TOOL_IDS = ['agent-infra', 'claude-code', 'codex', 'antigravity-cli', 'opencode'];
+const BUILTIN_TOOL_IDS = ['agent-infra', 'claude-code', 'codex', 'antigravity-cli', 'opencode', 'traecli'];
 
 function makeConfig(home: string): SandboxConfig {
   return {
@@ -76,7 +76,8 @@ test('collectSandboxDetail excludes disabled clients even when host state remain
       'claude-code': { enabled: true, installInSandbox: false },
       codex: { enabled: true, installInSandbox: true },
       'antigravity-cli': { enabled: true, installInSandbox: false },
-      opencode: { enabled: true, installInSandbox: false }
+      opencode: { enabled: true, installInSandbox: false },
+      traecli: { enabled: true, installInSandbox: false }
     }
   };
   const branch = 'feature/selected';

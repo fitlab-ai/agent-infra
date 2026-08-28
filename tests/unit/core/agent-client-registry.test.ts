@@ -66,6 +66,16 @@ const CAPABILITY_MATRIX = {
     orchestration: 'unsupported',
     sandbox: 'integrated',
     verification: 'compatible'
+  },
+  traecli: {
+    instructions: 'compatible',
+    skills: 'compatible',
+    commands: 'integrated',
+    hooks: 'compatible',
+    subagents: 'experimental',
+    orchestration: 'experimental',
+    sandbox: 'integrated',
+    verification: 'compatible'
   }
 } as const;
 
@@ -433,7 +443,8 @@ test('registry is complete, canonical, deeply frozen, and matches the capability
       'claude-code': '/${skillName}',
       codex: '$${skillName}',
       'antigravity-cli': '/${skillName}',
-      opencode: '/${skillName}'
+      opencode: '/${skillName}',
+      traecli: '/${skillName}'
     }
   );
 
@@ -515,6 +526,25 @@ test('registry exposes the exact built-in project asset matrix', () => {
           target: '.opencode/commands/${skillName}.md',
           frontmatter: { agent: 'general', subtask: false },
           argumentsToken: '$ARGUMENTS'
+        }
+      },
+      traecli: {
+        ownedPathPrefixes: ['.trae/'],
+        managed: ['.trae/skills/'],
+        merged: [],
+        ejected: [],
+        seedCommands: [{
+          templates: {
+            en: '.trae/skills/update-agent-infra.en.md',
+            'zh-CN': '.trae/skills/update-agent-infra.zh-CN.md'
+          },
+          target: '.trae/skills/update-agent-infra.md'
+        }],
+        customCommand: {
+          target: '.trae/skills/${skillName}.md',
+          frontmatter: {},
+          includeUsage: true,
+          inheritDisableModelInvocation: true
         }
       }
     }
@@ -631,7 +661,8 @@ test('manifest projects invocation and remains deeply frozen', () => {
       { id: 'claude-code', displayName: 'Claude Code', invocation: '/${skillName}' },
       { id: 'codex', displayName: 'Codex', invocation: '$${skillName}' },
       { id: 'antigravity-cli', displayName: 'Antigravity CLI', invocation: '/${skillName}' },
-      { id: 'opencode', displayName: 'OpenCode', invocation: '/${skillName}' }
+      { id: 'opencode', displayName: 'OpenCode', invocation: '/${skillName}' },
+      { id: 'traecli', displayName: 'TraeCode CLI', invocation: '/${skillName}' }
     ]
   );
   assert.ok(Object.isFrozen(manifest));
@@ -653,7 +684,7 @@ test('registry queries preserve canonical order and keep enabled separate from s
   );
   assert.deepEqual(
     listInstalledAgentClientAdapters(state).map((adapter) => adapter.id),
-    ['claude-code', 'antigravity-cli']
+    ['claude-code', 'antigravity-cli', 'traecli']
   );
   assert.deepEqual(listEnabledAgentClientAdapters(stateFor([])), []);
   assert.deepEqual(

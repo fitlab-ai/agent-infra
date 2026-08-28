@@ -81,7 +81,7 @@ function makeProject(projectRoot: string, overrides: Record<string, unknown> = {
 }
 
 function canonicalAgentClients(enabled: readonly string[]) {
-  return ["claude-code", "codex", "antigravity-cli", "opencode"].map((id) => ({
+  return ["claude-code", "codex", "antigravity-cli", "opencode", "traecli"].map((id) => ({
     id,
     enabled: enabled.includes(id),
     installInSandbox: false
@@ -326,7 +326,7 @@ test("syncTemplates: canonical agentClients controls assets and rejects incomple
     const projectRoot = path.join(tmpDir, "project");
     const templateRoot = makeTemplateRoot(tmpDir);
     makeProject(projectRoot, {
-      tuis: ["claude-code", "codex", "antigravity-cli", "opencode"],
+      tuis: ["claude-code", "codex", "antigravity-cli", "opencode", "traecli"],
       agentClients: canonicalAgentClients([])
     });
     const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
@@ -373,12 +373,12 @@ test("syncTemplates: disabling Antigravity leaves shared skills untouched", asyn
 });
 
 test("syncTemplates: every built-in client subset converges idempotently", async () => {
-  const ids = ["claude-code", "codex", "antigravity-cli", "opencode"];
+  const ids = ["claude-code", "codex", "antigravity-cli", "opencode", "traecli"];
   const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(
     ".agents/skills/update-agent-infra/scripts/sync-templates.js"
   );
 
-  for (let mask = 0; mask < 16; mask += 1) {
+  for (let mask = 0; mask < 32; mask += 1) {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `ai-tui-matrix-${mask}-`));
     try {
       const projectRoot = path.join(tmpDir, "project");
@@ -402,7 +402,8 @@ test("syncTemplates: every built-in client subset converges idempotently", async
           "claude-code": ".claude/commands/",
           codex: ".codex/hooks.json",
           "antigravity-cli": null,
-          opencode: ".opencode/commands/"
+          opencode: ".opencode/commands/",
+          traecli: ".trae/skills/"
         }[id]!;
         if (adapterPath === null) {
           continue;

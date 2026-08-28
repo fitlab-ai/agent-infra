@@ -1051,7 +1051,7 @@ test("resolveTools consolidates sandbox bases under ~/.agent-infra", async () =>
   const tools = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["agent-infra", "claude-code", "codex", "antigravity-cli", "opencode"]
+    tools: ["agent-infra", "claude-code", "codex", "antigravity-cli", "opencode", "traecli"]
   });
 
   assert.deepEqual(tools.map((tool) => ({
@@ -1077,6 +1077,10 @@ test("resolveTools consolidates sandbox bases under ~/.agent-infra", async () =>
     {
       id: "opencode",
       sandboxBase: "/home/host-user/.agent-infra/sandboxes/opencode"
+    },
+    {
+      id: "traecli",
+      sandboxBase: "/home/host-user/.agent-infra/sandboxes/traecli"
     }
   ]);
 });

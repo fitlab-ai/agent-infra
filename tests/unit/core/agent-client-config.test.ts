@@ -50,7 +50,7 @@ function errorCode(run: () => unknown): string {
 }
 
 test('agent client vocabulary is closed, unique, and recognized by the shared guard', () => {
-  assert.deepEqual(AGENT_CLIENT_IDS, ['claude-code', 'codex', 'antigravity-cli', 'opencode']);
+  assert.deepEqual(AGENT_CLIENT_IDS, ['claude-code', 'codex', 'antigravity-cli', 'opencode', 'traecli']);
   assert.equal(new Set(AGENT_CLIENT_IDS).size, AGENT_CLIENT_IDS.length);
   assert.deepEqual(AGENT_CLIENT_CAPABILITY_IDS, [
     'instructions',

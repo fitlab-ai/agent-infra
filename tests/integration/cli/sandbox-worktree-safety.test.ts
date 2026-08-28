@@ -165,7 +165,8 @@ function rmOneConfig(fixture: ReturnType<typeof writeSandboxEngineFixture>, tmpD
       "antigravity-cli": { enabled: false, installInSandbox: false },
       "claude-code": { enabled: false, installInSandbox: false },
       codex: { enabled: false, installInSandbox: false },
-      opencode: { enabled: false, installInSandbox: false }
+      opencode: { enabled: false, installInSandbox: false },
+      traecli: { enabled: false, installInSandbox: false }
     },
     agentClientSource: "canonical",
     refreshIntervalDays: 7,

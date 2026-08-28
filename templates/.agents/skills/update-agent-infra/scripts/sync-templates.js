@@ -48,6 +48,11 @@ const DEFAULTS = {
       "id": "opencode",
       "enabled": true,
       "installInSandbox": true
+    },
+    {
+      "id": "traecli",
+      "enabled": true,
+      "installInSandbox": true
     }
   ],
   "sandbox": {
@@ -188,6 +193,25 @@ const AGENT_CLIENT_MANIFEST = [
         "subtask": false
       },
       "argumentsToken": "$ARGUMENTS"
+    }
+  },
+  {
+    "id": "traecli",
+    "displayName": "TraeCode CLI",
+    "invocation": "/${skillName}",
+    "ownedPathPrefixes": [
+      ".trae/"
+    ],
+    "managed": [
+      ".trae/skills/"
+    ],
+    "merged": [],
+    "ejected": [],
+    "customCommand": {
+      "target": ".trae/skills/${skillName}.md",
+      "frontmatter": {},
+      "includeUsage": true,
+      "inheritDisableModelInvocation": true
     }
   }
 ];
