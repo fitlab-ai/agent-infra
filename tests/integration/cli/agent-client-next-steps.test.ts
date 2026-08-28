@@ -8,7 +8,7 @@ import test from 'node:test';
 import { INTERNAL_CLI_PATH } from '../../helpers.ts';
 
 function canonical(enabled: readonly string[]) {
-  return ['claude-code', 'codex', 'antigravity-cli', 'opencode'].map((id) => ({
+  return ['claude-code', 'codex', 'antigravity-cli', 'opencode', 'traecli'].map((id) => ({
     id,
     enabled: enabled.includes(id),
     installInSandbox: false

@@ -123,6 +123,10 @@ test('buildTuiCommand returns argv arrays, not shell strings', () => {
     'agy',
     ['--dangerously-skip-permissions', '--print', '/code-task #7']
   ]);
+  assert.deepEqual(buildTuiCommand('traecli', '/code-task #7'), [
+    'traecli',
+    ['exec', '--dangerously-bypass-approvals-and-sandbox', '/code-task #7']
+  ]);
 });
 
 test('runSkill routes create-task to host and task skills to sandbox', async () => {

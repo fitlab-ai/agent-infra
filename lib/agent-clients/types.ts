@@ -2,7 +2,8 @@ const AGENT_CLIENT_IDS = [
   'claude-code',
   'codex',
   'antigravity-cli',
-  'opencode'
+  'opencode',
+  'traecli'
 ] as const;
 
 type AgentClientId = (typeof AGENT_CLIENT_IDS)[number];

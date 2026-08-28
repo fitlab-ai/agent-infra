@@ -489,7 +489,7 @@ test("syncTemplates migrates legacy client tools to canonical agent-infra toolin
       sandbox: {
         engine: null,
         runtimes: ["node22"],
-        tools: ["claude-code", "opencode", "codex", "antigravity-cli"],
+        tools: ["claude-code", "opencode", "codex", "antigravity-cli", "traecli"],
         dockerfile: null,
         vm: { cpu: null, memory: null, disk: null }
       },
@@ -508,7 +508,8 @@ test("syncTemplates migrates legacy client tools to canonical agent-infra toolin
         ["claude-code", true],
         ["codex", true],
         ["antigravity-cli", true],
-        ["opencode", true]
+        ["opencode", true],
+        ["traecli", true]
       ]
     );
   } finally {

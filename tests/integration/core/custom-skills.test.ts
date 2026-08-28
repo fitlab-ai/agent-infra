@@ -133,7 +133,7 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
     const sharedClaudeCommand = fs.readFileSync(path.join(projectRoot, ".claude/commands/shared-rules.md"), "utf8");
     assert.doesNotMatch(sharedClaudeCommand, /^disable-model-invocation: true$/m);
 
-    assert.equal(firstReport.custom.commands.generated.length, 4);
+    assert.equal(firstReport.custom.commands.generated.length, 6);
     assert.equal(secondReport.custom.commands.updated.length, 0);
     assert.equal(secondReport.custom.commands.generated.length, 0);
     assert.ok(secondReport.custom.commands.unchanged.includes(".claude/commands/local-rules.md"));

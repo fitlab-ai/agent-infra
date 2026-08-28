@@ -17,7 +17,9 @@ function writeTemplates(root: string): void {
     ['docs/templates/update-agent-infra.en.md', 'docs {{project}}'],
     ['docs/templates/update-agent-infra.zh-CN.md', 'docs zh {{project}}'],
     ['.opencode/commands/update-agent-infra.en.md', 'opencode {{project}}'],
-    ['.opencode/commands/update-agent-infra.zh-CN.md', 'opencode zh {{project}}']
+    ['.opencode/commands/update-agent-infra.zh-CN.md', 'opencode zh {{project}}'],
+    ['.trae/skills/update-agent-infra.en.md', 'traecli {{project}}'],
+    ['.trae/skills/update-agent-infra.zh-CN.md', 'traecli zh {{project}}']
   ];
   for (const [relative, content] of files) {
     const target = path.join(root, relative!);

@@ -2,14 +2,15 @@ import { renderAgentClientInvocation } from '../agent-clients/invocation.ts';
 import { getAgentClientAdapter } from '../agent-clients/registry.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 
-export type TuiName = 'claude' | 'codex' | 'antigravity' | 'opencode';
+export type TuiName = 'claude' | 'codex' | 'antigravity' | 'opencode' | 'traecli';
 
-const TUI_NAMES = new Set(['claude', 'codex', 'antigravity', 'opencode']);
+const TUI_NAMES = new Set(['claude', 'codex', 'antigravity', 'opencode', 'traecli']);
 const TUI_AGENT_CLIENT_IDS: Readonly<Record<TuiName, AgentClientId>> = Object.freeze({
   claude: 'claude-code',
   codex: 'codex',
   antigravity: 'antigravity-cli',
-  opencode: 'opencode'
+  opencode: 'opencode',
+  traecli: 'traecli'
 });
 
 export type CommandConfig = {
@@ -46,5 +47,6 @@ export function buildTuiCommand(tui: TuiName, prompt: string): [string, string[]
   if (tui === 'claude') return ['claude', ['--dangerously-skip-permissions', '--print', prompt]];
   if (tui === 'antigravity') return ['agy', ['--dangerously-skip-permissions', '--print', prompt]];
   if (tui === 'opencode') return ['opencode', ['run', '--dangerously-skip-permissions', prompt]];
+  if (tui === 'traecli') return ['traecli', ['exec', '--dangerously-bypass-approvals-and-sandbox', prompt]];
   return ['codex', ['exec', '--dangerously-bypass-approvals-and-sandbox', prompt]];
 }

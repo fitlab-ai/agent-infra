@@ -185,12 +185,12 @@ test("ai init rejects whitespace-only TUI input with non-zero exit", () => {
   }
 });
 
-test("ai init rejects out-of-range selection (5) with non-zero exit", () => {
+test("ai init rejects out-of-range selection (6) with non-zero exit", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-init-tuis-oor-"));
   try {
     const result = spawnSync(process.execPath, cliArgs("init"), {
       cwd: tmpDir,
-      input: makeInput({ tuis: "5" }),
+      input: makeInput({ tuis: "6" }),
       stdio: "pipe",
       encoding: "utf8"
     });

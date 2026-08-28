@@ -4,13 +4,15 @@ import { claudeCodeAdapter } from './claude-code.ts';
 import { codexAdapter } from './codex.ts';
 import { antigravityCliAdapter } from './antigravity-cli.ts';
 import { opencodeAdapter } from './opencode.ts';
+import { traecliAdapter } from './traecli.ts';
 
 const adaptersById = new Map(
   [
     claudeCodeAdapter,
     codexAdapter,
     antigravityCliAdapter,
-    opencodeAdapter
+    opencodeAdapter,
+    traecliAdapter
   ].map((adapter) => [adapter.id, adapter])
 );
 

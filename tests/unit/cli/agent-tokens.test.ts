@@ -12,7 +12,7 @@ import {
 // --- normalizeAgentToken: strict write-side validation ---
 
 test('normalizeAgentToken passes every standard short token through unchanged', () => {
-  for (const token of ['claude', 'codex', 'antigravity', 'opencode', 'cursor']) {
+  for (const token of ['claude', 'codex', 'antigravity', 'opencode', 'cursor', 'traecli']) {
     assert.equal(normalizeAgentToken(token), token, token);
   }
 });

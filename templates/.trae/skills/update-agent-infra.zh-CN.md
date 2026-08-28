@@ -1,0 +1,8 @@
+---
+description: "更新项目 AI 协作配置"
+disable-model-invocation: true
+---
+
+读取并执行 `.agents/skills/update-agent-infra/SKILL.md` 中的 update-agent-infra 技能。
+
+严格按照技能中定义的所有步骤执行，包括先从 `templates/` 渲染，再应用 managed/merged 更新策略。

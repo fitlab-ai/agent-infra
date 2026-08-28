@@ -276,7 +276,7 @@ test('task-orchestration begin fails closed when model policy is omitted', () =>
 test('task-orchestration falls back to the selected client project policy only', () => {
   const f = fixture();
   fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify({
-    agentClients: ['claude-code', 'codex', 'antigravity-cli', 'opencode'].map((id) => ({
+    agentClients: ['claude-code', 'codex', 'antigravity-cli', 'opencode', 'traecli'].map((id) => ({
       id,
       enabled: true,
       installInSandbox: true,
