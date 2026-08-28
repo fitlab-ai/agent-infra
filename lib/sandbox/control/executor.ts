@@ -8,7 +8,7 @@ import { applyTaskFinalization } from '../../task/finalization.ts';
 import { verifyTaskEvent } from '../../task/verification.ts';
 import { bindSandboxControlTask, type SandboxControlExecution, type SandboxControlManifest, type SandboxControlRequest } from './protocol.ts';
 import { atomicWriteJson, executionPath, terminateSandboxControlExecution } from './state.ts';
-import { computeLifecycleBuildIdentity, type LifecycleIdentityWarning } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
+import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import {
   closeCodexControllerRegistration,
   CodexControllerRegistrationError,
@@ -237,7 +237,6 @@ export function executeRequest(
               controlGeneration: binding.controlGeneration,
               controllerInstanceDigest: binding.instanceDigest
             },
-            ...(binding.warnings && binding.warnings.length > 0 ? { warnings: binding.warnings } : {}),
             error: null
           })}\n`,
           stderr: ''
@@ -272,7 +271,6 @@ export function executeRequest(
   let controllerBinding: Readonly<{
     instanceDigest: string;
     controlGeneration: string;
-    warnings?: readonly LifecycleIdentityWarning[];
   }> | null = null;
   if (request.family === 'task-orchestration') {
     if (isCodexPrepare(request.args)) {
@@ -313,15 +311,7 @@ export function executeRequest(
         ...safeEnv(process.env),
         AGENT_INFRA_RUNTIME_DIR: manifest.runtimeDir,
         ...(controllerBinding
-          ? {
-              AGENT_INFRA_CONTROL_CONTROLLER_BINDING: JSON.stringify({
-                instanceDigest: controllerBinding.instanceDigest,
-                controlGeneration: controllerBinding.controlGeneration
-              }),
-              ...(controllerBinding.warnings && controllerBinding.warnings.length > 0
-                ? { AGENT_INFRA_CONTROL_CONTROLLER_WARNINGS: JSON.stringify(controllerBinding.warnings) }
-                : {})
-            }
+          ? { AGENT_INFRA_CONTROL_CONTROLLER_BINDING: JSON.stringify(controllerBinding) }
           : {})
       }
     }

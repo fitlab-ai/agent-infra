@@ -18,7 +18,6 @@ import type {
   CodexControllerLeaseProofV1,
   CodexControllerOpened
 } from './controller-registration.ts';
-import type { LifecycleIdentityWarning } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import type { ProcessIdentity } from '../../server/process-state.ts';
 import { normalizeAgentToken } from '../../agent-clients/tokens.ts';
 import { readSandboxControlStatus } from './state.ts';
@@ -262,7 +261,6 @@ type CodexControllerClosed = Readonly<{
   changed: boolean;
   lease: null;
   error: null;
-  warnings?: readonly LifecycleIdentityWarning[];
 }>;
 
 type CodexControllerVerified = Readonly<{
@@ -276,36 +274,10 @@ type CodexControllerVerified = Readonly<{
     controllerInstanceDigest: string;
   }>;
   error: null;
-  warnings?: readonly LifecycleIdentityWarning[];
 }>;
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(value).sort().join(',') === [...keys].sort().join(',');
-}
-
-function hasExactKeys(value: Record<string, unknown>, required: readonly string[], optional: readonly string[] = []): boolean {
-  const allowed = new Set([...required, ...optional]);
-  const keys = Object.keys(value);
-  return required.every((key) => Object.hasOwn(value, key)) && keys.every((key) => allowed.has(key));
-}
-
-function validWarnings(value: unknown): value is readonly LifecycleIdentityWarning[] | undefined {
-  if (value === undefined) return true;
-  if (!Array.isArray(value) || value.length === 0) return false;
-  const codes = new Set<string>();
-  return value.every((warning) => {
-    if (!warning || typeof warning !== 'object' || Array.isArray(warning)) return false;
-    const row = warning as Record<string, unknown>;
-    if (!exactKeys(row, ['action', 'code', 'message'])
-      || typeof row.code !== 'string' || !/^[A-Z][A-Z0-9_]+$/u.test(row.code)
-      || codes.has(row.code)
-      || typeof row.message !== 'string'
-      || !/^[^\r\n\0]{1,512}$/u.test(row.message)
-      || /(?:^|\s)(?:\/|[A-Za-z]:[\\/])/u.test(row.message)
-      || row.action !== 'rebuild-sandbox') return false;
-    codes.add(row.code);
-    return true;
-  });
 }
 
 function validProcess(value: unknown): value is ProcessIdentity {
@@ -344,8 +316,7 @@ export function parseCodexControllerResult(response: SandboxControlResponse): Co
   const resultKeys = result.status === 'verified'
     ? ['binding', 'changed', 'error', 'lease', 'status', 'version']
     : ['changed', 'error', 'lease', 'status', 'version'];
-  if (!hasExactKeys(result, resultKeys, ['warnings'])
-    || !validWarnings(result.warnings)
+  if (!exactKeys(result, resultKeys)
     || result.version !== 1 || !['opened', 'closed', 'failed', 'verified'].includes(result.status as string)) {
     clientError('SANDBOX_CONTROL_RESULT_INVALID', 'controller result schema is invalid', false, true);
   }

@@ -106,14 +106,6 @@ function writeControllerContext(
   const realBuild = computeLifecycleBuildIdentity(root);
   const processStartTime = getProcessStartTime(process.pid);
   assert.ok(processStartTime);
-  const profileFiles = contractFiles.slice(1, 3).map((relative) => path.join(root, relative)).sort();
-  const profileHash = crypto.createHash('sha256');
-  for (const file of profileFiles) {
-    profileHash.update(path.basename(file));
-    profileHash.update('\0');
-    profileHash.update(fs.readFileSync(file));
-    profileHash.update('\0');
-  }
   const contextPath = path.join(root, 'controller-context.json');
   writeCodexSandboxControllerContext(contextPath, contextFromControllerLease({
     version: 1,
@@ -127,8 +119,7 @@ function writeControllerContext(
     issuedAt: Date.now() - 1_000,
     expiresAt: Date.now() + 60_000
   }, {
-    hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(path.join(root, '.codex', 'hooks.json'))).digest('hex'),
-    lifecycleProfilesHash: profileHash.digest('hex')
+    hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(path.join(root, '.codex', 'hooks.json'))).digest('hex')
   }));
   return contextPath;
 }
@@ -138,13 +129,7 @@ test('Codex prepare consumes a controller-bound capability from the trusted brok
   const controller = { instanceDigest: 'e'.repeat(64), controlGeneration: 'generation-1' };
   const currentCapability = capability(f.root, 'broker-controller-token', controller);
   const previous = process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
-  const previousWarnings = process.env.AGENT_INFRA_CONTROL_CONTROLLER_WARNINGS;
   process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING = JSON.stringify(controller);
-  process.env.AGENT_INFRA_CONTROL_CONTROLLER_WARNINGS = JSON.stringify([{
-    code: 'CODEX_LIFECYCLE_BUILD_MISMATCH',
-    message: 'rebuild the sandbox',
-    action: 'rebuild-sandbox'
-  }]);
   try {
     const result = await prepareCodexOrchestrationDelegation(taskId, {
       client: 'codex',
@@ -159,45 +144,11 @@ test('Codex prepare consumes a controller-bound capability from the trusted brok
       orchestrationOptions: { captureWorkspace: () => 'before', id: () => 'receipt-controller' }
     });
     assert.equal(result.status, 'running');
-    assert.equal(result.warnings?.[0]?.code, 'CODEX_LIFECYCLE_BUILD_MISMATCH');
     assert.equal(result.run?.pendingDelegation?.lifecycleProvenance?.controllerInstanceDigest, controller.instanceDigest);
     assert.equal(result.run?.pendingDelegation?.lifecycleProvenance?.controlGeneration, controller.controlGeneration);
   } finally {
     if (previous === undefined) delete process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING;
     else process.env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING = previous;
-    if (previousWarnings === undefined) delete process.env.AGENT_INFRA_CONTROL_CONTROLLER_WARNINGS;
-    else process.env.AGENT_INFRA_CONTROL_CONTROLLER_WARNINGS = previousWarnings;
-  }
-});
-
-test('Codex prepare rejects malformed controller warning transport before capability consume', async () => {
-  const f = fixture();
-  const currentCapability = capability(f.root, 'malformed-controller-warning-token');
-  const previousWarnings = process.env.AGENT_INFRA_CONTROL_CONTROLLER_WARNINGS;
-  process.env.AGENT_INFRA_CONTROL_CONTROLLER_WARNINGS = JSON.stringify([{
-    code: 'UNKNOWN_WARNING',
-    message: 'unexpected warning',
-    action: 'rebuild-sandbox'
-  }]);
-  try {
-    const result = await prepareCodexOrchestrationDelegation(taskId, {
-      client: 'codex',
-      requestedModel: 'executor-model',
-      requestedReasoningEffort: 'xhigh',
-      capabilityToken: currentCapability.token
-    }, {
-      repoRoot: f.root,
-      capabilityStore: currentCapability.store,
-      buildIdentity,
-      preflight,
-      orchestrationOptions: { captureWorkspace: () => { throw new Error('workspace must not be captured'); } }
-    });
-    assert.equal(result.error?.code, 'ORCHESTRATION_CLIENT_PREFLIGHT_FAILED');
-    assert.match(result.error?.message ?? '', /CODEX_SANDBOX_CONTROLLER_WARNINGS_INVALID/);
-    assert.equal(currentCapability.store.inspect(currentCapability.token).status, 'attested');
-  } finally {
-    if (previousWarnings === undefined) delete process.env.AGENT_INFRA_CONTROL_CONTROLLER_WARNINGS;
-    else process.env.AGENT_INFRA_CONTROL_CONTROLLER_WARNINGS = previousWarnings;
   }
 });
 
@@ -404,9 +355,36 @@ test('Codex prepare preserves the typed orchestration state error', async () => 
   assert.equal(captures, 0);
 });
 
-test('Codex prepare preserves safe provenance detail from capability consume', async () => {
+test('Codex prepare continues with build drift warnings', async () => {
   const f = fixture();
   const currentCapability = capability(f.root, 'capability-detail-token');
+  const result = await prepareCodexOrchestrationDelegation(taskId, {
+    client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
+    capabilityToken: currentCapability.token
+  }, {
+    repoRoot: f.root,
+    capabilityStore: currentCapability.store,
+    buildIdentity: {
+      ...buildIdentity,
+      packageVersion: '0.9.8-alpha.0',
+      internalExecutableBuildHash: 'e'.repeat(64),
+      lifecycleContractHash: 'f'.repeat(64)
+    },
+    preflight,
+    orchestrationOptions: { captureWorkspace: () => 'before' }
+  });
+
+  assert.equal(result.status, 'running');
+  assert.equal(result.run?.pendingDelegation?.status, 'prepared');
+  assert.deepEqual(
+    result.warnings?.map(({ code }) => code).sort(),
+    ['CODEX_LIFECYCLE_BUILD_MISMATCH', 'CODEX_LIFECYCLE_CONTRACT_MISMATCH']
+  );
+});
+
+test('Codex prepare rejects hook mismatch before side effects', async () => {
+  const f = fixture();
+  const currentCapability = capability(f.root, 'hook-mismatch-token');
   let captures = 0;
   const result = await prepareCodexOrchestrationDelegation(taskId, {
     client: 'codex', requestedModel: 'executor-model', requestedReasoningEffort: 'xhigh',
@@ -414,22 +392,17 @@ test('Codex prepare preserves safe provenance detail from capability consume', a
   }, {
     repoRoot: f.root,
     capabilityStore: currentCapability.store,
-    buildIdentity: { ...buildIdentity, packageVersion: '0.9.8-alpha.0' },
-    preflight: async () => ({
-      ...(await preflight()),
-      hookDefinitionHash: 'd'.repeat(64)
-    }),
+    buildIdentity,
+    preflight: async () => ({ ...(await preflight()), hookDefinitionHash: 'mismatched-hook-hash' }),
     orchestrationOptions: { captureWorkspace: () => { captures += 1; return 'before'; } }
   });
 
   assert.equal(result.error?.code, 'CODEX_CAPABILITY_PROVENANCE_MISMATCH');
-  assert.equal(result.error?.message, 'CODEX_CAPABILITY_PROVENANCE_MISMATCH: capability consumption identity does not match');
-  assert.equal(JSON.stringify(result.error?.detail).includes('capability-detail-token'), false);
   assert.equal(result.error?.detail?.kind, 'codex-capability-provenance-mismatch');
   assert.equal(result.error?.detail?.version, 1);
-  assert.equal(result.error?.detail?.fields.buildIdentity.packageVersion.matches, false);
-  assert.equal(result.error?.detail?.fields.hookDefinitionHash.matches, false);
+  assert.equal(JSON.stringify(result.error?.detail).includes('hook-mismatch-token'), false);
   assert.equal(captures, 0);
+  assert.equal(currentCapability.store.inspect(currentCapability.token).status, 'attested');
   assert.equal(readRun(f.taskDir)?.pendingDelegation, null);
   assert.equal(readRun(f.taskDir)?.baseline, '');
 });

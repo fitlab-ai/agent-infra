@@ -66,10 +66,8 @@ function fixture() {
   `);
   writeNodeCommandShim(path.join(bin, 'codex'), codex);
   const hooks = '{"hooks":{}}\n';
-  fs.mkdirSync(path.join(root, '.codex', 'agents'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.codex'), { recursive: true });
   fs.writeFileSync(path.join(root, '.codex', 'hooks.json'), hooks);
-  fs.writeFileSync(path.join(root, '.codex', 'agents', 'agent-infra-lifecycle-executor.toml'), 'name = "executor"\n');
-  fs.writeFileSync(path.join(root, '.codex', 'agents', 'agent-infra-lifecycle-reviewer.toml'), 'name = "reviewer"\n');
   return {
     root,
     env: envWithPrependedPath(sandboxControlSafeEnv({

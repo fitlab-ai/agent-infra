@@ -1188,15 +1188,7 @@ function activateOrchestrationDelegation(
   }
   const updated = withUpdatedRun(run, { pendingDelegation: result.receipt });
   saveRun(resolved.taskDir, updated);
-  return {
-    status: 'running',
-    changed: true,
-    taskId: resolved.taskId,
-    run: updated,
-    next: null,
-    ...(result.warnings ? { warnings: result.warnings } : {}),
-    error: null
-  };
+  return { status: 'running', changed: true, taskId: resolved.taskId, run: updated, next: null, error: null };
 }
 
 async function awaitOrchestrationDelegationActivation(

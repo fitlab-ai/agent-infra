@@ -230,8 +230,8 @@ function verifyLifecycleBuildIdentity(
   }
   return {
     ok: true,
-    code: warnings[0]?.code ?? null,
-    message: warnings[0]?.message ?? null,
+    code: null,
+    message: null,
     warnings: Object.freeze(warnings)
   };
 }

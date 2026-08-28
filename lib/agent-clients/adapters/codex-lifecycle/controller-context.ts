@@ -12,11 +12,6 @@ import {
 } from './build-identity.ts';
 
 const HEX_256 = /^[a-f0-9]{64}$/u;
-export type LifecycleContextWarning = Readonly<{
-  code: string;
-  message: string;
-  action: 'rebuild-sandbox';
-}>;
 
 export type CodexSandboxControllerContextV2 = Readonly<{
   version: 2;
@@ -29,28 +24,10 @@ export type CodexSandboxControllerContextV2 = Readonly<{
   expiresAt: number;
   buildIdentity: LifecycleBuildIdentity;
   hookDefinitionHash: string;
-  lifecycleProfilesHash: string;
 }>;
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(value).sort().join(',') === [...keys].sort().join(',');
-}
-
-function digestProfiles(repoRoot: string): string {
-  const files = [
-    path.join(repoRoot, '.codex', 'agents', 'agent-infra-lifecycle-executor.toml'),
-    path.join(repoRoot, '.codex', 'agents', 'agent-infra-lifecycle-reviewer.toml')
-  ];
-  const hash = crypto.createHash('sha256');
-  for (const file of files.sort()) {
-    const stat = fs.lstatSync(file);
-    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('CODEX_SANDBOX_CONTROLLER_BUNDLE_MISMATCH');
-    hash.update(path.basename(file));
-    hash.update('\0');
-    hash.update(fs.readFileSync(file));
-    hash.update('\0');
-  }
-  return hash.digest('hex');
 }
 
 function validProcess(value: unknown): value is ProcessIdentity {
@@ -82,7 +59,7 @@ function validateContext(value: unknown): CodexSandboxControllerContextV2 {
   if (!exactKeys(context, [
     'buildIdentity', 'controlGeneration', 'controllerInstanceDigest', 'controllerLease',
     'controllerProcess', 'expiresAt', 'hookDefinitionHash', 'issuedAt',
-    'lifecycleProfilesHash', 'taskId', 'version'
+    'taskId', 'version'
   ])
     || context.version !== 2
     || typeof context.taskId !== 'string' || context.taskId.length === 0
@@ -97,8 +74,7 @@ function validateContext(value: unknown): CodexSandboxControllerContextV2 {
     || !Number.isSafeInteger(context.expiresAt)
     || (context.expiresAt as number) <= (context.issuedAt as number)
     || !validBuildIdentity(context.buildIdentity)
-    || typeof context.hookDefinitionHash !== 'string' || !HEX_256.test(context.hookDefinitionHash)
-    || typeof context.lifecycleProfilesHash !== 'string' || !HEX_256.test(context.lifecycleProfilesHash)) {
+    || typeof context.hookDefinitionHash !== 'string' || !HEX_256.test(context.hookDefinitionHash)) {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
   return context as unknown as CodexSandboxControllerContextV2;
@@ -106,7 +82,7 @@ function validateContext(value: unknown): CodexSandboxControllerContextV2 {
 
 export function contextFromControllerLease(
   lease: CodexControllerLeaseV1,
-  hashes: Readonly<{ hookDefinitionHash: string; lifecycleProfilesHash: string }>
+  input: Readonly<{ hookDefinitionHash: string }>
 ): CodexSandboxControllerContextV2 {
   return Object.freeze({
     version: 2,
@@ -118,8 +94,7 @@ export function contextFromControllerLease(
     issuedAt: lease.issuedAt,
     expiresAt: lease.expiresAt,
     buildIdentity: lease.buildIdentity,
-    hookDefinitionHash: hashes.hookDefinitionHash,
-    lifecycleProfilesHash: hashes.lifecycleProfilesHash
+    hookDefinitionHash: input.hookDefinitionHash
   });
 }
 
@@ -147,7 +122,7 @@ export function verifyCodexSandboxControllerContextWithWarnings(
     generation?: string;
     probeProcess?: (identity: ProcessIdentity) => 'alive' | 'dead' | 'unknown';
   }> = {}
-): Readonly<{ context: CodexSandboxControllerContextV2; warnings: readonly (LifecycleIdentityWarning | LifecycleContextWarning)[] }> {
+): Readonly<{ context: CodexSandboxControllerContextV2; warnings: readonly LifecycleIdentityWarning[] }> {
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(contextPath);
@@ -172,51 +147,12 @@ export function verifyCodexSandboxControllerContextWithWarnings(
     || state !== 'alive') {
     throw new Error('CODEX_SANDBOX_CONTROLLER_CONTEXT_INVALID');
   }
-  const warnings: Array<LifecycleIdentityWarning | LifecycleContextWarning> = [];
+  const warnings: LifecycleIdentityWarning[] = [];
   const currentBuildIdentity = computeLifecycleBuildIdentity(repoRoot);
   const identity = verifyLifecycleBuildIdentity(context.buildIdentity, currentBuildIdentity);
   if (!identity.ok) throw new Error(`${identity.code}: ${identity.message}`);
   warnings.push(...identity.warnings);
-  try {
-    const hookHash = crypto.createHash('sha256')
-      .update(fs.readFileSync(path.join(repoRoot, '.codex', 'hooks.json')))
-      .digest('hex');
-    if (hookHash !== context.hookDefinitionHash) {
-      warnings.push({
-        code: 'CODEX_LIFECYCLE_HOOK_DRIFT',
-        message: 'Codex lifecycle hook definition differs; rebuild the sandbox if the runtime is stale',
-        action: 'rebuild-sandbox'
-      });
-    }
-    const profileHash = digestProfiles(repoRoot);
-    if (profileHash !== context.lifecycleProfilesHash) {
-      warnings.push({
-        code: 'CODEX_LIFECYCLE_PROFILE_DRIFT',
-        message: 'Codex lifecycle profile content differs; rebuild the sandbox if the runtime is stale',
-        action: 'rebuild-sandbox'
-      });
-    }
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('CODEX_SANDBOX_CONTROLLER_')) throw error;
-    warnings.push({
-      code: 'CODEX_LIFECYCLE_PROFILE_DRIFT',
-      message: 'Codex lifecycle profile content is unavailable; rebuild the sandbox if the runtime is stale',
-      action: 'rebuild-sandbox'
-    });
-  }
   return Object.freeze({ context: Object.freeze(context), warnings: Object.freeze(warnings) });
-}
-
-export function verifyCodexSandboxControllerContext(
-  contextPath: string,
-  options: Readonly<{
-    repoRoot?: string;
-    now?: number;
-    generation?: string;
-    probeProcess?: (identity: ProcessIdentity) => 'alive' | 'dead' | 'unknown';
-  }> = {}
-): CodexSandboxControllerContextV2 {
-  return verifyCodexSandboxControllerContextWithWarnings(contextPath, options).context;
 }
 
 export function controllerProofFromContext(context: CodexSandboxControllerContextV2): CodexControllerLeaseProofV1 {

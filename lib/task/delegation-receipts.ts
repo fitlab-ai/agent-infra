@@ -3,11 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
 import { normalizeAgentToken } from '../agent-clients/tokens.ts';
-import {
-  verifyLifecycleBuildIdentity,
-  type LifecycleBuildIdentity,
-  type LifecycleIdentityWarning
-} from '../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 
 type DelegationRole = 'executor' | 'reviewer';
 type DelegationStage = 'analysis' | 'review-analysis' | 'plan' | 'review-plan' | 'code' | 'review-code' | 'commit';
@@ -90,14 +85,7 @@ type DelegationReceipt = Readonly<{
 }>;
 
 type ReceiptFailure = Readonly<{ ok: false; code: string; message: string; receipt?: never }>;
-type DelegationWarning = LifecycleIdentityWarning;
-type ReceiptSuccess = Readonly<{
-  ok: true;
-  receipt: DelegationReceipt;
-  warnings?: readonly DelegationWarning[];
-  code?: never;
-  message?: never;
-}>;
+type ReceiptSuccess = Readonly<{ ok: true; receipt: DelegationReceipt; code?: never; message?: never }>;
 type ReceiptResult = ReceiptSuccess | ReceiptFailure;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -120,6 +108,13 @@ function exactText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.trim() === value;
 }
 
+function validCodexBuildMetadata(value: Readonly<Record<string, unknown>>): boolean {
+  return Number.isSafeInteger(value.protocolVersion) && (value.protocolVersion as number) > 0
+    && exactText(value.packageVersion)
+    && exactText(value.internalExecutableBuildHash)
+    && exactText(value.lifecycleContractHash);
+}
+
 function nullableText(value: unknown): value is string | null {
   return value === null || exactText(value);
 }
@@ -134,6 +129,7 @@ const LIFECYCLE_PROVENANCE_KEYS = [
   'capabilitySessionId', 'capabilityTurnId', 'capabilityToolUseId',
   'controllerInstanceDigest', 'controlGeneration'
 ] as const;
+
 function isDelegationLifecycleProvenance(value: unknown): value is DelegationLifecycleProvenance {
   if (!hasExactKeys(value, LIFECYCLE_PROVENANCE_KEYS)) return false;
   return Number.isSafeInteger(value.protocolVersion)
@@ -161,6 +157,7 @@ const HOST_EVIDENCE_OPTIONAL_KEYS = [
   'capabilityTurnId', 'capabilityToolUseId', 'spawnToolUseId', 'spawnObservedAt',
   'controllerInstanceDigest', 'controlGeneration'
 ] as const;
+
 function isDelegationHostEvidence(value: unknown): value is DelegationHostEvidence {
   if (!hasExactKeys(value, HOST_EVIDENCE_REQUIRED_KEYS, HOST_EVIDENCE_OPTIONAL_KEYS)) return false;
   if (!['codex-lifecycle-v1', 'codex-lifecycle-v2'].includes(value.kind as string)) return false;
@@ -552,31 +549,8 @@ function activateDelegation(
       || event.parentId !== expected.capabilitySessionId
       || (event.hostEvidence.controllerInstanceDigest ?? null) !== expected.controllerInstanceDigest
       || (event.hostEvidence.controlGeneration ?? null) !== expected.controlGeneration
-      || !Number.isSafeInteger(event.hostEvidence.protocolVersion)
-      || typeof event.hostEvidence.packageVersion !== 'string'
-      || event.hostEvidence.packageVersion.trim() !== event.hostEvidence.packageVersion
-      || event.hostEvidence.packageVersion.length === 0
-      || typeof event.hostEvidence.internalExecutableBuildHash !== 'string'
-      || event.hostEvidence.internalExecutableBuildHash.trim() !== event.hostEvidence.internalExecutableBuildHash
-      || event.hostEvidence.internalExecutableBuildHash.length === 0
-      || typeof event.hostEvidence.lifecycleContractHash !== 'string'
-      || event.hostEvidence.lifecycleContractHash.trim() !== event.hostEvidence.lifecycleContractHash
-      || event.hostEvidence.lifecycleContractHash.length === 0
+      || !validCodexBuildMetadata(event.hostEvidence)
     ) return fail('DELEGATION_HOST_EVIDENCE_INVALID', 'Codex lifecycle provenance does not match the prepared receipt');
-  }
-  const warnings: DelegationWarning[] = [];
-  if (event.hostEvidence?.kind === 'codex-lifecycle-v2' && receipt.lifecycleProvenance) {
-    const identity = verifyLifecycleBuildIdentity(
-      receipt.lifecycleProvenance as LifecycleBuildIdentity,
-      {
-        protocolVersion: event.hostEvidence.protocolVersion as LifecycleBuildIdentity['protocolVersion'],
-        packageVersion: event.hostEvidence.packageVersion!,
-        internalExecutableBuildHash: event.hostEvidence.internalExecutableBuildHash!,
-        lifecycleContractHash: event.hostEvidence.lifecycleContractHash!
-      } as LifecycleBuildIdentity
-    );
-    if (!identity.ok) return fail(identity.code!, identity.message!);
-    warnings.push(...identity.warnings);
   }
   return { ok: true, receipt: Object.freeze({
     ...receipt,
@@ -597,7 +571,7 @@ function activateDelegation(
     startEvidenceMonotonicMs: monotonic,
     activatedMonotonicMs: (options.monotonicNow ?? (() => Number(process.hrtime.bigint() / 1_000_000n)))(),
     activatedAt: new Date(wallNow).toISOString()
-  }), ...(warnings.length > 0 ? { warnings: Object.freeze(warnings) } : {}) };
+  }) };
 }
 
 function abortPreparedDelegation(receipt: DelegationReceipt): ReceiptResult {
@@ -709,6 +683,5 @@ export type {
   DelegationRole,
   DelegationStage,
   DelegationStatus,
-  DelegationWarning,
   ReceiptResult
 };

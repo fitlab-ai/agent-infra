@@ -20,8 +20,7 @@ import {
   controllerProofFromContext,
   verifyCodexSandboxControllerContextWithWarnings as verifyContextFileWithWarnings,
   writeCodexSandboxControllerContext,
-  type CodexSandboxControllerContextV2,
-  type LifecycleContextWarning
+  type CodexSandboxControllerContextV2
 } from './controller-context.ts';
 
 type ControllerControl = Readonly<{
@@ -59,7 +58,6 @@ type PreparedCodexSandboxController = Readonly<{
   home: string;
   contextPath: string;
   context: CodexSandboxControllerContextV2;
-  warnings: readonly LifecycleIdentityWarning[];
   cleanup: () => void;
 }>;
 
@@ -71,21 +69,6 @@ type VerifyContextOptions = Readonly<{
   control?: ControllerControl;
   requestControllerVerify?: typeof requestCodexControllerVerify;
 }>;
-
-function digestFiles(files: readonly string[]): string {
-  const hash = crypto.createHash('sha256');
-  for (const file of [...files].sort()) {
-    const stat = fs.lstatSync(file);
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      throw new Error('CODEX_SANDBOX_CONTROLLER_BUNDLE_MISMATCH');
-    }
-    hash.update(path.basename(file));
-    hash.update('\0');
-    hash.update(fs.readFileSync(file));
-    hash.update('\0');
-  }
-  return hash.digest('hex');
-}
 
 function copyRegular(source: string, destination: string, mode: number): void {
   const stat = fs.lstatSync(source);
@@ -171,7 +154,7 @@ function verifyControl(taskId: string, control: ControllerControl): void {
 function verifyCodexSandboxControllerContextWithWarnings(
   contextPath: string,
   options: VerifyContextOptions = {}
-): Readonly<{ context: CodexSandboxControllerContextV2; warnings: readonly (LifecycleIdentityWarning | LifecycleContextWarning)[] }> {
+): Readonly<{ context: CodexSandboxControllerContextV2; warnings: readonly LifecycleIdentityWarning[] }> {
   const control = options.control ?? controlFromEnvironment();
   const fileVerification = verifyContextFileWithWarnings(contextPath, {
     repoRoot: options.repoRoot,
@@ -192,17 +175,8 @@ function verifyCodexSandboxControllerContextWithWarnings(
   }
   return Object.freeze({
     context,
-    warnings: Object.freeze([...new Map(
-      [...fileVerification.warnings, ...(verified.warnings ?? [])].map((warning) => [warning.code, warning])
-    ).values()])
+    warnings: fileVerification.warnings
   });
-}
-
-function verifyCodexSandboxControllerContext(
-  contextPath: string,
-  options: VerifyContextOptions = {}
-): CodexSandboxControllerContextV2 {
-  return verifyCodexSandboxControllerContextWithWarnings(contextPath, options).context;
 }
 
 function detectedCodexVersion(): string {
@@ -352,14 +326,6 @@ function prepareCodexSandboxController(
     copyRegular(hooks, path.join(home, 'hooks.json'), 0o600);
     copyRegular(executor, path.join(home, 'agents', path.basename(executor)), 0o600);
     copyRegular(reviewer, path.join(home, 'agents', path.basename(reviewer)), 0o600);
-    if (crypto.createHash('sha256').update(fs.readFileSync(path.join(home, 'hooks.json'))).digest('hex')
-      !== crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex')
-      || digestFiles([
-        path.join(home, 'agents', path.basename(executor)),
-        path.join(home, 'agents', path.basename(reviewer))
-      ]) !== digestFiles([executor, reviewer])) {
-      throw new Error('CODEX_SANDBOX_CONTROLLER_BUNDLE_MISMATCH');
-    }
 
     const buildIdentity = computeLifecycleBuildIdentity(repoRoot);
     const opened = (options.openController ?? requestCodexControllerOpen)({
@@ -370,10 +336,8 @@ function prepareCodexSandboxController(
     const taskId = opened.lease.taskId;
     const identity = verifyLifecycleBuildIdentity(opened.lease.buildIdentity, buildIdentity);
     if (!identity.ok) throw new Error(`${identity.code}: ${identity.message}`);
-    const warnings = Object.freeze([...(opened.warnings ?? []), ...identity.warnings]);
     context = contextFromControllerLease(opened.lease, {
-      hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex'),
-      lifecycleProfilesHash: digestFiles([executor, reviewer])
+      hookDefinitionHash: crypto.createHash('sha256').update(fs.readFileSync(hooks)).digest('hex')
     });
     if (opened.lease.controlGeneration !== control.generation
       || opened.lease.controllerProcess.pid !== process.pid
@@ -425,7 +389,6 @@ function prepareCodexSandboxController(
       home,
       contextPath,
       context,
-      warnings,
       cleanup
     });
   } catch (error) {
@@ -478,7 +441,6 @@ async function runCodexSandboxController(
 export {
   prepareCodexSandboxController,
   runCodexSandboxController,
-  verifyCodexSandboxControllerContext,
   verifyCodexSandboxControllerContextWithWarnings,
   controllerProofFromContext
 };

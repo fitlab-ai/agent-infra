@@ -268,41 +268,6 @@ test('Codex receipts bind lifecycle evidence revisions through activation and se
   });
 });
 
-test('Codex activation reports build drift without blocking receipt activation', () => {
-  const prepared = dispatched(prepareDelegation({
-    ...input, client: 'codex', role: 'executor', stage: 'analysis', artifact: 'analysis.md',
-    lifecycleProvenance: codexProvenance
-  }, {
-    id: () => 'delegation-codex-build-drift', now: () => '2099-01-01T00:00:00.000Z'
-  }));
-  const result = activateDelegation(prepared, {
-    nativeAgent: 'agent-infra-lifecycle-executor',
-    childId: 'child-codex-build-drift',
-    parentId: 'parent-codex',
-    spawnMode: 'fresh',
-    actualModel: 'review-model',
-    actualReasoningEffort: 'high',
-    hostEvidence: {
-      kind: 'codex-lifecycle-v2',
-      startRevision: 4,
-      ...codexProvenance,
-      packageVersion: '0.9.8-alpha.0',
-      internalExecutableBuildHash: 'e'.repeat(64),
-      lifecycleContractHash: 'f'.repeat(64),
-      spawnToolUseId: 'spawn-tool',
-      spawnObservedAt: '2099-01-01T00:00:00.500Z'
-    }
-  }, { now: () => '2099-01-01T00:00:01.000Z', monotonicNow: () => 2 });
-
-  assert.equal(result.ok, true);
-  if (!result.ok) return;
-  assert.equal(result.receipt.status, 'activated');
-  assert.deepEqual(result.warnings?.map((warning) => warning.code), [
-    'CODEX_LIFECYCLE_BUILD_MISMATCH',
-    'CODEX_LIFECYCLE_CONTRACT_MISMATCH'
-  ]);
-});
-
 test('Codex receipts reject generic hook evidence and cross-session capability reuse', () => {
   const prepared = dispatched(prepareDelegation({
     ...input,

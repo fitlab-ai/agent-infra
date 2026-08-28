@@ -23,8 +23,14 @@ const build = {
   internalExecutableBuildHash: 'a'.repeat(64),
   lifecycleContractHash: 'b'.repeat(64)
 } as const;
+const driftedBuild = {
+  ...build,
+  packageVersion: '1.2.4',
+  internalExecutableBuildHash: 'c'.repeat(64),
+  lifecycleContractHash: 'd'.repeat(64)
+} as const;
 
-test('Codex capability is attested by one tool use and consumed once', () => {
+test('Codex capability tolerates build drift and is consumed once', () => {
   let now = 1_000;
   const root = mkdtempSync('codex-capability-');
   const store = createCodexCapabilityStore({
@@ -42,20 +48,25 @@ test('Codex capability is attested by one tool use and consumed once', () => {
     turnId: 'turn',
     toolUseId: 'tool',
     hookDefinitionHash: 'c'.repeat(64),
-    buildIdentity: build
+    buildIdentity: driftedBuild
   });
   assert.equal(attested.status, 'attested');
+  assert.equal(store.validate(armed.token, {
+    taskId: 'TASK-20260101-000001',
+    hookDefinitionHash: 'c'.repeat(64),
+    buildIdentity: driftedBuild
+  }).status, 'attested');
   const consumed = store.consume(armed.token, {
     taskId: 'TASK-20260101-000001',
     hookDefinitionHash: 'c'.repeat(64),
-    buildIdentity: build
+    buildIdentity: driftedBuild
   });
   assert.equal(consumed.status, 'consumed');
   assert.throws(
     () => store.consume(armed.token, {
       taskId: 'TASK-20260101-000001',
       hookDefinitionHash: 'c'.repeat(64),
-      buildIdentity: build
+      buildIdentity: driftedBuild
     }),
     /CODEX_CAPABILITY_REPLAY/
   );
@@ -65,14 +76,14 @@ test('Codex capability is attested by one tool use and consumed once', () => {
   assert.equal(fs.existsSync(armed.path), false);
 });
 
-test('Codex capability expiry and protocol mismatch fail closed while build drift is diagnostic', () => {
+test('Codex capability expiry and provenance mismatch fail closed', () => {
   let now = 2_000;
   let tokenIndex = 0;
   const root = mkdtempSync('codex-capability-expiry-');
   const store = createCodexCapabilityStore({
     root,
     now: () => now,
-    token: () => ['expiring-token', 'mismatched-token', 'drift-token'][tokenIndex++]!
+    token: () => ['expiring-token', 'mismatched-token'][tokenIndex++]!
   });
   const armed = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
   now += 30_001;
@@ -95,33 +106,6 @@ test('Codex capability expiry and protocol mismatch fail closed while build drif
     hookDefinitionHash: 'c'.repeat(64),
     buildIdentity: { ...build, protocolVersion: 2 as never }
   }), /CODEX_CAPABILITY_PROVENANCE_MISMATCH/);
-
-  const drifted = store.arm({ taskId: 'TASK-20260101-000001', buildIdentity: build });
-  const driftedBuild = {
-    ...build,
-    packageVersion: '1.2.4',
-    internalExecutableBuildHash: 'c'.repeat(64),
-    lifecycleContractHash: 'd'.repeat(64)
-  };
-  const attested = store.attest({
-    token: drifted.token,
-    sessionId: 'session',
-    turnId: 'turn',
-    toolUseId: 'tool',
-    hookDefinitionHash: 'c'.repeat(64),
-    buildIdentity: driftedBuild
-  });
-  assert.equal(attested.status, 'attested');
-  assert.equal(store.validate(drifted.token, {
-    taskId: 'TASK-20260101-000001',
-    hookDefinitionHash: 'c'.repeat(64),
-    buildIdentity: driftedBuild
-  }).status, 'attested');
-  assert.equal(store.consume(drifted.token, {
-    taskId: 'TASK-20260101-000001',
-    hookDefinitionHash: 'c'.repeat(64),
-    buildIdentity: driftedBuild
-  }).status, 'consumed');
 });
 
 test('Codex capability mismatch exposes fixed safe field detail without consuming', () => {

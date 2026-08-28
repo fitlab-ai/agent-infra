@@ -70,7 +70,6 @@ async function codexSandboxController(args: string[] = []): Promise<void> {
           expiresAt: context.expiresAt,
           buildIdentity: context.buildIdentity,
           hookDefinitionHash: context.hookDefinitionHash,
-          lifecycleProfilesHash: context.lifecycleProfilesHash,
         },
         ...(verified.warnings.length > 0 ? { warnings: verified.warnings } : {}),
         error: null
