@@ -588,6 +588,105 @@ test("completed readiness failures never invoke replacement and provide manual d
   }
 });
 
+test("healthy completed re-entry rejects an explicit recreate request", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-recreate-healthy-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const taskId = "TASK-20260814-223556";
+  const fixture = taskBoundRecoveryFixture(config, taskId);
+  moveTaskToCompleted(config, taskId);
+  let recreated = false;
+
+  try {
+    await assert.rejects(
+      () => ensureSandboxReady({
+        config,
+        engine: "native",
+        branch: "feature/demo",
+        workspace: { mode: "task-bound", taskId },
+        reentry: "completed",
+        row: {
+          name: "demo-dev-feature..demo",
+          status: "Up",
+          branch: "feature/demo",
+          running: true,
+          index: 1
+        },
+        allowRecreate: true,
+        recreate: async () => { recreated = true; },
+        deps: {
+          ensureControlBroker: async () => {},
+          run: () => JSON.stringify([{
+            Id: "fixture-container-id",
+            Config: { Labels: fixture.labels },
+            Mounts: fixture.mounts
+          }]),
+          runOk: () => true,
+          runVerbose: () => {}
+        }
+      }),
+      /SANDBOX_COMPLETED_RECREATE_UNSUPPORTED/
+    );
+    assert.equal(recreated, false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("stopped completed re-entry restores the historical task source only while starting", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-stopped-source-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const taskId = "TASK-20260814-223557";
+  const fixture = taskBoundRecoveryFixture(config, taskId);
+  moveTaskToCompleted(config, taskId);
+  const activePath = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
+  const completedPath = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
+  let startedWithSource = false;
+
+  try {
+    const result = await ensureSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      workspace: { mode: "task-bound", taskId },
+      reentry: "completed",
+      row: {
+        name: "demo-dev-feature..demo",
+        status: "Exited",
+        branch: "feature/demo",
+        running: false,
+        index: 1
+      },
+      deps: {
+        ensureControlBroker: async () => {},
+        start: () => {
+          startedWithSource = fs.lstatSync(activePath).isSymbolicLink()
+            && fs.realpathSync.native(activePath) === fs.realpathSync.native(completedPath);
+        },
+        run: () => JSON.stringify([{
+          Id: "fixture-container-id",
+          Config: { Labels: fixture.labels },
+          Mounts: fixture.mounts
+        }]),
+        runOk: (_engine, _cmd, args) => {
+          const script = args[6] ?? "";
+          const target = args.at(-1);
+          if (script === 'test -r "$1"' && target?.endsWith("/task.md")) {
+            return startedWithSource;
+          }
+          return true;
+        },
+        runVerbose: () => {}
+      }
+    });
+
+    assert.equal(result.path, "recovered");
+    assert.equal(startedWithSource, true);
+    assert.equal(fs.existsSync(activePath), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("fresh task-bound readiness succeeds without restart when task.md is readable", async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-fresh-task-bound-healthy-"));
   const config = recoveryFixtureConfig(tmpDir);

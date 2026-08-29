@@ -653,6 +653,46 @@ function recoveryTaskSources(repoRoot: string, taskId: string): {
   return { mountPaths, accessiblePaths: [completedSource] };
 }
 
+function startCompletedSandboxContainer(params: {
+  config: SandboxConfig;
+  engine: string;
+  container: string;
+  taskId: string;
+  start: typeof startSandboxContainer;
+}): void {
+  const taskSources = recoveryTaskSources(params.config.repoRoot, params.taskId);
+  const completedSource = taskSources.accessiblePaths[0]!;
+  const activeRoot = path.join(params.config.repoRoot, '.agents', 'workspace', 'active');
+  const historicalSource = path.join(activeRoot, params.taskId);
+  fs.mkdirSync(activeRoot, { recursive: true });
+  try {
+    fs.lstatSync(historicalSource);
+    throw new Error(
+      `SANDBOX_COMPLETED_SOURCE_CONFLICT: historical task source already exists at ${historicalSource}`
+    );
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+  }
+
+  fs.symlinkSync(
+    completedSource,
+    historicalSource,
+    process.platform === 'win32' ? 'junction' : 'dir'
+  );
+  try {
+    params.start(params.engine, params.container);
+  } finally {
+    const temporarySource = fs.lstatSync(historicalSource);
+    const resolvedSource = fs.realpathSync.native(historicalSource);
+    if (!temporarySource.isSymbolicLink() || resolvedSource !== completedSource) {
+      throw new Error(
+        `SANDBOX_COMPLETED_SOURCE_CHANGED: refusing to remove unexpected path at ${historicalSource}`
+      );
+    }
+    fs.unlinkSync(historicalSource);
+  }
+}
+
 function sameHostSource(left: string, right: string): boolean {
   try {
     const leftStat = fs.statSync(left, { bigint: true });
@@ -1217,11 +1257,21 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
         workspace: params.workspace ?? { mode: 'branch-only' }
       });
     }
-    if (params.forceRecreate) {
+    if (params.forceRecreate || (params.reentry === 'completed' && params.allowRecreate)) {
       throw new Error('Explicit container recreation requested.');
     }
     if (!params.row.running) {
-      startFn(params.engine, params.row.name);
+      if (params.reentry === 'completed' && params.workspace?.mode === 'task-bound') {
+        startCompletedSandboxContainer({
+          config: params.config,
+          engine: params.engine,
+          container: params.row.name,
+          taskId: params.workspace.taskId,
+          start: startFn
+        });
+      } else {
+        startFn(params.engine, params.row.name);
+      }
       const initial = assess({
         config: params.config,
         engine: params.engine,
