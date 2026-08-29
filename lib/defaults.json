@@ -91,6 +91,10 @@
     "ejected": [],
     "retiredManaged": [
       {
+        "path": ".trae/skills/",
+        "templateHashes": []
+      },
+      {
         "path": ".agents/workspace/README.md",
         "templateHashes": [
           "sha256:967b27ca4008154c5abf99a1df728242f80ed3ace9bd98eb2828bc1c76af826c",

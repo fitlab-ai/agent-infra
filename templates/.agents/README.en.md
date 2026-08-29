@@ -227,7 +227,7 @@ Ordinary `managed` files keep their overwrite semantics. A small set of platform
 
 ## Agent Client Configuration
 
-Use the top-level `.agents/.airc.json` `agentClients` array to configure all four built-in clients (`claude-code`, `codex`, `antigravity-cli`, `opencode`). Each canonical entry has three required fields and one optional orchestration policy:
+Use the top-level `.agents/.airc.json` `agentClients` array to configure all five built-in clients (`claude-code`, `codex`, `antigravity-cli`, `opencode`, `traecli`). Each canonical entry has three required fields and one optional orchestration policy:
 
 | Field | Meaning |
 |-------|---------|
@@ -249,6 +249,8 @@ ai agent-client configure
 ```
 
 `enable` and `disable` only change `enabled`; `configure` edits both dimensions. `ai init` asks which clients to enable and preserves the displayed defaults when you press Enter. All clients default to `installInSandbox: true`.
+
+TraeCode CLI uses `.agents/skills/` as the canonical Skill source. agent-infra generates lightweight slash-command wrappers under `.traecli/commands/`; each wrapper reads the corresponding shared Skill and forwards `$ARGUMENTS` when that Skill declares arguments. It does not mirror Skill packages into `.trae/skills/`, which remains user-owned for intentional Trae-specific overrides.
 
 Legacy `tuis` and built-in client ids in `sandbox.tools` are migration inputs only. The next config-writing command converts them into the canonical `agentClients` array and removes the legacy fields. If canonical and legacy values conflict, the command stops without modifying files so the conflict can be resolved explicitly.
 

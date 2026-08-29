@@ -69,7 +69,7 @@
 | `org` | 生成元数据和链接时使用的 GitHub 组织或拥有者。 |
 | `language` | 渲染模板时采用的项目主语言或区域设置。 |
 | `templateVersion` | 当前安装模板包的精确 `v` 前缀 SemVer（可包含 prerelease 或 build metadata），用于升级和差异追踪。 |
-| `agentClients` | 四个内建 AI Coding Agent Client 的 canonical 配置。 |
+| `agentClients` | 五个内建 AI Coding Agent Client 的 canonical 配置。 |
 | `templates` | 可选的外部模板叠加配置。 |
 | `templates.sources` | 可选的外部模板源列表，按顺序应用。当前仅支持 `type: "local"`。 |
 | `skills` | 可选的自定义 skill 同步配置。 |
@@ -80,16 +80,18 @@
 
 ## Agent Client 契约
 
-**AI Coding Agent Client**（简称 **Agent Client**）是受支持的编码代理应用，例如 Claude Code、Codex、Antigravity CLI 或 OpenCode。Canonical `agentClients` 数组必须恰好包含每个内建客户端一次。数组顺序没有运行时语义；agent-infra 会按上方示例中的稳定顺序序列化。
+**AI Coding Agent Client**（简称 **Agent Client**）是受支持的编码代理应用，例如 Claude Code、Codex、Antigravity CLI、OpenCode 或 TraeCode CLI。Canonical `agentClients` 数组必须恰好包含每个内建客户端一次。数组顺序没有运行时语义；agent-infra 会按上方示例中的稳定顺序序列化。
 
 | 字段 | 含义 |
 |------|------|
-| `id` | 封闭的内建客户端标识：`claude-code`、`codex`、`antigravity-cli` 或 `opencode`。 |
+| `id` | 封闭的内建客户端标识：`claude-code`、`codex`、`antigravity-cli`、`opencode` 或 `traecli`。 |
 | `enabled` | 项目是否启用该客户端专属文件与集成。 |
 | `installInSandbox` | 沙箱装配是否安装该客户端；此状态与 `enabled` 相互独立。 |
 | `orchestration` | 该客户端可选的完整默认策略。存在时两个角色都必须提供非空 `model` 与宿主原生 `reasoningEffort`；两个角色可以使用同一模型。 |
 
 将 `installInSandbox` 设为 `false` 即可从托管沙箱卸载客户端。重建镜像或重新创建容器后，sandbox reconciler 会移除该客户端的工具、mount 和生命周期 hook；宿主拥有的 `~/.claude`、Keychain 条目、插件、历史记录及项目凭证副本不会被删除。
+
+TraeCode CLI 以 `.agents/skills/` 作为 Skill 的唯一权威源。agent-infra 仅在 `.traecli/commands/` 下生成轻量 slash-command 包装文件；每个包装文件读取对应的共享 Skill，并在该 Skill 声明参数时转发 `$ARGUMENTS`。它不会把 Skill 包镜像到 `.trae/skills/`；该目录继续由用户所有，仅用于有意添加的 Trae 专属覆盖。
 
 `run-task` 把显式策略视为原子输入：提供任一角色 model/effort 参数时，四个角色字段必须全部提供，缺项不会从配置补齐。完全没有显式策略时，只读取所选客户端的 `orchestration`。选中策略及来源会写入 current run 结构；配置变化不会热切换 active run。磁盘状态包含未知字段、缺失字段、非法 provenance 或旧 run 结构时，读取会失败关闭且不改写；升级 agent-infra 前必须完成或清空 active run。模型发现独立标记为 `complete`/`partial` catalog 或 `interactive-only` 指引，局部工具 override 枚举不等于完整目录。
 
@@ -133,8 +135,8 @@ Claude Code 的生命周期证据强度弱于 Codex，且如实声明为此：`d
 
 旧的内建 `tuis` 字段和 `sandbox.tools` 中的内建 Agent Client ID 仅作为迁移输入：
 
-- 缺少 `agentClients` 时，有效的 `tuis` 数组按成员关系投影为 `enabled`。字段缺失、为 `null` 或非数组时启用全部四个客户端；空数组禁用全部四个客户端。
-- 非空 `sandbox.tools` 数组按内建客户端成员关系投影为 `installInSandbox`。字段缺失、非数组或空数组时，为保持原有运行行为，安装全部四个客户端。
+- 缺少 `agentClients` 时，有效的 `tuis` 数组按成员关系投影为 `enabled`。字段缺失、为 `null` 或非数组时启用全部五个客户端；空数组禁用全部五个客户端。
+- 非空 `sandbox.tools` 数组按内建客户端成员关系投影为 `installInSandbox`。字段缺失、非数组或空数组时，为保持原有运行行为，安装全部五个客户端。
 - 迁移后的 `sandbox.tools` 会移除内建客户端 ID；`agent-infra`、自定义工具和其他非客户端字符串 ID 保持原有顺序。
 - `customTUIs` 仍是独立扩展机制，不迁移到 `agentClients`。
 - Canonical 与旧字段共存时，投影出的客户端状态必须一致；冲突会使校验失败，而不是静默选择某一来源。

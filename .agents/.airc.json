@@ -6,7 +6,7 @@
     "type": "github"
   },
   "prFlow": "required",
-  "templateVersion": "v0.9.10",
+  "templateVersion": "v0.9.11-alpha.0",
   "sandbox": {
     "engine": {
       "darwin": "orbstack"
@@ -89,7 +89,8 @@
       ".github/workflows/status-label.yml",
       ".agents/QUICKSTART.md",
       ".agents/README.md",
-      ".claude/rules/"
+      ".claude/rules/",
+      ".traecli/commands/"
     ],
     "merged": [
       "**/post-release.*",
@@ -191,7 +192,9 @@
       ".claude/agents/agent-infra-lifecycle-reviewer.md": "sha256:08c423761825b5211810ef4a28673c4e9a32e2fa64595d261dae47e7d9a8c1eb",
       ".codex/agents/agent-infra-lifecycle-executor.toml": "sha256:49dd60ccf8458178c3c0c71d3065bbcf931931bd7abee9a6395b3c28a983c676",
       ".codex/agents/agent-infra-lifecycle-reviewer.toml": "sha256:0a359e4f454101e45a1271563bd205dad32fbd64e0a178698199f083c7efb96a",
-      ".claude/rules/tool-preferences.md": "sha256:610984771f3af595a0b25a94942b5b0aea3ea2fd602c25633de7958dee336f9f"
+      ".claude/rules/tool-preferences.md": "sha256:610984771f3af595a0b25a94942b5b0aea3ea2fd602c25633de7958dee336f9f",
+      ".traecli/commands/update-agent-infra.md": "sha256:e9f2d948c9619c9a4f6ba7bd9385eb7314f9d6233929c3beb54fcda863f5c626",
+      ".traecli/commands/entropy-check.md": "sha256:f7d9ee05293aef1a29bda9085d79aa29db06e5eaaa64307e0699c11be26eb9c5"
     }
   },
   "task": {

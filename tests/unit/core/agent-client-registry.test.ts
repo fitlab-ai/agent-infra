@@ -529,22 +529,21 @@ test('registry exposes the exact built-in project asset matrix', () => {
         }
       },
       traecli: {
-        ownedPathPrefixes: ['.trae/'],
-        managed: ['.trae/skills/'],
+        ownedPathPrefixes: ['.traecli/'],
+        managed: ['.traecli/commands/'],
         merged: [],
         ejected: [],
         seedCommands: [{
           templates: {
-            en: '.trae/skills/update-agent-infra.en.md',
-            'zh-CN': '.trae/skills/update-agent-infra.zh-CN.md'
+            en: '.traecli/commands/update-agent-infra.en.md',
+            'zh-CN': '.traecli/commands/update-agent-infra.zh-CN.md'
           },
-          target: '.trae/skills/update-agent-infra.md'
+          target: '.traecli/commands/update-agent-infra.md'
         }],
         customCommand: {
-          target: '.trae/skills/${skillName}.md',
+          target: '.traecli/commands/${skillName}.md',
           frontmatter: {},
-          includeUsage: true,
-          inheritDisableModelInvocation: true
+          argumentsToken: '$ARGUMENTS'
         }
       }
     }

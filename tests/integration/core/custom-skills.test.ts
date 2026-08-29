@@ -117,6 +117,7 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
 
     const claudeCommand = fs.readFileSync(path.join(projectRoot, ".claude/commands/local-rules.md"), "utf8");
     const openCodeCommand = fs.readFileSync(path.join(projectRoot, ".opencode/commands/local-rules.md"), "utf8");
+    const traeCommand = fs.readFileSync(path.join(projectRoot, ".traecli/commands/local-rules.md"), "utf8");
     const expectedDescription = "本地规范检查。\n当提交前需要本地规则时使用。";
 
     assert.match(claudeCommand, /^description: \|-\n  本地规范检查。\n  当提交前需要本地规则时使用。$/m);
@@ -129,11 +130,16 @@ test("syncTemplates preserves manual custom skills and generates commands for ma
     assert.match(openCodeCommand, /^description: \|-\n  本地规范检查。\n  当提交前需要本地规则时使用。$/m);
     assert.equal(parseMarkdownFrontmatter(claudeCommand).description, expectedDescription);
     assert.equal(parseMarkdownFrontmatter(openCodeCommand).description, expectedDescription);
+    assert.equal(parseMarkdownFrontmatter(traeCommand).description, expectedDescription);
+    assert.match(traeCommand, /参数：\$ARGUMENTS/);
+    assert.match(traeCommand, /读取并执行 `\.agents\/skills\/local-rules\/SKILL\.md`/);
 
     const sharedClaudeCommand = fs.readFileSync(path.join(projectRoot, ".claude/commands/shared-rules.md"), "utf8");
     assert.doesNotMatch(sharedClaudeCommand, /^disable-model-invocation: true$/m);
 
     assert.equal(firstReport.custom.commands.generated.length, 6);
+    assert.equal(fs.existsSync(path.join(projectRoot, ".traecli/commands/local-rules.md")), true);
+    assert.equal(fs.existsSync(path.join(projectRoot, ".trae/skills/local-rules.md")), false);
     assert.equal(secondReport.custom.commands.updated.length, 0);
     assert.equal(secondReport.custom.commands.generated.length, 0);
     assert.ok(secondReport.custom.commands.unchanged.includes(".claude/commands/local-rules.md"));

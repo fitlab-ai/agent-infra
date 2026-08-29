@@ -287,6 +287,17 @@ function isInsideProject(projectRoot, relativePath) {
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
+function isInsideProjectDirectory(projectRoot, directory, relativePath) {
+  if (!isInsideProject(projectRoot, directory) || !isInsideProject(projectRoot, relativePath)) {
+    return false;
+  }
+
+  const root = path.resolve(projectRoot, directory);
+  const resolved = path.resolve(projectRoot, relativePath);
+  const rel = path.relative(root, resolved);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
 function isPathOwnedByOtherPlatform(relativePath, platformType) {
   const normalized = norm(relativePath).replace(/^\.\//, '');
   const top = normalized.split('/')[0];
@@ -1134,6 +1145,10 @@ function syncTemplates(projectRoot, templateRootOverride) {
       (descriptor.templateHashes || []).map(trustedBaseline).filter(Boolean)
     )];
   }));
+  const retiredManagedForTarget = (target) => [...retiredManaged.entries()].find(
+    ([entry]) => assetMatches(entry, target)
+      && (!entry.endsWith('/') || isInsideProjectDirectory(projectRoot, entry, target))
+  );
   const planningRegistry = {
     ...currentRegistry,
     managed: currentRegistry.managed.filter((entry) => !retiredManaged.has(norm(entry)))
@@ -1162,7 +1177,7 @@ function syncTemplates(projectRoot, templateRootOverride) {
   for (const target of Object.keys(managedBaselines)) {
     if (
       !guardedManaged.has(norm(target))
-      && !retiredManaged.has(norm(target))
+      && !retiredManagedForTarget(target)
       && !allClientManaged.some((entry) => assetMatches(entry, target))
     ) {
       delete managedBaselines[target];
@@ -1238,8 +1253,72 @@ function syncTemplates(projectRoot, templateRootOverride) {
   );
 
   for (const [entry, historicalTemplateHashes] of retiredManaged) {
-    const target = path.join(projectRoot, entry);
+    const target = path.join(projectRoot, entry.endsWith('/') ? entry.slice(0, -1) : entry);
     const owned = currentRegistry.managed.some((candidate) => norm(candidate) === entry);
+    if (entry.endsWith('/')) {
+      if (fs.existsSync(target)) {
+        const targetStat = fs.lstatSync(target);
+        if (!targetStat.isDirectory() || targetStat.isSymbolicLink()) {
+          report.managed.protected.push({
+            target: entry,
+            reason: 'invalid-type',
+            baseline: null,
+            local: null,
+            template: null
+          });
+          continue;
+        }
+      }
+      const candidates = new Set(
+        Object.keys(managedBaselines).filter((candidate) =>
+          assetMatches(entry, candidate)
+            && isInsideProjectDirectory(projectRoot, entry, candidate)
+        )
+      );
+      if (owned && fs.existsSync(target)) {
+        for (const filePath of walkDir(target)) {
+          candidates.add(norm(path.relative(projectRoot, filePath)));
+        }
+      }
+
+      for (const candidate of candidates) {
+        const candidatePath = path.join(projectRoot, candidate);
+        const baseline = trustedBaseline(managedBaselines[candidate]);
+        if (!fs.existsSync(candidatePath)) {
+          if (Object.prototype.hasOwnProperty.call(managedBaselines, candidate)) {
+            delete managedBaselines[candidate];
+            baselinesChanged = true;
+          }
+          continue;
+        }
+        const stat = fs.lstatSync(candidatePath);
+        const localHash = stat.isFile() && !stat.isSymbolicLink()
+          ? sha256(fs.readFileSync(candidatePath))
+          : null;
+        const safeToRemove = localHash !== null
+          && (localHash === baseline || historicalTemplateHashes.has(localHash));
+        if (safeToRemove) {
+          fs.unlinkSync(candidatePath);
+          report.managed.removed.push(candidate);
+        } else {
+          report.managed.protected.push({
+            target: candidate,
+            reason: localHash === null
+              ? 'invalid-type'
+              : (baseline !== null ? 'user-modified' : 'unknown-origin'),
+            baseline,
+            local: localHash,
+            template: null
+          });
+        }
+        if (Object.prototype.hasOwnProperty.call(managedBaselines, candidate)) {
+          delete managedBaselines[candidate];
+          baselinesChanged = true;
+        }
+      }
+      removeEmptyDirs(target);
+      continue;
+    }
     if (!fs.existsSync(target)) continue;
     const stat = fs.lstatSync(target);
     const baseline = trustedBaseline(managedBaselines[entry]);

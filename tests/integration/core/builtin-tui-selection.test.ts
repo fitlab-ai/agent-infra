@@ -403,7 +403,7 @@ test("syncTemplates: every built-in client subset converges idempotently", async
           codex: ".codex/hooks.json",
           "antigravity-cli": null,
           opencode: ".opencode/commands/",
-          traecli: ".trae/skills/"
+          traecli: ".traecli/commands/"
         }[id]!;
         if (adapterPath === null) {
           continue;

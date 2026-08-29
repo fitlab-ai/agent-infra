@@ -69,7 +69,7 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 | `org` | GitHub organization or owner used by generated metadata and links. |
 | `language` | Primary project language or locale used by rendered templates. |
 | `templateVersion` | Exact `v`-prefixed SemVer of the installed template package, including prerelease or build metadata, for future upgrades and drift tracking. |
-| `agentClients` | Canonical configuration for the four built-in AI Coding Agent Clients. |
+| `agentClients` | Canonical configuration for the five built-in AI Coding Agent Clients. |
 | `templates` | Optional external template overlay configuration. |
 | `templates.sources` | Optional ordered list of external template sources. Only `type: "local"` is supported today. |
 | `skills` | Optional custom skill sync configuration. |
@@ -80,16 +80,18 @@ The generated `.agents/.airc.json` file is the central contract between the boot
 
 ## Agent Client contract
 
-An **AI Coding Agent Client**, or **Agent Client** for short, is a supported coding-agent application such as Claude Code, Codex, Antigravity CLI, or OpenCode. The canonical `agentClients` array contains each built-in client exactly once. Array order has no runtime meaning; agent-infra serializes entries in the stable order shown above.
+An **AI Coding Agent Client**, or **Agent Client** for short, is a supported coding-agent application such as Claude Code, Codex, Antigravity CLI, OpenCode, or TraeCode CLI. The canonical `agentClients` array contains each built-in client exactly once. Array order has no runtime meaning; agent-infra serializes entries in the stable order shown above.
 
 | Field | Meaning |
 |-------|---------|
-| `id` | Closed built-in client identifier: `claude-code`, `codex`, `antigravity-cli`, or `opencode`. |
+| `id` | Closed built-in client identifier: `claude-code`, `codex`, `antigravity-cli`, `opencode`, or `traecli`. |
 | `enabled` | Whether the project enables client-specific files and integration. |
 | `installInSandbox` | Whether sandbox assembly should install this client. This is independent of `enabled`. |
 | `orchestration` | Optional complete default policy for this client. If present, both roles require non-empty `model` and host-native `reasoningEffort`; the role models may be equal. |
 
 Set `installInSandbox` to `false` to uninstall a client from managed sandboxes. The sandbox reconciler removes the client's tool, mounts, and lifecycle hooks after the image/container is rebuilt or recreated. This does not delete host-owned state such as `~/.claude`, Keychain entries, plugins, history, or project credential copies.
+
+TraeCode CLI uses `.agents/skills/` as the canonical Skill source. agent-infra generates lightweight slash-command wrappers under `.traecli/commands/`; each wrapper reads the corresponding shared Skill and forwards `$ARGUMENTS` when that Skill declares arguments. It does not mirror Skill packages into `.trae/skills/`, which remains user-owned for intentional Trae-specific overrides.
 
 `run-task` treats explicit policy as atomic: supplying any role model/effort flag requires all four role fields and never fills omissions from configuration. With no explicit policy, it reads only the selected client's `orchestration`. The selected policy and its source are persisted in the current run structure; changing configuration does not hot-switch an active run. Readers fail closed without rewriting when disk state has unknown fields, missing fields, invalid provenance, or an old run structure. Finish or clear active runs before upgrading agent-infra. Model discovery is reported separately as a `complete` or `partial` catalog, or `interactive-only` guidance. A tool's local override enum is not a complete catalog.
 
@@ -133,8 +135,8 @@ The `verification` capability names an integration area; the `verified` support 
 
 The old built-in `tuis` field and built-in Agent Client IDs in `sandbox.tools` are migration inputs only:
 
-- If `agentClients` is absent, a valid `tuis` array maps membership to `enabled`. A missing, `null`, or non-array value enables all four clients; an empty array disables all four.
-- A non-empty `sandbox.tools` array maps built-in client membership to `installInSandbox`. Missing, non-array, and empty arrays preserve the previous runtime behavior by installing all four clients.
+- If `agentClients` is absent, a valid `tuis` array maps membership to `enabled`. A missing, `null`, or non-array value enables all five clients; an empty array disables all five.
+- A non-empty `sandbox.tools` array maps built-in client membership to `installInSandbox`. Missing, non-array, and empty arrays preserve the previous runtime behavior by installing all five clients.
 - Built-in client IDs are removed from the migrated `sandbox.tools`. `agent-infra`, custom tools, and other non-client string IDs retain their original order.
 - `customTUIs` remains an independent extension mechanism and is not migrated into `agentClients`.
 - When canonical and legacy fields coexist, their projected client states must agree. A conflict fails validation instead of silently choosing one source.

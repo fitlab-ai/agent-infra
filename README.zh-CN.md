@@ -141,7 +141,7 @@ ai init
 # 或：agent-infra init
 ```
 
-CLI 会收集项目元数据，让你选择启用的 Agent Client，为其安装 `update-agent-infra` 种子命令，并生成 `.agents/.airc.json`。
+CLI 会收集项目元数据，让你选择启用的 Agent Client，安装该客户端需要的 `update-agent-infra` 种子命令，并生成 `.agents/.airc.json`。
 
 > `ai` 是 `agent-infra` 的简写命令，两者等价。
 
@@ -155,12 +155,13 @@ CLI 会收集项目元数据，让你选择启用的 Agent Client，为其安装
 | Codex | `$update-agent-infra` |
 | Antigravity CLI | `/update-agent-infra` |
 | OpenCode | `/update-agent-infra` |
+| TraeCode CLI | `/update-agent-infra` |
 
 该命令会检测当前打包模板版本并渲染所有受管理文件。首次安装和后续升级都使用同一条命令。
 
 ## 核心命令
 
-以下命令用于独立管理四个内建 Agent Client：
+以下命令用于独立管理五个内建 Agent Client：
 
 ```bash
 ai agent-client list
@@ -170,7 +171,7 @@ ai agent-client disable antigravity-cli
 ai agent-client configure
 ```
 
-最常用的生命周期命令，按交付顺序排列。命令前缀因 TUI 而异（Claude Code/Antigravity/OpenCode 用 `/skill`，Codex 用 `$skill`），工作流语义保持一致。
+最常用的生命周期命令，按交付顺序排列。命令前缀因 TUI 而异（Claude Code/Antigravity/OpenCode/TraeCode 用 `/skill`，Codex 用 `$skill`），工作流语义保持一致。
 
 | 命令 | 用途 |
 |------|------|

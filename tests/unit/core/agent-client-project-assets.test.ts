@@ -48,7 +48,7 @@ test('project asset planning preserves user entries and appends enabled assets c
     '.claude/commands/',
     '.claude/agents/',
     '.claude/rules/',
-    '.trae/skills/'
+    '.traecli/commands/'
   ]);
 });
 

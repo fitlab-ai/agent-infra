@@ -137,6 +137,88 @@ test("syncTemplates retires a recorded-baseline file and protects one that drift
   }
 });
 
+test("syncTemplates retires generated Trae skill mirrors and preserves local files", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-retired-trae-skills-"));
+  try {
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const projectRoot = path.join(tmpDir, "project");
+    const generated = "generated mirror\n";
+    const drifted = "edited mirror\n";
+    const baseline = `sha256:${createHash("sha256").update(generated).digest("hex")}`;
+    const outsidePath = path.join(tmpDir, "outside.txt");
+    const traversalKey = ".trae/skills/../../../outside.txt";
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", platform: { type: "none" },
+      files: {
+        managed: [".agents/skills/", ".trae/skills/"],
+        merged: [],
+        ejected: [],
+        managedBaselines: {
+          ".trae/skills/generated.md": baseline,
+          ".trae/skills/drifted.md": baseline,
+          [traversalKey]: baseline
+        }
+      }
+    });
+    writeFile(projectRoot, ".trae/skills/generated.md", generated);
+    writeFile(projectRoot, ".trae/skills/drifted.md", drifted);
+    writeFile(projectRoot, ".trae/skills/local.md", "local skill\n");
+    fs.writeFileSync(outsidePath, generated, "utf8");
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const first = syncTemplates(projectRoot, templateRoot);
+    const second = syncTemplates(projectRoot, templateRoot);
+
+    assert.ok(first.registryRemoved.some((entry) =>
+      entry.entry === ".trae/skills/" && entry.list === "managed"));
+    assert.equal(fs.existsSync(path.join(projectRoot, ".trae/skills/generated.md")), false);
+    assert.equal(fs.readFileSync(path.join(projectRoot, ".trae/skills/drifted.md"), "utf8"), drifted);
+    assert.equal(fs.readFileSync(path.join(projectRoot, ".trae/skills/local.md"), "utf8"), "local skill\n");
+    assert.equal(fs.readFileSync(outsidePath, "utf8"), generated);
+    assert.ok(first.managed.removed.includes(".trae/skills/generated.md"));
+    assert.ok(first.managed.protected.some((entry) =>
+      entry.target === ".trae/skills/drifted.md" && entry.reason === "user-modified"));
+    assert.ok(first.managed.protected.some((entry) =>
+      entry.target === ".trae/skills/local.md" && entry.reason === "unknown-origin"));
+    assert.deepEqual(second.managed.removed, []);
+    assert.ok(!second.managed.protected.some((entry) => entry.target.startsWith(".trae/skills/")));
+
+    const config = JSON.parse(fs.readFileSync(path.join(projectRoot, ".agents/.airc.json"), "utf8"));
+    assert.ok(!config.files.managed.includes(".trae/skills/"));
+    assert.equal(config.files.managedBaselines?.[".trae/skills/generated.md"], undefined);
+    assert.equal(config.files.managedBaselines?.[".trae/skills/drifted.md"], undefined);
+    assert.equal(config.files.managedBaselines?.[traversalKey], undefined);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("syncTemplates does not traverse a retired managed directory symlink", onPlatforms("linux", "darwin"), async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-retired-symlink-"));
+  try {
+    const { templateRoot } = createTemplateInstall(tmpDir);
+    const projectRoot = path.join(tmpDir, "project");
+    const outsideRoot = path.join(tmpDir, "outside");
+    writeJson(projectRoot, ".agents/.airc.json", {
+      project: "demo", org: "acme", language: "en", platform: { type: "none" },
+      files: { managed: [".trae/skills/"], merged: [], ejected: [] }
+    });
+    writeFile(outsideRoot, "keep.md", "outside\n");
+    fs.mkdirSync(path.join(projectRoot, ".trae"), { recursive: true });
+    fs.symlinkSync(outsideRoot, path.join(projectRoot, ".trae/skills"));
+
+    const { syncTemplates } = await loadFreshEsm<SyncTemplatesModule>(".agents/skills/update-agent-infra/scripts/sync-templates.js");
+    const report = syncTemplates(projectRoot, templateRoot);
+
+    assert.equal(fs.readFileSync(path.join(outsideRoot, "keep.md"), "utf8"), "outside\n");
+    assert.equal(fs.lstatSync(path.join(projectRoot, ".trae/skills")).isSymbolicLink(), true);
+    assert.ok(report.managed.protected.some((entry) =>
+      entry.target === ".trae/skills/" && entry.reason === "invalid-type"));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("syncTemplates rejects a symbolic-link runtime workspace before template writes", onPlatforms("linux", "darwin"), async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-collab-runtime-workspace-link-"));
   try {

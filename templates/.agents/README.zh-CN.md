@@ -225,7 +225,7 @@ disable-model-invocation: true   # 可选；由支持该能力的 TUI 适配器�
 
 ## Agent Client 配置
 
-`.agents/.airc.json` 顶层 `agentClients` 数组用于配置全部四个内建客户端（`claude-code`、`codex`、`antigravity-cli`、`opencode`）。每个规范条目包含三个必填字段和一个可选编排策略：
+`.agents/.airc.json` 顶层 `agentClients` 数组用于配置全部五个内建客户端（`claude-code`、`codex`、`antigravity-cli`、`opencode`、`traecli`）。每个规范条目包含三个必填字段和一个可选编排策略：
 
 | 字段 | 含义 |
 |------|------|
@@ -247,6 +247,8 @@ ai agent-client configure
 ```
 
 `enable` 和 `disable` 只修改 `enabled`；`configure` 同时编辑两个维度。`ai init` 会询问启用哪些客户端，直接回车会保留界面展示的默认值。所有客户端的 `installInSandbox` 默认均为 `true`。
+
+TraeCode CLI 以 `.agents/skills/` 作为 Skill 的唯一权威源。agent-infra 仅在 `.traecli/commands/` 下生成轻量 slash-command 包装文件；每个包装文件读取对应的共享 Skill，并在该 Skill 声明参数时转发 `$ARGUMENTS`。它不会把 Skill 包镜像到 `.trae/skills/`；该目录继续由用户所有，仅用于有意添加的 Trae 专属覆盖。
 
 旧 `tuis` 字段和 `sandbox.tools` 中的内建客户端 id 仅作为迁移输入。下一次写配置的命令会将其转换为规范 `agentClients` 数组并移除旧字段。若规范配置与旧配置冲突，命令会在修改文件前停止，要求显式解决冲突。
 
