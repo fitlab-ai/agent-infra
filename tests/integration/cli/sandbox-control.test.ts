@@ -172,7 +172,7 @@ function writeControlManifest(root: string, branch: string, generation = 'lifecy
   const processingDir = path.join(root, 'processing');
   for (const directory of [channelDir, publicStatusDir, processingDir]) fs.mkdirSync(directory, { recursive: true });
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 5, engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'lifecycle-secret', generation,
     channelDir, publicStatusDir, processingDir, runtimeDir: path.join(root, 'runtime')
@@ -690,7 +690,7 @@ test('sandbox broker startup resolves only after matching status is published', 
   fs.mkdirSync(processingDir);
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 5, engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'readiness-secret', generation: 'readiness-generation',
     channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
@@ -722,7 +722,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
   fs.mkdirSync(processingDir);
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 5, engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'owner-secret', generation: 'owner-generation',
     channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
@@ -743,7 +743,7 @@ test('sandbox broker startup replaces a stale owner without creating a concurren
     assert.equal(second.pid, first.pid);
     assert.equal(second.startTime, first.startTime);
     fs.writeFileSync(manifestPath, `${JSON.stringify({
-      version: 5, engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+      engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
       containerIdentity: { id: 'container-id', labels: {} }, branch,
       mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'rotated-owner-secret', generation: 'rotated-generation',
       channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')
@@ -990,6 +990,14 @@ test('task-bound finalization compensates an accepted response loss through the 
       activeRequestId: null,
       updatedAt: Date.now()
     })}\n`);
+    fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({
+      version: 3,
+      pid: process.pid,
+      startTime,
+      brokerId: 'finalization-compensation-broker',
+      token,
+      generation
+    })}\n`);
     const statusPath = path.join(statusDir, 'status.json');
     heartbeat = setInterval(() => {
       try {
@@ -1100,7 +1108,6 @@ test('sandbox control client and broker exchange a task-bound response', async (
   fs.writeFileSync(runPath, '{"schemaVersion":3}\n');
   const invalidRunBytes = fs.readFileSync(runPath, 'utf8');
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 5,
     engine: 'docker',
     repoRoot: root,
     worktreeRoot: root,
@@ -1185,7 +1192,6 @@ test('sandbox broker opens and closes a host-only Codex controller registration 
   const docker = path.join(fakeBin, 'docker');
   fs.writeFileSync(docker, '#!/bin/sh\n[ "$1" = exec ] && [ "$3" = cat ] && exec cat "$4"\nexit 1\n', { mode: 0o700 });
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 5,
     engine: 'native',
     repoRoot: root,
     worktreeRoot: root,
@@ -1286,7 +1292,7 @@ test('branch-only broker persists a typed task-create request on the host', asyn
   fs.copyFileSync(path.resolve('.agents/templates/task.md'), path.join(root, '.agents', 'templates', 'task.md'));
   fs.copyFileSync(path.resolve('.agents/skills/create-task/config/verify.json'), path.join(root, '.agents', 'skills', 'create-task', 'config', 'verify.json'));
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 5, engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, branch,
     mode: 'branch-only', taskId: null, token, generation, channelDir,
     publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'control', 'runtime')
@@ -1369,7 +1375,7 @@ test('broker recovery preserves terminal responses and marks unaccepted claims r
   fs.mkdirSync(path.join(processingDir, unacceptedId), { recursive: true });
   const branch = initializeRepository(root);
   fs.writeFileSync(manifestPath, `${JSON.stringify({
-    version: 5, engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
+    engine: 'docker', repoRoot: root, worktreeRoot: root, project: 'demo', container: 'demo-dev-feature',
     containerIdentity: { id: 'container-id', labels: {} }, branch,
     mode: 'task-bound', taskId: 'TASK-20260809-010203', token: 'recovery-secret', generation,
     channelDir, publicStatusDir: statusDir, processingDir, runtimeDir: path.join(root, 'runtime')

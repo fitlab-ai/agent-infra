@@ -16,7 +16,8 @@ import {
   readActiveLease,
   readSandboxControlStatus
 } from '../sandbox/control/state.ts';
-import type { SandboxControlLease, SandboxControlManifest } from '../sandbox/control/protocol.ts';
+import type { SandboxControlLease } from '../sandbox/control/protocol.ts';
+import { readSandboxControlManifest } from '../sandbox/control/lifecycle.ts';
 import {
   SANDBOX_CONTROL_FUTURE_SKEW_MS,
   SANDBOX_CONTROL_STATUS_STALE_MS
@@ -152,7 +153,7 @@ function inplaceValidation(config: ReturnType<typeof loadConfig>, target: Return
     base: config.controlBase, project: config.project,
     container: row.name, identity: target.workspace
   });
-  const manifest = JSON.parse(fs.readFileSync(control.manifestPath, 'utf8')) as SandboxControlManifest;
+  const manifest = readSandboxControlManifest(control.manifestPath);
   const initial = readSandboxControlStatus(control.statusDir);
   const now = Date.now();
   if (initial.generation !== manifest.generation

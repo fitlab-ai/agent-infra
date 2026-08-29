@@ -34,11 +34,11 @@ test('task-scoped snapshots isolate ignored active tasks while retaining Git-vis
   fs.writeFileSync(path.join(taskADir, 'review-code.md'), 'before\n');
   fs.writeFileSync(path.join(taskBDir, 'analysis.md'), 'before\n');
 
-  const before = captureWorkspaceSnapshot(root, taskA);
+  const before = captureWorkspaceSnapshot({ gitRoot: root, stateRoot: root, taskId: taskA });
   fs.writeFileSync(path.join(root, 'source.ts'), 'after\n');
   fs.writeFileSync(path.join(taskADir, 'review-code.md'), 'after\n');
   fs.writeFileSync(path.join(taskBDir, 'analysis.md'), 'after\n');
-  const after = captureWorkspaceSnapshot(root, taskA);
+  const after = captureWorkspaceSnapshot({ gitRoot: root, stateRoot: root, taskId: taskA });
 
   assert.deepEqual(diffWorkspaceSnapshots(root, before, after), [
     '.agents/workspace/active/TASK-20260101-000001/review-code.md',
@@ -46,7 +46,7 @@ test('task-scoped snapshots isolate ignored active tasks while retaining Git-vis
   ]);
 });
 
-test('legacy snapshots retain repository-wide active task coverage', () => {
+test('repository-wide context snapshots retain active task coverage', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-snapshot-'));
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
@@ -61,16 +61,16 @@ test('legacy snapshots retain repository-wide active task coverage', () => {
   fs.writeFileSync(path.join(taskADir, 'analysis.md'), 'before\n');
   fs.writeFileSync(path.join(taskBDir, 'analysis.md'), 'before\n');
 
-  const before = captureWorkspaceSnapshot(root, null);
+  const before = captureWorkspaceSnapshot({ gitRoot: root, stateRoot: root, taskId: null });
   fs.writeFileSync(path.join(taskBDir, 'analysis.md'), 'after\n');
-  const after = captureWorkspaceSnapshot(root, null);
+  const after = captureWorkspaceSnapshot({ gitRoot: root, stateRoot: root, taskId: null });
 
   assert.deepEqual(diffWorkspaceSnapshots(root, before, after), [
     '.agents/workspace/active/TASK-20260101-000002/analysis.md'
   ]);
 });
 
-test('mixing task-scoped before with legacy after exposes the incompatible tree shape', () => {
+test('task-scoped and repository-wide contexts retain their explicit scope', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orchestration-snapshot-'));
   git(root, ['init', '-q']);
   git(root, ['config', 'user.name', 'Test']);
@@ -85,10 +85,10 @@ test('mixing task-scoped before with legacy after exposes the incompatible tree 
   fs.writeFileSync(path.join(taskADir, 'analysis.md'), 'current task\n');
   fs.writeFileSync(path.join(taskBDir, 'analysis.md'), 'other task\n');
 
-  const taskScopedBefore = captureWorkspaceSnapshot(root, 'TASK-20260101-000001');
-  const legacyAfter = captureWorkspaceSnapshot(root, null);
+  const taskScopedBefore = captureWorkspaceSnapshot({ gitRoot: root, stateRoot: root, taskId: 'TASK-20260101-000001' });
+  const repositoryWideAfter = captureWorkspaceSnapshot({ gitRoot: root, stateRoot: root, taskId: null });
 
-  assert.deepEqual(diffWorkspaceSnapshots(root, taskScopedBefore, legacyAfter), [
+  assert.deepEqual(diffWorkspaceSnapshots(root, taskScopedBefore, repositoryWideAfter), [
     '.agents/workspace/active/TASK-20260101-000002/analysis.md'
   ]);
 });
@@ -150,8 +150,4 @@ test('versioned orchestration snapshots combine a linked worktree with task stat
     '.agents/workspace/active/TASK-20260101-000001/task.md',
     'source.ts'
   ]);
-  assert.throws(
-    () => diffWorkspaceSnapshots(gitRoot, captureWorkspaceSnapshot(gitRoot, taskId), after),
-    /versions cannot be mixed/
-  );
 });

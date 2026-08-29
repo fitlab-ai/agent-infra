@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { getProcessStartTime } from '../../../lib/server/process-state.ts';
 import {
   sandboxControlSafeEnv,
   serveSandboxControl
@@ -23,15 +24,15 @@ import {
 } from '../../../lib/sandbox/control/state.ts';
 import {
   acquireSandboxControlReplacement,
+  assertSandboxControlBrokerOwner,
   assertSandboxControlCutoverSnapshot,
   beginSandboxControlReplacement,
   captureSandboxControlCutoverSnapshot,
   recoverSandboxControlReplacement,
   quiesceSandboxControlRoot,
   readSandboxControlManifest,
-  readSandboxControlManifestForTransition
 } from '../../../lib/sandbox/control/lifecycle.ts';
-import { executeRequest, nodeEntryArgs } from '../../../lib/sandbox/control/executor.ts';
+import { assertSandboxControlExecutorAuthority, executeRequest, nodeEntryArgs } from '../../../lib/sandbox/control/executor.ts';
 import { parseCodexControllerResult, SandboxControlClientError } from '../../../lib/sandbox/control/client.ts';
 import {
   closeCodexControllerRegistration,
@@ -42,7 +43,6 @@ import {
 } from '../../../lib/sandbox/control/controller-registration.ts';
 
 const manifest: SandboxControlManifest = {
-  version: 5,
   engine: 'docker',
   repoRoot: '/repo',
   worktreeRoot: '/worktree',
@@ -66,6 +66,53 @@ const controllerBuild = {
   internalExecutableBuildHash: 'a'.repeat(64),
   lifecycleContractHash: 'b'.repeat(64)
 } as const;
+
+test('sandbox executor authority revalidates the gate-bound broker owner and handoff lease', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-executor-authority-'));
+  const publicStatusDir = path.join(root, 'public');
+  fs.mkdirSync(publicStatusDir);
+  const startTime = getProcessStartTime(process.pid);
+  assert.ok(startTime);
+  const boundManifest = {
+    ...manifest,
+    publicStatusDir,
+    token: 'authority-token',
+    generation: 'authority-generation'
+  };
+  const owner = {
+    version: 3,
+    pid: process.pid,
+    startTime,
+    brokerId: 'broker-id',
+    token: boundManifest.token,
+    generation: boundManifest.generation
+  } as const;
+  fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify(owner)}\n`);
+  try {
+    assert.doesNotThrow(() => assertSandboxControlBrokerOwner(boundManifest, { identityProbe: () => 'alive' }));
+    assert.doesNotThrow(() => assertSandboxControlExecutorAuthority(boundManifest, owner));
+    fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify({ ...owner, brokerId: 'replacement-owner' })}\n`);
+    assert.throws(
+      () => assertSandboxControlExecutorAuthority(boundManifest, owner),
+      /SANDBOX_CONTROL_GATE_OWNER_MISMATCH/
+    );
+    fs.writeFileSync(path.join(root, 'broker.json'), `${JSON.stringify(owner)}\n`);
+    fs.writeFileSync(path.join(root, 'lease.json'), `${JSON.stringify({
+      version: 2,
+      generation: boundManifest.generation,
+      nonce: 'lease-nonce',
+      owner: { pid: process.pid, startTime },
+      issuedAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+      taskId: boundManifest.taskId,
+      branch: boundManifest.branch,
+      reason: 'test handoff'
+    })}\n`);
+    assert.throws(() => assertSandboxControlExecutorAuthority(boundManifest), /SANDBOX_CONTROL_HANDOFF_ACTIVE/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('controller registration requires a live requested process across create and replacement states', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-registration-'));
@@ -240,7 +287,7 @@ test('controller proof failures preserve the host registration', () => {
   }
 });
 
-test('controller proof rejection occurs before the domain child and workspace mutation', () => {
+test('controller proof rejection occurs before the domain child and workspace mutation', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-proof-executor-'));
   const sentinel = path.join(root, 'workspace-sentinel');
   fs.writeFileSync(sentinel, 'unchanged\n');
@@ -257,7 +304,6 @@ test('controller proof rejection occurs before the domain child and workspace mu
     'CODEX_SANDBOX_CONTROLLER_PROCESS_INACTIVE',
     'CODEX_SANDBOX_CONTROLLER_PROCESS_UNKNOWN'
   ]) {
-    let spawns = 0;
     const request = {
       version: 3 as const,
       id: '12345678-1234-1234-1234-123456789abc',
@@ -270,18 +316,15 @@ test('controller proof rejection occurs before the domain child and workspace mu
       controllerProcess: null,
       controllerProof: proof
     };
-    const result = executeRequest(manifest, path.join(root, 'manifest.json'), request, {
+    const result = await executeRequest(manifest, path.join(root, 'manifest.json'), request, {
       buildIdentity: () => controllerBuild,
-      resolveControllerBinding: (() => { throw new CodexControllerRegistrationError(code, 'rejected'); }) as never,
-      spawnDomain: (() => { spawns += 1; throw new Error('domain child must not spawn'); }) as never
+      resolveControllerBinding: (() => { throw new CodexControllerRegistrationError(code, 'rejected'); }) as never
     });
     assert.equal(result.exitCode, 1, code);
     assert.match(result.stdout, new RegExp(code), code);
-    assert.equal(spawns, 0, code);
     assert.equal(fs.readFileSync(sentinel, 'utf8'), 'unchanged\n', code);
   }
-  let missingProofSpawns = 0;
-  const missingProof = executeRequest(manifest, path.join(root, 'manifest.json'), {
+  const missingProof = await executeRequest(manifest, path.join(root, 'manifest.json'), {
     version: 3,
     id: '12345678-1234-1234-1234-123456789abd',
     token: manifest.token,
@@ -292,13 +335,12 @@ test('controller proof rejection occurs before the domain child and workspace mu
     args: [manifest.taskId!, 'prepare', '--client', 'codex'],
     controllerProcess: null,
     controllerProof: null
-  }, { spawnDomain: (() => { missingProofSpawns += 1; }) as never });
+  });
   assert.match(missingProof.stdout, /CODEX_SANDBOX_CONTROLLER_PROOF_REQUIRED/);
-  assert.equal(missingProofSpawns, 0);
   assert.equal(fs.readFileSync(sentinel, 'utf8'), 'unchanged\n');
 });
 
-test('typed controller verify returns only the live task binding without spawning or mutating state', () => {
+test('typed controller verify returns only the live task binding without spawning or mutating state', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'controller-verify-executor-'));
   const manifestPath = path.join(root, 'manifest.json');
   fs.writeFileSync(manifestPath, '{}\n', { mode: 0o600 });
@@ -333,11 +375,9 @@ test('typed controller verify returns only the live task binding without spawnin
   const validated = validateSandboxControlRequest(request, manifest, { now: 2_000 });
   assert.equal(request.command, 'verify');
   const before = fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8');
-  let spawns = 0;
-  const result = executeRequest(manifest, manifestPath, validated, {
+  const result = await executeRequest(manifest, manifestPath, validated, {
     buildIdentity: () => controllerBuild,
-    resolveControllerBinding: () => ({ instanceDigest: opened.lease.controllerInstanceDigest, controlGeneration: manifest.generation }),
-    spawnDomain: (() => { spawns += 1; throw new Error('verify must not spawn'); }) as never
+    resolveControllerBinding: () => ({ instanceDigest: opened.lease.controllerInstanceDigest, controlGeneration: manifest.generation })
   });
   assert.equal(result.exitCode, 0);
   assert.deepEqual(JSON.parse(result.stdout), {
@@ -353,7 +393,6 @@ test('typed controller verify returns only the live task binding without spawnin
     error: null
   });
   assert.equal(result.stdout.includes(opened.lease.leaseSecret), false);
-  assert.equal(spawns, 0);
   assert.equal(fs.readFileSync(path.join(root, 'codex-controller.json'), 'utf8'), before);
 });
 
@@ -439,7 +478,7 @@ test('task finalization uses a typed task-bound request with manifest authority'
   assert.throws(() => validateSandboxControlRequest(request, { ...manifest, mode: 'branch-only', taskId: null }, { now: 2_000 }), /SANDBOX_CONTROL_BRANCH_ONLY/);
 });
 
-test('sandbox executor finalizes only the manifest task and returns no control authority', () => {
+test('sandbox executor finalizes only the manifest task and returns no control authority', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'finalization-executor-'));
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
@@ -455,7 +494,7 @@ test('sandbox executor finalizes only the manifest task and returns no control a
       '---', `id: ${taskId}`, 'status: active', 'current_step: code-review', 'updated_at: old', 'agent_infra_version: old', 'target_date:', '---',
       '', '# Task', '', '## Activity Log', ''
     ].join('\n'));
-    const result = executeRequest({
+    const result = await executeRequest({
       ...manifest,
       repoRoot: root,
       worktreeRoot: root,
@@ -716,14 +755,14 @@ test('control broker rejects legacy manifests with container-only recreation gui
   try {
     await assert.rejects(
       serveSandboxControl(manifestPath),
-      /SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 5; container-only recreation is required/
+      /SANDBOX_CONTROL_MANIFEST_REBUILD_REQUIRED: container-only recreation\/rebuild is required/
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('replacement lease serializes generation cutover and transition reader isolates v4 compatibility', () => {
+test('replacement lease serializes generation cutover and rebuilds versioned manifests', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-infra-control-replacement-'));
   const manifestPath = path.join(root, 'manifest.json');
   const legacy = {
@@ -742,8 +781,7 @@ test('replacement lease serializes generation cutover and transition reader isol
   const lease = acquireSandboxControlReplacement(root);
   try {
     assert.throws(() => acquireSandboxControlReplacement(root), /SANDBOX_CONTROL_REPLACEMENT_BUSY/);
-    assert.equal(readSandboxControlManifestForTransition(manifestPath).version, 4);
-    assert.throws(() => readSandboxControlManifest(manifestPath), /SANDBOX_CONTROL_MANIFEST_VERSION_INVALID/);
+    assert.throws(() => readSandboxControlManifest(manifestPath), /SANDBOX_CONTROL_MANIFEST_REBUILD_REQUIRED/);
     lease.assertOwned();
   } finally {
     lease.release();

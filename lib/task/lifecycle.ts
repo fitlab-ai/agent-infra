@@ -126,6 +126,14 @@ function failed(request: Pick<TaskLifecycleRequest, 'taskRef' | 'intent'>, error
   };
 }
 
+export function taskLifecycleFailure(
+  request: Pick<TaskLifecycleRequest, 'taskRef' | 'intent'>,
+  error: LifecycleError,
+  taskId: string | null = null
+): TaskLifecycleResult {
+  return failed(request, error, { taskId });
+}
+
 function normalizedRequest(request: TaskLifecycleRequest): TaskLifecycleRequest | LifecycleError {
   if (!request || typeof request !== 'object' || !lifecycleIntentCatalog.includes(request.intent as TaskLifecycleIntent)) {
     return { code: 'LIFECYCLE_PAYLOAD_INVALID', message: 'intent is not in the lifecycle catalog' };

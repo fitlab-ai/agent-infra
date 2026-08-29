@@ -147,7 +147,7 @@ function inplaceFixture({ includeContainer = true }: { includeContainer?: boolea
     fs.mkdirSync(dir, { recursive: true });
   }
   fs.writeFileSync(control.manifestPath, `${JSON.stringify({
-    version: 5, engine: 'docker-desktop', repoRoot: repoDir, worktreeRoot: repoDir,
+    engine: 'docker-desktop', repoRoot: repoDir, worktreeRoot: repoDir,
     project, container: containerName, containerIdentity: { id: 'fixture-container-id', labels: {} },
     branch, mode: 'task-bound', taskId, token: 'fixture-token', generation,
     channelDir: control.channelDir, publicStatusDir: control.statusDir,

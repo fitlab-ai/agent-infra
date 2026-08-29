@@ -1,7 +1,11 @@
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
 import { applyTaskFinalization } from '../task/finalization.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
-import { verifyTaskEvent } from '../task/verification.ts';
+import {
+  assertTaskControlOperation,
+  createDirectHostExecutionContext,
+  dispatchTaskControlOperation
+} from '../task/control-authority.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-finalization <N | TASK-id> complete --agent <agent>\n';
 
@@ -55,12 +59,15 @@ function taskFinalization(args: string[] = []): void {
     process.exitCode = 1;
     return;
   }
-  const result = applyTaskFinalization(
-    { taskRef: resolved.taskId, intent: 'complete', agent },
-    { repoRoot, preflight: (request, options) => verifyTaskEvent(
-      { ...request, event: 'complete-task.hard-preflight' }, options
-    ) }
-  );
+  const operation = {
+    family: 'task-finalization' as const,
+    request: { taskRef: resolved.taskId, intent: 'complete' as const, agent }
+  };
+  assertTaskControlOperation(operation);
+  const result = dispatchTaskControlOperation(
+    createDirectHostExecutionContext({ repoRoot }),
+    operation
+  ) as ReturnType<typeof applyTaskFinalization>;
   process.stdout.write(envelope(result.status, result.changed, true, result, result.error));
   process.exitCode = exitCode(result.status);
 }

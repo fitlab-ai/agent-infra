@@ -53,13 +53,6 @@ function captureWorktreeTree(repoRoot: string, forcedPath: string | null): strin
   }
 }
 
-function captureLegacyWorkspaceSnapshot(repoRoot: string, taskId: string | null): string {
-  const workspaceRelative = taskId
-    ? `.agents/workspace/active/${taskId}`
-    : '.agents/workspace/active';
-  return captureWorktreeTree(repoRoot, workspaceRelative);
-}
-
 function taskFileFingerprints(stateRoot: string, taskId: string | null): TaskFileFingerprint[] {
   const activeRoot = path.join(stateRoot, '.agents', 'workspace', 'active');
   const roots = taskId ? [path.join(activeRoot, taskId)] : [activeRoot];
@@ -73,6 +66,7 @@ function taskFileFingerprints(stateRoot: string, taskId: string | null): TaskFil
       return;
     }
     if (!stat.isFile() && !stat.isSymbolicLink()) return;
+    if (relative.startsWith('.agents/workspace/active/') && path.posix.basename(relative) === 'orchestration.json') return;
     const content = stat.isSymbolicLink()
       ? Buffer.from(fs.readlinkSync(absolute))
       : fs.readFileSync(absolute);
@@ -108,14 +102,11 @@ function decodeWorkspaceFingerprint(value: string): OrchestrationWorkspaceFinger
   }
 }
 
-function captureWorkspaceSnapshot(context: WorkspaceSnapshotContext): string;
-function captureWorkspaceSnapshot(repoRoot: string, taskId: string | null): string;
-function captureWorkspaceSnapshot(contextOrRoot: WorkspaceSnapshotContext | string, taskId?: string | null): string {
-  if (typeof contextOrRoot === 'string') return captureLegacyWorkspaceSnapshot(contextOrRoot, taskId ?? null);
+function captureWorkspaceSnapshot(context: WorkspaceSnapshotContext): string {
   return encodeWorkspaceFingerprint({
     version: 2,
-    gitTree: captureWorktreeTree(contextOrRoot.gitRoot, null),
-    taskFiles: taskFileFingerprints(contextOrRoot.stateRoot, contextOrRoot.taskId)
+    gitTree: captureWorktreeTree(context.gitRoot, null),
+    taskFiles: taskFileFingerprints(context.stateRoot, context.taskId)
   });
 }
 

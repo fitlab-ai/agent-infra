@@ -8,7 +8,7 @@ import type { ProcessIdentity, ProcessIdentityProbe } from '../../server/process
 import type {
   SandboxControlExecution,
   SandboxControlLease,
-  SandboxControlManifestLike,
+  SandboxControlManifest,
   SandboxControlStatus
 } from './protocol.ts';
 
@@ -36,12 +36,12 @@ export function readJsonFile(filePath: string): unknown {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
-export function statusPath(manifest: SandboxControlManifestLike): string {
+export function statusPath(manifest: SandboxControlManifest): string {
   return path.join(manifest.publicStatusDir, 'status.json');
 }
 
 export function writeSandboxControlStatus(
-  manifest: SandboxControlManifestLike,
+  manifest: SandboxControlManifest,
   broker: ProcessIdentity & { brokerId: string },
   state: SandboxControlStatus['state'],
   reasonCode: string | null,
@@ -72,7 +72,7 @@ export function readSandboxControlStatus(directory: string): SandboxControlStatu
   return parseSandboxControlStatus(readJsonFile(path.join(directory, 'status.json')));
 }
 
-export function readActiveLease(manifest: SandboxControlManifestLike, now = Date.now()): SandboxControlLease | null {
+export function readActiveLease(manifest: SandboxControlManifest, now = Date.now()): SandboxControlLease | null {
   const filePath = path.join(path.dirname(manifest.publicStatusDir), 'lease.json');
   if (!fs.existsSync(filePath)) return null;
   const lease = readJsonFile(filePath) as Partial<SandboxControlLease> | null;
@@ -91,7 +91,7 @@ export function readActiveLease(manifest: SandboxControlManifestLike, now = Date
 }
 
 export function cleanupStaleSandboxControlLease(
-  manifest: SandboxControlManifestLike,
+  manifest: SandboxControlManifest,
   now = Date.now(),
   options: Readonly<{ identityProbe?: ProcessIdentityProbe }> = {}
 ): boolean {
@@ -121,7 +121,7 @@ export function cleanupStaleSandboxControlLease(
 }
 
 export function appendSandboxControlAudit(
-  manifest: SandboxControlManifestLike,
+  manifest: SandboxControlManifest,
   event: string,
   fields: Record<string, string | number | boolean | null> = {},
   now = Date.now()
@@ -136,7 +136,7 @@ export function appendSandboxControlAudit(
   });
 }
 
-export function executionPath(manifest: SandboxControlManifestLike, requestId: string): string {
+export function executionPath(manifest: SandboxControlManifest, requestId: string): string {
   return path.join(manifest.processingDir, requestId, 'execution.json');
 }
 

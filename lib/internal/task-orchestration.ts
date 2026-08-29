@@ -1,21 +1,11 @@
-import {
-  activateMatchingOrchestrationDelegation,
-  activateOrchestrationDelegation,
-  advanceOrchestration,
-  awaitOrchestrationDelegationActivation,
-  beginOrResumeOrchestration,
-  dispatchOrchestrationDelegation,
-  OrchestrationStateError,
-  pauseOrchestration,
-  recoverPreparedOrchestrationDelegation,
-  routeOrchestration,
-  sealMatchingOrchestrationDelegation,
-  sealOrchestrationDelegation,
-  statusOrchestration
-} from '../task/orchestration.ts';
-import { prepareCodexOrchestrationDelegation } from '../task/codex-orchestration.ts';
+import { OrchestrationStateError } from '../task/orchestration.ts';
 import { isAgentClientId } from '../agent-clients/types.ts';
 import type { AgentClientId } from '../agent-clients/types.ts';
+import {
+  createDirectHostExecutionContext,
+  dispatchTaskControlOperation
+} from '../task/control-authority.ts';
+import { detectRepoRoot } from '../task/resolve-ref.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-orchestration <task-ref|auto> <begin-or-resume|route|prepare|dispatch|await-activation|recover-prepared|hook-start|hook-stop|advance|pause|status> [options]\n';
 
@@ -79,6 +69,12 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
   const coreOptions = values['--git-worktree-root'] === undefined
     ? {}
     : { gitWorktreeRoot: values['--git-worktree-root'] };
+  let repoRoot = process.cwd();
+  try { repoRoot = detectRepoRoot(); } catch { /* domain resolution reports the repository error */ }
+  const context = createDirectHostExecutionContext({
+    repoRoot,
+    ...(process.env.AGENT_INFRA_RUNTIME_DIR ? { runtimeDir: process.env.AGENT_INFRA_RUNTIME_DIR } : {})
+  });
   if (values['--client'] !== undefined && !isAgentClientId(values['--client'])) {
     usageFailure(`unknown client '${values['--client']}'`);
     return;
@@ -101,36 +97,49 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
       usageFailure('explicit model policy requires executor/reviewer model and reasoning effort');
       return;
     }
-    result = beginOrResumeOrchestration(taskRef!, {
-      ...coreOptions,
-      maxSteps,
-      client: values['--client'] as AgentClientId,
-      modelPolicy: hasAnyPolicy ? {
-        executor: {
-          model: values['--executor-model']!,
-          reasoningEffort: values['--executor-reasoning-effort']!
-        },
-        reviewer: {
-          model: values['--reviewer-model']!,
-          reasoningEffort: values['--reviewer-reasoning-effort']!
-        }
-      } : undefined
+    result = dispatchTaskControlOperation(context, {
+      family: 'task-orchestration', taskRef: taskRef!, intent: 'begin-or-resume',
+      input: {
+        client: values['--client'] as AgentClientId,
+        maxSteps,
+        modelPolicy: hasAnyPolicy ? {
+          executor: {
+            model: values['--executor-model']!,
+            reasoningEffort: values['--executor-reasoning-effort']!
+          },
+          reviewer: {
+            model: values['--reviewer-model']!,
+            reasoningEffort: values['--reviewer-reasoning-effort']!
+          }
+        } : undefined
+      },
+      options: coreOptions
     });
   } else if (intent === 'route') {
-    result = routeOrchestration(taskRef!, coreOptions);
+    result = dispatchTaskControlOperation(context, {
+      family: 'task-orchestration', taskRef: taskRef!, intent: 'route', input: {}, options: coreOptions
+    });
   } else if (intent === 'status') {
-    result = statusOrchestration(taskRef!, coreOptions);
+    result = dispatchTaskControlOperation(context, {
+      family: 'task-orchestration', taskRef: taskRef!, intent: 'status', input: {}, options: coreOptions
+    });
   } else if (intent === 'prepare') {
     const missing = requireValues(['--client']);
     if (missing) { usageFailure(`intent 'prepare' requires '${missing}'`); return; }
-    result = await prepareCodexOrchestrationDelegation(taskRef!, {
-      client: values['--client'] as AgentClientId,
-      requestedModel: values['--requested-model'],
-      requestedReasoningEffort: values['--requested-reasoning-effort'],
-      capabilityToken: values['--capability-token']
-    }, { orchestrationOptions: coreOptions });
+    result = await dispatchTaskControlOperation(context, {
+      family: 'task-orchestration', taskRef: taskRef!, intent: 'prepare',
+      input: {
+        client: values['--client'] as AgentClientId,
+        requestedModel: values['--requested-model'],
+        requestedReasoningEffort: values['--requested-reasoning-effort'],
+        capabilityToken: values['--capability-token']
+      },
+      options: coreOptions
+    });
   } else if (intent === 'dispatch') {
-    result = dispatchOrchestrationDelegation(taskRef!, coreOptions);
+    result = dispatchTaskControlOperation(context, {
+      family: 'task-orchestration', taskRef: taskRef!, intent: 'dispatch', input: {}, options: coreOptions
+    });
   } else if (intent === 'await-activation') {
     const missing = requireValues(['--stage', '--round', '--artifact', '--role']);
     if (missing) { usageFailure(`intent 'await-activation' requires '${missing}'`); return; }
@@ -141,14 +150,22 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
     if (!['executor', 'reviewer'].includes(values['--role']!)) {
       usageFailure('--role must be executor or reviewer'); return;
     }
-    result = await awaitOrchestrationDelegationActivation(taskRef!, {
-      stage: values['--stage'] as Parameters<typeof awaitOrchestrationDelegationActivation>[1]['stage'],
-      round,
-      artifact: values['--artifact']!,
-      role: values['--role'] as 'executor' | 'reviewer'
-    }, coreOptions);
+    result = await dispatchTaskControlOperation(context, {
+      family: 'task-orchestration', taskRef: taskRef!, intent: 'await-activation',
+      input: {
+        event: {
+          stage: values['--stage'],
+          round,
+          artifact: values['--artifact']!,
+          role: values['--role'] as 'executor' | 'reviewer'
+        }
+      },
+      options: coreOptions
+    });
   } else if (intent === 'recover-prepared') {
-    result = recoverPreparedOrchestrationDelegation(taskRef!, coreOptions);
+    result = dispatchTaskControlOperation(context, {
+      family: 'task-orchestration', taskRef: taskRef!, intent: 'recover-prepared', input: {}, options: coreOptions
+    });
   } else if (intent === 'hook-start') {
     const missing = requireValues([
       ...(taskRef === 'auto' ? ['--client'] : []),
@@ -163,42 +180,66 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
       modelFallbackReason: values['--model-fallback-reason'],
       reasoningEffortFallbackReason: values['--reasoning-effort-fallback-reason']
     };
-    result = taskRef === 'auto'
-      ? activateMatchingOrchestrationDelegation(values['--client'] as AgentClientId, event, coreOptions)
-      : activateOrchestrationDelegation(taskRef!, event, coreOptions);
+    result = dispatchTaskControlOperation(context, {
+      family: 'task-orchestration', taskRef: taskRef!, intent: 'hook-start',
+      input: { auto: taskRef === 'auto', client: values['--client'] as AgentClientId, event }, options: coreOptions
+    });
   } else if (intent === 'hook-stop') {
     if (taskRef === 'auto') {
       const missing = requireValues(['--client', '--native-agent', '--child-id']);
       if (missing) { usageFailure(`intent 'hook-stop' requires '${missing}'`); return; }
-      result = sealMatchingOrchestrationDelegation(values['--client'] as AgentClientId, {
-        nativeAgent: values['--native-agent']!, childId: values['--child-id']!,
-        actualModel: values['--actual-model'],
-        actualReasoningEffort: values['--actual-reasoning-effort'],
-        modelFallbackReason: values['--model-fallback-reason'],
-        reasoningEffortFallbackReason: values['--reasoning-effort-fallback-reason']
-      }, coreOptions);
+      result = dispatchTaskControlOperation(context, {
+        family: 'task-orchestration', taskRef: taskRef!, intent: 'hook-stop',
+        input: {
+          auto: true,
+          client: values['--client'] as AgentClientId,
+          event: {
+            nativeAgent: values['--native-agent']!, childId: values['--child-id']!,
+            actualModel: values['--actual-model'],
+            actualReasoningEffort: values['--actual-reasoning-effort'],
+            modelFallbackReason: values['--model-fallback-reason'],
+            reasoningEffortFallbackReason: values['--reasoning-effort-fallback-reason']
+          }
+        },
+        options: coreOptions
+      });
     } else {
       const missing = requireValues(['--child-id', '--exit-code', '--after-fingerprint']);
       if (missing) { usageFailure(`intent 'hook-stop' requires '${missing}'`); return; }
       const exitCode = Number(values['--exit-code']);
       if (!Number.isInteger(exitCode)) { usageFailure('--exit-code must be an integer'); return; }
-      result = sealOrchestrationDelegation(taskRef!, {
-        childId: values['--child-id']!, exitCode,
-        afterFingerprint: values['--after-fingerprint']!,
-        changedPaths: values['--changed-paths'] ? values['--changed-paths']!.split(',').filter(Boolean) : [],
-        actualModel: values['--actual-model'],
-        actualReasoningEffort: values['--actual-reasoning-effort'],
-        modelFallbackReason: values['--model-fallback-reason'],
-        reasoningEffortFallbackReason: values['--reasoning-effort-fallback-reason']
-      }, coreOptions);
+      result = dispatchTaskControlOperation(context, {
+        family: 'task-orchestration', taskRef: taskRef!, intent: 'hook-stop',
+        input: {
+          auto: false,
+          event: {
+            childId: values['--child-id']!, exitCode,
+            afterFingerprint: values['--after-fingerprint']!,
+            changedPaths: values['--changed-paths'] ? values['--changed-paths']!.split(',').filter(Boolean) : [],
+            actualModel: values['--actual-model'],
+            actualReasoningEffort: values['--actual-reasoning-effort'],
+            modelFallbackReason: values['--model-fallback-reason'],
+            reasoningEffortFallbackReason: values['--reasoning-effort-fallback-reason']
+          }
+        },
+        options: coreOptions
+      });
     }
   } else if (intent === 'advance') {
-    result = advanceOrchestration(taskRef!, coreOptions);
+    result = dispatchTaskControlOperation(context, {
+      family: 'task-orchestration', taskRef: taskRef!, intent: 'advance', input: {}, options: coreOptions
+    });
   } else {
     const missing = requireValues(['--code', '--message', '--recoverable']);
     if (missing) { usageFailure(`intent 'pause' requires '${missing}'`); return; }
     if (!['true', 'false'].includes(values['--recoverable']!)) { usageFailure('--recoverable must be true or false'); return; }
-    result = pauseOrchestration(taskRef!, values['--code']!, values['--message']!, values['--recoverable'] === 'true', coreOptions);
+    result = dispatchTaskControlOperation(context, {
+      family: 'task-orchestration', taskRef: taskRef!, intent: 'pause',
+      input: {
+        code: values['--code']!, message: values['--message']!, recoverable: values['--recoverable'] === 'true'
+      },
+      options: coreOptions
+    });
   }
   } catch (error) {
     if (!(error instanceof OrchestrationStateError)) throw error;
@@ -211,9 +252,9 @@ async function taskOrchestration(args: string[] = []): Promise<void> {
       error: { code: error.code, message: error.message }
     };
   }
-  const output = result;
+  const output = await result;
   process.stdout.write(`${JSON.stringify(output)}\n`);
-  if (result.status === 'failed') process.exitCode = 1;
+  if (output.status === 'failed') process.exitCode = 1;
 }
 
 export { taskOrchestration };

@@ -1,9 +1,13 @@
 import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
-import { consumeHumanOverride, failureId, overrideDryRunConflict } from '../task/human-override.ts';
-import { applyTaskLifecycle, lifecycleIntentCatalog } from '../task/lifecycle.ts';
-import type { TaskLifecycleRequest } from '../task/lifecycle.ts';
+import { lifecycleIntentCatalog } from '../task/lifecycle.ts';
+import type { TaskLifecycleResult } from '../task/lifecycle.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
-import { TaskExecutionLockError, withTaskExecutionLock } from '../task/task-execution-lock.ts';
+import {
+  assertTaskControlOperation,
+  createDirectHostExecutionContext,
+  dispatchTaskControlOperation,
+  type TaskLifecycleControlRequest
+} from '../task/control-authority.ts';
 
 const USAGE = `Usage: agent-infra-internal task-lifecycle <N | TASK-id> <intent> --agent <agent> [intent flags] [--dry-run]\n\nIntents: ${lifecycleIntentCatalog.join(', ')}\nOverride: --override-ticket <ticket> --override-target <target> --override-scope <scope>\n`;
 const FLAGS: Record<string, string> = {
@@ -41,10 +45,7 @@ function taskLifecycle(args: string[] = []): void {
   const agent = normalizeAgentToken(String(values.agent ?? ''));
   if (!agent) { usageFailure(`invalid --agent '${values.agent}': ${AGENT_USAGE_HINT}`); return; }
   values.agent = agent;
-  const dryRunConflict = overrideDryRunConflict(values);
-  if (dryRunConflict) { usageFailure(dryRunConflict.message); return; }
   let repoRoot: string;
-  let taskId: string;
   if (values.intent === 'restore') {
     // restore's precondition is that the task does NOT exist locally yet (it only lives
     // in a staging dir), so resolveTaskRef's existence check is inapplicable here; identity
@@ -56,7 +57,6 @@ function taskLifecycle(args: string[] = []): void {
       process.exitCode = 1;
       return;
     }
-    taskId = String(values.taskRef);
   } else {
     const resolved = resolveTaskRef(String(values.taskRef));
     if (!resolved.ok) {
@@ -65,44 +65,13 @@ function taskLifecycle(args: string[] = []): void {
       return;
     }
     repoRoot = resolved.repoRoot;
-    taskId = resolved.taskId;
   }
-  let result: ReturnType<typeof applyTaskLifecycle> & { humanOverride?: unknown };
-  try {
-    result = withTaskExecutionLock(
-      repoRoot,
-      taskId,
-      `task-lifecycle.${String(values.intent)}`,
-      () => {
-        const lifecycleResult = applyTaskLifecycle(values as TaskLifecycleRequest);
-        if (lifecycleResult.status !== 'failed' || !values.overrideTicket) return lifecycleResult;
-        if (!values.overrideTarget || !values.overrideScope) {
-          return {
-            ...lifecycleResult,
-            error: { code: 'OVERRIDE_PAYLOAD_INVALID', message: 'override ticket requires --override-target and --override-scope' }
-          };
-        }
-        const override = consumeHumanOverride({
-          taskRef: String(values.taskRef),
-          ticketId: String(values.overrideTicket),
-          failureId: failureId('lifecycle.apply', lifecycleResult.error?.code ?? 'LIFECYCLE_FAILED'),
-          target: String(values.overrideTarget),
-          scope: String(values.overrideScope),
-          intent: String(values.intent) as TaskLifecycleRequest['intent'],
-          ...(values.alertNumber ? { alertNumber: Number(values.alertNumber) } : {}),
-          ...(values.issueNumber ? { issueNumber: Number(values.issueNumber) } : {}),
-          ...(values.stagingDir ? { stagingDir: String(values.stagingDir) } : {})
-        });
-        if (override.status === 'failed') return { ...lifecycleResult, humanOverride: override };
-        return { ...lifecycleResult, ...override, humanOverride: override, error: null };
-      }
-    );
-  } catch (error) {
-    if (!(error instanceof TaskExecutionLockError)) throw error;
-    process.stdout.write(`${JSON.stringify({ status: 'failed', changed: false, error: { code: error.code, message: error.message } })}\n`);
-    process.exitCode = 1;
-    return;
-  }
+  const operation = { family: 'task-lifecycle' as const, request: values as TaskLifecycleControlRequest };
+  assertTaskControlOperation(operation);
+  const result = dispatchTaskControlOperation(
+    createDirectHostExecutionContext({ repoRoot }),
+    operation
+  ) as TaskLifecycleResult & { humanOverride?: unknown };
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'failed') process.exitCode = 1;
 }

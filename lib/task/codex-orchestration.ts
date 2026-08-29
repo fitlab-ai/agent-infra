@@ -45,6 +45,7 @@ type CodexBridgeOptions = Readonly<{
   capabilityStore?: CapabilityStore;
   buildIdentity?: LifecycleBuildIdentity;
   orchestrationOptions?: OrchestrationOptions;
+  controllerBinding?: Readonly<{ instanceDigest: string; controlGeneration: string }>;
 }>;
 
 type CodexSpawnIdentity = Readonly<{
@@ -142,7 +143,7 @@ async function prepareCodexOrchestrationDelegation(
       );
     }
     const buildIdentity = options.buildIdentity ?? computeLifecycleBuildIdentity(repoRoot);
-    const brokerController = brokerControllerBinding();
+    const brokerController = options.controllerBinding ?? brokerControllerBinding();
     const contextPath = process.env.AGENT_INFRA_CODEX_CONTROLLER_CONTEXT;
     const contextVerification = contextPath
       ? (brokerController
