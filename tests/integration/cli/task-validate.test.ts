@@ -42,7 +42,11 @@ function pollUntil(check, timeoutMs) {
   }
   return false;
 }
-if (!pollUntil(() => fs.existsSync(leasePath), 20000)) {
+if (!pollUntil(() => {
+  if (fs.existsSync(leasePath)) return true;
+  writeStatus({ state: 'healthy', reasonCode: null, activeRequestId: null });
+  return false;
+}, 20000)) {
   logDiagnostic('state-driver: timed out waiting for lease.json to appear');
   process.exit(1);
 }
@@ -70,6 +74,7 @@ function startStateDriver(tmpDir: string, statusPath: string, leasePath: string,
   const child = spawn(process.execPath, [driverPath, statusPath, leasePath, dockerLogPath, diagnosticsLogPath], { stdio: 'ignore' });
   return {
     child,
+    status: () => `exitCode=${child.exitCode}, signalCode=${child.signalCode}`,
     diagnostics: () => {
       try { return fs.readFileSync(diagnosticsLogPath, 'utf8'); } catch { return ''; }
     }
@@ -241,7 +246,11 @@ test('inplace validation stops, runs, restarts the container, and restores broke
     process.execPath, '-e',
     "if(process.env.AGENT_INFRA_VALIDATION_SCOPE!=='inplace')process.exit(9)"
   ]);
-  assert.equal(result.status, 0, `${result.stderr}\nstate-driver diagnostics:\n${driver.diagnostics()}`);
+  assert.equal(
+    result.status,
+    0,
+    `stdout:\n${result.stdout}\nstderr:\n${result.stderr}\nstate-driver ${driver.status()}\nstate-driver diagnostics:\n${driver.diagnostics()}`
+  );
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.status, 'applied');
   const evidence = payload.evidence;
