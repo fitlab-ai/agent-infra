@@ -109,13 +109,12 @@ If no historical release notes exist, use the following default Markdown format:
      - Commit co-authors from the typed context's commit `authors`
      - Issue reporters from typed `closingIssues[].author`
    - **Contribution count**: `PR count + co-authored commit count` for the same identity, merged across both sources
-   - **Name -> `@login` mapping**:
-     - For `platform-user` or `platform-noreply`, use the lowercased `login`
-     - Only for `unresolved`, use the Name heuristic: take the first token before a space and lowercase it
-     - If the login already appears in the PR author list, merge counts into that login so `Claude` and `@claude` do not become separate entries
-     - Merge all Name variants that map to the same login before counting and sorting; for example, `Claude` and `Claude Opus 4.6 (1M context)` should both collapse into `@claude`
+   - **`@login` mapping**: follow the identity safety boundary in `.agents/rules/release-commands.md`
+     - For `platform-user` or `platform-noreply` with a non-empty `login`, use the lowercased `login`
+     - Exclude `unresolved` identities from the contributor list; never infer a login from a name, email address, domain, brand, or same-named platform account
+     - Merge all Name variants carrying the same typed login before counting and sorting
      - Preserve bot identities as-is, for example `dependabot[bot]`
-     - If the login still cannot be determined reliably, output `@{lowercased first Name token}` and append `<!-- TODO(reviewer): confirm platform login for {original Name <email>} -->` below the `Contributors` section
+     - Do not add unresolved identity emails, placeholder mentions, or identity-verification TODOs to publishable notes
    - **Sorting**: descending by contribution count, then lexicographically by login for ties
    - **Deduplication**: use the final mapped `@login` as the key
    - **Issue reporter rules**:

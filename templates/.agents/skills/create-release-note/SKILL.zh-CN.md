@@ -109,13 +109,12 @@ agent-infra-internal platform-release-notes context \
      - Commit co-authors：来自步骤 3 typed context 的 commit `authors`
      - Issue reporters：来自步骤 3 typed context 的 `closingIssues[].author`
    - **贡献数定义**：`该人的 PR 数 + 该人作为 co-author 的 commit 数`（同一身份跨来源合并计数）
-   - **Name → `@login` 映射**：
-     - `resolution` 为 `platform-user` 或 `platform-noreply` 时直接采用小写 `login`
-     - 仅当 `resolution` 为 `unresolved` 时按 Name 启发式：取首个空格前的 token 并转为小写
-     - 已出现在 PR author 列表中的 login，必须按该 login 合并计数，避免把 `Claude` 和 `@claude` 拆成两个条目
-     - 同一 login 的所有 Name 变体都必须归并后再计数与排序；例如 `Claude` 与 `Claude Opus 4.6 (1M context)` 都映射到 `@claude` 时，应先合并为同一个贡献者
+   - **`@login` 映射**：遵循 `.agents/rules/release-commands.md` 的身份安全边界
+     - `resolution` 为 `platform-user` 或 `platform-noreply` 且 `login` 非空时，采用小写 `login`
+     - `resolution` 为 `unresolved` 时从贡献者列表中排除；不得从 Name、邮箱、域名、品牌或同名平台账号推断 login
+     - 同一 typed login 的所有 Name 变体必须归并后再计数与排序
      - Bot 身份保留原样（如 `dependabot[bot]`）
-     - 若仍无法可靠确定 login，则输出 `@{Name 首 token 小写}`，并在 `Contributors` 段落下追加 `<!-- TODO(reviewer): 确认 {原始 Name <email>} 的 platform login -->`
+     - 不得在可发布 notes 中加入未解析身份的邮箱、占位 mention 或身份确认 TODO
    - **排序**：按贡献数降序；贡献数相同时按 login 字典序
    - **去重**：以最终映射后的 `@login` 为键
    - **Issue reporter 规则**：

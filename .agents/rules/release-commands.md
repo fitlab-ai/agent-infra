@@ -14,6 +14,12 @@ agent-infra-internal platform-release-notes context \
 
 结果包含 `history`、`pullRequests`、`closingIssues` 和带规范化 `login` / `resolution` 的 commit `authors`。`status: no-op` 且错误码为 `PLATFORM_RELEASE_NOTES_UNSUPPORTED` 表示当前平台不支持远端发布说明能力。
 
+### 身份安全边界
+
+- 只有 `resolution` 为 `platform-user` 或 `platform-noreply` 且 `login` 非空的身份可以渲染为 `@login`。
+- `resolution: unresolved` 的身份不得进入发布说明的贡献者列表；不得从 Name、邮箱、域名、品牌或同名平台账号推断 login，也不得替换成推测的个人或组织账号。
+- 不得把未解析身份的邮箱或身份确认 TODO 写入可发布的 Release notes。需要调查时仅在发布流程外记录，不得产生平台 mention。
+
 ## Stage Release notes
 
 ```bash
