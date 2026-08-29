@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import path from 'node:path';
 
 import {
   assertTaskControlExecutionContext,
@@ -10,8 +11,9 @@ import {
 } from '../../../lib/task/control-authority.ts';
 
 test('direct host context does not require sandbox facts', () => {
-  const context = createDirectHostExecutionContext({ repoRoot: '/repo' });
-  assert.deepEqual(context, { source: 'direct-host', mode: 'direct-host', repoRoot: '/repo' });
+  const repoRoot = path.resolve('/repo');
+  const context = createDirectHostExecutionContext({ repoRoot });
+  assert.deepEqual(context, { source: 'direct-host', mode: 'direct-host', repoRoot });
   assertTaskControlExecutionContext(context);
 });
 
