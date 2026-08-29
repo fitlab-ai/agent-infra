@@ -17,6 +17,8 @@ export type SandboxWorkspaceKey =
   | Readonly<{ mode: 'task-bound'; taskId: string }>
   | Readonly<{ mode: 'branch-only' }>;
 
+export type SandboxWorkspaceReference = SandboxWorkspaceIdentity | SandboxWorkspaceKey;
+
 export type SandboxCleanupTarget = Readonly<{
   requestedRef: string;
   branch: string;
@@ -33,6 +35,11 @@ export type SandboxTarget = Readonly<{
   requestedRef: string;
   branch: string;
   workspace: SandboxWorkspaceIdentity;
+}>;
+
+export type SandboxReentryContext = Readonly<{
+  workspace: SandboxWorkspaceReference;
+  reentry: 'standard' | 'completed';
 }>;
 
 function stripQuotes(value: string): string {
@@ -114,6 +121,27 @@ export function resolveSandboxTarget(requestedRef: string, repoRoot: string): Sa
     return { requestedRef, branch: requestedRef, workspace: taskIdentity(repoRoot, taskId, registry) };
   }
   return { requestedRef, branch: requestedRef, workspace: { mode: 'branch-only' } };
+}
+
+export function resolveSandboxReentryContext(params: Readonly<{
+  target: SandboxTarget;
+  containerWorkspace: SandboxContainerWorkspaceIdentity;
+  repoRoot: string;
+}>): SandboxReentryContext {
+  if (params.target.workspace.mode !== 'branch-only'
+    || params.containerWorkspace.mode !== 'task-bound') {
+    return { workspace: params.target.workspace, reentry: 'standard' };
+  }
+
+  const task = resolveTaskWorkspace(params.containerWorkspace.taskId, params.repoRoot);
+  if (task.state !== 'completed' || task.branch !== params.target.branch) {
+    return { workspace: params.target.workspace, reentry: 'standard' };
+  }
+
+  return {
+    workspace: { mode: 'task-bound', taskId: task.taskId },
+    reentry: 'completed'
+  };
 }
 
 export function resolveSandboxCleanupTarget(

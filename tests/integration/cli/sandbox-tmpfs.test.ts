@@ -273,6 +273,13 @@ function legacyTaskBoundMounts(fixture: { mounts: Array<Record<string, unknown>>
     });
 }
 
+function moveTaskToCompleted(config: SandboxConfig, taskId: string): void {
+  const activePath = path.join(config.repoRoot, '.agents', 'workspace', 'active', taskId);
+  const completedRoot = path.join(config.repoRoot, '.agents', 'workspace', 'completed');
+  fs.mkdirSync(completedRoot, { recursive: true });
+  fs.renameSync(activePath, path.join(completedRoot, taskId));
+}
+
 test("recovery classification preserves healthy running seed content drift", () => {
   const snapshot = healthyRecoverySnapshot();
 
@@ -467,6 +474,214 @@ test("task-bound recovery probes the real task.md view instead of mount declarat
     assert.equal(classifySandboxRecovery(recovered).some(
       (finding) => finding.code === "SANDBOX_TASK_VIEW_UNREADABLE"
     ), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("completed task-bound recovery accepts the moved task source and historical active mount", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-task-source-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const taskId = "TASK-20260814-223554";
+  const fixture = taskBoundRecoveryFixture(config, taskId);
+  moveTaskToCompleted(config, taskId);
+
+  try {
+    const snapshot = collectSandboxRecoverySnapshot({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      workspace: { mode: "task-bound", taskId },
+      container: "demo-dev-feature..demo",
+      deps: {
+        run: () => JSON.stringify([{
+          Id: "fixture-container-id",
+          Config: { Labels: fixture.labels },
+          Mounts: fixture.mounts
+        }]),
+        runOk: () => true
+      }
+    });
+    const taskMount = snapshot.mounts.find((mount) =>
+      mount.path === `/workspace/.agents/workspace/active/${taskId}`
+    );
+
+    assert.equal(snapshot.identityOk, true);
+    assert.equal(taskMount?.sourceMatches, true);
+    assert.equal(taskMount?.sourceAccessible, true);
+    assert.deepEqual(classifySandboxRecovery(snapshot), []);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("completed readiness failures never invoke replacement and provide manual disposal commands", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-reentry-failure-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const taskId = "TASK-20260814-223555";
+  const fixture = taskBoundRecoveryFixture(config, taskId);
+  moveTaskToCompleted(config, taskId);
+  let recreated = false;
+  let writes = 0;
+  const row = {
+    name: "demo-dev-feature..demo",
+    status: "Up",
+    branch: "feature/demo",
+    running: true,
+    index: 1
+  };
+  const deps = {
+    ensureControlBroker: async () => {},
+    run: () => JSON.stringify([{
+      Id: "fixture-container-id",
+      Config: { Labels: fixture.labels },
+      Mounts: fixture.mounts
+    }]),
+    runOk: (_engine: string, _cmd: string, args: string[]) => {
+      const script = args[6] ?? "";
+      const target = args.at(-1);
+      return !(script === 'test -r "$1"' && target?.endsWith("/task.md"));
+    },
+    runVerbose: () => { writes += 1; }
+  };
+
+  try {
+    await assert.rejects(
+      () => ensureSandboxReady({
+        config,
+        engine: "native",
+        branch: "feature/demo",
+        workspace: { mode: "task-bound", taskId },
+        reentry: "completed",
+        row,
+        deps,
+        recreate: async () => { recreated = true; }
+      }),
+      (error: unknown) => error instanceof Error
+        && error.message.includes("SANDBOX_COMPLETED_REENTRY_FAILED")
+        && error.message.includes(`container: ${row.name}`)
+        && error.message.includes(`docker exec -it ${row.name} bash /usr/local/bin/sandbox-tmux-entry`)
+        && error.message.includes('full interactive sandbox cleanup')
+        && error.message.includes('worktree, local branch, tool/shell state, and branch share')
+        && error.message.includes(`ai sandbox rm ${taskId}`)
+        && error.message.includes("ai sandbox create feature/demo")
+    );
+
+    await assert.rejects(
+      () => ensureSandboxReady({
+        config,
+        engine: "native",
+        branch: "feature/demo",
+        workspace: { mode: "task-bound", taskId },
+        reentry: "completed",
+        row,
+        allowRecreate: true,
+        recreate: async () => { recreated = true; },
+        deps
+      }),
+      /SANDBOX_COMPLETED_RECREATE_UNSUPPORTED/
+    );
+    assert.equal(recreated, false);
+    assert.equal(writes, 0);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("healthy completed re-entry rejects an explicit recreate request", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-recreate-healthy-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const taskId = "TASK-20260814-223556";
+  const fixture = taskBoundRecoveryFixture(config, taskId);
+  moveTaskToCompleted(config, taskId);
+  let recreated = false;
+
+  try {
+    await assert.rejects(
+      () => ensureSandboxReady({
+        config,
+        engine: "native",
+        branch: "feature/demo",
+        workspace: { mode: "task-bound", taskId },
+        reentry: "completed",
+        row: {
+          name: "demo-dev-feature..demo",
+          status: "Up",
+          branch: "feature/demo",
+          running: true,
+          index: 1
+        },
+        allowRecreate: true,
+        recreate: async () => { recreated = true; },
+        deps: {
+          ensureControlBroker: async () => {},
+          run: () => JSON.stringify([{
+            Id: "fixture-container-id",
+            Config: { Labels: fixture.labels },
+            Mounts: fixture.mounts
+          }]),
+          runOk: () => true,
+          runVerbose: () => {}
+        }
+      }),
+      /SANDBOX_COMPLETED_RECREATE_UNSUPPORTED/
+    );
+    assert.equal(recreated, false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("stopped completed re-entry restores the historical task source only while starting", async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-completed-stopped-source-"));
+  const config = recoveryFixtureConfig(tmpDir);
+  const taskId = "TASK-20260814-223557";
+  const fixture = taskBoundRecoveryFixture(config, taskId);
+  moveTaskToCompleted(config, taskId);
+  const activePath = path.join(config.repoRoot, ".agents", "workspace", "active", taskId);
+  const completedPath = path.join(config.repoRoot, ".agents", "workspace", "completed", taskId);
+  let startedWithSource = false;
+
+  try {
+    const result = await ensureSandboxReady({
+      config,
+      engine: "native",
+      branch: "feature/demo",
+      workspace: { mode: "task-bound", taskId },
+      reentry: "completed",
+      row: {
+        name: "demo-dev-feature..demo",
+        status: "Exited",
+        branch: "feature/demo",
+        running: false,
+        index: 1
+      },
+      deps: {
+        ensureControlBroker: async () => {},
+        start: () => {
+          startedWithSource = fs.lstatSync(activePath).isSymbolicLink()
+            && fs.realpathSync.native(activePath) === fs.realpathSync.native(completedPath);
+        },
+        run: () => JSON.stringify([{
+          Id: "fixture-container-id",
+          Config: { Labels: fixture.labels },
+          Mounts: fixture.mounts
+        }]),
+        runOk: (_engine, _cmd, args) => {
+          const script = args[6] ?? "";
+          const target = args.at(-1);
+          if (script === 'test -r "$1"' && target?.endsWith("/task.md")) {
+            return startedWithSource;
+          }
+          return true;
+        },
+        runVerbose: () => {}
+      }
+    });
+
+    assert.equal(result.path, "recovered");
+    assert.equal(startedWithSource, true);
+    assert.equal(fs.existsSync(activePath), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

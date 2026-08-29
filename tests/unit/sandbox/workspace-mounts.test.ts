@@ -17,7 +17,7 @@ test('task-bound mount topology exposes isolated state mounts and one writable t
     workspaceViewRoot: '/views/current',
     controlDir: '/control/current',
     controlStatusDir: '/control/status',
-    taskSource: '/repo/.agents/workspace/active/TASK-20260809-010203',
+    taskSources: ['/repo/.agents/workspace/active/TASK-20260809-010203'],
     taskId: 'TASK-20260809-010203'
   });
   const workspace = mounts.filter((mount) => mount.containerPath.startsWith('/workspace/.agents/workspace'));

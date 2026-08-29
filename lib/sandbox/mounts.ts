@@ -27,11 +27,12 @@ export function sandboxCoreBindMounts(
     controlDir: string;
     controlStatusDir: string;
     runtimeDir?: string;
-    taskSource?: string;
+    taskSources?: string[];
     taskId?: string;
   }
 ): SandboxBindMountDeclaration[] {
-  const taskBound = Boolean(overrides.taskSource && overrides.taskId);
+  const taskSources = overrides.taskSources ?? [];
+  const taskBound = Boolean(taskSources.length > 0 && overrides.taskId);
   const workspaceMounts = sandboxWorkspaceViewStatePaths(overrides.workspaceViewRoot).map(
     ({ state, hostPath }) => taskBound && state === 'active'
       ? {
@@ -57,7 +58,7 @@ export function sandboxCoreBindMounts(
   ];
   if (taskBound) {
     mounts.push({
-      hostPaths: [overrides.taskSource!],
+      hostPaths: taskSources,
       containerPath: path.posix.join('/workspace/.agents/workspace/active', overrides.taskId!),
       readOnly: false
     });

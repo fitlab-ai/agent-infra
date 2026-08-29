@@ -3,7 +3,9 @@ import {
   assertValidBranchName,
   containerNameCandidates,
   sandboxBranchLabel,
-  sandboxLabel
+  sandboxLabel,
+  sandboxTaskIdLabel,
+  sandboxWorkspaceModeLabel
 } from '../constants.ts';
 import { detectEngine } from '../engine.ts';
 import { ensureSandboxReady } from '../recovery.ts';
@@ -21,7 +23,10 @@ import {
   fetchSandboxRows,
   selectSandboxContainer,
 } from './list-running.ts';
-import { resolveSandboxTarget } from '../workspace-identity.ts';
+import {
+  resolveSandboxReentryContext,
+  resolveSandboxTarget
+} from '../workspace-identity.ts';
 
 const USAGE = `Usage: ai sandbox exec [--recreate] <branch | TASK-id | N> [cmd...]
 
@@ -128,7 +133,11 @@ export async function enter(args: string[]): Promise<number> {
   const { running, nonRunning } = fetchSandboxRows(
     engine,
     sandboxLabel(config),
-    sandboxBranchLabel(config)
+    sandboxBranchLabel(config),
+    {
+      mode: sandboxWorkspaceModeLabel(config),
+      taskId: sandboxTaskIdLabel(config)
+    }
   );
   const found = selectSandboxContainer(
     [...running, ...nonRunning],
@@ -140,11 +149,22 @@ export async function enter(args: string[]): Promise<number> {
       `No sandbox found for branch '${branch}'. Run 'ai sandbox create ${branch}' to create one.`
     );
   }
+  const containerWorkspace = found.workspaceMode === 'task-bound' && found.taskId
+    ? { mode: 'task-bound' as const, taskId: found.taskId }
+    : found.workspaceMode === 'branch-only'
+      ? { mode: 'branch-only' as const }
+      : { mode: 'legacy-invalid' as const };
+  const reentry = resolveSandboxReentryContext({
+    target,
+    containerWorkspace,
+    repoRoot: config.repoRoot
+  });
   const ready = await ensureSandboxReady({
     config,
     engine,
     branch,
-    workspace: target.workspace,
+    workspace: reentry.workspace,
+    reentry: reentry.reentry,
     row: found,
     allowRecreate: parsed.recreate,
     recreate: async () => {
