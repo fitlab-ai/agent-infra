@@ -78,19 +78,25 @@ description: >
 
 记录 `platform-pr create` 结构化结果中的 `result`（`pr_created`、`pr_reused` 或 `no_op`），并调用 `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue --result {primary-result}`。core 从 Issue 复制 type / `in:` labels、assignee 和具体 milestone，并维护 Development 关联；逐项权限不足返回 degraded，不反向更新 Issue。PR 已成功绑定后，metadata/summary 同步失败只产生与 primary result 对应的 `pr_created_with_warnings`、`pr_reused_with_warnings` 或 `no_op_with_warnings`，保留主动作事实，重试只执行未完成的同步步骤。
 
-### 7. 发布审查摘要
+### 7. 生成 PR 代码增减报告
+
+创建或唯一复用 PR 后，调用 `agent-infra-internal platform-pr inspect {task-id}` 取得权威 base/head SHA，并按 `reference/change-report.md` 统计完整 PR 的分类增减、rename 与疑似不必要变化。执行本步骤前先读取该 reference。
+
+报告既是下方 reviewer 摘要的一部分，也必须出现在最终用户回复中；不得只给总行数或只统计最后一个 commit。
+
+### 8. 发布审查摘要
 
 读取最新的上下文产物：`plan.md` / `plan-r{N}.md`、`review-plan.md` / `review-plan-r{N}.md`、`code.md` / `code-r{N}.md`、`review-code.md` / `review-code-r{N}.md`（存在时）。
 
-基于这些产物聚合 reviewer 摘要，并使用隐藏标记维护唯一且幂等的摘要评论。调用 `summary-sync` 时继续传递同一个 `--result {primary-result}`，不得根据同步子步骤猜测 PR 是创建还是复用。
+基于这些产物聚合 reviewer 摘要，并追加第 7 步生成的 `### PR 代码增减` 段落，再使用隐藏标记维护唯一且幂等的摘要评论。调用 `summary-sync` 时继续传递同一个 `--result {primary-result}`，不得根据同步子步骤猜测 PR 是创建还是复用。
 
 > canonical context、摘要聚合和 `summary-sync` 调用见 `reference/comment-publish.md`（其引用 `.agents/rules/pr-sync.md`）。发布摘要前先读取该 reference。
 
-### 8. 确认任务状态
+### 9. 确认任务状态
 
 `platform-pr create` 在成功创建或恢复唯一远端身份后，通过任务写入内核原子更新 `pr_number`、`pr_status`、规范时间/版本和 Create PR 完成日志。调用方只核对结构化结果，不再次编辑这些字段。
 
-### 9. 完成校验
+### 10. 完成校验
 
 如果本次操作关联了 `{task-id}`，运行完成校验，确认任务元数据和同步状态符合规范；如果没有任务上下文，跳过本步骤。
 
@@ -105,13 +111,13 @@ agent-infra-internal task-verify {task-id} create-pr.completed --format text
 
 将校验输出保留在回复中作为当次验证输出。没有当次校验输出，不得声明完成。
 
-### 10. 告知用户
+### 11. 告知用户
 
 > 仅在校验通过后执行本步骤。
 
 > 渲染下一步前先读取 `.agents/rules/next-step-output.md`，仅为已选场景调用统一 helper，并将 stdout 填入 `{next-step-commands}`。
 
-说明 PR URL、元数据同步结果、摘要评论结果，并推荐下一步进入 PR 监控（按 `.agents/rules/next-step-output.md` 把 `{task-ref}` 渲染为短号 `NN`）：
+说明 PR URL、元数据同步结果、摘要评论结果，完整展示第 7 步的分类统计表与必要性结论，并推荐下一步进入 PR 监控（按 `.agents/rules/next-step-output.md` 把 `{task-ref}` 渲染为短号 `NN`）：
 
 使用 `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}` 生成本场景的 `{next-step-commands}`。
 

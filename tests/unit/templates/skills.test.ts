@@ -1531,6 +1531,27 @@ test("create-pr enables Issue field verification in local and template configs",
   });
 });
 
+test("create-pr change reports keep one structured publication contract", () => {
+  for (const relativePath of skillDocPaths("create-pr")) {
+    assert.ok(read(relativePath).includes("reference/change-report.md"), `${relativePath} should reference the change-report contract`);
+  }
+
+  for (const relativePath of [
+    ".agents/skills/create-pr/reference/change-report.md",
+    "templates/.agents/skills/create-pr/reference/change-report.en.md",
+    "templates/.agents/skills/create-pr/reference/change-report.zh-CN.md"
+  ]) {
+    const match = read(relativePath).match(/<!-- pr-change-report-contract\n([^\n]+)\n-->/);
+    assert.ok(match, `${relativePath} should expose the structured change-report contract`);
+    assert.deepEqual(JSON.parse(match[1]!), {
+      version: 1,
+      source: "platform-pr-inspect",
+      diff: "three-dot-find-renames-numstat",
+      publish: ["pr-summary", "user-response"]
+    });
+  }
+});
+
 test("complete-task splits active preflight checks from completed-state checks", () => {
   [
     ".agents/skills/complete-task/config/verify.json",

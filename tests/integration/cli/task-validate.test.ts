@@ -67,6 +67,24 @@ writeStatus({ state: 'healthy', activeRequestId: null });
 process.exit(0);
 `;
 
+// Keeps precondition fixtures fresh while the blocking CLI child starts. A real
+// broker continuously publishes status; a one-shot fixture can become stale
+// under a busy full-suite run before task-validate reads it.
+const STATUS_HEARTBEAT_SOURCE = `
+const fs = require('node:fs');
+const [statusPath, patchJson, readyPath] = process.argv.slice(2);
+const patch = JSON.parse(patchJson);
+function publish() {
+  const current = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+  const temporaryPath = statusPath + '.' + process.pid + '.tmp';
+  fs.writeFileSync(temporaryPath, JSON.stringify({ ...current, ...patch, updatedAt: Date.now() }) + '\\n');
+  fs.renameSync(temporaryPath, statusPath);
+}
+publish();
+fs.writeFileSync(readyPath, 'ready\\n');
+setInterval(publish, 20);
+`;
+
 function startStateDriver(tmpDir: string, statusPath: string, leasePath: string, dockerLogPath: string) {
   const driverPath = path.join(tmpDir, 'state-driver.js');
   const diagnosticsLogPath = path.join(tmpDir, 'state-driver.log');
@@ -79,6 +97,19 @@ function startStateDriver(tmpDir: string, statusPath: string, leasePath: string,
       try { return fs.readFileSync(diagnosticsLogPath, 'utf8'); } catch { return ''; }
     }
   };
+}
+
+function startStatusHeartbeat(tmpDir: string, statusPath: string, patch: Record<string, unknown>) {
+  const heartbeatPath = path.join(tmpDir, 'status-heartbeat.js');
+  const readyPath = path.join(tmpDir, 'status-heartbeat.ready');
+  fs.writeFileSync(heartbeatPath, STATUS_HEARTBEAT_SOURCE, 'utf8');
+  const child = spawn(process.execPath, [heartbeatPath, statusPath, JSON.stringify(patch), readyPath], { stdio: 'ignore' });
+  const deadline = Date.now() + 5_000;
+  while (!fs.existsSync(readyPath) && child.exitCode === null && Date.now() < deadline) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  }
+  assert.equal(fs.existsSync(readyPath), true, 'status heartbeat did not become ready');
+  return child;
 }
 
 function inplaceFixture({ includeContainer = true }: { includeContainer?: boolean } = {}) {
@@ -190,6 +221,8 @@ test('inplace validation refuses to run when the broker is not idle', (t) => {
   const f = inplaceFixture();
   t.after(() => fs.rmSync(f.tmpDir, { recursive: true, force: true }));
   f.writeStatus({ state: 'busy', activeRequestId: 'other-request' });
+  const heartbeat = startStatusHeartbeat(f.tmpDir, f.statusPath, { state: 'busy', activeRequestId: 'other-request' });
+  t.after(() => { try { heartbeat.kill(); } catch { /* already exited */ } });
   const result = spawnTaskValidate(f.repoDir, f.env, [
     f.taskId, '--scope', 'inplace', '--format', 'json', '--', process.execPath, '-e', 'process.exit(0)'
   ]);
@@ -226,6 +259,8 @@ test('inplace validation refuses to run when the manifest generation does not ma
 test('inplace validation refuses to run when no matching container exists', (t) => {
   const f = inplaceFixture({ includeContainer: false });
   t.after(() => fs.rmSync(f.tmpDir, { recursive: true, force: true }));
+  const heartbeat = startStatusHeartbeat(f.tmpDir, f.statusPath, { state: 'healthy', activeRequestId: null });
+  t.after(() => { try { heartbeat.kill(); } catch { /* already exited */ } });
   const result = spawnTaskValidate(f.repoDir, f.env, [
     f.taskId, '--scope', 'inplace', '--format', 'json', '--', process.execPath, '-e', 'process.exit(0)'
   ]);

@@ -10,7 +10,7 @@ The model writes the semantic reviewer summary. Typed core owns canonical artifa
 agent-infra-internal platform-pr summary-context {task-id}
 ```
 
-Use only the returned latest canonical `plan*`, `review-plan*`, `code*`, `review-code*`, and `manual-validation*`. The summary covers scope, tests, review history, and exactly one manual-validation state.
+Use only the returned latest canonical `plan*`, `review-plan*`, `code*`, `review-code*`, and `manual-validation*` for lifecycle claims. The summary covers scope, tests, review history, and exactly one manual-validation state. It also includes a `### PR Code Changes` section based on authoritative base/head facts from `platform-pr inspect` and the complete `git diff --find-renames --numstat base...head`, with reconciled runtime, test, skill/rule, template, documentation, and other categories plus rename, mechanical-mirror, and unnecessary-change analysis.
 
 ## Publish
 

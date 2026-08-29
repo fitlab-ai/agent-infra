@@ -144,8 +144,14 @@ test('host finalization rejects a current receipt that omits warningProjection',
 
 test('host finalization returns actionable verification gate failures and retries them', () => {
   const f = fixture();
+  let commentCalls = 0;
+  const commentSnapshots: string[] = [];
   let verifyCalls = 0;
-  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => platformResult('no-op');
+  const commentSync: NonNullable<TaskFinalizationOptions['commentSync']> = () => {
+    commentCalls += 1;
+    commentSnapshots.push(fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8'));
+    return platformResult(commentCalls === 1 ? 'applied' : 'no-op');
+  };
   const verify: NonNullable<TaskFinalizationOptions['verify']> = () => {
     verifyCalls += 1;
     return verification(verifyCalls === 1 ? 'fail' : 'pass');
@@ -158,10 +164,14 @@ test('host finalization returns actionable verification gate failures and retrie
     assert.equal(failed.result, 'completed_with_warnings');
     assert.equal(failed.warnings[0]?.code, 'CHECK_FAILED');
     assert.match(failed.warnings[0]?.message ?? '', /Fix complete-task issues/);
-    assert.deepEqual(failed.pendingSteps, ['verification']);
+    assert.deepEqual(failed.pendingSteps, ['task-comment', 'verification']);
     assert.equal(recovered.status, 'completed');
     assert.equal(replay.status, 'completed');
     assert.equal(verifyCalls, 2);
+    assert.equal(commentCalls, 3);
+    assert.doesNotMatch(commentSnapshots[0]!, /CHECK_FAILED/);
+    assert.match(commentSnapshots[1]!, /\| CHECK_FAILED \| open \|/);
+    assert.match(commentSnapshots[2]!, /\| CHECK_FAILED \| resolved \|/);
   } finally {
     fs.rmSync(f.repoRoot, { recursive: true, force: true });
   }

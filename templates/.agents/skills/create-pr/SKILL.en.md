@@ -78,19 +78,25 @@ If `{task-id}` is available and the related task provides `issue_number`, keep `
 
 Capture the `result` field from `platform-pr create` (`pr_created`, `pr_reused`, or `no_op`), then run `agent-infra-internal platform-pr sync {task-id} --agent {standard-agent-token} --metadata --closing-issue --result {primary-result}`. The core copies type / `in:` labels, assignee, and a specific milestone from the Issue and maintains the closing association. Permission-bound items degrade independently, and the Issue is never updated in reverse. After the PR identity is bound, metadata or summary sync failures produce `pr_created_with_warnings`, `pr_reused_with_warnings`, or `no_op_with_warnings` from that primary result, preserve the primary-action fact, and retry only unfinished sync steps.
 
-### 7. Publish the Review Summary
+### 7. Generate the PR Code Change Report
+
+After creating or uniquely reusing the PR, run `agent-infra-internal platform-pr inspect {task-id}` to obtain the authoritative base/head SHAs, then follow `reference/change-report.md` to classify the complete PR additions/deletions, renames, and potentially unnecessary changes. Read that reference before this step.
+
+The report is part of the reviewer summary below and must also appear in the final user response. Do not provide only a grand total or inspect only the last commit.
+
+### 8. Publish the Review Summary
 
 Read the latest context artifacts when they exist: `plan.md` / `plan-r{N}.md`, `review-plan.md` / `review-plan-r{N}.md`, `code.md` / `code-r{N}.md`, and `review-code.md` / `review-code-r{N}.md`.
 
-Aggregate a reviewer-facing summary from those artifacts and maintain a single idempotent summary comment via the hidden marker. Pass the same `--result {primary-result}` to `summary-sync`; a sync substep must not infer whether the PR was created or reused.
+Aggregate a reviewer-facing summary from those artifacts, append the `### PR Code Changes` section generated in step 7, and maintain a single idempotent summary comment via the hidden marker. Pass the same `--result {primary-result}` to `summary-sync`; a sync substep must not infer whether the PR was created or reused.
 
 > Canonical context, aggregation, and the `summary-sync` call live in `reference/comment-publish.md`, which points to `.agents/rules/pr-sync.md`. Read that reference before publishing.
 
-### 8. Confirm Task Status
+### 9. Confirm Task Status
 
 After a PR is created or uniquely recovered, `platform-pr create` atomically updates `pr_number`, `pr_status`, canonical time/version metadata, and the Create PR completion log through the task write core. The caller verifies the structured result and does not edit those fields again.
 
-### 9. Verification Gate
+### 10. Verification Gate
 
 If this operation is associated with `{task-id}`, run the verification gate to confirm task metadata and sync state. If there is no task context, skip this step.
 
@@ -105,13 +111,13 @@ Handle the result as follows:
 
 Keep the gate output in your reply as fresh evidence. Do not claim completion without output from this run.
 
-### 10. Inform User
+### 11. Inform User
 
 > Execute this step only after the verification gate passes.
 
 > Before rendering next steps, read `.agents/rules/next-step-output.md`, invoke the shared helper only for the selected scenario, and insert its stdout at `{next-step-commands}`.
 
-Explain the created PR URL, summarize metadata sync and summary-comment results, and recommend watching the PR's checks next (render `{task-ref}` as the short id `NN` per `.agents/rules/next-step-output.md`):
+Explain the created PR URL, summarize metadata sync and summary-comment results, show the complete step 7 category table and necessity conclusion, and recommend watching the PR's checks next (render `{task-ref}` as the short id `NN` per `.agents/rules/next-step-output.md`):
 
 Populate `{next-step-commands}` for this scenario by running `agent-infra-internal agent-client next-steps --skill watch-pr --task-ref {task-ref}`.
 

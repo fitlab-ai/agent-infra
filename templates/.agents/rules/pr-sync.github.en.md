@@ -31,9 +31,10 @@ The canonical comment envelope produced by the core is:
 ### Key Technical Decisions
 ### Review History
 ### Test Results
+### PR Code Changes
 ```
 
-Canonical inputs include `manual-validation.md`. The manual-validation section is one of `### ✅ Manual Validation Passed`, `### ⚠️ Manual Verification Required`, or `### ✅ No Manual Verification Needed`; `complete-manual-validation` refreshes the same summary in place.
+Canonical inputs include `manual-validation.md`. The manual-validation section is one of `### ✅ Manual Validation Passed`, `### ⚠️ Manual Verification Required`, or `### ✅ No Manual Verification Needed`; `complete-manual-validation` refreshes the same summary in place. The PR code-change section uses authoritative base/head facts from `platform-pr inspect` and the complete `git diff --find-renames --numstat base...head`, reconciles runtime, test, skill/rule, template, documentation, and other categories, and explains renames, mechanical mirrors, and potentially unnecessary changes.
 
 ```bash
 agent-infra-internal task-warning {task-id} add --step {step} --severity WARNING \

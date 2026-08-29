@@ -85,6 +85,13 @@ type TaskFinalizationStep = Readonly<{
   pendingSteps?: readonly string[];
 }>;
 
+type TaskCommentSyncOutcome = Readonly<{
+  receipt: TaskFinalizationReceipt;
+  step: TaskFinalizationStep;
+  changed: boolean;
+  error: FinalizationError | null;
+}>;
+
 type TaskFinalizationResult = Readonly<{
   status: 'completed' | 'failed' | 'blocked';
   changed: boolean;
@@ -390,11 +397,18 @@ function mutationPatch(current: TaskFinalizationReceipt, mutation: FinalizationM
   }
   if (mutation.scope === 'verification') {
     if (mutation.operation === 'succeeded') {
+      const resolvedTaskWarning = current.warnings.some((warning) => warning.step === 'verification' && warning.status === 'open');
       const warnings = resolveStepWarnings(current, 'verification');
-      return { verification: 'done', warningProjection: warnings.length > 0 ? 'pending' : 'done', warnings, lastError: null };
+      return {
+        verification: 'done',
+        taskComment: resolvedTaskWarning ? 'pending' : current.taskComment,
+        warningProjection: warnings.length > 0 ? 'pending' : 'done',
+        warnings,
+        lastError: null
+      };
     }
     const warnings = replaceWarning(current, warningFromError('verification', mutation.error), 'open');
-    return { verification: 'pending', warningProjection: 'pending', warnings, lastError: mutation.error };
+    return { verification: 'pending', taskComment: 'pending', warningProjection: 'pending', warnings, lastError: mutation.error };
   }
   return mutation.operation === 'succeeded'
     ? { warningProjection: 'done', lastError: null }
@@ -470,6 +484,56 @@ function reconcileWarningProjection(repoRoot: string, taskId: string, receipt: T
     return applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, { scope: 'warning-projection', operation: 'succeeded' }, consumed);
   }
   catch { return receipt; }
+}
+
+function syncPendingTaskComment(input: {
+  repoRoot: string;
+  taskId: string;
+  agent: string;
+  receipt: TaskFinalizationReceipt;
+  commentSync: typeof syncPlatformComment;
+  consumedCapabilities: Set<string>;
+}): TaskCommentSyncOutcome {
+  const { repoRoot, taskId, agent, commentSync, consumedCapabilities } = input;
+  let receipt = input.receipt;
+  if (receipt.taskComment !== 'pending') {
+    return {
+      receipt,
+      step: { status: receipt.taskComment === 'skipped' ? 'skipped' : 'no-op', changed: false, error: null },
+      changed: false,
+      error: null
+    };
+  }
+  try {
+    const result = commentSync(taskId, { kind: 'task', agent, cwd: repoRoot });
+    const step = commentStep(result);
+    if (result.status === 'applied' || result.status === 'no-op') {
+      const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
+      const capability = issueCapability(receipt, 'task-comment');
+      receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+        scope: 'task-comment', operation: 'succeeded', state: skipped ? 'skipped' : 'done'
+      }, consumedCapabilities);
+      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+      return { receipt, step: skipped ? { ...step, status: 'skipped' } : step, changed: result.changed, error: null };
+    }
+    const detail = step.error ?? { code: 'COMMENT_SYNC_FAILED', message: 'task comment synchronization failed', retryable: true };
+    const capability = issueCapability(receipt, 'task-comment');
+    receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+      scope: 'task-comment', operation: 'failed', error: detail
+    }, consumedCapabilities);
+    receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+    return { receipt, step, changed: result.changed, error: detail };
+  } catch (error) {
+    const detail = errorOf(error, 'COMMENT_SYNC_FAILED', true);
+    try {
+      const capability = issueCapability(receipt, 'task-comment');
+      receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
+        scope: 'task-comment', operation: 'failed', error: detail
+      }, consumedCapabilities);
+      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+    } catch { /* preserve the primary error */ }
+    return { receipt, step: { status: 'blocked', changed: false, error: detail }, changed: false, error: detail };
+  }
 }
 
 function terminalResult(
@@ -603,46 +667,15 @@ function applyUnderLock(
   }
 
   let taskComment: TaskFinalizationStep | null = null;
-  try {
-    receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-    if (receipt.taskComment !== 'pending') {
-      taskComment = {
-        status: receipt.taskComment === 'skipped' ? 'skipped' : 'no-op',
-        changed: false,
-        error: null
-      };
-    } else {
-      const result = commentSync(taskId, { kind: 'task', agent: request.agent, cwd: repoRoot });
-      taskComment = commentStep(result);
-      if (result.status === 'applied' || result.status === 'no-op') {
-        const skipped = result.error?.code === 'ISSUE_NOT_LINKED';
-        const capability = issueCapability(receipt, 'task-comment');
-        receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
-          scope: 'task-comment', operation: 'succeeded', state: skipped ? 'skipped' : 'done'
-        }, consumedCapabilities);
-        receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-        taskComment = skipped ? { ...taskComment, status: 'skipped' } : taskComment;
-        changed = changed || result.changed;
-      } else {
-        const detail = taskComment.error ?? { code: 'COMMENT_SYNC_FAILED', message: 'task comment synchronization failed', retryable: true };
-        const capability = issueCapability(receipt, 'task-comment');
-        receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
-          scope: 'task-comment', operation: 'failed', error: detail
-        }, consumedCapabilities);
-        receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-        return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification: null }, changed, taskComment.error);
-      }
-    }
-  } catch (error) {
-    const detail = errorOf(error, 'COMMENT_SYNC_FAILED', true);
-    try {
-      const capability = issueCapability(receipt, 'task-comment');
-      receipt = applyFinalizationReceiptMutationUnderLock(repoRoot, receipt, capability, {
-        scope: 'task-comment', operation: 'failed', error: detail
-      }, consumedCapabilities);
-      receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
-    } catch { /* preserve the primary error */ }
-    return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment: { status: 'blocked', changed: false, error: detail }, verification: null }, changed, detail);
+  receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+  const initialComment = syncPendingTaskComment({
+    repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities
+  });
+  receipt = initialComment.receipt;
+  taskComment = initialComment.step;
+  changed = changed || initialComment.changed;
+  if (initialComment.error) {
+    return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification: null }, changed, initialComment.error);
   }
 
   let verification: TaskFinalizationStep | null = null;
@@ -662,6 +695,15 @@ function applyUnderLock(
           scope: 'verification', operation: 'succeeded'
         }, consumedCapabilities);
         receipt = reconcileWarningProjection(repoRoot, taskId, receipt, consumedCapabilities);
+        const finalComment = syncPendingTaskComment({
+          repoRoot, taskId, agent: request.agent, receipt, commentSync, consumedCapabilities
+        });
+        receipt = finalComment.receipt;
+        if (finalComment.step.status !== 'no-op') taskComment = finalComment.step;
+        changed = changed || finalComment.changed;
+        if (finalComment.error) {
+          return terminalResult(taskId, receipt, { lifecycle: lifecycleResult, taskComment, verification }, changed, finalComment.error);
+        }
       } else {
         const detail = verification.error ?? { code: 'VERIFY_FAILED', message: 'verification failed', retryable: true };
         const capability = issueCapability(receipt, 'verification');
