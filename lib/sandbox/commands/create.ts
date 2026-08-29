@@ -1423,10 +1423,10 @@ export async function create(args: string[]): Promise<void> {
               ...(target.workspace.mode === 'task-bound' ? { runtimeDir: control.runtimeDir } : {}),
               ...(target.workspace.mode === 'task-bound'
                 ? {
-                  taskSource: assertSandboxTaskSource(
+                  taskSources: [assertSandboxTaskSource(
                     effectiveConfig.repoRoot,
                     target.workspace.taskId
-                  ),
+                  )],
                   taskId: target.workspace.taskId
                 }
                 : {})

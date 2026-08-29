@@ -27,13 +27,11 @@ export function sandboxCoreBindMounts(
     controlDir: string;
     controlStatusDir: string;
     runtimeDir?: string;
-    taskSource?: string;
     taskSources?: string[];
     taskId?: string;
   }
 ): SandboxBindMountDeclaration[] {
-  const taskSources = overrides.taskSources
-    ?? (overrides.taskSource ? [overrides.taskSource] : []);
+  const taskSources = overrides.taskSources ?? [];
   const taskBound = Boolean(taskSources.length > 0 && overrides.taskId);
   const workspaceMounts = sandboxWorkspaceViewStatePaths(overrides.workspaceViewRoot).map(
     ({ state, hostPath }) => taskBound && state === 'active'
