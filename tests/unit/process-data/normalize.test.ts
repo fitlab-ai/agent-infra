@@ -97,6 +97,37 @@ test('normalization preserves repeated historical rows with unique deterministic
   assert.equal(quality.filter((finding) => finding.category === 'duplicate-identity').length, 2);
 });
 
+test('normalization canonicalizes activity actors through the current token rules', () => {
+  const actors = ['human', 'claude', 'traecli', 'claude-code', 'antigravity-cli', 'devuser', 'gemini', 'gemini-cli'];
+  const task: CapturedObject = {
+    sourceKind: 'local-file',
+    sourceIdentity: '.agents/workspace/active/TASK-20260101-000002/task.md',
+    sha256: 'e'.repeat(64),
+    bytes: 400,
+    content: [
+      '---',
+      'id: TASK-20260101-000002',
+      '---',
+      '',
+      '## 活动日志',
+      ...actors.map((actor, index) => `- 2026-01-01 00:00:0${index}+00:00 — **Step ${index}** by ${actor} — actor test`),
+      ''
+    ].join('\n')
+  };
+
+  const lifecycle = normalizeObjects([task])
+    .filter((record) => record.kind === 'lifecycle-event')
+    .sort((left, right) => {
+      const leftTime = (left.data as { timestamp: string }).timestamp;
+      const rightTime = (right.data as { timestamp: string }).timestamp;
+      return leftTime.localeCompare(rightTime);
+    });
+  assert.deepEqual(
+    lifecycle.map((record) => (record.data as { actorCanonical: string | null }).actorCanonical),
+    ['human', 'claude', 'traecli', 'claude', 'antigravity', null, null, null]
+  );
+});
+
 test('resource normalization uses stable resource identity instead of page identity', () => {
   const records = normalizeResources([{
     sourceKind: 'github-rest',

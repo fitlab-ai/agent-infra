@@ -1,6 +1,6 @@
 # PR 平台意图命令
 
-> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`antigravity`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`antigravity-cli`→`antigravity`）或人工例外 `human`。
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
 PR 资源的定位、创建、绑定和元数据同步统一通过 typed internal intent；SKILL 只负责决定分支、标题、正文和调用时机，不直接拼装平台命令。
 

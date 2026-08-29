@@ -556,7 +556,7 @@ test('stage completion rejects cross-client and unknown activity tokens', () => 
   assert.equal(activated.ok, true);
   if (!activated.ok) return;
 
-  for (const agent of ['codex', 'gemini']) {
+  for (const agent of ['codex', 'devuser']) {
     const completed = completeDelegationStage(activated.receipt, {
       stage: 'review-code',
       round: 1,

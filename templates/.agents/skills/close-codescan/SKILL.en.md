@@ -6,7 +6,7 @@ description: >
 ---
 
 # Dismiss Code Scanning Alert
-> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`antigravity`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `antigravity-cli`->`antigravity`), or the `human` manual exception.
+> `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
 
 Dismiss the specified Code Scanning (CodeQL) alert and record a justified reason.

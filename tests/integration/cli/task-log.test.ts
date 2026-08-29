@@ -361,7 +361,7 @@ test('ai task log renders legacy long-name agents as their short token', () => {
   // renderer maps them to the canonical short token (claude-code -> claude).
   writeTask(activeDir, taskId, '## 活动日志', [
     '- 2026-06-18 14:00:00+08:00 — **Code Task (Round 1)** by claude-code — Code implemented → code.md',
-    '- 2026-06-18 15:00:00+08:00 — **Review Plan (Round 1)** by gemini-cli — Plan reviewed → review-plan.md'
+    '- 2026-06-18 15:00:00+08:00 — **Review Plan (Round 1)** by antigravity-cli — Plan reviewed → review-plan.md'
   ]);
 
   const out = runCli(['task', 'log', taskId], repoRoot);
@@ -370,7 +370,7 @@ test('ai task log renders legacy long-name agents as their short token', () => {
   // are NOT given the `(unknown)` marker and keep an empty STARTED on a
   // done-only row.
   assert.match(out.stdout, /^1\s+Code Task \(Round 1\)\s+claude\s+2026-06-18 14:00:00\+08:00\s+Code implemented → code\.md/m);
-  assert.match(out.stdout, /^2\s+Review Plan \(Round 1\)\s+gemini\s+2026-06-18 15:00:00\+08:00\s+Plan reviewed, Manual-validation: 0, Human-decision: 0 → review-plan\.md/m);
+  assert.match(out.stdout, /^2\s+Review Plan \(Round 1\)\s+antigravity\s+2026-06-18 15:00:00\+08:00\s+Plan reviewed, Manual-validation: 0, Human-decision: 0 → review-plan\.md/m);
   assert.match(out.stdout, /^Total: 2 steps$/m);
 });
 

@@ -22,12 +22,6 @@ test('normalizeAgentToken maps long names to short tokens (HD-4)', () => {
   assert.equal(normalizeAgentToken('antigravity-cli'), 'antigravity');
 });
 
-test('normalizeAgentToken rejects historical gemini tokens on the write side', () => {
-  for (const token of ['gemini', 'gemini-cli']) {
-    assert.equal(normalizeAgentToken(token), null, token);
-  }
-});
-
 test('normalizeAgentToken keeps human as the single manual-executor token', () => {
   assert.equal(normalizeAgentToken('human'), 'human');
   assert.equal(normalizeAgentToken('  human  '), 'human');
@@ -48,14 +42,13 @@ test('normalizeAgentToken exposes the long-name mapping as the single source', (
 // --- classifyAgent: loose rendering-side classification ---
 
 test('classifyAgent treats every known AI short and long token as ai', () => {
-  for (const token of [...KNOWN_AI_AGENTS, 'gemini', 'claude-code', 'gemini-cli', 'antigravity-cli']) {
+  for (const token of [...KNOWN_AI_AGENTS, 'claude-code', 'antigravity-cli']) {
     assert.equal(classifyAgent(token).status, 'ai', token);
   }
 });
 
 test('classifyAgent renders known long names to their short display token', () => {
   assert.deepEqual(classifyAgent('claude-code'), { status: 'ai', display: 'claude' });
-  assert.deepEqual(classifyAgent('gemini-cli'), { status: 'ai', display: 'gemini' });
   assert.deepEqual(classifyAgent('antigravity-cli'), { status: 'ai', display: 'antigravity' });
 });
 

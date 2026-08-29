@@ -92,8 +92,8 @@ function isHumanCountField(field: string): boolean {
 }
 
 // A step is human-executed when its agent token is not a known AI token.
-// Known long names (claude-code -> claude, gemini-cli -> gemini) classify as
-// AI; empty or unknown tokens classify as non-AI (human).
+// Known long names classify as AI; empty or unknown tokens classify as non-AI
+// (human).
 export function isHumanAgent(agent: string): boolean {
   return classifyAgent(agent).status !== 'ai';
 }
