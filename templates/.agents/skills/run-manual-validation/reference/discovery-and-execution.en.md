@@ -58,7 +58,7 @@ Only `executable` items may run. Commands must not expose credentials, environme
 1. Invoke each executable item separately:
 
    ```bash
-   ai task validate {task-ref} --scope snapshot --format json -- {command...}
+   agent-infra-internal task-validate {task-ref} --scope snapshot --format json -- {command...}
    ```
 
 2. Only when the item or first-run evidence proves a dependency on uncommitted content, original mounts, or in-place permissions, explicitly invoke that item a second time with `--scope inplace` and record the reason.

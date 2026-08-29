@@ -37,7 +37,7 @@ $ agent-infra-internal task-snapshot {task-id} --format text
 ## 结构化证据
 
 ```json
-{sanitized-ai-task-validate-json}
+{sanitized-task-validate-json}
 ```
 
 ## 逐项结果
@@ -64,6 +64,6 @@ $ agent-infra-internal task-snapshot {task-id} --format text
 ## 证据原文
 
 ```text
-$ ai task validate {task-ref} --scope {scope} --format json -- {redacted-command}
+$ agent-infra-internal task-validate {task-ref} --scope {scope} --format json -- {redacted-command}
 {sanitized-result}
 ```

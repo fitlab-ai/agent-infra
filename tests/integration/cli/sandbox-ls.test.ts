@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { cliArgs, envWithPrependedPath, gitSafeEnv, writeSandboxEngineFixture } from '../../helpers.ts';
+import { cliArgs, envWithPrependedPath, gitSafeEnv, sandboxRow, writeSandboxEngineFixture } from '../../helpers.ts';
 
 // clack renders section headers (p.log.step) on stdout prefixed with this glyph.
 const STEP_GLYPH = '◇'; // ◇
@@ -32,10 +32,6 @@ function spawnSandboxCli(
     },
     encoding: 'utf8'
   });
-}
-
-function sandboxRow(name: string, branch: string, project = 'demo'): string {
-  return `${name}\tUp 1 minute\t${project}.sandbox.branch=${branch},${project}.sandbox=true`;
 }
 
 test('ai sandbox ls shows only the Containers section (no worktree/state sections)', () => {

@@ -164,6 +164,11 @@ if (
     taskVerify(process.argv.slice(3));
     break;
   }
+  case 'task-validate': {
+    const { taskValidate } = await import('../lib/internal/task-validate.ts');
+    taskValidate(process.argv.slice(3));
+    break;
+  }
   default:
     process.stdout.write(`${JSON.stringify({
       status: 'failed',

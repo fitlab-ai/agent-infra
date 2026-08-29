@@ -37,7 +37,7 @@ $ agent-infra-internal task-snapshot {task-id} --format text
 ## Structured Evidence
 
 ```json
-{sanitized-ai-task-validate-json}
+{sanitized-task-validate-json}
 ```
 
 ## Per-item Results
@@ -64,6 +64,6 @@ $ agent-infra-internal task-snapshot {task-id} --format text
 ## Raw Evidence
 
 ```text
-$ ai task validate {task-ref} --scope {scope} --format json -- {redacted-command}
+$ agent-infra-internal task-validate {task-ref} --scope {scope} --format json -- {redacted-command}
 {sanitized-result}
 ```
