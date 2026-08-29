@@ -7,7 +7,7 @@ description: >
 ---
 
 # 完成任务
-> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`antigravity`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`antigravity-cli`→`antigravity`）或人工例外 `human`。
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
 宿主 finalization 使用 receipt v2（不可变 `receiptId`、单调 `revision` 和 canonical warnings）。生命周期/身份/required PR 等硬失败返回 `result: failed|blocked`；生命周期完成后，评论、外围验证和其他同步失败返回 `result: completed_with_warnings` 及六字段 warning，并仅重试 receipt 中的 pending step。
 

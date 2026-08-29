@@ -23,9 +23,8 @@ Map user intent to the corresponding workflow command:
 
 `--agent` values must converge on the standard AI collaborator tokens; OS usernames (e.g. `devuser`) and git usernames (e.g. a human name) are forbidden. The standard set (short tokens are the single source of truth for the activity log):
 
-- AI short tokens: `claude` / `codex` / `antigravity` / `opencode` / `cursor`
+- AI short tokens: `claude` / `codex` / `antigravity` / `opencode` / `cursor` / `traecli`
 - Long-name mapping (normalized to the short token before writing): `claude-code` -> `claude`, `antigravity-cli` -> `antigravity`
-- Historical `gemini` / `gemini-cli` remain read-only for `ai task log` rendering and are not writable
 - Manual-step exception: no matter which agent is used, a human-made decision is always declared as `human`
 
 The seven internal commands (`task-event` / `task-lifecycle` / `task-finalization` / `platform-issue` / `platform-comment` / `platform-pr` / `task-orchestration`) hard-validate `--agent` against a whitelist: they accept a short token, a long name, or `human`, and reject non-standard values with the matching `*_PAYLOAD_INVALID` error; long names are normalized to the short token before being persisted or forwarded. The `ai task log` renderer keeps unknown tokens grouped as `human` but appends a visible `(unknown)` marker.

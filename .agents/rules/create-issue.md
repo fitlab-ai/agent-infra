@@ -1,6 +1,6 @@
 # Issue 创建
 
-> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`antigravity`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`antigravity-cli`→`antigravity`）或人工例外 `human`。
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
 当 `create-task` 完成本地 `task.md` 落盘后，通过声明式内部命令创建 Issue：
 

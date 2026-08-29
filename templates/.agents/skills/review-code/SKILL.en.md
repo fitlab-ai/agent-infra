@@ -7,7 +7,7 @@ description: >
 ---
 
 # Code Review
-> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`antigravity`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `antigravity-cli`->`antigravity`), or the `human` manual exception.
+> `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
 If the entry operands contain `--orchestrated`, bind `{execution-flag}` to `--orchestrated` and forward it unchanged to both the summary finalizer and completed event; otherwise bind it to an empty value. Never infer it from `orchestration.json`, environment variables, or prior artifacts.
 

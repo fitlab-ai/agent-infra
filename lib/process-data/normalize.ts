@@ -1,4 +1,5 @@
 import { sha256 } from './store.ts';
+import { normalizeAgentToken } from '../agent-clients/tokens.ts';
 
 import type { CapturedObject, JsonValue, NormalizedKind, NormalizedRecord } from './types.ts';
 
@@ -14,14 +15,7 @@ function recordId(kind: NormalizedKind, identity: string, suffix = ''): string {
 
 function canonicalActor(raw: string): string | null {
   const lowered = raw.toLowerCase();
-  const aliases: Record<string, string> = {
-    'claude-code': 'claude',
-    'antigravity-cli': 'antigravity',
-    'gemini-cli': 'gemini',
-    gemini: 'gemini'
-  };
-  if (['claude', 'codex', 'antigravity', 'opencode', 'cursor', 'human'].includes(lowered)) return lowered;
-  return aliases[lowered] ?? null;
+  return normalizeAgentToken(lowered);
 }
 
 function nextOccurrence(occurrences: Map<string, number>, identity: string): string {

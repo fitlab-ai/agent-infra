@@ -7,7 +7,7 @@ description: >
 ---
 
 # Complete Task
-> `--agent` values follow the "Collaborator Token Specification" in `.agents/rules/task-management.md`: standard AI short tokens (`claude`/`codex`/`antigravity`/`opencode`/`cursor`), long-name normalization (`claude-code`->`claude`, `antigravity-cli`->`antigravity`), or the `human` manual exception.
+> `--agent` values are defined in `.agents/rules/task-management.md` under “Collaborator Token Specification”.
 
 Host finalization uses receipt v2 with an immutable `receiptId`, monotonic `revision`, and canonical warnings. Lifecycle/identity/required-PR hard failures return `result: failed|blocked`; after lifecycle succeeds, comment, peripheral verification, and other sync failures return `result: completed_with_warnings` and six-field warnings, retrying only receipt-pending steps.
 

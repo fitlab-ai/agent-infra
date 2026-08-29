@@ -1,6 +1,6 @@
 # Issue 同步规则
 
-> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」：标准 AI 短名（`claude`/`codex`/`antigravity`/`opencode`/`cursor`）、长名归一化（`claude-code`→`claude`、`antigravity-cli`→`antigravity`）或人工例外 `human`。
+> `--agent` 取值见 `.agents/rules/task-management.md`「合作者 token 规范」。
 
 ## Marker 注册表
 
@@ -27,7 +27,7 @@ agent-infra-internal platform-context resolve [--cwd <path>]
 agent-infra-internal platform-comment list --issue <N> [--cwd <path>]
 agent-infra-internal platform-comment owner <task-ref>
 agent-infra-internal platform-comment sync <task-ref> \
-  --kind task|artifact|summary|cancel --agent <standard-agent-token> \
+  --kind task|artifact|summary|cancel --agent {standard-agent-token} \
   [--artifact <canonical.md>] [--body-file <path|->] [--backfill]
 ```
 
