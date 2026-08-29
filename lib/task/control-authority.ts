@@ -401,20 +401,32 @@ function operationInvalid(message: string): never {
   throw new Error(`TASK_CONTROL_OPERATION_INVALID: ${message}`);
 }
 
-function parseValues(args: readonly string[], start: number): Record<string, string | boolean> {
+const LIFECYCLE_FLAGS = new Set([
+  '--agent', '--reason', '--unblock-condition', '--note', '--alert-number', '--staging-dir', '--issue-number',
+  '--override-ticket', '--override-target', '--override-scope', '--dry-run'
+]);
+
+const FINALIZATION_FLAGS = new Set(['--agent']);
+
+const ORCHESTRATION_FLAGS = new Set([
+  '--agent', '--max-steps', '--executor-model', '--executor-reasoning-effort', '--reviewer-model',
+  '--reviewer-reasoning-effort', '--client', '--requested-model', '--requested-reasoning-effort',
+  '--capability-token', '--parent-id', '--before-fingerprint', '--stage', '--round', '--artifact', '--role',
+  '--native-agent', '--child-id', '--spawn-mode', '--actual-model', '--actual-reasoning-effort',
+  '--model-fallback-reason', '--reasoning-effort-fallback-reason', '--exit-code', '--after-fingerprint',
+  '--changed-paths', '--code', '--message', '--recoverable', '--git-worktree-root'
+]);
+
+function parseValues(
+  args: readonly string[],
+  start: number,
+  flags: ReadonlySet<string>
+): Record<string, string | boolean> {
   const values: Record<string, string | boolean> = {};
-  const flags = new Set([
-    '--agent', '--reason', '--unblock-condition', '--note', '--alert-number', '--staging-dir', '--issue-number',
-    '--override-ticket', '--override-target', '--override-scope', '--max-steps', '--executor-model',
-    '--executor-reasoning-effort', '--reviewer-model', '--reviewer-reasoning-effort', '--client', '--requested-model',
-    '--requested-reasoning-effort', '--capability-token', '--parent-id', '--before-fingerprint', '--stage', '--round',
-    '--artifact', '--role', '--native-agent', '--child-id', '--spawn-mode', '--actual-model',
-    '--actual-reasoning-effort', '--model-fallback-reason', '--reasoning-effort-fallback-reason', '--exit-code',
-    '--after-fingerprint', '--changed-paths', '--code', '--message', '--recoverable', '--git-worktree-root'
-  ]);
   for (let index = start; index < args.length; index += 1) {
     const flag = args[index]!;
     if (flag === '--dry-run') {
+      if (!flags.has(flag)) operationInvalid(`unknown option '${flag}'`);
       if (values[flag] !== undefined) operationInvalid(`duplicate option '${flag}'`);
       values[flag] = true;
       continue;
@@ -440,19 +452,22 @@ function required(values: Record<string, string | boolean>, flags: readonly stri
 
 export function parseTaskControlOperation(
   family: 'task-lifecycle' | 'task-orchestration' | 'task-finalization',
-  args: readonly string[],
-  finalizationAgent?: string
+  args: readonly string[]
 ): TaskControlOperation {
   if (family === 'task-finalization') {
-    const agent = normalizeAgentToken(finalizationAgent ?? '');
+    if (args.length !== 4 || args[1] !== 'complete' || args[2] !== '--agent' || !args[0] || !args[3]) {
+      operationInvalid('task ref, complete intent, and --agent are required');
+    }
+    const values = parseValues(args, 2, FINALIZATION_FLAGS);
+    const agent = normalizeAgentToken(value(values, '--agent') ?? '');
     if (!agent) operationInvalid('finalization agent is invalid');
-    return { family, request: { taskRef: args[0] ?? '', intent: 'complete', agent } };
+    return { family, request: { taskRef: args[0]!, intent: 'complete', agent } };
   }
   if (args.length < 2) operationInvalid('task ref and intent are required');
   const taskRef = args[0]!;
   const intent = args[1]!;
-  const values = parseValues(args, 2);
   if (family === 'task-lifecycle') {
+    const values = parseValues(args, 2, LIFECYCLE_FLAGS);
     const agent = normalizeAgentToken(value(values, '--agent') ?? '');
     if (!agent) operationInvalid('lifecycle agent is invalid');
     const input: Record<string, unknown> = {
@@ -473,6 +488,7 @@ export function parseTaskControlOperation(
     return { family, request: input as unknown as TaskLifecycleControlRequest };
   }
 
+  const values = parseValues(args, 2, ORCHESTRATION_FLAGS);
   const orchestrationIntents = new Set<TaskControlOrchestrationIntent>([
     'begin-or-resume', 'route', 'prepare', 'dispatch', 'await-activation', 'recover-prepared',
     'hook-start', 'hook-stop', 'advance', 'pause', 'status'
@@ -480,11 +496,12 @@ export function parseTaskControlOperation(
   if (!orchestrationIntents.has(intent as TaskControlOrchestrationIntent)) {
     operationInvalid(`unknown orchestration intent '${intent}'`);
   }
+  const client = value(values, '--client');
+  if (client !== undefined && !isAgentClientId(client)) operationInvalid(`unknown client '${client}'`);
   const parsedIntent = intent as TaskControlOrchestrationIntent;
   const input: Record<string, unknown> = {};
   if (parsedIntent === 'begin-or-resume' || parsedIntent === 'prepare') {
     required(values, ['--client']);
-    const client = value(values, '--client');
     if (!client || !isAgentClientId(client)) operationInvalid(`unknown client '${client ?? ''}'`);
     input.client = client;
   }

@@ -234,16 +234,6 @@ function finalizationResult(result: ReturnType<typeof applyTaskFinalization>): S
   };
 }
 
-function isCodexPrepare(args: readonly string[]): boolean {
-  if (args[1] !== 'prepare') return false;
-  const values: string[] = [];
-  for (let index = 2; index < args.length; index += 1) {
-    if (args[index] === '--client') values.push(args[index + 1] ?? '');
-    else if (args[index]?.startsWith('--client=')) values.push(args[index]!.slice('--client='.length));
-  }
-  return values.length === 1 && values[0] === 'codex';
-}
-
 type ExecuteRequestOptions = Readonly<{
   buildIdentity?: typeof computeLifecycleBuildIdentity;
   resolveControllerBinding?: typeof resolveCodexControllerBinding;
@@ -307,7 +297,9 @@ export async function executeRequest(
     }
   }
   if (request.family === 'task-finalization') {
-    const operation = parseTaskControlOperation('task-finalization', [manifest.taskId!], request.agent);
+    const operation = parseTaskControlOperation(
+      'task-finalization', [manifest.taskId!, 'complete', '--agent', request.agent]
+    );
     if (operation.family !== 'task-finalization') throw new Error('SANDBOX_CONTROL_FINALIZATION_OPERATION_INVALID');
     const result = dispatchTaskControlOperation(
       createSandboxExecutorExecutionContext({
@@ -324,12 +316,28 @@ export async function executeRequest(
     return finalizationResult(result);
   }
   const boundArgs = bindSandboxControlTask(request, manifest.taskId!);
+  if (request.family === 'task-orchestration') {
+    boundArgs.push('--git-worktree-root', manifest.worktreeRoot);
+  }
+  let operation: TaskControlOperation;
+  try {
+    operation = parseTaskControlOperation(request.family, boundArgs);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'TASK_CONTROL_OPERATION_INVALID';
+    return request.family === 'task-lifecycle'
+      ? lifecycleFailure('LIFECYCLE_PAYLOAD_INVALID', message)
+      : orchestrationFailure(code, message);
+  }
   let controllerBinding: Readonly<{
     instanceDigest: string;
     controlGeneration: string;
   }> | null = null;
   if (request.family === 'task-orchestration') {
-    if (isCodexPrepare(request.args)) {
+    const codexPrepare = operation.family === 'task-orchestration'
+      && operation.intent === 'prepare'
+      && operation.input.client === 'codex';
+    if (codexPrepare) {
       if (!request.controllerProof) {
         return orchestrationFailure(
           'CODEX_SANDBOX_CONTROLLER_PROOF_REQUIRED',
@@ -355,17 +363,6 @@ export async function executeRequest(
         'Controller proof is only accepted for canonical Codex prepare'
       );
     }
-    boundArgs.push('--git-worktree-root', manifest.worktreeRoot);
-  }
-  let operation: TaskControlOperation;
-  try {
-    operation = parseTaskControlOperation(request.family, boundArgs);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const code = /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'TASK_CONTROL_OPERATION_INVALID';
-    return request.family === 'task-lifecycle'
-      ? lifecycleFailure('LIFECYCLE_PAYLOAD_INVALID', message)
-      : orchestrationFailure(code, message);
   }
   const context = createSandboxExecutorExecutionContext({
     repoRoot: manifest.repoRoot,
