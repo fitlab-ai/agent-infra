@@ -28,11 +28,12 @@ import {
   sandboxControlPaths,
   sandboxWorkspaceViewPaths
 } from './workspace-view.ts';
+import { resolveTaskWorkspace } from './task-resolver.ts';
 import {
   parseSandboxWorkspaceIdentity,
   sameSandboxWorkspaceIdentity,
   type SandboxContainerWorkspaceIdentity,
-  type SandboxWorkspaceIdentity
+  type SandboxWorkspaceReference
 } from './workspace-identity.ts';
 import { inspectWorktree, type WorktreeSnapshot } from './worktree-safety.ts';
 import { commandForEngine, runEngine, runOkEngine, runProbe, runVerboseEngine } from './shell.ts';
@@ -91,7 +92,7 @@ export type SandboxRecoverySnapshot = {
   containerIdValid: boolean;
   expectedBranch: string;
   actualBranch: string | null;
-  expectedWorkspace: SandboxWorkspaceIdentity;
+  expectedWorkspace: SandboxWorkspaceReference;
   actualWorkspace: SandboxContainerWorkspaceIdentity;
   workspaceTopology?: 'legacy-parent' | 'per-state' | 'unknown';
   taskView?: { path: string; readable: boolean };
@@ -174,7 +175,8 @@ type EnsureSandboxReadyParams = {
   config: SandboxConfig;
   engine: string;
   branch: string;
-  workspace?: SandboxWorkspaceIdentity;
+  workspace?: SandboxWorkspaceReference;
+  reentry?: 'standard' | 'completed';
   row: SandboxRow;
   allowRecreate?: boolean;
   forceRecreate?: boolean;
@@ -187,6 +189,7 @@ type ExpectedMount = {
   path: string;
   expectedType: 'bind' | 'tmpfs';
   hostPaths: string[];
+  sourceAccessiblePaths?: string[];
   expectedRW: boolean;
 };
 
@@ -324,7 +327,7 @@ export async function startSandboxControlBroker(repoRoot: string, manifestPath: 
 async function ensureSandboxControlBroker(params: {
   config: SandboxConfig;
   container: string;
-  workspace: SandboxWorkspaceIdentity;
+  workspace: SandboxWorkspaceReference;
 }): Promise<void> {
   const control = sandboxControlPaths({
     base: params.config.controlBase ?? path.join(params.config.home, '.agent-infra', 'sandbox-control'),
@@ -603,6 +606,53 @@ function sourceCandidates(engine: string, hostPath: string): string[] {
   return [...new Set(candidates.map((candidate) => normalizeMountSource(engine, candidate)))];
 }
 
+function recoveryTaskSources(repoRoot: string, taskId: string): {
+  mountPaths: string[];
+  accessiblePaths: string[];
+} {
+  const activePath = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
+  const completedPath = path.join(repoRoot, '.agents', 'workspace', 'completed', taskId);
+  if (fs.existsSync(activePath) && !fs.existsSync(completedPath)) {
+    const source = assertSandboxTaskSource(repoRoot, taskId);
+    return { mountPaths: [source], accessiblePaths: [source] };
+  }
+
+  const task = resolveTaskWorkspace(taskId, repoRoot);
+  if (task.state === 'active') {
+    const source = assertSandboxTaskSource(repoRoot, taskId);
+    return { mountPaths: [source], accessiblePaths: [source] };
+  }
+  if (task.state !== 'completed') {
+    throw new Error(`SANDBOX_TASK_SOURCE_STATE_UNSUPPORTED: task ${taskId} is ${task.state}`);
+  }
+
+  const completedRoot = fs.realpathSync.native(
+    path.join(repoRoot, '.agents', 'workspace', 'completed')
+  );
+  const completedSource = fs.realpathSync.native(path.dirname(task.taskMd));
+  if (path.dirname(completedSource) !== completedRoot) {
+    throw new Error(`SANDBOX_TASK_SOURCE_INVALID: ${completedSource} is not under completed workspace`);
+  }
+
+  const historicalActivePath = path.join(
+    repoRoot,
+    '.agents',
+    'workspace',
+    'active',
+    taskId
+  );
+  const mountPaths = [completedSource, historicalActivePath];
+  if (fs.existsSync(historicalActivePath)) {
+    try {
+      mountPaths[1] = fs.realpathSync.native(historicalActivePath);
+    } catch {
+      // Keep the exact historical path as a candidate; the current completed
+      // source remains the only source that must still be accessible.
+    }
+  }
+  return { mountPaths, accessiblePaths: [completedSource] };
+}
+
 function sameHostSource(left: string, right: string): boolean {
   try {
     const leftStat = fs.statSync(left, { bigint: true });
@@ -629,7 +679,7 @@ function expectedMounts(params: {
   config: SandboxConfig;
   branch: string;
   container: string;
-  workspace: SandboxWorkspaceIdentity;
+  workspace: SandboxWorkspaceReference;
   tools: readonly SandboxTool[];
   actualMounts: Map<string, DockerMount>;
 }): ExpectedMount[] {
@@ -646,21 +696,29 @@ function expectedMounts(params: {
     container: params.container,
     identity: params.workspace
   });
+  const taskSources = params.workspace.mode === 'task-bound'
+    ? recoveryTaskSources(config.repoRoot, params.workspace.taskId)
+    : null;
+  const taskId = params.workspace.mode === 'task-bound' ? params.workspace.taskId : null;
   const core = sandboxCoreBindMounts(config, branch, {
     workspaceViewRoot: view.root,
     controlDir: control.channelDir,
     controlStatusDir: control.statusDir,
-    ...(params.workspace.mode === 'task-bound'
-      ? {
+    ...(taskSources === null
+      ? {}
+      : {
         runtimeDir: control.runtimeDir,
-        taskSource: assertSandboxTaskSource(config.repoRoot, params.workspace.taskId),
-        taskId: params.workspace.taskId
-      }
-      : {})
+        taskSources: taskSources.mountPaths,
+        taskId: taskId!
+      })
   }).map((mount) => ({
     path: mount.containerPath,
     expectedType: 'bind' as const,
     hostPaths: mount.hostPaths,
+    ...(taskSources !== null && taskId !== null
+      && mount.containerPath === `/workspace/.agents/workspace/active/${taskId}`
+      ? { sourceAccessiblePaths: taskSources.accessiblePaths }
+      : {}),
     expectedRW: !mount.readOnly
   }));
   const live = tools.flatMap((tool) =>
@@ -755,7 +813,7 @@ export function collectSandboxRecoverySnapshot(params: {
   config: SandboxConfig;
   engine: string;
   branch: string;
-  workspace?: SandboxWorkspaceIdentity;
+  workspace?: SandboxWorkspaceReference;
   container: string;
   deps?: RecoveryCommandDeps;
 }): SandboxRecoverySnapshot {
@@ -880,7 +938,9 @@ export function collectSandboxRecoverySnapshot(params: {
       sourceAccessible: expected.expectedType === 'tmpfs'
         ? true
         : matchedHostPath !== undefined
-          && hostSourceAccessible(matchedHostPath, expected.expectedRW)
+          && (expected.sourceAccessiblePaths ?? [matchedHostPath]).some((hostPath) =>
+            hostSourceAccessible(hostPath, expected.expectedRW)
+          )
     };
   });
 
@@ -1069,7 +1129,7 @@ function assess(params: {
   config: SandboxConfig;
   engine: string;
   branch: string;
-  workspace?: SandboxWorkspaceIdentity;
+  workspace?: SandboxWorkspaceReference;
   container: string;
   deps?: RecoveryCommandDeps;
 }): { snapshot: SandboxRecoverySnapshot; findings: SandboxRecoveryFinding[] } {
@@ -1095,7 +1155,7 @@ export async function assertFreshSandboxReady(params: {
   config: SandboxConfig;
   engine: string;
   branch: string;
-  workspace?: SandboxWorkspaceIdentity;
+  workspace?: SandboxWorkspaceReference;
   container: string;
   copiedEntries: TmpfsSeedEntry[];
   deps?: RecoveryCommandDeps;
@@ -1279,6 +1339,35 @@ export async function ensureSandboxReady(params: EnsureSandboxReadyParams): Prom
     return { container: params.row.name, path: 'recovered', warnings };
   } catch (error) {
     failure = error instanceof Error ? error : new Error(String(error));
+  }
+
+  if (params.reentry === 'completed') {
+    if (params.workspace?.mode !== 'task-bound') {
+      throw new Error('SANDBOX_COMPLETED_REENTRY_INVALID: completed re-entry requires a task-bound workspace');
+    }
+    const taskId = params.workspace.taskId;
+    const commandChain = [
+      `docker exec -it ${params.row.name} bash /usr/local/bin/sandbox-tmux-entry`,
+      `ai sandbox rm ${taskId}`,
+      `ai sandbox create ${params.branch}`
+    ];
+    const code = params.allowRecreate || params.forceRecreate
+      ? 'SANDBOX_COMPLETED_RECREATE_UNSUPPORTED'
+      : 'SANDBOX_COMPLETED_REENTRY_FAILED';
+    const lead = code === 'SANDBOX_COMPLETED_RECREATE_UNSUPPORTED'
+      ? 'Completed sandbox replacement is unsupported; the existing container was not replaced.'
+      : 'Completed sandbox recovery failed; the existing container was not replaced.';
+    throw new Error([
+      `${code}: ${lead}`,
+      `Task: ${taskId}; container: ${params.row.name}; branch: ${params.branch}.`,
+      'To preserve the current container state, enter it manually with:',
+      `  ${commandChain[0]}`,
+      'If you intentionally want a replacement, the following is the full interactive sandbox cleanup, not a container-only delete.',
+      'It may remove the worktree, local branch, tool/shell state, and branch share:',
+      `  ${commandChain[1]}`,
+      `  ${commandChain[2]}`,
+      `Details: ${failure.message}`
+    ].join('\n'));
   }
 
   const dataBoundary =

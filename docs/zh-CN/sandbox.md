@@ -129,6 +129,8 @@ ai sandbox create feature/proxy --inherit-proxy
 
 每个沙箱都有显式 workspace identity。branch-only 沙箱对 `active`、`completed`、`blocked`、`archive` 使用互不重叠的只读目录挂载。task-bound 沙箱把 `active` 目录挂载替换为只读的 `.agents/workspace/active/.short-ids.json` 文件，继续只读挂载 `completed`、`blocked`、`archive`，并且只把 `.agents/workspace/active/<TASK-id>` 覆盖为可写。active 祖先目录由可写的 `/workspace` worktree 提供；宿主 workspace 根目录绝不会被挂载，其他状态下的全部任务都不可见。
 
+如果 task-bound 容器仍然存在，但任务已经移动到 `completed`，`ai sandbox exec <branch>` 会在核对容器标签、唯一的 completed 任务、分支、task view 和历史任务挂载后，原位重新进入同一个容器。该流程内部使用完整 TASK-id，不会恢复或重新分配 active 短号。如果 completed readiness 失败，或用户执行 `ai sandbox exec --recreate <branch>`，命令会 fail closed，原容器保持不变。需要保留现场时可手动进入原容器；如果明确要新建 branch-only 沙箱，则分开执行 `ai sandbox rm <TASK-id>` 和 `ai sandbox create <branch>`。`ai sandbox rm` 是完整的交互式 sandbox 清理入口，不是只删除容器；它可能删除 worktree、本地分支、工具/shell 状态和 branch share。
+
 两种 identity 都可以通过专用 typed `task-create` 控制请求创建新任务。沙箱 AI 只写一次版本化 candidate JSON；宿主负责严格验证、派生宿主字段、原子持久化、分配短号并尝试平台同步。该例外只授予“创建”能力：不会暴露宿主 workspace，不会让 branch-only 执行 lifecycle/orchestration，不会挂载新任务，也不会改变当前沙箱 identity。
 
 创建重试包含两层身份：重复 outer request ID 即使在 broker 重启后也会被拒绝；超时后调用方使用新的 outer ID，但必须复用原不可变 candidate 文件和业务幂等 key。语义相同的 JSON 返回原任务 `no-op`，任一字段值变化均 fail closed。平台失败时保留本地任务和短号，并返回结构化 warning。
@@ -145,7 +147,7 @@ v0.9.7 的父挂载加子挂载拓扑属于 legacy，与当前 per-state 拓扑�
 
 依赖宿主环境的校验统一通过内部命令 `agent-infra-internal task-validate <branch | task-ref> [--scope snapshot|inplace] [--timeout <ms>] [--format text|json] -- <command>` 执行，由 `run-manual-validation` 技能机械调用。默认 `snapshot` 在任务分支 commit 对应的临时 detached worktree 中运行命令，并保证清理。`inplace` 获取宿主 lease、等待 broker 进入 parked、停止沙箱容器、对原 worktree 运行命令，随后恢复分支、容器、lease 与 broker 健康状态。ready 检查把 task view、runtime、control 作为三个独立信号；runtime 会执行无损的 write/read/delete 探针。新容器的 runtime mount settling 最多触发一次 restart/recheck，但 ready 路径不会轮换 generation，也不会清理旧 runtime evidence。`run-manual-validation` 技能只记录去敏的 `validation-run` 证据；`complete-manual-validation` 仍是独立的维护者确认步骤。
 
-原地恢复失败时，命令会在进入容器或调度 tmux 前停止，不会自动替换容器。只有显式传入 `--recreate` 才授权 container-only fallback：`ai sandbox start --recreate <target>`、`ai sandbox exec --recreate <target> [cmd...]` 或 `ai run <skill> <task-ref> --recreate`。对于 `sandbox exec`，只有 target 之前的 flag 由宿主解析；target 之后的 `--recreate` 会透传给容器命令。替换会保留 worktree、local branch、宿主管理的工具 seed、shell 配置与 `/share` 数据，但会丢弃旧 container ID、writable layer、普通 `/tmp`、进程、tmux session 与其他 RAM 状态；该路径绝不会执行完整的 `ai sandbox rm`。
+原地恢复失败时，命令会在进入容器或调度 tmux 前停止，不会自动替换容器。对于 active 和 branch-only 沙箱，只有显式传入 `--recreate` 才授权 container-only fallback：`ai sandbox start --recreate <target>`、`ai sandbox exec --recreate <target> [cmd...]` 或 `ai run <skill> <task-ref> --recreate`。对于 `sandbox exec`，只有 target 之前的 flag 由宿主解析；target 之后的 `--recreate` 会透传给容器命令。completed task-bound 重入是例外：readiness 失败和 `ai sandbox exec --recreate <branch>` 都会被拒绝，不调用 replacement；错误会给出手动 `docker exec` 路径，以及用户明确要新建 branch-only 沙箱时分开执行的 `ai sandbox rm <TASK-id>`、`ai sandbox create <branch>` 命令。`ai sandbox rm` 是完整的交互式 sandbox 清理入口，不是只删除容器；它可能删除 worktree、本地分支、工具/shell 状态和 branch share。普通替换会保留 worktree、local branch、宿主管理的工具 seed、shell 配置与 `/share` 数据，但会丢弃旧 container ID、writable layer、普通 `/tmp`、进程、tmux session 与其他 RAM 状态；该路径绝不会执行完整的 `ai sandbox rm`。
 
 tmpfs runtime 数据本来就是临时数据。tmpfs 丢失后，`/home/devuser/.codex` 下的 Codex 数据库、日志、session 与其他未列入 seed 的文件无法恢复；`config.toml`、`model-catalogs` 等声明式 seed 可以从只读 staging mount 重建；bind mount 的 worktree、凭据、shell 配置与 share 目录继续由宿主持久化。
 

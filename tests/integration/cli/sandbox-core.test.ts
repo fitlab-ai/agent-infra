@@ -1655,6 +1655,25 @@ test("sandbox list-running parseSandboxRows tags running rows by 'Up ' prefix", 
   assert.equal(rows[3]!.running, true);
 });
 
+test("sandbox list-running preserves task-bound labels for completed re-entry", async () => {
+  const { parseSandboxRows } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
+  const rows = parseSandboxRows(
+    "demo-completed\tUp 5 minutes\tdemo.sandbox.branch=feature/completed,demo.sandbox.workspace-mode=task-bound,demo.sandbox.task-id=TASK-20260301-000001",
+    "demo.sandbox.branch",
+    { mode: "demo.sandbox.workspace-mode", taskId: "demo.sandbox.task-id" }
+  );
+
+  assert.deepEqual(rows[0], {
+    name: "demo-completed",
+    status: "Up 5 minutes",
+    branch: "feature/completed",
+    running: true,
+    index: null,
+    workspaceMode: "task-bound",
+    taskId: "TASK-20260301-000001"
+  });
+});
+
 test("sandbox list-running sortAndIndexSandboxRows assigns 1-based index to running only", async () => {
   const { sortAndIndexSandboxRows } = await loadFreshEsm<typeof import("../../../lib/sandbox/commands/list-running.ts")>("lib/sandbox/commands/list-running.js");
 

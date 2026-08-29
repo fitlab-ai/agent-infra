@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   parseSandboxWorkspaceIdentity,
   resolveSandboxCleanupTarget,
+  resolveSandboxReentryContext,
   resolveSandboxTarget,
   sameSandboxWorkspaceIdentity
 } from '../../../lib/sandbox/workspace-identity.ts';
@@ -57,6 +58,47 @@ test('resolveSandboxTarget distinguishes branch-only and rejects ambiguous branc
     () => resolveSandboxTarget('agent-infra-feature-shared', root),
     /SANDBOX_TASK_IDENTITY_AMBIGUOUS/
   );
+});
+
+test('completed task-bound containers are promoted only when their task and branch match', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260809-010208';
+  addTaskInState(root, 'completed', taskId, 'agent-infra-fix-completed');
+  const target = resolveSandboxTarget('agent-infra-fix-completed', root);
+
+  assert.deepEqual(resolveSandboxReentryContext({
+    target,
+    containerWorkspace: { mode: 'task-bound', taskId },
+    repoRoot: root
+  }), {
+    workspace: { mode: 'task-bound', taskId },
+    reentry: 'completed'
+  });
+
+  assert.deepEqual(resolveSandboxReentryContext({
+    target: { ...target, branch: 'another-branch' },
+    containerWorkspace: { mode: 'task-bound', taskId },
+    repoRoot: root
+  }), {
+    workspace: { mode: 'branch-only' },
+    reentry: 'standard'
+  });
+});
+
+test('active task-bound containers are not promoted as completed re-entry', () => {
+  const root = fixture();
+  const taskId = 'TASK-20260809-010209';
+  addTaskInState(root, 'active', taskId, 'agent-infra-fix-active');
+  const target = resolveSandboxTarget('agent-infra-fix-other', root);
+
+  assert.deepEqual(resolveSandboxReentryContext({
+    target,
+    containerWorkspace: { mode: 'task-bound', taskId },
+    repoRoot: root
+  }), {
+    workspace: { mode: 'branch-only' },
+    reentry: 'standard'
+  });
 });
 
 test('resolveSandboxCleanupTarget keeps completed task identity after short-id release', () => {
