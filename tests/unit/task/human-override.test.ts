@@ -29,7 +29,7 @@ function fixture(state: 'active' | 'blocked' = 'blocked') {
   const ids = Object.fromEntries(Array.from({ length: 99 }, (_, index) => [String(index + 1).padStart(2, '0'), `TASK-20260101-${String(index + 2).padStart(6, '0')}`]));
   fs.mkdirSync(path.join(repoRoot, '.agents', 'workspace', 'active'), { recursive: true });
   fs.writeFileSync(path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids })}\n`);
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\nstatus: ${state}\nupdated_at: old\nagent_infra_version: old\n---\n\n# Task\n\n## Activity Log\n\n`);
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\nstatus: ${state}\nupdated_at: old\nagent_infra_version: v0.9.8-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   return { repoRoot, taskMd: path.join(taskDir, 'task.md') };
 }
 
@@ -604,7 +604,7 @@ test('producer probe reads an existing lifecycle failure journal without resumin
   fs.mkdirSync(path.join(repoRoot, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
   fs.writeFileSync(path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\nstatus: active\nupdated_at: old\nagent_infra_version: old\n---\n\n# Task\n\n## Activity Log\n\n`);
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\nstatus: active\nupdated_at: old\nagent_infra_version: v0.9.8-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   try {
     const initial = applyTaskLifecycle({ taskRef: TASK_ID, intent: 'complete', agent: 'codex' }, {
       repoRoot,

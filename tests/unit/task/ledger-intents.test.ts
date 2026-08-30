@@ -13,7 +13,7 @@ function fixture(rows: string[] = []) {
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: old\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n`);
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nupdated_at: 2026-01-01 00:00:00+00:00\nstatus: active\nagent_infra_version: v0.8.6-alpha.0\n---\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${rows.join('\n')}\n\n## Implementation Inputs\n\n| id | ledger_id | decision_evidence | stage | needs_implementation | decided_at | status | consumed_by |\n|----|-----------|-------------------|-------|----------------------|------------|--------|-------------|\n`);
   return { repoRoot, taskId, taskMd: path.join(taskDir, 'task.md') };
 }
 

@@ -23,7 +23,7 @@ function fixture(state: 'active' | 'blocked' = 'active') {
   fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
   fs.writeFileSync(
     path.join(taskDir, 'task.md'),
-    `---\nid: ${TASK_ID}\nstatus: ${state}\ncurrent_step: code-review\nassigned_to: claude\nupdated_at: old\nagent_infra_version: old\ntarget_date:\n${state === 'blocked' ? 'blocked_at: old\n' : ''}---\n\n# Task\n\n## Activity Log\n\n`
+    `---\nid: ${TASK_ID}\nstatus: ${state}\ncurrent_step: code-review\nassigned_to: claude\nupdated_at: old\nagent_infra_version: v9.9.9\ntarget_date:\n${state === 'blocked' ? 'blocked_at: old\n' : ''}---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`
   );
   if (state === 'active') {
     fs.writeFileSync(path.join(repoRoot, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } }, null, 2)}\n`);
@@ -113,7 +113,51 @@ test('activate clears terminal fields, moves to active, and allocates a short id
   assert.match(content, /status: active/);
   assert.match(content, /assigned_to: codex/);
   assert.equal(/^blocked_at:/m.test(content), false);
+  assert.match(content, /## Review Disagreement Ledger/);
   assert.equal(result.shortId.shortId, '01');
+});
+
+test('activate rejects a blocked task with a missing ledger before journal, directory, or registry mutation', () => {
+  const f = fixture('blocked');
+  const taskPath = path.join(f.taskDir, 'task.md');
+  const original = fs.readFileSync(taskPath, 'utf8');
+  const missingLedger = original.replace(
+    /## Review Disagreement Ledger\n\n\| id \| stage \| round \| severity \| status \| evidence \|\n\|----\|-------\|-------\|----------\|--------\|----------\|\n\n/,
+    ''
+  );
+  fs.writeFileSync(taskPath, missingLedger);
+  const beforeMtime = fs.statSync(taskPath).mtimeMs;
+  const result = applyTaskLifecycle(
+    { taskRef: TASK_ID, intent: 'activate', agent: 'codex', note: 'Dependency landed' },
+    { repoRoot: f.repoRoot, metadataProvider: () => METADATA }
+  );
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'LIFECYCLE_DOCUMENT_INVALID');
+  assert.match(result.error?.message ?? '', /LEDGER_SECTION_MISSING/);
+  assert.equal(fs.readFileSync(taskPath, 'utf8'), missingLedger);
+  assert.equal(fs.statSync(taskPath).mtimeMs, beforeMtime);
+  assert.equal(fs.existsSync(path.join(f.taskDir, '.task-lifecycle.json')), false);
+  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID)), false);
+  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json')), false);
+});
+
+test('activate rejects an invalid target metadata version before lifecycle mutation', () => {
+  const f = fixture('blocked');
+  const taskPath = path.join(f.taskDir, 'task.md');
+  const before = fs.readFileSync(taskPath);
+  const beforeMtime = fs.statSync(taskPath).mtimeMs;
+  const result = applyTaskLifecycle(
+    { taskRef: TASK_ID, intent: 'activate', agent: 'codex', note: 'Dependency landed' },
+    { repoRoot: f.repoRoot, metadataProvider: () => ({ timestamp: METADATA.timestamp, agentInfraVersion: 'unknown' }) }
+  );
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.code, 'LIFECYCLE_DOCUMENT_INVALID');
+  assert.match(result.error?.message ?? '', /valid v-prefixed semver/);
+  assert.deepEqual(fs.readFileSync(taskPath), before);
+  assert.equal(fs.statSync(taskPath).mtimeMs, beforeMtime);
+  assert.equal(fs.existsSync(path.join(f.taskDir, '.task-lifecycle.json')), false);
+  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID)), false);
+  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json')), false);
 });
 
 test('security completion records the alert payload in its canonical done note', () => {
@@ -132,7 +176,7 @@ test('restore validates staging before exposing active and allocates a short id'
   const staging = path.join(repoRoot, '.agents', 'workspace', '.restore-staging-1');
   fs.mkdirSync(staging, { recursive: true });
   fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
-  fs.writeFileSync(path.join(staging, 'task.md'), `---\nid: ${TASK_ID}\nissue_number: 42\nstatus: completed\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: old\n---\n\n# Task\n\n## Activity Log\n\n`);
+  fs.writeFileSync(path.join(staging, 'task.md'), `---\nid: ${TASK_ID}\nissue_number: 42\nstatus: completed\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.9\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(staging, 'analysis.md'), '# Analysis\n');
   const result = applyTaskLifecycle(
     { taskRef: TASK_ID, intent: 'restore', agent: 'codex', stagingDir: staging, issueNumber: 42 },
@@ -151,7 +195,7 @@ test('restore transports task receipts with artifacts without using mtime', () =
   fs.mkdirSync(staging, { recursive: true });
   fs.writeFileSync(path.join(repoRoot, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
   const taskPath = path.join(staging, 'task.md');
-  fs.writeFileSync(taskPath, `---\nid: ${TASK_ID}\nissue_number: 42\nstatus: completed\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: old\n---\n\n# Task\n\n## Activity Log\n\n`);
+  fs.writeFileSync(taskPath, `---\nid: ${TASK_ID}\nissue_number: 42\nstatus: completed\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.9\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(staging, 'plan.md'), '# Plan\n');
   fs.writeFileSync(path.join(staging, 'review-plan.md'), '# Review\n\n- **审查输入**：`plan.md`\n\n## 审查摘要\n\n- **总体结论**：通过\n');
   let content = fs.readFileSync(taskPath, 'utf8');
@@ -236,6 +280,38 @@ test('task write failure preserves source bytes and retries with journal metadat
   assert.equal(recovered.status, 'applied');
   const content = fs.readFileSync(path.join(f.repoRoot, '.agents', 'workspace', 'completed', TASK_ID, 'task.md'), 'utf8');
   assert.match(content, /updated_at: 2026-07-18 12:00:00\+00:00/);
+});
+
+test('active recovery rejects invalid journal metadata before resuming any lifecycle step', () => {
+  const f = fixture('blocked');
+  const request = { taskRef: TASK_ID, intent: 'activate' as const, agent: 'codex', note: 'Dependency landed' };
+  const taskPath = path.join(f.taskDir, 'task.md');
+  const journalPath = path.join(f.taskDir, '.task-lifecycle.json');
+  const failed = applyTaskLifecycle(request, {
+    repoRoot: f.repoRoot, metadataProvider: () => METADATA,
+    taskFileSystem: { renameSync: () => { throw new Error('injected task rename failure'); } }
+  });
+  assert.equal(failed.status, 'failed');
+  assert.equal(fs.existsSync(journalPath), true);
+
+  const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as { metadata: { agentInfraVersion: string } };
+  journal.metadata.agentInfraVersion = 'unknown';
+  fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+  const beforeTask = fs.readFileSync(taskPath);
+  const beforeTaskMtime = fs.statSync(taskPath).mtimeMs;
+  const beforeJournal = fs.readFileSync(journalPath);
+
+  const recovered = applyTaskLifecycle(request, {
+    repoRoot: f.repoRoot, metadataProvider: () => METADATA
+  });
+  assert.equal(recovered.status, 'failed');
+  assert.equal(recovered.error?.code, 'LIFECYCLE_DOCUMENT_INVALID');
+  assert.match(recovered.error?.message ?? '', /journal metadata agentInfraVersion must be a valid v-prefixed semver/);
+  assert.deepEqual(fs.readFileSync(taskPath), beforeTask);
+  assert.equal(fs.statSync(taskPath).mtimeMs, beforeTaskMtime);
+  assert.deepEqual(fs.readFileSync(journalPath), beforeJournal);
+  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', TASK_ID)), false);
+  assert.equal(fs.existsSync(path.join(f.repoRoot, '.agents', 'workspace', 'active', '.short-ids.json')), false);
 });
 
 test('directory rename failure keeps the journal at source and retries without duplicate logs', () => {

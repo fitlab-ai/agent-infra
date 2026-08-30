@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { VERSION } from '../version.ts';
+import { isValidAgentInfraVersion, VERSION } from '../version.ts';
 import {
   parseTypedTaskFrontmatter,
   updateTaskFrontmatter
@@ -15,6 +15,7 @@ import type {
 import { allowsManualOverride } from './guard-override.ts';
 import type { ManualOverrideCapability } from './guard-override.ts';
 import { mutateTableRow, upsertSection } from './sections.ts';
+import { validateCurrentTaskContract } from './current-contract.ts';
 import type {
   TableRowDeleteMutation,
   TableRowUpsertMutation
@@ -84,6 +85,7 @@ type TaskWriteMetadata = {
 type TaskWriteErrorCode =
   | ResolveTaskRefErrorCode
   | 'TASK_STATE_MISMATCH'
+  | 'TASK_CURRENT_CONTRACT_INVALID'
   | 'TASK_READ_FAILED'
   | 'TASK_DOCUMENT_INVALID'
   | 'MUTATION_INVALID'
@@ -268,6 +270,13 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
     );
   }
 
+  if (resolved.state === 'active') {
+    const contract = validateCurrentTaskContract(original);
+    if (!contract.ok) {
+      return failure(request, identity, contract.code, contract.message);
+    }
+  }
+
   let candidate = original;
   const operations: TaskOperationSummary[] = [];
   try {
@@ -340,6 +349,16 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
       'METADATA_CAPTURE_FAILED',
       error instanceof Error ? error.message : String(error),
       operations
+    );
+  }
+  if (resolved.state === 'active' && !isValidAgentInfraVersion(metadata.agentInfraVersion)) {
+    return failure(
+      request,
+      identity,
+      'TASK_CURRENT_CONTRACT_INVALID',
+      `metadata agentInfraVersion must be a valid v-prefixed semver (received ${metadata.agentInfraVersion})`,
+      operations,
+      metadata
     );
   }
 

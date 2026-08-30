@@ -11,7 +11,7 @@ function fixture() {
   const taskId = 'TASK-20260101-000001';
   const taskDir = path.join(repoRoot, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nupdated_at: old\nagent_infra_version: old\n---\n# Task\n\n## Activity Log\n\n`);
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nupdated_at: old\nstatus: active\nagent_infra_version: v0.8.6-alpha.0\n---\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   return { repoRoot, taskId, taskMd: path.join(taskDir, 'task.md') };
 }
 

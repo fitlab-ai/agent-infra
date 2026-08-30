@@ -22,8 +22,9 @@ import { resolveMaterializedReviewedHeadRelation } from "../platform/change-requ
 import { resolveReviewedHeadRelation } from "../platform/merged-pr-equivalence.ts";
 import { resolveLocalReviewedCommitRelation } from "../git/reviewed-commit-equivalence.ts";
 import { parseTypedTaskFrontmatter } from "./frontmatter.ts";
-import { parseLedger, summarizeLedgerStage, validateLedgerRows } from "./ledger.ts";
+import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from "./ledger.ts";
 import type { LedgerRow } from "./ledger.ts";
+import { isValidAgentInfraVersion } from "../version.ts";
 import { equalCounts, parseReviewSummary } from "./review-artifacts.ts";
 import { loadVerificationConfig } from "./verification-config.ts";
 import { snapshotReview } from "../git/review-snapshot.ts";
@@ -48,7 +49,6 @@ const DEFAULT_REQUIRED_FIELDS = [
 ];
 
 const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?$/;
-const AGENT_INFRA_VERSION_PATTERN = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const ACTIVITY_LOG_PATTERN = /^- (\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?) — \*\*(.+?)\*\* by (.+?) — (.+)$/;
 // Start markers (action suffixed with ` [started]`) are excluded from the
 // "latest action" / freshness computation so a step's in-flight marker never
@@ -392,23 +392,20 @@ function checkTaskMeta({ taskDir, config }: any): any {
   const metadata = task.metadata;
   const requiredFields = config.required_fields || DEFAULT_REQUIRED_FIELDS;
   const missingFields = requiredFields.filter((field: any) => isBlank(metadata[field]));
-  const blockingMissingFields = missingFields.filter((field: any) => field !== "agent_infra_version");
+  const currentTask = metadata.status === 'active';
+  const blockingMissingFields = missingFields.filter((field: any) => field !== "agent_infra_version" || currentTask);
   const warnings = [];
-  if (missingFields.includes("agent_infra_version")) {
+  if (missingFields.includes("agent_infra_version") && !currentTask) {
     warnings.push("field 'agent_infra_version' missing — historical task or skipped version stamp");
   }
   if (blockingMissingFields.length > 0) {
     return failResult("task-meta", `Missing required fields: ${blockingMissingFields.join(", ")}`);
   }
 
-  if (
-    !isBlank(metadata.agent_infra_version) &&
-    metadata.agent_infra_version !== "unknown" &&
-    !AGENT_INFRA_VERSION_PATTERN.test(metadata.agent_infra_version)
-  ) {
+  if (currentTask && !isValidAgentInfraVersion(metadata.agent_infra_version)) {
     return failResult(
       "task-meta",
-      `Invalid agent_infra_version: ${metadata.agent_infra_version}`
+      `Invalid agent_infra_version: ${String(metadata.agent_infra_version ?? 'missing')}`
     );
   }
 
@@ -640,7 +637,9 @@ function checkReviewSummary({ taskDir, config, artifactFile }: any): any {
   if (!task.ok) return failResult("review-summary", task.message);
   let rows;
   try {
-    rows = parseLedger(task.content);
+    const ledger = parseLedgerDocument(task.content);
+    if (!ledger.present) return failResult("review-summary", `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`);
+    rows = ledger.rows;
   } catch (error) {
     return failResult("review-summary", `Invalid disagreement ledger: ${String(error)}`);
   }
@@ -946,14 +945,11 @@ function checkReviewLedger({ taskDir, config }: any): any {
     return failResult("review-ledger", task.message);
   }
 
-  const section = getSectionContent(task.content, LEDGER_SECTION_NAMES);
-  if (!section.trim()) {
-    return passResult("review-ledger", "No disagreement ledger section; treated as no open disagreements");
-  }
-
   let rows;
   try {
-    rows = parseLedger(task.content).map((row) => [
+    const ledger = parseLedgerDocument(task.content);
+    if (!ledger.present) return failResult("review-ledger", `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`);
+    rows = ledger.rows.map((row) => [
       row.id, row.stage, row.round, row.severity, row.status, row.evidence
     ]);
   } catch (error) {
@@ -1248,7 +1244,11 @@ function resolvePostReviewExemption(content: string):
   | { ok: true; exemptions: readonly LedgerRow[] }
   | { ok: false; code: "POST_REVIEW_EXEMPTION_INVALID"; message: string } {
   try {
-    const rows = parseLedger(content);
+    const ledger = parseLedgerDocument(content);
+    if (!ledger.present) {
+      return { ok: false, code: "POST_REVIEW_EXEMPTION_INVALID", message: `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}` };
+    }
+    const rows = ledger.rows;
     const invalid = validateLedgerRows(rows);
     if (invalid) {
       return {

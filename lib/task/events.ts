@@ -21,9 +21,9 @@ import {
   parseImplementationInputs,
   renderImplementationInputs
 } from './implementation-inputs.ts';
-import { parseLedger, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
+import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { ReviewStage } from './ledger.ts';
-import { parseReviewSummary } from './review-artifacts.ts';
+import { parseReviewSummary, resolveCanonicalVerdict } from './review-artifacts.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { findSectionHeading } from './sections.ts';
 import { validateLifecycleExecution } from './lifecycle-execution.ts';
@@ -50,6 +50,7 @@ type TaskEventErrorCode =
   | 'EVENT_UNKNOWN' | 'EVENT_PAYLOAD_INVALID' | 'EVENT_TRANSITION_INVALID'
   | 'EVENT_LOG_MISSING' | 'EVENT_START_MISSING' | 'EVENT_ALREADY_COMPLETED'
   | 'EVENT_LOG_CONFLICT' | 'EVENT_ARTIFACT_CONFLICT' | 'EVENT_FINDING_COUNT_MISMATCH'
+  | 'EVENT_VERDICT_INVALID'
   | 'EVENT_ORCHESTRATION_COMMIT_FAILED'
   | ArtifactErrorCode | TaskWriteErrorCode;
 type TaskEventRequest = {
@@ -151,7 +152,9 @@ function validateReviewFindingCounts(
 ): TaskEventError | null {
   const stage = REVIEW_LEDGER_STAGES[family];
   if (!stage || !artifactPath) return null;
-  const rows = parseLedger(content);
+  const ledger = parseLedgerDocument(content);
+  if (!ledger.present) return { code: 'EVENT_FINDING_COUNT_MISMATCH', message: `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}` };
+  const rows = ledger.rows;
   const invalid = validateLedgerRows(rows);
   if (invalid) return { code: 'TASK_DOCUMENT_INVALID', message: `${invalid.code}: ${invalid.message}` };
   const expected = summarizeLedgerStage(rows, stage).unresolvedFindingCounts;
@@ -173,6 +176,8 @@ function validateReviewFindingCounts(
       message: parsed.ok ? 'review summary finding counts are not finalized' : parsed.message
     };
   }
+  const canonical = resolveCanonicalVerdict(parsed.summary);
+  if (!canonical.ok) return { code: 'EVENT_VERDICT_INVALID', message: `${canonical.code}: ${canonical.message}` };
   const report = parsed.summary.counts;
   const reportVerdict = parsed.summary.verdict === 'Approved'
     ? 'approved'

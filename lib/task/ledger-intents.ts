@@ -7,7 +7,7 @@ import {
   parseImplementationInputs,
   renderImplementationInputs
 } from './implementation-inputs.ts';
-import { LEDGER_COLUMNS, LEDGER_HEADINGS, nextHdId, parseLedger, validateLedgerRows } from './ledger.ts';
+import { LEDGER_COLUMNS, LEDGER_HEADINGS, LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, nextHdId, parseLedgerDocument, validateLedgerRows } from './ledger.ts';
 import type { LedgerRow, ReviewStage } from './ledger.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import { writeTask } from './write.ts';
@@ -61,6 +61,7 @@ function normalizedEvidence(value: string): string {
 
 function ledgerReadErrorCode(error: unknown): string {
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+  if (code === LEDGER_SECTION_MISSING_CODE) return code;
   return code === 'TABLE_DUPLICATE_KEY' ? 'LEDGER_DUPLICATE_ID' : 'LEDGER_DOCUMENT_INVALID';
 }
 
@@ -96,12 +97,7 @@ function rowMutation(row: LedgerRow): TaskMutation {
 }
 
 function ledgerSectionMutation(content: string): TaskMutation[] {
-  if (/^##\s+(审查分歧账本|Review Disagreement Ledger)\s*$/m.test(content)) return [];
-  const english = /^##\s+Activity Log\s*$/m.test(content);
-  return [{
-    kind: 'section', aliases: LEDGER_HEADINGS, heading: english ? 'Review Disagreement Ledger' : '审查分歧账本',
-    body: `| ${LEDGER_COLUMNS.join(' | ')} |\n|----|-------|-------|----------|--------|----------|`
-  }];
+  return [];
 }
 
 function implementationInputMutation(content: string, rows: Parameters<typeof renderImplementationInputs>[0]): TaskMutation {
@@ -127,7 +123,9 @@ function applyLedgerIntent(intent: LedgerIntent, options: TaskWriteOptions = {})
   let rows: LedgerRow[];
   try {
     content = fs.readFileSync(resolved.taskMdPath, 'utf8');
-    rows = parseLedger(content);
+    const ledger = parseLedgerDocument(content);
+    if (!ledger.present) return failed(intent, LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, resolved.taskId);
+    rows = ledger.rows as LedgerRow[];
   } catch (error) {
     return failed(intent, ledgerReadErrorCode(error), error instanceof Error ? error.message : String(error), resolved.taskId);
   }

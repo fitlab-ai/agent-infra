@@ -76,6 +76,20 @@ test('task-create candidate validation rejects unknown fields and invalid slugs'
   );
 });
 
+test('local task creation rejects an invalid explicit version before creating workspace state', () => {
+  const root = fixture();
+  try {
+    assert.throws(
+      () => createLocalTask(candidate, { repoRoot: root, agentInfraVersion: 'unknown' }),
+      /TASK_CREATE_VERSION_INVALID/
+    );
+    assert.deepEqual(fs.readdirSync(path.join(root, '.agents', 'workspace', 'active')), []);
+    assert.equal(fs.existsSync(path.join(root, '.agents', 'workspace', '.task-create')), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('canonical candidate digest ignores JSON key order but preserves value changes', () => {
   const reordered = {
     taskInput: {

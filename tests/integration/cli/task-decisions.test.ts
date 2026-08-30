@@ -33,15 +33,17 @@ function writeTask(
   activeDir: string,
   taskId: string,
   ledgerRows: string[],
-  opts: { artifacts?: Record<string, string>; decisionHeading?: string; decisionRecords?: string[] } = {}
+  opts: { artifacts?: Record<string, string>; decisionHeading?: string; decisionRecords?: string[]; includeLedger?: boolean } = {}
 ): void {
   const dir = path.join(activeDir, taskId);
   fs.mkdirSync(dir, { recursive: true });
-  const ledger = `## 审查分歧账本\n\n${HEADER}\n${SEP}\n${ledgerRows.join('\n')}\n`;
+  const ledger = opts.includeLedger === false
+    ? ''
+    : `## 审查分歧账本\n\n${HEADER}\n${SEP}\n${ledgerRows.join('\n')}\n`;
   const records = (opts.decisionRecords ?? []).join('\n');
   fs.writeFileSync(
     path.join(dir, 'task.md'),
-    `---\nid: ${taskId}\nbranch: feat\n---\n# 任务：${taskId}\n\n${ledger}\n## ${opts.decisionHeading ?? '人工裁决'}\n\n${records}\n\n## 完成检查清单\n\n- [ ] done\n`
+    `---\nid: ${taskId}\nbranch: feat\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n# 任务：${taskId}\n\n${ledger}\n## ${opts.decisionHeading ?? '人工裁决'}\n\n${records}\n\n## 完成检查清单\n\n- [ ] done\n`
   );
   for (const [name, body] of Object.entries(opts.artifacts ?? {})) {
     fs.writeFileSync(path.join(dir, name), body);
@@ -253,6 +255,22 @@ test('A8: command is read-only (task.md unchanged)', () => {
   runCli(['task', 'd', taskId, '--all', '--format', 'markdown'], repoRoot);
   const after = fs.readFileSync(taskMd);
   assert.ok(before.equals(after), 'task.md must not be modified by decisions');
+});
+
+test('missing ledger reports a structured diagnostic without rendering an empty decision list or writing', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000022';
+  writeTask(activeDir, taskId, [], { includeLedger: false });
+  const taskMd = path.join(activeDir, taskId, 'task.md');
+  const before = fs.readFileSync(taskMd);
+  const beforeMtime = fs.statSync(taskMd).mtimeMs;
+
+  const out = runCli(['task', 'decisions', taskId], repoRoot);
+  assert.equal(out.status, 1);
+  assert.equal(out.stdout, '');
+  assert.match(out.stderr, /^ai task decisions: ledger unavailable \[LEDGER_SECTION_MISSING\]:/);
+  assert.deepEqual(fs.readFileSync(taskMd), before);
+  assert.equal(fs.statSync(taskMd).mtimeMs, beforeMtime);
 });
 
 test('CD-1: decided detail finds records under the Human Rulings heading', () => {

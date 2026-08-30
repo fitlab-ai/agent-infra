@@ -491,8 +491,10 @@ test('sandbox executor finalizes only the manifest task and returns no control a
       skill: 'complete-task', checks: { 'review-ledger': null, 'manual-validation': {}, 'post-review-commit': null, 'platform-sync-preflight': null, 'required-pr-delivery': null }
     }));
     fs.writeFileSync(path.join(taskDir, 'task.md'), [
-      '---', `id: ${taskId}`, 'status: active', 'current_step: code-review', 'updated_at: old', 'agent_infra_version: old', 'target_date:', '---',
-      '', '# Task', '', '## Activity Log', ''
+      '---', `id: ${taskId}`, 'status: active', 'current_step: code-review', 'updated_at: old', 'agent_infra_version: v0.9.11-alpha.0', 'target_date:', '---',
+      '', '# Task', '', '## Review Disagreement Ledger', '',
+      '| id | stage | round | severity | status | evidence |',
+      '|----|-------|-------|----------|--------|----------|', '', '## Activity Log', ''
     ].join('\n'));
     const result = await executeRequest({
       ...manifest,

@@ -18,7 +18,7 @@ function fixture(step = 'requirement-analysis-review') {
   const id = 'TASK-20260101-000001';
   const dir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\ncurrent_step: ${step}\nassigned_to: claude\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.0.0\n---\n\n# Task\n\n## Activity Log\n\n`);
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${id}\nstatus: active\ncurrent_step: ${step}\nassigned_to: claude\nupdated_at: 2026-01-01 00:00:00+00:00\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   fs.writeFileSync(path.join(dir, 'analysis.md'), '# Analysis\n');
   return { root, id, dir, file: path.join(dir, 'task.md') };
 }
@@ -143,7 +143,8 @@ function setLedger(file: string, rows: string[]) {
     ...rows,
     ''
   ].join('\n');
-  fs.writeFileSync(file, content.replace('## Activity Log', `${ledger}\n## Activity Log`));
+  const existing = /## Review Disagreement Ledger\n\n\| id \| stage \| round \| severity \| status \| evidence \|\n\|----\|-------\|-------\|----------\|--------\|----------\|\n[\s\S]*?(?=## Activity Log)/;
+  fs.writeFileSync(file, content.replace(existing, ledger));
 }
 
 function prepareReview(
@@ -185,14 +186,20 @@ function decisionFixture() {
   fs.writeFileSync(path.join(f.dir, 'review-code.md'), `## 审查摘要\n\n- **总体结论**：通过\n- **发现（AI 可处理）**：0 阻塞项，0 主要，0 次要 / **人工校验**：0\n`);
   fs.writeFileSync(f.file, `---
 id: ${f.id}
+status: active
 current_step: code-review
 assigned_to: claude
 updated_at: 2026-07-18 10:02:00+08:00
-agent_infra_version: v0.0.0
+agent_infra_version: v0.9.11-alpha.0
 last_reviewed_commit: abcdef1234567890
 ---
 
 # Task
+
+## Review Disagreement Ledger
+
+| id | stage | round | severity | status | evidence |
+|----|-------|-------|----------|--------|----------|
 
 ## 实现备注
 
@@ -762,18 +769,20 @@ for (const scenario of reviewScenarios) {
   });
 }
 
-test('approved review completion accepts matching non-zero finding counts', () => {
+test('approved review completion rejects non-zero finding counts even when payload and ledger match', () => {
   const scenario = reviewScenarios[2];
   const f = prepareReview(scenario, [
     '| CD-1 | code | 1 | blocker | open | review-code.md#CD-1 |',
     '| CD-2 | code | 1 | major | adjusted | review-code.md#CD-2 |',
     '| CD-3 | code | 1 | minor | needs-human-decision | review-code.md#CD-3 |'
   ], '通过', { blockers: 1, major: 1, minor: 1 });
+  const before = fs.readFileSync(f.file);
   const completed = completeReview(f, scenario, 'approved', { blockers: 1, major: 1, minor: 1 });
 
-  assert.equal(completed.status, 0, completed.stderr);
-  assert.equal(JSON.parse(completed.stdout).status, 'applied');
-  assert.match(fs.readFileSync(f.file, 'utf8'), /Verdict: Approved, blockers: 1, major: 1, minor: 1/);
+  assert.equal(completed.status, 1);
+  const result = JSON.parse(completed.stdout);
+  assert.equal(result.error.code, 'EVENT_VERDICT_INVALID');
+  assert.deepEqual(fs.readFileSync(f.file), before);
 });
 
 for (const verdict of ['changes-requested', 'rejected'] as const) {
@@ -829,9 +838,11 @@ test('approved dry-run rejects mismatched finding counts without changing task b
 
 test('approved review completion reports an invalid ledger as an invalid task document', () => {
   const scenario = reviewScenarios[0];
-  const f = prepareReview(scenario, [
-    '| invalid | analysis | 1 | minor | open | review-analysis.md#finding |'
-  ]);
+  const f = prepareReview(scenario, []);
+  fs.writeFileSync(f.file, fs.readFileSync(f.file, 'utf8').replace(
+    '|----|-------|-------|----------|--------|----------|',
+    '|----|-------|-------|----------|--------|----------|\n| invalid | analysis | 1 | minor | open | review-analysis.md#finding |'
+  ));
   const before = fs.readFileSync(f.file);
   const completed = completeReview(f, scenario, 'approved', { blockers: 0, major: 0, minor: 0 });
   const result = JSON.parse(completed.stdout);

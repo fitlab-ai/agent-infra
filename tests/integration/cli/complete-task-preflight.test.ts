@@ -23,7 +23,9 @@ function fixture() {
   fs.writeFileSync(path.join(activeDir, 'task.md'), [
     '---', `id: ${TASK_ID}`, 'status: active', 'current_step: code-review',
     'updated_at: 2026-01-01 00:00:00+00:00', 'agent_infra_version: v0.0.0',
-    'target_date:', '---', '', '# Task', '', '## Workflow Warnings', '',
+    'target_date:', '---', '', '# Task', '', '## Review Disagreement Ledger', '',
+    '| id | stage | round | severity | status | evidence |',
+    '|----|-------|-------|----------|--------|----------|', '', '## Workflow Warnings', '',
     '| id | time | step | severity | code | status | target | message | action | resolved_at | resolution |',
     '|----|------|------|----------|------|--------|--------|---------|--------|-------------|------------|',
     '', '## Activity Log', ''
@@ -64,7 +66,9 @@ test('compiled preflight does not require a checks snapshot for a bound historic
       '---', `id: ${TASK_ID}`, 'status: active', 'current_step: code-review',
       'updated_at: 2026-01-01 00:00:00+00:00', 'agent_infra_version: v0.0.0',
       'pr_number: 42', 'pr_status: merged', `last_reviewed_commit: ${head}`,
-      'target_date:', '---', '', '# Task', ''
+      'target_date:', '---', '', '# Task', '', '## Review Disagreement Ledger', '',
+      '| id | stage | round | severity | status | evidence |',
+      '|----|-------|-------|----------|--------|----------|', ''
     ].join('\n'));
 
     const result = spawnSync(process.execPath, [

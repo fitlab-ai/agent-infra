@@ -56,7 +56,7 @@ function fixture(step: string) {
   fixtureRoots.add(root);
   const taskDir = path.join(root, '.agents', 'workspace', 'active', 'TASK-20260101-000001');
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: TASK-20260101-000001\ncurrent_step: ${step}\n---\n\n# Task\n`);
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: TASK-20260101-000001\nstatus: active\ncurrent_step: ${step}\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   return { root, taskDir };
 }
 
@@ -124,7 +124,7 @@ function cleanCommitCandidateFixture(prFlow: unknown = 'required') {
   const head = 'a'.repeat(40);
   fs.mkdirSync(path.join(f.root, '.agents'), { recursive: true });
   fs.writeFileSync(path.join(f.root, '.agents', '.airc.json'), `${JSON.stringify({ prFlow })}\n`);
-  fs.writeFileSync(path.join(f.taskDir, 'task.md'), `---\nid: TASK-20260101-000001\ncurrent_step: code-review\npr_number: 42\nlast_reviewed_commit: ${head}\n---\n\n# Task\n`);
+  fs.writeFileSync(path.join(f.taskDir, 'task.md'), `---\nid: TASK-20260101-000001\nstatus: active\ncurrent_step: code-review\nagent_infra_version: v0.9.11-alpha.0\npr_number: 42\nlast_reviewed_commit: ${head}\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   seedLifecycleReceipts(f);
   beginOrResumeOrchestration('TASK-20260101-000001', {
     repoRoot: f.root,
@@ -483,7 +483,11 @@ test('route allows commit when manual validation remains (complete-task gate own
 
 test('route fails closed before commit when code review ledger work remains', () => {
   const ledger = approvedCodeFixture();
-  fs.appendFileSync(path.join(ledger.taskDir, 'task.md'), '\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n| CD-1 | code | 1 | blocker | open | review-code.md#CD-1 |\n');
+  const taskPath = path.join(ledger.taskDir, 'task.md');
+  fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace(
+    '|----|-------|-------|----------|--------|----------|',
+    '|----|-------|-------|----------|--------|----------|\n| CD-1 | code | 1 | blocker | open | review-code.md#CD-1 |'
+  ));
   assert.equal(
     routeOrchestration('TASK-20260101-000001', { repoRoot: ledger.root }).error?.code,
     'ORCHESTRATION_LEDGER_BLOCKED'
@@ -565,7 +569,7 @@ test('route gates clean completion on an explicit required PR flow', () => {
   }
 
   const missingPr = cleanCommitCandidateFixture();
-  fs.writeFileSync(path.join(missingPr.taskDir, 'task.md'), `---\nid: TASK-20260101-000001\ncurrent_step: code-review\nlast_reviewed_commit: ${missingPr.head}\n---\n\n# Task\n`);
+  fs.writeFileSync(path.join(missingPr.taskDir, 'task.md'), `---\nid: TASK-20260101-000001\nstatus: active\ncurrent_step: code-review\nagent_infra_version: v0.9.11-alpha.0\nlast_reviewed_commit: ${missingPr.head}\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   seedLifecycleReceipts(missingPr);
   let missingPrCaptures = 0;
   const routed = routeOrchestration('TASK-20260101-000001', {
@@ -816,7 +820,7 @@ test('repository pending guard ignores paused runs that retain audit evidence', 
   fs.mkdirSync(secondTaskDir, { recursive: true });
   fs.writeFileSync(
     path.join(secondTaskDir, 'task.md'),
-    '---\nid: TASK-20260101-000002\ncurrent_step: requirement-analysis\n---\n\n# Task\n'
+    '---\nid: TASK-20260101-000002\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\ncurrent_step: requirement-analysis\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n'
   );
   beginOrResumeOrchestration('TASK-20260101-000002', { repoRoot: f.root });
 
@@ -845,7 +849,7 @@ test('repository pending guard still blocks a second running delegation', () => 
   fs.mkdirSync(secondTaskDir, { recursive: true });
   fs.writeFileSync(
     path.join(secondTaskDir, 'task.md'),
-    '---\nid: TASK-20260101-000002\ncurrent_step: requirement-analysis\n---\n\n# Task\n'
+    '---\nid: TASK-20260101-000002\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\ncurrent_step: requirement-analysis\n---\n\n# Task\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n'
   );
   beginOrResumeOrchestration('TASK-20260101-000002', { repoRoot: f.root });
 

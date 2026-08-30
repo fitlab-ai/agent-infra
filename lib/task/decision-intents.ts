@@ -10,7 +10,7 @@ import {
   renderImplementationInputs,
   selectDeclaredImplementationInput
 } from './implementation-inputs.ts';
-import { LEDGER_COLUMNS, LEDGER_HEADINGS, parseLedger } from './ledger.ts';
+import { LEDGER_COLUMNS, LEDGER_HEADINGS, LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument } from './ledger.ts';
 import type { LedgerRow } from './ledger.ts';
 import { resolveTaskContext } from './resolve-ref.ts';
 import { extractSection, extractSubSection, findSectionHeading } from './sections.ts';
@@ -90,7 +90,12 @@ function applyHumanDecision(request: HumanDecisionRequest, options: TaskWriteOpt
   if (resolved.state !== 'active' && !stateOverride) return failed('TASK_STATE_MISMATCH', `task ${resolved.taskId} is ${resolved.state}, expected active`, resolved.taskId);
   let content: string;
   let rows: LedgerRow[];
-  try { content = fs.readFileSync(resolved.taskMdPath, 'utf8'); rows = parseLedger(content); }
+  try {
+    content = fs.readFileSync(resolved.taskMdPath, 'utf8');
+    const ledger = parseLedgerDocument(content);
+    if (!ledger.present) return failed(LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, resolved.taskId);
+    rows = ledger.rows as LedgerRow[];
+  }
   catch (error) { return failed('DECISION_DOCUMENT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId); }
 
   const direct = rows.filter((row) => row.id.toUpperCase() === request.selector.toUpperCase());

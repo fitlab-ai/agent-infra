@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { isValidAgentInfraVersion, VERSION } from '../version.ts';
 import { loadShortIdByTaskId, mutateShortIdRegistry } from './short-id.ts';
 import { TaskExecutionLockError, withTaskExecutionLock } from './task-execution-lock.ts';
 
@@ -294,6 +295,10 @@ function recoverPublishedTask(activeRoot: string, repoRoot: string, keyDigest: s
 
 function createLocalTask(value: unknown, options: LocalTaskCreateOptions): LocalTaskCreateResult {
   const candidate = validateTaskCreateCandidate(value);
+  const agentInfraVersion = options.agentInfraVersion ?? VERSION;
+  if (!isValidAgentInfraVersion(agentInfraVersion)) {
+    throw new Error('TASK_CREATE_VERSION_INVALID: agentInfraVersion must be a valid v-prefixed semver');
+  }
   const repoRoot = fs.realpathSync.native(options.repoRoot);
   const workspaceRoot = path.join(repoRoot, '.agents', 'workspace');
   const activeRoot = path.join(workspaceRoot, 'active');
@@ -342,7 +347,7 @@ function createLocalTask(value: unknown, options: LocalTaskCreateOptions): Local
     if (!templateStat.isFile() || templateStat.isSymbolicLink()) throw new Error('TASK_CREATE_TEMPLATE_INVALID');
     const rendered = renderTask({
       template: fs.readFileSync(templatePath, 'utf8'), candidate, taskId, project, timestamp,
-      agentInfraVersion: options.agentInfraVersion ?? 'unknown', keyDigest, candidateDigest
+      agentInfraVersion, keyDigest, candidateDigest
     });
     const temporary = path.join(workspaceRoot, `.task-create.tmp.${process.pid}.${randomUUID()}`);
     fs.mkdirSync(temporary, { mode: 0o700 });

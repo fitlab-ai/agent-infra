@@ -45,7 +45,11 @@ function externalFixture(taskContent: string) {
   const taskDir = path.join(root, '.agents', 'workspace', 'active', taskId);
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), '{"platform":{"type":"github"}}');
-  fs.writeFileSync(path.join(taskDir, 'task.md'), taskContent.replaceAll('{task-id}', taskId));
+  const renderedTask = taskContent.replaceAll('{task-id}', taskId);
+  const taskWithContract = renderedTask
+    .replace('\n---\n', '\nagent_infra_version: v0.9.11-alpha.0\n---\n')
+    .replace('## Activity Log', '## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log');
+  fs.writeFileSync(path.join(taskDir, 'task.md'), taskWithContract);
   const closing = path.join(root, 'closing.json');
   const calls = path.join(root, 'calls.jsonl');
   const fake = path.join(root, 'fake-gh.cjs');

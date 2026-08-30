@@ -18,6 +18,21 @@ type ReviewSummaryErrorCode =
   | 'REVIEW_SUMMARY_NOT_FOUND'
   | 'REVIEW_SUMMARY_PLACEHOLDER_INVALID'
   | 'REVIEW_SUMMARY_COUNT_MISMATCH';
+type VerdictSemanticErrorCode =
+  | 'REVIEW_VERDICT_FINDING_MISMATCH'
+  | 'REVIEW_FINDING_COUNTS_NOT_FINALIZED';
+type CanonicalVerdictResult =
+  | { ok: true; verdict: ReviewVerdict }
+  | { ok: false; verdict: null; code: VerdictSemanticErrorCode; message: string };
+type PathVerdictErrorCode =
+  | 'REVIEW_ARTIFACT_NOT_FOUND'
+  | 'REVIEW_ARTIFACT_READ_FAILED'
+  | 'REVIEW_SUMMARY_NOT_FOUND'
+  | 'REVIEW_SUMMARY_PLACEHOLDER_INVALID'
+  | VerdictSemanticErrorCode;
+type PathVerdictResult =
+  | { ok: true; verdict: ReviewVerdict }
+  | { ok: false; verdict: null; code: PathVerdictErrorCode; message: string };
 type ReviewSummaryParseResult =
   | { ok: true; summary: ReviewSummary; findingsStart: number; findingsEnd: number }
   | { ok: false; code: ReviewSummaryErrorCode; message: string };
@@ -203,28 +218,46 @@ function finalizeReviewSummaryContent(
   };
 }
 
-function parseVerdict(reviewPath: string):
-  | { ok: true; verdict: 'Approved' | 'Approved-with-issues' | 'Changes Requested' | 'Rejected' }
-  | { ok: false; verdict: null; message: string } {
-  if (!fs.existsSync(reviewPath)) {
-    return { ok: false, verdict: null, message: `Review artifact not found: ${path.basename(reviewPath)}` };
+function resolveCanonicalVerdict(summary: ReviewSummary): CanonicalVerdictResult {
+  if (summary.counts === null) {
+    return {
+      ok: false,
+      verdict: null,
+      code: 'REVIEW_FINDING_COUNTS_NOT_FINALIZED',
+      message: 'review summary finding counts are not finalized'
+    };
   }
-  const parsed = parseReviewSummary(fs.readFileSync(reviewPath, 'utf8'));
+  if (summary.verdict === 'Approved' && !equalCounts(summary.counts, { blocker: 0, major: 0, minor: 0 })) {
+    return {
+      ok: false,
+      verdict: null,
+      code: 'REVIEW_VERDICT_FINDING_MISMATCH',
+      message: 'Approved verdict requires zero finalized findings'
+    };
+  }
+  return { ok: true, verdict: summary.verdict };
+}
+
+function parseVerdict(reviewPath: string): PathVerdictResult {
+  if (!fs.existsSync(reviewPath)) {
+    return { ok: false, verdict: null, code: 'REVIEW_ARTIFACT_NOT_FOUND', message: `Review artifact not found: ${path.basename(reviewPath)}` };
+  }
+  let content: string;
+  try {
+    content = fs.readFileSync(reviewPath, 'utf8');
+  } catch (error) {
+    return { ok: false, verdict: null, code: 'REVIEW_ARTIFACT_READ_FAILED', message: `Review artifact could not be read: ${String(error)}` };
+  }
+  const parsed = parseReviewSummary(content);
   if (!parsed.ok) {
     return {
       ok: false,
       verdict: null,
+      code: parsed.code === 'REVIEW_SUMMARY_PLACEHOLDER_INVALID' ? parsed.code : 'REVIEW_SUMMARY_NOT_FOUND',
       message: `cannot parse review summary in ${path.basename(reviewPath)}: ${parsed.message}`
     };
   }
-  const { verdict, counts } = parsed.summary;
-  if (verdict !== 'Approved') return { ok: true, verdict };
-  return {
-    ok: true,
-    verdict: counts && equalCounts(counts, { blocker: 0, major: 0, minor: 0 })
-      ? 'Approved'
-      : 'Approved-with-issues'
-  };
+  return resolveCanonicalVerdict(parsed.summary);
 }
 
 export {
@@ -236,13 +269,18 @@ export {
   maxRound,
   normalizeVerdict,
   parseReviewSummary,
-  parseVerdict
+  parseVerdict,
+  resolveCanonicalVerdict
 };
 export type {
+  CanonicalVerdictResult,
+  PathVerdictErrorCode,
+  PathVerdictResult,
   ReviewFindingCounts,
   ReviewSummary,
   ReviewSummaryErrorCode,
   ReviewSummaryFinalizeResult,
   ReviewSummaryParseResult,
-  ReviewVerdict
+  ReviewVerdict,
+  VerdictSemanticErrorCode
 };

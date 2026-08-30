@@ -20,7 +20,7 @@ function fixture(state: 'active' | 'blocked'): string {
   const ids = Object.fromEntries(Array.from({ length: 99 }, (_, index) => [String(index + 1).padStart(2, '0'), `TASK-20260102-${String(index + 1).padStart(6, '0')}`]));
   fs.mkdirSync(path.join(root, '.agents', 'workspace', 'active'), { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids })}\n`);
-  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\nstatus: ${state}\n---\n\n# Task\n\n## Activity Log\n\n`);
+  fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${TASK_ID}\nstatus: ${state}\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   return root;
 }
 

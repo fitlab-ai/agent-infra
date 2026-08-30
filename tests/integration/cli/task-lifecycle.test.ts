@@ -16,7 +16,7 @@ function fixture() {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
   fs.writeFileSync(path.join(root, '.agents', 'workspace', 'active', '.short-ids.json'), `${JSON.stringify({ version: 1, ids: { '01': TASK_ID } })}\n`);
-  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: old\ntarget_date:\n---\n\n# Task\n\n## Activity Log\n\n`);
+  fs.writeFileSync(path.join(dir, 'task.md'), `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.11-alpha.0\ntarget_date:\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   return { root, dir };
 }
 
@@ -98,7 +98,7 @@ function stagingFixture({ initGit = true } = {}) {
   const staging = path.join(root, '.agents', 'workspace', '.restore-staging-1');
   fs.mkdirSync(staging, { recursive: true });
   fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ task: { shortIdLength: 2 } }));
-  fs.writeFileSync(path.join(staging, 'task.md'), `---\nid: ${RESTORE_TASK_ID}\nissue_number: 42\nstatus: active\ncurrent_step: requirement-analysis\nupdated_at: old\nagent_infra_version: old\n---\n\n# Task\n\n## Activity Log\n\n`);
+  fs.writeFileSync(path.join(staging, 'task.md'), `---\nid: ${RESTORE_TASK_ID}\nissue_number: 42\nstatus: active\ncurrent_step: requirement-analysis\nupdated_at: old\nagent_infra_version: v0.9.11-alpha.0\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n\n`);
   return { root, staging };
 }
 
@@ -132,7 +132,7 @@ test('task-lifecycle CLI restore fails closed with REPO_ROOT_NOT_FOUND outside a
 test('task-lifecycle consumes a ticket to repair a missing log before moving the task', () => {
   const f = fixture();
   const taskFile = path.join(f.dir, 'task.md');
-  fs.writeFileSync(taskFile, `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: old\ntarget_date:\n---\n\n# Task\n`);
+  fs.writeFileSync(taskFile, `---\nid: ${TASK_ID}\nstatus: active\ncurrent_step: code-review\nupdated_at: old\nagent_infra_version: v0.9.11-alpha.0\ntarget_date:\n---\n\n# Task\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n`);
   const issue = runOverride(f.root, [
     TASK_ID, 'issue', '--failure-id', 'lifecycle.apply:LIFECYCLE_LOG_MISSING',
     '--target', 'repair-task', '--intent', 'cancel', '--operator', 'external-contributor',

@@ -31,17 +31,18 @@ function writeTask(
   heading: string,
   entries: string[],
   ledgerRows: string[] = [],
-  ledgerHeading = '## 审查分歧账本'
+  ledgerHeading = '## 审查分歧账本',
+  includeLedger = true
 ): void {
   const dir = path.join(activeDir, taskId);
   fs.mkdirSync(dir, { recursive: true });
   const log = entries.length ? `${entries.join('\n')}\n` : '';
-  const ledger = ledgerRows.length
+  const ledger = includeLedger
     ? `${ledgerHeading}\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n${ledgerRows.join('\n')}\n\n`
     : '';
   fs.writeFileSync(
     path.join(dir, 'task.md'),
-    `---\nid: ${taskId}\nbranch: feat\n---\n# 任务：${taskId}\n\n${ledger}${heading}\n\n${log}\n## 完成检查清单\n\n- [ ] done\n`
+    `---\nid: ${taskId}\nbranch: feat\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n# 任务：${taskId}\n\n${ledger}${heading}\n\n${log}\n## 完成检查清单\n\n- [ ] done\n`
   );
 }
 
@@ -395,6 +396,26 @@ test('ai task log fails when the activity log section has no entries', () => {
   const out = runCli(['task', 'log', taskId], repoRoot);
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /no activity log entries/);
+});
+
+test('ai task log preserves readable activity output and reports a missing ledger without writing', () => {
+  const { repoRoot, activeDir } = mkFixture();
+  const taskId = 'TASK-20260101-000021';
+  writeTask(activeDir, taskId, '## 活动日志', [
+    '- 2026-06-18 15:06:43+08:00 — **Create Task** by codex — Task created'
+  ], [], '## 审查分歧账本', false);
+  const taskMd = path.join(activeDir, taskId, 'task.md');
+  const before = fs.readFileSync(taskMd);
+  const beforeMtime = fs.statSync(taskMd).mtimeMs;
+
+  const out = runCli(['task', 'log', taskId], repoRoot);
+  assert.equal(out.status, 1);
+  assert.match(out.stdout, /^1\s+Create Task\s+codex\s+2026-06-18 15:06:43\+08:00\s+Task created/m);
+  assert.match(out.stdout, /Ledger: unavailable \[LEDGER_SECTION_MISSING:/);
+  assert.match(out.stdout, /^Total: 1 steps$/m);
+  assert.equal(out.stderr, '');
+  assert.deepEqual(fs.readFileSync(taskMd), before);
+  assert.equal(fs.statSync(taskMd).mtimeMs, beforeMtime);
 });
 
 test('ai task log rejects an unknown ref', () => {

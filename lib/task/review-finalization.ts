@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 import { locateActivityLog, pairEntries } from './activity-log.ts';
 import { parseArtifactName, validateCompletedArtifact } from './artifact-lifecycle.ts';
-import { parseLedger, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
+import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
 import type { LedgerStageStatus, ReviewStage } from './ledger.ts';
 import { finalizeReviewSummaryContent } from './review-artifacts.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
@@ -194,7 +194,11 @@ function finalizeReviewSummaryUnlocked(
 
   let rows;
   try {
-    rows = parseLedger(taskContent);
+    const ledger = parseLedgerDocument(taskContent);
+    if (!ledger.present) {
+      return failed(request, 'REVIEW_LEDGER_INVALID', `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`, resolved.taskId);
+    }
+    rows = ledger.rows;
   } catch (error) {
     return failed(request, 'REVIEW_LEDGER_INVALID', String(error), resolved.taskId);
   }

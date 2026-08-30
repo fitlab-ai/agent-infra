@@ -31,10 +31,17 @@ function fixture(monotonicNow: () => number, now: () => string) {
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---
 id: ${taskId}
+status: active
 current_step: requirement-analysis
+agent_infra_version: v0.9.11-alpha.0
 ---
 
 # Task
+
+## Review Disagreement Ledger
+
+| id | stage | round | severity | status | evidence |
+|----|-------|-------|----------|--------|----------|
 `);
   beginOrResumeOrchestration(taskId, {
     repoRoot: root,
