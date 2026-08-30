@@ -143,27 +143,39 @@ test('two processes cannot overlap callbacks for the same task key', async () =>
     const [root, lockRoot, ready, release] = process.argv.slice(1);
     withTaskExecutionLock(root, 'TASK-20260101-000001', 'child', () => {
       fs.writeFileSync(ready, 'ready');
-      while (!fs.existsSync(release)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      const deadline = Date.now() + 5_000;
+      while (!fs.existsSync(release) && Date.now() < deadline) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+      if (!fs.existsSync(release)) throw new Error('timed out waiting for release');
     }, { lockRoot });
   `;
   const child = spawn(process.execPath, [
     '--experimental-strip-types', '--input-type=module', '--eval', childCode,
     root, lockRoot, ready, release
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
-  const deadline = Date.now() + 2_000;
-  while (!fs.existsSync(ready) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  const exit = new Promise<number | null>((resolve) => child.once('exit', resolve));
+  try {
+    const deadline = Date.now() + 2_000;
+    while (!fs.existsSync(ready) && child.exitCode === null && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(fs.existsSync(ready), true);
+    assert.throws(
+      () => withTaskExecutionLock(root, 'TASK-20260101-000001', 'parent', () => undefined, { lockRoot }),
+      (error: unknown) => error instanceof TaskExecutionLockError
+        && error.code === 'ORCHESTRATION_LOCK_BUSY'
+    );
+    fs.writeFileSync(release, 'release');
+    assert.equal(await exit, 0);
+    assert.deepEqual(fs.readdirSync(lockRoot).sort(), ['ready', 'release']);
+  } finally {
+    if (!fs.existsSync(release)) fs.writeFileSync(release, 'release');
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    await exit;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(lockRoot, { recursive: true, force: true });
   }
-  assert.equal(fs.existsSync(ready), true);
-  assert.throws(
-    () => withTaskExecutionLock(root, 'TASK-20260101-000001', 'parent', () => undefined, { lockRoot }),
-    (error: unknown) => error instanceof TaskExecutionLockError
-      && error.code === 'ORCHESTRATION_LOCK_BUSY'
-  );
-  fs.writeFileSync(release, 'release');
-  const exitCode = await new Promise<number | null>((resolve) => child.once('exit', resolve));
-  assert.equal(exitCode, 0);
-  assert.deepEqual(fs.readdirSync(lockRoot).sort(), ['ready', 'release']);
 });
 
 test(

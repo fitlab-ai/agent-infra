@@ -29,7 +29,9 @@ function sleep(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0
 function readStatus() { return JSON.parse(fs.readFileSync(statusPath, 'utf8')); }
 function writeStatus(patch) {
   const current = readStatus();
-  fs.writeFileSync(statusPath, JSON.stringify({ ...current, ...patch, updatedAt: Date.now() }) + '\\n');
+  const temporaryPath = statusPath + '.' + process.pid + '.tmp';
+  fs.writeFileSync(temporaryPath, JSON.stringify({ ...current, ...patch, updatedAt: Date.now() }) + '\\n');
+  fs.renameSync(temporaryPath, statusPath);
 }
 function logDiagnostic(message) {
   fs.appendFileSync(diagnosticsLogPath, message + '\\n');

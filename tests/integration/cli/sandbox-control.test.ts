@@ -62,11 +62,46 @@ async function waitForStatusStateAsync(statusDir: string, state: string, timeout
   throw new Error(`Timed out waiting for ${state} status in ${statusDir}`);
 }
 
-async function waitForRequestAsync(requestsDir: string, timeoutMs: number): Promise<string> {
+type CollectedChild = {
+  child: ReturnType<typeof spawn>;
+  result: Promise<{ exitCode: number; stdout: string; stderr: string }>;
+};
+
+function collectChild(child: ReturnType<typeof spawn>): CollectedChild {
+  let stdout = '';
+  let stderr = '';
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
+  child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+  const result = new Promise<{ exitCode: number; stdout: string; stderr: string }>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
+  });
+  return { child, result };
+}
+
+async function stopCollectedChild(client: CollectedChild | null): Promise<void> {
+  if (!client) return;
+  if (client.child.exitCode === null && client.child.signalCode === null) client.child.kill('SIGTERM');
+  await client.result.catch(() => undefined);
+}
+
+async function waitForRequestAsync(
+  requestsDir: string,
+  timeoutMs: number,
+  options: { exclude?: string; client?: CollectedChild } = {}
+): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const request = fs.readdirSync(requestsDir).find((name) => name.endsWith('.json'));
+    const request = fs.readdirSync(requestsDir)
+      .find((name) => name.endsWith('.json') && name !== options.exclude);
     if (request) return request;
+    if (options.client
+      && (options.client.child.exitCode !== null || options.client.child.signalCode !== null)) {
+      const result = await options.client.result;
+      throw new Error(`client exited before publishing a request: ${result.stderr || result.stdout || result.exitCode}`);
+    }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`Timed out waiting for a request in ${requestsDir}`);
@@ -796,7 +831,7 @@ test('sandbox control client tolerates a transient torn response but rejects sta
     updatedAt: Date.now()
   })}\n`);
   const clientModule = path.resolve('lib/sandbox/control/client.ts');
-  const runClient = () => {
+  const runClient = (): CollectedChild => {
     const script = `
       import { requestSandboxControl } from ${JSON.stringify(clientModule)};
       try {
@@ -814,32 +849,21 @@ test('sandbox control client tolerates a transient torn response but rejects sta
         process.exitCode = 1;
       }
     `;
-    return spawn(process.execPath, ['--experimental-strip-types', '--input-type=module', '--eval', script], {
+    return collectChild(spawn(process.execPath, ['--experimental-strip-types', '--input-type=module', '--eval', script], {
       stdio: ['ignore', 'pipe', 'pipe']
-    });
-  };
-  const collect = async (child: ReturnType<typeof runClient>) => {
-    let stdout = '';
-    let stderr = '';
-    child.stdout?.setEncoding('utf8');
-    child.stderr?.setEncoding('utf8');
-    child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
-    child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
-    const exitCode = await new Promise<number>((resolve) => child.once('close', (code) => resolve(code ?? 1)));
-    return { exitCode, stdout, stderr };
+    }));
   };
   const responseFor = (id: string) => ({
     version: 2, id, phase: 'rejected', exitCode: null, stdout: '',
     stderr: 'SANDBOX_CONTROL_RESULT_UNKNOWN\n',
     error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
   });
+  let transientClient: CollectedChild | null = null;
+  let stableClient: CollectedChild | null = null;
   try {
-    const transientClient = runClient();
-    const requestDeadline = Date.now() + 2_000;
-    while (!fs.readdirSync(requestsDir).some((name) => name.endsWith('.json')) && Date.now() < requestDeadline) {
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-    }
-    const transientId = fs.readdirSync(requestsDir).find((name) => name.endsWith('.json'))!.slice(0, -5);
+    transientClient = runClient();
+    const transientName = await waitForRequestAsync(requestsDir, 2_000, { client: transientClient });
+    const transientId = transientName.slice(0, -5);
     const transientPath = path.join(responsesDir, `${transientId}.json`);
     fs.writeFileSync(transientPath, `${JSON.stringify({
       version: 2, id: transientId, phase: 'accepted', exitCode: null, stdout: '', stderr: '', error: null
@@ -848,21 +872,21 @@ test('sandbox control client tolerates a transient torn response but rejects sta
     fs.writeFileSync(transientPath, '{"version":2,"id":"');
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 75);
     fs.writeFileSync(transientPath, `${JSON.stringify(responseFor(transientId))}\n`);
-    const transient = await collect(transientClient);
+    const transient = await transientClient.result;
     assert.equal(transient.exitCode, 0, transient.stderr || transient.stdout);
     assert.equal(JSON.parse(transient.stdout).response.error.code, 'SANDBOX_CONTROL_RESULT_UNKNOWN');
 
-    const stableClient = runClient();
-    while (fs.readdirSync(requestsDir).filter((name) => name.endsWith('.json')).length < 2) {
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-    }
-    const stableName = fs.readdirSync(requestsDir).filter((name) => name.endsWith('.json'))
-      .find((name) => !name.startsWith(transientId))!;
+    stableClient = runClient();
+    const stableName = await waitForRequestAsync(requestsDir, 2_000, {
+      client: stableClient,
+      exclude: transientName
+    });
     fs.writeFileSync(path.join(responsesDir, stableName), '{"version":2');
-    const stable = await collect(stableClient);
+    const stable = await stableClient.result;
     assert.equal(stable.exitCode, 1);
     assert.equal(JSON.parse(stable.stdout).code, 'SANDBOX_CONTROL_RESPONSE_INVALID');
   } finally {
+    await Promise.all([stopCollectedChild(transientClient), stopCollectedChild(stableClient)]);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
@@ -888,7 +912,7 @@ test('task-finalization client exposes accepted result loss as a structured unkn
     activeRequestId: null,
     updatedAt: Date.now()
   })}\n`);
-  const child = spawn(process.execPath, [
+  const client = collectChild(spawn(process.execPath, [
     '--experimental-strip-types', '--no-warnings', path.resolve('bin/internal-cli.ts'),
     'sandbox-control', 'client', 'task-finalization', '08', 'complete', '--agent', 'codex'
   ], {
@@ -901,20 +925,9 @@ test('task-finalization client exposes accepted result loss as a structured unkn
       AGENT_INFRA_CONTROL_STATUS_DIR: statusDir
     },
     stdio: ['ignore', 'pipe', 'pipe']
-  });
-  let stdout = '';
-  let stderr = '';
-  child.stdout?.setEncoding('utf8');
-  child.stderr?.setEncoding('utf8');
-  child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
-  child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+  }));
   try {
-    const deadline = Date.now() + 2_000;
-    let requestName: string | undefined;
-    while (!(requestName = fs.readdirSync(requestsDir).find((name) => name.endsWith('.json'))) && Date.now() < deadline) {
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-    }
-    assert.ok(requestName);
+    const requestName = await waitForRequestAsync(requestsDir, 2_000, { client });
     const request = JSON.parse(fs.readFileSync(path.join(requestsDir, requestName), 'utf8')) as Record<string, unknown>;
     assert.equal(request.family, 'task-finalization');
     assert.equal(request.operation, 'complete');
@@ -931,9 +944,9 @@ test('task-finalization client exposes accepted result loss as a structured unkn
       stderr: 'SANDBOX_CONTROL_RESULT_UNKNOWN\n',
       error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
     })}\n`);
-    const exitCode = await new Promise<number>((resolve) => child.once('close', (code) => resolve(code ?? 1)));
-    assert.equal(exitCode, 1, stderr);
-    assert.deepEqual(JSON.parse(stdout), {
+    const result = await client.result;
+    assert.equal(result.exitCode, 1, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
       version: 1,
       status: 'unknown',
       changed: false,
@@ -941,9 +954,9 @@ test('task-finalization client exposes accepted result loss as a structured unkn
       result: null,
       error: { code: 'SANDBOX_CONTROL_RESULT_UNKNOWN', message: 'result unknown', retryable: false }
     });
-    assert.match(stderr, /result unknown/);
+    assert.match(result.stderr, /result unknown/);
   } finally {
-    if (child.exitCode === null) child.kill('SIGTERM');
+    await stopCollectedChild(client);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
