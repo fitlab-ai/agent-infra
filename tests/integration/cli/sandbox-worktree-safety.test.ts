@@ -226,7 +226,7 @@ test("sandbox rm retries control and workspace cleanup after the container is al
     fs.writeFileSync(path.join(siblingControlRoot, "keep"), "sibling\n");
     fs.mkdirSync(workspaceViewRoot, { recursive: true });
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
-      version: 5, engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
+      engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
       project: "demo", container, containerIdentity: { id: "fixture-container-id", labels: {} }, branch,
       mode: "branch-only", taskId: null, token: "partial-secret", generation: "partial-generation",
       channelDir, publicStatusDir: path.join(controlRoot, "public"), processingDir,
@@ -298,7 +298,7 @@ test("sandbox rm removes an empty control container parent after control cleanup
     fs.mkdirSync(path.join(controlRoot, "public"), { recursive: true });
     fs.mkdirSync(processingDir, { recursive: true });
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
-      version: 5, engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
+      engine: "docker-desktop", repoRoot: fixture.repoDir, worktreeRoot: fixture.repoDir,
       project: "demo", container, containerIdentity: { id: "empty-parent-container", labels: {} }, branch,
       mode: "branch-only", taskId: null, token: "empty-parent-secret", generation: "empty-parent-generation",
       channelDir, publicStatusDir: path.join(controlRoot, "public"), processingDir,
@@ -816,7 +816,6 @@ test("sandbox rm rejects a control manifest whose container does not match its c
     fs.mkdirSync(publicStatusDir, { recursive: true });
     fs.mkdirSync(processingDir, { recursive: true });
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
-      version: 5,
       engine: "docker-desktop",
       repoRoot: fixture.repoDir,
       worktreeRoot: fixture.repoDir,
@@ -905,7 +904,6 @@ test("sandbox rm cleans a completed task-bound sandbox only with matching contro
     fs.mkdirSync(publicStatusDir, { recursive: true });
     fs.mkdirSync(processingDir, { recursive: true });
     fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
-      version: 5,
       engine: "docker-desktop",
       repoRoot: fixture.repoDir,
       worktreeRoot: fixture.repoDir,

@@ -35,9 +35,7 @@ export type SandboxControlManifestBase = Readonly<{
   branch: string; mode: 'task-bound' | 'branch-only'; taskId: string | null; token: string;
   generation: string; channelDir: string; publicStatusDir: string; processingDir: string;
 }>;
-export type SandboxControlLegacyManifest = SandboxControlManifestBase & Readonly<{ version: 4 }>;
-export type SandboxControlManifest = SandboxControlManifestBase & Readonly<{ version: 5; runtimeDir: string }>;
-export type SandboxControlManifestLike = SandboxControlLegacyManifest | SandboxControlManifest;
+export type SandboxControlManifest = SandboxControlManifestBase & Readonly<{ runtimeDir: string }>;
 export type SandboxControlBrokerOwner = ProcessIdentity & Readonly<{
   version: 3;
   brokerId: string;

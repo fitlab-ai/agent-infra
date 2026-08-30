@@ -1,13 +1,19 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getProcessStartTime } from '../../server/process-state.ts';
 import { createTask } from '../../task/create-service.ts';
 import { applyTaskFinalization } from '../../task/finalization.ts';
-import { verifyTaskEvent } from '../../task/verification.ts';
-import { bindSandboxControlTask, type SandboxControlExecution, type SandboxControlManifest, type SandboxControlRequest } from './protocol.ts';
-import { atomicWriteJson, executionPath, terminateSandboxControlExecution } from './state.ts';
+import { bindSandboxControlTask, validateSandboxControlRequest, type SandboxControlExecution, type SandboxControlManifest, type SandboxControlRequest } from './protocol.ts';
+import { atomicWriteJson, executionPath, readActiveLease, terminateSandboxControlExecution } from './state.ts';
+import {
+  createSandboxExecutorExecutionContext,
+  dispatchTaskControlOperation,
+  parseTaskControlOperation,
+  type TaskControlOperation
+} from '../../task/control-authority.ts';
+import { assertSandboxControlBrokerOwner, readSandboxControlManifest, type BrokerOwner } from './lifecycle.ts';
 import { computeLifecycleBuildIdentity } from '../../agent-clients/adapters/codex-lifecycle/build-identity.ts';
 import {
   closeCodexControllerRegistration,
@@ -28,6 +34,26 @@ export type PreparedSandboxControlExecution = {
   completion: Promise<SandboxControlExecutionResult>;
   terminate(updateState?: boolean): boolean;
 };
+
+function sameBrokerOwner(left: BrokerOwner, right: BrokerOwner): boolean {
+  return left.version === right.version
+    && left.pid === right.pid
+    && left.startTime === right.startTime
+    && left.brokerId === right.brokerId
+    && left.token === right.token
+    && left.generation === right.generation;
+}
+
+export function assertSandboxControlExecutorAuthority(
+  manifest: SandboxControlManifest,
+  gateOwner?: BrokerOwner
+): void {
+  const owner = assertSandboxControlBrokerOwner(manifest);
+  if (gateOwner && !sameBrokerOwner(owner, gateOwner)) {
+    throw new Error('SANDBOX_CONTROL_GATE_OWNER_MISMATCH');
+  }
+  if (readActiveLease(manifest)) throw new Error('SANDBOX_CONTROL_HANDOFF_ACTIVE');
+}
 
 function safeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(env).filter(([key]) => !key.toUpperCase().startsWith('AGENT_INFRA_CONTROL_')));
@@ -104,9 +130,11 @@ export async function prepareSandboxControlExecution(params: {
     start(canWrite = () => true) {
       if (!child.connected) throw new Error('SANDBOX_CONTROL_EXECUTOR_GATE_CLOSED');
       if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
+      const gateOwner = assertSandboxControlBrokerOwner(params.manifest);
+      if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
       atomicWriteJson(executionPath(params.manifest, params.request.id), { ...execution, phase: 'running', updatedAt: Date.now() });
       if (!canWrite()) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
-      child.send({ version: 1, nonce });
+      child.send({ version: 1, nonce, owner: gateOwner });
     },
     completion,
     terminate(updateState = true) {
@@ -120,7 +148,7 @@ export async function prepareSandboxControlExecution(params: {
   };
 }
 
-function waitForGate(nonce: string, timeoutMs = 2_000): Promise<void> {
+function waitForGate(nonce: string, timeoutMs = 2_000): Promise<BrokerOwner> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('SANDBOX_CONTROL_EXECUTOR_GATE_TIMEOUT')), timeoutMs);
     const onDisconnect = () => {
@@ -131,12 +159,21 @@ function waitForGate(nonce: string, timeoutMs = 2_000): Promise<void> {
     process.once('message', (message: unknown) => {
       clearTimeout(timer);
       process.off('disconnect', onDisconnect);
-      const value = message as { version?: unknown; nonce?: unknown } | null;
-      if (!value || value.version !== 1 || value.nonce !== nonce) {
+      const value = message as {
+        version?: unknown;
+        nonce?: unknown;
+        owner?: Partial<BrokerOwner> | null;
+      } | null;
+      const owner = value?.owner;
+      if (!value || value.version !== 1 || value.nonce !== nonce
+        || !owner || owner.version !== 3 || !Number.isSafeInteger(owner.pid) || (owner.pid ?? 0) <= 0
+        || typeof owner.startTime !== 'number' || !Number.isSafeInteger(owner.startTime)
+        || typeof owner.brokerId !== 'string' || owner.brokerId.length === 0
+        || typeof owner.token !== 'string' || typeof owner.generation !== 'string') {
         reject(new Error('SANDBOX_CONTROL_EXECUTOR_GATE_INVALID'));
         return;
       }
-      resolve();
+      resolve(owner as BrokerOwner);
     });
   });
 }
@@ -170,6 +207,17 @@ function orchestrationFailure(code: string, message: string): SandboxControlExec
   };
 }
 
+function lifecycleFailure(code: string, message: string): SandboxControlExecutionResult {
+  return {
+    exitCode: 1,
+    stdout: `${JSON.stringify({
+      status: 'failed', changed: false,
+      error: { code, message }
+    })}\n`,
+    stderr: ''
+  };
+}
+
 function finalizationResult(result: ReturnType<typeof applyTaskFinalization>): SandboxControlExecutionResult {
   const payload = {
     version: 1,
@@ -186,28 +234,17 @@ function finalizationResult(result: ReturnType<typeof applyTaskFinalization>): S
   };
 }
 
-function isCodexPrepare(args: readonly string[]): boolean {
-  if (args[1] !== 'prepare') return false;
-  const values: string[] = [];
-  for (let index = 2; index < args.length; index += 1) {
-    if (args[index] === '--client') values.push(args[index + 1] ?? '');
-    else if (args[index]?.startsWith('--client=')) values.push(args[index]!.slice('--client='.length));
-  }
-  return values.length === 1 && values[0] === 'codex';
-}
-
 type ExecuteRequestOptions = Readonly<{
   buildIdentity?: typeof computeLifecycleBuildIdentity;
   resolveControllerBinding?: typeof resolveCodexControllerBinding;
-  spawnDomain?: typeof spawnSync;
 }>;
 
-export function executeRequest(
+export async function executeRequest(
   manifest: SandboxControlManifest,
   manifestPath: string,
   request: SandboxControlRequest,
   options: ExecuteRequestOptions = {}
-): SandboxControlExecutionResult {
+): Promise<SandboxControlExecutionResult> {
   if (request.family === 'task-create') {
     const result = createTask(request.candidate, { repoRoot: manifest.repoRoot });
     return {
@@ -260,20 +297,47 @@ export function executeRequest(
     }
   }
   if (request.family === 'task-finalization') {
-    return finalizationResult(applyTaskFinalization(
-      { taskRef: manifest.taskId!, intent: 'complete', agent: request.agent },
-      { repoRoot: manifest.repoRoot, preflight: (input, options) => verifyTaskEvent(
-        { ...input, event: 'complete-task.hard-preflight' }, options
-      ) }
-    ));
+    const operation = parseTaskControlOperation(
+      'task-finalization', [manifest.taskId!, 'complete', '--agent', request.agent]
+    );
+    if (operation.family !== 'task-finalization') throw new Error('SANDBOX_CONTROL_FINALIZATION_OPERATION_INVALID');
+    const result = dispatchTaskControlOperation(
+      createSandboxExecutorExecutionContext({
+        repoRoot: manifest.repoRoot,
+        worktreeRoot: manifest.worktreeRoot,
+        runtimeDir: manifest.runtimeDir,
+        taskId: manifest.taskId!,
+        generation: manifest.generation,
+        manifestPath,
+        requestId: request.id
+      }),
+      operation
+    );
+    return finalizationResult(result);
   }
   const boundArgs = bindSandboxControlTask(request, manifest.taskId!);
+  if (request.family === 'task-orchestration') {
+    boundArgs.push('--git-worktree-root', manifest.worktreeRoot);
+  }
+  let operation: TaskControlOperation;
+  try {
+    operation = parseTaskControlOperation(request.family, boundArgs);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = /^([A-Z][A-Z0-9_]+)/u.exec(message)?.[1] ?? 'TASK_CONTROL_OPERATION_INVALID';
+    return request.family === 'task-lifecycle'
+      ? lifecycleFailure('LIFECYCLE_PAYLOAD_INVALID', message)
+      : orchestrationFailure(code, message);
+  }
   let controllerBinding: Readonly<{
     instanceDigest: string;
     controlGeneration: string;
   }> | null = null;
   if (request.family === 'task-orchestration') {
-    if (isCodexPrepare(request.args)) {
+    const codexPrepare = operation.family === 'task-orchestration'
+      && operation.intent === 'prepare'
+      && operation.input.client === 'codex';
+    if (codexPrepare) {
       if (!request.controllerProof) {
         return orchestrationFailure(
           'CODEX_SANDBOX_CONTROLLER_PROOF_REQUIRED',
@@ -299,36 +363,69 @@ export function executeRequest(
         'Controller proof is only accepted for canonical Codex prepare'
       );
     }
-    boundArgs.push('--git-worktree-root', manifest.worktreeRoot);
   }
-  const result = (options.spawnDomain ?? spawnSync)(
-    process.execPath,
-    nodeEntryArgs(process.argv[1]!, [request.family, ...boundArgs]),
-    {
-      cwd: manifest.repoRoot,
-      encoding: 'utf8',
-      env: {
-        ...safeEnv(process.env),
-        AGENT_INFRA_RUNTIME_DIR: manifest.runtimeDir,
-        ...(controllerBinding
-          ? { AGENT_INFRA_CONTROL_CONTROLLER_BINDING: JSON.stringify(controllerBinding) }
-          : {})
-      }
-    }
-  );
-  return { exitCode: result.status ?? 1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+  const context = createSandboxExecutorExecutionContext({
+    repoRoot: manifest.repoRoot,
+    worktreeRoot: manifest.worktreeRoot,
+    runtimeDir: manifest.runtimeDir,
+    taskId: manifest.taskId!,
+    generation: manifest.generation,
+    manifestPath,
+    requestId: request.id,
+    ...(controllerBinding ? { controllerBinding } : {})
+  });
+  const format = (value: unknown): SandboxControlExecutionResult => {
+    const result = value as { status?: string };
+    return {
+      exitCode: result.status === 'failed' ? 1 : 0,
+      stdout: `${JSON.stringify(value)}\n`,
+      stderr: ''
+    };
+  };
+  if (request.family === 'task-orchestration') {
+    if (operation.family !== 'task-orchestration') throw new Error('SANDBOX_CONTROL_ORCHESTRATION_OPERATION_INVALID');
+    return format(await dispatchTaskControlOperation(context, operation));
+  }
+  if (operation.family !== 'task-lifecycle') throw new Error('SANDBOX_CONTROL_LIFECYCLE_OPERATION_INVALID');
+  return format(dispatchTaskControlOperation(context, operation));
 }
 
 export async function runSandboxControlExecutor(requestPath: string, nonce: string): Promise<void> {
-  await waitForGate(nonce);
+  const gateOwner = await waitForGate(nonce);
   process.disconnect?.();
-  const root = fs.realpathSync.native(process.cwd());
-  const request = JSON.parse(fs.readFileSync(requestPath, 'utf8')) as SandboxControlRequest;
   const manifestPath = process.env.AGENT_INFRA_EXECUTOR_MANIFEST;
   if (!manifestPath) throw new Error('SANDBOX_CONTROL_EXECUTOR_MANIFEST_MISSING');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as SandboxControlManifest;
+  const manifest = readSandboxControlManifest(manifestPath);
+  const root = fs.realpathSync.native(process.cwd());
   if (fs.realpathSync.native(manifest.repoRoot) !== root) throw new Error('SANDBOX_CONTROL_EXECUTOR_ROOT_INVALID');
-  const result = executeRequest(manifest, manifestPath, request);
+  const raw = JSON.parse(fs.readFileSync(requestPath, 'utf8')) as unknown;
+  const request = validateSandboxControlRequest(raw, manifest);
+  const requestDirectory = path.resolve(path.dirname(requestPath));
+  const processingDirectory = path.resolve(path.join(manifest.processingDir, request.id));
+  const channelRequestDirectory = path.resolve(path.join(manifest.channelDir, 'requests'));
+  if (requestDirectory !== processingDirectory && requestDirectory !== channelRequestDirectory) {
+    throw new Error('SANDBOX_CONTROL_EXECUTOR_REQUEST_INVALID');
+  }
+  let result: SandboxControlExecutionResult;
+  try {
+    assertSandboxControlExecutorAuthority(manifest, gateOwner);
+    result = await executeRequest(manifest, manifestPath, request);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const code = /^([A-Z][A-Z0-9_]+)/u.exec(detail)?.[1] ?? 'SANDBOX_CONTROL_EXECUTOR_FAILED';
+    result = request.family === 'task-finalization'
+      ? {
+        exitCode: 1,
+        stdout: `${JSON.stringify({
+          version: 1, status: 'failed', changed: false, accepted: true, result: null,
+          error: { code, message: detail, retryable: false }
+        })}\n`,
+        stderr: ''
+      }
+      : request.family === 'task-lifecycle'
+        ? lifecycleFailure(code, detail)
+        : orchestrationFailure(code, detail);
+  }
   process.stdout.write(result.stdout);
   process.stderr.write(result.stderr);
   process.exitCode = result.exitCode;

@@ -9,13 +9,57 @@ if (major < 22 || (major === 22 && minor < 9)) {
 }
 
 const command = process.argv[2] || '';
+const taskControlCommand = command === 'task-lifecycle' || command === 'task-orchestration' || command === 'task-finalization';
 
-if (
-  process.env.AGENT_INFRA_CONTROL_TOKEN
-  && (command === 'task-lifecycle' || command === 'task-orchestration' || command === 'task-finalization')
-) {
-  const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
-  await sandboxControl(['client', command, ...process.argv.slice(3)]);
+function taskControlTransportFailure(message: string): never {
+  process.stdout.write(`${JSON.stringify({
+    status: 'failed', changed: false,
+    error: { code: 'TASK_CONTROL_TRANSPORT_INVALID', message }
+  })}\n`);
+  process.exit(1);
+}
+
+if (taskControlCommand) {
+  const env = process.env;
+  const executorMarked = Boolean(env.AGENT_INFRA_EXECUTOR_MANIFEST);
+  const controlKeys = [
+    'AGENT_INFRA_CONTROL_TOKEN', 'AGENT_INFRA_CONTROL_GENERATION',
+    'AGENT_INFRA_CONTROL_DIR', 'AGENT_INFRA_CONTROL_STATUS_DIR'
+  ];
+  const hasControlMarker = controlKeys.some((key) => Boolean(env[key]))
+    || Boolean(env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING);
+  const taskBindingMarker = hasControlMarker && Boolean(env.AGENT_INFRA_TASK_ID);
+  const hasCompleteClientConfig = controlKeys.every((key) => Boolean(env[key]))
+    && !env.AGENT_INFRA_CONTROL_CONTROLLER_BINDING
+    && (!taskBindingMarker || Boolean(env.AGENT_INFRA_RUNTIME_DIR));
+  if (executorMarked) {
+    taskControlTransportFailure('executor context is only valid for sandbox-control execute');
+  }
+  if ((hasControlMarker || taskBindingMarker) && !hasCompleteClientConfig) {
+    taskControlTransportFailure('sandbox client control configuration is incomplete or conflicting');
+  }
+  if (hasCompleteClientConfig) {
+    const { sandboxControl } = await import('../lib/internal/sandbox-control.ts');
+    await sandboxControl(['client', command, ...process.argv.slice(3)]);
+  } else {
+    switch (command) {
+      case 'task-orchestration': {
+        const { taskOrchestration } = await import('../lib/internal/task-orchestration.ts');
+        await taskOrchestration(process.argv.slice(3));
+        break;
+      }
+      case 'task-lifecycle': {
+        const { taskLifecycle } = await import('../lib/internal/task-lifecycle.ts');
+        taskLifecycle(process.argv.slice(3));
+        break;
+      }
+      case 'task-finalization': {
+        const { taskFinalization } = await import('../lib/internal/task-finalization.ts');
+        taskFinalization(process.argv.slice(3));
+        break;
+      }
+    }
+  }
 } else switch (command) {
 
   case 'task-create': {

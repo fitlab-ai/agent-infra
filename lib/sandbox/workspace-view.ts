@@ -52,8 +52,13 @@ export type SandboxControlSetup = Readonly<{
   statusDir: string;
   runtimeDir: string;
   manifestPath: string;
+  manifestDraft: SandboxControlManifestDraft;
   token: string;
   generation: string;
+}>;
+
+export type SandboxControlManifestDraft = Readonly<Omit<SandboxControlManifest, 'containerIdentity' | 'engine'> & {
+  engine: string;
 }>;
 
 export function sandboxControlPaths(params: Readonly<{
@@ -230,14 +235,12 @@ export function materializeSandboxControl(params: Readonly<{
   const token = randomBytes(32).toString('hex');
   const generation = randomBytes(16).toString('hex');
   const repoRoot = fs.realpathSync.native(params.repoRoot);
-  const manifest: SandboxControlManifest = {
-    version: 5,
+  const manifestDraft: SandboxControlManifestDraft = {
     engine: params.engine ?? 'docker',
     repoRoot,
     worktreeRoot: fs.realpathSync.native(params.worktreeRoot),
     project: params.project,
     container: params.container,
-    containerIdentity: { id: '', labels: {} },
     branch: params.branch,
     mode: params.identity.mode,
     taskId: params.identity.mode === 'task-bound' ? params.identity.taskId : null,
@@ -248,19 +251,19 @@ export function materializeSandboxControl(params: Readonly<{
     processingDir,
     runtimeDir
   };
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, { mode: 0o600 });
-  return { root, channelDir, statusDir, runtimeDir, manifestPath, token, generation };
+  return { root, channelDir, statusDir, runtimeDir, manifestPath, manifestDraft, token, generation };
 }
 
 export function finalizeSandboxControlManifest(
   setup: SandboxControlSetup,
   identity: Readonly<{ engine: string; id: string; labels: Readonly<Record<string, string>> }>
-): void {
+): SandboxControlManifest {
   if (!identity.engine || !identity.id) throw new Error('SANDBOX_CONTROL_CONTAINER_ID_INVALID');
-  const manifest = JSON.parse(fs.readFileSync(setup.manifestPath, 'utf8')) as Record<string, unknown>;
-  manifest.version = 5;
-  manifest.engine = identity.engine;
-  manifest.containerIdentity = { id: identity.id, labels: { ...identity.labels } };
+  const manifest: SandboxControlManifest = {
+    ...setup.manifestDraft,
+    engine: identity.engine,
+    containerIdentity: { id: identity.id, labels: { ...identity.labels } }
+  };
   const temporary = `${setup.manifestPath}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
   try {
     fs.writeFileSync(temporary, `${JSON.stringify(manifest)}\n`, { mode: 0o600, flag: 'wx' });
@@ -268,4 +271,5 @@ export function finalizeSandboxControlManifest(
   } finally {
     fs.rmSync(temporary, { force: true });
   }
+  return manifest;
 }

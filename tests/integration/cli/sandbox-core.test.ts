@@ -336,7 +336,6 @@ function writeTaskBoundControlEvidence(
   fs.mkdirSync(processingDir, { recursive: true });
   fs.mkdirSync(path.join(controlRoot, "runtime"), { recursive: true });
   fs.writeFileSync(path.join(controlRoot, "manifest.json"), `${JSON.stringify({
-    version: 5,
     engine: "docker-desktop",
     repoRoot: repoDir,
     worktreeRoot: repoDir,

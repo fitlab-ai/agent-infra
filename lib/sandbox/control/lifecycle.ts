@@ -10,9 +10,7 @@ import {
 import type { ProcessIdentity, ProcessIdentityProbe, ProcessIdentityState } from '../../server/process-state.ts';
 import type {
   SandboxControlExecution,
-  SandboxControlManifestLike,
   SandboxControlManifest,
-  SandboxControlLegacyManifest,
   SandboxControlStatus,
   SandboxControlTimingPolicy
 } from './protocol.ts';
@@ -468,7 +466,6 @@ function readProcessingSnapshot(root: string): SandboxControlCutoverSnapshot['pr
 export function captureSandboxControlCutoverSnapshot(root: string): SandboxControlCutoverSnapshot {
   const resolvedRoot = path.resolve(root);
   const manifestPath = path.join(resolvedRoot, 'manifest.json');
-  if (fs.existsSync(manifestPath)) readSandboxControlManifestForTransition(manifestPath);
   return {
     root: resolvedRoot,
     manifestRaw: readOptionalRaw(manifestPath),
@@ -485,10 +482,7 @@ export function assertSandboxControlCutoverSnapshot(snapshot: SandboxControlCuto
   }
 }
 
-function readSandboxControlManifestValue(
-  manifestPath: string,
-  allowLegacy: boolean
-): SandboxControlManifestLike {
+function readSandboxControlManifestValue(manifestPath: string): SandboxControlManifest {
   if (!regularFile(manifestPath)) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   let manifest: Record<string, unknown>;
   try {
@@ -500,9 +494,15 @@ function readSandboxControlManifestValue(
   } catch {
     throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
-  const candidate = manifest as Partial<SandboxControlManifest> & Partial<SandboxControlLegacyManifest>;
-  if (candidate.version !== 4 && candidate.version !== 5) {
-    throw new Error('SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 5; container-only recreation is required');
+  const candidate = manifest as Partial<SandboxControlManifest> & { version?: unknown };
+  const expectedKeys = [
+    'branch', 'channelDir', 'container', 'containerIdentity', 'engine', 'generation',
+    'mode', 'processingDir', 'project', 'publicStatusDir', 'repoRoot', 'runtimeDir',
+    'taskId', 'token', 'worktreeRoot'
+  ];
+  if ('version' in candidate || typeof candidate.runtimeDir !== 'string'
+    || Object.keys(manifest).sort().join(',') !== expectedKeys.sort().join(',')) {
+    throw new Error('SANDBOX_CONTROL_MANIFEST_REBUILD_REQUIRED: container-only recreation/rebuild is required');
   }
   if (typeof candidate.containerIdentity !== 'object' || candidate.containerIdentity === null
     || Array.isArray(candidate.containerIdentity)) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
@@ -518,31 +518,23 @@ function readSandboxControlManifestValue(
     || (candidate.taskId !== null && typeof candidate.taskId !== 'string')
     || typeof candidate.channelDir !== 'string' || typeof candidate.publicStatusDir !== 'string'
     || typeof candidate.processingDir !== 'string' || typeof candidate.token !== 'string'
-    || typeof candidate.generation !== 'string') throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
+    || typeof candidate.generation !== 'string'
+    || (candidate.mode === 'task-bound' && (typeof candidate.taskId !== 'string' || candidate.taskId.length === 0))
+    || (candidate.mode === 'branch-only' && candidate.taskId !== null)) throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   const root = path.dirname(path.resolve(manifestPath));
   if (path.resolve(candidate.channelDir) !== path.join(root, 'channel')
     || path.resolve(candidate.publicStatusDir) !== path.join(root, 'public')
     || path.resolve(candidate.processingDir) !== path.join(root, 'processing')) {
     throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
-  if (candidate.version === 4) {
-    if (!allowLegacy) {
-      throw new Error('SANDBOX_CONTROL_MANIFEST_VERSION_INVALID: expected version 5; container-only recreation is required');
-    }
-    return candidate as unknown as SandboxControlLegacyManifest;
-  }
-  if (typeof candidate.runtimeDir !== 'string' || path.resolve(candidate.runtimeDir) !== path.join(root, 'runtime')) {
+  if (path.resolve(candidate.runtimeDir) !== path.join(root, 'runtime')) {
     throw new Error('SANDBOX_CONTROL_MANIFEST_INVALID');
   }
-  return candidate as unknown as SandboxControlManifest;
+  return candidate as SandboxControlManifest;
 }
 
 export function readSandboxControlManifest(manifestPath: string): SandboxControlManifest {
-  return readSandboxControlManifestValue(manifestPath, false) as SandboxControlManifest;
-}
-
-export function readSandboxControlManifestForTransition(manifestPath: string): SandboxControlManifestLike {
-  return readSandboxControlManifestValue(manifestPath, true);
+  return readSandboxControlManifestValue(manifestPath);
 }
 
 function readBrokerOwner(filePath: string): BrokerOwner | null {
@@ -559,6 +551,20 @@ function readBrokerOwner(filePath: string): BrokerOwner | null {
     || typeof owner.brokerId !== 'string' || owner.brokerId.length === 0
     || typeof owner.token !== 'string' || typeof owner.generation !== 'string') throw new Error('SANDBOX_CONTROL_OWNER_MISMATCH');
   return owner as BrokerOwner;
+}
+
+export function assertSandboxControlBrokerOwner(
+  manifest: SandboxControlManifest,
+  options: Readonly<{ identityProbe?: ProcessIdentityProbe }> = {}
+): BrokerOwner {
+  const root = path.dirname(path.resolve(manifest.publicStatusDir));
+  const owner = readBrokerOwner(path.join(root, 'broker.json'));
+  if (!owner) throw new Error('SANDBOX_CONTROL_OWNER_EVIDENCE_MISSING');
+  if (owner.token !== manifest.token || owner.generation !== manifest.generation) {
+    throw new Error('SANDBOX_CONTROL_OWNER_MISMATCH');
+  }
+  if (!ownerLive(owner, options.identityProbe)) throw new Error('SANDBOX_CONTROL_OWNER_LOST');
+  return owner;
 }
 
 function readStatusOwner(filePath: string): SandboxControlStatus | null {
@@ -585,7 +591,7 @@ function ownerLive(
   return state === 'alive';
 }
 
-function readExecutions(manifest: SandboxControlManifestLike): SandboxControlExecution[] {
+function readExecutions(manifest: SandboxControlManifest): SandboxControlExecution[] {
   if (!fs.existsSync(manifest.processingDir)) return [];
   const stat = fs.lstatSync(manifest.processingDir);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_EXECUTION_STILL_RUNNING');
@@ -705,7 +711,7 @@ export async function quiesceSandboxControlRoot(
   await waitForStartupTransition(resolvedRoot, Math.max(0, forceAt - Date.now()), identityProbe);
 
   const manifestPath = path.join(resolvedRoot, 'manifest.json');
-  const manifest = fs.existsSync(manifestPath) ? readSandboxControlManifestForTransition(manifestPath) : null;
+  const manifest = fs.existsSync(manifestPath) ? readSandboxControlManifest(manifestPath) : null;
   const broker = readBrokerOwner(path.join(resolvedRoot, 'broker.json'));
   const status = readStatusOwner(path.join(resolvedRoot, 'public', 'status.json'));
   const statusOwner = status ? status.broker : null;
@@ -799,7 +805,7 @@ export async function removeSandboxControlRoot(
   const stat = fs.lstatSync(resolvedRoot);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('SANDBOX_CONTROL_CHANNEL_INVALID');
   const manifestPath = path.join(resolvedRoot, 'manifest.json');
-  const manifest = readSandboxControlManifestForTransition(manifestPath);
+  const manifest = readSandboxControlManifest(manifestPath);
   const inspectContainer = options.inspectContainer
     ?? ((timeoutMs) => inspectSandboxControlContainer(manifest, { timeoutMs }));
   const timeoutMs = options.timeoutMs ?? options.timing?.quiesceDeadlineMs ?? DEFAULT_QUIESCE_TIMEOUT_MS;
@@ -870,7 +876,7 @@ export async function removeSandboxControlRoot(
     }
   }
 
-  const currentManifest = readSandboxControlManifestForTransition(manifestPath);
+  const currentManifest = readSandboxControlManifest(manifestPath);
   if (currentManifest.token !== manifest.token || currentManifest.generation !== manifest.generation
     || !isSandboxControlRootQuiescing(resolvedRoot)) {
     throw new Error('SANDBOX_CONTROL_OWNER_TRANSITION');

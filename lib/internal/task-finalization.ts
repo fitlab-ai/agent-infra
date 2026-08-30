@@ -1,7 +1,10 @@
-import { normalizeAgentToken, AGENT_USAGE_HINT } from '../agent-clients/tokens.ts';
+import {
+  createDirectHostExecutionContext,
+  dispatchTaskControlOperation,
+  parseTaskControlOperation
+} from '../task/control-authority.ts';
 import { applyTaskFinalization } from '../task/finalization.ts';
 import { detectRepoRoot, resolveTaskRef } from '../task/resolve-ref.ts';
-import { verifyTaskEvent } from '../task/verification.ts';
 
 const USAGE = 'Usage: agent-infra-internal task-finalization <N | TASK-id> complete --agent <agent>\n';
 
@@ -28,17 +31,26 @@ function fail(message: string): void {
   process.exitCode = 1;
 }
 
+function parseFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^TASK_CONTROL_OPERATION_INVALID: /u, '');
+}
+
 function taskFinalization(args: string[] = []): void {
   if (args[0] === '--help' || args[0] === '-h') { process.stdout.write(USAGE); return; }
-  if (args.length !== 4 || !args[0] || args[1] !== 'complete' || args[2] !== '--agent' || !args[3]) {
-    fail('task ref, complete intent, and --agent are required');
+
+  let operation;
+  try {
+    operation = parseTaskControlOperation('task-finalization', args);
+  } catch (error) {
+    fail(parseFailure(error));
     return;
   }
-  const agent = normalizeAgentToken(args[3]);
-  if (!agent) {
-    fail(`invalid --agent: ${AGENT_USAGE_HINT}`);
+  if (operation.family !== 'task-finalization') {
+    fail('finalization operation is invalid');
     return;
   }
+
   let repoRoot: string;
   try {
     repoRoot = detectRepoRoot();
@@ -48,18 +60,20 @@ function taskFinalization(args: string[] = []): void {
     process.exitCode = 1;
     return;
   }
-  const resolved = resolveTaskRef(args[0], { repoRoot });
+  const resolved = resolveTaskRef(operation.request.taskRef, { repoRoot });
   if (!resolved.ok) {
     const detail = { code: resolved.code, message: resolved.message, retryable: false };
     process.stdout.write(envelope('failed', false, true, null, detail));
     process.exitCode = 1;
     return;
   }
-  const result = applyTaskFinalization(
-    { taskRef: resolved.taskId, intent: 'complete', agent },
-    { repoRoot, preflight: (request, options) => verifyTaskEvent(
-      { ...request, event: 'complete-task.hard-preflight' }, options
-    ) }
+  const boundOperation = {
+    ...operation,
+    request: { ...operation.request, taskRef: resolved.taskId }
+  };
+  const result = dispatchTaskControlOperation(
+    createDirectHostExecutionContext({ repoRoot }),
+    boundOperation
   );
   process.stdout.write(envelope(result.status, result.changed, true, result, result.error));
   process.exitCode = exitCode(result.status);

@@ -77,7 +77,7 @@ import {
   commitSandboxControlReplacement,
   quiesceSandboxControlRoot,
   recoverSandboxControlReplacement,
-  readSandboxControlManifestForTransition
+  readSandboxControlManifest
 } from '../control/lifecycle.ts';
 import { inspectSandboxControlContainer } from '../control/container-identity.ts';
 import { hostJoin, toEnginePath, volumeArg } from '../engines/wsl2-paths.ts';
@@ -1250,7 +1250,7 @@ export async function create(args: string[]): Promise<void> {
             const recoveryResult = await recoverSandboxControlReplacement(controlPaths.root, replacementLease);
             const hadExistingControlRoot = hadControlRootBeforeAcquire || recoveryResult === 'restored';
             const previousManifest = fs.existsSync(controlPaths.manifestPath)
-              ? readSandboxControlManifestForTransition(controlPaths.manifestPath)
+              ? readSandboxControlManifest(controlPaths.manifestPath)
               : null;
             if (hadExistingControlRoot) {
               await quiesceSandboxControlRoot(controlPaths.root);
