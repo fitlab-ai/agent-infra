@@ -1878,6 +1878,9 @@ test("commit skill variants preserve the single commit-core structure", () => {
   variants.forEach(([skillPath, referencePath]) => {
     const skill = read(skillPath!);
     const reference = read(referencePath!);
+    const exampleMatch = skill.match(/```json\n([\s\S]*?)\n```/);
+    assert.ok(exampleMatch, `${skillPath} should include a commit input JSON example`);
+    const example = JSON.parse(exampleMatch[1]!) as { push?: { remote?: unknown; refs?: unknown } };
     const navigation = skill.indexOf("reference/commit-orchestration.md");
     const commit = skill.indexOf("agent-infra-internal git-workflow commit");
     const gate = skill.indexOf("agent-infra-internal task-verify {task-id} commit.completed");
@@ -1885,6 +1888,15 @@ test("commit skill variants preserve the single commit-core structure", () => {
     assert.ok(gate > commit, `${skillPath} should verify after the core call`);
     assert.match(skill, /mode=orchestrated/);
     assert.match(skill, /commit-operation\.json/);
+    assert.match(skill, /--task <ref>/);
+    assert.match(skill, /-t <ref>/);
+    assert.match(skill, /reference\/issue-metadata-sync\.md/);
+    assert.match(skill, /reference\/pr-summary-sync\.md/);
+    assert.equal(typeof example.push?.remote, "string", `${skillPath} should declare the push remote`);
+    assert.ok(
+      Array.isArray(example.push?.refs) && example.push.refs.length === 1 && /^refs\/heads\//.test(String(example.push.refs[0])),
+      `${skillPath} should declare one full heads ref`
+    );
     assert.match(reference, /commit-operation\.execute/);
     assert.match(reference, /COMMIT_AUTOPUSH_PROTECTED_BRANCH/);
     assert.match(reference, /COMMIT_PUSH_FAILED/);

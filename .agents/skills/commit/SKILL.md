@@ -47,7 +47,7 @@ git diff
 
 执行本步骤前读取 `reference/commit-orchestration.md`。
 
-将 message、明确 paths、expected HEAD/tree、task scope、agent、mode 和可选 push policy 写入临时 JSON，然后调用：
+将 message、明确 paths、expected HEAD/tree、task scope、agent、mode 和必填 push policy 写入临时 JSON，然后调用：
 
 ```bash
 agent-infra-internal git-workflow commit --input {commit-operation.json}
@@ -66,8 +66,7 @@ agent-infra-internal git-workflow commit --input {commit-operation.json}
   "expectedTree": "{TREE}",
   "push": {
     "remote": "origin",
-    "refs": ["refs/heads/{branch}"],
-    "automatic": true
+    "refs": ["refs/heads/{branch}"]
   }
 }
 ```

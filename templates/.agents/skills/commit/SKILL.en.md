@@ -7,15 +7,15 @@ description: >
 
 # Commit code
 
-Use the standard agent token from `.agents/rules/task-management.md`.
+> See the collaborator token convention in `.agents/rules/task-management.md` for valid `--agent` values.
 
-Create a Git commit without overwriting local work, and update the associated task only when a task context exists.
+Create a Git commit without overwriting local work, and update the associated task state when needed.
 
 The commit core returns one primary result: `committed`, `no_op`, `committed_with_warnings`, `failed`, or `blocked`, with structured `warnings`. A push failure or protected-branch policy never rolls back a local commit.
 
 ## Task context
 
-Resolve the optional task scope with `agent-infra-internal task-context resolve {task-scope}`.
+The entry point accepts an omitted task ref, a legacy positional task ref, or `--task <ref>` / `-t <ref>`. First call `agent-infra-internal task-context resolve {task-scope}`.
 
 - An explicit task-resolution failure stops the operation.
 - Without an explicit task scope, only `TASK_CONTEXT_NOT_FOUND` may enter taskless direct mode; detached HEAD, malformed candidates, and multiple matches fail closed.
@@ -33,7 +33,7 @@ git status --short
 git diff
 ```
 
-Respect existing user changes and stop on a conflict according to the no-mid-flow-questions rule.
+Respect existing user changes. If the planned work conflicts with them, stop and record the blocking reason according to the no-mid-flow-questions rule.
 
 ## 2. Update copyright years
 
@@ -47,10 +47,28 @@ Review status, diff, and recent history. Use an imperative Conventional Commit m
 
 Read `reference/commit-orchestration.md` before this step.
 
-Write the message, explicit paths, expected HEAD/tree, task scope, agent, mode, and optional push policy to a temporary JSON file, then call:
+Write the message, explicit paths, expected HEAD/tree, task scope, agent, mode, and required push policy to a temporary JSON file, then call:
 
 ```bash
 agent-infra-internal git-workflow commit --input {commit-operation.json}
+```
+
+Example:
+
+```json
+{
+  "taskRef": "TASK-YYYYMMDD-HHMMSS",
+  "agent": "codex",
+  "mode": "direct",
+  "paths": ["lib/example.ts", "tests/example.test.ts"],
+  "message": "fix(core): validate example input",
+  "expectedHead": "{HEAD}",
+  "expectedTree": "{TREE}",
+  "push": {
+    "remote": "origin",
+    "refs": ["refs/heads/{branch}"]
+  }
+}
 ```
 
 Taskless direct mode omits `taskRef`; orchestrated mode must pass `taskRef`, `agent`, and `mode: "orchestrated"`. The core owns repository/worktree mutation locking, task locking when bound, path and sensitive-file checks, staged scope, HEAD/tree, branch/ref, commit, push, protected-branch policy, warnings, and idempotency.
@@ -63,7 +81,9 @@ Taskless direct mode omits `taskRef`; orchestrated mode must pass `taskRef`, `ag
 
 ## 5. Finish task and platform synchronization
 
-Continue task synchronization only for task-bound operations. For an associated Issue or PR, follow the issue, PR-summary, and platform rules; the commit path passes `--result no_op` to summary-sync because it only synchronizes an existing PR identity. Synchronization failures are warnings and do not roll back the local commit.
+Continue task synchronization from the core-returned task result for task-bound operations; taskless operations skip task verification and platform synchronization.
+
+When the task has an associated Issue or PR, follow `reference/issue-metadata-sync.md`, `reference/pr-summary-sync.md`, and the platform rules. The commit path passes `--result no_op` to summary-sync because it only synchronizes an existing PR identity. Synchronization failures are warnings and do not roll back the local commit.
 
 After task-bound finalization, run:
 
@@ -76,7 +96,7 @@ Do not claim task finalization without fresh verification output.
 
 ## 6. Render the next step
 
-Read `.agents/rules/next-step-output.md` immediately before calling the single next-step helper. A failed push keeps the task active and reports diagnostics; a final commit routes to `create-pr` or `complete-task` according to `prFlow`.
+Before rendering the next step, read `.agents/rules/next-step-output.md` and call the unified helper exactly once based on the latest task and PR state. A failed push keeps the task active and reports only diagnostics; a final commit routes to `create-pr` or `complete-task` according to `prFlow`.
 
 ## Notes
 

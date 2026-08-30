@@ -27,10 +27,9 @@ type CommitOperationInput = Readonly<{
   taskRef?: string;
   agent?: string;
   mode?: CommitExecutionMode;
-  push?: Readonly<{
+  push: Readonly<{
     remote: string;
     refs: readonly string[];
-    automatic: boolean;
   }>;
 }>;
 
@@ -155,9 +154,9 @@ function boundTask(
 
 function validateCommon(input: CommitOperationInput, branch: string | null): Readonly<{ code: string; message: string }> | null {
   if (!input.message.trim()) return { code: 'GIT_COMMIT_INPUT_INVALID', message: 'Commit message is required' };
-  if (input.paths.length === 0 && !input.push) return { code: 'GIT_COMMIT_INPUT_INVALID', message: 'At least one explicit path is required unless this is a push-only retry' };
   if (!/^[a-f0-9]{40,64}$/.test(input.expectedHead)) return { code: 'GIT_HEAD_EXPECTATION_REQUIRED', message: 'A valid expected HEAD is required' };
   if (!/^[a-f0-9]{40,64}$/.test(input.expectedTree)) return { code: 'GIT_TREE_EXPECTATION_REQUIRED', message: 'A valid expected tree is required' };
+  if (!input.push) return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Commit delivery requires a push policy' };
   if (input.paths.some((candidate) => !candidate || candidate.startsWith('/') || candidate.split(/[\\/]/).includes('..'))) {
     return { code: 'GIT_COMMIT_INPUT_INVALID', message: 'Commit paths must stay inside the repository' };
   }
@@ -165,12 +164,10 @@ function validateCommon(input: CommitOperationInput, branch: string | null): Rea
     return { code: 'GIT_COMMIT_INPUT_INVALID', message: 'Sensitive paths cannot be committed' };
   }
   if (branch !== null && branch === '') return { code: 'GIT_BRANCH_INVALID', message: 'A named branch is required' };
-  if (input.push) {
-    if (!input.push.remote || input.push.refs.length !== 1) return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Push requires one remote and one ref' };
-    const ref = input.push.refs[0] ?? '';
-    if (!HEAD_REF.test(ref) || HEAD_REF.exec(ref)?.[1] !== branch) {
-      return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Push ref must be the current full heads ref' };
-    }
+  if (!input.push.remote || input.push.refs.length !== 1) return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Push requires one remote and one ref' };
+  const ref = input.push.refs[0] ?? '';
+  if (!HEAD_REF.test(ref) || HEAD_REF.exec(ref)?.[1] !== branch) {
+    return { code: 'GIT_PUSH_INPUT_INVALID', message: 'Push ref must be the current full heads ref' };
   }
   return null;
 }
@@ -346,27 +343,25 @@ function executeUnlocked(input: CommitOperationInput, task: BoundTask | null, mo
   }
   let status: CommitOperationResult['status'] = committed.status;
   let result: CommitOperationResult['result'] = committed.status === 'applied' ? 'committed' : 'no_op';
-  if (input.push) {
-    const target = `${input.push.remote}:${input.push.refs[0]}`;
-    const decision = commitPushDecision({ branch, automatic: input.push.automatic }, target);
-    if (!decision.shouldPush) {
-      warnings.push(decision.warning!);
-    } else {
-      const pushed = pushGitRefs({
-        cwd: input.cwd,
-        remote: input.push.remote,
-        refs: input.push.refs,
-        expectedSha: committed.snapshot?.head ?? gitText(input.cwd, ['rev-parse', 'HEAD'])
-      });
-      if (pushed.status !== 'applied') warnings.push(warning(
-        'COMMIT_PUSH_FAILED',
-        pushed.error?.message ?? 'Git push failed',
-        true,
-        'push',
-        target,
-        'ACTION_REQUIRED'
-      ));
-    }
+  const target = `${input.push.remote}:${input.push.refs[0]}`;
+  const decision = commitPushDecision({ branch }, target);
+  if (!decision.shouldPush) {
+    warnings.push(decision.warning!);
+  } else {
+    const pushed = pushGitRefs({
+      cwd: input.cwd,
+      remote: input.push.remote,
+      refs: input.push.refs,
+      expectedSha: committed.snapshot?.head ?? gitText(input.cwd, ['rev-parse', 'HEAD'])
+    });
+    if (pushed.status !== 'applied') warnings.push(warning(
+      'COMMIT_PUSH_FAILED',
+      pushed.error?.message ?? 'Git push failed',
+      true,
+      'push',
+      target,
+      'ACTION_REQUIRED'
+    ));
   }
   if (warnings.length > 0) {
     status = 'applied';

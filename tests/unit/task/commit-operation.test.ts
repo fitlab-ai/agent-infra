@@ -18,6 +18,8 @@ function fixture(branch = 'feature') {
   git(root, ['init', '-q', '-b', branch]);
   git(root, ['config', 'user.name', 'Codex']);
   git(root, ['config', 'user.email', 'codex@example.com']);
+  git(root, ['init', '-q', '--bare', path.join(root, '.git', 'remote.git')]);
+  git(root, ['remote', 'add', 'origin', path.join(root, '.git', 'remote.git')]);
   fs.writeFileSync(path.join(root, 'change.txt'), 'one\n');
   git(root, ['add', 'change.txt']);
   git(root, ['commit', '-qm', 'initial']);
@@ -35,6 +37,7 @@ function input(root: string, extra: Record<string, unknown> = {}) {
     message: 'fix: update change',
     expectedHead,
     expectedTree,
+    push: { remote: 'origin', refs: [`refs/heads/${git(root, ['branch', '--show-current'])}`] },
     ...extra
   } as Parameters<typeof executeCommitOperation>[0];
 }
@@ -67,6 +70,7 @@ test('taskless direct commit uses the shared core and does not write task state'
     assert.equal(committed.mode, 'direct');
     assert.equal(committed.warnings.length, 0);
     assert.equal(git(root, ['log', '-1', '--format=%s']), 'fix: update change');
+    assert.equal(git(root, ['ls-remote', 'origin', 'refs/heads/feature']).split(/\s+/)[0], git(root, ['rev-parse', 'HEAD']));
     assert.equal(fs.existsSync(path.join(root, '.agents')), false);
 
     const repeated = executeCommitOperation(input(root));
@@ -78,15 +82,31 @@ test('taskless direct commit uses the shared core and does not write task state'
   }
 });
 
+test('commit core rejects a missing push policy before writing Git state', () => {
+  const root = fixture();
+  try {
+    fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
+    const { push: _push, ...withoutPush } = input(root);
+    const result = executeCommitOperation(withoutPush as unknown as Parameters<typeof executeCommitOperation>[0]);
+
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error?.code, 'GIT_PUSH_INPUT_INVALID');
+    assert.equal(git(root, ['rev-list', '--count', 'HEAD']), '1');
+    assert.equal(git(root, ['status', '--short']), 'M change.txt');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('taskless protected branch keeps the local commit and reports a push warning', () => {
   const root = fixture('main');
   const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-operation-remote-'));
   try {
     git(remote, ['init', '-q', '--bare']);
-    git(root, ['remote', 'add', 'origin', remote]);
+    git(root, ['remote', 'set-url', 'origin', remote]);
     fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
     const result = executeCommitOperation(input(root, {
-      push: { remote: 'origin', refs: ['refs/heads/main'], automatic: true }
+      push: { remote: 'origin', refs: ['refs/heads/main'], automatic: false }
     }));
 
     assert.equal(result.result, 'committed_with_warnings');
@@ -102,10 +122,10 @@ test('taskless protected branch keeps the local commit and reports a push warnin
 test('taskless ordinary push failure preserves the local commit for a later push-only retry', () => {
   const root = fixture();
   try {
-    git(root, ['remote', 'add', 'origin', path.join(root, 'missing.git')]);
+    git(root, ['remote', 'set-url', 'origin', path.join(root, 'missing.git')]);
     fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
     const result = executeCommitOperation(input(root, {
-      push: { remote: 'origin', refs: ['refs/heads/feature'], automatic: true }
+      push: { remote: 'origin', refs: ['refs/heads/feature'] }
     }));
 
     assert.equal(result.result, 'committed_with_warnings');
@@ -128,12 +148,12 @@ test('task-bound push-only retry ignores review artifacts and only follows Git f
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${taskId}\nbranch: feature\nstatus: active\nagent_infra_version: v0.9.11-alpha.0\n---\n\n## Review Disagreement Ledger\n\n| id | stage | round | severity | status | evidence |\n|----|-------|-------|----------|--------|----------|\n\n## Activity Log\n`);
     fs.writeFileSync(path.join(taskDir, 'review-code.md'), 'this review is intentionally not a commit gate\n');
-    git(root, ['remote', 'add', 'origin', missingRemote]);
+    git(root, ['remote', 'set-url', 'origin', missingRemote]);
     fs.writeFileSync(path.join(root, 'change.txt'), 'two\n');
     const first = executeCommitOperation(input(root, {
       taskRef: taskId,
       agent: 'codex',
-      push: { remote: 'origin', refs: ['refs/heads/feature'], automatic: true }
+      push: { remote: 'origin', refs: ['refs/heads/feature'] }
     }));
     assert.equal(first.result, 'committed_with_warnings');
     assert.equal(first.warnings[0]?.code, 'COMMIT_PUSH_FAILED');
@@ -143,7 +163,7 @@ test('task-bound push-only retry ignores review artifacts and only follows Git f
       paths: [],
       taskRef: taskId,
       agent: 'codex',
-      push: { remote: 'origin', refs: ['refs/heads/feature'], automatic: true }
+      push: { remote: 'origin', refs: ['refs/heads/feature'] }
     }));
     assert.equal(retry.result, 'no_op');
     assert.equal(retry.warnings.length, 0);
@@ -159,7 +179,7 @@ test('push-only retry refuses an unexpected same-tree HEAD before pushing', () =
   const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-operation-remote-'));
   try {
     git(remote, ['init', '-q', '--bare']);
-    git(root, ['remote', 'add', 'origin', remote]);
+    git(root, ['remote', 'set-url', 'origin', remote]);
     const expectedHead = git(root, ['rev-parse', 'HEAD']);
     const expectedTree = git(root, ['rev-parse', 'HEAD^{tree}']);
     git(root, ['commit', '--allow-empty', '-qm', 'unrelated local commit']);
@@ -170,7 +190,7 @@ test('push-only retry refuses an unexpected same-tree HEAD before pushing', () =
       message: 'retry push',
       expectedHead,
       expectedTree,
-      push: { remote: 'origin', refs: ['refs/heads/feature'], automatic: true }
+      push: { remote: 'origin', refs: ['refs/heads/feature'] }
     });
 
     assert.equal(result.status, 'failed');
@@ -259,7 +279,8 @@ test('task-bound commit from a repository subdirectory resolves the canonical re
       expectedHead,
       expectedTree,
       taskRef: taskId,
-      agent: 'codex'
+      agent: 'codex',
+      push: { remote: 'origin', refs: ['refs/heads/feature'] }
     });
 
     assert.equal(result.result, 'committed');
