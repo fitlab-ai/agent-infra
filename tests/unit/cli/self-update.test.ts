@@ -86,7 +86,7 @@ test("POSIX command resolution skips a non-executable earlier PATH file", onPlat
 
     assert.equal(
       resolveCommand("probe", "linux", { PATH: [first, second].join(path.delimiter) }),
-      normalizeTestPath(path.join(second, "probe"))
+      path.join(second, "probe")
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -103,7 +103,7 @@ test("POSIX command resolution uses PATH instead of a non-standard Path variable
 
     assert.equal(
       resolveCommand("probe", "linux", { Path: first, PATH: second }),
-      normalizeTestPath(path.join(second, "probe"))
+      path.join(second, "probe")
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -122,7 +122,7 @@ test("POSIX command resolution preserves the current directory for an empty PATH
 
     assert.equal(
       resolveCommand("probe", "linux", { PATH: ["", second].join(path.delimiter) }),
-      normalizeTestPath(cwdProbe)
+      cwdProbe
     );
   } finally {
     process.chdir(previousCwd);
