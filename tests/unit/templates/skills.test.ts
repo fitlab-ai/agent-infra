@@ -1544,9 +1544,9 @@ test("create-pr change reports keep one structured publication contract", () => 
     const match = read(relativePath).match(/<!-- pr-change-report-contract\n([^\n]+)\n-->/);
     assert.ok(match, `${relativePath} should expose the structured change-report contract`);
     assert.deepEqual(JSON.parse(match[1]!), {
-      version: 1,
       source: "platform-pr-inspect",
-      diff: "three-dot-find-renames-numstat",
+      diff: "three-dot-find-renames",
+      metrics: ["numstat-lines", "git-blob-bytes"],
       publish: ["pr-summary", "user-response"]
     });
   }

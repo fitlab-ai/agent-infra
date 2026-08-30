@@ -80,9 +80,9 @@ Capture the `result` field from `platform-pr create` (`pr_created`, `pr_reused`,
 
 ### 7. Generate the PR Code Change Report
 
-After creating or uniquely reusing the PR, run `agent-infra-internal platform-pr inspect {task-id}` to obtain the authoritative base/head SHAs, then follow `reference/change-report.md` to classify the complete PR additions/deletions, renames, and potentially unnecessary changes. Read that reference before this step.
+After creating or uniquely reusing the PR, run `agent-infra-internal platform-pr inspect {task-id}` to obtain the authoritative base/head SHAs, then follow `reference/change-report.md` to classify the complete PR line counts, Git blob byte sizes, renames, and potentially unnecessary changes. Read that reference before this step.
 
-The report is part of the reviewer summary below and must also appear in the final user response. Do not provide only a grand total or inspect only the last commit.
+The report is part of the reviewer summary below and must also appear in the final user response. Do not provide only total lines, omit byte changes, or inspect only the last commit.
 
 ### 8. Publish the Review Summary
 

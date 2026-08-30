@@ -80,9 +80,9 @@ description: >
 
 ### 7. 生成 PR 代码增减报告
 
-创建或唯一复用 PR 后，调用 `agent-infra-internal platform-pr inspect {task-id}` 取得权威 base/head SHA，并按 `reference/change-report.md` 统计完整 PR 的分类增减、rename 与疑似不必要变化。执行本步骤前先读取该 reference。
+创建或唯一复用 PR 后，调用 `agent-infra-internal platform-pr inspect {task-id}` 取得权威 base/head SHA，并按 `reference/change-report.md` 统计完整 PR 的分类行数、Git blob 字节数、rename 与疑似不必要变化。执行本步骤前先读取该 reference。
 
-报告既是下方 reviewer 摘要的一部分，也必须出现在最终用户回复中；不得只给总行数或只统计最后一个 commit。
+报告既是下方 reviewer 摘要的一部分，也必须出现在最终用户回复中；不得只给总行数、忽略字节变化或只统计最后一个 commit。
 
 ### 8. 发布审查摘要
 
