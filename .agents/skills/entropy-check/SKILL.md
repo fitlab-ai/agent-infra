@@ -53,6 +53,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 - `.agents/rules/create-issue.md`
 - `.agents/skills/*/SKILL.md`
 - `templates/.agents/skills/**`
+- 仓库源码、规则、Skill 与模板中的 `TODO(compat)`
 - `package.json`
 - `.agents/.airc.json`
 - 版本发布相关文档与脚本
@@ -66,6 +67,7 @@ date "+%Y-%m-%d %H:%M:%S%z" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 - 规则职责重叠或边界漂移
 - `SKILL.md` 膨胀且应拆分到 `reference/`
 - over-design、死约定或重复规则
+- 临时兼容 TODO 缺少删除对象、可验证条件，或删除条件已经满足
 - bilingual 命名约定混用且缺少边界说明
 - version 号散落导致漂移风险
 

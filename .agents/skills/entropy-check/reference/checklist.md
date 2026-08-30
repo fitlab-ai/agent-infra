@@ -40,7 +40,21 @@ find .agents/skills -name SKILL.md -print0 | xargs -0 wc -l | sort -n
 - 模板和运行态文件是否长期漂移。
 - 测试是否在记住已删除概念，或用自然语言措辞断言制造维护债务。
 
-## 4. bilingual 命名约定
+## 4. 临时兼容 TODO
+
+检索与兼容代码同源的删除提醒：
+
+```bash
+rg -n '^[[:space:]]*(//|#|<!--)[[:space:]]*TODO\(compat\):' . \
+  --glob '!node_modules/**' --glob '!dist/**' --glob '!.git/**'
+```
+
+关注点：
+- TODO 是否位于唯一兼容边界，并明确要删除的对象和可验证删除条件。
+- 删除条件是否已经满足；满足时建议直接删除兼容逻辑、TODO 及专属测试和文档。
+- 任务或 Issue 只用于可选排期；缺失外部跟踪不构成阻塞，也不替代代码中的 TODO。
+
+## 5. bilingual 命名约定
 
 检查双语文件命名是否边界清晰：
 
@@ -52,7 +66,7 @@ find .agents/skills -name SKILL.md -print0 | xargs -0 wc -l | sort -n
 - 新增模板是否成对存在。
 - 测试是否能结构性覆盖命名约定。
 
-## 5. version 散落点
+## 6. version 散落点
 
 检查 version 信息是否容易漂移：
 

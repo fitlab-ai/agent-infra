@@ -8,12 +8,13 @@ Use when changes touch persistent formats, schemas, configuration/frontmatter, c
 
 - Does compatibility pass the subject, necessity, window, and exit gate in `.agents/rules/compatibility-policy.md`? If not, should the change be current-only?
 - Is an approved conversion concentrated at one boundary and followed by current-format-only writes, rather than teaching business logic multiple versions?
+- Does temporarily retained compatibility include a co-located `TODO(compat): Remove ... once ...` at its single boundary, naming the removal target and a verifiable condition? A task or issue does not replace this TODO.
 - If migration is required, is it repeatable, and can partial failure recover or stop safely?
 - When an old format is removed, are its branches, fixtures, tests, and documentation removed in the same change?
 
 ## Evidence Requirements
 
-Record compatibility admission evidence first. For approved compatibility, record the single conversion from old input to current state, version decisions, exit condition, and failure states. Prefer consumer or stored-data evidence, migration tests, fixtures, state transitions, or specification conflicts.
+Record compatibility admission evidence first. For approved compatibility, record the single conversion from old input to current state, version decisions, co-located `TODO(compat)`, exit condition, and failure states. Prefer consumer or stored-data evidence, migration tests, fixtures, state transitions, or specification conflicts.
 
 ## Common Counterexamples
 
