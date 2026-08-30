@@ -123,9 +123,16 @@ jobs:
           {
             "project": "linux-e2e",
             "org": "fitlab-ai",
+            "agentClients": [
+              { "id": "claude-code", "enabled": true, "installInSandbox": true },
+              { "id": "codex", "enabled": false, "installInSandbox": false },
+              { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
+              { "id": "opencode", "enabled": false, "installInSandbox": false },
+              { "id": "traecli", "enabled": false, "installInSandbox": false }
+            ],
             "sandbox": {
               "runtimes": ["node20"],
-              "tools": ["claude-code"]
+              "tools": ["agent-infra"]
             }
           }
           JSON
@@ -272,9 +279,16 @@ jobs:
           {
             "project": "linux-e2e",
             "org": "fitlab-ai",
+            "agentClients": [
+              { "id": "claude-code", "enabled": true, "installInSandbox": true },
+              { "id": "codex", "enabled": false, "installInSandbox": false },
+              { "id": "antigravity-cli", "enabled": false, "installInSandbox": false },
+              { "id": "opencode", "enabled": false, "installInSandbox": false },
+              { "id": "traecli", "enabled": false, "installInSandbox": false }
+            ],
             "sandbox": {
               "runtimes": ["node20"],
-              "tools": ["claude-code"]
+              "tools": ["agent-infra"]
             }
           }
           JSON
