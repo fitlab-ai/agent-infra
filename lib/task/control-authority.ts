@@ -42,14 +42,6 @@ export type TaskControlControllerBinding = Readonly<{
   controlGeneration: string;
 }>;
 
-export type TaskControlTransportEntry = Readonly<{
-  source: 'direct-host' | 'sandbox-client' | 'sandbox-executor';
-  args: readonly string[];
-  repoRoot?: string;
-  runtimeDir?: string;
-  controllerBinding?: TaskControlControllerBinding | null;
-}>;
-
 export type TaskControlExecutionContext =
   | Readonly<{
       source: 'direct-host';
@@ -162,19 +154,6 @@ export function createSandboxExecutorExecutionContext(params: Readonly<{
     manifestPath: absolute('manifestPath', params.manifestPath),
     requestId: params.requestId,
     ...(params.controllerBinding === undefined ? {} : { controllerBinding: binding(params.controllerBinding) })
-  };
-}
-
-export function createSandboxClientTransportEntry(params: Readonly<{
-  args: readonly string[];
-  repoRoot?: string;
-  runtimeDir?: string;
-}>): TaskControlTransportEntry {
-  return {
-    source: 'sandbox-client',
-    args: [...params.args],
-    ...(params.repoRoot === undefined ? {} : { repoRoot: absolute('repoRoot', params.repoRoot) }),
-    ...(params.runtimeDir === undefined ? {} : { runtimeDir: absolute('runtimeDir', params.runtimeDir) })
   };
 }
 

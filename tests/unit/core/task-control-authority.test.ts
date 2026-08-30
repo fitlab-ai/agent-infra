@@ -5,7 +5,6 @@ import path from 'node:path';
 import {
   assertTaskControlExecutionContext,
   createDirectHostExecutionContext,
-  createSandboxClientTransportEntry,
   createSandboxExecutorExecutionContext,
   parseTaskControlOperation
 } from '../../../lib/task/control-authority.ts';
@@ -15,13 +14,6 @@ test('direct host context does not require sandbox facts', () => {
   const context = createDirectHostExecutionContext({ repoRoot });
   assert.deepEqual(context, { source: 'direct-host', mode: 'direct-host', repoRoot });
   assertTaskControlExecutionContext(context);
-});
-
-test('sandbox client transport entry remains outside the authority context', () => {
-  const entry = createSandboxClientTransportEntry({ args: ['TASK-20260809-010203', 'status'] });
-  assert.equal(entry.source, 'sandbox-client');
-  assert.equal('mode' in entry, false);
-  assert.equal('taskId' in entry, false);
 });
 
 test('sandbox executor context requires the complete manifest binding', () => {
