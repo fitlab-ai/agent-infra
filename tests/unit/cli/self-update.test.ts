@@ -32,7 +32,9 @@ function writeFile(filePath: string, content = "fixture\n", mode?: number): void
 }
 
 function normalizeTestPath(filePath: string): string {
-  return process.platform === "darwin" ? fs.realpathSync.native(filePath) : filePath;
+  return process.platform === "darwin" || process.platform === "win32"
+    ? fs.realpathSync.native(filePath)
+    : filePath;
 }
 
 function sameTestPath(left: string, right: string): boolean {
@@ -122,7 +124,7 @@ test("POSIX command resolution preserves the current directory for an empty PATH
 
     assert.equal(
       resolveCommand("probe", "linux", { PATH: ["", second].join(path.delimiter) }),
-      cwdProbe
+      path.resolve("probe")
     );
   } finally {
     process.chdir(previousCwd);
@@ -191,7 +193,7 @@ test("Windows npm source accepts a Node manager directory separate from global p
   }
 });
 
-test("POSIX npm source rejects a manager outside its global prefix", () => {
+test("POSIX npm source rejects a manager outside its global prefix", onPlatforms("linux", "darwin"), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-posix-"));
   try {
     const prefix = path.join(root, "prefix");
@@ -214,7 +216,7 @@ test("POSIX npm source rejects a manager outside its global prefix", () => {
   }
 });
 
-test("POSIX npm source accepts a symlinked npm entry point", () => {
+test("POSIX npm source accepts a symlinked npm entry point", onPlatforms("linux", "darwin"), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-npm-link-"));
   try {
     const prefix = path.join(root, "prefix");
@@ -241,7 +243,7 @@ test("POSIX npm source accepts a symlinked npm entry point", () => {
   }
 });
 
-test("manager failure returns the manager exit code without success output contract", async () => {
+test("manager failure returns the manager exit code without success output contract", onPlatforms("linux", "darwin"), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-failure-"));
   try {
     const prefix = path.join(root, "prefix");
@@ -264,7 +266,7 @@ test("manager failure returns the manager exit code without success output contr
   }
 });
 
-test("Homebrew source uses the formula manager without probing npm", async () => {
+test("Homebrew source uses the formula manager without probing npm", onPlatforms("linux", "darwin"), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-brew-"));
   try {
     const homebrewRoot = path.join(root, "homebrew");
@@ -297,7 +299,7 @@ test("Homebrew source uses the formula manager without probing npm", async () =>
   }
 });
 
-test("self-update rejects a package root that does not match npm global root", () => {
+test("self-update rejects a package root that does not match npm global root", onPlatforms("linux", "darwin"), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-package-root-"));
   try {
     const prefix = path.join(root, "prefix");
@@ -320,7 +322,7 @@ test("self-update rejects a package root that does not match npm global root", (
   }
 });
 
-test("self-update rejects a package name that is not agent-infra", () => {
+test("self-update rejects a package name that is not agent-infra", onPlatforms("linux", "darwin"), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-package-name-"));
   try {
     const prefix = path.join(root, "prefix");
@@ -347,7 +349,7 @@ test("self-update rejects a package name that is not agent-infra", () => {
   }
 });
 
-test("self-update rejects PATH shadowing from a different installed package", () => {
+test("self-update rejects PATH shadowing from a different installed package", onPlatforms("linux", "darwin"), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-shadow-"));
   try {
     const prefix = path.join(root, "prefix");
@@ -374,7 +376,7 @@ test("self-update rejects PATH shadowing from a different installed package", ()
   }
 });
 
-test("self-update refuses when npm and Homebrew both claim the package", () => {
+test("self-update refuses when npm and Homebrew both claim the package", onPlatforms("linux", "darwin"), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-dual-"));
   try {
     const prefix = path.join(root, "prefix");
@@ -409,7 +411,7 @@ test("self-update refuses when npm and Homebrew both claim the package", () => {
   }
 });
 
-test("self-update fails closed when no package manager is on PATH", () => {
+test("self-update fails closed when no package manager is on PATH", onPlatforms("linux", "darwin"), () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-no-manager-"));
   try {
     const { entry } = makePackage(path.join(root, "prefix", "node_modules"));
@@ -431,7 +433,7 @@ test("self-update fails closed when no package manager is on PATH", () => {
   }
 });
 
-test("self-update refuses a manager that disappears after probing", async () => {
+test("self-update refuses a manager that disappears after probing", onPlatforms("linux", "darwin"), async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-self-update-drift-"));
   try {
     const prefix = path.join(root, "prefix");
@@ -463,7 +465,7 @@ test("self-update refuses a manager that disappears after probing", async () => 
   }
 });
 
-test("self-update returns 1 for manager signal and spawn failures", async () => {
+test("self-update returns 1 for manager signal and spawn failures", onPlatforms("linux", "darwin"), async () => {
   for (const failure of [
     { signal: "SIGTERM" as NodeJS.Signals },
     { error: new Error("spawn failed") }
