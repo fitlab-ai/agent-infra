@@ -31,6 +31,14 @@ function writeFile(filePath: string, content = "fixture\n", mode?: number): void
   if (mode !== undefined) fs.chmodSync(filePath, mode);
 }
 
+function normalizeTestPath(filePath: string): string {
+  return process.platform === "darwin" ? fs.realpathSync.native(filePath) : filePath;
+}
+
+function sameTestPath(left: string, right: string): boolean {
+  return normalizeTestPath(left) === normalizeTestPath(right);
+}
+
 function makePackage(root: string): { packageRoot: string; entry: string } {
   const packageRoot = path.join(root, "@fitlab-ai", "agent-infra");
   const entry = path.join(packageRoot, "dist", "bin", "cli.js");
@@ -78,7 +86,7 @@ test("POSIX command resolution skips a non-executable earlier PATH file", onPlat
 
     assert.equal(
       resolveCommand("probe", "linux", { PATH: [first, second].join(path.delimiter) }),
-      path.join(second, "probe")
+      normalizeTestPath(path.join(second, "probe"))
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -95,7 +103,7 @@ test("POSIX command resolution uses PATH instead of a non-standard Path variable
 
     assert.equal(
       resolveCommand("probe", "linux", { Path: first, PATH: second }),
-      path.join(second, "probe")
+      normalizeTestPath(path.join(second, "probe"))
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -114,7 +122,7 @@ test("POSIX command resolution preserves the current directory for an empty PATH
 
     assert.equal(
       resolveCommand("probe", "linux", { PATH: ["", second].join(path.delimiter) }),
-      cwdProbe
+      normalizeTestPath(cwdProbe)
     );
   } finally {
     process.chdir(previousCwd);
@@ -171,12 +179,12 @@ test("Windows npm source accepts a Node manager directory separate from global p
 
     const detected = detectUpdateSource(options);
     assert.equal(detected.source?.kind, "npm");
-    assert.equal(detected.source?.managerPath, manager);
-    assert.equal(detected.source?.packageRoot, packageRoot);
+    assert.equal(detected.source?.managerPath, normalizeTestPath(manager));
+    assert.equal(detected.source?.packageRoot, normalizeTestPath(packageRoot));
 
     const code = await cmdUpdate(options);
     assert.equal(code, 0);
-    assert.deepEqual(calls.map((call) => call[0]), [manager, manager, manager, manager, manager]);
+    assert.ok(calls.every((call) => call[0] && sameTestPath(call[0], manager)));
     assert.deepEqual(calls.at(-1)?.slice(1), ["update", "--global", "@fitlab-ai/agent-infra"]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -227,7 +235,7 @@ test("POSIX npm source accepts a symlinked npm entry point", () => {
     });
 
     assert.equal(detected.source?.kind, "npm");
-    assert.equal(detected.source?.managerPath, managerTarget);
+    assert.equal(detected.source?.managerPath, normalizeTestPath(managerTarget));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -280,10 +288,10 @@ test("Homebrew source uses the formula manager without probing npm", async () =>
 
     const detected = detectUpdateSource(options);
     assert.equal(detected.source?.kind, "brew");
-    assert.equal(detected.source?.packageRoot, packageRoot);
+    assert.equal(detected.source?.packageRoot, normalizeTestPath(packageRoot));
     assert.equal(await cmdUpdate(options), 0);
     assert.deepEqual(calls.at(-1)?.slice(1), ["upgrade", "agent-infra"]);
-    assert.ok(calls.every((call) => call[0] === manager));
+    assert.ok(calls.every((call) => call[0] && sameTestPath(call[0], manager)));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -385,10 +393,10 @@ test("self-update refuses when npm and Homebrew both claim the package", () => {
       run: (command) => {
         calls.push([...command]);
         const args = command.slice(1).join(" ");
-        if (command[0] === npm && args === "prefix --global") return { status: 0, stdout: `${prefix}\n` };
-        if (command[0] === npm && args === "root --global") return { status: 0, stdout: `${globalRoot}\n` };
-        if (command[0] === brew && args === "--prefix") return { status: 0, stdout: `${prefix}\n` };
-        if (command[0] === brew && args === "--prefix agent-infra") return { status: 0, stdout: `${prefix}\n` };
+        if (command[0] && sameTestPath(command[0], npm) && args === "prefix --global") return { status: 0, stdout: `${prefix}\n` };
+        if (command[0] && sameTestPath(command[0], npm) && args === "root --global") return { status: 0, stdout: `${globalRoot}\n` };
+        if (command[0] && sameTestPath(command[0], brew) && args === "--prefix") return { status: 0, stdout: `${prefix}\n` };
+        if (command[0] && sameTestPath(command[0], brew) && args === "--prefix agent-infra") return { status: 0, stdout: `${prefix}\n` };
         return { status: 0, stderr: "" };
       }
     });
