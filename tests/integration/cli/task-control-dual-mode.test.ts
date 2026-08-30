@@ -119,7 +119,10 @@ function taskFixture(activityLog = true, repository = false): { root: string; ta
   );
   fs.writeFileSync(path.join(taskDir, 'task.md'), [
     '---', `id: ${TASK_ID}`, 'status: active', 'current_step: code-review',
-    'updated_at: old', 'agent_infra_version: old', 'target_date:', '---', '', '# Task',
+    'updated_at: old', 'agent_infra_version: v0.9.11-alpha.0', 'target_date:', '---', '', '# Task',
+    '', '## Review Disagreement Ledger', '',
+    '| id | stage | round | severity | status | evidence |',
+    '|----|-------|-------|----------|--------|----------|',
     ...(activityLog ? ['', '## Activity Log', ''] : [''])
   ].join('\n'));
   if (repository) initializeRepository(root);

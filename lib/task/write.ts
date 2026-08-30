@@ -15,7 +15,7 @@ import type {
 import { allowsManualOverride } from './guard-override.ts';
 import type { ManualOverrideCapability } from './guard-override.ts';
 import { mutateTableRow, upsertSection } from './sections.ts';
-import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, validateLedgerRows } from './ledger.ts';
+import { validateCurrentTaskContract } from './current-contract.ts';
 import type {
   TableRowDeleteMutation,
   TableRowUpsertMutation
@@ -222,27 +222,6 @@ function errorDetails(error: unknown, fallback: TaskWriteErrorCode): TaskWriteEr
   };
 }
 
-function validateCurrentTaskContract(content: string): { code: 'TASK_DOCUMENT_INVALID' | 'TASK_CURRENT_CONTRACT_INVALID'; message: string } | null {
-  let frontmatter: ReturnType<typeof parseTypedTaskFrontmatter>;
-  try {
-    frontmatter = parseTypedTaskFrontmatter(content);
-  } catch (error) {
-    return { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) };
-  }
-  if (!isValidAgentInfraVersion(frontmatter.agent_infra_version)) {
-    return { code: 'TASK_CURRENT_CONTRACT_INVALID', message: `agent_infra_version must be a valid v-prefixed semver (received ${String(frontmatter.agent_infra_version ?? 'missing')})` };
-  }
-  let ledger;
-  try {
-    ledger = parseLedgerDocument(content);
-  } catch (error) {
-    return { code: 'TASK_DOCUMENT_INVALID', message: error instanceof Error ? error.message : String(error) };
-  }
-  if (!ledger.present) return { code: 'TASK_CURRENT_CONTRACT_INVALID', message: `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}` };
-  const invalid = validateLedgerRows(ledger.rows);
-  return invalid ? { code: 'TASK_CURRENT_CONTRACT_INVALID', message: `${invalid.code}: ${invalid.message}` } : null;
-}
-
 function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): TaskWriteResult {
   const resolved = options.taskLocation
     ? {
@@ -292,9 +271,9 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
   }
 
   if (resolved.state === 'active') {
-    const contractError = validateCurrentTaskContract(original);
-    if (contractError) {
-      return failure(request, identity, contractError.code, contractError.message);
+    const contract = validateCurrentTaskContract(original);
+    if (!contract.ok) {
+      return failure(request, identity, contract.code, contract.message);
     }
   }
 
@@ -484,7 +463,7 @@ function writeTask(request: TaskWriteRequest, options: TaskWriteOptions = {}): T
   return { ...successBase, status: 'applied', changed: true };
 }
 
-export { writeTask, captureTaskWriteMetadata, canonicalTimestamp, validateCurrentTaskContract };
+export { writeTask, captureTaskWriteMetadata, canonicalTimestamp };
 export type {
   FrontmatterMutation,
   SectionMutation,

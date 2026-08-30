@@ -10,8 +10,9 @@ import {
   configuredShortIdLength, executeShortIdCommand, loadShortIdByTaskId,
   mutateShortIdRegistry
 } from './short-id.ts';
-import { captureTaskWriteMetadata, validateCurrentTaskContract, writeTask } from './write.ts';
+import { captureTaskWriteMetadata, writeTask } from './write.ts';
 import type { TaskFileSystem, TaskMutation, TaskOperationSummary, TaskWriteMetadata } from './write.ts';
+import { validateCurrentTaskContract } from './current-contract.ts';
 import { isValidAgentInfraVersion } from '../version.ts';
 
 const lifecycleIntentCatalog = [
@@ -395,8 +396,8 @@ function applyTaskLifecycle(requestInput: TaskLifecycleRequest, options: TaskLif
   if (frontmatter.id !== taskId) return failed(request, { code: 'LIFECYCLE_IDENTITY_INVALID', message: 'task.md id does not match its lifecycle task id' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   if (!locateActivityLog(content) && !allowsManualOverride(options, 'LIFECYCLE_LOG_MISSING')) return failed(request, { code: 'LIFECYCLE_LOG_MISSING', message: 'task has no unique Activity Log section' }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   if (spec.target === 'active') {
-    const contractError = validateCurrentTaskContract(content);
-    if (contractError) return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: contractError.message }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
+    const contract = validateCurrentTaskContract(content);
+    if (!contract.ok) return failed(request, { code: 'LIFECYCLE_DOCUMENT_INVALID', message: contract.message }, { taskId, sourceState, targetState: spec.target, sourcePath, targetPath });
   }
   const registryRequest = executeShortIdCommand({
     operation: 'list', activeDir: path.join(repoRoot, '.agents', 'workspace', 'active'),

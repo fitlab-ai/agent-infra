@@ -3,10 +3,11 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { parseTypedTaskFrontmatter } from './frontmatter.ts';
+import { validateCurrentTaskContract } from './current-contract.ts';
 import { parseReviewSummary, resolveCanonicalVerdict } from './review-artifacts.ts';
-import { isValidAgentInfraVersion } from '../version.ts';
 import { inspectArtifactDirectory } from './artifact-lifecycle.ts';
 import { LEDGER_SECTION_MISSING_CODE, LEDGER_SECTION_MISSING_MESSAGE, parseLedgerDocument, summarizeLedgerStage, validateLedgerRows } from './ledger.ts';
+import type { LedgerDocument } from './ledger.ts';
 import { resolveTaskRef } from './resolve-ref.ts';
 import {
   activateDelegation,
@@ -612,21 +613,18 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
     return failed('ORCHESTRATION_TASK_READ_FAILED', String(error), resolved.taskId);
   }
   let metadata: ReturnType<typeof parseTypedTaskFrontmatter>;
-  try {
-    metadata = parseTypedTaskFrontmatter(content);
-  } catch (error) {
-    return failed('ORCHESTRATION_TASK_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
-  }
+  let currentLedger: LedgerDocument | null = null;
   if (resolved.state === 'active') {
-    if (!isValidAgentInfraVersion(metadata.agent_infra_version)) {
-      return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', 'agent_infra_version must be a valid v-prefixed semver', resolved.taskId);
+    const contract = validateCurrentTaskContract(content);
+    if (!contract.ok) return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', contract.message, resolved.taskId);
+    metadata = contract.metadata;
+    currentLedger = contract.ledger;
+  } else {
+    try {
+      metadata = parseTypedTaskFrontmatter(content);
+    } catch (error) {
+      return failed('ORCHESTRATION_TASK_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId);
     }
-    let ledger;
-    try { ledger = parseLedgerDocument(content); }
-    catch (error) { return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', error instanceof Error ? error.message : String(error), resolved.taskId); }
-    if (!ledger.present) return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`, resolved.taskId);
-    const ledgerError = validateLedgerRows(ledger.rows);
-    if (ledgerError) return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', `${ledgerError.code}: ${ledgerError.message}`, resolved.taskId);
   }
   const routed = routeFromFacts(resolved.taskDir);
   if (routed && 'error' in routed) return failed('ORCHESTRATION_REVIEW_INVALID', routed.error, resolved.taskId);
@@ -647,7 +645,7 @@ function routeOrchestration(taskRef: string, options: OrchestrationOptions = {})
     if (!review.ok || review.summary.manualValidation === null) {
       return failed('ORCHESTRATION_REVIEW_INVALID', 'latest code review has no numeric manual-validation count', resolved.taskId);
     }
-    const ledger = parseLedgerDocument(content);
+    const ledger = currentLedger ?? parseLedgerDocument(content);
     if (!ledger.present) return failed('ORCHESTRATION_CURRENT_CONTRACT_INVALID', `${LEDGER_SECTION_MISSING_CODE}: ${LEDGER_SECTION_MISSING_MESSAGE}`, resolved.taskId);
     const rows = ledger.rows;
     const ledgerError = validateLedgerRows(rows);
