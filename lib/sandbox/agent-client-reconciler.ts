@@ -28,7 +28,7 @@ type SandboxCapabilityConfig = Readonly<{
   project: string;
   tools: readonly string[];
   customTools?: readonly SandboxTool[];
-  agentClientState?: AgentClientState;
+  agentClientState: AgentClientState;
 }>;
 
 type SandboxRuntimeCapabilityProjection = Readonly<{
@@ -96,18 +96,6 @@ function agentInfraTool(home: string): SandboxTool {
     versionCmd: 'ai version --raw',
     setupHint: 'Provides the ai and agent-infra CLI commands inside the sandbox.'
   };
-}
-
-function compatAgentClientState(tools: readonly string[]): AgentClientState {
-  return Object.fromEntries(
-    listAgentClientAdapters().map((adapter) => [
-      adapter.id,
-      {
-        enabled: true,
-        installInSandbox: tools.includes(adapter.id)
-      }
-    ])
-  ) as AgentClientState;
 }
 
 function stableValue(value: unknown): unknown {
@@ -206,7 +194,7 @@ function hooksByPhase(
 function createSandboxCapabilityPlan(
   config: SandboxCapabilityConfig
 ): SandboxCapabilityPlan {
-  const state = config.agentClientState ?? compatAgentClientState(config.tools);
+  const state = config.agentClientState;
   const selectedAgentClients = listInstalledAgentClientAdapters(state);
   const context = { home: config.home, project: config.project };
   const selectedTools = selectedAgentClients.map((adapter) =>
@@ -228,7 +216,9 @@ function createSandboxCapabilityPlan(
   const nonClientTools: SandboxTool[] = [];
   const selectedCustomTools: SandboxTool[] = [];
   for (const id of config.tools) {
-    if (isAgentClientId(id)) continue;
+    if (isAgentClientId(id)) {
+      throw new Error(`Agent Client '${id}' must be provided by agentClientState`);
+    }
     if (id === 'agent-infra') {
       if (!nonClientTools.some((tool) => tool.id === id)) {
         nonClientTools.push(agentInfraTool(config.home));

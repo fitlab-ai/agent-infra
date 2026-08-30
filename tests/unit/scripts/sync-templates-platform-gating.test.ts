@@ -8,6 +8,14 @@ import path from "node:path";
 import { loadFreshEsm, read, supportsPosixModeBits } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
 
+const CANONICAL_AGENT_CLIENTS = [
+  "claude-code",
+  "codex",
+  "antigravity-cli",
+  "opencode",
+  "traecli"
+].map((id) => ({ id, enabled: true, installInSandbox: true }));
+
 function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
@@ -61,6 +69,7 @@ test("gitlab projects skip github-owned managed directories", async () => withSt
       project: "demo",
       org: "acme",
       language: "en",
+      agentClients: CANONICAL_AGENT_CLIENTS,
       platform: { type: "gitlab" },
       files: { managed: [], merged: [], ejected: [] }
     });
@@ -92,6 +101,7 @@ test("platform switch removes stale github-owned files", async () => withStubbed
       project: "demo",
       org: "acme",
       language: "en",
+      agentClients: CANONICAL_AGENT_CLIENTS,
       platform: { type: "gitlab" },
       files: { managed: [".github/scripts/"], merged: [], ejected: [] }
     });
@@ -123,6 +133,7 @@ test("shared hooks are distributed to all platforms", async () => withStubbedExe
         project: "demo",
         org: "acme",
         language: "en",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         platform: { type: platformType },
         files: { managed: [], merged: [], ejected: [] }
       });
@@ -155,6 +166,7 @@ test("custom platforms skip all known-platform directories", async () => withStu
       project: "demo",
       org: "acme",
       language: "en",
+      agentClients: CANONICAL_AGENT_CLIENTS,
       platform: { type: "custom" },
       files: { managed: [], merged: [], ejected: [] }
     });
@@ -186,6 +198,7 @@ test("platform switch only removes guarded workflows with provable official owne
       project: "demo",
       org: "acme",
       language: "en",
+      agentClients: CANONICAL_AGENT_CLIENTS,
       platform: { type: "github" },
       files: { managed: [".github/"], merged: [], ejected: [] }
     });

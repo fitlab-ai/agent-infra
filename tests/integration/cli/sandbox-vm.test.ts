@@ -12,6 +12,7 @@ import {
   onPlatforms
 } from "../../helpers.ts";
 import { runVerbose } from "../../../lib/sandbox/shell.ts";
+import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
 
 type AdapterModule<T extends string> = Record<`${T}Adapter`, SandboxAdapterFixture>;
 type SandboxVmConfigFixture = { cpu?: number | null; memory?: number | null; disk?: number | null };
@@ -48,6 +49,12 @@ type NativeModule = AdapterModule<"native"> & {
   isRootlessDocker(options: Record<string, unknown>): boolean;
 };
 
+const CANONICAL_AGENT_CLIENTS = AGENT_CLIENT_IDS.map((id) => ({
+  id,
+  enabled: true,
+  installInSandbox: true
+}));
+
 function restoreDockerContext(previousValue: string | undefined) {
   if (previousValue === undefined) {
     delete process.env.DOCKER_CONTEXT;
@@ -74,6 +81,7 @@ test("sandbox vm stop warns instead of stopping when OrbStack is not running", o
       path.join(repoDir, ".agents", ".airc.json"),
       JSON.stringify({
         project: "demo",
+        agentClients: CANONICAL_AGENT_CLIENTS,
         sandbox: { engine: "orbstack" }
       }, null, 2) + "\n",
       "utf8"

@@ -41,7 +41,7 @@ type ToolsConfig = {
   project: string;
   tools: string[];
   customTools?: SandboxTool[];
-  agentClientState?: import('../agent-clients/types.ts').AgentClientState;
+  agentClientState: import('../agent-clients/types.ts').AgentClientState;
 };
 
 const TOOL_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;

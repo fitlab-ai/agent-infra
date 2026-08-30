@@ -82,7 +82,7 @@ function addPostPrepareInputs(input: Fixture) {
   const files = [
     'assets/demo-init.tape', 'scripts/demo-regen.sh', 'scripts/normalize-gif-duration.py',
     'bin/cli.ts', 'lib/init.ts', 'lib/log.ts', 'lib/prompt.ts', 'lib/paths.ts',
-    'lib/render.ts', 'lib/builtin-tuis.ts', 'lib/sandbox/engines/index.ts',
+    'lib/render.ts', 'lib/sandbox/engines/index.ts',
     'src/sync-templates.js', 'templates/AGENTS.md', 'scripts/build-inline.js'
   ];
   for (const file of files) {

@@ -7,6 +7,13 @@ import os from "node:os";
 
 import { filePath, loadFreshEsm, read } from "../../helpers.ts";
 import type { SyncTemplatesModule } from "../../helpers.ts";
+import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
+
+const CANONICAL_AGENT_CLIENTS = AGENT_CLIENT_IDS.map((id) => ({
+  id,
+  enabled: true,
+  installInSandbox: true
+}));
 
 function writeFile(root: string, relativePath: string, content: string) {
   const fullPath = path.join(root, relativePath);
@@ -45,6 +52,7 @@ test("custom platforms fall back to generic platform templates", async () => {
     writeJson(projectRoot, ".agents/.airc.json", {
       project: "demo",
       org: "acme",
+      agentClients: CANONICAL_AGENT_CLIENTS,
       language: "en",
       platform: { type: "gitea" },
       files: structuredClone(defaults.files)

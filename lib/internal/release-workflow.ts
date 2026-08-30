@@ -36,7 +36,6 @@ const DEMO_INPUT_PATHS = [
   'lib/prompt.ts',
   'lib/paths.ts',
   'lib/render.ts',
-  'lib/builtin-tuis.ts',
   'lib/sandbox/engines/'
 ] as const;
 const DEMO_DIGEST_PATH = 'assets/demo-init.inputs.sha256';

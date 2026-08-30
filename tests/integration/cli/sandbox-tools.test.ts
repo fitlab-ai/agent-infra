@@ -13,6 +13,8 @@ import {
   onPlatforms,
   writeSandboxEngineFixture
 } from "../../helpers.ts";
+import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
+import type { AgentClientState } from "../../../lib/agent-clients/types.ts";
 
 type CommandOptions = Record<string, unknown> & {
   env?: NodeJS.ProcessEnv;
@@ -38,6 +40,13 @@ type ExecFn = (cmd: string, args: string[], options?: CommandOptions) => string 
 type EngineExecFn = (engine: string, cmd: string, args: string[], options?: CommandOptions) => string | Buffer | void;
 type RunSafeFn = (cmd: string, args: string[]) => string;
 type EngineRunSafeFn = (engine: string, cmd: string, args: string[]) => string;
+
+function stateWithInstalled(installed: readonly string[]): AgentClientState {
+  return Object.fromEntries(AGENT_CLIENT_IDS.map((id) => [id, {
+    enabled: true,
+    installInSandbox: installed.includes(id)
+  }])) as AgentClientState;
+}
 type SandboxCreateModule = {
   create(args: string[]): Promise<void>;
   buildContainerEnvFile(tools: ResolvedToolFixture[], engine: string, runSafe?: EngineRunSafeFn, options?: CommandOptions): EnvFileResult;
@@ -977,7 +986,8 @@ test("claude-code tool pins CLAUDE_CONFIG_DIR so $HOME/.claude.json preseed reac
   const tools = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["claude-code"]
+    tools: [],
+    agentClientState: stateWithInstalled(["claude-code"])
   });
 
   assert.equal(tools.length, 1);
@@ -991,7 +1001,8 @@ test("opencode tool pins XDG roots inside its sandbox volume", async () => {
   const tools = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["opencode"]
+    tools: [],
+    agentClientState: stateWithInstalled(["opencode"])
   });
 
   assert.equal(tools.length, 1);
@@ -1009,7 +1020,8 @@ test("antigravity-cli tool preseeds keybindings and MCP config without host sett
   const [maybeTool] = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["antigravity-cli"]
+    tools: [],
+    agentClientState: stateWithInstalled(["antigravity-cli"])
   });
 
   const tool = required(maybeTool);
@@ -1030,7 +1042,8 @@ test("agent-infra tool exposes the ai CLI without credentials or tmpfs state", a
   const [maybeTool] = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["agent-infra"]
+    tools: ["agent-infra"],
+    agentClientState: stateWithInstalled([])
   });
 
   const tool = required(maybeTool);
@@ -1051,7 +1064,8 @@ test("resolveTools consolidates sandbox bases under ~/.agent-infra", async () =>
   const tools = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["agent-infra", "claude-code", "codex", "antigravity-cli", "opencode", "traecli"]
+    tools: ["agent-infra"],
+    agentClientState: stateWithInstalled(AGENT_CLIENT_IDS)
   });
 
   assert.deepEqual(tools.map((tool) => ({
@@ -1090,7 +1104,8 @@ test("tool directory candidates only return consolidated paths", async () => {
   const [maybeTool] = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["claude-code"]
+    tools: [],
+    agentClientState: stateWithInstalled(["claude-code"])
   });
 
   const tool = required(maybeTool);
@@ -1108,7 +1123,8 @@ test("claude-code live mount uses the consolidated credentials path", async () =
   const [maybeTool] = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["claude-code"]
+    tools: [],
+    agentClientState: stateWithInstalled(["claude-code"])
   });
 
   assert.equal(
@@ -1122,7 +1138,8 @@ test("codex tool declares a tmpfs mount so its high-churn logs stay in RAM", asy
   const [maybeTool] = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["codex"]
+    tools: [],
+    agentClientState: stateWithInstalled(["codex"])
   });
 
   assert.deepEqual(required(maybeTool).tmpfs, { size: "512m", seed: ["config.toml", "model-catalogs"] });
@@ -1133,7 +1150,8 @@ test("non-tmpfs builtin tools leave the tmpfs field unset", async () => {
   const [maybeTool] = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["claude-code"]
+    tools: [],
+    agentClientState: stateWithInstalled(["claude-code"])
   });
 
   assert.equal(required(maybeTool).tmpfs, undefined);

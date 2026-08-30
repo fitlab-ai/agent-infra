@@ -8,12 +8,15 @@ import {
   materializeSandboxControl,
   materializeSandboxWorkspaceView
 } from "../../../lib/sandbox/workspace-view.ts";
+import { createSandboxCapabilityPlan } from "../../../lib/sandbox/agent-client-reconciler.ts";
 
 import {
   gitSafeEnv,
   loadFreshEsm,
   withGitSafeProcessEnv
 } from "../../helpers.ts";
+import { AGENT_CLIENT_IDS } from "../../../lib/agent-clients/types.ts";
+import type { AgentClientState } from "../../../lib/agent-clients/types.ts";
 
 type SandboxConfigModule = typeof import("../../../lib/sandbox/config.ts");
 type SandboxToolsModule = typeof import("../../../lib/sandbox/tools.ts");
@@ -31,6 +34,11 @@ type VerboseCall = {
 
 const SHELL_INSTALL_CMD = 'curl -fsSL https://example.com/install.sh | bash';
 
+const NO_AGENT_CLIENTS = Object.fromEntries(AGENT_CLIENT_IDS.map((id) => [id, {
+  enabled: true,
+  installInSandbox: false
+}])) as AgentClientState;
+
 test("sandbox recovery does not replay custom postSetupCmds or versionCmd", async () => {
   const recovery = await loadFreshEsm<SandboxRecoveryModule>("lib/sandbox/recovery.js");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-infra-custom-recovery-"));
@@ -46,11 +54,12 @@ test("sandbox recovery does not replay custom postSetupCmds or versionCmd", asyn
     workspaceViewBase: path.join(tmpDir, "home", ".agent-infra", "workspace-views"),
     controlBase: path.join(tmpDir, "home", ".agent-infra", "sandbox-control"),
     tools: ["custom-tool"],
+    agentClientState: NO_AGENT_CLIENTS,
     customTools: [{
       id: "custom-tool",
       name: "Custom Tool",
       install: { type: "shell", cmd: "true" },
-      sandboxBase: "/host/custom-tool",
+    sandboxBase: path.join(tmpDir, "custom-tool"),
       containerMount: "/home/devuser/.custom-tool",
       versionCmd: "custom-tool dangerous-version-check",
       setupHint: "Custom tool",
@@ -59,6 +68,8 @@ test("sandbox recovery does not replay custom postSetupCmds or versionCmd", asyn
   } as unknown as SandboxConfig;
   fs.mkdirSync(config.repoRoot, { recursive: true });
   fs.mkdirSync(path.join(config.worktreeBase, branchDir), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, "custom-tool", config.project, branchDir), { recursive: true });
+  const runtimeSignature = createSandboxCapabilityPlan(config).runtimeSignature;
   const view = materializeSandboxWorkspaceView({
     base: config.workspaceViewBase,
     project: config.project,
@@ -85,7 +96,8 @@ test("sandbox recovery does not replay custom postSetupCmds or versionCmd", asyn
     { Source: control.statusDir, Destination: "/run/agent-infra/control-status", RW: false },
     { Source: path.join(config.shareBase, "common"), Destination: "/share/common", RW: true },
     { Source: path.join(config.shareBase, "branches", branchDir), Destination: "/share/branch", RW: true },
-    { Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false }
+    { Source: path.join(config.shellConfigBase, branchDir), Destination: "/home/devuser/.host-shell-config", RW: false },
+    { Source: path.join(tmpDir, "custom-tool", config.project, branchDir), Destination: "/home/devuser/.custom-tool", RW: true }
   ].map((mount) => ({ Type: "bind", ...mount }));
   for (const mount of mounts) fs.mkdirSync(String(mount.Source), { recursive: true });
 
@@ -100,7 +112,8 @@ test("sandbox recovery does not replay custom postSetupCmds or versionCmd", asyn
           Id: "fixture-container-id",
           Config: { Labels: {
             "demo.sandbox.branch": "feature/demo",
-            "demo.sandbox.workspace-mode": "branch-only"
+            "demo.sandbox.workspace-mode": "branch-only",
+            "agent-infra.sandbox.runtime-capability.demo": runtimeSignature
           } },
           Mounts: mounts
         }]),
@@ -125,7 +138,14 @@ function writeAirc(repoRoot: string, body: Record<string, unknown>): void {
   fs.mkdirSync(path.join(repoRoot, ".agents"), { recursive: true });
   fs.writeFileSync(
     path.join(repoRoot, ".agents", ".airc.json"),
-    JSON.stringify(body, null, 2) + "\n",
+    JSON.stringify({
+      agentClients: AGENT_CLIENT_IDS.map((id) => ({
+        id,
+        enabled: true,
+        installInSandbox: true
+      })),
+      ...body
+    }, null, 2) + "\n",
     "utf8"
   );
 }
@@ -142,7 +162,7 @@ test("loadConfig parses the minimal {id, install} customTools entry and fills al
     writeAirc(tmpDir, {
       project: "demo",
       sandbox: {
-        tools: ["claude-code", "my-tool"],
+        tools: ["my-tool"],
         customTools: [
           {
             id: "my-tool",
@@ -177,7 +197,7 @@ test("loadConfig parses the minimal {id, install} customTools entry and fills al
     assert.equal(tool?.pathRewriteFiles, undefined);
     assert.equal(tool?.postSetupCmds, undefined);
     // tools array preserves user order, including non-builtin id
-    assert.deepEqual(config.tools, ["claude-code", "my-tool"]);
+    assert.deepEqual(config.tools, ["my-tool"]);
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -391,7 +411,8 @@ test("resolveTools groups non-client builtins, clients, and custom tools determi
   const tools = sandboxTools.resolveTools({
     home: "/home/host-user",
     project: "demo",
-    tools: ["my-shell-tool", "claude-code"],
+    tools: ["my-shell-tool"],
+    agentClientState: { ...NO_AGENT_CLIENTS, "claude-code": { enabled: true, installInSandbox: true } },
     customTools: [
       {
         id: "my-shell-tool",
@@ -420,7 +441,8 @@ test("resolveTools throws when customTools id collides with a built-in tool", as
       sandboxTools.resolveTools({
         home: "/home/host-user",
         project: "demo",
-        tools: ["claude-code"],
+        tools: [],
+        agentClientState: NO_AGENT_CLIENTS,
         customTools: [
           {
             id: "claude-code",
@@ -456,6 +478,7 @@ test("resolveTools throws when two customTools share the same id", async () => {
         home: "/home/host-user",
         project: "demo",
         tools: ["dup-tool"],
+        agentClientState: NO_AGENT_CLIENTS,
         customTools: [dup, { ...dup }]
       }),
     /Duplicate sandbox tool id/
@@ -471,6 +494,7 @@ test("resolveTools still throws Unknown sandbox tool when sandbox.tools referenc
         home: "/home/host-user",
         project: "demo",
         tools: ["does-not-exist"],
+        agentClientState: NO_AGENT_CLIENTS,
         customTools: []
       }),
     /Unknown sandbox tool: does-not-exist/

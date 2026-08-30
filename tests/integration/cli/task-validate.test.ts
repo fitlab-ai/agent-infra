@@ -12,6 +12,13 @@ import { SANDBOX_CONTROL_STATUS_STALE_MS } from '../../../lib/sandbox/control/pr
 
 const SHORT_ID_SCRIPT = path.resolve(process.cwd(), '.agents/scripts/task-short-id.js');
 const internalCli = path.resolve('bin/internal-cli.ts');
+const CANONICAL_AGENT_CLIENTS = [
+  'claude-code',
+  'codex',
+  'antigravity-cli',
+  'opencode',
+  'traecli'
+].map((id) => ({ id, enabled: true, installInSandbox: true }));
 
 function spawnTaskValidate(cwd: string, env: NodeJS.ProcessEnv, args: string[]) {
   return spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', internalCli, 'task-validate', ...args], {
@@ -184,7 +191,7 @@ function fixture() {
   spawnSync('git', ['switch', '-c', branch], { cwd: root, env: gitSafeEnv() });
   const taskDir = path.join(root, '.agents', 'workspace', 'active', id);
   fs.mkdirSync(taskDir, { recursive: true });
-  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'fixture' }));
+  fs.writeFileSync(path.join(root, '.agents', '.airc.json'), JSON.stringify({ project: 'fixture', agentClients: CANONICAL_AGENT_CLIENTS }));
   fs.writeFileSync(path.join(taskDir, 'task.md'), `---\nid: ${id}\nbranch: ${branch}\nstatus: active\n---\n# Task\n`);
   fs.writeFileSync(path.join(root, 'tracked.txt'), 'committed\n');
   const allocation = spawnSync('node', [SHORT_ID_SCRIPT, 'alloc', id], { cwd: root, encoding: 'utf8', env: gitSafeEnv() });

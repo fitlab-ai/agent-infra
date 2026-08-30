@@ -33,13 +33,8 @@ function ensureOpenCodeSandboxState(
   const canonicalConfigDir = path.join(toolDir, '.xdg', 'config', 'opencode');
   const canonicalStateDir = path.join(toolDir, '.xdg', 'state', 'opencode');
   const canonicalConfigPath = path.join(canonicalConfigDir, 'opencode.json');
-  const legacyConfigPath = path.join(toolDir, 'opencode.json');
   fs.mkdirSync(canonicalConfigDir, { recursive: true });
   fs.mkdirSync(canonicalStateDir, { recursive: true });
-
-  if (!fs.existsSync(canonicalConfigPath) && fs.existsSync(legacyConfigPath)) {
-    fs.copyFileSync(legacyConfigPath, canonicalConfigPath, fs.constants.COPYFILE_EXCL);
-  }
 
   const hostConfigRoot = resolveXdgRoot(
     hostEnv.XDG_CONFIG_HOME,

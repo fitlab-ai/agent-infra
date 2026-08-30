@@ -31,7 +31,7 @@ function makeProject(tmpDir: string, config: Record<string, unknown>) {
   );
 }
 
-test("agent-infra update without tuis field refreshes all built-in TUI seeds (backward compat)", () => {
+test("agent-infra update with canonical state refreshes all built-in client seeds", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-default-"));
   try {
     makeProject(tmpDir, {
@@ -39,6 +39,7 @@ test("agent-infra update without tuis field refreshes all built-in TUI seeds (ba
       org: "acme",
       language: "en",
       templateVersion: "stale",
+      agentClients: canonical(AGENT_CLIENT_IDS),
       files: { managed: [], merged: [], ejected: [] }
     });
 
@@ -52,8 +53,6 @@ test("agent-infra update without tuis field refreshes all built-in TUI seeds (ba
     assert.ok(fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
 
     const updated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    // Update must NOT auto-write a default `tuis` field (Q7: read-only idempotency).
-    assert.equal("tuis" in updated, false, "update must not auto-create tuis field for legacy configs");
     assert.deepEqual(updated.agentClients, canonical(AGENT_CLIENT_IDS));
     // All built-in TUI owned paths still get registered.
     assert.ok(updated.files.managed.includes(".claude/commands/"));
@@ -64,7 +63,7 @@ test("agent-infra update without tuis field refreshes all built-in TUI seeds (ba
   }
 });
 
-test("agent-infra update with subset tuis only refreshes enabled TUI seeds", () => {
+test("agent-infra update with canonical subset only refreshes enabled client seeds", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-subset-"));
   try {
     makeProject(tmpDir, {
@@ -72,7 +71,7 @@ test("agent-infra update with subset tuis only refreshes enabled TUI seeds", () 
       org: "acme",
       language: "en",
       templateVersion: "stale",
-      tuis: ["claude-code"],
+      agentClients: canonical(["claude-code"]),
       files: { managed: [], merged: [], ejected: [] }
     });
 
@@ -86,7 +85,6 @@ test("agent-infra update with subset tuis only refreshes enabled TUI seeds", () 
     assert.ok(!fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
 
     const updated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    assert.equal("tuis" in updated, false);
     assert.deepEqual(updated.agentClients, canonical(["claude-code"]));
     // Disabled-TUI owned default paths are NOT added to managed registry.
     assert.ok(!updated.files.managed.includes(".opencode/commands/"));
@@ -98,7 +96,7 @@ test("agent-infra update with subset tuis only refreshes enabled TUI seeds", () 
   }
 });
 
-test("agent-infra update with tuis: [] installs no built-in seeds and registers no owned defaults", () => {
+test("agent-infra update with empty canonical state installs no built-in seeds", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-empty-"));
   try {
     makeProject(tmpDir, {
@@ -106,7 +104,7 @@ test("agent-infra update with tuis: [] installs no built-in seeds and registers 
       org: "acme",
       language: "en",
       templateVersion: "stale",
-      tuis: [],
+      agentClients: canonical([]),
       files: { managed: [], merged: [], ejected: [] }
     });
 
@@ -121,7 +119,6 @@ test("agent-infra update with tuis: [] installs no built-in seeds and registers 
     assert.ok(!fs.existsSync(path.join(tmpDir, ".opencode/commands/update-agent-infra.md")));
 
     const updated = JSON.parse(fs.readFileSync(path.join(tmpDir, ".agents/.airc.json"), "utf8"));
-    assert.equal("tuis" in updated, false);
     assert.deepEqual(updated.agentClients, canonical([]));
     // No built-in TUI owned default paths registered.
     assert.ok(!updated.files.managed.includes(".claude/commands/"));
@@ -135,7 +132,7 @@ test("agent-infra update with tuis: [] installs no built-in seeds and registers 
   }
 });
 
-test("agent-infra update is idempotent: second run does not change tuis or duplicate entries", () => {
+test("agent-infra update is idempotent: second run does not change canonical state or duplicate entries", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-update-tuis-idempotent-"));
   try {
     makeProject(tmpDir, {
@@ -143,7 +140,7 @@ test("agent-infra update is idempotent: second run does not change tuis or dupli
       org: "acme",
       language: "en",
       templateVersion: "stale",
-      tuis: ["claude-code", "opencode"],
+      agentClients: canonical(["claude-code", "opencode"]),
       files: { managed: [], merged: [], ejected: [] }
     });
 
@@ -155,7 +152,6 @@ test("agent-infra update is idempotent: second run does not change tuis or dupli
 
     assert.equal(afterFirst, afterSecond, "second update must be a no-op");
     const cfg = JSON.parse(afterSecond);
-    assert.equal("tuis" in cfg, false);
     assert.deepEqual(cfg.agentClients, canonical(["claude-code", "opencode"]));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

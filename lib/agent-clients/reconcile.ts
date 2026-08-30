@@ -32,7 +32,6 @@ type AgentClientSeedOperation = Readonly<{
 type WorkflowDiagnostic = AgentClientDiagnostic | Readonly<{ code: string; path: string }>;
 
 type AgentClientWorkflowPlan = Readonly<{
-  source: 'canonical' | 'legacy';
   before: AgentClientState;
   desired: AgentClientState;
   nextConfig: Record<string, unknown>;
@@ -149,15 +148,6 @@ function planAgentClientReconciliation(input: Readonly<{
 
   const nextConfig = structuredClone(input.config);
   nextConfig.agentClients = serializeAgentClients(desired);
-  delete nextConfig.tuis;
-  if (normalized.remainingSandboxTools !== undefined) {
-    const sandbox = isRecord(nextConfig.sandbox) ? { ...nextConfig.sandbox } : {};
-    sandbox.tools = [
-      'agent-infra',
-      ...normalized.remainingSandboxTools.filter((tool) => tool !== 'agent-infra')
-    ];
-    nextConfig.sandbox = sandbox;
-  }
   const existingFiles = isRecord(nextConfig.files) ? nextConfig.files : {};
   const existingBaselines = isRecord(existingFiles.managedBaselines)
     ? existingFiles.managedBaselines
@@ -240,14 +230,13 @@ function planAgentClientReconciliation(input: Readonly<{
     || actionableSeed;
 
   return Object.freeze({
-    source: normalized.source,
     before: normalized.state,
     desired,
     nextConfig,
     projectAssets,
     seedOperations: Object.freeze(seedOperations),
     nextSteps,
-    diagnostics: Object.freeze([...normalized.diagnostics, ...custom.diagnostics]),
+    diagnostics: Object.freeze([...custom.diagnostics]),
     changed,
     projectRoot: input.projectRoot,
     configPath: path.join(input.projectRoot, '.agents', '.airc.json')

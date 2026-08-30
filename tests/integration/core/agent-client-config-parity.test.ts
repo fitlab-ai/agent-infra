@@ -19,13 +19,8 @@ function projectTypeScript(input: Record<string, unknown>): Record<string, unkno
   try {
     const result = normalizeAgentClients(input);
     return {
-      source: result.source,
       state: result.state,
       canonical: result.canonical,
-      remainingSandboxTools: result.remainingSandboxTools ?? null,
-      removeLegacyTuis: result.removeLegacyTuis,
-      changed: result.changed,
-      diagnostics: result.diagnostics,
       errorCode: null,
       errorPath: null
     };
@@ -40,13 +35,8 @@ function projectStandalone(result: Record<string, unknown>): Record<string, unkn
     return { errorCode: result.errorCode, errorPath: result.errorPath };
   }
   return {
-    source: result.source,
     state: result.state,
     canonical: result.canonical,
-    remainingSandboxTools: result.remainingSandboxTools ?? null,
-    removeLegacyTuis: result.removeLegacyTuis,
-    changed: result.changed,
-    diagnostics: result.diagnostics,
     errorCode: null,
     errorPath: null
   };

@@ -9,18 +9,11 @@ import {
 } from '../../../lib/agent-clients/types.ts';
 import type { AgentClientState } from '../../../lib/agent-clients/types.ts';
 import {
+  AgentClientConfigError,
   normalizeAgentClients,
   serializeAgentClients
 } from '../../../lib/agent-clients/config.ts';
 import { AGENT_CLIENTS_SCHEMA } from '../../../lib/agent-clients/schema.ts';
-import {
-  BUILTIN_TUI_DISPLAY,
-  BUILTIN_TUI_IDS,
-  BUILTIN_TUI_OWNED_PATH_PREFIXES,
-  isBuiltinTUIId,
-  isPathOwnedByDisabledTUI,
-  resolveEnabledTUIs
-} from '../../../lib/builtin-tuis.ts';
 
 const ALL_ENABLED = Object.fromEntries(
   AGENT_CLIENT_IDS.map((id) => [id, { enabled: true, installInSandbox: true }])
@@ -37,14 +30,12 @@ function canonical(
   }));
 }
 
-function errorCode(run: () => unknown): string {
+function errorDetails(run: () => unknown): { code: string; path: string } {
   try {
     run();
   } catch (error) {
-    if (typeof error !== 'object' || error === null || !('code' in error)) {
-      assert.fail('Expected an error with a stable code');
-    }
-    return String(error.code);
+    assert.ok(error instanceof AgentClientConfigError);
+    return { code: error.code, path: error.path };
   }
   assert.fail('Expected normalization to fail');
 }
@@ -75,7 +66,7 @@ test('agent client vocabulary is closed, unique, and recognized by the shared gu
   assert.equal(isAgentClientId('other'), false);
 });
 
-test('schema is JSON-safe and derives its closed enums from shared constants', () => {
+test('schema is JSON-safe and expresses the canonical tuple order', () => {
   const json = JSON.stringify(AGENT_CLIENTS_SCHEMA);
   assert.deepEqual(JSON.parse(json), AGENT_CLIENTS_SCHEMA);
 
@@ -84,13 +75,14 @@ test('schema is JSON-safe and derives its closed enums from shared constants', (
   assert.deepEqual(schema.required, ['agentClients']);
   assert.equal(schema.properties.agentClients.minItems, AGENT_CLIENT_IDS.length);
   assert.equal(schema.properties.agentClients.maxItems, AGENT_CLIENT_IDS.length);
-  assert.equal(schema.properties.agentClients.items.additionalProperties, false);
+  assert.equal(schema.properties.agentClients.additionalItems, false);
+  assert.equal(Array.isArray(schema.properties.agentClients.items), true);
   assert.deepEqual(
-    schema.properties.agentClients.items.properties.id.enum,
+    schema.properties.agentClients.items.map((item: Record<string, any>) => item.properties.id.const),
     AGENT_CLIENT_IDS
   );
   assert.deepEqual(
-    schema.properties.agentClients.items.required,
+    schema.properties.agentClients.items[0].required,
     ['id', 'enabled', 'installInSandbox']
   );
   assert.deepEqual(
@@ -101,11 +93,6 @@ test('schema is JSON-safe and derives its closed enums from shared constants', (
   assert.equal(schema.properties.customTUIs.items.properties.name.type, 'string');
   assert.equal(schema.properties.customTUIs.items.properties.dir.type, 'string');
   assert.equal(schema.properties.customTUIs.items.properties.invoke.type, 'string');
-  assert.equal(schema.properties.agentClients.items.properties.enabled.type, 'boolean');
-  assert.equal(
-    schema.properties.agentClients.items.properties.installInSandbox.type,
-    'boolean'
-  );
   assert.deepEqual(
     schema.definitions.agentClientCapabilityId.enum,
     AGENT_CLIENT_CAPABILITY_IDS
@@ -116,24 +103,28 @@ test('schema is JSON-safe and derives its closed enums from shared constants', (
   );
 });
 
-test('canonical input is normalized to stable ID order without mutation', () => {
-  const input = [...canonical()].reverse();
+test('canonical input is normalized without mutation and preserves the required order', () => {
+  const input = canonical();
   const before = structuredClone(input);
   const result = normalizeAgentClients({ agentClients: input });
 
-  assert.equal(result.source, 'canonical');
   assert.deepEqual(result.state, ALL_ENABLED);
   assert.deepEqual(result.canonical, canonical());
-  assert.equal(result.changed, true);
-  assert.equal(result.removeLegacyTuis, false);
-  assert.equal(result.remainingSandboxTools, undefined);
-  assert.deepEqual(result.diagnostics, []);
   assert.deepEqual(input, before);
 
   const second = normalizeAgentClients({ agentClients: result.canonical });
-  assert.equal(second.changed, false);
   assert.deepEqual(second.canonical, result.canonical);
   assert.notEqual(second.canonical, result.canonical);
+});
+
+test('canonical config rejects a reordered client array instead of silently sorting it', () => {
+  const input = [...canonical()].reverse();
+  const error = errorDetails(() => normalizeAgentClients({ agentClients: input }));
+
+  assert.deepEqual(error, {
+    code: 'INVALID_AGENT_CLIENTS',
+    path: 'agentClients[0].id'
+  });
 });
 
 test('canonical config preserves a complete per-client orchestration policy', () => {
@@ -148,12 +139,14 @@ test('canonical config preserves a complete per-client orchestration policy', ()
 
   assert.deepEqual(result.canonical, input);
   assert.deepEqual(result.state.codex.orchestration, policy);
-  assert.equal(result.changed, false);
-  assert.equal(errorCode(() => normalizeAgentClients({
-    agentClients: canonical().map((entry) => entry.id === 'codex'
-      ? { ...entry, orchestration: { ...policy, reviewer: { model: '', reasoningEffort: 'high' } } }
-      : entry)
-  })), 'INVALID_AGENT_CLIENTS');
+  assert.deepEqual(
+    errorDetails(() => normalizeAgentClients({
+      agentClients: canonical().map((entry) => entry.id === 'codex'
+        ? { ...entry, orchestration: { ...policy, reviewer: { model: '', reasoningEffort: 'high' } } }
+        : entry)
+    })),
+    { code: 'INVALID_AGENT_CLIENTS', path: 'agentClients[1].orchestration.reviewer.model' }
+  );
 });
 
 test('serializer returns a new stable array and does not mutate state', () => {
@@ -191,134 +184,53 @@ test('canonical validation reports stable structural error codes', () => {
   ];
 
   for (const [expected, agentClients] of cases) {
-    assert.equal(errorCode(() => normalizeAgentClients({ agentClients })), expected);
+    assert.equal(errorDetails(() => normalizeAgentClients({ agentClients })).code, expected);
   }
 
   const missing = canonical().slice(0, 3);
   missing.push({ id: 'codex', enabled: true, installInSandbox: true });
   assert.equal(
-    errorCode(() => normalizeAgentClients({ agentClients: missing })),
+    errorDetails(() => normalizeAgentClients({ agentClients: missing })).code,
     'DUPLICATE_AGENT_CLIENT'
   );
 });
 
-test('legacy defaults preserve current enabled and sandbox behavior', () => {
-  for (const input of [
-    {},
-    { tuis: null, sandbox: null },
-    { tuis: 'invalid', sandbox: { tools: 'invalid' } },
-    { sandbox: { tools: [] } }
-  ]) {
-    const result = normalizeAgentClients(input);
-    assert.equal(result.source, 'legacy');
-    assert.deepEqual(result.state, ALL_ENABLED);
-    assert.deepEqual(result.canonical, canonical());
-    assert.equal(result.changed, true);
-  }
-});
-
-test('legacy arrays project independent enabled and sandbox states', () => {
-  const input = {
-    tuis: ['codex', 'opencode', 'unknown'],
-    sandbox: {
-      tools: ['agent-infra', 'claude-code', 'opencode', 'custom-tool', 'unknown-tool']
-    },
-    customTUIs: [{ name: 'custom' }]
-  };
-  const before = structuredClone(input);
-  const result = normalizeAgentClients(input);
-
+test('legacy fields are rejected after canonical validation and do not affect state', () => {
   assert.deepEqual(
-    result.canonical,
-    canonical(['codex', 'opencode'], ['claude-code', 'opencode'])
-  );
-  assert.deepEqual(
-    result.remainingSandboxTools,
-    ['agent-infra', 'custom-tool', 'unknown-tool']
-  );
-  assert.equal(result.removeLegacyTuis, true);
-  assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    ['LEGACY_VALUE_IGNORED']
-  );
-  assert.deepEqual(input, before);
-});
-
-test('an empty legacy tuis array disables all clients independently of sandbox defaults', () => {
-  const result = normalizeAgentClients({ tuis: [], sandbox: { tools: [] } });
-  assert.deepEqual(result.canonical, canonical([], AGENT_CLIENT_IDS));
-  assert.deepEqual(result.remainingSandboxTools, []);
-});
-
-test('canonical and present legacy signals must be equivalent', () => {
-  const equivalent = normalizeAgentClients({
-    agentClients: canonical(['codex'], ['claude-code']),
-    tuis: ['codex'],
-    sandbox: { tools: ['agent-infra', 'claude-code', 'custom-tool'] }
-  });
-  assert.equal(equivalent.source, 'canonical');
-  assert.equal(equivalent.changed, true);
-  assert.equal(equivalent.removeLegacyTuis, true);
-  assert.deepEqual(equivalent.remainingSandboxTools, ['agent-infra', 'custom-tool']);
-
-  assert.equal(
-    errorCode(() => normalizeAgentClients({
-      agentClients: canonical(['codex'], ['claude-code']),
-      tuis: ['opencode']
+    errorDetails(() => normalizeAgentClients({
+      agentClients: canonical(),
+      tuis: ['codex']
     })),
-    'LEGACY_CONFLICT'
+    { code: 'INVALID_AGENT_CLIENTS', path: 'tuis' }
   );
-  assert.equal(
-    errorCode(() => normalizeAgentClients({
-      agentClients: canonical(['codex'], ['claude-code']),
-      sandbox: { tools: ['codex'] }
-    })),
-    'LEGACY_CONFLICT'
-  );
-});
-
-test('canonical config preserves non-client sandbox tools without treating them as legacy client signals', () => {
-  const result = normalizeAgentClients({
-    agentClients: canonical(['codex'], ['claude-code']),
-    sandbox: { tools: ['agent-infra', 'custom-tool'] }
-  });
-
-  assert.equal(result.source, 'canonical');
-  assert.deepEqual(result.canonical, canonical(['codex'], ['claude-code']));
-  assert.deepEqual(result.remainingSandboxTools, ['agent-infra', 'custom-tool']);
-  assert.equal(result.changed, false);
-
-  assert.equal(
-    errorCode(() => normalizeAgentClients({
-      agentClients: canonical(['codex'], ['claude-code']),
+  assert.deepEqual(
+    errorDetails(() => normalizeAgentClients({
+      agentClients: canonical(),
       sandbox: { tools: ['agent-infra', 'codex'] }
     })),
-    'LEGACY_CONFLICT'
+    { code: 'INVALID_AGENT_CLIENTS', path: 'sandbox.tools[1]' }
   );
-});
-
-test('invalid canonical input never falls back to legacy values', () => {
   assert.equal(
-    errorCode(() => normalizeAgentClients({
-      agentClients: [],
+    errorDetails(() => normalizeAgentClients({
       tuis: AGENT_CLIENT_IDS,
       sandbox: { tools: AGENT_CLIENT_IDS }
-    })),
+    })).code,
     'MISSING_AGENT_CLIENT'
   );
 });
 
-test('builtin TUI exports remain compatible aliases over shared client IDs', () => {
-  assert.equal(BUILTIN_TUI_IDS, AGENT_CLIENT_IDS);
-  assert.deepEqual(Object.keys(BUILTIN_TUI_DISPLAY), AGENT_CLIENT_IDS);
-  assert.deepEqual(Object.keys(BUILTIN_TUI_OWNED_PATH_PREFIXES), AGENT_CLIENT_IDS);
-  assert.equal(isBuiltinTUIId('codex'), true);
-  assert.equal(isBuiltinTUIId('unknown'), false);
-  assert.deepEqual(resolveEnabledTUIs([]), new Set());
-  assert.deepEqual(resolveEnabledTUIs(undefined), new Set(AGENT_CLIENT_IDS));
-  assert.equal(isPathOwnedByDisabledTUI('.codex/skills', new Set()), true);
-  assert.equal(
-    isPathOwnedByDisabledTUI('.codex/skills', new Set(AGENT_CLIENT_IDS)),
-    false
-  );
+test('canonical normalization preserves non-client sandbox tools without projecting them', () => {
+  const input = {
+    agentClients: canonical(['codex'], ['claude-code']),
+    sandbox: { tools: ['agent-infra', 'custom-tool'] }
+  };
+  const result = normalizeAgentClients(input);
+
+  assert.deepEqual(result.state, Object.fromEntries(
+    AGENT_CLIENT_IDS.map((id) => [id, {
+      enabled: id === 'codex',
+      installInSandbox: id === 'claude-code'
+    }])
+  ));
+  assert.deepEqual(result.canonical, input.agentClients);
 });

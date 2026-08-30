@@ -70,13 +70,11 @@ test('capability plan selects clients only from installInSandbox while preservin
 });
 
 test('canonical all-false state does not fall back to legacy client tool ids', () => {
-  const plan = createSandboxCapabilityPlan(config([], [
-    'agent-infra',
-    'claude-code',
-    'codex',
-    'antigravity-cli',
-    'opencode'
-  ]));
+  assert.throws(
+    () => createSandboxCapabilityPlan(config([], ['agent-infra', 'codex'])),
+    /must be provided by agentClientState/
+  );
+  const plan = createSandboxCapabilityPlan(config([], ['agent-infra']));
 
   assert.deepEqual(plan.selectedAgentClients, []);
   assert.deepEqual(plan.tools.map((tool) => tool.id), ['agent-infra']);

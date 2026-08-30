@@ -26,7 +26,6 @@ type UpdateConfig = {
   task?: { shortIdLength: number };
   labels?: Record<string, unknown>;
   files?: Partial<FileRegistry>;
-  tuis?: unknown;
   agentClients?: unknown;
   customTUIs?: unknown;
 };

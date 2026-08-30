@@ -68,13 +68,12 @@ OpenCode adapter 通过共享的 Node/npm 镜像层安装 `opencode-ai`，并把
 状态保存在 `/home/devuser/.local/share/opencode` 单一持久卷中。卷内的
 `XDG_CONFIG_HOME` 为 `.local/share/opencode/.xdg/config`，`XDG_STATE_HOME`
 为 `.local/share/opencode/.xdg/state`，常规数据根目录仍为
-`/home/devuser/.local/share`。首次创建时，只有 canonical XDG 配置不存在，
-才会把分支旧版 `opencode.json` 复制过去；宿主配置只补齐缺失的字符串
+`/home/devuser/.local/share`。adapter 只读取和写入规范 XDG 配置；宿主配置只补齐缺失的字符串
 `model` 与 `small_model`。唯一实时凭证 mount 是宿主
 `XDG_DATA_HOME/opencode/auth.json`，version/help 的无认证 smoke 不要求该文件存在。
 
 禁用或卸载 OpenCode 只会移除 adapter 管理的项目资产与选择状态，不会删除宿主
-XDG 目录、旧配置、分支运行时卷、用户自建 command 或其他非托管运行时数据；
+XDG 目录、分支运行时卷、用户自建 command 或其他非托管运行时数据；
 重新启用 adapter 后会继续复用这些保留状态。
 
 禁用客户端绝不会删除其宿主凭证、配置或历史。即使宿主仍保留已禁用客户端

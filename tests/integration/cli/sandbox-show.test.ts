@@ -16,6 +16,7 @@ import {
 } from '../../helpers.ts';
 import { worktreeDirCandidates } from '../../../lib/sandbox/constants.ts';
 import { resolveTools, toolConfigDirCandidates } from '../../../lib/sandbox/tools.ts';
+import { AGENT_CLIENT_IDS } from '../../../lib/agent-clients/types.ts';
 import type { SandboxConfig } from '../../../lib/sandbox/config.ts';
 
 type ShowModule = typeof import('../../../lib/sandbox/commands/show.ts');
@@ -26,7 +27,11 @@ function makeConfig(home: string): SandboxConfig {
   return {
     home,
     project: 'demo',
-    tools: BUILTIN_TOOL_IDS,
+    tools: ['agent-infra'],
+    agentClientState: Object.fromEntries(BUILTIN_TOOL_IDS.slice(1).map((id) => [id, {
+      enabled: true,
+      installInSandbox: true
+    }])) as SandboxConfig['agentClientState'],
     worktreeBase: path.join(home, '.agent-infra', 'worktrees', 'demo')
   } as unknown as SandboxConfig;
 }
@@ -81,8 +86,8 @@ test('collectSandboxDetail excludes disabled clients even when host state remain
     }
   };
   const branch = 'feature/selected';
-  const legacyConfig = makeConfig(home);
-  const claude = resolveTools(legacyConfig).find((tool) => tool.id === 'claude-code')!;
+  const selectedConfig = makeConfig(home);
+  const claude = resolveTools(selectedConfig).find((tool) => tool.id === 'claude-code')!;
   fs.mkdirSync(
     toolConfigDirCandidates(claude, config.project, branch)[0]!,
     { recursive: true }
@@ -125,7 +130,11 @@ function mkCliFixture(): { repoRoot: string; activeDir: string; scriptPath: stri
   fs.copyFileSync(path.resolve(process.cwd(), '.agents/scripts/task-short-id.js'), scriptPath);
   fs.writeFileSync(
     path.join(agentsDir, '.airc.json'),
-    JSON.stringify({ project: 'demo', task: { shortIdLength: 2 } })
+    JSON.stringify({
+      project: 'demo',
+      agentClients: AGENT_CLIENT_IDS.map((id) => ({ id, enabled: true, installInSandbox: true })),
+      task: { shortIdLength: 2 }
+    })
   );
   const activeDir = path.join(agentsDir, 'workspace', 'active');
   fs.mkdirSync(activeDir, { recursive: true });
